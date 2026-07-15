@@ -10,8 +10,8 @@ param(
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "Common.ps1")
 
-$ToolRoot = Get-BctToolRoot
-$EngineRoot = Resolve-BctEngineRoot -EngineRoot $EngineRoot
+$ToolRoot = Get-UeakToolRoot
+$EngineRoot = Resolve-UeakEngineRoot -EngineRoot $EngineRoot
 
 if ($Method -eq "Direct")
 {
@@ -20,19 +20,19 @@ if ($Method -eq "Direct")
     exit $LASTEXITCODE
 }
 
-$PluginDescriptor = Join-Path $ToolRoot "Plugin\BlueprintContextTool\BlueprintContextTool.uplugin"
+$PluginDescriptor = Join-Path $ToolRoot "Plugin\UEAgentKit\UEAgentKit.uplugin"
 $RunUAT = Join-Path $EngineRoot "Engine\Build\BatchFiles\RunUAT.bat"
 if ([string]::IsNullOrWhiteSpace($PackageDirectory))
 {
-    $PackageDirectory = Join-Path $ToolRoot "Build\Packaged\BlueprintContextTool"
+    $PackageDirectory = Join-Path $ToolRoot "Build\Packaged\UEAgentKit"
 }
 else
 {
     $PackageDirectory = [System.IO.Path]::GetFullPath($PackageDirectory)
 }
 
-Assert-BctPath -Path $PluginDescriptor -Description "Plugin descriptor" -PathType File
-Assert-BctPath -Path $RunUAT -Description "RunUAT.bat" -PathType File
+Assert-UeakPath -Path $PluginDescriptor -Description "Plugin descriptor" -PathType File
+Assert-UeakPath -Path $RunUAT -Description "RunUAT.bat" -PathType File
 New-Item -ItemType Directory -Path $PackageDirectory -Force | Out-Null
 
 Write-Warning "The UAT build path is optional and may fail on systems with Unreal Build Accelerator issues. The default Direct method is the validated build path."

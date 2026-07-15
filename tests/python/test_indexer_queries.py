@@ -13,9 +13,9 @@ SRC_ROOT = TOOL_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from blueprint_context_tool.database import open_database  # noqa: E402
-from blueprint_context_tool.indexer import build_index  # noqa: E402
-from blueprint_context_tool.queries import (  # noqa: E402
+from ue_agent_kit.database import open_database  # noqa: E402
+from ue_agent_kit.indexer import build_index  # noqa: E402
+from ue_agent_kit.queries import (  # noqa: E402
     find_references,
     get_asset,
     get_stats,
@@ -252,7 +252,7 @@ def write_export(root: Path, assets: list[dict[str, Any]]) -> None:
 
 class IndexerAndQueryTests(unittest.TestCase):
     def test_incremental_index_search_and_prune(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="bct_index_") as temporary_root:
+        with tempfile.TemporaryDirectory(prefix="ueak_index_") as temporary_root:
             temp_root = Path(temporary_root)
             database_path = temp_root / "数据" / "索引.sqlite3"
             index_export = temp_root / "导出 index"
@@ -324,7 +324,7 @@ class IndexerAndQueryTests(unittest.TestCase):
 
 
     def test_project_identity_mismatch_is_rejected(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="bct_project_key_") as temporary_root:
+        with tempfile.TemporaryDirectory(prefix="ueak_project_key_") as temporary_root:
             temp_root = Path(temporary_root)
             database_path = temp_root / "index.sqlite3"
             project_a = temp_root / "project_a"
@@ -347,7 +347,7 @@ class IndexerAndQueryTests(unittest.TestCase):
     def test_relocated_export_prefers_current_copy(self) -> None:
         import shutil
 
-        with tempfile.TemporaryDirectory(prefix="bct_relocated_") as temporary_root:
+        with tempfile.TemporaryDirectory(prefix="ueak_relocated_") as temporary_root:
             temp_root = Path(temporary_root)
             database_path = temp_root / "index.sqlite3"
             source_export = temp_root / "original"
@@ -378,7 +378,7 @@ class IndexerAndQueryTests(unittest.TestCase):
                 self.assertTrue(str(indexed_asset["canonical_relpath"]).startswith("canonical/"))
 
     def test_prune_is_blocked_when_manifest_has_failures(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="bct_prune_fail_") as temporary_root:
+        with tempfile.TemporaryDirectory(prefix="ueak_prune_fail_") as temporary_root:
             temp_root = Path(temporary_root)
             database_path = temp_root / "index.sqlite3"
             export_root = temp_root / "export"

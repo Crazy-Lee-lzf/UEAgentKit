@@ -8,7 +8,7 @@ param(
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "Common.ps1")
 
-$ToolRoot = Get-BctToolRoot
+$ToolRoot = Get-UeakToolRoot
 $VenvRoot = Join-Path $ToolRoot ".venv"
 $VenvPython = Join-Path $VenvRoot "Scripts\python.exe"
 $RuntimeRequirements = Join-Path $ToolRoot "requirements.lock"
@@ -22,7 +22,7 @@ if ($Recreate -and (Test-Path -LiteralPath $VenvRoot))
 
 if (!(Test-Path -LiteralPath $VenvPython -PathType Leaf))
 {
-    $BasePython = Resolve-BctPythonExecutable -PythonExecutable $PythonExecutable
+    $BasePython = Resolve-UeakPythonExecutable -PythonExecutable $PythonExecutable
     Write-Host "Creating virtual environment..."
     Write-Host "  Base Python : $BasePython"
     Write-Host "  Environment : $VenvRoot"
@@ -34,7 +34,7 @@ if (!(Test-Path -LiteralPath $VenvPython -PathType Leaf))
     }
 }
 
-if (!(Test-BctPythonVersion -PythonExecutable $VenvPython))
+if (!(Test-UeakPythonVersion -PythonExecutable $VenvPython))
 {
     throw "The project virtual environment must use CPython 3.11 or 3.12: $VenvPython"
 }
@@ -54,7 +54,7 @@ if ($UpgradePip)
     }
 }
 
-if (Test-BctRequirementFileHasPackages -Path $RuntimeRequirements)
+if (Test-UeakRequirementFileHasPackages -Path $RuntimeRequirements)
 {
     & $VenvPython -m pip install --requirement $RuntimeRequirements
     if ($LASTEXITCODE -ne 0)
@@ -63,7 +63,7 @@ if (Test-BctRequirementFileHasPackages -Path $RuntimeRequirements)
     }
 }
 
-if ($IncludeDev -and (Test-BctRequirementFileHasPackages -Path $DevRequirements))
+if ($IncludeDev -and (Test-UeakRequirementFileHasPackages -Path $DevRequirements))
 {
     & $VenvPython -m pip install --requirement $DevRequirements
     if ($LASTEXITCODE -ne 0)

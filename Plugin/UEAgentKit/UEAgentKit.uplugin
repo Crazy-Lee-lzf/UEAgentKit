@@ -1,0 +1,19 @@
+{
+  "FileVersion": 3,
+  "Version": 2,
+  "VersionName": "0.2.2",
+  "FriendlyName": "UE Agent Kit",
+  "Description": "AI-ready Unreal Engine project inspection, indexing, validation, and automation toolkit.",
+  "Category": "Developer Tools",
+  "CreatedBy": "UE Agent Kit Contributors",
+  "CanContainContent": false,
+  "IsBetaVersion": true,
+  "EnabledByDefault": true,
+  "Modules": [
+    {
+      "Name": "UEAgentKitEditor",
+      "Type": "Editor",
+      "LoadingPhase": "Default"
+    }
+  ]
+}

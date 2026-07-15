@@ -1,6 +1,6 @@
 param(
     [string]$ProjectPath = "",
-    [string]$PluginName = "BlueprintContextTool",
+    [string]$PluginName = "UEAgentKit",
     [ValidateSet("true", "false")]
     [string]$Enabled = "true",
     [string]$BackupRoot = ""
@@ -9,13 +9,13 @@ param(
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "Common.ps1")
 
-$ToolRoot = Get-BctToolRoot
-$ProjectPath = Resolve-BctProjectPath -ProjectPath $ProjectPath
+$ToolRoot = Get-UeakToolRoot
+$ProjectPath = Resolve-UeakProjectPath -ProjectPath $ProjectPath
 $VenvPython = Join-Path $ToolRoot ".venv\Scripts\python.exe"
 $UpdaterScript = Join-Path $PSScriptRoot "UpdateProjectPlugin.py"
 
-Assert-BctPath -Path $VenvPython -Description "Project Python environment" -PathType File
-Assert-BctPath -Path $UpdaterScript -Description "Project plugin updater" -PathType File
+Assert-UeakPath -Path $VenvPython -Description "Project Python environment" -PathType File
+Assert-UeakPath -Path $UpdaterScript -Description "Project plugin updater" -PathType File
 
 $Arguments = @(
     $UpdaterScript,

@@ -9,7 +9,7 @@ import unreal
 
 TOOL_ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_PATH = Path(
-    os.environ.get("BCT_BLUEPRINT_TYPE_OUTPUT", TOOL_ROOT / "Output" / "BlueprintTypeInventory.json")
+    os.environ.get("UEAK_BLUEPRINT_TYPE_OUTPUT", TOOL_ROOT / "Output" / "BlueprintTypeInventory.json")
 ).resolve()
 
 registry = unreal.AssetRegistryHelpers.get_asset_registry()

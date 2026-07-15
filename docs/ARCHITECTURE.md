@@ -31,7 +31,7 @@ AI Client / Claude Code / ChatGPT
 第一版暂时保留单个 Editor Module，先通过目录和命名空间分层。功能稳定后再决定是否拆分多个 UE Module。
 
 ```text
-BlueprintContextToolEditor/
+UEAgentKitEditor/
 ├─ Public/
 │  ├─ Core/
 │  ├─ Read/

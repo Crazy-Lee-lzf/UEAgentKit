@@ -11,13 +11,13 @@ SRC_ROOT = TOOL_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from blueprint_context_tool.database import get_schema_version, open_database  # noqa: E402
-from blueprint_context_tool.schema import CURRENT_SCHEMA_VERSION  # noqa: E402
+from ue_agent_kit.database import get_schema_version, open_database  # noqa: E402
+from ue_agent_kit.schema import CURRENT_SCHEMA_VERSION  # noqa: E402
 
 
 class DatabaseTests(unittest.TestCase):
     def test_migration_and_fts_triggers(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="bct_db_") as temporary_root:
+        with tempfile.TemporaryDirectory(prefix="ueak_db_") as temporary_root:
             database_path = Path(temporary_root) / "中文目录" / "索引.sqlite3"
             with open_database(database_path) as connection:
                 self.assertEqual(get_schema_version(connection), CURRENT_SCHEMA_VERSION)
@@ -88,7 +88,7 @@ class DatabaseTests(unittest.TestCase):
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM nodes_fts").fetchone()[0], 0)
 
     def test_newer_schema_is_rejected(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="bct_db_newer_") as temporary_root:
+        with tempfile.TemporaryDirectory(prefix="ueak_db_newer_") as temporary_root:
             database_path = Path(temporary_root) / "newer.sqlite3"
             with open_database(database_path) as connection:
                 connection.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION + 1}")

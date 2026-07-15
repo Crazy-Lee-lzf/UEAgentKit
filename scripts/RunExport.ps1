@@ -18,12 +18,12 @@ param(
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "Common.ps1")
 
-$ToolRoot = Get-BctToolRoot
-$EngineRoot = Resolve-BctEngineRoot -EngineRoot $EngineRoot
-$ProjectPath = Resolve-BctProjectPath -ProjectPath $ProjectPath
+$ToolRoot = Get-UeakToolRoot
+$EngineRoot = Resolve-UeakEngineRoot -EngineRoot $EngineRoot
+$ProjectPath = Resolve-UeakProjectPath -ProjectPath $ProjectPath
 $EditorCmd = Join-Path $EngineRoot "Engine\Binaries\Win64\UnrealEditor-Cmd.exe"
 
-Assert-BctPath -Path $EditorCmd -Description "UnrealEditor-Cmd.exe" -PathType File
+Assert-UeakPath -Path $EditorCmd -Description "UnrealEditor-Cmd.exe" -PathType File
 
 if ([string]::IsNullOrWhiteSpace($Asset) -eq [string]::IsNullOrWhiteSpace($Root))
 {

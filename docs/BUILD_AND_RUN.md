@@ -16,7 +16,7 @@ PowerShell 5.1 或更高版本
 本文使用以下占位符：
 
 ```text
-<TOOL_ROOT>     BlueprintContextTool 根目录
+<TOOL_ROOT>     UEAgentKit 根目录
 <UE_ROOT>       Unreal Engine 5.6 安装目录
 <PROJECT_ROOT>  需要加载插件的 UE 项目目录
 ```
@@ -24,7 +24,7 @@ PowerShell 5.1 或更高版本
 示例：
 
 ```text
-<TOOL_ROOT>\Plugin\BlueprintContextTool
+<TOOL_ROOT>\Plugin\UEAgentKit
 <PROJECT_ROOT>\ProjectName.uproject
 ```
 
@@ -55,7 +55,7 @@ powershell.exe -ExecutionPolicy Bypass -File <TOOL_ROOT>\scripts\BuildPluginDire
 7. 将可安装插件复制到：
 
 ```text
-<TOOL_ROOT>\Build\Compiled\BlueprintContextTool
+<TOOL_ROOT>\Build\Compiled\UEAgentKit
 ```
 
 构建成功标志：
@@ -67,7 +67,7 @@ BUILD SUCCEEDED
 并且以下文件存在：
 
 ```text
-Build\Compiled\BlueprintContextTool\Binaries\Win64\UnrealEditor-BlueprintContextToolEditor.dll
+Build\Compiled\UEAgentKit\Binaries\Win64\UnrealEditor-UEAgentKitEditor.dll
 ```
 
 ## 4. 安装到项目
@@ -75,15 +75,15 @@ Build\Compiled\BlueprintContextTool\Binaries\Win64\UnrealEditor-BlueprintContext
 推荐使用项目级 Junction，不复制插件源码和大型 PDB：
 
 ```text
-<PROJECT_ROOT>\Plugins\BlueprintContextTool
-→ <TOOL_ROOT>\Build\Compiled\BlueprintContextTool
+<PROJECT_ROOT>\Plugins\UEAgentKit
+→ <TOOL_ROOT>\Build\Compiled\UEAgentKit
 ```
 
 然后在 `.uproject` 的 `Plugins` 数组中启用：
 
 ```json
 {
-  "Name": "BlueprintContextTool",
+  "Name": "UEAgentKit",
   "Enabled": true,
   "TargetAllowList": [
     "Editor"
@@ -100,7 +100,7 @@ Junction 只用于本地安装，不应进入 Git 或 P4。
 启动编辑器或 `UnrealEditor-Cmd.exe`，检查日志中是否出现：
 
 ```text
-Mounting Project plugin BlueprintContextTool
+Mounting Project plugin UEAgentKit
 ```
 
 若插件未加载，检查：

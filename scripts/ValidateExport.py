@@ -10,7 +10,7 @@ from typing import Any
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Validate BlueprintContextTool export output.")
+    parser = argparse.ArgumentParser(description="Validate UEAgentKit export output.")
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--asset-file", type=Path)
     parser.add_argument("--expect-schema", default="")

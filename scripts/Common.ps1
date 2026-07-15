@@ -1,13 +1,13 @@
 Set-StrictMode -Version Latest
 
-$script:BctToolRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
+$script:UeakToolRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 
-function Get-BctToolRoot
+function Get-UeakToolRoot
 {
-    return $script:BctToolRoot
+    return $script:UeakToolRoot
 }
 
-function Assert-BctPath
+function Assert-UeakPath
 {
     param(
         [Parameter(Mandatory = $true)]
@@ -33,7 +33,7 @@ function Assert-BctPath
     }
 }
 
-function Get-BctUniquePaths
+function Get-UeakUniquePaths
 {
     param(
         [Parameter(Mandatory = $true)]
@@ -67,7 +67,7 @@ function Get-BctUniquePaths
     }
 }
 
-function Test-BctEngineRoot
+function Test-UeakEngineRoot
 {
     param(
         [Parameter(Mandatory = $true)]
@@ -78,7 +78,7 @@ function Test-BctEngineRoot
         (Test-Path -LiteralPath (Join-Path $Path "Engine\Binaries\Win64\UnrealEditor-Cmd.exe") -PathType Leaf)
 }
 
-function Get-BctEpicLauncherEngineRoots
+function Get-UeakEpicLauncherEngineRoots
 {
     $CommonApplicationData = $env:ProgramData
     if ([string]::IsNullOrWhiteSpace($CommonApplicationData))
@@ -128,7 +128,7 @@ function Get-BctEpicLauncherEngineRoots
     }
 }
 
-function Get-BctRegistryEngineRoots
+function Get-UeakRegistryEngineRoots
 {
     $Keys = @(
         "HKLM:\SOFTWARE\EpicGames\Unreal Engine\5.6",
@@ -170,7 +170,7 @@ function Get-BctRegistryEngineRoots
     }
 }
 
-function Get-BctCommonEngineRoots
+function Get-UeakCommonEngineRoots
 {
     param(
         [string]$EngineVersion = "5.6"
@@ -192,7 +192,7 @@ function Get-BctCommonEngineRoots
     }
 }
 
-function Resolve-BctEngineRoot
+function Resolve-UeakEngineRoot
 {
     param(
         [string]$EngineRoot = "",
@@ -201,13 +201,13 @@ function Resolve-BctEngineRoot
 
     $ExplicitCandidates = @(
         $EngineRoot,
-        $env:BCT_ENGINE_ROOT,
+        $env:UEAK_ENGINE_ROOT,
         $env:UE_ENGINE_ROOT
     )
 
-    foreach ($Candidate in Get-BctUniquePaths -Paths $ExplicitCandidates)
+    foreach ($Candidate in Get-UeakUniquePaths -Paths $ExplicitCandidates)
     {
-        if (Test-BctEngineRoot -Path $Candidate)
+        if (Test-UeakEngineRoot -Path $Candidate)
         {
             return $Candidate
         }
@@ -216,13 +216,13 @@ function Resolve-BctEngineRoot
     }
 
     $AutoCandidates = @()
-    $AutoCandidates += @(Get-BctRegistryEngineRoots)
-    $AutoCandidates += @(Get-BctEpicLauncherEngineRoots)
-    $AutoCandidates += @(Get-BctCommonEngineRoots -EngineVersion $EngineVersion)
+    $AutoCandidates += @(Get-UeakRegistryEngineRoots)
+    $AutoCandidates += @(Get-UeakEpicLauncherEngineRoots)
+    $AutoCandidates += @(Get-UeakCommonEngineRoots -EngineVersion $EngineVersion)
 
-    foreach ($Candidate in Get-BctUniquePaths -Paths $AutoCandidates)
+    foreach ($Candidate in Get-UeakUniquePaths -Paths $AutoCandidates)
     {
-        if (!(Test-BctEngineRoot -Path $Candidate))
+        if (!(Test-UeakEngineRoot -Path $Candidate))
         {
             continue
         }
@@ -248,10 +248,10 @@ function Resolve-BctEngineRoot
         return $Candidate
     }
 
-    throw "Unreal Engine $EngineVersion was not found. Pass -EngineRoot or set BCT_ENGINE_ROOT."
+    throw "Unreal Engine $EngineVersion was not found. Pass -EngineRoot or set UEAK_ENGINE_ROOT."
 }
 
-function Get-BctMsvcToolchainFromRoot
+function Get-UeakMsvcToolchainFromRoot
 {
     param(
         [Parameter(Mandatory = $true)]
@@ -284,7 +284,7 @@ function Get-BctMsvcToolchainFromRoot
         Select-Object -First 1
 }
 
-function Get-BctVsWhereInstallations
+function Get-UeakVsWhereInstallations
 {
     $VsWhereCandidates = @()
     $VsWhereCommand = Get-Command vswhere.exe -ErrorAction SilentlyContinue
@@ -298,7 +298,7 @@ function Get-BctVsWhereInstallations
         $VsWhereCandidates += Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
     }
 
-    foreach ($VsWhere in Get-BctUniquePaths -Paths $VsWhereCandidates)
+    foreach ($VsWhere in Get-UeakUniquePaths -Paths $VsWhereCandidates)
     {
         if (!(Test-Path -LiteralPath $VsWhere -PathType Leaf))
         {
@@ -323,7 +323,7 @@ function Get-BctVsWhereInstallations
     }
 }
 
-function Get-BctCommonMsvcRoots
+function Get-UeakCommonMsvcRoots
 {
     $Candidates = @()
 
@@ -332,7 +332,7 @@ function Get-BctCommonMsvcRoots
         $Candidates += Join-Path $env:VSINSTALLDIR "VC\Tools\MSVC"
     }
 
-    foreach ($Installation in Get-BctVsWhereInstallations)
+    foreach ($Installation in Get-UeakVsWhereInstallations)
     {
         $Candidates += Join-Path $Installation "VC\Tools\MSVC"
     }
@@ -357,10 +357,10 @@ function Get-BctCommonMsvcRoots
         }
     }
 
-    return Get-BctUniquePaths -Paths $Candidates
+    return Get-UeakUniquePaths -Paths $Candidates
 }
 
-function Resolve-BctMsvcToolchain
+function Resolve-UeakMsvcToolchain
 {
     param(
         [string]$MsvcToolsRoot = ""
@@ -368,12 +368,12 @@ function Resolve-BctMsvcToolchain
 
     $ConfiguredCandidates = @(
         $MsvcToolsRoot,
-        $env:BCT_MSVC_TOOLS_ROOT
+        $env:UEAK_MSVC_TOOLS_ROOT
     )
 
-    foreach ($Candidate in Get-BctUniquePaths -Paths $ConfiguredCandidates)
+    foreach ($Candidate in Get-UeakUniquePaths -Paths $ConfiguredCandidates)
     {
-        $Toolchain = Get-BctMsvcToolchainFromRoot -Path $Candidate
+        $Toolchain = Get-UeakMsvcToolchainFromRoot -Path $Candidate
         if ($Toolchain)
         {
             return $Toolchain
@@ -383,9 +383,9 @@ function Resolve-BctMsvcToolchain
     }
 
     $Toolchains = @()
-    foreach ($Candidate in Get-BctCommonMsvcRoots)
+    foreach ($Candidate in Get-UeakCommonMsvcRoots)
     {
-        $Toolchain = Get-BctMsvcToolchainFromRoot -Path $Candidate
+        $Toolchain = Get-UeakMsvcToolchainFromRoot -Path $Candidate
         if ($Toolchain)
         {
             $Toolchains += $Toolchain
@@ -401,10 +401,10 @@ function Resolve-BctMsvcToolchain
         return $Selected
     }
 
-    throw "An x64 MSVC toolchain was not found. Pass -MsvcToolsRoot or set BCT_MSVC_TOOLS_ROOT."
+    throw "An x64 MSVC toolchain was not found. Pass -MsvcToolsRoot or set UEAK_MSVC_TOOLS_ROOT."
 }
 
-function Resolve-BctProjectPath
+function Resolve-UeakProjectPath
 {
     param(
         [string]$ProjectPath = ""
@@ -412,12 +412,12 @@ function Resolve-BctProjectPath
 
     $ConfiguredCandidates = @(
         $ProjectPath,
-        $env:BCT_PROJECT_PATH
+        $env:UEAK_PROJECT_PATH
     )
 
-    foreach ($Candidate in Get-BctUniquePaths -Paths $ConfiguredCandidates)
+    foreach ($Candidate in Get-UeakUniquePaths -Paths $ConfiguredCandidates)
     {
-        Assert-BctPath -Path $Candidate -Description "Unreal project file" -PathType File
+        Assert-UeakPath -Path $Candidate -Description "Unreal project file" -PathType File
         if ([System.IO.Path]::GetExtension($Candidate) -ne ".uproject")
         {
             throw "Project path must point to a .uproject file: $Candidate"
@@ -432,10 +432,10 @@ function Resolve-BctProjectPath
         return $CurrentProjects[0].FullName
     }
 
-    throw "Project path was not provided. Pass -ProjectPath or set BCT_PROJECT_PATH."
+    throw "Project path was not provided. Pass -ProjectPath or set UEAK_PROJECT_PATH."
 }
 
-function Test-BctPythonVersion
+function Test-UeakPythonVersion
 {
     param(
         [Parameter(Mandatory = $true)]
@@ -458,7 +458,7 @@ function Test-BctPythonVersion
     }
 }
 
-function Resolve-BctPythonExecutable
+function Resolve-UeakPythonExecutable
 {
     param(
         [string]$PythonExecutable = ""
@@ -466,12 +466,12 @@ function Resolve-BctPythonExecutable
 
     $ConfiguredCandidates = @(
         $PythonExecutable,
-        $env:BCT_PYTHON
+        $env:UEAK_PYTHON
     )
 
-    foreach ($Candidate in Get-BctUniquePaths -Paths $ConfiguredCandidates)
+    foreach ($Candidate in Get-UeakUniquePaths -Paths $ConfiguredCandidates)
     {
-        if (Test-BctPythonVersion -PythonExecutable $Candidate)
+        if (Test-UeakPythonVersion -PythonExecutable $Candidate)
         {
             return $Candidate
         }
@@ -480,7 +480,7 @@ function Resolve-BctPythonExecutable
     }
 
     $PythonCommand = Get-Command python.exe -ErrorAction SilentlyContinue
-    if ($PythonCommand -and (Test-BctPythonVersion -PythonExecutable $PythonCommand.Source))
+    if ($PythonCommand -and (Test-UeakPythonVersion -PythonExecutable $PythonCommand.Source))
     {
         return $PythonCommand.Source
     }
@@ -496,7 +496,7 @@ function Resolve-BctPythonExecutable
                 if ($LASTEXITCODE -eq 0 -and $Resolved)
                 {
                     $ResolvedPath = [string]$Resolved | Select-Object -First 1
-                    if (Test-BctPythonVersion -PythonExecutable $ResolvedPath.Trim())
+                    if (Test-UeakPythonVersion -PythonExecutable $ResolvedPath.Trim())
                     {
                         return $ResolvedPath.Trim()
                     }
@@ -508,10 +508,10 @@ function Resolve-BctPythonExecutable
         }
     }
 
-    throw "CPython 3.11 or 3.12 was not found. Pass -PythonExecutable or set BCT_PYTHON."
+    throw "CPython 3.11 or 3.12 was not found. Pass -PythonExecutable or set UEAK_PYTHON."
 }
 
-function Test-BctRequirementFileHasPackages
+function Test-UeakRequirementFileHasPackages
 {
     param(
         [Parameter(Mandatory = $true)]
@@ -535,7 +535,7 @@ function Test-BctRequirementFileHasPackages
     return $false
 }
 
-function Ensure-BctJunction
+function Ensure-UeakJunction
 {
     param(
         [Parameter(Mandatory = $true)]
@@ -549,7 +549,7 @@ function Ensure-BctJunction
 
     $LinkPath = [System.IO.Path]::GetFullPath($LinkPath)
     $TargetPath = [System.IO.Path]::GetFullPath($TargetPath)
-    Assert-BctPath -Path $TargetPath -Description "Junction target" -PathType Directory
+    Assert-UeakPath -Path $TargetPath -Description "Junction target" -PathType Directory
 
     if (Test-Path -LiteralPath $LinkPath)
     {
@@ -578,7 +578,7 @@ function Ensure-BctJunction
     return New-Item -ItemType Junction -Path $LinkPath -Target $TargetPath
 }
 
-function Remove-BctJunction
+function Remove-UeakJunction
 {
     param(
         [Parameter(Mandatory = $true)]

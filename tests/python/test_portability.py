@@ -35,7 +35,7 @@ class PortabilityTests(unittest.TestCase):
             self.assertIn("==", requirement)
 
     def test_unicode_json_and_sqlite_round_trip(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="bct_test_") as temporary_root:
+        with tempfile.TemporaryDirectory(prefix="ueak_test_") as temporary_root:
             root = Path(temporary_root) / "中文项目" / "目录 with spaces"
             root.mkdir(parents=True)
             database = root / "索引.sqlite3"

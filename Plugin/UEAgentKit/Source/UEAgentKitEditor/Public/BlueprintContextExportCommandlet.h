@@ -4,7 +4,7 @@
 #include "BlueprintContextExportCommandlet.generated.h"
 
 UCLASS()
-class BLUEPRINTCONTEXTTOOLEDITOR_API UBlueprintContextExportCommandlet : public UCommandlet
+class UEAGENTKITEDITOR_API UBlueprintContextExportCommandlet : public UCommandlet
 {
 	GENERATED_BODY()
 

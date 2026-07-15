@@ -1,4 +1,4 @@
-# BlueprintContextTool 文档
+# UE Agent Kit 文档
 
 本目录只包含面向用户和用户 AI 的正式文档，可以提交到 Git。
 
@@ -13,8 +13,10 @@
 7. `SAFE_WRITE_MODEL.md`：写入、编译验证、保存与回滚规则。
 8. `PORTABILITY.md`：Python、路径、配置、Unicode 和发布的可移植性设计。
 9. `ROADMAP.md`：公开开发路线。
-10. `THIRD_PARTY_REFERENCE.md`：参考项目和代码采用规则。
-11. `../spec/BPCTX_FORMAT.md`：BPCTX/1 格式规范。
+10. `REFERENCE_POLICY.md`：第三方参考与独立实现规则。
+11. `THIRD_PARTY_REFERENCE.md`：已研究项目及采用边界。
+12. `RELEASE_DISTRIBUTION.md`：Source 与 Offline-bootstrap 发行方案。
+13. `../spec/BPCTX_FORMAT.md`：BPCTX/1 格式规范。
 
 ## 文档受众
 

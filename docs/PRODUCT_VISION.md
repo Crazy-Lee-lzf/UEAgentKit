@@ -11,11 +11,7 @@
 - 验证（Verify）：修改后执行 Refresh、Compile、重新导出和结构化 Diff。
 - 保存与回滚（Commit/Rollback）：只有显式提交且验证通过才保存资产；失败时恢复。
 
-当前代码和插件名称暂时保留 `BlueprintContextTool`，避免在第一版功能稳定前进行无价值的目录、模块和接口重命名。产品工作名称为：
-
-```text
-UE AI Development Assistant
-```
+项目顶层名称统一为 `UE Agent Kit`，插件与主模块分别使用 `UEAgentKit` 和 `UEAgentKitEditor`。`BlueprintContext`、`BlueprintContextAnalysis` 与 `BPCTX/1` 继续作为 Blueprint 专用子系统和格式名称，不代表整个项目。
 
 ## 2. 核心用户场景
 

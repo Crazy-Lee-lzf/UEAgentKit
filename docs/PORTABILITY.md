@@ -169,8 +169,8 @@ config/
 使用项目级 Junction：
 
 ```text
-<Project>\Plugins\BlueprintContextTool
-→ <ToolRoot>\Build\Compiled\BlueprintContextTool
+<Project>\Plugins\UEAgentKit
+→ <ToolRoot>\Build\Compiled\UEAgentKit
 ```
 
 优点：构建后立即生效，不重复复制大型 PDB。

@@ -6,31 +6,31 @@ param(
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "Common.ps1")
 
-$ToolRoot = Get-BctToolRoot
-$EngineRoot = Resolve-BctEngineRoot -EngineRoot $EngineRoot
-$MsvcToolchain = Resolve-BctMsvcToolchain -MsvcToolsRoot $MsvcToolsRoot
+$ToolRoot = Get-UeakToolRoot
+$EngineRoot = Resolve-UeakEngineRoot -EngineRoot $EngineRoot
+$MsvcToolchain = Resolve-UeakMsvcToolchain -MsvcToolsRoot $MsvcToolsRoot
 
-$SourcePlugin = Join-Path $ToolRoot "Plugin\BlueprintContextTool"
-$PluginDescriptor = Join-Path $SourcePlugin "BlueprintContextTool.uplugin"
+$SourcePlugin = Join-Path $ToolRoot "Plugin\UEAgentKit"
+$PluginDescriptor = Join-Path $SourcePlugin "UEAgentKit.uplugin"
 $HostRoot = Join-Path $ToolRoot "Build\DirectHost"
 $HostProject = Join-Path $HostRoot "HostProject.uproject"
 $HostPluginParent = Join-Path $HostRoot "Plugins"
-$HostPlugin = Join-Path $HostPluginParent "BlueprintContextTool"
-$HostPluginDescriptor = Join-Path $HostPlugin "BlueprintContextTool.uplugin"
+$HostPlugin = Join-Path $HostPluginParent "UEAgentKit"
+$HostPluginDescriptor = Join-Path $HostPlugin "UEAgentKit.uplugin"
 $BuildBat = Join-Path $EngineRoot "Engine\Build\BatchFiles\Build.bat"
 $AutoSdkRoot = Join-Path $ToolRoot "AutoSDK"
 $AutoSdkToolchain = Join-Path $AutoSdkRoot "HostWin64\Win64\VS2022\$($MsvcToolchain.Name)"
 $CompiledRoot = Join-Path $ToolRoot "Build\Compiled"
-$CompiledPlugin = Join-Path $CompiledRoot "BlueprintContextTool"
+$CompiledPlugin = Join-Path $CompiledRoot "UEAgentKit"
 
-Assert-BctPath -Path $BuildBat -Description "Unreal Build.bat" -PathType File
-Assert-BctPath -Path $PluginDescriptor -Description "Plugin descriptor" -PathType File
+Assert-UeakPath -Path $BuildBat -Description "Unreal Build.bat" -PathType File
+Assert-UeakPath -Path $PluginDescriptor -Description "Plugin descriptor" -PathType File
 
-Ensure-BctJunction -LinkPath $AutoSdkToolchain -TargetPath $MsvcToolchain.FullName -ReplaceDifferentJunction | Out-Null
+Ensure-UeakJunction -LinkPath $AutoSdkToolchain -TargetPath $MsvcToolchain.FullName -ReplaceDifferentJunction | Out-Null
 New-Item -ItemType Directory -Path $HostPluginParent -Force | Out-Null
-Ensure-BctJunction -LinkPath $HostPlugin -TargetPath $SourcePlugin -ReplaceDifferentJunction | Out-Null
+Ensure-UeakJunction -LinkPath $HostPlugin -TargetPath $SourcePlugin -ReplaceDifferentJunction | Out-Null
 
-$HostProjectContent = '{ "FileVersion": 3, "Plugins": [ { "Name": "BlueprintContextTool", "Enabled": true } ] }'
+$HostProjectContent = '{ "FileVersion": 3, "Plugins": [ { "Name": "UEAgentKit", "Enabled": true } ] }'
 [System.IO.File]::WriteAllText($HostProject, $HostProjectContent, [System.Text.UTF8Encoding]::new($false))
 
 $PreviousAutoSdkRoot = $env:UE_SDKS_ROOT
@@ -79,8 +79,8 @@ try
         }
     }
 
-    $BuiltDll = Join-Path $CompiledPlugin "Binaries\Win64\UnrealEditor-BlueprintContextToolEditor.dll"
-    Assert-BctPath -Path $BuiltDll -Description "Compiled plugin DLL" -PathType File
+    $BuiltDll = Join-Path $CompiledPlugin "Binaries\Win64\UnrealEditor-UEAgentKitEditor.dll"
+    Assert-UeakPath -Path $BuiltDll -Description "Compiled plugin DLL" -PathType File
 
     Write-Host "BUILD SUCCEEDED"
     Write-Host "Compiled plugin: $CompiledPlugin"

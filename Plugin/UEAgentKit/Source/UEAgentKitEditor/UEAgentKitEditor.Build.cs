@@ -1,8 +1,8 @@
 using UnrealBuildTool;
 
-public class BlueprintContextToolEditor : ModuleRules
+public class UEAgentKitEditor : ModuleRules
 {
-	public BlueprintContextToolEditor(ReadOnlyTargetRules Target) : base(Target)
+	public UEAgentKitEditor(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 

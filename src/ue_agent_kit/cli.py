@@ -31,8 +31,8 @@ def _add_pagination_arguments(parser: argparse.ArgumentParser, *, default_limit:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="bct",
-        description="BlueprintContextTool project index and query CLI.",
+        prog="ue-agent",
+        description="UEAgentKit project index and query CLI.",
     )
     parser.add_argument("--compact", action="store_true", help="Emit compact JSON.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -44,7 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_database_argument(index_build)
     index_build.add_argument("export_root", type=Path)
     index_build.add_argument("--force", action="store_true")
-    index_build.add_argument("--project-key", default=os.environ.get("BCT_PROJECT_KEY", ""))
+    index_build.add_argument("--project-key", default=os.environ.get("UEAK_PROJECT_KEY", ""))
     index_build.add_argument("--include-assets", action="store_true", help="Include per-asset results in JSON output.")
     index_build.add_argument(
         "--prune-prefix",

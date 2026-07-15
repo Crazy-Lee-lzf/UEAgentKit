@@ -6,5 +6,5 @@ from pathlib import Path
 
 TOOL_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATABASE = Path(
-    os.environ.get("BCT_DATABASE", TOOL_ROOT / ".data" / "blueprint_context.sqlite3")
+    os.environ.get("UEAK_DATABASE", TOOL_ROOT / ".data" / "ue_agent_kit.sqlite3")
 ).expanduser().resolve()

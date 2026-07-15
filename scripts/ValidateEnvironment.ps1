@@ -8,17 +8,17 @@ param(
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "Common.ps1")
 
-$ToolRoot = Get-BctToolRoot
-$ResolvedEngineRoot = Resolve-BctEngineRoot -EngineRoot $EngineRoot
-$MsvcToolchain = Resolve-BctMsvcToolchain -MsvcToolsRoot $MsvcToolsRoot
-$BasePython = Resolve-BctPythonExecutable
+$ToolRoot = Get-UeakToolRoot
+$ResolvedEngineRoot = Resolve-UeakEngineRoot -EngineRoot $EngineRoot
+$MsvcToolchain = Resolve-UeakMsvcToolchain -MsvcToolsRoot $MsvcToolsRoot
+$BasePython = Resolve-UeakPythonExecutable
 $VenvPython = Join-Path $ToolRoot ".venv\Scripts\python.exe"
-$PluginDescriptor = Join-Path $ToolRoot "Plugin\BlueprintContextTool\BlueprintContextTool.uplugin"
+$PluginDescriptor = Join-Path $ToolRoot "Plugin\UEAgentKit\UEAgentKit.uplugin"
 
 $ResolvedProjectPath = $null
-if (![string]::IsNullOrWhiteSpace($ProjectPath) -or ![string]::IsNullOrWhiteSpace($env:BCT_PROJECT_PATH))
+if (![string]::IsNullOrWhiteSpace($ProjectPath) -or ![string]::IsNullOrWhiteSpace($env:UEAK_PROJECT_PATH))
 {
-    $ResolvedProjectPath = Resolve-BctProjectPath -ProjectPath $ProjectPath
+    $ResolvedProjectPath = Resolve-UeakProjectPath -ProjectPath $ProjectPath
 }
 else
 {
@@ -35,7 +35,7 @@ $Checks = @(
     [PSCustomObject]@{ Name = "UE Build.bat"; Exists = (Test-Path -LiteralPath (Join-Path $ResolvedEngineRoot "Engine\Build\BatchFiles\Build.bat") -PathType Leaf); Path = (Join-Path $ResolvedEngineRoot "Engine\Build\BatchFiles\Build.bat") },
     [PSCustomObject]@{ Name = "UnrealEditor-Cmd.exe"; Exists = (Test-Path -LiteralPath (Join-Path $ResolvedEngineRoot "Engine\Binaries\Win64\UnrealEditor-Cmd.exe") -PathType Leaf); Path = (Join-Path $ResolvedEngineRoot "Engine\Binaries\Win64\UnrealEditor-Cmd.exe") },
     [PSCustomObject]@{ Name = "MSVC cl.exe"; Exists = (Test-Path -LiteralPath (Join-Path $MsvcToolchain.FullName "bin\Hostx64\x64\cl.exe") -PathType Leaf); Path = (Join-Path $MsvcToolchain.FullName "bin\Hostx64\x64\cl.exe") },
-    [PSCustomObject]@{ Name = "Base Python"; Exists = (Test-BctPythonVersion -PythonExecutable $BasePython); Path = $BasePython }
+    [PSCustomObject]@{ Name = "Base Python"; Exists = (Test-UeakPythonVersion -PythonExecutable $BasePython); Path = $BasePython }
 )
 
 if ($ResolvedProjectPath)
@@ -45,7 +45,7 @@ if ($ResolvedProjectPath)
 
 if ($RequireVenv -or (Test-Path -LiteralPath $VenvPython -PathType Leaf))
 {
-    $Checks += [PSCustomObject]@{ Name = "Project Python"; Exists = (Test-BctPythonVersion -PythonExecutable $VenvPython); Path = $VenvPython }
+    $Checks += [PSCustomObject]@{ Name = "Project Python"; Exists = (Test-UeakPythonVersion -PythonExecutable $VenvPython); Path = $VenvPython }
 }
 
 Write-Host "=== Resolved environment ==="

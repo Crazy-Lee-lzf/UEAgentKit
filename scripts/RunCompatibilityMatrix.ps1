@@ -12,22 +12,22 @@ param(
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "Common.ps1")
 
-$ToolRoot = Get-BctToolRoot
-$EngineRoot = Resolve-BctEngineRoot -EngineRoot $EngineRoot
-$ProjectPath = Resolve-BctProjectPath -ProjectPath $ProjectPath
+$ToolRoot = Get-UeakToolRoot
+$EngineRoot = Resolve-UeakEngineRoot -EngineRoot $EngineRoot
+$ProjectPath = Resolve-UeakProjectPath -ProjectPath $ProjectPath
 $EditorCmd = Join-Path $EngineRoot "Engine\Binaries\Win64\UnrealEditor-Cmd.exe"
-Assert-BctPath -Path $EditorCmd -Description "UnrealEditor-Cmd.exe" -PathType File
+Assert-UeakPath -Path $EditorCmd -Description "UnrealEditor-Cmd.exe" -PathType File
 
 if ([string]::IsNullOrWhiteSpace($CasesPath))
 {
-    $CasesPath = $env:BCT_COMPATIBILITY_CASES
+    $CasesPath = $env:UEAK_COMPATIBILITY_CASES
 }
 if ([string]::IsNullOrWhiteSpace($CasesPath))
 {
-    throw "Compatibility cases were not provided. Pass -CasesPath or set BCT_COMPATIBILITY_CASES."
+    throw "Compatibility cases were not provided. Pass -CasesPath or set UEAK_COMPATIBILITY_CASES."
 }
 $CasesPath = [System.IO.Path]::GetFullPath($CasesPath)
-Assert-BctPath -Path $CasesPath -Description "Compatibility cases JSON" -PathType File
+Assert-UeakPath -Path $CasesPath -Description "Compatibility cases JSON" -PathType File
 
 if ([string]::IsNullOrWhiteSpace($OutputRoot))
 {

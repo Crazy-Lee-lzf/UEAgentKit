@@ -24,7 +24,7 @@ def sha256(path: Path) -> str:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Enable or disable an Unreal plugin in a .uproject file.")
     parser.add_argument("--project", required=True, type=Path)
-    parser.add_argument("--plugin", default="BlueprintContextTool")
+    parser.add_argument("--plugin", default="UEAgentKit")
     parser.add_argument("--enabled", choices=("true", "false"), required=True)
     parser.add_argument("--backup-root", type=Path, default=TOOL_ROOT / "Backups" / "ProjectFiles")
     return parser.parse_args()

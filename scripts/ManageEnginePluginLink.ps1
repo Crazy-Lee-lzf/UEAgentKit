@@ -10,11 +10,11 @@ param(
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "Common.ps1")
 
-$ToolRoot = Get-BctToolRoot
-$EngineRoot = Resolve-BctEngineRoot -EngineRoot $EngineRoot
-$DefaultSourceDirectory = Join-Path $ToolRoot "Plugin\BlueprintContextTool"
-$DefaultPackageDirectory = Join-Path $ToolRoot "Build\Compiled\BlueprintContextTool"
-$LinkPath = Join-Path $EngineRoot "Engine\Plugins\Developer\BlueprintContextTool"
+$ToolRoot = Get-UeakToolRoot
+$EngineRoot = Resolve-UeakEngineRoot -EngineRoot $EngineRoot
+$DefaultSourceDirectory = Join-Path $ToolRoot "Plugin\UEAgentKit"
+$DefaultPackageDirectory = Join-Path $ToolRoot "Build\Compiled\UEAgentKit"
+$LinkPath = Join-Path $EngineRoot "Engine\Plugins\Developer\UEAgentKit"
 
 if ([string]::IsNullOrWhiteSpace($PluginDirectory))
 {
@@ -24,9 +24,9 @@ $PluginDirectory = [System.IO.Path]::GetFullPath($PluginDirectory)
 
 if ($Action -eq "Install")
 {
-    $PluginDescriptor = Join-Path $PluginDirectory "BlueprintContextTool.uplugin"
-    Assert-BctPath -Path $PluginDescriptor -Description "Plugin descriptor" -PathType File
-    Ensure-BctJunction -LinkPath $LinkPath -TargetPath $PluginDirectory | Out-Null
+    $PluginDescriptor = Join-Path $PluginDirectory "UEAgentKit.uplugin"
+    Assert-UeakPath -Path $PluginDescriptor -Description "Plugin descriptor" -PathType File
+    Ensure-UeakJunction -LinkPath $LinkPath -TargetPath $PluginDirectory | Out-Null
 
     Write-Host "Installed engine plugin junction:"
     Write-Host "  Engine: $EngineRoot"
@@ -36,7 +36,7 @@ if ($Action -eq "Install")
     exit 0
 }
 
-$Removed = Remove-BctJunction -LinkPath $LinkPath
+$Removed = Remove-UeakJunction -LinkPath $LinkPath
 if ($Removed)
 {
     Write-Host "Removed engine plugin junction: $LinkPath"

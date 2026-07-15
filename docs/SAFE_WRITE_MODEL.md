@@ -76,7 +76,7 @@ Commit 前必须建立外部备份。备份不得只依赖 Editor Undo。
 建议目录：
 
 ```text
-BlueprintContextTool/Backups/Assets/<Project>/<Timestamp>/
+UEAgentKit/Backups/Assets/<Project>/<Timestamp>/
 ```
 
 记录：

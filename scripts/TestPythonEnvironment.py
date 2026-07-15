@@ -25,7 +25,7 @@ def main() -> int:
     if requires_python != ">=3.11,<3.13":
         raise RuntimeError(f"Unexpected requires-python value: {requires_python}")
 
-    with tempfile.TemporaryDirectory(prefix="bct_") as temporary_root:
+    with tempfile.TemporaryDirectory(prefix="ueak_") as temporary_root:
         unicode_root = Path(temporary_root) / "中文路径" / "空格 directory"
         unicode_root.mkdir(parents=True)
         database_path = unicode_root / "索引.sqlite3"
