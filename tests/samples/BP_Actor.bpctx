@@ -1,0 +1,18 @@
+H|BPCTX|1|engine=5.6|profile=logic
+A|a0|/Game/0_/BP_Actor|normal|parent=/Script/Engine.Actor|generated=BP_Actor_C|data=1
+C|c0|DefaultSceneRoot|/Script/Engine.SceneComponent|root=1
+G|g0|EventGraph|uber|schema=EdGraphSchema_K2
+N|n0|g0|K2Node_Event|ReceiveActorBeginOverlap|ref=/Script/Engine.Actor.ReceiveActorBeginOverlap
+P|n0.p0|out|delegate|OutputDelegate
+P|n0.p1|out|exec|then
+P|n0.p2|out|object</Script/Engine.Actor>|OtherActor
+N|n1|g0|K2Node_Event|ReceiveBeginPlay|ref=/Script/Engine.Actor.ReceiveBeginPlay
+P|n1.p0|out|delegate|OutputDelegate
+P|n1.p1|out|exec|then
+N|n2|g0|K2Node_Event|ReceiveTick|ref=/Script/Engine.Actor.ReceiveTick
+P|n2.p0|out|delegate|OutputDelegate
+P|n2.p1|out|exec|then
+P|n2.p2|out|real|DeltaSeconds|default=0.0
+G|g1|UserConstructionScript|function|schema=EdGraphSchema_K2
+N|n3|g1|K2Node_FunctionEntry|Construction Script
+P|n3.p0|out|exec|then

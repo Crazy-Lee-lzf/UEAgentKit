@@ -1,0 +1,23 @@
+* text=auto
+
+*.md text eol=crlf
+*.txt text eol=crlf
+*.cpp text eol=crlf
+*.h text eol=crlf
+*.cs text eol=crlf
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.py text eol=crlf
+*.json text eol=crlf
+*.jsonl text eol=crlf
+*.ini text eol=crlf
+*.uplugin text eol=crlf
+*.uproject text eol=crlf
+
+*.uasset binary
+*.umap binary
+*.dll binary
+*.pdb binary
+*.lib binary
+*.exe binary

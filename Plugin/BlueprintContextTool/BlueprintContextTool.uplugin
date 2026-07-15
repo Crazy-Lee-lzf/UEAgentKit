@@ -1,0 +1,19 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "0.1.0",
+  "FriendlyName": "Blueprint Context Tool",
+  "Description": "Read-only UE5 Blueprint exporter for canonical JSON and BPCTX text.",
+  "Category": "Developer Tools",
+  "CreatedBy": "BlueprintContextTool",
+  "CanContainContent": false,
+  "IsBetaVersion": true,
+  "EnabledByDefault": true,
+  "Modules": [
+    {
+      "Name": "BlueprintContextToolEditor",
+      "Type": "Editor",
+      "LoadingPhase": "Default"
+    }
+  ]
+}

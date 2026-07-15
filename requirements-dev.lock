@@ -1,0 +1,2 @@
+# Development dependencies are intentionally empty during M0.
+# Add exact pinned versions only when tests or tooling require them.

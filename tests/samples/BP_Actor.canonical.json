@@ -1,0 +1,79 @@
+{
+  "schema": "bpctx.canonical.v1",
+  "engine": "5.6",
+  "profile": "logic",
+  "asset": {
+    "id": "a0",
+    "path": "/Game/0_/BP_Actor",
+    "kind": "normal",
+    "parent": "/Script/Engine.Actor",
+    "generated_class": "BP_Actor_C",
+    "is_data_only": true
+  },
+  "components": [
+    {
+      "id": "c0",
+      "name": "DefaultSceneRoot",
+      "class": "/Script/Engine.SceneComponent",
+      "root": true
+    }
+  ],
+  "graphs": [
+    {
+      "id": "g0",
+      "name": "EventGraph",
+      "kind": "uber",
+      "schema": "EdGraphSchema_K2",
+      "nodes": [
+        {
+          "id": "n0",
+          "class": "K2Node_Event",
+          "title": "ReceiveActorBeginOverlap",
+          "reference": "/Script/Engine.Actor.ReceiveActorBeginOverlap",
+          "pins": [
+            {"id": "p0", "direction": "out", "type": "delegate", "name": "OutputDelegate"},
+            {"id": "p1", "direction": "out", "type": "exec", "name": "then"},
+            {"id": "p2", "direction": "out", "type": "object</Script/Engine.Actor>", "name": "OtherActor"}
+          ]
+        },
+        {
+          "id": "n1",
+          "class": "K2Node_Event",
+          "title": "ReceiveBeginPlay",
+          "reference": "/Script/Engine.Actor.ReceiveBeginPlay",
+          "pins": [
+            {"id": "p0", "direction": "out", "type": "delegate", "name": "OutputDelegate"},
+            {"id": "p1", "direction": "out", "type": "exec", "name": "then"}
+          ]
+        },
+        {
+          "id": "n2",
+          "class": "K2Node_Event",
+          "title": "ReceiveTick",
+          "reference": "/Script/Engine.Actor.ReceiveTick",
+          "pins": [
+            {"id": "p0", "direction": "out", "type": "delegate", "name": "OutputDelegate"},
+            {"id": "p1", "direction": "out", "type": "exec", "name": "then"},
+            {"id": "p2", "direction": "out", "type": "real", "name": "DeltaSeconds", "default": "0.0"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "g1",
+      "name": "UserConstructionScript",
+      "kind": "function",
+      "schema": "EdGraphSchema_K2",
+      "nodes": [
+        {
+          "id": "n3",
+          "class": "K2Node_FunctionEntry",
+          "title": "Construction Script",
+          "pins": [
+            {"id": "p0", "direction": "out", "type": "exec", "name": "then"}
+          ]
+        }
+      ]
+    }
+  ]
+}
