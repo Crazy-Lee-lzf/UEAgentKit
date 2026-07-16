@@ -2,122 +2,118 @@
 
 [English](README_EN.md)
 
-UE Agent Kit 是一套面向 Unreal Engine 的开源 AI 开发工具。它通过 UE Editor 插件、Python CLI、SQLite 索引和后续 MCP 接口，让 AI 能够按受控流程查询、分析、修改、验证和回滚 UE 项目内容。
+> 将 Unreal Engine Blueprint 转换为 AI 和开发者可检索、可追踪的项目知识。
 
-当前阶段仍以 Blueprint 只读分析为主，不会修改或保存 `.uasset`。
+UE Agent Kit 是一套面向 Unreal Engine 的开源 Blueprint 分析工具。它通过 UE Editor 插件读取 Blueprint，再使用 Python CLI 和 SQLite 建立项目级索引，帮助开发者或 AI 快速定位资产、变量、函数、调用关系和依赖关系。
 
-## 当前功能
+当前版本为 **0.2.4**，支持 **Unreal Engine 5.6**。现阶段仅执行只读分析，不修改或保存 `.uasset`。
 
-- 读取 Blueprint 的类、父类、接口、变量、默认值、组件和函数。
-- 导出 Graph、Node、Pin 及完整连接关系。
-- 识别继承、接口实现、变量读写、函数/宏调用、接口消息、Dynamic Cast 和 Delegate 关系。
-- 将 Event Dispatcher、Event、Function Entry、成员变量与局部变量建模为可查询 Symbol。
-- 区分函数输入、输出、返回和 InOut 参数，以及 Value/Reference 与 Const 属性，并记录返回值上游来源。
-- 解析 Delegate 创建、绑定、解绑和广播，并关联目标 Dispatcher 与 Handler。
-- 将 Soft Object/Class 成员变量默认值建模为变量级引用，保留声明类型、具体目标和来源变量。
-- 导出 Asset Registry 的 Hard/Soft Package、Manage 和 Searchable Name 依赖及 Game、EditorOnly、Build、Direct 等属性，并支持正向/反向查询。
-- 生成稳定的 Asset Revision 与 SHA-256 内容指纹。
-- 归一化 UE 加载期生成的瞬态 Pin ID 与 Property Bag 对象名，使 Canonical JSON 和 BPCTX 可跨编辑器进程稳定复现。
+> **AI Generated**：本项目的代码和文档主要由 AI 生成，并通过人工审查、UE 5.6 编译、自动化测试和真实工程回归验证。
+
+## 可以用来做什么
+
+Blueprint 保存在二进制资产中，普通文本搜索无法回答很多项目级问题。UE Agent Kit 可以帮助查询：
+
+- 某个变量在哪些 Blueprint 中被读取或写入。
+- 哪些资产调用了某个函数、接口消息、宏或 Event Dispatcher。
+- 一个 Blueprint 继承了什么、实现了哪些接口、依赖了哪些资产。
+- Soft Reference、PrimaryAssetLabel Manage 和 DataTable Row 等引用来自哪里。
+- 某个大型 Blueprint 的 Graph、Node、Pin 和连接结构是什么。
+
+导出结果可以直接检查，也可以导入 SQLite，供 CLI、脚本或后续 AI 工具按需查询，而不必反复加载完整 Blueprint。
+
+## 主要能力
+
+- 读取 Blueprint 的类、父类、接口、变量、默认值、组件、函数和 Graph。
+- 导出 Node、Pin、连接关系及常用节点属性。
+- 识别变量读写、函数和宏调用、接口消息、Dynamic Cast、Delegate、继承与接口实现关系。
+- 区分成员变量、局部变量、输入、输出、返回和引用参数。
+- 分析 Hard/Soft Package、Soft Object/Class、Manage 和 Searchable Name 依赖。
 - 输出 Canonical JSON、BPCTX/1 和 Manifest。
-- 使用 SQLite/FTS 建立项目级索引。
-- 通过 CLI 检索资产、符号和引用关系。
-- 支持增量索引、项目身份隔离、中文路径和离线环境。
+- 使用 SQLite/FTS5 建立增量项目索引，并支持正向和反向引用查询。
+- 支持中文路径、Unicode 内容和离线环境。
 
-当前已在 UE 5.6 下完成真实项目的编译、导出、索引和查询验证。
-
-## 最终目标
-
-```text
-查询项目
-→ 精确定位资产与逻辑
-→ AI 生成声明式修改计划
-→ Dry Run
-→ 创建、修改或删除 UE 内容
-→ 编译与依赖验证
-→ 结构化 Diff
-→ 显式保存
-→ 失败自动回滚
-```
-
-长期目标不仅包含普通 Blueprint，还包括 Widget、Anim Blueprint、Control Rig、Material、Niagara、DataTable、Behavior Tree、StateTree 等资产类型。
-
-## 项目结构
-
-```text
-UE Agent Kit
-├─ UEAgentKit                    UE Editor 插件
-│  └─ Blueprint Context         Blueprint 读取、分析和后续 Patch
-├─ ue_agent_kit                 Python 索引、查询和工具层
-├─ Project Index                SQLite/FTS 项目索引
-├─ Validation                   编译、Diff 和一致性验证
-└─ Agent Bridge                 后续 MCP / Agent 接口
-```
-
-`BlueprintContext` 与 `BPCTX/1` 继续作为 Blueprint 子系统和格式名称使用；它们不再代表整个项目。
+完整实现范围和验证结果见 [`docs/CURRENT_STATUS.md`](docs/CURRENT_STATUS.md)。
 
 ## 快速开始
 
-构建 UE 插件：
+### 环境要求
+
+```text
+Windows 10 / 11
+Unreal Engine 5.6
+Visual Studio C++ Toolchain
+PowerShell 5.1+
+Python 3.11 或 3.12
+```
+
+### 1. 构建插件
 
 ```bat
 scripts\BuildPluginDirect.cmd
 ```
 
-默认编译输出：
+默认输出到：
 
 ```text
 Build\Compiled\UEAgentKit
 ```
 
-运行 Blueprint 导出：
+### 2. 导出 Blueprint
 
 ```bat
 scripts\RunExport.cmd -Asset "/Game/Folder/BP_Name" -Profile logic -Format both
 ```
 
-运行索引与查询：
+批量导出目录：
 
 ```bat
-scripts\ue-agent.cmd index build --export-root Output\Export
+scripts\RunExport.cmd -Root "/Game/Folder" -Profile ai -Format both -CompactJson
+```
+
+### 3. 建立索引并查询
+
+```bat
+scripts\ue-agent.cmd index build Output
 scripts\ue-agent.cmd index stats
 scripts\ue-agent.cmd search assets Door
 scripts\ue-agent.cmd search symbols MaxWalkSpeed
+scripts\ue-agent.cmd references --target-asset /Game/Characters/BP_Player
 ```
 
-详细步骤见 [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md)。
+项目路径、UE 安装路径、插件安装和完整参数说明见 [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md)。
 
-## 当前限制
+## 输出内容
 
-- 当前公开实现是只读版本。
-- 尚未实现 Blueprint Patch、保存和回滚。
-- Widget、Anim Blueprint 和 Control Rig 目前只具备通用 Blueprint 结构导出，专用语义仍需补充。
-- 当前主要支持并验证 UE 5.6，其他 UE 版本需要单独编译和适配。
+```text
+Output\
+├─ manifest.json
+├─ canonical\
+└─ bpctx\
+```
 
-## 安全原则
-
-- 不直接修改 `.uasset` 二进制文件。
-- 未来所有写入默认执行 Dry Run。
-- 写入前校验资产 Revision，拒绝过期 Patch。
-- 编译失败、版本冲突或备份失败时禁止保存。
-- 正式项目默认只读，写入测试仅在明确授权的沙箱资产中进行。
+- **Canonical JSON**：完整、稳定的 Blueprint 事实模型。
+- **BPCTX/1**：适合 AI 按需读取的紧凑文本格式。
+- **SQLite Index**：用于项目级资产、Symbol 和 Reference 检索。
 
 ## 文档
 
-- [`docs/CURRENT_STATUS.md`](docs/CURRENT_STATUS.md)：当前实现状态。
-- [`docs/PRODUCT_VISION.md`](docs/PRODUCT_VISION.md)：产品目标和范围。
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)：系统架构。
-- [`docs/SAFE_WRITE_MODEL.md`](docs/SAFE_WRITE_MODEL.md)：安全写入模型。
 - [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md)：构建、安装和运行。
-- [`docs/ROADMAP.md`](docs/ROADMAP.md)：开发路线。
-- [`docs/REFERENCE_POLICY.md`](docs/REFERENCE_POLICY.md)：第三方参考和独立实现规则。
-- [`docs/RELEASE_DISTRIBUTION.md`](docs/RELEASE_DISTRIBUTION.md)：发行包和离线依赖策略。
+- [`docs/CURRENT_STATUS.md`](docs/CURRENT_STATUS.md)：当前版本能力和验证结果。
+- [`docs/AI_USAGE.md`](docs/AI_USAGE.md)：AI 使用导出与索引的方式。
+- [`docs/ROADMAP.md`](docs/ROADMAP.md)：公开开发路线。
 - [`spec/BPCTX_FORMAT.md`](spec/BPCTX_FORMAT.md)：BPCTX/1 格式规范。
-- [`tests/fixtures/README.md`](tests/fixtures/README.md)：Soft Reference、Manage 和 Searchable Name 测试资产生成方式。
 
-## 许可证
+完整文档索引见 [`docs/README.md`](docs/README.md)。
+
+## 安全说明
+
+当前公开版本只读，不会保存 Blueprint。后续写入功能也不会直接修改 `.uasset` 二进制，并将通过 Revision 校验、Dry Run、编译验证、备份和回滚流程执行。
+
+## License
 
 UE Agent Kit 使用 [MIT License](LICENSE)。
 
-仓库代码以独立实现为原则。第三方项目主要用于架构、工作流和 UE API 使用方式参考，不直接复制其代码；实际分发的第三方依赖会单独记录许可证、版本和哈希。
+本项目采用独立实现方式。第三方项目仅用于研究架构、工作流和 Unreal API 使用方式，相关规则见 [`docs/REFERENCE_POLICY.md`](docs/REFERENCE_POLICY.md)。
 
 UE Agent Kit 是独立开源项目，与 Epic Games, Inc. 没有隶属、赞助或背书关系。Unreal 和 Unreal Engine 是 Epic Games, Inc. 在美国及其他地区的商标或注册商标。

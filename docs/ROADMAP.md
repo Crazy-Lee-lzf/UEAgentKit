@@ -1,110 +1,106 @@
 # 开发路线图
 
-## 阶段 0：基线整理
+本路线图描述 UE Agent Kit 的公开开发方向。实际已实现能力以 [`CURRENT_STATUS.md`](CURRENT_STATUS.md) 为准。
+
+## 当前进度
+
+```text
+当前版本：0.2.4
+当前阶段：只读索引 MVP 已完成，准备进入安全写入 MVP
+主要支持：Unreal Engine 5.6、普通 Blueprint 读取与项目级检索
+默认策略：只读，不修改或保存 .uasset
+```
+
+## 阶段 0：项目基线
 
 状态：已完成。
 
-目标：把现有只读导出器整理为后续可扩展基础。
-
-任务：
-
-- 更新产品目标、架构、安全写入和测试沙箱文档。
-- 更新 README 和实现状态。
-- 保留现有普通 Blueprint 导出能力。
-- 记录 UE5.6 编译成功和真实项目兼容性测试结果。
-- 初始化本地 Git，但第一版完成前不创建正式版本提交。
-- 清理不应进入版本控制的 Build、Output、Backups、AutoSDK 和临时 HostProject。
-
-验收：
-
-- 文档无明显冲突。
-- 现有插件仍能编译。
-- 生产级复杂项目的只读导出回归仍通过。
+- 完成产品命名、目录结构、构建脚本和公开文档整理。
+- 建立 UE 5.6 Editor-only 插件与 Python CLI 基线。
+- 建立只读安全边界、测试沙箱和第三方参考规则。
+- 完成 Git 仓库与版本检查点管理。
 
 ## 阶段 1：只读索引 MVP
 
-状态：进行中。Revision、Symbol 和 Reference 导出模型已完成；SQLite/FTS 与查询接口尚未完成。
+状态：已完成，0.2.4 形成稳定检查点。
 
-目标：从“导出文件”升级为“可精确查询的项目知识层”。
+目标是把 Blueprint 从“可导出的 JSON”升级为“可精确查询的项目知识层”。
 
-### 1.1 读取模型补强
+### 已完成能力
 
-- 提取常见 K2 节点语义。
-- 标记变量 Get/Set。
-- 标记函数、事件、接口和宏调用。
-- 提取当前 Blueprint 定义与引用关系。
-- 记录依赖、继承、接口实现和默认值覆盖。
+- 导出 Blueprint 类、变量、组件、函数、图、节点、Pin 和连接关系。
+- 建立 Asset、Symbol、Graph、Node 和 Reference 数据模型。
+- 提取变量读写、函数和宏调用、接口消息、Dynamic Cast、Delegate、继承与实现关系。
+- 提取 Asset Registry Hard/Soft Package、Manage 和 Searchable Name 依赖。
+- 支持 Soft Object / Soft Class 成员变量级引用。
+- 输出 Canonical JSON、BPCTX/1 和 Manifest。
+- 建立 SQLite/FTS5 项目索引、增量导入和正向/反向引用查询。
+- 保证跨独立编辑器进程的 Canonical 与 BPCTX 确定性。
+- 提供可重复生成的只读语义测试资产。
 
-### 1.2 SQLite 索引
+### 版本节点
 
-- 建立数据库 Schema。
-- 从 Canonical JSON 构建索引。
-- 增量更新。
-- FTS5 全文检索。
-- 调用关系和变量读写查询。
-
-### 1.3 查询命令
-
-- `search_assets`
-- `search_symbols`
-- `find_references`
-- `get_asset_summary`
-- `get_graph`
-- `get_callers/get_callees`
-- `get_variable_reads/get_variable_writes`
-
-验收：
-
-- 能回答“变量在哪里被写入”。
-- 能回答“谁调用了某函数”。
-- 能回答“哪些子蓝图覆盖了属性”。
-- 查询结果可继续按资产、图和节点展开。
+```text
+0.2.2  全项目导出、项目身份和 SQLite 闭环
+0.2.3  Event、参数、局部变量、接口消息、Cast 与 Delegate 语义
+0.2.4  Soft Reference、PrimaryAssetLabel Manage、Searchable Name 与正式 fixture
+```
 
 ## 阶段 2：安全写入 MVP
 
-测试项目：配置为允许写入的独立 UE5.6 沙箱工程。
+状态：下一阶段。
 
-### 2.1 Patch 基础设施
+目标是在隔离测试资产中建立可校验、可预览、可回滚的低风险 Blueprint 修改流程。
 
-- Patch JSON Schema。
-- Operation Registry。
+### 2.1 写入测试基线
+
+- 建立独立的 `/Game/UEAgentKitWriteTests` 测试目录。
+- 提供可重复执行的写入 fixture 生成脚本。
+- 覆盖正常修改、非法输入、Revision 冲突、编译失败和回滚场景。
+- 正式项目继续默认只读，写入只允许在明确授权目录内执行。
+
+### 2.2 Patch 基础设施
+
+- 声明式 Patch JSON Schema。
+- Operation Registry 与操作白名单。
 - Asset Revision 检查。
-- Project Write Policy。
-- Dry Run 和 Commit 模式。
-- 外部备份、操作日志和 Diff。
+- Project Write Policy 与允许目录检查。
+- 结构化校验结果、Expected Changes 和风险等级。
 
-### 2.2 第一批操作
+### 2.3 第一批低风险操作
 
-- `setVariableDefault`
-- `addVariable`
-- `renameVariable`
-- `removeVariable`，只允许无引用变量。
-- `setComponentProperty`
-- `setPinDefault`
+按以下顺序开放：
 
-### 2.3 编译和保存门禁
+```text
+setVariableDefault
+→ setComponentProperty
+→ setPinDefault
+```
 
-- Refresh 节点。
-- Compile Blueprint。
-- 收集编译错误和警告。
-- 重新导出验证。
-- 显式保存。
-- 重新加载验证。
-- 回滚。
+`addVariable`、`renameVariable` 和 `removeVariable` 涉及结构重编译与引用迁移，待基础流程稳定后再开放。
 
-验收：
+### 2.4 Dry Run、编译与回滚
 
-- Dry Run 不改变 `.uasset`。
-- Commit 后重启编辑器仍生效。
-- 编译失败不保存。
-- 错误 Patch 不造成部分写入。
-- 备份可恢复。
+- Dry Run 只在内存中应用修改，不改变磁盘文件。
+- Refresh Blueprint 节点并执行编译。
+- 重新导出资产并生成结构化 Diff。
+- 编译失败、Revision 冲突、备份失败或 Diff 不符时禁止保存。
+- 支持内存回滚和外部 `.uasset` 备份恢复。
+- 只有显式 Commit 才允许保存，并在重新加载后验证结果。
 
-## 阶段 3：MCP 第一版
+### 验收标准
 
-目标：让 Claude Code 等 AI 客户端使用统一查询和修改接口。
+- Dry Run 前后 `.uasset` 哈希不变。
+- Commit 后重启编辑器仍能观察到预期修改。
+- 错误 Patch 不产生部分保存。
+- 编译失败不会写入磁盘。
+- 备份、Patch、Diff、日志和恢复路径完整。
 
-工具：
+## 阶段 3：MCP / Agent 接口
+
+目标是让 Claude Code、ChatGPT 等 AI 客户端通过统一接口查询和修改 UE 项目。
+
+计划工具：
 
 ```text
 ue_search
@@ -117,32 +113,22 @@ ue_verify_asset
 ue_rollback_patch
 ```
 
-要求：
-
-- MCP 不直接接触 UE 内部写入实现。
-- 所有写入经过同一 Patch 和安全策略。
-- 返回值支持分页和按需展开。
-- 超大 Blueprint 不一次返回完整 JSON。
+MCP 不直接暴露任意 UObject 调用。所有写入必须经过同一 Patch Schema、安全策略、编译验证和回滚流程。
 
 ## 阶段 4：图结构编辑
 
 - 添加和删除节点。
-- 变量 Get/Set 节点。
-- Call Function 节点。
+- 创建变量 Get/Set 与函数调用节点。
 - 连接和断开 Pin。
 - 创建简单函数图。
 - 修改函数参数。
 - 替换函数调用。
 
-验收重点：
-
-- 使用 Schema 校验连接。
-- 节点创建后 GUID、Pin 和图状态一致。
-- 编译失败完整回滚。
+这一阶段必须依赖 Blueprint Schema 校验，并保证失败时完整回滚。
 
 ## 阶段 5：专用资产适配器
 
-优先级：
+计划优先级：
 
 1. Widget Blueprint。
 2. Anim Blueprint。
@@ -151,28 +137,28 @@ ue_rollback_patch
 5. Niagara。
 6. Behavior Tree / StateTree。
 
-每种适配器先完成读取和索引，再开放写入。
+每类资产先完成读取和索引，再单独开放写入。
 
 ## 阶段 6：工程化
 
 - 编辑器内状态面板。
-- Git/P4 适配。
+- Git / Perforce 适配。
 - CI 回归测试。
-- 多项目配置。
-- 权限、审计和操作历史。
-- 项目级知识摘要和语义检索。
+- 多项目配置与权限策略。
+- 审计日志和操作历史。
+- 项目级知识摘要与语义检索。
 
-## 第一版定义
+## 第一版产品边界
 
-“第一版”指阶段 0、1、2 的核心能力完成，并具备最小 MCP 或命令行入口：
+第一版的核心闭环是：
 
 ```text
 普通 Blueprint 可查
 → 全项目可检索
 → 低风险属性可 Dry Run 修改
-→ 编译验证
+→ 编译与结构 Diff 验证
 → 显式保存
-→ 可回滚
+→ 可恢复和回滚
 ```
 
-第一版完成后再进行首次正式 Git Commit 和版本标记。
+MCP 是这一闭环之上的接入层，不应早于安全写入基础设施实现。
