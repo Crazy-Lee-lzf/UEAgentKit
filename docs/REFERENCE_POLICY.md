@@ -34,7 +34,7 @@ Vendored Files: No/Yes
 Independent Implementation Notes:
 ```
 
-仅参考而未分发其代码的项目记录在 `docs/THIRD_PARTY_REFERENCE.md`。真正随发行包分发的依赖记录在 `THIRD_PARTY_NOTICES.md`、`licenses/` 和 SBOM 中。
+仅作为研究参考、但未随项目分发代码的第三方项目不属于发布依赖。真正随发行包分发的依赖必须记录在 `THIRD_PARTY_NOTICES.md`、`licenses/` 和 SBOM 中。
 
 ## 引入代码的例外流程
 

@@ -33,8 +33,6 @@ Blueprint 保存在二进制资产中，普通文本搜索无法回答很多项�
 - 使用 SQLite/FTS5 建立增量项目索引，并支持正向和反向引用查询。
 - 支持中文路径、Unicode 内容和离线环境。
 
-完整实现范围和验证结果见 [`docs/CURRENT_STATUS.md`](docs/CURRENT_STATUS.md)。
-
 ## 快速开始
 
 ### 环境要求
@@ -99,9 +97,7 @@ Output\
 ## 文档
 
 - [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md)：构建、安装和运行。
-- [`docs/CURRENT_STATUS.md`](docs/CURRENT_STATUS.md)：当前版本能力和验证结果。
 - [`docs/AI_USAGE.md`](docs/AI_USAGE.md)：AI 使用导出与索引的方式。
-- [`docs/ROADMAP.md`](docs/ROADMAP.md)：公开开发路线。
 - [`spec/BPCTX_FORMAT.md`](spec/BPCTX_FORMAT.md)：BPCTX/1 格式规范。
 
 完整文档索引见 [`docs/README.md`](docs/README.md)。

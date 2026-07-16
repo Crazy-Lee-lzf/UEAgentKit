@@ -1,6 +1,5 @@
 param(
     [string]$PythonExecutable = "",
-    [switch]$IncludeDev,
     [switch]$Recreate,
     [switch]$UpgradePip
 )
@@ -11,8 +10,7 @@ $ErrorActionPreference = "Stop"
 $ToolRoot = Get-UeakToolRoot
 $VenvRoot = Join-Path $ToolRoot ".venv"
 $VenvPython = Join-Path $VenvRoot "Scripts\python.exe"
-$RuntimeRequirements = Join-Path $ToolRoot "requirements.lock"
-$DevRequirements = Join-Path $ToolRoot "requirements-dev.lock"
+$RuntimeRequirements = Join-Path $ToolRoot "requirements.txt"
 $ValidationScript = Join-Path $PSScriptRoot "TestPythonEnvironment.py"
 
 if ($Recreate -and (Test-Path -LiteralPath $VenvRoot))
@@ -60,15 +58,6 @@ if (Test-UeakRequirementFileHasPackages -Path $RuntimeRequirements)
     if ($LASTEXITCODE -ne 0)
     {
         throw "Runtime dependency installation failed with exit code $LASTEXITCODE"
-    }
-}
-
-if ($IncludeDev -and (Test-UeakRequirementFileHasPackages -Path $DevRequirements))
-{
-    & $VenvPython -m pip install --requirement $DevRequirements
-    if ($LASTEXITCODE -ne 0)
-    {
-        throw "Development dependency installation failed with exit code $LASTEXITCODE"
     }
 }
 

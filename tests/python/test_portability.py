@@ -22,14 +22,8 @@ class PortabilityTests(unittest.TestCase):
             data = tomllib.load(stream)
         self.assertEqual(data["project"]["requires-python"], ">=3.11,<3.13")
 
-    def test_runtime_lock_has_no_unpinned_packages(self) -> None:
-        lines = (TOOL_ROOT / "requirements.lock").read_text(encoding="utf-8").splitlines()
-        requirements = [line.strip() for line in lines if line.strip() and not line.lstrip().startswith("#")]
-        for requirement in requirements:
-            self.assertIn("==", requirement)
-
-    def test_dev_lock_has_no_unpinned_packages(self) -> None:
-        lines = (TOOL_ROOT / "requirements-dev.lock").read_text(encoding="utf-8").splitlines()
+    def test_requirements_have_no_unpinned_packages(self) -> None:
+        lines = (TOOL_ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines()
         requirements = [line.strip() for line in lines if line.strip() and not line.lstrip().startswith("#")]
         for requirement in requirements:
             self.assertIn("==", requirement)

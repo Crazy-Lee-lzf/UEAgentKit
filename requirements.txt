@@ -1,0 +1,2 @@
+# Exact runtime dependency list used by scripts/setup_python.ps1.
+# Intentionally empty: the current Python runtime uses only the Python 3.11+ standard library.

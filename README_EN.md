@@ -33,8 +33,6 @@ Exports can be inspected directly or imported into SQLite for CLI, scripts, and 
 - Build an incremental SQLite/FTS5 project index with forward and reverse reference queries.
 - Support Unicode paths, localized content, and offline environments.
 
-See [`docs/CURRENT_STATUS.md`](docs/CURRENT_STATUS.md) for the complete implementation and validation status.
-
 ## Quick start
 
 ### Requirements
@@ -99,9 +97,7 @@ Output\
 ## Documentation
 
 - [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md): build, installation, and usage.
-- [`docs/CURRENT_STATUS.md`](docs/CURRENT_STATUS.md): current capabilities and validation results.
 - [`docs/AI_USAGE.md`](docs/AI_USAGE.md): using exports and the index with AI tools.
-- [`docs/ROADMAP.md`](docs/ROADMAP.md): public development roadmap.
 - [`spec/BPCTX_FORMAT.md`](spec/BPCTX_FORMAT.md): BPCTX/1 format specification.
 
 See [`docs/README.md`](docs/README.md) for the complete documentation index.

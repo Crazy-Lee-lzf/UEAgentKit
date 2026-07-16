@@ -168,16 +168,9 @@ H|BPCTX|1|...
 
 - Manifest 中 `Success` 和 `Failure` 数量符合预期。
 
-## 9. 当前写入能力
+## 9. 写入行为
 
-当前公开版本只读。尚未提供：
-
-- Patch Commandlet。
-- Dry Run 修改。
-- Blueprint Commit。
-- Rollback。
-
-正式写入接口完成后，本文件会补充 Patch、验证和保存命令。当前能力边界以 `CURRENT_STATUS.md` 为准。
+当前公开版本仅执行只读导出、索引和查询，不会修改或保存项目资产。
 
 ## 10. 清理
 

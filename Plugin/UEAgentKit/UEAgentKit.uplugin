@@ -3,7 +3,7 @@
   "Version": 4,
   "VersionName": "0.2.4",
   "FriendlyName": "UE Agent Kit",
-  "Description": "AI-ready Unreal Engine project inspection, indexing, validation, and automation toolkit.",
+  "Description": "Read-only Unreal Engine Blueprint inspection, semantic export, indexing, and query toolkit.",
   "Category": "Developer Tools",
   "CreatedBy": "UE Agent Kit Contributors",
   "CanContainContent": false,
