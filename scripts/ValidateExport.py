@@ -16,6 +16,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--expect-schema", default="")
     parser.add_argument("--expect-exporter", default="")
     parser.add_argument("--expect-project", default="")
+    parser.add_argument("--require-symbol-kind", action="append", default=[])
     parser.add_argument("--require-reference-kind", action="append", default=[])
     parser.add_argument("--allow-failures", action="store_true")
     return parser.parse_args()
@@ -50,6 +51,7 @@ def validate_pair(
     expected_schema: str,
     expected_exporter: str,
     expected_project: str,
+    required_symbol_kinds: set[str],
     required_reference_kinds: set[str],
 ) -> dict[str, Any]:
     errors: list[str] = []
@@ -93,6 +95,11 @@ def validate_pair(
         errors.append("summary.symbols does not match symbols array")
     if summary.get("references") != len(references):
         errors.append("summary.references does not match references array")
+
+    symbol_kinds = collections.Counter(str(item.get("kind", "")) for item in symbols)
+    missing_symbol_kinds = sorted(required_symbol_kinds - set(symbol_kinds))
+    if missing_symbol_kinds:
+        errors.append(f"missing required symbol kinds: {', '.join(missing_symbol_kinds)}")
 
     reference_kinds = collections.Counter(str(item.get("kind", "")) for item in references)
     missing_kinds = sorted(required_reference_kinds - set(reference_kinds))
@@ -159,7 +166,7 @@ def validate_pair(
         "projectName": project_name,
         "revision": revision_value,
         "symbols": len(symbols),
-        "symbolKinds": dict(collections.Counter(str(item.get("kind", "")) for item in symbols)),
+        "symbolKinds": dict(symbol_kinds),
         "references": len(references),
         "referenceKinds": dict(reference_kinds),
         "bpctxLines": len(lines),
@@ -204,7 +211,8 @@ def main() -> int:
         for path in bpctx_files
     }
     validations: list[dict[str, Any]] = []
-    required_kinds = set(args.require_reference_kind)
+    required_symbol_kinds = set(args.require_symbol_kind)
+    required_reference_kinds = set(args.require_reference_kind)
     for canonical_path in canonical_files:
         key = canonical_path.relative_to(canonical_root).with_suffix("").as_posix()
         bpctx_path = bpctx_by_key.get(key)
@@ -217,7 +225,8 @@ def main() -> int:
             args.expect_schema,
             args.expect_exporter,
             args.expect_project,
-            required_kinds,
+            required_symbol_kinds,
+            required_reference_kinds,
         )
         errors.extend(f"{key}: {message}" for message in validation["errors"])
         validations.append(validation)

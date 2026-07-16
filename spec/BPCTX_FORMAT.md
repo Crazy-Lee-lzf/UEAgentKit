@@ -22,7 +22,7 @@ H|BPCTX|1|engine=<engine-version>|profile=<profile>|schema=<canonical-schema>|ex
 示例：
 
 ```text
-H|BPCTX|1|engine=5.6.1|profile=logic|schema=1.1|exporter=0.2.2
+H|BPCTX|1|engine=5.6.1|profile=logic|schema=1.1|exporter=0.2.3
 ```
 
 `BPCTX|1` 是 BPCTX 主版本。新增可选记录或字段不自动提升主版本；发生不兼容的解析规则变化时才提升。
@@ -100,8 +100,13 @@ soft
 
 ```text
 S|s0|asset|BP_Test|stable=asset\p/Game/Test/BP_Test.BP_Test
-S|s1|variable|Health|stable=variable\p/Game/Test/BP_Test.BP_Test\p<guid>|guid=<guid>|owner=s0
+S|s1|variable|Health|stable=variable\p/Game/Test/BP_Test.BP_Test\p<guid>|guid=<guid>|owner=s0|variable-scope=member
+S|s6|variable|Target|stable=variable\p/Game/Test/BP_Test.BP_Test\plocal:RunCheck:Target|guid=<pin-guid>|owner=s5|graph=g1|variable-scope=local|variable-role=parameter|scope-name=RunCheck|parameter-direction=input|parameter-passing=reference|parameter-const=1
+S|s10|variable|ReturnValue|stable=variable\p/Game/Test/BP_Test.BP_Test\plocal:RunCheck:return:ReturnValue|guid=<pin-guid>|owner=s5|graph=g1|variable-scope=local|variable-role=parameter|scope-name=RunCheck|parameter-direction=return|parameter-passing=value|parameter-const=0
 S|s2|graph|EventGraph|stable=graph\p/Game/Test/BP_Test.BP_Test\p<guid>|guid=<guid>|owner=s0|graph=g0
+S|s3|event|ReceiveBeginPlay|stable=event\p/Game/Test/BP_Test.BP_Test\p<node-guid>|guid=<node-guid>|owner=s2|graph=g0|node-guid=<node-guid>|event-kind=override|signature=/Script/Engine.Actor\pReceiveBeginPlay
+S|s4|function-entry|RunCheck|stable=function-entry\p/Game/Test/BP_Test.BP_Test\p<node-guid>|guid=<node-guid>|owner=s5|graph=g1|node-guid=<node-guid>
+S|s8|delegate|OnFinished|stable=delegate\p/Game/Test/BP_Test.BP_Test\p<guid>|guid=<guid>|owner=s0|signature=/Game/Test/BP_Test.SKEL_BP_Test_C\pOnFinished__DelegateSignature|delegate-kind=event-dispatcher|delegate-scope=member|signature-graph=g2|signature-symbol=s9|multicast=1
 ```
 
 第一批 Symbol Kind：
@@ -112,6 +117,9 @@ variable
 component
 function
 graph
+event
+function-entry
+delegate
 ```
 
 字段：
@@ -124,6 +132,20 @@ graph
 - `parent`：组件或其他层级父 Symbol。
 - `class`：组件或相关类型路径。
 - `graph`：对应 BPCTX Graph 短 ID。
+- `node-guid`：Event 或 Function Entry 对应节点 GUID。
+- `event-kind`：Event 子类型，当前为 `custom`、`override` 或 `event`。
+- `signature`：Event 对应的原生函数或 Blueprint Interface 签名路径。
+- `variable-scope`：变量作用域，当前为 `member` 或 `local`。
+- `variable-role`：局部作用域变量角色，当前为 `parameter` 或 `local`。
+- `scope-name`：局部变量或参数所属函数/Graph 名称。
+- `parameter-direction`：参数语义方向，当前为 `input`、`output`、`return` 或 `inout`。
+- `parameter-passing`：参数传递方式，当前为 `value` 或 `reference`。
+- `parameter-const`：参数是否为 Const。
+- `delegate-kind`：Delegate 类型；Blueprint Event Dispatcher 当前为 `event-dispatcher`。
+- `delegate-scope`：Delegate 作用域；当前 Blueprint Event Dispatcher 为 `member`。
+- `signature-graph`、`signature-graph-guid`：Delegate Signature Graph 的短 ID 或完整 GUID。
+- `signature-symbol`：Delegate Signature Graph 对应的 Symbol ID。
+- `multicast`：是否为 Multicast Delegate。
 
 稳定 ID 优先使用 UE 原生 GUID；没有 GUID 时才使用规范化名称回退。
 
@@ -133,8 +155,17 @@ graph
 
 ```text
 D|d0|inherits|s0|class\p/Script/Engine.Actor|stable=...
-D|d1|reads|s3|s1|stable=...|target-kind=variable|name=Health|graph=g0|node=n4
+D|d1|reads|s3|s1|stable=...|target-kind=variable|name=Health|variable-scope=member|graph=g0|node=n4
+D|d3|reads|s7|s6|stable=...|target-kind=variable|name=Target|variable-scope=local|scope-name=RunCheck|graph=g1|node=n8
 D|d2|calls|s3|function\p/Script/Engine.KismetMathLibrary\pLerp|stable=...|target-kind=function|name=Lerp|path=/Script/Engine.KismetMathLibrary:Lerp|graph=g0|node=n7
+D|d4|interface-calls|s3|function\p/Game/Test/BPI_Test.BPI_Test\pActivate|stable=...|target-kind=interface-function|name=Activate|asset=/Game/Test/BPI_Test.BPI_Test|dispatch=message|graph=g0|node=n9
+D|d5|casts|s3|class\p/Script/Engine.Character|stable=...|target-kind=class|name=Character|path=/Script/Engine.Character|source-type=/Script/CoreUObject.Object|cast-mode=impure|success-targets=<node-guid>|failure-targets=<node-guid>|graph=g0|node=n10
+D|d6|delegate-creates|s2|s7|stable=...|target-kind=event|name=HandleFinished|signature=/Game/Test/BP_Test.SKEL_BP_Test_C\pOnFinished__DelegateSignature|delegate-output-nodes=<node-guid>|graph=g0|node=n11
+D|d7|delegate-binds|s2|s8|stable=...|target-kind=delegate|name=OnFinished|delegate-op=bind|handler=s7|handler-kind=event|handler-name=HandleFinished|target-object-nodes=<node-guid>|graph=g0|node=n12
+D|d8|delegate-broadcasts|s2|s8|stable=...|target-kind=delegate|name=OnFinished|delegate-op=broadcast|signature=/Game/Test/BP_Test.SKEL_BP_Test_C\pOnFinished__DelegateSignature|graph=g0|node=n13
+D|d9|depends-hard-package|s0|asset\p/Game/Test/M_Test.M_Test|stable=...|target-kind=asset|name=M_Test|asset=/Game/Test/M_Test.M_Test|path=/Game/Test/M_Test|package=/Game/Test/M_Test|dependency-category=package|dependency-properties=hard,game|dependency-domain=project|hard=1|game=1|build=0|direct=0
+D|d10|depends-soft-package|s0|package\p/Script/Engine|stable=...|target-kind=package|name=Engine|path=/Script/Engine|package=/Script/Engine|dependency-category=package|dependency-properties=soft,editor-only,build|dependency-domain=script|hard=0|game=0|build=1|direct=0
+D|d11|returns|s5|s10|stable=...|target-kind=variable|name=ReturnValue|asset=/Game/Test/BP_Test.BP_Test|parameter-direction=return|parameter-passing=value|value-nodes=<node-guid>|result-node-guid=<node-guid>|parameter-const=0|graph=g1|node=n14
 ```
 
 第一批 Reference Kind：
@@ -144,8 +175,22 @@ inherits
 implements
 reads
 writes
+returns
 calls
+interface-calls
+casts
 macro-calls
+delegate-creates
+delegate-binds
+delegate-assigns
+delegate-unbinds
+delegate-broadcasts
+delegate-clears
+depends-hard-package
+depends-soft-package
+depends-searchable-name
+manages-direct
+manages-indirect
 ```
 
 字段：
@@ -159,18 +204,45 @@ macro-calls
 - `path`：原生函数或对象路径。
 - `graph`：引用所在 Graph 短 ID。
 - `node`：引用所在 Node 短 ID。
+- `variable-scope`：变量引用目标的成员/局部作用域分类。
+- `scope-name`：局部作用域引用所属函数/Graph 名称。
+- `parameter-direction`：返回/输出引用目标的 `output`、`return` 或 `inout` 语义。
+- `parameter-passing`、`parameter-const`：参数传递方式与 Const 属性。
+- `value-nodes`：Function Result 参数输入所连接的上游 Node GUID 列表。
+- `result-node-guid`：生成该 `returns` Reference 的 Function Result Node GUID。
+- `dispatch`：调用分发类型；接口消息当前为 `message`。
+- `source-type`：Dynamic Cast 输入 Pin 的声明类型路径。
+- `cast-mode`：Dynamic Cast 模式，当前为 `pure` 或 `impure`。
+- `success-targets`、`failure-targets`：Cast 成功/失败执行分支连接到的 Node GUID 列表。
+- `signature`：Event 或 Delegate 的签名函数路径。
+- `delegate-op`：Delegate 操作，当前为 `bind`、`assign`、`unbind`、`broadcast`、`clear` 或 `use`。
+- `delegate-owner-class`：声明目标 Delegate Property 的 Class 路径。
+- `target-object-nodes`：提供 Delegate 所属对象的上游 Node GUID 列表。
+- `handler`：Bind/Assign/Unbind 所关联的 Handler Symbol；本文件内优先使用短 ID。
+- `handler-kind`、`handler-name`、`handler-asset`、`handler-path`、`handler-node-guid`：Handler 的类型、名称、资产、函数路径和来源节点。
+- `object-type`、`object-nodes`：Create Delegate 的对象输入声明类型和上游 Node GUID。
+- `delegate-output-nodes`：Create Delegate 输出所连接的目标 Node GUID 列表。
+- `package`、`object`、`value`、`primary-type`：Asset Registry 目标 Identifier 的 Package、Object、Value 和 Primary Asset Type。
+- `dependency-category`：Asset Registry 类别，当前可能为 `package`、`manage` 或 `searchable-name`。
+- `dependency-properties`：逗号分隔的属性，如 `hard,game`、`soft,editor-only,build` 或 `direct`。
+- `dependency-domain`：目标所在域，当前为 `project`、`engine-content`、`script`、`plugin-or-mounted` 或 `external`。
+- `hard`、`game`、`build`、`direct`：Asset Registry Dependency Property 的布尔展开字段。
 - `graph-guid`、`node-guid`：无法映射短 ID 时的回退位置。
 
 Pin 连线仍由 `P` 记录的 `links=` 表达，不生成重复 `D` 记录。
 
 ## 8. Pin 连线
 
-普通 Pin 连线直接放在输出 Pin 上，正常情况下只记录一次：
+普通 Pin 连线直接放在输出 Pin 上，正常情况下只记录一次。Pin 短 ID 按 Canonical Pin 顺序生成，因此不受 UE 瞬态 Pin GUID 影响：
 
 ```text
 P|n0.p1|out|exec|then|links=n1.p0
 P|n0.p2|out|object</Script/Engine.Actor>|OtherActor|links=n2.p3
 ```
+
+Canonical 默认保留 UE 原生 Pin GUID。对于已确认会在每次加载时重建 GUID 的瞬态 Pin，Exporter 可以使用由 Node GUID、方向和 Pin 名称派生的确定性 GUID；当前仅应用于 `K2Node_PromotableOperator` 的隐藏、无类型、无连接 `ErrorTolerance` Pin。
+
+反射属性文本中由 UE 在加载进程内生成的 `/Engine/Transient.PropertyBag_<hex>` 对象名必须归一化为 `/Engine/Transient.PropertyBag_<transient>`。该规则只处理 `/Engine/Transient` 下带十六进制随机后缀的 Property Bag，不影响项目资产路径、持久对象名或属性载荷。
 
 ## 9. 推荐输出顺序
 
@@ -208,7 +280,7 @@ asset.defaults.bpctx
 ## 11. 示例
 
 ```text
-H|BPCTX|1|engine=5.6.1|profile=logic|schema=1.1|exporter=0.2.2
+H|BPCTX|1|engine=5.6.1|profile=logic|schema=1.1|exporter=0.2.3
 A|a0|/Game/Test/BP_Actor.BP_Actor|normal|parent=/Script/Engine.Actor|generated=/Game/Test/BP_Actor.BP_Actor_C
 R|sha256:0123...|available=1|dirty=0|guid=...|size=20480|mtime=2026-07-15T12:00:00.000Z|sha256=0123...
 G|g0|EventGraph|uber|schema=/Script/BlueprintGraph.EdGraphSchema_K2

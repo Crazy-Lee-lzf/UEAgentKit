@@ -10,10 +10,12 @@
 #include "Engine/SCS_Node.h"
 #include "Engine/SimpleConstructionScript.h"
 #include "HAL/FileManager.h"
+#include "K2Node_PromotableOperator.h"
 #include "Misc/EngineVersion.h"
 #include "Misc/App.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Misc/SecureHash.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "UObject/FieldIterator.h"
@@ -23,7 +25,7 @@
 namespace BlueprintContextExporterPrivate
 {
 	static constexpr const TCHAR* SchemaVersion = TEXT("1.1");
-	static constexpr const TCHAR* ExporterVersion = TEXT("0.2.2");
+	static constexpr const TCHAR* ExporterVersion = TEXT("0.2.3");
 
 	FString GuidToString(const FGuid& Guid)
 	{
@@ -33,6 +35,50 @@ namespace BlueprintContextExporterPrivate
 	FString ObjectPath(const UObject* Object)
 	{
 		return Object ? Object->GetPathName() : FString();
+	}
+
+	bool NeedsDerivedPinId(const UEdGraphPin* Pin)
+	{
+		const UEdGraphNode* Node = Pin ? Pin->GetOwningNode() : nullptr;
+		return Pin
+			&& Node
+			&& Node->IsA<UK2Node_PromotableOperator>()
+			&& Pin->PinName == TEXT("ErrorTolerance")
+			&& Pin->bHidden
+			&& Pin->LinkedTo.IsEmpty()
+			&& Pin->PinType.PinCategory.IsNone()
+			&& Pin->DefaultValue.IsEmpty()
+			&& !Pin->DefaultObject;
+	}
+
+	FString ExportPinId(const UEdGraphPin* Pin)
+	{
+		if (!Pin)
+		{
+			return FString();
+		}
+
+		if (!NeedsDerivedPinId(Pin))
+		{
+			return GuidToString(Pin->PinId);
+		}
+
+		const UEdGraphNode* Node = Pin->GetOwningNode();
+		const FString StableKey = FString::Printf(
+			TEXT("%s|%s|%s|transient-promotable-pin"),
+			*GuidToString(Node ? Node->NodeGuid : FGuid()),
+			Pin->Direction == EGPD_Input ? TEXT("input") : TEXT("output"),
+			*Pin->PinName.ToString());
+		const FString Digest = FMD5::HashAnsiString(*StableKey).ToLower();
+		return Digest.Len() == 32
+			? FString::Printf(
+				TEXT("%s-%s-%s-%s-%s"),
+				*Digest.Mid(0, 8),
+				*Digest.Mid(8, 4),
+				*Digest.Mid(12, 4),
+				*Digest.Mid(16, 4),
+				*Digest.Mid(20, 12))
+			: GuidToString(Pin->PinId);
 	}
 
 	FString BlueprintTypeToString(const EBlueprintType Type)
@@ -140,6 +186,44 @@ namespace BlueprintContextExporterPrivate
 		return BaseType;
 	}
 
+	FString NormalizeTransientPropertyBagNames(FString Value)
+	{
+		static const FString Prefix = TEXT("/Engine/Transient.PropertyBag_");
+		static const FString Marker = TEXT("<transient>");
+		int32 SearchFrom = 0;
+		while (SearchFrom < Value.Len())
+		{
+			const int32 PrefixIndex = Value.Find(
+				Prefix,
+				ESearchCase::CaseSensitive,
+				ESearchDir::FromStart,
+				SearchFrom);
+			if (PrefixIndex == INDEX_NONE)
+			{
+				break;
+			}
+
+			const int32 SuffixStart = PrefixIndex + Prefix.Len();
+			int32 SuffixEnd = SuffixStart;
+			while (SuffixEnd < Value.Len() && FChar::IsHexDigit(Value[SuffixEnd]))
+			{
+				++SuffixEnd;
+			}
+
+			if (SuffixEnd > SuffixStart)
+			{
+				Value.RemoveAt(SuffixStart, SuffixEnd - SuffixStart, EAllowShrinking::No);
+				Value.InsertAt(SuffixStart, Marker);
+				SearchFrom = SuffixStart + Marker.Len();
+			}
+			else
+			{
+				SearchFrom = SuffixStart;
+			}
+		}
+		return Value;
+	}
+
 	FString ExportPropertyValue(const FProperty* Property, const void* Container, UObject* ParentObject)
 	{
 		if (!Property || !Container)
@@ -150,6 +234,7 @@ namespace BlueprintContextExporterPrivate
 		const void* ValuePtr = Property->ContainerPtrToValuePtr<void>(Container);
 		FString Value;
 		Property->ExportTextItem_Direct(Value, ValuePtr, nullptr, ParentObject, PPF_None);
+		Value = NormalizeTransientPropertyBagNames(MoveTemp(Value));
 		if (Value.Len() > 65536)
 		{
 			Value.LeftInline(65536, EAllowShrinking::No);
@@ -362,7 +447,7 @@ namespace BlueprintContextExporterPrivate
 		}
 
 		++Result.PinCount;
-		PinObject->SetStringField(TEXT("id"), GuidToString(Pin->PinId));
+		PinObject->SetStringField(TEXT("id"), ExportPinId(Pin));
 		PinObject->SetStringField(TEXT("name"), Pin->PinName.ToString());
 		PinObject->SetStringField(TEXT("friendlyName"), Pin->PinFriendlyName.ToString());
 		PinObject->SetStringField(TEXT("direction"), Pin->Direction == EGPD_Input ? TEXT("input") : TEXT("output"));
@@ -390,7 +475,7 @@ namespace BlueprintContextExporterPrivate
 			LinkObject->SetStringField(
 				TEXT("targetNodeGuid"),
 				LinkedPin->GetOwningNode() ? GuidToString(LinkedPin->GetOwningNode()->NodeGuid) : FString());
-			LinkObject->SetStringField(TEXT("targetPinId"), GuidToString(LinkedPin->PinId));
+			LinkObject->SetStringField(TEXT("targetPinId"), ExportPinId(LinkedPin));
 			LinkObject->SetStringField(TEXT("targetPinName"), LinkedPin->PinName.ToString());
 			Links.Add(MakeShared<FJsonValueObject>(LinkObject));
 
@@ -1162,6 +1247,20 @@ FString FBlueprintContextExporter::BuildBpctx(const TSharedRef<FJsonObject>& Roo
 			FString ParentSymbolId;
 			FString ClassPath;
 			FString GraphGuid;
+			FString NodeGuid;
+			FString EventKind;
+			FString SignaturePath;
+			FString VariableScope;
+			FString VariableRole;
+			FString ScopeName;
+			FString ParameterDirection;
+			FString ParameterPassing;
+			bool bParameterConst = false;
+			FString DelegateKind;
+			FString DelegateScope;
+			FString SignatureGraphGuid;
+			FString SignatureGraphSymbolId;
+			bool bMulticast = false;
 			SymbolObject->TryGetStringField(TEXT("id"), StableId);
 			SymbolObject->TryGetStringField(TEXT("kind"), Kind);
 			SymbolObject->TryGetStringField(TEXT("name"), Name);
@@ -1171,6 +1270,20 @@ FString FBlueprintContextExporter::BuildBpctx(const TSharedRef<FJsonObject>& Roo
 			SymbolObject->TryGetStringField(TEXT("parentSymbolId"), ParentSymbolId);
 			SymbolObject->TryGetStringField(TEXT("class"), ClassPath);
 			SymbolObject->TryGetStringField(TEXT("graphGuid"), GraphGuid);
+			SymbolObject->TryGetStringField(TEXT("nodeGuid"), NodeGuid);
+			SymbolObject->TryGetStringField(TEXT("eventKind"), EventKind);
+			SymbolObject->TryGetStringField(TEXT("signaturePath"), SignaturePath);
+			SymbolObject->TryGetStringField(TEXT("variableScope"), VariableScope);
+			SymbolObject->TryGetStringField(TEXT("variableRole"), VariableRole);
+			SymbolObject->TryGetStringField(TEXT("scopeName"), ScopeName);
+			SymbolObject->TryGetStringField(TEXT("parameterDirection"), ParameterDirection);
+			SymbolObject->TryGetStringField(TEXT("parameterPassing"), ParameterPassing);
+			SymbolObject->TryGetBoolField(TEXT("parameterConst"), bParameterConst);
+			SymbolObject->TryGetStringField(TEXT("delegateKind"), DelegateKind);
+			SymbolObject->TryGetStringField(TEXT("delegateScope"), DelegateScope);
+			SymbolObject->TryGetStringField(TEXT("signatureGraphGuid"), SignatureGraphGuid);
+			SymbolObject->TryGetStringField(TEXT("signatureGraphSymbolId"), SignatureGraphSymbolId);
+			SymbolObject->TryGetBoolField(TEXT("multicast"), bMulticast);
 
 			const FString ShortId = SymbolShortIdByStableId.FindRef(StableId);
 			TArray<FString> Fields = {
@@ -1200,6 +1313,38 @@ FString FBlueprintContextExporter::BuildBpctx(const TSharedRef<FJsonObject>& Roo
 			{
 				Fields.Add(TEXT("graph=") + EscapeBpctx(*GraphShortId));
 			}
+			AddOptionalField(Fields, TEXT("node-guid"), NodeGuid);
+			AddOptionalField(Fields, TEXT("event-kind"), EventKind);
+			AddOptionalField(Fields, TEXT("signature"), SignaturePath);
+			AddOptionalField(Fields, TEXT("variable-scope"), VariableScope);
+			AddOptionalField(Fields, TEXT("variable-role"), VariableRole);
+			AddOptionalField(Fields, TEXT("scope-name"), ScopeName);
+			AddOptionalField(Fields, TEXT("parameter-direction"), ParameterDirection);
+			AddOptionalField(Fields, TEXT("parameter-passing"), ParameterPassing);
+			if (!ParameterDirection.IsEmpty())
+			{
+				Fields.Add(FString::Printf(TEXT("parameter-const=%d"), bParameterConst ? 1 : 0));
+			}
+			AddOptionalField(Fields, TEXT("delegate-kind"), DelegateKind);
+			AddOptionalField(Fields, TEXT("delegate-scope"), DelegateScope);
+			if (const FString* SignatureGraphShortId = GraphShortIdByGuid.Find(SignatureGraphGuid))
+			{
+				Fields.Add(TEXT("signature-graph=") + EscapeBpctx(*SignatureGraphShortId));
+			}
+			else
+			{
+				AddOptionalField(Fields, TEXT("signature-graph-guid"), SignatureGraphGuid);
+			}
+			if (!SignatureGraphSymbolId.IsEmpty())
+			{
+				const FString SignatureGraphSymbolShortId = SymbolShortIdByStableId.FindRef(SignatureGraphSymbolId);
+				Fields.Add(TEXT("signature-symbol=") + EscapeBpctx(
+					SignatureGraphSymbolShortId.IsEmpty() ? SignatureGraphSymbolId : SignatureGraphSymbolShortId));
+			}
+			if (Kind == TEXT("delegate"))
+			{
+				Fields.Add(FString::Printf(TEXT("multicast=%d"), bMulticast ? 1 : 0));
+			}
 			AppendBpctxLine(Output, Fields);
 		}
 	}
@@ -1225,6 +1370,42 @@ FString FBlueprintContextExporter::BuildBpctx(const TSharedRef<FJsonObject>& Roo
 			FString TargetPath;
 			FString GraphGuid;
 			FString NodeGuid;
+			FString VariableScope;
+			FString ScopeName;
+			FString ParameterDirection;
+			FString ParameterPassing;
+			FString ValueNodeGuids;
+			FString ResultNodeGuid;
+			bool bParameterConst = false;
+			FString DispatchKind;
+			FString SourceTypePath;
+			FString CastMode;
+			FString SuccessNodeGuids;
+			FString FailureNodeGuids;
+			FString DelegateSignaturePath;
+			FString DelegateOperation;
+			FString DelegateOwnerClassPath;
+			FString TargetObjectNodeGuids;
+			FString HandlerSymbolId;
+			FString HandlerKind;
+			FString HandlerName;
+			FString HandlerAssetPath;
+			FString HandlerPath;
+			FString HandlerNodeGuid;
+			FString ObjectTypePath;
+			FString ObjectNodeGuids;
+			FString DelegateOutputNodeGuids;
+			FString TargetPackageName;
+			FString TargetObjectName;
+			FString TargetValueName;
+			FString TargetPrimaryAssetType;
+			FString DependencyCategory;
+			FString DependencyProperties;
+			FString DependencyDomain;
+			bool bDependencyHard = false;
+			bool bDependencyGame = false;
+			bool bDependencyBuild = false;
+			bool bDependencyDirect = false;
 			ReferenceObject->TryGetStringField(TEXT("id"), StableId);
 			ReferenceObject->TryGetStringField(TEXT("kind"), Kind);
 			ReferenceObject->TryGetStringField(TEXT("sourceSymbolId"), SourceSymbolId);
@@ -1235,6 +1416,42 @@ FString FBlueprintContextExporter::BuildBpctx(const TSharedRef<FJsonObject>& Roo
 			ReferenceObject->TryGetStringField(TEXT("targetPath"), TargetPath);
 			ReferenceObject->TryGetStringField(TEXT("graphGuid"), GraphGuid);
 			ReferenceObject->TryGetStringField(TEXT("nodeGuid"), NodeGuid);
+			ReferenceObject->TryGetStringField(TEXT("variableScope"), VariableScope);
+			ReferenceObject->TryGetStringField(TEXT("scopeName"), ScopeName);
+			ReferenceObject->TryGetStringField(TEXT("parameterDirection"), ParameterDirection);
+			ReferenceObject->TryGetStringField(TEXT("parameterPassing"), ParameterPassing);
+			ReferenceObject->TryGetStringField(TEXT("valueNodeGuids"), ValueNodeGuids);
+			ReferenceObject->TryGetStringField(TEXT("resultNodeGuid"), ResultNodeGuid);
+			ReferenceObject->TryGetBoolField(TEXT("parameterConst"), bParameterConst);
+			ReferenceObject->TryGetStringField(TEXT("dispatchKind"), DispatchKind);
+			ReferenceObject->TryGetStringField(TEXT("sourceTypePath"), SourceTypePath);
+			ReferenceObject->TryGetStringField(TEXT("castMode"), CastMode);
+			ReferenceObject->TryGetStringField(TEXT("successNodeGuids"), SuccessNodeGuids);
+			ReferenceObject->TryGetStringField(TEXT("failureNodeGuids"), FailureNodeGuids);
+			ReferenceObject->TryGetStringField(TEXT("signaturePath"), DelegateSignaturePath);
+			ReferenceObject->TryGetStringField(TEXT("delegateOperation"), DelegateOperation);
+			ReferenceObject->TryGetStringField(TEXT("delegateOwnerClassPath"), DelegateOwnerClassPath);
+			ReferenceObject->TryGetStringField(TEXT("targetObjectNodeGuids"), TargetObjectNodeGuids);
+			ReferenceObject->TryGetStringField(TEXT("handlerSymbolId"), HandlerSymbolId);
+			ReferenceObject->TryGetStringField(TEXT("handlerKind"), HandlerKind);
+			ReferenceObject->TryGetStringField(TEXT("handlerName"), HandlerName);
+			ReferenceObject->TryGetStringField(TEXT("handlerAssetPath"), HandlerAssetPath);
+			ReferenceObject->TryGetStringField(TEXT("handlerPath"), HandlerPath);
+			ReferenceObject->TryGetStringField(TEXT("handlerNodeGuid"), HandlerNodeGuid);
+			ReferenceObject->TryGetStringField(TEXT("objectTypePath"), ObjectTypePath);
+			ReferenceObject->TryGetStringField(TEXT("objectNodeGuids"), ObjectNodeGuids);
+			ReferenceObject->TryGetStringField(TEXT("delegateOutputNodeGuids"), DelegateOutputNodeGuids);
+			ReferenceObject->TryGetStringField(TEXT("targetPackageName"), TargetPackageName);
+			ReferenceObject->TryGetStringField(TEXT("targetObjectName"), TargetObjectName);
+			ReferenceObject->TryGetStringField(TEXT("targetValueName"), TargetValueName);
+			ReferenceObject->TryGetStringField(TEXT("targetPrimaryAssetType"), TargetPrimaryAssetType);
+			ReferenceObject->TryGetStringField(TEXT("dependencyCategory"), DependencyCategory);
+			ReferenceObject->TryGetStringField(TEXT("dependencyProperties"), DependencyProperties);
+			ReferenceObject->TryGetStringField(TEXT("dependencyDomain"), DependencyDomain);
+			ReferenceObject->TryGetBoolField(TEXT("hard"), bDependencyHard);
+			ReferenceObject->TryGetBoolField(TEXT("game"), bDependencyGame);
+			ReferenceObject->TryGetBoolField(TEXT("build"), bDependencyBuild);
+			ReferenceObject->TryGetBoolField(TEXT("direct"), bDependencyDirect);
 
 			const FString SourceShortId = SymbolShortIdByStableId.FindRef(SourceSymbolId);
 			const FString TargetShortId = SymbolShortIdByStableId.FindRef(TargetSymbolId);
@@ -1250,6 +1467,52 @@ FString FBlueprintContextExporter::BuildBpctx(const TSharedRef<FJsonObject>& Roo
 			AddOptionalField(Fields, TEXT("name"), TargetName);
 			AddOptionalField(Fields, TEXT("asset"), TargetAssetPath);
 			AddOptionalField(Fields, TEXT("path"), TargetPath);
+			AddOptionalField(Fields, TEXT("variable-scope"), VariableScope);
+			AddOptionalField(Fields, TEXT("scope-name"), ScopeName);
+			AddOptionalField(Fields, TEXT("parameter-direction"), ParameterDirection);
+			AddOptionalField(Fields, TEXT("parameter-passing"), ParameterPassing);
+			AddOptionalField(Fields, TEXT("value-nodes"), ValueNodeGuids);
+			AddOptionalField(Fields, TEXT("result-node-guid"), ResultNodeGuid);
+			if (!ParameterDirection.IsEmpty())
+			{
+				Fields.Add(FString::Printf(TEXT("parameter-const=%d"), bParameterConst ? 1 : 0));
+			}
+			AddOptionalField(Fields, TEXT("dispatch"), DispatchKind);
+			AddOptionalField(Fields, TEXT("source-type"), SourceTypePath);
+			AddOptionalField(Fields, TEXT("cast-mode"), CastMode);
+			AddOptionalField(Fields, TEXT("success-targets"), SuccessNodeGuids);
+			AddOptionalField(Fields, TEXT("failure-targets"), FailureNodeGuids);
+			AddOptionalField(Fields, TEXT("signature"), DelegateSignaturePath);
+			AddOptionalField(Fields, TEXT("delegate-op"), DelegateOperation);
+			AddOptionalField(Fields, TEXT("delegate-owner-class"), DelegateOwnerClassPath);
+			AddOptionalField(Fields, TEXT("target-object-nodes"), TargetObjectNodeGuids);
+			if (!HandlerSymbolId.IsEmpty())
+			{
+				const FString HandlerShortId = SymbolShortIdByStableId.FindRef(HandlerSymbolId);
+				Fields.Add(TEXT("handler=") + EscapeBpctx(HandlerShortId.IsEmpty() ? HandlerSymbolId : HandlerShortId));
+			}
+			AddOptionalField(Fields, TEXT("handler-kind"), HandlerKind);
+			AddOptionalField(Fields, TEXT("handler-name"), HandlerName);
+			AddOptionalField(Fields, TEXT("handler-asset"), HandlerAssetPath);
+			AddOptionalField(Fields, TEXT("handler-path"), HandlerPath);
+			AddOptionalField(Fields, TEXT("handler-node-guid"), HandlerNodeGuid);
+			AddOptionalField(Fields, TEXT("object-type"), ObjectTypePath);
+			AddOptionalField(Fields, TEXT("object-nodes"), ObjectNodeGuids);
+			AddOptionalField(Fields, TEXT("delegate-output-nodes"), DelegateOutputNodeGuids);
+			if (!DependencyCategory.IsEmpty())
+			{
+				AddOptionalField(Fields, TEXT("package"), TargetPackageName);
+				AddOptionalField(Fields, TEXT("object"), TargetObjectName);
+				AddOptionalField(Fields, TEXT("value"), TargetValueName);
+				AddOptionalField(Fields, TEXT("primary-type"), TargetPrimaryAssetType);
+				AddOptionalField(Fields, TEXT("dependency-category"), DependencyCategory);
+				AddOptionalField(Fields, TEXT("dependency-properties"), DependencyProperties);
+				AddOptionalField(Fields, TEXT("dependency-domain"), DependencyDomain);
+				Fields.Add(FString::Printf(TEXT("hard=%d"), bDependencyHard ? 1 : 0));
+				Fields.Add(FString::Printf(TEXT("game=%d"), bDependencyGame ? 1 : 0));
+				Fields.Add(FString::Printf(TEXT("build=%d"), bDependencyBuild ? 1 : 0));
+				Fields.Add(FString::Printf(TEXT("direct=%d"), bDependencyDirect ? 1 : 0));
+			}
 			if (const FString* GraphShortId = GraphShortIdByGuid.Find(GraphGuid))
 			{
 				Fields.Add(TEXT("graph=") + EscapeBpctx(*GraphShortId));

@@ -10,8 +10,13 @@ UE Agent Kit 是一套面向 Unreal Engine 的开源 AI 开发工具。它通过
 
 - 读取 Blueprint 的类、父类、接口、变量、默认值、组件和函数。
 - 导出 Graph、Node、Pin 及完整连接关系。
-- 识别继承、接口实现、变量读写、函数调用和宏调用。
+- 识别继承、接口实现、变量读写、函数/宏调用、接口消息、Dynamic Cast 和 Delegate 关系。
+- 将 Event Dispatcher、Event、Function Entry、成员变量与局部变量建模为可查询 Symbol。
+- 区分函数输入、输出、返回和 InOut 参数，以及 Value/Reference 与 Const 属性，并记录返回值上游来源。
+- 解析 Delegate 创建、绑定、解绑和广播，并关联目标 Dispatcher 与 Handler。
+- 导出 Asset Registry 的 Hard/Soft Package 依赖及 Game、EditorOnly、Build 等属性，并支持反向依赖查询。
 - 生成稳定的 Asset Revision 与 SHA-256 内容指纹。
+- 归一化 UE 加载期生成的瞬态 Pin ID 与 Property Bag 对象名，使 Canonical JSON 和 BPCTX 可跨编辑器进程稳定复现。
 - 输出 Canonical JSON、BPCTX/1 和 Manifest。
 - 使用 SQLite/FTS 建立项目级索引。
 - 通过 CLI 检索资产、符号和引用关系。

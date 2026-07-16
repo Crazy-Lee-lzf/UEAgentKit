@@ -10,8 +10,13 @@ The current implementation is still read-only and focused on Blueprint analysis.
 
 - Read Blueprint classes, parents, interfaces, variables, defaults, components, and functions.
 - Export graphs, nodes, pins, and complete link relationships.
-- Detect inheritance, interface implementation, variable reads/writes, function calls, and macro calls.
+- Detect inheritance, interface implementation, variable reads/writes, function and macro calls, interface messages, dynamic casts, and delegate relationships.
+- Model event dispatchers, events, function entries, member variables, and local variables as queryable symbols.
+- Distinguish input, output, return, and in-out parameters, including value/reference and const semantics, and record upstream return-value sources.
+- Resolve delegate creation, binding, unbinding, and broadcasting, including dispatcher and handler relationships.
+- Export Asset Registry hard and soft package dependencies with Game, EditorOnly, Build, and related properties, with reverse dependency queries.
 - Generate stable asset revisions and SHA-256 fingerprints.
+- Normalize UE load-time transient pin IDs and Property Bag object names so Canonical JSON and BPCTX remain reproducible across editor processes.
 - Export Canonical JSON, BPCTX/1, and manifests.
 - Build a SQLite/FTS project index.
 - Search assets, symbols, and references through the CLI.
