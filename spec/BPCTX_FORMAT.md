@@ -22,7 +22,7 @@ H|BPCTX|1|engine=<engine-version>|profile=<profile>|schema=<canonical-schema>|ex
 示例：
 
 ```text
-H|BPCTX|1|engine=5.6.1|profile=logic|schema=1.1|exporter=0.2.3
+H|BPCTX|1|engine=5.6.1|profile=logic|schema=1.1|exporter=0.2.4
 ```
 
 `BPCTX|1` 是 BPCTX 主版本。新增可选记录或字段不自动提升主版本；发生不兼容的解析规则变化时才提升。
@@ -137,6 +137,10 @@ delegate
 - `signature`：Event 对应的原生函数或 Blueprint Interface 签名路径。
 - `variable-scope`：变量作用域，当前为 `member` 或 `local`。
 - `variable-role`：局部作用域变量角色，当前为 `parameter` 或 `local`。
+- `variable-type`：变量 Pin Category，例如 `softobject`、`softclass` 或 `struct`。
+- `declared-type`：变量声明的 UObject/Class/Struct 类型路径。
+- `default-target`：Soft Object/Class 变量默认值指向的完整软路径。
+- `soft-reference-kind`：软引用种类，当前为 `object` 或 `class`。
 - `scope-name`：局部变量或参数所属函数/Graph 名称。
 - `parameter-direction`：参数语义方向，当前为 `input`、`output`、`return` 或 `inout`。
 - `parameter-passing`：参数传递方式，当前为 `value` 或 `reference`。
@@ -165,7 +169,10 @@ D|d7|delegate-binds|s2|s8|stable=...|target-kind=delegate|name=OnFinished|delega
 D|d8|delegate-broadcasts|s2|s8|stable=...|target-kind=delegate|name=OnFinished|delegate-op=broadcast|signature=/Game/Test/BP_Test.SKEL_BP_Test_C\pOnFinished__DelegateSignature|graph=g0|node=n13
 D|d9|depends-hard-package|s0|asset\p/Game/Test/M_Test.M_Test|stable=...|target-kind=asset|name=M_Test|asset=/Game/Test/M_Test.M_Test|path=/Game/Test/M_Test|package=/Game/Test/M_Test|dependency-category=package|dependency-properties=hard,game|dependency-domain=project|hard=1|game=1|build=0|direct=0
 D|d10|depends-soft-package|s0|package\p/Script/Engine|stable=...|target-kind=package|name=Engine|path=/Script/Engine|package=/Script/Engine|dependency-category=package|dependency-properties=soft,editor-only,build|dependency-domain=script|hard=0|game=0|build=1|direct=0
-D|d11|returns|s5|s10|stable=...|target-kind=variable|name=ReturnValue|asset=/Game/Test/BP_Test.BP_Test|parameter-direction=return|parameter-passing=value|value-nodes=<node-guid>|result-node-guid=<node-guid>|parameter-const=0|graph=g1|node=n14
+D|d11|soft-object-reference|s1|asset\p/Game/Test/BP_Target.BP_Target|stable=...|target-kind=asset|name=BP_Target|asset=/Game/Test/BP_Target.BP_Target|path=/Game/Test/BP_Target.BP_Target|soft-reference-kind=object|source-variable=SoftTarget|declared-type=/Script/CoreUObject.Object|dependency-domain=project
+D|d12|manages-direct|asset\p/Game/Test/PAL_Test.PAL_Test|s0|stable=...|target-kind=asset|name=BP_Test|asset=/Game/Test/BP_Test.BP_Test|manager-name=PAL_Test|manager-asset=/Game/Test/PAL_Test.PAL_Test|manager-package=/Game/Test/PAL_Test|manager-resolution=primary-asset-label-explicit|incoming=1|dependency-category=manage|dependency-properties=direct|direct=1
+D|d13|depends-searchable-name|s0|asset\p/Game/Test/DT_Test.DT_Test|stable=...|target-kind=asset|name=Row_Alpha|asset=/Game/Test/DT_Test.DT_Test|path=/Game/Test/DT_Test.DT_Test::Row_Alpha|package=/Game/Test/DT_Test|object=DT_Test|value=Row_Alpha|dependency-category=searchable-name
+D|d14|returns|s5|s10|stable=...|target-kind=variable|name=ReturnValue|asset=/Game/Test/BP_Test.BP_Test|parameter-direction=return|parameter-passing=value|value-nodes=<node-guid>|result-node-guid=<node-guid>|parameter-const=0|graph=g1|node=n14
 ```
 
 第一批 Reference Kind：
@@ -188,6 +195,8 @@ delegate-broadcasts
 delegate-clears
 depends-hard-package
 depends-soft-package
+soft-object-reference
+soft-class-reference
 depends-searchable-name
 manages-direct
 manages-indirect
@@ -222,6 +231,12 @@ manages-indirect
 - `handler-kind`、`handler-name`、`handler-asset`、`handler-path`、`handler-node-guid`：Handler 的类型、名称、资产、函数路径和来源节点。
 - `object-type`、`object-nodes`：Create Delegate 的对象输入声明类型和上游 Node GUID。
 - `delegate-output-nodes`：Create Delegate 输出所连接的目标 Node GUID 列表。
+- `soft-reference-kind`：变量级软引用种类，当前为 `object` 或 `class`。
+- `source-variable`：产生软引用的成员变量名。
+- `declared-type`：软引用变量声明的基础 UObject/Class 类型路径。
+- `manager-name`、`manager-asset`、`manager-package`、`manager-path`：Manage 边的管理者身份。
+- `manager-resolution`：Manage 边解析来源，例如 `asset-registry` 或 `primary-asset-label-explicit`。
+- `incoming`：该记录是否是从当前资产的 Referencer 方向补充的入向 Manage 边。
 - `package`、`object`、`value`、`primary-type`：Asset Registry 目标 Identifier 的 Package、Object、Value 和 Primary Asset Type。
 - `dependency-category`：Asset Registry 类别，当前可能为 `package`、`manage` 或 `searchable-name`。
 - `dependency-properties`：逗号分隔的属性，如 `hard,game`、`soft,editor-only,build` 或 `direct`。
@@ -280,7 +295,7 @@ asset.defaults.bpctx
 ## 11. 示例
 
 ```text
-H|BPCTX|1|engine=5.6.1|profile=logic|schema=1.1|exporter=0.2.3
+H|BPCTX|1|engine=5.6.1|profile=logic|schema=1.1|exporter=0.2.4
 A|a0|/Game/Test/BP_Actor.BP_Actor|normal|parent=/Script/Engine.Actor|generated=/Game/Test/BP_Actor.BP_Actor_C
 R|sha256:0123...|available=1|dirty=0|guid=...|size=20480|mtime=2026-07-15T12:00:00.000Z|sha256=0123...
 G|g0|EventGraph|uber|schema=/Script/BlueprintGraph.EdGraphSchema_K2

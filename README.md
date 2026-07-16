@@ -14,7 +14,8 @@ UE Agent Kit 是一套面向 Unreal Engine 的开源 AI 开发工具。它通过
 - 将 Event Dispatcher、Event、Function Entry、成员变量与局部变量建模为可查询 Symbol。
 - 区分函数输入、输出、返回和 InOut 参数，以及 Value/Reference 与 Const 属性，并记录返回值上游来源。
 - 解析 Delegate 创建、绑定、解绑和广播，并关联目标 Dispatcher 与 Handler。
-- 导出 Asset Registry 的 Hard/Soft Package 依赖及 Game、EditorOnly、Build 等属性，并支持反向依赖查询。
+- 将 Soft Object/Class 成员变量默认值建模为变量级引用，保留声明类型、具体目标和来源变量。
+- 导出 Asset Registry 的 Hard/Soft Package、Manage 和 Searchable Name 依赖及 Game、EditorOnly、Build、Direct 等属性，并支持正向/反向查询。
 - 生成稳定的 Asset Revision 与 SHA-256 内容指纹。
 - 归一化 UE 加载期生成的瞬态 Pin ID 与 Property Bag 对象名，使 Canonical JSON 和 BPCTX 可跨编辑器进程稳定复现。
 - 输出 Canonical JSON、BPCTX/1 和 Manifest。
@@ -111,6 +112,7 @@ scripts\ue-agent.cmd search symbols MaxWalkSpeed
 - [`docs/REFERENCE_POLICY.md`](docs/REFERENCE_POLICY.md)：第三方参考和独立实现规则。
 - [`docs/RELEASE_DISTRIBUTION.md`](docs/RELEASE_DISTRIBUTION.md)：发行包和离线依赖策略。
 - [`spec/BPCTX_FORMAT.md`](spec/BPCTX_FORMAT.md)：BPCTX/1 格式规范。
+- [`tests/fixtures/README.md`](tests/fixtures/README.md)：Soft Reference、Manage 和 Searchable Name 测试资产生成方式。
 
 ## 许可证
 

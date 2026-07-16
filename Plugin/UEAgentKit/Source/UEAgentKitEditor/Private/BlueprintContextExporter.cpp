@@ -25,7 +25,7 @@
 namespace BlueprintContextExporterPrivate
 {
 	static constexpr const TCHAR* SchemaVersion = TEXT("1.1");
-	static constexpr const TCHAR* ExporterVersion = TEXT("0.2.3");
+	static constexpr const TCHAR* ExporterVersion = TEXT("0.2.4");
 
 	FString GuidToString(const FGuid& Guid)
 	{
@@ -1252,6 +1252,10 @@ FString FBlueprintContextExporter::BuildBpctx(const TSharedRef<FJsonObject>& Roo
 			FString SignaturePath;
 			FString VariableScope;
 			FString VariableRole;
+			FString VariableType;
+			FString DeclaredTypePath;
+			FString DefaultTargetPath;
+			FString SoftReferenceKind;
 			FString ScopeName;
 			FString ParameterDirection;
 			FString ParameterPassing;
@@ -1275,6 +1279,10 @@ FString FBlueprintContextExporter::BuildBpctx(const TSharedRef<FJsonObject>& Roo
 			SymbolObject->TryGetStringField(TEXT("signaturePath"), SignaturePath);
 			SymbolObject->TryGetStringField(TEXT("variableScope"), VariableScope);
 			SymbolObject->TryGetStringField(TEXT("variableRole"), VariableRole);
+			SymbolObject->TryGetStringField(TEXT("variableType"), VariableType);
+			SymbolObject->TryGetStringField(TEXT("declaredTypePath"), DeclaredTypePath);
+			SymbolObject->TryGetStringField(TEXT("defaultTargetPath"), DefaultTargetPath);
+			SymbolObject->TryGetStringField(TEXT("softReferenceKind"), SoftReferenceKind);
 			SymbolObject->TryGetStringField(TEXT("scopeName"), ScopeName);
 			SymbolObject->TryGetStringField(TEXT("parameterDirection"), ParameterDirection);
 			SymbolObject->TryGetStringField(TEXT("parameterPassing"), ParameterPassing);
@@ -1318,6 +1326,10 @@ FString FBlueprintContextExporter::BuildBpctx(const TSharedRef<FJsonObject>& Roo
 			AddOptionalField(Fields, TEXT("signature"), SignaturePath);
 			AddOptionalField(Fields, TEXT("variable-scope"), VariableScope);
 			AddOptionalField(Fields, TEXT("variable-role"), VariableRole);
+			AddOptionalField(Fields, TEXT("variable-type"), VariableType);
+			AddOptionalField(Fields, TEXT("declared-type"), DeclaredTypePath);
+			AddOptionalField(Fields, TEXT("default-target"), DefaultTargetPath);
+			AddOptionalField(Fields, TEXT("soft-reference-kind"), SoftReferenceKind);
 			AddOptionalField(Fields, TEXT("scope-name"), ScopeName);
 			AddOptionalField(Fields, TEXT("parameter-direction"), ParameterDirection);
 			AddOptionalField(Fields, TEXT("parameter-passing"), ParameterPassing);
@@ -1402,6 +1414,15 @@ FString FBlueprintContextExporter::BuildBpctx(const TSharedRef<FJsonObject>& Roo
 			FString DependencyCategory;
 			FString DependencyProperties;
 			FString DependencyDomain;
+			FString SoftReferenceKind;
+			FString SourceVariableName;
+			FString DeclaredTypePath;
+			FString ManagerName;
+			FString ManagerAssetPath;
+			FString ManagerPackageName;
+			FString ManagerPath;
+			FString ManagerResolution;
+			bool bIncoming = false;
 			bool bDependencyHard = false;
 			bool bDependencyGame = false;
 			bool bDependencyBuild = false;
@@ -1448,6 +1469,15 @@ FString FBlueprintContextExporter::BuildBpctx(const TSharedRef<FJsonObject>& Roo
 			ReferenceObject->TryGetStringField(TEXT("dependencyCategory"), DependencyCategory);
 			ReferenceObject->TryGetStringField(TEXT("dependencyProperties"), DependencyProperties);
 			ReferenceObject->TryGetStringField(TEXT("dependencyDomain"), DependencyDomain);
+			ReferenceObject->TryGetStringField(TEXT("softReferenceKind"), SoftReferenceKind);
+			ReferenceObject->TryGetStringField(TEXT("sourceVariableName"), SourceVariableName);
+			ReferenceObject->TryGetStringField(TEXT("declaredTypePath"), DeclaredTypePath);
+			ReferenceObject->TryGetStringField(TEXT("managerName"), ManagerName);
+			ReferenceObject->TryGetStringField(TEXT("managerAssetPath"), ManagerAssetPath);
+			ReferenceObject->TryGetStringField(TEXT("managerPackageName"), ManagerPackageName);
+			ReferenceObject->TryGetStringField(TEXT("managerPath"), ManagerPath);
+			ReferenceObject->TryGetStringField(TEXT("managerResolution"), ManagerResolution);
+			ReferenceObject->TryGetBoolField(TEXT("incoming"), bIncoming);
 			ReferenceObject->TryGetBoolField(TEXT("hard"), bDependencyHard);
 			ReferenceObject->TryGetBoolField(TEXT("game"), bDependencyGame);
 			ReferenceObject->TryGetBoolField(TEXT("build"), bDependencyBuild);
@@ -1499,6 +1529,22 @@ FString FBlueprintContextExporter::BuildBpctx(const TSharedRef<FJsonObject>& Roo
 			AddOptionalField(Fields, TEXT("object-type"), ObjectTypePath);
 			AddOptionalField(Fields, TEXT("object-nodes"), ObjectNodeGuids);
 			AddOptionalField(Fields, TEXT("delegate-output-nodes"), DelegateOutputNodeGuids);
+			AddOptionalField(Fields, TEXT("soft-reference-kind"), SoftReferenceKind);
+			AddOptionalField(Fields, TEXT("source-variable"), SourceVariableName);
+			AddOptionalField(Fields, TEXT("declared-type"), DeclaredTypePath);
+			AddOptionalField(Fields, TEXT("manager-name"), ManagerName);
+			AddOptionalField(Fields, TEXT("manager-asset"), ManagerAssetPath);
+			AddOptionalField(Fields, TEXT("manager-package"), ManagerPackageName);
+			AddOptionalField(Fields, TEXT("manager-path"), ManagerPath);
+			AddOptionalField(Fields, TEXT("manager-resolution"), ManagerResolution);
+			if (!ManagerResolution.IsEmpty())
+			{
+				Fields.Add(FString::Printf(TEXT("incoming=%d"), bIncoming ? 1 : 0));
+			}
+			if (DependencyCategory.IsEmpty())
+			{
+				AddOptionalField(Fields, TEXT("dependency-domain"), DependencyDomain);
+			}
 			if (!DependencyCategory.IsEmpty())
 			{
 				AddOptionalField(Fields, TEXT("package"), TargetPackageName);

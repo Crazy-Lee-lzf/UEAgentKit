@@ -4,7 +4,7 @@
 
 ```text
 产品名：UE Agent Kit
-当前版本：0.2.3
+当前版本：0.2.4
 仓库名：UEAgentKit
 UE 插件：UEAgentKit
 编辑器模块：UEAgentKitEditor
@@ -48,6 +48,9 @@ Python：CPython 3.11–3.12
 - Event Dispatcher 作为独立 Delegate Symbol，关联签名 Graph、签名函数和 Multicast 属性。
 - Delegate 创建、绑定、解绑、广播、Assign 和 Clear 分别使用独立 Reference Kind，并记录目标对象、Handler 和签名。
 - Asset Registry 依赖导出为普通 Reference，区分 Hard/Soft Package、Game/EditorOnly、Build、Direct/Indirect 属性和项目/引擎/脚本/Mount 域。
+- Soft Object/Class 成员变量默认值导出为 `soft-object-reference` / `soft-class-reference`，引用 Source 为变量 Symbol。
+- PrimaryAssetLabel 显式管理关系导出为 `manages-direct`；命令行环境缺少 Asset Manager 缓存时使用 ExplicitAssets/ExplicitBlueprints 只读回退。
+- Searchable Name 保留目标 Package、Object 与 Value，例如 DataTable 资产和具体 Row Name。
 - 依赖目标优先解析为 Asset Symbol；无法解析为资产对象时保留 Package、Primary Asset 或 Searchable Name 标识。
 - 对 UE 每次加载会重建 GUID 的 `K2Node_PromotableOperator.ErrorTolerance` 瞬态 Pin 使用确定性派生 ID，其他 Pin 继续保留原生 GUID。
 - 反射属性文本中的 `/Engine/Transient.PropertyBag_<hex>` 进程级随机对象名统一归一化为 `/Engine/Transient.PropertyBag_<transient>`，不改写真实资产路径或持久对象名。
@@ -71,7 +74,7 @@ Python：CPython 3.11–3.12
 - UE 5.6 插件编译成功。
 - 普通 Blueprint、Actor Component、Interface、Macro Library、Widget Blueprint、Anim Blueprint、Editor Utility Widget 和 Control Rig 的通用结构导出。
 - 中文项目路径与中文项目名。
-- 单资产和 45 个 Blueprint 的目录批量导出。
+- 单资产和 47 个 Blueprint 的目录批量导出。
 - Canonical、BPCTX、Revision 和项目身份一致性。
 - 0.2.3 Event / Custom Event / Function Entry 语义导出与 Custom Event 调用关联。
 - 0.2.3 成员变量与局部作用域变量区分；函数参数引用可解析到对应参数 Symbol。
@@ -81,21 +84,25 @@ Python：CPython 3.11–3.12
 - 0.2.3 Dynamic Cast 源类型、目标类型、模式和分支语义验证。
 - 0.2.3 Event Dispatcher Symbol、自有 Dispatcher 广播、原生 Delegate 绑定、外部 Blueprint Dispatcher 绑定/解绑验证。
 - Delegate Symbol 检索和跨资产反向引用查询已通过 SQLite 验证。
-- 0.2.3 Asset Registry Package 依赖在 45 个 Blueprint 上验证：543 条依赖边，其中 Hard Package 194 条、Soft Package 349 条。
+- 0.2.4 Asset Registry Package 依赖在 47 个 Blueprint 上验证：545 条依赖边，其中 Hard Package 195 条、Soft Package 350 条。
+- 0.2.4 Soft Object/Class 默认引用在专用 Blueprint 中完成 Canonical、BPCTX 和 SQLite 正向/反向查询验证。
+- 0.2.4 PrimaryAssetLabel ExplicitAssets 产生的 `manages-direct` 已在命令行导出和 SQLite 中验证。
+- 0.2.4 DataTableRowHandle 的 `Row_Alpha` 产生真实 `depends-searchable-name`，目标表与行名均完整保留。
 - Asset Registry 依赖的 Canonical、BPCTX、SQLite 正向/反向查询和同目标多属性边保留均已验证。
-- 两个独立编辑器进程分别完整导出 45 个 Blueprint，45 个 Canonical 与 45 个 BPCTX 均逐文件 SHA-256 完全一致。
+- 0.2.4 全新 SQLite：47 个资产、643 个 Symbol、133 个 Graph、3065 个 Node、1349 条 Reference。
+- 两个独立编辑器进程分别完整导出 47 个 Blueprint，47 个 Canonical 与 47 个 BPCTX 均逐文件 SHA-256 完全一致。
 - Python 单元测试与 SQLite/FTS 查询。
-- 完整导出前后 434 个测试 `.uasset` 的数量与 SHA-256 均未变化。
+- 完整导出前后 438 个测试 `.uasset` 的数量与 SHA-256 均未变化。
 
 ## 当前限制
 
 - 尚未实现声明式 Patch、Dry Run、保存和回滚。
-- Soft Object/Class 变量和同步/异步加载节点仍需补充专用测试资产与语义建模；当前 45 个 Blueprint 中没有可用样本。
+- Soft Object/Class 标量成员变量默认值已建模；数组/Set/Map、嵌套 Struct、组件属性、同步/异步加载节点及运行时解析链仍需单独建模。
 - 函数 Input、Output、Return、Const Reference 和 `FunctionEntry.LocalVariables` 已建模；当前测试工程没有真实 `inout` 参数或多 FunctionResult 节点函数，因此这两类仍缺资产验证。
 - 当前 Event 调用关联优先覆盖同 Blueprint 内的 Custom Event；跨 Blueprint Event 仍需继续建模。
 - Delegate 已记录创建、绑定、解绑和广播的静态关系，但不会推断一次广播在运行时实际触发的 Handler 集合或执行顺序。
 - `Assign Delegate` 和 `Clear Delegate` 代码路径已实现并通过编译，但当前测试工程没有对应节点，尚缺真实资产验证。
-- Asset Registry 的 Manage 与 Searchable Name 代码路径已实现；当前 45 个 Blueprint 只产生 Package 类别依赖，因此这两类尚缺真实资产验证。
+- PrimaryAssetLabel 的显式 direct-manage 已验证；目录规则、递归规则、间接 Manage 和非 Label 的 Asset Manager 规则仍需更多样本。
 - 同一目标可能同时存在 Hard Game 与 Soft Editor Build 等多条边；这是 Asset Registry 的不同依赖属性记录，不做合并。
 - `UK2Node_Message` 已作为接口消息建模；强类型直接接口调用仍按普通函数调用输出，后续可进一步细分。
 - Dynamic Cast 的源类型当前为 Cast 输入 Pin 的声明类型，不追踪上游表达式的运行时具体类型。
@@ -110,7 +117,7 @@ Python：CPython 3.11–3.12
 重命名和文档基线
 → 0.2.2 全项目导出与全新数据库闭环
 → 0.2.3 Event、Custom Event、Function Entry、完整函数参数、局部变量、接口消息、Dynamic Cast、Delegate 与 Asset Registry Package 依赖语义
-→ 建立 Soft Reference、Manage Dependency 与 Searchable Name 专用测试资产
+→ 0.2.4 Soft Reference、PrimaryAssetLabel Manage 与 Searchable Name 专用测试资产及语义闭环
 → 建立专用写入测试资产
 → 声明式 Patch Schema
 → Dry Run

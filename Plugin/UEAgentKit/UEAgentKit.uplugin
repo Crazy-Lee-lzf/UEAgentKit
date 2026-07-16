@@ -1,7 +1,7 @@
 {
   "FileVersion": 3,
-  "Version": 3,
-  "VersionName": "0.2.3",
+  "Version": 4,
+  "VersionName": "0.2.4",
   "FriendlyName": "UE Agent Kit",
   "Description": "AI-ready Unreal Engine project inspection, indexing, validation, and automation toolkit.",
   "Category": "Developer Tools",

@@ -14,7 +14,8 @@ The current implementation is still read-only and focused on Blueprint analysis.
 - Model event dispatchers, events, function entries, member variables, and local variables as queryable symbols.
 - Distinguish input, output, return, and in-out parameters, including value/reference and const semantics, and record upstream return-value sources.
 - Resolve delegate creation, binding, unbinding, and broadcasting, including dispatcher and handler relationships.
-- Export Asset Registry hard and soft package dependencies with Game, EditorOnly, Build, and related properties, with reverse dependency queries.
+- Model Soft Object and Soft Class member defaults as variable-level references with declared types, concrete targets, and source variables.
+- Export Asset Registry hard/soft package, manage, and searchable-name dependencies with Game, EditorOnly, Build, Direct, and related properties, with forward and reverse queries.
 - Generate stable asset revisions and SHA-256 fingerprints.
 - Normalize UE load-time transient pin IDs and Property Bag object names so Canonical JSON and BPCTX remain reproducible across editor processes.
 - Export Canonical JSON, BPCTX/1, and manifests.
@@ -63,7 +64,7 @@ scripts\ue-agent.cmd search assets Door
 scripts\ue-agent.cmd search symbols MaxWalkSpeed
 ```
 
-See [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md) for details.
+See [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md) for details. Semantic fixture generation is documented in [`tests/fixtures/README.md`](tests/fixtures/README.md).
 
 ## Safety model
 

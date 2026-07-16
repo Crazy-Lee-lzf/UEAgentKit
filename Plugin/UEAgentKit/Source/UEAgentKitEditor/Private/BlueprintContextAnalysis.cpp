@@ -10,6 +10,7 @@
 #include "EdGraph/EdGraphPin.h"
 #include "EdGraphSchema_K2.h"
 #include "Engine/Blueprint.h"
+#include "Engine/PrimaryAssetLabel.h"
 #include "Engine/SCS_Node.h"
 #include "Engine/SimpleConstructionScript.h"
 #include "HAL/FileManager.h"
@@ -641,6 +642,8 @@ void FBlueprintContextAnalysis::BuildSymbolsAndReferences(
 			else
 			{
 				Symbol->SetStringField(TEXT("variableScope"), TEXT("member"));
+				Symbol->SetStringField(TEXT("variableType"), Variable.VarType.PinCategory.ToString());
+				Symbol->SetStringField(TEXT("declaredTypePath"), ObjectPath(Variable.VarType.PinSubCategoryObject.Get()));
 			}
 
 			AddSymbol(Symbol, OutSymbols, SymbolIds);
@@ -649,6 +652,56 @@ void FBlueprintContextAnalysis::BuildSymbolsAndReferences(
 				VariableIdByGuid.Add(Variable.VarGuid, Id);
 			}
 			VariableIdByName.Add(Variable.VarName, Id);
+
+			const bool bSoftObject = Variable.VarType.PinCategory == UEdGraphSchema_K2::PC_SoftObject;
+			const bool bSoftClass = Variable.VarType.PinCategory == UEdGraphSchema_K2::PC_SoftClass;
+			if (!bDelegate && (bSoftObject || bSoftClass) && Blueprint->GeneratedClass)
+			{
+				UClass* BlueprintClass = Blueprint->GeneratedClass.Get();
+				UObject* DefaultObject = BlueprintClass ? BlueprintClass->GetDefaultObject(false) : nullptr;
+				const FSoftObjectProperty* SoftProperty = BlueprintClass
+					? FindFProperty<FSoftObjectProperty>(BlueprintClass, Variable.VarName)
+					: nullptr;
+				if (SoftProperty && DefaultObject)
+				{
+					const FSoftObjectPtr& SoftValue = SoftProperty->GetPropertyValue_InContainer(DefaultObject);
+					const FSoftObjectPath& SoftPath = SoftValue.ToSoftObjectPath();
+					if (!SoftPath.IsNull())
+					{
+						IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(
+							TEXT("AssetRegistry")).Get();
+						const FString TargetPath = SoftPath.ToString();
+						const FString TargetPackageName = SoftPath.GetLongPackageName();
+						const FString TargetAssetPath = ResolveAssetPathForPackage(
+							AssetRegistry,
+							SoftPath.GetLongPackageFName());
+						const FString ReferenceKind = bSoftClass
+							? TEXT("soft-class-reference")
+							: TEXT("soft-object-reference");
+						const FString TargetKind = bSoftClass ? TEXT("class") : TEXT("asset");
+						const FString TargetSymbolId = MakeSymbolId(
+							TargetKind,
+							bSoftClass || TargetAssetPath.IsEmpty() ? TargetPath : TargetAssetPath);
+						TSharedRef<FJsonObject> Reference = MakeReference(
+							MakeSymbolId(TEXT("reference"), ReferenceKind, Id + TEXT("|") + TargetSymbolId),
+							ReferenceKind,
+							Id,
+							TargetSymbolId,
+							TargetKind,
+							SoftPath.GetAssetName(),
+							TargetAssetPath);
+						Reference->SetStringField(TEXT("targetPath"), TargetPath);
+						Reference->SetStringField(TEXT("targetPackageName"), TargetPackageName);
+						Reference->SetStringField(TEXT("softReferenceKind"), bSoftClass ? TEXT("class") : TEXT("object"));
+						Reference->SetStringField(TEXT("sourceVariableName"), Name);
+						Reference->SetStringField(TEXT("declaredTypePath"), ObjectPath(Variable.VarType.PinSubCategoryObject.Get()));
+						Reference->SetStringField(TEXT("dependencyDomain"), DependencyDomainName(TargetPackageName));
+						AddReference(Reference, OutReferences, ReferenceIds);
+						Symbol->SetStringField(TEXT("defaultTargetPath"), TargetPath);
+						Symbol->SetStringField(TEXT("softReferenceKind"), bSoftClass ? TEXT("class") : TEXT("object"));
+					}
+				}
+			}
 		}
 
 		if (Blueprint->SimpleConstructionScript)
@@ -1450,6 +1503,147 @@ void FBlueprintContextAnalysis::BuildSymbolsAndReferences(
 					TEXT("direct"),
 					EnumHasAnyFlags(Dependency.Properties, UE::AssetRegistry::EDependencyProperty::Direct));
 				AddReference(Reference, OutReferences, ReferenceIds);
+			}
+		}
+
+		auto AddManageReference = [&OutReferences, &ReferenceIds, &AssetSymbolId, &AssetPath, Blueprint, Package](
+			const FString& ManagerIdentifier,
+			const FString& ManagerPackageName,
+			const FString& ManagerAssetPath,
+			const FString& ManagerName,
+			const bool bDirect,
+			const FString& Resolution)
+		{
+			const FString ManagerKind = !ManagerAssetPath.IsEmpty() ? TEXT("asset") : TEXT("package");
+			const FString ManagerSymbolId = MakeSymbolId(
+				ManagerKind,
+				ManagerAssetPath.IsEmpty() ? ManagerIdentifier : ManagerAssetPath);
+			const FString ReferenceKind = bDirect ? TEXT("manages-direct") : TEXT("manages-indirect");
+			const FString DependencyProperties = bDirect ? TEXT("direct") : TEXT("indirect");
+			TSharedRef<FJsonObject> Reference = MakeReference(
+				MakeSymbolId(
+					TEXT("reference"),
+					ReferenceKind,
+					ManagerSymbolId + TEXT("|") + AssetSymbolId + TEXT("|") + DependencyProperties),
+				ReferenceKind,
+				ManagerSymbolId,
+				AssetSymbolId,
+				TEXT("asset"),
+				Blueprint->GetName(),
+				AssetPath);
+			Reference->SetStringField(TEXT("targetPath"), AssetPath);
+			Reference->SetStringField(TEXT("targetPackageName"), Package->GetName());
+			Reference->SetStringField(TEXT("managerName"), ManagerName);
+			Reference->SetStringField(TEXT("managerAssetPath"), ManagerAssetPath);
+			Reference->SetStringField(TEXT("managerPackageName"), ManagerPackageName);
+			Reference->SetStringField(TEXT("managerPath"), ManagerIdentifier);
+			Reference->SetStringField(TEXT("managerResolution"), Resolution);
+			Reference->SetStringField(TEXT("dependencyCategory"), TEXT("manage"));
+			Reference->SetStringField(TEXT("dependencyProperties"), DependencyProperties);
+			Reference->SetStringField(TEXT("dependencyDomain"), DependencyDomainName(Package->GetName()));
+			Reference->SetBoolField(TEXT("direct"), bDirect);
+			Reference->SetBoolField(TEXT("incoming"), true);
+			AddReference(Reference, OutReferences, ReferenceIds);
+		};
+
+		TSet<FName> ResolvedManagerPackages;
+		TArray<FAssetDependency> ManageReferencers;
+		if (AssetRegistry.GetReferencers(
+			FAssetIdentifier(Package->GetFName()),
+			ManageReferencers,
+			UE::AssetRegistry::EDependencyCategory::Manage))
+		{
+			ManageReferencers.Sort([](const FAssetDependency& Left, const FAssetDependency& Right)
+			{
+				return Left.LexicalLess(Right);
+			});
+
+			for (const FAssetDependency& Referencer : ManageReferencers)
+			{
+				if (!Referencer.AssetId.IsValid()
+					|| Referencer.AssetId.PackageName == Package->GetFName())
+				{
+					continue;
+				}
+
+				const FString ManagerIdentifier = Referencer.AssetId.ToString();
+				const FString ManagerPackageName = Referencer.AssetId.PackageName.ToString();
+				const FString ManagerAssetPath = ResolveAssetPathForPackage(
+					AssetRegistry,
+					Referencer.AssetId.PackageName);
+				const FString ManagerName = !Referencer.AssetId.ObjectName.IsNone()
+					? Referencer.AssetId.ObjectName.ToString()
+					: FPackageName::GetShortName(ManagerPackageName);
+				const bool bDirect = EnumHasAnyFlags(
+					Referencer.Properties,
+					UE::AssetRegistry::EDependencyProperty::Direct);
+				ResolvedManagerPackages.Add(Referencer.AssetId.PackageName);
+				AddManageReference(
+					ManagerIdentifier,
+					ManagerPackageName,
+					ManagerAssetPath,
+					ManagerName,
+					bDirect,
+					TEXT("asset-registry"));
+			}
+		}
+
+		TArray<FAssetData> PrimaryAssetLabels;
+		if (AssetRegistry.GetAssetsByClass(
+			UPrimaryAssetLabel::StaticClass()->GetClassPathName(),
+			PrimaryAssetLabels,
+			true))
+		{
+			PrimaryAssetLabels.Sort([](const FAssetData& Left, const FAssetData& Right)
+			{
+				return Left.GetSoftObjectPath().ToString() < Right.GetSoftObjectPath().ToString();
+			});
+
+			for (const FAssetData& LabelData : PrimaryAssetLabels)
+			{
+				if (ResolvedManagerPackages.Contains(LabelData.PackageName))
+				{
+					continue;
+				}
+
+				const UPrimaryAssetLabel* Label = Cast<UPrimaryAssetLabel>(LabelData.GetAsset());
+				if (!Label)
+				{
+					continue;
+				}
+
+				bool bExplicitMatch = false;
+				for (const TSoftObjectPtr<UObject>& ExplicitAsset : Label->ExplicitAssets)
+				{
+					if (ExplicitAsset.ToSoftObjectPath().GetLongPackageFName() == Package->GetFName())
+					{
+						bExplicitMatch = true;
+						break;
+					}
+				}
+				if (!bExplicitMatch)
+				{
+					for (const TSoftClassPtr<UObject>& ExplicitBlueprint : Label->ExplicitBlueprints)
+					{
+						if (ExplicitBlueprint.ToSoftObjectPath().GetLongPackageFName() == Package->GetFName())
+						{
+							bExplicitMatch = true;
+							break;
+						}
+					}
+				}
+				if (!bExplicitMatch)
+				{
+					continue;
+				}
+
+				AddManageReference(
+					LabelData.PackageName.ToString(),
+					LabelData.PackageName.ToString(),
+					LabelData.GetSoftObjectPath().ToString(),
+					LabelData.AssetName.ToString(),
+					true,
+					TEXT("primary-asset-label-explicit"));
 			}
 		}
 	}
