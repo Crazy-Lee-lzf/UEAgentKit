@@ -31,6 +31,7 @@ UE Agent Kit 是一套面向 Unreal Engine 的开源只读资产分析工具。�
 - Skeletal Mesh 专用 Reader 输出 Skeleton/Physics Asset、LOD、材质槽、Bounds、骨骼摘要、Morph Target 和 Socket；Skeleton Reader 输出完整骨骼层级、参考姿势、Virtual Bone、Socket、兼容项和 Curve 元数据。
 - Physics Asset Reader 输出预览 Mesh、Body→Bone 映射、Shape 统计、禁碰撞对、Constraint 两端骨骼/参考帧和 Profile。
 - Material Reader 输出 Domain、Blend Mode、Shading Model、双面/薄表面、Opacity Mask 和 Expression Class 摘要；Material Instance Reader 输出 Parent、渲染属性以及 Scalar/Vector/Texture/Font/Static Switch 参数覆盖。
+- Material Function Reader 输出描述、库暴露状态、输入/输出稳定 GUID、类型、默认预览值以及 Expression Class 摘要。
 - Texture2D Reader 输出 Source 尺寸/格式、Platform Data 可用性、压缩、sRGB、LOD Group、Mip、Filter、寻址、Streaming 和 Virtual Texture 设置，不读取像素或 BulkData。
 - 不批量加载所有 UObject，适合项目级快速扫描。
 

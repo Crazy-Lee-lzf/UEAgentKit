@@ -11,6 +11,9 @@
 #include "Materials/MaterialExpression.h"
 #include "Materials/MaterialInstance.h"
 #include "Materials/MaterialInstanceConstant.h"
+#include "Materials/MaterialFunction.h"
+#include "Materials/MaterialExpressionFunctionInput.h"
+#include "Materials/MaterialExpressionFunctionOutput.h"
 #include "MaterialDomain.h"
 #include "MaterialShaderType.h"
 #include "PixelFormat.h"
@@ -117,6 +120,41 @@ namespace AssetReaderRegistryPrivate
 			return TEXT("AlphaHoldout");
 		case BLEND_TranslucentColoredTransmittance:
 			return TEXT("TranslucentColoredTransmittance");
+		default:
+			return TEXT("Unknown");
+		}
+	}
+
+	const TCHAR* FunctionInputTypeToString(const EFunctionInputType Value)
+	{
+		switch (Value)
+		{
+		case FunctionInput_Scalar:
+			return TEXT("Scalar");
+		case FunctionInput_Vector2:
+			return TEXT("Vector2");
+		case FunctionInput_Vector3:
+			return TEXT("Vector3");
+		case FunctionInput_Vector4:
+			return TEXT("Vector4");
+		case FunctionInput_Texture2D:
+			return TEXT("Texture2D");
+		case FunctionInput_TextureCube:
+			return TEXT("TextureCube");
+		case FunctionInput_Texture2DArray:
+			return TEXT("Texture2DArray");
+		case FunctionInput_VolumeTexture:
+			return TEXT("VolumeTexture");
+		case FunctionInput_StaticBool:
+			return TEXT("StaticBool");
+		case FunctionInput_MaterialAttributes:
+			return TEXT("MaterialAttributes");
+		case FunctionInput_TextureExternal:
+			return TEXT("TextureExternal");
+		case FunctionInput_Bool:
+			return TEXT("Bool");
+		case FunctionInput_Substrate:
+			return TEXT("Substrate");
 		default:
 			return TEXT("Unknown");
 		}
@@ -667,6 +705,113 @@ namespace AssetReaderRegistryPrivate
 		return EAssetReaderStatus::Success;
 	}
 
+	EAssetReaderStatus ReadMaterialFunction(
+		const FAssetData& AssetData,
+		TSharedRef<FJsonObject>& OutDetails,
+		FString& OutError)
+	{
+		UMaterialFunction* Function = Cast<UMaterialFunction>(AssetData.GetAsset());
+		if (Function == nullptr)
+		{
+			OutError = TEXT("Failed to load Material Function asset.");
+			return EAssetReaderStatus::Failed;
+		}
+
+		OutDetails->SetStringField(TEXT("type"), TEXT("material-function"));
+		OutDetails->SetNumberField(TEXT("readerVersion"), 1);
+		OutDetails->SetStringField(TEXT("description"), Function->Description);
+		OutDetails->SetStringField(TEXT("caption"), Function->UserExposedCaption);
+		OutDetails->SetBoolField(TEXT("exposeToLibrary"), Function->bExposeToLibrary);
+
+		TArray<const UMaterialExpressionFunctionInput*> Inputs;
+		TArray<const UMaterialExpressionFunctionOutput*> Outputs;
+		TMap<FString, int32> ClassCounts;
+		TArray<FString> CalledFunctions;
+		for (const TObjectPtr<UMaterialExpression>& ExpressionPtr : Function->GetExpressions())
+		{
+			const UMaterialExpression* Expression = ExpressionPtr.Get();
+			if (Expression == nullptr)
+			{
+				continue;
+			}
+			ClassCounts.FindOrAdd(Expression->GetClass()->GetPathName()) += 1;
+			if (const UMaterialExpressionFunctionInput* Input = Cast<UMaterialExpressionFunctionInput>(Expression))
+			{
+				Inputs.Add(Input);
+			}
+			else if (const UMaterialExpressionFunctionOutput* Output = Cast<UMaterialExpressionFunctionOutput>(Expression))
+			{
+				Outputs.Add(Output);
+			}
+		}
+
+		Inputs.Sort([](const UMaterialExpressionFunctionInput& Left, const UMaterialExpressionFunctionInput& Right)
+		{
+			if (Left.SortPriority != Right.SortPriority)
+			{
+				return Left.SortPriority < Right.SortPriority;
+			}
+			return Left.InputName.LexicalLess(Right.InputName);
+		});
+		Outputs.Sort([](const UMaterialExpressionFunctionOutput& Left, const UMaterialExpressionFunctionOutput& Right)
+		{
+			if (Left.SortPriority != Right.SortPriority)
+			{
+				return Left.SortPriority < Right.SortPriority;
+			}
+			return Left.OutputName.LexicalLess(Right.OutputName);
+		});
+
+		TArray<TSharedPtr<FJsonValue>> InputValues;
+		for (const UMaterialExpressionFunctionInput* Input : Inputs)
+		{
+			TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
+			Json->SetStringField(TEXT("name"), Input->InputName.ToString());
+			Json->SetStringField(TEXT("description"), Input->Description);
+			Json->SetStringField(TEXT("id"), Input->Id.ToString(EGuidFormats::DigitsWithHyphensLower));
+			Json->SetStringField(TEXT("inputType"), FunctionInputTypeToString(Input->InputType));
+			Json->SetNumberField(TEXT("inputTypeValue"), static_cast<int32>(Input->InputType.GetValue()));
+			Json->SetNumberField(TEXT("sortPriority"), Input->SortPriority);
+			Json->SetBoolField(TEXT("usePreviewAsDefault"), Input->bUsePreviewValueAsDefault);
+			Json->SetObjectField(
+				TEXT("previewValue"),
+				Vector4dToJson(FVector4d(Input->PreviewValue.X, Input->PreviewValue.Y, Input->PreviewValue.Z, Input->PreviewValue.W)));
+			InputValues.Add(MakeShared<FJsonValueObject>(Json));
+		}
+		OutDetails->SetNumberField(TEXT("inputCount"), InputValues.Num());
+		OutDetails->SetArrayField(TEXT("inputs"), InputValues);
+
+		TArray<TSharedPtr<FJsonValue>> OutputValues;
+		for (const UMaterialExpressionFunctionOutput* Output : Outputs)
+		{
+			TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
+			Json->SetStringField(TEXT("name"), Output->OutputName.ToString());
+			Json->SetStringField(TEXT("description"), Output->Description);
+			Json->SetStringField(TEXT("id"), Output->Id.ToString(EGuidFormats::DigitsWithHyphensLower));
+			Json->SetNumberField(TEXT("sortPriority"), Output->SortPriority);
+			Json->SetBoolField(TEXT("lastPreviewed"), Output->bLastPreviewed);
+			OutputValues.Add(MakeShared<FJsonValueObject>(Json));
+		}
+		OutDetails->SetNumberField(TEXT("outputCount"), OutputValues.Num());
+		OutDetails->SetArrayField(TEXT("outputs"), OutputValues);
+
+		TArray<FString> ClassNames;
+		ClassCounts.GetKeys(ClassNames);
+		ClassNames.Sort();
+		TArray<TSharedPtr<FJsonValue>> ExpressionClasses;
+		for (const FString& ClassName : ClassNames)
+		{
+			TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
+			Json->SetStringField(TEXT("class"), ClassName);
+			Json->SetNumberField(TEXT("count"), ClassCounts[ClassName]);
+			ExpressionClasses.Add(MakeShared<FJsonValueObject>(Json));
+		}
+		OutDetails->SetNumberField(TEXT("expressionCount"), Function->GetExpressions().Num());
+		OutDetails->SetArrayField(TEXT("expressionClasses"), ExpressionClasses);
+		OutDetails->SetNumberField(TEXT("commentCount"), Function->GetEditorComments().Num());
+		return EAssetReaderStatus::Success;
+	}
+
 	EAssetReaderStatus ReadMaterial(
 		const FAssetData& AssetData,
 		TSharedRef<FJsonObject>& OutDetails,
@@ -955,6 +1100,11 @@ EAssetReaderStatus FAssetReaderRegistry::ReadAssetDetails(
 	{
 		OutReaderName = TEXT("physics-asset-v1");
 		return AssetReaderRegistryPrivate::ReadPhysicsAsset(AssetData, OutDetails, OutError);
+	}
+	if (AssetData.AssetClassPath == UMaterialFunction::StaticClass()->GetClassPathName())
+	{
+		OutReaderName = TEXT("material-function-v1");
+		return AssetReaderRegistryPrivate::ReadMaterialFunction(AssetData, OutDetails, OutError);
 	}
 	if (AssetData.AssetClassPath == UMaterial::StaticClass()->GetClassPathName())
 	{
