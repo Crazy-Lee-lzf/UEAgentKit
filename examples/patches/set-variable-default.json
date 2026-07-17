@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1.0",
+  "patchId": "set-variable-default-example",
+  "projectName": "我的项目",
+  "description": "Validate changing a Blueprint variable default.",
+  "assets": [
+    {
+      "assetPath": "/Game/UEAgentKitWriteTests/BP_PatchTarget.BP_PatchTarget",
+      "expectedRevision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expectedAssetClass": "/Script/Engine.Blueprint",
+      "operations": [
+        {
+          "operationId": "set-health",
+          "operation": "setVariableDefault",
+          "target": {
+            "variableName": "Health"
+          },
+          "value": 125.0
+        }
+      ]
+    }
+  ]
+}

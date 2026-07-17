@@ -11,6 +11,7 @@ from typing import Any, Sequence
 from .config import DEFAULT_DATABASE
 from .database import assert_fts5_available, get_schema_version, open_database
 from .indexer import build_index
+from .patches import PATCH_SCHEMA_VERSION, get_operation_registry, validate_patch
 from .queries import find_references, get_asset, get_stats, search_assets, search_symbols
 from .schema import CURRENT_SCHEMA_VERSION
 
@@ -27,6 +28,25 @@ def _add_database_argument(parser: argparse.ArgumentParser) -> None:
 def _add_pagination_arguments(parser: argparse.ArgumentParser, *, default_limit: int) -> None:
     parser.add_argument("--limit", type=int, default=default_limit)
     parser.add_argument("--offset", type=int, default=0)
+
+
+def _serialize_json(value: Any, *, compact: bool) -> str:
+    if compact:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=False)
+
+
+def _write_json_file(path: Path, value: Any) -> None:
+    resolved = path.expanduser().resolve()
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    temporary = resolved.with_name(f".{resolved.name}.tmp")
+    output = _serialize_json(value, compact=False) + "\n"
+    try:
+        temporary.write_text(output, encoding="utf-8", newline="\r\n")
+        os.replace(temporary, resolved)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -91,15 +111,25 @@ def build_parser() -> argparse.ArgumentParser:
     asset_parser.add_argument("--node-limit", type=int, default=200)
     asset_parser.add_argument("--include-details", action="store_true")
 
+    patch_parser = subparsers.add_parser("patch", help="Inspect or validate declarative Blueprint patches.")
+    patch_subparsers = patch_parser.add_subparsers(dest="patch_command", required=True)
+
+    patch_subparsers.add_parser("operations", help="List validation-only patch operations.")
+
+    patch_validate = patch_subparsers.add_parser(
+        "validate",
+        help="Validate a patch without loading or modifying UObject data.",
+    )
+    patch_validate.add_argument("--patch", dest="patch_path", type=Path, required=True)
+    patch_validate.add_argument("--policy", dest="policy_path", type=Path, required=True)
+    patch_validate.add_argument("--export", dest="export_root", type=Path, required=True)
+    patch_validate.add_argument("--report", dest="report_path", type=Path)
+
     return parser
 
 
 def _print_json(value: Any, *, compact: bool) -> None:
-    if compact:
-        output = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    else:
-        output = json.dumps(value, ensure_ascii=False, indent=2, sort_keys=False)
-    print(output)
+    print(_serialize_json(value, compact=compact))
 
 
 def _open_query_database(path: Path):
@@ -119,6 +149,22 @@ def _open_query_database(path: Path):
 
 
 def run(args: argparse.Namespace) -> tuple[Any, int]:
+    if args.command == "patch" and args.patch_command == "operations":
+        return {
+            "schemaVersion": PATCH_SCHEMA_VERSION,
+            "validationOnly": True,
+            "willLoadOrModifyUObjects": False,
+            "willWriteDisk": False,
+            "commitSupported": False,
+            "operations": get_operation_registry(),
+        }, 0
+
+    if args.command == "patch" and args.patch_command == "validate":
+        result = validate_patch(args.patch_path, args.policy_path, args.export_root)
+        if args.report_path is not None:
+            _write_json_file(args.report_path, result)
+        return result, 0 if result["valid"] else 1
+
     if args.command == "index" and args.index_command == "build":
         with open_database(args.database) as connection:
             result = build_index(
@@ -214,7 +260,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         result, exit_code = run(args)
         _print_json(result, compact=args.compact)
         return exit_code
-    except (FileNotFoundError, ValueError, RuntimeError, sqlite3.Error) as exc:
+    except FileNotFoundError as exc:
+        _print_json(
+            {
+                "error": type(exc).__name__,
+                "message": str(exc),
+                "valid": False,
+            },
+            compact=args.compact,
+        )
+        return 2
+    except (ValueError, RuntimeError, sqlite3.Error) as exc:
         _print_json(
             {
                 "error": type(exc).__name__,

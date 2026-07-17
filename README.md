@@ -6,7 +6,7 @@
 
 UE Agent Kit 是一套面向 Unreal Engine 的开源只读资产分析工具。它通过 UE Editor 插件导出项目资产目录、Asset Registry 元数据、依赖关系和 Blueprint 语义，再使用 Python CLI 与 SQLite 建立项目级索引。
 
-当前版本为 **0.2.6**，支持 **Unreal Engine 5.6**。工具仅执行只读导出、索引和查询，不修改或保存 `.uasset`。
+当前版本为 **0.3.0**，支持 **Unreal Engine 5.6**。新增 Safe Write 纯校验基线；工具仍不加载或修改 UObject，也不修改或保存 `.uasset`。
 
 > **AI Generated**：本项目的代码和文档主要由 AI 生成，并通过人工审查、UE 5.6 编译、自动化测试和真实工程回归验证。
 
@@ -19,6 +19,7 @@ UE Agent Kit 是一套面向 Unreal Engine 的开源只读资产分析工具。�
 - 查询 Blueprint 变量在哪里被读取或写入。
 - 查询函数、接口消息、宏、Dynamic Cast 和 Event Dispatcher 的调用关系。
 - 查看 Blueprint 的 Graph、Node、Pin 和连接结构。
+- 使用 Policy、Revision 和导出快照校验声明式 Blueprint Patch，不加载或修改 UObject。
 
 ## 主要能力
 
@@ -121,10 +122,23 @@ scripts\ue-agent.cmd search symbols MaxWalkSpeed
 scripts\ue-agent.cmd references --target-asset /Game/LevelPrototyping/Materials/M_FlatCol.M_FlatCol
 ```
 
-### 5. 校验通用资产导出
+### 5. 校验声明式 Patch（不写资产）
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.2.6
+scripts\ue-agent.cmd patch operations
+scripts\ue-agent.cmd patch validate ^
+  --patch examples\patches\set-variable-default.json ^
+  --policy config\write-policy.example.json ^
+  --export Output\Blueprints ^
+  --report Output\patch-report.json
+```
+
+该命令只读取 JSON 和导出快照，固定返回 `willLoadOrModifyUObjects=false`、`willWriteDisk=false` 和 `commitSupported=false`。格式与 Policy 说明见 [`spec/PATCH_SCHEMA.md`](spec/PATCH_SCHEMA.md)。
+
+### 6. 校验通用资产导出
+
+```bat
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.3.0
 ```
 
 完整参数和安装说明见 [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md)。
@@ -157,12 +171,13 @@ Output\Blueprints\
 - [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md)：构建、安装、导出和查询。
 - [`docs/AI_USAGE.md`](docs/AI_USAGE.md)：AI 使用资产索引与 Blueprint 语义的方式。
 - [`spec/BPCTX_FORMAT.md`](spec/BPCTX_FORMAT.md)：BPCTX/1 格式规范。
+- [`spec/PATCH_SCHEMA.md`](spec/PATCH_SCHEMA.md)：声明式 Patch、Policy、Revision 和纯校验安全边界。
 
 完整文档索引见 [`docs/README.md`](docs/README.md)。
 
 ## 安全说明
 
-当前版本完全只读。Commandlet 不保存项目资产，不直接编辑 `.uasset`。每个导出记录都可以包含原始包文件的 SHA-256 Revision，用于验证资产是否变化。
+当前版本仍然完全不写资产。Commandlet 不保存项目资产，不直接编辑 `.uasset`；Patch Baseline 只校验 JSON、Policy 和导出 Revision，不加载或修改 UObject。每个导出记录都可以包含原始包文件的 SHA-256 Revision，用于验证资产是否变化。
 
 ## License
 

@@ -1,0 +1,226 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Crazy-Lee-lzf/UEAgentKit/blob/main/spec/patch.schema.json",
+  "title": "UEAgentKit Patch",
+  "description": "Validation-only declarative Blueprint patch request.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "patchId",
+    "projectName",
+    "assets"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "patchId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "projectName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 4096
+    },
+    "assets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/asset"
+      }
+    }
+  },
+  "$defs": {
+    "revision": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "assetClass": {
+      "type": "string",
+      "pattern": "^/Script/[^.]+\\.[^.]+$"
+    },
+    "guid": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "scalar": {
+      "type": [
+        "string",
+        "number",
+        "integer",
+        "boolean",
+        "null"
+      ]
+    },
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assetPath",
+        "expectedRevision",
+        "operations"
+      ],
+      "properties": {
+        "assetPath": {
+          "type": "string",
+          "pattern": "^/Game/.+\\.[^./]+$"
+        },
+        "expectedRevision": {
+          "$ref": "#/$defs/revision"
+        },
+        "expectedAssetClass": {
+          "$ref": "#/$defs/assetClass"
+        },
+        "operations": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/setVariableDefault"
+              },
+              {
+                "$ref": "#/$defs/setComponentProperty"
+              },
+              {
+                "$ref": "#/$defs/setPinDefault"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "operationBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operationId",
+        "operation",
+        "target",
+        "value"
+      ],
+      "properties": {
+        "operationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "operation": {
+          "type": "string"
+        },
+        "target": {
+          "type": "object"
+        },
+        "value": {
+          "$ref": "#/$defs/scalar"
+        }
+      }
+    },
+    "setVariableDefault": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "operation": {
+              "const": "setVariableDefault"
+            },
+            "target": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "variableName"
+              ],
+              "properties": {
+                "variableName": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "setComponentProperty": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "operation": {
+              "const": "setComponentProperty"
+            },
+            "target": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "componentName",
+                "propertyPath"
+              ],
+              "properties": {
+                "componentName": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "propertyPath": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^[^.]+(?:\\.[^.]+)*$"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "setPinDefault": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "operation": {
+              "const": "setPinDefault"
+            },
+            "target": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "graphGuid",
+                "nodeGuid",
+                "pinName"
+              ],
+              "properties": {
+                "graphGuid": {
+                  "$ref": "#/$defs/guid"
+                },
+                "nodeGuid": {
+                  "$ref": "#/$defs/guid"
+                },
+                "pinName": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,394 @@
+from __future__ import annotations
+
+import copy
+import io
+import json
+import sys
+import tempfile
+import unittest
+from contextlib import redirect_stdout
+from pathlib import Path
+from typing import Any
+
+
+TOOL_ROOT = Path(__file__).resolve().parents[2]
+SRC_ROOT = TOOL_ROOT / "src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
+
+from ue_agent_kit.cli import main  # noqa: E402
+from ue_agent_kit.patches import validate_patch  # noqa: E402
+
+
+PROJECT_NAME = "我的项目"
+ASSET_PATH = "/Game/UEAgentKitWriteTests/BP_PatchTarget.BP_PatchTarget"
+ASSET_CLASS = "/Script/Engine.Blueprint"
+REVISION = "sha256:" + "a" * 64
+GRAPH_GUID = "11111111-1111-1111-1111-111111111111"
+NODE_GUID = "22222222-2222-2222-2222-222222222222"
+
+
+def write_json(path: Path, value: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+        newline="\r\n",
+    )
+
+
+def make_policy() -> dict[str, Any]:
+    return {
+        "schemaVersion": "1.0",
+        "validationEnabled": True,
+        "commitEnabled": False,
+        "allowedProjectNames": [PROJECT_NAME],
+        "allowedAssetRoots": ["/Game/UEAgentKitWriteTests"],
+        "allowedOperations": [
+            "setVariableDefault",
+            "setComponentProperty",
+            "setPinDefault",
+        ],
+        "allowedAssetClasses": [
+            "/Script/Engine.Blueprint",
+            "/Script/UMGEditor.WidgetBlueprint",
+            "/Script/Engine.AnimBlueprint",
+        ],
+        "requireRevision": True,
+        "rejectDirtyPackages": True,
+        "maxAssetsPerPatch": 10,
+        "maxOperationsPerAsset": 32,
+        "maxValueBytes": 65536,
+    }
+
+
+def make_patch() -> dict[str, Any]:
+    return {
+        "schemaVersion": "1.0",
+        "patchId": "patch-baseline-test",
+        "projectName": PROJECT_NAME,
+        "description": "Validation-only baseline test.",
+        "assets": [
+            {
+                "assetPath": ASSET_PATH,
+                "expectedRevision": REVISION,
+                "expectedAssetClass": ASSET_CLASS,
+                "operations": [
+                    {
+                        "operationId": "set-health",
+                        "operation": "setVariableDefault",
+                        "target": {"variableName": "Health"},
+                        "value": 125.0,
+                    },
+                    {
+                        "operationId": "set-component-visible",
+                        "operation": "setComponentProperty",
+                        "target": {
+                            "componentName": "StaticMesh",
+                            "propertyPath": "Rendering.Visible",
+                        },
+                        "value": True,
+                    },
+                    {
+                        "operationId": "set-pin-default",
+                        "operation": "setPinDefault",
+                        "target": {
+                            "graphGuid": GRAPH_GUID,
+                            "nodeGuid": NODE_GUID,
+                            "pinName": "NewValue",
+                        },
+                        "value": "42",
+                    },
+                ],
+            }
+        ],
+    }
+
+
+def make_canonical() -> dict[str, Any]:
+    return {
+        "schemaVersion": "1.1",
+        "exporterVersion": "0.2.6",
+        "engineVersion": "5.6.1-test",
+        "profile": "logic",
+        "projectName": PROJECT_NAME,
+        "assetPath": ASSET_PATH,
+        "packageName": ASSET_PATH.rsplit(".", 1)[0],
+        "assetClass": ASSET_CLASS,
+        "revision": {
+            "strategy": "package-sha256-v1",
+            "available": True,
+            "packageDirty": False,
+            "value": REVISION,
+        },
+        "variables": [],
+        "components": [],
+        "functions": [],
+        "graphs": [],
+        "symbols": [],
+        "references": [],
+        "summary": {},
+    }
+
+
+def write_export(root: Path, canonical: dict[str, Any], *, failure_count: int = 0) -> None:
+    canonical_path = root / "canonical" / "Game" / "UEAgentKitWriteTests" / "BP_PatchTarget.json"
+    write_json(canonical_path, canonical)
+    write_json(
+        root / "manifest.json",
+        {
+            "schemaVersion": "1.1",
+            "exporterVersion": "0.2.6",
+            "engineVersion": "5.6.1-test",
+            "profile": "logic",
+            "projectName": PROJECT_NAME,
+            "successCount": 1,
+            "failureCount": failure_count,
+            "assets": [{"assetPath": ASSET_PATH, "success": True}],
+        },
+    )
+
+
+class PatchValidationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory(prefix="ueak_patch_")
+        self.root = Path(self.temporary.name)
+        self.patch_path = self.root / "patch.json"
+        self.policy_path = self.root / "policy.json"
+        self.export_root = self.root / "export"
+        self.patch = make_patch()
+        self.policy = make_policy()
+        self.canonical = make_canonical()
+        self.flush()
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def flush(self, *, failure_count: int = 0) -> None:
+        write_json(self.patch_path, self.patch)
+        write_json(self.policy_path, self.policy)
+        write_export(self.export_root, self.canonical, failure_count=failure_count)
+
+    def validate(self) -> dict[str, Any]:
+        return validate_patch(self.patch_path, self.policy_path, self.export_root)
+
+    def error_codes(self, result: dict[str, Any]) -> set[str]:
+        return {item["code"] for item in result["errors"]}
+
+    def test_valid_patch_is_validation_only(self) -> None:
+        result = self.validate()
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["summary"]["validatedAssets"], 1)
+        self.assertEqual(result["summary"]["validatedOperations"], 3)
+        self.assertFalse(result["willLoadOrModifyUObjects"])
+        self.assertFalse(result["willWriteDisk"])
+        self.assertFalse(result["commitSupported"])
+        self.assertTrue(all(item["valid"] for item in result["assets"][0]["operations"]))
+
+    def test_commit_enabled_policy_still_cannot_commit(self) -> None:
+        self.policy["commitEnabled"] = True
+        self.flush()
+        result = self.validate()
+        self.assertTrue(result["valid"])
+        self.assertTrue(result["commitAllowedByPolicy"])
+        self.assertFalse(result["commitSupported"])
+        self.assertFalse(result["willWriteDisk"])
+
+    def test_unknown_field_is_rejected(self) -> None:
+        self.patch["unexpected"] = True
+        self.flush()
+        self.assertIn("unknown-field", self.error_codes(self.validate()))
+
+    def test_duplicate_json_key_is_rejected(self) -> None:
+        self.patch_path.write_text(
+            '{"schemaVersion":"1.0","schemaVersion":"1.0","patchId":"x","projectName":"我的项目","assets":[]}',
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "Duplicate JSON key"):
+            self.validate()
+
+    def test_unknown_operation_is_rejected(self) -> None:
+        self.patch["assets"][0]["operations"][0]["operation"] = "unknownOperation"
+        self.flush()
+        self.assertIn("unknown-operation", self.error_codes(self.validate()))
+
+    def test_operation_not_authorized_is_rejected(self) -> None:
+        self.policy["allowedOperations"] = ["setVariableDefault"]
+        self.flush()
+        self.assertIn("operation-not-allowed", self.error_codes(self.validate()))
+
+    def test_project_mismatch_is_rejected(self) -> None:
+        self.patch["projectName"] = "OtherProject"
+        self.flush()
+        codes = self.error_codes(self.validate())
+        self.assertIn("project-not-allowed", codes)
+        self.assertIn("project-mismatch", codes)
+
+    def test_canonical_project_mismatch_is_rejected(self) -> None:
+        self.canonical["projectName"] = "OtherProject"
+        self.flush()
+        self.assertIn("export-project-mismatch", self.error_codes(self.validate()))
+
+    def test_asset_outside_authorized_root_is_rejected(self) -> None:
+        self.policy["allowedAssetRoots"] = ["/Game/OtherRoot"]
+        self.flush()
+        result = self.validate()
+        self.assertIn("asset-root-not-allowed", self.error_codes(result))
+        self.assertTrue(all(not item["valid"] for item in result["assets"][0]["operations"]))
+
+    def test_entire_game_root_cannot_be_authorized(self) -> None:
+        self.policy["allowedAssetRoots"] = ["/Game/"]
+        self.flush()
+        self.assertIn("policy-root-too-broad", self.error_codes(self.validate()))
+
+    def test_asset_class_mismatch_is_rejected(self) -> None:
+        self.patch["assets"][0]["expectedAssetClass"] = "/Script/Engine.AnimBlueprint"
+        self.flush()
+        self.assertIn("asset-class-mismatch", self.error_codes(self.validate()))
+
+    def test_revision_conflict_is_rejected(self) -> None:
+        self.patch["assets"][0]["expectedRevision"] = "sha256:" + "b" * 64
+        self.flush()
+        self.assertIn("revision-conflict", self.error_codes(self.validate()))
+
+    def test_revision_unavailable_is_rejected(self) -> None:
+        self.canonical["revision"]["available"] = False
+        self.canonical["revision"]["value"] = ""
+        self.flush()
+        self.assertIn("revision-unavailable", self.error_codes(self.validate()))
+
+    def test_dirty_package_is_rejected(self) -> None:
+        self.canonical["revision"]["packageDirty"] = True
+        self.flush()
+        self.assertIn("dirty-package", self.error_codes(self.validate()))
+
+    def test_duplicate_asset_is_rejected(self) -> None:
+        self.patch["assets"].append(copy.deepcopy(self.patch["assets"][0]))
+        self.flush()
+        self.assertIn("duplicate-asset", self.error_codes(self.validate()))
+
+    def test_duplicate_operation_id_is_rejected(self) -> None:
+        operations = self.patch["assets"][0]["operations"]
+        operations[1]["operationId"] = operations[0]["operationId"]
+        self.flush()
+        self.assertIn("duplicate-operation-id", self.error_codes(self.validate()))
+
+    def test_invalid_guid_is_rejected(self) -> None:
+        self.patch["assets"][0]["operations"][2]["target"]["nodeGuid"] = "not-a-guid"
+        self.flush()
+        self.assertIn("operation-target-value", self.error_codes(self.validate()))
+
+    def test_invalid_property_path_is_rejected(self) -> None:
+        self.patch["assets"][0]["operations"][1]["target"]["propertyPath"] = "Rendering..Visible"
+        self.flush()
+        self.assertIn("operation-target-value", self.error_codes(self.validate()))
+
+    def test_value_over_policy_limit_is_rejected(self) -> None:
+        self.policy["maxValueBytes"] = 4
+        self.patch["assets"][0]["operations"][0]["value"] = "12345"
+        self.flush()
+        self.assertIn("operation-value", self.error_codes(self.validate()))
+
+    def test_nan_and_infinity_are_rejected(self) -> None:
+        for value in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(value=value):
+                self.patch["assets"][0]["operations"][0]["value"] = value
+                self.flush()
+                self.assertIn("operation-value", self.error_codes(self.validate()))
+
+    def test_incomplete_export_is_rejected(self) -> None:
+        self.flush(failure_count=1)
+        self.assertIn("export-incomplete", self.error_codes(self.validate()))
+
+    def test_errors_are_stably_sorted(self) -> None:
+        self.patch["unexpected"] = True
+        self.patch["assets"][0]["expectedRevision"] = "bad"
+        self.policy["allowedAssetRoots"] = ["/Game/OtherRoot"]
+        self.flush()
+        result = self.validate()
+        keys = [(item["path"], item["code"], item["message"]) for item in result["errors"]]
+        self.assertEqual(keys, sorted(keys))
+
+    def test_cli_operations_and_validate_exit_codes(self) -> None:
+        output = io.StringIO()
+        with redirect_stdout(output):
+            operations_code = main(["patch", "operations"])
+        self.assertEqual(operations_code, 0)
+        self.assertIn("setVariableDefault", output.getvalue())
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            validate_code = main(
+                [
+                    "patch",
+                    "validate",
+                    "--patch",
+                    str(self.patch_path),
+                    "--policy",
+                    str(self.policy_path),
+                    "--export",
+                    str(self.export_root),
+                ]
+            )
+        self.assertEqual(validate_code, 0)
+
+        self.patch["projectName"] = "OtherProject"
+        self.flush()
+        with redirect_stdout(io.StringIO()):
+            invalid_code = main(
+                [
+                    "patch",
+                    "validate",
+                    "--patch",
+                    str(self.patch_path),
+                    "--policy",
+                    str(self.policy_path),
+                    "--export",
+                    str(self.export_root),
+                ]
+            )
+        self.assertEqual(invalid_code, 1)
+
+        with redirect_stdout(io.StringIO()):
+            missing_code = main(
+                [
+                    "patch",
+                    "validate",
+                    "--patch",
+                    str(self.root / "missing.json"),
+                    "--policy",
+                    str(self.policy_path),
+                    "--export",
+                    str(self.export_root),
+                ]
+            )
+        self.assertEqual(missing_code, 2)
+
+    def test_cli_report_output_is_stable(self) -> None:
+        report_path = self.root / "reports" / "patch-report.json"
+        arguments = [
+            "patch",
+            "validate",
+            "--patch",
+            str(self.patch_path),
+            "--policy",
+            str(self.policy_path),
+            "--export",
+            str(self.export_root),
+            "--report",
+            str(report_path),
+        ]
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(main(arguments), 0)
+        first = report_path.read_bytes()
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(main(arguments), 0)
+        second = report_path.read_bytes()
+        self.assertEqual(first, second)
+        report = json.loads(second.decode("utf-8"))
+        self.assertTrue(report["valid"])
+        self.assertFalse(report["willWriteDisk"])
+
+
+if __name__ == "__main__":
+    unittest.main()

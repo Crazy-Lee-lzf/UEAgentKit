@@ -6,7 +6,7 @@
 
 UE Agent Kit is an open-source, read-only Unreal Engine asset analysis toolkit. Its Editor plugin exports the project asset catalog, Asset Registry metadata, dependencies, and Blueprint semantics. A Python CLI and SQLite then provide a project-wide searchable index.
 
-The current release is **0.2.6** and targets **Unreal Engine 5.6**. It performs read-only export, indexing, and queries; it does not modify or save `.uasset` files.
+The current release is **0.3.0** and targets **Unreal Engine 5.6**. It adds a validation-only Safe Write baseline while still avoiding UObject mutation and `.uasset` writes.
 
 > **AI Generated**: Most code and documentation in this project are AI-generated and reviewed through human inspection, UE 5.6 compilation, automated tests, and real-project regression validation.
 
@@ -19,6 +19,7 @@ The current release is **0.2.6** and targets **Unreal Engine 5.6**. It performs 
 - Find where Blueprint variables are read or written.
 - Trace functions, interface messages, macros, Dynamic Casts, and Event Dispatchers.
 - Inspect Blueprint graphs, nodes, pins, and connections.
+- Validate declarative Blueprint patches against policy, revision, and export snapshots without loading or modifying UObjects.
 
 ## Main capabilities
 
@@ -121,10 +122,23 @@ scripts\ue-agent.cmd search symbols MaxWalkSpeed
 scripts\ue-agent.cmd references --target-asset /Game/LevelPrototyping/Materials/M_FlatCol.M_FlatCol
 ```
 
-### 5. Validate the asset catalog
+### 5. Validate a declarative patch without writing assets
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.2.6
+scripts\ue-agent.cmd patch operations
+scripts\ue-agent.cmd patch validate ^
+  --patch examples\patches\set-variable-default.json ^
+  --policy config\write-policy.example.json ^
+  --export Output\Blueprints ^
+  --report Output\patch-report.json
+```
+
+This command only reads JSON and export snapshots. It always reports `willLoadOrModifyUObjects=false`, `willWriteDisk=false`, and `commitSupported=false`. See [`spec/PATCH_SCHEMA.md`](spec/PATCH_SCHEMA.md).
+
+### 6. Validate the asset catalog
+
+```bat
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.3.0
 ```
 
 See [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md) for installation and full command details.
@@ -157,12 +171,13 @@ Output\Blueprints\
 - [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md): build, install, export, and query instructions.
 - [`docs/AI_USAGE.md`](docs/AI_USAGE.md): using the asset index and Blueprint semantics with AI tools.
 - [`spec/BPCTX_FORMAT.md`](spec/BPCTX_FORMAT.md): BPCTX/1 format specification.
+- [`spec/PATCH_SCHEMA.md`](spec/PATCH_SCHEMA.md): declarative patches, policy, revision checks, and validation-only safety boundaries.
 
 See [`docs/README.md`](docs/README.md) for the documentation index.
 
 ## Safety
 
-The current release is fully read-only. Commandlets do not save project assets or directly edit `.uasset` files. Export records can include the source package SHA-256 revision for change verification.
+The current release still never writes project assets. Commandlets do not save or directly edit `.uasset` files, and the Patch Baseline only validates JSON, policy, and exported revisions without loading or modifying UObjects.
 
 ## License
 

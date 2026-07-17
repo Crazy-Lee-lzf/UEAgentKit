@@ -197,14 +197,34 @@ scripts\ue-agent.cmd references --target-asset /Game/Environment/SM_Wall.SM_Wall
 scripts\ue-agent.cmd references --asset /Game/Characters/BP_Player.BP_Player
 ```
 
-## 9. 校验输出
+## 9. 校验声明式 Patch
+
+列出当前支持的声明式操作：
+
+```bat
+scripts\ue-agent.cmd patch operations
+```
+
+使用 Policy 和 Blueprint 导出快照校验 Patch：
+
+```bat
+scripts\ue-agent.cmd patch validate ^
+  --patch examples\patches\set-variable-default.json ^
+  --policy config\write-policy.example.json ^
+  --export Output\Blueprints ^
+  --report Output\patch-report.json
+```
+
+退出码为 `0` 表示合法，`1` 表示 Patch、Policy 或 Export 校验失败，`2` 表示输入路径不存在。该命令不加载或修改 UObject，也不会写入 `.uasset`。完整格式见 [`../spec/PATCH_SCHEMA.md`](../spec/PATCH_SCHEMA.md)。
+
+## 10. 校验输出
 
 通用资产目录：
 
 ```bat
 python <TOOL_ROOT>\scripts\ValidateAssetCatalog.py ^
   --output <TOOL_ROOT>\Output\AssetCatalog ^
-  --expect-exporter 0.2.6
+  --expect-exporter 0.3.0
 ```
 
 校验器会检查：
@@ -222,11 +242,11 @@ Blueprint 输出至少应检查：
 - Canonical JSON 可解析。
 - BPCTX 第一行符合 `H|BPCTX|1|...`。
 
-## 10. 只读行为
+## 11. 只读行为
 
-当前版本不保存项目资产，不直接编辑 `.uasset`。建议在重要项目中对 Content 目录进行版本控制或哈希对比，以确认导出前后资产文件不变。
+当前版本不保存项目资产，不直接编辑 `.uasset`。Patch Baseline 只读取 JSON、Policy 和导出快照，固定不加载或修改 UObject。建议在重要项目中对 Content 目录进行版本控制或哈希对比，以确认导出和校验前后资产文件不变。
 
-## 11. 清理
+## 12. 清理
 
 可以安全清理：
 

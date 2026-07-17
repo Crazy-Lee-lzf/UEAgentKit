@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "1.0",
+  "patchId": "set-component-property-example",
+  "projectName": "我的项目",
+  "description": "Validate changing a Blueprint component property.",
+  "assets": [
+    {
+      "assetPath": "/Game/UEAgentKitWriteTests/BP_PatchTarget.BP_PatchTarget",
+      "expectedRevision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expectedAssetClass": "/Script/Engine.Blueprint",
+      "operations": [
+        {
+          "operationId": "set-mesh-visible",
+          "operation": "setComponentProperty",
+          "target": {
+            "componentName": "StaticMesh",
+            "propertyPath": "Rendering.Visible"
+          },
+          "value": true
+        }
+      ]
+    }
+  ]
+}

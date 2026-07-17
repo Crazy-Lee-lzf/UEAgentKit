@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "1.0",
+  "validationEnabled": true,
+  "commitEnabled": false,
+  "allowedProjectNames": [
+    "我的项目"
+  ],
+  "allowedAssetRoots": [
+    "/Game/UEAgentKitWriteTests"
+  ],
+  "allowedOperations": [
+    "setVariableDefault",
+    "setComponentProperty",
+    "setPinDefault"
+  ],
+  "allowedAssetClasses": [
+    "/Script/Engine.Blueprint",
+    "/Script/UMGEditor.WidgetBlueprint",
+    "/Script/Engine.AnimBlueprint"
+  ],
+  "requireRevision": true,
+  "rejectDirtyPackages": true,
+  "maxAssetsPerPatch": 10,
+  "maxOperationsPerAsset": 32,
+  "maxValueBytes": 65536
+}
