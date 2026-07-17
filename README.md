@@ -37,6 +37,7 @@ UE Agent Kit 是一套面向 Unreal Engine 的开源只读资产分析工具。�
 - Blend Space / Aim Offset Reader 输出轴配置与稳定排序样本；DataTable Reader 输出 Row Struct、排序后的 Row Name 和结构化行数据。
 - 通用 Data Asset Reader 只读导出 Edit/Blueprint/Config/Searchable 属性、PrimaryAssetId 和对象/软对象路径，覆盖 Input Action、Input Mapping Context、Primary Asset Label 等派生资产。
 - Niagara System Reader 输出系统 Warmup/Fixed Tick/Bounds、User Parameter、Emitter、Script、Renderer、事件处理器和 Simulation Stage 摘要，不读取模拟缓存或 GPU 数据。
+- World Reader 输出 Persistent Level、World Settings、Streaming/World Partition、Actor/Component 类别计数与有界明细，并在 Actor Descriptor 元数据可用时只读输出外部 Actor 摘要，不主动加载外部 Actor，也不触发 BeginPlay 或关卡保存。
 - 不批量加载所有 UObject，适合项目级快速扫描。
 
 ### Blueprint 深度分析

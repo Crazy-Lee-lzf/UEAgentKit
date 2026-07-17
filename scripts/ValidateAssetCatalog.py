@@ -23,6 +23,7 @@ READER_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "data-table-v1": ("type", "readerVersion", "rowStructPath", "rowCount", "rowNames", "rows"),
     "data-asset-v1": ("type", "readerVersion", "classPath", "hasPrimaryAssetId", "primaryAssetType", "primaryAssetName", "primaryAssetId", "propertyCount", "skippedPropertyCount", "conversionFailureCount", "properties"),
     "niagara-system-v1": ("type", "readerVersion", "effectTypePath", "deterministic", "randomSeed", "warmup", "fixedTick", "fixedBounds", "systemSpawnScript", "systemUpdateScript", "exposedParameterCount", "exposedParameters", "emitterCount", "emitters"),
+    "world-v1": ("type", "readerVersion", "worldType", "persistentLevelPath", "persistentLevelPackage", "usingExternalActors", "loadedActorCount", "exportedActorCount", "actorListTruncated", "componentCount", "actorClassCounts", "componentClassCounts", "actors", "streamingLevelCount", "streamingLevels", "worldSettings", "worldPartition"),
 }
 
 READER_COUNT_ARRAY_PAIRS: dict[str, tuple[tuple[str, str], ...]] = {
@@ -38,6 +39,7 @@ READER_COUNT_ARRAY_PAIRS: dict[str, tuple[tuple[str, str], ...]] = {
     "data-table-v1": (("rowCount", "rows"), ("rowCount", "rowNames")),
     "data-asset-v1": (("propertyCount", "properties"),),
     "niagara-system-v1": (("exposedParameterCount", "exposedParameters"), ("emitterCount", "emitters")),
+    "world-v1": (("exportedActorCount", "actors"), ("streamingLevelCount", "streamingLevels")),
 }
 
 
@@ -169,6 +171,36 @@ def validate_asset(
                     or emitter.get("statelessModuleCount", 0) != 0
                 ):
                     errors.append("niagara-system-v1 unavailable stateless emitter has nonzero counts")
+        if reader_name == "world-v1":
+            loaded_actor_count = int(asset_details.get("loadedActorCount", 0))
+            exported_actor_count = int(asset_details.get("exportedActorCount", 0))
+            if exported_actor_count > loaded_actor_count:
+                errors.append("world-v1 exportedActorCount exceeds loadedActorCount")
+            if bool(asset_details.get("actorListTruncated")) != (exported_actor_count < loaded_actor_count):
+                errors.append("world-v1 actorListTruncated is inconsistent")
+            if sum(int(item.get("count", 0)) for item in asset_details.get("actorClassCounts", [])) != loaded_actor_count:
+                errors.append("world-v1 actorClassCounts are inconsistent")
+            if sum(int(item.get("count", 0)) for item in asset_details.get("componentClassCounts", [])) != int(asset_details.get("componentCount", 0)):
+                errors.append("world-v1 componentClassCounts are inconsistent")
+            for actor in asset_details.get("actors", []):
+                if sum(int(item.get("count", 0)) for item in actor.get("componentClasses", [])) != int(actor.get("componentCount", 0)):
+                    errors.append("world-v1 actor componentClasses are inconsistent")
+            world_partition = asset_details.get("worldPartition", {})
+            actor_desc_count = int(world_partition.get("actorDescCount", 0))
+            exported_actor_desc_count = int(world_partition.get("exportedActorDescCount", 0))
+            if exported_actor_desc_count != len(world_partition.get("actorDescs", [])):
+                errors.append("world-v1 exportedActorDescCount is inconsistent")
+            if exported_actor_desc_count > actor_desc_count:
+                errors.append("world-v1 exportedActorDescCount exceeds actorDescCount")
+            if bool(world_partition.get("actorDescListTruncated")) != (exported_actor_desc_count < actor_desc_count):
+                errors.append("world-v1 actorDescListTruncated is inconsistent")
+            if sum(int(item.get("count", 0)) for item in world_partition.get("actorDescClassCounts", [])) != actor_desc_count:
+                errors.append("world-v1 actorDescClassCounts are inconsistent")
+            actor_desc_metadata_available = bool(world_partition.get("actorDescMetadataAvailable"))
+            if not world_partition.get("available") and actor_desc_count != 0:
+                errors.append("world-v1 unavailable world partition has actor descriptions")
+            if not actor_desc_metadata_available and actor_desc_count != 0:
+                errors.append("world-v1 unavailable actor descriptor metadata has actor descriptions")
     if reader_status == "failed" and not reader_error:
         errors.append("failed specialized reader has empty assetReaderError")
     if len(symbols) != 1 or symbols[0].get("kind") != "asset":
