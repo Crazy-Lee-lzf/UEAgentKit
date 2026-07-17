@@ -11,12 +11,14 @@
   "allowedOperations": [
     "setVariableDefault",
     "setComponentProperty",
-    "setPinDefault"
+    "setPinDefault",
+    "setBlueprintDescription"
   ],
   "allowedAssetClasses": [
     "/Script/Engine.Blueprint",
     "/Script/UMGEditor.WidgetBlueprint",
-    "/Script/Engine.AnimBlueprint"
+    "/Script/Engine.AnimBlueprint",
+    "/Script/ControlRigDeveloper.ControlRigBlueprint"
   ],
   "requireRevision": true,
   "rejectDirtyPackages": true,

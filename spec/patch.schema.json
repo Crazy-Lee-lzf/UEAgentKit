@@ -91,6 +91,9 @@
               },
               {
                 "$ref": "#/$defs/setPinDefault"
+              },
+              {
+                "$ref": "#/$defs/setBlueprintDescription"
               }
             ]
           }
@@ -217,6 +220,29 @@
                   "maxLength": 256
                 }
               }
+            }
+          }
+        }
+      ]
+    },
+    "setBlueprintDescription": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "operation": {
+              "const": "setBlueprintDescription"
+            },
+            "target": {
+              "type": "object",
+              "additionalProperties": false,
+              "maxProperties": 0
+            },
+            "value": {
+              "type": "string",
+              "maxLength": 4096
             }
           }
         }

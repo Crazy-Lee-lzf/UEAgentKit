@@ -48,6 +48,7 @@ def make_policy() -> dict[str, Any]:
             "setVariableDefault",
             "setComponentProperty",
             "setPinDefault",
+            "setBlueprintDescription",
         ],
         "allowedAssetClasses": [
             "/Script/Engine.Blueprint",
@@ -184,6 +185,34 @@ class PatchValidationTests(unittest.TestCase):
         self.assertFalse(result["willWriteDisk"])
         self.assertTrue(result["commitSupported"])
         self.assertTrue(all(item["valid"] for item in result["assets"][0]["operations"]))
+
+    def test_blueprint_description_operation_is_valid(self) -> None:
+        self.patch["assets"][0]["operations"] = [
+            {
+                "operationId": "set-description",
+                "operation": "setBlueprintDescription",
+                "target": {},
+                "value": "Verified description.",
+            }
+        ]
+        self.flush()
+        result = self.validate()
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["summary"]["validatedOperations"], 1)
+        expected = result["assets"][0]["operations"][0]["expectedChange"]
+        self.assertEqual(expected["kind"], "blueprint-description")
+
+    def test_blueprint_description_rejects_nonempty_target(self) -> None:
+        self.patch["assets"][0]["operations"] = [
+            {
+                "operationId": "set-description",
+                "operation": "setBlueprintDescription",
+                "target": {"unexpected": True},
+                "value": "Verified description.",
+            }
+        ]
+        self.flush()
+        self.assertIn("unknown-field", self.error_codes(self.validate()))
 
     def test_commit_enabled_policy_reports_executor_support(self) -> None:
         self.policy["commitEnabled"] = True

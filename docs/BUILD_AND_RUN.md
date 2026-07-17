@@ -244,9 +244,10 @@ scripts\RunPatch.cmd ^
 当前限制：
 
 - 每次一个 Blueprint、一个 Operation。
-- 支持 `setVariableDefault`、`setComponentProperty`、`setPinDefault`。
+- 支持 `setVariableDefault`、`setComponentProperty`、`setPinDefault`、`setBlueprintDescription`。
 - 变量和组件属性支持 Bool、整数、浮点、String、Name、Text。
 - Pin 支持未连接、可编辑的输入 Pin，值为布尔、数值或字符串。
+- 已验证普通 Blueprint、Widget、Anim、Actor Component、Function Library、Macro Library、Interface 和 Control Rig。
 - 不支持数组、Set、Map、对象引用和 Blueprint 结构性增删。
 
 ## 10. 校验输出
@@ -256,7 +257,7 @@ scripts\RunPatch.cmd ^
 ```bat
 python <TOOL_ROOT>\scripts\ValidateAssetCatalog.py ^
   --output <TOOL_ROOT>\Output\AssetCatalog ^
-  --expect-exporter 0.3.1
+  --expect-exporter 0.3.2
 ```
 
 校验器会检查：

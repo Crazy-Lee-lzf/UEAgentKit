@@ -32,7 +32,12 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
 
             [item["operation"] for item in operations],
 
-            ["setVariableDefault", "setComponentProperty", "setPinDefault"],
+            [
+                "setVariableDefault",
+                "setComponentProperty",
+                "setPinDefault",
+                "setBlueprintDescription",
+            ],
 
         )
 
@@ -124,11 +129,11 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
 
         )
 
-        self.assertIn('version = "0.3.1"', pyproject)
+        self.assertIn('version = "0.3.2"', pyproject)
 
-        self.assertEqual(plugin["VersionName"], "0.3.1")
+        self.assertEqual(plugin["VersionName"], "0.3.2")
 
-        self.assertEqual(plugin["Version"], 8)
+        self.assertEqual(plugin["Version"], 9)
 
 
 

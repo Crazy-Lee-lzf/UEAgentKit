@@ -480,6 +480,26 @@ namespace BlueprintPatchCommandletPrivate
 			return false;
 		}
 
+		if (Operation.Equals(TEXT("setBlueprintDescription"), ESearchCase::CaseSensitive))
+		{
+			FProperty* Property = FindFProperty<FProperty>(
+				UBlueprint::StaticClass(),
+				GET_MEMBER_NAME_CHECKED(UBlueprint, BlueprintDescription));
+			if (!Property)
+			{
+				OutError = TEXT("BlueprintDescription property is unavailable.");
+				return false;
+			}
+
+			OutTarget.Kind = EResolvedTargetKind::Property;
+			OutTarget.OwnerObject = Blueprint;
+			OutTarget.Property = Property;
+			OutTarget.ValueAddress = Property->ContainerPtrToValuePtr<void>(Blueprint);
+			OutTarget.TypeName = Property->GetClass()->GetName();
+			OutTarget.Description = TEXT("blueprint:description");
+			return true;
+		}
+
 		if (Operation.Equals(TEXT("setVariableDefault"), ESearchCase::CaseSensitive))
 		{
 			FString VariableName;
@@ -928,7 +948,8 @@ int32 UBlueprintPatchCommandlet::Main(const FString& Params)
 	}
 	if (!Operation.Equals(TEXT("setVariableDefault"), ESearchCase::CaseSensitive)
 		&& !Operation.Equals(TEXT("setComponentProperty"), ESearchCase::CaseSensitive)
-		&& !Operation.Equals(TEXT("setPinDefault"), ESearchCase::CaseSensitive))
+		&& !Operation.Equals(TEXT("setPinDefault"), ESearchCase::CaseSensitive)
+		&& !Operation.Equals(TEXT("setBlueprintDescription"), ESearchCase::CaseSensitive))
 	{
 		UE_LOG(LogBlueprintPatch, Error, TEXT("Operation is not implemented: %s"), *Operation);
 		return 18;
@@ -1052,7 +1073,7 @@ int32 UBlueprintPatchCommandlet::Main(const FString& Params)
 	const FString AfterRevision = HashPackageFile(Package);
 	const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 	Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-	Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.1"));
+	Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.2"));
 	Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 	Report->SetStringField(TEXT("patchId"), PatchId);
 	Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());

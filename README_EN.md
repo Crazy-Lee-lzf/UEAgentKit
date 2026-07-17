@@ -6,7 +6,7 @@
 
 UE Agent Kit is an open-source, read-only Unreal Engine asset analysis toolkit. Its Editor plugin exports the project asset catalog, Asset Registry metadata, dependencies, and Blueprint semantics. A Python CLI and SQLite then provide a project-wide searchable index.
 
-The current release is **0.3.1** and targets **Unreal Engine 5.6**. It implements the low-risk Blueprint write loop: policy and revision validation, in-memory dry run, Blueprint compilation, rollback, external backup, and explicit commit.
+The current release is **0.3.2** and targets **Unreal Engine 5.6**. Low-risk Blueprint writes are verified for ordinary Blueprints, Widget, Anim, Actor Component, Function Library, Macro Library, Interface, and Control Rig assets.
 
 > **AI Generated**: Most code and documentation in this project are AI-generated and reviewed through human inspection, UE 5.6 compilation, automated tests, and real-project regression validation.
 
@@ -168,12 +168,12 @@ scripts\RunPatch.cmd ^
   -BackupDir "Backups\Patches"
 ```
 
-The current executor supports `setVariableDefault`, `setComponentProperty`, and `setPinDefault`. One execution is limited to one Blueprint and one operation; values are currently limited to Boolean, numeric, and string-like scalars.
+The current executor supports `setVariableDefault`, `setComponentProperty`, `setPinDefault`, and `setBlueprintDescription`. One execution is limited to one Blueprint and one operation; values are currently limited to Boolean, numeric, and string-like scalars.
 
 ### 6. Validate the asset catalog
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.3.1
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.3.2
 ```
 
 See [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md) for installation and full command details.

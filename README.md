@@ -6,7 +6,7 @@
 
 UE Agent Kit 是一套面向 Unreal Engine 的开源只读资产分析工具。它通过 UE Editor 插件导出项目资产目录、Asset Registry 元数据、依赖关系和 Blueprint 语义，再使用 Python CLI 与 SQLite 建立项目级索引。
 
-当前版本为 **0.3.1**，支持 **Unreal Engine 5.6**。已实现普通 Blueprint 的低风险属性写入闭环：Policy 与 Revision 预校验、内存 Dry Run、Blueprint 编译、回滚、外部备份和显式 Commit。
+当前版本为 **0.3.2**，支持 **Unreal Engine 5.6**。Blueprint 低风险写入已覆盖普通 Blueprint、Widget、Anim、Actor Component、Function Library、Macro Library、Interface 和 Control Rig。
 
 > **AI Generated**：本项目的代码和文档主要由 AI 生成，并通过人工审查、UE 5.6 编译、自动化测试和真实工程回归验证。
 
@@ -168,12 +168,12 @@ scripts\RunPatch.cmd ^
   -BackupDir "Backups\Patches"
 ```
 
-当前支持 `setVariableDefault`、`setComponentProperty` 和 `setPinDefault`。每次执行仅允许一个 Blueprint 和一个 Operation；值类型暂限布尔、数值和字符串类标量。
+当前支持 `setVariableDefault`、`setComponentProperty`、`setPinDefault` 和 `setBlueprintDescription`。每次执行仅允许一个 Blueprint 和一个 Operation；值类型暂限布尔、数值和字符串类标量。
 
 ### 6. 校验通用资产导出
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.3.1
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.3.2
 ```
 
 完整参数和安装说明见 [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md)。

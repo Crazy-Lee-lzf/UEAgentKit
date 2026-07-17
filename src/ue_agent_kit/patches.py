@@ -75,6 +75,13 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
         },
         expected_change="pin-default",
     ),
+    "setBlueprintDescription": OperationSpec(
+        name="setBlueprintDescription",
+        risk="low",
+        target_fields=(),
+        target_validators={},
+        expected_change="blueprint-description",
+    ),
 }
 
 

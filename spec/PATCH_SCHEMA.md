@@ -153,6 +153,21 @@ scripts\RunPatch.cmd ^
 
 `propertyPath` 支持用点号进入嵌套 Struct；当前最终属性仍限定为标量。
 
+### setBlueprintDescription
+
+修改 Blueprint 资产自身的描述文本，适用于没有成员变量或普通 Pin 的 Blueprint 子类型：
+
+```json
+{
+  "operationId": "set-description",
+  "operation": "setBlueprintDescription",
+  "target": {},
+  "value": "UEAgentKit verified Blueprint write."
+}
+```
+
+该操作已在 Function Library、Macro Library、Blueprint Interface 和 Control Rig Blueprint 上完成 Dry Run、Commit、备份和独立重载验证。
+
 ### setPinDefault
 
 修改指定 Graph/Node 的未连接输入 Pin 默认值：

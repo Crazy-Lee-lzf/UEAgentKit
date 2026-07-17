@@ -1,0 +1,41 @@
+{
+
+  "schemaVersion": "1.0",
+
+  "patchId": "set-blueprint-description-example",
+
+  "projectName": "我的项目",
+
+  "description": "Set a low-risk Blueprint asset description.",
+
+  "assets": [
+
+    {
+
+      "assetPath": "/Game/UEAgentKitWriteTests/BFL_PatchTarget.BFL_PatchTarget",
+
+      "expectedRevision": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+
+      "expectedAssetClass": "/Script/Engine.Blueprint",
+
+      "operations": [
+
+        {
+
+          "operationId": "set-description",
+
+          "operation": "setBlueprintDescription",
+
+          "target": {},
+
+          "value": "UEAgentKit verified Blueprint write."
+
+        }
+
+      ]
+
+    }
+
+  ]
+
+}
