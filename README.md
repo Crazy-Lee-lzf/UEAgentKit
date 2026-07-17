@@ -35,6 +35,7 @@ UE Agent Kit 是一套面向 Unreal Engine 的开源只读资产分析工具。�
 - Texture2D Reader 输出 Source 尺寸/格式、Platform Data 可用性、压缩、sRGB、LOD Group、Mip、Filter、寻址、Streaming 和 Virtual Texture 设置，不读取像素或 BulkData。
 - Anim Sequence Reader 输出 Skeleton、时长/采样、Additive、Root Motion、Notify、Curve 和 Sync Marker；Anim Montage Reader 输出 Section、Slot、Segment、Notify 和 Branching Point 摘要。
 - Blend Space / Aim Offset Reader 输出轴配置与稳定排序样本；DataTable Reader 输出 Row Struct、排序后的 Row Name 和结构化行数据。
+- 通用 Data Asset Reader 只读导出 Edit/Blueprint/Config/Searchable 属性、PrimaryAssetId 和对象/软对象路径，覆盖 Input Action、Input Mapping Context、Primary Asset Label 等派生资产。
 - 不批量加载所有 UObject，适合项目级快速扫描。
 
 ### Blueprint 深度分析

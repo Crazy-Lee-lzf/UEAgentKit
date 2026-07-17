@@ -27,6 +27,7 @@
 #include "MaterialShaderType.h"
 #include "PixelFormat.h"
 #include "StaticParameterSet.h"
+#include "Engine/DataAsset.h"
 #include "Engine/DataTable.h"
 #include "Engine/Font.h"
 #include "Engine/Texture2D.h"
@@ -38,6 +39,7 @@
 #include "ReferenceSkeleton.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "JsonObjectConverter.h"
 #include "UObject/UnrealType.h"
 
 namespace AssetReaderRegistryPrivate
@@ -1495,6 +1497,107 @@ namespace AssetReaderRegistryPrivate
 		OutDetails->SetArrayField(TEXT("rows"), ParsedRows);
 		return EAssetReaderStatus::Success;
 	}
+
+	EAssetReaderStatus ReadDataAsset(
+		const FAssetData& AssetData,
+		TSharedRef<FJsonObject>& OutDetails,
+		FString& OutError)
+	{
+		UDataAsset* DataAsset = Cast<UDataAsset>(AssetData.GetAsset());
+		if (DataAsset == nullptr)
+		{
+			OutError = TEXT("Failed to load Data Asset.");
+			return EAssetReaderStatus::Failed;
+		}
+
+		OutDetails->SetStringField(TEXT("type"), TEXT("data-asset"));
+		OutDetails->SetNumberField(TEXT("readerVersion"), 1);
+		OutDetails->SetStringField(TEXT("classPath"), DataAsset->GetClass()->GetPathName());
+		const FPrimaryAssetId PrimaryAssetId = DataAsset->GetPrimaryAssetId();
+		const bool bHasPrimaryAssetId = PrimaryAssetId.IsValid();
+		OutDetails->SetBoolField(TEXT("hasPrimaryAssetId"), bHasPrimaryAssetId);
+		OutDetails->SetStringField(TEXT("primaryAssetType"), bHasPrimaryAssetId ? PrimaryAssetId.PrimaryAssetType.ToString() : FString());
+		OutDetails->SetStringField(TEXT("primaryAssetName"), bHasPrimaryAssetId ? PrimaryAssetId.PrimaryAssetName.ToString() : FString());
+		OutDetails->SetStringField(TEXT("primaryAssetId"), bHasPrimaryAssetId ? PrimaryAssetId.ToString() : FString());
+
+		const EPropertyFlags IncludeFlags = CPF_Edit | CPF_BlueprintVisible | CPF_Config | CPF_AssetRegistrySearchable;
+		const EPropertyFlags SkipFlags = CPF_Transient | CPF_DuplicateTransient | CPF_NonPIEDuplicateTransient | CPF_Deprecated;
+		TArray<FProperty*> Properties;
+		int32 SkippedPropertyCount = 0;
+		for (TFieldIterator<FProperty> Iterator(DataAsset->GetClass(), EFieldIterationFlags::IncludeSuper); Iterator; ++Iterator)
+		{
+			FProperty* Property = *Iterator;
+			if (!Property->HasAnyPropertyFlags(IncludeFlags) || Property->HasAnyPropertyFlags(SkipFlags))
+			{
+				++SkippedPropertyCount;
+				continue;
+			}
+			Properties.Add(Property);
+		}
+		Properties.Sort([](const FProperty& Left, const FProperty& Right)
+		{
+			return Left.GetName() < Right.GetName();
+		});
+
+		FJsonObjectConverter::CustomExportCallback ExportCallback;
+		ExportCallback.BindLambda([](FProperty* Property, const void* Value) -> TSharedPtr<FJsonValue>
+		{
+			if (const FSoftObjectProperty* SoftObjectProperty = CastField<FSoftObjectProperty>(Property))
+			{
+				const FSoftObjectPtr SoftObject = SoftObjectProperty->GetPropertyValue(Value);
+				return MakeShared<FJsonValueString>(SoftObject.ToSoftObjectPath().ToString());
+			}
+			if (const FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property))
+			{
+				const UObject* Object = ObjectProperty->GetObjectPropertyValue(Value);
+				return MakeShared<FJsonValueString>(ObjectPathOrEmpty(Object));
+			}
+			return nullptr;
+		});
+
+		TArray<TSharedPtr<FJsonValue>> PropertyValues;
+		int32 ConversionFailureCount = 0;
+		for (FProperty* Property : Properties)
+		{
+			const void* Value = Property->ContainerPtrToValuePtr<void>(DataAsset);
+			TSharedPtr<FJsonValue> JsonValue = FJsonObjectConverter::UPropertyToJsonValue(
+				Property,
+				Value,
+				0,
+				static_cast<int64>(SkipFlags),
+				&ExportCallback,
+				nullptr,
+				EJsonObjectConversionFlags::SuppressClassNameForPersistentObject);
+
+			TSharedRef<FJsonObject> PropertyObject = MakeShared<FJsonObject>();
+			PropertyObject->SetStringField(TEXT("name"), Property->GetName());
+			PropertyObject->SetStringField(TEXT("displayName"), Property->GetDisplayNameText().ToString());
+			PropertyObject->SetStringField(TEXT("cppType"), Property->GetCPPType());
+			PropertyObject->SetStringField(TEXT("propertyClass"), Property->GetClass()->GetName());
+			PropertyObject->SetStringField(TEXT("ownerClassPath"), Property->GetOwnerClass() != nullptr ? Property->GetOwnerClass()->GetPathName() : FString());
+			PropertyObject->SetStringField(TEXT("flagsHex"), FString::Printf(TEXT("0x%016llx"), static_cast<uint64>(Property->GetPropertyFlags())));
+			PropertyObject->SetBoolField(TEXT("conversionSucceeded"), JsonValue.IsValid());
+			if (JsonValue.IsValid())
+			{
+				PropertyObject->SetField(TEXT("value"), JsonValue);
+			}
+			else
+			{
+				++ConversionFailureCount;
+				FString ExportedText;
+				Property->ExportTextItem_Direct(ExportedText, Value, nullptr, DataAsset, PPF_None);
+				PropertyObject->SetStringField(TEXT("fallbackExportText"), ExportedText.Left(262144));
+				PropertyObject->SetBoolField(TEXT("fallbackTruncated"), ExportedText.Len() > 262144);
+			}
+			PropertyValues.Add(MakeShared<FJsonValueObject>(PropertyObject));
+		}
+		OutDetails->SetNumberField(TEXT("propertyCount"), PropertyValues.Num());
+		OutDetails->SetNumberField(TEXT("skippedPropertyCount"), SkippedPropertyCount);
+		OutDetails->SetNumberField(TEXT("conversionFailureCount"), ConversionFailureCount);
+		OutDetails->SetArrayField(TEXT("properties"), PropertyValues);
+		return EAssetReaderStatus::Success;
+	}
+
 }
 
 EAssetReaderStatus FAssetReaderRegistry::ReadAssetDetails(
@@ -1566,6 +1669,11 @@ EAssetReaderStatus FAssetReaderRegistry::ReadAssetDetails(
 	{
 		OutReaderName = TEXT("data-table-v1");
 		return AssetReaderRegistryPrivate::ReadDataTable(AssetData, OutDetails, OutError);
+	}
+	if (const UClass* AssetClass = AssetData.GetClass(); AssetClass != nullptr && AssetClass->IsChildOf(UDataAsset::StaticClass()))
+	{
+		OutReaderName = TEXT("data-asset-v1");
+		return AssetReaderRegistryPrivate::ReadDataAsset(AssetData, OutDetails, OutError);
 	}
 	return EAssetReaderStatus::NotHandled;
 }

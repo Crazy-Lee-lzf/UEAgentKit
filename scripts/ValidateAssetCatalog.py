@@ -21,6 +21,7 @@ READER_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "anim-montage-v1": ("type", "readerVersion", "skeletonPath", "playLength", "rateScale", "samplingFrameRate", "hasRootMotion", "autoBlendOut", "sectionCount", "sections", "slotCount", "slots", "notifyCount", "notifies", "notifyReadError", "branchingPointMarkerCount"),
     "blend-space-v1": ("type", "readerVersion", "blendSpaceType", "skeletonPath", "notifyTriggerMode", "axes", "sampleCount", "samples"),
     "data-table-v1": ("type", "readerVersion", "rowStructPath", "rowCount", "rowNames", "rows"),
+    "data-asset-v1": ("type", "readerVersion", "classPath", "hasPrimaryAssetId", "primaryAssetType", "primaryAssetName", "primaryAssetId", "propertyCount", "skippedPropertyCount", "conversionFailureCount", "properties"),
 }
 
 READER_COUNT_ARRAY_PAIRS: dict[str, tuple[tuple[str, str], ...]] = {
@@ -34,6 +35,7 @@ READER_COUNT_ARRAY_PAIRS: dict[str, tuple[tuple[str, str], ...]] = {
     "anim-montage-v1": (("sectionCount", "sections"), ("slotCount", "slots"), ("notifyCount", "notifies")),
     "blend-space-v1": (("sampleCount", "samples"),),
     "data-table-v1": (("rowCount", "rows"), ("rowCount", "rowNames")),
+    "data-asset-v1": (("propertyCount", "properties"),),
 }
 
 
@@ -124,6 +126,28 @@ def validate_asset(
             source = asset_details.get("source", {})
             if source.get("available") and (asset_details.get("sizeX", 0) <= 0 or asset_details.get("sizeY", 0) <= 0):
                 errors.append("texture-2d-v1 source is available but dimensions are invalid")
+        if reader_name == "data-asset-v1":
+            failed_properties = [
+                item.get("name", "")
+                for item in asset_details.get("properties", [])
+                if not item.get("conversionSucceeded")
+            ]
+            if asset_details.get("conversionFailureCount") != len(failed_properties):
+                errors.append("data-asset-v1 conversionFailureCount is inconsistent")
+            has_primary_asset_id = bool(asset_details.get("hasPrimaryAssetId"))
+            primary_asset_fields = (
+                asset_details.get("primaryAssetType", ""),
+                asset_details.get("primaryAssetName", ""),
+                asset_details.get("primaryAssetId", ""),
+            )
+            if has_primary_asset_id and not all(primary_asset_fields):
+                errors.append("data-asset-v1 valid PrimaryAssetId fields are incomplete")
+            if not has_primary_asset_id and any(primary_asset_fields):
+                errors.append("data-asset-v1 invalid PrimaryAssetId fields must be empty")
+            if failed_properties:
+                errors.append(
+                    "data-asset-v1 property conversion failures: " + ", ".join(failed_properties)
+                )
     if reader_status == "failed" and not reader_error:
         errors.append("failed specialized reader has empty assetReaderError")
     if len(symbols) != 1 or symbols[0].get("kind") != "asset":
