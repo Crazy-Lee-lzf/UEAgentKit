@@ -8,6 +8,35 @@ from pathlib import Path
 from typing import Any
 
 
+READER_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
+    "static-mesh-v1": ("type", "readerVersion", "lodCount", "lods", "materialSlotCount", "materials", "bounds", "lightmap", "nanite", "collision", "socketCount", "sockets"),
+    "skeletal-mesh-v1": ("type", "readerVersion", "skeletonPath", "physicsAssetPath", "lodCount", "bounds", "boneCount", "rawBoneCount", "rootBoneName", "materialSlotCount", "materials", "morphTargetCount", "morphTargets", "meshSocketCount", "meshSockets", "activeSocketCount", "activeSockets"),
+    "skeleton-v1": ("type", "readerVersion", "boneCount", "rawBoneCount", "rootBoneName", "bones", "virtualBoneCount", "virtualBones", "socketCount", "sockets", "previewMeshPath", "compatibleSkeletonCount", "compatibleSkeletons", "curveMetadataCount", "curveMetadataNames"),
+    "physics-asset-v1": ("type", "readerVersion", "previewSkeletalMeshPath", "bodyCount", "constraintCount", "disabledCollisionPairCount", "boundsBodyCount", "boundsBodies", "physicalAnimationProfileCount", "physicalAnimationProfiles", "constraintProfileCount", "constraintProfiles", "totalShapeCount", "bodies", "constraints"),
+    "material-v1": ("type", "readerVersion", "domain", "blendMode", "twoSided", "shadingModels", "opacityMaskClipValue", "expressionCount", "expressionClasses"),
+    "material-instance-v1": ("type", "readerVersion", "parentPath", "blendMode", "twoSided", "shadingModels", "scalarParameterCount", "scalarParameters", "vectorParameterCount", "vectorParameters", "textureParameterCount", "textureParameters", "staticSwitchParameterCount", "staticSwitchParameters"),
+    "material-function-v1": ("type", "readerVersion", "description", "caption", "exposeToLibrary", "inputCount", "inputs", "outputCount", "outputs", "expressionCount", "expressionClasses", "commentCount"),
+    "texture-2d-v1": ("type", "readerVersion", "source", "platform", "sizeX", "sizeY", "mipCount", "compressionSettings", "srgb", "lodGroup", "mipGenSettings", "filter", "addressX", "addressY", "neverStream", "virtualTextureStreaming"),
+    "anim-sequence-v1": ("type", "readerVersion", "skeletonPath", "playLength", "rateScale", "sampledKeyCount", "samplingFrameRate", "retargetSource", "additiveType", "basePoseType", "rootMotion", "notifyCount", "notifies", "notifyReadError", "curveCount", "curves", "syncMarkerCount", "syncMarkers", "uniqueMarkerNames"),
+    "anim-montage-v1": ("type", "readerVersion", "skeletonPath", "playLength", "rateScale", "samplingFrameRate", "hasRootMotion", "autoBlendOut", "sectionCount", "sections", "slotCount", "slots", "notifyCount", "notifies", "notifyReadError", "branchingPointMarkerCount"),
+    "blend-space-v1": ("type", "readerVersion", "blendSpaceType", "skeletonPath", "notifyTriggerMode", "axes", "sampleCount", "samples"),
+    "data-table-v1": ("type", "readerVersion", "rowStructPath", "rowCount", "rowNames", "rows"),
+}
+
+READER_COUNT_ARRAY_PAIRS: dict[str, tuple[tuple[str, str], ...]] = {
+    "static-mesh-v1": (("lodCount", "lods"), ("materialSlotCount", "materials"), ("socketCount", "sockets")),
+    "skeletal-mesh-v1": (("materialSlotCount", "materials"), ("morphTargetCount", "morphTargets"), ("meshSocketCount", "meshSockets"), ("activeSocketCount", "activeSockets")),
+    "skeleton-v1": (("boneCount", "bones"), ("virtualBoneCount", "virtualBones"), ("socketCount", "sockets"), ("compatibleSkeletonCount", "compatibleSkeletons"), ("curveMetadataCount", "curveMetadataNames")),
+    "physics-asset-v1": (("bodyCount", "bodies"), ("constraintCount", "constraints"), ("boundsBodyCount", "boundsBodies")),
+    "material-instance-v1": (("scalarParameterCount", "scalarParameters"), ("vectorParameterCount", "vectorParameters"), ("doubleVectorParameterCount", "doubleVectorParameters"), ("textureParameterCount", "textureParameters"), ("fontParameterCount", "fontParameters"), ("staticSwitchParameterCount", "staticSwitchParameters")),
+    "material-function-v1": (("inputCount", "inputs"), ("outputCount", "outputs")),
+    "anim-sequence-v1": (("notifyCount", "notifies"), ("curveCount", "curves"), ("syncMarkerCount", "syncMarkers")),
+    "anim-montage-v1": (("sectionCount", "sections"), ("slotCount", "slots"), ("notifyCount", "notifies")),
+    "blend-space-v1": (("sampleCount", "samples"),),
+    "data-table-v1": (("rowCount", "rows"), ("rowCount", "rowNames")),
+}
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Validate UE Agent Kit generic asset catalog output.")
     parser.add_argument("--output", required=True, type=Path)
@@ -73,6 +102,28 @@ def validate_asset(
         errors.append("assetReader is empty")
     if reader_status == "success" and (not isinstance(asset_details, dict) or not asset_details):
         errors.append("successful specialized reader has empty assetDetails")
+    if reader_status == "success" and reader_name in READER_REQUIRED_FIELDS:
+        missing_fields = [
+            field for field in READER_REQUIRED_FIELDS[reader_name] if field not in asset_details
+        ]
+        if missing_fields:
+            errors.append(
+                f"{reader_name} assetDetails missing fields: {', '.join(missing_fields)}"
+            )
+        for count_field, array_field in READER_COUNT_ARRAY_PAIRS.get(reader_name, ()):
+            array_value = asset_details.get(array_field)
+            if not isinstance(array_value, list):
+                errors.append(f"{reader_name}.{array_field} is not an array")
+            elif asset_details.get(count_field) != len(array_value):
+                errors.append(
+                    f"{reader_name}.{count_field} does not match {array_field} length"
+                )
+        if reader_name in {"anim-sequence-v1", "anim-montage-v1"} and asset_details.get("notifyReadError"):
+            errors.append(f"{reader_name} notifyReadError is not empty")
+        if reader_name == "texture-2d-v1":
+            source = asset_details.get("source", {})
+            if source.get("available") and (asset_details.get("sizeX", 0) <= 0 or asset_details.get("sizeY", 0) <= 0):
+                errors.append("texture-2d-v1 source is available but dimensions are invalid")
     if reader_status == "failed" and not reader_error:
         errors.append("failed specialized reader has empty assetReaderError")
     if len(symbols) != 1 or symbols[0].get("kind") != "asset":

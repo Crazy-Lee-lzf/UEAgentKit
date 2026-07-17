@@ -1,6 +1,15 @@
 #include "AssetReaders/AssetReaderRegistry.h"
 
 #include "Animation/MorphTarget.h"
+#include "Animation/AnimCompositeBase.h"
+#include "Animation/AnimCurveTypes.h"
+#include "Animation/AnimMontage.h"
+#include "Animation/AnimNotifies/AnimNotify.h"
+#include "Animation/AnimNotifies/AnimNotifyState.h"
+#include "Animation/AnimSequence.h"
+#include "Animation/AnimSequenceBase.h"
+#include "Animation/AnimTypes.h"
+#include "Animation/BlendSpace.h"
 #include "Animation/Skeleton.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/SkeletalMeshSocket.h"
@@ -18,6 +27,7 @@
 #include "MaterialShaderType.h"
 #include "PixelFormat.h"
 #include "StaticParameterSet.h"
+#include "Engine/DataTable.h"
 #include "Engine/Font.h"
 #include "Engine/Texture2D.h"
 #include "PhysicsEngine/AggregateGeom.h"
@@ -26,6 +36,9 @@
 #include "PhysicsEngine/PhysicsConstraintTemplate.h"
 #include "PhysicsEngine/SkeletalBodySetup.h"
 #include "ReferenceSkeleton.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "UObject/UnrealType.h"
 
 namespace AssetReaderRegistryPrivate
 {
@@ -202,6 +215,147 @@ namespace AssetReaderRegistryPrivate
 			return Enum->GetNameStringByValue(static_cast<int64>(Value));
 		}
 		return FString::FromInt(static_cast<int32>(Value));
+	}
+
+	TSharedRef<FJsonObject> FrameRateToJson(const FFrameRate& Value)
+	{
+		TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
+		Json->SetNumberField(TEXT("numerator"), Value.Numerator);
+		Json->SetNumberField(TEXT("denominator"), Value.Denominator);
+		Json->SetNumberField(TEXT("decimal"), Value.IsValid() ? Value.AsDecimal() : 0.0);
+		return Json;
+	}
+
+	const TCHAR* AdditiveAnimationTypeToString(const EAdditiveAnimationType Value)
+	{
+		switch (Value)
+		{
+		case AAT_None: return TEXT("None");
+		case AAT_LocalSpaceBase: return TEXT("LocalSpaceBase");
+		case AAT_RotationOffsetMeshSpace: return TEXT("RotationOffsetMeshSpace");
+		default: return TEXT("Unknown");
+		}
+	}
+
+	const TCHAR* AdditiveBasePoseTypeToString(const EAdditiveBasePoseType Value)
+	{
+		switch (Value)
+		{
+		case ABPT_None: return TEXT("None");
+		case ABPT_RefPose: return TEXT("ReferencePose");
+		case ABPT_AnimScaled: return TEXT("AnimationScaled");
+		case ABPT_AnimFrame: return TEXT("AnimationFrame");
+		case ABPT_LocalAnimFrame: return TEXT("LocalAnimationFrame");
+		default: return TEXT("Unknown");
+		}
+	}
+
+	const TCHAR* RootMotionRootLockToString(const ERootMotionRootLock::Type Value)
+	{
+		switch (Value)
+		{
+		case ERootMotionRootLock::RefPose: return TEXT("ReferencePose");
+		case ERootMotionRootLock::AnimFirstFrame: return TEXT("AnimationFirstFrame");
+		case ERootMotionRootLock::Zero: return TEXT("Zero");
+		default: return TEXT("Unknown");
+		}
+	}
+
+	const TCHAR* NotifyTriggerModeToString(const ENotifyTriggerMode::Type Value)
+	{
+		switch (Value)
+		{
+		case ENotifyTriggerMode::AllAnimations: return TEXT("AllAnimations");
+		case ENotifyTriggerMode::HighestWeightedAnimation: return TEXT("HighestWeightedAnimation");
+		case ENotifyTriggerMode::None: return TEXT("None");
+		default: return TEXT("Unknown");
+		}
+	}
+
+	struct FSortedNotify
+	{
+		const FAnimNotifyEvent* Event = nullptr;
+		FString SortKey;
+	};
+
+	TArray<TSharedPtr<FJsonValue>> BuildNotifyArray(UAnimSequenceBase* Asset, FString& OutError)
+	{
+		TArray<TSharedPtr<FJsonValue>> Result;
+		const FArrayProperty* ArrayProperty = FindFProperty<FArrayProperty>(Asset->GetClass(), TEXT("Notifies"));
+		const FStructProperty* StructProperty = ArrayProperty != nullptr ? CastField<FStructProperty>(ArrayProperty->Inner) : nullptr;
+		if (ArrayProperty == nullptr || StructProperty == nullptr || StructProperty->Struct != FAnimNotifyEvent::StaticStruct())
+		{
+			OutError = TEXT("Notifies property is unavailable or has an unexpected type.");
+			return Result;
+		}
+
+		FScriptArrayHelper Helper(ArrayProperty, ArrayProperty->ContainerPtrToValuePtr<void>(Asset));
+		TArray<FSortedNotify> Sorted;
+		Sorted.Reserve(Helper.Num());
+		for (int32 Index = 0; Index < Helper.Num(); ++Index)
+		{
+			const FAnimNotifyEvent* Event = reinterpret_cast<const FAnimNotifyEvent*>(Helper.GetRawPtr(Index));
+			const FString Name = !Event->NotifyName.IsNone() ? Event->NotifyName.ToString()
+				: (Event->Notify != nullptr ? Event->Notify->GetName()
+					: (Event->NotifyStateClass != nullptr ? Event->NotifyStateClass->GetName() : FString()));
+			FSortedNotify Record;
+			Record.Event = Event;
+			Record.SortKey = FString::Printf(TEXT("%020.9f|%08d|%s"), Event->GetTriggerTime(), Event->TrackIndex, *Name);
+			Sorted.Add(MoveTemp(Record));
+		}
+		Sorted.Sort([](const FSortedNotify& Left, const FSortedNotify& Right) { return Left.SortKey < Right.SortKey; });
+
+		for (const FSortedNotify& Record : Sorted)
+		{
+			const FAnimNotifyEvent& Event = *Record.Event;
+			TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
+			Json->SetStringField(TEXT("name"), Event.NotifyName.ToString());
+			Json->SetStringField(TEXT("notifyPath"), ObjectPathOrEmpty(Event.Notify.Get()));
+			Json->SetStringField(TEXT("notifyStatePath"), ObjectPathOrEmpty(Event.NotifyStateClass.Get()));
+			Json->SetNumberField(TEXT("triggerTime"), Event.GetTriggerTime());
+			Json->SetNumberField(TEXT("endTriggerTime"), Event.GetEndTriggerTime());
+			Json->SetNumberField(TEXT("duration"), Event.GetDuration());
+			Json->SetNumberField(TEXT("trackIndex"), Event.TrackIndex);
+			Json->SetNumberField(TEXT("triggerWeightThreshold"), Event.TriggerWeightThreshold);
+			Json->SetNumberField(TEXT("triggerChance"), Event.NotifyTriggerChance);
+			Json->SetNumberField(TEXT("filterLod"), Event.NotifyFilterLOD);
+			Json->SetBoolField(TEXT("branchingPoint"), Event.IsBranchingPoint());
+			Json->SetBoolField(TEXT("triggerOnDedicatedServer"), Event.bTriggerOnDedicatedServer);
+			Json->SetBoolField(TEXT("triggerOnFollower"), Event.bTriggerOnFollower);
+#if WITH_EDITORONLY_DATA
+			Json->SetStringField(TEXT("guid"), Event.Guid.ToString(EGuidFormats::DigitsWithHyphensLower));
+#endif
+			Result.Add(MakeShared<FJsonValueObject>(Json));
+		}
+		return Result;
+	}
+
+	int32 GetReflectedArrayCount(UObject* Object, const FName PropertyName)
+	{
+		const FArrayProperty* Property = FindFProperty<FArrayProperty>(Object->GetClass(), PropertyName);
+		if (Property == nullptr)
+		{
+			return 0;
+		}
+		FScriptArrayHelper Helper(Property, Property->ContainerPtrToValuePtr<void>(Object));
+		return Helper.Num();
+	}
+
+	TArray<TSharedPtr<FJsonValue>> BuildCurveArray(const UAnimSequenceBase* Asset)
+	{
+		TArray<const FFloatCurve*> Curves;
+		for (const FFloatCurve& Curve : Asset->GetCurveData().FloatCurves) Curves.Add(&Curve);
+		Curves.Sort([](const FFloatCurve& Left, const FFloatCurve& Right) { return Left.GetName().LexicalLess(Right.GetName()); });
+		TArray<TSharedPtr<FJsonValue>> Result;
+		for (const FFloatCurve* Curve : Curves)
+		{
+			TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
+			Json->SetStringField(TEXT("name"), Curve->GetName().ToString());
+			Json->SetNumberField(TEXT("keyCount"), Curve->FloatCurve.GetNumKeys());
+			Json->SetNumberField(TEXT("flags"), Curve->GetCurveTypeFlags());
+			Result.Add(MakeShared<FJsonValueObject>(Json));
+		}
+		return Result;
 	}
 
 	const TCHAR* CollisionTraceFlagToString(const ECollisionTraceFlag Value)
@@ -1069,7 +1223,279 @@ namespace AssetReaderRegistryPrivate
 		OutDetails->SetBoolField(TEXT("requiresVirtualTexturing"), Texture->RequiresVirtualTexturing());
 		OutDetails->SetNumberField(TEXT("virtualTexturePrefetchMips"), Texture->VirtualTexturePrefetchMips);
 		return EAssetReaderStatus::Success;
-	}}
+	}
+
+	EAssetReaderStatus ReadAnimSequence(
+		const FAssetData& AssetData,
+		TSharedRef<FJsonObject>& OutDetails,
+		FString& OutError)
+	{
+		UAnimSequence* Sequence = Cast<UAnimSequence>(AssetData.GetAsset());
+		if (Sequence == nullptr)
+		{
+			OutError = TEXT("Failed to load Anim Sequence asset.");
+			return EAssetReaderStatus::Failed;
+		}
+
+		const EAdditiveAnimationType AdditiveType = static_cast<EAdditiveAnimationType>(Sequence->AdditiveAnimType.GetValue());
+		const EAdditiveBasePoseType BasePoseType = static_cast<EAdditiveBasePoseType>(Sequence->RefPoseType.GetValue());
+		OutDetails->SetStringField(TEXT("type"), TEXT("anim-sequence"));
+		OutDetails->SetNumberField(TEXT("readerVersion"), 1);
+		OutDetails->SetStringField(TEXT("skeletonPath"), ObjectPathOrEmpty(Sequence->GetSkeleton()));
+		OutDetails->SetNumberField(TEXT("playLength"), Sequence->GetPlayLength());
+		OutDetails->SetNumberField(TEXT("rateScale"), Sequence->RateScale);
+		OutDetails->SetNumberField(TEXT("sampledKeyCount"), Sequence->GetNumberOfSampledKeys());
+		OutDetails->SetObjectField(TEXT("samplingFrameRate"), FrameRateToJson(Sequence->GetSamplingFrameRate()));
+		OutDetails->SetStringField(TEXT("retargetSource"), Sequence->RetargetSource.ToString());
+		OutDetails->SetStringField(TEXT("additiveType"), AdditiveAnimationTypeToString(AdditiveType));
+		OutDetails->SetNumberField(TEXT("additiveTypeValue"), static_cast<int32>(AdditiveType));
+		OutDetails->SetStringField(TEXT("basePoseType"), AdditiveBasePoseTypeToString(BasePoseType));
+		OutDetails->SetNumberField(TEXT("basePoseTypeValue"), static_cast<int32>(BasePoseType));
+		OutDetails->SetStringField(TEXT("basePoseSequencePath"), ObjectPathOrEmpty(Sequence->RefPoseSeq.Get()));
+		OutDetails->SetNumberField(TEXT("basePoseFrameIndex"), Sequence->RefFrameIndex);
+
+		TSharedRef<FJsonObject> RootMotion = MakeShared<FJsonObject>();
+		RootMotion->SetBoolField(TEXT("enabled"), Sequence->bEnableRootMotion);
+		RootMotion->SetStringField(TEXT("rootLock"), RootMotionRootLockToString(Sequence->RootMotionRootLock));
+		RootMotion->SetNumberField(TEXT("rootLockValue"), static_cast<int32>(Sequence->RootMotionRootLock.GetValue()));
+		RootMotion->SetBoolField(TEXT("forceRootLock"), Sequence->bForceRootLock);
+		RootMotion->SetBoolField(TEXT("normalizedScale"), Sequence->bUseNormalizedRootMotionScale);
+		OutDetails->SetObjectField(TEXT("rootMotion"), RootMotion);
+
+		FString NotifyError;
+		TArray<TSharedPtr<FJsonValue>> Notifies = BuildNotifyArray(Sequence, NotifyError);
+		OutDetails->SetNumberField(TEXT("notifyCount"), Notifies.Num());
+		OutDetails->SetArrayField(TEXT("notifies"), Notifies);
+		OutDetails->SetStringField(TEXT("notifyReadError"), NotifyError);
+		TArray<TSharedPtr<FJsonValue>> Curves = BuildCurveArray(Sequence);
+		OutDetails->SetNumberField(TEXT("curveCount"), Curves.Num());
+		OutDetails->SetArrayField(TEXT("curves"), Curves);
+
+		TArray<FAnimSyncMarker> Markers = Sequence->AuthoredSyncMarkers;
+		Markers.Sort([](const FAnimSyncMarker& Left, const FAnimSyncMarker& Right)
+		{
+			if (!FMath::IsNearlyEqual(Left.Time, Right.Time)) return Left.Time < Right.Time;
+			return Left.MarkerName.LexicalLess(Right.MarkerName);
+		});
+		TArray<TSharedPtr<FJsonValue>> MarkerValues;
+		for (const FAnimSyncMarker& Marker : Markers)
+		{
+			TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
+			Json->SetStringField(TEXT("name"), Marker.MarkerName.ToString());
+			Json->SetNumberField(TEXT("time"), Marker.Time);
+#if WITH_EDITORONLY_DATA
+			Json->SetNumberField(TEXT("trackIndex"), Marker.TrackIndex);
+			Json->SetStringField(TEXT("guid"), Marker.Guid.ToString(EGuidFormats::DigitsWithHyphensLower));
+#endif
+			MarkerValues.Add(MakeShared<FJsonValueObject>(Json));
+		}
+		OutDetails->SetNumberField(TEXT("syncMarkerCount"), MarkerValues.Num());
+		OutDetails->SetArrayField(TEXT("syncMarkers"), MarkerValues);
+
+		TArray<FName> UniqueMarkerNames = Sequence->UniqueMarkerNames;
+		UniqueMarkerNames.Sort(FNameLexicalLess());
+		TArray<TSharedPtr<FJsonValue>> UniqueMarkers;
+		for (const FName Name : UniqueMarkerNames) UniqueMarkers.Add(MakeShared<FJsonValueString>(Name.ToString()));
+		OutDetails->SetArrayField(TEXT("uniqueMarkerNames"), UniqueMarkers);
+		return EAssetReaderStatus::Success;
+	}
+
+	EAssetReaderStatus ReadAnimMontage(
+		const FAssetData& AssetData,
+		TSharedRef<FJsonObject>& OutDetails,
+		FString& OutError)
+	{
+		UAnimMontage* Montage = Cast<UAnimMontage>(AssetData.GetAsset());
+		if (Montage == nullptr)
+		{
+			OutError = TEXT("Failed to load Anim Montage asset.");
+			return EAssetReaderStatus::Failed;
+		}
+
+		OutDetails->SetStringField(TEXT("type"), TEXT("anim-montage"));
+		OutDetails->SetNumberField(TEXT("readerVersion"), 1);
+		OutDetails->SetStringField(TEXT("skeletonPath"), ObjectPathOrEmpty(Montage->GetSkeleton()));
+		OutDetails->SetNumberField(TEXT("playLength"), Montage->GetPlayLength());
+		OutDetails->SetNumberField(TEXT("rateScale"), Montage->RateScale);
+		OutDetails->SetObjectField(TEXT("samplingFrameRate"), FrameRateToJson(Montage->GetSamplingFrameRate()));
+		OutDetails->SetBoolField(TEXT("hasRootMotion"), Montage->HasRootMotion());
+		OutDetails->SetBoolField(TEXT("autoBlendOut"), Montage->bEnableAutoBlendOut);
+		OutDetails->SetNumberField(TEXT("defaultBlendInTime"), Montage->GetDefaultBlendInTime());
+		OutDetails->SetNumberField(TEXT("defaultBlendOutTime"), Montage->GetDefaultBlendOutTime());
+		OutDetails->SetNumberField(TEXT("blendOutTriggerTime"), Montage->BlendOutTriggerTime);
+		OutDetails->SetStringField(TEXT("syncGroup"), Montage->SyncGroup.ToString());
+		OutDetails->SetNumberField(TEXT("syncSlotIndex"), Montage->SyncSlotIndex);
+
+		TArray<TSharedPtr<FJsonValue>> Sections;
+		for (int32 SectionIndex = 0; SectionIndex < Montage->GetNumSections(); ++SectionIndex)
+		{
+			const FCompositeSection& Section = Montage->GetAnimCompositeSection(SectionIndex);
+			float StartTime = 0.0f;
+			float EndTime = 0.0f;
+			Montage->GetSectionStartAndEndTime(SectionIndex, StartTime, EndTime);
+			TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
+			Json->SetNumberField(TEXT("index"), SectionIndex);
+			Json->SetStringField(TEXT("name"), Section.SectionName.ToString());
+			Json->SetStringField(TEXT("nextSectionName"), Section.NextSectionName.ToString());
+			Json->SetNumberField(TEXT("startTime"), StartTime);
+			Json->SetNumberField(TEXT("endTime"), EndTime);
+			Json->SetNumberField(TEXT("length"), EndTime - StartTime);
+			Json->SetNumberField(TEXT("metadataCount"), Section.MetaData.Num());
+			Sections.Add(MakeShared<FJsonValueObject>(Json));
+		}
+		OutDetails->SetNumberField(TEXT("sectionCount"), Sections.Num());
+		OutDetails->SetArrayField(TEXT("sections"), Sections);
+
+		TArray<TSharedPtr<FJsonValue>> Slots;
+		for (int32 SlotIndex = 0; SlotIndex < Montage->SlotAnimTracks.Num(); ++SlotIndex)
+		{
+			const FSlotAnimationTrack& Slot = Montage->SlotAnimTracks[SlotIndex];
+			TSharedRef<FJsonObject> SlotJson = MakeShared<FJsonObject>();
+			SlotJson->SetNumberField(TEXT("index"), SlotIndex);
+			SlotJson->SetStringField(TEXT("name"), Slot.SlotName.ToString());
+			SlotJson->SetNumberField(TEXT("trackLength"), Slot.AnimTrack.GetLength());
+			TArray<TSharedPtr<FJsonValue>> Segments;
+			for (int32 SegmentIndex = 0; SegmentIndex < Slot.AnimTrack.AnimSegments.Num(); ++SegmentIndex)
+			{
+				const FAnimSegment& Segment = Slot.AnimTrack.AnimSegments[SegmentIndex];
+				TSharedRef<FJsonObject> SegmentJson = MakeShared<FJsonObject>();
+				SegmentJson->SetNumberField(TEXT("index"), SegmentIndex);
+				SegmentJson->SetStringField(TEXT("animationPath"), ObjectPathOrEmpty(Segment.GetAnimReference().Get()));
+				SegmentJson->SetNumberField(TEXT("startPosition"), Segment.StartPos);
+				SegmentJson->SetNumberField(TEXT("endPosition"), Segment.GetEndPos());
+				SegmentJson->SetNumberField(TEXT("animationStartTime"), Segment.AnimStartTime);
+				SegmentJson->SetNumberField(TEXT("animationEndTime"), Segment.AnimEndTime);
+				SegmentJson->SetNumberField(TEXT("playRate"), Segment.AnimPlayRate);
+				SegmentJson->SetNumberField(TEXT("loopCount"), Segment.LoopingCount);
+				SegmentJson->SetNumberField(TEXT("length"), Segment.GetLength());
+				SegmentJson->SetBoolField(TEXT("valid"), Segment.IsValid());
+				Segments.Add(MakeShared<FJsonValueObject>(SegmentJson));
+			}
+			SlotJson->SetNumberField(TEXT("segmentCount"), Segments.Num());
+			SlotJson->SetArrayField(TEXT("segments"), Segments);
+			Slots.Add(MakeShared<FJsonValueObject>(SlotJson));
+		}
+		OutDetails->SetNumberField(TEXT("slotCount"), Slots.Num());
+		OutDetails->SetArrayField(TEXT("slots"), Slots);
+
+		FString NotifyError;
+		TArray<TSharedPtr<FJsonValue>> Notifies = BuildNotifyArray(Montage, NotifyError);
+		OutDetails->SetNumberField(TEXT("notifyCount"), Notifies.Num());
+		OutDetails->SetArrayField(TEXT("notifies"), Notifies);
+		OutDetails->SetStringField(TEXT("notifyReadError"), NotifyError);
+		OutDetails->SetNumberField(TEXT("branchingPointMarkerCount"), GetReflectedArrayCount(Montage, TEXT("BranchingPointMarkers")));
+		return EAssetReaderStatus::Success;
+	}
+
+	EAssetReaderStatus ReadBlendSpace(
+		const FAssetData& AssetData,
+		TSharedRef<FJsonObject>& OutDetails,
+		FString& OutError)
+	{
+		UBlendSpace* BlendSpace = Cast<UBlendSpace>(AssetData.GetAsset());
+		if (BlendSpace == nullptr)
+		{
+			OutError = TEXT("Failed to load Blend Space asset.");
+			return EAssetReaderStatus::Failed;
+		}
+
+		const bool bAimOffset = AssetData.AssetClassPath.ToString().Contains(TEXT("AimOffset"));
+		OutDetails->SetStringField(TEXT("type"), TEXT("blend-space"));
+		OutDetails->SetNumberField(TEXT("readerVersion"), 1);
+		OutDetails->SetStringField(TEXT("blendSpaceType"), bAimOffset ? TEXT("aim-offset") : TEXT("blend-space"));
+		OutDetails->SetStringField(TEXT("skeletonPath"), ObjectPathOrEmpty(BlendSpace->GetSkeleton()));
+		OutDetails->SetStringField(TEXT("notifyTriggerMode"), NotifyTriggerModeToString(BlendSpace->NotifyTriggerMode));
+		OutDetails->SetNumberField(TEXT("notifyTriggerModeValue"), static_cast<int32>(BlendSpace->NotifyTriggerMode.GetValue()));
+
+		TArray<TSharedPtr<FJsonValue>> Axes;
+		for (int32 AxisIndex = 0; AxisIndex < 3; ++AxisIndex)
+		{
+			const FBlendParameter& Axis = BlendSpace->GetBlendParameter(AxisIndex);
+			TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
+			Json->SetNumberField(TEXT("index"), AxisIndex);
+			Json->SetStringField(TEXT("name"), Axis.DisplayName);
+			Json->SetNumberField(TEXT("min"), Axis.Min);
+			Json->SetNumberField(TEXT("max"), Axis.Max);
+			Json->SetNumberField(TEXT("gridDivisions"), Axis.GridNum);
+			Json->SetBoolField(TEXT("snapToGrid"), Axis.bSnapToGrid);
+			Json->SetBoolField(TEXT("wrapInput"), Axis.bWrapInput);
+			Axes.Add(MakeShared<FJsonValueObject>(Json));
+		}
+		OutDetails->SetArrayField(TEXT("axes"), Axes);
+
+		TArray<const FBlendSample*> SortedSamples;
+		for (const FBlendSample& Sample : BlendSpace->GetBlendSamples()) SortedSamples.Add(&Sample);
+		SortedSamples.Sort([](const FBlendSample& Left, const FBlendSample& Right)
+		{
+			if (Left.SampleValue.X != Right.SampleValue.X) return Left.SampleValue.X < Right.SampleValue.X;
+			if (Left.SampleValue.Y != Right.SampleValue.Y) return Left.SampleValue.Y < Right.SampleValue.Y;
+			if (Left.SampleValue.Z != Right.SampleValue.Z) return Left.SampleValue.Z < Right.SampleValue.Z;
+			return ObjectPathOrEmpty(Left.Animation.Get()) < ObjectPathOrEmpty(Right.Animation.Get());
+		});
+		TArray<TSharedPtr<FJsonValue>> Samples;
+		for (int32 SampleIndex = 0; SampleIndex < SortedSamples.Num(); ++SampleIndex)
+		{
+			const FBlendSample& Sample = *SortedSamples[SampleIndex];
+			TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
+			Json->SetNumberField(TEXT("index"), SampleIndex);
+			Json->SetStringField(TEXT("animationPath"), ObjectPathOrEmpty(Sample.Animation.Get()));
+			Json->SetObjectField(TEXT("value"), VectorToJson(Sample.SampleValue));
+			Json->SetNumberField(TEXT("rateScale"), Sample.RateScale);
+#if WITH_EDITORONLY_DATA
+			Json->SetBoolField(TEXT("includeInAnalyzeAll"), Sample.bIncludeInAnalyseAll);
+			Json->SetBoolField(TEXT("valid"), Sample.bIsValid);
+#endif
+			Samples.Add(MakeShared<FJsonValueObject>(Json));
+		}
+		OutDetails->SetNumberField(TEXT("sampleCount"), Samples.Num());
+		OutDetails->SetArrayField(TEXT("samples"), Samples);
+		return EAssetReaderStatus::Success;
+	}
+
+	EAssetReaderStatus ReadDataTable(
+		const FAssetData& AssetData,
+		TSharedRef<FJsonObject>& OutDetails,
+		FString& OutError)
+	{
+		UDataTable* Table = Cast<UDataTable>(AssetData.GetAsset());
+		if (Table == nullptr)
+		{
+			OutError = TEXT("Failed to load DataTable asset.");
+			return EAssetReaderStatus::Failed;
+		}
+
+		OutDetails->SetStringField(TEXT("type"), TEXT("data-table"));
+		OutDetails->SetNumberField(TEXT("readerVersion"), 1);
+		OutDetails->SetStringField(TEXT("rowStructPath"), ObjectPathOrEmpty(Table->GetRowStruct()));
+		TArray<FName> RowNames = Table->GetRowNames();
+		RowNames.Sort(FNameLexicalLess());
+		TArray<TSharedPtr<FJsonValue>> RowNameValues;
+		for (const FName RowName : RowNames) RowNameValues.Add(MakeShared<FJsonValueString>(RowName.ToString()));
+		OutDetails->SetNumberField(TEXT("rowCount"), RowNames.Num());
+		OutDetails->SetArrayField(TEXT("rowNames"), RowNameValues);
+
+		const FString TableJson = Table->GetTableAsJSON(EDataTableExportFlags::None);
+		TArray<TSharedPtr<FJsonValue>> ParsedRows;
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(TableJson);
+		if (!FJsonSerializer::Deserialize(Reader, ParsedRows))
+		{
+			OutError = TEXT("Failed to parse DataTable JSON export.");
+			return EAssetReaderStatus::Failed;
+		}
+		ParsedRows.Sort([](const TSharedPtr<FJsonValue>& Left, const TSharedPtr<FJsonValue>& Right)
+		{
+			FString LeftName;
+			FString RightName;
+			const TSharedPtr<FJsonObject> LeftObject = Left.IsValid() ? Left->AsObject() : nullptr;
+			const TSharedPtr<FJsonObject> RightObject = Right.IsValid() ? Right->AsObject() : nullptr;
+			if (LeftObject.IsValid()) LeftObject->TryGetStringField(TEXT("Name"), LeftName);
+			if (RightObject.IsValid()) RightObject->TryGetStringField(TEXT("Name"), RightName);
+			return LeftName < RightName;
+		});
+		OutDetails->SetArrayField(TEXT("rows"), ParsedRows);
+		return EAssetReaderStatus::Success;
+	}
+}
 
 EAssetReaderStatus FAssetReaderRegistry::ReadAssetDetails(
 	const FAssetData& AssetData,
@@ -1120,6 +1546,26 @@ EAssetReaderStatus FAssetReaderRegistry::ReadAssetDetails(
 	{
 		OutReaderName = TEXT("texture-2d-v1");
 		return AssetReaderRegistryPrivate::ReadTexture2D(AssetData, OutDetails, OutError);
+	}
+	if (AssetData.AssetClassPath == UAnimSequence::StaticClass()->GetClassPathName())
+	{
+		OutReaderName = TEXT("anim-sequence-v1");
+		return AssetReaderRegistryPrivate::ReadAnimSequence(AssetData, OutDetails, OutError);
+	}
+	if (AssetData.AssetClassPath == UAnimMontage::StaticClass()->GetClassPathName())
+	{
+		OutReaderName = TEXT("anim-montage-v1");
+		return AssetReaderRegistryPrivate::ReadAnimMontage(AssetData, OutDetails, OutError);
+	}
+	if (const UClass* AssetClass = AssetData.GetClass(); AssetClass != nullptr && AssetClass->IsChildOf(UBlendSpace::StaticClass()))
+	{
+		OutReaderName = TEXT("blend-space-v1");
+		return AssetReaderRegistryPrivate::ReadBlendSpace(AssetData, OutDetails, OutError);
+	}
+	if (AssetData.AssetClassPath == UDataTable::StaticClass()->GetClassPathName())
+	{
+		OutReaderName = TEXT("data-table-v1");
+		return AssetReaderRegistryPrivate::ReadDataTable(AssetData, OutDetails, OutError);
 	}
 	return EAssetReaderStatus::NotHandled;
 }
