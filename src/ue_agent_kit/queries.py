@@ -63,42 +63,50 @@ def search_assets(
     connection: sqlite3.Connection,
     query: str,
     *,
+    asset_class: str = "",
     limit: int = 50,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
     limit, offset = normalize_pagination(limit, offset)
     query = query.strip()
+    asset_class = asset_class.strip()
+    class_like = f"%{asset_class}%"
     fetch_limit = min(MAX_QUERY_LIMIT, limit + offset + 200)
 
     if not query:
+        where_sql = "WHERE asset_class LIKE ?" if asset_class else ""
+        parameters: list[Any] = [class_like] if asset_class else []
         rows = connection.execute(
-            """
+            f"""
             SELECT id, asset_path, package_name, asset_name, asset_class, blueprint_type,
                    parent_class, generated_class, revision_value, schema_version,
                    exporter_version, profile, summary_json
             FROM assets
+            {where_sql}
             ORDER BY asset_path
             LIMIT ? OFFSET ?
             """,
-            (limit, offset),
+            [*parameters, limit, offset],
         ).fetchall()
         results = [_row_to_dict(row) for row in rows]
     else:
         ranked: list[tuple[float, sqlite3.Row]] = []
+        class_filter_sql = " AND a.asset_class LIKE ?" if asset_class else ""
+        class_parameters: list[Any] = [class_like] if asset_class else []
         try:
             fts_rows = connection.execute(
-                """
+                f"""
                 SELECT a.id, a.asset_path, a.package_name, a.asset_name, a.asset_class,
                        a.blueprint_type, a.parent_class, a.generated_class, a.revision_value,
                        a.schema_version, a.exporter_version, a.profile, a.summary_json,
                        bm25(assets_fts) AS search_rank
                 FROM assets_fts
                 JOIN assets AS a ON a.id = assets_fts.rowid
-                WHERE assets_fts MATCH ?
+                WHERE assets_fts MATCH ?{class_filter_sql}
                 ORDER BY search_rank, a.asset_path
                 LIMIT ?
                 """,
-                (_fts_phrase(query), fetch_limit),
+                [_fts_phrase(query), *class_parameters, fetch_limit],
             ).fetchall()
             ranked.extend((float(row["search_rank"]), row) for row in fts_rows)
         except sqlite3.OperationalError:
@@ -106,13 +114,14 @@ def search_assets(
 
         like_value = f"%{query}%"
         like_rows = connection.execute(
-            """
+            f"""
             SELECT id, asset_path, package_name, asset_name, asset_class, blueprint_type,
                    parent_class, generated_class, revision_value, schema_version,
                    exporter_version, profile, summary_json
-            FROM assets
-            WHERE asset_path LIKE ? OR package_name LIKE ? OR asset_name LIKE ?
-               OR parent_class LIKE ? OR generated_class LIKE ?
+            FROM assets AS a
+            WHERE (asset_path LIKE ? OR package_name LIKE ? OR asset_name LIKE ?
+               OR asset_class LIKE ? OR parent_class LIKE ? OR generated_class LIKE ?)
+               {class_filter_sql}
             ORDER BY
                 CASE
                     WHEN asset_path = ? OR asset_name = ? THEN 0
@@ -122,18 +131,20 @@ def search_assets(
                 asset_path
             LIMIT ?
             """,
-            (
+            [
                 like_value,
                 like_value,
                 like_value,
                 like_value,
                 like_value,
+                like_value,
+                *class_parameters,
                 query,
                 query,
                 query + "%",
                 query + "%",
                 fetch_limit,
-            ),
+            ],
         ).fetchall()
         for row in like_rows:
             if row["asset_path"] == query or row["asset_name"] == query:
@@ -151,7 +162,6 @@ def search_assets(
         result.pop("id", None)
         result["summary"] = _parse_json(str(result.pop("summary_json", "")), {})
     return results
-
 
 def search_symbols(
     connection: sqlite3.Connection,
@@ -433,6 +443,12 @@ def get_stats(connection: sqlite3.Connection) -> dict[str, Any]:
             "SELECT profile, COUNT(*) AS count FROM assets GROUP BY profile ORDER BY profile"
         )
     }
+    asset_classes = {
+        str(row["asset_class"]): int(row["count"])
+        for row in connection.execute(
+            "SELECT asset_class, COUNT(*) AS count FROM assets GROUP BY asset_class ORDER BY asset_class"
+        )
+    }
     symbol_kinds = {
         str(row["kind"]): int(row["count"])
         for row in connection.execute(
@@ -451,6 +467,7 @@ def get_stats(connection: sqlite3.Connection) -> dict[str, Any]:
         "projectKey": get_metadata(connection, "project_key", ""),
         "counts": count_values,
         "profiles": profiles,
+        "assetClasses": asset_classes,
         "symbolKinds": symbol_kinds,
         "referenceKinds": reference_kinds,
     }

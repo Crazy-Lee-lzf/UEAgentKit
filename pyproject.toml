@@ -1,7 +1,7 @@
 [project]
 name = "ue-agent-kit"
-version = "0.2.4"
-description = "Open-source Unreal Engine Blueprint inspection and indexing toolkit for developers and AI agents."
+version = "0.2.5"
+description = "Open-source Unreal Engine asset catalog and Blueprint semantic indexing toolkit for developers and AI agents."
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 license = "MIT"

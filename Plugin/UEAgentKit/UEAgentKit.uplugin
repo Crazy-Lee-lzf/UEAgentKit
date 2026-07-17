@@ -1,9 +1,9 @@
 {
   "FileVersion": 3,
-  "Version": 4,
-  "VersionName": "0.2.4",
+  "Version": 5,
+  "VersionName": "0.2.5",
   "FriendlyName": "UE Agent Kit",
-  "Description": "Read-only Unreal Engine Blueprint inspection, semantic export, indexing, and query toolkit.",
+  "Description": "Read-only Unreal Engine asset catalog, Blueprint semantic export, indexing, and query toolkit.",
   "Category": "Developer Tools",
   "CreatedBy": "UE Agent Kit Contributors",
   "CanContainContent": false,

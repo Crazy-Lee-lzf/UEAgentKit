@@ -1,148 +1,137 @@
 # AI 使用指南
 
-## 1. 目标
+## 1. 使用目标
 
-本工具为 AI 提供可验证、可定位、按需加载的 UE5 项目上下文。当前公开版本仅支持只读分析。
+UE Agent Kit 为 AI 提供可验证、可定位、按需加载的 UE5 项目上下文。当前版本只读，不允许 AI 直接修改 `.uasset`。
 
-AI 不应把 Blueprint 当作普通文本文件处理，也不应直接修改 `.uasset` 二进制文件。
+项目知识分为两层：
 
-## 2. 查询工作流
+```text
+通用资产目录：所有常用 UE 资产的路径、类型、Tags、Revision 和依赖。
+Blueprint 深度语义：变量、函数、Graph、Node、Pin 和结构化调用关系。
+```
 
-### 查阅单个资产
+## 2. 推荐索引方式
+
+先将通用资产目录和 Blueprint 深度结果导入同一个 SQLite 数据库：
+
+```bat
+scripts\ue-agent.cmd index build Output\AssetCatalog
+scripts\ue-agent.cmd index build Output\Blueprints
+```
+
+通用记录使用 `asset-index` Profile；同一路径存在 Blueprint 深度记录时，深度记录具有更高优先级。
+
+## 3. 资产查询
+
+### 查找某类资产
+
+```bat
+scripts\ue-agent.cmd search assets --class StaticMesh
+scripts\ue-agent.cmd search assets --class SkeletalMesh
+scripts\ue-agent.cmd search assets Manny --class Texture2D
+```
+
+AI 应优先使用 Asset Class 筛选，避免仅根据 `SM_`、`T_` 等命名前缀猜测类型。
+
+### 查看单个资产
+
+```bat
+scripts\ue-agent.cmd asset /Game/Environment/SM_Wall.SM_Wall --details
+```
+
+通用资产详情中可以包含：
+
+- Asset Class 和 Package。
+- Asset Registry Tags。
+- SHA-256 Revision。
+- 直接依赖和被引用关系。
+
+Tags 来自 Asset Registry，不等于完整 UObject 内部状态。未通过专用 Reader 导出的字段应标记为未知，而不是自行推断。
+
+### 查询反向引用
+
+```bat
+scripts\ue-agent.cmd references --target-asset /Game/Environment/SM_Wall.SM_Wall
+```
+
+回答“谁使用了这个 Mesh、Material 或 Texture”时，应返回引用者 Asset Path 和 Reference Kind。
+
+## 4. Blueprint 查询
 
 推荐顺序：
 
 ```text
-1. 获取资产摘要
-2. 获取结构信息
-3. 定位相关变量、函数或 Graph
-4. 只展开相关节点和 Pin
-5. 查询外部引用和依赖
-6. 给出带资产路径、Graph 名和 Node GUID 的结论
+1. 查找 Blueprint 资产。
+2. 获取资产摘要和 Revision。
+3. 查找相关 Symbol。
+4. 查询结构化 Reference。
+5. 只展开相关 Graph、Node 和 Pin。
+6. 输出 Asset Path、Graph、Node GUID 和引用类型。
 ```
 
-避免一次读取整个大型 Blueprint。
+示例：
 
-### 全项目检索
+```bat
+scripts\ue-agent.cmd search symbols MaxWalkSpeed
+scripts\ue-agent.cmd references --kind writes --target-name MaxWalkSpeed
+```
 
-优先使用结构化查询：
+不要一次把大型 Blueprint 的完整 Canonical JSON 全部塞入模型上下文。
 
-- 精确资产路径。
-- 类名、变量名和函数名。
-- 变量 Read/Write 引用。
-- 函数 Caller/Callee。
-- 接口实现。
-- 继承关系。
-- 资产依赖。
-- 默认值和组件属性覆盖。
-
-语义检索只作为补充，不能替代结构化引用关系。
-
-## 3. 输出 Profile
-
-### index
-
-只用于快速资产发现和清单查询。
-
-### structure
-
-用于类、变量、组件、函数签名和接口分析。
-
-### logic
-
-用于 Graph、Node、Pin 和连接关系分析。
-
-### defaults
-
-用于 Blueprint CDO 和组件模板默认值分析。
-
-### full
-
-用于归档、回归测试和完整 Diff，不应默认塞入 AI 上下文。
-
-### ai
-
-用于面向模型的紧凑上下文。仍应按资产、函数或 Graph 分片加载。
-
-## 4. 事实和推断
-
-AI 输出应区分：
+## 5. Blueprint Profile
 
 ```text
-事实：直接来自 Blueprint 导出、索引或编译结果。
-推断：根据调用关系、变量命名和控制流做出的解释。
-未知：当前适配器没有导出的专用信息。
+index       快速资产和符号发现
+structure   类、变量、组件、函数签名和接口
+logic       Graph、Node、Pin 和连接
+defaults    CDO 与组件模板默认值
+full        完整归档与回归验证
+ai          面向模型的紧凑上下文
 ```
 
-例如 Anim Blueprint 能导出通用 Graph，并不代表已经完整理解 State Machine 和 Transition 语义。
+`asset-index` 是通用资产目录 Profile，不包含 Blueprint Graph 语义。
 
-## 5. 修改工作流
+## 6. 事实、推断和未知
 
-未来写入功能必须使用声明式 Patch：
+AI 输出应明确区分：
 
 ```text
-读取当前 Revision
-→ 查询引用和影响范围
-→ 生成 Patch
-→ Dry Run
-→ 编译验证
-→ 结构化 Diff
-→ 用户确认
-→ Commit
-→ 重新加载验证
+事实：直接来自 Canonical JSON、BPCTX 或 SQLite 结构化记录。
+推断：根据依赖、命名、调用关系和控制流得出的解释。
+未知：当前通用记录或专用适配器没有导出的字段。
 ```
 
-AI 不得：
+例如，Static Mesh 的 Registry Tags 可以证明资产类型和部分构建元数据，但不能自动证明 Socket、Collision 或每级 LOD 的完整内部结构已经被解析。
 
-- 直接写 `.uasset` 文件。
-- 跳过 Revision 检查。
-- 跳过备份。
-- 在编译失败时请求保存。
-- 将 Dry Run 结果描述为已保存。
-- 在未允许写入的项目中尝试 Commit。
+## 7. 可追溯性
 
-## 6. 修改前的影响分析
-
-删除或重命名变量、函数、接口、Graph 和组件前，必须先查询：
-
-- 当前资产内引用。
-- 其他 Blueprint 引用。
-- 子类和实现类。
-- 默认值覆盖。
-- 资产依赖。
-
-存在引用时，应优先生成迁移计划，而不是直接删除。
-
-## 7. 结果可追溯性
-
-查询和修改结果应尽量返回：
+结论尽量附带：
 
 - Asset Path。
+- Asset Class。
 - Package Name。
 - Revision。
-- Graph Name 和 Graph GUID。
-- Node GUID。
-- Pin ID 或稳定 Pin Key。
-- Symbol 名和引用类型。
-- 编译结果。
-- Diff 摘要。
+- Reference Kind。
+- Blueprint Graph Name / GUID。
+- Node GUID 和 Pin ID。
 
-这样用户和后续 AI 可以重新定位同一对象。
+这样用户可以在编辑器中重新定位同一对象，并核对资产是否在查询后发生变化。
 
-## 8. 当前版本注意事项
+## 8. 安全边界
 
-当前版本支持读取、Revision、Symbol/Reference 导出，但尚未提供 SQLite 查询服务和 Blueprint 写入能力。AI 可以：
+当前版本只能：
 
-- 查阅 Blueprint 结构。
-- 分析变量、组件、函数、节点和连线。
-- 根据 Canonical JSON 或 BPCTX 查询当前导出范围内的继承、接口、变量读写、函数调用和宏调用。
-- 生成修改建议或未来 Patch 草案。
+- 导出资产目录和 Blueprint 语义。
+- 建立 SQLite 索引。
+- 搜索资产、Symbol 和 Reference。
+- 分析依赖和调用关系。
 
-AI 不能声称已经：
+当前版本不能声称已经：
 
-- 修改变量。
-- 新增节点。
-- 保存 Blueprint。
+- 修改属性或默认值。
+- 新增或删除节点。
+- 保存 Blueprint 或其他资产。
 - 回滚资产。
 
-当前公开能力以仓库根目录 `README.md` 为准。
+公开能力以仓库根目录 `README.md` 为准。

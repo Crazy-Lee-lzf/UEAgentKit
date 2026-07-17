@@ -58,9 +58,10 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser = subparsers.add_parser("search", help="Search assets or symbols.")
     search_subparsers = search_parser.add_subparsers(dest="search_command", required=True)
 
-    search_assets_parser = search_subparsers.add_parser("assets", help="Search Blueprint assets.")
+    search_assets_parser = search_subparsers.add_parser("assets", help="Search indexed assets.")
     _add_database_argument(search_assets_parser)
     search_assets_parser.add_argument("query", nargs="?", default="")
+    search_assets_parser.add_argument("--class", dest="asset_class", default="")
     _add_pagination_arguments(search_assets_parser, default_limit=50)
 
     search_symbols_parser = search_subparsers.add_parser("symbols", help="Search indexed symbols.")
@@ -137,11 +138,13 @@ def run(args: argparse.Namespace) -> tuple[Any, int]:
         if args.command == "search" and args.search_command == "assets":
             return {
                 "query": args.query,
+                "assetClass": args.asset_class,
                 "limit": args.limit,
                 "offset": args.offset,
                 "results": search_assets(
                     connection,
                     args.query,
+                    asset_class=args.asset_class,
                     limit=args.limit,
                     offset=args.offset,
                 ),

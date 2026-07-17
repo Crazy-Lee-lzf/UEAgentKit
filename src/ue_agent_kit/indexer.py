@@ -11,6 +11,7 @@ from .database import get_metadata, get_schema_version, set_metadata, utc_now_is
 
 
 PROFILE_RANK = {
+    "asset-index": 0,
     "index": 0,
     "structure": 1,
     "defaults": 1,

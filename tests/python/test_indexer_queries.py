@@ -250,7 +250,98 @@ def write_export(root: Path, assets: list[dict[str, Any]]) -> None:
     )
 
 
+GENERIC_ASSET = "/Game/Environment/SM_Test.SM_Test"
+GENERIC_TARGET = "/Game/Environment/T_Test.T_Test"
+
+
+def make_generic_asset() -> dict[str, Any]:
+    asset = make_asset(GENERIC_ASSET, profile="asset-index", revision=REVISION_A, rich=False)
+    asset_symbol = f"asset|{GENERIC_ASSET}"
+    target_symbol = f"asset|{GENERIC_TARGET}"
+    asset["assetClass"] = "/Script/Engine.StaticMesh"
+    asset["blueprintType"] = ""
+    asset["parentClass"] = ""
+    asset["generatedClass"] = ""
+    asset["skeletonGeneratedClass"] = ""
+    asset["variables"] = []
+    asset["components"] = []
+    asset["functions"] = []
+    asset["graphs"] = []
+    asset["symbols"] = [
+        {
+            "id": asset_symbol,
+            "kind": "asset",
+            "name": "SM_Test",
+            "assetPath": GENERIC_ASSET,
+            "path": GENERIC_ASSET,
+            "class": "/Script/Engine.StaticMesh",
+            "assetRegistry": {
+                "packagePath": "/Game/Environment",
+                "tags": {"Triangles": "12", "LODs": "1"},
+            },
+        }
+    ]
+    asset["references"] = [
+        {
+            "id": f"reference|depends-hard-package|{asset_symbol}|{target_symbol}",
+            "kind": "depends-hard-package",
+            "sourceSymbolId": asset_symbol,
+            "targetSymbolId": target_symbol,
+            "targetKind": "asset",
+            "targetName": "T_Test",
+            "targetAssetPath": GENERIC_TARGET,
+            "targetPath": "/Game/Environment/T_Test",
+            "dependencyCategory": "package",
+            "dependencyProperties": "hard,game",
+        }
+    ]
+    asset["summary"] = {
+        "variables": 0,
+        "components": 0,
+        "graphs": 0,
+        "nodes": 0,
+        "pins": 0,
+        "links": 0,
+        "symbols": 1,
+        "references": 1,
+        "registryTags": 2,
+    }
+    return asset
+
+
 class IndexerAndQueryTests(unittest.TestCase):
+
+    def test_generic_asset_catalog_import_and_class_search(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ueak_generic_assets_") as temporary_root:
+            temp_root = Path(temporary_root)
+            database_path = temp_root / "index.sqlite3"
+            export_root = temp_root / "asset_catalog"
+            write_export(export_root, [make_generic_asset()])
+
+            with open_database(database_path) as connection:
+                result = build_index(connection, export_root, database_path)
+                self.assertEqual((result.added, result.failed), (1, 0))
+
+                by_query = search_assets(connection, "StaticMesh")
+                self.assertEqual([item["asset_path"] for item in by_query], [GENERIC_ASSET])
+
+                by_class = search_assets(connection, "", asset_class="StaticMesh")
+                self.assertEqual([item["asset_path"] for item in by_class], [GENERIC_ASSET])
+                self.assertEqual(by_class[0]["profile"], "asset-index")
+
+                references = find_references(connection, target_asset_path=GENERIC_TARGET)
+                self.assertEqual(len(references), 1)
+                self.assertEqual(references[0]["asset_path"], GENERIC_ASSET)
+
+                indexed = get_asset(connection, GENERIC_ASSET, include_details=True)
+                self.assertIsNotNone(indexed)
+                assert indexed is not None
+                self.assertEqual(indexed["asset_class"], "/Script/Engine.StaticMesh")
+                self.assertEqual(indexed["indexed_counts"]["references"], 1)
+                self.assertEqual(indexed["symbols"][0]["details"]["symbol"]["assetRegistry"]["tags"]["LODs"], "1")
+                stats = get_stats(connection)
+                self.assertEqual(stats["assetClasses"]["/Script/Engine.StaticMesh"], 1)
+
     def test_incremental_index_search_and_prune(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ueak_index_") as temporary_root:
             temp_root = Path(temporary_root)
