@@ -6,7 +6,7 @@
 
 UE Agent Kit is an open-source, read-only Unreal Engine asset analysis toolkit. Its Editor plugin exports the project asset catalog, Asset Registry metadata, dependencies, and Blueprint semantics. A Python CLI and SQLite then provide a project-wide searchable index.
 
-The current release is **0.3.0** and targets **Unreal Engine 5.6**. It adds a validation-only Safe Write baseline while still avoiding UObject mutation and `.uasset` writes.
+The current release is **0.3.1** and targets **Unreal Engine 5.6**. It implements the low-risk Blueprint write loop: policy and revision validation, in-memory dry run, Blueprint compilation, rollback, external backup, and explicit commit.
 
 > **AI Generated**: Most code and documentation in this project are AI-generated and reviewed through human inspection, UE 5.6 compilation, automated tests, and real-project regression validation.
 
@@ -19,7 +19,7 @@ The current release is **0.3.0** and targets **Unreal Engine 5.6**. It adds a va
 - Find where Blueprint variables are read or written.
 - Trace functions, interface messages, macros, Dynamic Casts, and Event Dispatchers.
 - Inspect Blueprint graphs, nodes, pins, and connections.
-- Validate declarative Blueprint patches against policy, revision, and export snapshots without loading or modifying UObjects.
+- Validate Blueprint patches against policy, revision, and export snapshots, then execute an authorized dry run or explicit commit.
 
 ## Main capabilities
 
@@ -122,23 +122,58 @@ scripts\ue-agent.cmd search symbols MaxWalkSpeed
 scripts\ue-agent.cmd references --target-asset /Game/LevelPrototyping/Materials/M_FlatCol.M_FlatCol
 ```
 
-### 5. Validate a declarative patch without writing assets
+### 5. Validate and execute a Blueprint patch
+
+Export the target Blueprint first to capture its current revision:
 
 ```bat
-scripts\ue-agent.cmd patch operations
+scripts\RunExport.cmd ^
+  -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject" ^
+  -Asset "/Game/UEAgentKitWriteTests/BP_PatchTarget" ^
+  -Profile full ^
+  -Format json ^
+  -Output "Output\PatchRevision"
+```
+
+Validate JSON, policy, and revision only:
+
+```bat
 scripts\ue-agent.cmd patch validate ^
   --patch examples\patches\set-variable-default.json ^
   --policy config\write-policy.example.json ^
-  --export Output\Blueprints ^
-  --report Output\patch-report.json
+  --export Output\PatchRevision ^
+  --report Output\Patch\validation-report.json
 ```
 
-This command only reads JSON and export snapshots. It always reports `willLoadOrModifyUObjects=false`, `willWriteDisk=false`, and `commitSupported=false`. See [`spec/PATCH_SCHEMA.md`](spec/PATCH_SCHEMA.md).
+Run an in-memory dry run. The commandlet mutates the UObject, compiles the Blueprint, captures the result, restores the original value, and compiles again without saving the asset:
+
+```bat
+scripts\RunPatch.cmd ^
+  -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject" ^
+  -Patch "examples\patches\set-variable-default.json" ^
+  -Policy "config\write-policy.example.json" ^
+  -RevisionExport "Output\PatchRevision" ^
+  -Mode DryRun
+```
+
+For an explicit commit, the policy must also set `commitEnabled=true`. The executor creates an external `.uasset` backup before compiling and saving one authorized Blueprint:
+
+```bat
+scripts\RunPatch.cmd ^
+  -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject" ^
+  -Patch "examples\patches\set-variable-default.json" ^
+  -Policy "config\write-policy.example.json" ^
+  -RevisionExport "Output\PatchRevision" ^
+  -Mode Commit ^
+  -BackupDir "Backups\Patches"
+```
+
+The current executor supports `setVariableDefault`, `setComponentProperty`, and `setPinDefault`. One execution is limited to one Blueprint and one operation; values are currently limited to Boolean, numeric, and string-like scalars.
 
 ### 6. Validate the asset catalog
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.3.0
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.3.1
 ```
 
 See [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md) for installation and full command details.
@@ -177,7 +212,14 @@ See [`docs/README.md`](docs/README.md) for the documentation index.
 
 ## Safety
 
-The current release still never writes project assets. Commandlets do not save or directly edit `.uasset` files, and the Patch Baseline only validates JSON, policy, and exported revisions without loading or modifying UObjects.
+Read-only exporters and `ue-agent patch validate` never modify UObjects or asset files. Actual mutation is isolated in the `BlueprintPatch` commandlet, invoked by `RunPatch` only after pre-validation succeeds.
+
+- `DryRun` is the default and must preserve the disk revision.
+- `Commit` requires both an explicit command mode and `commitEnabled=true` in policy.
+- Project, asset root, asset class, and operation must all be authorized.
+- An external backup is created before saving. Compile failure, revision conflict, dirty package, or target resolution failure prevents saving.
+- The executor currently handles one asset and one operation to avoid partial saves.
+- Assets are changed through Unreal Editor APIs; the tool never edits `.uasset` binary bytes directly.
 
 ## License
 

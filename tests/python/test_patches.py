@@ -182,16 +182,16 @@ class PatchValidationTests(unittest.TestCase):
         self.assertEqual(result["summary"]["validatedOperations"], 3)
         self.assertFalse(result["willLoadOrModifyUObjects"])
         self.assertFalse(result["willWriteDisk"])
-        self.assertFalse(result["commitSupported"])
+        self.assertTrue(result["commitSupported"])
         self.assertTrue(all(item["valid"] for item in result["assets"][0]["operations"]))
 
-    def test_commit_enabled_policy_still_cannot_commit(self) -> None:
+    def test_commit_enabled_policy_reports_executor_support(self) -> None:
         self.policy["commitEnabled"] = True
         self.flush()
         result = self.validate()
         self.assertTrue(result["valid"])
         self.assertTrue(result["commitAllowedByPolicy"])
-        self.assertFalse(result["commitSupported"])
+        self.assertTrue(result["commitSupported"])
         self.assertFalse(result["willWriteDisk"])
 
     def test_unknown_field_is_rejected(self) -> None:

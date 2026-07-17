@@ -105,6 +105,8 @@ def get_operation_registry() -> list[dict[str, Any]]:
             "targetFields": list(spec.target_fields),
             "expectedChange": spec.expected_change,
             "assetType": "Blueprint",
+            "dryRunSupported": True,
+            "commitSupported": True,
         }
         for spec in OPERATION_REGISTRY.values()
     ]
@@ -877,7 +879,7 @@ def validate_patch(
         "validationOnly": True,
         "willLoadOrModifyUObjects": False,
         "willWriteDisk": False,
-        "commitSupported": False,
+        "commitSupported": True,
         "commitAllowedByPolicy": policy["commitEnabled"],
         "revisionSource": str(export_root.expanduser().resolve()),
         "policy": policy,

@@ -1,9 +1,9 @@
 {
   "FileVersion": 3,
-  "Version": 7,
-  "VersionName": "0.3.0",
+  "Version": 8,
+  "VersionName": "0.3.1",
   "FriendlyName": "UE Agent Kit",
-  "Description": "Read-only Unreal Engine asset analysis, indexing, query, and validation-only patch planning toolkit.",
+  "Description": "Unreal Engine asset analysis, indexing, and policy-gated Blueprint patch toolkit.",
   "Category": "Developer Tools",
   "CreatedBy": "UE Agent Kit Contributors",
   "CanContainContent": false,

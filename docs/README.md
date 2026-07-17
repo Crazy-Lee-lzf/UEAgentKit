@@ -8,17 +8,17 @@
 2. [`AI_USAGE.md`](AI_USAGE.md)：AI 如何使用资产目录、Blueprint 语义和结构化引用。
 3. [`REFERENCE_POLICY.md`](REFERENCE_POLICY.md)：第三方参考、独立实现和依赖分发规则。
 4. [`../spec/BPCTX_FORMAT.md`](../spec/BPCTX_FORMAT.md)：BPCTX/1 文本格式规范。
-5. [`../spec/PATCH_SCHEMA.md`](../spec/PATCH_SCHEMA.md)：Patch Schema、Policy、Revision 和纯校验安全边界。
+5. [`../spec/PATCH_SCHEMA.md`](../spec/PATCH_SCHEMA.md)：Patch Schema、Policy、Revision 和校验、Dry Run、备份和显式 Commit 安全边界。
 
 ## 当前版本
 
-UE Agent Kit 0.3.0 支持 Unreal Engine 5.6，当前公开能力包括：
+UE Agent Kit 0.3.1 支持 Unreal Engine 5.6，当前公开能力包括：
 
 - 通用 UE 资产目录、Asset Registry Tags、Revision 和依赖导出。
 - Blueprint 只读语义分析。
 - SQLite/FTS5 项目索引、Asset Class 筛选和正反向引用查询。
-- 声明式 Blueprint Patch 的 Policy、Revision 和导出快照纯校验。
+- 声明式 Blueprint Patch 的 Policy/Revision 校验、Dry Run、备份与显式 Commit。
 
-工具不修改或保存 `.uasset`；Patch Baseline 也不加载或修改 UObject。
+只读分析路径不修改资产；Blueprint Patch 仅在明确授权后执行 Dry Run 或显式 Commit。
 
 测试资产生成方式见 [`../tests/fixtures/README.md`](../tests/fixtures/README.md)。

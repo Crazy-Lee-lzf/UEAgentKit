@@ -197,25 +197,57 @@ scripts\ue-agent.cmd references --target-asset /Game/Environment/SM_Wall.SM_Wall
 scripts\ue-agent.cmd references --asset /Game/Characters/BP_Player.BP_Player
 ```
 
-## 9. 校验声明式 Patch
+## 9. 校验与执行 Blueprint Patch
 
-列出当前支持的声明式操作：
+列出操作：
 
 ```bat
 scripts\ue-agent.cmd patch operations
 ```
 
-使用 Policy 和 Blueprint 导出快照校验 Patch：
+只读预校验：
 
 ```bat
 scripts\ue-agent.cmd patch validate ^
-  --patch examples\patches\set-variable-default.json ^
-  --policy config\write-policy.example.json ^
-  --export Output\Blueprints ^
-  --report Output\patch-report.json
+  --patch <PATCH_JSON> ^
+  --policy <POLICY_JSON> ^
+  --export <BLUEPRINT_EXPORT> ^
+  --report <VALIDATION_REPORT>
 ```
 
-退出码为 `0` 表示合法，`1` 表示 Patch、Policy 或 Export 校验失败，`2` 表示输入路径不存在。该命令不加载或修改 UObject，也不会写入 `.uasset`。完整格式见 [`../spec/PATCH_SCHEMA.md`](../spec/PATCH_SCHEMA.md)。
+统一执行入口：
+
+```bat
+scripts\RunPatch.cmd ^
+  -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject" ^
+  -Patch "<PATCH_JSON>" ^
+  -Policy "<POLICY_JSON>" ^
+  -RevisionExport "<BLUEPRINT_EXPORT>" ^
+  -Mode DryRun
+```
+
+提交模式：
+
+```bat
+scripts\RunPatch.cmd ^
+  -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject" ^
+  -Patch "<PATCH_JSON>" ^
+  -Policy "<POLICY_JSON>" ^
+  -RevisionExport "<BLUEPRINT_EXPORT>" ^
+  -Mode Commit ^
+  -Report "Output\Patch\commit-report.json" ^
+  -BackupDir "Backups\Patches"
+```
+
+执行顺序固定为：Python 预校验 → 单资产/单操作约束 → 加载 Blueprint → 再次检查 Policy 与磁盘 Revision → 修改 → 编译 → Dry Run 回滚或 Commit 备份并保存。
+
+当前限制：
+
+- 每次一个 Blueprint、一个 Operation。
+- 支持 `setVariableDefault`、`setComponentProperty`、`setPinDefault`。
+- 变量和组件属性支持 Bool、整数、浮点、String、Name、Text。
+- Pin 支持未连接、可编辑的输入 Pin，值为布尔、数值或字符串。
+- 不支持数组、Set、Map、对象引用和 Blueprint 结构性增删。
 
 ## 10. 校验输出
 
@@ -224,7 +256,7 @@ scripts\ue-agent.cmd patch validate ^
 ```bat
 python <TOOL_ROOT>\scripts\ValidateAssetCatalog.py ^
   --output <TOOL_ROOT>\Output\AssetCatalog ^
-  --expect-exporter 0.3.0
+  --expect-exporter 0.3.1
 ```
 
 校验器会检查：
@@ -242,9 +274,11 @@ Blueprint 输出至少应检查：
 - Canonical JSON 可解析。
 - BPCTX 第一行符合 `H|BPCTX|1|...`。
 
-## 11. 只读行为
+## 11. 安全行为
 
-当前版本不保存项目资产，不直接编辑 `.uasset`。Patch Baseline 只读取 JSON、Policy 和导出快照，固定不加载或修改 UObject。建议在重要项目中对 Content 目录进行版本控制或哈希对比，以确认导出和校验前后资产文件不变。
+通用资产目录、Blueprint 导出、SQLite 查询和 `ue-agent patch validate` 保持只读。`RunPatch -Mode DryRun` 会在内存中修改并编译 Blueprint，但必须回滚且保持磁盘 SHA-256 不变。
+
+只有 `RunPatch -Mode Commit` 可以保存资产，并且必须满足：Policy 显式允许 Commit、项目/目录/类型/操作均授权、Revision 一致、Package 非 Dirty、备份创建成功且 Blueprint 编译成功。写入通过 Unreal Editor API 完成，不直接修改 `.uasset` 二进制。
 
 ## 12. 清理
 

@@ -6,7 +6,7 @@
 
 UE Agent Kit 是一套面向 Unreal Engine 的开源只读资产分析工具。它通过 UE Editor 插件导出项目资产目录、Asset Registry 元数据、依赖关系和 Blueprint 语义，再使用 Python CLI 与 SQLite 建立项目级索引。
 
-当前版本为 **0.3.0**，支持 **Unreal Engine 5.6**。新增 Safe Write 纯校验基线；工具仍不加载或修改 UObject，也不修改或保存 `.uasset`。
+当前版本为 **0.3.1**，支持 **Unreal Engine 5.6**。已实现普通 Blueprint 的低风险属性写入闭环：Policy 与 Revision 预校验、内存 Dry Run、Blueprint 编译、回滚、外部备份和显式 Commit。
 
 > **AI Generated**：本项目的代码和文档主要由 AI 生成，并通过人工审查、UE 5.6 编译、自动化测试和真实工程回归验证。
 
@@ -19,7 +19,7 @@ UE Agent Kit 是一套面向 Unreal Engine 的开源只读资产分析工具。�
 - 查询 Blueprint 变量在哪里被读取或写入。
 - 查询函数、接口消息、宏、Dynamic Cast 和 Event Dispatcher 的调用关系。
 - 查看 Blueprint 的 Graph、Node、Pin 和连接结构。
-- 使用 Policy、Revision 和导出快照校验声明式 Blueprint Patch，不加载或修改 UObject。
+- 使用 Policy、Revision 和导出快照校验 Blueprint Patch，并对授权 Blueprint 执行 Dry Run 或显式 Commit。
 
 ## 主要能力
 
@@ -122,23 +122,58 @@ scripts\ue-agent.cmd search symbols MaxWalkSpeed
 scripts\ue-agent.cmd references --target-asset /Game/LevelPrototyping/Materials/M_FlatCol.M_FlatCol
 ```
 
-### 5. 校验声明式 Patch（不写资产）
+### 5. 校验并执行 Blueprint Patch
+
+先导出目标 Blueprint，获得当前 Revision：
 
 ```bat
-scripts\ue-agent.cmd patch operations
+scripts\RunExport.cmd ^
+  -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject" ^
+  -Asset "/Game/UEAgentKitWriteTests/BP_PatchTarget" ^
+  -Profile full ^
+  -Format json ^
+  -Output "Output\PatchRevision"
+```
+
+仅执行 JSON、Policy 与 Revision 预校验：
+
+```bat
 scripts\ue-agent.cmd patch validate ^
   --patch examples\patches\set-variable-default.json ^
   --policy config\write-policy.example.json ^
-  --export Output\Blueprints ^
-  --report Output\patch-report.json
+  --export Output\PatchRevision ^
+  --report Output\Patch\validation-report.json
 ```
 
-该命令只读取 JSON 和导出快照，固定返回 `willLoadOrModifyUObjects=false`、`willWriteDisk=false` 和 `commitSupported=false`。格式与 Policy 说明见 [`spec/PATCH_SCHEMA.md`](spec/PATCH_SCHEMA.md)。
+内存 Dry Run：修改 UObject、编译 Blueprint、读取修改结果、恢复原值并再次编译；不保存 `.uasset`：
+
+```bat
+scripts\RunPatch.cmd ^
+  -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject" ^
+  -Patch "examples\patches\set-variable-default.json" ^
+  -Policy "config\write-policy.example.json" ^
+  -RevisionExport "Output\PatchRevision" ^
+  -Mode DryRun
+```
+
+显式 Commit：Policy 中还必须设置 `commitEnabled=true`。执行器会先创建外部 `.uasset` 备份，再编译并保存单个授权 Blueprint：
+
+```bat
+scripts\RunPatch.cmd ^
+  -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject" ^
+  -Patch "examples\patches\set-variable-default.json" ^
+  -Policy "config\write-policy.example.json" ^
+  -RevisionExport "Output\PatchRevision" ^
+  -Mode Commit ^
+  -BackupDir "Backups\Patches"
+```
+
+当前支持 `setVariableDefault`、`setComponentProperty` 和 `setPinDefault`。每次执行仅允许一个 Blueprint 和一个 Operation；值类型暂限布尔、数值和字符串类标量。
 
 ### 6. 校验通用资产导出
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.3.0
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.3.1
 ```
 
 完整参数和安装说明见 [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md)。
@@ -177,7 +212,14 @@ Output\Blueprints\
 
 ## 安全说明
 
-当前版本仍然完全不写资产。Commandlet 不保存项目资产，不直接编辑 `.uasset`；Patch Baseline 只校验 JSON、Policy 和导出 Revision，不加载或修改 UObject。每个导出记录都可以包含原始包文件的 SHA-256 Revision，用于验证资产是否变化。
+只读导出器和 `ue-agent patch validate` 不修改 UObject 或资产文件。实际写入只能通过独立的 `BlueprintPatch` Commandlet，由 `RunPatch` 在预校验通过后调用。
+
+- 默认使用 `DryRun`，磁盘 Revision 必须保持不变。
+- `Commit` 同时要求命令行显式选择和 Policy 的 `commitEnabled=true`。
+- 仅允许 Policy 授权的项目、目录、Asset Class 和 Operation。
+- 保存前创建外部备份；编译失败、Revision 冲突、Dirty Package 或目标解析失败时禁止保存。
+- 当前执行器只处理单资产、单操作，避免部分保存。
+- 工具通过 UE Editor API 修改并保存资产，不直接编辑 `.uasset` 二进制。
 
 ## License
 
