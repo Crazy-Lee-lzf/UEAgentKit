@@ -10,6 +10,8 @@
 #include "PhysicsEngine/AggregateGeom.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "PhysicsEngine/PhysicsAsset.h"
+#include "PhysicsEngine/PhysicsConstraintTemplate.h"
+#include "PhysicsEngine/SkeletalBodySetup.h"
 #include "ReferenceSkeleton.h"
 
 namespace AssetReaderRegistryPrivate
@@ -406,6 +408,165 @@ namespace AssetReaderRegistryPrivate
 		OutDetails->SetArrayField(TEXT("curveMetadataNames"), CurveNameValues);
 		return EAssetReaderStatus::Success;
 	}
+
+	EAssetReaderStatus ReadPhysicsAsset(
+		const FAssetData& AssetData,
+		TSharedRef<FJsonObject>& OutDetails,
+		FString& OutError)
+	{
+		UPhysicsAsset* PhysicsAsset = Cast<UPhysicsAsset>(AssetData.GetAsset());
+		if (PhysicsAsset == nullptr)
+		{
+			OutError = TEXT("Failed to load Physics Asset.");
+			return EAssetReaderStatus::Failed;
+		}
+
+		OutDetails->SetStringField(TEXT("type"), TEXT("physics-asset"));
+		OutDetails->SetNumberField(TEXT("readerVersion"), 1);
+		OutDetails->SetStringField(TEXT("previewSkeletalMeshPath"), ObjectPathOrEmpty(PhysicsAsset->GetPreviewMesh()));
+		OutDetails->SetNumberField(TEXT("bodyCount"), PhysicsAsset->SkeletalBodySetups.Num());
+		OutDetails->SetNumberField(TEXT("constraintCount"), PhysicsAsset->ConstraintSetup.Num());
+		OutDetails->SetNumberField(TEXT("disabledCollisionPairCount"), PhysicsAsset->CollisionDisableTable.Num());
+
+		TMap<int32, FName> BoneNameByBodyIndex;
+		for (const TPair<FName, int32>& Pair : PhysicsAsset->BodySetupIndexMap)
+		{
+			if (Pair.Value >= 0)
+			{
+				BoneNameByBodyIndex.Add(Pair.Value, Pair.Key);
+			}
+		}
+
+		TSet<int32> BoundsBodyIndices;
+		for (const int32 BodyIndex : PhysicsAsset->BoundsBodies)
+		{
+			BoundsBodyIndices.Add(BodyIndex);
+		}
+		TArray<TSharedPtr<FJsonValue>> BoundsBodies;
+		for (const int32 BodyIndex : PhysicsAsset->BoundsBodies)
+		{
+			TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
+			Json->SetNumberField(TEXT("bodyIndex"), BodyIndex);
+			Json->SetStringField(TEXT("boneName"), BoneNameByBodyIndex.FindRef(BodyIndex).ToString());
+			BoundsBodies.Add(MakeShared<FJsonValueObject>(Json));
+		}
+		OutDetails->SetNumberField(TEXT("boundsBodyCount"), BoundsBodies.Num());
+		OutDetails->SetArrayField(TEXT("boundsBodies"), BoundsBodies);
+
+		TArray<FName> PhysicalAnimationProfileNames = PhysicsAsset->GetPhysicalAnimationProfileNames();
+		PhysicalAnimationProfileNames.Sort(FNameLexicalLess());
+		TArray<TSharedPtr<FJsonValue>> PhysicalAnimationProfiles;
+		for (const FName ProfileName : PhysicalAnimationProfileNames)
+		{
+			PhysicalAnimationProfiles.Add(MakeShared<FJsonValueString>(ProfileName.ToString()));
+		}
+		OutDetails->SetNumberField(TEXT("physicalAnimationProfileCount"), PhysicalAnimationProfiles.Num());
+		OutDetails->SetArrayField(TEXT("physicalAnimationProfiles"), PhysicalAnimationProfiles);
+
+		TArray<FName> ConstraintProfileNames = PhysicsAsset->GetConstraintProfileNames();
+		ConstraintProfileNames.Sort(FNameLexicalLess());
+		TArray<TSharedPtr<FJsonValue>> ConstraintProfiles;
+		for (const FName ProfileName : ConstraintProfileNames)
+		{
+			ConstraintProfiles.Add(MakeShared<FJsonValueString>(ProfileName.ToString()));
+		}
+		OutDetails->SetNumberField(TEXT("constraintProfileCount"), ConstraintProfiles.Num());
+		OutDetails->SetArrayField(TEXT("constraintProfiles"), ConstraintProfiles);
+
+		TArray<TSharedPtr<FJsonValue>> Bodies;
+		int32 TotalShapeCount = 0;
+		for (int32 BodyIndex = 0; BodyIndex < PhysicsAsset->SkeletalBodySetups.Num(); ++BodyIndex)
+		{
+			const USkeletalBodySetup* BodySetup = PhysicsAsset->SkeletalBodySetups[BodyIndex];
+			if (BodySetup == nullptr)
+			{
+				continue;
+			}
+
+			const FKAggregateGeom& Geometry = BodySetup->AggGeom;
+			const int32 ShapeCount = Geometry.GetElementCount();
+			TotalShapeCount += ShapeCount;
+			TSharedRef<FJsonObject> Body = MakeShared<FJsonObject>();
+			Body->SetNumberField(TEXT("index"), BodyIndex);
+			Body->SetStringField(TEXT("boneName"), BoneNameByBodyIndex.FindRef(BodyIndex).ToString());
+			Body->SetStringField(TEXT("objectName"), BodySetup->GetName());
+			Body->SetBoolField(TEXT("considerForBounds"), BodySetup->bConsiderForBounds);
+			Body->SetBoolField(TEXT("skipScaleFromAnimation"), BodySetup->bSkipScaleFromAnimation);
+			Body->SetBoolField(TEXT("listedAsBoundsBody"), BoundsBodyIndices.Contains(BodyIndex));
+			Body->SetNumberField(TEXT("shapeCount"), ShapeCount);
+			TSharedRef<FJsonObject> Shapes = MakeShared<FJsonObject>();
+			Shapes->SetNumberField(TEXT("sphere"), Geometry.SphereElems.Num());
+			Shapes->SetNumberField(TEXT("box"), Geometry.BoxElems.Num());
+			Shapes->SetNumberField(TEXT("capsule"), Geometry.SphylElems.Num());
+			Shapes->SetNumberField(TEXT("convex"), Geometry.ConvexElems.Num());
+			Shapes->SetNumberField(TEXT("taperedCapsule"), Geometry.TaperedCapsuleElems.Num());
+			Shapes->SetNumberField(TEXT("levelSet"), Geometry.LevelSetElems.Num());
+			Body->SetObjectField(TEXT("shapeCounts"), Shapes);
+
+			TArray<FString> BodyProfileNames;
+			for (const FPhysicalAnimationProfile& Profile : BodySetup->GetPhysicalAnimationProfiles())
+			{
+				if (!Profile.ProfileName.IsNone())
+				{
+					BodyProfileNames.Add(Profile.ProfileName.ToString());
+				}
+			}
+			BodyProfileNames.Sort();
+			TArray<TSharedPtr<FJsonValue>> BodyProfiles;
+			for (const FString& ProfileName : BodyProfileNames)
+			{
+				BodyProfiles.Add(MakeShared<FJsonValueString>(ProfileName));
+			}
+			Body->SetNumberField(TEXT("physicalAnimationProfileCount"), BodyProfiles.Num());
+			Body->SetArrayField(TEXT("physicalAnimationProfiles"), BodyProfiles);
+			Bodies.Add(MakeShared<FJsonValueObject>(Body));
+		}
+		OutDetails->SetNumberField(TEXT("totalShapeCount"), TotalShapeCount);
+		OutDetails->SetArrayField(TEXT("bodies"), Bodies);
+
+		TArray<TSharedPtr<FJsonValue>> Constraints;
+		for (int32 ConstraintIndex = 0; ConstraintIndex < PhysicsAsset->ConstraintSetup.Num(); ++ConstraintIndex)
+		{
+			const UPhysicsConstraintTemplate* ConstraintTemplate = PhysicsAsset->ConstraintSetup[ConstraintIndex];
+			if (ConstraintTemplate == nullptr)
+			{
+				continue;
+			}
+			const FConstraintInstance& Instance = ConstraintTemplate->DefaultInstance;
+			TSharedRef<FJsonObject> Constraint = MakeShared<FJsonObject>();
+			Constraint->SetNumberField(TEXT("index"), ConstraintIndex);
+			Constraint->SetStringField(TEXT("jointName"), Instance.JointName.ToString());
+			Constraint->SetStringField(TEXT("bone1"), Instance.ConstraintBone1.ToString());
+			Constraint->SetStringField(TEXT("bone2"), Instance.ConstraintBone2.ToString());
+			Constraint->SetObjectField(TEXT("position1"), VectorToJson(Instance.Pos1));
+			Constraint->SetObjectField(TEXT("primaryAxis1"), VectorToJson(Instance.PriAxis1));
+			Constraint->SetObjectField(TEXT("secondaryAxis1"), VectorToJson(Instance.SecAxis1));
+			Constraint->SetObjectField(TEXT("position2"), VectorToJson(Instance.Pos2));
+			Constraint->SetObjectField(TEXT("primaryAxis2"), VectorToJson(Instance.PriAxis2));
+			Constraint->SetObjectField(TEXT("secondaryAxis2"), VectorToJson(Instance.SecAxis2));
+			Constraint->SetObjectField(TEXT("angularRotationOffset"), RotatorToJson(Instance.AngularRotationOffset));
+
+			TArray<FString> ProfileNames;
+			for (const FPhysicsConstraintProfileHandle& Profile : ConstraintTemplate->ProfileHandles)
+			{
+				if (!Profile.ProfileName.IsNone())
+				{
+					ProfileNames.Add(Profile.ProfileName.ToString());
+				}
+			}
+			ProfileNames.Sort();
+			TArray<TSharedPtr<FJsonValue>> Profiles;
+			for (const FString& ProfileName : ProfileNames)
+			{
+				Profiles.Add(MakeShared<FJsonValueString>(ProfileName));
+			}
+			Constraint->SetNumberField(TEXT("profileCount"), Profiles.Num());
+			Constraint->SetArrayField(TEXT("profiles"), Profiles);
+			Constraints.Add(MakeShared<FJsonValueObject>(Constraint));
+		}
+		OutDetails->SetArrayField(TEXT("constraints"), Constraints);
+		return EAssetReaderStatus::Success;
+	}
 }
 
 EAssetReaderStatus FAssetReaderRegistry::ReadAssetDetails(
@@ -432,6 +593,11 @@ EAssetReaderStatus FAssetReaderRegistry::ReadAssetDetails(
 	{
 		OutReaderName = TEXT("skeleton-v1");
 		return AssetReaderRegistryPrivate::ReadSkeleton(AssetData, OutDetails, OutError);
+	}
+	if (AssetData.AssetClassPath == UPhysicsAsset::StaticClass()->GetClassPathName())
+	{
+		OutReaderName = TEXT("physics-asset-v1");
+		return AssetReaderRegistryPrivate::ReadPhysicsAsset(AssetData, OutDetails, OutError);
 	}
 	return EAssetReaderStatus::NotHandled;
 }
