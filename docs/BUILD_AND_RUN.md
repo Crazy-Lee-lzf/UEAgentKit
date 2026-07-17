@@ -127,7 +127,7 @@ AssetCatalog\
 - 包文件大小、修改时间和 SHA-256 Revision。
 - Hard/Soft Package、Manage 和 Searchable Name 依赖边。
 
-已注册的专用 Reader 会把稳定字段写入 `assetDetails`；未知类型继续使用通用 Asset Registry 记录。当前覆盖 Static Mesh、Skeletal Mesh、Skeleton 和 Physics Asset，并明确不导出顶点、蒙皮权重、RenderData、Chaos 模拟缓存或大型 BulkData。
+已注册的专用 Reader 会把稳定字段写入 `assetDetails`；未知类型继续使用通用 Asset Registry 记录。当前覆盖 Static Mesh、Skeletal Mesh、Skeleton、Physics Asset、Material、Material Instance 和 Texture2D。Reader 明确不导出顶点、蒙皮权重、RenderData、Shader Bytecode、纹理像素、Chaos 模拟缓存或大型 BulkData；Texture2D 会区分 Source 元数据与 NullRHI 下可能不可用的 Platform Data。
 
 ## 7. 导出 Blueprint 语义
 

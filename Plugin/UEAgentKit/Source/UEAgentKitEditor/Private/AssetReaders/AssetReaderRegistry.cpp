@@ -7,6 +7,16 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshSocket.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialExpression.h"
+#include "Materials/MaterialInstance.h"
+#include "Materials/MaterialInstanceConstant.h"
+#include "MaterialDomain.h"
+#include "MaterialShaderType.h"
+#include "PixelFormat.h"
+#include "StaticParameterSet.h"
+#include "Engine/Font.h"
+#include "Engine/Texture2D.h"
 #include "PhysicsEngine/AggregateGeom.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "PhysicsEngine/PhysicsAsset.h"
@@ -65,6 +75,95 @@ namespace AssetReaderRegistryPrivate
 	FString ObjectPathOrEmpty(const UObject* Object)
 	{
 		return Object != nullptr ? Object->GetPathName() : FString();
+	}
+
+	TSharedRef<FJsonObject> LinearColorToJson(const FLinearColor& Value)
+	{
+		TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
+		Json->SetNumberField(TEXT("r"), Value.R);
+		Json->SetNumberField(TEXT("g"), Value.G);
+		Json->SetNumberField(TEXT("b"), Value.B);
+		Json->SetNumberField(TEXT("a"), Value.A);
+		return Json;
+	}
+
+	TSharedRef<FJsonObject> Vector4dToJson(const FVector4d& Value)
+	{
+		TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
+		Json->SetNumberField(TEXT("x"), Value.X);
+		Json->SetNumberField(TEXT("y"), Value.Y);
+		Json->SetNumberField(TEXT("z"), Value.Z);
+		Json->SetNumberField(TEXT("w"), Value.W);
+		return Json;
+	}
+
+	const TCHAR* BlendModeToString(const EBlendMode Value)
+	{
+		switch (Value)
+		{
+		case BLEND_Opaque:
+			return TEXT("Opaque");
+		case BLEND_Masked:
+			return TEXT("Masked");
+		case BLEND_Translucent:
+			return TEXT("Translucent");
+		case BLEND_Additive:
+			return TEXT("Additive");
+		case BLEND_Modulate:
+			return TEXT("Modulate");
+		case BLEND_AlphaComposite:
+			return TEXT("AlphaComposite");
+		case BLEND_AlphaHoldout:
+			return TEXT("AlphaHoldout");
+		case BLEND_TranslucentColoredTransmittance:
+			return TEXT("TranslucentColoredTransmittance");
+		default:
+			return TEXT("Unknown");
+		}
+	}
+
+	const TCHAR* ParameterAssociationToString(const EMaterialParameterAssociation Association)
+	{
+		switch (Association)
+		{
+		case EMaterialParameterAssociation::GlobalParameter:
+			return TEXT("global");
+		case EMaterialParameterAssociation::LayerParameter:
+			return TEXT("layer");
+		case EMaterialParameterAssociation::BlendParameter:
+			return TEXT("blend");
+		default:
+			return TEXT("unknown");
+		}
+	}
+
+	TSharedRef<FJsonObject> MaterialParameterInfoToJson(const FMaterialParameterInfo& Info)
+	{
+		TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
+		Json->SetStringField(TEXT("name"), Info.Name.ToString());
+		Json->SetStringField(TEXT("association"), ParameterAssociationToString(Info.Association));
+		Json->SetNumberField(TEXT("associationValue"), static_cast<int32>(Info.Association));
+		Json->SetNumberField(TEXT("index"), Info.Index);
+		return Json;
+	}
+
+	FString MaterialParameterSortKey(const FMaterialParameterInfo& Info)
+	{
+		return FString::Printf(
+			TEXT("%s|%d|%08d"),
+			*Info.Name.ToString(),
+			static_cast<int32>(Info.Association),
+			Info.Index);
+	}
+
+	template <typename EnumType>
+	FString EnumNameOrValue(const EnumType Value)
+	{
+		if (const UEnum* Enum = StaticEnum<EnumType>())
+		{
+			return Enum->GetNameStringByValue(static_cast<int64>(Value));
+		}
+		return FString::FromInt(static_cast<int32>(Value));
 	}
 
 	const TCHAR* CollisionTraceFlagToString(const ECollisionTraceFlag Value)
@@ -567,7 +666,265 @@ namespace AssetReaderRegistryPrivate
 		OutDetails->SetArrayField(TEXT("constraints"), Constraints);
 		return EAssetReaderStatus::Success;
 	}
-}
+
+	EAssetReaderStatus ReadMaterial(
+		const FAssetData& AssetData,
+		TSharedRef<FJsonObject>& OutDetails,
+		FString& OutError)
+	{
+		UMaterial* Material = Cast<UMaterial>(AssetData.GetAsset());
+		if (Material == nullptr)
+		{
+			OutError = TEXT("Failed to load Material asset.");
+			return EAssetReaderStatus::Failed;
+		}
+
+		OutDetails->SetStringField(TEXT("type"), TEXT("material"));
+		OutDetails->SetNumberField(TEXT("readerVersion"), 1);
+		OutDetails->SetStringField(TEXT("domain"), MaterialDomainString(Material->MaterialDomain));
+		OutDetails->SetNumberField(TEXT("domainValue"), static_cast<int32>(Material->MaterialDomain));
+		OutDetails->SetStringField(TEXT("blendMode"), BlendModeToString(Material->GetBlendMode()));
+		OutDetails->SetNumberField(TEXT("blendModeValue"), static_cast<int32>(Material->GetBlendMode()));
+		OutDetails->SetBoolField(TEXT("twoSided"), Material->IsTwoSided());
+		OutDetails->SetBoolField(TEXT("thinSurface"), Material->IsThinSurface());
+		OutDetails->SetBoolField(TEXT("shadingModelFromExpression"), Material->IsShadingModelFromMaterialExpression());
+		OutDetails->SetNumberField(TEXT("opacityMaskClipValue"), Material->GetOpacityMaskClipValue());
+		OutDetails->SetStringField(TEXT("shadingModels"), GetShadingModelFieldString(Material->GetShadingModels()));
+
+#if WITH_EDITOR
+		TArray<UMaterialExpression*> Expressions;
+		Material->GetAllReferencedExpressions(Expressions, nullptr);
+		TMap<FString, int32> ClassCounts;
+		for (const UMaterialExpression* Expression : Expressions)
+		{
+			if (Expression != nullptr)
+			{
+				ClassCounts.FindOrAdd(Expression->GetClass()->GetPathName()) += 1;
+			}
+		}
+		TArray<FString> ClassNames;
+		ClassCounts.GetKeys(ClassNames);
+		ClassNames.Sort();
+		TArray<TSharedPtr<FJsonValue>> ExpressionClasses;
+		for (const FString& ClassName : ClassNames)
+		{
+			TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
+			Json->SetStringField(TEXT("class"), ClassName);
+			Json->SetNumberField(TEXT("count"), ClassCounts[ClassName]);
+			ExpressionClasses.Add(MakeShared<FJsonValueObject>(Json));
+		}
+		OutDetails->SetNumberField(TEXT("expressionCount"), Expressions.Num());
+		OutDetails->SetArrayField(TEXT("expressionClasses"), ExpressionClasses);
+#else
+		OutDetails->SetNumberField(TEXT("expressionCount"), 0);
+		OutDetails->SetArrayField(TEXT("expressionClasses"), {});
+#endif
+		return EAssetReaderStatus::Success;
+	}
+
+	EAssetReaderStatus ReadMaterialInstance(
+		const FAssetData& AssetData,
+		TSharedRef<FJsonObject>& OutDetails,
+		FString& OutError)
+	{
+		UMaterialInstance* Instance = Cast<UMaterialInstance>(AssetData.GetAsset());
+		if (Instance == nullptr)
+		{
+			OutError = TEXT("Failed to load Material Instance asset.");
+			return EAssetReaderStatus::Failed;
+		}
+
+		OutDetails->SetStringField(TEXT("type"), TEXT("material-instance"));
+		OutDetails->SetNumberField(TEXT("readerVersion"), 1);
+		OutDetails->SetStringField(TEXT("parentPath"), ObjectPathOrEmpty(Instance->Parent));
+		OutDetails->SetStringField(TEXT("blendMode"), BlendModeToString(Instance->GetBlendMode()));
+		OutDetails->SetNumberField(TEXT("blendModeValue"), static_cast<int32>(Instance->GetBlendMode()));
+		OutDetails->SetBoolField(TEXT("twoSided"), Instance->IsTwoSided());
+		OutDetails->SetBoolField(TEXT("thinSurface"), Instance->IsThinSurface());
+		OutDetails->SetNumberField(TEXT("opacityMaskClipValue"), Instance->GetOpacityMaskClipValue());
+		OutDetails->SetStringField(TEXT("shadingModels"), GetShadingModelFieldString(Instance->GetShadingModels()));
+		OutDetails->SetBoolField(TEXT("hasBasePropertyOverrides"), Instance->HasOverridenBaseProperties());
+
+		TArray<const FScalarParameterValue*> Scalars;
+		for (const FScalarParameterValue& Parameter : Instance->ScalarParameterValues) Scalars.Add(&Parameter);
+		Scalars.Sort([](const FScalarParameterValue& Left, const FScalarParameterValue& Right)
+		{
+			return MaterialParameterSortKey(Left.ParameterInfo) < MaterialParameterSortKey(Right.ParameterInfo);
+		});
+		TArray<TSharedPtr<FJsonValue>> ScalarValues;
+		for (const FScalarParameterValue* Parameter : Scalars)
+		{
+			TSharedRef<FJsonObject> Json = MaterialParameterInfoToJson(Parameter->ParameterInfo);
+			Json->SetNumberField(TEXT("value"), Parameter->ParameterValue);
+			ScalarValues.Add(MakeShared<FJsonValueObject>(Json));
+		}
+		OutDetails->SetNumberField(TEXT("scalarParameterCount"), ScalarValues.Num());
+		OutDetails->SetArrayField(TEXT("scalarParameters"), ScalarValues);
+
+		TArray<const FVectorParameterValue*> Vectors;
+		for (const FVectorParameterValue& Parameter : Instance->VectorParameterValues) Vectors.Add(&Parameter);
+		Vectors.Sort([](const FVectorParameterValue& Left, const FVectorParameterValue& Right)
+		{
+			return MaterialParameterSortKey(Left.ParameterInfo) < MaterialParameterSortKey(Right.ParameterInfo);
+		});
+		TArray<TSharedPtr<FJsonValue>> VectorValues;
+		for (const FVectorParameterValue* Parameter : Vectors)
+		{
+			TSharedRef<FJsonObject> Json = MaterialParameterInfoToJson(Parameter->ParameterInfo);
+			Json->SetObjectField(TEXT("value"), LinearColorToJson(Parameter->ParameterValue));
+			VectorValues.Add(MakeShared<FJsonValueObject>(Json));
+		}
+		OutDetails->SetNumberField(TEXT("vectorParameterCount"), VectorValues.Num());
+		OutDetails->SetArrayField(TEXT("vectorParameters"), VectorValues);
+
+		TArray<const FDoubleVectorParameterValue*> DoubleVectors;
+		for (const FDoubleVectorParameterValue& Parameter : Instance->DoubleVectorParameterValues) DoubleVectors.Add(&Parameter);
+		DoubleVectors.Sort([](const FDoubleVectorParameterValue& Left, const FDoubleVectorParameterValue& Right)
+		{
+			return MaterialParameterSortKey(Left.ParameterInfo) < MaterialParameterSortKey(Right.ParameterInfo);
+		});
+		TArray<TSharedPtr<FJsonValue>> DoubleVectorValues;
+		for (const FDoubleVectorParameterValue* Parameter : DoubleVectors)
+		{
+			TSharedRef<FJsonObject> Json = MaterialParameterInfoToJson(Parameter->ParameterInfo);
+			Json->SetObjectField(TEXT("value"), Vector4dToJson(Parameter->ParameterValue));
+			DoubleVectorValues.Add(MakeShared<FJsonValueObject>(Json));
+		}
+		OutDetails->SetNumberField(TEXT("doubleVectorParameterCount"), DoubleVectorValues.Num());
+		OutDetails->SetArrayField(TEXT("doubleVectorParameters"), DoubleVectorValues);
+
+		TArray<const FTextureParameterValue*> Textures;
+		for (const FTextureParameterValue& Parameter : Instance->TextureParameterValues) Textures.Add(&Parameter);
+		Textures.Sort([](const FTextureParameterValue& Left, const FTextureParameterValue& Right)
+		{
+			return MaterialParameterSortKey(Left.ParameterInfo) < MaterialParameterSortKey(Right.ParameterInfo);
+		});
+		TArray<TSharedPtr<FJsonValue>> TextureValues;
+		for (const FTextureParameterValue* Parameter : Textures)
+		{
+			TSharedRef<FJsonObject> Json = MaterialParameterInfoToJson(Parameter->ParameterInfo);
+			Json->SetStringField(TEXT("valuePath"), ObjectPathOrEmpty(Parameter->ParameterValue));
+			TextureValues.Add(MakeShared<FJsonValueObject>(Json));
+		}
+		OutDetails->SetNumberField(TEXT("textureParameterCount"), TextureValues.Num());
+		OutDetails->SetArrayField(TEXT("textureParameters"), TextureValues);
+
+		TArray<const FFontParameterValue*> Fonts;
+		for (const FFontParameterValue& Parameter : Instance->FontParameterValues) Fonts.Add(&Parameter);
+		Fonts.Sort([](const FFontParameterValue& Left, const FFontParameterValue& Right)
+		{
+			return MaterialParameterSortKey(Left.ParameterInfo) < MaterialParameterSortKey(Right.ParameterInfo);
+		});
+		TArray<TSharedPtr<FJsonValue>> FontValues;
+		for (const FFontParameterValue* Parameter : Fonts)
+		{
+			TSharedRef<FJsonObject> Json = MaterialParameterInfoToJson(Parameter->ParameterInfo);
+			Json->SetStringField(TEXT("fontPath"), ObjectPathOrEmpty(Parameter->FontValue.Get()));
+			Json->SetNumberField(TEXT("fontPage"), Parameter->FontPage);
+			FontValues.Add(MakeShared<FJsonValueObject>(Json));
+		}
+		OutDetails->SetNumberField(TEXT("fontParameterCount"), FontValues.Num());
+		OutDetails->SetArrayField(TEXT("fontParameters"), FontValues);
+
+		const FStaticParameterSet StaticParameters = Instance->GetStaticParameters();
+		TArray<const FStaticSwitchParameter*> StaticSwitches;
+		for (const FStaticSwitchParameter& Parameter : StaticParameters.StaticSwitchParameters) StaticSwitches.Add(&Parameter);
+		StaticSwitches.Sort([](const FStaticSwitchParameter& Left, const FStaticSwitchParameter& Right)
+		{
+			return MaterialParameterSortKey(Left.ParameterInfo) < MaterialParameterSortKey(Right.ParameterInfo);
+		});
+		TArray<TSharedPtr<FJsonValue>> StaticSwitchValues;
+		for (const FStaticSwitchParameter* Parameter : StaticSwitches)
+		{
+			TSharedRef<FJsonObject> Json = MaterialParameterInfoToJson(Parameter->ParameterInfo);
+			Json->SetBoolField(TEXT("value"), Parameter->Value);
+			Json->SetBoolField(TEXT("override"), Parameter->bOverride);
+			StaticSwitchValues.Add(MakeShared<FJsonValueObject>(Json));
+		}
+		OutDetails->SetNumberField(TEXT("staticSwitchParameterCount"), StaticSwitchValues.Num());
+		OutDetails->SetArrayField(TEXT("staticSwitchParameters"), StaticSwitchValues);
+		return EAssetReaderStatus::Success;
+	}
+
+	EAssetReaderStatus ReadTexture2D(
+		const FAssetData& AssetData,
+		TSharedRef<FJsonObject>& OutDetails,
+		FString& OutError)
+	{
+		UTexture2D* Texture = Cast<UTexture2D>(AssetData.GetAsset());
+		if (Texture == nullptr)
+		{
+			OutError = TEXT("Failed to load Texture2D asset.");
+			return EAssetReaderStatus::Failed;
+		}
+
+		const int32 PlatformSizeX = Texture->GetSizeX();
+		const int32 PlatformSizeY = Texture->GetSizeY();
+		const int32 PlatformMipCount = Texture->GetNumMips();
+		const EPixelFormat PixelFormat = Texture->GetPixelFormat();
+		const bool bPlatformDataAvailable = PlatformSizeX > 0 && PlatformSizeY > 0 && PixelFormat != PF_Unknown;
+
+		int64 SourceSizeX = 0;
+		int64 SourceSizeY = 0;
+		int32 SourceMipCount = 0;
+		bool bSourceAvailable = false;
+		TSharedRef<FJsonObject> Source = MakeShared<FJsonObject>();
+#if WITH_EDITORONLY_DATA
+		bSourceAvailable = Texture->Source.IsValid();
+		SourceSizeX = Texture->Source.GetSizeX();
+		SourceSizeY = Texture->Source.GetSizeY();
+		SourceMipCount = Texture->Source.GetNumMips();
+		const ETextureSourceFormat SourceFormat = Texture->Source.GetFormat();
+		Source->SetBoolField(TEXT("available"), bSourceAvailable);
+		Source->SetNumberField(TEXT("sizeX"), static_cast<double>(SourceSizeX));
+		Source->SetNumberField(TEXT("sizeY"), static_cast<double>(SourceSizeY));
+		Source->SetNumberField(TEXT("sliceCount"), Texture->Source.GetNumSlices());
+		Source->SetNumberField(TEXT("mipCount"), SourceMipCount);
+		Source->SetNumberField(TEXT("layerCount"), Texture->Source.GetNumLayers());
+		Source->SetNumberField(TEXT("blockCount"), Texture->Source.GetNumBlocks());
+		Source->SetStringField(TEXT("format"), EnumNameOrValue<ETextureSourceFormat>(SourceFormat));
+		Source->SetNumberField(TEXT("formatValue"), static_cast<int32>(SourceFormat));
+		Source->SetBoolField(TEXT("hdr"), FTextureSource::IsHDR(SourceFormat));
+#else
+		Source->SetBoolField(TEXT("available"), false);
+#endif
+
+		TSharedRef<FJsonObject> Platform = MakeShared<FJsonObject>();
+		Platform->SetBoolField(TEXT("available"), bPlatformDataAvailable);
+		Platform->SetNumberField(TEXT("sizeX"), PlatformSizeX);
+		Platform->SetNumberField(TEXT("sizeY"), PlatformSizeY);
+		Platform->SetNumberField(TEXT("mipCount"), PlatformMipCount);
+		Platform->SetStringField(TEXT("pixelFormat"), GetPixelFormatString(PixelFormat));
+		Platform->SetNumberField(TEXT("pixelFormatValue"), static_cast<int32>(PixelFormat));
+
+		OutDetails->SetStringField(TEXT("type"), TEXT("texture-2d"));
+		OutDetails->SetNumberField(TEXT("readerVersion"), 1);
+		OutDetails->SetObjectField(TEXT("source"), Source);
+		OutDetails->SetObjectField(TEXT("platform"), Platform);
+		OutDetails->SetNumberField(TEXT("sizeX"), static_cast<double>(bSourceAvailable ? SourceSizeX : PlatformSizeX));
+		OutDetails->SetNumberField(TEXT("sizeY"), static_cast<double>(bSourceAvailable ? SourceSizeY : PlatformSizeY));
+		OutDetails->SetNumberField(TEXT("mipCount"), bSourceAvailable ? SourceMipCount : PlatformMipCount);
+		OutDetails->SetStringField(TEXT("pixelFormat"), GetPixelFormatString(PixelFormat));
+		OutDetails->SetNumberField(TEXT("pixelFormatValue"), static_cast<int32>(PixelFormat));
+		OutDetails->SetStringField(TEXT("compressionSettings"), EnumNameOrValue<TextureCompressionSettings>(Texture->CompressionSettings));
+		OutDetails->SetNumberField(TEXT("compressionSettingsValue"), static_cast<int32>(Texture->CompressionSettings));
+		OutDetails->SetBoolField(TEXT("srgb"), Texture->SRGB);
+		OutDetails->SetStringField(TEXT("lodGroup"), EnumNameOrValue<TextureGroup>(Texture->LODGroup));
+		OutDetails->SetNumberField(TEXT("lodGroupValue"), static_cast<int32>(Texture->LODGroup));
+		OutDetails->SetStringField(TEXT("mipGenSettings"), UTexture::GetMipGenSettingsString(Texture->MipGenSettings));
+		OutDetails->SetNumberField(TEXT("mipGenSettingsValue"), static_cast<int32>(Texture->MipGenSettings));
+		OutDetails->SetStringField(TEXT("filter"), EnumNameOrValue<TextureFilter>(Texture->Filter));
+		OutDetails->SetNumberField(TEXT("filterValue"), static_cast<int32>(Texture->Filter));
+		OutDetails->SetStringField(TEXT("addressX"), EnumNameOrValue<TextureAddress>(Texture->AddressX));
+		OutDetails->SetStringField(TEXT("addressY"), EnumNameOrValue<TextureAddress>(Texture->AddressY));
+		OutDetails->SetBoolField(TEXT("neverStream"), Texture->NeverStream);
+		OutDetails->SetBoolField(TEXT("globalForceMipLevelsResident"), Texture->bGlobalForceMipLevelsToBeResident);
+		OutDetails->SetNumberField(TEXT("cinematicMipLevels"), Texture->NumCinematicMipLevels);
+		OutDetails->SetBoolField(TEXT("virtualTextureStreaming"), Texture->VirtualTextureStreaming);
+		OutDetails->SetBoolField(TEXT("requiresVirtualTexturing"), Texture->RequiresVirtualTexturing());
+		OutDetails->SetNumberField(TEXT("virtualTexturePrefetchMips"), Texture->VirtualTexturePrefetchMips);
+		return EAssetReaderStatus::Success;
+	}}
 
 EAssetReaderStatus FAssetReaderRegistry::ReadAssetDetails(
 	const FAssetData& AssetData,
@@ -598,6 +955,21 @@ EAssetReaderStatus FAssetReaderRegistry::ReadAssetDetails(
 	{
 		OutReaderName = TEXT("physics-asset-v1");
 		return AssetReaderRegistryPrivate::ReadPhysicsAsset(AssetData, OutDetails, OutError);
+	}
+	if (AssetData.AssetClassPath == UMaterial::StaticClass()->GetClassPathName())
+	{
+		OutReaderName = TEXT("material-v1");
+		return AssetReaderRegistryPrivate::ReadMaterial(AssetData, OutDetails, OutError);
+	}
+	if (AssetData.AssetClassPath == UMaterialInstanceConstant::StaticClass()->GetClassPathName())
+	{
+		OutReaderName = TEXT("material-instance-v1");
+		return AssetReaderRegistryPrivate::ReadMaterialInstance(AssetData, OutDetails, OutError);
+	}
+	if (AssetData.AssetClassPath == UTexture2D::StaticClass()->GetClassPathName())
+	{
+		OutReaderName = TEXT("texture-2d-v1");
+		return AssetReaderRegistryPrivate::ReadTexture2D(AssetData, OutDetails, OutError);
 	}
 	return EAssetReaderStatus::NotHandled;
 }
