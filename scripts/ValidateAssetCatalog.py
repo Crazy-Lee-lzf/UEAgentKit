@@ -22,6 +22,7 @@ READER_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "blend-space-v1": ("type", "readerVersion", "blendSpaceType", "skeletonPath", "notifyTriggerMode", "axes", "sampleCount", "samples"),
     "data-table-v1": ("type", "readerVersion", "rowStructPath", "rowCount", "rowNames", "rows"),
     "data-asset-v1": ("type", "readerVersion", "classPath", "hasPrimaryAssetId", "primaryAssetType", "primaryAssetName", "primaryAssetId", "propertyCount", "skippedPropertyCount", "conversionFailureCount", "properties"),
+    "niagara-system-v1": ("type", "readerVersion", "effectTypePath", "deterministic", "randomSeed", "warmup", "fixedTick", "fixedBounds", "systemSpawnScript", "systemUpdateScript", "exposedParameterCount", "exposedParameters", "emitterCount", "emitters"),
 }
 
 READER_COUNT_ARRAY_PAIRS: dict[str, tuple[tuple[str, str], ...]] = {
@@ -36,6 +37,7 @@ READER_COUNT_ARRAY_PAIRS: dict[str, tuple[tuple[str, str], ...]] = {
     "blend-space-v1": (("sampleCount", "samples"),),
     "data-table-v1": (("rowCount", "rows"), ("rowCount", "rowNames")),
     "data-asset-v1": (("propertyCount", "properties"),),
+    "niagara-system-v1": (("exposedParameterCount", "exposedParameters"), ("emitterCount", "emitters")),
 }
 
 
@@ -148,6 +150,25 @@ def validate_asset(
                 errors.append(
                     "data-asset-v1 property conversion failures: " + ", ".join(failed_properties)
                 )
+        if reader_name == "niagara-system-v1":
+            for emitter in asset_details.get("emitters", []):
+                if emitter.get("rendererCount") != len(emitter.get("renderers", [])):
+                    errors.append("niagara-system-v1 rendererCount is inconsistent")
+                if emitter.get("scriptCount") != len(emitter.get("scripts", [])):
+                    errors.append("niagara-system-v1 scriptCount is inconsistent")
+                if emitter.get("statelessModuleCount") != len(emitter.get("statelessModules", [])):
+                    errors.append("niagara-system-v1 statelessModuleCount is inconsistent")
+                is_stateless = emitter.get("mode") == "Stateless"
+                has_stateless_emitter = bool(emitter.get("statelessEmitterAvailable"))
+                if is_stateless and not has_stateless_emitter:
+                    errors.append("niagara-system-v1 stateless emitter data is unavailable")
+                if not is_stateless and has_stateless_emitter:
+                    errors.append("niagara-system-v1 standard emitter exposes stateless data")
+                if not has_stateless_emitter and (
+                    emitter.get("statelessSpawnInfoCount", 0) != 0
+                    or emitter.get("statelessModuleCount", 0) != 0
+                ):
+                    errors.append("niagara-system-v1 unavailable stateless emitter has nonzero counts")
     if reader_status == "failed" and not reader_error:
         errors.append("failed specialized reader has empty assetReaderError")
     if len(symbols) != 1 or symbols[0].get("kind") != "asset":
