@@ -6,7 +6,7 @@
 
 UE Agent Kit is an open-source, read-only Unreal Engine asset analysis toolkit. Its Editor plugin exports the project asset catalog, Asset Registry metadata, dependencies, and Blueprint semantics. A Python CLI and SQLite then provide a project-wide searchable index.
 
-The current release is **0.2.5** and targets **Unreal Engine 5.6**. It performs read-only export, indexing, and queries; it does not modify or save `.uasset` files.
+The current release is **0.2.6** and targets **Unreal Engine 5.6**. It performs read-only export, indexing, and queries; it does not modify or save `.uasset` files.
 
 > **AI Generated**: Most code and documentation in this project are AI-generated and reviewed through human inspection, UE 5.6 compilation, automated tests, and real-project regression validation.
 
@@ -27,6 +27,7 @@ The current release is **0.2.5** and targets **Unreal Engine 5.6**. It performs 
 - Exports project assets visible to the Asset Registry.
 - Excludes Blueprints and World Partition external Actor/Object packages by default to avoid duplicate or generated records.
 - Records asset paths, Asset Classes, packages, chunks, Registry Tags, revisions, and dependency edges.
+- The Static Mesh reader adds LOD/section counts, material slots, Nanite, bounds, lightmaps, collision, and sockets.
 - Avoids bulk loading every UObject during project-wide scans.
 
 ### Blueprint semantic analysis
@@ -112,7 +113,7 @@ scripts\ue-agent.cmd references --target-asset /Game/LevelPrototyping/Materials/
 ### 5. Validate the asset catalog
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.2.5
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.2.6
 ```
 
 See [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md) for installation and full command details.

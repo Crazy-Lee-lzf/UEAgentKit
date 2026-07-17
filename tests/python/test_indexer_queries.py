@@ -275,12 +275,31 @@ def make_generic_asset() -> dict[str, Any]:
             "assetPath": GENERIC_ASSET,
             "path": GENERIC_ASSET,
             "class": "/Script/Engine.StaticMesh",
+            "assetReader": "static-mesh-v1",
+            "assetReaderStatus": "success",
+            "assetDetails": {
+                "type": "static-mesh",
+                "readerVersion": 1,
+                "lodCount": 1,
+                "materialSlotCount": 1,
+                "nanite": {"enabled": True},
+            },
             "assetRegistry": {
                 "packagePath": "/Game/Environment",
                 "tags": {"Triangles": "12", "LODs": "1"},
             },
         }
     ]
+    asset["assetReader"] = "static-mesh-v1"
+    asset["assetReaderStatus"] = "success"
+    asset["assetReaderError"] = ""
+    asset["assetDetails"] = {
+        "type": "static-mesh",
+        "readerVersion": 1,
+        "lodCount": 1,
+        "materialSlotCount": 1,
+        "nanite": {"enabled": True},
+    }
     asset["references"] = [
         {
             "id": f"reference|depends-hard-package|{asset_symbol}|{target_symbol}",
@@ -305,6 +324,7 @@ def make_generic_asset() -> dict[str, Any]:
         "symbols": 1,
         "references": 1,
         "registryTags": 2,
+        "specializedDetails": 1,
     }
     return asset
 
@@ -339,6 +359,12 @@ class IndexerAndQueryTests(unittest.TestCase):
                 self.assertEqual(indexed["asset_class"], "/Script/Engine.StaticMesh")
                 self.assertEqual(indexed["indexed_counts"]["references"], 1)
                 self.assertEqual(indexed["symbols"][0]["details"]["symbol"]["assetRegistry"]["tags"]["LODs"], "1")
+                self.assertEqual(
+                    indexed["symbols"][0]["details"]["symbol"]["assetDetails"]["lodCount"],
+                    1,
+                )
+                details_search = search_symbols(connection, "static-mesh", kind="asset", include_details=True)
+                self.assertEqual(details_search[0]["details"]["symbol"]["assetReader"], "static-mesh-v1")
                 stats = get_stats(connection)
                 self.assertEqual(stats["assetClasses"]["/Script/Engine.StaticMesh"], 1)
 

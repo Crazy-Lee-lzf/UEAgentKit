@@ -1,7 +1,7 @@
 {
   "FileVersion": 3,
-  "Version": 5,
-  "VersionName": "0.2.5",
+  "Version": 6,
+  "VersionName": "0.2.6",
   "FriendlyName": "UE Agent Kit",
   "Description": "Read-only Unreal Engine asset catalog, Blueprint semantic export, indexing, and query toolkit.",
   "Category": "Developer Tools",

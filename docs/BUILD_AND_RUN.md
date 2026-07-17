@@ -202,7 +202,7 @@ scripts\ue-agent.cmd references --asset /Game/Characters/BP_Player.BP_Player
 ```bat
 python <TOOL_ROOT>\scripts\ValidateAssetCatalog.py ^
   --output <TOOL_ROOT>\Output\AssetCatalog ^
-  --expect-exporter 0.2.5
+  --expect-exporter 0.2.6
 ```
 
 校验器会检查：

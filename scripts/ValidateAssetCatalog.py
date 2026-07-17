@@ -46,6 +46,10 @@ def validate_asset(
     references = data.get("references", [])
     summary = data.get("summary", {})
     registry = data.get("assetRegistry", {})
+    reader_name = str(data.get("assetReader", ""))
+    reader_status = str(data.get("assetReaderStatus", ""))
+    reader_error = str(data.get("assetReaderError", ""))
+    asset_details = data.get("assetDetails", {})
 
     if not asset_path:
         errors.append("assetPath is empty")
@@ -63,8 +67,22 @@ def validate_asset(
         errors.append("packageName is empty")
     if not isinstance(registry, dict) or not str(registry.get("assetClassPath", "")):
         errors.append("assetRegistry.assetClassPath is empty")
+    if reader_status not in {"not-handled", "success", "failed"}:
+        errors.append(f"invalid assetReaderStatus: {reader_status!r}")
+    if not reader_name:
+        errors.append("assetReader is empty")
+    if reader_status == "success" and (not isinstance(asset_details, dict) or not asset_details):
+        errors.append("successful specialized reader has empty assetDetails")
+    if reader_status == "failed" and not reader_error:
+        errors.append("failed specialized reader has empty assetReaderError")
     if len(symbols) != 1 or symbols[0].get("kind") != "asset":
         errors.append("generic asset must contain exactly one asset symbol")
+    elif symbols[0].get("assetReader") != reader_name:
+        errors.append("asset symbol assetReader does not match root assetReader")
+    elif symbols[0].get("assetReaderStatus") != reader_status:
+        errors.append("asset symbol assetReaderStatus does not match root assetReaderStatus")
+    elif symbols[0].get("assetDetails", {}) != asset_details:
+        errors.append("asset symbol assetDetails does not match root assetDetails")
     if summary.get("symbols") != len(symbols):
         errors.append("summary.symbols does not match symbols array")
     if summary.get("references") != len(references):
@@ -100,6 +118,7 @@ def validate_asset(
             "tags": len(registry.get("tags", {})) if isinstance(registry, dict) else 0,
             "references": len(references),
             "revisionAvailable": bool(revision.get("available")),
+            "readerStatus": reader_status,
         },
         errors,
     )
@@ -120,6 +139,8 @@ def main() -> int:
     manifest = load_json(manifest_path)
     success_count = int(manifest.get("successCount", 0))
     failure_count = int(manifest.get("failureCount", 0))
+    manifest_reader_success = int(manifest.get("readerSuccessCount", 0))
+    manifest_reader_failure = int(manifest.get("readerFailureCount", 0))
     if manifest.get("profile") != "asset-index":
         errors.append(f"manifest profile={manifest.get('profile')!r}, expected 'asset-index'")
     if args.expect_schema and str(manifest.get("schemaVersion", "")) != args.expect_schema:
@@ -153,6 +174,19 @@ def main() -> int:
         errors.extend(f"{path.relative_to(output_root)}: {message}" for message in asset_errors)
         assets.append(result)
 
+    reader_success_count = sum(item["readerStatus"] == "success" for item in assets)
+    reader_failure_count = sum(item["readerStatus"] == "failed" for item in assets)
+    if reader_success_count != manifest_reader_success:
+        errors.append(
+            f"reader success count {reader_success_count} does not match manifest {manifest_reader_success}"
+        )
+    if reader_failure_count != manifest_reader_failure:
+        errors.append(
+            f"reader failure count {reader_failure_count} does not match manifest {manifest_reader_failure}"
+        )
+    if reader_failure_count and not args.allow_failures:
+        errors.append(f"manifest contains {reader_failure_count} specialized reader failure(s)")
+
     asset_file_result: dict[str, Any] = {}
     if args.asset_file:
         asset_file = args.asset_file.expanduser().resolve()
@@ -177,6 +211,8 @@ def main() -> int:
         "projectName": manifest.get("projectName", ""),
         "successCount": success_count,
         "failureCount": failure_count,
+        "readerSuccessCount": reader_success_count,
+        "readerFailureCount": reader_failure_count,
         "canonicalFiles": len(files),
         "assetClasses": dict(sorted(class_counts.items())),
         "totalTags": sum(int(item["tags"]) for item in assets),

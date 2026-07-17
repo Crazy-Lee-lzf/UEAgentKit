@@ -1,5 +1,7 @@
 #include "AssetCatalogExportCommandlet.h"
 
+#include "AssetReaders/AssetReaderRegistry.h"
+
 #include "AssetRegistry/AssetData.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
@@ -23,7 +25,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogAssetCatalogExport, Log, All);
 namespace AssetCatalogExportPrivate
 {
 	constexpr const TCHAR* SchemaVersion = TEXT("1.1");
-	constexpr const TCHAR* ExporterVersion = TEXT("0.2.5");
+	constexpr const TCHAR* ExporterVersion = TEXT("0.2.6");
 	constexpr const TCHAR* ProfileName = TEXT("asset-index");
 
 	struct FAssetCatalogExportResult
@@ -34,6 +36,9 @@ namespace AssetCatalogExportPrivate
 		bool bSuccess = false;
 		int32 TagCount = 0;
 		int32 ReferenceCount = 0;
+		FString ReaderName;
+		FString ReaderStatus;
+		FString ReaderError;
 	};
 
 	FString NormalizeObjectPath(FString Path)
@@ -367,6 +372,15 @@ namespace AssetCatalogExportPrivate
 		const FString AssetSymbolId = MakeSymbolId(TEXT("asset"), OutResult.AssetPath);
 		TArray<TSharedPtr<FJsonValue>> References = BuildDependencies(AssetRegistry, AssetData, AssetSymbolId);
 
+		TSharedRef<FJsonObject> AssetDetails = MakeShared<FJsonObject>();
+		FString ReaderName;
+		FString ReaderError;
+		const EAssetReaderStatus ReaderStatus = FAssetReaderRegistry::ReadAssetDetails(
+			AssetData,
+			AssetDetails,
+			ReaderName,
+			ReaderError);
+
 		TArray<TSharedPtr<FJsonValue>> ChunkIds;
 		for (const int32 ChunkId : AssetData.GetChunkIDs())
 		{
@@ -391,6 +405,9 @@ namespace AssetCatalogExportPrivate
 		AssetSymbol->SetStringField(TEXT("path"), OutResult.AssetPath);
 		AssetSymbol->SetStringField(TEXT("class"), AssetData.AssetClassPath.ToString());
 		AssetSymbol->SetObjectField(TEXT("assetRegistry"), RegistryObject);
+		AssetSymbol->SetStringField(TEXT("assetReader"), ReaderName);
+		AssetSymbol->SetStringField(TEXT("assetReaderStatus"), FAssetReaderRegistry::StatusToString(ReaderStatus));
+		AssetSymbol->SetObjectField(TEXT("assetDetails"), AssetDetails);
 		TArray<TSharedPtr<FJsonValue>> Symbols;
 		Symbols.Add(MakeShared<FJsonValueObject>(AssetSymbol));
 
@@ -404,6 +421,7 @@ namespace AssetCatalogExportPrivate
 		Summary->SetNumberField(TEXT("symbols"), Symbols.Num());
 		Summary->SetNumberField(TEXT("references"), References.Num());
 		Summary->SetNumberField(TEXT("registryTags"), TagCount);
+		Summary->SetNumberField(TEXT("specializedDetails"), ReaderStatus == EAssetReaderStatus::Success ? 1 : 0);
 
 		TSharedRef<FJsonObject> RootObject = MakeShared<FJsonObject>();
 		RootObject->SetStringField(TEXT("schemaVersion"), SchemaVersion);
@@ -422,6 +440,10 @@ namespace AssetCatalogExportPrivate
 		RootObject->SetNumberField(TEXT("status"), 0);
 		RootObject->SetObjectField(TEXT("revision"), BuildRevision(AssetData));
 		RootObject->SetObjectField(TEXT("assetRegistry"), RegistryObject);
+		RootObject->SetStringField(TEXT("assetReader"), ReaderName);
+		RootObject->SetStringField(TEXT("assetReaderStatus"), FAssetReaderRegistry::StatusToString(ReaderStatus));
+		RootObject->SetStringField(TEXT("assetReaderError"), ReaderError);
+		RootObject->SetObjectField(TEXT("assetDetails"), AssetDetails);
 		RootObject->SetArrayField(TEXT("interfaces"), {});
 		RootObject->SetArrayField(TEXT("variables"), {});
 		RootObject->SetArrayField(TEXT("components"), {});
@@ -440,6 +462,9 @@ namespace AssetCatalogExportPrivate
 		OutResult.bSuccess = true;
 		OutResult.TagCount = TagCount;
 		OutResult.ReferenceCount = References.Num();
+		OutResult.ReaderName = ReaderName;
+		OutResult.ReaderStatus = FAssetReaderRegistry::StatusToString(ReaderStatus);
+		OutResult.ReaderError = ReaderError;
 		return true;
 	}
 
@@ -469,10 +494,14 @@ namespace AssetCatalogExportPrivate
 		RootObject->SetNumberField(TEXT("skippedGeneratedCount"), SkippedGeneratedCount);
 
 		int32 SuccessCount = 0;
+		int32 ReaderSuccessCount = 0;
+		int32 ReaderFailureCount = 0;
 		TArray<TSharedPtr<FJsonValue>> Assets;
 		for (const FAssetCatalogExportResult& Result : Results)
 		{
 			SuccessCount += Result.bSuccess ? 1 : 0;
+			ReaderSuccessCount += Result.ReaderStatus == TEXT("success") ? 1 : 0;
+			ReaderFailureCount += Result.ReaderStatus == TEXT("failed") ? 1 : 0;
 			TSharedRef<FJsonObject> AssetObject = MakeShared<FJsonObject>();
 			AssetObject->SetStringField(TEXT("assetPath"), Result.AssetPath);
 			AssetObject->SetBoolField(TEXT("success"), Result.bSuccess);
@@ -488,12 +517,17 @@ namespace AssetCatalogExportPrivate
 			AssetObject->SetNumberField(TEXT("symbols"), Result.bSuccess ? 1 : 0);
 			AssetObject->SetNumberField(TEXT("references"), Result.ReferenceCount);
 			AssetObject->SetNumberField(TEXT("registryTags"), Result.TagCount);
+			AssetObject->SetStringField(TEXT("assetReader"), Result.ReaderName);
+			AssetObject->SetStringField(TEXT("assetReaderStatus"), Result.ReaderStatus);
+			AssetObject->SetStringField(TEXT("assetReaderError"), Result.ReaderError);
 			Assets.Add(MakeShared<FJsonValueObject>(AssetObject));
 		}
 
 		RootObject->SetNumberField(TEXT("assetCount"), Results.Num());
 		RootObject->SetNumberField(TEXT("successCount"), SuccessCount);
 		RootObject->SetNumberField(TEXT("failureCount"), Results.Num() - SuccessCount);
+		RootObject->SetNumberField(TEXT("readerSuccessCount"), ReaderSuccessCount);
+		RootObject->SetNumberField(TEXT("readerFailureCount"), ReaderFailureCount);
 		RootObject->SetArrayField(TEXT("assets"), Assets);
 		return SaveJsonObject(
 			RootObject,

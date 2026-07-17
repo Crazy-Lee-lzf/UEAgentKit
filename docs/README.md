@@ -11,7 +11,7 @@
 
 ## 当前版本
 
-UE Agent Kit 0.2.5 支持 Unreal Engine 5.6，当前公开能力包括：
+UE Agent Kit 0.2.6 支持 Unreal Engine 5.6，当前公开能力包括：
 
 - 通用 UE 资产目录、Asset Registry Tags、Revision 和依赖导出。
 - Blueprint 只读语义分析。

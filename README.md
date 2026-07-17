@@ -6,7 +6,7 @@
 
 UE Agent Kit 是一套面向 Unreal Engine 的开源只读资产分析工具。它通过 UE Editor 插件导出项目资产目录、Asset Registry 元数据、依赖关系和 Blueprint 语义，再使用 Python CLI 与 SQLite 建立项目级索引。
 
-当前版本为 **0.2.5**，支持 **Unreal Engine 5.6**。工具仅执行只读导出、索引和查询，不修改或保存 `.uasset`。
+当前版本为 **0.2.6**，支持 **Unreal Engine 5.6**。工具仅执行只读导出、索引和查询，不修改或保存 `.uasset`。
 
 > **AI Generated**：本项目的代码和文档主要由 AI 生成，并通过人工审查、UE 5.6 编译、自动化测试和真实工程回归验证。
 
@@ -27,6 +27,7 @@ UE Agent Kit 是一套面向 Unreal Engine 的开源只读资产分析工具。�
 - 导出 Asset Registry 可见的项目资产。
 - 默认排除 Blueprint 和 World Partition 外部 Actor/Object 包，避免与 Blueprint 深度导出重复或产生大量生成记录。
 - 输出资产路径、Asset Class、Package、Chunk、Registry Tags、Revision 和依赖关系。
+- Static Mesh 专用 Reader 额外输出 LOD/Section、材质槽、Nanite、Bounds、Lightmap、碰撞和 Socket。
 - 不批量加载所有 UObject，适合项目级快速扫描。
 
 ### Blueprint 深度分析
@@ -112,7 +113,7 @@ scripts\ue-agent.cmd references --target-asset /Game/LevelPrototyping/Materials/
 ### 5. 校验通用资产导出
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.2.5
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.2.6
 ```
 
 完整参数和安装说明见 [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md)。
