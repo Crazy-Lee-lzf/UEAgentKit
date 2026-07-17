@@ -28,6 +28,8 @@ The current release is **0.2.6** and targets **Unreal Engine 5.6**. It performs 
 - Excludes Blueprints and World Partition external Actor/Object packages by default to avoid duplicate or generated records.
 - Records asset paths, Asset Classes, packages, chunks, Registry Tags, revisions, and dependency edges.
 - The Static Mesh reader adds LOD/section counts, material slots, Nanite, bounds, lightmaps, collision, and sockets.
+- The Skeletal Mesh reader adds Skeleton/Physics Asset links, LODs, materials, bounds, bone summaries, morph targets, and sockets; the Skeleton reader adds the full hierarchy, reference pose, virtual bones, sockets, compatibility entries, and curve metadata.
+- The Skeletal Mesh reader adds Skeleton/Physics Asset links, LODs, materials, bounds, bone summaries, morph targets, and sockets; the Skeleton reader adds the full hierarchy, reference pose, virtual bones, sockets, compatibility entries, and curve metadata.
 - Avoids bulk loading every UObject during project-wide scans.
 
 ### Blueprint semantic analysis

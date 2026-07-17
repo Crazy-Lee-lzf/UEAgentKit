@@ -1,10 +1,16 @@
 #include "AssetReaders/AssetReaderRegistry.h"
 
+#include "Animation/MorphTarget.h"
+#include "Animation/Skeleton.h"
+#include "Engine/SkeletalMesh.h"
+#include "Engine/SkeletalMeshSocket.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshSocket.h"
 #include "Materials/MaterialInterface.h"
 #include "PhysicsEngine/AggregateGeom.h"
 #include "PhysicsEngine/BodySetup.h"
+#include "PhysicsEngine/PhysicsAsset.h"
+#include "ReferenceSkeleton.h"
 
 namespace AssetReaderRegistryPrivate
 {
@@ -23,6 +29,34 @@ namespace AssetReaderRegistryPrivate
 		Json->SetNumberField(TEXT("pitch"), Value.Pitch);
 		Json->SetNumberField(TEXT("yaw"), Value.Yaw);
 		Json->SetNumberField(TEXT("roll"), Value.Roll);
+		return Json;
+	}
+
+	TSharedRef<FJsonObject> QuatToJson(const FQuat& Value)
+	{
+		TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
+		Json->SetNumberField(TEXT("x"), Value.X);
+		Json->SetNumberField(TEXT("y"), Value.Y);
+		Json->SetNumberField(TEXT("z"), Value.Z);
+		Json->SetNumberField(TEXT("w"), Value.W);
+		return Json;
+	}
+
+	TSharedRef<FJsonObject> TransformToJson(const FTransform& Value)
+	{
+		TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
+		Json->SetObjectField(TEXT("translation"), VectorToJson(Value.GetTranslation()));
+		Json->SetObjectField(TEXT("rotation"), QuatToJson(Value.GetRotation()));
+		Json->SetObjectField(TEXT("scale"), VectorToJson(Value.GetScale3D()));
+		return Json;
+	}
+
+	TSharedRef<FJsonObject> BoundsToJson(const FBoxSphereBounds& Bounds)
+	{
+		TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
+		Json->SetObjectField(TEXT("origin"), VectorToJson(Bounds.Origin));
+		Json->SetObjectField(TEXT("boxExtent"), VectorToJson(Bounds.BoxExtent));
+		Json->SetNumberField(TEXT("sphereRadius"), Bounds.SphereRadius);
 		return Json;
 	}
 
@@ -46,6 +80,58 @@ namespace AssetReaderRegistryPrivate
 		default:
 			return TEXT("Unknown");
 		}
+	}
+
+	TArray<TSharedPtr<FJsonValue>> BuildSkeletalSocketArray(const TArray<USkeletalMeshSocket*>& SourceSockets)
+	{
+		TArray<const USkeletalMeshSocket*> SortedSockets;
+		for (const USkeletalMeshSocket* Socket : SourceSockets)
+		{
+			if (Socket != nullptr)
+			{
+				SortedSockets.Add(Socket);
+			}
+		}
+		SortedSockets.Sort([](const USkeletalMeshSocket& Left, const USkeletalMeshSocket& Right)
+		{
+			const FString LeftKey = Left.SocketName.ToString() + TEXT("|") + Left.BoneName.ToString();
+			const FString RightKey = Right.SocketName.ToString() + TEXT("|") + Right.BoneName.ToString();
+			return LeftKey < RightKey;
+		});
+
+		TArray<TSharedPtr<FJsonValue>> Result;
+		for (const USkeletalMeshSocket* Socket : SortedSockets)
+		{
+			TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
+			Json->SetStringField(TEXT("name"), Socket->SocketName.ToString());
+			Json->SetStringField(TEXT("boneName"), Socket->BoneName.ToString());
+			Json->SetObjectField(TEXT("location"), VectorToJson(Socket->RelativeLocation));
+			Json->SetObjectField(TEXT("rotation"), RotatorToJson(Socket->RelativeRotation));
+			Json->SetObjectField(TEXT("scale"), VectorToJson(Socket->RelativeScale));
+			Result.Add(MakeShared<FJsonValueObject>(Json));
+		}
+		return Result;
+	}
+
+	TArray<TSharedPtr<FJsonValue>> BuildSkeletalMaterials(const TArray<FSkeletalMaterial>& SourceMaterials)
+	{
+		TArray<TSharedPtr<FJsonValue>> Result;
+		for (int32 MaterialIndex = 0; MaterialIndex < SourceMaterials.Num(); ++MaterialIndex)
+		{
+			const FSkeletalMaterial& Source = SourceMaterials[MaterialIndex];
+			TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
+			Json->SetNumberField(TEXT("index"), MaterialIndex);
+			Json->SetStringField(TEXT("slotName"), Source.MaterialSlotName.ToString());
+#if WITH_EDITORONLY_DATA
+			Json->SetStringField(TEXT("importedSlotName"), Source.ImportedMaterialSlotName.ToString());
+#else
+			Json->SetStringField(TEXT("importedSlotName"), FString());
+#endif
+			Json->SetStringField(TEXT("materialPath"), ObjectPathOrEmpty(Source.MaterialInterface));
+			Json->SetStringField(TEXT("overlayMaterialPath"), ObjectPathOrEmpty(Source.OverlayMaterialInterface));
+			Result.Add(MakeShared<FJsonValueObject>(Json));
+		}
+		return Result;
 	}
 
 	EAssetReaderStatus ReadStaticMesh(
@@ -90,13 +176,7 @@ namespace AssetReaderRegistryPrivate
 		}
 		OutDetails->SetNumberField(TEXT("materialSlotCount"), StaticMaterials.Num());
 		OutDetails->SetArrayField(TEXT("materials"), Materials);
-
-		const FBoxSphereBounds Bounds = StaticMesh->GetBounds();
-		TSharedRef<FJsonObject> BoundsObject = MakeShared<FJsonObject>();
-		BoundsObject->SetObjectField(TEXT("origin"), VectorToJson(Bounds.Origin));
-		BoundsObject->SetObjectField(TEXT("boxExtent"), VectorToJson(Bounds.BoxExtent));
-		BoundsObject->SetNumberField(TEXT("sphereRadius"), Bounds.SphereRadius);
-		OutDetails->SetObjectField(TEXT("bounds"), BoundsObject);
+		OutDetails->SetObjectField(TEXT("bounds"), BoundsToJson(StaticMesh->GetBounds()));
 
 		TSharedRef<FJsonObject> Lightmap = MakeShared<FJsonObject>();
 		Lightmap->SetNumberField(TEXT("resolution"), StaticMesh->GetLightMapResolution());
@@ -121,9 +201,7 @@ namespace AssetReaderRegistryPrivate
 		if (BodySetup != nullptr)
 		{
 			const FKAggregateGeom& Geometry = BodySetup->AggGeom;
-			Collision->SetStringField(
-				TEXT("traceFlag"),
-				CollisionTraceFlagToString(BodySetup->CollisionTraceFlag));
+			Collision->SetStringField(TEXT("traceFlag"), CollisionTraceFlagToString(BodySetup->CollisionTraceFlag));
 			Collision->SetNumberField(TEXT("traceFlagValue"), static_cast<int32>(BodySetup->CollisionTraceFlag));
 			Collision->SetNumberField(TEXT("sphereCount"), Geometry.SphereElems.Num());
 			Collision->SetNumberField(TEXT("boxCount"), Geometry.BoxElems.Num());
@@ -165,6 +243,169 @@ namespace AssetReaderRegistryPrivate
 		OutDetails->SetArrayField(TEXT("sockets"), Sockets);
 		return EAssetReaderStatus::Success;
 	}
+
+	EAssetReaderStatus ReadSkeletalMesh(
+		const FAssetData& AssetData,
+		TSharedRef<FJsonObject>& OutDetails,
+		FString& OutError)
+	{
+		USkeletalMesh* SkeletalMesh = Cast<USkeletalMesh>(AssetData.GetAsset());
+		if (SkeletalMesh == nullptr)
+		{
+			OutError = TEXT("Failed to load Skeletal Mesh asset.");
+			return EAssetReaderStatus::Failed;
+		}
+
+		OutDetails->SetStringField(TEXT("type"), TEXT("skeletal-mesh"));
+		OutDetails->SetNumberField(TEXT("readerVersion"), 1);
+		OutDetails->SetStringField(TEXT("skeletonPath"), ObjectPathOrEmpty(SkeletalMesh->GetSkeleton()));
+		OutDetails->SetStringField(TEXT("physicsAssetPath"), ObjectPathOrEmpty(SkeletalMesh->GetPhysicsAsset()));
+		OutDetails->SetNumberField(TEXT("lodCount"), SkeletalMesh->GetLODNum());
+		OutDetails->SetObjectField(TEXT("bounds"), BoundsToJson(SkeletalMesh->GetBounds()));
+
+		const FReferenceSkeleton& RefSkeleton = SkeletalMesh->GetRefSkeleton();
+		OutDetails->SetNumberField(TEXT("boneCount"), RefSkeleton.GetNum());
+		OutDetails->SetNumberField(TEXT("rawBoneCount"), RefSkeleton.GetRawBoneNum());
+		OutDetails->SetStringField(
+			TEXT("rootBoneName"),
+			RefSkeleton.GetNum() > 0 ? RefSkeleton.GetBoneName(0).ToString() : FString());
+
+		const TArray<FSkeletalMaterial>& Materials = SkeletalMesh->GetMaterials();
+		OutDetails->SetNumberField(TEXT("materialSlotCount"), Materials.Num());
+		OutDetails->SetArrayField(TEXT("materials"), BuildSkeletalMaterials(Materials));
+
+		TArray<TPair<FString, FString>> MorphTargets;
+		for (const TObjectPtr<UMorphTarget>& MorphTarget : SkeletalMesh->GetMorphTargets())
+		{
+			if (MorphTarget != nullptr)
+			{
+				MorphTargets.Emplace(MorphTarget->GetName(), MorphTarget->GetPathName());
+			}
+		}
+		MorphTargets.Sort([](const TPair<FString, FString>& Left, const TPair<FString, FString>& Right)
+		{
+			return Left.Key < Right.Key;
+		});
+		TArray<TSharedPtr<FJsonValue>> MorphTargetValues;
+		for (const TPair<FString, FString>& MorphTarget : MorphTargets)
+		{
+			TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
+			Json->SetStringField(TEXT("name"), MorphTarget.Key);
+			Json->SetStringField(TEXT("path"), MorphTarget.Value);
+			MorphTargetValues.Add(MakeShared<FJsonValueObject>(Json));
+		}
+		OutDetails->SetNumberField(TEXT("morphTargetCount"), MorphTargetValues.Num());
+		OutDetails->SetArrayField(TEXT("morphTargets"), MorphTargetValues);
+
+		const USkeletalMesh* ConstMesh = SkeletalMesh;
+		const TArray<USkeletalMeshSocket*>& MeshSocketList = ConstMesh->GetMeshOnlySocketList();
+		const TArray<USkeletalMeshSocket*> ActiveSocketList = ConstMesh->GetActiveSocketList();
+		OutDetails->SetNumberField(TEXT("meshSocketCount"), MeshSocketList.Num());
+		OutDetails->SetArrayField(TEXT("meshSockets"), BuildSkeletalSocketArray(MeshSocketList));
+		OutDetails->SetNumberField(TEXT("activeSocketCount"), ActiveSocketList.Num());
+		OutDetails->SetArrayField(TEXT("activeSockets"), BuildSkeletalSocketArray(ActiveSocketList));
+		return EAssetReaderStatus::Success;
+	}
+
+	EAssetReaderStatus ReadSkeleton(
+		const FAssetData& AssetData,
+		TSharedRef<FJsonObject>& OutDetails,
+		FString& OutError)
+	{
+		USkeleton* Skeleton = Cast<USkeleton>(AssetData.GetAsset());
+		if (Skeleton == nullptr)
+		{
+			OutError = TEXT("Failed to load Skeleton asset.");
+			return EAssetReaderStatus::Failed;
+		}
+
+		OutDetails->SetStringField(TEXT("type"), TEXT("skeleton"));
+		OutDetails->SetNumberField(TEXT("readerVersion"), 1);
+		const FReferenceSkeleton& RefSkeleton = Skeleton->GetReferenceSkeleton();
+		OutDetails->SetNumberField(TEXT("boneCount"), RefSkeleton.GetNum());
+		OutDetails->SetNumberField(TEXT("rawBoneCount"), RefSkeleton.GetRawBoneNum());
+		OutDetails->SetStringField(
+			TEXT("rootBoneName"),
+			RefSkeleton.GetNum() > 0 ? RefSkeleton.GetBoneName(0).ToString() : FString());
+
+		const TArray<FTransform>& BonePoses = RefSkeleton.GetRefBonePose();
+		TArray<TSharedPtr<FJsonValue>> Bones;
+		for (int32 BoneIndex = 0; BoneIndex < RefSkeleton.GetNum(); ++BoneIndex)
+		{
+			const int32 ParentIndex = RefSkeleton.GetParentIndex(BoneIndex);
+			TSharedRef<FJsonObject> Bone = MakeShared<FJsonObject>();
+			Bone->SetNumberField(TEXT("index"), BoneIndex);
+			Bone->SetStringField(TEXT("name"), RefSkeleton.GetBoneName(BoneIndex).ToString());
+			Bone->SetNumberField(TEXT("parentIndex"), ParentIndex);
+			Bone->SetStringField(
+				TEXT("parentName"),
+				ParentIndex != INDEX_NONE ? RefSkeleton.GetBoneName(ParentIndex).ToString() : FString());
+			Bone->SetObjectField(TEXT("localTransform"), TransformToJson(BonePoses[BoneIndex]));
+			Bones.Add(MakeShared<FJsonValueObject>(Bone));
+		}
+		OutDetails->SetArrayField(TEXT("bones"), Bones);
+
+		TArray<FVirtualBone> VirtualBones = Skeleton->GetVirtualBones();
+		VirtualBones.Sort([](const FVirtualBone& Left, const FVirtualBone& Right)
+		{
+			return Left.VirtualBoneName.LexicalLess(Right.VirtualBoneName);
+		});
+		TArray<TSharedPtr<FJsonValue>> VirtualBoneValues;
+		for (const FVirtualBone& VirtualBone : VirtualBones)
+		{
+			TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
+			Json->SetStringField(TEXT("name"), VirtualBone.VirtualBoneName.ToString());
+			Json->SetStringField(TEXT("sourceBoneName"), VirtualBone.SourceBoneName.ToString());
+			Json->SetStringField(TEXT("targetBoneName"), VirtualBone.TargetBoneName.ToString());
+			VirtualBoneValues.Add(MakeShared<FJsonValueObject>(Json));
+		}
+		OutDetails->SetNumberField(TEXT("virtualBoneCount"), VirtualBoneValues.Num());
+		OutDetails->SetArrayField(TEXT("virtualBones"), VirtualBoneValues);
+
+		TArray<USkeletalMeshSocket*> SkeletonSocketList;
+		for (const TObjectPtr<USkeletalMeshSocket>& Socket : Skeleton->Sockets)
+		{
+			if (Socket != nullptr)
+			{
+				SkeletonSocketList.Add(Socket.Get());
+			}
+		}
+		OutDetails->SetNumberField(TEXT("socketCount"), SkeletonSocketList.Num());
+		OutDetails->SetArrayField(TEXT("sockets"), BuildSkeletalSocketArray(SkeletonSocketList));
+
+		const USkeleton* ConstSkeleton = Skeleton;
+		OutDetails->SetStringField(TEXT("previewMeshPath"), ObjectPathOrEmpty(ConstSkeleton->GetPreviewMesh()));
+
+		TArray<FString> CompatibleSkeletonPaths;
+		for (const TSoftObjectPtr<USkeleton>& CompatibleSkeleton : Skeleton->GetCompatibleSkeletons())
+		{
+			const FString Path = CompatibleSkeleton.ToSoftObjectPath().ToString();
+			if (!Path.IsEmpty())
+			{
+				CompatibleSkeletonPaths.Add(Path);
+			}
+		}
+		CompatibleSkeletonPaths.Sort();
+		TArray<TSharedPtr<FJsonValue>> CompatibleSkeletonValues;
+		for (const FString& Path : CompatibleSkeletonPaths)
+		{
+			CompatibleSkeletonValues.Add(MakeShared<FJsonValueString>(Path));
+		}
+		OutDetails->SetNumberField(TEXT("compatibleSkeletonCount"), CompatibleSkeletonValues.Num());
+		OutDetails->SetArrayField(TEXT("compatibleSkeletons"), CompatibleSkeletonValues);
+
+		TArray<FName> CurveNames;
+		Skeleton->GetCurveMetaDataNames(CurveNames);
+		CurveNames.Sort(FNameLexicalLess());
+		TArray<TSharedPtr<FJsonValue>> CurveNameValues;
+		for (const FName CurveName : CurveNames)
+		{
+			CurveNameValues.Add(MakeShared<FJsonValueString>(CurveName.ToString()));
+		}
+		OutDetails->SetNumberField(TEXT("curveMetadataCount"), CurveNameValues.Num());
+		OutDetails->SetArrayField(TEXT("curveMetadataNames"), CurveNameValues);
+		return EAssetReaderStatus::Success;
+	}
 }
 
 EAssetReaderStatus FAssetReaderRegistry::ReadAssetDetails(
@@ -181,6 +422,16 @@ EAssetReaderStatus FAssetReaderRegistry::ReadAssetDetails(
 	{
 		OutReaderName = TEXT("static-mesh-v1");
 		return AssetReaderRegistryPrivate::ReadStaticMesh(AssetData, OutDetails, OutError);
+	}
+	if (AssetData.AssetClassPath == USkeletalMesh::StaticClass()->GetClassPathName())
+	{
+		OutReaderName = TEXT("skeletal-mesh-v1");
+		return AssetReaderRegistryPrivate::ReadSkeletalMesh(AssetData, OutDetails, OutError);
+	}
+	if (AssetData.AssetClassPath == USkeleton::StaticClass()->GetClassPathName())
+	{
+		OutReaderName = TEXT("skeleton-v1");
+		return AssetReaderRegistryPrivate::ReadSkeleton(AssetData, OutDetails, OutError);
 	}
 	return EAssetReaderStatus::NotHandled;
 }

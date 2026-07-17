@@ -28,6 +28,7 @@ UE Agent Kit 是一套面向 Unreal Engine 的开源只读资产分析工具。�
 - 默认排除 Blueprint 和 World Partition 外部 Actor/Object 包，避免与 Blueprint 深度导出重复或产生大量生成记录。
 - 输出资产路径、Asset Class、Package、Chunk、Registry Tags、Revision 和依赖关系。
 - Static Mesh 专用 Reader 额外输出 LOD/Section、材质槽、Nanite、Bounds、Lightmap、碰撞和 Socket。
+- Skeletal Mesh 专用 Reader 输出 Skeleton/Physics Asset、LOD、材质槽、Bounds、骨骼摘要、Morph Target 和 Socket；Skeleton Reader 输出完整骨骼层级、参考姿势、Virtual Bone、Socket、兼容项和 Curve 元数据。
 - 不批量加载所有 UObject，适合项目级快速扫描。
 
 ### Blueprint 深度分析
