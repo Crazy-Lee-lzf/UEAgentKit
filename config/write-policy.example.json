@@ -13,7 +13,8 @@
     "setComponentProperty",
     "setPinDefault",
     "setBlueprintDescription",
-    "setAssetProperty"
+    "setAssetProperty",
+    "setMaterialInstanceScalarParameter"
   ],
   "allowedAssetClasses": [
     "/Script/Engine.Blueprint",
@@ -22,7 +23,8 @@
     "/Script/ControlRigDeveloper.ControlRigBlueprint",
     "/Script/Engine.PrimaryAssetLabel",
     "/Script/Engine.Texture2D",
-    "/Script/Engine.StaticMesh"
+    "/Script/Engine.StaticMesh",
+    "/Script/Engine.MaterialInstanceConstant"
   ],
   "requireRevision": true,
   "rejectDirtyPackages": true,
@@ -33,5 +35,8 @@
     "/Script/Engine.PrimaryAssetLabel#bIncludeRedirectors",
     "/Script/Engine.Texture2D#SRGB",
     "/Script/Engine.StaticMesh#LightMapResolution"
+  ],
+  "allowedMaterialParameters": [
+    "/Script/Engine.MaterialInstanceConstant#Scalar#Roughness"
   ]
 }

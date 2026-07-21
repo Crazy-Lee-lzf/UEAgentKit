@@ -4,6 +4,8 @@
 #include "Dom/JsonObject.h"
 #include "Engine/Blueprint.h"
 #include "HAL/FileManager.h"
+#include "MaterialEditingLibrary.h"
+#include "Materials/MaterialInstanceConstant.h"
 #include "Misc/App.h"
 #include "Misc/DateTime.h"
 #include "Misc/FileHelper.h"
@@ -31,6 +33,7 @@ namespace AssetPatchCommandletPrivate
 		TArray<FString> AllowedOperations;
 		TArray<FString> AllowedAssetClasses;
 		TArray<FString> AllowedAssetProperties;
+		TArray<FString> AllowedMaterialParameters;
 	};
 
 	bool LoadJsonObject(const FString& Filename, TSharedPtr<FJsonObject>& OutObject, FString& OutError)
@@ -96,6 +99,7 @@ namespace AssetPatchCommandletPrivate
 		ReadStringArray(Object, TEXT("allowedOperations"), OutPolicy.AllowedOperations);
 		ReadStringArray(Object, TEXT("allowedAssetClasses"), OutPolicy.AllowedAssetClasses);
 		ReadStringArray(Object, TEXT("allowedAssetProperties"), OutPolicy.AllowedAssetProperties);
+		ReadStringArray(Object, TEXT("allowedMaterialParameters"), OutPolicy.AllowedMaterialParameters);
 		for (FString& Root : OutPolicy.AllowedAssetRoots)
 		{
 			Root.RemoveFromEnd(TEXT("/"));
@@ -122,6 +126,13 @@ namespace AssetPatchCommandletPrivate
 			&& OutPolicy.AllowedAssetProperties.IsEmpty())
 		{
 			OutError = TEXT("setAssetProperty requires allowedAssetProperties authorization.");
+			return false;
+		}
+		if (ContainsExact(OutPolicy.AllowedOperations, TEXT("setMaterialInstanceScalarParameter"))
+			&& OutPolicy.AllowedMaterialParameters.IsEmpty())
+		{
+			OutError = TEXT(
+				"setMaterialInstanceScalarParameter requires allowedMaterialParameters authorization.");
 			return false;
 		}
 		return true;
@@ -452,6 +463,74 @@ namespace AssetPatchCommandletPrivate
 				*FPaths::GetCleanFilename(PackageFilename)));
 	}
 
+	bool ScalarParameterArraysEqualExact(
+		const TArray<FScalarParameterValue>& A,
+		const TArray<FScalarParameterValue>& B)
+	{
+		if (A.Num() != B.Num())
+		{
+			return false;
+		}
+		for (int32 Index = 0; Index < A.Num(); ++Index)
+		{
+			if (A[Index] != B[Index])
+			{
+				return false;
+			}
+#if WITH_EDITORONLY_DATA
+			if (A[Index].ParameterName_DEPRECATED != B[Index].ParameterName_DEPRECATED
+				|| A[Index].AtlasData != B[Index].AtlasData)
+			{
+				return false;
+			}
+#endif
+		}
+		return true;
+	}
+
+	bool FindGlobalScalarParameter(
+		UMaterialInstanceConstant* Instance,
+		const FName ParameterName,
+		FMaterialParameterInfo& OutInfo,
+		FString& OutError)
+	{
+		TArray<FMaterialParameterInfo> ParameterInfos;
+		TArray<FGuid> ParameterIds;
+		Instance->GetAllScalarParameterInfo(ParameterInfos, ParameterIds);
+		int32 MatchCount = 0;
+		for (const FMaterialParameterInfo& Info : ParameterInfos)
+		{
+			if (Info.Name == ParameterName
+				&& Info.Association == EMaterialParameterAssociation::GlobalParameter)
+			{
+				OutInfo = Info;
+				++MatchCount;
+			}
+		}
+		if (MatchCount != 1)
+		{
+			OutError = FString::Printf(
+				TEXT("Expected exactly one global scalar parameter named %s; found %d."),
+				*ParameterName.ToString(),
+				MatchCount);
+			return false;
+		}
+		return true;
+	}
+
+	bool ReadScalarParameter(
+		UMaterialInstanceConstant* Instance,
+		const FMaterialParameterInfo& ParameterInfo,
+		float& OutValue)
+	{
+		return Instance->GetScalarParameterValue(FHashedMaterialParameterInfo(ParameterInfo), OutValue);
+	}
+
+	FString FormatScalarParameterValue(const float Value)
+	{
+		return FString::Printf(TEXT("%.9g"), static_cast<double>(Value));
+	}
+
 	bool SaveReport(const FString& Filename, const TSharedRef<FJsonObject>& Report, FString& OutError)
 	{
 		FString JsonText;
@@ -596,7 +675,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 
 	if (Asset->IsA<UBlueprint>())
 	{
-		UE_LOG(LogAssetPatch, Error, TEXT("setAssetProperty only supports non-Blueprint assets."));
+		UE_LOG(LogAssetPatch, Error, TEXT("AssetPatch only supports non-Blueprint assets."));
 		return 11;
 	}
 
@@ -648,7 +727,11 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 	}
 	FString Operation;
 	OperationObject->TryGetStringField(TEXT("operation"), Operation);
-	if (!Operation.Equals(TEXT("setAssetProperty"), ESearchCase::CaseSensitive)
+	const bool bAssetPropertyOperation =
+		Operation.Equals(TEXT("setAssetProperty"), ESearchCase::CaseSensitive);
+	const bool bMaterialScalarOperation =
+		Operation.Equals(TEXT("setMaterialInstanceScalarParameter"), ESearchCase::CaseSensitive);
+	if ((!bAssetPropertyOperation && !bMaterialScalarOperation)
 		|| !ContainsExact(Policy.AllowedOperations, Operation))
 	{
 		UE_LOG(LogAssetPatch, Error, TEXT("Operation is not authorized or implemented: %s"), *Operation);
@@ -664,6 +747,182 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		return 16;
 	}
 	const TSharedPtr<FJsonObject> TargetObject = *TargetObjectPtr;
+
+	if (bMaterialScalarOperation)
+	{
+		UMaterialInstanceConstant* MaterialInstance = Cast<UMaterialInstanceConstant>(Asset);
+		if (!MaterialInstance)
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Operation requires MaterialInstanceConstant."));
+			return 17;
+		}
+
+		FString ParameterNameText;
+		TargetObject->TryGetStringField(TEXT("parameterName"), ParameterNameText);
+		if (ParameterNameText.IsEmpty())
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Material scalar parameterName is required."));
+			return 17;
+		}
+		const FString ParameterAuthorization =
+			ActualAssetClass + TEXT("#Scalar#") + ParameterNameText;
+		if (!ContainsExact(Policy.AllowedMaterialParameters, ParameterAuthorization))
+		{
+			UE_LOG(
+				LogAssetPatch,
+				Error,
+				TEXT("Material parameter is not authorized by policy: %s"),
+				*ParameterAuthorization);
+			return 17;
+		}
+
+		const TSharedPtr<FJsonValue> NewValue = OperationObject->TryGetField(TEXT("value"));
+		double NewValueDouble = 0.0;
+		if (!NewValue.IsValid()
+			|| !NewValue->TryGetNumber(NewValueDouble)
+			|| !FMath::IsFinite(NewValueDouble)
+			|| FMath::Abs(NewValueDouble) > static_cast<double>(FLT_MAX))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Material scalar value must be a finite float."));
+			return 18;
+		}
+		const float NewScalarValue = static_cast<float>(NewValueDouble);
+		if (!FMath::IsFinite(NewScalarValue))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Material scalar value is outside float range."));
+			return 18;
+		}
+
+		FMaterialParameterInfo ParameterInfo;
+		if (!FindGlobalScalarParameter(MaterialInstance, FName(*ParameterNameText), ParameterInfo, Error))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("%s"), *Error);
+			return 17;
+		}
+
+		float BeforeScalarValue = 0.0f;
+		if (!ReadScalarParameter(MaterialInstance, ParameterInfo, BeforeScalarValue))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Could not read material scalar parameter."));
+			return 17;
+		}
+		const TArray<FScalarParameterValue> OriginalScalarParameters =
+			MaterialInstance->ScalarParameterValues;
+
+		FString BackupFilename;
+		if (bCommit)
+		{
+			IFileManager::Get().MakeDirectory(*BackupDirectory, true);
+			BackupFilename = CreateBackupFilename(BackupDirectory, PatchId, PackageFilename);
+			if (IFileManager::Get().Copy(*BackupFilename, *PackageFilename, true, true) != COPY_OK)
+			{
+				UE_LOG(LogAssetPatch, Error, TEXT("Could not create package backup: %s"), *BackupFilename);
+				return 19;
+			}
+		}
+
+		MaterialInstance->Modify();
+		UMaterialEditingLibrary::SetMaterialInstanceScalarParameterValue(
+			MaterialInstance,
+			FName(*ParameterNameText),
+			NewScalarValue,
+			EMaterialParameterAssociation::GlobalParameter);
+
+		float AfterScalarValue = 0.0f;
+		if (!ReadScalarParameter(MaterialInstance, ParameterInfo, AfterScalarValue)
+			|| !FMath::IsNearlyEqual(AfterScalarValue, NewScalarValue, UE_SMALL_NUMBER))
+		{
+			MaterialInstance->ScalarParameterValues = OriginalScalarParameters;
+			UMaterialEditingLibrary::UpdateMaterialInstance(MaterialInstance);
+			Package->SetDirtyFlag(bOriginalDirty);
+			UE_LOG(LogAssetPatch, Error, TEXT("Material scalar parameter read-back verification failed."));
+			return 20;
+		}
+
+		bool bSaved = false;
+		bool bRolledBack = false;
+		bool bStructureMatch = true;
+		float RestoredScalarValue = BeforeScalarValue;
+		if (bCommit)
+		{
+			if (!SaveAssetPackage(MaterialInstance, PackageFilename, Error))
+			{
+				IFileManager::Get().Copy(*PackageFilename, *BackupFilename, true, true);
+				UE_LOG(LogAssetPatch, Error, TEXT("%s Backup restored."), *Error);
+				return 21;
+			}
+			bSaved = true;
+		}
+		else
+		{
+			MaterialInstance->ScalarParameterValues = OriginalScalarParameters;
+			UMaterialEditingLibrary::UpdateMaterialInstance(MaterialInstance);
+			Package->SetDirtyFlag(bOriginalDirty);
+			bStructureMatch = ScalarParameterArraysEqualExact(
+				OriginalScalarParameters,
+				MaterialInstance->ScalarParameterValues);
+			if (!ReadScalarParameter(MaterialInstance, ParameterInfo, RestoredScalarValue))
+			{
+				UE_LOG(LogAssetPatch, Error, TEXT("Could not read restored material scalar parameter."));
+				return 22;
+			}
+			bRolledBack = true;
+		}
+
+		const FString AfterRevision = HashPackageFile(Package);
+		const bool bRestoredValueMatch =
+			!bRolledBack
+			|| FMath::IsNearlyEqual(RestoredScalarValue, BeforeScalarValue, UE_SMALL_NUMBER);
+		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
+		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.4"));
+		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
+		Report->SetStringField(TEXT("patchId"), PatchId);
+		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
+		Report->SetStringField(TEXT("assetPath"), AssetPath);
+		Report->SetStringField(TEXT("assetClass"), ActualAssetClass);
+		Report->SetStringField(TEXT("operation"), Operation);
+		Report->SetObjectField(TEXT("target"), TargetObject);
+		Report->SetStringField(
+			TEXT("targetDescription"),
+			TEXT("material-instance-scalar:") + ParameterNameText);
+		Report->SetStringField(TEXT("targetType"), TEXT("MaterialScalarParameter(float)"));
+		Report->SetStringField(TEXT("beforeValue"), FormatScalarParameterValue(BeforeScalarValue));
+		Report->SetStringField(TEXT("afterValue"), FormatScalarParameterValue(AfterScalarValue));
+		Report->SetStringField(TEXT("restoredValue"), FormatScalarParameterValue(RestoredScalarValue));
+		Report->SetStringField(TEXT("beforeRevision"), BeforeRevision);
+		Report->SetStringField(TEXT("afterRevision"), AfterRevision);
+		Report->SetBoolField(TEXT("compiled"), false);
+		Report->SetBoolField(TEXT("saved"), bSaved);
+		Report->SetBoolField(TEXT("rolledBack"), bRolledBack);
+		Report->SetBoolField(TEXT("rollbackValueMatch"), bRestoredValueMatch);
+		Report->SetBoolField(TEXT("rollbackStructureMatch"), !bRolledBack || bStructureMatch);
+		Report->SetBoolField(
+			TEXT("diskUnchanged"),
+			BeforeRevision.Equals(AfterRevision, ESearchCase::IgnoreCase));
+		Report->SetStringField(TEXT("backupPath"), BackupFilename);
+		if (!SaveReport(ReportFilename, Report, Error))
+		{
+			if (bCommit && !BackupFilename.IsEmpty())
+			{
+				IFileManager::Get().Copy(*PackageFilename, *BackupFilename, true, true);
+			}
+			UE_LOG(LogAssetPatch, Error, TEXT("%s Disk backup restored."), *Error);
+			return 23;
+		}
+
+		UE_LOG(
+			LogAssetPatch,
+			Display,
+			TEXT("Material scalar patch succeeded. Mode=%s Asset=%s Parameter=%s Before=%s After=%s"),
+			bCommit ? TEXT("Commit") : TEXT("DryRun"),
+			*AssetPath,
+			*ParameterNameText,
+			*FormatScalarParameterValue(BeforeScalarValue),
+			*FormatScalarParameterValue(AfterScalarValue));
+		return 0;
+	}
+
 	FString PropertyPath;
 	TargetObject->TryGetStringField(TEXT("propertyPath"), PropertyPath);
 	const FString PropertyAuthorization = ActualAssetClass + TEXT("#") + PropertyPath;
@@ -757,7 +1016,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 	const FString AfterRevision = HashPackageFile(Package);
 	const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 	Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-	Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.3"));
+	Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.4"));
 	Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 	Report->SetStringField(TEXT("patchId"), PatchId);
 	Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());

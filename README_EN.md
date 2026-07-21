@@ -6,7 +6,7 @@
 
 UE Agent Kit is an open-source Unreal Engine asset analysis, indexing, and policy-gated patch toolkit. Its Editor plugin exports asset catalogs, Asset Registry metadata, dependencies, and Blueprint semantics; a Python CLI and SQLite provide a project-wide index, while Policy, Revision checks, dry runs, and backups protect explicit writes.
 
-The current release is **0.3.3** and targets **Unreal Engine 5.6**. In addition to eight Blueprint categories, exact-allowlist scalar writes are verified for Data Assets, Texture2D, and Static Mesh assets.
+The current release is **0.3.4** and targets **Unreal Engine 5.6**. In addition to eight Blueprint categories and generic scalar properties, it supports exact-allowlist Global Scalar parameter writes on Material Instances with structural dry-run rollback.
 
 > **AI Generated**: Most code and documentation in this project are AI-generated and reviewed through human inspection, UE 5.6 compilation, automated tests, and real-project regression validation.
 
@@ -19,7 +19,7 @@ The current release is **0.3.3** and targets **Unreal Engine 5.6**. In addition 
 - Find where Blueprint variables are read or written.
 - Trace functions, interface messages, macros, Dynamic Casts, and Event Dispatchers.
 - Inspect Blueprint graphs, nodes, pins, and connections.
-- Validate patches against policy, revision, and export snapshots, then dry-run or explicitly commit authorized Blueprint or non-Blueprint scalar changes.
+- Validate patches against policy, revision, and export snapshots, then dry-run or explicitly commit authorized Blueprint, non-Blueprint scalar, or Material Instance Scalar changes.
 
 ## Main capabilities
 
@@ -124,7 +124,7 @@ scripts\ue-agent.cmd references --target-asset /Game/LevelPrototyping/Materials/
 
 ### 5. Validate and execute a patch
 
-Export the target Blueprint first to capture its current revision:
+Export the target asset first to capture its current revision. Use deep export for Blueprints and the general asset catalog for non-Blueprint assets:
 
 ```bat
 scripts\RunExport.cmd ^
@@ -168,12 +168,12 @@ scripts\RunPatch.cmd ^
   -BackupDir "Backups\Patches"
 ```
 
-The executor supports four Blueprint operations plus non-Blueprint `setAssetProperty`. One execution is limited to one asset and one operation. Generic asset properties require an exact `allowedAssetProperties` entry in `AssetClass#Property.Path` form and must resolve to an editable, non-transient scalar rather than a container or object reference. The current executor only accepts single-file packages without external package sidecars.
+The executor supports four Blueprint operations, non-Blueprint `setAssetProperty`, and `setMaterialInstanceScalarParameter`. One execution is limited to one asset and one operation. Generic properties use exact `allowedAssetProperties` authorization; Material parameters use `allowedMaterialParameters` in `AssetClass#Scalar#ParameterName` form. The first Material Instance implementation supports exactly one matching Global Scalar parameter and restores the complete Scalar Override array during dry runs. Only single-file packages without external package sidecars are accepted.
 
 ### 6. Validate the asset catalog
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.3.3
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.3.4
 ```
 
 See [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md) for installation and full command details.
@@ -216,8 +216,8 @@ Read-only exporters and `ue-agent patch validate` never modify UObjects or asset
 
 - `DryRun` is the default and must preserve the disk revision.
 - `Commit` requires both an explicit command mode and `commitEnabled=true` in policy.
-- Project, asset root, asset class, and operation must all be authorized; generic assets also require an exact property-path allowlist entry.
-- An external backup is created before saving. Blueprint compile failure, revision conflict, dirty package, target resolution, or type validation failure prevents saving.
+- Project, asset root, asset class, and operation must all be authorized; generic properties and Material parameters also require their own exact allowlist entries.
+- An external backup is created before saving. Blueprint compile failure, revision conflict, dirty package, target resolution, parameter lookup, or type validation failure prevents saving.
 - The executor currently handles one asset and one operation to avoid partial saves.
 - Assets are changed through Unreal Editor APIs; the tool never edits `.uasset` binary bytes directly.
 

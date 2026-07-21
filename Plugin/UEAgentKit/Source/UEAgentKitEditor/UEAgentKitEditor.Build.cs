@@ -21,6 +21,7 @@ public class UEAgentKitEditor : ModuleRules
 				"BlueprintGraph",
 				"Json",
 				"JsonUtilities",
+				"MaterialEditor",
 				"Niagara",
 				"Projects",
 				"UnrealEd"

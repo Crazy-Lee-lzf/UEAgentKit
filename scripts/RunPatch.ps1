@@ -89,7 +89,8 @@ if (!$Validation.commitSupported)
 }
 
 $Operation = $Validation.assets[0].operations[0].operation
-$Commandlet = if ($Operation -eq "setAssetProperty") { "AssetPatch" } else { "BlueprintPatch" }
+$AssetOperations = @("setAssetProperty", "setMaterialInstanceScalarParameter")
+$Commandlet = if ($AssetOperations -contains $Operation) { "AssetPatch" } else { "BlueprintPatch" }
 
 $Arguments = @(
     $ProjectPath,

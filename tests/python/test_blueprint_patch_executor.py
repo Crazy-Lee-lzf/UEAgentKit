@@ -38,6 +38,7 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
                 "setPinDefault",
                 "setBlueprintDescription",
                 "setAssetProperty",
+                "setMaterialInstanceScalarParameter",
             ],
 
         )
@@ -47,7 +48,7 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
         self.assertTrue(all(item["commitSupported"] for item in operations))
         self.assertEqual(
             [item["assetType"] for item in operations],
-            ["Blueprint", "Blueprint", "Blueprint", "Blueprint", "NonBlueprint"],
+            ["Blueprint", "Blueprint", "Blueprint", "Blueprint", "NonBlueprint", "NonBlueprint"],
         )
 
 
@@ -117,6 +118,10 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
         for token in (
             "setAssetProperty",
             "AllowedAssetProperties",
+            "AllowedMaterialParameters",
+            "setMaterialInstanceScalarParameter",
+            "ScalarParameterArraysEqualExact",
+            "rollbackStructureMatch",
             "Policy asset root is invalid or too broad",
             "Patch operation entry is invalid",
             "MaxExclusiveInt64AsDouble",
@@ -141,7 +146,7 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
 
         validation_index = source.index("patch validate")
 
-        commandlet_index = source.index('$Commandlet = if')
+        commandlet_index = source.index('$AssetOperations = @')
 
         self.assertLess(validation_index, commandlet_index)
 
@@ -165,11 +170,11 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
 
         )
 
-        self.assertIn('version = "0.3.3"', pyproject)
+        self.assertIn('version = "0.3.4"', pyproject)
 
-        self.assertEqual(plugin["VersionName"], "0.3.3")
+        self.assertEqual(plugin["VersionName"], "0.3.4")
 
-        self.assertEqual(plugin["Version"], 10)
+        self.assertEqual(plugin["Version"], 11)
 
 
 

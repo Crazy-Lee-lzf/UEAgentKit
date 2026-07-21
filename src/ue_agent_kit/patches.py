@@ -95,6 +95,14 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
         expected_change="asset-property",
         asset_type="NonBlueprint",
     ),
+    "setMaterialInstanceScalarParameter": OperationSpec(
+        name="setMaterialInstanceScalarParameter",
+        risk="medium",
+        target_fields=("parameterName",),
+        target_validators={"parameterName": _is_nonempty_text},
+        expected_change="material-instance-scalar-parameter",
+        asset_type="NonBlueprint",
+    ),
 }
 
 
@@ -107,6 +115,7 @@ POLICY_FIELDS = {
     "allowedOperations",
     "allowedAssetClasses",
     "allowedAssetProperties",
+    "allowedMaterialParameters",
     "requireRevision",
     "rejectDirtyPackages",
     "maxAssetsPerPatch",
@@ -207,7 +216,8 @@ def _normalize_asset_root(value: str) -> str:
 def _validate_policy(policy: dict[str, Any], errors: list[dict[str, str]]) -> dict[str, Any]:
     path = "policy"
     _check_unknown_fields(policy, POLICY_FIELDS, path=path, errors=errors)
-    _require_fields(policy, POLICY_FIELDS, path=path, errors=errors)
+    required_fields = POLICY_FIELDS - {"allowedMaterialParameters"}
+    _require_fields(policy, required_fields, path=path, errors=errors)
 
     schema_version = policy.get("schemaVersion")
     if schema_version != POLICY_SCHEMA_VERSION:
@@ -364,6 +374,61 @@ def _validate_policy(policy: dict[str, Any], errors: list[dict[str, str]]) -> di
             "policy.allowedAssetProperties",
         )
 
+    allowed_material_parameters_value = policy.get("allowedMaterialParameters", [])
+    normalized_material_parameters: list[str] = []
+    if not isinstance(allowed_material_parameters_value, list):
+        _issue(
+            errors,
+            "policy-material-parameters",
+            "allowedMaterialParameters must be a unique string array.",
+            "policy.allowedMaterialParameters",
+        )
+    else:
+        string_items = [item for item in allowed_material_parameters_value if isinstance(item, str)]
+        if len(set(string_items)) != len(allowed_material_parameters_value):
+            _issue(
+                errors,
+                "policy-material-parameters",
+                "allowedMaterialParameters must contain unique strings.",
+                "policy.allowedMaterialParameters",
+            )
+        for index, item in enumerate(allowed_material_parameters_value):
+            if not isinstance(item, str) or item.count("#") != 2:
+                _issue(
+                    errors,
+                    "policy-material-parameter-format",
+                    "Material parameter entries must use /Script/Module.Class#Scalar#ParameterName form.",
+                    f"policy.allowedMaterialParameters[{index}]",
+                )
+                continue
+            asset_class, parameter_type, parameter_name = item.split("#", 2)
+            if (
+                asset_class not in allowed_asset_classes
+                or not asset_class.startswith("/Script/")
+                or "." not in asset_class
+                or asset_class != "/Script/Engine.MaterialInstanceConstant"
+                or parameter_type != "Scalar"
+                or not _is_nonempty_text(parameter_name, max_length=256)
+            ):
+                _issue(
+                    errors,
+                    "policy-material-parameter-format",
+                    "Material parameter entries must reference an allowed class, Scalar type, and valid name.",
+                    f"policy.allowedMaterialParameters[{index}]",
+                )
+                continue
+            normalized_material_parameters.append(item)
+    if (
+        "setMaterialInstanceScalarParameter" in normalized_operations
+        and not normalized_material_parameters
+    ):
+        _issue(
+            errors,
+            "policy-material-parameters",
+            "setMaterialInstanceScalarParameter requires allowedMaterialParameters authorization.",
+            "policy.allowedMaterialParameters",
+        )
+
     require_revision = policy.get("requireRevision")
     if not isinstance(require_revision, bool):
         _issue(errors, "policy-type", "requireRevision must be a boolean.", "policy.requireRevision")
@@ -405,6 +470,7 @@ def _validate_policy(policy: dict[str, Any], errors: list[dict[str, str]]) -> di
         "allowedOperations": sorted(set(normalized_operations)),
         "allowedAssetClasses": sorted(set(allowed_asset_classes)) if isinstance(allowed_asset_classes, list) else [],
         "allowedAssetProperties": sorted(set(normalized_asset_properties)),
+        "allowedMaterialParameters": sorted(set(normalized_material_parameters)),
         "requireRevision": require_revision is True,
         "rejectDirtyPackages": reject_dirty_packages is True,
         **limits,
@@ -905,6 +971,27 @@ def validate_patch(
                             f"Asset property is not authorized by policy: {authorization or '<invalid>'}",
                             f"{operation_pointer}.target.propertyPath",
                         )
+                elif operation_name == "setMaterialInstanceScalarParameter":
+                    if asset_class != "/Script/Engine.MaterialInstanceConstant":
+                        _issue(
+                            errors,
+                            "operation-asset-type",
+                            "Material scalar parameters require MaterialInstanceConstant.",
+                            f"{operation_pointer}.operation",
+                        )
+                    parameter_name = target.get("parameterName")
+                    authorization = (
+                        f"{asset_class}#Scalar#{parameter_name}"
+                        if isinstance(parameter_name, str)
+                        else ""
+                    )
+                    if authorization not in policy["allowedMaterialParameters"]:
+                        _issue(
+                            errors,
+                            "material-parameter-not-allowed",
+                            f"Material parameter is not authorized by policy: {authorization or '<invalid>'}",
+                            f"{operation_pointer}.target.parameterName",
+                        )
                 risk = spec.risk
                 expected_change = spec.expected_change
                 if operation_name not in policy["allowedOperations"]:
@@ -921,6 +1008,15 @@ def validate_patch(
                     errors,
                     "operation-value",
                     "value must be a finite JSON scalar within the policy byte limit.",
+                    f"{operation_pointer}.value",
+                )
+            elif operation_name == "setMaterialInstanceScalarParameter" and (
+                isinstance(value, bool) or not isinstance(value, (int, float))
+            ):
+                _issue(
+                    errors,
+                    "operation-value-type",
+                    "Material scalar parameters require a finite JSON number.",
                     f"{operation_pointer}.value",
                 )
 

@@ -1,6 +1,6 @@
 # UEAgentKit Patch Schema 1.0
 
-UEAgentKit Patch 是面向 Unreal Engine 资产的声明式变更格式。0.3.3 同时提供纯 JSON 预校验，以及 UE Editor 内的 Blueprint 和非 Blueprint 执行器。
+UEAgentKit Patch 是面向 Unreal Engine 资产的声明式变更格式。0.3.4 同时提供纯 JSON 预校验，以及 UE Editor 内的 Blueprint、通用属性和 Material Instance 参数执行器。
 
 ## 两层执行模型
 
@@ -20,8 +20,9 @@ commitSupported=true
 `scripts\RunPatch.cmd` 在预校验成功后按 Operation 分发：
 
 ```text
-Blueprint Operation     → BlueprintPatch Commandlet
-setAssetProperty        → AssetPatch Commandlet
+Blueprint Operation                       → BlueprintPatch Commandlet
+setAssetProperty                          → AssetPatch Commandlet
+setMaterialInstanceScalarParameter        → AssetPatch Commandlet
 ```
 
 执行语义：
@@ -112,14 +113,19 @@ Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目�
     "setComponentProperty",
     "setPinDefault",
     "setBlueprintDescription",
-    "setAssetProperty"
+    "setAssetProperty",
+    "setMaterialInstanceScalarParameter"
   ],
   "allowedAssetClasses": [
     "/Script/Engine.Blueprint",
-    "/Script/Engine.Texture2D"
+    "/Script/Engine.Texture2D",
+    "/Script/Engine.MaterialInstanceConstant"
   ],
   "allowedAssetProperties": [
     "/Script/Engine.Texture2D#SRGB"
+  ],
+  "allowedMaterialParameters": [
+    "/Script/Engine.MaterialInstanceConstant#Scalar#Roughness"
   ],
   "requireRevision": true,
   "rejectDirtyPackages": true,
@@ -137,7 +143,8 @@ Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目�
 - Policy 的数组限制属于格式上限；执行器当前仍只接受单资产、单操作。
 - `setAssetProperty` 必须由 `allowedAssetProperties` 精确授权。
 - 属性授权格式固定为 `AssetClass#Property.Path`，例如 `/Script/Engine.Texture2D#SRGB`。
-- Blueprint Operation 不能用于非 Blueprint；`setAssetProperty` 不能用于 Blueprint。
+- Material 参数授权格式固定为 `AssetClass#Scalar#ParameterName`。
+- Blueprint Operation 不能用于非 Blueprint；`setAssetProperty` 不能用于 Blueprint；Material 参数操作只接受 MaterialInstanceConstant。
 
 ## 支持的 Operation
 
@@ -230,6 +237,29 @@ Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目�
 - 当前 Revision 与备份以主 `.uasset` 为边界，因此存在 `.uexp/.ubulk/.uptnl/.m.ubulk/.upayload` 等侧文件时直接拒绝。
 - 已完成 PrimaryAssetLabel/Data Asset、Texture2D 和 Static Mesh 的 Dry Run、Commit、备份与独立重载验证。
 
+### setMaterialInstanceScalarParameter
+
+修改 `MaterialInstanceConstant` 上由 Policy 精确授权的 Global Scalar 参数：
+
+```json
+{
+  "operationId": "set-roughness",
+  "operation": "setMaterialInstanceScalarParameter",
+  "target": {"parameterName": "Roughness"},
+  "value": 0.42
+}
+```
+
+限制与语义：
+
+- 当前只支持 `MaterialInstanceConstant`、Global association 和 Scalar 参数。
+- 参数名必须在继承链中恰好匹配一次，并由 `allowedMaterialParameters` 精确授权。
+- 值必须是可表示为有限 `float` 的 JSON number。
+- 修改通过 UE5.6 `MaterialEditingLibrary` 执行；Setter 返回值不作为成功依据，执行器以重新读取结果为准。
+- Dry Run 会保存并恢复完整 `ScalarParameterValues` 数组，因此继承参数临时新增的 Override 也会被移除。
+- 报告额外包含 `rollbackStructureMatch`；成功 Dry Run 要求其为 `true`。
+- 已完成继承参数和已有 Override 两条路径的 Dry Run、Commit、外部备份和独立 UE 重载验证。
+
 ## Dry Run 报告
 
 报告包含：
@@ -250,6 +280,7 @@ compiled
 saved
 rolledBack
 rollbackValueMatch
+rollbackStructureMatch (Material Instance operation)
 diskUnchanged
 backupPath
 ```
@@ -259,6 +290,7 @@ Blueprint Dry Run 成功时要求 `compiled=true`。非 Blueprint 不执行 Blue
 ```text
 rolledBack=true
 rollbackValueMatch=true
+rollbackStructureMatch=true (when reported)
 diskUnchanged=true
 ```
 

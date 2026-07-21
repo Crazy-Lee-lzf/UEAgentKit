@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Crazy-Lee-lzf/UEAgentKit/blob/main/spec/patch.schema.json",
   "title": "UEAgentKit Patch",
-  "description": "Validation-only declarative Blueprint patch request.",
+  "description": "Declarative Blueprint and policy-gated asset patch request.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -97,6 +97,9 @@
               },
               {
                 "$ref": "#/$defs/setAssetProperty"
+              },
+              {
+                "$ref": "#/$defs/setMaterialInstanceScalarParameter"
               }
             ]
           }
@@ -275,6 +278,37 @@
                   "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"
                 }
               }
+            }
+          }
+        }
+      ]
+    },
+    "setMaterialInstanceScalarParameter": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "operation": {
+              "const": "setMaterialInstanceScalarParameter"
+            },
+            "target": {
+              "type": "object",
+              "required": [
+                "parameterName"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "parameterName": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              }
+            },
+            "value": {
+              "type": "number"
             }
           }
         }

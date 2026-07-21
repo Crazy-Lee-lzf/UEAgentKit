@@ -56,6 +56,7 @@ def make_policy() -> dict[str, Any]:
             "/Script/Engine.AnimBlueprint",
         ],
         "allowedAssetProperties": [],
+        "allowedMaterialParameters": [],
         "requireRevision": True,
         "rejectDirtyPackages": True,
         "maxAssetsPerPatch": 10,
@@ -260,6 +261,114 @@ class PatchValidationTests(unittest.TestCase):
         self.policy["allowedAssetProperties"] = ["not-a-class-or-property"]
         self.flush()
         self.assertIn("policy-asset-property-format", self.error_codes(self.validate()))
+
+    def test_material_scalar_parameter_operation_is_valid(self) -> None:
+        asset_path = "/Game/UEAgentKitWriteTests/MI_PatchTarget.MI_PatchTarget"
+        asset_class = "/Script/Engine.MaterialInstanceConstant"
+        asset = self.patch["assets"][0]
+        asset["assetPath"] = asset_path
+        asset["expectedAssetClass"] = asset_class
+        asset["operations"] = [
+            {
+                "operationId": "set-roughness",
+                "operation": "setMaterialInstanceScalarParameter",
+                "target": {"parameterName": "Roughness"},
+                "value": 0.42,
+            }
+        ]
+        self.policy["allowedOperations"].append("setMaterialInstanceScalarParameter")
+        self.policy["allowedAssetClasses"].append(asset_class)
+        self.policy["allowedMaterialParameters"] = [f"{asset_class}#Scalar#Roughness"]
+        self.canonical["assetPath"] = asset_path
+        self.canonical["packageName"] = asset_path.rsplit(".", 1)[0]
+        self.canonical["assetClass"] = asset_class
+        self.flush()
+        result = self.validate()
+        self.assertTrue(result["valid"])
+        expected = result["assets"][0]["operations"][0]["expectedChange"]
+        self.assertEqual(expected["kind"], "material-instance-scalar-parameter")
+
+    def test_material_scalar_parameter_rejects_wrong_asset_class(self) -> None:
+        asset_path = "/Game/UEAgentKitWriteTests/T_PatchTarget.T_PatchTarget"
+        asset_class = "/Script/Engine.Texture2D"
+        asset = self.patch["assets"][0]
+        asset["assetPath"] = asset_path
+        asset["expectedAssetClass"] = asset_class
+        asset["operations"] = [
+            {
+                "operationId": "set-roughness",
+                "operation": "setMaterialInstanceScalarParameter",
+                "target": {"parameterName": "Roughness"},
+                "value": 0.42,
+            }
+        ]
+        self.policy["allowedOperations"].append("setMaterialInstanceScalarParameter")
+        self.policy["allowedAssetClasses"].append(asset_class)
+        self.policy["allowedMaterialParameters"] = [f"{asset_class}#Scalar#Roughness"]
+        self.canonical["assetPath"] = asset_path
+        self.canonical["packageName"] = asset_path.rsplit(".", 1)[0]
+        self.canonical["assetClass"] = asset_class
+        self.flush()
+        codes = self.error_codes(self.validate())
+        self.assertIn("operation-asset-type", codes)
+        self.assertIn("policy-material-parameter-format", codes)
+
+    def test_material_scalar_parameter_requires_numeric_value(self) -> None:
+        asset_path = "/Game/UEAgentKitWriteTests/MI_PatchTarget.MI_PatchTarget"
+        asset_class = "/Script/Engine.MaterialInstanceConstant"
+        asset = self.patch["assets"][0]
+        asset["assetPath"] = asset_path
+        asset["expectedAssetClass"] = asset_class
+        asset["operations"] = [
+            {
+                "operationId": "set-roughness",
+                "operation": "setMaterialInstanceScalarParameter",
+                "target": {"parameterName": "Roughness"},
+                "value": "0.42",
+            }
+        ]
+        self.policy["allowedOperations"].append("setMaterialInstanceScalarParameter")
+        self.policy["allowedAssetClasses"].append(asset_class)
+        self.policy["allowedMaterialParameters"] = [f"{asset_class}#Scalar#Roughness"]
+        self.canonical["assetPath"] = asset_path
+        self.canonical["packageName"] = asset_path.rsplit(".", 1)[0]
+        self.canonical["assetClass"] = asset_class
+        self.flush()
+        self.assertIn("operation-value-type", self.error_codes(self.validate()))
+
+    def test_material_scalar_parameter_requires_exact_authorization(self) -> None:
+        asset_path = "/Game/UEAgentKitWriteTests/MI_PatchTarget.MI_PatchTarget"
+        asset_class = "/Script/Engine.MaterialInstanceConstant"
+        asset = self.patch["assets"][0]
+        asset["assetPath"] = asset_path
+        asset["expectedAssetClass"] = asset_class
+        asset["operations"] = [
+            {
+                "operationId": "set-roughness",
+                "operation": "setMaterialInstanceScalarParameter",
+                "target": {"parameterName": "Roughness"},
+                "value": 0.42,
+            }
+        ]
+        self.policy["allowedOperations"].append("setMaterialInstanceScalarParameter")
+        self.policy["allowedAssetClasses"].append(asset_class)
+        self.policy["allowedMaterialParameters"] = [f"{asset_class}#Scalar#Metallic"]
+        self.canonical["assetPath"] = asset_path
+        self.canonical["packageName"] = asset_path.rsplit(".", 1)[0]
+        self.canonical["assetClass"] = asset_class
+        self.flush()
+        self.assertIn("material-parameter-not-allowed", self.error_codes(self.validate()))
+
+    def test_material_scalar_parameter_requires_policy_allowlist(self) -> None:
+        self.policy["allowedOperations"].append("setMaterialInstanceScalarParameter")
+        self.policy["allowedMaterialParameters"] = []
+        self.flush()
+        self.assertIn("policy-material-parameters", self.error_codes(self.validate()))
+
+    def test_invalid_material_parameter_allowlist_entry_is_rejected(self) -> None:
+        self.policy["allowedMaterialParameters"] = ["not-a-material-parameter"]
+        self.flush()
+        self.assertIn("policy-material-parameter-format", self.error_codes(self.validate()))
 
     def test_blueprint_description_operation_is_valid(self) -> None:
         self.patch["assets"][0]["operations"] = [

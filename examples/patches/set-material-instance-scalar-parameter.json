@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1.0",
+  "patchId": "set-material-instance-scalar-example",
+  "projectName": "我的项目",
+  "description": "Set an explicitly authorized global scalar parameter on a Material Instance.",
+  "assets": [
+    {
+      "assetPath": "/Game/UEAgentKitWriteTests/MI_PatchTarget.MI_PatchTarget",
+      "expectedRevision": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "expectedAssetClass": "/Script/Engine.MaterialInstanceConstant",
+      "operations": [
+        {
+          "operationId": "set-roughness",
+          "operation": "setMaterialInstanceScalarParameter",
+          "target": {
+            "parameterName": "Roughness"
+          },
+          "value": 0.42
+        }
+      ]
+    }
+  ]
+}

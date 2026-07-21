@@ -6,7 +6,7 @@
 
 UE Agent Kit 是一套面向 Unreal Engine 的开源资产分析、索引与受控写入工具。它通过 UE Editor 插件导出项目资产目录、Asset Registry 元数据、依赖关系和 Blueprint 语义，再使用 Python CLI 与 SQLite 建立项目级索引，并通过 Policy、Revision、Dry Run 和备份保护显式写入。
 
-当前版本为 **0.3.3**，支持 **Unreal Engine 5.6**。除八类 Blueprint 写入外，现已验证 Data Asset、Texture2D 和 Static Mesh 的精确白名单标量属性写入。
+当前版本为 **0.3.4**，支持 **Unreal Engine 5.6**。除八类 Blueprint 和通用标量属性写入外，现已支持 Material Instance Global Scalar 参数的精确白名单写入与结构化回滚。
 
 > **AI Generated**：本项目的代码和文档主要由 AI 生成，并通过人工审查、UE 5.6 编译、自动化测试和真实工程回归验证。
 
@@ -19,7 +19,7 @@ UE Agent Kit 是一套面向 Unreal Engine 的开源资产分析、索引与受�
 - 查询 Blueprint 变量在哪里被读取或写入。
 - 查询函数、接口消息、宏、Dynamic Cast 和 Event Dispatcher 的调用关系。
 - 查看 Blueprint 的 Graph、Node、Pin 和连接结构。
-- 使用 Policy、Revision 和导出快照校验 Patch，并对授权 Blueprint 或非 Blueprint 标量属性执行 Dry Run 或显式 Commit。
+- 使用 Policy、Revision 和导出快照校验 Patch，并对授权 Blueprint、非 Blueprint 标量属性或 Material Instance Scalar 参数执行 Dry Run 或显式 Commit。
 
 ## 主要能力
 
@@ -124,7 +124,7 @@ scripts\ue-agent.cmd references --target-asset /Game/LevelPrototyping/Materials/
 
 ### 5. 校验并执行 Patch
 
-先导出目标 Blueprint，获得当前 Revision：
+先导出目标资产以获得当前 Revision。Blueprint 使用深度导出；非 Blueprint 使用通用资产目录：
 
 ```bat
 scripts\RunExport.cmd ^
@@ -168,12 +168,12 @@ scripts\RunPatch.cmd ^
   -BackupDir "Backups\Patches"
 ```
 
-当前支持四种 Blueprint Operation，以及非 Blueprint 的 `setAssetProperty`。每次执行仅允许一个资产和一个 Operation；通用资产属性必须由 `allowedAssetProperties` 以 `AssetClass#Property.Path` 精确授权，且最终属性必须可编辑、非 Transient、非容器和非对象引用；当前仅接受没有独立 Package 侧文件的单文件资产。
+当前支持四种 Blueprint Operation、非 Blueprint 的 `setAssetProperty`，以及 `setMaterialInstanceScalarParameter`。每次执行仅允许一个资产和一个 Operation；通用属性由 `allowedAssetProperties` 精确授权，Material 参数由 `allowedMaterialParameters` 以 `AssetClass#Scalar#ParameterName` 精确授权。Material Instance 首版只支持唯一的 Global Scalar 参数；Dry Run 会恢复完整 Scalar Override 数组。当前仍只接受没有独立 Package 侧文件的单文件资产。
 
 ### 6. 校验通用资产导出
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.3.3
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.3.4
 ```
 
 完整参数和安装说明见 [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md)。
@@ -216,8 +216,8 @@ Output\Blueprints\
 
 - 默认使用 `DryRun`，磁盘 Revision 必须保持不变。
 - `Commit` 同时要求命令行显式选择和 Policy 的 `commitEnabled=true`。
-- 仅允许 Policy 授权的项目、目录、Asset Class 和 Operation；通用资产还要求精确 PropertyPath 白名单。
-- 保存前创建外部备份；Blueprint 编译失败、Revision 冲突、Dirty Package、目标解析或类型校验失败时禁止保存。
+- 仅允许 Policy 授权的项目、目录、Asset Class 和 Operation；通用属性和 Material 参数还要求各自的精确白名单。
+- 保存前创建外部备份；Blueprint 编译失败、Revision 冲突、Dirty Package、目标解析、参数查找或类型校验失败时禁止保存。
 - 当前执行器只处理单资产、单操作，避免部分保存。
 - 工具通过 UE Editor API 修改并保存资产，不直接编辑 `.uasset` 二进制。
 
