@@ -257,14 +257,60 @@ scripts\RunPatch.cmd ^
 - 通用属性仅允许可编辑、非 Transient 的 Bool、数值、String、Name、Text 或 Enum；不支持数组、Set、Map、对象引用和 Blueprint 结构性增删。
 - 当前仅接受没有 `.uexp/.ubulk/.uptnl/.m.ubulk/.upayload` 等独立侧文件的单文件 Package。
 
-## 10. 校验输出
+## 10. Backup Manifest 与 Rollback
+
+`RunPatch -Mode Commit` 成功后会自动创建 `<backup>.manifest.json`。Manifest 位于 `BackupDir` 内，记录：
+
+- Patch、Policy 和 Commit Report 的 SHA-256。
+- Asset Path、Asset Class、Operation、Target 与精确授权键。
+- Commit 前后 Package Revision。
+- 备份相对路径、Revision 和文件大小。
+
+默认恢复仅校验：
+
+```bat
+scripts\RunRollback.cmd ^
+  -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject" ^
+  -Manifest "<BACKUP_MANIFEST>" ^
+  -Policy "<POLICY_JSON>" ^
+  -BackupRoot "<BACKUP_ROOT>" ^
+  -Mode DryRun ^
+  -Report "Output\Rollback\dryrun-report.json"
+```
+
+显式恢复：
+
+```bat
+scripts\RunRollback.cmd ^
+  -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject" ^
+  -Manifest "<BACKUP_MANIFEST>" ^
+  -Policy "<POLICY_JSON>" ^
+  -BackupRoot "<BACKUP_ROOT>" ^
+  -Mode Commit ^
+  -Report "Output\Rollback\commit-report.json"
+```
+
+Rollback Commit 固定执行：
+
+1. 确认目标 UE 工程未在 Editor 或 Commandlet 中打开。
+2. 重新校验 Manifest 位置、Policy 文件哈希和当前精确授权。
+3. 要求当前 Package Revision 仍等于 Manifest 的 `afterRevision`。
+4. 要求备份 Revision、文件大小和 `beforeRevision` 完全一致。
+5. 拒绝 Sidecar Package；当前只恢复单 `.uasset`。
+6. 先复制当前包到 `rollback-safety`，再用临时文件原子替换。
+7. 写入唯一 rollback receipt；审计输出失败时自动恢复安全副本。
+8. 启动独立 UE 进程重新导出资产，并核对恢复后的 Revision 与 Dirty 状态。
+
+完整格式见 [`../spec/BACKUP_AND_ROLLBACK.md`](../spec/BACKUP_AND_ROLLBACK.md)。
+
+## 11. 校验输出
 
 通用资产目录：
 
 ```bat
 python <TOOL_ROOT>\scripts\ValidateAssetCatalog.py ^
   --output <TOOL_ROOT>\Output\AssetCatalog ^
-  --expect-exporter 0.4.0
+  --expect-exporter 0.4.1
 ```
 
 校验器会检查：
@@ -282,13 +328,13 @@ Blueprint 输出至少应检查：
 - Canonical JSON 可解析。
 - BPCTX 第一行符合 `H|BPCTX|1|...`。
 
-## 11. 安全行为
+## 12. 安全行为
 
 通用资产目录、Blueprint 导出、SQLite 查询和 `ue-agent patch validate` 保持只读。`RunPatch -Mode DryRun` 会在内存中修改资产，但必须恢复原值并保持磁盘 SHA-256 不变；Blueprint 还会在修改和回滚后编译。
 
-只有 `RunPatch -Mode Commit` 可以保存资产，并且必须满足：Policy 显式允许 Commit、项目/目录/类型/操作均授权、属性或参数精确授权、Revision 一致、Package 非 Dirty、备份创建成功，且 Blueprint 编译成功。写入通过 Unreal Editor API 完成，不直接修改 `.uasset` 二进制。
+只有 `RunPatch -Mode Commit` 可以保存资产，并且必须满足：Policy 显式允许 Commit、项目/目录/类型/操作均授权、属性或参数精确授权、Revision 一致、Package 非 Dirty、备份创建成功，且 Blueprint 编译成功。成功后自动生成 Backup Manifest。`RunRollback -Mode Commit` 是唯一恢复入口，默认 Dry Run，并要求工程关闭、当前 Revision 未变化、备份完整和独立 UE 重载验证。Patch 写入通过 Unreal Editor API 完成；rollback 仅按已验证 Manifest 原子恢复单文件 Package。
 
-## 12. 清理
+## 13. 清理
 
 可以安全清理：
 

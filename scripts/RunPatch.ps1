@@ -11,7 +11,8 @@ param(
     [string]$Mode = "DryRun",
     [string]$Report = "",
     [string]$ValidationReport = "",
-    [string]$BackupDir = ""
+    [string]$BackupDir = "",
+    [string]$Manifest = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -58,6 +59,31 @@ if ([string]::IsNullOrWhiteSpace($BackupDir))
 else
 {
     $BackupDir = [System.IO.Path]::GetFullPath($BackupDir)
+}
+
+if ($Mode -eq "Commit" -and ![string]::IsNullOrWhiteSpace($Manifest))
+{
+    $Manifest = [System.IO.Path]::GetFullPath($Manifest)
+    if ([System.IO.Path]::GetExtension($Manifest) -ne ".json")
+    {
+        throw "Backup manifest output must use a .json extension: $Manifest"
+    }
+    $BackupRootPrefix = $BackupDir.TrimEnd([char]'\', [char]'/') + [System.IO.Path]::DirectorySeparatorChar
+    if (!$Manifest.StartsWith($BackupRootPrefix, [System.StringComparison]::OrdinalIgnoreCase))
+    {
+        throw "Backup manifest output must stay inside BackupDir: $Manifest"
+    }
+    foreach ($ProtectedPath in @($Patch, $Policy, $Report, $ValidationReport))
+    {
+        if ($Manifest.Equals($ProtectedPath, [System.StringComparison]::OrdinalIgnoreCase))
+        {
+            throw "Backup manifest output conflicts with another patch input or report: $Manifest"
+        }
+    }
+    if (Test-Path -LiteralPath $Manifest)
+    {
+        throw "Backup manifest output already exists: $Manifest"
+    }
 }
 
 New-Item -ItemType Directory -Path ([System.IO.Path]::GetDirectoryName($Report)) -Force | Out-Null
@@ -133,6 +159,31 @@ if ($Mode -eq "Commit")
 if ($LASTEXITCODE -ne 0)
 {
     throw "$Commandlet failed with exit code $LASTEXITCODE"
+}
+
+if ($Mode -eq "Commit")
+{
+    $CommitReport = Get-Content -LiteralPath $Report -Raw | ConvertFrom-Json
+    if (!$CommitReport.saved -or [string]::IsNullOrWhiteSpace([string]$CommitReport.backupPath))
+    {
+        throw "Commit report does not contain a successful save and backup path."
+    }
+    if ([string]::IsNullOrWhiteSpace($Manifest))
+    {
+        $Manifest = "{0}.manifest.json" -f [string]$CommitReport.backupPath
+    }
+    Write-Host "Creating backup manifest..."
+    & $AgentCmd patch manifest `
+        --patch $Patch `
+        --policy $Policy `
+        --report $Report `
+        --backup-root $BackupDir `
+        --output $Manifest
+    if ($LASTEXITCODE -ne 0)
+    {
+        throw "Backup manifest creation failed with exit code $LASTEXITCODE. The Commit and raw backup remain available."
+    }
+    Write-Host "Manifest  : $Manifest"
 }
 
 Write-Host "Patch completed: $Report"

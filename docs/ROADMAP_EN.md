@@ -2,7 +2,7 @@
 
 Updated: 2026-07-21
 
-The current release is **0.4.0** and targets Unreal Engine 5.6.
+The current release is **0.4.1** and targets Unreal Engine 5.6.
 
 UE Agent Kit provides project-wide read-only analysis, SQLite/FTS indexing, low-risk Blueprint patching, generic non-Blueprint scalar properties, Global Scalar/Vector/Texture/Static Switch Material Instance parameters, and one top-level scalar field in one existing DataTable row.
 
@@ -29,10 +29,13 @@ Every operation retains exact policy allowlists, revision checks, dry-run rollba
 
 ## 0.4.x: rollback and safety regression
 
-Planned work:
+Completed in 0.4.1:
 
-- A standalone `rollback` command.
-- Backup manifests and post-restore revision verification.
+- A standalone `rollback` command that defaults to dry run and requires an explicit commit.
+- Automatic backup manifests, pre-rollback safety copies, unique receipts, and post-restore revision verification.
+
+Remaining work:
+
 - Reproducible write-fixture generation and reset.
 - Real UE coverage for all supported scalar types.
 - Negative tests for unauthorized targets, missing targets, wrong types, revision conflicts, dirty packages, sidecars, and save failures.

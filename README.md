@@ -6,7 +6,7 @@
 
 UE Agent Kit 是一套面向 Unreal Engine 的开源资产分析、索引与受控写入工具。它通过 UE Editor 插件导出项目资产目录、Asset Registry 元数据、依赖关系和 Blueprint 语义，再使用 Python CLI 与 SQLite 建立项目级索引，并通过 Policy、Revision、Dry Run 和备份保护显式写入。
 
-当前版本为 **0.4.0**，支持 **Unreal Engine 5.6**。除八类 Blueprint 和通用标量属性写入外，现已支持 Material Instance Global Scalar、Vector、Texture、Static Switch，以及 DataTable 单 Row、单顶层标量字段的精确白名单写入和完整 Dry Run 回滚。
+当前版本为 **0.4.1**，支持 **Unreal Engine 5.6**。除八类 Blueprint、通用标量属性、Material Instance 参数和 DataTable 单元格写入外，现已提供可审计 Backup Manifest、默认 Dry Run 的独立 rollback、回滚前安全副本和独立 UE 进程恢复验证。
 
 > **AI Generated**：本项目的代码和文档主要由 AI 生成，并通过人工审查、UE 5.6 编译、自动化测试和真实工程回归验证。
 
@@ -20,6 +20,7 @@ UE Agent Kit 是一套面向 Unreal Engine 的开源资产分析、索引与受�
 - 查询函数、接口消息、宏、Dynamic Cast 和 Event Dispatcher 的调用关系。
 - 查看 Blueprint 的 Graph、Node、Pin 和连接结构。
 - 使用 Policy、Revision 和导出快照校验 Patch，并对授权 Blueprint、非 Blueprint 标量属性、Material Instance 参数或 DataTable 单元格执行 Dry Run 或显式 Commit。
+- 为成功 Commit 自动生成 Backup Manifest，并在当前 Revision 仍匹配时显式回滚和独立验证恢复结果。
 
 ## 主要能力
 
@@ -168,12 +169,25 @@ scripts\RunPatch.cmd ^
   -BackupDir "Backups\Patches"
 ```
 
+Commit 成功后，`RunPatch` 会在同一备份目录自动生成 `<backup>.manifest.json`。恢复命令默认只校验、不写磁盘：
+
+```bat
+scripts\RunRollback.cmd ^
+  -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject" ^
+  -Manifest "Backups\Patches\<backup>.manifest.json" ^
+  -Policy "config\write-policy.example.json" ^
+  -BackupRoot "Backups\Patches" ^
+  -Mode DryRun
+```
+
+显式恢复使用 `-Mode Commit`。目标工程必须关闭；恢复前会保存当前包，恢复后自动启动独立 UE 进程重新导出并核对 SHA-256 Revision。
+
 当前支持四种 Blueprint Operation、`setAssetProperty`、四种 Material Instance 参数 Operation，以及 `setDataTableCell`。每次执行仅允许一个资产和一个 Operation；通用属性、Material 参数和 DataTable 字段分别由 `allowedAssetProperties`、`allowedMaterialParameters`、`allowedDataTableFields` 精确授权。Material Instance 仅接受唯一 Global 参数；DataTable 仅修改现有 Row 的一个顶层标量字段，并在 Dry Run 中恢复完整 Row。当前仍只接受没有独立 Package 侧文件的单文件资产。
 
 ### 6. 校验通用资产导出
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.4.0
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.4.1
 ```
 
 完整参数和安装说明见 [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md)。
@@ -208,6 +222,7 @@ Output\Blueprints\
 - [`docs/ROADMAP.md`](docs/ROADMAP.md)：0.4.0、0.4.x 和 0.5.0 的版本目标与安全边界。
 - [`spec/BPCTX_FORMAT.md`](spec/BPCTX_FORMAT.md)：BPCTX/1 格式规范。
 - [`spec/PATCH_SCHEMA.md`](spec/PATCH_SCHEMA.md)：声明式 Patch、Policy、Revision 和纯校验安全边界。
+- [`spec/BACKUP_AND_ROLLBACK.md`](spec/BACKUP_AND_ROLLBACK.md)：Backup Manifest、rollback、审计回执和恢复验证规范。
 
 完整文档索引见 [`docs/README.md`](docs/README.md)。
 
@@ -218,9 +233,11 @@ Output\Blueprints\
 - 默认使用 `DryRun`，磁盘 Revision 必须保持不变。
 - `Commit` 同时要求命令行显式选择和 Policy 的 `commitEnabled=true`。
 - 仅允许 Policy 授权的项目、目录、Asset Class 和 Operation；通用属性和 Material 参数还要求各自的精确白名单。
-- 保存前创建外部备份；Blueprint 编译失败、Revision 冲突、Dirty Package、目标解析、参数查找或类型校验失败时禁止保存。
+- 保存前创建外部备份；成功 Commit 自动生成不可覆盖的 Manifest，记录授权键、Policy 哈希和变更前后 Revision。
+- rollback 默认 Dry Run；Commit 要求工程关闭、当前文件仍等于 Commit 后 Revision、备份哈希与大小一致，并在替换前创建安全副本。
+- Blueprint 编译失败、Revision 冲突、Dirty Package、目标解析、参数查找或类型校验失败时禁止保存。
 - 当前执行器只处理单资产、单操作，避免部分保存。
-- 工具通过 UE Editor API 修改并保存资产，不直接编辑 `.uasset` 二进制。
+- Patch 通过 UE Editor API 修改并保存资产；rollback 仅按已验证 Manifest 原子恢复完整 Package，不解析或局部改写 `.uasset` 二进制。
 
 ## License
 

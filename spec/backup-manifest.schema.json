@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ueagentkit.dev/schema/backup-manifest-1.0.json",
+  "title": "UE Agent Kit Backup Manifest 1.0",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "toolVersion",
+    "manifestId",
+    "createdUtc",
+    "patchId",
+    "projectName",
+    "assetPath",
+    "assetClass",
+    "operation",
+    "target",
+    "authorizationKey",
+    "beforeRevision",
+    "afterRevision",
+    "packageKind",
+    "backup",
+    "source"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "toolVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "manifestId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "createdUtc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "patchId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "projectName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "assetPath": {
+      "type": "string",
+      "pattern": "^/Game/(?!.*(?:^|/)\\.\\.?/)[^\\\\:]+\\.[^./\\\\:]+$"
+    },
+    "assetClass": {
+      "type": "string",
+      "pattern": "^/Script/[A-Za-z0-9_]+\\.[A-Za-z0-9_]+$"
+    },
+    "operation": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "target": {
+      "type": "object"
+    },
+    "authorizationKey": {
+      "type": "string",
+      "maxLength": 2048
+    },
+    "beforeRevision": {
+      "$ref": "#/$defs/revision"
+    },
+    "afterRevision": {
+      "$ref": "#/$defs/revision"
+    },
+    "beforeValue": {
+      "$ref": "#/$defs/reportValue"
+    },
+    "afterValue": {
+      "$ref": "#/$defs/reportValue"
+    },
+    "rowStructPath": {
+      "type": "string",
+      "maxLength": 1024
+    },
+    "packageKind": {
+      "const": "single-uasset"
+    },
+    "backup": {
+      "type": "object",
+      "required": [
+        "relativePath",
+        "revision",
+        "size"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "relativePath": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048,
+          "pattern": "^(?![A-Za-z]:)(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\]+$"
+        },
+        "revision": {
+          "$ref": "#/$defs/revision"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "patchFileName",
+        "patchSha256",
+        "policyFileName",
+        "policySha256",
+        "commitReportFileName",
+        "commitReportSha256",
+        "executorVersion"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "patchFileName": {
+          "$ref": "#/$defs/fileName"
+        },
+        "patchSha256": {
+          "$ref": "#/$defs/revision"
+        },
+        "policyFileName": {
+          "$ref": "#/$defs/fileName"
+        },
+        "policySha256": {
+          "$ref": "#/$defs/revision"
+        },
+        "commitReportFileName": {
+          "$ref": "#/$defs/fileName"
+        },
+        "commitReportSha256": {
+          "$ref": "#/$defs/revision"
+        },
+        "executorVersion": {
+          "type": "string",
+          "maxLength": 64
+        }
+      }
+    }
+  },
+  "$defs": {
+    "revision": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "fileName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "pattern": "^[^/\\\\:]+$"
+    },
+    "reportValue": {
+      "type": [
+        "null",
+        "string",
+        "number",
+        "integer",
+        "boolean",
+        "object"
+      ]
+    }
+  }
+}

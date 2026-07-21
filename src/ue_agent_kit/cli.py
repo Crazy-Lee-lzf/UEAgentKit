@@ -8,6 +8,11 @@ import sys
 from pathlib import Path
 from typing import Any, Sequence
 
+from .backups import (
+    create_backup_manifest,
+    rollback_backup,
+    verify_rollback_export,
+)
 from .config import DEFAULT_DATABASE
 from .database import assert_fts5_available, get_schema_version, open_database
 from .indexer import build_index
@@ -125,6 +130,40 @@ def build_parser() -> argparse.ArgumentParser:
     patch_validate.add_argument("--export", dest="export_root", type=Path, required=True)
     patch_validate.add_argument("--report", dest="report_path", type=Path)
 
+    patch_manifest = patch_subparsers.add_parser(
+        "manifest",
+        help="Create an auditable backup manifest from a successful Commit report.",
+    )
+    patch_manifest.add_argument("--patch", dest="patch_path", type=Path, required=True)
+    patch_manifest.add_argument("--policy", dest="policy_path", type=Path, required=True)
+    patch_manifest.add_argument("--report", dest="commit_report_path", type=Path, required=True)
+    patch_manifest.add_argument("--backup-root", dest="backup_root", type=Path, required=True)
+    patch_manifest.add_argument("--output", dest="manifest_output", type=Path)
+
+    patch_rollback = patch_subparsers.add_parser(
+        "rollback",
+        help="Validate or explicitly restore one single-file package from a backup manifest.",
+    )
+    patch_rollback.add_argument("--manifest", dest="manifest_path", type=Path, required=True)
+    patch_rollback.add_argument("--policy", dest="policy_path", type=Path, required=True)
+    patch_rollback.add_argument("--project", dest="project_path", type=Path, required=True)
+    patch_rollback.add_argument("--backup-root", dest="backup_root", type=Path, required=True)
+    patch_rollback.add_argument("--mode", choices=("DryRun", "Commit"), default="DryRun")
+    patch_rollback.add_argument("--report", dest="rollback_report_path", type=Path)
+
+    patch_verify_rollback = patch_subparsers.add_parser(
+        "verify-rollback",
+        help="Verify a rollback using an independent Unreal asset export.",
+    )
+    patch_verify_rollback.add_argument(
+        "--rollback-report",
+        dest="rollback_report_path",
+        type=Path,
+        required=True,
+    )
+    patch_verify_rollback.add_argument("--export", dest="export_root", type=Path, required=True)
+    patch_verify_rollback.add_argument("--report", dest="verification_report_path", type=Path)
+
     return parser
 
 
@@ -164,6 +203,33 @@ def run(args: argparse.Namespace) -> tuple[Any, int]:
         if args.report_path is not None:
             _write_json_file(args.report_path, result)
         return result, 0 if result["valid"] else 1
+
+    if args.command == "patch" and args.patch_command == "manifest":
+        result = create_backup_manifest(
+            args.patch_path,
+            args.policy_path,
+            args.commit_report_path,
+            args.backup_root,
+            output_path=args.manifest_output,
+        )
+        return result, 0
+
+    if args.command == "patch" and args.patch_command == "rollback":
+        result = rollback_backup(
+            args.manifest_path,
+            args.policy_path,
+            args.project_path,
+            args.backup_root,
+            commit=args.mode == "Commit",
+            report_path=args.rollback_report_path,
+        )
+        return result, 0 if result["valid"] and (args.mode != "Commit" or result["restored"]) else 1
+
+    if args.command == "patch" and args.patch_command == "verify-rollback":
+        result = verify_rollback_export(args.rollback_report_path, args.export_root)
+        if args.verification_report_path is not None:
+            _write_json_file(args.verification_report_path, result)
+        return result, 0 if result["verified"] else 1
 
     if args.command == "index" and args.index_command == "build":
         with open_database(args.database) as connection:
@@ -270,7 +336,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             compact=args.compact,
         )
         return 2
-    except (ValueError, RuntimeError, sqlite3.Error) as exc:
+    except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
         _print_json(
             {
                 "error": type(exc).__name__,

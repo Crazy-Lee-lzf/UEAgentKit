@@ -6,7 +6,7 @@
 
 UE Agent Kit is an open-source Unreal Engine asset analysis, indexing, and policy-gated patch toolkit. Its Editor plugin exports asset catalogs, Asset Registry metadata, dependencies, and Blueprint semantics; a Python CLI and SQLite provide a project-wide index, while Policy, Revision checks, dry runs, and backups protect explicit writes.
 
-The current release is **0.4.0** and targets **Unreal Engine 5.6**. In addition to eight Blueprint categories and generic scalar properties, it supports exact-allowlist Global Scalar, Vector, Texture, and Static Switch writes on Material Instances, plus one top-level scalar field in one existing DataTable row, with complete dry-run rollback.
+The current release is **0.4.1** and targets **Unreal Engine 5.6**. In addition to Blueprint, generic scalar, Material Instance, and DataTable writes, it adds auditable backup manifests, a standalone rollback command that defaults to dry run, pre-rollback safety copies, and independent Unreal-process restore verification.
 
 > **AI Generated**: Most code and documentation in this project are AI-generated and reviewed through human inspection, UE 5.6 compilation, automated tests, and real-project regression validation.
 
@@ -20,6 +20,7 @@ The current release is **0.4.0** and targets **Unreal Engine 5.6**. In addition 
 - Trace functions, interface messages, macros, Dynamic Casts, and Event Dispatchers.
 - Inspect Blueprint graphs, nodes, pins, and connections.
 - Validate patches against policy, revision, and export snapshots, then dry-run or explicitly commit authorized Blueprint, non-Blueprint scalar, Material Instance parameter, or DataTable cell changes.
+- Generate a backup manifest after every successful commit, then explicitly roll back and independently verify the restored revision when the current package still matches.
 
 ## Main capabilities
 
@@ -168,12 +169,25 @@ scripts\RunPatch.cmd ^
   -BackupDir "Backups\Patches"
 ```
 
+After a successful commit, `RunPatch` automatically creates `<backup>.manifest.json` in the same backup directory. Rollback defaults to validation-only dry run:
+
+```bat
+scripts\RunRollback.cmd ^
+  -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject" ^
+  -Manifest "Backups\Patches\<backup>.manifest.json" ^
+  -Policy "config\write-policy.example.json" ^
+  -BackupRoot "Backups\Patches" ^
+  -Mode DryRun
+```
+
+Use `-Mode Commit` for an explicit restore. The target project must be closed; the tool saves a pre-rollback safety copy and launches an independent Unreal process to verify the restored SHA-256 revision.
+
 The executor supports four Blueprint operations, `setAssetProperty`, four Material Instance parameter operations, and `setDataTableCell`. One execution is limited to one asset and one operation. Generic properties, Material parameters, and DataTable fields use exact `allowedAssetProperties`, `allowedMaterialParameters`, and `allowedDataTableFields` authorization. Material Instance writes require one unique Global parameter; DataTable writes target one top-level scalar field in one existing row and restore the complete row during dry runs. Only single-file packages without external package sidecars are accepted.
 
 ### 6. Validate the asset catalog
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.4.0
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.4.1
 ```
 
 See [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md) for installation and full command details.
@@ -208,6 +222,7 @@ Output\Blueprints\
 - [`docs/ROADMAP_EN.md`](docs/ROADMAP_EN.md): version goals and safety boundaries for 0.4.0, 0.4.x, and 0.5.0.
 - [`spec/BPCTX_FORMAT.md`](spec/BPCTX_FORMAT.md): BPCTX/1 format specification.
 - [`spec/PATCH_SCHEMA.md`](spec/PATCH_SCHEMA.md): declarative patches, policy, revision checks, and validation-only safety boundaries.
+- [`spec/BACKUP_AND_ROLLBACK.md`](spec/BACKUP_AND_ROLLBACK.md): backup manifest, rollback receipt, and restore-verification contract.
 
 See [`docs/README.md`](docs/README.md) for the documentation index.
 
@@ -218,9 +233,11 @@ Read-only exporters and `ue-agent patch validate` never modify UObjects or asset
 - `DryRun` is the default and must preserve the disk revision.
 - `Commit` requires both an explicit command mode and `commitEnabled=true` in policy.
 - Project, asset root, asset class, and operation must all be authorized; generic properties and Material parameters also require their own exact allowlist entries.
-- An external backup is created before saving. Blueprint compile failure, revision conflict, dirty package, target resolution, parameter lookup, or type validation failure prevents saving.
+- An external backup is created before saving; every successful commit creates a non-overwriting manifest with the authorization key, policy hash, and before/after revisions.
+- Rollback defaults to dry run. Commit requires a closed project, an unchanged post-commit revision, matching backup hash and size, and a pre-rollback safety copy.
+- Blueprint compile failures, revision conflicts, dirty packages, target resolution failures, parameter lookup failures, and type validation errors prevent saving.
 - The executor currently handles one asset and one operation to avoid partial saves.
-- Assets are changed through Unreal Editor APIs; the tool never edits `.uasset` binary bytes directly.
+- Patches modify and save assets through Unreal Editor APIs; rollback only atomically restores a complete package authorized by a validated manifest and never performs partial binary edits.
 
 ## License
 

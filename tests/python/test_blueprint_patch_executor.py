@@ -196,6 +196,13 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
         self.assertIn("exactly one asset and one operation", source)
 
         self.assertIn("commitSupported", source)
+        for token in (
+            "Backup manifest output must stay inside BackupDir",
+            "Backup manifest output conflicts with another patch input or report",
+            "Backup manifest output already exists",
+        ):
+            self.assertIn(token, source)
+            self.assertLess(source.index(token), source.index("& $EditorCmd @Arguments"))
 
 
 
@@ -213,11 +220,11 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
 
         )
 
-        self.assertIn('version = "0.4.0"', pyproject)
+        self.assertIn('version = "0.4.1"', pyproject)
 
-        self.assertEqual(plugin["VersionName"], "0.4.0")
+        self.assertEqual(plugin["VersionName"], "0.4.1")
 
-        self.assertEqual(plugin["Version"], 15)
+        self.assertEqual(plugin["Version"], 16)
 
 
 

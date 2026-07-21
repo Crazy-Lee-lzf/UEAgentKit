@@ -1,6 +1,6 @@
 # UEAgentKit Patch Schema 1.0
 
-UEAgentKit Patch 是面向 Unreal Engine 资产的声明式变更格式。0.4.0 同时提供纯 JSON 预校验，以及 UE Editor 内的 Blueprint、通用属性、Material Instance 参数和 DataTable 单元格执行器。
+UEAgentKit Patch 是面向 Unreal Engine 资产的声明式变更格式。0.4.1 同时提供纯 JSON 预校验，以及 UE Editor 内的 Blueprint、通用属性、Material Instance 参数和 DataTable 单元格执行器。
 
 ## 两层执行模型
 
