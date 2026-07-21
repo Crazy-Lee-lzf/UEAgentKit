@@ -94,7 +94,8 @@ $AssetOperations = @(
     "setMaterialInstanceScalarParameter",
     "setMaterialInstanceVectorParameter",
     "setMaterialInstanceTextureParameter",
-    "setMaterialInstanceStaticSwitchParameter"
+    "setMaterialInstanceStaticSwitchParameter",
+    "setDataTableCell"
 )
 $Commandlet = if ($AssetOperations -contains $Operation) { "AssetPatch" } else { "BlueprintPatch" }
 

@@ -3,6 +3,7 @@
 #include "BlueprintContextSha256.h"
 #include "Dom/JsonObject.h"
 #include "Engine/Blueprint.h"
+#include "Engine/DataTable.h"
 #include "Engine/Texture.h"
 #include "HAL/FileManager.h"
 #include "MaterialEditingLibrary.h"
@@ -20,6 +21,7 @@
 #include "Serialization/JsonWriter.h"
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
+#include "UObject/StructOnScope.h"
 #include "UObject/UnrealType.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogAssetPatch, Log, All);
@@ -38,6 +40,7 @@ namespace AssetPatchCommandletPrivate
 		TArray<FString> AllowedAssetClasses;
 		TArray<FString> AllowedAssetProperties;
 		TArray<FString> AllowedMaterialParameters;
+		TArray<FString> AllowedDataTableFields;
 	};
 
 	bool LoadJsonObject(const FString& Filename, TSharedPtr<FJsonObject>& OutObject, FString& OutError)
@@ -106,6 +109,7 @@ namespace AssetPatchCommandletPrivate
 		ReadStringArray(Object, TEXT("allowedAssetClasses"), OutPolicy.AllowedAssetClasses);
 		ReadStringArray(Object, TEXT("allowedAssetProperties"), OutPolicy.AllowedAssetProperties);
 		ReadStringArray(Object, TEXT("allowedMaterialParameters"), OutPolicy.AllowedMaterialParameters);
+		ReadStringArray(Object, TEXT("allowedDataTableFields"), OutPolicy.AllowedDataTableFields);
 		auto NormalizeAndValidateRoots = [&OutError](
 			TArray<FString>& Roots,
 			const TCHAR* RootKind) -> bool
@@ -157,6 +161,12 @@ namespace AssetPatchCommandletPrivate
 		{
 			OutError = TEXT(
 				"Material Instance parameter operations require allowedMaterialParameters authorization.");
+			return false;
+		}
+		if (ContainsExact(OutPolicy.AllowedOperations, TEXT("setDataTableCell"))
+			&& OutPolicy.AllowedDataTableFields.IsEmpty())
+		{
+			OutError = TEXT("setDataTableCell requires allowedDataTableFields authorization.");
 			return false;
 		}
 		if (ContainsExact(OutPolicy.AllowedOperations, TEXT("setMaterialInstanceTextureParameter"))
@@ -439,6 +449,7 @@ namespace AssetPatchCommandletPrivate
 		{
 			return false;
 		}
+		OutValue.Reset();
 		Property->ExportTextItem_Direct(
 			OutValue,
 			ValueAddress,
@@ -985,11 +996,14 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		Operation.Equals(TEXT("setMaterialInstanceTextureParameter"), ESearchCase::CaseSensitive);
 	const bool bMaterialStaticSwitchOperation =
 		Operation.Equals(TEXT("setMaterialInstanceStaticSwitchParameter"), ESearchCase::CaseSensitive);
+	const bool bDataTableCellOperation =
+		Operation.Equals(TEXT("setDataTableCell"), ESearchCase::CaseSensitive);
 	if ((!bAssetPropertyOperation
 			&& !bMaterialScalarOperation
 			&& !bMaterialVectorOperation
 			&& !bMaterialTextureOperation
-			&& !bMaterialStaticSwitchOperation)
+			&& !bMaterialStaticSwitchOperation
+			&& !bDataTableCellOperation)
 		|| !ContainsExact(Policy.AllowedOperations, Operation))
 	{
 		UE_LOG(LogAssetPatch, Error, TEXT("Operation is not authorized or implemented: %s"), *Operation);
@@ -1133,7 +1147,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			|| FMath::IsNearlyEqual(RestoredScalarValue, BeforeScalarValue, UE_SMALL_NUMBER);
 		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-		Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.7"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.4.0"));
 		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 		Report->SetStringField(TEXT("patchId"), PatchId);
 		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
@@ -1335,7 +1349,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			!bRolledBack || RestoredVectorValue.Equals(BeforeVectorValue, UE_SMALL_NUMBER);
 		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-		Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.7"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.4.0"));
 		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 		Report->SetStringField(TEXT("patchId"), PatchId);
 		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
@@ -1523,7 +1537,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		const bool bRestoredValueMatch = !bRolledBack || RestoredTextureValue == BeforeTextureValue;
 		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-		Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.7"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.4.0"));
 		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 		Report->SetStringField(TEXT("patchId"), PatchId);
 		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
@@ -1723,7 +1737,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 				&& bRestoredOverride == bBeforeOverride);
 		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-		Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.7"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.4.0"));
 		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 		Report->SetStringField(TEXT("patchId"), PatchId);
 		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
@@ -1774,6 +1788,232 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			*ParameterNameText,
 			BeforeSwitchValue ? TEXT("true") : TEXT("false"),
 			AfterSwitchValue ? TEXT("true") : TEXT("false"));
+		return 0;
+	}
+
+	if (bDataTableCellOperation)
+	{
+		UDataTable* DataTable = Cast<UDataTable>(Asset);
+		if (!DataTable)
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("setDataTableCell requires a DataTable asset."));
+			return 17;
+		}
+
+		FString RowNameText;
+		FString FieldNameText;
+		TargetObject->TryGetStringField(TEXT("rowName"), RowNameText);
+		TargetObject->TryGetStringField(TEXT("fieldName"), FieldNameText);
+		if (RowNameText.IsEmpty() || FieldNameText.IsEmpty() || FieldNameText.Contains(TEXT(".")))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("DataTable rowName and one top-level fieldName are required."));
+			return 17;
+		}
+
+		UScriptStruct* RowStruct = const_cast<UScriptStruct*>(DataTable->GetRowStruct());
+		if (!RowStruct)
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("DataTable has no valid row struct."));
+			return 17;
+		}
+		const FString RowStructPath = RowStruct->GetPathName();
+		const FString FieldAuthorization =
+			ActualAssetClass + TEXT("#") + RowStructPath + TEXT("#") + FieldNameText;
+		if (!ContainsExact(Policy.AllowedDataTableFields, FieldAuthorization))
+		{
+			UE_LOG(
+				LogAssetPatch,
+				Error,
+				TEXT("DataTable field is not authorized by policy: %s"),
+				*FieldAuthorization);
+			return 17;
+		}
+
+		const FName RowName(*RowNameText);
+		uint8* RowData = DataTable->FindRowUnchecked(RowName);
+		if (!RowData)
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("DataTable row was not found: %s"), *RowNameText);
+			return 17;
+		}
+		FProperty* Field = FindFProperty<FProperty>(RowStruct, FName(*FieldNameText));
+		if (!Field || Field->ArrayDim != 1
+			|| Field->HasAnyPropertyFlags(
+				CPF_Transient | CPF_DuplicateTransient | CPF_NonPIEDuplicateTransient))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("DataTable field is missing, fixed-array, or transient: %s"), *FieldNameText);
+			return 17;
+		}
+		const TSharedPtr<FJsonValue> NewValue = OperationObject->TryGetField(TEXT("value"));
+		if (!NewValue.IsValid() || NewValue->Type == EJson::Null)
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("DataTable cell value must be a non-null JSON scalar."));
+			return 18;
+		}
+
+		FStructOnScope OriginalRow(RowStruct);
+		FStructOnScope ExpectedRow(RowStruct);
+		if (!OriginalRow.IsValid() || !ExpectedRow.IsValid())
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Could not allocate DataTable row snapshots."));
+			return 18;
+		}
+		RowStruct->CopyScriptStruct(OriginalRow.GetStructMemory(), RowData);
+		RowStruct->CopyScriptStruct(ExpectedRow.GetStructMemory(), RowData);
+		void* ExpectedValueAddress = Field->ContainerPtrToValuePtr<void>(ExpectedRow.GetStructMemory());
+		if (!SetPropertyFromJson(Field, ExpectedValueAddress, NewValue, Error))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Invalid DataTable cell value: %s"), *Error);
+			return 18;
+		}
+
+		void* ValueAddress = Field->ContainerPtrToValuePtr<void>(RowData);
+		void* OriginalValueAddress = Field->ContainerPtrToValuePtr<void>(OriginalRow.GetStructMemory());
+		FString BeforeValue;
+		if (!ReadPropertyValue(DataTable, Field, ValueAddress, BeforeValue))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Could not read original DataTable cell value."));
+			return 18;
+		}
+
+		FString BackupFilename;
+		if (bCommit)
+		{
+			IFileManager::Get().MakeDirectory(*BackupDirectory, true);
+			BackupFilename = CreateBackupFilename(BackupDirectory, PatchId, PackageFilename);
+			if (IFileManager::Get().Copy(*BackupFilename, *PackageFilename, true, true) != COPY_OK)
+			{
+				UE_LOG(LogAssetPatch, Error, TEXT("Could not create package backup: %s"), *BackupFilename);
+				return 19;
+			}
+		}
+
+		DataTable->Modify();
+		if (!SetPropertyFromJson(Field, ValueAddress, NewValue, Error))
+		{
+			RowStruct->CopyScriptStruct(RowData, OriginalRow.GetStructMemory());
+			DataTable->HandleDataTableChanged(RowName);
+			Package->SetDirtyFlag(bOriginalDirty);
+			UE_LOG(LogAssetPatch, Error, TEXT("Could not apply DataTable cell value: %s"), *Error);
+			return 20;
+		}
+		DataTable->HandleDataTableChanged(RowName);
+		Package->MarkPackageDirty();
+		const bool bAppliedStructureMatch = RowStruct->CompareScriptStruct(
+			RowData,
+			ExpectedRow.GetStructMemory(),
+			PPF_None);
+		if (!bAppliedStructureMatch
+			|| !Field->Identical(ValueAddress, ExpectedValueAddress, PPF_None))
+		{
+			RowStruct->CopyScriptStruct(RowData, OriginalRow.GetStructMemory());
+			DataTable->HandleDataTableChanged(RowName);
+			Package->SetDirtyFlag(bOriginalDirty);
+			UE_LOG(LogAssetPatch, Error, TEXT("DataTable cell read-back verification failed."));
+			return 20;
+		}
+
+		FString AfterValue;
+		if (!ReadPropertyValue(DataTable, Field, ValueAddress, AfterValue))
+		{
+			RowStruct->CopyScriptStruct(RowData, OriginalRow.GetStructMemory());
+			DataTable->HandleDataTableChanged(RowName);
+			Package->SetDirtyFlag(bOriginalDirty);
+			UE_LOG(LogAssetPatch, Error, TEXT("Could not read updated DataTable cell value."));
+			return 20;
+		}
+
+		bool bSaved = false;
+		bool bRolledBack = false;
+		bool bStructureMatch = true;
+		bool bRestoredValueMatch = true;
+		FString RestoredValue = BeforeValue;
+		if (bCommit)
+		{
+			if (!SaveAssetPackage(DataTable, PackageFilename, Error))
+			{
+				IFileManager::Get().Copy(*PackageFilename, *BackupFilename, true, true);
+				UE_LOG(LogAssetPatch, Error, TEXT("%s Backup restored."), *Error);
+				return 21;
+			}
+			bSaved = true;
+		}
+		else
+		{
+			RowStruct->CopyScriptStruct(RowData, OriginalRow.GetStructMemory());
+			DataTable->HandleDataTableChanged(RowName);
+			Package->SetDirtyFlag(bOriginalDirty);
+			ValueAddress = Field->ContainerPtrToValuePtr<void>(RowData);
+			bStructureMatch = RowStruct->CompareScriptStruct(
+				RowData,
+				OriginalRow.GetStructMemory(),
+				PPF_None);
+			bRestoredValueMatch = Field->Identical(ValueAddress, OriginalValueAddress, PPF_None);
+			if (!ReadPropertyValue(DataTable, Field, ValueAddress, RestoredValue))
+			{
+				UE_LOG(LogAssetPatch, Error, TEXT("Could not read restored DataTable cell value."));
+				return 22;
+			}
+			bRolledBack = true;
+		}
+
+		const FString AfterRevision = HashPackageFile(Package);
+		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
+		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.4.0"));
+		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
+		Report->SetStringField(TEXT("patchId"), PatchId);
+		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
+		Report->SetStringField(TEXT("assetPath"), AssetPath);
+		Report->SetStringField(TEXT("assetClass"), ActualAssetClass);
+		Report->SetStringField(TEXT("operation"), Operation);
+		Report->SetObjectField(TEXT("target"), TargetObject);
+		Report->SetStringField(
+			TEXT("targetDescription"),
+			TEXT("data-table-cell:") + RowNameText + TEXT(".") + FieldNameText);
+		Report->SetStringField(TEXT("targetType"), Field->GetClass()->GetName());
+		Report->SetStringField(TEXT("rowStructPath"), RowStructPath);
+		Report->SetStringField(TEXT("beforeValue"), BeforeValue);
+		Report->SetStringField(TEXT("afterValue"), AfterValue);
+		Report->SetStringField(TEXT("restoredValue"), RestoredValue);
+		Report->SetStringField(TEXT("beforeRevision"), BeforeRevision);
+		Report->SetStringField(TEXT("afterRevision"), AfterRevision);
+		Report->SetBoolField(TEXT("compiled"), false);
+		Report->SetBoolField(TEXT("saved"), bSaved);
+		Report->SetBoolField(TEXT("rolledBack"), bRolledBack);
+		Report->SetBoolField(TEXT("appliedStructureMatch"), bAppliedStructureMatch);
+		Report->SetBoolField(TEXT("rollbackValueMatch"), !bRolledBack || bRestoredValueMatch);
+		Report->SetBoolField(TEXT("rollbackStructureMatch"), !bRolledBack || bStructureMatch);
+		Report->SetBoolField(
+			TEXT("diskUnchanged"),
+			BeforeRevision.Equals(AfterRevision, ESearchCase::IgnoreCase));
+		Report->SetStringField(TEXT("backupPath"), BackupFilename);
+		if (!SaveReport(ReportFilename, Report, Error))
+		{
+			if (bCommit && !BackupFilename.IsEmpty())
+			{
+				IFileManager::Get().Copy(*PackageFilename, *BackupFilename, true, true);
+			}
+			UE_LOG(LogAssetPatch, Error, TEXT("%s Disk backup restored."), *Error);
+			return 23;
+		}
+
+		if (bRolledBack && (!bRestoredValueMatch || !bStructureMatch
+			|| !BeforeRevision.Equals(AfterRevision, ESearchCase::IgnoreCase)))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("DataTable Dry Run rollback verification failed."));
+			return 22;
+		}
+		UE_LOG(
+			LogAssetPatch,
+			Display,
+			TEXT("DataTable cell patch succeeded. Mode=%s Asset=%s Row=%s Field=%s Before=%s After=%s"),
+			bCommit ? TEXT("Commit") : TEXT("DryRun"),
+			*AssetPath,
+			*RowNameText,
+			*FieldNameText,
+			*BeforeValue,
+			*AfterValue);
 		return 0;
 	}
 
@@ -1870,7 +2110,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 	const FString AfterRevision = HashPackageFile(Package);
 	const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 	Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-	Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.7"));
+	Report->SetStringField(TEXT("executorVersion"), TEXT("0.4.0"));
 	Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 	Report->SetStringField(TEXT("patchId"), PatchId);
 	Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());

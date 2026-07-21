@@ -239,7 +239,7 @@ scripts\RunPatch.cmd ^
   -BackupDir "Backups\Patches"
 ```
 
-执行顺序固定为：Python 预校验 → 单资产/单操作约束 → 按 Operation 选择 Commandlet → 加载资产 → 再次检查 Policy 与磁盘 Revision → 修改 → Dry Run 回滚或 Commit 备份并保存。Blueprint 操作额外执行编译；通用属性要求精确 PropertyPath 白名单；Material 参数要求精确参数白名单并通过 MaterialEditingLibrary 更新。
+执行顺序固定为：Python 预校验 → 单资产/单操作约束 → 按 Operation 选择 Commandlet → 加载资产 → 再次检查 Policy 与磁盘 Revision → 修改 → Dry Run 回滚或 Commit 备份并保存。Blueprint 操作额外执行编译；通用属性、Material 参数和 DataTable 字段分别要求精确 PropertyPath、参数和 RowStruct/字段白名单。
 
 当前限制：
 
@@ -247,11 +247,13 @@ scripts\RunPatch.cmd ^
 - Blueprint 支持 `setVariableDefault`、`setComponentProperty`、`setPinDefault`、`setBlueprintDescription`。
 - 非 Blueprint 支持 `setAssetProperty`；Policy 必须用 `AssetClass#Property.Path` 精确授权。
 - Material Instance 支持 `setMaterialInstanceScalarParameter`、`setMaterialInstanceVectorParameter`、`setMaterialInstanceTextureParameter` 和 `setMaterialInstanceStaticSwitchParameter`；Policy 使用 `AssetClass#Type#ParameterName` 精确授权。
+- DataTable 支持 `setDataTableCell`；Policy 使用 `AssetClass#RowStructPath#FieldName` 精确授权，首版仅修改现有 Row 的一个顶层标量字段。
 - 变量和组件属性支持 Bool、整数、浮点、String、Name、Text。
 - Pin 支持未连接、可编辑的输入 Pin，值为布尔、数值或字符串。
 - 已验证普通 Blueprint、Widget、Anim、Actor Component、Function Library、Macro Library、Interface 和 Control Rig。
 - 已验证 PrimaryAssetLabel/Data Asset、Texture2D、Static Mesh 和 InputAction；支持用点号进入嵌套 Struct 和普通 Enum 名称写入。
 - 已验证 MaterialInstanceConstant 的 Global Scalar、Vector、Texture 与 Static Switch 参数 Dry Run、完整 Override/Static Parameter 回滚、Commit、备份和独立重载。Texture 引用额外要求 `allowedReferenceRoots` 与 `allowedReferenceClasses`；Static Switch 同时验证 Expression GUID 与 Override 状态。
+- 已验证 DataTable `GameplayTagTableRow.DevComment` 的整 Row Dry Run 回滚、Commit、唯一备份、独立重载和过期 Revision 拒绝。
 - 通用属性仅允许可编辑、非 Transient 的 Bool、数值、String、Name、Text 或 Enum；不支持数组、Set、Map、对象引用和 Blueprint 结构性增删。
 - 当前仅接受没有 `.uexp/.ubulk/.uptnl/.m.ubulk/.upayload` 等独立侧文件的单文件 Package。
 
@@ -262,7 +264,7 @@ scripts\RunPatch.cmd ^
 ```bat
 python <TOOL_ROOT>\scripts\ValidateAssetCatalog.py ^
   --output <TOOL_ROOT>\Output\AssetCatalog ^
-  --expect-exporter 0.3.7
+  --expect-exporter 0.4.0
 ```
 
 校验器会检查：

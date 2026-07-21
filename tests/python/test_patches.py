@@ -59,6 +59,7 @@ def make_policy() -> dict[str, Any]:
         ],
         "allowedAssetProperties": [],
         "allowedMaterialParameters": [],
+        "allowedDataTableFields": [],
         "requireRevision": True,
         "rejectDirtyPackages": True,
         "maxAssetsPerPatch": 10,
@@ -593,6 +594,95 @@ class PatchValidationTests(unittest.TestCase):
         self.canonical["assetClass"] = asset_class
         self.flush()
         self.assertIn("material-parameter-not-allowed", self.error_codes(self.validate()))
+
+    def test_data_table_cell_operation_is_valid(self) -> None:
+        asset_path = "/Game/UEAgentKitWriteTests/DT_CellPatchTarget.DT_CellPatchTarget"
+        asset_class = "/Script/Engine.DataTable"
+        row_struct = "/Script/GameplayTags.GameplayTagTableRow"
+        asset = self.patch["assets"][0]
+        asset["assetPath"] = asset_path
+        asset["expectedAssetClass"] = asset_class
+        asset["operations"] = [
+            {
+                "operationId": "set-comment",
+                "operation": "setDataTableCell",
+                "target": {"rowName": "Row_Alpha", "fieldName": "DevComment"},
+                "value": "Verified",
+            }
+        ]
+        self.policy["allowedOperations"].append("setDataTableCell")
+        self.policy["allowedAssetClasses"].append(asset_class)
+        self.policy["allowedDataTableFields"] = [
+            f"{asset_class}#{row_struct}#DevComment"
+        ]
+        self.canonical["assetPath"] = asset_path
+        self.canonical["packageName"] = asset_path.rsplit(".", 1)[0]
+        self.canonical["assetClass"] = asset_class
+        self.canonical["assetDetails"] = {"rowStructPath": row_struct}
+        self.flush()
+        result = self.validate()
+        self.assertTrue(result["valid"])
+        expected = result["assets"][0]["operations"][0]["expectedChange"]
+        self.assertEqual(expected["kind"], "data-table-cell")
+
+    def test_data_table_cell_requires_exact_authorization(self) -> None:
+        asset_path = "/Game/UEAgentKitWriteTests/DT_CellPatchTarget.DT_CellPatchTarget"
+        asset_class = "/Script/Engine.DataTable"
+        row_struct = "/Script/GameplayTags.GameplayTagTableRow"
+        asset = self.patch["assets"][0]
+        asset["assetPath"] = asset_path
+        asset["expectedAssetClass"] = asset_class
+        asset["operations"] = [
+            {
+                "operationId": "set-comment",
+                "operation": "setDataTableCell",
+                "target": {"rowName": "Row_Alpha", "fieldName": "DevComment"},
+                "value": "Verified",
+            }
+        ]
+        self.policy["allowedOperations"].append("setDataTableCell")
+        self.policy["allowedAssetClasses"].append(asset_class)
+        self.policy["allowedDataTableFields"] = [
+            f"{asset_class}#{row_struct}#OtherField"
+        ]
+        self.canonical["assetPath"] = asset_path
+        self.canonical["packageName"] = asset_path.rsplit(".", 1)[0]
+        self.canonical["assetClass"] = asset_class
+        self.canonical["assetDetails"] = {"rowStructPath": row_struct}
+        self.flush()
+        self.assertIn("data-table-field-not-allowed", self.error_codes(self.validate()))
+
+    def test_data_table_cell_requires_policy_allowlist(self) -> None:
+        self.policy["allowedOperations"].append("setDataTableCell")
+        self.flush()
+        self.assertIn("policy-data-table-fields", self.error_codes(self.validate()))
+
+    def test_data_table_cell_rejects_null(self) -> None:
+        asset_path = "/Game/UEAgentKitWriteTests/DT_CellPatchTarget.DT_CellPatchTarget"
+        asset_class = "/Script/Engine.DataTable"
+        row_struct = "/Script/GameplayTags.GameplayTagTableRow"
+        asset = self.patch["assets"][0]
+        asset["assetPath"] = asset_path
+        asset["expectedAssetClass"] = asset_class
+        asset["operations"] = [
+            {
+                "operationId": "set-comment",
+                "operation": "setDataTableCell",
+                "target": {"rowName": "Row_Alpha", "fieldName": "DevComment"},
+                "value": None,
+            }
+        ]
+        self.policy["allowedOperations"].append("setDataTableCell")
+        self.policy["allowedAssetClasses"].append(asset_class)
+        self.policy["allowedDataTableFields"] = [
+            f"{asset_class}#{row_struct}#DevComment"
+        ]
+        self.canonical["assetPath"] = asset_path
+        self.canonical["packageName"] = asset_path.rsplit(".", 1)[0]
+        self.canonical["assetClass"] = asset_class
+        self.canonical["assetDetails"] = {"rowStructPath": row_struct}
+        self.flush()
+        self.assertIn("operation-value-type", self.error_codes(self.validate()))
 
     def test_blueprint_description_operation_is_valid(self) -> None:
         self.patch["assets"][0]["operations"] = [

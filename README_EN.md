@@ -6,7 +6,7 @@
 
 UE Agent Kit is an open-source Unreal Engine asset analysis, indexing, and policy-gated patch toolkit. Its Editor plugin exports asset catalogs, Asset Registry metadata, dependencies, and Blueprint semantics; a Python CLI and SQLite provide a project-wide index, while Policy, Revision checks, dry runs, and backups protect explicit writes.
 
-The current release is **0.3.7** and targets **Unreal Engine 5.6**. In addition to eight Blueprint categories and generic scalar properties, it supports exact-allowlist Global Scalar, Vector, Texture, and Static Switch parameter writes on Material Instances, independently authorized referenced assets, and full override/static-parameter dry-run rollback.
+The current release is **0.4.0** and targets **Unreal Engine 5.6**. In addition to eight Blueprint categories and generic scalar properties, it supports exact-allowlist Global Scalar, Vector, Texture, and Static Switch writes on Material Instances, plus one top-level scalar field in one existing DataTable row, with complete dry-run rollback.
 
 > **AI Generated**: Most code and documentation in this project are AI-generated and reviewed through human inspection, UE 5.6 compilation, automated tests, and real-project regression validation.
 
@@ -19,7 +19,7 @@ The current release is **0.3.7** and targets **Unreal Engine 5.6**. In addition 
 - Find where Blueprint variables are read or written.
 - Trace functions, interface messages, macros, Dynamic Casts, and Event Dispatchers.
 - Inspect Blueprint graphs, nodes, pins, and connections.
-- Validate patches against policy, revision, and export snapshots, then dry-run or explicitly commit authorized Blueprint, non-Blueprint scalar, or Material Instance Scalar changes.
+- Validate patches against policy, revision, and export snapshots, then dry-run or explicitly commit authorized Blueprint, non-Blueprint scalar, Material Instance parameter, or DataTable cell changes.
 
 ## Main capabilities
 
@@ -168,12 +168,12 @@ scripts\RunPatch.cmd ^
   -BackupDir "Backups\Patches"
 ```
 
-The executor supports four Blueprint operations, non-Blueprint `setAssetProperty`, and `setMaterialInstanceScalarParameter`. One execution is limited to one asset and one operation. Generic properties use exact `allowedAssetProperties` authorization; Material parameters use `allowedMaterialParameters` in `AssetClass#Scalar#ParameterName` form. The first Material Instance implementation supports exactly one matching Global Scalar parameter and restores the complete Scalar Override array during dry runs. Only single-file packages without external package sidecars are accepted.
+The executor supports four Blueprint operations, `setAssetProperty`, four Material Instance parameter operations, and `setDataTableCell`. One execution is limited to one asset and one operation. Generic properties, Material parameters, and DataTable fields use exact `allowedAssetProperties`, `allowedMaterialParameters`, and `allowedDataTableFields` authorization. Material Instance writes require one unique Global parameter; DataTable writes target one top-level scalar field in one existing row and restore the complete row during dry runs. Only single-file packages without external package sidecars are accepted.
 
 ### 6. Validate the asset catalog
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.3.7
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.4.0
 ```
 
 See [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md) for installation and full command details.

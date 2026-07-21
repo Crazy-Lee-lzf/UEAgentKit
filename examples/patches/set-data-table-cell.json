@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "1.0",
+  "patchId": "set-data-table-cell-example",
+  "projectName": "我的项目",
+  "description": "Set one scalar field on one existing DataTable row.",
+  "assets": [
+    {
+      "assetPath": "/Game/UEAgentKitWriteTests/DT_CellPatchTarget.DT_CellPatchTarget",
+      "expectedRevision": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "expectedAssetClass": "/Script/Engine.DataTable",
+      "operations": [
+        {
+          "operationId": "set-row-comment",
+          "operation": "setDataTableCell",
+          "target": {
+            "rowName": "Row_Alpha",
+            "fieldName": "DevComment"
+          },
+          "value": "Verified by UEAgentKit"
+        }
+      ]
+    }
+  ]
+}

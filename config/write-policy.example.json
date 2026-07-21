@@ -17,7 +17,8 @@
     "setMaterialInstanceScalarParameter",
     "setMaterialInstanceVectorParameter",
     "setMaterialInstanceTextureParameter",
-    "setMaterialInstanceStaticSwitchParameter"
+    "setMaterialInstanceStaticSwitchParameter",
+    "setDataTableCell"
   ],
   "allowedAssetClasses": [
     "/Script/Engine.Blueprint",
@@ -27,7 +28,8 @@
     "/Script/Engine.PrimaryAssetLabel",
     "/Script/Engine.Texture2D",
     "/Script/Engine.StaticMesh",
-    "/Script/Engine.MaterialInstanceConstant"
+    "/Script/Engine.MaterialInstanceConstant",
+    "/Script/Engine.DataTable"
   ],
   "requireRevision": true,
   "rejectDirtyPackages": true,
@@ -50,5 +52,8 @@
   ],
   "allowedReferenceClasses": [
     "/Script/Engine.Texture2D"
+  ],
+  "allowedDataTableFields": [
+    "/Script/Engine.DataTable#/Script/GameplayTags.GameplayTagTableRow#DevComment"
   ]
 }

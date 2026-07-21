@@ -1,6 +1,6 @@
 # UEAgentKit Patch Schema 1.0
 
-UEAgentKit Patch 是面向 Unreal Engine 资产的声明式变更格式。0.3.7 同时提供纯 JSON 预校验，以及 UE Editor 内的 Blueprint、通用属性和 Material Instance 参数执行器。
+UEAgentKit Patch 是面向 Unreal Engine 资产的声明式变更格式。0.4.0 同时提供纯 JSON 预校验，以及 UE Editor 内的 Blueprint、通用属性、Material Instance 参数和 DataTable 单元格执行器。
 
 ## 两层执行模型
 
@@ -26,6 +26,7 @@ setMaterialInstanceScalarParameter        → AssetPatch Commandlet
 setMaterialInstanceVectorParameter        → AssetPatch Commandlet
 setMaterialInstanceTextureParameter       → AssetPatch Commandlet
 setMaterialInstanceStaticSwitchParameter  → AssetPatch Commandlet
+setDataTableCell                           → AssetPatch Commandlet
 ```
 
 执行语义：
@@ -122,12 +123,14 @@ Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目�
     "setMaterialInstanceScalarParameter",
     "setMaterialInstanceVectorParameter",
     "setMaterialInstanceTextureParameter",
-    "setMaterialInstanceStaticSwitchParameter"
+    "setMaterialInstanceStaticSwitchParameter",
+    "setDataTableCell"
   ],
   "allowedAssetClasses": [
     "/Script/Engine.Blueprint",
     "/Script/Engine.Texture2D",
-    "/Script/Engine.MaterialInstanceConstant"
+    "/Script/Engine.MaterialInstanceConstant",
+    "/Script/Engine.DataTable"
   ],
   "allowedAssetProperties": [
     "/Script/Engine.Texture2D#SRGB"
@@ -137,6 +140,9 @@ Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目�
     "/Script/Engine.MaterialInstanceConstant#Vector#Base Color",
     "/Script/Engine.MaterialInstanceConstant#Texture#Base Texture",
     "/Script/Engine.MaterialInstanceConstant#StaticSwitch#Logo?"
+  ],
+  "allowedDataTableFields": [
+    "/Script/Engine.DataTable#/Script/GameplayTags.GameplayTagTableRow#DevComment"
   ],
   "requireRevision": true,
   "rejectDirtyPackages": true,
@@ -156,7 +162,8 @@ Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目�
 - 属性授权格式固定为 `AssetClass#Property.Path`，例如 `/Script/Engine.Texture2D#SRGB`。
 - Material 参数授权格式固定为 `AssetClass#Type#ParameterName`；当前 `Type` 支持 `Scalar`、`Vector`、`Texture` 和 `StaticSwitch`。
 - Texture 参数引用的目标资产必须同时落在 `allowedReferenceRoots` 内，且实际类必须精确命中 `allowedReferenceClasses`。
-- Blueprint Operation 不能用于非 Blueprint；`setAssetProperty` 不能用于 Blueprint；Material 参数操作只接受 MaterialInstanceConstant。
+- DataTable 字段授权格式固定为 `AssetClass#RowStructPath#FieldName`，并要求 Canonical 快照和 UE 运行时 RowStruct 完全一致。
+- Blueprint Operation 不能用于非 Blueprint；`setAssetProperty` 不能用于 Blueprint；Material 参数操作只接受 MaterialInstanceConstant；`setDataTableCell` 只接受 DataTable。
 
 ## 支持的 Operation
 
@@ -342,6 +349,32 @@ Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目�
 - UE 5.6 的 `SetMaterialInstanceStaticSwitchParameterValue` 会应用修改但始终返回 `false`；执行器以精确读回结果作为成功依据。
 - Material Instance 只读 Reader 额外导出 `expressionGuid`，用于独立 UE 进程重载验证。
 - 已在真实 `Logo?` 参数上完成 Dry Run、Commit、唯一备份、独立重载和过期 Revision 拒绝验证。
+
+### setDataTableCell
+
+修改 `DataTable` 中一个现有 Row 的一个顶层标量字段：
+
+```json
+{
+  "operationId": "set-row-comment",
+  "operation": "setDataTableCell",
+  "target": {
+    "rowName": "Row_Alpha",
+    "fieldName": "DevComment"
+  },
+  "value": "Verified by UEAgentKit"
+}
+```
+
+限制与语义：
+
+- 目标必须是 `DataTable`，Row 必须已存在；首版不新增、删除或重命名 Row。
+- `fieldName` 只能是 RowStruct 的一个顶层字段，不接受点号路径、固定数组、容器、对象引用或任意 Struct 整体导入。
+- 值只接受非 `null` 的 JSON string、number 或 boolean，并由目标属性类型严格解析；支持 Bool、整数、浮点、String、Name、Text 和 Enum 标量。
+- Policy 使用 `AssetClass#RowStructPath#FieldName` 精确授权；预校验从 Canonical `assetDetails.rowStructPath` 读取 RowStruct，UE 执行时再次读取真实 RowStruct。
+- 执行器创建原始整 Row 和期望整 Row 两份 `FStructOnScope` 快照，先在期望副本中解析值，再写实际 Row；`HandleDataTableChanged` 返回后必须同时匹配目标字段和完整期望 Row，防止回调引入额外变化。
+- Dry Run 通过 `CopyScriptStruct` 恢复完整 Row，并要求目标字段、`CompareScriptStruct` 整行比较和磁盘 Revision 全部匹配；刷新使用 `HandleDataTableChanged`。
+- 已在真实 `GameplayTagTableRow` 的 `Row_Alpha.DevComment` 上完成 Dry Run、Commit、唯一备份、独立 UE 进程重载和过期 Revision 拒绝验证。
 
 ## Dry Run 报告
 

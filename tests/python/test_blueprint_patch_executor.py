@@ -42,6 +42,7 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
                 "setMaterialInstanceVectorParameter",
                 "setMaterialInstanceTextureParameter",
                 "setMaterialInstanceStaticSwitchParameter",
+                "setDataTableCell",
             ],
 
         )
@@ -56,6 +57,7 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
                 "Blueprint",
                 "Blueprint",
                 "Blueprint",
+                "NonBlueprint",
                 "NonBlueprint",
                 "NonBlueprint",
                 "NonBlueprint",
@@ -136,6 +138,11 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
             "setMaterialInstanceVectorParameter",
             "setMaterialInstanceTextureParameter",
             "setMaterialInstanceStaticSwitchParameter",
+            "setDataTableCell",
+            "AllowedDataTableFields",
+            "FStructOnScope",
+            "HandleDataTableChanged",
+            "appliedStructureMatch",
             "ScalarParameterArraysEqualExact",
             "VectorParameterArraysEqualExact",
             "TextureParameterArraysEqualExact",
@@ -206,11 +213,11 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
 
         )
 
-        self.assertIn('version = "0.3.7"', pyproject)
+        self.assertIn('version = "0.4.0"', pyproject)
 
-        self.assertEqual(plugin["VersionName"], "0.3.7")
+        self.assertEqual(plugin["VersionName"], "0.4.0")
 
-        self.assertEqual(plugin["Version"], 14)
+        self.assertEqual(plugin["Version"], 15)
 
 
 

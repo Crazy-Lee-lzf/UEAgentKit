@@ -2,9 +2,9 @@
 
 更新时间：2026-07-21
 
-当前版本为 **0.3.7**，支持 Unreal Engine 5.6。
+当前版本为 **0.4.0**，支持 Unreal Engine 5.6。
 
-UE Agent Kit 已完成项目级只读分析、SQLite/FTS 索引、Blueprint 低风险安全写入、通用非 Blueprint 标量属性写入，以及 Material Instance Global Scalar、Vector、Texture 与 Static Switch 参数写入。
+UE Agent Kit 已完成项目级只读分析、SQLite/FTS 索引、Blueprint 低风险安全写入、通用非 Blueprint 标量属性写入、Material Instance Global Scalar/Vector/Texture/Static Switch，以及 DataTable 单 Row、单顶层标量字段写入。
 
 ## 下一整体目标：0.5.0
 
@@ -16,14 +16,14 @@ UE Agent Kit 已完成项目级只读分析、SQLite/FTS 索引、Blueprint 低�
 0.5.0  MCP / Agent 第一版
 ```
 
-## 0.4.0：常用非 Blueprint 专用写入
+## 0.4.0：常用非 Blueprint 专用写入（已完成）
 
-计划开放：
+0.4.0 已完成：
 
 - Material Instance Vector 参数：已在 0.3.5 完成。
 - Material Instance Texture 参数：已在 0.3.6 完成。
 - Material Instance Static Switch 参数：已在 0.3.7 完成。
-- DataTable 单 Row、单标量字段修改。
+- DataTable 单 Row、单顶层标量字段修改：已在 0.4.0 完成。
 
 所有操作继续遵循：
 
@@ -34,6 +34,8 @@ UE Agent Kit 已完成项目级只读分析、SQLite/FTS 索引、Blueprint 低�
 - Commit 前外部备份。
 - Commit 后独立 UE 进程重载验证。
 - 单资产、单 Operation。
+
+0.4.0 已完成全部真实资产 Dry Run、Commit、唯一备份、独立 UE 进程重载和过期 Revision 拒绝验证。当前活动阶段为 0.4.x。
 
 ## 0.4.x：恢复与安全回归
 
