@@ -41,6 +41,7 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
                 "setMaterialInstanceScalarParameter",
                 "setMaterialInstanceVectorParameter",
                 "setMaterialInstanceTextureParameter",
+                "setMaterialInstanceStaticSwitchParameter",
             ],
 
         )
@@ -55,6 +56,7 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
                 "Blueprint",
                 "Blueprint",
                 "Blueprint",
+                "NonBlueprint",
                 "NonBlueprint",
                 "NonBlueprint",
                 "NonBlueprint",
@@ -133,9 +135,12 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
             "setMaterialInstanceScalarParameter",
             "setMaterialInstanceVectorParameter",
             "setMaterialInstanceTextureParameter",
+            "setMaterialInstanceStaticSwitchParameter",
             "ScalarParameterArraysEqualExact",
             "VectorParameterArraysEqualExact",
             "TextureParameterArraysEqualExact",
+            "StaticParameterSetsEqualExact",
+            "ExpressionGuid",
             "AllowedReferenceRoots",
             "AllowedReferenceClasses",
             "rollbackStructureMatch",
@@ -156,6 +161,20 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
             "Disk backup restored",
         ):
             self.assertIn(token, source)
+
+    def test_material_reader_exports_static_switch_identity(self) -> None:
+        source = (
+            ROOT
+            / "Plugin"
+            / "UEAgentKit"
+            / "Source"
+            / "UEAgentKitEditor"
+            / "Private"
+            / "AssetReaders"
+            / "MaterialAssetReaders.cpp"
+        ).read_text(encoding="utf-8")
+        self.assertIn('TEXT("expressionGuid")', source)
+        self.assertIn("Parameter->ExpressionGUID", source)
 
     def test_run_patch_validates_before_unreal_execution(self) -> None:
 
@@ -187,11 +206,11 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
 
         )
 
-        self.assertIn('version = "0.3.6"', pyproject)
+        self.assertIn('version = "0.3.7"', pyproject)
 
-        self.assertEqual(plugin["VersionName"], "0.3.6")
+        self.assertEqual(plugin["VersionName"], "0.3.7")
 
-        self.assertEqual(plugin["Version"], 13)
+        self.assertEqual(plugin["Version"], 14)
 
 
 

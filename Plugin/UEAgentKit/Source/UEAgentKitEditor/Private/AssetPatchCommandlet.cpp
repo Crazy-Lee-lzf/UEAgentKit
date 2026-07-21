@@ -7,6 +7,7 @@
 #include "HAL/FileManager.h"
 #include "MaterialEditingLibrary.h"
 #include "Materials/MaterialInstanceConstant.h"
+#include "StaticParameterSet.h"
 #include "Misc/App.h"
 #include "Misc/DateTime.h"
 #include "Misc/FileHelper.h"
@@ -150,7 +151,8 @@ namespace AssetPatchCommandletPrivate
 		const bool bUsesMaterialParameterOperations =
 			ContainsExact(OutPolicy.AllowedOperations, TEXT("setMaterialInstanceScalarParameter"))
 			|| ContainsExact(OutPolicy.AllowedOperations, TEXT("setMaterialInstanceVectorParameter"))
-			|| ContainsExact(OutPolicy.AllowedOperations, TEXT("setMaterialInstanceTextureParameter"));
+			|| ContainsExact(OutPolicy.AllowedOperations, TEXT("setMaterialInstanceTextureParameter"))
+			|| ContainsExact(OutPolicy.AllowedOperations, TEXT("setMaterialInstanceStaticSwitchParameter"));
 		if (bUsesMaterialParameterOperations && OutPolicy.AllowedMaterialParameters.IsEmpty())
 		{
 			OutError = TEXT(
@@ -576,6 +578,14 @@ namespace AssetPatchCommandletPrivate
 		return true;
 	}
 
+	bool StaticParameterSetsEqualExact(
+		const FStaticParameterSet& A,
+		const FStaticParameterSet& B)
+	{
+		return A.Equivalent(B)
+			&& A.StaticSwitchParameters == B.StaticSwitchParameters;
+	}
+
 	bool FindGlobalScalarParameter(
 		UMaterialInstanceConstant* Instance,
 		const FName ParameterName,
@@ -664,6 +674,65 @@ namespace AssetPatchCommandletPrivate
 			return false;
 		}
 		return true;
+	}
+
+	bool FindGlobalStaticSwitchParameter(
+		UMaterialInstanceConstant* Instance,
+		const FName ParameterName,
+		FMaterialParameterInfo& OutInfo,
+		FString& OutError)
+	{
+		TArray<FMaterialParameterInfo> ParameterInfos;
+		TArray<FGuid> ParameterIds;
+		Instance->GetAllStaticSwitchParameterInfo(ParameterInfos, ParameterIds);
+		int32 MatchCount = 0;
+		for (const FMaterialParameterInfo& Info : ParameterInfos)
+		{
+			if (Info.Name == ParameterName
+				&& Info.Association == EMaterialParameterAssociation::GlobalParameter)
+			{
+				OutInfo = Info;
+				++MatchCount;
+			}
+		}
+		if (MatchCount != 1)
+		{
+			OutError = FString::Printf(
+				TEXT("Expected exactly one global static switch parameter named %s; found %d."),
+				*ParameterName.ToString(),
+				MatchCount);
+			return false;
+		}
+		return true;
+	}
+
+	bool ReadStaticSwitchParameter(
+		UMaterialInstanceConstant* Instance,
+		const FMaterialParameterInfo& ParameterInfo,
+		bool& OutValue,
+		FGuid& OutExpressionGuid,
+		bool& OutOverride)
+	{
+		if (!Instance->GetStaticSwitchParameterValue(
+			FHashedMaterialParameterInfo(ParameterInfo),
+			OutValue,
+			OutExpressionGuid,
+			false))
+		{
+			return false;
+		}
+
+		const FStaticParameterSet StaticParameters = Instance->GetStaticParameters();
+		int32 MatchCount = 0;
+		for (const FStaticSwitchParameter& Parameter : StaticParameters.StaticSwitchParameters)
+		{
+			if (Parameter.ParameterInfo == ParameterInfo)
+			{
+				OutOverride = Parameter.bOverride;
+				++MatchCount;
+			}
+		}
+		return MatchCount == 1;
 	}
 
 	bool ReadScalarParameter(
@@ -914,10 +983,13 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		Operation.Equals(TEXT("setMaterialInstanceVectorParameter"), ESearchCase::CaseSensitive);
 	const bool bMaterialTextureOperation =
 		Operation.Equals(TEXT("setMaterialInstanceTextureParameter"), ESearchCase::CaseSensitive);
+	const bool bMaterialStaticSwitchOperation =
+		Operation.Equals(TEXT("setMaterialInstanceStaticSwitchParameter"), ESearchCase::CaseSensitive);
 	if ((!bAssetPropertyOperation
 			&& !bMaterialScalarOperation
 			&& !bMaterialVectorOperation
-			&& !bMaterialTextureOperation)
+			&& !bMaterialTextureOperation
+			&& !bMaterialStaticSwitchOperation)
 		|| !ContainsExact(Policy.AllowedOperations, Operation))
 	{
 		UE_LOG(LogAssetPatch, Error, TEXT("Operation is not authorized or implemented: %s"), *Operation);
@@ -1061,7 +1133,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			|| FMath::IsNearlyEqual(RestoredScalarValue, BeforeScalarValue, UE_SMALL_NUMBER);
 		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-		Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.6"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.7"));
 		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 		Report->SetStringField(TEXT("patchId"), PatchId);
 		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
@@ -1263,7 +1335,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			!bRolledBack || RestoredVectorValue.Equals(BeforeVectorValue, UE_SMALL_NUMBER);
 		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-		Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.6"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.7"));
 		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 		Report->SetStringField(TEXT("patchId"), PatchId);
 		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
@@ -1451,7 +1523,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		const bool bRestoredValueMatch = !bRolledBack || RestoredTextureValue == BeforeTextureValue;
 		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-		Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.6"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.7"));
 		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 		Report->SetStringField(TEXT("patchId"), PatchId);
 		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
@@ -1498,6 +1570,210 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			*ParameterNameText,
 			*FormatTextureParameterValue(BeforeTextureValue),
 			*FormatTextureParameterValue(AfterTextureValue));
+		return 0;
+	}
+
+
+	if (bMaterialStaticSwitchOperation)
+	{
+		UMaterialInstanceConstant* MaterialInstance = Cast<UMaterialInstanceConstant>(Asset);
+		if (!MaterialInstance)
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Operation requires MaterialInstanceConstant."));
+			return 17;
+		}
+
+		FString ParameterNameText;
+		TargetObject->TryGetStringField(TEXT("parameterName"), ParameterNameText);
+		if (ParameterNameText.IsEmpty())
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Material static switch parameterName is required."));
+			return 17;
+		}
+		const FString ParameterAuthorization =
+			ActualAssetClass + TEXT("#StaticSwitch#") + ParameterNameText;
+		if (!ContainsExact(Policy.AllowedMaterialParameters, ParameterAuthorization))
+		{
+			UE_LOG(
+				LogAssetPatch,
+				Error,
+				TEXT("Material parameter is not authorized by policy: %s"),
+				*ParameterAuthorization);
+			return 17;
+		}
+
+		bool NewSwitchValue = false;
+		if (!OperationObject->TryGetBoolField(TEXT("value"), NewSwitchValue))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Material static switch value must be a JSON boolean."));
+			return 18;
+		}
+
+		FMaterialParameterInfo ParameterInfo;
+		if (!FindGlobalStaticSwitchParameter(
+			MaterialInstance,
+			FName(*ParameterNameText),
+			ParameterInfo,
+			Error))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("%s"), *Error);
+			return 17;
+		}
+
+		bool BeforeSwitchValue = false;
+		bool bBeforeOverride = false;
+		FGuid BeforeExpressionGuid;
+		if (!ReadStaticSwitchParameter(
+			MaterialInstance,
+			ParameterInfo,
+			BeforeSwitchValue,
+			BeforeExpressionGuid,
+			bBeforeOverride))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Could not read material static switch parameter."));
+			return 17;
+		}
+		const FStaticParameterSet OriginalStaticParameters = MaterialInstance->GetStaticParameters();
+
+		FString BackupFilename;
+		if (bCommit)
+		{
+			IFileManager::Get().MakeDirectory(*BackupDirectory, true);
+			BackupFilename = CreateBackupFilename(BackupDirectory, PatchId, PackageFilename);
+			if (IFileManager::Get().Copy(*BackupFilename, *PackageFilename, true, true) != COPY_OK)
+			{
+				UE_LOG(LogAssetPatch, Error, TEXT("Could not create package backup: %s"), *BackupFilename);
+				return 19;
+			}
+		}
+
+		MaterialInstance->Modify();
+		// UE 5.6 applies and updates the value but its library function always returns false.
+		// Verify the exact value, Expression GUID, and override state instead.
+		UMaterialEditingLibrary::SetMaterialInstanceStaticSwitchParameterValue(
+			MaterialInstance,
+			FName(*ParameterNameText),
+			NewSwitchValue,
+			EMaterialParameterAssociation::GlobalParameter,
+			true);
+
+		bool AfterSwitchValue = false;
+		bool bAfterOverride = false;
+		FGuid AfterExpressionGuid;
+		if (!ReadStaticSwitchParameter(
+				MaterialInstance,
+				ParameterInfo,
+				AfterSwitchValue,
+				AfterExpressionGuid,
+				bAfterOverride)
+			|| AfterSwitchValue != NewSwitchValue
+			|| AfterExpressionGuid != BeforeExpressionGuid
+			|| !bAfterOverride)
+		{
+			MaterialInstance->UpdateStaticPermutation(OriginalStaticParameters);
+			UMaterialEditingLibrary::UpdateMaterialInstance(MaterialInstance);
+			Package->SetDirtyFlag(bOriginalDirty);
+			UE_LOG(LogAssetPatch, Error, TEXT("Material static switch read-back verification failed."));
+			return 20;
+		}
+
+		bool bSaved = false;
+		bool bRolledBack = false;
+		bool bStructureMatch = true;
+		bool RestoredSwitchValue = BeforeSwitchValue;
+		bool bRestoredOverride = bBeforeOverride;
+		FGuid RestoredExpressionGuid = BeforeExpressionGuid;
+		if (bCommit)
+		{
+			if (!SaveAssetPackage(MaterialInstance, PackageFilename, Error))
+			{
+				IFileManager::Get().Copy(*PackageFilename, *BackupFilename, true, true);
+				UE_LOG(LogAssetPatch, Error, TEXT("%s Backup restored."), *Error);
+				return 21;
+			}
+			bSaved = true;
+		}
+		else
+		{
+			MaterialInstance->UpdateStaticPermutation(OriginalStaticParameters);
+			UMaterialEditingLibrary::UpdateMaterialInstance(MaterialInstance);
+			Package->SetDirtyFlag(bOriginalDirty);
+			const FStaticParameterSet RestoredStaticParameters = MaterialInstance->GetStaticParameters();
+			bStructureMatch = StaticParameterSetsEqualExact(
+				OriginalStaticParameters,
+				RestoredStaticParameters);
+			if (!ReadStaticSwitchParameter(
+				MaterialInstance,
+				ParameterInfo,
+				RestoredSwitchValue,
+				RestoredExpressionGuid,
+				bRestoredOverride))
+			{
+				UE_LOG(LogAssetPatch, Error, TEXT("Could not read restored material static switch parameter."));
+				return 22;
+			}
+			bRolledBack = true;
+		}
+
+		const FString AfterRevision = HashPackageFile(Package);
+		const bool bRestoredValueMatch =
+			!bRolledBack
+			|| (RestoredSwitchValue == BeforeSwitchValue
+				&& RestoredExpressionGuid == BeforeExpressionGuid
+				&& bRestoredOverride == bBeforeOverride);
+		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
+		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.7"));
+		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
+		Report->SetStringField(TEXT("patchId"), PatchId);
+		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
+		Report->SetStringField(TEXT("assetPath"), AssetPath);
+		Report->SetStringField(TEXT("assetClass"), ActualAssetClass);
+		Report->SetStringField(TEXT("operation"), Operation);
+		Report->SetObjectField(TEXT("target"), TargetObject);
+		Report->SetStringField(
+			TEXT("targetDescription"),
+			TEXT("material-instance-static-switch:") + ParameterNameText);
+		Report->SetStringField(TEXT("targetType"), TEXT("MaterialStaticSwitchParameter(bool)"));
+		Report->SetBoolField(TEXT("beforeValue"), BeforeSwitchValue);
+		Report->SetBoolField(TEXT("afterValue"), AfterSwitchValue);
+		Report->SetBoolField(TEXT("restoredValue"), RestoredSwitchValue);
+		Report->SetStringField(TEXT("beforeExpressionGuid"), BeforeExpressionGuid.ToString(EGuidFormats::DigitsWithHyphensLower));
+		Report->SetStringField(TEXT("afterExpressionGuid"), AfterExpressionGuid.ToString(EGuidFormats::DigitsWithHyphensLower));
+		Report->SetStringField(TEXT("restoredExpressionGuid"), RestoredExpressionGuid.ToString(EGuidFormats::DigitsWithHyphensLower));
+		Report->SetBoolField(TEXT("beforeOverride"), bBeforeOverride);
+		Report->SetBoolField(TEXT("afterOverride"), bAfterOverride);
+		Report->SetBoolField(TEXT("restoredOverride"), bRestoredOverride);
+		Report->SetStringField(TEXT("beforeRevision"), BeforeRevision);
+		Report->SetStringField(TEXT("afterRevision"), AfterRevision);
+		Report->SetBoolField(TEXT("compiled"), false);
+		Report->SetBoolField(TEXT("saved"), bSaved);
+		Report->SetBoolField(TEXT("rolledBack"), bRolledBack);
+		Report->SetBoolField(TEXT("rollbackValueMatch"), bRestoredValueMatch);
+		Report->SetBoolField(TEXT("rollbackStructureMatch"), !bRolledBack || bStructureMatch);
+		Report->SetBoolField(
+			TEXT("diskUnchanged"),
+			BeforeRevision.Equals(AfterRevision, ESearchCase::IgnoreCase));
+		Report->SetStringField(TEXT("backupPath"), BackupFilename);
+		if (!SaveReport(ReportFilename, Report, Error))
+		{
+			if (bCommit && !BackupFilename.IsEmpty())
+			{
+				IFileManager::Get().Copy(*PackageFilename, *BackupFilename, true, true);
+			}
+			UE_LOG(LogAssetPatch, Error, TEXT("%s Disk backup restored."), *Error);
+			return 23;
+		}
+
+		UE_LOG(
+			LogAssetPatch,
+			Display,
+			TEXT("Material static switch patch succeeded. Mode=%s Asset=%s Parameter=%s Before=%s After=%s"),
+			bCommit ? TEXT("Commit") : TEXT("DryRun"),
+			*AssetPath,
+			*ParameterNameText,
+			BeforeSwitchValue ? TEXT("true") : TEXT("false"),
+			AfterSwitchValue ? TEXT("true") : TEXT("false"));
 		return 0;
 	}
 
@@ -1594,7 +1870,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 	const FString AfterRevision = HashPackageFile(Package);
 	const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 	Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-	Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.6"));
+	Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.7"));
 	Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 	Report->SetStringField(TEXT("patchId"), PatchId);
 	Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());

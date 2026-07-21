@@ -282,6 +282,9 @@ namespace AssetReaderRegistryPrivate
 			TSharedRef<FJsonObject> Json = MaterialParameterInfoToJson(Parameter->ParameterInfo);
 			Json->SetBoolField(TEXT("value"), Parameter->Value);
 			Json->SetBoolField(TEXT("override"), Parameter->bOverride);
+			Json->SetStringField(
+				TEXT("expressionGuid"),
+				Parameter->ExpressionGUID.ToString(EGuidFormats::DigitsWithHyphensLower));
 			StaticSwitchValues.Add(MakeShared<FJsonValueObject>(Json));
 		}
 		OutDetails->SetNumberField(TEXT("staticSwitchParameterCount"), StaticSwitchValues.Num());

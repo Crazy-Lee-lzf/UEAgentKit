@@ -522,6 +522,78 @@ class PatchValidationTests(unittest.TestCase):
         self.assertIn("policy-reference-roots", codes)
         self.assertIn("policy-reference-classes", codes)
 
+    def test_material_static_switch_parameter_operation_is_valid(self) -> None:
+        asset_path = "/Game/UEAgentKitWriteTests/MI_StaticSwitchPatchTarget.MI_StaticSwitchPatchTarget"
+        asset_class = "/Script/Engine.MaterialInstanceConstant"
+        asset = self.patch["assets"][0]
+        asset["assetPath"] = asset_path
+        asset["expectedAssetClass"] = asset_class
+        asset["operations"] = [
+            {
+                "operationId": "disable-logo",
+                "operation": "setMaterialInstanceStaticSwitchParameter",
+                "target": {"parameterName": "Logo?"},
+                "value": False,
+            }
+        ]
+        self.policy["allowedOperations"].append("setMaterialInstanceStaticSwitchParameter")
+        self.policy["allowedAssetClasses"].append(asset_class)
+        self.policy["allowedMaterialParameters"] = [f"{asset_class}#StaticSwitch#Logo?"]
+        self.canonical["assetPath"] = asset_path
+        self.canonical["packageName"] = asset_path.rsplit(".", 1)[0]
+        self.canonical["assetClass"] = asset_class
+        self.flush()
+        result = self.validate()
+        self.assertTrue(result["valid"])
+        expected = result["assets"][0]["operations"][0]["expectedChange"]
+        self.assertEqual(expected["kind"], "material-instance-static-switch-parameter")
+
+    def test_material_static_switch_parameter_requires_boolean(self) -> None:
+        asset_path = "/Game/UEAgentKitWriteTests/MI_StaticSwitchPatchTarget.MI_StaticSwitchPatchTarget"
+        asset_class = "/Script/Engine.MaterialInstanceConstant"
+        asset = self.patch["assets"][0]
+        asset["assetPath"] = asset_path
+        asset["expectedAssetClass"] = asset_class
+        asset["operations"] = [
+            {
+                "operationId": "disable-logo",
+                "operation": "setMaterialInstanceStaticSwitchParameter",
+                "target": {"parameterName": "Logo?"},
+                "value": 0,
+            }
+        ]
+        self.policy["allowedOperations"].append("setMaterialInstanceStaticSwitchParameter")
+        self.policy["allowedAssetClasses"].append(asset_class)
+        self.policy["allowedMaterialParameters"] = [f"{asset_class}#StaticSwitch#Logo?"]
+        self.canonical["assetPath"] = asset_path
+        self.canonical["packageName"] = asset_path.rsplit(".", 1)[0]
+        self.canonical["assetClass"] = asset_class
+        self.flush()
+        self.assertIn("operation-value-type", self.error_codes(self.validate()))
+
+    def test_material_static_switch_parameter_requires_exact_authorization(self) -> None:
+        asset_path = "/Game/UEAgentKitWriteTests/MI_StaticSwitchPatchTarget.MI_StaticSwitchPatchTarget"
+        asset_class = "/Script/Engine.MaterialInstanceConstant"
+        asset = self.patch["assets"][0]
+        asset["assetPath"] = asset_path
+        asset["expectedAssetClass"] = asset_class
+        asset["operations"] = [
+            {
+                "operationId": "disable-logo",
+                "operation": "setMaterialInstanceStaticSwitchParameter",
+                "target": {"parameterName": "Logo?"},
+                "value": False,
+            }
+        ]
+        self.policy["allowedOperations"].append("setMaterialInstanceStaticSwitchParameter")
+        self.policy["allowedAssetClasses"].append(asset_class)
+        self.policy["allowedMaterialParameters"] = [f"{asset_class}#StaticSwitch#Other"]
+        self.canonical["assetPath"] = asset_path
+        self.canonical["packageName"] = asset_path.rsplit(".", 1)[0]
+        self.canonical["assetClass"] = asset_class
+        self.flush()
+        self.assertIn("material-parameter-not-allowed", self.error_codes(self.validate()))
+
     def test_blueprint_description_operation_is_valid(self) -> None:
         self.patch["assets"][0]["operations"] = [
             {

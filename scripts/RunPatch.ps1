@@ -93,7 +93,8 @@ $AssetOperations = @(
     "setAssetProperty",
     "setMaterialInstanceScalarParameter",
     "setMaterialInstanceVectorParameter",
-    "setMaterialInstanceTextureParameter"
+    "setMaterialInstanceTextureParameter",
+    "setMaterialInstanceStaticSwitchParameter"
 )
 $Commandlet = if ($AssetOperations -contains $Operation) { "AssetPatch" } else { "BlueprintPatch" }
 

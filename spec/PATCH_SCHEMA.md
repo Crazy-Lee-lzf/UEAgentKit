@@ -1,6 +1,6 @@
 # UEAgentKit Patch Schema 1.0
 
-UEAgentKit Patch 是面向 Unreal Engine 资产的声明式变更格式。0.3.6 同时提供纯 JSON 预校验，以及 UE Editor 内的 Blueprint、通用属性和 Material Instance 参数执行器。
+UEAgentKit Patch 是面向 Unreal Engine 资产的声明式变更格式。0.3.7 同时提供纯 JSON 预校验，以及 UE Editor 内的 Blueprint、通用属性和 Material Instance 参数执行器。
 
 ## 两层执行模型
 
@@ -25,6 +25,7 @@ setAssetProperty                          → AssetPatch Commandlet
 setMaterialInstanceScalarParameter        → AssetPatch Commandlet
 setMaterialInstanceVectorParameter        → AssetPatch Commandlet
 setMaterialInstanceTextureParameter       → AssetPatch Commandlet
+setMaterialInstanceStaticSwitchParameter  → AssetPatch Commandlet
 ```
 
 执行语义：
@@ -120,7 +121,8 @@ Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目�
     "setAssetProperty",
     "setMaterialInstanceScalarParameter",
     "setMaterialInstanceVectorParameter",
-    "setMaterialInstanceTextureParameter"
+    "setMaterialInstanceTextureParameter",
+    "setMaterialInstanceStaticSwitchParameter"
   ],
   "allowedAssetClasses": [
     "/Script/Engine.Blueprint",
@@ -133,7 +135,8 @@ Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目�
   "allowedMaterialParameters": [
     "/Script/Engine.MaterialInstanceConstant#Scalar#Roughness",
     "/Script/Engine.MaterialInstanceConstant#Vector#Base Color",
-    "/Script/Engine.MaterialInstanceConstant#Texture#Base Texture"
+    "/Script/Engine.MaterialInstanceConstant#Texture#Base Texture",
+    "/Script/Engine.MaterialInstanceConstant#StaticSwitch#Logo?"
   ],
   "requireRevision": true,
   "rejectDirtyPackages": true,
@@ -151,7 +154,7 @@ Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目�
 - Policy 的数组限制属于格式上限；执行器当前仍只接受单资产、单操作。
 - `setAssetProperty` 必须由 `allowedAssetProperties` 精确授权。
 - 属性授权格式固定为 `AssetClass#Property.Path`，例如 `/Script/Engine.Texture2D#SRGB`。
-- Material 参数授权格式固定为 `AssetClass#Type#ParameterName`；当前 `Type` 支持 `Scalar`、`Vector` 和 `Texture`。
+- Material 参数授权格式固定为 `AssetClass#Type#ParameterName`；当前 `Type` 支持 `Scalar`、`Vector`、`Texture` 和 `StaticSwitch`。
 - Texture 参数引用的目标资产必须同时落在 `allowedReferenceRoots` 内，且实际类必须精确命中 `allowedReferenceClasses`。
 - Blueprint Operation 不能用于非 Blueprint；`setAssetProperty` 不能用于 Blueprint；Material 参数操作只接受 MaterialInstanceConstant。
 
@@ -315,6 +318,30 @@ Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目�
 - UE 5.6 的 `SetMaterialInstanceTextureParameterValue` 会应用修改但始终返回 `false`；执行器不信任该返回值，而以精确参数读回作为成功依据。
 - 成功 Dry Run 要求 `rollbackValueMatch=true`、`rollbackStructureMatch=true` 和 `diskUnchanged=true`。
 - 已完成真实 Texture2D 的 Dry Run、Commit、唯一备份、独立 UE 进程重载和过期 Revision 拒绝验证。
+
+### setMaterialInstanceStaticSwitchParameter
+
+修改 `MaterialInstanceConstant` 上由 Policy 精确授权的 Global Static Switch 参数：
+
+```json
+{
+  "operationId": "disable-logo",
+  "operation": "setMaterialInstanceStaticSwitchParameter",
+  "target": {"parameterName": "Logo?"},
+  "value": false
+}
+```
+
+限制与语义：
+
+- 当前只支持 `MaterialInstanceConstant`、Global association 和 Static Switch 参数。
+- 值必须是 JSON boolean。
+- 参数必须在继承链中恰好匹配一次，并由 `AssetClass#StaticSwitch#ParameterName` 精确授权。
+- 执行前保存完整 `FStaticParameterSet`，修改后精确验证值、Expression GUID 和 Override 状态。
+- Dry Run 通过 `UpdateStaticPermutation` 恢复完整静态参数集，并同时要求参数值、GUID、Override 与结构全部匹配。
+- UE 5.6 的 `SetMaterialInstanceStaticSwitchParameterValue` 会应用修改但始终返回 `false`；执行器以精确读回结果作为成功依据。
+- Material Instance 只读 Reader 额外导出 `expressionGuid`，用于独立 UE 进程重载验证。
+- 已在真实 `Logo?` 参数上完成 Dry Run、Commit、唯一备份、独立重载和过期 Revision 拒绝验证。
 
 ## Dry Run 报告
 

@@ -119,6 +119,14 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
         expected_change="material-instance-texture-parameter",
         asset_type="NonBlueprint",
     ),
+    "setMaterialInstanceStaticSwitchParameter": OperationSpec(
+        name="setMaterialInstanceStaticSwitchParameter",
+        risk="medium",
+        target_fields=("parameterName",),
+        target_validators={"parameterName": _is_nonempty_text},
+        expected_change="material-instance-static-switch-parameter",
+        asset_type="NonBlueprint",
+    ),
 }
 
 
@@ -498,7 +506,7 @@ def _validate_policy(policy: dict[str, Any], errors: list[dict[str, str]]) -> di
                 or not asset_class.startswith("/Script/")
                 or "." not in asset_class
                 or asset_class != "/Script/Engine.MaterialInstanceConstant"
-                or parameter_type not in {"Scalar", "Vector", "Texture"}
+                or parameter_type not in {"Scalar", "Vector", "Texture", "StaticSwitch"}
                 or not _is_nonempty_text(parameter_name, max_length=256)
             ):
                 _issue(
@@ -513,6 +521,7 @@ def _validate_policy(policy: dict[str, Any], errors: list[dict[str, str]]) -> di
         "setMaterialInstanceScalarParameter",
         "setMaterialInstanceVectorParameter",
         "setMaterialInstanceTextureParameter",
+        "setMaterialInstanceStaticSwitchParameter",
     }
     if material_operations.intersection(normalized_operations) and not normalized_material_parameters:
         _issue(
@@ -1105,6 +1114,7 @@ def validate_patch(
                     "setMaterialInstanceScalarParameter",
                     "setMaterialInstanceVectorParameter",
                     "setMaterialInstanceTextureParameter",
+                    "setMaterialInstanceStaticSwitchParameter",
                 }:
                     if asset_class != "/Script/Engine.MaterialInstanceConstant":
                         _issue(
@@ -1118,6 +1128,7 @@ def validate_patch(
                         "setMaterialInstanceScalarParameter": "Scalar",
                         "setMaterialInstanceVectorParameter": "Vector",
                         "setMaterialInstanceTextureParameter": "Texture",
+                        "setMaterialInstanceStaticSwitchParameter": "StaticSwitch",
                     }[operation_name]
                     authorization = (
                         f"{asset_class}#{parameter_type}#{parameter_name}"
@@ -1148,6 +1159,14 @@ def validate_patch(
                         errors,
                         "operation-value-type",
                         "Material vector parameters require a finite {r,g,b,a} JSON object.",
+                        f"{operation_pointer}.value",
+                    )
+            elif operation_name == "setMaterialInstanceStaticSwitchParameter":
+                if not isinstance(value, bool):
+                    _issue(
+                        errors,
+                        "operation-value-type",
+                        "Material static switch parameters require a JSON boolean.",
                         f"{operation_pointer}.value",
                     )
             elif operation_name == "setMaterialInstanceTextureParameter":

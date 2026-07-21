@@ -16,7 +16,8 @@
     "setAssetProperty",
     "setMaterialInstanceScalarParameter",
     "setMaterialInstanceVectorParameter",
-    "setMaterialInstanceTextureParameter"
+    "setMaterialInstanceTextureParameter",
+    "setMaterialInstanceStaticSwitchParameter"
   ],
   "allowedAssetClasses": [
     "/Script/Engine.Blueprint",
@@ -41,7 +42,8 @@
   "allowedMaterialParameters": [
     "/Script/Engine.MaterialInstanceConstant#Scalar#Roughness",
     "/Script/Engine.MaterialInstanceConstant#Vector#Base Color",
-    "/Script/Engine.MaterialInstanceConstant#Texture#Base Texture"
+    "/Script/Engine.MaterialInstanceConstant#Texture#Base Texture",
+    "/Script/Engine.MaterialInstanceConstant#StaticSwitch#Logo?"
   ],
   "allowedReferenceRoots": [
     "/Game/Characters/Mannequins/Textures"

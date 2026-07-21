@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1.0",
+  "patchId": "set-material-instance-static-switch-example",
+  "projectName": "我的项目",
+  "description": "Set an explicitly authorized Global Static Switch parameter.",
+  "assets": [
+    {
+      "assetPath": "/Game/UEAgentKitWriteTests/MI_StaticSwitchPatchTarget.MI_StaticSwitchPatchTarget",
+      "expectedRevision": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "expectedAssetClass": "/Script/Engine.MaterialInstanceConstant",
+      "operations": [
+        {
+          "operationId": "disable-logo",
+          "operation": "setMaterialInstanceStaticSwitchParameter",
+          "target": {
+            "parameterName": "Logo?"
+          },
+          "value": false
+        }
+      ]
+    }
+  ]
+}
