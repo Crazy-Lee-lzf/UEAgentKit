@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1.0",
+  "patchId": "set-material-instance-texture-example",
+  "projectName": "我的项目",
+  "description": "Set an authorized Global Texture parameter to an authorized Texture2D asset.",
+  "assets": [
+    {
+      "assetPath": "/Game/UEAgentKitWriteTests/MI_TexturePatchTarget.MI_TexturePatchTarget",
+      "expectedRevision": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "expectedAssetClass": "/Script/Engine.MaterialInstanceConstant",
+      "operations": [
+        {
+          "operationId": "set-base-texture",
+          "operation": "setMaterialInstanceTextureParameter",
+          "target": {
+            "parameterName": "Base Texture"
+          },
+          "value": "/Game/Characters/Mannequins/Textures/Manny/T_Manny_02_D.T_Manny_02_D"
+        }
+      ]
+    }
+  ]
+}

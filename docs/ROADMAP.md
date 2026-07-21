@@ -2,9 +2,9 @@
 
 更新时间：2026-07-21
 
-当前版本为 **0.3.5**，支持 Unreal Engine 5.6。
+当前版本为 **0.3.6**，支持 Unreal Engine 5.6。
 
-UE Agent Kit 已完成项目级只读分析、SQLite/FTS 索引、Blueprint 低风险安全写入、通用非 Blueprint 标量属性写入，以及 Material Instance Global Scalar 与 Vector 参数写入。
+UE Agent Kit 已完成项目级只读分析、SQLite/FTS 索引、Blueprint 低风险安全写入、通用非 Blueprint 标量属性写入，以及 Material Instance Global Scalar、Vector 与 Texture 参数写入。
 
 ## 下一整体目标：0.5.0
 
@@ -21,7 +21,7 @@ UE Agent Kit 已完成项目级只读分析、SQLite/FTS 索引、Blueprint 低�
 计划开放：
 
 - Material Instance Vector 参数：已在 0.3.5 完成。
-- Material Instance Texture 参数。
+- Material Instance Texture 参数：已在 0.3.6 完成。
 - Material Instance Static Switch 参数。
 - DataTable 单 Row、单标量字段修改。
 

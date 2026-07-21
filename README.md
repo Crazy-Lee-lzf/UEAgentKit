@@ -6,7 +6,7 @@
 
 UE Agent Kit 是一套面向 Unreal Engine 的开源资产分析、索引与受控写入工具。它通过 UE Editor 插件导出项目资产目录、Asset Registry 元数据、依赖关系和 Blueprint 语义，再使用 Python CLI 与 SQLite 建立项目级索引，并通过 Policy、Revision、Dry Run 和备份保护显式写入。
 
-当前版本为 **0.3.5**，支持 **Unreal Engine 5.6**。除八类 Blueprint 和通用标量属性写入外，现已支持 Material Instance Global Scalar 与 Vector 参数的精确白名单写入和完整 Override 数组回滚。
+当前版本为 **0.3.6**，支持 **Unreal Engine 5.6**。除八类 Blueprint 和通用标量属性写入外，现已支持 Material Instance Global Scalar、Vector 与 Texture 参数的精确白名单写入、独立引用资产授权和完整 Override 数组回滚。
 
 > **AI Generated**：本项目的代码和文档主要由 AI 生成，并通过人工审查、UE 5.6 编译、自动化测试和真实工程回归验证。
 
@@ -173,7 +173,7 @@ scripts\RunPatch.cmd ^
 ### 6. 校验通用资产导出
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.3.5
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.3.6
 ```
 
 完整参数和安装说明见 [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md)。

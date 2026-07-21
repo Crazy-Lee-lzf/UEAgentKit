@@ -92,7 +92,8 @@ $Operation = $Validation.assets[0].operations[0].operation
 $AssetOperations = @(
     "setAssetProperty",
     "setMaterialInstanceScalarParameter",
-    "setMaterialInstanceVectorParameter"
+    "setMaterialInstanceVectorParameter",
+    "setMaterialInstanceTextureParameter"
 )
 $Commandlet = if ($AssetOperations -contains $Operation) { "AssetPatch" } else { "BlueprintPatch" }
 

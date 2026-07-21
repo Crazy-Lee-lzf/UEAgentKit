@@ -103,6 +103,9 @@
               },
               {
                 "$ref": "#/$defs/setMaterialInstanceVectorParameter"
+              },
+              {
+                "$ref": "#/$defs/setMaterialInstanceTextureParameter"
               }
             ]
           }
@@ -386,6 +389,43 @@
             },
             "value": {
               "$ref": "#/$defs/colorVector"
+            }
+          }
+        }
+      ]
+    },
+    "assetObjectPath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^/Game/(?:[^./\\\\]+/)*[^./\\\\]+\\.[^./\\\\]+$"
+    },
+    "setMaterialInstanceTextureParameter": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "operation": {
+              "const": "setMaterialInstanceTextureParameter"
+            },
+            "target": {
+              "type": "object",
+              "required": [
+                "parameterName"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "parameterName": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              }
+            },
+            "value": {
+              "$ref": "#/$defs/assetObjectPath"
             }
           }
         }

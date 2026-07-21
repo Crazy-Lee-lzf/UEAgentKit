@@ -111,6 +111,14 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
         expected_change="material-instance-vector-parameter",
         asset_type="NonBlueprint",
     ),
+    "setMaterialInstanceTextureParameter": OperationSpec(
+        name="setMaterialInstanceTextureParameter",
+        risk="medium",
+        target_fields=("parameterName",),
+        target_validators={"parameterName": _is_nonempty_text},
+        expected_change="material-instance-texture-parameter",
+        asset_type="NonBlueprint",
+    ),
 }
 
 
@@ -120,6 +128,8 @@ POLICY_FIELDS = {
     "commitEnabled",
     "allowedProjectNames",
     "allowedAssetRoots",
+    "allowedReferenceRoots",
+    "allowedReferenceClasses",
     "allowedOperations",
     "allowedAssetClasses",
     "allowedAssetProperties",
@@ -224,7 +234,11 @@ def _normalize_asset_root(value: str) -> str:
 def _validate_policy(policy: dict[str, Any], errors: list[dict[str, str]]) -> dict[str, Any]:
     path = "policy"
     _check_unknown_fields(policy, POLICY_FIELDS, path=path, errors=errors)
-    required_fields = POLICY_FIELDS - {"allowedMaterialParameters"}
+    required_fields = POLICY_FIELDS - {
+        "allowedMaterialParameters",
+        "allowedReferenceRoots",
+        "allowedReferenceClasses",
+    }
     _require_fields(policy, required_fields, path=path, errors=errors)
 
     schema_version = policy.get("schemaVersion")
@@ -289,6 +303,75 @@ def _validate_policy(policy: dict[str, Any], errors: list[dict[str, str]]) -> di
             normalized_roots.append(root)
         if len(set(normalized_roots)) != len(normalized_roots):
             _issue(errors, "policy-roots", "Normalized allowedAssetRoots must be unique.", "policy.allowedAssetRoots")
+
+    allowed_reference_roots_value = policy.get("allowedReferenceRoots", [])
+    normalized_reference_roots: list[str] = []
+    if not isinstance(allowed_reference_roots_value, list):
+        _issue(
+            errors,
+            "policy-reference-roots",
+            "allowedReferenceRoots must be a unique string array.",
+            "policy.allowedReferenceRoots",
+        )
+    else:
+        string_items = [item for item in allowed_reference_roots_value if isinstance(item, str)]
+        if len(set(string_items)) != len(allowed_reference_roots_value):
+            _issue(
+                errors,
+                "policy-reference-roots",
+                "allowedReferenceRoots must contain unique strings.",
+                "policy.allowedReferenceRoots",
+            )
+        for index, item in enumerate(allowed_reference_roots_value):
+            if not isinstance(item, str):
+                continue
+            root = _normalize_asset_root(item)
+            if root == "/Game":
+                _issue(
+                    errors,
+                    "policy-reference-root-too-broad",
+                    "The entire /Game root cannot be authorized for referenced assets.",
+                    f"policy.allowedReferenceRoots[{index}]",
+                )
+                continue
+            if not root.startswith("/Game/") or "." in root or "\\" in root or "//" in root:
+                _issue(
+                    errors,
+                    "policy-reference-root-format",
+                    "Reference roots must be package paths below /Game, without object names.",
+                    f"policy.allowedReferenceRoots[{index}]",
+                )
+                continue
+            normalized_reference_roots.append(root)
+
+    allowed_reference_classes_value = policy.get("allowedReferenceClasses", [])
+    normalized_reference_classes: list[str] = []
+    if not isinstance(allowed_reference_classes_value, list):
+        _issue(
+            errors,
+            "policy-reference-classes",
+            "allowedReferenceClasses must be a unique string array.",
+            "policy.allowedReferenceClasses",
+        )
+    else:
+        string_items = [item for item in allowed_reference_classes_value if isinstance(item, str)]
+        if len(set(string_items)) != len(allowed_reference_classes_value):
+            _issue(
+                errors,
+                "policy-reference-classes",
+                "allowedReferenceClasses must contain unique strings.",
+                "policy.allowedReferenceClasses",
+            )
+        for index, item in enumerate(allowed_reference_classes_value):
+            if not isinstance(item, str) or not item.startswith("/Script/") or "." not in item:
+                _issue(
+                    errors,
+                    "policy-reference-class-format",
+                    "Reference classes must use /Script/Module.Class paths.",
+                    f"policy.allowedReferenceClasses[{index}]",
+                )
+                continue
+            normalized_reference_classes.append(item)
 
     allowed_operations = policy.get("allowedOperations")
     normalized_operations: list[str] = []
@@ -415,7 +498,7 @@ def _validate_policy(policy: dict[str, Any], errors: list[dict[str, str]]) -> di
                 or not asset_class.startswith("/Script/")
                 or "." not in asset_class
                 or asset_class != "/Script/Engine.MaterialInstanceConstant"
-                or parameter_type not in {"Scalar", "Vector"}
+                or parameter_type not in {"Scalar", "Vector", "Texture"}
                 or not _is_nonempty_text(parameter_name, max_length=256)
             ):
                 _issue(
@@ -429,6 +512,7 @@ def _validate_policy(policy: dict[str, Any], errors: list[dict[str, str]]) -> di
     material_operations = {
         "setMaterialInstanceScalarParameter",
         "setMaterialInstanceVectorParameter",
+        "setMaterialInstanceTextureParameter",
     }
     if material_operations.intersection(normalized_operations) and not normalized_material_parameters:
         _issue(
@@ -437,6 +521,21 @@ def _validate_policy(policy: dict[str, Any], errors: list[dict[str, str]]) -> di
             "Material Instance parameter operations require allowedMaterialParameters authorization.",
             "policy.allowedMaterialParameters",
         )
+    if "setMaterialInstanceTextureParameter" in normalized_operations:
+        if not normalized_reference_roots:
+            _issue(
+                errors,
+                "policy-reference-roots",
+                "Texture parameter writes require allowedReferenceRoots authorization.",
+                "policy.allowedReferenceRoots",
+            )
+        if not normalized_reference_classes:
+            _issue(
+                errors,
+                "policy-reference-classes",
+                "Texture parameter writes require allowedReferenceClasses authorization.",
+                "policy.allowedReferenceClasses",
+            )
 
     require_revision = policy.get("requireRevision")
     if not isinstance(require_revision, bool):
@@ -476,6 +575,8 @@ def _validate_policy(policy: dict[str, Any], errors: list[dict[str, str]]) -> di
         "commitEnabled": commit_enabled is True,
         "allowedProjectNames": list(allowed_project_names) if isinstance(allowed_project_names, list) else [],
         "allowedAssetRoots": sorted(set(normalized_roots)),
+        "allowedReferenceRoots": sorted(set(normalized_reference_roots)),
+        "allowedReferenceClasses": sorted(set(normalized_reference_classes)),
         "allowedOperations": sorted(set(normalized_operations)),
         "allowedAssetClasses": sorted(set(allowed_asset_classes)) if isinstance(allowed_asset_classes, list) else [],
         "allowedAssetProperties": sorted(set(normalized_asset_properties)),
@@ -1003,6 +1104,7 @@ def validate_patch(
                 elif operation_name in {
                     "setMaterialInstanceScalarParameter",
                     "setMaterialInstanceVectorParameter",
+                    "setMaterialInstanceTextureParameter",
                 }:
                     if asset_class != "/Script/Engine.MaterialInstanceConstant":
                         _issue(
@@ -1012,11 +1114,11 @@ def validate_patch(
                             f"{operation_pointer}.operation",
                         )
                     parameter_name = target.get("parameterName")
-                    parameter_type = (
-                        "Scalar"
-                        if operation_name == "setMaterialInstanceScalarParameter"
-                        else "Vector"
-                    )
+                    parameter_type = {
+                        "setMaterialInstanceScalarParameter": "Scalar",
+                        "setMaterialInstanceVectorParameter": "Vector",
+                        "setMaterialInstanceTextureParameter": "Texture",
+                    }[operation_name]
                     authorization = (
                         f"{asset_class}#{parameter_type}#{parameter_name}"
                         if isinstance(parameter_name, str)
@@ -1046,6 +1148,22 @@ def validate_patch(
                         errors,
                         "operation-value-type",
                         "Material vector parameters require a finite {r,g,b,a} JSON object.",
+                        f"{operation_pointer}.value",
+                    )
+            elif operation_name == "setMaterialInstanceTextureParameter":
+                valid_reference, reference_package = _validate_asset_path(value)
+                if not valid_reference:
+                    _issue(
+                        errors,
+                        "operation-value-type",
+                        reference_package,
+                        f"{operation_pointer}.value",
+                    )
+                elif not _path_is_allowed(reference_package, policy["allowedReferenceRoots"]):
+                    _issue(
+                        errors,
+                        "reference-not-allowed",
+                        f"Referenced asset is outside allowedReferenceRoots: {value}",
                         f"{operation_pointer}.value",
                     )
             elif not _validate_scalar_value(value, policy["maxValueBytes"]):

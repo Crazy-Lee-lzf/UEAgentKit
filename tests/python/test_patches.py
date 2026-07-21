@@ -44,6 +44,8 @@ def make_policy() -> dict[str, Any]:
         "commitEnabled": False,
         "allowedProjectNames": [PROJECT_NAME],
         "allowedAssetRoots": ["/Game/UEAgentKitWriteTests"],
+        "allowedReferenceRoots": [],
+        "allowedReferenceClasses": [],
         "allowedOperations": [
             "setVariableDefault",
             "setComponentProperty",
@@ -441,6 +443,84 @@ class PatchValidationTests(unittest.TestCase):
         self.canonical["assetClass"] = asset_class
         self.flush()
         self.assertIn("material-parameter-not-allowed", self.error_codes(self.validate()))
+
+    def test_material_texture_parameter_operation_is_valid(self) -> None:
+        asset_path = "/Game/UEAgentKitWriteTests/MI_TexturePatchTarget.MI_TexturePatchTarget"
+        asset_class = "/Script/Engine.MaterialInstanceConstant"
+        asset = self.patch["assets"][0]
+        asset["assetPath"] = asset_path
+        asset["expectedAssetClass"] = asset_class
+        asset["operations"] = [
+            {
+                "operationId": "set-base-texture",
+                "operation": "setMaterialInstanceTextureParameter",
+                "target": {"parameterName": "Base Texture"},
+                "value": "/Game/Characters/Mannequins/Textures/Manny/T_Manny_02_D.T_Manny_02_D",
+            }
+        ]
+        self.policy["allowedOperations"].append("setMaterialInstanceTextureParameter")
+        self.policy["allowedAssetClasses"].append(asset_class)
+        self.policy["allowedMaterialParameters"] = [f"{asset_class}#Texture#Base Texture"]
+        self.policy["allowedReferenceRoots"] = ["/Game/Characters/Mannequins/Textures"]
+        self.policy["allowedReferenceClasses"] = ["/Script/Engine.Texture2D"]
+        self.canonical["assetPath"] = asset_path
+        self.canonical["packageName"] = asset_path.rsplit(".", 1)[0]
+        self.canonical["assetClass"] = asset_class
+        self.flush()
+        result = self.validate()
+        self.assertTrue(result["valid"])
+        expected = result["assets"][0]["operations"][0]["expectedChange"]
+        self.assertEqual(expected["kind"], "material-instance-texture-parameter")
+
+    def test_material_texture_parameter_rejects_outside_reference_root(self) -> None:
+        asset_path = "/Game/UEAgentKitWriteTests/MI_TexturePatchTarget.MI_TexturePatchTarget"
+        asset_class = "/Script/Engine.MaterialInstanceConstant"
+        asset = self.patch["assets"][0]
+        asset["assetPath"] = asset_path
+        asset["expectedAssetClass"] = asset_class
+        asset["operations"] = [
+            {
+                "operationId": "set-base-texture",
+                "operation": "setMaterialInstanceTextureParameter",
+                "target": {"parameterName": "Base Texture"},
+                "value": "/Game/Other/T_Forbidden.T_Forbidden",
+            }
+        ]
+        self.policy["allowedOperations"].append("setMaterialInstanceTextureParameter")
+        self.policy["allowedAssetClasses"].append(asset_class)
+        self.policy["allowedMaterialParameters"] = [f"{asset_class}#Texture#Base Texture"]
+        self.policy["allowedReferenceRoots"] = ["/Game/Characters/Mannequins/Textures"]
+        self.policy["allowedReferenceClasses"] = ["/Script/Engine.Texture2D"]
+        self.canonical["assetPath"] = asset_path
+        self.canonical["packageName"] = asset_path.rsplit(".", 1)[0]
+        self.canonical["assetClass"] = asset_class
+        self.flush()
+        self.assertIn("reference-not-allowed", self.error_codes(self.validate()))
+
+    def test_material_texture_parameter_requires_reference_policy(self) -> None:
+        asset_path = "/Game/UEAgentKitWriteTests/MI_TexturePatchTarget.MI_TexturePatchTarget"
+        asset_class = "/Script/Engine.MaterialInstanceConstant"
+        asset = self.patch["assets"][0]
+        asset["assetPath"] = asset_path
+        asset["expectedAssetClass"] = asset_class
+        asset["operations"] = [
+            {
+                "operationId": "set-base-texture",
+                "operation": "setMaterialInstanceTextureParameter",
+                "target": {"parameterName": "Base Texture"},
+                "value": "/Game/Characters/Mannequins/Textures/Manny/T_Manny_02_D.T_Manny_02_D",
+            }
+        ]
+        self.policy["allowedOperations"].append("setMaterialInstanceTextureParameter")
+        self.policy["allowedAssetClasses"].append(asset_class)
+        self.policy["allowedMaterialParameters"] = [f"{asset_class}#Texture#Base Texture"]
+        self.canonical["assetPath"] = asset_path
+        self.canonical["packageName"] = asset_path.rsplit(".", 1)[0]
+        self.canonical["assetClass"] = asset_class
+        self.flush()
+        codes = self.error_codes(self.validate())
+        self.assertIn("policy-reference-roots", codes)
+        self.assertIn("policy-reference-classes", codes)
 
     def test_blueprint_description_operation_is_valid(self) -> None:
         self.patch["assets"][0]["operations"] = [

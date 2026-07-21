@@ -15,7 +15,8 @@
     "setBlueprintDescription",
     "setAssetProperty",
     "setMaterialInstanceScalarParameter",
-    "setMaterialInstanceVectorParameter"
+    "setMaterialInstanceVectorParameter",
+    "setMaterialInstanceTextureParameter"
   ],
   "allowedAssetClasses": [
     "/Script/Engine.Blueprint",
@@ -39,6 +40,13 @@
   ],
   "allowedMaterialParameters": [
     "/Script/Engine.MaterialInstanceConstant#Scalar#Roughness",
-    "/Script/Engine.MaterialInstanceConstant#Vector#Base Color"
+    "/Script/Engine.MaterialInstanceConstant#Vector#Base Color",
+    "/Script/Engine.MaterialInstanceConstant#Texture#Base Texture"
+  ],
+  "allowedReferenceRoots": [
+    "/Game/Characters/Mannequins/Textures"
+  ],
+  "allowedReferenceClasses": [
+    "/Script/Engine.Texture2D"
   ]
 }

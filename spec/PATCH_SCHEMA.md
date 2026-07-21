@@ -1,6 +1,6 @@
 # UEAgentKit Patch Schema 1.0
 
-UEAgentKit Patch 是面向 Unreal Engine 资产的声明式变更格式。0.3.5 同时提供纯 JSON 预校验，以及 UE Editor 内的 Blueprint、通用属性和 Material Instance 参数执行器。
+UEAgentKit Patch 是面向 Unreal Engine 资产的声明式变更格式。0.3.6 同时提供纯 JSON 预校验，以及 UE Editor 内的 Blueprint、通用属性和 Material Instance 参数执行器。
 
 ## 两层执行模型
 
@@ -24,6 +24,7 @@ Blueprint Operation                       → BlueprintPatch Commandlet
 setAssetProperty                          → AssetPatch Commandlet
 setMaterialInstanceScalarParameter        → AssetPatch Commandlet
 setMaterialInstanceVectorParameter        → AssetPatch Commandlet
+setMaterialInstanceTextureParameter       → AssetPatch Commandlet
 ```
 
 执行语义：
@@ -109,6 +110,8 @@ Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目�
   "commitEnabled": false,
   "allowedProjectNames": ["我的项目"],
   "allowedAssetRoots": ["/Game/UEAgentKitWriteTests"],
+  "allowedReferenceRoots": ["/Game/Characters/Mannequins/Textures"],
+  "allowedReferenceClasses": ["/Script/Engine.Texture2D"],
   "allowedOperations": [
     "setVariableDefault",
     "setComponentProperty",
@@ -116,7 +119,8 @@ Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目�
     "setBlueprintDescription",
     "setAssetProperty",
     "setMaterialInstanceScalarParameter",
-    "setMaterialInstanceVectorParameter"
+    "setMaterialInstanceVectorParameter",
+    "setMaterialInstanceTextureParameter"
   ],
   "allowedAssetClasses": [
     "/Script/Engine.Blueprint",
@@ -128,7 +132,8 @@ Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目�
   ],
   "allowedMaterialParameters": [
     "/Script/Engine.MaterialInstanceConstant#Scalar#Roughness",
-    "/Script/Engine.MaterialInstanceConstant#Vector#Base Color"
+    "/Script/Engine.MaterialInstanceConstant#Vector#Base Color",
+    "/Script/Engine.MaterialInstanceConstant#Texture#Base Texture"
   ],
   "requireRevision": true,
   "rejectDirtyPackages": true,
@@ -146,7 +151,8 @@ Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目�
 - Policy 的数组限制属于格式上限；执行器当前仍只接受单资产、单操作。
 - `setAssetProperty` 必须由 `allowedAssetProperties` 精确授权。
 - 属性授权格式固定为 `AssetClass#Property.Path`，例如 `/Script/Engine.Texture2D#SRGB`。
-- Material 参数授权格式固定为 `AssetClass#Type#ParameterName`；当前 `Type` 支持 `Scalar` 和 `Vector`。
+- Material 参数授权格式固定为 `AssetClass#Type#ParameterName`；当前 `Type` 支持 `Scalar`、`Vector` 和 `Texture`。
+- Texture 参数引用的目标资产必须同时落在 `allowedReferenceRoots` 内，且实际类必须精确命中 `allowedReferenceClasses`。
 - Blueprint Operation 不能用于非 Blueprint；`setAssetProperty` 不能用于 Blueprint；Material 参数操作只接受 MaterialInstanceConstant。
 
 ## 支持的 Operation
@@ -285,6 +291,30 @@ Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目�
 - Dry Run 保存并恢复完整 `VectorParameterValues` 数组，同时比较每个 Override 的 ParameterInfo、值和编辑器兼容字段。
 - 成功 Dry Run 要求 `rollbackValueMatch=true`、`rollbackStructureMatch=true` 和 `diskUnchanged=true`。
 - 已在真实 `Base Color` 参数上完成 Dry Run、Commit、唯一备份、独立 UE 进程重载和过期 Revision 拒绝验证。
+
+### setMaterialInstanceTextureParameter
+
+修改 `MaterialInstanceConstant` 上由 Policy 精确授权的 Global Texture 参数：
+
+```json
+{
+  "operationId": "set-base-texture",
+  "operation": "setMaterialInstanceTextureParameter",
+  "target": {"parameterName": "Base Texture"},
+  "value": "/Game/Characters/Mannequins/Textures/Manny/T_Manny_02_D.T_Manny_02_D"
+}
+```
+
+限制与语义：
+
+- 当前只支持 `MaterialInstanceConstant`、Global association 和 Texture 参数。
+- 值必须是现有 `/Game/.../Asset.Asset` 对象路径，不接受文件系统路径。
+- 参数必须由 `AssetClass#Texture#ParameterName` 精确授权。
+- 引用资产必须位于 `allowedReferenceRoots`，并在加载后由实际 UObject Class 精确匹配 `allowedReferenceClasses`。
+- Dry Run 保存并恢复完整 `TextureParameterValues` 数组，并逐项比较 ParameterInfo、Texture 指针和编辑器兼容字段。
+- UE 5.6 的 `SetMaterialInstanceTextureParameterValue` 会应用修改但始终返回 `false`；执行器不信任该返回值，而以精确参数读回作为成功依据。
+- 成功 Dry Run 要求 `rollbackValueMatch=true`、`rollbackStructureMatch=true` 和 `diskUnchanged=true`。
+- 已完成真实 Texture2D 的 Dry Run、Commit、唯一备份、独立 UE 进程重载和过期 Revision 拒绝验证。
 
 ## Dry Run 报告
 

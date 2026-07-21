@@ -40,6 +40,7 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
                 "setAssetProperty",
                 "setMaterialInstanceScalarParameter",
                 "setMaterialInstanceVectorParameter",
+                "setMaterialInstanceTextureParameter",
             ],
 
         )
@@ -54,6 +55,7 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
                 "Blueprint",
                 "Blueprint",
                 "Blueprint",
+                "NonBlueprint",
                 "NonBlueprint",
                 "NonBlueprint",
                 "NonBlueprint",
@@ -130,10 +132,14 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
             "AllowedMaterialParameters",
             "setMaterialInstanceScalarParameter",
             "setMaterialInstanceVectorParameter",
+            "setMaterialInstanceTextureParameter",
             "ScalarParameterArraysEqualExact",
             "VectorParameterArraysEqualExact",
+            "TextureParameterArraysEqualExact",
+            "AllowedReferenceRoots",
+            "AllowedReferenceClasses",
             "rollbackStructureMatch",
-            "Policy asset root is invalid or too broad",
+            "Policy %s root is invalid or too broad",
             "Patch operation entry is invalid",
             "MaxExclusiveInt64AsDouble",
             "FindExistingPackageSidecar",
@@ -181,11 +187,11 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
 
         )
 
-        self.assertIn('version = "0.3.5"', pyproject)
+        self.assertIn('version = "0.3.6"', pyproject)
 
-        self.assertEqual(plugin["VersionName"], "0.3.5")
+        self.assertEqual(plugin["VersionName"], "0.3.6")
 
-        self.assertEqual(plugin["Version"], 12)
+        self.assertEqual(plugin["Version"], 13)
 
 
 

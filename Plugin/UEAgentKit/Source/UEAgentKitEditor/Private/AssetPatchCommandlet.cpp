@@ -3,6 +3,7 @@
 #include "BlueprintContextSha256.h"
 #include "Dom/JsonObject.h"
 #include "Engine/Blueprint.h"
+#include "Engine/Texture.h"
 #include "HAL/FileManager.h"
 #include "MaterialEditingLibrary.h"
 #include "Materials/MaterialInstanceConstant.h"
@@ -30,6 +31,8 @@ namespace AssetPatchCommandletPrivate
 		bool bRejectDirtyPackages = true;
 		TArray<FString> AllowedProjectNames;
 		TArray<FString> AllowedAssetRoots;
+		TArray<FString> AllowedReferenceRoots;
+		TArray<FString> AllowedReferenceClasses;
 		TArray<FString> AllowedOperations;
 		TArray<FString> AllowedAssetClasses;
 		TArray<FString> AllowedAssetProperties;
@@ -96,22 +99,38 @@ namespace AssetPatchCommandletPrivate
 		Object->TryGetBoolField(TEXT("rejectDirtyPackages"), OutPolicy.bRejectDirtyPackages);
 		ReadStringArray(Object, TEXT("allowedProjectNames"), OutPolicy.AllowedProjectNames);
 		ReadStringArray(Object, TEXT("allowedAssetRoots"), OutPolicy.AllowedAssetRoots);
+		ReadStringArray(Object, TEXT("allowedReferenceRoots"), OutPolicy.AllowedReferenceRoots);
+		ReadStringArray(Object, TEXT("allowedReferenceClasses"), OutPolicy.AllowedReferenceClasses);
 		ReadStringArray(Object, TEXT("allowedOperations"), OutPolicy.AllowedOperations);
 		ReadStringArray(Object, TEXT("allowedAssetClasses"), OutPolicy.AllowedAssetClasses);
 		ReadStringArray(Object, TEXT("allowedAssetProperties"), OutPolicy.AllowedAssetProperties);
 		ReadStringArray(Object, TEXT("allowedMaterialParameters"), OutPolicy.AllowedMaterialParameters);
-		for (FString& Root : OutPolicy.AllowedAssetRoots)
+		auto NormalizeAndValidateRoots = [&OutError](
+			TArray<FString>& Roots,
+			const TCHAR* RootKind) -> bool
 		{
-			Root.RemoveFromEnd(TEXT("/"));
-			if (Root.Equals(TEXT("/Game"), ESearchCase::CaseSensitive)
-				|| !Root.StartsWith(TEXT("/Game/"), ESearchCase::CaseSensitive)
-				|| Root.Contains(TEXT("."))
-				|| Root.Contains(TEXT("\\"))
-				|| Root.Contains(TEXT("//")))
+			for (FString& Root : Roots)
 			{
-				OutError = FString::Printf(TEXT("Policy asset root is invalid or too broad: %s"), *Root);
-				return false;
+				Root.RemoveFromEnd(TEXT("/"));
+				if (Root.Equals(TEXT("/Game"), ESearchCase::CaseSensitive)
+					|| !Root.StartsWith(TEXT("/Game/"), ESearchCase::CaseSensitive)
+					|| Root.Contains(TEXT("."))
+					|| Root.Contains(TEXT("\\"))
+					|| Root.Contains(TEXT("//")))
+				{
+					OutError = FString::Printf(
+						TEXT("Policy %s root is invalid or too broad: %s"),
+						RootKind,
+						*Root);
+					return false;
+				}
 			}
+			return true;
+		};
+		if (!NormalizeAndValidateRoots(OutPolicy.AllowedAssetRoots, TEXT("asset"))
+			|| !NormalizeAndValidateRoots(OutPolicy.AllowedReferenceRoots, TEXT("reference")))
+		{
+			return false;
 		}
 
 		if (OutPolicy.AllowedProjectNames.IsEmpty()
@@ -130,11 +149,20 @@ namespace AssetPatchCommandletPrivate
 		}
 		const bool bUsesMaterialParameterOperations =
 			ContainsExact(OutPolicy.AllowedOperations, TEXT("setMaterialInstanceScalarParameter"))
-			|| ContainsExact(OutPolicy.AllowedOperations, TEXT("setMaterialInstanceVectorParameter"));
+			|| ContainsExact(OutPolicy.AllowedOperations, TEXT("setMaterialInstanceVectorParameter"))
+			|| ContainsExact(OutPolicy.AllowedOperations, TEXT("setMaterialInstanceTextureParameter"));
 		if (bUsesMaterialParameterOperations && OutPolicy.AllowedMaterialParameters.IsEmpty())
 		{
 			OutError = TEXT(
 				"Material Instance parameter operations require allowedMaterialParameters authorization.");
+			return false;
+		}
+		if (ContainsExact(OutPolicy.AllowedOperations, TEXT("setMaterialInstanceTextureParameter"))
+			&& (OutPolicy.AllowedReferenceRoots.IsEmpty()
+				|| OutPolicy.AllowedReferenceClasses.IsEmpty()))
+		{
+			OutError = TEXT(
+				"Texture parameter writes require allowedReferenceRoots and allowedReferenceClasses authorization.");
 			return false;
 		}
 		return true;
@@ -153,7 +181,7 @@ namespace AssetPatchCommandletPrivate
 		return Path;
 	}
 
-	bool IsAssetAllowed(const FPatchPolicy& Policy, const FString& ObjectPath)
+	bool IsObjectPathAllowed(const TArray<FString>& AllowedRoots, const FString& ObjectPath)
 	{
 		FString PackagePath = ObjectPath;
 		int32 DotIndex = INDEX_NONE;
@@ -162,7 +190,7 @@ namespace AssetPatchCommandletPrivate
 			PackagePath.LeftInline(DotIndex, EAllowShrinking::No);
 		}
 
-		for (const FString& Root : Policy.AllowedAssetRoots)
+		for (const FString& Root : AllowedRoots)
 		{
 			if (PackagePath.Equals(Root, ESearchCase::CaseSensitive)
 				|| PackagePath.StartsWith(Root + TEXT("/"), ESearchCase::CaseSensitive))
@@ -171,6 +199,16 @@ namespace AssetPatchCommandletPrivate
 			}
 		}
 		return false;
+	}
+
+	bool IsAssetAllowed(const FPatchPolicy& Policy, const FString& ObjectPath)
+	{
+		return IsObjectPathAllowed(Policy.AllowedAssetRoots, ObjectPath);
+	}
+
+	bool IsReferenceAllowed(const FPatchPolicy& Policy, const FString& ObjectPath)
+	{
+		return IsObjectPathAllowed(Policy.AllowedReferenceRoots, ObjectPath);
 	}
 
 	FString GetPackageFilename(const UPackage* Package)
@@ -514,6 +552,30 @@ namespace AssetPatchCommandletPrivate
 		return true;
 	}
 
+	bool TextureParameterArraysEqualExact(
+		const TArray<FTextureParameterValue>& A,
+		const TArray<FTextureParameterValue>& B)
+	{
+		if (A.Num() != B.Num())
+		{
+			return false;
+		}
+		for (int32 Index = 0; Index < A.Num(); ++Index)
+		{
+			if (A[Index] != B[Index])
+			{
+				return false;
+			}
+#if WITH_EDITORONLY_DATA
+			if (A[Index].ParameterName_DEPRECATED != B[Index].ParameterName_DEPRECATED)
+			{
+				return false;
+			}
+#endif
+		}
+		return true;
+	}
+
 	bool FindGlobalScalarParameter(
 		UMaterialInstanceConstant* Instance,
 		const FName ParameterName,
@@ -574,6 +636,36 @@ namespace AssetPatchCommandletPrivate
 		return true;
 	}
 
+	bool FindGlobalTextureParameter(
+		UMaterialInstanceConstant* Instance,
+		const FName ParameterName,
+		FMaterialParameterInfo& OutInfo,
+		FString& OutError)
+	{
+		TArray<FMaterialParameterInfo> ParameterInfos;
+		TArray<FGuid> ParameterIds;
+		Instance->GetAllTextureParameterInfo(ParameterInfos, ParameterIds);
+		int32 MatchCount = 0;
+		for (const FMaterialParameterInfo& Info : ParameterInfos)
+		{
+			if (Info.Name == ParameterName
+				&& Info.Association == EMaterialParameterAssociation::GlobalParameter)
+			{
+				OutInfo = Info;
+				++MatchCount;
+			}
+		}
+		if (MatchCount != 1)
+		{
+			OutError = FString::Printf(
+				TEXT("Expected exactly one global texture parameter named %s; found %d."),
+				*ParameterName.ToString(),
+				MatchCount);
+			return false;
+		}
+		return true;
+	}
+
 	bool ReadScalarParameter(
 		UMaterialInstanceConstant* Instance,
 		const FMaterialParameterInfo& ParameterInfo,
@@ -603,6 +695,19 @@ namespace AssetPatchCommandletPrivate
 			static_cast<double>(Value.G),
 			static_cast<double>(Value.B),
 			static_cast<double>(Value.A));
+	}
+
+	bool ReadTextureParameter(
+		UMaterialInstanceConstant* Instance,
+		const FMaterialParameterInfo& ParameterInfo,
+		UTexture*& OutValue)
+	{
+		return Instance->GetTextureParameterValue(FHashedMaterialParameterInfo(ParameterInfo), OutValue);
+	}
+
+	FString FormatTextureParameterValue(const UTexture* Value)
+	{
+		return Value ? Value->GetPathName() : FString();
 	}
 
 	bool SaveReport(const FString& Filename, const TSharedRef<FJsonObject>& Report, FString& OutError)
@@ -807,7 +912,12 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		Operation.Equals(TEXT("setMaterialInstanceScalarParameter"), ESearchCase::CaseSensitive);
 	const bool bMaterialVectorOperation =
 		Operation.Equals(TEXT("setMaterialInstanceVectorParameter"), ESearchCase::CaseSensitive);
-	if ((!bAssetPropertyOperation && !bMaterialScalarOperation && !bMaterialVectorOperation)
+	const bool bMaterialTextureOperation =
+		Operation.Equals(TEXT("setMaterialInstanceTextureParameter"), ESearchCase::CaseSensitive);
+	if ((!bAssetPropertyOperation
+			&& !bMaterialScalarOperation
+			&& !bMaterialVectorOperation
+			&& !bMaterialTextureOperation)
 		|| !ContainsExact(Policy.AllowedOperations, Operation))
 	{
 		UE_LOG(LogAssetPatch, Error, TEXT("Operation is not authorized or implemented: %s"), *Operation);
@@ -951,7 +1061,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			|| FMath::IsNearlyEqual(RestoredScalarValue, BeforeScalarValue, UE_SMALL_NUMBER);
 		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-		Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.5"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.6"));
 		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 		Report->SetStringField(TEXT("patchId"), PatchId);
 		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
@@ -1153,7 +1263,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			!bRolledBack || RestoredVectorValue.Equals(BeforeVectorValue, UE_SMALL_NUMBER);
 		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-		Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.5"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.6"));
 		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 		Report->SetStringField(TEXT("patchId"), PatchId);
 		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
@@ -1198,6 +1308,196 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			*ParameterNameText,
 			*FormatVectorParameterValue(BeforeVectorValue),
 			*FormatVectorParameterValue(AfterVectorValue));
+		return 0;
+	}
+
+
+	if (bMaterialTextureOperation)
+	{
+		UMaterialInstanceConstant* MaterialInstance = Cast<UMaterialInstanceConstant>(Asset);
+		if (!MaterialInstance)
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Operation requires MaterialInstanceConstant."));
+			return 17;
+		}
+
+		FString ParameterNameText;
+		TargetObject->TryGetStringField(TEXT("parameterName"), ParameterNameText);
+		if (ParameterNameText.IsEmpty())
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Material texture parameterName is required."));
+			return 17;
+		}
+		const FString ParameterAuthorization =
+			ActualAssetClass + TEXT("#Texture#") + ParameterNameText;
+		if (!ContainsExact(Policy.AllowedMaterialParameters, ParameterAuthorization))
+		{
+			UE_LOG(
+				LogAssetPatch,
+				Error,
+				TEXT("Material parameter is not authorized by policy: %s"),
+				*ParameterAuthorization);
+			return 17;
+		}
+
+		FString NewTexturePath;
+		if (!OperationObject->TryGetStringField(TEXT("value"), NewTexturePath))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Material texture value must be an asset object path string."));
+			return 18;
+		}
+		NewTexturePath = NormalizeObjectPath(NewTexturePath);
+		if (!IsReferenceAllowed(Policy, NewTexturePath))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Referenced texture is outside authorized roots: %s"), *NewTexturePath);
+			return 18;
+		}
+		UTexture* NewTexture = LoadObject<UTexture>(nullptr, *NewTexturePath);
+		if (!NewTexture)
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Could not load referenced texture: %s"), *NewTexturePath);
+			return 18;
+		}
+		const FString NewTextureClass = NewTexture->GetClass()->GetPathName();
+		if (!ContainsExact(Policy.AllowedReferenceClasses, NewTextureClass))
+		{
+			UE_LOG(
+				LogAssetPatch,
+				Error,
+				TEXT("Referenced texture class is not authorized: %s"),
+				*NewTextureClass);
+			return 18;
+		}
+
+		FMaterialParameterInfo ParameterInfo;
+		if (!FindGlobalTextureParameter(MaterialInstance, FName(*ParameterNameText), ParameterInfo, Error))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("%s"), *Error);
+			return 17;
+		}
+
+		UTexture* BeforeTextureValue = nullptr;
+		if (!ReadTextureParameter(MaterialInstance, ParameterInfo, BeforeTextureValue))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Could not read material texture parameter."));
+			return 17;
+		}
+		const TArray<FTextureParameterValue> OriginalTextureParameters =
+			MaterialInstance->TextureParameterValues;
+
+		FString BackupFilename;
+		if (bCommit)
+		{
+			IFileManager::Get().MakeDirectory(*BackupDirectory, true);
+			BackupFilename = CreateBackupFilename(BackupDirectory, PatchId, PackageFilename);
+			if (IFileManager::Get().Copy(*BackupFilename, *PackageFilename, true, true) != COPY_OK)
+			{
+				UE_LOG(LogAssetPatch, Error, TEXT("Could not create package backup: %s"), *BackupFilename);
+				return 19;
+			}
+		}
+
+		MaterialInstance->Modify();
+		// UE 5.6 applies and updates the value but its library function always returns false.
+		// Treat the exact parameter read-back below as the authoritative result.
+		UMaterialEditingLibrary::SetMaterialInstanceTextureParameterValue(
+			MaterialInstance,
+			FName(*ParameterNameText),
+			NewTexture,
+			EMaterialParameterAssociation::GlobalParameter);
+
+		UTexture* AfterTextureValue = nullptr;
+		if (!ReadTextureParameter(MaterialInstance, ParameterInfo, AfterTextureValue)
+			|| AfterTextureValue != NewTexture)
+		{
+			MaterialInstance->TextureParameterValues = OriginalTextureParameters;
+			UMaterialEditingLibrary::UpdateMaterialInstance(MaterialInstance);
+			Package->SetDirtyFlag(bOriginalDirty);
+			UE_LOG(LogAssetPatch, Error, TEXT("Material texture parameter read-back verification failed."));
+			return 20;
+		}
+
+		bool bSaved = false;
+		bool bRolledBack = false;
+		bool bStructureMatch = true;
+		UTexture* RestoredTextureValue = BeforeTextureValue;
+		if (bCommit)
+		{
+			if (!SaveAssetPackage(MaterialInstance, PackageFilename, Error))
+			{
+				IFileManager::Get().Copy(*PackageFilename, *BackupFilename, true, true);
+				UE_LOG(LogAssetPatch, Error, TEXT("%s Backup restored."), *Error);
+				return 21;
+			}
+			bSaved = true;
+		}
+		else
+		{
+			MaterialInstance->TextureParameterValues = OriginalTextureParameters;
+			UMaterialEditingLibrary::UpdateMaterialInstance(MaterialInstance);
+			Package->SetDirtyFlag(bOriginalDirty);
+			bStructureMatch = TextureParameterArraysEqualExact(
+				OriginalTextureParameters,
+				MaterialInstance->TextureParameterValues);
+			if (!ReadTextureParameter(MaterialInstance, ParameterInfo, RestoredTextureValue))
+			{
+				UE_LOG(LogAssetPatch, Error, TEXT("Could not read restored material texture parameter."));
+				return 22;
+			}
+			bRolledBack = true;
+		}
+
+		const FString AfterRevision = HashPackageFile(Package);
+		const bool bRestoredValueMatch = !bRolledBack || RestoredTextureValue == BeforeTextureValue;
+		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
+		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.6"));
+		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
+		Report->SetStringField(TEXT("patchId"), PatchId);
+		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
+		Report->SetStringField(TEXT("assetPath"), AssetPath);
+		Report->SetStringField(TEXT("assetClass"), ActualAssetClass);
+		Report->SetStringField(TEXT("operation"), Operation);
+		Report->SetObjectField(TEXT("target"), TargetObject);
+		Report->SetStringField(
+			TEXT("targetDescription"),
+			TEXT("material-instance-texture:") + ParameterNameText);
+		Report->SetStringField(TEXT("targetType"), TEXT("MaterialTextureParameter(UTexture)"));
+		Report->SetStringField(TEXT("beforeValue"), FormatTextureParameterValue(BeforeTextureValue));
+		Report->SetStringField(TEXT("afterValue"), FormatTextureParameterValue(AfterTextureValue));
+		Report->SetStringField(TEXT("restoredValue"), FormatTextureParameterValue(RestoredTextureValue));
+		Report->SetStringField(TEXT("referencedAssetPath"), NewTexturePath);
+		Report->SetStringField(TEXT("referencedAssetClass"), NewTextureClass);
+		Report->SetStringField(TEXT("beforeRevision"), BeforeRevision);
+		Report->SetStringField(TEXT("afterRevision"), AfterRevision);
+		Report->SetBoolField(TEXT("compiled"), false);
+		Report->SetBoolField(TEXT("saved"), bSaved);
+		Report->SetBoolField(TEXT("rolledBack"), bRolledBack);
+		Report->SetBoolField(TEXT("rollbackValueMatch"), bRestoredValueMatch);
+		Report->SetBoolField(TEXT("rollbackStructureMatch"), !bRolledBack || bStructureMatch);
+		Report->SetBoolField(
+			TEXT("diskUnchanged"),
+			BeforeRevision.Equals(AfterRevision, ESearchCase::IgnoreCase));
+		Report->SetStringField(TEXT("backupPath"), BackupFilename);
+		if (!SaveReport(ReportFilename, Report, Error))
+		{
+			if (bCommit && !BackupFilename.IsEmpty())
+			{
+				IFileManager::Get().Copy(*PackageFilename, *BackupFilename, true, true);
+			}
+			UE_LOG(LogAssetPatch, Error, TEXT("%s Disk backup restored."), *Error);
+			return 23;
+		}
+
+		UE_LOG(
+			LogAssetPatch,
+			Display,
+			TEXT("Material texture patch succeeded. Mode=%s Asset=%s Parameter=%s Before=%s After=%s"),
+			bCommit ? TEXT("Commit") : TEXT("DryRun"),
+			*AssetPath,
+			*ParameterNameText,
+			*FormatTextureParameterValue(BeforeTextureValue),
+			*FormatTextureParameterValue(AfterTextureValue));
 		return 0;
 	}
 
@@ -1294,7 +1594,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 	const FString AfterRevision = HashPackageFile(Package);
 	const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 	Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-	Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.5"));
+	Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.6"));
 	Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 	Report->SetStringField(TEXT("patchId"), PatchId);
 	Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());

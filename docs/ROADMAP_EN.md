@@ -2,9 +2,9 @@
 
 Updated: 2026-07-21
 
-The current release is **0.3.5** and targets Unreal Engine 5.6.
+The current release is **0.3.6** and targets Unreal Engine 5.6.
 
-UE Agent Kit already provides project-wide read-only analysis, SQLite/FTS indexing, low-risk Blueprint patching, generic non-Blueprint scalar property patching, and Global Scalar and Vector parameter patching for Material Instances.
+UE Agent Kit already provides project-wide read-only analysis, SQLite/FTS indexing, low-risk Blueprint patching, generic non-Blueprint scalar property patching, and Global Scalar, Vector, and Texture parameter patching for Material Instances.
 
 ## Next product target: 0.5.0
 
@@ -21,7 +21,7 @@ The next product-level target is 0.5.0, split into independently verifiable chec
 Planned operations:
 
 - Material Instance Vector parameters: completed in 0.3.5.
-- Material Instance Texture parameters.
+- Material Instance Texture parameters: completed in 0.3.6.
 - Material Instance Static Switch parameters.
 - One scalar field in one DataTable row.
 
