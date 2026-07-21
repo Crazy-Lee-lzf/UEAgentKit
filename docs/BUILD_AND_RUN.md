@@ -303,14 +303,29 @@ Rollback Commit 固定执行：
 
 完整格式见 [`../spec/BACKUP_AND_ROLLBACK.md`](../spec/BACKUP_AND_ROLLBACK.md)。
 
-## 11. 校验输出
+## 11. Write Fixture Plan
+
+用于写入回归的测试资产可以通过声明式 Plan 重建：
+
+```bat
+scripts\RunWriteFixturePlan.cmd ^
+  -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject" ^
+  -Plan "tests\fixtures\write_fixture_plan.example.json" ^
+  -Mode Reset
+```
+
+执行链为：Python 只读预校验 → UE Commandlet 全量预校验 → 仅清理 Plan 明列目标 → 创建/复制并保存 → 第二个 UE 进程重新导出 → 精确验证类、Revision 和 Dirty 状态。
+
+`Create` 拒绝既有目标；`Reset` 只删除 `fixtures[].targetAsset`，不会递归删除 Root。当前支持 `duplicateAsset` 与 `blueprint`，且只接受没有 Sidecar 的单文件 Package。完整规范见 [`../spec/WRITE_FIXTURE_PLAN.md`](../spec/WRITE_FIXTURE_PLAN.md)。
+
+## 12. 校验输出
 
 通用资产目录：
 
 ```bat
 python <TOOL_ROOT>\scripts\ValidateAssetCatalog.py ^
   --output <TOOL_ROOT>\Output\AssetCatalog ^
-  --expect-exporter 0.4.1
+  --expect-exporter 0.4.2
 ```
 
 校验器会检查：
@@ -328,13 +343,13 @@ Blueprint 输出至少应检查：
 - Canonical JSON 可解析。
 - BPCTX 第一行符合 `H|BPCTX|1|...`。
 
-## 12. 安全行为
+## 13. 安全行为
 
 通用资产目录、Blueprint 导出、SQLite 查询和 `ue-agent patch validate` 保持只读。`RunPatch -Mode DryRun` 会在内存中修改资产，但必须恢复原值并保持磁盘 SHA-256 不变；Blueprint 还会在修改和回滚后编译。
 
 只有 `RunPatch -Mode Commit` 可以保存资产，并且必须满足：Policy 显式允许 Commit、项目/目录/类型/操作均授权、属性或参数精确授权、Revision 一致、Package 非 Dirty、备份创建成功，且 Blueprint 编译成功。成功后自动生成 Backup Manifest。`RunRollback -Mode Commit` 是唯一恢复入口，默认 Dry Run，并要求工程关闭、当前 Revision 未变化、备份完整和独立 UE 重载验证。Patch 写入通过 Unreal Editor API 完成；rollback 仅按已验证 Manifest 原子恢复单文件 Package。
 
-## 13. 清理
+## 14. 清理
 
 可以安全清理：
 

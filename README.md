@@ -6,7 +6,7 @@
 
 UE Agent Kit 是一套面向 Unreal Engine 的开源资产分析、索引与受控写入工具。它通过 UE Editor 插件导出项目资产目录、Asset Registry 元数据、依赖关系和 Blueprint 语义，再使用 Python CLI 与 SQLite 建立项目级索引，并通过 Policy、Revision、Dry Run 和备份保护显式写入。
 
-当前版本为 **0.4.1**，支持 **Unreal Engine 5.6**。除八类 Blueprint、通用标量属性、Material Instance 参数和 DataTable 单元格写入外，现已提供可审计 Backup Manifest、默认 Dry Run 的独立 rollback、回滚前安全副本和独立 UE 进程恢复验证。
+当前版本为 **0.4.2**，支持 **Unreal Engine 5.6**。除受控 Patch 与可审计 rollback 外，现已支持声明式 Write Fixture Plan：可在隔离目录中重复创建或重置 Blueprint、DataTable、Data Asset、Texture、Static Mesh 等测试资产，并通过独立 UE 进程验证实际类与 Revision。
 
 > **AI Generated**：本项目的代码和文档主要由 AI 生成，并通过人工审查、UE 5.6 编译、自动化测试和真实工程回归验证。
 
@@ -21,6 +21,7 @@ UE Agent Kit 是一套面向 Unreal Engine 的开源资产分析、索引与受�
 - 查看 Blueprint 的 Graph、Node、Pin 和连接结构。
 - 使用 Policy、Revision 和导出快照校验 Patch，并对授权 Blueprint、非 Blueprint 标量属性、Material Instance 参数或 DataTable 单元格执行 Dry Run 或显式 Commit。
 - 为成功 Commit 自动生成 Backup Manifest，并在当前 Revision 仍匹配时显式回滚和独立验证恢复结果。
+- 使用声明式 Write Fixture Plan 在安全测试目录内创建或重置测试资产，并独立验证类、Revision 与 Dirty 状态。
 
 ## 主要能力
 
@@ -187,7 +188,7 @@ scripts\RunRollback.cmd ^
 ### 6. 校验通用资产导出
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.4.1
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.4.2
 ```
 
 完整参数和安装说明见 [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md)。
@@ -223,6 +224,7 @@ Output\Blueprints\
 - [`spec/BPCTX_FORMAT.md`](spec/BPCTX_FORMAT.md)：BPCTX/1 格式规范。
 - [`spec/PATCH_SCHEMA.md`](spec/PATCH_SCHEMA.md)：声明式 Patch、Policy、Revision 和纯校验安全边界。
 - [`spec/BACKUP_AND_ROLLBACK.md`](spec/BACKUP_AND_ROLLBACK.md)：Backup Manifest、rollback、审计回执和恢复验证规范。
+- [`spec/WRITE_FIXTURE_PLAN.md`](spec/WRITE_FIXTURE_PLAN.md)：测试资产 Plan、Create/Reset 和独立重载验证规范。
 
 完整文档索引见 [`docs/README.md`](docs/README.md)。
 

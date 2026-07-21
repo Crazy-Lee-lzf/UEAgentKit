@@ -31,3 +31,16 @@ Requirements:
 - A disposable or explicitly authorized test project. The script deletes and recreates assets with the fixture names above.
 
 The result report is written to `<Project>/Saved/UEAgentKitFixtures/semantic_fixtures.json`.
+
+## Write fixtures
+
+`write_fixture_plan.example.json` demonstrates the repository-shipped Blueprint-only Plan. Project-specific plans may add `duplicateAsset` entries for DataTables, Data Assets, Textures, Static Meshes, Material Instances, Input Actions, or other single-file assets available in that test project.
+
+```powershell
+scripts\RunWriteFixturePlan.ps1 `
+    -ProjectPath "E:\Path\To\Project.uproject" `
+    -Plan "tests\fixtures\write_fixture_plan.example.json" `
+    -Mode Reset
+```
+
+The wrapper validates the Plan before launching Unreal, recreates only explicitly listed targets, then uses a second Unreal process to verify every fixture. See [`../../spec/WRITE_FIXTURE_PLAN.md`](../../spec/WRITE_FIXTURE_PLAN.md).

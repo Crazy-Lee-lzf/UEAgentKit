@@ -15,6 +15,7 @@ from .backups import (
 )
 from .config import DEFAULT_DATABASE
 from .database import assert_fts5_available, get_schema_version, open_database
+from .fixtures import validate_fixture_plan, verify_fixture_export
 from .indexer import build_index
 from .patches import PATCH_SCHEMA_VERSION, get_operation_registry, validate_patch
 from .queries import find_references, get_asset, get_stats, search_assets, search_symbols
@@ -164,6 +165,27 @@ def build_parser() -> argparse.ArgumentParser:
     patch_verify_rollback.add_argument("--export", dest="export_root", type=Path, required=True)
     patch_verify_rollback.add_argument("--report", dest="verification_report_path", type=Path)
 
+    fixtures_parser = subparsers.add_parser(
+        "fixtures",
+        help="Validate write-fixture plans or verify independently reloaded fixtures.",
+    )
+    fixtures_subparsers = fixtures_parser.add_subparsers(dest="fixtures_command", required=True)
+
+    fixtures_validate = fixtures_subparsers.add_parser(
+        "validate",
+        help="Validate a write-fixture plan without loading Unreal assets.",
+    )
+    fixtures_validate.add_argument("--plan", dest="fixture_plan_path", type=Path, required=True)
+    fixtures_validate.add_argument("--report", dest="fixture_validation_report_path", type=Path)
+
+    fixtures_verify = fixtures_subparsers.add_parser(
+        "verify",
+        help="Verify fixture classes and revisions from an independent Unreal export.",
+    )
+    fixtures_verify.add_argument("--fixture-report", dest="fixture_report_path", type=Path, required=True)
+    fixtures_verify.add_argument("--export", dest="fixture_export_root", type=Path, required=True)
+    fixtures_verify.add_argument("--report", dest="fixture_verification_report_path", type=Path)
+
     return parser
 
 
@@ -229,6 +251,18 @@ def run(args: argparse.Namespace) -> tuple[Any, int]:
         result = verify_rollback_export(args.rollback_report_path, args.export_root)
         if args.verification_report_path is not None:
             _write_json_file(args.verification_report_path, result)
+        return result, 0 if result["verified"] else 1
+
+    if args.command == "fixtures" and args.fixtures_command == "validate":
+        result = validate_fixture_plan(args.fixture_plan_path)
+        if args.fixture_validation_report_path is not None:
+            _write_json_file(args.fixture_validation_report_path, result)
+        return result, 0 if result["valid"] else 1
+
+    if args.command == "fixtures" and args.fixtures_command == "verify":
+        result = verify_fixture_export(args.fixture_report_path, args.fixture_export_root)
+        if args.fixture_verification_report_path is not None:
+            _write_json_file(args.fixture_verification_report_path, result)
         return result, 0 if result["verified"] else 1
 
     if args.command == "index" and args.index_command == "build":

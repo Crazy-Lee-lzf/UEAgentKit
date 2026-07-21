@@ -6,7 +6,7 @@
 
 UE Agent Kit is an open-source Unreal Engine asset analysis, indexing, and policy-gated patch toolkit. Its Editor plugin exports asset catalogs, Asset Registry metadata, dependencies, and Blueprint semantics; a Python CLI and SQLite provide a project-wide index, while Policy, Revision checks, dry runs, and backups protect explicit writes.
 
-The current release is **0.4.1** and targets **Unreal Engine 5.6**. In addition to Blueprint, generic scalar, Material Instance, and DataTable writes, it adds auditable backup manifests, a standalone rollback command that defaults to dry run, pre-rollback safety copies, and independent Unreal-process restore verification.
+The current release is **0.4.2** and targets **Unreal Engine 5.6**. In addition to policy-gated patching and auditable rollback, it adds declarative Write Fixture Plans that repeatedly create or reset isolated Blueprint, DataTable, Data Asset, Texture, and Static Mesh fixtures and verify their actual classes and revisions in an independent Unreal process.
 
 > **AI Generated**: Most code and documentation in this project are AI-generated and reviewed through human inspection, UE 5.6 compilation, automated tests, and real-project regression validation.
 
@@ -21,6 +21,7 @@ The current release is **0.4.1** and targets **Unreal Engine 5.6**. In addition 
 - Inspect Blueprint graphs, nodes, pins, and connections.
 - Validate patches against policy, revision, and export snapshots, then dry-run or explicitly commit authorized Blueprint, non-Blueprint scalar, Material Instance parameter, or DataTable cell changes.
 - Generate a backup manifest after every successful commit, then explicitly roll back and independently verify the restored revision when the current package still matches.
+- Create or reset isolated test assets from a declarative Write Fixture Plan, then independently verify class, revision, and dirty state.
 
 ## Main capabilities
 
@@ -187,7 +188,7 @@ The executor supports four Blueprint operations, `setAssetProperty`, four Materi
 ### 6. Validate the asset catalog
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.4.1
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.4.2
 ```
 
 See [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md) for installation and full command details.
@@ -223,6 +224,7 @@ Output\Blueprints\
 - [`spec/BPCTX_FORMAT.md`](spec/BPCTX_FORMAT.md): BPCTX/1 format specification.
 - [`spec/PATCH_SCHEMA.md`](spec/PATCH_SCHEMA.md): declarative patches, policy, revision checks, and validation-only safety boundaries.
 - [`spec/BACKUP_AND_ROLLBACK.md`](spec/BACKUP_AND_ROLLBACK.md): backup manifest, rollback receipt, and restore-verification contract.
+- [`spec/WRITE_FIXTURE_PLAN.md`](spec/WRITE_FIXTURE_PLAN.md): fixture plan, create/reset, and independent reload-verification contract.
 
 See [`docs/README.md`](docs/README.md) for the documentation index.
 

@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ueagentkit.dev/schema/write-fixture-plan-1.0.json",
+  "title": "UE Agent Kit Write Fixture Plan 1.0",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "root",
+    "fixtures"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "root": {
+      "type": "string",
+      "pattern": "^/Game/(?!.*(?:^|/)\\.\\.?/)[A-Za-z0-9_/-]*[A-Za-z0-9_]$"
+    },
+    "fixtures": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/duplicateAsset"
+          },
+          {
+            "$ref": "#/$defs/blueprint"
+          }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "packagePath": {
+      "type": "string",
+      "pattern": "^/[A-Za-z0-9_][A-Za-z0-9_/-]*[A-Za-z0-9_]$"
+    },
+    "sourceAssetPath": {
+      "type": "string",
+      "pattern": "^/[A-Za-z0-9_][A-Za-z0-9_/-]*[A-Za-z0-9_](?:\\.[A-Za-z0-9_]+)?$"
+    },
+    "classPath": {
+      "type": "string",
+      "pattern": "^/Script/[A-Za-z0-9_]+\\.[A-Za-z0-9_]+$"
+    },
+    "duplicateAsset": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "sourceAsset",
+        "targetAsset",
+        "expectedClass"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "const": "duplicateAsset"
+        },
+        "sourceAsset": {
+          "$ref": "#/$defs/sourceAssetPath"
+        },
+        "targetAsset": {
+          "$ref": "#/$defs/packagePath"
+        },
+        "expectedClass": {
+          "$ref": "#/$defs/classPath"
+        }
+      }
+    },
+    "blueprint": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "targetAsset",
+        "expectedClass",
+        "parentClass",
+        "blueprintType"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "const": "blueprint"
+        },
+        "targetAsset": {
+          "$ref": "#/$defs/packagePath"
+        },
+        "expectedClass": {
+          "const": "/Script/Engine.Blueprint"
+        },
+        "parentClass": {
+          "$ref": "#/$defs/classPath"
+        },
+        "blueprintType": {
+          "enum": [
+            "Normal",
+            "FunctionLibrary",
+            "MacroLibrary",
+            "Interface"
+          ]
+        }
+      }
+    }
+  }
+}

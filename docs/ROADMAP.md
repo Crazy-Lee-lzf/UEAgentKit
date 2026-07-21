@@ -2,7 +2,7 @@
 
 更新时间：2026-07-21
 
-当前版本为 **0.4.1**，支持 Unreal Engine 5.6。
+当前版本为 **0.4.2**，支持 Unreal Engine 5.6。
 
 UE Agent Kit 已完成项目级只读分析、SQLite/FTS 索引、Blueprint 低风险安全写入、通用非 Blueprint 标量属性写入、Material Instance Global Scalar/Vector/Texture/Static Switch，以及 DataTable 单 Row、单顶层标量字段写入。
 
@@ -44,9 +44,13 @@ UE Agent Kit 已完成项目级只读分析、SQLite/FTS 索引、Blueprint 低�
 - 独立 `rollback` 命令，默认 Dry Run，显式 Commit。
 - Commit 自动生成 Backup Manifest、回滚前安全副本、唯一回执和恢复后 Revision 验证。
 
+0.4.2 已完成：
+
+- 声明式 Write Fixture Plan。
+- Create/Reset、源资产类检查、目标边界、Sidecar 拒绝和独立 UE 重载验证。
+
 后续继续：
 
-- 自动生成和重置写入测试资产。
 - 标量类型完整真实 UE 覆盖。
 - 未授权、目标不存在、错误类型、Revision 冲突、Dirty Package、Sidecar 和保存失败测试。
 

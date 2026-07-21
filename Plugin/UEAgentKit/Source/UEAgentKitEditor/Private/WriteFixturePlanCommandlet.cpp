@@ -1,0 +1,622 @@
+#include "WriteFixturePlanCommandlet.h"
+
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "BlueprintContextSha256.h"
+#include "Dom/JsonObject.h"
+#include "Editor.h"
+#include "Engine/Blueprint.h"
+#include "GameFramework/Actor.h"
+#include "HAL/FileManager.h"
+#include "Kismet/BlueprintFunctionLibrary.h"
+#include "Kismet2/KismetEditorUtilities.h"
+#include "Misc/App.h"
+#include "Misc/EngineVersion.h"
+#include "Misc/FileHelper.h"
+#include "Misc/PackageName.h"
+#include "Misc/Parse.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
+#include "Subsystems/EditorAssetSubsystem.h"
+#include "UObject/GarbageCollection.h"
+#include "UObject/Interface.h"
+#include "UObject/Package.h"
+#include "UObject/SavePackage.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogWriteFixturePlan, Log, All);
+
+namespace WriteFixturePlanCommandletPrivate
+{
+	constexpr const TCHAR* SchemaVersion = TEXT("1.0");
+	constexpr const TCHAR* ToolVersion = TEXT("0.4.2");
+	constexpr int32 MaxFixtures = 64;
+
+	struct FFixtureDefinition
+	{
+		FString Id;
+		FString Kind;
+		FString SourceAsset;
+		FString TargetAsset;
+		FString ExpectedClass;
+		FString ParentClassPath;
+		EBlueprintType BlueprintType = BPTYPE_Normal;
+		TObjectPtr<UObject> SourceObject = nullptr;
+		TObjectPtr<UClass> ParentClass = nullptr;
+	};
+
+	bool LoadJsonObject(const FString& Filename, TSharedPtr<FJsonObject>& OutObject, FString& OutError)
+	{
+		FString JsonText;
+		if (!FFileHelper::LoadFileToString(JsonText, *Filename))
+		{
+			OutError = FString::Printf(TEXT("Could not read JSON file: %s"), *Filename);
+			return false;
+		}
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonText);
+		if (!FJsonSerializer::Deserialize(Reader, OutObject) || !OutObject.IsValid())
+		{
+			OutError = FString::Printf(TEXT("Could not parse JSON file: %s"), *Filename);
+			return false;
+		}
+		return true;
+	}
+
+	bool SaveJsonObject(const FString& Filename, const TSharedRef<FJsonObject>& Object, FString& OutError)
+	{
+		FString JsonText;
+		const TSharedRef<TJsonWriter<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>> Writer =
+			TJsonWriterFactory<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>::Create(&JsonText);
+		if (!FJsonSerializer::Serialize(Object, Writer))
+		{
+			OutError = TEXT("Could not serialize fixture report.");
+			return false;
+		}
+		IFileManager::Get().MakeDirectory(*FPaths::GetPath(Filename), true);
+		if (!FFileHelper::SaveStringToFile(JsonText, *Filename, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+		{
+			OutError = FString::Printf(TEXT("Could not write fixture report: %s"), *Filename);
+			return false;
+		}
+		return true;
+	}
+
+	FString NormalizePackagePath(const FString& Input)
+	{
+		FString Result = Input;
+		int32 DotIndex = INDEX_NONE;
+		if (Result.FindChar(TEXT('.'), DotIndex))
+		{
+			Result = Result.Left(DotIndex);
+		}
+		Result.RemoveFromEnd(TEXT("/"));
+		return Result;
+	}
+
+	bool IsSpecificGameRoot(const FString& Root)
+	{
+		return Root.StartsWith(TEXT("/Game/"), ESearchCase::CaseSensitive)
+			&& !Root.Contains(TEXT(".."))
+			&& FPackageName::IsValidLongPackageName(Root);
+	}
+
+	bool IsTargetUnderRoot(const FString& Target, const FString& Root)
+	{
+		return Target.StartsWith(Root + TEXT("/"), ESearchCase::CaseSensitive)
+			&& !Target.Contains(TEXT(".."))
+			&& !Target.Contains(TEXT("."))
+			&& FPackageName::IsValidLongPackageName(Target);
+	}
+
+	bool IsReadableSourcePackage(const FString& Source)
+	{
+		return Source.StartsWith(TEXT("/"), ESearchCase::CaseSensitive)
+			&& !Source.Contains(TEXT(".."))
+			&& FPackageName::IsValidLongPackageName(Source);
+	}
+
+	FString ToObjectPath(const FString& PackagePath)
+	{
+		return PackagePath + TEXT(".") + FPackageName::GetLongPackageAssetName(PackagePath);
+	}
+
+	FString GetAssetClassPath(const UObject* Asset)
+	{
+		return Asset && Asset->GetClass()
+			? Asset->GetClass()->GetClassPathName().ToString()
+			: FString();
+	}
+
+	FString GetPackageFilename(const FString& PackageName)
+	{
+		return FPaths::ConvertRelativePathToFull(FPackageName::LongPackageNameToFilename(
+			PackageName,
+			FPackageName::GetAssetPackageExtension()));
+	}
+
+	TArray<FString> FindPackageSidecars(const FString& PackageFilename)
+	{
+		static const TCHAR* SidecarExtensions[] = {
+			TEXT(".uexp"),
+			TEXT(".ubulk"),
+			TEXT(".uptnl"),
+			TEXT(".m.ubulk"),
+			TEXT(".upayload")};
+		TArray<FString> Results;
+		const FString BaseFilename = FPaths::ChangeExtension(PackageFilename, TEXT(""));
+		for (const TCHAR* Extension : SidecarExtensions)
+		{
+			const FString Candidate = BaseFilename + Extension;
+			if (IFileManager::Get().FileExists(*Candidate))
+			{
+				Results.Add(Candidate);
+			}
+		}
+		return Results;
+	}
+
+	bool ParseBlueprintType(const FString& Value, EBlueprintType& OutType)
+	{
+		if (Value.Equals(TEXT("Normal"), ESearchCase::CaseSensitive))
+		{
+			OutType = BPTYPE_Normal;
+			return true;
+		}
+		if (Value.Equals(TEXT("FunctionLibrary"), ESearchCase::CaseSensitive))
+		{
+			OutType = BPTYPE_FunctionLibrary;
+			return true;
+		}
+		if (Value.Equals(TEXT("MacroLibrary"), ESearchCase::CaseSensitive))
+		{
+			OutType = BPTYPE_MacroLibrary;
+			return true;
+		}
+		if (Value.Equals(TEXT("Interface"), ESearchCase::CaseSensitive))
+		{
+			OutType = BPTYPE_Interface;
+			return true;
+		}
+		return false;
+	}
+
+	bool SaveBlueprint(UBlueprint* Blueprint, FString& OutError)
+	{
+		if (!Blueprint)
+		{
+			OutError = TEXT("Blueprint is null.");
+			return false;
+		}
+		UPackage* Package = Blueprint->GetOutermost();
+		const FString Filename = GetPackageFilename(Package->GetName());
+		IFileManager::Get().MakeDirectory(*FPaths::GetPath(Filename), true);
+		FKismetEditorUtilities::CompileBlueprint(Blueprint, EBlueprintCompileOptions::SkipGarbageCollection);
+		if (Blueprint->Status == BS_Error)
+		{
+			OutError = FString::Printf(TEXT("Blueprint compilation failed: %s"), *Blueprint->GetPathName());
+			return false;
+		}
+		FSavePackageArgs SaveArgs;
+		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+		SaveArgs.SaveFlags = SAVE_NoError;
+		SaveArgs.Error = GError;
+		if (!UPackage::SavePackage(Package, Blueprint, *Filename, SaveArgs))
+		{
+			OutError = FString::Printf(TEXT("Could not save Blueprint fixture: %s"), *Filename);
+			return false;
+		}
+		return true;
+	}
+
+	UBlueprint* CreateBlueprintFixture(const FFixtureDefinition& Definition, FString& OutError)
+	{
+		UPackage* Package = CreatePackage(*Definition.TargetAsset);
+		if (!Package)
+		{
+			OutError = FString::Printf(TEXT("Could not create package: %s"), *Definition.TargetAsset);
+			return nullptr;
+		}
+		const FString AssetName = FPackageName::GetLongPackageAssetName(Definition.TargetAsset);
+		UBlueprint* Blueprint = FKismetEditorUtilities::CreateBlueprint(
+			Definition.ParentClass,
+			Package,
+			FName(*AssetName),
+			Definition.BlueprintType,
+			FName(TEXT("UEAgentKitWriteFixturePlan")));
+		if (!Blueprint)
+		{
+			OutError = FString::Printf(TEXT("Could not create Blueprint fixture: %s"), *Definition.TargetAsset);
+			return nullptr;
+		}
+		Blueprint->BlueprintDescription = FString::Printf(
+			TEXT("UEAgentKit generated fixture %s."),
+			*Definition.Id);
+		FAssetRegistryModule::AssetCreated(Blueprint);
+		Package->MarkPackageDirty();
+		if (!SaveBlueprint(Blueprint, OutError))
+		{
+			return nullptr;
+		}
+		return Blueprint;
+	}
+
+	void AddError(TArray<TSharedPtr<FJsonValue>>& Errors, const FString& Code, const FString& Message, const FString& Path)
+	{
+		const TSharedRef<FJsonObject> Error = MakeShared<FJsonObject>();
+		Error->SetStringField(TEXT("code"), Code);
+		Error->SetStringField(TEXT("message"), Message);
+		Error->SetStringField(TEXT("path"), Path);
+		Errors.Add(MakeShared<FJsonValueObject>(Error));
+	}
+}
+
+UWriteFixturePlanCommandlet::UWriteFixturePlanCommandlet()
+{
+	IsClient = false;
+	IsEditor = true;
+	IsServer = false;
+	LogToConsole = true;
+	ShowErrorCount = true;
+}
+
+int32 UWriteFixturePlanCommandlet::Main(const FString& Params)
+{
+	using namespace WriteFixturePlanCommandletPrivate;
+
+	FString PlanFilename;
+	FString ExpectedPlanRevision;
+	FString ReportFilename;
+	FString Mode = TEXT("Create");
+	FParse::Value(*Params, TEXT("Plan="), PlanFilename);
+	FParse::Value(*Params, TEXT("ExpectedPlanRevision="), ExpectedPlanRevision);
+	FParse::Value(*Params, TEXT("Report="), ReportFilename);
+	FParse::Value(*Params, TEXT("Mode="), Mode);
+	PlanFilename = FPaths::ConvertRelativePathToFull(PlanFilename);
+	ReportFilename = FPaths::ConvertRelativePathToFull(ReportFilename);
+
+	const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
+	Report->SetStringField(TEXT("schemaVersion"), SchemaVersion);
+	Report->SetStringField(TEXT("toolVersion"), ToolVersion);
+	Report->SetStringField(TEXT("engineVersion"), FEngineVersion::Current().ToString());
+	Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
+	Report->SetStringField(TEXT("mode"), Mode);
+	Report->SetStringField(TEXT("planPath"), PlanFilename);
+	TArray<TSharedPtr<FJsonValue>> Errors;
+	TArray<TSharedPtr<FJsonValue>> FixtureResults;
+	int32 DeletedCount = 0;
+	int32 CreatedCount = 0;
+
+	auto Finish = [&](const int32 ExitCode, const bool bValid, const FString& Status) -> int32
+	{
+		Report->SetNumberField(TEXT("deletedCount"), DeletedCount);
+		Report->SetNumberField(TEXT("createdCount"), CreatedCount);
+		Report->SetBoolField(TEXT("valid"), bValid);
+		Report->SetStringField(TEXT("status"), Status);
+		Report->SetArrayField(TEXT("fixtures"), FixtureResults);
+		Report->SetArrayField(TEXT("errors"), Errors);
+		Report->SetNumberField(TEXT("fixtureCount"), FixtureResults.Num());
+		Report->SetNumberField(TEXT("errorCount"), Errors.Num());
+		FString SaveError;
+		if (ReportFilename.IsEmpty() || !SaveJsonObject(ReportFilename, Report, SaveError))
+		{
+			UE_LOG(LogWriteFixturePlan, Error, TEXT("%s"), *SaveError);
+			return ExitCode == 0 ? 9 : ExitCode;
+		}
+		return ExitCode;
+	};
+
+	if (PlanFilename.IsEmpty() || ExpectedPlanRevision.IsEmpty() || ReportFilename.IsEmpty())
+	{
+		AddError(Errors, TEXT("arguments"), TEXT("Plan, ExpectedPlanRevision, and Report are required."), TEXT("commandLine"));
+		return Finish(1, false, TEXT("invalid-arguments"));
+	}
+	if (!Mode.Equals(TEXT("Create"), ESearchCase::CaseSensitive)
+		&& !Mode.Equals(TEXT("Reset"), ESearchCase::CaseSensitive))
+	{
+		AddError(Errors, TEXT("mode"), TEXT("Mode must be Create or Reset."), TEXT("commandLine.Mode"));
+		return Finish(1, false, TEXT("invalid-mode"));
+	}
+
+	TSharedPtr<FJsonObject> Plan;
+	FString Error;
+	if (!LoadJsonObject(PlanFilename, Plan, Error))
+	{
+		AddError(Errors, TEXT("plan-json"), Error, TEXT("plan"));
+		return Finish(1, false, TEXT("invalid-plan"));
+	}
+	FString PlanHash;
+	if (!FBlueprintContextSha256::HashFile(PlanFilename, PlanHash))
+	{
+		AddError(Errors, TEXT("plan-hash"), TEXT("Fixture plan could not be hashed."), TEXT("plan"));
+		return Finish(1, false, TEXT("invalid-plan"));
+	}
+	const FString ActualPlanRevision = TEXT("sha256:") + PlanHash.ToLower();
+	Report->SetStringField(TEXT("planRevision"), ActualPlanRevision);
+	if (!ActualPlanRevision.Equals(ExpectedPlanRevision, ESearchCase::CaseSensitive))
+	{
+		AddError(
+			Errors,
+			TEXT("plan-revision-conflict"),
+			FString::Printf(
+				TEXT("Expected Plan Revision %s, found %s."),
+				*ExpectedPlanRevision,
+				*ActualPlanRevision),
+			TEXT("commandLine.ExpectedPlanRevision"));
+		return Finish(2, false, TEXT("validation-failed"));
+	}
+	FString PlanSchemaVersion;
+	Plan->TryGetStringField(TEXT("schemaVersion"), PlanSchemaVersion);
+	if (!PlanSchemaVersion.Equals(SchemaVersion, ESearchCase::CaseSensitive))
+	{
+		AddError(Errors, TEXT("plan-schema"), TEXT("Unsupported fixture plan schemaVersion."), TEXT("plan.schemaVersion"));
+	}
+	FString Root;
+	Plan->TryGetStringField(TEXT("root"), Root);
+	Root.RemoveFromEnd(TEXT("/"));
+	if (!IsSpecificGameRoot(Root))
+	{
+		AddError(Errors, TEXT("root"), TEXT("root must be a specific valid directory below /Game."), TEXT("plan.root"));
+	}
+	Report->SetStringField(TEXT("root"), Root);
+
+	const TArray<TSharedPtr<FJsonValue>>* FixtureValues = nullptr;
+	if (!Plan->TryGetArrayField(TEXT("fixtures"), FixtureValues)
+		|| !FixtureValues
+		|| FixtureValues->IsEmpty()
+		|| FixtureValues->Num() > MaxFixtures)
+	{
+		AddError(
+			Errors,
+			TEXT("fixtures"),
+			FString::Printf(TEXT("fixtures must contain 1-%d entries."), MaxFixtures),
+			TEXT("plan.fixtures"));
+	}
+
+	UEditorAssetSubsystem* AssetSubsystem = GEditor
+		? GEditor->GetEditorSubsystem<UEditorAssetSubsystem>()
+		: nullptr;
+	if (!AssetSubsystem)
+	{
+		AddError(Errors, TEXT("editor-subsystem"), TEXT("EditorAssetSubsystem is unavailable."), TEXT("engine"));
+	}
+	if (!Errors.IsEmpty())
+	{
+		return Finish(2, false, TEXT("validation-failed"));
+	}
+
+	TArray<FFixtureDefinition> Definitions;
+	TSet<FString> FixtureIds;
+	TSet<FString> TargetPackages;
+	for (int32 Index = 0; Index < FixtureValues->Num(); ++Index)
+	{
+		const TSharedPtr<FJsonObject> Object = (*FixtureValues)[Index].IsValid()
+			? (*FixtureValues)[Index]->AsObject()
+			: nullptr;
+		const FString BasePath = FString::Printf(TEXT("plan.fixtures[%d]"), Index);
+		if (!Object.IsValid())
+		{
+			AddError(Errors, TEXT("fixture-object"), TEXT("Fixture entry must be an object."), BasePath);
+			continue;
+		}
+		FFixtureDefinition Definition;
+		Object->TryGetStringField(TEXT("id"), Definition.Id);
+		Object->TryGetStringField(TEXT("kind"), Definition.Kind);
+		Object->TryGetStringField(TEXT("targetAsset"), Definition.TargetAsset);
+		Object->TryGetStringField(TEXT("expectedClass"), Definition.ExpectedClass);
+		const bool bTargetHasObjectSuffix = Definition.TargetAsset.Contains(TEXT("."));
+		Definition.TargetAsset = NormalizePackagePath(Definition.TargetAsset);
+		if (Definition.Id.IsEmpty() || FixtureIds.Contains(Definition.Id))
+		{
+			AddError(Errors, TEXT("fixture-id"), TEXT("Fixture id must be non-empty and unique."), BasePath + TEXT(".id"));
+		}
+		else
+		{
+			FixtureIds.Add(Definition.Id);
+		}
+		if (bTargetHasObjectSuffix
+			|| !IsTargetUnderRoot(Definition.TargetAsset, Root)
+			|| TargetPackages.Contains(Definition.TargetAsset))
+		{
+			AddError(
+				Errors,
+				TEXT("target"),
+				TEXT("targetAsset must be a unique package directly below the declared root."),
+				BasePath + TEXT(".targetAsset"));
+		}
+		else
+		{
+			TargetPackages.Add(Definition.TargetAsset);
+		}
+		if (!Definition.ExpectedClass.StartsWith(TEXT("/Script/"), ESearchCase::CaseSensitive))
+		{
+			AddError(Errors, TEXT("expected-class"), TEXT("expectedClass must use /Script/Module.Class form."), BasePath + TEXT(".expectedClass"));
+		}
+
+		if (Definition.Kind.Equals(TEXT("duplicateAsset"), ESearchCase::CaseSensitive))
+		{
+			Object->TryGetStringField(TEXT("sourceAsset"), Definition.SourceAsset);
+			Definition.SourceAsset = NormalizePackagePath(Definition.SourceAsset);
+			if (!IsReadableSourcePackage(Definition.SourceAsset)
+				|| Definition.SourceAsset.Equals(Definition.TargetAsset, ESearchCase::CaseSensitive))
+			{
+				AddError(Errors, TEXT("source"), TEXT("sourceAsset must be a different valid long package name."), BasePath + TEXT(".sourceAsset"));
+			}
+			else
+			{
+				Definition.SourceObject = AssetSubsystem->LoadAsset(Definition.SourceAsset);
+				if (!Definition.SourceObject)
+				{
+					AddError(Errors, TEXT("source-missing"), TEXT("sourceAsset could not be loaded."), BasePath + TEXT(".sourceAsset"));
+				}
+				else if (!GetAssetClassPath(Definition.SourceObject).Equals(Definition.ExpectedClass, ESearchCase::CaseSensitive))
+				{
+					AddError(
+						Errors,
+						TEXT("source-class"),
+						FString::Printf(
+							TEXT("sourceAsset class %s does not match expectedClass %s."),
+							*GetAssetClassPath(Definition.SourceObject),
+							*Definition.ExpectedClass),
+						BasePath + TEXT(".expectedClass"));
+				}
+			}
+		}
+		else if (Definition.Kind.Equals(TEXT("blueprint"), ESearchCase::CaseSensitive))
+		{
+			FString BlueprintTypeText;
+			Object->TryGetStringField(TEXT("parentClass"), Definition.ParentClassPath);
+			Object->TryGetStringField(TEXT("blueprintType"), BlueprintTypeText);
+			if (!Definition.ExpectedClass.Equals(TEXT("/Script/Engine.Blueprint"), ESearchCase::CaseSensitive))
+			{
+				AddError(Errors, TEXT("blueprint-class"), TEXT("blueprint fixtures require expectedClass /Script/Engine.Blueprint."), BasePath + TEXT(".expectedClass"));
+			}
+			if (!ParseBlueprintType(BlueprintTypeText, Definition.BlueprintType))
+			{
+				AddError(Errors, TEXT("blueprint-type"), TEXT("blueprintType is invalid."), BasePath + TEXT(".blueprintType"));
+			}
+			Definition.ParentClass = LoadObject<UClass>(nullptr, *Definition.ParentClassPath);
+			if (!Definition.ParentClass)
+			{
+				AddError(Errors, TEXT("parent-class"), TEXT("parentClass could not be loaded."), BasePath + TEXT(".parentClass"));
+			}
+		}
+		else
+		{
+			AddError(Errors, TEXT("fixture-kind"), TEXT("kind must be duplicateAsset or blueprint."), BasePath + TEXT(".kind"));
+		}
+		Definitions.Add(MoveTemp(Definition));
+	}
+
+	for (const FFixtureDefinition& Definition : Definitions)
+	{
+		if (!Definition.SourceAsset.IsEmpty() && TargetPackages.Contains(Definition.SourceAsset))
+		{
+			AddError(
+				Errors,
+				TEXT("source-target-overlap"),
+				TEXT("A sourceAsset cannot also be a targetAsset in the same plan."),
+				Definition.Id);
+		}
+		const bool bExists = AssetSubsystem->DoesAssetExist(Definition.TargetAsset);
+		if (Mode.Equals(TEXT("Create"), ESearchCase::CaseSensitive) && bExists)
+		{
+			AddError(
+				Errors,
+				TEXT("target-exists"),
+				TEXT("Create mode refuses existing targets; use Reset for deterministic recreation."),
+				Definition.TargetAsset);
+		}
+		if (bExists)
+		{
+			const TArray<FString> Sidecars = FindPackageSidecars(GetPackageFilename(Definition.TargetAsset));
+			if (!Sidecars.IsEmpty())
+			{
+				AddError(
+					Errors,
+					TEXT("target-sidecars"),
+					TEXT("Fixture reset currently supports only single-file .uasset packages."),
+					Definition.TargetAsset);
+			}
+		}
+	}
+	if (!Errors.IsEmpty())
+	{
+		return Finish(2, false, TEXT("validation-failed"));
+	}
+
+	if (Mode.Equals(TEXT("Reset"), ESearchCase::CaseSensitive))
+	{
+		for (const FFixtureDefinition& Definition : Definitions)
+		{
+			if (AssetSubsystem->DoesAssetExist(Definition.TargetAsset))
+			{
+				if (!AssetSubsystem->DeleteAsset(Definition.TargetAsset))
+				{
+					AddError(Errors, TEXT("delete-failed"), TEXT("Could not delete existing fixture target."), Definition.TargetAsset);
+					return Finish(3, false, TEXT("reset-failed"));
+				}
+				++DeletedCount;
+			}
+		}
+		if (DeletedCount > 0)
+		{
+			CollectGarbage(RF_NoFlags);
+		}
+	}
+
+	for (const FFixtureDefinition& Definition : Definitions)
+	{
+		UObject* CreatedAsset = nullptr;
+		FString CreateError;
+		if (Definition.Kind.Equals(TEXT("duplicateAsset"), ESearchCase::CaseSensitive))
+		{
+			CreatedAsset = AssetSubsystem->DuplicateAsset(Definition.SourceAsset, Definition.TargetAsset);
+			if (CreatedAsset && !AssetSubsystem->SaveLoadedAsset(CreatedAsset, false))
+			{
+				CreateError = TEXT("Duplicated fixture could not be saved.");
+				CreatedAsset = nullptr;
+			}
+		}
+		else
+		{
+			CreatedAsset = CreateBlueprintFixture(Definition, CreateError);
+		}
+
+		if (!CreatedAsset)
+		{
+			AddError(
+				Errors,
+				TEXT("create-failed"),
+				CreateError.IsEmpty() ? TEXT("Fixture creation failed.") : CreateError,
+				Definition.TargetAsset);
+			return Finish(4, false, TEXT("creation-failed"));
+		}
+		const FString ActualClass = GetAssetClassPath(CreatedAsset);
+		if (!ActualClass.Equals(Definition.ExpectedClass, ESearchCase::CaseSensitive))
+		{
+			AddError(
+				Errors,
+				TEXT("created-class"),
+				FString::Printf(TEXT("Created class %s does not match %s."), *ActualClass, *Definition.ExpectedClass),
+				Definition.TargetAsset);
+			return Finish(5, false, TEXT("verification-failed"));
+		}
+		const FString PackageFilename = GetPackageFilename(Definition.TargetAsset);
+		FString RevisionHex;
+		if (!IFileManager::Get().FileExists(*PackageFilename)
+			|| !FBlueprintContextSha256::HashFile(PackageFilename, RevisionHex))
+		{
+			AddError(Errors, TEXT("revision"), TEXT("Created fixture package could not be hashed."), Definition.TargetAsset);
+			return Finish(5, false, TEXT("verification-failed"));
+		}
+		const TArray<FString> Sidecars = FindPackageSidecars(PackageFilename);
+		if (!Sidecars.IsEmpty())
+		{
+			AddError(Errors, TEXT("created-sidecars"), TEXT("Created fixture has unsupported package sidecars."), Definition.TargetAsset);
+			return Finish(5, false, TEXT("verification-failed"));
+		}
+
+		const TSharedRef<FJsonObject> FixtureResult = MakeShared<FJsonObject>();
+		FixtureResult->SetStringField(TEXT("id"), Definition.Id);
+		FixtureResult->SetStringField(TEXT("kind"), Definition.Kind);
+		FixtureResult->SetStringField(TEXT("assetPath"), ToObjectPath(Definition.TargetAsset));
+		FixtureResult->SetStringField(TEXT("packageName"), Definition.TargetAsset);
+		FixtureResult->SetStringField(TEXT("assetClass"), ActualClass);
+		FixtureResult->SetStringField(TEXT("packageFilename"), PackageFilename);
+		FixtureResult->SetStringField(TEXT("revision"), TEXT("sha256:") + RevisionHex.ToLower());
+		FixtureResult->SetNumberField(TEXT("fileSize"), IFileManager::Get().FileSize(*PackageFilename));
+		FixtureResult->SetBoolField(TEXT("singleFilePackage"), true);
+		FixtureResult->SetStringField(TEXT("status"), TEXT("created"));
+		FixtureResults.Add(MakeShared<FJsonValueObject>(FixtureResult));
+		++CreatedCount;
+	}
+
+	UE_LOG(
+		LogWriteFixturePlan,
+		Display,
+		TEXT("Fixture plan completed. Mode=%s Created=%d Deleted=%d Root=%s"),
+		*Mode,
+		CreatedCount,
+		DeletedCount,
+		*Root);
+	return Finish(0, true, TEXT("completed"));
+}
