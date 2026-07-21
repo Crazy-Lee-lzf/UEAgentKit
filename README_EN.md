@@ -4,9 +4,9 @@
 
 > Convert Unreal Engine assets and Blueprints into searchable, traceable project knowledge for developers and AI agents.
 
-UE Agent Kit is an open-source, read-only Unreal Engine asset analysis toolkit. Its Editor plugin exports the project asset catalog, Asset Registry metadata, dependencies, and Blueprint semantics. A Python CLI and SQLite then provide a project-wide searchable index.
+UE Agent Kit is an open-source Unreal Engine asset analysis, indexing, and policy-gated patch toolkit. Its Editor plugin exports asset catalogs, Asset Registry metadata, dependencies, and Blueprint semantics; a Python CLI and SQLite provide a project-wide index, while Policy, Revision checks, dry runs, and backups protect explicit writes.
 
-The current release is **0.3.2** and targets **Unreal Engine 5.6**. Low-risk Blueprint writes are verified for ordinary Blueprints, Widget, Anim, Actor Component, Function Library, Macro Library, Interface, and Control Rig assets.
+The current release is **0.3.3** and targets **Unreal Engine 5.6**. In addition to eight Blueprint categories, exact-allowlist scalar writes are verified for Data Assets, Texture2D, and Static Mesh assets.
 
 > **AI Generated**: Most code and documentation in this project are AI-generated and reviewed through human inspection, UE 5.6 compilation, automated tests, and real-project regression validation.
 
@@ -19,7 +19,7 @@ The current release is **0.3.2** and targets **Unreal Engine 5.6**. Low-risk Blu
 - Find where Blueprint variables are read or written.
 - Trace functions, interface messages, macros, Dynamic Casts, and Event Dispatchers.
 - Inspect Blueprint graphs, nodes, pins, and connections.
-- Validate Blueprint patches against policy, revision, and export snapshots, then execute an authorized dry run or explicit commit.
+- Validate patches against policy, revision, and export snapshots, then dry-run or explicitly commit authorized Blueprint or non-Blueprint scalar changes.
 
 ## Main capabilities
 
@@ -122,7 +122,7 @@ scripts\ue-agent.cmd search symbols MaxWalkSpeed
 scripts\ue-agent.cmd references --target-asset /Game/LevelPrototyping/Materials/M_FlatCol.M_FlatCol
 ```
 
-### 5. Validate and execute a Blueprint patch
+### 5. Validate and execute a patch
 
 Export the target Blueprint first to capture its current revision:
 
@@ -145,7 +145,7 @@ scripts\ue-agent.cmd patch validate ^
   --report Output\Patch\validation-report.json
 ```
 
-Run an in-memory dry run. The commandlet mutates the UObject, compiles the Blueprint, captures the result, restores the original value, and compiles again without saving the asset:
+Run an in-memory dry run. The commandlet mutates the UObject, captures the result, and restores the original value without saving; Blueprint operations compile after mutation and rollback, while non-Blueprint operations issue editor change notifications:
 
 ```bat
 scripts\RunPatch.cmd ^
@@ -156,7 +156,7 @@ scripts\RunPatch.cmd ^
   -Mode DryRun
 ```
 
-For an explicit commit, the policy must also set `commitEnabled=true`. The executor creates an external `.uasset` backup before compiling and saving one authorized Blueprint:
+For an explicit commit, the policy must also set `commitEnabled=true`. The executor creates an external `.uasset` backup before saving one authorized asset; Blueprint operations must also compile successfully:
 
 ```bat
 scripts\RunPatch.cmd ^
@@ -168,12 +168,12 @@ scripts\RunPatch.cmd ^
   -BackupDir "Backups\Patches"
 ```
 
-The current executor supports `setVariableDefault`, `setComponentProperty`, `setPinDefault`, and `setBlueprintDescription`. One execution is limited to one Blueprint and one operation; values are currently limited to Boolean, numeric, and string-like scalars.
+The executor supports four Blueprint operations plus non-Blueprint `setAssetProperty`. One execution is limited to one asset and one operation. Generic asset properties require an exact `allowedAssetProperties` entry in `AssetClass#Property.Path` form and must resolve to an editable, non-transient scalar rather than a container or object reference. The current executor only accepts single-file packages without external package sidecars.
 
 ### 6. Validate the asset catalog
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.3.2
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.3.3
 ```
 
 See [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md) for installation and full command details.
@@ -212,12 +212,12 @@ See [`docs/README.md`](docs/README.md) for the documentation index.
 
 ## Safety
 
-Read-only exporters and `ue-agent patch validate` never modify UObjects or asset files. Actual mutation is isolated in the `BlueprintPatch` commandlet, invoked by `RunPatch` only after pre-validation succeeds.
+Read-only exporters and `ue-agent patch validate` never modify UObjects or asset files. Actual mutation is isolated in the `BlueprintPatch` or `AssetPatch` commandlet, selected by `RunPatch` only after pre-validation succeeds.
 
 - `DryRun` is the default and must preserve the disk revision.
 - `Commit` requires both an explicit command mode and `commitEnabled=true` in policy.
-- Project, asset root, asset class, and operation must all be authorized.
-- An external backup is created before saving. Compile failure, revision conflict, dirty package, or target resolution failure prevents saving.
+- Project, asset root, asset class, and operation must all be authorized; generic assets also require an exact property-path allowlist entry.
+- An external backup is created before saving. Blueprint compile failure, revision conflict, dirty package, target resolution, or type validation failure prevents saving.
 - The executor currently handles one asset and one operation to avoid partial saves.
 - Assets are changed through Unreal Editor APIs; the tool never edits `.uasset` binary bytes directly.
 

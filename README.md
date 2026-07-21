@@ -4,9 +4,9 @@
 
 > 将 Unreal Engine 资产和 Blueprint 转换为 AI 与开发者可检索、可追踪的项目知识。
 
-UE Agent Kit 是一套面向 Unreal Engine 的开源只读资产分析工具。它通过 UE Editor 插件导出项目资产目录、Asset Registry 元数据、依赖关系和 Blueprint 语义，再使用 Python CLI 与 SQLite 建立项目级索引。
+UE Agent Kit 是一套面向 Unreal Engine 的开源资产分析、索引与受控写入工具。它通过 UE Editor 插件导出项目资产目录、Asset Registry 元数据、依赖关系和 Blueprint 语义，再使用 Python CLI 与 SQLite 建立项目级索引，并通过 Policy、Revision、Dry Run 和备份保护显式写入。
 
-当前版本为 **0.3.2**，支持 **Unreal Engine 5.6**。Blueprint 低风险写入已覆盖普通 Blueprint、Widget、Anim、Actor Component、Function Library、Macro Library、Interface 和 Control Rig。
+当前版本为 **0.3.3**，支持 **Unreal Engine 5.6**。除八类 Blueprint 写入外，现已验证 Data Asset、Texture2D 和 Static Mesh 的精确白名单标量属性写入。
 
 > **AI Generated**：本项目的代码和文档主要由 AI 生成，并通过人工审查、UE 5.6 编译、自动化测试和真实工程回归验证。
 
@@ -19,7 +19,7 @@ UE Agent Kit 是一套面向 Unreal Engine 的开源只读资产分析工具。�
 - 查询 Blueprint 变量在哪里被读取或写入。
 - 查询函数、接口消息、宏、Dynamic Cast 和 Event Dispatcher 的调用关系。
 - 查看 Blueprint 的 Graph、Node、Pin 和连接结构。
-- 使用 Policy、Revision 和导出快照校验 Blueprint Patch，并对授权 Blueprint 执行 Dry Run 或显式 Commit。
+- 使用 Policy、Revision 和导出快照校验 Patch，并对授权 Blueprint 或非 Blueprint 标量属性执行 Dry Run 或显式 Commit。
 
 ## 主要能力
 
@@ -122,7 +122,7 @@ scripts\ue-agent.cmd search symbols MaxWalkSpeed
 scripts\ue-agent.cmd references --target-asset /Game/LevelPrototyping/Materials/M_FlatCol.M_FlatCol
 ```
 
-### 5. 校验并执行 Blueprint Patch
+### 5. 校验并执行 Patch
 
 先导出目标 Blueprint，获得当前 Revision：
 
@@ -145,7 +145,7 @@ scripts\ue-agent.cmd patch validate ^
   --report Output\Patch\validation-report.json
 ```
 
-内存 Dry Run：修改 UObject、编译 Blueprint、读取修改结果、恢复原值并再次编译；不保存 `.uasset`：
+内存 Dry Run：修改 UObject、读取结果并恢复原值；Blueprint 会在修改和回滚后编译，非 Blueprint 会触发编辑通知；不保存 `.uasset`：
 
 ```bat
 scripts\RunPatch.cmd ^
@@ -156,7 +156,7 @@ scripts\RunPatch.cmd ^
   -Mode DryRun
 ```
 
-显式 Commit：Policy 中还必须设置 `commitEnabled=true`。执行器会先创建外部 `.uasset` 备份，再编译并保存单个授权 Blueprint：
+显式 Commit：Policy 中还必须设置 `commitEnabled=true`。执行器会先创建外部 `.uasset` 备份，再保存单个授权资产；Blueprint 还必须编译成功：
 
 ```bat
 scripts\RunPatch.cmd ^
@@ -168,12 +168,12 @@ scripts\RunPatch.cmd ^
   -BackupDir "Backups\Patches"
 ```
 
-当前支持 `setVariableDefault`、`setComponentProperty`、`setPinDefault` 和 `setBlueprintDescription`。每次执行仅允许一个 Blueprint 和一个 Operation；值类型暂限布尔、数值和字符串类标量。
+当前支持四种 Blueprint Operation，以及非 Blueprint 的 `setAssetProperty`。每次执行仅允许一个资产和一个 Operation；通用资产属性必须由 `allowedAssetProperties` 以 `AssetClass#Property.Path` 精确授权，且最终属性必须可编辑、非 Transient、非容器和非对象引用；当前仅接受没有独立 Package 侧文件的单文件资产。
 
 ### 6. 校验通用资产导出
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.3.2
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.3.3
 ```
 
 完整参数和安装说明见 [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md)。
@@ -212,12 +212,12 @@ Output\Blueprints\
 
 ## 安全说明
 
-只读导出器和 `ue-agent patch validate` 不修改 UObject 或资产文件。实际写入只能通过独立的 `BlueprintPatch` Commandlet，由 `RunPatch` 在预校验通过后调用。
+只读导出器和 `ue-agent patch validate` 不修改 UObject 或资产文件。实际写入只能通过独立的 `BlueprintPatch` 或 `AssetPatch` Commandlet，由 `RunPatch` 在预校验通过后按 Operation 分发。
 
 - 默认使用 `DryRun`，磁盘 Revision 必须保持不变。
 - `Commit` 同时要求命令行显式选择和 Policy 的 `commitEnabled=true`。
-- 仅允许 Policy 授权的项目、目录、Asset Class 和 Operation。
-- 保存前创建外部备份；编译失败、Revision 冲突、Dirty Package 或目标解析失败时禁止保存。
+- 仅允许 Policy 授权的项目、目录、Asset Class 和 Operation；通用资产还要求精确 PropertyPath 白名单。
+- 保存前创建外部备份；Blueprint 编译失败、Revision 冲突、Dirty Package、目标解析或类型校验失败时禁止保存。
 - 当前执行器只处理单资产、单操作，避免部分保存。
 - 工具通过 UE Editor API 修改并保存资产，不直接编辑 `.uasset` 二进制。
 

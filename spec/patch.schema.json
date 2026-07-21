@@ -94,6 +94,9 @@
               },
               {
                 "$ref": "#/$defs/setBlueprintDescription"
+              },
+              {
+                "$ref": "#/$defs/setAssetProperty"
               }
             ]
           }
@@ -243,6 +246,35 @@
             "value": {
               "type": "string",
               "maxLength": 4096
+            }
+          }
+        }
+      ]
+    },
+    "setAssetProperty": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "operation": {
+              "const": "setAssetProperty"
+            },
+            "target": {
+              "type": "object",
+              "required": [
+                "propertyPath"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "propertyPath": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"
+                }
+              }
             }
           }
         }

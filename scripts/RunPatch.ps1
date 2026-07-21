@@ -81,16 +81,19 @@ if ($LASTEXITCODE -ne 0)
 $Validation = Get-Content -LiteralPath $ValidationReport -Raw | ConvertFrom-Json
 if ($Validation.summary.assets -ne 1 -or $Validation.summary.operations -ne 1)
 {
-    throw "BlueprintPatch currently requires exactly one asset and one operation per execution."
+    throw "Patch execution currently requires exactly one asset and one operation per execution."
 }
 if (!$Validation.commitSupported)
 {
-    throw "The installed validation layer does not report Blueprint patch executor support."
+    throw "The installed validation layer does not report patch executor support."
 }
+
+$Operation = $Validation.assets[0].operations[0].operation
+$Commandlet = if ($Operation -eq "setAssetProperty") { "AssetPatch" } else { "BlueprintPatch" }
 
 $Arguments = @(
     $ProjectPath,
-    "-run=BlueprintPatch",
+    "-run=$Commandlet",
     "-Patch=$Patch",
     "-Policy=$Policy",
     "-Report=$Report",
@@ -105,7 +108,7 @@ $Arguments = @(
     "-FullStdOutLogOutput"
 )
 
-Write-Host "Running BlueprintPatch..."
+Write-Host "Running $Commandlet..."
 Write-Host "Engine    : $EngineRoot"
 Write-Host "Project   : $ProjectPath"
 Write-Host "Mode      : $Mode"
@@ -121,7 +124,7 @@ if ($Mode -eq "Commit")
 & $EditorCmd @Arguments
 if ($LASTEXITCODE -ne 0)
 {
-    throw "BlueprintPatch failed with exit code $LASTEXITCODE"
+    throw "$Commandlet failed with exit code $LASTEXITCODE"
 }
 
 Write-Host "Patch completed: $Report"

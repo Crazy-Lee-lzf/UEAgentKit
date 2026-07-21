@@ -12,17 +12,26 @@
     "setVariableDefault",
     "setComponentProperty",
     "setPinDefault",
-    "setBlueprintDescription"
+    "setBlueprintDescription",
+    "setAssetProperty"
   ],
   "allowedAssetClasses": [
     "/Script/Engine.Blueprint",
     "/Script/UMGEditor.WidgetBlueprint",
     "/Script/Engine.AnimBlueprint",
-    "/Script/ControlRigDeveloper.ControlRigBlueprint"
+    "/Script/ControlRigDeveloper.ControlRigBlueprint",
+    "/Script/Engine.PrimaryAssetLabel",
+    "/Script/Engine.Texture2D",
+    "/Script/Engine.StaticMesh"
   ],
   "requireRevision": true,
   "rejectDirtyPackages": true,
   "maxAssetsPerPatch": 10,
   "maxOperationsPerAsset": 32,
-  "maxValueBytes": 65536
+  "maxValueBytes": 65536,
+  "allowedAssetProperties": [
+    "/Script/Engine.PrimaryAssetLabel#bIncludeRedirectors",
+    "/Script/Engine.Texture2D#SRGB",
+    "/Script/Engine.StaticMesh#LightMapResolution"
+  ]
 }

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1.0",
+  "patchId": "set-asset-property-example",
+  "projectName": "我的项目",
+  "description": "Set an explicitly authorized scalar property on a non-Blueprint asset.",
+  "assets": [
+    {
+      "assetPath": "/Game/UEAgentKitWriteTests/T_PatchTarget.T_PatchTarget",
+      "expectedRevision": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "expectedAssetClass": "/Script/Engine.Texture2D",
+      "operations": [
+        {
+          "operationId": "disable-srgb",
+          "operation": "setAssetProperty",
+          "target": {
+            "propertyPath": "SRGB"
+          },
+          "value": false
+        }
+      ]
+    }
+  ]
+}

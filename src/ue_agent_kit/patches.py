@@ -25,6 +25,7 @@ class OperationSpec:
     target_fields: tuple[str, ...]
     target_validators: dict[str, Callable[[Any], bool]]
     expected_change: str
+    asset_type: str
 
 
 def _is_nonempty_text(value: Any, *, max_length: int = 256) -> bool:
@@ -53,6 +54,7 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
         target_fields=("variableName",),
         target_validators={"variableName": _is_nonempty_text},
         expected_change="variable-default",
+        asset_type="Blueprint",
     ),
     "setComponentProperty": OperationSpec(
         name="setComponentProperty",
@@ -63,6 +65,7 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
             "propertyPath": _is_property_path,
         },
         expected_change="component-property",
+        asset_type="Blueprint",
     ),
     "setPinDefault": OperationSpec(
         name="setPinDefault",
@@ -74,6 +77,7 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
             "pinName": _is_nonempty_text,
         },
         expected_change="pin-default",
+        asset_type="Blueprint",
     ),
     "setBlueprintDescription": OperationSpec(
         name="setBlueprintDescription",
@@ -81,6 +85,15 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
         target_fields=(),
         target_validators={},
         expected_change="blueprint-description",
+        asset_type="Blueprint",
+    ),
+    "setAssetProperty": OperationSpec(
+        name="setAssetProperty",
+        risk="medium",
+        target_fields=("propertyPath",),
+        target_validators={"propertyPath": _is_property_path},
+        expected_change="asset-property",
+        asset_type="NonBlueprint",
     ),
 }
 
@@ -93,6 +106,7 @@ POLICY_FIELDS = {
     "allowedAssetRoots",
     "allowedOperations",
     "allowedAssetClasses",
+    "allowedAssetProperties",
     "requireRevision",
     "rejectDirtyPackages",
     "maxAssetsPerPatch",
@@ -111,7 +125,7 @@ def get_operation_registry() -> list[dict[str, Any]]:
             "risk": spec.risk,
             "targetFields": list(spec.target_fields),
             "expectedChange": spec.expected_change,
-            "assetType": "Blueprint",
+            "assetType": spec.asset_type,
             "dryRunSupported": True,
             "commitSupported": True,
         }
@@ -299,6 +313,57 @@ def _validate_policy(policy: dict[str, Any], errors: list[dict[str, str]]) -> di
                     f"policy.allowedAssetClasses[{index}]",
                 )
 
+    allowed_asset_properties_value = policy.get("allowedAssetProperties", [])
+    normalized_asset_properties: list[str] = []
+    if not isinstance(allowed_asset_properties_value, list):
+        _issue(
+            errors,
+            "policy-asset-properties",
+            "allowedAssetProperties must be a unique string array.",
+            "policy.allowedAssetProperties",
+        )
+    else:
+        if len(set(item for item in allowed_asset_properties_value if isinstance(item, str))) != len(
+            allowed_asset_properties_value
+        ):
+            _issue(
+                errors,
+                "policy-asset-properties",
+                "allowedAssetProperties must contain unique strings.",
+                "policy.allowedAssetProperties",
+            )
+        for index, item in enumerate(allowed_asset_properties_value):
+            if not isinstance(item, str) or item.count("#") != 1:
+                _issue(
+                    errors,
+                    "policy-asset-property-format",
+                    "Asset property entries must use /Script/Module.Class#Property.Path form.",
+                    f"policy.allowedAssetProperties[{index}]",
+                )
+                continue
+            asset_class, property_path = item.split("#", 1)
+            if (
+                asset_class not in allowed_asset_classes
+                or not asset_class.startswith("/Script/")
+                or "." not in asset_class
+                or not _is_property_path(property_path)
+            ):
+                _issue(
+                    errors,
+                    "policy-asset-property-format",
+                    "Asset property entries must reference an allowed class and valid property path.",
+                    f"policy.allowedAssetProperties[{index}]",
+                )
+                continue
+            normalized_asset_properties.append(item)
+    if "setAssetProperty" in normalized_operations and not normalized_asset_properties:
+        _issue(
+            errors,
+            "policy-asset-properties",
+            "setAssetProperty requires at least one allowedAssetProperties entry.",
+            "policy.allowedAssetProperties",
+        )
+
     require_revision = policy.get("requireRevision")
     if not isinstance(require_revision, bool):
         _issue(errors, "policy-type", "requireRevision must be a boolean.", "policy.requireRevision")
@@ -339,6 +404,7 @@ def _validate_policy(policy: dict[str, Any], errors: list[dict[str, str]]) -> di
         "allowedAssetRoots": sorted(set(normalized_roots)),
         "allowedOperations": sorted(set(normalized_operations)),
         "allowedAssetClasses": sorted(set(allowed_asset_classes)) if isinstance(allowed_asset_classes, list) else [],
+        "allowedAssetProperties": sorted(set(normalized_asset_properties)),
         "requireRevision": require_revision is True,
         "rejectDirtyPackages": reject_dirty_packages is True,
         **limits,
@@ -713,14 +779,6 @@ def validate_patch(
                 f"Asset class is not authorized by policy: {asset_class or '<missing>'}",
                 f"{asset_path_pointer}.assetPath",
             )
-        if asset_class and not _is_blueprint_class(asset_class):
-            _issue(
-                errors,
-                "operation-asset-type",
-                f"The baseline operations only support Blueprint asset classes, not {asset_class}.",
-                f"{asset_path_pointer}.assetPath",
-            )
-
         current_revision_value = current.get("revision", "")
         current_revision = current_revision_value if isinstance(current_revision_value, str) else ""
         revision_available = current.get("revisionAvailable") is True
@@ -813,12 +871,40 @@ def validate_patch(
                 risk = "unknown"
                 expected_change = ""
             else:
+                if asset_class:
+                    is_blueprint = _is_blueprint_class(asset_class)
+                    if spec.asset_type == "Blueprint" and not is_blueprint:
+                        _issue(
+                            errors,
+                            "operation-asset-type",
+                            f"Operation {operation_name} requires a Blueprint asset, not {asset_class}.",
+                            f"{operation_pointer}.operation",
+                        )
+                    elif spec.asset_type == "NonBlueprint" and is_blueprint:
+                        _issue(
+                            errors,
+                            "operation-asset-type",
+                            f"Operation {operation_name} requires a non-Blueprint asset, not {asset_class}.",
+                            f"{operation_pointer}.operation",
+                        )
                 target = _validate_operation_target(
                     spec,
                     operation_value.get("target"),
                     path=f"{operation_pointer}.target",
                     errors=errors,
                 )
+                if operation_name == "setAssetProperty":
+                    property_path = target.get("propertyPath")
+                    authorization = (
+                        f"{asset_class}#{property_path}" if isinstance(property_path, str) else ""
+                    )
+                    if authorization not in policy["allowedAssetProperties"]:
+                        _issue(
+                            errors,
+                            "asset-property-not-allowed",
+                            f"Asset property is not authorized by policy: {authorization or '<invalid>'}",
+                            f"{operation_pointer}.target.propertyPath",
+                        )
                 risk = spec.risk
                 expected_change = spec.expected_change
                 if operation_name not in policy["allowedOperations"]:

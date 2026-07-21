@@ -55,6 +55,7 @@ def make_policy() -> dict[str, Any]:
             "/Script/UMGEditor.WidgetBlueprint",
             "/Script/Engine.AnimBlueprint",
         ],
+        "allowedAssetProperties": [],
         "requireRevision": True,
         "rejectDirtyPackages": True,
         "maxAssetsPerPatch": 10,
@@ -145,7 +146,7 @@ def write_export(root: Path, canonical: dict[str, Any], *, failure_count: int = 
             "projectName": PROJECT_NAME,
             "successCount": 1,
             "failureCount": failure_count,
-            "assets": [{"assetPath": ASSET_PATH, "success": True}],
+            "assets": [{"assetPath": canonical["assetPath"], "success": True}],
         },
     )
 
@@ -185,6 +186,80 @@ class PatchValidationTests(unittest.TestCase):
         self.assertFalse(result["willWriteDisk"])
         self.assertTrue(result["commitSupported"])
         self.assertTrue(all(item["valid"] for item in result["assets"][0]["operations"]))
+
+    def test_asset_property_operation_is_valid(self) -> None:
+        asset_path = "/Game/UEAgentKitWriteTests/T_PatchTarget.T_PatchTarget"
+        asset_class = "/Script/Engine.Texture2D"
+        asset = self.patch["assets"][0]
+        asset["assetPath"] = asset_path
+        asset["expectedAssetClass"] = asset_class
+        asset["operations"] = [
+            {
+                "operationId": "set-srgb",
+                "operation": "setAssetProperty",
+                "target": {"propertyPath": "SRGB"},
+                "value": False,
+            }
+        ]
+        self.policy["allowedOperations"].append("setAssetProperty")
+        self.policy["allowedAssetClasses"].append(asset_class)
+        self.policy["allowedAssetProperties"] = [f"{asset_class}#SRGB"]
+        self.canonical["assetPath"] = asset_path
+        self.canonical["packageName"] = asset_path.rsplit(".", 1)[0]
+        self.canonical["assetClass"] = asset_class
+        self.flush()
+        result = self.validate()
+        self.assertTrue(result["valid"])
+        expected = result["assets"][0]["operations"][0]["expectedChange"]
+        self.assertEqual(expected["kind"], "asset-property")
+
+    def test_asset_property_rejects_blueprint(self) -> None:
+        self.patch["assets"][0]["operations"] = [
+            {
+                "operationId": "set-property",
+                "operation": "setAssetProperty",
+                "target": {"propertyPath": "Description"},
+                "value": "not allowed",
+            }
+        ]
+        self.policy["allowedOperations"].append("setAssetProperty")
+        self.policy["allowedAssetProperties"] = [f"{ASSET_CLASS}#Description"]
+        self.flush()
+        self.assertIn("operation-asset-type", self.error_codes(self.validate()))
+
+    def test_asset_property_requires_policy_allowlist(self) -> None:
+        self.policy["allowedOperations"].append("setAssetProperty")
+        self.policy["allowedAssetProperties"] = []
+        self.flush()
+        self.assertIn("policy-asset-properties", self.error_codes(self.validate()))
+
+    def test_asset_property_requires_exact_authorization(self) -> None:
+        asset_path = "/Game/UEAgentKitWriteTests/T_PatchTarget.T_PatchTarget"
+        asset_class = "/Script/Engine.Texture2D"
+        asset = self.patch["assets"][0]
+        asset["assetPath"] = asset_path
+        asset["expectedAssetClass"] = asset_class
+        asset["operations"] = [
+            {
+                "operationId": "set-srgb",
+                "operation": "setAssetProperty",
+                "target": {"propertyPath": "SRGB"},
+                "value": False,
+            }
+        ]
+        self.policy["allowedOperations"].append("setAssetProperty")
+        self.policy["allowedAssetClasses"].append(asset_class)
+        self.policy["allowedAssetProperties"] = [f"{asset_class}#CompressionSettings"]
+        self.canonical["assetPath"] = asset_path
+        self.canonical["packageName"] = asset_path.rsplit(".", 1)[0]
+        self.canonical["assetClass"] = asset_class
+        self.flush()
+        self.assertIn("asset-property-not-allowed", self.error_codes(self.validate()))
+
+    def test_invalid_asset_property_allowlist_entry_is_rejected(self) -> None:
+        self.policy["allowedAssetProperties"] = ["not-a-class-or-property"]
+        self.flush()
+        self.assertIn("policy-asset-property-format", self.error_codes(self.validate()))
 
     def test_blueprint_description_operation_is_valid(self) -> None:
         self.patch["assets"][0]["operations"] = [

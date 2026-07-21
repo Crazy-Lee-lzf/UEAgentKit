@@ -37,6 +37,7 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
                 "setComponentProperty",
                 "setPinDefault",
                 "setBlueprintDescription",
+                "setAssetProperty",
             ],
 
         )
@@ -44,6 +45,10 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
         self.assertTrue(all(item["dryRunSupported"] for item in operations))
 
         self.assertTrue(all(item["commitSupported"] for item in operations))
+        self.assertEqual(
+            [item["assetType"] for item in operations],
+            ["Blueprint", "Blueprint", "Blueprint", "Blueprint", "NonBlueprint"],
+        )
 
 
 
@@ -99,13 +104,44 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
 
 
 
+    def test_asset_commandlet_contains_required_safety_gates(self) -> None:
+        source = (
+            ROOT
+            / "Plugin"
+            / "UEAgentKit"
+            / "Source"
+            / "UEAgentKitEditor"
+            / "Private"
+            / "AssetPatchCommandlet.cpp"
+        ).read_text(encoding="utf-8")
+        for token in (
+            "setAssetProperty",
+            "AllowedAssetProperties",
+            "Policy asset root is invalid or too broad",
+            "Patch operation entry is invalid",
+            "MaxExclusiveInt64AsDouble",
+            "FindExistingPackageSidecar",
+            "Packages with sidecar files are not supported yet",
+            "Asset->IsA<UBlueprint>()",
+            "CPF_Edit",
+            "CPF_Transient",
+            "GetIntPropertyEnum",
+            "CanHoldValue",
+            "TruncToDouble",
+            "Revision conflict",
+            "CreateBackupFilename",
+            "UPackage::SavePackage",
+            "Disk backup restored",
+        ):
+            self.assertIn(token, source)
+
     def test_run_patch_validates_before_unreal_execution(self) -> None:
 
         source = (ROOT / "scripts" / "RunPatch.ps1").read_text(encoding="utf-8")
 
         validation_index = source.index("patch validate")
 
-        commandlet_index = source.index('"-run=BlueprintPatch"')
+        commandlet_index = source.index('$Commandlet = if')
 
         self.assertLess(validation_index, commandlet_index)
 
@@ -129,11 +165,11 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
 
         )
 
-        self.assertIn('version = "0.3.2"', pyproject)
+        self.assertIn('version = "0.3.3"', pyproject)
 
-        self.assertEqual(plugin["VersionName"], "0.3.2")
+        self.assertEqual(plugin["VersionName"], "0.3.3")
 
-        self.assertEqual(plugin["Version"], 9)
+        self.assertEqual(plugin["Version"], 10)
 
 
 

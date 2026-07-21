@@ -12,13 +12,13 @@
 
 ## 当前版本
 
-UE Agent Kit 0.3.2 支持 Unreal Engine 5.6，当前公开能力包括：
+UE Agent Kit 0.3.3 支持 Unreal Engine 5.6，当前公开能力包括：
 
 - 通用 UE 资产目录、Asset Registry Tags、Revision 和依赖导出。
 - Blueprint 只读语义分析。
 - SQLite/FTS5 项目索引、Asset Class 筛选和正反向引用查询。
-- Blueprint Patch 的 Policy/Revision 校验、Dry Run、备份与显式 Commit；覆盖八类 Blueprint 资产。
+- Blueprint Patch 覆盖八类 Blueprint；Asset Patch 已验证 Data Asset、Texture2D 和 Static Mesh 的精确白名单标量属性。
 
-只读分析路径不修改资产；Blueprint Patch 仅在明确授权后执行 Dry Run 或显式 Commit。
+只读分析路径不修改资产；Blueprint Patch 与 Asset Patch 仅在明确授权后执行 Dry Run 或显式 Commit。
 
 测试资产生成方式见 [`../tests/fixtures/README.md`](../tests/fixtures/README.md)。

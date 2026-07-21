@@ -1,12 +1,12 @@
 # UEAgentKit Patch Schema 1.0
 
-UEAgentKit Patch 是面向 Blueprint 的声明式变更格式。0.3.1 同时提供纯 JSON 预校验和 UE Editor 内执行器。
+UEAgentKit Patch 是面向 Unreal Engine 资产的声明式变更格式。0.3.3 同时提供纯 JSON 预校验，以及 UE Editor 内的 Blueprint 和非 Blueprint 执行器。
 
 ## 两层执行模型
 
 ### 预校验层
 
-`ue-agent patch validate` 只读取 Patch、Policy 和 Blueprint 导出快照：
+`ue-agent patch validate` 只读取 Patch、Policy 和最新导出快照：
 
 ```text
 validationOnly=true
@@ -17,14 +17,22 @@ commitSupported=true
 
 ### UE 执行层
 
-`scripts\RunPatch.cmd` 在预校验成功后调用 `BlueprintPatch` Commandlet：
+`scripts\RunPatch.cmd` 在预校验成功后按 Operation 分发：
 
 ```text
-DryRun  = 内存修改 → 编译 → 读取结果 → 回滚 → 再编译，不保存
-Commit  = 创建外部备份 → 修改 → 编译 → 保存
+Blueprint Operation     → BlueprintPatch Commandlet
+setAssetProperty        → AssetPatch Commandlet
 ```
 
-当前每次执行严格限制为一个 Blueprint 和一个 Operation，避免部分保存。
+执行语义：
+
+```text
+Blueprint DryRun = 内存修改 → 编译 → 读取结果 → 回滚 → 再编译，不保存
+Asset DryRun     = 内存修改 → PostEditChange → 读取结果 → 回滚，不保存
+Commit           = 创建外部备份 → 修改 → 校验/编译 → 保存
+```
+
+当前每次执行严格限制为一个资产和一个 Operation，避免部分保存。
 
 ## CLI
 
@@ -40,7 +48,7 @@ scripts\ue-agent.cmd patch operations
 scripts\ue-agent.cmd patch validate ^
   --patch <PATCH_JSON> ^
   --policy <POLICY_JSON> ^
-  --export <BLUEPRINT_EXPORT> ^
+  --export <REVISION_EXPORT> ^
   --report <VALIDATION_REPORT>
 ```
 
@@ -51,9 +59,11 @@ scripts\RunPatch.cmd ^
   -ProjectPath "<PROJECT>.uproject" ^
   -Patch "<PATCH_JSON>" ^
   -Policy "<POLICY_JSON>" ^
-  -RevisionExport "<BLUEPRINT_EXPORT>" ^
+  -RevisionExport "<REVISION_EXPORT>" ^
   -Mode DryRun|Commit
 ```
+
+Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目录结果。两者都必须提供最新的 Package SHA-256 Revision。
 
 ## Patch 根对象
 
@@ -73,20 +83,20 @@ scripts\RunPatch.cmd ^
 - `patchId`：本次变更的稳定标识。
 - `projectName`：必须同时匹配当前工程、Policy 和导出快照。
 - `description`：可选说明。
-- `assets`：预校验格式允许数组；当前 UE 执行器要求恰好一项。
+- `assets`：格式允许数组；当前 UE 执行器要求恰好一项。
 
 ## Asset 对象
 
 ```json
 {
-  "assetPath": "/Game/UEAgentKitWriteTests/BP_Target.BP_Target",
+  "assetPath": "/Game/UEAgentKitWriteTests/T_Target.T_Target",
   "expectedRevision": "sha256:<64 lowercase hex>",
-  "expectedAssetClass": "/Script/Engine.Blueprint",
+  "expectedAssetClass": "/Script/Engine.Texture2D",
   "operations": []
 }
 ```
 
-`expectedRevision` 必须来自最新 Blueprint 导出。执行器加载资产后会重新计算磁盘 SHA-256，不信任仅来自预校验快照的结果。
+执行器加载资产后会重新计算磁盘 SHA-256，不信任仅来自预校验快照的结果。
 
 ## Policy
 
@@ -100,9 +110,17 @@ scripts\RunPatch.cmd ^
   "allowedOperations": [
     "setVariableDefault",
     "setComponentProperty",
-    "setPinDefault"
+    "setPinDefault",
+    "setBlueprintDescription",
+    "setAssetProperty"
   ],
-  "allowedAssetClasses": ["/Script/Engine.Blueprint"],
+  "allowedAssetClasses": [
+    "/Script/Engine.Blueprint",
+    "/Script/Engine.Texture2D"
+  ],
+  "allowedAssetProperties": [
+    "/Script/Engine.Texture2D#SRGB"
+  ],
   "requireRevision": true,
   "rejectDirtyPackages": true,
   "maxAssetsPerPatch": 10,
@@ -117,6 +135,9 @@ scripts\RunPatch.cmd ^
 - `Commit` 同时要求命令行 `-Mode Commit` 和 `commitEnabled=true`。
 - 当前执行器始终要求 Revision，并建议保持 `rejectDirtyPackages=true`。
 - Policy 的数组限制属于格式上限；执行器当前仍只接受单资产、单操作。
+- `setAssetProperty` 必须由 `allowedAssetProperties` 精确授权。
+- 属性授权格式固定为 `AssetClass#Property.Path`，例如 `/Script/Engine.Texture2D#SRGB`。
+- Blueprint Operation 不能用于非 Blueprint；`setAssetProperty` 不能用于 Blueprint。
 
 ## 支持的 Operation
 
@@ -151,22 +172,7 @@ scripts\RunPatch.cmd ^
 }
 ```
 
-`propertyPath` 支持用点号进入嵌套 Struct；当前最终属性仍限定为标量。
-
-### setBlueprintDescription
-
-修改 Blueprint 资产自身的描述文本，适用于没有成员变量或普通 Pin 的 Blueprint 子类型：
-
-```json
-{
-  "operationId": "set-description",
-  "operation": "setBlueprintDescription",
-  "target": {},
-  "value": "UEAgentKit verified Blueprint write."
-}
-```
-
-该操作已在 Function Library、Macro Library、Blueprint Interface 和 Control Rig Blueprint 上完成 Dry Run、Commit、备份和独立重载验证。
+`propertyPath` 支持用点号进入嵌套 Struct；最终属性仍限定为标量。
 
 ### setPinDefault
 
@@ -185,11 +191,48 @@ scripts\RunPatch.cmd ^
 }
 ```
 
-执行器拒绝输出 Pin、已连接 Pin、只读 Pin和忽略默认值的 Pin，并由该 Graph Schema 校验新值。
+执行器拒绝输出 Pin、已连接 Pin、只读 Pin 和忽略默认值的 Pin，并由该 Graph Schema 校验新值。
+
+### setBlueprintDescription
+
+修改 Blueprint 资产自身的描述文本：
+
+```json
+{
+  "operationId": "set-description",
+  "operation": "setBlueprintDescription",
+  "target": {},
+  "value": "UEAgentKit verified Blueprint write."
+}
+```
+
+该操作已在 Function Library、Macro Library、Blueprint Interface 和 Control Rig Blueprint 上完成 Dry Run、Commit、备份和独立重载验证。
+
+### setAssetProperty
+
+修改非 Blueprint 资产上由 Policy 精确授权的反射属性：
+
+```json
+{
+  "operationId": "disable-srgb",
+  "operation": "setAssetProperty",
+  "target": {"propertyPath": "SRGB"},
+  "value": false
+}
+```
+
+限制：
+
+- 最终属性必须具有 `CPF_Edit`，且不能是 Transient、DuplicateTransient 或 NonPIEDuplicateTransient。
+- 支持 Bool、整数、浮点、String、Name、Text 和 Enum。
+- 支持用点号进入嵌套 Struct，例如 `Rules.Priority`。
+- 不支持 Array、Set、Map、对象引用、软对象引用和任意 UObject 替换。
+- 当前 Revision 与备份以主 `.uasset` 为边界，因此存在 `.uexp/.ubulk/.uptnl/.m.ubulk/.upayload` 等侧文件时直接拒绝。
+- 已完成 PrimaryAssetLabel/Data Asset、Texture2D 和 Static Mesh 的 Dry Run、Commit、备份与独立重载验证。
 
 ## Dry Run 报告
 
-报告至少包含：
+报告包含：
 
 ```text
 mode
@@ -211,12 +254,18 @@ diskUnchanged
 backupPath
 ```
 
-Dry Run 成功条件包括 `compiled=true`、`rolledBack=true`、`rollbackValueMatch=true`、`diskUnchanged=true`。
+Blueprint Dry Run 成功时要求 `compiled=true`。非 Blueprint 不执行 Blueprint 编译，因此 `compiled=false`。所有 Dry Run 都必须满足：
+
+```text
+rolledBack=true
+rollbackValueMatch=true
+diskUnchanged=true
+```
 
 ## Commit 与备份
 
-保存前在 `BackupDir` 创建带 `patchId` 和 UTC ticks 的唯一 `.bak` 文件。编译失败、Revision 冲突、Dirty Package、Policy 越界、备份失败或目标解析失败都会在保存前退出。
+保存前在 `BackupDir` 创建带 `patchId` 和 UTC ticks 的唯一 `.bak` 文件。Revision 冲突、Dirty Package、Policy 越界、属性未授权、备份失败、目标解析失败、类型不支持或 Blueprint 编译失败都会在保存前退出。
 
-当前失败保存路径会把备份复制回原资产文件。每次 Commit 后应使用独立 UE 进程重新导出并核对预期值和新 Revision。
+保存失败或保存后报告写入失败时，执行器会把外部备份复制回原资产文件。每次 Commit 后应使用独立 UE 进程重新导出，并核对预期值、新 Revision 和备份哈希。
 
 JSON Schema 文件：[`patch.schema.json`](patch.schema.json)。运行时校验器与 UE 执行器是最终安全判断来源。
