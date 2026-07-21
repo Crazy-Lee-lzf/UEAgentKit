@@ -128,11 +128,13 @@ namespace AssetPatchCommandletPrivate
 			OutError = TEXT("setAssetProperty requires allowedAssetProperties authorization.");
 			return false;
 		}
-		if (ContainsExact(OutPolicy.AllowedOperations, TEXT("setMaterialInstanceScalarParameter"))
-			&& OutPolicy.AllowedMaterialParameters.IsEmpty())
+		const bool bUsesMaterialParameterOperations =
+			ContainsExact(OutPolicy.AllowedOperations, TEXT("setMaterialInstanceScalarParameter"))
+			|| ContainsExact(OutPolicy.AllowedOperations, TEXT("setMaterialInstanceVectorParameter"));
+		if (bUsesMaterialParameterOperations && OutPolicy.AllowedMaterialParameters.IsEmpty())
 		{
 			OutError = TEXT(
-				"setMaterialInstanceScalarParameter requires allowedMaterialParameters authorization.");
+				"Material Instance parameter operations require allowedMaterialParameters authorization.");
 			return false;
 		}
 		return true;
@@ -488,6 +490,30 @@ namespace AssetPatchCommandletPrivate
 		return true;
 	}
 
+	bool VectorParameterArraysEqualExact(
+		const TArray<FVectorParameterValue>& A,
+		const TArray<FVectorParameterValue>& B)
+	{
+		if (A.Num() != B.Num())
+		{
+			return false;
+		}
+		for (int32 Index = 0; Index < A.Num(); ++Index)
+		{
+			if (A[Index] != B[Index])
+			{
+				return false;
+			}
+#if WITH_EDITORONLY_DATA
+			if (A[Index].ParameterName_DEPRECATED != B[Index].ParameterName_DEPRECATED)
+			{
+				return false;
+			}
+#endif
+		}
+		return true;
+	}
+
 	bool FindGlobalScalarParameter(
 		UMaterialInstanceConstant* Instance,
 		const FName ParameterName,
@@ -518,6 +544,36 @@ namespace AssetPatchCommandletPrivate
 		return true;
 	}
 
+	bool FindGlobalVectorParameter(
+		UMaterialInstanceConstant* Instance,
+		const FName ParameterName,
+		FMaterialParameterInfo& OutInfo,
+		FString& OutError)
+	{
+		TArray<FMaterialParameterInfo> ParameterInfos;
+		TArray<FGuid> ParameterIds;
+		Instance->GetAllVectorParameterInfo(ParameterInfos, ParameterIds);
+		int32 MatchCount = 0;
+		for (const FMaterialParameterInfo& Info : ParameterInfos)
+		{
+			if (Info.Name == ParameterName
+				&& Info.Association == EMaterialParameterAssociation::GlobalParameter)
+			{
+				OutInfo = Info;
+				++MatchCount;
+			}
+		}
+		if (MatchCount != 1)
+		{
+			OutError = FString::Printf(
+				TEXT("Expected exactly one global vector parameter named %s; found %d."),
+				*ParameterName.ToString(),
+				MatchCount);
+			return false;
+		}
+		return true;
+	}
+
 	bool ReadScalarParameter(
 		UMaterialInstanceConstant* Instance,
 		const FMaterialParameterInfo& ParameterInfo,
@@ -529,6 +585,24 @@ namespace AssetPatchCommandletPrivate
 	FString FormatScalarParameterValue(const float Value)
 	{
 		return FString::Printf(TEXT("%.9g"), static_cast<double>(Value));
+	}
+
+	bool ReadVectorParameter(
+		UMaterialInstanceConstant* Instance,
+		const FMaterialParameterInfo& ParameterInfo,
+		FLinearColor& OutValue)
+	{
+		return Instance->GetVectorParameterValue(FHashedMaterialParameterInfo(ParameterInfo), OutValue);
+	}
+
+	FString FormatVectorParameterValue(const FLinearColor& Value)
+	{
+		return FString::Printf(
+			TEXT("{\"r\":%.9g,\"g\":%.9g,\"b\":%.9g,\"a\":%.9g}"),
+			static_cast<double>(Value.R),
+			static_cast<double>(Value.G),
+			static_cast<double>(Value.B),
+			static_cast<double>(Value.A));
 	}
 
 	bool SaveReport(const FString& Filename, const TSharedRef<FJsonObject>& Report, FString& OutError)
@@ -731,7 +805,9 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		Operation.Equals(TEXT("setAssetProperty"), ESearchCase::CaseSensitive);
 	const bool bMaterialScalarOperation =
 		Operation.Equals(TEXT("setMaterialInstanceScalarParameter"), ESearchCase::CaseSensitive);
-	if ((!bAssetPropertyOperation && !bMaterialScalarOperation)
+	const bool bMaterialVectorOperation =
+		Operation.Equals(TEXT("setMaterialInstanceVectorParameter"), ESearchCase::CaseSensitive);
+	if ((!bAssetPropertyOperation && !bMaterialScalarOperation && !bMaterialVectorOperation)
 		|| !ContainsExact(Policy.AllowedOperations, Operation))
 	{
 		UE_LOG(LogAssetPatch, Error, TEXT("Operation is not authorized or implemented: %s"), *Operation);
@@ -875,7 +951,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			|| FMath::IsNearlyEqual(RestoredScalarValue, BeforeScalarValue, UE_SMALL_NUMBER);
 		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-		Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.4"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.5"));
 		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 		Report->SetStringField(TEXT("patchId"), PatchId);
 		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
@@ -920,6 +996,208 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			*ParameterNameText,
 			*FormatScalarParameterValue(BeforeScalarValue),
 			*FormatScalarParameterValue(AfterScalarValue));
+		return 0;
+	}
+
+
+	if (bMaterialVectorOperation)
+	{
+		UMaterialInstanceConstant* MaterialInstance = Cast<UMaterialInstanceConstant>(Asset);
+		if (!MaterialInstance)
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Operation requires MaterialInstanceConstant."));
+			return 17;
+		}
+
+		FString ParameterNameText;
+		TargetObject->TryGetStringField(TEXT("parameterName"), ParameterNameText);
+		if (ParameterNameText.IsEmpty())
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Material vector parameterName is required."));
+			return 17;
+		}
+		const FString ParameterAuthorization =
+			ActualAssetClass + TEXT("#Vector#") + ParameterNameText;
+		if (!ContainsExact(Policy.AllowedMaterialParameters, ParameterAuthorization))
+		{
+			UE_LOG(
+				LogAssetPatch,
+				Error,
+				TEXT("Material parameter is not authorized by policy: %s"),
+				*ParameterAuthorization);
+			return 17;
+		}
+
+		const TSharedPtr<FJsonObject>* ColorObjectPtr = nullptr;
+		if (!OperationObject->TryGetObjectField(TEXT("value"), ColorObjectPtr)
+			|| !ColorObjectPtr
+			|| !ColorObjectPtr->IsValid())
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Material vector value must be an RGBA object."));
+			return 18;
+		}
+		const TSharedPtr<FJsonObject> ColorObject = *ColorObjectPtr;
+		if (ColorObject->Values.Num() != 4
+			|| !ColorObject->HasField(TEXT("r"))
+			|| !ColorObject->HasField(TEXT("g"))
+			|| !ColorObject->HasField(TEXT("b"))
+			|| !ColorObject->HasField(TEXT("a")))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Material vector value must contain only r, g, b, and a."));
+			return 18;
+		}
+		double R = 0.0;
+		double G = 0.0;
+		double B = 0.0;
+		double A = 0.0;
+		if (!ColorObject->TryGetNumberField(TEXT("r"), R)
+			|| !ColorObject->TryGetNumberField(TEXT("g"), G)
+			|| !ColorObject->TryGetNumberField(TEXT("b"), B)
+			|| !ColorObject->TryGetNumberField(TEXT("a"), A)
+			|| !FMath::IsFinite(R)
+			|| !FMath::IsFinite(G)
+			|| !FMath::IsFinite(B)
+			|| !FMath::IsFinite(A)
+			|| FMath::Abs(R) > static_cast<double>(FLT_MAX)
+			|| FMath::Abs(G) > static_cast<double>(FLT_MAX)
+			|| FMath::Abs(B) > static_cast<double>(FLT_MAX)
+			|| FMath::Abs(A) > static_cast<double>(FLT_MAX))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Material vector components must be finite floats."));
+			return 18;
+		}
+		const FLinearColor NewVectorValue(
+			static_cast<float>(R),
+			static_cast<float>(G),
+			static_cast<float>(B),
+			static_cast<float>(A));
+
+		FMaterialParameterInfo ParameterInfo;
+		if (!FindGlobalVectorParameter(MaterialInstance, FName(*ParameterNameText), ParameterInfo, Error))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("%s"), *Error);
+			return 17;
+		}
+
+		FLinearColor BeforeVectorValue = FLinearColor::Black;
+		if (!ReadVectorParameter(MaterialInstance, ParameterInfo, BeforeVectorValue))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Could not read material vector parameter."));
+			return 17;
+		}
+		const TArray<FVectorParameterValue> OriginalVectorParameters =
+			MaterialInstance->VectorParameterValues;
+
+		FString BackupFilename;
+		if (bCommit)
+		{
+			IFileManager::Get().MakeDirectory(*BackupDirectory, true);
+			BackupFilename = CreateBackupFilename(BackupDirectory, PatchId, PackageFilename);
+			if (IFileManager::Get().Copy(*BackupFilename, *PackageFilename, true, true) != COPY_OK)
+			{
+				UE_LOG(LogAssetPatch, Error, TEXT("Could not create package backup: %s"), *BackupFilename);
+				return 19;
+			}
+		}
+
+		MaterialInstance->Modify();
+		UMaterialEditingLibrary::SetMaterialInstanceVectorParameterValue(
+			MaterialInstance,
+			FName(*ParameterNameText),
+			NewVectorValue,
+			EMaterialParameterAssociation::GlobalParameter);
+
+		FLinearColor AfterVectorValue = FLinearColor::Black;
+		if (!ReadVectorParameter(MaterialInstance, ParameterInfo, AfterVectorValue)
+			|| !AfterVectorValue.Equals(NewVectorValue, UE_SMALL_NUMBER))
+		{
+			MaterialInstance->VectorParameterValues = OriginalVectorParameters;
+			UMaterialEditingLibrary::UpdateMaterialInstance(MaterialInstance);
+			Package->SetDirtyFlag(bOriginalDirty);
+			UE_LOG(LogAssetPatch, Error, TEXT("Material vector parameter read-back verification failed."));
+			return 20;
+		}
+
+		bool bSaved = false;
+		bool bRolledBack = false;
+		bool bStructureMatch = true;
+		FLinearColor RestoredVectorValue = BeforeVectorValue;
+		if (bCommit)
+		{
+			if (!SaveAssetPackage(MaterialInstance, PackageFilename, Error))
+			{
+				IFileManager::Get().Copy(*PackageFilename, *BackupFilename, true, true);
+				UE_LOG(LogAssetPatch, Error, TEXT("%s Backup restored."), *Error);
+				return 21;
+			}
+			bSaved = true;
+		}
+		else
+		{
+			MaterialInstance->VectorParameterValues = OriginalVectorParameters;
+			UMaterialEditingLibrary::UpdateMaterialInstance(MaterialInstance);
+			Package->SetDirtyFlag(bOriginalDirty);
+			bStructureMatch = VectorParameterArraysEqualExact(
+				OriginalVectorParameters,
+				MaterialInstance->VectorParameterValues);
+			if (!ReadVectorParameter(MaterialInstance, ParameterInfo, RestoredVectorValue))
+			{
+				UE_LOG(LogAssetPatch, Error, TEXT("Could not read restored material vector parameter."));
+				return 22;
+			}
+			bRolledBack = true;
+		}
+
+		const FString AfterRevision = HashPackageFile(Package);
+		const bool bRestoredValueMatch =
+			!bRolledBack || RestoredVectorValue.Equals(BeforeVectorValue, UE_SMALL_NUMBER);
+		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
+		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.5"));
+		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
+		Report->SetStringField(TEXT("patchId"), PatchId);
+		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
+		Report->SetStringField(TEXT("assetPath"), AssetPath);
+		Report->SetStringField(TEXT("assetClass"), ActualAssetClass);
+		Report->SetStringField(TEXT("operation"), Operation);
+		Report->SetObjectField(TEXT("target"), TargetObject);
+		Report->SetStringField(
+			TEXT("targetDescription"),
+			TEXT("material-instance-vector:") + ParameterNameText);
+		Report->SetStringField(TEXT("targetType"), TEXT("MaterialVectorParameter(FLinearColor)"));
+		Report->SetStringField(TEXT("beforeValue"), FormatVectorParameterValue(BeforeVectorValue));
+		Report->SetStringField(TEXT("afterValue"), FormatVectorParameterValue(AfterVectorValue));
+		Report->SetStringField(TEXT("restoredValue"), FormatVectorParameterValue(RestoredVectorValue));
+		Report->SetStringField(TEXT("beforeRevision"), BeforeRevision);
+		Report->SetStringField(TEXT("afterRevision"), AfterRevision);
+		Report->SetBoolField(TEXT("compiled"), false);
+		Report->SetBoolField(TEXT("saved"), bSaved);
+		Report->SetBoolField(TEXT("rolledBack"), bRolledBack);
+		Report->SetBoolField(TEXT("rollbackValueMatch"), bRestoredValueMatch);
+		Report->SetBoolField(TEXT("rollbackStructureMatch"), !bRolledBack || bStructureMatch);
+		Report->SetBoolField(
+			TEXT("diskUnchanged"),
+			BeforeRevision.Equals(AfterRevision, ESearchCase::IgnoreCase));
+		Report->SetStringField(TEXT("backupPath"), BackupFilename);
+		if (!SaveReport(ReportFilename, Report, Error))
+		{
+			if (bCommit && !BackupFilename.IsEmpty())
+			{
+				IFileManager::Get().Copy(*PackageFilename, *BackupFilename, true, true);
+			}
+			UE_LOG(LogAssetPatch, Error, TEXT("%s Disk backup restored."), *Error);
+			return 23;
+		}
+
+		UE_LOG(
+			LogAssetPatch,
+			Display,
+			TEXT("Material vector patch succeeded. Mode=%s Asset=%s Parameter=%s Before=%s After=%s"),
+			bCommit ? TEXT("Commit") : TEXT("DryRun"),
+			*AssetPath,
+			*ParameterNameText,
+			*FormatVectorParameterValue(BeforeVectorValue),
+			*FormatVectorParameterValue(AfterVectorValue));
 		return 0;
 	}
 
@@ -1016,7 +1294,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 	const FString AfterRevision = HashPackageFile(Package);
 	const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 	Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-	Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.4"));
+	Report->SetStringField(TEXT("executorVersion"), TEXT("0.3.5"));
 	Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 	Report->SetStringField(TEXT("patchId"), PatchId);
 	Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());

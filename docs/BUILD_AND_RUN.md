@@ -246,12 +246,12 @@ scripts\RunPatch.cmd ^
 - 每次一个资产、一个 Operation。
 - Blueprint 支持 `setVariableDefault`、`setComponentProperty`、`setPinDefault`、`setBlueprintDescription`。
 - 非 Blueprint 支持 `setAssetProperty`；Policy 必须用 `AssetClass#Property.Path` 精确授权。
-- Material Instance 支持 `setMaterialInstanceScalarParameter`；Policy 使用 `AssetClass#Scalar#ParameterName` 精确授权。
+- Material Instance 支持 `setMaterialInstanceScalarParameter` 和 `setMaterialInstanceVectorParameter`；Policy 使用 `AssetClass#Scalar#ParameterName` 或 `AssetClass#Vector#ParameterName` 精确授权。
 - 变量和组件属性支持 Bool、整数、浮点、String、Name、Text。
 - Pin 支持未连接、可编辑的输入 Pin，值为布尔、数值或字符串。
 - 已验证普通 Blueprint、Widget、Anim、Actor Component、Function Library、Macro Library、Interface 和 Control Rig。
 - 已验证 PrimaryAssetLabel/Data Asset、Texture2D、Static Mesh 和 InputAction；支持用点号进入嵌套 Struct 和普通 Enum 名称写入。
-- 已验证 MaterialInstanceConstant 的 Global Scalar 参数 Dry Run、结构回滚、Commit、备份和独立重载。
+- 已验证 MaterialInstanceConstant 的 Global Scalar 与 Vector 参数 Dry Run、完整 Override 数组回滚、Commit、备份和独立重载。
 - 通用属性仅允许可编辑、非 Transient 的 Bool、数值、String、Name、Text 或 Enum；不支持数组、Set、Map、对象引用和 Blueprint 结构性增删。
 - 当前仅接受没有 `.uexp/.ubulk/.uptnl/.m.ubulk/.upayload` 等独立侧文件的单文件 Package。
 
@@ -262,7 +262,7 @@ scripts\RunPatch.cmd ^
 ```bat
 python <TOOL_ROOT>\scripts\ValidateAssetCatalog.py ^
   --output <TOOL_ROOT>\Output\AssetCatalog ^
-  --expect-exporter 0.3.4
+  --expect-exporter 0.3.5
 ```
 
 校验器会检查：

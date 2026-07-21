@@ -1,7 +1,7 @@
 {
   "FileVersion": 3,
-  "Version": 11,
-  "VersionName": "0.3.4",
+  "Version": 12,
+  "VersionName": "0.3.5",
   "FriendlyName": "UE Agent Kit",
   "Description": "Unreal Engine asset analysis, indexing, and policy-gated Blueprint, scalar asset, and Material Instance parameter patch toolkit.",
   "Category": "Developer Tools",

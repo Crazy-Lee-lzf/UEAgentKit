@@ -6,7 +6,7 @@
 
 UE Agent Kit is an open-source Unreal Engine asset analysis, indexing, and policy-gated patch toolkit. Its Editor plugin exports asset catalogs, Asset Registry metadata, dependencies, and Blueprint semantics; a Python CLI and SQLite provide a project-wide index, while Policy, Revision checks, dry runs, and backups protect explicit writes.
 
-The current release is **0.3.4** and targets **Unreal Engine 5.6**. In addition to eight Blueprint categories and generic scalar properties, it supports exact-allowlist Global Scalar parameter writes on Material Instances with structural dry-run rollback.
+The current release is **0.3.5** and targets **Unreal Engine 5.6**. In addition to eight Blueprint categories and generic scalar properties, it supports exact-allowlist Global Scalar and Vector parameter writes on Material Instances with full override-array dry-run rollback.
 
 > **AI Generated**: Most code and documentation in this project are AI-generated and reviewed through human inspection, UE 5.6 compilation, automated tests, and real-project regression validation.
 
@@ -173,7 +173,7 @@ The executor supports four Blueprint operations, non-Blueprint `setAssetProperty
 ### 6. Validate the asset catalog
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.3.4
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.3.5
 ```
 
 See [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md) for installation and full command details.
@@ -205,6 +205,7 @@ Output\Blueprints\
 
 - [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md): build, install, export, and query instructions.
 - [`docs/AI_USAGE.md`](docs/AI_USAGE.md): using the asset index and Blueprint semantics with AI tools.
+- [`docs/ROADMAP_EN.md`](docs/ROADMAP_EN.md): version goals and safety boundaries for 0.4.0, 0.4.x, and 0.5.0.
 - [`spec/BPCTX_FORMAT.md`](spec/BPCTX_FORMAT.md): BPCTX/1 format specification.
 - [`spec/PATCH_SCHEMA.md`](spec/PATCH_SCHEMA.md): declarative patches, policy, revision checks, and validation-only safety boundaries.
 

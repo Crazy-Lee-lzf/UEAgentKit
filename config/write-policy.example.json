@@ -14,7 +14,8 @@
     "setPinDefault",
     "setBlueprintDescription",
     "setAssetProperty",
-    "setMaterialInstanceScalarParameter"
+    "setMaterialInstanceScalarParameter",
+    "setMaterialInstanceVectorParameter"
   ],
   "allowedAssetClasses": [
     "/Script/Engine.Blueprint",
@@ -37,6 +38,7 @@
     "/Script/Engine.StaticMesh#LightMapResolution"
   ],
   "allowedMaterialParameters": [
-    "/Script/Engine.MaterialInstanceConstant#Scalar#Roughness"
+    "/Script/Engine.MaterialInstanceConstant#Scalar#Roughness",
+    "/Script/Engine.MaterialInstanceConstant#Vector#Base Color"
   ]
 }

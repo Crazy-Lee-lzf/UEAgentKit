@@ -370,6 +370,78 @@ class PatchValidationTests(unittest.TestCase):
         self.flush()
         self.assertIn("policy-material-parameter-format", self.error_codes(self.validate()))
 
+    def test_material_vector_parameter_operation_is_valid(self) -> None:
+        asset_path = "/Game/UEAgentKitWriteTests/MI_PatchTarget.MI_PatchTarget"
+        asset_class = "/Script/Engine.MaterialInstanceConstant"
+        asset = self.patch["assets"][0]
+        asset["assetPath"] = asset_path
+        asset["expectedAssetClass"] = asset_class
+        asset["operations"] = [
+            {
+                "operationId": "set-base-color",
+                "operation": "setMaterialInstanceVectorParameter",
+                "target": {"parameterName": "BaseColor"},
+                "value": {"r": 0.25, "g": 0.5, "b": 0.75, "a": 1.0},
+            }
+        ]
+        self.policy["allowedOperations"].append("setMaterialInstanceVectorParameter")
+        self.policy["allowedAssetClasses"].append(asset_class)
+        self.policy["allowedMaterialParameters"] = [f"{asset_class}#Vector#BaseColor"]
+        self.canonical["assetPath"] = asset_path
+        self.canonical["packageName"] = asset_path.rsplit(".", 1)[0]
+        self.canonical["assetClass"] = asset_class
+        self.flush()
+        result = self.validate()
+        self.assertTrue(result["valid"])
+        expected = result["assets"][0]["operations"][0]["expectedChange"]
+        self.assertEqual(expected["kind"], "material-instance-vector-parameter")
+
+    def test_material_vector_parameter_requires_exact_rgba_object(self) -> None:
+        asset_path = "/Game/UEAgentKitWriteTests/MI_PatchTarget.MI_PatchTarget"
+        asset_class = "/Script/Engine.MaterialInstanceConstant"
+        asset = self.patch["assets"][0]
+        asset["assetPath"] = asset_path
+        asset["expectedAssetClass"] = asset_class
+        asset["operations"] = [
+            {
+                "operationId": "set-base-color",
+                "operation": "setMaterialInstanceVectorParameter",
+                "target": {"parameterName": "BaseColor"},
+                "value": {"r": 0.25, "g": 0.5, "b": 0.75},
+            }
+        ]
+        self.policy["allowedOperations"].append("setMaterialInstanceVectorParameter")
+        self.policy["allowedAssetClasses"].append(asset_class)
+        self.policy["allowedMaterialParameters"] = [f"{asset_class}#Vector#BaseColor"]
+        self.canonical["assetPath"] = asset_path
+        self.canonical["packageName"] = asset_path.rsplit(".", 1)[0]
+        self.canonical["assetClass"] = asset_class
+        self.flush()
+        self.assertIn("operation-value-type", self.error_codes(self.validate()))
+
+    def test_material_vector_parameter_requires_exact_authorization(self) -> None:
+        asset_path = "/Game/UEAgentKitWriteTests/MI_PatchTarget.MI_PatchTarget"
+        asset_class = "/Script/Engine.MaterialInstanceConstant"
+        asset = self.patch["assets"][0]
+        asset["assetPath"] = asset_path
+        asset["expectedAssetClass"] = asset_class
+        asset["operations"] = [
+            {
+                "operationId": "set-base-color",
+                "operation": "setMaterialInstanceVectorParameter",
+                "target": {"parameterName": "BaseColor"},
+                "value": {"r": 0.25, "g": 0.5, "b": 0.75, "a": 1.0},
+            }
+        ]
+        self.policy["allowedOperations"].append("setMaterialInstanceVectorParameter")
+        self.policy["allowedAssetClasses"].append(asset_class)
+        self.policy["allowedMaterialParameters"] = [f"{asset_class}#Vector#EmissiveColor"]
+        self.canonical["assetPath"] = asset_path
+        self.canonical["packageName"] = asset_path.rsplit(".", 1)[0]
+        self.canonical["assetClass"] = asset_class
+        self.flush()
+        self.assertIn("material-parameter-not-allowed", self.error_codes(self.validate()))
+
     def test_blueprint_description_operation_is_valid(self) -> None:
         self.patch["assets"][0]["operations"] = [
             {

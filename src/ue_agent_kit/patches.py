@@ -103,6 +103,14 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
         expected_change="material-instance-scalar-parameter",
         asset_type="NonBlueprint",
     ),
+    "setMaterialInstanceVectorParameter": OperationSpec(
+        name="setMaterialInstanceVectorParameter",
+        risk="medium",
+        target_fields=("parameterName",),
+        target_validators={"parameterName": _is_nonempty_text},
+        expected_change="material-instance-vector-parameter",
+        asset_type="NonBlueprint",
+    ),
 }
 
 
@@ -397,7 +405,7 @@ def _validate_policy(policy: dict[str, Any], errors: list[dict[str, str]]) -> di
                 _issue(
                     errors,
                     "policy-material-parameter-format",
-                    "Material parameter entries must use /Script/Module.Class#Scalar#ParameterName form.",
+                    "Material parameter entries must use /Script/Module.Class#Type#ParameterName form.",
                     f"policy.allowedMaterialParameters[{index}]",
                 )
                 continue
@@ -407,25 +415,26 @@ def _validate_policy(policy: dict[str, Any], errors: list[dict[str, str]]) -> di
                 or not asset_class.startswith("/Script/")
                 or "." not in asset_class
                 or asset_class != "/Script/Engine.MaterialInstanceConstant"
-                or parameter_type != "Scalar"
+                or parameter_type not in {"Scalar", "Vector"}
                 or not _is_nonempty_text(parameter_name, max_length=256)
             ):
                 _issue(
                     errors,
                     "policy-material-parameter-format",
-                    "Material parameter entries must reference an allowed class, Scalar type, and valid name.",
+                    "Material parameter entries must reference an allowed class, supported type, and valid name.",
                     f"policy.allowedMaterialParameters[{index}]",
                 )
                 continue
             normalized_material_parameters.append(item)
-    if (
-        "setMaterialInstanceScalarParameter" in normalized_operations
-        and not normalized_material_parameters
-    ):
+    material_operations = {
+        "setMaterialInstanceScalarParameter",
+        "setMaterialInstanceVectorParameter",
+    }
+    if material_operations.intersection(normalized_operations) and not normalized_material_parameters:
         _issue(
             errors,
             "policy-material-parameters",
-            "setMaterialInstanceScalarParameter requires allowedMaterialParameters authorization.",
+            "Material Instance parameter operations require allowedMaterialParameters authorization.",
             "policy.allowedMaterialParameters",
         )
 
@@ -508,6 +517,26 @@ def _validate_scalar_value(value: Any, max_value_bytes: int) -> bool:
     if isinstance(value, float) and not math.isfinite(value):
         return False
     encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return len(encoded) <= max_value_bytes
+
+
+def _validate_vector_value(value: Any, max_value_bytes: int) -> bool:
+    if not isinstance(value, dict) or set(value) != {"r", "g", "b", "a"}:
+        return False
+    for component in ("r", "g", "b", "a"):
+        component_value = value[component]
+        if (
+            isinstance(component_value, bool)
+            or not isinstance(component_value, (int, float))
+            or not math.isfinite(float(component_value))
+        ):
+            return False
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
     return len(encoded) <= max_value_bytes
 
 
@@ -971,17 +1000,25 @@ def validate_patch(
                             f"Asset property is not authorized by policy: {authorization or '<invalid>'}",
                             f"{operation_pointer}.target.propertyPath",
                         )
-                elif operation_name == "setMaterialInstanceScalarParameter":
+                elif operation_name in {
+                    "setMaterialInstanceScalarParameter",
+                    "setMaterialInstanceVectorParameter",
+                }:
                     if asset_class != "/Script/Engine.MaterialInstanceConstant":
                         _issue(
                             errors,
                             "operation-asset-type",
-                            "Material scalar parameters require MaterialInstanceConstant.",
+                            "Material parameters require MaterialInstanceConstant.",
                             f"{operation_pointer}.operation",
                         )
                     parameter_name = target.get("parameterName")
+                    parameter_type = (
+                        "Scalar"
+                        if operation_name == "setMaterialInstanceScalarParameter"
+                        else "Vector"
+                    )
                     authorization = (
-                        f"{asset_class}#Scalar#{parameter_name}"
+                        f"{asset_class}#{parameter_type}#{parameter_name}"
                         if isinstance(parameter_name, str)
                         else ""
                     )
@@ -1003,7 +1040,15 @@ def validate_patch(
                     )
 
             value = operation_value.get("value")
-            if not _validate_scalar_value(value, policy["maxValueBytes"]):
+            if operation_name == "setMaterialInstanceVectorParameter":
+                if not _validate_vector_value(value, policy["maxValueBytes"]):
+                    _issue(
+                        errors,
+                        "operation-value-type",
+                        "Material vector parameters require a finite {r,g,b,a} JSON object.",
+                        f"{operation_pointer}.value",
+                    )
+            elif not _validate_scalar_value(value, policy["maxValueBytes"]):
                 _issue(
                     errors,
                     "operation-value",

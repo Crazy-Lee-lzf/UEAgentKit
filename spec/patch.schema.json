@@ -100,6 +100,9 @@
               },
               {
                 "$ref": "#/$defs/setMaterialInstanceScalarParameter"
+              },
+              {
+                "$ref": "#/$defs/setMaterialInstanceVectorParameter"
               }
             ]
           }
@@ -128,7 +131,14 @@
           "type": "object"
         },
         "value": {
-          "$ref": "#/$defs/scalar"
+          "oneOf": [
+            {
+              "$ref": "#/$defs/scalar"
+            },
+            {
+              "$ref": "#/$defs/colorVector"
+            }
+          ]
         }
       }
     },
@@ -155,6 +165,9 @@
                   "maxLength": 256
                 }
               }
+            },
+            "value": {
+              "$ref": "#/$defs/scalar"
             }
           }
         }
@@ -190,6 +203,9 @@
                   "pattern": "^[^.]+(?:\\.[^.]+)*$"
                 }
               }
+            },
+            "value": {
+              "$ref": "#/$defs/scalar"
             }
           }
         }
@@ -226,6 +242,9 @@
                   "maxLength": 256
                 }
               }
+            },
+            "value": {
+              "$ref": "#/$defs/scalar"
             }
           }
         }
@@ -278,6 +297,9 @@
                   "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"
                 }
               }
+            },
+            "value": {
+              "$ref": "#/$defs/scalar"
             }
           }
         }
@@ -309,6 +331,61 @@
             },
             "value": {
               "type": "number"
+            }
+          }
+        }
+      ]
+    },
+    "colorVector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "r",
+        "g",
+        "b",
+        "a"
+      ],
+      "properties": {
+        "r": {
+          "type": "number"
+        },
+        "g": {
+          "type": "number"
+        },
+        "b": {
+          "type": "number"
+        },
+        "a": {
+          "type": "number"
+        }
+      }
+    },
+    "setMaterialInstanceVectorParameter": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "operation": {
+              "const": "setMaterialInstanceVectorParameter"
+            },
+            "target": {
+              "type": "object",
+              "required": [
+                "parameterName"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "parameterName": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              }
+            },
+            "value": {
+              "$ref": "#/$defs/colorVector"
             }
           }
         }

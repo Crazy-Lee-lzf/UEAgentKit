@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "1.0",
+  "patchId": "set-material-instance-vector-example",
+  "projectName": "我的项目",
+  "description": "Set an explicitly authorized global vector parameter on a Material Instance.",
+  "assets": [
+    {
+      "assetPath": "/Game/UEAgentKitWriteTests/MI_PatchTarget.MI_PatchTarget",
+      "expectedRevision": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "expectedAssetClass": "/Script/Engine.MaterialInstanceConstant",
+      "operations": [
+        {
+          "operationId": "set-base-color",
+          "operation": "setMaterialInstanceVectorParameter",
+          "target": {
+            "parameterName": "Base Color"
+          },
+          "value": {
+            "r": 0.25,
+            "g": 0.5,
+            "b": 0.75,
+            "a": 1.0
+          }
+        }
+      ]
+    }
+  ]
+}

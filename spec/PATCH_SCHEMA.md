@@ -1,6 +1,6 @@
 # UEAgentKit Patch Schema 1.0
 
-UEAgentKit Patch 是面向 Unreal Engine 资产的声明式变更格式。0.3.4 同时提供纯 JSON 预校验，以及 UE Editor 内的 Blueprint、通用属性和 Material Instance 参数执行器。
+UEAgentKit Patch 是面向 Unreal Engine 资产的声明式变更格式。0.3.5 同时提供纯 JSON 预校验，以及 UE Editor 内的 Blueprint、通用属性和 Material Instance 参数执行器。
 
 ## 两层执行模型
 
@@ -23,6 +23,7 @@ commitSupported=true
 Blueprint Operation                       → BlueprintPatch Commandlet
 setAssetProperty                          → AssetPatch Commandlet
 setMaterialInstanceScalarParameter        → AssetPatch Commandlet
+setMaterialInstanceVectorParameter        → AssetPatch Commandlet
 ```
 
 执行语义：
@@ -114,7 +115,8 @@ Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目�
     "setPinDefault",
     "setBlueprintDescription",
     "setAssetProperty",
-    "setMaterialInstanceScalarParameter"
+    "setMaterialInstanceScalarParameter",
+    "setMaterialInstanceVectorParameter"
   ],
   "allowedAssetClasses": [
     "/Script/Engine.Blueprint",
@@ -125,7 +127,8 @@ Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目�
     "/Script/Engine.Texture2D#SRGB"
   ],
   "allowedMaterialParameters": [
-    "/Script/Engine.MaterialInstanceConstant#Scalar#Roughness"
+    "/Script/Engine.MaterialInstanceConstant#Scalar#Roughness",
+    "/Script/Engine.MaterialInstanceConstant#Vector#Base Color"
   ],
   "requireRevision": true,
   "rejectDirtyPackages": true,
@@ -143,7 +146,7 @@ Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目�
 - Policy 的数组限制属于格式上限；执行器当前仍只接受单资产、单操作。
 - `setAssetProperty` 必须由 `allowedAssetProperties` 精确授权。
 - 属性授权格式固定为 `AssetClass#Property.Path`，例如 `/Script/Engine.Texture2D#SRGB`。
-- Material 参数授权格式固定为 `AssetClass#Scalar#ParameterName`。
+- Material 参数授权格式固定为 `AssetClass#Type#ParameterName`；当前 `Type` 支持 `Scalar` 和 `Vector`。
 - Blueprint Operation 不能用于非 Blueprint；`setAssetProperty` 不能用于 Blueprint；Material 参数操作只接受 MaterialInstanceConstant。
 
 ## 支持的 Operation
@@ -259,6 +262,29 @@ Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目�
 - Dry Run 会保存并恢复完整 `ScalarParameterValues` 数组，因此继承参数临时新增的 Override 也会被移除。
 - 报告额外包含 `rollbackStructureMatch`；成功 Dry Run 要求其为 `true`。
 - 已完成继承参数和已有 Override 两条路径的 Dry Run、Commit、外部备份和独立 UE 重载验证。
+
+### setMaterialInstanceVectorParameter
+
+修改 `MaterialInstanceConstant` 上由 Policy 精确授权的 Global Vector 参数：
+
+```json
+{
+  "operationId": "set-base-color",
+  "operation": "setMaterialInstanceVectorParameter",
+  "target": {"parameterName": "Base Color"},
+  "value": {"r": 0.2, "g": 0.4, "b": 0.8, "a": 1.0}
+}
+```
+
+限制与语义：
+
+- 当前只支持 `MaterialInstanceConstant`、Global association 和 Vector 参数。
+- 值必须是仅包含 `r`、`g`、`b`、`a` 四个有限数字的 JSON 对象。
+- 参数名必须在继承链中恰好匹配一次，并由 `AssetClass#Vector#ParameterName` 精确授权。
+- 修改通过 UE5.6 `MaterialEditingLibrary` 执行，并以重新读取的 `FLinearColor` 结果作为成功依据。
+- Dry Run 保存并恢复完整 `VectorParameterValues` 数组，同时比较每个 Override 的 ParameterInfo、值和编辑器兼容字段。
+- 成功 Dry Run 要求 `rollbackValueMatch=true`、`rollbackStructureMatch=true` 和 `diskUnchanged=true`。
+- 已在真实 `Base Color` 参数上完成 Dry Run、Commit、唯一备份、独立 UE 进程重载和过期 Revision 拒绝验证。
 
 ## Dry Run 报告
 
