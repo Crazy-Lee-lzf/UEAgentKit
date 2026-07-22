@@ -2,7 +2,7 @@
 
 Updated: 2026-07-21
 
-The current release is **0.4.2** and targets Unreal Engine 5.6.
+The current release is **0.4.3** and targets Unreal Engine 5.6.
 
 UE Agent Kit provides project-wide read-only analysis, SQLite/FTS indexing, low-risk Blueprint patching, generic non-Blueprint scalar properties, Global Scalar/Vector/Texture/Static Switch Material Instance parameters, and one top-level scalar field in one existing DataTable row.
 
@@ -39,10 +39,15 @@ Completed in 0.4.2:
 - Declarative Write Fixture Plans.
 - Create/reset, source-class checks, target boundaries, sidecar rejection, and independent Unreal reload verification.
 
+Completed in 0.4.3:
+
+- Real Unreal coverage for Bool, Byte, Int32, Int64, Float, Double, String, Name, Text, `FEnumProperty`, and enum-backed Byte properties.
+- 11 dry runs, 11 commits, per-step backups/manifests/independent reloads, and a final reset.
+- Zero-write rejection regressions for unauthorized targets, missing properties, wrong types, stale revisions, numeric range errors, and invalid enum names.
+
 Remaining work:
 
-- Real UE coverage for all supported scalar types.
-- Negative tests for unauthorized targets, missing targets, wrong types, revision conflicts, dirty packages, sidecars, and save failures.
+- Reproducible real tests for dirty packages, patch sidecars, and save failures.
 
 Arrays, sets, maps, object references, and arbitrary structs will not be exposed through permissive text import. They require a stable JSON value model and verifiable diffs first.
 

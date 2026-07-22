@@ -3,6 +3,12 @@
   "root": "/Game/UEAgentKitWriteTests",
   "fixtures": [
     {
+      "id": "scalar-asset",
+      "kind": "scalarAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/Scalar_PatchTarget",
+      "expectedClass": "/Script/UEAgentKitEditor.UEAgentKitScalarWriteFixtureAsset"
+    },
+    {
       "id": "function-library",
       "kind": "blueprint",
       "targetAsset": "/Game/UEAgentKitWriteTests/BFL_PatchTarget",

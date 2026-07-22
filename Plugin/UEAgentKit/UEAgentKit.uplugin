@@ -1,9 +1,9 @@
 {
   "FileVersion": 3,
-  "Version": 17,
-  "VersionName": "0.4.2",
+  "Version": 18,
+  "VersionName": "0.4.3",
   "FriendlyName": "UE Agent Kit",
-  "Description": "Unreal Engine asset analysis, policy-gated patching, rollback, and reproducible write-fixture toolkit.",
+  "Description": "Unreal Engine asset analysis, policy-gated patching, rollback, fixtures, and real scalar regression toolkit.",
   "Category": "Developer Tools",
   "CreatedBy": "UE Agent Kit Contributors",
   "CanContainContent": false,

@@ -2,7 +2,7 @@
 
 更新时间：2026-07-21
 
-当前版本为 **0.4.2**，支持 Unreal Engine 5.6。
+当前版本为 **0.4.3**，支持 Unreal Engine 5.6。
 
 UE Agent Kit 已完成项目级只读分析、SQLite/FTS 索引、Blueprint 低风险安全写入、通用非 Blueprint 标量属性写入、Material Instance Global Scalar/Vector/Texture/Static Switch，以及 DataTable 单 Row、单顶层标量字段写入。
 
@@ -49,10 +49,15 @@ UE Agent Kit 已完成项目级只读分析、SQLite/FTS 索引、Blueprint 低�
 - 声明式 Write Fixture Plan。
 - Create/Reset、源资产类检查、目标边界、Sidecar 拒绝和独立 UE 重载验证。
 
+0.4.3 已完成：
+
+- Bool、Byte、Int32、Int64、Float、Double、String、Name、Text、`FEnumProperty` 和 enum-backed Byte Property 的完整真实 UE 覆盖。
+- 11/11 Dry Run、11/11 Commit、逐次备份/Manifest/独立重载和最终 Reset。
+- 未授权、属性不存在、错误类型、Revision 冲突、数值越界和非法 Enum 的零写入失败回归。
+
 后续继续：
 
-- 标量类型完整真实 UE 覆盖。
-- 未授权、目标不存在、错误类型、Revision 冲突、Dirty Package、Sidecar 和保存失败测试。
+- Dirty Package、Patch Sidecar 和保存失败的可重复真实测试。
 
 Array、Set、Map、对象引用和任意 Struct 不会直接通过宽松文本导入开放；必须先定义稳定的 JSON 值模型和可验证 Diff。
 

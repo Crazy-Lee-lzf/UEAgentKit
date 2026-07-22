@@ -63,6 +63,19 @@ JSON Schema 位于 [`write-fixture-plan.schema.json`](write-fixture-plan.schema.
 - 源资产只读，不能同时作为同一 Plan 中的目标。
 - 目标必须是单文件 `.uasset`；不支持 `.uexp`、`.ubulk`、`.uptnl`、`.m.ubulk` 或 `.upayload` Sidecar。
 
+### scalarAsset
+
+创建插件内置的 `/Script/UEAgentKitEditor.UEAgentKitScalarWriteFixtureAsset`，用于稳定覆盖以下可编辑标量：
+
+- Bool
+- Byte、Int32、Int64
+- Float、Double
+- String、Name、Text
+- `FEnumProperty` Enum
+- 带 Enum 的 Byte/Numeric Property
+
+默认值由插件构造函数固定，适合重复 Reset 后执行精确 Patch 回归。
+
 ### blueprint
 
 通过 `FKismetEditorUtilities::CreateBlueprint` 创建并编译 Blueprint。

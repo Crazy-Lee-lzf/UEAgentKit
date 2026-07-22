@@ -27,6 +27,9 @@
             "$ref": "#/$defs/duplicateAsset"
           },
           {
+            "$ref": "#/$defs/scalarAsset"
+          },
+          {
             "$ref": "#/$defs/blueprint"
           }
         ]
@@ -113,6 +116,30 @@
             "MacroLibrary",
             "Interface"
           ]
+        }
+      }
+    },
+    "scalarAsset": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "targetAsset",
+        "expectedClass"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "const": "scalarAsset"
+        },
+        "targetAsset": {
+          "$ref": "#/$defs/packagePath"
+        },
+        "expectedClass": {
+          "const": "/Script/UEAgentKitEditor.UEAgentKitScalarWriteFixtureAsset"
         }
       }
     }

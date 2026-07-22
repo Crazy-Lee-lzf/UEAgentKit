@@ -28,6 +28,12 @@ class FixturePlanTests(unittest.TestCase):
             "root": "/Game/UEAgentKitWriteTests",
             "fixtures": [
                 {
+                    "id": "scalar-asset",
+                    "kind": "scalarAsset",
+                    "targetAsset": "/Game/UEAgentKitWriteTests/Scalar_PatchTarget",
+                    "expectedClass": "/Script/UEAgentKitEditor.UEAgentKitScalarWriteFixtureAsset",
+                },
+                {
                     "id": "data-table",
                     "kind": "duplicateAsset",
                     "sourceAsset": "/Game/UEAgentKitTests/DT_SearchableNameFixture",
@@ -75,11 +81,17 @@ class FixturePlanTests(unittest.TestCase):
         self.assertFalse(result["willLoadOrModifyUObjects"])
         self.assertFalse(result["willWriteDisk"])
         self.assertRegex(result["planRevision"], r"^sha256:[0-9a-f]{64}$")
-        self.assertEqual(result["fixtureCount"], 2)
+        self.assertEqual(result["fixtureCount"], 3)
+
+    def test_scalar_asset_requires_exact_fixture_class(self) -> None:
+        self.plan["fixtures"][0]["expectedClass"] = "/Script/Engine.DataAsset"
+        write_json(self.plan_path, self.plan)
+        result = validate_fixture_plan(self.plan_path)
+        self.assertIn("scalar-asset-class", self.codes(result))
 
     def test_plan_rejects_target_outside_root_and_duplicate_id(self) -> None:
-        self.plan["fixtures"][1]["id"] = "data-table"
-        self.plan["fixtures"][1]["targetAsset"] = "/Game/Other/BFL_PatchTarget"
+        self.plan["fixtures"][2]["id"] = "data-table"
+        self.plan["fixtures"][2]["targetAsset"] = "/Game/Other/BFL_PatchTarget"
         write_json(self.plan_path, self.plan)
         result = validate_fixture_plan(self.plan_path)
         self.assertFalse(result["valid"])
@@ -87,7 +99,7 @@ class FixturePlanTests(unittest.TestCase):
         self.assertIn("target-invalid", self.codes(result))
 
     def test_plan_rejects_source_target_overlap(self) -> None:
-        self.plan["fixtures"][0]["sourceAsset"] = "/Game/UEAgentKitWriteTests/BFL_PatchTarget"
+        self.plan["fixtures"][1]["sourceAsset"] = "/Game/UEAgentKitWriteTests/Scalar_PatchTarget"
         write_json(self.plan_path, self.plan)
         result = validate_fixture_plan(self.plan_path)
         self.assertIn("source-target-overlap", self.codes(result))
@@ -154,6 +166,9 @@ class FixturePlanTests(unittest.TestCase):
             "IsSpecificGameRoot",
             "IsTargetUnderRoot",
             "source-target-overlap",
+            "scalarAsset",
+            "CreateScalarAssetFixture",
+            "UEAgentKitScalarWriteFixtureAsset",
             "Create mode refuses existing targets",
             "FindPackageSidecars",
             "DeleteAsset",

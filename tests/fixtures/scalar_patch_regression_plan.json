@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "1.0",
+  "root": "/Game/UEAgentKitWriteTests/ScalarRegression",
+  "fixtures": [
+    {
+      "id": "scalar-asset",
+      "kind": "scalarAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/ScalarRegression/DA_ScalarPatchTarget",
+      "expectedClass": "/Script/UEAgentKitEditor.UEAgentKitScalarWriteFixtureAsset"
+    }
+  ]
+}

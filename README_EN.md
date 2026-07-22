@@ -6,7 +6,7 @@
 
 UE Agent Kit is an open-source Unreal Engine asset analysis, indexing, and policy-gated patch toolkit. Its Editor plugin exports asset catalogs, Asset Registry metadata, dependencies, and Blueprint semantics; a Python CLI and SQLite provide a project-wide index, while Policy, Revision checks, dry runs, and backups protect explicit writes.
 
-The current release is **0.4.2** and targets **Unreal Engine 5.6**. In addition to policy-gated patching and auditable rollback, it adds declarative Write Fixture Plans that repeatedly create or reset isolated Blueprint, DataTable, Data Asset, Texture, and Static Mesh fixtures and verify their actual classes and revisions in an independent Unreal process.
+The current release is **0.4.3** and targets **Unreal Engine 5.6**. In addition to policy-gated patching, auditable rollback, and declarative fixtures, it adds a plugin-native scalar fixture and a real Unreal regression covering 11 scalar types through dry run, commit, backup manifests, independent reloads, and six zero-write rejection paths.
 
 > **AI Generated**: Most code and documentation in this project are AI-generated and reviewed through human inspection, UE 5.6 compilation, automated tests, and real-project regression validation.
 
@@ -22,6 +22,7 @@ The current release is **0.4.2** and targets **Unreal Engine 5.6**. In addition 
 - Validate patches against policy, revision, and export snapshots, then dry-run or explicitly commit authorized Blueprint, non-Blueprint scalar, Material Instance parameter, or DataTable cell changes.
 - Generate a backup manifest after every successful commit, then explicitly roll back and independently verify the restored revision when the current package still matches.
 - Create or reset isolated test assets from a declarative Write Fixture Plan, then independently verify class, revision, and dirty state.
+- Exercise Bool, integer, floating-point, String, Name, Text, and two Enum representations through real dry-run/commit/reload matrices, including zero-write rejections for authorization, stale revisions, wrong types, range errors, invalid enums, and missing properties.
 
 ## Main capabilities
 
@@ -183,12 +184,21 @@ scripts\RunRollback.cmd ^
 
 Use `-Mode Commit` for an explicit restore. The target project must be closed; the tool saves a pre-rollback safety copy and launches an independent Unreal process to verify the restored SHA-256 revision.
 
+Run the complete scalar regression:
+
+```bat
+scripts\RunScalarPatchRegression.cmd ^
+  -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject"
+```
+
+The script creates an isolated native Data Asset fixture, runs 11 dry runs, 11 commits, six expected failures, and resets the fixture to its defaults after a successful run.
+
 The executor supports four Blueprint operations, `setAssetProperty`, four Material Instance parameter operations, and `setDataTableCell`. One execution is limited to one asset and one operation. Generic properties, Material parameters, and DataTable fields use exact `allowedAssetProperties`, `allowedMaterialParameters`, and `allowedDataTableFields` authorization. Material Instance writes require one unique Global parameter; DataTable writes target one top-level scalar field in one existing row and restore the complete row during dry runs. Only single-file packages without external package sidecars are accepted.
 
 ### 6. Validate the asset catalog
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.4.2
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.4.3
 ```
 
 See [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md) for installation and full command details.
@@ -225,6 +235,7 @@ Output\Blueprints\
 - [`spec/PATCH_SCHEMA.md`](spec/PATCH_SCHEMA.md): declarative patches, policy, revision checks, and validation-only safety boundaries.
 - [`spec/BACKUP_AND_ROLLBACK.md`](spec/BACKUP_AND_ROLLBACK.md): backup manifest, rollback receipt, and restore-verification contract.
 - [`spec/WRITE_FIXTURE_PLAN.md`](spec/WRITE_FIXTURE_PLAN.md): fixture plan, create/reset, and independent reload-verification contract.
+- [`spec/SCALAR_PATCH_REGRESSION.md`](spec/SCALAR_PATCH_REGRESSION.md): complete scalar-type, positive-write, and rejection-path Unreal regression contract.
 
 See [`docs/README.md`](docs/README.md) for the documentation index.
 

@@ -316,16 +316,37 @@ scripts\RunWriteFixturePlan.cmd ^
 
 执行链为：Python 只读预校验 → UE Commandlet 全量预校验 → 仅清理 Plan 明列目标 → 创建/复制并保存 → 第二个 UE 进程重新导出 → 精确验证类、Revision 和 Dirty 状态。
 
-`Create` 拒绝既有目标；`Reset` 只删除 `fixtures[].targetAsset`，不会递归删除 Root。当前支持 `duplicateAsset` 与 `blueprint`，且只接受没有 Sidecar 的单文件 Package。完整规范见 [`../spec/WRITE_FIXTURE_PLAN.md`](../spec/WRITE_FIXTURE_PLAN.md)。
+`Create` 拒绝既有目标；`Reset` 只删除 `fixtures[].targetAsset`，不会递归删除 Root。当前支持 `duplicateAsset`、`scalarAsset` 与 `blueprint`，且只接受没有 Sidecar 的单文件 Package。完整规范见 [`../spec/WRITE_FIXTURE_PLAN.md`](../spec/WRITE_FIXTURE_PLAN.md)。
 
-## 12. 校验输出
+## 12. Scalar Patch Regression
+
+完整真实 UE 标量回归：
+
+```bat
+scripts\RunScalarPatchRegression.cmd ^
+  -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject"
+```
+
+脚本使用插件原生 `UEAgentKitScalarWriteFixtureAsset`，固定覆盖 Bool、Byte、Int32、Int64、Float、Double、String、Name、Text、`FEnumProperty` 和 enum-backed Byte Property。
+
+执行内容：
+
+- 11 次独立 Dry Run，验证回滚值、磁盘 Revision 和文件 SHA-256 不变。
+- 11 次顺序 Commit，每次验证备份、Manifest、独立 UE 重载和累计属性值。
+- 正常完成时最终 Reset 回默认值。
+- 6 次预期失败：未授权、过期 Revision、错误 JSON 类型、Byte 越界、非法 Enum、目标 Property 不存在。
+- 所有失败均验证 `.uasset` 哈希和最终 Canonical Revision 不变。
+
+输出默认位于 `Output\ScalarPatchRegression`，其中 `summary.json` 汇总所有报告。完整规范见 [`../spec/SCALAR_PATCH_REGRESSION.md`](../spec/SCALAR_PATCH_REGRESSION.md)。
+
+## 13. 校验输出
 
 通用资产目录：
 
 ```bat
 python <TOOL_ROOT>\scripts\ValidateAssetCatalog.py ^
   --output <TOOL_ROOT>\Output\AssetCatalog ^
-  --expect-exporter 0.4.2
+  --expect-exporter 0.4.3
 ```
 
 校验器会检查：
@@ -343,13 +364,13 @@ Blueprint 输出至少应检查：
 - Canonical JSON 可解析。
 - BPCTX 第一行符合 `H|BPCTX|1|...`。
 
-## 13. 安全行为
+## 14. 安全行为
 
 通用资产目录、Blueprint 导出、SQLite 查询和 `ue-agent patch validate` 保持只读。`RunPatch -Mode DryRun` 会在内存中修改资产，但必须恢复原值并保持磁盘 SHA-256 不变；Blueprint 还会在修改和回滚后编译。
 
 只有 `RunPatch -Mode Commit` 可以保存资产，并且必须满足：Policy 显式允许 Commit、项目/目录/类型/操作均授权、属性或参数精确授权、Revision 一致、Package 非 Dirty、备份创建成功，且 Blueprint 编译成功。成功后自动生成 Backup Manifest。`RunRollback -Mode Commit` 是唯一恢复入口，默认 Dry Run，并要求工程关闭、当前 Revision 未变化、备份完整和独立 UE 重载验证。Patch 写入通过 Unreal Editor API 完成；rollback 仅按已验证 Manifest 原子恢复单文件 Package。
 
-## 14. 清理
+## 15. 清理
 
 可以安全清理：
 

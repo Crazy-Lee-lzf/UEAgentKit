@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 FIXTURE_PLAN_SCHEMA_VERSION = "1.0"
-FIXTURE_TOOL_VERSION = "0.4.2"
+FIXTURE_TOOL_VERSION = "0.4.3"
 _MAX_FIXTURES = 64
 _PACKAGE_RE = re.compile(r"^/[A-Za-z0-9_][A-Za-z0-9_/-]*[A-Za-z0-9_]$")
 _SCRIPT_CLASS_RE = re.compile(r"^/Script/[A-Za-z0-9_]+\.[A-Za-z0-9_]+$")
@@ -93,6 +93,8 @@ def validate_fixture_plan(plan_path: Path) -> dict[str, Any]:
         kind = fixture.get("kind")
         if kind == "duplicateAsset":
             required = {"id", "kind", "sourceAsset", "targetAsset", "expectedClass"}
+        elif kind == "scalarAsset":
+            required = {"id", "kind", "targetAsset", "expectedClass"}
         elif kind == "blueprint":
             required = {
                 "id",
@@ -104,7 +106,7 @@ def validate_fixture_plan(plan_path: Path) -> dict[str, Any]:
             }
         else:
             required = {"id", "kind", "targetAsset", "expectedClass"}
-            _issue(errors, "fixture-kind", "kind must be duplicateAsset or blueprint.", f"{base}.kind")
+            _issue(errors, "fixture-kind", "kind must be duplicateAsset, scalarAsset, or blueprint.", f"{base}.kind")
         missing = sorted(required - set(fixture))
         unknown = sorted(set(fixture) - required)
         for field in missing:
@@ -151,6 +153,14 @@ def validate_fixture_plan(plan_path: Path) -> dict[str, Any]:
                 sources.add(source_package)
                 if source_package == target:
                     _issue(errors, "source-target-equal", "sourceAsset and targetAsset must differ.", f"{base}.sourceAsset")
+        elif kind == "scalarAsset":
+            if expected_class != "/Script/UEAgentKitEditor.UEAgentKitScalarWriteFixtureAsset":
+                _issue(
+                    errors,
+                    "scalar-asset-class",
+                    "scalarAsset fixtures require the UEAgentKit scalar fixture class.",
+                    f"{base}.expectedClass",
+                )
         elif kind == "blueprint":
             if expected_class != "/Script/Engine.Blueprint":
                 _issue(

@@ -34,7 +34,7 @@ The result report is written to `<Project>/Saved/UEAgentKitFixtures/semantic_fix
 
 ## Write fixtures
 
-`write_fixture_plan.example.json` demonstrates the repository-shipped Blueprint-only Plan. Project-specific plans may add `duplicateAsset` entries for DataTables, Data Assets, Textures, Static Meshes, Material Instances, Input Actions, or other single-file assets available in that test project.
+`write_fixture_plan.example.json` demonstrates the repository-shipped native scalar fixture and Blueprint fixtures. Project-specific plans may add `duplicateAsset` entries for DataTables, Data Assets, Textures, Static Meshes, Material Instances, Input Actions, or other single-file assets available in that test project.
 
 ```powershell
 scripts\RunWriteFixturePlan.ps1 `
@@ -44,3 +44,7 @@ scripts\RunWriteFixturePlan.ps1 `
 ```
 
 The wrapper validates the Plan before launching Unreal, recreates only explicitly listed targets, then uses a second Unreal process to verify every fixture. See [`../../spec/WRITE_FIXTURE_PLAN.md`](../../spec/WRITE_FIXTURE_PLAN.md).
+
+## Scalar patch regression
+
+`scalar_patch_regression_plan.json` creates the plugin-native scalar Data Asset used by `scripts\RunScalarPatchRegression.ps1`. The regression covers every currently supported `setAssetProperty` scalar representation, backup manifests, independent reloads, six expected rejection paths, and a final reset. See [`../../spec/SCALAR_PATCH_REGRESSION.md`](../../spec/SCALAR_PATCH_REGRESSION.md).
