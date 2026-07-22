@@ -2,13 +2,13 @@
 
 更新时间：2026-07-21
 
-当前版本为 **0.4.4**，支持 Unreal Engine 5.6。
+当前版本为 **0.5.0**，支持 Unreal Engine 5.6。
 
 UE Agent Kit 已完成项目级只读分析、SQLite/FTS 索引、Blueprint 低风险安全写入、通用非 Blueprint 标量属性写入、Material Instance Global Scalar/Vector/Texture/Static Switch，以及 DataTable 单 Row、单顶层标量字段写入。
 
-## 下一整体目标：0.5.0
+## 当前整体版本：0.5.0
 
-0.5.0 是下一阶段的整体产品目标，但会拆分为可独立验证和回退的 0.4.0、0.4.x 与 0.5.0 三个检查点。
+0.5.0 已完成；0.4.0、0.4.x 与 0.5.0 均保留为可独立验证和回退的检查点。
 
 ```text
 0.4.0  常用非 Blueprint 专用写入
@@ -66,42 +66,24 @@ UE Agent Kit 已完成项目级只读分析、SQLite/FTS 索引、Blueprint 低�
 
 Array、Set、Map、对象引用和任意 Struct 不会直接通过宽松文本导入开放；必须先定义稳定的 JSON 值模型和可验证 Diff。
 
-## 0.5.0：MCP / Agent 第一版
+## 0.5.0：MCP / Agent 第一版（已完成）
 
-首个只读检查点已完成：
+0.5.0 提供两种本地 `stdio` 模式：
 
-- MCP Python SDK 固定稳定 v1 依赖范围，默认使用本地 `stdio`。
-- `ue_search`、`ue_get_asset`、`ue_find_references` 已复用现有 SQLite 查询层。
-- 数据库在服务器启动时固定，并以 `mode=ro&immutable=1` 打开；活动 SQLite Sidecar 会被拒绝，Tool 不能选择路径或执行任意 SQL。
-- 已通过真实 MCP Client 握手、Tool 发现、中文查询、错误参数拒绝，以及数据库目录文件集合与 SHA-256 完全不变验证。
+- 默认三 Tool 只读查询：`ue_search`、`ue_get_asset`、`ue_find_references`。
+- 固定项目八 Tool 完整工作流，额外提供 `ue_plan_patch`、`ue_dry_run_patch`、`ue_apply_patch`、`ue_verify_asset`、`ue_rollback_patch`。
 
-0.5.0 仍计划提供以下高层接口：
+完整模式的安全边界：
 
-```text
-ue_search
-ue_get_asset
-ue_find_references
-ue_plan_patch
-ue_dry_run_patch
-ue_apply_patch
-ue_verify_asset
-ue_rollback_patch
-```
+- Database、Engine、Project、Policy、Revision Export、工作目录和备份目录均在 Server 启动时固定，Tool 参数不能覆盖。
+- SQLite 使用不可变只读快照，拒绝活动 `-wal`、`-shm` 和 `-journal`。
+- Patch 仍限制为单资产、单 Operation，并复用现有 Policy、Revision、Commandlet、Backup Manifest 和 rollback。
+- Plan 文件和 Policy 在 Server 会话内锁定摘要；外部修改会拒绝继续执行。
+- Commit 必须先成功 Dry Run，再提供一次性 Receipt 和精确 `COMMIT <planId>` 确认。
+- Rollback Commit 必须先成功 rollback Dry Run，再提供一次性 Receipt 和精确 `ROLLBACK <applyReceipt>` 确认。
+- `ue_verify_asset` 使用独立 UE 进程重新导出并核对保存后的 SHA-256 Revision。
 
-MCP 只是现有 SQLite、Patch、Policy、Revision、Commandlet 和 Rollback 的接入层，不会暴露任意 UObject 调用、Shell 或文件覆盖能力。
-
-0.5.0 的目标闭环是：
-
-```text
-查找资产
-→ 查看结构和引用
-→ 生成 Patch 计划
-→ Dry Run
-→ 查看结构化结果
-→ 显式 Commit
-→ 独立验证
-→ 必要时回滚
-```
+真实 UE5.6 MCP Client 回归已完成：八 Tool 发现、Dry Run 磁盘不变、错误确认拒绝、Commit、Receipt 单次使用、独立重载、rollback Dry Run、显式恢复，以及最终 `.uasset` 哈希完全还原。
 
 ## 0.5.0 之后
 

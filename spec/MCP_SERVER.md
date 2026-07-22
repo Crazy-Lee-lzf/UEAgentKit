@@ -1,92 +1,162 @@
 # UE Agent Kit MCP Server
 
-UE Agent Kit 的 MCP 接入层只暴露稳定的高层能力，不开放任意 SQL、Shell、文件读写或 UObject 调用。
+UE Agent Kit 0.5.0 通过本地 MCP `stdio` 提供稳定的高层查询和受控资产工作流。MCP 层不会开放任意 SQL、Shell、文件系统路径、Commandlet 参数或 UObject 调用。
 
-## 传输与依赖
+## 模式
 
-首版仅使用本地 `stdio`：
+### 默认只读模式
 
-```bat
-scripts\setup_python.cmd -WithMcp
-scripts\RunMcp.cmd -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
-scripts\TestMcpStdio.cmd
-```
-
-MCP Python SDK 固定在稳定 v1 范围：
+固定一个不可变 SQLite 索引，只注册：
 
 ```text
-mcp>=1.27,<2
+ue_search
+ue_get_asset
+ue_find_references
 ```
 
-服务器启动时固定数据库路径。MCP Tool 参数不能选择其他数据库，也不能修改或迁移数据库；每次查询均通过 SQLite `mode=ro&immutable=1` 重新打开。索引必须是无活动 Writer 的静态快照；存在 `-wal`、`-shm` 或 `-journal` 时拒绝查询。
+### 固定项目完整模式
 
-## 只读 Tool
+使用 `-EnableWriteTools` 后，Server 启动时还必须固定：
+
+```text
+EngineRoot
+ProjectPath
+Policy
+RevisionExport
+WorkRoot
+BackupRoot
+```
+
+并额外注册：
+
+```text
+ue_plan_patch
+ue_dry_run_patch
+ue_apply_patch
+ue_verify_asset
+ue_rollback_patch
+```
+
+只有再使用 `-EnableCommitTools`，且固定 Policy 的 `commitEnabled=true`，`ue_apply_patch` 与 rollback Commit 才能写入项目资产。
+
+## 启动配置不是 Tool 参数
+
+Database、Engine、Project、Policy、Revision Export、Work Root、Backup Root 和进程超时只能在 Server 启动时配置。任何 MCP Tool Schema 都不会出现这些字段，因此 Agent 不能在调用中切换工程、Policy、引擎、数据库或输出位置。完整模式还要求 SQLite `projectKey`、Revision Export `projectName` 与 `.uproject` 文件名完全一致。
+
+## 查询 Tool
 
 ### `ue_search`
 
-统一搜索资产或 Symbol：
-
-```text
-scope=assets  → query + asset_class
-scope=symbols → query + kind + asset_path + include_details
-```
-
-默认 `limit=20`，MCP 层最大 `100`。
+搜索 Asset 或 Symbol，带硬分页上限。
 
 ### `ue_get_asset`
 
-按完整 Object Path 获取一个资产：
-
-```text
-/Game/Characters/BP_Player.BP_Player
-```
-
-返回资产元数据、受限数量的 Symbol、Reference、Graph 和 Node。四类明细都有独立硬上限，默认不展开 `details_json`。
+按完整 Object Path 返回一个资产，以及有界的 Symbol、Reference、Graph 和 Node。
 
 ### `ue_find_references`
 
-按引用类型、源资产、源/目标 Symbol 或目标资产查找依赖边。必须至少提供一个过滤条件，避免无意导出整个引用表。
+按引用类型、源/目标 Symbol、源/目标资产过滤；至少需要一个条件。
 
-## 响应契约
+## 写入工作流 Tool
 
-成功响应至少包含：
+### `ue_plan_patch`
 
-```json
-{
-  "schemaVersion": "1.0",
-  "tool": "ue_search",
-  "ok": true,
-  "projectKey": "ProjectName",
-  "databaseSchemaVersion": 1,
-  "readOnly": true
-}
+输入资产路径、已注册 Operation、语义 Target 和 JSON Value。Server：
+
+1. 从固定 SQLite 获取 Asset Class 与 SHA-256 Revision。
+2. 生成单资产、单 Operation Patch。
+3. 使用固定 Policy 与 Revision Export 纯校验。
+4. 将 Patch 写入固定 Work Root。
+5. 记录 Canonical JSON 摘要。
+
+Plan 只在当前 Server 会话有效。
+
+### `ue_dry_run_patch`
+
+按 `planId` 调用现有 `RunPatch.ps1 -Mode DryRun`，并要求：
+
+```text
+saved=false
+rolledBack=true
+rollbackValueMatch=true
+diskUnchanged=true
+beforeRevision==afterRevision
 ```
 
-错误通过结构化响应返回，不把数据库路径暴露为 Tool 参数：
+成功后返回一次性 `dryRunReceipt`。
 
-```json
-{
-  "schemaVersion": "1.0",
-  "tool": "ue_search",
-  "ok": false,
-  "readOnly": true,
-  "error": {
-    "code": "invalid-arguments",
-    "type": "ValueError",
-    "message": "..."
-  }
-}
+### `ue_apply_patch`
+
+要求：
+
+- Server 启动时启用 Commit。
+- 固定 Policy 允许 Commit。
+- Plan 与 Policy 摘要未变化。
+- 新鲜、未使用且属于该 Plan 的 Dry Run Receipt。
+- `confirmation` 精确等于 `COMMIT <planId>`。
+
+成功后生成外部备份、Backup Manifest 和 `applyReceipt`。同一 Dry Run Receipt 不能重复 Commit。
+
+### `ue_verify_asset`
+
+使用独立 Unreal Editor 进程重新导出目标资产，并核对 Object Path 与 Commit 后 SHA-256 Revision。该 Tool 不修改项目资产，但会在固定 Work Root 写验证报告，因此 MCP Annotation 不是纯 read-only。
+
+### `ue_rollback_patch`
+
+分两阶段：
+
+1. 默认 `mode=DryRun`，验证 Manifest、Policy、当前 Revision 和备份完整性，返回一次性 `rollbackDryRunReceipt`。
+2. `mode=Commit` 要求 Receipt 和精确 `ROLLBACK <applyReceipt>`，执行原子恢复并由独立 UE 进程验证恢复后的 Revision。
+
+## 会话锁与失效
+
+- Policy SHA-256 在 Server 启动时锁定。
+- 每个 Plan 的 Canonical JSON 摘要在创建时锁定。
+- Policy 或 Plan 文件被外部修改后，后续 Dry Run/Commit 被拒绝。
+- Plan、Dry Run Receipt、Apply Receipt 和 rollback Receipt 仅保存在内存中。
+- Server 重启后全部失效，不支持跨会话恢复执行上下文。
+- Commit 后固定 SQLite 与 Revision Export 不会自动改写；若保留修改并继续规划该资产，必须停止 Server，重新导出、重建索引并启动新会话。
+
+## 文件和进程边界
+
+- Work Root 必须是工具 `Output` 的子目录。
+- Backup Root 必须是工具 `Backups` 的子目录。
+- 解析后的真实路径会再次检查，防止 Junction/符号链接逃逸。
+- 所有子进程 stdin 固定为 `DEVNULL`，不得占用 MCP 协议管道。
+- 子进程 stdout/stderr 有固定截断上限；对 Agent 返回的错误和报告会脱敏本机配置路径。
+- 当前仍只支持单文件 Package；发现 `.uexp`、`.ubulk` 等 Sidecar 时由既有执行器拒绝。
+
+## SQLite 边界
+
+- 使用 `mode=ro&immutable=1`。
+- 启动和每次查询前拒绝活动 `-wal`、`-shm`、`-journal`。
+- 不运行 Migration。
+- 查询后索引目录文件集合与 SHA-256 必须不变。
+- 重建索引前必须停止 MCP Server，完成构建并关闭所有写入连接后再启动。
+
+## MCP SDK 与传输
+
+```text
+mcp>=1.27,<2
+transport=stdio
 ```
 
-## 安全边界
+当前不监听 TCP，不提供 HTTP/SSE。
 
-- 仅 `stdio`，当前不监听 TCP 端口。
-- 数据库固定于服务器启动参数，Tool 调用不能覆盖。
-- SQLite 使用 `mode=ro&immutable=1`，不运行 Migration，也不创建 WAL/SHM Sidecar。
-- 验证数据库 Schema 与 FTS5 表后才启动服务器；查询前后都检查不存在活动 SQLite Sidecar。
-- 搜索、Symbol、Reference 和 Node 数量均有硬上限。
-- `ue_find_references` 禁止无过滤条件的全表读取。
-- 当前三个 Tool 均不会启动 Unreal Editor、加载 UObject 或写入资产。
-- 重建索引前必须停止 MCP Server；完成索引并关闭所有 Writer 后再启动，以获得新的不可变快照。
+## 集成测试
 
-后续写入 Tool 必须继续复用现有 Patch、Policy、Revision、Dry Run、备份、独立验证和 rollback 层，不会直接开放底层 Commandlet 参数。
+只读协议测试：
+
+```bat
+scripts\TestMcpStdio.cmd
+```
+
+完整 UE5.6 工作流测试：
+
+```bat
+scripts\TestMcpWorkflow.cmd ^
+  -EngineRoot "E:\Path\To\UE_5.6" ^
+  -ProjectPath "E:\Path\To\Project.uproject"
+```
+
+完整测试使用隔离 Scalar Fixture，最终必须恢复测试前 `.uasset` SHA-256。

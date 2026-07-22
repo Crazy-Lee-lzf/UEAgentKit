@@ -135,3 +135,23 @@ AI 输出应明确区分：
 - 回滚资产。
 
 公开能力以仓库根目录 `README.md` 为准。
+
+
+## MCP 工作流
+
+0.5.0 的默认 MCP 模式只提供查询 Tool。完整固定项目模式增加 Patch Plan、Dry Run、Commit、独立验证和 rollback，但 Agent 仍不能选择项目、引擎、Policy、数据库或任意文件路径。
+
+推荐调用顺序：
+
+```text
+ue_search / ue_get_asset / ue_find_references
+→ ue_plan_patch
+→ ue_dry_run_patch
+→ 人工或上层 Agent 检查结构化 Diff 与安全门
+→ ue_apply_patch（一次性 Receipt + 精确确认）
+→ ue_verify_asset
+→ 必要时 ue_rollback_patch DryRun
+→ ue_rollback_patch Commit（一次性 Receipt + 精确确认）
+```
+
+MCP Receipt 仅在当前 Server 会话中有效；重启后必须重新 Plan 和 Dry Run。

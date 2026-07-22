@@ -220,11 +220,11 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
 
         )
 
-        self.assertIn('version = "0.4.4"', pyproject)
+        self.assertIn('version = "0.5.0"', pyproject)
 
-        self.assertEqual(plugin["VersionName"], "0.4.4")
+        self.assertEqual(plugin["VersionName"], "0.5.0")
 
-        self.assertEqual(plugin["Version"], 19)
+        self.assertEqual(plugin["Version"], 20)
 
 
 

@@ -6,7 +6,7 @@
 
 UE Agent Kit 是一套面向 Unreal Engine 的开源资产分析、索引与受控写入工具。它通过 UE Editor 插件导出项目资产目录、Asset Registry 元数据、依赖关系和 Blueprint 语义，再使用 Python CLI 与 SQLite 建立项目级索引，并通过 Policy、Revision、Dry Run 和备份保护显式写入。
 
-当前版本为 **0.4.4**，支持 **Unreal Engine 5.6**。在 11 类标量完整 Dry Run/Commit/独立重载基础上，现已补齐 Dirty Package、真实 Package Sidecar 和保存失败磁盘保护回归；失败矩阵扩展为 9 类，并继续要求目标 SHA-256 零变化。
+当前版本为 **0.5.0**，支持 **Unreal Engine 5.6**。在 0.4.4 的安全写入、备份与回滚基础上，0.5.0 提供完整的本地 MCP 工作流：搜索、读取、生成 Patch、Dry Run、显式 Commit、独立验证和二阶段回滚。
 
 > **AI Generated**：本项目的代码和文档主要由 AI 生成，并通过人工审查、UE 5.6 编译、自动化测试和真实工程回归验证。
 
@@ -22,7 +22,7 @@ UE Agent Kit 是一套面向 Unreal Engine 的开源资产分析、索引与受�
 - 使用 Policy、Revision 和导出快照校验 Patch，并对授权 Blueprint、非 Blueprint 标量属性、Material Instance 参数或 DataTable 单元格执行 Dry Run 或显式 Commit。
 - 为成功 Commit 自动生成 Backup Manifest，并在当前 Revision 仍匹配时显式回滚和独立验证恢复结果。
 - 使用声明式 Write Fixture Plan 在安全测试目录内创建或重置测试资产，并独立验证类、Revision 与 Dirty 状态。
-- 通过 0.5.0 开发中的本地只读 MCP Server，让 Agent 搜索资产/Symbol、读取单资产和查询引用，不开放 Shell、任意 SQL 或 UObject。
+- 通过 0.5.0 本地 MCP Server，让 Agent 搜索资产/Symbol、读取单资产和查询引用，不开放 Shell、任意 SQL 或 UObject。
 - 对 Bool、整数、浮点、String、Name、Text 和两类 Enum 执行真实 Dry Run/Commit/重载矩阵，并验证未授权、过期 Revision、错误类型、越界、非法 Enum、属性不存在、Dirty Package、Sidecar 和保存失败均零写入拒绝。
 
 ## 主要能力
@@ -196,7 +196,7 @@ scripts\RunScalarPatchRegression.cmd ^
 
 当前支持四种 Blueprint Operation、`setAssetProperty`、四种 Material Instance 参数 Operation，以及 `setDataTableCell`。每次执行仅允许一个资产和一个 Operation；通用属性、Material 参数和 DataTable 字段分别由 `allowedAssetProperties`、`allowedMaterialParameters`、`allowedDataTableFields` 精确授权。Material Instance 仅接受唯一 Global 参数；DataTable 仅修改现有 Row 的一个顶层标量字段，并在 Dry Run 中恢复完整 Row。当前仍只接受没有独立 Package 侧文件的单文件资产。
 
-### 6. 启动只读 MCP（0.5.0 开发中）
+### 6. 启动 MCP Server（0.5.0）
 
 先安装可选 MCP 依赖并确认 SQLite 索引可读：
 
@@ -206,7 +206,7 @@ scripts\RunMcp.cmd -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3" -Check
 scripts\TestMcpStdio.cmd
 ```
 
-服务器默认只使用本地 `stdio`，并把索引作为无活动 Sidecar 的不可变快照读取；当前提供 `ue_search`、`ue_get_asset` 和 `ue_find_references`：
+服务器仅使用本地 `stdio`。默认模式提供 `ue_search`、`ue_get_asset` 和 `ue_find_references` 三个只读查询 Tool；固定 Engine、Project、Policy 和 Revision Export 后可启用完整八 Tool 工作流：
 
 ```bat
 claude mcp add --transport stdio --scope project ue-agent-kit -- ^
@@ -215,12 +215,12 @@ claude mcp add --transport stdio --scope project ue-agent-kit -- ^
   -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
 ```
 
-添加后可用 `claude mcp list` 或 Claude Code 内的 `/mcp` 检查连接。重建索引前应停止 MCP Server，完成索引并关闭写入连接后再重启。完整契约见 [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md)。
+添加后可用 `claude mcp list` 或 Claude Code 内的 `/mcp` 检查连接。完整模式使用 `-EnableWriteTools`；只有同时使用 `-EnableCommitTools` 且 Policy 允许 Commit，才能保存或恢复资产。Commit 和 rollback Commit 都要求一次性 Dry Run Receipt 与精确确认短语。重建索引前必须停止 MCP Server。完整契约见 [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md)。
 
 ### 7. 校验通用资产导出
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.4.4
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.5.0
 ```
 
 完整参数和安装说明见 [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md)。
@@ -252,6 +252,7 @@ Output\Blueprints\
 
 - [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md)：构建、安装、导出和查询。
 - [`docs/AI_USAGE.md`](docs/AI_USAGE.md)：AI 使用资产索引与 Blueprint 语义的方式。
+- [`docs/RELEASE_0.5.0.md`](docs/RELEASE_0.5.0.md)：0.5.0 MCP 工作流、验证结果和安全边界。
 - [`docs/RELEASE_0.4.4.md`](docs/RELEASE_0.4.4.md)：0.4.4 正式发布范围、验证结果和升级说明。
 - [`CHANGELOG.md`](CHANGELOG.md)：版本变更摘要。
 - [`docs/ROADMAP.md`](docs/ROADMAP.md)：0.4.0、0.4.x 和 0.5.0 的版本目标与安全边界。

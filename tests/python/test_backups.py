@@ -94,7 +94,7 @@ class BackupRollbackTests(unittest.TestCase):
         }
         self.report = {
             "schemaVersion": "1.0",
-            "executorVersion": "0.4.4",
+            "executorVersion": "0.5.0",
             "mode": "Commit",
             "patchId": "backup-test",
             "projectName": "TestProject",

@@ -2,11 +2,15 @@
 
 All notable changes to UE Agent Kit are documented here.
 
-## Unreleased — 0.5.0 development
+## 0.5.0 — Fixed-project MCP workflow
 
-- Added the first read-only MCP checkpoint with `ue_search`, `ue_get_asset`, and `ue_find_references`.
-- Uses local `stdio` and a fixed immutable SQLite snapshot.
-- Does not expose shell execution, arbitrary SQL, UObject access, or write operations.
+- Added `ue_plan_patch`, `ue_dry_run_patch`, `ue_apply_patch`, `ue_verify_asset`, and `ue_rollback_patch` to the existing three read-only query tools.
+- Added fixed server configuration for Database, Engine, Project, Policy, Revision Export, work root, and backup root; tool calls cannot replace these paths.
+- Added digest locking for stored plans and Policy files.
+- Added one-time dry-run receipts and exact confirmation phrases for both Commit and rollback Commit.
+- Added independent Unreal reload verification after Commit and rollback.
+- Added real MCP client integration coverage with final package SHA-256 restoration and unchanged immutable SQLite index files.
+- Preserved the default three-tool read-only server mode.
 
 ## 0.4.4 — Safe write regression hardening
 

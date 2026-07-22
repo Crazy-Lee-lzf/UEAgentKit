@@ -1,0 +1,28 @@
+{
+  "mcpServers": {
+    "ue-agent-kit": {
+      "type": "stdio",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "E:\\Path\\To\\UEAgentKit\\scripts\\RunMcp.ps1",
+        "-Database",
+        "E:\\Path\\To\\UEAgentKit\\.data\\ue_agent_kit.sqlite3",
+        "-EnableWriteTools",
+        "-EnableCommitTools",
+        "-EngineRoot",
+        "E:\\Path\\To\\UE_5.6",
+        "-ProjectPath",
+        "E:\\Path\\To\\Project.uproject",
+        "-Policy",
+        "E:\\Path\\To\\write-policy.json",
+        "-RevisionExport",
+        "E:\\Path\\To\\RevisionExport"
+      ],
+      "env": {}
+    }
+  }
+}

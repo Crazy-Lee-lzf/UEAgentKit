@@ -33,9 +33,9 @@ scripts\RunScalarPatchRegression.cmd ^
 | `Int64Value` | Int64Property | `1234567890123` | `-4000000000000` |
 | `FloatValue` | FloatProperty | `1.25` | `3.75` |
 | `DoubleValue` | DoubleProperty | `-2.5` | `123.125` |
-| `StringValue` | StrProperty | `Initial String` | `Updated String 0.4.4` |
+| `StringValue` | StrProperty | `Initial String` | `Updated String 0.5.0` |
 | `NameValue` | NameProperty | `InitialName` | `UpdatedName044` |
-| `TextValue` | TextProperty | `Initial Text` | `Updated Text 0.4.4` |
+| `TextValue` | TextProperty | `Initial Text` | `Updated Text 0.5.0` |
 | `EnumValue` | EnumProperty | `Alpha` | `Beta` |
 | `LegacyEnumValue` | enum-backed ByteProperty | `UEAK_LegacyAlpha` | `UEAK_LegacyBeta` |
 

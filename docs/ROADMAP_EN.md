@@ -2,13 +2,13 @@
 
 Updated: 2026-07-21
 
-The current release is **0.4.4** and targets Unreal Engine 5.6.
+The current release is **0.5.0** and targets Unreal Engine 5.6.
 
 UE Agent Kit provides project-wide read-only analysis, SQLite/FTS indexing, low-risk Blueprint patching, generic non-Blueprint scalar properties, Global Scalar/Vector/Texture/Static Switch Material Instance parameters, and one top-level scalar field in one existing DataTable row.
 
-## Next product target: 0.5.0
+## Current product version: 0.5.0
 
-The next product-level target is 0.5.0, split into independently verifiable checkpoints:
+Version 0.5.0 is complete, with 0.4.0, 0.4.x, and 0.5.0 retained as independently verifiable checkpoints:
 
 ```text
 0.4.0  Common non-Blueprint asset adapters
@@ -56,42 +56,24 @@ The 0.4.x rollback and core safety-regression goals are complete. The next phase
 
 Arrays, sets, maps, object references, and arbitrary structs will not be exposed through permissive text import. They require a stable JSON value model and verifiable diffs first.
 
-## 0.5.0: first MCP / Agent interface
+## 0.5.0: first MCP / Agent interface (completed)
 
-The first read-only checkpoint is complete:
+Version 0.5.0 provides two local `stdio` modes:
 
-- The stable v1 MCP Python SDK range is pinned and the default transport is local `stdio`.
-- `ue_search`, `ue_get_asset`, and `ue_find_references` reuse the existing SQLite query layer.
-- The database is fixed at server startup and opened with `mode=ro&immutable=1`; active SQLite sidecars are rejected, and tools cannot select paths or execute arbitrary SQL.
-- A real MCP client verified handshake, tool discovery, Unicode queries, invalid-argument rejection, and an unchanged index-directory file set and SHA-256 values.
+- A default three-tool read-only query mode: `ue_search`, `ue_get_asset`, and `ue_find_references`.
+- A fixed-project eight-tool workflow that additionally exposes `ue_plan_patch`, `ue_dry_run_patch`, `ue_apply_patch`, `ue_verify_asset`, and `ue_rollback_patch`.
 
-The remaining 0.5.0 high-level tools are:
+Full-workflow safety boundaries:
 
-```text
-ue_search
-ue_get_asset
-ue_find_references
-ue_plan_patch
-ue_dry_run_patch
-ue_apply_patch
-ue_verify_asset
-ue_rollback_patch
-```
+- Database, Engine, Project, Policy, Revision Export, work root, and backup root are fixed at server startup and cannot be overridden by tool arguments.
+- SQLite uses an immutable read-only snapshot and rejects active `-wal`, `-shm`, and `-journal` sidecars.
+- Patches remain single-asset and single-operation, reusing the existing Policy, Revision, commandlet, backup-manifest, and rollback layers.
+- Plan files and the Policy are digest-locked for the server session; external changes reject further execution.
+- Commit requires a successful dry run, a one-time receipt, and exact `COMMIT <planId>` confirmation.
+- Rollback commit requires a successful rollback dry run, a one-time receipt, and exact `ROLLBACK <applyReceipt>` confirmation.
+- `ue_verify_asset` launches an independent Unreal process and checks the saved SHA-256 revision.
 
-The MCP layer will wrap the existing SQLite, patch, policy, revision, commandlet, and rollback layers. It will not expose arbitrary UObject calls, shell execution, or unrestricted file writes.
-
-The 0.5.0 workflow target is:
-
-```text
-search
-→ inspect structure and references
-→ plan a patch
-→ dry run
-→ inspect structured results
-→ explicit commit
-→ independent verification
-→ rollback when required
-```
+A real UE5.6 MCP client verified eight-tool discovery, zero-write dry run, invalid-confirmation rejection, commit, single-use receipts, independent reload, rollback dry run, explicit restore, and exact final `.uasset` hash restoration.
 
 ## After 0.5.0
 

@@ -346,7 +346,7 @@ scripts\RunScalarPatchRegression.cmd ^
 ```bat
 python <TOOL_ROOT>\scripts\ValidateAssetCatalog.py ^
   --output <TOOL_ROOT>\Output\AssetCatalog ^
-  --expect-exporter 0.4.4
+  --expect-exporter 0.5.0
 ```
 
 校验器会检查：
@@ -364,7 +364,7 @@ Blueprint 输出至少应检查：
 - Canonical JSON 可解析。
 - BPCTX 第一行符合 `H|BPCTX|1|...`。
 
-## 14. 只读 MCP Server（0.5.0 开发中）
+## 14. MCP Server（0.5.0）
 
 安装 MCP SDK v1 可选依赖：
 
@@ -401,7 +401,7 @@ claude mcp add --transport stdio --scope project ue-agent-kit -- ^
   -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
 ```
 
-当前只暴露三个只读 Tool：
+默认只读模式暴露三个 Tool：
 
 ```text
 ue_search
@@ -409,7 +409,7 @@ ue_get_asset
 ue_find_references
 ```
 
-服务器启动时固定数据库路径，Tool 参数不能更换数据库；SQLite 以 `mode=ro&immutable=1` 打开，不执行 Migration，也不会创建 `-wal/-shm`。若检测到活动 `-wal`、`-shm` 或 `-journal`，服务器拒绝查询。重建索引前先停止 MCP Server，写入完成并关闭连接后再重启。完整响应和上限见 [`../spec/MCP_SERVER.md`](../spec/MCP_SERVER.md)。
+服务器启动时固定数据库路径，Tool 参数不能更换数据库；SQLite 使用不可变只读快照并拒绝活动 Sidecar。完整模式再固定 Engine、Project、Policy、Revision Export、工作目录和备份目录，并增加 `ue_plan_patch`、`ue_dry_run_patch`、`ue_apply_patch`、`ue_verify_asset`、`ue_rollback_patch`。保存和恢复必须显式启用 Commit、通过 Policy，并提供一次性 Receipt 与精确确认短语。真实全闭环测试使用 `scripts\TestMcpWorkflow.cmd`。完整契约见 [`../spec/MCP_SERVER.md`](../spec/MCP_SERVER.md)。
 
 ## 15. 安全行为
 

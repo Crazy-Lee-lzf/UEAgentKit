@@ -6,7 +6,7 @@
 
 UE Agent Kit is an open-source Unreal Engine asset analysis, indexing, and policy-gated patch toolkit. Its Editor plugin exports asset catalogs, Asset Registry metadata, dependencies, and Blueprint semantics; a Python CLI and SQLite provide a project-wide index, while Policy, Revision checks, dry runs, and backups protect explicit writes.
 
-The current release is **0.4.4** and targets **Unreal Engine 5.6**. It extends the complete 11-type scalar dry-run/commit/reload matrix with reproducible Dirty Package, real package-sidecar, and save-failure disk-protection tests. The rejection matrix now covers nine zero-write paths with unchanged target SHA-256 values.
+The current release is **0.5.0** and targets **Unreal Engine 5.6**. Building on the policy, backup, and rollback guarantees in 0.4.4, version 0.5.0 adds a complete local MCP workflow for search, inspection, patch planning, dry run, explicit commit, independent verification, and two-stage rollback.
 
 > **AI Generated**: Most code and documentation in this project are AI-generated and reviewed through human inspection, UE 5.6 compilation, automated tests, and real-project regression validation.
 
@@ -22,7 +22,7 @@ The current release is **0.4.4** and targets **Unreal Engine 5.6**. It extends t
 - Validate patches against policy, revision, and export snapshots, then dry-run or explicitly commit authorized Blueprint, non-Blueprint scalar, Material Instance parameter, or DataTable cell changes.
 - Generate a backup manifest after every successful commit, then explicitly roll back and independently verify the restored revision when the current package still matches.
 - Create or reset isolated test assets from a declarative Write Fixture Plan, then independently verify class, revision, and dirty state.
-- Use the local read-only MCP server under 0.5.0 development to search assets/symbols, inspect one asset, and query references without exposing shell, arbitrary SQL, or UObject access.
+- Use the local MCP server in 0.5.0 to search assets/symbols, inspect one asset, and query references without exposing shell, arbitrary SQL, or UObject access.
 - Exercise Bool, integer, floating-point, String, Name, Text, and two Enum representations through real dry-run/commit/reload matrices, including zero-write rejections for authorization, stale revisions, wrong types, range errors, invalid enums, missing properties, dirty packages, sidecars, and save failures.
 
 ## Main capabilities
@@ -196,7 +196,7 @@ The script creates an isolated native Data Asset fixture, runs 11 dry runs, 11 c
 
 The executor supports four Blueprint operations, `setAssetProperty`, four Material Instance parameter operations, and `setDataTableCell`. One execution is limited to one asset and one operation. Generic properties, Material parameters, and DataTable fields use exact `allowedAssetProperties`, `allowedMaterialParameters`, and `allowedDataTableFields` authorization. Material Instance writes require one unique Global parameter; DataTable writes target one top-level scalar field in one existing row and restore the complete row during dry runs. Only single-file packages without external package sidecars are accepted.
 
-### 6. Run the read-only MCP server (0.5.0 development)
+### 6. Run the MCP server (0.5.0)
 
 Install the optional MCP dependency and validate the SQLite index:
 
@@ -206,7 +206,7 @@ scripts\RunMcp.cmd -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3" -Check
 scripts\TestMcpStdio.cmd
 ```
 
-The server uses local `stdio` only and reads the index as an immutable snapshot without active SQLite sidecars. It currently exposes `ue_search`, `ue_get_asset`, and `ue_find_references`:
+The server uses local `stdio` only. Default mode exposes `ue_search`, `ue_get_asset`, and `ue_find_references`; fixed Engine, Project, Policy, and Revision Export settings enable the complete eight-tool workflow:
 
 ```bat
 claude mcp add --transport stdio --scope project ue-agent-kit -- ^
@@ -215,12 +215,12 @@ claude mcp add --transport stdio --scope project ue-agent-kit -- ^
   -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
 ```
 
-Use `claude mcp list` or `/mcp` inside Claude Code to inspect the connection. Stop the MCP server before rebuilding the index, then restart it after all index writers have closed. See [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md) for the full contract.
+Use `claude mcp list` or `/mcp` inside Claude Code to inspect the connection. Full workflow mode requires `-EnableWriteTools`; asset save and restore additionally require `-EnableCommitTools`, a commit-enabled Policy, one-time dry-run receipts, and exact confirmation phrases. Stop the server before rebuilding the index. See [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md) for the full contract.
 
 ### 7. Validate the asset catalog
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.4.4
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.5.0
 ```
 
 See [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md) for installation and full command details.
@@ -252,6 +252,7 @@ Output\Blueprints\
 
 - [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md): build, install, export, and query instructions.
 - [`docs/AI_USAGE.md`](docs/AI_USAGE.md): using the asset index and Blueprint semantics with AI tools.
+- [`docs/RELEASE_0.5.0_EN.md`](docs/RELEASE_0.5.0_EN.md): 0.5.0 MCP workflow, verification, and safety boundaries.
 - [`docs/RELEASE_0.4.4_EN.md`](docs/RELEASE_0.4.4_EN.md): 0.4.4 release scope, verification, and upgrade notes.
 - [`CHANGELOG.md`](CHANGELOG.md): version history summary.
 - [`docs/ROADMAP_EN.md`](docs/ROADMAP_EN.md): version goals and safety boundaries for 0.4.0, 0.4.x, and 0.5.0.

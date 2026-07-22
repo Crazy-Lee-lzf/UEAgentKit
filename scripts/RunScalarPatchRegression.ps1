@@ -94,9 +94,9 @@ $Cases = @(
     [pscustomobject]@{ Name = "Int64Value"; Value = -4000000000000; Baseline = 1234567890123; TargetType = "Int64Property" },
     [pscustomobject]@{ Name = "FloatValue"; Value = 3.75; Baseline = 1.25; TargetType = "FloatProperty" },
     [pscustomobject]@{ Name = "DoubleValue"; Value = 123.125; Baseline = -2.5; TargetType = "DoubleProperty" },
-    [pscustomobject]@{ Name = "StringValue"; Value = "Updated String 0.4.4"; Baseline = "Initial String"; TargetType = "StrProperty" },
+    [pscustomobject]@{ Name = "StringValue"; Value = "Updated String 0.5.0"; Baseline = "Initial String"; TargetType = "StrProperty" },
     [pscustomobject]@{ Name = "NameValue"; Value = "UpdatedName044"; Baseline = "InitialName"; TargetType = "NameProperty" },
-    [pscustomobject]@{ Name = "TextValue"; Value = "Updated Text 0.4.4"; Baseline = "Initial Text"; TargetType = "TextProperty" },
+    [pscustomobject]@{ Name = "TextValue"; Value = "Updated Text 0.5.0"; Baseline = "Initial Text"; TargetType = "TextProperty" },
     [pscustomobject]@{ Name = "EnumValue"; Value = "Beta"; Baseline = "Alpha"; TargetType = "EnumProperty" },
     [pscustomobject]@{ Name = "LegacyEnumValue"; Value = "UEAK_LegacyBeta"; Baseline = "UEAK_LegacyAlpha"; TargetType = "ByteProperty" }
 )
@@ -703,7 +703,7 @@ if ($AfterFailures.revision.value -ne $ResetRevision)
 
 $Summary = [ordered]@{
     schemaVersion = "1.0"
-    toolVersion = "0.4.4"
+    toolVersion = "0.5.0"
     projectPath = $ProjectPath
     assetPath = $AssetPath
     assetClass = $AssetClass

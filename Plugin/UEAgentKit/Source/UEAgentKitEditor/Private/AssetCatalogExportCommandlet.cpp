@@ -25,7 +25,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogAssetCatalogExport, Log, All);
 namespace AssetCatalogExportPrivate
 {
 	constexpr const TCHAR* SchemaVersion = TEXT("1.1");
-	constexpr const TCHAR* ExporterVersion = TEXT("0.4.4");
+	constexpr const TCHAR* ExporterVersion = TEXT("0.5.0");
 	constexpr const TCHAR* ProfileName = TEXT("asset-index");
 
 	struct FAssetCatalogExportResult
