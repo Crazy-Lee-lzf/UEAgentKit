@@ -9,6 +9,7 @@ import json
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 
 
@@ -36,6 +37,26 @@ from ue_agent_kit.mcp_server import create_mcp_server, main as mcp_main  # noqa:
 
 
 MCP_AVAILABLE = importlib.util.find_spec("mcp") is not None
+
+
+class FakeWorkflowService:
+    def __init__(self) -> None:
+        self.config = SimpleNamespace(commit_enabled=True)
+
+    def plan_patch(self, **kwargs):
+        return {"ok": True, "tool": "ue_plan_patch", "planId": "plan_test", **kwargs}
+
+    def dry_run_patch(self, plan_id):
+        return {"ok": True, "tool": "ue_dry_run_patch", "planId": plan_id, "dryRunReceipt": "dry_test"}
+
+    def apply_patch(self, plan_id, dry_run_receipt, confirmation):
+        return {"ok": True, "tool": "ue_apply_patch", "planId": plan_id, "applyReceipt": "apply_test"}
+
+    def verify_asset(self, apply_receipt):
+        return {"ok": True, "tool": "ue_verify_asset", "applyReceipt": apply_receipt, "verified": True}
+
+    def rollback_patch(self, apply_receipt, **kwargs):
+        return {"ok": True, "tool": "ue_rollback_patch", "applyReceipt": apply_receipt, "mode": kwargs.get("mode", "DryRun")}
 
 
 def sha256(path: Path) -> str:
@@ -111,8 +132,10 @@ class McpServerTests(unittest.TestCase):
             exit_code = mcp_main(["--database", str(self.database_path), "--check"])
         self.assertEqual(exit_code, 0)
         payload = json.loads(output.getvalue())
-        self.assertEqual(payload["tool"], "ue_index_status")
-        self.assertEqual(payload["stats"]["counts"]["assets"], 2)
+        self.assertEqual(payload["tool"], "ue_agent_kit_mcp_status")
+        self.assertFalse(payload["writeToolsEnabled"])
+        self.assertEqual(payload["index"]["tool"], "ue_index_status")
+        self.assertEqual(payload["index"]["stats"]["counts"]["assets"], 2)
 
     @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
     def test_fastmcp_registers_only_three_read_only_tools(self) -> None:
@@ -139,6 +162,54 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(len(rejected_content), 1)
         self.assertFalse(error_payload["ok"])
         self.assertEqual(error_payload["error"]["code"], "invalid-arguments")
+
+    @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
+    def test_fastmcp_full_workflow_registers_eight_fixed_high_level_tools(self) -> None:
+        server = create_mcp_server(self.database_path, workflow_service=FakeWorkflowService())
+        tools = asyncio.run(server.list_tools())
+        self.assertEqual(
+            [tool.name for tool in tools],
+            [
+                "ue_search",
+                "ue_get_asset",
+                "ue_find_references",
+                "ue_plan_patch",
+                "ue_dry_run_patch",
+                "ue_apply_patch",
+                "ue_verify_asset",
+                "ue_rollback_patch",
+            ],
+        )
+        forbidden = {"database", "project", "project_path", "engine_root", "policy", "revision_export", "work_root", "backup_root", "command"}
+        for tool in tools:
+            properties = set(tool.inputSchema.get("properties", {}))
+            self.assertFalse(properties.intersection(forbidden), (tool.name, properties))
+        apply_tool = next(tool for tool in tools if tool.name == "ue_apply_patch")
+        self.assertTrue(apply_tool.annotations.destructiveHint)
+        self.assertFalse(apply_tool.annotations.readOnlyHint)
+        verify_tool = next(tool for tool in tools if tool.name == "ue_verify_asset")
+        self.assertFalse(verify_tool.annotations.readOnlyHint)
+        self.assertFalse(verify_tool.annotations.destructiveHint)
+
+        _, planned = asyncio.run(
+            server.call_tool(
+                "ue_plan_patch",
+                {
+                    "asset_path": ASSET_A,
+                    "operation": "setBlueprintDescription",
+                    "target": {},
+                    "value": "MCP",
+                },
+            )
+        )
+        self.assertTrue(planned["ok"])
+        _, applied = asyncio.run(
+            server.call_tool(
+                "ue_apply_patch",
+                {"plan_id": "plan_test", "dry_run_receipt": "dry_test", "confirmation": "COMMIT plan_test"},
+            )
+        )
+        self.assertEqual(applied["applyReceipt"], "apply_test")
 
     def test_active_sqlite_sidecar_is_rejected(self) -> None:
         sidecar = Path(str(self.database_path) + "-wal")

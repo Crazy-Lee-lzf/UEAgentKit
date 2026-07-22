@@ -8,34 +8,59 @@ from pathlib import Path
 from typing import Any, Literal, Sequence
 
 from .agent_api import IndexQueryService, IndexSnapshotError
+from .agent_workflow import PatchWorkflowConfig, PatchWorkflowService, WorkflowError
 from .config import DEFAULT_DATABASE
 
 try:
     from mcp.server.fastmcp import FastMCP
+    from mcp.types import ToolAnnotations
 except ModuleNotFoundError as exc:  # pragma: no cover - exercised in dependency-free installs
     FastMCP = None  # type: ignore[assignment,misc]
+    ToolAnnotations = None  # type: ignore[assignment,misc]
     _MCP_IMPORT_ERROR: ModuleNotFoundError | None = exc
 else:
     _MCP_IMPORT_ERROR = None
 
 
 MCP_SERVER_NAME = "UE Agent Kit"
-MCP_SERVER_INSTRUCTIONS = (
-    "Read-only access to the UE Agent Kit SQLite index. "
-    "Use ue_search to locate assets or symbols, ue_get_asset for one exact asset path, "
-    "and ue_find_references for dependency and Blueprint reference edges. "
-    "This server cannot execute shell commands, load Unreal objects, or write assets."
-)
+TOOL_ROOT = Path(__file__).resolve().parents[2]
 
 
-def _error_response(tool: str, error: Exception) -> dict[str, Any]:
+def _server_instructions(write_tools_enabled: bool, commit_enabled: bool) -> str:
+    base = (
+        "Use ue_search to locate assets or symbols, ue_get_asset for one exact asset path, "
+        "and ue_find_references for dependency and Blueprint reference edges. "
+    )
+    if not write_tools_enabled:
+        return "Read-only access to the UE Agent Kit SQLite index. " + base + (
+            "This server cannot execute shell commands, load Unreal objects, or write assets."
+        )
+    commit_text = (
+        "Explicit Commit and rollback Commit are enabled, but each requires a successful prior Dry Run, "
+        "a one-time session receipt, and an exact confirmation phrase."
+        if commit_enabled
+        else "Planning, Dry Run, and independent verification are enabled; Commit and rollback Commit are disabled."
+    )
+    return (
+        "Fixed-project UE Agent Kit workflow. " + base +
+        "Use ue_plan_patch, ue_dry_run_patch, ue_apply_patch, ue_verify_asset, and ue_rollback_patch "
+        "for policy-gated single-asset workflows. Tool arguments cannot choose filesystem paths, policies, projects, "
+        "engines, databases, or arbitrary Unreal commands. " + commit_text
+    )
+
+
+def _error_response(tool: str, error: Exception, *, read_only: bool) -> dict[str, Any]:
     message = str(error)
-    if isinstance(error, FileNotFoundError):
+    details: dict[str, Any] = {}
+    if isinstance(error, WorkflowError):
+        code = error.code
+        details = error.details
+    elif isinstance(error, FileNotFoundError):
         code = "database-not-found"
         message = "The configured UE Agent Kit database was not found."
     elif isinstance(error, OSError):
         code = "filesystem-error"
-        message = "The configured read-only index could not be accessed."
+        message = "A configured UE Agent Kit resource could not be accessed."
     elif isinstance(error, IndexSnapshotError):
         code = "index-not-quiescent"
     elif isinstance(error, ValueError):
@@ -43,36 +68,57 @@ def _error_response(tool: str, error: Exception) -> dict[str, Any]:
     elif isinstance(error, sqlite3.Error):
         code = "database-error"
     else:
-        code = "index-error"
-    return {
+        code = "ue-agent-kit-error"
+    response: dict[str, Any] = {
         "schemaVersion": "1.0",
         "tool": tool,
         "ok": False,
-        "readOnly": True,
+        "readOnly": read_only,
         "error": {
             "code": code,
             "type": type(error).__name__,
             "message": message,
         },
     }
+    if details:
+        response["error"]["details"] = details
+    return response
 
 
-def create_mcp_server(database_path: Path):
-    if FastMCP is None:
+def create_mcp_server(
+    database_path: Path,
+    *,
+    workflow_config: PatchWorkflowConfig | None = None,
+    workflow_service: PatchWorkflowService | None = None,
+):
+    if FastMCP is None or ToolAnnotations is None:
         raise RuntimeError(
             "MCP support is not installed. Run scripts\\setup_python.cmd -WithMcp "
             "or install the mcp optional dependency."
         ) from _MCP_IMPORT_ERROR
 
-    service = IndexQueryService(database_path)
-    service.check()
+    index_service = IndexQueryService(database_path)
+    index_service.check()
+    if workflow_service is not None and workflow_config is not None:
+        raise ValueError("Provide workflow_config or workflow_service, not both.")
+    if workflow_service is None and workflow_config is not None:
+        workflow_service = PatchWorkflowService(index_service, workflow_config)
+    write_tools_enabled = workflow_service is not None
+    commit_enabled = bool(workflow_service and workflow_service.config.commit_enabled)
     server = FastMCP(
         MCP_SERVER_NAME,
-        instructions=MCP_SERVER_INSTRUCTIONS,
+        instructions=_server_instructions(write_tools_enabled, commit_enabled),
         json_response=True,
     )
 
-    @server.tool()
+    read_annotations = ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False,
+    )
+
+    @server.tool(annotations=read_annotations)
     def ue_search(
         query: str = "",
         scope: Literal["assets", "symbols"] = "assets",
@@ -85,7 +131,7 @@ def create_mcp_server(database_path: Path):
     ) -> dict[str, Any]:
         """Search indexed Unreal assets or Blueprint symbols with bounded pagination."""
         try:
-            return service.search(
+            return index_service.search(
                 query,
                 scope=scope,
                 asset_class=asset_class,
@@ -96,9 +142,9 @@ def create_mcp_server(database_path: Path):
                 include_details=include_details,
             )
         except (FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-            return _error_response("ue_search", exc)
+            return _error_response("ue_search", exc, read_only=True)
 
-    @server.tool()
+    @server.tool(annotations=read_annotations)
     def ue_get_asset(
         asset_path: str,
         symbol_limit: int = 100,
@@ -109,7 +155,7 @@ def create_mcp_server(database_path: Path):
     ) -> dict[str, Any]:
         """Get one exact indexed Unreal asset with bounded symbols, references, graphs, and nodes."""
         try:
-            return service.get_asset(
+            return index_service.get_asset(
                 asset_path,
                 symbol_limit=symbol_limit,
                 reference_limit=reference_limit,
@@ -118,9 +164,9 @@ def create_mcp_server(database_path: Path):
                 include_details=include_details,
             )
         except (FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-            return _error_response("ue_get_asset", exc)
+            return _error_response("ue_get_asset", exc, read_only=True)
 
-    @server.tool()
+    @server.tool(annotations=read_annotations)
     def ue_find_references(
         query: str = "",
         kind: str = "",
@@ -134,7 +180,7 @@ def create_mcp_server(database_path: Path):
     ) -> dict[str, Any]:
         """Find indexed dependency or Blueprint reference edges using explicit filters."""
         try:
-            return service.find_references(
+            return index_service.find_references(
                 query=query,
                 kind=kind,
                 asset_path=asset_path,
@@ -146,7 +192,89 @@ def create_mcp_server(database_path: Path):
                 include_details=include_details,
             )
         except (FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-            return _error_response("ue_find_references", exc)
+            return _error_response("ue_find_references", exc, read_only=True)
+
+    if workflow_service is not None:
+        planning_annotations = ToolAnnotations(
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=False,
+            openWorldHint=False,
+        )
+        dry_run_annotations = ToolAnnotations(
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=False,
+            openWorldHint=False,
+        )
+        destructive_annotations = ToolAnnotations(
+            readOnlyHint=False,
+            destructiveHint=True,
+            idempotentHint=False,
+            openWorldHint=False,
+        )
+
+        @server.tool(annotations=planning_annotations)
+        def ue_plan_patch(
+            asset_path: str,
+            operation: str,
+            target: dict[str, Any] | None = None,
+            value: Any = None,
+            description: str = "",
+        ) -> dict[str, Any]:
+            """Create and validate one policy-gated single-asset, single-operation patch plan."""
+            try:
+                return workflow_service.plan_patch(
+                    asset_path=asset_path,
+                    operation=operation,
+                    target=target,
+                    value=value,
+                    description=description,
+                )
+            except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+                return _error_response("ue_plan_patch", exc, read_only=False)
+
+        @server.tool(annotations=dry_run_annotations)
+        def ue_dry_run_patch(plan_id: str) -> dict[str, Any]:
+            """Run the stored plan through Unreal, restore memory state, and require unchanged disk Revision."""
+            try:
+                return workflow_service.dry_run_patch(plan_id)
+            except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+                return _error_response("ue_dry_run_patch", exc, read_only=False)
+
+        @server.tool(annotations=destructive_annotations)
+        def ue_apply_patch(plan_id: str, dry_run_receipt: str, confirmation: str) -> dict[str, Any]:
+            """Explicitly commit a plan using a fresh one-time Dry Run receipt and exact confirmation phrase."""
+            try:
+                return workflow_service.apply_patch(plan_id, dry_run_receipt, confirmation)
+            except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+                return _error_response("ue_apply_patch", exc, read_only=False)
+
+        @server.tool(annotations=planning_annotations)
+        def ue_verify_asset(apply_receipt: str) -> dict[str, Any]:
+            """Independently reload the committed asset in Unreal and verify its saved SHA-256 Revision."""
+            try:
+                return workflow_service.verify_asset(apply_receipt)
+            except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+                return _error_response("ue_verify_asset", exc, read_only=True)
+
+        @server.tool(annotations=destructive_annotations)
+        def ue_rollback_patch(
+            apply_receipt: str,
+            mode: Literal["DryRun", "Commit"] = "DryRun",
+            rollback_dry_run_receipt: str = "",
+            confirmation: str = "",
+        ) -> dict[str, Any]:
+            """Validate rollback, then explicitly restore only with a fresh receipt and exact confirmation phrase."""
+            try:
+                return workflow_service.rollback_patch(
+                    apply_receipt,
+                    mode=mode,
+                    rollback_dry_run_receipt=rollback_dry_run_receipt,
+                    confirmation=confirmation,
+                )
+            except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+                return _error_response("ue_rollback_patch", exc, read_only=mode == "DryRun")
 
     return server
 
@@ -154,35 +282,89 @@ def create_mcp_server(database_path: Path):
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ue-agent-mcp",
-        description="Run the read-only UE Agent Kit MCP server over stdio.",
+        description="Run UE Agent Kit MCP over local stdio.",
     )
     parser.add_argument(
         "--database",
         type=Path,
         default=DEFAULT_DATABASE,
-        help=f"Read-only SQLite index path. Default: {DEFAULT_DATABASE}",
+        help=f"Immutable read-only SQLite index path. Default: {DEFAULT_DATABASE}",
     )
+    parser.add_argument("--enable-write-tools", action="store_true")
+    parser.add_argument("--enable-commit-tools", action="store_true")
+    parser.add_argument("--engine-root", type=Path)
+    parser.add_argument("--project", dest="project_path", type=Path)
+    parser.add_argument("--policy", dest="policy_path", type=Path)
+    parser.add_argument("--revision-export", type=Path)
+    parser.add_argument("--work-root", type=Path, default=TOOL_ROOT / "Output" / "McpWorkflow")
+    parser.add_argument("--backup-root", type=Path, default=TOOL_ROOT / "Backups" / "McpWorkflow")
+    parser.add_argument("--process-timeout-seconds", type=int, default=1800)
     parser.add_argument(
         "--check",
         action="store_true",
-        help="Validate the database and print index status without starting MCP.",
+        help="Validate fixed configuration and print status without starting MCP.",
     )
     return parser
+
+
+def _build_workflow_config(args: argparse.Namespace) -> PatchWorkflowConfig | None:
+    if args.enable_commit_tools and not args.enable_write_tools:
+        raise ValueError("--enable-commit-tools requires --enable-write-tools")
+    if not args.enable_write_tools:
+        configured = [args.engine_root, args.project_path, args.policy_path, args.revision_export]
+        if any(item is not None for item in configured):
+            raise ValueError("Workflow paths require --enable-write-tools")
+        return None
+    required = {
+        "--engine-root": args.engine_root,
+        "--project": args.project_path,
+        "--policy": args.policy_path,
+        "--revision-export": args.revision_export,
+    }
+    missing = [name for name, value in required.items() if value is None]
+    if missing:
+        raise ValueError("Missing fixed workflow arguments: " + ", ".join(missing))
+    if not 60 <= args.process_timeout_seconds <= 7200:
+        raise ValueError("--process-timeout-seconds must be from 60 through 7200")
+    return PatchWorkflowConfig(
+        tool_root=TOOL_ROOT,
+        engine_root=args.engine_root,
+        project_path=args.project_path,
+        policy_path=args.policy_path,
+        revision_export=args.revision_export,
+        work_root=args.work_root,
+        backup_root=args.backup_root,
+        commit_enabled=args.enable_commit_tools,
+        process_timeout_seconds=args.process_timeout_seconds,
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        service = IndexQueryService(args.database)
+        index_service = IndexQueryService(args.database)
+        index_status = index_service.check()
+        workflow_config = _build_workflow_config(args)
+        workflow_service = PatchWorkflowService(index_service, workflow_config) if workflow_config is not None else None
         if args.check:
-            print(json.dumps(service.check(), ensure_ascii=False, indent=2))
+            payload: dict[str, Any] = {
+                "schemaVersion": "1.0",
+                "tool": "ue_agent_kit_mcp_status",
+                "ok": True,
+                "index": index_status,
+                "writeToolsEnabled": workflow_service is not None,
+                "commitToolsEnabled": bool(workflow_service and workflow_service.config.commit_enabled),
+            }
+            if workflow_service is not None:
+                payload["workflow"] = workflow_service.status()
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
             return 0
-        server = create_mcp_server(args.database)
+        server = create_mcp_server(args.database, workflow_service=workflow_service)
         server.run(transport="stdio")
         return 0
-    except (FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+    except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
         print(
-            json.dumps(_error_response("ue_agent_kit_mcp", exc), ensure_ascii=False),
+            json.dumps(_error_response("ue_agent_kit_mcp", exc, read_only=False), ensure_ascii=False),
             file=sys.stderr,
         )
         return 2 if isinstance(exc, FileNotFoundError) else 1
