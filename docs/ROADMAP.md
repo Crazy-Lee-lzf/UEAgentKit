@@ -68,7 +68,14 @@ Array、Set、Map、对象引用和任意 Struct 不会直接通过宽松文本�
 
 ## 0.5.0：MCP / Agent 第一版
 
-计划提供少量高层接口：
+首个只读检查点已完成：
+
+- MCP Python SDK 固定稳定 v1 依赖范围，默认使用本地 `stdio`。
+- `ue_search`、`ue_get_asset`、`ue_find_references` 已复用现有 SQLite 查询层。
+- 数据库在服务器启动时固定，并以 `mode=ro&immutable=1` 打开；活动 SQLite Sidecar 会被拒绝，Tool 不能选择路径或执行任意 SQL。
+- 已通过真实 MCP Client 握手、Tool 发现、中文查询、错误参数拒绝，以及数据库目录文件集合与 SHA-256 完全不变验证。
+
+0.5.0 仍计划提供以下高层接口：
 
 ```text
 ue_search

@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "ue-agent-kit": {
+      "type": "stdio",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "E:\\Path\\To\\UEAgentKit\\scripts\\RunMcp.ps1",
+        "-Database",
+        "E:\\Path\\To\\UEAgentKit\\.data\\ue_agent_kit.sqlite3"
+      ],
+      "env": {}
+    }
+  }
+}

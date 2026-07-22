@@ -1,0 +1,2 @@
+# Optional MCP server dependency. v1 is the stable SDK line as of UE Agent Kit 0.5 development.
+mcp>=1.27,<2

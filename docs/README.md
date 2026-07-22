@@ -13,6 +13,7 @@
 7. [`../spec/BACKUP_AND_ROLLBACK.md`](../spec/BACKUP_AND_ROLLBACK.md)：Backup Manifest、独立 rollback、审计回执和恢复后验证。
 8. [`../spec/WRITE_FIXTURE_PLAN.md`](../spec/WRITE_FIXTURE_PLAN.md)：声明式写入测试资产生成、重置和独立验证。
 9. [`../spec/SCALAR_PATCH_REGRESSION.md`](../spec/SCALAR_PATCH_REGRESSION.md)：完整标量写入、独立重载和失败路径回归。
+10. [`../spec/MCP_SERVER.md`](../spec/MCP_SERVER.md)：只读 MCP Server、Tool Schema、stdio 和固定数据库安全边界。
 
 ## 当前版本
 
@@ -26,6 +27,7 @@ UE Agent Kit 0.4.4 支持 Unreal Engine 5.6，当前公开能力包括：
 - 0.4.2 增加 Write Fixture Plan、Create/Reset、安全目标边界和独立 UE 重载验证。
 - 0.4.3 增加原生 Scalar Fixture、11 类标量完整 Dry Run/Commit/重载矩阵，以及 6 类失败路径零写入回归。
 - 0.4.4 增加 Dirty Package、真实 Sidecar 和 SaveFailure 备份/磁盘保护回归，将失败矩阵扩展到 9 类。
+- 0.5.0 开发已开始：首个检查点提供固定 SQLite、stdio 和三个只读 MCP Tool。
 
 只读分析路径不修改资产；Blueprint Patch 与 Asset Patch 仅在明确授权后执行 Dry Run 或显式 Commit。
 

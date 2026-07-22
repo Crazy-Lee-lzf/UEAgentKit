@@ -13,13 +13,21 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def connect_database(path: Path, *, readonly: bool = False) -> sqlite3.Connection:
+def connect_database(
+    path: Path,
+    *,
+    readonly: bool = False,
+    immutable: bool = False,
+) -> sqlite3.Connection:
     database_path = path.expanduser().resolve()
+    if immutable and not readonly:
+        raise ValueError("immutable database connections must also be read-only")
     if readonly:
         if not database_path.is_file():
             raise FileNotFoundError(f"Database not found: {database_path}")
+        immutable_query = "&immutable=1" if immutable else ""
         connection = sqlite3.connect(
-            f"file:{database_path.as_posix()}?mode=ro",
+            f"file:{database_path.as_posix()}?mode=ro{immutable_query}",
             uri=True,
             timeout=30.0,
         )
@@ -108,8 +116,14 @@ def get_metadata(connection: sqlite3.Connection, key: str, default: str = "") ->
 
 
 @contextmanager
-def open_database(path: Path, *, readonly: bool = False, migrate: bool = True) -> Iterator[sqlite3.Connection]:
-    connection = connect_database(path, readonly=readonly)
+def open_database(
+    path: Path,
+    *,
+    readonly: bool = False,
+    migrate: bool = True,
+    immutable: bool = False,
+) -> Iterator[sqlite3.Connection]:
+    connection = connect_database(path, readonly=readonly, immutable=immutable)
     try:
         if migrate:
             apply_migrations(connection)

@@ -1,7 +1,8 @@
 param(
     [string]$PythonExecutable = "",
     [switch]$Recreate,
-    [switch]$UpgradePip
+    [switch]$UpgradePip,
+    [switch]$WithMcp
 )
 
 $ErrorActionPreference = "Stop"
@@ -11,6 +12,7 @@ $ToolRoot = Get-UeakToolRoot
 $VenvRoot = Join-Path $ToolRoot ".venv"
 $VenvPython = Join-Path $VenvRoot "Scripts\python.exe"
 $RuntimeRequirements = Join-Path $ToolRoot "requirements.txt"
+$McpRequirements = Join-Path $ToolRoot "requirements-mcp.txt"
 $ValidationScript = Join-Path $PSScriptRoot "TestPythonEnvironment.py"
 
 if ($Recreate -and (Test-Path -LiteralPath $VenvRoot))
@@ -58,6 +60,21 @@ if (Test-UeakRequirementFileHasPackages -Path $RuntimeRequirements)
     if ($LASTEXITCODE -ne 0)
     {
         throw "Runtime dependency installation failed with exit code $LASTEXITCODE"
+    }
+}
+
+if ($WithMcp)
+{
+    Assert-UeakPath -Path $McpRequirements -Description "MCP requirements" -PathType File
+    & $VenvPython -m pip install --requirement $McpRequirements
+    if ($LASTEXITCODE -ne 0)
+    {
+        throw "MCP dependency installation failed with exit code $LASTEXITCODE"
+    }
+    & $VenvPython -c "import importlib.metadata as metadata; import mcp; print('MCP SDK ' + metadata.version('mcp'))"
+    if ($LASTEXITCODE -ne 0)
+    {
+        throw "MCP dependency validation failed with exit code $LASTEXITCODE"
     }
 }
 

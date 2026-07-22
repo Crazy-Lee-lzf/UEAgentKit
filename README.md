@@ -22,6 +22,7 @@ UE Agent Kit 是一套面向 Unreal Engine 的开源资产分析、索引与受�
 - 使用 Policy、Revision 和导出快照校验 Patch，并对授权 Blueprint、非 Blueprint 标量属性、Material Instance 参数或 DataTable 单元格执行 Dry Run 或显式 Commit。
 - 为成功 Commit 自动生成 Backup Manifest，并在当前 Revision 仍匹配时显式回滚和独立验证恢复结果。
 - 使用声明式 Write Fixture Plan 在安全测试目录内创建或重置测试资产，并独立验证类、Revision 与 Dirty 状态。
+- 通过 0.5.0 开发中的本地只读 MCP Server，让 Agent 搜索资产/Symbol、读取单资产和查询引用，不开放 Shell、任意 SQL 或 UObject。
 - 对 Bool、整数、浮点、String、Name、Text 和两类 Enum 执行真实 Dry Run/Commit/重载矩阵，并验证未授权、过期 Revision、错误类型、越界、非法 Enum、属性不存在、Dirty Package、Sidecar 和保存失败均零写入拒绝。
 
 ## 主要能力
@@ -195,7 +196,28 @@ scripts\RunScalarPatchRegression.cmd ^
 
 当前支持四种 Blueprint Operation、`setAssetProperty`、四种 Material Instance 参数 Operation，以及 `setDataTableCell`。每次执行仅允许一个资产和一个 Operation；通用属性、Material 参数和 DataTable 字段分别由 `allowedAssetProperties`、`allowedMaterialParameters`、`allowedDataTableFields` 精确授权。Material Instance 仅接受唯一 Global 参数；DataTable 仅修改现有 Row 的一个顶层标量字段，并在 Dry Run 中恢复完整 Row。当前仍只接受没有独立 Package 侧文件的单文件资产。
 
-### 6. 校验通用资产导出
+### 6. 启动只读 MCP（0.5.0 开发中）
+
+先安装可选 MCP 依赖并确认 SQLite 索引可读：
+
+```bat
+scripts\setup_python.cmd -WithMcp
+scripts\RunMcp.cmd -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3" -Check
+scripts\TestMcpStdio.cmd
+```
+
+服务器默认只使用本地 `stdio`，并把索引作为无活动 Sidecar 的不可变快照读取；当前提供 `ue_search`、`ue_get_asset` 和 `ue_find_references`：
+
+```bat
+claude mcp add --transport stdio --scope project ue-agent-kit -- ^
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File ^
+  "<TOOL_ROOT>\scripts\RunMcp.ps1" ^
+  -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
+```
+
+添加后可用 `claude mcp list` 或 Claude Code 内的 `/mcp` 检查连接。重建索引前应停止 MCP Server，完成索引并关闭写入连接后再重启。完整契约见 [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md)。
+
+### 7. 校验通用资产导出
 
 ```bat
 python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.4.4
@@ -236,12 +258,13 @@ Output\Blueprints\
 - [`spec/BACKUP_AND_ROLLBACK.md`](spec/BACKUP_AND_ROLLBACK.md)：Backup Manifest、rollback、审计回执和恢复验证规范。
 - [`spec/WRITE_FIXTURE_PLAN.md`](spec/WRITE_FIXTURE_PLAN.md)：测试资产 Plan、Create/Reset 和独立重载验证规范。
 - [`spec/SCALAR_PATCH_REGRESSION.md`](spec/SCALAR_PATCH_REGRESSION.md)：完整标量类型、正向写入和失败路径真实 UE 回归规范。
+- [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md)：只读 MCP Tool、stdio、固定数据库和响应契约。
 
 完整文档索引见 [`docs/README.md`](docs/README.md)。
 
 ## 安全说明
 
-只读导出器和 `ue-agent patch validate` 不修改 UObject 或资产文件。实际写入只能通过独立的 `BlueprintPatch` 或 `AssetPatch` Commandlet，由 `RunPatch` 在预校验通过后按 Operation 分发。
+只读导出器、SQLite 查询、当前 MCP Tool 和 `ue-agent patch validate` 不修改 UObject 或资产文件。实际写入只能通过独立的 `BlueprintPatch` 或 `AssetPatch` Commandlet，由 `RunPatch` 在预校验通过后按 Operation 分发。
 
 - 默认使用 `DryRun`，磁盘 Revision 必须保持不变。
 - `Commit` 同时要求命令行显式选择和 Policy 的 `commitEnabled=true`。

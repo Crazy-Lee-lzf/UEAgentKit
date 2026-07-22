@@ -7,6 +7,9 @@ requires-python = ">=3.11,<3.13"
 license = "MIT"
 dependencies = []
 
+[project.optional-dependencies]
+mcp = ["mcp>=1.27,<2"]
+
 [tool.ue-agent-kit]
 canonical-schema-version = "1.1"
 bpctx-version = "1"

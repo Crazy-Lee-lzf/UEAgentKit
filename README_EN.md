@@ -22,6 +22,7 @@ The current release is **0.4.4** and targets **Unreal Engine 5.6**. It extends t
 - Validate patches against policy, revision, and export snapshots, then dry-run or explicitly commit authorized Blueprint, non-Blueprint scalar, Material Instance parameter, or DataTable cell changes.
 - Generate a backup manifest after every successful commit, then explicitly roll back and independently verify the restored revision when the current package still matches.
 - Create or reset isolated test assets from a declarative Write Fixture Plan, then independently verify class, revision, and dirty state.
+- Use the local read-only MCP server under 0.5.0 development to search assets/symbols, inspect one asset, and query references without exposing shell, arbitrary SQL, or UObject access.
 - Exercise Bool, integer, floating-point, String, Name, Text, and two Enum representations through real dry-run/commit/reload matrices, including zero-write rejections for authorization, stale revisions, wrong types, range errors, invalid enums, missing properties, dirty packages, sidecars, and save failures.
 
 ## Main capabilities
@@ -195,7 +196,28 @@ The script creates an isolated native Data Asset fixture, runs 11 dry runs, 11 c
 
 The executor supports four Blueprint operations, `setAssetProperty`, four Material Instance parameter operations, and `setDataTableCell`. One execution is limited to one asset and one operation. Generic properties, Material parameters, and DataTable fields use exact `allowedAssetProperties`, `allowedMaterialParameters`, and `allowedDataTableFields` authorization. Material Instance writes require one unique Global parameter; DataTable writes target one top-level scalar field in one existing row and restore the complete row during dry runs. Only single-file packages without external package sidecars are accepted.
 
-### 6. Validate the asset catalog
+### 6. Run the read-only MCP server (0.5.0 development)
+
+Install the optional MCP dependency and validate the SQLite index:
+
+```bat
+scripts\setup_python.cmd -WithMcp
+scripts\RunMcp.cmd -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3" -Check
+scripts\TestMcpStdio.cmd
+```
+
+The server uses local `stdio` only and reads the index as an immutable snapshot without active SQLite sidecars. It currently exposes `ue_search`, `ue_get_asset`, and `ue_find_references`:
+
+```bat
+claude mcp add --transport stdio --scope project ue-agent-kit -- ^
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File ^
+  "<TOOL_ROOT>\scripts\RunMcp.ps1" ^
+  -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
+```
+
+Use `claude mcp list` or `/mcp` inside Claude Code to inspect the connection. Stop the MCP server before rebuilding the index, then restart it after all index writers have closed. See [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md) for the full contract.
+
+### 7. Validate the asset catalog
 
 ```bat
 python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.4.4
@@ -236,12 +258,13 @@ Output\Blueprints\
 - [`spec/BACKUP_AND_ROLLBACK.md`](spec/BACKUP_AND_ROLLBACK.md): backup manifest, rollback receipt, and restore-verification contract.
 - [`spec/WRITE_FIXTURE_PLAN.md`](spec/WRITE_FIXTURE_PLAN.md): fixture plan, create/reset, and independent reload-verification contract.
 - [`spec/SCALAR_PATCH_REGRESSION.md`](spec/SCALAR_PATCH_REGRESSION.md): complete scalar-type, positive-write, and rejection-path Unreal regression contract.
+- [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md): read-only MCP tools, stdio transport, fixed database, and response contract.
 
 See [`docs/README.md`](docs/README.md) for the documentation index.
 
 ## Safety
 
-Read-only exporters and `ue-agent patch validate` never modify UObjects or asset files. Actual mutation is isolated in the `BlueprintPatch` or `AssetPatch` commandlet, selected by `RunPatch` only after pre-validation succeeds.
+Read-only exporters, SQLite queries, the current MCP tools, and `ue-agent patch validate` never modify UObjects or asset files. Actual mutation is isolated in the `BlueprintPatch` or `AssetPatch` commandlet, selected by `RunPatch` only after pre-validation succeeds.
 
 - `DryRun` is the default and must preserve the disk revision.
 - `Commit` requires both an explicit command mode and `commitEnabled=true` in policy.

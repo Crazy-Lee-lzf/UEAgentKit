@@ -58,7 +58,14 @@ Arrays, sets, maps, object references, and arbitrary structs will not be exposed
 
 ## 0.5.0: first MCP / Agent interface
 
-Planned high-level tools:
+The first read-only checkpoint is complete:
+
+- The stable v1 MCP Python SDK range is pinned and the default transport is local `stdio`.
+- `ue_search`, `ue_get_asset`, and `ue_find_references` reuse the existing SQLite query layer.
+- The database is fixed at server startup and opened with `mode=ro&immutable=1`; active SQLite sidecars are rejected, and tools cannot select paths or execute arbitrary SQL.
+- A real MCP client verified handshake, tool discovery, Unicode queries, invalid-argument rejection, and an unchanged index-directory file set and SHA-256 values.
+
+The remaining 0.5.0 high-level tools are:
 
 ```text
 ue_search

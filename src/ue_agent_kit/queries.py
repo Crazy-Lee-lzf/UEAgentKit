@@ -345,11 +345,14 @@ def get_asset(
     *,
     symbol_limit: int = 200,
     reference_limit: int = 500,
+    graph_limit: int | None = None,
     node_limit: int = 200,
     include_details: bool = False,
 ) -> dict[str, Any] | None:
     normalize_pagination(symbol_limit, 0)
     normalize_pagination(reference_limit, 0)
+    if graph_limit is not None:
+        normalize_pagination(graph_limit, 0)
     normalize_pagination(node_limit, 0)
 
     row = connection.execute("SELECT * FROM assets WHERE asset_path = ?", (asset_path,)).fetchone()
@@ -374,15 +377,17 @@ def get_asset(
         include_details=include_details,
     )
 
-    graph_rows = connection.execute(
-        """
+    graph_sql = """
         SELECT id, guid, name, kind, schema_path, node_count, details_json
         FROM graphs
         WHERE asset_id = ?
         ORDER BY kind, name
-        """,
-        (asset_id,),
-    ).fetchall()
+    """
+    graph_parameters: list[Any] = [asset_id]
+    if graph_limit is not None:
+        graph_sql += "\nLIMIT ?"
+        graph_parameters.append(graph_limit)
+    graph_rows = connection.execute(graph_sql, graph_parameters).fetchall()
     result["graphs"] = []
     for graph_row in graph_rows:
         graph = _row_to_dict(graph_row)

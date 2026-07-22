@@ -364,13 +364,60 @@ Blueprint 输出至少应检查：
 - Canonical JSON 可解析。
 - BPCTX 第一行符合 `H|BPCTX|1|...`。
 
-## 14. 安全行为
+## 14. 只读 MCP Server（0.5.0 开发中）
 
-通用资产目录、Blueprint 导出、SQLite 查询和 `ue-agent patch validate` 保持只读。`RunPatch -Mode DryRun` 会在内存中修改资产，但必须恢复原值并保持磁盘 SHA-256 不变；Blueprint 还会在修改和回滚后编译。
+安装 MCP SDK v1 可选依赖：
+
+```bat
+scripts\setup_python.cmd -WithMcp
+```
+
+验证固定 SQLite 数据库，不启动协议循环：
+
+```bat
+scripts\RunMcp.cmd ^
+  -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3" ^
+  -Check
+```
+
+启动本地 stdio Server：
+
+```bat
+scripts\RunMcp.cmd -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
+```
+
+运行真实 MCP Client stdio 握手、Tool 发现和只读哈希验证：
+
+```bat
+scripts\TestMcpStdio.cmd
+```
+
+Claude Code 项目级接入：
+
+```bat
+claude mcp add --transport stdio --scope project ue-agent-kit -- ^
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File ^
+  "<TOOL_ROOT>\scripts\RunMcp.ps1" ^
+  -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
+```
+
+当前只暴露三个只读 Tool：
+
+```text
+ue_search
+ue_get_asset
+ue_find_references
+```
+
+服务器启动时固定数据库路径，Tool 参数不能更换数据库；SQLite 以 `mode=ro&immutable=1` 打开，不执行 Migration，也不会创建 `-wal/-shm`。若检测到活动 `-wal`、`-shm` 或 `-journal`，服务器拒绝查询。重建索引前先停止 MCP Server，写入完成并关闭连接后再重启。完整响应和上限见 [`../spec/MCP_SERVER.md`](../spec/MCP_SERVER.md)。
+
+## 15. 安全行为
+
+通用资产目录、Blueprint 导出、SQLite 查询、当前 MCP Tool 和 `ue-agent patch validate` 保持只读。`RunPatch -Mode DryRun` 会在内存中修改资产，但必须恢复原值并保持磁盘 SHA-256 不变；Blueprint 还会在修改和回滚后编译。
 
 只有 `RunPatch -Mode Commit` 可以保存资产，并且必须满足：Policy 显式允许 Commit、项目/目录/类型/操作均授权、属性或参数精确授权、Revision 一致、Package 非 Dirty、备份创建成功，且 Blueprint 编译成功。成功后自动生成 Backup Manifest。`RunRollback -Mode Commit` 是唯一恢复入口，默认 Dry Run，并要求工程关闭、当前 Revision 未变化、备份完整和独立 UE 重载验证。Patch 写入通过 Unreal Editor API 完成；rollback 仅按已验证 Manifest 原子恢复单文件 Package。
 
-## 15. 清理
+## 16. 清理
 
 可以安全清理：
 
