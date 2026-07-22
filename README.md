@@ -252,6 +252,8 @@ Output\Blueprints\
 
 - [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md)：构建、安装、导出和查询。
 - [`docs/AI_USAGE.md`](docs/AI_USAGE.md)：AI 使用资产索引与 Blueprint 语义的方式。
+- [`docs/RELEASE_0.4.4.md`](docs/RELEASE_0.4.4.md)：0.4.4 正式发布范围、验证结果和升级说明。
+- [`CHANGELOG.md`](CHANGELOG.md)：版本变更摘要。
 - [`docs/ROADMAP.md`](docs/ROADMAP.md)：0.4.0、0.4.x 和 0.5.0 的版本目标与安全边界。
 - [`spec/BPCTX_FORMAT.md`](spec/BPCTX_FORMAT.md)：BPCTX/1 格式规范。
 - [`spec/PATCH_SCHEMA.md`](spec/PATCH_SCHEMA.md)：声明式 Patch、Policy、Revision 和纯校验安全边界。

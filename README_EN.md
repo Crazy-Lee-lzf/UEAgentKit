@@ -252,6 +252,8 @@ Output\Blueprints\
 
 - [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md): build, install, export, and query instructions.
 - [`docs/AI_USAGE.md`](docs/AI_USAGE.md): using the asset index and Blueprint semantics with AI tools.
+- [`docs/RELEASE_0.4.4_EN.md`](docs/RELEASE_0.4.4_EN.md): 0.4.4 release scope, verification, and upgrade notes.
+- [`CHANGELOG.md`](CHANGELOG.md): version history summary.
 - [`docs/ROADMAP_EN.md`](docs/ROADMAP_EN.md): version goals and safety boundaries for 0.4.0, 0.4.x, and 0.5.0.
 - [`spec/BPCTX_FORMAT.md`](spec/BPCTX_FORMAT.md): BPCTX/1 format specification.
 - [`spec/PATCH_SCHEMA.md`](spec/PATCH_SCHEMA.md): declarative patches, policy, revision checks, and validation-only safety boundaries.
