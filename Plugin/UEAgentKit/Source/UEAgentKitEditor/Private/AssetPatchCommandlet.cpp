@@ -831,11 +831,13 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 	FString ReportFilename;
 	FString BackupDirectory;
 	FString Mode = TEXT("DryRun");
+	FString TestFailureInjection;
 	FParse::Value(*Params, TEXT("Patch="), PatchFilename);
 	FParse::Value(*Params, TEXT("Policy="), PolicyFilename);
 	FParse::Value(*Params, TEXT("Report="), ReportFilename);
 	FParse::Value(*Params, TEXT("BackupDir="), BackupDirectory);
 	FParse::Value(*Params, TEXT("Mode="), Mode);
+	FParse::Value(*Params, TEXT("TestFailureInjection="), TestFailureInjection);
 
 	PatchFilename = FPaths::ConvertRelativePathToFull(PatchFilename);
 	PolicyFilename = FPaths::ConvertRelativePathToFull(PolicyFilename);
@@ -938,7 +940,39 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		return 11;
 	}
 
+	const bool bDirtyPackageInjection =
+		TestFailureInjection.Equals(TEXT("DirtyPackage"), ESearchCase::CaseSensitive);
+	const bool bSaveFailureInjection =
+		TestFailureInjection.Equals(TEXT("SaveFailure"), ESearchCase::CaseSensitive);
+	const bool bTestFailureInjectionRequested = !TestFailureInjection.IsEmpty();
+	const bool bAuthorizedFailureFixture =
+		AssetPath.StartsWith(
+			TEXT("/Game/UEAgentKitWriteTests/ScalarRegression/"),
+			ESearchCase::CaseSensitive)
+		&& ActualAssetClass.Equals(
+			TEXT("/Script/UEAgentKitEditor.UEAgentKitScalarWriteFixtureAsset"),
+			ESearchCase::CaseSensitive)
+		&& PatchId.StartsWith(TEXT("scalar-failure-"), ESearchCase::CaseSensitive);
+	if (bTestFailureInjectionRequested
+		&& ((!bDirtyPackageInjection && !bSaveFailureInjection) || !bAuthorizedFailureFixture))
+	{
+		UE_LOG(
+			LogAssetPatch,
+			Error,
+			TEXT("Test failure injection is restricted to the native scalar regression fixture."));
+		return 25;
+	}
+	if (bSaveFailureInjection && !bCommit)
+	{
+		UE_LOG(LogAssetPatch, Error, TEXT("SaveFailure injection requires Commit mode."));
+		return 25;
+	}
+
 	UPackage* Package = Asset->GetOutermost();
+	if (bDirtyPackageInjection)
+	{
+		Package->MarkPackageDirty();
+	}
 	const bool bOriginalDirty = Package->IsDirty();
 	if (Policy.bRejectDirtyPackages && bOriginalDirty)
 	{
@@ -1147,7 +1181,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			|| FMath::IsNearlyEqual(RestoredScalarValue, BeforeScalarValue, UE_SMALL_NUMBER);
 		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-		Report->SetStringField(TEXT("executorVersion"), TEXT("0.4.3"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.4.4"));
 		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 		Report->SetStringField(TEXT("patchId"), PatchId);
 		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
@@ -1349,7 +1383,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			!bRolledBack || RestoredVectorValue.Equals(BeforeVectorValue, UE_SMALL_NUMBER);
 		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-		Report->SetStringField(TEXT("executorVersion"), TEXT("0.4.3"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.4.4"));
 		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 		Report->SetStringField(TEXT("patchId"), PatchId);
 		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
@@ -1537,7 +1571,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		const bool bRestoredValueMatch = !bRolledBack || RestoredTextureValue == BeforeTextureValue;
 		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-		Report->SetStringField(TEXT("executorVersion"), TEXT("0.4.3"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.4.4"));
 		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 		Report->SetStringField(TEXT("patchId"), PatchId);
 		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
@@ -1737,7 +1771,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 				&& bRestoredOverride == bBeforeOverride);
 		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-		Report->SetStringField(TEXT("executorVersion"), TEXT("0.4.3"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.4.4"));
 		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 		Report->SetStringField(TEXT("patchId"), PatchId);
 		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
@@ -1960,7 +1994,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		const FString AfterRevision = HashPackageFile(Package);
 		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-		Report->SetStringField(TEXT("executorVersion"), TEXT("0.4.3"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.4.4"));
 		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 		Report->SetStringField(TEXT("patchId"), PatchId);
 		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
@@ -2086,10 +2120,50 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 	FString RestoredValue;
 	if (bCommit)
 	{
-		if (!SaveAssetPackage(Asset, PackageFilename, Error))
+		const bool bSaveSucceeded =
+			!bSaveFailureInjection && SaveAssetPackage(Asset, PackageFilename, Error);
+		if (!bSaveSucceeded)
 		{
-			IFileManager::Get().Copy(*PackageFilename, *BackupFilename, true, true);
-			UE_LOG(LogAssetPatch, Error, TEXT("%s Backup restored."), *Error);
+			if (bSaveFailureInjection)
+			{
+				Error = TEXT("Injected save failure for scalar regression.");
+			}
+			FString RestoredRevision = HashPackageFile(Package);
+			bool bBackupCopied = false;
+			if (!RestoredRevision.Equals(BeforeRevision, ESearchCase::IgnoreCase))
+			{
+				const uint32 BackupRestoreResult =
+					IFileManager::Get().Copy(*PackageFilename, *BackupFilename, true, true);
+				if (BackupRestoreResult != COPY_OK)
+				{
+					UE_LOG(
+						LogAssetPatch,
+						Error,
+						TEXT("%s Backup restoration also failed: %s"),
+						*Error,
+						*BackupFilename);
+					return 23;
+				}
+				bBackupCopied = true;
+				RestoredRevision = HashPackageFile(Package);
+			}
+			if (!RestoredRevision.Equals(BeforeRevision, ESearchCase::IgnoreCase))
+			{
+				UE_LOG(
+					LogAssetPatch,
+					Error,
+					TEXT("%s Restored Revision does not match the pre-Commit Revision."),
+					*Error);
+				return 23;
+			}
+			UE_LOG(
+				LogAssetPatch,
+				Error,
+				TEXT("%s %s"),
+				*Error,
+				bBackupCopied
+					? TEXT("Backup restored.")
+					: TEXT("Disk revision was already unchanged."));
 			return 21;
 		}
 		bSaved = true;
@@ -2110,7 +2184,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 	const FString AfterRevision = HashPackageFile(Package);
 	const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 	Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-	Report->SetStringField(TEXT("executorVersion"), TEXT("0.4.3"));
+	Report->SetStringField(TEXT("executorVersion"), TEXT("0.4.4"));
 	Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 	Report->SetStringField(TEXT("patchId"), PatchId);
 	Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());

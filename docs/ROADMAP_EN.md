@@ -2,7 +2,7 @@
 
 Updated: 2026-07-21
 
-The current release is **0.4.3** and targets Unreal Engine 5.6.
+The current release is **0.4.4** and targets Unreal Engine 5.6.
 
 UE Agent Kit provides project-wide read-only analysis, SQLite/FTS indexing, low-risk Blueprint patching, generic non-Blueprint scalar properties, Global Scalar/Vector/Texture/Static Switch Material Instance parameters, and one top-level scalar field in one existing DataTable row.
 
@@ -45,9 +45,14 @@ Completed in 0.4.3:
 - 11 dry runs, 11 commits, per-step backups/manifests/independent reloads, and a final reset.
 - Zero-write rejection regressions for unauthorized targets, missing properties, wrong types, stale revisions, numeric range errors, and invalid enum names.
 
-Remaining work:
+Completed in 0.4.4:
 
-- Reproducible real tests for dirty packages, patch sidecars, and save failures.
+- Dirty Package rejection through a strictly scoped test injection before any property mutation.
+- Real temporary `.uexp` sidecar rejection with guaranteed cleanup.
+- Save-failure injection after Commit backup creation, verifying an unchanged target revision, an available raw backup, and no success manifest; if an actual save changes the disk, the executor copies the backup and rechecks the restored revision.
+- A complete matrix of 11 dry runs, 11 commits, and nine zero-write rejection paths.
+
+The 0.4.x rollback and core safety-regression goals are complete. The next phase is the 0.5.0 MCP / Agent interface.
 
 Arrays, sets, maps, object references, and arbitrary structs will not be exposed through permissive text import. They require a stable JSON value model and verifiable diffs first.
 

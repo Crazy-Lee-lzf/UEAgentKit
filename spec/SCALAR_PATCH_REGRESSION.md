@@ -33,9 +33,9 @@ scripts\RunScalarPatchRegression.cmd ^
 | `Int64Value` | Int64Property | `1234567890123` | `-4000000000000` |
 | `FloatValue` | FloatProperty | `1.25` | `3.75` |
 | `DoubleValue` | DoubleProperty | `-2.5` | `123.125` |
-| `StringValue` | StrProperty | `Initial String` | `Updated String 0.4.3` |
-| `NameValue` | NameProperty | `InitialName` | `UpdatedName043` |
-| `TextValue` | TextProperty | `Initial Text` | `Updated Text 0.4.3` |
+| `StringValue` | StrProperty | `Initial String` | `Updated String 0.4.4` |
+| `NameValue` | NameProperty | `InitialName` | `UpdatedName044` |
+| `TextValue` | TextProperty | `Initial Text` | `Updated Text 0.4.4` |
 | `EnumValue` | EnumProperty | `Alpha` | `Beta` |
 | `LegacyEnumValue` | enum-backed ByteProperty | `UEAK_LegacyAlpha` | `UEAK_LegacyBeta` |
 
@@ -66,7 +66,7 @@ Fixture 通过 Write Fixture Plan 的 `scalarAsset` Kind 创建和重置，不�
 
 ## 失败矩阵
 
-最终 Reset 后固定执行 6 个预期失败：
+最终 Reset 后固定执行 9 个预期失败：
 
 | Case | 拒绝层 | 预期结果 |
 |---|---|---|
@@ -76,6 +76,9 @@ Fixture 通过 Write Fixture Plan 的 `scalarAsset` Kind 创建和重置，不�
 | Byte 值 `300` | UE AssetPatch | 范围拒绝 |
 | 非法 Enum 名称 | UE AssetPatch | Enum 拒绝 |
 | 不存在的 Property | UE AssetPatch | 目标拒绝 |
+| Dirty Package | UE AssetPatch | Policy Dirty Package 拒绝 |
+| 临时 `.uexp` Sidecar | UE AssetPatch | Package Sidecar 拒绝 |
+| 注入的保存失败 | UE AssetPatch Commit | 原始备份存在、目标 Revision 不变、无成功 Manifest |
 
 每个失败用例都必须满足：
 
@@ -93,7 +96,7 @@ Fixture 通过 Write Fixture Plan 的 `scalarAsset` Kind 创建和重置，不�
 {
   "dryRunCount": 11,
   "commitCount": 11,
-  "failureCount": 6,
+  "failureCount": 9,
   "finalResetVerified": true,
   "failureMatrixDiskUnchanged": true
 }
@@ -108,4 +111,5 @@ Fixture 通过 Write Fixture Plan 的 `scalarAsset` Kind 创建和重置，不�
 - Fixture Plan 不能位于即将清理的输出目录内。
 - 所有测试资产严格位于 `/Game/UEAgentKitWriteTests/ScalarRegression/`。
 - 脚本正常完成时将 Fixture Reset 回默认值；异常中断时只允许残留在隔离测试目录。
+- `DirtyPackage` 与 `SaveFailure` 注入仅接受原生 Scalar Fixture、固定测试目录和 `scalar-failure-` Patch ID；不能用于业务资产或绕过 Policy。
 - 测试资产类位于 Editor Module，仅用于编辑器和 Commandlet 回归，不应作为游戏运行时业务类型使用。

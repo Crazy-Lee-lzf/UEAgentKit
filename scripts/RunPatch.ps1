@@ -12,7 +12,8 @@ param(
     [string]$Report = "",
     [string]$ValidationReport = "",
     [string]$BackupDir = "",
-    [string]$Manifest = ""
+    [string]$Manifest = "",
+    [string]$TestFailureInjection = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -59,6 +60,12 @@ if ([string]::IsNullOrWhiteSpace($BackupDir))
 else
 {
     $BackupDir = [System.IO.Path]::GetFullPath($BackupDir)
+}
+
+$AllowedTestFailureInjections = @("", "DirtyPackage", "SaveFailure")
+if (!($AllowedTestFailureInjections -contains $TestFailureInjection))
+{
+    throw "TestFailureInjection must be empty, DirtyPackage, or SaveFailure."
 }
 
 if ($Mode -eq "Commit" -and ![string]::IsNullOrWhiteSpace($Manifest))
@@ -124,6 +131,10 @@ $AssetOperations = @(
     "setDataTableCell"
 )
 $Commandlet = if ($AssetOperations -contains $Operation) { "AssetPatch" } else { "BlueprintPatch" }
+if (![string]::IsNullOrWhiteSpace($TestFailureInjection) -and $Commandlet -ne "AssetPatch")
+{
+    throw "TestFailureInjection is available only for AssetPatch regression fixtures."
+}
 
 $Arguments = @(
     $ProjectPath,
@@ -141,6 +152,10 @@ $Arguments = @(
     "-stdout",
     "-FullStdOutLogOutput"
 )
+if (![string]::IsNullOrWhiteSpace($TestFailureInjection))
+{
+    $Arguments += "-TestFailureInjection=$TestFailureInjection"
+}
 
 Write-Host "Running $Commandlet..."
 Write-Host "Engine    : $EngineRoot"
@@ -150,6 +165,10 @@ Write-Host "Patch     : $Patch"
 Write-Host "Policy    : $Policy"
 Write-Host "Report    : $Report"
 Write-Host "Validation: $ValidationReport"
+if (![string]::IsNullOrWhiteSpace($TestFailureInjection))
+{
+    Write-Host "Test fault : $TestFailureInjection"
+}
 if ($Mode -eq "Commit")
 {
     Write-Host "Backup    : $BackupDir"

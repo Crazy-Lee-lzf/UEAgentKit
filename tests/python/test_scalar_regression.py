@@ -100,6 +100,12 @@ class ScalarRegressionTests(unittest.TestCase):
             "byte-out-of-range",
             "invalid-enum-name",
             "missing-property",
+            "dirty-package",
+            "sidecar-file",
+            "save-failure",
+            "TestFailureInjection",
+            "ExpectedUnrealExitCode",
+            "ExpectBackup",
             "asset-property-not-allowed",
             "revision-conflict",
             "Failure case $CaseName changed the scalar fixture package",
@@ -111,7 +117,35 @@ class ScalarRegressionTests(unittest.TestCase):
         self.assertIn("dryRunCount = $DryRunResults.Count", script)
         self.assertIn("commitCount = $CommitResults.Count", script)
         self.assertIn("failureCount = $FailureResults.Count", script)
+        self.assertIn("$($FailureResults.Count)/9 rejected with zero disk changes", script)
         self.assertIn("failureMatrixDiskUnchanged = $true", script)
+
+    def test_failure_injection_is_strictly_scoped_to_scalar_fixture(self) -> None:
+        commandlet = (
+            ROOT
+            / "Plugin"
+            / "UEAgentKit"
+            / "Source"
+            / "UEAgentKitEditor"
+            / "Private"
+            / "AssetPatchCommandlet.cpp"
+        ).read_text(encoding="utf-8")
+        wrapper = (ROOT / "scripts" / "RunPatch.ps1").read_text(encoding="utf-8")
+        for token in (
+            "TestFailureInjection",
+            "/Game/UEAgentKitWriteTests/ScalarRegression/",
+            "/Script/UEAgentKitEditor.UEAgentKitScalarWriteFixtureAsset",
+            "scalar-failure-",
+            "DirtyPackage",
+            "SaveFailure",
+            "Backup restoration also failed",
+            "Restored Revision does not match",
+            "Disk revision was already unchanged",
+        ):
+            self.assertIn(token, commandlet)
+        self.assertIn('$AllowedTestFailureInjections = @("", "DirtyPackage", "SaveFailure")', wrapper)
+        self.assertIn('throw "TestFailureInjection is available only for AssetPatch regression fixtures."', wrapper)
+        self.assertIn('$Arguments += "-TestFailureInjection=$TestFailureInjection"', wrapper)
 
     def test_fixture_schema_accepts_scalar_regression_plan(self) -> None:
         schema_path = ROOT / "spec" / "write-fixture-plan.schema.json"

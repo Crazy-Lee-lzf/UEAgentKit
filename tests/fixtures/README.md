@@ -47,4 +47,4 @@ The wrapper validates the Plan before launching Unreal, recreates only explicitl
 
 ## Scalar patch regression
 
-`scalar_patch_regression_plan.json` creates the plugin-native scalar Data Asset used by `scripts\RunScalarPatchRegression.ps1`. The regression covers every currently supported `setAssetProperty` scalar representation, backup manifests, independent reloads, six expected rejection paths, and a final reset. See [`../../spec/SCALAR_PATCH_REGRESSION.md`](../../spec/SCALAR_PATCH_REGRESSION.md).
+`scalar_patch_regression_plan.json` creates the plugin-native scalar Data Asset used by `scripts\RunScalarPatchRegression.ps1`. The regression covers every currently supported `setAssetProperty` scalar representation, backup manifests, independent reloads, nine expected rejection paths, and a final reset. See [`../../spec/SCALAR_PATCH_REGRESSION.md`](../../spec/SCALAR_PATCH_REGRESSION.md).

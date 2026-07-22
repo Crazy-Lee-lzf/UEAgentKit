@@ -334,7 +334,7 @@ scripts\RunScalarPatchRegression.cmd ^
 - 11 次独立 Dry Run，验证回滚值、磁盘 Revision 和文件 SHA-256 不变。
 - 11 次顺序 Commit，每次验证备份、Manifest、独立 UE 重载和累计属性值。
 - 正常完成时最终 Reset 回默认值。
-- 6 次预期失败：未授权、过期 Revision、错误 JSON 类型、Byte 越界、非法 Enum、目标 Property 不存在。
+- 9 次预期失败：未授权、过期 Revision、错误 JSON 类型、Byte 越界、非法 Enum、目标 Property 不存在、Dirty Package、真实 Package Sidecar、注入的保存失败。
 - 所有失败均验证 `.uasset` 哈希和最终 Canonical Revision 不变。
 
 输出默认位于 `Output\ScalarPatchRegression`，其中 `summary.json` 汇总所有报告。完整规范见 [`../spec/SCALAR_PATCH_REGRESSION.md`](../spec/SCALAR_PATCH_REGRESSION.md)。
@@ -346,7 +346,7 @@ scripts\RunScalarPatchRegression.cmd ^
 ```bat
 python <TOOL_ROOT>\scripts\ValidateAssetCatalog.py ^
   --output <TOOL_ROOT>\Output\AssetCatalog ^
-  --expect-exporter 0.4.3
+  --expect-exporter 0.4.4
 ```
 
 校验器会检查：

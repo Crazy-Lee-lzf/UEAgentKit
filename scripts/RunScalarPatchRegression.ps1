@@ -94,9 +94,9 @@ $Cases = @(
     [pscustomobject]@{ Name = "Int64Value"; Value = -4000000000000; Baseline = 1234567890123; TargetType = "Int64Property" },
     [pscustomobject]@{ Name = "FloatValue"; Value = 3.75; Baseline = 1.25; TargetType = "FloatProperty" },
     [pscustomobject]@{ Name = "DoubleValue"; Value = 123.125; Baseline = -2.5; TargetType = "DoubleProperty" },
-    [pscustomobject]@{ Name = "StringValue"; Value = "Updated String 0.4.3"; Baseline = "Initial String"; TargetType = "StrProperty" },
-    [pscustomobject]@{ Name = "NameValue"; Value = "UpdatedName043"; Baseline = "InitialName"; TargetType = "NameProperty" },
-    [pscustomobject]@{ Name = "TextValue"; Value = "Updated Text 0.4.3"; Baseline = "Initial Text"; TargetType = "TextProperty" },
+    [pscustomobject]@{ Name = "StringValue"; Value = "Updated String 0.4.4"; Baseline = "Initial String"; TargetType = "StrProperty" },
+    [pscustomobject]@{ Name = "NameValue"; Value = "UpdatedName044"; Baseline = "InitialName"; TargetType = "NameProperty" },
+    [pscustomobject]@{ Name = "TextValue"; Value = "Updated Text 0.4.4"; Baseline = "Initial Text"; TargetType = "TextProperty" },
     [pscustomobject]@{ Name = "EnumValue"; Value = "Beta"; Baseline = "Alpha"; TargetType = "EnumProperty" },
     [pscustomobject]@{ Name = "LegacyEnumValue"; Value = "UEAK_LegacyBeta"; Baseline = "UEAK_LegacyAlpha"; TargetType = "ByteProperty" }
 )
@@ -244,7 +244,11 @@ function Invoke-RejectedScalarPatch
         [Parameter(Mandatory = $true)][object]$Value,
         [Parameter(Mandatory = $true)][string]$ExpectedRevision,
         [Parameter(Mandatory = $true)][string[]]$AllowedProperties,
-        [string]$ExpectedValidationCode = ""
+        [string]$ExpectedValidationCode = "",
+        [ValidateSet("DryRun", "Commit")][string]$Mode = "DryRun",
+        [string]$TestFailureInjection = "",
+        [int]$ExpectedUnrealExitCode = 0,
+        [switch]$ExpectBackup
     )
     $CaseDirectory = Join-Path (Join-Path $Output "Failures") $CaseName
     $PatchPath = Join-Path $CaseDirectory "patch.json"
@@ -294,20 +298,32 @@ function Invoke-RejectedScalarPatch
     Write-Utf8Json -Path $PatchPath -Value $Patch
     Write-Utf8Json -Path $CasePolicyPath -Value $CasePolicy
     $BeforeHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $TargetPackagePath).Hash.ToLowerInvariant()
+    $BeforeBackupPaths = @()
+    if ($ExpectBackup)
+    {
+        $BeforeBackupPaths = @(Get-ChildItem -LiteralPath $BackupDir -Filter *.bak -File -ErrorAction SilentlyContinue |
+            ForEach-Object { $_.FullName })
+    }
     $Rejected = $false
     $FailureMessage = ""
     try
     {
-        & $PatchScript `
-            -EngineRoot $EngineRoot `
-            -ProjectPath $ProjectPath `
-            -Patch $PatchPath `
-            -Policy $CasePolicyPath `
-            -RevisionExport $FailureRevisionExport `
-            -Mode DryRun `
-            -Report $ReportPath `
-            -ValidationReport $ValidationPath `
-            -BackupDir $BackupDir | Out-Host
+        $RunPatchArguments = @{
+            EngineRoot = $EngineRoot
+            ProjectPath = $ProjectPath
+            Patch = $PatchPath
+            Policy = $CasePolicyPath
+            RevisionExport = $FailureRevisionExport
+            Mode = $Mode
+            Report = $ReportPath
+            ValidationReport = $ValidationPath
+            BackupDir = $BackupDir
+        }
+        if (![string]::IsNullOrWhiteSpace($TestFailureInjection))
+        {
+            $RunPatchArguments.TestFailureInjection = $TestFailureInjection
+        }
+        & $PatchScript @RunPatchArguments | Out-Host
     }
     catch
     {
@@ -338,15 +354,40 @@ function Invoke-RejectedScalarPatch
             throw "Failure case $CaseName did not return validation code $ExpectedValidationCode."
         }
     }
-    elseif (!$Validation.valid -or $FailureMessage -notlike "*AssetPatch failed with exit code*")
+    elseif (!$Validation.valid -or
+        $ExpectedUnrealExitCode -le 0 -or
+        $FailureMessage -notlike "*AssetPatch failed with exit code $ExpectedUnrealExitCode*")
     {
-        throw "Failure case $CaseName was expected to reach and fail in AssetPatch."
+        throw "Failure case $CaseName was expected to reach AssetPatch exit code $ExpectedUnrealExitCode."
+    }
+    $FailureBackupPath = ""
+    if ($ExpectBackup)
+    {
+        $NewBackups = @(Get-ChildItem -LiteralPath $BackupDir -Filter *.bak -File |
+            Where-Object { $BeforeBackupPaths -notcontains $_.FullName })
+        if ($NewBackups.Count -ne 1)
+        {
+            throw "Failure case $CaseName expected one new raw backup, found $($NewBackups.Count)."
+        }
+        $FailureBackupPath = $NewBackups[0].FullName
+        $BackupHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $FailureBackupPath).Hash.ToLowerInvariant()
+        if ($BackupHash -ne $BeforeHash)
+        {
+            throw "Failure case $CaseName backup does not match the pre-Commit package."
+        }
+        if (Test-Path -LiteralPath ($FailureBackupPath + ".manifest.json"))
+        {
+            throw "Failure case $CaseName must not create a success Manifest."
+        }
     }
     return [pscustomobject]@{
         name = $CaseName
         property = $PropertyName
         stage = $FailureStage
+        mode = $Mode
+        testFailureInjection = $TestFailureInjection
         expectedValidationCode = $ExpectedValidationCode
+        expectedUnrealExitCode = $ExpectedUnrealExitCode
         validationCodes = $ValidationCodes
         failureMessage = $FailureMessage
         diskUnchanged = $true
@@ -354,6 +395,7 @@ function Invoke-RejectedScalarPatch
         afterHash = $AfterHash
         validationPath = $ValidationPath
         reportExists = [bool](Test-Path -LiteralPath $ReportPath)
+        backupPath = $FailureBackupPath
     }
 }
 
@@ -584,25 +626,74 @@ $FailureResults += Invoke-RejectedScalarPatch `
     -PropertyName "IntValue" `
     -Value "not-a-number" `
     -ExpectedRevision $ResetRevision `
-    -AllowedProperties @("IntValue")
+    -AllowedProperties @("IntValue") `
+    -ExpectedUnrealExitCode 20
 $FailureResults += Invoke-RejectedScalarPatch `
     -CaseName "byte-out-of-range" `
     -PropertyName "ByteValue" `
     -Value 300 `
     -ExpectedRevision $ResetRevision `
-    -AllowedProperties @("ByteValue")
+    -AllowedProperties @("ByteValue") `
+    -ExpectedUnrealExitCode 20
 $FailureResults += Invoke-RejectedScalarPatch `
     -CaseName "invalid-enum-name" `
     -PropertyName "EnumValue" `
     -Value "MissingValue" `
     -ExpectedRevision $ResetRevision `
-    -AllowedProperties @("EnumValue")
+    -AllowedProperties @("EnumValue") `
+    -ExpectedUnrealExitCode 20
 $FailureResults += Invoke-RejectedScalarPatch `
     -CaseName "missing-property" `
     -PropertyName "DoesNotExist" `
     -Value 1 `
     -ExpectedRevision $ResetRevision `
-    -AllowedProperties @("DoesNotExist")
+    -AllowedProperties @("DoesNotExist") `
+    -ExpectedUnrealExitCode 17
+$FailureResults += Invoke-RejectedScalarPatch `
+    -CaseName "dirty-package" `
+    -PropertyName "BoolValue" `
+    -Value $true `
+    -ExpectedRevision $ResetRevision `
+    -AllowedProperties @("BoolValue") `
+    -TestFailureInjection "DirtyPackage" `
+    -ExpectedUnrealExitCode 12
+$SidecarPath = [System.IO.Path]::ChangeExtension($TargetPackagePath, ".uexp")
+if (Test-Path -LiteralPath $SidecarPath)
+{
+    throw "Scalar failure regression refuses a pre-existing sidecar: $SidecarPath"
+}
+try
+{
+    [System.IO.File]::WriteAllBytes($SidecarPath, [byte[]](0x55, 0x45, 0x41, 0x4B))
+    $FailureResults += Invoke-RejectedScalarPatch `
+        -CaseName "sidecar-file" `
+        -PropertyName "BoolValue" `
+        -Value $true `
+        -ExpectedRevision $ResetRevision `
+        -AllowedProperties @("BoolValue") `
+        -ExpectedUnrealExitCode 24
+}
+finally
+{
+    if (Test-Path -LiteralPath $SidecarPath)
+    {
+        Remove-Item -LiteralPath $SidecarPath -Force
+    }
+}
+if (Test-Path -LiteralPath $SidecarPath)
+{
+    throw "Scalar failure regression could not remove its temporary sidecar: $SidecarPath"
+}
+$FailureResults += Invoke-RejectedScalarPatch `
+    -CaseName "save-failure" `
+    -PropertyName "BoolValue" `
+    -Value $true `
+    -ExpectedRevision $ResetRevision `
+    -AllowedProperties @("BoolValue") `
+    -Mode Commit `
+    -TestFailureInjection "SaveFailure" `
+    -ExpectedUnrealExitCode 21 `
+    -ExpectBackup
 $AfterFailures = Export-ScalarAsset -Directory (Join-Path $Output "AfterFailures")
 Assert-Values -Canonical $AfterFailures -Expected $BaselineValues -Context "After expected failures"
 if ($AfterFailures.revision.value -ne $ResetRevision)
@@ -612,7 +703,7 @@ if ($AfterFailures.revision.value -ne $ResetRevision)
 
 $Summary = [ordered]@{
     schemaVersion = "1.0"
-    toolVersion = "0.4.3"
+    toolVersion = "0.4.4"
     projectPath = $ProjectPath
     assetPath = $AssetPath
     assetClass = $AssetClass
@@ -633,5 +724,5 @@ Write-Utf8Json -Path $SummaryPath -Value $Summary -Depth 30
 Write-Host "Scalar patch regression completed."
 Write-Host "Dry Runs : $($DryRunResults.Count)/$($Cases.Count)"
 Write-Host "Commits  : $($CommitResults.Count)/$($Cases.Count)"
-Write-Host "Failures : $($FailureResults.Count)/6 rejected with zero disk changes"
+Write-Host "Failures : $($FailureResults.Count)/9 rejected with zero disk changes"
 Write-Host "Summary  : $SummaryPath"

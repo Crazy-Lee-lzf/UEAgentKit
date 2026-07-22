@@ -6,7 +6,7 @@
 
 UE Agent Kit is an open-source Unreal Engine asset analysis, indexing, and policy-gated patch toolkit. Its Editor plugin exports asset catalogs, Asset Registry metadata, dependencies, and Blueprint semantics; a Python CLI and SQLite provide a project-wide index, while Policy, Revision checks, dry runs, and backups protect explicit writes.
 
-The current release is **0.4.3** and targets **Unreal Engine 5.6**. In addition to policy-gated patching, auditable rollback, and declarative fixtures, it adds a plugin-native scalar fixture and a real Unreal regression covering 11 scalar types through dry run, commit, backup manifests, independent reloads, and six zero-write rejection paths.
+The current release is **0.4.4** and targets **Unreal Engine 5.6**. It extends the complete 11-type scalar dry-run/commit/reload matrix with reproducible Dirty Package, real package-sidecar, and save-failure disk-protection tests. The rejection matrix now covers nine zero-write paths with unchanged target SHA-256 values.
 
 > **AI Generated**: Most code and documentation in this project are AI-generated and reviewed through human inspection, UE 5.6 compilation, automated tests, and real-project regression validation.
 
@@ -22,7 +22,7 @@ The current release is **0.4.3** and targets **Unreal Engine 5.6**. In addition 
 - Validate patches against policy, revision, and export snapshots, then dry-run or explicitly commit authorized Blueprint, non-Blueprint scalar, Material Instance parameter, or DataTable cell changes.
 - Generate a backup manifest after every successful commit, then explicitly roll back and independently verify the restored revision when the current package still matches.
 - Create or reset isolated test assets from a declarative Write Fixture Plan, then independently verify class, revision, and dirty state.
-- Exercise Bool, integer, floating-point, String, Name, Text, and two Enum representations through real dry-run/commit/reload matrices, including zero-write rejections for authorization, stale revisions, wrong types, range errors, invalid enums, and missing properties.
+- Exercise Bool, integer, floating-point, String, Name, Text, and two Enum representations through real dry-run/commit/reload matrices, including zero-write rejections for authorization, stale revisions, wrong types, range errors, invalid enums, missing properties, dirty packages, sidecars, and save failures.
 
 ## Main capabilities
 
@@ -191,14 +191,14 @@ scripts\RunScalarPatchRegression.cmd ^
   -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject"
 ```
 
-The script creates an isolated native Data Asset fixture, runs 11 dry runs, 11 commits, six expected failures, and resets the fixture to its defaults after a successful run.
+The script creates an isolated native Data Asset fixture, runs 11 dry runs, 11 commits, nine expected failures, and resets the fixture to its defaults after a successful run.
 
 The executor supports four Blueprint operations, `setAssetProperty`, four Material Instance parameter operations, and `setDataTableCell`. One execution is limited to one asset and one operation. Generic properties, Material parameters, and DataTable fields use exact `allowedAssetProperties`, `allowedMaterialParameters`, and `allowedDataTableFields` authorization. Material Instance writes require one unique Global parameter; DataTable writes target one top-level scalar field in one existing row and restore the complete row during dry runs. Only single-file packages without external package sidecars are accepted.
 
 ### 6. Validate the asset catalog
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.4.3
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.4.4
 ```
 
 See [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md) for installation and full command details.

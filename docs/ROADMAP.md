@@ -2,7 +2,7 @@
 
 更新时间：2026-07-21
 
-当前版本为 **0.4.3**，支持 Unreal Engine 5.6。
+当前版本为 **0.4.4**，支持 Unreal Engine 5.6。
 
 UE Agent Kit 已完成项目级只读分析、SQLite/FTS 索引、Blueprint 低风险安全写入、通用非 Blueprint 标量属性写入、Material Instance Global Scalar/Vector/Texture/Static Switch，以及 DataTable 单 Row、单顶层标量字段写入。
 
@@ -55,9 +55,14 @@ UE Agent Kit 已完成项目级只读分析、SQLite/FTS 索引、Blueprint 低�
 - 11/11 Dry Run、11/11 Commit、逐次备份/Manifest/独立重载和最终 Reset。
 - 未授权、属性不存在、错误类型、Revision 冲突、数值越界和非法 Enum 的零写入失败回归。
 
-后续继续：
+0.4.4 已完成：
 
-- Dirty Package、Patch Sidecar 和保存失败的可重复真实测试。
+- Dirty Package 通过受限测试注入，在任何属性修改前由现有 Policy 门拒绝。
+- 真实临时 `.uexp` Sidecar 触发 Package Sidecar 拒绝，并在测试后可靠清理。
+- SaveFailure 在 Commit 备份后注入，验证目标 Revision 保持不变、原始备份可用且不生成成功 Manifest；若实际保存已改变磁盘，执行器会复制备份并复核恢复 Revision。
+- 完整矩阵达到 11/11 Dry Run、11/11 Commit 和 9/9 零写入失败路径。
+
+0.4.x 的恢复与核心安全回归目标已完成，下一阶段进入 0.5.0 MCP / Agent 接入。
 
 Array、Set、Map、对象引用和任意 Struct 不会直接通过宽松文本导入开放；必须先定义稳定的 JSON 值模型和可验证 Diff。
 

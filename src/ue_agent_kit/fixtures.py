@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 FIXTURE_PLAN_SCHEMA_VERSION = "1.0"
-FIXTURE_TOOL_VERSION = "0.4.3"
+FIXTURE_TOOL_VERSION = "0.4.4"
 _MAX_FIXTURES = 64
 _PACKAGE_RE = re.compile(r"^/[A-Za-z0-9_][A-Za-z0-9_/-]*[A-Za-z0-9_]$")
 _SCRIPT_CLASS_RE = re.compile(r"^/Script/[A-Za-z0-9_]+\.[A-Za-z0-9_]+$")

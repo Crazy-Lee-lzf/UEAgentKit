@@ -6,7 +6,7 @@
 
 UE Agent Kit 是一套面向 Unreal Engine 的开源资产分析、索引与受控写入工具。它通过 UE Editor 插件导出项目资产目录、Asset Registry 元数据、依赖关系和 Blueprint 语义，再使用 Python CLI 与 SQLite 建立项目级索引，并通过 Policy、Revision、Dry Run 和备份保护显式写入。
 
-当前版本为 **0.4.3**，支持 **Unreal Engine 5.6**。除受控 Patch、可审计 rollback 与声明式 Fixture 外，现已提供插件原生 Scalar Fixture 和完整真实 UE 标量回归：11 类标量逐项 Dry Run、Commit、备份、Manifest、独立重载，以及 6 类失败路径零写入验证。
+当前版本为 **0.4.4**，支持 **Unreal Engine 5.6**。在 11 类标量完整 Dry Run/Commit/独立重载基础上，现已补齐 Dirty Package、真实 Package Sidecar 和保存失败磁盘保护回归；失败矩阵扩展为 9 类，并继续要求目标 SHA-256 零变化。
 
 > **AI Generated**：本项目的代码和文档主要由 AI 生成，并通过人工审查、UE 5.6 编译、自动化测试和真实工程回归验证。
 
@@ -22,7 +22,7 @@ UE Agent Kit 是一套面向 Unreal Engine 的开源资产分析、索引与受�
 - 使用 Policy、Revision 和导出快照校验 Patch，并对授权 Blueprint、非 Blueprint 标量属性、Material Instance 参数或 DataTable 单元格执行 Dry Run 或显式 Commit。
 - 为成功 Commit 自动生成 Backup Manifest，并在当前 Revision 仍匹配时显式回滚和独立验证恢复结果。
 - 使用声明式 Write Fixture Plan 在安全测试目录内创建或重置测试资产，并独立验证类、Revision 与 Dirty 状态。
-- 对 Bool、整数、浮点、String、Name、Text 和两类 Enum 执行真实 Dry Run/Commit/重载矩阵，并验证未授权、过期 Revision、错误类型、越界、非法 Enum 和属性不存在均零写入拒绝。
+- 对 Bool、整数、浮点、String、Name、Text 和两类 Enum 执行真实 Dry Run/Commit/重载矩阵，并验证未授权、过期 Revision、错误类型、越界、非法 Enum、属性不存在、Dirty Package、Sidecar 和保存失败均零写入拒绝。
 
 ## 主要能力
 
@@ -191,14 +191,14 @@ scripts\RunScalarPatchRegression.cmd ^
   -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject"
 ```
 
-脚本会创建隔离的原生 Data Asset Fixture，执行 11/11 Dry Run、11/11 Commit、6/6 预期失败，并在正常完成时 Reset 回默认值。
+脚本会创建隔离的原生 Data Asset Fixture，执行 11/11 Dry Run、11/11 Commit、9/9 预期失败，并在正常完成时 Reset 回默认值。
 
 当前支持四种 Blueprint Operation、`setAssetProperty`、四种 Material Instance 参数 Operation，以及 `setDataTableCell`。每次执行仅允许一个资产和一个 Operation；通用属性、Material 参数和 DataTable 字段分别由 `allowedAssetProperties`、`allowedMaterialParameters`、`allowedDataTableFields` 精确授权。Material Instance 仅接受唯一 Global 参数；DataTable 仅修改现有 Row 的一个顶层标量字段，并在 Dry Run 中恢复完整 Row。当前仍只接受没有独立 Package 侧文件的单文件资产。
 
 ### 6. 校验通用资产导出
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.4.3
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.4.4
 ```
 
 完整参数和安装说明见 [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md)。
