@@ -17,7 +17,12 @@ from .agent_api import (
     IndexQueryService,
     IndexSnapshotError,
 )
-from .agent_workflow import PatchWorkflowConfig, PatchWorkflowService, WorkflowError
+from .agent_workflow import (
+    MATERIAL_PARAMETER_OPERATIONS,
+    PatchWorkflowConfig,
+    PatchWorkflowService,
+    WorkflowError,
+)
 from .config import DEFAULT_DATABASE
 from .patches import get_operation_registry
 from .query_protocol import (
@@ -41,7 +46,16 @@ else:
 MCP_SERVER_NAME = "UE Agent Kit"
 TOOL_ROOT = Path(__file__).resolve().parents[2]
 READ_TOOL_NAMES = ["ue_get_capabilities", "ue_get_project_status", "ue_search", "ue_get_asset", "ue_find_references"]
-WRITE_TOOL_NAMES = ["ue_plan_patch", "ue_dry_run_patch", "ue_apply_patch", "ue_verify_asset", "ue_rollback_patch"]
+HIGH_LEVEL_WRITE_TOOL_NAMES = [
+    "ue_set_blueprint_default",
+    "ue_set_component_property",
+    "ue_set_pin_default",
+    "ue_set_asset_property",
+    "ue_set_material_parameter",
+    "ue_set_datatable_cell",
+]
+LOW_LEVEL_WRITE_TOOL_NAMES = ["ue_plan_patch", "ue_dry_run_patch", "ue_apply_patch", "ue_verify_asset", "ue_rollback_patch"]
+WRITE_TOOL_NAMES = HIGH_LEVEL_WRITE_TOOL_NAMES + LOW_LEVEL_WRITE_TOOL_NAMES
 
 
 def _server_instructions(write_tools_enabled: bool, commit_enabled: bool) -> str:
@@ -62,8 +76,10 @@ def _server_instructions(write_tools_enabled: bool, commit_enabled: bool) -> str
     )
     return (
         "Fixed-project UE Agent Kit workflow. " + base +
-        "Use ue_plan_patch, ue_dry_run_patch, ue_apply_patch, ue_verify_asset, and ue_rollback_patch "
-        "for policy-gated single-asset workflows. Tool arguments cannot choose filesystem paths, policies, projects, "
+        "Prefer the ue_set_* tools for common Blueprint, asset, Material Instance, and DataTable changes. "
+        "They create a strict Plan by default and may run Plan plus Dry Run, but never Commit. Use ue_apply_patch only "
+        "with the returned planId and one-time Dry Run receipt. The low-level ue_plan_patch remains available for "
+        "registered Operations not covered by a high-level Tool. Tool arguments cannot choose filesystem paths, policies, projects, "
         "engines, databases, or arbitrary Unreal commands. " + commit_text
     )
 
@@ -81,6 +97,12 @@ def _tool_descriptors(write_tools_enabled: bool) -> list[dict[str, Any]]:
         "ue_search": (True, False),
         "ue_get_asset": (True, False),
         "ue_find_references": (True, False),
+        "ue_set_blueprint_default": (False, False),
+        "ue_set_component_property": (False, False),
+        "ue_set_pin_default": (False, False),
+        "ue_set_asset_property": (False, False),
+        "ue_set_material_parameter": (False, False),
+        "ue_set_datatable_cell": (False, False),
         "ue_plan_patch": (False, False),
         "ue_dry_run_patch": (False, False),
         "ue_apply_patch": (False, True),
@@ -138,6 +160,14 @@ def _capabilities_response(workflow_service: PatchWorkflowService | None) -> dic
             "available": write_tools_enabled,
             "items": get_operation_registry() if write_tools_enabled else [],
         },
+        "highLevelChanges": {
+            "available": write_tools_enabled,
+            "tools": HIGH_LEVEL_WRITE_TOOL_NAMES if write_tools_enabled else [],
+            "modes": ["Plan", "DryRun"],
+            "defaultMode": "Plan",
+            "commitSupportedDirectly": False,
+            "commitUsesApplyReceiptWorkflow": True,
+        },
         "limits": {
             "searchResults": MAX_MCP_SEARCH_LIMIT,
             "assetSymbols": MAX_MCP_SYMBOL_LIMIT,
@@ -163,6 +193,11 @@ def _capabilities_response(workflow_service: PatchWorkflowService | None) -> dic
             },
             "assetSections": ["identity", "summary", "metadata", "symbols", "references", "graphs", "nodes"],
             "outputTokenBudget": True,
+            "diagnostics": {
+                "fields": ["diagnosticId", "reportId", "stage", "exitCode", "stdoutTail", "stderrTail"],
+                "localPathsRedacted": True,
+                "reportPathsExposed": False,
+            },
         },
         "freshness": {
             "available": write_tools_enabled,
@@ -262,6 +297,7 @@ _RETRYABLE_ERROR_CODES = {
     "verify-export-failed",
     "rollback-dry-run-failed",
     "rollback-commit-failed",
+    "workflow-report-missing",
 }
 
 
@@ -277,6 +313,12 @@ def _suggested_action(code: str) -> str:
         "commit-disabled": "Restart the server with explicitly authorized Commit tools and a Commit-enabled Policy.",
         "index-stale": "Refresh the target asset export and immutable SQLite index, then create a new plan.",
         "index-freshness-unavailable": "Restore the fixed Revision Export or package file so all Revision sources can be compared.",
+        "policy-rejected": "Review the fixed Project Write Policy authorization for this exact asset, operation, and target.",
+        "revision-conflict": "Refresh the Revision Export and immutable SQLite index, then create a new plan from the current Revision.",
+        "dirty-package": "Save or discard the Dirty package, rebuild the fixed Revision snapshot, and create a new plan.",
+        "ue-process-crashed": "Inspect the sanitized diagnostic and Unreal log tail, fix the crash cause, then repeat from a new Plan.",
+        "workflow-report-missing": "Inspect the diagnosticId and Unreal process output; repeat the workflow only after confirming why no report was created.",
+        "workflow-report-invalid": "Inspect the reportId and diagnostic details; fix the producer or corrupted report before retrying.",
     }
     if code in exact:
         return exact[code]
@@ -495,6 +537,166 @@ def create_mcp_server(
             idempotentHint=False,
             openWorldHint=False,
         )
+
+        def _run_high_level_change(
+            *,
+            tool_name: str,
+            mode: Literal["Plan", "DryRun"],
+            asset_path: str,
+            operation: str,
+            target: dict[str, Any],
+            value: Any,
+            description: str,
+        ) -> dict[str, Any]:
+            return workflow_service.prepare_high_level_change(
+                tool_name=tool_name,
+                mode=mode,
+                asset_path=asset_path,
+                operation=operation,
+                target=target,
+                value=value,
+                description=description,
+            )
+
+        @server.tool(annotations=planning_annotations)
+        def ue_set_blueprint_default(
+            asset_path: str,
+            variable_name: str,
+            value: Any,
+            mode: Literal["Plan", "DryRun"] = "Plan",
+            description: str = "",
+        ) -> dict[str, Any]:
+            """Plan or Dry Run one policy-authorized Blueprint variable default change."""
+            try:
+                return _run_high_level_change(
+                    tool_name="ue_set_blueprint_default",
+                    mode=mode,
+                    asset_path=asset_path,
+                    operation="setVariableDefault",
+                    target={"variableName": variable_name},
+                    value=value,
+                    description=description,
+                )
+            except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+                return _error_response("ue_set_blueprint_default", exc, read_only=False)
+
+        @server.tool(annotations=planning_annotations)
+        def ue_set_component_property(
+            asset_path: str,
+            component_name: str,
+            property_path: str,
+            value: Any,
+            mode: Literal["Plan", "DryRun"] = "Plan",
+            description: str = "",
+        ) -> dict[str, Any]:
+            """Plan or Dry Run one policy-authorized Blueprint component property change."""
+            try:
+                return _run_high_level_change(
+                    tool_name="ue_set_component_property",
+                    mode=mode,
+                    asset_path=asset_path,
+                    operation="setComponentProperty",
+                    target={"componentName": component_name, "propertyPath": property_path},
+                    value=value,
+                    description=description,
+                )
+            except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+                return _error_response("ue_set_component_property", exc, read_only=False)
+
+        @server.tool(annotations=planning_annotations)
+        def ue_set_pin_default(
+            asset_path: str,
+            graph_guid: str,
+            node_guid: str,
+            pin_name: str,
+            value: Any,
+            mode: Literal["Plan", "DryRun"] = "Plan",
+            description: str = "",
+        ) -> dict[str, Any]:
+            """Plan or Dry Run one policy-authorized Blueprint pin default change."""
+            try:
+                return _run_high_level_change(
+                    tool_name="ue_set_pin_default",
+                    mode=mode,
+                    asset_path=asset_path,
+                    operation="setPinDefault",
+                    target={"graphGuid": graph_guid, "nodeGuid": node_guid, "pinName": pin_name},
+                    value=value,
+                    description=description,
+                )
+            except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+                return _error_response("ue_set_pin_default", exc, read_only=False)
+
+        @server.tool(annotations=planning_annotations)
+        def ue_set_asset_property(
+            asset_path: str,
+            property_path: str,
+            value: Any,
+            mode: Literal["Plan", "DryRun"] = "Plan",
+            description: str = "",
+        ) -> dict[str, Any]:
+            """Plan or Dry Run one policy-authorized non-Blueprint asset property change."""
+            try:
+                return _run_high_level_change(
+                    tool_name="ue_set_asset_property",
+                    mode=mode,
+                    asset_path=asset_path,
+                    operation="setAssetProperty",
+                    target={"propertyPath": property_path},
+                    value=value,
+                    description=description,
+                )
+            except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+                return _error_response("ue_set_asset_property", exc, read_only=False)
+
+        @server.tool(annotations=planning_annotations)
+        def ue_set_material_parameter(
+            asset_path: str,
+            parameter_name: str,
+            parameter_type: Literal["Scalar", "Vector", "Texture", "StaticSwitch"],
+            value: Any,
+            mode: Literal["Plan", "DryRun"] = "Plan",
+            description: str = "",
+        ) -> dict[str, Any]:
+            """Plan or Dry Run one authorized Material Instance parameter change."""
+            try:
+                operation = MATERIAL_PARAMETER_OPERATIONS.get(parameter_type)
+                if operation is None:
+                    raise ValueError("parameter_type must be Scalar, Vector, Texture, or StaticSwitch")
+                return _run_high_level_change(
+                    tool_name="ue_set_material_parameter",
+                    mode=mode,
+                    asset_path=asset_path,
+                    operation=operation,
+                    target={"parameterName": parameter_name},
+                    value=value,
+                    description=description,
+                )
+            except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+                return _error_response("ue_set_material_parameter", exc, read_only=False)
+
+        @server.tool(annotations=planning_annotations)
+        def ue_set_datatable_cell(
+            asset_path: str,
+            row_name: str,
+            field_name: str,
+            value: Any,
+            mode: Literal["Plan", "DryRun"] = "Plan",
+            description: str = "",
+        ) -> dict[str, Any]:
+            """Plan or Dry Run one authorized existing DataTable row field change."""
+            try:
+                return _run_high_level_change(
+                    tool_name="ue_set_datatable_cell",
+                    mode=mode,
+                    asset_path=asset_path,
+                    operation="setDataTableCell",
+                    target={"rowName": row_name, "fieldName": field_name},
+                    value=value,
+                    description=description,
+                )
+            except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+                return _error_response("ue_set_datatable_cell", exc, read_only=False)
 
         @server.tool(annotations=planning_annotations)
         def ue_plan_patch(

@@ -20,6 +20,22 @@ from .patches import OPERATION_REGISTRY, validate_patch
 WORKFLOW_SCHEMA_VERSION = "1.0"
 MAX_WORKFLOW_RECORDS = 128
 MAX_PROCESS_OUTPUT_CHARS = 16000
+HIGH_LEVEL_CHANGE_MODES = ("Plan", "DryRun")
+MATERIAL_PARAMETER_OPERATIONS = {
+    "Scalar": "setMaterialInstanceScalarParameter",
+    "Vector": "setMaterialInstanceVectorParameter",
+    "Texture": "setMaterialInstanceTextureParameter",
+    "StaticSwitch": "setMaterialInstanceStaticSwitchParameter",
+}
+CRASH_MARKERS = (
+    "fatal error:",
+    "assertion failed:",
+    "unhandled exception:",
+    "exception_access_violation",
+    "lowlevelfatalerror",
+    "signal 11 caught",
+)
+CRASH_EXIT_CODES = {-1073741819, -1073741676, -1073740791, 3221225477, 3221225620, 3221226505}
 
 
 class WorkflowError(RuntimeError):
@@ -124,16 +140,94 @@ def _sha256_bytes(value: bytes) -> str:
     return "sha256:" + hashlib.sha256(value).hexdigest()
 
 
-def _read_json(path: Path) -> dict[str, Any]:
+def _diagnostic_id(*parts: str) -> str:
+    payload = "\n".join(parts).encode("utf-8", errors="replace")
+    return "diag_" + hashlib.sha256(payload).hexdigest()[:20]
+
+
+def _report_id(stage: str, path: Path) -> str:
+    return "report_" + hashlib.sha256(f"{stage}:{path.resolve()}".encode("utf-8")).hexdigest()[:20]
+
+
+def _read_json(path: Path, *, stage: str = "") -> dict[str, Any]:
+    report_id = _report_id(stage, path) if stage else ""
     try:
         value = json.loads(path.read_text(encoding="utf-8-sig"))
     except FileNotFoundError as exc:
-        raise WorkflowError("workflow-output-missing", "A required workflow report was not created.") from exc
+        code = "workflow-report-missing" if stage else "workflow-output-missing"
+        details = {"stage": stage, "reportId": report_id} if stage else {}
+        raise WorkflowError(code, "A required workflow report was not created.", details=details) from exc
     except json.JSONDecodeError as exc:
-        raise WorkflowError("workflow-output-invalid", "A workflow report was not valid JSON.") from exc
+        code = "workflow-report-invalid" if stage else "workflow-output-invalid"
+        details = (
+            {
+                "stage": stage,
+                "reportId": report_id,
+                "jsonError": exc.msg,
+                "line": exc.lineno,
+                "column": exc.colno,
+            }
+            if stage
+            else {}
+        )
+        raise WorkflowError(code, "A workflow report was not valid JSON.", details=details) from exc
     if not isinstance(value, dict):
-        raise WorkflowError("workflow-output-invalid", "A workflow report must contain a JSON object.")
+        code = "workflow-report-invalid" if stage else "workflow-output-invalid"
+        details = {"stage": stage, "reportId": report_id} if stage else {}
+        raise WorkflowError(code, "A workflow report must contain a JSON object.", details=details)
     return value
+
+
+def _is_ue_crash(result: ProcessResult) -> bool:
+    if result.exit_code in CRASH_EXIT_CODES:
+        return True
+    output = f"{result.stdout}\n{result.stderr}".casefold()
+    return any(marker in output for marker in CRASH_MARKERS)
+
+
+def _validation_error(
+    validation: dict[str, Any],
+    *,
+    default_code: str,
+    default_message: str,
+    phase: str,
+) -> WorkflowError:
+    errors = validation.get("errors", [])
+    issues = errors if isinstance(errors, list) else []
+    issue_codes = {
+        str(issue.get("code", ""))
+        for issue in issues
+        if isinstance(issue, dict)
+    }
+    policy_codes = {
+        code
+        for code in issue_codes
+        if code.startswith("policy-")
+        or code.endswith("-not-allowed")
+        or code in {"project-not-allowed", "asset-root-not-allowed", "asset-class-not-allowed", "operation-not-allowed"}
+    }
+    if "revision-conflict" in issue_codes:
+        code = "revision-conflict"
+        message = "The asset Revision changed after the plan snapshot was created."
+    elif "dirty-package" in issue_codes:
+        code = "dirty-package"
+        message = "The target package was Dirty when the fixed Revision Export was created."
+    elif policy_codes:
+        code = "policy-rejected"
+        message = "The fixed Project Write Policy rejected this change."
+    else:
+        code = default_code
+        message = default_message
+    return WorkflowError(
+        code,
+        message,
+        details={
+            "phase": phase,
+            "issueCodes": sorted(issue_codes),
+            "errors": issues,
+            "warnings": validation.get("warnings", []),
+        },
+    )
 
 
 def _write_json_atomic(path: Path, value: Any) -> None:
@@ -367,18 +461,40 @@ class PatchWorkflowService:
     def _plan_directory(self, plan_id: str) -> Path:
         return self._safe_work_path("plans", plan_id)
 
+    def _assert_asset_fresh(self, asset_path: str) -> dict[str, Any]:
+        freshness = self.freshness.inspect_asset(asset_path)
+        if freshness.get("state") == "stale":
+            raise WorkflowError(
+                "index-stale",
+                "The requested asset differs from the fixed SQLite index or Revision Export.",
+                details=self._sanitize_details({"freshness": freshness}),
+            )
+        if freshness.get("state") != "fresh":
+            raise WorkflowError(
+                "index-freshness-unavailable",
+                "The requested asset could not be compared across SQLite, Revision Export, and disk.",
+                details=self._sanitize_details({"freshness": freshness}),
+            )
+        return freshness
+
     def _validate_plan_file(self, record: PlanRecord) -> dict[str, Any]:
         self._assert_policy_unchanged()
         stored_patch = _read_json(record.patch_path)
         stored_digest = _sha256_bytes(_json_bytes(stored_patch))
         if stored_digest != record.digest or stored_patch != record.patch:
             raise WorkflowError("plan-tampered", "The stored MCP patch plan changed after it was created.")
+        assets = stored_patch.get("assets", [])
+        if not isinstance(assets, list) or len(assets) != 1 or not isinstance(assets[0], dict):
+            raise WorkflowError("plan-invalid", "The stored MCP patch no longer contains exactly one asset.")
+        asset_path = str(assets[0].get("assetPath", ""))
+        self._assert_asset_fresh(asset_path)
         validation = validate_patch(record.patch_path, self.config.policy_path, self.config.revision_export)
         if not validation.get("valid"):
-            raise WorkflowError(
-                "patch-validation-failed",
-                "The stored patch no longer passes Policy and Revision validation.",
-                details=self._sanitize_details({"errors": validation.get("errors", [])}),
+            raise _validation_error(
+                validation,
+                default_code="patch-validation-failed",
+                default_message="The stored patch no longer passes Policy and Revision validation.",
+                phase="stored-plan-validation",
             )
         return validation
 
@@ -399,19 +515,7 @@ class PatchWorkflowService:
             if not asset_result.get("found"):
                 raise WorkflowError("asset-not-indexed", "The requested asset is not present in the fixed SQLite index.")
             asset = asset_result["asset"]
-            freshness = self.freshness.inspect_asset(asset_path)
-            if freshness.get("state") == "stale":
-                raise WorkflowError(
-                    "index-stale",
-                    "The requested asset differs from the fixed SQLite index or Revision Export.",
-                    details=self._sanitize_details({"freshness": freshness}),
-                )
-            if freshness.get("state") != "fresh":
-                raise WorkflowError(
-                    "index-freshness-unavailable",
-                    "The requested asset could not be compared across SQLite, Revision Export, and disk.",
-                    details=self._sanitize_details({"freshness": freshness}),
-                )
+            self._assert_asset_fresh(asset_path)
             revision = asset.get("revision_value")
             asset_class = asset.get("asset_class")
             if not isinstance(revision, str) or not revision.startswith("sha256:"):
@@ -448,10 +552,11 @@ class PatchWorkflowService:
             _write_json_atomic(patch_path, patch)
             validation = validate_patch(patch_path, self.config.policy_path, self.config.revision_export)
             if not validation.get("valid"):
-                raise WorkflowError(
-                    "patch-plan-rejected",
-                    "The proposed patch was rejected by Policy or Revision validation.",
-                    details=self._sanitize_details({"errors": validation.get("errors", []), "warnings": validation.get("warnings", [])}),
+                raise _validation_error(
+                    validation,
+                    default_code="patch-plan-rejected",
+                    default_message="The proposed patch was rejected by Policy or Revision validation.",
+                    phase="plan-validation",
                 )
             record = PlanRecord(plan_id, digest, patch, patch_path, validation)
             self._plans[plan_id] = record
@@ -475,7 +580,60 @@ class PatchWorkflowService:
                 "nextStep": "Call ue_dry_run_patch with this planId.",
             }
 
-    def _run_script(self, script_name: str, script_arguments: list[str]) -> ProcessResult:
+    def prepare_high_level_change(
+        self,
+        *,
+        tool_name: str,
+        mode: Literal["Plan", "DryRun"],
+        asset_path: str,
+        operation: str,
+        target: dict[str, Any],
+        value: Any,
+        description: str = "",
+    ) -> dict[str, Any]:
+        if mode not in HIGH_LEVEL_CHANGE_MODES:
+            raise ValueError("mode must be Plan or DryRun")
+        plan = self.plan_patch(
+            asset_path=asset_path,
+            operation=operation,
+            target=target,
+            value=value,
+            description=description,
+        )
+        if mode == "Plan":
+            response = dict(plan)
+            response.update(
+                {
+                    "tool": tool_name,
+                    "mode": "Plan",
+                    "underlyingTool": "ue_plan_patch",
+                    "underlyingOperation": operation,
+                }
+            )
+            return response
+        dry_run = self.dry_run_patch(str(plan["planId"]))
+        response = dict(dry_run)
+        response.update(
+            {
+                "tool": tool_name,
+                "mode": "DryRun",
+                "assetPath": asset_path,
+                "underlyingTools": ["ue_plan_patch", "ue_dry_run_patch"],
+                "underlyingOperation": operation,
+                "risk": plan.get("risk", ""),
+                "commitToolsEnabled": plan.get("commitToolsEnabled", False),
+            }
+        )
+        return response
+
+    def _run_script(
+        self,
+        script_name: str,
+        script_arguments: list[str],
+        *,
+        stage: str,
+        report_path: Path,
+    ) -> ProcessResult:
         self._assert_runtime_boundaries()
         script = self.config.tool_root / "scripts" / script_name
         arguments = [
@@ -490,8 +648,52 @@ class PatchWorkflowService:
         try:
             result = self._runner(arguments, self.config.tool_root, self.config.process_timeout_seconds)
         except subprocess.TimeoutExpired as exc:
-            raise WorkflowError("workflow-timeout", "The Unreal workflow process exceeded its fixed timeout.") from exc
+            stdout = exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else str(exc.stdout or "")
+            stderr = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else str(exc.stderr or "")
+            details = self._sanitize_details(
+                {
+                    "stage": stage,
+                    "diagnosticId": _diagnostic_id(stage, "timeout", stdout[-1024:], stderr[-1024:]),
+                    "reportId": _report_id(stage, report_path),
+                    "stdoutTail": _safe_tail(stdout),
+                    "stderrTail": _safe_tail(stderr),
+                }
+            )
+            raise WorkflowError(
+                "workflow-timeout",
+                "The Unreal workflow process exceeded its fixed timeout.",
+                details=details,
+            ) from exc
         return result
+
+    def _raise_process_failure(
+        self,
+        *,
+        stage: str,
+        result: ProcessResult,
+        report_path: Path,
+        fallback_code: str,
+        fallback_message: str,
+    ) -> None:
+        crashed = _is_ue_crash(result)
+        code = "ue-process-crashed" if crashed else fallback_code
+        message = "The Unreal workflow process crashed." if crashed else fallback_message
+        details = self._sanitize_details(
+            {
+                "stage": stage,
+                "diagnosticId": _diagnostic_id(
+                    stage,
+                    str(result.exit_code),
+                    result.stdout[-2048:],
+                    result.stderr[-2048:],
+                ),
+                "reportId": _report_id(stage, report_path),
+                "exitCode": result.exit_code,
+                "stdoutTail": _safe_tail(result.stdout),
+                "stderrTail": _safe_tail(result.stderr),
+            }
+        )
+        raise WorkflowError(code, message, details=details)
 
     def dry_run_patch(self, plan_id: str) -> dict[str, Any]:
         with self._lock:
@@ -517,14 +719,18 @@ class PatchWorkflowService:
                     "-ValidationReport", str(validation_report),
                     "-BackupDir", str(self.config.backup_root),
                 ],
+                stage="patch-dry-run",
+                report_path=report_path,
             )
             if result.exit_code != 0:
-                raise WorkflowError(
-                    "dry-run-failed",
-                    "The Unreal Dry Run failed.",
-                    details=self._sanitize_details({"exitCode": result.exit_code, "stderrTail": _safe_tail(result.stderr)}),
+                self._raise_process_failure(
+                    stage="patch-dry-run",
+                    result=result,
+                    report_path=report_path,
+                    fallback_code="dry-run-failed",
+                    fallback_message="The Unreal Dry Run failed.",
                 )
-            report = _read_json(report_path)
+            report = _read_json(report_path, stage="patch-dry-run")
             gates = {
                 "modeDryRun": report.get("mode") == "DryRun",
                 "notSaved": report.get("saved") is False,
@@ -545,6 +751,7 @@ class PatchWorkflowService:
                 "planId": plan_id,
                 "patchDigest": record.digest,
                 "dryRunReceipt": receipt,
+                "reportId": _report_id("patch-dry-run", report_path),
                 "gates": gates,
                 "report": _safe_report(report, configured_paths=self.configured_paths),
                 "validationSummary": validation.get("summary", {}),
@@ -586,14 +793,18 @@ class PatchWorkflowService:
                     "-BackupDir", str(self.config.backup_root),
                     "-Manifest", str(manifest_path),
                 ],
+                stage="patch-commit",
+                report_path=report_path,
             )
             if result.exit_code != 0:
-                raise WorkflowError(
-                    "commit-failed",
-                    "The Unreal Commit failed.",
-                    details=self._sanitize_details({"exitCode": result.exit_code, "stderrTail": _safe_tail(result.stderr)}),
+                self._raise_process_failure(
+                    stage="patch-commit",
+                    result=result,
+                    report_path=report_path,
+                    fallback_code="commit-failed",
+                    fallback_message="The Unreal Commit failed.",
                 )
-            report = _read_json(report_path)
+            report = _read_json(report_path, stage="patch-commit")
             if report.get("mode") != "Commit" or report.get("saved") is not True:
                 raise WorkflowError("commit-report-invalid", "The Commit report did not confirm a saved asset.")
             if not manifest_path.is_file():
@@ -634,6 +845,7 @@ class PatchWorkflowService:
                 "beforeRevision": before_revision,
                 "afterRevision": after_revision,
                 "manifestId": manifest_path.name,
+                "reportId": _report_id("patch-commit", report_path),
                 "indexFreshness": freshness,
                 "report": _safe_report(report, configured_paths=self.configured_paths),
                 "nextStep": "Call ue_verify_asset with this applyReceipt. The fixed index remains stale until refreshed or rolled back.",
@@ -657,17 +869,21 @@ class PatchWorkflowService:
                     "-Asset", asset_package,
                     "-Output", str(output),
                 ],
+                stage="verify-export",
+                report_path=output / "manifest.json",
             )
             if result.exit_code != 0:
-                raise WorkflowError(
-                    "verify-export-failed",
-                    "The independent Unreal verification export failed.",
-                    details=self._sanitize_details({"exitCode": result.exit_code, "stderrTail": _safe_tail(result.stderr)}),
+                self._raise_process_failure(
+                    stage="verify-export",
+                    result=result,
+                    report_path=output / "manifest.json",
+                    fallback_code="verify-export-failed",
+                    fallback_message="The independent Unreal verification export failed.",
                 )
             canonical_files = list((output / "canonical").rglob("*.json"))
             if len(canonical_files) != 1:
                 raise WorkflowError("verify-export-invalid", "Independent verification did not produce exactly one Canonical asset.")
-            canonical = _read_json(canonical_files[0])
+            canonical = _read_json(canonical_files[0], stage="verify-canonical")
             revision = canonical.get("revision", {})
             actual_revision = revision.get("value", "") if isinstance(revision, dict) else ""
             verified = canonical.get("assetPath") == apply.asset_path and actual_revision == apply.after_revision
@@ -690,6 +906,7 @@ class PatchWorkflowService:
                 "verified": True,
                 "assetClass": canonical.get("assetClass", ""),
                 "packageDirty": revision.get("packageDirty", False) if isinstance(revision, dict) else False,
+                "reportId": _report_id("verify-export", output / "manifest.json"),
                 "indexFreshness": freshness,
                 "nextStep": "Keep the change and refresh the asset index, or call ue_rollback_patch in DryRun mode before an explicit rollback Commit.",
             }
@@ -723,14 +940,18 @@ class PatchWorkflowService:
                         "-Mode", "DryRun",
                         "-Report", str(report_path),
                     ],
+                    stage="rollback-dry-run",
+                    report_path=report_path,
                 )
                 if result.exit_code != 0:
-                    raise WorkflowError(
-                        "rollback-dry-run-failed",
-                        "Rollback Dry Run failed.",
-                        details=self._sanitize_details({"exitCode": result.exit_code, "stderrTail": _safe_tail(result.stderr)}),
+                    self._raise_process_failure(
+                        stage="rollback-dry-run",
+                        result=result,
+                        report_path=report_path,
+                        fallback_code="rollback-dry-run-failed",
+                        fallback_message="Rollback Dry Run failed.",
                     )
-                report = _read_json(report_path)
+                report = _read_json(report_path, stage="rollback-dry-run")
                 if report.get("valid") is not True or report.get("wroteDisk") is not False:
                     raise WorkflowError("rollback-dry-run-invalid", "Rollback Dry Run did not confirm a valid zero-write result.")
                 receipt = "rollback_dry_" + secrets.token_urlsafe(24)
@@ -743,6 +964,7 @@ class PatchWorkflowService:
                     "mode": "DryRun",
                     "applyReceipt": apply_receipt,
                     "rollbackDryRunReceipt": receipt,
+                    "reportId": _report_id("rollback-dry-run", report_path),
                     "report": _safe_report(report, configured_paths=self.configured_paths),
                     "nextStep": f"To restore, call ue_rollback_patch with mode Commit and confirmation 'ROLLBACK {apply_receipt}'.",
                 }
@@ -771,15 +993,19 @@ class PatchWorkflowService:
                     "-VerificationOutput", str(verification_output),
                     "-VerificationReport", str(verification_report),
                 ],
+                stage="rollback-commit",
+                report_path=report_path,
             )
             if result.exit_code != 0:
-                raise WorkflowError(
-                    "rollback-commit-failed",
-                    "Rollback Commit or independent verification failed.",
-                    details=self._sanitize_details({"exitCode": result.exit_code, "stderrTail": _safe_tail(result.stderr)}),
+                self._raise_process_failure(
+                    stage="rollback-commit",
+                    result=result,
+                    report_path=report_path,
+                    fallback_code="rollback-commit-failed",
+                    fallback_message="Rollback Commit or independent verification failed.",
                 )
-            report = _read_json(report_path)
-            verification = _read_json(verification_report)
+            report = _read_json(report_path, stage="rollback-commit")
+            verification = _read_json(verification_report, stage="rollback-verification")
             if report.get("restored") is not True or verification.get("verified") is not True:
                 raise WorkflowError("rollback-report-invalid", "Rollback reports did not confirm restore and independent verification.")
             restored_revision = str(
@@ -802,6 +1028,8 @@ class PatchWorkflowService:
                 "assetPath": apply.asset_path,
                 "restored": True,
                 "expectedRevision": apply.before_revision,
+                "reportId": _report_id("rollback-commit", report_path),
+                "verificationReportId": _report_id("rollback-verification", verification_report),
                 "indexFreshness": freshness,
                 "verification": _safe_report(verification, configured_paths=self.configured_paths),
                 "report": _safe_report(report, configured_paths=self.configured_paths),

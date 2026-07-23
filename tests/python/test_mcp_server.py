@@ -32,6 +32,7 @@ from ue_agent_kit.agent_api import (  # noqa: E402
     MAX_MCP_SEARCH_LIMIT,
     IndexQueryService,
 )
+from ue_agent_kit.agent_workflow import WorkflowError  # noqa: E402
 from ue_agent_kit.database import open_database  # noqa: E402
 from ue_agent_kit.indexer import build_index  # noqa: E402
 from ue_agent_kit.mcp_server import create_mcp_server, main as mcp_main  # noqa: E402
@@ -64,6 +65,21 @@ class FakeWorkflowService:
             "staleAssetCount": 0,
             "unavailableAssetCount": 0,
         }
+
+    def prepare_high_level_change(self, **kwargs):
+        mode = kwargs.get("mode", "Plan")
+        response = {
+            "ok": True,
+            "tool": kwargs["tool_name"],
+            "mode": mode,
+            "planId": "plan_test",
+            "underlyingOperation": kwargs["operation"],
+            "target": kwargs["target"],
+            "value": kwargs["value"],
+        }
+        if mode == "DryRun":
+            response["dryRunReceipt"] = "dry_test"
+        return response
 
     def plan_patch(self, **kwargs):
         return {"ok": True, "tool": "ue_plan_patch", "planId": "plan_test", **kwargs}
@@ -300,6 +316,12 @@ class McpServerTests(unittest.TestCase):
                 "ue_search",
                 "ue_get_asset",
                 "ue_find_references",
+                "ue_set_blueprint_default",
+                "ue_set_component_property",
+                "ue_set_pin_default",
+                "ue_set_asset_property",
+                "ue_set_material_parameter",
+                "ue_set_datatable_cell",
                 "ue_plan_patch",
                 "ue_dry_run_patch",
                 "ue_apply_patch",
@@ -311,6 +333,14 @@ class McpServerTests(unittest.TestCase):
         for tool in tools:
             properties = set(tool.inputSchema.get("properties", {}))
             self.assertFalse(properties.intersection(forbidden), (tool.name, properties))
+        high_level_tool = next(tool for tool in tools if tool.name == "ue_set_asset_property")
+        self.assertIn("mode", high_level_tool.inputSchema["properties"])
+        self.assertEqual(high_level_tool.inputSchema["properties"]["mode"]["default"], "Plan")
+        self.assertFalse(high_level_tool.annotations.destructiveHint)
+        self.assertFalse(high_level_tool.annotations.readOnlyHint)
+        material_tool = next(tool for tool in tools if tool.name == "ue_set_material_parameter")
+        self.assertIn("parameter_type", material_tool.inputSchema["properties"])
+
         apply_tool = next(tool for tool in tools if tool.name == "ue_apply_patch")
         self.assertTrue(apply_tool.annotations.destructiveHint)
         self.assertFalse(apply_tool.annotations.readOnlyHint)
@@ -323,12 +353,38 @@ class McpServerTests(unittest.TestCase):
         self.assertTrue(capabilities["operations"]["available"])
         self.assertTrue(capabilities["freshness"]["available"])
         self.assertTrue(capabilities["freshness"]["planRequiresFreshIndex"])
+        self.assertTrue(capabilities["highLevelChanges"]["available"])
+        self.assertEqual(capabilities["highLevelChanges"]["defaultMode"], "Plan")
+        self.assertFalse(capabilities["highLevelChanges"]["commitSupportedDirectly"])
+        self.assertEqual(len(capabilities["highLevelChanges"]["tools"]), 6)
         self.assertGreater(len(capabilities["operations"]["items"]), 0)
         _, project_status = asyncio.run(server.call_tool("ue_get_project_status", {}))
         self.assertEqual(project_status["project"]["projectName"], "TestProject")
         self.assertEqual(project_status["engine"]["state"], "unknown")
         self.assertEqual(project_status["freshness"]["state"], "fresh")
         self.assertTrue(project_status["freshness"]["indexFresh"])
+
+        high_level_cases = [
+            ("ue_set_blueprint_default", {"asset_path": ASSET_A, "variable_name": "Health", "value": 10}, "setVariableDefault"),
+            ("ue_set_component_property", {"asset_path": ASSET_A, "component_name": "Root", "property_path": "Mobility", "value": "Movable"}, "setComponentProperty"),
+            ("ue_set_pin_default", {"asset_path": ASSET_A, "graph_guid": "11111111-1111-1111-1111-111111111111", "node_guid": "22222222-2222-2222-2222-222222222222", "pin_name": "Value", "value": "1"}, "setPinDefault"),
+            ("ue_set_asset_property", {"asset_path": GENERIC_ASSET, "property_path": "BoolValue", "value": True}, "setAssetProperty"),
+            ("ue_set_material_parameter", {"asset_path": GENERIC_ASSET, "parameter_name": "Roughness", "parameter_type": "Scalar", "value": 0.5}, "setMaterialInstanceScalarParameter"),
+            ("ue_set_datatable_cell", {"asset_path": GENERIC_ASSET, "row_name": "Default", "field_name": "Value", "value": 7}, "setDataTableCell"),
+        ]
+        for tool_name, arguments, operation in high_level_cases:
+            _, high_level = asyncio.run(server.call_tool(tool_name, arguments))
+            self.assertTrue(high_level["ok"], high_level)
+            self.assertEqual(high_level["mode"], "Plan")
+            self.assertEqual(high_level["underlyingOperation"], operation)
+
+        _, high_level_dry = asyncio.run(
+            server.call_tool(
+                "ue_set_asset_property",
+                {"asset_path": GENERIC_ASSET, "property_path": "BoolValue", "value": True, "mode": "DryRun"},
+            )
+        )
+        self.assertEqual(high_level_dry["dryRunReceipt"], "dry_test")
 
         _, planned = asyncio.run(
             server.call_tool(
@@ -349,6 +405,36 @@ class McpServerTests(unittest.TestCase):
             )
         )
         self.assertEqual(applied["applyReceipt"], "apply_test")
+
+    @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
+    def test_workflow_diagnostics_use_stable_redacted_error_envelope(self) -> None:
+        class CrashingWorkflow(FakeWorkflowService):
+            def prepare_high_level_change(self, **kwargs):
+                del kwargs
+                raise WorkflowError(
+                    "ue-process-crashed",
+                    "The Unreal workflow process crashed.",
+                    details={
+                        "stage": "patch-dry-run",
+                        "diagnosticId": "diag_test",
+                        "reportId": "report_test",
+                        "stderrTail": "Fatal error: <configured-path>",
+                    },
+                )
+
+        server = create_mcp_server(self.database_path, workflow_service=CrashingWorkflow())
+        _, payload = asyncio.run(
+            server.call_tool(
+                "ue_set_asset_property",
+                {"asset_path": GENERIC_ASSET, "property_path": "BoolValue", "value": True, "mode": "DryRun"},
+            )
+        )
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "ue-process-crashed")
+        self.assertFalse(payload["error"]["retryable"])
+        self.assertEqual(payload["error"]["details"]["diagnosticId"], "diag_test")
+        self.assertEqual(payload["error"]["details"]["reportId"], "report_test")
+        self.assertIn("new Plan", payload["error"]["suggestedAction"])
 
     def test_active_sqlite_sidecar_is_rejected(self) -> None:
         sidecar = Path(str(self.database_path) + "-wal")

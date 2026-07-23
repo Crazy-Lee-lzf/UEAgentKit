@@ -22,7 +22,7 @@ The current release is **0.5.0** and targets **Unreal Engine 5.6**. Building on 
 - Validate patches against policy, revision, and export snapshots, then dry-run or explicitly commit authorized Blueprint, non-Blueprint scalar, Material Instance parameter, or DataTable cell changes.
 - Generate a backup manifest after every successful commit, then explicitly roll back and independently verify the restored revision when the current package still matches.
 - Create or reset isolated test assets from a declarative Write Fixture Plan, then independently verify class, revision, and dirty state.
-- Use the local MCP server in 0.5.0 to search assets/symbols, inspect one asset, and query references without exposing shell, arbitrary SQL, or UObject access.
+- Use the local MCP server to search assets/symbols, inspect assets and references, and create strict Plans or Dry Runs through six high-level safe-change tools without exposing shell, arbitrary SQL, or UObject access.
 - Exercise Bool, integer, floating-point, String, Name, Text, and two Enum representations through real dry-run/commit/reload matrices, including zero-write rejections for authorization, stale revisions, wrong types, range errors, invalid enums, missing properties, dirty packages, sidecars, and save failures.
 
 ## Main capabilities
@@ -206,7 +206,7 @@ scripts\RunMcp.cmd -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3" -Check
 scripts\TestMcpStdio.cmd
 ```
 
-The server uses local `stdio` only. Default mode exposes five read-only capability, project-status, and query tools; fixed Engine, Project, Policy, and Revision Export settings enable the complete ten-tool workflow:
+The server uses local `stdio` only. Default mode exposes five read-only capability, project-status, and query tools; fixed Engine, Project, Policy, and Revision Export settings enable the complete sixteen-tool workflow:
 
 ```bat
 claude mcp add --transport stdio --scope project ue-agent-kit -- ^
@@ -215,7 +215,7 @@ claude mcp add --transport stdio --scope project ue-agent-kit -- ^
   -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
 ```
 
-Use `claude mcp list` or `/mcp` inside Claude Code to inspect the connection. Full workflow mode requires `-EnableWriteTools`; asset save and restore additionally require `-EnableCommitTools`, a commit-enabled Policy, one-time dry-run receipts, and exact confirmation phrases. Planning requires matching SQLite, Revision Export, and disk-package revisions. Commit marks the fixed snapshots stale; exact rollback can restore fresh state. Stop the server before rebuilding the index. See [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md) and [`spec/INDEX_FRESHNESS.md`](spec/INDEX_FRESHNESS.md) for the full contract.
+Use `claude mcp list` or `/mcp` inside Claude Code to inspect the connection. Full workflow mode requires `-EnableWriteTools`; asset save and restore additionally require `-EnableCommitTools`, a commit-enabled Policy, one-time dry-run receipts, and exact confirmation phrases. Planning requires matching SQLite, Revision Export, and disk-package revisions. Six `ue_set_*` tools create a Plan by default or may run a Dry Run, but cannot commit directly. Commit marks the fixed snapshots stale; exact rollback can restore fresh state. Stop the server before rebuilding the index. See [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md) and [`spec/INDEX_FRESHNESS.md`](spec/INDEX_FRESHNESS.md) for the full contract.
 
 ### 7. Validate the asset catalog
 

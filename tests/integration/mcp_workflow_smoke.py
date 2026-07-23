@@ -18,6 +18,12 @@ EXPECTED_TOOLS = [
     "ue_search",
     "ue_get_asset",
     "ue_find_references",
+    "ue_set_blueprint_default",
+    "ue_set_component_property",
+    "ue_set_pin_default",
+    "ue_set_asset_property",
+    "ue_set_material_parameter",
+    "ue_set_datatable_cell",
     "ue_plan_patch",
     "ue_dry_run_patch",
     "ue_apply_patch",
@@ -114,6 +120,10 @@ async def run_workflow(args: argparse.Namespace) -> dict[str, object]:
                     raise RuntimeError(f"Unexpected MCP mode: {capabilities}")
                 if not capabilities["operations"]["available"]:
                     raise RuntimeError(f"Write operations were not reported as available: {capabilities}")
+                if not capabilities["highLevelChanges"]["available"]:
+                    raise RuntimeError(f"High-level changes were not reported as available: {capabilities}")
+                if capabilities["highLevelChanges"]["defaultMode"] != "Plan":
+                    raise RuntimeError(f"Unexpected high-level default mode: {capabilities}")
 
                 project_status = require_payload(
                     await session.call_tool("ue_get_project_status", {}),
@@ -138,30 +148,27 @@ async def run_workflow(args: argparse.Namespace) -> dict[str, object]:
                 if search["pagination"]["resultCount"] != 1:
                     raise RuntimeError(f"Scalar fixture search failed: {search}")
 
-                planned = require_payload(
+                prepared = require_payload(
                     await session.call_tool(
-                        "ue_plan_patch",
+                        "ue_set_asset_property",
                         {
                             "asset_path": ASSET_PATH,
-                            "operation": "setAssetProperty",
-                            "target": {"propertyPath": "BoolValue"},
+                            "property_path": "BoolValue",
                             "value": True,
-                            "description": "UE Agent Kit 0.5.0 MCP full workflow smoke test.",
+                            "mode": "DryRun",
+                            "description": "UE Agent Kit 0.5.1 high-level MCP workflow smoke test.",
                         },
                     ),
-                    "ue_plan_patch",
+                    "ue_set_asset_property DryRun",
                 )
-                plan_id = str(planned["planId"])
-
-                dry_run = require_payload(
-                    await session.call_tool("ue_dry_run_patch", {"plan_id": plan_id}),
-                    "ue_dry_run_patch",
-                )
-                if not all(dry_run["gates"].values()):
-                    raise RuntimeError(f"Dry Run gates failed: {dry_run}")
+                if prepared["mode"] != "DryRun" or prepared["underlyingOperation"] != "setAssetProperty":
+                    raise RuntimeError(f"High-level operation mapping failed: {prepared}")
+                if not all(prepared["gates"].values()):
+                    raise RuntimeError(f"High-level Dry Run gates failed: {prepared}")
                 if sha256(args.package_file) != package_before_hash:
-                    raise RuntimeError("MCP Dry Run changed the scalar fixture package")
-                dry_receipt = str(dry_run["dryRunReceipt"])
+                    raise RuntimeError("High-level MCP Dry Run changed the scalar fixture package")
+                plan_id = str(prepared["planId"])
+                dry_receipt = str(prepared["dryRunReceipt"])
 
                 rejected_apply = await session.call_tool(
                     "ue_apply_patch",
@@ -295,6 +302,7 @@ async def run_workflow(args: argparse.Namespace) -> dict[str, object]:
         "rollbackRestoredIndexFresh": True,
         "engineVersion": project_status["engine"]["version"],
         "planId": plan_id,
+        "highLevelDryRun": True,
         "dryRunReceiptIssued": True,
         "invalidCommitConfirmationRejected": True,
         "commitReceiptSingleUse": True,

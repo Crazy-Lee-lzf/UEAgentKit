@@ -32,6 +32,12 @@ BackupRoot
 并额外注册：
 
 ```text
+ue_set_blueprint_default
+ue_set_component_property
+ue_set_pin_default
+ue_set_asset_property
+ue_set_material_parameter
+ue_set_datatable_cell
 ue_plan_patch
 ue_dry_run_patch
 ue_apply_patch
@@ -92,6 +98,30 @@ nodes
 - `project_only=true` 只返回目标资产也存在于当前 SQLite 索引中的边。
 - 深层遍历不接受源/目标 Symbol 与目标资产端点组合，避免产生含义不稳定的跨层过滤。
 
+## 高层安全写入 Tool
+
+常见修改优先使用以下 Tool，Agent 不需要填写底层 Operation 名称或 Patch Target：
+
+```text
+ue_set_blueprint_default    variable_name + value
+ue_set_component_property   component_name + property_path + value
+ue_set_pin_default           graph_guid + node_guid + pin_name + value
+ue_set_asset_property        property_path + value
+ue_set_material_parameter    parameter_name + parameter_type + value
+ue_set_datatable_cell        row_name + field_name + value
+```
+
+所有高层 Tool 都要求完整 Unreal Object Path，并支持：
+
+```text
+mode=Plan     仅创建并校验严格 Plan，默认值
+mode=DryRun   自动执行 Plan -> Unreal Dry Run，返回 planId 与 dryRunReceipt
+```
+
+高层 Tool **不提供 Commit 模式**。实际保存仍必须调用 `ue_apply_patch`，携带高层 Dry Run 返回的一次性 `dryRunReceipt`，并使用精确 `COMMIT <planId>` 确认。这样高层易用性不会绕过 Policy、Revision、新鲜度、备份、验证或 rollback 安全门。
+
+`ue_set_material_parameter.parameter_type` 仅接受 `Scalar`、`Vector`、`Texture` 或 `StaticSwitch`，Server 映射到现有四个已注册 Operation。高层 Tool 只覆盖当前稳定 Operation；`ue_plan_patch` 继续保留，供已注册但尚无高层封装的 Operation 使用。
+
 ## 索引新鲜度与写入生命周期
 
 固定项目模式只允许对 `fresh` 目标创建 Plan：
@@ -136,7 +166,21 @@ suggestedAction
 
 `code` 是供客户端判断的稳定错误码；`retryable` 表示在不改变请求语义的前提下重试是否可能成功；`details` 必须经过路径脱敏；`suggestedAction` 给出下一步操作。保留 `type` 仅用于兼容旧客户端，不应作为协议判断依据。无效、过期、跨 Tool 或跨索引快照的分页 Token 统一返回 `invalid-continuation-token`。
 
-## 写入工作流 Tool
+写入流程进一步区分：
+
+```text
+policy-rejected             固定 Policy 拒绝资产、Operation 或语义 Target
+revision-conflict           Plan Revision 与当前 Revision Export 不一致
+dirty-package               Revision Export 记录目标 Package 为 Dirty
+workflow-timeout             UE 子进程超过固定超时
+ue-process-crashed           检测到 Fatal、Assertion、访问冲突或已知崩溃退出码
+workflow-report-missing      子进程未生成要求的结构化报告
+workflow-report-invalid      报告不是有效 JSON Object
+```
+
+子进程错误 `details` 可包含脱敏的 `diagnosticId`、`reportId`、`stage`、`exitCode`、`stdoutTail` 和 `stderrTail`。`reportId` 只用于关联当前会话诊断，不暴露本机报告路径。成功的 Dry Run、Commit、Verify 和 rollback 响应也返回对应 `reportId`。
+
+## 底层写入工作流 Tool
 
 ### `ue_plan_patch`
 

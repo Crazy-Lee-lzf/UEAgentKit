@@ -4,6 +4,10 @@ All notable changes to UE Agent Kit are documented here.
 
 ## Unreleased
 
+- Added six high-level MCP safe-change tools for Blueprint defaults, component properties, pin defaults, generic asset properties, Material Instance parameters, and DataTable cells.
+- Added `Plan` and `DryRun` high-level modes while keeping Commit exclusively behind the existing one-time receipt and exact-confirmation workflow.
+- Added separate `policy-rejected`, `revision-conflict`, `dirty-package`, `ue-process-crashed`, `workflow-report-missing`, and `workflow-report-invalid` diagnostics.
+- Added redacted `diagnosticId`, `reportId`, stage, exit-code, and process-output tails without exposing local report paths.
 - Added three-source freshness comparison across immutable SQLite, Revision Export Canonical data, and current project package SHA-256.
 - Required `fresh` target state before creating a Patch Plan, with separate `index-stale` and `index-freshness-unavailable` errors.
 - Marked SQLite and Revision Export snapshots stale after Commit, preserved stale through independent verification, and cleared it only after exact verified rollback.

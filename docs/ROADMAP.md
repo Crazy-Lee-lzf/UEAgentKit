@@ -32,8 +32,8 @@ UE Agent Kit 的长期定位是面向 AI Agent 的 Unreal Engine 项目智能层
 - [x] Commit 后标记固定快照 stale，Verify 保持 stale，精确 rollback 后恢复 fresh。
 - [x] 优化 `ue_search`、`ue_get_asset` 和 `ue_find_references` 的过滤、分页、section 和 Token Budget。
 - [x] 完成单资产分阶段刷新与 immutable Server 新会话安全重载方案。
-- [ ] 为现有写入 Operation 提供高层参数入口，由 Server 自动生成严格 Patch。
-- [ ] 改进 Plan、Dry Run Receipt、Apply Receipt 和 rollback Receipt 的可诊断性。
+- [x] 为现有写入 Operation 提供六个高层参数入口，由 Server 自动生成严格 Patch，并支持 Plan/Dry Run。
+- [x] 区分 Policy、Revision、Dirty、超时、UE Crash 和报告错误，并返回脱敏 diagnostic/report ID。
 - [ ] 补充 Claude Code、ChatGPT 和独立 MCP Client 的回归矩阵。
 
 ### 0.5.2：Live Editor Read

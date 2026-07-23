@@ -22,7 +22,7 @@ UE Agent Kit 是一套面向 Unreal Engine 的开源资产分析、索引与受�
 - 使用 Policy、Revision 和导出快照校验 Patch，并对授权 Blueprint、非 Blueprint 标量属性、Material Instance 参数或 DataTable 单元格执行 Dry Run 或显式 Commit。
 - 为成功 Commit 自动生成 Backup Manifest，并在当前 Revision 仍匹配时显式回滚和独立验证恢复结果。
 - 使用声明式 Write Fixture Plan 在安全测试目录内创建或重置测试资产，并独立验证类、Revision 与 Dirty 状态。
-- 通过 0.5.0 本地 MCP Server，让 Agent 搜索资产/Symbol、读取单资产和查询引用，不开放 Shell、任意 SQL 或 UObject。
+- 通过本地 MCP Server，让 Agent 搜索资产/Symbol、读取单资产和查询引用，并使用六个高层安全写入 Tool 自动生成严格 Plan 或执行 Dry Run，不开放 Shell、任意 SQL 或 UObject。
 - 对 Bool、整数、浮点、String、Name、Text 和两类 Enum 执行真实 Dry Run/Commit/重载矩阵，并验证未授权、过期 Revision、错误类型、越界、非法 Enum、属性不存在、Dirty Package、Sidecar 和保存失败均零写入拒绝。
 
 ## 主要能力
@@ -206,7 +206,7 @@ scripts\RunMcp.cmd -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3" -Check
 scripts\TestMcpStdio.cmd
 ```
 
-服务器仅使用本地 `stdio`。默认模式提供能力、项目状态和三个查询在内的五个只读 Tool；固定 Engine、Project、Policy 和 Revision Export 后可启用完整十 Tool 工作流：
+服务器仅使用本地 `stdio`。默认模式提供能力、项目状态和三个查询在内的五个只读 Tool；固定 Engine、Project、Policy 和 Revision Export 后可启用完整十六 Tool 工作流：
 
 ```bat
 claude mcp add --transport stdio --scope project ue-agent-kit -- ^
@@ -215,7 +215,7 @@ claude mcp add --transport stdio --scope project ue-agent-kit -- ^
   -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
 ```
 
-添加后可用 `claude mcp list` 或 Claude Code 内的 `/mcp` 检查连接。完整模式使用 `-EnableWriteTools`；只有同时使用 `-EnableCommitTools` 且 Policy 允许 Commit，才能保存或恢复资产。Plan 要求 SQLite、Revision Export 与磁盘 Package Revision 一致；Commit 后固定快照会标记 stale，rollback 恢复原 Revision 后才重新 fresh。Commit 和 rollback Commit 都要求一次性 Dry Run Receipt 与精确确认短语。重建索引前必须停止 MCP Server。完整契约见 [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md) 与 [`spec/INDEX_FRESHNESS.md`](spec/INDEX_FRESHNESS.md)。
+添加后可用 `claude mcp list` 或 Claude Code 内的 `/mcp` 检查连接。完整模式使用 `-EnableWriteTools`；只有同时使用 `-EnableCommitTools` 且 Policy 允许 Commit，才能保存或恢复资产。Plan 要求 SQLite、Revision Export 与磁盘 Package Revision 一致；六个 `ue_set_*` Tool 默认只生成 Plan，也可自动执行 Dry Run，但不能直接 Commit。Commit 后固定快照会标记 stale，rollback 恢复原 Revision 后才重新 fresh。Commit 和 rollback Commit 都要求一次性 Dry Run Receipt 与精确确认短语。重建索引前必须停止 MCP Server。完整契约见 [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md) 与 [`spec/INDEX_FRESHNESS.md`](spec/INDEX_FRESHNESS.md)。
 
 ### 7. 校验通用资产导出
 

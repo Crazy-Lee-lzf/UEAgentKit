@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -398,13 +399,15 @@ class AgentWorkflowTests(unittest.TestCase):
                 target={"propertyPath": "BoolValue"},
                 value=True,
             )
-        with self.assertRaisesRegex(WorkflowError, "rejected"):
+        with self.assertRaisesRegex(WorkflowError, "rejected") as rejected:
             self.service.plan_patch(
                 asset_path=ASSET_PATH,
                 operation="setAssetProperty",
                 target={"propertyPath": "ForbiddenValue"},
                 value=True,
             )
+        self.assertEqual(rejected.exception.code, "policy-rejected")
+        self.assertIn("asset-property-not-allowed", rejected.exception.details["issueCodes"])
 
     def test_plan_and_policy_are_locked_after_creation(self) -> None:
         plan = self.service.plan_patch(
@@ -488,6 +491,166 @@ class AgentWorkflowTests(unittest.TestCase):
                 process_runner=self.runner,
                 freshness_tracker=FakeFreshnessTracker(),
             )
+
+
+    def test_high_level_change_defaults_to_plan_and_can_run_dry_run(self) -> None:
+        planned = self.service.prepare_high_level_change(
+            tool_name="ue_set_asset_property",
+            mode="Plan",
+            asset_path=ASSET_PATH,
+            operation="setAssetProperty",
+            target={"propertyPath": "BoolValue"},
+            value=True,
+            description="High-level Plan",
+        )
+        self.assertEqual(planned["tool"], "ue_set_asset_property")
+        self.assertEqual(planned["mode"], "Plan")
+        self.assertEqual(planned["underlyingTool"], "ue_plan_patch")
+        record = self.service._plans[planned["planId"]]
+        operation = record.patch["assets"][0]["operations"][0]
+        self.assertEqual(operation["operation"], "setAssetProperty")
+        self.assertEqual(operation["target"], {"propertyPath": "BoolValue"})
+
+        dry_run = self.service.prepare_high_level_change(
+            tool_name="ue_set_asset_property",
+            mode="DryRun",
+            asset_path=ASSET_PATH,
+            operation="setAssetProperty",
+            target={"propertyPath": "BoolValue"},
+            value=False,
+        )
+        self.assertEqual(dry_run["tool"], "ue_set_asset_property")
+        self.assertEqual(dry_run["mode"], "DryRun")
+        self.assertEqual(dry_run["underlyingTools"], ["ue_plan_patch", "ue_dry_run_patch"])
+        self.assertTrue(dry_run["dryRunReceipt"].startswith("dry_"))
+        self.assertTrue(dry_run["reportId"].startswith("report_"))
+        another_dry_run = self.service.prepare_high_level_change(
+            tool_name="ue_set_asset_property",
+            mode="DryRun",
+            asset_path=ASSET_PATH,
+            operation="setAssetProperty",
+            target={"propertyPath": "BoolValue"},
+            value=True,
+        )
+        self.assertNotEqual(dry_run["reportId"], another_dry_run["reportId"])
+
+        with self.assertRaisesRegex(ValueError, "Plan or DryRun"):
+            self.service.prepare_high_level_change(
+                tool_name="ue_set_asset_property",
+                mode="Commit",  # type: ignore[arg-type]
+                asset_path=ASSET_PATH,
+                operation="setAssetProperty",
+                target={"propertyPath": "BoolValue"},
+                value=True,
+            )
+
+    def test_dry_run_rechecks_freshness_after_plan_creation(self) -> None:
+        plan = self.service.plan_patch(
+            asset_path=ASSET_PATH,
+            operation="setAssetProperty",
+            target={"propertyPath": "BoolValue"},
+            value=True,
+        )
+        call_count = len(self.runner.calls)
+        self.freshness.state = "stale"
+        with self.assertRaises(WorkflowError) as stale:
+            self.service.dry_run_patch(plan["planId"])
+        self.assertEqual(stale.exception.code, "index-stale")
+        self.assertEqual(len(self.runner.calls), call_count)
+
+    def test_stored_plan_revision_conflict_has_specific_code(self) -> None:
+        plan = self.service.plan_patch(
+            asset_path=ASSET_PATH,
+            operation="setAssetProperty",
+            target={"propertyPath": "BoolValue"},
+            value=True,
+        )
+        canonical_path = self.revision_export / "canonical" / "asset.json"
+        canonical = json.loads(canonical_path.read_text(encoding="utf-8"))
+        canonical["revision"]["value"] = AFTER_REVISION
+        write_json(canonical_path, canonical)
+        with self.assertRaises(WorkflowError) as conflict:
+            self.service.dry_run_patch(plan["planId"])
+        self.assertEqual(conflict.exception.code, "revision-conflict")
+        self.assertIn("revision-conflict", conflict.exception.details["issueCodes"])
+
+    def test_unreal_crash_is_classified_with_sanitized_diagnostics(self) -> None:
+        plan = self.service.plan_patch(
+            asset_path=ASSET_PATH,
+            operation="setAssetProperty",
+            target={"propertyPath": "BoolValue"},
+            value=True,
+        )
+
+        def crash_runner(arguments: list[str], cwd: Path, timeout_seconds: int) -> ProcessResult:
+            del arguments, cwd, timeout_seconds
+            return ProcessResult(
+                -1073741819,
+                f"Fatal error: failed below {self.tool_root}",
+                "Unhandled Exception: EXCEPTION_ACCESS_VIOLATION",
+            )
+
+        self.service._runner = crash_runner
+        with self.assertRaises(WorkflowError) as crashed:
+            self.service.dry_run_patch(plan["planId"])
+        self.assertEqual(crashed.exception.code, "ue-process-crashed")
+        details = crashed.exception.details
+        self.assertEqual(details["stage"], "patch-dry-run")
+        self.assertTrue(details["diagnosticId"].startswith("diag_"))
+        self.assertTrue(details["reportId"].startswith("report_"))
+        self.assertNotIn(str(self.tool_root), json.dumps(details, ensure_ascii=False))
+
+    def test_timeout_and_invalid_report_are_separate_errors(self) -> None:
+        plan = self.service.plan_patch(
+            asset_path=ASSET_PATH,
+            operation="setAssetProperty",
+            target={"propertyPath": "BoolValue"},
+            value=True,
+        )
+
+        def timeout_runner(arguments: list[str], cwd: Path, timeout_seconds: int) -> ProcessResult:
+            del cwd
+            raise subprocess.TimeoutExpired(
+                cmd=arguments,
+                timeout=timeout_seconds,
+                output="partial stdout",
+                stderr="partial stderr",
+            )
+
+        self.service._runner = timeout_runner
+        with self.assertRaises(WorkflowError) as timed_out:
+            self.service.dry_run_patch(plan["planId"])
+        self.assertEqual(timed_out.exception.code, "workflow-timeout")
+        self.assertEqual(timed_out.exception.details["stage"], "patch-dry-run")
+
+        def invalid_report_runner(arguments: list[str], cwd: Path, timeout_seconds: int) -> ProcessResult:
+            del cwd, timeout_seconds
+            _, values = FakeWorkflowRunner._arguments(arguments)
+            report_path = Path(values["-Report"])
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text("{invalid", encoding="utf-8")
+            return ProcessResult(0, "", "")
+
+        self.service._runner = invalid_report_runner
+        with self.assertRaises(WorkflowError) as invalid:
+            self.service.dry_run_patch(plan["planId"])
+        self.assertEqual(invalid.exception.code, "workflow-report-invalid")
+        self.assertTrue(invalid.exception.details["reportId"].startswith("report_"))
+        self.assertEqual(invalid.exception.details["stage"], "patch-dry-run")
+
+    def test_missing_report_has_specific_error_and_report_id(self) -> None:
+        plan = self.service.plan_patch(
+            asset_path=ASSET_PATH,
+            operation="setAssetProperty",
+            target={"propertyPath": "BoolValue"},
+            value=True,
+        )
+        self.service._runner = lambda arguments, cwd, timeout_seconds: ProcessResult(0, "", "")
+        with self.assertRaises(WorkflowError) as missing:
+            self.service.dry_run_patch(plan["planId"])
+        self.assertEqual(missing.exception.code, "workflow-report-missing")
+        self.assertTrue(missing.exception.details["reportId"].startswith("report_"))
+
 
 
 if __name__ == "__main__":
