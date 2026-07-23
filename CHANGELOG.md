@@ -4,6 +4,12 @@ All notable changes to UE Agent Kit are documented here.
 
 ## Unreleased
 
+- Added bounded Live Editor Output Log reads with a 4,096-entry ring buffer, sequence cursors, category/severity/text/UTC/PIE filters, and explicit dropped-entry reporting.
+- Added compile diagnostics that combine current-session compiler-related log entries with loaded Blueprint status while explicitly reporting incomplete history.
+- Added exact `/Game` live asset inspection using Asset Registry plus already-loaded memory state without loading or modifying the asset.
+- Expanded Live-only MCP mode from 11 to 14 tools and combined Live + workflow mode from 22 to 25 tools.
+- Kept `ue_refresh_asset_index` separate from pure reads until paired snapshot staging, atomic switching, and new-session visibility are implemented.
+
 - Added a restricted fixed-project Live Editor Bridge over authenticated localhost TCP with exact project/version/capability handshake and no arbitrary endpoint, UObject, Console, Python, Shell, or filesystem Tool arguments.
 - Added six optional read-only MCP tools: `ue_editor_status`, `ue_get_selection`, `ue_get_open_assets`, `ue_get_dirty_assets`, `ue_get_current_level`, and `ue_get_pie_state`.
 - Added stable offline degradation and separate Live Editor error codes while keeping Editor memory, disk packages, and immutable SQLite snapshot state distinct.

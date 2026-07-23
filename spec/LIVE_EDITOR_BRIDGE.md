@@ -94,7 +94,7 @@ capabilities[]
 可配置超时：0.1–30 秒
 ```
 
-## 首批 MCP Tool
+## 当前 MCP Tool
 
 ```text
 ue_editor_status
@@ -103,13 +103,16 @@ ue_get_open_assets
 ue_get_dirty_assets
 ue_get_current_level
 ue_get_pie_state
+ue_get_output_log
+ue_get_compile_errors
+ue_inspect_asset_live
 ```
 
 所有 Tool：
 
 - `readOnlyHint=true`。
 - `destructiveHint=false`。
-- 无参数。
+- 前六个状态 Tool 无参数；后三个 Tool 只接受下文规定的有界过滤或精确资产路径。
 - 返回 `source=live-editor-memory`。
 - 不生成磁盘 Revision，也不声称数据来自 SQLite。
 
@@ -145,6 +148,18 @@ simulating
 
 当存在 Play World 时同时返回 World Path、World Type 和 Net Mode。
 
+### ue_get_output_log
+
+Bridge 注册为 `FOutputDevice`，保留最多 4096 条当前会话日志，并在启动时读取可用 Backlog。查询支持 `category`、`minimum_verbosity`、`keyword`、`since_sequence`、`since_utc`、`until_utc`、`pie_session_id` 和 `limit`；单次最多 100 条。每条结果包含单调递增 Sequence、UTC、Category、Verbosity、Thread、PIE Session 和是否来自 Backlog。缓冲淘汰数量通过 `droppedCount` 明确返回。
+
+### ue_get_compile_errors
+
+返回当前 Bridge 会话中捕获到的编译相关 Warning/Error，并补充当前已加载 `/Game/` Blueprint 的 `Status`、生成类和 Graph/变量计数，最多返回 100 项并标记截断。该结果明确返回 `diagnosticSource=captured-output-log` 和 `historyComplete=false`，因为它不是完整持久化 Message Log 历史。可按精确 Blueprint Object Path、Sequence、PIE Session 和数量过滤。
+
+### ue_inspect_asset_live
+
+只接受一个精确 `/Game/...Asset.Asset` Object Path。结果区分 Asset Registry 元数据和 Editor 内存状态，包括是否已加载、Package Dirty、是否在 Asset Editor 中打开、是否被选择，以及 Blueprint 编译状态。Bridge 使用 `StaticFindObject`，不会调用 `LoadObject`，并始终返回 `loadedByBridge=false`。
+
 ## 状态与 Revision 语义
 
 Live Editor、磁盘和索引是三个不同事实源：
@@ -160,7 +175,8 @@ Immutable Index   上次导出并构建的 SQLite Snapshot
 - Dirty UObject 不生成虚假的磁盘 SHA-256 Revision。
 - Live Tool 结果不清除或覆盖 SQLite/Revision Export 的 stale 状态。
 - 写入 Plan 仍必须通过现有三源磁盘新鲜度门禁。
-- 本批 Live Tool 不能保存、编译、运行 Console 或执行 UObject Method。
+- 本批 Live Tool 不能保存、编译、运行 Console 或执行 UObject Method。日志读取和编译诊断只观察已有状态。
+- `ue_refresh_asset_index` 不属于本批纯读取能力；它必须在后续独立实现配对 Snapshot staging、原子切换与新 MCP 会话重载。
 
 ## 稳定错误码
 
@@ -173,6 +189,7 @@ live-editor-project-mismatch
 live-editor-authentication-failed
 live-editor-authentication-required
 live-editor-capability-unavailable
+live-editor-invalid-parameters
 live-editor-protocol-error
 ```
 
@@ -195,7 +212,7 @@ scripts\TestMcpLiveEditor.cmd ^
 1. 拒绝干扰已有 Editor，或显式使用 `-UseExistingEditor`。
 2. 启动测试项目的独立 Unreal Editor。
 3. 等待匹配 PID 的 Descriptor。
-4. 通过真实 MCP `stdio` Client 发现并调用 11 个 Tool。
+4. 通过真实 MCP `stdio` Client 发现并调用 14 个 Tool。
 5. 验证 Token、端口、Descriptor 和固定本机路径不进入 MCP 响应。
 6. 验证临时 immutable SQLite 哈希和目录文件集合不变。
 7. 仅关闭脚本自己创建的 Editor，并清理对应 Descriptor。

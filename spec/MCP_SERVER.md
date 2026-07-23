@@ -27,6 +27,9 @@ ue_get_open_assets
 ue_get_dirty_assets
 ue_get_current_level
 ue_get_pie_state
+ue_get_output_log
+ue_get_compile_errors
+ue_inspect_asset_live
 ```
 
 该模式不要求启用写入。MCP Server 从固定项目 `Saved/UEAgentKit/EditorBridge.json` 读取 localhost 临时端点，并校验随机认证令牌、规范化项目路径摘要、Plugin/Server 版本和注册 Capability。地址、端口、令牌、Descriptor 和任意本机路径不会成为 Tool 参数或响应字段。Editor 未运行时 `ue_editor_status` 稳定报告 `state=unavailable`，其余 Live Tool 返回可重试错误，离线 SQLite Tool 保持可用。详细协议见 `spec/LIVE_EDITOR_BRIDGE.md`。
@@ -68,7 +71,7 @@ Database、Engine、Project、Policy、Revision Export、Work Root、Backup Root
 
 ## Live Editor Tool
 
-Live Tool 全部无参数、`readOnlyHint=true`、`destructiveHint=false`，成功结果标记 `source=live-editor-memory`。它们读取当前 Editor 内存，不读取或改写 SQLite，不生成磁盘 Revision，也不改变索引 freshness。
+Live Tool 全部为 `readOnlyHint=true`、`destructiveHint=false`，成功结果标记 `source=live-editor-memory`。前六个状态 Tool 无参数；日志、编译诊断和实时资产检查只接受固定有界 Schema。它们读取当前 Editor 内存，不读取或改写 SQLite，不生成磁盘 Revision，也不改变索引 freshness。
 
 - `ue_editor_status`：Bridge 可用性、Plugin/Engine 版本、Project、PID、Session、Capability、PIE、当前关卡和 Dirty Package 计数。
 - `ue_get_selection`：Actor、Component、Asset 和 Object 当前选择，去重后最多 200 项。
@@ -76,8 +79,11 @@ Live Tool 全部无参数、`readOnlyHint=true`、`destructiveHint=false`，成�
 - `ue_get_dirty_assets`：Dirty `/Game/` Package 和 Asset Registry 路径，最多 200 项。
 - `ue_get_current_level`：Editor World、Persistent/Current Level、World Partition 和 Dirty 状态。
 - `ue_get_pie_state`：`stopped`、`playing` 或 `simulating`，以及 Play World/Net Mode。
+- `ue_get_output_log`：4096 条内存环形缓冲，支持 Category、最低 Verbosity、关键词、UTC 范围、PIE Session、`since_sequence` 和最多 100 条分页读取。
+- `ue_get_compile_errors`：读取 Bridge 当前会话捕获到的编译相关 Warning/Error，并补充最多 100 个已加载 Blueprint 的 `Status` 与截断信息；返回 `historyComplete=false`，不冒充完整 Message Log 历史。
+- `ue_inspect_asset_live`：只接受精确 `/Game/...Asset.Asset`，返回 Asset Registry 和已加载对象状态；使用 `StaticFindObject`，不触发加载，并明确返回 `loadedByBridge=false`。
 
-稳定错误包括 `live-editor-unavailable`、`live-editor-timeout`、`live-editor-connection-closed`、`live-editor-version-mismatch`、`live-editor-project-mismatch`、`live-editor-authentication-failed`、`live-editor-capability-unavailable` 和 `live-editor-protocol-error`。
+稳定错误包括 `live-editor-unavailable`、`live-editor-timeout`、`live-editor-connection-closed`、`live-editor-version-mismatch`、`live-editor-project-mismatch`、`live-editor-authentication-failed`、`live-editor-capability-unavailable`、`live-editor-invalid-parameters` 和 `live-editor-protocol-error`。
 
 ## 查询 Tool
 

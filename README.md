@@ -215,7 +215,7 @@ scripts\TestMcpLiveEditor.cmd ^
   -ProjectPath "<TEST_PROJECT>.uproject"
 ```
 
-服务器对 MCP Client 仍只使用本地 `stdio`。默认模式为 5 个离线只读 Tool；`-EnableLiveEditor -ProjectPath <固定工程>` 增加 6 个实时只读 Tool，共 11 个；固定 Engine、Project、Policy 和 Revision Export 后的写入工作流为 16 个；两者组合时共 22 个 Tool：
+服务器对 MCP Client 仍只使用本地 `stdio`。默认模式为 5 个离线只读 Tool；`-EnableLiveEditor -ProjectPath <固定工程>` 增加 9 个实时只读 Tool，共 14 个；固定 Engine、Project、Policy 和 Revision Export 后的写入工作流为 16 个；两者组合时共 25 个 Tool。实时模式新增有界 Output Log、编译诊断和不触发加载的内存资产检查：
 
 ```bat
 claude mcp add --transport stdio --scope project ue-agent-kit -- ^
@@ -224,7 +224,7 @@ claude mcp add --transport stdio --scope project ue-agent-kit -- ^
   -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
 ```
 
-添加后可用 `claude mcp list` 或 Claude Code 内的 `/mcp` 检查连接。Live Editor 模式通过固定工程 `Saved/UEAgentKit/EditorBridge.json` 发现仅绑定 `127.0.0.1` 的临时端点，并执行随机令牌、工程路径摘要、版本和 Capability 握手；Tool 参数不能指定端口、令牌或任意 UObject/Console/Python/Shell。完整写入模式使用 `-EnableWriteTools`；只有同时使用 `-EnableCommitTools` 且 Policy 允许 Commit，才能保存或恢复资产。Plan 要求 SQLite、Revision Export 与磁盘 Package Revision 一致；六个 `ue_set_*` Tool 默认只生成 Plan，也可自动执行 Dry Run，但不能直接 Commit。Commit 后固定快照会标记 stale，rollback 恢复原 Revision 后才重新 fresh。重建索引前必须停止 MCP Server。完整契约见 [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md)、[`spec/LIVE_EDITOR_BRIDGE.md`](spec/LIVE_EDITOR_BRIDGE.md) 与 [`spec/INDEX_FRESHNESS.md`](spec/INDEX_FRESHNESS.md)。
+添加后可用 `claude mcp list` 或 Claude Code 内的 `/mcp` 检查连接。Live Editor 模式通过固定工程 `Saved/UEAgentKit/EditorBridge.json` 发现仅绑定 `127.0.0.1` 的临时端点，并执行随机令牌、工程路径摘要、版本和 Capability 握手；Tool 参数不能指定端口、令牌或任意 UObject/Console/Python/Shell。实时读取新增 4096 条 Output Log 环形缓冲、编译诊断和不触发加载的精确 `/Game/...Asset.Asset` 检查，且始终报告 `loadedByBridge=false`。完整写入模式使用 `-EnableWriteTools`；只有同时使用 `-EnableCommitTools` 且 Policy 允许 Commit，才能保存或恢复资产。Plan 要求 SQLite、Revision Export 与磁盘 Package Revision 一致；六个 `ue_set_*` Tool 默认只生成 Plan，也可自动执行 Dry Run，但不能直接 Commit。Commit 后固定快照会标记 stale，rollback 恢复原 Revision 后才重新 fresh。重建索引前必须停止 MCP Server。完整契约见 [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md)、[`spec/LIVE_EDITOR_BRIDGE.md`](spec/LIVE_EDITOR_BRIDGE.md) 与 [`spec/INDEX_FRESHNESS.md`](spec/INDEX_FRESHNESS.md)。
 
 ### 7. 校验通用资产导出
 

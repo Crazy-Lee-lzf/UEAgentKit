@@ -57,10 +57,10 @@ UE Agent Kit 的长期定位是面向 AI Agent 的 Unreal Engine 项目智能层
 
 后续：
 
-- [ ] `ue_get_output_log`。
-- [ ] `ue_get_compile_errors`。
-- [ ] `ue_inspect_asset_live`。
-- [ ] `ue_refresh_asset_index`。
+- [x] `ue_get_output_log`：4096 条环形缓冲、单条 1024 字符上限、序号游标和 Category/Verbosity/关键词/UTC/PIE 过滤。
+- [x] `ue_get_compile_errors`：当前会话编译相关日志与已加载 Blueprint 编译状态，明确标记历史不完整。
+- [x] `ue_inspect_asset_live`：Asset Registry + 已加载内存状态，不触发 `LoadObject`。
+- [ ] `ue_refresh_asset_index`：保持独立后续批次；必须完成 Revision Export 与 SQLite 配对 staging、原子切换和新 MCP 会话可见性，不能混入纯读取 Tool。
 - [ ] Dirty UObject 与磁盘/索引差异的更细粒度状态模型。
 
 ### 0.5.3：Daily Actions 与验证

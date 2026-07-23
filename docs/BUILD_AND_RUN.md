@@ -427,7 +427,7 @@ ue_get_asset
 ue_find_references
 ```
 
-服务器启动时固定数据库路径，Tool 参数不能更换数据库；SQLite 使用不可变只读快照并拒绝活动 Sidecar。`-EnableLiveEditor -ProjectPath <固定工程>` 会增加 `ue_editor_status`、选择、打开资产、Dirty Package、当前关卡和 PIE 六个无参数只读 Tool。Bridge 只绑定 `127.0.0.1`，使用随机会话令牌，并校验固定工程路径摘要、Plugin/Server 版本与 Capability；MCP 响应不暴露 Token、端口或 Descriptor 路径。离线 5 Tool、Live-only 11 Tool、写入 16 Tool、组合模式 22 Tool 相互兼容。高层写入入口默认只生成 Plan，也可执行 Dry Run，但不能直接 Commit。保存和恢复必须显式启用 Commit、通过 Policy，并提供一次性 Receipt 与精确确认短语。真实写入闭环使用 `scripts\TestMcpWorkflow.cmd`。完整契约见 [`../spec/MCP_SERVER.md`](../spec/MCP_SERVER.md) 与 [`../spec/LIVE_EDITOR_BRIDGE.md`](../spec/LIVE_EDITOR_BRIDGE.md)。
+服务器启动时固定数据库路径，Tool 参数不能更换数据库；SQLite 使用不可变只读快照并拒绝活动 Sidecar。`-EnableLiveEditor -ProjectPath <固定工程>` 会增加 9 个实时只读 Tool：Editor 状态、选择、打开资产、Dirty Package、当前关卡、PIE、Output Log、编译诊断和实时资产检查。Bridge 只绑定 `127.0.0.1`，使用随机会话令牌，并校验固定工程路径摘要、Plugin/Server 版本与 Capability；MCP 响应不暴露 Token、端口或 Descriptor 路径。离线 5 Tool、Live-only 14 Tool、写入 16 Tool、组合模式 25 Tool 相互兼容。Output Log 最多返回 100 条并使用序号游标；实时资产检查不加载目标资产。高层写入入口默认只生成 Plan，也可执行 Dry Run，但不能直接 Commit。保存和恢复必须显式启用 Commit、通过 Policy，并提供一次性 Receipt 与精确确认短语。真实写入闭环使用 `scripts\TestMcpWorkflow.cmd`。完整契约见 [`../spec/MCP_SERVER.md`](../spec/MCP_SERVER.md) 与 [`../spec/LIVE_EDITOR_BRIDGE.md`](../spec/LIVE_EDITOR_BRIDGE.md)。
 
 ## 15. 安全行为
 

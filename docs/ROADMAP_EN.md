@@ -52,10 +52,10 @@ Completed in the first batch:
 
 Remaining 0.5.2 targets:
 
-- [ ] `ue_get_output_log`.
-- [ ] `ue_get_compile_errors`.
-- [ ] `ue_inspect_asset_live`.
-- [ ] `ue_refresh_asset_index`.
+- [x] `ue_get_output_log`: a 4,096-entry ring buffer with a 1,024-character per-entry cap and sequence cursors and category, verbosity, keyword, UTC, and PIE filters.
+- [x] `ue_get_compile_errors`: current-session compiler-related logs plus loaded Blueprint compile status, explicitly marked as incomplete history.
+- [x] `ue_inspect_asset_live`: Asset Registry plus already-loaded memory state without triggering `LoadObject`.
+- [ ] `ue_refresh_asset_index`: remains a separate follow-up batch because it must stage paired Revision Export and SQLite generations, atomically switch them, and become visible only to a new MCP session.
 - [ ] Finer-grained Dirty UObject versus disk/index status.
 
 ### 0.5.3: daily actions and validation

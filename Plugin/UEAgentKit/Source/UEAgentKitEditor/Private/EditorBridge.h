@@ -5,6 +5,7 @@
 
 class FJsonObject;
 class FSocket;
+class FUEAgentKitEditorBridgeLogCapture;
 
 class FUEAgentKitEditorBridge final
 {
@@ -41,6 +42,9 @@ private:
 	TSharedRef<FJsonObject> BuildDirtyAssetsResult() const;
 	TSharedRef<FJsonObject> BuildCurrentLevelResult() const;
 	TSharedRef<FJsonObject> BuildPieStateResult() const;
+	TSharedRef<FJsonObject> BuildOutputLogResult(const TSharedPtr<FJsonObject>& Params) const;
+	TSharedRef<FJsonObject> BuildCompileErrorsResult(const TSharedPtr<FJsonObject>& Params) const;
+	TSharedRef<FJsonObject> BuildInspectAssetLiveResult(const FString& AssetPath) const;
 
 	bool WriteDescriptor();
 	void RemoveDescriptor();
@@ -55,4 +59,5 @@ private:
 	FString ProjectPathHash;
 	FString DescriptorPath;
 	int32 ListenPort = 0;
+	TUniquePtr<FUEAgentKitEditorBridgeLogCapture> LogCapture;
 };

@@ -44,7 +44,9 @@ class _BridgeHandler(socketserver.StreamRequestHandler):
             },
         )
         request = json.loads(self.rfile.readline().decode("utf-8"))
+        self.server.requests.append(request)  # type: ignore[attr-defined]
         method = request.get("method")
+        params = request.get("params", {})
         results: dict[str, dict[str, Any]] = {
             "editor.status": {
                 "state": "available",
@@ -88,6 +90,25 @@ class _BridgeHandler(socketserver.StreamRequestHandler):
                 "playing": False,
                 "simulating": False,
                 "worldPath": "",
+            },
+            "editor.getOutputLog": {
+                "available": True,
+                "resultCount": 1,
+                "nextSequence": 8,
+                "filters": params,
+                "items": [{"sequence": 7, "category": "LogTest", "verbosity": "Warning"}],
+            },
+            "editor.getCompileErrors": {
+                "diagnosticSource": "captured-output-log",
+                "historyComplete": False,
+                "assetPath": params.get("assetPath", ""),
+                "diagnosticCount": 0,
+                "loadedBlueprintCount": 1,
+            },
+            "editor.inspectAssetLive": {
+                "assetPath": params.get("assetPath", ""),
+                "assetRegistry": {"found": True},
+                "memory": {"loaded": False, "loadedByBridge": False, "state": "not-loaded"},
             },
         }
         result = results.get(method)
@@ -136,6 +157,9 @@ class EditorBridgeTests(unittest.TestCase):
             "editor.getDirtyAssets",
             "editor.getCurrentLevel",
             "editor.getPieState",
+            "editor.getOutputLog",
+            "editor.getCompileErrors",
+            "editor.inspectAssetLive",
         ]
         self.server = _BridgeServer(("127.0.0.1", 0), _BridgeHandler)
         self.server.auth_token = self.token  # type: ignore[attr-defined]
@@ -143,6 +167,7 @@ class EditorBridgeTests(unittest.TestCase):
         self.server.project_hash = self.config.project_path_hash  # type: ignore[attr-defined]
         self.server.project_name = self.config.project_name  # type: ignore[attr-defined]
         self.server.capabilities = self.capabilities  # type: ignore[attr-defined]
+        self.server.requests = []  # type: ignore[attr-defined]
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
 
@@ -185,6 +210,54 @@ class EditorBridgeTests(unittest.TestCase):
         self.assertTrue(selection["ok"])
         self.assertEqual(selection["source"], "live-editor-memory")
         self.assertEqual(selection["result"]["items"][0]["kind"], "Actor")
+
+    def test_bounded_log_compile_and_live_asset_parameters(self) -> None:
+        self._write_descriptor()
+        output = self.service.call_tool(
+            "ue_get_output_log",
+            {
+                "category": "LogTest",
+                "minimumVerbosity": "warning",
+                "keyword": "compile",
+                "sinceSequence": 5,
+                "sinceUtc": "2026-07-23T00:00:00Z",
+                "untilUtc": "2026-07-24T00:00:00+00:00",
+                "pieSessionId": 2,
+                "limit": 20,
+            },
+        )
+        self.assertEqual(output["result"]["nextSequence"], 8)
+        request = self.server.requests[-1]  # type: ignore[attr-defined]
+        self.assertEqual(request["params"]["minimumVerbosity"], "warning")
+        self.assertEqual(request["params"]["sinceUtc"], "2026-07-23T00:00:00.000Z")
+
+        compile_result = self.service.call_tool(
+            "ue_get_compile_errors",
+            {"assetPath": "/Game/Test/BP_Test.BP_Test", "limit": 10},
+        )
+        self.assertFalse(compile_result["result"]["historyComplete"])
+        self.assertEqual(compile_result["result"]["assetPath"], "/Game/Test/BP_Test.BP_Test")
+
+        live_asset = self.service.call_tool(
+            "ue_inspect_asset_live",
+            {"assetPath": "/Game/Test/BP_Test.BP_Test"},
+        )
+        self.assertFalse(live_asset["result"]["memory"]["loadedByBridge"])
+
+        invalid_cases = (
+            ("ue_get_output_log", {"minimumVerbosity": "trace"}),
+            ("ue_get_output_log", {"limit": 101}),
+            ("ue_get_output_log", {"sinceUtc": "2026-07-24", "untilUtc": "2026-07-23T00:00:00Z"}),
+            ("ue_get_compile_errors", {"assetPath": "C:/Project/Test.uasset"}),
+            ("ue_get_compile_errors", {"limit": 101}),
+            ("ue_inspect_asset_live", {"assetPath": "/Game/Test/BP_Test"}),
+            ("ue_get_selection", {"unexpected": True}),
+        )
+        for tool_name, params in invalid_cases:
+            with self.subTest(tool=tool_name, params=params):
+                with self.assertRaises(LiveEditorError) as context:
+                    self.service.call_tool(tool_name, params)
+                self.assertEqual(context.exception.code, "live-editor-invalid-parameters")
 
     def test_missing_descriptor_degrades_without_exposing_path(self) -> None:
         status = self.service.status()

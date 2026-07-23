@@ -36,6 +36,9 @@ LIVE_TOOLS = [
     "ue_get_dirty_assets",
     "ue_get_current_level",
     "ue_get_pie_state",
+    "ue_get_output_log",
+    "ue_get_compile_errors",
+    "ue_inspect_asset_live",
 ]
 EXPECTED_TOOLS = [
     "ue_get_capabilities",
@@ -91,8 +94,26 @@ async def _run(database: Path, project: Path, error_log: Path) -> dict[str, Any]
                 project_status_result = await session.call_tool("ue_get_project_status", {})
                 live_results = {
                     tool: (await session.call_tool(tool, {})).structuredContent
-                    for tool in LIVE_TOOLS
+                    for tool in LIVE_TOOLS[:6]
                 }
+                live_results["ue_get_output_log"] = (
+                    await session.call_tool(
+                        "ue_get_output_log",
+                        {"minimum_verbosity": "warning", "since_sequence": 0, "limit": 50},
+                    )
+                ).structuredContent
+                live_results["ue_get_compile_errors"] = (
+                    await session.call_tool(
+                        "ue_get_compile_errors",
+                        {"since_sequence": 0, "limit": 50},
+                    )
+                ).structuredContent
+                live_results["ue_inspect_asset_live"] = (
+                    await session.call_tool(
+                        "ue_inspect_asset_live",
+                        {"asset_path": "/Game/UEAgentKitWriteTests/BP_PatchTarget.BP_PatchTarget"},
+                    )
+                ).structuredContent
 
     tool_names = [tool.name for tool in listed.tools]
     if tool_names != EXPECTED_TOOLS:
@@ -147,6 +168,22 @@ async def _run(database: Path, project: Path, error_log: Path) -> dict[str, Any]
     if pie_state.get("state") not in {"stopped", "playing", "simulating"}:
         raise RuntimeError(f"PIE state is invalid: {pie_state}")
 
+    output_log = live_results["ue_get_output_log"]["result"]
+    if not output_log.get("available") or output_log.get("nextSequence") is None:
+        raise RuntimeError(f"Output Log result is incomplete: {output_log}")
+    if output_log.get("resultCount", 0) > 50 or output_log.get("matchedCount", 0) < output_log.get("resultCount", 0):
+        raise RuntimeError(f"Output Log bounds are invalid: {output_log}")
+
+    compile_errors = live_results["ue_get_compile_errors"]["result"]
+    if compile_errors.get("diagnosticSource") != "captured-output-log" or compile_errors.get("historyComplete") is not False:
+        raise RuntimeError(f"Compile diagnostic provenance is invalid: {compile_errors}")
+
+    live_asset = live_results["ue_inspect_asset_live"]["result"]
+    if live_asset.get("assetPath") != "/Game/UEAgentKitWriteTests/BP_PatchTarget.BP_PatchTarget":
+        raise RuntimeError(f"Live asset path is invalid: {live_asset}")
+    if live_asset.get("memory", {}).get("loadedByBridge") is not False:
+        raise RuntimeError(f"Live asset inspection claimed it loaded the asset: {live_asset}")
+
     response_text = json.dumps(
         {
             "capabilities": capabilities,
@@ -177,6 +214,13 @@ async def _run(database: Path, project: Path, error_log: Path) -> dict[str, Any]
         "selectionCount": live_results["ue_get_selection"]["result"]["count"],
         "openAssetCount": live_results["ue_get_open_assets"]["result"]["count"],
         "dirtyPackageCount": live_results["ue_get_dirty_assets"]["result"]["count"],
+        "outputLogResultCount": output_log["resultCount"],
+        "outputLogNextSequence": output_log["nextSequence"],
+        "compileDiagnosticCount": compile_errors["diagnosticCount"],
+        "compileHistoryComplete": compile_errors["historyComplete"],
+        "liveAssetRegistryFound": live_asset["assetRegistry"]["found"],
+        "liveAssetLoaded": live_asset["memory"]["loaded"],
+        "liveAssetLoadedByBridge": live_asset["memory"]["loadedByBridge"],
         "secretsRedacted": True,
         "databaseHashUnchanged": True,
         "indexDirectoryUnchanged": True,

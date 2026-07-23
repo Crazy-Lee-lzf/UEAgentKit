@@ -123,6 +123,9 @@ def _tool_descriptors(
         "ue_get_dirty_assets": (True, False),
         "ue_get_current_level": (True, False),
         "ue_get_pie_state": (True, False),
+        "ue_get_output_log": (True, False),
+        "ue_get_compile_errors": (True, False),
+        "ue_inspect_asset_live": (True, False),
         "ue_set_blueprint_default": (False, False),
         "ue_set_component_property": (False, False),
         "ue_set_pin_default": (False, False),
@@ -232,6 +235,11 @@ def _capabilities_response(
             "liveSelectionItems": 200,
             "liveOpenAssets": 200,
             "liveDirtyPackages": 200,
+            "liveLogEntries": 100,
+            "liveLogBufferEntries": 4096,
+            "liveLogEntryCharacters": 1024,
+            "liveCompileBlueprintStates": 100,
+            "liveAssetPathLength": 512,
         },
         "responseContract": {
             "schemaVersion": "1.0",
@@ -398,6 +406,7 @@ def _suggested_action(code: str) -> str:
         "live-editor-project-mismatch": "Start the exact project fixed at MCP Server startup; endpoint arguments cannot override it.",
         "live-editor-authentication-failed": "Restart the Editor and MCP Server so a new local authenticated session is negotiated.",
         "live-editor-capability-unavailable": "Use only the registered Live Editor capabilities reported by ue_get_capabilities.",
+        "live-editor-invalid-parameters": "Use the bounded Live Editor Tool schema and an exact /Game Object Path where required.",
     }
     if code in exact:
         return exact[code]
@@ -660,6 +669,75 @@ def create_mcp_server(
                 return live_editor_service.call_tool("ue_get_pie_state")
             except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
                 return _error_response("ue_get_pie_state", exc, read_only=True)
+
+        @server.tool(annotations=read_annotations)
+        def ue_get_output_log(
+            category: str = "",
+            minimum_verbosity: Literal[
+                "fatal",
+                "error",
+                "warning",
+                "display",
+                "log",
+                "verbose",
+                "veryverbose",
+            ] = "log",
+            keyword: str = "",
+            since_sequence: int = 0,
+            since_utc: str = "",
+            until_utc: str = "",
+            pie_session_id: int = -1,
+            limit: int = 100,
+        ) -> dict[str, Any]:
+            """Read bounded current-session Output Log entries using category, severity, text, UTC, PIE, and sequence filters."""
+            try:
+                return live_editor_service.call_tool(
+                    "ue_get_output_log",
+                    {
+                        "category": category,
+                        "minimumVerbosity": minimum_verbosity,
+                        "keyword": keyword,
+                        "sinceSequence": since_sequence,
+                        "sinceUtc": since_utc,
+                        "untilUtc": until_utc,
+                        "pieSessionId": pie_session_id,
+                        "limit": limit,
+                    },
+                )
+            except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+                return _error_response("ue_get_output_log", exc, read_only=True)
+
+        @server.tool(annotations=read_annotations)
+        def ue_get_compile_errors(
+            asset_path: str = "",
+            since_sequence: int = 0,
+            pie_session_id: int = -1,
+            limit: int = 100,
+        ) -> dict[str, Any]:
+            """Return captured compiler-related warnings/errors plus current loaded Blueprint compile status."""
+            try:
+                return live_editor_service.call_tool(
+                    "ue_get_compile_errors",
+                    {
+                        "assetPath": asset_path,
+                        "sinceSequence": since_sequence,
+                        "pieSessionId": pie_session_id,
+                        "limit": limit,
+                    },
+                )
+            except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+                return _error_response("ue_get_compile_errors", exc, read_only=True)
+
+        @server.tool(annotations=read_annotations)
+        def ue_inspect_asset_live(asset_path: str) -> dict[str, Any]:
+            """Inspect one exact /Game asset in Asset Registry and current Editor memory without loading or modifying it."""
+            try:
+                return live_editor_service.call_tool(
+                    "ue_inspect_asset_live",
+                    {"assetPath": asset_path},
+                )
+            except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+                return _error_response("ue_inspect_asset_live", exc, read_only=True)
 
     if workflow_service is not None:
         planning_annotations = ToolAnnotations(

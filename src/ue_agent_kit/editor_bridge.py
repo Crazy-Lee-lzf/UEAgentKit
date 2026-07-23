@@ -4,6 +4,7 @@ import hashlib
 import json
 import socket
 import uuid
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,19 @@ LIVE_EDITOR_METHODS = {
     "ue_get_dirty_assets": "editor.getDirtyAssets",
     "ue_get_current_level": "editor.getCurrentLevel",
     "ue_get_pie_state": "editor.getPieState",
+    "ue_get_output_log": "editor.getOutputLog",
+    "ue_get_compile_errors": "editor.getCompileErrors",
+    "ue_inspect_asset_live": "editor.inspectAssetLive",
+}
+
+LIVE_LOG_VERBOSITIES = {
+    "fatal",
+    "error",
+    "warning",
+    "display",
+    "log",
+    "verbose",
+    "veryverbose",
 }
 
 
@@ -88,15 +102,18 @@ class LiveEditorBridgeService:
             "sessionId": result.get("sessionId", ""),
             "capabilities": result.get("capabilities", []),
             "pieState": result.get("pieState", "unknown"),
+            "currentPieSessionId": result.get("currentPieSessionId", 0),
+            "capturedPieState": result.get("capturedPieState", "unavailable"),
             "currentLevel": result.get("currentLevel", ""),
             "dirtyPackageCount": result.get("dirtyPackageCount", 0),
         }
 
-    def call_tool(self, tool_name: str) -> dict[str, Any]:
+    def call_tool(self, tool_name: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         method = LIVE_EDITOR_METHODS.get(tool_name)
         if method is None:
             raise ValueError(f"Unsupported Live Editor Tool: {tool_name}")
-        result = self.call_method(method)
+        normalized_params = self._normalize_tool_params(tool_name, params or {})
+        result = self.call_method(method, normalized_params)
         return {
             "schemaVersion": "1.0",
             "tool": tool_name,
@@ -110,6 +127,127 @@ class LiveEditorBridgeService:
             },
             "result": result,
         }
+
+    @staticmethod
+    def _normalize_tool_params(tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(params, dict):
+            raise LiveEditorError("live-editor-invalid-parameters", "Live Editor Tool parameters must be an object.")
+        if tool_name == "ue_get_output_log":
+            allowed = {
+                "category",
+                "minimumVerbosity",
+                "keyword",
+                "sinceSequence",
+                "sinceUtc",
+                "untilUtc",
+                "pieSessionId",
+                "limit",
+            }
+            LiveEditorBridgeService._reject_unknown_params(params, allowed)
+            normalized = {
+                "category": LiveEditorBridgeService._bounded_string(params.get("category", ""), "category", 128),
+                "minimumVerbosity": LiveEditorBridgeService._normalize_verbosity(params.get("minimumVerbosity", "log")),
+                "keyword": LiveEditorBridgeService._bounded_string(params.get("keyword", ""), "keyword", 256),
+                "sinceSequence": LiveEditorBridgeService._bounded_integer(params.get("sinceSequence", 0), "sinceSequence", 0),
+                "pieSessionId": LiveEditorBridgeService._bounded_integer(params.get("pieSessionId", -1), "pieSessionId", -1),
+                "limit": LiveEditorBridgeService._bounded_integer(params.get("limit", 100), "limit", 1, 100),
+            }
+            since_utc = LiveEditorBridgeService._normalize_utc(params.get("sinceUtc", ""), "sinceUtc")
+            until_utc = LiveEditorBridgeService._normalize_utc(params.get("untilUtc", ""), "untilUtc")
+            if since_utc:
+                normalized["sinceUtc"] = since_utc
+            if until_utc:
+                normalized["untilUtc"] = until_utc
+            if since_utc and until_utc and since_utc > until_utc:
+                raise LiveEditorError("live-editor-invalid-parameters", "sinceUtc must not be later than untilUtc.")
+            return normalized
+        if tool_name == "ue_get_compile_errors":
+            allowed = {"assetPath", "sinceSequence", "pieSessionId", "limit"}
+            LiveEditorBridgeService._reject_unknown_params(params, allowed)
+            asset_path = LiveEditorBridgeService._bounded_string(params.get("assetPath", ""), "assetPath", 512)
+            if asset_path:
+                LiveEditorBridgeService._validate_game_object_path(asset_path)
+            return {
+                "assetPath": asset_path,
+                "sinceSequence": LiveEditorBridgeService._bounded_integer(params.get("sinceSequence", 0), "sinceSequence", 0),
+                "pieSessionId": LiveEditorBridgeService._bounded_integer(params.get("pieSessionId", -1), "pieSessionId", -1),
+                "limit": LiveEditorBridgeService._bounded_integer(params.get("limit", 100), "limit", 1, 100),
+            }
+        if tool_name == "ue_inspect_asset_live":
+            allowed = {"assetPath"}
+            LiveEditorBridgeService._reject_unknown_params(params, allowed)
+            asset_path = LiveEditorBridgeService._bounded_string(params.get("assetPath", ""), "assetPath", 512)
+            LiveEditorBridgeService._validate_game_object_path(asset_path)
+            return {"assetPath": asset_path}
+        if params:
+            raise LiveEditorError(
+                "live-editor-invalid-parameters",
+                f"{tool_name} does not accept parameters.",
+            )
+        return {}
+
+    @staticmethod
+    def _reject_unknown_params(params: dict[str, Any], allowed: set[str]) -> None:
+        unknown = sorted(set(params) - allowed)
+        if unknown:
+            raise LiveEditorError(
+                "live-editor-invalid-parameters",
+                f"Unsupported Live Editor parameter: {unknown[0]}",
+            )
+
+    @staticmethod
+    def _bounded_string(value: Any, name: str, maximum: int) -> str:
+        if not isinstance(value, str):
+            raise LiveEditorError("live-editor-invalid-parameters", f"{name} must be a string.")
+        if len(value) > maximum or any(ord(character) < 32 for character in value):
+            raise LiveEditorError("live-editor-invalid-parameters", f"{name} is outside the allowed text boundary.")
+        return value
+
+    @staticmethod
+    def _bounded_integer(value: Any, name: str, minimum: int, maximum: int | None = None) -> int:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise LiveEditorError("live-editor-invalid-parameters", f"{name} must be an integer.")
+        if value < minimum or (maximum is not None and value > maximum):
+            raise LiveEditorError("live-editor-invalid-parameters", f"{name} is outside the allowed range.")
+        return value
+
+    @staticmethod
+    def _normalize_verbosity(value: Any) -> str:
+        if not isinstance(value, str):
+            raise LiveEditorError("live-editor-invalid-parameters", "minimumVerbosity must be a string.")
+        normalized = value.casefold()
+        if normalized not in LIVE_LOG_VERBOSITIES:
+            raise LiveEditorError("live-editor-invalid-parameters", "minimumVerbosity is unsupported.")
+        return normalized
+
+    @staticmethod
+    def _normalize_utc(value: Any, name: str) -> str:
+        if value == "":
+            return ""
+        if not isinstance(value, str) or len(value) > 64:
+            raise LiveEditorError("live-editor-invalid-parameters", f"{name} must be an ISO-8601 UTC timestamp.")
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise LiveEditorError("live-editor-invalid-parameters", f"{name} must be an ISO-8601 UTC timestamp.") from exc
+        if parsed.tzinfo is None:
+            raise LiveEditorError("live-editor-invalid-parameters", f"{name} must include a UTC offset.")
+        return parsed.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+    @staticmethod
+    def _validate_game_object_path(asset_path: str) -> None:
+        if (
+            not asset_path
+            or not asset_path.startswith("/Game/")
+            or "\\" in asset_path
+            or ":" in asset_path
+            or ".." in asset_path
+            or any(ord(character) < 32 for character in asset_path)
+        ):
+            raise LiveEditorError("live-editor-invalid-parameters", "assetPath must be an exact /Game Object Path.")
+        package_path, separator, object_name = asset_path.rpartition(".")
+        if not separator or not object_name or "/" in object_name or package_path.rfind("/") >= len(package_path) - 1:
+            raise LiveEditorError("live-editor-invalid-parameters", "assetPath must be an exact /Game Object Path.")
 
     def call_method(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         descriptor = self._read_descriptor()

@@ -105,6 +105,7 @@ class FakeWorkflowService:
 class FakeLiveEditorService:
     def __init__(self, *, available: bool = True) -> None:
         self.available = available
+        self.calls: list[tuple[str, dict[str, object]]] = []
         self.config = SimpleNamespace(
             project_path=Path("C:/Projects/TestProject/TestProject.uproject"),
             project_name="TestProject",
@@ -134,21 +135,43 @@ class FakeLiveEditorService:
                 "editor.getDirtyAssets",
                 "editor.getCurrentLevel",
                 "editor.getPieState",
+                "editor.getOutputLog",
+                "editor.getCompileErrors",
+                "editor.inspectAssetLive",
             ],
             "pieState": "stopped",
             "currentLevel": "/Game/Maps/Test.Test:PersistentLevel",
             "dirtyPackageCount": 1,
         }
 
-    def call_tool(self, tool_name: str):
+    def call_tool(self, tool_name: str, params: dict[str, object] | None = None):
         if not self.available:
             raise LiveEditorError("live-editor-unavailable", "The fixed Editor is offline.")
+        normalized_params = params or {}
+        self.calls.append((tool_name, normalized_params))
         results = {
             "ue_get_selection": {"count": 1, "truncated": False, "items": [{"kind": "Actor"}]},
             "ue_get_open_assets": {"count": 0, "truncated": False, "items": []},
             "ue_get_dirty_assets": {"count": 1, "truncated": False, "items": [{"packageName": "/Game/Test"}]},
             "ue_get_current_level": {"available": True, "currentLevelPath": "/Game/Maps/Test.Test:PersistentLevel"},
             "ue_get_pie_state": {"state": "stopped", "playing": False, "simulating": False},
+            "ue_get_output_log": {
+                "available": True,
+                "resultCount": 1,
+                "nextSequence": 12,
+                "items": [{"sequence": 11, "category": "LogTest", "verbosity": "Warning"}],
+            },
+            "ue_get_compile_errors": {
+                "diagnosticSource": "captured-output-log",
+                "historyComplete": False,
+                "diagnosticCount": 1,
+                "loadedBlueprintCount": 1,
+            },
+            "ue_inspect_asset_live": {
+                "assetPath": normalized_params.get("assetPath", ""),
+                "assetRegistry": {"found": True},
+                "memory": {"loaded": True, "loadedByBridge": False, "state": "loaded-saved"},
+            },
         }
         return {
             "schemaVersion": "1.0",
@@ -404,6 +427,9 @@ class McpServerTests(unittest.TestCase):
             "ue_get_dirty_assets",
             "ue_get_current_level",
             "ue_get_pie_state",
+            "ue_get_output_log",
+            "ue_get_compile_errors",
+            "ue_inspect_asset_live",
         ]
         self.assertEqual([tool.name for tool in tools], expected_names)
         forbidden = {
@@ -445,6 +471,47 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(selection["source"], "live-editor-memory")
         self.assertEqual(selection["result"]["items"][0]["kind"], "Actor")
 
+        _, output_log = asyncio.run(
+            server.call_tool(
+                "ue_get_output_log",
+                {
+                    "category": "LogTest",
+                    "minimum_verbosity": "warning",
+                    "keyword": "compile",
+                    "since_sequence": 10,
+                    "pie_session_id": 2,
+                    "limit": 25,
+                },
+            )
+        )
+        self.assertEqual(output_log["result"]["nextSequence"], 12)
+        self.assertEqual(live_service.calls[-1][0], "ue_get_output_log")
+        self.assertEqual(live_service.calls[-1][1]["minimumVerbosity"], "warning")
+        self.assertEqual(live_service.calls[-1][1]["sinceSequence"], 10)
+
+        _, compile_errors = asyncio.run(
+            server.call_tool(
+                "ue_get_compile_errors",
+                {
+                    "asset_path": "/Game/Test/BP_Test.BP_Test",
+                    "since_sequence": 4,
+                    "pie_session_id": -1,
+                    "limit": 30,
+                },
+            )
+        )
+        self.assertFalse(compile_errors["result"]["historyComplete"])
+        self.assertEqual(live_service.calls[-1][1]["assetPath"], "/Game/Test/BP_Test.BP_Test")
+
+        _, live_asset = asyncio.run(
+            server.call_tool(
+                "ue_inspect_asset_live",
+                {"asset_path": "/Game/Test/BP_Test.BP_Test"},
+            )
+        )
+        self.assertTrue(live_asset["result"]["assetRegistry"]["found"])
+        self.assertFalse(live_asset["result"]["memory"]["loadedByBridge"])
+
         offline_server = create_mcp_server(
             self.database_path,
             live_editor_service=FakeLiveEditorService(available=False),
@@ -479,6 +546,9 @@ class McpServerTests(unittest.TestCase):
             "ue_get_dirty_assets",
             "ue_get_current_level",
             "ue_get_pie_state",
+            "ue_get_output_log",
+            "ue_get_compile_errors",
+            "ue_inspect_asset_live",
             "ue_set_blueprint_default",
             "ue_set_component_property",
             "ue_set_pin_default",
@@ -492,7 +562,7 @@ class McpServerTests(unittest.TestCase):
             "ue_rollback_patch",
         ]
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 22)
+        self.assertEqual(len(tools), 25)
 
         mismatched_live = FakeLiveEditorService()
         mismatched_live.config = SimpleNamespace(
@@ -735,6 +805,11 @@ class McpServerTests(unittest.TestCase):
             "ue_get_dirty_assets",
             "ue_get_current_level",
             "ue_get_pie_state",
+            "ue_get_output_log",
+            "ue_get_compile_errors",
+            "ue_inspect_asset_live",
+            "liveAssetLoadedByBridge",
+            "compileHistoryComplete",
             "secretsRedacted",
             "databaseHashUnchanged",
         ):
