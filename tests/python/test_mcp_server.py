@@ -54,6 +54,17 @@ class FakeWorkflowService:
             "commitToolsEnabled": True,
         }
 
+    def freshness_status(self):
+        return {
+            "state": "fresh",
+            "indexFresh": True,
+            "indexStale": False,
+            "comparedAssetCount": 1,
+            "freshAssetCount": 1,
+            "staleAssetCount": 0,
+            "unavailableAssetCount": 0,
+        }
+
     def plan_patch(self, **kwargs):
         return {"ok": True, "tool": "ue_plan_patch", "planId": "plan_test", **kwargs}
 
@@ -241,6 +252,8 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(capabilities["server"]["version"], "0.5.0")
         self.assertEqual(capabilities["server"]["mode"], "read-only")
         self.assertFalse(capabilities["operations"]["available"])
+        self.assertFalse(capabilities["freshness"]["available"])
+        self.assertFalse(capabilities["freshness"]["planRequiresFreshIndex"])
         self.assertEqual(
             [item["name"] for item in capabilities["tools"]],
             [tool.name for tool in tools],
@@ -308,10 +321,14 @@ class McpServerTests(unittest.TestCase):
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
         self.assertEqual(capabilities["server"]["mode"], "fixed-project-commit")
         self.assertTrue(capabilities["operations"]["available"])
+        self.assertTrue(capabilities["freshness"]["available"])
+        self.assertTrue(capabilities["freshness"]["planRequiresFreshIndex"])
         self.assertGreater(len(capabilities["operations"]["items"]), 0)
         _, project_status = asyncio.run(server.call_tool("ue_get_project_status", {}))
         self.assertEqual(project_status["project"]["projectName"], "TestProject")
         self.assertEqual(project_status["engine"]["state"], "unknown")
+        self.assertEqual(project_status["freshness"]["state"], "fresh")
+        self.assertTrue(project_status["freshness"]["indexFresh"])
 
         _, planned = asyncio.run(
             server.call_tool(

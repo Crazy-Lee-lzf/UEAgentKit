@@ -52,6 +52,58 @@ class FakeIndexService:
         }
 
 
+class FakeFreshnessTracker:
+    def __init__(self) -> None:
+        self.state = "fresh"
+        self.transitions: dict[str, dict[str, Any]] = {}
+
+    def inspect_asset(self, asset_path: str) -> dict[str, Any]:
+        return {
+            "assetPath": asset_path,
+            "state": self.state,
+            "indexFresh": self.state == "fresh",
+            "indexStale": self.state == "stale",
+            "indexRevision": BEFORE_REVISION,
+            "revisionExportRevision": BEFORE_REVISION,
+            "diskRevision": BEFORE_REVISION if self.state == "fresh" else AFTER_REVISION,
+        }
+
+    def project_status(self) -> dict[str, Any]:
+        return {
+            "state": self.state,
+            "indexFresh": self.state == "fresh",
+            "indexStale": self.state == "stale",
+            "sessionStaleAssets": self.session_stale_assets(),
+        }
+
+    def session_stale_assets(self) -> list[dict[str, Any]]:
+        return [dict(value) for value in self.transitions.values()]
+
+    def mark_commit(self, asset_path: str, before_revision: str, after_revision: str) -> dict[str, Any]:
+        self.state = "stale"
+        transition = {
+            "assetPath": asset_path,
+            "state": "stale",
+            "reason": "commit-changed-package",
+            "beforeRevision": before_revision,
+            "afterRevision": after_revision,
+        }
+        self.transitions[asset_path] = transition
+        return dict(transition)
+
+    def mark_rollback(self, asset_path: str, restored_revision: str) -> dict[str, Any]:
+        self.state = "fresh"
+        self.transitions.pop(asset_path, None)
+        return {
+            "assetPath": asset_path,
+            "state": "fresh",
+            "indexFresh": True,
+            "indexStale": False,
+            "diskRevision": restored_revision,
+            "sessionStateCleared": True,
+        }
+
+
 class FakeWorkflowRunner:
     def __init__(self) -> None:
         self.revision = BEFORE_REVISION
@@ -228,6 +280,7 @@ class AgentWorkflowTests(unittest.TestCase):
             },
         )
         self.runner = FakeWorkflowRunner()
+        self.freshness = FakeFreshnessTracker()
         self.config = PatchWorkflowConfig(
             tool_root=self.tool_root,
             engine_root=self.engine_root,
@@ -238,7 +291,12 @@ class AgentWorkflowTests(unittest.TestCase):
             backup_root=self.backup_root,
             commit_enabled=True,
         )
-        self.service = PatchWorkflowService(FakeIndexService(), self.config, process_runner=self.runner)
+        self.service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=self.freshness,
+        )
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -268,6 +326,18 @@ class AgentWorkflowTests(unittest.TestCase):
             f"COMMIT {plan['planId']}",
         )
         self.assertEqual(applied["afterRevision"], AFTER_REVISION)
+        self.assertEqual(applied["indexFreshness"]["state"], "stale")
+        lifecycle = self.service.status()["indexLifecycle"]
+        self.assertTrue(lifecycle["sessionStale"])
+        self.assertTrue(lifecycle["sqliteIndexStale"])
+        self.assertTrue(lifecycle["revisionExportStale"])
+        with self.assertRaisesRegex(WorkflowError, "differs from"):
+            self.service.plan_patch(
+                asset_path=ASSET_PATH,
+                operation="setAssetProperty",
+                target={"propertyPath": "BoolValue"},
+                value=False,
+            )
         self.assertNotIn(str(self.tool_root), json.dumps(applied, ensure_ascii=False))
         with self.assertRaisesRegex(WorkflowError, "used, stale"):
             self.service.apply_patch(
@@ -279,6 +349,7 @@ class AgentWorkflowTests(unittest.TestCase):
         verified = self.service.verify_asset(applied["applyReceipt"])
         self.assertTrue(verified["verified"])
         self.assertEqual(verified["actualRevision"], AFTER_REVISION)
+        self.assertEqual(verified["indexFreshness"]["state"], "stale")
 
         rollback_dry = self.service.rollback_patch(applied["applyReceipt"])
         self.assertEqual(rollback_dry["mode"], "DryRun")
@@ -297,7 +368,27 @@ class AgentWorkflowTests(unittest.TestCase):
             confirmation=f"ROLLBACK {applied['applyReceipt']}",
         )
         self.assertTrue(restored["restored"])
+        self.assertEqual(restored["indexFreshness"]["state"], "fresh")
+        self.assertFalse(self.service.status()["indexLifecycle"]["sessionStale"])
         self.assertEqual(self.runner.revision, BEFORE_REVISION)
+
+    def test_plan_rejects_stale_or_unavailable_index_state(self) -> None:
+        self.freshness.state = "stale"
+        with self.assertRaisesRegex(WorkflowError, "differs from"):
+            self.service.plan_patch(
+                asset_path=ASSET_PATH,
+                operation="setAssetProperty",
+                target={"propertyPath": "BoolValue"},
+                value=True,
+            )
+        self.freshness.state = "unavailable"
+        with self.assertRaisesRegex(WorkflowError, "could not be compared"):
+            self.service.plan_patch(
+                asset_path=ASSET_PATH,
+                operation="setAssetProperty",
+                target={"propertyPath": "BoolValue"},
+                value=True,
+            )
 
     def test_plan_rejects_policy_mismatch_and_unindexed_assets(self) -> None:
         with self.assertRaisesRegex(WorkflowError, "not present"):
@@ -342,7 +433,12 @@ class AgentWorkflowTests(unittest.TestCase):
 
     def test_commit_can_be_disabled_at_server_configuration(self) -> None:
         config = PatchWorkflowConfig(**{**self.config.__dict__, "commit_enabled": False})
-        service = PatchWorkflowService(FakeIndexService(), config, process_runner=self.runner)
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            config,
+            process_runner=self.runner,
+            freshness_tracker=FakeFreshnessTracker(),
+        )
         plan = service.plan_patch(
             asset_path=ASSET_PATH,
             operation="setAssetProperty",
@@ -361,7 +457,12 @@ class AgentWorkflowTests(unittest.TestCase):
     def test_fixed_project_revision_export_and_index_must_match(self) -> None:
         write_json(self.revision_export / "manifest.json", {"projectName": "OtherProject"})
         with self.assertRaisesRegex(WorkflowError, "Revision Export projectName"):
-            PatchWorkflowService(FakeIndexService(), self.config, process_runner=self.runner)
+            PatchWorkflowService(
+                FakeIndexService(),
+                self.config,
+                process_runner=self.runner,
+                freshness_tracker=FakeFreshnessTracker(),
+            )
 
         write_json(self.revision_export / "manifest.json", {"projectName": PROJECT})
 
@@ -370,13 +471,23 @@ class AgentWorkflowTests(unittest.TestCase):
                 return {"ok": True, "projectKey": "OtherProject"}
 
         with self.assertRaisesRegex(WorkflowError, "SQLite projectKey"):
-            PatchWorkflowService(WrongIndex(), self.config, process_runner=self.runner)
+            PatchWorkflowService(
+                WrongIndex(),
+                self.config,
+                process_runner=self.runner,
+                freshness_tracker=FakeFreshnessTracker(),
+            )
 
     def test_work_and_backup_roots_must_stay_inside_tool_root(self) -> None:
         outside = self.root / "outside"
         config = PatchWorkflowConfig(**{**self.config.__dict__, "work_root": outside})
         with self.assertRaisesRegex(WorkflowError, "work_root"):
-            PatchWorkflowService(FakeIndexService(), config, process_runner=self.runner)
+            PatchWorkflowService(
+                FakeIndexService(),
+                config,
+                process_runner=self.runner,
+                freshness_tracker=FakeFreshnessTracker(),
+            )
 
 
 if __name__ == "__main__":

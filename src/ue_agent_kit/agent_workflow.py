@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable, Literal
 
 from .agent_api import IndexQueryService
+from .freshness import IndexFreshnessTracker
 from .patches import OPERATION_REGISTRY, validate_patch
 
 
@@ -223,6 +224,7 @@ class PatchWorkflowService:
         config: PatchWorkflowConfig,
         *,
         process_runner: ProcessRunner | None = None,
+        freshness_tracker: IndexFreshnessTracker | None = None,
     ) -> None:
         self.index_service = index_service
         self.config = PatchWorkflowConfig(
@@ -243,6 +245,11 @@ class PatchWorkflowService:
         self._applies: dict[str, ApplyRecord] = {}
         self._rollback_dry_runs: dict[str, RollbackDryRunRecord] = {}
         self._validate_config()
+        self.freshness = freshness_tracker or IndexFreshnessTracker(
+            self.index_service,
+            self.config.project_path,
+            self.config.revision_export,
+        )
 
     @property
     def configured_paths(self) -> tuple[Path, ...]:
@@ -315,6 +322,7 @@ class PatchWorkflowService:
             raise WorkflowError("policy-changed", "The fixed Policy changed after this MCP server started.")
 
     def status(self) -> dict[str, Any]:
+        session_stale = self.freshness.session_stale_assets()
         return {
             "schemaVersion": WORKFLOW_SCHEMA_VERSION,
             "tool": "ue_workflow_status",
@@ -326,7 +334,18 @@ class PatchWorkflowService:
             "singleAssetSingleOperation": True,
             "receiptRequiredForCommit": True,
             "receiptRequiredForRollbackCommit": True,
+            "indexLifecycle": {
+                "sessionStale": bool(session_stale),
+                "fixedSnapshotsStale": bool(session_stale),
+                "sqliteIndexStale": bool(session_stale),
+                "revisionExportStale": bool(session_stale),
+                "sessionStaleAssetCount": len(session_stale),
+                "sessionStaleAssets": session_stale,
+            },
         }
+
+    def freshness_status(self) -> dict[str, Any]:
+        return self.freshness.project_status()
 
     def _sanitize_details(self, details: dict[str, Any]) -> dict[str, Any]:
         sanitized = _safe_report(details, configured_paths=self.configured_paths)
@@ -380,6 +399,19 @@ class PatchWorkflowService:
             if not asset_result.get("found"):
                 raise WorkflowError("asset-not-indexed", "The requested asset is not present in the fixed SQLite index.")
             asset = asset_result["asset"]
+            freshness = self.freshness.inspect_asset(asset_path)
+            if freshness.get("state") == "stale":
+                raise WorkflowError(
+                    "index-stale",
+                    "The requested asset differs from the fixed SQLite index or Revision Export.",
+                    details=self._sanitize_details({"freshness": freshness}),
+                )
+            if freshness.get("state") != "fresh":
+                raise WorkflowError(
+                    "index-freshness-unavailable",
+                    "The requested asset could not be compared across SQLite, Revision Export, and disk.",
+                    details=self._sanitize_details({"freshness": freshness}),
+                )
             revision = asset.get("revision_value")
             asset_class = asset.get("asset_class")
             if not isinstance(revision, str) or not revision.startswith("sha256:"):
@@ -571,16 +603,22 @@ class PatchWorkflowService:
             if not before_revision.startswith("sha256:") or not after_revision.startswith("sha256:") or before_revision == after_revision:
                 raise WorkflowError("commit-revision-invalid", "The Commit report did not contain a valid Revision transition.")
             receipt = "apply_" + secrets.token_urlsafe(24)
+            committed_asset_path = str(report.get("assetPath", ""))
             self._applies[receipt] = ApplyRecord(
                 receipt,
                 plan_id,
                 record.digest,
-                str(report.get("assetPath", "")),
+                committed_asset_path,
                 before_revision,
                 after_revision,
                 manifest_path,
                 report_path,
                 report,
+            )
+            freshness = self.freshness.mark_commit(
+                committed_asset_path,
+                before_revision,
+                after_revision,
             )
             dry_run.consumed = True
             record.consumed = True
@@ -596,8 +634,9 @@ class PatchWorkflowService:
                 "beforeRevision": before_revision,
                 "afterRevision": after_revision,
                 "manifestId": manifest_path.name,
+                "indexFreshness": freshness,
                 "report": _safe_report(report, configured_paths=self.configured_paths),
-                "nextStep": "Call ue_verify_asset with this applyReceipt.",
+                "nextStep": "Call ue_verify_asset with this applyReceipt. The fixed index remains stale until refreshed or rolled back.",
             }
 
     def verify_asset(self, apply_receipt: str) -> dict[str, Any]:
@@ -639,6 +678,7 @@ class PatchWorkflowService:
                     details={"expectedRevision": apply.after_revision, "actualRevision": actual_revision},
                 )
             apply.verified = True
+            freshness = self.freshness.inspect_asset(apply.asset_path)
             return {
                 "schemaVersion": WORKFLOW_SCHEMA_VERSION,
                 "tool": "ue_verify_asset",
@@ -650,7 +690,8 @@ class PatchWorkflowService:
                 "verified": True,
                 "assetClass": canonical.get("assetClass", ""),
                 "packageDirty": revision.get("packageDirty", False) if isinstance(revision, dict) else False,
-                "nextStep": "Keep the change, or call ue_rollback_patch in DryRun mode before an explicit rollback Commit.",
+                "indexFreshness": freshness,
+                "nextStep": "Keep the change and refresh the asset index, or call ue_rollback_patch in DryRun mode before an explicit rollback Commit.",
             }
 
     def rollback_patch(
@@ -751,6 +792,7 @@ class PatchWorkflowService:
                 raise WorkflowError("rollback-revision-mismatch", "Rollback verification did not match the pre-Commit Revision.")
             dry_run.consumed = True
             apply.rolled_back = True
+            freshness = self.freshness.mark_rollback(apply.asset_path, restored_revision)
             return {
                 "schemaVersion": WORKFLOW_SCHEMA_VERSION,
                 "tool": "ue_rollback_patch",
@@ -760,6 +802,7 @@ class PatchWorkflowService:
                 "assetPath": apply.asset_path,
                 "restored": True,
                 "expectedRevision": apply.before_revision,
+                "indexFreshness": freshness,
                 "verification": _safe_report(verification, configured_paths=self.configured_paths),
                 "report": _safe_report(report, configured_paths=self.configured_paths),
             }

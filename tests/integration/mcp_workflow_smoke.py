@@ -125,6 +125,8 @@ async def run_workflow(args: argparse.Namespace) -> dict[str, object]:
                     raise RuntimeError(f"Unexpected Engine version: {project_status}")
                 if project_status["revisionExport"]["state"] != "available":
                     raise RuntimeError(f"Revision Export status mismatch: {project_status}")
+                if project_status["freshness"]["state"] != "fresh":
+                    raise RuntimeError(f"Initial index freshness mismatch: {project_status}")
 
                 search = require_payload(
                     await session.call_tool(
@@ -192,6 +194,14 @@ async def run_workflow(args: argparse.Namespace) -> dict[str, object]:
                 package_after_commit_hash = sha256(args.package_file)
                 if package_after_commit_hash == package_before_hash:
                     raise RuntimeError("Commit did not change the scalar fixture package hash")
+                if applied["indexFreshness"]["state"] != "stale":
+                    raise RuntimeError(f"Commit did not mark the fixed index stale: {applied}")
+                stale_status = require_payload(
+                    await session.call_tool("ue_get_project_status", {}),
+                    "ue_get_project_status after Commit",
+                )
+                if stale_status["freshness"]["state"] != "stale":
+                    raise RuntimeError(f"Project status did not report stale after Commit: {stale_status}")
 
                 reused = await session.call_tool(
                     "ue_apply_patch",
@@ -211,6 +221,8 @@ async def run_workflow(args: argparse.Namespace) -> dict[str, object]:
                 )
                 if not verified["verified"] or verified["actualRevision"] != applied["afterRevision"]:
                     raise RuntimeError(f"Independent Commit verification failed: {verified}")
+                if verified["indexFreshness"]["state"] != "stale":
+                    raise RuntimeError(f"Independent Verify incorrectly cleared stale state: {verified}")
 
                 rollback_dry = require_payload(
                     await session.call_tool(
@@ -252,6 +264,14 @@ async def run_workflow(args: argparse.Namespace) -> dict[str, object]:
                 )
                 if not restored["restored"]:
                     raise RuntimeError(f"Rollback did not restore the package: {restored}")
+                if restored["indexFreshness"]["state"] != "fresh":
+                    raise RuntimeError(f"Rollback did not restore fresh index state: {restored}")
+                restored_status = require_payload(
+                    await session.call_tool("ue_get_project_status", {}),
+                    "ue_get_project_status after Rollback",
+                )
+                if restored_status["freshness"]["state"] != "fresh":
+                    raise RuntimeError(f"Project status did not return to fresh after Rollback: {restored_status}")
 
     package_final_hash = sha256(args.package_file)
     if package_final_hash != package_before_hash:
@@ -269,6 +289,10 @@ async def run_workflow(args: argparse.Namespace) -> dict[str, object]:
         "tools": EXPECTED_TOOLS,
         "capabilitiesChecked": True,
         "projectStatusChecked": True,
+        "initialIndexFresh": True,
+        "commitMarkedIndexStale": True,
+        "verifyPreservedIndexStale": True,
+        "rollbackRestoredIndexFresh": True,
         "engineVersion": project_status["engine"]["version"],
         "planId": plan_id,
         "dryRunReceiptIssued": True,

@@ -26,13 +26,15 @@ UE Agent Kit 的长期定位是面向 AI Agent 的 Unreal Engine 项目智能层
 
 ### 0.5.1：MCP 查询与协议补全
 
-- 增加项目、索引和能力状态查询。
-- 统一 Tool 错误码、分页、局部展开、结果截断和重试语义。
-- 增加索引过期检测，明确磁盘资产、索引 Revision 和当前工程状态的差异。
+- [x] 增加项目、索引和能力状态查询。
+- [x] 统一 Tool 错误码、分页、局部展开、结果截断和重试语义。
+- [x] 比较 SQLite、Revision Export 和磁盘 Package Revision，明确 `fresh`、`stale`、`partial`、`unavailable` 与 `unknown`。
+- [x] Commit 后标记固定快照 stale，Verify 保持 stale，精确 rollback 后恢复 fresh。
 - [x] 优化 `ue_search`、`ue_get_asset` 和 `ue_find_references` 的过滤、分页、section 和 Token Budget。
-- 为现有写入 Operation 提供高层参数入口，由 Server 自动生成严格 Patch。
-- 改进 Plan、Dry Run Receipt、Apply Receipt 和 rollback Receipt 的可诊断性。
-- 补充 Claude Code、ChatGPT 和独立 MCP Client 的回归矩阵。
+- [x] 完成单资产分阶段刷新与 immutable Server 新会话安全重载方案。
+- [ ] 为现有写入 Operation 提供高层参数入口，由 Server 自动生成严格 Patch。
+- [ ] 改进 Plan、Dry Run Receipt、Apply Receipt 和 rollback Receipt 的可诊断性。
+- [ ] 补充 Claude Code、ChatGPT 和独立 MCP Client 的回归矩阵。
 
 ### 0.5.2：Live Editor Read
 

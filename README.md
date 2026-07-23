@@ -206,7 +206,7 @@ scripts\RunMcp.cmd -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3" -Check
 scripts\TestMcpStdio.cmd
 ```
 
-服务器仅使用本地 `stdio`。默认模式提供 `ue_search`、`ue_get_asset` 和 `ue_find_references` 三个只读查询 Tool；固定 Engine、Project、Policy 和 Revision Export 后可启用完整八 Tool 工作流：
+服务器仅使用本地 `stdio`。默认模式提供能力、项目状态和三个查询在内的五个只读 Tool；固定 Engine、Project、Policy 和 Revision Export 后可启用完整十 Tool 工作流：
 
 ```bat
 claude mcp add --transport stdio --scope project ue-agent-kit -- ^
@@ -215,7 +215,7 @@ claude mcp add --transport stdio --scope project ue-agent-kit -- ^
   -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
 ```
 
-添加后可用 `claude mcp list` 或 Claude Code 内的 `/mcp` 检查连接。完整模式使用 `-EnableWriteTools`；只有同时使用 `-EnableCommitTools` 且 Policy 允许 Commit，才能保存或恢复资产。Commit 和 rollback Commit 都要求一次性 Dry Run Receipt 与精确确认短语。重建索引前必须停止 MCP Server。完整契约见 [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md)。
+添加后可用 `claude mcp list` 或 Claude Code 内的 `/mcp` 检查连接。完整模式使用 `-EnableWriteTools`；只有同时使用 `-EnableCommitTools` 且 Policy 允许 Commit，才能保存或恢复资产。Plan 要求 SQLite、Revision Export 与磁盘 Package Revision 一致；Commit 后固定快照会标记 stale，rollback 恢复原 Revision 后才重新 fresh。Commit 和 rollback Commit 都要求一次性 Dry Run Receipt 与精确确认短语。重建索引前必须停止 MCP Server。完整契约见 [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md) 与 [`spec/INDEX_FRESHNESS.md`](spec/INDEX_FRESHNESS.md)。
 
 ### 7. 校验通用资产导出
 
@@ -261,7 +261,8 @@ Output\Blueprints\
 - [`spec/BACKUP_AND_ROLLBACK.md`](spec/BACKUP_AND_ROLLBACK.md)：Backup Manifest、rollback、审计回执和恢复验证规范。
 - [`spec/WRITE_FIXTURE_PLAN.md`](spec/WRITE_FIXTURE_PLAN.md)：测试资产 Plan、Create/Reset 和独立重载验证规范。
 - [`spec/SCALAR_PATCH_REGRESSION.md`](spec/SCALAR_PATCH_REGRESSION.md)：完整标量类型、正向写入和失败路径真实 UE 回归规范。
-- [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md)：只读 MCP Tool、stdio、固定数据库和响应契约。
+- [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md)：MCP Tool、stdio、固定配置和响应契约。
+- [`spec/INDEX_FRESHNESS.md`](spec/INDEX_FRESHNESS.md)：三源 Revision 新鲜度、stale 生命周期与安全快照重载。
 
 完整文档索引见 [`docs/README.md`](docs/README.md)。
 

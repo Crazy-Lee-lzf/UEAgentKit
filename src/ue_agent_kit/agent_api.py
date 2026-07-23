@@ -185,6 +185,36 @@ class IndexQueryService:
             response["stats"] = get_stats(connection)
             return response
 
+    def get_revision_records(self) -> list[dict[str, Any]]:
+        """Return the immutable per-asset Revision fields needed by freshness checks."""
+        with self._open() as connection:
+            rows = connection.execute(
+                """
+                SELECT asset_path, package_name, asset_class, revision_value,
+                       file_size, modified_utc, content_sha256, package_dirty,
+                       canonical_relpath
+                FROM assets
+                ORDER BY asset_path
+                """
+            ).fetchall()
+            return [{key: row[key] for key in row.keys()} for row in rows]
+
+    def get_revision_record(self, asset_path: str) -> dict[str, Any] | None:
+        """Return immutable Revision metadata for one exact Unreal object path."""
+        asset_path = _asset_path(asset_path, required=True)
+        with self._open() as connection:
+            row = connection.execute(
+                """
+                SELECT asset_path, package_name, asset_class, revision_value,
+                       file_size, modified_utc, content_sha256, package_dirty,
+                       canonical_relpath
+                FROM assets
+                WHERE asset_path = ?
+                """,
+                (asset_path,),
+            ).fetchone()
+            return None if row is None else {key: row[key] for key in row.keys()}
+
     def _paged_response(
         self,
         *,

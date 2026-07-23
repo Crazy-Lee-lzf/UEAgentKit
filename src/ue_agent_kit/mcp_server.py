@@ -164,6 +164,14 @@ def _capabilities_response(workflow_service: PatchWorkflowService | None) -> dic
             "assetSections": ["identity", "summary", "metadata", "symbols", "references", "graphs", "nodes"],
             "outputTokenBudget": True,
         },
+        "freshness": {
+            "available": write_tools_enabled,
+            "sources": ["sqlite", "revision-export", "disk-package"] if write_tools_enabled else ["sqlite"],
+            "states": ["fresh", "stale", "partial", "unavailable", "unknown"],
+            "planRequiresFreshIndex": write_tools_enabled,
+            "commitMarksFixedSnapshotsStale": write_tools_enabled,
+            "rollbackMayRestoreFreshState": write_tools_enabled,
+        },
         "safety": {
             "fixedServerConfiguration": True,
             "arbitrarySql": False,
@@ -193,6 +201,13 @@ def _project_status_response(
     write_tools_enabled = workflow_service is not None
     commit_enabled = bool(workflow_service and workflow_service.config.commit_enabled)
     workflow_status = workflow_service.status() if workflow_service is not None else None
+    freshness_reader = getattr(workflow_service, "freshness_status", None) if workflow_service is not None else None
+    freshness_status = freshness_reader() if callable(freshness_reader) else {
+        "state": "unknown",
+        "indexFresh": None,
+        "indexStale": None,
+        "reason": "Revision Export and disk Package comparison is unavailable in this server mode.",
+    }
     project_key = str(index_status.get("projectKey", ""))
     project_name = str(workflow_status.get("projectName", project_key)) if workflow_status else project_key
     return {
@@ -229,12 +244,7 @@ def _project_status_response(
             "writeToolsEnabled": False,
             "commitToolsEnabled": False,
         },
-        "freshness": {
-            "state": "unknown",
-            "indexFresh": None,
-            "indexStale": None,
-            "reason": "Revision Export and disk Package comparison is not enabled in this server version.",
-        },
+        "freshness": freshness_status,
         "liveEditor": {
             "state": "unavailable",
             "reason": "Live Editor Bridge is not enabled.",
@@ -265,6 +275,8 @@ def _suggested_action(code: str) -> str:
         "filesystem-error": "Check access to the fixed server resources, then retry.",
         "workflow-timeout": "Check the Unreal process state and retry after the fixed workflow is responsive.",
         "commit-disabled": "Restart the server with explicitly authorized Commit tools and a Commit-enabled Policy.",
+        "index-stale": "Refresh the target asset export and immutable SQLite index, then create a new plan.",
+        "index-freshness-unavailable": "Restore the fixed Revision Export or package file so all Revision sources can be compared.",
     }
     if code in exact:
         return exact[code]

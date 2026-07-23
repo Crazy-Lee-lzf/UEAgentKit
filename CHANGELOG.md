@@ -4,6 +4,11 @@ All notable changes to UE Agent Kit are documented here.
 
 ## Unreleased
 
+- Added three-source freshness comparison across immutable SQLite, Revision Export Canonical data, and current project package SHA-256.
+- Required `fresh` target state before creating a Patch Plan, with separate `index-stale` and `index-freshness-unavailable` errors.
+- Marked SQLite and Revision Export snapshots stale after Commit, preserved stale through independent verification, and cleared it only after exact verified rollback.
+- Added bounded project freshness summaries to `ue_get_project_status` without exposing local package or snapshot paths.
+- Documented the staged single-asset refresh and new-session immutable snapshot reload design.
 - Added `ue_get_capabilities` for active Tool, Operation, limit, response-contract, and safety discovery.
 - Added `ue_get_project_status` for fixed project, Engine, immutable index, workflow, freshness, and Live Editor state.
 - Standardized MCP errors with `code`, `message`, `retryable`, `details`, and `suggestedAction` while retaining `type` for compatibility.

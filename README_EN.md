@@ -206,7 +206,7 @@ scripts\RunMcp.cmd -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3" -Check
 scripts\TestMcpStdio.cmd
 ```
 
-The server uses local `stdio` only. Default mode exposes `ue_search`, `ue_get_asset`, and `ue_find_references`; fixed Engine, Project, Policy, and Revision Export settings enable the complete eight-tool workflow:
+The server uses local `stdio` only. Default mode exposes five read-only capability, project-status, and query tools; fixed Engine, Project, Policy, and Revision Export settings enable the complete ten-tool workflow:
 
 ```bat
 claude mcp add --transport stdio --scope project ue-agent-kit -- ^
@@ -215,7 +215,7 @@ claude mcp add --transport stdio --scope project ue-agent-kit -- ^
   -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
 ```
 
-Use `claude mcp list` or `/mcp` inside Claude Code to inspect the connection. Full workflow mode requires `-EnableWriteTools`; asset save and restore additionally require `-EnableCommitTools`, a commit-enabled Policy, one-time dry-run receipts, and exact confirmation phrases. Stop the server before rebuilding the index. See [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md) for the full contract.
+Use `claude mcp list` or `/mcp` inside Claude Code to inspect the connection. Full workflow mode requires `-EnableWriteTools`; asset save and restore additionally require `-EnableCommitTools`, a commit-enabled Policy, one-time dry-run receipts, and exact confirmation phrases. Planning requires matching SQLite, Revision Export, and disk-package revisions. Commit marks the fixed snapshots stale; exact rollback can restore fresh state. Stop the server before rebuilding the index. See [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md) and [`spec/INDEX_FRESHNESS.md`](spec/INDEX_FRESHNESS.md) for the full contract.
 
 ### 7. Validate the asset catalog
 
@@ -261,7 +261,8 @@ Output\Blueprints\
 - [`spec/BACKUP_AND_ROLLBACK.md`](spec/BACKUP_AND_ROLLBACK.md): backup manifest, rollback receipt, and restore-verification contract.
 - [`spec/WRITE_FIXTURE_PLAN.md`](spec/WRITE_FIXTURE_PLAN.md): fixture plan, create/reset, and independent reload-verification contract.
 - [`spec/SCALAR_PATCH_REGRESSION.md`](spec/SCALAR_PATCH_REGRESSION.md): complete scalar-type, positive-write, and rejection-path Unreal regression contract.
-- [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md): read-only MCP tools, stdio transport, fixed database, and response contract.
+- [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md): MCP tools, stdio transport, fixed configuration, and response contract.
+- [`spec/INDEX_FRESHNESS.md`](spec/INDEX_FRESHNESS.md): three-source Revision freshness, stale lifecycle, and safe snapshot reload.
 
 See [`docs/README.md`](docs/README.md) for the documentation index.
 

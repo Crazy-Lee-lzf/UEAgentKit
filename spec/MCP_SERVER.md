@@ -55,7 +55,7 @@ Database、Engine、Project、Policy、Revision Export、Work Root、Backup Root
 
 返回 Project Key、固定项目状态、Engine 版本、SQLite Schema、索引时间、Exporter 版本、统计信息、Workflow 模式、索引新鲜度状态和 Live Editor 可用性。
 
-当前索引新鲜度尚未完成 Revision Export 与磁盘 Package 比较时，必须明确返回 `state=unknown`，不能把未知状态报告为 fresh。Live Editor Bridge 未启用时返回 `state=unavailable`。
+固定项目模式会比较 SQLite Revision、Revision Export Canonical Revision 和磁盘 Package SHA-256，返回 `fresh`、`stale`、`partial` 或 `unavailable`。默认只读模式没有固定 Project 与 Revision Export，必须明确返回 `state=unknown`，不能把未知状态报告为 fresh。Live Editor Bridge 未启用时返回 `state=unavailable`。详细契约见 `spec/INDEX_FRESHNESS.md`。
 
 ### `ue_search`
 
@@ -91,6 +91,26 @@ nodes
 - `depth` 为 1 至 3；大于 1 时必须提供锚点 `asset_path`。
 - `project_only=true` 只返回目标资产也存在于当前 SQLite 索引中的边。
 - 深层遍历不接受源/目标 Symbol 与目标资产端点组合，避免产生含义不稳定的跨层过滤。
+
+## 索引新鲜度与写入生命周期
+
+固定项目模式只允许对 `fresh` 目标创建 Plan：
+
+```text
+SQLite Revision == Revision Export Revision == disk Package SHA-256
+```
+
+Commit 成功后，磁盘 Package 已变化，但固定 SQLite 与 Revision Export 不会被原地改写，因此 Server 立即标记：
+
+```text
+fixedSnapshotsStale=true
+sqliteIndexStale=true
+revisionExportStale=true
+```
+
+独立 Verify 只确认 Commit Revision，不会清除 stale。只有 rollback 恢复到原 Revision 并重新通过三源比较，或在新会话中安全切换已验证的新快照，才能重新进入 `fresh`。
+
+当前 `/Game/...` 项目 Package 支持 `.uasset` 与 `.umap` 比较；未知 Mount 不做路径猜测，而是返回 `unavailable`。单资产刷新和安全重载设计见 `spec/INDEX_FRESHNESS.md`。
 
 ## 分页与输出预算
 
