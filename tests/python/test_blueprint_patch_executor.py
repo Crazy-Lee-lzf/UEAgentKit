@@ -244,6 +244,7 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
             "BlueprintContextExportCommandlet.cpp",
             "BlueprintContextExporter.cpp",
             "BlueprintPatchCommandlet.cpp",
+            "EditorBridge.cpp",
             "WriteFixturePlanCommandlet.cpp",
         ]
         private_root = ROOT / "Plugin" / "UEAgentKit" / "Source" / "UEAgentKitEditor" / "Private"

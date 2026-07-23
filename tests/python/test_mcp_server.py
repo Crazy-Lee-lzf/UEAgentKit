@@ -34,6 +34,7 @@ from ue_agent_kit.agent_api import (  # noqa: E402
 )
 from ue_agent_kit.agent_workflow import WorkflowError  # noqa: E402
 from ue_agent_kit.database import open_database  # noqa: E402
+from ue_agent_kit.editor_bridge import LiveEditorError  # noqa: E402
 from ue_agent_kit.indexer import build_index  # noqa: E402
 from ue_agent_kit.mcp_server import create_mcp_server, main as mcp_main  # noqa: E402
 
@@ -43,7 +44,11 @@ MCP_AVAILABLE = importlib.util.find_spec("mcp") is not None
 
 class FakeWorkflowService:
     def __init__(self) -> None:
-        self.config = SimpleNamespace(commit_enabled=True, engine_root=Path("missing-engine"))
+        self.config = SimpleNamespace(
+            commit_enabled=True,
+            engine_root=Path("missing-engine"),
+            project_path=Path("C:/Projects/TestProject/TestProject.uproject"),
+        )
 
     def status(self):
         return {
@@ -95,6 +100,64 @@ class FakeWorkflowService:
 
     def rollback_patch(self, apply_receipt, **kwargs):
         return {"ok": True, "tool": "ue_rollback_patch", "applyReceipt": apply_receipt, "mode": kwargs.get("mode", "DryRun")}
+
+
+class FakeLiveEditorService:
+    def __init__(self, *, available: bool = True) -> None:
+        self.available = available
+        self.config = SimpleNamespace(
+            project_path=Path("C:/Projects/TestProject/TestProject.uproject"),
+            project_name="TestProject",
+        )
+
+    def status(self):
+        if not self.available:
+            return {
+                "configured": True,
+                "state": "unavailable",
+                "reasonCode": "live-editor-unavailable",
+                "reason": "The fixed Editor is offline.",
+                "retryable": True,
+            }
+        return {
+            "configured": True,
+            "state": "available",
+            "pluginVersion": __version__,
+            "projectName": "TestProject",
+            "engineVersion": "5.6.1",
+            "processId": 1234,
+            "sessionId": "session-test",
+            "capabilities": [
+                "editor.status",
+                "editor.getSelection",
+                "editor.getOpenAssets",
+                "editor.getDirtyAssets",
+                "editor.getCurrentLevel",
+                "editor.getPieState",
+            ],
+            "pieState": "stopped",
+            "currentLevel": "/Game/Maps/Test.Test:PersistentLevel",
+            "dirtyPackageCount": 1,
+        }
+
+    def call_tool(self, tool_name: str):
+        if not self.available:
+            raise LiveEditorError("live-editor-unavailable", "The fixed Editor is offline.")
+        results = {
+            "ue_get_selection": {"count": 1, "truncated": False, "items": [{"kind": "Actor"}]},
+            "ue_get_open_assets": {"count": 0, "truncated": False, "items": []},
+            "ue_get_dirty_assets": {"count": 1, "truncated": False, "items": [{"packageName": "/Game/Test"}]},
+            "ue_get_current_level": {"available": True, "currentLevelPath": "/Game/Maps/Test.Test:PersistentLevel"},
+            "ue_get_pie_state": {"state": "stopped", "playing": False, "simulating": False},
+        }
+        return {
+            "schemaVersion": "1.0",
+            "tool": tool_name,
+            "ok": True,
+            "readOnly": True,
+            "source": "live-editor-memory",
+            "result": results[tool_name],
+        }
 
 
 def sha256(path: Path) -> str:
@@ -243,6 +306,26 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(payload["index"]["tool"], "ue_index_status")
         self.assertEqual(payload["index"]["stats"]["counts"]["assets"], 2)
 
+        project_path = self.temp_root / "TestProject.uproject"
+        project_path.write_text("{}", encoding="utf-8")
+        live_output = io.StringIO()
+        with contextlib.redirect_stdout(live_output):
+            live_exit_code = mcp_main(
+                [
+                    "--database",
+                    str(self.database_path),
+                    "--enable-live-editor",
+                    "--project",
+                    str(project_path),
+                    "--check",
+                ]
+            )
+        self.assertEqual(live_exit_code, 0)
+        live_payload = json.loads(live_output.getvalue())
+        self.assertTrue(live_payload["liveEditorEnabled"])
+        self.assertEqual(live_payload["liveEditor"]["state"], "unavailable")
+        self.assertEqual(live_payload["liveEditor"]["reasonCode"], "live-editor-unavailable")
+
     @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
     def test_fastmcp_registers_read_only_status_and_query_tools(self) -> None:
         server = create_mcp_server(self.database_path)
@@ -303,6 +386,125 @@ class McpServerTests(unittest.TestCase):
             server.call_tool("ue_search", {"continuation_token": "ct_unknown"})
         )
         self.assertEqual(token_error["error"]["code"], "invalid-continuation-token")
+
+    @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
+    def test_fastmcp_live_editor_mode_registers_bounded_read_tools(self) -> None:
+        live_service = FakeLiveEditorService()
+        server = create_mcp_server(self.database_path, live_editor_service=live_service)
+        tools = asyncio.run(server.list_tools())
+        expected_names = [
+            "ue_get_capabilities",
+            "ue_get_project_status",
+            "ue_search",
+            "ue_get_asset",
+            "ue_find_references",
+            "ue_editor_status",
+            "ue_get_selection",
+            "ue_get_open_assets",
+            "ue_get_dirty_assets",
+            "ue_get_current_level",
+            "ue_get_pie_state",
+        ]
+        self.assertEqual([tool.name for tool in tools], expected_names)
+        forbidden = {
+            "address",
+            "port",
+            "auth_token",
+            "endpoint",
+            "project",
+            "project_path",
+            "filesystem_path",
+            "uobject",
+            "console",
+            "python",
+            "shell",
+        }
+        for tool in tools:
+            properties = set(tool.inputSchema.get("properties", {}))
+            self.assertFalse(properties.intersection(forbidden), (tool.name, properties))
+            self.assertTrue(tool.annotations.readOnlyHint)
+            self.assertFalse(tool.annotations.destructiveHint)
+
+        _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
+        self.assertTrue(capabilities["liveEditor"]["configured"])
+        self.assertEqual(capabilities["liveEditor"]["transport"], "localhost-tcp")
+        self.assertEqual(capabilities["liveEditor"]["tools"], expected_names[5:])
+        self.assertFalse(capabilities["liveEditor"]["arbitraryEndpointArguments"])
+        self.assertFalse(capabilities["liveEditor"]["arbitraryUObject"])
+        self.assertTrue(capabilities["freshness"]["liveEditorMemorySeparate"])
+
+        _, project_status = asyncio.run(server.call_tool("ue_get_project_status", {}))
+        self.assertTrue(project_status["project"]["fixedProject"])
+        self.assertEqual(project_status["project"]["projectName"], "TestProject")
+        self.assertEqual(project_status["liveEditor"]["state"], "available")
+
+        _, editor_status = asyncio.run(server.call_tool("ue_editor_status", {}))
+        self.assertTrue(editor_status["ok"])
+        self.assertEqual(editor_status["result"]["state"], "available")
+        _, selection = asyncio.run(server.call_tool("ue_get_selection", {}))
+        self.assertEqual(selection["source"], "live-editor-memory")
+        self.assertEqual(selection["result"]["items"][0]["kind"], "Actor")
+
+        offline_server = create_mcp_server(
+            self.database_path,
+            live_editor_service=FakeLiveEditorService(available=False),
+        )
+        _, offline_status = asyncio.run(offline_server.call_tool("ue_editor_status", {}))
+        self.assertTrue(offline_status["ok"])
+        self.assertEqual(offline_status["result"]["state"], "unavailable")
+        _, offline_selection = asyncio.run(offline_server.call_tool("ue_get_selection", {}))
+        self.assertFalse(offline_selection["ok"])
+        self.assertEqual(offline_selection["error"]["code"], "live-editor-unavailable")
+        self.assertTrue(offline_selection["error"]["retryable"])
+
+    @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
+    def test_fastmcp_combined_live_and_workflow_mode_has_exact_tool_order(self) -> None:
+        workflow_service = FakeWorkflowService()
+        live_service = FakeLiveEditorService()
+        server = create_mcp_server(
+            self.database_path,
+            workflow_service=workflow_service,
+            live_editor_service=live_service,
+        )
+        tools = asyncio.run(server.list_tools())
+        expected_names = [
+            "ue_get_capabilities",
+            "ue_get_project_status",
+            "ue_search",
+            "ue_get_asset",
+            "ue_find_references",
+            "ue_editor_status",
+            "ue_get_selection",
+            "ue_get_open_assets",
+            "ue_get_dirty_assets",
+            "ue_get_current_level",
+            "ue_get_pie_state",
+            "ue_set_blueprint_default",
+            "ue_set_component_property",
+            "ue_set_pin_default",
+            "ue_set_asset_property",
+            "ue_set_material_parameter",
+            "ue_set_datatable_cell",
+            "ue_plan_patch",
+            "ue_dry_run_patch",
+            "ue_apply_patch",
+            "ue_verify_asset",
+            "ue_rollback_patch",
+        ]
+        self.assertEqual([tool.name for tool in tools], expected_names)
+        self.assertEqual(len(tools), 22)
+
+        mismatched_live = FakeLiveEditorService()
+        mismatched_live.config = SimpleNamespace(
+            project_path=Path("C:/Projects/OtherProject/OtherProject.uproject"),
+            project_name="OtherProject",
+        )
+        with self.assertRaisesRegex(ValueError, "same fixed project"):
+            create_mcp_server(
+                self.database_path,
+                workflow_service=workflow_service,
+                live_editor_service=mismatched_live,
+            )
 
     @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
     def test_fastmcp_full_workflow_registers_status_query_and_workflow_tools(self) -> None:
@@ -521,6 +723,25 @@ class McpServerTests(unittest.TestCase):
         ):
             self.assertIn(token, compatibility_source)
         self.assertIn("mcp_client_compatibility.py", compatibility_runner)
+
+        live_integration_source = (
+            TOOL_ROOT / "tests" / "integration" / "mcp_live_editor_smoke.py"
+        ).read_text(encoding="utf-8")
+        live_integration_runner = (TOOL_ROOT / "scripts" / "TestMcpLiveEditor.ps1").read_text(encoding="utf-8")
+        for token in (
+            "ue_editor_status",
+            "ue_get_selection",
+            "ue_get_open_assets",
+            "ue_get_dirty_assets",
+            "ue_get_current_level",
+            "ue_get_pie_state",
+            "secretsRedacted",
+            "databaseHashUnchanged",
+        ):
+            self.assertIn(token, live_integration_source)
+        self.assertIn("mcp_live_editor_smoke.py", live_integration_runner)
+        self.assertIn("[switch]$EnableLiveEditor", runner_source)
+        self.assertIn("--enable-live-editor", server_source)
 
         example = json.loads(
             (TOOL_ROOT / "examples" / "mcp" / "claude-code.example.json").read_text(encoding="utf-8")

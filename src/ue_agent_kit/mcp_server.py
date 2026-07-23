@@ -24,6 +24,12 @@ from .agent_workflow import (
     WorkflowError,
 )
 from .config import DEFAULT_DATABASE
+from .editor_bridge import (
+    LIVE_EDITOR_METHODS,
+    LiveEditorBridgeConfig,
+    LiveEditorBridgeService,
+    LiveEditorError,
+)
 from .patches import get_operation_registry
 from .query_protocol import (
     DEFAULT_OUTPUT_TOKEN_BUDGET,
@@ -46,6 +52,7 @@ else:
 MCP_SERVER_NAME = "UE Agent Kit"
 TOOL_ROOT = Path(__file__).resolve().parents[2]
 READ_TOOL_NAMES = ["ue_get_capabilities", "ue_get_project_status", "ue_search", "ue_get_asset", "ue_find_references"]
+LIVE_EDITOR_TOOL_NAMES = list(LIVE_EDITOR_METHODS)
 HIGH_LEVEL_WRITE_TOOL_NAMES = [
     "ue_set_blueprint_default",
     "ue_set_component_property",
@@ -58,15 +65,25 @@ LOW_LEVEL_WRITE_TOOL_NAMES = ["ue_plan_patch", "ue_dry_run_patch", "ue_apply_pat
 WRITE_TOOL_NAMES = HIGH_LEVEL_WRITE_TOOL_NAMES + LOW_LEVEL_WRITE_TOOL_NAMES
 
 
-def _server_instructions(write_tools_enabled: bool, commit_enabled: bool) -> str:
+def _server_instructions(
+    write_tools_enabled: bool,
+    commit_enabled: bool,
+    live_editor_enabled: bool,
+) -> str:
     base = (
         "Use ue_get_capabilities to inspect the active server contract and ue_get_project_status for the fixed "
         "project and index state. Use ue_search to locate assets or symbols, ue_get_asset for one exact asset path, "
         "and ue_find_references for dependency and Blueprint reference edges. "
     )
+    live_text = (
+        "The ue_editor_* and ue_get_* live tools read registered state from the fixed local Unreal Editor Bridge; "
+        "they never accept endpoints, tokens, filesystem paths, arbitrary UObject calls, Console commands, Python, or Shell. "
+        if live_editor_enabled
+        else "Live Editor access is not configured. "
+    )
     if not write_tools_enabled:
-        return "Read-only access to the UE Agent Kit SQLite index. " + base + (
-            "This server cannot execute shell commands, load Unreal objects, or write assets."
+        return "Read-only access to the UE Agent Kit SQLite index. " + base + live_text + (
+            "This server cannot execute shell commands or write assets."
         )
     commit_text = (
         "Explicit Commit and rollback Commit are enabled, but each requires a successful prior Dry Run, "
@@ -75,12 +92,12 @@ def _server_instructions(write_tools_enabled: bool, commit_enabled: bool) -> str
         else "Planning, Dry Run, and independent verification are enabled; Commit and rollback Commit are disabled."
     )
     return (
-        "Fixed-project UE Agent Kit workflow. " + base +
+        "Fixed-project UE Agent Kit workflow. " + base + live_text +
         "Prefer the ue_set_* tools for common Blueprint, asset, Material Instance, and DataTable changes. "
         "They create a strict Plan by default and may run Plan plus Dry Run, but never Commit. Use ue_apply_patch only "
         "with the returned planId and one-time Dry Run receipt. The low-level ue_plan_patch remains available for "
         "registered Operations not covered by a high-level Tool. Tool arguments cannot choose filesystem paths, policies, projects, "
-        "engines, databases, or arbitrary Unreal commands. " + commit_text
+        "engines, databases, Editor Bridge endpoints, or arbitrary Unreal commands. " + commit_text
     )
 
 
@@ -90,13 +107,22 @@ def _server_mode(write_tools_enabled: bool, commit_enabled: bool) -> str:
     return "fixed-project-commit" if commit_enabled else "fixed-project-dry-run"
 
 
-def _tool_descriptors(write_tools_enabled: bool) -> list[dict[str, Any]]:
+def _tool_descriptors(
+    write_tools_enabled: bool,
+    live_editor_enabled: bool,
+) -> list[dict[str, Any]]:
     traits = {
         "ue_get_capabilities": (True, False),
         "ue_get_project_status": (True, False),
         "ue_search": (True, False),
         "ue_get_asset": (True, False),
         "ue_find_references": (True, False),
+        "ue_editor_status": (True, False),
+        "ue_get_selection": (True, False),
+        "ue_get_open_assets": (True, False),
+        "ue_get_dirty_assets": (True, False),
+        "ue_get_current_level": (True, False),
+        "ue_get_pie_state": (True, False),
         "ue_set_blueprint_default": (False, False),
         "ue_set_component_property": (False, False),
         "ue_set_pin_default": (False, False),
@@ -109,7 +135,11 @@ def _tool_descriptors(write_tools_enabled: bool) -> list[dict[str, Any]]:
         "ue_verify_asset": (False, False),
         "ue_rollback_patch": (False, True),
     }
-    names = READ_TOOL_NAMES + (WRITE_TOOL_NAMES if write_tools_enabled else [])
+    names = list(READ_TOOL_NAMES)
+    if live_editor_enabled:
+        names += LIVE_EDITOR_TOOL_NAMES
+    if write_tools_enabled:
+        names += WRITE_TOOL_NAMES
     return [
         {
             "name": name,
@@ -141,9 +171,13 @@ def _read_engine_status(workflow_service: PatchWorkflowService | None) -> dict[s
     }
 
 
-def _capabilities_response(workflow_service: PatchWorkflowService | None) -> dict[str, Any]:
+def _capabilities_response(
+    workflow_service: PatchWorkflowService | None,
+    live_editor_service: LiveEditorBridgeService | None,
+) -> dict[str, Any]:
     write_tools_enabled = workflow_service is not None
     commit_enabled = bool(workflow_service and workflow_service.config.commit_enabled)
+    live_editor_enabled = live_editor_service is not None
     return {
         "schemaVersion": "1.0",
         "tool": "ue_get_capabilities",
@@ -155,10 +189,25 @@ def _capabilities_response(workflow_service: PatchWorkflowService | None) -> dic
             "transport": "stdio",
             "mode": _server_mode(write_tools_enabled, commit_enabled),
         },
-        "tools": _tool_descriptors(write_tools_enabled),
+        "tools": _tool_descriptors(write_tools_enabled, live_editor_enabled),
         "operations": {
             "available": write_tools_enabled,
             "items": get_operation_registry() if write_tools_enabled else [],
+        },
+        "liveEditor": {
+            "configured": live_editor_enabled,
+            "transport": "localhost-tcp" if live_editor_enabled else "unavailable",
+            "tools": LIVE_EDITOR_TOOL_NAMES if live_editor_enabled else [],
+            "source": "editor-memory" if live_editor_enabled else "unavailable",
+            "fixedProject": live_editor_enabled,
+            "fixedEndpoint": live_editor_enabled,
+            "projectVersionHandshake": live_editor_enabled,
+            "arbitraryEndpointArguments": False,
+            "arbitraryUObject": False,
+            "arbitraryConsole": False,
+            "arbitraryPython": False,
+            "arbitraryShell": False,
+            "writeSupported": False,
         },
         "highLevelChanges": {
             "available": write_tools_enabled,
@@ -180,6 +229,9 @@ def _capabilities_response(workflow_service: PatchWorkflowService | None) -> dic
             "outputTokenBudgetMaximum": MAX_OUTPUT_TOKEN_BUDGET,
             "singleAssetPerPatch": 1,
             "singleOperationPerAsset": 1,
+            "liveSelectionItems": 200,
+            "liveOpenAssets": 200,
+            "liveDirtyPackages": 200,
         },
         "responseContract": {
             "schemaVersion": "1.0",
@@ -193,6 +245,7 @@ def _capabilities_response(workflow_service: PatchWorkflowService | None) -> dic
             },
             "assetSections": ["identity", "summary", "metadata", "symbols", "references", "graphs", "nodes"],
             "outputTokenBudget": True,
+            "liveSource": "live-editor-memory",
             "diagnostics": {
                 "fields": ["diagnosticId", "reportId", "stage", "exitCode", "stdoutTail", "stderrTail"],
                 "localPathsRedacted": True,
@@ -206,6 +259,7 @@ def _capabilities_response(workflow_service: PatchWorkflowService | None) -> dic
             "planRequiresFreshIndex": write_tools_enabled,
             "commitMarksFixedSnapshotsStale": write_tools_enabled,
             "rollbackMayRestoreFreshState": write_tools_enabled,
+            "liveEditorMemorySeparate": live_editor_enabled,
         },
         "safety": {
             "fixedServerConfiguration": True,
@@ -223,6 +277,7 @@ def _capabilities_response(workflow_service: PatchWorkflowService | None) -> dic
         "session": {
             "plansPersistent": False,
             "receiptsPersistent": False,
+            "liveEditorConnectionPersistent": False,
         },
     }
 
@@ -230,6 +285,7 @@ def _capabilities_response(workflow_service: PatchWorkflowService | None) -> dic
 def _project_status_response(
     index_service: IndexQueryService,
     workflow_service: PatchWorkflowService | None,
+    live_editor_service: LiveEditorBridgeService | None,
 ) -> dict[str, Any]:
     index_status = index_service.check()
     index_metadata = index_status.get("indexMetadata", {})
@@ -243,8 +299,24 @@ def _project_status_response(
         "indexStale": None,
         "reason": "Revision Export and disk Package comparison is unavailable in this server mode.",
     }
+    live_editor_status = (
+        live_editor_service.status()
+        if live_editor_service is not None
+        else {
+            "configured": False,
+            "state": "unavailable",
+            "reasonCode": "live-editor-disabled",
+            "reason": "Live Editor Bridge is not enabled for this MCP Server.",
+            "retryable": False,
+        }
+    )
     project_key = str(index_status.get("projectKey", ""))
-    project_name = str(workflow_status.get("projectName", project_key)) if workflow_status else project_key
+    if workflow_status:
+        project_name = str(workflow_status.get("projectName", project_key))
+    elif live_editor_service is not None:
+        project_name = live_editor_service.config.project_name
+    else:
+        project_name = project_key
     return {
         "schemaVersion": "1.0",
         "tool": "ue_get_project_status",
@@ -255,7 +327,7 @@ def _project_status_response(
         "project": {
             "projectKey": project_key,
             "projectName": project_name,
-            "fixedProject": write_tools_enabled,
+            "fixedProject": write_tools_enabled or live_editor_service is not None,
         },
         "engine": _read_engine_status(workflow_service),
         "database": {
@@ -280,10 +352,7 @@ def _project_status_response(
             "commitToolsEnabled": False,
         },
         "freshness": freshness_status,
-        "liveEditor": {
-            "state": "unavailable",
-            "reason": "Live Editor Bridge is not enabled.",
-        },
+        "liveEditor": live_editor_status,
     }
 
 
@@ -298,6 +367,9 @@ _RETRYABLE_ERROR_CODES = {
     "rollback-dry-run-failed",
     "rollback-commit-failed",
     "workflow-report-missing",
+    "live-editor-unavailable",
+    "live-editor-timeout",
+    "live-editor-connection-closed",
 }
 
 
@@ -319,6 +391,13 @@ def _suggested_action(code: str) -> str:
         "ue-process-crashed": "Inspect the sanitized diagnostic and Unreal log tail, fix the crash cause, then repeat from a new Plan.",
         "workflow-report-missing": "Inspect the diagnosticId and Unreal process output; repeat the workflow only after confirming why no report was created.",
         "workflow-report-invalid": "Inspect the reportId and diagnostic details; fix the producer or corrupted report before retrying.",
+        "live-editor-unavailable": "Start the fixed Unreal Editor project with the UE Agent Kit plugin enabled, then retry.",
+        "live-editor-timeout": "Check whether the fixed Unreal Editor is responsive, then retry the read-only request.",
+        "live-editor-connection-closed": "Retry after the fixed Unreal Editor Bridge publishes a new active session descriptor.",
+        "live-editor-version-mismatch": "Use matching UE Agent Kit plugin and MCP Server versions, then restart both sessions.",
+        "live-editor-project-mismatch": "Start the exact project fixed at MCP Server startup; endpoint arguments cannot override it.",
+        "live-editor-authentication-failed": "Restart the Editor and MCP Server so a new local authenticated session is negotiated.",
+        "live-editor-capability-unavailable": "Use only the registered Live Editor capabilities reported by ue_get_capabilities.",
     }
     if code in exact:
         return exact[code]
@@ -335,6 +414,9 @@ def _error_response(tool: str, error: Exception, *, read_only: bool) -> dict[str
     message = str(error)
     details: dict[str, Any] = {}
     if isinstance(error, WorkflowError):
+        code = error.code
+        details = error.details
+    elif isinstance(error, LiveEditorError):
         code = error.code
         details = error.details
     elif isinstance(error, FileNotFoundError):
@@ -375,6 +457,7 @@ def create_mcp_server(
     *,
     workflow_config: PatchWorkflowConfig | None = None,
     workflow_service: PatchWorkflowService | None = None,
+    live_editor_service: LiveEditorBridgeService | None = None,
 ):
     if FastMCP is None or ToolAnnotations is None:
         raise RuntimeError(
@@ -388,11 +471,18 @@ def create_mcp_server(
         raise ValueError("Provide workflow_config or workflow_service, not both.")
     if workflow_service is None and workflow_config is not None:
         workflow_service = PatchWorkflowService(index_service, workflow_config)
+    if (
+        workflow_service is not None
+        and live_editor_service is not None
+        and workflow_service.config.project_path.resolve() != live_editor_service.config.project_path.resolve()
+    ):
+        raise ValueError("Workflow and Live Editor services must use the same fixed project")
     write_tools_enabled = workflow_service is not None
     commit_enabled = bool(workflow_service and workflow_service.config.commit_enabled)
+    live_editor_enabled = live_editor_service is not None
     server = FastMCP(
         MCP_SERVER_NAME,
-        instructions=_server_instructions(write_tools_enabled, commit_enabled),
+        instructions=_server_instructions(write_tools_enabled, commit_enabled, live_editor_enabled),
         json_response=True,
     )
 
@@ -406,13 +496,13 @@ def create_mcp_server(
     @server.tool(annotations=read_annotations)
     def ue_get_capabilities() -> dict[str, Any]:
         """Return the active MCP mode, Tool contract, operation registry, limits, and safety guarantees."""
-        return _capabilities_response(workflow_service)
+        return _capabilities_response(workflow_service, live_editor_service)
 
     @server.tool(annotations=read_annotations)
     def ue_get_project_status() -> dict[str, Any]:
         """Return the fixed project, Engine, immutable index, workflow, freshness, and live-state summary."""
         try:
-            return _project_status_response(index_service, workflow_service)
+            return _project_status_response(index_service, workflow_service, live_editor_service)
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return _error_response("ue_get_project_status", exc, read_only=True)
 
@@ -517,6 +607,59 @@ def create_mcp_server(
             )
         except (FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return _error_response("ue_find_references", exc, read_only=True)
+
+    if live_editor_service is not None:
+        @server.tool(annotations=read_annotations)
+        def ue_editor_status() -> dict[str, Any]:
+            """Return fixed-project Live Editor availability, version, session, PIE, level, and Dirty summary."""
+            return {
+                "schemaVersion": "1.0",
+                "tool": "ue_editor_status",
+                "ok": True,
+                "readOnly": True,
+                "source": "live-editor-memory",
+                "result": live_editor_service.status(),
+            }
+
+        @server.tool(annotations=read_annotations)
+        def ue_get_selection() -> dict[str, Any]:
+            """Return the bounded Actor, Component, Asset, and Object selection from the fixed Editor session."""
+            try:
+                return live_editor_service.call_tool("ue_get_selection")
+            except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+                return _error_response("ue_get_selection", exc, read_only=True)
+
+        @server.tool(annotations=read_annotations)
+        def ue_get_open_assets() -> dict[str, Any]:
+            """Return assets currently opened in registered asset editors in the fixed Editor session."""
+            try:
+                return live_editor_service.call_tool("ue_get_open_assets")
+            except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+                return _error_response("ue_get_open_assets", exc, read_only=True)
+
+        @server.tool(annotations=read_annotations)
+        def ue_get_dirty_assets() -> dict[str, Any]:
+            """Return bounded Dirty /Game packages and their Asset Registry paths from Editor memory."""
+            try:
+                return live_editor_service.call_tool("ue_get_dirty_assets")
+            except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+                return _error_response("ue_get_dirty_assets", exc, read_only=True)
+
+        @server.tool(annotations=read_annotations)
+        def ue_get_current_level() -> dict[str, Any]:
+            """Return the fixed Editor world, persistent/current level, World Partition, and Dirty state."""
+            try:
+                return live_editor_service.call_tool("ue_get_current_level")
+            except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+                return _error_response("ue_get_current_level", exc, read_only=True)
+
+        @server.tool(annotations=read_annotations)
+        def ue_get_pie_state() -> dict[str, Any]:
+            """Return whether the fixed Editor is stopped, playing, or simulating in editor."""
+            try:
+                return live_editor_service.call_tool("ue_get_pie_state")
+            except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+                return _error_response("ue_get_pie_state", exc, read_only=True)
 
     if workflow_service is not None:
         planning_annotations = ToolAnnotations(
@@ -776,6 +919,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--enable-write-tools", action="store_true")
     parser.add_argument("--enable-commit-tools", action="store_true")
+    parser.add_argument("--enable-live-editor", action="store_true")
     parser.add_argument("--engine-root", type=Path)
     parser.add_argument("--project", dest="project_path", type=Path)
     parser.add_argument("--policy", dest="policy_path", type=Path)
@@ -783,6 +927,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--work-root", type=Path, default=TOOL_ROOT / "Output" / "McpWorkflow")
     parser.add_argument("--backup-root", type=Path, default=TOOL_ROOT / "Backups" / "McpWorkflow")
     parser.add_argument("--process-timeout-seconds", type=int, default=1800)
+    parser.add_argument("--live-editor-timeout-seconds", type=float, default=2.0)
     parser.add_argument(
         "--check",
         action="store_true",
@@ -795,9 +940,11 @@ def _build_workflow_config(args: argparse.Namespace) -> PatchWorkflowConfig | No
     if args.enable_commit_tools and not args.enable_write_tools:
         raise ValueError("--enable-commit-tools requires --enable-write-tools")
     if not args.enable_write_tools:
-        configured = [args.engine_root, args.project_path, args.policy_path, args.revision_export]
+        configured = [args.engine_root, args.policy_path, args.revision_export]
         if any(item is not None for item in configured):
-            raise ValueError("Workflow paths require --enable-write-tools")
+            raise ValueError("Engine, Policy, and Revision Export paths require --enable-write-tools")
+        if args.project_path is not None and not args.enable_live_editor:
+            raise ValueError("--project without write tools requires --enable-live-editor")
         return None
     required = {
         "--engine-root": args.engine_root,
@@ -823,6 +970,20 @@ def _build_workflow_config(args: argparse.Namespace) -> PatchWorkflowConfig | No
     )
 
 
+def _build_live_editor_service(args: argparse.Namespace) -> LiveEditorBridgeService | None:
+    if not args.enable_live_editor:
+        return None
+    if args.project_path is None:
+        raise ValueError("--enable-live-editor requires --project")
+    return LiveEditorBridgeService(
+        LiveEditorBridgeConfig(
+            project_path=args.project_path,
+            timeout_seconds=args.live_editor_timeout_seconds,
+        ),
+        server_version=__version__,
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -830,6 +991,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         index_status = index_service.check()
         workflow_config = _build_workflow_config(args)
         workflow_service = PatchWorkflowService(index_service, workflow_config) if workflow_config is not None else None
+        live_editor_service = _build_live_editor_service(args)
         if args.check:
             payload: dict[str, Any] = {
                 "schemaVersion": "1.0",
@@ -838,15 +1000,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "index": index_status,
                 "writeToolsEnabled": workflow_service is not None,
                 "commitToolsEnabled": bool(workflow_service and workflow_service.config.commit_enabled),
+                "liveEditorEnabled": live_editor_service is not None,
             }
             if workflow_service is not None:
                 payload["workflow"] = workflow_service.status()
+            if live_editor_service is not None:
+                payload["liveEditor"] = live_editor_service.status()
             print(json.dumps(payload, ensure_ascii=False, indent=2))
             return 0
-        server = create_mcp_server(args.database, workflow_service=workflow_service)
+        server = create_mcp_server(
+            args.database,
+            workflow_service=workflow_service,
+            live_editor_service=live_editor_service,
+        )
         server.run(transport="stdio")
         return 0
-    except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+    except (LiveEditorError, WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
         print(
             json.dumps(_error_response("ue_agent_kit_mcp", exc, read_only=False), ensure_ascii=False),
             file=sys.stderr,

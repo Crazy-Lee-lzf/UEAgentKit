@@ -2,6 +2,7 @@ param(
     [string]$Database = "",
     [switch]$EnableWriteTools,
     [switch]$EnableCommitTools,
+    [switch]$EnableLiveEditor,
     [string]$EngineRoot = "",
     [string]$ProjectPath = "",
     [string]$Policy = "",
@@ -10,6 +11,8 @@ param(
     [string]$BackupRoot = "",
     [ValidateRange(60, 7200)]
     [int]$ProcessTimeoutSeconds = 1800,
+    [ValidateRange(0.1, 30.0)]
+    [double]$LiveEditorTimeoutSeconds = 2.0,
     [switch]$Check
 )
 
@@ -35,10 +38,13 @@ if ($EnableCommitTools -and !$EnableWriteTools)
 }
 
 $Arguments = @($EntryPoint, "--database", $Database)
+if ($EnableWriteTools -or $EnableLiveEditor)
+{
+    $ProjectPath = Resolve-UeakProjectPath -ProjectPath $ProjectPath
+}
 if ($EnableWriteTools)
 {
     $EngineRoot = Resolve-UeakEngineRoot -EngineRoot $EngineRoot
-    $ProjectPath = Resolve-UeakProjectPath -ProjectPath $ProjectPath
     if ([string]::IsNullOrWhiteSpace($Policy))
     {
         throw "Policy is required when EnableWriteTools is set."
@@ -82,16 +88,34 @@ if ($EnableWriteTools)
         $Arguments += "--enable-commit-tools"
     }
 }
-elseif (
-    ![string]::IsNullOrWhiteSpace($EngineRoot) -or
-    ![string]::IsNullOrWhiteSpace($ProjectPath) -or
-    ![string]::IsNullOrWhiteSpace($Policy) -or
-    ![string]::IsNullOrWhiteSpace($RevisionExport) -or
-    ![string]::IsNullOrWhiteSpace($WorkRoot) -or
-    ![string]::IsNullOrWhiteSpace($BackupRoot)
+
+if ($EnableLiveEditor)
+{
+    $Arguments += @(
+        "--enable-live-editor",
+        "--live-editor-timeout-seconds", [string]$LiveEditorTimeoutSeconds
+    )
+    if (!$EnableWriteTools)
+    {
+        $Arguments += @("--project", $ProjectPath)
+    }
+}
+
+if (
+    !$EnableWriteTools -and (
+        ![string]::IsNullOrWhiteSpace($EngineRoot) -or
+        ![string]::IsNullOrWhiteSpace($Policy) -or
+        ![string]::IsNullOrWhiteSpace($RevisionExport) -or
+        ![string]::IsNullOrWhiteSpace($WorkRoot) -or
+        ![string]::IsNullOrWhiteSpace($BackupRoot)
+    )
 )
 {
-    throw "Workflow paths require EnableWriteTools."
+    throw "Engine, Policy, RevisionExport, WorkRoot, and BackupRoot require EnableWriteTools."
+}
+if (!$EnableWriteTools -and !$EnableLiveEditor -and ![string]::IsNullOrWhiteSpace($ProjectPath))
+{
+    throw "ProjectPath requires EnableWriteTools or EnableLiveEditor."
 }
 
 & $VenvPython -c "import mcp"

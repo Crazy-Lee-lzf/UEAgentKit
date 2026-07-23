@@ -4,6 +4,11 @@ All notable changes to UE Agent Kit are documented here.
 
 ## Unreleased
 
+- Added a restricted fixed-project Live Editor Bridge over authenticated localhost TCP with exact project/version/capability handshake and no arbitrary endpoint, UObject, Console, Python, Shell, or filesystem Tool arguments.
+- Added six optional read-only MCP tools: `ue_editor_status`, `ue_get_selection`, `ue_get_open_assets`, `ue_get_dirty_assets`, `ue_get_current_level`, and `ue_get_pie_state`.
+- Added stable offline degradation and separate Live Editor error codes while keeping Editor memory, disk packages, and immutable SQLite snapshot state distinct.
+- Added a reproducible real UE5.6 Live Editor MCP smoke test with endpoint/token redaction and unchanged temporary SQLite verification.
+
 ## 0.5.1 — MCP usability, freshness, and diagnostics
 
 - Added a multi-client compatibility matrix covering the official Python MCP SDK, raw newline-delimited JSON-RPC stdio, Claude Code Tool Schema requirements, and standard structured-content/text-fallback response contracts.

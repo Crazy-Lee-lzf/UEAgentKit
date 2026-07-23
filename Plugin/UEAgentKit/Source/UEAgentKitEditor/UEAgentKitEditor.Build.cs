@@ -22,8 +22,10 @@ public class UEAgentKitEditor : ModuleRules
 				"Json",
 				"JsonUtilities",
 				"MaterialEditor",
+				"Networking",
 				"Niagara",
 				"Projects",
+				"Sockets",
 				"UnrealEd"
 			});
 	}

@@ -1,6 +1,6 @@
 # UE Agent Kit 路线图
 
-更新时间：2026-07-23
+更新时间：2026-07-24
 
 当前版本为 **0.5.1**，支持 Unreal Engine 5.6。
 
@@ -19,7 +19,7 @@ UE Agent Kit 的长期定位是面向 AI Agent 的 Unreal Engine 项目智能层
 0.5.1  MCP 协议补全：状态、分页、新鲜度、高层写入、诊断和 Client 兼容
 ```
 
-0.5.1 已完成离线 MCP 查询、受控写入和协议诊断的日常可用性补全。下一阶段进入 0.5.2 Live Editor Read，重点区分磁盘快照、SQLite 索引与 Editor 内存状态。
+0.5.1 已完成离线 MCP 查询、受控写入和协议诊断。0.5.2 第一批 localhost Editor Bridge 与六个核心实时只读 Tool 已完成，下一批补日志、编译错误、实时资产检查和安全索引刷新。
 
 ## 0.5.x：MCP 与日常开发工具补全
 
@@ -41,27 +41,27 @@ UE Agent Kit 的长期定位是面向 AI Agent 的 Unreal Engine 项目智能层
 
 建立受限的 Editor Bridge，只提供明确注册的高层能力，不开放任意 UObject、Console、Python、Shell 或文件操作。
 
-首批能力：
+已完成：
 
-```text
-ue_editor_status
-ue_get_selection
-ue_get_open_assets
-ue_get_dirty_assets
-ue_get_current_level
-ue_get_pie_state
-ue_get_output_log
-ue_get_compile_errors
-ue_inspect_asset_live
-ue_refresh_asset_index
-```
+- [x] 仅绑定 `127.0.0.1` 的临时 TCP Listener 与随机会话令牌。
+- [x] 固定 Project Path 摘要、Plugin/Server 版本和 Capability 握手。
+- [x] Editor 不在线时稳定降级，离线 SQLite Tool 继续工作。
+- [x] `ue_editor_status`。
+- [x] `ue_get_selection`。
+- [x] `ue_get_open_assets`。
+- [x] `ue_get_dirty_assets`。
+- [x] `ue_get_current_level`。
+- [x] `ue_get_pie_state`。
+- [x] 区分 Editor Memory、磁盘 Package Revision 与 SQLite Snapshot。
+- [x] 真实 UE5.6 Editor + MCP `stdio` 联调与端点/令牌脱敏验证。
 
-需要区分：
+后续：
 
-- 磁盘 Package Revision。
-- SQLite 索引状态。
-- Editor 内存中的当前对象状态。
-- 尚未保存的 Dirty 修改。
+- [ ] `ue_get_output_log`。
+- [ ] `ue_get_compile_errors`。
+- [ ] `ue_inspect_asset_live`。
+- [ ] `ue_refresh_asset_index`。
+- [ ] Dirty UObject 与磁盘/索引差异的更细粒度状态模型。
 
 ### 0.5.3：Daily Actions 与验证
 

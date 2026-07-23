@@ -207,7 +207,15 @@ scripts\TestMcpStdio.cmd
 scripts\TestMcpClients.cmd
 ```
 
-The server uses local `stdio` only. Default mode exposes five read-only capability, project-status, and query tools; fixed Engine, Project, Policy, and Revision Export settings enable the complete sixteen-tool workflow:
+The 0.5.2 development branch can additionally test a fixed-project Live Editor Bridge:
+
+```bat
+scripts\TestMcpLiveEditor.cmd ^
+  -EngineRoot "<UE_5.6>" ^
+  -ProjectPath "<TEST_PROJECT>.uproject"
+```
+
+The MCP Client still uses local `stdio` only. Default mode exposes 5 offline read-only tools; `-EnableLiveEditor -ProjectPath <fixed project>` adds 6 live read-only tools for a total of 11; the fixed write workflow exposes 16; combining both exposes 22:
 
 ```bat
 claude mcp add --transport stdio --scope project ue-agent-kit -- ^
@@ -216,7 +224,7 @@ claude mcp add --transport stdio --scope project ue-agent-kit -- ^
   -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
 ```
 
-Use `claude mcp list` or `/mcp` inside Claude Code to inspect the connection. Full workflow mode requires `-EnableWriteTools`; asset save and restore additionally require `-EnableCommitTools`, a commit-enabled Policy, one-time dry-run receipts, and exact confirmation phrases. Planning requires matching SQLite, Revision Export, and disk-package revisions. Six `ue_set_*` tools create a Plan by default or may run a Dry Run, but cannot commit directly. Commit marks the fixed snapshots stale; exact rollback can restore fresh state. Stop the server before rebuilding the index. See [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md) and [`spec/INDEX_FRESHNESS.md`](spec/INDEX_FRESHNESS.md) for the full contract.
+Use `claude mcp list` or `/mcp` inside Claude Code to inspect the connection. Live Editor mode discovers a temporary loopback endpoint from the fixed project's `Saved/UEAgentKit/EditorBridge.json`, then validates a random token, project-path digest, exact version, and registered capabilities. Tool arguments cannot choose a port, token, arbitrary UObject, Console, Python, or Shell. Full write mode requires `-EnableWriteTools`; saving and restore additionally require `-EnableCommitTools`, a commit-enabled Policy, one-time receipts, and exact confirmation phrases. Planning still requires matching SQLite, Revision Export, and disk-package revisions. See [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md), [`spec/LIVE_EDITOR_BRIDGE.md`](spec/LIVE_EDITOR_BRIDGE.md), and [`spec/INDEX_FRESHNESS.md`](spec/INDEX_FRESHNESS.md).
 
 ### 7. Validate the asset catalog
 
@@ -264,6 +272,7 @@ Output\Blueprints\
 - [`spec/WRITE_FIXTURE_PLAN.md`](spec/WRITE_FIXTURE_PLAN.md): fixture plan, create/reset, and independent reload-verification contract.
 - [`spec/SCALAR_PATCH_REGRESSION.md`](spec/SCALAR_PATCH_REGRESSION.md): complete scalar-type, positive-write, and rejection-path Unreal regression contract.
 - [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md): MCP tools, stdio transport, fixed configuration, and response contract.
+- [`spec/LIVE_EDITOR_BRIDGE.md`](spec/LIVE_EDITOR_BRIDGE.md): restricted localhost IPC, fixed-project handshake, and live read-only state.
 - [`spec/INDEX_FRESHNESS.md`](spec/INDEX_FRESHNESS.md): three-source Revision freshness, stale lifecycle, and safe snapshot reload.
 
 See [`docs/README.md`](docs/README.md) for the documentation index.

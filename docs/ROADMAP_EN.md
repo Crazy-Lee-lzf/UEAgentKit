@@ -1,6 +1,6 @@
 # UE Agent Kit Roadmap
 
-Updated: 2026-07-23
+Updated: 2026-07-24
 
 The current release is **0.5.1** and targets Unreal Engine 5.6.
 
@@ -17,7 +17,7 @@ UE Agent Kit is evolving into an Unreal Engine project intelligence layer for AI
 0.5.1  MCP protocol completion: status, pagination, freshness, high-level writes, diagnostics, client compatibility
 ```
 
-Version 0.5.1 completes the offline MCP query and controlled-write usability layer. The next phase is Live Editor Read, which must distinguish disk packages, immutable SQLite snapshots, and unsaved Editor memory.
+Version 0.5.1 completes the offline MCP query and controlled-write usability layer. The first 0.5.2 batch now provides an authenticated localhost Editor Bridge and six core live read tools; logs, compile diagnostics, live asset inspection, and safe index refresh remain next.
 
 ## 0.5.x: MCP and daily development tools
 
@@ -36,20 +36,27 @@ Version 0.5.1 completes the offline MCP query and controlled-write usability lay
 
 Create a restricted local Editor Bridge with registered high-level capabilities only. Do not expose arbitrary UObject, Console, Python, Shell, or filesystem access.
 
-Initial targets:
+Completed in the first batch:
 
-```text
-ue_editor_status
-ue_get_selection
-ue_get_open_assets
-ue_get_dirty_assets
-ue_get_current_level
-ue_get_pie_state
-ue_get_output_log
-ue_get_compile_errors
-ue_inspect_asset_live
-ue_refresh_asset_index
-```
+- [x] Ephemeral `127.0.0.1` listener with a random per-session token.
+- [x] Fixed project-path digest, exact Plugin/Server version, and capability handshake.
+- [x] Stable offline degradation while SQLite tools remain available.
+- [x] `ue_editor_status`.
+- [x] `ue_get_selection`.
+- [x] `ue_get_open_assets`.
+- [x] `ue_get_dirty_assets`.
+- [x] `ue_get_current_level`.
+- [x] `ue_get_pie_state`.
+- [x] Separate Editor memory, disk package Revision, and immutable SQLite snapshot semantics.
+- [x] Real UE5.6 Editor plus MCP stdio smoke coverage with endpoint/token redaction.
+
+Remaining 0.5.2 targets:
+
+- [ ] `ue_get_output_log`.
+- [ ] `ue_get_compile_errors`.
+- [ ] `ue_inspect_asset_live`.
+- [ ] `ue_refresh_asset_index`.
+- [ ] Finer-grained Dirty UObject versus disk/index status.
 
 ### 0.5.3: daily actions and validation
 

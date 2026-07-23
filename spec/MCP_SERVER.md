@@ -16,6 +16,21 @@ ue_get_asset
 ue_find_references
 ```
 
+### 固定项目 Live Editor 模式
+
+使用 `-EnableLiveEditor -ProjectPath <固定 .uproject>` 后，在五个离线查询 Tool 之外注册：
+
+```text
+ue_editor_status
+ue_get_selection
+ue_get_open_assets
+ue_get_dirty_assets
+ue_get_current_level
+ue_get_pie_state
+```
+
+该模式不要求启用写入。MCP Server 从固定项目 `Saved/UEAgentKit/EditorBridge.json` 读取 localhost 临时端点，并校验随机认证令牌、规范化项目路径摘要、Plugin/Server 版本和注册 Capability。地址、端口、令牌、Descriptor 和任意本机路径不会成为 Tool 参数或响应字段。Editor 未运行时 `ue_editor_status` 稳定报告 `state=unavailable`，其余 Live Tool 返回可重试错误，离线 SQLite Tool 保持可用。详细协议见 `spec/LIVE_EDITOR_BRIDGE.md`。
+
 ### 固定项目完整模式
 
 使用 `-EnableWriteTools` 后，Server 启动时还必须固定：
@@ -49,7 +64,20 @@ ue_rollback_patch
 
 ## 启动配置不是 Tool 参数
 
-Database、Engine、Project、Policy、Revision Export、Work Root、Backup Root 和进程超时只能在 Server 启动时配置。任何 MCP Tool Schema 都不会出现这些字段，因此 Agent 不能在调用中切换工程、Policy、引擎、数据库或输出位置。完整模式还要求 SQLite `projectKey`、Revision Export `projectName` 与 `.uproject` 文件名完全一致。
+Database、Engine、Project、Policy、Revision Export、Work Root、Backup Root、进程超时、Live Editor 启用状态和 Live Editor 超时只能在 Server 启动时配置。任何 MCP Tool Schema 都不会出现这些字段，因此 Agent 不能在调用中切换工程、Policy、引擎、数据库、Bridge 端点或输出位置。写入完整模式还要求 SQLite `projectKey`、Revision Export `projectName` 与 `.uproject` 文件名完全一致；Live Editor 与写入模式组合时必须使用同一个固定 `.uproject`。
+
+## Live Editor Tool
+
+Live Tool 全部无参数、`readOnlyHint=true`、`destructiveHint=false`，成功结果标记 `source=live-editor-memory`。它们读取当前 Editor 内存，不读取或改写 SQLite，不生成磁盘 Revision，也不改变索引 freshness。
+
+- `ue_editor_status`：Bridge 可用性、Plugin/Engine 版本、Project、PID、Session、Capability、PIE、当前关卡和 Dirty Package 计数。
+- `ue_get_selection`：Actor、Component、Asset 和 Object 当前选择，去重后最多 200 项。
+- `ue_get_open_assets`：`UAssetEditorSubsystem` 中打开的资产，最多 200 项。
+- `ue_get_dirty_assets`：Dirty `/Game/` Package 和 Asset Registry 路径，最多 200 项。
+- `ue_get_current_level`：Editor World、Persistent/Current Level、World Partition 和 Dirty 状态。
+- `ue_get_pie_state`：`stopped`、`playing` 或 `simulating`，以及 Play World/Net Mode。
+
+稳定错误包括 `live-editor-unavailable`、`live-editor-timeout`、`live-editor-connection-closed`、`live-editor-version-mismatch`、`live-editor-project-mismatch`、`live-editor-authentication-failed`、`live-editor-capability-unavailable` 和 `live-editor-protocol-error`。
 
 ## 查询 Tool
 

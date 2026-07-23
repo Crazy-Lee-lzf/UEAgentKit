@@ -1,0 +1,215 @@
+from __future__ import annotations
+
+import json
+import socketserver
+import sys
+import tempfile
+import threading
+import unittest
+from pathlib import Path
+from typing import Any
+
+TOOL_ROOT = Path(__file__).resolve().parents[2]
+SRC_ROOT = TOOL_ROOT / "src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
+
+from ue_agent_kit import __version__  # noqa: E402
+from ue_agent_kit.editor_bridge import (  # noqa: E402
+    LiveEditorBridgeConfig,
+    LiveEditorBridgeService,
+    LiveEditorError,
+)
+
+
+class _BridgeHandler(socketserver.StreamRequestHandler):
+    def handle(self) -> None:
+        hello = json.loads(self.rfile.readline().decode("utf-8"))
+        if hello.get("authToken") != self.server.auth_token:  # type: ignore[attr-defined]
+            self._write_error(hello.get("requestId", ""), "live-editor-authentication-failed")
+            return
+        if hello.get("serverVersion") != self.server.version:  # type: ignore[attr-defined]
+            self._write_error(hello.get("requestId", ""), "live-editor-version-mismatch")
+            return
+        if hello.get("projectPathHash") != self.server.project_hash:  # type: ignore[attr-defined]
+            self._write_error(hello.get("requestId", ""), "live-editor-project-mismatch")
+            return
+        self._write_result(
+            hello["requestId"],
+            {
+                "pluginVersion": self.server.version,  # type: ignore[attr-defined]
+                "projectName": self.server.project_name,  # type: ignore[attr-defined]
+                "sessionId": "session-test",
+                "capabilities": self.server.capabilities,  # type: ignore[attr-defined]
+            },
+        )
+        request = json.loads(self.rfile.readline().decode("utf-8"))
+        method = request.get("method")
+        results: dict[str, dict[str, Any]] = {
+            "editor.status": {
+                "state": "available",
+                "pluginVersion": self.server.version,  # type: ignore[attr-defined]
+                "projectName": self.server.project_name,  # type: ignore[attr-defined]
+                "engineVersion": "5.6.1",
+                "processId": 1234,
+                "sessionId": "session-test",
+                "capabilities": self.server.capabilities,  # type: ignore[attr-defined]
+                "pieState": "stopped",
+                "currentLevel": "/Game/Maps/Test.Test:PersistentLevel",
+                "dirtyPackageCount": 1,
+            },
+            "editor.getSelection": {
+                "count": 1,
+                "truncated": False,
+                "items": [
+                    {
+                        "kind": "Actor",
+                        "name": "TestActor",
+                        "objectPath": "/Game/Maps/Test.Test:PersistentLevel.TestActor",
+                        "packageDirty": True,
+                    }
+                ],
+            },
+            "editor.getOpenAssets": {"count": 0, "truncated": False, "items": []},
+            "editor.getDirtyAssets": {
+                "count": 1,
+                "truncated": False,
+                "items": [{"packageName": "/Game/Maps/Test", "assetPaths": ["/Game/Maps/Test.Test"]}],
+            },
+            "editor.getCurrentLevel": {
+                "available": True,
+                "worldPath": "/Game/Maps/Test.Test",
+                "currentLevelPath": "/Game/Maps/Test.Test:PersistentLevel",
+                "packageDirty": True,
+                "worldPartitioned": False,
+            },
+            "editor.getPieState": {
+                "state": "stopped",
+                "playing": False,
+                "simulating": False,
+                "worldPath": "",
+            },
+        }
+        result = results.get(method)
+        if result is None:
+            self._write_error(request.get("requestId", ""), "live-editor-capability-unavailable")
+            return
+        self._write_result(request["requestId"], result)
+
+    def _write_result(self, request_id: str, result: dict[str, Any]) -> None:
+        payload = {
+            "schemaVersion": "1.0",
+            "requestId": request_id,
+            "ok": True,
+            "result": result,
+        }
+        self.wfile.write(json.dumps(payload, ensure_ascii=False).encode("utf-8") + b"\n")
+
+    def _write_error(self, request_id: str, code: str) -> None:
+        payload = {
+            "schemaVersion": "1.0",
+            "requestId": request_id,
+            "ok": False,
+            "error": {"code": code, "message": code},
+        }
+        self.wfile.write(json.dumps(payload).encode("utf-8") + b"\n")
+
+
+class _BridgeServer(socketserver.ThreadingTCPServer):
+    allow_reuse_address = False
+    daemon_threads = True
+
+
+class EditorBridgeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory(prefix="ueak_live_editor_")
+        self.root = Path(self.temporary_directory.name)
+        self.project_path = self.root / "测试项目.uproject"
+        self.project_path.write_text("{}", encoding="utf-8")
+        self.config = LiveEditorBridgeConfig(self.project_path, timeout_seconds=1.0)
+        self.service = LiveEditorBridgeService(self.config, server_version=__version__)
+        self.token = "a" * 64
+        self.capabilities = [
+            "editor.status",
+            "editor.getSelection",
+            "editor.getOpenAssets",
+            "editor.getDirtyAssets",
+            "editor.getCurrentLevel",
+            "editor.getPieState",
+        ]
+        self.server = _BridgeServer(("127.0.0.1", 0), _BridgeHandler)
+        self.server.auth_token = self.token  # type: ignore[attr-defined]
+        self.server.version = __version__  # type: ignore[attr-defined]
+        self.server.project_hash = self.config.project_path_hash  # type: ignore[attr-defined]
+        self.server.project_name = self.config.project_name  # type: ignore[attr-defined]
+        self.server.capabilities = self.capabilities  # type: ignore[attr-defined]
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    def tearDown(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        self.temporary_directory.cleanup()
+
+    def _write_descriptor(self, **overrides: Any) -> None:
+        descriptor = {
+            "schemaVersion": "1.0",
+            "address": "127.0.0.1",
+            "port": self.server.server_address[1],
+            "authToken": self.token,
+            "projectName": self.config.project_name,
+            "projectPathHash": self.config.project_path_hash,
+            "pluginVersion": __version__,
+            "processId": 1234,
+            "sessionId": "session-test",
+            "capabilities": self.capabilities,
+        }
+        descriptor.update(overrides)
+        self.config.descriptor_path.parent.mkdir(parents=True, exist_ok=True)
+        self.config.descriptor_path.write_text(
+            json.dumps(descriptor, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+    def test_authenticated_status_and_selection(self) -> None:
+        self._write_descriptor()
+        status = self.service.status()
+        self.assertEqual(status["state"], "available")
+        self.assertEqual(status["pluginVersion"], __version__)
+        self.assertEqual(status["projectName"], "测试项目")
+        self.assertEqual(status["pieState"], "stopped")
+        self.assertEqual(status["dirtyPackageCount"], 1)
+
+        selection = self.service.call_tool("ue_get_selection")
+        self.assertTrue(selection["ok"])
+        self.assertEqual(selection["source"], "live-editor-memory")
+        self.assertEqual(selection["result"]["items"][0]["kind"], "Actor")
+
+    def test_missing_descriptor_degrades_without_exposing_path(self) -> None:
+        status = self.service.status()
+        self.assertEqual(status["state"], "unavailable")
+        self.assertEqual(status["reasonCode"], "live-editor-unavailable")
+        self.assertNotIn(str(self.config.descriptor_path), json.dumps(status, ensure_ascii=False))
+
+    def test_descriptor_rejects_version_project_and_non_local_address(self) -> None:
+        for overrides, code in (
+            ({"pluginVersion": "9.9.9"}, "live-editor-version-mismatch"),
+            ({"projectPathHash": "sha1:" + "0" * 40}, "live-editor-project-mismatch"),
+            ({"address": "0.0.0.0"}, "live-editor-protocol-error"),
+        ):
+            with self.subTest(code=code):
+                self._write_descriptor(**overrides)
+                with self.assertRaises(LiveEditorError) as context:
+                    self.service.call_method("editor.status")
+                self.assertEqual(context.exception.code, code)
+
+    def test_authentication_failure_is_stable(self) -> None:
+        self._write_descriptor(authToken="b" * 64)
+        with self.assertRaises(LiveEditorError) as context:
+            self.service.call_method("editor.status")
+        self.assertEqual(context.exception.code, "live-editor-authentication-failed")
+
+
+if __name__ == "__main__":
+    unittest.main()

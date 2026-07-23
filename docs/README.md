@@ -22,6 +22,7 @@
 16. [`../spec/SCALAR_PATCH_REGRESSION.md`](../spec/SCALAR_PATCH_REGRESSION.md)：完整标量写入、独立重载和失败路径回归。
 17. [`../spec/MCP_SERVER.md`](../spec/MCP_SERVER.md)：MCP Tool、固定配置、Receipt、stdio 和完整安全边界。
 18. [`../spec/INDEX_FRESHNESS.md`](../spec/INDEX_FRESHNESS.md)：SQLite、Revision Export、磁盘 Package 三源新鲜度与安全重载。
+19. [`../spec/LIVE_EDITOR_BRIDGE.md`](../spec/LIVE_EDITOR_BRIDGE.md)：localhost IPC、固定工程认证握手和实时只读状态。
 
 ## 当前版本
 
@@ -35,6 +36,7 @@ UE Agent Kit 0.5.1 支持 Unreal Engine 5.6，当前公开能力包括：
 - Write Fixture Plan、Create/Reset、安全目标边界和独立 UE 重载验证。
 - 11 类标量完整 Dry Run/Commit/重载矩阵，以及 9 类失败路径零写入回归。
 - 默认五 Tool 只读 MCP，以及固定项目、六个高层安全写入入口、Receipt 门禁、显式确认和独立验证的十六 Tool 完整 MCP 工作流。
+- 0.5.2 开发中的受限 Live Editor Bridge：固定工程 localhost 会话和六个实时只读 Tool；可与离线或写入模式组合。
 
 只读分析路径不修改资产；Blueprint Patch、Asset Patch 与 MCP Commit 仅在明确授权后执行。
 
