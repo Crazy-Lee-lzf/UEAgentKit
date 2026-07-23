@@ -2,6 +2,14 @@
 
 All notable changes to UE Agent Kit are documented here.
 
+## Unreleased
+
+- Added `ue_get_capabilities` for active Tool, Operation, limit, response-contract, and safety discovery.
+- Added `ue_get_project_status` for fixed project, Engine, immutable index, workflow, freshness, and Live Editor state.
+- Standardized MCP errors with `code`, `message`, `retryable`, `details`, and `suggestedAction` while retaining `type` for compatibility.
+- Added index build metadata to the read-only status contract and fixed the Python package version reported by MCP.
+- Extended unit, stdio, and real UE5.6 workflow coverage for the new protocol contract.
+
 ## 0.5.0 — Fixed-project MCP workflow
 
 - Added `ue_plan_patch`, `ue_dry_run_patch`, `ue_apply_patch`, `ue_verify_asset`, and `ue_rollback_patch` to the existing three read-only query tools.

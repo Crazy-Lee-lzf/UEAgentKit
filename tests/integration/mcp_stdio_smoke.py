@@ -64,6 +64,8 @@ async def _run_client(database_path: Path, error_log_path: Path) -> dict[str, ob
             async with ClientSession(read_stream, write_stream) as session:
                 initialize_result = await session.initialize()
                 tools_result = await session.list_tools()
+                capabilities_result = await session.call_tool("ue_get_capabilities", {})
+                project_status_result = await session.call_tool("ue_get_project_status", {})
                 search_result = await session.call_tool(
                     "ue_search",
                     {"query": "生命值", "scope": "symbols", "kind": "variable"},
@@ -75,13 +77,19 @@ async def _run_client(database_path: Path, error_log_path: Path) -> dict[str, ob
                 )
                 rejected_result = await session.call_tool("ue_find_references", {})
 
+    capabilities = capabilities_result.structuredContent
+    project_status = project_status_result.structuredContent
     search = search_result.structuredContent
     asset = asset_result.structuredContent
     references = references_result.structuredContent
     rejected = rejected_result.structuredContent
     tool_names = [tool.name for tool in tools_result.tools]
-    if tool_names != ["ue_search", "ue_get_asset", "ue_find_references"]:
+    if tool_names != ["ue_get_capabilities", "ue_get_project_status", "ue_search", "ue_get_asset", "ue_find_references"]:
         raise RuntimeError(f"Unexpected MCP tools: {tool_names}")
+    if not capabilities or capabilities["server"]["mode"] != "read-only":
+        raise RuntimeError(f"Capabilities lookup failed: {capabilities}")
+    if not project_status or project_status["freshness"]["state"] != "unknown":
+        raise RuntimeError(f"Project status lookup failed: {project_status}")
     if not search or search["results"][0]["name"] != "生命值":
         raise RuntimeError(f"Unicode symbol search failed: {search}")
     if not asset or not asset["found"] or asset["asset"]["asset_path"] != ASSET_A:
@@ -102,6 +110,8 @@ async def _run_client(database_path: Path, error_log_path: Path) -> dict[str, ob
         "protocolVersion": initialize_result.protocolVersion,
         "serverName": initialize_result.serverInfo.name,
         "tools": tool_names,
+        "serverVersion": capabilities["server"]["version"],
+        "projectStatusAvailable": True,
         "searchResultCount": search["pagination"]["resultCount"],
         "assetFound": asset["found"],
         "referenceResultCount": references["pagination"]["resultCount"],

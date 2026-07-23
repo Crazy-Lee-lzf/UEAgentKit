@@ -1,6 +1,6 @@
 # UE Agent Kit MCP Server
 
-UE Agent Kit 0.5.0 通过本地 MCP `stdio` 提供稳定的高层查询和受控资产工作流。MCP 层不会开放任意 SQL、Shell、文件系统路径、Commandlet 参数或 UObject 调用。
+UE Agent Kit 0.5.x 通过本地 MCP `stdio` 提供稳定的高层查询和受控资产工作流。MCP 层不会开放任意 SQL、Shell、文件系统路径、Commandlet 参数或 UObject 调用。
 
 ## 模式
 
@@ -9,6 +9,8 @@ UE Agent Kit 0.5.0 通过本地 MCP `stdio` 提供稳定的高层查询和受控
 固定一个不可变 SQLite 索引，只注册：
 
 ```text
+ue_get_capabilities
+ue_get_project_status
 ue_search
 ue_get_asset
 ue_find_references
@@ -45,6 +47,16 @@ Database、Engine、Project、Policy、Revision Export、Work Root、Backup Root
 
 ## 查询 Tool
 
+### `ue_get_capabilities`
+
+返回当前 Server 版本、模式、实际注册的 Tool、可用 Operation、查询上限、响应契约和安全边界。只读模式不会把写入 Operation 标记为可用。
+
+### `ue_get_project_status`
+
+返回 Project Key、固定项目状态、Engine 版本、SQLite Schema、索引时间、Exporter 版本、统计信息、Workflow 模式、索引新鲜度状态和 Live Editor 可用性。
+
+当前索引新鲜度尚未完成 Revision Export 与磁盘 Package 比较时，必须明确返回 `state=unknown`，不能把未知状态报告为 fresh。Live Editor Bridge 未启用时返回 `state=unavailable`。
+
 ### `ue_search`
 
 搜索 Asset 或 Symbol，带硬分页上限。
@@ -56,6 +68,20 @@ Database、Engine、Project、Policy、Revision Export、Work Root、Backup Root
 ### `ue_find_references`
 
 按引用类型、源/目标 Symbol、源/目标资产过滤；至少需要一个条件。
+
+## 错误 Envelope
+
+Tool 失败时统一返回：
+
+```text
+code
+message
+retryable
+details
+suggestedAction
+```
+
+`code` 是供客户端判断的稳定错误码；`retryable` 表示在不改变请求语义的前提下重试是否可能成功；`details` 必须经过路径脱敏；`suggestedAction` 给出下一步操作。保留 `type` 仅用于兼容旧客户端，不应作为协议判断依据。
 
 ## 写入工作流 Tool
 

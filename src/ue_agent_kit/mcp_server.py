@@ -7,9 +7,19 @@ import sys
 from pathlib import Path
 from typing import Any, Literal, Sequence
 
-from .agent_api import IndexQueryService, IndexSnapshotError
+from . import __version__
+from .agent_api import (
+    MAX_MCP_GRAPH_LIMIT,
+    MAX_MCP_NODE_LIMIT,
+    MAX_MCP_REFERENCE_LIMIT,
+    MAX_MCP_SEARCH_LIMIT,
+    MAX_MCP_SYMBOL_LIMIT,
+    IndexQueryService,
+    IndexSnapshotError,
+)
 from .agent_workflow import PatchWorkflowConfig, PatchWorkflowService, WorkflowError
 from .config import DEFAULT_DATABASE
+from .patches import get_operation_registry
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -24,11 +34,14 @@ else:
 
 MCP_SERVER_NAME = "UE Agent Kit"
 TOOL_ROOT = Path(__file__).resolve().parents[2]
+READ_TOOL_NAMES = ["ue_get_capabilities", "ue_get_project_status", "ue_search", "ue_get_asset", "ue_find_references"]
+WRITE_TOOL_NAMES = ["ue_plan_patch", "ue_dry_run_patch", "ue_apply_patch", "ue_verify_asset", "ue_rollback_patch"]
 
 
 def _server_instructions(write_tools_enabled: bool, commit_enabled: bool) -> str:
     base = (
-        "Use ue_search to locate assets or symbols, ue_get_asset for one exact asset path, "
+        "Use ue_get_capabilities to inspect the active server contract and ue_get_project_status for the fixed "
+        "project and index state. Use ue_search to locate assets or symbols, ue_get_asset for one exact asset path, "
         "and ue_find_references for dependency and Blueprint reference edges. "
     )
     if not write_tools_enabled:
@@ -47,6 +60,201 @@ def _server_instructions(write_tools_enabled: bool, commit_enabled: bool) -> str
         "for policy-gated single-asset workflows. Tool arguments cannot choose filesystem paths, policies, projects, "
         "engines, databases, or arbitrary Unreal commands. " + commit_text
     )
+
+
+def _server_mode(write_tools_enabled: bool, commit_enabled: bool) -> str:
+    if not write_tools_enabled:
+        return "read-only"
+    return "fixed-project-commit" if commit_enabled else "fixed-project-dry-run"
+
+
+def _tool_descriptors(write_tools_enabled: bool) -> list[dict[str, Any]]:
+    traits = {
+        "ue_get_capabilities": (True, False),
+        "ue_get_project_status": (True, False),
+        "ue_search": (True, False),
+        "ue_get_asset": (True, False),
+        "ue_find_references": (True, False),
+        "ue_plan_patch": (False, False),
+        "ue_dry_run_patch": (False, False),
+        "ue_apply_patch": (False, True),
+        "ue_verify_asset": (False, False),
+        "ue_rollback_patch": (False, True),
+    }
+    names = READ_TOOL_NAMES + (WRITE_TOOL_NAMES if write_tools_enabled else [])
+    return [
+        {
+            "name": name,
+            "readOnly": traits[name][0],
+            "destructive": traits[name][1],
+        }
+        for name in names
+    ]
+
+
+def _read_engine_status(workflow_service: PatchWorkflowService | None) -> dict[str, Any]:
+    if workflow_service is None:
+        return {"configured": False, "state": "unavailable"}
+    build_version = workflow_service.config.engine_root / "Engine" / "Build" / "Build.version"
+    try:
+        payload = json.loads(build_version.read_text(encoding="utf-8-sig"))
+        major = int(payload["MajorVersion"])
+        minor = int(payload["MinorVersion"])
+        patch = int(payload["PatchVersion"])
+    except (FileNotFoundError, OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return {"configured": True, "state": "unknown"}
+    return {
+        "configured": True,
+        "state": "available",
+        "version": f"{major}.{minor}.{patch}",
+        "changelist": payload.get("Changelist"),
+        "compatibleChangelist": payload.get("CompatibleChangelist"),
+        "isLicenseeVersion": payload.get("IsLicenseeVersion"),
+    }
+
+
+def _capabilities_response(workflow_service: PatchWorkflowService | None) -> dict[str, Any]:
+    write_tools_enabled = workflow_service is not None
+    commit_enabled = bool(workflow_service and workflow_service.config.commit_enabled)
+    return {
+        "schemaVersion": "1.0",
+        "tool": "ue_get_capabilities",
+        "ok": True,
+        "readOnly": True,
+        "server": {
+            "name": MCP_SERVER_NAME,
+            "version": __version__,
+            "transport": "stdio",
+            "mode": _server_mode(write_tools_enabled, commit_enabled),
+        },
+        "tools": _tool_descriptors(write_tools_enabled),
+        "operations": {
+            "available": write_tools_enabled,
+            "items": get_operation_registry() if write_tools_enabled else [],
+        },
+        "limits": {
+            "searchResults": MAX_MCP_SEARCH_LIMIT,
+            "assetSymbols": MAX_MCP_SYMBOL_LIMIT,
+            "assetReferences": MAX_MCP_REFERENCE_LIMIT,
+            "assetGraphs": MAX_MCP_GRAPH_LIMIT,
+            "assetNodes": MAX_MCP_NODE_LIMIT,
+            "singleAssetPerPatch": 1,
+            "singleOperationPerAsset": 1,
+        },
+        "responseContract": {
+            "schemaVersion": "1.0",
+            "errorFields": ["code", "message", "retryable", "details", "suggestedAction"],
+        },
+        "safety": {
+            "fixedServerConfiguration": True,
+            "arbitrarySql": False,
+            "arbitraryShell": False,
+            "arbitraryFilesystem": False,
+            "arbitraryConsole": False,
+            "arbitraryPython": False,
+            "arbitraryUObject": False,
+            "dryRunRequiredForCommit": True,
+            "oneTimeReceiptRequired": True,
+            "explicitConfirmationRequired": True,
+            "unboundedSaveAll": False,
+        },
+        "session": {
+            "plansPersistent": False,
+            "receiptsPersistent": False,
+        },
+    }
+
+
+def _project_status_response(
+    index_service: IndexQueryService,
+    workflow_service: PatchWorkflowService | None,
+) -> dict[str, Any]:
+    index_status = index_service.check()
+    index_metadata = index_status.get("indexMetadata", {})
+    write_tools_enabled = workflow_service is not None
+    commit_enabled = bool(workflow_service and workflow_service.config.commit_enabled)
+    workflow_status = workflow_service.status() if workflow_service is not None else None
+    project_key = str(index_status.get("projectKey", ""))
+    project_name = str(workflow_status.get("projectName", project_key)) if workflow_status else project_key
+    return {
+        "schemaVersion": "1.0",
+        "tool": "ue_get_project_status",
+        "ok": True,
+        "readOnly": True,
+        "serverVersion": __version__,
+        "serverMode": _server_mode(write_tools_enabled, commit_enabled),
+        "project": {
+            "projectKey": project_key,
+            "projectName": project_name,
+            "fixedProject": write_tools_enabled,
+        },
+        "engine": _read_engine_status(workflow_service),
+        "database": {
+            "configured": True,
+            "state": "available",
+            "schemaVersion": index_status.get("databaseSchemaVersion"),
+            "immutable": bool(index_metadata.get("immutable")),
+            "quiescent": bool(index_metadata.get("quiescent")),
+            "lastIndexedAtUtc": index_metadata.get("lastIndexedAtUtc", ""),
+            "manifestSchemaVersion": index_metadata.get("manifestSchemaVersion", ""),
+            "exporterVersion": index_metadata.get("exporterVersion", ""),
+            "profile": index_metadata.get("profile", ""),
+            "stats": index_status.get("stats", {}),
+        },
+        "revisionExport": {
+            "configured": write_tools_enabled,
+            "state": "available" if write_tools_enabled else "unavailable",
+        },
+        "workflow": workflow_status or {
+            "available": False,
+            "writeToolsEnabled": False,
+            "commitToolsEnabled": False,
+        },
+        "freshness": {
+            "state": "unknown",
+            "indexFresh": None,
+            "indexStale": None,
+            "reason": "Revision Export and disk Package comparison is not enabled in this server version.",
+        },
+        "liveEditor": {
+            "state": "unavailable",
+            "reason": "Live Editor Bridge is not enabled.",
+        },
+    }
+
+
+_RETRYABLE_ERROR_CODES = {
+    "index-not-quiescent",
+    "filesystem-error",
+    "database-error",
+    "workflow-timeout",
+    "dry-run-failed",
+    "commit-failed",
+    "verify-export-failed",
+    "rollback-dry-run-failed",
+    "rollback-commit-failed",
+}
+
+
+def _suggested_action(code: str) -> str:
+    exact = {
+        "database-not-found": "Check the fixed --database configuration and rebuild the index if it was moved.",
+        "index-not-quiescent": "Finish indexing, close every SQLite writer, then retry with a quiescent snapshot.",
+        "invalid-arguments": "Correct the Tool arguments using the published input schema and retry.",
+        "database-error": "Validate the immutable index and rebuild it if the database is damaged or incompatible.",
+        "filesystem-error": "Check access to the fixed server resources, then retry.",
+        "workflow-timeout": "Check the Unreal process state and retry after the fixed workflow is responsive.",
+        "commit-disabled": "Restart the server with explicitly authorized Commit tools and a Commit-enabled Policy.",
+    }
+    if code in exact:
+        return exact[code]
+    if "receipt" in code or code.endswith("-not-found") or code.endswith("-consumed"):
+        return "Repeat the required planning or Dry Run step in the current MCP session to obtain a fresh receipt."
+    if "policy" in code or code in {"commit-not-allowed", "patch-plan-rejected", "patch-validation-failed"}:
+        return "Review the fixed Project Write Policy and target authorization before creating a new plan."
+    if "revision" in code or code in {"asset-not-indexed", "plan-tampered"}:
+        return "Refresh the Revision Export and SQLite index, then create a new plan from the current asset Revision."
+    return "Review the sanitized error details and fixed server configuration before retrying."
 
 
 def _error_response(tool: str, error: Exception, *, read_only: bool) -> dict[str, Any]:
@@ -78,10 +286,11 @@ def _error_response(tool: str, error: Exception, *, read_only: bool) -> dict[str
             "code": code,
             "type": type(error).__name__,
             "message": message,
+            "retryable": code in _RETRYABLE_ERROR_CODES,
+            "details": details,
+            "suggestedAction": _suggested_action(code),
         },
     }
-    if details:
-        response["error"]["details"] = details
     return response
 
 
@@ -117,6 +326,19 @@ def create_mcp_server(
         idempotentHint=True,
         openWorldHint=False,
     )
+
+    @server.tool(annotations=read_annotations)
+    def ue_get_capabilities() -> dict[str, Any]:
+        """Return the active MCP mode, Tool contract, operation registry, limits, and safety guarantees."""
+        return _capabilities_response(workflow_service)
+
+    @server.tool(annotations=read_annotations)
+    def ue_get_project_status() -> dict[str, Any]:
+        """Return the fixed project, Engine, immutable index, workflow, freshness, and live-state summary."""
+        try:
+            return _project_status_response(index_service, workflow_service)
+        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return _error_response("ue_get_project_status", exc, read_only=True)
 
     @server.tool(annotations=read_annotations)
     def ue_search(

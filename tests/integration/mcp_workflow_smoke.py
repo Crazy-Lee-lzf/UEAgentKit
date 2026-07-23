@@ -13,6 +13,8 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 TOOL_ROOT = Path(__file__).resolve().parents[2]
 ASSET_PATH = "/Game/UEAgentKitWriteTests/ScalarRegression/DA_ScalarPatchTarget.DA_ScalarPatchTarget"
 EXPECTED_TOOLS = [
+    "ue_get_capabilities",
+    "ue_get_project_status",
     "ue_search",
     "ue_get_asset",
     "ue_find_references",
@@ -103,6 +105,26 @@ async def run_workflow(args: argparse.Namespace) -> dict[str, object]:
                     properties = set(tool.inputSchema.get("properties", {}))
                     if properties.intersection(forbidden):
                         raise RuntimeError(f"Tool exposes fixed configuration: {tool.name} {properties}")
+
+                capabilities = require_payload(
+                    await session.call_tool("ue_get_capabilities", {}),
+                    "ue_get_capabilities",
+                )
+                if capabilities["server"]["mode"] != "fixed-project-commit":
+                    raise RuntimeError(f"Unexpected MCP mode: {capabilities}")
+                if not capabilities["operations"]["available"]:
+                    raise RuntimeError(f"Write operations were not reported as available: {capabilities}")
+
+                project_status = require_payload(
+                    await session.call_tool("ue_get_project_status", {}),
+                    "ue_get_project_status",
+                )
+                if project_status["project"]["projectName"] != args.project.stem:
+                    raise RuntimeError(f"Fixed project identity mismatch: {project_status}")
+                if not str(project_status["engine"].get("version", "")).startswith("5.6"):
+                    raise RuntimeError(f"Unexpected Engine version: {project_status}")
+                if project_status["revisionExport"]["state"] != "available":
+                    raise RuntimeError(f"Revision Export status mismatch: {project_status}")
 
                 search = require_payload(
                     await session.call_tool(
@@ -245,6 +267,9 @@ async def run_workflow(args: argparse.Namespace) -> dict[str, object]:
         "protocolVersion": initialized.protocolVersion,
         "serverName": initialized.serverInfo.name,
         "tools": EXPECTED_TOOLS,
+        "capabilitiesChecked": True,
+        "projectStatusChecked": True,
+        "engineVersion": project_status["engine"]["version"],
         "planId": plan_id,
         "dryRunReceiptIssued": True,
         "invalidCommitConfirmationRejected": True,

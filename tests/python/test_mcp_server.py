@@ -18,6 +18,7 @@ SRC_ROOT = TOOL_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
+from ue_agent_kit import __version__  # noqa: E402
 from test_indexer_queries import (  # noqa: E402
     ASSET_A,
     GENERIC_ASSET,
@@ -41,7 +42,17 @@ MCP_AVAILABLE = importlib.util.find_spec("mcp") is not None
 
 class FakeWorkflowService:
     def __init__(self) -> None:
-        self.config = SimpleNamespace(commit_enabled=True)
+        self.config = SimpleNamespace(commit_enabled=True, engine_root=Path("missing-engine"))
+
+    def status(self):
+        return {
+            "schemaVersion": "1.0",
+            "tool": "ue_workflow_status",
+            "ok": True,
+            "projectName": "TestProject",
+            "writeToolsEnabled": True,
+            "commitToolsEnabled": True,
+        }
 
     def plan_patch(self, **kwargs):
         return {"ok": True, "tool": "ue_plan_patch", "planId": "plan_test", **kwargs}
@@ -97,6 +108,7 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(status["schemaVersion"], "1.0")
         self.assertEqual(status["tool"], "ue_index_status")
         self.assertTrue(status["readOnly"])
+        self.assertTrue(status["indexMetadata"]["immutable"])
         self.assertEqual(status["stats"]["counts"]["assets"], 2)
         self.assertEqual(assets["tool"], "ue_search")
         self.assertEqual(assets["scope"], "assets")
@@ -138,15 +150,30 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(payload["index"]["stats"]["counts"]["assets"], 2)
 
     @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
-    def test_fastmcp_registers_only_three_read_only_tools(self) -> None:
+    def test_fastmcp_registers_read_only_status_and_query_tools(self) -> None:
         server = create_mcp_server(self.database_path)
         tools = asyncio.run(server.list_tools())
         self.assertEqual(
             [tool.name for tool in tools],
-            ["ue_search", "ue_get_asset", "ue_find_references"],
+            ["ue_get_capabilities", "ue_get_project_status", "ue_search", "ue_get_asset", "ue_find_references"],
         )
         for tool in tools:
             self.assertNotIn("database", tool.inputSchema.get("properties", {}))
+
+        _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
+        self.assertEqual(capabilities["server"]["version"], "0.5.0")
+        self.assertEqual(capabilities["server"]["mode"], "read-only")
+        self.assertFalse(capabilities["operations"]["available"])
+        self.assertEqual(
+            [item["name"] for item in capabilities["tools"]],
+            [tool.name for tool in tools],
+        )
+
+        _, project_status = asyncio.run(server.call_tool("ue_get_project_status", {}))
+        self.assertEqual(project_status["project"]["projectKey"], "测试项目")
+        self.assertEqual(project_status["engine"]["state"], "unavailable")
+        self.assertEqual(project_status["freshness"]["state"], "unknown")
+        self.assertEqual(project_status["liveEditor"]["state"], "unavailable")
 
         content, payload = asyncio.run(
             server.call_tool(
@@ -162,14 +189,19 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(len(rejected_content), 1)
         self.assertFalse(error_payload["ok"])
         self.assertEqual(error_payload["error"]["code"], "invalid-arguments")
+        self.assertFalse(error_payload["error"]["retryable"])
+        self.assertEqual(error_payload["error"]["details"], {})
+        self.assertTrue(error_payload["error"]["suggestedAction"])
 
     @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
-    def test_fastmcp_full_workflow_registers_eight_fixed_high_level_tools(self) -> None:
+    def test_fastmcp_full_workflow_registers_status_query_and_workflow_tools(self) -> None:
         server = create_mcp_server(self.database_path, workflow_service=FakeWorkflowService())
         tools = asyncio.run(server.list_tools())
         self.assertEqual(
             [tool.name for tool in tools],
             [
+                "ue_get_capabilities",
+                "ue_get_project_status",
                 "ue_search",
                 "ue_get_asset",
                 "ue_find_references",
@@ -190,6 +222,14 @@ class McpServerTests(unittest.TestCase):
         verify_tool = next(tool for tool in tools if tool.name == "ue_verify_asset")
         self.assertFalse(verify_tool.annotations.readOnlyHint)
         self.assertFalse(verify_tool.annotations.destructiveHint)
+
+        _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
+        self.assertEqual(capabilities["server"]["mode"], "fixed-project-commit")
+        self.assertTrue(capabilities["operations"]["available"])
+        self.assertGreater(len(capabilities["operations"]["items"]), 0)
+        _, project_status = asyncio.run(server.call_tool("ue_get_project_status", {}))
+        self.assertEqual(project_status["project"]["projectName"], "TestProject")
+        self.assertEqual(project_status["engine"]["state"], "unknown")
 
         _, planned = asyncio.run(
             server.call_tool(
@@ -226,6 +266,8 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(len(content), 1)
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["error"]["code"], "index-not-quiescent")
+        self.assertTrue(payload["error"]["retryable"])
+        self.assertIn("SQLite writer", payload["error"]["suggestedAction"])
         self.assertNotIn(str(self.database_path), json.dumps(payload, ensure_ascii=False))
 
     @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
@@ -250,6 +292,7 @@ class McpServerTests(unittest.TestCase):
         setup_source = (TOOL_ROOT / "scripts" / "setup_python.ps1").read_text(encoding="utf-8")
         runner_source = (TOOL_ROOT / "scripts" / "RunMcp.ps1").read_text(encoding="utf-8")
 
+        self.assertIn(f'version = "{__version__}"', pyproject)
         self.assertIn('mcp = ["mcp>=1.27,<2"]', pyproject)
         self.assertIn("mcp>=1.27,<2", requirements)
         self.assertIn('server.run(transport="stdio")', server_source)

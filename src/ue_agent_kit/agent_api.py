@@ -88,6 +88,14 @@ class IndexQueryService:
     def check(self) -> dict[str, Any]:
         with self._open() as connection:
             response = self._base_response(connection, "ue_index_status")
+            response["indexMetadata"] = {
+                "lastIndexedAtUtc": get_metadata(connection, "last_indexed_at_utc", ""),
+                "manifestSchemaVersion": get_metadata(connection, "last_manifest_schema", ""),
+                "exporterVersion": get_metadata(connection, "last_exporter_version", ""),
+                "profile": get_metadata(connection, "last_profile", ""),
+                "immutable": True,
+                "quiescent": True,
+            }
             response["stats"] = get_stats(connection)
             return response
 
