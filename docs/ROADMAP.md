@@ -1,103 +1,219 @@
 # UE Agent Kit 路线图
 
-更新时间：2026-07-21
+更新时间：2026-07-23
 
 当前版本为 **0.5.0**，支持 Unreal Engine 5.6。
 
-UE Agent Kit 已完成项目级只读分析、SQLite/FTS 索引、Blueprint 低风险安全写入、通用非 Blueprint 标量属性写入、Material Instance Global Scalar/Vector/Texture/Static Switch，以及 DataTable 单 Row、单顶层标量字段写入。
+UE Agent Kit 的长期定位是面向 AI Agent 的 Unreal Engine 项目智能层：既提供独立的项目读取和受控写入能力，也提供带 Revision 的长期项目记忆、证据驱动分析、影响评估和验证闭环。
 
-## 当前整体版本：0.5.0
+项目不以工具数量为目标。后续开发顺序以实际游戏开发工作流为准：先补齐日常 MCP 与 Live Editor 工具，再建设项目记忆和分析能力，最后按程序、策划配置、美术、LD 和 QA 的真实痛点扩展专用能力。
 
-0.5.0 已完成；0.4.0、0.4.x 与 0.5.0 均保留为可独立验证和回退的检查点。
+## 已完成检查点
 
 ```text
-0.4.0  常用非 Blueprint 专用写入
-0.4.x  独立恢复与完整安全回归
-0.5.0  MCP / Agent 第一版
+0.2.x  项目级只读分析、Canonical/BPCTX、SQLite/FTS
+0.3.x  Blueprint 与非 Blueprint 安全写入基础
+0.4.0  Material Instance 与 DataTable 常用写入
+0.4.x  Backup Manifest、rollback、Fixture 和完整安全回归
+0.5.0  本地 MCP 第一版：查询、Patch、Dry Run、Commit、验证和回滚
 ```
 
-## 0.4.0：常用非 Blueprint 专用写入（已完成）
+0.5.0 已形成完整但偏底层的 Agent 工作流。当前主要缺口不是继续横向增加大量资产类型，而是 MCP 易用性、Editor 实时状态、项目长期记忆和高层分析能力。
 
-0.4.0 已完成：
+## 0.5.x：MCP 与日常开发工具补全
 
-- Material Instance Vector 参数：已在 0.3.5 完成。
-- Material Instance Texture 参数：已在 0.3.6 完成。
-- Material Instance Static Switch 参数：已在 0.3.7 完成。
-- DataTable 单 Row、单顶层标量字段修改：已在 0.4.0 完成。
+目标：让 UE Agent Kit 在日常 UE5.6 开发中持续可用，不要求用户或 Agent 手工拼接底层命令和完整 Patch JSON。
 
-所有操作继续遵循：
+### 0.5.1：MCP 查询与协议补全
 
-- 精确 Policy 白名单。
-- 当前 Asset Revision 校验。
-- 默认 Dry Run。
-- Dry Run 完整内存回滚和磁盘哈希不变。
-- Commit 前外部备份。
-- Commit 后独立 UE 进程重载验证。
-- 单资产、单 Operation。
+- 增加项目、索引和能力状态查询。
+- 统一 Tool 错误码、分页、局部展开、结果截断和重试语义。
+- 增加索引过期检测，明确磁盘资产、索引 Revision 和当前工程状态的差异。
+- 优化 `ue_search`、`ue_get_asset` 和 `ue_find_references` 的过滤、摘要和 Token Budget。
+- 为现有写入 Operation 提供高层参数入口，由 Server 自动生成严格 Patch。
+- 改进 Plan、Dry Run Receipt、Apply Receipt 和 rollback Receipt 的可诊断性。
+- 补充 Claude Code、ChatGPT 和独立 MCP Client 的回归矩阵。
 
-0.4.0 已完成全部真实资产 Dry Run、Commit、唯一备份、独立 UE 进程重载和过期 Revision 拒绝验证。当前活动阶段为 0.4.x。
+### 0.5.2：Live Editor Read
 
-## 0.4.x：恢复与安全回归
+建立受限的 Editor Bridge，只提供明确注册的高层能力，不开放任意 UObject、Console、Python、Shell 或文件操作。
 
-0.4.1 已完成：
+首批能力：
 
-- 独立 `rollback` 命令，默认 Dry Run，显式 Commit。
-- Commit 自动生成 Backup Manifest、回滚前安全副本、唯一回执和恢复后 Revision 验证。
+```text
+ue_editor_status
+ue_get_selection
+ue_get_open_assets
+ue_get_dirty_assets
+ue_get_current_level
+ue_get_pie_state
+ue_get_output_log
+ue_get_compile_errors
+ue_inspect_asset_live
+ue_refresh_asset_index
+```
 
-0.4.2 已完成：
+需要区分：
 
-- 声明式 Write Fixture Plan。
-- Create/Reset、源资产类检查、目标边界、Sidecar 拒绝和独立 UE 重载验证。
+- 磁盘 Package Revision。
+- SQLite 索引状态。
+- Editor 内存中的当前对象状态。
+- 尚未保存的 Dirty 修改。
 
-0.4.3 已完成：
+### 0.5.3：Daily Actions 与验证
 
-- Bool、Byte、Int32、Int64、Float、Double、String、Name、Text、`FEnumProperty` 和 enum-backed Byte Property 的完整真实 UE 覆盖。
-- 11/11 Dry Run、11/11 Commit、逐次备份/Manifest/独立重载和最终 Reset。
-- 未授权、属性不存在、错误类型、Revision 冲突、数值越界和非法 Enum 的零写入失败回归。
+首批低风险操作：
 
-0.4.4 已完成：
+```text
+ue_open_asset
+ue_focus_asset
+ue_sync_content_browser
+ue_focus_actor
+ue_compile_blueprint
+ue_validate_asset
+ue_validate_folder
+ue_run_automation_test
+ue_save_authorized_asset
+```
 
-- Dirty Package 通过受限测试注入，在任何属性修改前由现有 Policy 门拒绝。
-- 真实临时 `.uexp` Sidecar 触发 Package Sidecar 拒绝，并在测试后可靠清理。
-- SaveFailure 在 Commit 备份后注入，验证目标 Revision 保持不变、原始备份可用且不生成成功 Manifest；若实际保存已改变磁盘，执行器会复制备份并复核恢复 Revision。
-- 完整矩阵达到 11/11 Dry Run、11/11 Commit 和 9/9 零写入失败路径。
+所有写入或保存操作继续受 Policy、Revision、Dry Run、显式确认、备份和验证约束。禁止提供无范围限制的 `save_all`。
 
-0.4.x 的恢复与核心安全回归目标已完成，下一阶段进入 0.5.0 MCP / Agent 接入。
+### 0.5.4：日常数据编辑完善
 
-Array、Set、Map、对象引用和任意 Struct 不会直接通过宽松文本导入开放；必须先定义稳定的 JSON 值模型和可验证 Diff。
+优先补当前项目真实使用频率高的内容：
 
-## 0.5.0：MCP / Agent 第一版（已完成）
+- DataTable 单 Row 多字段与受控 Row 操作。
+- Data Asset 的对象引用、软引用、Struct 和容器值模型。
+- Material Instance 参数工作流统一。
+- Blueprint 默认值、组件属性和 Pin 默认值的高层 MCP 封装。
+- 单资产多 Operation 原子 Dry Run、Commit 和 rollback。
 
-0.5.0 提供两种本地 `stdio` 模式：
+暂不优先实现完整 Blueprint Graph、Anim State Machine、Control Rig、Sequencer 和任意脚本执行。
 
-- 默认三 Tool 只读查询：`ue_search`、`ue_get_asset`、`ue_find_references`。
-- 固定项目八 Tool 完整工作流，额外提供 `ue_plan_patch`、`ue_dry_run_patch`、`ue_apply_patch`、`ue_verify_asset`、`ue_rollback_patch`。
+## 0.6.0：带 Revision 的项目长期记忆
 
-完整模式的安全边界：
+项目记忆是 0.5.x 之后的最高优先级能力。
 
-- Database、Engine、Project、Policy、Revision Export、工作目录和备份目录均在 Server 启动时固定，Tool 参数不能覆盖。
-- SQLite 使用不可变只读快照，拒绝活动 `-wal`、`-shm` 和 `-journal`。
-- Patch 仍限制为单资产、单 Operation，并复用现有 Policy、Revision、Commandlet、Backup Manifest 和 rollback。
-- Plan 文件和 Policy 在 Server 会话内锁定摘要；外部修改会拒绝继续执行。
-- Commit 必须先成功 Dry Run，再提供一次性 Receipt 和精确 `COMMIT <planId>` 确认。
-- Rollback Commit 必须先成功 rollback Dry Run，再提供一次性 Receipt 和精确 `ROLLBACK <applyReceipt>` 确认。
-- `ue_verify_asset` 使用独立 UE 进程重新导出并核对保存后的 SHA-256 Revision。
+目标：让 AI 不再在每次会话中从零开始，同时避免过期知识长期污染分析结果。
 
-真实 UE5.6 MCP Client 回归已完成：八 Tool 发现、Dry Run 磁盘不变、错误确认拒绝、Commit、Receipt 单次使用、独立重载、rollback Dry Run、显式恢复，以及最终 `.uasset` 哈希完全还原。
+### 记忆类型
 
-## 0.5.0 之后
+```text
+ProjectFact       从资产、代码、索引或运行证据提取的项目事实
+ProjectRule       用户或团队确认的开发规则和安全约束
+DecisionRecord    已采用或放弃的方案及原因
+KnownIssue        已知问题、触发条件、规避方式和当前状态
+TaskRecord        一次任务的目标、证据、结论、修改和验证结果
+RuntimeEvidence   日志、测试、性能数据、崩溃和 PIE 结果
+```
 
-后续阶段包括：
+### 每条记忆必须记录
 
-- Blueprint 变量新增、重命名和安全删除。
-- 单资产多 Operation 原子事务。
-- Blueprint 节点创建、删除和 Pin 连接。
-- Widget Tree、Anim State Machine、Control Rig、Material Graph、Niagara、Behavior Tree 和 StateTree 专用适配器。
-- Git / Perforce、CI、编辑器状态面板、审计和多 UE 版本支持。
+- `projectKey`、Engine Version 和适用范围。
+- 来源类型和可追溯 Source ID。
+- 相关 Asset、Symbol、Graph、Node、DataTable Row 或日志范围。
+- 创建时间、最后验证时间和置信度。
+- 关联 Package Revision 或 Revision Set。
+- `valid`、`stale`、`conflicted`、`superseded` 等状态。
+- 用户确认、工具观测和模型推断必须明确区分。
+
+### 失效与冲突规则
+
+- 关联资产 Revision 变化后，事实记忆不能继续视为已验证事实。
+- 用户确认的项目规则不会因资产变化自动删除，但可以被新规则替代。
+- 相互矛盾的记忆必须并存并标记冲突，不允许静默覆盖。
+- 模型推断不能直接升级为项目事实，必须经过证据或用户确认。
+
+### MCP 能力
+
+```text
+ue_memory_search
+ue_memory_get
+ue_memory_add_rule
+ue_memory_record_finding
+ue_memory_mark_superseded
+ue_memory_validate
+```
+
+0.6.0 首版以可追溯、可失效和可检索为重点，不追求自动生成大规模知识总结。
+
+## 0.7.0：上下文与分析能力
+
+建立在索引、Live Editor 和项目记忆之上：
+
+```text
+ue_analyze_task
+ue_build_context
+ue_trace_value
+ue_trace_execution
+ue_analyze_impact
+ue_diff_asset
+ue_create_hypotheses
+ue_create_change_plan
+ue_create_verification_plan
+```
+
+首批验收任务：
+
+1. 一个变量或配置值最终从哪里产生。
+2. 一个函数、Blueprint 或资产被哪些内容使用。
+3. 修改或删除某个资产可能影响什么。
+4. 两个资产版本发生了哪些语义变化。
+5. 根据日志、静态结构和历史结论维护可证伪的根因假设。
+
+分析结论必须附带证据来源；无法证明的内容必须标记为推断。
+
+## 0.8.0：协作、冲突与岗位能力
+
+### 多人协作与资产冲突
+
+重点考虑 Perforce/Git 工作区中的资产冲突、锁定和责任边界：
+
+- 当前 Source Control Provider 状态。
+- 资产是否被 Checkout、Lock，以及持有人。
+- 本地 Dirty、磁盘 Revision、Depot/Remote Head 的差异。
+- 多人同时修改同一 Package 或强关联资产的冲突风险。
+- 修改计划涉及的资产是否越过预设责任范围。
+- Commit 前冲突预检和风险报告。
+- 资产锁定、所有权和责任范围仅做分析与提示，不自动抢锁或覆盖他人修改。
+
+Perforce/Git Changelist 的语义审查暂缓。当前团队 Changelist 缺少稳定规范和元数据，在规则建立前不把 CL 描述作为可靠分析输入。
+
+### 岗位能力包
+
+按真实项目需求逐步建立：
+
+```text
+Programmer Pack     C++/Blueprint/Config/日志/网络/性能关联
+Designer Data Pack  DataTable、Data Asset、公式、范围和引用验证
+Art & TA Pack       导入设置、LOD、材质、纹理、骨骼和资产预算
+Level Design Pack   World Partition、Data Layer、HLOD、导航和空间审计
+QA & Review Pack    复现、自动测试、Revision 绑定和变更风险
+```
+
+每个能力包由 Reader、分析规则、安全写入、验证工具和报告组成，不以单独增加 Tool 数量作为完成标准。
+
+## 0.9.0 及以后
+
+根据前述阶段暴露的真实缺口补充：
+
+- Blueprint Graph 节点、Pin 和函数图编辑。
+- Anim State Machine、Montage、Control Rig、Material Graph 和 Niagara。
+- PIE 输入记录、回放和自动验收。
+- 性能数据到 Actor、资产、材质和逻辑的归因。
+- UE 5.4/5.5/5.7+ 兼容矩阵。
+
+## 暂不作为当前主线
+
+- 为追赶同类项目而一次性补齐所有 Editor Operation。
+- 无安全边界的任意 UObject、Python、Console、Shell 或文件系统接口。
+- 无约束批量修改、批量删除或 `save_all`。
+- 在缺少团队规范时依赖 Changelist 描述进行自动语义审查。
 
 ## 版本原则
 
-- 每个 Operation 独立完成 Schema、Policy、Dry Run、Commit、备份、重载和负面测试。
-- 不以“编译通过”替代真实资产验证。
-- 正式项目默认只读。
-- 不直接编辑 `.uasset` 二进制文件。
+- UE Agent Kit 保持独立实现和独立安装，不依赖其他 UE Agent 插件才能工作。
+- 先满足当前真实开发需求，再补暂时不用的 Reader 或 Writer。
+- 每个写入 Operation 独立完成 Schema、Policy、Dry Run、Commit、备份、重载和负面测试。
+- 每条项目记忆必须可追溯，并能在 Revision 变化后失效或重新验证。
+- 正式项目默认只读，不直接编辑 `.uasset` 二进制文件。
