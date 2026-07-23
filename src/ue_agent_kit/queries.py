@@ -8,7 +8,7 @@ from collections.abc import Iterable
 from typing import Any
 
 
-MAX_QUERY_LIMIT = 1000
+MAX_QUERY_LIMIT = 10000
 
 
 def normalize_pagination(limit: int, offset: int) -> tuple[int, int]:
@@ -64,18 +64,28 @@ def search_assets(
     query: str,
     *,
     asset_class: str = "",
+    path_prefix: str = "",
     limit: int = 50,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
     limit, offset = normalize_pagination(limit, offset)
     query = query.strip()
     asset_class = asset_class.strip()
+    path_prefix = path_prefix.strip()
     class_like = f"%{asset_class}%"
-    fetch_limit = min(MAX_QUERY_LIMIT, limit + offset + 200)
+    path_like = path_prefix + "%"
+    fetch_limit = limit + offset + 200
 
     if not query:
-        where_sql = "WHERE asset_class LIKE ?" if asset_class else ""
-        parameters: list[Any] = [class_like] if asset_class else []
+        clauses: list[str] = []
+        parameters: list[Any] = []
+        if asset_class:
+            clauses.append("asset_class LIKE ?")
+            parameters.append(class_like)
+        if path_prefix:
+            clauses.append("asset_path LIKE ?")
+            parameters.append(path_like)
+        where_sql = "WHERE " + " AND ".join(clauses) if clauses else ""
         rows = connection.execute(
             f"""
             SELECT id, asset_path, package_name, asset_name, asset_class, blueprint_type,
@@ -91,8 +101,15 @@ def search_assets(
         results = [_row_to_dict(row) for row in rows]
     else:
         ranked: list[tuple[float, sqlite3.Row]] = []
-        class_filter_sql = " AND a.asset_class LIKE ?" if asset_class else ""
-        class_parameters: list[Any] = [class_like] if asset_class else []
+        filter_clauses: list[str] = []
+        filter_parameters: list[Any] = []
+        if asset_class:
+            filter_clauses.append("a.asset_class LIKE ?")
+            filter_parameters.append(class_like)
+        if path_prefix:
+            filter_clauses.append("a.asset_path LIKE ?")
+            filter_parameters.append(path_like)
+        class_filter_sql = " AND " + " AND ".join(filter_clauses) if filter_clauses else ""
         try:
             fts_rows = connection.execute(
                 f"""
@@ -106,7 +123,7 @@ def search_assets(
                 ORDER BY search_rank, a.asset_path
                 LIMIT ?
                 """,
-                [_fts_phrase(query), *class_parameters, fetch_limit],
+                [_fts_phrase(query), *filter_parameters, fetch_limit],
             ).fetchall()
             ranked.extend((float(row["search_rank"]), row) for row in fts_rows)
         except sqlite3.OperationalError:
@@ -138,7 +155,7 @@ def search_assets(
                 like_value,
                 like_value,
                 like_value,
-                *class_parameters,
+                *filter_parameters,
                 query,
                 query,
                 query + "%",
@@ -169,13 +186,15 @@ def search_symbols(
     *,
     kind: str = "",
     asset_path: str = "",
+    path_prefix: str = "",
     limit: int = 50,
     offset: int = 0,
     include_details: bool = False,
 ) -> list[dict[str, Any]]:
     limit, offset = normalize_pagination(limit, offset)
     query = query.strip()
-    fetch_limit = min(MAX_QUERY_LIMIT, limit + offset + 200)
+    path_prefix = path_prefix.strip()
+    fetch_limit = limit + offset + 200
     filters: list[str] = []
     parameters: list[Any] = []
     if kind:
@@ -184,6 +203,9 @@ def search_symbols(
     if asset_path:
         filters.append("a.asset_path = ?")
         parameters.append(asset_path)
+    if path_prefix:
+        filters.append("a.asset_path LIKE ?")
+        parameters.append(path_prefix + "%")
     filter_sql = " AND " + " AND ".join(filters) if filters else ""
 
     ranked: list[tuple[float, sqlite3.Row]] = []
@@ -274,23 +296,14 @@ def search_symbols(
     return results
 
 
-def find_references(
-    connection: sqlite3.Connection,
+def _reference_filter_parts(
     *,
-    query: str = "",
-    kind: str = "",
-    asset_path: str = "",
-    source_symbol_id: str = "",
-    target_symbol_id: str = "",
-    target_asset_path: str = "",
-    limit: int = 100,
-    offset: int = 0,
-    include_details: bool = False,
-) -> list[dict[str, Any]]:
-    limit, offset = normalize_pagination(limit, offset)
+    query: str,
+    kind: str,
+    project_only: bool,
+) -> tuple[list[str], list[Any]]:
     clauses: list[str] = []
     parameters: list[Any] = []
-
     if query:
         like_value = f"%{query}%"
         clauses.append(
@@ -301,9 +314,55 @@ def find_references(
     if kind:
         clauses.append("r.kind = ?")
         parameters.append(kind)
+    if project_only:
+        clauses.append("EXISTS (SELECT 1 FROM assets AS target_asset WHERE target_asset.asset_path = r.target_asset_path)")
+    return clauses, parameters
+
+
+def _decorate_reference_rows(
+    rows: Iterable[sqlite3.Row],
+    *,
+    include_details: bool,
+    depth: int,
+    direction: str,
+) -> list[dict[str, Any]]:
+    results = [_row_to_dict(row) for row in rows]
+    for result in results:
+        result.pop("id", None)
+        details_json = str(result.pop("details_json", ""))
+        result["depth"] = depth
+        result["direction"] = direction
+        if include_details:
+            result["details"] = _parse_json(details_json, {})
+    return results
+
+
+def _find_direct_references(
+    connection: sqlite3.Connection,
+    *,
+    query: str,
+    kind: str,
+    asset_path: str,
+    source_symbol_id: str,
+    target_symbol_id: str,
+    target_asset_path: str,
+    direction: str,
+    project_only: bool,
+    limit: int,
+    offset: int,
+    include_details: bool,
+) -> list[dict[str, Any]]:
+    clauses, parameters = _reference_filter_parts(query=query, kind=kind, project_only=project_only)
     if asset_path:
-        clauses.append("a.asset_path = ?")
-        parameters.append(asset_path)
+        if direction == "outgoing":
+            clauses.append("a.asset_path = ?")
+            parameters.append(asset_path)
+        elif direction == "incoming":
+            clauses.append("r.target_asset_path = ?")
+            parameters.append(asset_path)
+        else:
+            clauses.append("(a.asset_path = ? OR r.target_asset_path = ?)")
+            parameters.extend([asset_path, asset_path])
     if source_symbol_id:
         clauses.append("r.source_symbol_id = ?")
         parameters.append(source_symbol_id)
@@ -324,20 +383,183 @@ def find_references(
         FROM references_table AS r
         JOIN assets AS a ON a.id = r.asset_id
         WHERE {where_sql}
-        ORDER BY a.asset_path, r.graph_name, r.node_title, r.kind, r.target_name
+        ORDER BY a.asset_path, r.graph_name, r.node_title, r.kind, r.target_name, r.stable_id
         LIMIT ? OFFSET ?
         """,
         [*parameters, limit, offset],
     ).fetchall()
-
-    results = [_row_to_dict(row) for row in rows]
-    for result in results:
-        result.pop("id", None)
-        details_json = str(result.pop("details_json", ""))
-        if include_details:
-            result["details"] = _parse_json(details_json, {})
+    results = _decorate_reference_rows(
+        rows,
+        include_details=include_details,
+        depth=1,
+        direction=direction,
+    )
+    if direction == "both" and asset_path:
+        for result in results:
+            result["direction"] = "outgoing" if result["asset_path"] == asset_path else "incoming"
     return results
 
+
+def _find_traversed_references(
+    connection: sqlite3.Connection,
+    *,
+    query: str,
+    kind: str,
+    asset_path: str,
+    direction: str,
+    depth: int,
+    project_only: bool,
+    limit: int,
+    offset: int,
+    include_details: bool,
+) -> list[dict[str, Any]]:
+    project_paths = {
+        str(row["asset_path"])
+        for row in connection.execute("SELECT asset_path FROM assets ORDER BY asset_path")
+    }
+    visited_assets = {asset_path}
+    frontier = {asset_path}
+    collected: list[dict[str, Any]] = []
+    seen_edges: set[tuple[str, str, int]] = set()
+    base_clauses, base_parameters = _reference_filter_parts(
+        query=query,
+        kind=kind,
+        project_only=project_only,
+    )
+
+    for current_depth in range(1, depth + 1):
+        if not frontier:
+            break
+        ordered_frontier = sorted(frontier)
+        placeholders = ",".join("?" for _ in ordered_frontier)
+        if direction == "outgoing":
+            anchor_clause = f"a.asset_path IN ({placeholders})"
+            anchor_parameters = ordered_frontier
+        elif direction == "incoming":
+            anchor_clause = f"r.target_asset_path IN ({placeholders})"
+            anchor_parameters = ordered_frontier
+        else:
+            anchor_clause = (
+                f"(a.asset_path IN ({placeholders}) OR r.target_asset_path IN ({placeholders}))"
+            )
+            anchor_parameters = [*ordered_frontier, *ordered_frontier]
+        where_sql = " AND ".join([anchor_clause, *base_clauses])
+        rows = connection.execute(
+            f"""
+            SELECT r.id, r.stable_id, r.kind, a.asset_path,
+                   r.source_symbol_id, r.target_symbol_id, r.target_kind, r.target_name,
+                   r.target_asset_path, r.target_path, r.graph_guid, r.graph_name,
+                   r.node_guid, r.node_class, r.node_title, r.details_json
+            FROM references_table AS r
+            JOIN assets AS a ON a.id = r.asset_id
+            WHERE {where_sql}
+            ORDER BY a.asset_path, r.graph_name, r.node_title, r.kind, r.target_name, r.stable_id
+            """,
+            [*anchor_parameters, *base_parameters],
+        ).fetchall()
+
+        next_frontier: set[str] = set()
+        for row in rows:
+            source_path = str(row["asset_path"])
+            target_path = str(row["target_asset_path"])
+            edge_directions: list[str] = []
+            if direction in ("outgoing", "both") and source_path in frontier:
+                edge_directions.append("outgoing")
+            if direction in ("incoming", "both") and target_path in frontier:
+                edge_directions.append("incoming")
+            for edge_direction in edge_directions:
+                edge_key = (str(row["stable_id"]), edge_direction, current_depth)
+                if edge_key in seen_edges:
+                    continue
+                seen_edges.add(edge_key)
+                result = _decorate_reference_rows(
+                    [row],
+                    include_details=include_details,
+                    depth=current_depth,
+                    direction=edge_direction,
+                )[0]
+                collected.append(result)
+                next_path = target_path if edge_direction == "outgoing" else source_path
+                if next_path in project_paths and next_path not in visited_assets:
+                    next_frontier.add(next_path)
+        visited_assets.update(next_frontier)
+        frontier = next_frontier
+
+    collected.sort(
+        key=lambda item: (
+            int(item["depth"]),
+            str(item["direction"]),
+            str(item["asset_path"]).casefold(),
+            str(item["graph_name"]).casefold(),
+            str(item["node_title"]).casefold(),
+            str(item["kind"]).casefold(),
+            str(item["target_name"]).casefold(),
+            str(item["stable_id"]).casefold(),
+        )
+    )
+    return collected[offset : offset + limit]
+
+
+def find_references(
+    connection: sqlite3.Connection,
+    *,
+    query: str = "",
+    kind: str = "",
+    asset_path: str = "",
+    source_symbol_id: str = "",
+    target_symbol_id: str = "",
+    target_asset_path: str = "",
+    direction: str = "outgoing",
+    depth: int = 1,
+    project_only: bool = False,
+    limit: int = 100,
+    offset: int = 0,
+    include_details: bool = False,
+) -> list[dict[str, Any]]:
+    limit, offset = normalize_pagination(limit, offset)
+    query = query.strip()
+    kind = kind.strip()
+    asset_path = asset_path.strip()
+    source_symbol_id = source_symbol_id.strip()
+    target_symbol_id = target_symbol_id.strip()
+    target_asset_path = target_asset_path.strip()
+    if direction not in {"outgoing", "incoming", "both"}:
+        raise ValueError("direction must be outgoing, incoming, or both")
+    if depth < 1 or depth > 3:
+        raise ValueError("depth must be between 1 and 3")
+    if direction in {"incoming", "both"} and not asset_path:
+        raise ValueError("asset_path is required for incoming or both reference direction")
+    if depth > 1:
+        if not asset_path:
+            raise ValueError("asset_path is required when depth is greater than 1")
+        if any((source_symbol_id, target_symbol_id, target_asset_path)):
+            raise ValueError("symbol and target endpoint filters are available only when depth is 1")
+        return _find_traversed_references(
+            connection,
+            query=query,
+            kind=kind,
+            asset_path=asset_path,
+            direction=direction,
+            depth=depth,
+            project_only=project_only,
+            limit=limit,
+            offset=offset,
+            include_details=include_details,
+        )
+    return _find_direct_references(
+        connection,
+        query=query,
+        kind=kind,
+        asset_path=asset_path,
+        source_symbol_id=source_symbol_id,
+        target_symbol_id=target_symbol_id,
+        target_asset_path=target_asset_path,
+        direction=direction,
+        project_only=project_only,
+        limit=limit,
+        offset=offset,
+        include_details=include_details,
+    )
 
 def get_asset(
     connection: sqlite3.Connection,
@@ -347,14 +569,24 @@ def get_asset(
     reference_limit: int = 500,
     graph_limit: int | None = None,
     node_limit: int = 200,
+    symbol_offset: int = 0,
+    reference_offset: int = 0,
+    graph_offset: int = 0,
+    node_offset: int = 0,
+    sections: Iterable[str] | None = None,
+    graph_guid: str = "",
+    node_guid: str = "",
     include_details: bool = False,
 ) -> dict[str, Any] | None:
-    normalize_pagination(symbol_limit, 0)
-    normalize_pagination(reference_limit, 0)
+    normalize_pagination(symbol_limit, symbol_offset)
+    normalize_pagination(reference_limit, reference_offset)
     if graph_limit is not None:
-        normalize_pagination(graph_limit, 0)
-    normalize_pagination(node_limit, 0)
+        normalize_pagination(graph_limit, graph_offset)
+    elif graph_offset < 0:
+        raise ValueError("offset must not be negative")
+    normalize_pagination(node_limit, node_offset)
 
+    requested_sections = set(sections or {"identity", "summary", "metadata", "symbols", "references", "graphs", "nodes"})
     row = connection.execute("SELECT * FROM assets WHERE asset_path = ?", (asset_path,)).fetchone()
     if row is None:
         return None
@@ -362,59 +594,85 @@ def get_asset(
     asset_id = int(row["id"])
     result = _row_to_dict(row)
     result.pop("id", None)
-    result["summary"] = _parse_json(str(result.pop("summary_json", "")), {})
-    result["symbols"] = search_symbols(
-        connection,
-        "",
-        asset_path=asset_path,
-        limit=symbol_limit,
-        include_details=include_details,
-    )
-    result["references"] = find_references(
-        connection,
-        asset_path=asset_path,
-        limit=reference_limit,
-        include_details=include_details,
-    )
+    summary_json = str(result.pop("summary_json", ""))
+    if "summary" in requested_sections:
+        result["summary"] = _parse_json(summary_json, {})
 
-    graph_sql = """
-        SELECT id, guid, name, kind, schema_path, node_count, details_json
-        FROM graphs
-        WHERE asset_id = ?
-        ORDER BY kind, name
-    """
-    graph_parameters: list[Any] = [asset_id]
-    if graph_limit is not None:
-        graph_sql += "\nLIMIT ?"
-        graph_parameters.append(graph_limit)
-    graph_rows = connection.execute(graph_sql, graph_parameters).fetchall()
-    result["graphs"] = []
-    for graph_row in graph_rows:
-        graph = _row_to_dict(graph_row)
-        graph.pop("id", None)
-        details_json = str(graph.pop("details_json", ""))
-        if include_details:
-            graph["details"] = _parse_json(details_json, {})
-        result["graphs"].append(graph)
+    if "symbols" in requested_sections:
+        result["symbols"] = search_symbols(
+            connection,
+            "",
+            asset_path=asset_path,
+            limit=symbol_limit,
+            offset=symbol_offset,
+            include_details=include_details,
+        )
+    if "references" in requested_sections:
+        result["references"] = find_references(
+            connection,
+            asset_path=asset_path,
+            direction="outgoing",
+            depth=1,
+            limit=reference_limit,
+            offset=reference_offset,
+            include_details=include_details,
+        )
 
-    node_rows = connection.execute(
+    if "graphs" in requested_sections:
+        graph_clauses = ["asset_id = ?"]
+        graph_parameters: list[Any] = [asset_id]
+        if graph_guid:
+            graph_clauses.append("guid = ?")
+            graph_parameters.append(graph_guid)
+        graph_sql = f"""
+            SELECT id, guid, name, kind, schema_path, node_count, details_json
+            FROM graphs
+            WHERE {' AND '.join(graph_clauses)}
+            ORDER BY kind, name, guid
         """
-        SELECT n.id, n.graph_guid, n.guid, n.object_name, n.node_class, n.title, n.comment, n.details_json
-        FROM nodes AS n
-        WHERE n.asset_id = ?
-        ORDER BY n.graph_guid, n.title, n.guid
-        LIMIT ?
-        """,
-        (asset_id, node_limit),
-    ).fetchall()
-    result["nodes"] = []
-    for node_row in node_rows:
-        node = _row_to_dict(node_row)
-        node.pop("id", None)
-        details_json = str(node.pop("details_json", ""))
-        if include_details:
-            node["details"] = _parse_json(details_json, {})
-        result["nodes"].append(node)
+        if graph_limit is None:
+            graph_sql += "\nLIMIT -1 OFFSET ?"
+            graph_parameters.append(graph_offset)
+        else:
+            graph_sql += "\nLIMIT ? OFFSET ?"
+            graph_parameters.extend([graph_limit, graph_offset])
+        graph_rows = connection.execute(graph_sql, graph_parameters).fetchall()
+        result["graphs"] = []
+        for graph_row in graph_rows:
+            graph = _row_to_dict(graph_row)
+            graph.pop("id", None)
+            details_json = str(graph.pop("details_json", ""))
+            if include_details:
+                graph["details"] = _parse_json(details_json, {})
+            result["graphs"].append(graph)
+
+    if "nodes" in requested_sections:
+        node_clauses = ["n.asset_id = ?"]
+        node_parameters: list[Any] = [asset_id]
+        if graph_guid:
+            node_clauses.append("n.graph_guid = ?")
+            node_parameters.append(graph_guid)
+        if node_guid:
+            node_clauses.append("n.guid = ?")
+            node_parameters.append(node_guid)
+        node_rows = connection.execute(
+            f"""
+            SELECT n.id, n.graph_guid, n.guid, n.object_name, n.node_class, n.title, n.comment, n.details_json
+            FROM nodes AS n
+            WHERE {' AND '.join(node_clauses)}
+            ORDER BY n.graph_guid, n.title, n.guid
+            LIMIT ? OFFSET ?
+            """,
+            [*node_parameters, node_limit, node_offset],
+        ).fetchall()
+        result["nodes"] = []
+        for node_row in node_rows:
+            node = _row_to_dict(node_row)
+            node.pop("id", None)
+            details_json = str(node.pop("details_json", ""))
+            if include_details:
+                node["details"] = _parse_json(details_json, {})
+            result["nodes"].append(node)
 
     counts = connection.execute(
         """
@@ -429,7 +687,6 @@ def get_asset(
     result["indexed_counts"] = _row_to_dict(counts)
     result["indexed_counts"]["references"] = result["indexed_counts"].pop("reference_count")
     return result
-
 
 def get_stats(connection: sqlite3.Connection) -> dict[str, Any]:
     counts = connection.execute(

@@ -440,6 +440,79 @@ class IndexerAndQueryTests(unittest.TestCase):
                 self.assertEqual(stats["counts"]["nodes"], 1)
 
 
+    def test_reference_direction_depth_and_project_filter(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ueak_reference_walk_") as temporary_root:
+            root = Path(temporary_root)
+            database_path = root / "index.sqlite3"
+            export_root = root / "export"
+            first = make_asset(ASSET_A, profile="logic", revision=REVISION_A, rich=False)
+            second = make_asset(ASSET_B, profile="logic", revision=REVISION_B, rich=False)
+            third = make_generic_asset()
+            first["references"].append(
+                {
+                    "id": f"reference|uses|asset|{ASSET_A}|asset|{ASSET_B}",
+                    "kind": "uses",
+                    "sourceSymbolId": f"asset|{ASSET_A}",
+                    "targetSymbolId": f"asset|{ASSET_B}",
+                    "targetKind": "asset",
+                    "targetName": "BP_SecondActor",
+                    "targetAssetPath": ASSET_B,
+                }
+            )
+            second["references"].append(
+                {
+                    "id": f"reference|uses|asset|{ASSET_B}|asset|{GENERIC_ASSET}",
+                    "kind": "uses",
+                    "sourceSymbolId": f"asset|{ASSET_B}",
+                    "targetSymbolId": f"asset|{GENERIC_ASSET}",
+                    "targetKind": "asset",
+                    "targetName": "SM_Test",
+                    "targetAssetPath": GENERIC_ASSET,
+                }
+            )
+            first["summary"]["references"] = len(first["references"])
+            second["summary"]["references"] = len(second["references"])
+            write_export(export_root, [first, second, third])
+
+            with open_database(database_path) as connection:
+                result = build_index(connection, export_root, database_path)
+                self.assertEqual((result.added, result.failed), (3, 0))
+                outgoing = find_references(
+                    connection,
+                    kind="uses",
+                    asset_path=ASSET_A,
+                    direction="outgoing",
+                    depth=2,
+                    project_only=True,
+                )
+                incoming = find_references(
+                    connection,
+                    kind="uses",
+                    asset_path=GENERIC_ASSET,
+                    direction="incoming",
+                    depth=2,
+                    project_only=True,
+                )
+                external_classes = find_references(
+                    connection,
+                    kind="inherits",
+                    asset_path=ASSET_A,
+                    direction="outgoing",
+                    project_only=True,
+                )
+
+            self.assertEqual(
+                [(item["depth"], item["target_asset_path"]) for item in outgoing],
+                [(1, ASSET_B), (2, GENERIC_ASSET)],
+            )
+            self.assertEqual(
+                [(item["depth"], item["asset_path"]) for item in incoming],
+                [(1, ASSET_B), (2, ASSET_A)],
+            )
+            self.assertTrue(all(item["direction"] == "outgoing" for item in outgoing))
+            self.assertTrue(all(item["direction"] == "incoming" for item in incoming))
+            self.assertEqual(external_classes, [])
+
     def test_project_identity_mismatch_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ueak_project_key_") as temporary_root:
             temp_root = Path(temporary_root)

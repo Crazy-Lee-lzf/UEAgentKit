@@ -20,6 +20,12 @@ from .agent_api import (
 from .agent_workflow import PatchWorkflowConfig, PatchWorkflowService, WorkflowError
 from .config import DEFAULT_DATABASE
 from .patches import get_operation_registry
+from .query_protocol import (
+    DEFAULT_OUTPUT_TOKEN_BUDGET,
+    MAX_OUTPUT_TOKEN_BUDGET,
+    MIN_OUTPUT_TOKEN_BUDGET,
+    ContinuationTokenError,
+)
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -138,12 +144,25 @@ def _capabilities_response(workflow_service: PatchWorkflowService | None) -> dic
             "assetReferences": MAX_MCP_REFERENCE_LIMIT,
             "assetGraphs": MAX_MCP_GRAPH_LIMIT,
             "assetNodes": MAX_MCP_NODE_LIMIT,
+            "referenceTraversalDepth": 3,
+            "outputTokenBudgetMinimum": MIN_OUTPUT_TOKEN_BUDGET,
+            "outputTokenBudgetDefault": DEFAULT_OUTPUT_TOKEN_BUDGET,
+            "outputTokenBudgetMaximum": MAX_OUTPUT_TOKEN_BUDGET,
             "singleAssetPerPatch": 1,
             "singleOperationPerAsset": 1,
         },
         "responseContract": {
             "schemaVersion": "1.0",
             "errorFields": ["code", "message", "retryable", "details", "suggestedAction"],
+            "pagination": {
+                "offsetCompatible": True,
+                "continuationTokens": True,
+                "continuationTokensOpaque": True,
+                "continuationTokensSessionLocal": True,
+                "continuationTokensBoundToIndexSnapshot": True,
+            },
+            "assetSections": ["identity", "summary", "metadata", "symbols", "references", "graphs", "nodes"],
+            "outputTokenBudget": True,
         },
         "safety": {
             "fixedServerConfiguration": True,
@@ -241,6 +260,7 @@ def _suggested_action(code: str) -> str:
         "database-not-found": "Check the fixed --database configuration and rebuild the index if it was moved.",
         "index-not-quiescent": "Finish indexing, close every SQLite writer, then retry with a quiescent snapshot.",
         "invalid-arguments": "Correct the Tool arguments using the published input schema and retry.",
+        "invalid-continuation-token": "Restart pagination from the first request and use a continuation Token returned by this server session.",
         "database-error": "Validate the immutable index and rebuild it if the database is damaged or incompatible.",
         "filesystem-error": "Check access to the fixed server resources, then retry.",
         "workflow-timeout": "Check the Unreal process state and retry after the fixed workflow is responsive.",
@@ -271,6 +291,8 @@ def _error_response(tool: str, error: Exception, *, read_only: bool) -> dict[str
         message = "A configured UE Agent Kit resource could not be accessed."
     elif isinstance(error, IndexSnapshotError):
         code = "index-not-quiescent"
+    elif isinstance(error, ContinuationTokenError):
+        code = "invalid-continuation-token"
     elif isinstance(error, ValueError):
         code = "invalid-arguments"
     elif isinstance(error, sqlite3.Error):
@@ -347,11 +369,14 @@ def create_mcp_server(
         asset_class: str = "",
         kind: str = "",
         asset_path: str = "",
+        path_prefix: str = "",
         limit: int = 20,
         offset: int = 0,
         include_details: bool = False,
+        continuation_token: str = "",
+        max_output_tokens: int = DEFAULT_OUTPUT_TOKEN_BUDGET,
     ) -> dict[str, Any]:
-        """Search indexed Unreal assets or Blueprint symbols with bounded pagination."""
+        """Search assets or symbols with filters, offset compatibility, opaque continuation, and output budgeting."""
         try:
             return index_service.search(
                 query,
@@ -359,31 +384,44 @@ def create_mcp_server(
                 asset_class=asset_class,
                 kind=kind,
                 asset_path=asset_path,
+                path_prefix=path_prefix,
                 limit=limit,
                 offset=offset,
                 include_details=include_details,
+                continuation_token=continuation_token,
+                max_output_tokens=max_output_tokens,
             )
         except (FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return _error_response("ue_search", exc, read_only=True)
 
     @server.tool(annotations=read_annotations)
     def ue_get_asset(
-        asset_path: str,
+        asset_path: str = "",
+        sections: list[str] | None = None,
         symbol_limit: int = 100,
         reference_limit: int = 200,
         graph_limit: int = 100,
         node_limit: int = 100,
+        graph_guid: str = "",
+        node_guid: str = "",
         include_details: bool = False,
+        continuation_token: str = "",
+        max_output_tokens: int = DEFAULT_OUTPUT_TOKEN_BUDGET,
     ) -> dict[str, Any]:
-        """Get one exact indexed Unreal asset with bounded symbols, references, graphs, and nodes."""
+        """Get selected asset sections with independent section pagination and output budgeting."""
         try:
             return index_service.get_asset(
                 asset_path,
+                sections=sections,
                 symbol_limit=symbol_limit,
                 reference_limit=reference_limit,
                 graph_limit=graph_limit,
                 node_limit=node_limit,
+                graph_guid=graph_guid,
+                node_guid=node_guid,
                 include_details=include_details,
+                continuation_token=continuation_token,
+                max_output_tokens=max_output_tokens,
             )
         except (FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return _error_response("ue_get_asset", exc, read_only=True)
@@ -396,11 +434,16 @@ def create_mcp_server(
         source_symbol_id: str = "",
         target_symbol_id: str = "",
         target_asset_path: str = "",
+        direction: Literal["outgoing", "incoming", "both"] = "outgoing",
+        depth: int = 1,
+        project_only: bool = False,
         limit: int = 50,
         offset: int = 0,
         include_details: bool = False,
+        continuation_token: str = "",
+        max_output_tokens: int = DEFAULT_OUTPUT_TOKEN_BUDGET,
     ) -> dict[str, Any]:
-        """Find indexed dependency or Blueprint reference edges using explicit filters."""
+        """Find direct or bounded transitive reference edges with explicit direction and pagination."""
         try:
             return index_service.find_references(
                 query=query,
@@ -409,9 +452,14 @@ def create_mcp_server(
                 source_symbol_id=source_symbol_id,
                 target_symbol_id=target_symbol_id,
                 target_asset_path=target_asset_path,
+                direction=direction,
+                depth=depth,
+                project_only=project_only,
                 limit=limit,
                 offset=offset,
                 include_details=include_details,
+                continuation_token=continuation_token,
+                max_output_tokens=max_output_tokens,
             )
         except (FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return _error_response("ue_find_references", exc, read_only=True)

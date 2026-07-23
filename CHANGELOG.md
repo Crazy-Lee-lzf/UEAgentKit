@@ -9,6 +9,11 @@ All notable changes to UE Agent Kit are documented here.
 - Standardized MCP errors with `code`, `message`, `retryable`, `details`, and `suggestedAction` while retaining `type` for compatibility.
 - Added index build metadata to the read-only status contract and fixed the Python package version reported by MCP.
 - Extended unit, stdio, and real UE5.6 workflow coverage for the new protocol contract.
+- Added opaque session-local continuation tokens bound to one Tool and immutable SQLite snapshot while retaining offset compatibility.
+- Added accurate `limit + 1` pagination, Path Prefix filters, and bounded output Token Budgets with explicit truncation reasons.
+- Added selective `ue_get_asset` sections with independent Symbol, Reference, Graph, and Node continuations.
+- Added outgoing, incoming, and bidirectional reference queries with bounded depth 1-3 and project-only filtering.
+- Added stable validation for Unreal paths, Symbol IDs, Graph GUIDs, Node GUIDs, and invalid continuation tokens.
 
 ## 0.5.0 — Fixed-project MCP workflow
 

@@ -59,15 +59,48 @@ Database、Engine、Project、Policy、Revision Export、Work Root、Backup Root
 
 ### `ue_search`
 
-搜索 Asset 或 Symbol，带硬分页上限。
+搜索 Asset 或 Symbol。
+
+- Asset 支持 `asset_class` 和 `path_prefix`。
+- Symbol 支持 `kind`、精确 `asset_path` 和 `path_prefix`。
+- 保留 `offset` 兼容旧客户端；新客户端优先使用 `continuation_token`。
+- Server 内部读取 `limit + 1` 条记录，准确判断是否仍有下一页。
+- `max_output_tokens` 控制返回体的近似 Token Budget。
 
 ### `ue_get_asset`
 
-按完整 Object Path 返回一个资产，以及有界的 Symbol、Reference、Graph 和 Node。
+按完整 Object Path 读取一个资产，支持以下 section：
+
+```text
+identity
+summary
+metadata
+symbols
+references
+graphs
+nodes
+```
+
+不传 `sections` 时保持 0.5.0 的完整读取语义。`symbols`、`references`、`graphs` 和 `nodes` 分别具有独立分页状态与 continuation token；后续请求可只携带该 section 返回的 Token。`graph_guid` 和 `node_guid` 可进一步限定 Graph/Node 结果。
 
 ### `ue_find_references`
 
 按引用类型、源/目标 Symbol、源/目标资产过滤；至少需要一个条件。
+
+- `direction=outgoing|incoming|both`。
+- `depth` 为 1 至 3；大于 1 时必须提供锚点 `asset_path`。
+- `project_only=true` 只返回目标资产也存在于当前 SQLite 索引中的边。
+- 深层遍历不接受源/目标 Symbol 与目标资产端点组合，避免产生含义不稳定的跨层过滤。
+
+## 分页与输出预算
+
+- continuation token 是分页状态，不是 API Key、登录 Token 或模型 Token。
+- Token 为当前 Server 会话生成的不透明随机值，不暴露查询文本和本机路径。
+- Token 绑定 Tool、固定 SQLite 快照和原始查询参数，不能跨 Tool、跨索引快照或跨 Server 重启复用。
+- `offset` 继续保留兼容性，但 Agent 应优先使用 continuation token。
+- 查询响应返回 `hasMore`、兼容字段 `mayHaveMore`、`continuationToken` 和 `source`。
+- `outputBudget` 返回 `maxTokens`、`estimatedTokens`、`truncated` 和 `truncationReason`。
+- 截断原因包括 `page-limit`、`section-limit`、`token-budget` 和 `single-result-exceeds-token-budget`。
 
 ## 错误 Envelope
 
@@ -81,7 +114,7 @@ details
 suggestedAction
 ```
 
-`code` 是供客户端判断的稳定错误码；`retryable` 表示在不改变请求语义的前提下重试是否可能成功；`details` 必须经过路径脱敏；`suggestedAction` 给出下一步操作。保留 `type` 仅用于兼容旧客户端，不应作为协议判断依据。
+`code` 是供客户端判断的稳定错误码；`retryable` 表示在不改变请求语义的前提下重试是否可能成功；`details` 必须经过路径脱敏；`suggestedAction` 给出下一步操作。保留 `type` 仅用于兼容旧客户端，不应作为协议判断依据。无效、过期、跨 Tool 或跨索引快照的分页 Token 统一返回 `invalid-continuation-token`。
 
 ## 写入工作流 Tool
 

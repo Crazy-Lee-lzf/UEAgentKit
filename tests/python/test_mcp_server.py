@@ -120,6 +120,67 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(asset["limits"]["graphs"], 100)
         self.assertEqual(references["results"][0]["target_asset_path"], GENERIC_TARGET)
 
+    def test_search_continuation_path_prefix_and_output_budget(self) -> None:
+        first = self.service.search(
+            "",
+            scope="symbols",
+            asset_path=ASSET_A,
+            limit=1,
+        )
+        token = first["pagination"]["continuationToken"]
+        self.assertTrue(first["pagination"]["hasMore"])
+        self.assertTrue(token.startswith("ct_"))
+
+        second = self.service.search(continuation_token=token)
+        self.assertEqual(second["pagination"]["offset"], 1)
+        self.assertEqual(second["pagination"]["source"], "continuation-token")
+        self.assertNotEqual(first["results"][0]["stable_id"], second["results"][0]["stable_id"])
+
+        by_prefix = self.service.search("", path_prefix="/Game/Environment")
+        self.assertEqual([item["asset_path"] for item in by_prefix["results"]], [GENERIC_ASSET])
+
+        budgeted = self.service.search(
+            "",
+            scope="symbols",
+            asset_path=ASSET_A,
+            limit=3,
+            include_details=True,
+            max_output_tokens=256,
+        )
+        self.assertTrue(budgeted["outputBudget"]["truncated"])
+        self.assertTrue(budgeted["outputBudget"]["truncationReason"])
+        self.assertTrue(budgeted["pagination"]["continuationToken"])
+
+        with self.assertRaisesRegex(ValueError, "unknown or expired"):
+            self.service.search(continuation_token=token + "x")
+        with self.assertRaisesRegex(ValueError, "another Tool"):
+            self.service.find_references(continuation_token=token)
+
+    def test_asset_sections_have_independent_continuations(self) -> None:
+        first = self.service.get_asset(
+            ASSET_A,
+            sections=["identity", "symbols"],
+            symbol_limit=1,
+        )
+        self.assertEqual(first["requestedSections"], ["identity", "symbols"])
+        self.assertIn("asset_path", first["asset"])
+        self.assertIn("symbols", first["asset"])
+        self.assertNotIn("summary", first["asset"])
+        self.assertNotIn("revision_value", first["asset"])
+        symbol_page = first["sectionPagination"]["symbols"]
+        self.assertTrue(symbol_page["hasMore"])
+        self.assertTrue(symbol_page["continuationToken"])
+
+        second = self.service.get_asset(continuation_token=symbol_page["continuationToken"])
+        self.assertEqual(second["sectionPagination"]["symbols"]["offset"], 1)
+        self.assertEqual(second["sectionPagination"]["symbols"]["source"], "continuation-token")
+        self.assertEqual(second["requestedSections"], ["identity", "symbols"])
+
+        with self.assertRaisesRegex(ValueError, "canonical GUID"):
+            self.service.get_asset(ASSET_A, graph_guid="not-a-guid")
+        with self.assertRaisesRegex(ValueError, "beginning with /"):
+            self.service.get_asset("Game/BP_Invalid.BP_Invalid")
+
     def test_service_requires_bounded_and_filtered_queries(self) -> None:
         with self.assertRaisesRegex(ValueError, "must not exceed"):
             self.service.search("", limit=MAX_MCP_SEARCH_LIMIT + 1)
@@ -127,6 +188,12 @@ class McpServerTests(unittest.TestCase):
             self.service.find_references()
         with self.assertRaisesRegex(ValueError, "graph_limit must not exceed"):
             self.service.get_asset(ASSET_A, graph_limit=501)
+        maximum_reference_page = self.service.get_asset(
+            ASSET_A,
+            sections=["references"],
+            reference_limit=1000,
+        )
+        self.assertTrue(maximum_reference_page["found"])
         with self.assertRaisesRegex(ValueError, "only for symbol search"):
             self.service.search("x", asset_path=ASSET_A)
         with self.assertRaisesRegex(ValueError, "only for asset search"):
@@ -159,6 +226,16 @@ class McpServerTests(unittest.TestCase):
         )
         for tool in tools:
             self.assertNotIn("database", tool.inputSchema.get("properties", {}))
+        search_tool = next(tool for tool in tools if tool.name == "ue_search")
+        self.assertIn("path_prefix", search_tool.inputSchema["properties"])
+        self.assertIn("continuation_token", search_tool.inputSchema["properties"])
+        self.assertIn("max_output_tokens", search_tool.inputSchema["properties"])
+        asset_tool = next(tool for tool in tools if tool.name == "ue_get_asset")
+        self.assertIn("sections", asset_tool.inputSchema["properties"])
+        self.assertIn("graph_guid", asset_tool.inputSchema["properties"])
+        reference_tool = next(tool for tool in tools if tool.name == "ue_find_references")
+        self.assertIn("direction", reference_tool.inputSchema["properties"])
+        self.assertIn("depth", reference_tool.inputSchema["properties"])
 
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
         self.assertEqual(capabilities["server"]["version"], "0.5.0")
@@ -192,6 +269,11 @@ class McpServerTests(unittest.TestCase):
         self.assertFalse(error_payload["error"]["retryable"])
         self.assertEqual(error_payload["error"]["details"], {})
         self.assertTrue(error_payload["error"]["suggestedAction"])
+
+        _, token_error = asyncio.run(
+            server.call_tool("ue_search", {"continuation_token": "ct_unknown"})
+        )
+        self.assertEqual(token_error["error"]["code"], "invalid-continuation-token")
 
     @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
     def test_fastmcp_full_workflow_registers_status_query_and_workflow_tools(self) -> None:

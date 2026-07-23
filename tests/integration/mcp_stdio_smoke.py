@@ -70,7 +70,31 @@ async def _run_client(database_path: Path, error_log_path: Path) -> dict[str, ob
                     "ue_search",
                     {"query": "生命值", "scope": "symbols", "kind": "variable"},
                 )
+                paged_search_result = await session.call_tool(
+                    "ue_search",
+                    {"scope": "symbols", "asset_path": ASSET_A, "limit": 1},
+                )
+                paged_search = paged_search_result.structuredContent
+                if not paged_search or not paged_search["pagination"]["continuationToken"]:
+                    raise RuntimeError(f"Search continuation was not returned: {paged_search}")
+                continued_search_result = await session.call_tool(
+                    "ue_search",
+                    {"continuation_token": paged_search["pagination"]["continuationToken"]},
+                )
                 asset_result = await session.call_tool("ue_get_asset", {"asset_path": ASSET_A})
+                section_asset_result = await session.call_tool(
+                    "ue_get_asset",
+                    {"asset_path": ASSET_A, "sections": ["identity", "symbols"], "symbol_limit": 1},
+                )
+                section_asset = section_asset_result.structuredContent
+                if not section_asset or not section_asset["sectionPagination"]["symbols"]["continuationToken"]:
+                    raise RuntimeError(f"Asset section continuation was not returned: {section_asset}")
+                continued_section_result = await session.call_tool(
+                    "ue_get_asset",
+                    {
+                        "continuation_token": section_asset["sectionPagination"]["symbols"]["continuationToken"]
+                    },
+                )
                 references_result = await session.call_tool(
                     "ue_find_references",
                     {"target_asset_path": GENERIC_TARGET},
@@ -80,7 +104,11 @@ async def _run_client(database_path: Path, error_log_path: Path) -> dict[str, ob
     capabilities = capabilities_result.structuredContent
     project_status = project_status_result.structuredContent
     search = search_result.structuredContent
+    paged_search = paged_search_result.structuredContent
+    continued_search = continued_search_result.structuredContent
     asset = asset_result.structuredContent
+    section_asset = section_asset_result.structuredContent
+    continued_section = continued_section_result.structuredContent
     references = references_result.structuredContent
     rejected = rejected_result.structuredContent
     tool_names = [tool.name for tool in tools_result.tools]
@@ -92,8 +120,16 @@ async def _run_client(database_path: Path, error_log_path: Path) -> dict[str, ob
         raise RuntimeError(f"Project status lookup failed: {project_status}")
     if not search or search["results"][0]["name"] != "生命值":
         raise RuntimeError(f"Unicode symbol search failed: {search}")
+    if not continued_search or continued_search["pagination"]["source"] != "continuation-token":
+        raise RuntimeError(f"Search continuation failed: {continued_search}")
+    if paged_search["results"][0]["stable_id"] == continued_search["results"][0]["stable_id"]:
+        raise RuntimeError("Search continuation repeated the first result")
     if not asset or not asset["found"] or asset["asset"]["asset_path"] != ASSET_A:
         raise RuntimeError(f"Asset lookup failed: {asset}")
+    if not section_asset or set(section_asset["requestedSections"]) != {"identity", "symbols"}:
+        raise RuntimeError(f"Asset section selection failed: {section_asset}")
+    if not continued_section or continued_section["sectionPagination"]["symbols"]["source"] != "continuation-token":
+        raise RuntimeError(f"Asset section continuation failed: {continued_section}")
     if not references or references["results"][0]["target_asset_path"] != GENERIC_TARGET:
         raise RuntimeError(f"Reference lookup failed: {references}")
     if not rejected or rejected["ok"] or rejected["error"]["code"] != "invalid-arguments":
@@ -113,7 +149,9 @@ async def _run_client(database_path: Path, error_log_path: Path) -> dict[str, ob
         "serverVersion": capabilities["server"]["version"],
         "projectStatusAvailable": True,
         "searchResultCount": search["pagination"]["resultCount"],
+        "searchContinuationPassed": True,
         "assetFound": asset["found"],
+        "assetSectionContinuationPassed": True,
         "referenceResultCount": references["pagination"]["resultCount"],
         "invalidArgumentsRejected": True,
         "databaseHashUnchanged": True,

@@ -29,7 +29,7 @@ UE Agent Kit 的长期定位是面向 AI Agent 的 Unreal Engine 项目智能层
 - 增加项目、索引和能力状态查询。
 - 统一 Tool 错误码、分页、局部展开、结果截断和重试语义。
 - 增加索引过期检测，明确磁盘资产、索引 Revision 和当前工程状态的差异。
-- 优化 `ue_search`、`ue_get_asset` 和 `ue_find_references` 的过滤、摘要和 Token Budget。
+- [x] 优化 `ue_search`、`ue_get_asset` 和 `ue_find_references` 的过滤、分页、section 和 Token Budget。
 - 为现有写入 Operation 提供高层参数入口，由 Server 自动生成严格 Patch。
 - 改进 Plan、Dry Run Receipt、Apply Receipt 和 rollback Receipt 的可诊断性。
 - 补充 Claude Code、ChatGPT 和独立 MCP Client 的回归矩阵。
