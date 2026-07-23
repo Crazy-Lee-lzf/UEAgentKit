@@ -139,7 +139,7 @@ AI 输出应明确区分：
 
 ## MCP 工作流
 
-0.5.0 的默认 MCP 模式只提供查询 Tool。完整固定项目模式增加 Patch Plan、Dry Run、Commit、独立验证和 rollback，但 Agent 仍不能选择项目、引擎、Policy、数据库或任意文件路径。
+0.5.1 的默认 MCP 模式提供能力、项目状态和三个查询 Tool。完整固定项目模式共 16 个 Tool，增加六个高层 Plan/Dry Run 入口与底层 Apply、Verify、rollback 工作流，但 Agent 仍不能选择项目、引擎、Policy、数据库或任意文件路径。
 
 推荐调用顺序：
 

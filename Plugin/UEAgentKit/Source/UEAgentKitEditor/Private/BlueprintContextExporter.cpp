@@ -25,7 +25,7 @@
 namespace BlueprintContextExporterPrivate
 {
 	static constexpr const TCHAR* SchemaVersion = TEXT("1.1");
-	static constexpr const TCHAR* ExporterVersion = TEXT("0.5.0");
+	static constexpr const TCHAR* ExporterVersion = TEXT("0.5.1");
 
 	FString GuidToString(const FGuid& Guid)
 	{

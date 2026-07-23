@@ -6,7 +6,7 @@
 
 UE Agent Kit is an open-source Unreal Engine asset analysis, indexing, and policy-gated patch toolkit. Its Editor plugin exports asset catalogs, Asset Registry metadata, dependencies, and Blueprint semantics; a Python CLI and SQLite provide a project-wide index, while Policy, Revision checks, dry runs, and backups protect explicit writes.
 
-The current release is **0.5.0** and targets **Unreal Engine 5.6**. Building on the policy, backup, and rollback guarantees in 0.4.4, version 0.5.0 adds a complete local MCP workflow for search, inspection, patch planning, dry run, explicit commit, independent verification, and two-stage rollback.
+The current release is **0.5.1** and targets **Unreal Engine 5.6**. Building on the fixed-project MCP workflow in 0.5.0, version 0.5.1 adds capability and project status, stable continuation and Token Budget contracts, three-source Revision freshness, six high-level safe-change tools, detailed diagnostics, and a multi-client MCP protocol compatibility matrix.
 
 > **AI Generated**: Most code and documentation in this project are AI-generated and reviewed through human inspection, UE 5.6 compilation, automated tests, and real-project regression validation.
 
@@ -196,7 +196,7 @@ The script creates an isolated native Data Asset fixture, runs 11 dry runs, 11 c
 
 The executor supports four Blueprint operations, `setAssetProperty`, four Material Instance parameter operations, and `setDataTableCell`. One execution is limited to one asset and one operation. Generic properties, Material parameters, and DataTable fields use exact `allowedAssetProperties`, `allowedMaterialParameters`, and `allowedDataTableFields` authorization. Material Instance writes require one unique Global parameter; DataTable writes target one top-level scalar field in one existing row and restore the complete row during dry runs. Only single-file packages without external package sidecars are accepted.
 
-### 6. Run the MCP server (0.5.0)
+### 6. Run the MCP server (0.5.1)
 
 Install the optional MCP dependency and validate the SQLite index:
 
@@ -204,6 +204,7 @@ Install the optional MCP dependency and validate the SQLite index:
 scripts\setup_python.cmd -WithMcp
 scripts\RunMcp.cmd -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3" -Check
 scripts\TestMcpStdio.cmd
+scripts\TestMcpClients.cmd
 ```
 
 The server uses local `stdio` only. Default mode exposes five read-only capability, project-status, and query tools; fixed Engine, Project, Policy, and Revision Export settings enable the complete sixteen-tool workflow:
@@ -220,7 +221,7 @@ Use `claude mcp list` or `/mcp` inside Claude Code to inspect the connection. Fu
 ### 7. Validate the asset catalog
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.5.0
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.5.1
 ```
 
 See [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md) for installation and full command details.
@@ -252,10 +253,11 @@ Output\Blueprints\
 
 - [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md): build, install, export, and query instructions.
 - [`docs/AI_USAGE.md`](docs/AI_USAGE.md): using the asset index and Blueprint semantics with AI tools.
-- [`docs/RELEASE_0.5.0_EN.md`](docs/RELEASE_0.5.0_EN.md): 0.5.0 MCP workflow, verification, and safety boundaries.
+- [`docs/RELEASE_0.5.1_EN.md`](docs/RELEASE_0.5.1_EN.md): 0.5.1 query contract, high-level safe changes, diagnostics, and client compatibility.
+- [`docs/RELEASE_0.5.0_EN.md`](docs/RELEASE_0.5.0_EN.md): 0.5.0 fixed-project MCP workflow release notes.
 - [`docs/RELEASE_0.4.4_EN.md`](docs/RELEASE_0.4.4_EN.md): 0.4.4 release scope, verification, and upgrade notes.
 - [`CHANGELOG.md`](CHANGELOG.md): version history summary.
-- [`docs/ROADMAP_EN.md`](docs/ROADMAP_EN.md): version goals and safety boundaries for 0.4.0, 0.4.x, and 0.5.0.
+- [`docs/ROADMAP_EN.md`](docs/ROADMAP_EN.md): 0.5.x daily MCP and Live Editor work, followed by Revision-aware memory and analysis.
 - [`spec/BPCTX_FORMAT.md`](spec/BPCTX_FORMAT.md): BPCTX/1 format specification.
 - [`spec/PATCH_SCHEMA.md`](spec/PATCH_SCHEMA.md): declarative patches, policy, revision checks, and validation-only safety boundaries.
 - [`spec/BACKUP_AND_ROLLBACK.md`](spec/BACKUP_AND_ROLLBACK.md): backup manifest, rollback receipt, and restore-verification contract.

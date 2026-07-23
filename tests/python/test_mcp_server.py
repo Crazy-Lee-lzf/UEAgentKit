@@ -265,7 +265,7 @@ class McpServerTests(unittest.TestCase):
         self.assertIn("depth", reference_tool.inputSchema["properties"])
 
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
-        self.assertEqual(capabilities["server"]["version"], "0.5.0")
+        self.assertEqual(capabilities["server"]["version"], __version__)
         self.assertEqual(capabilities["server"]["mode"], "read-only")
         self.assertFalse(capabilities["operations"]["available"])
         self.assertFalse(capabilities["freshness"]["available"])
@@ -505,6 +505,22 @@ class McpServerTests(unittest.TestCase):
         ):
             self.assertIn(token, integration_source)
         self.assertIn("mcp_stdio_smoke.py", integration_runner)
+
+        compatibility_source = (
+            TOOL_ROOT / "tests" / "integration" / "mcp_client_compatibility.py"
+        ).read_text(encoding="utf-8")
+        compatibility_runner = (TOOL_ROOT / "scripts" / "TestMcpClients.ps1").read_text(encoding="utf-8")
+        for token in (
+            "RawJsonRpcClient",
+            "officialPythonClient",
+            "rawJsonRpcClient",
+            "claudeCodeContract",
+            "chatGptProtocolContract",
+            "structuredContent",
+            "fixedConfigurationHidden",
+        ):
+            self.assertIn(token, compatibility_source)
+        self.assertIn("mcp_client_compatibility.py", compatibility_runner)
 
         example = json.loads(
             (TOOL_ROOT / "examples" / "mcp" / "claude-code.example.json").read_text(encoding="utf-8")

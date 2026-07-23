@@ -152,6 +152,19 @@ revisionExportStale=true
 - `outputBudget` 返回 `maxTokens`、`estimatedTokens`、`truncated` 和 `truncationReason`。
 - 截断原因包括 `page-limit`、`section-limit`、`token-budget` 和 `single-result-exceeds-token-budget`。
 
+## Client 兼容契约
+
+0.5.1 提供 `scripts\TestMcpClients.cmd`，通过两个独立真实 `stdio` 会话验证：
+
+```text
+官方 Python MCP ClientSession
+不依赖 SDK 的原始 newline-delimited JSON-RPC Client
+```
+
+矩阵要求两类 Client 协商相同 MCP Protocol Version，发现相同 Tool 顺序与 JSON Schema，并正确接收 `structuredContent`。每个 Tool 同时保留可解析的单条 JSON Text Content 回退，错误也使用相同 Envelope，便于只消费文本内容的 Host 保持兼容。
+
+Claude Code 契约检查本地 `stdio`、非空 Tool Description、Object 型 `inputSchema`、完整 annotations，以及 Tool 参数中不存在固定 Database、Project、Engine、Policy 或文件路径。标准 MCP/ChatGPT Host 契约只验证 `tools/list`、`tools/call`、`structuredContent` 和文本回退；本地自动化不会声称测试托管 ChatGPT UI、账号配置或远程 Transport。
+
 ## 错误 Envelope
 
 Tool 失败时统一返回：

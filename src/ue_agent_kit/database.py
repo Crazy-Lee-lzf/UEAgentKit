@@ -69,7 +69,7 @@ def apply_migrations(connection: sqlite3.Connection) -> int:
             "BEGIN IMMEDIATE;\n"
             + migration.sql
             + "\n"
-            + f"INSERT INTO schema_migrations(version, description, applied_at_utc) "
+            + "INSERT INTO schema_migrations(version, description, applied_at_utc) "
             + f"VALUES ({migration.version}, {description}, {applied_at});\n"
             + f"PRAGMA user_version = {migration.version};\n"
             + "COMMIT;\n"

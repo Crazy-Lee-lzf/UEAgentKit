@@ -12,7 +12,7 @@ from typing import Any
 
 BACKUP_MANIFEST_SCHEMA_VERSION = "1.0"
 ROLLBACK_REPORT_SCHEMA_VERSION = "1.0"
-TOOL_VERSION = "0.5.0"
+TOOL_VERSION = "0.5.1"
 
 _REVISION_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SAFE_ID_RE = re.compile(r"[^A-Za-z0-9_.-]+")

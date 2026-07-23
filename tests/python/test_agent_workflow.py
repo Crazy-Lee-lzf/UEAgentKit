@@ -136,7 +136,7 @@ class FakeWorkflowRunner:
             if mode == "DryRun":
                 report = {
                     "schemaVersion": "1.0",
-                    "executorVersion": "0.5.0",
+                    "executorVersion": "0.5.1",
                     "mode": "DryRun",
                     "patchId": patch["patchId"],
                     "projectName": PROJECT,
@@ -159,7 +159,7 @@ class FakeWorkflowRunner:
                 self.revision = AFTER_REVISION
                 report = {
                     "schemaVersion": "1.0",
-                    "executorVersion": "0.5.0",
+                    "executorVersion": "0.5.1",
                     "mode": "Commit",
                     "patchId": patch["patchId"],
                     "projectName": PROJECT,

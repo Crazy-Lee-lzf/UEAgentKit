@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import sys
+
 import unittest
 
 from pathlib import Path
@@ -13,6 +15,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
+SRC_ROOT = ROOT / "src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
 
 
 
@@ -208,23 +213,44 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
 
     def test_release_version_is_consistent(self) -> None:
 
+        expected_version = "0.5.1"
         pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-
         plugin = json.loads(
-
             (ROOT / "Plugin" / "UEAgentKit" / "UEAgentKit.uplugin").read_text(
-
                 encoding="utf-8"
-
             )
-
         )
 
-        self.assertIn('version = "0.5.0"', pyproject)
+        self.assertIn(f'version = "{expected_version}"', pyproject)
+        self.assertEqual(plugin["VersionName"], expected_version)
+        self.assertEqual(plugin["Version"], 21)
 
-        self.assertEqual(plugin["VersionName"], "0.5.0")
+        python_version_files = [
+            ROOT / "src" / "ue_agent_kit" / "__init__.py",
+            ROOT / "src" / "ue_agent_kit" / "backups.py",
+            ROOT / "src" / "ue_agent_kit" / "fixtures.py",
+        ]
+        for path in python_version_files:
+            source = path.read_text(encoding="utf-8")
+            self.assertIn(expected_version, source, path)
+            self.assertNotIn("0.5.0", source, path)
 
-        self.assertEqual(plugin["Version"], 20)
+        scalar_regression = (ROOT / "scripts" / "RunScalarPatchRegression.ps1").read_text(encoding="utf-8")
+        self.assertIn('toolVersion = "0.5.1"', scalar_regression)
+
+        versioned_cpp_files = [
+            "AssetCatalogExportCommandlet.cpp",
+            "AssetPatchCommandlet.cpp",
+            "BlueprintContextExportCommandlet.cpp",
+            "BlueprintContextExporter.cpp",
+            "BlueprintPatchCommandlet.cpp",
+            "WriteFixturePlanCommandlet.cpp",
+        ]
+        private_root = ROOT / "Plugin" / "UEAgentKit" / "Source" / "UEAgentKitEditor" / "Private"
+        for filename in versioned_cpp_files:
+            source = (private_root / filename).read_text(encoding="utf-8")
+            self.assertIn(expected_version, source, filename)
+            self.assertNotIn("0.5.0", source, filename)
 
 
 

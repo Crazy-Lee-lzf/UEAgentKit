@@ -2,7 +2,7 @@
 
 更新时间：2026-07-23
 
-当前版本为 **0.5.0**，支持 Unreal Engine 5.6。
+当前版本为 **0.5.1**，支持 Unreal Engine 5.6。
 
 UE Agent Kit 的长期定位是面向 AI Agent 的 Unreal Engine 项目智能层：既提供独立的项目读取和受控写入能力，也提供带 Revision 的长期项目记忆、证据驱动分析、影响评估和验证闭环。
 
@@ -16,9 +16,10 @@ UE Agent Kit 的长期定位是面向 AI Agent 的 Unreal Engine 项目智能层
 0.4.0  Material Instance 与 DataTable 常用写入
 0.4.x  Backup Manifest、rollback、Fixture 和完整安全回归
 0.5.0  本地 MCP 第一版：查询、Patch、Dry Run、Commit、验证和回滚
+0.5.1  MCP 协议补全：状态、分页、新鲜度、高层写入、诊断和 Client 兼容
 ```
 
-0.5.0 已形成完整但偏底层的 Agent 工作流。当前主要缺口不是继续横向增加大量资产类型，而是 MCP 易用性、Editor 实时状态、项目长期记忆和高层分析能力。
+0.5.1 已完成离线 MCP 查询、受控写入和协议诊断的日常可用性补全。下一阶段进入 0.5.2 Live Editor Read，重点区分磁盘快照、SQLite 索引与 Editor 内存状态。
 
 ## 0.5.x：MCP 与日常开发工具补全
 
@@ -34,7 +35,7 @@ UE Agent Kit 的长期定位是面向 AI Agent 的 Unreal Engine 项目智能层
 - [x] 完成单资产分阶段刷新与 immutable Server 新会话安全重载方案。
 - [x] 为现有写入 Operation 提供六个高层参数入口，由 Server 自动生成严格 Patch，并支持 Plan/Dry Run。
 - [x] 区分 Policy、Revision、Dirty、超时、UE Crash 和报告错误，并返回脱敏 diagnostic/report ID。
-- [ ] 补充 Claude Code、ChatGPT 和独立 MCP Client 的回归矩阵。
+- [x] 补充 Claude Code Schema、标准 `structuredContent` 契约、官方 Python Client 和原始 JSON-RPC Client 回归矩阵；托管 ChatGPT UI 不属于本地自动化范围。
 
 ### 0.5.2：Live Editor Read
 
