@@ -4,6 +4,7 @@ import argparse
 import json
 import sqlite3
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal, Sequence
 
@@ -37,6 +38,12 @@ from .query_protocol import (
     MIN_OUTPUT_TOKEN_BUDGET,
     ContinuationTokenError,
 )
+from .snapshot_lifecycle import (
+    FrozenSessionSnapshot,
+    SnapshotLifecycleError,
+    freeze_active_snapshot,
+    resolve_active_snapshot,
+)
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -62,7 +69,8 @@ HIGH_LEVEL_WRITE_TOOL_NAMES = [
     "ue_set_datatable_cell",
 ]
 LOW_LEVEL_WRITE_TOOL_NAMES = ["ue_plan_patch", "ue_dry_run_patch", "ue_apply_patch", "ue_verify_asset", "ue_rollback_patch"]
-WRITE_TOOL_NAMES = HIGH_LEVEL_WRITE_TOOL_NAMES + LOW_LEVEL_WRITE_TOOL_NAMES
+SNAPSHOT_TOOL_NAMES = ["ue_refresh_asset_index"]
+WRITE_TOOL_NAMES = HIGH_LEVEL_WRITE_TOOL_NAMES + LOW_LEVEL_WRITE_TOOL_NAMES[:-1] + SNAPSHOT_TOOL_NAMES + LOW_LEVEL_WRITE_TOOL_NAMES[-1:]
 
 
 def _server_instructions(
@@ -137,6 +145,7 @@ def _tool_descriptors(
         "ue_apply_patch": (False, True),
         "ue_verify_asset": (False, False),
         "ue_rollback_patch": (False, True),
+        "ue_refresh_asset_index": (False, False),
     }
     names = list(READ_TOOL_NAMES)
     if live_editor_enabled:
@@ -220,6 +229,18 @@ def _capabilities_response(
             "commitSupportedDirectly": False,
             "commitUsesApplyReceiptWorkflow": True,
         },
+        "snapshotRefresh": {
+            "available": write_tools_enabled,
+            "tool": "ue_refresh_asset_index" if write_tools_enabled else "",
+            "modes": ["Preview", "Apply"],
+            "singleExactAsset": True,
+            "policyAuthorized": True,
+            "pairedGeneration": True,
+            "atomicPointerSwitch": True,
+            "currentSessionFrozen": True,
+            "restartRequiredAfterApply": True,
+            "arbitraryPaths": False,
+        },
         "limits": {
             "searchResults": MAX_MCP_SEARCH_LIMIT,
             "assetSymbols": MAX_MCP_SYMBOL_LIMIT,
@@ -267,6 +288,9 @@ def _capabilities_response(
             "planRequiresFreshIndex": write_tools_enabled,
             "commitMarksFixedSnapshotsStale": write_tools_enabled,
             "rollbackMayRestoreFreshState": write_tools_enabled,
+            "singleAssetRefreshAvailable": write_tools_enabled,
+            "pairedSnapshotGeneration": write_tools_enabled,
+            "newSessionRequiredAfterRefresh": write_tools_enabled,
             "liveEditorMemorySeparate": live_editor_enabled,
         },
         "safety": {
@@ -286,6 +310,8 @@ def _capabilities_response(
             "plansPersistent": False,
             "receiptsPersistent": False,
             "liveEditorConnectionPersistent": False,
+            "workflowSnapshotFrozen": write_tools_enabled,
+            "refreshInvalidatesWorkflowRecords": write_tools_enabled,
         },
     }
 
@@ -407,6 +433,11 @@ def _suggested_action(code: str) -> str:
         "live-editor-authentication-failed": "Restart the Editor and MCP Server so a new local authenticated session is negotiated.",
         "live-editor-capability-unavailable": "Use only the registered Live Editor capabilities reported by ue_get_capabilities.",
         "live-editor-invalid-parameters": "Use the bounded Live Editor Tool schema and an exact /Game Object Path where required.",
+        "snapshot-refresh-restart-required": "Restart the MCP server so the new paired snapshot generation becomes the frozen session snapshot.",
+        "snapshot-refresh-invalid-asset": "Use one exact policy-authorized /Game Object Path.",
+        "snapshot-refresh-revision-mismatch": "Save or revert the asset, then retry after its disk Package Revision is stable.",
+        "snapshot-refresh-disk-space": "Free disk space under the fixed workflow root before retrying snapshot refresh.",
+        "live-editor-asset-dirty": "Save or revert the target asset in Unreal Editor before refreshing its disk-backed index record.",
     }
     if code in exact:
         return exact[code]
@@ -423,6 +454,9 @@ def _error_response(tool: str, error: Exception, *, read_only: bool) -> dict[str
     message = str(error)
     details: dict[str, Any] = {}
     if isinstance(error, WorkflowError):
+        code = error.code
+        details = error.details
+    elif isinstance(error, SnapshotLifecycleError):
         code = error.code
         details = error.details
     elif isinstance(error, LiveEditorError):
@@ -963,6 +997,17 @@ def create_mcp_server(
             except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
                 return _error_response("ue_verify_asset", exc, read_only=True)
 
+        @server.tool(annotations=planning_annotations)
+        def ue_refresh_asset_index(
+            asset_path: str,
+            mode: Literal["Preview", "Apply"] = "Preview",
+        ) -> dict[str, Any]:
+            """Preview or atomically activate one policy-authorized paired SQLite and Revision Export generation."""
+            try:
+                return workflow_service.refresh_asset_index(asset_path, mode=mode)
+            except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+                return _error_response("ue_refresh_asset_index", exc, read_only=False)
+
         @server.tool(annotations=destructive_annotations)
         def ue_rollback_patch(
             apply_receipt: str,
@@ -1064,12 +1109,49 @@ def _build_live_editor_service(args: argparse.Namespace) -> LiveEditorBridgeServ
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    frozen_snapshot: FrozenSessionSnapshot | None = None
     try:
-        index_service = IndexQueryService(args.database)
-        index_status = index_service.check()
-        workflow_config = _build_workflow_config(args)
-        workflow_service = PatchWorkflowService(index_service, workflow_config) if workflow_config is not None else None
+        base_workflow_config = _build_workflow_config(args)
         live_editor_service = _build_live_editor_service(args)
+        workflow_config: PatchWorkflowConfig | None = None
+        database_path = args.database
+        if base_workflow_config is not None:
+            active_snapshot = resolve_active_snapshot(
+                args.database,
+                base_workflow_config.revision_export,
+                base_workflow_config.work_root,
+                base_workflow_config.project_path.stem,
+            )
+            validation_index = IndexQueryService(active_snapshot.database)
+            validation_config = replace(
+                base_workflow_config,
+                revision_export=active_snapshot.revision_export,
+                active_snapshot=active_snapshot,
+            )
+            PatchWorkflowService(
+                validation_index,
+                validation_config,
+                live_editor_service=live_editor_service,
+            )
+            frozen_snapshot = freeze_active_snapshot(active_snapshot)
+            database_path = frozen_snapshot.database
+            workflow_config = replace(
+                base_workflow_config,
+                revision_export=frozen_snapshot.revision_export,
+                active_snapshot=active_snapshot,
+            )
+
+        index_service = IndexQueryService(database_path)
+        index_status = index_service.check()
+        workflow_service = (
+            PatchWorkflowService(
+                index_service,
+                workflow_config,
+                live_editor_service=live_editor_service,
+            )
+            if workflow_config is not None
+            else None
+        )
         if args.check:
             payload: dict[str, Any] = {
                 "schemaVersion": "1.0",
@@ -1087,18 +1169,30 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(payload, ensure_ascii=False, indent=2))
             return 0
         server = create_mcp_server(
-            args.database,
+            database_path,
             workflow_service=workflow_service,
             live_editor_service=live_editor_service,
         )
         server.run(transport="stdio")
         return 0
-    except (LiveEditorError, WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+    except (
+        LiveEditorError,
+        SnapshotLifecycleError,
+        WorkflowError,
+        FileNotFoundError,
+        OSError,
+        ValueError,
+        RuntimeError,
+        sqlite3.Error,
+    ) as exc:
         print(
             json.dumps(_error_response("ue_agent_kit_mcp", exc, read_only=False), ensure_ascii=False),
             file=sys.stderr,
         )
         return 2 if isinstance(exc, FileNotFoundError) else 1
+    finally:
+        if frozen_snapshot is not None:
+            frozen_snapshot.cleanup()
 
 
 if __name__ == "__main__":

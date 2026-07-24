@@ -13,8 +13,27 @@ from pathlib import Path
 from typing import Any, Callable, Literal
 
 from .agent_api import IndexQueryService
+from .database import (
+    CURRENT_SCHEMA_VERSION,
+    assert_fts5_available,
+    get_metadata,
+    get_schema_version,
+    open_database,
+    set_metadata,
+)
 from .freshness import IndexFreshnessTracker
+from .indexer import build_index
 from .patches import OPERATION_REGISTRY, validate_patch
+from .snapshot_lifecycle import (
+    ActiveSnapshot,
+    SnapshotLifecycleError,
+    assert_quiescent_database,
+    clone_tree,
+    new_generation_id,
+    sha256_file,
+    utc_now_iso,
+    write_active_pointer,
+)
 
 
 WORKFLOW_SCHEMA_VERSION = "1.0"
@@ -66,6 +85,7 @@ class PatchWorkflowConfig:
     backup_root: Path
     commit_enabled: bool = False
     process_timeout_seconds: int = 1800
+    active_snapshot: ActiveSnapshot | None = None
 
 
 @dataclass
@@ -319,6 +339,7 @@ class PatchWorkflowService:
         *,
         process_runner: ProcessRunner | None = None,
         freshness_tracker: IndexFreshnessTracker | None = None,
+        live_editor_service: Any | None = None,
     ) -> None:
         self.index_service = index_service
         self.config = PatchWorkflowConfig(
@@ -331,6 +352,7 @@ class PatchWorkflowService:
             backup_root=config.backup_root.expanduser().resolve(),
             commit_enabled=config.commit_enabled,
             process_timeout_seconds=config.process_timeout_seconds,
+            active_snapshot=config.active_snapshot,
         )
         self._runner = process_runner or _default_process_runner
         self._lock = threading.RLock()
@@ -338,6 +360,9 @@ class PatchWorkflowService:
         self._dry_runs: dict[str, DryRunRecord] = {}
         self._applies: dict[str, ApplyRecord] = {}
         self._rollback_dry_runs: dict[str, RollbackDryRunRecord] = {}
+        self.live_editor_service = live_editor_service
+        self.active_snapshot = self.config.active_snapshot
+        self._refresh_applied = False
         self._validate_config()
         self.freshness = freshness_tracker or IndexFreshnessTracker(
             self.index_service,
@@ -347,7 +372,7 @@ class PatchWorkflowService:
 
     @property
     def configured_paths(self) -> tuple[Path, ...]:
-        return (
+        paths = [
             self.config.tool_root,
             self.config.engine_root,
             self.config.project_path,
@@ -355,7 +380,18 @@ class PatchWorkflowService:
             self.config.revision_export,
             self.config.work_root,
             self.config.backup_root,
-        )
+        ]
+        if self.active_snapshot is not None:
+            paths.extend(
+                [
+                    self.active_snapshot.configured_database,
+                    self.active_snapshot.configured_revision_export,
+                    self.active_snapshot.database,
+                    self.active_snapshot.revision_export,
+                    self.active_snapshot.pointer_path,
+                ]
+            )
+        return tuple(dict.fromkeys(paths))
 
     def _assert_runtime_boundaries(self) -> None:
         output_root = (self.config.tool_root / "Output").resolve()
@@ -396,6 +432,13 @@ class PatchWorkflowService:
         if not _is_within(self.config.backup_root.resolve(), backups_root):
             raise WorkflowError("workflow-config-invalid", "MCP backup_root resolved outside the tool Backups directory.")
         self._assert_runtime_boundaries()
+        if self.active_snapshot is not None:
+            if self.active_snapshot.project_name != self.config.project_path.stem:
+                raise WorkflowError("workflow-config-invalid", "The active snapshot project does not match the fixed project file.")
+            if self.active_snapshot.work_root != self.config.work_root:
+                raise WorkflowError("workflow-config-invalid", "The active snapshot pointer does not use the fixed MCP work root.")
+            if not self.active_snapshot.database.is_file() or not self.active_snapshot.revision_export.is_dir():
+                raise WorkflowError("workflow-config-invalid", "The active snapshot pair is incomplete.")
         manifest = _read_json(self.config.revision_export / "manifest.json")
         project_name = manifest.get("projectName")
         if not isinstance(project_name, str) or not project_name:
@@ -411,6 +454,7 @@ class PatchWorkflowService:
         self.policy_digest = _sha256_bytes(self.config.policy_path.read_bytes())
 
     def _assert_policy_unchanged(self) -> None:
+        self._assert_session_current()
         current_policy_digest = _sha256_bytes(self.config.policy_path.read_bytes())
         if current_policy_digest != self.policy_digest:
             raise WorkflowError("policy-changed", "The fixed Policy changed after this MCP server started.")
@@ -430,6 +474,10 @@ class PatchWorkflowService:
             "receiptRequiredForRollbackCommit": True,
             "indexLifecycle": {
                 "sessionStale": bool(session_stale),
+                "activeSnapshotGenerationId": self.active_snapshot.generation_id if self.active_snapshot is not None else "",
+                "sessionUsesFrozenSnapshot": self.active_snapshot is not None,
+                "refreshAppliedInSession": self._refresh_applied,
+                "restartRequired": self._refresh_applied,
                 "fixedSnapshotsStale": bool(session_stale),
                 "sqliteIndexStale": bool(session_stale),
                 "revisionExportStale": bool(session_stale),
@@ -476,6 +524,469 @@ class PatchWorkflowService:
                 details=self._sanitize_details({"freshness": freshness}),
             )
         return freshness
+
+    def _assert_session_current(self) -> None:
+        if self._refresh_applied:
+            raise WorkflowError(
+                "snapshot-refresh-restart-required",
+                "This MCP session already switched the active snapshot generation and must be restarted before more workflow actions.",
+            )
+
+    @staticmethod
+    def _validate_refresh_asset_path(asset_path: str) -> str:
+        if (
+            not isinstance(asset_path, str)
+            or not asset_path.startswith("/Game/")
+            or len(asset_path) > 512
+            or "\\" in asset_path
+            or ":" in asset_path
+            or ".." in asset_path
+            or any(ord(character) < 32 for character in asset_path)
+        ):
+            raise WorkflowError("snapshot-refresh-invalid-asset", "asset_path must be one exact /Game Object Path.")
+        package_path, separator, object_name = asset_path.rpartition(".")
+        if not separator or not object_name or "/" in object_name or package_path.rfind("/") >= len(package_path) - 1:
+            raise WorkflowError("snapshot-refresh-invalid-asset", "asset_path must be one exact /Game Object Path.")
+        return asset_path
+
+    def _read_fixed_policy(self) -> dict[str, Any]:
+        self._assert_policy_unchanged()
+        policy = _read_json(self.config.policy_path)
+        if policy.get("schemaVersion") != "1.0":
+            raise WorkflowError("policy-rejected", "The fixed Project Write Policy schema is unsupported.")
+        projects = policy.get("allowedProjectNames", [])
+        if not isinstance(projects, list) or self.project_name not in projects:
+            raise WorkflowError("policy-rejected", "The fixed Project Write Policy does not authorize this project.")
+        return policy
+
+    @staticmethod
+    def _asset_matches_root(asset_path: str, root: str) -> bool:
+        normalized = root.rstrip("/")
+        return asset_path == normalized or asset_path.startswith(normalized + "/")
+
+    def _assert_refresh_policy(self, asset_path: str, asset_class: str = "") -> dict[str, Any]:
+        policy = self._read_fixed_policy()
+        roots = policy.get("allowedAssetRoots", [])
+        if not isinstance(roots, list) or not any(
+            isinstance(root, str) and self._asset_matches_root(asset_path, root)
+            for root in roots
+        ):
+            raise WorkflowError("policy-rejected", "The fixed Project Write Policy does not authorize this asset root.")
+        if asset_class:
+            classes = policy.get("allowedAssetClasses", [])
+            if not isinstance(classes, list) or asset_class not in classes:
+                raise WorkflowError("policy-rejected", "The fixed Project Write Policy does not authorize this Asset Class.")
+        return policy
+
+    def _inspect_refresh_live_state(self, asset_path: str) -> dict[str, Any]:
+        descriptor = self.config.project_path.parent / "Saved" / "UEAgentKit" / "EditorBridge.json"
+        if self.live_editor_service is None:
+            if descriptor.is_file():
+                raise WorkflowError(
+                    "live-editor-status-required",
+                    "An Editor Bridge descriptor exists, so safe refresh requires Live Editor mode to verify that the asset is not Dirty.",
+                )
+            return {"state": "offline", "loaded": False, "packageDirty": False}
+        try:
+            status = self.live_editor_service.status()
+        except Exception as exc:
+            raise WorkflowError("live-editor-status-unavailable", "Live Editor state could not be checked before snapshot refresh.") from exc
+        if status.get("state") != "available":
+            if descriptor.is_file():
+                raise WorkflowError(
+                    "live-editor-status-unavailable",
+                    "The fixed Editor Bridge is not available, so the target Dirty state cannot be trusted.",
+                )
+            return {"state": "offline", "loaded": False, "packageDirty": False}
+        try:
+            payload = self.live_editor_service.call_tool("ue_inspect_asset_live", {"assetPath": asset_path})
+        except Exception as exc:
+            raise WorkflowError("live-editor-status-unavailable", "The target asset could not be inspected in the fixed Editor session.") from exc
+        result = payload.get("result", {}) if isinstance(payload, dict) else {}
+        memory = result.get("memory", {}) if isinstance(result, dict) else {}
+        if not isinstance(memory, dict):
+            memory = {}
+        if memory.get("packageDirty") is True:
+            raise WorkflowError(
+                "live-editor-asset-dirty",
+                "The target asset has unsaved Editor memory changes and cannot be added to a disk-backed snapshot.",
+            )
+        return {
+            "state": str(memory.get("state", "unknown")),
+            "loaded": bool(memory.get("loaded")),
+            "packageDirty": bool(memory.get("packageDirty")),
+        }
+
+    @staticmethod
+    def _package_file(project_path: Path, package_name: str, asset_class: str) -> Path:
+        if not package_name.startswith("/Game/"):
+            raise WorkflowError("snapshot-refresh-invalid-export", "The exported asset is outside the /Game mount.")
+        relative_parts = [part for part in package_name[len("/Game/") :].split("/") if part]
+        if not relative_parts or any(part in {".", ".."} for part in relative_parts):
+            raise WorkflowError("snapshot-refresh-invalid-export", "The exported package name is invalid.")
+        content_root = (project_path.parent / "Content").resolve()
+        base = content_root.joinpath(*relative_parts)
+        preferred = ".umap" if asset_class == "/Script/Engine.World" else ".uasset"
+        candidates = [base.with_suffix(preferred), base.with_suffix(".uasset" if preferred == ".umap" else ".umap")]
+        for candidate in candidates:
+            try:
+                candidate.resolve().relative_to(content_root)
+            except ValueError:
+                continue
+            if candidate.is_file():
+                return candidate.resolve()
+        raise WorkflowError("snapshot-refresh-package-missing", "The exported asset Package file is missing from the fixed project.")
+
+    def _export_refresh_candidate(self, asset_path: str, output: Path) -> dict[str, Any]:
+        if output.exists():
+            shutil.rmtree(output)
+        output.mkdir(parents=True, exist_ok=False)
+        package_path = asset_path.split(".", 1)[0]
+        result = self._run_script(
+            "RunAssetCatalog.ps1",
+            [
+                "-EngineRoot", str(self.config.engine_root),
+                "-ProjectPath", str(self.config.project_path),
+                "-Asset", package_path,
+                "-Output", str(output),
+            ],
+            stage="snapshot-refresh-export",
+            report_path=output / "manifest.json",
+        )
+        if result.exit_code != 0:
+            self._raise_process_failure(
+                stage="snapshot-refresh-export",
+                result=result,
+                report_path=output / "manifest.json",
+                fallback_code="snapshot-refresh-export-failed",
+                fallback_message="The independent Unreal export for snapshot refresh failed.",
+            )
+        manifest = _read_json(output / "manifest.json", stage="snapshot-refresh-export")
+        manifest_assets = manifest.get("assets", [])
+        if (
+            manifest.get("projectName") != self.project_name
+            or int(manifest.get("assetCount", -1)) != 1
+            or int(manifest.get("successCount", -1)) != 1
+            or int(manifest.get("failureCount", -1)) != 0
+            or not isinstance(manifest_assets, list)
+            or len(manifest_assets) != 1
+            or not isinstance(manifest_assets[0], dict)
+            or not manifest_assets[0].get("success")
+            or manifest_assets[0].get("assetPath") != asset_path
+        ):
+            raise WorkflowError(
+                "snapshot-refresh-export-invalid",
+                "The refresh Manifest must confirm exactly the requested asset in the fixed project with zero failures.",
+            )
+        canonical_files = list((output / "canonical").rglob("*.json"))
+        if len(canonical_files) != 1:
+            raise WorkflowError("snapshot-refresh-export-invalid", "The refresh export must contain exactly one Canonical asset.")
+        canonical_path = canonical_files[0]
+        canonical = _read_json(canonical_path, stage="snapshot-refresh-canonical")
+        if canonical.get("projectName") != self.project_name or canonical.get("assetPath") != asset_path:
+            raise WorkflowError("snapshot-refresh-export-invalid", "The refresh Canonical asset does not match the fixed project and requested asset.")
+        revision = canonical.get("revision", {})
+        if not isinstance(revision, dict):
+            raise WorkflowError("snapshot-refresh-export-invalid", "The refresh Canonical asset has no Revision object.")
+        revision_value = str(revision.get("value", ""))
+        revision_digest = revision_value.removeprefix("sha256:")
+        if (
+            not revision.get("available")
+            or revision.get("packageDirty")
+            or not revision_value.startswith("sha256:")
+            or len(revision_digest) != 64
+            or any(character not in "0123456789abcdefABCDEF" for character in revision_digest)
+        ):
+            raise WorkflowError("snapshot-refresh-export-invalid", "The refresh Canonical asset has no clean SHA-256 Package Revision.")
+        asset_class = str(canonical.get("assetClass", ""))
+        package_name = str(canonical.get("packageName", ""))
+        expected_package_name = asset_path.split(".", 1)[0]
+        if not asset_class or package_name != expected_package_name:
+            raise WorkflowError(
+                "snapshot-refresh-export-invalid",
+                "The refresh Canonical asset has no matching class and package identity.",
+            )
+        self._assert_refresh_policy(asset_path, asset_class)
+        package_file = self._package_file(self.config.project_path, package_name, asset_class)
+        disk_revision = "sha256:" + sha256_file(package_file)
+        if revision_value != disk_revision:
+            raise WorkflowError(
+                "snapshot-refresh-revision-mismatch",
+                "The staged Canonical Revision does not match the current disk Package SHA-256.",
+                details={"canonicalRevision": revision_value, "diskRevision": disk_revision},
+            )
+        entry = dict(manifest_assets[0])
+        manifest_json_path = Path(str(entry.get("jsonPath", "")))
+        if not manifest_json_path.is_absolute():
+            manifest_json_path = output / manifest_json_path
+        if manifest_json_path.resolve() != canonical_path.resolve():
+            raise WorkflowError(
+                "snapshot-refresh-export-invalid",
+                "The refresh Manifest Canonical path does not match the requested staged asset.",
+            )
+        bpctx_files = list((output / "bpctx").rglob("*.bpctx")) if (output / "bpctx").is_dir() else []
+        bpctx_path = bpctx_files[0] if len(bpctx_files) == 1 else None
+        return {
+            "manifest": manifest,
+            "manifestEntry": entry,
+            "canonical": canonical,
+            "canonicalPath": canonical_path,
+            "bpctxPath": bpctx_path,
+            "revision": revision_value,
+            "assetClass": asset_class,
+            "packageName": package_name,
+            "diskFileSize": package_file.stat().st_size,
+        }
+
+    @staticmethod
+    def _tree_size(root: Path) -> int:
+        total = 0
+        for path in root.rglob("*"):
+            if path.is_file() and not path.is_symlink():
+                total += path.stat().st_size
+        return total
+
+    @staticmethod
+    def _find_export_canonical(export_root: Path, asset_path: str) -> list[Path]:
+        matches: list[Path] = []
+        canonical_root = export_root / "canonical"
+        if not canonical_root.is_dir():
+            return matches
+        for candidate in canonical_root.rglob("*.json"):
+            try:
+                value = json.loads(candidate.read_text(encoding="utf-8-sig"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(value, dict) and value.get("assetPath") == asset_path:
+                matches.append(candidate)
+        return matches
+
+    def _merge_refresh_export(self, active_export: Path, next_export: Path, candidate_root: Path, candidate: dict[str, Any]) -> None:
+        clone_tree(
+            active_export,
+            next_export,
+            prefer_hardlinks=bool(self.active_snapshot and not self.active_snapshot.legacy),
+        )
+        asset_path = str(candidate["canonical"].get("assetPath", ""))
+        old_canonical = self._find_export_canonical(next_export, asset_path)
+        for path in old_canonical:
+            try:
+                relative = path.relative_to(next_export / "canonical")
+            except ValueError:
+                relative = None
+            path.unlink()
+            if relative is not None:
+                (next_export / "bpctx" / relative.with_suffix(".bpctx")).unlink(missing_ok=True)
+
+        source_canonical = Path(candidate["canonicalPath"])
+        relative = source_canonical.relative_to(candidate_root / "canonical")
+        destination_canonical = next_export / "canonical" / relative
+        destination_canonical.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_canonical, destination_canonical)
+        destination_bpctx: Path | None = None
+        if candidate.get("bpctxPath") is not None:
+            source_bpctx = Path(candidate["bpctxPath"])
+            bpctx_relative = source_bpctx.relative_to(candidate_root / "bpctx")
+            destination_bpctx = next_export / "bpctx" / bpctx_relative
+            destination_bpctx.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_bpctx, destination_bpctx)
+
+        manifest_path = next_export / "manifest.json"
+        manifest = _read_json(manifest_path) if manifest_path.is_file() else {}
+        entries = [dict(item) for item in manifest.get("assets", []) if isinstance(item, dict)]
+        replacement = dict(candidate["manifestEntry"])
+        replacement["assetPath"] = asset_path
+        replacement["success"] = True
+        replacement["jsonPath"] = str(destination_canonical)
+        if destination_bpctx is not None:
+            replacement["bpctxPath"] = str(destination_bpctx)
+        else:
+            replacement.pop("bpctxPath", None)
+        replaced = False
+        for index, entry in enumerate(entries):
+            if entry.get("assetPath") == asset_path:
+                entries[index] = replacement
+                replaced = True
+                break
+        if not replaced:
+            entries.append(replacement)
+        successful = [entry for entry in entries if entry.get("success")]
+        manifest.update(
+            {
+                "projectName": self.project_name,
+                "createdUtc": utc_now_iso(),
+                "assetCount": len(entries),
+                "successCount": len(successful),
+                "failureCount": len(entries) - len(successful),
+                "readerSuccessCount": len(successful),
+                "readerFailureCount": len(entries) - len(successful),
+                "assets": entries,
+            }
+        )
+        _write_json_atomic(manifest_path, manifest)
+
+    def _validate_next_database(self, database: Path, asset_path: str, expected_revision: str) -> dict[str, Any]:
+        assert_quiescent_database(database)
+        with open_database(database, readonly=True, migrate=False, immutable=True) as connection:
+            integrity = connection.execute("PRAGMA integrity_check").fetchone()
+            if integrity is None or str(integrity[0]).casefold() != "ok":
+                raise WorkflowError("snapshot-refresh-database-invalid", "The next SQLite generation failed integrity_check.")
+            if get_schema_version(connection) != CURRENT_SCHEMA_VERSION:
+                raise WorkflowError("snapshot-refresh-database-invalid", "The next SQLite generation has the wrong schema version.")
+            assert_fts5_available(connection)
+            if get_metadata(connection, "project_key", "") != self.project_name:
+                raise WorkflowError("snapshot-refresh-database-invalid", "The next SQLite generation has the wrong project identity.")
+            row = connection.execute(
+                "SELECT revision_value, package_dirty, canonical_relpath FROM assets WHERE asset_path = ?",
+                (asset_path,),
+            ).fetchone()
+            if row is None or str(row["revision_value"]) != expected_revision or bool(row["package_dirty"]):
+                raise WorkflowError("snapshot-refresh-database-invalid", "The next SQLite generation does not contain the clean refreshed Revision.")
+            asset_count = int(connection.execute("SELECT COUNT(*) FROM assets").fetchone()[0])
+        return {"assetCount": asset_count, "targetRevision": expected_revision}
+
+    def _build_snapshot_generation(self, asset_path: str, candidate_root: Path, candidate: dict[str, Any]) -> dict[str, Any]:
+        if self.active_snapshot is None:
+            raise WorkflowError("snapshot-refresh-unavailable", "This workflow session was not started from a frozen active snapshot pair.")
+        active = self.active_snapshot
+        generation_id = new_generation_id()
+        snapshots_root = self._safe_work_path("snapshots")
+        snapshots_root.mkdir(parents=True, exist_ok=True)
+        staging = snapshots_root / ("." + generation_id + ".staging")
+        final_root = snapshots_root / generation_id
+        if staging.exists() or final_root.exists():
+            raise WorkflowError("snapshot-refresh-generation-exists", "The generated snapshot ID already exists.")
+        required_bytes = self._tree_size(active.revision_export) + active.database.stat().st_size * 2 + 64 * 1024 * 1024
+        free_bytes = shutil.disk_usage(snapshots_root).free
+        if free_bytes < required_bytes:
+            raise WorkflowError(
+                "snapshot-refresh-disk-space",
+                "There is not enough free disk space to build and validate the next snapshot generation.",
+                details={"requiredBytes": required_bytes, "freeBytes": free_bytes},
+            )
+        staging.mkdir(parents=True, exist_ok=False)
+        pointer_written = False
+        try:
+            next_export = staging / "revision-export"
+            self._merge_refresh_export(active.revision_export, next_export, candidate_root, candidate)
+            next_database = staging / "index.sqlite3"
+            assert_quiescent_database(active.database)
+            shutil.copy2(active.database, next_database)
+            with open_database(next_database) as connection:
+                build_result = build_index(
+                    connection,
+                    candidate_root,
+                    next_database,
+                    force=True,
+                    project_key=self.project_name,
+                )
+                if build_result.failed or build_result.errors or build_result.updated + build_result.added != 1:
+                    raise WorkflowError(
+                        "snapshot-refresh-index-build-failed",
+                        "The next SQLite generation did not update exactly one requested asset.",
+                        details={"build": build_result.to_dict(include_assets=False)},
+                    )
+                set_metadata(connection, "last_export_root", str(final_root / "revision-export"))
+            database_validation = self._validate_next_database(next_database, asset_path, str(candidate["revision"]))
+            manifest_path = next_export / "manifest.json"
+            manifest_sha = sha256_file(manifest_path)
+            database_sha = sha256_file(next_database)
+            os.replace(staging, final_root)
+            write_active_pointer(
+                active,
+                generation_id=generation_id,
+                database_sha256=database_sha,
+                revision_export_manifest_sha256=manifest_sha,
+                refreshed_asset_path=asset_path,
+                refreshed_revision=str(candidate["revision"]),
+            )
+            pointer_written = True
+            return {
+                "generationId": generation_id,
+                "databaseSha256": "sha256:" + database_sha,
+                "revisionExportManifestSha256": "sha256:" + manifest_sha,
+                "assetCount": database_validation["assetCount"],
+                "targetRevision": candidate["revision"],
+            }
+        except SnapshotLifecycleError as exc:
+            raise WorkflowError(exc.code, str(exc), details=exc.details) from exc
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+            if final_root.exists() and not pointer_written:
+                shutil.rmtree(final_root, ignore_errors=True)
+
+    def refresh_asset_index(self, asset_path: str, *, mode: Literal["Preview", "Apply"] = "Preview") -> dict[str, Any]:
+        with self._lock:
+            self._assert_session_current()
+            asset_path = self._validate_refresh_asset_path(asset_path)
+            if mode not in {"Preview", "Apply"}:
+                raise WorkflowError("snapshot-refresh-invalid-mode", "mode must be Preview or Apply.")
+            if self.active_snapshot is None:
+                raise WorkflowError("snapshot-refresh-unavailable", "Snapshot refresh is unavailable because this session has no frozen active snapshot pair.")
+            self._assert_refresh_policy(asset_path)
+            live_state = self._inspect_refresh_live_state(asset_path)
+            operation_root = self._safe_work_path("refresh", uuid.uuid4().hex)
+            candidate_root = operation_root / "candidate"
+            try:
+                candidate = self._export_refresh_candidate(asset_path, candidate_root)
+                current_record = self.index_service.get_revision_record(asset_path)
+                action = "add" if current_record is None else "update"
+                base = {
+                    "schemaVersion": WORKFLOW_SCHEMA_VERSION,
+                    "tool": "ue_refresh_asset_index",
+                    "ok": True,
+                    "mode": mode,
+                    "assetPath": asset_path,
+                    "assetClass": candidate["assetClass"],
+                    "action": action,
+                    "currentSessionGenerationId": self.active_snapshot.generation_id,
+                    "targetRevision": candidate["revision"],
+                    "diskFileSize": candidate["diskFileSize"],
+                    "liveState": live_state,
+                    "currentSessionUsesFrozenSnapshot": True,
+                }
+                if mode == "Preview":
+                    base.update(
+                        {
+                            "applied": False,
+                            "activeSnapshotChanged": False,
+                            "restartRequired": False,
+                            "wouldInvalidate": {
+                                "planCount": len(self._plans),
+                                "dryRunReceiptCount": len(self._dry_runs),
+                                "applyReceiptCount": len(self._applies),
+                                "rollbackReceiptCount": len(self._rollback_dry_runs),
+                            },
+                            "nextStep": "Review the target Revision, then call ue_refresh_asset_index with mode=Apply. No active snapshot changed.",
+                        }
+                    )
+                    return base
+                invalidated = {
+                    "planCount": len(self._plans),
+                    "dryRunReceiptCount": len(self._dry_runs),
+                    "applyReceiptCount": len(self._applies),
+                    "rollbackReceiptCount": len(self._rollback_dry_runs),
+                }
+                generation = self._build_snapshot_generation(asset_path, candidate_root, candidate)
+                self._plans.clear()
+                self._dry_runs.clear()
+                self._applies.clear()
+                self._rollback_dry_runs.clear()
+                self._refresh_applied = True
+                base.update(
+                    {
+                        "applied": True,
+                        "activeSnapshotChanged": True,
+                        "newGeneration": generation,
+                        "invalidated": invalidated,
+                        "currentSessionUsesPreviousSnapshot": True,
+                        "restartRequired": True,
+                        "nextStep": "Restart the MCP server. The new session will freeze and validate the new paired SQLite and Revision Export generation.",
+                    }
+                )
+                return base
+            finally:
+                shutil.rmtree(operation_root, ignore_errors=True)
 
     def _validate_plan_file(self, record: PlanRecord) -> dict[str, Any]:
         self._assert_policy_unchanged()
@@ -853,6 +1364,7 @@ class PatchWorkflowService:
 
     def verify_asset(self, apply_receipt: str) -> dict[str, Any]:
         with self._lock:
+            self._assert_session_current()
             apply = self._applies.get(apply_receipt)
             if apply is None:
                 raise WorkflowError("apply-receipt-not-found", "The applyReceipt is not active in this MCP server session.")

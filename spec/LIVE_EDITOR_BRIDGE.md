@@ -34,7 +34,7 @@ PowerShell 入口对应：
 -ProjectPath <fixed .uproject>
 ```
 
-Tool 参数不能覆盖固定项目或选择其他 Editor 端点。未启用时，原有 5/16 Tool 模式和响应保持兼容。
+Tool 参数不能覆盖固定项目或选择其他 Editor 端点。未启用时，离线 5 Tool 与固定项目工作流 17 Tool 保持可用。
 
 ## 端点描述符
 
@@ -176,7 +176,7 @@ Immutable Index   上次导出并构建的 SQLite Snapshot
 - Live Tool 结果不清除或覆盖 SQLite/Revision Export 的 stale 状态。
 - 写入 Plan 仍必须通过现有三源磁盘新鲜度门禁。
 - 本批 Live Tool 不能保存、编译、运行 Console 或执行 UObject Method。日志读取和编译诊断只观察已有状态。
-- `ue_refresh_asset_index` 不属于本批纯读取能力；它必须在后续独立实现配对 Snapshot staging、原子切换与新 MCP 会话重载。
+- `ue_refresh_asset_index` 属于固定项目工作流而非 Live 只读 Tool；启用 Live Bridge 时，它会先通过 `ue_inspect_asset_live` 拒绝 Dirty 目标，再构建配对 Snapshot Generation。
 
 ## 稳定错误码
 

@@ -60,10 +60,31 @@ ue_plan_patch
 ue_dry_run_patch
 ue_apply_patch
 ue_verify_asset
+ue_refresh_asset_index
 ue_rollback_patch
 ```
 
-只有再使用 `-EnableCommitTools`，且固定 Policy 的 `commitEnabled=true`，`ue_apply_patch` 与 rollback Commit 才能写入项目资产。
+只有再使用 `-EnableCommitTools`，且固定 Policy 的 `commitEnabled=true`，`ue_apply_patch` 与 rollback Commit 才能写入项目资产。`ue_refresh_asset_index` 不修改 `.uasset`，但会修改 UE Agent Kit 自己的活动索引 Generation，因此标记为 `readOnlyHint=false`、`destructiveHint=false`。
+
+### `ue_refresh_asset_index`
+
+该 Tool 只接受：
+
+```text
+asset_path = 一个精确、Policy 授权的 /Game/...Asset.Asset
+mode = Preview | Apply
+```
+
+它不接受数据库、Revision Export、Work Root、输出目录、Commandlet 参数或任意文件路径。`Preview` 独立导出并验证目标资产，但不切换活动快照。`Apply` 会：
+
+1. 拒绝 Dirty Live Editor Package；Editor 在线但无法可信读取 Dirty 状态时也拒绝。
+2. 独立导出一个资产，并要求 Canonical Revision 等于当前磁盘 Package SHA-256。
+3. 在固定 Work Root 中构建下一代 Revision Export 和 SQLite Pair。
+4. 校验项目身份、Schema、FTS5、`PRAGMA integrity_check`、目标 Revision、Sidecar 和磁盘空间。
+5. 将 Generation 目录发布后，原子替换固定 `active-snapshot.json` Pointer。
+6. 使当前会话的 Plan、Dry Run、Apply 与 rollback Receipt 失效，并拒绝后续工作流调用。
+
+当前 MCP 会话始终读取启动时冻结的旧快照；Apply 不会热替换活动 SQLite 连接。新 MCP 会话解析 Pointer 后才读取新 Generation。配置中原始 SQLite 与 Revision Export 保持不变。
 
 ## 启动配置不是 Tool 参数
 
@@ -95,7 +116,7 @@ Live Tool 全部为 `readOnlyHint=true`、`destructiveHint=false`，成功结果
 
 返回 Project Key、固定项目状态、Engine 版本、SQLite Schema、索引时间、Exporter 版本、统计信息、Workflow 模式、索引新鲜度状态和 Live Editor 可用性。
 
-固定项目模式会比较 SQLite Revision、Revision Export Canonical Revision 和磁盘 Package SHA-256，返回 `fresh`、`stale`、`partial` 或 `unavailable`。默认只读模式没有固定 Project 与 Revision Export，必须明确返回 `state=unknown`，不能把未知状态报告为 fresh。Live Editor Bridge 未启用时返回 `state=unavailable`。详细契约见 `spec/INDEX_FRESHNESS.md`。
+固定项目模式会比较会话冻结的 SQLite Revision、配对 Revision Export Canonical Revision 和磁盘 Package SHA-256，返回 `fresh`、`stale`、`partial` 或 `unavailable`。默认只读模式没有固定 Project 与 Revision Export，必须明确返回 `state=unknown`，不能把未知状态报告为 fresh。刷新 Apply 后旧会话仍可查询旧索引，但 `workflow.indexLifecycle.restartRequired=true`，所有新工作流动作返回 `snapshot-refresh-restart-required`。详细契约见 `spec/INDEX_FRESHNESS.md`。
 
 ### `ue_search`
 

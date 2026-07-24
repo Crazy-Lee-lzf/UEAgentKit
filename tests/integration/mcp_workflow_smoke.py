@@ -28,6 +28,7 @@ EXPECTED_TOOLS = [
     "ue_dry_run_patch",
     "ue_apply_patch",
     "ue_verify_asset",
+    "ue_refresh_asset_index",
     "ue_rollback_patch",
 ]
 

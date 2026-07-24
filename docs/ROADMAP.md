@@ -19,7 +19,7 @@ UE Agent Kit 的长期定位是面向 AI Agent 的 Unreal Engine 项目智能层
 0.5.1  MCP 协议补全：状态、分页、新鲜度、高层写入、诊断和 Client 兼容
 ```
 
-0.5.1 已完成离线 MCP 查询、受控写入和协议诊断。0.5.2 第一批 localhost Editor Bridge 与六个核心实时只读 Tool 已完成，下一批补日志、编译错误、实时资产检查和安全索引刷新。
+0.5.1 已完成离线 MCP 查询、受控写入和协议诊断。0.5.2 已完成 localhost Editor Bridge、日志与编译诊断、实时资产检查，以及配对 Revision Export + SQLite Generation 的安全单资产刷新；下一批收紧 Dirty UObject、磁盘与索引的细粒度状态模型。
 
 ## 0.5.x：MCP 与日常开发工具补全
 
@@ -60,7 +60,9 @@ UE Agent Kit 的长期定位是面向 AI Agent 的 Unreal Engine 项目智能层
 - [x] `ue_get_output_log`：4096 条环形缓冲、单条 1024 字符上限、序号游标和 Category/Verbosity/关键词/UTC/PIE 过滤。
 - [x] `ue_get_compile_errors`：当前会话编译相关日志与已加载 Blueprint 编译状态，明确标记历史不完整。
 - [x] `ue_inspect_asset_live`：Asset Registry + 已加载内存状态，不触发 `LoadObject`。
-- [ ] `ue_refresh_asset_index`：保持独立后续批次；必须完成 Revision Export 与 SQLite 配对 staging、原子切换和新 MCP 会话可见性，不能混入纯读取 Tool。
+- [x] `ue_refresh_asset_index`：精确授权资产、Preview/Apply、独立 Package SHA-256 校验、Revision Export 与 SQLite 配对 Generation、完整校验、原子 Pointer 切换和新会话可见性。
+- [x] 工作流会话冻结：首代从外部快照独立复制；内部不可变 Generation 可直接固定；Apply 后旧会话保持旧代并拒绝新 Plan/Receipt，重启后新会话读取新代。
+- [x] Dirty Live Editor 资产拒绝、磁盘空间预检、失败保持旧 Pair、配置源快照零修改和真实 UE5.6 双会话刷新回归。
 - [ ] Dirty UObject 与磁盘/索引差异的更细粒度状态模型。
 
 ### 0.5.3：Daily Actions 与验证

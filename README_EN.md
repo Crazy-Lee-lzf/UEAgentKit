@@ -213,9 +213,13 @@ The 0.5.2 development branch can additionally test a fixed-project Live Editor B
 scripts\TestMcpLiveEditor.cmd ^
   -EngineRoot "<UE_5.6>" ^
   -ProjectPath "<TEST_PROJECT>.uproject"
+
+scripts\TestMcpSnapshotRefresh.cmd ^
+  -EngineRoot "<UE_5.6>" ^
+  -ProjectPath "<TEST_PROJECT>.uproject"
 ```
 
-The MCP Client still uses local `stdio` only. Default mode exposes 5 offline read-only tools; `-EnableLiveEditor -ProjectPath <fixed project>` adds 9 live read-only tools for a total of 14; the fixed write workflow exposes 16; combining both exposes 25. Live mode now includes bounded Output Log queries, compile diagnostics, and non-loading live asset inspection:
+The MCP Client still uses local `stdio` only. Default mode exposes 5 offline read-only tools; `-EnableLiveEditor -ProjectPath <fixed project>` adds 9 live read-only tools for a total of 14; the fixed-project workflow exposes 17; combining both exposes 26. Live mode includes bounded Output Log queries, compile diagnostics, and non-loading live asset inspection; workflow mode adds safe single-asset index refresh:
 
 ```bat
 claude mcp add --transport stdio --scope project ue-agent-kit -- ^
@@ -224,7 +228,7 @@ claude mcp add --transport stdio --scope project ue-agent-kit -- ^
   -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
 ```
 
-Use `claude mcp list` or `/mcp` inside Claude Code to inspect the connection. Live Editor mode discovers a temporary loopback endpoint from the fixed project's `Saved/UEAgentKit/EditorBridge.json`, then validates a random token, project-path digest, exact version, and registered capabilities. Tool arguments cannot choose a port, token, arbitrary UObject, Console, Python, or Shell. Live reads now include a 4,096-entry Output Log ring buffer, compile diagnostics, and exact `/Game/...Asset.Asset` inspection that never loads the target and always reports `loadedByBridge=false`. Full write mode requires `-EnableWriteTools`; saving and restore additionally require `-EnableCommitTools`, a commit-enabled Policy, one-time receipts, and exact confirmation phrases. Planning still requires matching SQLite, Revision Export, and disk-package revisions. See [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md), [`spec/LIVE_EDITOR_BRIDGE.md`](spec/LIVE_EDITOR_BRIDGE.md), and [`spec/INDEX_FRESHNESS.md`](spec/INDEX_FRESHNESS.md).
+Use `claude mcp list` or `/mcp` inside Claude Code to inspect the connection. Live Editor mode discovers a temporary loopback endpoint from the fixed project's `Saved/UEAgentKit/EditorBridge.json`, then validates a random token, project-path digest, exact version, and registered capabilities. Tool arguments cannot choose a port, token, arbitrary UObject, Console, Python, or Shell. Live reads now include a 4,096-entry Output Log ring buffer, compile diagnostics, and exact `/Game/...Asset.Asset` inspection that never loads the target and always reports `loadedByBridge=false`. Full write mode requires `-EnableWriteTools`; saving and restore additionally require `-EnableCommitTools`, a commit-enabled Policy, one-time receipts, and exact confirmation phrases. Planning still requires matching SQLite, Revision Export, and disk-package revisions. `ue_refresh_asset_index` accepts one exact policy-authorized asset and uses Preview/Apply to build and atomically activate a paired Revision Export plus SQLite generation. The current session remains frozen on its previous generation and rejects further workflow actions until MCP is restarted. See [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md), [`spec/LIVE_EDITOR_BRIDGE.md`](spec/LIVE_EDITOR_BRIDGE.md), and [`spec/INDEX_FRESHNESS.md`](spec/INDEX_FRESHNESS.md).
 
 ### 7. Validate the asset catalog
 

@@ -98,6 +98,16 @@ class FakeWorkflowService:
     def verify_asset(self, apply_receipt):
         return {"ok": True, "tool": "ue_verify_asset", "applyReceipt": apply_receipt, "verified": True}
 
+    def refresh_asset_index(self, asset_path, *, mode="Preview"):
+        return {
+            "ok": True,
+            "tool": "ue_refresh_asset_index",
+            "assetPath": asset_path,
+            "mode": mode,
+            "applied": mode == "Apply",
+            "restartRequired": mode == "Apply",
+        }
+
     def rollback_patch(self, apply_receipt, **kwargs):
         return {"ok": True, "tool": "ue_rollback_patch", "applyReceipt": apply_receipt, "mode": kwargs.get("mode", "DryRun")}
 
@@ -559,10 +569,11 @@ class McpServerTests(unittest.TestCase):
             "ue_dry_run_patch",
             "ue_apply_patch",
             "ue_verify_asset",
+            "ue_refresh_asset_index",
             "ue_rollback_patch",
         ]
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 25)
+        self.assertEqual(len(tools), 26)
 
         mismatched_live = FakeLiveEditorService()
         mismatched_live.config = SimpleNamespace(
@@ -598,6 +609,7 @@ class McpServerTests(unittest.TestCase):
                 "ue_dry_run_patch",
                 "ue_apply_patch",
                 "ue_verify_asset",
+                "ue_refresh_asset_index",
                 "ue_rollback_patch",
             ],
         )
@@ -616,6 +628,10 @@ class McpServerTests(unittest.TestCase):
         apply_tool = next(tool for tool in tools if tool.name == "ue_apply_patch")
         self.assertTrue(apply_tool.annotations.destructiveHint)
         self.assertFalse(apply_tool.annotations.readOnlyHint)
+        refresh_tool = next(tool for tool in tools if tool.name == "ue_refresh_asset_index")
+        self.assertEqual(set(refresh_tool.inputSchema["properties"]), {"asset_path", "mode"})
+        self.assertFalse(refresh_tool.annotations.readOnlyHint)
+        self.assertFalse(refresh_tool.annotations.destructiveHint)
         verify_tool = next(tool for tool in tools if tool.name == "ue_verify_asset")
         self.assertFalse(verify_tool.annotations.readOnlyHint)
         self.assertFalse(verify_tool.annotations.destructiveHint)
@@ -629,6 +645,10 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(capabilities["highLevelChanges"]["defaultMode"], "Plan")
         self.assertFalse(capabilities["highLevelChanges"]["commitSupportedDirectly"])
         self.assertEqual(len(capabilities["highLevelChanges"]["tools"]), 6)
+        self.assertTrue(capabilities["snapshotRefresh"]["available"])
+        self.assertEqual(capabilities["snapshotRefresh"]["modes"], ["Preview", "Apply"])
+        self.assertTrue(capabilities["snapshotRefresh"]["pairedGeneration"])
+        self.assertTrue(capabilities["snapshotRefresh"]["restartRequiredAfterApply"])
         self.assertGreater(len(capabilities["operations"]["items"]), 0)
         _, project_status = asyncio.run(server.call_tool("ue_get_project_status", {}))
         self.assertEqual(project_status["project"]["projectName"], "TestProject")
@@ -649,6 +669,15 @@ class McpServerTests(unittest.TestCase):
             self.assertTrue(high_level["ok"], high_level)
             self.assertEqual(high_level["mode"], "Plan")
             self.assertEqual(high_level["underlyingOperation"], operation)
+
+        _, refresh_preview = asyncio.run(
+            server.call_tool(
+                "ue_refresh_asset_index",
+                {"asset_path": "/Game/UEAgentKitWriteTests/Test.Test", "mode": "Preview"},
+            )
+        )
+        self.assertTrue(refresh_preview["ok"])
+        self.assertFalse(refresh_preview["applied"])
 
         _, high_level_dry = asyncio.run(
             server.call_tool(

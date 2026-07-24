@@ -136,31 +136,47 @@ Rollback Commit clears the session stale marker only when independent verificati
 
 If the package is restored to another Revision, or either snapshot changed independently, stale state remains visible.
 
-## Single-asset refresh design
+## Implemented single-asset refresh lifecycle
 
-Single-asset refresh is intentionally not implemented as an in-place mutation of a running immutable server. The safe design is:
+`ue_refresh_asset_index` never mutates the SQLite file opened by the running server. A fixed workflow session resolves one active Pair at startup and freezes that selection:
 
-1. Stop accepting new Plans and wait for active Tool calls to finish.
-2. Export exactly one authorized asset into a staging directory below the fixed Work Root.
-3. Require the staging Manifest to match the fixed Project, contain exactly the requested asset, report zero failures, and provide a usable SHA-256 Revision.
-4. Confirm that the staged Canonical Revision equals the current disk package SHA-256.
-5. Build a next Revision Export snapshot in staging. Do not overwrite the active Canonical file or Manifest in place.
-6. Build a next SQLite file from the next Revision Export snapshot. The active immutable database remains untouched.
-7. Validate Project Key, Schema version, asset count, target Revision, FTS availability, and absence of `-wal`, `-shm`, or `-journal` sidecars.
-8. End the current MCP session. All continuation tokens, Plans, and Receipts become invalid.
-9. Atomically replace the active snapshot pair, or switch a small fixed snapshot pointer, only after both staged snapshots pass validation.
-10. Start a new MCP session and require `ue_get_project_status.freshness.state=fresh` for the target asset.
-11. If any step fails, delete staging output and keep the previous snapshot pair active.
+- A legacy configured SQLite + Revision Export Pair is copied into a private session snapshot, so later external rebuilds cannot change the running session.
+- An internal immutable Generation is pinned directly without duplicating the entire tree.
+- Revision Export and SQLite always move together as one Generation.
 
-The Revision Export and SQLite database form one logical snapshot generation. They must never be switched independently.
+The Tool exposes only an exact Policy-authorized Unreal Asset Path and `mode=Preview|Apply`. It cannot accept output paths, database paths, shell commands, Commandlet parameters, or filesystem operations.
 
-A future `ue_refresh_asset_index` Tool should expose only an authorized Unreal Asset Path. It must not accept arbitrary output paths, database paths, shell commands, Commandlet parameters, or filesystem operations.
+### Preview
+
+1. Reject an invalid or unauthorized asset.
+2. Reject a Dirty target reported by the fixed Live Editor Bridge. If a Bridge Descriptor exists but Dirty state cannot be read reliably, fail closed.
+3. Export exactly one asset below the fixed Work Root.
+4. Require fixed-project identity, zero failures, exactly one Canonical record, and a clean SHA-256 Revision.
+5. Independently hash the current disk Package and require exact equality.
+6. Report add/update action, target Revision, current Generation, and workflow records that Apply would invalidate.
+7. Delete staging output without changing the active Pointer.
+
+### Apply
+
+Apply repeats all Preview validation, then:
+
+1. Preflight free disk space.
+2. Build a next Revision Export tree in staging. The first internal Generation copies external legacy files; later internal generations may hard-link unchanged immutable files.
+3. Copy the active database and update exactly the requested asset from the staged export.
+4. Validate `PRAGMA integrity_check`, current Schema, FTS5, Project Key, target Revision, clean Package state, and absence of SQLite Sidecars.
+5. Rename the completed staging tree to `snapshots/<generationId>`.
+6. Atomically replace `<WorkRoot>/active-snapshot.json` with the paired Generation identity and database/manifest hashes.
+7. Invalidate all session Plans and Receipts and mark the current workflow session restart-required.
+
+If any ordinary validation, export, database build, or pointer-write step fails, the previous Pointer remains active. The configured source SQLite and Revision Export are never overwritten.
+
+Published historical generations are retained because an older MCP process may still have one pinned. Runtime refresh never guesses that an old generation is unused and never deletes it automatically. Generation cleanup is an explicit maintenance action that requires all MCP processes to be stopped and must preserve the generation named by `active-snapshot.json`.
 
 ## Reload boundary
 
-A running server opens SQLite using `mode=ro&immutable=1`. Safe reload therefore means a new server session, not reconnecting the existing immutable connection to a modified file.
+A running server opens SQLite using `mode=ro&immutable=1`. The session that performs Apply continues serving reads from its previously frozen snapshot and rejects new workflow actions with `snapshot-refresh-restart-required`. A new MCP process resolves the new Pointer and must report `ue_get_project_status.freshness.state=fresh` before new writes.
 
-A reload invalidates:
+A refresh invalidates:
 
 ```text
 continuation tokens
