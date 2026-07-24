@@ -107,15 +107,27 @@ ue_get_output_log
 ue_get_compile_errors
 ue_inspect_asset_live
 ue_get_blueprint_graph_selection
+ue_open_asset
+ue_focus_asset
+ue_sync_content_browser
+ue_focus_actor
+ue_compile_blueprint
+ue_validate_asset
+ue_validate_folder
 ```
 
-所有 Tool：
+所有 Tool 均返回 `source=live-editor-memory`，不生成磁盘 Revision，也不声称数据来自 SQLite。
 
-- `readOnlyHint=true`。
-- `destructiveHint=false`。
-- Editor 状态、选择、打开资产、Dirty 资产、关卡、PIE 和 Blueprint Graph 选择 Tool 无参数；日志、编译诊断和实时资产检查只接受下文规定的有界过滤或精确资产路径。
-- 返回 `source=live-editor-memory`。
-- 不生成磁盘 Revision，也不声称数据来自 SQLite。
+Live Read：
+
+- 10 个 Tool，`readOnlyHint=true`、`destructiveHint=false`。
+- 状态、选择、打开资产、Dirty 资产、关卡、PIE 和 Blueprint Graph 选择无参数；日志、编译诊断和实时资产检查只接受有界过滤或精确资产路径。
+
+Live Action：
+
+- 7 个 Tool，`readOnlyHint=false`、`destructiveHint=false`。
+- 可以改变窗口、选择、资产加载状态或 Blueprint 内存编译状态，但不保存任何 Package。
+- 只接受精确 `/Game/...Asset.Asset`、非根 `/Game/...` Package Path 或当前 Editor World 的 `ActorGuid`；PIE/SIE 期间拒绝执行。
 
 ### ue_editor_status
 
@@ -165,6 +177,22 @@ Bridge 注册为 `FOutputDevice`，保留最多 4096 条当前会话日志，并
 
 无参数，只检查最近激活且 Editor Name 精确为 `BlueprintEditor` 的普通 Blueprint Editor。成功时返回 Blueprint Object Path、Focused Graph Path/Name/GUID/Class/Schema、可编辑状态，以及最多 100 个当前 Graph 中选中的 Node；每个 Node 仅返回 Path、Name、GUID、Class、Title 和二维位置。无普通 Blueprint Editor 或无 Focused Graph 时返回 `available=false` 与稳定 `reasonCode`。该 Tool 不扫描或强转 Material、Niagara、Control Rig 等其他编辑器，不加载资产，也不提供 Graph 编辑。
 
+### ue_open_asset / ue_focus_asset / ue_sync_content_browser
+
+三者都只接受一个精确 `/Game/...Asset.Asset`。`ue_open_asset` 允许通过 Asset Registry 加载并打开注册编辑器；`ue_focus_asset` 只聚焦已经加载且打开的资产，不隐式加载；`ue_sync_content_browser` 只使用 `FAssetData` 同步 Content Browser，并返回 `loadedByBridge` 证明是否意外加载。三者均返回 Package Dirty 前后状态或加载状态，且不保存。
+
+### ue_focus_actor
+
+只接受当前 Editor World 中的 `ActorGuid`。Bridge 只扫描 `EWorldType::Editor`，要求唯一匹配且 Actor 可选择，然后更新 Editor Selection 并调用视口聚焦。结果返回 ActorGuid、InstanceGuid、Path、Label、Level 和 Dirty Package 计数；PIE/SIE、无匹配、重复 GUID 或不可选择状态均稳定拒绝。
+
+### ue_compile_blueprint
+
+只接受一个精确 Blueprint Object Path。Bridge 可按 Asset Registry 加载目标，在内存中调用 UE5.6 Blueprint 编译 API，返回编译前后 `Status`、Package Dirty、耗时和当前 Bridge 会话捕获的最多 100 条编译 Warning/Error。该 Tool 不保存，也不编译任意命令或依赖列表。
+
+### ue_validate_asset / ue_validate_folder
+
+使用官方 `UEditorValidatorSubsystem::ValidateAssetsWithSettings`。单资产验证只接受精确 Object Path；文件夹验证只接受非根 `/Game/...` Package Path，可显式选择递归。Folder 在执行前统计并排序非 Redirector 资产，超过 `max_assets` 时拒绝；`max_assets` 硬上限 500，`max_issues` 硬上限 200。验证可临时加载资产并卸载本次加载项，不加载 External Objects，不保存 Package，并返回 Valid/Invalid/NotValidated、错误、警告、耗时和 Dirty Package 计数。
+
 ## 状态与 Revision 语义
 
 Editor Memory、磁盘、Revision Export 和 SQLite 是四个不同事实源：
@@ -181,7 +209,7 @@ Immutable Index   当前 MCP 会话冻结的 SQLite Snapshot
 - Dirty UObject 不生成虚假的磁盘 SHA-256 Revision。
 - Live Tool 结果不清除或覆盖 SQLite/Revision Export 的 stale 状态。
 - 写入 Plan 仍必须通过现有三源磁盘新鲜度门禁。
-- 本批 Live Tool 不能保存、编译、运行 Console 或执行 UObject Method。日志读取和编译诊断只观察已有状态。
+- Live Read 只观察已有状态。Live Action 可以执行已注册的资产导航、Blueprint 编译和官方 Data Validation，但不能保存、运行 Console/Python/Shell、接受任意 UObject Method 或改变 SQLite/Revision Export。
 - `ue_refresh_asset_index` 属于固定项目工作流而非 Live 只读 Tool；启用 Live Bridge 时，它会先通过 `ue_inspect_asset_live` 拒绝 Dirty 目标，再构建配对 Snapshot Generation。
 
 ## 稳定错误码
@@ -197,6 +225,19 @@ live-editor-authentication-required
 live-editor-capability-unavailable
 live-editor-invalid-parameters
 live-editor-protocol-error
+live-editor-pie-active
+live-editor-asset-not-found
+live-editor-asset-load-failed
+live-editor-asset-editor-unavailable
+live-editor-asset-not-open
+live-editor-world-unavailable
+live-editor-actor-not-found
+live-editor-actor-guid-ambiguous
+live-editor-actor-not-selectable
+live-editor-blueprint-required
+live-editor-data-validation-unavailable
+live-editor-folder-empty
+live-editor-asset-limit-exceeded
 ```
 
 错误响应沿用 MCP `code/message/retryable/details/suggestedAction` Envelope，不返回本机 Descriptor、Project 或 Token 路径。

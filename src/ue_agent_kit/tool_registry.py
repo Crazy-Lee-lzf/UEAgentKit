@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-ToolGroup = Literal["query", "live-read", "workflow"]
+ToolGroup = Literal["query", "live-read", "live-action", "workflow"]
 AnnotationKind = Literal["read", "planning", "destructive"]
 
 
@@ -49,6 +49,13 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
         "read",
         "editor.getBlueprintGraphSelection",
     ),
+    ToolDefinition("ue_open_asset", "live-action", "planning", "editor.openAsset"),
+    ToolDefinition("ue_focus_asset", "live-action", "planning", "editor.focusAsset"),
+    ToolDefinition("ue_sync_content_browser", "live-action", "planning", "editor.syncContentBrowser"),
+    ToolDefinition("ue_focus_actor", "live-action", "planning", "editor.focusActor"),
+    ToolDefinition("ue_compile_blueprint", "live-action", "planning", "editor.compileBlueprint"),
+    ToolDefinition("ue_validate_asset", "live-action", "planning", "editor.validateAsset"),
+    ToolDefinition("ue_validate_folder", "live-action", "planning", "editor.validateFolder"),
     ToolDefinition("ue_set_blueprint_default", "workflow", "planning", high_level_change=True),
     ToolDefinition("ue_set_component_property", "workflow", "planning", high_level_change=True),
     ToolDefinition("ue_set_pin_default", "workflow", "planning", high_level_change=True),
@@ -66,20 +73,22 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
 
 TOOL_DEFINITIONS_BY_NAME = {definition.name: definition for definition in TOOL_REGISTRY}
 QUERY_TOOL_NAMES = [definition.name for definition in TOOL_REGISTRY if definition.group == "query"]
-LIVE_EDITOR_TOOL_NAMES = [definition.name for definition in TOOL_REGISTRY if definition.group == "live-read"]
+LIVE_EDITOR_TOOL_NAMES = [
+    definition.name for definition in TOOL_REGISTRY if definition.group in {"live-read", "live-action"}
+]
 WORKFLOW_TOOL_NAMES = [definition.name for definition in TOOL_REGISTRY if definition.group == "workflow"]
 HIGH_LEVEL_WRITE_TOOL_NAMES = [definition.name for definition in TOOL_REGISTRY if definition.high_level_change]
 LIVE_EDITOR_METHODS = {
     definition.name: definition.live_method
     for definition in TOOL_REGISTRY
-    if definition.group == "live-read"
+    if definition.group in {"live-read", "live-action"}
 }
 
 
 def tool_definitions_for_mode(*, live_editor_enabled: bool, workflow_enabled: bool) -> list[ToolDefinition]:
     enabled_groups: set[ToolGroup] = {"query"}
     if live_editor_enabled:
-        enabled_groups.add("live-read")
+        enabled_groups.update({"live-read", "live-action"})
     if workflow_enabled:
         enabled_groups.add("workflow")
     return [definition for definition in TOOL_REGISTRY if definition.group in enabled_groups]

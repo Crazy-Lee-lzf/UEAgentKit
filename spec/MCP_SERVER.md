@@ -31,6 +31,13 @@ ue_get_output_log
 ue_get_compile_errors
 ue_inspect_asset_live
 ue_get_blueprint_graph_selection
+ue_open_asset
+ue_focus_asset
+ue_sync_content_browser
+ue_focus_actor
+ue_compile_blueprint
+ue_validate_asset
+ue_validate_folder
 ```
 
 该模式不要求启用写入。MCP Server 从固定项目 `Saved/UEAgentKit/EditorBridge.json` 读取 localhost 临时端点，并校验随机认证令牌、规范化项目路径摘要、Plugin/Server 版本和注册 Capability。地址、端口、令牌、Descriptor 和任意本机路径不会成为 Tool 参数或响应字段。Editor 未运行时 `ue_editor_status` 稳定报告 `state=unavailable`，其余 Live Tool 返回可重试错误，离线 SQLite Tool 保持可用。详细协议见 `spec/LIVE_EDITOR_BRIDGE.md`。
@@ -107,7 +114,10 @@ Database、Engine、Project、Policy、Revision Export、Work Root、Backup Root
 
 ## Live Editor Tool
 
-Live Tool 全部为 `readOnlyHint=true`、`destructiveHint=false`，成功结果标记 `source=live-editor-memory`。前六个状态 Tool 无参数；日志、编译诊断和实时资产检查只接受固定有界 Schema。它们读取当前 Editor 内存，不读取或改写 SQLite，不生成磁盘 Revision，也不改变索引 freshness。
+Live Editor 能力分为两类，成功结果均标记 `source=live-editor-memory`，都不读取或改写 SQLite、不生成磁盘 Revision，也不改变索引 freshness：
+
+- Live Read：10 个 Tool，`readOnlyHint=true`、`destructiveHint=false`。
+- Live Action：7 个 Tool，`readOnlyHint=false`、`destructiveHint=false`；允许改变 Editor 选择、窗口、已加载状态或内存编译状态，但不保存 Package。
 
 - `ue_editor_status`：Bridge 可用性、Plugin/Engine 版本、Project、PID、Session、Capability、PIE、当前关卡和 Dirty Package 计数。
 - `ue_get_selection`：Actor、Component、Asset 和 Object 当前选择，去重后最多 200 项。
@@ -119,8 +129,15 @@ Live Tool 全部为 `readOnlyHint=true`、`destructiveHint=false`，成功结果
 - `ue_get_compile_errors`：读取 Bridge 当前会话捕获到的编译相关 Warning/Error，并补充最多 100 个已加载 Blueprint 的 `Status` 与截断信息；返回 `historyComplete=false`，不冒充完整 Message Log 历史。
 - `ue_inspect_asset_live`：只接受精确 `/Game/...Asset.Asset`，返回 Asset Registry 和已加载对象状态；使用 `StaticFindObject`，不触发加载，并明确返回 `loadedByBridge=false`。
 - `ue_get_blueprint_graph_selection`：无参数，只读取最近激活的普通 Blueprint Editor，返回 Focused Graph GUID 和最多 100 个当前 Graph 选中 Node GUID；不支持其他 Graph Editor，也不提供编辑。
+- `ue_open_asset`：加载一个 Asset Registry 中存在的精确资产并使用注册 Asset Editor 打开；返回加载、打开和 Dirty 前后状态，不保存。
+- `ue_focus_asset`：只聚焦已经打开的精确资产；不加载未打开资产。
+- `ue_sync_content_browser`：使用 `FAssetData` 在 Content Browser 定位精确资产，不加载目标。
+- `ue_focus_actor`：按当前 Editor World 的唯一 `ActorGuid` 选择并聚焦视口；不存在、重复或不可选择时稳定拒绝。
+- `ue_compile_blueprint`：加载一个精确 Blueprint，在内存中编译并返回前后状态、Dirty 变化和当前会话诊断；不保存。
+- `ue_validate_asset`：使用官方 `UEditorValidatorSubsystem` 验证一个精确资产，最多返回 200 条问题。
+- `ue_validate_folder`：验证一个非根 `/Game/...` Package Path，可选递归；匹配资产数必须不超过 `max_assets`，硬上限 500，最多返回 200 条问题。
 
-稳定错误包括 `live-editor-unavailable`、`live-editor-timeout`、`live-editor-connection-closed`、`live-editor-version-mismatch`、`live-editor-project-mismatch`、`live-editor-authentication-failed`、`live-editor-capability-unavailable`、`live-editor-invalid-parameters` 和 `live-editor-protocol-error`。
+稳定错误包括通用连接/协议错误，以及 `live-editor-pie-active`、`live-editor-asset-not-found`、`live-editor-asset-load-failed`、`live-editor-asset-editor-unavailable`、`live-editor-asset-not-open`、`live-editor-world-unavailable`、`live-editor-actor-not-found`、`live-editor-actor-guid-ambiguous`、`live-editor-actor-not-selectable`、`live-editor-blueprint-required`、`live-editor-data-validation-unavailable`、`live-editor-folder-empty` 和 `live-editor-asset-limit-exceeded`。
 
 ## 查询 Tool
 

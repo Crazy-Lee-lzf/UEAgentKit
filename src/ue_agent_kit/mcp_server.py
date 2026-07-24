@@ -29,6 +29,7 @@ from .editor_bridge import (
     LiveEditorBridgeService,
     LiveEditorError,
 )
+from .mcp_live_action_tools import register_live_action_tools
 from .mcp_live_tools import register_live_read_tools
 from .mcp_query_tools import register_query_tools
 from .mcp_workflow_tools import register_workflow_tools
@@ -167,6 +168,25 @@ def _capabilities_response(
             "arbitraryPython": False,
             "arbitraryShell": False,
             "writeSupported": False,
+            "assetWriteSupported": False,
+            "editorActions": {
+                "available": live_editor_enabled,
+                "tools": [
+                    "ue_open_asset",
+                    "ue_focus_asset",
+                    "ue_sync_content_browser",
+                    "ue_focus_actor",
+                    "ue_compile_blueprint",
+                    "ue_validate_asset",
+                    "ue_validate_folder",
+                ] if live_editor_enabled else [],
+                "saveSupported": False,
+                "pieSupported": False,
+                "assetPathsAreExactGameObjectPaths": True,
+                "actorIdentity": "current-editor-world-actor-guid",
+                "folderValidationMaxAssets": 500,
+                "returnedValidationIssueLimit": 200,
+            },
             "graphSelection": {
                 "available": live_editor_enabled,
                 "tool": "ue_get_blueprint_graph_selection" if live_editor_enabled else "",
@@ -520,6 +540,12 @@ def create_mcp_server(
             server=server,
             live_editor_service=live_editor_service,
             read_annotations=read_annotations,
+            error_response=_error_response,
+        )
+        register_live_action_tools(
+            server=server,
+            live_editor_service=live_editor_service,
+            tool_annotations_type=ToolAnnotations,
             error_response=_error_response,
         )
     if workflow_service is not None:

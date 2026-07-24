@@ -2,6 +2,8 @@ param(
     [string]$EngineRoot = "",
     [string]$ProjectPath = "",
     [switch]$UseExistingEditor,
+    [string]$StartupMap = "",
+    [string]$ActorGuid = "",
     [ValidateRange(30, 300)]
     [int]$StartupTimeoutSeconds = 120
 )
@@ -62,7 +64,13 @@ try
         }
         Remove-Item -LiteralPath $EditorStdout, $EditorStderr -Force -ErrorAction SilentlyContinue
         $EditorArguments = @(
-            $ProjectPath,
+            $ProjectPath
+        )
+        if (![string]::IsNullOrWhiteSpace($StartupMap))
+        {
+            $EditorArguments += $StartupMap
+        }
+        $EditorArguments += @(
             "-unattended",
             "-nosplash",
             "-NoSound",
@@ -116,7 +124,16 @@ try
         }
     }
 
-    & $VenvPython $TestScript --project $ProjectPath
+    $TestArguments = @($TestScript, "--project", $ProjectPath)
+    if (![string]::IsNullOrWhiteSpace($StartupMap))
+    {
+        $TestArguments += @("--startup-map", $StartupMap)
+    }
+    if (![string]::IsNullOrWhiteSpace($ActorGuid))
+    {
+        $TestArguments += @("--actor-guid", $ActorGuid)
+    }
+    & $VenvPython @TestArguments
     if ($LASTEXITCODE -ne 0)
     {
         throw "MCP Live Editor smoke test failed with exit code $LASTEXITCODE"

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .tool_registry import LIVE_EDITOR_METHODS
+from .tool_registry import LIVE_EDITOR_METHODS, TOOL_DEFINITIONS_BY_NAME
 
 DESCRIPTOR_SCHEMA_VERSION = "1.0"
 PROTOCOL_SCHEMA_VERSION = "1.0"
@@ -105,11 +105,12 @@ class LiveEditorBridgeService:
             raise ValueError(f"Unsupported Live Editor Tool: {tool_name}")
         normalized_params = self._normalize_tool_params(tool_name, params or {})
         result = self.call_method(method, normalized_params)
+        definition = TOOL_DEFINITIONS_BY_NAME[tool_name]
         return {
             "schemaVersion": "1.0",
             "tool": tool_name,
             "ok": True,
-            "readOnly": True,
+            "readOnly": definition.read_only,
             "source": "live-editor-memory",
             "liveEditor": {
                 "state": "available",
@@ -170,6 +171,41 @@ class LiveEditorBridgeService:
             asset_path = LiveEditorBridgeService._bounded_string(params.get("assetPath", ""), "assetPath", 512)
             LiveEditorBridgeService._validate_game_object_path(asset_path)
             return {"assetPath": asset_path}
+        if tool_name in {"ue_open_asset", "ue_focus_asset", "ue_sync_content_browser", "ue_compile_blueprint"}:
+            allowed = {"assetPath"}
+            LiveEditorBridgeService._reject_unknown_params(params, allowed)
+            asset_path = LiveEditorBridgeService._bounded_string(params.get("assetPath", ""), "assetPath", 512)
+            LiveEditorBridgeService._validate_game_object_path(asset_path)
+            return {"assetPath": asset_path}
+        if tool_name == "ue_focus_actor":
+            allowed = {"actorGuid"}
+            LiveEditorBridgeService._reject_unknown_params(params, allowed)
+            actor_guid = LiveEditorBridgeService._bounded_string(params.get("actorGuid", ""), "actorGuid", 64)
+            LiveEditorBridgeService._validate_guid(actor_guid, "actorGuid")
+            return {"actorGuid": actor_guid.lower()}
+        if tool_name == "ue_validate_asset":
+            allowed = {"assetPath", "maxIssues"}
+            LiveEditorBridgeService._reject_unknown_params(params, allowed)
+            asset_path = LiveEditorBridgeService._bounded_string(params.get("assetPath", ""), "assetPath", 512)
+            LiveEditorBridgeService._validate_game_object_path(asset_path)
+            return {
+                "assetPath": asset_path,
+                "maxIssues": LiveEditorBridgeService._bounded_integer(params.get("maxIssues", 100), "maxIssues", 1, 200),
+            }
+        if tool_name == "ue_validate_folder":
+            allowed = {"packagePath", "recursive", "maxAssets", "maxIssues"}
+            LiveEditorBridgeService._reject_unknown_params(params, allowed)
+            package_path = LiveEditorBridgeService._bounded_string(params.get("packagePath", ""), "packagePath", 512)
+            LiveEditorBridgeService._validate_game_package_path(package_path)
+            recursive = params.get("recursive", True)
+            if not isinstance(recursive, bool):
+                raise LiveEditorError("live-editor-invalid-parameters", "recursive must be a boolean.")
+            return {
+                "packagePath": package_path.rstrip("/"),
+                "recursive": recursive,
+                "maxAssets": LiveEditorBridgeService._bounded_integer(params.get("maxAssets", 100), "maxAssets", 1, 500),
+                "maxIssues": LiveEditorBridgeService._bounded_integer(params.get("maxIssues", 100), "maxIssues", 1, 200),
+            }
         if params:
             raise LiveEditorError(
                 "live-editor-invalid-parameters",
@@ -224,6 +260,30 @@ class LiveEditorBridgeService:
         if parsed.tzinfo is None:
             raise LiveEditorError("live-editor-invalid-parameters", f"{name} must include a UTC offset.")
         return parsed.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+    @staticmethod
+    def _validate_guid(value: str, name: str) -> None:
+        compact = value.replace("-", "")
+        if len(compact) != 32 or any(character not in "0123456789abcdefABCDEF" for character in compact):
+            raise LiveEditorError("live-editor-invalid-parameters", f"{name} must be a valid GUID.")
+
+    @staticmethod
+    def _validate_game_package_path(package_path: str) -> None:
+        normalized = package_path.rstrip("/")
+        if (
+            not normalized.startswith("/Game/")
+            or normalized == "/Game"
+            or "." in normalized
+            or "//" in normalized
+            or "\\" in normalized
+            or ":" in normalized
+            or ".." in normalized
+            or any(ord(character) < 32 for character in normalized)
+        ):
+            raise LiveEditorError(
+                "live-editor-invalid-parameters",
+                "packagePath must be a non-root /Game package path without an object name.",
+            )
 
     @staticmethod
     def _validate_game_object_path(asset_path: str) -> None:

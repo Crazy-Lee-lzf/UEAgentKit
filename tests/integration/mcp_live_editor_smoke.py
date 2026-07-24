@@ -17,7 +17,7 @@ SRC_ROOT = TOOL_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from ue_agent_kit.tool_registry import tool_names_for_mode  # noqa: E402
+from ue_agent_kit.tool_registry import TOOL_DEFINITIONS_BY_NAME, tool_names_for_mode  # noqa: E402
 SRC_ROOT = TOOL_ROOT / "src"
 PYTHON_TESTS = TOOL_ROOT / "tests" / "python"
 for search_path in (SRC_ROOT, PYTHON_TESTS):
@@ -36,6 +36,8 @@ from ue_agent_kit.indexer import build_index  # noqa: E402
 
 EXPECTED_TOOLS = tool_names_for_mode(live_editor_enabled=True)
 LIVE_TOOLS = EXPECTED_TOOLS[5:]
+READ_LIVE_TOOLS = [name for name in LIVE_TOOLS if TOOL_DEFINITIONS_BY_NAME[name].read_only]
+ACTION_LIVE_TOOLS = [name for name in LIVE_TOOLS if not TOOL_DEFINITIONS_BY_NAME[name].read_only]
 
 
 
@@ -47,9 +49,29 @@ def _snapshot(directory: Path) -> dict[str, str]:
     return {path.name: _sha256(path) for path in directory.iterdir() if path.is_file()}
 
 
-async def _run(database: Path, project: Path, error_log: Path) -> dict[str, Any]:
+async def _run(
+    database: Path,
+    project: Path,
+    error_log: Path,
+    actor_guid: str = "",
+    startup_map: str = "",
+) -> dict[str, Any]:
     before_hash = _sha256(database)
     before_files = _snapshot(database.parent)
+    target_package = project.parent / "Content" / "UEAgentKitWriteTests" / "BP_PatchTarget.uasset"
+    if not target_package.is_file():
+        raise RuntimeError(f"Live action fixture package is missing: {target_package}")
+    target_package_hash_before = _sha256(target_package)
+    map_package: Path | None = None
+    map_package_hash_before = ""
+    if startup_map:
+        if not startup_map.startswith("/Game/") or "." in startup_map or ".." in startup_map:
+            raise RuntimeError(f"Invalid startup map package path: {startup_map}")
+        map_package = project.parent / "Content" / Path(*startup_map.removeprefix("/Game/").split("/"))
+        map_package = map_package.with_suffix(".umap")
+        if not map_package.is_file():
+            raise RuntimeError(f"Startup map package is missing: {map_package}")
+        map_package_hash_before = _sha256(map_package)
     descriptor_path = project.parent / "Saved" / "UEAgentKit" / "EditorBridge.json"
     descriptor = json.loads(descriptor_path.read_text(encoding="utf-8-sig"))
     secret_token = str(descriptor["authToken"])
@@ -68,7 +90,7 @@ async def _run(database: Path, project: Path, error_log: Path) -> dict[str, Any]
             "-ProjectPath",
             str(project),
             "-LiveEditorTimeoutSeconds",
-            "5",
+            "30",
         ],
         cwd=TOOL_ROOT,
         encoding="utf-8",
@@ -106,6 +128,53 @@ async def _run(database: Path, project: Path, error_log: Path) -> dict[str, Any]
                 live_results["ue_get_blueprint_graph_selection"] = (
                     await session.call_tool("ue_get_blueprint_graph_selection", {})
                 ).structuredContent
+                action_results = {}
+                target_asset = "/Game/UEAgentKitWriteTests/BP_PatchTarget.BP_PatchTarget"
+                action_results["ue_sync_content_browser"] = (
+                    await session.call_tool(
+                        "ue_sync_content_browser",
+                        {"asset_path": target_asset},
+                    )
+                ).structuredContent
+                action_results["ue_open_asset"] = (
+                    await session.call_tool("ue_open_asset", {"asset_path": target_asset})
+                ).structuredContent
+                action_results["ue_focus_asset"] = (
+                    await session.call_tool("ue_focus_asset", {"asset_path": target_asset})
+                ).structuredContent
+                action_results["ue_compile_blueprint"] = (
+                    await session.call_tool("ue_compile_blueprint", {"asset_path": target_asset})
+                ).structuredContent
+                action_results["ue_validate_asset"] = (
+                    await session.call_tool(
+                        "ue_validate_asset",
+                        {"asset_path": target_asset, "max_issues": 50},
+                    )
+                ).structuredContent
+                action_results["ue_validate_folder"] = (
+                    await session.call_tool(
+                        "ue_validate_folder",
+                        {
+                            "package_path": "/Game/UEAgentKitWriteTests",
+                            "recursive": True,
+                            "max_assets": 100,
+                            "max_issues": 50,
+                        },
+                    )
+                ).structuredContent
+                action_results["ue_focus_actor"] = (
+                    await session.call_tool(
+                        "ue_focus_actor",
+                        {"actor_guid": "11111111-1111-1111-1111-111111111111"},
+                    )
+                ).structuredContent
+                if actor_guid:
+                    action_results["ue_focus_actor_existing"] = (
+                        await session.call_tool(
+                            "ue_focus_actor",
+                            {"actor_guid": actor_guid},
+                        )
+                    ).structuredContent
 
     tool_names = [tool.name for tool in listed.tools]
     if tool_names != EXPECTED_TOOLS:
@@ -129,8 +198,13 @@ async def _run(database: Path, project: Path, error_log: Path) -> dict[str, Any]
         if properties.intersection(forbidden):
             raise RuntimeError(f"Tool exposes fixed or arbitrary bridge configuration: {tool.name} {properties}")
         if tool.name in LIVE_TOOLS:
-            if not tool.annotations or not tool.annotations.readOnlyHint or tool.annotations.destructiveHint:
-                raise RuntimeError(f"Live Tool annotations are unsafe: {tool.name} {tool.annotations}")
+            definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
+            if (
+                not tool.annotations
+                or tool.annotations.readOnlyHint != definition.read_only
+                or tool.annotations.destructiveHint != definition.destructive
+            ):
+                raise RuntimeError(f"Live Tool annotations do not match the Registry: {tool.name} {tool.annotations}")
 
     capabilities = capabilities_result.structuredContent
     project_status = project_status_result.structuredContent
@@ -149,7 +223,7 @@ async def _run(database: Path, project: Path, error_log: Path) -> dict[str, Any]
         raise RuntimeError(f"Live Editor project mismatch: {editor_status}")
     if editor_status["result"]["pluginVersion"] != capabilities["server"]["version"]:
         raise RuntimeError(f"Live Editor version mismatch: {editor_status}")
-    for tool in LIVE_TOOLS[1:]:
+    for tool in READ_LIVE_TOOLS[1:]:
         payload = live_results[tool]
         if not payload or not payload["ok"] or payload["source"] != "live-editor-memory":
             raise RuntimeError(f"Live Tool failed: {tool} {payload}")
@@ -192,11 +266,58 @@ async def _run(database: Path, project: Path, error_log: Path) -> dict[str, Any]
     }:
         raise RuntimeError(f"Graph selection fallback is invalid: {graph_selection}")
 
+    if ACTION_LIVE_TOOLS != [
+        "ue_open_asset",
+        "ue_focus_asset",
+        "ue_sync_content_browser",
+        "ue_focus_actor",
+        "ue_compile_blueprint",
+        "ue_validate_asset",
+        "ue_validate_folder",
+    ]:
+        raise RuntimeError(f"Unexpected Live Action Tool order: {ACTION_LIVE_TOOLS}")
+    sync_result = action_results["ue_sync_content_browser"]
+    if not sync_result or not sync_result.get("ok") or sync_result["result"].get("loadedByBridge") is not False:
+        raise RuntimeError(f"Content Browser sync loaded or failed: {sync_result}")
+    open_result = action_results["ue_open_asset"]
+    if not open_result or not open_result.get("ok") or not open_result["result"].get("openAfter"):
+        raise RuntimeError(f"Asset open failed: {open_result}")
+    focus_result = action_results["ue_focus_asset"]
+    if not focus_result or not focus_result.get("ok") or not focus_result["result"].get("focused"):
+        raise RuntimeError(f"Asset focus failed: {focus_result}")
+    compile_result = action_results["ue_compile_blueprint"]
+    if not compile_result or not compile_result.get("ok") or not compile_result["result"].get("compiled"):
+        raise RuntimeError(f"Blueprint compile did not execute: {compile_result}")
+    if compile_result["result"].get("saved") is not False:
+        raise RuntimeError(f"Blueprint compile claimed to save: {compile_result}")
+    validate_asset = action_results["ue_validate_asset"]
+    if not validate_asset or not validate_asset.get("ok") or validate_asset["result"].get("numRequested") != 1:
+        raise RuntimeError(f"Single-asset validation failed: {validate_asset}")
+    validate_folder = action_results["ue_validate_folder"]
+    if not validate_folder or not validate_folder.get("ok") or validate_folder["result"].get("matchedAssetCount", 0) < 1:
+        raise RuntimeError(f"Folder validation failed: {validate_folder}")
+    actor_failure = action_results["ue_focus_actor"]
+    if not actor_failure or actor_failure.get("ok") or actor_failure["error"]["code"] != "live-editor-actor-not-found":
+        raise RuntimeError(f"Missing ActorGuid was not rejected predictably: {actor_failure}")
+
+    actor_success = action_results.get("ue_focus_actor_existing")
+    if actor_guid:
+        if (
+            not actor_success
+            or not actor_success.get("ok")
+            or not actor_success["result"].get("selected")
+            or not actor_success["result"].get("viewportFocused")
+            or actor_success["result"].get("actorGuid") != actor_guid.lower()
+            or actor_success["result"].get("dirtyPackageCountChanged") is not False
+        ):
+            raise RuntimeError(f"Existing ActorGuid was not selected and framed: {actor_success}")
+
     response_text = json.dumps(
         {
             "capabilities": capabilities,
             "projectStatus": project_status,
             "live": live_results,
+            "actions": action_results,
         },
         ensure_ascii=False,
     )
@@ -206,7 +327,11 @@ async def _run(database: Path, project: Path, error_log: Path) -> dict[str, Any]
     if "authToken" in response_text or "projectPathHash" in response_text:
         raise RuntimeError("MCP Live Editor responses exposed descriptor authentication fields")
     if _sha256(database) != before_hash or _snapshot(database.parent) != before_files:
-        raise RuntimeError("Live Editor MCP reads modified the immutable SQLite index")
+        raise RuntimeError("Live Editor MCP actions modified the immutable SQLite index")
+    if _sha256(target_package) != target_package_hash_before:
+        raise RuntimeError("Live Editor Daily Actions changed the fixture package on disk")
+    if map_package is not None and _sha256(map_package) != map_package_hash_before:
+        raise RuntimeError("Actor focus changed the startup map package on disk")
 
     return {
         "protocolVersion": initialized.protocolVersion,
@@ -232,9 +357,19 @@ async def _run(database: Path, project: Path, error_log: Path) -> dict[str, Any]
         "blueprintGraphSelectionAvailable": bool(graph_selection.get("available")),
         "blueprintGraphSelectionReason": graph_selection.get("reasonCode", ""),
         "blueprintSelectedNodeCount": graph_selection.get("selectedNodeCount", 0),
+        "contentBrowserSyncNoLoad": sync_result["result"]["loadedByBridge"] is False,
+        "assetOpened": bool(open_result["result"]["openAfter"]),
+        "assetFocused": bool(focus_result["result"]["focused"]),
+        "blueprintCompileResult": compile_result["result"]["result"],
+        "singleAssetValidationResult": validate_asset["result"]["result"],
+        "folderValidationChecked": validate_folder["result"]["numChecked"],
+        "missingActorRejected": actor_failure["error"]["code"] == "live-editor-actor-not-found",
+        "existingActorFocused": bool(actor_success and actor_success.get("ok")),
         "secretsRedacted": True,
         "databaseHashUnchanged": True,
         "indexDirectoryUnchanged": True,
+        "fixturePackageHashUnchanged": True,
+        "startupMapHashUnchanged": map_package is None or _sha256(map_package) == map_package_hash_before,
         "serverLogLines": len(error_log.read_text(encoding="utf-8").splitlines()),
     }
 
@@ -263,6 +398,8 @@ def main() -> int:
     parser.add_argument("--database", type=Path)
     parser.add_argument("--project", type=Path, required=True)
     parser.add_argument("--error-log", type=Path)
+    parser.add_argument("--actor-guid", default="")
+    parser.add_argument("--startup-map", default="")
     args = parser.parse_args()
     project = args.project.resolve()
     with tempfile.TemporaryDirectory(prefix="ueak_mcp_live_") as temporary_root:
@@ -274,7 +411,9 @@ def main() -> int:
             else root / "logs" / "server-stderr.log"
         )
         error_log.parent.mkdir(parents=True, exist_ok=True)
-        report = asyncio.run(_run(database, project, error_log))
+        report = asyncio.run(
+            _run(database, project, error_log, args.actor_guid, args.startup_map)
+        )
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0
 

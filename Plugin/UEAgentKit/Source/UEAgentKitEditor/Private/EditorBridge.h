@@ -47,6 +47,14 @@ private:
 	TSharedRef<FJsonObject> BuildInspectAssetLiveResult(const FString& AssetPath) const;
 	TSharedRef<FJsonObject> BuildBlueprintGraphSelectionResult() const;
 
+	bool TryOpenAssetResult(const FString& AssetPath, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
+	bool TryFocusAssetResult(const FString& AssetPath, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
+	bool TrySyncContentBrowserResult(const FString& AssetPath, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
+	bool TryFocusActorResult(const FString& ActorGuid, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
+	bool TryCompileBlueprintResult(const FString& AssetPath, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
+	bool TryValidateAssetResult(const FString& AssetPath, int32 MaxIssues, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
+	bool TryValidateFolderResult(const FString& PackagePath, bool bRecursive, int32 MaxAssets, int32 MaxIssues, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
+
 	bool WriteDescriptor();
 	void RemoveDescriptor();
 	FString ComputeProjectPathHash() const;

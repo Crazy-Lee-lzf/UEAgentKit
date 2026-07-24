@@ -172,6 +172,13 @@ class FakeLiveEditorService:
                 "editor.getCompileErrors",
                 "editor.inspectAssetLive",
                 "editor.getBlueprintGraphSelection",
+                "editor.openAsset",
+                "editor.focusAsset",
+                "editor.syncContentBrowser",
+                "editor.focusActor",
+                "editor.compileBlueprint",
+                "editor.validateAsset",
+                "editor.validateFolder",
             ],
             "pieState": "stopped",
             "currentLevel": "/Game/Maps/Test.Test:PersistentLevel",
@@ -233,12 +240,52 @@ class FakeLiveEditorService:
                     }
                 ],
             },
+            "ue_open_asset": {"action": "open-asset", "openedNewEditor": True, "saved": False},
+            "ue_focus_asset": {"action": "focus-asset", "focused": True, "saved": False},
+            "ue_sync_content_browser": {
+                "action": "sync-content-browser",
+                "synchronized": True,
+                "loadedByBridge": False,
+                "saved": False,
+            },
+            "ue_focus_actor": {
+                "action": "focus-actor",
+                "actorGuid": normalized_params.get("actorGuid", ""),
+                "selected": True,
+                "viewportFocused": True,
+                "saved": False,
+            },
+            "ue_compile_blueprint": {
+                "action": "compile-blueprint",
+                "assetPath": normalized_params.get("assetPath", ""),
+                "result": "success",
+                "compiled": True,
+                "succeeded": True,
+                "saved": False,
+                "diagnostics": [],
+            },
+            "ue_validate_asset": {
+                "action": "validate-assets",
+                "scope": normalized_params.get("assetPath", ""),
+                "result": "valid",
+                "numRequested": 1,
+                "numChecked": 1,
+                "saved": False,
+            },
+            "ue_validate_folder": {
+                "action": "validate-assets",
+                "scope": normalized_params.get("packagePath", ""),
+                "result": "valid",
+                "matchedAssetCount": 2,
+                "numChecked": 2,
+                "saved": False,
+            },
         }
         return {
             "schemaVersion": "1.0",
             "tool": tool_name,
             "ok": True,
-            "readOnly": True,
+            "readOnly": TOOL_DEFINITIONS_BY_NAME[tool_name].read_only,
             "source": "live-editor-memory",
             "result": results[tool_name],
         }
@@ -494,8 +541,9 @@ class McpServerTests(unittest.TestCase):
         for tool in tools:
             properties = set(tool.inputSchema.get("properties", {}))
             self.assertFalse(properties.intersection(forbidden), (tool.name, properties))
-            self.assertTrue(tool.annotations.readOnlyHint)
-            self.assertFalse(tool.annotations.destructiveHint)
+            definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
+            self.assertEqual(tool.annotations.readOnlyHint, definition.read_only, tool.name)
+            self.assertEqual(tool.annotations.destructiveHint, definition.destructive, tool.name)
 
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
         self.assertTrue(capabilities["liveEditor"]["configured"])
@@ -509,6 +557,14 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(graph_contract["maxSelectedNodes"], 100)
         self.assertFalse(graph_contract["materialEditorSupported"])
         self.assertFalse(graph_contract["editingSupported"])
+        action_contract = capabilities["liveEditor"]["editorActions"]
+        self.assertTrue(action_contract["available"])
+        self.assertEqual(action_contract["tools"], expected_names[15:22])
+        self.assertFalse(action_contract["saveSupported"])
+        self.assertFalse(action_contract["pieSupported"])
+        self.assertEqual(action_contract["actorIdentity"], "current-editor-world-actor-guid")
+        self.assertEqual(action_contract["folderValidationMaxAssets"], 500)
+        self.assertEqual(action_contract["returnedValidationIssueLimit"], 200)
         self.assertTrue(capabilities["freshness"]["liveEditorMemorySeparate"])
 
         _, project_status = asyncio.run(server.call_tool("ue_get_project_status", {}))
@@ -579,6 +635,46 @@ class McpServerTests(unittest.TestCase):
             "22222222-2222-2222-2222-222222222222",
         )
 
+        _, opened = asyncio.run(
+            server.call_tool("ue_open_asset", {"asset_path": "/Game/Test/BP_Test.BP_Test"})
+        )
+        self.assertTrue(opened["result"]["openedNewEditor"])
+        self.assertFalse(opened["readOnly"])
+        self.assertEqual(live_service.calls[-1][1]["assetPath"], "/Game/Test/BP_Test.BP_Test")
+
+        _, focused_actor = asyncio.run(
+            server.call_tool(
+                "ue_focus_actor",
+                {"actor_guid": "33333333-3333-3333-3333-333333333333"},
+            )
+        )
+        self.assertTrue(focused_actor["result"]["viewportFocused"])
+        self.assertEqual(
+            live_service.calls[-1][1]["actorGuid"],
+            "33333333-3333-3333-3333-333333333333",
+        )
+
+        _, compiled = asyncio.run(
+            server.call_tool("ue_compile_blueprint", {"asset_path": "/Game/Test/BP_Test.BP_Test"})
+        )
+        self.assertTrue(compiled["result"]["succeeded"])
+        self.assertFalse(compiled["result"]["saved"])
+
+        _, validated = asyncio.run(
+            server.call_tool(
+                "ue_validate_folder",
+                {
+                    "package_path": "/Game/Test",
+                    "recursive": False,
+                    "max_assets": 20,
+                    "max_issues": 30,
+                },
+            )
+        )
+        self.assertEqual(validated["result"]["matchedAssetCount"], 2)
+        self.assertEqual(live_service.calls[-1][1]["packagePath"], "/Game/Test")
+        self.assertEqual(live_service.calls[-1][1]["maxAssets"], 20)
+
         offline_server = create_mcp_server(
             self.database_path,
             live_editor_service=FakeLiveEditorService(available=False),
@@ -603,7 +699,7 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         expected_names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 28)
+        self.assertEqual(len(tools), 35)
         for tool in tools:
             definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
             self.assertEqual(bool(tool.annotations.readOnlyHint), definition.read_only, tool.name)

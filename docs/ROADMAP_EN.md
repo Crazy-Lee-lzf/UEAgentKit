@@ -65,24 +65,19 @@ Remaining 0.5.2 targets:
 
 Development preparation is complete:
 
-- [x] One Tool Registry owns order, mode membership, annotations, and Live capability mapping while preserving the 5/15/18/28 contracts.
-- [x] MCP Query, Live Read, and Workflow registration are split; Editor Bridge readers are separated into Status, Diagnostic, Asset, and Graph handlers.
+- [x] One Tool Registry owns order, mode membership, annotations, and Live capability mapping; current modes are 5/22/18/35.
+- [x] MCP Query, Live Read, Live Action, and Workflow registration are split; Editor Bridge capabilities are separated into Status, Diagnostic, Asset, Graph, Navigation, and Validation handlers.
 - [x] Targeted Registry/Query/Live/Workflow tests and preview-first Navigation/Validation/Protocol worktree creation are available.
 - [x] Parallel development assigns frozen contracts and shared integration to Sol and bounded file-owned subtasks to Luna.
 
 Initial low-risk actions:
 
-```text
-ue_open_asset
-ue_focus_asset
-ue_sync_content_browser
-ue_focus_actor
-ue_compile_blueprint
-ue_validate_asset
-ue_validate_folder
-ue_run_automation_test
-ue_save_authorized_asset
-```
+- [x] `ue_open_asset`, `ue_focus_asset`, `ue_sync_content_browser`, and `ue_focus_actor`: exact identities, PIE/SIE rejection, and no saves.
+- [x] `ue_compile_blueprint`: in-memory compilation with structured status and current-session diagnostics, without saving packages.
+- [x] `ue_validate_asset` and `ue_validate_folder`: official Data Validation with hard limits of 500 assets and 200 returned issues.
+- [x] Real UE5.6 positive and negative coverage for no-load Content Browser sync, asset open/focus, ActorGuid focus, compile, and a 25-asset folder validation while preserving package SHA-256.
+- [ ] `ue_run_automation_test`.
+- [ ] `ue_save_authorized_asset`; unbounded `save_all` remains forbidden.
 
 Every save remains bounded by Policy, Revision, Dry Run, explicit confirmation, backup, and verification. There will be no unbounded `save_all`.
 

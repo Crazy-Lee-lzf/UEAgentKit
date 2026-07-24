@@ -219,7 +219,7 @@ scripts\TestMcpSnapshotRefresh.cmd ^
   -ProjectPath "<TEST_PROJECT>.uproject"
 ```
 
-服务器对 MCP Client 仍只使用本地 `stdio`。默认模式为 5 个离线只读 Tool；`-EnableLiveEditor -ProjectPath <固定工程>` 增加 10 个实时只读 Tool，共 15 个；固定 Engine、Project、Policy 和 Revision Export 后的工作流为 18 个；两者组合时共 28 个 Tool。实时模式提供有界 Output Log、编译诊断、不触发加载的内存资产检查，以及普通 Blueprint Editor 的当前 Graph/Node 定位；工作流模式提供四源资产状态和安全单资产索引刷新：
+服务器对 MCP Client 仍只使用本地 `stdio`。默认模式为 5 个离线只读 Tool；`-EnableLiveEditor -ProjectPath <固定工程>` 增加 10 个实时只读 Tool和 7 个受限 Daily Action，共 22 个 Live Tool；固定 Engine、Project、Policy 和 Revision Export 后的工作流为 18 个；两者组合时共 35 个 Tool。实时读取提供有界 Output Log、编译诊断、不触发加载的内存资产检查，以及普通 Blueprint Editor 的当前 Graph/Node 定位；Daily Action 提供资产打开/聚焦、Content Browser 同步、ActorGuid 聚焦、Blueprint 内存编译和官方 Data Validation，均不保存资产；工作流模式提供四源资产状态和安全单资产索引刷新：
 
 ```bat
 claude mcp add --transport stdio --scope project ue-agent-kit -- ^
@@ -228,7 +228,7 @@ claude mcp add --transport stdio --scope project ue-agent-kit -- ^
   -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
 ```
 
-添加后可用 `claude mcp list` 或 Claude Code 内的 `/mcp` 检查连接。Live Editor 模式通过固定工程 `Saved/UEAgentKit/EditorBridge.json` 发现仅绑定 `127.0.0.1` 的临时端点，并执行随机令牌、工程路径摘要、版本和 Capability 握手；Tool 参数不能指定端口、令牌或任意 UObject/Console/Python/Shell。实时读取包括 4096 条 Output Log 环形缓冲、编译诊断、不触发加载的精确 `/Game/...Asset.Asset` 检查，以及只支持普通 Blueprint Editor 的聚焦 Graph 与最多 100 个选中 Node；相关读取始终报告 `loadedByBridge=false`。`ue_get_asset_state` 区分 Editor Memory、磁盘 Package、Revision Export 和 SQLite，且不会为内存状态伪造 Revision。完整写入模式使用 `-EnableWriteTools`；只有同时使用 `-EnableCommitTools` 且 Policy 允许 Commit，才能保存或恢复资产。Plan 要求 SQLite、Revision Export 与磁盘 Package Revision 一致；六个 `ue_set_*` Tool 默认只生成 Plan，也可自动执行 Dry Run，但不能直接 Commit。Commit 后固定快照会标记 stale，rollback 恢复原 Revision 后才重新 fresh。`ue_refresh_asset_index` 仅接受一个 Policy 授权的精确资产路径，并通过 Preview/Apply 生成配对 Revision Export + SQLite Generation；Apply 后当前会话继续读取冻结旧代且拒绝新工作流，重启 MCP 后新会话才读取新代。完整契约见 [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md)、[`spec/LIVE_EDITOR_BRIDGE.md`](spec/LIVE_EDITOR_BRIDGE.md) 与 [`spec/INDEX_FRESHNESS.md`](spec/INDEX_FRESHNESS.md)。
+添加后可用 `claude mcp list` 或 Claude Code 内的 `/mcp` 检查连接。Live Editor 模式通过固定工程 `Saved/UEAgentKit/EditorBridge.json` 发现仅绑定 `127.0.0.1` 的临时端点，并执行随机令牌、工程路径摘要、版本和 Capability 握手；Tool 参数不能指定端口、令牌或任意 UObject/Console/Python/Shell。实时读取包括 4096 条 Output Log 环形缓冲、编译诊断、不触发加载的精确 `/Game/...Asset.Asset` 检查，以及只支持普通 Blueprint Editor 的聚焦 Graph 与最多 100 个选中 Node；相关读取始终报告 `loadedByBridge=false`。Daily Action 仅接受精确 `/Game` 身份或当前 Editor World `ActorGuid`，在 PIE/SIE 中拒绝执行；资产打开/聚焦、Content Browser 同步、Blueprint 内存编译和官方 Data Validation 均不保存 Package，并明确返回 Dirty 状态。`ue_get_asset_state` 区分 Editor Memory、磁盘 Package、Revision Export 和 SQLite，且不会为内存状态伪造 Revision。完整写入模式使用 `-EnableWriteTools`；只有同时使用 `-EnableCommitTools` 且 Policy 允许 Commit，才能保存或恢复资产。Plan 要求 SQLite、Revision Export 与磁盘 Package Revision 一致；六个 `ue_set_*` Tool 默认只生成 Plan，也可自动执行 Dry Run，但不能直接 Commit。Commit 后固定快照会标记 stale，rollback 恢复原 Revision 后才重新 fresh。`ue_refresh_asset_index` 仅接受一个 Policy 授权的精确资产路径，并通过 Preview/Apply 生成配对 Revision Export + SQLite Generation；Apply 后当前会话继续读取冻结旧代且拒绝新工作流，重启 MCP 后新会话才读取新代。完整契约见 [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md)、[`spec/LIVE_EDITOR_BRIDGE.md`](spec/LIVE_EDITOR_BRIDGE.md) 与 [`spec/INDEX_FRESHNESS.md`](spec/INDEX_FRESHNESS.md)。
 
 ### 7. 校验通用资产导出
 
@@ -276,7 +276,7 @@ Output\Blueprints\
 - [`spec/WRITE_FIXTURE_PLAN.md`](spec/WRITE_FIXTURE_PLAN.md)：测试资产 Plan、Create/Reset 和独立重载验证规范。
 - [`spec/SCALAR_PATCH_REGRESSION.md`](spec/SCALAR_PATCH_REGRESSION.md)：完整标量类型、正向写入和失败路径真实 UE 回归规范。
 - [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md)：MCP Tool、stdio、固定配置和响应契约。
-- [`spec/LIVE_EDITOR_BRIDGE.md`](spec/LIVE_EDITOR_BRIDGE.md)：受限 localhost IPC、固定工程握手和实时只读状态。
+- [`spec/LIVE_EDITOR_BRIDGE.md`](spec/LIVE_EDITOR_BRIDGE.md)：受限 localhost IPC、固定工程握手、实时读取与 Daily Actions。
 - [`spec/INDEX_FRESHNESS.md`](spec/INDEX_FRESHNESS.md)：三源 Revision 新鲜度、stale 生命周期与安全快照重载。
 
 完整文档索引见 [`docs/README.md`](docs/README.md)。

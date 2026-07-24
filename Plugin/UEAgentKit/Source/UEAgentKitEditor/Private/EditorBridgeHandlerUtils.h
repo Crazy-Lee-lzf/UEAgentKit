@@ -27,6 +27,8 @@ namespace UEAgentKitEditorBridgePrivate
 	FUEAgentKitLogQuery BuildLogQuery(const TSharedPtr<FJsonObject>& Params, bool bCompileOnly);
 	TSharedRef<FJsonObject> DescribeCapturedLogEntry(const FUEAgentKitCapturedLogEntry& Entry);
 	TSharedRef<FJsonObject> DescribeBlueprintState(UBlueprint* Blueprint);
+	bool IsSafeGameAssetPath(const FString& AssetPath);
+	bool IsSafeGamePackagePath(const FString& PackagePath);
 	bool IsObjectSelected(UObject* Object);
 	bool IsAssetOpenInEditor(UObject* Asset);
 }

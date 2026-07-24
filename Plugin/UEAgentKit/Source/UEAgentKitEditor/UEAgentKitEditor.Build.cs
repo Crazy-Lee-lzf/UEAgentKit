@@ -19,6 +19,7 @@ public class UEAgentKitEditor : ModuleRules
 			{
 				"AssetRegistry",
 				"BlueprintGraph",
+				"DataValidation",
 				"Json",
 				"JsonUtilities",
 				"Kismet",

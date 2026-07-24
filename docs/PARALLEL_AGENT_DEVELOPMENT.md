@@ -7,7 +7,7 @@
 - **Sol**：冻结 Tool 契约、维护公共 Registry、处理跨模块集成、执行最终 UE5.6 验证并决定是否合并。
 - **Luna**：在冻结契约和文件所有权内实现独立子任务，不得自行修改公共 Schema 或扩展安全边界。
 
-Tool 顺序、模式归属、Annotation 和 Live Bridge Method 统一由 `src/ue_agent_kit/tool_registry.py` 管理。MCP 注册拆分为 Query、Live Read 和 Workflow 三个模块；Editor Bridge Reader 按 Status、Diagnostic、Asset、Graph 拆分。
+Tool 顺序、模式归属、Annotation 和 Live Bridge Method 统一由 `src/ue_agent_kit/tool_registry.py` 管理。MCP 注册拆分为 Query、Live Read、Live Action 和 Workflow 四个模块；Editor Bridge 能力按 Status、Diagnostic、Asset、Graph、Navigation、Validation 拆分。
 
 ## Worktree
 

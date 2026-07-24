@@ -110,6 +110,39 @@ class _BridgeHandler(socketserver.StreamRequestHandler):
                 "assetRegistry": {"found": True},
                 "memory": {"loaded": False, "loadedByBridge": False, "state": "not-loaded"},
             },
+            "editor.openAsset": {
+                "action": "open-asset",
+                "assetPath": params.get("assetPath", ""),
+                "openAfter": True,
+                "saved": False,
+            },
+            "editor.focusAsset": {"action": "focus-asset", "focused": True, "saved": False},
+            "editor.syncContentBrowser": {
+                "action": "sync-content-browser",
+                "loadedByBridge": False,
+                "saved": False,
+            },
+            "editor.focusActor": {
+                "action": "focus-actor",
+                "actorGuid": params.get("actorGuid", ""),
+                "selected": True,
+                "saved": False,
+            },
+            "editor.compileBlueprint": {
+                "action": "compile-blueprint",
+                "compiled": True,
+                "saved": False,
+            },
+            "editor.validateAsset": {
+                "action": "validate-assets",
+                "numRequested": 1,
+                "saved": False,
+            },
+            "editor.validateFolder": {
+                "action": "validate-assets",
+                "numRequested": 2,
+                "saved": False,
+            },
         }
         result = results.get(method)
         if result is None:
@@ -160,6 +193,13 @@ class EditorBridgeTests(unittest.TestCase):
             "editor.getOutputLog",
             "editor.getCompileErrors",
             "editor.inspectAssetLive",
+            "editor.openAsset",
+            "editor.focusAsset",
+            "editor.syncContentBrowser",
+            "editor.focusActor",
+            "editor.compileBlueprint",
+            "editor.validateAsset",
+            "editor.validateFolder",
         ]
         self.server = _BridgeServer(("127.0.0.1", 0), _BridgeHandler)
         self.server.auth_token = self.token  # type: ignore[attr-defined]
@@ -252,6 +292,55 @@ class EditorBridgeTests(unittest.TestCase):
             ("ue_get_compile_errors", {"limit": 101}),
             ("ue_inspect_asset_live", {"assetPath": "/Game/Test/BP_Test"}),
             ("ue_get_selection", {"unexpected": True}),
+        )
+        for tool_name, params in invalid_cases:
+            with self.subTest(tool=tool_name, params=params):
+                with self.assertRaises(LiveEditorError) as context:
+                    self.service.call_tool(tool_name, params)
+                self.assertEqual(context.exception.code, "live-editor-invalid-parameters")
+
+    def test_live_action_parameters_are_bounded_and_non_read_only(self) -> None:
+        self._write_descriptor()
+        opened = self.service.call_tool(
+            "ue_open_asset",
+            {"assetPath": "/Game/Test/BP_Test.BP_Test"},
+        )
+        self.assertFalse(opened["readOnly"])
+        self.assertTrue(opened["result"]["openAfter"])
+
+        actor = self.service.call_tool(
+            "ue_focus_actor",
+            {"actorGuid": "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"},
+        )
+        self.assertEqual(
+            actor["result"]["actorGuid"],
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        )
+        request = self.server.requests[-1]  # type: ignore[attr-defined]
+        self.assertEqual(request["params"]["actorGuid"], "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+
+        folder = self.service.call_tool(
+            "ue_validate_folder",
+            {
+                "packagePath": "/Game/Test/",
+                "recursive": False,
+                "maxAssets": 500,
+                "maxIssues": 200,
+            },
+        )
+        self.assertFalse(folder["readOnly"])
+        request = self.server.requests[-1]  # type: ignore[attr-defined]
+        self.assertEqual(request["params"]["packagePath"], "/Game/Test")
+        self.assertFalse(request["params"]["recursive"] )
+
+        invalid_cases = (
+            ("ue_focus_actor", {"actorGuid": "not-a-guid"}),
+            ("ue_validate_folder", {"packagePath": "/Game"}),
+            ("ue_validate_folder", {"packagePath": "/Game/Test.Asset"}),
+            ("ue_validate_folder", {"packagePath": "/Game/Test", "recursive": 1}),
+            ("ue_validate_folder", {"packagePath": "/Game/Test", "maxAssets": 501}),
+            ("ue_validate_folder", {"packagePath": "/Game/Test", "maxIssues": 201}),
+            ("ue_validate_asset", {"assetPath": "/Game/Test/A.A", "maxIssues": 0}),
         )
         for tool_name, params in invalid_cases:
             with self.subTest(tool=tool_name, params=params):

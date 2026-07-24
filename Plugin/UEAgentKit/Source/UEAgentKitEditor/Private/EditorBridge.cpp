@@ -51,7 +51,14 @@ namespace UEAgentKitEditorBridgePrivate
 		TEXT("editor.getOutputLog"),
 		TEXT("editor.getCompileErrors"),
 		TEXT("editor.inspectAssetLive"),
-		TEXT("editor.getBlueprintGraphSelection")
+		TEXT("editor.getBlueprintGraphSelection"),
+		TEXT("editor.openAsset"),
+		TEXT("editor.focusAsset"),
+		TEXT("editor.syncContentBrowser"),
+		TEXT("editor.focusActor"),
+		TEXT("editor.compileBlueprint"),
+		TEXT("editor.validateAsset"),
+		TEXT("editor.validateFolder")
 	};
 
 	FString NormalizeProjectPath()
@@ -118,6 +125,8 @@ namespace UEAgentKitEditorBridgePrivate
 		if (const AActor* Actor = Cast<AActor>(Object))
 		{
 			Item->SetStringField(TEXT("label"), Actor->GetActorLabel());
+			Item->SetStringField(TEXT("actorGuid"), Actor->GetActorGuid().ToString(EGuidFormats::DigitsWithHyphensLower));
+			Item->SetStringField(TEXT("actorInstanceGuid"), Actor->GetActorInstanceGuid().ToString(EGuidFormats::DigitsWithHyphensLower));
 			Item->SetStringField(TEXT("levelPath"), Actor->GetLevel() != nullptr ? Actor->GetLevel()->GetPathName() : FString());
 		}
 		if (const UActorComponent* Component = Cast<UActorComponent>(Object))
@@ -331,6 +340,31 @@ namespace UEAgentKitEditorBridgePrivate
 		}
 		const FSoftObjectPath ObjectPath(AssetPath);
 		return ObjectPath.IsValid() && ObjectPath.GetSubPathString().IsEmpty();
+	}
+
+	bool IsSafeGamePackagePath(const FString& PackagePath)
+	{
+		if (
+			PackagePath.IsEmpty() ||
+			PackagePath.Len() > 512 ||
+			!PackagePath.StartsWith(TEXT("/Game/"), ESearchCase::CaseSensitive) ||
+			PackagePath.Equals(TEXT("/Game"), ESearchCase::CaseSensitive) ||
+			PackagePath.Contains(TEXT(".")) ||
+			PackagePath.Contains(TEXT("//")) ||
+			PackagePath.Contains(TEXT("\\")) ||
+			PackagePath.Contains(TEXT(":")) ||
+			PackagePath.Contains(TEXT("..")))
+		{
+			return false;
+		}
+		for (const TCHAR Character : PackagePath)
+		{
+			if (Character < 32)
+			{
+				return false;
+			}
+		}
+		return true;
 	}
 
 	bool IsObjectSelected(UObject* Object)
@@ -683,6 +717,26 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 		Params = *ParamsField;
 	}
 
+	auto SendActionResult = [this, &Client, &RequestId](
+		const bool bSucceeded,
+		const TSharedPtr<FJsonObject>& Result,
+		const FString& ErrorCode,
+		const FString& ErrorMessage)
+	{
+		if (bSucceeded && Result.IsValid())
+		{
+			SendResult(Client.Socket, RequestId, Result.ToSharedRef());
+		}
+		else
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				ErrorCode.IsEmpty() ? TEXT("live-editor-action-failed") : ErrorCode,
+				ErrorMessage.IsEmpty() ? TEXT("The Editor action failed.") : ErrorMessage);
+		}
+	};
+
 	if (Method == TEXT("editor.status"))
 	{
 		SendResult(Client.Socket, RequestId, BuildStatusResult());
@@ -731,6 +785,86 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 	else if (Method == TEXT("editor.getBlueprintGraphSelection"))
 	{
 		SendResult(Client.Socket, RequestId, BuildBlueprintGraphSelectionResult());
+	}
+	else if (Method == TEXT("editor.openAsset")
+		|| Method == TEXT("editor.focusAsset")
+		|| Method == TEXT("editor.syncContentBrowser")
+		|| Method == TEXT("editor.compileBlueprint")
+		|| Method == TEXT("editor.validateAsset"))
+	{
+		FString AssetPath;
+		Params->TryGetStringField(TEXT("assetPath"), AssetPath);
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode;
+		FString ErrorMessage;
+		bool bSucceeded = false;
+		if (Method == TEXT("editor.openAsset"))
+		{
+			bSucceeded = TryOpenAssetResult(AssetPath, Result, ErrorCode, ErrorMessage);
+		}
+		else if (Method == TEXT("editor.focusAsset"))
+		{
+			bSucceeded = TryFocusAssetResult(AssetPath, Result, ErrorCode, ErrorMessage);
+		}
+		else if (Method == TEXT("editor.syncContentBrowser"))
+		{
+			bSucceeded = TrySyncContentBrowserResult(AssetPath, Result, ErrorCode, ErrorMessage);
+		}
+		else if (Method == TEXT("editor.compileBlueprint"))
+		{
+			bSucceeded = TryCompileBlueprintResult(AssetPath, Result, ErrorCode, ErrorMessage);
+		}
+		else
+		{
+			double MaxIssuesValue = 100.0;
+			Params->TryGetNumberField(TEXT("maxIssues"), MaxIssuesValue);
+			bSucceeded = TryValidateAssetResult(
+				AssetPath,
+				FMath::Clamp(static_cast<int32>(MaxIssuesValue), 1, 200),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+		SendActionResult(bSucceeded, Result, ErrorCode, ErrorMessage);
+	}
+	else if (Method == TEXT("editor.focusActor"))
+	{
+		FString ActorGuid;
+		Params->TryGetStringField(TEXT("actorGuid"), ActorGuid);
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode;
+		FString ErrorMessage;
+		SendActionResult(
+			TryFocusActorResult(ActorGuid, Result, ErrorCode, ErrorMessage),
+			Result,
+			ErrorCode,
+			ErrorMessage);
+	}
+	else if (Method == TEXT("editor.validateFolder"))
+	{
+		FString PackagePath;
+		Params->TryGetStringField(TEXT("packagePath"), PackagePath);
+		bool bRecursive = true;
+		Params->TryGetBoolField(TEXT("recursive"), bRecursive);
+		double MaxAssetsValue = 100.0;
+		double MaxIssuesValue = 100.0;
+		Params->TryGetNumberField(TEXT("maxAssets"), MaxAssetsValue);
+		Params->TryGetNumberField(TEXT("maxIssues"), MaxIssuesValue);
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode;
+		FString ErrorMessage;
+		SendActionResult(
+			TryValidateFolderResult(
+				PackagePath,
+				bRecursive,
+				FMath::Clamp(static_cast<int32>(MaxAssetsValue), 1, 500),
+				FMath::Clamp(static_cast<int32>(MaxIssuesValue), 1, 200),
+				Result,
+				ErrorCode,
+				ErrorMessage),
+			Result,
+			ErrorCode,
+			ErrorMessage);
 	}
 	else
 	{

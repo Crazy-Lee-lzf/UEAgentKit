@@ -23,7 +23,7 @@
 17. [`../spec/SCALAR_PATCH_REGRESSION.md`](../spec/SCALAR_PATCH_REGRESSION.md)：完整标量写入、独立重载和失败路径回归。
 18. [`../spec/MCP_SERVER.md`](../spec/MCP_SERVER.md)：MCP Tool、固定配置、Receipt、stdio 和完整安全边界。
 19. [`../spec/INDEX_FRESHNESS.md`](../spec/INDEX_FRESHNESS.md)：SQLite、Revision Export、磁盘 Package 三源新鲜度与安全重载。
-20. [`../spec/LIVE_EDITOR_BRIDGE.md`](../spec/LIVE_EDITOR_BRIDGE.md)：localhost IPC、固定工程认证握手和实时只读状态。
+20. [`../spec/LIVE_EDITOR_BRIDGE.md`](../spec/LIVE_EDITOR_BRIDGE.md)：localhost IPC、固定工程认证握手、实时读取与 Daily Actions。
 
 ## 当前版本
 
@@ -36,8 +36,9 @@ UE Agent Kit 0.5.1 支持 Unreal Engine 5.6，当前公开能力包括：
 - Backup Manifest、默认 Dry Run 的独立 rollback、回滚前安全副本、唯一回执和独立 UE 恢复验证。
 - Write Fixture Plan、Create/Reset、安全目标边界和独立 UE 重载验证。
 - 11 类标量完整 Dry Run/Commit/重载矩阵，以及 9 类失败路径零写入回归。
-- 默认 5 Tool 离线只读 MCP、15 Tool Live Editor 模式、18 Tool 固定项目工作流，以及 28 Tool 组合模式。
+- 默认 5 Tool 离线只读 MCP、22 Tool Live Editor 模式、18 Tool 固定项目工作流，以及 35 Tool 组合模式。
 - 0.5.3-prep 开发基础设施：统一 Tool Registry、拆分 MCP/Editor Bridge Handler、专项测试入口和安全 Worktree/Luna 子任务流程。
+- 0.5.3 首批 Daily Actions：资产打开/聚焦、Content Browser 同步、ActorGuid 聚焦、Blueprint 内存编译和官方 Data Validation；全部不保存 Package。
 
 只读分析路径不修改资产；Blueprint Patch、Asset Patch 与 MCP Commit 仅在明确授权后执行。
 

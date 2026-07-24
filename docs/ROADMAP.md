@@ -70,24 +70,19 @@ UE Agent Kit 的长期定位是面向 AI Agent 的 Unreal Engine 项目智能层
 
 开发准备已完成：
 
-- [x] Tool Registry 统一 Tool 顺序、模式、Annotation 与 Live Capability 映射，保持 5/15/18/28 契约不变。
-- [x] MCP Query、Live Read、Workflow 注册拆分；Editor Bridge Reader 按 Status、Diagnostic、Asset、Graph 拆分。
+- [x] Tool Registry 统一 Tool 顺序、模式、Annotation 与 Live Capability 映射；当前模式为 5/22/18/35。
+- [x] MCP Query、Live Read、Live Action、Workflow 注册拆分；Editor Bridge 按 Status、Diagnostic、Asset、Graph、Navigation、Validation 拆分。
 - [x] Registry/Query/Live/Workflow 专项测试入口，以及预览优先的 Navigation/Validation/Protocol Worktree 脚本。
 - [x] Sol 冻结公共契约、Luna 按文件所有权执行子任务的并行开发规范。
 
 首批低风险操作：
 
-```text
-ue_open_asset
-ue_focus_asset
-ue_sync_content_browser
-ue_focus_actor
-ue_compile_blueprint
-ue_validate_asset
-ue_validate_folder
-ue_run_automation_test
-ue_save_authorized_asset
-```
+- [x] `ue_open_asset`、`ue_focus_asset`、`ue_sync_content_browser` 和 `ue_focus_actor`：精确身份、PIE/SIE 拒绝、无保存。
+- [x] `ue_compile_blueprint`：内存编译、结构化状态与当前会话诊断，不保存 Package。
+- [x] `ue_validate_asset` 与 `ue_validate_folder`：官方 Data Validation、500 资产/200 问题硬上限。
+- [x] 真实 UE5.6 正负路径：Content Browser 零加载、资产打开/聚焦、ActorGuid 聚焦、编译和 25 资产文件夹验证；目标 Package SHA-256 不变。
+- [ ] `ue_run_automation_test`。
+- [ ] `ue_save_authorized_asset`，禁止无范围 `save_all`。
 
 所有写入或保存操作继续受 Policy、Revision、Dry Run、显式确认、备份和验证约束。禁止提供无范围限制的 `save_all`。
 
