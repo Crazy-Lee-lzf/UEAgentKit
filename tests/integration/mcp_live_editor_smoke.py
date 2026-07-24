@@ -14,6 +14,11 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 
 TOOL_ROOT = Path(__file__).resolve().parents[2]
 SRC_ROOT = TOOL_ROOT / "src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
+
+from ue_agent_kit.tool_registry import tool_names_for_mode  # noqa: E402
+SRC_ROOT = TOOL_ROOT / "src"
 PYTHON_TESTS = TOOL_ROOT / "tests" / "python"
 for search_path in (SRC_ROOT, PYTHON_TESTS):
     if str(search_path) not in sys.path:
@@ -29,26 +34,9 @@ from test_indexer_queries import (  # noqa: E402
 from ue_agent_kit.database import open_database  # noqa: E402
 from ue_agent_kit.indexer import build_index  # noqa: E402
 
-LIVE_TOOLS = [
-    "ue_editor_status",
-    "ue_get_selection",
-    "ue_get_open_assets",
-    "ue_get_dirty_assets",
-    "ue_get_current_level",
-    "ue_get_pie_state",
-    "ue_get_output_log",
-    "ue_get_compile_errors",
-    "ue_inspect_asset_live",
-    "ue_get_blueprint_graph_selection",
-]
-EXPECTED_TOOLS = [
-    "ue_get_capabilities",
-    "ue_get_project_status",
-    "ue_search",
-    "ue_get_asset",
-    "ue_find_references",
-    *LIVE_TOOLS,
-]
+EXPECTED_TOOLS = tool_names_for_mode(live_editor_enabled=True)
+LIVE_TOOLS = EXPECTED_TOOLS[5:]
+
 
 
 def _sha256(path: Path) -> str:

@@ -63,6 +63,13 @@ Remaining 0.5.2 targets:
 
 ### 0.5.3: daily actions and validation
 
+Development preparation is complete:
+
+- [x] One Tool Registry owns order, mode membership, annotations, and Live capability mapping while preserving the 5/15/18/28 contracts.
+- [x] MCP Query, Live Read, and Workflow registration are split; Editor Bridge readers are separated into Status, Diagnostic, Asset, and Graph handlers.
+- [x] Targeted Registry/Query/Live/Workflow tests and preview-first Navigation/Validation/Protocol worktree creation are available.
+- [x] Parallel development assigns frozen contracts and shared integration to Sol and bounded file-owned subtasks to Luna.
+
 Initial low-risk actions:
 
 ```text

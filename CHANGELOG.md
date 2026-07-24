@@ -4,6 +4,10 @@ All notable changes to UE Agent Kit are documented here.
 
 ## Unreleased
 
+- Centralized MCP Tool order, mode membership, annotations, and Live Bridge method names in one typed Tool Registry while preserving the existing 5/15/18/28 Tool contracts.
+- Split MCP Query, Live Read, and Workflow registration into independent modules and split Editor Bridge readers into Status, Diagnostic, Asset, and Graph handler translation units.
+- Added targeted Registry/Query/Live/Workflow test entry points, safe preview-first Git Worktree creation, and a bounded Sol/Luna parallel-development contract.
+
 - Added bounded Live Editor Output Log reads with a 4,096-entry ring buffer, sequence cursors, category/severity/text/UTC/PIE filters, and explicit dropped-entry reporting.
 - Added compile diagnostics that combine current-session compiler-related log entries with loaded Blueprint status while explicitly reporting incomplete history.
 - Added exact `/Game` live asset inspection using Asset Registry plus already-loaded memory state without loading or modifying the asset.

@@ -14,15 +14,16 @@
 8. [`BUILD_AND_RUN.md`](BUILD_AND_RUN.md)：环境要求、插件构建、通用资产目录、Blueprint 导出和 SQLite 查询。
 9. [`AI_USAGE.md`](AI_USAGE.md)：AI 如何使用资产目录、Blueprint 语义和结构化引用。
 10. [`ROADMAP.md`](ROADMAP.md)：版本目标、完成状态和后续边界。
-11. [`REFERENCE_POLICY.md`](REFERENCE_POLICY.md)：第三方参考、独立实现和依赖分发规则。
-12. [`../spec/BPCTX_FORMAT.md`](../spec/BPCTX_FORMAT.md)：BPCTX/1 文本格式规范。
-13. [`../spec/PATCH_SCHEMA.md`](../spec/PATCH_SCHEMA.md)：Patch Schema、Policy、Revision 和校验、Dry Run、备份和显式 Commit 安全边界。
-14. [`../spec/BACKUP_AND_ROLLBACK.md`](../spec/BACKUP_AND_ROLLBACK.md)：Backup Manifest、独立 rollback、审计回执和恢复后验证。
-15. [`../spec/WRITE_FIXTURE_PLAN.md`](../spec/WRITE_FIXTURE_PLAN.md)：声明式写入测试资产生成、重置和独立验证。
-16. [`../spec/SCALAR_PATCH_REGRESSION.md`](../spec/SCALAR_PATCH_REGRESSION.md)：完整标量写入、独立重载和失败路径回归。
-17. [`../spec/MCP_SERVER.md`](../spec/MCP_SERVER.md)：MCP Tool、固定配置、Receipt、stdio 和完整安全边界。
-18. [`../spec/INDEX_FRESHNESS.md`](../spec/INDEX_FRESHNESS.md)：SQLite、Revision Export、磁盘 Package 三源新鲜度与安全重载。
-19. [`../spec/LIVE_EDITOR_BRIDGE.md`](../spec/LIVE_EDITOR_BRIDGE.md)：localhost IPC、固定工程认证握手和实时只读状态。
+11. [`PARALLEL_AGENT_DEVELOPMENT.md`](PARALLEL_AGENT_DEVELOPMENT.md)：Sol/Luna 分工、Worktree、文件所有权和分层测试规则。
+12. [`REFERENCE_POLICY.md`](REFERENCE_POLICY.md)：第三方参考、独立实现和依赖分发规则。
+13. [`../spec/BPCTX_FORMAT.md`](../spec/BPCTX_FORMAT.md)：BPCTX/1 文本格式规范。
+14. [`../spec/PATCH_SCHEMA.md`](../spec/PATCH_SCHEMA.md)：Patch Schema、Policy、Revision 和校验、Dry Run、备份和显式 Commit 安全边界。
+15. [`../spec/BACKUP_AND_ROLLBACK.md`](../spec/BACKUP_AND_ROLLBACK.md)：Backup Manifest、独立 rollback、审计回执和恢复后验证。
+16. [`../spec/WRITE_FIXTURE_PLAN.md`](../spec/WRITE_FIXTURE_PLAN.md)：声明式写入测试资产生成、重置和独立验证。
+17. [`../spec/SCALAR_PATCH_REGRESSION.md`](../spec/SCALAR_PATCH_REGRESSION.md)：完整标量写入、独立重载和失败路径回归。
+18. [`../spec/MCP_SERVER.md`](../spec/MCP_SERVER.md)：MCP Tool、固定配置、Receipt、stdio 和完整安全边界。
+19. [`../spec/INDEX_FRESHNESS.md`](../spec/INDEX_FRESHNESS.md)：SQLite、Revision Export、磁盘 Package 三源新鲜度与安全重载。
+20. [`../spec/LIVE_EDITOR_BRIDGE.md`](../spec/LIVE_EDITOR_BRIDGE.md)：localhost IPC、固定工程认证握手和实时只读状态。
 
 ## 当前版本
 
@@ -35,8 +36,8 @@ UE Agent Kit 0.5.1 支持 Unreal Engine 5.6，当前公开能力包括：
 - Backup Manifest、默认 Dry Run 的独立 rollback、回滚前安全副本、唯一回执和独立 UE 恢复验证。
 - Write Fixture Plan、Create/Reset、安全目标边界和独立 UE 重载验证。
 - 11 类标量完整 Dry Run/Commit/重载矩阵，以及 9 类失败路径零写入回归。
-- 默认五 Tool 只读 MCP，以及固定项目、六个高层安全写入入口、Receipt 门禁、显式确认和独立验证的十六 Tool 完整 MCP 工作流。
-- 0.5.2 开发中的受限 Live Editor Bridge：固定工程 localhost 会话和六个实时只读 Tool；可与离线或写入模式组合。
+- 默认 5 Tool 离线只读 MCP、15 Tool Live Editor 模式、18 Tool 固定项目工作流，以及 28 Tool 组合模式。
+- 0.5.3-prep 开发基础设施：统一 Tool Registry、拆分 MCP/Editor Bridge Handler、专项测试入口和安全 Worktree/Luna 子任务流程。
 
 只读分析路径不修改资产；Blueprint Patch、Asset Patch 与 MCP Commit 仅在明确授权后执行。
 

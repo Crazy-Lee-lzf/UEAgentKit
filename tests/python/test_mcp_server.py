@@ -37,6 +37,10 @@ from ue_agent_kit.database import open_database  # noqa: E402
 from ue_agent_kit.editor_bridge import LiveEditorError  # noqa: E402
 from ue_agent_kit.indexer import build_index  # noqa: E402
 from ue_agent_kit.mcp_server import create_mcp_server, main as mcp_main  # noqa: E402
+from ue_agent_kit.tool_registry import (  # noqa: E402
+    TOOL_DEFINITIONS_BY_NAME,
+    tool_names_for_mode,
+)
 
 
 MCP_AVAILABLE = importlib.util.find_spec("mcp") is not None
@@ -472,23 +476,7 @@ class McpServerTests(unittest.TestCase):
         live_service = FakeLiveEditorService()
         server = create_mcp_server(self.database_path, live_editor_service=live_service)
         tools = asyncio.run(server.list_tools())
-        expected_names = [
-            "ue_get_capabilities",
-            "ue_get_project_status",
-            "ue_search",
-            "ue_get_asset",
-            "ue_find_references",
-            "ue_editor_status",
-            "ue_get_selection",
-            "ue_get_open_assets",
-            "ue_get_dirty_assets",
-            "ue_get_current_level",
-            "ue_get_pie_state",
-            "ue_get_output_log",
-            "ue_get_compile_errors",
-            "ue_inspect_asset_live",
-            "ue_get_blueprint_graph_selection",
-        ]
+        expected_names = tool_names_for_mode(live_editor_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
         forbidden = {
             "address",
@@ -613,38 +601,14 @@ class McpServerTests(unittest.TestCase):
             live_editor_service=live_service,
         )
         tools = asyncio.run(server.list_tools())
-        expected_names = [
-            "ue_get_capabilities",
-            "ue_get_project_status",
-            "ue_search",
-            "ue_get_asset",
-            "ue_find_references",
-            "ue_editor_status",
-            "ue_get_selection",
-            "ue_get_open_assets",
-            "ue_get_dirty_assets",
-            "ue_get_current_level",
-            "ue_get_pie_state",
-            "ue_get_output_log",
-            "ue_get_compile_errors",
-            "ue_inspect_asset_live",
-            "ue_get_blueprint_graph_selection",
-            "ue_set_blueprint_default",
-            "ue_set_component_property",
-            "ue_set_pin_default",
-            "ue_set_asset_property",
-            "ue_set_material_parameter",
-            "ue_set_datatable_cell",
-            "ue_plan_patch",
-            "ue_dry_run_patch",
-            "ue_apply_patch",
-            "ue_verify_asset",
-            "ue_get_asset_state",
-            "ue_refresh_asset_index",
-            "ue_rollback_patch",
-        ]
+        expected_names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
         self.assertEqual(len(tools), 28)
+        for tool in tools:
+            definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
+            self.assertEqual(bool(tool.annotations.readOnlyHint), definition.read_only, tool.name)
+            self.assertEqual(bool(tool.annotations.destructiveHint), definition.destructive, tool.name)
+            self.assertEqual(bool(tool.annotations.idempotentHint), definition.idempotent, tool.name)
 
         mismatched_live = FakeLiveEditorService()
         mismatched_live.config = SimpleNamespace(
@@ -664,26 +628,7 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         self.assertEqual(
             [tool.name for tool in tools],
-            [
-                "ue_get_capabilities",
-                "ue_get_project_status",
-                "ue_search",
-                "ue_get_asset",
-                "ue_find_references",
-                "ue_set_blueprint_default",
-                "ue_set_component_property",
-                "ue_set_pin_default",
-                "ue_set_asset_property",
-                "ue_set_material_parameter",
-                "ue_set_datatable_cell",
-                "ue_plan_patch",
-                "ue_dry_run_patch",
-                "ue_apply_patch",
-                "ue_verify_asset",
-                "ue_get_asset_state",
-                "ue_refresh_asset_index",
-                "ue_rollback_patch",
-            ],
+            tool_names_for_mode(workflow_enabled=True),
         )
         forbidden = {"database", "project", "project_path", "engine_root", "policy", "revision_export", "work_root", "backup_root", "command"}
         for tool in tools:

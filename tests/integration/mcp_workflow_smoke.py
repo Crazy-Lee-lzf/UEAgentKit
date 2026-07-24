@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import sys
 from pathlib import Path
 
 from mcp import ClientSession
@@ -11,27 +12,13 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 
 
 TOOL_ROOT = Path(__file__).resolve().parents[2]
+SRC_ROOT = TOOL_ROOT / "src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
+
+from ue_agent_kit.tool_registry import tool_names_for_mode  # noqa: E402
 ASSET_PATH = "/Game/UEAgentKitWriteTests/ScalarRegression/DA_ScalarPatchTarget.DA_ScalarPatchTarget"
-EXPECTED_TOOLS = [
-    "ue_get_capabilities",
-    "ue_get_project_status",
-    "ue_search",
-    "ue_get_asset",
-    "ue_find_references",
-    "ue_set_blueprint_default",
-    "ue_set_component_property",
-    "ue_set_pin_default",
-    "ue_set_asset_property",
-    "ue_set_material_parameter",
-    "ue_set_datatable_cell",
-    "ue_plan_patch",
-    "ue_dry_run_patch",
-    "ue_apply_patch",
-    "ue_verify_asset",
-    "ue_get_asset_state",
-    "ue_refresh_asset_index",
-    "ue_rollback_patch",
-]
+EXPECTED_TOOLS = tool_names_for_mode(workflow_enabled=True)
 
 
 def sha256(path: Path) -> str:

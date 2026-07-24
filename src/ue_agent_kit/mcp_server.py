@@ -6,7 +6,7 @@ import sqlite3
 import sys
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Literal, Sequence
+from typing import Any, Sequence
 
 from . import __version__
 from .agent_api import (
@@ -19,24 +19,30 @@ from .agent_api import (
     IndexSnapshotError,
 )
 from .agent_workflow import (
-    MATERIAL_PARAMETER_OPERATIONS,
     PatchWorkflowConfig,
     PatchWorkflowService,
     WorkflowError,
 )
 from .config import DEFAULT_DATABASE
 from .editor_bridge import (
-    LIVE_EDITOR_METHODS,
     LiveEditorBridgeConfig,
     LiveEditorBridgeService,
     LiveEditorError,
 )
+from .mcp_live_tools import register_live_read_tools
+from .mcp_query_tools import register_query_tools
+from .mcp_workflow_tools import register_workflow_tools
 from .patches import get_operation_registry
 from .query_protocol import (
     DEFAULT_OUTPUT_TOKEN_BUDGET,
     MAX_OUTPUT_TOKEN_BUDGET,
     MIN_OUTPUT_TOKEN_BUDGET,
     ContinuationTokenError,
+)
+from .tool_registry import (
+    HIGH_LEVEL_WRITE_TOOL_NAMES,
+    LIVE_EDITOR_TOOL_NAMES,
+    tool_descriptors_for_mode,
 )
 from .snapshot_lifecycle import (
     FrozenSessionSnapshot,
@@ -58,28 +64,6 @@ else:
 
 MCP_SERVER_NAME = "UE Agent Kit"
 TOOL_ROOT = Path(__file__).resolve().parents[2]
-READ_TOOL_NAMES = ["ue_get_capabilities", "ue_get_project_status", "ue_search", "ue_get_asset", "ue_find_references"]
-LIVE_EDITOR_TOOL_NAMES = list(LIVE_EDITOR_METHODS)
-HIGH_LEVEL_WRITE_TOOL_NAMES = [
-    "ue_set_blueprint_default",
-    "ue_set_component_property",
-    "ue_set_pin_default",
-    "ue_set_asset_property",
-    "ue_set_material_parameter",
-    "ue_set_datatable_cell",
-]
-LOW_LEVEL_WRITE_TOOL_NAMES = ["ue_plan_patch", "ue_dry_run_patch", "ue_apply_patch", "ue_verify_asset", "ue_rollback_patch"]
-WORKFLOW_READ_TOOL_NAMES = ["ue_get_asset_state"]
-SNAPSHOT_TOOL_NAMES = ["ue_refresh_asset_index"]
-WORKFLOW_TOOL_NAMES = (
-    HIGH_LEVEL_WRITE_TOOL_NAMES
-    + LOW_LEVEL_WRITE_TOOL_NAMES[:-1]
-    + WORKFLOW_READ_TOOL_NAMES
-    + SNAPSHOT_TOOL_NAMES
-    + LOW_LEVEL_WRITE_TOOL_NAMES[-1:]
-)
-
-
 def _server_instructions(
     write_tools_enabled: bool,
     commit_enabled: bool,
@@ -122,55 +106,6 @@ def _server_mode(write_tools_enabled: bool, commit_enabled: bool) -> str:
     return "fixed-project-commit" if commit_enabled else "fixed-project-dry-run"
 
 
-def _tool_descriptors(
-    write_tools_enabled: bool,
-    live_editor_enabled: bool,
-) -> list[dict[str, Any]]:
-    traits = {
-        "ue_get_capabilities": (True, False),
-        "ue_get_project_status": (True, False),
-        "ue_search": (True, False),
-        "ue_get_asset": (True, False),
-        "ue_find_references": (True, False),
-        "ue_editor_status": (True, False),
-        "ue_get_selection": (True, False),
-        "ue_get_open_assets": (True, False),
-        "ue_get_dirty_assets": (True, False),
-        "ue_get_current_level": (True, False),
-        "ue_get_pie_state": (True, False),
-        "ue_get_output_log": (True, False),
-        "ue_get_compile_errors": (True, False),
-        "ue_inspect_asset_live": (True, False),
-        "ue_get_blueprint_graph_selection": (True, False),
-        "ue_set_blueprint_default": (False, False),
-        "ue_set_component_property": (False, False),
-        "ue_set_pin_default": (False, False),
-        "ue_set_asset_property": (False, False),
-        "ue_set_material_parameter": (False, False),
-        "ue_set_datatable_cell": (False, False),
-        "ue_plan_patch": (False, False),
-        "ue_dry_run_patch": (False, False),
-        "ue_apply_patch": (False, True),
-        "ue_verify_asset": (False, False),
-        "ue_rollback_patch": (False, True),
-        "ue_get_asset_state": (True, False),
-        "ue_refresh_asset_index": (False, False),
-    }
-    names = list(READ_TOOL_NAMES)
-    if live_editor_enabled:
-        names += LIVE_EDITOR_TOOL_NAMES
-    if write_tools_enabled:
-        names += WORKFLOW_TOOL_NAMES
-    return [
-        {
-            "name": name,
-            "readOnly": traits[name][0],
-            "destructive": traits[name][1],
-        }
-        for name in names
-    ]
-
-
 def _read_engine_status(workflow_service: PatchWorkflowService | None) -> dict[str, Any]:
     if workflow_service is None:
         return {"configured": False, "state": "unavailable"}
@@ -210,7 +145,10 @@ def _capabilities_response(
             "transport": "stdio",
             "mode": _server_mode(write_tools_enabled, commit_enabled),
         },
-        "tools": _tool_descriptors(write_tools_enabled, live_editor_enabled),
+        "tools": tool_descriptors_for_mode(
+            live_editor_enabled=live_editor_enabled,
+            workflow_enabled=write_tools_enabled,
+        ),
         "operations": {
             "available": write_tools_enabled,
             "items": get_operation_registry() if write_tools_enabled else [],
@@ -567,511 +505,31 @@ def create_mcp_server(
         openWorldHint=False,
     )
 
-    @server.tool(annotations=read_annotations)
-    def ue_get_capabilities() -> dict[str, Any]:
-        """Return the active MCP mode, Tool contract, operation registry, limits, and safety guarantees."""
-        return _capabilities_response(workflow_service, live_editor_service)
-
-    @server.tool(annotations=read_annotations)
-    def ue_get_project_status() -> dict[str, Any]:
-        """Return the fixed project, Engine, immutable index, workflow, freshness, and live-state summary."""
-        try:
-            return _project_status_response(index_service, workflow_service, live_editor_service)
-        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-            return _error_response("ue_get_project_status", exc, read_only=True)
-
-    @server.tool(annotations=read_annotations)
-    def ue_search(
-        query: str = "",
-        scope: Literal["assets", "symbols"] = "assets",
-        asset_class: str = "",
-        kind: str = "",
-        asset_path: str = "",
-        path_prefix: str = "",
-        limit: int = 20,
-        offset: int = 0,
-        include_details: bool = False,
-        continuation_token: str = "",
-        max_output_tokens: int = DEFAULT_OUTPUT_TOKEN_BUDGET,
-    ) -> dict[str, Any]:
-        """Search assets or symbols with filters, offset compatibility, opaque continuation, and output budgeting."""
-        try:
-            return index_service.search(
-                query,
-                scope=scope,
-                asset_class=asset_class,
-                kind=kind,
-                asset_path=asset_path,
-                path_prefix=path_prefix,
-                limit=limit,
-                offset=offset,
-                include_details=include_details,
-                continuation_token=continuation_token,
-                max_output_tokens=max_output_tokens,
-            )
-        except (FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-            return _error_response("ue_search", exc, read_only=True)
-
-    @server.tool(annotations=read_annotations)
-    def ue_get_asset(
-        asset_path: str = "",
-        sections: list[str] | None = None,
-        symbol_limit: int = 100,
-        reference_limit: int = 200,
-        graph_limit: int = 100,
-        node_limit: int = 100,
-        graph_guid: str = "",
-        node_guid: str = "",
-        include_details: bool = False,
-        continuation_token: str = "",
-        max_output_tokens: int = DEFAULT_OUTPUT_TOKEN_BUDGET,
-    ) -> dict[str, Any]:
-        """Get selected asset sections with independent section pagination and output budgeting."""
-        try:
-            return index_service.get_asset(
-                asset_path,
-                sections=sections,
-                symbol_limit=symbol_limit,
-                reference_limit=reference_limit,
-                graph_limit=graph_limit,
-                node_limit=node_limit,
-                graph_guid=graph_guid,
-                node_guid=node_guid,
-                include_details=include_details,
-                continuation_token=continuation_token,
-                max_output_tokens=max_output_tokens,
-            )
-        except (FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-            return _error_response("ue_get_asset", exc, read_only=True)
-
-    @server.tool(annotations=read_annotations)
-    def ue_find_references(
-        query: str = "",
-        kind: str = "",
-        asset_path: str = "",
-        source_symbol_id: str = "",
-        target_symbol_id: str = "",
-        target_asset_path: str = "",
-        direction: Literal["outgoing", "incoming", "both"] = "outgoing",
-        depth: int = 1,
-        project_only: bool = False,
-        limit: int = 50,
-        offset: int = 0,
-        include_details: bool = False,
-        continuation_token: str = "",
-        max_output_tokens: int = DEFAULT_OUTPUT_TOKEN_BUDGET,
-    ) -> dict[str, Any]:
-        """Find direct or bounded transitive reference edges with explicit direction and pagination."""
-        try:
-            return index_service.find_references(
-                query=query,
-                kind=kind,
-                asset_path=asset_path,
-                source_symbol_id=source_symbol_id,
-                target_symbol_id=target_symbol_id,
-                target_asset_path=target_asset_path,
-                direction=direction,
-                depth=depth,
-                project_only=project_only,
-                limit=limit,
-                offset=offset,
-                include_details=include_details,
-                continuation_token=continuation_token,
-                max_output_tokens=max_output_tokens,
-            )
-        except (FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-            return _error_response("ue_find_references", exc, read_only=True)
-
+    register_query_tools(
+        server=server,
+        index_service=index_service,
+        workflow_service=workflow_service,
+        live_editor_service=live_editor_service,
+        read_annotations=read_annotations,
+        error_response=_error_response,
+        capabilities_response=_capabilities_response,
+        project_status_response=_project_status_response,
+    )
     if live_editor_service is not None:
-        @server.tool(annotations=read_annotations)
-        def ue_editor_status() -> dict[str, Any]:
-            """Return fixed-project Live Editor availability, version, session, PIE, level, and Dirty summary."""
-            return {
-                "schemaVersion": "1.0",
-                "tool": "ue_editor_status",
-                "ok": True,
-                "readOnly": True,
-                "source": "live-editor-memory",
-                "result": live_editor_service.status(),
-            }
-
-        @server.tool(annotations=read_annotations)
-        def ue_get_selection() -> dict[str, Any]:
-            """Return the bounded Actor, Component, Asset, and Object selection from the fixed Editor session."""
-            try:
-                return live_editor_service.call_tool("ue_get_selection")
-            except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
-                return _error_response("ue_get_selection", exc, read_only=True)
-
-        @server.tool(annotations=read_annotations)
-        def ue_get_open_assets() -> dict[str, Any]:
-            """Return assets currently opened in registered asset editors in the fixed Editor session."""
-            try:
-                return live_editor_service.call_tool("ue_get_open_assets")
-            except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
-                return _error_response("ue_get_open_assets", exc, read_only=True)
-
-        @server.tool(annotations=read_annotations)
-        def ue_get_dirty_assets() -> dict[str, Any]:
-            """Return bounded Dirty /Game packages and their Asset Registry paths from Editor memory."""
-            try:
-                return live_editor_service.call_tool("ue_get_dirty_assets")
-            except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
-                return _error_response("ue_get_dirty_assets", exc, read_only=True)
-
-        @server.tool(annotations=read_annotations)
-        def ue_get_current_level() -> dict[str, Any]:
-            """Return the fixed Editor world, persistent/current level, World Partition, and Dirty state."""
-            try:
-                return live_editor_service.call_tool("ue_get_current_level")
-            except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
-                return _error_response("ue_get_current_level", exc, read_only=True)
-
-        @server.tool(annotations=read_annotations)
-        def ue_get_pie_state() -> dict[str, Any]:
-            """Return whether the fixed Editor is stopped, playing, or simulating in editor."""
-            try:
-                return live_editor_service.call_tool("ue_get_pie_state")
-            except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
-                return _error_response("ue_get_pie_state", exc, read_only=True)
-
-        @server.tool(annotations=read_annotations)
-        def ue_get_output_log(
-            category: str = "",
-            minimum_verbosity: Literal[
-                "fatal",
-                "error",
-                "warning",
-                "display",
-                "log",
-                "verbose",
-                "veryverbose",
-            ] = "log",
-            keyword: str = "",
-            since_sequence: int = 0,
-            since_utc: str = "",
-            until_utc: str = "",
-            pie_session_id: int = -1,
-            limit: int = 100,
-        ) -> dict[str, Any]:
-            """Read bounded current-session Output Log entries using category, severity, text, UTC, PIE, and sequence filters."""
-            try:
-                return live_editor_service.call_tool(
-                    "ue_get_output_log",
-                    {
-                        "category": category,
-                        "minimumVerbosity": minimum_verbosity,
-                        "keyword": keyword,
-                        "sinceSequence": since_sequence,
-                        "sinceUtc": since_utc,
-                        "untilUtc": until_utc,
-                        "pieSessionId": pie_session_id,
-                        "limit": limit,
-                    },
-                )
-            except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
-                return _error_response("ue_get_output_log", exc, read_only=True)
-
-        @server.tool(annotations=read_annotations)
-        def ue_get_compile_errors(
-            asset_path: str = "",
-            since_sequence: int = 0,
-            pie_session_id: int = -1,
-            limit: int = 100,
-        ) -> dict[str, Any]:
-            """Return captured compiler-related warnings/errors plus current loaded Blueprint compile status."""
-            try:
-                return live_editor_service.call_tool(
-                    "ue_get_compile_errors",
-                    {
-                        "assetPath": asset_path,
-                        "sinceSequence": since_sequence,
-                        "pieSessionId": pie_session_id,
-                        "limit": limit,
-                    },
-                )
-            except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
-                return _error_response("ue_get_compile_errors", exc, read_only=True)
-
-        @server.tool(annotations=read_annotations)
-        def ue_inspect_asset_live(asset_path: str) -> dict[str, Any]:
-            """Inspect one exact /Game asset in Asset Registry and current Editor memory without loading or modifying it."""
-            try:
-                return live_editor_service.call_tool(
-                    "ue_inspect_asset_live",
-                    {"assetPath": asset_path},
-                )
-            except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
-                return _error_response("ue_inspect_asset_live", exc, read_only=True)
-
-        @server.tool(annotations=read_annotations)
-        def ue_get_blueprint_graph_selection() -> dict[str, Any]:
-            """Return the focused Graph and bounded selected Nodes from the most recently active ordinary Blueprint Editor."""
-            try:
-                return live_editor_service.call_tool("ue_get_blueprint_graph_selection")
-            except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
-                return _error_response("ue_get_blueprint_graph_selection", exc, read_only=True)
-
+        register_live_read_tools(
+            server=server,
+            live_editor_service=live_editor_service,
+            read_annotations=read_annotations,
+            error_response=_error_response,
+        )
     if workflow_service is not None:
-        planning_annotations = ToolAnnotations(
-            readOnlyHint=False,
-            destructiveHint=False,
-            idempotentHint=False,
-            openWorldHint=False,
+        register_workflow_tools(
+            server=server,
+            workflow_service=workflow_service,
+            read_annotations=read_annotations,
+            tool_annotations_type=ToolAnnotations,
+            error_response=_error_response,
         )
-        dry_run_annotations = ToolAnnotations(
-            readOnlyHint=False,
-            destructiveHint=False,
-            idempotentHint=False,
-            openWorldHint=False,
-        )
-        destructive_annotations = ToolAnnotations(
-            readOnlyHint=False,
-            destructiveHint=True,
-            idempotentHint=False,
-            openWorldHint=False,
-        )
-
-        def _run_high_level_change(
-            *,
-            tool_name: str,
-            mode: Literal["Plan", "DryRun"],
-            asset_path: str,
-            operation: str,
-            target: dict[str, Any],
-            value: Any,
-            description: str,
-        ) -> dict[str, Any]:
-            return workflow_service.prepare_high_level_change(
-                tool_name=tool_name,
-                mode=mode,
-                asset_path=asset_path,
-                operation=operation,
-                target=target,
-                value=value,
-                description=description,
-            )
-
-        @server.tool(annotations=planning_annotations)
-        def ue_set_blueprint_default(
-            asset_path: str,
-            variable_name: str,
-            value: Any,
-            mode: Literal["Plan", "DryRun"] = "Plan",
-            description: str = "",
-        ) -> dict[str, Any]:
-            """Plan or Dry Run one policy-authorized Blueprint variable default change."""
-            try:
-                return _run_high_level_change(
-                    tool_name="ue_set_blueprint_default",
-                    mode=mode,
-                    asset_path=asset_path,
-                    operation="setVariableDefault",
-                    target={"variableName": variable_name},
-                    value=value,
-                    description=description,
-                )
-            except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-                return _error_response("ue_set_blueprint_default", exc, read_only=False)
-
-        @server.tool(annotations=planning_annotations)
-        def ue_set_component_property(
-            asset_path: str,
-            component_name: str,
-            property_path: str,
-            value: Any,
-            mode: Literal["Plan", "DryRun"] = "Plan",
-            description: str = "",
-        ) -> dict[str, Any]:
-            """Plan or Dry Run one policy-authorized Blueprint component property change."""
-            try:
-                return _run_high_level_change(
-                    tool_name="ue_set_component_property",
-                    mode=mode,
-                    asset_path=asset_path,
-                    operation="setComponentProperty",
-                    target={"componentName": component_name, "propertyPath": property_path},
-                    value=value,
-                    description=description,
-                )
-            except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-                return _error_response("ue_set_component_property", exc, read_only=False)
-
-        @server.tool(annotations=planning_annotations)
-        def ue_set_pin_default(
-            asset_path: str,
-            graph_guid: str,
-            node_guid: str,
-            pin_name: str,
-            value: Any,
-            mode: Literal["Plan", "DryRun"] = "Plan",
-            description: str = "",
-        ) -> dict[str, Any]:
-            """Plan or Dry Run one policy-authorized Blueprint pin default change."""
-            try:
-                return _run_high_level_change(
-                    tool_name="ue_set_pin_default",
-                    mode=mode,
-                    asset_path=asset_path,
-                    operation="setPinDefault",
-                    target={"graphGuid": graph_guid, "nodeGuid": node_guid, "pinName": pin_name},
-                    value=value,
-                    description=description,
-                )
-            except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-                return _error_response("ue_set_pin_default", exc, read_only=False)
-
-        @server.tool(annotations=planning_annotations)
-        def ue_set_asset_property(
-            asset_path: str,
-            property_path: str,
-            value: Any,
-            mode: Literal["Plan", "DryRun"] = "Plan",
-            description: str = "",
-        ) -> dict[str, Any]:
-            """Plan or Dry Run one policy-authorized non-Blueprint asset property change."""
-            try:
-                return _run_high_level_change(
-                    tool_name="ue_set_asset_property",
-                    mode=mode,
-                    asset_path=asset_path,
-                    operation="setAssetProperty",
-                    target={"propertyPath": property_path},
-                    value=value,
-                    description=description,
-                )
-            except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-                return _error_response("ue_set_asset_property", exc, read_only=False)
-
-        @server.tool(annotations=planning_annotations)
-        def ue_set_material_parameter(
-            asset_path: str,
-            parameter_name: str,
-            parameter_type: Literal["Scalar", "Vector", "Texture", "StaticSwitch"],
-            value: Any,
-            mode: Literal["Plan", "DryRun"] = "Plan",
-            description: str = "",
-        ) -> dict[str, Any]:
-            """Plan or Dry Run one authorized Material Instance parameter change."""
-            try:
-                operation = MATERIAL_PARAMETER_OPERATIONS.get(parameter_type)
-                if operation is None:
-                    raise ValueError("parameter_type must be Scalar, Vector, Texture, or StaticSwitch")
-                return _run_high_level_change(
-                    tool_name="ue_set_material_parameter",
-                    mode=mode,
-                    asset_path=asset_path,
-                    operation=operation,
-                    target={"parameterName": parameter_name},
-                    value=value,
-                    description=description,
-                )
-            except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-                return _error_response("ue_set_material_parameter", exc, read_only=False)
-
-        @server.tool(annotations=planning_annotations)
-        def ue_set_datatable_cell(
-            asset_path: str,
-            row_name: str,
-            field_name: str,
-            value: Any,
-            mode: Literal["Plan", "DryRun"] = "Plan",
-            description: str = "",
-        ) -> dict[str, Any]:
-            """Plan or Dry Run one authorized existing DataTable row field change."""
-            try:
-                return _run_high_level_change(
-                    tool_name="ue_set_datatable_cell",
-                    mode=mode,
-                    asset_path=asset_path,
-                    operation="setDataTableCell",
-                    target={"rowName": row_name, "fieldName": field_name},
-                    value=value,
-                    description=description,
-                )
-            except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-                return _error_response("ue_set_datatable_cell", exc, read_only=False)
-
-        @server.tool(annotations=planning_annotations)
-        def ue_plan_patch(
-            asset_path: str,
-            operation: str,
-            target: dict[str, Any] | None = None,
-            value: Any = None,
-            description: str = "",
-        ) -> dict[str, Any]:
-            """Create and validate one policy-gated single-asset, single-operation patch plan."""
-            try:
-                return workflow_service.plan_patch(
-                    asset_path=asset_path,
-                    operation=operation,
-                    target=target,
-                    value=value,
-                    description=description,
-                )
-            except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-                return _error_response("ue_plan_patch", exc, read_only=False)
-
-        @server.tool(annotations=dry_run_annotations)
-        def ue_dry_run_patch(plan_id: str) -> dict[str, Any]:
-            """Run the stored plan through Unreal, restore memory state, and require unchanged disk Revision."""
-            try:
-                return workflow_service.dry_run_patch(plan_id)
-            except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-                return _error_response("ue_dry_run_patch", exc, read_only=False)
-
-        @server.tool(annotations=destructive_annotations)
-        def ue_apply_patch(plan_id: str, dry_run_receipt: str, confirmation: str) -> dict[str, Any]:
-            """Explicitly commit a plan using a fresh one-time Dry Run receipt and exact confirmation phrase."""
-            try:
-                return workflow_service.apply_patch(plan_id, dry_run_receipt, confirmation)
-            except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-                return _error_response("ue_apply_patch", exc, read_only=False)
-
-        @server.tool(annotations=planning_annotations)
-        def ue_verify_asset(apply_receipt: str) -> dict[str, Any]:
-            """Independently reload the committed asset in Unreal and verify its saved SHA-256 Revision."""
-            try:
-                return workflow_service.verify_asset(apply_receipt)
-            except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-                return _error_response("ue_verify_asset", exc, read_only=True)
-
-        @server.tool(annotations=read_annotations)
-        def ue_get_asset_state(asset_path: str) -> dict[str, Any]:
-            """Compare Editor memory, disk Package, Revision Export, and frozen SQLite state for one exact asset."""
-            try:
-                return workflow_service.get_asset_state(asset_path)
-            except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-                return _error_response("ue_get_asset_state", exc, read_only=True)
-
-        @server.tool(annotations=planning_annotations)
-        def ue_refresh_asset_index(
-            asset_path: str,
-            mode: Literal["Preview", "Apply"] = "Preview",
-        ) -> dict[str, Any]:
-            """Preview or atomically activate one policy-authorized paired SQLite and Revision Export generation."""
-            try:
-                return workflow_service.refresh_asset_index(asset_path, mode=mode)
-            except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-                return _error_response("ue_refresh_asset_index", exc, read_only=False)
-
-        @server.tool(annotations=destructive_annotations)
-        def ue_rollback_patch(
-            apply_receipt: str,
-            mode: Literal["DryRun", "Commit"] = "DryRun",
-            rollback_dry_run_receipt: str = "",
-            confirmation: str = "",
-        ) -> dict[str, Any]:
-            """Validate rollback, then explicitly restore only with a fresh receipt and exact confirmation phrase."""
-            try:
-                return workflow_service.rollback_patch(
-                    apply_receipt,
-                    mode=mode,
-                    rollback_dry_run_receipt=rollback_dry_run_receipt,
-                    confirmation=confirmation,
-                )
-            except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-                return _error_response("ue_rollback_patch", exc, read_only=mode == "DryRun")
 
     return server
 

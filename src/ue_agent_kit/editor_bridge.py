@@ -9,24 +9,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .tool_registry import LIVE_EDITOR_METHODS
+
 DESCRIPTOR_SCHEMA_VERSION = "1.0"
 PROTOCOL_SCHEMA_VERSION = "1.0"
 MAX_DESCRIPTOR_BYTES = 64 * 1024
 MAX_RESPONSE_BYTES = 1024 * 1024
 DEFAULT_TIMEOUT_SECONDS = 2.0
 
-LIVE_EDITOR_METHODS = {
-    "ue_editor_status": "editor.status",
-    "ue_get_selection": "editor.getSelection",
-    "ue_get_open_assets": "editor.getOpenAssets",
-    "ue_get_dirty_assets": "editor.getDirtyAssets",
-    "ue_get_current_level": "editor.getCurrentLevel",
-    "ue_get_pie_state": "editor.getPieState",
-    "ue_get_output_log": "editor.getOutputLog",
-    "ue_get_compile_errors": "editor.getCompileErrors",
-    "ue_inspect_asset_live": "editor.inspectAssetLive",
-    "ue_get_blueprint_graph_selection": "editor.getBlueprintGraphSelection",
-}
 
 LIVE_LOG_VERBOSITIES = {
     "fatal",

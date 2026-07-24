@@ -398,6 +398,24 @@ scripts\TestMcpStdio.cmd
 scripts\TestMcpClients.cmd
 ```
 
+开发 MCP 子模块时优先运行对应专项测试，避免每次小改动都执行完整真实 UE 工作流：
+
+```bat
+scripts\TestMcpModules.cmd -Group Registry
+scripts\TestMcpModules.cmd -Group Query
+scripts\TestMcpModules.cmd -Group Live
+scripts\TestMcpModules.cmd -Group Workflow
+```
+
+并行子任务使用预览优先的 Worktree 脚本；不带 `-Apply` 时只打印计划：
+
+```bat
+scripts\CreateAgentWorktrees.cmd
+scripts\CreateAgentWorktrees.cmd -Apply
+```
+
+文件所有权、Sol/Luna 边界和测试层级见 [`PARALLEL_AGENT_DEVELOPMENT.md`](PARALLEL_AGENT_DEVELOPMENT.md)。
+
 运行真实 UE5.6 Live Editor Bridge 联调；脚本使用临时 SQLite，启动并只关闭自己创建的测试 Editor：
 
 ```bat

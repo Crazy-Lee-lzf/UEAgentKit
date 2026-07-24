@@ -68,6 +68,13 @@ UE Agent Kit 的长期定位是面向 AI Agent 的 Unreal Engine 项目智能层
 
 ### 0.5.3：Daily Actions 与验证
 
+开发准备已完成：
+
+- [x] Tool Registry 统一 Tool 顺序、模式、Annotation 与 Live Capability 映射，保持 5/15/18/28 契约不变。
+- [x] MCP Query、Live Read、Workflow 注册拆分；Editor Bridge Reader 按 Status、Diagnostic、Asset、Graph 拆分。
+- [x] Registry/Query/Live/Workflow 专项测试入口，以及预览优先的 Navigation/Validation/Protocol Worktree 脚本。
+- [x] Sol 冻结公共契约、Luna 按文件所有权执行子任务的并行开发规范。
+
 首批低风险操作：
 
 ```text
