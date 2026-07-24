@@ -28,6 +28,7 @@ EXPECTED_TOOLS = [
     "ue_dry_run_patch",
     "ue_apply_patch",
     "ue_verify_asset",
+    "ue_get_asset_state",
     "ue_refresh_asset_index",
     "ue_rollback_patch",
 ]
@@ -138,6 +139,12 @@ async def run_workflow(args: argparse.Namespace) -> dict[str, object]:
                     raise RuntimeError(f"Revision Export status mismatch: {project_status}")
                 if project_status["freshness"]["state"] != "fresh":
                     raise RuntimeError(f"Initial index freshness mismatch: {project_status}")
+                initial_asset_state = require_payload(
+                    await session.call_tool("ue_get_asset_state", {"asset_path": ASSET_PATH}),
+                    "ue_get_asset_state initial",
+                )
+                if initial_asset_state.get("state") != "synchronized":
+                    raise RuntimeError(f"Initial four-source asset state is not synchronized: {initial_asset_state}")
 
                 search = require_payload(
                     await session.call_tool(
@@ -298,6 +305,7 @@ async def run_workflow(args: argparse.Namespace) -> dict[str, object]:
         "capabilitiesChecked": True,
         "projectStatusChecked": True,
         "initialIndexFresh": True,
+        "initialAssetStateSynchronized": initial_asset_state["state"] == "synchronized",
         "commitMarkedIndexStale": True,
         "verifyPreservedIndexStale": True,
         "rollbackRestoredIndexFresh": True,

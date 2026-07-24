@@ -25,6 +25,7 @@ LIVE_EDITOR_METHODS = {
     "ue_get_output_log": "editor.getOutputLog",
     "ue_get_compile_errors": "editor.getCompileErrors",
     "ue_inspect_asset_live": "editor.inspectAssetLive",
+    "ue_get_blueprint_graph_selection": "editor.getBlueprintGraphSelection",
 }
 
 LIVE_LOG_VERBOSITIES = {

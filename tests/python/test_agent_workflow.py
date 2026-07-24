@@ -52,6 +52,17 @@ class FakeIndexService:
             },
         }
 
+    def get_revision_record(self, asset_path: str) -> dict[str, Any] | None:
+        if asset_path != ASSET_PATH:
+            return None
+        return {
+            "asset_path": ASSET_PATH,
+            "package_name": ASSET_PATH.split(".", 1)[0],
+            "asset_class": ASSET_CLASS,
+            "revision_value": BEFORE_REVISION,
+            "package_dirty": False,
+        }
+
 
 class FakeFreshnessTracker:
     def __init__(self) -> None:
@@ -59,14 +70,21 @@ class FakeFreshnessTracker:
         self.transitions: dict[str, dict[str, Any]] = {}
 
     def inspect_asset(self, asset_path: str) -> dict[str, Any]:
+        disk_revision = BEFORE_REVISION if self.state == "fresh" else AFTER_REVISION
         return {
             "assetPath": asset_path,
             "state": self.state,
+            "reason": "" if self.state == "fresh" else "index-disk-mismatch,revision-export-disk-mismatch",
             "indexFresh": self.state == "fresh",
             "indexStale": self.state == "stale",
             "indexRevision": BEFORE_REVISION,
             "revisionExportRevision": BEFORE_REVISION,
-            "diskRevision": BEFORE_REVISION if self.state == "fresh" else AFTER_REVISION,
+            "diskRevision": disk_revision,
+            "comparisons": {
+                "indexMatchesRevisionExport": True,
+                "indexMatchesDisk": disk_revision == BEFORE_REVISION,
+                "revisionExportMatchesDisk": disk_revision == BEFORE_REVISION,
+            },
         }
 
     def project_status(self) -> dict[str, Any]:
@@ -301,6 +319,62 @@ class AgentWorkflowTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
+
+    def test_asset_state_reports_synchronized_and_disk_newer_states(self) -> None:
+        synchronized = self.service.get_asset_state(ASSET_PATH)
+        self.assertEqual(synchronized["state"], "synchronized")
+        self.assertFalse(synchronized["saveRequired"])
+        self.assertFalse(synchronized["indexRefreshRequired"])
+        self.assertEqual(synchronized["sources"]["memory"]["state"], "unavailable")
+        self.assertFalse(synchronized["sources"]["memory"]["revisionAvailable"])
+        self.assertEqual(synchronized["sources"]["disk"]["revision"], BEFORE_REVISION)
+
+        self.freshness.state = "stale"
+        stale = self.service.get_asset_state(ASSET_PATH)
+        self.assertEqual(stale["state"], "disk-newer-than-snapshots")
+        self.assertTrue(stale["indexRefreshRequired"])
+        self.assertEqual(stale["recommendedAction"], "refresh-asset-index")
+
+        with self.assertRaises(WorkflowError) as invalid:
+            self.service.get_asset_state("Game/Invalid")
+        self.assertEqual(invalid.exception.code, "asset-state-invalid-asset")
+
+    def test_asset_state_prioritizes_dirty_editor_memory(self) -> None:
+        class DirtyLiveService:
+            def status(self) -> dict[str, Any]:
+                return {"state": "available"}
+
+            def call_tool(self, tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
+                if tool_name != "ue_inspect_asset_live" or params != {"assetPath": ASSET_PATH}:
+                    raise AssertionError("unexpected Live Editor call")
+                return {
+                    "ok": True,
+                    "result": {
+                        "assetRegistry": {"found": True},
+                        "memory": {
+                            "state": "loaded-unsaved",
+                            "loaded": True,
+                            "packageDirty": True,
+                            "openInAssetEditor": True,
+                            "selected": False,
+                            "loadedByBridge": False,
+                        },
+                    },
+                }
+
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=FakeFreshnessTracker(),
+            live_editor_service=DirtyLiveService(),
+        )
+        result = service.get_asset_state(ASSET_PATH)
+        self.assertEqual(result["state"], "memory-dirty")
+        self.assertTrue(result["saveRequired"])
+        self.assertTrue(result["refreshBlockedByDirtyMemory"])
+        self.assertEqual(result["recommendedAction"], "save-or-revert-memory")
+        self.assertFalse(result["limitations"]["memoryRevisionAvailable"])
 
     def test_complete_plan_dry_run_apply_verify_and_rollback_lifecycle(self) -> None:
         plan = self.service.plan_patch(

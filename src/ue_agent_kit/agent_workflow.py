@@ -915,6 +915,133 @@ class PatchWorkflowService:
             if final_root.exists() and not pointer_written:
                 shutil.rmtree(final_root, ignore_errors=True)
 
+    def get_asset_state(self, asset_path: str) -> dict[str, Any]:
+        """Combine Editor memory with the frozen SQLite, Revision Export, and current disk Package state."""
+        with self._lock:
+            try:
+                asset_path = self._validate_refresh_asset_path(asset_path)
+            except WorkflowError as exc:
+                raise WorkflowError("asset-state-invalid-asset", "asset_path must be one exact /Game Object Path.") from exc
+
+            record = self.index_service.get_revision_record(asset_path)
+            freshness = self.freshness.inspect_asset(asset_path)
+            index_revision = str(freshness.get("indexRevision", ""))
+            export_revision = str(freshness.get("revisionExportRevision", ""))
+            disk_revision = str(freshness.get("diskRevision", ""))
+            reasons = [item for item in str(freshness.get("reason", "")).split(",") if item]
+
+            sqlite_state = {
+                "state": "available" if record is not None and index_revision else "missing",
+                "revision": index_revision,
+                "packageName": str(record.get("package_name", "")) if record else "",
+                "assetClass": str(record.get("asset_class", "")) if record else "",
+                "packageDirty": bool(record.get("package_dirty")) if record else None,
+                "snapshotGenerationId": self.active_snapshot.generation_id if self.active_snapshot is not None else "",
+            }
+            revision_export_state = {
+                "state": "available" if export_revision else (
+                    "missing" if "revision-export-missing" in reasons else "unavailable"
+                ),
+                "revision": export_revision,
+                "packageDirty": "revision-export-package-dirty" in reasons,
+            }
+            disk_state = {
+                "state": "available" if disk_revision else (
+                    "missing" if "package-file-missing" in reasons else "unavailable"
+                ),
+                "revision": disk_revision,
+                "revisionAlgorithm": "sha256" if disk_revision else "",
+            }
+
+            memory_state: dict[str, Any] = {
+                "configured": self.live_editor_service is not None,
+                "state": "unavailable",
+                "loaded": None,
+                "packageDirty": None,
+                "openInAssetEditor": None,
+                "selected": None,
+                "revisionAvailable": False,
+                "reasonCode": "live-editor-disabled" if self.live_editor_service is None else "live-editor-unavailable",
+            }
+            if self.live_editor_service is not None:
+                try:
+                    live_status = self.live_editor_service.status()
+                    if live_status.get("state") == "available":
+                        payload = self.live_editor_service.call_tool(
+                            "ue_inspect_asset_live",
+                            {"assetPath": asset_path},
+                        )
+                        result = payload.get("result", {}) if isinstance(payload, dict) else {}
+                        memory = result.get("memory", {}) if isinstance(result, dict) else {}
+                        registry = result.get("assetRegistry", {}) if isinstance(result, dict) else {}
+                        if isinstance(memory, dict):
+                            memory_state.update(
+                                {
+                                    "state": str(memory.get("state", "unknown")),
+                                    "loaded": bool(memory.get("loaded")),
+                                    "packageDirty": bool(memory.get("packageDirty")),
+                                    "openInAssetEditor": bool(memory.get("openInAssetEditor")),
+                                    "selected": bool(memory.get("selected")),
+                                    "loadedByBridge": bool(memory.get("loadedByBridge")),
+                                    "registryFound": bool(registry.get("found")) if isinstance(registry, dict) else None,
+                                    "reasonCode": "",
+                                }
+                            )
+                    else:
+                        memory_state["reasonCode"] = str(live_status.get("reasonCode", "live-editor-unavailable"))
+                except Exception:
+                    memory_state["reasonCode"] = "live-editor-status-unavailable"
+
+            memory_dirty = memory_state.get("packageDirty") is True
+            if memory_dirty:
+                state = "memory-dirty"
+                recommended_action = "save-or-revert-memory"
+            elif freshness.get("state") == "fresh":
+                state = "synchronized"
+                recommended_action = "none"
+            elif freshness.get("state") == "unavailable":
+                state = "incomplete"
+                recommended_action = "restore-missing-source"
+            elif index_revision == export_revision and disk_revision and disk_revision != index_revision:
+                state = "disk-newer-than-snapshots"
+                recommended_action = "refresh-asset-index"
+            elif disk_revision == export_revision and index_revision != disk_revision:
+                state = "sqlite-outdated"
+                recommended_action = "refresh-asset-index"
+            elif disk_revision == index_revision and export_revision != disk_revision:
+                state = "revision-export-outdated"
+                recommended_action = "refresh-asset-index"
+            else:
+                state = "persistent-sources-diverged"
+                recommended_action = "inspect-and-refresh"
+
+            return {
+                "schemaVersion": WORKFLOW_SCHEMA_VERSION,
+                "tool": "ue_get_asset_state",
+                "ok": True,
+                "readOnly": True,
+                "assetPath": asset_path,
+                "state": state,
+                "sources": {
+                    "memory": memory_state,
+                    "disk": disk_state,
+                    "revisionExport": revision_export_state,
+                    "sqlite": sqlite_state,
+                },
+                "comparisons": dict(freshness.get("comparisons", {})),
+                "freshness": freshness,
+                "saveRequired": memory_dirty,
+                "indexRefreshRequired": freshness.get("state") == "stale",
+                "refreshBlockedByDirtyMemory": memory_dirty,
+                "currentSessionUsesFrozenSnapshot": self.active_snapshot is not None,
+                "restartRequired": self._refresh_applied,
+                "recommendedAction": recommended_action,
+                "limitations": {
+                    "memoryRevisionAvailable": False,
+                    "memoryCleanMeans": "The loaded package is not Dirty; it is not a cryptographic equality proof against disk.",
+                },
+            }
+
     def refresh_asset_index(self, asset_path: str, *, mode: Literal["Preview", "Apply"] = "Preview") -> dict[str, Any]:
         with self._lock:
             self._assert_session_current()

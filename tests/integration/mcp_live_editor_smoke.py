@@ -39,6 +39,7 @@ LIVE_TOOLS = [
     "ue_get_output_log",
     "ue_get_compile_errors",
     "ue_inspect_asset_live",
+    "ue_get_blueprint_graph_selection",
 ]
 EXPECTED_TOOLS = [
     "ue_get_capabilities",
@@ -114,6 +115,9 @@ async def _run(database: Path, project: Path, error_log: Path) -> dict[str, Any]
                         {"asset_path": "/Game/UEAgentKitWriteTests/BP_PatchTarget.BP_PatchTarget"},
                     )
                 ).structuredContent
+                live_results["ue_get_blueprint_graph_selection"] = (
+                    await session.call_tool("ue_get_blueprint_graph_selection", {})
+                ).structuredContent
 
     tool_names = [tool.name for tool in listed.tools]
     if tool_names != EXPECTED_TOOLS:
@@ -184,6 +188,22 @@ async def _run(database: Path, project: Path, error_log: Path) -> dict[str, Any]
     if live_asset.get("memory", {}).get("loadedByBridge") is not False:
         raise RuntimeError(f"Live asset inspection claimed it loaded the asset: {live_asset}")
 
+    graph_selection = live_results["ue_get_blueprint_graph_selection"]["result"]
+    if graph_selection.get("scope") != "ordinary-blueprint-editor":
+        raise RuntimeError(f"Graph selection scope is invalid: {graph_selection}")
+    if graph_selection.get("loadedByBridge") is not False:
+        raise RuntimeError(f"Graph selection claimed it loaded an asset: {graph_selection}")
+    if graph_selection.get("available"):
+        graph = graph_selection.get("graph", {})
+        if not graph.get("graphGuid") or graph_selection.get("selectedNodeCount", 0) > 100:
+            raise RuntimeError(f"Graph selection result is incomplete or unbounded: {graph_selection}")
+    elif graph_selection.get("reasonCode") not in {
+        "no-ordinary-blueprint-editor",
+        "no-focused-blueprint-graph",
+        "blueprint-asset-unavailable",
+    }:
+        raise RuntimeError(f"Graph selection fallback is invalid: {graph_selection}")
+
     response_text = json.dumps(
         {
             "capabilities": capabilities,
@@ -221,6 +241,9 @@ async def _run(database: Path, project: Path, error_log: Path) -> dict[str, Any]
         "liveAssetRegistryFound": live_asset["assetRegistry"]["found"],
         "liveAssetLoaded": live_asset["memory"]["loaded"],
         "liveAssetLoadedByBridge": live_asset["memory"]["loadedByBridge"],
+        "blueprintGraphSelectionAvailable": bool(graph_selection.get("available")),
+        "blueprintGraphSelectionReason": graph_selection.get("reasonCode", ""),
+        "blueprintSelectedNodeCount": graph_selection.get("selectedNodeCount", 0),
         "secretsRedacted": True,
         "databaseHashUnchanged": True,
         "indexDirectoryUnchanged": True,

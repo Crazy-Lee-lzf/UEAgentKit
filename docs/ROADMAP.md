@@ -19,7 +19,7 @@ UE Agent Kit 的长期定位是面向 AI Agent 的 Unreal Engine 项目智能层
 0.5.1  MCP 协议补全：状态、分页、新鲜度、高层写入、诊断和 Client 兼容
 ```
 
-0.5.1 已完成离线 MCP 查询、受控写入和协议诊断。0.5.2 已完成 localhost Editor Bridge、日志与编译诊断、实时资产检查，以及配对 Revision Export + SQLite Generation 的安全单资产刷新；下一批收紧 Dirty UObject、磁盘与索引的细粒度状态模型。
+0.5.1 已完成离线 MCP 查询、受控写入和协议诊断。0.5.2 已完成 localhost Editor Bridge、日志与编译诊断、实时资产检查、配对 Revision Export + SQLite Generation 的安全单资产刷新、四源状态模型，以及普通 Blueprint Editor 的最小 Graph/Node 定位。下一阶段进入 0.5.3 Daily Actions 与验证。
 
 ## 0.5.x：MCP 与日常开发工具补全
 
@@ -63,7 +63,8 @@ UE Agent Kit 的长期定位是面向 AI Agent 的 Unreal Engine 项目智能层
 - [x] `ue_refresh_asset_index`：精确授权资产、Preview/Apply、独立 Package SHA-256 校验、Revision Export 与 SQLite 配对 Generation、完整校验、原子 Pointer 切换和新会话可见性。
 - [x] 工作流会话冻结：首代从外部快照独立复制；内部不可变 Generation 可直接固定；Apply 后旧会话保持旧代并拒绝新 Plan/Receipt，重启后新会话读取新代。
 - [x] Dirty Live Editor 资产拒绝、磁盘空间预检、失败保持旧 Pair、配置源快照零修改和真实 UE5.6 双会话刷新回归。
-- [ ] Dirty UObject 与磁盘/索引差异的更细粒度状态模型。
+- [x] `ue_get_asset_state`：区分可选 Editor Memory、当前磁盘 Package SHA-256、会话冻结 Revision Export 和 SQLite，返回同步、内存 Dirty、磁盘领先、单快照过期、持久化源分叉或数据不完整状态。
+- [x] `ue_get_blueprint_graph_selection`：定位最近激活的普通 Blueprint Editor、Focused Graph GUID 和最多 100 个选中 Node GUID；不加载资产，不支持 Material/Niagara/Control Rig，不提供 Graph 编辑。
 
 ### 0.5.3：Daily Actions 与验证
 

@@ -69,8 +69,15 @@ HIGH_LEVEL_WRITE_TOOL_NAMES = [
     "ue_set_datatable_cell",
 ]
 LOW_LEVEL_WRITE_TOOL_NAMES = ["ue_plan_patch", "ue_dry_run_patch", "ue_apply_patch", "ue_verify_asset", "ue_rollback_patch"]
+WORKFLOW_READ_TOOL_NAMES = ["ue_get_asset_state"]
 SNAPSHOT_TOOL_NAMES = ["ue_refresh_asset_index"]
-WRITE_TOOL_NAMES = HIGH_LEVEL_WRITE_TOOL_NAMES + LOW_LEVEL_WRITE_TOOL_NAMES[:-1] + SNAPSHOT_TOOL_NAMES + LOW_LEVEL_WRITE_TOOL_NAMES[-1:]
+WORKFLOW_TOOL_NAMES = (
+    HIGH_LEVEL_WRITE_TOOL_NAMES
+    + LOW_LEVEL_WRITE_TOOL_NAMES[:-1]
+    + WORKFLOW_READ_TOOL_NAMES
+    + SNAPSHOT_TOOL_NAMES
+    + LOW_LEVEL_WRITE_TOOL_NAMES[-1:]
+)
 
 
 def _server_instructions(
@@ -134,6 +141,7 @@ def _tool_descriptors(
         "ue_get_output_log": (True, False),
         "ue_get_compile_errors": (True, False),
         "ue_inspect_asset_live": (True, False),
+        "ue_get_blueprint_graph_selection": (True, False),
         "ue_set_blueprint_default": (False, False),
         "ue_set_component_property": (False, False),
         "ue_set_pin_default": (False, False),
@@ -145,13 +153,14 @@ def _tool_descriptors(
         "ue_apply_patch": (False, True),
         "ue_verify_asset": (False, False),
         "ue_rollback_patch": (False, True),
+        "ue_get_asset_state": (True, False),
         "ue_refresh_asset_index": (False, False),
     }
     names = list(READ_TOOL_NAMES)
     if live_editor_enabled:
         names += LIVE_EDITOR_TOOL_NAMES
     if write_tools_enabled:
-        names += WRITE_TOOL_NAMES
+        names += WORKFLOW_TOOL_NAMES
     return [
         {
             "name": name,
@@ -220,6 +229,16 @@ def _capabilities_response(
             "arbitraryPython": False,
             "arbitraryShell": False,
             "writeSupported": False,
+            "graphSelection": {
+                "available": live_editor_enabled,
+                "tool": "ue_get_blueprint_graph_selection" if live_editor_enabled else "",
+                "scope": "ordinary-blueprint-editor",
+                "materialEditorSupported": False,
+                "niagaraEditorSupported": False,
+                "controlRigEditorSupported": False,
+                "editingSupported": False,
+                "maxSelectedNodes": 100,
+            },
         },
         "highLevelChanges": {
             "available": write_tools_enabled,
@@ -228,6 +247,16 @@ def _capabilities_response(
             "defaultMode": "Plan",
             "commitSupportedDirectly": False,
             "commitUsesApplyReceiptWorkflow": True,
+        },
+        "assetState": {
+            "available": write_tools_enabled,
+            "tool": "ue_get_asset_state" if write_tools_enabled else "",
+            "sources": ["editor-memory", "disk-package", "revision-export", "sqlite"],
+            "memoryOptional": True,
+            "memoryRevisionAvailable": False,
+            "memoryCleanIsRevisionProof": False,
+            "persistentRevisionsUseSha256": True,
+            "readOnly": True,
         },
         "snapshotRefresh": {
             "available": write_tools_enabled,
@@ -260,6 +289,7 @@ def _capabilities_response(
             "liveLogBufferEntries": 4096,
             "liveLogEntryCharacters": 1024,
             "liveCompileBlueprintStates": 100,
+            "liveBlueprintSelectedNodes": 100,
             "liveAssetPathLength": 512,
         },
         "responseContract": {
@@ -434,6 +464,7 @@ def _suggested_action(code: str) -> str:
         "live-editor-capability-unavailable": "Use only the registered Live Editor capabilities reported by ue_get_capabilities.",
         "live-editor-invalid-parameters": "Use the bounded Live Editor Tool schema and an exact /Game Object Path where required.",
         "snapshot-refresh-restart-required": "Restart the MCP server so the new paired snapshot generation becomes the frozen session snapshot.",
+        "asset-state-invalid-asset": "Use one exact /Game Object Path from the fixed project.",
         "snapshot-refresh-invalid-asset": "Use one exact policy-authorized /Game Object Path.",
         "snapshot-refresh-revision-mismatch": "Save or revert the asset, then retry after its disk Package Revision is stable.",
         "snapshot-refresh-disk-space": "Free disk space under the fixed workflow root before retrying snapshot refresh.",
@@ -773,6 +804,14 @@ def create_mcp_server(
             except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
                 return _error_response("ue_inspect_asset_live", exc, read_only=True)
 
+        @server.tool(annotations=read_annotations)
+        def ue_get_blueprint_graph_selection() -> dict[str, Any]:
+            """Return the focused Graph and bounded selected Nodes from the most recently active ordinary Blueprint Editor."""
+            try:
+                return live_editor_service.call_tool("ue_get_blueprint_graph_selection")
+            except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+                return _error_response("ue_get_blueprint_graph_selection", exc, read_only=True)
+
     if workflow_service is not None:
         planning_annotations = ToolAnnotations(
             readOnlyHint=False,
@@ -996,6 +1035,14 @@ def create_mcp_server(
                 return workflow_service.verify_asset(apply_receipt)
             except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
                 return _error_response("ue_verify_asset", exc, read_only=True)
+
+        @server.tool(annotations=read_annotations)
+        def ue_get_asset_state(asset_path: str) -> dict[str, Any]:
+            """Compare Editor memory, disk Package, Revision Export, and frozen SQLite state for one exact asset."""
+            try:
+                return workflow_service.get_asset_state(asset_path)
+            except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+                return _error_response("ue_get_asset_state", exc, read_only=True)
 
         @server.tool(annotations=planning_annotations)
         def ue_refresh_asset_index(

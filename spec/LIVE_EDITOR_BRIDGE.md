@@ -34,7 +34,7 @@ PowerShell 入口对应：
 -ProjectPath <fixed .uproject>
 ```
 
-Tool 参数不能覆盖固定项目或选择其他 Editor 端点。未启用时，离线 5 Tool 与固定项目工作流 17 Tool 保持可用。
+Tool 参数不能覆盖固定项目或选择其他 Editor 端点。未启用时，离线 5 Tool 与固定项目工作流 18 Tool 保持可用。
 
 ## 端点描述符
 
@@ -106,13 +106,14 @@ ue_get_pie_state
 ue_get_output_log
 ue_get_compile_errors
 ue_inspect_asset_live
+ue_get_blueprint_graph_selection
 ```
 
 所有 Tool：
 
 - `readOnlyHint=true`。
 - `destructiveHint=false`。
-- 前六个状态 Tool 无参数；后三个 Tool 只接受下文规定的有界过滤或精确资产路径。
+- Editor 状态、选择、打开资产、Dirty 资产、关卡、PIE 和 Blueprint Graph 选择 Tool 无参数；日志、编译诊断和实时资产检查只接受下文规定的有界过滤或精确资产路径。
 - 返回 `source=live-editor-memory`。
 - 不生成磁盘 Revision，也不声称数据来自 SQLite。
 
@@ -160,14 +161,19 @@ Bridge 注册为 `FOutputDevice`，保留最多 4096 条当前会话日志，并
 
 只接受一个精确 `/Game/...Asset.Asset` Object Path。结果区分 Asset Registry 元数据和 Editor 内存状态，包括是否已加载、Package Dirty、是否在 Asset Editor 中打开、是否被选择，以及 Blueprint 编译状态。Bridge 使用 `StaticFindObject`，不会调用 `LoadObject`，并始终返回 `loadedByBridge=false`。
 
+### ue_get_blueprint_graph_selection
+
+无参数，只检查最近激活且 Editor Name 精确为 `BlueprintEditor` 的普通 Blueprint Editor。成功时返回 Blueprint Object Path、Focused Graph Path/Name/GUID/Class/Schema、可编辑状态，以及最多 100 个当前 Graph 中选中的 Node；每个 Node 仅返回 Path、Name、GUID、Class、Title 和二维位置。无普通 Blueprint Editor 或无 Focused Graph 时返回 `available=false` 与稳定 `reasonCode`。该 Tool 不扫描或强转 Material、Niagara、Control Rig 等其他编辑器，不加载资产，也不提供 Graph 编辑。
+
 ## 状态与 Revision 语义
 
-Live Editor、磁盘和索引是三个不同事实源：
+Editor Memory、磁盘、Revision Export 和 SQLite 是四个不同事实源：
 
 ```text
-Editor Memory     当前选择、打开资产、Dirty UObject/Package、PIE
-Disk Package      已保存 .uasset/.umap Revision
-Immutable Index   上次导出并构建的 SQLite Snapshot
+Editor Memory     当前选择、打开资产、Dirty UObject/Package、PIE；没有加密 Revision
+Disk Package      当前已保存 .uasset/.umap 的 SHA-256 Revision
+Revision Export   当前 MCP 会话冻结的 Canonical Revision Snapshot
+Immutable Index   当前 MCP 会话冻结的 SQLite Snapshot
 ```
 
 规则：
@@ -212,7 +218,7 @@ scripts\TestMcpLiveEditor.cmd ^
 1. 拒绝干扰已有 Editor，或显式使用 `-UseExistingEditor`。
 2. 启动测试项目的独立 Unreal Editor。
 3. 等待匹配 PID 的 Descriptor。
-4. 通过真实 MCP `stdio` Client 发现并调用 14 个 Tool。
+4. 通过真实 MCP `stdio` Client 发现并调用 15 个 Tool；自管理无界面 Editor 验证 Graph Tool 的安全降级，真实选中 Node 的正向结果由 UE5.6 API 编译和 Schema/单元回归覆盖。
 5. 验证 Token、端口、Descriptor 和固定本机路径不进入 MCP 响应。
 6. 验证临时 immutable SQLite 哈希和目录文件集合不变。
 7. 仅关闭脚本自己创建的 Editor，并清理对应 Descriptor。

@@ -219,7 +219,7 @@ scripts\TestMcpSnapshotRefresh.cmd ^
   -ProjectPath "<TEST_PROJECT>.uproject"
 ```
 
-服务器对 MCP Client 仍只使用本地 `stdio`。默认模式为 5 个离线只读 Tool；`-EnableLiveEditor -ProjectPath <固定工程>` 增加 9 个实时只读 Tool，共 14 个；固定 Engine、Project、Policy 和 Revision Export 后的工作流为 17 个；两者组合时共 26 个 Tool。实时模式提供有界 Output Log、编译诊断和不触发加载的内存资产检查；工作流模式新增安全单资产索引刷新：
+服务器对 MCP Client 仍只使用本地 `stdio`。默认模式为 5 个离线只读 Tool；`-EnableLiveEditor -ProjectPath <固定工程>` 增加 10 个实时只读 Tool，共 15 个；固定 Engine、Project、Policy 和 Revision Export 后的工作流为 18 个；两者组合时共 28 个 Tool。实时模式提供有界 Output Log、编译诊断、不触发加载的内存资产检查，以及普通 Blueprint Editor 的当前 Graph/Node 定位；工作流模式提供四源资产状态和安全单资产索引刷新：
 
 ```bat
 claude mcp add --transport stdio --scope project ue-agent-kit -- ^
@@ -228,7 +228,7 @@ claude mcp add --transport stdio --scope project ue-agent-kit -- ^
   -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
 ```
 
-添加后可用 `claude mcp list` 或 Claude Code 内的 `/mcp` 检查连接。Live Editor 模式通过固定工程 `Saved/UEAgentKit/EditorBridge.json` 发现仅绑定 `127.0.0.1` 的临时端点，并执行随机令牌、工程路径摘要、版本和 Capability 握手；Tool 参数不能指定端口、令牌或任意 UObject/Console/Python/Shell。实时读取新增 4096 条 Output Log 环形缓冲、编译诊断和不触发加载的精确 `/Game/...Asset.Asset` 检查，且始终报告 `loadedByBridge=false`。完整写入模式使用 `-EnableWriteTools`；只有同时使用 `-EnableCommitTools` 且 Policy 允许 Commit，才能保存或恢复资产。Plan 要求 SQLite、Revision Export 与磁盘 Package Revision 一致；六个 `ue_set_*` Tool 默认只生成 Plan，也可自动执行 Dry Run，但不能直接 Commit。Commit 后固定快照会标记 stale，rollback 恢复原 Revision 后才重新 fresh。`ue_refresh_asset_index` 仅接受一个 Policy 授权的精确资产路径，并通过 Preview/Apply 生成配对 Revision Export + SQLite Generation；Apply 后当前会话继续读取冻结旧代且拒绝新工作流，重启 MCP 后新会话才读取新代。完整契约见 [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md)、[`spec/LIVE_EDITOR_BRIDGE.md`](spec/LIVE_EDITOR_BRIDGE.md) 与 [`spec/INDEX_FRESHNESS.md`](spec/INDEX_FRESHNESS.md)。
+添加后可用 `claude mcp list` 或 Claude Code 内的 `/mcp` 检查连接。Live Editor 模式通过固定工程 `Saved/UEAgentKit/EditorBridge.json` 发现仅绑定 `127.0.0.1` 的临时端点，并执行随机令牌、工程路径摘要、版本和 Capability 握手；Tool 参数不能指定端口、令牌或任意 UObject/Console/Python/Shell。实时读取包括 4096 条 Output Log 环形缓冲、编译诊断、不触发加载的精确 `/Game/...Asset.Asset` 检查，以及只支持普通 Blueprint Editor 的聚焦 Graph 与最多 100 个选中 Node；相关读取始终报告 `loadedByBridge=false`。`ue_get_asset_state` 区分 Editor Memory、磁盘 Package、Revision Export 和 SQLite，且不会为内存状态伪造 Revision。完整写入模式使用 `-EnableWriteTools`；只有同时使用 `-EnableCommitTools` 且 Policy 允许 Commit，才能保存或恢复资产。Plan 要求 SQLite、Revision Export 与磁盘 Package Revision 一致；六个 `ue_set_*` Tool 默认只生成 Plan，也可自动执行 Dry Run，但不能直接 Commit。Commit 后固定快照会标记 stale，rollback 恢复原 Revision 后才重新 fresh。`ue_refresh_asset_index` 仅接受一个 Policy 授权的精确资产路径，并通过 Preview/Apply 生成配对 Revision Export + SQLite Generation；Apply 后当前会话继续读取冻结旧代且拒绝新工作流，重启 MCP 后新会话才读取新代。完整契约见 [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md)、[`spec/LIVE_EDITOR_BRIDGE.md`](spec/LIVE_EDITOR_BRIDGE.md) 与 [`spec/INDEX_FRESHNESS.md`](spec/INDEX_FRESHNESS.md)。
 
 ### 7. 校验通用资产导出
 

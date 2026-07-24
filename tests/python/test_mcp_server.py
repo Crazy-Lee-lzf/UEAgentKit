@@ -98,6 +98,25 @@ class FakeWorkflowService:
     def verify_asset(self, apply_receipt):
         return {"ok": True, "tool": "ue_verify_asset", "applyReceipt": apply_receipt, "verified": True}
 
+    def get_asset_state(self, asset_path):
+        return {
+            "schemaVersion": "1.0",
+            "ok": True,
+            "tool": "ue_get_asset_state",
+            "readOnly": True,
+            "assetPath": asset_path,
+            "state": "synchronized",
+            "sources": {
+                "memory": {"state": "unavailable", "revisionAvailable": False},
+                "disk": {"state": "available", "revision": REVISION_A},
+                "revisionExport": {"state": "available", "revision": REVISION_A},
+                "sqlite": {"state": "available", "revision": REVISION_A},
+            },
+            "saveRequired": False,
+            "indexRefreshRequired": False,
+            "recommendedAction": "none",
+        }
+
     def refresh_asset_index(self, asset_path, *, mode="Preview"):
         return {
             "ok": True,
@@ -148,6 +167,7 @@ class FakeLiveEditorService:
                 "editor.getOutputLog",
                 "editor.getCompileErrors",
                 "editor.inspectAssetLive",
+                "editor.getBlueprintGraphSelection",
             ],
             "pieState": "stopped",
             "currentLevel": "/Game/Maps/Test.Test:PersistentLevel",
@@ -180,7 +200,34 @@ class FakeLiveEditorService:
             "ue_inspect_asset_live": {
                 "assetPath": normalized_params.get("assetPath", ""),
                 "assetRegistry": {"found": True},
-                "memory": {"loaded": True, "loadedByBridge": False, "state": "loaded-saved"},
+                "memory": {
+                    "loaded": True,
+                    "loadedByBridge": False,
+                    "packageDirty": False,
+                    "openInAssetEditor": True,
+                    "selected": False,
+                    "state": "loaded-saved",
+                },
+            },
+            "ue_get_blueprint_graph_selection": {
+                "scope": "ordinary-blueprint-editor",
+                "available": True,
+                "loadedByBridge": False,
+                "blueprintPath": "/Game/Test/BP_Test.BP_Test",
+                "graph": {
+                    "graphPath": "/Game/Test/BP_Test.BP_Test:EventGraph",
+                    "graphName": "EventGraph",
+                    "graphGuid": "11111111-1111-1111-1111-111111111111",
+                    "editable": True,
+                },
+                "selectedNodeCount": 1,
+                "selectedNodesTruncated": False,
+                "selectedNodes": [
+                    {
+                        "nodeGuid": "22222222-2222-2222-2222-222222222222",
+                        "title": "BeginPlay",
+                    }
+                ],
             },
         }
         return {
@@ -440,6 +487,7 @@ class McpServerTests(unittest.TestCase):
             "ue_get_output_log",
             "ue_get_compile_errors",
             "ue_inspect_asset_live",
+            "ue_get_blueprint_graph_selection",
         ]
         self.assertEqual([tool.name for tool in tools], expected_names)
         forbidden = {
@@ -467,6 +515,12 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(capabilities["liveEditor"]["tools"], expected_names[5:])
         self.assertFalse(capabilities["liveEditor"]["arbitraryEndpointArguments"])
         self.assertFalse(capabilities["liveEditor"]["arbitraryUObject"])
+        graph_contract = capabilities["liveEditor"]["graphSelection"]
+        self.assertTrue(graph_contract["available"])
+        self.assertEqual(graph_contract["scope"], "ordinary-blueprint-editor")
+        self.assertEqual(graph_contract["maxSelectedNodes"], 100)
+        self.assertFalse(graph_contract["materialEditorSupported"])
+        self.assertFalse(graph_contract["editingSupported"])
         self.assertTrue(capabilities["freshness"]["liveEditorMemorySeparate"])
 
         _, project_status = asyncio.run(server.call_tool("ue_get_project_status", {}))
@@ -522,6 +576,21 @@ class McpServerTests(unittest.TestCase):
         self.assertTrue(live_asset["result"]["assetRegistry"]["found"])
         self.assertFalse(live_asset["result"]["memory"]["loadedByBridge"])
 
+        graph_tool = next(tool for tool in tools if tool.name == "ue_get_blueprint_graph_selection")
+        self.assertEqual(graph_tool.inputSchema.get("properties", {}), {})
+        _, graph_selection = asyncio.run(
+            server.call_tool("ue_get_blueprint_graph_selection", {})
+        )
+        self.assertTrue(graph_selection["result"]["available"])
+        self.assertEqual(
+            graph_selection["result"]["graph"]["graphGuid"],
+            "11111111-1111-1111-1111-111111111111",
+        )
+        self.assertEqual(
+            graph_selection["result"]["selectedNodes"][0]["nodeGuid"],
+            "22222222-2222-2222-2222-222222222222",
+        )
+
         offline_server = create_mcp_server(
             self.database_path,
             live_editor_service=FakeLiveEditorService(available=False),
@@ -559,6 +628,7 @@ class McpServerTests(unittest.TestCase):
             "ue_get_output_log",
             "ue_get_compile_errors",
             "ue_inspect_asset_live",
+            "ue_get_blueprint_graph_selection",
             "ue_set_blueprint_default",
             "ue_set_component_property",
             "ue_set_pin_default",
@@ -569,11 +639,12 @@ class McpServerTests(unittest.TestCase):
             "ue_dry_run_patch",
             "ue_apply_patch",
             "ue_verify_asset",
+            "ue_get_asset_state",
             "ue_refresh_asset_index",
             "ue_rollback_patch",
         ]
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 26)
+        self.assertEqual(len(tools), 28)
 
         mismatched_live = FakeLiveEditorService()
         mismatched_live.config = SimpleNamespace(
@@ -609,6 +680,7 @@ class McpServerTests(unittest.TestCase):
                 "ue_dry_run_patch",
                 "ue_apply_patch",
                 "ue_verify_asset",
+                "ue_get_asset_state",
                 "ue_refresh_asset_index",
                 "ue_rollback_patch",
             ],
@@ -628,6 +700,10 @@ class McpServerTests(unittest.TestCase):
         apply_tool = next(tool for tool in tools if tool.name == "ue_apply_patch")
         self.assertTrue(apply_tool.annotations.destructiveHint)
         self.assertFalse(apply_tool.annotations.readOnlyHint)
+        state_tool = next(tool for tool in tools if tool.name == "ue_get_asset_state")
+        self.assertEqual(set(state_tool.inputSchema["properties"]), {"asset_path"})
+        self.assertTrue(state_tool.annotations.readOnlyHint)
+        self.assertFalse(state_tool.annotations.destructiveHint)
         refresh_tool = next(tool for tool in tools if tool.name == "ue_refresh_asset_index")
         self.assertEqual(set(refresh_tool.inputSchema["properties"]), {"asset_path", "mode"})
         self.assertFalse(refresh_tool.annotations.readOnlyHint)
@@ -645,6 +721,13 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(capabilities["highLevelChanges"]["defaultMode"], "Plan")
         self.assertFalse(capabilities["highLevelChanges"]["commitSupportedDirectly"])
         self.assertEqual(len(capabilities["highLevelChanges"]["tools"]), 6)
+        self.assertTrue(capabilities["assetState"]["available"])
+        self.assertEqual(
+            capabilities["assetState"]["sources"],
+            ["editor-memory", "disk-package", "revision-export", "sqlite"],
+        )
+        self.assertFalse(capabilities["assetState"]["memoryRevisionAvailable"])
+        self.assertFalse(capabilities["assetState"]["memoryCleanIsRevisionProof"])
         self.assertTrue(capabilities["snapshotRefresh"]["available"])
         self.assertEqual(capabilities["snapshotRefresh"]["modes"], ["Preview", "Apply"])
         self.assertTrue(capabilities["snapshotRefresh"]["pairedGeneration"])
@@ -669,6 +752,15 @@ class McpServerTests(unittest.TestCase):
             self.assertTrue(high_level["ok"], high_level)
             self.assertEqual(high_level["mode"], "Plan")
             self.assertEqual(high_level["underlyingOperation"], operation)
+
+        _, asset_state = asyncio.run(
+            server.call_tool(
+                "ue_get_asset_state",
+                {"asset_path": "/Game/UEAgentKitWriteTests/Test.Test"},
+            )
+        )
+        self.assertEqual(asset_state["state"], "synchronized")
+        self.assertFalse(asset_state["sources"]["memory"]["revisionAvailable"])
 
         _, refresh_preview = asyncio.run(
             server.call_tool(
@@ -837,6 +929,7 @@ class McpServerTests(unittest.TestCase):
             "ue_get_output_log",
             "ue_get_compile_errors",
             "ue_inspect_asset_live",
+            "ue_get_blueprint_graph_selection",
             "liveAssetLoadedByBridge",
             "compileHistoryComplete",
             "secretsRedacted",

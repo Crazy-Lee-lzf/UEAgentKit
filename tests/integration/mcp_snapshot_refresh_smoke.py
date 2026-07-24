@@ -30,6 +30,7 @@ EXPECTED_TOOLS = [
     "ue_dry_run_patch",
     "ue_apply_patch",
     "ue_verify_asset",
+    "ue_get_asset_state",
     "ue_refresh_asset_index",
     "ue_rollback_patch",
 ]
@@ -148,6 +149,12 @@ async def first_session(args: argparse.Namespace) -> dict[str, Any]:
             "ue_get_asset before Commit",
         )
         old_revision = str(old_asset["asset"]["revision_value"])
+        initial_asset_state = require_payload(
+            await session.call_tool("ue_get_asset_state", {"asset_path": ASSET_PATH}),
+            "ue_get_asset_state before Commit",
+        )
+        if initial_asset_state.get("state") != "synchronized":
+            raise RuntimeError(f"Initial four-source state is not synchronized: {initial_asset_state}")
 
         prepared = require_payload(
             await session.call_tool(
@@ -189,6 +196,14 @@ async def first_session(args: argparse.Namespace) -> dict[str, Any]:
         )
         if verified["actualRevision"] != committed_revision:
             raise RuntimeError(f"Committed Revision verification failed: {verified}")
+        committed_asset_state = require_payload(
+            await session.call_tool("ue_get_asset_state", {"asset_path": ASSET_PATH}),
+            "ue_get_asset_state after Commit",
+        )
+        if committed_asset_state.get("state") != "disk-newer-than-snapshots":
+            raise RuntimeError(f"Committed four-source state is incorrect: {committed_asset_state}")
+        if not committed_asset_state.get("indexRefreshRequired"):
+            raise RuntimeError(f"Committed state did not require index refresh: {committed_asset_state}")
 
         preview = require_payload(
             await session.call_tool(
@@ -226,6 +241,12 @@ async def first_session(args: argparse.Namespace) -> dict[str, Any]:
         )
         if old_session_asset["asset"]["revision_value"] != old_revision:
             raise RuntimeError(f"The old MCP session switched snapshots in place: {old_session_asset}")
+        old_session_state = require_payload(
+            await session.call_tool("ue_get_asset_state", {"asset_path": ASSET_PATH}),
+            "ue_get_asset_state in previous session",
+        )
+        if old_session_state.get("state") != "disk-newer-than-snapshots" or not old_session_state.get("restartRequired"):
+            raise RuntimeError(f"Old-session four-source state lost its frozen boundary: {old_session_state}")
 
         post_refresh_status = require_payload(
             await session.call_tool("ue_get_project_status", {}),
@@ -257,6 +278,9 @@ async def first_session(args: argparse.Namespace) -> dict[str, Any]:
             "generationId": generation_id,
             "oldSessionStayedOld": True,
             "restartRequired": True,
+            "initialAssetState": initial_asset_state["state"],
+            "committedAssetState": committed_asset_state["state"],
+            "oldSessionAssetState": old_session_state["state"],
             "packageBeforeHash": package_before_hash,
         }
 
@@ -287,11 +311,18 @@ async def second_session(args: argparse.Namespace, first: dict[str, Any]) -> dic
         )
         if asset["asset"]["revision_value"] != first["committedRevision"]:
             raise RuntimeError(f"The new session did not read the refreshed Revision: {asset}")
+        new_asset_state = require_payload(
+            await session.call_tool("ue_get_asset_state", {"asset_path": ASSET_PATH}),
+            "ue_get_asset_state new session",
+        )
+        if new_asset_state.get("state") != "synchronized":
+            raise RuntimeError(f"The new session four-source state is not synchronized: {new_asset_state}")
         return {
             "protocolVersion": initialized.protocolVersion,
             "newSessionFresh": True,
             "newSessionRevision": asset["asset"]["revision_value"],
             "generationId": lifecycle["activeSnapshotGenerationId"],
+            "assetState": new_asset_state["state"],
         }
 
 
@@ -316,6 +347,12 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         "oldSessionStayedOld": first["oldSessionStayedOld"],
         "postRefreshWorkflowRejected": True,
         "newSessionFresh": second["newSessionFresh"],
+        "fourSourceStateTransitions": {
+            "initial": first["initialAssetState"],
+            "committed": first["committedAssetState"],
+            "oldSessionAfterRefresh": first["oldSessionAssetState"],
+            "newSession": second["assetState"],
+        },
         "generationId": second["generationId"],
         "oldRevision": first["oldRevision"],
         "newRevision": second["newSessionRevision"],

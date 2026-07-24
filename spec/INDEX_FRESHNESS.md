@@ -136,6 +136,19 @@ Rollback Commit clears the session stale marker only when independent verificati
 
 If the package is restored to another Revision, or either snapshot changed independently, stale state remains visible.
 
+## Four-source asset state
+
+`ue_get_asset_state` adds optional Editor memory to the existing three persistent Revision sources. It does not change the write freshness gate, which remains based on SQLite, Revision Export, and disk SHA-256.
+
+```text
+Editor Memory      loaded / Dirty / open / selected; no cryptographic Revision
+Disk Package       current saved SHA-256
+Revision Export    frozen Canonical SHA-256
+SQLite             frozen indexed SHA-256
+```
+
+A clean loaded Package is not proof that memory bytes equal disk. Dirty memory always takes priority and blocks snapshot refresh. When memory is unavailable, the Tool still compares the three persistent sources and reports the limitation explicitly.
+
 ## Implemented single-asset refresh lifecycle
 
 `ue_refresh_asset_index` never mutates the SQLite file opened by the running server. A fixed workflow session resolves one active Pair at startup and freezes that selection:

@@ -7,11 +7,13 @@ All notable changes to UE Agent Kit are documented here.
 - Added bounded Live Editor Output Log reads with a 4,096-entry ring buffer, sequence cursors, category/severity/text/UTC/PIE filters, and explicit dropped-entry reporting.
 - Added compile diagnostics that combine current-session compiler-related log entries with loaded Blueprint status while explicitly reporting incomplete history.
 - Added exact `/Game` live asset inspection using Asset Registry plus already-loaded memory state without loading or modifying the asset.
-- Expanded Live-only MCP mode from 11 to 14 tools.
+- Added `ue_get_blueprint_graph_selection` for the most recently active ordinary Blueprint Editor, returning the focused Graph GUID and up to 100 selected Node GUIDs without loading assets or supporting Graph edits.
+- Expanded Live-only MCP mode from 11 to 15 tools.
 - Added `ue_refresh_asset_index` with exact policy-authorized asset paths, Preview/Apply modes, independent Package Revision verification, paired Revision Export and SQLite generation staging, integrity validation, and atomic pointer switching.
 - Added immutable workflow-session freezing: the session that applies a refresh continues reading its previous snapshot and rejects further workflow actions, while a new MCP session resolves the new paired generation.
 - Preserved configured SQLite and Revision Export source snapshots, rejected Dirty Live Editor assets, kept failed refreshes on the previous active pair, and added a real two-session UE5.6 refresh smoke test.
-- Expanded fixed-project workflow mode from 16 to 17 tools and combined Live + workflow mode from 25 to 26 tools.
+- Added `ue_get_asset_state`, a read-only four-source state model over optional Editor memory, current disk Package SHA-256, frozen Revision Export, and frozen SQLite, with explicit save/refresh recommendations and no invented memory Revision.
+- Expanded fixed-project workflow mode from 16 to 18 tools and combined Live + workflow mode from 25 to 28 tools.
 
 - Added a restricted fixed-project Live Editor Bridge over authenticated localhost TCP with exact project/version/capability handshake and no arbitrary endpoint, UObject, Console, Python, Shell, or filesystem Tool arguments.
 - Added six optional read-only MCP tools: `ue_editor_status`, `ue_get_selection`, `ue_get_open_assets`, `ue_get_dirty_assets`, `ue_get_current_level`, and `ue_get_pie_state`.

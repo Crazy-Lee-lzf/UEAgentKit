@@ -58,7 +58,8 @@ Remaining 0.5.2 targets:
 - [x] `ue_refresh_asset_index`: exact authorized asset, Preview/Apply, independent Package SHA-256 verification, paired Revision Export and SQLite generations, complete validation, atomic pointer switching, and new-session visibility.
 - [x] Frozen workflow sessions: copy legacy external snapshots independently, directly pin internal immutable generations, preserve the old generation after Apply, reject new workflow records, and load the new generation only after restart.
 - [x] Dirty Live Editor rejection, disk-space preflight, failure-safe retention of the previous pair, unchanged configured source snapshots, and real UE5.6 two-session refresh coverage.
-- [ ] Finer-grained Dirty UObject versus disk/index status.
+- [x] `ue_get_asset_state`: distinguish optional Editor memory, current disk Package SHA-256, frozen Revision Export, and frozen SQLite, with explicit synchronized, memory-dirty, snapshot-outdated, persistent-divergence, and incomplete states.
+- [x] `ue_get_blueprint_graph_selection`: locate the most recently active ordinary Blueprint Editor, focused Graph GUID, and up to 100 selected Node GUIDs without loading assets or supporting Graph edits; Material, Niagara, and Control Rig editors remain out of scope.
 
 ### 0.5.3: daily actions and validation
 

@@ -45,6 +45,7 @@ private:
 	TSharedRef<FJsonObject> BuildOutputLogResult(const TSharedPtr<FJsonObject>& Params) const;
 	TSharedRef<FJsonObject> BuildCompileErrorsResult(const TSharedPtr<FJsonObject>& Params) const;
 	TSharedRef<FJsonObject> BuildInspectAssetLiveResult(const FString& AssetPath) const;
+	TSharedRef<FJsonObject> BuildBlueprintGraphSelectionResult() const;
 
 	bool WriteDescriptor();
 	void RemoveDescriptor();

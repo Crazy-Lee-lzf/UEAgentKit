@@ -30,6 +30,7 @@ ue_get_pie_state
 ue_get_output_log
 ue_get_compile_errors
 ue_inspect_asset_live
+ue_get_blueprint_graph_selection
 ```
 
 该模式不要求启用写入。MCP Server 从固定项目 `Saved/UEAgentKit/EditorBridge.json` 读取 localhost 临时端点，并校验随机认证令牌、规范化项目路径摘要、Plugin/Server 版本和注册 Capability。地址、端口、令牌、Descriptor 和任意本机路径不会成为 Tool 参数或响应字段。Editor 未运行时 `ue_editor_status` 稳定报告 `state=unavailable`，其余 Live Tool 返回可重试错误，离线 SQLite Tool 保持可用。详细协议见 `spec/LIVE_EDITOR_BRIDGE.md`。
@@ -60,11 +61,25 @@ ue_plan_patch
 ue_dry_run_patch
 ue_apply_patch
 ue_verify_asset
+ue_get_asset_state
 ue_refresh_asset_index
 ue_rollback_patch
 ```
 
 只有再使用 `-EnableCommitTools`，且固定 Policy 的 `commitEnabled=true`，`ue_apply_patch` 与 rollback Commit 才能写入项目资产。`ue_refresh_asset_index` 不修改 `.uasset`，但会修改 UE Agent Kit 自己的活动索引 Generation，因此标记为 `readOnlyHint=false`、`destructiveHint=false`。
+
+### `ue_get_asset_state`
+
+只接受一个精确 `/Game/...Asset.Asset`，并只在固定项目工作流模式注册。该 Tool 为 `readOnlyHint=true`，汇总：
+
+```text
+memory           可选 Live Editor 已加载/Dirty/打开/选择状态；不提供 Revision
+disk             当前 .uasset/.umap SHA-256
+revisionExport   会话冻结 Canonical Revision
+sqlite           会话冻结 SQLite Revision
+```
+
+总体状态包括 `synchronized`、`memory-dirty`、`disk-newer-than-snapshots`、`sqlite-outdated`、`revision-export-outdated`、`persistent-sources-diverged` 和 `incomplete`。结果同时返回 `saveRequired`、`indexRefreshRequired`、`refreshBlockedByDirtyMemory` 与 `recommendedAction`。`loaded-saved` 只表示内存 Package 未 Dirty，不等于内存与磁盘经过加密哈希证明相同。
 
 ### `ue_refresh_asset_index`
 
@@ -103,6 +118,7 @@ Live Tool 全部为 `readOnlyHint=true`、`destructiveHint=false`，成功结果
 - `ue_get_output_log`：4096 条内存环形缓冲，支持 Category、最低 Verbosity、关键词、UTC 范围、PIE Session、`since_sequence` 和最多 100 条分页读取。
 - `ue_get_compile_errors`：读取 Bridge 当前会话捕获到的编译相关 Warning/Error，并补充最多 100 个已加载 Blueprint 的 `Status` 与截断信息；返回 `historyComplete=false`，不冒充完整 Message Log 历史。
 - `ue_inspect_asset_live`：只接受精确 `/Game/...Asset.Asset`，返回 Asset Registry 和已加载对象状态；使用 `StaticFindObject`，不触发加载，并明确返回 `loadedByBridge=false`。
+- `ue_get_blueprint_graph_selection`：无参数，只读取最近激活的普通 Blueprint Editor，返回 Focused Graph GUID 和最多 100 个当前 Graph 选中 Node GUID；不支持其他 Graph Editor，也不提供编辑。
 
 稳定错误包括 `live-editor-unavailable`、`live-editor-timeout`、`live-editor-connection-closed`、`live-editor-version-mismatch`、`live-editor-project-mismatch`、`live-editor-authentication-failed`、`live-editor-capability-unavailable`、`live-editor-invalid-parameters` 和 `live-editor-protocol-error`。
 
