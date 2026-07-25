@@ -727,7 +727,7 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         expected_names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 37)
+        self.assertEqual(len(tools), 38)
         for tool in tools:
             definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
             self.assertEqual(bool(tool.annotations.readOnlyHint), definition.read_only, tool.name)
@@ -789,7 +789,7 @@ class McpServerTests(unittest.TestCase):
         self.assertTrue(capabilities["highLevelChanges"]["available"])
         self.assertEqual(capabilities["highLevelChanges"]["defaultMode"], "Plan")
         self.assertFalse(capabilities["highLevelChanges"]["commitSupportedDirectly"])
-        self.assertEqual(len(capabilities["highLevelChanges"]["tools"]), 6)
+        self.assertEqual(len(capabilities["highLevelChanges"]["tools"]), 7)
         self.assertTrue(capabilities["assetState"]["available"])
         self.assertEqual(
             capabilities["assetState"]["sources"],
@@ -815,6 +815,7 @@ class McpServerTests(unittest.TestCase):
             ("ue_set_asset_property", {"asset_path": GENERIC_ASSET, "property_path": "BoolValue", "value": True}, "setAssetProperty"),
             ("ue_set_material_parameter", {"asset_path": GENERIC_ASSET, "parameter_name": "Roughness", "parameter_type": "Scalar", "value": 0.5}, "setMaterialInstanceScalarParameter"),
             ("ue_set_datatable_cell", {"asset_path": GENERIC_ASSET, "row_name": "Default", "field_name": "Value", "value": 7}, "setDataTableCell"),
+            ("ue_set_datatable_row_fields", {"asset_path": GENERIC_ASSET, "row_name": "Default", "values": {"Value": 7, "Enabled": True}}, "setDataTableRowFields"),
         ]
         for tool_name, arguments, operation in high_level_cases:
             _, high_level = asyncio.run(server.call_tool(tool_name, arguments))

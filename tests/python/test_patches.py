@@ -625,6 +625,102 @@ class PatchValidationTests(unittest.TestCase):
         expected = result["assets"][0]["operations"][0]["expectedChange"]
         self.assertEqual(expected["kind"], "data-table-cell")
 
+    def test_data_table_row_fields_operation_is_valid(self) -> None:
+        asset_path = "/Game/UEAgentKitWriteTests/DT_CellPatchTarget.DT_CellPatchTarget"
+        asset_class = "/Script/Engine.DataTable"
+        row_struct = "/Script/GameplayTags.GameplayTagTableRow"
+        asset = self.patch["assets"][0]
+        asset["assetPath"] = asset_path
+        asset["expectedAssetClass"] = asset_class
+        asset["operations"] = [
+            {
+                "operationId": "set-row-fields",
+                "operation": "setDataTableRowFields",
+                "target": {"rowName": "Row_Alpha"},
+                "value": {"DevComment": "Verified", "Tag": "Gameplay.Test"},
+            }
+        ]
+        self.policy["allowedOperations"].append("setDataTableRowFields")
+        self.policy["allowedAssetClasses"].append(asset_class)
+        self.policy["allowedDataTableFields"] = [
+            f"{asset_class}#{row_struct}#DevComment",
+            f"{asset_class}#{row_struct}#Tag",
+        ]
+        self.canonical["assetPath"] = asset_path
+        self.canonical["packageName"] = asset_path.rsplit(".", 1)[0]
+        self.canonical["assetClass"] = asset_class
+        self.canonical["assetDetails"] = {"rowStructPath": row_struct}
+        self.flush()
+        result = self.validate()
+        self.assertTrue(result["valid"], result["errors"])
+        expected = result["assets"][0]["operations"][0]["expectedChange"]
+        self.assertEqual(expected["kind"], "data-table-row-fields")
+        self.assertEqual(expected["value"], {"DevComment": "Verified", "Tag": "Gameplay.Test"})
+
+    def test_data_table_row_fields_requires_every_field_authorized(self) -> None:
+        asset_path = "/Game/UEAgentKitWriteTests/DT_CellPatchTarget.DT_CellPatchTarget"
+        asset_class = "/Script/Engine.DataTable"
+        row_struct = "/Script/GameplayTags.GameplayTagTableRow"
+        asset = self.patch["assets"][0]
+        asset["assetPath"] = asset_path
+        asset["expectedAssetClass"] = asset_class
+        asset["operations"] = [
+            {
+                "operationId": "set-row-fields",
+                "operation": "setDataTableRowFields",
+                "target": {"rowName": "Row_Alpha"},
+                "value": {"DevComment": "Verified", "Tag": "Gameplay.Test"},
+            }
+        ]
+        self.policy["allowedOperations"].append("setDataTableRowFields")
+        self.policy["allowedAssetClasses"].append(asset_class)
+        self.policy["allowedDataTableFields"] = [
+            f"{asset_class}#{row_struct}#DevComment",
+        ]
+        self.canonical["assetPath"] = asset_path
+        self.canonical["packageName"] = asset_path.rsplit(".", 1)[0]
+        self.canonical["assetClass"] = asset_class
+        self.canonical["assetDetails"] = {"rowStructPath": row_struct}
+        self.flush()
+        result = self.validate()
+        self.assertIn("data-table-field-not-allowed", self.error_codes(result))
+        self.assertTrue(any(error["path"].endswith(".value.Tag") for error in result["errors"]))
+
+    def test_data_table_row_fields_rejects_empty_nested_null_and_too_many(self) -> None:
+        asset_path = "/Game/UEAgentKitWriteTests/DT_CellPatchTarget.DT_CellPatchTarget"
+        asset_class = "/Script/Engine.DataTable"
+        row_struct = "/Script/GameplayTags.GameplayTagTableRow"
+        asset = self.patch["assets"][0]
+        asset["assetPath"] = asset_path
+        asset["expectedAssetClass"] = asset_class
+        self.policy["allowedOperations"].append("setDataTableRowFields")
+        self.policy["allowedAssetClasses"].append(asset_class)
+        self.policy["allowedDataTableFields"] = [
+            f"{asset_class}#{row_struct}#Value",
+        ]
+        self.canonical["assetPath"] = asset_path
+        self.canonical["packageName"] = asset_path.rsplit(".", 1)[0]
+        self.canonical["assetClass"] = asset_class
+        self.canonical["assetDetails"] = {"rowStructPath": row_struct}
+        invalid_values = [
+            {},
+            {"Value": None},
+            {"Value": {"Nested": 1}},
+            {f"Field{index}": index for index in range(33)},
+        ]
+        for index, value in enumerate(invalid_values):
+            with self.subTest(index=index):
+                asset["operations"] = [
+                    {
+                        "operationId": f"set-row-fields-{index}",
+                        "operation": "setDataTableRowFields",
+                        "target": {"rowName": "Row_Alpha"},
+                        "value": value,
+                    }
+                ]
+                self.flush()
+                self.assertIn("operation-value-type", self.error_codes(self.validate()))
+
     def test_data_table_cell_requires_exact_authorization(self) -> None:
         asset_path = "/Game/UEAgentKitWriteTests/DT_CellPatchTarget.DT_CellPatchTarget"
         asset_class = "/Script/Engine.DataTable"

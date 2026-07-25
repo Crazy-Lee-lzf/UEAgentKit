@@ -90,7 +90,8 @@ UE Agent Kit 的长期定位是面向 AI Agent 的 Unreal Engine 项目智能层
 
 优先补当前项目真实使用频率高的内容：
 
-- DataTable 单 Row 多字段与受控 Row 操作。
+- [x] DataTable 现有单 Row 的 1–32 个顶层标量字段原子更新。
+- [ ] DataTable 受控新增、删除和重命名 Row。
 - Data Asset 的对象引用、软引用、Struct 和容器值模型。
 - Material Instance 参数工作流统一。
 - Blueprint 默认值、组件属性和 Pin 默认值的高层 MCP 封装。

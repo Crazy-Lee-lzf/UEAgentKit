@@ -128,7 +128,8 @@ $AssetOperations = @(
     "setMaterialInstanceVectorParameter",
     "setMaterialInstanceTextureParameter",
     "setMaterialInstanceStaticSwitchParameter",
-    "setDataTableCell"
+    "setDataTableCell",
+    "setDataTableRowFields"
 )
 $Commandlet = if ($AssetOperations -contains $Operation) { "AssetPatch" } else { "BlueprintPatch" }
 if (![string]::IsNullOrWhiteSpace($TestFailureInjection) -and $Commandlet -ne "AssetPatch")

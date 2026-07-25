@@ -19,10 +19,10 @@ The current release is **0.5.1** and targets **Unreal Engine 5.6**. Building on 
 - Find where Blueprint variables are read or written.
 - Trace functions, interface messages, macros, Dynamic Casts, and Event Dispatchers.
 - Inspect Blueprint graphs, nodes, pins, and connections.
-- Validate patches against policy, revision, and export snapshots, then dry-run or explicitly commit authorized Blueprint, non-Blueprint scalar, Material Instance parameter, or DataTable cell changes.
+- Validate patches against policy, revision, and export snapshots, then dry-run or explicitly commit authorized Blueprint, non-Blueprint scalar, Material Instance parameter, DataTable cell, or single-row multi-field changes.
 - Generate a backup manifest after every successful commit, then explicitly roll back and independently verify the restored revision when the current package still matches.
 - Create or reset isolated test assets from a declarative Write Fixture Plan, then independently verify class, revision, and dirty state.
-- Use the local MCP server to search assets/symbols, inspect assets and references, and create strict Plans or Dry Runs through six high-level safe-change tools without exposing shell, arbitrary SQL, or UObject access.
+- Use the local MCP server to search assets/symbols, inspect assets and references, and create strict Plans or Dry Runs through seven high-level safe-change tools without exposing shell, arbitrary SQL, or UObject access.
 - Exercise Bool, integer, floating-point, String, Name, Text, and two Enum representations through real dry-run/commit/reload matrices, including zero-write rejections for authorization, stale revisions, wrong types, range errors, invalid enums, missing properties, dirty packages, sidecars, and save failures.
 
 ## Main capabilities
@@ -194,7 +194,16 @@ scripts\RunScalarPatchRegression.cmd ^
 
 The script creates an isolated native Data Asset fixture, runs 11 dry runs, 11 commits, nine expected failures, and resets the fixture to its defaults after a successful run.
 
-The executor supports four Blueprint operations, `setAssetProperty`, four Material Instance parameter operations, and `setDataTableCell`. One execution is limited to one asset and one operation. Generic properties, Material parameters, and DataTable fields use exact `allowedAssetProperties`, `allowedMaterialParameters`, and `allowedDataTableFields` authorization. Material Instance writes require one unique Global parameter; DataTable writes target one top-level scalar field in one existing row and restore the complete row during dry runs. Only single-file packages without external package sidecars are accepted.
+Run the atomic DataTable single-row multi-field regression:
+
+```bat
+scripts\TestDataTableRowFields.cmd ^
+  -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject"
+```
+
+The script performs Dry Run, Commit, independent reload, rollback Dry Run, and rollback Commit for two fields in one existing row, then verifies that the original revision and values are restored.
+
+The executor supports four Blueprint operations, `setAssetProperty`, four Material Instance parameter operations, and `setDataTableCell` plus `setDataTableRowFields`. One execution is limited to one asset and one operation. Generic properties, Material parameters, and DataTable fields use exact `allowedAssetProperties`, `allowedMaterialParameters`, and `allowedDataTableFields` authorization. Material Instance writes require one unique Global parameter; DataTable writes may target one top-level scalar field or atomically update 1–32 authorized top-level scalar fields in one existing row, restoring the complete row during dry runs. Only single-file packages without external package sidecars are accepted.
 
 ### 6. Run the MCP server (0.5.1)
 

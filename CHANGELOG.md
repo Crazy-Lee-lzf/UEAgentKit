@@ -4,6 +4,10 @@ All notable changes to UE Agent Kit are documented here.
 
 ## Unreleased
 
+- Added `setDataTableRowFields` and `ue_set_datatable_row_fields` for atomic updates to 1–32 authorized top-level scalar fields in one existing DataTable row.
+- Added full-row prevalidation, exact per-field Policy checks, all-or-nothing mutation, full-row Dry Run restoration, structured multi-field reports, and a real UE5.6 Dry Run/Commit/reload/rollback regression.
+- Expanded workflow-only MCP mode from 19 to 20 tools and combined Live + workflow mode from 37 to 38 tools; offline and Live-only modes remain 5 and 23 tools.
+
 - Centralized MCP Tool order, mode membership, annotations, and Live Bridge method names in one typed Tool Registry with registration and handler-boundary drift guards.
 - Split MCP Query, Live Read, Live Action, and Workflow registration into independent modules and split Editor Bridge capabilities into Status, Diagnostic, Asset, Graph, Navigation, and Validation handler translation units.
 - Added eight bounded Live Editor Daily Action tools: `ue_open_asset`, `ue_focus_asset`, `ue_sync_content_browser`, `ue_focus_actor`, `ue_compile_blueprint`, `ue_validate_asset`, `ue_validate_folder`, and isolated exact-name `ue_run_automation_test`.

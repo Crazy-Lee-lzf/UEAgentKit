@@ -48,6 +48,7 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
                 "setMaterialInstanceTextureParameter",
                 "setMaterialInstanceStaticSwitchParameter",
                 "setDataTableCell",
+                "setDataTableRowFields",
             ],
 
         )
@@ -62,6 +63,7 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
                 "Blueprint",
                 "Blueprint",
                 "Blueprint",
+                "NonBlueprint",
                 "NonBlueprint",
                 "NonBlueprint",
                 "NonBlueprint",
@@ -144,6 +146,7 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
             "setMaterialInstanceTextureParameter",
             "setMaterialInstanceStaticSwitchParameter",
             "setDataTableCell",
+            "setDataTableRowFields",
             "AllowedDataTableFields",
             "FStructOnScope",
             "HandleDataTableChanged",

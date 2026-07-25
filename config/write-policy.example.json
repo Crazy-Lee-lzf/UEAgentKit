@@ -18,7 +18,8 @@
     "setMaterialInstanceVectorParameter",
     "setMaterialInstanceTextureParameter",
     "setMaterialInstanceStaticSwitchParameter",
-    "setDataTableCell"
+    "setDataTableCell",
+    "setDataTableRowFields"
   ],
   "allowedAssetClasses": [
     "/Script/Engine.Blueprint",
@@ -54,6 +55,7 @@
     "/Script/Engine.Texture2D"
   ],
   "allowedDataTableFields": [
-    "/Script/Engine.DataTable#/Script/GameplayTags.GameplayTagTableRow#DevComment"
+    "/Script/Engine.DataTable#/Script/GameplayTags.GameplayTagTableRow#DevComment",
+    "/Script/Engine.DataTable#/Script/GameplayTags.GameplayTagTableRow#Tag"
   ]
 }

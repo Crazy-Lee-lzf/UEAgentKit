@@ -83,7 +83,8 @@ Every save remains bounded by Policy, Revision, Dry Run, explicit confirmation, 
 
 ### 0.5.4: common data editing
 
-- DataTable single-row multi-field changes and controlled row operations.
+- [x] Atomic updates to 1–32 top-level scalar fields in one existing DataTable row.
+- [ ] Controlled DataTable row creation, deletion, and renaming.
 - Data Asset object/soft references, structs, and container value models.
 - Unified Material Instance parameter workflows.
 - High-level Blueprint default/component/pin editing refinements.

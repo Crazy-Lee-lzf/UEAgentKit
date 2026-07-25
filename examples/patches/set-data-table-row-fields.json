@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "1.0",
+  "patchId": "set-data-table-row-fields-example",
+  "projectName": "我的项目",
+  "description": "Atomically set multiple scalar fields on one existing DataTable row.",
+  "assets": [
+    {
+      "assetPath": "/Game/UEAgentKitWriteTests/DT_CellPatchTarget.DT_CellPatchTarget",
+      "expectedRevision": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "expectedAssetClass": "/Script/Engine.DataTable",
+      "operations": [
+        {
+          "operationId": "set-row-fields",
+          "operation": "setDataTableRowFields",
+          "target": {
+            "rowName": "Row_Alpha"
+          },
+          "value": {
+            "Tag": "UEAgentKit.Atomic.Row",
+            "DevComment": "Updated atomically"
+          }
+        }
+      ]
+    }
+  ]
+}

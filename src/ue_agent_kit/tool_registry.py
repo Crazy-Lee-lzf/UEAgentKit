@@ -63,6 +63,7 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_set_asset_property", "workflow", "planning", high_level_change=True),
     ToolDefinition("ue_set_material_parameter", "workflow", "planning", high_level_change=True),
     ToolDefinition("ue_set_datatable_cell", "workflow", "planning", high_level_change=True),
+    ToolDefinition("ue_set_datatable_row_fields", "workflow", "planning", high_level_change=True),
     ToolDefinition("ue_plan_patch", "workflow", "planning"),
     ToolDefinition("ue_dry_run_patch", "workflow", "planning"),
     ToolDefinition("ue_apply_patch", "workflow", "destructive"),

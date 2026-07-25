@@ -194,6 +194,28 @@ def register_workflow_tools(
             return error_response("ue_set_datatable_cell", exc, read_only=False)
 
     @server.tool(annotations=planning_annotations)
+    def ue_set_datatable_row_fields(
+        asset_path: str,
+        row_name: str,
+        values: dict[str, Any],
+        mode: Literal["Plan", "DryRun"] = "Plan",
+        description: str = "",
+    ) -> dict[str, Any]:
+        """Plan or Dry Run one atomic authorized update to fields in an existing DataTable row."""
+        try:
+            return _run_high_level_change(
+                tool_name="ue_set_datatable_row_fields",
+                mode=mode,
+                asset_path=asset_path,
+                operation="setDataTableRowFields",
+                target={"rowName": row_name},
+                value=values,
+                description=description,
+            )
+        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_set_datatable_row_fields", exc, read_only=False)
+
+    @server.tool(annotations=planning_annotations)
     def ue_plan_patch(
         asset_path: str,
         operation: str,

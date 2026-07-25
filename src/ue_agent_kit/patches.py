@@ -138,6 +138,14 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
         expected_change="data-table-cell",
         asset_type="NonBlueprint",
     ),
+    "setDataTableRowFields": OperationSpec(
+        name="setDataTableRowFields",
+        risk="medium",
+        target_fields=("rowName",),
+        target_validators={"rowName": _is_nonempty_text},
+        expected_change="data-table-row-fields",
+        asset_type="NonBlueprint",
+    ),
 }
 
 
@@ -593,11 +601,12 @@ def _validate_policy(policy: dict[str, Any], errors: list[dict[str, str]]) -> di
                 )
                 continue
             normalized_data_table_fields.append(item)
-    if "setDataTableCell" in normalized_operations and not normalized_data_table_fields:
+    data_table_operations = {"setDataTableCell", "setDataTableRowFields"}
+    if data_table_operations.intersection(normalized_operations) and not normalized_data_table_fields:
         _issue(
             errors,
             "policy-data-table-fields",
-            "setDataTableCell requires allowedDataTableFields authorization.",
+            "DataTable field operations require allowedDataTableFields authorization.",
             "policy.allowedDataTableFields",
         )
 
@@ -711,6 +720,26 @@ def _validate_vector_value(value: Any, max_value_bytes: int) -> bool:
             isinstance(component_value, bool)
             or not isinstance(component_value, (int, float))
             or not math.isfinite(float(component_value))
+        ):
+            return False
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return len(encoded) <= max_value_bytes
+
+
+def _validate_data_table_field_map(value: Any, max_value_bytes: int) -> bool:
+    if not isinstance(value, dict) or not 1 <= len(value) <= 32:
+        return False
+    for field_name, field_value in value.items():
+        if (
+            not _is_nonempty_text(field_name, max_length=256)
+            or "." in field_name
+            or field_value is None
+            or not _validate_scalar_value(field_value, max_value_bytes)
         ):
             return False
     encoded = json.dumps(
@@ -1190,12 +1219,12 @@ def validate_patch(
                             f"Asset property is not authorized by policy: {authorization or '<invalid>'}",
                             f"{operation_pointer}.target.propertyPath",
                         )
-                elif operation_name == "setDataTableCell":
+                elif operation_name in {"setDataTableCell", "setDataTableRowFields"}:
                     if asset_class != "/Script/Engine.DataTable":
                         _issue(
                             errors,
                             "operation-asset-type",
-                            "setDataTableCell requires a DataTable asset.",
+                            f"{operation_name} requires a DataTable asset.",
                             f"{operation_pointer}.operation",
                         )
                     row_struct_path_value = current.get("rowStructPath", "")
@@ -1204,19 +1233,26 @@ def validate_patch(
                         if isinstance(row_struct_path_value, str)
                         else ""
                     )
-                    field_name = target.get("fieldName")
-                    authorization = (
-                        f"{asset_class}#{row_struct_path}#{field_name}"
-                        if isinstance(field_name, str) and row_struct_path
-                        else ""
-                    )
-                    if authorization not in policy["allowedDataTableFields"]:
-                        _issue(
-                            errors,
-                            "data-table-field-not-allowed",
-                            f"DataTable field is not authorized by policy: {authorization or '<invalid>'}",
-                            f"{operation_pointer}.target.fieldName",
+                    if operation_name == "setDataTableCell":
+                        field_names = [target.get("fieldName")]
+                        field_paths = [f"{operation_pointer}.target.fieldName"]
+                    else:
+                        row_fields_value = operation_value.get("value")
+                        field_names = sorted(row_fields_value) if isinstance(row_fields_value, dict) else []
+                        field_paths = [f"{operation_pointer}.value.{field_name}" for field_name in field_names]
+                    for field_name, field_path in zip(field_names, field_paths, strict=True):
+                        authorization = (
+                            f"{asset_class}#{row_struct_path}#{field_name}"
+                            if isinstance(field_name, str) and row_struct_path
+                            else ""
                         )
+                        if authorization not in policy["allowedDataTableFields"]:
+                            _issue(
+                                errors,
+                                "data-table-field-not-allowed",
+                                f"DataTable field is not authorized by policy: {authorization or '<invalid>'}",
+                                field_path,
+                            )
                 elif operation_name in {
                     "setMaterialInstanceScalarParameter",
                     "setMaterialInstanceVectorParameter",
@@ -1282,6 +1318,14 @@ def validate_patch(
                         errors,
                         "operation-value-type",
                         "DataTable cells require a finite non-null JSON scalar.",
+                        f"{operation_pointer}.value",
+                    )
+            elif operation_name == "setDataTableRowFields":
+                if not _validate_data_table_field_map(value, policy["maxValueBytes"]):
+                    _issue(
+                        errors,
+                        "operation-value-type",
+                        "DataTable row fields require 1-32 unique top-level fields with finite non-null JSON scalar values.",
                         f"{operation_pointer}.value",
                     )
             elif operation_name == "setMaterialInstanceTextureParameter":

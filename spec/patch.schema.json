@@ -112,6 +112,9 @@
               },
               {
                 "$ref": "#/$defs/setDataTableCell"
+              },
+              {
+                "$ref": "#/$defs/setDataTableRowFields"
               }
             ]
           }
@@ -140,12 +143,15 @@
           "type": "object"
         },
         "value": {
-          "oneOf": [
+          "anyOf": [
             {
               "$ref": "#/$defs/scalar"
             },
             {
               "$ref": "#/$defs/colorVector"
+            },
+            {
+              "$ref": "#/$defs/dataTableFieldMap"
             }
           ]
         }
@@ -509,6 +515,56 @@
           }
         }
       ]
+    },
+    "setDataTableRowFields": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "operation": {
+              "const": "setDataTableRowFields"
+            },
+            "target": {
+              "type": "object",
+              "required": [
+                "rowName"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "rowName": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              }
+            },
+            "value": {
+              "$ref": "#/$defs/dataTableFieldMap"
+            }
+          }
+        }
+      ]
+    },
+    "dataTableFieldMap": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 32,
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256,
+        "pattern": "^[^.]+$"
+      },
+      "additionalProperties": {
+        "type": [
+          "string",
+          "number",
+          "integer",
+          "boolean"
+        ]
+      }
     }
   }
 }

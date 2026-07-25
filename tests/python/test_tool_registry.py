@@ -47,6 +47,7 @@ EXPECTED_ALL_TOOLS = [
     "ue_set_asset_property",
     "ue_set_material_parameter",
     "ue_set_datatable_cell",
+    "ue_set_datatable_row_fields",
     "ue_plan_patch",
     "ue_dry_run_patch",
     "ue_apply_patch",
@@ -66,7 +67,7 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertEqual(len(tool_names_for_mode()), 5)
         self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 23)
-        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 19)
+        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 20)
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:
         mcp_root = ROOT / "src" / "ue_agent_kit"

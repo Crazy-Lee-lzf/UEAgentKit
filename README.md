@@ -19,10 +19,10 @@ UE Agent Kit 是一套面向 Unreal Engine 的开源资产分析、索引与受�
 - 查询 Blueprint 变量在哪里被读取或写入。
 - 查询函数、接口消息、宏、Dynamic Cast 和 Event Dispatcher 的调用关系。
 - 查看 Blueprint 的 Graph、Node、Pin 和连接结构。
-- 使用 Policy、Revision 和导出快照校验 Patch，并对授权 Blueprint、非 Blueprint 标量属性、Material Instance 参数或 DataTable 单元格执行 Dry Run 或显式 Commit。
+- 使用 Policy、Revision 和导出快照校验 Patch，并对授权 Blueprint、非 Blueprint 标量属性、Material Instance 参数、DataTable 单元格或单 Row 多字段执行 Dry Run 或显式 Commit。
 - 为成功 Commit 自动生成 Backup Manifest，并在当前 Revision 仍匹配时显式回滚和独立验证恢复结果。
 - 使用声明式 Write Fixture Plan 在安全测试目录内创建或重置测试资产，并独立验证类、Revision 与 Dirty 状态。
-- 通过本地 MCP Server，让 Agent 搜索资产/Symbol、读取单资产和查询引用，并使用六个高层安全写入 Tool 自动生成严格 Plan 或执行 Dry Run，不开放 Shell、任意 SQL 或 UObject。
+- 通过本地 MCP Server，让 Agent 搜索资产/Symbol、读取单资产和查询引用，并使用七个高层安全写入 Tool 自动生成严格 Plan 或执行 Dry Run，不开放 Shell、任意 SQL 或 UObject。
 - 对 Bool、整数、浮点、String、Name、Text 和两类 Enum 执行真实 Dry Run/Commit/重载矩阵，并验证未授权、过期 Revision、错误类型、越界、非法 Enum、属性不存在、Dirty Package、Sidecar 和保存失败均零写入拒绝。
 
 ## 主要能力
@@ -194,7 +194,16 @@ scripts\RunScalarPatchRegression.cmd ^
 
 脚本会创建隔离的原生 Data Asset Fixture，执行 11/11 Dry Run、11/11 Commit、9/9 预期失败，并在正常完成时 Reset 回默认值。
 
-当前支持四种 Blueprint Operation、`setAssetProperty`、四种 Material Instance 参数 Operation，以及 `setDataTableCell`。每次执行仅允许一个资产和一个 Operation；通用属性、Material 参数和 DataTable 字段分别由 `allowedAssetProperties`、`allowedMaterialParameters`、`allowedDataTableFields` 精确授权。Material Instance 仅接受唯一 Global 参数；DataTable 仅修改现有 Row 的一个顶层标量字段，并在 Dry Run 中恢复完整 Row。当前仍只接受没有独立 Package 侧文件的单文件资产。
+DataTable 单 Row 多字段原子回归：
+
+```bat
+scripts\TestDataTableRowFields.cmd ^
+  -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject"
+```
+
+脚本会对一个现有 Row 的两个字段执行 Dry Run、Commit、独立重载、rollback Dry Run 和 rollback Commit，并验证最终 Revision 与原始字段值均恢复。
+
+当前支持四种 Blueprint Operation、`setAssetProperty`、四种 Material Instance 参数 Operation，以及 `setDataTableCell` 和 `setDataTableRowFields`。每次执行仅允许一个资产和一个 Operation；通用属性、Material 参数和 DataTable 字段分别由 `allowedAssetProperties`、`allowedMaterialParameters`、`allowedDataTableFields` 精确授权。Material Instance 仅接受唯一 Global 参数；DataTable 可修改现有 Row 的一个顶层标量字段，或以一个原子 Operation 修改 1–32 个已授权顶层标量字段，并在 Dry Run 中恢复完整 Row。当前仍只接受没有独立 Package 侧文件的单文件资产。
 
 ### 6. 启动 MCP Server（0.5.1）
 

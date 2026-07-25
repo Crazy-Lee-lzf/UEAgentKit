@@ -163,10 +163,12 @@ namespace AssetPatchCommandletPrivate
 				"Material Instance parameter operations require allowedMaterialParameters authorization.");
 			return false;
 		}
-		if (ContainsExact(OutPolicy.AllowedOperations, TEXT("setDataTableCell"))
-			&& OutPolicy.AllowedDataTableFields.IsEmpty())
+		const bool bUsesDataTableFieldOperations =
+			ContainsExact(OutPolicy.AllowedOperations, TEXT("setDataTableCell"))
+			|| ContainsExact(OutPolicy.AllowedOperations, TEXT("setDataTableRowFields"));
+		if (bUsesDataTableFieldOperations && OutPolicy.AllowedDataTableFields.IsEmpty())
 		{
-			OutError = TEXT("setDataTableCell requires allowedDataTableFields authorization.");
+			OutError = TEXT("DataTable field operations require allowedDataTableFields authorization.");
 			return false;
 		}
 		if (ContainsExact(OutPolicy.AllowedOperations, TEXT("setMaterialInstanceTextureParameter"))
@@ -1032,12 +1034,15 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		Operation.Equals(TEXT("setMaterialInstanceStaticSwitchParameter"), ESearchCase::CaseSensitive);
 	const bool bDataTableCellOperation =
 		Operation.Equals(TEXT("setDataTableCell"), ESearchCase::CaseSensitive);
+	const bool bDataTableRowFieldsOperation =
+		Operation.Equals(TEXT("setDataTableRowFields"), ESearchCase::CaseSensitive);
 	if ((!bAssetPropertyOperation
 			&& !bMaterialScalarOperation
 			&& !bMaterialVectorOperation
 			&& !bMaterialTextureOperation
 			&& !bMaterialStaticSwitchOperation
-			&& !bDataTableCellOperation)
+			&& !bDataTableCellOperation
+			&& !bDataTableRowFieldsOperation)
 		|| !ContainsExact(Policy.AllowedOperations, Operation))
 	{
 		UE_LOG(LogAssetPatch, Error, TEXT("Operation is not authorized or implemented: %s"), *Operation);
@@ -1825,22 +1830,20 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		return 0;
 	}
 
-	if (bDataTableCellOperation)
+	if (bDataTableCellOperation || bDataTableRowFieldsOperation)
 	{
 		UDataTable* DataTable = Cast<UDataTable>(Asset);
 		if (!DataTable)
 		{
-			UE_LOG(LogAssetPatch, Error, TEXT("setDataTableCell requires a DataTable asset."));
+			UE_LOG(LogAssetPatch, Error, TEXT("DataTable field operations require a DataTable asset."));
 			return 17;
 		}
 
 		FString RowNameText;
-		FString FieldNameText;
 		TargetObject->TryGetStringField(TEXT("rowName"), RowNameText);
-		TargetObject->TryGetStringField(TEXT("fieldName"), FieldNameText);
-		if (RowNameText.IsEmpty() || FieldNameText.IsEmpty() || FieldNameText.Contains(TEXT(".")))
+		if (RowNameText.IsEmpty())
 		{
-			UE_LOG(LogAssetPatch, Error, TEXT("DataTable rowName and one top-level fieldName are required."));
+			UE_LOG(LogAssetPatch, Error, TEXT("DataTable rowName is required."));
 			return 17;
 		}
 
@@ -1851,18 +1854,6 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			return 17;
 		}
 		const FString RowStructPath = RowStruct->GetPathName();
-		const FString FieldAuthorization =
-			ActualAssetClass + TEXT("#") + RowStructPath + TEXT("#") + FieldNameText;
-		if (!ContainsExact(Policy.AllowedDataTableFields, FieldAuthorization))
-		{
-			UE_LOG(
-				LogAssetPatch,
-				Error,
-				TEXT("DataTable field is not authorized by policy: %s"),
-				*FieldAuthorization);
-			return 17;
-		}
-
 		const FName RowName(*RowNameText);
 		uint8* RowData = DataTable->FindRowUnchecked(RowName);
 		if (!RowData)
@@ -1870,19 +1861,85 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			UE_LOG(LogAssetPatch, Error, TEXT("DataTable row was not found: %s"), *RowNameText);
 			return 17;
 		}
-		FProperty* Field = FindFProperty<FProperty>(RowStruct, FName(*FieldNameText));
-		if (!Field || Field->ArrayDim != 1
-			|| Field->HasAnyPropertyFlags(
-				CPF_Transient | CPF_DuplicateTransient | CPF_NonPIEDuplicateTransient))
+
+		TArray<FString> FieldNames;
+		TArray<TSharedPtr<FJsonValue>> NewValues;
+		if (bDataTableCellOperation)
 		{
-			UE_LOG(LogAssetPatch, Error, TEXT("DataTable field is missing, fixed-array, or transient: %s"), *FieldNameText);
-			return 17;
+			FString FieldNameText;
+			TargetObject->TryGetStringField(TEXT("fieldName"), FieldNameText);
+			const TSharedPtr<FJsonValue> NewValue = OperationObject->TryGetField(TEXT("value"));
+			if (FieldNameText.IsEmpty()
+				|| FieldNameText.Contains(TEXT("."))
+				|| !NewValue.IsValid()
+				|| NewValue->Type == EJson::Null
+				|| NewValue->Type == EJson::Array
+				|| NewValue->Type == EJson::Object)
+			{
+				UE_LOG(LogAssetPatch, Error, TEXT("DataTable cell requires one top-level field and a non-null JSON scalar."));
+				return 18;
+			}
+			FieldNames.Add(FieldNameText);
+			NewValues.Add(NewValue);
 		}
-		const TSharedPtr<FJsonValue> NewValue = OperationObject->TryGetField(TEXT("value"));
-		if (!NewValue.IsValid() || NewValue->Type == EJson::Null)
+		else
 		{
-			UE_LOG(LogAssetPatch, Error, TEXT("DataTable cell value must be a non-null JSON scalar."));
-			return 18;
+			const TSharedPtr<FJsonObject>* FieldValuesObjectPtr = nullptr;
+			if (!OperationObject->TryGetObjectField(TEXT("value"), FieldValuesObjectPtr)
+				|| !FieldValuesObjectPtr
+				|| !FieldValuesObjectPtr->IsValid()
+				|| (*FieldValuesObjectPtr)->Values.Num() < 1
+				|| (*FieldValuesObjectPtr)->Values.Num() > 32)
+			{
+				UE_LOG(LogAssetPatch, Error, TEXT("setDataTableRowFields requires an object containing 1 through 32 fields."));
+				return 18;
+			}
+			const TSharedPtr<FJsonObject> FieldValuesObject = *FieldValuesObjectPtr;
+			FieldValuesObject->Values.GetKeys(FieldNames);
+			FieldNames.Sort();
+			for (const FString& FieldName : FieldNames)
+			{
+				const TSharedPtr<FJsonValue> FieldValue = FieldValuesObject->Values.FindChecked(FieldName);
+				if (FieldName.IsEmpty()
+					|| FieldName.Len() > 256
+					|| FieldName.Contains(TEXT("."))
+					|| !FieldValue.IsValid()
+					|| FieldValue->Type == EJson::Null
+					|| FieldValue->Type == EJson::Array
+					|| FieldValue->Type == EJson::Object)
+				{
+					UE_LOG(LogAssetPatch, Error, TEXT("DataTable row fields require valid top-level names and non-null JSON scalar values."));
+					return 18;
+				}
+				NewValues.Add(FieldValue);
+			}
+		}
+
+		TArray<FProperty*> Fields;
+		Fields.Reserve(FieldNames.Num());
+		for (const FString& FieldName : FieldNames)
+		{
+			const FString FieldAuthorization =
+				ActualAssetClass + TEXT("#") + RowStructPath + TEXT("#") + FieldName;
+			if (!ContainsExact(Policy.AllowedDataTableFields, FieldAuthorization))
+			{
+				UE_LOG(
+					LogAssetPatch,
+					Error,
+					TEXT("DataTable field is not authorized by policy: %s"),
+					*FieldAuthorization);
+				return 17;
+			}
+			FProperty* Field = FindFProperty<FProperty>(RowStruct, FName(*FieldName));
+			if (!Field
+				|| Field->ArrayDim != 1
+				|| Field->HasAnyPropertyFlags(
+					CPF_Transient | CPF_DuplicateTransient | CPF_NonPIEDuplicateTransient))
+			{
+				UE_LOG(LogAssetPatch, Error, TEXT("DataTable field is missing, fixed-array, or transient: %s"), *FieldName);
+				return 17;
+			}
+			Fields.Add(Field);
 		}
 
 		FStructOnScope OriginalRow(RowStruct);
@@ -1894,20 +1951,36 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		}
 		RowStruct->CopyScriptStruct(OriginalRow.GetStructMemory(), RowData);
 		RowStruct->CopyScriptStruct(ExpectedRow.GetStructMemory(), RowData);
-		void* ExpectedValueAddress = Field->ContainerPtrToValuePtr<void>(ExpectedRow.GetStructMemory());
-		if (!SetPropertyFromJson(Field, ExpectedValueAddress, NewValue, Error))
+		for (int32 Index = 0; Index < Fields.Num(); ++Index)
 		{
-			UE_LOG(LogAssetPatch, Error, TEXT("Invalid DataTable cell value: %s"), *Error);
-			return 18;
+			void* ExpectedValueAddress = Fields[Index]->ContainerPtrToValuePtr<void>(ExpectedRow.GetStructMemory());
+			if (!SetPropertyFromJson(Fields[Index], ExpectedValueAddress, NewValues[Index], Error))
+			{
+				UE_LOG(LogAssetPatch, Error, TEXT("Invalid DataTable value for field %s: %s"), *FieldNames[Index], *Error);
+				return 18;
+			}
 		}
 
-		void* ValueAddress = Field->ContainerPtrToValuePtr<void>(RowData);
-		void* OriginalValueAddress = Field->ContainerPtrToValuePtr<void>(OriginalRow.GetStructMemory());
-		FString BeforeValue;
-		if (!ReadPropertyValue(DataTable, Field, ValueAddress, BeforeValue))
+		TSharedRef<FJsonObject> BeforeValues = MakeShared<FJsonObject>();
+		TSharedRef<FJsonObject> AfterValues = MakeShared<FJsonObject>();
+		TSharedRef<FJsonObject> RestoredValues = MakeShared<FJsonObject>();
+		TSharedRef<FJsonObject> FieldTypes = MakeShared<FJsonObject>();
+		TArray<FString> BeforeValueTexts;
+		TArray<FString> AfterValueTexts;
+		TArray<FString> RestoredValueTexts;
+		BeforeValueTexts.SetNum(Fields.Num());
+		AfterValueTexts.SetNum(Fields.Num());
+		RestoredValueTexts.SetNum(Fields.Num());
+		for (int32 Index = 0; Index < Fields.Num(); ++Index)
 		{
-			UE_LOG(LogAssetPatch, Error, TEXT("Could not read original DataTable cell value."));
-			return 18;
+			void* ValueAddress = Fields[Index]->ContainerPtrToValuePtr<void>(RowData);
+			if (!ReadPropertyValue(DataTable, Fields[Index], ValueAddress, BeforeValueTexts[Index]))
+			{
+				UE_LOG(LogAssetPatch, Error, TEXT("Could not read original DataTable field value: %s"), *FieldNames[Index]);
+				return 18;
+			}
+			BeforeValues->SetStringField(FieldNames[Index], BeforeValueTexts[Index]);
+			FieldTypes->SetStringField(FieldNames[Index], Fields[Index]->GetClass()->GetName());
 		}
 
 		FString BackupFilename;
@@ -1923,45 +1996,60 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		}
 
 		DataTable->Modify();
-		if (!SetPropertyFromJson(Field, ValueAddress, NewValue, Error))
+		for (int32 Index = 0; Index < Fields.Num(); ++Index)
 		{
-			RowStruct->CopyScriptStruct(RowData, OriginalRow.GetStructMemory());
-			DataTable->HandleDataTableChanged(RowName);
-			Package->SetDirtyFlag(bOriginalDirty);
-			UE_LOG(LogAssetPatch, Error, TEXT("Could not apply DataTable cell value: %s"), *Error);
-			return 20;
+			void* ValueAddress = Fields[Index]->ContainerPtrToValuePtr<void>(RowData);
+			if (!SetPropertyFromJson(Fields[Index], ValueAddress, NewValues[Index], Error))
+			{
+				RowStruct->CopyScriptStruct(RowData, OriginalRow.GetStructMemory());
+				DataTable->HandleDataTableChanged(RowName);
+				Package->SetDirtyFlag(bOriginalDirty);
+				UE_LOG(LogAssetPatch, Error, TEXT("Could not apply DataTable field %s: %s"), *FieldNames[Index], *Error);
+				return 20;
+			}
 		}
 		DataTable->HandleDataTableChanged(RowName);
 		Package->MarkPackageDirty();
+
+		bool bAppliedValueMatch = true;
 		const bool bAppliedStructureMatch = RowStruct->CompareScriptStruct(
 			RowData,
 			ExpectedRow.GetStructMemory(),
 			PPF_None);
-		if (!bAppliedStructureMatch
-			|| !Field->Identical(ValueAddress, ExpectedValueAddress, PPF_None))
+		for (int32 Index = 0; Index < Fields.Num(); ++Index)
+		{
+			void* ValueAddress = Fields[Index]->ContainerPtrToValuePtr<void>(RowData);
+			void* ExpectedValueAddress = Fields[Index]->ContainerPtrToValuePtr<void>(ExpectedRow.GetStructMemory());
+			bAppliedValueMatch = bAppliedValueMatch
+				&& Fields[Index]->Identical(ValueAddress, ExpectedValueAddress, PPF_None);
+		}
+		if (!bAppliedStructureMatch || !bAppliedValueMatch)
 		{
 			RowStruct->CopyScriptStruct(RowData, OriginalRow.GetStructMemory());
 			DataTable->HandleDataTableChanged(RowName);
 			Package->SetDirtyFlag(bOriginalDirty);
-			UE_LOG(LogAssetPatch, Error, TEXT("DataTable cell read-back verification failed."));
+			UE_LOG(LogAssetPatch, Error, TEXT("DataTable row read-back verification failed."));
 			return 20;
 		}
 
-		FString AfterValue;
-		if (!ReadPropertyValue(DataTable, Field, ValueAddress, AfterValue))
+		for (int32 Index = 0; Index < Fields.Num(); ++Index)
 		{
-			RowStruct->CopyScriptStruct(RowData, OriginalRow.GetStructMemory());
-			DataTable->HandleDataTableChanged(RowName);
-			Package->SetDirtyFlag(bOriginalDirty);
-			UE_LOG(LogAssetPatch, Error, TEXT("Could not read updated DataTable cell value."));
-			return 20;
+			void* ValueAddress = Fields[Index]->ContainerPtrToValuePtr<void>(RowData);
+			if (!ReadPropertyValue(DataTable, Fields[Index], ValueAddress, AfterValueTexts[Index]))
+			{
+				RowStruct->CopyScriptStruct(RowData, OriginalRow.GetStructMemory());
+				DataTable->HandleDataTableChanged(RowName);
+				Package->SetDirtyFlag(bOriginalDirty);
+				UE_LOG(LogAssetPatch, Error, TEXT("Could not read updated DataTable field value: %s"), *FieldNames[Index]);
+				return 20;
+			}
+			AfterValues->SetStringField(FieldNames[Index], AfterValueTexts[Index]);
 		}
 
 		bool bSaved = false;
 		bool bRolledBack = false;
 		bool bStructureMatch = true;
 		bool bRestoredValueMatch = true;
-		FString RestoredValue = BeforeValue;
 		if (bCommit)
 		{
 			if (!SaveAssetPackage(DataTable, PackageFilename, Error))
@@ -1977,16 +2065,22 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			RowStruct->CopyScriptStruct(RowData, OriginalRow.GetStructMemory());
 			DataTable->HandleDataTableChanged(RowName);
 			Package->SetDirtyFlag(bOriginalDirty);
-			ValueAddress = Field->ContainerPtrToValuePtr<void>(RowData);
 			bStructureMatch = RowStruct->CompareScriptStruct(
 				RowData,
 				OriginalRow.GetStructMemory(),
 				PPF_None);
-			bRestoredValueMatch = Field->Identical(ValueAddress, OriginalValueAddress, PPF_None);
-			if (!ReadPropertyValue(DataTable, Field, ValueAddress, RestoredValue))
+			for (int32 Index = 0; Index < Fields.Num(); ++Index)
 			{
-				UE_LOG(LogAssetPatch, Error, TEXT("Could not read restored DataTable cell value."));
-				return 22;
+				void* ValueAddress = Fields[Index]->ContainerPtrToValuePtr<void>(RowData);
+				void* OriginalValueAddress = Fields[Index]->ContainerPtrToValuePtr<void>(OriginalRow.GetStructMemory());
+				bRestoredValueMatch = bRestoredValueMatch
+					&& Fields[Index]->Identical(ValueAddress, OriginalValueAddress, PPF_None);
+				if (!ReadPropertyValue(DataTable, Fields[Index], ValueAddress, RestoredValueTexts[Index]))
+				{
+					UE_LOG(LogAssetPatch, Error, TEXT("Could not read restored DataTable field value: %s"), *FieldNames[Index]);
+					return 22;
+				}
+				RestoredValues->SetStringField(FieldNames[Index], RestoredValueTexts[Index]);
 			}
 			bRolledBack = true;
 		}
@@ -2002,19 +2096,37 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		Report->SetStringField(TEXT("assetClass"), ActualAssetClass);
 		Report->SetStringField(TEXT("operation"), Operation);
 		Report->SetObjectField(TEXT("target"), TargetObject);
-		Report->SetStringField(
-			TEXT("targetDescription"),
-			TEXT("data-table-cell:") + RowNameText + TEXT(".") + FieldNameText);
-		Report->SetStringField(TEXT("targetType"), Field->GetClass()->GetName());
 		Report->SetStringField(TEXT("rowStructPath"), RowStructPath);
-		Report->SetStringField(TEXT("beforeValue"), BeforeValue);
-		Report->SetStringField(TEXT("afterValue"), AfterValue);
-		Report->SetStringField(TEXT("restoredValue"), RestoredValue);
+		Report->SetNumberField(TEXT("fieldCount"), Fields.Num());
+		Report->SetObjectField(TEXT("beforeValues"), BeforeValues);
+		Report->SetObjectField(TEXT("afterValues"), AfterValues);
+		Report->SetObjectField(TEXT("restoredValues"), RestoredValues);
+		Report->SetObjectField(TEXT("fieldTypes"), FieldTypes);
+		if (bDataTableCellOperation)
+		{
+			Report->SetStringField(
+				TEXT("targetDescription"),
+				TEXT("data-table-cell:") + RowNameText + TEXT(".") + FieldNames[0]);
+			Report->SetStringField(TEXT("targetType"), Fields[0]->GetClass()->GetName());
+			Report->SetStringField(TEXT("beforeValue"), BeforeValueTexts[0]);
+			Report->SetStringField(TEXT("afterValue"), AfterValueTexts[0]);
+			Report->SetStringField(
+				TEXT("restoredValue"),
+				bRolledBack ? RestoredValueTexts[0] : BeforeValueTexts[0]);
+		}
+		else
+		{
+			Report->SetStringField(
+				TEXT("targetDescription"),
+				TEXT("data-table-row-fields:") + RowNameText);
+			Report->SetStringField(TEXT("targetType"), TEXT("DataTableRowFields"));
+		}
 		Report->SetStringField(TEXT("beforeRevision"), BeforeRevision);
 		Report->SetStringField(TEXT("afterRevision"), AfterRevision);
 		Report->SetBoolField(TEXT("compiled"), false);
 		Report->SetBoolField(TEXT("saved"), bSaved);
 		Report->SetBoolField(TEXT("rolledBack"), bRolledBack);
+		Report->SetBoolField(TEXT("appliedValueMatch"), bAppliedValueMatch);
 		Report->SetBoolField(TEXT("appliedStructureMatch"), bAppliedStructureMatch);
 		Report->SetBoolField(TEXT("rollbackValueMatch"), !bRolledBack || bRestoredValueMatch);
 		Report->SetBoolField(TEXT("rollbackStructureMatch"), !bRolledBack || bStructureMatch);
@@ -2032,7 +2144,8 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			return 23;
 		}
 
-		if (bRolledBack && (!bRestoredValueMatch || !bStructureMatch
+		if (bRolledBack && (!bRestoredValueMatch
+			|| !bStructureMatch
 			|| !BeforeRevision.Equals(AfterRevision, ESearchCase::IgnoreCase)))
 		{
 			UE_LOG(LogAssetPatch, Error, TEXT("DataTable Dry Run rollback verification failed."));
@@ -2041,13 +2154,11 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		UE_LOG(
 			LogAssetPatch,
 			Display,
-			TEXT("DataTable cell patch succeeded. Mode=%s Asset=%s Row=%s Field=%s Before=%s After=%s"),
+			TEXT("DataTable field patch succeeded. Mode=%s Asset=%s Row=%s FieldCount=%d"),
 			bCommit ? TEXT("Commit") : TEXT("DryRun"),
 			*AssetPath,
 			*RowNameText,
-			*FieldNameText,
-			*BeforeValue,
-			*AfterValue);
+			Fields.Num());
 		return 0;
 	}
 
