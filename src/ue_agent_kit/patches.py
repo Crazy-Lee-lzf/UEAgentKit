@@ -146,6 +146,33 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
         expected_change="data-table-row-fields",
         asset_type="NonBlueprint",
     ),
+    "addDataTableRow": OperationSpec(
+        name="addDataTableRow",
+        risk="high",
+        target_fields=("rowName",),
+        target_validators={"rowName": _is_nonempty_text},
+        expected_change="data-table-row-add",
+        asset_type="NonBlueprint",
+    ),
+    "removeDataTableRow": OperationSpec(
+        name="removeDataTableRow",
+        risk="high",
+        target_fields=("rowName",),
+        target_validators={"rowName": _is_nonempty_text},
+        expected_change="data-table-row-remove",
+        asset_type="NonBlueprint",
+    ),
+    "renameDataTableRow": OperationSpec(
+        name="renameDataTableRow",
+        risk="high",
+        target_fields=("rowName", "newRowName"),
+        target_validators={
+            "rowName": _is_nonempty_text,
+            "newRowName": _is_nonempty_text,
+        },
+        expected_change="data-table-row-rename",
+        asset_type="NonBlueprint",
+    ),
 }
 
 
@@ -601,7 +628,11 @@ def _validate_policy(policy: dict[str, Any], errors: list[dict[str, str]]) -> di
                 )
                 continue
             normalized_data_table_fields.append(item)
-    data_table_operations = {"setDataTableCell", "setDataTableRowFields"}
+    data_table_operations = {
+        "setDataTableCell",
+        "setDataTableRowFields",
+        "addDataTableRow",
+    }
     if data_table_operations.intersection(normalized_operations) and not normalized_data_table_fields:
         _issue(
             errors,
@@ -865,10 +896,14 @@ def _load_export_snapshot(
             revision_value = ""
         asset_details = canonical.get("assetDetails")
         row_struct_path = ""
+        row_names: list[str] = []
         if isinstance(asset_details, dict):
             row_struct_value = asset_details.get("rowStructPath", "")
             if isinstance(row_struct_value, str):
                 row_struct_path = row_struct_value
+            row_names_value = asset_details.get("rowNames", [])
+            if isinstance(row_names_value, list):
+                row_names = [item for item in row_names_value if isinstance(item, str)]
 
         package_dirty_value = revision.get("packageDirty")
         if not isinstance(package_dirty_value, bool):
@@ -888,6 +923,7 @@ def _load_export_snapshot(
             "packageDirty": package_dirty_value is True,
             "canonicalPath": canonical_path.relative_to(root).as_posix(),
             "rowStructPath": row_struct_path,
+            "rowNames": row_names,
         }
     return str(project_name), assets
 
@@ -1219,7 +1255,13 @@ def validate_patch(
                             f"Asset property is not authorized by policy: {authorization or '<invalid>'}",
                             f"{operation_pointer}.target.propertyPath",
                         )
-                elif operation_name in {"setDataTableCell", "setDataTableRowFields"}:
+                elif operation_name in {
+                    "setDataTableCell",
+                    "setDataTableRowFields",
+                    "addDataTableRow",
+                    "removeDataTableRow",
+                    "renameDataTableRow",
+                }:
                     if asset_class != "/Script/Engine.DataTable":
                         _issue(
                             errors,
@@ -1233,13 +1275,53 @@ def validate_patch(
                         if isinstance(row_struct_path_value, str)
                         else ""
                     )
+                    row_names_value = current.get("rowNames", [])
+                    row_names = {
+                        item for item in row_names_value if isinstance(item, str)
+                    } if isinstance(row_names_value, list) else set()
+                    row_name = target.get("rowName")
+                    if operation_name == "addDataTableRow":
+                        if isinstance(row_name, str) and row_name in row_names:
+                            _issue(
+                                errors,
+                                "data-table-row-exists",
+                                f"DataTable row already exists: {row_name}",
+                                f"{operation_pointer}.target.rowName",
+                            )
+                    elif operation_name in {"removeDataTableRow", "renameDataTableRow"}:
+                        if isinstance(row_name, str) and row_name not in row_names:
+                            _issue(
+                                errors,
+                                "data-table-row-missing",
+                                f"DataTable row does not exist: {row_name}",
+                                f"{operation_pointer}.target.rowName",
+                            )
+                    if operation_name == "renameDataTableRow":
+                        new_row_name = target.get("newRowName")
+                        if new_row_name == row_name:
+                            _issue(
+                                errors,
+                                "data-table-row-name-unchanged",
+                                "DataTable source and destination row names must differ.",
+                                f"{operation_pointer}.target.newRowName",
+                            )
+                        elif isinstance(new_row_name, str) and new_row_name in row_names:
+                            _issue(
+                                errors,
+                                "data-table-row-exists",
+                                f"DataTable destination row already exists: {new_row_name}",
+                                f"{operation_pointer}.target.newRowName",
+                            )
                     if operation_name == "setDataTableCell":
                         field_names = [target.get("fieldName")]
                         field_paths = [f"{operation_pointer}.target.fieldName"]
-                    else:
+                    elif operation_name in {"setDataTableRowFields", "addDataTableRow"}:
                         row_fields_value = operation_value.get("value")
                         field_names = sorted(row_fields_value) if isinstance(row_fields_value, dict) else []
                         field_paths = [f"{operation_pointer}.value.{field_name}" for field_name in field_names]
+                    else:
+                        field_names = []
+                        field_paths = []
                     for field_name, field_path in zip(field_names, field_paths, strict=True):
                         authorization = (
                             f"{asset_class}#{row_struct_path}#{field_name}"
@@ -1326,6 +1408,28 @@ def validate_patch(
                         errors,
                         "operation-value-type",
                         "DataTable row fields require 1-32 unique top-level fields with finite non-null JSON scalar values.",
+                        f"{operation_pointer}.value",
+                    )
+            elif operation_name == "addDataTableRow":
+                if not isinstance(value, dict) or len(value) > 32 or any(
+                    not _is_nonempty_text(field_name, max_length=256)
+                    or "." in field_name
+                    or field_value is None
+                    or not _validate_scalar_value(field_value, policy["maxValueBytes"])
+                    for field_name, field_value in value.items()
+                ):
+                    _issue(
+                        errors,
+                        "operation-value-type",
+                        "DataTable row creation requires an object containing at most 32 authorized scalar fields.",
+                        f"{operation_pointer}.value",
+                    )
+            elif operation_name in {"removeDataTableRow", "renameDataTableRow"}:
+                if value is not True:
+                    _issue(
+                        errors,
+                        "operation-value-type",
+                        f"{operation_name} requires value=true as an explicit structural-change acknowledgement.",
                         f"{operation_pointer}.value",
                     )
             elif operation_name == "setMaterialInstanceTextureParameter":

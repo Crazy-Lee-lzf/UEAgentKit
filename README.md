@@ -19,7 +19,7 @@ UE Agent Kit 是一套面向 Unreal Engine 的开源资产分析、索引与受�
 - 查询 Blueprint 变量在哪里被读取或写入。
 - 查询函数、接口消息、宏、Dynamic Cast 和 Event Dispatcher 的调用关系。
 - 查看 Blueprint 的 Graph、Node、Pin 和连接结构。
-- 使用 Policy、Revision 和导出快照校验 Patch，并对授权 Blueprint、非 Blueprint 标量属性、Material Instance 参数、DataTable 单元格或单 Row 多字段执行 Dry Run 或显式 Commit。
+- 使用 Policy、Revision 和导出快照校验 Patch，并对授权 Blueprint、非 Blueprint 标量属性、Material Instance 参数、DataTable 单元格、单 Row 多字段或受控 Row 新增/删除/重命名执行 Dry Run 或显式 Commit。
 - 为成功 Commit 自动生成 Backup Manifest，并在当前 Revision 仍匹配时显式回滚和独立验证恢复结果。
 - 使用声明式 Write Fixture Plan 在安全测试目录内创建或重置测试资产，并独立验证类、Revision 与 Dirty 状态。
 - 通过本地 MCP Server，让 Agent 搜索资产/Symbol、读取单资产和查询引用，并使用七个高层安全写入 Tool 自动生成严格 Plan 或执行 Dry Run，不开放 Shell、任意 SQL 或 UObject。
@@ -203,7 +203,16 @@ scripts\TestDataTableRowFields.cmd ^
 
 脚本会对一个现有 Row 的两个字段执行 Dry Run、Commit、独立重载、rollback Dry Run 和 rollback Commit，并验证最终 Revision 与原始字段值均恢复。
 
-当前支持四种 Blueprint Operation、`setAssetProperty`、四种 Material Instance 参数 Operation，以及 `setDataTableCell` 和 `setDataTableRowFields`。每次执行仅允许一个资产和一个 Operation；通用属性、Material 参数和 DataTable 字段分别由 `allowedAssetProperties`、`allowedMaterialParameters`、`allowedDataTableFields` 精确授权。Material Instance 仅接受唯一 Global 参数；DataTable 可修改现有 Row 的一个顶层标量字段，或以一个原子 Operation 修改 1–32 个已授权顶层标量字段，并在 Dry Run 中恢复完整 Row。当前仍只接受没有独立 Package 侧文件的单文件资产。
+DataTable Row 结构操作回归：
+
+```bat
+scripts\TestDataTableRowOperations.cmd ^
+  -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject"
+```
+
+脚本依次执行 Add Dry Run、Add Commit、Rename Commit、Remove Commit，再按 Remove → Rename → Add 逆序执行三层 rollback；每一步均通过独立 UE 进程重新导出验证 Row 集合，最终 Package Revision 必须与初始值完全一致。
+
+当前支持四种 Blueprint Operation、`setAssetProperty`、四种 Material Instance 参数 Operation，以及 `setDataTableCell`、`setDataTableRowFields`、`addDataTableRow`、`removeDataTableRow` 和 `renameDataTableRow`。每次执行仅允许一个资产和一个 Operation；通用属性、Material 参数和 DataTable 字段分别由 `allowedAssetProperties`、`allowedMaterialParameters`、`allowedDataTableFields` 精确授权。DataTable 可修改现有 Row 的一个顶层标量字段、原子修改 1–32 个已授权顶层标量字段，或受控新增、删除和重命名 Row。Add 从 RowStruct 默认值开始并只写入 0–32 个已授权标量字段；Remove/Rename 要求显式 `value=true`。结构操作使用完整表快照、未受影响 Row 校验、Dry Run 恢复、唯一备份和独立 rollback 验证。当前仍只接受没有独立 Package 侧文件的单文件资产。
 
 ### 6. 启动 MCP Server（0.5.1）
 
@@ -228,7 +237,7 @@ scripts\TestMcpSnapshotRefresh.cmd ^
   -ProjectPath "<TEST_PROJECT>.uproject"
 ```
 
-服务器对 MCP Client 仍只使用本地 `stdio`。默认模式为 5 个离线只读 Tool；`-EnableLiveEditor -ProjectPath <固定工程>` 增加 10 个实时只读 Tool和 7 个受限 Daily Action，共 22 个 Live Tool；固定 Engine、Project、Policy 和 Revision Export 后的工作流为 18 个；两者组合时共 35 个 Tool。实时读取提供有界 Output Log、编译诊断、不触发加载的内存资产检查，以及普通 Blueprint Editor 的当前 Graph/Node 定位；Daily Action 提供资产打开/聚焦、Content Browser 同步、ActorGuid 聚焦、Blueprint 内存编译和官方 Data Validation，均不保存资产；工作流模式提供四源资产状态和安全单资产索引刷新：
+服务器对 MCP Client 仍只使用本地 `stdio`。默认模式为 5 个离线只读 Tool；`-EnableLiveEditor -ProjectPath <固定工程>` 增加 10 个实时只读 Tool 和 8 个受限 Daily Action，共 23 个 Live Tool；固定 Engine、Project、Policy 和 Revision Export 后的工作流为 23 个；两者组合时共 41 个 Tool。实时读取提供有界 Output Log、编译诊断、不触发加载的内存资产检查，以及普通 Blueprint Editor 的当前 Graph/Node 定位；Daily Action 提供资产打开/聚焦、Content Browser 同步、ActorGuid 聚焦、Blueprint 内存编译和官方 Data Validation，均不保存资产；工作流模式提供四源资产状态和安全单资产索引刷新：
 
 ```bat
 claude mcp add --transport stdio --scope project ue-agent-kit -- ^
@@ -237,7 +246,7 @@ claude mcp add --transport stdio --scope project ue-agent-kit -- ^
   -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
 ```
 
-添加后可用 `claude mcp list` 或 Claude Code 内的 `/mcp` 检查连接。Live Editor 模式通过固定工程 `Saved/UEAgentKit/EditorBridge.json` 发现仅绑定 `127.0.0.1` 的临时端点，并执行随机令牌、工程路径摘要、版本和 Capability 握手；Tool 参数不能指定端口、令牌或任意 UObject/Console/Python/Shell。实时读取包括 4096 条 Output Log 环形缓冲、编译诊断、不触发加载的精确 `/Game/...Asset.Asset` 检查，以及只支持普通 Blueprint Editor 的聚焦 Graph 与最多 100 个选中 Node；相关读取始终报告 `loadedByBridge=false`。Daily Action 仅接受精确 `/Game` 身份或当前 Editor World `ActorGuid`，在 PIE/SIE 中拒绝执行；资产打开/聚焦、Content Browser 同步、Blueprint 内存编译和官方 Data Validation 均不保存 Package，并明确返回 Dirty 状态。`ue_get_asset_state` 区分 Editor Memory、磁盘 Package、Revision Export 和 SQLite，且不会为内存状态伪造 Revision。完整写入模式使用 `-EnableWriteTools`；只有同时使用 `-EnableCommitTools` 且 Policy 允许 Commit，才能保存或恢复资产。Plan 要求 SQLite、Revision Export 与磁盘 Package Revision 一致；六个 `ue_set_*` Tool 默认只生成 Plan，也可自动执行 Dry Run，但不能直接 Commit。Commit 后固定快照会标记 stale，rollback 恢复原 Revision 后才重新 fresh。`ue_refresh_asset_index` 仅接受一个 Policy 授权的精确资产路径，并通过 Preview/Apply 生成配对 Revision Export + SQLite Generation；Apply 后当前会话继续读取冻结旧代且拒绝新工作流，重启 MCP 后新会话才读取新代。完整契约见 [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md)、[`spec/LIVE_EDITOR_BRIDGE.md`](spec/LIVE_EDITOR_BRIDGE.md) 与 [`spec/INDEX_FRESHNESS.md`](spec/INDEX_FRESHNESS.md)。
+添加后可用 `claude mcp list` 或 Claude Code 内的 `/mcp` 检查连接。Live Editor 模式通过固定工程 `Saved/UEAgentKit/EditorBridge.json` 发现仅绑定 `127.0.0.1` 的临时端点，并执行随机令牌、工程路径摘要、版本和 Capability 握手；Tool 参数不能指定端口、令牌或任意 UObject/Console/Python/Shell。实时读取包括 4096 条 Output Log 环形缓冲、编译诊断、不触发加载的精确 `/Game/...Asset.Asset` 检查，以及只支持普通 Blueprint Editor 的聚焦 Graph 与最多 100 个选中 Node；相关读取始终报告 `loadedByBridge=false`。Daily Action 仅接受精确 `/Game` 身份或当前 Editor World `ActorGuid`，在 PIE/SIE 中拒绝执行；资产打开/聚焦、Content Browser 同步、Blueprint 内存编译和官方 Data Validation 均不保存 Package，并明确返回 Dirty 状态。`ue_get_asset_state` 区分 Editor Memory、磁盘 Package、Revision Export 和 SQLite，且不会为内存状态伪造 Revision。完整写入模式使用 `-EnableWriteTools`；只有同时使用 `-EnableCommitTools` 且 Policy 允许 Commit，才能保存或恢复资产。Plan 要求 SQLite、Revision Export 与磁盘 Package Revision 一致；十个高层安全变更 Tool 默认只生成 Plan，也可自动执行 Dry Run，但不能直接 Commit。Commit 后固定快照会标记 stale，rollback 恢复原 Revision 后才重新 fresh。`ue_refresh_asset_index` 仅接受一个 Policy 授权的精确资产路径，并通过 Preview/Apply 生成配对 Revision Export + SQLite Generation；Apply 后当前会话继续读取冻结旧代且拒绝新工作流，重启 MCP 后新会话才读取新代。完整契约见 [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md)、[`spec/LIVE_EDITOR_BRIDGE.md`](spec/LIVE_EDITOR_BRIDGE.md) 与 [`spec/INDEX_FRESHNESS.md`](spec/INDEX_FRESHNESS.md)。
 
 ### 7. 校验通用资产导出
 

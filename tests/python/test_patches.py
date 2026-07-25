@@ -181,6 +181,44 @@ class PatchValidationTests(unittest.TestCase):
     def error_codes(self, result: dict[str, Any]) -> set[str]:
         return {item["code"] for item in result["errors"]}
 
+    def configure_data_table_row_operation(
+        self,
+        operation: str,
+        target: dict[str, str],
+        value: Any,
+        *,
+        row_names: list[str] | None = None,
+        authorized_fields: list[str] | None = None,
+    ) -> None:
+        asset_path = "/Game/UEAgentKitWriteTests/DT_CellPatchTarget.DT_CellPatchTarget"
+        asset_class = "/Script/Engine.DataTable"
+        row_struct = "/Script/GameplayTags.GameplayTagTableRow"
+        asset = self.patch["assets"][0]
+        asset["assetPath"] = asset_path
+        asset["expectedAssetClass"] = asset_class
+        asset["operations"] = [
+            {
+                "operationId": f"{operation}-test",
+                "operation": operation,
+                "target": target,
+                "value": value,
+            }
+        ]
+        self.policy["allowedOperations"].append(operation)
+        self.policy["allowedAssetClasses"].append(asset_class)
+        fields = authorized_fields if authorized_fields is not None else ["DevComment", "Tag"]
+        self.policy["allowedDataTableFields"] = [
+            f"{asset_class}#{row_struct}#{field_name}" for field_name in fields
+        ]
+        self.canonical["assetPath"] = asset_path
+        self.canonical["packageName"] = asset_path.rsplit(".", 1)[0]
+        self.canonical["assetClass"] = asset_class
+        self.canonical["assetDetails"] = {
+            "rowStructPath": row_struct,
+            "rowNames": list(row_names if row_names is not None else ["Row_Alpha"]),
+        }
+        self.flush()
+
     def test_valid_patch_is_validation_only(self) -> None:
         result = self.validate()
         self.assertTrue(result["valid"])
@@ -778,6 +816,107 @@ class PatchValidationTests(unittest.TestCase):
         self.canonical["assetClass"] = asset_class
         self.canonical["assetDetails"] = {"rowStructPath": row_struct}
         self.flush()
+        self.assertIn("operation-value-type", self.error_codes(self.validate()))
+
+    def test_add_data_table_row_is_valid(self) -> None:
+        self.configure_data_table_row_operation(
+            "addDataTableRow",
+            {"rowName": "Row_Beta"},
+            {"DevComment": "Added", "Tag": "Gameplay.Added"},
+        )
+        result = self.validate()
+        self.assertTrue(result["valid"], result["errors"])
+        expected = result["assets"][0]["operations"][0]["expectedChange"]
+        self.assertEqual(expected["kind"], "data-table-row-add")
+
+    def test_add_data_table_row_rejects_existing_row(self) -> None:
+        self.configure_data_table_row_operation(
+            "addDataTableRow",
+            {"rowName": "Row_Alpha"},
+            {},
+        )
+        self.assertIn("data-table-row-exists", self.error_codes(self.validate()))
+
+    def test_add_data_table_row_requires_every_field_authorized(self) -> None:
+        self.configure_data_table_row_operation(
+            "addDataTableRow",
+            {"rowName": "Row_Beta"},
+            {"DevComment": "Added", "Tag": "Gameplay.Added"},
+            authorized_fields=["DevComment"],
+        )
+        result = self.validate()
+        self.assertIn("data-table-field-not-allowed", self.error_codes(result))
+        self.assertTrue(any(error["path"].endswith(".value.Tag") for error in result["errors"]))
+
+    def test_remove_data_table_row_is_valid(self) -> None:
+        self.configure_data_table_row_operation(
+            "removeDataTableRow",
+            {"rowName": "Row_Alpha"},
+            True,
+        )
+        result = self.validate()
+        self.assertTrue(result["valid"], result["errors"])
+        expected = result["assets"][0]["operations"][0]["expectedChange"]
+        self.assertEqual(expected["kind"], "data-table-row-remove")
+
+    def test_remove_data_table_row_rejects_missing_row(self) -> None:
+        self.configure_data_table_row_operation(
+            "removeDataTableRow",
+            {"rowName": "Row_Missing"},
+            True,
+        )
+        self.assertIn("data-table-row-missing", self.error_codes(self.validate()))
+
+    def test_remove_data_table_row_requires_true(self) -> None:
+        self.configure_data_table_row_operation(
+            "removeDataTableRow",
+            {"rowName": "Row_Alpha"},
+            False,
+        )
+        self.assertIn("operation-value-type", self.error_codes(self.validate()))
+
+    def test_rename_data_table_row_is_valid(self) -> None:
+        self.configure_data_table_row_operation(
+            "renameDataTableRow",
+            {"rowName": "Row_Alpha", "newRowName": "Row_Beta"},
+            True,
+        )
+        result = self.validate()
+        self.assertTrue(result["valid"], result["errors"])
+        expected = result["assets"][0]["operations"][0]["expectedChange"]
+        self.assertEqual(expected["kind"], "data-table-row-rename")
+
+    def test_rename_data_table_row_rejects_missing_source(self) -> None:
+        self.configure_data_table_row_operation(
+            "renameDataTableRow",
+            {"rowName": "Row_Missing", "newRowName": "Row_Beta"},
+            True,
+        )
+        self.assertIn("data-table-row-missing", self.error_codes(self.validate()))
+
+    def test_rename_data_table_row_rejects_existing_destination(self) -> None:
+        self.configure_data_table_row_operation(
+            "renameDataTableRow",
+            {"rowName": "Row_Alpha", "newRowName": "Row_Beta"},
+            True,
+            row_names=["Row_Alpha", "Row_Beta"],
+        )
+        self.assertIn("data-table-row-exists", self.error_codes(self.validate()))
+
+    def test_rename_data_table_row_rejects_unchanged_name(self) -> None:
+        self.configure_data_table_row_operation(
+            "renameDataTableRow",
+            {"rowName": "Row_Alpha", "newRowName": "Row_Alpha"},
+            True,
+        )
+        self.assertIn("data-table-row-name-unchanged", self.error_codes(self.validate()))
+
+    def test_rename_data_table_row_requires_true(self) -> None:
+        self.configure_data_table_row_operation(
+            "renameDataTableRow",
+            {"rowName": "Row_Alpha", "newRowName": "Row_Beta"},
+            False,
+        )
         self.assertIn("operation-value-type", self.error_codes(self.validate()))
 
     def test_blueprint_description_operation_is_valid(self) -> None:

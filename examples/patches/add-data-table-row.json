@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "1.0",
+  "projectName": "我的项目",
+  "assets": [
+    {
+      "assetPath": "/Game/UEAgentKitWriteTests/DT_CellPatchTarget.DT_CellPatchTarget",
+      "expectedRevision": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "expectedAssetClass": "/Script/Engine.DataTable",
+      "operations": [
+        {
+          "operationId": "add-row",
+          "operation": "addDataTableRow",
+          "target": {
+            "rowName": "Row_Beta"
+          },
+          "value": {
+            "Tag": "UEAgentKit.Structural.Row",
+            "DevComment": "Created safely"
+          }
+        }
+      ]
+    }
+  ],
+  "patchId": "add-data-table-row-example",
+  "description": "Create one DataTable row from RowStruct defaults plus authorized scalar fields."
+}

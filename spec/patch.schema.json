@@ -115,6 +115,15 @@
               },
               {
                 "$ref": "#/$defs/setDataTableRowFields"
+              },
+              {
+                "$ref": "#/$defs/addDataTableRow"
+              },
+              {
+                "$ref": "#/$defs/removeDataTableRow"
+              },
+              {
+                "$ref": "#/$defs/renameDataTableRow"
               }
             ]
           }
@@ -565,6 +574,124 @@
           "boolean"
         ]
       }
+    },
+    "dataTableOptionalFieldMap": {
+      "type": "object",
+      "minProperties": 0,
+      "maxProperties": 32,
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256,
+        "pattern": "^[^.]+$"
+      },
+      "additionalProperties": {
+        "type": [
+          "string",
+          "number",
+          "integer",
+          "boolean"
+        ]
+      }
+    },
+    "addDataTableRow": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "operation": {
+              "const": "addDataTableRow"
+            },
+            "target": {
+              "type": "object",
+              "required": [
+                "rowName"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "rowName": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              }
+            },
+            "value": {
+              "$ref": "#/$defs/dataTableOptionalFieldMap"
+            }
+          }
+        }
+      ]
+    },
+    "removeDataTableRow": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "operation": {
+              "const": "removeDataTableRow"
+            },
+            "target": {
+              "type": "object",
+              "required": [
+                "rowName"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "rowName": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              }
+            },
+            "value": {
+              "const": true
+            }
+          }
+        }
+      ]
+    },
+    "renameDataTableRow": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "operation": {
+              "const": "renameDataTableRow"
+            },
+            "target": {
+              "type": "object",
+              "required": [
+                "rowName",
+                "newRowName"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "rowName": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "newRowName": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              }
+            },
+            "value": {
+              "const": true
+            }
+          }
+        }
+      ]
     }
   }
 }

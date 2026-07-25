@@ -19,7 +19,10 @@
     "setMaterialInstanceTextureParameter",
     "setMaterialInstanceStaticSwitchParameter",
     "setDataTableCell",
-    "setDataTableRowFields"
+    "setDataTableRowFields",
+    "addDataTableRow",
+    "removeDataTableRow",
+    "renameDataTableRow"
   ],
   "allowedAssetClasses": [
     "/Script/Engine.Blueprint",

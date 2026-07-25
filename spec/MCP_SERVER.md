@@ -64,6 +64,10 @@ ue_set_pin_default
 ue_set_asset_property
 ue_set_material_parameter
 ue_set_datatable_cell
+ue_set_datatable_row_fields
+ue_add_datatable_row
+ue_remove_datatable_row
+ue_rename_datatable_row
 ue_plan_patch
 ue_dry_run_patch
 ue_apply_patch
@@ -197,7 +201,14 @@ ue_set_pin_default           graph_guid + node_guid + pin_name + value
 ue_set_asset_property        property_path + value
 ue_set_material_parameter    parameter_name + parameter_type + value
 ue_set_datatable_cell        row_name + field_name + value
+ue_set_datatable_row_fields   row_name + values
+ue_add_datatable_row          row_name + values
+ue_remove_datatable_row       row_name
+ue_rename_datatable_row       row_name + new_row_name
 ```
+
+
+`ue_add_datatable_row` accepts an optional 0–32-field scalar object. `ue_remove_datatable_row` and `ue_rename_datatable_row` generate low-level Operations with the required explicit `value=true` acknowledgement. All three still follow Plan → Dry Run → one-time receipt → explicit Commit and the existing backup/verification/rollback gates.
 
 所有高层 Tool 都要求完整 Unreal Object Path，并支持：
 

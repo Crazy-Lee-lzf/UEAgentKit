@@ -216,6 +216,71 @@ def register_workflow_tools(
             return error_response("ue_set_datatable_row_fields", exc, read_only=False)
 
     @server.tool(annotations=planning_annotations)
+    def ue_add_datatable_row(
+        asset_path: str,
+        row_name: str,
+        values: dict[str, Any] | None = None,
+        mode: Literal["Plan", "DryRun"] = "Plan",
+        description: str = "",
+    ) -> dict[str, Any]:
+        """Plan or Dry Run one authorized DataTable row creation."""
+        try:
+            return _run_high_level_change(
+                tool_name="ue_add_datatable_row",
+                mode=mode,
+                asset_path=asset_path,
+                operation="addDataTableRow",
+                target={"rowName": row_name},
+                value=values or {},
+                description=description,
+            )
+        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_add_datatable_row", exc, read_only=False)
+
+    @server.tool(annotations=planning_annotations)
+    def ue_remove_datatable_row(
+        asset_path: str,
+        row_name: str,
+        mode: Literal["Plan", "DryRun"] = "Plan",
+        description: str = "",
+    ) -> dict[str, Any]:
+        """Plan or Dry Run one authorized DataTable row removal."""
+        try:
+            return _run_high_level_change(
+                tool_name="ue_remove_datatable_row",
+                mode=mode,
+                asset_path=asset_path,
+                operation="removeDataTableRow",
+                target={"rowName": row_name},
+                value=True,
+                description=description,
+            )
+        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_remove_datatable_row", exc, read_only=False)
+
+    @server.tool(annotations=planning_annotations)
+    def ue_rename_datatable_row(
+        asset_path: str,
+        row_name: str,
+        new_row_name: str,
+        mode: Literal["Plan", "DryRun"] = "Plan",
+        description: str = "",
+    ) -> dict[str, Any]:
+        """Plan or Dry Run one authorized DataTable row rename."""
+        try:
+            return _run_high_level_change(
+                tool_name="ue_rename_datatable_row",
+                mode=mode,
+                asset_path=asset_path,
+                operation="renameDataTableRow",
+                target={"rowName": row_name, "newRowName": new_row_name},
+                value=True,
+                description=description,
+            )
+        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_rename_datatable_row", exc, read_only=False)
+
+    @server.tool(annotations=planning_annotations)
     def ue_plan_patch(
         asset_path: str,
         operation: str,

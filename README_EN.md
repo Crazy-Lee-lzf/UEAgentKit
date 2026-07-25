@@ -19,7 +19,7 @@ The current release is **0.5.1** and targets **Unreal Engine 5.6**. Building on 
 - Find where Blueprint variables are read or written.
 - Trace functions, interface messages, macros, Dynamic Casts, and Event Dispatchers.
 - Inspect Blueprint graphs, nodes, pins, and connections.
-- Validate patches against policy, revision, and export snapshots, then dry-run or explicitly commit authorized Blueprint, non-Blueprint scalar, Material Instance parameter, DataTable cell, or single-row multi-field changes.
+- Validate patches against policy, revision, and export snapshots, then dry-run or explicitly commit authorized Blueprint, non-Blueprint scalar, Material Instance parameter, DataTable cell, single-row multi-field, or controlled row add/remove/rename changes.
 - Generate a backup manifest after every successful commit, then explicitly roll back and independently verify the restored revision when the current package still matches.
 - Create or reset isolated test assets from a declarative Write Fixture Plan, then independently verify class, revision, and dirty state.
 - Use the local MCP server to search assets/symbols, inspect assets and references, and create strict Plans or Dry Runs through seven high-level safe-change tools without exposing shell, arbitrary SQL, or UObject access.
@@ -203,7 +203,16 @@ scripts\TestDataTableRowFields.cmd ^
 
 The script performs Dry Run, Commit, independent reload, rollback Dry Run, and rollback Commit for two fields in one existing row, then verifies that the original revision and values are restored.
 
-The executor supports four Blueprint operations, `setAssetProperty`, four Material Instance parameter operations, and `setDataTableCell` plus `setDataTableRowFields`. One execution is limited to one asset and one operation. Generic properties, Material parameters, and DataTable fields use exact `allowedAssetProperties`, `allowedMaterialParameters`, and `allowedDataTableFields` authorization. Material Instance writes require one unique Global parameter; DataTable writes may target one top-level scalar field or atomically update 1–32 authorized top-level scalar fields in one existing row, restoring the complete row during dry runs. Only single-file packages without external package sidecars are accepted.
+Run the DataTable row-structure regression:
+
+```bat
+scripts\TestDataTableRowOperations.cmd ^
+  -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject"
+```
+
+The script runs Add Dry Run, Add Commit, Rename Commit, and Remove Commit, then rolls back Remove → Rename → Add in reverse order. Every stage is independently re-exported by Unreal, and the final package revision must exactly match the initial revision.
+
+The executor supports four Blueprint operations, `setAssetProperty`, four Material Instance parameter operations, and `setDataTableCell`, `setDataTableRowFields`, `addDataTableRow`, `removeDataTableRow`, and `renameDataTableRow`. One execution remains limited to one asset and one operation. Generic properties, Material parameters, and DataTable fields use exact `allowedAssetProperties`, `allowedMaterialParameters`, and `allowedDataTableFields` authorization. DataTable writes may update one scalar field, atomically update 1–32 authorized scalar fields, or perform controlled row creation, deletion, and renaming. Add starts from RowStruct defaults and applies 0–32 authorized scalar fields; remove and rename require explicit `value=true`. Structural operations use full-table snapshots, unaffected-row verification, dry-run restoration, unique backups, and independent rollback verification. Only single-file packages without external package sidecars are accepted.
 
 ### 6. Run the MCP server (0.5.1)
 
@@ -228,7 +237,7 @@ scripts\TestMcpSnapshotRefresh.cmd ^
   -ProjectPath "<TEST_PROJECT>.uproject"
 ```
 
-The MCP Client still uses local `stdio` only. Default mode exposes 5 offline read-only tools; `-EnableLiveEditor -ProjectPath <fixed project>` adds 10 live read tools plus 7 bounded Daily Actions for a total of 22; the fixed-project workflow exposes 18; combining both exposes 35. Live reads include bounded Output Log queries, compile diagnostics, non-loading live asset inspection, and focused Graph/Node selection for ordinary Blueprint Editors. Daily Actions open or focus assets, sync the Content Browser, focus an ActorGuid, compile a Blueprint in memory, and run official Data Validation without saving packages. Workflow mode adds four-source asset state and safe single-asset index refresh:
+The MCP Client still uses local `stdio` only. Default mode exposes 5 offline read-only tools; `-EnableLiveEditor -ProjectPath <fixed project>` adds 10 live read tools plus 8 bounded Daily Actions for a total of 23; the fixed-project workflow exposes 23; combining both exposes 41. Live reads include bounded Output Log queries, compile diagnostics, non-loading live asset inspection, and focused Graph/Node selection for ordinary Blueprint Editors. Daily Actions open or focus assets, sync the Content Browser, focus an ActorGuid, compile a Blueprint in memory, and run official Data Validation without saving packages. Workflow mode adds four-source asset state and safe single-asset index refresh:
 
 ```bat
 claude mcp add --transport stdio --scope project ue-agent-kit -- ^

@@ -165,7 +165,8 @@ namespace AssetPatchCommandletPrivate
 		}
 		const bool bUsesDataTableFieldOperations =
 			ContainsExact(OutPolicy.AllowedOperations, TEXT("setDataTableCell"))
-			|| ContainsExact(OutPolicy.AllowedOperations, TEXT("setDataTableRowFields"));
+			|| ContainsExact(OutPolicy.AllowedOperations, TEXT("setDataTableRowFields"))
+			|| ContainsExact(OutPolicy.AllowedOperations, TEXT("addDataTableRow"));
 		if (bUsesDataTableFieldOperations && OutPolicy.AllowedDataTableFields.IsEmpty())
 		{
 			OutError = TEXT("DataTable field operations require allowedDataTableFields authorization.");
@@ -1036,13 +1037,22 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		Operation.Equals(TEXT("setDataTableCell"), ESearchCase::CaseSensitive);
 	const bool bDataTableRowFieldsOperation =
 		Operation.Equals(TEXT("setDataTableRowFields"), ESearchCase::CaseSensitive);
+	const bool bDataTableAddRowOperation =
+		Operation.Equals(TEXT("addDataTableRow"), ESearchCase::CaseSensitive);
+	const bool bDataTableRemoveRowOperation =
+		Operation.Equals(TEXT("removeDataTableRow"), ESearchCase::CaseSensitive);
+	const bool bDataTableRenameRowOperation =
+		Operation.Equals(TEXT("renameDataTableRow"), ESearchCase::CaseSensitive);
 	if ((!bAssetPropertyOperation
 			&& !bMaterialScalarOperation
 			&& !bMaterialVectorOperation
 			&& !bMaterialTextureOperation
 			&& !bMaterialStaticSwitchOperation
 			&& !bDataTableCellOperation
-			&& !bDataTableRowFieldsOperation)
+			&& !bDataTableRowFieldsOperation
+			&& !bDataTableAddRowOperation
+			&& !bDataTableRemoveRowOperation
+			&& !bDataTableRenameRowOperation)
 		|| !ContainsExact(Policy.AllowedOperations, Operation))
 	{
 		UE_LOG(LogAssetPatch, Error, TEXT("Operation is not authorized or implemented: %s"), *Operation);
@@ -1827,6 +1837,337 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			*ParameterNameText,
 			BeforeSwitchValue ? TEXT("true") : TEXT("false"),
 			AfterSwitchValue ? TEXT("true") : TEXT("false"));
+		return 0;
+	}
+
+	if (bDataTableAddRowOperation || bDataTableRemoveRowOperation || bDataTableRenameRowOperation)
+	{
+		UDataTable* DataTable = Cast<UDataTable>(Asset);
+		if (!DataTable)
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("DataTable row operations require a DataTable asset."));
+			return 17;
+		}
+
+		UScriptStruct* RowStruct = const_cast<UScriptStruct*>(DataTable->GetRowStruct());
+		if (!RowStruct)
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("DataTable has no valid row struct."));
+			return 17;
+		}
+		const FString RowStructPath = RowStruct->GetPathName();
+
+		FString RowNameText;
+		TargetObject->TryGetStringField(TEXT("rowName"), RowNameText);
+		if (RowNameText.IsEmpty() || RowNameText.Len() > 256)
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("DataTable rowName is required and must not exceed 256 characters."));
+			return 17;
+		}
+		const FName RowName(*RowNameText);
+		FString NewRowNameText;
+		FName NewRowName = NAME_None;
+		if (bDataTableRenameRowOperation)
+		{
+			TargetObject->TryGetStringField(TEXT("newRowName"), NewRowNameText);
+			if (NewRowNameText.IsEmpty() || NewRowNameText.Len() > 256 || NewRowNameText == RowNameText)
+			{
+				UE_LOG(LogAssetPatch, Error, TEXT("renameDataTableRow requires a distinct newRowName."));
+				return 17;
+			}
+			NewRowName = FName(*NewRowNameText);
+		}
+
+		const uint8* ExistingRowData = DataTable->FindRowUnchecked(RowName);
+		if (bDataTableAddRowOperation && ExistingRowData)
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("DataTable row already exists: %s"), *RowNameText);
+			return 17;
+		}
+		if ((bDataTableRemoveRowOperation || bDataTableRenameRowOperation) && !ExistingRowData)
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("DataTable source row was not found: %s"), *RowNameText);
+			return 17;
+		}
+		if (bDataTableRenameRowOperation && DataTable->FindRowUnchecked(NewRowName))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("DataTable destination row already exists: %s"), *NewRowNameText);
+			return 17;
+		}
+
+		const TSharedPtr<FJsonValue> ConfirmationValue = OperationObject->TryGetField(TEXT("value"));
+		if ((bDataTableRemoveRowOperation || bDataTableRenameRowOperation)
+			&& (!ConfirmationValue.IsValid() || ConfirmationValue->Type != EJson::Boolean || !ConfirmationValue->AsBool()))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Structural DataTable row operations require value=true."));
+			return 18;
+		}
+
+		FStructOnScope RowSnapshot(RowStruct);
+		if (!RowSnapshot.IsValid())
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Could not allocate DataTable row snapshot."));
+			return 18;
+		}
+		if (ExistingRowData)
+		{
+			RowStruct->CopyScriptStruct(RowSnapshot.GetStructMemory(), ExistingRowData);
+		}
+
+		TArray<FString> FieldNames;
+		TArray<FProperty*> Fields;
+		TSharedRef<FJsonObject> AppliedValues = MakeShared<FJsonObject>();
+		if (bDataTableAddRowOperation)
+		{
+			const TSharedPtr<FJsonObject>* ValuesObjectPtr = nullptr;
+			if (!OperationObject->TryGetObjectField(TEXT("value"), ValuesObjectPtr)
+				|| !ValuesObjectPtr || !ValuesObjectPtr->IsValid() || (*ValuesObjectPtr)->Values.Num() > 32)
+			{
+				UE_LOG(LogAssetPatch, Error, TEXT("addDataTableRow requires an object containing at most 32 fields."));
+				return 18;
+			}
+			const TSharedPtr<FJsonObject> ValuesObject = *ValuesObjectPtr;
+			ValuesObject->Values.GetKeys(FieldNames);
+			FieldNames.Sort();
+			for (const FString& FieldName : FieldNames)
+			{
+				const TSharedPtr<FJsonValue> FieldValue = ValuesObject->Values.FindChecked(FieldName);
+				if (FieldName.IsEmpty() || FieldName.Len() > 256 || FieldName.Contains(TEXT("."))
+					|| !FieldValue.IsValid() || FieldValue->Type == EJson::Null
+					|| FieldValue->Type == EJson::Array || FieldValue->Type == EJson::Object)
+				{
+					UE_LOG(LogAssetPatch, Error, TEXT("Invalid DataTable row field: %s"), *FieldName);
+					return 18;
+				}
+				const FString Authorization = ActualAssetClass + TEXT("#") + RowStructPath + TEXT("#") + FieldName;
+				if (!ContainsExact(Policy.AllowedDataTableFields, Authorization))
+				{
+					UE_LOG(LogAssetPatch, Error, TEXT("DataTable field is not authorized by policy: %s"), *Authorization);
+					return 17;
+				}
+				FProperty* Field = FindFProperty<FProperty>(RowStruct, FName(*FieldName));
+				if (!Field || Field->ArrayDim != 1 || Field->HasAnyPropertyFlags(CPF_Transient | CPF_DuplicateTransient | CPF_NonPIEDuplicateTransient))
+				{
+					UE_LOG(LogAssetPatch, Error, TEXT("DataTable field is missing, fixed-array, or transient: %s"), *FieldName);
+					return 17;
+				}
+				void* Address = Field->ContainerPtrToValuePtr<void>(RowSnapshot.GetStructMemory());
+				if (!SetPropertyFromJson(Field, Address, FieldValue, Error))
+				{
+					UE_LOG(LogAssetPatch, Error, TEXT("Invalid DataTable value for field %s: %s"), *FieldName, *Error);
+					return 18;
+				}
+				Fields.Add(Field);
+				FString ValueText;
+				ReadPropertyValue(DataTable, Field, Address, ValueText);
+				AppliedValues->SetStringField(FieldName, ValueText);
+			}
+		}
+
+		TArray<FName> OriginalRowNames = DataTable->GetRowNames();
+		OriginalRowNames.Sort(FNameLexicalLess());
+		TMap<FName, TUniquePtr<FStructOnScope>> OriginalRows;
+		for (const FName& OriginalName : OriginalRowNames)
+		{
+			const uint8* OriginalData = DataTable->FindRowUnchecked(OriginalName);
+			TUniquePtr<FStructOnScope> Snapshot = MakeUnique<FStructOnScope>(RowStruct);
+			if (!OriginalData || !Snapshot->IsValid())
+			{
+				UE_LOG(LogAssetPatch, Error, TEXT("Could not snapshot DataTable row: %s"), *OriginalName.ToString());
+				return 18;
+			}
+			RowStruct->CopyScriptStruct(Snapshot->GetStructMemory(), OriginalData);
+			OriginalRows.Add(OriginalName, MoveTemp(Snapshot));
+		}
+		auto RestoreOriginalTable = [&]()
+		{
+			DataTable->EmptyTable();
+			for (const FName& OriginalName : OriginalRowNames)
+			{
+				const TUniquePtr<FStructOnScope>* Snapshot = OriginalRows.Find(OriginalName);
+				if (!Snapshot || !Snapshot->IsValid())
+				{
+					return false;
+				}
+				DataTable->AddRow(
+					OriginalName,
+					*reinterpret_cast<const FTableRowBase*>((*Snapshot)->GetStructMemory()));
+			}
+			return true;
+		};
+		auto TableMatchesOriginal = [&]()
+		{
+			TArray<FName> CurrentNames = DataTable->GetRowNames();
+			CurrentNames.Sort(FNameLexicalLess());
+			if (CurrentNames != OriginalRowNames)
+			{
+				return false;
+			}
+			for (const FName& OriginalName : OriginalRowNames)
+			{
+				const uint8* CurrentData = DataTable->FindRowUnchecked(OriginalName);
+				const TUniquePtr<FStructOnScope>* Snapshot = OriginalRows.Find(OriginalName);
+				if (!CurrentData || !Snapshot
+					|| !RowStruct->CompareScriptStruct(CurrentData, (*Snapshot)->GetStructMemory(), PPF_None))
+				{
+					return false;
+				}
+			}
+			return true;
+		};
+		FString BackupFilename;
+		if (bCommit)
+		{
+			IFileManager::Get().MakeDirectory(*BackupDirectory, true);
+			BackupFilename = CreateBackupFilename(BackupDirectory, PatchId, PackageFilename);
+			if (IFileManager::Get().Copy(*BackupFilename, *PackageFilename, true, true) != COPY_OK)
+			{
+				UE_LOG(LogAssetPatch, Error, TEXT("Could not create package backup: %s"), *BackupFilename);
+				return 19;
+			}
+		}
+
+		DataTable->Modify();
+		if (bDataTableAddRowOperation)
+		{
+			DataTable->AddRow(RowName, *reinterpret_cast<const FTableRowBase*>(RowSnapshot.GetStructMemory()));
+		}
+		else if (bDataTableRemoveRowOperation)
+		{
+			// UDataTable::RemoveRow notifies with the removed key. GameplayTag-backed tables can
+			// synchronously query that now-missing key, so detach and notify only the stable final table.
+			TMap<FName, uint8*>& MutableRowMap =
+				const_cast<TMap<FName, uint8*>&>(DataTable->GetRowMap());
+			uint8* RemovedRowData = nullptr;
+			if (!MutableRowMap.RemoveAndCopyValue(RowName, RemovedRowData) || !RemovedRowData)
+			{
+				RestoreOriginalTable();
+				Package->SetDirtyFlag(bOriginalDirty);
+				UE_LOG(LogAssetPatch, Error, TEXT("Could not detach DataTable row for removal."));
+				return 20;
+			}
+			RowStruct->DestroyStruct(RemovedRowData);
+			FMemory::Free(RemovedRowData);
+			DataTable->HandleDataTableChanged(NAME_None);
+		}
+		else
+		{
+			// AddRow + RemoveRow exposes an invalid intermediate state to DataTable listeners. Move
+			// the owned row allocation between keys, then publish the completed rename exactly once.
+			TMap<FName, uint8*>& MutableRowMap =
+				const_cast<TMap<FName, uint8*>&>(DataTable->GetRowMap());
+			uint8* MovedRowData = nullptr;
+			if (!MutableRowMap.RemoveAndCopyValue(RowName, MovedRowData) || !MovedRowData)
+			{
+				RestoreOriginalTable();
+				Package->SetDirtyFlag(bOriginalDirty);
+				UE_LOG(LogAssetPatch, Error, TEXT("Could not detach DataTable source row for rename."));
+				return 20;
+			}
+			MutableRowMap.Add(NewRowName, MovedRowData);
+			DataTable->HandleDataTableChanged(NewRowName);
+		}
+		Package->MarkPackageDirty();
+
+		const uint8* AppliedRowData = bDataTableRenameRowOperation
+			? DataTable->FindRowUnchecked(NewRowName)
+			: DataTable->FindRowUnchecked(RowName);
+		bool bAppliedStructureMatch = true;
+		if (bDataTableAddRowOperation || bDataTableRenameRowOperation)
+		{
+			bAppliedStructureMatch = AppliedRowData
+				&& RowStruct->CompareScriptStruct(AppliedRowData, RowSnapshot.GetStructMemory(), PPF_None);
+		}
+		else
+		{
+			bAppliedStructureMatch = AppliedRowData == nullptr;
+		}
+		if (bDataTableRenameRowOperation)
+		{
+			bAppliedStructureMatch = bAppliedStructureMatch && DataTable->FindRowUnchecked(RowName) == nullptr;
+		}
+		for (const FName& OriginalName : OriginalRowNames)
+		{
+			if ((bDataTableRemoveRowOperation || bDataTableRenameRowOperation) && OriginalName == RowName)
+			{
+				continue;
+			}
+			const uint8* CurrentData = DataTable->FindRowUnchecked(OriginalName);
+			const TUniquePtr<FStructOnScope>* Snapshot = OriginalRows.Find(OriginalName);
+			bAppliedStructureMatch = bAppliedStructureMatch && CurrentData && Snapshot
+				&& RowStruct->CompareScriptStruct(CurrentData, (*Snapshot)->GetStructMemory(), PPF_None);
+		}
+		const int32 AppliedRowCount = DataTable->GetRowNames().Num();
+		if (!bAppliedStructureMatch)
+		{
+			RestoreOriginalTable();
+			Package->SetDirtyFlag(bOriginalDirty);
+			UE_LOG(LogAssetPatch, Error, TEXT("DataTable row operation read-back verification failed."));
+			return 20;
+		}
+
+		bool bSaved = false;
+		bool bRolledBack = false;
+		bool bRollbackStructureMatch = true;
+		if (bCommit)
+		{
+			if (!SaveAssetPackage(DataTable, PackageFilename, Error))
+			{
+				IFileManager::Get().Copy(*PackageFilename, *BackupFilename, true, true);
+				UE_LOG(LogAssetPatch, Error, TEXT("%s Backup restored."), *Error);
+				return 21;
+			}
+			bSaved = true;
+		}
+		else
+		{
+			const bool bRestoreSucceeded = RestoreOriginalTable();
+			Package->SetDirtyFlag(bOriginalDirty);
+			bRollbackStructureMatch = bRestoreSucceeded && TableMatchesOriginal();
+			bRolledBack = true;
+		}
+
+		const FString AfterRevision = HashPackageFile(Package);
+		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
+		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.5.1"));
+		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
+		Report->SetStringField(TEXT("patchId"), PatchId);
+		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
+		Report->SetStringField(TEXT("assetPath"), AssetPath);
+		Report->SetStringField(TEXT("assetClass"), ActualAssetClass);
+		Report->SetStringField(TEXT("operation"), Operation);
+		Report->SetObjectField(TEXT("target"), TargetObject);
+		Report->SetStringField(TEXT("rowStructPath"), RowStructPath);
+		Report->SetStringField(TEXT("sourceRowName"), RowNameText);
+		Report->SetStringField(TEXT("destinationRowName"), NewRowNameText);
+		Report->SetObjectField(TEXT("appliedValues"), AppliedValues);
+		Report->SetNumberField(TEXT("beforeRowCount"), OriginalRowNames.Num());
+		Report->SetNumberField(TEXT("afterRowCount"), AppliedRowCount);
+		Report->SetStringField(TEXT("targetDescription"), TEXT("data-table-row-operation:") + RowNameText);
+		Report->SetStringField(TEXT("targetType"), TEXT("DataTableRow"));
+		Report->SetStringField(TEXT("beforeRevision"), BeforeRevision);
+		Report->SetStringField(TEXT("afterRevision"), AfterRevision);
+		Report->SetBoolField(TEXT("compiled"), false);
+		Report->SetBoolField(TEXT("saved"), bSaved);
+		Report->SetBoolField(TEXT("rolledBack"), bRolledBack);
+		Report->SetBoolField(TEXT("appliedStructureMatch"), bAppliedStructureMatch);
+		Report->SetBoolField(TEXT("rollbackStructureMatch"), !bRolledBack || bRollbackStructureMatch);
+		Report->SetBoolField(TEXT("diskUnchanged"), BeforeRevision.Equals(AfterRevision, ESearchCase::IgnoreCase));
+		Report->SetStringField(TEXT("backupPath"), BackupFilename);
+		if (!SaveReport(ReportFilename, Report, Error))
+		{
+			if (bCommit && !BackupFilename.IsEmpty()) IFileManager::Get().Copy(*PackageFilename, *BackupFilename, true, true);
+			UE_LOG(LogAssetPatch, Error, TEXT("%s Disk backup restored."), *Error);
+			return 23;
+		}
+		if (bRolledBack && (!bRollbackStructureMatch || !BeforeRevision.Equals(AfterRevision, ESearchCase::IgnoreCase)))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("DataTable row operation Dry Run rollback verification failed."));
+			return 22;
+		}
+		UE_LOG(LogAssetPatch, Display, TEXT("DataTable row operation succeeded. Mode=%s Operation=%s Row=%s"),
+			bCommit ? TEXT("Commit") : TEXT("DryRun"), *Operation, *RowNameText);
 		return 0;
 	}
 

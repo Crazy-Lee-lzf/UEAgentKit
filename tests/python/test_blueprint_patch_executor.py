@@ -49,6 +49,9 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
                 "setMaterialInstanceStaticSwitchParameter",
                 "setDataTableCell",
                 "setDataTableRowFields",
+                "addDataTableRow",
+                "removeDataTableRow",
+                "renameDataTableRow",
             ],
 
         )
@@ -63,6 +66,9 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
                 "Blueprint",
                 "Blueprint",
                 "Blueprint",
+                "NonBlueprint",
+                "NonBlueprint",
+                "NonBlueprint",
                 "NonBlueprint",
                 "NonBlueprint",
                 "NonBlueprint",

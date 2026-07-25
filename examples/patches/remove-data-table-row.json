@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1.0",
+  "projectName": "我的项目",
+  "assets": [
+    {
+      "assetPath": "/Game/UEAgentKitWriteTests/DT_CellPatchTarget.DT_CellPatchTarget",
+      "expectedRevision": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "expectedAssetClass": "/Script/Engine.DataTable",
+      "operations": [
+        {
+          "operationId": "remove-row",
+          "operation": "removeDataTableRow",
+          "target": {
+            "rowName": "Row_Beta"
+          },
+          "value": true
+        }
+      ]
+    }
+  ],
+  "patchId": "remove-data-table-row-example",
+  "description": "Remove one existing DataTable row after explicit structural acknowledgement."
+}

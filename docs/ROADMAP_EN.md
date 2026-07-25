@@ -84,7 +84,7 @@ Every save remains bounded by Policy, Revision, Dry Run, explicit confirmation, 
 ### 0.5.4: common data editing
 
 - [x] Atomic updates to 1–32 top-level scalar fields in one existing DataTable row.
-- [ ] Controlled DataTable row creation, deletion, and renaming.
+- [x] Controlled DataTable row creation, deletion, and renaming, including Canonical `rowNames` validation, Policy/Revision/backup gates, full-table restoration, and a real UE5.6 Add → Rename → Remove → three-step reverse rollback with exact final revision recovery.
 - Data Asset object/soft references, structs, and container value models.
 - Unified Material Instance parameter workflows.
 - High-level Blueprint default/component/pin editing refinements.

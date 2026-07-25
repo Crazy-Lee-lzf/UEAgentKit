@@ -1,6 +1,6 @@
 # UEAgentKit Patch Schema 1.0
 
-UEAgentKit Patch 是面向 Unreal Engine 资产的声明式变更格式。当前同时提供纯 JSON 预校验，以及 UE Editor 内的 Blueprint、通用属性、Material Instance 参数、DataTable 单元格和单 Row 多字段执行器。
+UEAgentKit Patch 是面向 Unreal Engine 资产的声明式变更格式。当前同时提供纯 JSON 预校验，以及 UE Editor 内的 Blueprint、通用属性、Material Instance 参数、DataTable 单元格、单 Row 多字段和受控 Row 结构执行器。
 
 ## 两层执行模型
 
@@ -28,6 +28,9 @@ setMaterialInstanceTextureParameter       → AssetPatch Commandlet
 setMaterialInstanceStaticSwitchParameter  → AssetPatch Commandlet
 setDataTableCell                           → AssetPatch Commandlet
 setDataTableRowFields                       → AssetPatch Commandlet
+addDataTableRow                              → AssetPatch Commandlet
+removeDataTableRow                           → AssetPatch Commandlet
+renameDataTableRow                           → AssetPatch Commandlet
 ```
 
 执行语义：
@@ -126,7 +129,10 @@ Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目�
     "setMaterialInstanceTextureParameter",
     "setMaterialInstanceStaticSwitchParameter",
     "setDataTableCell",
-    "setDataTableRowFields"
+    "setDataTableRowFields",
+    "addDataTableRow",
+    "removeDataTableRow",
+    "renameDataTableRow"
   ],
   "allowedAssetClasses": [
     "/Script/Engine.Blueprint",
@@ -166,7 +172,7 @@ Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目�
 - Material 参数授权格式固定为 `AssetClass#Type#ParameterName`；当前 `Type` 支持 `Scalar`、`Vector`、`Texture` 和 `StaticSwitch`。
 - Texture 参数引用的目标资产必须同时落在 `allowedReferenceRoots` 内，且实际类必须精确命中 `allowedReferenceClasses`。
 - DataTable 字段授权格式固定为 `AssetClass#RowStructPath#FieldName`，并要求 Canonical 快照和 UE 运行时 RowStruct 完全一致。
-- Blueprint Operation 不能用于非 Blueprint；`setAssetProperty` 不能用于 Blueprint；Material 参数操作只接受 MaterialInstanceConstant；`setDataTableCell` 和 `setDataTableRowFields` 只接受 DataTable。
+- Blueprint Operation 不能用于非 Blueprint；`setAssetProperty` 不能用于 Blueprint；Material 参数操作只接受 MaterialInstanceConstant；`setDataTableCell`、`setDataTableRowFields`、`addDataTableRow`、`removeDataTableRow` 和 `renameDataTableRow` 只接受 DataTable。
 
 ## 支持的 Operation
 
@@ -371,7 +377,7 @@ Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目�
 
 限制与语义：
 
-- 目标必须是 `DataTable`，Row 必须已存在；首版不新增、删除或重命名 Row。
+- 目标必须是 `DataTable`，且本 Operation 只修改已存在 Row；Row 结构变更使用后续三个独立 Operation。
 - `fieldName` 只能是 RowStruct 的一个顶层字段，不接受点号路径、固定数组、容器、对象引用或任意 Struct 整体导入。
 - 值只接受非 `null` 的 JSON string、number 或 boolean，并由目标属性类型严格解析；支持 Bool、整数、浮点、String、Name、Text 和 Enum 标量。
 - Policy 使用 `AssetClass#RowStructPath#FieldName` 精确授权；预校验从 Canonical `assetDetails.rowStructPath` 读取 RowStruct，UE 执行时再次读取真实 RowStruct。
@@ -406,6 +412,59 @@ Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目�
 - Dry Run 要求 `appliedValueMatch`、`appliedStructureMatch`、`rollbackValueMatch`、`rollbackStructureMatch` 和 `diskUnchanged` 全部成立。
 - Commit 继续使用单 Package Revision、唯一备份、独立 UE 重载验证和现有 rollback Manifest。
 - 已在真实 `GameplayTagTableRow.Row_Alpha` 的 `Tag` 与 `DevComment` 上完成两字段 Dry Run、Commit、独立重载、rollback Dry Run、rollback Commit 和最终 Revision 恢复验证。
+
+### addDataTableRow
+
+从 RowStruct 默认值创建一个新 Row，并可覆盖 0–32 个已授权顶层标量字段：
+
+```json
+{
+  "operationId": "add-row",
+  "operation": "addDataTableRow",
+  "target": { "rowName": "Row_Beta" },
+  "value": {
+    "Tag": "UEAgentKit.Structural.Row",
+    "DevComment": "Created safely"
+  }
+}
+```
+
+- 目标 Row 必须不存在；空对象 `{}` 表示完全使用 RowStruct 默认值。
+- 每个提供的字段都必须精确命中 `allowedDataTableFields`，只接受非 `null` 的有限 JSON 标量。
+- 执行后验证新增 Row 的完整 Struct、Row 数量以及全部原有 Row 未变化。
+
+### removeDataTableRow
+
+```json
+{
+  "operationId": "remove-row",
+  "operation": "removeDataTableRow",
+  "target": { "rowName": "Row_Beta" },
+  "value": true
+}
+```
+
+- 源 Row 必须存在，`value=true` 是不可省略的结构变更确认。
+- 执行器从 RowMap 稳定摘除 Row，销毁 Struct 内存后仅发送一次最终表变化通知。
+
+### renameDataTableRow
+
+```json
+{
+  "operationId": "rename-row",
+  "operation": "renameDataTableRow",
+  "target": {
+    "rowName": "Row_Beta",
+    "newRowName": "Row_Gamma"
+  },
+  "value": true
+}
+```
+
+- 源 Row 必须存在，目标 Row 必须不存在，两个名称必须不同。
+- 重命名只迁移 RowMap 键并复用同一 Row 内存，不修改 Row 内容；最终稳定状态只通知一次。
+
+三个结构 Operation 都先保存完整表快照并验证未受影响 Row。Dry Run 或内存验证失败时恢复整表；Commit 使用唯一 Package 备份、Manifest、独立 UE 重载和 Revision-aware rollback。真实 UE5.6 回归已完成 Add Dry Run/Commit、Rename Commit、Remove Commit、Remove/Rename/Add 逆序 rollback，并恢复初始 Revision。
 
 ## Dry Run 报告
 

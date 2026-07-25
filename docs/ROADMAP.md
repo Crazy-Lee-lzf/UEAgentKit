@@ -1,6 +1,6 @@
 # UE Agent Kit 路线图
 
-更新时间：2026-07-24
+更新时间：2026-07-25
 
 当前版本为 **0.5.1**，支持 Unreal Engine 5.6。
 
@@ -91,7 +91,7 @@ UE Agent Kit 的长期定位是面向 AI Agent 的 Unreal Engine 项目智能层
 优先补当前项目真实使用频率高的内容：
 
 - [x] DataTable 现有单 Row 的 1–32 个顶层标量字段原子更新。
-- [ ] DataTable 受控新增、删除和重命名 Row。
+- [x] DataTable 受控新增、删除和重命名 Row：已完成 Canonical `rowNames` 预校验、Policy/Revision/备份约束、完整表原子恢复，并通过真实 UE5.6 Add → Rename → Remove → 逆序三层 rollback 与最终 Revision 恢复验证。
 - Data Asset 的对象引用、软引用、Struct 和容器值模型。
 - Material Instance 参数工作流统一。
 - Blueprint 默认值、组件属性和 Pin 默认值的高层 MCP 封装。

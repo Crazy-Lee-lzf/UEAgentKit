@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "1.0",
+  "projectName": "我的项目",
+  "assets": [
+    {
+      "assetPath": "/Game/UEAgentKitWriteTests/DT_CellPatchTarget.DT_CellPatchTarget",
+      "expectedRevision": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "expectedAssetClass": "/Script/Engine.DataTable",
+      "operations": [
+        {
+          "operationId": "rename-row",
+          "operation": "renameDataTableRow",
+          "target": {
+            "rowName": "Row_Beta",
+            "newRowName": "Row_Gamma"
+          },
+          "value": true
+        }
+      ]
+    }
+  ],
+  "patchId": "rename-data-table-row-example",
+  "description": "Rename one existing DataTable row without changing its row data."
+}

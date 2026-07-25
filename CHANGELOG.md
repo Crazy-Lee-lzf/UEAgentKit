@@ -7,6 +7,11 @@ All notable changes to UE Agent Kit are documented here.
 - Added `setDataTableRowFields` and `ue_set_datatable_row_fields` for atomic updates to 1–32 authorized top-level scalar fields in one existing DataTable row.
 - Added full-row prevalidation, exact per-field Policy checks, all-or-nothing mutation, full-row Dry Run restoration, structured multi-field reports, and a real UE5.6 Dry Run/Commit/reload/rollback regression.
 - Expanded workflow-only MCP mode from 19 to 20 tools and combined Live + workflow mode from 37 to 38 tools; offline and Live-only modes remain 5 and 23 tools.
+- Added `addDataTableRow`, `removeDataTableRow`, and `renameDataTableRow` plus `ue_add_datatable_row`, `ue_remove_datatable_row`, and `ue_rename_datatable_row` for controlled DataTable row structure changes.
+- Added Canonical `rowNames` prevalidation, exact add-field Policy authorization, explicit `value=true` acknowledgement for remove/rename, full-table snapshots, unaffected-row verification, Dry Run restoration, package backup manifests, and independent rollback verification.
+- Fixed `GameplayTagTableRow` structural notifications by applying rename as a stable RowMap key migration and remove as a stable detach/destroy operation before one final table-change notification.
+- Passed the real UE5.6 Add Dry Run/Commit, Rename Commit, Remove Commit, reverse Rollback Remove/Rename/Add chain, with the final package revision restored exactly.
+- Expanded workflow-only MCP mode to 23 tools and combined Live + workflow mode to 41 tools; offline and Live-only modes remain 5 and 23 tools.
 
 - Centralized MCP Tool order, mode membership, annotations, and Live Bridge method names in one typed Tool Registry with registration and handler-boundary drift guards.
 - Split MCP Query, Live Read, Live Action, and Workflow registration into independent modules and split Editor Bridge capabilities into Status, Diagnostic, Asset, Graph, Navigation, and Validation handler translation units.
