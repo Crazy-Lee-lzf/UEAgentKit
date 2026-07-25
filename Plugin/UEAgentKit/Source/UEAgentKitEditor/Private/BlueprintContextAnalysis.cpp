@@ -1451,14 +1451,15 @@ void FBlueprintContextAnalysis::BuildSymbolsAndReferences(
 				const FString TargetAssetPath = ResolveAssetPathForPackage(
 					AssetRegistry,
 					Dependency.AssetId.PackageName);
-				const FString TargetKind = !TargetAssetPath.IsEmpty()
-					? TEXT("asset")
-					: (Dependency.AssetId.GetPrimaryAssetId().IsValid()
-						? TEXT("primary-asset")
-						: (Dependency.AssetId.IsValue() ? TEXT("searchable-name") : TEXT("package")));
+				const bool bSearchableName = Dependency.AssetId.IsValue();
+				const FString TargetKind = bSearchableName
+					? TEXT("searchable-name")
+					: (!TargetAssetPath.IsEmpty()
+						? TEXT("asset")
+						: (Dependency.AssetId.GetPrimaryAssetId().IsValid() ? TEXT("primary-asset") : TEXT("package")));
 				const FString TargetSymbolId = MakeSymbolId(
 					TargetKind,
-					TargetAssetPath.IsEmpty() ? Identifier : TargetAssetPath);
+					bSearchableName ? Identifier : (TargetAssetPath.IsEmpty() ? Identifier : TargetAssetPath));
 				const FString ReferenceKind = AssetDependencyReferenceKind(Dependency);
 				const FString DependencyCategory = DependencyCategoryName(Dependency.Category);
 				const FString DependencyProperties = DependencyPropertiesName(

@@ -63,6 +63,25 @@ class FakeIndexService:
             "package_dirty": False,
         }
 
+    def get_data_table_row_reference_impact(
+        self,
+        asset_path: str,
+        row_name: str,
+        *,
+        sample_limit: int = 20,
+    ) -> dict[str, Any]:
+        return {
+            "checked": True,
+            "source": "immutable-sqlite-searchable-name",
+            "assetPath": asset_path,
+            "rowName": row_name,
+            "targetPath": f"{asset_path}::{row_name}",
+            "referenceCount": 0,
+            "sampleLimit": sample_limit,
+            "sampleTruncated": False,
+            "referencers": [],
+        }
+
 
 class FakeFreshnessTracker:
     def __init__(self) -> None:
@@ -531,6 +550,84 @@ class AgentWorkflowTests(unittest.TestCase):
             )
         self.assertEqual(rejected.exception.code, "policy-rejected")
         self.assertIn("asset-property-not-allowed", rejected.exception.details["issueCodes"])
+
+    def test_structural_data_table_plan_rejects_exact_row_referencers(self) -> None:
+        class DataTableIndexService(FakeIndexService):
+            def __init__(self, reference_count: int) -> None:
+                self.reference_count = reference_count
+
+            def get_asset(self, asset_path: str, **_: Any) -> dict[str, Any]:
+                if asset_path != ASSET_PATH:
+                    return {"found": False, "ok": True}
+                return {
+                    "found": True,
+                    "ok": True,
+                    "asset": {
+                        "asset_path": ASSET_PATH,
+                        "asset_class": "/Script/Engine.DataTable",
+                        "revision_value": BEFORE_REVISION,
+                    },
+                }
+
+            def get_data_table_row_reference_impact(
+                self,
+                asset_path: str,
+                row_name: str,
+                *,
+                sample_limit: int = 20,
+            ) -> dict[str, Any]:
+                referencers = []
+                if self.reference_count:
+                    referencers.append(
+                        {
+                            "source_asset_path": "/Game/UEAgentKitTests/BP_RowConsumer.BP_RowConsumer",
+                            "target_path": f"{asset_path}::{row_name}",
+                        }
+                    )
+                return {
+                    "checked": True,
+                    "source": "immutable-sqlite-searchable-name",
+                    "assetPath": asset_path,
+                    "rowName": row_name,
+                    "targetPath": f"{asset_path}::{row_name}",
+                    "referenceCount": self.reference_count,
+                    "sampleLimit": sample_limit,
+                    "sampleTruncated": False,
+                    "referencers": referencers,
+                }
+
+        validation = {"valid": True, "commitAllowedByPolicy": True, "issues": []}
+        referenced_service = PatchWorkflowService(
+            DataTableIndexService(1),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=self.freshness,
+        )
+        with patch("ue_agent_kit.agent_workflow.validate_patch", return_value=validation):
+            with self.assertRaises(WorkflowError) as rejected:
+                referenced_service.plan_patch(
+                    asset_path=ASSET_PATH,
+                    operation="renameDataTableRow",
+                    target={"rowName": "Row_Alpha", "newRowName": "Row_Beta"},
+                    value=True,
+                )
+        self.assertEqual(rejected.exception.code, "data-table-row-referenced")
+        self.assertEqual(rejected.exception.details["referenceCount"], 1)
+
+        clear_service = PatchWorkflowService(
+            DataTableIndexService(0),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=self.freshness,
+        )
+        with patch("ue_agent_kit.agent_workflow.validate_patch", return_value=validation):
+            plan = clear_service.plan_patch(
+                asset_path=ASSET_PATH,
+                operation="removeDataTableRow",
+                target={"rowName": "Row_Alpha"},
+                value=True,
+            )
+        self.assertEqual(plan["referenceImpact"]["referenceCount"], 0)
 
     def test_plan_and_policy_are_locked_after_creation(self) -> None:
         plan = self.service.plan_patch(

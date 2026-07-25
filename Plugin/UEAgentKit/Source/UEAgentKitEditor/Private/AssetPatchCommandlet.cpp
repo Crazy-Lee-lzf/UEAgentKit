@@ -1,5 +1,8 @@
 #include "AssetPatchCommandlet.h"
 
+#include "AssetRegistry/AssetIdentifier.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistry/IAssetRegistry.h"
 #include "BlueprintContextSha256.h"
 #include "Dom/JsonObject.h"
 #include "Engine/Blueprint.h"
@@ -17,6 +20,7 @@
 #include "Misc/PackageSegment.h"
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
+#include "Modules/ModuleManager.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "UObject/Package.h"
@@ -89,6 +93,30 @@ namespace AssetPatchCommandletPrivate
 			{
 				return Value.Equals(Candidate, ESearchCase::CaseSensitive);
 			});
+	}
+
+	void FindDataTableRowReferencers(
+		UDataTable* DataTable,
+		const FName RowName,
+		TArray<FAssetIdentifier>& OutReferencers)
+	{
+		OutReferencers.Reset();
+		if (!DataTable || !DataTable->GetOutermost())
+		{
+			return;
+		}
+
+		IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(
+			TEXT("AssetRegistry")).Get();
+		AssetRegistry.SearchAllAssets(true);
+		AssetRegistry.GetReferencers(
+			FAssetIdentifier(DataTable->GetOutermost()->GetFName(), DataTable->GetFName(), RowName),
+			OutReferencers,
+			UE::AssetRegistry::EDependencyCategory::SearchableName);
+		OutReferencers.Sort([](const FAssetIdentifier& Left, const FAssetIdentifier& Right)
+		{
+			return Left.ToString() < Right.ToString();
+		});
 	}
 
 	bool LoadPolicy(const FString& Filename, FPatchPolicy& OutPolicy, FString& OutError)
@@ -1903,6 +1931,31 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			return 18;
 		}
 
+		TArray<FAssetIdentifier> RowReferencers;
+		const bool bReferenceImpactChecked = bDataTableRemoveRowOperation || bDataTableRenameRowOperation;
+		if (bReferenceImpactChecked)
+		{
+			FindDataTableRowReferencers(DataTable, RowName, RowReferencers);
+			if (!RowReferencers.IsEmpty())
+			{
+				TArray<FString> ReferencerNames;
+				const int32 DisplayCount = FMath::Min(RowReferencers.Num(), 8);
+				ReferencerNames.Reserve(DisplayCount);
+				for (int32 Index = 0; Index < DisplayCount; ++Index)
+				{
+					ReferencerNames.Add(RowReferencers[Index].ToString());
+				}
+				UE_LOG(
+					LogAssetPatch,
+					Error,
+					TEXT("DataTable row is referenced and cannot be removed or renamed. Row=%s ReferenceCount=%d Referencers=%s"),
+					*RowNameText,
+					RowReferencers.Num(),
+					*FString::Join(ReferencerNames, TEXT(", ")));
+				return 17;
+			}
+		}
+
 		FStructOnScope RowSnapshot(RowStruct);
 		if (!RowSnapshot.IsValid())
 		{
@@ -2141,6 +2194,12 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		Report->SetStringField(TEXT("rowStructPath"), RowStructPath);
 		Report->SetStringField(TEXT("sourceRowName"), RowNameText);
 		Report->SetStringField(TEXT("destinationRowName"), NewRowNameText);
+		Report->SetBoolField(TEXT("referenceImpactChecked"), bReferenceImpactChecked);
+		if (bReferenceImpactChecked)
+		{
+			Report->SetStringField(TEXT("referenceImpactSource"), TEXT("asset-registry-searchable-name"));
+			Report->SetNumberField(TEXT("referenceCount"), RowReferencers.Num());
+		}
 		Report->SetObjectField(TEXT("appliedValues"), AppliedValues);
 		Report->SetNumberField(TEXT("beforeRowCount"), OriginalRowNames.Num());
 		Report->SetNumberField(TEXT("afterRowCount"), AppliedRowCount);

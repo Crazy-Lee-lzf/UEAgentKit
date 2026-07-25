@@ -215,6 +215,66 @@ class IndexQueryService:
             ).fetchone()
             return None if row is None else {key: row[key] for key in row.keys()}
 
+    def get_data_table_row_reference_impact(
+        self,
+        asset_path: str,
+        row_name: str,
+        *,
+        sample_limit: int = 20,
+    ) -> dict[str, Any]:
+        """Return exact Searchable Name referencers for one DataTable row."""
+        asset_path = _asset_path(asset_path, required=True)
+        row_name = _clean_text(row_name, name="row_name", maximum=256)
+        sample_limit = _bounded_limit(sample_limit, maximum=100, name="sample_limit")
+        target_path = f"{asset_path}::{row_name}"
+        with self._open() as connection:
+            reference_count = int(
+                connection.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM references_table AS r
+                    WHERE r.kind = 'depends-searchable-name'
+                      AND r.target_asset_path = ?
+                      AND r.target_path = ?
+                    """,
+                    (asset_path, target_path),
+                ).fetchone()[0]
+            )
+            rows = connection.execute(
+                """
+                SELECT a.asset_path AS source_asset_path,
+                       r.stable_id,
+                       r.source_symbol_id,
+                       r.target_symbol_id,
+                       r.target_name,
+                       r.target_path,
+                       r.graph_guid,
+                       r.graph_name,
+                       r.node_guid,
+                       r.node_class,
+                       r.node_title
+                FROM references_table AS r
+                JOIN assets AS a ON a.id = r.asset_id
+                WHERE r.kind = 'depends-searchable-name'
+                  AND r.target_asset_path = ?
+                  AND r.target_path = ?
+                ORDER BY a.asset_path, r.graph_name, r.node_title, r.stable_id
+                LIMIT ?
+                """,
+                (asset_path, target_path, sample_limit),
+            ).fetchall()
+            return {
+                "checked": True,
+                "source": "immutable-sqlite-searchable-name",
+                "assetPath": asset_path,
+                "rowName": row_name,
+                "targetPath": target_path,
+                "referenceCount": reference_count,
+                "sampleLimit": sample_limit,
+                "sampleTruncated": reference_count > len(rows),
+                "referencers": [{key: row[key] for key in row.keys()} for row in rows],
+            }
+
     def _paged_response(
         self,
         *,

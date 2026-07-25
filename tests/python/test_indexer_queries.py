@@ -13,6 +13,7 @@ SRC_ROOT = TOOL_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
+from ue_agent_kit.agent_api import IndexQueryService  # noqa: E402
 from ue_agent_kit.database import open_database  # noqa: E402
 from ue_agent_kit.indexer import build_index  # noqa: E402
 from ue_agent_kit.queries import (  # noqa: E402
@@ -367,6 +368,62 @@ class IndexerAndQueryTests(unittest.TestCase):
                 self.assertEqual(details_search[0]["details"]["symbol"]["assetReader"], "static-mesh-v1")
                 stats = get_stats(connection)
                 self.assertEqual(stats["assetClasses"]["/Script/Engine.StaticMesh"], 1)
+
+    def test_data_table_row_reference_impact_is_exact_per_row(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ueak_data_table_row_refs_") as temporary_root:
+            root = Path(temporary_root)
+            database_path = root / "index.sqlite3"
+            export_root = root / "export"
+            data_table_path = "/Game/UEAgentKitTests/DT_RowTarget.DT_RowTarget"
+            source = make_asset(ASSET_A, profile="logic", revision=REVISION_A, rich=False)
+            source["references"].extend(
+                [
+                    {
+                        "id": (
+                            "reference|depends-searchable-name|"
+                            f"asset|{ASSET_A}|searchable-name|{data_table_path}::Row_Alpha"
+                        ),
+                        "kind": "depends-searchable-name",
+                        "sourceSymbolId": f"asset|{ASSET_A}",
+                        "targetSymbolId": f"searchable-name|{data_table_path}::Row_Alpha",
+                        "targetKind": "searchable-name",
+                        "targetName": "Row_Alpha",
+                        "targetAssetPath": data_table_path,
+                        "targetPath": f"{data_table_path}::Row_Alpha",
+                    },
+                    {
+                        "id": (
+                            "reference|depends-searchable-name|"
+                            f"asset|{ASSET_A}|searchable-name|{data_table_path}::Row_Beta"
+                        ),
+                        "kind": "depends-searchable-name",
+                        "sourceSymbolId": f"asset|{ASSET_A}",
+                        "targetSymbolId": f"searchable-name|{data_table_path}::Row_Beta",
+                        "targetKind": "searchable-name",
+                        "targetName": "Row_Beta",
+                        "targetAssetPath": data_table_path,
+                        "targetPath": f"{data_table_path}::Row_Beta",
+                    },
+                ]
+            )
+            source["summary"]["references"] = len(source["references"])
+            write_export(export_root, [source])
+
+            with open_database(database_path) as connection:
+                result = build_index(connection, export_root, database_path)
+                self.assertEqual((result.added, result.failed), (1, 0))
+
+            service = IndexQueryService(database_path)
+            alpha = service.get_data_table_row_reference_impact(data_table_path, "Row_Alpha")
+            beta = service.get_data_table_row_reference_impact(data_table_path, "Row_Beta")
+            missing = service.get_data_table_row_reference_impact(data_table_path, "Row_Missing")
+
+            self.assertEqual(alpha["referenceCount"], 1)
+            self.assertEqual(alpha["referencers"][0]["source_asset_path"], ASSET_A)
+            self.assertEqual(alpha["targetPath"], f"{data_table_path}::Row_Alpha")
+            self.assertEqual(beta["referenceCount"], 1)
+            self.assertEqual(missing["referenceCount"], 0)
+            self.assertEqual(missing["referencers"], [])
 
     def test_incremental_index_search_and_prune(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ueak_index_") as temporary_root:

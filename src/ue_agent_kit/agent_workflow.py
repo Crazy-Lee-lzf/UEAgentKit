@@ -1196,6 +1196,7 @@ class PatchWorkflowService:
                     }
                 ],
             }
+            reference_impact: dict[str, Any] | None = None
             digest = _sha256_bytes(_json_bytes(patch))
             plan_id = "plan_" + secrets.token_urlsafe(18)
             directory = self._plan_directory(plan_id)
@@ -1209,10 +1210,28 @@ class PatchWorkflowService:
                     default_message="The proposed patch was rejected by Policy or Revision validation.",
                     phase="plan-validation",
                 )
+            if operation in {"removeDataTableRow", "renameDataTableRow"}:
+                row_name = target_value.get("rowName") if isinstance(target_value, dict) else None
+                if not isinstance(row_name, str) or not row_name:
+                    raise WorkflowError(
+                        "data-table-row-name-invalid",
+                        "The structural DataTable operation has no valid source row name.",
+                    )
+                reference_impact = self.index_service.get_data_table_row_reference_impact(
+                    asset_path,
+                    row_name,
+                )
+                if int(reference_impact.get("referenceCount", 0)) > 0:
+                    shutil.rmtree(directory, ignore_errors=True)
+                    raise WorkflowError(
+                        "data-table-row-referenced",
+                        "The DataTable row has indexed Searchable Name referencers and cannot be removed or renamed by a single-asset patch.",
+                        details=reference_impact,
+                    )
             record = PlanRecord(plan_id, digest, patch, patch_path, validation)
             self._plans[plan_id] = record
             self._prune_records()
-            return {
+            response = {
                 "schemaVersion": WORKFLOW_SCHEMA_VERSION,
                 "tool": "ue_plan_patch",
                 "ok": True,
@@ -1230,6 +1249,9 @@ class PatchWorkflowService:
                 "commitToolsEnabled": self.config.commit_enabled,
                 "nextStep": "Call ue_dry_run_patch with this planId.",
             }
+            if reference_impact is not None:
+                response["referenceImpact"] = reference_impact
+            return response
 
     def prepare_high_level_change(
         self,

@@ -445,6 +445,8 @@ Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目�
 ```
 
 - 源 Row 必须存在，`value=true` 是不可省略的结构变更确认。
+- Plan 阶段从 immutable SQLite 精确查询 `depends-searchable-name`，匹配键为 `targetAssetPath=<DataTable Object Path>` 与 `targetPath=<DataTable Object Path>::<RowName>`；存在引用时返回 `data-table-row-referenced`。
+- UE 执行阶段再次以 `FAssetIdentifier(DataTablePackage, DataTableObject, RowName)` 查询当前 Asset Registry Searchable Name；任何 Referencer 都会在修改前以退出码 17 零写入拒绝。
 - 执行器从 RowMap 稳定摘除 Row，销毁 Struct 内存后仅发送一次最终表变化通知。
 
 ### renameDataTableRow
@@ -462,9 +464,12 @@ Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目�
 ```
 
 - 源 Row 必须存在，目标 Row 必须不存在，两个名称必须不同。
+- 与删除相同，重命名必须通过 immutable SQLite 与当前 Asset Registry 两层精确 Row 引用检查；存在引用时不会自动更新引用方，也不会生成可执行 Plan。
 - 重命名只迁移 RowMap 键并复用同一 Row 内存，不修改 Row 内容；最终稳定状态只通知一次。
 
 三个结构 Operation 都先保存完整表快照并验证未受影响 Row。Dry Run 或内存验证失败时恢复整表；Commit 使用唯一 Package 备份、Manifest、独立 UE 重载和 Revision-aware rollback。真实 UE5.6 回归已完成 Add Dry Run/Commit、Rename Commit、Remove Commit、Remove/Rename/Add 逆序 rollback，并恢复初始 Revision。
+
+Searchable Name 导出使用完整 `Package.Object::ValueName` 构造 `targetSymbolId` 与 `targetPath`，因此同一 DataTable 的不同 Row 引用不会折叠。引用影响门禁只覆盖 UE Asset Registry 可证明的 Searchable Name 引用，不进行文本模糊扫描。
 
 ## Dry Run 报告
 
@@ -489,6 +494,9 @@ rollbackValueMatch
 rollbackStructureMatch (Material Instance operation)
 diskUnchanged
 backupPath
+referenceImpactChecked (DataTable Row structural operation)
+referenceImpactSource (DataTable Row remove/rename)
+referenceCount (DataTable Row remove/rename)
 ```
 
 Blueprint Dry Run 成功时要求 `compiled=true`。非 Blueprint 不执行 Blueprint 编译，因此 `compiled=false`。所有 Dry Run 都必须满足：

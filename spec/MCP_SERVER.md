@@ -281,6 +281,7 @@ suggestedAction
 写入流程进一步区分：
 
 ```text
+data-table-row-referenced    DataTable 删除/重命名目标 Row 存在精确 Searchable Name 引用
 policy-rejected             固定 Policy 拒绝资产、Operation 或语义 Target
 revision-conflict           Plan Revision 与当前 Revision Export 不一致
 dirty-package               Revision Export 记录目标 Package 为 Dirty
@@ -301,10 +302,14 @@ workflow-report-invalid      报告不是有效 JSON Object
 1. 从固定 SQLite 获取 Asset Class 与 SHA-256 Revision。
 2. 生成单资产、单 Operation Patch。
 3. 使用固定 Policy 与 Revision Export 纯校验。
-4. 将 Patch 写入固定 Work Root。
-5. 记录 Canonical JSON 摘要。
+4. 对 `removeDataTableRow` / `renameDataTableRow`，从 immutable SQLite 精确查询目标 `DataTable Object Path::RowName` 的 `depends-searchable-name` 引用。
+5. 存在引用时返回 `data-table-row-referenced`，删除临时 Plan 目录，不生成可执行 Plan；无引用时在响应中返回 `referenceImpact`。
+6. 将 Patch 写入固定 Work Root。
+7. 记录 Canonical JSON 摘要。
 
 Plan 只在当前 Server 会话有效。
+
+该 Plan 检查是提前反馈，不替代执行期安全判断。UE Commandlet 在 Remove/Rename 实际修改前使用当前 Asset Registry 和完整 `FAssetIdentifier(Package, Object, RowName)` 再次检查；发现 Referencer 时以退出码 17 零写入拒绝。当前不自动重写引用方，也不使用字符串模糊扫描。
 
 ### `ue_dry_run_patch`
 
@@ -395,3 +400,17 @@ scripts\TestMcpWorkflow.cmd ^
 ```
 
 完整测试使用隔离 Scalar Fixture，最终必须恢复测试前 `.uasset` SHA-256。
+
+DataTable Row 引用影响真实回归：
+
+```bat
+scripts\TestDataTableRowReferenceImpact.cmd ^
+  -EngineRoot "E:\Path\To\UE_5.6" ^
+  -ProjectPath "E:\Path\To\Project.uproject"
+```
+
+该回归要求：
+
+- 精确 Searchable Name 引用可被导出为 `DataTable Object Path::RowName`。
+- Remove/Rename 都在 UE 执行阶段被拒绝。
+- 目标 Row 与 Revision 完全不变。

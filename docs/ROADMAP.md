@@ -92,6 +92,7 @@ UE Agent Kit 的长期定位是面向 AI Agent 的 Unreal Engine 项目智能层
 
 - [x] DataTable 现有单 Row 的 1–32 个顶层标量字段原子更新。
 - [x] DataTable 受控新增、删除和重命名 Row：已完成 Canonical `rowNames` 预校验、Policy/Revision/备份约束、完整表原子恢复，并通过真实 UE5.6 Add → Rename → Remove → 逆序三层 rollback 与最终 Revision 恢复验证。
+- [x] DataTable 删除/重命名 Row 的精确引用影响门禁：基于 Searchable Name 的 Plan 与 UE 执行双层检查，存在引用时零写入拒绝，不自动重写引用方。
 - Data Asset 的对象引用、软引用、Struct 和容器值模型。
 - Material Instance 参数工作流统一。
 - Blueprint 默认值、组件属性和 Pin 默认值的高层 MCP 封装。
