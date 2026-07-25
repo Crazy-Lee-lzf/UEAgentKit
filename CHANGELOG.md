@@ -6,9 +6,11 @@ All notable changes to UE Agent Kit are documented here.
 
 - Centralized MCP Tool order, mode membership, annotations, and Live Bridge method names in one typed Tool Registry with registration and handler-boundary drift guards.
 - Split MCP Query, Live Read, Live Action, and Workflow registration into independent modules and split Editor Bridge capabilities into Status, Diagnostic, Asset, Graph, Navigation, and Validation handler translation units.
-- Added seven bounded Live Editor Daily Action tools: `ue_open_asset`, `ue_focus_asset`, `ue_sync_content_browser`, `ue_focus_actor`, `ue_compile_blueprint`, `ue_validate_asset`, and `ue_validate_folder`.
+- Added eight bounded Live Editor Daily Action tools: `ue_open_asset`, `ue_focus_asset`, `ue_sync_content_browser`, `ue_focus_actor`, `ue_compile_blueprint`, `ue_validate_asset`, `ue_validate_folder`, and isolated exact-name `ue_run_automation_test`.
 - Added exact Asset Registry paths, current-Editor-World ActorGuid targeting, no-save Blueprint compilation, official Data Validation, folder/issue limits, PIE rejection, and real UE5.6 positive/negative action coverage with unchanged package SHA-256.
-- Expanded Live-only MCP mode from 15 to 22 tools and combined Live + workflow mode from 28 to 35 tools; offline and workflow-only modes remain 5 and 18 tools.
+- Added `ue_save_authorized_asset` with Policy/Revision/session-bound Preview receipts, exact `SAVE <receipt>` confirmation, one-package backup, exact loaded Dirty Package save, independent Unreal verification, and stale snapshot marking; unbounded `save_all` remains forbidden.
+- Added a dedicated real UE5.6 authorized-save smoke test with a command-line-only fixed fixture Dirty hook and verified fixture recovery.
+- Expanded Live-only MCP mode from 15 to 23 tools, workflow-only mode from 18 to 19 tools, and combined Live + workflow mode from 28 to 37 tools; offline mode remains 5 tools.
 - Added targeted Registry/Query/Live/Workflow test entry points, safe preview-first Git Worktree creation, and a bounded Sol/Luna parallel-development contract.
 
 - Added bounded Live Editor Output Log reads with a 4,096-entry ring buffer, sequence cursors, category/severity/text/UTC/PIE filters, and explicit dropped-entry reporting.

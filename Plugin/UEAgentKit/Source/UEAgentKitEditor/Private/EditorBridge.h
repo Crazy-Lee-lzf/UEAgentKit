@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Containers/Ticker.h"
+#include "HAL/PlatformProcess.h"
 
 class FJsonObject;
 class FSocket;
@@ -24,9 +25,27 @@ private:
 		TArray<uint8> ReceiveBuffer;
 		bool bAuthenticated = false;
 		bool bCloseAfterResponse = false;
+		bool bDeferredResponse = false;
+	};
+
+	struct FPendingAutomationRun
+	{
+		FSocket* Socket = nullptr;
+		FString RequestId;
+		FString TestName;
+		FString ReportDirectory;
+		FString ReportPath;
+		FProcHandle ProcessHandle;
+		uint32 ProcessId = 0;
+		int32 ExitCode = INDEX_NONE;
+		double DeadlineSeconds = 0.0;
+		int32 MaxEntries = 100;
+		bool bActive = false;
 	};
 
 	bool Tick(float DeltaTime);
+	void TickAutomationTest();
+	void CancelAutomationTest();
 	void AcceptConnections();
 	void PumpConnections();
 	void CloseConnection(int32 Index);
@@ -54,6 +73,17 @@ private:
 	bool TryCompileBlueprintResult(const FString& AssetPath, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
 	bool TryValidateAssetResult(const FString& AssetPath, int32 MaxIssues, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
 	bool TryValidateFolderResult(const FString& PackagePath, bool bRecursive, int32 MaxAssets, int32 MaxIssues, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
+	bool TrySaveAuthorizedAssetResult(const FString& AssetPath, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
+	bool TryPrepareAuthorizedSaveFixtureResult(const FString& AssetPath, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
+	bool TryStartAutomationTest(
+		const FString& TestName,
+		int32 TimeoutSeconds,
+		int32 MaxEntries,
+		FSocket* Socket,
+		const FString& RequestId,
+		FString& OutErrorCode,
+		FString& OutErrorMessage);
+	void CompleteAutomationTest(bool bTimedOut);
 
 	bool WriteDescriptor();
 	void RemoveDescriptor();
@@ -69,4 +99,5 @@ private:
 	FString DescriptorPath;
 	int32 ListenPort = 0;
 	TUniquePtr<FUEAgentKitEditorBridgeLogCapture> LogCapture;
+	FPendingAutomationRun PendingAutomation;
 };

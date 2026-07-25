@@ -58,7 +58,9 @@ namespace UEAgentKitEditorBridgePrivate
 		TEXT("editor.focusActor"),
 		TEXT("editor.compileBlueprint"),
 		TEXT("editor.validateAsset"),
-		TEXT("editor.validateFolder")
+		TEXT("editor.validateFolder"),
+		TEXT("editor.runAutomationTest"),
+		TEXT("editor.saveAuthorizedAsset")
 	};
 
 	FString NormalizeProjectPath()
@@ -493,6 +495,7 @@ bool FUEAgentKitEditorBridge::Start()
 
 void FUEAgentKitEditorBridge::Stop()
 {
+	CancelAutomationTest();
 	if (TickerHandle.IsValid())
 	{
 		FTSTicker::GetCoreTicker().RemoveTicker(TickerHandle);
@@ -542,6 +545,7 @@ bool FUEAgentKitEditorBridge::Tick(float DeltaTime)
 	(void)DeltaTime;
 	AcceptConnections();
 	PumpConnections();
+	TickAutomationTest();
 	return true;
 }
 
@@ -639,6 +643,10 @@ void FUEAgentKitEditorBridge::CloseConnection(const int32 Index)
 		return;
 	}
 	ISocketSubsystem* SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+	if (PendingAutomation.bActive && PendingAutomation.Socket == Clients[Index].Socket)
+	{
+		CancelAutomationTest();
+	}
 	if (Clients[Index].Socket != nullptr)
 	{
 		Clients[Index].Socket->Close();
@@ -707,6 +715,11 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 	if (!Client.bAuthenticated)
 	{
 		SendError(Client.Socket, RequestId, TEXT("live-editor-authentication-required"), TEXT("Call hello before using Editor Bridge capabilities."));
+		return;
+	}
+	if (Client.bDeferredResponse)
+	{
+		SendError(Client.Socket, RequestId, TEXT("live-editor-automation-busy"), TEXT("This connection already owns a pending Automation Test response."));
 		return;
 	}
 
@@ -840,6 +853,63 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 			ErrorCode,
 			ErrorMessage);
 	}
+	else if (Method == TEXT("editor.prepareAuthorizedSaveFixture"))
+	{
+		FString AssetPath;
+		Params->TryGetStringField(TEXT("assetPath"), AssetPath);
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode;
+		FString ErrorMessage;
+		SendActionResult(
+			TryPrepareAuthorizedSaveFixtureResult(AssetPath, Result, ErrorCode, ErrorMessage),
+			Result,
+			ErrorCode,
+			ErrorMessage);
+	}
+	else if (Method == TEXT("editor.saveAuthorizedAsset"))
+	{
+		FString AssetPath;
+		Params->TryGetStringField(TEXT("assetPath"), AssetPath);
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode;
+		FString ErrorMessage;
+		SendActionResult(
+			TrySaveAuthorizedAssetResult(AssetPath, Result, ErrorCode, ErrorMessage),
+			Result,
+			ErrorCode,
+			ErrorMessage);
+	}
+	else if (Method == TEXT("editor.runAutomationTest"))
+	{
+		FString TestName;
+		Params->TryGetStringField(TEXT("testName"), TestName);
+		double TimeoutSecondsValue = 120.0;
+		double MaxEntriesValue = 100.0;
+		Params->TryGetNumberField(TEXT("timeoutSeconds"), TimeoutSecondsValue);
+		Params->TryGetNumberField(TEXT("maxEntries"), MaxEntriesValue);
+		FString ErrorCode;
+		FString ErrorMessage;
+		if (TryStartAutomationTest(
+			TestName,
+			FMath::Clamp(static_cast<int32>(TimeoutSecondsValue), 1, 300),
+			FMath::Clamp(static_cast<int32>(MaxEntriesValue), 1, 200),
+			Client.Socket,
+			RequestId,
+			ErrorCode,
+			ErrorMessage))
+		{
+			Client.bDeferredResponse = true;
+			Client.bCloseAfterResponse = false;
+		}
+		else
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				ErrorCode.IsEmpty() ? TEXT("live-editor-automation-start-failed") : ErrorCode,
+				ErrorMessage.IsEmpty() ? TEXT("The exact Automation Test could not be started.") : ErrorMessage);
+		}
+	}
 	else if (Method == TEXT("editor.validateFolder"))
 	{
 		FString PackagePath;
@@ -870,7 +940,10 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 	{
 		SendError(Client.Socket, RequestId, TEXT("live-editor-capability-unavailable"), TEXT("The requested Editor Bridge capability is not registered."));
 	}
-	Client.bCloseAfterResponse = true;
+	if (!Client.bDeferredResponse)
+	{
+		Client.bCloseAfterResponse = true;
+	}
 }
 
 bool FUEAgentKitEditorBridge::SendResponse(FSocket* Socket, const TSharedRef<FJsonObject>& Response) const

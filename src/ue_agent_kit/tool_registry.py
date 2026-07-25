@@ -56,6 +56,7 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_compile_blueprint", "live-action", "planning", "editor.compileBlueprint"),
     ToolDefinition("ue_validate_asset", "live-action", "planning", "editor.validateAsset"),
     ToolDefinition("ue_validate_folder", "live-action", "planning", "editor.validateFolder"),
+    ToolDefinition("ue_run_automation_test", "live-action", "planning", "editor.runAutomationTest"),
     ToolDefinition("ue_set_blueprint_default", "workflow", "planning", high_level_change=True),
     ToolDefinition("ue_set_component_property", "workflow", "planning", high_level_change=True),
     ToolDefinition("ue_set_pin_default", "workflow", "planning", high_level_change=True),
@@ -68,6 +69,7 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_verify_asset", "workflow", "planning"),
     ToolDefinition("ue_get_asset_state", "workflow", "read"),
     ToolDefinition("ue_refresh_asset_index", "workflow", "planning"),
+    ToolDefinition("ue_save_authorized_asset", "workflow", "destructive"),
     ToolDefinition("ue_rollback_patch", "workflow", "destructive"),
 )
 

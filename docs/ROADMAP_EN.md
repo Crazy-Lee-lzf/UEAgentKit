@@ -76,8 +76,8 @@ Initial low-risk actions:
 - [x] `ue_compile_blueprint`: in-memory compilation with structured status and current-session diagnostics, without saving packages.
 - [x] `ue_validate_asset` and `ue_validate_folder`: official Data Validation with hard limits of 500 assets and 200 returned issues.
 - [x] Real UE5.6 positive and negative coverage for no-load Content Browser sync, asset open/focus, ActorGuid focus, compile, and a 25-asset folder validation while preserving package SHA-256.
-- [ ] `ue_run_automation_test`.
-- [ ] `ue_save_authorized_asset`; unbounded `save_all` remains forbidden.
+- [x] `ue_run_automation_test` with an exact registered test name, an isolated `UnrealEditor-Cmd` child process, and fixed timeout/log limits.
+- [x] `ue_save_authorized_asset` with Policy/Revision/session-bound Preview receipts, one-asset backup, explicit confirmation, and independent verification; unbounded `save_all` remains forbidden.
 
 Every save remains bounded by Policy, Revision, Dry Run, explicit confirmation, backup, and verification. There will be no unbounded `save_all`.
 

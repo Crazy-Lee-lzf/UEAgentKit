@@ -132,6 +132,18 @@ class RollbackDryRunRecord:
     consumed: bool = False
 
 
+@dataclass
+class SaveAuthorizationRecord:
+    receipt: str
+    asset_path: str
+    asset_class: str
+    package_name: str
+    expected_disk_revision: str
+    editor_session_id: str
+    editor_process_id: int
+    consumed: bool = False
+
+
 def _default_process_runner(arguments: list[str], cwd: Path, timeout_seconds: int) -> ProcessResult:
     completed = subprocess.run(
         arguments,
@@ -360,6 +372,7 @@ class PatchWorkflowService:
         self._dry_runs: dict[str, DryRunRecord] = {}
         self._applies: dict[str, ApplyRecord] = {}
         self._rollback_dry_runs: dict[str, RollbackDryRunRecord] = {}
+        self._save_authorizations: dict[str, SaveAuthorizationRecord] = {}
         self.live_editor_service = live_editor_service
         self.active_snapshot = self.config.active_snapshot
         self._refresh_applied = False
@@ -494,7 +507,7 @@ class PatchWorkflowService:
         return sanitized if isinstance(sanitized, dict) else {}
 
     def _prune_records(self) -> None:
-        for mapping in (self._plans, self._dry_runs, self._applies, self._rollback_dry_runs):
+        for mapping in (self._plans, self._dry_runs, self._applies, self._rollback_dry_runs, self._save_authorizations):
             while len(mapping) > MAX_WORKFLOW_RECORDS:
                 mapping.pop(next(iter(mapping)))
 
@@ -1548,6 +1561,190 @@ class PatchWorkflowService:
                 "reportId": _report_id("verify-export", output / "manifest.json"),
                 "indexFreshness": freshness,
                 "nextStep": "Keep the change and refresh the asset index, or call ue_rollback_patch in DryRun mode before an explicit rollback Commit.",
+            }
+
+    def save_authorized_asset(
+        self,
+        asset_path: str,
+        *,
+        mode: Literal["Preview", "Commit"] = "Preview",
+        save_receipt: str = "",
+        confirmation: str = "",
+    ) -> dict[str, Any]:
+        with self._lock:
+            self._assert_session_current()
+            asset_path = self._validate_refresh_asset_path(asset_path)
+            if mode not in {"Preview", "Commit"}:
+                raise WorkflowError("authorized-save-invalid-mode", "mode must be Preview or Commit.")
+            if self.live_editor_service is None:
+                raise WorkflowError("live-editor-required", "Authorized save requires Live Editor mode for the fixed project.")
+
+            record = self.index_service.get_revision_record(asset_path)
+            if record is None:
+                raise WorkflowError("asset-not-indexed", "The requested asset is not present in the fixed SQLite index.")
+            asset_class = str(record.get("asset_class", ""))
+            package_name = str(record.get("package_name", ""))
+            if not asset_class or not package_name:
+                raise WorkflowError("asset-identity-unavailable", "The indexed asset has no stable Class and Package identity.")
+            if asset_class == "/Script/Engine.World":
+                raise WorkflowError("authorized-save-map-unsupported", "Authorized save does not save maps or external-actor packages.")
+            policy = self._assert_refresh_policy(asset_path, asset_class)
+            if policy.get("commitEnabled") is not True:
+                raise WorkflowError("commit-not-allowed", "The fixed Policy does not enable Commit.")
+            freshness = self._assert_asset_fresh(asset_path)
+            expected_revision = str(freshness.get("diskRevision", ""))
+            if not expected_revision.startswith("sha256:"):
+                raise WorkflowError("revision-unavailable", "The current disk Package has no usable SHA-256 Revision.")
+
+            try:
+                status = self.live_editor_service.status()
+            except Exception as exc:
+                raise WorkflowError("live-editor-status-unavailable", "The fixed Editor session could not be inspected before save.") from exc
+            if status.get("state") != "available" or status.get("pieState") != "stopped":
+                raise WorkflowError("live-editor-unavailable", "The fixed Editor must be available and stopped before authorized save.")
+            editor_session_id = str(status.get("sessionId", ""))
+            editor_process_id = int(status.get("processId") or 0)
+            if not editor_session_id or editor_process_id <= 0:
+                raise WorkflowError("live-editor-status-unavailable", "The fixed Editor session identity is incomplete.")
+            try:
+                inspection = self.live_editor_service.call_tool("ue_inspect_asset_live", {"assetPath": asset_path})
+            except Exception as exc:
+                raise WorkflowError("live-editor-status-unavailable", "The target asset could not be inspected before save.") from exc
+            result = inspection.get("result", {}) if isinstance(inspection, dict) else {}
+            memory = result.get("memory", {}) if isinstance(result, dict) else {}
+            registry = result.get("assetRegistry", {}) if isinstance(result, dict) else {}
+            if not isinstance(memory, dict) or not isinstance(registry, dict):
+                raise WorkflowError("live-editor-protocol-error", "The target asset inspection result is incomplete.")
+            if registry.get("classPath") not in {None, "", asset_class}:
+                raise WorkflowError("asset-class-mismatch", "The live Asset Registry Class does not match the fixed snapshot.")
+            if memory.get("loaded") is not True:
+                raise WorkflowError("live-editor-save-asset-not-loaded", "Authorized save only accepts an already loaded exact asset.")
+            if memory.get("packageDirty") is not True:
+                raise WorkflowError("live-editor-save-not-dirty", "The exact loaded package is not Dirty.")
+
+            if mode == "Preview":
+                receipt = "save_" + secrets.token_urlsafe(24)
+                self._save_authorizations[receipt] = SaveAuthorizationRecord(
+                    receipt,
+                    asset_path,
+                    asset_class,
+                    package_name,
+                    expected_revision,
+                    editor_session_id,
+                    editor_process_id,
+                )
+                self._prune_records()
+                return {
+                    "schemaVersion": WORKFLOW_SCHEMA_VERSION,
+                    "tool": "ue_save_authorized_asset",
+                    "ok": True,
+                    "mode": "Preview",
+                    "assetPath": asset_path,
+                    "assetClass": asset_class,
+                    "expectedDiskRevision": expected_revision,
+                    "editorSessionId": editor_session_id,
+                    "editorProcessId": editor_process_id,
+                    "loaded": True,
+                    "packageDirty": True,
+                    "saveReceipt": receipt,
+                    "saved": False,
+                    "commitToolsEnabled": self.config.commit_enabled,
+                    "nextStep": f"To save exactly this asset, call ue_save_authorized_asset with mode=Commit and confirmation 'SAVE {receipt}'.",
+                }
+
+            if not self.config.commit_enabled:
+                raise WorkflowError("commit-disabled", "Commit tools were not enabled when this MCP server started.")
+            authorization = self._save_authorizations.get(save_receipt)
+            if authorization is None or authorization.consumed:
+                raise WorkflowError("save-receipt-invalid", "A fresh one-time saveReceipt is required.")
+            if authorization.asset_path != asset_path:
+                raise WorkflowError("save-receipt-invalid", "The saveReceipt belongs to another asset.")
+            if confirmation != f"SAVE {save_receipt}":
+                raise WorkflowError("save-confirmation-required", "Save confirmation did not exactly match the required receipt phrase.")
+            if (
+                authorization.asset_class != asset_class
+                or authorization.package_name != package_name
+                or authorization.expected_disk_revision != expected_revision
+                or authorization.editor_session_id != editor_session_id
+                or authorization.editor_process_id != editor_process_id
+            ):
+                raise WorkflowError("save-receipt-stale", "The asset, disk Revision, or Editor session changed after Preview.")
+
+            package_file = self._package_file(self.config.project_path, package_name, asset_class)
+            before_revision = "sha256:" + sha256_file(package_file)
+            if before_revision != expected_revision:
+                raise WorkflowError("revision-conflict", "The disk Package changed after save Preview.")
+            backup_directory = self.config.backup_root / "live-save" / save_receipt
+            if backup_directory.exists():
+                raise WorkflowError("backup-exists", "The fixed authorized-save backup directory already exists.")
+            backup_directory.mkdir(parents=True, exist_ok=False)
+            backup_file = backup_directory / package_file.name
+            shutil.copy2(package_file, backup_file)
+            manifest_path = backup_directory / "manifest.json"
+            _write_json_atomic(
+                manifest_path,
+                {
+                    "schemaVersion": "1.0",
+                    "operation": "authorized-live-save",
+                    "projectName": self.project_name,
+                    "assetPath": asset_path,
+                    "assetClass": asset_class,
+                    "packageName": package_name,
+                    "beforeRevision": before_revision,
+                    "backupFileName": backup_file.name,
+                    "createdUtc": utc_now_iso(),
+                },
+            )
+
+            try:
+                bridge_result = self.live_editor_service.call_method(
+                    "editor.saveAuthorizedAsset",
+                    {"assetPath": asset_path},
+                    timeout_seconds=30.0,
+                )
+            except Exception as exc:
+                raise WorkflowError(
+                    "authorized-save-failed",
+                    "The fixed Editor rejected or failed the exact authorized save.",
+                    details={"backupManifestId": manifest_path.name},
+                ) from exc
+            if bridge_result.get("saved") is not True or bridge_result.get("assetPath") != asset_path:
+                raise WorkflowError("authorized-save-report-invalid", "The Editor did not confirm the exact saved asset.")
+
+            after_revision = "sha256:" + sha256_file(package_file)
+            verification_root = self._safe_work_path("authorized-save", save_receipt, "verify")
+            candidate = self._export_refresh_candidate(asset_path, verification_root)
+            if candidate.get("revision") != after_revision:
+                raise WorkflowError(
+                    "authorized-save-verification-failed",
+                    "Independent Unreal export did not match the saved disk Revision.",
+                    details={"beforeRevision": before_revision, "afterRevision": after_revision},
+                )
+            authorization.consumed = True
+            freshness_after = (
+                self.freshness.mark_commit(asset_path, before_revision, after_revision)
+                if after_revision != before_revision
+                else self.freshness.inspect_asset(asset_path)
+            )
+            return {
+                "schemaVersion": WORKFLOW_SCHEMA_VERSION,
+                "tool": "ue_save_authorized_asset",
+                "ok": True,
+                "mode": "Commit",
+                "assetPath": asset_path,
+                "assetClass": asset_class,
+                "saveReceipt": save_receipt,
+                "saved": True,
+                "verified": True,
+                "beforeRevision": before_revision,
+                "afterRevision": after_revision,
+                "revisionChanged": before_revision != after_revision,
+                "backupManifestId": manifest_path.name,
+                "editorSessionId": editor_session_id,
+                "editorProcessId": editor_process_id,
+                "bridge": _safe_report(bridge_result, configured_paths=self.configured_paths),
+                "indexFreshness": freshness_after,
+                "nextStep": "Call ue_refresh_asset_index to preview and activate a paired snapshot generation when the Revision changed.",
             }
 
     def rollback_patch(

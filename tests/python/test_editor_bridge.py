@@ -143,6 +143,13 @@ class _BridgeHandler(socketserver.StreamRequestHandler):
                 "numRequested": 2,
                 "saved": False,
             },
+            "editor.runAutomationTest": {
+                "action": "run-automation-test",
+                "testName": params.get("testName", ""),
+                "state": "success",
+                "successful": True,
+                "saved": False,
+            },
         }
         result = results.get(method)
         if result is None:
@@ -200,6 +207,7 @@ class EditorBridgeTests(unittest.TestCase):
             "editor.compileBlueprint",
             "editor.validateAsset",
             "editor.validateFolder",
+            "editor.runAutomationTest",
         ]
         self.server = _BridgeServer(("127.0.0.1", 0), _BridgeHandler)
         self.server.auth_token = self.token  # type: ignore[attr-defined]
@@ -333,6 +341,20 @@ class EditorBridgeTests(unittest.TestCase):
         self.assertEqual(request["params"]["packagePath"], "/Game/Test")
         self.assertFalse(request["params"]["recursive"] )
 
+        automation = self.service.call_tool(
+            "ue_run_automation_test",
+            {
+                "testName": "UEAgentKit.EditorBridge.LiveActionSmoke",
+                "timeoutSeconds": 300,
+                "maxEntries": 200,
+            },
+        )
+        self.assertFalse(automation["readOnly"])
+        self.assertTrue(automation["result"]["successful"])
+        request = self.server.requests[-1]  # type: ignore[attr-defined]
+        self.assertEqual(request["params"]["timeoutSeconds"], 300)
+        self.assertEqual(request["params"]["maxEntries"], 200)
+
         invalid_cases = (
             ("ue_focus_actor", {"actorGuid": "not-a-guid"}),
             ("ue_validate_folder", {"packagePath": "/Game"}),
@@ -341,6 +363,10 @@ class EditorBridgeTests(unittest.TestCase):
             ("ue_validate_folder", {"packagePath": "/Game/Test", "maxAssets": 501}),
             ("ue_validate_folder", {"packagePath": "/Game/Test", "maxIssues": 201}),
             ("ue_validate_asset", {"assetPath": "/Game/Test/A.A", "maxIssues": 0}),
+            ("ue_run_automation_test", {"testName": ""}),
+            ("ue_run_automation_test", {"testName": " Test.Name"}),
+            ("ue_run_automation_test", {"testName": "Test.Name", "timeoutSeconds": 301}),
+            ("ue_run_automation_test", {"testName": "Test.Name", "maxEntries": 201}),
         )
         for tool_name, params in invalid_cases:
             with self.subTest(tool=tool_name, params=params):

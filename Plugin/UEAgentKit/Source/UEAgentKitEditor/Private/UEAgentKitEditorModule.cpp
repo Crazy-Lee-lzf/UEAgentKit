@@ -1,4 +1,6 @@
 #include "EditorBridge.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 #include "Modules/ModuleManager.h"
 
 class FUEAgentKitEditorModule final : public IModuleInterface
@@ -6,7 +8,8 @@ class FUEAgentKitEditorModule final : public IModuleInterface
 public:
 	virtual void StartupModule() override
 	{
-		if (GIsEditor && !IsRunningCommandlet())
+		const bool bAutomationChild = FParse::Param(FCommandLine::Get(), TEXT("UEAgentKitAutomationChild"));
+		if (GIsEditor && !IsRunningCommandlet() && !bAutomationChild)
 		{
 			EditorBridge = MakeUnique<FUEAgentKitEditorBridge>();
 			EditorBridge->Start();

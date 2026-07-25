@@ -257,6 +257,24 @@ def register_workflow_tools(
             return error_response("ue_refresh_asset_index", exc, read_only=False)
 
     @server.tool(annotations=destructive_annotations)
+    def ue_save_authorized_asset(
+        asset_path: str,
+        mode: Literal["Preview", "Commit"] = "Preview",
+        save_receipt: str = "",
+        confirmation: str = "",
+    ) -> dict[str, Any]:
+        """Preview or explicitly save one policy-authorized loaded Dirty asset with backup and verification."""
+        try:
+            return workflow_service.save_authorized_asset(
+                asset_path,
+                mode=mode,
+                save_receipt=save_receipt,
+                confirmation=confirmation,
+            )
+        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_save_authorized_asset", exc, read_only=False)
+
+    @server.tool(annotations=destructive_annotations)
     def ue_rollback_patch(
         apply_receipt: str,
         mode: Literal["DryRun", "Commit"] = "DryRun",

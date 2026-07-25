@@ -280,6 +280,14 @@ class FakeLiveEditorService:
                 "numChecked": 2,
                 "saved": False,
             },
+            "ue_run_automation_test": {
+                "action": "run-automation-test",
+                "testName": normalized_params.get("testName", ""),
+                "state": "success",
+                "successful": True,
+                "entryCount": 1,
+                "saved": False,
+            },
         }
         return {
             "schemaVersion": "1.0",
@@ -559,12 +567,16 @@ class McpServerTests(unittest.TestCase):
         self.assertFalse(graph_contract["editingSupported"])
         action_contract = capabilities["liveEditor"]["editorActions"]
         self.assertTrue(action_contract["available"])
-        self.assertEqual(action_contract["tools"], expected_names[15:22])
+        self.assertEqual(action_contract["tools"], expected_names[15:23])
         self.assertFalse(action_contract["saveSupported"])
         self.assertFalse(action_contract["pieSupported"])
         self.assertEqual(action_contract["actorIdentity"], "current-editor-world-actor-guid")
         self.assertEqual(action_contract["folderValidationMaxAssets"], 500)
         self.assertEqual(action_contract["returnedValidationIssueLimit"], 200)
+        self.assertTrue(action_contract["automationExactTestNameOnly"])
+        self.assertTrue(action_contract["automationSingleParticipantOnly"])
+        self.assertEqual(action_contract["automationTimeoutSecondsMax"], 300)
+        self.assertEqual(action_contract["automationReturnedEntryLimit"], 200)
         self.assertTrue(capabilities["freshness"]["liveEditorMemorySeparate"])
 
         _, project_status = asyncio.run(server.call_tool("ue_get_project_status", {}))
@@ -675,6 +687,22 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(live_service.calls[-1][1]["packagePath"], "/Game/Test")
         self.assertEqual(live_service.calls[-1][1]["maxAssets"], 20)
 
+        _, automation = asyncio.run(
+            server.call_tool(
+                "ue_run_automation_test",
+                {
+                    "test_name": "UEAgentKit.EditorBridge.LiveActionSmoke",
+                    "timeout_seconds": 45,
+                    "max_entries": 25,
+                },
+            )
+        )
+        self.assertTrue(automation["result"]["successful"])
+        self.assertEqual(live_service.calls[-1][0], "ue_run_automation_test")
+        self.assertEqual(live_service.calls[-1][1]["testName"], "UEAgentKit.EditorBridge.LiveActionSmoke")
+        self.assertEqual(live_service.calls[-1][1]["timeoutSeconds"], 45)
+        self.assertEqual(live_service.calls[-1][1]["maxEntries"], 25)
+
         offline_server = create_mcp_server(
             self.database_path,
             live_editor_service=FakeLiveEditorService(available=False),
@@ -699,7 +727,7 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         expected_names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 35)
+        self.assertEqual(len(tools), 37)
         for tool in tools:
             definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
             self.assertEqual(bool(tool.annotations.readOnlyHint), definition.read_only, tool.name)

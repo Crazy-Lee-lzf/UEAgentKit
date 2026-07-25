@@ -81,8 +81,8 @@ UE Agent Kit 的长期定位是面向 AI Agent 的 Unreal Engine 项目智能层
 - [x] `ue_compile_blueprint`：内存编译、结构化状态与当前会话诊断，不保存 Package。
 - [x] `ue_validate_asset` 与 `ue_validate_folder`：官方 Data Validation、500 资产/200 问题硬上限。
 - [x] 真实 UE5.6 正负路径：Content Browser 零加载、资产打开/聚焦、ActorGuid 聚焦、编译和 25 资产文件夹验证；目标 Package SHA-256 不变。
-- [ ] `ue_run_automation_test`。
-- [ ] `ue_save_authorized_asset`，禁止无范围 `save_all`。
+- [x] `ue_run_automation_test`：精确注册测试名、隔离 `UnrealEditor-Cmd` 子进程、固定超时与日志上限。
+- [x] `ue_save_authorized_asset`：Policy/Revision/Session 绑定的 Preview Receipt、单资产备份、显式确认、独立验证；禁止无范围 `save_all`。
 
 所有写入或保存操作继续受 Policy、Revision、Dry Run、显式确认、备份和验证约束。禁止提供无范围限制的 `save_all`。
 

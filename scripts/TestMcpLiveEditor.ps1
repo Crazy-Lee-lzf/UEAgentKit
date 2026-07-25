@@ -2,6 +2,7 @@ param(
     [string]$EngineRoot = "",
     [string]$ProjectPath = "",
     [switch]$UseExistingEditor,
+    [switch]$UseRHI,
     [string]$StartupMap = "",
     [string]$ActorGuid = "",
     [ValidateRange(30, 300)]
@@ -74,11 +75,14 @@ try
             "-unattended",
             "-nosplash",
             "-NoSound",
-            "-NullRHI",
             "-NoP4",
             "-stdout",
             "-FullStdOutLogOutput"
         )
+        if (!$UseRHI)
+        {
+            $EditorArguments += "-NullRHI"
+        }
         $EditorProcess = Start-Process `
             -FilePath $UnrealEditor `
             -ArgumentList $EditorArguments `

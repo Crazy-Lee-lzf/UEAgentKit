@@ -76,6 +76,9 @@ async def _run(
     descriptor = json.loads(descriptor_path.read_text(encoding="utf-8-sig"))
     secret_token = str(descriptor["authToken"])
     secret_port = str(descriptor["port"])
+    descriptor_session_id = str(descriptor["sessionId"])
+    descriptor_process_id = int(descriptor["processId"])
+    descriptor_hash_before = _sha256(descriptor_path)
     parameters = StdioServerParameters(
         command="powershell.exe",
         args=[
@@ -161,6 +164,19 @@ async def _run(
                             "max_issues": 50,
                         },
                     )
+                ).structuredContent
+                action_results["ue_run_automation_test"] = (
+                    await session.call_tool(
+                        "ue_run_automation_test",
+                        {
+                            "test_name": "UEAgentKit.EditorBridge.LiveActionSmoke",
+                            "timeout_seconds": 30,
+                            "max_entries": 50,
+                        },
+                    )
+                ).structuredContent
+                post_automation_status = (
+                    await session.call_tool("ue_editor_status", {})
                 ).structuredContent
                 action_results["ue_focus_actor"] = (
                     await session.call_tool(
@@ -274,6 +290,7 @@ async def _run(
         "ue_compile_blueprint",
         "ue_validate_asset",
         "ue_validate_folder",
+        "ue_run_automation_test",
     ]:
         raise RuntimeError(f"Unexpected Live Action Tool order: {ACTION_LIVE_TOOLS}")
     sync_result = action_results["ue_sync_content_browser"]
@@ -296,6 +313,33 @@ async def _run(
     validate_folder = action_results["ue_validate_folder"]
     if not validate_folder or not validate_folder.get("ok") or validate_folder["result"].get("matchedAssetCount", 0) < 1:
         raise RuntimeError(f"Folder validation failed: {validate_folder}")
+    automation = action_results["ue_run_automation_test"]
+    if (
+        not automation
+        or not automation.get("ok")
+        or automation["result"].get("testName") != "UEAgentKit.EditorBridge.LiveActionSmoke"
+        or automation["result"].get("state") != "success"
+        or automation["result"].get("successful") is not True
+        or automation["result"].get("isolatedProcess") is not True
+        or automation["result"].get("exitCode") != 0
+        or automation["result"].get("timedOut") is not False
+        or automation["result"].get("saved") is not False
+    ):
+        raise RuntimeError(f"Exact Automation Test action failed: {automation}")
+    if (
+        not post_automation_status
+        or not post_automation_status.get("ok")
+        or post_automation_status["result"].get("state") != "available"
+        or post_automation_status["result"].get("processId") != descriptor_process_id
+        or post_automation_status["result"].get("sessionId") != descriptor_session_id
+        or post_automation_status["result"].get("processId") != editor_status["result"].get("processId")
+        or post_automation_status["result"].get("sessionId") != editor_status["result"].get("sessionId")
+    ):
+        raise RuntimeError(
+            f"Main Editor Bridge did not survive isolated Automation unchanged: {post_automation_status}"
+        )
+    if not descriptor_path.is_file() or _sha256(descriptor_path) != descriptor_hash_before:
+        raise RuntimeError("Isolated Automation replaced or modified the main Editor Bridge descriptor")
     actor_failure = action_results["ue_focus_actor"]
     if not actor_failure or actor_failure.get("ok") or actor_failure["error"]["code"] != "live-editor-actor-not-found":
         raise RuntimeError(f"Missing ActorGuid was not rejected predictably: {actor_failure}")
@@ -361,8 +405,14 @@ async def _run(
         "assetOpened": bool(open_result["result"]["openAfter"]),
         "assetFocused": bool(focus_result["result"]["focused"]),
         "blueprintCompileResult": compile_result["result"]["result"],
+        "blueprintPackageDirtyAfter": bool(compile_result["result"].get("packageDirtyAfter")),
         "singleAssetValidationResult": validate_asset["result"]["result"],
         "folderValidationChecked": validate_folder["result"]["numChecked"],
+        "automationTestState": automation["result"]["state"],
+        "automationTestEntryCount": automation["result"]["entryCount"],
+        "automationIsolatedProcess": automation["result"]["isolatedProcess"],
+        "automationExitCode": automation["result"]["exitCode"],
+        "mainEditorSurvivedAutomation": True,
         "missingActorRejected": actor_failure["error"]["code"] == "live-editor-actor-not-found",
         "existingActorFocused": bool(actor_success and actor_success.get("ok")),
         "secretsRedacted": True,

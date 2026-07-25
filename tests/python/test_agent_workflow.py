@@ -376,6 +376,55 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertEqual(result["recommendedAction"], "save-or-revert-memory")
         self.assertFalse(result["limitations"]["memoryRevisionAvailable"])
 
+    def test_authorized_save_preview_requires_dirty_loaded_asset_and_exact_confirmation(self) -> None:
+        class DirtyLiveService:
+            def status(self) -> dict[str, Any]:
+                return {
+                    "state": "available",
+                    "pieState": "stopped",
+                    "sessionId": "session-1",
+                    "processId": 1234,
+                }
+
+            def call_tool(self, tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
+                if tool_name != "ue_inspect_asset_live" or params != {"assetPath": ASSET_PATH}:
+                    raise AssertionError("unexpected Live Editor call")
+                return {
+                    "ok": True,
+                    "result": {
+                        "assetRegistry": {"found": True, "classPath": ASSET_CLASS},
+                        "memory": {
+                            "loaded": True,
+                            "packageDirty": True,
+                            "loadedByBridge": False,
+                        },
+                    },
+                }
+
+            def call_method(self, method: str, params: dict[str, Any], *, timeout_seconds: float) -> dict[str, Any]:
+                raise AssertionError(f"save should not execute during Preview or invalid confirmation: {method} {params} {timeout_seconds}")
+
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=FakeFreshnessTracker(),
+            live_editor_service=DirtyLiveService(),
+        )
+        preview = service.save_authorized_asset(ASSET_PATH)
+        self.assertEqual(preview["mode"], "Preview")
+        self.assertTrue(preview["saveReceipt"].startswith("save_"))
+        self.assertTrue(preview["packageDirty"] )
+        self.assertFalse(preview["saved"])
+        with self.assertRaises(WorkflowError) as invalid:
+            service.save_authorized_asset(
+                ASSET_PATH,
+                mode="Commit",
+                save_receipt=preview["saveReceipt"],
+                confirmation="SAVE wrong",
+            )
+        self.assertEqual(invalid.exception.code, "save-confirmation-required")
+
     def test_complete_plan_dry_run_apply_verify_and_rollback_lifecycle(self) -> None:
         plan = self.service.plan_patch(
             asset_path=ASSET_PATH,

@@ -104,7 +104,10 @@ class LiveEditorBridgeService:
         if method is None:
             raise ValueError(f"Unsupported Live Editor Tool: {tool_name}")
         normalized_params = self._normalize_tool_params(tool_name, params or {})
-        result = self.call_method(method, normalized_params)
+        response_timeout = None
+        if tool_name == "ue_run_automation_test":
+            response_timeout = float(normalized_params["timeoutSeconds"]) + 5.0
+        result = self.call_method(method, normalized_params, timeout_seconds=response_timeout)
         definition = TOOL_DEFINITIONS_BY_NAME[tool_name]
         return {
             "schemaVersion": "1.0",
@@ -191,6 +194,21 @@ class LiveEditorBridgeService:
             return {
                 "assetPath": asset_path,
                 "maxIssues": LiveEditorBridgeService._bounded_integer(params.get("maxIssues", 100), "maxIssues", 1, 200),
+            }
+        if tool_name == "ue_run_automation_test":
+            allowed = {"testName", "timeoutSeconds", "maxEntries"}
+            LiveEditorBridgeService._reject_unknown_params(params, allowed)
+            test_name = LiveEditorBridgeService._bounded_string(params.get("testName", ""), "testName", 512)
+            if not test_name or test_name != test_name.strip():
+                raise LiveEditorError("live-editor-invalid-parameters", "testName must be one exact registered Automation Test name.")
+            return {
+                "testName": test_name,
+                "timeoutSeconds": LiveEditorBridgeService._bounded_integer(
+                    params.get("timeoutSeconds", 120), "timeoutSeconds", 1, 300
+                ),
+                "maxEntries": LiveEditorBridgeService._bounded_integer(
+                    params.get("maxEntries", 100), "maxEntries", 1, 200
+                ),
             }
         if tool_name == "ue_validate_folder":
             allowed = {"packagePath", "recursive", "maxAssets", "maxIssues"}
@@ -300,15 +318,24 @@ class LiveEditorBridgeService:
         if not separator or not object_name or "/" in object_name or package_path.rfind("/") >= len(package_path) - 1:
             raise LiveEditorError("live-editor-invalid-parameters", "assetPath must be an exact /Game Object Path.")
 
-    def call_method(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    def call_method(
+        self,
+        method: str,
+        params: dict[str, Any] | None = None,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> dict[str, Any]:
         descriptor = self._read_descriptor()
         request_id = uuid.uuid4().hex
+        response_timeout = self.config.timeout_seconds if timeout_seconds is None else timeout_seconds
+        if not 0.1 <= response_timeout <= 305.0:
+            raise ValueError("Live Editor response timeout is outside the supported boundary")
         try:
             with socket.create_connection(
                 ("127.0.0.1", descriptor["port"]),
                 timeout=self.config.timeout_seconds,
             ) as connection:
-                connection.settimeout(self.config.timeout_seconds)
+                connection.settimeout(response_timeout)
                 stream = connection.makefile("rwb", buffering=0)
                 self._write_message(
                     stream,

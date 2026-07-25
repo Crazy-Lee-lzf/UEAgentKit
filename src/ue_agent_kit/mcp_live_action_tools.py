@@ -75,3 +75,19 @@ def register_live_action_tools(
                 "maxIssues": max_issues,
             },
         )
+
+    @server.tool(annotations=action_annotations)
+    def ue_run_automation_test(
+        test_name: str,
+        timeout_seconds: int = 120,
+        max_entries: int = 100,
+    ) -> dict[str, Any]:
+        """Run one exact registered single-participant Unreal Automation Test without filters or command strings."""
+        return call(
+            "ue_run_automation_test",
+            {
+                "testName": test_name,
+                "timeoutSeconds": timeout_seconds,
+                "maxEntries": max_entries,
+            },
+        )
