@@ -14,6 +14,7 @@
     "setPinDefault",
     "setBlueprintDescription",
     "setAssetProperty",
+    "setAssetReferenceProperty",
     "setMaterialInstanceScalarParameter",
     "setMaterialInstanceVectorParameter",
     "setMaterialInstanceTextureParameter",
@@ -33,7 +34,8 @@
     "/Script/Engine.Texture2D",
     "/Script/Engine.StaticMesh",
     "/Script/Engine.MaterialInstanceConstant",
-    "/Script/Engine.DataTable"
+    "/Script/Engine.DataTable",
+    "/Script/UEAgentKitEditor.UEAgentKitReferenceWriteFixtureAsset"
   ],
   "requireRevision": true,
   "rejectDirtyPackages": true,
@@ -43,7 +45,11 @@
   "allowedAssetProperties": [
     "/Script/Engine.PrimaryAssetLabel#bIncludeRedirectors",
     "/Script/Engine.Texture2D#SRGB",
-    "/Script/Engine.StaticMesh#LightMapResolution"
+    "/Script/Engine.StaticMesh#LightMapResolution",
+    "/Script/UEAgentKitEditor.UEAgentKitReferenceWriteFixtureAsset#ObjectValue",
+    "/Script/UEAgentKitEditor.UEAgentKitReferenceWriteFixtureAsset#ClassValue",
+    "/Script/UEAgentKitEditor.UEAgentKitReferenceWriteFixtureAsset#SoftObjectValue",
+    "/Script/UEAgentKitEditor.UEAgentKitReferenceWriteFixtureAsset#SoftClassValue"
   ],
   "allowedMaterialParameters": [
     "/Script/Engine.MaterialInstanceConstant#Scalar#Roughness",
@@ -52,10 +58,12 @@
     "/Script/Engine.MaterialInstanceConstant#StaticSwitch#Logo?"
   ],
   "allowedReferenceRoots": [
-    "/Game/Characters/Mannequins/Textures"
+    "/Game/Characters/Mannequins/Textures",
+    "/Game/ThirdPerson/Blueprints"
   ],
   "allowedReferenceClasses": [
-    "/Script/Engine.Texture2D"
+    "/Script/Engine.Texture2D",
+    "/Game/ThirdPerson/Blueprints/BP_ThirdPersonCharacter.BP_ThirdPersonCharacter_C"
   ],
   "allowedDataTableFields": [
     "/Script/Engine.DataTable#/Script/GameplayTags.GameplayTagTableRow#DevComment",

@@ -124,6 +124,7 @@ if (!$Validation.commitSupported)
 $Operation = $Validation.assets[0].operations[0].operation
 $AssetOperations = @(
     "setAssetProperty",
+    "setAssetReferenceProperty",
     "setMaterialInstanceScalarParameter",
     "setMaterialInstanceVectorParameter",
     "setMaterialInstanceTextureParameter",

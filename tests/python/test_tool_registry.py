@@ -45,6 +45,7 @@ EXPECTED_ALL_TOOLS = [
     "ue_set_component_property",
     "ue_set_pin_default",
     "ue_set_asset_property",
+    "ue_set_asset_reference_property",
     "ue_set_material_parameter",
     "ue_set_datatable_cell",
     "ue_set_datatable_row_fields",
@@ -70,7 +71,7 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertEqual(len(tool_names_for_mode()), 5)
         self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 23)
-        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 23)
+        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 24)
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:
         mcp_root = ROOT / "src" / "ue_agent_kit"

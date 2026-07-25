@@ -255,6 +255,99 @@ class PatchValidationTests(unittest.TestCase):
         expected = result["assets"][0]["operations"][0]["expectedChange"]
         self.assertEqual(expected["kind"], "asset-property")
 
+    def configure_asset_reference_operation(
+        self,
+        *,
+        property_name: str = "ObjectValue",
+        reference_type: str = "Object",
+        value: Any | None = None,
+    ) -> None:
+        asset_path = "/Game/UEAgentKitWriteTests/DA_ReferencePatchTarget.DA_ReferencePatchTarget"
+        asset_class = "/Script/UEAgentKitEditor.UEAgentKitReferenceWriteFixtureAsset"
+        if value is None:
+            value = {
+                "referenceType": reference_type,
+                "path": (
+                    "/Game/ThirdPerson/Blueprints/BP_ThirdPersonCharacter.BP_ThirdPersonCharacter_C"
+                    if reference_type in {"Class", "SoftClass"}
+                    else "/Game/Characters/Mannequins/Textures/Manny/T_Manny_02_D.T_Manny_02_D"
+                ),
+            }
+        asset = self.patch["assets"][0]
+        asset["assetPath"] = asset_path
+        asset["expectedAssetClass"] = asset_class
+        asset["operations"] = [
+            {
+                "operationId": "set-reference",
+                "operation": "setAssetReferenceProperty",
+                "target": {"propertyPath": property_name},
+                "value": value,
+            }
+        ]
+        self.policy["allowedOperations"].append("setAssetReferenceProperty")
+        self.policy["allowedAssetClasses"].append(asset_class)
+        self.policy["allowedAssetProperties"] = [f"{asset_class}#{property_name}"]
+        self.policy["allowedReferenceRoots"] = [
+            "/Game/Characters/Mannequins/Textures/Manny",
+            "/Game/ThirdPerson/Blueprints",
+        ]
+        self.policy["allowedReferenceClasses"] = [
+            "/Script/Engine.Texture2D",
+            "/Game/ThirdPerson/Blueprints/BP_ThirdPersonCharacter.BP_ThirdPersonCharacter_C",
+        ]
+        self.canonical["assetPath"] = asset_path
+        self.canonical["packageName"] = asset_path.rsplit(".", 1)[0]
+        self.canonical["assetClass"] = asset_class
+        self.canonical["assetDetails"] = {
+            "type": "data-asset",
+            "properties": [
+                {
+                    "name": property_name,
+                    "propertyClass": f"{reference_type}Property",
+                    "referenceType": reference_type,
+                    "referenceClassPath": (
+                        "/Script/Engine.Actor"
+                        if reference_type in {"Class", "SoftClass"}
+                        else "/Script/Engine.Texture2D"
+                    ),
+                    "conversionSucceeded": True,
+                    "value": "",
+                }
+            ],
+        }
+        self.flush()
+
+    def test_asset_reference_property_object_model_is_valid(self) -> None:
+        self.configure_asset_reference_operation()
+        result = self.validate()
+        self.assertTrue(result["valid"])
+        expected = result["assets"][0]["operations"][0]["expectedChange"]
+        self.assertEqual(expected["kind"], "asset-reference-property")
+
+    def test_asset_reference_property_null_clear_is_valid(self) -> None:
+        self.configure_asset_reference_operation(value=None)
+        self.patch["assets"][0]["operations"][0]["value"] = None
+        self.flush()
+        self.assertTrue(self.validate()["valid"])
+
+    def test_asset_reference_property_rejects_type_mismatch(self) -> None:
+        self.configure_asset_reference_operation(reference_type="Object")
+        self.patch["assets"][0]["operations"][0]["value"]["referenceType"] = "SoftObject"
+        self.flush()
+        self.assertIn("asset-reference-type-mismatch", self.error_codes(self.validate()))
+
+    def test_asset_reference_property_rejects_unauthorized_root(self) -> None:
+        self.configure_asset_reference_operation()
+        self.patch["assets"][0]["operations"][0]["value"]["path"] = "/Game/Outside/T_Outside.T_Outside"
+        self.flush()
+        self.assertIn("reference-not-allowed", self.error_codes(self.validate()))
+
+    def test_asset_reference_property_requires_reader_metadata(self) -> None:
+        self.configure_asset_reference_operation()
+        self.canonical["assetDetails"]["properties"] = []
+        self.flush()
+        self.assertIn("asset-reference-property-missing", self.error_codes(self.validate()))
+
     def test_asset_property_rejects_blueprint(self) -> None:
         self.patch["assets"][0]["operations"] = [
             {

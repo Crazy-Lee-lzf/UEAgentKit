@@ -350,6 +350,41 @@ namespace AssetReaderRegistryPrivate
 			PropertyObject->SetStringField(TEXT("displayName"), Property->GetDisplayNameText().ToString());
 			PropertyObject->SetStringField(TEXT("cppType"), Property->GetCPPType());
 			PropertyObject->SetStringField(TEXT("propertyClass"), Property->GetClass()->GetName());
+			FString ReferenceType;
+			FString ReferenceClassPath;
+			if (const FSoftClassProperty* SoftClassProperty = CastField<FSoftClassProperty>(Property))
+			{
+				ReferenceType = TEXT("SoftClass");
+				ReferenceClassPath = SoftClassProperty->MetaClass != nullptr
+					? SoftClassProperty->MetaClass->GetPathName()
+					: FString();
+			}
+			else if (const FSoftObjectProperty* SoftObjectProperty = CastField<FSoftObjectProperty>(Property))
+			{
+				ReferenceType = TEXT("SoftObject");
+				ReferenceClassPath = SoftObjectProperty->PropertyClass != nullptr
+					? SoftObjectProperty->PropertyClass->GetPathName()
+					: FString();
+			}
+			else if (const FClassProperty* ClassProperty = CastField<FClassProperty>(Property))
+			{
+				ReferenceType = TEXT("Class");
+				ReferenceClassPath = ClassProperty->MetaClass != nullptr
+					? ClassProperty->MetaClass->GetPathName()
+					: FString();
+			}
+			else if (const FObjectProperty* ObjectProperty = CastField<FObjectProperty>(Property))
+			{
+				ReferenceType = TEXT("Object");
+				ReferenceClassPath = ObjectProperty->PropertyClass != nullptr
+					? ObjectProperty->PropertyClass->GetPathName()
+					: FString();
+			}
+			if (!ReferenceType.IsEmpty())
+			{
+				PropertyObject->SetStringField(TEXT("referenceType"), ReferenceType);
+				PropertyObject->SetStringField(TEXT("referenceClassPath"), ReferenceClassPath);
+			}
 			PropertyObject->SetStringField(TEXT("ownerClassPath"), Property->GetOwnerClass() != nullptr ? Property->GetOwnerClass()->GetPathName() : FString());
 			PropertyObject->SetStringField(TEXT("flagsHex"), FString::Printf(TEXT("0x%016llx"), static_cast<uint64>(Property->GetPropertyFlags())));
 			PropertyObject->SetBoolField(TEXT("conversionSucceeded"), JsonValue.IsValid());

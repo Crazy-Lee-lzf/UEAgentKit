@@ -212,7 +212,7 @@ scripts\TestDataTableRowOperations.cmd ^
 
 脚本依次执行 Add Dry Run、Add Commit、Rename Commit、Remove Commit，再按 Remove → Rename → Add 逆序执行三层 rollback；每一步均通过独立 UE 进程重新导出验证 Row 集合，最终 Package Revision 必须与初始值完全一致。
 
-当前支持四种 Blueprint Operation、`setAssetProperty`、四种 Material Instance 参数 Operation，以及 `setDataTableCell`、`setDataTableRowFields`、`addDataTableRow`、`removeDataTableRow` 和 `renameDataTableRow`。每次执行仅允许一个资产和一个 Operation；通用属性、Material 参数和 DataTable 字段分别由 `allowedAssetProperties`、`allowedMaterialParameters`、`allowedDataTableFields` 精确授权。DataTable 可修改现有 Row 的一个顶层标量字段、原子修改 1–32 个已授权顶层标量字段，或受控新增、删除和重命名 Row。Add 从 RowStruct 默认值开始并只写入 0–32 个已授权标量字段；Remove/Rename 要求显式 `value=true`。结构操作使用完整表快照、未受影响 Row 校验、Dry Run 恢复、唯一备份和独立 rollback 验证。当前仍只接受没有独立 Package 侧文件的单文件资产。
+当前支持四种 Blueprint Operation、标量 `setAssetProperty`、Data Asset 专用 `setAssetReferenceProperty`、四种 Material Instance 参数 Operation，以及 `setDataTableCell`、`setDataTableRowFields`、`addDataTableRow`、`removeDataTableRow` 和 `renameDataTableRow`。每次执行仅允许一个资产和一个 Operation；通用属性、引用目标、Material 参数和 DataTable 字段分别由 `allowedAssetProperties`、`allowedReferenceRoots/allowedReferenceClasses`、`allowedMaterialParameters`、`allowedDataTableFields` 精确授权。`setAssetReferenceProperty` 只接受顶层 Object/Class、Soft Object/Class 属性，值为 `null` 或精确 `{referenceType, path}` 对象。DataTable 可修改现有 Row 的一个顶层标量字段、原子修改 1–32 个已授权顶层标量字段，或受控新增、删除和重命名 Row。Add 从 RowStruct 默认值开始并只写入 0–32 个已授权标量字段；Remove/Rename 要求显式 `value=true`。结构操作使用完整表快照、未受影响 Row 校验、Dry Run 恢复、唯一备份和独立 rollback 验证。当前仍只接受没有独立 Package 侧文件的单文件资产。
 
 ### 6. 启动 MCP Server（0.5.1）
 

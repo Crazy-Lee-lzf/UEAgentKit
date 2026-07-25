@@ -6,6 +6,7 @@
 #include "BlueprintContextSha256.h"
 #include "Dom/JsonObject.h"
 #include "Engine/Blueprint.h"
+#include "Engine/DataAsset.h"
 #include "Engine/DataTable.h"
 #include "Engine/Texture.h"
 #include "HAL/FileManager.h"
@@ -174,10 +175,12 @@ namespace AssetPatchCommandletPrivate
 			OutError = TEXT("Policy authorization arrays must not be empty.");
 			return false;
 		}
-		if (ContainsExact(OutPolicy.AllowedOperations, TEXT("setAssetProperty"))
-			&& OutPolicy.AllowedAssetProperties.IsEmpty())
+		const bool bUsesAssetPropertyOperations =
+			ContainsExact(OutPolicy.AllowedOperations, TEXT("setAssetProperty"))
+			|| ContainsExact(OutPolicy.AllowedOperations, TEXT("setAssetReferenceProperty"));
+		if (bUsesAssetPropertyOperations && OutPolicy.AllowedAssetProperties.IsEmpty())
 		{
-			OutError = TEXT("setAssetProperty requires allowedAssetProperties authorization.");
+			OutError = TEXT("Asset property operations require allowedAssetProperties authorization.");
 			return false;
 		}
 		const bool bUsesMaterialParameterOperations =
@@ -200,12 +203,15 @@ namespace AssetPatchCommandletPrivate
 			OutError = TEXT("DataTable field operations require allowedDataTableFields authorization.");
 			return false;
 		}
-		if (ContainsExact(OutPolicy.AllowedOperations, TEXT("setMaterialInstanceTextureParameter"))
+		const bool bUsesReferenceWrites =
+			ContainsExact(OutPolicy.AllowedOperations, TEXT("setMaterialInstanceTextureParameter"))
+			|| ContainsExact(OutPolicy.AllowedOperations, TEXT("setAssetReferenceProperty"));
+		if (bUsesReferenceWrites
 			&& (OutPolicy.AllowedReferenceRoots.IsEmpty()
 				|| OutPolicy.AllowedReferenceClasses.IsEmpty()))
 		{
 			OutError = TEXT(
-				"Texture parameter writes require allowedReferenceRoots and allowedReferenceClasses authorization.");
+				"Reference writes require allowedReferenceRoots and allowedReferenceClasses authorization.");
 			return false;
 		}
 		return true;
@@ -252,6 +258,206 @@ namespace AssetPatchCommandletPrivate
 	bool IsReferenceAllowed(const FPatchPolicy& Policy, const FString& ObjectPath)
 	{
 		return IsObjectPathAllowed(Policy.AllowedReferenceRoots, ObjectPath);
+	}
+
+	enum class EAssetReferenceType : uint8
+	{
+		Invalid,
+		Object,
+		Class,
+		SoftObject,
+		SoftClass
+	};
+
+	FString AssetReferenceTypeName(const EAssetReferenceType Type)
+	{
+		switch (Type)
+		{
+		case EAssetReferenceType::Object:
+			return TEXT("Object");
+		case EAssetReferenceType::Class:
+			return TEXT("Class");
+		case EAssetReferenceType::SoftObject:
+			return TEXT("SoftObject");
+		case EAssetReferenceType::SoftClass:
+			return TEXT("SoftClass");
+		default:
+			return FString();
+		}
+	}
+
+	EAssetReferenceType GetAssetReferenceType(FProperty* Property, UClass*& OutConstraintClass)
+	{
+		OutConstraintClass = nullptr;
+		if (FSoftClassProperty* SoftClassProperty = CastField<FSoftClassProperty>(Property))
+		{
+			OutConstraintClass = SoftClassProperty->MetaClass;
+			return EAssetReferenceType::SoftClass;
+		}
+		if (FSoftObjectProperty* SoftObjectProperty = CastField<FSoftObjectProperty>(Property))
+		{
+			OutConstraintClass = SoftObjectProperty->PropertyClass;
+			return EAssetReferenceType::SoftObject;
+		}
+		if (FClassProperty* ClassProperty = CastField<FClassProperty>(Property))
+		{
+			OutConstraintClass = ClassProperty->MetaClass;
+			return EAssetReferenceType::Class;
+		}
+		if (FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property))
+		{
+			if (CastField<FWeakObjectProperty>(Property) || CastField<FLazyObjectProperty>(Property))
+			{
+				return EAssetReferenceType::Invalid;
+			}
+			OutConstraintClass = ObjectProperty->PropertyClass;
+			return EAssetReferenceType::Object;
+		}
+		return EAssetReferenceType::Invalid;
+	}
+
+	bool ReadAssetReferencePath(FProperty* Property, void* ValueAddress, FString& OutPath)
+	{
+		OutPath.Reset();
+		if (FSoftObjectProperty* SoftObjectProperty = CastField<FSoftObjectProperty>(Property))
+		{
+			OutPath = SoftObjectProperty->GetPropertyValue(ValueAddress).ToSoftObjectPath().ToString();
+			return true;
+		}
+		if (FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property))
+		{
+			const UObject* Object = ObjectProperty->GetObjectPropertyValue(ValueAddress);
+			OutPath = Object != nullptr ? Object->GetPathName() : FString();
+			return true;
+		}
+		return false;
+	}
+
+	bool SetAssetReferenceFromJson(
+		FProperty* Property,
+		void* ValueAddress,
+		const TSharedPtr<FJsonValue>& JsonValue,
+		const FPatchPolicy& Policy,
+		FString& OutReferenceType,
+		FString& OutReferencePath,
+		FString& OutResolvedClassPath,
+		FString& OutError)
+	{
+		UClass* ConstraintClass = nullptr;
+		const EAssetReferenceType PropertyType = GetAssetReferenceType(Property, ConstraintClass);
+		if (PropertyType == EAssetReferenceType::Invalid || ConstraintClass == nullptr)
+		{
+			OutError = FString::Printf(TEXT("Unsupported asset reference property type: %s"), *Property->GetClass()->GetName());
+			return false;
+		}
+		OutReferenceType = AssetReferenceTypeName(PropertyType);
+		OutReferencePath.Reset();
+		OutResolvedClassPath.Reset();
+
+		if (JsonValue->Type == EJson::Null)
+		{
+			if (FSoftObjectProperty* SoftObjectProperty = CastField<FSoftObjectProperty>(Property))
+			{
+				SoftObjectProperty->SetPropertyValue(ValueAddress, FSoftObjectPtr());
+			}
+			else if (FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property))
+			{
+				ObjectProperty->SetObjectPropertyValue(ValueAddress, nullptr);
+			}
+			return true;
+		}
+
+		if (JsonValue->Type != EJson::Object)
+		{
+			OutError = TEXT("Asset reference value must be null or an object.");
+			return false;
+		}
+		const TSharedPtr<FJsonObject> ReferenceObject = JsonValue->AsObject();
+		if (!ReferenceObject.IsValid() || ReferenceObject->Values.Num() != 2)
+		{
+			OutError = TEXT("Asset reference object must contain exactly referenceType and path.");
+			return false;
+		}
+		FString RequestedType;
+		FString RequestedPath;
+		if (!ReferenceObject->TryGetStringField(TEXT("referenceType"), RequestedType)
+			|| !ReferenceObject->TryGetStringField(TEXT("path"), RequestedPath)
+			|| RequestedPath.IsEmpty())
+		{
+			OutError = TEXT("Asset reference object requires non-empty string referenceType and path.");
+			return false;
+		}
+		if (!RequestedType.Equals(OutReferenceType, ESearchCase::CaseSensitive))
+		{
+			OutError = FString::Printf(
+				TEXT("Reference type %s does not match property type %s."),
+				*RequestedType,
+				*OutReferenceType);
+			return false;
+		}
+		const FSoftObjectPath SoftPath(RequestedPath);
+		if (!SoftPath.IsValid() || !SoftPath.GetSubPathString().IsEmpty())
+		{
+			OutError = FString::Printf(TEXT("Reference path is invalid or contains a subobject: %s"), *RequestedPath);
+			return false;
+		}
+		if (!IsReferenceAllowed(Policy, RequestedPath))
+		{
+			OutError = FString::Printf(TEXT("Reference path is not authorized by policy: %s"), *RequestedPath);
+			return false;
+		}
+
+		if (PropertyType == EAssetReferenceType::Class || PropertyType == EAssetReferenceType::SoftClass)
+		{
+			UClass* ReferencedClass = LoadObject<UClass>(nullptr, *RequestedPath);
+			if (ReferencedClass == nullptr || !ReferencedClass->IsChildOf(ConstraintClass))
+			{
+				OutError = FString::Printf(
+					TEXT("Referenced class is missing or not a child of %s: %s"),
+					*ConstraintClass->GetPathName(),
+					*RequestedPath);
+				return false;
+			}
+			OutResolvedClassPath = ReferencedClass->GetPathName();
+			if (!ContainsExact(Policy.AllowedReferenceClasses, OutResolvedClassPath))
+			{
+				OutError = FString::Printf(TEXT("Referenced class is not authorized by policy: %s"), *OutResolvedClassPath);
+				return false;
+			}
+			if (PropertyType == EAssetReferenceType::Class)
+			{
+				CastFieldChecked<FClassProperty>(Property)->SetObjectPropertyValue(ValueAddress, ReferencedClass);
+			}
+			else
+			{
+				CastFieldChecked<FSoftClassProperty>(Property)->SetPropertyValue(ValueAddress, FSoftObjectPtr(SoftPath));
+			}
+		}
+		else
+		{
+			UObject* ReferencedObject = StaticLoadObject(ConstraintClass, nullptr, *RequestedPath);
+			if (ReferencedObject == nullptr)
+			{
+				OutError = FString::Printf(TEXT("Referenced object is missing or has an incompatible class: %s"), *RequestedPath);
+				return false;
+			}
+			OutResolvedClassPath = ReferencedObject->GetClass()->GetPathName();
+			if (!ContainsExact(Policy.AllowedReferenceClasses, OutResolvedClassPath))
+			{
+				OutError = FString::Printf(TEXT("Referenced object class is not authorized by policy: %s"), *OutResolvedClassPath);
+				return false;
+			}
+			if (PropertyType == EAssetReferenceType::Object)
+			{
+				CastFieldChecked<FObjectPropertyBase>(Property)->SetObjectPropertyValue(ValueAddress, ReferencedObject);
+			}
+			else
+			{
+				CastFieldChecked<FSoftObjectProperty>(Property)->SetPropertyValue(ValueAddress, FSoftObjectPtr(SoftPath));
+			}
+		}
+		OutReferencePath = RequestedPath;
+		return true;
 	}
 
 	FString GetPackageFilename(const UPackage* Package)
@@ -1053,6 +1259,8 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 	OperationObject->TryGetStringField(TEXT("operation"), Operation);
 	const bool bAssetPropertyOperation =
 		Operation.Equals(TEXT("setAssetProperty"), ESearchCase::CaseSensitive);
+	const bool bAssetReferencePropertyOperation =
+		Operation.Equals(TEXT("setAssetReferenceProperty"), ESearchCase::CaseSensitive);
 	const bool bMaterialScalarOperation =
 		Operation.Equals(TEXT("setMaterialInstanceScalarParameter"), ESearchCase::CaseSensitive);
 	const bool bMaterialVectorOperation =
@@ -1072,6 +1280,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 	const bool bDataTableRenameRowOperation =
 		Operation.Equals(TEXT("renameDataTableRow"), ESearchCase::CaseSensitive);
 	if ((!bAssetPropertyOperation
+			&& !bAssetReferencePropertyOperation
 			&& !bMaterialScalarOperation
 			&& !bMaterialVectorOperation
 			&& !bMaterialTextureOperation
@@ -2559,6 +2768,193 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			*AssetPath,
 			*RowNameText,
 			Fields.Num());
+		return 0;
+	}
+
+
+	if (bAssetReferencePropertyOperation)
+	{
+		if (Cast<UDataAsset>(Asset) == nullptr)
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("setAssetReferenceProperty requires a Data Asset."));
+			return 17;
+		}
+		FString PropertyPath;
+		TargetObject->TryGetStringField(TEXT("propertyPath"), PropertyPath);
+		if (PropertyPath.IsEmpty() || PropertyPath.Contains(TEXT(".")))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Asset reference propertyPath must be one top-level property name."));
+			return 17;
+		}
+		const FString PropertyAuthorization = ActualAssetClass + TEXT("#") + PropertyPath;
+		if (!ContainsExact(Policy.AllowedAssetProperties, PropertyAuthorization))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Asset reference property is not authorized by policy: %s"), *PropertyAuthorization);
+			return 17;
+		}
+
+		FProperty* Property = nullptr;
+		void* ValueAddress = nullptr;
+		if (!ResolvePropertyPath(Asset, PropertyPath, Property, ValueAddress, Error))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("%s"), *Error);
+			return 17;
+		}
+		const EPropertyFlags DisallowedFlags =
+			CPF_Transient | CPF_DuplicateTransient | CPF_NonPIEDuplicateTransient;
+		if (!Property->HasAnyPropertyFlags(CPF_Edit) || Property->HasAnyPropertyFlags(DisallowedFlags))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Asset reference property must be editable and non-transient: %s"), *PropertyPath);
+			return 17;
+		}
+		UClass* ConstraintClass = nullptr;
+		const EAssetReferenceType ReferencePropertyType = GetAssetReferenceType(Property, ConstraintClass);
+		if (ReferencePropertyType == EAssetReferenceType::Invalid || ConstraintClass == nullptr)
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Property is not a supported Object/Class/Soft Object/Soft Class reference: %s"), *PropertyPath);
+			return 17;
+		}
+
+		const TSharedPtr<FJsonValue> NewValue = OperationObject->TryGetField(TEXT("value"));
+		if (!NewValue.IsValid())
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Operation value is missing."));
+			return 18;
+		}
+		FString BeforeValue;
+		FString BeforeReferencePath;
+		ReadPropertyValue(Asset, Property, ValueAddress, BeforeValue);
+		ReadAssetReferencePath(Property, ValueAddress, BeforeReferencePath);
+
+		FString BackupFilename;
+		if (bCommit)
+		{
+			IFileManager::Get().MakeDirectory(*BackupDirectory, true);
+			BackupFilename = CreateBackupFilename(BackupDirectory, PatchId, PackageFilename);
+			if (IFileManager::Get().Copy(*BackupFilename, *PackageFilename, true, true) != COPY_OK)
+			{
+				UE_LOG(LogAssetPatch, Error, TEXT("Could not create package backup: %s"), *BackupFilename);
+				return 19;
+			}
+		}
+
+		FString ReferenceType;
+		FString RequestedReferencePath;
+		FString ResolvedReferenceClassPath;
+		Asset->Modify();
+		if (!SetAssetReferenceFromJson(
+				Property,
+				ValueAddress,
+				NewValue,
+				Policy,
+				ReferenceType,
+				RequestedReferencePath,
+				ResolvedReferenceClassPath,
+				Error))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("%s"), *Error);
+			return 20;
+		}
+		Asset->PostEditChange();
+		Package->MarkPackageDirty();
+
+		FString AfterValue;
+		FString AfterReferencePath;
+		ReadPropertyValue(Asset, Property, ValueAddress, AfterValue);
+		ReadAssetReferencePath(Property, ValueAddress, AfterReferencePath);
+		if (!AfterReferencePath.Equals(RequestedReferencePath, ESearchCase::CaseSensitive))
+		{
+			RestorePropertyValue(Asset, Property, ValueAddress, BeforeValue, Error);
+			Asset->PostEditChange();
+			Package->SetDirtyFlag(bOriginalDirty);
+			UE_LOG(LogAssetPatch, Error, TEXT("Asset reference read-back verification failed."));
+			return 20;
+		}
+
+		bool bSaved = false;
+		bool bRolledBack = false;
+		FString RestoredValue;
+		FString RestoredReferencePath;
+		if (bCommit)
+		{
+			if (!SaveAssetPackage(Asset, PackageFilename, Error))
+			{
+				IFileManager::Get().Copy(*PackageFilename, *BackupFilename, true, true);
+				UE_LOG(LogAssetPatch, Error, TEXT("%s Backup restored."), *Error);
+				return 21;
+			}
+			bSaved = true;
+		}
+		else
+		{
+			if (!RestorePropertyValue(Asset, Property, ValueAddress, BeforeValue, Error))
+			{
+				UE_LOG(LogAssetPatch, Error, TEXT("%s"), *Error);
+				return 22;
+			}
+			Asset->PostEditChange();
+			Package->SetDirtyFlag(bOriginalDirty);
+			ReadPropertyValue(Asset, Property, ValueAddress, RestoredValue);
+			ReadAssetReferencePath(Property, ValueAddress, RestoredReferencePath);
+			bRolledBack = true;
+		}
+
+		const FString AfterRevision = HashPackageFile(Package);
+		const bool bRollbackValueMatch = !bRolledBack
+			|| (RestoredValue.Equals(BeforeValue, ESearchCase::CaseSensitive)
+				&& RestoredReferencePath.Equals(BeforeReferencePath, ESearchCase::CaseSensitive));
+		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
+		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.5.1"));
+		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
+		Report->SetStringField(TEXT("patchId"), PatchId);
+		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
+		Report->SetStringField(TEXT("assetPath"), AssetPath);
+		Report->SetStringField(TEXT("assetClass"), ActualAssetClass);
+		Report->SetStringField(TEXT("operation"), Operation);
+		Report->SetObjectField(TEXT("target"), TargetObject);
+		Report->SetStringField(TEXT("targetDescription"), TEXT("asset-reference-property:") + PropertyPath);
+		Report->SetStringField(TEXT("targetType"), Property->GetClass()->GetName());
+		Report->SetStringField(TEXT("referenceType"), ReferenceType);
+		Report->SetStringField(TEXT("referenceConstraintClass"), ConstraintClass->GetPathName());
+		Report->SetStringField(TEXT("referencePath"), RequestedReferencePath);
+		Report->SetStringField(TEXT("resolvedReferenceClass"), ResolvedReferenceClassPath);
+		Report->SetStringField(TEXT("beforeValue"), BeforeValue);
+		Report->SetStringField(TEXT("afterValue"), AfterValue);
+		Report->SetStringField(TEXT("restoredValue"), RestoredValue);
+		Report->SetStringField(TEXT("beforeRevision"), BeforeRevision);
+		Report->SetStringField(TEXT("afterRevision"), AfterRevision);
+		Report->SetBoolField(TEXT("compiled"), false);
+		Report->SetBoolField(TEXT("saved"), bSaved);
+		Report->SetBoolField(TEXT("rolledBack"), bRolledBack);
+		Report->SetBoolField(TEXT("appliedValueMatch"), true);
+		Report->SetBoolField(TEXT("rollbackValueMatch"), bRollbackValueMatch);
+		Report->SetBoolField(TEXT("diskUnchanged"), BeforeRevision.Equals(AfterRevision, ESearchCase::IgnoreCase));
+		Report->SetStringField(TEXT("backupPath"), BackupFilename);
+		if (!SaveReport(ReportFilename, Report, Error))
+		{
+			if (bCommit && !BackupFilename.IsEmpty())
+			{
+				IFileManager::Get().Copy(*PackageFilename, *BackupFilename, true, true);
+			}
+			UE_LOG(LogAssetPatch, Error, TEXT("%s Disk backup restored."), *Error);
+			return 23;
+		}
+		if (bRolledBack
+			&& (!bRollbackValueMatch || !BeforeRevision.Equals(AfterRevision, ESearchCase::IgnoreCase)))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Asset reference Dry Run rollback verification failed."));
+			return 22;
+		}
+		UE_LOG(
+			LogAssetPatch,
+			Display,
+			TEXT("Asset reference patch succeeded. Mode=%s Asset=%s Property=%s Type=%s Path=%s"),
+			bCommit ? TEXT("Commit") : TEXT("DryRun"),
+			*AssetPath,
+			*PropertyPath,
+			*ReferenceType,
+			*RequestedReferencePath);
 		return 0;
 	}
 

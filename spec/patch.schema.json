@@ -99,6 +99,9 @@
                 "$ref": "#/$defs/setAssetProperty"
               },
               {
+                "$ref": "#/$defs/setAssetReferenceProperty"
+              },
+              {
                 "$ref": "#/$defs/setMaterialInstanceScalarParameter"
               },
               {
@@ -161,6 +164,9 @@
             },
             {
               "$ref": "#/$defs/dataTableFieldMap"
+            },
+            {
+              "$ref": "#/$defs/assetReferenceValue"
             }
           ]
         }
@@ -324,6 +330,66 @@
             },
             "value": {
               "$ref": "#/$defs/scalar"
+            }
+          }
+        }
+      ]
+    },
+    "assetReferenceValue": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "referenceType",
+            "path"
+          ],
+          "properties": {
+            "referenceType": {
+              "enum": [
+                "Object",
+                "Class",
+                "SoftObject",
+                "SoftClass"
+              ]
+            },
+            "path": {
+              "$ref": "#/$defs/assetObjectPath"
+            }
+          }
+        }
+      ]
+    },
+    "setAssetReferenceProperty": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "operation": {
+              "const": "setAssetReferenceProperty"
+            },
+            "target": {
+              "type": "object",
+              "required": [
+                "propertyPath"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "propertyPath": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                }
+              }
+            },
+            "value": {
+              "$ref": "#/$defs/assetReferenceValue"
             }
           }
         }

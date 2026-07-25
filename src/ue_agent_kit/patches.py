@@ -43,6 +43,10 @@ def _is_property_path(value: Any) -> bool:
     return all(_is_nonempty_text(segment, max_length=256) for segment in value.split("."))
 
 
+def _is_top_level_property_name(value: Any) -> bool:
+    return _is_nonempty_text(value, max_length=256) and isinstance(value, str) and "." not in value
+
+
 def _is_guid(value: Any) -> bool:
     return isinstance(value, str) and GUID_PATTERN.fullmatch(value) is not None
 
@@ -93,6 +97,14 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
         target_fields=("propertyPath",),
         target_validators={"propertyPath": _is_property_path},
         expected_change="asset-property",
+        asset_type="NonBlueprint",
+    ),
+    "setAssetReferenceProperty": OperationSpec(
+        name="setAssetReferenceProperty",
+        risk="medium",
+        target_fields=("propertyPath",),
+        target_validators={"propertyPath": _is_top_level_property_name},
+        expected_change="asset-reference-property",
         asset_type="NonBlueprint",
     ),
     "setMaterialInstanceScalarParameter": OperationSpec(
@@ -419,11 +431,17 @@ def _validate_policy(policy: dict[str, Any], errors: list[dict[str, str]]) -> di
                 "policy.allowedReferenceClasses",
             )
         for index, item in enumerate(allowed_reference_classes_value):
-            if not isinstance(item, str) or not item.startswith("/Script/") or "." not in item:
+            valid_script_class = isinstance(item, str) and item.startswith("/Script/") and "." in item
+            valid_generated_class = False
+            if isinstance(item, str) and item.startswith("/Game/") and item.count(".") == 1:
+                package_name, object_name = item.rsplit(".", 1)
+                package_leaf = package_name.rsplit("/", 1)[-1]
+                valid_generated_class = object_name == package_leaf + "_C"
+            if not valid_script_class and not valid_generated_class:
                 _issue(
                     errors,
                     "policy-reference-class-format",
-                    "Reference classes must use /Script/Module.Class paths.",
+                    "Reference classes must use /Script/Module.Class or /Game/Package.Asset_C paths.",
                     f"policy.allowedReferenceClasses[{index}]",
                 )
                 continue
@@ -513,11 +531,12 @@ def _validate_policy(policy: dict[str, Any], errors: list[dict[str, str]]) -> di
                 )
                 continue
             normalized_asset_properties.append(item)
-    if "setAssetProperty" in normalized_operations and not normalized_asset_properties:
+    asset_property_operations = {"setAssetProperty", "setAssetReferenceProperty"}
+    if asset_property_operations.intersection(normalized_operations) and not normalized_asset_properties:
         _issue(
             errors,
             "policy-asset-properties",
-            "setAssetProperty requires at least one allowedAssetProperties entry.",
+            "Asset property operations require at least one allowedAssetProperties entry.",
             "policy.allowedAssetProperties",
         )
 
@@ -641,19 +660,23 @@ def _validate_policy(policy: dict[str, Any], errors: list[dict[str, str]]) -> di
             "policy.allowedDataTableFields",
         )
 
-    if "setMaterialInstanceTextureParameter" in normalized_operations:
+    reference_write_operations = {
+        "setMaterialInstanceTextureParameter",
+        "setAssetReferenceProperty",
+    }
+    if reference_write_operations.intersection(normalized_operations):
         if not normalized_reference_roots:
             _issue(
                 errors,
                 "policy-reference-roots",
-                "Texture parameter writes require allowedReferenceRoots authorization.",
+                "Reference writes require allowedReferenceRoots authorization.",
                 "policy.allowedReferenceRoots",
             )
         if not normalized_reference_classes:
             _issue(
                 errors,
                 "policy-reference-classes",
-                "Texture parameter writes require allowedReferenceClasses authorization.",
+                "Reference writes require allowedReferenceClasses authorization.",
                 "policy.allowedReferenceClasses",
             )
 
@@ -727,6 +750,40 @@ def _validate_asset_path(value: Any) -> tuple[bool, str]:
 
 def _path_is_allowed(package_name: str, roots: list[str]) -> bool:
     return any(package_name == root or package_name.startswith(root + "/") for root in roots)
+
+
+def _validate_reference_object_path(value: Any, reference_type: str) -> tuple[bool, str]:
+    if reference_type in {"Object", "SoftObject"}:
+        return _validate_asset_path(value)
+    if reference_type not in {"Class", "SoftClass"}:
+        return False, "referenceType must be Object, Class, SoftObject, or SoftClass."
+    if not isinstance(value, str) or not value.startswith("/Game/") or value.count(".") != 1:
+        return False, "Class reference path must use /Game/Package.Asset_C form."
+    if "\\" in value or "//" in value or any(ord(character) < 32 for character in value):
+        return False, "Class reference path contains invalid separators or control characters."
+    package_name, object_name = value.rsplit(".", 1)
+    package_leaf = package_name.rsplit("/", 1)[-1]
+    if object_name != package_leaf + "_C":
+        return False, "Class reference object name must equal the package leaf plus _C."
+    return True, package_name
+
+
+def _validate_asset_reference_value(value: Any, max_value_bytes: int) -> tuple[bool, str, str]:
+    if value is None:
+        return True, "", ""
+    if not isinstance(value, dict) or set(value) != {"referenceType", "path"}:
+        return False, "Asset reference value must be null or contain exactly referenceType and path.", ""
+    reference_type = value.get("referenceType")
+    reference_path = value.get("path")
+    if not isinstance(reference_type, str) or not isinstance(reference_path, str):
+        return False, "Asset reference referenceType and path must be strings.", ""
+    valid_path, package_or_error = _validate_reference_object_path(reference_path, reference_type)
+    if not valid_path:
+        return False, package_or_error, ""
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    if len(encoded) > max_value_bytes:
+        return False, "Asset reference value exceeds maxValueBytes.", ""
+    return True, package_or_error, reference_type
 
 
 def _is_blueprint_class(asset_class: str) -> bool:
@@ -895,15 +952,28 @@ def _load_export_snapshot(
             )
             revision_value = ""
         asset_details = canonical.get("assetDetails")
+        asset_details_type = ""
         row_struct_path = ""
         row_names: list[str] = []
+        data_asset_properties: dict[str, dict[str, Any]] = {}
         if isinstance(asset_details, dict):
+            asset_details_type_value = asset_details.get("type", "")
+            if isinstance(asset_details_type_value, str):
+                asset_details_type = asset_details_type_value
             row_struct_value = asset_details.get("rowStructPath", "")
             if isinstance(row_struct_value, str):
                 row_struct_path = row_struct_value
             row_names_value = asset_details.get("rowNames", [])
             if isinstance(row_names_value, list):
                 row_names = [item for item in row_names_value if isinstance(item, str)]
+            property_values = asset_details.get("properties", [])
+            if isinstance(property_values, list):
+                for property_value in property_values:
+                    if not isinstance(property_value, dict):
+                        continue
+                    property_name = property_value.get("name")
+                    if isinstance(property_name, str):
+                        data_asset_properties[property_name] = property_value
 
         package_dirty_value = revision.get("packageDirty")
         if not isinstance(package_dirty_value, bool):
@@ -922,6 +992,8 @@ def _load_export_snapshot(
             "revision": revision_value,
             "packageDirty": package_dirty_value is True,
             "canonicalPath": canonical_path.relative_to(root).as_posix(),
+            "assetDetailsType": asset_details_type,
+            "dataAssetProperties": data_asset_properties,
             "rowStructPath": row_struct_path,
             "rowNames": row_names,
         }
@@ -1243,7 +1315,7 @@ def validate_patch(
                     path=f"{operation_pointer}.target",
                     errors=errors,
                 )
-                if operation_name == "setAssetProperty":
+                if operation_name in {"setAssetProperty", "setAssetReferenceProperty"}:
                     property_path = target.get("propertyPath")
                     authorization = (
                         f"{asset_class}#{property_path}" if isinstance(property_path, str) else ""
@@ -1255,6 +1327,32 @@ def validate_patch(
                             f"Asset property is not authorized by policy: {authorization or '<invalid>'}",
                             f"{operation_pointer}.target.propertyPath",
                         )
+                    if operation_name == "setAssetReferenceProperty":
+                        if current.get("assetDetailsType") != "data-asset":
+                            _issue(
+                                errors,
+                                "operation-asset-type",
+                                "setAssetReferenceProperty requires a Data Asset reader snapshot.",
+                                f"{operation_pointer}.operation",
+                            )
+                        properties = current.get("dataAssetProperties", {})
+                        property_details = properties.get(property_path) if isinstance(properties, dict) else None
+                        if not isinstance(property_details, dict):
+                            _issue(
+                                errors,
+                                "asset-reference-property-missing",
+                                f"Data Asset reference property was not exported: {property_path}",
+                                f"{operation_pointer}.target.propertyPath",
+                            )
+                        else:
+                            reference_type = property_details.get("referenceType")
+                            if reference_type not in {"Object", "Class", "SoftObject", "SoftClass"}:
+                                _issue(
+                                    errors,
+                                    "asset-reference-property-type",
+                                    f"Property is not a supported reference type: {property_path}",
+                                    f"{operation_pointer}.target.propertyPath",
+                                )
                 elif operation_name in {
                     "setDataTableCell",
                     "setDataTableRowFields",
@@ -1432,6 +1530,42 @@ def validate_patch(
                         f"{operation_name} requires value=true as an explicit structural-change acknowledgement.",
                         f"{operation_pointer}.value",
                     )
+            elif operation_name == "setAssetReferenceProperty":
+                valid_reference, reference_package, requested_reference_type = _validate_asset_reference_value(
+                    value,
+                    policy["maxValueBytes"],
+                )
+                if not valid_reference:
+                    _issue(
+                        errors,
+                        "operation-value-type",
+                        reference_package,
+                        f"{operation_pointer}.value",
+                    )
+                else:
+                    property_path = target.get("propertyPath")
+                    properties = current.get("dataAssetProperties", {})
+                    property_details = properties.get(property_path) if isinstance(properties, dict) else None
+                    expected_reference_type = (
+                        property_details.get("referenceType") if isinstance(property_details, dict) else ""
+                    )
+                    if value is not None and requested_reference_type != expected_reference_type:
+                        _issue(
+                            errors,
+                            "asset-reference-type-mismatch",
+                            f"Reference type {requested_reference_type} does not match property type {expected_reference_type}.",
+                            f"{operation_pointer}.value.referenceType",
+                        )
+                    if value is not None and not _path_is_allowed(
+                        reference_package,
+                        policy["allowedReferenceRoots"],
+                    ):
+                        _issue(
+                            errors,
+                            "reference-not-allowed",
+                            f"Referenced asset is outside allowedReferenceRoots: {value.get('path')}",
+                            f"{operation_pointer}.value.path",
+                        )
             elif operation_name == "setMaterialInstanceTextureParameter":
                 valid_reference, reference_package = _validate_asset_path(value)
                 if not valid_reference:

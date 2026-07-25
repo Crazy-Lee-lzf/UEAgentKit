@@ -186,7 +186,7 @@ def _authorization_key(report: dict[str, Any]) -> str:
     target = report.get("target")
     if not isinstance(operation, str) or not isinstance(asset_class, str) or not isinstance(target, dict):
         return ""
-    if operation == "setAssetProperty":
+    if operation in {"setAssetProperty", "setAssetReferenceProperty"}:
         property_path = target.get("propertyPath")
         return f"{asset_class}#{property_path}" if isinstance(property_path, str) else ""
     material_type = _MATERIAL_OPERATION_TYPES.get(operation)
@@ -226,7 +226,7 @@ def _policy_authorizes_manifest(policy: dict[str, Any], manifest: dict[str, Any]
         return False, "Manifest assetClass is not authorized by policy."
     if operation not in policy.get("allowedOperations", []):
         return False, "Manifest operation is not authorized by policy."
-    if operation == "setAssetProperty" and authorization_key not in policy.get("allowedAssetProperties", []):
+    if operation in {"setAssetProperty", "setAssetReferenceProperty"} and authorization_key not in policy.get("allowedAssetProperties", []):
         return False, "Manifest asset property is not authorized by policy."
     if operation in _MATERIAL_OPERATION_TYPES and authorization_key not in policy.get(
         "allowedMaterialParameters", []

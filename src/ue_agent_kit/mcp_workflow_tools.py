@@ -145,6 +145,28 @@ def register_workflow_tools(
             return error_response("ue_set_asset_property", exc, read_only=False)
 
     @server.tool(annotations=planning_annotations)
+    def ue_set_asset_reference_property(
+        asset_path: str,
+        property_path: str,
+        value: Any,
+        mode: Literal["Plan", "DryRun"] = "Plan",
+        description: str = "",
+    ) -> dict[str, Any]:
+        """Plan or Dry Run one authorized Data Asset Object/Class or soft-reference change."""
+        try:
+            return _run_high_level_change(
+                tool_name="ue_set_asset_reference_property",
+                mode=mode,
+                asset_path=asset_path,
+                operation="setAssetReferenceProperty",
+                target={"propertyPath": property_path},
+                value=value,
+                description=description,
+            )
+        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_set_asset_reference_property", exc, read_only=False)
+
+    @server.tool(annotations=planning_annotations)
     def ue_set_material_parameter(
         asset_path: str,
         parameter_name: str,

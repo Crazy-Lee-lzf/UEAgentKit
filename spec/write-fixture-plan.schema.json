@@ -30,6 +30,9 @@
             "$ref": "#/$defs/scalarAsset"
           },
           {
+            "$ref": "#/$defs/referenceAsset"
+          },
+          {
             "$ref": "#/$defs/blueprint"
           }
         ]
@@ -140,6 +143,30 @@
         },
         "expectedClass": {
           "const": "/Script/UEAgentKitEditor.UEAgentKitScalarWriteFixtureAsset"
+        }
+      }
+    },
+    "referenceAsset": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "targetAsset",
+        "expectedClass"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "const": "referenceAsset"
+        },
+        "targetAsset": {
+          "$ref": "#/$defs/packagePath"
+        },
+        "expectedClass": {
+          "const": "/Script/UEAgentKitEditor.UEAgentKitReferenceWriteFixtureAsset"
         }
       }
     }

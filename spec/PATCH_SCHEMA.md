@@ -471,6 +471,42 @@ Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目�
 
 Searchable Name 导出使用完整 `Package.Object::ValueName` 构造 `targetSymbolId` 与 `targetPath`，因此同一 DataTable 的不同 Row 引用不会折叠。引用影响门禁只覆盖 UE Asset Registry 可证明的 Searchable Name 引用，不进行文本模糊扫描。
 
+### setAssetReferenceProperty
+
+修改 `Data Asset` 的一个授权顶层 Object/Class、Soft Object/Class 引用属性：
+
+```json
+{
+  "operationId": "set-icon-reference",
+  "operation": "setAssetReferenceProperty",
+  "target": { "propertyPath": "ObjectValue" },
+  "value": {
+    "referenceType": "Object",
+    "path": "/Game/Characters/Mannequins/Textures/Manny/T_Manny_02_D.T_Manny_02_D"
+  }
+}
+```
+
+清空引用时，`value` 必须为 JSON `null`。非空值必须只包含 `referenceType` 与 `path`：
+
+```text
+Object
+Class
+SoftObject
+SoftClass
+```
+
+限制与语义：
+
+- 目标必须由 Data Asset Reader 导出，且 `propertyPath` 只能是一个顶层属性名；不接受点号路径、容器元素或 Struct 内部字段。
+- Reader 为引用属性导出 `referenceType` 与 `referenceClassPath`。Plan 阶段要求请求类型与真实属性类型精确一致，避免把软引用误写为硬引用，或把 Object 写入 Class 属性。
+- `Object` / `SoftObject` 路径使用 `/Game/Package.Asset`；`Class` / `SoftClass` 使用 `/Game/Package.Asset_C`。不接受文件系统路径、Subobject Path 或模糊名称。
+- 属性必须命中 `allowedAssetProperties`；非空目标必须位于 `allowedReferenceRoots`，并在 UE 执行阶段由实际加载对象或 `UClass` 精确命中 `allowedReferenceClasses`。
+- Object 引用验证目标对象兼容属性 `PropertyClass`；Class 引用验证目标 `UClass::IsChildOf(MetaClass)`。软引用也会在写入前加载一次完成相同类型与 Policy 验证，保存值仍为软路径。
+- `null` 只清空目标引用，不要求引用目标授权；目标属性本身仍必须授权。
+- Dry Run 修改、精确读回并恢复原值，同时要求 Package Revision 不变；Commit 继续使用唯一 Package 备份、Manifest、独立 UE 重载验证与 Revision-aware rollback。
+- 真实 UE5.6 回归已覆盖 Object、Soft Object、Class、Soft Class 与 `null` 清空共 5 次 Dry Run，随后四类 Commit、独立重载和四层逆序 rollback，最终四个属性为空且 Revision 精确恢复。
+
 ## Dry Run 报告
 
 报告包含：
@@ -497,6 +533,10 @@ backupPath
 referenceImpactChecked (DataTable Row structural operation)
 referenceImpactSource (DataTable Row remove/rename)
 referenceCount (DataTable Row remove/rename)
+referenceType (Data Asset reference operation)
+referenceConstraintClass (Data Asset reference operation)
+referencePath (Data Asset reference operation)
+resolvedReferenceClass (Data Asset reference operation)
 ```
 
 Blueprint Dry Run 成功时要求 `compiled=true`。非 Blueprint 不执行 Blueprint 编译，因此 `compiled=false`。所有 Dry Run 都必须满足：

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "1.0",
+  "patchId": "set-asset-reference-property-example",
+  "projectName": "我的项目",
+  "description": "Set an explicitly authorized Data Asset object reference.",
+  "assets": [
+    {
+      "assetPath": "/Game/UEAgentKitWriteTests/DA_ReferencePatchTarget.DA_ReferencePatchTarget",
+      "expectedRevision": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "expectedAssetClass": "/Script/UEAgentKitEditor.UEAgentKitReferenceWriteFixtureAsset",
+      "operations": [
+        {
+          "operationId": "set-object-reference",
+          "operation": "setAssetReferenceProperty",
+          "target": {
+            "propertyPath": "ObjectValue"
+          },
+          "value": {
+            "referenceType": "Object",
+            "path": "/Game/Characters/Mannequins/Textures/Manny/T_Manny_02_D.T_Manny_02_D"
+          }
+        }
+      ]
+    }
+  ]
+}

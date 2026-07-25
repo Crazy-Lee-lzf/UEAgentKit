@@ -43,6 +43,7 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
                 "setPinDefault",
                 "setBlueprintDescription",
                 "setAssetProperty",
+                "setAssetReferenceProperty",
                 "setMaterialInstanceScalarParameter",
                 "setMaterialInstanceVectorParameter",
                 "setMaterialInstanceTextureParameter",
@@ -66,6 +67,7 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
                 "Blueprint",
                 "Blueprint",
                 "Blueprint",
+                "NonBlueprint",
                 "NonBlueprint",
                 "NonBlueprint",
                 "NonBlueprint",
@@ -145,7 +147,10 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         for token in (
             "setAssetProperty",
+            "setAssetReferenceProperty",
             "AllowedAssetProperties",
+            "AllowedReferenceRoots",
+            "AllowedReferenceClasses",
             "AllowedMaterialParameters",
             "setMaterialInstanceScalarParameter",
             "setMaterialInstanceVectorParameter",
