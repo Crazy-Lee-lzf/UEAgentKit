@@ -102,6 +102,9 @@
                 "$ref": "#/$defs/setAssetReferenceProperty"
               },
               {
+                "$ref": "#/$defs/setAssetStructuredProperty"
+              },
+              {
                 "$ref": "#/$defs/setMaterialInstanceScalarParameter"
               },
               {
@@ -167,6 +170,9 @@
             },
             {
               "$ref": "#/$defs/assetReferenceValue"
+            },
+            {
+              "$ref": "#/$defs/structuredValue"
             }
           ]
         }
@@ -754,6 +760,153 @@
             },
             "value": {
               "const": true
+            }
+          }
+        }
+      ]
+    },
+    "structuredScalar": {
+      "type": [
+        "string",
+        "number",
+        "integer",
+        "boolean"
+      ]
+    },
+    "structuredItem": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/structuredScalar"
+        },
+        {
+          "$ref": "#/$defs/structuredValue"
+        }
+      ]
+    },
+    "structuredValue": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "valueType",
+            "fields"
+          ],
+          "properties": {
+            "valueType": {
+              "const": "Struct"
+            },
+            "fields": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/structuredItem"
+              },
+              "maxProperties": 256
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "valueType",
+            "items"
+          ],
+          "properties": {
+            "valueType": {
+              "const": "Array"
+            },
+            "items": {
+              "type": "array",
+              "maxItems": 4096,
+              "items": {
+                "$ref": "#/$defs/structuredItem"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "valueType",
+            "items"
+          ],
+          "properties": {
+            "valueType": {
+              "const": "Set"
+            },
+            "items": {
+              "type": "array",
+              "maxItems": 4096,
+              "items": {
+                "$ref": "#/$defs/structuredItem"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "valueType",
+            "entries"
+          ],
+          "properties": {
+            "valueType": {
+              "const": "Map"
+            },
+            "entries": {
+              "type": "array",
+              "maxItems": 4096,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "key",
+                  "value"
+                ],
+                "properties": {
+                  "key": {
+                    "$ref": "#/$defs/structuredItem"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/structuredItem"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "setAssetStructuredProperty": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "operation": {
+              "const": "setAssetStructuredProperty"
+            },
+            "target": {
+              "type": "object",
+              "required": [
+                "propertyPath"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "propertyPath": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                }
+              }
+            },
+            "value": {
+              "$ref": "#/$defs/structuredValue"
             }
           }
         }

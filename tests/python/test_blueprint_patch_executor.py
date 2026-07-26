@@ -44,6 +44,7 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
                 "setBlueprintDescription",
                 "setAssetProperty",
                 "setAssetReferenceProperty",
+                "setAssetStructuredProperty",
                 "setMaterialInstanceScalarParameter",
                 "setMaterialInstanceVectorParameter",
                 "setMaterialInstanceTextureParameter",
@@ -67,6 +68,7 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
                 "Blueprint",
                 "Blueprint",
                 "Blueprint",
+                "NonBlueprint",
                 "NonBlueprint",
                 "NonBlueprint",
                 "NonBlueprint",
@@ -148,6 +150,7 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
         for token in (
             "setAssetProperty",
             "setAssetReferenceProperty",
+            "setAssetStructuredProperty",
             "AllowedAssetProperties",
             "AllowedReferenceRoots",
             "AllowedReferenceClasses",

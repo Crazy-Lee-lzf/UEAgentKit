@@ -212,7 +212,16 @@ scripts\TestDataTableRowOperations.cmd ^
 
 The script runs Add Dry Run, Add Commit, Rename Commit, and Remove Commit, then rolls back Remove → Rename → Add in reverse order. Every stage is independently re-exported by Unreal, and the final package revision must exactly match the initial revision.
 
-The executor supports four Blueprint operations, scalar `setAssetProperty`, Data Asset-specific `setAssetReferenceProperty`, four Material Instance parameter operations, and `setDataTableCell`, `setDataTableRowFields`, `addDataTableRow`, `removeDataTableRow`, and `renameDataTableRow`. One execution remains limited to one asset and one operation. Generic properties, reference targets, Material parameters, and DataTable fields use exact `allowedAssetProperties`, `allowedReferenceRoots/allowedReferenceClasses`, `allowedMaterialParameters`, and `allowedDataTableFields` authorization. `setAssetReferenceProperty` is limited to top-level Object/Class and Soft Object/Class properties and accepts only `null` or an exact `{referenceType, path}` object. DataTable writes may update one scalar field, atomically update 1–32 authorized scalar fields, or perform controlled row creation, deletion, and renaming. Add starts from RowStruct defaults and applies 0–32 authorized scalar fields; remove and rename require explicit `value=true`. Structural operations use full-table snapshots, unaffected-row verification, dry-run restoration, unique backups, and independent rollback verification. Only single-file packages without external package sidecars are accepted.
+Run the Data Asset Struct/container-property regression:
+
+```bat
+scripts\TestDataAssetStructuredProperties.cmd ^
+  -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject"
+```
+
+The script validates stable JSON, structured diffs, deep Dry Run restoration, Commit reload, and reverse rollback for Struct, Array, Set, and Map properties. The final package revision must exactly match the initial revision.
+
+The executor supports four Blueprint operations, scalar `setAssetProperty`, Data Asset-specific `setAssetReferenceProperty` and `setAssetStructuredProperty`, four Material Instance parameter operations, and DataTable field/row operations. One execution remains limited to one asset and one operation, with exact Policy authorization. `setAssetStructuredProperty` replaces one top-level Struct, Array, Set, or Map through an explicit `valueType` envelope. Struct values must contain every field, while Set and Map values must be uniquely ordered by Canonical JSON; reports include a recursive structured diff. Only single-file packages without external package sidecars are accepted.
 
 ### 6. Run the MCP server (0.5.1)
 

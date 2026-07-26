@@ -107,6 +107,14 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
         expected_change="asset-reference-property",
         asset_type="NonBlueprint",
     ),
+    "setAssetStructuredProperty": OperationSpec(
+        name="setAssetStructuredProperty",
+        risk="medium",
+        target_fields=("propertyPath",),
+        target_validators={"propertyPath": _is_top_level_property_name},
+        expected_change="asset-structured-property",
+        asset_type="NonBlueprint",
+    ),
     "setMaterialInstanceScalarParameter": OperationSpec(
         name="setMaterialInstanceScalarParameter",
         risk="medium",
@@ -531,7 +539,7 @@ def _validate_policy(policy: dict[str, Any], errors: list[dict[str, str]]) -> di
                 )
                 continue
             normalized_asset_properties.append(item)
-    asset_property_operations = {"setAssetProperty", "setAssetReferenceProperty"}
+    asset_property_operations = {"setAssetProperty", "setAssetReferenceProperty", "setAssetStructuredProperty"}
     if asset_property_operations.intersection(normalized_operations) and not normalized_asset_properties:
         _issue(
             errors,
@@ -784,6 +792,152 @@ def _validate_asset_reference_value(value: Any, max_value_bytes: int) -> tuple[b
     if len(encoded) > max_value_bytes:
         return False, "Asset reference value exceeds maxValueBytes.", ""
     return True, package_or_error, reference_type
+
+
+STRUCTURED_MAX_DEPTH = 8
+STRUCTURED_MAX_CONTAINER_ENTRIES = 4096
+STRUCTURED_INTEGER_RANGES = {
+    "Int8": (-128, 127),
+    "UInt8": (0, 255),
+    "Int16": (-32768, 32767),
+    "UInt16": (0, 65535),
+    "Int32": (-2147483648, 2147483647),
+    "UInt32": (0, 4294967295),
+}
+
+
+def _canonical_json(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("Non-finite JSON number")
+        return "0" if value == 0.0 else format(value, ".17g")
+    if isinstance(value, list):
+        return "[" + ",".join(_canonical_json(item) for item in value) + "]"
+    if isinstance(value, dict):
+        keys = sorted(value, key=lambda item: item.encode("utf-8"))
+        return "{" + ",".join(
+            json.dumps(key, ensure_ascii=False, separators=(",", ":")) + ":" + _canonical_json(value[key])
+            for key in keys
+        ) + "}"
+    raise TypeError(f"Unsupported JSON value: {type(value).__name__}")
+
+
+def _canonical_sort_key(value: Any) -> bytes:
+    return _canonical_json(value).encode("utf-8")
+
+
+def _validate_structured_value_node(value: Any, schema: Any, depth: int = 0) -> str:
+    if depth > STRUCTURED_MAX_DEPTH:
+        return "Structured value exceeds the maximum nesting depth."
+    if not isinstance(schema, dict):
+        return "Structured property schema is missing or invalid."
+    kind = schema.get("kind")
+    if kind == "Scalar":
+        scalar_type = schema.get("scalarType")
+        if scalar_type == "Bool":
+            return "" if isinstance(value, bool) else "Expected a JSON boolean."
+        if scalar_type in STRUCTURED_INTEGER_RANGES:
+            if isinstance(value, bool) or not isinstance(value, int):
+                return f"Expected an integer for {scalar_type}."
+            minimum, maximum = STRUCTURED_INTEGER_RANGES[scalar_type]
+            return "" if minimum <= value <= maximum else f"Integer is outside the {scalar_type} range."
+        if scalar_type in {"Float", "Double"}:
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                return f"Expected a finite number for {scalar_type}."
+            return ""
+        if scalar_type in {"String", "Name"}:
+            return "" if isinstance(value, str) else f"Expected a JSON string for {scalar_type}."
+        if scalar_type == "Enum":
+            values = schema.get("values")
+            if not isinstance(value, str) or not isinstance(values, list) or value not in values:
+                return "Enum value is not present in the exported property schema."
+            return ""
+        return f"Unsupported structured scalar type: {scalar_type!r}."
+
+    if kind == "Struct":
+        if not isinstance(value, dict) or set(value) != {"valueType", "fields"} or value.get("valueType") != "Struct":
+            return "Struct values require exactly {valueType:'Struct', fields:{...}}."
+        fields = value.get("fields")
+        schema_fields = schema.get("fields")
+        if not isinstance(fields, dict) or not isinstance(schema_fields, list):
+            return "Struct fields or schema fields are invalid."
+        field_schemas: dict[str, Any] = {}
+        for item in schema_fields:
+            if not isinstance(item, dict) or not isinstance(item.get("name"), str) or "schema" not in item:
+                return "Struct field schema is invalid."
+            field_schemas[item["name"]] = item["schema"]
+        if set(fields) != set(field_schemas):
+            return "Struct value must contain every exported field exactly once."
+        for field_name in sorted(field_schemas):
+            error = _validate_structured_value_node(fields[field_name], field_schemas[field_name], depth + 1)
+            if error:
+                return f"Struct field {field_name}: {error}"
+        return ""
+
+    if kind in {"Array", "Set"}:
+        field_name = "items"
+        if not isinstance(value, dict) or set(value) != {"valueType", field_name} or value.get("valueType") != kind:
+            return f"{kind} values require exactly {{valueType:'{kind}', items:[...]}}."
+        items = value.get(field_name)
+        if not isinstance(items, list) or len(items) > STRUCTURED_MAX_CONTAINER_ENTRIES:
+            return f"{kind} items are invalid or exceed the entry limit."
+        element_schema = schema.get("element")
+        previous: bytes = b""
+        for index, item in enumerate(items):
+            error = _validate_structured_value_node(item, element_schema, depth + 1)
+            if error:
+                return f"{kind} item {index}: {error}"
+            if kind == "Set":
+                current = _canonical_sort_key(item)
+                if previous and current <= previous:
+                    return "Set items must be unique and sorted by Canonical JSON."
+                previous = current
+        return ""
+
+    if kind == "Map":
+        if not isinstance(value, dict) or set(value) != {"valueType", "entries"} or value.get("valueType") != "Map":
+            return "Map values require exactly {valueType:'Map', entries:[{key,value}, ...]}."
+        entries = value.get("entries")
+        if not isinstance(entries, list) or len(entries) > STRUCTURED_MAX_CONTAINER_ENTRIES:
+            return "Map entries are invalid or exceed the entry limit."
+        key_schema = schema.get("key")
+        value_schema = schema.get("value")
+        previous_key: bytes = b""
+        for index, entry in enumerate(entries):
+            if not isinstance(entry, dict) or set(entry) != {"key", "value"}:
+                return f"Map entry {index} must contain exactly key and value."
+            error = _validate_structured_value_node(entry["key"], key_schema, depth + 1)
+            if error:
+                return f"Map key {index}: {error}"
+            error = _validate_structured_value_node(entry["value"], value_schema, depth + 1)
+            if error:
+                return f"Map value {index}: {error}"
+            current_key = _canonical_sort_key(entry["key"])
+            if previous_key and current_key <= previous_key:
+                return "Map entries must have unique keys sorted by Canonical JSON."
+            previous_key = current_key
+        return ""
+
+    return f"Unsupported structured schema kind: {kind!r}."
+
+
+def _validate_asset_structured_value(value: Any, schema: Any, max_value_bytes: int) -> tuple[bool, str]:
+    try:
+        encoded = _canonical_json(value).encode("utf-8")
+    except (TypeError, ValueError):
+        return False, "Structured value is not valid finite JSON."
+    if len(encoded) > max_value_bytes:
+        return False, "Structured value exceeds maxValueBytes."
+    error = _validate_structured_value_node(value, schema)
+    return not error, error
 
 
 def _is_blueprint_class(asset_class: str) -> bool:
@@ -1315,7 +1469,7 @@ def validate_patch(
                     path=f"{operation_pointer}.target",
                     errors=errors,
                 )
-                if operation_name in {"setAssetProperty", "setAssetReferenceProperty"}:
+                if operation_name in {"setAssetProperty", "setAssetReferenceProperty", "setAssetStructuredProperty"}:
                     property_path = target.get("propertyPath")
                     authorization = (
                         f"{asset_class}#{property_path}" if isinstance(property_path, str) else ""
@@ -1353,6 +1507,39 @@ def validate_patch(
                                     f"Property is not a supported reference type: {property_path}",
                                     f"{operation_pointer}.target.propertyPath",
                                 )
+                    elif operation_name == "setAssetStructuredProperty":
+                        if current.get("assetDetailsType") != "data-asset":
+                            _issue(
+                                errors,
+                                "operation-asset-type",
+                                "setAssetStructuredProperty requires a Data Asset reader snapshot.",
+                                f"{operation_pointer}.operation",
+                            )
+                        properties = current.get("dataAssetProperties", {})
+                        property_details = properties.get(property_path) if isinstance(properties, dict) else None
+                        if not isinstance(property_details, dict):
+                            _issue(
+                                errors,
+                                "asset-structured-property-missing",
+                                f"Data Asset structured property was not exported: {property_path}",
+                                f"{operation_pointer}.target.propertyPath",
+                            )
+                        elif property_details.get("structuredType") not in {"Struct", "Array", "Set", "Map"}:
+                            _issue(
+                                errors,
+                                "asset-structured-property-type",
+                                f"Property is not Struct, Array, Set, or Map: {property_path}",
+                                f"{operation_pointer}.target.propertyPath",
+                            )
+                        elif property_details.get("structuredSupported") is not True or not isinstance(
+                            property_details.get("structuredSchema"), dict
+                        ):
+                            _issue(
+                                errors,
+                                "asset-structured-property-unsupported",
+                                f"Property contains unsupported structured leaves: {property_path}",
+                                f"{operation_pointer}.target.propertyPath",
+                            )
                 elif operation_name in {
                     "setDataTableCell",
                     "setDataTableRowFields",
@@ -1566,6 +1753,30 @@ def validate_patch(
                             f"Referenced asset is outside allowedReferenceRoots: {value.get('path')}",
                             f"{operation_pointer}.value.path",
                         )
+            elif operation_name == "setAssetStructuredProperty":
+                property_path = target.get("propertyPath")
+                properties = current.get("dataAssetProperties", {})
+                property_details = properties.get(property_path) if isinstance(properties, dict) else None
+                structured_schema = property_details.get("structuredSchema") if isinstance(property_details, dict) else None
+                valid_structured, structured_error = _validate_asset_structured_value(
+                    value,
+                    structured_schema,
+                    policy["maxValueBytes"],
+                )
+                if not valid_structured:
+                    _issue(
+                        errors,
+                        "operation-value-type",
+                        structured_error,
+                        f"{operation_pointer}.value",
+                    )
+                elif isinstance(property_details, dict) and value.get("valueType") != property_details.get("structuredType"):
+                    _issue(
+                        errors,
+                        "asset-structured-type-mismatch",
+                        f"Structured value type {value.get('valueType')} does not match property type {property_details.get('structuredType')}.",
+                        f"{operation_pointer}.value.valueType",
+                    )
             elif operation_name == "setMaterialInstanceTextureParameter":
                 valid_reference, reference_package = _validate_asset_path(value)
                 if not valid_reference:

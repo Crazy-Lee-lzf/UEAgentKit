@@ -317,6 +317,162 @@ class PatchValidationTests(unittest.TestCase):
         }
         self.flush()
 
+    def configure_asset_structured_operation(
+        self,
+        *,
+        property_name: str = "StructValue",
+        structured_type: str = "Struct",
+        value: Any | None = None,
+    ) -> None:
+        scalar_int = {"kind": "Scalar", "scalarType": "Int32"}
+        scalar_name = {"kind": "Scalar", "scalarType": "Name"}
+        record_schema = {
+            "kind": "Struct",
+            "structPath": "/Script/UEAgentKitEditor.UEAgentKitStructuredFixtureRecord",
+            "fields": [
+                {"name": "Count", "schema": scalar_int},
+                {"name": "Label", "schema": {"kind": "Scalar", "scalarType": "String"}},
+                {"name": "bEnabled", "schema": {"kind": "Scalar", "scalarType": "Bool"}},
+            ],
+        }
+        schemas = {
+            "Struct": record_schema,
+            "Array": {"kind": "Array", "element": scalar_int},
+            "Set": {"kind": "Set", "element": scalar_name},
+            "Map": {"kind": "Map", "key": scalar_name, "value": record_schema},
+        }
+        values = {
+            "Struct": {
+                "valueType": "Struct",
+                "fields": {"Count": 7, "Label": "Updated", "bEnabled": False},
+            },
+            "Array": {"valueType": "Array", "items": [1, 4, 9]},
+            "Set": {"valueType": "Set", "items": ["Alpha", "Gamma"]},
+            "Map": {
+                "valueType": "Map",
+                "entries": [
+                    {
+                        "key": "Primary",
+                        "value": {
+                            "valueType": "Struct",
+                            "fields": {"Count": 11, "Label": "Primary Updated", "bEnabled": False},
+                        },
+                    },
+                    {
+                        "key": "Tertiary",
+                        "value": {
+                            "valueType": "Struct",
+                            "fields": {"Count": 30, "Label": "Tertiary", "bEnabled": True},
+                        },
+                    },
+                ],
+            },
+        }
+        asset_path = "/Game/UEAgentKitWriteTests/DA_StructuredPatchTarget.DA_StructuredPatchTarget"
+        asset_class = "/Script/UEAgentKitEditor.UEAgentKitStructuredWriteFixtureAsset"
+        asset = self.patch["assets"][0]
+        asset["assetPath"] = asset_path
+        asset["expectedAssetClass"] = asset_class
+        asset["operations"] = [
+            {
+                "operationId": "set-structured",
+                "operation": "setAssetStructuredProperty",
+                "target": {"propertyPath": property_name},
+                "value": copy.deepcopy(values[structured_type] if value is None else value),
+            }
+        ]
+        self.policy["allowedOperations"].append("setAssetStructuredProperty")
+        self.policy["allowedAssetClasses"].append(asset_class)
+        self.policy["allowedAssetProperties"] = [f"{asset_class}#{property_name}"]
+        self.canonical["assetPath"] = asset_path
+        self.canonical["packageName"] = asset_path.rsplit(".", 1)[0]
+        self.canonical["assetClass"] = asset_class
+        self.canonical["assetDetails"] = {
+            "type": "data-asset",
+            "properties": [
+                {
+                    "name": property_name,
+                    "propertyClass": f"{structured_type}Property",
+                    "structuredType": structured_type,
+                    "structuredSupported": True,
+                    "structuredSchema": copy.deepcopy(schemas[structured_type]),
+                    "structuredError": "",
+                    "conversionSucceeded": True,
+                    "value": copy.deepcopy(values[structured_type]),
+                }
+            ],
+        }
+        self.flush()
+
+    def test_asset_structured_property_models_are_valid(self) -> None:
+        property_names = {
+            "Struct": "StructValue",
+            "Array": "ArrayValue",
+            "Set": "SetValue",
+            "Map": "MapValue",
+        }
+        for structured_type, property_name in property_names.items():
+            with self.subTest(structured_type=structured_type):
+                self.patch = make_patch()
+                self.policy = make_policy()
+                self.canonical = make_canonical()
+                self.configure_asset_structured_operation(
+                    property_name=property_name,
+                    structured_type=structured_type,
+                )
+                result = self.validate()
+                self.assertTrue(result["valid"], result["errors"])
+                expected = result["assets"][0]["operations"][0]["expectedChange"]
+                self.assertEqual(expected["kind"], "asset-structured-property")
+
+    def test_asset_structured_property_rejects_incomplete_struct(self) -> None:
+        self.configure_asset_structured_operation()
+        del self.patch["assets"][0]["operations"][0]["value"]["fields"]["Label"]
+        self.flush()
+        self.assertIn("operation-value-type", self.error_codes(self.validate()))
+
+    def test_asset_structured_property_rejects_unsorted_set(self) -> None:
+        self.configure_asset_structured_operation(property_name="SetValue", structured_type="Set")
+        self.patch["assets"][0]["operations"][0]["value"]["items"] = ["Gamma", "Alpha"]
+        self.flush()
+        self.assertIn("operation-value-type", self.error_codes(self.validate()))
+
+    def test_asset_structured_property_rejects_canonical_numeric_duplicates(self) -> None:
+        self.configure_asset_structured_operation(property_name="SetValue", structured_type="Set")
+        property_details = self.canonical["assetDetails"]["properties"][0]
+        property_details["structuredSchema"] = {
+            "kind": "Set",
+            "element": {"kind": "Scalar", "scalarType": "Double"},
+        }
+        self.patch["assets"][0]["operations"][0]["value"]["items"] = [1, 1.0]
+        self.flush()
+        self.assertIn("operation-value-type", self.error_codes(self.validate()))
+
+    def test_asset_structured_property_rejects_duplicate_map_keys(self) -> None:
+        self.configure_asset_structured_operation(property_name="MapValue", structured_type="Map")
+        entries = self.patch["assets"][0]["operations"][0]["value"]["entries"]
+        entries[1]["key"] = entries[0]["key"]
+        self.flush()
+        self.assertIn("operation-value-type", self.error_codes(self.validate()))
+
+    def test_asset_structured_property_rejects_type_mismatch(self) -> None:
+        self.configure_asset_structured_operation(property_name="ArrayValue", structured_type="Array")
+        self.patch["assets"][0]["operations"][0]["value"] = {
+            "valueType": "Set",
+            "items": [1, 2],
+        }
+        self.flush()
+        codes = self.error_codes(self.validate())
+        self.assertTrue({"operation-value-type", "asset-structured-type-mismatch"}.intersection(codes))
+
+    def test_asset_structured_property_rejects_unsupported_reader_schema(self) -> None:
+        self.configure_asset_structured_operation()
+        property_details = self.canonical["assetDetails"]["properties"][0]
+        property_details["structuredSupported"] = False
+        property_details["structuredError"] = "Unsupported object reference leaf"
+        self.flush()
+        self.assertIn("asset-structured-property-unsupported", self.error_codes(self.validate()))
+
     def test_asset_reference_property_object_model_is_valid(self) -> None:
         self.configure_asset_reference_operation()
         result = self.validate()

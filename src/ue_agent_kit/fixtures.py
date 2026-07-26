@@ -93,7 +93,7 @@ def validate_fixture_plan(plan_path: Path) -> dict[str, Any]:
         kind = fixture.get("kind")
         if kind == "duplicateAsset":
             required = {"id", "kind", "sourceAsset", "targetAsset", "expectedClass"}
-        elif kind in {"scalarAsset", "referenceAsset"}:
+        elif kind in {"scalarAsset", "referenceAsset", "structuredAsset"}:
             required = {"id", "kind", "targetAsset", "expectedClass"}
         elif kind == "blueprint":
             required = {
@@ -106,7 +106,7 @@ def validate_fixture_plan(plan_path: Path) -> dict[str, Any]:
             }
         else:
             required = {"id", "kind", "targetAsset", "expectedClass"}
-            _issue(errors, "fixture-kind", "kind must be duplicateAsset, scalarAsset, referenceAsset, or blueprint.", f"{base}.kind")
+            _issue(errors, "fixture-kind", "kind must be duplicateAsset, scalarAsset, referenceAsset, structuredAsset, or blueprint.", f"{base}.kind")
         missing = sorted(required - set(fixture))
         unknown = sorted(set(fixture) - required)
         for field in missing:
@@ -167,6 +167,14 @@ def validate_fixture_plan(plan_path: Path) -> dict[str, Any]:
                     errors,
                     "reference-asset-class",
                     "referenceAsset fixtures require the UEAgentKit reference fixture class.",
+                    f"{base}.expectedClass",
+                )
+        elif kind == "structuredAsset":
+            if expected_class != "/Script/UEAgentKitEditor.UEAgentKitStructuredWriteFixtureAsset":
+                _issue(
+                    errors,
+                    "structured-asset-class",
+                    "structuredAsset fixtures require the UEAgentKit structured fixture class.",
                     f"{base}.expectedClass",
                 )
         elif kind == "blueprint":

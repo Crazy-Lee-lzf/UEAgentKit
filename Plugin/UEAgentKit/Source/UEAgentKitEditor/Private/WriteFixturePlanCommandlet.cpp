@@ -16,6 +16,7 @@
 #include "Misc/Parse.h"
 #include "ReferenceWriteFixtureAsset.h"
 #include "ScalarWriteFixtureAsset.h"
+#include "StructuredWriteFixtureAsset.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
@@ -276,6 +277,42 @@ namespace WriteFixturePlanCommandletPrivate
 		if (!UPackage::SavePackage(Package, Asset, *Filename, SaveArgs))
 		{
 			OutError = FString::Printf(TEXT("Could not save reference fixture: %s"), *Filename);
+			return nullptr;
+		}
+		return Asset;
+	}
+
+	UUEAgentKitStructuredWriteFixtureAsset* CreateStructuredAssetFixture(
+		const FFixtureDefinition& Definition,
+		FString& OutError)
+	{
+		UPackage* Package = CreatePackage(*Definition.TargetAsset);
+		if (!Package)
+		{
+			OutError = FString::Printf(TEXT("Could not create package: %s"), *Definition.TargetAsset);
+			return nullptr;
+		}
+		const FString AssetName = FPackageName::GetLongPackageAssetName(Definition.TargetAsset);
+		UUEAgentKitStructuredWriteFixtureAsset* Asset = NewObject<UUEAgentKitStructuredWriteFixtureAsset>(
+			Package,
+			FName(*AssetName),
+			RF_Public | RF_Standalone | RF_Transactional);
+		if (!Asset)
+		{
+			OutError = FString::Printf(TEXT("Could not create structured fixture: %s"), *Definition.TargetAsset);
+			return nullptr;
+		}
+		FAssetRegistryModule::AssetCreated(Asset);
+		Package->MarkPackageDirty();
+		const FString Filename = GetPackageFilename(Definition.TargetAsset);
+		IFileManager::Get().MakeDirectory(*FPaths::GetPath(Filename), true);
+		FSavePackageArgs SaveArgs;
+		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+		SaveArgs.SaveFlags = SAVE_NoError;
+		SaveArgs.Error = GError;
+		if (!UPackage::SavePackage(Package, Asset, *Filename, SaveArgs))
+		{
+			OutError = FString::Printf(TEXT("Could not save structured fixture: %s"), *Filename);
 			return nullptr;
 		}
 		return Asset;
@@ -560,6 +597,19 @@ int32 UWriteFixturePlanCommandlet::Main(const FString& Params)
 					BasePath + TEXT(".expectedClass"));
 			}
 		}
+		else if (Definition.Kind.Equals(TEXT("structuredAsset"), ESearchCase::CaseSensitive))
+		{
+			if (!Definition.ExpectedClass.Equals(
+					TEXT("/Script/UEAgentKitEditor.UEAgentKitStructuredWriteFixtureAsset"),
+					ESearchCase::CaseSensitive))
+			{
+				AddError(
+					Errors,
+					TEXT("structured-asset-class"),
+					TEXT("structuredAsset fixtures require the UEAgentKit structured fixture class."),
+					BasePath + TEXT(".expectedClass"));
+			}
+		}
 		else if (Definition.Kind.Equals(TEXT("blueprint"), ESearchCase::CaseSensitive))
 		{
 			FString BlueprintTypeText;
@@ -581,7 +631,7 @@ int32 UWriteFixturePlanCommandlet::Main(const FString& Params)
 		}
 		else
 		{
-			AddError(Errors, TEXT("fixture-kind"), TEXT("kind must be duplicateAsset, scalarAsset, referenceAsset, or blueprint."), BasePath + TEXT(".kind"));
+			AddError(Errors, TEXT("fixture-kind"), TEXT("kind must be duplicateAsset, scalarAsset, referenceAsset, structuredAsset, or blueprint."), BasePath + TEXT(".kind"));
 		}
 		Definitions.Add(MoveTemp(Definition));
 	}
@@ -663,6 +713,10 @@ int32 UWriteFixturePlanCommandlet::Main(const FString& Params)
 		else if (Definition.Kind.Equals(TEXT("referenceAsset"), ESearchCase::CaseSensitive))
 		{
 			CreatedAsset = CreateReferenceAssetFixture(Definition, CreateError);
+		}
+		else if (Definition.Kind.Equals(TEXT("structuredAsset"), ESearchCase::CaseSensitive))
+		{
+			CreatedAsset = CreateStructuredAssetFixture(Definition, CreateError);
 		}
 		else
 		{

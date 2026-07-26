@@ -507,6 +507,44 @@ SoftClass
 - Dry Run 修改、精确读回并恢复原值，同时要求 Package Revision 不变；Commit 继续使用唯一 Package 备份、Manifest、独立 UE 重载验证与 Revision-aware rollback。
 - 真实 UE5.6 回归已覆盖 Object、Soft Object、Class、Soft Class 与 `null` 清空共 5 次 Dry Run，随后四类 Commit、独立重载和四层逆序 rollback，最终四个属性为空且 Revision 精确恢复。
 
+### setAssetStructuredProperty
+
+替换 Data Asset 的一个授权顶层 Struct、Array、Set 或 Map 属性。值使用显式类型包络：
+
+```json
+{
+  "operationId": "replace-array",
+  "operation": "setAssetStructuredProperty",
+  "target": { "propertyPath": "ArrayValue" },
+  "value": {
+    "valueType": "Array",
+    "items": [1, 4, 9, 16]
+  }
+}
+```
+
+稳定模型：
+
+```text
+Struct = {valueType:"Struct", fields:{FieldName: Value, ...}}
+Array  = {valueType:"Array", items:[Value, ...]}
+Set    = {valueType:"Set", items:[Value, ...]}
+Map    = {valueType:"Map", entries:[{key:Value, value:Value}, ...]}
+```
+
+限制与语义：
+
+- 目标必须由 Data Asset Reader v2 导出，`propertyPath` 只能是一个顶层属性名。
+- Reader 同时导出 `structuredType`、`structuredSupported`、递归 `structuredSchema` 和稳定 `value`；Plan 与 UE 执行阶段都按该类型重新验证。
+- Struct 值必须包含 Schema 中每个支持字段且不得多出字段；Array 保留索引语义。
+- Set 的元素和 Map 的键必须唯一，并按各自 Canonical JSON 字符串严格升序排列，使不同进程和不同插入顺序得到相同表示。
+- 当前支持 Bool、Int8/UInt8/Int16/UInt16/Int32/UInt32、有限 Float/Double、String、Name 和 Enum 叶子；允许递归 Struct/Array/Set/Map。对象引用、Int64/UInt64、Text、固定数组和 Transient/Deprecated 字段暂不支持。
+- 最大递归深度为 8，单容器最多 4096 项，单报告最多 1024 条结构化 Diff；仍受 `maxValueBytes` 约束。
+- 属性必须精确命中 `allowedAssetProperties`；该 Operation 不使用引用白名单，也不会放宽 `setAssetProperty` 或 `setAssetReferenceProperty`。
+- UE 执行器使用反射级深拷贝保存整个属性值。Dry Run 恢复后重新稳定导出并比较完整值与 Package Revision；Commit 继续使用唯一 Package 备份、Manifest、独立重载和 Revision-aware rollback。
+- Diff 递归区分普通 `replace`、`array-add/remove`、`set-add/remove`、`map-add/remove`，路径从 `$` 开始。Set/Map 增删以稳定值或键识别，不依赖容器内部索引。
+- 真实 UE5.6 回归已覆盖四种 Dry Run、四次 Commit、独立重载、四层逆序 rollback，并精确恢复初始 Revision。
+
 ## Dry Run 报告
 
 报告包含：
@@ -537,6 +575,10 @@ referenceType (Data Asset reference operation)
 referenceConstraintClass (Data Asset reference operation)
 referencePath (Data Asset reference operation)
 resolvedReferenceClass (Data Asset reference operation)
+structuredType (Data Asset structured operation)
+structuredSchema (Data Asset structured operation)
+beforeStructuredValue / afterStructuredValue / restoredStructuredValue
+structuredDiff / structuredDiffCount / structuredDiffTruncated
 ```
 
 Blueprint Dry Run 成功时要求 `compiled=true`。非 Blueprint 不执行 Blueprint 编译，因此 `compiled=false`。所有 Dry Run 都必须满足：

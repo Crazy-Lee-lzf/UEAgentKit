@@ -125,6 +125,7 @@ $Operation = $Validation.assets[0].operations[0].operation
 $AssetOperations = @(
     "setAssetProperty",
     "setAssetReferenceProperty",
+    "setAssetStructuredProperty",
     "setMaterialInstanceScalarParameter",
     "setMaterialInstanceVectorParameter",
     "setMaterialInstanceTextureParameter",

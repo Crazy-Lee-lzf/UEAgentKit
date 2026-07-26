@@ -1,5 +1,6 @@
 #include "AssetReaders/AssetReaderCommon.h"
 #include "AssetReaders/AssetReaderImplementations.h"
+#include "StructuredPropertyJson.h"
 
 namespace AssetReaderRegistryPrivate
 {
@@ -287,7 +288,7 @@ namespace AssetReaderRegistryPrivate
 		}
 
 		OutDetails->SetStringField(TEXT("type"), TEXT("data-asset"));
-		OutDetails->SetNumberField(TEXT("readerVersion"), 1);
+		OutDetails->SetNumberField(TEXT("readerVersion"), 2);
 		OutDetails->SetStringField(TEXT("classPath"), DataAsset->GetClass()->GetPathName());
 		const FPrimaryAssetId PrimaryAssetId = DataAsset->GetPrimaryAssetId();
 		const bool bHasPrimaryAssetId = PrimaryAssetId.IsValid();
@@ -336,20 +337,55 @@ namespace AssetReaderRegistryPrivate
 		for (FProperty* Property : Properties)
 		{
 			const void* Value = Property->ContainerPtrToValuePtr<void>(DataAsset);
-			TSharedPtr<FJsonValue> JsonValue = FJsonObjectConverter::UPropertyToJsonValue(
-				Property,
-				Value,
-				0,
-				static_cast<int64>(SkipFlags),
-				&ExportCallback,
-				nullptr,
-				EJsonObjectConversionFlags::SuppressClassNameForPersistentObject);
+			TSharedPtr<FJsonValue> JsonValue;
+			TSharedPtr<FJsonValue> StructuredSchema;
+			FString StructuredError;
+			const UEAgentKit::StructuredPropertyJson::EKind StructuredKind =
+				UEAgentKit::StructuredPropertyJson::GetKind(Property);
+			const bool bStructuredProperty =
+				StructuredKind != UEAgentKit::StructuredPropertyJson::EKind::Invalid;
+			bool bStructuredSupported = false;
+			if (bStructuredProperty)
+			{
+				bStructuredSupported = UEAgentKit::StructuredPropertyJson::BuildSchema(
+					Property,
+					StructuredSchema,
+					StructuredError)
+					&& UEAgentKit::StructuredPropertyJson::ExportValue(
+						Property,
+						Value,
+						JsonValue,
+						StructuredError);
+			}
+			else
+			{
+				JsonValue = FJsonObjectConverter::UPropertyToJsonValue(
+					Property,
+					Value,
+					0,
+					static_cast<int64>(SkipFlags),
+					&ExportCallback,
+					nullptr,
+					EJsonObjectConversionFlags::SuppressClassNameForPersistentObject);
+			}
 
 			TSharedRef<FJsonObject> PropertyObject = MakeShared<FJsonObject>();
 			PropertyObject->SetStringField(TEXT("name"), Property->GetName());
 			PropertyObject->SetStringField(TEXT("displayName"), Property->GetDisplayNameText().ToString());
 			PropertyObject->SetStringField(TEXT("cppType"), Property->GetCPPType());
 			PropertyObject->SetStringField(TEXT("propertyClass"), Property->GetClass()->GetName());
+			if (bStructuredProperty)
+			{
+				PropertyObject->SetStringField(
+					TEXT("structuredType"),
+					UEAgentKit::StructuredPropertyJson::KindName(StructuredKind));
+				PropertyObject->SetBoolField(TEXT("structuredSupported"), bStructuredSupported);
+				if (StructuredSchema.IsValid())
+				{
+					PropertyObject->SetField(TEXT("structuredSchema"), StructuredSchema);
+				}
+				PropertyObject->SetStringField(TEXT("structuredError"), StructuredError);
+			}
 			FString ReferenceType;
 			FString ReferenceClassPath;
 			if (const FSoftClassProperty* SoftClassProperty = CastField<FSoftClassProperty>(Property))

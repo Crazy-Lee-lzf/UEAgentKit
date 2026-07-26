@@ -13,6 +13,7 @@
 #include "MaterialEditingLibrary.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "StaticParameterSet.h"
+#include "StructuredPropertyJson.h"
 #include "Misc/App.h"
 #include "Misc/DateTime.h"
 #include "Misc/FileHelper.h"
@@ -177,7 +178,8 @@ namespace AssetPatchCommandletPrivate
 		}
 		const bool bUsesAssetPropertyOperations =
 			ContainsExact(OutPolicy.AllowedOperations, TEXT("setAssetProperty"))
-			|| ContainsExact(OutPolicy.AllowedOperations, TEXT("setAssetReferenceProperty"));
+			|| ContainsExact(OutPolicy.AllowedOperations, TEXT("setAssetReferenceProperty"))
+			|| ContainsExact(OutPolicy.AllowedOperations, TEXT("setAssetStructuredProperty"));
 		if (bUsesAssetPropertyOperations && OutPolicy.AllowedAssetProperties.IsEmpty())
 		{
 			OutError = TEXT("Asset property operations require allowedAssetProperties authorization.");
@@ -332,6 +334,49 @@ namespace AssetPatchCommandletPrivate
 		}
 		return false;
 	}
+
+	class FScopedPropertyValueBackup
+	{
+	public:
+		FScopedPropertyValueBackup(const FProperty* InProperty, const void* Source)
+			: Property(InProperty)
+		{
+			if (!Property || !Source)
+			{
+				return;
+			}
+			Storage = FMemory::Malloc(Property->GetSize(), Property->GetMinAlignment());
+			Property->InitializeValue(Storage);
+			Property->CopyCompleteValue(Storage, Source);
+		}
+
+		~FScopedPropertyValueBackup()
+		{
+			if (Property && Storage)
+			{
+				Property->DestroyValue(Storage);
+				FMemory::Free(Storage);
+			}
+		}
+
+		FScopedPropertyValueBackup(const FScopedPropertyValueBackup&) = delete;
+		FScopedPropertyValueBackup& operator=(const FScopedPropertyValueBackup&) = delete;
+
+		bool IsValid() const
+		{
+			return Property != nullptr && Storage != nullptr;
+		}
+
+		void Restore(void* Destination) const
+		{
+			check(IsValid());
+			Property->CopyCompleteValue(Destination, Storage);
+		}
+
+	private:
+		const FProperty* Property = nullptr;
+		void* Storage = nullptr;
+	};
 
 	bool SetAssetReferenceFromJson(
 		FProperty* Property,
@@ -1261,6 +1306,8 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		Operation.Equals(TEXT("setAssetProperty"), ESearchCase::CaseSensitive);
 	const bool bAssetReferencePropertyOperation =
 		Operation.Equals(TEXT("setAssetReferenceProperty"), ESearchCase::CaseSensitive);
+	const bool bAssetStructuredPropertyOperation =
+		Operation.Equals(TEXT("setAssetStructuredProperty"), ESearchCase::CaseSensitive);
 	const bool bMaterialScalarOperation =
 		Operation.Equals(TEXT("setMaterialInstanceScalarParameter"), ESearchCase::CaseSensitive);
 	const bool bMaterialVectorOperation =
@@ -1281,6 +1328,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		Operation.Equals(TEXT("renameDataTableRow"), ESearchCase::CaseSensitive);
 	if ((!bAssetPropertyOperation
 			&& !bAssetReferencePropertyOperation
+			&& !bAssetStructuredPropertyOperation
 			&& !bMaterialScalarOperation
 			&& !bMaterialVectorOperation
 			&& !bMaterialTextureOperation
@@ -2768,6 +2816,213 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			*AssetPath,
 			*RowNameText,
 			Fields.Num());
+		return 0;
+	}
+
+
+
+	if (bAssetStructuredPropertyOperation)
+	{
+		if (Cast<UDataAsset>(Asset) == nullptr)
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("setAssetStructuredProperty requires a Data Asset."));
+			return 17;
+		}
+		FString PropertyPath;
+		TargetObject->TryGetStringField(TEXT("propertyPath"), PropertyPath);
+		if (PropertyPath.IsEmpty() || PropertyPath.Contains(TEXT(".")))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Asset structured propertyPath must be one top-level property name."));
+			return 17;
+		}
+		const FString PropertyAuthorization = ActualAssetClass + TEXT("#") + PropertyPath;
+		if (!ContainsExact(Policy.AllowedAssetProperties, PropertyAuthorization))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Asset structured property is not authorized by policy: %s"), *PropertyAuthorization);
+			return 17;
+		}
+
+		FProperty* Property = nullptr;
+		void* ValueAddress = nullptr;
+		if (!ResolvePropertyPath(Asset, PropertyPath, Property, ValueAddress, Error))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("%s"), *Error);
+			return 17;
+		}
+		const EPropertyFlags DisallowedFlags =
+			CPF_Transient | CPF_DuplicateTransient | CPF_NonPIEDuplicateTransient;
+		if (!Property->HasAnyPropertyFlags(CPF_Edit)
+			|| Property->HasAnyPropertyFlags(DisallowedFlags)
+			|| Property->ArrayDim != 1)
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Asset structured property must be editable, non-transient, and non-fixed-array: %s"), *PropertyPath);
+			return 17;
+		}
+		const UEAgentKit::StructuredPropertyJson::EKind StructuredKind =
+			UEAgentKit::StructuredPropertyJson::GetKind(Property);
+		if (StructuredKind == UEAgentKit::StructuredPropertyJson::EKind::Invalid)
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Property is not Struct, Array, Set, or Map: %s"), *PropertyPath);
+			return 17;
+		}
+		TSharedPtr<FJsonValue> StructuredSchema;
+		if (!UEAgentKit::StructuredPropertyJson::BuildSchema(Property, StructuredSchema, Error))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Structured property is unsupported: %s"), *Error);
+			return 17;
+		}
+
+		const TSharedPtr<FJsonValue> NewValue = OperationObject->TryGetField(TEXT("value"));
+		if (!NewValue.IsValid())
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Operation value is missing."));
+			return 18;
+		}
+		TSharedPtr<FJsonValue> BeforeValue;
+		if (!UEAgentKit::StructuredPropertyJson::ExportValue(Property, ValueAddress, BeforeValue, Error))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Could not export structured property before modification: %s"), *Error);
+			return 18;
+		}
+		FScopedPropertyValueBackup ValueBackup(Property, ValueAddress);
+		if (!ValueBackup.IsValid())
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Could not allocate structured property backup."));
+			return 18;
+		}
+
+		FString BackupFilename;
+		if (bCommit)
+		{
+			IFileManager::Get().MakeDirectory(*BackupDirectory, true);
+			BackupFilename = CreateBackupFilename(BackupDirectory, PatchId, PackageFilename);
+			if (IFileManager::Get().Copy(*BackupFilename, *PackageFilename, true, true) != COPY_OK)
+			{
+				UE_LOG(LogAssetPatch, Error, TEXT("Could not create package backup: %s"), *BackupFilename);
+				return 19;
+			}
+		}
+
+		Asset->Modify();
+		if (!UEAgentKit::StructuredPropertyJson::ImportValue(Property, ValueAddress, NewValue, Error))
+		{
+			ValueBackup.Restore(ValueAddress);
+			Asset->PostEditChange();
+			Package->SetDirtyFlag(bOriginalDirty);
+			UE_LOG(LogAssetPatch, Error, TEXT("Could not import structured property: %s"), *Error);
+			return 20;
+		}
+		Asset->PostEditChange();
+		Package->MarkPackageDirty();
+
+		TSharedPtr<FJsonValue> AfterValue;
+		if (!UEAgentKit::StructuredPropertyJson::ExportValue(Property, ValueAddress, AfterValue, Error)
+			|| !UEAgentKit::StructuredPropertyJson::JsonEqual(AfterValue, NewValue))
+		{
+			ValueBackup.Restore(ValueAddress);
+			Asset->PostEditChange();
+			Package->SetDirtyFlag(bOriginalDirty);
+			UE_LOG(LogAssetPatch, Error, TEXT("Asset structured property read-back verification failed: %s"), *Error);
+			return 20;
+		}
+
+		TArray<TSharedPtr<FJsonValue>> StructuredDiff;
+		bool bStructuredDiffTruncated = false;
+		UEAgentKit::StructuredPropertyJson::BuildDiff(
+			BeforeValue,
+			AfterValue,
+			StructuredDiff,
+			bStructuredDiffTruncated);
+
+		bool bSaved = false;
+		bool bRolledBack = false;
+		TSharedPtr<FJsonValue> RestoredValue;
+		if (bCommit)
+		{
+			if (!SaveAssetPackage(Asset, PackageFilename, Error))
+			{
+				IFileManager::Get().Copy(*PackageFilename, *BackupFilename, true, true);
+				UE_LOG(LogAssetPatch, Error, TEXT("%s Backup restored."), *Error);
+				return 21;
+			}
+			bSaved = true;
+		}
+		else
+		{
+			ValueBackup.Restore(ValueAddress);
+			Asset->PostEditChange();
+			Package->SetDirtyFlag(bOriginalDirty);
+			if (!UEAgentKit::StructuredPropertyJson::ExportValue(Property, ValueAddress, RestoredValue, Error))
+			{
+				UE_LOG(LogAssetPatch, Error, TEXT("Could not export restored structured property: %s"), *Error);
+				return 22;
+			}
+			bRolledBack = true;
+		}
+
+		const FString AfterRevision = HashPackageFile(Package);
+		const bool bRollbackValueMatch = !bRolledBack
+			|| UEAgentKit::StructuredPropertyJson::JsonEqual(RestoredValue, BeforeValue);
+		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
+		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.5.1"));
+		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
+		Report->SetStringField(TEXT("patchId"), PatchId);
+		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
+		Report->SetStringField(TEXT("assetPath"), AssetPath);
+		Report->SetStringField(TEXT("assetClass"), ActualAssetClass);
+		Report->SetStringField(TEXT("operation"), Operation);
+		Report->SetObjectField(TEXT("target"), TargetObject);
+		Report->SetStringField(TEXT("targetDescription"), TEXT("asset-structured-property:") + PropertyPath);
+		Report->SetStringField(TEXT("targetType"), Property->GetClass()->GetName());
+		Report->SetStringField(
+			TEXT("structuredType"),
+			UEAgentKit::StructuredPropertyJson::KindName(StructuredKind));
+		Report->SetField(TEXT("structuredSchema"), StructuredSchema);
+		Report->SetField(TEXT("beforeStructuredValue"), BeforeValue);
+		Report->SetField(TEXT("afterStructuredValue"), AfterValue);
+		Report->SetField(TEXT("restoredStructuredValue"), bRolledBack ? RestoredValue : BeforeValue);
+		Report->SetArrayField(TEXT("structuredDiff"), StructuredDiff);
+		Report->SetNumberField(TEXT("structuredDiffCount"), StructuredDiff.Num());
+		Report->SetBoolField(TEXT("structuredDiffTruncated"), bStructuredDiffTruncated);
+		Report->SetStringField(TEXT("beforeValue"), UEAgentKit::StructuredPropertyJson::CanonicalJson(BeforeValue));
+		Report->SetStringField(TEXT("afterValue"), UEAgentKit::StructuredPropertyJson::CanonicalJson(AfterValue));
+		Report->SetStringField(
+			TEXT("restoredValue"),
+			UEAgentKit::StructuredPropertyJson::CanonicalJson(bRolledBack ? RestoredValue : BeforeValue));
+		Report->SetStringField(TEXT("beforeRevision"), BeforeRevision);
+		Report->SetStringField(TEXT("afterRevision"), AfterRevision);
+		Report->SetBoolField(TEXT("compiled"), false);
+		Report->SetBoolField(TEXT("saved"), bSaved);
+		Report->SetBoolField(TEXT("rolledBack"), bRolledBack);
+		Report->SetBoolField(TEXT("appliedValueMatch"), true);
+		Report->SetBoolField(TEXT("rollbackValueMatch"), bRollbackValueMatch);
+		Report->SetBoolField(TEXT("diskUnchanged"), BeforeRevision.Equals(AfterRevision, ESearchCase::IgnoreCase));
+		Report->SetStringField(TEXT("backupPath"), BackupFilename);
+		if (!SaveReport(ReportFilename, Report, Error))
+		{
+			if (bCommit && !BackupFilename.IsEmpty())
+			{
+				IFileManager::Get().Copy(*PackageFilename, *BackupFilename, true, true);
+			}
+			UE_LOG(LogAssetPatch, Error, TEXT("%s Disk backup restored."), *Error);
+			return 23;
+		}
+		if (bRolledBack
+			&& (!bRollbackValueMatch || !BeforeRevision.Equals(AfterRevision, ESearchCase::IgnoreCase)))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Asset structured Dry Run rollback verification failed."));
+			return 22;
+		}
+		UE_LOG(
+			LogAssetPatch,
+			Display,
+			TEXT("Asset structured patch succeeded. Mode=%s Asset=%s Property=%s Type=%s Diff=%d"),
+			bCommit ? TEXT("Commit") : TEXT("DryRun"),
+			*AssetPath,
+			*PropertyPath,
+			*UEAgentKit::StructuredPropertyJson::KindName(StructuredKind),
+			StructuredDiff.Num());
 		return 0;
 	}
 

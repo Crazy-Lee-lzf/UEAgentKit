@@ -63,6 +63,7 @@ ue_set_component_property
 ue_set_pin_default
 ue_set_asset_property
 ue_set_asset_reference_property
+ue_set_asset_structured_property
 ue_set_material_parameter
 ue_set_datatable_cell
 ue_set_datatable_row_fields
@@ -201,6 +202,7 @@ ue_set_component_property   component_name + property_path + value
 ue_set_pin_default           graph_guid + node_guid + pin_name + value
 ue_set_asset_property        property_path + value
 ue_set_asset_reference_property  property_path + reference object or null
+ue_set_asset_structured_property   property_path + stable structured value
 ue_set_material_parameter    parameter_name + parameter_type + value
 ue_set_datatable_cell        row_name + field_name + value
 ue_set_datatable_row_fields   row_name + values
@@ -211,6 +213,8 @@ ue_rename_datatable_row       row_name + new_row_name
 
 
 `ue_set_asset_reference_property` maps to `setAssetReferenceProperty` and accepts `null` or an exact `{referenceType, path}` object. It only targets Data Asset top-level Object/Class/Soft Object/Soft Class properties and does not broaden the scalar `ue_set_asset_property` contract.
+
+`ue_set_asset_structured_property` maps to `setAssetStructuredProperty`. It replaces one Data Asset top-level Struct/Array/Set/Map with the Reader-exported stable schema; Struct fields must be complete and Set/Map entries must be uniquely sorted by Canonical JSON. Commit remains a separate `ue_apply_patch` step.
 
 `ue_add_datatable_row` accepts an optional 0–32-field scalar object. `ue_remove_datatable_row` and `ue_rename_datatable_row` generate low-level Operations with the required explicit `value=true` acknowledgement. All three still follow Plan → Dry Run → one-time receipt → explicit Commit and the existing backup/verification/rollback gates.
 
@@ -433,3 +437,18 @@ scripts\TestDataAssetReferenceProperties.cmd ^
 - 四种引用与 `null` 清空共 5 次 Dry Run 均恢复内存值且磁盘 Revision 不变。
 - 四种引用 Commit 后可由独立 UE 进程重新读取。
 - 四层逆序 rollback 后全部引用为空，最终 Revision 与初始值完全一致。
+
+Data Asset Struct/容器属性真实回归：
+
+```bat
+scripts\TestDataAssetStructuredProperties.cmd ^
+  -EngineRoot "E:\Path\To\UE_5.6" ^
+  -ProjectPath "E:\Path\To\Project.uproject"
+```
+
+该回归要求：
+
+- Reader v2 为 Struct、Array、Set、Map 导出递归 Schema 和稳定值。
+- Struct 字段、Array 索引、Set 增删和 Map 键增删/嵌套值修改生成结构化 Diff。
+- 四种 Dry Run 均完成深恢复且磁盘 Revision 不变。
+- 四次 Commit 可独立重载，四层逆序 rollback 后最终 Revision 与初始值完全一致。

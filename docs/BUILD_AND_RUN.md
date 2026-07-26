@@ -245,7 +245,7 @@ scripts\RunPatch.cmd ^
 
 - 每次一个资产、一个 Operation。
 - Blueprint 支持 `setVariableDefault`、`setComponentProperty`、`setPinDefault`、`setBlueprintDescription`。
-- 非 Blueprint 标量属性使用 `setAssetProperty`；Data Asset Object/Class 与 Soft Object/Class 引用使用 `setAssetReferenceProperty`。两者都必须用 `AssetClass#Property.Path` 精确授权。
+- 非 Blueprint 标量属性使用 `setAssetProperty`；Data Asset Object/Class 与 Soft Object/Class 引用使用 `setAssetReferenceProperty`；顶层 Struct、Array、Set、Map 使用 `setAssetStructuredProperty`。三者都必须用 `AssetClass#Property.Path` 精确授权。
 - Material Instance 支持 `setMaterialInstanceScalarParameter`、`setMaterialInstanceVectorParameter`、`setMaterialInstanceTextureParameter` 和 `setMaterialInstanceStaticSwitchParameter`；Policy 使用 `AssetClass#Type#ParameterName` 精确授权。
 - DataTable 支持 `setDataTableCell`；Policy 使用 `AssetClass#RowStructPath#FieldName` 精确授权，首版仅修改现有 Row 的一个顶层标量字段。
 - 变量和组件属性支持 Bool、整数、浮点、String、Name、Text。
@@ -256,6 +256,8 @@ scripts\RunPatch.cmd ^
 - 已验证 DataTable `GameplayTagTableRow.DevComment` 的整 Row Dry Run 回滚、Commit、唯一备份、独立重载和过期 Revision 拒绝。
 - 通用 `setAssetProperty` 仅允许可编辑、非 Transient 的 Bool、数值、String、Name、Text 或 Enum；不支持数组、Set、Map、对象引用和 Blueprint 结构性增删。
 - Data Asset 对象/类引用必须使用专用 `setAssetReferenceProperty`：仅顶层 Object、Class、Soft Object、Soft Class，值为 `null` 或精确 `{referenceType, path}`，并受 `allowedAssetProperties`、`allowedReferenceRoots`、`allowedReferenceClasses` 三层授权。
+- Data Asset Struct/容器必须使用 `setAssetStructuredProperty`：仅顶层 Struct、Array、Set、Map；Reader 导出递归 Schema，Struct 要求完整字段，Set/Map 按 Canonical JSON 唯一排序。当前支持 Bool、32 位以内整数、Float/Double、String、Name 和 Enum 叶子，不允许对象引用叶子。
+- 已通过真实 UE5.6 Struct/Array/Set/Map Dry Run、Commit、独立重载、结构化 Diff 和四层逆序 rollback。
 - 当前仅接受没有 `.uexp/.ubulk/.uptnl/.m.ubulk/.upayload` 等独立侧文件的单文件 Package。
 
 ## 10. Backup Manifest 与 Rollback

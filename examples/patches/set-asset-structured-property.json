@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "1.0",
+  "patchId": "set-asset-structured-property-example",
+  "projectName": "我的项目",
+  "description": "Replace one explicitly authorized Data Asset Array using the stable structured value model.",
+  "assets": [
+    {
+      "assetPath": "/Game/UEAgentKitWriteTests/DA_StructuredPatchTarget.DA_StructuredPatchTarget",
+      "expectedRevision": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "expectedAssetClass": "/Script/UEAgentKitEditor.UEAgentKitStructuredWriteFixtureAsset",
+      "operations": [
+        {
+          "operationId": "replace-array-value",
+          "operation": "setAssetStructuredProperty",
+          "target": {
+            "propertyPath": "ArrayValue"
+          },
+          "value": {
+            "valueType": "Array",
+            "items": [
+              1,
+              4,
+              9,
+              16
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

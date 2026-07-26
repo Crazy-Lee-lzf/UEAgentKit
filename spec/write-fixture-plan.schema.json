@@ -33,6 +33,9 @@
             "$ref": "#/$defs/referenceAsset"
           },
           {
+            "$ref": "#/$defs/structuredAsset"
+          },
+          {
             "$ref": "#/$defs/blueprint"
           }
         ]
@@ -167,6 +170,30 @@
         },
         "expectedClass": {
           "const": "/Script/UEAgentKitEditor.UEAgentKitReferenceWriteFixtureAsset"
+        }
+      }
+    },
+    "structuredAsset": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "targetAsset",
+        "expectedClass"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "const": "structuredAsset"
+        },
+        "targetAsset": {
+          "$ref": "#/$defs/packagePath"
+        },
+        "expectedClass": {
+          "const": "/Script/UEAgentKitEditor.UEAgentKitStructuredWriteFixtureAsset"
         }
       }
     }

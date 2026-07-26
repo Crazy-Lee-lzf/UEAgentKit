@@ -15,6 +15,7 @@
     "setBlueprintDescription",
     "setAssetProperty",
     "setAssetReferenceProperty",
+    "setAssetStructuredProperty",
     "setMaterialInstanceScalarParameter",
     "setMaterialInstanceVectorParameter",
     "setMaterialInstanceTextureParameter",
@@ -33,6 +34,7 @@
     "/Script/Engine.PrimaryAssetLabel",
     "/Script/Engine.Texture2D",
     "/Script/Engine.StaticMesh",
+    "/Script/UEAgentKitEditor.UEAgentKitStructuredWriteFixtureAsset",
     "/Script/Engine.MaterialInstanceConstant",
     "/Script/Engine.DataTable",
     "/Script/UEAgentKitEditor.UEAgentKitReferenceWriteFixtureAsset"
@@ -49,7 +51,11 @@
     "/Script/UEAgentKitEditor.UEAgentKitReferenceWriteFixtureAsset#ObjectValue",
     "/Script/UEAgentKitEditor.UEAgentKitReferenceWriteFixtureAsset#ClassValue",
     "/Script/UEAgentKitEditor.UEAgentKitReferenceWriteFixtureAsset#SoftObjectValue",
-    "/Script/UEAgentKitEditor.UEAgentKitReferenceWriteFixtureAsset#SoftClassValue"
+    "/Script/UEAgentKitEditor.UEAgentKitReferenceWriteFixtureAsset#SoftClassValue",
+    "/Script/UEAgentKitEditor.UEAgentKitStructuredWriteFixtureAsset#StructValue",
+    "/Script/UEAgentKitEditor.UEAgentKitStructuredWriteFixtureAsset#ArrayValue",
+    "/Script/UEAgentKitEditor.UEAgentKitStructuredWriteFixtureAsset#SetValue",
+    "/Script/UEAgentKitEditor.UEAgentKitStructuredWriteFixtureAsset#MapValue"
   ],
   "allowedMaterialParameters": [
     "/Script/Engine.MaterialInstanceConstant#Scalar#Roughness",
