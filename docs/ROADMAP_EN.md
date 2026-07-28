@@ -2,7 +2,7 @@
 
 Updated: 2026-07-28
 
-The latest published release is **0.5.1** for Unreal Engine 5.6. The `main` branch already contains unreleased 0.5.2–0.5.4 development work and is now in the 0.5.x consolidation stage.
+The latest published release is **0.5.5** for Unreal Engine 5.6. The 0.5.x daily-development scope is complete and in stable maintenance.
 
 ## Direction
 
@@ -29,13 +29,9 @@ Combined  43 tools
 - Unified native-JSON state/diff reports, Override/Expression GUID metadata, and real four-type regressions for Material Instance Scalar, Vector, Texture, and Static Switch parameters.
 - Project/session/time-bound Data Validation and Automation evidence with stable Asset Revision Sets and explicit `not-applicable` Automation coverage.
 
-## 0.5.x: daily-development consolidation
+## 0.5.x: complete
 
-Remaining order:
-
-1. **Completed: atomic multi-operation transactions for one asset** with one Plan, Dry Run, backup, Commit, independent verification, and whole-transaction rollback.
-2. **Next: close an official 0.5.x release** with consistent versions, changelog, release notes, artifacts, and Git tag.
-3. Add specialized Input Mapping Context writes only when real project demand justifies them.
+Version 0.5.5 closes the Live Editor, daily actions, controlled-write extensions, validation evidence, single-asset multi-operation transactions, CI, and release-engineering scope. Specialized Input Mapping Context writes remain demand-driven.
 
 Complete Blueprint Graph, Material Graph, Anim State Machine, Control Rig, Sequencer, Niagara writes, and arbitrary script execution remain out of scope for 0.5.x.
 

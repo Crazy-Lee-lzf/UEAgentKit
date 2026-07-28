@@ -190,6 +190,97 @@ class BackupRollbackTests(unittest.TestCase):
             "/Script/Engine.DataTable#/Script/Test.Row#Value",
         )
 
+    def test_manifest_derives_all_data_table_row_field_authorizations(self) -> None:
+        fields = {"Tag": "UEAgentKit.Atomic.Row", "DevComment": "Atomic"}
+        self.patch["assets"][0]["operations"][0] = {
+            "operationId": "set-row-fields",
+            "operation": "setDataTableRowFields",
+            "target": {"rowName": "Row"},
+            "value": fields,
+        }
+        self.policy["allowedOperations"] = ["setDataTableRowFields"]
+        self.policy["allowedDataTableFields"] = [
+            "/Script/Engine.DataTable#/Script/Test.Row#Tag",
+            "/Script/Engine.DataTable#/Script/Test.Row#DevComment",
+        ]
+        self.report.update(
+            {
+                "operation": "setDataTableRowFields",
+                "target": {"rowName": "Row"},
+                "rowStructPath": "/Script/Test.Row",
+                "beforeValues": {"Tag": "Before", "DevComment": "Before"},
+                "afterValues": fields,
+            }
+        )
+        write_json(self.patch_path, self.patch)
+        write_json(self.policy_path, self.policy)
+        write_json(self.report_path, self.report)
+
+        manifest = json.loads(self.create_manifest().read_text(encoding="utf-8"))
+        self.assertEqual(
+            manifest["operations"][0]["authorizationKeys"],
+            [
+                "/Script/Engine.DataTable#/Script/Test.Row#DevComment",
+                "/Script/Engine.DataTable#/Script/Test.Row#Tag",
+            ],
+        )
+
+    def test_manifest_derives_all_added_data_table_row_authorizations(self) -> None:
+        fields = {"Tag": "UEAgentKit.Row", "DevComment": "Added"}
+        self.patch["assets"][0]["operations"][0] = {
+            "operationId": "add-row",
+            "operation": "addDataTableRow",
+            "target": {"rowName": "AddedRow"},
+            "value": fields,
+        }
+        self.policy["allowedOperations"] = ["addDataTableRow"]
+        self.policy["allowedDataTableFields"] = [
+            "/Script/Engine.DataTable#/Script/Test.Row#Tag",
+            "/Script/Engine.DataTable#/Script/Test.Row#DevComment",
+        ]
+        self.report.update(
+            {
+                "operation": "addDataTableRow",
+                "target": {"rowName": "AddedRow"},
+                "rowStructPath": "/Script/Test.Row",
+                "appliedValues": fields,
+            }
+        )
+        write_json(self.patch_path, self.patch)
+        write_json(self.policy_path, self.policy)
+        write_json(self.report_path, self.report)
+
+        manifest = json.loads(self.create_manifest().read_text(encoding="utf-8"))
+        self.assertEqual(
+            manifest["operations"][0]["authorizationKeys"],
+            [
+                "/Script/Engine.DataTable#/Script/Test.Row#DevComment",
+                "/Script/Engine.DataTable#/Script/Test.Row#Tag",
+            ],
+        )
+
+    def test_manifest_allows_data_table_row_remove_without_field_authorizations(self) -> None:
+        self.patch["assets"][0]["operations"][0] = {
+            "operationId": "remove-row",
+            "operation": "removeDataTableRow",
+            "target": {"rowName": "RemovedRow"},
+        }
+        self.policy["allowedOperations"] = ["removeDataTableRow"]
+        self.policy["allowedDataTableFields"] = []
+        self.report.update(
+            {
+                "operation": "removeDataTableRow",
+                "target": {"rowName": "RemovedRow"},
+                "rowStructPath": "/Script/Test.Row",
+            }
+        )
+        write_json(self.patch_path, self.patch)
+        write_json(self.policy_path, self.policy)
+        write_json(self.report_path, self.report)
+
+        manifest = json.loads(self.create_manifest().read_text(encoding="utf-8"))
+        self.assertEqual(manifest["operations"][0]["authorizationKeys"], [])
+
     def test_backup_manifest_schema_declares_security_fields(self) -> None:
         schema_path = Path(__file__).resolve().parents[2] / "spec" / "backup-manifest.schema.json"
         schema = json.loads(schema_path.read_text(encoding="utf-8"))

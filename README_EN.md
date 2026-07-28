@@ -6,9 +6,9 @@
 
 UE Agent Kit is an open-source Unreal Engine asset analysis, indexing, and policy-gated patch toolkit. Its Editor plugin exports asset catalogs, Asset Registry metadata, dependencies, and Blueprint semantics; a Python CLI and SQLite provide a project-wide index, while Policy, Revision checks, dry runs, and backups protect explicit writes.
 
-The latest published release is **0.5.1** and targets **Unreal Engine 5.6**. Building on the fixed-project MCP workflow in 0.5.0, version 0.5.1 adds capability and project status, stable continuation and Token Budget contracts, three-source Revision freshness, six high-level safe-change tools, detailed diagnostics, and a multi-client MCP protocol compatibility matrix.
+The latest published release is **0.5.5** and targets **Unreal Engine 5.6**. This release closes the 0.5.x daily-development scope with the restricted Live Editor, daily actions, four-source asset state, authorized saves and index refresh, DataTable/Data Asset/Material write extensions, validation evidence, single-asset multi-operation transactions, and repeatable release validation and CI.
 
-> **Development branch status**: `main` already contains unreleased 0.5.2–0.5.4 capabilities, including Live Editor, daily actions, authorized saves, DataTable row operations, and Data Asset reference/Struct/container writes. Current modes are Offline 5, Live 23, Workflow 25, and Combined 43 tools.
+> **Release status**: 0.5.x is complete. Current modes are Offline 5, Live 23, Workflow 25, and Combined 43 tools. The next stage is 0.6.0 Revision-aware Project Memory.
 
 > **AI Generated**: Most code and documentation in this project are AI-generated and reviewed through human inspection, UE 5.6 compilation, automated tests, and real-project regression validation.
 
@@ -234,7 +234,7 @@ The regression applies two operations to a Data Asset and a Blueprint. Dry Run u
 
 The executor supports four Blueprint operations, scalar `setAssetProperty`, Data Asset-specific `setAssetReferenceProperty` and `setAssetStructuredProperty`, four Material Instance parameter operations, and DataTable field/row operations. One execution remains limited to one asset but may contain 1–32 compatible operations in one atomic transaction. Multi-operation execution pre-validates every target, creates one backup, compiles/saves once, and records all operations in one manifest. Exact Policy authorization remains per target. `setAssetStructuredProperty` replaces one top-level Struct, Array, Set, or Map through an explicit `valueType` envelope. Struct values must contain every field, while Set and Map values must be uniquely ordered by Canonical JSON; reports include a recursive structured diff. Only single-file packages without external package sidecars are accepted.
 
-### 6. Run the MCP server (0.5.1)
+### 6. Run the MCP server (0.5.5)
 
 Install the optional MCP dependency and validate the SQLite index:
 
@@ -245,7 +245,7 @@ scripts\TestMcpStdio.cmd
 scripts\TestMcpClients.cmd
 ```
 
-The 0.5.2 development branch can additionally test a fixed-project Live Editor Bridge:
+Version 0.5.5 can connect to a restricted fixed-project Live Editor Bridge:
 
 ```bat
 scripts\TestMcpLiveEditor.cmd ^
@@ -257,7 +257,7 @@ scripts\TestMcpSnapshotRefresh.cmd ^
   -ProjectPath "<TEST_PROJECT>.uproject"
 ```
 
-The MCP Client still uses local `stdio` only. Default mode exposes 5 offline read-only tools; `-EnableLiveEditor -ProjectPath <fixed project>` adds 10 live read tools plus 8 bounded Daily Actions for a total of 23; the fixed-project workflow exposes 23; combining both exposes 41. Live reads include bounded Output Log queries, compile diagnostics, non-loading live asset inspection, and focused Graph/Node selection for ordinary Blueprint Editors. Daily Actions open or focus assets, sync the Content Browser, focus an ActorGuid, compile a Blueprint in memory, and run official Data Validation without saving packages. Workflow mode adds four-source asset state and safe single-asset index refresh:
+The MCP Client still uses local `stdio` only. Default mode exposes 5 offline read-only tools; `-EnableLiveEditor -ProjectPath <fixed project>` adds 10 live read tools plus 8 bounded Daily Actions for a total of 23; the fixed-project workflow exposes 25; combining both exposes 43. Live reads include bounded Output Log queries, compile diagnostics, non-loading live asset inspection, and focused Graph/Node selection for ordinary Blueprint Editors. Daily Actions open or focus assets, sync the Content Browser, focus an ActorGuid, compile a Blueprint in memory, and run official Data Validation without saving packages. Workflow mode adds four-source asset state and safe single-asset index refresh:
 
 ```bat
 claude mcp add --transport stdio --scope project ue-agent-kit -- ^
@@ -271,7 +271,7 @@ Use `claude mcp list` or `/mcp` inside Claude Code to inspect the connection. Li
 ### 7. Validate the asset catalog
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.5.1
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.5.5
 ```
 
 See [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md) for installation and full command details.
@@ -303,6 +303,7 @@ Output\Blueprints\
 
 - [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md): build, install, export, and query instructions.
 - [`docs/AI_USAGE.md`](docs/AI_USAGE.md): using the asset index and Blueprint semantics with AI tools.
+- [`docs/RELEASE_0.5.5_EN.md`](docs/RELEASE_0.5.5_EN.md): 0.5.x daily-development capabilities, atomic transactions, validation evidence, and release closeout.
 - [`docs/RELEASE_0.5.1_EN.md`](docs/RELEASE_0.5.1_EN.md): 0.5.1 query contract, high-level safe changes, diagnostics, and client compatibility.
 - [`docs/RELEASE_0.5.0_EN.md`](docs/RELEASE_0.5.0_EN.md): 0.5.0 fixed-project MCP workflow release notes.
 - [`docs/RELEASE_0.4.4_EN.md`](docs/RELEASE_0.4.4_EN.md): 0.4.4 release scope, verification, and upgrade notes.

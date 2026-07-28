@@ -12,7 +12,7 @@ from typing import Any
 
 BACKUP_MANIFEST_SCHEMA_VERSION = "1.0"
 ROLLBACK_REPORT_SCHEMA_VERSION = "1.0"
-TOOL_VERSION = "0.5.1"
+TOOL_VERSION = "0.5.5"
 
 _REVISION_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SAFE_ID_RE = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -180,32 +180,40 @@ def _asset_under_allowed_root(asset_path: str, root: Any) -> bool:
     return asset_path == normalized or asset_path.startswith(f"{normalized}/")
 
 
-def _authorization_key(report: dict[str, Any]) -> str:
+def _authorization_keys(report: dict[str, Any]) -> list[str]:
     operation = report.get("operation")
     asset_class = report.get("assetClass")
     target = report.get("target")
     if not isinstance(operation, str) or not isinstance(asset_class, str) or not isinstance(target, dict):
-        return ""
+        return []
     if operation in {"setAssetProperty", "setAssetReferenceProperty", "setAssetStructuredProperty"}:
         property_path = target.get("propertyPath")
-        return f"{asset_class}#{property_path}" if isinstance(property_path, str) else ""
+        return [f"{asset_class}#{property_path}"] if isinstance(property_path, str) else []
     material_type = _MATERIAL_OPERATION_TYPES.get(operation)
     if material_type is not None:
         parameter_name = target.get("parameterName")
-        return (
-            f"{asset_class}#{material_type}#{parameter_name}"
-            if isinstance(parameter_name, str)
-            else ""
-        )
+        return [f"{asset_class}#{material_type}#{parameter_name}"] if isinstance(parameter_name, str) else []
+
+    row_struct_path = report.get("rowStructPath")
+    if not isinstance(row_struct_path, str):
+        return []
     if operation == "setDataTableCell":
-        row_struct_path = report.get("rowStructPath")
         field_name = target.get("fieldName")
-        return (
-            f"{asset_class}#{row_struct_path}#{field_name}"
-            if isinstance(row_struct_path, str) and isinstance(field_name, str)
-            else ""
-        )
-    return ""
+        return [f"{asset_class}#{row_struct_path}#{field_name}"] if isinstance(field_name, str) else []
+    if operation == "setDataTableRowFields":
+        field_values = report.get("afterValues")
+    elif operation == "addDataTableRow":
+        field_values = report.get("appliedValues")
+    else:
+        return []
+    if not isinstance(field_values, dict) or any(not isinstance(name, str) or not name for name in field_values):
+        return []
+    return [f"{asset_class}#{row_struct_path}#{name}" for name in sorted(field_values)]
+
+
+def _authorization_key(report: dict[str, Any]) -> str:
+    keys = _authorization_keys(report)
+    return keys[0] if len(keys) == 1 else ""
 
 
 def _policy_authorizes_operation(
@@ -333,7 +341,7 @@ def create_backup_manifest(
                 "operationId": patch_operations[0].get("operationId"),
                 "operation": report.get("operation"),
                 "target": report.get("target"),
-                "authorizationKeys": [key] if (key := _authorization_key(report)) else [],
+                "authorizationKeys": _authorization_keys(report),
                 "beforeValue": report.get("beforeValue"),
                 "afterValue": report.get("afterValue"),
             }

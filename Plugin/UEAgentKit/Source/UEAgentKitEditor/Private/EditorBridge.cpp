@@ -37,7 +37,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogUEAgentKitEditorBridge, Log, All);
 namespace UEAgentKitEditorBridgePrivate
 {
 	constexpr const TCHAR* ProtocolSchemaVersion = TEXT("1.0");
-	const TCHAR* const PluginVersion = TEXT("0.5.1");
+	const TCHAR* const PluginVersion = TEXT("0.5.5");
 	constexpr int32 MaxClients = 8;
 	constexpr int32 MaxRequestBytes = 64 * 1024;
 

@@ -350,7 +350,7 @@ scripts\RunScalarPatchRegression.cmd ^
 ```bat
 python <TOOL_ROOT>\scripts\ValidateAssetCatalog.py ^
   --output <TOOL_ROOT>\Output\AssetCatalog ^
-  --expect-exporter 0.5.1
+  --expect-exporter 0.5.5
 ```
 
 校验器会检查：
@@ -368,7 +368,7 @@ Blueprint 输出至少应检查：
 - Canonical JSON 可解析。
 - BPCTX 第一行符合 `H|BPCTX|1|...`。
 
-## 14. MCP Server（0.5.1）
+## 14. MCP Server（0.5.5）
 
 安装 MCP SDK v1 可选依赖：
 

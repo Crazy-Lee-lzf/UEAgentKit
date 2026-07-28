@@ -14,6 +14,7 @@ SPEC.loader.exec_module(MODULE)
 
 class ReleaseValidationTests(unittest.TestCase):
     def test_current_version_sources_are_consistent(self) -> None:
+        self.assertEqual(MODULE.project_version(), "0.5.5")
         self.assertEqual(MODULE.validate_version_sources(require_release_docs=True), [])
 
     def test_schemas_and_examples_are_release_ready(self) -> None:
@@ -30,6 +31,16 @@ class ReleaseValidationTests(unittest.TestCase):
         self.assertIn('- "3.12"', workflow)
         self.assertIn('python scripts/ValidateRelease.py --require-release-docs', workflow)
         self.assertIn('python -m build --outdir dist', workflow)
+
+    def test_release_builder_requires_clean_tree_and_emits_hashed_artifacts(self) -> None:
+        script = (ROOT / "scripts" / "BuildRelease.ps1").read_text(encoding="utf-8")
+        self.assertIn("status --porcelain", script)
+        self.assertIn("-Method UAT", script)
+        self.assertIn("UEAgentKit-$Version-UE5.6-Win64.zip", script)
+        self.assertIn("pip wheel", script)
+        self.assertIn("SHA256SUMS.txt", script)
+        self.assertIn("release-manifest.json", script)
+        self.assertIn("Get-FileHash", script)
 
     def test_pyproject_declares_portable_build_and_dev_dependencies(self) -> None:
         pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")

@@ -2,7 +2,7 @@
 
 更新时间：2026-07-28
 
-当前已发布版本为 **0.5.1**，支持 Unreal Engine 5.6。`main` 分支已经包含尚未发布的 0.5.2–0.5.4 开发能力，当前处于 0.5.x 收口阶段。
+当前已发布版本为 **0.5.5**，支持 Unreal Engine 5.6。0.5.x 日常开发能力已经完成并进入稳定维护。
 
 ## 总体方向
 
@@ -29,15 +29,11 @@ Combined  43 Tool
 - Material Instance Scalar、Vector、Texture、Static Switch 统一原生 JSON 状态/Diff 报告、Override/Expression GUID 元数据和真实四类型回归。
 - Data Validation 与 Automation Test 结果绑定 Project、Editor Session、UTC 和稳定 Asset Revision Set；Automation 明确使用 `not-applicable` 覆盖语义。
 
-## 0.5.x：日常开发能力收口
+## 0.5.x：已完成
 
-剩余实施顺序：
+0.5.5 完成了 Live Editor、Daily Actions、受控写入扩展、验证证据、单资产多 Operation 原子事务、CI 和正式发布工程。Input Mapping Context 等专用写入仅在真实项目需求出现后增加。
 
-1. **已完成：单资产多 Operation 原子事务**：一次 Plan、Dry Run、备份、Commit、独立验证和整体 rollback。
-2. **下一步：正式发布收口**：统一版本号、CHANGELOG、发布说明、构建产物和 Git Tag。
-3. Input Mapping Context 等专用写入仅在真实项目需求出现后增加。
-
-完整 Blueprint Graph、Material Graph、Anim State Machine、Control Rig、Sequencer、Niagara 写入和任意脚本执行不属于 0.5.x 范围。
+完整 Blueprint Graph、Material Graph、Anim State Machine、Control Rig、Sequencer、Niagara 写入和任意脚本执行仍不属于 0.5.x 范围。
 
 ## 0.6.0：Revision-aware Project Memory
 
