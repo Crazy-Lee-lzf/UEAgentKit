@@ -6,7 +6,9 @@
 
 UE Agent Kit is an open-source Unreal Engine asset analysis, indexing, and policy-gated patch toolkit. Its Editor plugin exports asset catalogs, Asset Registry metadata, dependencies, and Blueprint semantics; a Python CLI and SQLite provide a project-wide index, while Policy, Revision checks, dry runs, and backups protect explicit writes.
 
-The current release is **0.5.1** and targets **Unreal Engine 5.6**. Building on the fixed-project MCP workflow in 0.5.0, version 0.5.1 adds capability and project status, stable continuation and Token Budget contracts, three-source Revision freshness, six high-level safe-change tools, detailed diagnostics, and a multi-client MCP protocol compatibility matrix.
+The latest published release is **0.5.1** and targets **Unreal Engine 5.6**. Building on the fixed-project MCP workflow in 0.5.0, version 0.5.1 adds capability and project status, stable continuation and Token Budget contracts, three-source Revision freshness, six high-level safe-change tools, detailed diagnostics, and a multi-client MCP protocol compatibility matrix.
+
+> **Development branch status**: `main` already contains unreleased 0.5.2–0.5.4 capabilities, including Live Editor, daily actions, authorized saves, DataTable row operations, and Data Asset reference/Struct/container writes. Current modes are Offline 5, Live 23, Workflow 25, and Combined 43 tools.
 
 > **AI Generated**: Most code and documentation in this project are AI-generated and reviewed through human inspection, UE 5.6 compilation, automated tests, and real-project regression validation.
 
@@ -19,10 +21,10 @@ The current release is **0.5.1** and targets **Unreal Engine 5.6**. Building on 
 - Find where Blueprint variables are read or written.
 - Trace functions, interface messages, macros, Dynamic Casts, and Event Dispatchers.
 - Inspect Blueprint graphs, nodes, pins, and connections.
-- Validate patches against policy, revision, and export snapshots, then dry-run or explicitly commit authorized Blueprint, non-Blueprint scalar, Material Instance parameter, DataTable cell, single-row multi-field, or controlled row add/remove/rename changes.
+- Validate patches against policy, revision, and export snapshots, then dry-run or explicitly commit authorized Blueprint, non-Blueprint scalar, Data Asset Object/Class/Soft references and Struct/Array/Set/Map values, Material Instance parameters, and DataTable cell, multi-field, or controlled row-structure changes.
 - Generate a backup manifest after every successful commit, then explicitly roll back and independently verify the restored revision when the current package still matches.
 - Create or reset isolated test assets from a declarative Write Fixture Plan, then independently verify class, revision, and dirty state.
-- Use the local MCP server to search assets/symbols, inspect assets and references, and create strict Plans or Dry Runs through seven high-level safe-change tools without exposing shell, arbitrary SQL, or UObject access.
+- Use the local MCP server to search assets/symbols, inspect assets and references, and create strict Plans or Dry Runs through 12 high-level safe-change tools without exposing shell, arbitrary SQL, or UObject access.
 - Exercise Bool, integer, floating-point, String, Name, Text, and two Enum representations through real dry-run/commit/reload matrices, including zero-write rejections for authorization, stale revisions, wrong types, range errors, invalid enums, missing properties, dirty packages, sidecars, and save failures.
 
 ## Main capabilities

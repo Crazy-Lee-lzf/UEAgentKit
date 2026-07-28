@@ -1,10 +1,10 @@
 # Live Editor Bridge 规范
 
-更新时间：2026-07-24
+更新时间：2026-07-28
 
 ## 目标
 
-Live Editor Bridge 让固定项目的本地 MCP Server 读取当前 Unreal Editor 内存状态，同时保持离线 SQLite 查询与写入安全模型不变。Bridge 只开放显式注册的高层只读能力，不提供任意 UObject、Console、Python、Shell、SQL 或文件系统接口。
+Live Editor Bridge 让固定项目的本地 MCP Server 读取当前 Unreal Editor 内存状态，同时保持离线 SQLite 查询与写入安全模型不变。Bridge 只开放显式注册的高层读取与受限 Editor Action；任何磁盘保存仍必须通过固定项目 Workflow、Policy、Revision、Receipt、备份和独立验证，不提供任意 UObject、Console、Python、Shell、SQL 或文件系统接口。
 
 ## 进程结构
 
@@ -13,7 +13,7 @@ MCP Client
 → UE Agent Kit Python MCP Server（stdio）
 → 127.0.0.1 临时 TCP 会话
 → UEAgentKit Editor-only Plugin
-→ 注册的只读 Capability Handler
+→ 注册的读取/受限 Action Capability Handler
 ```
 
 MCP Client 不接触 TCP 地址、端口、认证令牌或描述符路径。它只能调用 MCP Server 已注册的 Tool。
@@ -34,7 +34,7 @@ PowerShell 入口对应：
 -ProjectPath <fixed .uproject>
 ```
 
-Tool 参数不能覆盖固定项目或选择其他 Editor 端点。未启用时，离线 5 Tool 与固定项目工作流 18 Tool 保持可用。
+Tool 参数不能覆盖固定项目或选择其他 Editor 端点。未启用时，离线 5 Tool 与固定项目 Workflow 模式 25 Tool 保持可用；启用后 Live 模式为 23 Tool，Combined 模式为 43 Tool。
 
 ## 端点描述符
 

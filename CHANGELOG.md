@@ -4,39 +4,18 @@ All notable changes to UE Agent Kit are documented here.
 
 ## Unreleased
 
-- Added `setDataTableRowFields` and `ue_set_datatable_row_fields` for atomic updates to 1–32 authorized top-level scalar fields in one existing DataTable row.
-- Added full-row prevalidation, exact per-field Policy checks, all-or-nothing mutation, full-row Dry Run restoration, structured multi-field reports, and a real UE5.6 Dry Run/Commit/reload/rollback regression.
-- Expanded workflow-only MCP mode from 19 to 20 tools and combined Live + workflow mode from 37 to 38 tools; offline and Live-only modes remain 5 and 23 tools.
-- Added `addDataTableRow`, `removeDataTableRow`, and `renameDataTableRow` plus `ue_add_datatable_row`, `ue_remove_datatable_row`, and `ue_rename_datatable_row` for controlled DataTable row structure changes.
-- Added Canonical `rowNames` prevalidation, exact add-field Policy authorization, explicit `value=true` acknowledgement for remove/rename, full-table snapshots, unaffected-row verification, Dry Run restoration, package backup manifests, and independent rollback verification.
-- Fixed `GameplayTagTableRow` structural notifications by applying rename as a stable RowMap key migration and remove as a stable detach/destroy operation before one final table-change notification.
-- Passed the real UE5.6 Add Dry Run/Commit, Rename Commit, Remove Commit, reverse Rollback Remove/Rename/Add chain, with the final package revision restored exactly.
-- Expanded workflow-only MCP mode to 23 tools and combined Live + workflow mode to 41 tools; offline and Live-only modes remain 5 and 23 tools.
+Development status: the latest published version remains 0.5.1, while `main` contains the following unreleased 0.5.2–0.5.4 work.
 
-- Centralized MCP Tool order, mode membership, annotations, and Live Bridge method names in one typed Tool Registry with registration and handler-boundary drift guards.
-- Split MCP Query, Live Read, Live Action, and Workflow registration into independent modules and split Editor Bridge capabilities into Status, Diagnostic, Asset, Graph, Navigation, and Validation handler translation units.
-- Added eight bounded Live Editor Daily Action tools: `ue_open_asset`, `ue_focus_asset`, `ue_sync_content_browser`, `ue_focus_actor`, `ue_compile_blueprint`, `ue_validate_asset`, `ue_validate_folder`, and isolated exact-name `ue_run_automation_test`.
-- Added exact Asset Registry paths, current-Editor-World ActorGuid targeting, no-save Blueprint compilation, official Data Validation, folder/issue limits, PIE rejection, and real UE5.6 positive/negative action coverage with unchanged package SHA-256.
-- Added `ue_save_authorized_asset` with Policy/Revision/session-bound Preview receipts, exact `SAVE <receipt>` confirmation, one-package backup, exact loaded Dirty Package save, independent Unreal verification, and stale snapshot marking; unbounded `save_all` remains forbidden.
-- Added a dedicated real UE5.6 authorized-save smoke test with a command-line-only fixed fixture Dirty hook and verified fixture recovery.
-- Expanded Live-only MCP mode from 15 to 23 tools, workflow-only mode from 18 to 19 tools, and combined Live + workflow mode from 28 to 37 tools; offline mode remains 5 tools.
-- Added targeted Registry/Query/Live/Workflow test entry points, safe preview-first Git Worktree creation, and a bounded Sol/Luna parallel-development contract.
-
-- Added bounded Live Editor Output Log reads with a 4,096-entry ring buffer, sequence cursors, category/severity/text/UTC/PIE filters, and explicit dropped-entry reporting.
-- Added compile diagnostics that combine current-session compiler-related log entries with loaded Blueprint status while explicitly reporting incomplete history.
-- Added exact `/Game` live asset inspection using Asset Registry plus already-loaded memory state without loading or modifying the asset.
-- Added `ue_get_blueprint_graph_selection` for the most recently active ordinary Blueprint Editor, returning the focused Graph GUID and up to 100 selected Node GUIDs without loading assets or supporting Graph edits.
-- Expanded Live-only MCP mode from 11 to 15 tools.
-- Added `ue_refresh_asset_index` with exact policy-authorized asset paths, Preview/Apply modes, independent Package Revision verification, paired Revision Export and SQLite generation staging, integrity validation, and atomic pointer switching.
-- Added immutable workflow-session freezing: the session that applies a refresh continues reading its previous snapshot and rejects further workflow actions, while a new MCP session resolves the new paired generation.
-- Preserved configured SQLite and Revision Export source snapshots, rejected Dirty Live Editor assets, kept failed refreshes on the previous active pair, and added a real two-session UE5.6 refresh smoke test.
-- Added `ue_get_asset_state`, a read-only four-source state model over optional Editor memory, current disk Package SHA-256, frozen Revision Export, and frozen SQLite, with explicit save/refresh recommendations and no invented memory Revision.
-- Expanded fixed-project workflow mode from 16 to 18 tools and combined Live + workflow mode from 25 to 28 tools.
-
-- Added a restricted fixed-project Live Editor Bridge over authenticated localhost TCP with exact project/version/capability handshake and no arbitrary endpoint, UObject, Console, Python, Shell, or filesystem Tool arguments.
-- Added six optional read-only MCP tools: `ue_editor_status`, `ue_get_selection`, `ue_get_open_assets`, `ue_get_dirty_assets`, `ue_get_current_level`, and `ue_get_pie_state`.
-- Added stable offline degradation and separate Live Editor error codes while keeping Editor memory, disk packages, and immutable SQLite snapshot state distinct.
-- Added a reproducible real UE5.6 Live Editor MCP smoke test with endpoint/token redaction and unchanged temporary SQLite verification.
+- Added the authenticated localhost Live Editor Bridge, live state/log/diagnostic/inspection tools, Blueprint Graph selection, bounded Daily Actions, exact-name Automation Tests, and Policy/Revision/session-bound authorized one-asset saves.
+- Added immutable single-asset index refresh, paired Revision Export/SQLite generations, four-source asset state, and frozen workflow-session semantics.
+- Centralized Tool Registry ownership and split MCP and Editor Bridge handlers by responsibility.
+- Added atomic `setDataTableRowFields`, controlled DataTable row add/remove/rename, full-table restoration, and exact Searchable Name reference-impact gates at both Plan and UE execution time.
+- Added `setAssetReferenceProperty` for Object/Class and Soft Object/Class Data Asset properties with exact reference authorization and `null` clearing.
+- Added `setAssetStructuredProperty` for top-level Struct, Array, Set, and Map Data Asset properties with recursive schema, Canonical ordering, deep restoration, and structured diffs.
+- Expanded high-level safe-write entry points to 12 and registered Patch Operations to 16.
+- Current server modes are Offline 5, Live 23, Workflow 25, and Combined 43 tools.
+- Current regression baseline is Ruff plus 184 Python tests, 16 example Patch schemas, two schema meta-validations, UE5.6 Direct Build, and real Data Asset/DataTable Dry Run, Commit, independent reload, and rollback chains.
+- Remaining 0.5.x consolidation work: unified Material Instance parameter reports, Revision/session-bound validation evidence, single-asset multi-operation transactions, and an official version/release closeout.
 
 ## 0.5.1 — MCP usability, freshness, and diagnostics
 

@@ -25,20 +25,21 @@
 19. [`../spec/INDEX_FRESHNESS.md`](../spec/INDEX_FRESHNESS.md)：SQLite、Revision Export、磁盘 Package 三源新鲜度与安全重载。
 20. [`../spec/LIVE_EDITOR_BRIDGE.md`](../spec/LIVE_EDITOR_BRIDGE.md)：localhost IPC、固定工程认证握手、实时读取与 Daily Actions。
 
-## 当前版本
+## 当前版本与开发分支
 
-UE Agent Kit 0.5.1 支持 Unreal Engine 5.6，当前公开能力包括：
+当前已发布版本为 UE Agent Kit 0.5.1，支持 Unreal Engine 5.6。`main` 分支已经包含尚未发布的 0.5.2–0.5.4 能力。
 
-- 通用 UE 资产目录、Asset Registry Tags、Revision 和依赖导出。
-- Blueprint 只读语义分析。
-- SQLite/FTS5 项目索引、Asset Class 筛选和正反向引用查询。
-- Blueprint Patch 覆盖八类 Blueprint；Asset Patch 已验证通用标量属性、InputAction Enum、Material Instance Global Scalar/Vector/Texture/Static Switch，以及 DataTable 单 Row、单顶层标量字段的精确白名单写入。
-- Backup Manifest、默认 Dry Run 的独立 rollback、回滚前安全副本、唯一回执和独立 UE 恢复验证。
-- Write Fixture Plan、Create/Reset、安全目标边界和独立 UE 重载验证。
-- 11 类标量完整 Dry Run/Commit/重载矩阵，以及 9 类失败路径零写入回归。
-- 默认 5 Tool 离线只读 MCP、22 Tool Live Editor 模式、18 Tool 固定项目工作流，以及 35 Tool 组合模式。
-- 0.5.3-prep 开发基础设施：统一 Tool Registry、拆分 MCP/Editor Bridge Handler、专项测试入口和安全 Worktree/Luna 子任务流程。
-- 0.5.3 首批 Daily Actions：资产打开/聚焦、Content Browser 同步、ActorGuid 聚焦、Blueprint 内存编译和官方 Data Validation；全部不保存 Package。
+当前开发分支能力包括：
+
+- 通用资产/Blueprint 导出、SQLite/FTS、Revision、引用和四源资产状态。
+- Live Editor 状态、日志、编译诊断、导航、验证、Automation 和授权单资产保存。
+- Blueprint、标量 Asset、Material Instance、DataTable 和 Data Asset 的受控写入。
+- DataTable 多字段、Row 新增/删除/重命名和 Searchable Name 引用影响门禁。
+- Data Asset Object/Class、Soft Object/Class、Struct、Array、Set 和 Map 稳定值模型。
+- Backup Manifest、独立验证和 Revision-aware rollback。
+- Offline 5、Live 23、Workflow 25、Combined 43 Tool；其中 12 个为高层安全写入入口。
+
+0.5.x 剩余重点为 Material 参数报告统一、验证证据绑定、单资产多 Operation 原子事务和正式发布收口。
 
 只读分析路径不修改资产；Blueprint Patch、Asset Patch 与 MCP Commit 仅在明确授权后执行。
 

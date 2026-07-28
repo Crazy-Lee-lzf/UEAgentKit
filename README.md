@@ -6,7 +6,9 @@
 
 UE Agent Kit 是一套面向 Unreal Engine 的开源资产分析、索引与受控写入工具。它通过 UE Editor 插件导出项目资产目录、Asset Registry 元数据、依赖关系和 Blueprint 语义，再使用 Python CLI 与 SQLite 建立项目级索引，并通过 Policy、Revision、Dry Run 和备份保护显式写入。
 
-当前版本为 **0.5.1**，支持 **Unreal Engine 5.6**。在 0.5.0 固定项目 MCP 工作流基础上，0.5.1 补全能力与项目状态、稳定分页与 Token Budget、三源 Revision 新鲜度、六个高层安全写入 Tool、细分诊断，以及多 MCP Client 协议兼容回归。
+当前已发布版本为 **0.5.1**，支持 **Unreal Engine 5.6**。在 0.5.0 固定项目 MCP 工作流基础上，0.5.1 补全能力与项目状态、稳定分页与 Token Budget、三源 Revision 新鲜度、六个高层安全写入 Tool、细分诊断，以及多 MCP Client 协议兼容回归。
+
+> **开发分支状态**：`main` 已包含尚未发布的 0.5.2–0.5.4 能力，包括 Live Editor、Daily Actions、授权保存、DataTable Row 操作和 Data Asset 引用/Struct/容器写入。当前模式为 Offline 5、Live 23、Workflow 25、Combined 43 Tool。
 
 > **AI Generated**：本项目的代码和文档主要由 AI 生成，并通过人工审查、UE 5.6 编译、自动化测试和真实工程回归验证。
 
@@ -19,10 +21,10 @@ UE Agent Kit 是一套面向 Unreal Engine 的开源资产分析、索引与受�
 - 查询 Blueprint 变量在哪里被读取或写入。
 - 查询函数、接口消息、宏、Dynamic Cast 和 Event Dispatcher 的调用关系。
 - 查看 Blueprint 的 Graph、Node、Pin 和连接结构。
-- 使用 Policy、Revision 和导出快照校验 Patch，并对授权 Blueprint、非 Blueprint 标量属性、Material Instance 参数、DataTable 单元格、单 Row 多字段或受控 Row 新增/删除/重命名执行 Dry Run 或显式 Commit。
+- 使用 Policy、Revision 和导出快照校验 Patch，并对授权 Blueprint、非 Blueprint 标量属性、Data Asset Object/Class/Soft 引用、Struct/Array/Set/Map、Material Instance 参数，以及 DataTable 单元格、多字段和 Row 结构操作执行 Dry Run 或显式 Commit。
 - 为成功 Commit 自动生成 Backup Manifest，并在当前 Revision 仍匹配时显式回滚和独立验证恢复结果。
 - 使用声明式 Write Fixture Plan 在安全测试目录内创建或重置测试资产，并独立验证类、Revision 与 Dirty 状态。
-- 通过本地 MCP Server，让 Agent 搜索资产/Symbol、读取单资产和查询引用，并使用七个高层安全写入 Tool 自动生成严格 Plan 或执行 Dry Run，不开放 Shell、任意 SQL 或 UObject。
+- 通过本地 MCP Server，让 Agent 搜索资产/Symbol、读取单资产和查询引用，并使用 12 个高层安全写入 Tool 自动生成严格 Plan 或执行 Dry Run，不开放 Shell、任意 SQL 或 UObject。
 - 对 Bool、整数、浮点、String、Name、Text 和两类 Enum 执行真实 Dry Run/Commit/重载矩阵，并验证未授权、过期 Revision、错误类型、越界、非法 Enum、属性不存在、Dirty Package、Sidecar 和保存失败均零写入拒绝。
 
 ## 主要能力
