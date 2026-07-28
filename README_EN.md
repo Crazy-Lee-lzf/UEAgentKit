@@ -332,6 +332,16 @@ Read-only exporters, SQLite queries, the current MCP tools, and `ue-agent patch 
 - The executor handles one asset with 1–32 compatible operations. Multi-operation transactions reject duplicate targets and structural DataTable row add/remove/rename operations to avoid partial saves and order-dependent ambiguity.
 - Patches modify and save assets through Unreal Editor APIs; rollback only atomically restores a complete package authorized by a validated manifest and never performs partial binary edits.
 
+## Release gates
+
+Run the portable release validation suite with:
+
+```bat
+python scripts\ValidateRelease.py --require-release-docs
+```
+
+The command checks Python/Plugin/C++ version sources, bilingual release notes, Ruff, the full Python test suite, three JSON Schemas, sixteen Patch examples, and the example Policy. GitHub Actions runs the same gates on Python 3.11 and 3.12 and builds the Python distribution. UE5.6 plugin compilation and real-asset regressions remain local release-machine gates because they require an installed engine.
+
 ## License
 
 UE Agent Kit is available under the [MIT License](LICENSE).

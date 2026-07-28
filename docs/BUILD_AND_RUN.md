@@ -459,13 +459,23 @@ ue_find_references
 
 服务器启动时固定数据库路径，Tool 参数不能更换数据库；SQLite 使用不可变只读快照并拒绝活动 Sidecar。`-EnableLiveEditor -ProjectPath <固定工程>` 会增加 10 个实时只读 Tool 和 8 个受限 Daily Action。Bridge 只绑定 `127.0.0.1`，使用随机会话令牌，并校验固定工程路径摘要、Plugin/Server 版本与 Capability；MCP 响应不暴露 Token、端口或 Descriptor 路径。离线 5 Tool、Live 模式 23 Tool、工作流模式 25 Tool、组合模式 43 Tool 相互兼容。Output Log 最多返回 100 条并使用序号游标；实时资产检查和 Content Browser 同步不加载目标资产；Blueprint Graph 定位只支持普通 Blueprint Editor，并最多返回 100 个选中 Node。八个 Live Daily Action 仅接受精确 `/Game` 身份或当前 Editor World 的 ActorGuid，在 PIE/SIE 中拒绝运行且不保存 Package；工作流 Tool `ue_save_authorized_asset` 使用 Policy/Revision/Session 绑定的 Preview Receipt、备份、显式确认和独立验证保存一个授权资产；文件夹 Validation 最多匹配 500 个资产并最多返回 200 条问题。`ue_get_asset_state` 只读比较 Editor Memory、磁盘 Package、Revision Export 和 SQLite。高层写入入口默认只生成 Plan，也可执行 Dry Run，但不能直接 Commit。保存和恢复必须显式启用 Commit、通过 Policy，并提供一次性 Receipt 与精确确认短语。`ue_refresh_asset_index` 只接受一个精确授权资产和 Preview/Apply；它在固定 Work Root 中构建配对 Generation，验证后原子切换 Pointer，并要求新 MCP 会话加载新代。真实写入闭环使用 `scripts\TestMcpWorkflow.cmd`，真实刷新闭环使用 `scripts\TestMcpSnapshotRefresh.cmd`。完整契约见 [`../spec/MCP_SERVER.md`](../spec/MCP_SERVER.md) 与 [`../spec/LIVE_EDITOR_BRIDGE.md`](../spec/LIVE_EDITOR_BRIDGE.md)。
 
-## 15. 安全行为
+## 15. Release Validation 与 CI
+
+发布前运行：
+
+```bat
+python scripts\ValidateRelease.py --require-release-docs
+```
+
+Validator 会统一检查版本来源、发布文档、Ruff、Python 全测、Schema、示例 Patch 和 Policy。`.github/workflows/release-validation.yml` 在 Python 3.11/3.12 上运行相同门禁并构建 wheel/sdist。GitHub Hosted Runner 不包含 Unreal Engine，因此 UE5.6 Direct Build、UAT Plugin Package 和真实资产回归仍是本地发布机门禁。
+
+## 16. 安全行为
 
 通用资产目录、Blueprint 导出、SQLite 查询、当前 MCP Tool 和 `ue-agent patch validate` 保持只读。`RunPatch -Mode DryRun` 会在内存中修改资产，但必须恢复原值并保持磁盘 SHA-256 不变；Blueprint 还会在修改和回滚后编译。
 
 只有 `RunPatch -Mode Commit` 可以保存资产，并且必须满足：Policy 显式允许 Commit、项目/目录/类型/操作均授权、属性或参数精确授权、Revision 一致、Package 非 Dirty、备份创建成功，且 Blueprint 编译成功。成功后自动生成 Backup Manifest。`RunRollback -Mode Commit` 是唯一恢复入口，默认 Dry Run，并要求工程关闭、当前 Revision 未变化、备份完整和独立 UE 重载验证。Patch 写入通过 Unreal Editor API 完成；rollback 仅按已验证 Manifest 原子恢复单文件 Package。
 
-## 16. 清理
+## 17. 清理
 
 可以安全清理：
 

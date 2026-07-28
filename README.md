@@ -332,6 +332,16 @@ Output\Blueprints\
 - 当前执行器只处理单资产；每个资产支持 1–32 个兼容 Operation。多 Operation 事务拒绝重复目标和 DataTable Row 新增/删除/重命名，并避免部分保存。
 - Patch 通过 UE Editor API 修改并保存资产；rollback 仅按已验证 Manifest 原子恢复完整 Package，不解析或局部改写 `.uasset` 二进制。
 
+## 发布门禁
+
+跨平台发布检查统一通过：
+
+```bat
+python scripts\ValidateRelease.py --require-release-docs
+```
+
+该命令校验 Python/Plugin/C++ 版本源、双语发布文档、Ruff、完整 Python 测试、3 份 JSON Schema、16 个 Patch 示例和示例 Policy。GitHub Actions 在 Python 3.11 与 3.12 上执行同一门禁并构建 Python Distribution；UE5.6 Plugin 编译和真实资产回归仍由具备引擎环境的本地发布机执行。
+
 ## License
 
 UE Agent Kit 使用 [MIT License](LICENSE)。

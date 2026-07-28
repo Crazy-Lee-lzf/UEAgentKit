@@ -26,3 +26,4 @@ __pycache__/
 .venv/
 .local/
 .data/
+*.egg-info/

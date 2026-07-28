@@ -6,6 +6,7 @@ All notable changes to UE Agent Kit are documented here.
 
 Development status: the latest published version remains 0.5.1, while `main` contains the following unreleased 0.5.2–0.5.4 work.
 
+- Added a portable release validator, Python 3.11/3.12 GitHub Actions matrix, package-build gate, and uploaded Python distribution artifact.
 - Added single-asset atomic transactions containing 1–32 compatible operations, with complete pre-validation, duplicate-target rejection, one backup, one Blueprint compile/save, process-discard Dry Run semantics, and whole-package rollback.
 - Extended backup manifests with ordered per-operation targets, before/after values, and exact authorization-key evidence while preserving schema 1.0 compatibility for existing single-operation manifests.
 - Added a real UE5.6 Data Asset and Blueprint transaction regression covering Dry Run, Commit, one backup, independent reload, manifest verification, whole-transaction rollback, and exact final Revision recovery.
