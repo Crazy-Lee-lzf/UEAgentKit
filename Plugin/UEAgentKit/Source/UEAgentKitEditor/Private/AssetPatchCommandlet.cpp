@@ -883,18 +883,26 @@ namespace AssetPatchCommandletPrivate
 		UMaterialInstanceConstant* Instance,
 		const FName ParameterName,
 		FMaterialParameterInfo& OutInfo,
+		FGuid& OutExpressionGuid,
 		FString& OutError)
 	{
 		TArray<FMaterialParameterInfo> ParameterInfos;
 		TArray<FGuid> ParameterIds;
 		Instance->GetAllScalarParameterInfo(ParameterInfos, ParameterIds);
-		int32 MatchCount = 0;
-		for (const FMaterialParameterInfo& Info : ParameterInfos)
+		if (ParameterInfos.Num() != ParameterIds.Num())
 		{
+			OutError = TEXT("Scalar parameter metadata is inconsistent.");
+			return false;
+		}
+		int32 MatchCount = 0;
+		for (int32 Index = 0; Index < ParameterInfos.Num(); ++Index)
+		{
+			const FMaterialParameterInfo& Info = ParameterInfos[Index];
 			if (Info.Name == ParameterName
 				&& Info.Association == EMaterialParameterAssociation::GlobalParameter)
 			{
 				OutInfo = Info;
+				OutExpressionGuid = ParameterIds[Index];
 				++MatchCount;
 			}
 		}
@@ -913,18 +921,26 @@ namespace AssetPatchCommandletPrivate
 		UMaterialInstanceConstant* Instance,
 		const FName ParameterName,
 		FMaterialParameterInfo& OutInfo,
+		FGuid& OutExpressionGuid,
 		FString& OutError)
 	{
 		TArray<FMaterialParameterInfo> ParameterInfos;
 		TArray<FGuid> ParameterIds;
 		Instance->GetAllVectorParameterInfo(ParameterInfos, ParameterIds);
-		int32 MatchCount = 0;
-		for (const FMaterialParameterInfo& Info : ParameterInfos)
+		if (ParameterInfos.Num() != ParameterIds.Num())
 		{
+			OutError = TEXT("Vector parameter metadata is inconsistent.");
+			return false;
+		}
+		int32 MatchCount = 0;
+		for (int32 Index = 0; Index < ParameterInfos.Num(); ++Index)
+		{
+			const FMaterialParameterInfo& Info = ParameterInfos[Index];
 			if (Info.Name == ParameterName
 				&& Info.Association == EMaterialParameterAssociation::GlobalParameter)
 			{
 				OutInfo = Info;
+				OutExpressionGuid = ParameterIds[Index];
 				++MatchCount;
 			}
 		}
@@ -943,18 +959,26 @@ namespace AssetPatchCommandletPrivate
 		UMaterialInstanceConstant* Instance,
 		const FName ParameterName,
 		FMaterialParameterInfo& OutInfo,
+		FGuid& OutExpressionGuid,
 		FString& OutError)
 	{
 		TArray<FMaterialParameterInfo> ParameterInfos;
 		TArray<FGuid> ParameterIds;
 		Instance->GetAllTextureParameterInfo(ParameterInfos, ParameterIds);
-		int32 MatchCount = 0;
-		for (const FMaterialParameterInfo& Info : ParameterInfos)
+		if (ParameterInfos.Num() != ParameterIds.Num())
 		{
+			OutError = TEXT("Texture parameter metadata is inconsistent.");
+			return false;
+		}
+		int32 MatchCount = 0;
+		for (int32 Index = 0; Index < ParameterInfos.Num(); ++Index)
+		{
+			const FMaterialParameterInfo& Info = ParameterInfos[Index];
 			if (Info.Name == ParameterName
 				&& Info.Association == EMaterialParameterAssociation::GlobalParameter)
 			{
 				OutInfo = Info;
+				OutExpressionGuid = ParameterIds[Index];
 				++MatchCount;
 			}
 		}
@@ -1028,12 +1052,44 @@ namespace AssetPatchCommandletPrivate
 		return MatchCount == 1;
 	}
 
+	template<typename TParameterValue>
+	bool ReadMaterialParameterMetadata(
+		const TArray<TParameterValue>& Parameters,
+		const FMaterialParameterInfo& ParameterInfo,
+		const FGuid& DefaultExpressionGuid,
+		bool& OutOverride,
+		FGuid& OutExpressionGuid)
+	{
+		OutOverride = false;
+		OutExpressionGuid = DefaultExpressionGuid;
+		int32 MatchCount = 0;
+		for (const TParameterValue& Parameter : Parameters)
+		{
+			if (Parameter.ParameterInfo == ParameterInfo)
+			{
+				OutOverride = true;
+				OutExpressionGuid = Parameter.ExpressionGUID;
+				++MatchCount;
+			}
+		}
+		return MatchCount <= 1;
+	}
+
 	bool ReadScalarParameter(
 		UMaterialInstanceConstant* Instance,
 		const FMaterialParameterInfo& ParameterInfo,
-		float& OutValue)
+		const FGuid& DefaultExpressionGuid,
+		float& OutValue,
+		bool& OutOverride,
+		FGuid& OutExpressionGuid)
 	{
-		return Instance->GetScalarParameterValue(FHashedMaterialParameterInfo(ParameterInfo), OutValue);
+		return Instance->GetScalarParameterValue(FHashedMaterialParameterInfo(ParameterInfo), OutValue)
+			&& ReadMaterialParameterMetadata(
+				Instance->ScalarParameterValues,
+				ParameterInfo,
+				DefaultExpressionGuid,
+				OutOverride,
+				OutExpressionGuid);
 	}
 
 	FString FormatScalarParameterValue(const float Value)
@@ -1044,9 +1100,18 @@ namespace AssetPatchCommandletPrivate
 	bool ReadVectorParameter(
 		UMaterialInstanceConstant* Instance,
 		const FMaterialParameterInfo& ParameterInfo,
-		FLinearColor& OutValue)
+		const FGuid& DefaultExpressionGuid,
+		FLinearColor& OutValue,
+		bool& OutOverride,
+		FGuid& OutExpressionGuid)
 	{
-		return Instance->GetVectorParameterValue(FHashedMaterialParameterInfo(ParameterInfo), OutValue);
+		return Instance->GetVectorParameterValue(FHashedMaterialParameterInfo(ParameterInfo), OutValue)
+			&& ReadMaterialParameterMetadata(
+				Instance->VectorParameterValues,
+				ParameterInfo,
+				DefaultExpressionGuid,
+				OutOverride,
+				OutExpressionGuid);
 	}
 
 	FString FormatVectorParameterValue(const FLinearColor& Value)
@@ -1062,15 +1127,157 @@ namespace AssetPatchCommandletPrivate
 	bool ReadTextureParameter(
 		UMaterialInstanceConstant* Instance,
 		const FMaterialParameterInfo& ParameterInfo,
-		UTexture*& OutValue)
+		const FGuid& DefaultExpressionGuid,
+		UTexture*& OutValue,
+		bool& OutOverride,
+		FGuid& OutExpressionGuid)
 	{
-		return Instance->GetTextureParameterValue(FHashedMaterialParameterInfo(ParameterInfo), OutValue);
+		return Instance->GetTextureParameterValue(FHashedMaterialParameterInfo(ParameterInfo), OutValue)
+			&& ReadMaterialParameterMetadata(
+				Instance->TextureParameterValues,
+				ParameterInfo,
+				DefaultExpressionGuid,
+				OutOverride,
+				OutExpressionGuid);
 	}
 
 	FString FormatTextureParameterValue(const UTexture* Value)
 	{
 		return Value ? Value->GetPathName() : FString();
 	}
+
+	FString FormatMaterialExpressionGuid(const FGuid& Value)
+	{
+		return Value.IsValid()
+			? Value.ToString(EGuidFormats::DigitsWithHyphensLower)
+			: FString();
+	}
+
+	TSharedRef<FJsonObject> MakeMaterialVectorValue(const FLinearColor& Value)
+	{
+		const TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+		Result->SetNumberField(TEXT("r"), Value.R);
+		Result->SetNumberField(TEXT("g"), Value.G);
+		Result->SetNumberField(TEXT("b"), Value.B);
+		Result->SetNumberField(TEXT("a"), Value.A);
+		return Result;
+	}
+
+	TSharedPtr<FJsonValue> MakeMaterialTextureValue(const UTexture* Value)
+	{
+		if (Value)
+		{
+			return MakeShared<FJsonValueString>(Value->GetPathName());
+		}
+		return MakeShared<FJsonValueNull>();
+	}
+
+	TSharedRef<FJsonObject> MakeMaterialParameterState(
+		const TSharedPtr<FJsonValue>& Value,
+		const bool bOverride,
+		const FGuid& ExpressionGuid)
+	{
+		const TSharedRef<FJsonObject> State = MakeShared<FJsonObject>();
+		State->SetField(TEXT("value"), Value);
+		State->SetBoolField(TEXT("override"), bOverride);
+		State->SetStringField(TEXT("source"), bOverride ? TEXT("override") : TEXT("inherited"));
+		State->SetStringField(TEXT("expressionGuid"), FormatMaterialExpressionGuid(ExpressionGuid));
+		return State;
+	}
+
+	TSharedRef<FJsonObject> MakeMaterialParameterChange(
+		const bool bValueChanged,
+		const bool bOverrideChanged,
+		const bool bExpressionGuidChanged)
+	{
+		const TSharedRef<FJsonObject> Change = MakeShared<FJsonObject>();
+		Change->SetBoolField(TEXT("valueChanged"), bValueChanged);
+		Change->SetBoolField(TEXT("overrideChanged"), bOverrideChanged);
+		Change->SetBoolField(TEXT("expressionGuidChanged"), bExpressionGuidChanged);
+		Change->SetBoolField(
+			TEXT("changed"),
+			bValueChanged || bOverrideChanged || bExpressionGuidChanged);
+		return Change;
+	}
+
+	void AddMaterialParameterReport(
+		const TSharedRef<FJsonObject>& Report,
+		const FString& ParameterName,
+		const FString& ParameterType,
+		const TSharedPtr<FJsonValue>& BeforeValue,
+		const TSharedPtr<FJsonValue>& AfterValue,
+		const TSharedPtr<FJsonValue>& RestoredValue,
+		const bool bBeforeOverride,
+		const bool bAfterOverride,
+		const bool bRestoredOverride,
+		const FGuid& BeforeExpressionGuid,
+		const FGuid& AfterExpressionGuid,
+		const FGuid& RestoredExpressionGuid,
+		const bool bValueChanged,
+		const bool bRestoredValueMatch,
+		const bool bRolledBack)
+	{
+		const bool bRestoredMetadataMatch =
+			bRestoredOverride == bBeforeOverride
+			&& RestoredExpressionGuid == BeforeExpressionGuid;
+		const bool bRollbackValueMatch = !bRolledBack || bRestoredValueMatch;
+		const bool bRollbackMetadataMatch = !bRolledBack || bRestoredMetadataMatch;
+		const bool bRollbackStateMatch = bRollbackValueMatch && bRollbackMetadataMatch;
+
+		Report->SetStringField(
+			TEXT("targetDescription"),
+			TEXT("material-instance-parameter:") + ParameterType + TEXT(":") + ParameterName);
+		Report->SetStringField(TEXT("targetType"), TEXT("MaterialInstanceParameter"));
+		Report->SetStringField(TEXT("parameterName"), ParameterName);
+		Report->SetStringField(TEXT("parameterType"), ParameterType);
+		Report->SetStringField(TEXT("parameterAssociation"), TEXT("Global"));
+		Report->SetField(TEXT("beforeValue"), BeforeValue);
+		Report->SetField(TEXT("afterValue"), AfterValue);
+		Report->SetField(TEXT("restoredValue"), RestoredValue);
+		Report->SetBoolField(TEXT("beforeOverride"), bBeforeOverride);
+		Report->SetBoolField(TEXT("afterOverride"), bAfterOverride);
+		Report->SetBoolField(TEXT("restoredOverride"), bRestoredOverride);
+		Report->SetStringField(
+			TEXT("beforeExpressionGuid"),
+			FormatMaterialExpressionGuid(BeforeExpressionGuid));
+		Report->SetStringField(
+			TEXT("afterExpressionGuid"),
+			FormatMaterialExpressionGuid(AfterExpressionGuid));
+		Report->SetStringField(
+			TEXT("restoredExpressionGuid"),
+			FormatMaterialExpressionGuid(RestoredExpressionGuid));
+		Report->SetBoolField(TEXT("rollbackValueMatch"), bRollbackValueMatch);
+		Report->SetBoolField(TEXT("rollbackMetadataMatch"), bRollbackMetadataMatch);
+		Report->SetBoolField(TEXT("rollbackStateMatch"), bRollbackStateMatch);
+
+		const TSharedRef<FJsonObject> Parameter = MakeShared<FJsonObject>();
+		Parameter->SetStringField(TEXT("name"), ParameterName);
+		Parameter->SetStringField(TEXT("type"), ParameterType);
+		Parameter->SetStringField(TEXT("association"), TEXT("Global"));
+		Parameter->SetObjectField(
+			TEXT("before"),
+			MakeMaterialParameterState(BeforeValue, bBeforeOverride, BeforeExpressionGuid));
+		Parameter->SetObjectField(
+			TEXT("after"),
+			MakeMaterialParameterState(AfterValue, bAfterOverride, AfterExpressionGuid));
+		Parameter->SetObjectField(
+			TEXT("restored"),
+			MakeMaterialParameterState(RestoredValue, bRestoredOverride, RestoredExpressionGuid));
+		Parameter->SetObjectField(
+			TEXT("change"),
+			MakeMaterialParameterChange(
+				bValueChanged,
+				bAfterOverride != bBeforeOverride,
+				AfterExpressionGuid != BeforeExpressionGuid));
+		Parameter->SetObjectField(
+			TEXT("rollbackChange"),
+			MakeMaterialParameterChange(
+				!bRestoredValueMatch,
+				bRestoredOverride != bBeforeOverride,
+				RestoredExpressionGuid != BeforeExpressionGuid));
+		Report->SetObjectField(TEXT("materialParameter"), Parameter);
+	}
+
 
 	bool SaveReport(const FString& Filename, const TSharedRef<FJsonObject>& Report, FString& OutError)
 	{
@@ -1400,14 +1607,28 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		}
 
 		FMaterialParameterInfo ParameterInfo;
-		if (!FindGlobalScalarParameter(MaterialInstance, FName(*ParameterNameText), ParameterInfo, Error))
+		FGuid ScalarExpressionGuid;
+		if (!FindGlobalScalarParameter(
+			MaterialInstance,
+			FName(*ParameterNameText),
+			ParameterInfo,
+			ScalarExpressionGuid,
+			Error))
 		{
 			UE_LOG(LogAssetPatch, Error, TEXT("%s"), *Error);
 			return 17;
 		}
 
 		float BeforeScalarValue = 0.0f;
-		if (!ReadScalarParameter(MaterialInstance, ParameterInfo, BeforeScalarValue))
+		bool bBeforeOverride = false;
+		FGuid BeforeExpressionGuid;
+		if (!ReadScalarParameter(
+			MaterialInstance,
+			ParameterInfo,
+			ScalarExpressionGuid,
+			BeforeScalarValue,
+			bBeforeOverride,
+			BeforeExpressionGuid))
 		{
 			UE_LOG(LogAssetPatch, Error, TEXT("Could not read material scalar parameter."));
 			return 17;
@@ -1435,8 +1656,18 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			EMaterialParameterAssociation::GlobalParameter);
 
 		float AfterScalarValue = 0.0f;
-		if (!ReadScalarParameter(MaterialInstance, ParameterInfo, AfterScalarValue)
-			|| !FMath::IsNearlyEqual(AfterScalarValue, NewScalarValue, UE_SMALL_NUMBER))
+		bool bAfterOverride = false;
+		FGuid AfterExpressionGuid;
+		if (!ReadScalarParameter(
+				MaterialInstance,
+				ParameterInfo,
+				ScalarExpressionGuid,
+				AfterScalarValue,
+				bAfterOverride,
+				AfterExpressionGuid)
+			|| !FMath::IsNearlyEqual(AfterScalarValue, NewScalarValue, UE_SMALL_NUMBER)
+			|| !bAfterOverride
+			|| AfterExpressionGuid != ScalarExpressionGuid)
 		{
 			MaterialInstance->ScalarParameterValues = OriginalScalarParameters;
 			UMaterialEditingLibrary::UpdateMaterialInstance(MaterialInstance);
@@ -1449,6 +1680,8 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		bool bRolledBack = false;
 		bool bStructureMatch = true;
 		float RestoredScalarValue = BeforeScalarValue;
+		bool bRestoredOverride = bBeforeOverride;
+		FGuid RestoredExpressionGuid = BeforeExpressionGuid;
 		if (bCommit)
 		{
 			if (!SaveAssetPackage(MaterialInstance, PackageFilename, Error))
@@ -1467,7 +1700,13 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			bStructureMatch = ScalarParameterArraysEqualExact(
 				OriginalScalarParameters,
 				MaterialInstance->ScalarParameterValues);
-			if (!ReadScalarParameter(MaterialInstance, ParameterInfo, RestoredScalarValue))
+			if (!ReadScalarParameter(
+				MaterialInstance,
+				ParameterInfo,
+				ScalarExpressionGuid,
+				RestoredScalarValue,
+				bRestoredOverride,
+				RestoredExpressionGuid))
 			{
 				UE_LOG(LogAssetPatch, Error, TEXT("Could not read restored material scalar parameter."));
 				return 22;
@@ -1477,8 +1716,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 
 		const FString AfterRevision = HashPackageFile(Package);
 		const bool bRestoredValueMatch =
-			!bRolledBack
-			|| FMath::IsNearlyEqual(RestoredScalarValue, BeforeScalarValue, UE_SMALL_NUMBER);
+			FMath::IsNearlyEqual(RestoredScalarValue, BeforeScalarValue, UE_SMALL_NUMBER);
 		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
 		Report->SetStringField(TEXT("executorVersion"), TEXT("0.5.1"));
@@ -1489,19 +1727,27 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		Report->SetStringField(TEXT("assetClass"), ActualAssetClass);
 		Report->SetStringField(TEXT("operation"), Operation);
 		Report->SetObjectField(TEXT("target"), TargetObject);
-		Report->SetStringField(
-			TEXT("targetDescription"),
-			TEXT("material-instance-scalar:") + ParameterNameText);
-		Report->SetStringField(TEXT("targetType"), TEXT("MaterialScalarParameter(float)"));
-		Report->SetStringField(TEXT("beforeValue"), FormatScalarParameterValue(BeforeScalarValue));
-		Report->SetStringField(TEXT("afterValue"), FormatScalarParameterValue(AfterScalarValue));
-		Report->SetStringField(TEXT("restoredValue"), FormatScalarParameterValue(RestoredScalarValue));
+		AddMaterialParameterReport(
+			Report,
+			ParameterNameText,
+			TEXT("Scalar"),
+			MakeShared<FJsonValueNumber>(BeforeScalarValue),
+			MakeShared<FJsonValueNumber>(AfterScalarValue),
+			MakeShared<FJsonValueNumber>(RestoredScalarValue),
+			bBeforeOverride,
+			bAfterOverride,
+			bRestoredOverride,
+			BeforeExpressionGuid,
+			AfterExpressionGuid,
+			RestoredExpressionGuid,
+			!FMath::IsNearlyEqual(AfterScalarValue, BeforeScalarValue, UE_SMALL_NUMBER),
+			bRestoredValueMatch,
+			bRolledBack);
 		Report->SetStringField(TEXT("beforeRevision"), BeforeRevision);
 		Report->SetStringField(TEXT("afterRevision"), AfterRevision);
 		Report->SetBoolField(TEXT("compiled"), false);
 		Report->SetBoolField(TEXT("saved"), bSaved);
 		Report->SetBoolField(TEXT("rolledBack"), bRolledBack);
-		Report->SetBoolField(TEXT("rollbackValueMatch"), bRestoredValueMatch);
 		Report->SetBoolField(TEXT("rollbackStructureMatch"), !bRolledBack || bStructureMatch);
 		Report->SetBoolField(
 			TEXT("diskUnchanged"),
@@ -1515,6 +1761,14 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			}
 			UE_LOG(LogAssetPatch, Error, TEXT("%s Disk backup restored."), *Error);
 			return 23;
+		}
+		if (bRolledBack
+			&& (!Report->GetBoolField(TEXT("rollbackStateMatch"))
+				|| !bStructureMatch
+				|| !BeforeRevision.Equals(AfterRevision, ESearchCase::IgnoreCase)))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Material parameter Dry Run rollback verification failed."));
+			return 22;
 		}
 
 		UE_LOG(
@@ -1603,14 +1857,28 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			static_cast<float>(A));
 
 		FMaterialParameterInfo ParameterInfo;
-		if (!FindGlobalVectorParameter(MaterialInstance, FName(*ParameterNameText), ParameterInfo, Error))
+		FGuid VectorExpressionGuid;
+		if (!FindGlobalVectorParameter(
+			MaterialInstance,
+			FName(*ParameterNameText),
+			ParameterInfo,
+			VectorExpressionGuid,
+			Error))
 		{
 			UE_LOG(LogAssetPatch, Error, TEXT("%s"), *Error);
 			return 17;
 		}
 
 		FLinearColor BeforeVectorValue = FLinearColor::Black;
-		if (!ReadVectorParameter(MaterialInstance, ParameterInfo, BeforeVectorValue))
+		bool bBeforeOverride = false;
+		FGuid BeforeExpressionGuid;
+		if (!ReadVectorParameter(
+			MaterialInstance,
+			ParameterInfo,
+			VectorExpressionGuid,
+			BeforeVectorValue,
+			bBeforeOverride,
+			BeforeExpressionGuid))
 		{
 			UE_LOG(LogAssetPatch, Error, TEXT("Could not read material vector parameter."));
 			return 17;
@@ -1638,8 +1906,18 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			EMaterialParameterAssociation::GlobalParameter);
 
 		FLinearColor AfterVectorValue = FLinearColor::Black;
-		if (!ReadVectorParameter(MaterialInstance, ParameterInfo, AfterVectorValue)
-			|| !AfterVectorValue.Equals(NewVectorValue, UE_SMALL_NUMBER))
+		bool bAfterOverride = false;
+		FGuid AfterExpressionGuid;
+		if (!ReadVectorParameter(
+				MaterialInstance,
+				ParameterInfo,
+				VectorExpressionGuid,
+				AfterVectorValue,
+				bAfterOverride,
+				AfterExpressionGuid)
+			|| !AfterVectorValue.Equals(NewVectorValue, UE_SMALL_NUMBER)
+			|| !bAfterOverride
+			|| AfterExpressionGuid != VectorExpressionGuid)
 		{
 			MaterialInstance->VectorParameterValues = OriginalVectorParameters;
 			UMaterialEditingLibrary::UpdateMaterialInstance(MaterialInstance);
@@ -1652,6 +1930,8 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		bool bRolledBack = false;
 		bool bStructureMatch = true;
 		FLinearColor RestoredVectorValue = BeforeVectorValue;
+		bool bRestoredOverride = bBeforeOverride;
+		FGuid RestoredExpressionGuid = BeforeExpressionGuid;
 		if (bCommit)
 		{
 			if (!SaveAssetPackage(MaterialInstance, PackageFilename, Error))
@@ -1670,7 +1950,13 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			bStructureMatch = VectorParameterArraysEqualExact(
 				OriginalVectorParameters,
 				MaterialInstance->VectorParameterValues);
-			if (!ReadVectorParameter(MaterialInstance, ParameterInfo, RestoredVectorValue))
+			if (!ReadVectorParameter(
+				MaterialInstance,
+				ParameterInfo,
+				VectorExpressionGuid,
+				RestoredVectorValue,
+				bRestoredOverride,
+				RestoredExpressionGuid))
 			{
 				UE_LOG(LogAssetPatch, Error, TEXT("Could not read restored material vector parameter."));
 				return 22;
@@ -1680,7 +1966,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 
 		const FString AfterRevision = HashPackageFile(Package);
 		const bool bRestoredValueMatch =
-			!bRolledBack || RestoredVectorValue.Equals(BeforeVectorValue, UE_SMALL_NUMBER);
+			RestoredVectorValue.Equals(BeforeVectorValue, UE_SMALL_NUMBER);
 		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
 		Report->SetStringField(TEXT("executorVersion"), TEXT("0.5.1"));
@@ -1691,19 +1977,27 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		Report->SetStringField(TEXT("assetClass"), ActualAssetClass);
 		Report->SetStringField(TEXT("operation"), Operation);
 		Report->SetObjectField(TEXT("target"), TargetObject);
-		Report->SetStringField(
-			TEXT("targetDescription"),
-			TEXT("material-instance-vector:") + ParameterNameText);
-		Report->SetStringField(TEXT("targetType"), TEXT("MaterialVectorParameter(FLinearColor)"));
-		Report->SetStringField(TEXT("beforeValue"), FormatVectorParameterValue(BeforeVectorValue));
-		Report->SetStringField(TEXT("afterValue"), FormatVectorParameterValue(AfterVectorValue));
-		Report->SetStringField(TEXT("restoredValue"), FormatVectorParameterValue(RestoredVectorValue));
+		AddMaterialParameterReport(
+			Report,
+			ParameterNameText,
+			TEXT("Vector"),
+			MakeShared<FJsonValueObject>(MakeMaterialVectorValue(BeforeVectorValue)),
+			MakeShared<FJsonValueObject>(MakeMaterialVectorValue(AfterVectorValue)),
+			MakeShared<FJsonValueObject>(MakeMaterialVectorValue(RestoredVectorValue)),
+			bBeforeOverride,
+			bAfterOverride,
+			bRestoredOverride,
+			BeforeExpressionGuid,
+			AfterExpressionGuid,
+			RestoredExpressionGuid,
+			!AfterVectorValue.Equals(BeforeVectorValue, UE_SMALL_NUMBER),
+			bRestoredValueMatch,
+			bRolledBack);
 		Report->SetStringField(TEXT("beforeRevision"), BeforeRevision);
 		Report->SetStringField(TEXT("afterRevision"), AfterRevision);
 		Report->SetBoolField(TEXT("compiled"), false);
 		Report->SetBoolField(TEXT("saved"), bSaved);
 		Report->SetBoolField(TEXT("rolledBack"), bRolledBack);
-		Report->SetBoolField(TEXT("rollbackValueMatch"), bRestoredValueMatch);
 		Report->SetBoolField(TEXT("rollbackStructureMatch"), !bRolledBack || bStructureMatch);
 		Report->SetBoolField(
 			TEXT("diskUnchanged"),
@@ -1717,6 +2011,14 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			}
 			UE_LOG(LogAssetPatch, Error, TEXT("%s Disk backup restored."), *Error);
 			return 23;
+		}
+		if (bRolledBack
+			&& (!Report->GetBoolField(TEXT("rollbackStateMatch"))
+				|| !bStructureMatch
+				|| !BeforeRevision.Equals(AfterRevision, ESearchCase::IgnoreCase)))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Material parameter Dry Run rollback verification failed."));
+			return 22;
 		}
 
 		UE_LOG(
@@ -1790,14 +2092,28 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		}
 
 		FMaterialParameterInfo ParameterInfo;
-		if (!FindGlobalTextureParameter(MaterialInstance, FName(*ParameterNameText), ParameterInfo, Error))
+		FGuid TextureExpressionGuid;
+		if (!FindGlobalTextureParameter(
+			MaterialInstance,
+			FName(*ParameterNameText),
+			ParameterInfo,
+			TextureExpressionGuid,
+			Error))
 		{
 			UE_LOG(LogAssetPatch, Error, TEXT("%s"), *Error);
 			return 17;
 		}
 
 		UTexture* BeforeTextureValue = nullptr;
-		if (!ReadTextureParameter(MaterialInstance, ParameterInfo, BeforeTextureValue))
+		bool bBeforeOverride = false;
+		FGuid BeforeExpressionGuid;
+		if (!ReadTextureParameter(
+			MaterialInstance,
+			ParameterInfo,
+			TextureExpressionGuid,
+			BeforeTextureValue,
+			bBeforeOverride,
+			BeforeExpressionGuid))
 		{
 			UE_LOG(LogAssetPatch, Error, TEXT("Could not read material texture parameter."));
 			return 17;
@@ -1827,8 +2143,18 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			EMaterialParameterAssociation::GlobalParameter);
 
 		UTexture* AfterTextureValue = nullptr;
-		if (!ReadTextureParameter(MaterialInstance, ParameterInfo, AfterTextureValue)
-			|| AfterTextureValue != NewTexture)
+		bool bAfterOverride = false;
+		FGuid AfterExpressionGuid;
+		if (!ReadTextureParameter(
+				MaterialInstance,
+				ParameterInfo,
+				TextureExpressionGuid,
+				AfterTextureValue,
+				bAfterOverride,
+				AfterExpressionGuid)
+			|| AfterTextureValue != NewTexture
+			|| !bAfterOverride
+			|| AfterExpressionGuid != TextureExpressionGuid)
 		{
 			MaterialInstance->TextureParameterValues = OriginalTextureParameters;
 			UMaterialEditingLibrary::UpdateMaterialInstance(MaterialInstance);
@@ -1841,6 +2167,8 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		bool bRolledBack = false;
 		bool bStructureMatch = true;
 		UTexture* RestoredTextureValue = BeforeTextureValue;
+		bool bRestoredOverride = bBeforeOverride;
+		FGuid RestoredExpressionGuid = BeforeExpressionGuid;
 		if (bCommit)
 		{
 			if (!SaveAssetPackage(MaterialInstance, PackageFilename, Error))
@@ -1859,7 +2187,13 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			bStructureMatch = TextureParameterArraysEqualExact(
 				OriginalTextureParameters,
 				MaterialInstance->TextureParameterValues);
-			if (!ReadTextureParameter(MaterialInstance, ParameterInfo, RestoredTextureValue))
+			if (!ReadTextureParameter(
+				MaterialInstance,
+				ParameterInfo,
+				TextureExpressionGuid,
+				RestoredTextureValue,
+				bRestoredOverride,
+				RestoredExpressionGuid))
 			{
 				UE_LOG(LogAssetPatch, Error, TEXT("Could not read restored material texture parameter."));
 				return 22;
@@ -1868,7 +2202,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		}
 
 		const FString AfterRevision = HashPackageFile(Package);
-		const bool bRestoredValueMatch = !bRolledBack || RestoredTextureValue == BeforeTextureValue;
+		const bool bRestoredValueMatch = RestoredTextureValue == BeforeTextureValue;
 		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
 		Report->SetStringField(TEXT("executorVersion"), TEXT("0.5.1"));
@@ -1879,13 +2213,22 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		Report->SetStringField(TEXT("assetClass"), ActualAssetClass);
 		Report->SetStringField(TEXT("operation"), Operation);
 		Report->SetObjectField(TEXT("target"), TargetObject);
-		Report->SetStringField(
-			TEXT("targetDescription"),
-			TEXT("material-instance-texture:") + ParameterNameText);
-		Report->SetStringField(TEXT("targetType"), TEXT("MaterialTextureParameter(UTexture)"));
-		Report->SetStringField(TEXT("beforeValue"), FormatTextureParameterValue(BeforeTextureValue));
-		Report->SetStringField(TEXT("afterValue"), FormatTextureParameterValue(AfterTextureValue));
-		Report->SetStringField(TEXT("restoredValue"), FormatTextureParameterValue(RestoredTextureValue));
+		AddMaterialParameterReport(
+			Report,
+			ParameterNameText,
+			TEXT("Texture"),
+			MakeMaterialTextureValue(BeforeTextureValue),
+			MakeMaterialTextureValue(AfterTextureValue),
+			MakeMaterialTextureValue(RestoredTextureValue),
+			bBeforeOverride,
+			bAfterOverride,
+			bRestoredOverride,
+			BeforeExpressionGuid,
+			AfterExpressionGuid,
+			RestoredExpressionGuid,
+			AfterTextureValue != BeforeTextureValue,
+			bRestoredValueMatch,
+			bRolledBack);
 		Report->SetStringField(TEXT("referencedAssetPath"), NewTexturePath);
 		Report->SetStringField(TEXT("referencedAssetClass"), NewTextureClass);
 		Report->SetStringField(TEXT("beforeRevision"), BeforeRevision);
@@ -1893,7 +2236,6 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		Report->SetBoolField(TEXT("compiled"), false);
 		Report->SetBoolField(TEXT("saved"), bSaved);
 		Report->SetBoolField(TEXT("rolledBack"), bRolledBack);
-		Report->SetBoolField(TEXT("rollbackValueMatch"), bRestoredValueMatch);
 		Report->SetBoolField(TEXT("rollbackStructureMatch"), !bRolledBack || bStructureMatch);
 		Report->SetBoolField(
 			TEXT("diskUnchanged"),
@@ -1907,6 +2249,14 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			}
 			UE_LOG(LogAssetPatch, Error, TEXT("%s Disk backup restored."), *Error);
 			return 23;
+		}
+		if (bRolledBack
+			&& (!Report->GetBoolField(TEXT("rollbackStateMatch"))
+				|| !bStructureMatch
+				|| !BeforeRevision.Equals(AfterRevision, ESearchCase::IgnoreCase)))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Material parameter Dry Run rollback verification failed."));
+			return 22;
 		}
 
 		UE_LOG(
@@ -2064,11 +2414,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		}
 
 		const FString AfterRevision = HashPackageFile(Package);
-		const bool bRestoredValueMatch =
-			!bRolledBack
-			|| (RestoredSwitchValue == BeforeSwitchValue
-				&& RestoredExpressionGuid == BeforeExpressionGuid
-				&& bRestoredOverride == bBeforeOverride);
+		const bool bRestoredValueMatch = RestoredSwitchValue == BeforeSwitchValue;
 		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
 		Report->SetStringField(TEXT("executorVersion"), TEXT("0.5.1"));
@@ -2079,25 +2425,27 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		Report->SetStringField(TEXT("assetClass"), ActualAssetClass);
 		Report->SetStringField(TEXT("operation"), Operation);
 		Report->SetObjectField(TEXT("target"), TargetObject);
-		Report->SetStringField(
-			TEXT("targetDescription"),
-			TEXT("material-instance-static-switch:") + ParameterNameText);
-		Report->SetStringField(TEXT("targetType"), TEXT("MaterialStaticSwitchParameter(bool)"));
-		Report->SetBoolField(TEXT("beforeValue"), BeforeSwitchValue);
-		Report->SetBoolField(TEXT("afterValue"), AfterSwitchValue);
-		Report->SetBoolField(TEXT("restoredValue"), RestoredSwitchValue);
-		Report->SetStringField(TEXT("beforeExpressionGuid"), BeforeExpressionGuid.ToString(EGuidFormats::DigitsWithHyphensLower));
-		Report->SetStringField(TEXT("afterExpressionGuid"), AfterExpressionGuid.ToString(EGuidFormats::DigitsWithHyphensLower));
-		Report->SetStringField(TEXT("restoredExpressionGuid"), RestoredExpressionGuid.ToString(EGuidFormats::DigitsWithHyphensLower));
-		Report->SetBoolField(TEXT("beforeOverride"), bBeforeOverride);
-		Report->SetBoolField(TEXT("afterOverride"), bAfterOverride);
-		Report->SetBoolField(TEXT("restoredOverride"), bRestoredOverride);
+		AddMaterialParameterReport(
+			Report,
+			ParameterNameText,
+			TEXT("StaticSwitch"),
+			MakeShared<FJsonValueBoolean>(BeforeSwitchValue),
+			MakeShared<FJsonValueBoolean>(AfterSwitchValue),
+			MakeShared<FJsonValueBoolean>(RestoredSwitchValue),
+			bBeforeOverride,
+			bAfterOverride,
+			bRestoredOverride,
+			BeforeExpressionGuid,
+			AfterExpressionGuid,
+			RestoredExpressionGuid,
+			AfterSwitchValue != BeforeSwitchValue,
+			bRestoredValueMatch,
+			bRolledBack);
 		Report->SetStringField(TEXT("beforeRevision"), BeforeRevision);
 		Report->SetStringField(TEXT("afterRevision"), AfterRevision);
 		Report->SetBoolField(TEXT("compiled"), false);
 		Report->SetBoolField(TEXT("saved"), bSaved);
 		Report->SetBoolField(TEXT("rolledBack"), bRolledBack);
-		Report->SetBoolField(TEXT("rollbackValueMatch"), bRestoredValueMatch);
 		Report->SetBoolField(TEXT("rollbackStructureMatch"), !bRolledBack || bStructureMatch);
 		Report->SetBoolField(
 			TEXT("diskUnchanged"),
@@ -2111,6 +2459,14 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			}
 			UE_LOG(LogAssetPatch, Error, TEXT("%s Disk backup restored."), *Error);
 			return 23;
+		}
+		if (bRolledBack
+			&& (!Report->GetBoolField(TEXT("rollbackStateMatch"))
+				|| !bStructureMatch
+				|| !BeforeRevision.Equals(AfterRevision, ESearchCase::IgnoreCase)))
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Material parameter Dry Run rollback verification failed."));
+			return 22;
 		}
 
 		UE_LOG(

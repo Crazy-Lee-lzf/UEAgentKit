@@ -178,7 +178,7 @@ namespace AssetReaderRegistryPrivate
 		}
 
 		OutDetails->SetStringField(TEXT("type"), TEXT("material-instance"));
-		OutDetails->SetNumberField(TEXT("readerVersion"), 1);
+		OutDetails->SetNumberField(TEXT("readerVersion"), 2);
 		OutDetails->SetStringField(TEXT("parentPath"), ObjectPathOrEmpty(Instance->Parent));
 		OutDetails->SetStringField(TEXT("blendMode"), BlendModeToString(Instance->GetBlendMode()));
 		OutDetails->SetNumberField(TEXT("blendModeValue"), static_cast<int32>(Instance->GetBlendMode()));
@@ -199,6 +199,10 @@ namespace AssetReaderRegistryPrivate
 		{
 			TSharedRef<FJsonObject> Json = MaterialParameterInfoToJson(Parameter->ParameterInfo);
 			Json->SetNumberField(TEXT("value"), Parameter->ParameterValue);
+			Json->SetBoolField(TEXT("override"), true);
+			Json->SetStringField(
+				TEXT("expressionGuid"),
+				Parameter->ExpressionGUID.ToString(EGuidFormats::DigitsWithHyphensLower));
 			ScalarValues.Add(MakeShared<FJsonValueObject>(Json));
 		}
 		OutDetails->SetNumberField(TEXT("scalarParameterCount"), ScalarValues.Num());
@@ -215,6 +219,10 @@ namespace AssetReaderRegistryPrivate
 		{
 			TSharedRef<FJsonObject> Json = MaterialParameterInfoToJson(Parameter->ParameterInfo);
 			Json->SetObjectField(TEXT("value"), LinearColorToJson(Parameter->ParameterValue));
+			Json->SetBoolField(TEXT("override"), true);
+			Json->SetStringField(
+				TEXT("expressionGuid"),
+				Parameter->ExpressionGUID.ToString(EGuidFormats::DigitsWithHyphensLower));
 			VectorValues.Add(MakeShared<FJsonValueObject>(Json));
 		}
 		OutDetails->SetNumberField(TEXT("vectorParameterCount"), VectorValues.Num());
@@ -247,6 +255,10 @@ namespace AssetReaderRegistryPrivate
 		{
 			TSharedRef<FJsonObject> Json = MaterialParameterInfoToJson(Parameter->ParameterInfo);
 			Json->SetStringField(TEXT("valuePath"), ObjectPathOrEmpty(Parameter->ParameterValue));
+			Json->SetBoolField(TEXT("override"), true);
+			Json->SetStringField(
+				TEXT("expressionGuid"),
+				Parameter->ExpressionGUID.ToString(EGuidFormats::DigitsWithHyphensLower));
 			TextureValues.Add(MakeShared<FJsonValueObject>(Json));
 		}
 		OutDetails->SetNumberField(TEXT("textureParameterCount"), TextureValues.Num());

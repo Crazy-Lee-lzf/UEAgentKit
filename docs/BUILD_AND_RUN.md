@@ -246,7 +246,7 @@ scripts\RunPatch.cmd ^
 - 每次一个资产、一个 Operation。
 - Blueprint 支持 `setVariableDefault`、`setComponentProperty`、`setPinDefault`、`setBlueprintDescription`。
 - 非 Blueprint 标量属性使用 `setAssetProperty`；Data Asset Object/Class 与 Soft Object/Class 引用使用 `setAssetReferenceProperty`；顶层 Struct、Array、Set、Map 使用 `setAssetStructuredProperty`。三者都必须用 `AssetClass#Property.Path` 精确授权。
-- Material Instance 支持 `setMaterialInstanceScalarParameter`、`setMaterialInstanceVectorParameter`、`setMaterialInstanceTextureParameter` 和 `setMaterialInstanceStaticSwitchParameter`；Policy 使用 `AssetClass#Type#ParameterName` 精确授权。
+- Material Instance 支持 `setMaterialInstanceScalarParameter`、`setMaterialInstanceVectorParameter`、`setMaterialInstanceTextureParameter` 和 `setMaterialInstanceStaticSwitchParameter`；Policy 使用 `AssetClass#Type#ParameterName` 精确授权。 四类报告统一使用原生 JSON 值、Override、Expression GUID、结构化 `materialParameter` Diff，以及值/元数据/数组结构三层 Dry Run 恢复门禁；完整回归运行 `scripts\TestMaterialInstanceParameters.cmd`。
 - DataTable 支持 `setDataTableCell`；Policy 使用 `AssetClass#RowStructPath#FieldName` 精确授权，首版仅修改现有 Row 的一个顶层标量字段。
 - 变量和组件属性支持 Bool、整数、浮点、String、Name、Text。
 - Pin 支持未连接、可编辑的输入 Pin，值为布尔、数值或字符串。

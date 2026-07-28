@@ -359,6 +359,22 @@ Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目�
 - Material Instance 只读 Reader 额外导出 `expressionGuid`，用于独立 UE 进程重载验证。
 - 已在真实 `Logo?` 参数上完成 Dry Run、Commit、唯一备份、独立重载和过期 Revision 拒绝验证。
 
+### Material Instance 统一报告契约
+
+四类 Material Instance 参数 Operation 使用同一报告模型：
+
+- `targetType` 固定为 `MaterialInstanceParameter`。
+- `targetDescription` 固定为 `material-instance-parameter:<Type>:<ParameterName>`。
+- `parameterType` 为 `Scalar`、`Vector`、`Texture` 或 `StaticSwitch`；`parameterAssociation` 固定为 `Global`。
+- `beforeValue`、`afterValue` 和 `restoredValue` 使用原生 JSON 类型：Scalar 为 number，Vector 为 `{r,g,b,a}`，Texture 为对象路径 string 或 `null`，Static Switch 为 boolean。
+- `beforeOverride`、`afterOverride`、`restoredOverride` 与对应的 `*ExpressionGuid` 记录完整参数元数据。
+- `materialParameter.before/after/restored` 将值、Override、来源和 Expression GUID 组合为稳定状态对象。
+- `materialParameter.change` 和 `materialParameter.rollbackChange` 分别报告值、Override 和 GUID 是否变化。
+- 成功 Dry Run 必须同时满足 `rollbackValueMatch=true`、`rollbackMetadataMatch=true`、`rollbackStateMatch=true`、`rollbackStructureMatch=true` 和 `diskUnchanged=true`。
+- Material Instance Reader version 2 为 Scalar、Vector、Texture 和 Static Switch Override 导出 `override` 与 `expressionGuid`，用于独立 UE 进程重载验证。
+
+真实 UE5.6 回归入口为 `scripts\TestMaterialInstanceParameters.cmd`；它通过声明式 Duplicate Fixture 对四类参数逐项执行 Dry Run、Commit、独立导出、rollback 和最终 Revision 恢复。
+
 ### setDataTableCell
 
 修改 `DataTable` 中一个现有 Row 的一个顶层标量字段：

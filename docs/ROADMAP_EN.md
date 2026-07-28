@@ -26,16 +26,16 @@ Combined  43 tools
 - Policy, Revision, Dry Run, explicit Commit, Backup Manifest, independent reload verification, and rollback.
 - Atomic DataTable row-field updates, controlled row add/remove/rename, and exact Searchable Name reference-impact gates.
 - Data Asset Object/Class and Soft Object/Class references plus stable Struct, Array, Set, and Map values with structured diffs.
+- Unified native-JSON state/diff reports, Override/Expression GUID metadata, and real four-type regressions for Material Instance Scalar, Vector, Texture, and Static Switch parameters.
 
 ## 0.5.x: daily-development consolidation
 
 Remaining order:
 
-1. **Unify Material Instance parameter workflows and reports** across Scalar, Vector, Texture, and Static Switch targets, values, override state, expression GUIDs, diffs, and reports.
-2. **Bind validation evidence** from Automation Tests and Data Validation to the project, Editor session, timestamp, and relevant Asset Revision or Revision Set.
-3. **Add atomic multi-operation transactions for one asset** with one Plan, Dry Run, backup, Commit, independent verification, and whole-transaction rollback.
-4. **Close an official 0.5.x release** with consistent versions, changelog, release notes, artifacts, and Git tag.
-5. Add specialized Input Mapping Context writes only when real project demand justifies them.
+1. **Bind validation evidence** from Automation Tests and Data Validation to the project, Editor session, timestamp, and relevant Asset Revision or Revision Set.
+2. **Add atomic multi-operation transactions for one asset** with one Plan, Dry Run, backup, Commit, independent verification, and whole-transaction rollback.
+3. **Close an official 0.5.x release** with consistent versions, changelog, release notes, artifacts, and Git tag.
+4. Add specialized Input Mapping Context writes only when real project demand justifies them.
 
 Complete Blueprint Graph, Material Graph, Anim State Machine, Control Rig, Sequencer, Niagara writes, and arbitrary script execution remain out of scope for 0.5.x.
 

@@ -26,16 +26,16 @@ Combined  43 Tool
 - Policy、Revision、Dry Run、显式 Commit、Backup Manifest、独立重载验证和 rollback。
 - DataTable 单 Row 多字段、Row 新增/删除/重命名和 Searchable Name 引用影响门禁。
 - Data Asset Object/Class、Soft Object/Class、Struct、Array、Set 和 Map 稳定值模型与结构化 Diff。
+- Material Instance Scalar、Vector、Texture、Static Switch 统一原生 JSON 状态/Diff 报告、Override/Expression GUID 元数据和真实四类型回归。
 
 ## 0.5.x：日常开发能力收口
 
 剩余实施顺序：
 
-1. **Material Instance 参数工作流与报告统一**：统一 Scalar、Vector、Texture、Static Switch 的目标、值、Override、Expression GUID、Diff 和报告契约。
-2. **验证证据绑定**：Automation Test 和 Data Validation 结果绑定 Project、Editor Session、时间与 Asset Revision/Revision Set。
-3. **单资产多 Operation 原子事务**：一次 Plan、Dry Run、备份、Commit、独立验证和整体 rollback。
-4. **正式发布收口**：统一版本号、CHANGELOG、发布说明、构建产物和 Git Tag。
-5. Input Mapping Context 等专用写入仅在真实项目需求出现后增加。
+1. **验证证据绑定**：Automation Test 和 Data Validation 结果绑定 Project、Editor Session、时间和 Asset Revision/Revision Set。
+2. **单资产多 Operation 原子事务**：一次 Plan、Dry Run、备份、Commit、独立验证和整体 rollback。
+3. **正式发布收口**：统一版本号、CHANGELOG、发布说明、构建产物和 Git Tag。
+4. Input Mapping Context 等专用写入仅在真实项目需求出现后增加。
 
 完整 Blueprint Graph、Material Graph、Anim State Machine、Control Rig、Sequencer、Niagara 写入和任意脚本执行不属于 0.5.x 范围。
 

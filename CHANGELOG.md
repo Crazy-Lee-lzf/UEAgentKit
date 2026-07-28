@@ -6,6 +6,9 @@ All notable changes to UE Agent Kit are documented here.
 
 Development status: the latest published version remains 0.5.1, while `main` contains the following unreleased 0.5.2–0.5.4 work.
 
+- Unified Scalar, Vector, Texture, and Static Switch Material Instance reports under a native-JSON `materialParameter` state/diff contract, including Override, source, Expression GUID, rollback metadata, and full-state rollback gates.
+- Upgraded the Material Instance reader to version 2 with `override` and `expressionGuid` metadata for Scalar, Vector, Texture, and Static Switch overrides.
+- Added a reproducible real UE5.6 four-parameter Dry Run/Commit/independent-export/rollback regression using declarative duplicate fixtures and exact final Revision recovery.
 - Added the authenticated localhost Live Editor Bridge, live state/log/diagnostic/inspection tools, Blueprint Graph selection, bounded Daily Actions, exact-name Automation Tests, and Policy/Revision/session-bound authorized one-asset saves.
 - Added immutable single-asset index refresh, paired Revision Export/SQLite generations, four-source asset state, and frozen workflow-session semantics.
 - Centralized Tool Registry ownership and split MCP and Editor Bridge handlers by responsibility.
@@ -15,7 +18,7 @@ Development status: the latest published version remains 0.5.1, while `main` con
 - Expanded high-level safe-write entry points to 12 and registered Patch Operations to 16.
 - Current server modes are Offline 5, Live 23, Workflow 25, and Combined 43 tools.
 - Current regression baseline is Ruff plus 184 Python tests, 16 example Patch schemas, two schema meta-validations, UE5.6 Direct Build, and real Data Asset/DataTable Dry Run, Commit, independent reload, and rollback chains.
-- Remaining 0.5.x consolidation work: unified Material Instance parameter reports, Revision/session-bound validation evidence, single-asset multi-operation transactions, and an official version/release closeout.
+- Remaining 0.5.x consolidation work: Revision/session-bound validation evidence, single-asset multi-operation transactions, and an official version/release closeout.
 
 ## 0.5.1 — MCP usability, freshness, and diagnostics
 

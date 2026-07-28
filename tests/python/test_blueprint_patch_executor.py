@@ -170,6 +170,11 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
             "TextureParameterArraysEqualExact",
             "StaticParameterSetsEqualExact",
             "ExpressionGuid",
+            "ReadMaterialParameterMetadata",
+            "AddMaterialParameterReport",
+            "materialParameter",
+            "rollbackMetadataMatch",
+            "rollbackStateMatch",
             "AllowedReferenceRoots",
             "AllowedReferenceClasses",
             "rollbackStructureMatch",
@@ -226,6 +231,22 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
             self.assertIn(token, source)
             self.assertLess(source.index(token), source.index("& $EditorCmd @Arguments"))
 
+
+
+    def test_material_instance_reader_exports_override_metadata(self) -> None:
+        source = (
+            ROOT
+            / "Plugin"
+            / "UEAgentKit"
+            / "Source"
+            / "UEAgentKitEditor"
+            / "Private"
+            / "AssetReaders"
+            / "MaterialAssetReaders.cpp"
+        ).read_text(encoding="utf-8")
+        self.assertIn('TEXT("readerVersion"), 2', source)
+        self.assertGreaterEqual(source.count('TEXT("override"), true'), 3)
+        self.assertGreaterEqual(source.count('TEXT("expressionGuid")'), 4)
 
 
     def test_release_version_is_consistent(self) -> None:
