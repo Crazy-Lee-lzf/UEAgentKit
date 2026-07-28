@@ -249,6 +249,33 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
         self.assertGreaterEqual(source.count('TEXT("expressionGuid")'), 4)
 
 
+    def test_validation_evidence_is_project_and_revision_bound(self) -> None:
+        private_root = ROOT / "Plugin" / "UEAgentKit" / "Source" / "UEAgentKitEditor" / "Private"
+        bridge = (private_root / "EditorBridge.cpp").read_text(encoding="utf-8")
+        validation = (private_root / "EditorBridgeValidationHandlers.cpp").read_text(encoding="utf-8")
+        automation = (private_root / "EditorBridgeAutomationHandlers.cpp").read_text(encoding="utf-8")
+        for token in (
+            "BuildValidationEvidence",
+            'TEXT("projectPathHash")',
+            'TEXT("editorSessionId")',
+            'TEXT("startedAtUtc")',
+            'TEXT("completedAtUtc")',
+            'TEXT("revisionCoverage")',
+            'TEXT("revisionSet")',
+        ):
+            self.assertIn(token, bridge)
+        for token in (
+            "CaptureValidationRevisions",
+            "CompleteValidationRevisionEvidence",
+            'TEXT("revisionStable")',
+            'TEXT("packageDirtyBefore")',
+            'TEXT("changedDuringActionCount")',
+        ):
+            self.assertIn(token, validation)
+        self.assertIn('TEXT("not-applicable")', automation)
+        self.assertIn('TEXT("isolated-unreal-editor-cmd")', automation)
+
+
     def test_release_version_is_consistent(self) -> None:
 
         expected_version = "0.5.1"

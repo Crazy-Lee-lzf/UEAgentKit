@@ -193,6 +193,19 @@ Bridge 注册为 `FOutputDevice`，保留最多 4096 条当前会话日志，并
 
 使用官方 `UEditorValidatorSubsystem::ValidateAssetsWithSettings`。单资产验证只接受精确 Object Path；文件夹验证只接受非根 `/Game/...` Package Path，可显式选择递归。Folder 在执行前统计并排序非 Redirector 资产，超过 `max_assets` 时拒绝；`max_assets` 硬上限 500，`max_issues` 硬上限 200。验证可临时加载资产并卸载本次加载项，不加载 External Objects，不保存 Package，并返回 Valid/Invalid/NotValidated、错误、警告、耗时和 Dirty Package 计数。
 
+## 验证证据契约
+
+`ue_validate_asset`、`ue_validate_folder` 和 `ue_run_automation_test` 的成功结果包含 `validationEvidence`：
+
+- `schemaVersion=1.0`、唯一 `evidenceId` 和 `source=tool-observed`。
+- 固定 `projectName`、脱敏 `projectPathHash`、`engineVersion`、`pluginVersion` 和父 `editorSessionId`。
+- `startedAtUtc`、`completedAtUtc` 和 `observedAtUtc`。
+- Asset/Folder 验证输出按 Asset Path 排序的 `revisionSet`；每项记录磁盘 Package 的验证前/后 SHA-256、Dirty 状态和 `revisionStable`。
+- `revisionCoverage=complete` 仅在所有 Package Revision 可用、无 Dirty 内存状态且执行期间磁盘未变化时成立，否则为 `partial`。
+- Automation Test 未声明资产输入，因此固定 `revisionCoverage=not-applicable`、空 `revisionSet` 和明确 `revisionRationale`；同时记录隔离子进程类型与 Process ID，不伪造 Asset Revision。
+
+该 Evidence 可直接作为后续 Project Memory 的 `RuntimeEvidence` 来源，但资产发生 Revision 变化后必须重新验证。
+
 ## 状态与 Revision 语义
 
 Editor Memory、磁盘、Revision Export 和 SQLite 是四个不同事实源：

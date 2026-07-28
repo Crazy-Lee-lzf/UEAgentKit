@@ -191,6 +191,10 @@ def _capabilities_response(
                 "automationSingleParticipantOnly": True,
                 "automationTimeoutSecondsMax": 300,
                 "automationReturnedEntryLimit": 200,
+                "validationEvidenceSchemaVersion": "1.0",
+                "validationEvidenceProjectBound": True,
+                "validationEvidenceRevisionSetBound": True,
+                "automationRevisionCoverage": "not-applicable",
             },
             "authorizedSave": {
                 "available": bool(live_editor_enabled and write_tools_enabled),

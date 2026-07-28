@@ -137,11 +137,42 @@ class _BridgeHandler(socketserver.StreamRequestHandler):
                 "action": "validate-assets",
                 "numRequested": 1,
                 "saved": False,
+                "validationEvidence": {
+                    "schemaVersion": "1.0",
+                    "evidenceId": "validation:test-asset",
+                    "source": "tool-observed",
+                    "scope": "asset",
+                    "projectName": "TestProject",
+                    "projectPathHash": "sha1:test",
+                    "editorSessionId": "session-test",
+                    "startedAtUtc": "2026-07-28T00:00:00Z",
+                    "completedAtUtc": "2026-07-28T00:00:01Z",
+                    "observedAtUtc": "2026-07-28T00:00:01Z",
+                    "revisionCoverage": "complete",
+                    "revisionSet": [{"assetPath": params.get("assetPath", ""), "revision": "sha256:a", "revisionStable": True}],
+                },
             },
             "editor.validateFolder": {
                 "action": "validate-assets",
                 "numRequested": 2,
                 "saved": False,
+                "validationEvidence": {
+                    "schemaVersion": "1.0",
+                    "evidenceId": "validation:test-folder",
+                    "source": "tool-observed",
+                    "scope": "folder",
+                    "projectName": "TestProject",
+                    "projectPathHash": "sha1:test",
+                    "editorSessionId": "session-test",
+                    "startedAtUtc": "2026-07-28T00:00:00Z",
+                    "completedAtUtc": "2026-07-28T00:00:01Z",
+                    "observedAtUtc": "2026-07-28T00:00:01Z",
+                    "revisionCoverage": "complete",
+                    "revisionSet": [
+                        {"assetPath": "/Game/Test/A.A", "revision": "sha256:a", "revisionStable": True},
+                        {"assetPath": "/Game/Test/B.B", "revision": "sha256:b", "revisionStable": True},
+                    ],
+                },
             },
             "editor.runAutomationTest": {
                 "action": "run-automation-test",
@@ -149,6 +180,20 @@ class _BridgeHandler(socketserver.StreamRequestHandler):
                 "state": "success",
                 "successful": True,
                 "saved": False,
+                "validationEvidence": {
+                    "schemaVersion": "1.0",
+                    "evidenceId": "validation:test-automation",
+                    "source": "tool-observed",
+                    "scope": "automation",
+                    "projectName": "TestProject",
+                    "projectPathHash": "sha1:test",
+                    "editorSessionId": "session-test",
+                    "startedAtUtc": "2026-07-28T00:00:00Z",
+                    "completedAtUtc": "2026-07-28T00:00:01Z",
+                    "observedAtUtc": "2026-07-28T00:00:01Z",
+                    "revisionCoverage": "not-applicable",
+                    "revisionSet": [],
+                },
             },
         }
         result = results.get(method)
@@ -337,6 +382,9 @@ class EditorBridgeTests(unittest.TestCase):
             },
         )
         self.assertFalse(folder["readOnly"])
+        self.assertEqual(folder["result"]["validationEvidence"]["scope"], "folder")
+        self.assertEqual(folder["result"]["validationEvidence"]["revisionCoverage"], "complete")
+        self.assertEqual(len(folder["result"]["validationEvidence"]["revisionSet"]), 2)
         request = self.server.requests[-1]  # type: ignore[attr-defined]
         self.assertEqual(request["params"]["packagePath"], "/Game/Test")
         self.assertFalse(request["params"]["recursive"] )
@@ -351,6 +399,9 @@ class EditorBridgeTests(unittest.TestCase):
         )
         self.assertFalse(automation["readOnly"])
         self.assertTrue(automation["result"]["successful"])
+        self.assertEqual(automation["result"]["validationEvidence"]["scope"], "automation")
+        self.assertEqual(automation["result"]["validationEvidence"]["revisionCoverage"], "not-applicable")
+        self.assertEqual(automation["result"]["validationEvidence"]["revisionSet"], [])
         request = self.server.requests[-1]  # type: ignore[attr-defined]
         self.assertEqual(request["params"]["timeoutSeconds"], 300)
         self.assertEqual(request["params"]["maxEntries"], 200)

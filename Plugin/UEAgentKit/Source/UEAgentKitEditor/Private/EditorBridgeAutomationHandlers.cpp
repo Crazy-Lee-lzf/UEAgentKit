@@ -8,6 +8,7 @@
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/DateTime.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
@@ -178,6 +179,7 @@ bool FUEAgentKitEditorBridge::TryStartAutomationTest(
 	PendingAutomation.Socket = Socket;
 	PendingAutomation.RequestId = RequestId;
 	PendingAutomation.TestName = TestName;
+	PendingAutomation.StartedAtUtc = FDateTime::UtcNow().ToIso8601();
 	PendingAutomation.ReportDirectory = ReportDirectory;
 	PendingAutomation.ReportPath = FPaths::Combine(ReportDirectory, TEXT("index.json"));
 	PendingAutomation.ProcessHandle = ProcessHandle;
@@ -248,6 +250,23 @@ void FUEAgentKitEditorBridge::CompleteAutomationTest(const bool bTimedOut)
 	};
 
 	IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+	const FString CompletedAtUtc = FDateTime::UtcNow().ToIso8601();
+	auto AddAutomationEvidence = [this, &Completed, &CompletedAtUtc](const TSharedRef<FJsonObject>& Result)
+	{
+		TSharedRef<FJsonObject> Evidence = BuildValidationEvidence(
+			TEXT("automation"),
+			Completed.StartedAtUtc,
+			CompletedAtUtc,
+			TEXT("not-applicable"));
+		Evidence->SetStringField(
+			TEXT("revisionRationale"),
+			TEXT("The exact Automation Test did not declare asset inputs."));
+		Evidence->SetStringField(TEXT("executionIsolation"), TEXT("isolated-unreal-editor-cmd"));
+		Evidence->SetNumberField(TEXT("executionProcessId"), Completed.ProcessId);
+		Result->SetStringField(TEXT("startedAtUtc"), Completed.StartedAtUtc);
+		Result->SetStringField(TEXT("completedAtUtc"), CompletedAtUtc);
+		Result->SetObjectField(TEXT("validationEvidence"), Evidence);
+	};
 	if (bTimedOut)
 	{
 		TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
@@ -265,6 +284,7 @@ void FUEAgentKitEditorBridge::CompleteAutomationTest(const bool bTimedOut)
 		Result->SetBoolField(TEXT("entriesTruncated"), false);
 		Result->SetArrayField(TEXT("entries"), {});
 		Result->SetBoolField(TEXT("saved"), false);
+		AddAutomationEvidence(Result);
 		SendResult(Completed.Socket, Completed.RequestId, Result);
 		FinishClient();
 		PlatformFile.DeleteDirectoryRecursively(*Completed.ReportDirectory);
@@ -389,6 +409,7 @@ void FUEAgentKitEditorBridge::CompleteAutomationTest(const bool bTimedOut)
 	Result->SetBoolField(TEXT("entriesTruncated"), EntryCount > ReturnedCount);
 	Result->SetArrayField(TEXT("entries"), Entries);
 	Result->SetBoolField(TEXT("saved"), false);
+	AddAutomationEvidence(Result);
 
 	SendResult(Completed.Socket, Completed.RequestId, Result);
 	FinishClient();

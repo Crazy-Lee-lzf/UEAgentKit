@@ -33,6 +33,7 @@ private:
 		FSocket* Socket = nullptr;
 		FString RequestId;
 		FString TestName;
+		FString StartedAtUtc;
 		FString ReportDirectory;
 		FString ReportPath;
 		FProcHandle ProcessHandle;
@@ -88,6 +89,11 @@ private:
 	bool WriteDescriptor();
 	void RemoveDescriptor();
 	FString ComputeProjectPathHash() const;
+	TSharedRef<FJsonObject> BuildValidationEvidence(
+		const FString& Scope,
+		const FString& StartedAtUtc,
+		const FString& CompletedAtUtc,
+		const FString& RevisionCoverage) const;
 	TArray<TSharedPtr<class FJsonValue>> BuildCapabilityValues() const;
 
 	FSocket* ListenSocket = nullptr;

@@ -6,6 +6,9 @@ All notable changes to UE Agent Kit are documented here.
 
 Development status: the latest published version remains 0.5.1, while `main` contains the following unreleased 0.5.2–0.5.4 work.
 
+- Added project/session/time-bound `validationEvidence` to Data Validation and exact Automation Test results.
+- Added deterministically ordered Asset Revision Sets with before/after Package SHA-256, Dirty-state provenance, stability checks, and explicit complete/partial coverage.
+- Marked asset-unspecified Automation evidence as `not-applicable` instead of inventing revisions, while recording isolated child-process provenance.
 - Unified Scalar, Vector, Texture, and Static Switch Material Instance reports under a native-JSON `materialParameter` state/diff contract, including Override, source, Expression GUID, rollback metadata, and full-state rollback gates.
 - Upgraded the Material Instance reader to version 2 with `override` and `expressionGuid` metadata for Scalar, Vector, Texture, and Static Switch overrides.
 - Added a reproducible real UE5.6 four-parameter Dry Run/Commit/independent-export/rollback regression using declarative duplicate fixtures and exact final Revision recovery.
@@ -18,7 +21,7 @@ Development status: the latest published version remains 0.5.1, while `main` con
 - Expanded high-level safe-write entry points to 12 and registered Patch Operations to 16.
 - Current server modes are Offline 5, Live 23, Workflow 25, and Combined 43 tools.
 - Current regression baseline is Ruff plus 184 Python tests, 16 example Patch schemas, two schema meta-validations, UE5.6 Direct Build, and real Data Asset/DataTable Dry Run, Commit, independent reload, and rollback chains.
-- Remaining 0.5.x consolidation work: Revision/session-bound validation evidence, single-asset multi-operation transactions, and an official version/release closeout.
+- Remaining 0.5.x consolidation work: single-asset multi-operation transactions and an official version/release closeout.
 
 ## 0.5.1 — MCP usability, freshness, and diagnostics
 

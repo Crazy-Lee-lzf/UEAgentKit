@@ -1082,6 +1082,32 @@ FString FUEAgentKitEditorBridge::ComputeProjectPathHash() const
 	return UEAgentKitEditorBridgePrivate::HashUtf8(UEAgentKitEditorBridgePrivate::NormalizeProjectPath());
 }
 
+TSharedRef<FJsonObject> FUEAgentKitEditorBridge::BuildValidationEvidence(
+	const FString& Scope,
+	const FString& StartedAtUtc,
+	const FString& CompletedAtUtc,
+	const FString& RevisionCoverage) const
+{
+	TSharedRef<FJsonObject> Evidence = MakeShared<FJsonObject>();
+	Evidence->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
+	Evidence->SetStringField(
+		TEXT("evidenceId"),
+		TEXT("validation:") + FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphensLower));
+	Evidence->SetStringField(TEXT("source"), TEXT("tool-observed"));
+	Evidence->SetStringField(TEXT("scope"), Scope);
+	Evidence->SetStringField(TEXT("projectName"), FApp::GetProjectName());
+	Evidence->SetStringField(TEXT("projectPathHash"), ProjectPathHash);
+	Evidence->SetStringField(TEXT("engineVersion"), FEngineVersion::Current().ToString());
+	Evidence->SetStringField(TEXT("pluginVersion"), UEAgentKitEditorBridgePrivate::PluginVersion);
+	Evidence->SetStringField(TEXT("editorSessionId"), SessionId);
+	Evidence->SetStringField(TEXT("startedAtUtc"), StartedAtUtc);
+	Evidence->SetStringField(TEXT("completedAtUtc"), CompletedAtUtc);
+	Evidence->SetStringField(TEXT("observedAtUtc"), CompletedAtUtc);
+	Evidence->SetStringField(TEXT("revisionCoverage"), RevisionCoverage);
+	Evidence->SetArrayField(TEXT("revisionSet"), {});
+	return Evidence;
+}
+
 TArray<TSharedPtr<FJsonValue>> FUEAgentKitEditorBridge::BuildCapabilityValues() const
 {
 	TArray<TSharedPtr<FJsonValue>> Values;

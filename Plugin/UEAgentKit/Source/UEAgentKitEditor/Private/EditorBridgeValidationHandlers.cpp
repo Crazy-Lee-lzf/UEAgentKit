@@ -1,6 +1,7 @@
 #include "EditorBridge.h"
 #include "EditorBridgeHandlerUtils.h"
 #include "EditorBridgeLogCapture.h"
+#include "BlueprintContextSha256.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Dom/JsonObject.h"
@@ -10,6 +11,8 @@
 #include "Engine/Blueprint.h"
 #include "HAL/PlatformTime.h"
 #include "Kismet2/KismetEditorUtilities.h"
+#include "Misc/DateTime.h"
+#include "Misc/PackageName.h"
 #include "Modules/ModuleManager.h"
 #include "UObject/Package.h"
 #include "UObject/SoftObjectPath.h"
@@ -58,6 +61,109 @@ namespace
 			return false;
 		}
 		return true;
+	}
+
+	struct FValidationRevisionSnapshot
+	{
+		FString AssetPath;
+		FString PackageName;
+		FString BeforeRevision;
+		bool bPackageDirtyBefore = false;
+	};
+
+	FString HashAssetPackage(const FAssetData& AssetData)
+	{
+		FString PackageFilename;
+		FString Digest;
+		if (FPackageName::DoesPackageExist(AssetData.PackageName.ToString(), &PackageFilename)
+			&& FBlueprintContextSha256::HashFile(PackageFilename, Digest))
+		{
+			return TEXT("sha256:") + Digest;
+		}
+		return FString();
+	}
+
+	TArray<FValidationRevisionSnapshot> CaptureValidationRevisions(const TArray<FAssetData>& Assets)
+	{
+		TArray<FValidationRevisionSnapshot> Snapshots;
+		Snapshots.Reserve(Assets.Num());
+		for (const FAssetData& AssetData : Assets)
+		{
+			FValidationRevisionSnapshot Snapshot;
+			Snapshot.AssetPath = AssetData.GetObjectPathString();
+			Snapshot.PackageName = AssetData.PackageName.ToString();
+			Snapshot.BeforeRevision = HashAssetPackage(AssetData);
+			const UPackage* LoadedPackage = FindPackage(nullptr, *Snapshot.PackageName);
+			Snapshot.bPackageDirtyBefore = LoadedPackage != nullptr && LoadedPackage->IsDirty();
+			Snapshots.Add(MoveTemp(Snapshot));
+		}
+		Snapshots.Sort([](const FValidationRevisionSnapshot& Left, const FValidationRevisionSnapshot& Right)
+		{
+			return Left.AssetPath < Right.AssetPath;
+		});
+		return Snapshots;
+	}
+
+	void CompleteValidationRevisionEvidence(
+		const TSharedRef<FJsonObject>& Evidence,
+		const TArray<FAssetData>& Assets,
+		const TArray<FValidationRevisionSnapshot>& BeforeSnapshots)
+	{
+		TMap<FString, FAssetData> AssetsByPath;
+		for (const FAssetData& AssetData : Assets)
+		{
+			AssetsByPath.Add(AssetData.GetObjectPathString(), AssetData);
+		}
+
+		TArray<TSharedPtr<FJsonValue>> RevisionSet;
+		int32 MissingRevisionCount = 0;
+		int32 DirtyAssetCount = 0;
+		int32 ChangedDuringActionCount = 0;
+		for (const FValidationRevisionSnapshot& Before : BeforeSnapshots)
+		{
+			const FAssetData* AssetData = AssetsByPath.Find(Before.AssetPath);
+			const FString AfterRevision = AssetData != nullptr ? HashAssetPackage(*AssetData) : FString();
+			const UPackage* LoadedPackage = FindPackage(nullptr, *Before.PackageName);
+			const bool bPackageDirtyAfter = LoadedPackage != nullptr && LoadedPackage->IsDirty();
+			const bool bRevisionAvailable = !Before.BeforeRevision.IsEmpty() && !AfterRevision.IsEmpty();
+			const bool bRevisionStable = bRevisionAvailable && Before.BeforeRevision == AfterRevision;
+			if (!bRevisionAvailable)
+			{
+				++MissingRevisionCount;
+			}
+			if (Before.bPackageDirtyBefore || bPackageDirtyAfter)
+			{
+				++DirtyAssetCount;
+			}
+			if (bRevisionAvailable && !bRevisionStable)
+			{
+				++ChangedDuringActionCount;
+			}
+
+			TSharedRef<FJsonObject> Item = MakeShared<FJsonObject>();
+			Item->SetStringField(TEXT("assetPath"), Before.AssetPath);
+			Item->SetStringField(TEXT("packageName"), Before.PackageName);
+			Item->SetStringField(TEXT("source"), TEXT("disk-package"));
+			Item->SetStringField(TEXT("revision"), Before.BeforeRevision);
+			Item->SetStringField(TEXT("revisionAfter"), AfterRevision);
+			Item->SetBoolField(TEXT("revisionAvailable"), bRevisionAvailable);
+			Item->SetBoolField(TEXT("revisionStable"), bRevisionStable);
+			Item->SetBoolField(TEXT("packageDirtyBefore"), Before.bPackageDirtyBefore);
+			Item->SetBoolField(TEXT("packageDirtyAfter"), bPackageDirtyAfter);
+			RevisionSet.Add(MakeShared<FJsonValueObject>(Item));
+		}
+
+		const bool bComplete = MissingRevisionCount == 0
+			&& DirtyAssetCount == 0
+			&& ChangedDuringActionCount == 0
+			&& RevisionSet.Num() == Assets.Num();
+		Evidence->SetStringField(TEXT("revisionCoverage"), bComplete ? TEXT("complete") : TEXT("partial"));
+		Evidence->SetArrayField(TEXT("revisionSet"), RevisionSet);
+		Evidence->SetNumberField(TEXT("revisionAssetCount"), RevisionSet.Num());
+		Evidence->SetNumberField(TEXT("missingRevisionCount"), MissingRevisionCount);
+		Evidence->SetNumberField(TEXT("dirtyAssetCount"), DirtyAssetCount);
+		Evidence->SetNumberField(TEXT("changedDuringActionCount"), ChangedDuringActionCount);
+		Evidence->SetBoolField(TEXT("revisionStable"), ChangedDuringActionCount == 0);
 	}
 
 	FString ValidationResultName(const EDataValidationResult Result)
@@ -310,6 +416,8 @@ bool FUEAgentKitEditorBridge::TryValidateAssetResult(
 	}
 	TArray<FAssetData> Assets;
 	Assets.Add(AssetData);
+	const TArray<FValidationRevisionSnapshot> RevisionSnapshots = CaptureValidationRevisions(Assets);
+	const FString StartedAtUtc = FDateTime::UtcNow().ToIso8601();
 	const int32 DirtyBefore = CountDirtyGamePackages();
 	const double Started = FPlatformTime::Seconds();
 	FValidateAssetsResults Results;
@@ -318,8 +426,9 @@ bool FUEAgentKitEditorBridge::TryValidateAssetResult(
 		MakeValidationSettings(1),
 		Results);
 	const double DurationMs = (FPlatformTime::Seconds() - Started) * 1000.0;
+	const FString CompletedAtUtc = FDateTime::UtcNow().ToIso8601();
 	const int32 DirtyAfter = CountDirtyGamePackages();
-	OutResult = DescribeValidationResults(
+	TSharedRef<FJsonObject> Result = DescribeValidationResults(
 		AssetData.GetObjectPathString(),
 		SessionId,
 		Results,
@@ -328,6 +437,14 @@ bool FUEAgentKitEditorBridge::TryValidateAssetResult(
 		DurationMs,
 		DirtyBefore,
 		DirtyAfter);
+	TSharedRef<FJsonObject> Evidence = BuildValidationEvidence(
+		TEXT("asset"),
+		StartedAtUtc,
+		CompletedAtUtc,
+		TEXT("pending"));
+	CompleteValidationRevisionEvidence(Evidence, Assets, RevisionSnapshots);
+	Result->SetObjectField(TEXT("validationEvidence"), Evidence);
+	OutResult = Result;
 	return true;
 }
 
@@ -384,6 +501,8 @@ bool FUEAgentKitEditorBridge::TryValidateFolderResult(
 		OutErrorMessage = TEXT("The Unreal Data Validation subsystem is unavailable.");
 		return false;
 	}
+	const TArray<FValidationRevisionSnapshot> RevisionSnapshots = CaptureValidationRevisions(Assets);
+	const FString StartedAtUtc = FDateTime::UtcNow().ToIso8601();
 	const int32 DirtyBefore = CountDirtyGamePackages();
 	const double Started = FPlatformTime::Seconds();
 	FValidateAssetsResults Results;
@@ -392,6 +511,7 @@ bool FUEAgentKitEditorBridge::TryValidateFolderResult(
 		MakeValidationSettings(MaxAssets),
 		Results);
 	const double DurationMs = (FPlatformTime::Seconds() - Started) * 1000.0;
+	const FString CompletedAtUtc = FDateTime::UtcNow().ToIso8601();
 	const int32 DirtyAfter = CountDirtyGamePackages();
 	TSharedRef<FJsonObject> Result = DescribeValidationResults(
 		PackagePath,
@@ -405,6 +525,13 @@ bool FUEAgentKitEditorBridge::TryValidateFolderResult(
 	Result->SetBoolField(TEXT("recursive"), bRecursive);
 	Result->SetNumberField(TEXT("matchedAssetCount"), Assets.Num());
 	Result->SetNumberField(TEXT("maxAssets"), MaxAssets);
+	TSharedRef<FJsonObject> Evidence = BuildValidationEvidence(
+		TEXT("folder"),
+		StartedAtUtc,
+		CompletedAtUtc,
+		TEXT("pending"));
+	CompleteValidationRevisionEvidence(Evidence, Assets, RevisionSnapshots);
+	Result->SetObjectField(TEXT("validationEvidence"), Evidence);
 	OutResult = Result;
 	return true;
 }

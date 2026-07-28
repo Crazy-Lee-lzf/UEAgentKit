@@ -271,6 +271,15 @@ class FakeLiveEditorService:
                 "numRequested": 1,
                 "numChecked": 1,
                 "saved": False,
+                "validationEvidence": {
+                    "schemaVersion": "1.0",
+                    "source": "tool-observed",
+                    "scope": "asset",
+                    "projectPathHash": "sha1:test",
+                    "editorSessionId": "session-test",
+                    "revisionCoverage": "complete",
+                    "revisionSet": [{"assetPath": normalized_params.get("assetPath", ""), "revision": "sha256:a", "revisionStable": True}],
+                },
             },
             "ue_validate_folder": {
                 "action": "validate-assets",
@@ -279,6 +288,18 @@ class FakeLiveEditorService:
                 "matchedAssetCount": 2,
                 "numChecked": 2,
                 "saved": False,
+                "validationEvidence": {
+                    "schemaVersion": "1.0",
+                    "source": "tool-observed",
+                    "scope": "folder",
+                    "projectPathHash": "sha1:test",
+                    "editorSessionId": "session-test",
+                    "revisionCoverage": "complete",
+                    "revisionSet": [
+                        {"assetPath": "/Game/Test/A.A", "revision": "sha256:a", "revisionStable": True},
+                        {"assetPath": "/Game/Test/B.B", "revision": "sha256:b", "revisionStable": True},
+                    ],
+                },
             },
             "ue_run_automation_test": {
                 "action": "run-automation-test",
@@ -287,6 +308,15 @@ class FakeLiveEditorService:
                 "successful": True,
                 "entryCount": 1,
                 "saved": False,
+                "validationEvidence": {
+                    "schemaVersion": "1.0",
+                    "source": "tool-observed",
+                    "scope": "automation",
+                    "projectPathHash": "sha1:test",
+                    "editorSessionId": "session-test",
+                    "revisionCoverage": "not-applicable",
+                    "revisionSet": [],
+                },
             },
         }
         return {
@@ -577,6 +607,10 @@ class McpServerTests(unittest.TestCase):
         self.assertTrue(action_contract["automationSingleParticipantOnly"])
         self.assertEqual(action_contract["automationTimeoutSecondsMax"], 300)
         self.assertEqual(action_contract["automationReturnedEntryLimit"], 200)
+        self.assertEqual(action_contract["validationEvidenceSchemaVersion"], "1.0")
+        self.assertTrue(action_contract["validationEvidenceProjectBound"])
+        self.assertTrue(action_contract["validationEvidenceRevisionSetBound"])
+        self.assertEqual(action_contract["automationRevisionCoverage"], "not-applicable")
         self.assertTrue(capabilities["freshness"]["liveEditorMemorySeparate"])
 
         _, project_status = asyncio.run(server.call_tool("ue_get_project_status", {}))
@@ -684,6 +718,8 @@ class McpServerTests(unittest.TestCase):
             )
         )
         self.assertEqual(validated["result"]["matchedAssetCount"], 2)
+        self.assertEqual(validated["result"]["validationEvidence"]["scope"], "folder")
+        self.assertEqual(len(validated["result"]["validationEvidence"]["revisionSet"]), 2)
         self.assertEqual(live_service.calls[-1][1]["packagePath"], "/Game/Test")
         self.assertEqual(live_service.calls[-1][1]["maxAssets"], 20)
 
@@ -698,6 +734,7 @@ class McpServerTests(unittest.TestCase):
             )
         )
         self.assertTrue(automation["result"]["successful"])
+        self.assertEqual(automation["result"]["validationEvidence"]["revisionCoverage"], "not-applicable")
         self.assertEqual(live_service.calls[-1][0], "ue_run_automation_test")
         self.assertEqual(live_service.calls[-1][1]["testName"], "UEAgentKit.EditorBridge.LiveActionSmoke")
         self.assertEqual(live_service.calls[-1][1]["timeoutSeconds"], 45)

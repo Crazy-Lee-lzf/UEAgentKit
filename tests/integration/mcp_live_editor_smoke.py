@@ -49,6 +49,52 @@ def _snapshot(directory: Path) -> dict[str, str]:
     return {path.name: _sha256(path) for path in directory.iterdir() if path.is_file()}
 
 
+def _assert_validation_evidence(
+    result: dict[str, Any],
+    *,
+    scope: str,
+    project_path_hash: str,
+    editor_session_id: str,
+    expected_revision_count: int | None,
+) -> dict[str, Any]:
+    evidence = result.get("validationEvidence")
+    if not isinstance(evidence, dict):
+        raise RuntimeError(f"Validation evidence is missing: {result}")
+    if (
+        evidence.get("schemaVersion") != "1.0"
+        or not str(evidence.get("evidenceId", "")).startswith("validation:")
+        or evidence.get("source") != "tool-observed"
+        or evidence.get("scope") != scope
+        or evidence.get("projectPathHash") != project_path_hash
+        or evidence.get("editorSessionId") != editor_session_id
+        or not str(evidence.get("startedAtUtc", "")).endswith("Z")
+        or not str(evidence.get("completedAtUtc", "")).endswith("Z")
+        or evidence.get("observedAtUtc") != evidence.get("completedAtUtc")
+    ):
+        raise RuntimeError(f"Validation evidence identity is invalid: {evidence}")
+    revisions = evidence.get("revisionSet")
+    if not isinstance(revisions, list):
+        raise RuntimeError(f"Validation Revision Set is invalid: {evidence}")
+    if expected_revision_count is None:
+        if evidence.get("revisionCoverage") != "not-applicable" or revisions:
+            raise RuntimeError(f"Automation Revision coverage is invalid: {evidence}")
+    else:
+        if len(revisions) != expected_revision_count:
+            raise RuntimeError(f"Validation Revision Set size is invalid: {evidence}")
+        for revision in revisions:
+            if (
+                not str(revision.get("revision", "")).startswith("sha256:")
+                or revision.get("revision") != revision.get("revisionAfter")
+                or revision.get("revisionAvailable") is not True
+                or revision.get("revisionStable") is not True
+            ):
+                raise RuntimeError(f"Validation Revision entry is invalid: {revision}")
+        expected_coverage = "complete" if evidence.get("dirtyAssetCount") == 0 else "partial"
+        if evidence.get("revisionCoverage") != expected_coverage:
+            raise RuntimeError(f"Validation Revision coverage is invalid: {evidence}")
+    return evidence
+
+
 async def _run(
     database: Path,
     project: Path,
@@ -77,6 +123,7 @@ async def _run(
     secret_token = str(descriptor["authToken"])
     secret_port = str(descriptor["port"])
     descriptor_session_id = str(descriptor["sessionId"])
+    descriptor_project_path_hash = str(descriptor["projectPathHash"])
     descriptor_process_id = int(descriptor["processId"])
     descriptor_hash_before = _sha256(descriptor_path)
     parameters = StdioServerParameters(
@@ -310,9 +357,25 @@ async def _run(
     validate_asset = action_results["ue_validate_asset"]
     if not validate_asset or not validate_asset.get("ok") or validate_asset["result"].get("numRequested") != 1:
         raise RuntimeError(f"Single-asset validation failed: {validate_asset}")
+    asset_evidence = _assert_validation_evidence(
+        validate_asset["result"],
+        scope="asset",
+        project_path_hash=descriptor_project_path_hash,
+        editor_session_id=descriptor_session_id,
+        expected_revision_count=1,
+    )
+    if asset_evidence["revisionSet"][0]["revision"] != f"sha256:{target_package_hash_before}":
+        raise RuntimeError(f"Single-asset validation Revision does not match the package: {asset_evidence}")
     validate_folder = action_results["ue_validate_folder"]
     if not validate_folder or not validate_folder.get("ok") or validate_folder["result"].get("matchedAssetCount", 0) < 1:
         raise RuntimeError(f"Folder validation failed: {validate_folder}")
+    folder_evidence = _assert_validation_evidence(
+        validate_folder["result"],
+        scope="folder",
+        project_path_hash=descriptor_project_path_hash,
+        editor_session_id=descriptor_session_id,
+        expected_revision_count=validate_folder["result"]["matchedAssetCount"],
+    )
     automation = action_results["ue_run_automation_test"]
     if (
         not automation
@@ -326,6 +389,15 @@ async def _run(
         or automation["result"].get("saved") is not False
     ):
         raise RuntimeError(f"Exact Automation Test action failed: {automation}")
+    automation_evidence = _assert_validation_evidence(
+        automation["result"],
+        scope="automation",
+        project_path_hash=descriptor_project_path_hash,
+        editor_session_id=descriptor_session_id,
+        expected_revision_count=None,
+    )
+    if automation_evidence.get("executionIsolation") != "isolated-unreal-editor-cmd":
+        raise RuntimeError(f"Automation evidence isolation is invalid: {automation_evidence}")
     if (
         not post_automation_status
         or not post_automation_status.get("ok")
@@ -368,7 +440,7 @@ async def _run(
     for secret in (secret_token, secret_port, str(descriptor_path), str(project.resolve())):
         if secret and secret in response_text:
             raise RuntimeError("MCP Live Editor responses exposed fixed endpoint, token, or local path")
-    if "authToken" in response_text or "projectPathHash" in response_text:
+    if "authToken" in response_text:
         raise RuntimeError("MCP Live Editor responses exposed descriptor authentication fields")
     if _sha256(database) != before_hash or _snapshot(database.parent) != before_files:
         raise RuntimeError("Live Editor MCP actions modified the immutable SQLite index")
@@ -407,6 +479,11 @@ async def _run(
         "blueprintCompileResult": compile_result["result"]["result"],
         "blueprintPackageDirtyAfter": bool(compile_result["result"].get("packageDirtyAfter")),
         "singleAssetValidationResult": validate_asset["result"]["result"],
+        "singleAssetEvidenceCoverage": asset_evidence["revisionCoverage"],
+        "singleAssetEvidenceRevision": asset_evidence["revisionSet"][0]["revision"],
+        "folderEvidenceCoverage": folder_evidence["revisionCoverage"],
+        "folderEvidenceRevisionCount": len(folder_evidence["revisionSet"]),
+        "automationEvidenceCoverage": automation_evidence["revisionCoverage"],
         "folderValidationChecked": validate_folder["result"]["numChecked"],
         "automationTestState": automation["result"]["state"],
         "automationTestEntryCount": automation["result"]["entryCount"],

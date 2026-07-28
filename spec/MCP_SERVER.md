@@ -249,6 +249,10 @@ revisionExportStale=true
 
 当前 `/Game/...` 项目 Package 支持 `.uasset` 与 `.umap` 比较；未知 Mount 不做路径猜测，而是返回 `unavailable`。单资产刷新和安全重载设计见 `spec/INDEX_FRESHNESS.md`。
 
+## Validation Evidence
+
+Live Validation 和 Automation 结果保留 Editor Bridge 返回的 `validationEvidence`，MCP Server 不重写 Evidence ID、项目哈希、Editor Session、UTC 时间或 Revision Set。`ue_get_capabilities` 的 `liveActionContract` 声明 Evidence Schema 版本、项目绑定和 Revision Set 绑定语义。
+
 ## 分页与输出预算
 
 - continuation token 是分页状态，不是 API Key、登录 Token 或模型 Token。
