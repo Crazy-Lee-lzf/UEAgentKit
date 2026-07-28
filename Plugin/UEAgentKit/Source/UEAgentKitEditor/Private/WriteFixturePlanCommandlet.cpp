@@ -5,9 +5,11 @@
 #include "Dom/JsonObject.h"
 #include "Editor.h"
 #include "Engine/Blueprint.h"
+#include "EdGraphSchema_K2.h"
 #include "GameFramework/Actor.h"
 #include "HAL/FileManager.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
+#include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Misc/App.h"
 #include "Misc/EngineVersion.h"
@@ -341,6 +343,27 @@ namespace WriteFixturePlanCommandletPrivate
 		Blueprint->BlueprintDescription = FString::Printf(
 			TEXT("UEAgentKit generated fixture %s."),
 			*Definition.Id);
+		if (Definition.Id.Equals(TEXT("transaction-blueprint"), ESearchCase::CaseSensitive))
+		{
+			FEdGraphPinType IntType;
+			IntType.PinCategory = UEdGraphSchema_K2::PC_Int;
+			FEdGraphPinType BoolType;
+			BoolType.PinCategory = UEdGraphSchema_K2::PC_Boolean;
+			if (!FBlueprintEditorUtils::AddMemberVariable(
+					Blueprint,
+					FName(TEXT("TransactionInt")),
+					IntType,
+					TEXT("0"))
+				|| !FBlueprintEditorUtils::AddMemberVariable(
+					Blueprint,
+					FName(TEXT("TransactionFlag")),
+					BoolType,
+					TEXT("false")))
+			{
+				OutError = TEXT("Could not create transaction Blueprint fixture variables.");
+				return nullptr;
+			}
+		}
 		FAssetRegistryModule::AssetCreated(Blueprint);
 		Package->MarkPackageDirty();
 		if (!SaveBlueprint(Blueprint, OutError))

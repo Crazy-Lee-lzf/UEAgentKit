@@ -33,8 +33,8 @@ Combined  43 Tool
 
 剩余实施顺序：
 
-1. **单资产多 Operation 原子事务**：一次 Plan、Dry Run、备份、Commit、独立验证和整体 rollback。
-2. **正式发布收口**：统一版本号、CHANGELOG、发布说明、构建产物和 Git Tag。
+1. **已完成：单资产多 Operation 原子事务**：一次 Plan、Dry Run、备份、Commit、独立验证和整体 rollback。
+2. **下一步：正式发布收口**：统一版本号、CHANGELOG、发布说明、构建产物和 Git Tag。
 3. Input Mapping Context 等专用写入仅在真实项目需求出现后增加。
 
 完整 Blueprint Graph、Material Graph、Anim State Machine、Control Rig、Sequencer、Niagara 写入和任意脚本执行不属于 0.5.x 范围。

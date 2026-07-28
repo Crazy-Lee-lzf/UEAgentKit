@@ -220,7 +220,8 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
 
         self.assertLess(validation_index, commandlet_index)
 
-        self.assertIn("exactly one asset and one operation", source)
+        self.assertIn("exactly one asset and 1 through 32 operations", source)
+        self.assertIn("single-asset transaction cannot mix", source)
 
         self.assertIn("commitSupported", source)
         for token in (
@@ -275,6 +276,40 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
         self.assertIn('TEXT("not-applicable")', automation)
         self.assertIn('TEXT("isolated-unreal-editor-cmd")', automation)
 
+
+    def test_multi_operation_transaction_regression_contract(self) -> None:
+        script = (ROOT / "scripts" / "TestMultiOperationTransactions.ps1").read_text(
+            encoding="utf-8"
+        )
+        rollback = (ROOT / "scripts" / "RunRollback.ps1").read_text(encoding="utf-8")
+        self.assertIn("Assert-DryRun", script)
+        self.assertIn("Assert-Commit", script)
+        self.assertIn("OperationsPerAsset=2", script)
+        self.assertIn("asset-transaction", script)
+        self.assertIn("blueprint-transaction", script)
+        self.assertIn("IncludeBlueprints", rollback)
+        self.assertIn("/Script/Engine.Blueprint", rollback)
+
+    def test_transaction_fixture_declares_two_blueprint_variables(self) -> None:
+        commandlet = (
+            ROOT
+            / "Plugin"
+            / "UEAgentKit"
+            / "Source"
+            / "UEAgentKitEditor"
+            / "Private"
+            / "WriteFixturePlanCommandlet.cpp"
+        ).read_text(encoding="utf-8")
+        plan = json.loads(
+            (ROOT / "tests" / "fixtures" / "multi_operation_transaction_plan.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertIn("transaction-blueprint", commandlet)
+        self.assertIn("TransactionInt", commandlet)
+        self.assertIn("TransactionFlag", commandlet)
+        self.assertEqual(plan["root"], "/Game/UEAgentKitWriteTests/Transactions")
+        self.assertEqual(len(plan["fixtures"]), 2)
 
     def test_release_version_is_consistent(self) -> None:
 

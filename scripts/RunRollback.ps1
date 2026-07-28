@@ -117,12 +117,19 @@ if ($Mode -eq "Commit")
     New-Item -ItemType Directory -Path ([System.IO.Path]::GetDirectoryName($VerificationReport)) -Force | Out-Null
 
     $AssetPackage = ([string]$Rollback.assetPath).Split(".")[0]
+    $ManifestValue = [IO.File]::ReadAllText($Manifest, [Text.Encoding]::UTF8) | ConvertFrom-Json
+    $CatalogArguments = @{
+        EngineRoot = $EngineRoot
+        ProjectPath = $ProjectPath
+        Asset = $AssetPackage
+        Output = $VerificationOutput
+    }
+    if ([string]$ManifestValue.assetClass -eq "/Script/Engine.Blueprint")
+    {
+        $CatalogArguments.IncludeBlueprints = $true
+    }
     Write-Host "Reloading restored asset in an independent Unreal process..."
-    & $RunAssetCatalog `
-        -EngineRoot $EngineRoot `
-        -ProjectPath $ProjectPath `
-        -Asset $AssetPackage `
-        -Output $VerificationOutput
+    & $RunAssetCatalog @CatalogArguments
     if ($LASTEXITCODE -ne 0)
     {
         throw "Independent rollback export failed with exit code $LASTEXITCODE"

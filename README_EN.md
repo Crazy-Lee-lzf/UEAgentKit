@@ -223,7 +223,16 @@ scripts\TestDataAssetStructuredProperties.cmd ^
 
 The script validates stable JSON, structured diffs, deep Dry Run restoration, Commit reload, and reverse rollback for Struct, Array, Set, and Map properties. The final package revision must exactly match the initial revision.
 
-The executor supports four Blueprint operations, scalar `setAssetProperty`, Data Asset-specific `setAssetReferenceProperty` and `setAssetStructuredProperty`, four Material Instance parameter operations, and DataTable field/row operations. One execution remains limited to one asset and one operation, with exact Policy authorization. `setAssetStructuredProperty` replaces one top-level Struct, Array, Set, or Map through an explicit `valueType` envelope. Struct values must contain every field, while Set and Map values must be uniquely ordered by Canonical JSON; reports include a recursive structured diff. Only single-file packages without external package sidecars are accepted.
+Run the single-asset multi-operation transaction regression:
+
+```bat
+scripts\TestMultiOperationTransactions.cmd ^
+  -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject"
+```
+
+The regression applies two operations to a Data Asset and a Blueprint. Dry Run uses `process-discard` and preserves the disk revision. Commit creates one package backup, saves once, records every operation and authorization key in one manifest, independently reloads the result, then rolls back the whole transaction and requires exact baseline revision recovery.
+
+The executor supports four Blueprint operations, scalar `setAssetProperty`, Data Asset-specific `setAssetReferenceProperty` and `setAssetStructuredProperty`, four Material Instance parameter operations, and DataTable field/row operations. One execution remains limited to one asset but may contain 1–32 compatible operations in one atomic transaction. Multi-operation execution pre-validates every target, creates one backup, compiles/saves once, and records all operations in one manifest. Exact Policy authorization remains per target. `setAssetStructuredProperty` replaces one top-level Struct, Array, Set, or Map through an explicit `valueType` envelope. Struct values must contain every field, while Set and Map values must be uniquely ordered by Canonical JSON; reports include a recursive structured diff. Only single-file packages without external package sidecars are accepted.
 
 ### 6. Run the MCP server (0.5.1)
 
@@ -320,7 +329,7 @@ Read-only exporters, SQLite queries, the current MCP tools, and `ue-agent patch 
 - An external backup is created before saving; every successful commit creates a non-overwriting manifest with the authorization key, policy hash, and before/after revisions.
 - Rollback defaults to dry run. Commit requires a closed project, an unchanged post-commit revision, matching backup hash and size, and a pre-rollback safety copy.
 - Blueprint compile failures, revision conflicts, dirty packages, target resolution failures, parameter lookup failures, and type validation errors prevent saving.
-- The executor currently handles one asset and one operation to avoid partial saves.
+- The executor handles one asset with 1–32 compatible operations. Multi-operation transactions reject duplicate targets and structural DataTable row add/remove/rename operations to avoid partial saves and order-dependent ambiguity.
 - Patches modify and save assets through Unreal Editor APIs; rollback only atomically restores a complete package authorized by a validated manifest and never performs partial binary edits.
 
 ## License

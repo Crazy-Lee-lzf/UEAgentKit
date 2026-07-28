@@ -223,7 +223,16 @@ scripts\TestDataAssetStructuredProperties.cmd ^
 
 脚本依次验证 Struct、Array、Set、Map 的稳定 JSON、结构化 Diff、Dry Run 深恢复、Commit 独立重载和四层逆序 rollback，最终 Package Revision 必须与初始值完全一致。
 
-当前支持四种 Blueprint Operation、标量 `setAssetProperty`、Data Asset 专用 `setAssetReferenceProperty` 与 `setAssetStructuredProperty`、四种 Material Instance 参数 Operation，以及 DataTable 字段和 Row 操作。每次执行仅允许一个资产和一个 Operation；属性、引用目标、Material 参数和 DataTable 字段继续使用精确 Policy 授权。`setAssetStructuredProperty` 只替换顶层 Struct、Array、Set 或 Map，使用显式 `valueType` 包络；Struct 必须包含完整字段，Set/Map 必须按 Canonical JSON 唯一排序，并返回递归结构化 Diff。当前仍只接受没有独立 Package 侧文件的单文件资产。
+单资产多 Operation 原子事务回归：
+
+```bat
+scripts\TestMultiOperationTransactions.cmd ^
+  -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject"
+```
+
+脚本分别对 Data Asset 和 Blueprint 执行两个 Operation：Dry Run 使用 `process-discard` 且磁盘 Revision 不变；Commit 只创建一个 Package 备份、只保存一次，并生成包含全部 Operation 与授权键的 Manifest；随后通过独立 UE 进程验证结果并整体 rollback，最终 Revision 必须与各自基线完全一致。
+
+当前支持四种 Blueprint Operation、标量 `setAssetProperty`、Data Asset 专用 `setAssetReferenceProperty` 与 `setAssetStructuredProperty`、四种 Material Instance 参数 Operation，以及 DataTable 字段和 Row 操作。每次执行仍严格限制为一个资产，但可在同一原子事务中包含 1–32 个兼容 Operation；多 Operation 会统一预校验、创建一次备份、编译/保存一次，并由一个 Manifest 记录全部 Operation。属性、引用目标、Material 参数和 DataTable 字段继续使用逐目标精确 Policy 授权。`setAssetStructuredProperty` 只替换顶层 Struct、Array、Set 或 Map，使用显式 `valueType` 包络；Struct 必须包含完整字段，Set/Map 必须按 Canonical JSON 唯一排序，并返回递归结构化 Diff。当前仍只接受没有独立 Package 侧文件的单文件资产。
 
 ### 6. 启动 MCP Server（0.5.1）
 
@@ -320,7 +329,7 @@ Output\Blueprints\
 - 保存前创建外部备份；成功 Commit 自动生成不可覆盖的 Manifest，记录授权键、Policy 哈希和变更前后 Revision。
 - rollback 默认 Dry Run；Commit 要求工程关闭、当前文件仍等于 Commit 后 Revision、备份哈希与大小一致，并在替换前创建安全副本。
 - Blueprint 编译失败、Revision 冲突、Dirty Package、目标解析、参数查找或类型校验失败时禁止保存。
-- 当前执行器只处理单资产、单操作，避免部分保存。
+- 当前执行器只处理单资产；每个资产支持 1–32 个兼容 Operation。多 Operation 事务拒绝重复目标和 DataTable Row 新增/删除/重命名，并避免部分保存。
 - Patch 通过 UE Editor API 修改并保存资产；rollback 仅按已验证 Manifest 原子恢复完整 Package，不解析或局部改写 `.uasset` 二进制。
 
 ## License

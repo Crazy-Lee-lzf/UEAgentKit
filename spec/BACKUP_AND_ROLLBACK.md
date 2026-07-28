@@ -7,7 +7,7 @@ UE Agent Kit 0.4.1 为成功的单资产 Patch Commit 增加可审计 Backup Man
 恢复流程不接受任意源文件和任意目标路径。一次 rollback 必须同时满足：
 
 - Manifest 位于显式指定的 Backup Root 内。
-- Manifest 对应一个已成功保存的单资产、单 Operation Commit。
+- Manifest 对应一个已成功保存的单资产 Commit；可记录 1–32 个兼容 Operation。
 - 目标资产是规范化的 `/Game/...` 单文件 `.uasset`，解析后仍位于目标工程 `Content` 目录内。
 - 当前目标文件 SHA-256 等于 Commit 后 Revision。
 - Backup SHA-256 等于 Commit 前 Revision。
@@ -47,6 +47,8 @@ assetClass
 operation
 target
 authorizationKey
+operationCount
+operations[].operationId / operation / target / authorizationKeys
 beforeRevision
 afterRevision
 backup.relativePath
@@ -57,6 +59,8 @@ source.commitReportSha256
 ```
 
 Manifest 只记录 Backup Root 内的相对备份路径，不记录可重定向到任意位置的绝对恢复源路径。
+
+单 Operation Manifest 保留原有顶层 `operation`、`target` 和 `authorizationKey`。多 Operation Manifest 使用 `operation=transaction`，并在 `operations[]` 中按 Patch 顺序记录每个 Operation、目标、变更前后值和全部精确授权键。Rollback 会逐条重新校验当前 Policy 授权，但文件恢复仍是一次完整 Package 原子替换，不会反向执行单个 UObject Operation。
 
 ## 3. Rollback Dry Run
 

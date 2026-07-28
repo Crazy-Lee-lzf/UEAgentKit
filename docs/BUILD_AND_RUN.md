@@ -239,11 +239,11 @@ scripts\RunPatch.cmd ^
   -BackupDir "Backups\Patches"
 ```
 
-执行顺序固定为：Python 预校验 → 单资产/单操作约束 → 按 Operation 选择 Commandlet → 加载资产 → 再次检查 Policy 与磁盘 Revision → 修改 → Dry Run 回滚或 Commit 备份并保存。Blueprint 操作额外执行编译；通用属性、Material 参数和 DataTable 字段分别要求精确 PropertyPath、参数和 RowStruct/字段白名单。
+执行顺序固定为：Python 预校验 → 单资产/1–32 Operation 约束 → 确认全部 Operation 属于同一 Commandlet → 加载资产 → 再次检查 Policy 与磁盘 Revision → 预校验全部目标 → 顺序修改 → Dry Run 进程丢弃或 Commit 创建一次备份并保存一次。Blueprint 事务只编译一次；通用属性、Material 参数和 DataTable 字段仍分别要求精确 PropertyPath、参数和 RowStruct/字段白名单。
 
 当前限制：
 
-- 每次一个资产、一个 Operation。
+- 每次一个资产、1–32 个兼容 Operation；多 Operation 拒绝重复目标，且 DataTable Row 新增/删除/重命名必须单独执行。
 - Blueprint 支持 `setVariableDefault`、`setComponentProperty`、`setPinDefault`、`setBlueprintDescription`。
 - 非 Blueprint 标量属性使用 `setAssetProperty`；Data Asset Object/Class 与 Soft Object/Class 引用使用 `setAssetReferenceProperty`；顶层 Struct、Array、Set、Map 使用 `setAssetStructuredProperty`。三者都必须用 `AssetClass#Property.Path` 精确授权。
 - Material Instance 支持 `setMaterialInstanceScalarParameter`、`setMaterialInstanceVectorParameter`、`setMaterialInstanceTextureParameter` 和 `setMaterialInstanceStaticSwitchParameter`；Policy 使用 `AssetClass#Type#ParameterName` 精确授权。 四类报告统一使用原生 JSON 值、Override、Expression GUID、结构化 `materialParameter` Diff，以及值/元数据/数组结构三层 Dry Run 恢复门禁；完整回归运行 `scripts\TestMaterialInstanceParameters.cmd`。
@@ -259,13 +259,14 @@ scripts\RunPatch.cmd ^
 - Data Asset Struct/容器必须使用 `setAssetStructuredProperty`：仅顶层 Struct、Array、Set、Map；Reader 导出递归 Schema，Struct 要求完整字段，Set/Map 按 Canonical JSON 唯一排序。当前支持 Bool、32 位以内整数、Float/Double、String、Name 和 Enum 叶子，不允许对象引用叶子。
 - 已通过真实 UE5.6 Struct/Array/Set/Map Dry Run、Commit、独立重载、结构化 Diff 和四层逆序 rollback。
 - 当前仅接受没有 `.uexp/.ubulk/.uptnl/.m.ubulk/.upayload` 等独立侧文件的单文件 Package。
+- 多 Operation 事务回归运行 `scripts\TestMultiOperationTransactions.cmd`，覆盖 Data Asset 与 Blueprint 的 Dry Run、一次备份、一次保存、独立重载、Manifest 与整体 rollback。
 
 ## 10. Backup Manifest 与 Rollback
 
 `RunPatch -Mode Commit` 成功后会自动创建 `<backup>.manifest.json`。Manifest 位于 `BackupDir` 内，记录：
 
 - Patch、Policy 和 Commit Report 的 SHA-256。
-- Asset Path、Asset Class、Operation、Target 与精确授权键。
+- Asset Path、Asset Class、Operation、Target 与精确授权键；多 Operation Manifest 额外记录 `operationCount` 和逐 Operation `operations[]/authorizationKeys[]`。
 - Commit 前后 Package Revision。
 - 备份相对路径、Revision 和文件大小。
 

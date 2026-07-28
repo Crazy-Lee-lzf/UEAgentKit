@@ -144,7 +144,7 @@ class ScalarRegressionTests(unittest.TestCase):
         ):
             self.assertIn(token, commandlet)
         self.assertIn('$AllowedTestFailureInjections = @("", "DirtyPackage", "SaveFailure")', wrapper)
-        self.assertIn('throw "TestFailureInjection is available only for AssetPatch regression fixtures."', wrapper)
+        self.assertIn('throw "TestFailureInjection is available only for single-operation AssetPatch regression fixtures."', wrapper)
         self.assertIn('$Arguments += "-TestFailureInjection=$TestFailureInjection"', wrapper)
 
     def test_fixture_schema_accepts_scalar_regression_plan(self) -> None:

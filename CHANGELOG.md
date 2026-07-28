@@ -6,6 +6,9 @@ All notable changes to UE Agent Kit are documented here.
 
 Development status: the latest published version remains 0.5.1, while `main` contains the following unreleased 0.5.2–0.5.4 work.
 
+- Added single-asset atomic transactions containing 1–32 compatible operations, with complete pre-validation, duplicate-target rejection, one backup, one Blueprint compile/save, process-discard Dry Run semantics, and whole-package rollback.
+- Extended backup manifests with ordered per-operation targets, before/after values, and exact authorization-key evidence while preserving schema 1.0 compatibility for existing single-operation manifests.
+- Added a real UE5.6 Data Asset and Blueprint transaction regression covering Dry Run, Commit, one backup, independent reload, manifest verification, whole-transaction rollback, and exact final Revision recovery.
 - Added project/session/time-bound `validationEvidence` to Data Validation and exact Automation Test results.
 - Added deterministically ordered Asset Revision Sets with before/after Package SHA-256, Dirty-state provenance, stability checks, and explicit complete/partial coverage.
 - Marked asset-unspecified Automation evidence as `not-applicable` instead of inventing revisions, while recording isolated child-process provenance.
@@ -20,8 +23,8 @@ Development status: the latest published version remains 0.5.1, while `main` con
 - Added `setAssetStructuredProperty` for top-level Struct, Array, Set, and Map Data Asset properties with recursive schema, Canonical ordering, deep restoration, and structured diffs.
 - Expanded high-level safe-write entry points to 12 and registered Patch Operations to 16.
 - Current server modes are Offline 5, Live 23, Workflow 25, and Combined 43 tools.
-- Current regression baseline is Ruff plus 184 Python tests, 16 example Patch schemas, two schema meta-validations, UE5.6 Direct Build, and real Data Asset/DataTable Dry Run, Commit, independent reload, and rollback chains.
-- Remaining 0.5.x consolidation work: single-asset multi-operation transactions and an official version/release closeout.
+- Current regression baseline is Ruff plus 193 Python tests, 16 example Patch schemas, three schema meta-validations, UE5.6 Direct Build, and real Blueprint/Data Asset/Material/DataTable Dry Run, Commit, independent reload, transaction, and rollback chains.
+- Remaining 0.5.x consolidation work: the official version/release closeout.
 
 ## 0.5.1 — MCP usability, freshness, and diagnostics
 

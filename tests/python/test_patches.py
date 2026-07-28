@@ -1400,6 +1400,45 @@ class PatchValidationTests(unittest.TestCase):
         self.assertTrue(report["valid"])
         self.assertFalse(report["willWriteDisk"])
 
+    def test_multi_operation_plan_declares_atomic_transaction(self) -> None:
+        result = self.validate()
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["summary"]["operations"], 3)
+        transaction = result["assets"][0]["transaction"]
+        self.assertEqual(transaction["kind"], "single-asset-multi-operation")
+        self.assertTrue(transaction["atomic"])
+        self.assertEqual(transaction["operationCount"], 3)
+
+    def test_multi_operation_plan_rejects_duplicate_target(self) -> None:
+        duplicate = copy.deepcopy(self.patch["assets"][0]["operations"][0])
+        duplicate["operationId"] = "set-health-again"
+        duplicate["value"] = 200.0
+        self.patch["assets"][0]["operations"].append(duplicate)
+        self.flush()
+        result = self.validate()
+        self.assertFalse(result["valid"])
+        self.assertIn("duplicate-transaction-target", self.error_codes(result))
+
+    def test_structural_data_table_row_operation_must_be_single(self) -> None:
+        self.configure_data_table_row_operation(
+            "removeDataTableRow",
+            {"rowName": "Row_Alpha"},
+            True,
+            row_names=["Row_Alpha", "Row_Beta"],
+        )
+        self.patch["assets"][0]["operations"].append(
+            {
+                "operationId": "remove-row-beta",
+                "operation": "removeDataTableRow",
+                "target": {"rowName": "Row_Beta"},
+                "value": True,
+            }
+        )
+        self.flush()
+        result = self.validate()
+        self.assertFalse(result["valid"])
+        self.assertIn("transaction-operation-not-supported", self.error_codes(result))
+
 
 if __name__ == "__main__":
     unittest.main()

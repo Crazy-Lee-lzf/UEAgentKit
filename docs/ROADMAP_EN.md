@@ -33,8 +33,8 @@ Combined  43 tools
 
 Remaining order:
 
-1. **Add atomic multi-operation transactions for one asset** with one Plan, Dry Run, backup, Commit, independent verification, and whole-transaction rollback.
-2. **Close an official 0.5.x release** with consistent versions, changelog, release notes, artifacts, and Git tag.
+1. **Completed: atomic multi-operation transactions for one asset** with one Plan, Dry Run, backup, Commit, independent verification, and whole-transaction rollback.
+2. **Next: close an official 0.5.x release** with consistent versions, changelog, release notes, artifacts, and Git tag.
 3. Add specialized Input Mapping Context writes only when real project demand justifies them.
 
 Complete Blueprint Graph, Material Graph, Anim State Machine, Control Rig, Sequencer, Niagara writes, and arbitrary script execution remain out of scope for 0.5.x.

@@ -41,7 +41,7 @@ Asset DryRun     = 内存修改 → PostEditChange → 读取结果 → 回滚�
 Commit           = 创建外部备份 → 修改 → 校验/编译 → 保存
 ```
 
-当前每次执行严格限制为一个资产和一个 Operation，避免部分保存。
+当前每次执行严格限制为一个资产；每个资产可以包含 1–32 个兼容 Operation。多 Operation 使用单资产原子事务：全部目标先预校验，Commit 只创建一次 Package 备份并只保存一次；Blueprint 只编译一次。Dry Run 不保存，依赖独立 Commandlet 进程退出丢弃内存状态。
 
 ## CLI
 
@@ -166,7 +166,7 @@ Blueprint 应使用深度导出结果；非 Blueprint 应使用通用资产目�
 - 禁止授权整个 `/Game`；必须使用其下具体目录。
 - `Commit` 同时要求命令行 `-Mode Commit` 和 `commitEnabled=true`。
 - 当前执行器始终要求 Revision，并建议保持 `rejectDirtyPackages=true`。
-- Policy 的数组限制属于格式上限；执行器当前仍只接受单资产、单操作。
+- 执行器只接受一个资产，并遵守 `maxOperationsPerAsset`；当前运行时上限为 32。多 Operation 不能混用 BlueprintPatch 与 AssetPatch Operation。
 - `setAssetProperty` 必须由 `allowedAssetProperties` 精确授权。
 - 属性授权格式固定为 `AssetClass#Property.Path`，例如 `/Script/Engine.Texture2D#SRGB`。
 - Material 参数授权格式固定为 `AssetClass#Type#ParameterName`；当前 `Type` 支持 `Scalar`、`Vector`、`Texture` 和 `StaticSwitch`。
@@ -605,6 +605,32 @@ rollbackValueMatch=true
 rollbackStructureMatch=true (when reported)
 diskUnchanged=true
 ```
+
+
+## 单资产多 Operation 原子事务
+
+当 `assets[0].operations` 包含 2–32 个 Operation 时，Plan 和 UE 执行器将其视为 `single-asset-multi-operation`：
+
+- 所有 Operation ID 必须唯一。
+- 同一 Blueprint 变量/组件属性/Pin/Description、Asset Property、Material 参数或 DataTable Row 字段不能重复写入。
+- `addDataTableRow`、`removeDataTableRow`、`renameDataTableRow` 必须保持单 Operation Patch，避免结构变化、引用影响和顺序依赖混入事务。
+- 全部目标、类型、Policy 授权和输入值在真实对象修改前完成预校验。
+- Commit 只创建一个 Package 备份，只编译/保存一次；保存失败或报告写入失败时恢复完整 Package 备份。
+- Dry Run 的 `rollbackStrategy=process-discard`：不保存 Package，独立 Commandlet 退出后由新 UE 进程验证磁盘状态未变化。
+- Commit 的 `rollbackStrategy=package-backup`：一个 Backup Manifest 记录 `operationCount` 和完整 `operations[]`，整体 rollback 恢复 Commit 前 Package。
+
+事务报告额外包含：
+
+```text
+operation=transaction
+transactionKind=single-asset-multi-operation
+operationCount
+operations[]
+atomic=true
+rollbackStrategy=process-discard | package-backup
+```
+
+每个 `operations[]` 条目包含 `operationId`、`operation`、`target`、`beforeValue`、`afterValue`、`restoredValue`、`authorizationKeys` 和读回/回滚状态。
 
 ## Commit 与备份
 

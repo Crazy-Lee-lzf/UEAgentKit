@@ -208,6 +208,8 @@ class BackupRollbackTests(unittest.TestCase):
             }.issubset(required)
         )
         self.assertEqual(schema["properties"]["packageKind"]["const"], "single-uasset")
+        self.assertEqual(schema["properties"]["operations"]["maxItems"], 32)
+        self.assertIn("authorizationKeys", schema["$defs"]["manifestOperation"]["required"])
 
     def test_create_backup_manifest_rejects_target_mismatch(self) -> None:
         self.patch["assets"][0]["operations"][0]["target"]["fieldName"] = "OtherValue"
@@ -433,6 +435,100 @@ class BackupRollbackTests(unittest.TestCase):
         write_json(canonical, value)
         rejected = verify_rollback_export(rollback_report, export_root)
         self.assertIn("rollback-verification-revision", self.error_codes(rejected))
+
+    def test_multi_operation_manifest_records_each_authorization(self) -> None:
+        second_operation = {
+            "operationId": "set-other-cell",
+            "operation": "setDataTableCell",
+            "target": {"rowName": "Row", "fieldName": "OtherValue"},
+            "value": "other-after",
+        }
+        self.patch["assets"][0]["operations"].append(second_operation)
+        self.policy["maxOperationsPerAsset"] = 2
+        self.policy["allowedDataTableFields"].append(
+            "/Script/Engine.DataTable#/Script/Test.Row#OtherValue"
+        )
+        self.report.update(
+            {
+                "operation": "transaction",
+                "target": {},
+                "operationCount": 2,
+                "operations": [
+                    {
+                        "operationId": "set-cell",
+                        "operation": "setDataTableCell",
+                        "target": {"rowName": "Row", "fieldName": "Value"},
+                        "authorizationKeys": [
+                            "/Script/Engine.DataTable#/Script/Test.Row#Value"
+                        ],
+                        "beforeValue": "before",
+                        "afterValue": "after",
+                    },
+                    {
+                        "operationId": "set-other-cell",
+                        "operation": "setDataTableCell",
+                        "target": {"rowName": "Row", "fieldName": "OtherValue"},
+                        "authorizationKeys": [
+                            "/Script/Engine.DataTable#/Script/Test.Row#OtherValue"
+                        ],
+                        "beforeValue": "other-before",
+                        "afterValue": "other-after",
+                    },
+                ],
+            }
+        )
+        write_json(self.patch_path, self.patch)
+        write_json(self.policy_path, self.policy)
+        write_json(self.report_path, self.report)
+
+        manifest_path = self.create_manifest()
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["operation"], "transaction")
+        self.assertEqual(manifest["operationCount"], 2)
+        self.assertEqual(len(manifest["operations"]), 2)
+        self.assertEqual(
+            manifest["operations"][1]["authorizationKeys"],
+            ["/Script/Engine.DataTable#/Script/Test.Row#OtherValue"],
+        )
+
+    def test_multi_operation_manifest_rejects_report_order_mismatch(self) -> None:
+        second_operation = {
+            "operationId": "set-other-cell",
+            "operation": "setDataTableCell",
+            "target": {"rowName": "Row", "fieldName": "OtherValue"},
+            "value": "other-after",
+        }
+        self.patch["assets"][0]["operations"].append(second_operation)
+        self.report.update(
+            {
+                "operation": "transaction",
+                "target": {},
+                "operationCount": 2,
+                "operations": [
+                    {
+                        "operationId": "set-other-cell",
+                        "operation": "setDataTableCell",
+                        "target": {"rowName": "Row", "fieldName": "OtherValue"},
+                        "authorizationKeys": [],
+                    },
+                    {
+                        "operationId": "set-cell",
+                        "operation": "setDataTableCell",
+                        "target": {"rowName": "Row", "fieldName": "Value"},
+                        "authorizationKeys": [],
+                    },
+                ],
+            }
+        )
+        write_json(self.patch_path, self.patch)
+        write_json(self.report_path, self.report)
+        with self.assertRaisesRegex(ValueError, "operationId values do not match"):
+            create_backup_manifest(
+                self.patch_path,
+                self.policy_path,
+                self.report_path,
+                self.backup_root,
+            )
 
 
 if __name__ == "__main__":

@@ -208,12 +208,36 @@ def _authorization_key(report: dict[str, Any]) -> str:
     return ""
 
 
+def _policy_authorizes_operation(
+    policy: dict[str, Any],
+    operation_entry: dict[str, Any],
+) -> tuple[bool, str]:
+    operation = operation_entry.get("operation")
+    authorization_keys = operation_entry.get("authorizationKeys", [])
+    if not isinstance(operation, str) or operation not in policy.get("allowedOperations", []):
+        return False, "Manifest operation is not authorized by policy."
+    if not isinstance(authorization_keys, list) or any(
+        not isinstance(item, str) for item in authorization_keys
+    ):
+        return False, "Manifest operation authorizationKeys are invalid."
+    if operation in {"setAssetProperty", "setAssetReferenceProperty", "setAssetStructuredProperty"}:
+        if len(authorization_keys) != 1 or authorization_keys[0] not in policy.get("allowedAssetProperties", []):
+            return False, "Manifest asset property is not authorized by policy."
+    elif operation in _MATERIAL_OPERATION_TYPES:
+        if len(authorization_keys) != 1 or authorization_keys[0] not in policy.get("allowedMaterialParameters", []):
+            return False, "Manifest Material Instance parameter is not authorized by policy."
+    elif operation in {"setDataTableCell", "setDataTableRowFields", "addDataTableRow"}:
+        if not authorization_keys or any(
+            item not in policy.get("allowedDataTableFields", []) for item in authorization_keys
+        ):
+            return False, "Manifest DataTable field is not authorized by policy."
+    return True, ""
+
+
 def _policy_authorizes_manifest(policy: dict[str, Any], manifest: dict[str, Any]) -> tuple[bool, str]:
     project_name = manifest.get("projectName")
     asset_path = manifest.get("assetPath")
     asset_class = manifest.get("assetClass")
-    operation = manifest.get("operation")
-    authorization_key = manifest.get("authorizationKey", "")
     if policy.get("commitEnabled") is not True:
         return False, "Rollback requires a policy with commitEnabled=true."
     if project_name not in policy.get("allowedProjectNames", []):
@@ -224,17 +248,24 @@ def _policy_authorizes_manifest(policy: dict[str, Any], manifest: dict[str, Any]
         return False, "Manifest assetPath is not under an allowed policy root."
     if asset_class not in policy.get("allowedAssetClasses", []):
         return False, "Manifest assetClass is not authorized by policy."
-    if operation not in policy.get("allowedOperations", []):
-        return False, "Manifest operation is not authorized by policy."
-    if operation in {"setAssetProperty", "setAssetReferenceProperty", "setAssetStructuredProperty"} and authorization_key not in policy.get("allowedAssetProperties", []):
-        return False, "Manifest asset property is not authorized by policy."
-    if operation in _MATERIAL_OPERATION_TYPES and authorization_key not in policy.get(
-        "allowedMaterialParameters", []
-    ):
-        return False, "Manifest Material Instance parameter is not authorized by policy."
-    if operation == "setDataTableCell" and authorization_key not in policy.get("allowedDataTableFields", []):
-        return False, "Manifest DataTable field is not authorized by policy."
-    return True, ""
+
+    operations = manifest.get("operations")
+    if isinstance(operations, list):
+        if not operations or len(operations) > 32 or any(not isinstance(item, dict) for item in operations):
+            return False, "Manifest operations are invalid."
+        for operation_entry in operations:
+            authorized, reason = _policy_authorizes_operation(policy, operation_entry)
+            if not authorized:
+                return False, reason
+        return True, ""
+
+    legacy_entry = {
+        "operation": manifest.get("operation"),
+        "authorizationKeys": [manifest.get("authorizationKey", "")]
+        if manifest.get("authorizationKey", "")
+        else [],
+    }
+    return _policy_authorizes_operation(policy, legacy_entry)
 
 
 def create_backup_manifest(
@@ -257,12 +288,15 @@ def create_backup_manifest(
         raise ValueError("Commit report must describe a successful saved Commit.")
     patch_assets = patch.get("assets")
     if not isinstance(patch_assets, list) or len(patch_assets) != 1 or not isinstance(patch_assets[0], dict):
-        raise ValueError("Backup manifests currently require exactly one patch asset.")
+        raise ValueError("Backup manifests require exactly one patch asset.")
     patch_asset = patch_assets[0]
-    operations = patch_asset.get("operations")
-    if not isinstance(operations, list) or len(operations) != 1 or not isinstance(operations[0], dict):
-        raise ValueError("Backup manifests currently require exactly one patch operation.")
-    patch_operation = operations[0]
+    patch_operations = patch_asset.get("operations")
+    if (
+        not isinstance(patch_operations, list)
+        or not 1 <= len(patch_operations) <= 32
+        or any(not isinstance(item, dict) for item in patch_operations)
+    ):
+        raise ValueError("Backup manifests require 1 through 32 patch operations.")
 
     before_revision = _require_revision(report.get("beforeRevision"), label="beforeRevision")
     after_revision = _require_revision(report.get("afterRevision"), label="afterRevision")
@@ -278,10 +312,59 @@ def create_backup_manifest(
         raise ValueError("Patch and Commit report assetClass values do not match.")
     if patch_asset.get("expectedRevision") != before_revision:
         raise ValueError("Patch expectedRevision does not match the Commit beforeRevision.")
-    if patch_operation.get("operation") != report.get("operation"):
-        raise ValueError("Patch and Commit report operation values do not match.")
-    if patch_operation.get("target") != report.get("target"):
-        raise ValueError("Patch and Commit report target values do not match.")
+
+    report_operations_value = report.get("operations")
+    is_transaction = len(patch_operations) > 1
+    if is_transaction:
+        if report.get("operation") != "transaction":
+            raise ValueError("Multi-operation Commit report must use operation=transaction.")
+        if report.get("operationCount") != len(patch_operations):
+            raise ValueError("Patch and Commit report operation counts do not match.")
+        if (
+            not isinstance(report_operations_value, list)
+            or len(report_operations_value) != len(patch_operations)
+            or any(not isinstance(item, dict) for item in report_operations_value)
+        ):
+            raise ValueError("Multi-operation Commit report operations are invalid.")
+        report_operations = report_operations_value
+    else:
+        report_operations = [
+            {
+                "operationId": patch_operations[0].get("operationId"),
+                "operation": report.get("operation"),
+                "target": report.get("target"),
+                "authorizationKeys": [key] if (key := _authorization_key(report)) else [],
+                "beforeValue": report.get("beforeValue"),
+                "afterValue": report.get("afterValue"),
+            }
+        ]
+
+    manifest_operations: list[dict[str, Any]] = []
+    for index, (patch_operation, report_operation) in enumerate(
+        zip(patch_operations, report_operations, strict=True)
+    ):
+        if patch_operation.get("operationId") != report_operation.get("operationId"):
+            raise ValueError(f"Patch and Commit report operationId values do not match at index {index}.")
+        if patch_operation.get("operation") != report_operation.get("operation"):
+            raise ValueError(f"Patch and Commit report operation values do not match at index {index}.")
+        if patch_operation.get("target") != report_operation.get("target"):
+            raise ValueError(f"Patch and Commit report target values do not match at index {index}.")
+        authorization_keys = report_operation.get("authorizationKeys", [])
+        if not isinstance(authorization_keys, list) or any(
+            not isinstance(item, str) or not item for item in authorization_keys
+        ):
+            if authorization_keys != []:
+                raise ValueError(f"Commit report authorizationKeys are invalid at index {index}.")
+        manifest_operations.append(
+            {
+                "operationId": patch_operation.get("operationId"),
+                "operation": patch_operation.get("operation"),
+                "target": patch_operation.get("target", {}),
+                "authorizationKeys": authorization_keys,
+                "beforeValue": report_operation.get("beforeValue"),
+                "afterValue": report_operation.get("afterValue"),
+            }
+        )
 
     backup_path_value = report.get("backupPath")
     if not isinstance(backup_path_value, str) or not backup_path_value:
@@ -302,7 +385,14 @@ def create_backup_manifest(
 
     asset_path = report.get("assetPath")
     _, canonical_asset_path = _normalize_asset_path(asset_path)
-    authorization_key = _authorization_key(report)
+    first_operation = manifest_operations[0]
+    top_operation = first_operation["operation"] if len(manifest_operations) == 1 else "transaction"
+    top_target = first_operation["target"] if len(manifest_operations) == 1 else {}
+    top_authorization = (
+        first_operation["authorizationKeys"][0]
+        if len(manifest_operations) == 1 and first_operation["authorizationKeys"]
+        else ""
+    )
     manifest_id = f"{report['patchId']}-{after_revision.removeprefix('sha256:')[:12]}"
     manifest: dict[str, Any] = {
         "schemaVersion": BACKUP_MANIFEST_SCHEMA_VERSION,
@@ -313,13 +403,15 @@ def create_backup_manifest(
         "projectName": report["projectName"],
         "assetPath": canonical_asset_path,
         "assetClass": report["assetClass"],
-        "operation": report["operation"],
-        "target": report.get("target", {}),
-        "authorizationKey": authorization_key,
+        "operation": top_operation,
+        "target": top_target,
+        "authorizationKey": top_authorization,
+        "operationCount": len(manifest_operations),
+        "operations": manifest_operations,
         "beforeRevision": before_revision,
         "afterRevision": after_revision,
-        "beforeValue": report.get("beforeValue"),
-        "afterValue": report.get("afterValue"),
+        "beforeValue": report.get("beforeValue") if len(manifest_operations) == 1 else None,
+        "afterValue": report.get("afterValue") if len(manifest_operations) == 1 else None,
         "rowStructPath": report.get("rowStructPath", ""),
         "packageKind": "single-uasset",
         "backup": {

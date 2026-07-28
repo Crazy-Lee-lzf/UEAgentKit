@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "1.0",
+  "root": "/Game/UEAgentKitWriteTests/Transactions",
+  "fixtures": [
+    {
+      "id": "transaction-asset",
+      "kind": "scalarAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/Transactions/DA_TransactionAsset",
+      "expectedClass": "/Script/UEAgentKitEditor.UEAgentKitScalarWriteFixtureAsset"
+    },
+    {
+      "id": "transaction-blueprint",
+      "kind": "blueprint",
+      "targetAsset": "/Game/UEAgentKitWriteTests/Transactions/BP_TransactionBlueprint",
+      "expectedClass": "/Script/Engine.Blueprint",
+      "parentClass": "/Script/Engine.Actor",
+      "blueprintType": "Normal"
+    }
+  ]
+}

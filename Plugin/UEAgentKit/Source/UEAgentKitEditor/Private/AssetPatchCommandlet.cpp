@@ -1300,6 +1300,1043 @@ namespace AssetPatchCommandletPrivate
 		}
 		return true;
 	}
+
+
+	class FScopedPropertyScratch
+	{
+	public:
+		FScopedPropertyScratch(const FProperty* InProperty, const void* Source)
+			: Property(InProperty)
+		{
+			if (!Property || !Source)
+			{
+				return;
+			}
+			Storage = FMemory::Malloc(Property->GetSize(), Property->GetMinAlignment());
+			Property->InitializeValue(Storage);
+			Property->CopyCompleteValue(Storage, Source);
+		}
+
+		~FScopedPropertyScratch()
+		{
+			if (Property && Storage)
+			{
+				Property->DestroyValue(Storage);
+				FMemory::Free(Storage);
+			}
+		}
+
+		FScopedPropertyScratch(const FScopedPropertyScratch&) = delete;
+		FScopedPropertyScratch& operator=(const FScopedPropertyScratch&) = delete;
+
+		bool IsValid() const
+		{
+			return Property != nullptr && Storage != nullptr;
+		}
+
+		void* Get() const
+		{
+			return Storage;
+		}
+
+	private:
+		const FProperty* Property = nullptr;
+		void* Storage = nullptr;
+	};
+
+	enum class EAssetTransactionKind : uint8
+	{
+		AssetProperty,
+		AssetReference,
+		AssetStructured,
+		MaterialScalar,
+		MaterialVector,
+		MaterialTexture,
+		MaterialStaticSwitch,
+		DataTableFields
+	};
+
+	struct FAssetTransactionOperation
+	{
+		FString OperationId;
+		FString Operation;
+		TSharedPtr<FJsonObject> Target;
+		TSharedPtr<FJsonValue> Value;
+		EAssetTransactionKind Kind = EAssetTransactionKind::AssetProperty;
+		FString TargetDescription;
+		FString TargetType;
+		TArray<FString> TargetKeys;
+		TArray<FString> AuthorizationKeys;
+		TSharedPtr<FJsonValue> BeforeValue;
+		TSharedPtr<FJsonValue> ExpectedValue;
+		TSharedPtr<FJsonValue> AfterValue;
+
+		FProperty* Property = nullptr;
+		void* ValueAddress = nullptr;
+		FString PropertyPath;
+		FString ReferenceType;
+		FString ReferencePath;
+		FString ResolvedReferenceClass;
+
+		FString ParameterName;
+		FMaterialParameterInfo ParameterInfo;
+		FGuid ParameterExpressionGuid;
+		bool bBeforeOverride = false;
+		FGuid BeforeExpressionGuid;
+		bool bAfterOverride = false;
+		FGuid AfterExpressionGuid;
+		float BeforeScalar = 0.0f;
+		float NewScalar = 0.0f;
+		float AfterScalar = 0.0f;
+		FLinearColor BeforeVector = FLinearColor::Black;
+		FLinearColor NewVector = FLinearColor::Black;
+		FLinearColor AfterVector = FLinearColor::Black;
+		UTexture* BeforeTexture = nullptr;
+		UTexture* NewTexture = nullptr;
+		UTexture* AfterTexture = nullptr;
+		bool bBeforeSwitch = false;
+		bool bNewSwitch = false;
+		bool bAfterSwitch = false;
+
+		UDataTable* DataTable = nullptr;
+		UScriptStruct* RowStruct = nullptr;
+		FName RowName;
+		FString RowNameText;
+		uint8* RowData = nullptr;
+		TArray<FString> FieldNames;
+		TArray<FProperty*> Fields;
+		TArray<TSharedPtr<FJsonValue>> FieldValues;
+		TArray<FString> ExpectedFieldTexts;
+	};
+
+	bool IsEditableTransactionProperty(FProperty* Property)
+	{
+		const EPropertyFlags DisallowedFlags =
+			CPF_Transient | CPF_DuplicateTransient | CPF_NonPIEDuplicateTransient;
+		return Property != nullptr
+			&& Property->HasAnyPropertyFlags(CPF_Edit)
+			&& !Property->HasAnyPropertyFlags(DisallowedFlags)
+			&& Property->ArrayDim == 1;
+	}
+
+	TSharedPtr<FJsonValue> StringOrNull(const FString& Value)
+	{
+		if (Value.IsEmpty())
+		{
+			return MakeShared<FJsonValueNull>();
+		}
+		return MakeShared<FJsonValueString>(Value);
+	}
+
+	bool AddUniqueTransactionTarget(
+		TSet<FString>& TargetKeys,
+		const FString& TargetKey,
+		FString& OutError)
+	{
+		if (TargetKey.IsEmpty() || TargetKeys.Contains(TargetKey))
+		{
+			OutError = FString::Printf(TEXT("Transaction contains a duplicate or empty target: %s"), *TargetKey);
+			return false;
+		}
+		TargetKeys.Add(TargetKey);
+		return true;
+	}
+
+	bool PrepareDataAssetTransactionOperation(
+		UObject* Asset,
+		const FString& ActualAssetClass,
+		const FPatchPolicy& Policy,
+		FAssetTransactionOperation& Prepared,
+		FString& OutError)
+	{
+		if (Cast<UDataAsset>(Asset) == nullptr)
+		{
+			OutError = TEXT("Data Asset transaction operations require a Data Asset.");
+			return false;
+		}
+		Prepared.Target->TryGetStringField(TEXT("propertyPath"), Prepared.PropertyPath);
+		if (Prepared.PropertyPath.IsEmpty() || Prepared.PropertyPath.Contains(TEXT(".")))
+		{
+			OutError = TEXT("Data Asset transaction propertyPath must be one top-level property name.");
+			return false;
+		}
+		const FString Authorization = ActualAssetClass + TEXT("#") + Prepared.PropertyPath;
+		Prepared.AuthorizationKeys.Add(Authorization);
+		if (!ContainsExact(Policy.AllowedAssetProperties, Authorization)
+			|| !ResolvePropertyPath(Asset, Prepared.PropertyPath, Prepared.Property, Prepared.ValueAddress, OutError)
+			|| !IsEditableTransactionProperty(Prepared.Property))
+		{
+			if (OutError.IsEmpty())
+			{
+				OutError = FString::Printf(TEXT("Data Asset transaction property is not authorized or editable: %s"), *Authorization);
+			}
+			return false;
+		}
+
+		FScopedPropertyScratch Scratch(Prepared.Property, Prepared.ValueAddress);
+		if (!Scratch.IsValid())
+		{
+			OutError = TEXT("Could not allocate Data Asset transaction scratch value.");
+			return false;
+		}
+
+		Prepared.TargetDescription = TEXT("asset-property:") + Prepared.PropertyPath;
+		Prepared.TargetType = Prepared.Property->GetClass()->GetName();
+		if (Prepared.Kind == EAssetTransactionKind::AssetProperty)
+		{
+			FString BeforeText;
+			FString ExpectedText;
+			if (!ReadPropertyValue(Asset, Prepared.Property, Prepared.ValueAddress, BeforeText)
+				|| !SetPropertyFromJson(Prepared.Property, Scratch.Get(), Prepared.Value, OutError)
+				|| !ReadPropertyValue(Asset, Prepared.Property, Scratch.Get(), ExpectedText))
+			{
+				return false;
+			}
+			Prepared.BeforeValue = MakeShared<FJsonValueString>(BeforeText);
+			Prepared.ExpectedValue = MakeShared<FJsonValueString>(ExpectedText);
+			return true;
+		}
+		if (Prepared.Kind == EAssetTransactionKind::AssetReference)
+		{
+			FString BeforePath;
+			if (!ReadAssetReferencePath(Prepared.Property, Prepared.ValueAddress, BeforePath)
+				|| !SetAssetReferenceFromJson(
+					Prepared.Property,
+					Scratch.Get(),
+					Prepared.Value,
+					Policy,
+					Prepared.ReferenceType,
+					Prepared.ReferencePath,
+					Prepared.ResolvedReferenceClass,
+					OutError))
+			{
+				return false;
+			}
+			FString ExpectedPath;
+			if (!ReadAssetReferencePath(Prepared.Property, Scratch.Get(), ExpectedPath))
+			{
+				OutError = TEXT("Could not read expected Data Asset reference value.");
+				return false;
+			}
+			Prepared.TargetDescription = TEXT("asset-reference-property:") + Prepared.PropertyPath;
+			Prepared.TargetType = TEXT("AssetReference(") + Prepared.ReferenceType + TEXT(")");
+			Prepared.BeforeValue = StringOrNull(BeforePath);
+			Prepared.ExpectedValue = StringOrNull(ExpectedPath);
+			return true;
+		}
+
+		if (UEAgentKit::StructuredPropertyJson::GetKind(Prepared.Property)
+			== UEAgentKit::StructuredPropertyJson::EKind::Invalid)
+		{
+			OutError = FString::Printf(TEXT("Property is not Struct, Array, Set, or Map: %s"), *Prepared.PropertyPath);
+			return false;
+		}
+		TSharedPtr<FJsonValue> Schema;
+		TSharedPtr<FJsonValue> Before;
+		TSharedPtr<FJsonValue> Expected;
+		if (!UEAgentKit::StructuredPropertyJson::BuildSchema(Prepared.Property, Schema, OutError)
+			|| !UEAgentKit::StructuredPropertyJson::ExportValue(
+				Prepared.Property,
+				Prepared.ValueAddress,
+				Before,
+				OutError)
+			|| !UEAgentKit::StructuredPropertyJson::ImportValue(
+				Prepared.Property,
+				Scratch.Get(),
+				Prepared.Value,
+				OutError)
+			|| !UEAgentKit::StructuredPropertyJson::ExportValue(
+				Prepared.Property,
+				Scratch.Get(),
+				Expected,
+				OutError))
+		{
+			return false;
+		}
+		Prepared.TargetDescription = TEXT("asset-structured-property:") + Prepared.PropertyPath;
+		Prepared.TargetType = TEXT("AssetStructuredProperty(") + Prepared.Property->GetClass()->GetName() + TEXT(")");
+		Prepared.BeforeValue = Before;
+		Prepared.ExpectedValue = Expected;
+		return true;
+	}
+
+	bool PrepareMaterialTransactionOperation(
+		UObject* Asset,
+		const FString& ActualAssetClass,
+		const FPatchPolicy& Policy,
+		FAssetTransactionOperation& Prepared,
+		FString& OutError)
+	{
+		UMaterialInstanceConstant* MaterialInstance = Cast<UMaterialInstanceConstant>(Asset);
+		if (!MaterialInstance)
+		{
+			OutError = TEXT("Material transaction operations require MaterialInstanceConstant.");
+			return false;
+		}
+		Prepared.Target->TryGetStringField(TEXT("parameterName"), Prepared.ParameterName);
+		if (Prepared.ParameterName.IsEmpty())
+		{
+			OutError = TEXT("Material transaction parameterName is required.");
+			return false;
+		}
+
+		FString ParameterType;
+		if (Prepared.Kind == EAssetTransactionKind::MaterialScalar)
+		{
+			ParameterType = TEXT("Scalar");
+		}
+		else if (Prepared.Kind == EAssetTransactionKind::MaterialVector)
+		{
+			ParameterType = TEXT("Vector");
+		}
+		else if (Prepared.Kind == EAssetTransactionKind::MaterialTexture)
+		{
+			ParameterType = TEXT("Texture");
+		}
+		else
+		{
+			ParameterType = TEXT("StaticSwitch");
+		}
+		const FString Authorization =
+			ActualAssetClass + TEXT("#") + ParameterType + TEXT("#") + Prepared.ParameterName;
+		Prepared.AuthorizationKeys.Add(Authorization);
+		if (!ContainsExact(Policy.AllowedMaterialParameters, Authorization))
+		{
+			OutError = FString::Printf(TEXT("Material transaction parameter is not authorized: %s"), *Authorization);
+			return false;
+		}
+		Prepared.TargetDescription =
+			TEXT("material-instance-parameter:") + ParameterType + TEXT(":") + Prepared.ParameterName;
+		Prepared.TargetType = TEXT("MaterialInstanceParameter");
+
+		if (Prepared.Kind == EAssetTransactionKind::MaterialScalar)
+		{
+			double Number = 0.0;
+			if (!Prepared.Value->TryGetNumber(Number)
+				|| !FMath::IsFinite(Number)
+				|| FMath::Abs(Number) > static_cast<double>(FLT_MAX))
+			{
+				OutError = TEXT("Material transaction scalar value must be a finite float.");
+				return false;
+			}
+			Prepared.NewScalar = static_cast<float>(Number);
+			if (!FindGlobalScalarParameter(
+					MaterialInstance,
+					FName(*Prepared.ParameterName),
+					Prepared.ParameterInfo,
+					Prepared.ParameterExpressionGuid,
+					OutError)
+				|| !ReadScalarParameter(
+					MaterialInstance,
+					Prepared.ParameterInfo,
+					Prepared.ParameterExpressionGuid,
+					Prepared.BeforeScalar,
+					Prepared.bBeforeOverride,
+					Prepared.BeforeExpressionGuid))
+			{
+				return false;
+			}
+			Prepared.BeforeValue = MakeShared<FJsonValueNumber>(Prepared.BeforeScalar);
+			Prepared.ExpectedValue = MakeShared<FJsonValueNumber>(Prepared.NewScalar);
+			return true;
+		}
+		if (Prepared.Kind == EAssetTransactionKind::MaterialVector)
+		{
+			const TSharedPtr<FJsonObject> Color = Prepared.Value->AsObject();
+			double R = 0.0;
+			double G = 0.0;
+			double B = 0.0;
+			double A = 0.0;
+			if (!Color.IsValid()
+				|| Color->Values.Num() != 4
+				|| !Color->TryGetNumberField(TEXT("r"), R)
+				|| !Color->TryGetNumberField(TEXT("g"), G)
+				|| !Color->TryGetNumberField(TEXT("b"), B)
+				|| !Color->TryGetNumberField(TEXT("a"), A)
+				|| !FMath::IsFinite(R) || !FMath::IsFinite(G)
+				|| !FMath::IsFinite(B) || !FMath::IsFinite(A)
+				|| FMath::Abs(R) > static_cast<double>(FLT_MAX)
+				|| FMath::Abs(G) > static_cast<double>(FLT_MAX)
+				|| FMath::Abs(B) > static_cast<double>(FLT_MAX)
+				|| FMath::Abs(A) > static_cast<double>(FLT_MAX))
+			{
+				OutError = TEXT("Material transaction vector value must contain finite r, g, b, and a floats.");
+				return false;
+			}
+			Prepared.NewVector = FLinearColor(
+				static_cast<float>(R),
+				static_cast<float>(G),
+				static_cast<float>(B),
+				static_cast<float>(A));
+			if (!FindGlobalVectorParameter(
+					MaterialInstance,
+					FName(*Prepared.ParameterName),
+					Prepared.ParameterInfo,
+					Prepared.ParameterExpressionGuid,
+					OutError)
+				|| !ReadVectorParameter(
+					MaterialInstance,
+					Prepared.ParameterInfo,
+					Prepared.ParameterExpressionGuid,
+					Prepared.BeforeVector,
+					Prepared.bBeforeOverride,
+					Prepared.BeforeExpressionGuid))
+			{
+				return false;
+			}
+			Prepared.BeforeValue = MakeShared<FJsonValueObject>(MakeMaterialVectorValue(Prepared.BeforeVector));
+			Prepared.ExpectedValue = MakeShared<FJsonValueObject>(MakeMaterialVectorValue(Prepared.NewVector));
+			return true;
+		}
+		if (Prepared.Kind == EAssetTransactionKind::MaterialTexture)
+		{
+			FString TexturePath;
+			if (!Prepared.Value->TryGetString(TexturePath))
+			{
+				OutError = TEXT("Material transaction texture value must be an object path string.");
+				return false;
+			}
+			TexturePath = NormalizeObjectPath(TexturePath);
+			if (!IsReferenceAllowed(Policy, TexturePath))
+			{
+				OutError = FString::Printf(TEXT("Material transaction texture is outside authorized roots: %s"), *TexturePath);
+				return false;
+			}
+			Prepared.NewTexture = LoadObject<UTexture>(nullptr, *TexturePath);
+			if (!Prepared.NewTexture
+				|| !ContainsExact(Policy.AllowedReferenceClasses, Prepared.NewTexture->GetClass()->GetPathName()))
+			{
+				OutError = FString::Printf(TEXT("Material transaction texture is missing or unauthorized: %s"), *TexturePath);
+				return false;
+			}
+			if (!FindGlobalTextureParameter(
+					MaterialInstance,
+					FName(*Prepared.ParameterName),
+					Prepared.ParameterInfo,
+					Prepared.ParameterExpressionGuid,
+					OutError)
+				|| !ReadTextureParameter(
+					MaterialInstance,
+					Prepared.ParameterInfo,
+					Prepared.ParameterExpressionGuid,
+					Prepared.BeforeTexture,
+					Prepared.bBeforeOverride,
+					Prepared.BeforeExpressionGuid))
+			{
+				return false;
+			}
+			Prepared.BeforeValue = MakeMaterialTextureValue(Prepared.BeforeTexture);
+			Prepared.ExpectedValue = MakeMaterialTextureValue(Prepared.NewTexture);
+			return true;
+		}
+
+		if (!Prepared.Value->TryGetBool(Prepared.bNewSwitch)
+			|| !FindGlobalStaticSwitchParameter(
+				MaterialInstance,
+				FName(*Prepared.ParameterName),
+				Prepared.ParameterInfo,
+				OutError)
+			|| !ReadStaticSwitchParameter(
+				MaterialInstance,
+				Prepared.ParameterInfo,
+				Prepared.bBeforeSwitch,
+				Prepared.BeforeExpressionGuid,
+				Prepared.bBeforeOverride))
+		{
+			if (OutError.IsEmpty())
+			{
+				OutError = TEXT("Material transaction static switch value or parameter is invalid.");
+			}
+			return false;
+		}
+		Prepared.BeforeValue = MakeShared<FJsonValueBoolean>(Prepared.bBeforeSwitch);
+		Prepared.ExpectedValue = MakeShared<FJsonValueBoolean>(Prepared.bNewSwitch);
+		return true;
+	}
+
+	bool PrepareDataTableTransactionOperation(
+		UObject* Asset,
+		const FString& ActualAssetClass,
+		const FPatchPolicy& Policy,
+		FAssetTransactionOperation& Prepared,
+		FString& OutError)
+	{
+		Prepared.DataTable = Cast<UDataTable>(Asset);
+		if (!Prepared.DataTable)
+		{
+			OutError = TEXT("DataTable transaction operations require a DataTable.");
+			return false;
+		}
+		Prepared.RowStruct = const_cast<UScriptStruct*>(Prepared.DataTable->GetRowStruct());
+		Prepared.Target->TryGetStringField(TEXT("rowName"), Prepared.RowNameText);
+		if (!Prepared.RowStruct || Prepared.RowNameText.IsEmpty())
+		{
+			OutError = TEXT("DataTable transaction row struct or rowName is invalid.");
+			return false;
+		}
+		Prepared.RowName = FName(*Prepared.RowNameText);
+		Prepared.RowData = Prepared.DataTable->FindRowUnchecked(Prepared.RowName);
+		if (!Prepared.RowData)
+		{
+			OutError = FString::Printf(TEXT("DataTable transaction row was not found: %s"), *Prepared.RowNameText);
+			return false;
+		}
+
+		if (Prepared.Operation.Equals(TEXT("setDataTableCell"), ESearchCase::CaseSensitive))
+		{
+			FString FieldName;
+			Prepared.Target->TryGetStringField(TEXT("fieldName"), FieldName);
+			if (FieldName.IsEmpty() || FieldName.Contains(TEXT("."))
+				|| Prepared.Value->Type == EJson::Null
+				|| Prepared.Value->Type == EJson::Array
+				|| Prepared.Value->Type == EJson::Object)
+			{
+				OutError = TEXT("DataTable transaction cell requires a top-level field and scalar value.");
+				return false;
+			}
+			Prepared.FieldNames.Add(FieldName);
+			Prepared.FieldValues.Add(Prepared.Value);
+			Prepared.TargetDescription = TEXT("data-table-cell:") + Prepared.RowNameText + TEXT(".") + FieldName;
+		}
+		else
+		{
+			const TSharedPtr<FJsonObject> FieldsObject = Prepared.Value->AsObject();
+			if (!FieldsObject.IsValid() || FieldsObject->Values.IsEmpty() || FieldsObject->Values.Num() > 32)
+			{
+				OutError = TEXT("DataTable transaction row-fields value must contain 1-32 fields.");
+				return false;
+			}
+			FieldsObject->Values.GetKeys(Prepared.FieldNames);
+			Prepared.FieldNames.Sort();
+			for (const FString& FieldName : Prepared.FieldNames)
+			{
+				const TSharedPtr<FJsonValue> FieldValue = FieldsObject->Values.FindChecked(FieldName);
+				if (FieldName.IsEmpty() || FieldName.Contains(TEXT("."))
+					|| !FieldValue.IsValid()
+					|| FieldValue->Type == EJson::Null
+					|| FieldValue->Type == EJson::Array
+					|| FieldValue->Type == EJson::Object)
+				{
+					OutError = TEXT("DataTable transaction row fields require top-level names and scalar values.");
+					return false;
+				}
+				Prepared.FieldValues.Add(FieldValue);
+			}
+			Prepared.TargetDescription = TEXT("data-table-row-fields:") + Prepared.RowNameText;
+		}
+
+		const FString RowStructPath = Prepared.RowStruct->GetPathName();
+		TSharedRef<FJsonObject> BeforeValues = MakeShared<FJsonObject>();
+		TSharedRef<FJsonObject> ExpectedValues = MakeShared<FJsonObject>();
+		for (int32 Index = 0; Index < Prepared.FieldNames.Num(); ++Index)
+		{
+			const FString& FieldName = Prepared.FieldNames[Index];
+			const FString Authorization =
+				ActualAssetClass + TEXT("#") + RowStructPath + TEXT("#") + FieldName;
+			Prepared.AuthorizationKeys.Add(Authorization);
+			FProperty* Field = FindFProperty<FProperty>(Prepared.RowStruct, FName(*FieldName));
+			if (!ContainsExact(Policy.AllowedDataTableFields, Authorization)
+				|| !Field
+				|| Field->ArrayDim != 1
+				|| Field->HasAnyPropertyFlags(
+					CPF_Transient | CPF_DuplicateTransient | CPF_NonPIEDuplicateTransient))
+			{
+				OutError = FString::Printf(TEXT("DataTable transaction field is missing or unauthorized: %s"), *Authorization);
+				return false;
+			}
+			void* ValueAddress = Field->ContainerPtrToValuePtr<void>(Prepared.RowData);
+			FScopedPropertyScratch Scratch(Field, ValueAddress);
+			FString BeforeText;
+			FString ExpectedText;
+			if (!Scratch.IsValid()
+				|| !ReadPropertyValue(Prepared.DataTable, Field, ValueAddress, BeforeText)
+				|| !SetPropertyFromJson(Field, Scratch.Get(), Prepared.FieldValues[Index], OutError)
+				|| !ReadPropertyValue(Prepared.DataTable, Field, Scratch.Get(), ExpectedText))
+			{
+				return false;
+			}
+			Prepared.Fields.Add(Field);
+			Prepared.ExpectedFieldTexts.Add(ExpectedText);
+			BeforeValues->SetStringField(FieldName, BeforeText);
+			ExpectedValues->SetStringField(FieldName, ExpectedText);
+		}
+		Prepared.BeforeValue = MakeShared<FJsonValueObject>(BeforeValues);
+		Prepared.ExpectedValue = MakeShared<FJsonValueObject>(ExpectedValues);
+		Prepared.TargetType = Prepared.Operation.Equals(TEXT("setDataTableCell"), ESearchCase::CaseSensitive)
+			? Prepared.Fields[0]->GetClass()->GetName()
+			: TEXT("DataTableRowFields");
+		return true;
+	}
+
+	bool ApplyAssetTransactionOperation(
+		UObject* Asset,
+		const FPatchPolicy& Policy,
+		FAssetTransactionOperation& Prepared,
+		FString& OutError)
+	{
+		if (Prepared.Kind == EAssetTransactionKind::AssetProperty)
+		{
+			if (!SetPropertyFromJson(Prepared.Property, Prepared.ValueAddress, Prepared.Value, OutError))
+			{
+				return false;
+			}
+			FString AfterText;
+			if (!ReadPropertyValue(Asset, Prepared.Property, Prepared.ValueAddress, AfterText))
+			{
+				OutError = TEXT("Could not read Data Asset transaction value after apply.");
+				return false;
+			}
+			Prepared.AfterValue = MakeShared<FJsonValueString>(AfterText);
+			return Prepared.ExpectedValue->AsString() == AfterText;
+		}
+		if (Prepared.Kind == EAssetTransactionKind::AssetReference)
+		{
+			FString ReferenceType;
+			FString ReferencePath;
+			FString ResolvedClass;
+			if (!SetAssetReferenceFromJson(
+					Prepared.Property,
+					Prepared.ValueAddress,
+					Prepared.Value,
+					Policy,
+					ReferenceType,
+					ReferencePath,
+					ResolvedClass,
+					OutError))
+			{
+				return false;
+			}
+			FString AfterPath;
+			if (!ReadAssetReferencePath(Prepared.Property, Prepared.ValueAddress, AfterPath))
+			{
+				OutError = TEXT("Could not read Data Asset reference after apply.");
+				return false;
+			}
+			Prepared.AfterValue = StringOrNull(AfterPath);
+			return UEAgentKit::StructuredPropertyJson::JsonEqual(Prepared.AfterValue, Prepared.ExpectedValue);
+		}
+		if (Prepared.Kind == EAssetTransactionKind::AssetStructured)
+		{
+			if (!UEAgentKit::StructuredPropertyJson::ImportValue(
+					Prepared.Property,
+					Prepared.ValueAddress,
+					Prepared.Value,
+					OutError)
+				|| !UEAgentKit::StructuredPropertyJson::ExportValue(
+					Prepared.Property,
+					Prepared.ValueAddress,
+					Prepared.AfterValue,
+					OutError))
+			{
+				return false;
+			}
+			return UEAgentKit::StructuredPropertyJson::JsonEqual(Prepared.AfterValue, Prepared.ExpectedValue);
+		}
+
+		UMaterialInstanceConstant* MaterialInstance = Cast<UMaterialInstanceConstant>(Asset);
+		if (Prepared.Kind == EAssetTransactionKind::MaterialScalar)
+		{
+			UMaterialEditingLibrary::SetMaterialInstanceScalarParameterValue(
+				MaterialInstance,
+				FName(*Prepared.ParameterName),
+				Prepared.NewScalar,
+				EMaterialParameterAssociation::GlobalParameter);
+			if (!ReadScalarParameter(
+					MaterialInstance,
+					Prepared.ParameterInfo,
+					Prepared.ParameterExpressionGuid,
+					Prepared.AfterScalar,
+					Prepared.bAfterOverride,
+					Prepared.AfterExpressionGuid)
+				|| !FMath::IsNearlyEqual(Prepared.AfterScalar, Prepared.NewScalar, UE_SMALL_NUMBER)
+				|| !Prepared.bAfterOverride
+				|| Prepared.AfterExpressionGuid != Prepared.ParameterExpressionGuid)
+			{
+				OutError = TEXT("Material scalar transaction read-back failed.");
+				return false;
+			}
+			Prepared.AfterValue = MakeShared<FJsonValueNumber>(Prepared.AfterScalar);
+			return true;
+		}
+		if (Prepared.Kind == EAssetTransactionKind::MaterialVector)
+		{
+			UMaterialEditingLibrary::SetMaterialInstanceVectorParameterValue(
+				MaterialInstance,
+				FName(*Prepared.ParameterName),
+				Prepared.NewVector,
+				EMaterialParameterAssociation::GlobalParameter);
+			if (!ReadVectorParameter(
+					MaterialInstance,
+					Prepared.ParameterInfo,
+					Prepared.ParameterExpressionGuid,
+					Prepared.AfterVector,
+					Prepared.bAfterOverride,
+					Prepared.AfterExpressionGuid)
+				|| !Prepared.AfterVector.Equals(Prepared.NewVector, UE_SMALL_NUMBER)
+				|| !Prepared.bAfterOverride
+				|| Prepared.AfterExpressionGuid != Prepared.ParameterExpressionGuid)
+			{
+				OutError = TEXT("Material vector transaction read-back failed.");
+				return false;
+			}
+			Prepared.AfterValue = MakeShared<FJsonValueObject>(MakeMaterialVectorValue(Prepared.AfterVector));
+			return true;
+		}
+		if (Prepared.Kind == EAssetTransactionKind::MaterialTexture)
+		{
+			UMaterialEditingLibrary::SetMaterialInstanceTextureParameterValue(
+				MaterialInstance,
+				FName(*Prepared.ParameterName),
+				Prepared.NewTexture,
+				EMaterialParameterAssociation::GlobalParameter);
+			if (!ReadTextureParameter(
+					MaterialInstance,
+					Prepared.ParameterInfo,
+					Prepared.ParameterExpressionGuid,
+					Prepared.AfterTexture,
+					Prepared.bAfterOverride,
+					Prepared.AfterExpressionGuid)
+				|| Prepared.AfterTexture != Prepared.NewTexture
+				|| !Prepared.bAfterOverride
+				|| Prepared.AfterExpressionGuid != Prepared.ParameterExpressionGuid)
+			{
+				OutError = TEXT("Material texture transaction read-back failed.");
+				return false;
+			}
+			Prepared.AfterValue = MakeMaterialTextureValue(Prepared.AfterTexture);
+			return true;
+		}
+		if (Prepared.Kind == EAssetTransactionKind::MaterialStaticSwitch)
+		{
+			UMaterialEditingLibrary::SetMaterialInstanceStaticSwitchParameterValue(
+				MaterialInstance,
+				FName(*Prepared.ParameterName),
+				Prepared.bNewSwitch,
+				EMaterialParameterAssociation::GlobalParameter,
+				true);
+			if (!ReadStaticSwitchParameter(
+					MaterialInstance,
+					Prepared.ParameterInfo,
+					Prepared.bAfterSwitch,
+					Prepared.AfterExpressionGuid,
+					Prepared.bAfterOverride)
+				|| Prepared.bAfterSwitch != Prepared.bNewSwitch
+				|| Prepared.AfterExpressionGuid != Prepared.BeforeExpressionGuid
+				|| !Prepared.bAfterOverride)
+			{
+				OutError = TEXT("Material static switch transaction read-back failed.");
+				return false;
+			}
+			Prepared.AfterValue = MakeShared<FJsonValueBoolean>(Prepared.bAfterSwitch);
+			return true;
+		}
+
+		TSharedRef<FJsonObject> AfterValues = MakeShared<FJsonObject>();
+		for (int32 Index = 0; Index < Prepared.Fields.Num(); ++Index)
+		{
+			void* ValueAddress = Prepared.Fields[Index]->ContainerPtrToValuePtr<void>(Prepared.RowData);
+			if (!SetPropertyFromJson(Prepared.Fields[Index], ValueAddress, Prepared.FieldValues[Index], OutError))
+			{
+				return false;
+			}
+			FString AfterText;
+			if (!ReadPropertyValue(Prepared.DataTable, Prepared.Fields[Index], ValueAddress, AfterText)
+				|| AfterText != Prepared.ExpectedFieldTexts[Index])
+			{
+				OutError = FString::Printf(
+					TEXT("DataTable transaction read-back failed for field: %s"),
+					*Prepared.FieldNames[Index]);
+				return false;
+			}
+			AfterValues->SetStringField(Prepared.FieldNames[Index], AfterText);
+		}
+		Prepared.AfterValue = MakeShared<FJsonValueObject>(AfterValues);
+		return true;
+	}
+
+	int32 ExecuteAssetTransaction(
+		UObject* Asset,
+		UPackage* Package,
+		const TArray<TSharedPtr<FJsonValue>>& OperationValues,
+		const FPatchPolicy& Policy,
+		const bool bCommit,
+		const FString& PatchId,
+		const FString& AssetPath,
+		const FString& ActualAssetClass,
+		const FString& PackageFilename,
+		const FString& BeforeRevision,
+		const FString& BackupDirectory,
+		const FString& ReportFilename,
+		const bool bOriginalDirty)
+	{
+		if (OperationValues.Num() < 2 || OperationValues.Num() > 32)
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Asset transactions require 2-32 operations."));
+			return 14;
+		}
+
+		TArray<FAssetTransactionOperation> Operations;
+		Operations.Reserve(OperationValues.Num());
+		TSet<FString> OperationIds;
+		TSet<FString> TargetKeys;
+		FString Error;
+		for (const TSharedPtr<FJsonValue>& OperationValue : OperationValues)
+		{
+			const TSharedPtr<FJsonObject> OperationObject = OperationValue.IsValid()
+				? OperationValue->AsObject()
+				: nullptr;
+			const TSharedPtr<FJsonObject>* TargetPtr = nullptr;
+			if (!OperationObject.IsValid())
+			{
+				UE_LOG(LogAssetPatch, Error, TEXT("Asset transaction operation entry is invalid."));
+				return 15;
+			}
+
+			FAssetTransactionOperation Prepared;
+			OperationObject->TryGetStringField(TEXT("operationId"), Prepared.OperationId);
+			OperationObject->TryGetStringField(TEXT("operation"), Prepared.Operation);
+			if (Prepared.OperationId.IsEmpty()
+				|| OperationIds.Contains(Prepared.OperationId)
+				|| !ContainsExact(Policy.AllowedOperations, Prepared.Operation)
+				|| !OperationObject->TryGetObjectField(TEXT("target"), TargetPtr)
+				|| !TargetPtr || !TargetPtr->IsValid())
+			{
+				UE_LOG(LogAssetPatch, Error, TEXT("Asset transaction operation is unauthorized, duplicated, or invalid."));
+				return 15;
+			}
+			Prepared.Target = *TargetPtr;
+			Prepared.Value = OperationObject->TryGetField(TEXT("value"));
+			if (!Prepared.Value.IsValid())
+			{
+				UE_LOG(LogAssetPatch, Error, TEXT("Asset transaction operation value is missing."));
+				return 16;
+			}
+
+			bool bPrepared = false;
+			if (Prepared.Operation.Equals(TEXT("setAssetProperty"), ESearchCase::CaseSensitive))
+			{
+				Prepared.Kind = EAssetTransactionKind::AssetProperty;
+				bPrepared = PrepareDataAssetTransactionOperation(Asset, ActualAssetClass, Policy, Prepared, Error);
+				Prepared.TargetKeys.Add(TEXT("property:") + Prepared.PropertyPath);
+			}
+			else if (Prepared.Operation.Equals(TEXT("setAssetReferenceProperty"), ESearchCase::CaseSensitive))
+			{
+				Prepared.Kind = EAssetTransactionKind::AssetReference;
+				bPrepared = PrepareDataAssetTransactionOperation(Asset, ActualAssetClass, Policy, Prepared, Error);
+				Prepared.TargetKeys.Add(TEXT("property:") + Prepared.PropertyPath);
+			}
+			else if (Prepared.Operation.Equals(TEXT("setAssetStructuredProperty"), ESearchCase::CaseSensitive))
+			{
+				Prepared.Kind = EAssetTransactionKind::AssetStructured;
+				bPrepared = PrepareDataAssetTransactionOperation(Asset, ActualAssetClass, Policy, Prepared, Error);
+				Prepared.TargetKeys.Add(TEXT("property:") + Prepared.PropertyPath);
+			}
+			else if (Prepared.Operation.Equals(TEXT("setMaterialInstanceScalarParameter"), ESearchCase::CaseSensitive))
+			{
+				Prepared.Kind = EAssetTransactionKind::MaterialScalar;
+				bPrepared = PrepareMaterialTransactionOperation(Asset, ActualAssetClass, Policy, Prepared, Error);
+				Prepared.TargetKeys.Add(TEXT("material:Scalar:") + Prepared.ParameterName);
+			}
+			else if (Prepared.Operation.Equals(TEXT("setMaterialInstanceVectorParameter"), ESearchCase::CaseSensitive))
+			{
+				Prepared.Kind = EAssetTransactionKind::MaterialVector;
+				bPrepared = PrepareMaterialTransactionOperation(Asset, ActualAssetClass, Policy, Prepared, Error);
+				Prepared.TargetKeys.Add(TEXT("material:Vector:") + Prepared.ParameterName);
+			}
+			else if (Prepared.Operation.Equals(TEXT("setMaterialInstanceTextureParameter"), ESearchCase::CaseSensitive))
+			{
+				Prepared.Kind = EAssetTransactionKind::MaterialTexture;
+				bPrepared = PrepareMaterialTransactionOperation(Asset, ActualAssetClass, Policy, Prepared, Error);
+				Prepared.TargetKeys.Add(TEXT("material:Texture:") + Prepared.ParameterName);
+			}
+			else if (Prepared.Operation.Equals(TEXT("setMaterialInstanceStaticSwitchParameter"), ESearchCase::CaseSensitive))
+			{
+				Prepared.Kind = EAssetTransactionKind::MaterialStaticSwitch;
+				bPrepared = PrepareMaterialTransactionOperation(Asset, ActualAssetClass, Policy, Prepared, Error);
+				Prepared.TargetKeys.Add(TEXT("material:StaticSwitch:") + Prepared.ParameterName);
+			}
+			else if (Prepared.Operation.Equals(TEXT("setDataTableCell"), ESearchCase::CaseSensitive)
+				|| Prepared.Operation.Equals(TEXT("setDataTableRowFields"), ESearchCase::CaseSensitive))
+			{
+				Prepared.Kind = EAssetTransactionKind::DataTableFields;
+				bPrepared = PrepareDataTableTransactionOperation(Asset, ActualAssetClass, Policy, Prepared, Error);
+				for (const FString& FieldName : Prepared.FieldNames)
+				{
+					Prepared.TargetKeys.Add(
+						TEXT("datatable:") + Prepared.RowNameText + TEXT(":") + FieldName);
+				}
+			}
+			else
+			{
+				Error = TEXT("Structural DataTable row operations and unknown operations are not supported in a multi-operation transaction.");
+			}
+			if (!bPrepared)
+			{
+				UE_LOG(LogAssetPatch, Error, TEXT("Asset transaction prevalidation failed: %s"), *Error);
+				return 17;
+			}
+			for (const FString& TargetKey : Prepared.TargetKeys)
+			{
+				if (!AddUniqueTransactionTarget(TargetKeys, TargetKey, Error))
+				{
+					UE_LOG(LogAssetPatch, Error, TEXT("%s"), *Error);
+					return 17;
+				}
+			}
+			OperationIds.Add(Prepared.OperationId);
+			Operations.Add(MoveTemp(Prepared));
+		}
+
+		FString BackupFilename;
+		if (bCommit)
+		{
+			IFileManager::Get().MakeDirectory(*BackupDirectory, true);
+			BackupFilename = CreateBackupFilename(BackupDirectory, PatchId, PackageFilename);
+			if (IFileManager::Get().Copy(*BackupFilename, *PackageFilename, true, true) != COPY_OK)
+			{
+				UE_LOG(LogAssetPatch, Error, TEXT("Could not create transaction package backup: %s"), *BackupFilename);
+				return 19;
+			}
+		}
+
+		Asset->Modify();
+		TSet<FName> ChangedRows;
+		bool bDataAssetChanged = false;
+		for (FAssetTransactionOperation& Prepared : Operations)
+		{
+			if (!ApplyAssetTransactionOperation(Asset, Policy, Prepared, Error))
+			{
+				UE_LOG(LogAssetPatch, Error, TEXT("Asset transaction apply failed: %s"), *Error);
+				return 20;
+			}
+			if (Prepared.Kind == EAssetTransactionKind::AssetProperty
+				|| Prepared.Kind == EAssetTransactionKind::AssetReference
+				|| Prepared.Kind == EAssetTransactionKind::AssetStructured)
+			{
+				bDataAssetChanged = true;
+			}
+			if (Prepared.Kind == EAssetTransactionKind::DataTableFields)
+			{
+				ChangedRows.Add(Prepared.RowName);
+			}
+		}
+		if (bDataAssetChanged)
+		{
+			Asset->PostEditChange();
+		}
+		if (UDataTable* DataTable = Cast<UDataTable>(Asset))
+		{
+			TArray<FName> SortedRows = ChangedRows.Array();
+			SortedRows.Sort(FNameLexicalLess());
+			for (const FName RowName : SortedRows)
+			{
+				DataTable->HandleDataTableChanged(RowName);
+			}
+		}
+		Package->MarkPackageDirty();
+
+		bool bSaved = false;
+		if (bCommit)
+		{
+			if (!SaveAssetPackage(Asset, PackageFilename, Error))
+			{
+				IFileManager::Get().Copy(*PackageFilename, *BackupFilename, true, true);
+				UE_LOG(LogAssetPatch, Error, TEXT("%s Transaction backup restored."), *Error);
+				return 21;
+			}
+			bSaved = true;
+		}
+
+		const FString AfterRevision = HashPackageFile(Package);
+		const bool bDiskUnchanged = BeforeRevision.Equals(AfterRevision, ESearchCase::IgnoreCase);
+		const bool bRolledBack = !bCommit;
+		TArray<TSharedPtr<FJsonValue>> OperationReports;
+		for (const FAssetTransactionOperation& Prepared : Operations)
+		{
+			TSharedRef<FJsonObject> OperationReport = MakeShared<FJsonObject>();
+			OperationReport->SetStringField(TEXT("operationId"), Prepared.OperationId);
+			OperationReport->SetStringField(TEXT("operation"), Prepared.Operation);
+			OperationReport->SetObjectField(TEXT("target"), Prepared.Target);
+			OperationReport->SetStringField(TEXT("targetDescription"), Prepared.TargetDescription);
+			OperationReport->SetStringField(TEXT("targetType"), Prepared.TargetType);
+			OperationReport->SetField(TEXT("beforeValue"), Prepared.BeforeValue);
+			OperationReport->SetField(TEXT("afterValue"), Prepared.AfterValue);
+			OperationReport->SetField(
+				TEXT("restoredValue"),
+				bRolledBack ? Prepared.BeforeValue : MakeShared<FJsonValueNull>());
+			TArray<TSharedPtr<FJsonValue>> AuthorizationValues;
+			for (const FString& AuthorizationKey : Prepared.AuthorizationKeys)
+			{
+				AuthorizationValues.Add(MakeShared<FJsonValueString>(AuthorizationKey));
+			}
+			OperationReport->SetArrayField(TEXT("authorizationKeys"), AuthorizationValues);
+			OperationReport->SetBoolField(TEXT("applied"), true);
+			OperationReport->SetBoolField(TEXT("rollbackValueMatch"), !bRolledBack || bDiskUnchanged);
+			if (Prepared.Kind >= EAssetTransactionKind::MaterialScalar
+				&& Prepared.Kind <= EAssetTransactionKind::MaterialStaticSwitch)
+			{
+				OperationReport->SetBoolField(TEXT("beforeOverride"), Prepared.bBeforeOverride);
+				OperationReport->SetBoolField(TEXT("afterOverride"), Prepared.bAfterOverride);
+				OperationReport->SetStringField(
+					TEXT("beforeExpressionGuid"),
+					FormatMaterialExpressionGuid(Prepared.BeforeExpressionGuid));
+				OperationReport->SetStringField(
+					TEXT("afterExpressionGuid"),
+					FormatMaterialExpressionGuid(Prepared.AfterExpressionGuid));
+			}
+			OperationReports.Add(MakeShared<FJsonValueObject>(OperationReport));
+		}
+
+		TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
+		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.5.1"));
+		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
+		Report->SetStringField(TEXT("patchId"), PatchId);
+		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
+		Report->SetStringField(TEXT("assetPath"), AssetPath);
+		Report->SetStringField(TEXT("assetClass"), ActualAssetClass);
+		Report->SetStringField(TEXT("operation"), TEXT("transaction"));
+		Report->SetObjectField(TEXT("target"), MakeShared<FJsonObject>());
+		Report->SetStringField(TEXT("targetDescription"), TEXT("single-asset-multi-operation"));
+		Report->SetStringField(TEXT("targetType"), TEXT("AssetTransaction"));
+		Report->SetStringField(TEXT("transactionKind"), TEXT("single-asset-multi-operation"));
+		Report->SetStringField(TEXT("rollbackStrategy"), bRolledBack ? TEXT("process-discard") : TEXT("package-backup"));
+		Report->SetNumberField(TEXT("operationCount"), Operations.Num());
+		Report->SetArrayField(TEXT("operations"), OperationReports);
+		Report->SetStringField(TEXT("beforeRevision"), BeforeRevision);
+		Report->SetStringField(TEXT("afterRevision"), AfterRevision);
+		Report->SetBoolField(TEXT("compiled"), false);
+		Report->SetBoolField(TEXT("saved"), bSaved);
+		Report->SetBoolField(TEXT("rolledBack"), bRolledBack);
+		Report->SetBoolField(TEXT("atomic"), true);
+		Report->SetBoolField(TEXT("rollbackValueMatch"), !bRolledBack || bDiskUnchanged);
+		Report->SetBoolField(TEXT("diskUnchanged"), bDiskUnchanged);
+		Report->SetBoolField(TEXT("originalPackageDirty"), bOriginalDirty);
+		Report->SetStringField(TEXT("backupPath"), BackupFilename);
+		if (!SaveReport(ReportFilename, Report, Error))
+		{
+			if (bCommit && !BackupFilename.IsEmpty())
+			{
+				IFileManager::Get().Copy(*PackageFilename, *BackupFilename, true, true);
+			}
+			UE_LOG(LogAssetPatch, Error, TEXT("%s Transaction backup restored."), *Error);
+			return 23;
+		}
+		if (bRolledBack && !bDiskUnchanged)
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Asset transaction Dry Run changed the package on disk."));
+			return 22;
+		}
+
+		UE_LOG(
+			LogAssetPatch,
+			Display,
+			TEXT("Asset transaction succeeded. Mode=%s Asset=%s Operations=%d"),
+			bCommit ? TEXT("Commit") : TEXT("DryRun"),
+			*AssetPath,
+			Operations.Num());
+		return 0;
+	}
 }
 
 UAssetPatchCommandlet::UAssetPatchCommandlet()
@@ -1495,10 +2532,33 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 	const TArray<TSharedPtr<FJsonValue>>* OperationValues = nullptr;
 	if (!AssetObject->TryGetArrayField(TEXT("operations"), OperationValues)
 		|| !OperationValues
-		|| OperationValues->Num() != 1)
+		|| OperationValues->IsEmpty()
+		|| OperationValues->Num() > 32)
 	{
-		UE_LOG(LogAssetPatch, Error, TEXT("Exactly one operation is required per patch."));
+		UE_LOG(LogAssetPatch, Error, TEXT("One to 32 operations are required per patch."));
 		return 14;
+	}
+	if (OperationValues->Num() > 1)
+	{
+		if (bTestFailureInjectionRequested)
+		{
+			UE_LOG(LogAssetPatch, Error, TEXT("Test failure injection is not supported for transactions."));
+			return 25;
+		}
+		return ExecuteAssetTransaction(
+			Asset,
+			Package,
+			*OperationValues,
+			Policy,
+			bCommit,
+			PatchId,
+			AssetPath,
+			ActualAssetClass,
+			PackageFilename,
+			BeforeRevision,
+			BackupDirectory,
+			ReportFilename,
+			bOriginalDirty);
 	}
 
 	const TSharedPtr<FJsonObject> OperationObject = (*OperationValues)[0]->AsObject();

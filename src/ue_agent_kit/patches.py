@@ -704,7 +704,7 @@ def _validate_policy(policy: dict[str, Any], errors: list[dict[str, str]]) -> di
     limits: dict[str, int] = {}
     limit_ranges = {
         "maxAssetsPerPatch": (1, 100),
-        "maxOperationsPerAsset": (1, 256),
+        "maxOperationsPerAsset": (1, 32),
         "maxValueBytes": (1, 1024 * 1024),
     }
     for field, (minimum, maximum) in limit_ranges.items():
@@ -1183,6 +1183,56 @@ def _validate_operation_target(
     return normalized
 
 
+_STRUCTURAL_DATA_TABLE_OPERATIONS = {
+    "addDataTableRow",
+    "removeDataTableRow",
+    "renameDataTableRow",
+}
+
+
+def _transaction_target_keys(
+    operation_name: Any,
+    target: dict[str, Any],
+    value: Any,
+) -> list[str]:
+    if operation_name == "setVariableDefault":
+        return [f"blueprint-variable:{target.get('variableName', '')}"]
+    if operation_name == "setComponentProperty":
+        return [
+            f"blueprint-component:{target.get('componentName', '')}:"
+            f"{target.get('propertyPath', '')}"
+        ]
+    if operation_name == "setPinDefault":
+        return [
+            f"blueprint-pin:{target.get('graphGuid', '')}:"
+            f"{target.get('nodeGuid', '')}:{target.get('pinName', '')}"
+        ]
+    if operation_name == "setBlueprintDescription":
+        return ["blueprint-description"]
+    if operation_name in {
+        "setAssetProperty",
+        "setAssetReferenceProperty",
+        "setAssetStructuredProperty",
+    }:
+        return [f"asset-property:{target.get('propertyPath', '')}"]
+    material_type = {
+        "setMaterialInstanceScalarParameter": "Scalar",
+        "setMaterialInstanceVectorParameter": "Vector",
+        "setMaterialInstanceTextureParameter": "Texture",
+        "setMaterialInstanceStaticSwitchParameter": "StaticSwitch",
+    }.get(operation_name)
+    if material_type is not None:
+        return [f"material:{material_type}:{target.get('parameterName', '')}"]
+    if operation_name == "setDataTableCell":
+        return [f"data-table:{target.get('rowName', '')}:{target.get('fieldName', '')}"]
+    if operation_name == "setDataTableRowFields" and isinstance(value, dict):
+        return [
+            f"data-table:{target.get('rowName', '')}:{field_name}"
+            for field_name in sorted(value)
+        ]
+    return []
+
+
 def validate_patch(
     patch_path: Path,
     policy_path: Path,
@@ -1402,6 +1452,8 @@ def validate_patch(
             )
 
         operation_results: list[dict[str, Any]] = []
+        multi_operation = len(operations_value) > 1
+        transaction_targets: set[str] = set()
         asset_pre_operation_errors = len(errors) - asset_error_start
         for operation_index, operation_value in enumerate(operations_value):
             operation_count += 1
@@ -1810,6 +1862,28 @@ def validate_patch(
                     f"{operation_pointer}.value",
                 )
 
+            if multi_operation and spec is not None:
+                if operation_name in _STRUCTURAL_DATA_TABLE_OPERATIONS:
+                    _issue(
+                        errors,
+                        "transaction-operation-not-supported",
+                        f"{operation_name} must run as a single-operation patch.",
+                        f"{operation_pointer}.operation",
+                    )
+                else:
+                    for target_key in _transaction_target_keys(operation_name, target, value):
+                        if not target_key or target_key.endswith(":"):
+                            continue
+                        if target_key in transaction_targets:
+                            _issue(
+                                errors,
+                                "duplicate-transaction-target",
+                                f"Transaction target is modified more than once: {target_key}",
+                                f"{operation_pointer}.target",
+                            )
+                        else:
+                            transaction_targets.add(target_key)
+
             operation_valid = (
                 asset_pre_operation_errors == 0
                 and len(errors) == operation_error_start
@@ -1842,6 +1916,11 @@ def validate_patch(
                 "authorizedRoot": bool(package_name) and _path_is_allowed(package_name, policy["allowedAssetRoots"]),
                 "valid": len(errors) == asset_error_start,
                 "operations": operation_results,
+                "transaction": {
+                    "kind": "single-asset-multi-operation" if multi_operation else "single-operation",
+                    "atomic": multi_operation,
+                    "operationCount": len(operations_value),
+                },
             }
         )
 

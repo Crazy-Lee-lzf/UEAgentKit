@@ -112,16 +112,16 @@ if ($LASTEXITCODE -ne 0)
 }
 
 $Validation = Get-Content -LiteralPath $ValidationReport -Raw | ConvertFrom-Json
-if ($Validation.summary.assets -ne 1 -or $Validation.summary.operations -ne 1)
+if ($Validation.summary.assets -ne 1 -or $Validation.summary.operations -lt 1 -or $Validation.summary.operations -gt 32)
 {
-    throw "Patch execution currently requires exactly one asset and one operation per execution."
+    throw "Patch execution requires exactly one asset and 1 through 32 operations."
 }
 if (!$Validation.commitSupported)
 {
     throw "The installed validation layer does not report patch executor support."
 }
 
-$Operation = $Validation.assets[0].operations[0].operation
+$Operations = @($Validation.assets[0].operations | ForEach-Object { [string]$_.operation })
 $AssetOperations = @(
     "setAssetProperty",
     "setAssetReferenceProperty",
@@ -136,10 +136,16 @@ $AssetOperations = @(
     "removeDataTableRow",
     "renameDataTableRow"
 )
-$Commandlet = if ($AssetOperations -contains $Operation) { "AssetPatch" } else { "BlueprintPatch" }
-if (![string]::IsNullOrWhiteSpace($TestFailureInjection) -and $Commandlet -ne "AssetPatch")
+$AssetOperationCount = @($Operations | Where-Object { $AssetOperations -contains $_ }).Count
+if ($AssetOperationCount -ne 0 -and $AssetOperationCount -ne $Operations.Count)
 {
-    throw "TestFailureInjection is available only for AssetPatch regression fixtures."
+    throw "A single-asset transaction cannot mix AssetPatch and BlueprintPatch operations."
+}
+$Commandlet = if ($AssetOperationCount -eq $Operations.Count) { "AssetPatch" } else { "BlueprintPatch" }
+if (![string]::IsNullOrWhiteSpace($TestFailureInjection) -and
+    ($Commandlet -ne "AssetPatch" -or $Operations.Count -ne 1))
+{
+    throw "TestFailureInjection is available only for single-operation AssetPatch regression fixtures."
 }
 
 $Arguments = @(

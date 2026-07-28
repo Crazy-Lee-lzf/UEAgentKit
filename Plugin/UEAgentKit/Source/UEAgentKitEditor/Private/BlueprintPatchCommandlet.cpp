@@ -769,6 +769,235 @@ namespace BlueprintPatchCommandletPrivate
 				FDateTime::UtcNow().GetTicks(),
 				*FPaths::GetCleanFilename(PackageFilename)));
 	}
+
+
+	struct FBlueprintTransactionOperation
+	{
+		FString OperationId;
+		FString Operation;
+		TSharedPtr<FJsonObject> Target;
+		TSharedPtr<FJsonValue> Value;
+		FString TargetKey;
+		FString TargetDescription;
+		FString TargetType;
+		FString BeforeValue;
+		FString AfterValue;
+	};
+
+	int32 ExecuteBlueprintTransaction(
+		UBlueprint* Blueprint,
+		UPackage* Package,
+		const TArray<TSharedPtr<FJsonValue>>& OperationValues,
+		const FPatchPolicy& Policy,
+		const bool bCommit,
+		const FString& PatchId,
+		const FString& AssetPath,
+		const FString& ActualAssetClass,
+		const FString& PackageFilename,
+		const FString& BeforeRevision,
+		const FString& BackupDirectory,
+		const FString& ReportFilename)
+	{
+		if (OperationValues.Num() < 2 || OperationValues.Num() > 32)
+		{
+			UE_LOG(LogBlueprintPatch, Error, TEXT("Blueprint transactions require 2-32 operations."));
+			return 15;
+		}
+
+		FString Error;
+		TArray<FBlueprintTransactionOperation> Operations;
+		Operations.Reserve(OperationValues.Num());
+		TSet<FString> OperationIds;
+		TSet<FString> TargetKeys;
+		for (const TSharedPtr<FJsonValue>& OperationValue : OperationValues)
+		{
+			const TSharedPtr<FJsonObject> OperationObject = OperationValue.IsValid()
+				? OperationValue->AsObject()
+				: nullptr;
+			if (!OperationObject.IsValid())
+			{
+				UE_LOG(LogBlueprintPatch, Error, TEXT("Blueprint transaction operation entry is invalid."));
+				return 16;
+			}
+
+			FBlueprintTransactionOperation Prepared;
+			OperationObject->TryGetStringField(TEXT("operationId"), Prepared.OperationId);
+			OperationObject->TryGetStringField(TEXT("operation"), Prepared.Operation);
+			const TSharedPtr<FJsonObject>* TargetPtr = nullptr;
+			if (Prepared.OperationId.IsEmpty()
+				|| OperationIds.Contains(Prepared.OperationId)
+				|| !ContainsExact(Policy.AllowedOperations, Prepared.Operation)
+				|| (!Prepared.Operation.Equals(TEXT("setVariableDefault"), ESearchCase::CaseSensitive)
+					&& !Prepared.Operation.Equals(TEXT("setComponentProperty"), ESearchCase::CaseSensitive)
+					&& !Prepared.Operation.Equals(TEXT("setPinDefault"), ESearchCase::CaseSensitive)
+					&& !Prepared.Operation.Equals(TEXT("setBlueprintDescription"), ESearchCase::CaseSensitive))
+				|| !OperationObject->TryGetObjectField(TEXT("target"), TargetPtr)
+				|| !TargetPtr || !TargetPtr->IsValid())
+			{
+				UE_LOG(
+					LogBlueprintPatch,
+					Error,
+					TEXT("Blueprint transaction operation is unauthorized, duplicated, or invalid: %s"),
+					*Prepared.OperationId);
+				return 17;
+			}
+			Prepared.Target = *TargetPtr;
+			Prepared.Value = OperationObject->TryGetField(TEXT("value"));
+			if (!Prepared.Value.IsValid())
+			{
+				UE_LOG(LogBlueprintPatch, Error, TEXT("Blueprint transaction operation value is missing."));
+				return 20;
+			}
+
+			FResolvedTarget Resolved;
+			if (!ResolveTarget(Blueprint, Prepared.Operation, Prepared.Target, Resolved, Error)
+				|| !ReadTargetValue(Resolved, Prepared.BeforeValue, Error))
+			{
+				UE_LOG(LogBlueprintPatch, Error, TEXT("Blueprint transaction prevalidation failed: %s"), *Error);
+				return 21;
+			}
+			Prepared.TargetKey = Resolved.Description;
+			Prepared.TargetDescription = Resolved.Description;
+			Prepared.TargetType = Resolved.TypeName;
+			if (TargetKeys.Contains(Prepared.TargetKey))
+			{
+				UE_LOG(
+					LogBlueprintPatch,
+					Error,
+					TEXT("Blueprint transaction contains duplicate target: %s"),
+					*Prepared.TargetKey);
+				return 21;
+			}
+			OperationIds.Add(Prepared.OperationId);
+			TargetKeys.Add(Prepared.TargetKey);
+			Operations.Add(MoveTemp(Prepared));
+		}
+
+		FString BackupFilename;
+		if (bCommit)
+		{
+			IFileManager::Get().MakeDirectory(*BackupDirectory, true);
+			BackupFilename = CreateBackupFilename(BackupDirectory, PatchId, PackageFilename);
+			if (IFileManager::Get().Copy(*BackupFilename, *PackageFilename, true, true) != COPY_OK)
+			{
+				UE_LOG(LogBlueprintPatch, Error, TEXT("Could not create transaction package backup: %s"), *BackupFilename);
+				return 23;
+			}
+		}
+
+		for (FBlueprintTransactionOperation& Prepared : Operations)
+		{
+			FResolvedTarget Resolved;
+			if (!ResolveTarget(Blueprint, Prepared.Operation, Prepared.Target, Resolved, Error)
+				|| !WriteTargetJsonValue(Resolved, Prepared.Value, Error))
+			{
+				UE_LOG(LogBlueprintPatch, Error, TEXT("Blueprint transaction apply failed: %s"), *Error);
+				return 24;
+			}
+		}
+		FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+		if (!CompileBlueprint(Blueprint, Error))
+		{
+			UE_LOG(LogBlueprintPatch, Error, TEXT("Blueprint transaction compilation failed: %s"), *Error);
+			return 25;
+		}
+
+		for (FBlueprintTransactionOperation& Prepared : Operations)
+		{
+			FResolvedTarget Resolved;
+			if (!ResolveTarget(Blueprint, Prepared.Operation, Prepared.Target, Resolved, Error)
+				|| !ReadTargetValue(Resolved, Prepared.AfterValue, Error))
+			{
+				UE_LOG(LogBlueprintPatch, Error, TEXT("Blueprint transaction read-back failed: %s"), *Error);
+				return 27;
+			}
+			Prepared.TargetDescription = Resolved.Description;
+			Prepared.TargetType = Resolved.TypeName;
+		}
+
+		bool bSaved = false;
+		if (bCommit)
+		{
+			if (!SaveBlueprintPackage(Blueprint, PackageFilename, Error))
+			{
+				IFileManager::Get().Copy(*PackageFilename, *BackupFilename, true, true);
+				UE_LOG(LogBlueprintPatch, Error, TEXT("%s Transaction backup restored."), *Error);
+				return 28;
+			}
+			bSaved = true;
+		}
+
+		const FString AfterRevision = HashPackageFile(Package);
+		const bool bDiskUnchanged = BeforeRevision.Equals(AfterRevision, ESearchCase::IgnoreCase);
+		const bool bRolledBack = !bCommit;
+		TArray<TSharedPtr<FJsonValue>> OperationReports;
+		OperationReports.Reserve(Operations.Num());
+		for (const FBlueprintTransactionOperation& Prepared : Operations)
+		{
+			TSharedRef<FJsonObject> OperationReport = MakeShared<FJsonObject>();
+			OperationReport->SetStringField(TEXT("operationId"), Prepared.OperationId);
+			OperationReport->SetStringField(TEXT("operation"), Prepared.Operation);
+			OperationReport->SetObjectField(TEXT("target"), Prepared.Target);
+			OperationReport->SetStringField(TEXT("targetDescription"), Prepared.TargetDescription);
+			OperationReport->SetStringField(TEXT("targetType"), Prepared.TargetType);
+			OperationReport->SetStringField(TEXT("beforeValue"), Prepared.BeforeValue);
+			OperationReport->SetStringField(TEXT("afterValue"), Prepared.AfterValue);
+			OperationReport->SetStringField(TEXT("restoredValue"), bRolledBack ? Prepared.BeforeValue : FString());
+			OperationReport->SetArrayField(TEXT("authorizationKeys"), {});
+			OperationReport->SetBoolField(TEXT("applied"), true);
+			OperationReport->SetBoolField(TEXT("rollbackValueMatch"), !bRolledBack || bDiskUnchanged);
+			OperationReports.Add(MakeShared<FJsonValueObject>(OperationReport));
+		}
+
+		TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
+		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.5.1"));
+		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
+		Report->SetStringField(TEXT("patchId"), PatchId);
+		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
+		Report->SetStringField(TEXT("assetPath"), AssetPath);
+		Report->SetStringField(TEXT("assetClass"), ActualAssetClass);
+		Report->SetStringField(TEXT("operation"), TEXT("transaction"));
+		Report->SetObjectField(TEXT("target"), MakeShared<FJsonObject>());
+		Report->SetStringField(TEXT("targetDescription"), TEXT("single-asset-multi-operation"));
+		Report->SetStringField(TEXT("targetType"), TEXT("BlueprintTransaction"));
+		Report->SetStringField(TEXT("transactionKind"), TEXT("single-asset-multi-operation"));
+		Report->SetStringField(TEXT("rollbackStrategy"), bRolledBack ? TEXT("process-discard") : TEXT("package-backup"));
+		Report->SetNumberField(TEXT("operationCount"), Operations.Num());
+		Report->SetArrayField(TEXT("operations"), OperationReports);
+		Report->SetStringField(TEXT("beforeRevision"), BeforeRevision);
+		Report->SetStringField(TEXT("afterRevision"), AfterRevision);
+		Report->SetBoolField(TEXT("compiled"), true);
+		Report->SetBoolField(TEXT("saved"), bSaved);
+		Report->SetBoolField(TEXT("rolledBack"), bRolledBack);
+		Report->SetBoolField(TEXT("atomic"), true);
+		Report->SetBoolField(TEXT("rollbackValueMatch"), !bRolledBack || bDiskUnchanged);
+		Report->SetBoolField(TEXT("diskUnchanged"), bDiskUnchanged);
+		Report->SetStringField(TEXT("backupPath"), BackupFilename);
+		if (!SaveReport(ReportFilename, Report, Error))
+		{
+			if (bCommit && !BackupFilename.IsEmpty())
+			{
+				IFileManager::Get().Copy(*PackageFilename, *BackupFilename, true, true);
+			}
+			UE_LOG(LogBlueprintPatch, Error, TEXT("%s Transaction backup restored."), *Error);
+			return 32;
+		}
+		if (bRolledBack && !bDiskUnchanged)
+		{
+			UE_LOG(LogBlueprintPatch, Error, TEXT("Blueprint transaction Dry Run changed the package on disk."));
+			return 31;
+		}
+
+		UE_LOG(
+			LogBlueprintPatch,
+			Display,
+			TEXT("Blueprint transaction succeeded. Mode=%s Asset=%s Operations=%d"),
+			bCommit ? TEXT("Commit") : TEXT("DryRun"),
+			*AssetPath,
+			Operations.Num());
+		return 0;
+	}
 }
 
 UBlueprintPatchCommandlet::UBlueprintPatchCommandlet()
@@ -926,10 +1155,27 @@ int32 UBlueprintPatchCommandlet::Main(const FString& Params)
 	const TArray<TSharedPtr<FJsonValue>>* OperationValues = nullptr;
 	if (!AssetObject->TryGetArrayField(TEXT("operations"), OperationValues)
 		|| !OperationValues
-		|| OperationValues->Num() != 1)
+		|| OperationValues->IsEmpty()
+		|| OperationValues->Num() > 32)
 	{
-		UE_LOG(LogBlueprintPatch, Error, TEXT("Exactly one operation is required per patch."));
+		UE_LOG(LogBlueprintPatch, Error, TEXT("One to 32 operations are required per patch."));
 		return 15;
+	}
+	if (OperationValues->Num() > 1)
+	{
+		return ExecuteBlueprintTransaction(
+			Blueprint,
+			Package,
+			*OperationValues,
+			Policy,
+			bCommit,
+			PatchId,
+			AssetPath,
+			ActualAssetClass,
+			PackageFilename,
+			BeforeRevision,
+			BackupDirectory,
+			ReportFilename);
 	}
 
 	const TSharedPtr<FJsonObject> OperationObject = (*OperationValues)[0]->AsObject();
