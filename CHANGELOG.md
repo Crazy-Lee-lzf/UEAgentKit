@@ -10,6 +10,7 @@ All notable changes to UE Agent Kit are documented here.
 
 - Added a portable release validator, Python 3.11/3.12 GitHub Actions matrix, package-build gate, and uploaded Python distribution artifact.
 - Routed UAT BuildPlugin through the same resolved AutoSDK/MSVC toolchain used by the validated Direct Build path.
+- Placed the Python wheel at the release root so manifest and SHA-256 entries resolve directly from the published directory.
 - Added single-asset atomic transactions containing 1–32 compatible operations, with complete pre-validation, duplicate-target rejection, one backup, one Blueprint compile/save, process-discard Dry Run semantics, and whole-package rollback.
 - Extended backup manifests with ordered per-operation targets, before/after values, and exact authorization-key evidence while preserving schema 1.0 compatibility for existing single-operation manifests.
 - Preserved multi-field DataTable authorization evidence for single-operation row-field and row-add manifests.

@@ -77,8 +77,7 @@ Copy-Item -LiteralPath (Join-Path $ToolRoot "docs\RELEASE_${Version}_EN.md") -De
 $PluginZip = Join-Path $OutputDirectory "UEAgentKit-$Version-UE5.6-Win64.zip"
 Compress-Archive -LiteralPath $PluginPackage -DestinationPath $PluginZip -CompressionLevel Optimal
 
-$PythonOutput = Join-Path $OutputDirectory "Python"
-New-Item -ItemType Directory -Path $PythonOutput -Force | Out-Null
+$PythonOutput = $OutputDirectory
 & $PythonExecutable -m pip wheel $ToolRoot `
     --no-deps `
     --no-build-isolation `
