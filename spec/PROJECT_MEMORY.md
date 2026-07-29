@@ -183,7 +183,7 @@ External Document
 
 首版 Artifact 只保存 `artifactKind`、`artifactRef` 和结构化 `details`，不复制外部文件内容。
 
-## 11. Schema v1 表
+## 11. Schema v2 表
 
 ```text
 memory_schema_migrations
@@ -195,6 +195,15 @@ memory_relations
 memory_status_events
 memory_records_fts
 ```
+
+Schema v2 在 `memory_records` 中增加 `evidence_sha256`。打开可写数据库时会自动把 Schema v1 记录迁移到 v2，并基于现有 Source、Revision Set 和 Artifact 绑定回填摘要。
+
+两个摘要职责不同：
+
+- `contentSha256`：覆盖 Record Type、Subject、Title、Body、Scope 与 details，用于语义内容比较和冲突检测。
+- `evidenceSha256`：覆盖 Project Key、`contentSha256`、Source、Confidence、Revision Set 与 Artifact 绑定，用于审计证据完整性。
+
+读取记录时会重新计算两个摘要。正文、Scope、details、Revision 或 Artifact 被数据库外部修改后，读取会以摘要不匹配失败；状态迁移和 Supersede 关系不改变这两个摘要。
 
 ## 12. 首个实现边界
 

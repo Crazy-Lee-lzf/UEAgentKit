@@ -718,6 +718,7 @@ class McpServerTests(unittest.TestCase):
             fetched["record"]["revisionSet"][0]["revision"],
             f"sha256:{REVISION_A}",
         )
+        self.assertRegex(fetched["record"]["evidenceSha256"], r"^sha256:[0-9a-f]{64}$")
 
         _, validated = asyncio.run(server.call_tool("ue_memory_validate", {}))
         self.assertTrue(validated["ok"])

@@ -106,6 +106,7 @@ def _record_payload(record: MemoryRecord) -> dict[str, Any]:
         "confidence": record.confidence,
         "status": record.status.value,
         "contentSha256": record.content_sha256,
+        "evidenceSha256": record.evidence_sha256,
         "createdAtUtc": record.created_at_utc,
         "observedAtUtc": record.observed_at_utc,
         "updatedAtUtc": record.updated_at_utc,

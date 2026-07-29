@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-CURRENT_MEMORY_SCHEMA_VERSION = 1
+CURRENT_MEMORY_SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -203,6 +203,17 @@ CREATE TRIGGER memory_records_au AFTER UPDATE ON memory_records BEGIN
     INSERT INTO memory_records_fts(rowid, subject_key, title, body, source_ref, details_json)
     VALUES (new.rowid, new.subject_key, new.title, new.body, new.source_ref, new.details_json);
 END;
+""",
+    ),
+    MemoryMigration(
+        version=2,
+        description="Add evidence-bound audit digests",
+        sql=r"""
+ALTER TABLE memory_records
+    ADD COLUMN evidence_sha256 TEXT NOT NULL DEFAULT '';
+
+CREATE INDEX memory_records_evidence_idx
+    ON memory_records(project_key, evidence_sha256);
 """,
     ),
 )

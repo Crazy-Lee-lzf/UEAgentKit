@@ -4,6 +4,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 
@@ -12,7 +13,10 @@ SRC_ROOT = TOOL_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from ue_agent_kit.memory_schema import CURRENT_MEMORY_SCHEMA_VERSION  # noqa: E402
+from ue_agent_kit.memory_schema import (  # noqa: E402
+    CURRENT_MEMORY_SCHEMA_VERSION,
+    MEMORY_MIGRATIONS,
+)
 from ue_agent_kit.project_memory import (  # noqa: E402
     MemoryArtifact,
     MemoryRecordDraft,
@@ -23,6 +27,7 @@ from ue_agent_kit.project_memory import (  # noqa: E402
     MemoryScopeType,
     MemorySourceKind,
     MemoryStatus,
+    _content_sha256,
     create_memory_record,
     get_memory_record,
     invalidate_memory_revisions,
@@ -106,6 +111,134 @@ class ProjectMemoryTests(unittest.TestCase):
             self.assertEqual(record.artifacts[0].artifact_kind, "validationEvidence")
             self.assertEqual(record.details, {"owner": "design"})
             self.assertTrue(record.content_sha256.startswith("sha256:"))
+            self.assertTrue(record.evidence_sha256.startswith("sha256:"))
+
+    def test_evidence_digest_covers_sources_revisions_and_artifacts(self) -> None:
+        with open_project_memory_database(self.database_path) as connection:
+            base = self.draft(
+                source_kind=MemorySourceKind.TOOL_OBSERVED,
+                revision_set=(MemoryRevision(ASSET, "sha256:a"),),
+            )
+            first = create_memory_record(connection, base)
+            second = create_memory_record(
+                connection,
+                replace(
+                    base,
+                    source_ref="validation:second-run",
+                    artifacts=(
+                        MemoryArtifact(
+                            "validationEvidence",
+                            "Output/Validation/player-health-second.json",
+                            {"result": "passed"},
+                        ),
+                    ),
+                ),
+            )
+
+            self.assertEqual(first.content_sha256, second.content_sha256)
+            self.assertNotEqual(first.evidence_sha256, second.evidence_sha256)
+            self.assertRegex(first.evidence_sha256, r"^sha256:[0-9a-f]{64}$")
+            self.assertEqual(first.status, MemoryStatus.VALID)
+            self.assertEqual(second.status, MemoryStatus.VALID)
+
+    def test_schema_v1_migration_backfills_evidence_digest(self) -> None:
+        self.database_path.parent.mkdir(parents=True, exist_ok=True)
+        connection = sqlite3.connect(self.database_path)
+        try:
+            connection.executescript(MEMORY_MIGRATIONS[0].sql)
+            connection.execute(
+                "INSERT INTO memory_schema_migrations(version, description, applied_at_utc) VALUES (1, ?, ?)",
+                (MEMORY_MIGRATIONS[0].description, "2026-07-29T00:00:00Z"),
+            )
+            connection.execute("PRAGMA user_version = 1")
+            record_id = "mem_" + "0" * 32
+            connection.execute(
+                """
+                INSERT INTO memory_records(
+                    record_id, project_key, record_type, subject_key, title, body,
+                    source_kind, source_ref, confidence, status, content_sha256,
+                    created_at_utc, observed_at_utc, updated_at_utc, details_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record_id,
+                    PROJECT,
+                    "projectFact",
+                    "asset:player:legacy",
+                    "Legacy player fact",
+                    "Legacy record body.",
+                    "tool-observed",
+                    "legacy:index",
+                    1.0,
+                    "valid",
+                    _content_sha256(
+                        record_type=MemoryRecordType.PROJECT_FACT,
+                        subject_key="asset:player:legacy",
+                        title="Legacy player fact",
+                        body="Legacy record body.",
+                        scopes=(),
+                        details={},
+                    ),
+                    "2026-07-29T00:00:00Z",
+                    "2026-07-29T00:00:00Z",
+                    "2026-07-29T00:00:00Z",
+                    "{}",
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO memory_revisions(record_id, ordinal, asset_path, revision, revision_stable)
+                VALUES (?, 0, ?, ?, 1)
+                """,
+                (record_id, ASSET, "sha256:a"),
+            )
+            connection.execute(
+                """
+                INSERT INTO memory_artifacts(record_id, ordinal, artifact_kind, artifact_ref, details_json)
+                VALUES (?, 0, 'validationEvidence', 'validation:legacy', '{}')
+                """,
+                (record_id,),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        with open_project_memory_database(self.database_path) as migrated:
+            self.assertEqual(
+                int(migrated.execute("PRAGMA user_version").fetchone()[0]),
+                CURRENT_MEMORY_SCHEMA_VERSION,
+            )
+            record = get_memory_record(migrated, record_id)
+            self.assertRegex(record.evidence_sha256, r"^sha256:[0-9a-f]{64}$")
+            self.assertEqual(
+                migrated.execute(
+                    "SELECT evidence_sha256 FROM memory_records WHERE record_id = ?",
+                    (record_id,),
+                ).fetchone()[0],
+                record.evidence_sha256,
+            )
+
+    def test_content_digest_rejects_record_tampering(self) -> None:
+        with open_project_memory_database(self.database_path) as connection:
+            record = create_memory_record(connection, self.draft())
+            connection.execute(
+                "UPDATE memory_records SET body = ? WHERE record_id = ?",
+                ("Tampered body.", record.record_id),
+            )
+            connection.commit()
+            with self.assertRaisesRegex(RuntimeError, "content digest mismatch"):
+                get_memory_record(connection, record.record_id)
+
+    def test_evidence_digest_rejects_artifact_tampering(self) -> None:
+        with open_project_memory_database(self.database_path) as connection:
+            record = create_memory_record(connection, self.draft())
+            connection.execute(
+                "UPDATE memory_artifacts SET artifact_ref = ? WHERE record_id = ?",
+                ("validation:tampered", record.record_id),
+            )
+            connection.commit()
+            with self.assertRaisesRegex(RuntimeError, "evidence digest mismatch"):
+                get_memory_record(connection, record.record_id)
 
     def test_model_inferred_record_starts_unverified(self) -> None:
         with open_project_memory_database(self.database_path) as connection:

@@ -128,6 +128,7 @@ class MemoryRecord:
     confidence: float
     status: MemoryStatus
     content_sha256: str
+    evidence_sha256: str
     created_at_utc: str
     observed_at_utc: str
     updated_at_utc: str
@@ -216,6 +217,8 @@ def apply_memory_migrations(connection: sqlite3.Connection) -> int:
             "Project Memory migration stopped at schema "
             f"{current_version}; expected {CURRENT_MEMORY_SCHEMA_VERSION}."
         )
+    if current_version >= 2:
+        _backfill_evidence_sha256(connection)
     return current_version
 
 
@@ -408,6 +411,81 @@ def _content_sha256(
     return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _evidence_sha256(
+    *,
+    project_key: str,
+    content_sha256: str,
+    source_kind: MemorySourceKind,
+    source_ref: str,
+    confidence: float,
+    revisions: Sequence[MemoryRevision],
+    artifacts: Sequence[MemoryArtifact],
+) -> str:
+    payload = {
+        "projectKey": project_key,
+        "contentSha256": content_sha256,
+        "sourceKind": source_kind.value,
+        "sourceRef": source_ref,
+        "confidence": confidence,
+        "revisionSet": [
+            {
+                "assetPath": revision.asset_path,
+                "revision": revision.revision,
+                "revisionStable": revision.revision_stable,
+            }
+            for revision in sorted(revisions, key=lambda item: item.asset_path.casefold())
+        ],
+        "artifacts": [
+            {
+                "artifactKind": artifact.artifact_kind,
+                "artifactRef": artifact.artifact_ref,
+                "details": artifact.details,
+            }
+            for artifact in sorted(
+                artifacts,
+                key=lambda item: (item.artifact_kind.casefold(), item.artifact_ref.casefold()),
+            )
+        ],
+    }
+    canonical = _canonical_json(payload, "record evidence")
+    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _backfill_evidence_sha256(connection: sqlite3.Connection) -> None:
+    rows = connection.execute(
+        """
+        SELECT
+            record_id,
+            project_key,
+            source_kind,
+            source_ref,
+            confidence,
+            content_sha256
+        FROM memory_records
+        WHERE evidence_sha256 = ''
+        ORDER BY record_id
+        """
+    ).fetchall()
+    if not rows:
+        return
+    with connection:
+        for row in rows:
+            record_id = str(row[0])
+            digest = _evidence_sha256(
+                project_key=str(row[1]),
+                content_sha256=str(row[5]),
+                source_kind=MemorySourceKind(str(row[2])),
+                source_ref=str(row[3]),
+                confidence=float(row[4]),
+                revisions=_load_revisions(connection, record_id),
+                artifacts=_load_artifacts(connection, record_id),
+            )
+            connection.execute(
+                "UPDATE memory_records SET evidence_sha256 = ? WHERE record_id = ?",
+                (digest, record_id),
+            )
+
+
 def _insert_status_event(
     connection: sqlite3.Connection,
     *,
@@ -542,6 +620,15 @@ def create_memory_record(
         scopes=scopes,
         details=details,
     )
+    evidence_sha256 = _evidence_sha256(
+        project_key=project_key,
+        content_sha256=content_sha256,
+        source_kind=source_kind,
+        source_ref=source_ref,
+        confidence=confidence,
+        revisions=revisions,
+        artifacts=artifacts,
+    )
 
     with connection:
         connection.execute(
@@ -558,11 +645,12 @@ def create_memory_record(
                 confidence,
                 status,
                 content_sha256,
+                evidence_sha256,
                 created_at_utc,
                 observed_at_utc,
                 updated_at_utc,
                 details_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record_id,
@@ -576,6 +664,7 @@ def create_memory_record(
                 confidence,
                 status.value,
                 content_sha256,
+                evidence_sha256,
                 timestamp,
                 observed_at_utc,
                 timestamp,
@@ -786,6 +875,7 @@ def get_memory_record(connection: sqlite3.Connection, record_id: str) -> MemoryR
             confidence,
             status,
             content_sha256,
+            evidence_sha256,
             created_at_utc,
             observed_at_utc,
             updated_at_utc,
@@ -798,7 +888,11 @@ def get_memory_record(connection: sqlite3.Connection, record_id: str) -> MemoryR
     ).fetchone()
     if row is None:
         raise KeyError(f"Project Memory record not found: {normalized_id}")
-    return MemoryRecord(
+    scopes = _load_scopes(connection, normalized_id)
+    revisions = _load_revisions(connection, normalized_id)
+    artifacts = _load_artifacts(connection, normalized_id)
+    details = _read_json(str(row[16]))
+    record = MemoryRecord(
         record_id=str(row[0]),
         project_key=str(row[1]),
         record_type=MemoryRecordType(str(row[2])),
@@ -810,16 +904,39 @@ def get_memory_record(connection: sqlite3.Connection, record_id: str) -> MemoryR
         confidence=float(row[8]),
         status=MemoryStatus(str(row[9])),
         content_sha256=str(row[10]),
-        created_at_utc=str(row[11]),
-        observed_at_utc=str(row[12]),
-        updated_at_utc=str(row[13]),
-        superseded_by_record_id=str(row[14]),
-        scopes=_load_scopes(connection, normalized_id),
-        revision_set=_load_revisions(connection, normalized_id),
-        artifacts=_load_artifacts(connection, normalized_id),
+        evidence_sha256=str(row[11]),
+        created_at_utc=str(row[12]),
+        observed_at_utc=str(row[13]),
+        updated_at_utc=str(row[14]),
+        superseded_by_record_id=str(row[15]),
+        scopes=scopes,
+        revision_set=revisions,
+        artifacts=artifacts,
         relations=_load_relations(connection, normalized_id),
-        details=_read_json(str(row[15])),
+        details=details,
     )
+    expected_content = _content_sha256(
+        record_type=record.record_type,
+        subject_key=record.subject_key,
+        title=record.title,
+        body=record.body,
+        scopes=record.scopes,
+        details=record.details,
+    )
+    if record.content_sha256 != expected_content:
+        raise RuntimeError(f"Project Memory content digest mismatch for record {normalized_id}.")
+    expected_evidence = _evidence_sha256(
+        project_key=record.project_key,
+        content_sha256=record.content_sha256,
+        source_kind=record.source_kind,
+        source_ref=record.source_ref,
+        confidence=record.confidence,
+        revisions=record.revision_set,
+        artifacts=record.artifacts,
+    )
+    if record.evidence_sha256 != expected_evidence:
+        raise RuntimeError(f"Project Memory evidence digest mismatch for record {normalized_id}.")
+    return record
 
 
 def list_memory_records(
