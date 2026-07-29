@@ -1,5 +1,7 @@
 param(
     [string]$Database = "",
+    [switch]$EnableProjectMemory,
+    [string]$MemoryDatabase = "",
     [switch]$EnableWriteTools,
     [switch]$EnableCommitTools,
     [switch]$EnableLiveEditor,
@@ -38,6 +40,22 @@ if ($EnableCommitTools -and !$EnableWriteTools)
 }
 
 $Arguments = @($EntryPoint, "--database", $Database)
+if ($EnableProjectMemory)
+{
+    if ([string]::IsNullOrWhiteSpace($MemoryDatabase))
+    {
+        $MemoryDatabase = Join-Path $ToolRoot ".data\ue_agent_kit_memory.sqlite3"
+    }
+    $MemoryDatabase = [System.IO.Path]::GetFullPath($MemoryDatabase)
+    $Arguments += @(
+        "--enable-project-memory",
+        "--memory-database", $MemoryDatabase
+    )
+}
+elseif (![string]::IsNullOrWhiteSpace($MemoryDatabase))
+{
+    throw "MemoryDatabase requires EnableProjectMemory."
+}
 if ($EnableWriteTools -or $EnableLiveEditor)
 {
     $ProjectPath = Resolve-UeakProjectPath -ProjectPath $ProjectPath

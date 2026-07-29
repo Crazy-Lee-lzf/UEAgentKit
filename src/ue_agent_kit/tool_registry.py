@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-ToolGroup = Literal["query", "live-read", "live-action", "workflow"]
+ToolGroup = Literal["query", "memory", "live-read", "live-action", "workflow"]
 AnnotationKind = Literal["read", "planning", "destructive"]
 
 
@@ -34,6 +34,12 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_search", "query", "read"),
     ToolDefinition("ue_get_asset", "query", "read"),
     ToolDefinition("ue_find_references", "query", "read"),
+    ToolDefinition("ue_memory_search", "memory", "read"),
+    ToolDefinition("ue_memory_get", "memory", "read"),
+    ToolDefinition("ue_memory_add_rule", "memory", "planning"),
+    ToolDefinition("ue_memory_record_finding", "memory", "planning"),
+    ToolDefinition("ue_memory_mark_superseded", "memory", "planning"),
+    ToolDefinition("ue_memory_validate", "memory", "planning"),
     ToolDefinition("ue_editor_status", "live-read", "read", "editor.status"),
     ToolDefinition("ue_get_selection", "live-read", "read", "editor.getSelection"),
     ToolDefinition("ue_get_open_assets", "live-read", "read", "editor.getOpenAssets"),
@@ -81,6 +87,7 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
 
 TOOL_DEFINITIONS_BY_NAME = {definition.name: definition for definition in TOOL_REGISTRY}
 QUERY_TOOL_NAMES = [definition.name for definition in TOOL_REGISTRY if definition.group == "query"]
+MEMORY_TOOL_NAMES = [definition.name for definition in TOOL_REGISTRY if definition.group == "memory"]
 LIVE_EDITOR_TOOL_NAMES = [
     definition.name for definition in TOOL_REGISTRY if definition.group in {"live-read", "live-action"}
 ]
@@ -93,8 +100,15 @@ LIVE_EDITOR_METHODS = {
 }
 
 
-def tool_definitions_for_mode(*, live_editor_enabled: bool, workflow_enabled: bool) -> list[ToolDefinition]:
+def tool_definitions_for_mode(
+    *,
+    live_editor_enabled: bool,
+    workflow_enabled: bool,
+    memory_enabled: bool = False,
+) -> list[ToolDefinition]:
     enabled_groups: set[ToolGroup] = {"query"}
+    if memory_enabled:
+        enabled_groups.add("memory")
     if live_editor_enabled:
         enabled_groups.update({"live-read", "live-action"})
     if workflow_enabled:
@@ -102,17 +116,28 @@ def tool_definitions_for_mode(*, live_editor_enabled: bool, workflow_enabled: bo
     return [definition for definition in TOOL_REGISTRY if definition.group in enabled_groups]
 
 
-def tool_names_for_mode(*, live_editor_enabled: bool = False, workflow_enabled: bool = False) -> list[str]:
+def tool_names_for_mode(
+    *,
+    live_editor_enabled: bool = False,
+    workflow_enabled: bool = False,
+    memory_enabled: bool = False,
+) -> list[str]:
     return [
         definition.name
         for definition in tool_definitions_for_mode(
             live_editor_enabled=live_editor_enabled,
             workflow_enabled=workflow_enabled,
+            memory_enabled=memory_enabled,
         )
     ]
 
 
-def tool_descriptors_for_mode(*, live_editor_enabled: bool, workflow_enabled: bool) -> list[dict[str, object]]:
+def tool_descriptors_for_mode(
+    *,
+    live_editor_enabled: bool,
+    workflow_enabled: bool,
+    memory_enabled: bool = False,
+) -> list[dict[str, object]]:
     return [
         {
             "name": definition.name,
@@ -122,5 +147,6 @@ def tool_descriptors_for_mode(*, live_editor_enabled: bool, workflow_enabled: bo
         for definition in tool_definitions_for_mode(
             live_editor_enabled=live_editor_enabled,
             workflow_enabled=workflow_enabled,
+            memory_enabled=memory_enabled,
         )
     ]

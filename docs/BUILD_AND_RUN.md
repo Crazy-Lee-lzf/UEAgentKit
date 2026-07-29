@@ -390,6 +390,17 @@ scripts\RunMcp.cmd ^
 scripts\RunMcp.cmd -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
 ```
 
+启用独立持久化 Project Memory：
+
+```bat
+scripts\RunMcp.cmd ^
+  -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3" ^
+  -EnableProjectMemory ^
+  -MemoryDatabase "<TOOL_ROOT>\.data\ue_agent_kit_memory.sqlite3"
+```
+
+Memory Database 可省略，默认使用 `<TOOL_ROOT>\.data\ue_agent_kit_memory.sqlite3`。该路径和索引中的 Project Key 在 Server 启动时固定，不出现在任何 MCP Tool 参数中。
+
 运行官方 Python MCP Client 的 stdio 握手、Tool 发现和只读哈希验证：
 
 ```bat
@@ -457,7 +468,18 @@ ue_get_asset
 ue_find_references
 ```
 
-服务器启动时固定数据库路径，Tool 参数不能更换数据库；SQLite 使用不可变只读快照并拒绝活动 Sidecar。`-EnableLiveEditor -ProjectPath <固定工程>` 会增加 10 个实时只读 Tool 和 8 个受限 Daily Action。Bridge 只绑定 `127.0.0.1`，使用随机会话令牌，并校验固定工程路径摘要、Plugin/Server 版本与 Capability；MCP 响应不暴露 Token、端口或 Descriptor 路径。离线 5 Tool、Live 模式 23 Tool、工作流模式 25 Tool、组合模式 43 Tool 相互兼容。Output Log 最多返回 100 条并使用序号游标；实时资产检查和 Content Browser 同步不加载目标资产；Blueprint Graph 定位只支持普通 Blueprint Editor，并最多返回 100 个选中 Node。八个 Live Daily Action 仅接受精确 `/Game` 身份或当前 Editor World 的 ActorGuid，在 PIE/SIE 中拒绝运行且不保存 Package；工作流 Tool `ue_save_authorized_asset` 使用 Policy/Revision/Session 绑定的 Preview Receipt、备份、显式确认和独立验证保存一个授权资产；文件夹 Validation 最多匹配 500 个资产并最多返回 200 条问题。`ue_get_asset_state` 只读比较 Editor Memory、磁盘 Package、Revision Export 和 SQLite。高层写入入口默认只生成 Plan，也可执行 Dry Run，但不能直接 Commit。保存和恢复必须显式启用 Commit、通过 Policy，并提供一次性 Receipt 与精确确认短语。`ue_refresh_asset_index` 只接受一个精确授权资产和 Preview/Apply；它在固定 Work Root 中构建配对 Generation，验证后原子切换 Pointer，并要求新 MCP 会话加载新代。真实写入闭环使用 `scripts\TestMcpWorkflow.cmd`，真实刷新闭环使用 `scripts\TestMcpSnapshotRefresh.cmd`。完整契约见 [`../spec/MCP_SERVER.md`](../spec/MCP_SERVER.md) 与 [`../spec/LIVE_EDITOR_BRIDGE.md`](../spec/LIVE_EDITOR_BRIDGE.md)。
+启用 `-EnableProjectMemory` 后额外注册：
+
+```text
+ue_memory_search
+ue_memory_get
+ue_memory_add_rule
+ue_memory_record_finding
+ue_memory_mark_superseded
+ue_memory_validate
+```
+
+服务器启动时固定数据库路径，Tool 参数不能更换数据库；SQLite 使用不可变只读快照并拒绝活动 Sidecar。`-EnableLiveEditor -ProjectPath <固定工程>` 会增加 10 个实时只读 Tool 和 8 个受限 Daily Action。Bridge 只绑定 `127.0.0.1`，使用随机会话令牌，并校验固定工程路径摘要、Plugin/Server 版本与 Capability；MCP 响应不暴露 Token、端口或 Descriptor 路径。未启用 Memory 时离线 5 Tool、Live 模式 23 Tool、工作流模式 25 Tool、组合模式 43 Tool 相互兼容；启用 Memory 后分别为 11、29、31、49。Output Log 最多返回 100 条并使用序号游标；实时资产检查和 Content Browser 同步不加载目标资产；Blueprint Graph 定位只支持普通 Blueprint Editor，并最多返回 100 个选中 Node。八个 Live Daily Action 仅接受精确 `/Game` 身份或当前 Editor World 的 ActorGuid，在 PIE/SIE 中拒绝运行且不保存 Package；工作流 Tool `ue_save_authorized_asset` 使用 Policy/Revision/Session 绑定的 Preview Receipt、备份、显式确认和独立验证保存一个授权资产；文件夹 Validation 最多匹配 500 个资产并最多返回 200 条问题。`ue_get_asset_state` 只读比较 Editor Memory、磁盘 Package、Revision Export 和 SQLite。高层写入入口默认只生成 Plan，也可执行 Dry Run，但不能直接 Commit。保存和恢复必须显式启用 Commit、通过 Policy，并提供一次性 Receipt 与精确确认短语。`ue_refresh_asset_index` 只接受一个精确授权资产和 Preview/Apply；它在固定 Work Root 中构建配对 Generation，验证后原子切换 Pointer，并要求新 MCP 会话加载新代。真实写入闭环使用 `scripts\TestMcpWorkflow.cmd`，真实刷新闭环使用 `scripts\TestMcpSnapshotRefresh.cmd`。完整契约见 [`../spec/MCP_SERVER.md`](../spec/MCP_SERVER.md) 与 [`../spec/LIVE_EDITOR_BRIDGE.md`](../spec/LIVE_EDITOR_BRIDGE.md)。
 
 ## 15. Release Validation 与 CI
 

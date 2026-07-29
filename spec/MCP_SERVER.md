@@ -456,3 +456,30 @@ scripts\TestDataAssetStructuredProperties.cmd ^
 - Struct 字段、Array 索引、Set 增删和 Map 键增删/嵌套值修改生成结构化 Diff。
 - 四种 Dry Run 均完成深恢复且磁盘 Revision 不变。
 - 四次 Commit 可独立重载，四层逆序 rollback 后最终 Revision 与初始值完全一致。
+
+## Project Memory 模式
+
+Project Memory 是可选的独立持久化层，不属于会被替换的 immutable Index Snapshot。启动参数：
+
+```text
+--enable-project-memory
+--memory-database <fixed-memory.sqlite3>
+```
+
+若只启用 Project Memory，Server Mode 为 `fixed-project-memory`。Memory Database 和 Project Key 均在启动时固定：数据库路径来自 Server 配置，Project Key 来自当前索引的 `metadata.project_key`。六个 `ue_memory_*` Tool 均不接受数据库、索引、项目或文件系统路径参数。
+
+Tool 分组：
+
+```text
+Read:
+  ue_memory_search
+  ue_memory_get
+
+Persistent planning actions:
+  ue_memory_add_rule
+  ue_memory_record_finding
+  ue_memory_mark_superseded
+  ue_memory_validate
+```
+
+`ue_memory_validate` 使用当前固定 SQLite 的 `assets.revision_value`，仅更新 Memory Status，不修改索引或 Unreal Asset。完整数据模型和状态规则见 [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md)。

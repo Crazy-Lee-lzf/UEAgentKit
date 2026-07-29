@@ -23,7 +23,7 @@ from .agent_workflow import (
     PatchWorkflowService,
     WorkflowError,
 )
-from .config import DEFAULT_DATABASE
+from .config import DEFAULT_DATABASE, DEFAULT_MEMORY_DATABASE
 from .editor_bridge import (
     LiveEditorBridgeConfig,
     LiveEditorBridgeService,
@@ -31,8 +31,10 @@ from .editor_bridge import (
 )
 from .mcp_live_action_tools import register_live_action_tools
 from .mcp_live_tools import register_live_read_tools
+from .mcp_memory_tools import register_memory_tools
 from .mcp_query_tools import register_query_tools
 from .mcp_workflow_tools import register_workflow_tools
+from .memory_service import ProjectMemoryService, ProjectMemoryServiceError
 from .patches import get_operation_registry
 from .query_protocol import (
     DEFAULT_OUTPUT_TOKEN_BUDGET,
@@ -43,6 +45,7 @@ from .query_protocol import (
 from .tool_registry import (
     HIGH_LEVEL_WRITE_TOOL_NAMES,
     LIVE_EDITOR_TOOL_NAMES,
+    MEMORY_TOOL_NAMES,
     tool_descriptors_for_mode,
 )
 from .snapshot_lifecycle import (
@@ -69,6 +72,7 @@ def _server_instructions(
     write_tools_enabled: bool,
     commit_enabled: bool,
     live_editor_enabled: bool,
+    memory_enabled: bool,
 ) -> str:
     base = (
         "Use ue_get_capabilities to inspect the active server contract and ue_get_project_status for the fixed "
@@ -81,8 +85,14 @@ def _server_instructions(
         if live_editor_enabled
         else "Live Editor access is not configured. "
     )
+    memory_text = (
+        "The ue_memory_* tools use one persistent database and Project Key fixed at server startup; "
+        "Tool arguments cannot select another database or project. "
+        if memory_enabled
+        else "Persistent Project Memory is not configured. "
+    )
     if not write_tools_enabled:
-        return "Read-only access to the UE Agent Kit SQLite index. " + base + live_text + (
+        return "Read-only access to the UE Agent Kit SQLite index. " + base + live_text + memory_text + (
             "This server cannot execute shell commands or write assets."
         )
     commit_text = (
@@ -92,7 +102,7 @@ def _server_instructions(
         else "Planning, Dry Run, and independent verification are enabled; Commit and rollback Commit are disabled."
     )
     return (
-        "Fixed-project UE Agent Kit workflow. " + base + live_text +
+        "Fixed-project UE Agent Kit workflow. " + base + live_text + memory_text +
         "Prefer the ue_set_* tools for common Blueprint, asset, Material Instance, and DataTable changes. "
         "They create a strict Plan by default and may run Plan plus Dry Run, but never Commit. Use ue_apply_patch only "
         "with the returned planId and one-time Dry Run receipt. The low-level ue_plan_patch remains available for "
@@ -101,9 +111,13 @@ def _server_instructions(
     )
 
 
-def _server_mode(write_tools_enabled: bool, commit_enabled: bool) -> str:
+def _server_mode(
+    write_tools_enabled: bool,
+    commit_enabled: bool,
+    memory_enabled: bool = False,
+) -> str:
     if not write_tools_enabled:
-        return "read-only"
+        return "fixed-project-memory" if memory_enabled else "read-only"
     return "fixed-project-commit" if commit_enabled else "fixed-project-dry-run"
 
 
@@ -131,10 +145,13 @@ def _read_engine_status(workflow_service: PatchWorkflowService | None) -> dict[s
 def _capabilities_response(
     workflow_service: PatchWorkflowService | None,
     live_editor_service: LiveEditorBridgeService | None,
+    memory_service: ProjectMemoryService | None,
 ) -> dict[str, Any]:
     write_tools_enabled = workflow_service is not None
     commit_enabled = bool(workflow_service and workflow_service.config.commit_enabled)
     live_editor_enabled = live_editor_service is not None
+    memory_enabled = memory_service is not None
+    memory_status = memory_service.status() if memory_service is not None else None
     return {
         "schemaVersion": "1.0",
         "tool": "ue_get_capabilities",
@@ -144,11 +161,12 @@ def _capabilities_response(
             "name": MCP_SERVER_NAME,
             "version": __version__,
             "transport": "stdio",
-            "mode": _server_mode(write_tools_enabled, commit_enabled),
+            "mode": _server_mode(write_tools_enabled, commit_enabled, memory_enabled),
         },
         "tools": tool_descriptors_for_mode(
             live_editor_enabled=live_editor_enabled,
             workflow_enabled=write_tools_enabled,
+            memory_enabled=memory_enabled,
         ),
         "operations": {
             "available": write_tools_enabled,
@@ -223,6 +241,30 @@ def _capabilities_response(
                 "maxSelectedNodes": 100,
             },
         },
+        "projectMemory": {
+            "configured": memory_enabled,
+            "persistent": memory_enabled,
+            "fixedProject": memory_enabled,
+            "fixedDatabase": memory_enabled,
+            "projectKey": memory_service.project_key if memory_service is not None else "",
+            "schemaVersion": memory_status.schema_version if memory_status is not None else None,
+            "recordCount": memory_status.record_count if memory_status is not None else 0,
+            "tools": MEMORY_TOOL_NAMES if memory_enabled else [],
+            "recordTypes": [
+                "projectFact",
+                "projectRule",
+                "decisionRecord",
+                "knownIssue",
+                "taskRecord",
+                "runtimeEvidence",
+            ],
+            "sourceKinds": ["user-confirmed", "tool-observed", "model-inferred"],
+            "statuses": ["valid", "stale", "conflicted", "superseded", "unverified"],
+            "revisionAware": True,
+            "vectorDatabase": False,
+            "arbitraryDatabaseArguments": False,
+            "arbitraryProjectArguments": False,
+        },
         "highLevelChanges": {
             "available": write_tools_enabled,
             "tools": HIGH_LEVEL_WRITE_TOOL_NAMES if write_tools_enabled else [],
@@ -274,6 +316,7 @@ def _capabilities_response(
             "liveCompileBlueprintStates": 100,
             "liveBlueprintSelectedNodes": 100,
             "liveAssetPathLength": 512,
+            "memorySearchResults": 100,
         },
         "responseContract": {
             "schemaVersion": "1.0",
@@ -308,6 +351,7 @@ def _capabilities_response(
         },
         "safety": {
             "fixedServerConfiguration": True,
+            "fixedProjectMemoryConfiguration": memory_enabled,
             "arbitrarySql": False,
             "arbitraryShell": False,
             "arbitraryFilesystem": False,
@@ -325,6 +369,7 @@ def _capabilities_response(
             "liveEditorConnectionPersistent": False,
             "workflowSnapshotFrozen": write_tools_enabled,
             "refreshInvalidatesWorkflowRecords": write_tools_enabled,
+            "projectMemoryPersistent": memory_enabled,
         },
     }
 
@@ -333,6 +378,7 @@ def _project_status_response(
     index_service: IndexQueryService,
     workflow_service: PatchWorkflowService | None,
     live_editor_service: LiveEditorBridgeService | None,
+    memory_service: ProjectMemoryService | None,
 ) -> dict[str, Any]:
     index_status = index_service.check()
     index_metadata = index_status.get("indexMetadata", {})
@@ -364,17 +410,26 @@ def _project_status_response(
         project_name = live_editor_service.config.project_name
     else:
         project_name = project_key
+    memory_status = memory_service.status() if memory_service is not None else None
     return {
         "schemaVersion": "1.0",
         "tool": "ue_get_project_status",
         "ok": True,
         "readOnly": True,
         "serverVersion": __version__,
-        "serverMode": _server_mode(write_tools_enabled, commit_enabled),
+        "serverMode": _server_mode(
+            write_tools_enabled,
+            commit_enabled,
+            memory_service is not None,
+        ),
         "project": {
             "projectKey": project_key,
             "projectName": project_name,
-            "fixedProject": write_tools_enabled or live_editor_service is not None,
+            "fixedProject": (
+                write_tools_enabled
+                or live_editor_service is not None
+                or memory_service is not None
+            ),
         },
         "engine": _read_engine_status(workflow_service),
         "database": {
@@ -388,6 +443,15 @@ def _project_status_response(
             "exporterVersion": index_metadata.get("exporterVersion", ""),
             "profile": index_metadata.get("profile", ""),
             "stats": index_status.get("stats", {}),
+        },
+        "projectMemory": {
+            "configured": memory_status is not None,
+            "state": "available" if memory_status is not None else "unavailable",
+            "projectKey": memory_status.project_key if memory_status is not None else "",
+            "schemaVersion": memory_status.schema_version if memory_status is not None else None,
+            "recordCount": memory_status.record_count if memory_status is not None else 0,
+            "countsByType": memory_status.counts_by_type if memory_status is not None else {},
+            "countsByStatus": memory_status.counts_by_status if memory_status is not None else {},
         },
         "revisionExport": {
             "configured": write_tools_enabled,
@@ -447,6 +511,10 @@ def _suggested_action(code: str) -> str:
         "live-editor-capability-unavailable": "Use only the registered Live Editor capabilities reported by ue_get_capabilities.",
         "live-editor-invalid-parameters": "Use the bounded Live Editor Tool schema and an exact /Game Object Path where required.",
         "snapshot-refresh-restart-required": "Restart the MCP server so the new paired snapshot generation becomes the frozen session snapshot.",
+        "memory-project-mismatch": "Use the Project Memory service fixed to the active index Project Key.",
+        "memory-record-project-mismatch": "Use a record ID that belongs to the fixed Project Memory project.",
+        "memory-index-project-mismatch": "Validate against the index configured for the same fixed Project Key.",
+        "memory-record-not-found": "Search the fixed Project Memory database for a current record ID, then retry.",
         "asset-state-invalid-asset": "Use one exact /Game Object Path from the fixed project.",
         "snapshot-refresh-invalid-asset": "Use one exact policy-authorized /Game Object Path.",
         "snapshot-refresh-revision-mismatch": "Save or revert the asset, then retry after its disk Package Revision is stable.",
@@ -474,6 +542,9 @@ def _error_response(tool: str, error: Exception, *, read_only: bool) -> dict[str
         code = error.code
         details = error.details
     elif isinstance(error, LiveEditorError):
+        code = error.code
+        details = error.details
+    elif isinstance(error, ProjectMemoryServiceError):
         code = error.code
         details = error.details
     elif isinstance(error, FileNotFoundError):
@@ -515,6 +586,7 @@ def create_mcp_server(
     workflow_config: PatchWorkflowConfig | None = None,
     workflow_service: PatchWorkflowService | None = None,
     live_editor_service: LiveEditorBridgeService | None = None,
+    memory_service: ProjectMemoryService | None = None,
 ):
     if FastMCP is None or ToolAnnotations is None:
         raise RuntimeError(
@@ -523,7 +595,9 @@ def create_mcp_server(
         ) from _MCP_IMPORT_ERROR
 
     index_service = IndexQueryService(database_path)
-    index_service.check()
+    index_status = index_service.check()
+    if memory_service is not None and memory_service.project_key != str(index_status.get("projectKey", "")):
+        raise ValueError("Project Memory and index services must use the same fixed project")
     if workflow_service is not None and workflow_config is not None:
         raise ValueError("Provide workflow_config or workflow_service, not both.")
     if workflow_service is None and workflow_config is not None:
@@ -537,9 +611,15 @@ def create_mcp_server(
     write_tools_enabled = workflow_service is not None
     commit_enabled = bool(workflow_service and workflow_service.config.commit_enabled)
     live_editor_enabled = live_editor_service is not None
+    memory_enabled = memory_service is not None
     server = FastMCP(
         MCP_SERVER_NAME,
-        instructions=_server_instructions(write_tools_enabled, commit_enabled, live_editor_enabled),
+        instructions=_server_instructions(
+            write_tools_enabled,
+            commit_enabled,
+            live_editor_enabled,
+            memory_enabled,
+        ),
         json_response=True,
     )
 
@@ -557,9 +637,27 @@ def create_mcp_server(
         live_editor_service=live_editor_service,
         read_annotations=read_annotations,
         error_response=_error_response,
-        capabilities_response=_capabilities_response,
-        project_status_response=_project_status_response,
+        capabilities_response=lambda workflow, live: _capabilities_response(
+            workflow,
+            live,
+            memory_service,
+        ),
+        project_status_response=lambda index, workflow, live: _project_status_response(
+            index,
+            workflow,
+            live,
+            memory_service,
+        ),
     )
+    if memory_service is not None:
+        register_memory_tools(
+            server=server,
+            memory_service=memory_service,
+            index_database_path=index_service.database_path,
+            read_annotations=read_annotations,
+            tool_annotations_type=ToolAnnotations,
+            error_response=_error_response,
+        )
     if live_editor_service is not None:
         register_live_read_tools(
             server=server,
@@ -595,6 +693,13 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=DEFAULT_DATABASE,
         help=f"Immutable read-only SQLite index path. Default: {DEFAULT_DATABASE}",
+    )
+    parser.add_argument("--enable-project-memory", action="store_true")
+    parser.add_argument(
+        "--memory-database",
+        type=Path,
+        default=None,
+        help=f"Persistent Project Memory SQLite path. Default when enabled: {DEFAULT_MEMORY_DATABASE}",
     )
     parser.add_argument("--enable-write-tools", action="store_true")
     parser.add_argument("--enable-commit-tools", action="store_true")
@@ -699,6 +804,18 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         index_service = IndexQueryService(database_path)
         index_status = index_service.check()
+        memory_service: ProjectMemoryService | None = None
+        if args.enable_project_memory:
+            project_key = str(index_status.get("projectKey", "")).strip()
+            if not project_key:
+                raise ValueError("The fixed index has no valid Project Key for Project Memory.")
+            memory_service = ProjectMemoryService(
+                database_path=args.memory_database or DEFAULT_MEMORY_DATABASE,
+                project_key=project_key,
+            )
+            memory_service.status()
+        elif args.memory_database is not None:
+            raise ValueError("--memory-database requires --enable-project-memory")
         workflow_service = (
             PatchWorkflowService(
                 index_service,
@@ -717,17 +834,28 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "writeToolsEnabled": workflow_service is not None,
                 "commitToolsEnabled": bool(workflow_service and workflow_service.config.commit_enabled),
                 "liveEditorEnabled": live_editor_service is not None,
+                "projectMemoryEnabled": memory_service is not None,
             }
             if workflow_service is not None:
                 payload["workflow"] = workflow_service.status()
             if live_editor_service is not None:
                 payload["liveEditor"] = live_editor_service.status()
+            if memory_service is not None:
+                memory_status = memory_service.status()
+                payload["projectMemory"] = {
+                    "projectKey": memory_status.project_key,
+                    "schemaVersion": memory_status.schema_version,
+                    "recordCount": memory_status.record_count,
+                    "countsByType": memory_status.counts_by_type,
+                    "countsByStatus": memory_status.counts_by_status,
+                }
             print(json.dumps(payload, ensure_ascii=False, indent=2))
             return 0
         server = create_mcp_server(
             database_path,
             workflow_service=workflow_service,
             live_editor_service=live_editor_service,
+            memory_service=memory_service,
         )
         server.run(transport="stdio")
         return 0

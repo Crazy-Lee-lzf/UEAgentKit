@@ -37,6 +37,7 @@ from ue_agent_kit.database import open_database  # noqa: E402
 from ue_agent_kit.editor_bridge import LiveEditorError  # noqa: E402
 from ue_agent_kit.indexer import build_index  # noqa: E402
 from ue_agent_kit.mcp_server import create_mcp_server, main as mcp_main  # noqa: E402
+from ue_agent_kit.memory_service import ProjectMemoryService  # noqa: E402
 from ue_agent_kit.tool_registry import (  # noqa: E402
     TOOL_DEFINITIONS_BY_NAME,
     tool_names_for_mode,
@@ -474,6 +475,44 @@ class McpServerTests(unittest.TestCase):
         self.assertFalse(payload["writeToolsEnabled"])
         self.assertEqual(payload["index"]["tool"], "ue_index_status")
         self.assertEqual(payload["index"]["stats"]["counts"]["assets"], 2)
+        self.assertFalse(payload["projectMemoryEnabled"])
+
+        memory_path = self.temp_root / "check-memory.sqlite3"
+        memory_output = io.StringIO()
+        with contextlib.redirect_stdout(memory_output):
+            memory_exit_code = mcp_main(
+                [
+                    "--database",
+                    str(self.database_path),
+                    "--enable-project-memory",
+                    "--memory-database",
+                    str(memory_path),
+                    "--check",
+                ]
+            )
+        self.assertEqual(memory_exit_code, 0)
+        memory_payload = json.loads(memory_output.getvalue())
+        self.assertTrue(memory_payload["projectMemoryEnabled"])
+        self.assertEqual(memory_payload["projectMemory"]["projectKey"], "测试项目")
+        self.assertEqual(memory_payload["projectMemory"]["recordCount"], 0)
+        self.assertTrue(memory_path.is_file())
+
+        error_output = io.StringIO()
+        with contextlib.redirect_stderr(error_output):
+            invalid_memory_exit = mcp_main(
+                [
+                    "--database",
+                    str(self.database_path),
+                    "--memory-database",
+                    str(self.temp_root / "invalid-memory.sqlite3"),
+                    "--check",
+                ]
+            )
+        self.assertEqual(invalid_memory_exit, 1)
+        self.assertEqual(
+            json.loads(error_output.getvalue())["error"]["code"],
+            "invalid-arguments",
+        )
 
         project_path = self.temp_root / "TestProject.uproject"
         project_path.write_text("{}", encoding="utf-8")
@@ -555,6 +594,188 @@ class McpServerTests(unittest.TestCase):
             server.call_tool("ue_search", {"continuation_token": "ct_unknown"})
         )
         self.assertEqual(token_error["error"]["code"], "invalid-continuation-token")
+
+    @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
+    def test_fastmcp_project_memory_mode_is_fixed_and_revision_aware(self) -> None:
+        memory_path = self.temp_root / "memory" / "project-memory.sqlite3"
+        memory_service = ProjectMemoryService(
+            database_path=memory_path,
+            project_key="测试项目",
+        )
+        server = create_mcp_server(
+            self.database_path,
+            memory_service=memory_service,
+        )
+        tools = asyncio.run(server.list_tools())
+        expected_names = tool_names_for_mode(memory_enabled=True)
+        self.assertEqual([tool.name for tool in tools], expected_names)
+        self.assertEqual(len(tools), 11)
+        forbidden = {
+            "database",
+            "database_path",
+            "memory_database",
+            "index_database",
+            "project",
+            "project_key",
+            "project_path",
+            "filesystem_path",
+        }
+        for tool in tools:
+            properties = set(tool.inputSchema.get("properties", {}))
+            self.assertFalse(properties.intersection(forbidden), (tool.name, properties))
+            definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
+            self.assertEqual(bool(tool.annotations.readOnlyHint), definition.read_only, tool.name)
+            self.assertEqual(bool(tool.annotations.destructiveHint), definition.destructive, tool.name)
+
+        _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
+        self.assertEqual(capabilities["server"]["mode"], "fixed-project-memory")
+        memory_contract = capabilities["projectMemory"]
+        self.assertTrue(memory_contract["configured"])
+        self.assertTrue(memory_contract["persistent"])
+        self.assertEqual(memory_contract["projectKey"], "测试项目")
+        self.assertEqual(memory_contract["tools"], expected_names[5:])
+        self.assertFalse(memory_contract["arbitraryDatabaseArguments"])
+        self.assertFalse(memory_contract["arbitraryProjectArguments"])
+        self.assertFalse(memory_contract["vectorDatabase"])
+        self.assertEqual(capabilities["limits"]["memorySearchResults"], 100)
+
+        _, project_status = asyncio.run(server.call_tool("ue_get_project_status", {}))
+        self.assertEqual(project_status["serverMode"], "fixed-project-memory")
+        self.assertTrue(project_status["project"]["fixedProject"])
+        self.assertTrue(project_status["projectMemory"]["configured"])
+        self.assertEqual(project_status["projectMemory"]["recordCount"], 0)
+
+        _, rule = asyncio.run(
+            server.call_tool(
+                "ue_memory_add_rule",
+                {
+                    "subject_key": "rule:code:newline",
+                    "title": "Text files use CRLF",
+                    "body": "All tracked text files use UTF-8 without BOM and CRLF.",
+                    "source_ref": "conversation:user-confirmed",
+                    "scopes": [
+                        {
+                            "scopeType": "project",
+                            "scopeKey": "测试项目",
+                        }
+                    ],
+                },
+            )
+        )
+        self.assertTrue(rule["ok"])
+        rule_record = rule["record"]
+        self.assertEqual(rule_record["projectKey"], "测试项目")
+        self.assertEqual(rule_record["recordType"], "projectRule")
+        self.assertEqual(rule_record["sourceKind"], "user-confirmed")
+        self.assertEqual(rule_record["status"], "valid")
+
+        _, finding = asyncio.run(
+            server.call_tool(
+                "ue_memory_record_finding",
+                {
+                    "record_type": "projectFact",
+                    "subject_key": "asset:player:revision",
+                    "title": "Player asset revision",
+                    "body": "The player asset matches the indexed revision.",
+                    "source_kind": "tool-observed",
+                    "source_ref": "sqlite:index",
+                    "revision_set": [
+                        {
+                            "assetPath": ASSET_A,
+                            "revision": f"sha256:{REVISION_A}",
+                            "revisionStable": True,
+                        }
+                    ],
+                },
+            )
+        )
+        self.assertTrue(finding["ok"])
+        finding_record = finding["record"]
+        self.assertEqual(finding_record["sourceKind"], "tool-observed")
+        self.assertEqual(finding_record["status"], "valid")
+
+        _, search = asyncio.run(
+            server.call_tool(
+                "ue_memory_search",
+                {"query": "CRLF", "record_types": ["projectRule"]},
+            )
+        )
+        self.assertEqual(search["resultCount"], 1)
+        self.assertEqual(search["items"][0]["record"]["recordId"], rule_record["recordId"])
+        _, empty_statuses = asyncio.run(
+            server.call_tool(
+                "ue_memory_search",
+                {"query": "CRLF", "statuses": []},
+            )
+        )
+        self.assertFalse(empty_statuses["ok"])
+        self.assertEqual(empty_statuses["error"]["code"], "invalid-arguments")
+
+        _, fetched = asyncio.run(
+            server.call_tool("ue_memory_get", {"record_id": finding_record["recordId"]})
+        )
+        self.assertEqual(
+            fetched["record"]["revisionSet"][0]["revision"],
+            f"sha256:{REVISION_A}",
+        )
+
+        _, validated = asyncio.run(server.call_tool("ue_memory_validate", {}))
+        self.assertTrue(validated["ok"])
+        self.assertIn(finding_record["recordId"], validated["checkedRecordIds"])
+        self.assertEqual(validated["staleRecordIds"], [])
+
+        _, replacement = asyncio.run(
+            server.call_tool(
+                "ue_memory_record_finding",
+                {
+                    "record_type": "knownIssue",
+                    "subject_key": "issue:test",
+                    "title": "Replacement issue",
+                    "body": "Replacement issue state.",
+                },
+            )
+        )
+        _, original = asyncio.run(
+            server.call_tool(
+                "ue_memory_record_finding",
+                {
+                    "record_type": "knownIssue",
+                    "subject_key": "issue:test",
+                    "title": "Original issue",
+                    "body": "Original issue state.",
+                },
+            )
+        )
+        _, superseded = asyncio.run(
+            server.call_tool(
+                "ue_memory_mark_superseded",
+                {
+                    "record_id": original["record"]["recordId"],
+                    "replacement_record_id": replacement["record"]["recordId"],
+                    "reason": "issue-state-updated",
+                },
+            )
+        )
+        self.assertEqual(superseded["record"]["status"], "superseded")
+        self.assertEqual(
+            superseded["record"]["supersededByRecordId"],
+            replacement["record"]["recordId"],
+        )
+
+        _, missing = asyncio.run(
+            server.call_tool("ue_memory_get", {"record_id": "mem_00000000000000000000000000000000"})
+        )
+        self.assertFalse(missing["ok"])
+        self.assertEqual(missing["error"]["code"], "memory-record-not-found")
+
+        with self.assertRaisesRegex(ValueError, "same fixed project"):
+            create_mcp_server(
+                self.database_path,
+                memory_service=ProjectMemoryService(
+                    database_path=self.temp_root / "other-memory.sqlite3",
+                    project_key="OtherProject",
+                ),
+            )
 
     @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
     def test_fastmcp_live_editor_mode_registers_bounded_read_tools(self) -> None:
@@ -1051,6 +1272,10 @@ class McpServerTests(unittest.TestCase):
         self.assertIn("mcp_live_editor_smoke.py", live_integration_runner)
         self.assertIn("[switch]$EnableLiveEditor", runner_source)
         self.assertIn("--enable-live-editor", server_source)
+        self.assertIn("[switch]$EnableProjectMemory", runner_source)
+        self.assertIn("--enable-project-memory", runner_source)
+        self.assertIn("--enable-project-memory", server_source)
+        self.assertIn("UEAK_MEMORY_DATABASE", (SRC_ROOT / "ue_agent_kit" / "config.py").read_text(encoding="utf-8"))
 
         example = json.loads(
             (TOOL_ROOT / "examples" / "mcp" / "claude-code.example.json").read_text(encoding="utf-8")

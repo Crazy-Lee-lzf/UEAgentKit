@@ -229,3 +229,38 @@ projectKey
 - 当索引 Revision 缺失或变化时调用统一失效规则。
 
 Service 仍不接受来自 Agent 的任意数据库路径。MCP 接入时，Memory 路径和 Project Key 必须由 Server 固定配置提供。
+
+## 14. MCP Tool 契约
+
+Project Memory 默认关闭。Server 只有在启动时显式配置 `--enable-project-memory` 后才注册：
+
+```text
+ue_memory_search
+ue_memory_get
+ue_memory_add_rule
+ue_memory_record_finding
+ue_memory_mark_superseded
+ue_memory_validate
+```
+
+固定边界：
+
+- Memory 数据库路径只在 Server 启动时配置，Tool 参数不能传入或覆盖。
+- Project Key 从已验证的固定 SQLite 索引读取，Tool 参数不能选择其他项目。
+- `ue_memory_add_rule` 固定写入 `projectRule + user-confirmed`，仅应在用户明确确认规则后调用。
+- `ue_memory_record_finding` 只接受 `tool-observed` 或 `model-inferred`，不能伪装成用户确认。
+- Finding 类型只允许 `projectFact`、`decisionRecord`、`knownIssue` 和 `runtimeEvidence`。
+- `ue_memory_search` 默认排除 `stale` 与 `superseded`，需要审计历史时必须显式请求对应状态。
+- `ue_memory_validate` 只读取 Server 固定索引中的 Revision，并可能把不匹配记录持久化为 `stale`。
+- Memory 写入不修改 Unreal Asset，但属于持久化状态变化，因此 annotations 不是 Read Only，也不是 Destructive。
+
+启用 Memory 后的 Tool 数量：
+
+```text
+Offline + Memory   11
+Live + Memory      29
+Workflow + Memory  31
+Combined + Memory  49
+```
+
+未启用 Memory 时继续保持原有 5/23/25/43 Tool 契约。

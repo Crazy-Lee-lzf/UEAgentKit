@@ -17,6 +17,16 @@ from ue_agent_kit.tool_registry import (  # noqa: E402
     tool_names_for_mode,
 )
 
+EXPECTED_MEMORY_TOOLS = [
+    "ue_memory_search",
+    "ue_memory_get",
+    "ue_memory_add_rule",
+    "ue_memory_record_finding",
+    "ue_memory_mark_superseded",
+    "ue_memory_validate",
+]
+
+
 EXPECTED_ALL_TOOLS = [
     "ue_get_capabilities",
     "ue_get_project_status",
@@ -73,11 +83,40 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertEqual(len(tool_names_for_mode()), 5)
         self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 23)
         self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 25)
+        self.assertEqual(
+            tool_names_for_mode(memory_enabled=True),
+            EXPECTED_ALL_TOOLS[:5] + EXPECTED_MEMORY_TOOLS,
+        )
+        self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 11)
+        self.assertEqual(
+            len(tool_names_for_mode(live_editor_enabled=True, memory_enabled=True)),
+            29,
+        )
+        self.assertEqual(
+            len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
+            31,
+        )
+        self.assertEqual(
+            len(
+                tool_names_for_mode(
+                    live_editor_enabled=True,
+                    workflow_enabled=True,
+                    memory_enabled=True,
+                )
+            ),
+            49,
+        )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:
         mcp_root = ROOT / "src" / "ue_agent_kit"
         self.assertNotIn("@server.tool", (mcp_root / "mcp_server.py").read_text(encoding="utf-8"))
-        for filename in ("mcp_query_tools.py", "mcp_live_tools.py", "mcp_live_action_tools.py", "mcp_workflow_tools.py"):
+        for filename in (
+            "mcp_query_tools.py",
+            "mcp_memory_tools.py",
+            "mcp_live_tools.py",
+            "mcp_live_action_tools.py",
+            "mcp_workflow_tools.py",
+        ):
             self.assertIn("@server.tool", (mcp_root / filename).read_text(encoding="utf-8"), filename)
 
         private_root = ROOT / "Plugin" / "UEAgentKit" / "Source" / "UEAgentKitEditor" / "Private"
@@ -116,6 +155,19 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertFalse(TOOL_DEFINITIONS_BY_NAME["ue_open_asset"].read_only)
         self.assertFalse(TOOL_DEFINITIONS_BY_NAME["ue_validate_folder"].destructive)
         self.assertTrue(TOOL_DEFINITIONS_BY_NAME["ue_save_authorized_asset"].destructive)
+        self.assertTrue(TOOL_DEFINITIONS_BY_NAME["ue_memory_search"].read_only)
+        self.assertTrue(TOOL_DEFINITIONS_BY_NAME["ue_memory_get"].read_only)
+        self.assertFalse(TOOL_DEFINITIONS_BY_NAME["ue_memory_add_rule"].read_only)
+        self.assertFalse(TOOL_DEFINITIONS_BY_NAME["ue_memory_validate"].destructive)
+        memory_descriptors = tool_descriptors_for_mode(
+            live_editor_enabled=False,
+            workflow_enabled=False,
+            memory_enabled=True,
+        )
+        self.assertEqual(
+            [item["name"] for item in memory_descriptors],
+            EXPECTED_ALL_TOOLS[:5] + EXPECTED_MEMORY_TOOLS,
+        )
 
     def test_live_action_handlers_keep_bounded_execution_surface(self) -> None:
         private_root = (

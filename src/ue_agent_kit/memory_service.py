@@ -190,7 +190,6 @@ class ProjectMemoryService:
                     details={
                         "expectedProjectKey": self.project_key,
                         "actualProjectKey": index_project_key,
-                        "indexDatabase": str(resolved_index),
                     },
                 )
             revision_rows = index_connection.execute(
