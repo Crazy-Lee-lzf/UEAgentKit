@@ -4,7 +4,7 @@ All notable changes to UE Agent Kit are documented here.
 
 ## Unreleased
 
-- No changes yet.
+- Added the first Revision-aware Project Memory storage layer with an independent SQLite/FTS5 schema, six record types, source/status provenance, Scope/Revision/Artifact bindings, conflict coexistence, explicit supersede links, and automatic Revision-to-stale invalidation.
 
 ## 0.5.5 — daily-development consolidation
 
