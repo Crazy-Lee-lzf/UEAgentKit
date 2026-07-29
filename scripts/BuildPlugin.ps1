@@ -22,6 +22,9 @@ if ($Method -eq "Direct")
 
 $PluginDescriptor = Join-Path $ToolRoot "Plugin\UEAgentKit\UEAgentKit.uplugin"
 $RunUAT = Join-Path $EngineRoot "Engine\Build\BatchFiles\RunUAT.bat"
+$MsvcToolchain = Resolve-UeakMsvcToolchain -MsvcToolsRoot $MsvcToolsRoot
+$AutoSdkRoot = Join-Path $ToolRoot "AutoSDK"
+$AutoSdkToolchain = Join-Path $AutoSdkRoot "HostWin64\Win64\VS2022\$($MsvcToolchain.Name)"
 if ([string]::IsNullOrWhiteSpace($PackageDirectory))
 {
     $PackageDirectory = Join-Path $ToolRoot "Build\Packaged\UEAgentKit"
@@ -34,21 +37,42 @@ else
 Assert-UeakPath -Path $PluginDescriptor -Description "Plugin descriptor" -PathType File
 Assert-UeakPath -Path $RunUAT -Description "RunUAT.bat" -PathType File
 New-Item -ItemType Directory -Path $PackageDirectory -Force | Out-Null
+Ensure-UeakJunction -LinkPath $AutoSdkToolchain -TargetPath $MsvcToolchain.FullName -ReplaceDifferentJunction | Out-Null
 
-Write-Warning "The UAT build path is optional and may fail on systems with Unreal Build Accelerator issues. The default Direct method is the validated build path."
-
-& $RunUAT @(
-    "BuildPlugin",
-    "-Plugin=$PluginDescriptor",
-    "-Package=$PackageDirectory",
-    "-TargetPlatforms=$TargetPlatforms",
-    "-Rocket",
-    "-NoP4"
-)
-
-if ($LASTEXITCODE -ne 0)
+$PreviousAutoSdkRoot = $env:UE_SDKS_ROOT
+$PreviousAllowUbaExecutor = $env:UnrealBuildTool_BuildConfiguration__bAllowUBAExecutor
+$env:UE_SDKS_ROOT = $AutoSdkRoot
+$env:UnrealBuildTool_BuildConfiguration__bAllowUBAExecutor = "false"
+try
 {
-    throw "BuildPlugin failed with exit code $LASTEXITCODE"
+    Write-Host "UAT MSVC     : $($MsvcToolchain.FullName)"
+    Write-Host "UAT AutoSDK  : $AutoSdkRoot"
+    Write-Host "UAT UBA      : disabled"
+    & $RunUAT @(
+        "BuildPlugin",
+        "-Plugin=$PluginDescriptor",
+        "-Package=$PackageDirectory",
+        "-TargetPlatforms=$TargetPlatforms",
+        "-Rocket",
+        "-NoP4"
+    )
+
+    if ($LASTEXITCODE -ne 0)
+    {
+        throw "BuildPlugin failed with exit code $LASTEXITCODE"
+    }
+}
+finally
+{
+    $env:UE_SDKS_ROOT = $PreviousAutoSdkRoot
+    if ($null -eq $PreviousAllowUbaExecutor)
+    {
+        Remove-Item Env:UnrealBuildTool_BuildConfiguration__bAllowUBAExecutor -ErrorAction SilentlyContinue
+    }
+    else
+    {
+        $env:UnrealBuildTool_BuildConfiguration__bAllowUBAExecutor = $PreviousAllowUbaExecutor
+    }
 }
 
 Write-Host "Plugin package created: $PackageDirectory"

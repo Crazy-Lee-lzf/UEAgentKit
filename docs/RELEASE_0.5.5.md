@@ -54,10 +54,11 @@ Combined  43
 
 ```text
 Ruff                                      passed
-Python unittest                           201/201 passed
+Python unittest                           202/202 passed
 JSON Schema meta-validation               3/3 passed
 Example Patch schema validation           16/16 passed
 UE5.6 Direct plugin build                 passed
+UE5.6 UAT BuildPlugin package              passed
 UE5.6 UAT Win64 plugin package            passed
 Material four-parameter regression        passed
 DataTable field/row/reference regressions passed

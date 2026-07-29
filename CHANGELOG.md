@@ -9,6 +9,7 @@ All notable changes to UE Agent Kit are documented here.
 ## 0.5.5 — daily-development consolidation
 
 - Added a portable release validator, Python 3.11/3.12 GitHub Actions matrix, package-build gate, and uploaded Python distribution artifact.
+- Routed UAT BuildPlugin through the same resolved AutoSDK/MSVC toolchain used by the validated Direct Build path.
 - Added single-asset atomic transactions containing 1–32 compatible operations, with complete pre-validation, duplicate-target rejection, one backup, one Blueprint compile/save, process-discard Dry Run semantics, and whole-package rollback.
 - Extended backup manifests with ordered per-operation targets, before/after values, and exact authorization-key evidence while preserving schema 1.0 compatibility for existing single-operation manifests.
 - Preserved multi-field DataTable authorization evidence for single-operation row-field and row-add manifests.
@@ -27,7 +28,7 @@ All notable changes to UE Agent Kit are documented here.
 - Added `setAssetStructuredProperty` for top-level Struct, Array, Set, and Map Data Asset properties with recursive schema, Canonical ordering, deep restoration, and structured diffs.
 - Expanded high-level safe-write entry points to 12 and registered Patch Operations to 16.
 - Current server modes are Offline 5, Live 23, Workflow 25, and Combined 43 tools.
-- Current regression baseline is Ruff plus 201 Python tests, 16 example Patch schemas, three schema meta-validations, UE5.6 Direct Build, and real Blueprint/Data Asset/Material/DataTable Dry Run, Commit, independent reload, transaction, and rollback chains.
+- Current regression baseline is Ruff plus 202 Python tests, 16 example Patch schemas, three schema meta-validations, UE5.6 Direct Build and UAT BuildPlugin packaging, and real Blueprint/Data Asset/Material/DataTable Dry Run, Commit, independent reload, transaction, and rollback chains.
 
 ## 0.5.1 — MCP usability, freshness, and diagnostics
 

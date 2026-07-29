@@ -32,6 +32,21 @@ class ReleaseValidationTests(unittest.TestCase):
         self.assertIn('python scripts/ValidateRelease.py --require-release-docs', workflow)
         self.assertIn('python -m build --outdir dist', workflow)
 
+    def test_uat_plugin_builder_uses_the_resolved_autosdk_toolchain(self) -> None:
+        script = (ROOT / "scripts" / "BuildPlugin.ps1").read_text(encoding="utf-8")
+        self.assertIn("Resolve-UeakMsvcToolchain", script)
+        self.assertIn("Ensure-UeakJunction -LinkPath $AutoSdkToolchain", script)
+        self.assertIn("$env:UE_SDKS_ROOT = $AutoSdkRoot", script)
+        self.assertIn("$env:UE_SDKS_ROOT = $PreviousAutoSdkRoot", script)
+        self.assertIn(
+            '$env:UnrealBuildTool_BuildConfiguration__bAllowUBAExecutor = "false"',
+            script,
+        )
+        self.assertIn(
+            "Remove-Item Env:UnrealBuildTool_BuildConfiguration__bAllowUBAExecutor",
+            script,
+        )
+
     def test_release_builder_requires_clean_tree_and_emits_hashed_artifacts(self) -> None:
         script = (ROOT / "scripts" / "BuildRelease.ps1").read_text(encoding="utf-8")
         self.assertIn("status --porcelain", script)
