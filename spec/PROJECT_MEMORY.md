@@ -209,3 +209,23 @@ Schema v1 和 Python Storage API 提供：
 - FTS5 基础索引。
 
 首个实现不包含 MCP Tool、向量检索、自动摘要、自动从对话提取记忆或跨项目数据库选择。这些能力在存储契约稳定后逐项增加。
+## 13. 固定工程 Memory Service
+
+`ProjectMemoryService` 在创建时固定：
+
+```text
+memory.sqlite3
+projectKey
+```
+
+之后的创建、读取、查询、Supersede 和 Revision 校验都不能切换项目。Service 提供：
+
+- 初始化与状态统计。
+- 固定 Project Key 的记录创建和精确读取。
+- FTS5 查询，以及 Record Type、Status 和 Scope 过滤。
+- 默认查询 `valid`、`unverified` 和 `conflicted`，避免把 `stale` 或 `superseded` 当作当前事实。
+- 读取固定索引数据库中的 `metadata.project_key` 与 `assets.revision_value`。
+- 当索引 Project Key 不匹配时拒绝校验，不创建或修改 Memory 数据库。
+- 当索引 Revision 缺失或变化时调用统一失效规则。
+
+Service 仍不接受来自 Agent 的任意数据库路径。MCP 接入时，Memory 路径和 Project Key 必须由 Server 固定配置提供。

@@ -146,6 +146,12 @@ class RevisionInvalidationResult:
     reasons: dict[str, dict[str, Any]]
 
 
+@dataclass(frozen=True)
+class MemorySearchHit:
+    record: MemoryRecord
+    rank: float
+
+
 _ALLOWED_STATUS_TRANSITIONS = {
     MemoryStatus.VALID: {
         MemoryStatus.STALE,
@@ -853,6 +859,75 @@ def list_memory_records(
         parameters,
     ).fetchall()
     return tuple(get_memory_record(connection, str(row[0])) for row in rows)
+
+
+def _fts_match_query(query: str) -> str:
+    normalized = _require_text(query, "query")
+    terms = re.findall(r"[\w./:-]+", normalized, flags=re.UNICODE)
+    if not terms:
+        raise ValueError("query must contain at least one searchable token.")
+    return " AND ".join('\"' + term.replace('\"', '\"\"') + '\"' for term in terms)
+
+
+def search_memory_records(
+    connection: sqlite3.Connection,
+    *,
+    project_key: str,
+    query: str,
+    record_types: Sequence[MemoryRecordType | str] = (),
+    statuses: Sequence[MemoryStatus | str] = (
+        MemoryStatus.VALID,
+        MemoryStatus.UNVERIFIED,
+        MemoryStatus.CONFLICTED,
+    ),
+    scope_type: MemoryScopeType | str | None = None,
+    scope_key: str = "",
+    limit: int = 20,
+) -> tuple[MemorySearchHit, ...]:
+    normalized_project = _require_text(project_key, "project_key")
+    if limit < 1 or limit > 100:
+        raise ValueError("limit must be between 1 and 100.")
+    clauses = ["r.project_key = ?"]
+    parameters: list[Any] = [_fts_match_query(query), normalized_project]
+    if record_types:
+        normalized_types = [
+            _enum_value(value, MemoryRecordType, "record_types").value for value in record_types
+        ]
+        clauses.append("r.record_type IN (" + ",".join("?" for _ in normalized_types) + ")")
+        parameters.extend(normalized_types)
+    if statuses:
+        normalized_statuses = [
+            _enum_value(value, MemoryStatus, "statuses").value for value in statuses
+        ]
+        clauses.append("r.status IN (" + ",".join("?" for _ in normalized_statuses) + ")")
+        parameters.extend(normalized_statuses)
+    if scope_type is not None:
+        normalized_scope_type = _enum_value(scope_type, MemoryScopeType, "scope_type")
+        scope_clause = (
+            "EXISTS (SELECT 1 FROM memory_scopes AS s "
+            "WHERE s.record_id = r.record_id AND s.scope_type = ?"
+        )
+        parameters.append(normalized_scope_type.value)
+        if scope_key:
+            scope_clause += " AND s.scope_key = ?"
+            parameters.append(_require_text(scope_key, "scope_key"))
+        scope_clause += ")"
+        clauses.append(scope_clause)
+    elif scope_key:
+        raise ValueError("scope_key requires scope_type.")
+    parameters.append(limit)
+    rows = connection.execute(
+        "SELECT r.record_id, bm25(memory_records_fts) AS rank "
+        "FROM memory_records_fts "
+        "JOIN memory_records AS r ON r.rowid = memory_records_fts.rowid "
+        "WHERE memory_records_fts MATCH ? AND "
+        + " AND ".join(clauses)
+        + " ORDER BY rank, r.updated_at_utc DESC, r.record_id LIMIT ?",
+        parameters,
+    ).fetchall()
+    return tuple(
+        MemorySearchHit(get_memory_record(connection, str(row[0])), float(row[1])) for row in rows
+    )
 
 
 def mark_memory_record_superseded(
