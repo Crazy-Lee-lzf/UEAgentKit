@@ -525,7 +525,7 @@ scripts\TestMemoryCli.cmd
 
 该回归使用独立临时数据库启动 `scripts\ue-agent.py`，并验证 Windows stdout/stderr 固定为 UTF-8、中文 Project Key、五个子命令、审计 CRLF 和路径脱敏。
 
-Workflow 与 Memory 同时启用后，成功的 `ue_verify_asset` 会返回 `memoryTaskEvidence.arguments`。该对象与 `ue_memory_record_task` 输入一致，应原样传递；它只包含脱敏 ID 和最终 Revision，不包含一次性 Receipt 或绝对路径。
+Workflow 与 Memory 同时启用后，成功的 `ue_verify_asset` 和成功的 rollback Commit 都会返回 `memoryTaskEvidence.arguments`。该对象与 `ue_memory_record_task` 输入一致，应原样传递；它只包含脱敏 ID 和最终或恢复 Revision，不包含一次性 Receipt 或绝对路径。
 
 ## 15. Release Validation 与 CI
 

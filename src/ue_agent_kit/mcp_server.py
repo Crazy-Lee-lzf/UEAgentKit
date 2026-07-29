@@ -93,9 +93,9 @@ def _server_instructions(
         else "Persistent Project Memory is not configured. "
     )
     memory_workflow_text = (
-        "After ue_verify_asset succeeds, call ue_memory_record_task with "
-        "memoryTaskEvidence.arguments unchanged; never invent or edit its Patch, Backup Manifest, "
-        "Validation Evidence, or Revision references. "
+        "After ue_verify_asset succeeds or ue_rollback_patch completes a verified Commit, call "
+        "ue_memory_record_task with memoryTaskEvidence.arguments unchanged; never invent or edit "
+        "its Patch, Backup Manifest, Validation Evidence, or Revision references. "
         if memory_enabled and write_tools_enabled
         else ""
     )
@@ -272,8 +272,10 @@ def _capabilities_response(
             "statuses": ["valid", "stale", "conflicted", "superseded", "unverified"],
             "revisionAware": True,
             "workflowEvidenceHandoff": bool(memory_enabled and write_tools_enabled),
-            "workflowEvidenceSourceTool": (
-                "ue_verify_asset" if memory_enabled and write_tools_enabled else ""
+            "workflowEvidenceSourceTools": (
+                ["ue_verify_asset", "ue_rollback_patch"]
+                if memory_enabled and write_tools_enabled
+                else []
             ),
             "workflowEvidenceTargetTool": (
                 "ue_memory_record_task" if memory_enabled and write_tools_enabled else ""

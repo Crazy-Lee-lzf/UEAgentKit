@@ -179,7 +179,74 @@ class FakeWorkflowService:
         }
 
     def rollback_patch(self, apply_receipt, **kwargs):
-        return {"ok": True, "tool": "ue_rollback_patch", "applyReceipt": apply_receipt, "mode": kwargs.get("mode", "DryRun")}
+        mode = kwargs.get("mode", "DryRun")
+        response = {
+            "ok": True,
+            "tool": "ue_rollback_patch",
+            "applyReceipt": apply_receipt,
+            "mode": mode,
+        }
+        if mode == "Commit":
+            report_id = "report_rollback_test"
+            verification_report_id = "report_rollback_verify_test"
+            revision = f"sha256:{REVISION_A}"
+            response.update(
+                {
+                    "restored": True,
+                    "reportId": report_id,
+                    "verificationReportId": verification_report_id,
+                    "memoryTaskEvidence": {
+                        "schemaVersion": "1.0",
+                        "tool": "ue_memory_record_task",
+                        "arguments": {
+                            "task_key": "rollback:plan_test",
+                            "title": "Rolled back patch plan_test",
+                            "conclusion": (
+                                f"The committed asset {ASSET_A} was restored and independently "
+                                f"verified at Revision {revision}."
+                            ),
+                            "outcome": "rolledBack",
+                            "patch_ref": "patch:sha256:test",
+                            "backup_manifest_ref": "backup-manifest:plan_test.manifest.json",
+                            "validation_evidence_ref": (
+                                f"validation-evidence:{verification_report_id}"
+                            ),
+                            "revision_set": [
+                                {
+                                    "assetPath": ASSET_A,
+                                    "revision": revision,
+                                    "revisionStable": True,
+                                }
+                            ],
+                            "scopes": [{"scopeType": "asset", "scopeKey": ASSET_A}],
+                            "confidence": 1.0,
+                            "patch_details": {
+                                "planId": "plan_test",
+                                "patchDigest": "sha256:test",
+                                "committedRevision": "sha256:b",
+                                "restoredRevision": revision,
+                            },
+                            "backup_manifest_details": {
+                                "manifestId": "plan_test.manifest.json",
+                                "restored": True,
+                            },
+                            "validation_evidence_details": {
+                                "rollbackReportId": report_id,
+                                "reportId": verification_report_id,
+                                "independentReload": True,
+                                "verified": True,
+                                "expectedRevision": revision,
+                                "actualRevision": revision,
+                            },
+                            "details": {
+                                "workflowEvidenceSchemaVersion": "1.0",
+                                "workflowTool": "ue_rollback_patch",
+                            },
+                        },
+                    },
+                }
+            )
+        return response
 
 
 class FakeLiveEditorService:
@@ -684,7 +751,7 @@ class McpServerTests(unittest.TestCase):
         self.assertFalse(memory_contract["arbitraryProjectArguments"])
         self.assertFalse(memory_contract["vectorDatabase"])
         self.assertFalse(memory_contract["workflowEvidenceHandoff"])
-        self.assertEqual(memory_contract["workflowEvidenceSourceTool"], "")
+        self.assertEqual(memory_contract["workflowEvidenceSourceTools"], [])
         self.assertEqual(capabilities["limits"]["memorySearchResults"], 100)
 
         _, project_status = asyncio.run(server.call_tool("ue_get_project_status", {}))
@@ -1109,7 +1176,10 @@ class McpServerTests(unittest.TestCase):
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
         memory_contract = capabilities["projectMemory"]
         self.assertTrue(memory_contract["workflowEvidenceHandoff"])
-        self.assertEqual(memory_contract["workflowEvidenceSourceTool"], "ue_verify_asset")
+        self.assertEqual(
+            memory_contract["workflowEvidenceSourceTools"],
+            ["ue_verify_asset", "ue_rollback_patch"],
+        )
         self.assertEqual(memory_contract["workflowEvidenceTargetTool"], "ue_memory_record_task")
         self.assertEqual(
             memory_contract["workflowEvidenceArgumentsPath"],
@@ -1136,6 +1206,36 @@ class McpServerTests(unittest.TestCase):
             [artifact["artifactKind"] for artifact in record["artifacts"]],
             ["patch", "backupManifest", "validationEvidence"],
         )
+
+        _, rolled_back = asyncio.run(
+            server.call_tool(
+                "ue_rollback_patch",
+                {
+                    "apply_receipt": "apply_test",
+                    "mode": "Commit",
+                    "rollback_dry_run_receipt": "rollback_dry_test",
+                    "confirmation": "ROLLBACK apply_test",
+                },
+            )
+        )
+        rollback_evidence = rolled_back["memoryTaskEvidence"]
+        self.assertEqual(rollback_evidence["tool"], "ue_memory_record_task")
+        rollback_arguments = rollback_evidence["arguments"]
+        self.assertEqual(rollback_arguments["outcome"], "rolledBack")
+        self.assertEqual(
+            rollback_arguments["validation_evidence_ref"],
+            "validation-evidence:report_rollback_verify_test",
+        )
+        self.assertNotIn("apply_receipt", rollback_arguments)
+
+        _, rollback_recorded = asyncio.run(
+            server.call_tool(rollback_evidence["tool"], rollback_arguments)
+        )
+        self.assertTrue(rollback_recorded["ok"])
+        rollback_record = rollback_recorded["record"]
+        self.assertEqual(rollback_record["subjectKey"], "task:rollback:plan_test")
+        self.assertEqual(rollback_record["details"]["taskOutcome"], "rolledBack")
+        self.assertEqual(rollback_record["status"], "valid")
 
     @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
     def test_fastmcp_combined_live_and_workflow_mode_has_exact_tool_order(self) -> None:

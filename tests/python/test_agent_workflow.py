@@ -563,6 +563,57 @@ class AgentWorkflowTests(unittest.TestCase):
         )
         self.assertTrue(restored["restored"])
         self.assertEqual(restored["indexFreshness"]["state"], "fresh")
+        rollback_evidence = restored["memoryTaskEvidence"]
+        self.assertEqual(rollback_evidence["tool"], "ue_memory_record_task")
+        rollback_arguments = rollback_evidence["arguments"]
+        self.assertEqual(rollback_arguments["task_key"], f"rollback:{plan['planId']}")
+        self.assertEqual(rollback_arguments["outcome"], "rolledBack")
+        self.assertEqual(rollback_arguments["patch_ref"], f"patch:{applied['patchDigest']}")
+        self.assertEqual(
+            rollback_arguments["backup_manifest_ref"],
+            f"backup-manifest:{applied['manifestId']}",
+        )
+        self.assertEqual(
+            rollback_arguments["validation_evidence_ref"],
+            f"validation-evidence:{restored['verificationReportId']}",
+        )
+        self.assertEqual(
+            rollback_arguments["revision_set"],
+            [
+                {
+                    "assetPath": ASSET_PATH,
+                    "revision": BEFORE_REVISION,
+                    "revisionStable": True,
+                }
+            ],
+        )
+        self.assertEqual(
+            rollback_arguments["patch_details"],
+            {
+                "planId": plan["planId"],
+                "patchDigest": applied["patchDigest"],
+                "committedRevision": AFTER_REVISION,
+                "restoredRevision": BEFORE_REVISION,
+            },
+        )
+        self.assertEqual(
+            rollback_arguments["backup_manifest_details"],
+            {"manifestId": applied["manifestId"], "restored": True},
+        )
+        self.assertEqual(
+            rollback_arguments["validation_evidence_details"],
+            {
+                "rollbackReportId": restored["reportId"],
+                "reportId": restored["verificationReportId"],
+                "independentReload": True,
+                "verified": True,
+                "expectedRevision": BEFORE_REVISION,
+                "actualRevision": BEFORE_REVISION,
+            },
+        )
+        self.assertNotIn(applied["applyReceipt"], json.dumps(rollback_evidence, ensure_ascii=False))
+        self.assertNotIn(str(self.tool_root), json.dumps(rollback_evidence, ensure_ascii=False))
+        self.assertIn("memoryTaskEvidence.arguments", restored["nextStep"])
         self.assertFalse(self.service.status()["indexLifecycle"]["sessionStale"])
         self.assertEqual(self.runner.revision, BEFORE_REVISION)
 

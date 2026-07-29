@@ -5,6 +5,7 @@ All notable changes to UE Agent Kit are documented here.
 ## Unreleased
 
 - Added a verified Workflow-to-Memory evidence handoff: `ue_verify_asset` now returns exact `ue_memory_record_task` arguments derived from the Patch digest, Backup Manifest, independent validation report, and final Revision.
+- Added the same evidence handoff for verified rollback Commit results, producing `outcome=rolledBack` with the restored Revision and rollback validation report IDs.
 - Added fixed-project Memory CLI status/search/get/validate commands and portable audit export with verified record digests and a stable snapshot SHA-256.
 - Fixed the Windows CLI JSON transport to emit UTF-8 on redirected stdout/stderr, including non-ASCII Project Keys.
 - Added evidence-bound Task Records that require a final outcome, Patch, Backup Manifest, Validation Evidence, and stable Revision Set.

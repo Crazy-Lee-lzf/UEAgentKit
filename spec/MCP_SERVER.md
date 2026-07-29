@@ -493,11 +493,11 @@ Persistent planning actions:
 
 ```text
 workflowEvidenceHandoff = true
-workflowEvidenceSourceTool = ue_verify_asset
+workflowEvidenceSourceTools = [ue_verify_asset, ue_rollback_patch]
 workflowEvidenceTargetTool = ue_memory_record_task
 workflowEvidenceArgumentsPath = memoryTaskEvidence.arguments
 ```
 
-`ue_verify_asset` 只有在独立 UE 重载确认 Asset Path 与最终 Revision 完全一致后，才返回 `memoryTaskEvidence`。其 `arguments` 可以直接作为 `ue_memory_record_task` 参数。Agent 不得从日志文本、文件路径或会话 Receipt 自行重建证据。
+`ue_verify_asset` 只有在独立 UE 重载确认 Asset Path 与最终 Revision 完全一致后，才返回 `outcome=succeeded` 的 `memoryTaskEvidence`。`ue_rollback_patch` 只有在 Commit 恢复和独立验证均成功后，才返回 `outcome=rolledBack` 的同格式证据包。两者的 `arguments` 都可以直接作为 `ue_memory_record_task` 参数。Agent 不得从日志文本、文件路径或会话 Receipt 自行重建证据。
 
 仅启用 Memory、未启用 Workflow 时，`workflowEvidenceHandoff=false`，不会暗示存在可验证的写入证据来源。

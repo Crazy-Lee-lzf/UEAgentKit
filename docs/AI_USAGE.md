@@ -185,4 +185,6 @@ ue_memory_record_task(memoryTaskEvidence.arguments)
 
 只在 `ue_verify_asset.verified=true` 且返回 `memoryTaskEvidence` 时记录成功 Task。必须原样使用 `memoryTaskEvidence.arguments`；不要从自然语言总结中猜测 `patch_ref`、`backup_manifest_ref`、`validation_evidence_ref` 或 Revision。
 
+完成 rollback Commit 后，若 `ue_rollback_patch.restored=true` 且返回 `memoryTaskEvidence`，同样原样调用 `ue_memory_record_task`；该记录的 outcome 为 `rolledBack`。不要把 rollback Dry Run 记录成终态。
+
 在开始相关任务前先用 `ue_memory_search` 查询 Valid 记录。默认不要把 `stale` 或 `superseded` 记录当作当前事实；需要历史审计时再显式请求这些状态。

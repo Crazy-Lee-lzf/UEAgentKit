@@ -293,6 +293,33 @@ async def run_workflow(args: argparse.Namespace) -> dict[str, object]:
                     raise RuntimeError(f"Rollback did not restore the package: {restored}")
                 if restored["indexFreshness"]["state"] != "fresh":
                     raise RuntimeError(f"Rollback did not restore fresh index state: {restored}")
+                rollback_evidence = restored.get("memoryTaskEvidence")
+                if not isinstance(rollback_evidence, dict) or rollback_evidence.get("tool") != "ue_memory_record_task":
+                    raise RuntimeError(f"Rollback Memory evidence handoff is missing: {restored}")
+                rollback_arguments = rollback_evidence.get("arguments")
+                if not isinstance(rollback_arguments, dict):
+                    raise RuntimeError(f"Rollback Memory evidence arguments are missing: {rollback_evidence}")
+                if rollback_arguments.get("outcome") != "rolledBack":
+                    raise RuntimeError(f"Rollback Memory outcome is invalid: {rollback_evidence}")
+                if rollback_arguments.get("patch_ref") != f"patch:{applied['patchDigest']}":
+                    raise RuntimeError(f"Rollback Patch evidence mismatch: {rollback_evidence}")
+                if rollback_arguments.get("backup_manifest_ref") != f"backup-manifest:{applied['manifestId']}":
+                    raise RuntimeError(f"Rollback Backup Manifest evidence mismatch: {rollback_evidence}")
+                if rollback_arguments.get("validation_evidence_ref") != f"validation-evidence:{restored['verificationReportId']}":
+                    raise RuntimeError(f"Rollback Validation evidence mismatch: {rollback_evidence}")
+                if rollback_arguments.get("revision_set") != [
+                    {
+                        "assetPath": args.asset_path,
+                        "revision": applied["beforeRevision"],
+                        "revisionStable": True,
+                    }
+                ]:
+                    raise RuntimeError(f"Rollback Revision evidence mismatch: {rollback_evidence}")
+                rollback_evidence_json = json.dumps(rollback_evidence, ensure_ascii=False)
+                if apply_receipt in rollback_evidence_json:
+                    raise RuntimeError("Rollback Memory evidence exposed the one-time Apply Receipt")
+                if str(args.work_root) in rollback_evidence_json or str(args.backup_root) in rollback_evidence_json:
+                    raise RuntimeError("Rollback Memory evidence exposed a configured local path")
                 restored_status = require_payload(
                     await session.call_tool("ue_get_project_status", {}),
                     "ue_get_project_status after Rollback",
@@ -331,6 +358,7 @@ async def run_workflow(args: argparse.Namespace) -> dict[str, object]:
         "committedRevision": applied["afterRevision"],
         "independentCommitVerification": True,
         "memoryTaskEvidenceVerified": True,
+        "rollbackMemoryTaskEvidenceVerified": True,
         "rollbackDryRunReceiptIssued": True,
         "invalidRollbackConfirmationRejected": True,
         "rollbackVerified": True,

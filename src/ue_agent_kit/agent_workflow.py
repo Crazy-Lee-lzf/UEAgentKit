@@ -183,6 +183,68 @@ def _verified_memory_task_evidence(
     }
 
 
+def _rollback_memory_task_evidence(
+    apply: ApplyRecord,
+    *,
+    rollback_report_id: str,
+    verification_report_id: str,
+    restored_revision: str,
+) -> dict[str, Any]:
+    manifest_id = apply.manifest_path.name
+    return {
+        "schemaVersion": MEMORY_TASK_EVIDENCE_SCHEMA_VERSION,
+        "tool": "ue_memory_record_task",
+        "arguments": {
+            "task_key": f"rollback:{apply.plan_id}",
+            "title": f"Rolled back patch {apply.plan_id}",
+            "conclusion": (
+                f"The committed asset {apply.asset_path} was restored and independently "
+                f"verified at Revision {restored_revision}."
+            ),
+            "outcome": "rolledBack",
+            "patch_ref": f"patch:{apply.plan_digest}",
+            "backup_manifest_ref": f"backup-manifest:{manifest_id}",
+            "validation_evidence_ref": f"validation-evidence:{verification_report_id}",
+            "revision_set": [
+                {
+                    "assetPath": apply.asset_path,
+                    "revision": restored_revision,
+                    "revisionStable": True,
+                }
+            ],
+            "scopes": [
+                {
+                    "scopeType": "asset",
+                    "scopeKey": apply.asset_path,
+                }
+            ],
+            "confidence": 1.0,
+            "patch_details": {
+                "planId": apply.plan_id,
+                "patchDigest": apply.plan_digest,
+                "committedRevision": apply.after_revision,
+                "restoredRevision": restored_revision,
+            },
+            "backup_manifest_details": {
+                "manifestId": manifest_id,
+                "restored": True,
+            },
+            "validation_evidence_details": {
+                "rollbackReportId": rollback_report_id,
+                "reportId": verification_report_id,
+                "independentReload": True,
+                "verified": True,
+                "expectedRevision": apply.before_revision,
+                "actualRevision": restored_revision,
+            },
+            "details": {
+                "workflowEvidenceSchemaVersion": MEMORY_TASK_EVIDENCE_SCHEMA_VERSION,
+                "workflowTool": "ue_rollback_patch",
+            },
+        },
+    }
+
+
 @dataclass
 class RollbackDryRunRecord:
     receipt: str
@@ -1948,6 +2010,17 @@ class PatchWorkflowService:
             dry_run.consumed = True
             apply.rolled_back = True
             freshness = self.freshness.mark_rollback(apply.asset_path, restored_revision)
+            rollback_report_id = _report_id("rollback-commit", report_path)
+            verification_report_id = _report_id(
+                "rollback-verification",
+                verification_report,
+            )
+            memory_task_evidence = _rollback_memory_task_evidence(
+                apply,
+                rollback_report_id=rollback_report_id,
+                verification_report_id=verification_report_id,
+                restored_revision=restored_revision,
+            )
             return {
                 "schemaVersion": WORKFLOW_SCHEMA_VERSION,
                 "tool": "ue_rollback_patch",
@@ -1957,9 +2030,14 @@ class PatchWorkflowService:
                 "assetPath": apply.asset_path,
                 "restored": True,
                 "expectedRevision": apply.before_revision,
-                "reportId": _report_id("rollback-commit", report_path),
-                "verificationReportId": _report_id("rollback-verification", verification_report),
+                "reportId": rollback_report_id,
+                "verificationReportId": verification_report_id,
+                "memoryTaskEvidence": memory_task_evidence,
                 "indexFreshness": freshness,
                 "verification": _safe_report(verification, configured_paths=self.configured_paths),
                 "report": _safe_report(report, configured_paths=self.configured_paths),
+                "nextStep": (
+                    "If Project Memory is enabled, pass memoryTaskEvidence.arguments unchanged to "
+                    "ue_memory_record_task."
+                ),
             }
