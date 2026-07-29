@@ -4,6 +4,8 @@ All notable changes to UE Agent Kit are documented here.
 
 ## Unreleased
 
+- Added fixed-project Memory CLI status/search/get/validate commands and portable audit export with verified record digests and a stable snapshot SHA-256.
+- Fixed the Windows CLI JSON transport to emit UTF-8 on redirected stdout/stderr, including non-ASCII Project Keys.
 - Added evidence-bound Task Records that require a final outcome, Patch, Backup Manifest, Validation Evidence, and stable Revision Set.
 - Added Project Memory Schema v2 with evidence-bound SHA-256 digests, v1 backfill, and read-time tamper detection for semantic content, Revision Sets, and Artifact bindings.
 - Added the first Revision-aware Project Memory storage layer with an independent SQLite/FTS5 schema, six record types, source/status provenance, Scope/Revision/Artifact bindings, conflict coexistence, explicit supersede links, and automatic Revision-to-stale invalidation.

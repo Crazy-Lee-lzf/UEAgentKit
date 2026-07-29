@@ -13,10 +13,18 @@ from .backups import (
     rollback_backup,
     verify_rollback_export,
 )
-from .config import DEFAULT_DATABASE
+from .config import DEFAULT_DATABASE, DEFAULT_MEMORY_DATABASE
 from .database import assert_fts5_available, get_schema_version, open_database
 from .fixtures import validate_fixture_plan, verify_fixture_export
 from .indexer import build_index
+from .memory_reports import (
+    MAX_AUDIT_RECORDS,
+    MAX_AUDIT_STATUS_EVENTS,
+    build_memory_audit_report,
+    memory_record_payload,
+)
+from .memory_service import ProjectMemoryService
+from .project_memory import MemoryRecordType, MemoryScopeType, MemoryStatus
 from .patches import PATCH_SCHEMA_VERSION, get_operation_registry, validate_patch
 from .queries import find_references, get_asset, get_stats, search_assets, search_symbols
 from .schema import CURRENT_SCHEMA_VERSION
@@ -28,6 +36,20 @@ def _add_database_argument(parser: argparse.ArgumentParser) -> None:
         type=Path,
         default=DEFAULT_DATABASE,
         help=f"SQLite database path. Default: {DEFAULT_DATABASE}",
+    )
+
+
+def _add_memory_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--memory-database",
+        type=Path,
+        default=DEFAULT_MEMORY_DATABASE,
+        help=f"Writable Project Memory SQLite path. Default: {DEFAULT_MEMORY_DATABASE}",
+    )
+    parser.add_argument(
+        "--project-key",
+        default=os.environ.get("UEAK_PROJECT_KEY", ""),
+        help="Fixed Project Key. Defaults to UEAK_PROJECT_KEY.",
     )
 
 
@@ -117,6 +139,69 @@ def build_parser() -> argparse.ArgumentParser:
     asset_parser.add_argument("--node-limit", type=int, default=200)
     asset_parser.add_argument("--include-details", action="store_true")
 
+    memory_parser = subparsers.add_parser(
+        "memory",
+        help="Inspect, validate, or export revision-aware Project Memory.",
+    )
+    memory_subparsers = memory_parser.add_subparsers(dest="memory_command", required=True)
+
+    memory_status = memory_subparsers.add_parser("status", help="Show fixed-project Memory counts.")
+    _add_memory_arguments(memory_status)
+
+    memory_search = memory_subparsers.add_parser("search", help="Search current Project Memory records.")
+    _add_memory_arguments(memory_search)
+    memory_search.add_argument("query")
+    memory_search.add_argument(
+        "--record-type",
+        dest="record_types",
+        action="append",
+        choices=tuple(item.value for item in MemoryRecordType),
+        default=None,
+    )
+    memory_search.add_argument(
+        "--status",
+        dest="statuses",
+        action="append",
+        choices=tuple(item.value for item in MemoryStatus),
+        default=None,
+    )
+    memory_search.add_argument(
+        "--scope-type",
+        choices=tuple(item.value for item in MemoryScopeType),
+        default="",
+    )
+    memory_search.add_argument("--scope-key", default="")
+    memory_search.add_argument("--limit", type=int, default=20)
+
+    memory_get = memory_subparsers.add_parser("get", help="Get one exact Memory record.")
+    _add_memory_arguments(memory_get)
+    memory_get.add_argument("record_id")
+
+    memory_validate = memory_subparsers.add_parser(
+        "validate",
+        help="Mark Memory records stale when fixed index Revisions changed.",
+    )
+    _add_memory_arguments(memory_validate)
+    memory_validate.add_argument(
+        "--index-database",
+        type=Path,
+        default=DEFAULT_DATABASE,
+        help=f"Immutable index used for Revision validation. Default: {DEFAULT_DATABASE}",
+    )
+
+    memory_export = memory_subparsers.add_parser(
+        "export",
+        help="Write a portable audit JSON with all records and status events.",
+    )
+    _add_memory_arguments(memory_export)
+    memory_export.add_argument("--output", type=Path, required=True)
+    memory_export.add_argument("--max-records", type=int, default=MAX_AUDIT_RECORDS)
+    memory_export.add_argument(
+        "--max-status-events",
+        type=int,
+        default=MAX_AUDIT_STATUS_EVENTS,
+    )
+
     patch_parser = subparsers.add_parser("patch", help="Inspect or validate declarative Blueprint patches.")
     patch_subparsers = patch_parser.add_subparsers(dest="patch_command", required=True)
 
@@ -189,6 +274,13 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _configure_stdio() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def _print_json(value: Any, *, compact: bool) -> None:
     print(_serialize_json(value, compact=compact))
 
@@ -210,6 +302,80 @@ def _open_query_database(path: Path):
 
 
 def run(args: argparse.Namespace) -> tuple[Any, int]:
+    if args.command == "memory":
+        memory_service = ProjectMemoryService(
+            database_path=args.memory_database,
+            project_key=args.project_key,
+        )
+        if args.memory_command == "status":
+            status = memory_service.status()
+            return {
+                "schemaVersion": "1.0",
+                "tool": "ue_memory_status",
+                "projectKey": status.project_key,
+                "memorySchemaVersion": status.schema_version,
+                "recordCount": status.record_count,
+                "countsByType": status.counts_by_type,
+                "countsByStatus": status.counts_by_status,
+            }, 0
+        if args.memory_command == "search":
+            kwargs: dict[str, Any] = {
+                "query": args.query,
+                "record_types": tuple(args.record_types or ()),
+                "scope_type": args.scope_type or None,
+                "scope_key": args.scope_key,
+                "limit": args.limit,
+            }
+            if args.statuses is not None:
+                kwargs["statuses"] = tuple(args.statuses)
+            hits = memory_service.search_records(**kwargs)
+            return {
+                "schemaVersion": "1.0",
+                "tool": "ue_memory_search",
+                "projectKey": memory_service.project_key,
+                "resultCount": len(hits),
+                "items": [
+                    {"rank": hit.rank, "record": memory_record_payload(hit.record)}
+                    for hit in hits
+                ],
+            }, 0
+        if args.memory_command == "get":
+            return {
+                "schemaVersion": "1.0",
+                "tool": "ue_memory_get",
+                "projectKey": memory_service.project_key,
+                "record": memory_record_payload(memory_service.get_record(args.record_id)),
+            }, 0
+        if args.memory_command == "validate":
+            result = memory_service.validate_against_index(args.index_database)
+            return {
+                "schemaVersion": "1.0",
+                "tool": "ue_memory_validate",
+                "projectKey": result.project_key,
+                "indexedAssetCount": result.indexed_asset_count,
+                "checkedRecordIds": list(result.invalidation.checked_record_ids),
+                "staleRecordIds": list(result.invalidation.stale_record_ids),
+                "reasons": result.invalidation.reasons,
+            }, 0
+        if args.memory_command == "export":
+            report = build_memory_audit_report(
+                memory_service,
+                max_records=args.max_records,
+                max_status_events=args.max_status_events,
+            )
+            _write_json_file(args.output, report)
+            return {
+                "schemaVersion": "1.0",
+                "tool": "ue_memory_export",
+                "projectKey": memory_service.project_key,
+                "exported": True,
+                "output": str(args.output),
+                "recordCount": report["recordCount"],
+                "statusEventCount": report["statusEventCount"],
+                "snapshotSha256": report["integrity"]["snapshotSha256"],
+            }, 0
+        raise RuntimeError("Unsupported Project Memory command.")
+
     if args.command == "patch" and args.patch_command == "operations":
         return {
             "schemaVersion": PATCH_SCHEMA_VERSION,
@@ -354,12 +520,24 @@ def run(args: argparse.Namespace) -> tuple[Any, int]:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    _configure_stdio()
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
         result, exit_code = run(args)
         _print_json(result, compact=args.compact)
         return exit_code
+    except KeyError as exc:
+        message = str(exc.args[0]) if exc.args else "Requested record was not found."
+        _print_json(
+            {
+                "error": type(exc).__name__,
+                "message": message,
+                "valid": False,
+            },
+            compact=args.compact,
+        )
+        return 2
     except FileNotFoundError as exc:
         _print_json(
             {

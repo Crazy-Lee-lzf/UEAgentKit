@@ -484,6 +484,47 @@ ue_memory_validate
 
 服务器启动时固定数据库路径，Tool 参数不能更换数据库；SQLite 使用不可变只读快照并拒绝活动 Sidecar。`-EnableLiveEditor -ProjectPath <固定工程>` 会增加 10 个实时只读 Tool 和 8 个受限 Daily Action。Bridge 只绑定 `127.0.0.1`，使用随机会话令牌，并校验固定工程路径摘要、Plugin/Server 版本与 Capability；MCP 响应不暴露 Token、端口或 Descriptor 路径。未启用 Memory 时离线 5 Tool、Live 模式 23 Tool、工作流模式 25 Tool、组合模式 43 Tool 相互兼容；启用 Memory 后分别为 12、30、32、50。Output Log 最多返回 100 条并使用序号游标；实时资产检查和 Content Browser 同步不加载目标资产；Blueprint Graph 定位只支持普通 Blueprint Editor，并最多返回 100 个选中 Node。八个 Live Daily Action 仅接受精确 `/Game` 身份或当前 Editor World 的 ActorGuid，在 PIE/SIE 中拒绝运行且不保存 Package；工作流 Tool `ue_save_authorized_asset` 使用 Policy/Revision/Session 绑定的 Preview Receipt、备份、显式确认和独立验证保存一个授权资产；文件夹 Validation 最多匹配 500 个资产并最多返回 200 条问题。`ue_get_asset_state` 只读比较 Editor Memory、磁盘 Package、Revision Export 和 SQLite。高层写入入口默认只生成 Plan，也可执行 Dry Run，但不能直接 Commit。保存和恢复必须显式启用 Commit、通过 Policy，并提供一次性 Receipt 与精确确认短语。`ue_refresh_asset_index` 只接受一个精确授权资产和 Preview/Apply；它在固定 Work Root 中构建配对 Generation，验证后原子切换 Pointer，并要求新 MCP 会话加载新代。真实写入闭环使用 `scripts\TestMcpWorkflow.cmd`，真实刷新闭环使用 `scripts\TestMcpSnapshotRefresh.cmd`。完整契约见 [`../spec/MCP_SERVER.md`](../spec/MCP_SERVER.md) 与 [`../spec/LIVE_EDITOR_BRIDGE.md`](../spec/LIVE_EDITOR_BRIDGE.md)。
 
+### Project Memory CLI
+
+不启动 MCP 时，可以使用现有 `ue-agent` CLI 检查固定工程 Memory：
+
+```bat
+scripts\ue-agent.cmd memory status ^
+  --memory-database ".data\ue_agent_kit_memory.sqlite3" ^
+  --project-key "MyProject"
+
+scripts\ue-agent.cmd memory search "player health" ^
+  --memory-database ".data\ue_agent_kit_memory.sqlite3" ^
+  --project-key "MyProject" ^
+  --record-type taskRecord ^
+  --scope-type asset ^
+  --scope-key /Game/Characters/BP_Player.BP_Player
+
+scripts\ue-agent.cmd memory get mem_0123456789abcdef0123456789abcdef ^
+  --memory-database ".data\ue_agent_kit_memory.sqlite3" ^
+  --project-key "MyProject"
+
+scripts\ue-agent.cmd memory validate ^
+  --memory-database ".data\ue_agent_kit_memory.sqlite3" ^
+  --project-key "MyProject" ^
+  --index-database ".data\ue_agent_kit.sqlite3"
+
+scripts\ue-agent.cmd memory export ^
+  --memory-database ".data\ue_agent_kit_memory.sqlite3" ^
+  --project-key "MyProject" ^
+  --output "Output\ProjectMemory\memory-audit.json"
+```
+
+`status`、`search` 和 `get` 在已初始化的当前 Schema 上不改变业务记录或状态；首次打开空库或旧 Schema 时会执行建库、Schema Migration 和必要的证据摘要回填。`validate` 只可能把 Revision 不匹配的记录持久化为 `stale`。`export` 不改变业务记录或状态，输出完整 Record、Status Event、双摘要与可重复 `snapshotSha256`，并且不写入 Memory DB 或 Index DB 的绝对路径。默认拒绝超过 10,000 条 Record 或 100,000 条 Status Event 的不完整导出。
+
+进程级 CLI 回归：
+
+```bat
+scripts\TestMemoryCli.cmd
+```
+
+该回归使用独立临时数据库启动 `scripts\ue-agent.py`，并验证 Windows stdout/stderr 固定为 UTF-8、中文 Project Key、五个子命令、审计 CRLF 和路径脱敏。
+
 ## 15. Release Validation 与 CI
 
 发布前运行：

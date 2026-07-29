@@ -155,3 +155,20 @@ ue_search / ue_get_asset / ue_find_references
 ```
 
 MCP Receipt 仅在当前 Server 会话中有效；重启后必须重新 Plan 和 Dry Run。
+
+## Project Memory 查询与审计
+
+在不启动 MCP 的批处理或人工审计场景中，使用固定 `--memory-database` 和 `--project-key`：
+
+```bat
+scripts\ue-agent.cmd memory search "damage formula" ^
+  --memory-database ".data\ue_agent_kit_memory.sqlite3" ^
+  --project-key "MyProject"
+
+scripts\ue-agent.cmd memory export ^
+  --memory-database ".data\ue_agent_kit_memory.sqlite3" ^
+  --project-key "MyProject" ^
+  --output "Output\ProjectMemory\memory-audit.json"
+```
+
+AI 使用搜索结果时默认忽略 `stale` 和 `superseded`。需要审查历史时显式传入 `--status stale` 或 `--status superseded`。审计导出中的 `contentSha256` 用于语义内容比较，`evidenceSha256` 绑定 Source、Revision Set 与 Artifact，`snapshotSha256` 绑定整份可移植快照。

@@ -4,15 +4,14 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Literal
 
+from .memory_reports import memory_record_payload
 from .memory_service import ProjectMemoryService, ProjectMemoryServiceError
 from .memory_tasks import TaskOutcomeDraft
 from .project_memory import (
     MemoryArtifact,
-    MemoryRecord,
     MemoryRecordDraft,
     MemoryRevision,
     MemoryScope,
-    MemoryScopeType,
     MemorySourceKind,
 )
 
@@ -94,61 +93,6 @@ def _parse_artifacts(values: list[dict[str, Any]] | None) -> tuple[MemoryArtifac
     return tuple(result)
 
 
-def _record_payload(record: MemoryRecord) -> dict[str, Any]:
-    return {
-        "recordId": record.record_id,
-        "projectKey": record.project_key,
-        "recordType": record.record_type.value,
-        "subjectKey": record.subject_key,
-        "title": record.title,
-        "body": record.body,
-        "sourceKind": record.source_kind.value,
-        "sourceRef": record.source_ref,
-        "confidence": record.confidence,
-        "status": record.status.value,
-        "contentSha256": record.content_sha256,
-        "evidenceSha256": record.evidence_sha256,
-        "createdAtUtc": record.created_at_utc,
-        "observedAtUtc": record.observed_at_utc,
-        "updatedAtUtc": record.updated_at_utc,
-        "supersededByRecordId": record.superseded_by_record_id,
-        "scopes": [
-            {
-                "scopeType": MemoryScopeType(scope.scope_type).value,
-                "scopeKey": scope.scope_key,
-                "details": scope.details,
-            }
-            for scope in record.scopes
-        ],
-        "revisionSet": [
-            {
-                "assetPath": revision.asset_path,
-                "revision": revision.revision,
-                "revisionStable": revision.revision_stable,
-            }
-            for revision in record.revision_set
-        ],
-        "artifacts": [
-            {
-                "artifactKind": artifact.artifact_kind,
-                "artifactRef": artifact.artifact_ref,
-                "details": artifact.details,
-            }
-            for artifact in record.artifacts
-        ],
-        "relations": [
-            {
-                "relationKind": relation.relation_kind.value,
-                "targetRecordId": relation.target_record_id,
-                "createdAtUtc": relation.created_at_utc,
-                "details": relation.details,
-            }
-            for relation in record.relations
-        ],
-        "details": record.details,
-    }
-
-
 def _memory_error(error: Exception) -> Exception:
     if isinstance(error, KeyError):
         message = str(error.args[0]) if error.args else "Project Memory record not found."
@@ -203,7 +147,7 @@ def register_memory_tools(
                 "projectKey": memory_service.project_key,
                 "resultCount": len(hits),
                 "items": [
-                    {"rank": hit.rank, "record": _record_payload(hit.record)} for hit in hits
+                    {"rank": hit.rank, "record": memory_record_payload(hit.record)} for hit in hits
                 ],
             }
         except (
@@ -229,7 +173,7 @@ def register_memory_tools(
                 "ok": True,
                 "readOnly": True,
                 "projectKey": memory_service.project_key,
-                "record": _record_payload(record),
+                "record": memory_record_payload(record),
             }
         except (
             ProjectMemoryServiceError,
@@ -281,7 +225,7 @@ def register_memory_tools(
                 "ok": True,
                 "readOnly": False,
                 "projectKey": memory_service.project_key,
-                "record": _record_payload(record),
+                "record": memory_record_payload(record),
             }
         except (
             ProjectMemoryServiceError,
@@ -342,7 +286,7 @@ def register_memory_tools(
                 "ok": True,
                 "readOnly": False,
                 "projectKey": memory_service.project_key,
-                "record": _record_payload(record),
+                "record": memory_record_payload(record),
             }
         except (
             ProjectMemoryServiceError,
@@ -407,7 +351,7 @@ def register_memory_tools(
                 "ok": True,
                 "readOnly": False,
                 "projectKey": memory_service.project_key,
-                "record": _record_payload(record),
+                "record": memory_record_payload(record),
             }
         except (
             ProjectMemoryServiceError,
@@ -440,7 +384,7 @@ def register_memory_tools(
                 "ok": True,
                 "readOnly": False,
                 "projectKey": memory_service.project_key,
-                "record": _record_payload(record),
+                "record": memory_record_payload(record),
             }
         except (
             ProjectMemoryServiceError,

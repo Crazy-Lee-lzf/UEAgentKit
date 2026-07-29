@@ -308,3 +308,37 @@ validationEvidence
 Artifact 只保存稳定 ID 或工程相对引用，不复制文件内容，也不接受盘符绝对路径、POSIX 绝对路径或 `..` 父目录穿越。Project Scope 自动补全并且必须匹配 Server 固定 Project Key。
 
 Task Outcome 是不可变审计记录。后续出现新的最终结论时创建新记录，并通过 `ue_memory_mark_superseded` 显式取代旧记录；不得原地覆盖历史证据。
+
+## 16. CLI 与审计导出
+
+现有 `ue-agent` CLI 提供：
+
+```text
+memory status
+memory search
+memory get
+memory validate
+memory export
+```
+
+每个子命令都要求固定 `--memory-database` 与 `--project-key`，也可以通过 `UEAK_MEMORY_DATABASE` 和 `UEAK_PROJECT_KEY` 提供默认值。CLI 不接受 SQL、数据库表名或任意查询表达式。 空库或旧 Schema 首次打开时允许执行受控建库、Migration 和证据摘要回填；已经处于当前 Schema 时，`status`、`search`、`get` 和 `export` 不改变业务记录或状态。
+
+`memory validate` 额外读取固定 `--index-database`，只比较 `assets.revision_value` 并更新 Memory Status，不修改索引。`memory export` 生成 Schema 1.0 审计 JSON：
+
+```text
+projectKey
+memorySchemaVersion
+recordCount / statusEventCount
+countsByType / countsByStatus
+records[]
+statusEvents[]
+integrity.allRecordDigestsVerified
+integrity.snapshotSha256
+```
+
+导出前逐条重新验证 `contentSha256` 与 `evidenceSha256`。任何记录被数据库外部篡改时导出失败。`snapshotSha256` 不包含 `generatedAtUtc`，因此相同数据会生成相同摘要。报告不包含 Memory DB、Index DB 或本机工作目录的绝对路径。
+
+为了避免静默截断，默认最大值为 10,000 条 Record 和 100,000 条 Status Event；超过上限时整体失败，不生成部分审计快照。
+
+
+CLI 的 stdout/stderr 在入口处固定为 UTF-8，确保 Windows 管道、中文 Project Key 和 JSON 调用方不依赖系统代码页。`scripts\TestMemoryCli.cmd` 使用独立子进程验证该协议边界。
