@@ -478,8 +478,11 @@ Read:
 Persistent planning actions:
   ue_memory_add_rule
   ue_memory_record_finding
+  ue_memory_record_task
   ue_memory_mark_superseded
   ue_memory_validate
 ```
+
+`ue_memory_record_task` 固定写入 `taskRecord + tool-observed`，只接受终态 `succeeded`、`failed`、`rolledBack` 或 `cancelled`。它必须绑定最终结论、Patch、Backup Manifest、Validation Evidence 和至少一个稳定 Revision；Artifact 引用不能是绝对本机路径或父目录穿越路径。
 
 `ue_memory_validate` 使用当前固定 SQLite 的 `assets.revision_value`，仅更新 Memory Status，不修改索引或 Unreal Asset。完整数据模型和状态规则见 [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md)。

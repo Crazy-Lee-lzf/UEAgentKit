@@ -609,7 +609,7 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         expected_names = tool_names_for_mode(memory_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 11)
+        self.assertEqual(len(tools), 12)
         forbidden = {
             "database",
             "database_path",
@@ -694,6 +694,71 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(finding_record["sourceKind"], "tool-observed")
         self.assertEqual(finding_record["status"], "valid")
 
+        _, task = asyncio.run(
+            server.call_tool(
+                "ue_memory_record_task",
+                {
+                    "task_key": "player-revision-validation",
+                    "title": "Validate player revision",
+                    "conclusion": "The player asset revision was validated and retained.",
+                    "outcome": "succeeded",
+                    "patch_ref": "patch:player_revision",
+                    "backup_manifest_ref": "backup-manifest:player_revision",
+                    "validation_evidence_ref": "validation-evidence:player_revision",
+                    "revision_set": [
+                        {
+                            "assetPath": ASSET_A,
+                            "revision": f"sha256:{REVISION_A}",
+                            "revisionStable": True,
+                        }
+                    ],
+                    "scopes": [
+                        {
+                            "scopeType": "asset",
+                            "scopeKey": ASSET_A,
+                        }
+                    ],
+                    "patch_details": {"operationCount": 1},
+                    "backup_manifest_details": {"backupVerified": True},
+                    "validation_evidence_details": {"result": "passed"},
+                },
+            )
+        )
+        self.assertTrue(task["ok"])
+        task_record = task["record"]
+        self.assertEqual(task_record["recordType"], "taskRecord")
+        self.assertEqual(task_record["subjectKey"], "task:player-revision-validation")
+        self.assertEqual(task_record["details"]["taskOutcome"], "succeeded")
+        self.assertEqual(
+            [artifact["artifactKind"] for artifact in task_record["artifacts"]],
+            ["patch", "backupManifest", "validationEvidence"],
+        )
+        self.assertEqual(task_record["status"], "valid")
+
+        _, invalid_task = asyncio.run(
+            server.call_tool(
+                "ue_memory_record_task",
+                {
+                    "task_key": "invalid-path",
+                    "title": "Invalid task",
+                    "conclusion": "This task must be rejected.",
+                    "outcome": "failed",
+                    "patch_ref": "C:\\Temp\\patch.json",
+                    "backup_manifest_ref": "backup-manifest:invalid",
+                    "validation_evidence_ref": "validation-evidence:invalid",
+                    "revision_set": [
+                        {
+                            "assetPath": ASSET_A,
+                            "revision": f"sha256:{REVISION_A}",
+                            "revisionStable": True,
+                        }
+                    ],
+                },
+            )
+        )
+        self.assertFalse(invalid_task["ok"])
+        self.assertEqual(invalid_task["error"]["code"], "invalid-arguments")
+
         _, search = asyncio.run(
             server.call_tool(
                 "ue_memory_search",
@@ -723,6 +788,7 @@ class McpServerTests(unittest.TestCase):
         _, validated = asyncio.run(server.call_tool("ue_memory_validate", {}))
         self.assertTrue(validated["ok"])
         self.assertIn(finding_record["recordId"], validated["checkedRecordIds"])
+        self.assertIn(task_record["recordId"], validated["checkedRecordIds"])
         self.assertEqual(validated["staleRecordIds"], [])
 
         _, replacement = asyncio.run(

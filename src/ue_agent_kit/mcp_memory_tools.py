@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from .memory_service import ProjectMemoryService, ProjectMemoryServiceError
+from .memory_tasks import TaskOutcomeDraft
 from .project_memory import (
     MemoryArtifact,
     MemoryRecord,
@@ -354,6 +355,71 @@ def register_memory_tools(
             sqlite3.Error,
         ) as exc:
             return error_response("ue_memory_record_finding", _memory_error(exc), read_only=False)
+
+    @server.tool(annotations=planning_annotations)
+    def ue_memory_record_task(
+        task_key: str,
+        title: str,
+        conclusion: str,
+        outcome: Literal["succeeded", "failed", "rolledBack", "cancelled"],
+        patch_ref: str,
+        backup_manifest_ref: str,
+        validation_evidence_ref: str,
+        revision_set: list[dict[str, Any]],
+        scopes: list[dict[str, Any]] | None = None,
+        confidence: float = 1.0,
+        observed_at_utc: str = "",
+        patch_details: dict[str, Any] | None = None,
+        backup_manifest_details: dict[str, Any] | None = None,
+        validation_evidence_details: dict[str, Any] | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Persist one completed Task Record with exact Patch, Backup, Validation, and Revision evidence."""
+        try:
+            record = memory_service.record_task_outcome(
+                TaskOutcomeDraft(
+                    task_key=task_key,
+                    title=title,
+                    conclusion=conclusion,
+                    outcome=outcome,
+                    patch_ref=patch_ref,
+                    backup_manifest_ref=backup_manifest_ref,
+                    validation_evidence_ref=validation_evidence_ref,
+                    revision_set=_parse_revisions(revision_set),
+                    scopes=_parse_scopes(scopes),
+                    confidence=confidence,
+                    observed_at_utc=observed_at_utc,
+                    patch_details=_details(patch_details, "patch_details"),
+                    backup_manifest_details=_details(
+                        backup_manifest_details,
+                        "backup_manifest_details",
+                    ),
+                    validation_evidence_details=_details(
+                        validation_evidence_details,
+                        "validation_evidence_details",
+                    ),
+                    details=_details(details, "details"),
+                )
+            )
+            return {
+                "schemaVersion": "1.0",
+                "tool": "ue_memory_record_task",
+                "ok": True,
+                "readOnly": False,
+                "projectKey": memory_service.project_key,
+                "record": _record_payload(record),
+            }
+        except (
+            ProjectMemoryServiceError,
+            FileNotFoundError,
+            KeyError,
+            OSError,
+            TypeError,
+            ValueError,
+            RuntimeError,
+            sqlite3.Error,
+        ) as exc:
+            return error_response("ue_memory_record_task", _memory_error(exc), read_only=False)
 
     @server.tool(annotations=planning_annotations)
     def ue_memory_mark_superseded(

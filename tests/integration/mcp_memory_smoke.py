@@ -108,6 +108,31 @@ async def _run_client(
                         ],
                     },
                 )
+                task_result = await session.call_tool(
+                    "ue_memory_record_task",
+                    {
+                        "task_key": "memory-smoke",
+                        "title": "Validate Project Memory stdio",
+                        "conclusion": "The fixed-project Memory stdio workflow passed.",
+                        "outcome": "succeeded",
+                        "patch_ref": "patch:memory-smoke",
+                        "backup_manifest_ref": "backup-manifest:memory-smoke",
+                        "validation_evidence_ref": "validation-evidence:memory-smoke",
+                        "revision_set": [
+                            {
+                                "assetPath": ASSET_A,
+                                "revision": f"sha256:{REVISION_A}",
+                                "revisionStable": True,
+                            }
+                        ],
+                        "scopes": [
+                            {
+                                "scopeType": "asset",
+                                "scopeKey": ASSET_A,
+                            }
+                        ],
+                    },
+                )
                 validate_result = await session.call_tool("ue_memory_validate", {})
                 missing_result = await session.call_tool(
                     "ue_memory_get",
@@ -119,6 +144,7 @@ async def _run_client(
     search = search_result.structuredContent
     fetched = get_result.structuredContent
     finding = finding_result.structuredContent
+    task = task_result.structuredContent
     validated = validate_result.structuredContent
     missing = missing_result.structuredContent
     tool_names = [tool.name for tool in tools_result.tools]
@@ -137,6 +163,14 @@ async def _run_client(
         raise RuntimeError(f"Memory exact get failed: {fetched}")
     if not finding or finding["record"]["status"] != "valid":
         raise RuntimeError(f"Tool-observed Memory finding failed: {finding}")
+    if not task or task["record"]["status"] != "valid":
+        raise RuntimeError(f"Evidence-bound Task Record failed: {task}")
+    if [item["artifactKind"] for item in task["record"]["artifacts"]] != [
+        "patch",
+        "backupManifest",
+        "validationEvidence",
+    ]:
+        raise RuntimeError(f"Task Record Artifact contract failed: {task}")
     if not validated or validated["staleRecordIds"]:
         raise RuntimeError(f"Memory Revision validation failed: {validated}")
     if not missing or missing["ok"] or missing["error"]["code"] != "memory-record-not-found":
@@ -150,7 +184,7 @@ async def _run_client(
         database_path=memory_path,
         project_key="测试项目",
     ).status()
-    if memory_status.record_count != 2:
+    if memory_status.record_count != 3:
         raise RuntimeError(f"Unexpected persistent Memory record count: {memory_status}")
 
     return {
@@ -161,6 +195,7 @@ async def _run_client(
         "projectKey": capabilities["projectMemory"]["projectKey"],
         "ruleCreated": True,
         "findingCreated": True,
+        "taskCreated": True,
         "searchPassed": True,
         "exactGetPassed": True,
         "revisionValidationPassed": True,

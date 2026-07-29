@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from .database import get_metadata, get_schema_version, open_database
+from .memory_tasks import TaskOutcomeDraft, build_task_outcome_record
 from .project_memory import (
     MemoryRecord,
     MemoryRecordDraft,
@@ -104,6 +105,13 @@ class ProjectMemoryService:
             )
         with open_project_memory_database(self.database_path) as connection:
             return create_memory_record(connection, draft)
+
+    def record_task_outcome(self, draft: TaskOutcomeDraft) -> MemoryRecord:
+        record_draft = build_task_outcome_record(
+            project_key=self.project_key,
+            draft=draft,
+        )
+        return self.add_record(record_draft)
 
     def get_record(self, record_id: str) -> MemoryRecord:
         with open_project_memory_database(self.database_path) as connection:

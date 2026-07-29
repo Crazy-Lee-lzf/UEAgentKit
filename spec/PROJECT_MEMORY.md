@@ -248,6 +248,7 @@ ue_memory_search
 ue_memory_get
 ue_memory_add_rule
 ue_memory_record_finding
+ue_memory_record_task
 ue_memory_mark_superseded
 ue_memory_validate
 ```
@@ -258,6 +259,7 @@ ue_memory_validate
 - Project Key 从已验证的固定 SQLite 索引读取，Tool 参数不能选择其他项目。
 - `ue_memory_add_rule` 固定写入 `projectRule + user-confirmed`，仅应在用户明确确认规则后调用。
 - `ue_memory_record_finding` 只接受 `tool-observed` 或 `model-inferred`，不能伪装成用户确认。
+- `ue_memory_record_task` 固定写入 `taskRecord + tool-observed`，要求最终结论、完整三类 Artifact 和至少一个稳定 Revision。
 - Finding 类型只允许 `projectFact`、`decisionRecord`、`knownIssue` 和 `runtimeEvidence`。
 - `ue_memory_search` 默认排除 `stale` 与 `superseded`，需要审计历史时必须显式请求对应状态。
 - `ue_memory_validate` 只读取 Server 固定索引中的 Revision，并可能把不匹配记录持久化为 `stale`。
@@ -266,10 +268,43 @@ ue_memory_validate
 启用 Memory 后的 Tool 数量：
 
 ```text
-Offline + Memory   11
-Live + Memory      29
-Workflow + Memory  31
-Combined + Memory  49
+Offline + Memory   12
+Live + Memory      30
+Workflow + Memory  32
+Combined + Memory  50
 ```
 
 未启用 Memory 时继续保持原有 5/23/25/43 Tool 契约。
+
+## 15. Task Outcome 契约
+
+`ue_memory_record_task` 用于保存一个已经结束并形成最终结论的工作任务，而不是保存进行中的临时计划。记录固定为：
+
+```text
+recordType = taskRecord
+sourceKind = tool-observed
+status = valid
+```
+
+允许的终态：
+
+```text
+succeeded
+failed
+rolledBack
+cancelled
+```
+
+每条 Task Outcome 必须同时绑定：
+
+```text
+patch
+backupManifest
+validationEvidence
+至少一个 revisionStable=true 的 Revision
+非空最终结论
+```
+
+Artifact 只保存稳定 ID 或工程相对引用，不复制文件内容，也不接受盘符绝对路径、POSIX 绝对路径或 `..` 父目录穿越。Project Scope 自动补全并且必须匹配 Server 固定 Project Key。
+
+Task Outcome 是不可变审计记录。后续出现新的最终结论时创建新记录，并通过 `ue_memory_mark_superseded` 显式取代旧记录；不得原地覆盖历史证据。

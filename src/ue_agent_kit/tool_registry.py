@@ -38,6 +38,7 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_memory_get", "memory", "read"),
     ToolDefinition("ue_memory_add_rule", "memory", "planning"),
     ToolDefinition("ue_memory_record_finding", "memory", "planning"),
+    ToolDefinition("ue_memory_record_task", "memory", "planning"),
     ToolDefinition("ue_memory_mark_superseded", "memory", "planning"),
     ToolDefinition("ue_memory_validate", "memory", "planning"),
     ToolDefinition("ue_editor_status", "live-read", "read", "editor.status"),
