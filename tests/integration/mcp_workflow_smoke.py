@@ -225,6 +225,31 @@ async def run_workflow(args: argparse.Namespace) -> dict[str, object]:
                     raise RuntimeError(f"Independent Commit verification failed: {verified}")
                 if verified["indexFreshness"]["state"] != "stale":
                     raise RuntimeError(f"Independent Verify incorrectly cleared stale state: {verified}")
+                evidence = verified.get("memoryTaskEvidence")
+                if not isinstance(evidence, dict) or evidence.get("tool") != "ue_memory_record_task":
+                    raise RuntimeError(f"Workflow Memory evidence handoff is missing: {verified}")
+                evidence_arguments = evidence.get("arguments")
+                if not isinstance(evidence_arguments, dict):
+                    raise RuntimeError(f"Workflow Memory evidence arguments are missing: {evidence}")
+                if evidence_arguments.get("patch_ref") != f"patch:{applied['patchDigest']}":
+                    raise RuntimeError(f"Workflow Patch evidence mismatch: {evidence}")
+                if evidence_arguments.get("backup_manifest_ref") != f"backup-manifest:{applied['manifestId']}":
+                    raise RuntimeError(f"Workflow Backup Manifest evidence mismatch: {evidence}")
+                if evidence_arguments.get("validation_evidence_ref") != f"validation-evidence:{verified['reportId']}":
+                    raise RuntimeError(f"Workflow Validation evidence mismatch: {evidence}")
+                if evidence_arguments.get("revision_set") != [
+                    {
+                        "assetPath": args.asset_path,
+                        "revision": applied["afterRevision"],
+                        "revisionStable": True,
+                    }
+                ]:
+                    raise RuntimeError(f"Workflow Revision evidence mismatch: {evidence}")
+                evidence_json = json.dumps(evidence, ensure_ascii=False)
+                if apply_receipt in evidence_json:
+                    raise RuntimeError("Workflow Memory evidence exposed the one-time Apply Receipt")
+                if str(args.work_root) in evidence_json or str(args.backup_root) in evidence_json:
+                    raise RuntimeError("Workflow Memory evidence exposed a configured local path")
 
                 rollback_dry = require_payload(
                     await session.call_tool(
@@ -305,6 +330,7 @@ async def run_workflow(args: argparse.Namespace) -> dict[str, object]:
         "applyReceiptIssued": True,
         "committedRevision": applied["afterRevision"],
         "independentCommitVerification": True,
+        "memoryTaskEvidenceVerified": True,
         "rollbackDryRunReceiptIssued": True,
         "invalidRollbackConfirmationRejected": True,
         "rollbackVerified": True,

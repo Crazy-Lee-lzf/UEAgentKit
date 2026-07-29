@@ -486,3 +486,18 @@ Persistent planning actions:
 `ue_memory_record_task` 固定写入 `taskRecord + tool-observed`，只接受终态 `succeeded`、`failed`、`rolledBack` 或 `cancelled`。它必须绑定最终结论、Patch、Backup Manifest、Validation Evidence 和至少一个稳定 Revision；Artifact 引用不能是绝对本机路径或父目录穿越路径。
 
 `ue_memory_validate` 使用当前固定 SQLite 的 `assets.revision_value`，仅更新 Memory Status，不修改索引或 Unreal Asset。完整数据模型和状态规则见 [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md)。
+
+## Workflow 与 Project Memory 证据交接
+
+同时启用 Workflow 和 Project Memory 时，`ue_get_capabilities.projectMemory` 声明：
+
+```text
+workflowEvidenceHandoff = true
+workflowEvidenceSourceTool = ue_verify_asset
+workflowEvidenceTargetTool = ue_memory_record_task
+workflowEvidenceArgumentsPath = memoryTaskEvidence.arguments
+```
+
+`ue_verify_asset` 只有在独立 UE 重载确认 Asset Path 与最终 Revision 完全一致后，才返回 `memoryTaskEvidence`。其 `arguments` 可以直接作为 `ue_memory_record_task` 参数。Agent 不得从日志文本、文件路径或会话 Receipt 自行重建证据。
+
+仅启用 Memory、未启用 Workflow 时，`workflowEvidenceHandoff=false`，不会暗示存在可验证的写入证据来源。

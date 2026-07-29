@@ -493,6 +493,57 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertTrue(verified["verified"])
         self.assertEqual(verified["actualRevision"], AFTER_REVISION)
         self.assertEqual(verified["indexFreshness"]["state"], "stale")
+        evidence = verified["memoryTaskEvidence"]
+        self.assertEqual(evidence["schemaVersion"], "1.0")
+        self.assertEqual(evidence["tool"], "ue_memory_record_task")
+        arguments = evidence["arguments"]
+        self.assertEqual(arguments["task_key"], f"patch:{plan['planId']}")
+        self.assertEqual(arguments["outcome"], "succeeded")
+        self.assertEqual(arguments["patch_ref"], f"patch:{applied['patchDigest']}")
+        self.assertEqual(
+            arguments["backup_manifest_ref"],
+            f"backup-manifest:{applied['manifestId']}",
+        )
+        self.assertEqual(
+            arguments["validation_evidence_ref"],
+            f"validation-evidence:{verified['reportId']}",
+        )
+        self.assertEqual(
+            arguments["revision_set"],
+            [
+                {
+                    "assetPath": ASSET_PATH,
+                    "revision": AFTER_REVISION,
+                    "revisionStable": True,
+                }
+            ],
+        )
+        self.assertEqual(
+            arguments["patch_details"],
+            {
+                "planId": plan["planId"],
+                "patchDigest": applied["patchDigest"],
+                "beforeRevision": BEFORE_REVISION,
+                "afterRevision": AFTER_REVISION,
+            },
+        )
+        self.assertEqual(
+            arguments["backup_manifest_details"],
+            {"manifestId": applied["manifestId"]},
+        )
+        self.assertEqual(
+            arguments["validation_evidence_details"],
+            {
+                "reportId": verified["reportId"],
+                "independentReload": True,
+                "verified": True,
+                "expectedRevision": AFTER_REVISION,
+                "actualRevision": AFTER_REVISION,
+            },
+        )
+        self.assertNotIn("applyReceipt", json.dumps(evidence, ensure_ascii=False))
+        self.assertNotIn(str(self.tool_root), json.dumps(evidence, ensure_ascii=False))
+        self.assertIn("memoryTaskEvidence.arguments", verified["nextStep"])
 
         rollback_dry = self.service.rollback_patch(applied["applyReceipt"])
         self.assertEqual(rollback_dry["mode"], "DryRun")

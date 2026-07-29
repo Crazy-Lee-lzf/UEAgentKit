@@ -101,7 +101,53 @@ class FakeWorkflowService:
         return {"ok": True, "tool": "ue_apply_patch", "planId": plan_id, "applyReceipt": "apply_test"}
 
     def verify_asset(self, apply_receipt):
-        return {"ok": True, "tool": "ue_verify_asset", "applyReceipt": apply_receipt, "verified": True}
+        report_id = "report_verify_test"
+        revision = f"sha256:{REVISION_A}"
+        return {
+            "ok": True,
+            "tool": "ue_verify_asset",
+            "applyReceipt": apply_receipt,
+            "verified": True,
+            "reportId": report_id,
+            "memoryTaskEvidence": {
+                "schemaVersion": "1.0",
+                "tool": "ue_memory_record_task",
+                "arguments": {
+                    "task_key": "patch:plan_test",
+                    "title": "Verified patch plan_test",
+                    "conclusion": (
+                        f"The committed asset {ASSET_A} was independently reloaded "
+                        f"and matched Revision {revision}."
+                    ),
+                    "outcome": "succeeded",
+                    "patch_ref": "patch:sha256:test",
+                    "backup_manifest_ref": "backup-manifest:plan_test.manifest.json",
+                    "validation_evidence_ref": f"validation-evidence:{report_id}",
+                    "revision_set": [
+                        {
+                            "assetPath": ASSET_A,
+                            "revision": revision,
+                            "revisionStable": True,
+                        }
+                    ],
+                    "scopes": [{"scopeType": "asset", "scopeKey": ASSET_A}],
+                    "confidence": 1.0,
+                    "patch_details": {"planId": "plan_test", "patchDigest": "sha256:test"},
+                    "backup_manifest_details": {"manifestId": "plan_test.manifest.json"},
+                    "validation_evidence_details": {
+                        "reportId": report_id,
+                        "independentReload": True,
+                        "verified": True,
+                        "expectedRevision": revision,
+                        "actualRevision": revision,
+                    },
+                    "details": {
+                        "workflowEvidenceSchemaVersion": "1.0",
+                        "workflowTool": "ue_verify_asset",
+                    },
+                },
+            },
+        }
 
     def get_asset_state(self, asset_path):
         return {
@@ -637,6 +683,8 @@ class McpServerTests(unittest.TestCase):
         self.assertFalse(memory_contract["arbitraryDatabaseArguments"])
         self.assertFalse(memory_contract["arbitraryProjectArguments"])
         self.assertFalse(memory_contract["vectorDatabase"])
+        self.assertFalse(memory_contract["workflowEvidenceHandoff"])
+        self.assertEqual(memory_contract["workflowEvidenceSourceTool"], "")
         self.assertEqual(capabilities["limits"]["memorySearchResults"], 100)
 
         _, project_status = asyncio.run(server.call_tool("ue_get_project_status", {}))
@@ -1039,6 +1087,55 @@ class McpServerTests(unittest.TestCase):
         self.assertFalse(offline_selection["ok"])
         self.assertEqual(offline_selection["error"]["code"], "live-editor-unavailable")
         self.assertTrue(offline_selection["error"]["retryable"])
+
+    @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
+    def test_fastmcp_workflow_memory_mode_hands_off_verified_evidence(self) -> None:
+        memory_service = ProjectMemoryService(
+            database_path=self.temp_root / "workflow-memory.sqlite3",
+            project_key="测试项目",
+        )
+        server = create_mcp_server(
+            self.database_path,
+            workflow_service=FakeWorkflowService(),
+            memory_service=memory_service,
+        )
+        tools = asyncio.run(server.list_tools())
+        self.assertEqual(
+            [tool.name for tool in tools],
+            tool_names_for_mode(workflow_enabled=True, memory_enabled=True),
+        )
+        self.assertEqual(len(tools), 32)
+
+        _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
+        memory_contract = capabilities["projectMemory"]
+        self.assertTrue(memory_contract["workflowEvidenceHandoff"])
+        self.assertEqual(memory_contract["workflowEvidenceSourceTool"], "ue_verify_asset")
+        self.assertEqual(memory_contract["workflowEvidenceTargetTool"], "ue_memory_record_task")
+        self.assertEqual(
+            memory_contract["workflowEvidenceArgumentsPath"],
+            "memoryTaskEvidence.arguments",
+        )
+
+        _, verified = asyncio.run(
+            server.call_tool("ue_verify_asset", {"apply_receipt": "apply_test"})
+        )
+        evidence = verified["memoryTaskEvidence"]
+        self.assertEqual(evidence["tool"], "ue_memory_record_task")
+        arguments = evidence["arguments"]
+        self.assertEqual(arguments["validation_evidence_ref"], "validation-evidence:report_verify_test")
+        self.assertNotIn("apply_receipt", arguments)
+        self.assertNotIn("database", json.dumps(arguments, ensure_ascii=False).lower())
+
+        _, recorded = asyncio.run(server.call_tool(evidence["tool"], arguments))
+        self.assertTrue(recorded["ok"])
+        record = recorded["record"]
+        self.assertEqual(record["recordType"], "taskRecord")
+        self.assertEqual(record["subjectKey"], "task:patch:plan_test")
+        self.assertEqual(record["status"], "valid")
+        self.assertEqual(
+            [artifact["artifactKind"] for artifact in record["artifacts"]],
+            ["patch", "backupManifest", "validationEvidence"],
+        )
 
     @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
     def test_fastmcp_combined_live_and_workflow_mode_has_exact_tool_order(self) -> None:

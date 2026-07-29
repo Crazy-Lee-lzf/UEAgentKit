@@ -342,3 +342,43 @@ integrity.snapshotSha256
 
 
 CLI 的 stdout/stderr 在入口处固定为 UTF-8，确保 Windows 管道、中文 Project Key 和 JSON 调用方不依赖系统代码页。`scripts\TestMemoryCli.cmd` 使用独立子进程验证该协议边界。
+
+## 17. Workflow Evidence Handoff
+
+成功的 `ue_verify_asset` 会返回：
+
+```json
+{
+  "memoryTaskEvidence": {
+    "schemaVersion": "1.0",
+    "tool": "ue_memory_record_task",
+    "arguments": {
+      "task_key": "patch:<planId>",
+      "title": "Verified patch <planId>",
+      "conclusion": "...",
+      "outcome": "succeeded",
+      "patch_ref": "patch:<patchDigest>",
+      "backup_manifest_ref": "backup-manifest:<manifestId>",
+      "validation_evidence_ref": "validation-evidence:<reportId>",
+      "revision_set": [
+        {
+          "assetPath": "/Game/...",
+          "revision": "sha256:...",
+          "revisionStable": true
+        }
+      ]
+    }
+  }
+}
+```
+
+`arguments` 与 `ue_memory_record_task` 的输入 Schema 完全一致。启用 Workflow 与 Project Memory 时，Agent 应把该对象原样传入目标 Tool，不得修改或自行构造 Patch、Backup Manifest、Validation Evidence 与 Revision 引用。
+
+证据来源：
+
+- `patch_ref` 来自已 Commit Plan 的 Canonical Patch SHA-256。
+- `backup_manifest_ref` 来自 Commit 创建并验证存在的 Backup Manifest ID。
+- `validation_evidence_ref` 来自独立 UE 重载导出的脱敏 `reportId`。
+- `revision_set` 来自独立重载后与 Commit 目标一致的最终 SHA-256 Revision。
+
+证据包不持久化一次性 `applyReceipt`，也不包含 Work Root、Backup Root、Project Path 或报告文件的绝对路径。只有独立验证成功后才生成 `outcome=succeeded` 的证据包；Dry Run、Commit 未验证或验证失败时不会生成成功 Task Evidence。

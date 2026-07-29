@@ -37,6 +37,7 @@ from .snapshot_lifecycle import (
 
 
 WORKFLOW_SCHEMA_VERSION = "1.0"
+MEMORY_TASK_EVIDENCE_SCHEMA_VERSION = "1.0"
 MAX_WORKFLOW_RECORDS = 128
 MAX_PROCESS_OUTPUT_CHARS = 16000
 HIGH_LEVEL_CHANGE_MODES = ("Plan", "DryRun")
@@ -121,6 +122,65 @@ class ApplyRecord:
     report: dict[str, Any]
     verified: bool = False
     rolled_back: bool = False
+
+
+def _verified_memory_task_evidence(
+    apply: ApplyRecord,
+    *,
+    validation_report_id: str,
+    actual_revision: str,
+) -> dict[str, Any]:
+    manifest_id = apply.manifest_path.name
+    return {
+        "schemaVersion": MEMORY_TASK_EVIDENCE_SCHEMA_VERSION,
+        "tool": "ue_memory_record_task",
+        "arguments": {
+            "task_key": f"patch:{apply.plan_id}",
+            "title": f"Verified patch {apply.plan_id}",
+            "conclusion": (
+                f"The committed asset {apply.asset_path} was independently reloaded "
+                f"and matched Revision {actual_revision}."
+            ),
+            "outcome": "succeeded",
+            "patch_ref": f"patch:{apply.plan_digest}",
+            "backup_manifest_ref": f"backup-manifest:{manifest_id}",
+            "validation_evidence_ref": f"validation-evidence:{validation_report_id}",
+            "revision_set": [
+                {
+                    "assetPath": apply.asset_path,
+                    "revision": actual_revision,
+                    "revisionStable": True,
+                }
+            ],
+            "scopes": [
+                {
+                    "scopeType": "asset",
+                    "scopeKey": apply.asset_path,
+                }
+            ],
+            "confidence": 1.0,
+            "patch_details": {
+                "planId": apply.plan_id,
+                "patchDigest": apply.plan_digest,
+                "beforeRevision": apply.before_revision,
+                "afterRevision": apply.after_revision,
+            },
+            "backup_manifest_details": {
+                "manifestId": manifest_id,
+            },
+            "validation_evidence_details": {
+                "reportId": validation_report_id,
+                "independentReload": True,
+                "verified": True,
+                "expectedRevision": apply.after_revision,
+                "actualRevision": actual_revision,
+            },
+            "details": {
+                "workflowEvidenceSchemaVersion": MEMORY_TASK_EVIDENCE_SCHEMA_VERSION,
+                "workflowTool": "ue_verify_asset",
+            },
+        },
+    }
 
 
 @dataclass
@@ -1569,6 +1629,12 @@ class PatchWorkflowService:
                 )
             apply.verified = True
             freshness = self.freshness.inspect_asset(apply.asset_path)
+            verification_report_id = _report_id("verify-export", output / "manifest.json")
+            memory_task_evidence = _verified_memory_task_evidence(
+                apply,
+                validation_report_id=verification_report_id,
+                actual_revision=actual_revision,
+            )
             return {
                 "schemaVersion": WORKFLOW_SCHEMA_VERSION,
                 "tool": "ue_verify_asset",
@@ -1580,9 +1646,14 @@ class PatchWorkflowService:
                 "verified": True,
                 "assetClass": canonical.get("assetClass", ""),
                 "packageDirty": revision.get("packageDirty", False) if isinstance(revision, dict) else False,
-                "reportId": _report_id("verify-export", output / "manifest.json"),
+                "reportId": verification_report_id,
+                "memoryTaskEvidence": memory_task_evidence,
                 "indexFreshness": freshness,
-                "nextStep": "Keep the change and refresh the asset index, or call ue_rollback_patch in DryRun mode before an explicit rollback Commit.",
+                "nextStep": (
+                    "If Project Memory is enabled, pass memoryTaskEvidence.arguments unchanged to "
+                    "ue_memory_record_task. Otherwise keep the change and refresh the asset index, "
+                    "or call ue_rollback_patch in DryRun mode before an explicit rollback Commit."
+                ),
             }
 
     def save_authorized_asset(

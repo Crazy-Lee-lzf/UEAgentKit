@@ -172,3 +172,17 @@ scripts\ue-agent.cmd memory export ^
 ```
 
 AI 使用搜索结果时默认忽略 `stale` 和 `superseded`。需要审查历史时显式传入 `--status stale` 或 `--status superseded`。审计导出中的 `contentSha256` 用于语义内容比较，`evidenceSha256` 绑定 Source、Revision Set 与 Artifact，`snapshotSha256` 绑定整份可移植快照。
+
+## 写入完成后的 Memory 记录
+
+启用 Workflow 与 Project Memory 时，完成写入后按固定顺序执行：
+
+```text
+ue_apply_patch
+ue_verify_asset
+ue_memory_record_task(memoryTaskEvidence.arguments)
+```
+
+只在 `ue_verify_asset.verified=true` 且返回 `memoryTaskEvidence` 时记录成功 Task。必须原样使用 `memoryTaskEvidence.arguments`；不要从自然语言总结中猜测 `patch_ref`、`backup_manifest_ref`、`validation_evidence_ref` 或 Revision。
+
+在开始相关任务前先用 `ue_memory_search` 查询 Valid 记录。默认不要把 `stale` 或 `superseded` 记录当作当前事实；需要历史审计时再显式请求这些状态。

@@ -87,9 +87,17 @@ def _server_instructions(
     )
     memory_text = (
         "The ue_memory_* tools use one persistent database and Project Key fixed at server startup; "
-        "Tool arguments cannot select another database or project. "
+        "Tool arguments cannot select another database or project. Query valid Project Memory before "
+        "planning related work and never treat stale or superseded records as current facts. "
         if memory_enabled
         else "Persistent Project Memory is not configured. "
+    )
+    memory_workflow_text = (
+        "After ue_verify_asset succeeds, call ue_memory_record_task with "
+        "memoryTaskEvidence.arguments unchanged; never invent or edit its Patch, Backup Manifest, "
+        "Validation Evidence, or Revision references. "
+        if memory_enabled and write_tools_enabled
+        else ""
     )
     if not write_tools_enabled:
         return "Read-only access to the UE Agent Kit SQLite index. " + base + live_text + memory_text + (
@@ -107,7 +115,9 @@ def _server_instructions(
         "They create a strict Plan by default and may run Plan plus Dry Run, but never Commit. Use ue_apply_patch only "
         "with the returned planId and one-time Dry Run receipt. The low-level ue_plan_patch remains available for "
         "registered Operations not covered by a high-level Tool. Tool arguments cannot choose filesystem paths, policies, projects, "
-        "engines, databases, Editor Bridge endpoints, or arbitrary Unreal commands. " + commit_text
+        "engines, databases, Editor Bridge endpoints, or arbitrary Unreal commands. "
+        + memory_workflow_text
+        + commit_text
     )
 
 
@@ -261,6 +271,16 @@ def _capabilities_response(
             "sourceKinds": ["user-confirmed", "tool-observed", "model-inferred"],
             "statuses": ["valid", "stale", "conflicted", "superseded", "unverified"],
             "revisionAware": True,
+            "workflowEvidenceHandoff": bool(memory_enabled and write_tools_enabled),
+            "workflowEvidenceSourceTool": (
+                "ue_verify_asset" if memory_enabled and write_tools_enabled else ""
+            ),
+            "workflowEvidenceTargetTool": (
+                "ue_memory_record_task" if memory_enabled and write_tools_enabled else ""
+            ),
+            "workflowEvidenceArgumentsPath": (
+                "memoryTaskEvidence.arguments" if memory_enabled and write_tools_enabled else ""
+            ),
             "vectorDatabase": False,
             "arbitraryDatabaseArguments": False,
             "arbitraryProjectArguments": False,
