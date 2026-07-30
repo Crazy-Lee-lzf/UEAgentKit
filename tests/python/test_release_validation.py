@@ -58,6 +58,12 @@ class ReleaseValidationTests(unittest.TestCase):
         self.assertIn("SHA256SUMS.txt", script)
         self.assertIn("release-manifest.json", script)
         self.assertIn("Get-FileHash", script)
+        self.assertIn('$TransientPluginDirectories = @("Intermediate", "Saved", "DerivedDataCache", "HostProject")', script)
+        self.assertIn("Transient plugin package directory remains after pruning", script)
+        self.assertIn('"Binaries\\Win64\\UnrealEditor-UEAgentKitEditor.dll"', script)
+        self.assertIn('"Binaries\\Win64\\UnrealEditor.modules"', script)
+        self.assertIn("$AllowedTopLevelNames", script)
+        self.assertIn("Unexpected top-level plugin package entries", script)
 
     def test_pyproject_declares_portable_build_and_dev_dependencies(self) -> None:
         pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")

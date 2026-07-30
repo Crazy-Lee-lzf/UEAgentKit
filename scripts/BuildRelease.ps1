@@ -70,9 +70,61 @@ $BuildPlugin = Join-Path $ToolRoot "scripts\BuildPlugin.ps1"
     -TargetPlatforms Win64
 if ($LASTEXITCODE -ne 0) { throw "UE5.6 UAT plugin packaging failed." }
 
+$TransientPluginDirectories = @("Intermediate", "Saved", "DerivedDataCache", "HostProject")
+foreach ($DirectoryName in $TransientPluginDirectories)
+{
+    $TransientPath = Join-Path $PluginPackage $DirectoryName
+    if (Test-Path -LiteralPath $TransientPath)
+    {
+        Remove-Item -LiteralPath $TransientPath -Recurse -Force
+    }
+}
+
 Copy-Item -LiteralPath (Join-Path $ToolRoot "LICENSE") -Destination (Join-Path $PluginPackage "LICENSE") -Force
 Copy-Item -LiteralPath (Join-Path $ToolRoot "docs\RELEASE_$Version.md") -Destination (Join-Path $PluginPackage "RELEASE_NOTES.md") -Force
 Copy-Item -LiteralPath (Join-Path $ToolRoot "docs\RELEASE_${Version}_EN.md") -Destination (Join-Path $PluginPackage "RELEASE_NOTES_EN.md") -Force
+
+foreach ($DirectoryName in $TransientPluginDirectories)
+{
+    if (Test-Path -LiteralPath (Join-Path $PluginPackage $DirectoryName))
+    {
+        throw "Transient plugin package directory remains after pruning: $DirectoryName"
+    }
+}
+$RequiredPluginFiles = @(
+    "UEAgentKit.uplugin",
+    "Binaries\Win64\UnrealEditor-UEAgentKitEditor.dll",
+    "Binaries\Win64\UnrealEditor.modules",
+    "LICENSE",
+    "RELEASE_NOTES.md",
+    "RELEASE_NOTES_EN.md"
+)
+foreach ($RelativePath in $RequiredPluginFiles)
+{
+    $RequiredPath = Join-Path $PluginPackage $RelativePath
+    if (!(Test-Path -LiteralPath $RequiredPath -PathType Leaf))
+    {
+        throw "Required plugin release file is missing: $RelativePath"
+    }
+}
+$PackagedPlugin = Get-Content -LiteralPath (Join-Path $PluginPackage "UEAgentKit.uplugin") -Raw | ConvertFrom-Json
+if ([string]$PackagedPlugin.VersionName -ne $Version)
+{
+    throw "Packaged plugin VersionName does not match release version: $($PackagedPlugin.VersionName)"
+}
+$AllowedTopLevelNames = @(
+    "Binaries", "Config", "Content", "Resources", "Shaders", "Source",
+    "LICENSE", "RELEASE_NOTES.md", "RELEASE_NOTES_EN.md", "UEAgentKit.uplugin"
+)
+$UnexpectedTopLevel = @(
+    Get-ChildItem -LiteralPath $PluginPackage -Force |
+        Where-Object { $AllowedTopLevelNames -notcontains $_.Name } |
+        Select-Object -ExpandProperty Name
+)
+if ($UnexpectedTopLevel.Count -ne 0)
+{
+    throw "Unexpected top-level plugin package entries: $($UnexpectedTopLevel -join ', ')"
+}
 
 $PluginZip = Join-Path $OutputDirectory "UEAgentKit-$Version-UE5.6-Win64.zip"
 Compress-Archive -LiteralPath $PluginPackage -DestinationPath $PluginZip -CompressionLevel Optimal
