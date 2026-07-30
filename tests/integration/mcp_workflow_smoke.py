@@ -16,9 +16,11 @@ SRC_ROOT = TOOL_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
+from ue_agent_kit.memory_reports import build_memory_audit_report  # noqa: E402
+from ue_agent_kit.memory_service import ProjectMemoryService  # noqa: E402
 from ue_agent_kit.tool_registry import tool_names_for_mode  # noqa: E402
 ASSET_PATH = "/Game/UEAgentKitWriteTests/ScalarRegression/DA_ScalarPatchTarget.DA_ScalarPatchTarget"
-EXPECTED_TOOLS = tool_names_for_mode(workflow_enabled=True)
+EXPECTED_TOOLS = tool_names_for_mode(workflow_enabled=True, memory_enabled=True)
 
 
 def sha256(path: Path) -> str:
@@ -55,6 +57,9 @@ async def run_workflow(args: argparse.Namespace) -> dict[str, object]:
             str(TOOL_ROOT / "scripts" / "RunMcp.ps1"),
             "-Database",
             str(args.database),
+            "-EnableProjectMemory",
+            "-MemoryDatabase",
+            str(args.memory_database),
             "-EnableWriteTools",
             "-EnableCommitTools",
             "-EngineRoot",
@@ -113,6 +118,14 @@ async def run_workflow(args: argparse.Namespace) -> dict[str, object]:
                     raise RuntimeError(f"High-level changes were not reported as available: {capabilities}")
                 if capabilities["highLevelChanges"]["defaultMode"] != "Plan":
                     raise RuntimeError(f"Unexpected high-level default mode: {capabilities}")
+                memory_contract = capabilities["projectMemory"]
+                if not memory_contract["configured"] or not memory_contract["workflowEvidenceHandoff"]:
+                    raise RuntimeError(f"Workflow Memory evidence handoff is unavailable: {capabilities}")
+                if memory_contract["workflowEvidenceSourceTools"] != [
+                    "ue_verify_asset",
+                    "ue_rollback_patch",
+                ]:
+                    raise RuntimeError(f"Workflow Memory source Tools mismatch: {capabilities}")
 
                 project_status = require_payload(
                     await session.call_tool("ue_get_project_status", {}),
@@ -239,7 +252,7 @@ async def run_workflow(args: argparse.Namespace) -> dict[str, object]:
                     raise RuntimeError(f"Workflow Validation evidence mismatch: {evidence}")
                 if evidence_arguments.get("revision_set") != [
                     {
-                        "assetPath": args.asset_path,
+                        "assetPath": ASSET_PATH,
                         "revision": applied["afterRevision"],
                         "revisionStable": True,
                     }
@@ -250,6 +263,16 @@ async def run_workflow(args: argparse.Namespace) -> dict[str, object]:
                     raise RuntimeError("Workflow Memory evidence exposed the one-time Apply Receipt")
                 if str(args.work_root) in evidence_json or str(args.backup_root) in evidence_json:
                     raise RuntimeError("Workflow Memory evidence exposed a configured local path")
+                commit_memory = require_payload(
+                    await session.call_tool(evidence["tool"], evidence_arguments),
+                    "ue_memory_record_task after Verify",
+                )
+                commit_memory_record = commit_memory["record"]
+                if commit_memory_record["status"] != "valid":
+                    raise RuntimeError(f"Verified Commit Task Record is not valid: {commit_memory}")
+                if commit_memory_record["details"]["taskOutcome"] != "succeeded":
+                    raise RuntimeError(f"Verified Commit Task outcome is invalid: {commit_memory}")
+                commit_memory_record_id = str(commit_memory_record["recordId"])
 
                 rollback_dry = require_payload(
                     await session.call_tool(
@@ -309,7 +332,7 @@ async def run_workflow(args: argparse.Namespace) -> dict[str, object]:
                     raise RuntimeError(f"Rollback Validation evidence mismatch: {rollback_evidence}")
                 if rollback_arguments.get("revision_set") != [
                     {
-                        "assetPath": args.asset_path,
+                        "assetPath": ASSET_PATH,
                         "revision": applied["beforeRevision"],
                         "revisionStable": True,
                     }
@@ -320,12 +343,62 @@ async def run_workflow(args: argparse.Namespace) -> dict[str, object]:
                     raise RuntimeError("Rollback Memory evidence exposed the one-time Apply Receipt")
                 if str(args.work_root) in rollback_evidence_json or str(args.backup_root) in rollback_evidence_json:
                     raise RuntimeError("Rollback Memory evidence exposed a configured local path")
+                rollback_memory = require_payload(
+                    await session.call_tool(rollback_evidence["tool"], rollback_arguments),
+                    "ue_memory_record_task after Rollback",
+                )
+                rollback_memory_record = rollback_memory["record"]
+                if rollback_memory_record["status"] != "valid":
+                    raise RuntimeError(f"Rollback Task Record is not valid: {rollback_memory}")
+                if rollback_memory_record["details"]["taskOutcome"] != "rolledBack":
+                    raise RuntimeError(f"Rollback Task outcome is invalid: {rollback_memory}")
+                rollback_memory_record_id = str(rollback_memory_record["recordId"])
+
+                memory_validation = require_payload(
+                    await session.call_tool("ue_memory_validate", {}),
+                    "ue_memory_validate after Rollback",
+                )
+                if memory_validation["staleRecordIds"] != [commit_memory_record_id]:
+                    raise RuntimeError(f"Commit Task was not invalidated after Rollback: {memory_validation}")
+                if rollback_memory_record_id not in memory_validation["checkedRecordIds"]:
+                    raise RuntimeError(f"Rollback Task Revision was not checked: {memory_validation}")
+                commit_memory_after = require_payload(
+                    await session.call_tool(
+                        "ue_memory_get",
+                        {"record_id": commit_memory_record_id},
+                    ),
+                    "ue_memory_get Commit Task after Rollback",
+                )
+                rollback_memory_after = require_payload(
+                    await session.call_tool(
+                        "ue_memory_get",
+                        {"record_id": rollback_memory_record_id},
+                    ),
+                    "ue_memory_get Rollback Task after Rollback",
+                )
+                if commit_memory_after["record"]["status"] != "stale":
+                    raise RuntimeError(f"Commit Task did not become stale: {commit_memory_after}")
+                if rollback_memory_after["record"]["status"] != "valid":
+                    raise RuntimeError(f"Rollback Task did not remain valid: {rollback_memory_after}")
+
                 restored_status = require_payload(
                     await session.call_tool("ue_get_project_status", {}),
                     "ue_get_project_status after Rollback",
                 )
                 if restored_status["freshness"]["state"] != "fresh":
                     raise RuntimeError(f"Project status did not return to fresh after Rollback: {restored_status}")
+
+    memory_service = ProjectMemoryService(
+        database_path=args.memory_database,
+        project_key=args.project.stem,
+    )
+    memory_audit = build_memory_audit_report(memory_service)
+    if memory_audit["recordCount"] != 2 or memory_audit["statusEventCount"] != 3:
+        raise RuntimeError(f"Workflow Memory audit counts are invalid: {memory_audit}")
+    if memory_audit["countsByStatus"] != {"stale": 1, "valid": 1}:
+        raise RuntimeError(f"Workflow Memory audit states are invalid: {memory_audit}")
+    if not memory_audit["integrity"]["allRecordDigestsVerified"]:
+        raise RuntimeError(f"Workflow Memory audit digest verification failed: {memory_audit}")
 
     package_final_hash = sha256(args.package_file)
     if package_final_hash != package_before_hash:
@@ -359,6 +432,12 @@ async def run_workflow(args: argparse.Namespace) -> dict[str, object]:
         "independentCommitVerification": True,
         "memoryTaskEvidenceVerified": True,
         "rollbackMemoryTaskEvidenceVerified": True,
+        "commitTaskRecordPersisted": True,
+        "rollbackTaskRecordPersisted": True,
+        "commitTaskInvalidatedAfterRollback": True,
+        "rollbackTaskRemainedValid": True,
+        "memoryAuditDigestVerified": True,
+        "memoryAuditSnapshotSha256": memory_audit["integrity"]["snapshotSha256"],
         "rollbackDryRunReceiptIssued": True,
         "invalidRollbackConfirmationRejected": True,
         "rollbackVerified": True,
@@ -373,6 +452,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--engine-root", type=Path, required=True)
     parser.add_argument("--project", type=Path, required=True)
     parser.add_argument("--database", type=Path, required=True)
+    parser.add_argument("--memory-database", type=Path, required=True)
     parser.add_argument("--policy", type=Path, required=True)
     parser.add_argument("--revision-export", type=Path, required=True)
     parser.add_argument("--work-root", type=Path, required=True)

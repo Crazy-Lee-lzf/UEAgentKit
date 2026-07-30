@@ -411,7 +411,7 @@ scripts\TestMcpWorkflow.cmd ^
   -ProjectPath "E:\Path\To\Project.uproject"
 ```
 
-完整测试使用隔离 Scalar Fixture，最终必须恢复测试前 `.uasset` SHA-256。
+完整测试使用隔离 Scalar Fixture，最终必须恢复测试前 `.uasset` SHA-256。启用 Workflow 与 Project Memory 后，它还必须持久化 verified Commit 与 rollback Task Record，验证 rollback 后旧 Commit Record 变为 `stale`、rollback Record 保持 `valid`、Memory Audit 摘要可重算，并确认 immutable SQLite Index 目录完全不变。
 
 DataTable Row 引用影响真实回归：
 

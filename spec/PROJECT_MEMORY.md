@@ -384,3 +384,5 @@ CLI 的 stdout/stderr 在入口处固定为 UTF-8，确保 Windows 管道、中�
 证据包不持久化一次性 `applyReceipt`，也不包含 Work Root、Backup Root、Project Path 或报告文件的绝对路径。只有独立验证成功后才生成 `outcome=succeeded` 的证据包；Dry Run、Commit 未验证或验证失败时不会生成成功 Task Evidence。
 
 成功的 rollback Commit 使用相同外层结构，但 `task_key=rollback:<planId>`、`outcome=rolledBack`、Revision Set 绑定恢复后的 pre-Commit Revision，Validation Artifact 同时记录脱敏 rollback Report ID 与独立 verification Report ID。rollback Dry Run、确认失败、恢复失败或 Revision 不匹配时不生成 rolledBack Evidence。
+
+`scripts\TestMcpWorkflow.cmd` 的真实 UE5.6 回归会在同一固定工程会话中记录 succeeded 与 rolledBack Task，随后运行 `ue_memory_validate`：Commit 后 Revision 在 rollback 后必须变为 `stale`，恢复 Revision 对应的 rolledBack Record 必须保持 `valid`。回归同时验证 Audit Snapshot SHA-256、Package SHA-256 恢复和 immutable Index 零修改。

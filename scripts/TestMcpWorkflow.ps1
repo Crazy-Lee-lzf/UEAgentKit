@@ -68,6 +68,7 @@ $FixtureDirectory = Join-Path $Output "Fixture"
 $FixtureReport = Join-Path $FixtureDirectory "fixture-report.json"
 $RevisionExport = Join-Path $Output "Revision"
 $Database = Join-Path $Output "Index\ueak.sqlite3"
+$MemoryDatabase = Join-Path $Output "Memory\project-memory.sqlite3"
 $Policy = Join-Path $Output "policy.json"
 $WorkRoot = Join-Path $Output "Workflow"
 $ErrorLog = Join-Path $Output "Logs\mcp-stderr.log"
@@ -154,6 +155,7 @@ try
         --engine-root $EngineRoot `
         --project $ProjectPath `
         --database $Database `
+        --memory-database $MemoryDatabase `
         --policy $Policy `
         --revision-export $RevisionExport `
         --work-root $WorkRoot `
