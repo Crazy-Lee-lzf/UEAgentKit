@@ -265,7 +265,7 @@ Live Validation 和 Automation 结果保留 Editor Bridge 返回的 `validationE
 
 ## Client 兼容契约
 
-0.5.5 提供 `scripts\TestMcpClients.cmd`，通过两个独立真实 `stdio` 会话验证：
+0.6.0 提供 `scripts\TestMcpClients.cmd`，通过两个独立真实 `stdio` 会话验证：
 
 ```text
 官方 Python MCP ClientSession

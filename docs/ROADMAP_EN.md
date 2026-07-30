@@ -1,8 +1,8 @@
 # UE Agent Kit Roadmap
 
-Updated: 2026-07-28
+Updated: 2026-07-30
 
-The latest published release is **0.5.5** for Unreal Engine 5.6. The 0.5.x daily-development scope is complete and in stable maintenance.
+The latest published release is **0.6.0** for Unreal Engine 5.6. Revision-aware Project Memory is complete and in stable maintenance; active development moves to 0.7.0 Context/Analysis.
 
 ## Direction
 
@@ -11,10 +11,10 @@ UE Agent Kit is evolving into an Unreal Engine project-intelligence layer for AI
 Current server modes:
 
 ```text
-Offline   5 tools
-Live      23 tools
-Workflow  25 tools
-Combined  43 tools
+Offline             5 tools (12 with Memory)
+Live               23 tools (30 with Memory)
+Workflow           25 tools (32 with Memory)
+Combined           43 tools (50 with Memory)
 ```
 
 ## Completed foundation
@@ -35,9 +35,9 @@ Version 0.5.5 closes the Live Editor, daily actions, controlled-write extensions
 
 Complete Blueprint Graph, Material Graph, Anim State Machine, Control Rig, Sequencer, Niagara writes, and arbitrary script execution remain out of scope for 0.5.x.
 
-## 0.6.0: Revision-aware project memory
+## 0.6.0: Revision-aware project memory (complete)
 
-Project facts, rules, decisions, known issues, task records, and runtime evidence must preserve source, scope, time, confidence, and associated Revision sets.
+Project facts, rules, decisions, known issues, task records, and runtime evidence preserve source, scope, time, confidence, and associated Revision sets.
 
 Requirements:
 

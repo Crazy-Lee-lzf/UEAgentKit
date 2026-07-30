@@ -6,9 +6,9 @@
 
 UE Agent Kit 是一套面向 Unreal Engine 的开源资产分析、索引与受控写入工具。它通过 UE Editor 插件导出项目资产目录、Asset Registry 元数据、依赖关系和 Blueprint 语义，再使用 Python CLI 与 SQLite 建立项目级索引，并通过 Policy、Revision、Dry Run 和备份保护显式写入。
 
-当前已发布版本为 **0.5.5**，支持 **Unreal Engine 5.6**。本版本完成 0.5.x 日常开发能力收口：受限 Live Editor、Daily Actions、四源资产状态、授权保存与索引刷新、DataTable/Data Asset/Material 扩展写入、验证证据绑定、单资产多 Operation 原子事务，以及可重复 Release Validation 与 CI。
+当前已发布版本为 **0.6.0**，支持 **Unreal Engine 5.6**。本版本新增 Revision-aware Project Memory：独立 SQLite/FTS5、六类可追溯记录、来源与状态机、Revision 自动失效、证据摘要、固定工程 MCP/CLI、可审计导出，以及 Workflow/rollback Task Evidence 闭环。
 
-> **发布状态**：0.5.x 已完成。当前模式为 Offline 5、Live 23、Workflow 25、Combined 43 Tool；下一阶段为 0.6.0 Revision-aware Project Memory。
+> **发布状态**：0.6.0 已完成。未启用 Memory 时保持 Offline 5、Live 23、Workflow 25、Combined 43 Tool；启用固定 Project Memory 后分别为 12、30、32、50 Tool。下一阶段为 0.7.0 Context/Analysis。
 
 > **AI Generated**：本项目的代码和文档主要由 AI 生成，并通过人工审查、UE 5.6 编译、自动化测试和真实工程回归验证。
 
@@ -234,7 +234,7 @@ scripts\TestMultiOperationTransactions.cmd ^
 
 当前支持四种 Blueprint Operation、标量 `setAssetProperty`、Data Asset 专用 `setAssetReferenceProperty` 与 `setAssetStructuredProperty`、四种 Material Instance 参数 Operation，以及 DataTable 字段和 Row 操作。每次执行仍严格限制为一个资产，但可在同一原子事务中包含 1–32 个兼容 Operation；多 Operation 会统一预校验、创建一次备份、编译/保存一次，并由一个 Manifest 记录全部 Operation。属性、引用目标、Material 参数和 DataTable 字段继续使用逐目标精确 Policy 授权。`setAssetStructuredProperty` 只替换顶层 Struct、Array、Set 或 Map，使用显式 `valueType` 包络；Struct 必须包含完整字段，Set/Map 必须按 Canonical JSON 唯一排序，并返回递归结构化 Diff。当前仍只接受没有独立 Package 侧文件的单文件资产。
 
-### 6. 启动 MCP Server（0.5.5）
+### 6. 启动 MCP Server（0.6.0）
 
 先安装可选 MCP 依赖并确认 SQLite 索引可读：
 
@@ -245,7 +245,7 @@ scripts\TestMcpStdio.cmd
 scripts\TestMcpClients.cmd
 ```
 
-0.5.5 可以连接固定工程的受限 Live Editor Bridge：
+0.6.0 可以连接固定工程的受限 Live Editor Bridge，并可选择启用 Revision-aware Project Memory：
 
 ```bat
 scripts\TestMcpLiveEditor.cmd ^
@@ -271,7 +271,7 @@ claude mcp add --transport stdio --scope project ue-agent-kit -- ^
 ### 7. 校验通用资产导出
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.5.5
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.6.0
 ```
 
 完整参数和安装说明见 [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md)。
@@ -303,12 +303,13 @@ Output\Blueprints\
 
 - [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md)：构建、安装、导出和查询。
 - [`docs/AI_USAGE.md`](docs/AI_USAGE.md)：AI 使用资产索引与 Blueprint 语义的方式。
+- [`docs/RELEASE_0.6.0.md`](docs/RELEASE_0.6.0.md)：Revision-aware Project Memory、证据绑定 Task、审计导出和真实 UE5.6 闭环。
 - [`docs/RELEASE_0.5.5.md`](docs/RELEASE_0.5.5.md)：0.5.x 日常开发能力、原子事务、验证证据与正式发布收口。
 - [`docs/RELEASE_0.5.1.md`](docs/RELEASE_0.5.1.md)：0.5.1 查询协议、高层安全写入、诊断和 Client 兼容矩阵。
 - [`docs/RELEASE_0.5.0.md`](docs/RELEASE_0.5.0.md)：0.5.0 固定项目 MCP 工作流发布说明。
 - [`docs/RELEASE_0.4.4.md`](docs/RELEASE_0.4.4.md)：0.4.4 正式发布范围、验证结果和升级说明。
 - [`CHANGELOG.md`](CHANGELOG.md)：版本变更摘要。
-- [`docs/ROADMAP.md`](docs/ROADMAP.md)：0.5.x 日常 MCP、0.6.0 Revision-aware Project Memory、后续分析与协作能力路线。
+- [`docs/ROADMAP.md`](docs/ROADMAP.md)：0.6.0 Revision-aware Project Memory、0.7.0 Context/Analysis 与后续协作能力路线。
 - [`spec/BPCTX_FORMAT.md`](spec/BPCTX_FORMAT.md)：BPCTX/1 格式规范。
 - [`spec/PATCH_SCHEMA.md`](spec/PATCH_SCHEMA.md)：声明式 Patch、Policy、Revision 和纯校验安全边界。
 - [`spec/BACKUP_AND_ROLLBACK.md`](spec/BACKUP_AND_ROLLBACK.md)：Backup Manifest、rollback、审计回执和恢复验证规范。

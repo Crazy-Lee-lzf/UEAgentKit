@@ -1,8 +1,8 @@
 # UE Agent Kit 路线图
 
-更新时间：2026-07-28
+更新时间：2026-07-30
 
-当前已发布版本为 **0.5.5**，支持 Unreal Engine 5.6。0.5.x 日常开发能力已经完成并进入稳定维护。
+当前已发布版本为 **0.6.0**，支持 Unreal Engine 5.6。Revision-aware Project Memory 已完成并进入稳定维护，当前开发主线转向 0.7.0 Context/Analysis。
 
 ## 总体方向
 
@@ -11,10 +11,10 @@ UE Agent Kit 的长期定位是面向 AI Agent 的 Unreal Engine 项目智能层
 当前 Server 模式：
 
 ```text
-Offline   5 Tool
-Live      23 Tool
-Workflow  25 Tool
-Combined  43 Tool
+Offline             5 Tool（Memory 12）
+Live               23 Tool（Memory 30）
+Workflow           25 Tool（Memory 32）
+Combined           43 Tool（Memory 50）
 ```
 
 ## 已完成基础
@@ -35,9 +35,9 @@ Combined  43 Tool
 
 完整 Blueprint Graph、Material Graph、Anim State Machine、Control Rig、Sequencer、Niagara 写入和任意脚本执行仍不属于 0.5.x 范围。
 
-## 0.6.0：Revision-aware Project Memory
+## 0.6.0：Revision-aware Project Memory（已完成）
 
-项目事实、规则、决策、Known Issue、Task Record 和 Runtime Evidence 必须记录来源、范围、时间、置信度和关联 Revision Set。
+项目事实、规则、决策、Known Issue、Task Record 和 Runtime Evidence 记录来源、范围、时间、置信度和关联 Revision Set。
 
 核心要求：
 

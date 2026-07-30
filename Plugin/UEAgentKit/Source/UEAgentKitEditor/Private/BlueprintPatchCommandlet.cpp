@@ -951,7 +951,7 @@ namespace BlueprintPatchCommandletPrivate
 
 		TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-		Report->SetStringField(TEXT("executorVersion"), TEXT("0.5.5"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.6.0"));
 		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 		Report->SetStringField(TEXT("patchId"), PatchId);
 		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
@@ -1319,7 +1319,7 @@ int32 UBlueprintPatchCommandlet::Main(const FString& Params)
 	const FString AfterRevision = HashPackageFile(Package);
 	const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 	Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-	Report->SetStringField(TEXT("executorVersion"), TEXT("0.5.5"));
+	Report->SetStringField(TEXT("executorVersion"), TEXT("0.6.0"));
 	Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 	Report->SetStringField(TEXT("patchId"), PatchId);
 	Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());

@@ -4,6 +4,8 @@ All notable changes to UE Agent Kit are documented here.
 
 ## Unreleased
 
+## 0.6.0 — revision-aware project memory
+
 - Added a real UE5.6 Workflow-to-Memory regression that persists verified Commit and rollback Task Records, invalidates the superseded Commit Revision after rollback, verifies the Memory audit digest, restores the package SHA-256, and leaves the immutable index unchanged.
 - Added a verified Workflow-to-Memory evidence handoff: `ue_verify_asset` now returns exact `ue_memory_record_task` arguments derived from the Patch digest, Backup Manifest, independent validation report, and final Revision.
 - Added the same evidence handoff for verified rollback Commit results, producing `outcome=rolledBack` with the restored Revision and rollback validation report IDs.

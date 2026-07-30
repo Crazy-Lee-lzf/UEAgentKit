@@ -52,7 +52,7 @@ namespace BlueprintContextCommandletPrivate
 	{
 		TSharedRef<FJsonObject> RootObject = MakeShared<FJsonObject>();
 		RootObject->SetStringField(TEXT("schemaVersion"), TEXT("1.1"));
-		RootObject->SetStringField(TEXT("exporterVersion"), TEXT("0.5.5"));
+		RootObject->SetStringField(TEXT("exporterVersion"), TEXT("0.6.0"));
 		RootObject->SetStringField(TEXT("engineVersion"), FEngineVersion::Current().ToString());
 		RootObject->SetStringField(TEXT("projectName"), FApp::GetProjectName());
 		RootObject->SetStringField(TEXT("createdUtc"), FDateTime::UtcNow().ToIso8601());

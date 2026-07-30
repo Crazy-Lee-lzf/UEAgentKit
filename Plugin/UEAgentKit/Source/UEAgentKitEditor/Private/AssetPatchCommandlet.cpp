@@ -2289,7 +2289,7 @@ namespace AssetPatchCommandletPrivate
 
 		TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-		Report->SetStringField(TEXT("executorVersion"), TEXT("0.5.5"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.6.0"));
 		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 		Report->SetStringField(TEXT("patchId"), PatchId);
 		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
@@ -2779,7 +2779,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			FMath::IsNearlyEqual(RestoredScalarValue, BeforeScalarValue, UE_SMALL_NUMBER);
 		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-		Report->SetStringField(TEXT("executorVersion"), TEXT("0.5.5"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.6.0"));
 		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 		Report->SetStringField(TEXT("patchId"), PatchId);
 		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
@@ -3029,7 +3029,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			RestoredVectorValue.Equals(BeforeVectorValue, UE_SMALL_NUMBER);
 		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-		Report->SetStringField(TEXT("executorVersion"), TEXT("0.5.5"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.6.0"));
 		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 		Report->SetStringField(TEXT("patchId"), PatchId);
 		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
@@ -3265,7 +3265,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		const bool bRestoredValueMatch = RestoredTextureValue == BeforeTextureValue;
 		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-		Report->SetStringField(TEXT("executorVersion"), TEXT("0.5.5"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.6.0"));
 		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 		Report->SetStringField(TEXT("patchId"), PatchId);
 		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
@@ -3477,7 +3477,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		const bool bRestoredValueMatch = RestoredSwitchValue == BeforeSwitchValue;
 		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-		Report->SetStringField(TEXT("executorVersion"), TEXT("0.5.5"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.6.0"));
 		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 		Report->SetStringField(TEXT("patchId"), PatchId);
 		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
@@ -3856,7 +3856,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		const FString AfterRevision = HashPackageFile(Package);
 		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-		Report->SetStringField(TEXT("executorVersion"), TEXT("0.5.5"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.6.0"));
 		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 		Report->SetStringField(TEXT("patchId"), PatchId);
 		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
@@ -4161,7 +4161,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 		const FString AfterRevision = HashPackageFile(Package);
 		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-		Report->SetStringField(TEXT("executorVersion"), TEXT("0.5.5"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.6.0"));
 		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 		Report->SetStringField(TEXT("patchId"), PatchId);
 		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
@@ -4381,7 +4381,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 			|| UEAgentKit::StructuredPropertyJson::JsonEqual(RestoredValue, BeforeValue);
 		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-		Report->SetStringField(TEXT("executorVersion"), TEXT("0.5.5"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.6.0"));
 		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 		Report->SetStringField(TEXT("patchId"), PatchId);
 		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
@@ -4576,7 +4576,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 				&& RestoredReferencePath.Equals(BeforeReferencePath, ESearchCase::CaseSensitive));
 		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-		Report->SetStringField(TEXT("executorVersion"), TEXT("0.5.5"));
+		Report->SetStringField(TEXT("executorVersion"), TEXT("0.6.0"));
 		Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 		Report->SetStringField(TEXT("patchId"), PatchId);
 		Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());
@@ -4762,7 +4762,7 @@ int32 UAssetPatchCommandlet::Main(const FString& Params)
 	const FString AfterRevision = HashPackageFile(Package);
 	const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 	Report->SetStringField(TEXT("schemaVersion"), TEXT("1.0"));
-	Report->SetStringField(TEXT("executorVersion"), TEXT("0.5.5"));
+	Report->SetStringField(TEXT("executorVersion"), TEXT("0.6.0"));
 	Report->SetStringField(TEXT("mode"), bCommit ? TEXT("Commit") : TEXT("DryRun"));
 	Report->SetStringField(TEXT("patchId"), PatchId);
 	Report->SetStringField(TEXT("projectName"), FApp::GetProjectName());

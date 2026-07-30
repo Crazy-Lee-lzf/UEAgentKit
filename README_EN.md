@@ -6,9 +6,9 @@
 
 UE Agent Kit is an open-source Unreal Engine asset analysis, indexing, and policy-gated patch toolkit. Its Editor plugin exports asset catalogs, Asset Registry metadata, dependencies, and Blueprint semantics; a Python CLI and SQLite provide a project-wide index, while Policy, Revision checks, dry runs, and backups protect explicit writes.
 
-The latest published release is **0.5.5** and targets **Unreal Engine 5.6**. This release closes the 0.5.x daily-development scope with the restricted Live Editor, daily actions, four-source asset state, authorized saves and index refresh, DataTable/Data Asset/Material write extensions, validation evidence, single-asset multi-operation transactions, and repeatable release validation and CI.
+The latest published release is **0.6.0** and targets **Unreal Engine 5.6**. This release adds Revision-aware Project Memory with independent SQLite/FTS5 storage, six traceable record types, provenance and status transitions, Revision invalidation, evidence digests, fixed-project MCP/CLI access, auditable export, and verified Workflow/rollback Task Evidence.
 
-> **Release status**: 0.5.x is complete. Current modes are Offline 5, Live 23, Workflow 25, and Combined 43 tools. The next stage is 0.6.0 Revision-aware Project Memory.
+> **Release status**: 0.6.0 is complete. Without Memory, Offline/Live/Workflow/Combined remain 5/23/25/43 tools; enabling fixed Project Memory changes them to 12/30/32/50. The next stage is 0.7.0 Context/Analysis.
 
 > **AI Generated**: Most code and documentation in this project are AI-generated and reviewed through human inspection, UE 5.6 compilation, automated tests, and real-project regression validation.
 
@@ -234,7 +234,7 @@ The regression applies two operations to a Data Asset and a Blueprint. Dry Run u
 
 The executor supports four Blueprint operations, scalar `setAssetProperty`, Data Asset-specific `setAssetReferenceProperty` and `setAssetStructuredProperty`, four Material Instance parameter operations, and DataTable field/row operations. One execution remains limited to one asset but may contain 1–32 compatible operations in one atomic transaction. Multi-operation execution pre-validates every target, creates one backup, compiles/saves once, and records all operations in one manifest. Exact Policy authorization remains per target. `setAssetStructuredProperty` replaces one top-level Struct, Array, Set, or Map through an explicit `valueType` envelope. Struct values must contain every field, while Set and Map values must be uniquely ordered by Canonical JSON; reports include a recursive structured diff. Only single-file packages without external package sidecars are accepted.
 
-### 6. Run the MCP server (0.5.5)
+### 6. Run the MCP server (0.6.0)
 
 Install the optional MCP dependency and validate the SQLite index:
 
@@ -245,7 +245,7 @@ scripts\TestMcpStdio.cmd
 scripts\TestMcpClients.cmd
 ```
 
-Version 0.5.5 can connect to a restricted fixed-project Live Editor Bridge:
+Version 0.6.0 can connect to a restricted fixed-project Live Editor Bridge and optionally enable Revision-aware Project Memory:
 
 ```bat
 scripts\TestMcpLiveEditor.cmd ^
@@ -271,7 +271,7 @@ Use `claude mcp list` or `/mcp` inside Claude Code to inspect the connection. Li
 ### 7. Validate the asset catalog
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.5.5
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.6.0
 ```
 
 See [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md) for installation and full command details.
@@ -303,12 +303,13 @@ Output\Blueprints\
 
 - [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md): build, install, export, and query instructions.
 - [`docs/AI_USAGE.md`](docs/AI_USAGE.md): using the asset index and Blueprint semantics with AI tools.
+- [`docs/RELEASE_0.6.0_EN.md`](docs/RELEASE_0.6.0_EN.md): Revision-aware Project Memory, evidence-bound tasks, audit export, and the real UE5.6 closure.
 - [`docs/RELEASE_0.5.5_EN.md`](docs/RELEASE_0.5.5_EN.md): 0.5.x daily-development capabilities, atomic transactions, validation evidence, and release closeout.
 - [`docs/RELEASE_0.5.1_EN.md`](docs/RELEASE_0.5.1_EN.md): 0.5.1 query contract, high-level safe changes, diagnostics, and client compatibility.
 - [`docs/RELEASE_0.5.0_EN.md`](docs/RELEASE_0.5.0_EN.md): 0.5.0 fixed-project MCP workflow release notes.
 - [`docs/RELEASE_0.4.4_EN.md`](docs/RELEASE_0.4.4_EN.md): 0.4.4 release scope, verification, and upgrade notes.
 - [`CHANGELOG.md`](CHANGELOG.md): version history summary.
-- [`docs/ROADMAP_EN.md`](docs/ROADMAP_EN.md): 0.5.x daily MCP and Live Editor work, followed by Revision-aware memory and analysis.
+- [`docs/ROADMAP_EN.md`](docs/ROADMAP_EN.md): Revision-aware memory in 0.6.0, Context/Analysis in 0.7.0, and later collaboration work.
 - [`spec/BPCTX_FORMAT.md`](spec/BPCTX_FORMAT.md): BPCTX/1 format specification.
 - [`spec/PATCH_SCHEMA.md`](spec/PATCH_SCHEMA.md): declarative patches, policy, revision checks, and validation-only safety boundaries.
 - [`spec/BACKUP_AND_ROLLBACK.md`](spec/BACKUP_AND_ROLLBACK.md): backup manifest, rollback receipt, and restore-verification contract.
