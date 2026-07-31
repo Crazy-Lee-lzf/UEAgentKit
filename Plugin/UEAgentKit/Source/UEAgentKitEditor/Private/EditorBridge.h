@@ -79,6 +79,7 @@ private:
 		const FString& Operation,
 		const FString& AssetPath,
 		const FString& PropertyPath,
+		const FString& ParameterName,
 		const TSharedPtr<class FJsonValue>& Value,
 		TSharedPtr<FJsonObject>& OutResult,
 		FString& OutErrorCode,

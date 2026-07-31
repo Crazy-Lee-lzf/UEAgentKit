@@ -12,6 +12,13 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
+#include "MaterialEditingLibrary.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialExpressionScalarParameter.h"
+#include "Materials/MaterialExpressionStaticSwitchParameter.h"
+#include "Materials/MaterialExpressionTextureSampleParameter2D.h"
+#include "Materials/MaterialExpressionVectorParameter.h"
+#include "Materials/MaterialInstanceConstant.h"
 #include "Misc/App.h"
 #include "Misc/EngineVersion.h"
 #include "Misc/FileHelper.h"
@@ -49,6 +56,9 @@ namespace WriteFixturePlanCommandletPrivate
 		FString ParentClassPath;
 		EBlueprintType BlueprintType = BPTYPE_Normal;
 		TMap<FString, TSharedPtr<FJsonValue>> ReferenceValues;
+		TMap<FString, TArray<FString>> MaterialParameters;
+		TMap<FString, TSharedPtr<FJsonValue>> MaterialValues;
+		FString ParentAsset;
 		TObjectPtr<UObject> SourceObject = nullptr;
 		TObjectPtr<UClass> ParentClass = nullptr;
 	};
@@ -250,6 +260,226 @@ namespace WriteFixturePlanCommandletPrivate
 			return nullptr;
 		}
 		return Asset;
+	}
+
+	UMaterial* CreateMaterialParentAssetFixture(
+		const FFixtureDefinition& Definition,
+		FString& OutError)
+	{
+		UPackage* Package = CreatePackage(*Definition.TargetAsset);
+		if (!Package)
+		{
+			OutError = FString::Printf(TEXT("Could not create package: %s"), *Definition.TargetAsset);
+			return nullptr;
+		}
+		const FString AssetName = FPackageName::GetLongPackageAssetName(Definition.TargetAsset);
+		UMaterial* Material = NewObject<UMaterial>(
+			Package,
+			FName(*AssetName),
+			RF_Public | RF_Standalone | RF_Transactional);
+		if (!Material)
+		{
+			OutError = FString::Printf(TEXT("Could not create material fixture: %s"), *Definition.TargetAsset);
+			return nullptr;
+		}
+		for (const TPair<FString, TArray<FString>>& TypeEntry : Definition.MaterialParameters)
+		{
+			for (const FString& ParameterName : TypeEntry.Value)
+			{
+				if (TypeEntry.Key.Equals(TEXT("Scalar"), ESearchCase::CaseSensitive))
+				{
+					UMaterialExpressionScalarParameter* Expression = NewObject<UMaterialExpressionScalarParameter>(
+						Material,
+						NAME_None,
+						RF_Transactional);
+					Expression->ParameterName = FName(*ParameterName);
+					Expression->DefaultValue = 0.5f;
+					Material->GetExpressionCollection().AddExpression(Expression);
+				}
+				else if (TypeEntry.Key.Equals(TEXT("Vector"), ESearchCase::CaseSensitive))
+				{
+					UMaterialExpressionVectorParameter* Expression = NewObject<UMaterialExpressionVectorParameter>(
+						Material,
+						NAME_None,
+						RF_Transactional);
+					Expression->ParameterName = FName(*ParameterName);
+					Expression->DefaultValue = FLinearColor(0.2f, 0.2f, 0.2f, 1.0f);
+					Material->GetExpressionCollection().AddExpression(Expression);
+				}
+				else if (TypeEntry.Key.Equals(TEXT("Texture"), ESearchCase::CaseSensitive))
+				{
+					UMaterialExpressionTextureSampleParameter2D* Expression = NewObject<UMaterialExpressionTextureSampleParameter2D>(
+						Material,
+						NAME_None,
+						RF_Transactional);
+					Expression->ParameterName = FName(*ParameterName);
+					Material->GetExpressionCollection().AddExpression(Expression);
+				}
+				else
+				{
+					UMaterialExpressionStaticSwitchParameter* Expression = NewObject<UMaterialExpressionStaticSwitchParameter>(
+						Material,
+						NAME_None,
+						RF_Transactional);
+					Expression->ParameterName = FName(*ParameterName);
+					Expression->DefaultValue = false;
+					Material->GetExpressionCollection().AddExpression(Expression);
+				}
+			}
+		}
+		const TArray<TObjectPtr<UMaterialExpression>>& Expressions = Material->GetExpressionCollection().Expressions;
+		if (!Expressions.IsEmpty())
+		{
+			Material->GetEditorOnlyData()->BaseColor.Expression = Expressions[0];
+			Material->GetEditorOnlyData()->BaseColor.Mask = 0;
+		}
+		FAssetRegistryModule::AssetCreated(Material);
+		Material->PreEditChange(nullptr);
+		Material->PostEditChange();
+		Package->MarkPackageDirty();
+		const FString Filename = GetPackageFilename(Definition.TargetAsset);
+		IFileManager::Get().MakeDirectory(*FPaths::GetPath(Filename), true);
+		FSavePackageArgs SaveArgs;
+		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+		SaveArgs.SaveFlags = SAVE_NoError;
+		SaveArgs.Error = GError;
+		if (!UPackage::SavePackage(Package, Material, *Filename, SaveArgs))
+		{
+			OutError = FString::Printf(TEXT("Could not save material fixture: %s"), *Filename);
+			return nullptr;
+		}
+		return Material;
+	}
+
+	UMaterialInstanceConstant* CreateMaterialAssetFixture(
+		const FFixtureDefinition& Definition,
+		FString& OutError)
+	{
+		UMaterialInterface* ParentMaterial = LoadObject<UMaterialInterface>(nullptr, *Definition.ParentAsset);
+		if (!ParentMaterial)
+		{
+			OutError = FString::Printf(TEXT("Parent material could not be loaded: %s"), *Definition.ParentAsset);
+			return nullptr;
+		}
+		UPackage* Package = CreatePackage(*Definition.TargetAsset);
+		if (!Package)
+		{
+			OutError = FString::Printf(TEXT("Could not create package: %s"), *Definition.TargetAsset);
+			return nullptr;
+		}
+		const FString AssetName = FPackageName::GetLongPackageAssetName(Definition.TargetAsset);
+		UMaterialInstanceConstant* Instance = NewObject<UMaterialInstanceConstant>(
+			Package,
+			FName(*AssetName),
+			RF_Public | RF_Standalone | RF_Transactional);
+		if (!Instance)
+		{
+			OutError = FString::Printf(TEXT("Could not create material instance fixture: %s"), *Definition.TargetAsset);
+			return nullptr;
+		}
+		Instance->Parent = ParentMaterial;
+		for (const TPair<FString, TSharedPtr<FJsonValue>>& Entry : Definition.MaterialValues)
+		{
+			FString Type;
+			FString ParameterName;
+			if (!Entry.Key.Split(TEXT(":"), &Type, &ParameterName)
+				|| ParameterName.IsEmpty() || !Entry.Value.IsValid())
+			{
+				OutError = TEXT("Material fixture value key must use Type:ParameterName form.");
+				return nullptr;
+			}
+			if (Type.Equals(TEXT("Scalar"), ESearchCase::CaseSensitive))
+			{
+				double Number = 0.0;
+				if (!Entry.Value->TryGetNumber(Number) || !FMath::IsFinite(Number))
+				{
+					OutError = FString::Printf(TEXT("Material scalar fixture value is invalid: %s"), *ParameterName);
+					return nullptr;
+				}
+				UMaterialEditingLibrary::SetMaterialInstanceScalarParameterValue(
+					Instance,
+					FName(*ParameterName),
+					static_cast<float>(Number),
+					EMaterialParameterAssociation::GlobalParameter);
+			}
+			else if (Type.Equals(TEXT("Vector"), ESearchCase::CaseSensitive))
+			{
+				const TSharedPtr<FJsonObject> Color = Entry.Value->AsObject();
+				double R = 0.0;
+				double G = 0.0;
+				double B = 0.0;
+				double A = 0.0;
+				if (!Color.IsValid()
+					|| !Color->TryGetNumberField(TEXT("r"), R)
+					|| !Color->TryGetNumberField(TEXT("g"), G)
+					|| !Color->TryGetNumberField(TEXT("b"), B)
+					|| !Color->TryGetNumberField(TEXT("a"), A))
+				{
+					OutError = FString::Printf(TEXT("Material vector fixture value is invalid: %s"), *ParameterName);
+					return nullptr;
+				}
+				UMaterialEditingLibrary::SetMaterialInstanceVectorParameterValue(
+					Instance,
+					FName(*ParameterName),
+					FLinearColor(
+						static_cast<float>(R),
+						static_cast<float>(G),
+						static_cast<float>(B),
+						static_cast<float>(A)),
+					EMaterialParameterAssociation::GlobalParameter);
+			}
+			else if (Type.Equals(TEXT("Texture"), ESearchCase::CaseSensitive))
+			{
+				FString TexturePath;
+				if (!Entry.Value->TryGetString(TexturePath))
+				{
+					OutError = FString::Printf(TEXT("Material texture fixture value is invalid: %s"), *ParameterName);
+					return nullptr;
+				}
+				UTexture* Texture = LoadObject<UTexture>(nullptr, *TexturePath);
+				if (!Texture)
+				{
+					OutError = FString::Printf(TEXT("Material texture fixture asset could not be loaded: %s"), *TexturePath);
+					return nullptr;
+				}
+				UMaterialEditingLibrary::SetMaterialInstanceTextureParameterValue(
+					Instance,
+					FName(*ParameterName),
+					Texture,
+					EMaterialParameterAssociation::GlobalParameter);
+			}
+			else
+			{
+				bool bValue = false;
+				if (!Entry.Value->TryGetBool(bValue))
+				{
+					OutError = FString::Printf(TEXT("Material static switch fixture value is invalid: %s"), *ParameterName);
+					return nullptr;
+				}
+				UMaterialEditingLibrary::SetMaterialInstanceStaticSwitchParameterValue(
+					Instance,
+					FName(*ParameterName),
+					bValue,
+					EMaterialParameterAssociation::GlobalParameter,
+					true);
+			}
+		}
+		FAssetRegistryModule::AssetCreated(Instance);
+		Instance->PreEditChange(nullptr);
+		Instance->PostEditChange();
+		Package->MarkPackageDirty();
+		const FString Filename = GetPackageFilename(Definition.TargetAsset);
+		IFileManager::Get().MakeDirectory(*FPaths::GetPath(Filename), true);
+		FSavePackageArgs SaveArgs;
+		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+		SaveArgs.SaveFlags = SAVE_NoError;
+		SaveArgs.Error = GError;
+		if (!UPackage::SavePackage(Package, Instance, *Filename, SaveArgs))
+		{
+			OutError = FString::Printf(TEXT("Could not save material instance fixture: %s"), *Filename);
+			return nullptr;
+		}
+		return Instance;
 	}
 
 	bool ApplyReferenceFixtureValues(
@@ -846,6 +1076,170 @@ int32 UWriteFixturePlanCommandlet::Main(const FString& Params)
 					BasePath + TEXT(".expectedClass"));
 			}
 		}
+		else if (Definition.Kind.Equals(TEXT("materialParentAsset"), ESearchCase::CaseSensitive))
+		{
+			if (!Definition.ExpectedClass.Equals(TEXT("/Script/Engine.Material"), ESearchCase::CaseSensitive))
+			{
+				AddError(
+					Errors,
+					TEXT("material-parent-class"),
+					TEXT("materialParentAsset fixtures require expectedClass /Script/Engine.Material."),
+					BasePath + TEXT(".expectedClass"));
+			}
+			const TSharedPtr<FJsonValue> ParametersField = Object->Values.FindRef(TEXT("parameters"));
+			const TSharedPtr<FJsonObject> ParametersObject = ParametersField.IsValid()
+				? ParametersField->AsObject()
+				: nullptr;
+			if (!ParametersObject.IsValid())
+			{
+				AddError(
+					Errors,
+					TEXT("material-parent-parameters"),
+					TEXT("materialParentAsset parameters must be an object."),
+					BasePath + TEXT(".parameters"));
+			}
+			else
+			{
+				for (const TPair<FString, TSharedPtr<FJsonValue>>& TypeEntry : ParametersObject->Values)
+				{
+					const FString ParameterPath = BasePath + TEXT(".parameters.") + TypeEntry.Key;
+					if (!TypeEntry.Key.Equals(TEXT("Scalar"), ESearchCase::CaseSensitive)
+						&& !TypeEntry.Key.Equals(TEXT("Vector"), ESearchCase::CaseSensitive)
+						&& !TypeEntry.Key.Equals(TEXT("Texture"), ESearchCase::CaseSensitive)
+						&& !TypeEntry.Key.Equals(TEXT("StaticSwitch"), ESearchCase::CaseSensitive))
+					{
+						AddError(
+							Errors,
+							TEXT("material-parent-parameter-type"),
+							TEXT("materialParentAsset parameter types must be Scalar, Vector, Texture, or StaticSwitch."),
+							ParameterPath);
+						continue;
+					}
+					const TArray<TSharedPtr<FJsonValue>>* NamesArray = nullptr;
+					if (!TypeEntry.Value.IsValid() || !TypeEntry.Value->TryGetArray(NamesArray) || NamesArray->IsEmpty())
+					{
+						AddError(
+							Errors,
+							TEXT("material-parent-parameter-type"),
+							TEXT("materialParentAsset parameter type must contain at least one parameter name."),
+							ParameterPath);
+						continue;
+					}
+					TArray<FString> ValidNames;
+					TSet<FString> SeenNames;
+					for (const TSharedPtr<FJsonValue>& NameValue : *NamesArray)
+					{
+						FString Name;
+						if (!NameValue.IsValid() || !NameValue->TryGetString(Name) || Name.IsEmpty() || Name.Len() > 128 || Name.Contains(TEXT(".")) || Name.Contains(TEXT("/")))
+						{
+							AddError(
+								Errors,
+								TEXT("material-parent-parameter-name"),
+								TEXT("Material parameter names must be non-empty strings of at most 128 characters without dots or slashes."),
+								ParameterPath);
+							continue;
+						}
+						if (SeenNames.Contains(Name))
+						{
+							AddError(
+								Errors,
+								TEXT("material-parent-parameter-name"),
+								TEXT("Material parameter names must be unique within a type."),
+								ParameterPath);
+							continue;
+						}
+						SeenNames.Add(Name);
+						ValidNames.Add(Name);
+					}
+					Definition.MaterialParameters.Add(TypeEntry.Key, MoveTemp(ValidNames));
+				}
+			}
+		}
+		else if (Definition.Kind.Equals(TEXT("materialAsset"), ESearchCase::CaseSensitive))
+		{
+			if (!Definition.ExpectedClass.Equals(
+					TEXT("/Script/Engine.MaterialInstanceConstant"),
+					ESearchCase::CaseSensitive))
+			{
+				AddError(
+					Errors,
+					TEXT("material-asset-class"),
+					TEXT("materialAsset fixtures require expectedClass /Script/Engine.MaterialInstanceConstant."),
+					BasePath + TEXT(".expectedClass"));
+			}
+			Object->TryGetStringField(TEXT("parentAsset"), Definition.ParentAsset);
+			Definition.ParentAsset = NormalizePackagePath(Definition.ParentAsset);
+			if (!IsReadableSourcePackage(Definition.ParentAsset)
+				|| Definition.ParentAsset.Equals(Definition.TargetAsset, ESearchCase::CaseSensitive))
+			{
+				AddError(
+					Errors,
+					TEXT("material-parent-invalid"),
+					TEXT("materialAsset parentAsset must be a different valid long package name."),
+					BasePath + TEXT(".parentAsset"));
+			}
+			const TSharedPtr<FJsonValue> ValuesField = Object->Values.FindRef(TEXT("values"));
+			if (ValuesField.IsValid())
+			{
+				const TSharedPtr<FJsonObject> ValuesObject = ValuesField->AsObject();
+				if (!ValuesObject.IsValid())
+				{
+					AddError(
+						Errors,
+						TEXT("material-values"),
+						TEXT("materialAsset values must be an object."),
+						BasePath + TEXT(".values"));
+				}
+				else
+				{
+					for (const TPair<FString, TSharedPtr<FJsonValue>>& TypeEntry : ValuesObject->Values)
+					{
+						const FString ValuesPath = BasePath + TEXT(".values.") + TypeEntry.Key;
+						if (!TypeEntry.Key.Equals(TEXT("Scalar"), ESearchCase::CaseSensitive)
+							&& !TypeEntry.Key.Equals(TEXT("Vector"), ESearchCase::CaseSensitive)
+							&& !TypeEntry.Key.Equals(TEXT("Texture"), ESearchCase::CaseSensitive)
+							&& !TypeEntry.Key.Equals(TEXT("StaticSwitch"), ESearchCase::CaseSensitive))
+						{
+							AddError(
+								Errors,
+								TEXT("material-values-type"),
+								TEXT("materialAsset value types must be Scalar, Vector, Texture, or StaticSwitch."),
+								ValuesPath);
+							continue;
+						}
+						const TSharedPtr<FJsonObject> TypeValues = TypeEntry.Value.IsValid()
+							? TypeEntry.Value->AsObject()
+							: nullptr;
+						if (!TypeValues.IsValid() || TypeValues->Values.IsEmpty())
+						{
+							AddError(
+								Errors,
+								TEXT("material-values-type"),
+								TEXT("materialAsset value type must contain at least one parameter value."),
+								ValuesPath);
+							continue;
+						}
+						for (const TPair<FString, TSharedPtr<FJsonValue>>& ParameterEntry : TypeValues->Values)
+						{
+							if (ParameterEntry.Key.IsEmpty() || ParameterEntry.Key.Len() > 128
+								|| ParameterEntry.Key.Contains(TEXT(".")) || ParameterEntry.Key.Contains(TEXT("/"))
+								|| !ParameterEntry.Value.IsValid())
+							{
+								AddError(
+									Errors,
+									TEXT("material-values-name"),
+									TEXT("Material value parameter names must be non-empty strings without dots or slashes."),
+									ValuesPath);
+								continue;
+							}
+							Definition.MaterialValues.Add(
+								TypeEntry.Key + TEXT(":") + ParameterEntry.Key,
+								ParameterEntry.Value);
+						}
+					}
+				}
+			}
+		}
 		else if (Definition.Kind.Equals(TEXT("blueprint"), ESearchCase::CaseSensitive))
 		{
 			FString BlueprintTypeText;
@@ -867,7 +1261,7 @@ int32 UWriteFixturePlanCommandlet::Main(const FString& Params)
 		}
 		else
 		{
-			AddError(Errors, TEXT("fixture-kind"), TEXT("kind must be duplicateAsset, scalarAsset, referenceAsset, structuredAsset, or blueprint."), BasePath + TEXT(".kind"));
+			AddError(Errors, TEXT("fixture-kind"), TEXT("kind must be duplicateAsset, scalarAsset, referenceAsset, structuredAsset, materialParentAsset, materialAsset, or blueprint."), BasePath + TEXT(".kind"));
 		}
 		Definitions.Add(MoveTemp(Definition));
 	}
@@ -880,6 +1274,15 @@ int32 UWriteFixturePlanCommandlet::Main(const FString& Params)
 				Errors,
 				TEXT("source-target-overlap"),
 				TEXT("A sourceAsset cannot also be a targetAsset in the same plan."),
+				Definition.Id);
+		}
+		if (Definition.Kind.Equals(TEXT("materialAsset"), ESearchCase::CaseSensitive)
+			&& !TargetPackages.Contains(Definition.ParentAsset))
+		{
+			AddError(
+				Errors,
+				TEXT("material-parent-kind"),
+				TEXT("materialAsset parentAsset must reference a materialParentAsset fixture in the same plan."),
 				Definition.Id);
 		}
 		const bool bExists = AssetSubsystem->DoesAssetExist(Definition.TargetAsset);
@@ -953,6 +1356,14 @@ int32 UWriteFixturePlanCommandlet::Main(const FString& Params)
 		else if (Definition.Kind.Equals(TEXT("structuredAsset"), ESearchCase::CaseSensitive))
 		{
 			CreatedAsset = CreateStructuredAssetFixture(Definition, CreateError);
+		}
+		else if (Definition.Kind.Equals(TEXT("materialParentAsset"), ESearchCase::CaseSensitive))
+		{
+			CreatedAsset = CreateMaterialParentAssetFixture(Definition, CreateError);
+		}
+		else if (Definition.Kind.Equals(TEXT("materialAsset"), ESearchCase::CaseSensitive))
+		{
+			CreatedAsset = CreateMaterialAssetFixture(Definition, CreateError);
 		}
 		else
 		{

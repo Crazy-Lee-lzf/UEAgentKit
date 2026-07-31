@@ -1,0 +1,124 @@
+{
+  "schemaVersion": "1.0",
+  "root": "/Game/UEAgentKitWriteTests/Materials",
+  "fixtures": [
+    {
+      "id": "material-texture-target",
+      "kind": "duplicateAsset",
+      "sourceAsset": "/Engine/EngineResources/DefaultTexture",
+      "targetAsset": "/Game/UEAgentKitWriteTests/Materials/T_TextureTarget",
+      "expectedClass": "/Script/Engine.Texture2D"
+    },
+    {
+      "id": "material-texture-alt-target",
+      "kind": "duplicateAsset",
+      "sourceAsset": "/Engine/EngineResources/DefaultTexture",
+      "targetAsset": "/Game/UEAgentKitWriteTests/Materials/T_TextureAlt",
+      "expectedClass": "/Script/Engine.Texture2D"
+    },
+    {
+      "id": "material-parent-source",
+      "kind": "materialParentAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/Materials/M_Source",
+      "expectedClass": "/Script/Engine.Material",
+      "parameters": {
+        "Scalar": ["EmissiveIntensity"],
+        "Vector": ["TintColor"],
+        "Texture": ["BaseTexture"],
+        "StaticSwitch": ["EnableDetail"]
+      }
+    },
+    {
+      "id": "material-parent-minimal",
+      "kind": "materialParentAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/Materials/M_Minimal",
+      "expectedClass": "/Script/Engine.Material",
+      "parameters": {
+        "Scalar": ["EmissiveIntensity"]
+      }
+    },
+    {
+      "id": "material-scalar-asset",
+      "kind": "materialAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/Materials/MI_Scalar",
+      "expectedClass": "/Script/Engine.MaterialInstanceConstant",
+      "parentAsset": "/Game/UEAgentKitWriteTests/Materials/M_Source",
+      "values": {
+        "Scalar": {
+          "EmissiveIntensity": 0.25
+        }
+      }
+    },
+    {
+      "id": "material-vector-asset",
+      "kind": "materialAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/Materials/MI_Vector",
+      "expectedClass": "/Script/Engine.MaterialInstanceConstant",
+      "parentAsset": "/Game/UEAgentKitWriteTests/Materials/M_Source",
+      "values": {
+        "Vector": {
+          "TintColor": {
+            "r": 0.0,
+            "g": 0.5,
+            "b": 0.25,
+            "a": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "material-texture-asset",
+      "kind": "materialAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/Materials/MI_Texture",
+      "expectedClass": "/Script/Engine.MaterialInstanceConstant",
+      "parentAsset": "/Game/UEAgentKitWriteTests/Materials/M_Source",
+      "values": {
+        "Texture": {
+          "BaseTexture": "/Game/UEAgentKitWriteTests/Materials/T_TextureTarget.T_TextureTarget"
+        }
+      }
+    },
+    {
+      "id": "material-switch-asset",
+      "kind": "materialAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/Materials/MI_Switch",
+      "expectedClass": "/Script/Engine.MaterialInstanceConstant",
+      "parentAsset": "/Game/UEAgentKitWriteTests/Materials/M_Source",
+      "values": {
+        "StaticSwitch": {
+          "EnableDetail": false
+        }
+      }
+    },
+    {
+      "id": "material-noop-asset",
+      "kind": "materialAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/Materials/MI_Noop",
+      "expectedClass": "/Script/Engine.MaterialInstanceConstant",
+      "parentAsset": "/Game/UEAgentKitWriteTests/Materials/M_Source",
+      "values": {
+        "Scalar": {
+          "EmissiveIntensity": 0.5
+        }
+      }
+    },
+    {
+      "id": "material-missing-parameter-asset",
+      "kind": "materialAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/Materials/MI_MissingParameter",
+      "expectedClass": "/Script/Engine.MaterialInstanceConstant",
+      "parentAsset": "/Game/UEAgentKitWriteTests/Materials/M_Minimal",
+      "values": {
+        "Scalar": {
+          "EmissiveIntensity": 0.75
+        }
+      }
+    },
+    {
+      "id": "material-non-instance-asset",
+      "kind": "scalarAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/Materials/DA_ScalarNonMaterial",
+      "expectedClass": "/Script/UEAgentKitEditor.UEAgentKitScalarWriteFixtureAsset"
+    }
+  ]
+}

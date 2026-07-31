@@ -250,17 +250,30 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertIn("FScopedTransaction", live_write_frame)
         self.assertIn("Asset->Modify()", live_write_frame)
-        self.assertIn("PostEditChangeProperty", live_write_frame)
         self.assertIn("MarkPackageDirty", live_write_frame)
+        self.assertIn("CaptureSnapshot", live_write_frame)
+        self.assertIn("IO.RestoreSnapshot()", live_write_frame)
+        self.assertIn("IO.NotifyRestored()", live_write_frame)
+        self.assertIn("IO.NotifyChanged()", live_write_frame)
         self.assertIn("Property->ArrayDim != 1", live_write)
         self.assertIn("Live Editor writes do not support native fixed-array properties.", live_write)
         self.assertIn("RunLiveWriteTransaction", live_write)
+        # The per-target change notification policy lives in the handler IO classes:
+        # scalar/reference/structured notify via PostEditChangeProperty, material
+        # parameters via the Material Editing Library (which already marks Dirty and
+        # refreshes the material instance).
+        self.assertIn("PostEditChangeProperty", live_write)
+        self.assertIn("TryApplyMaterialParameterLive", live_write)
+        self.assertIn("SetMaterialInstanceScalarParameterValue", live_write)
+        self.assertIn("SetMaterialInstanceStaticSwitchParameterValue", live_write)
+        self.assertIn("live-editor-write-material-parameter-not-found", live_write)
+        self.assertNotIn("SavePackage", live_write)
         noop_branch = live_write_frame.split("IO.SemanticEqual(BeforeValue, AfterValue))", 1)[1]
-        # A structured no-op must restore the deep-copied snapshot before restoring the
-        # Dirty flag and cancelling the transaction, because ImportValue may clear and
-        # rebuild Array/Set/Map containers even for canonically identical values.
+        # A no-op must restore the captured snapshot before restoring the Dirty flag
+        # and cancelling the transaction, because the apply path may already have
+        # cleared and rebuilt containers or parameter entries for identical values.
         self.assertLess(
-            noop_branch.index("Snapshot.Restore(Context.ValueAddress)"),
+            noop_branch.index("IO.RestoreSnapshot()"),
             noop_branch.index("Transaction.Cancel()"),
         )
         self.assertLess(

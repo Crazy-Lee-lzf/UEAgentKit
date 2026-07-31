@@ -30,6 +30,8 @@ ASSET_CLASS = "/Script/UEAgentKitEditor.UEAgentKitScalarWriteFixtureAsset"
 REFERENCE_ASSET_PATH = "/Game/UEAgentKitWriteTests/References/DA_ReferenceLiveTarget.DA_ReferenceLiveTarget"
 REFERENCE_ASSET_CLASS = "/Script/UEAgentKitEditor.UEAgentKitReferenceWriteFixtureAsset"
 STRUCTURED_ASSET_PATH = "/Game/UEAgentKitWriteTests/Structured/DA_StructuredLiveTarget.DA_StructuredLiveTarget"
+MATERIAL_ASSET_PATH = "/Game/UEAgentKitWriteTests/Materials/MI_LiveTarget.MI_LiveTarget"
+MATERIAL_ASSET_CLASS = "/Script/Engine.MaterialInstanceConstant"
 STRUCTURED_ASSET_CLASS = "/Script/UEAgentKitEditor.UEAgentKitStructuredWriteFixtureAsset"
 DATA_TABLE_PATH = "/Game/UEAgentKitWriteTests/Tables/DT_Fixture.DT_Fixture"
 DATA_TABLE_CLASS = "/Script/Engine.DataTable"
@@ -72,6 +74,16 @@ class FakeIndexService:
                 "asset": {
                     "asset_path": STRUCTURED_ASSET_PATH,
                     "asset_class": STRUCTURED_ASSET_CLASS,
+                    "revision_value": BEFORE_REVISION,
+                },
+            }
+        if asset_path == MATERIAL_ASSET_PATH:
+            return {
+                "found": True,
+                "ok": True,
+                "asset": {
+                    "asset_path": MATERIAL_ASSET_PATH,
+                    "asset_class": MATERIAL_ASSET_CLASS,
                     "revision_value": BEFORE_REVISION,
                 },
             }
@@ -985,6 +997,188 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertEqual(bridge.calls[0][0], "editor.applyAssetPropertyLive")
         self.assertEqual(bridge.calls[0][1]["operation"], "setAssetStructuredProperty")
         self.assertEqual(bridge.calls[0][1]["propertyPath"], "StructValue")
+
+    def test_live_material_parameter_write_passes_parameter_name_and_value(self) -> None:
+        material_class = MATERIAL_ASSET_CLASS
+        material_path = MATERIAL_ASSET_PATH
+        write_json(
+            self.policy_path,
+            {
+                "schemaVersion": "1.0",
+                "validationEnabled": True,
+                "commitEnabled": True,
+                "allowedProjectNames": [PROJECT],
+                "allowedAssetRoots": ["/Game/UEAgentKitWriteTests"],
+                "allowedReferenceRoots": ["/Game/UEAgentKitWriteTests/Materials"],
+                "allowedReferenceClasses": ["/Script/Engine.Texture2D"],
+                "allowedOperations": [
+                    "setMaterialInstanceScalarParameter",
+                    "setMaterialInstanceVectorParameter",
+                    "setMaterialInstanceTextureParameter",
+                    "setMaterialInstanceStaticSwitchParameter",
+                ],
+                "allowedAssetClasses": [material_class],
+                "allowedAssetProperties": [],
+                "allowedMaterialParameters": [
+                    f"{material_class}#Scalar#EmissiveIntensity",
+                    f"{material_class}#Vector#TintColor",
+                ],
+                "allowedDataTableFields": [],
+                "requireRevision": True,
+                "rejectDirtyPackages": True,
+                "maxAssetsPerPatch": 1,
+                "maxOperationsPerAsset": 1,
+                "maxValueBytes": 65536,
+            },
+        )
+        write_json(
+            self.revision_export / "canonical" / "material_asset.json",
+            {
+                "projectName": PROJECT,
+                "assetPath": material_path,
+                "packageName": material_path.split(".", 1)[0],
+                "assetClass": material_class,
+                "revision": {"available": True, "packageDirty": False, "value": BEFORE_REVISION},
+                "assetDetails": {
+                    "type": "material-instance",
+                    "properties": [],
+                },
+            },
+        )
+
+        class LiveMaterialWriteService:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict[str, Any]]] = []
+
+            def call_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+                self.calls.append((method, params))
+                return {
+                    "action": "apply-asset-property-live",
+                    "operation": "setMaterialInstanceScalarParameter",
+                    "assetPath": material_path,
+                    "parameterName": "EmissiveIntensity",
+                    "parameterType": "Scalar",
+                    "parameterAssociation": "Global",
+                    "valueKind": "material-scalar",
+                    "beforeValue": 0.25,
+                    "afterValue": 0.75,
+                    "changed": True,
+                    "transactionRecorded": True,
+                    "transactionTitle": "UE Agent Kit: Set Material Instance Parameter",
+                    "assetOpen": True,
+                    "loadedByBridge": False,
+                    "packageDirtyBefore": False,
+                    "packageDirtyAfter": True,
+                    "dirtyBefore": False,
+                    "dirtyAfter": True,
+                    "saved": False,
+                    "editorSessionId": "session-1",
+                }
+
+        bridge = LiveMaterialWriteService()
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=FakeFreshnessTracker(),
+            live_editor_service=bridge,
+        )
+        plan = service.plan_patch(
+            asset_path=material_path,
+            operation="setMaterialInstanceScalarParameter",
+            target={"parameterName": "EmissiveIntensity"},
+            value=0.75,
+            description="Live material write test",
+        )
+        with self.assertRaises(WorkflowError) as invalid:
+            service.apply_asset_property_live(plan["planId"], "LIVE APPLY wrong")
+        self.assertEqual(invalid.exception.code, "live-editor-write-confirmation-required")
+        self.assertEqual(bridge.calls, [])
+
+        result = service.apply_asset_property_live(
+            plan["planId"],
+            f"LIVE APPLY {plan['planId']}",
+        )
+        self.assertEqual(result["mode"], "LiveApply")
+        self.assertEqual(result["operation"], "setMaterialInstanceScalarParameter")
+        self.assertEqual(result["valueKind"], "material-scalar")
+        self.assertEqual(result["propertyPath"], None)
+        self.assertEqual(result["parameterName"], "EmissiveIntensity")
+        self.assertTrue(result["changed"])
+        self.assertTrue(result["undoAvailableInEditor"])
+        self.assertFalse(result["saved"])
+        self.assertFalse(result["diskRevisionChanged"])
+        self.assertEqual(
+            bridge.calls,
+            [
+                (
+                    "editor.applyAssetPropertyLive",
+                    {
+                        "operation": "setMaterialInstanceScalarParameter",
+                        "assetPath": material_path,
+                        "value": 0.75,
+                        "parameterName": "EmissiveIntensity",
+                    },
+                )
+            ],
+        )
+
+    def test_live_material_parameter_write_requires_parameter_name(self) -> None:
+        material_class = MATERIAL_ASSET_CLASS
+        material_path = MATERIAL_ASSET_PATH
+        write_json(
+            self.policy_path,
+            {
+                "schemaVersion": "1.0",
+                "validationEnabled": True,
+                "commitEnabled": True,
+                "allowedProjectNames": [PROJECT],
+                "allowedAssetRoots": ["/Game/UEAgentKitWriteTests"],
+                "allowedReferenceRoots": [],
+                "allowedReferenceClasses": [],
+                "allowedOperations": ["setMaterialInstanceVectorParameter"],
+                "allowedAssetClasses": [material_class],
+                "allowedAssetProperties": [],
+                "allowedMaterialParameters": [f"{material_class}#Vector#TintColor"],
+                "allowedDataTableFields": [],
+                "requireRevision": True,
+                "rejectDirtyPackages": True,
+                "maxAssetsPerPatch": 1,
+                "maxOperationsPerAsset": 1,
+                "maxValueBytes": 65536,
+            },
+        )
+        write_json(
+            self.revision_export / "canonical" / "material_asset.json",
+            {
+                "projectName": PROJECT,
+                "assetPath": material_path,
+                "packageName": material_path.split(".", 1)[0],
+                "assetClass": material_class,
+                "revision": {"available": True, "packageDirty": False, "value": BEFORE_REVISION},
+                "assetDetails": {
+                    "type": "material-instance",
+                    "properties": [],
+                },
+            },
+        )
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=FakeFreshnessTracker(),
+            live_editor_service=object(),
+        )
+        plan = service.plan_patch(
+            asset_path=material_path,
+            operation="setMaterialInstanceVectorParameter",
+            target={"parameterName": "TintColor"},
+            value={"r": 1.0, "g": 0.5, "b": 0.25, "a": 1.0},
+        )
+        service._plans[plan["planId"]].patch["assets"][0]["operations"][0]["target"] = {"other": "field"}
+        with self.assertRaises(WorkflowError) as rejected:
+            service.apply_asset_property_live(plan["planId"], f"LIVE APPLY {plan['planId']}")
+        self.assertEqual(rejected.exception.code, "plan-tampered")
 
     def test_live_write_tool_count_and_names_are_unchanged(self) -> None:
         names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)

@@ -43,6 +43,17 @@ namespace UEAgentKitLiveWrite
 		Property->CopyCompleteValue(Destination, Storage);
 	}
 
+	void FLiveWriteSnapshot::Reset()
+	{
+		if (Property != nullptr && Storage != nullptr)
+		{
+			Property->DestroyValue(Storage);
+			FMemory::Free(Storage);
+			Property = nullptr;
+			Storage = nullptr;
+		}
+	}
+
 	bool RunLiveWriteTransaction(
 		const FLiveWriteContext& Context,
 		ILiveWriteValueIO& IO,
@@ -50,7 +61,7 @@ namespace UEAgentKitLiveWrite
 		FString& OutErrorCode,
 		FString& OutErrorMessage)
 	{
-		if (Context.Asset == nullptr || Context.Package == nullptr || Context.Property == nullptr || Context.ValueAddress == nullptr)
+		if (Context.Asset == nullptr || Context.Package == nullptr)
 		{
 			OutErrorCode = TEXT("live-editor-write-apply-failed");
 			OutErrorMessage = TEXT("The live write transaction received an invalid target.");
@@ -60,51 +71,59 @@ namespace UEAgentKitLiveWrite
 		const bool bPackageDirtyBefore = Context.Package->IsDirty();
 		OutEvidence.bPackageDirtyBefore = bPackageDirtyBefore;
 
-		TSharedPtr<FJsonValue> BeforeValue;
-		if (!IO.ReadBefore(Context.Property, Context.ValueAddress, BeforeValue, OutErrorCode, OutErrorMessage))
+		if (!IO.CaptureSnapshot())
 		{
+			OutErrorCode = TEXT("live-editor-write-apply-failed");
+			OutErrorMessage = TEXT("Could not capture the live write target snapshot.");
+			return false;
+		}
+		if (!IO.IsSnapshotValid())
+		{
+			IO.ReleaseSnapshot();
+			OutErrorCode = TEXT("live-editor-write-apply-failed");
+			OutErrorMessage = TEXT("The live write target snapshot is not valid.");
+			return false;
+		}
+
+		TSharedPtr<FJsonValue> BeforeValue;
+		if (!IO.ReadBefore(BeforeValue, OutErrorCode, OutErrorMessage))
+		{
+			IO.ReleaseSnapshot();
 			return false;
 		}
 		OutEvidence.BeforeValue = BeforeValue;
 
-		FLiveWriteSnapshot Snapshot;
-		if (!Snapshot.Capture(Context.Property, Context.ValueAddress))
-		{
-			OutErrorCode = TEXT("live-editor-write-apply-failed");
-			OutErrorMessage = TEXT("Could not allocate the live write property snapshot.");
-			return false;
-		}
-
 		FScopedTransaction Transaction(FText::FromString(Context.TransactionTitle));
 		Context.Asset->Modify();
 
-		if (!IO.ApplyValue(Context.Property, Context.ValueAddress, Context.Value, OutErrorCode, OutErrorMessage))
+		if (!IO.ApplyValue(Context.Value, OutErrorCode, OutErrorMessage))
 		{
-			Snapshot.Restore(Context.ValueAddress);
-			FPropertyChangedEvent RestoreEvent(Context.Property, EPropertyChangeType::ValueSet);
-			Context.Asset->PostEditChangeProperty(RestoreEvent);
+			IO.RestoreSnapshot();
+			IO.NotifyRestored();
 			Context.Package->SetDirtyFlag(bPackageDirtyBefore);
 			Transaction.Cancel();
+			IO.ReleaseSnapshot();
 			return false;
 		}
 
 		TSharedPtr<FJsonValue> AfterValue;
-		if (!IO.ReadAfter(Context.Property, Context.ValueAddress, Context.Value, AfterValue, OutErrorCode, OutErrorMessage))
+		if (!IO.ReadAfter(Context.Value, AfterValue, OutErrorCode, OutErrorMessage))
 		{
-			Snapshot.Restore(Context.ValueAddress);
-			FPropertyChangedEvent RestoreEvent(Context.Property, EPropertyChangeType::ValueSet);
-			Context.Asset->PostEditChangeProperty(RestoreEvent);
+			IO.RestoreSnapshot();
+			IO.NotifyRestored();
 			Context.Package->SetDirtyFlag(bPackageDirtyBefore);
 			Transaction.Cancel();
+			IO.ReleaseSnapshot();
 			return false;
 		}
 		OutEvidence.AfterValue = AfterValue;
 
 		if (IO.SemanticEqual(BeforeValue, AfterValue))
 		{
-			Snapshot.Restore(Context.ValueAddress);
+			IO.RestoreSnapshot();
 			Context.Package->SetDirtyFlag(bPackageDirtyBefore);
 			Transaction.Cancel();
+			IO.ReleaseSnapshot();
 			OutEvidence.bChanged = false;
 			OutEvidence.bTransactionRecorded = false;
 			OutEvidence.TransactionTitle = FString();
@@ -114,21 +133,21 @@ namespace UEAgentKitLiveWrite
 			return true;
 		}
 
-		FPropertyChangedEvent ChangedEvent(Context.Property, EPropertyChangeType::ValueSet);
-		Context.Asset->PostEditChangeProperty(ChangedEvent);
+		IO.NotifyChanged();
 		Context.Asset->MarkPackageDirty();
 		if (!Context.Package->IsDirty())
 		{
-			Snapshot.Restore(Context.ValueAddress);
-			FPropertyChangedEvent RestoreEvent(Context.Property, EPropertyChangeType::ValueSet);
-			Context.Asset->PostEditChangeProperty(RestoreEvent);
+			IO.RestoreSnapshot();
+			IO.NotifyRestored();
 			Context.Package->SetDirtyFlag(bPackageDirtyBefore);
 			Transaction.Cancel();
+			IO.ReleaseSnapshot();
 			OutErrorCode = TEXT("live-editor-write-apply-failed");
 			OutErrorMessage = TEXT("The Editor did not confirm the changed Dirty package state.");
 			return false;
 		}
 
+		IO.ReleaseSnapshot();
 		OutEvidence.bChanged = true;
 		OutEvidence.bTransactionRecorded = true;
 		OutEvidence.TransactionTitle = Context.TransactionTitle;

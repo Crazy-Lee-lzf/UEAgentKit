@@ -12,6 +12,7 @@ _MAX_FIXTURES = 64
 _PACKAGE_RE = re.compile(r"^/[A-Za-z0-9_][A-Za-z0-9_/-]*[A-Za-z0-9_]$")
 _SCRIPT_CLASS_RE = re.compile(r"^/Script/[A-Za-z0-9_]+\.[A-Za-z0-9_]+$")
 _BLUEPRINT_TYPES = {"Normal", "FunctionLibrary", "MacroLibrary", "Interface"}
+_MATERIAL_PARAMETER_TYPES = {"Scalar", "Vector", "Texture", "StaticSwitch"}
 
 
 def _read_json_object(path: Path, *, label: str) -> dict[str, Any]:
@@ -84,6 +85,7 @@ def validate_fixture_plan(plan_path: Path) -> dict[str, Any]:
     ids: set[str] = set()
     targets: set[str] = set()
     sources: set[str] = set()
+    material_parents: dict[str, dict[str, list[str]]] = {}
     normalized: list[dict[str, Any]] = []
     for index, fixture in enumerate(fixtures):
         base = f"plan.fixtures[{index}]"
@@ -100,6 +102,12 @@ def validate_fixture_plan(plan_path: Path) -> dict[str, Any]:
         elif kind in {"scalarAsset", "structuredAsset"}:
             required = {"id", "kind", "targetAsset", "expectedClass"}
             allowed = required
+        elif kind == "materialParentAsset":
+            required = {"id", "kind", "targetAsset", "expectedClass", "parameters"}
+            allowed = required
+        elif kind == "materialAsset":
+            required = {"id", "kind", "targetAsset", "expectedClass", "parentAsset"}
+            allowed = required | {"values"}
         elif kind == "blueprint":
             required = {
                 "id",
@@ -113,7 +121,7 @@ def validate_fixture_plan(plan_path: Path) -> dict[str, Any]:
         else:
             required = {"id", "kind", "targetAsset", "expectedClass"}
             allowed = required
-            _issue(errors, "fixture-kind", "kind must be duplicateAsset, scalarAsset, referenceAsset, structuredAsset, or blueprint.", f"{base}.kind")
+            _issue(errors, "fixture-kind", "kind must be duplicateAsset, scalarAsset, referenceAsset, structuredAsset, materialParentAsset, materialAsset, or blueprint.", f"{base}.kind")
         missing = sorted(required - set(fixture))
         unknown = sorted(set(fixture) - allowed)
         for field in missing:
@@ -245,6 +253,181 @@ def validate_fixture_plan(plan_path: Path) -> dict[str, Any]:
                     "structuredAsset fixtures require the UEAgentKit structured fixture class.",
                     f"{base}.expectedClass",
                 )
+        elif kind == "materialParentAsset":
+            if expected_class != "/Script/Engine.Material":
+                _issue(
+                    errors,
+                    "material-parent-class",
+                    "materialParentAsset fixtures require expectedClass /Script/Engine.Material.",
+                    f"{base}.expectedClass",
+                )
+            parameters = fixture.get("parameters")
+            if not isinstance(parameters, dict):
+                _issue(
+                    errors,
+                    "material-parent-parameters",
+                    "materialParentAsset parameters must be an object.",
+                    f"{base}.parameters",
+                )
+            else:
+                material_parameter_names: dict[str, list[str]] = {}
+                for parameter_type, names in parameters.items():
+                    parameter_path = f"{base}.parameters.{parameter_type}"
+                    if parameter_type not in _MATERIAL_PARAMETER_TYPES:
+                        _issue(
+                            errors,
+                            "material-parent-parameter-type",
+                            "materialParentAsset parameter types must be Scalar, Vector, Texture, or StaticSwitch.",
+                            parameter_path,
+                        )
+                        continue
+                    if not isinstance(names, list) or not names:
+                        _issue(
+                            errors,
+                            "material-parent-parameter-type",
+                            "materialParentAsset parameter type must contain at least one parameter name.",
+                            parameter_path,
+                        )
+                        continue
+                    seen: set[str] = set()
+                    valid_names: list[str] = []
+                    for name_index, name in enumerate(names):
+                        name_path = f"{parameter_path}[{name_index}]"
+                        if (
+                            not isinstance(name, str)
+                            or not name.strip()
+                            or len(name) > 128
+                            or "." in name
+                            or "/" in name
+                        ):
+                            _issue(
+                                errors,
+                                "material-parent-parameter-name",
+                                "Material parameter names must be non-empty strings of at most 128 characters without dots or slashes.",
+                                name_path,
+                            )
+                            continue
+                        if name in seen:
+                            _issue(
+                                errors,
+                                "material-parent-parameter-name",
+                                "Material parameter names must be unique within a type.",
+                                name_path,
+                            )
+                            continue
+                        seen.add(name)
+                        valid_names.append(name)
+                    material_parameter_names[parameter_type] = valid_names
+                material_parents[target] = material_parameter_names
+        elif kind == "materialAsset":
+            if expected_class != "/Script/Engine.MaterialInstanceConstant":
+                _issue(
+                    errors,
+                    "material-asset-class",
+                    "materialAsset fixtures require expectedClass /Script/Engine.MaterialInstanceConstant.",
+                    f"{base}.expectedClass",
+                )
+            parent_asset = fixture.get("parentAsset")
+            if not isinstance(parent_asset, str) or not _is_package_path(parent_asset):
+                _issue(
+                    errors,
+                    "material-parent-invalid",
+                    "materialAsset parentAsset must be a valid package path.",
+                    f"{base}.parentAsset",
+                )
+                parent_asset = ""
+            if parent_asset and parent_asset == target:
+                _issue(
+                    errors,
+                    "material-parent-equal",
+                    "materialAsset parentAsset and targetAsset must differ.",
+                    f"{base}.parentAsset",
+                )
+            values = fixture.get("values")
+            if values is not None:
+                if not isinstance(values, dict):
+                    _issue(
+                        errors,
+                        "material-values",
+                        "materialAsset values must be an object.",
+                        f"{base}.values",
+                    )
+                else:
+                    for type_name, type_values in values.items():
+                        values_path = f"{base}.values.{type_name}"
+                        if type_name not in _MATERIAL_PARAMETER_TYPES:
+                            _issue(
+                                errors,
+                                "material-values-type",
+                                "materialAsset value types must be Scalar, Vector, Texture, or StaticSwitch.",
+                                values_path,
+                            )
+                            continue
+                        if not isinstance(type_values, dict) or not type_values:
+                            _issue(
+                                errors,
+                                "material-values-type",
+                                "materialAsset value type must contain at least one parameter value.",
+                                values_path,
+                            )
+                            continue
+                        for parameter_name, value in type_values.items():
+                            value_path = f"{values_path}.{parameter_name}"
+                            if (
+                                not isinstance(parameter_name, str)
+                                or not parameter_name.strip()
+                                or "." in parameter_name
+                                or "/" in parameter_name
+                            ):
+                                _issue(
+                                    errors,
+                                    "material-values-name",
+                                    "Material value parameter names must be non-empty strings without dots or slashes.",
+                                    value_path,
+                                )
+                                continue
+                            if type_name == "Scalar":
+                                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                                    _issue(
+                                        errors,
+                                        "material-values-value",
+                                        "Material scalar values require a finite JSON number.",
+                                        value_path,
+                                    )
+                            elif type_name == "Vector":
+                                if (
+                                    not isinstance(value, dict)
+                                    or set(value) != {"r", "g", "b", "a"}
+                                    or any(
+                                        isinstance(component, bool)
+                                        or not isinstance(component, (int, float))
+                                        for component in value.values()
+                                    )
+                                ):
+                                    _issue(
+                                        errors,
+                                        "material-values-value",
+                                        "Material vector values require a {r,g,b,a} JSON object.",
+                                        value_path,
+                                    )
+                            elif type_name == "Texture":
+                                if not isinstance(value, str) or not _is_package_path(
+                                    value, allow_object_path=True
+                                ):
+                                    _issue(
+                                        errors,
+                                        "material-values-value",
+                                        "Material texture values require an asset object path string.",
+                                        value_path,
+                                    )
+                            else:
+                                if not isinstance(value, bool):
+                                    _issue(
+                                        errors,
+                                        "material-values-value",
+                                        "Material static switch values require a JSON boolean.",
+                                        value_path,
+                                    )
         elif kind == "blueprint":
             if expected_class != "/Script/Engine.Blueprint":
                 _issue(
@@ -278,6 +461,38 @@ def validate_fixture_plan(plan_path: Path) -> dict[str, Any]:
             f"A sourceAsset cannot also be a targetAsset in the same plan: {source}",
             "plan.fixtures",
         )
+
+    for index, fixture in enumerate(normalized):
+        if fixture.get("kind") != "materialAsset":
+            continue
+        base = f"plan.fixtures[{index}]"
+        parent_asset = fixture.get("parentAsset")
+        if not isinstance(parent_asset, str):
+            continue
+        parent_parameters = material_parents.get(parent_asset)
+        if parent_parameters is None:
+            _issue(
+                errors,
+                "material-parent-kind",
+                "materialAsset parentAsset must reference a materialParentAsset fixture in the same plan.",
+                f"{base}.parentAsset",
+            )
+            continue
+        values = fixture.get("values")
+        if not isinstance(values, dict):
+            continue
+        for type_name, type_values in values.items():
+            if type_name not in _MATERIAL_PARAMETER_TYPES or not isinstance(type_values, dict):
+                continue
+            declared = set(parent_parameters.get(type_name, []))
+            for parameter_name in type_values:
+                if parameter_name not in declared:
+                    _issue(
+                        errors,
+                        "material-values-declared",
+                        f"Material {type_name} parameter {parameter_name} is not declared by the parent material fixture.",
+                        f"{base}.values.{type_name}.{parameter_name}",
+                    )
 
     return {
         "schemaVersion": FIXTURE_PLAN_SCHEMA_VERSION,

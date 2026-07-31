@@ -23,6 +23,7 @@ namespace UEAgentKitLiveWrite
 		bool Capture(const FProperty* InProperty, const void* Source);
 		bool IsValid() const { return Property != nullptr && Storage != nullptr; }
 		void Restore(void* Destination) const;
+		void Reset();
 
 	private:
 		const FProperty* Property = nullptr;
@@ -33,8 +34,6 @@ namespace UEAgentKitLiveWrite
 	{
 		UObject* Asset = nullptr;
 		UPackage* Package = nullptr;
-		FProperty* Property = nullptr;
-		void* ValueAddress = nullptr;
 		FString SessionId;
 		FString TransactionTitle;
 		FString AssetPath;
@@ -54,35 +53,45 @@ namespace UEAgentKitLiveWrite
 		TSharedPtr<FJsonValue> AfterValue;
 	};
 
-	// Per-value-kind IO contract. Each callback must set a stable error code and message on failure.
+	// Per-target IO contract. The IO owns the exact pre-write target state: it
+	// captures a snapshot before the transaction, applies the requested JSON value,
+	// verifies the read-back, and restores the snapshot on failure or semantic no-op.
 	class ILiveWriteValueIO
 	{
 	public:
 		virtual ~ILiveWriteValueIO() = default;
 
+		// Captures the exact pre-write target state; called before the transaction.
+		virtual bool CaptureSnapshot() = 0;
+		virtual bool IsSnapshotValid() const = 0;
+		// Restores the captured state after a failed apply, failed read-back, or
+		// a semantic no-op. Must be safe to call even after ReleaseSnapshot.
+		virtual void RestoreSnapshot() = 0;
+		// Releases the captured state after a confirmed successful write.
+		virtual void ReleaseSnapshot() = 0;
+
 		virtual bool ReadBefore(
-			FProperty* Property,
-			void* ValueAddress,
 			TSharedPtr<FJsonValue>& OutValue,
 			FString& OutErrorCode,
 			FString& OutErrorMessage) = 0;
 
 		virtual bool ApplyValue(
-			FProperty* Property,
-			void* ValueAddress,
 			const TSharedPtr<FJsonValue>& Value,
 			FString& OutErrorCode,
 			FString& OutErrorMessage) = 0;
 
 		virtual bool ReadAfter(
-			FProperty* Property,
-			void* ValueAddress,
 			const TSharedPtr<FJsonValue>& Requested,
 			TSharedPtr<FJsonValue>& OutValue,
 			FString& OutErrorCode,
 			FString& OutErrorMessage) = 0;
 
 		virtual bool SemanticEqual(const TSharedPtr<FJsonValue>& Left, const TSharedPtr<FJsonValue>& Right) = 0;
+
+		// Notifies the target after a confirmed successful write (change policy).
+		virtual void NotifyChanged() = 0;
+		// Notifies the target after restoring the pre-write snapshot on failure.
+		virtual void NotifyRestored() = 0;
 	};
 
 	// Runs the unified live write transaction lifecycle.

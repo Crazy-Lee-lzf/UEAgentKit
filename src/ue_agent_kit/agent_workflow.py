@@ -61,7 +61,13 @@ LIVE_WRITE_VALUE_KINDS = {
     "setAssetProperty": "scalar",
     "setAssetReferenceProperty": "reference",
     "setAssetStructuredProperty": "structured",
+    "setMaterialInstanceScalarParameter": "material-scalar",
+    "setMaterialInstanceVectorParameter": "material-vector",
+    "setMaterialInstanceTextureParameter": "material-texture",
+    "setMaterialInstanceStaticSwitchParameter": "material-static-switch",
 }
+
+MATERIAL_PARAMETER_OPERATIONS_NAMES = frozenset(MATERIAL_PARAMETER_OPERATIONS.values())
 
 
 def _live_write_value_kind(operation: str) -> str:
@@ -1461,30 +1467,47 @@ class PatchWorkflowService:
             if not isinstance(operations, list) or len(operations) != 1 or not isinstance(operations[0], dict):
                 raise WorkflowError("plan-invalid", "The live write plan no longer contains exactly one operation.")
             operation = operations[0]
-            if operation.get("operation") not in {
+            operation_name = str(operation.get("operation", ""))
+            if operation_name not in {
                 "setAssetProperty",
                 "setAssetReferenceProperty",
                 "setAssetStructuredProperty",
+                "setMaterialInstanceScalarParameter",
+                "setMaterialInstanceVectorParameter",
+                "setMaterialInstanceTextureParameter",
+                "setMaterialInstanceStaticSwitchParameter",
             }:
                 raise WorkflowError(
                     "live-editor-write-operation-unsupported",
-                    "Live Editor writes accept only setAssetProperty, setAssetReferenceProperty, and setAssetStructuredProperty plans.",
+                    "Live Editor writes accept only setAssetProperty, setAssetReferenceProperty, setAssetStructuredProperty, setMaterialInstanceScalarParameter, setMaterialInstanceVectorParameter, setMaterialInstanceTextureParameter, and setMaterialInstanceStaticSwitchParameter plans.",
                 )
+            is_material = operation_name in MATERIAL_PARAMETER_OPERATIONS_NAMES
             target = operation.get("target", {})
-            property_path = target.get("propertyPath") if isinstance(target, dict) else None
-            if not isinstance(property_path, str) or not property_path:
-                raise WorkflowError("plan-invalid", "The live write plan has no exact propertyPath.")
+            parameter_name = None
+            property_path = None
+            if is_material:
+                parameter_name = target.get("parameterName") if isinstance(target, dict) else None
+                if not isinstance(parameter_name, str) or not parameter_name:
+                    raise WorkflowError("plan-invalid", "The live write plan has no exact parameterName.")
+            else:
+                property_path = target.get("propertyPath") if isinstance(target, dict) else None
+                if not isinstance(property_path, str) or not property_path:
+                    raise WorkflowError("plan-invalid", "The live write plan has no exact propertyPath.")
             asset_path = str(assets[0].get("assetPath", ""))
             expected_revision = str(assets[0].get("expectedRevision", ""))
+            bridge_parameters = {
+                "operation": operation_name,
+                "assetPath": asset_path,
+                "value": operation.get("value"),
+            }
+            if is_material:
+                bridge_parameters["parameterName"] = parameter_name
+            else:
+                bridge_parameters["propertyPath"] = property_path
             try:
                 live_result = self.live_editor_service.call_method(
                     "editor.applyAssetPropertyLive",
-                    {
-                        "operation": operation.get("operation"),
-                        "assetPath": asset_path,
-                        "propertyPath": property_path,
-                        "value": operation.get("value"),
-                    },
+                    bridge_parameters,
                 )
             except Exception as exc:
                 if hasattr(exc, "code"):
@@ -1501,9 +1524,10 @@ class PatchWorkflowService:
                 "projectName": self.project_name,
                 "assetPath": asset_path,
                 "expectedDiskRevision": expected_revision,
-                "operation": operation.get("operation"),
-                "valueKind": _live_write_value_kind(str(operation.get("operation"))),
+                "operation": operation_name,
+                "valueKind": _live_write_value_kind(operation_name),
                 "propertyPath": property_path,
+                "parameterName": parameter_name,
                 "changed": changed,
                 "saved": False,
                 "diskRevisionChanged": False,
