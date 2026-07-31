@@ -6,6 +6,9 @@
 
 - [`PROJECT_STATUS.md`](PROJECT_STATUS.md)：当前已实现能力、明确未实现能力、P0–P3 优先级和后续方向。
 - [`PROJECT_STATUS_EN.md`](PROJECT_STATUS_EN.md)：English project status.
+- [`MEMORY_ARCHITECTURE.md`](MEMORY_ARCHITECTURE.md)：分层知识树、Active Work、渐进式披露、MCP/Skill 分工和多人共享知识服务设计。
+- [`MEMORY_ARCHITECTURE_EN.md`](MEMORY_ARCHITECTURE_EN.md)：English layered memory and collaboration architecture.
+
 - [`COMPARISON_UE_LLM_TOOLKIT.md`](COMPARISON_UE_LLM_TOOLKIT.md)：与 ue-llm-toolkit 的读取、写入、Live Editor 和安全闭环对比。
 - [`COMPARISON_UE_LLM_TOOLKIT_EN.md`](COMPARISON_UE_LLM_TOOLKIT_EN.md)：English comparison with ue-llm-toolkit.
 
@@ -56,7 +59,7 @@
 - Offline 5、Live 23、Workflow 26、Combined 44 Tool；启用 Memory 后为 12、30、33、51；其中 12 个为高层安全写入入口。
 - `main` 新增 `ue_apply_asset_property_live`：对已打开且 Clean 的非 Blueprint 资产执行顶层标量内存修改，进入 Undo 栈并标记 Dirty，但不自动保存。
 
-0.5.x 与 0.6.0 已完成并进入维护。当前 P0 是 Live Transaction/Undo/Discard/Authorized Save/Evidence 基础层，P1 是 0.7.0 Context Pack、值来源、执行链、影响分析和语义 Diff。
+0.5.x 与 0.6.0 已完成并进入维护。当前 P0 是 Live Transaction/Undo/Discard/Authorized Save/Evidence 基础层；P1A 是 Memory Knowledge Tree、Active Work 和渐进式披露；P1B 是 0.7.0 Context Pack、值来源、执行链、影响分析和语义 Diff。
 
 只读分析路径不修改资产；Blueprint Patch、Asset Patch 与 MCP Commit 仅在明确授权后执行。
 

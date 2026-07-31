@@ -52,6 +52,19 @@ Requirements:
 
 The first vertical slice is complete, but it only supports one top-level scalar property on an open, clean, non-Blueprint asset. The next step is not unrestricted UObject access: it is a shared Live Transaction/Evidence layer, explicit Undo/Discard, Reference and Structured Property support, Material Instance and DataTable live apply, and a standard Live Apply → Authorized Save → Verify → Memory Task closure.
 
+## Pre-0.7 foundation: Memory usability and layered knowledge tree
+
+Before automatic Context Packs, evolve the 0.6.0 flat record store into a low-maintenance, low-token usability layer:
+
+- Stable paths and parent links provide an arbitrary-depth Knowledge Tree from Project Profile through systems, features/entities, and implementations.
+- Separate durable knowledge, record type, Active Work, and Evidence.
+- Store objectives, TODO items, blockers, and next actions in Active Work rather than long-term search records.
+- Use five-level progressive disclosure with server-enforced token budgets and summary-first responses.
+- MCP owns storage, retrieval, deduplication, Revision invalidation, automatic Evidence, and maintenance rules; one thin Skill only explains usage order.
+- Plan high-level `memory_get_context`, `memory_expand_node`, `memory_get_evidence`, `memory_update_knowledge`, and `memory_update_work` tools.
+
+Context Packs will then traverse this tree instead of retrieving a flat set of similar records. See [`MEMORY_ARCHITECTURE_EN.md`](MEMORY_ARCHITECTURE_EN.md).
+
 ## 0.7.0: context and analysis
 
 Planned capabilities include automatic context packs, value-source and execution tracing, impact analysis, semantic asset diffs, evidence-backed hypotheses, change plans, and verification plans. Unsupported conclusions must be marked as inference.
@@ -59,6 +72,8 @@ Planned capabilities include automatic context packs, value-source and execution
 ## 0.8.0: collaboration and conflict awareness
 
 Read source-control provider, checkout, lock, owner, and head state; compare local dirty state, disk Revision, and depot/remote head; and model ownership boundaries and multi-user asset conflict risk. The first version may analyze, warn, or block, but must not steal locks or overwrite another developer's work.
+
+Deployment uses one local MCP per developer plus a shared Knowledge Service. The local MCP connects to the local Editor Bridge and internally accesses the shared service; the agent should not orchestrate separate local-UE and shared-knowledge MCPs, and one central MCP must not route every developer's editor. Shared `/project` and `/team` knowledge and Active Work live in the service, while `/user`, `/session`, editor state, and asset indexes remain local. Shared updates use optimistic concurrency and explicit `knowledge-conflict` responses.
 
 ## Continuous gates
 

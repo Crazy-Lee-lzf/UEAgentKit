@@ -52,6 +52,19 @@ Combined           44 Tool（Memory 51）
 
 首个纵向闭环已经完成，但当前只支持一个已打开、Clean、非 Blueprint 资产的顶层标量属性。下一步不是立即开放任意 UObject，而是先完成统一 Live Transaction/Evidence、显式 Undo/Discard、Reference/Structured Property、Material Instance、DataTable，以及 Live Apply → Authorized Save → Verify → Memory Task 闭环。
 
+## 0.7.0 前置：Memory 可用性与分层知识树
+
+在自动 Context Pack 之前，先把 0.6.0 平面记录库升级为低维护、低 Token 的可用层：
+
+- Knowledge Tree 使用稳定 Path 与 Parent/Child 支持任意深度，默认从 Project Profile、System、Feature/Entity 到 Implementation。
+- 长期知识、Record Type、Active Work 与 Evidence 四个概念分离。
+- 当前目标、TODO、阻塞和下一步使用独立 Active Work，不污染长期知识搜索。
+- 查询采用五级渐进式披露，默认只返回摘要并由 Server 强制 Token Budget。
+- MCP 负责存储、检索、去重、Revision stale、自动 Evidence 和维护规则；Skill 只保留约 400–800 Token 的薄使用说明。
+- 计划提供 `memory_get_context`、`memory_expand_node`、`memory_get_evidence`、`memory_update_knowledge` 和 `memory_update_work` 高层入口。
+
+该阶段完成后，再让 0.7.0 Context Pack 沿知识树逐级收集上下文。完整设计见 [`MEMORY_ARCHITECTURE.md`](MEMORY_ARCHITECTURE.md)。
+
 ## 0.7.0：上下文与分析
 
 计划能力包括自动 Context Pack、值来源追踪、执行链追踪、影响分析、语义资产 Diff、证据支持的假设、修改计划和验证计划。无法证明的结论必须明确标记为推断。
@@ -59,6 +72,8 @@ Combined           44 Tool（Memory 51）
 ## 0.8.0：协作与冲突感知
 
 读取 Source Control Provider、Checkout/Lock/Owner/Head，分析 Local Dirty、磁盘 Revision 与 Depot/Remote Head 分歧，并建立资产责任边界和多人冲突风险模型。首版只分析、提示或阻止，不自动抢锁或覆盖他人修改。
+
+部署采用每人一个 Local MCP + 团队共享 Knowledge Service。Local MCP 连接本机 Editor Bridge，并在内部访问共享服务；不让 Agent 同时管理 Local UE MCP 与 Shared Knowledge MCP，也不使用一个中央 MCP 直接路由所有开发者的编辑器。共享服务保存 `/project` 与 `/team` 知识和 Active Work，本地保留 `/user`、`/session`、Editor 状态和资产索引。共享更新使用乐观并发与 `knowledge-conflict`，禁止静默覆盖。
 
 ## 持续门禁
 

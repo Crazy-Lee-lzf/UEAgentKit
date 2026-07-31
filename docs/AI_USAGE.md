@@ -2,14 +2,18 @@
 
 ## 1. 使用目标
 
-UE Agent Kit 为 AI 提供可验证、可定位、按需加载的 UE5 项目上下文。当前版本只读，不允许 AI 直接修改 `.uasset`。
+UE Agent Kit 为 AI 提供可验证、可定位、按需加载的 UE5 项目上下文，以及受 Policy、Revision、Plan、确认、备份和验证保护的有限写入能力。当前 `main` 既支持离线索引和 Live Editor 读取，也包含持久化 Patch 工作流与首个不自动保存的 Live Editor Write；具体公开边界以仓库根目录 `README.md` 和 [`PROJECT_STATUS.md`](PROJECT_STATUS.md) 为准。
 
-项目知识分为两层：
+当前项目数据包括：
 
 ```text
-通用资产目录：所有常用 UE 资产的路径、类型、Tags、Revision 和依赖。
+通用资产目录：路径、类型、Tags、Revision 和依赖。
 Blueprint 深度语义：变量、函数、Graph、Node、Pin 和结构化调用关系。
+Project Memory：来源、状态、Revision 和 Evidence 绑定的长期记录。
+Live Editor：当前选择、已打开资产、Dirty、日志、编译与编辑器内存状态。
 ```
+
+后续 Memory 将采用 Knowledge Tree + Active Work + 渐进式披露；设计见 [`MEMORY_ARCHITECTURE.md`](MEMORY_ARCHITECTURE.md)。
 
 ## 2. 推荐索引方式
 
@@ -120,26 +124,15 @@ AI 输出应明确区分：
 
 ## 8. 安全边界
 
-当前版本只能：
+当前读取能力包括资产/Blueprint 导出、SQLite 查询、Reference、Project Memory 和受限 Live Editor 状态。当前写入能力包括 Policy/Revision 门控的 Blueprint、Data Asset、Material Instance、DataTable Patch，授权单资产保存、验证、rollback，以及首个只修改 Editor 内存并进入 Undo 栈的 `ue_apply_asset_property_live`。
 
-- 导出资产目录和 Blueprint 语义。
-- 建立 SQLite 索引。
-- 搜索资产、Symbol 和 Reference。
-- 分析依赖和调用关系。
+不能因为能够读取某类数据，就声称已经支持对应写入。当前仍不支持通用 Blueprint Graph 重写、Animation/Control Rig/Material Graph/Niagara/Sequencer/UMG 写入、任意 Actor 生命周期操作、任意 Console/Python/Shell 或无约束 Save All。
 
-当前版本不能声称已经：
-
-- 修改属性或默认值。
-- 新增或删除节点。
-- 保存 Blueprint 或其他资产。
-- 回滚资产。
-
-公开能力以仓库根目录 `README.md` 为准。
-
+所有持久化写入必须使用固定项目、Policy、Revision、Plan/Dry Run、一次性 Receipt、精确确认、Backup、独立验证和可验证 rollback。Live Apply 默认不等于保存成功。
 
 ## MCP 工作流
 
-0.6.0 的默认 MCP 模式提供能力、项目状态和三个查询 Tool。完整固定项目模式共 16 个 Tool，增加六个高层 Plan/Dry Run 入口与底层 Apply、Verify、rollback 工作流，但 Agent 仍不能选择项目、引擎、Policy、数据库或任意文件路径。
+当前 `main` 的 MCP 模式为 Offline 5、Live 23、Workflow 26、Combined 44；启用固定 Project Memory 后分别为 12、30、33、51。Tool 数量不等同于 Unreal Operation 数量。Agent 仍不能在 Tool 参数中切换项目、引擎、Policy、数据库、Editor Endpoint 或任意文件路径。
 
 推荐调用顺序：
 
@@ -155,6 +148,22 @@ ue_search / ue_get_asset / ue_find_references
 ```
 
 MCP Receipt 仅在当前 Server 会话中有效；重启后必须重新 Plan 和 Dry Run。
+
+## Project Memory 的后续渐进式使用
+
+0.6.0 当前使用 `ue_memory_search` 和 `ue_memory_get` 查询平面记录。后续不会让 Agent 每轮加载全部 Memory，而是按以下顺序逐层披露：
+
+```text
+Project Profile
+→ 相关 System 摘要
+→ Feature/Entity/Implementation 摘要
+→ 详细 Rule/Decision/Finding/Issue
+→ 必要时才读取原始 Evidence
+```
+
+服务器将强制 Token Budget、默认过滤 `stale`/`superseded`，并返回建议的 `nextActions`。当前目标、TODO 和阻塞进入独立 Active Work，不混入长期知识记录。MCP 是主要执行层；日常只需要一个薄 `project-memory` Skill，不把读取、写入、维护和 TODO 拆分为多个长 Skill。
+
+完整规划见 [`MEMORY_ARCHITECTURE.md`](MEMORY_ARCHITECTURE.md)。
 
 ## Project Memory 查询与审计
 

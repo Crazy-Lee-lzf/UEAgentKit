@@ -332,7 +332,20 @@ Live Editor 中已经产生的受控 Dirty 资产，也可以通过 `ue_save_aut
 
 
 
-### P1：0.7.0 Context/Analysis 主线
+### P1A：Memory 可用性与知识树前置
+
+0.6.0 的 Revision-aware 平面记录库已经完成，但不继续把复杂维护责任直接交给 Agent。Context Pack 之前先完成：
+
+- 任意深度 Knowledge Tree：Project Profile → System → Feature/Entity → Implementation。
+- 现有 Rule/Finding/Decision/Known Issue/Task/Evidence 绑定 Knowledge Node，记录类型不再作为主要导航。
+- 独立 Active Work：当前目标、进行中、TODO、阻塞、待确认决策和下一步。
+- 五级渐进式披露：索引、节点摘要、实现概览、详细记录、原始证据。
+- MCP Server 强制 Token Budget、默认状态过滤、重复检测和结构化 `nextActions`。
+- 日常采用一个薄 `project-memory` Skill，不把读、写、维护和 TODO 拆成长 Skill。
+
+完整设计见 [`MEMORY_ARCHITECTURE.md`](MEMORY_ARCHITECTURE.md)。
+
+### P1B：0.7.0 Context/Analysis 主线
 
 
 
@@ -376,6 +389,8 @@ Live Editor 中已经产生的受控 Dirty 资产，也可以通过 `ue_save_aut
 
 ### P3：0.8.0 Collaboration
 
+多人部署采用混合架构：每名开发者运行本地 MCP 并连接本机 UEAgentKit Plugin/Editor；团队共享的是独立 Knowledge Service，而不是一个能够直接控制所有开发者编辑器的中央 MCP。共享层计划使用 PostgreSQL/API，本地 SQLite 保留资产索引、缓存、个人和 Session 数据。
+
 
 
 - Source Control Provider、Checkout、Lock、Owner、Head Revision 读取。
@@ -403,3 +418,7 @@ Live Editor 中已经产生的受控 Dirty 资产，也可以通过 `ue_save_aut
 5. **不追求任意脚本能力**：Console/Python/Shell 虽然扩展快，但会绕过 UE Agent Kit 的核心安全模型。
 
 6. **以真实项目需求排序**：优先实现 Reforge 实际开发中反复出现、能明显减少人工操作的能力。
+
+7. **渐进式披露**：默认只加载 Project Profile 和直接相关节点摘要，详细实现与原始证据必须显式展开。
+
+8. **本地执行、共享知识**：UE 编辑器状态和写入会话留在本机，长期项目知识与团队任务由共享服务管理。

@@ -4,6 +4,8 @@ All notable changes to UE Agent Kit are documented here.
 
 ## Unreleased
 
+- Documented the adopted layered Project Memory architecture: arbitrary-depth Knowledge Tree, separate Active Work/TODO, five-level progressive disclosure, server-enforced token budgets, MCP-primary/thin-Skill usage, and one-local-MCP-per-developer plus shared knowledge-service collaboration.
+
 - Added current project-status and roadmap documents covering implemented reads/writes, explicit gaps, Live Editor Write priorities, Context/Analysis, and collaboration direction.
 - Added a dated architecture and capability comparison with `ColtonWilley/ue-llm-toolkit`, separating editor-control breadth from UE Agent Kit's Policy/Revision/backup/verification/rollback model.
 

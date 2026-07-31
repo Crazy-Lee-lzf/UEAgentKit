@@ -270,11 +270,11 @@ ue_memory_validate
 ```text
 Offline + Memory   12
 Live + Memory      30
-Workflow + Memory  32
-Combined + Memory  50
+Workflow + Memory  33
+Combined + Memory  51
 ```
 
-未启用 Memory 时继续保持原有 5/23/25/43 Tool 契约。
+未启用 Memory 时继续保持原有 5/23/26/44 Tool 契约。
 
 ## 15. Task Outcome 契约
 
@@ -386,3 +386,85 @@ CLI 的 stdout/stderr 在入口处固定为 UTF-8，确保 Windows 管道、中�
 成功的 rollback Commit 使用相同外层结构，但 `task_key=rollback:<planId>`、`outcome=rolledBack`、Revision Set 绑定恢复后的 pre-Commit Revision，Validation Artifact 同时记录脱敏 rollback Report ID 与独立 verification Report ID。rollback Dry Run、确认失败、恢复失败或 Revision 不匹配时不生成 rolledBack Evidence。
 
 `scripts\TestMcpWorkflow.cmd` 的真实 UE5.6 回归会在同一固定工程会话中记录 succeeded 与 rolledBack Task，随后运行 `ue_memory_validate`：Commit 后 Revision 在 rollback 后必须变为 `stale`，恢复 Revision 对应的 rolledBack Record 必须保持 `valid`。回归同时验证 Audit Snapshot SHA-256、Package SHA-256 恢复和 immutable Index 零修改。
+
+## 18. 后续 Schema v3 方向：分层知识树与 Active Work
+
+本节是已经确定的后续架构方向，不属于 0.6.0 当前实现。当前稳定实现仍是 Schema v2 的平面 Record、Scope、Revision、Artifact 与状态机。
+
+计划中的 Schema v3 增加：
+
+```text
+memory_nodes
+work_items
+work_item_nodes
+memory_records.node_id
+node_revision / owner / visibility_scope
+```
+
+设计原则：
+
+- `memory_nodes` 使用 `parent_id + path + depth` 支持任意深度 Knowledge Tree，不使用固定三层字段。
+- 默认从 Project Profile、System、Feature/Entity、Implementation 逐层展开，但可以继续向下细分。
+- 现有六类 Record 继续保存知识性质、来源、状态和证据；Knowledge Node 负责知识归属与导航。
+- 当前目标、进行中任务、TODO、阻塞、待确认决策与下一步进入独立 Active Work，不与长期知识混存。
+- Work Item 完成后只提取稳定结论更新 Knowledge Node；Patch、Validation、Revision 和 Task Evidence 继续自动保存。
+- 旧 Record ID、Digest、Revision Set 和 Artifact 必须在迁移中保持不变；尚未归类的记录先绑定 `/project/unclassified`。
+
+完整设计见 [`../docs/MEMORY_ARCHITECTURE.md`](../docs/MEMORY_ARCHITECTURE.md)。
+
+## 19. 渐进式披露与 Token Budget
+
+后续 Memory 查询按五级披露：
+
+```text
+Level 0  Path、标题、一句话摘要、状态和子节点数量
+Level 1  Project/System/Feature 节点摘要
+Level 2  主要类、资产、入口、数据流、依赖与 Known Issue
+Level 3  Rule、Decision、Finding、Revision 与详细记录
+Level 4  Patch、日志、Blueprint Node、Validation Report 等原始证据
+```
+
+服务端必须强制限制返回条数、展开深度和预算，默认过滤 `stale` 与 `superseded`。普通任务的 Memory 上下文目标为约 1,000–2,500 Token，不允许依赖 Skill 中的文字提醒来约束弱 Agent。
+
+## 20. MCP 与 Skill
+
+后续采用 MCP 为主体、Skill 为薄层引导：
+
+- MCP Server 负责 Knowledge Tree、Active Work、渐进式披露、Token Budget、去重、冲突、Revision stale、权限和自动 Evidence。
+- 日常只保留一个约 400–800 Token 的 `project-memory` Skill，说明读取顺序与写入原则。
+- 不把读取、写入、维护和 TODO 拆成多个长 Skill。
+- 审计与 Schema Migration 可以使用按需加载的专用 Skill。
+
+计划中的高层 Tool：
+
+```text
+memory_get_context
+memory_expand_node
+memory_get_evidence
+memory_update_knowledge
+memory_update_work
+```
+
+这些名称是后续契约目标，0.6.0 当前仍使用本文件第 14 节列出的 `ue_memory_*` Tool。
+
+## 21. 多人协作部署方向
+
+多人协作不共用一个可直接控制所有 UE 编辑器的中央 MCP。推荐架构为：
+
+```text
+每名开发者：Local Agent → Local MCP → Local UEAgentKit Plugin / UE Editor
+整个团队：Local MCP → Shared Knowledge Service
+```
+
+本地 MCP 保留 Editor Session、Dirty、PIE、Output Log、Workspace、Policy、Receipt 与未保存内存状态。共享服务保存 Project/Team Knowledge Tree、公共规则与决策、Known Issue、团队 Active Work、负责人、Changelist 和审计引用。
+
+Scope 计划分为：
+
+```text
+/project/...   项目共享
+/team/...      团队共享
+/user/...      个人私有
+/session/...   当前本地会话
+```
+
+共享层使用 PostgreSQL 或等价服务端数据库与 API；本地 SQLite 继续用于资产索引、缓存、个人和 Session 数据。禁止把一个可写 SQLite 文件放在 NAS 后由多人直接并发访问。共享节点更新使用 `nodeId + expectedRevision` 乐观并发，冲突时返回 `knowledge-conflict`，不允许静默 Last Write Wins。

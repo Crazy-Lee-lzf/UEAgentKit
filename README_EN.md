@@ -8,7 +8,7 @@ UE Agent Kit is an open-source Unreal Engine asset analysis, indexing, and polic
 
 The latest published release is **0.6.0** and targets **Unreal Engine 5.6**. This release adds Revision-aware Project Memory with independent SQLite/FTS5 storage, six traceable record types, provenance and status transitions, Revision invalidation, evidence digests, fixed-project MCP/CLI access, auditable export, and verified Workflow/rollback Task Evidence.
 
-> **Release status**: 0.6.0 remains the latest published release. `main` now contains the first Live Editor Write vertical slice; without Memory the modes are 5/23/26/44 tools, and fixed Project Memory changes them to 12/30/33/51. Active development covers both the Live Write foundation and 0.7.0 Context/Analysis.
+> **Release status**: 0.6.0 remains the latest published release. `main` now contains the first Live Editor Write vertical slice; without Memory the modes are 5/23/26/44 tools, and fixed Project Memory changes them to 12/30/33/51. Active development covers the Live Write foundation, layered Memory/Active Work/progressive disclosure, and 0.7.0 Context/Analysis.
 
 > **AI Generated**: Most code and documentation in this project are AI-generated and reviewed through human inspection, UE 5.6 compilation, automated tests, and real-project regression validation.
 
@@ -309,6 +309,9 @@ Output\Blueprints\
 - [`docs/COMPARISON_UE_LLM_TOOLKIT_EN.md`](docs/COMPARISON_UE_LLM_TOOLKIT_EN.md): read, write, and safety-model comparison with ue-llm-toolkit.
 - [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md): build, install, export, and query instructions.
 - [`docs/AI_USAGE.md`](docs/AI_USAGE.md): using the asset index and Blueprint semantics with AI tools.
+- [`docs/MEMORY_ARCHITECTURE_EN.md`](docs/MEMORY_ARCHITECTURE_EN.md): layered knowledge tree, progressive disclosure, MCP/Skill responsibilities, and shared knowledge-service architecture.
+- [`docs/MEMORY_ARCHITECTURE.md`](docs/MEMORY_ARCHITECTURE.md): Chinese memory architecture.
+
 - [`docs/RELEASE_0.6.0_EN.md`](docs/RELEASE_0.6.0_EN.md): Revision-aware Project Memory, evidence-bound tasks, audit export, and the real UE5.6 closure.
 - [`docs/RELEASE_0.5.5_EN.md`](docs/RELEASE_0.5.5_EN.md): 0.5.x daily-development capabilities, atomic transactions, validation evidence, and release closeout.
 - [`docs/RELEASE_0.5.1_EN.md`](docs/RELEASE_0.5.1_EN.md): 0.5.1 query contract, high-level safe changes, diagnostics, and client compatibility.

@@ -278,7 +278,20 @@ These are intentional scope and safety boundaries, not documentation omissions.
 
 
 
-### P1: 0.7.0 Context/Analysis
+### P1A: Memory usability and knowledge-tree foundation
+
+The Revision-aware flat record store in 0.6.0 is complete, but maintenance complexity must not be delegated to agent discipline. Before Context Packs, implement:
+
+- An arbitrary-depth Knowledge Tree: Project Profile → System → Feature/Entity → Implementation.
+- Existing rules, findings, decisions, issues, tasks, and evidence bound to Knowledge Nodes.
+- Separate Active Work for objectives, in-progress work, TODO, blockers, pending decisions, and next actions.
+- Five-level progressive disclosure from index summaries to raw evidence.
+- Server-enforced token budgets, default status filters, deduplication, and structured `nextActions`.
+- One thin `project-memory` Skill instead of separate long read/write/maintenance/TODO Skills.
+
+See [`MEMORY_ARCHITECTURE_EN.md`](MEMORY_ARCHITECTURE_EN.md).
+
+### P1B: 0.7.0 Context/Analysis
 
 
 
@@ -315,6 +328,8 @@ Full graph mutation will require stable node/pin identity, structural diffs, com
 
 
 ### P3: 0.8.0 Collaboration
+
+Use a hybrid deployment: each developer runs a local MCP connected to the local UEAgentKit plugin and editor, while the team shares a separate Knowledge Service. The shared layer is expected to use PostgreSQL/API; local SQLite remains responsible for the asset index, caches, private data, and session data.
 
 
 
