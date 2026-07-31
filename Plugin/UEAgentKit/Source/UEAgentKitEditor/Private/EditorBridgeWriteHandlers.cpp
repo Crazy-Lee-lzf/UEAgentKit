@@ -1,5 +1,6 @@
 #include "EditorBridge.h"
 #include "EditorBridgeHandlerUtils.h"
+#include "LiveWriteTransaction.h"
 #include "StructuredPropertyJson.h"
 
 #include "Dom/JsonValue.h"
@@ -299,49 +300,6 @@ namespace
 		return false;
 	}
 
-	class FScopedPropertyValueBackup
-	{
-	public:
-		FScopedPropertyValueBackup(const FProperty* InProperty, const void* Source)
-			: Property(InProperty)
-		{
-			if (!Property || !Source)
-			{
-				return;
-			}
-			Storage = FMemory::Malloc(Property->GetSize(), Property->GetMinAlignment());
-			Property->InitializeValue(Storage);
-			Property->CopyCompleteValue(Storage, Source);
-		}
-
-		~FScopedPropertyValueBackup()
-		{
-			if (Property && Storage)
-			{
-				Property->DestroyValue(Storage);
-				FMemory::Free(Storage);
-			}
-		}
-
-		FScopedPropertyValueBackup(const FScopedPropertyValueBackup&) = delete;
-		FScopedPropertyValueBackup& operator=(const FScopedPropertyValueBackup&) = delete;
-
-		bool IsValid() const
-		{
-			return Property != nullptr && Storage != nullptr;
-		}
-
-		void Restore(void* Destination) const
-		{
-			check(IsValid());
-			Property->CopyCompleteValue(Destination, Storage);
-		}
-
-	private:
-		const FProperty* Property = nullptr;
-		void* Storage = nullptr;
-	};
-
 	bool SetAssetReferenceFromJson(
 		FProperty* Property,
 		void* ValueAddress,
@@ -459,6 +417,217 @@ namespace
 		OutReferencePath = RequestedPath;
 		return true;
 	}
+
+	class FLiveWriteScalarIO final : public UEAgentKitLiveWrite::ILiveWriteValueIO
+	{
+	public:
+		bool ReadBefore(
+			FProperty* Property,
+			void* ValueAddress,
+			TSharedPtr<FJsonValue>& OutValue,
+			FString& OutErrorCode,
+			FString& OutErrorMessage) override
+		{
+			if (!ReadScalarValue(Property, ValueAddress, OutValue))
+			{
+				OutErrorCode = TEXT("live-editor-write-property-type-unsupported");
+				OutErrorMessage = TEXT("The Live Write scalar capability supports only scalar, enum, string, name, and text properties.");
+				return false;
+			}
+			return true;
+		}
+
+		bool ApplyValue(
+			FProperty* Property,
+			void* ValueAddress,
+			const TSharedPtr<FJsonValue>& Value,
+			FString& OutErrorCode,
+			FString& OutErrorMessage) override
+		{
+			FString SetError;
+			if (!SetScalarValue(Property, ValueAddress, Value, SetError))
+			{
+				OutErrorCode = TEXT("live-editor-write-value-invalid");
+				OutErrorMessage = SetError;
+				return false;
+			}
+			return true;
+		}
+
+		bool ReadAfter(
+			FProperty* Property,
+			void* ValueAddress,
+			const TSharedPtr<FJsonValue>& Requested,
+			TSharedPtr<FJsonValue>& OutValue,
+			FString& OutErrorCode,
+			FString& OutErrorMessage) override
+		{
+			if (!ReadScalarValue(Property, ValueAddress, OutValue))
+			{
+				OutErrorCode = TEXT("live-editor-write-apply-failed");
+				OutErrorMessage = TEXT("The Editor did not confirm the changed Dirty package state.");
+				return false;
+			}
+			return true;
+		}
+
+		bool SemanticEqual(const TSharedPtr<FJsonValue>& Left, const TSharedPtr<FJsonValue>& Right) override
+		{
+			return UEAgentKit::StructuredPropertyJson::JsonEqual(Left, Right);
+		}
+	};
+
+	class FLiveWriteReferenceIO final : public UEAgentKitLiveWrite::ILiveWriteValueIO
+	{
+	public:
+		FString ResolvedClassPath;
+
+		bool ReadBefore(
+			FProperty* Property,
+			void* ValueAddress,
+			TSharedPtr<FJsonValue>& OutValue,
+			FString& OutErrorCode,
+			FString& OutErrorMessage) override
+		{
+			FString BeforePath;
+			if (!ReadAssetReferencePath(Property, ValueAddress, BeforePath))
+			{
+				OutErrorCode = TEXT("live-editor-write-property-type-unsupported");
+				OutErrorMessage = TEXT("The reference property value could not be read.");
+				return false;
+			}
+			if (BeforePath.IsEmpty())
+			{
+				OutValue = MakeShared<FJsonValueNull>();
+			}
+			else
+			{
+				OutValue = MakeShared<FJsonValueString>(BeforePath);
+			}
+			return true;
+		}
+
+		bool ApplyValue(
+			FProperty* Property,
+			void* ValueAddress,
+			const TSharedPtr<FJsonValue>& Value,
+			FString& OutErrorCode,
+			FString& OutErrorMessage) override
+		{
+			FString SetError;
+			FString SetReferenceType;
+			FString SetReferencePath;
+			ResolvedClassPath.Reset();
+			if (!SetAssetReferenceFromJson(
+					Property,
+					ValueAddress,
+					Value,
+					SetReferenceType,
+					SetReferencePath,
+					ResolvedClassPath,
+					SetError))
+			{
+				OutErrorCode = TEXT("live-editor-write-value-invalid");
+				OutErrorMessage = SetError;
+				return false;
+			}
+			return true;
+		}
+
+		bool ReadAfter(
+			FProperty* Property,
+			void* ValueAddress,
+			const TSharedPtr<FJsonValue>& Requested,
+			TSharedPtr<FJsonValue>& OutValue,
+			FString& OutErrorCode,
+			FString& OutErrorMessage) override
+		{
+			FString AfterPath;
+			if (!ReadAssetReferencePath(Property, ValueAddress, AfterPath))
+			{
+				OutErrorCode = TEXT("live-editor-write-apply-failed");
+				OutErrorMessage = TEXT("The reference property could not be read back after the write.");
+				return false;
+			}
+			if (AfterPath.IsEmpty())
+			{
+				OutValue = MakeShared<FJsonValueNull>();
+			}
+			else
+			{
+				OutValue = MakeShared<FJsonValueString>(AfterPath);
+			}
+			return true;
+		}
+
+		bool SemanticEqual(const TSharedPtr<FJsonValue>& Left, const TSharedPtr<FJsonValue>& Right) override
+		{
+			return UEAgentKit::StructuredPropertyJson::JsonEqual(Left, Right);
+		}
+	};
+
+	class FLiveWriteStructuredIO final : public UEAgentKitLiveWrite::ILiveWriteValueIO
+	{
+	public:
+		bool ReadBefore(
+			FProperty* Property,
+			void* ValueAddress,
+			TSharedPtr<FJsonValue>& OutValue,
+			FString& OutErrorCode,
+			FString& OutErrorMessage) override
+		{
+			FString Error;
+			if (!UEAgentKit::StructuredPropertyJson::ExportValue(Property, ValueAddress, OutValue, Error))
+			{
+				OutErrorCode = TEXT("live-editor-write-apply-failed");
+				OutErrorMessage = TEXT("Structured property could not be exported before the write: ") + Error;
+				return false;
+			}
+			return true;
+		}
+
+		bool ApplyValue(
+			FProperty* Property,
+			void* ValueAddress,
+			const TSharedPtr<FJsonValue>& Value,
+			FString& OutErrorCode,
+			FString& OutErrorMessage) override
+		{
+			FString Error;
+			if (!UEAgentKit::StructuredPropertyJson::ImportValue(Property, ValueAddress, Value, Error))
+			{
+				OutErrorCode = TEXT("live-editor-write-value-invalid");
+				OutErrorMessage = Error;
+				return false;
+			}
+			return true;
+		}
+
+		bool ReadAfter(
+			FProperty* Property,
+			void* ValueAddress,
+			const TSharedPtr<FJsonValue>& Requested,
+			TSharedPtr<FJsonValue>& OutValue,
+			FString& OutErrorCode,
+			FString& OutErrorMessage) override
+		{
+			FString Error;
+			if (!UEAgentKit::StructuredPropertyJson::ExportValue(Property, ValueAddress, OutValue, Error)
+				|| !UEAgentKit::StructuredPropertyJson::JsonEqual(OutValue, Requested))
+			{
+				OutErrorCode = TEXT("live-editor-write-apply-failed");
+				OutErrorMessage = TEXT("Structured property read-back verification failed: ") + Error;
+				return false;
+			}
+			return true;
+		}
+
+		bool SemanticEqual(const TSharedPtr<FJsonValue>& Left, const TSharedPtr<FJsonValue>& Right) override
+		{
+			return UEAgentKit::StructuredPropertyJson::JsonEqual(Left, Right);
+		}
+	};
+
 	bool TryApplyScalarPropertyLive(
 		UObject* Asset,
 		UPackage* Package,
@@ -472,86 +641,34 @@ namespace
 		FString& OutErrorCode,
 		FString& OutErrorMessage)
 	{
-		TSharedPtr<FJsonValue> BeforeValue;
-		if (!ReadScalarValue(Property, ValueAddress, BeforeValue))
-		{
-			OutErrorCode = TEXT("live-editor-write-property-type-unsupported");
-			OutErrorMessage = TEXT("The Live Write scalar capability supports only scalar, enum, string, name, and text properties.");
-			return false;
-		}
-		FString BeforeText;
-		Property->ExportTextItem_Direct(BeforeText, ValueAddress, ValueAddress, Asset, PPF_SerializedAsImportText);
+		FLiveWriteScalarIO IO;
+		UEAgentKitLiveWrite::FLiveWriteContext Context;
+		Context.Asset = Asset;
+		Context.Package = Package;
+		Context.Property = Property;
+		Context.ValueAddress = ValueAddress;
+		Context.SessionId = SessionId;
+		Context.TransactionTitle = TEXT("UE Agent Kit: Set Asset Property");
+		Context.AssetPath = AssetPath;
+		Context.PropertyPath = PropertyPath;
+		Context.Value = Value;
 
-		FScopedTransaction Transaction(FText::FromString(TEXT("UE Agent Kit: Set Asset Property")));
-		Asset->Modify();
-		FString SetError;
-		if (!SetScalarValue(Property, ValueAddress, Value, SetError))
+		UEAgentKitLiveWrite::FLiveWriteEvidence Evidence;
+		if (!UEAgentKitLiveWrite::RunLiveWriteTransaction(Context, IO, Evidence, OutErrorCode, OutErrorMessage))
 		{
-			Transaction.Cancel();
-			OutErrorCode = TEXT("live-editor-write-value-invalid");
-			OutErrorMessage = SetError;
-			return false;
-		}
-		FString AfterText;
-		Property->ExportTextItem_Direct(AfterText, ValueAddress, ValueAddress, Asset, PPF_SerializedAsImportText);
-		if (BeforeText == AfterText)
-		{
-			Transaction.Cancel();
-			TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
-			Result->SetStringField(TEXT("action"), TEXT("apply-asset-property-live"));
-			Result->SetStringField(TEXT("operation"), TEXT("setAssetProperty"));
-			Result->SetStringField(TEXT("assetPath"), AssetPath);
-			Result->SetStringField(TEXT("propertyPath"), PropertyPath);
-			Result->SetStringField(TEXT("propertyType"), Property->GetClass()->GetName());
-			Result->SetStringField(TEXT("valueKind"), TEXT("scalar"));
-			Result->SetField(TEXT("beforeValue"), BeforeValue);
-			Result->SetField(TEXT("afterValue"), BeforeValue);
-			Result->SetBoolField(TEXT("changed"), false);
-			Result->SetBoolField(TEXT("transactionRecorded"), false);
-			Result->SetBoolField(TEXT("packageDirtyBefore"), false);
-			Result->SetBoolField(TEXT("packageDirtyAfter"), Package->IsDirty());
-			Result->SetBoolField(TEXT("saved"), false);
-			Result->SetStringField(TEXT("editorSessionId"), SessionId);
-			OutResult = Result;
-			return true;
-		}
-
-		FPropertyChangedEvent ChangedEvent(Property, EPropertyChangeType::ValueSet);
-		Asset->PostEditChangeProperty(ChangedEvent);
-		Asset->MarkPackageDirty();
-		TSharedPtr<FJsonValue> AfterValue;
-		if (!ReadScalarValue(Property, ValueAddress, AfterValue) || !Package->IsDirty())
-		{
-			Property->ImportText_Direct(*BeforeText, ValueAddress, Asset, PPF_SerializedAsImportText);
-			FPropertyChangedEvent RestoreEvent(Property, EPropertyChangeType::ValueSet);
-			Asset->PostEditChangeProperty(RestoreEvent);
-			Package->SetDirtyFlag(false);
-			Transaction.Cancel();
-			OutErrorCode = TEXT("live-editor-write-apply-failed");
-			OutErrorMessage = TEXT("The Editor did not confirm the changed Dirty package state.");
 			return false;
 		}
 
 		TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
-		Result->SetStringField(TEXT("action"), TEXT("apply-asset-property-live"));
-		Result->SetStringField(TEXT("operation"), TEXT("setAssetProperty"));
-		Result->SetStringField(TEXT("assetPath"), AssetPath);
-		Result->SetStringField(TEXT("packageName"), Package->GetName());
-		Result->SetStringField(TEXT("classPath"), Asset->GetClass()->GetPathName());
-		Result->SetStringField(TEXT("propertyPath"), PropertyPath);
-		Result->SetStringField(TEXT("propertyType"), Property->GetClass()->GetName());
-		Result->SetStringField(TEXT("valueKind"), TEXT("scalar"));
-		Result->SetField(TEXT("beforeValue"), BeforeValue);
-		Result->SetField(TEXT("afterValue"), AfterValue);
-		Result->SetBoolField(TEXT("changed"), true);
-		Result->SetBoolField(TEXT("transactionRecorded"), true);
-		Result->SetStringField(TEXT("transactionTitle"), TEXT("UE Agent Kit: Set Asset Property"));
-		Result->SetBoolField(TEXT("assetOpen"), true);
-		Result->SetBoolField(TEXT("loadedByBridge"), false);
-		Result->SetBoolField(TEXT("packageDirtyBefore"), false);
-		Result->SetBoolField(TEXT("packageDirtyAfter"), Package->IsDirty());
-		Result->SetBoolField(TEXT("saved"), false);
-		Result->SetStringField(TEXT("editorSessionId"), SessionId);
+		UEAgentKitLiveWrite::FillLiveWriteEvidence(
+			Result,
+			Context,
+			Evidence,
+			TEXT("setAssetProperty"),
+			TEXT("scalar"),
+			Property->GetClass()->GetName(),
+			Evidence.bChanged,
+			false);
 		OutResult = Result;
 		return true;
 	}
@@ -585,145 +702,38 @@ namespace
 			return false;
 		}
 
-		FString BeforePath;
-		if (!ReadAssetReferencePath(Property, ValueAddress, BeforePath))
-		{
-			OutErrorCode = TEXT("live-editor-write-property-type-unsupported");
-			OutErrorMessage = TEXT("The reference property value could not be read.");
-			return false;
-		}
-		TSharedPtr<FJsonValue> BeforeValue;
-		if (BeforePath.IsEmpty())
-		{
-			BeforeValue = MakeShared<FJsonValueNull>();
-		}
-		else
-		{
-			BeforeValue = MakeShared<FJsonValueString>(BeforePath);
-		}
+		FLiveWriteReferenceIO IO;
+		UEAgentKitLiveWrite::FLiveWriteContext Context;
+		Context.Asset = Asset;
+		Context.Package = Package;
+		Context.Property = Property;
+		Context.ValueAddress = ValueAddress;
+		Context.SessionId = SessionId;
+		Context.TransactionTitle = TEXT("UE Agent Kit: Set Asset Reference Property");
+		Context.AssetPath = AssetPath;
+		Context.PropertyPath = PropertyPath;
+		Context.Value = Value;
 
-		const FScopedPropertyValueBackup Backup(Property, ValueAddress);
-		FScopedTransaction Transaction(FText::FromString(TEXT("UE Agent Kit: Set Asset Reference Property")));
-		Asset->Modify();
-
-		FString SetError;
-		FString SetReferenceType;
-		FString SetReferencePath;
-		FString SetResolvedClassPath;
-		if (!SetAssetReferenceFromJson(
-				Property,
-				ValueAddress,
-				Value,
-				SetReferenceType,
-				SetReferencePath,
-				SetResolvedClassPath,
-				SetError))
+		UEAgentKitLiveWrite::FLiveWriteEvidence Evidence;
+		if (!UEAgentKitLiveWrite::RunLiveWriteTransaction(Context, IO, Evidence, OutErrorCode, OutErrorMessage))
 		{
-			Backup.Restore(ValueAddress);
-			FPropertyChangedEvent RestoreEvent(Property, EPropertyChangeType::ValueSet);
-			Asset->PostEditChangeProperty(RestoreEvent);
-			Package->SetDirtyFlag(false);
-			Transaction.Cancel();
-			OutErrorCode = TEXT("live-editor-write-value-invalid");
-			OutErrorMessage = SetError;
 			return false;
-		}
-
-		FString AfterPath;
-		if (!ReadAssetReferencePath(Property, ValueAddress, AfterPath))
-		{
-			Backup.Restore(ValueAddress);
-			FPropertyChangedEvent RestoreEvent(Property, EPropertyChangeType::ValueSet);
-			Asset->PostEditChangeProperty(RestoreEvent);
-			Package->SetDirtyFlag(false);
-			Transaction.Cancel();
-			OutErrorCode = TEXT("live-editor-write-apply-failed");
-			OutErrorMessage = TEXT("The reference property could not be read back after the write.");
-			return false;
-		}
-		if (AfterPath == BeforePath)
-		{
-			Transaction.Cancel();
-			TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
-			Result->SetStringField(TEXT("action"), TEXT("apply-asset-property-live"));
-			Result->SetStringField(TEXT("operation"), TEXT("setAssetReferenceProperty"));
-			Result->SetStringField(TEXT("assetPath"), AssetPath);
-			Result->SetStringField(TEXT("packageName"), Package->GetName());
-			Result->SetStringField(TEXT("classPath"), Asset->GetClass()->GetPathName());
-			Result->SetStringField(TEXT("propertyPath"), PropertyPath);
-			Result->SetStringField(TEXT("propertyType"), Property->GetClass()->GetName());
-			Result->SetStringField(TEXT("valueKind"), TEXT("reference"));
-			Result->SetStringField(TEXT("referenceType"), ReferenceTypeName);
-			Result->SetStringField(TEXT("referenceConstraintClass"), ConstraintClass->GetPathName());
-			Result->SetField(TEXT("referencePath"), BeforeValue);
-			Result->SetStringField(TEXT("resolvedReferenceClass"), TEXT(""));
-			Result->SetField(TEXT("beforeValue"), BeforeValue);
-			Result->SetField(TEXT("afterValue"), BeforeValue);
-			Result->SetBoolField(TEXT("changed"), false);
-			Result->SetBoolField(TEXT("transactionRecorded"), false);
-			Result->SetStringField(TEXT("transactionTitle"), TEXT(""));
-			Result->SetBoolField(TEXT("assetOpen"), true);
-			Result->SetBoolField(TEXT("loadedByBridge"), false);
-			Result->SetBoolField(TEXT("packageDirtyBefore"), false);
-			Result->SetBoolField(TEXT("packageDirtyAfter"), Package->IsDirty());
-			Result->SetBoolField(TEXT("dirtyBefore"), false);
-			Result->SetBoolField(TEXT("dirtyAfter"), Package->IsDirty());
-			Result->SetBoolField(TEXT("saved"), false);
-			Result->SetStringField(TEXT("editorSessionId"), SessionId);
-			OutResult = Result;
-			return true;
-		}
-
-		FPropertyChangedEvent ChangedEvent(Property, EPropertyChangeType::ValueSet);
-		Asset->PostEditChangeProperty(ChangedEvent);
-		Asset->MarkPackageDirty();
-		if (!Package->IsDirty())
-		{
-			Backup.Restore(ValueAddress);
-			FPropertyChangedEvent RestoreEvent(Property, EPropertyChangeType::ValueSet);
-			Asset->PostEditChangeProperty(RestoreEvent);
-			Package->SetDirtyFlag(false);
-			Transaction.Cancel();
-			OutErrorCode = TEXT("live-editor-write-apply-failed");
-			OutErrorMessage = TEXT("The Editor did not confirm the changed Dirty package state.");
-			return false;
-		}
-		TSharedPtr<FJsonValue> AfterValue;
-		if (AfterPath.IsEmpty())
-		{
-			AfterValue = MakeShared<FJsonValueNull>();
-		}
-		else
-		{
-			AfterValue = MakeShared<FJsonValueString>(AfterPath);
 		}
 
 		TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
-		Result->SetStringField(TEXT("action"), TEXT("apply-asset-property-live"));
-		Result->SetStringField(TEXT("operation"), TEXT("setAssetReferenceProperty"));
-		Result->SetStringField(TEXT("assetPath"), AssetPath);
-		Result->SetStringField(TEXT("packageName"), Package->GetName());
-		Result->SetStringField(TEXT("classPath"), Asset->GetClass()->GetPathName());
-		Result->SetStringField(TEXT("propertyPath"), PropertyPath);
-		Result->SetStringField(TEXT("propertyType"), Property->GetClass()->GetName());
-		Result->SetStringField(TEXT("valueKind"), TEXT("reference"));
+		UEAgentKitLiveWrite::FillLiveWriteEvidence(
+			Result,
+			Context,
+			Evidence,
+			TEXT("setAssetReferenceProperty"),
+			TEXT("reference"),
+			Property->GetClass()->GetName(),
+			true,
+			true);
 		Result->SetStringField(TEXT("referenceType"), ReferenceTypeName);
 		Result->SetStringField(TEXT("referenceConstraintClass"), ConstraintClass->GetPathName());
-		Result->SetField(TEXT("referencePath"), AfterValue);
-		Result->SetStringField(TEXT("resolvedReferenceClass"), SetResolvedClassPath);
-		Result->SetField(TEXT("beforeValue"), BeforeValue);
-		Result->SetField(TEXT("afterValue"), AfterValue);
-		Result->SetBoolField(TEXT("changed"), true);
-		Result->SetBoolField(TEXT("transactionRecorded"), true);
-		Result->SetStringField(TEXT("transactionTitle"), TEXT("UE Agent Kit: Set Asset Reference Property"));
-		Result->SetBoolField(TEXT("assetOpen"), true);
-		Result->SetBoolField(TEXT("loadedByBridge"), false);
-		Result->SetBoolField(TEXT("packageDirtyBefore"), false);
-		Result->SetBoolField(TEXT("packageDirtyAfter"), Package->IsDirty());
-		Result->SetBoolField(TEXT("dirtyBefore"), false);
-		Result->SetBoolField(TEXT("dirtyAfter"), Package->IsDirty());
-		Result->SetBoolField(TEXT("saved"), false);
-		Result->SetStringField(TEXT("editorSessionId"), SessionId);
+		Result->SetField(TEXT("referencePath"), Evidence.AfterValue);
+		Result->SetStringField(TEXT("resolvedReferenceClass"), Evidence.bChanged ? IO.ResolvedClassPath : FString());
 		OutResult = Result;
 		return true;
 	}
@@ -763,139 +773,52 @@ namespace
 			OutErrorMessage = TEXT("Structured property is unsupported: ") + Error;
 			return false;
 		}
-		TSharedPtr<FJsonValue> BeforeValue;
-		if (!UEAgentKit::StructuredPropertyJson::ExportValue(Property, ValueAddress, BeforeValue, Error))
-		{
-			OutErrorCode = TEXT("live-editor-write-apply-failed");
-			OutErrorMessage = TEXT("Structured property could not be exported before the write: ") + Error;
-			return false;
-		}
 
-		const FScopedPropertyValueBackup Backup(Property, ValueAddress);
-		if (!Backup.IsValid())
-		{
-			OutErrorCode = TEXT("live-editor-write-apply-failed");
-			OutErrorMessage = TEXT("Could not allocate the structured property snapshot.");
-			return false;
-		}
-		const bool bPackageDirtyBefore = Package->IsDirty();
-		FScopedTransaction Transaction(FText::FromString(TEXT("UE Agent Kit: Set Asset Structured Property")));
-		Asset->Modify();
+		FLiveWriteStructuredIO IO;
+		UEAgentKitLiveWrite::FLiveWriteContext Context;
+		Context.Asset = Asset;
+		Context.Package = Package;
+		Context.Property = Property;
+		Context.ValueAddress = ValueAddress;
+		Context.SessionId = SessionId;
+		Context.TransactionTitle = TEXT("UE Agent Kit: Set Asset Structured Property");
+		Context.AssetPath = AssetPath;
+		Context.PropertyPath = PropertyPath;
+		Context.Value = Value;
 
-		if (!UEAgentKit::StructuredPropertyJson::ImportValue(Property, ValueAddress, Value, Error))
+		UEAgentKitLiveWrite::FLiveWriteEvidence Evidence;
+		if (!UEAgentKitLiveWrite::RunLiveWriteTransaction(Context, IO, Evidence, OutErrorCode, OutErrorMessage))
 		{
-			Backup.Restore(ValueAddress);
-			FPropertyChangedEvent RestoreEvent(Property, EPropertyChangeType::ValueSet);
-			Asset->PostEditChangeProperty(RestoreEvent);
-			Package->SetDirtyFlag(bPackageDirtyBefore);
-			Transaction.Cancel();
-			OutErrorCode = TEXT("live-editor-write-value-invalid");
-			OutErrorMessage = Error;
-			return false;
-		}
-
-		TSharedPtr<FJsonValue> AfterValue;
-		if (!UEAgentKit::StructuredPropertyJson::ExportValue(Property, ValueAddress, AfterValue, Error)
-			|| !UEAgentKit::StructuredPropertyJson::JsonEqual(AfterValue, Value))
-		{
-			Backup.Restore(ValueAddress);
-			FPropertyChangedEvent RestoreEvent(Property, EPropertyChangeType::ValueSet);
-			Asset->PostEditChangeProperty(RestoreEvent);
-			Package->SetDirtyFlag(bPackageDirtyBefore);
-			Transaction.Cancel();
-			OutErrorCode = TEXT("live-editor-write-apply-failed");
-			OutErrorMessage = TEXT("Structured property read-back verification failed: ") + Error;
-			return false;
-		}
-
-		if (UEAgentKit::StructuredPropertyJson::JsonEqual(AfterValue, BeforeValue))
-		{
-			Backup.Restore(ValueAddress);
-			Package->SetDirtyFlag(bPackageDirtyBefore);
-			Transaction.Cancel();
-			TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
-			Result->SetStringField(TEXT("action"), TEXT("apply-asset-property-live"));
-			Result->SetStringField(TEXT("operation"), TEXT("setAssetStructuredProperty"));
-			Result->SetStringField(TEXT("assetPath"), AssetPath);
-			Result->SetStringField(TEXT("packageName"), Package->GetName());
-			Result->SetStringField(TEXT("classPath"), Asset->GetClass()->GetPathName());
-			Result->SetStringField(TEXT("propertyPath"), PropertyPath);
-			Result->SetStringField(TEXT("propertyType"), Property->GetClass()->GetName());
-			Result->SetStringField(TEXT("valueKind"), TEXT("structured"));
-			Result->SetStringField(
-				TEXT("structuredKind"),
-				UEAgentKit::StructuredPropertyJson::KindName(StructuredKind));
-			Result->SetField(TEXT("structuredSchema"), StructuredSchema);
-			Result->SetField(TEXT("beforeValue"), BeforeValue);
-			Result->SetField(TEXT("afterValue"), BeforeValue);
-			Result->SetArrayField(TEXT("diff"), TArray<TSharedPtr<FJsonValue>>());
-			Result->SetBoolField(TEXT("diffTruncated"), false);
-			Result->SetBoolField(TEXT("changed"), false);
-			Result->SetBoolField(TEXT("transactionRecorded"), false);
-			Result->SetStringField(TEXT("transactionTitle"), TEXT(""));
-			Result->SetBoolField(TEXT("assetOpen"), true);
-			Result->SetBoolField(TEXT("loadedByBridge"), false);
-			Result->SetBoolField(TEXT("packageDirtyBefore"), bPackageDirtyBefore);
-			Result->SetBoolField(TEXT("packageDirtyAfter"), Package->IsDirty());
-			Result->SetBoolField(TEXT("dirtyBefore"), bPackageDirtyBefore);
-			Result->SetBoolField(TEXT("dirtyAfter"), Package->IsDirty());
-			Result->SetBoolField(TEXT("saved"), false);
-			Result->SetStringField(TEXT("editorSessionId"), SessionId);
-			OutResult = Result;
-			return true;
-		}
-
-		FPropertyChangedEvent ChangedEvent(Property, EPropertyChangeType::ValueSet);
-		Asset->PostEditChangeProperty(ChangedEvent);
-		Asset->MarkPackageDirty();
-		if (!Package->IsDirty())
-		{
-			Backup.Restore(ValueAddress);
-			FPropertyChangedEvent RestoreEvent(Property, EPropertyChangeType::ValueSet);
-			Asset->PostEditChangeProperty(RestoreEvent);
-			Package->SetDirtyFlag(bPackageDirtyBefore);
-			Transaction.Cancel();
-			OutErrorCode = TEXT("live-editor-write-apply-failed");
-			OutErrorMessage = TEXT("The Editor did not confirm the changed Dirty package state.");
 			return false;
 		}
 
 		TArray<TSharedPtr<FJsonValue>> StructuredDiff;
 		bool bStructuredDiffTruncated = false;
-		UEAgentKit::StructuredPropertyJson::BuildDiff(
-			BeforeValue,
-			AfterValue,
-			StructuredDiff,
-			bStructuredDiffTruncated);
+		if (Evidence.bChanged)
+		{
+			UEAgentKit::StructuredPropertyJson::BuildDiff(
+				Evidence.BeforeValue,
+				Evidence.AfterValue,
+				StructuredDiff,
+				bStructuredDiffTruncated);
+		}
 
 		TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
-		Result->SetStringField(TEXT("action"), TEXT("apply-asset-property-live"));
-		Result->SetStringField(TEXT("operation"), TEXT("setAssetStructuredProperty"));
-		Result->SetStringField(TEXT("assetPath"), AssetPath);
-		Result->SetStringField(TEXT("packageName"), Package->GetName());
-		Result->SetStringField(TEXT("classPath"), Asset->GetClass()->GetPathName());
-		Result->SetStringField(TEXT("propertyPath"), PropertyPath);
-		Result->SetStringField(TEXT("propertyType"), Property->GetClass()->GetName());
-		Result->SetStringField(TEXT("valueKind"), TEXT("structured"));
+		UEAgentKitLiveWrite::FillLiveWriteEvidence(
+			Result,
+			Context,
+			Evidence,
+			TEXT("setAssetStructuredProperty"),
+			TEXT("structured"),
+			Property->GetClass()->GetName(),
+			true,
+			true);
 		Result->SetStringField(
 			TEXT("structuredKind"),
 			UEAgentKit::StructuredPropertyJson::KindName(StructuredKind));
 		Result->SetField(TEXT("structuredSchema"), StructuredSchema);
-		Result->SetField(TEXT("beforeValue"), BeforeValue);
-		Result->SetField(TEXT("afterValue"), AfterValue);
 		Result->SetArrayField(TEXT("diff"), StructuredDiff);
 		Result->SetBoolField(TEXT("diffTruncated"), bStructuredDiffTruncated);
-		Result->SetBoolField(TEXT("changed"), true);
-		Result->SetBoolField(TEXT("transactionRecorded"), true);
-		Result->SetStringField(TEXT("transactionTitle"), TEXT("UE Agent Kit: Set Asset Structured Property"));
-		Result->SetBoolField(TEXT("assetOpen"), true);
-		Result->SetBoolField(TEXT("loadedByBridge"), false);
-		Result->SetBoolField(TEXT("packageDirtyBefore"), bPackageDirtyBefore);
-		Result->SetBoolField(TEXT("packageDirtyAfter"), Package->IsDirty());
-		Result->SetBoolField(TEXT("dirtyBefore"), bPackageDirtyBefore);
-		Result->SetBoolField(TEXT("dirtyAfter"), Package->IsDirty());
-		Result->SetBoolField(TEXT("saved"), false);
-		Result->SetStringField(TEXT("editorSessionId"), SessionId);
 		OutResult = Result;
 		return true;
 	}

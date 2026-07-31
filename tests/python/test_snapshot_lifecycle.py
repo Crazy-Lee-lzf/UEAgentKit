@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 TOOL_ROOT = Path(__file__).resolve().parents[2]
@@ -115,6 +116,42 @@ class SnapshotLifecycleTests(unittest.TestCase):
         write_json(active.pointer_path, pointer)
         with self.assertRaisesRegex(SnapshotLifecycleError, "does not match"):
             resolve_active_snapshot(self.database, self.revision_export, self.work_root, PROJECT)
+
+    def test_startup_freeze_retries_transient_replace_lock(self) -> None:
+        active = resolve_active_snapshot(self.database, self.revision_export, self.work_root, PROJECT)
+        self.assertTrue(active.legacy)
+        import ue_agent_kit.snapshot_lifecycle as lifecycle
+
+        real_replace = lifecycle.os.replace
+        calls: list[int] = []
+
+        def flaky_replace(source: str, target: str) -> None:
+            calls.append(1)
+            if len(calls) == 1:
+                raise PermissionError("WinError 5: access denied on a freshly copied SQLite tree")
+            return real_replace(source, target)
+
+        with mock.patch.object(lifecycle.os, "replace", flaky_replace):
+            frozen = freeze_active_snapshot(active)
+        try:
+            self.assertGreaterEqual(len(calls), 2)
+            self.assertEqual(frozen.database.read_bytes(), b"database-v1")
+        finally:
+            frozen.cleanup()
+
+    def test_startup_freeze_gives_up_after_bounded_retries(self) -> None:
+        active = resolve_active_snapshot(self.database, self.revision_export, self.work_root, PROJECT)
+        self.assertTrue(active.legacy)
+        import ue_agent_kit.snapshot_lifecycle as lifecycle
+
+        def always_fail_replace(_: str, __: str) -> None:
+            raise PermissionError("WinError 5: persistent lock")
+
+        with mock.patch.object(lifecycle.os, "replace", always_fail_replace):
+            with self.assertRaises(PermissionError):
+                freeze_active_snapshot(active)
+        self.assertFalse(list((self.work_root / "sessions").glob("session_*")))
+        self.assertFalse(list((self.work_root / "sessions").glob(".*.staging")))
 
 
 if __name__ == "__main__":

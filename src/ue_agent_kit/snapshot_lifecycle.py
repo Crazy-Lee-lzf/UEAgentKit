@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -217,6 +218,27 @@ def resolve_active_snapshot(
     )
 
 
+def _replace_directory_with_retry(staging: Path, root: Path) -> None:
+    """Move the completed staging directory into place.
+
+    On Windows, antivirus or file-indexing scans can transiently lock a newly
+    copied SQLite tree, making the final directory rename fail with a
+    PermissionError.  This helper is only used during MCP server startup when
+    freezing the active snapshot, so a short bounded retry does not mask any
+    Tool/Plan/Apply phase error.
+    """
+    last_error: OSError | None = None
+    for attempt in range(4):
+        try:
+            os.replace(staging, root)
+            return
+        except OSError as exc:
+            last_error = exc
+            time.sleep(0.25 * (attempt + 1))
+    if last_error is not None:
+        raise last_error
+
+
 def freeze_active_snapshot(active: ActiveSnapshot) -> FrozenSessionSnapshot:
     session_id = "session_" + uuid.uuid4().hex
     if not active.legacy:
@@ -241,7 +263,7 @@ def freeze_active_snapshot(active: ActiveSnapshot) -> FrozenSessionSnapshot:
         if sha256_file(database) != sha256_file(active.database):
             raise SnapshotLifecycleError("snapshot-freeze-failed", "The frozen session database hash does not match the active snapshot.")
         clone_tree(active.revision_export, staging / "revision-export", prefer_hardlinks=False)
-        os.replace(staging, root)
+        _replace_directory_with_retry(staging, root)
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
         shutil.rmtree(root, ignore_errors=True)

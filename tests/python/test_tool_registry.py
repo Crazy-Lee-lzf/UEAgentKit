@@ -245,24 +245,26 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertNotIn("LoadObject", scalar_section)
         self.assertNotIn("StaticLoadObject", scalar_section)
         self.assertNotIn("SavePackage", live_write)
-        self.assertIn("FScopedTransaction", live_write)
-        self.assertIn("Asset->Modify()", live_write)
-        self.assertIn("PostEditChangeProperty", live_write)
-        self.assertIn("MarkPackageDirty", live_write)
+        live_write_frame = (private_root / "LiveWriteTransaction.cpp").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("FScopedTransaction", live_write_frame)
+        self.assertIn("Asset->Modify()", live_write_frame)
+        self.assertIn("PostEditChangeProperty", live_write_frame)
+        self.assertIn("MarkPackageDirty", live_write_frame)
         self.assertIn("Property->ArrayDim != 1", live_write)
         self.assertIn("Live Editor writes do not support native fixed-array properties.", live_write)
-        structured_section = live_write.split("bool TryApplyStructuredPropertyLive(", 1)[1]
-        self.assertIn("FScopedPropertyValueBackup Backup(Property, ValueAddress)", structured_section)
-        noop_branch = structured_section.split("JsonEqual(AfterValue, BeforeValue))", 1)[1]
+        self.assertIn("RunLiveWriteTransaction", live_write)
+        noop_branch = live_write_frame.split("IO.SemanticEqual(BeforeValue, AfterValue))", 1)[1]
         # A structured no-op must restore the deep-copied snapshot before restoring the
         # Dirty flag and cancelling the transaction, because ImportValue may clear and
         # rebuild Array/Set/Map containers even for canonically identical values.
         self.assertLess(
-            noop_branch.index("Backup.Restore(ValueAddress)"),
+            noop_branch.index("Snapshot.Restore(Context.ValueAddress)"),
             noop_branch.index("Transaction.Cancel()"),
         )
         self.assertLess(
-            noop_branch.index("Package->SetDirtyFlag(bPackageDirtyBefore)"),
+            noop_branch.index("Context.Package->SetDirtyFlag(bPackageDirtyBefore)"),
             noop_branch.index("Transaction.Cancel()"),
         )
         self.assertIn('"DataValidation"', build_rules)

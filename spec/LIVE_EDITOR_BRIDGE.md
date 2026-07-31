@@ -219,6 +219,7 @@ Bridge 注册为 `FOutputDevice`，保留最多 4096 条当前会话日志，并
 - 结构化写入强制复用 `UEAgentKit::StructuredPropertyJson`（`GetKind`/`BuildSchema`/`ExportValue`/`ImportValue`/`CanonicalJson`/`JsonEqual`/`BuildDiff`），不引入第二套序列化逻辑；值在 Bridge 内按导出的稳定 Schema 导入并回读验证。固定数组（ArrayDim != 1）与非结构化属性在 Plan/Bridge 两个阶段都被拒绝；值类型不匹配、Struct 字段不完整、Set/Map 条目未按 Canonical JSON 唯一有序都会在 Plan 阶段被 Python 验证器拒绝。
 - Bridge 独立校验：引用路径必须是合法 `/Game/...Object` Object Path（禁止 Subobject Path），`referenceType` 必须与实际 Property 类型完全一致，目标引用必须存在，Object/Class 必须满足 Property 的 Constraint Class；SoftObject/SoftClass 也会解析并验证实际 Class（第一版允许为了验证而加载目标）。
 - 在 Game Thread 中使用 `FScopedTransaction` 与 `UObject::Modify()`，因此成功修改进入 Editor Undo 栈；修改前创建 Property Value Snapshot，任何失败都会恢复原值、恢复原 Dirty 状态并 `Transaction.Cancel()`，不留下部分修改、Dirty 状态或有效 Undo Transaction；No-op 不制造 Undo 或 Dirty。
+- 三类写入共享同一基础层 `UEAgentKitLiveWrite`（`LiveWriteTransaction.h/.cpp`）：统一修改前 Dirty 捕获、深拷贝 Snapshot、Transaction 创建/取消/标题、`Modify`/Apply/回读/语义 No-op、No-op 与失败恢复、`PostEditChangeProperty` 通知策略、成功 Dirty 确认和统一 Evidence；每个 Value Kind 只提供 `ReadBefore`/`ApplyValue`/`ReadAfter`/`SemanticEqual` IO 策略，错误码与返回 JSON 契约不变。
 - 调用 `PostEditChangeProperty()` 并标记 Package Dirty，但绝不调用 `SavePackage`。
 - 返回 `operation`、`valueKind`、`loadedByBridge=false`、Before/After、Dirty、Transaction、referenceType/referencePath/resolvedReferenceClass 和 Editor Session 证据；结构化写入额外返回 `structuredKind`、`structuredSchema`、`diff` 与 `diffTruncated`；标量 Operation 的既有返回字段与值保持兼容。
 - PIE/SIE、地图、Dirty Package、Blueprint、嵌套属性路径、不支持的属性类型、容器、Material Instance 与 DataTable Live Apply 全部拒绝。
