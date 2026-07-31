@@ -8,7 +8,7 @@ UE Agent Kit is an open-source Unreal Engine asset analysis, indexing, and polic
 
 The latest published release is **0.6.0** and targets **Unreal Engine 5.6**. This release adds Revision-aware Project Memory with independent SQLite/FTS5 storage, six traceable record types, provenance and status transitions, Revision invalidation, evidence digests, fixed-project MCP/CLI access, auditable export, and verified Workflow/rollback Task Evidence.
 
-> **Release status**: 0.6.0 is complete. Without Memory, Offline/Live/Workflow/Combined remain 5/23/25/43 tools; enabling fixed Project Memory changes them to 12/30/32/50. The next stage is 0.7.0 Context/Analysis.
+> **Release status**: 0.6.0 is complete. Without Memory, Offline/Live/Workflow/Combined remain 5/23/26/44 tools; enabling fixed Project Memory changes them to 12/30/33/51. The next stage is 0.7.0 Context/Analysis.
 
 > **AI Generated**: Most code and documentation in this project are AI-generated and reviewed through human inspection, UE 5.6 compilation, automated tests, and real-project regression validation.
 
@@ -252,12 +252,16 @@ scripts\TestMcpLiveEditor.cmd ^
   -EngineRoot "<UE_5.6>" ^
   -ProjectPath "<TEST_PROJECT>.uproject"
 
+scripts\TestMcpLiveWrite.cmd ^
+  -EngineRoot "<UE_5.6>" ^
+  -ProjectPath "<TEST_PROJECT>.uproject"
+
 scripts\TestMcpSnapshotRefresh.cmd ^
   -EngineRoot "<UE_5.6>" ^
   -ProjectPath "<TEST_PROJECT>.uproject"
 ```
 
-The MCP Client still uses local `stdio` only. Default mode exposes 5 offline read-only tools; `-EnableLiveEditor -ProjectPath <fixed project>` adds 10 live read tools plus 8 bounded Daily Actions for a total of 23; the fixed-project workflow exposes 25; combining both exposes 43. Live reads include bounded Output Log queries, compile diagnostics, non-loading live asset inspection, and focused Graph/Node selection for ordinary Blueprint Editors. Daily Actions open or focus assets, sync the Content Browser, focus an ActorGuid, compile a Blueprint in memory, and run official Data Validation without saving packages. Workflow mode adds four-source asset state and safe single-asset index refresh:
+The MCP Client still uses local `stdio` only. Default mode exposes 5 offline read-only tools; `-EnableLiveEditor -ProjectPath <fixed project>` adds 10 live read tools plus 8 bounded Daily Actions for a total of 23; the fixed-project workflow exposes 26; combining both exposes 44. Live reads include bounded Output Log queries, compile diagnostics, non-loading live asset inspection, and focused Graph/Node selection for ordinary Blueprint Editors. Daily Actions open or focus assets, sync the Content Browser, focus an ActorGuid, compile a Blueprint in memory, and run official Data Validation without saving packages. Workflow mode adds four-source asset state and safe single-asset index refresh:
 
 ```bat
 claude mcp add --transport stdio --scope project ue-agent-kit -- ^
@@ -323,7 +327,7 @@ See [`docs/README.md`](docs/README.md) for the documentation index.
 
 ## Safety
 
-Read-only exporters, SQLite queries, the current MCP tools, and `ue-agent patch validate` never modify UObjects or asset files. Actual mutation is isolated in the `BlueprintPatch` or `AssetPatch` commandlet, selected by `RunPatch` only after pre-validation succeeds.
+Read-only exporters, SQLite queries, and `ue-agent patch validate` never modify UObjects or asset files. `ue_apply_asset_property_live` is the single in-editor memory-write entry point: it reuses an existing Policy/Revision Plan, changes only an already open and clean non-Blueprint asset, records Undo and marks the package Dirty, but never saves automatically. Persistent mutation still uses authorized save or the isolated `BlueprintPatch`/`AssetPatch` commandlet path.
 
 - `DryRun` is the default and must preserve the disk revision.
 - `Commit` requires both an explicit command mode and `commitEnabled=true` in policy.

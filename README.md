@@ -8,7 +8,7 @@ UE Agent Kit 是一套面向 Unreal Engine 的开源资产分析、索引与受�
 
 当前已发布版本为 **0.6.0**，支持 **Unreal Engine 5.6**。本版本新增 Revision-aware Project Memory：独立 SQLite/FTS5、六类可追溯记录、来源与状态机、Revision 自动失效、证据摘要、固定工程 MCP/CLI、可审计导出，以及 Workflow/rollback Task Evidence 闭环。
 
-> **发布状态**：0.6.0 已完成。未启用 Memory 时保持 Offline 5、Live 23、Workflow 25、Combined 43 Tool；启用固定 Project Memory 后分别为 12、30、32、50 Tool。下一阶段为 0.7.0 Context/Analysis。
+> **发布状态**：0.6.0 已完成。未启用 Memory 时保持 Offline 5、Live 23、Workflow 26、Combined 44 Tool；启用固定 Project Memory 后分别为 12、30、33、51 Tool。下一阶段为 0.7.0 Context/Analysis。
 
 > **AI Generated**：本项目的代码和文档主要由 AI 生成，并通过人工审查、UE 5.6 编译、自动化测试和真实工程回归验证。
 
@@ -252,12 +252,16 @@ scripts\TestMcpLiveEditor.cmd ^
   -EngineRoot "<UE_5.6>" ^
   -ProjectPath "<TEST_PROJECT>.uproject"
 
+scripts\TestMcpLiveWrite.cmd ^
+  -EngineRoot "<UE_5.6>" ^
+  -ProjectPath "<TEST_PROJECT>.uproject"
+
 scripts\TestMcpSnapshotRefresh.cmd ^
   -EngineRoot "<UE_5.6>" ^
   -ProjectPath "<TEST_PROJECT>.uproject"
 ```
 
-服务器对 MCP Client 仍只使用本地 `stdio`。默认模式为 5 个离线只读 Tool；`-EnableLiveEditor -ProjectPath <固定工程>` 增加 10 个实时只读 Tool 和 8 个受限 Daily Action，共 23 个 Live Tool；固定 Engine、Project、Policy 和 Revision Export 后的工作流为 25 个；两者组合时共 43 个 Tool。实时读取提供有界 Output Log、编译诊断、不触发加载的内存资产检查，以及普通 Blueprint Editor 的当前 Graph/Node 定位；Daily Action 提供资产打开/聚焦、Content Browser 同步、ActorGuid 聚焦、Blueprint 内存编译和官方 Data Validation，均不保存资产；工作流模式提供四源资产状态和安全单资产索引刷新：
+服务器对 MCP Client 仍只使用本地 `stdio`。默认模式为 5 个离线只读 Tool；`-EnableLiveEditor -ProjectPath <固定工程>` 增加 10 个实时只读 Tool 和 8 个受限 Daily Action，共 23 个 Live Tool；固定 Engine、Project、Policy 和 Revision Export 后的工作流为 26 个；两者组合时共 44 个 Tool。实时读取提供有界 Output Log、编译诊断、不触发加载的内存资产检查，以及普通 Blueprint Editor 的当前 Graph/Node 定位；Daily Action 提供资产打开/聚焦、Content Browser 同步、ActorGuid 聚焦、Blueprint 内存编译和官方 Data Validation，均不保存资产；工作流模式提供四源资产状态和安全单资产索引刷新：
 
 ```bat
 claude mcp add --transport stdio --scope project ue-agent-kit -- ^
@@ -323,7 +327,7 @@ Output\Blueprints\
 
 ## 安全说明
 
-只读导出器、SQLite 查询、当前 MCP Tool 和 `ue-agent patch validate` 不修改 UObject 或资产文件。实际写入只能通过独立的 `BlueprintPatch` 或 `AssetPatch` Commandlet，由 `RunPatch` 在预校验通过后按 Operation 分发。
+只读导出器、SQLite 查询和 `ue-agent patch validate` 不修改 UObject 或资产文件。`ue_apply_asset_property_live` 是唯一的编辑器内存写入入口：它复用既有 Policy/Revision Plan，只修改已打开且干净的非 Blueprint 资产，进入 Undo 栈并标记 Dirty，但不自动保存；持久化写入仍由授权保存或独立 `BlueprintPatch`/`AssetPatch` Commandlet 完成。
 
 - 默认使用 `DryRun`，磁盘 Revision 必须保持不变。
 - `Commit` 同时要求命令行显式选择和 Policy 的 `commitEnabled=true`。

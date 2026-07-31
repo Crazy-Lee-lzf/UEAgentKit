@@ -1421,6 +1421,85 @@ class PatchWorkflowService:
         )
         return response
 
+    def apply_asset_property_live(self, plan_id: str, confirmation: str) -> dict[str, Any]:
+        with self._lock:
+            if not self.config.commit_enabled:
+                raise WorkflowError(
+                    "live-editor-write-disabled",
+                    "Live Editor writes require Commit tools to be enabled when the MCP server starts.",
+                )
+            if self.live_editor_service is None:
+                raise WorkflowError(
+                    "live-editor-required",
+                    "Live Editor mode is required for an in-editor asset property write.",
+                )
+            record = self._plans.get(plan_id)
+            if record is None:
+                raise WorkflowError("plan-not-found", "The live write plan is not active in this MCP server session.")
+            if confirmation != f"LIVE APPLY {plan_id}":
+                raise WorkflowError(
+                    "live-editor-write-confirmation-required",
+                    "Live write confirmation did not exactly match the required planId phrase.",
+                )
+            validation = self._validate_plan_file(record)
+            if not validation.get("commitAllowedByPolicy"):
+                raise WorkflowError("live-editor-write-not-allowed", "The fixed Policy does not enable this write.")
+            assets = record.patch.get("assets", [])
+            if not isinstance(assets, list) or len(assets) != 1 or not isinstance(assets[0], dict):
+                raise WorkflowError("plan-invalid", "The live write plan no longer contains exactly one asset.")
+            operations = assets[0].get("operations", [])
+            if not isinstance(operations, list) or len(operations) != 1 or not isinstance(operations[0], dict):
+                raise WorkflowError("plan-invalid", "The live write plan no longer contains exactly one operation.")
+            operation = operations[0]
+            if operation.get("operation") != "setAssetProperty":
+                raise WorkflowError(
+                    "live-editor-write-operation-unsupported",
+                    "The first Live Editor Write capability accepts only setAssetProperty plans.",
+                )
+            target = operation.get("target", {})
+            property_path = target.get("propertyPath") if isinstance(target, dict) else None
+            if not isinstance(property_path, str) or not property_path:
+                raise WorkflowError("plan-invalid", "The live write plan has no exact propertyPath.")
+            asset_path = str(assets[0].get("assetPath", ""))
+            expected_revision = str(assets[0].get("expectedRevision", ""))
+            try:
+                live_result = self.live_editor_service.call_method(
+                    "editor.applyAssetPropertyLive",
+                    {
+                        "assetPath": asset_path,
+                        "propertyPath": property_path,
+                        "value": operation.get("value"),
+                    },
+                )
+            except Exception as exc:
+                if hasattr(exc, "code"):
+                    raise WorkflowError(str(exc.code), str(exc), details=getattr(exc, "details", {})) from exc
+                raise
+            changed = bool(live_result.get("changed"))
+            return {
+                "schemaVersion": WORKFLOW_SCHEMA_VERSION,
+                "tool": "ue_apply_asset_property_live",
+                "ok": True,
+                "mode": "LiveApply",
+                "planId": plan_id,
+                "patchDigest": record.digest,
+                "projectName": self.project_name,
+                "assetPath": asset_path,
+                "expectedDiskRevision": expected_revision,
+                "operation": "setAssetProperty",
+                "propertyPath": property_path,
+                "changed": changed,
+                "saved": False,
+                "diskRevisionChanged": False,
+                "undoAvailableInEditor": bool(live_result.get("transactionRecorded")),
+                "result": live_result,
+                "nextStep": (
+                    "Inspect or Undo the in-editor change. To persist it, preview ue_save_authorized_asset for this exact asset."
+                    if changed
+                    else "No value change was required."
+                ),
+            }
+
     def _run_script(
         self,
         script_name: str,

@@ -144,6 +144,14 @@ def register_workflow_tools(
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_set_asset_property", exc, read_only=False)
 
+    @server.tool(annotations=destructive_annotations)
+    def ue_apply_asset_property_live(plan_id: str, confirmation: str) -> dict[str, Any]:
+        """Apply one authorized setAssetProperty plan to Editor memory without saving the package."""
+        try:
+            return workflow_service.apply_asset_property_live(plan_id, confirmation)
+        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_apply_asset_property_live", exc, read_only=False)
+
     @server.tool(annotations=planning_annotations)
     def ue_set_asset_reference_property(
         asset_path: str,

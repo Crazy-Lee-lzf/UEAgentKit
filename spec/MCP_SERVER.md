@@ -62,6 +62,7 @@ ue_set_blueprint_default
 ue_set_component_property
 ue_set_pin_default
 ue_set_asset_property
+ue_apply_asset_property_live
 ue_set_asset_reference_property
 ue_set_asset_structured_property
 ue_set_material_parameter
@@ -227,7 +228,22 @@ mode=DryRun   自动执行 Plan -> Unreal Dry Run，返回 planId 与 dryRunRece
 
 高层 Tool **不提供 Commit 模式**。实际保存仍必须调用 `ue_apply_patch`，携带高层 Dry Run 返回的一次性 `dryRunReceipt`，并使用精确 `COMMIT <planId>` 确认。这样高层易用性不会绕过 Policy、Revision、新鲜度、备份、验证或 rollback 安全门。
 
+### `ue_apply_asset_property_live`
+
+该破坏性 Tool 属于 Workflow 写入 Tool；执行时必须同时启用 Live Editor、Workflow Write 与 Commit 三项启动能力。它不接受任意资产、属性或 Policy，而是只接受当前会话已有的 `ue_set_asset_property(mode=Plan)` 结果：
+
+```text
+plan_id      = 当前会话有效 Plan ID
+confirmation = LIVE APPLY <planId>
+```
+
+执行前重新校验 Plan 文件摘要、固定 Policy、允许的 `setAssetProperty` Operation 和磁盘基线 Revision。Editor Bridge 只接受已经加载且已在资产编辑器中打开、Package 当前干净、位于 `/Game` 的非 Blueprint 单文件资产，以及一个顶层可编辑标量/Enum/String/Name/Text 属性。PIE/SIE、Dirty Package、嵌套属性路径、地图、Blueprint 和不支持的属性类型全部拒绝。
+
+成功时在 Game Thread 中通过 `FScopedTransaction`、`Modify()`、`PostEditChangeProperty()` 和 `MarkPackageDirty()` 修改当前 Editor 内存，返回 Before/After、Dirty、Editor Session 与 Undo 事务证据。该 Tool 始终返回 `saved=false`、`diskRevisionChanged=false`，不会调用 `SavePackage`；用户可在编辑器中检查或撤销，持久化仍需单独走现有授权保存流程。
+
 `ue_set_material_parameter.parameter_type` 仅接受 `Scalar`、`Vector`、`Texture` 或 `StaticSwitch`，Server 映射到现有四个已注册 Operation。高层 Tool 只覆盖当前稳定 Operation；`ue_plan_patch` 继续保留，供已注册但尚无高层封装的 Operation 使用。
+
+Live Write 稳定错误包括 `live-editor-write-disabled`、`live-editor-required`、`live-editor-write-confirmation-required`、`live-editor-write-not-allowed`、`live-editor-write-operation-unsupported`、`live-editor-write-asset-not-loaded`、`live-editor-write-asset-not-open`、`live-editor-write-blueprint-unsupported`、`live-editor-write-package-invalid`、`live-editor-write-package-dirty`、`live-editor-write-property-not-found`、`live-editor-write-property-not-editable`、`live-editor-write-property-type-unsupported`、`live-editor-write-value-invalid` 和 `live-editor-write-apply-failed`。
 
 ## 索引新鲜度与写入生命周期
 

@@ -34,7 +34,7 @@ PowerShell 入口对应：
 -ProjectPath <fixed .uproject>
 ```
 
-Tool 参数不能覆盖固定项目或选择其他 Editor 端点。未启用时，离线 5 Tool 与固定项目 Workflow 模式 25 Tool 保持可用；启用后 Live 模式为 23 Tool，Combined 模式为 43 Tool。
+Tool 参数不能覆盖固定项目或选择其他 Editor 端点。未启用时，离线 5 Tool 与固定项目 Workflow 模式 26 Tool 保持可用；启用后 Live 模式为 23 Tool，Combined 模式为 44 Tool。
 
 ## 端点描述符
 
@@ -206,6 +206,21 @@ Bridge 注册为 `FOutputDevice`，保留最多 4096 条当前会话日志，并
 
 该 Evidence 可直接作为后续 Project Memory 的 `RuntimeEvidence` 来源，但资产发生 Revision 变化后必须重新验证。
 
+## Live Editor Write
+
+`editor.applyAssetPropertyLive` 是首个受控内存写入 Capability，由 Workflow Tool `ue_apply_asset_property_live` 间接调用。该 Tool 虽属于 Workflow 注册表，但执行时必须同时启用 Live Editor、Write Tools 和 Commit Tools；MCP Client 不能直接选择 Bridge Method，也不能绕过固定 Plan、Policy、Revision 或精确确认短语。
+
+首版边界：
+
+- 仅接受已加载且已打开、当前不 Dirty 的非 Blueprint `/Game` 资产。
+- 仅接受一个顶层可编辑标量、Enum、String、Name 或 Text 属性。
+- 在 Game Thread 中使用 `FScopedTransaction` 与 `UObject::Modify()`，因此修改进入 Editor Undo 栈。
+- 调用 `PostEditChangeProperty()` 并标记 Package Dirty，但绝不调用 `SavePackage`。
+- 返回 `loadedByBridge=false`、Before/After、Dirty、Transaction 和 Editor Session 证据。
+- PIE/SIE、地图、Dirty Package、Blueprint、嵌套路径和不支持类型全部拒绝。
+
+该 Capability 不生成磁盘 Revision，也不修改 SQLite/Revision Export。用户检查后可以在编辑器中 Undo，或者通过现有 `ue_save_authorized_asset` Preview/Commit 流程显式保存。
+
 ## 状态与 Revision 语义
 
 Editor Memory、磁盘、Revision Export 和 SQLite 是四个不同事实源：
@@ -222,7 +237,7 @@ Immutable Index   当前 MCP 会话冻结的 SQLite Snapshot
 - Dirty UObject 不生成虚假的磁盘 SHA-256 Revision。
 - Live Tool 结果不清除或覆盖 SQLite/Revision Export 的 stale 状态。
 - 写入 Plan 仍必须通过现有三源磁盘新鲜度门禁。
-- Live Read 只观察已有状态。Live Action 可以执行已注册的资产导航、Blueprint 编译和官方 Data Validation，但不能保存、运行 Console/Python/Shell、接受任意 UObject Method 或改变 SQLite/Revision Export。
+- Live Read 只观察已有状态。普通 Live Action 可以执行已注册的资产导航、Blueprint 编译和官方 Data Validation。`ue_apply_asset_property_live` 是独立的 Plan/Policy/Revision 约束内存写入，只标记 Dirty 并记录 Undo；所有 Live 路径都不能自动保存、运行 Console/Python/Shell、接受任意 UObject Method 或改变 SQLite/Revision Export。
 - `ue_refresh_asset_index` 属于固定项目工作流而非 Live 只读 Tool；启用 Live Bridge 时，它会先通过 `ue_inspect_asset_live` 拒绝 Dirty 目标，再构建配对 Snapshot Generation。
 
 ## 稳定错误码
@@ -251,6 +266,16 @@ live-editor-blueprint-required
 live-editor-data-validation-unavailable
 live-editor-folder-empty
 live-editor-asset-limit-exceeded
+live-editor-write-asset-not-loaded
+live-editor-write-asset-not-open
+live-editor-write-blueprint-unsupported
+live-editor-write-package-invalid
+live-editor-write-package-dirty
+live-editor-write-property-not-found
+live-editor-write-property-not-editable
+live-editor-write-property-type-unsupported
+live-editor-write-value-invalid
+live-editor-write-apply-failed
 ```
 
 错误响应沿用 MCP `code/message/retryable/details/suggestedAction` Envelope，不返回本机 Descriptor、Project 或 Token 路径。

@@ -444,6 +444,107 @@ class AgentWorkflowTests(unittest.TestCase):
             )
         self.assertEqual(invalid.exception.code, "save-confirmation-required")
 
+    def test_live_asset_property_write_requires_plan_confirmation_and_keeps_disk_unchanged(self) -> None:
+        class LiveWriteService:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict[str, Any]]] = []
+
+            def call_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+                self.calls.append((method, params))
+                return {
+                    "action": "apply-asset-property-live",
+                    "assetPath": ASSET_PATH,
+                    "propertyPath": "BoolValue",
+                    "beforeValue": False,
+                    "afterValue": True,
+                    "changed": True,
+                    "transactionRecorded": True,
+                    "packageDirtyAfter": True,
+                    "saved": False,
+                }
+
+        bridge = LiveWriteService()
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=FakeFreshnessTracker(),
+            live_editor_service=bridge,
+        )
+        plan = service.plan_patch(
+            asset_path=ASSET_PATH,
+            operation="setAssetProperty",
+            target={"propertyPath": "BoolValue"},
+            value=True,
+            description="Live Editor write test",
+        )
+        with self.assertRaises(WorkflowError) as invalid:
+            service.apply_asset_property_live(plan["planId"], "LIVE APPLY wrong")
+        self.assertEqual(invalid.exception.code, "live-editor-write-confirmation-required")
+        self.assertEqual(bridge.calls, [])
+
+        result = service.apply_asset_property_live(
+            plan["planId"],
+            f"LIVE APPLY {plan['planId']}",
+        )
+        self.assertEqual(result["mode"], "LiveApply")
+        self.assertTrue(result["changed"])
+        self.assertTrue(result["undoAvailableInEditor"])
+        self.assertFalse(result["saved"])
+        self.assertFalse(result["diskRevisionChanged"])
+        self.assertEqual(result["expectedDiskRevision"], BEFORE_REVISION)
+        self.assertEqual(
+            bridge.calls,
+            [
+                (
+                    "editor.applyAssetPropertyLive",
+                    {"assetPath": ASSET_PATH, "propertyPath": "BoolValue", "value": True},
+                )
+            ],
+        )
+        self.assertEqual(self.freshness.state, "fresh")
+
+    def test_live_asset_property_write_requires_live_and_commit_modes(self) -> None:
+        plan = self.service.plan_patch(
+            asset_path=ASSET_PATH,
+            operation="setAssetProperty",
+            target={"propertyPath": "BoolValue"},
+            value=True,
+        )
+        with self.assertRaises(WorkflowError) as no_live:
+            self.service.apply_asset_property_live(plan["planId"], f"LIVE APPLY {plan['planId']}")
+        self.assertEqual(no_live.exception.code, "live-editor-required")
+
+        disabled_config = PatchWorkflowConfig(
+            tool_root=self.config.tool_root,
+            engine_root=self.config.engine_root,
+            project_path=self.config.project_path,
+            policy_path=self.config.policy_path,
+            revision_export=self.config.revision_export,
+            work_root=self.config.work_root,
+            backup_root=self.config.backup_root,
+            commit_enabled=False,
+        )
+        disabled_service = PatchWorkflowService(
+            FakeIndexService(),
+            disabled_config,
+            process_runner=self.runner,
+            freshness_tracker=FakeFreshnessTracker(),
+            live_editor_service=object(),
+        )
+        disabled_plan = disabled_service.plan_patch(
+            asset_path=ASSET_PATH,
+            operation="setAssetProperty",
+            target={"propertyPath": "BoolValue"},
+            value=True,
+        )
+        with self.assertRaises(WorkflowError) as disabled:
+            disabled_service.apply_asset_property_live(
+                disabled_plan["planId"],
+                f"LIVE APPLY {disabled_plan['planId']}",
+            )
+        self.assertEqual(disabled.exception.code, "live-editor-write-disabled")
+
     def test_complete_plan_dry_run_apply_verify_and_rollback_lifecycle(self) -> None:
         plan = self.service.plan_patch(
             asset_path=ASSET_PATH,

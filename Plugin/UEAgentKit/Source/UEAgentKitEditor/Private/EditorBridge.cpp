@@ -60,7 +60,8 @@ namespace UEAgentKitEditorBridgePrivate
 		TEXT("editor.validateAsset"),
 		TEXT("editor.validateFolder"),
 		TEXT("editor.runAutomationTest"),
-		TEXT("editor.saveAuthorizedAsset")
+		TEXT("editor.saveAuthorizedAsset"),
+		TEXT("editor.applyAssetPropertyLive")
 	};
 
 	FString NormalizeProjectPath()
@@ -862,6 +863,22 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 		FString ErrorMessage;
 		SendActionResult(
 			TryPrepareAuthorizedSaveFixtureResult(AssetPath, Result, ErrorCode, ErrorMessage),
+			Result,
+			ErrorCode,
+			ErrorMessage);
+	}
+	else if (Method == TEXT("editor.applyAssetPropertyLive"))
+	{
+		FString AssetPath;
+		FString PropertyPath;
+		Params->TryGetStringField(TEXT("assetPath"), AssetPath);
+		Params->TryGetStringField(TEXT("propertyPath"), PropertyPath);
+		const TSharedPtr<FJsonValue> Value = Params->TryGetField(TEXT("value"));
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode;
+		FString ErrorMessage;
+		SendActionResult(
+			TryApplyAssetPropertyLiveResult(AssetPath, PropertyPath, Value, Result, ErrorCode, ErrorMessage),
 			Result,
 			ErrorCode,
 			ErrorMessage);

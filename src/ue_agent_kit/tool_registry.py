@@ -68,6 +68,7 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_set_component_property", "workflow", "planning", high_level_change=True),
     ToolDefinition("ue_set_pin_default", "workflow", "planning", high_level_change=True),
     ToolDefinition("ue_set_asset_property", "workflow", "planning", high_level_change=True),
+    ToolDefinition("ue_apply_asset_property_live", "workflow", "destructive"),
     ToolDefinition("ue_set_asset_reference_property", "workflow", "planning", high_level_change=True),
     ToolDefinition("ue_set_asset_structured_property", "workflow", "planning", high_level_change=True),
     ToolDefinition("ue_set_material_parameter", "workflow", "planning", high_level_change=True),

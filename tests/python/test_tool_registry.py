@@ -56,6 +56,7 @@ EXPECTED_ALL_TOOLS = [
     "ue_set_component_property",
     "ue_set_pin_default",
     "ue_set_asset_property",
+    "ue_apply_asset_property_live",
     "ue_set_asset_reference_property",
     "ue_set_asset_structured_property",
     "ue_set_material_parameter",
@@ -83,7 +84,7 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertEqual(len(tool_names_for_mode()), 5)
         self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 23)
-        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 25)
+        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 26)
         self.assertEqual(
             tool_names_for_mode(memory_enabled=True),
             EXPECTED_ALL_TOOLS[:5] + EXPECTED_MEMORY_TOOLS,
@@ -95,7 +96,7 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
-            32,
+            33,
         )
         self.assertEqual(
             len(
@@ -105,7 +106,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-            50,
+            51,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:
@@ -131,6 +132,7 @@ class ToolRegistryTests(unittest.TestCase):
             "TryCompileBlueprintResult": "EditorBridgeValidationHandlers.cpp",
             "TryStartAutomationTest": "EditorBridgeAutomationHandlers.cpp",
             "TrySaveAuthorizedAssetResult": "EditorBridgeSaveHandlers.cpp",
+            "TryApplyAssetPropertyLiveResult": "EditorBridgeWriteHandlers.cpp",
         }
         for symbol, filename in handlers.items():
             self.assertNotIn(f"FUEAgentKitEditorBridge::{symbol}", core, symbol)
@@ -152,6 +154,7 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertEqual([item["name"] for item in descriptors], EXPECTED_ALL_TOOLS)
         self.assertTrue(TOOL_DEFINITIONS_BY_NAME["ue_get_asset_state"].read_only)
         self.assertTrue(TOOL_DEFINITIONS_BY_NAME["ue_apply_patch"].destructive)
+        self.assertTrue(TOOL_DEFINITIONS_BY_NAME["ue_apply_asset_property_live"].destructive)
         self.assertFalse(TOOL_DEFINITIONS_BY_NAME["ue_verify_asset"].read_only)
         self.assertFalse(TOOL_DEFINITIONS_BY_NAME["ue_open_asset"].read_only)
         self.assertFalse(TOOL_DEFINITIONS_BY_NAME["ue_validate_folder"].destructive)
@@ -189,6 +192,7 @@ class ToolRegistryTests(unittest.TestCase):
             encoding="utf-8"
         )
         save = (private_root / "EditorBridgeSaveHandlers.cpp").read_text(encoding="utf-8")
+        live_write = (private_root / "EditorBridgeWriteHandlers.cpp").read_text(encoding="utf-8")
         combined = navigation + validation + automation
         for forbidden in (
             "LoadObject",
@@ -232,6 +236,13 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertIn("UPackage::SavePackage", save)
         self.assertNotIn("SaveAll", save)
         self.assertNotIn("PromptForCheckoutAndSave", save)
+        self.assertNotIn("LoadObject", live_write)
+        self.assertNotIn("StaticLoadObject", live_write)
+        self.assertNotIn("SavePackage", live_write)
+        self.assertIn("FScopedTransaction", live_write)
+        self.assertIn("Asset->Modify()", live_write)
+        self.assertIn("PostEditChangeProperty", live_write)
+        self.assertIn("MarkPackageDirty", live_write)
         self.assertIn('"DataValidation"', build_rules)
         self.assertIn('"Name": "DataValidation"', plugin_descriptor)
 
