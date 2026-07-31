@@ -267,6 +267,9 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertIn("SetMaterialInstanceScalarParameterValue", live_write)
         self.assertIn("SetMaterialInstanceStaticSwitchParameterValue", live_write)
         self.assertIn("live-editor-write-material-parameter-not-found", live_write)
+        self.assertIn("TryApplyDataTableLive", live_write)
+        self.assertIn("DataTable->AddRow", live_write)
+        self.assertIn("live-editor-write-data-table-row-not-found", live_write)
         self.assertNotIn("SavePackage", live_write)
         noop_branch = live_write_frame.split("IO.SemanticEqual(BeforeValue, AfterValue))", 1)[1]
         # A no-op must restore the captured snapshot before restoring the Dirty flag

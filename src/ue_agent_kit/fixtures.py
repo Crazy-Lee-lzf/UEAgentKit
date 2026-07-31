@@ -108,6 +108,9 @@ def validate_fixture_plan(plan_path: Path) -> dict[str, Any]:
         elif kind == "materialAsset":
             required = {"id", "kind", "targetAsset", "expectedClass", "parentAsset"}
             allowed = required | {"values"}
+        elif kind == "dataTableAsset":
+            required = {"id", "kind", "targetAsset", "expectedClass", "rowStruct", "rows"}
+            allowed = required
         elif kind == "blueprint":
             required = {
                 "id",
@@ -121,7 +124,7 @@ def validate_fixture_plan(plan_path: Path) -> dict[str, Any]:
         else:
             required = {"id", "kind", "targetAsset", "expectedClass"}
             allowed = required
-            _issue(errors, "fixture-kind", "kind must be duplicateAsset, scalarAsset, referenceAsset, structuredAsset, materialParentAsset, materialAsset, or blueprint.", f"{base}.kind")
+            _issue(errors, "fixture-kind", "kind must be duplicateAsset, scalarAsset, referenceAsset, structuredAsset, materialParentAsset, materialAsset, dataTableAsset, or blueprint.", f"{base}.kind")
         missing = sorted(required - set(fixture))
         unknown = sorted(set(fixture) - allowed)
         for field in missing:
@@ -428,6 +431,86 @@ def validate_fixture_plan(plan_path: Path) -> dict[str, Any]:
                                         "Material static switch values require a JSON boolean.",
                                         value_path,
                                     )
+        elif kind == "dataTableAsset":
+            if expected_class != "/Script/Engine.DataTable":
+                _issue(
+                    errors,
+                    "data-table-asset-class",
+                    "dataTableAsset fixtures require expectedClass /Script/Engine.DataTable.",
+                    f"{base}.expectedClass",
+                )
+            row_struct = fixture.get("rowStruct")
+            if not isinstance(row_struct, str) or not _SCRIPT_CLASS_RE.fullmatch(row_struct):
+                _issue(
+                    errors,
+                    "data-table-row-struct",
+                    "dataTableAsset rowStruct must use /Script/Module.Struct form.",
+                    f"{base}.rowStruct",
+                )
+            rows = fixture.get("rows")
+            if not isinstance(rows, dict) or not rows or len(rows) > 64:
+                _issue(
+                    errors,
+                    "data-table-rows",
+                    "dataTableAsset rows must be an object containing 1-64 named rows.",
+                    f"{base}.rows",
+                )
+            else:
+                row_names: set[str] = set()
+                for row_name, row_values in rows.items():
+                    row_path = f"{base}.rows.{row_name}"
+                    if (
+                        not isinstance(row_name, str)
+                        or not row_name.strip()
+                        or len(row_name) > 256
+                        or "." in row_name
+                        or "/" in row_name
+                    ):
+                        _issue(
+                            errors,
+                            "data-table-row-name",
+                            "DataTable row names must be non-empty strings without dots or slashes.",
+                            row_path,
+                        )
+                        continue
+                    if row_name in row_names:
+                        _issue(
+                            errors,
+                            "data-table-row-name",
+                            "DataTable row names must be unique.",
+                            row_path,
+                        )
+                        continue
+                    row_names.add(row_name)
+                    if not isinstance(row_values, dict) or not row_values or len(row_values) > 32:
+                        _issue(
+                            errors,
+                            "data-table-row-values",
+                            "DataTable fixture rows require an object of 1-32 fields.",
+                            row_path,
+                        )
+                        continue
+                    for field_name, field_value in row_values.items():
+                        field_path = f"{row_path}.{field_name}"
+                        if (
+                            not isinstance(field_name, str)
+                            or not field_name.strip()
+                            or "." in field_name
+                        ):
+                            _issue(
+                                errors,
+                                "data-table-field-name",
+                                "DataTable field names must be non-empty strings without dots.",
+                                field_path,
+                            )
+                            continue
+                        if isinstance(field_value, (dict, list)) or field_value is None:
+                            _issue(
+                                errors,
+                                "data-table-field-value",
+                                "DataTable fixture field values must be finite JSON scalars.",
+                                field_path,
+                            )
         elif kind == "blueprint":
             if expected_class != "/Script/Engine.Blueprint":
                 _issue(

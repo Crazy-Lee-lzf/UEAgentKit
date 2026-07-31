@@ -1,0 +1,87 @@
+{
+  "schemaVersion": "1.0",
+  "root": "/Game/UEAgentKitWriteTests/DataTables",
+  "fixtures": [
+    {
+      "id": "data-table-cell-asset",
+      "kind": "dataTableAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/DataTables/DT_CellTarget",
+      "expectedClass": "/Script/Engine.DataTable",
+      "rowStruct": "/Script/UEAgentKitEditor.UEAgentKitDataTableFixtureRow",
+      "rows": {
+        "RowAlpha": {
+          "Count": 1,
+          "Label": "Alpha",
+          "bEnabled": true
+        },
+        "RowBeta": {
+          "Count": 2,
+          "Label": "Beta",
+          "bEnabled": false
+        }
+      }
+    },
+    {
+      "id": "data-table-fields-asset",
+      "kind": "dataTableAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/DataTables/DT_FieldsTarget",
+      "expectedClass": "/Script/Engine.DataTable",
+      "rowStruct": "/Script/UEAgentKitEditor.UEAgentKitDataTableFixtureRow",
+      "rows": {
+        "RowBeta": {
+          "Count": 2,
+          "Label": "Beta",
+          "bEnabled": false
+        }
+      }
+    },
+    {
+      "id": "data-table-add-asset",
+      "kind": "dataTableAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/DataTables/DT_AddTarget",
+      "expectedClass": "/Script/Engine.DataTable",
+      "rowStruct": "/Script/UEAgentKitEditor.UEAgentKitDataTableFixtureRow",
+      "rows": {
+        "RowGamma": {
+          "Count": 3,
+          "Label": "Gamma",
+          "bEnabled": true
+        }
+      }
+    },
+    {
+      "id": "data-table-rename-asset",
+      "kind": "dataTableAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/DataTables/DT_RenameTarget",
+      "expectedClass": "/Script/Engine.DataTable",
+      "rowStruct": "/Script/UEAgentKitEditor.UEAgentKitDataTableFixtureRow",
+      "rows": {
+        "RowGamma": {
+          "Count": 3,
+          "Label": "Gamma",
+          "bEnabled": true
+        }
+      }
+    },
+    {
+      "id": "data-table-remove-asset",
+      "kind": "dataTableAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/DataTables/DT_RemoveTarget",
+      "expectedClass": "/Script/Engine.DataTable",
+      "rowStruct": "/Script/UEAgentKitEditor.UEAgentKitDataTableFixtureRow",
+      "rows": {
+        "RowBeta": {
+          "Count": 2,
+          "Label": "Beta",
+          "bEnabled": false
+        }
+      }
+    },
+    {
+      "id": "data-table-non-table-asset",
+      "kind": "scalarAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/DataTables/DA_ScalarNonTable",
+      "expectedClass": "/Script/UEAgentKitEditor.UEAgentKitScalarWriteFixtureAsset"
+    }
+  ]
+}

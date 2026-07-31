@@ -65,6 +65,11 @@ LIVE_WRITE_VALUE_KINDS = {
     "setMaterialInstanceVectorParameter": "material-vector",
     "setMaterialInstanceTextureParameter": "material-texture",
     "setMaterialInstanceStaticSwitchParameter": "material-static-switch",
+    "setDataTableCell": "data-table-cell",
+    "setDataTableRowFields": "data-table-row-fields",
+    "addDataTableRow": "data-table-row-add",
+    "removeDataTableRow": "data-table-row-remove",
+    "renameDataTableRow": "data-table-row-rename",
 }
 
 MATERIAL_PARAMETER_OPERATIONS_NAMES = frozenset(MATERIAL_PARAMETER_OPERATIONS.values())
@@ -1476,19 +1481,46 @@ class PatchWorkflowService:
                 "setMaterialInstanceVectorParameter",
                 "setMaterialInstanceTextureParameter",
                 "setMaterialInstanceStaticSwitchParameter",
+                "setDataTableCell",
+                "setDataTableRowFields",
+                "addDataTableRow",
+                "removeDataTableRow",
+                "renameDataTableRow",
             }:
                 raise WorkflowError(
                     "live-editor-write-operation-unsupported",
-                    "Live Editor writes accept only setAssetProperty, setAssetReferenceProperty, setAssetStructuredProperty, setMaterialInstanceScalarParameter, setMaterialInstanceVectorParameter, setMaterialInstanceTextureParameter, and setMaterialInstanceStaticSwitchParameter plans.",
+                    "Live Editor writes accept only setAssetProperty, setAssetReferenceProperty, setAssetStructuredProperty, setMaterialInstanceScalarParameter, setMaterialInstanceVectorParameter, setMaterialInstanceTextureParameter, setMaterialInstanceStaticSwitchParameter, setDataTableCell, setDataTableRowFields, addDataTableRow, removeDataTableRow, and renameDataTableRow plans.",
                 )
             is_material = operation_name in MATERIAL_PARAMETER_OPERATIONS_NAMES
+            is_data_table = operation_name in {
+                "setDataTableCell",
+                "setDataTableRowFields",
+                "addDataTableRow",
+                "removeDataTableRow",
+                "renameDataTableRow",
+            }
             target = operation.get("target", {})
             parameter_name = None
             property_path = None
+            row_name = None
+            new_row_name = None
+            field_name = None
             if is_material:
                 parameter_name = target.get("parameterName") if isinstance(target, dict) else None
                 if not isinstance(parameter_name, str) or not parameter_name:
                     raise WorkflowError("plan-invalid", "The live write plan has no exact parameterName.")
+            elif is_data_table:
+                row_name = target.get("rowName") if isinstance(target, dict) else None
+                if not isinstance(row_name, str) or not row_name:
+                    raise WorkflowError("plan-invalid", "The live write plan has no exact rowName.")
+                if operation_name == "setDataTableCell":
+                    field_name = target.get("fieldName") if isinstance(target, dict) else None
+                    if not isinstance(field_name, str) or not field_name:
+                        raise WorkflowError("plan-invalid", "The live write plan has no exact fieldName.")
+                elif operation_name == "renameDataTableRow":
+                    new_row_name = target.get("newRowName") if isinstance(target, dict) else None
+                    if not isinstance(new_row_name, str) or not new_row_name:
+                        raise WorkflowError("plan-invalid", "The live write plan has no exact newRowName.")
             else:
                 property_path = target.get("propertyPath") if isinstance(target, dict) else None
                 if not isinstance(property_path, str) or not property_path:
@@ -1502,6 +1534,12 @@ class PatchWorkflowService:
             }
             if is_material:
                 bridge_parameters["parameterName"] = parameter_name
+            elif is_data_table:
+                bridge_parameters["rowName"] = row_name
+                if new_row_name is not None:
+                    bridge_parameters["newRowName"] = new_row_name
+                if field_name is not None:
+                    bridge_parameters["fieldName"] = field_name
             else:
                 bridge_parameters["propertyPath"] = property_path
             try:
@@ -1528,6 +1566,9 @@ class PatchWorkflowService:
                 "valueKind": _live_write_value_kind(operation_name),
                 "propertyPath": property_path,
                 "parameterName": parameter_name,
+                "rowName": row_name,
+                "newRowName": new_row_name,
+                "fieldName": field_name,
                 "changed": changed,
                 "saved": False,
                 "diskRevisionChanged": False,

@@ -2,6 +2,7 @@
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "BlueprintContextSha256.h"
+#include "DataTableWriteFixtureRow.h"
 #include "Dom/JsonObject.h"
 #include "Editor.h"
 #include "Engine/Blueprint.h"
@@ -36,6 +37,7 @@
 #include "UObject/Package.h"
 #include "UObject/SoftObjectPath.h"
 #include "UObject/SoftObjectPtr.h"
+#include "UObject/StructOnScope.h"
 #include "UObject/SavePackage.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWriteFixturePlan, Log, All);
@@ -59,6 +61,8 @@ namespace WriteFixturePlanCommandletPrivate
 		TMap<FString, TArray<FString>> MaterialParameters;
 		TMap<FString, TSharedPtr<FJsonValue>> MaterialValues;
 		FString ParentAsset;
+		FString RowStructPath;
+		TMap<FString, TSharedPtr<FJsonObject>> DataTableRows;
 		TObjectPtr<UObject> SourceObject = nullptr;
 		TObjectPtr<UClass> ParentClass = nullptr;
 	};
@@ -480,6 +484,179 @@ namespace WriteFixturePlanCommandletPrivate
 			return nullptr;
 		}
 		return Instance;
+	}
+
+	bool SetRowFieldFromJson(
+		FProperty* Property,
+		void* ValueAddress,
+		const TSharedPtr<FJsonValue>& JsonValue,
+		FString& OutError)
+	{
+		if (!Property || !ValueAddress || !JsonValue.IsValid())
+		{
+			OutError = TEXT("Property, address, or JSON value is invalid.");
+			return false;
+		}
+		if (FBoolProperty* BoolProperty = CastField<FBoolProperty>(Property))
+		{
+			bool Value = false;
+			if (!JsonValue->TryGetBool(Value))
+			{
+				OutError = TEXT("Expected a JSON boolean.");
+				return false;
+			}
+			BoolProperty->SetPropertyValue(ValueAddress, Value);
+			return true;
+		}
+		if (FEnumProperty* EnumProperty = CastField<FEnumProperty>(Property))
+		{
+			FString StringValue;
+			if (!JsonValue->TryGetString(StringValue))
+			{
+				OutError = TEXT("Expected a JSON enum-name string.");
+				return false;
+			}
+			const int64 EnumValue = EnumProperty->GetEnum()->GetValueByNameString(StringValue);
+			if (EnumValue == INDEX_NONE)
+			{
+				OutError = FString::Printf(TEXT("Unknown enum value: %s"), *StringValue);
+				return false;
+			}
+			EnumProperty->GetUnderlyingProperty()->SetIntPropertyValue(ValueAddress, EnumValue);
+			return true;
+		}
+		if (FNumericProperty* NumericProperty = CastField<FNumericProperty>(Property))
+		{
+			if (UEnum* Enum = NumericProperty->GetIntPropertyEnum())
+			{
+				FString StringValue;
+				if (!JsonValue->TryGetString(StringValue))
+				{
+					OutError = TEXT("Expected a JSON enum-name string.");
+					return false;
+				}
+				const int64 EnumValue = Enum->GetValueByNameString(StringValue);
+				if (EnumValue == INDEX_NONE || !NumericProperty->CanHoldValue(EnumValue))
+				{
+					OutError = TEXT("Unknown or out-of-range enum value.");
+					return false;
+				}
+				NumericProperty->SetIntPropertyValue(ValueAddress, EnumValue);
+				return true;
+			}
+			double Value = 0.0;
+			if (!JsonValue->TryGetNumber(Value) || !FMath::IsFinite(Value))
+			{
+				OutError = TEXT("Expected a finite JSON number.");
+				return false;
+			}
+			if (NumericProperty->IsFloatingPoint())
+			{
+				NumericProperty->SetFloatingPointPropertyValue(ValueAddress, Value);
+				return true;
+			}
+			if (Value != FMath::TruncToDouble(Value))
+			{
+				OutError = TEXT("Integer properties require a whole JSON number.");
+				return false;
+			}
+			NumericProperty->SetIntPropertyValue(ValueAddress, static_cast<int64>(Value));
+			return true;
+		}
+		FString StringValue;
+		if (!JsonValue->TryGetString(StringValue))
+		{
+			OutError = TEXT("Expected a JSON string.");
+			return false;
+		}
+		if (FStrProperty* StringProperty = CastField<FStrProperty>(Property))
+		{
+			StringProperty->SetPropertyValue(ValueAddress, StringValue);
+			return true;
+		}
+		if (FNameProperty* NameProperty = CastField<FNameProperty>(Property))
+		{
+			NameProperty->SetPropertyValue(ValueAddress, FName(*StringValue));
+			return true;
+		}
+		if (FTextProperty* TextProperty = CastField<FTextProperty>(Property))
+		{
+			TextProperty->SetPropertyValue(ValueAddress, FText::FromString(StringValue));
+			return true;
+		}
+		OutError = FString::Printf(TEXT("Unsupported property type: %s"), *Property->GetClass()->GetName());
+		return false;
+	}
+
+	UDataTable* CreateDataTableAssetFixture(
+		const FFixtureDefinition& Definition,
+		FString& OutError)
+	{
+		UScriptStruct* RowStruct = LoadObject<UScriptStruct>(nullptr, *Definition.RowStructPath);
+		if (!RowStruct || !RowStruct->IsChildOf(FTableRowBase::StaticStruct()))
+		{
+			OutError = FString::Printf(TEXT("DataTable row struct could not be loaded: %s"), *Definition.RowStructPath);
+			return nullptr;
+		}
+		UPackage* Package = CreatePackage(*Definition.TargetAsset);
+		if (!Package)
+		{
+			OutError = FString::Printf(TEXT("Could not create package: %s"), *Definition.TargetAsset);
+			return nullptr;
+		}
+		const FString AssetName = FPackageName::GetLongPackageAssetName(Definition.TargetAsset);
+		UDataTable* DataTable = NewObject<UDataTable>(
+			Package,
+			FName(*AssetName),
+			RF_Public | RF_Standalone | RF_Transactional);
+		if (!DataTable)
+		{
+			OutError = FString::Printf(TEXT("Could not create DataTable fixture: %s"), *Definition.TargetAsset);
+			return nullptr;
+		}
+		DataTable->RowStruct = RowStruct;
+		for (const TPair<FString, TSharedPtr<FJsonObject>>& RowEntry : Definition.DataTableRows)
+		{
+			FStructOnScope RowScope(RowStruct);
+			if (!RowScope.IsValid())
+			{
+				OutError = TEXT("Could not allocate DataTable fixture row.");
+				return nullptr;
+			}
+			for (const TPair<FString, TSharedPtr<FJsonValue>>& FieldEntry : RowEntry.Value->Values)
+			{
+				FProperty* Field = FindFProperty<FProperty>(RowStruct, FName(*FieldEntry.Key));
+				if (!Field)
+				{
+					OutError = FString::Printf(TEXT("DataTable fixture field was not found: %s"), *FieldEntry.Key);
+					return nullptr;
+				}
+				void* FieldAddress = Field->ContainerPtrToValuePtr<void>(RowScope.GetStructMemory());
+				FString SetError;
+				if (!SetRowFieldFromJson(Field, FieldAddress, FieldEntry.Value, SetError))
+				{
+					OutError = FString::Printf(TEXT("DataTable fixture field %s: %s"), *FieldEntry.Key, *SetError);
+					return nullptr;
+				}
+			}
+			DataTable->AddRow(FName(*RowEntry.Key), RowScope.GetStructMemory(), RowStruct);
+		}
+		FAssetRegistryModule::AssetCreated(DataTable);
+		DataTable->PreEditChange(nullptr);
+		DataTable->PostEditChange();
+		Package->MarkPackageDirty();
+		const FString Filename = GetPackageFilename(Definition.TargetAsset);
+		IFileManager::Get().MakeDirectory(*FPaths::GetPath(Filename), true);
+		FSavePackageArgs SaveArgs;
+		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+		SaveArgs.SaveFlags = SAVE_NoError;
+		SaveArgs.Error = GError;
+		if (!UPackage::SavePackage(Package, DataTable, *Filename, SaveArgs))
+		{
+			OutError = FString::Printf(TEXT("Could not save DataTable fixture: %s"), *Filename);
+			return nullptr;
+		}
+		return DataTable;
 	}
 
 	bool ApplyReferenceFixtureValues(
@@ -1240,6 +1417,66 @@ int32 UWriteFixturePlanCommandlet::Main(const FString& Params)
 				}
 			}
 		}
+		else if (Definition.Kind.Equals(TEXT("dataTableAsset"), ESearchCase::CaseSensitive))
+		{
+			if (!Definition.ExpectedClass.Equals(TEXT("/Script/Engine.DataTable"), ESearchCase::CaseSensitive))
+			{
+				AddError(
+					Errors,
+					TEXT("data-table-asset-class"),
+					TEXT("dataTableAsset fixtures require expectedClass /Script/Engine.DataTable."),
+					BasePath + TEXT(".expectedClass"));
+			}
+			Object->TryGetStringField(TEXT("rowStruct"), Definition.RowStructPath);
+			if (!Definition.RowStructPath.StartsWith(TEXT("/Script/"), ESearchCase::CaseSensitive))
+			{
+				AddError(
+					Errors,
+					TEXT("data-table-row-struct"),
+					TEXT("dataTableAsset rowStruct must use /Script/Module.Struct form."),
+					BasePath + TEXT(".rowStruct"));
+			}
+			const TSharedPtr<FJsonValue> RowsField = Object->Values.FindRef(TEXT("rows"));
+			const TSharedPtr<FJsonObject> RowsObject = RowsField.IsValid() ? RowsField->AsObject() : nullptr;
+			if (!RowsObject.IsValid() || RowsObject->Values.IsEmpty() || RowsObject->Values.Num() > 64)
+			{
+				AddError(
+					Errors,
+					TEXT("data-table-rows"),
+					TEXT("dataTableAsset rows must be an object containing 1-64 named rows."),
+					BasePath + TEXT(".rows"));
+			}
+			else
+			{
+				for (const TPair<FString, TSharedPtr<FJsonValue>>& RowEntry : RowsObject->Values)
+				{
+					const FString RowPath = BasePath + TEXT(".rows.") + RowEntry.Key;
+					if (RowEntry.Key.IsEmpty() || RowEntry.Key.Len() > 256
+						|| RowEntry.Key.Contains(TEXT(".")) || RowEntry.Key.Contains(TEXT("/")))
+					{
+						AddError(
+							Errors,
+							TEXT("data-table-row-name"),
+							TEXT("DataTable row names must be non-empty strings without dots or slashes."),
+							RowPath);
+						continue;
+					}
+					const TSharedPtr<FJsonObject> RowValues = RowEntry.Value.IsValid()
+						? RowEntry.Value->AsObject()
+						: nullptr;
+					if (!RowValues.IsValid() || RowValues->Values.Num() > 32)
+					{
+						AddError(
+							Errors,
+							TEXT("data-table-row-values"),
+							TEXT("DataTable fixture rows require an object of at most 32 fields."),
+							RowPath);
+						continue;
+					}
+					Definition.DataTableRows.Add(RowEntry.Key, RowValues);
+				}
+			}
+		}
 		else if (Definition.Kind.Equals(TEXT("blueprint"), ESearchCase::CaseSensitive))
 		{
 			FString BlueprintTypeText;
@@ -1261,7 +1498,7 @@ int32 UWriteFixturePlanCommandlet::Main(const FString& Params)
 		}
 		else
 		{
-			AddError(Errors, TEXT("fixture-kind"), TEXT("kind must be duplicateAsset, scalarAsset, referenceAsset, structuredAsset, materialParentAsset, materialAsset, or blueprint."), BasePath + TEXT(".kind"));
+			AddError(Errors, TEXT("fixture-kind"), TEXT("kind must be duplicateAsset, scalarAsset, referenceAsset, structuredAsset, materialParentAsset, materialAsset, dataTableAsset, or blueprint."), BasePath + TEXT(".kind"));
 		}
 		Definitions.Add(MoveTemp(Definition));
 	}
@@ -1364,6 +1601,10 @@ int32 UWriteFixturePlanCommandlet::Main(const FString& Params)
 		else if (Definition.Kind.Equals(TEXT("materialAsset"), ESearchCase::CaseSensitive))
 		{
 			CreatedAsset = CreateMaterialAssetFixture(Definition, CreateError);
+		}
+		else if (Definition.Kind.Equals(TEXT("dataTableAsset"), ESearchCase::CaseSensitive))
+		{
+			CreatedAsset = CreateDataTableAssetFixture(Definition, CreateError);
 		}
 		else
 		{

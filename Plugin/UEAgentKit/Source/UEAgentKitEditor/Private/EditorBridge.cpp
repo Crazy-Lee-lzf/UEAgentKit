@@ -873,16 +873,22 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 		FString AssetPath;
 		FString PropertyPath;
 		FString ParameterName;
+		FString RowName;
+		FString NewRowName;
+		FString FieldName;
 		Params->TryGetStringField(TEXT("operation"), Operation);
 		Params->TryGetStringField(TEXT("assetPath"), AssetPath);
 		Params->TryGetStringField(TEXT("propertyPath"), PropertyPath);
 		Params->TryGetStringField(TEXT("parameterName"), ParameterName);
+		Params->TryGetStringField(TEXT("rowName"), RowName);
+		Params->TryGetStringField(TEXT("newRowName"), NewRowName);
+		Params->TryGetStringField(TEXT("fieldName"), FieldName);
 		const TSharedPtr<FJsonValue> Value = Params->TryGetField(TEXT("value"));
 		TSharedPtr<FJsonObject> Result;
 		FString ErrorCode;
 		FString ErrorMessage;
 		SendActionResult(
-			TryApplyAssetPropertyLiveResult(Operation, AssetPath, PropertyPath, ParameterName, Value, Result, ErrorCode, ErrorMessage),
+			TryApplyAssetPropertyLiveResult(Operation, AssetPath, PropertyPath, ParameterName, RowName, NewRowName, FieldName, Value, Result, ErrorCode, ErrorMessage),
 			Result,
 			ErrorCode,
 			ErrorMessage);

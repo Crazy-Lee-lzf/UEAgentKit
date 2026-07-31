@@ -35,6 +35,7 @@ MATERIAL_ASSET_CLASS = "/Script/Engine.MaterialInstanceConstant"
 STRUCTURED_ASSET_CLASS = "/Script/UEAgentKitEditor.UEAgentKitStructuredWriteFixtureAsset"
 DATA_TABLE_PATH = "/Game/UEAgentKitWriteTests/Tables/DT_Fixture.DT_Fixture"
 DATA_TABLE_CLASS = "/Script/Engine.DataTable"
+DATA_TABLE_ROW_STRUCT = "/Script/UEAgentKitEditor.UEAgentKitStructuredFixtureRecord"
 STRUCTURED_STRUCT_VALUE = {
     "valueType": "Struct",
     "fields": {"Count": 42, "Label": "Live Write", "bEnabled": True},
@@ -797,62 +798,6 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertEqual(bridge.calls[0][1]["propertyPath"], "SoftObjectValue")
         self.assertIsNone(bridge.calls[0][1]["value"])
 
-    def test_live_asset_property_write_rejects_unsupported_operation(self) -> None:
-        write_json(
-            self.policy_path,
-            {
-                "schemaVersion": "1.0",
-                "validationEnabled": True,
-                "commitEnabled": True,
-                "allowedProjectNames": [PROJECT],
-                "allowedAssetRoots": ["/Game/UEAgentKitWriteTests"],
-                "allowedReferenceRoots": [],
-                "allowedReferenceClasses": [],
-                "allowedOperations": ["setDataTableCell"],
-                "allowedAssetClasses": [DATA_TABLE_CLASS],
-                "allowedAssetProperties": [],
-                "allowedMaterialParameters": [],
-                "allowedDataTableFields": [f"{DATA_TABLE_CLASS}#/Script/UEAgentKitEditor.UEAgentKitStructuredFixtureRecord#Count"],
-                "requireRevision": True,
-                "rejectDirtyPackages": True,
-                "maxAssetsPerPatch": 1,
-                "maxOperationsPerAsset": 1,
-                "maxValueBytes": 65536,
-            },
-        )
-        write_json(
-            self.revision_export / "canonical" / "data_table.json",
-            {
-                "projectName": PROJECT,
-                "assetPath": DATA_TABLE_PATH,
-                "packageName": DATA_TABLE_PATH.split(".", 1)[0],
-                "assetClass": DATA_TABLE_CLASS,
-                "revision": {"available": True, "packageDirty": False, "value": BEFORE_REVISION},
-                "assetDetails": {
-                    "type": "data-asset",
-                    "rowStructPath": "/Script/UEAgentKitEditor.UEAgentKitStructuredFixtureRecord",
-                    "rowNames": ["Row1"],
-                    "properties": [],
-                },
-            },
-        )
-        service = PatchWorkflowService(
-            FakeIndexService(),
-            self.config,
-            process_runner=self.runner,
-            freshness_tracker=FakeFreshnessTracker(),
-            live_editor_service=object(),
-        )
-        plan = service.plan_patch(
-            asset_path=DATA_TABLE_PATH,
-            operation="setDataTableCell",
-            target={"rowName": "Row1", "fieldName": "Count"},
-            value=42,
-        )
-        with self.assertRaises(WorkflowError) as rejected:
-            service.apply_asset_property_live(plan["planId"], f"LIVE APPLY {plan['planId']}")
-        self.assertEqual(rejected.exception.code, "live-editor-write-operation-unsupported")
-
     def test_live_structured_property_write_passes_operation_and_preserves_json_value(self) -> None:
         class LiveStructuredWriteService:
             def __init__(self) -> None:
@@ -1179,6 +1124,229 @@ class AgentWorkflowTests(unittest.TestCase):
         with self.assertRaises(WorkflowError) as rejected:
             service.apply_asset_property_live(plan["planId"], f"LIVE APPLY {plan['planId']}")
         self.assertEqual(rejected.exception.code, "plan-tampered")
+
+    def test_live_data_table_cell_write_passes_row_and_field_names(self) -> None:
+        write_json(
+            self.policy_path,
+            {
+                "schemaVersion": "1.0",
+                "validationEnabled": True,
+                "commitEnabled": True,
+                "allowedProjectNames": [PROJECT],
+                "allowedAssetRoots": ["/Game/UEAgentKitWriteTests"],
+                "allowedReferenceRoots": [],
+                "allowedReferenceClasses": [],
+                "allowedOperations": ["setDataTableCell", "renameDataTableRow"],
+                "allowedAssetClasses": [DATA_TABLE_CLASS],
+                "allowedAssetProperties": [],
+                "allowedMaterialParameters": [],
+                "allowedDataTableFields": [f"{DATA_TABLE_CLASS}#{DATA_TABLE_ROW_STRUCT}#Count"],
+                "requireRevision": True,
+                "rejectDirtyPackages": True,
+                "maxAssetsPerPatch": 1,
+                "maxOperationsPerAsset": 1,
+                "maxValueBytes": 65536,
+            },
+        )
+        write_json(
+            self.revision_export / "canonical" / "data_table.json",
+            {
+                "projectName": PROJECT,
+                "assetPath": DATA_TABLE_PATH,
+                "packageName": DATA_TABLE_PATH.split(".", 1)[0],
+                "assetClass": DATA_TABLE_CLASS,
+                "revision": {"available": True, "packageDirty": False, "value": BEFORE_REVISION},
+                "assetDetails": {
+                    "type": "data-asset",
+                    "rowStructPath": DATA_TABLE_ROW_STRUCT,
+                    "rowNames": ["Row1"],
+                    "properties": [],
+                },
+            },
+        )
+
+        class LiveDataTableCellService:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict[str, Any]]] = []
+
+            def call_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+                self.calls.append((method, params))
+                return {
+                    "action": "apply-asset-property-live",
+                    "operation": "setDataTableCell",
+                    "assetPath": DATA_TABLE_PATH,
+                    "rowName": "Row1",
+                    "fieldName": "Count",
+                    "dataTableKind": "cell",
+                    "rowStructPath": DATA_TABLE_ROW_STRUCT,
+                    "valueKind": "data-table-cell",
+                    "beforeValue": {"Count": 1, "Label": "Initial", "bEnabled": False},
+                    "afterValue": {"Count": 42, "Label": "Initial", "bEnabled": False},
+                    "changed": True,
+                    "transactionRecorded": True,
+                    "transactionTitle": "UE Agent Kit: Set DataTable Value",
+                    "assetOpen": True,
+                    "loadedByBridge": False,
+                    "packageDirtyBefore": False,
+                    "packageDirtyAfter": True,
+                    "dirtyBefore": False,
+                    "dirtyAfter": True,
+                    "saved": False,
+                    "editorSessionId": "session-1",
+                }
+
+        bridge = LiveDataTableCellService()
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=FakeFreshnessTracker(),
+            live_editor_service=bridge,
+        )
+        plan = service.plan_patch(
+            asset_path=DATA_TABLE_PATH,
+            operation="setDataTableCell",
+            target={"rowName": "Row1", "fieldName": "Count"},
+            value=42,
+            description="Live DataTable cell write test",
+        )
+        result = service.apply_asset_property_live(
+            plan["planId"],
+            f"LIVE APPLY {plan['planId']}",
+        )
+        self.assertEqual(result["mode"], "LiveApply")
+        self.assertEqual(result["operation"], "setDataTableCell")
+        self.assertEqual(result["valueKind"], "data-table-cell")
+        self.assertEqual(result["propertyPath"], None)
+        self.assertEqual(result["parameterName"], None)
+        self.assertEqual(result["rowName"], "Row1")
+        self.assertEqual(result["fieldName"], "Count")
+        self.assertTrue(result["changed"])
+        self.assertEqual(
+            bridge.calls,
+            [
+                (
+                    "editor.applyAssetPropertyLive",
+                    {
+                        "operation": "setDataTableCell",
+                        "assetPath": DATA_TABLE_PATH,
+                        "value": 42,
+                        "rowName": "Row1",
+                        "fieldName": "Count",
+                    },
+                )
+            ],
+        )
+
+    def test_live_data_table_rename_passes_new_row_name(self) -> None:
+        write_json(
+            self.policy_path,
+            {
+                "schemaVersion": "1.0",
+                "validationEnabled": True,
+                "commitEnabled": True,
+                "allowedProjectNames": [PROJECT],
+                "allowedAssetRoots": ["/Game/UEAgentKitWriteTests"],
+                "allowedReferenceRoots": [],
+                "allowedReferenceClasses": [],
+                "allowedOperations": ["renameDataTableRow"],
+                "allowedAssetClasses": [DATA_TABLE_CLASS],
+                "allowedAssetProperties": [],
+                "allowedMaterialParameters": [],
+                "allowedDataTableFields": [],
+                "requireRevision": True,
+                "rejectDirtyPackages": True,
+                "maxAssetsPerPatch": 1,
+                "maxOperationsPerAsset": 1,
+                "maxValueBytes": 65536,
+            },
+        )
+        write_json(
+            self.revision_export / "canonical" / "data_table.json",
+            {
+                "projectName": PROJECT,
+                "assetPath": DATA_TABLE_PATH,
+                "packageName": DATA_TABLE_PATH.split(".", 1)[0],
+                "assetClass": DATA_TABLE_CLASS,
+                "revision": {"available": True, "packageDirty": False, "value": BEFORE_REVISION},
+                "assetDetails": {
+                    "type": "data-asset",
+                    "rowStructPath": DATA_TABLE_ROW_STRUCT,
+                    "rowNames": ["Row1"],
+                    "properties": [],
+                },
+            },
+        )
+        class LiveDataTableRenameService:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict[str, Any]]] = []
+
+            def call_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+                self.calls.append((method, params))
+                return {
+                    "action": "apply-asset-property-live",
+                    "operation": "renameDataTableRow",
+                    "assetPath": DATA_TABLE_PATH,
+                    "rowName": "Row1",
+                    "newRowName": "RowRenamed",
+                    "dataTableKind": "row-rename",
+                    "rowStructPath": DATA_TABLE_ROW_STRUCT,
+                    "valueKind": "data-table-row-rename",
+                    "beforeValue": {"Count": 1, "Label": "Initial", "bEnabled": False},
+                    "afterValue": {"Count": 1, "Label": "Initial", "bEnabled": False},
+                    "changed": True,
+                    "transactionRecorded": True,
+                    "transactionTitle": "UE Agent Kit: Set DataTable Value",
+                    "assetOpen": True,
+                    "loadedByBridge": False,
+                    "packageDirtyBefore": False,
+                    "packageDirtyAfter": True,
+                    "dirtyBefore": False,
+                    "dirtyAfter": True,
+                    "saved": False,
+                    "editorSessionId": "session-1",
+                }
+
+        bridge = LiveDataTableRenameService()
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=FakeFreshnessTracker(),
+            live_editor_service=bridge,
+        )
+        plan = service.plan_patch(
+            asset_path=DATA_TABLE_PATH,
+            operation="renameDataTableRow",
+            target={"rowName": "Row1", "newRowName": "RowRenamed"},
+            value=True,
+        )
+        self.assertEqual(plan["operation"], "renameDataTableRow")
+        result = service.apply_asset_property_live(
+            plan["planId"],
+            f"LIVE APPLY {plan['planId']}",
+        )
+        self.assertEqual(result["mode"], "LiveApply")
+        self.assertEqual(result["operation"], "renameDataTableRow")
+        self.assertEqual(result["valueKind"], "data-table-row-rename")
+        self.assertEqual(result["rowName"], "Row1")
+        self.assertEqual(result["newRowName"], "RowRenamed")
+        self.assertTrue(result["changed"])
+        self.assertEqual(
+            bridge.calls,
+            [
+                (
+                    "editor.applyAssetPropertyLive",
+                    {
+                        "operation": "renameDataTableRow",
+                        "assetPath": DATA_TABLE_PATH,
+                        "value": True,
+                        "rowName": "Row1",
+                        "newRowName": "RowRenamed",
+                    },
+                )
+            ],
+        )
 
     def test_live_write_tool_count_and_names_are_unchanged(self) -> None:
         names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
