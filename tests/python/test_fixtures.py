@@ -89,6 +89,48 @@ class FixturePlanTests(unittest.TestCase):
         result = validate_fixture_plan(self.plan_path)
         self.assertIn("scalar-asset-class", self.codes(result))
 
+    def test_reference_asset_accepts_valid_initial_values(self) -> None:
+        self.plan["fixtures"].append(
+            {
+                "id": "reference-asset",
+                "kind": "referenceAsset",
+                "targetAsset": "/Game/UEAgentKitWriteTests/DA_ReferenceTarget",
+                "expectedClass": "/Script/UEAgentKitEditor.UEAgentKitReferenceWriteFixtureAsset",
+                "values": {
+                    "ObjectValue": {
+                        "referenceType": "Object",
+                        "path": "/Game/UEAgentKitWriteTests/T_Target.T_Target",
+                    },
+                    "SoftObjectValue": None,
+                },
+            }
+        )
+        write_json(self.plan_path, self.plan)
+        result = validate_fixture_plan(self.plan_path)
+        self.assertTrue(result["valid"], result["errors"])
+
+    def test_reference_asset_rejects_invalid_initial_values(self) -> None:
+        self.plan["fixtures"].append(
+            {
+                "id": "reference-asset",
+                "kind": "referenceAsset",
+                "targetAsset": "/Game/UEAgentKitWriteTests/DA_ReferenceTarget",
+                "expectedClass": "/Script/UEAgentKitEditor.UEAgentKitReferenceWriteFixtureAsset",
+                "values": {
+                    "UnknownValue": None,
+                    "SoftObjectValue": {
+                        "referenceType": "Object",
+                        "path": "/Game/UEAgentKitWriteTests/T_Target.T_Target",
+                    },
+                },
+            }
+        )
+        write_json(self.plan_path, self.plan)
+        result = validate_fixture_plan(self.plan_path)
+        self.assertFalse(result["valid"])
+        self.assertIn("reference-values-property", self.codes(result))
+        self.assertIn("reference-values-type", self.codes(result))
+
     def test_plan_rejects_target_outside_root_and_duplicate_id(self) -> None:
         self.plan["fixtures"][2]["id"] = "data-table"
         self.plan["fixtures"][2]["targetAsset"] = "/Game/Other/BFL_PatchTarget"
@@ -111,6 +153,48 @@ class FixturePlanTests(unittest.TestCase):
         write_json(self.plan_path, self.plan)
         result = validate_fixture_plan(self.plan_path)
         self.assertIn("target-invalid", self.codes(result))
+
+    def test_structured_live_write_plan_is_parsed_by_real_validator(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        plan_path = repository / "tests" / "fixtures" / "structured_live_write_plan.json"
+        result = validate_fixture_plan(plan_path)
+        self.assertTrue(result["valid"], result["errors"])
+        self.assertEqual(result["schemaVersion"], "1.0")
+        self.assertEqual(result["root"], "/Game/UEAgentKitWriteTests/Structured")
+        self.assertEqual(result["fixtureCount"], 6)
+        fixtures = {fixture["id"]: fixture for fixture in result["fixtures"]}
+        self.assertEqual(
+            set(fixtures),
+            {
+                "structured-struct-asset",
+                "structured-array-asset",
+                "structured-set-asset",
+                "structured-map-asset",
+                "structured-noop-asset",
+                "structured-scalar-non-structured",
+            },
+        )
+        self.assertEqual(
+            fixtures["structured-struct-asset"]["expectedClass"],
+            "/Script/UEAgentKitEditor.UEAgentKitStructuredWriteFixtureAsset",
+        )
+        self.assertEqual(
+            fixtures["structured-scalar-non-structured"]["expectedClass"],
+            "/Script/UEAgentKitEditor.UEAgentKitScalarWriteFixtureAsset",
+        )
+
+    def test_structured_asset_requires_exact_fixture_class(self) -> None:
+        self.plan["fixtures"].append(
+            {
+                "id": "structured-asset",
+                "kind": "structuredAsset",
+                "targetAsset": "/Game/UEAgentKitWriteTests/DA_StructuredTarget",
+                "expectedClass": "/Script/Engine.DataAsset",
+            }
+        )
+        write_json(self.plan_path, self.plan)
+        result = validate_fixture_plan(self.plan_path)
+        self.assertIn("structured-asset-class", self.codes(result))
 
     def test_verify_fixture_export_checks_class_revision_and_dirty_state(self) -> None:
         fixture_report = self.root / "fixture-report.json"

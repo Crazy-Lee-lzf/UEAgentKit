@@ -236,13 +236,35 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertIn("UPackage::SavePackage", save)
         self.assertNotIn("SaveAll", save)
         self.assertNotIn("PromptForCheckoutAndSave", save)
-        self.assertNotIn("LoadObject", live_write)
-        self.assertNotIn("StaticLoadObject", live_write)
+        reference_helpers = live_write.split("bool SetAssetReferenceFromJson(", 1)[1]
+        scalar_section = live_write.split("bool TryApplyScalarPropertyLive(", 1)[1].split("bool TryApplyReferencePropertyLive(", 1)[0]
+        # Reference verification is documented to load the target for class validation;
+        # the scalar live-write path must remain free of arbitrary object loading.
+        self.assertIn("StaticLoadObject", reference_helpers)
+        self.assertIn("LoadObject<UClass>", reference_helpers)
+        self.assertNotIn("LoadObject", scalar_section)
+        self.assertNotIn("StaticLoadObject", scalar_section)
         self.assertNotIn("SavePackage", live_write)
         self.assertIn("FScopedTransaction", live_write)
         self.assertIn("Asset->Modify()", live_write)
         self.assertIn("PostEditChangeProperty", live_write)
         self.assertIn("MarkPackageDirty", live_write)
+        self.assertIn("Property->ArrayDim != 1", live_write)
+        self.assertIn("Live Editor writes do not support native fixed-array properties.", live_write)
+        structured_section = live_write.split("bool TryApplyStructuredPropertyLive(", 1)[1]
+        self.assertIn("FScopedPropertyValueBackup Backup(Property, ValueAddress)", structured_section)
+        noop_branch = structured_section.split("JsonEqual(AfterValue, BeforeValue))", 1)[1]
+        # A structured no-op must restore the deep-copied snapshot before restoring the
+        # Dirty flag and cancelling the transaction, because ImportValue may clear and
+        # rebuild Array/Set/Map containers even for canonically identical values.
+        self.assertLess(
+            noop_branch.index("Backup.Restore(ValueAddress)"),
+            noop_branch.index("Transaction.Cancel()"),
+        )
+        self.assertLess(
+            noop_branch.index("Package->SetDirtyFlag(bPackageDirtyBefore)"),
+            noop_branch.index("Transaction.Cancel()"),
+        )
         self.assertIn('"DataValidation"', build_rules)
         self.assertIn('"Name": "DataValidation"', plugin_descriptor)
 

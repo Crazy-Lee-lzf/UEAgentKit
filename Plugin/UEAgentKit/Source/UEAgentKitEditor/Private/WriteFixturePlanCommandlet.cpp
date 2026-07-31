@@ -5,6 +5,7 @@
 #include "Dom/JsonObject.h"
 #include "Editor.h"
 #include "Engine/Blueprint.h"
+#include "Engine/Texture2D.h"
 #include "EdGraphSchema_K2.h"
 #include "GameFramework/Actor.h"
 #include "HAL/FileManager.h"
@@ -26,6 +27,8 @@
 #include "UObject/GarbageCollection.h"
 #include "UObject/Interface.h"
 #include "UObject/Package.h"
+#include "UObject/SoftObjectPath.h"
+#include "UObject/SoftObjectPtr.h"
 #include "UObject/SavePackage.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWriteFixturePlan, Log, All);
@@ -45,6 +48,7 @@ namespace WriteFixturePlanCommandletPrivate
 		FString ExpectedClass;
 		FString ParentClassPath;
 		EBlueprintType BlueprintType = BPTYPE_Normal;
+		TMap<FString, TSharedPtr<FJsonValue>> ReferenceValues;
 		TObjectPtr<UObject> SourceObject = nullptr;
 		TObjectPtr<UClass> ParentClass = nullptr;
 	};
@@ -248,6 +252,120 @@ namespace WriteFixturePlanCommandletPrivate
 		return Asset;
 	}
 
+	bool ApplyReferenceFixtureValues(
+		UUEAgentKitReferenceWriteFixtureAsset* Asset,
+		const TMap<FString, TSharedPtr<FJsonValue>>& Values,
+		FString& OutError)
+	{
+		if (!Asset)
+		{
+			OutError = TEXT("Reference fixture asset is null.");
+			return false;
+		}
+		for (const TPair<FString, TSharedPtr<FJsonValue>>& Entry : Values)
+		{
+			FProperty* Property = FindFProperty<FProperty>(Asset->GetClass(), FName(*Entry.Key));
+			if (Property == nullptr)
+			{
+				OutError = FString::Printf(TEXT("Reference fixture property was not found: %s"), *Entry.Key);
+				return false;
+			}
+			void* ValueAddress = Property->ContainerPtrToValuePtr<void>(Asset);
+			const TSharedPtr<FJsonValue>& JsonValue = Entry.Value;
+			if (!JsonValue.IsValid() || JsonValue->Type == EJson::Null)
+			{
+				if (FSoftObjectProperty* SoftObjectProperty = CastField<FSoftObjectProperty>(Property))
+				{
+					SoftObjectProperty->SetPropertyValue(ValueAddress, FSoftObjectPtr());
+				}
+				else if (FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property))
+				{
+					ObjectProperty->SetObjectPropertyValue(ValueAddress, nullptr);
+				}
+				else
+				{
+					OutError = FString::Printf(TEXT("Reference fixture property is not a reference: %s"), *Entry.Key);
+					return false;
+				}
+				continue;
+			}
+			if (JsonValue->Type != EJson::Object)
+			{
+				OutError = FString::Printf(TEXT("Reference fixture value must be null or an object: %s"), *Entry.Key);
+				return false;
+			}
+			const TSharedPtr<FJsonObject> ReferenceObject = JsonValue->AsObject();
+			FString RequestedType;
+			FString RequestedPath;
+			if (!ReferenceObject.IsValid()
+				|| !ReferenceObject->TryGetStringField(TEXT("referenceType"), RequestedType)
+				|| !ReferenceObject->TryGetStringField(TEXT("path"), RequestedPath)
+				|| RequestedPath.IsEmpty())
+			{
+				OutError = FString::Printf(TEXT("Reference fixture value requires non-empty referenceType and path: %s"), *Entry.Key);
+				return false;
+			}
+			const FString ExpectedType =
+				Entry.Key == TEXT("ObjectValue") ? TEXT("Object")
+				: Entry.Key == TEXT("ClassValue") ? TEXT("Class")
+				: Entry.Key == TEXT("SoftObjectValue") ? TEXT("SoftObject")
+				: TEXT("SoftClass");
+			if (!RequestedType.Equals(ExpectedType, ESearchCase::CaseSensitive))
+			{
+				OutError = FString::Printf(
+					TEXT("Reference fixture type %s does not match %s."),
+					*RequestedType,
+					*Entry.Key);
+				return false;
+			}
+			const FSoftObjectPath SoftPath(RequestedPath);
+			if (!SoftPath.IsValid() || !SoftPath.GetSubPathString().IsEmpty())
+			{
+				OutError = FString::Printf(TEXT("Reference fixture path is invalid or contains a subobject: %s"), *RequestedPath);
+				return false;
+			}
+			if (ExpectedType == TEXT("Class") || ExpectedType == TEXT("SoftClass"))
+			{
+				UClass* ReferencedClass = LoadObject<UClass>(nullptr, *RequestedPath);
+				if (ReferencedClass == nullptr || !ReferencedClass->IsChildOf(AActor::StaticClass()))
+				{
+					OutError = FString::Printf(
+						TEXT("Reference fixture class is missing or not an Actor class: %s"),
+						*RequestedPath);
+					return false;
+				}
+				if (ExpectedType == TEXT("Class"))
+				{
+					CastFieldChecked<FClassProperty>(Property)->SetObjectPropertyValue(ValueAddress, ReferencedClass);
+				}
+				else
+				{
+					CastFieldChecked<FSoftClassProperty>(Property)->SetPropertyValue(ValueAddress, FSoftObjectPtr(SoftPath));
+				}
+			}
+			else
+			{
+				UObject* ReferencedObject = StaticLoadObject(UTexture2D::StaticClass(), nullptr, *RequestedPath);
+				if (ReferencedObject == nullptr)
+				{
+					OutError = FString::Printf(
+						TEXT("Reference fixture object is missing or is not a Texture2D: %s"),
+						*RequestedPath);
+					return false;
+				}
+				if (ExpectedType == TEXT("Object"))
+				{
+					CastFieldChecked<FObjectPropertyBase>(Property)->SetObjectPropertyValue(ValueAddress, ReferencedObject);
+				}
+				else
+				{
+					CastFieldChecked<FSoftObjectProperty>(Property)->SetPropertyValue(ValueAddress, FSoftObjectPtr(SoftPath));
+				}
+			}
+		}
+		return true;
+	}
+
 	UUEAgentKitReferenceWriteFixtureAsset* CreateReferenceAssetFixture(
 		const FFixtureDefinition& Definition,
 		FString& OutError)
@@ -266,6 +384,12 @@ namespace WriteFixturePlanCommandletPrivate
 		if (!Asset)
 		{
 			OutError = FString::Printf(TEXT("Could not create reference fixture: %s"), *Definition.TargetAsset);
+			return nullptr;
+		}
+		FString ValuesError;
+		if (!ApplyReferenceFixtureValues(Asset, Definition.ReferenceValues, ValuesError))
+		{
+			OutError = FString::Printf(TEXT("Could not set reference fixture values: %s"), *ValuesError);
 			return nullptr;
 		}
 		FAssetRegistryModule::AssetCreated(Asset);
@@ -618,6 +742,95 @@ int32 UWriteFixturePlanCommandlet::Main(const FString& Params)
 					TEXT("reference-asset-class"),
 					TEXT("referenceAsset fixtures require the UEAgentKit reference fixture class."),
 					BasePath + TEXT(".expectedClass"));
+			}
+			const TSharedPtr<FJsonValue> ValuesField = Object->Values.FindRef(TEXT("values"));
+			if (ValuesField.IsValid())
+			{
+				const TSharedPtr<FJsonObject> ValuesObject = ValuesField->AsObject();
+				if (!ValuesObject.IsValid())
+				{
+					AddError(
+						Errors,
+						TEXT("reference-values"),
+						TEXT("referenceAsset values must be an object."),
+						BasePath + TEXT(".values"));
+				}
+				else
+				{
+					for (const TPair<FString, TSharedPtr<FJsonValue>>& Entry : ValuesObject->Values)
+					{
+						const FString PropertyPath = BasePath + TEXT(".values.") + Entry.Key;
+						const FString ExpectedType =
+							Entry.Key == TEXT("ObjectValue") ? TEXT("Object")
+							: Entry.Key == TEXT("ClassValue") ? TEXT("Class")
+							: Entry.Key == TEXT("SoftObjectValue") ? TEXT("SoftObject")
+							: Entry.Key == TEXT("SoftClassValue") ? TEXT("SoftClass")
+							: FString();
+						if (ExpectedType.IsEmpty())
+						{
+							AddError(
+								Errors,
+								TEXT("reference-values-property"),
+								TEXT("Unknown reference fixture property."),
+								PropertyPath);
+							continue;
+						}
+						if (!Entry.Value.IsValid() || Entry.Value->Type == EJson::Null)
+						{
+							Definition.ReferenceValues.Add(Entry.Key, Entry.Value);
+							continue;
+						}
+						if (Entry.Value->Type != EJson::Object)
+						{
+							AddError(
+								Errors,
+								TEXT("reference-values-value"),
+								TEXT("Reference fixture value must be null or an object."),
+								PropertyPath);
+							continue;
+						}
+						const TSharedPtr<FJsonObject> ReferenceObject = Entry.Value->AsObject();
+						FString RequestedType;
+						FString RequestedPath;
+						if (!ReferenceObject.IsValid()
+							|| !ReferenceObject->TryGetStringField(TEXT("referenceType"), RequestedType)
+							|| !ReferenceObject->TryGetStringField(TEXT("path"), RequestedPath)
+							|| RequestedPath.IsEmpty())
+						{
+							AddError(
+								Errors,
+								TEXT("reference-values-value"),
+								TEXT("Reference fixture value requires non-empty referenceType and path."),
+								PropertyPath);
+							continue;
+						}
+						if (!RequestedType.Equals(ExpectedType, ESearchCase::CaseSensitive))
+						{
+							AddError(
+								Errors,
+								TEXT("reference-values-type"),
+								FString::Printf(
+									TEXT("Reference fixture type %s does not match property type %s."),
+									*RequestedType,
+									*ExpectedType),
+								PropertyPath + TEXT(".referenceType"));
+							continue;
+						}
+						const FSoftObjectPath SoftPath(RequestedPath);
+						if (!SoftPath.IsValid() || !SoftPath.GetSubPathString().IsEmpty())
+						{
+							AddError(
+								Errors,
+								TEXT("reference-values-path"),
+								FString::Printf(
+									TEXT("Reference fixture path is invalid or contains a subobject: %s"),
+									*RequestedPath),
+								PropertyPath + TEXT(".path"));
+							continue;
+						}
+						Definition.ReferenceValues.Add(Entry.Key, Entry.Value);
+					}
+				}
 			}
 		}
 		else if (Definition.Kind.Equals(TEXT("structuredAsset"), ESearchCase::CaseSensitive))

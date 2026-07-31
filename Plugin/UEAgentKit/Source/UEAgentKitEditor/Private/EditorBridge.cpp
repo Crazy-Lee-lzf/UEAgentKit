@@ -869,8 +869,10 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 	}
 	else if (Method == TEXT("editor.applyAssetPropertyLive"))
 	{
+		FString Operation;
 		FString AssetPath;
 		FString PropertyPath;
+		Params->TryGetStringField(TEXT("operation"), Operation);
 		Params->TryGetStringField(TEXT("assetPath"), AssetPath);
 		Params->TryGetStringField(TEXT("propertyPath"), PropertyPath);
 		const TSharedPtr<FJsonValue> Value = Params->TryGetField(TEXT("value"));
@@ -878,7 +880,7 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 		FString ErrorCode;
 		FString ErrorMessage;
 		SendActionResult(
-			TryApplyAssetPropertyLiveResult(AssetPath, PropertyPath, Value, Result, ErrorCode, ErrorMessage),
+			TryApplyAssetPropertyLiveResult(Operation, AssetPath, PropertyPath, Value, Result, ErrorCode, ErrorMessage),
 			Result,
 			ErrorCode,
 			ErrorMessage);

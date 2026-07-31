@@ -16,8 +16,8 @@ $ProjectDirectory = Split-Path -Parent $ProjectPath
 $VenvPython = Join-Path $ToolRoot ".venv\Scripts\python.exe"
 $FixtureScript = Join-Path $PSScriptRoot "RunWriteFixturePlan.ps1"
 $CatalogScript = Join-Path $PSScriptRoot "RunAssetCatalog.ps1"
-$FixturePlan = Join-Path $ToolRoot "tests\fixtures\scalar_patch_regression_plan.json"
-$ClientScript = Join-Path $ToolRoot "tests\integration\mcp_live_write_smoke.py"
+$FixturePlan = Join-Path $ToolRoot "tests\fixtures\reference_live_write_plan.json"
+$ClientScript = Join-Path $ToolRoot "tests\integration\mcp_live_reference_write_smoke.py"
 $UnrealEditor = Join-Path $EngineRoot "Engine\Binaries\Win64\UnrealEditor.exe"
 $CompiledPlugin = Join-Path $ToolRoot "Build\Compiled\UEAgentKit\Binaries\Win64\UnrealEditor-UEAgentKitEditor.dll"
 foreach ($Required in @($VenvPython, $FixtureScript, $CatalogScript, $FixturePlan, $ClientScript, $UnrealEditor, $CompiledPlugin))
@@ -25,14 +25,14 @@ foreach ($Required in @($VenvPython, $FixtureScript, $CatalogScript, $FixturePla
     Assert-UeakPath -Path $Required -Description ([System.IO.Path]::GetFileName($Required)) -PathType File
 }
 
-$Output = Join-Path $ToolRoot "Output\McpLiveWriteSmoke"
+$Output = Join-Path $ToolRoot "Output\McpLiveReferenceWriteSmoke"
 if (Test-Path -LiteralPath $Output)
 {
     Remove-Item -LiteralPath $Output -Recurse -Force
 }
 New-Item -ItemType Directory -Path $Output -Force | Out-Null
 
-$BackupRoot = Join-Path $ToolRoot "Backups\McpLiveWriteSmoke"
+$BackupRoot = Join-Path $ToolRoot "Backups\McpLiveReferenceWriteSmoke"
 if (Test-Path -LiteralPath $BackupRoot)
 {
     Remove-Item -LiteralPath $BackupRoot -Recurse -Force
@@ -50,11 +50,12 @@ $SessionMarker = Join-Path $Output "session-initialized.marker"
 $EditorStdout = Join-Path $Output "Logs\Editor-stdout.log"
 $EditorStderr = Join-Path $Output "Logs\Editor-stderr.log"
 $DescriptorPath = Join-Path $ProjectDirectory "Saved\UEAgentKit\EditorBridge.json"
-$AssetPackage = "/Game/UEAgentKitWriteTests/ScalarRegression/DA_ScalarPatchTarget"
-$AssetClass = "/Script/UEAgentKitEditor.UEAgentKitScalarWriteFixtureAsset"
+$ReferenceClass = "/Script/UEAgentKitEditor.UEAgentKitReferenceWriteFixtureAsset"
+$ScalarClass = "/Script/UEAgentKitEditor.UEAgentKitScalarWriteFixtureAsset"
 $EditorProcess = $null
-$PackageFile = ""
-$PackageHashBefore = ""
+$FixtureHashes = @{}
+$DatabaseHashBefore = ""
+$RevisionExportHashBefore = ""
 $Succeeded = $false
 
 function Write-Utf8Json
@@ -85,6 +86,25 @@ function Read-BridgeDescriptor
     }
 }
 
+function Get-RevisionExportHash
+{
+    param([string]$Root)
+    $Items = Get-ChildItem -LiteralPath $Root -Filter "*.json" -File -Recurse |
+        Sort-Object { $_.FullName.Substring($Root.Length).TrimStart('\', '/') }
+    $Digest = [System.Security.Cryptography.SHA256]::Create()
+    foreach ($Item in $Items)
+    {
+        $Relative = $Item.FullName.Substring($Root.Length).TrimStart('\', '/')
+        $RelativeBytes = [System.Text.Encoding]::UTF8.GetBytes($Relative)
+        [void]$Digest.TransformBlock($RelativeBytes, 0, $RelativeBytes.Length, $null, 0)
+        [void]$Digest.TransformBlock([byte[]]@(1), 0, 1, $null, 0)
+        $Bytes = [System.IO.File]::ReadAllBytes($Item.FullName)
+        [void]$Digest.TransformBlock($Bytes, 0, $Bytes.Length, $null, 0)
+    }
+    [void]$Digest.TransformFinalBlock([byte[]]@(), 0, 0)
+    return ([System.BitConverter]::ToString($Digest.Hash) -replace '-', '').ToLowerInvariant()
+}
+
 try
 {
     $ExistingDescriptor = Read-BridgeDescriptor
@@ -98,7 +118,7 @@ try
         Remove-Item -LiteralPath $DescriptorPath -Force -ErrorAction SilentlyContinue
     }
 
-    Write-Host "Resetting isolated scalar fixture..."
+    Write-Host "Resetting isolated reference fixtures..."
     & $FixtureScript `
         -EngineRoot $EngineRoot `
         -ProjectPath $ProjectPath `
@@ -110,24 +130,24 @@ try
         -VerificationReport (Join-Path $FixtureDirectory "verification-report.json")
     if ($LASTEXITCODE -ne 0)
     {
-        throw "Scalar fixture reset failed with exit code $LASTEXITCODE"
+        throw "Reference fixture reset failed with exit code $LASTEXITCODE"
     }
 
     & $CatalogScript `
         -EngineRoot $EngineRoot `
         -ProjectPath $ProjectPath `
-        -Asset $AssetPackage `
+        -Root "/Game/UEAgentKitWriteTests/References" `
         -Output $RevisionExport
     if ($LASTEXITCODE -ne 0)
     {
-        throw "Scalar Revision Export failed with exit code $LASTEXITCODE"
+        throw "Reference Revision Export failed with exit code $LASTEXITCODE"
     }
 
     New-Item -ItemType Directory -Path ([System.IO.Path]::GetDirectoryName($Database)) -Force | Out-Null
     & $VenvPython (Join-Path $PSScriptRoot "ue-agent.py") index build $RevisionExport --database $Database --force --project-key $ProjectName | Out-Host
     if ($LASTEXITCODE -ne 0)
     {
-        throw "Live Write smoke index build failed with exit code $LASTEXITCODE"
+        throw "Live reference write smoke index build failed with exit code $LASTEXITCODE"
     }
 
     $PolicyValue = [ordered]@{
@@ -135,12 +155,21 @@ try
         validationEnabled = $true
         commitEnabled = $true
         allowedProjectNames = @($ProjectName)
-        allowedAssetRoots = @("/Game/UEAgentKitWriteTests/ScalarRegression")
-        allowedReferenceRoots = @()
-        allowedReferenceClasses = @()
-        allowedOperations = @("setAssetProperty")
-        allowedAssetClasses = @($AssetClass)
-        allowedAssetProperties = @("$AssetClass#BoolValue")
+        allowedAssetRoots = @("/Game/UEAgentKitWriteTests/References")
+        allowedReferenceRoots = @("/Game/UEAgentKitWriteTests/References")
+        allowedReferenceClasses = @(
+            "/Script/Engine.Texture2D",
+            "/Game/UEAgentKitWriteTests/References/BP_ReferenceTarget.BP_ReferenceTarget_C"
+        )
+        allowedOperations = @("setAssetReferenceProperty")
+        allowedAssetClasses = @($ReferenceClass, $ScalarClass)
+        allowedAssetProperties = @(
+            "$ReferenceClass#ObjectValue",
+            "$ReferenceClass#ClassValue",
+            "$ReferenceClass#SoftObjectValue",
+            "$ReferenceClass#SoftClassValue",
+            "$ScalarClass#BoolValue"
+        )
         allowedMaterialParameters = @()
         allowedDataTableFields = @()
         requireRevision = $true
@@ -152,9 +181,14 @@ try
     Write-Utf8Json -Path $Policy -Value $PolicyValue
 
     $Fixture = [System.IO.File]::ReadAllText($FixtureReport, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
-    $PackageFile = [string]$Fixture.fixtures[0].packageFilename
-    Assert-UeakPath -Path $PackageFile -Description "scalar fixture package" -PathType File
-    $PackageHashBefore = (Get-FileHash -LiteralPath $PackageFile -Algorithm SHA256).Hash.ToLowerInvariant()
+    foreach ($FixtureEntry in $Fixture.fixtures)
+    {
+        $PackageFile = [string]$FixtureEntry.packageFilename
+        Assert-UeakPath -Path $PackageFile -Description "reference fixture package $($FixtureEntry.id)" -PathType File
+        $FixtureHashes[[string]$FixtureEntry.id] = (Get-FileHash -LiteralPath $PackageFile -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+    $DatabaseHashBefore = (Get-FileHash -LiteralPath $Database -Algorithm SHA256).Hash.ToLowerInvariant()
+    $RevisionExportHashBefore = Get-RevisionExportHash -Root $RevisionExport
 
     New-Item -ItemType Directory -Path ([System.IO.Path]::GetDirectoryName($EditorStdout)) -Force | Out-Null
     $EditorProcess = Start-Process `
@@ -210,7 +244,7 @@ try
             --revision-export $RevisionExport `
             --work-root $WorkRoot `
             --backup-root $BackupRoot `
-            --package-file $PackageFile `
+            --fixture-report $FixtureReport `
             --error-log $ErrorLog `
             --session-marker $SessionMarker
         $ClientExitCode = $LASTEXITCODE
@@ -227,7 +261,7 @@ try
     }
     if ($ClientExitCode -ne 0)
     {
-        throw "MCP Live Editor Write smoke test failed with exit code $ClientExitCode"
+        throw "MCP Live Editor reference write smoke test failed with exit code $ClientExitCode"
     }
     $Succeeded = $true
 }
@@ -252,13 +286,26 @@ finally
         Remove-Item -LiteralPath $DescriptorPath -Force -ErrorAction SilentlyContinue
     }
 
-    if (![string]::IsNullOrWhiteSpace($PackageFile) -and (Test-Path -LiteralPath $PackageFile))
+    if ($FixtureHashes.Count -gt 0)
     {
-        $PackageHashAfter = (Get-FileHash -LiteralPath $PackageFile -Algorithm SHA256).Hash.ToLowerInvariant()
-        if ($PackageHashAfter -ne $PackageHashBefore)
+        $HashesChanged = $false
+        $Fixture = [System.IO.File]::ReadAllText($FixtureReport, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+        foreach ($FixtureEntry in $Fixture.fixtures)
+        {
+            $PackageFile = [string]$FixtureEntry.packageFilename
+            if (Test-Path -LiteralPath $PackageFile)
+            {
+                $HashAfter = (Get-FileHash -LiteralPath $PackageFile -Algorithm SHA256).Hash.ToLowerInvariant()
+                if ($HashAfter -ne $FixtureHashes[[string]$FixtureEntry.id])
+                {
+                    $HashesChanged = $true
+                }
+            }
+        }
+        if ($HashesChanged)
         {
             $Succeeded = $false
-            Write-Warning "Live Write changed the fixture package on disk; resetting the fixture."
+            Write-Warning "Live reference write changed a fixture package on disk; resetting the fixtures."
             & $FixtureScript `
                 -EngineRoot $EngineRoot `
                 -ProjectPath $ProjectPath `
@@ -274,6 +321,6 @@ finally
 
 if (!$Succeeded)
 {
-    throw "MCP Live Editor Write smoke test did not complete successfully."
+    throw "MCP Live Editor reference write smoke test did not complete successfully."
 }
-Write-Host "MCP Live Editor Write smoke test passed."
+Write-Host "MCP Live Editor reference write smoke test passed."

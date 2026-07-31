@@ -62,7 +62,7 @@ Current validation baseline:
 
 ```text
 
-Python tests                 248/248
+Python tests                 264/264
 
 JSON Schemas                 3/3
 
@@ -71,6 +71,10 @@ Patch examples               16/16
 UE5.6 Direct Build           passed
 
 Real Live Editor Write       passed
+
+Real Live Editor Reference Write  passed
+
+Real Live Editor Structured Write  passed
 
 UTF-8 no BOM / CRLF          passed
 
@@ -168,7 +172,7 @@ Policy/Revision Plan
 
 
 
-The first version supports one top-level scalar, enum, String, Name, or Text property on an already loaded, open, clean, non-Blueprint, non-map asset. The change enters the Unreal Undo stack while disk Package and SQLite remain unchanged.
+The current `main` snapshot (not part of the 0.6.0 release) supports three explicit Operations on an already loaded, open, clean, non-Blueprint, non-map asset: `setAssetProperty` for one top-level scalar, enum, String, Name, or Text property, `setAssetReferenceProperty` for one Data Asset top-level Object, Class, SoftObject, or SoftClass reference property (JSON `null` clears the reference), and `setAssetStructuredProperty` for one Data Asset top-level Struct, Array, Set, or Map property (reusing the StructuredPropertyJson schema/import/export/diff path and rejecting fixed arrays and non-structured properties). The change enters the Unreal Undo stack while disk Package, SQLite, and Revision Export remain unchanged; failures restore the original value and Dirty state and cancel the Transaction, no-op applies create no Undo or Dirty, and the Tool never auto-saves. Blueprint, container, Material Instance, and DataTable live apply remain unsupported.
 
 
 
@@ -268,7 +272,7 @@ These are intentional scope and safety boundaries, not documentation omissions.
 
 - Shared Live Transaction/Evidence framework.
 
-- Controlled live Reference and Structured Property changes.
+- Controlled live Structured Property changes (Data Asset reference properties are already implemented in the current snapshot).
 
 - Material Instance and DataTable live apply.
 

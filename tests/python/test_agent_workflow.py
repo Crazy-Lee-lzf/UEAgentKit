@@ -21,11 +21,26 @@ from ue_agent_kit.agent_workflow import (  # noqa: E402
     ProcessResult,
     WorkflowError,
 )
+from ue_agent_kit.tool_registry import tool_names_for_mode  # noqa: E402
 
 
 PROJECT = "我的项目"
 ASSET_PATH = "/Game/UEAgentKitWriteTests/ScalarRegression/DA_ScalarPatchTarget.DA_ScalarPatchTarget"
 ASSET_CLASS = "/Script/UEAgentKitEditor.UEAgentKitScalarWriteFixtureAsset"
+REFERENCE_ASSET_PATH = "/Game/UEAgentKitWriteTests/References/DA_ReferenceLiveTarget.DA_ReferenceLiveTarget"
+REFERENCE_ASSET_CLASS = "/Script/UEAgentKitEditor.UEAgentKitReferenceWriteFixtureAsset"
+STRUCTURED_ASSET_PATH = "/Game/UEAgentKitWriteTests/Structured/DA_StructuredLiveTarget.DA_StructuredLiveTarget"
+STRUCTURED_ASSET_CLASS = "/Script/UEAgentKitEditor.UEAgentKitStructuredWriteFixtureAsset"
+DATA_TABLE_PATH = "/Game/UEAgentKitWriteTests/Tables/DT_Fixture.DT_Fixture"
+DATA_TABLE_CLASS = "/Script/Engine.DataTable"
+STRUCTURED_STRUCT_VALUE = {
+    "valueType": "Struct",
+    "fields": {"Count": 42, "Label": "Live Write", "bEnabled": True},
+}
+STRUCTURED_DEFAULT_STRUCT_VALUE = {
+    "valueType": "Struct",
+    "fields": {"Count": 0, "Label": "", "bEnabled": False},
+}
 BEFORE_REVISION = "sha256:" + "a" * 64
 AFTER_REVISION = "sha256:" + "b" * 64
 
@@ -40,6 +55,36 @@ class FakeIndexService:
         return {"ok": True, "projectKey": PROJECT}
 
     def get_asset(self, asset_path: str, **_: Any) -> dict[str, Any]:
+        if asset_path == REFERENCE_ASSET_PATH:
+            return {
+                "found": True,
+                "ok": True,
+                "asset": {
+                    "asset_path": REFERENCE_ASSET_PATH,
+                    "asset_class": REFERENCE_ASSET_CLASS,
+                    "revision_value": BEFORE_REVISION,
+                },
+            }
+        if asset_path == STRUCTURED_ASSET_PATH:
+            return {
+                "found": True,
+                "ok": True,
+                "asset": {
+                    "asset_path": STRUCTURED_ASSET_PATH,
+                    "asset_class": STRUCTURED_ASSET_CLASS,
+                    "revision_value": BEFORE_REVISION,
+                },
+            }
+        if asset_path == DATA_TABLE_PATH:
+            return {
+                "found": True,
+                "ok": True,
+                "asset": {
+                    "asset_path": DATA_TABLE_PATH,
+                    "asset_class": DATA_TABLE_CLASS,
+                    "revision_value": BEFORE_REVISION,
+                },
+            }
         if asset_path != ASSET_PATH:
             return {"found": False, "ok": True}
         return {
@@ -493,16 +538,464 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertFalse(result["saved"])
         self.assertFalse(result["diskRevisionChanged"])
         self.assertEqual(result["expectedDiskRevision"], BEFORE_REVISION)
+        self.assertEqual(result["operation"], "setAssetProperty")
+        self.assertEqual(result["valueKind"], "scalar")
         self.assertEqual(
             bridge.calls,
             [
                 (
                     "editor.applyAssetPropertyLive",
-                    {"assetPath": ASSET_PATH, "propertyPath": "BoolValue", "value": True},
+                    {
+                        "operation": "setAssetProperty",
+                        "assetPath": ASSET_PATH,
+                        "propertyPath": "BoolValue",
+                        "value": True,
+                    },
                 )
             ],
         )
         self.assertEqual(self.freshness.state, "fresh")
+
+    def _write_reference_policy_and_export(self) -> None:
+        write_json(
+            self.policy_path,
+            {
+                "schemaVersion": "1.0",
+                "validationEnabled": True,
+                "commitEnabled": True,
+                "allowedProjectNames": [PROJECT],
+                "allowedAssetRoots": ["/Game/UEAgentKitWriteTests"],
+                "allowedReferenceRoots": ["/Game/UEAgentKitWriteTests/References"],
+                "allowedReferenceClasses": [
+                    "/Script/Engine.Texture2D",
+                    "/Script/Engine.Actor",
+                ],
+                "allowedOperations": ["setAssetReferenceProperty"],
+                "allowedAssetClasses": [REFERENCE_ASSET_CLASS],
+                "allowedAssetProperties": [
+                    f"{REFERENCE_ASSET_CLASS}#ObjectValue",
+                    f"{REFERENCE_ASSET_CLASS}#ClassValue",
+                    f"{REFERENCE_ASSET_CLASS}#SoftObjectValue",
+                    f"{REFERENCE_ASSET_CLASS}#SoftClassValue",
+                ],
+                "allowedMaterialParameters": [],
+                "allowedDataTableFields": [],
+                "requireRevision": True,
+                "rejectDirtyPackages": True,
+                "maxAssetsPerPatch": 1,
+                "maxOperationsPerAsset": 1,
+                "maxValueBytes": 65536,
+            },
+        )
+        write_json(
+            self.revision_export / "canonical" / "asset.json",
+            {
+                "projectName": PROJECT,
+                "assetPath": REFERENCE_ASSET_PATH,
+                "packageName": REFERENCE_ASSET_PATH.split(".", 1)[0],
+                "assetClass": REFERENCE_ASSET_CLASS,
+                "revision": {"available": True, "packageDirty": False, "value": BEFORE_REVISION},
+                "assetDetails": {
+                    "type": "data-asset",
+                    "properties": [
+                        {"name": "ObjectValue", "referenceType": "Object"},
+                        {"name": "ClassValue", "referenceType": "Class"},
+                        {"name": "SoftObjectValue", "referenceType": "SoftObject"},
+                        {"name": "SoftClassValue", "referenceType": "SoftClass"},
+                    ],
+                },
+            },
+        )
+
+    def _write_structured_policy_and_export(self) -> None:
+        write_json(
+            self.policy_path,
+            {
+                "schemaVersion": "1.0",
+                "validationEnabled": True,
+                "commitEnabled": True,
+                "allowedProjectNames": [PROJECT],
+                "allowedAssetRoots": ["/Game/UEAgentKitWriteTests"],
+                "allowedReferenceRoots": [],
+                "allowedReferenceClasses": [],
+                "allowedOperations": ["setAssetStructuredProperty"],
+                "allowedAssetClasses": [STRUCTURED_ASSET_CLASS],
+                "allowedAssetProperties": [f"{STRUCTURED_ASSET_CLASS}#StructValue"],
+                "allowedMaterialParameters": [],
+                "allowedDataTableFields": [],
+                "requireRevision": True,
+                "rejectDirtyPackages": True,
+                "maxAssetsPerPatch": 1,
+                "maxOperationsPerAsset": 1,
+                "maxValueBytes": 65536,
+            },
+        )
+        write_json(
+            self.revision_export / "canonical" / "structured_asset.json",
+            {
+                "projectName": PROJECT,
+                "assetPath": STRUCTURED_ASSET_PATH,
+                "packageName": STRUCTURED_ASSET_PATH.split(".", 1)[0],
+                "assetClass": STRUCTURED_ASSET_CLASS,
+                "revision": {"available": True, "packageDirty": False, "value": BEFORE_REVISION},
+                "assetDetails": {
+                    "type": "data-asset",
+                    "properties": [
+                        {
+                            "name": "StructValue",
+                            "structuredType": "Struct",
+                            "structuredSupported": True,
+                            "structuredSchema": {
+                                "kind": "Struct",
+                                "structPath": "/Script/UEAgentKitEditor.UEAgentKitStructuredFixtureRecord",
+                                "fields": [
+                                    {"name": "Count", "schema": {"kind": "Scalar", "scalarType": "Int32"}},
+                                    {"name": "Label", "schema": {"kind": "Scalar", "scalarType": "String"}},
+                                    {"name": "bEnabled", "schema": {"kind": "Scalar", "scalarType": "Bool"}},
+                                ],
+                            },
+                        }
+                    ],
+                },
+            },
+        )
+
+    def test_live_reference_property_write_passes_operation_and_preserves_json_value(self) -> None:
+        class LiveReferenceWriteService:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict[str, Any]]] = []
+
+            def call_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+                self.calls.append((method, params))
+                return {
+                    "action": "apply-asset-property-live",
+                    "operation": "setAssetReferenceProperty",
+                    "assetPath": REFERENCE_ASSET_PATH,
+                    "propertyPath": "ObjectValue",
+                    "valueKind": "reference",
+                    "referenceType": "Object",
+                    "changed": True,
+                    "transactionRecorded": True,
+                    "packageDirtyAfter": True,
+                    "dirtyAfter": True,
+                    "saved": False,
+                }
+
+        self._write_reference_policy_and_export()
+        bridge = LiveReferenceWriteService()
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=FakeFreshnessTracker(),
+            live_editor_service=bridge,
+        )
+        reference_value = {
+            "referenceType": "Object",
+            "path": "/Game/UEAgentKitWriteTests/References/T_Target.T_Target",
+        }
+        plan = service.plan_patch(
+            asset_path=REFERENCE_ASSET_PATH,
+            operation="setAssetReferenceProperty",
+            target={"propertyPath": "ObjectValue"},
+            value=reference_value,
+            description="Live reference write test",
+        )
+        with self.assertRaises(WorkflowError) as invalid:
+            service.apply_asset_property_live(plan["planId"], "LIVE APPLY wrong")
+        self.assertEqual(invalid.exception.code, "live-editor-write-confirmation-required")
+        self.assertEqual(bridge.calls, [])
+
+        result = service.apply_asset_property_live(
+            plan["planId"],
+            f"LIVE APPLY {plan['planId']}",
+        )
+        self.assertEqual(result["mode"], "LiveApply")
+        self.assertEqual(result["operation"], "setAssetReferenceProperty")
+        self.assertEqual(result["valueKind"], "reference")
+        self.assertTrue(result["changed"])
+        self.assertFalse(result["saved"])
+        self.assertFalse(result["diskRevisionChanged"])
+        self.assertEqual(
+            bridge.calls,
+            [
+                (
+                    "editor.applyAssetPropertyLive",
+                    {
+                        "operation": "setAssetReferenceProperty",
+                        "assetPath": REFERENCE_ASSET_PATH,
+                        "propertyPath": "ObjectValue",
+                        "value": reference_value,
+                    },
+                )
+            ],
+        )
+        self.assertIsInstance(bridge.calls[0][1]["value"], dict)
+        self.assertEqual(bridge.calls[0][1]["value"], reference_value)
+
+    def test_live_reference_property_write_passes_json_null(self) -> None:
+        class LiveNullWriteService:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict[str, Any]]] = []
+
+            def call_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+                self.calls.append((method, params))
+                return {
+                    "action": "apply-asset-property-live",
+                    "operation": "setAssetReferenceProperty",
+                    "assetPath": REFERENCE_ASSET_PATH,
+                    "propertyPath": "SoftObjectValue",
+                    "valueKind": "reference",
+                    "referenceType": "SoftObject",
+                    "referencePath": None,
+                    "beforeValue": None,
+                    "afterValue": None,
+                    "changed": True,
+                    "transactionRecorded": True,
+                    "packageDirtyAfter": True,
+                    "dirtyAfter": True,
+                    "saved": False,
+                }
+
+        self._write_reference_policy_and_export()
+        bridge = LiveNullWriteService()
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=FakeFreshnessTracker(),
+            live_editor_service=bridge,
+        )
+        plan = service.plan_patch(
+            asset_path=REFERENCE_ASSET_PATH,
+            operation="setAssetReferenceProperty",
+            target={"propertyPath": "SoftObjectValue"},
+            value=None,
+            description="Live reference clear test",
+        )
+        result = service.apply_asset_property_live(plan["planId"], f"LIVE APPLY {plan['planId']}")
+        self.assertEqual(result["mode"], "LiveApply")
+        self.assertEqual(result["operation"], "setAssetReferenceProperty")
+        self.assertEqual(result["valueKind"], "reference")
+        self.assertTrue(result["changed"])
+        self.assertFalse(result["saved"])
+        self.assertEqual(len(bridge.calls), 1)
+        self.assertEqual(bridge.calls[0][0], "editor.applyAssetPropertyLive")
+        self.assertEqual(bridge.calls[0][1]["operation"], "setAssetReferenceProperty")
+        self.assertEqual(bridge.calls[0][1]["propertyPath"], "SoftObjectValue")
+        self.assertIsNone(bridge.calls[0][1]["value"])
+
+    def test_live_asset_property_write_rejects_unsupported_operation(self) -> None:
+        write_json(
+            self.policy_path,
+            {
+                "schemaVersion": "1.0",
+                "validationEnabled": True,
+                "commitEnabled": True,
+                "allowedProjectNames": [PROJECT],
+                "allowedAssetRoots": ["/Game/UEAgentKitWriteTests"],
+                "allowedReferenceRoots": [],
+                "allowedReferenceClasses": [],
+                "allowedOperations": ["setDataTableCell"],
+                "allowedAssetClasses": [DATA_TABLE_CLASS],
+                "allowedAssetProperties": [],
+                "allowedMaterialParameters": [],
+                "allowedDataTableFields": [f"{DATA_TABLE_CLASS}#/Script/UEAgentKitEditor.UEAgentKitStructuredFixtureRecord#Count"],
+                "requireRevision": True,
+                "rejectDirtyPackages": True,
+                "maxAssetsPerPatch": 1,
+                "maxOperationsPerAsset": 1,
+                "maxValueBytes": 65536,
+            },
+        )
+        write_json(
+            self.revision_export / "canonical" / "data_table.json",
+            {
+                "projectName": PROJECT,
+                "assetPath": DATA_TABLE_PATH,
+                "packageName": DATA_TABLE_PATH.split(".", 1)[0],
+                "assetClass": DATA_TABLE_CLASS,
+                "revision": {"available": True, "packageDirty": False, "value": BEFORE_REVISION},
+                "assetDetails": {
+                    "type": "data-asset",
+                    "rowStructPath": "/Script/UEAgentKitEditor.UEAgentKitStructuredFixtureRecord",
+                    "rowNames": ["Row1"],
+                    "properties": [],
+                },
+            },
+        )
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=FakeFreshnessTracker(),
+            live_editor_service=object(),
+        )
+        plan = service.plan_patch(
+            asset_path=DATA_TABLE_PATH,
+            operation="setDataTableCell",
+            target={"rowName": "Row1", "fieldName": "Count"},
+            value=42,
+        )
+        with self.assertRaises(WorkflowError) as rejected:
+            service.apply_asset_property_live(plan["planId"], f"LIVE APPLY {plan['planId']}")
+        self.assertEqual(rejected.exception.code, "live-editor-write-operation-unsupported")
+
+    def test_live_structured_property_write_passes_operation_and_preserves_json_value(self) -> None:
+        class LiveStructuredWriteService:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict[str, Any]]] = []
+
+            def call_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+                self.calls.append((method, params))
+                return {
+                    "action": "apply-asset-property-live",
+                    "operation": "setAssetStructuredProperty",
+                    "assetPath": STRUCTURED_ASSET_PATH,
+                    "propertyPath": "StructValue",
+                    "valueKind": "structured",
+                    "structuredKind": "Struct",
+                    "structuredSchema": {
+                        "kind": "Struct",
+                        "structPath": "/Script/UEAgentKitEditor.UEAgentKitStructuredFixtureRecord",
+                        "fields": [
+                            {"name": "Count", "schema": {"kind": "Scalar", "scalarType": "Int32"}},
+                            {"name": "Label", "schema": {"kind": "Scalar", "scalarType": "String"}},
+                            {"name": "bEnabled", "schema": {"kind": "Scalar", "scalarType": "Bool"}},
+                        ],
+                    },
+                    "beforeValue": STRUCTURED_DEFAULT_STRUCT_VALUE,
+                    "afterValue": STRUCTURED_STRUCT_VALUE,
+                    "diff": [
+                        {"path": "Count", "before": 0, "after": 42},
+                        {"path": "Label", "before": "", "after": "Live Write"},
+                        {"path": "bEnabled", "before": False, "after": True},
+                    ],
+                    "diffTruncated": False,
+                    "changed": True,
+                    "transactionRecorded": True,
+                    "transactionTitle": "UE Agent Kit: Set Asset Structured Property",
+                    "assetOpen": True,
+                    "loadedByBridge": False,
+                    "packageDirtyBefore": False,
+                    "packageDirtyAfter": True,
+                    "dirtyBefore": False,
+                    "dirtyAfter": True,
+                    "saved": False,
+                    "editorSessionId": "session-1",
+                }
+
+        self._write_structured_policy_and_export()
+        bridge = LiveStructuredWriteService()
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=FakeFreshnessTracker(),
+            live_editor_service=bridge,
+        )
+        plan = service.plan_patch(
+            asset_path=STRUCTURED_ASSET_PATH,
+            operation="setAssetStructuredProperty",
+            target={"propertyPath": "StructValue"},
+            value=STRUCTURED_STRUCT_VALUE,
+            description="Live structured write test",
+        )
+        result = service.apply_asset_property_live(plan["planId"], f"LIVE APPLY {plan['planId']}")
+        self.assertEqual(result["mode"], "LiveApply")
+        self.assertEqual(result["operation"], "setAssetStructuredProperty")
+        self.assertEqual(result["valueKind"], "structured")
+        self.assertTrue(result["changed"])
+        self.assertFalse(result["saved"])
+        self.assertFalse(result["diskRevisionChanged"])
+        self.assertTrue(result["undoAvailableInEditor"])
+        self.assertEqual(
+            bridge.calls,
+            [
+                (
+                    "editor.applyAssetPropertyLive",
+                    {
+                        "operation": "setAssetStructuredProperty",
+                        "assetPath": STRUCTURED_ASSET_PATH,
+                        "propertyPath": "StructValue",
+                        "value": STRUCTURED_STRUCT_VALUE,
+                    },
+                )
+            ],
+        )
+        self.assertIsInstance(bridge.calls[0][1]["value"], dict)
+        self.assertEqual(bridge.calls[0][1]["value"], STRUCTURED_STRUCT_VALUE)
+        self.assertEqual(result["result"]["structuredKind"], "Struct")
+        self.assertEqual(result["result"]["packageDirtyAfter"], True)
+
+    def test_live_structured_property_write_reports_noop(self) -> None:
+        class LiveStructuredNoopService:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict[str, Any]]] = []
+
+            def call_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+                self.calls.append((method, params))
+                return {
+                    "action": "apply-asset-property-live",
+                    "operation": "setAssetStructuredProperty",
+                    "assetPath": STRUCTURED_ASSET_PATH,
+                    "propertyPath": "StructValue",
+                    "valueKind": "structured",
+                    "structuredKind": "Struct",
+                    "beforeValue": STRUCTURED_DEFAULT_STRUCT_VALUE,
+                    "afterValue": STRUCTURED_DEFAULT_STRUCT_VALUE,
+                    "diff": [],
+                    "diffTruncated": False,
+                    "changed": False,
+                    "transactionRecorded": False,
+                    "transactionTitle": "",
+                    "assetOpen": True,
+                    "loadedByBridge": False,
+                    "packageDirtyBefore": False,
+                    "packageDirtyAfter": False,
+                    "dirtyBefore": False,
+                    "dirtyAfter": False,
+                    "saved": False,
+                    "editorSessionId": "session-1",
+                }
+
+        self._write_structured_policy_and_export()
+        bridge = LiveStructuredNoopService()
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=FakeFreshnessTracker(),
+            live_editor_service=bridge,
+        )
+        plan = service.plan_patch(
+            asset_path=STRUCTURED_ASSET_PATH,
+            operation="setAssetStructuredProperty",
+            target={"propertyPath": "StructValue"},
+            value=STRUCTURED_DEFAULT_STRUCT_VALUE,
+            description="Live structured noop test",
+        )
+        result = service.apply_asset_property_live(plan["planId"], f"LIVE APPLY {plan['planId']}")
+        self.assertEqual(result["operation"], "setAssetStructuredProperty")
+        self.assertEqual(result["valueKind"], "structured")
+        self.assertFalse(result["changed"])
+        self.assertFalse(result["undoAvailableInEditor"])
+        self.assertEqual(result["nextStep"], "No value change was required.")
+        self.assertEqual(len(bridge.calls), 1)
+        self.assertEqual(bridge.calls[0][0], "editor.applyAssetPropertyLive")
+        self.assertEqual(bridge.calls[0][1]["operation"], "setAssetStructuredProperty")
+        self.assertEqual(bridge.calls[0][1]["propertyPath"], "StructValue")
+
+    def test_live_write_tool_count_and_names_are_unchanged(self) -> None:
+        names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
+        self.assertEqual(len(names), 44)
+        self.assertIn("ue_set_asset_property", names)
+        self.assertIn("ue_set_asset_reference_property", names)
+        self.assertIn("ue_apply_asset_property_live", names)
+        self.assertEqual(names.count("ue_set_asset_property"), 1)
+        self.assertEqual(names.count("ue_set_asset_reference_property"), 1)
+        self.assertEqual(names.count("ue_apply_asset_property_live"), 1)
+        self.assertEqual(len(set(names)), len(names))
 
     def test_live_asset_property_write_requires_live_and_commit_modes(self) -> None:
         plan = self.service.plan_patch(

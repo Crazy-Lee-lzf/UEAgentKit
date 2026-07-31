@@ -62,6 +62,8 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         async with stdio_client(parameters, errlog=stderr) as (read_stream, write_stream):
             async with ClientSession(read_stream, write_stream) as session:
                 initialized = await session.initialize()
+                if args.session_marker is not None:
+                    args.session_marker.write_text("session-initialized\n", encoding="utf-8")
                 listed = await session.list_tools()
                 tool_names = [tool.name for tool in listed.tools]
                 if tool_names != EXPECTED_TOOLS:
@@ -173,6 +175,7 @@ def main() -> int:
     parser.add_argument("--backup-root", type=Path, required=True)
     parser.add_argument("--package-file", type=Path, required=True)
     parser.add_argument("--error-log", type=Path, required=True)
+    parser.add_argument("--session-marker", type=Path)
     args = parser.parse_args()
     report = asyncio.run(run(args))
     print(json.dumps(report, ensure_ascii=False, indent=2))

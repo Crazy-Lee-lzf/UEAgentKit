@@ -93,8 +93,13 @@ def validate_fixture_plan(plan_path: Path) -> dict[str, Any]:
         kind = fixture.get("kind")
         if kind == "duplicateAsset":
             required = {"id", "kind", "sourceAsset", "targetAsset", "expectedClass"}
-        elif kind in {"scalarAsset", "referenceAsset", "structuredAsset"}:
+            allowed = required
+        elif kind == "referenceAsset":
             required = {"id", "kind", "targetAsset", "expectedClass"}
+            allowed = required | {"values"}
+        elif kind in {"scalarAsset", "structuredAsset"}:
+            required = {"id", "kind", "targetAsset", "expectedClass"}
+            allowed = required
         elif kind == "blueprint":
             required = {
                 "id",
@@ -104,11 +109,13 @@ def validate_fixture_plan(plan_path: Path) -> dict[str, Any]:
                 "parentClass",
                 "blueprintType",
             }
+            allowed = required
         else:
             required = {"id", "kind", "targetAsset", "expectedClass"}
+            allowed = required
             _issue(errors, "fixture-kind", "kind must be duplicateAsset, scalarAsset, referenceAsset, structuredAsset, or blueprint.", f"{base}.kind")
         missing = sorted(required - set(fixture))
-        unknown = sorted(set(fixture) - required)
+        unknown = sorted(set(fixture) - allowed)
         for field in missing:
             _issue(errors, "required-field", f"Missing required field: {field}", f"{base}.{field}")
         for field in unknown:
@@ -169,6 +176,67 @@ def validate_fixture_plan(plan_path: Path) -> dict[str, Any]:
                     "referenceAsset fixtures require the UEAgentKit reference fixture class.",
                     f"{base}.expectedClass",
                 )
+            values = fixture.get("values")
+            if values is not None:
+                if not isinstance(values, dict):
+                    _issue(
+                        errors,
+                        "reference-values",
+                        "referenceAsset values must be an object.",
+                        f"{base}.values",
+                    )
+                else:
+                    reference_types = {
+                        "ObjectValue": "Object",
+                        "ClassValue": "Class",
+                        "SoftObjectValue": "SoftObject",
+                        "SoftClassValue": "SoftClass",
+                    }
+                    for property_name, value in values.items():
+                        property_path = f"{base}.values.{property_name}"
+                        expected_type = reference_types.get(property_name)
+                        if expected_type is None:
+                            _issue(
+                                errors,
+                                "reference-values-property",
+                                "Unknown reference fixture property.",
+                                property_path,
+                            )
+                            continue
+                        if value is None:
+                            continue
+                        if not isinstance(value, dict):
+                            _issue(
+                                errors,
+                                "reference-values-value",
+                                "Reference fixture value must be null or an object.",
+                                property_path,
+                            )
+                            continue
+                        if set(value) != {"referenceType", "path"}:
+                            _issue(
+                                errors,
+                                "reference-values-value",
+                                "Reference fixture value must contain exactly referenceType and path.",
+                                property_path,
+                            )
+                            continue
+                        requested_type = value.get("referenceType")
+                        requested_path = value.get("path")
+                        if requested_type != expected_type:
+                            _issue(
+                                errors,
+                                "reference-values-type",
+                                f"Reference fixture type {requested_type} does not match property type {expected_type}.",
+                                f"{property_path}.referenceType",
+                            )
+                        if not _is_package_path(requested_path, allow_object_path=True) or "." not in requested_path:
+                            _issue(
+                                errors,
+                                "reference-values-path",
+                                "Reference fixture path must be a valid object path.",
+                                f"{property_path}.path",
+                            )
         elif kind == "structuredAsset":
             if expected_class != "/Script/UEAgentKitEditor.UEAgentKitStructuredWriteFixtureAsset":
                 _issue(

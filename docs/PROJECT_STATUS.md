@@ -62,7 +62,7 @@ Tool 数量只表示 MCP 接口数量，不等同于 Unreal Operation 数量。�
 
 ```text
 
-Python tests                 248/248
+Python tests                 264/264
 
 JSON Schemas                 3/3
 
@@ -71,6 +71,10 @@ Patch examples               16/16
 UE5.6 Direct Build           passed
 
 真实 Live Editor Write       passed
+
+真实 Live Editor Reference Write  passed
+
+真实 Live Editor Structured Write  passed
 
 UTF-8 no BOM / CRLF          passed
 
@@ -188,18 +192,23 @@ Policy/Revision Plan
 
 
 
-首版范围：
-
-
+当前范围（`main` 开发快照，不是 0.6.0 正式发布能力）：
 
 - 已加载并在资产编辑器中打开的非 Blueprint、非地图资产。
 
 - 当前 Package 必须为 Clean。
 
-- 一个顶层 Bool、整数、浮点、Enum、String、Name 或 Text 属性。
+- `setAssetProperty`：一个顶层 Bool、整数、浮点、Enum、String、Name 或 Text 属性。
 
-- 修改进入 UE Undo 栈，磁盘 Package 和 SQLite 保持不变。
+- `setAssetReferenceProperty`：Data Asset 顶层 Object、Class、SoftObject、SoftClass 引用属性，JSON `null` 可清空引用。
 
+- `setAssetStructuredProperty`：Data Asset 顶层 Struct、Array、Set、Map 结构化属性，复用 `StructuredPropertyJson` 的 Schema/导入/导出/Diff，强制拒绝固定数组与非结构化属性。
+
+- 修改进入 UE Undo 栈，磁盘 Package、SQLite 与 Revision Export 保持不变；不自动保存。
+
+- 仍不支持 Blueprint、容器、Material Instance 与 DataTable 的 Live Apply。
+
+- No-op 不制造 Undo 或 Dirty；失败恢复原值、原 Dirty 状态并取消 Transaction。
 
 
 这不是任意 UObject 写入接口。它复用现有 `ue_set_asset_property` 生成的 Policy/Revision Plan，拒绝任意资产路径、任意属性、嵌套字段、PIE/SIE 和 Dirty Package。
@@ -322,7 +331,7 @@ Live Editor 中已经产生的受控 Dirty 资产，也可以通过 `ue_save_aut
 
 1. 抽取统一 Live Transaction/Evidence 框架，避免每类资产重复实现 Dirty、Undo、失败恢复和会话证据。
 
-2. 将已验证的 Live 标量能力扩展到 Data Asset Reference 与 Structured Property。
+2. 将已验证的 Live 标量/Reference 能力扩展到 Data Asset Structured Property。
 
 3. 增加 Material Instance 和 DataTable 的受控 Live Apply。
 

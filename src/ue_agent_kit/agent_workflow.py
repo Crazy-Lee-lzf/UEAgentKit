@@ -57,6 +57,16 @@ CRASH_MARKERS = (
 )
 CRASH_EXIT_CODES = {-1073741819, -1073741676, -1073740791, 3221225477, 3221225620, 3221226505}
 
+LIVE_WRITE_VALUE_KINDS = {
+    "setAssetProperty": "scalar",
+    "setAssetReferenceProperty": "reference",
+    "setAssetStructuredProperty": "structured",
+}
+
+
+def _live_write_value_kind(operation: str) -> str:
+    return LIVE_WRITE_VALUE_KINDS.get(operation, "unknown")
+
 
 class WorkflowError(RuntimeError):
     def __init__(self, code: str, message: str, *, details: dict[str, Any] | None = None) -> None:
@@ -1451,10 +1461,14 @@ class PatchWorkflowService:
             if not isinstance(operations, list) or len(operations) != 1 or not isinstance(operations[0], dict):
                 raise WorkflowError("plan-invalid", "The live write plan no longer contains exactly one operation.")
             operation = operations[0]
-            if operation.get("operation") != "setAssetProperty":
+            if operation.get("operation") not in {
+                "setAssetProperty",
+                "setAssetReferenceProperty",
+                "setAssetStructuredProperty",
+            }:
                 raise WorkflowError(
                     "live-editor-write-operation-unsupported",
-                    "The first Live Editor Write capability accepts only setAssetProperty plans.",
+                    "Live Editor writes accept only setAssetProperty, setAssetReferenceProperty, and setAssetStructuredProperty plans.",
                 )
             target = operation.get("target", {})
             property_path = target.get("propertyPath") if isinstance(target, dict) else None
@@ -1466,6 +1480,7 @@ class PatchWorkflowService:
                 live_result = self.live_editor_service.call_method(
                     "editor.applyAssetPropertyLive",
                     {
+                        "operation": operation.get("operation"),
                         "assetPath": asset_path,
                         "propertyPath": property_path,
                         "value": operation.get("value"),
@@ -1486,7 +1501,8 @@ class PatchWorkflowService:
                 "projectName": self.project_name,
                 "assetPath": asset_path,
                 "expectedDiskRevision": expected_revision,
-                "operation": "setAssetProperty",
+                "operation": operation.get("operation"),
+                "valueKind": _live_write_value_kind(str(operation.get("operation"))),
                 "propertyPath": property_path,
                 "changed": changed,
                 "saved": False,

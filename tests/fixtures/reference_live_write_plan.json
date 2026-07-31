@@ -1,0 +1,71 @@
+{
+  "schemaVersion": "1.0",
+  "root": "/Game/UEAgentKitWriteTests/References",
+  "fixtures": [
+    {
+      "id": "reference-texture-target",
+      "kind": "duplicateAsset",
+      "sourceAsset": "/Engine/EngineResources/DefaultTexture",
+      "targetAsset": "/Game/UEAgentKitWriteTests/References/T_Target",
+      "expectedClass": "/Script/Engine.Texture2D"
+    },
+    {
+      "id": "reference-actor-class-target",
+      "kind": "blueprint",
+      "targetAsset": "/Game/UEAgentKitWriteTests/References/BP_ReferenceTarget",
+      "expectedClass": "/Script/Engine.Blueprint",
+      "parentClass": "/Script/Engine.Actor",
+      "blueprintType": "Normal"
+    },
+    {
+      "id": "reference-incompatible-class-target",
+      "kind": "blueprint",
+      "targetAsset": "/Game/UEAgentKitWriteTests/References/BP_NotActorTarget",
+      "expectedClass": "/Script/Engine.Blueprint",
+      "parentClass": "/Script/Engine.ActorComponent",
+      "blueprintType": "Normal"
+    },
+    {
+      "id": "reference-object-asset",
+      "kind": "referenceAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/References/DA_Ref_Object",
+      "expectedClass": "/Script/UEAgentKitEditor.UEAgentKitReferenceWriteFixtureAsset"
+    },
+    {
+      "id": "reference-class-asset",
+      "kind": "referenceAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/References/DA_Ref_Class",
+      "expectedClass": "/Script/UEAgentKitEditor.UEAgentKitReferenceWriteFixtureAsset"
+    },
+    {
+      "id": "reference-soft-object-asset",
+      "kind": "referenceAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/References/DA_Ref_SoftObject",
+      "expectedClass": "/Script/UEAgentKitEditor.UEAgentKitReferenceWriteFixtureAsset"
+    },
+    {
+      "id": "reference-soft-class-asset",
+      "kind": "referenceAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/References/DA_Ref_SoftClass",
+      "expectedClass": "/Script/UEAgentKitEditor.UEAgentKitReferenceWriteFixtureAsset"
+    },
+    {
+      "id": "reference-null-asset",
+      "kind": "referenceAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/References/DA_Ref_Null",
+      "expectedClass": "/Script/UEAgentKitEditor.UEAgentKitReferenceWriteFixtureAsset",
+      "values": {
+        "SoftObjectValue": {
+          "referenceType": "SoftObject",
+          "path": "/Game/UEAgentKitWriteTests/References/T_Target.T_Target"
+        }
+      }
+    },
+    {
+      "id": "reference-non-reference-asset",
+      "kind": "scalarAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/References/DA_ScalarNonReference",
+      "expectedClass": "/Script/UEAgentKitEditor.UEAgentKitScalarWriteFixtureAsset"
+    }
+  ]
+}

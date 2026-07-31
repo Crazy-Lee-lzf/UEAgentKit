@@ -76,6 +76,7 @@ private:
 	bool TryValidateFolderResult(const FString& PackagePath, bool bRecursive, int32 MaxAssets, int32 MaxIssues, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
 	bool TrySaveAuthorizedAssetResult(const FString& AssetPath, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
 	bool TryApplyAssetPropertyLiveResult(
+		const FString& Operation,
 		const FString& AssetPath,
 		const FString& PropertyPath,
 		const TSharedPtr<class FJsonValue>& Value,

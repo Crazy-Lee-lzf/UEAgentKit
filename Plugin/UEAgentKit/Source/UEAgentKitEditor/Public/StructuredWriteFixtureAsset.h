@@ -37,4 +37,7 @@ public:
 
 	UPROPERTY(EditAnywhere, Category = "Structured")
 	TMap<FName, FUEAgentKitStructuredFixtureRecord> MapValue;
+
+	UPROPERTY(EditAnywhere, Category = "Structured")
+	int32 FixedArrayValue[3] = {0, 0, 0};
 };

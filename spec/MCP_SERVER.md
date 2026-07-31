@@ -230,16 +230,16 @@ mode=DryRun   自动执行 Plan -> Unreal Dry Run，返回 planId 与 dryRunRece
 
 ### `ue_apply_asset_property_live`
 
-该破坏性 Tool 属于 Workflow 写入 Tool；执行时必须同时启用 Live Editor、Workflow Write 与 Commit 三项启动能力。它不接受任意资产、属性或 Policy，而是只接受当前会话已有的 `ue_set_asset_property(mode=Plan)` 结果：
+该破坏性 Tool 属于 Workflow 写入 Tool；执行时必须同时启用 Live Editor、Workflow Write 与 Commit 三项启动能力。它不接受任意资产、属性或 Policy，而是只接受当前会话已有的高层 Plan 结果（`ue_set_asset_property(mode=Plan)`、`ue_set_asset_reference_property(mode=Plan)` 或 `ue_set_asset_structured_property(mode=Plan)`）：
 
 ```text
 plan_id      = 当前会话有效 Plan ID
 confirmation = LIVE APPLY <planId>
 ```
 
-执行前重新校验 Plan 文件摘要、固定 Policy、允许的 `setAssetProperty` Operation 和磁盘基线 Revision。Editor Bridge 只接受已经加载且已在资产编辑器中打开、Package 当前干净、位于 `/Game` 的非 Blueprint 单文件资产，以及一个顶层可编辑标量/Enum/String/Name/Text 属性。PIE/SIE、Dirty Package、嵌套属性路径、地图、Blueprint 和不支持的属性类型全部拒绝。
+执行前重新校验 Plan 文件摘要、固定 Policy、允许的 `setAssetProperty`/`setAssetReferenceProperty`/`setAssetStructuredProperty` Operation 和磁盘基线 Revision。调用 `editor.applyAssetPropertyLive` 时必须显式传递 `operation`，Bridge 不靠 Value 猜测。Editor Bridge 只接受已经加载且已在资产编辑器中打开、Package 当前干净、位于 `/Game` 的非 Blueprint 单文件资产；`setAssetProperty` 只接受一个顶层可编辑标量/Enum/String/Name/Text 属性，`setAssetReferenceProperty` 只接受 Data Asset 顶层 Object/Class/SoftObject/SoftClass 引用属性（引用值为 `{"referenceType": ..., "path": "/Game/...Object"}` 或 JSON `null` 清空），`setAssetStructuredProperty` 只接受 Data Asset 顶层 Struct/Array/Set/Map 结构化属性（值必须按 Reader 导出的稳定 Schema 验证，Struct 字段必须完整、Set/Map 条目必须按 Canonical JSON 唯一有序；固定数组与容器值会被拒绝）。PIE/SIE、Dirty Package、嵌套属性路径、地图、Blueprint、容器、Material Instance、DataTable 和不支持的属性类型全部拒绝。
 
-成功时在 Game Thread 中通过 `FScopedTransaction`、`Modify()`、`PostEditChangeProperty()` 和 `MarkPackageDirty()` 修改当前 Editor 内存，返回 Before/After、Dirty、Editor Session 与 Undo 事务证据。该 Tool 始终返回 `saved=false`、`diskRevisionChanged=false`，不会调用 `SavePackage`；用户可在编辑器中检查或撤销，持久化仍需单独走现有授权保存流程。
+成功时在 Game Thread 中通过 `FScopedTransaction`、`Modify()`、`PostEditChangeProperty()` 和 `MarkPackageDirty()` 修改当前 Editor 内存，返回 `operation`、`valueKind`、Before/After、Dirty、Editor Session 与 Undo 事务证据；引用写入还返回 `referenceType`、`referenceConstraintClass`、`referencePath` 与 `resolvedReferenceClass`，结构化写入还返回 `structuredKind`、`structuredSchema`、`diff` 与 `diffTruncated`。失败会恢复原值、原 Dirty 状态并取消 Transaction，No-op 不制造 Undo 或 Dirty。该 Tool 始终返回 `saved=false`、`diskRevisionChanged=false`，不会调用 `SavePackage`；用户可在编辑器中检查或撤销，持久化仍需单独走现有授权保存流程。
 
 `ue_set_material_parameter.parameter_type` 仅接受 `Scalar`、`Vector`、`Texture` 或 `StaticSwitch`，Server 映射到现有四个已注册 Operation。高层 Tool 只覆盖当前稳定 Operation；`ue_plan_patch` 继续保留，供已注册但尚无高层封装的 Operation 使用。
 

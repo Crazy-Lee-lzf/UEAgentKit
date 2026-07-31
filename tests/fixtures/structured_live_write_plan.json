@@ -1,0 +1,42 @@
+{
+  "schemaVersion": "1.0",
+  "root": "/Game/UEAgentKitWriteTests/Structured",
+  "fixtures": [
+    {
+      "id": "structured-struct-asset",
+      "kind": "structuredAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/Structured/DA_Structured_Struct",
+      "expectedClass": "/Script/UEAgentKitEditor.UEAgentKitStructuredWriteFixtureAsset"
+    },
+    {
+      "id": "structured-array-asset",
+      "kind": "structuredAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/Structured/DA_Structured_Array",
+      "expectedClass": "/Script/UEAgentKitEditor.UEAgentKitStructuredWriteFixtureAsset"
+    },
+    {
+      "id": "structured-set-asset",
+      "kind": "structuredAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/Structured/DA_Structured_Set",
+      "expectedClass": "/Script/UEAgentKitEditor.UEAgentKitStructuredWriteFixtureAsset"
+    },
+    {
+      "id": "structured-map-asset",
+      "kind": "structuredAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/Structured/DA_Structured_Map",
+      "expectedClass": "/Script/UEAgentKitEditor.UEAgentKitStructuredWriteFixtureAsset"
+    },
+    {
+      "id": "structured-noop-asset",
+      "kind": "structuredAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/Structured/DA_Structured_Noop",
+      "expectedClass": "/Script/UEAgentKitEditor.UEAgentKitStructuredWriteFixtureAsset"
+    },
+    {
+      "id": "structured-scalar-non-structured",
+      "kind": "scalarAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/Structured/DA_ScalarNonStructured",
+      "expectedClass": "/Script/UEAgentKitEditor.UEAgentKitScalarWriteFixtureAsset"
+    }
+  ]
+}

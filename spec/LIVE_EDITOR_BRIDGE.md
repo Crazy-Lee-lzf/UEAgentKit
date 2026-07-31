@@ -210,14 +210,18 @@ Bridge 注册为 `FOutputDevice`，保留最多 4096 条当前会话日志，并
 
 `editor.applyAssetPropertyLive` 是首个受控内存写入 Capability，由 Workflow Tool `ue_apply_asset_property_live` 间接调用。该 Tool 虽属于 Workflow 注册表，但执行时必须同时启用 Live Editor、Write Tools 和 Commit Tools；MCP Client 不能直接选择 Bridge Method，也不能绕过固定 Plan、Policy、Revision 或精确确认短语。
 
-首版边界：
+当前边界（`main` 开发快照能力，不是 0.6.0 正式发布能力）：
 
-- 仅接受已加载且已打开、当前不 Dirty 的非 Blueprint `/Game` 资产。
-- 仅接受一个顶层可编辑标量、Enum、String、Name 或 Text 属性。
-- 在 Game Thread 中使用 `FScopedTransaction` 与 `UObject::Modify()`，因此修改进入 Editor Undo 栈。
+- 仅接受已加载且已打开、当前不 Dirty 的非 Blueprint、非地图 `/Game` 单文件资产。
+- 同一个 Tool 只接受三个显式 Operation：`setAssetProperty`（一个顶层可编辑标量、Enum、String、Name 或 Text 属性）、`setAssetReferenceProperty`（Data Asset 顶层引用属性）与 `setAssetStructuredProperty`（Data Asset 顶层 Struct/Array/Set/Map 结构化属性）。MCP 请求必须显式携带 `operation`，Bridge 不靠 Value 猜测 Operation。
+- 引用类型只支持 `Object`、`Class`、`SoftObject`、`SoftClass`（按 SoftClass → SoftObject → Class → Object 顺序识别），拒绝 Weak/Lazy Object、Interface、Delegate、固定数组和容器。
+- 引用值沿用 `setAssetReferenceProperty` 契约：设置用 `{"referenceType": ..., "path": "/Game/...Object"}`，清空用 JSON `null`；清空时仍按实际 Property 报告 `referenceType`，`referencePath`/`beforeValue`/`afterValue` 用 JSON `null` 表示空引用。
+- 结构化写入强制复用 `UEAgentKit::StructuredPropertyJson`（`GetKind`/`BuildSchema`/`ExportValue`/`ImportValue`/`CanonicalJson`/`JsonEqual`/`BuildDiff`），不引入第二套序列化逻辑；值在 Bridge 内按导出的稳定 Schema 导入并回读验证。固定数组（ArrayDim != 1）与非结构化属性在 Plan/Bridge 两个阶段都被拒绝；值类型不匹配、Struct 字段不完整、Set/Map 条目未按 Canonical JSON 唯一有序都会在 Plan 阶段被 Python 验证器拒绝。
+- Bridge 独立校验：引用路径必须是合法 `/Game/...Object` Object Path（禁止 Subobject Path），`referenceType` 必须与实际 Property 类型完全一致，目标引用必须存在，Object/Class 必须满足 Property 的 Constraint Class；SoftObject/SoftClass 也会解析并验证实际 Class（第一版允许为了验证而加载目标）。
+- 在 Game Thread 中使用 `FScopedTransaction` 与 `UObject::Modify()`，因此成功修改进入 Editor Undo 栈；修改前创建 Property Value Snapshot，任何失败都会恢复原值、恢复原 Dirty 状态并 `Transaction.Cancel()`，不留下部分修改、Dirty 状态或有效 Undo Transaction；No-op 不制造 Undo 或 Dirty。
 - 调用 `PostEditChangeProperty()` 并标记 Package Dirty，但绝不调用 `SavePackage`。
-- 返回 `loadedByBridge=false`、Before/After、Dirty、Transaction 和 Editor Session 证据。
-- PIE/SIE、地图、Dirty Package、Blueprint、嵌套路径和不支持类型全部拒绝。
+- 返回 `operation`、`valueKind`、`loadedByBridge=false`、Before/After、Dirty、Transaction、referenceType/referencePath/resolvedReferenceClass 和 Editor Session 证据；结构化写入额外返回 `structuredKind`、`structuredSchema`、`diff` 与 `diffTruncated`；标量 Operation 的既有返回字段与值保持兼容。
+- PIE/SIE、地图、Dirty Package、Blueprint、嵌套属性路径、不支持的属性类型、容器、Material Instance 与 DataTable Live Apply 全部拒绝。
 
 该 Capability 不生成磁盘 Revision，也不修改 SQLite/Revision Export。用户检查后可以在编辑器中 Undo，或者通过现有 `ue_save_authorized_asset` Preview/Commit 流程显式保存。
 
