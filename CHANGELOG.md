@@ -4,6 +4,9 @@ All notable changes to UE Agent Kit are documented here.
 
 ## Unreleased
 
+- Added current project-status and roadmap documents covering implemented reads/writes, explicit gaps, Live Editor Write priorities, Context/Analysis, and collaboration direction.
+- Added a dated architecture and capability comparison with `ColtonWilley/ue-llm-toolkit`, separating editor-control breadth from UE Agent Kit's Policy/Revision/backup/verification/rollback model.
+
 - Added the first Policy/Revision-gated Live Editor Write path: `ue_apply_asset_property_live` applies one existing `setAssetProperty` Plan to an already open, clean non-Blueprint asset inside the running Editor, records an Undo transaction, marks the package Dirty, and never saves automatically.
 - Added a real UE5.6 live-write regression that keeps ordinary `UnrealEditor.exe` running, rejects an invalid confirmation, changes the in-memory scalar value, reports Dirty/Undo evidence, and proves both the `.uasset` SHA-256 and immutable SQLite index remain unchanged.
 

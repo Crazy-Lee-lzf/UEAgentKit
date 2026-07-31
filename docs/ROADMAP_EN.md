@@ -1,8 +1,8 @@
 # UE Agent Kit Roadmap
 
-Updated: 2026-07-30
+Updated: 2026-07-31
 
-The latest published release is **0.6.0** for Unreal Engine 5.6. Revision-aware Project Memory is complete and in stable maintenance; active development moves to 0.7.0 Context/Analysis.
+The latest published release is **0.6.0** for Unreal Engine 5.6. Revision-aware Project Memory is complete and in stable maintenance; `main` now contains the first Live Editor Write vertical slice, and active development covers both the Live Write foundation and 0.7.0 Context/Analysis.
 
 ## Direction
 
@@ -13,8 +13,8 @@ Current server modes:
 ```text
 Offline             5 tools (12 with Memory)
 Live               23 tools (30 with Memory)
-Workflow           25 tools (32 with Memory)
-Combined           43 tools (50 with Memory)
+Workflow           26 tools (33 with Memory)
+Combined           44 tools (51 with Memory)
 ```
 
 ## Completed foundation
@@ -22,6 +22,7 @@ Combined           43 tools (50 with Memory)
 - Project-wide asset and Blueprint export, Canonical JSON, BPCTX, Revision, Symbol/Reference, and SQLite/FTS5.
 - MCP queries, stable pagination, Token Budgets, fixed-project safety, diagnostics, and four-source asset state.
 - Restricted localhost Editor Bridge, logs, compile diagnostics, live inspection, Graph/Node location, daily actions, Automation Tests, and authorized one-asset saves.
+- First Live Editor Write slice: after a Policy/Revision Plan, change one top-level scalar property on an open clean non-Blueprint asset, record Undo, mark Dirty, and never save automatically.
 - Controlled Blueprint, scalar non-Blueprint, Material Instance, DataTable, and Data Asset writes.
 - Policy, Revision, Dry Run, explicit Commit, Backup Manifest, independent reload verification, and rollback.
 - Atomic DataTable row-field updates, controlled row add/remove/rename, and exact Searchable Name reference-impact gates.
@@ -46,6 +47,10 @@ Requirements:
 - Mark related facts stale when an asset Revision changes.
 - Preserve conflicting conclusions instead of silently overwriting them.
 - Link Task Records to patches, backup manifests, verification reports, and final conclusions.
+
+## Post-0.6 development snapshot: Live Editor Write
+
+The first vertical slice is complete, but it only supports one top-level scalar property on an open, clean, non-Blueprint asset. The next step is not unrestricted UObject access: it is a shared Live Transaction/Evidence layer, explicit Undo/Discard, Reference and Structured Property support, Material Instance and DataTable live apply, and a standard Live Apply → Authorized Save → Verify → Memory Task closure.
 
 ## 0.7.0: context and analysis
 

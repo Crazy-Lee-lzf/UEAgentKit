@@ -1,6 +1,13 @@
 # UE Agent Kit 文档
 
-本目录保留当前公开版本的用户文档。项目概览和快速示例见仓库根目录 [`README.md`](../README.md)。
+本目录保留当前公开版本与 `main` 开发快照的用户文档。项目概览和快速示例见仓库根目录 [`README.md`](../README.md)。
+
+## 当前状态与对比
+
+- [`PROJECT_STATUS.md`](PROJECT_STATUS.md)：当前已实现能力、明确未实现能力、P0–P3 优先级和后续方向。
+- [`PROJECT_STATUS_EN.md`](PROJECT_STATUS_EN.md)：English project status.
+- [`COMPARISON_UE_LLM_TOOLKIT.md`](COMPARISON_UE_LLM_TOOLKIT.md)：与 ue-llm-toolkit 的读取、写入、Live Editor 和安全闭环对比。
+- [`COMPARISON_UE_LLM_TOOLKIT_EN.md`](COMPARISON_UE_LLM_TOOLKIT_EN.md)：English comparison with ue-llm-toolkit.
 
 ## 使用文档
 
@@ -32,7 +39,7 @@
 
 ## 当前版本与开发分支
 
-当前已发布版本为 UE Agent Kit 0.6.0，支持 Unreal Engine 5.6。Revision-aware Project Memory 已完成，`main` 后续进入 0.7.0 Context/Analysis 开发阶段。
+当前已发布版本为 UE Agent Kit 0.6.0，支持 Unreal Engine 5.6。Revision-aware Project Memory 已完成；`main` 已增加首个 Live Editor Write，并同时推进 Live Write 基础层和 0.7.0 Context/Analysis。
 
 0.6.0 发布能力包括：
 
@@ -46,9 +53,10 @@
 - DataTable 多字段、Row 新增/删除/重命名和 Searchable Name 引用影响门禁。
 - Data Asset Object/Class、Soft Object/Class、Struct、Array、Set 和 Map 稳定值模型。
 - Backup Manifest、独立验证和 Revision-aware rollback。
-- Offline 5、Live 23、Workflow 25、Combined 43 Tool；其中 12 个为高层安全写入入口。
+- Offline 5、Live 23、Workflow 26、Combined 44 Tool；启用 Memory 后为 12、30、33、51；其中 12 个为高层安全写入入口。
+- `main` 新增 `ue_apply_asset_property_live`：对已打开且 Clean 的非 Blueprint 资产执行顶层标量内存修改，进入 Undo 栈并标记 Dirty，但不自动保存。
 
-0.5.x 剩余重点为 Material 参数报告统一、验证证据绑定、单资产多 Operation 原子事务和正式发布收口。
+0.5.x 与 0.6.0 已完成并进入维护。当前 P0 是 Live Transaction/Undo/Discard/Authorized Save/Evidence 基础层，P1 是 0.7.0 Context Pack、值来源、执行链、影响分析和语义 Diff。
 
 只读分析路径不修改资产；Blueprint Patch、Asset Patch 与 MCP Commit 仅在明确授权后执行。
 

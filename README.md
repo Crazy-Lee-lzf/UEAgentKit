@@ -8,7 +8,7 @@ UE Agent Kit 是一套面向 Unreal Engine 的开源资产分析、索引与受�
 
 当前已发布版本为 **0.6.0**，支持 **Unreal Engine 5.6**。本版本新增 Revision-aware Project Memory：独立 SQLite/FTS5、六类可追溯记录、来源与状态机、Revision 自动失效、证据摘要、固定工程 MCP/CLI、可审计导出，以及 Workflow/rollback Task Evidence 闭环。
 
-> **发布状态**：0.6.0 已完成。未启用 Memory 时保持 Offline 5、Live 23、Workflow 26、Combined 44 Tool；启用固定 Project Memory 后分别为 12、30、33、51 Tool。下一阶段为 0.7.0 Context/Analysis。
+> **发布状态**：最新正式版本仍为 0.6.0。`main` 已完成首个 Live Editor Write 纵向闭环；未启用 Memory 时为 Offline 5、Live 23、Workflow 26、Combined 44 Tool，启用固定 Project Memory 后为 12、30、33、51 Tool。当前开发同时推进 Live Write 基础层与 0.7.0 Context/Analysis。
 
 > **AI Generated**：本项目的代码和文档主要由 AI 生成，并通过人工审查、UE 5.6 编译、自动化测试和真实工程回归验证。
 
@@ -305,6 +305,8 @@ Output\Blueprints\
 
 ## 文档
 
+- [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)：当前已实现功能、明确缺口、优先级和后续方向。
+- [`docs/COMPARISON_UE_LLM_TOOLKIT.md`](docs/COMPARISON_UE_LLM_TOOLKIT.md)：与 ue-llm-toolkit 的读取、写入和安全模型对比。
 - [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md)：构建、安装、导出和查询。
 - [`docs/AI_USAGE.md`](docs/AI_USAGE.md)：AI 使用资产索引与 Blueprint 语义的方式。
 - [`docs/RELEASE_0.6.0.md`](docs/RELEASE_0.6.0.md)：Revision-aware Project Memory、证据绑定 Task、审计导出和真实 UE5.6 闭环。
