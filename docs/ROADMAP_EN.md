@@ -2,7 +2,7 @@
 
 Updated: 2026-08-01
 
-The latest published release is **0.6.0** for Unreal Engine 5.6. Revision-aware Project Memory is complete and in stable maintenance; `main` is now the **0.7.0-dev** line with the controlled Live Editor Write foundation complete. Active development now focuses on Memory usability, the layered knowledge tree, and Context/Analysis.
+The latest published release is **0.6.0** for Unreal Engine 5.6. Revision-aware Project Memory is complete and in stable maintenance; `main` is now the **0.7.0-dev** line with the controlled Live Editor Write foundation complete. Development now runs on two parallel tracks: Realtime I/O for running-Editor CRUD, batch tasks, and diagnostics, and Memory/Context for the layered knowledge tree, Active Work, Context Packs, and analysis.
 
 ## Direction
 
@@ -51,6 +51,8 @@ Requirements:
 ## 0.7.0-dev: Live Editor Write foundation (complete)
 
 The current `main` line now includes 12 controlled Operations, generic `operation + assetPath + target + value` requests, separate Property/Material/DataTable domain modules, shared Transaction/Evidence handling, exact Undo/Discard, Authorized Save → Independent Verify, Memory Evidence, and a recoverable Live Apply journal. Every new Operation must still register explicit targets, policy, snapshot, undo, failure-restoration, and real UE regression coverage. Registration does not grant write authority or expose arbitrary UObject methods, scripts, or automatic saves.
+
+See [`AI_NATIVE_UE_EDITOR_EN.md`](AI_NATIVE_UE_EDITOR_EN.md) and [`BRANCH_WORKTREES_EN.md`](BRANCH_WORKTREES_EN.md) for track ownership, performance budgets, risk levels, and Worktree integration rules.
 
 ## Pre-0.7 foundation: Memory usability and layered knowledge tree
 

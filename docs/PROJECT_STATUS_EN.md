@@ -256,16 +256,16 @@ These are intentional scope and safety boundaries, not documentation omissions.
 
 
 
-### P0: expand Live Editor Operation coverage
+### P0A: Realtime Editor CRUD, batch tasks, and diagnostics
 
-The Live Editor Write foundation, Material/DataTable support, Undo/Discard, Save→Verify→Memory closeout, and registry-based extension architecture are complete. New capabilities should now be added per asset domain without expanding the central dispatcher. Every new Operation must add:
+The Live Editor Write foundation, Material/DataTable support, Undo/Discard, Save→Verify→Memory closeout, and registry-based extension architecture are complete. Realtime I/O is the primary daily-development path; the next stage prioritizes current Editor Context, batch Query/Task execution, PIE diagnostics, Change Sets, and high-value domain CRUD without expanding the central dispatcher. Every new Operation must add:
 
 1. Python `OperationSpec`, Policy authorization, and Plan schema.
 2. A C++ domain executor and Operation Descriptor.
 3. Snapshot, no-op, failure restoration, Dirty, Undo, and independent Verify semantics.
 4. Real UE5.6 success, rejection, restoration, and closeout regressions.
 
-### P1A: Memory usability and knowledge-tree foundation
+### P0B: Memory usability and knowledge-tree foundation
 
 The Revision-aware flat record store in 0.6.0 is complete, but maintenance complexity must not be delegated to agent discipline. Before Context Packs, implement:
 
@@ -278,7 +278,7 @@ The Revision-aware flat record store in 0.6.0 is complete, but maintenance compl
 
 See [`MEMORY_ARCHITECTURE_EN.md`](MEMORY_ARCHITECTURE_EN.md).
 
-### P1B: 0.7.0 Context/Analysis
+### P1: 0.7.0 Context/Analysis
 
 
 

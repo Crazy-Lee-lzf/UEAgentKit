@@ -296,16 +296,16 @@ Live Editor 中已经产生的受控 Dirty 资产，也可以通过 `ue_save_aut
 
 
 
-### P0：扩展 Live Editor Operation 覆盖
+### P0A：Realtime Editor CRUD、批量任务与诊断
 
-Live Editor Write 基础层、Material/DataTable、Undo/Discard、Save→Verify→Memory 闭环和注册式扩展架构已经完成。下一阶段不再重写中央分派，而是按资产域逐步增加 Operation，并为每个新增 Operation 补齐：
+Live Editor Write 基础层、Material/DataTable、Undo/Discard、Save→Verify→Memory 闭环和注册式扩展架构已经完成。Realtime I/O 作为日常开发主路径，下一阶段优先建设当前 Editor Context、批量 Query/Task、PIE 诊断、Change Set 和高价值资产域 CRUD；不再重写中央分派。每个新增 Operation 仍需补齐：
 
 1. Python `OperationSpec`、Policy 授权和 Plan Schema。
 2. 对应 C++ 域执行器与 Operation Descriptor。
 3. Snapshot、No-op、失败恢复、Dirty、Undo 和独立 Verify 语义。
 4. 真实 UE5.6 成功、拒绝、恢复和闭环回归。
 
-### P1A：Memory 可用性与知识树前置
+### P0B：Memory 可用性与知识树前置
 
 0.6.0 的 Revision-aware 平面记录库已经完成，但不继续把复杂维护责任直接交给 Agent。Context Pack 之前先完成：
 
@@ -318,7 +318,7 @@ Live Editor Write 基础层、Material/DataTable、Undo/Discard、Save→Verify�
 
 完整设计见 [`MEMORY_ARCHITECTURE.md`](MEMORY_ARCHITECTURE.md)。
 
-### P1B：0.7.0 Context/Analysis 主线
+### P1：0.7.0 Context/Analysis 主线
 
 
 

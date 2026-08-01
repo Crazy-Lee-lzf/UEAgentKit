@@ -8,6 +8,10 @@
 - [`PROJECT_STATUS_EN.md`](PROJECT_STATUS_EN.md)：English project status.
 - [`MEMORY_ARCHITECTURE.md`](MEMORY_ARCHITECTURE.md)：分层知识树、Active Work、渐进式披露、MCP/Skill 分工和多人共享知识服务设计。
 - [`MEMORY_ARCHITECTURE_EN.md`](MEMORY_ARCHITECTURE_EN.md)：English layered memory and collaboration architecture.
+- [`AI_NATIVE_UE_EDITOR.md`](AI_NATIVE_UE_EDITOR.md)：AI 可用 UE5 编辑器的实时 CRUD、项目模型、知识树、性能与风险自适应安全架构。
+- [`AI_NATIVE_UE_EDITOR_EN.md`](AI_NATIVE_UE_EDITOR_EN.md)：English AI-usable UE5 Editor architecture.
+- [`BRANCH_WORKTREES.md`](BRANCH_WORKTREES.md)：Realtime I/O 与 Memory/Context 双分支、Worktree、公共协议和合并规范。
+- [`BRANCH_WORKTREES_EN.md`](BRANCH_WORKTREES_EN.md)：English dual-branch and Worktree workflow.
 
 - [`COMPARISON_UE_LLM_TOOLKIT.md`](COMPARISON_UE_LLM_TOOLKIT.md)：与 ue-llm-toolkit 的读取、写入、Live Editor 和安全闭环对比。
 - [`COMPARISON_UE_LLM_TOOLKIT_EN.md`](COMPARISON_UE_LLM_TOOLKIT_EN.md)：English comparison with ue-llm-toolkit.
@@ -42,7 +46,7 @@
 
 ## 当前版本与开发分支
 
-当前已发布版本为 UE Agent Kit 0.6.0，支持 Unreal Engine 5.6。Revision-aware Project Memory 已完成；`main` 当前为 **0.7.0-dev**，受控 Live Editor Write 基础层已经完成，后续重点是 Memory 可用性、分层知识树和 Context/Analysis。
+当前已发布版本为 UE Agent Kit 0.6.0，支持 Unreal Engine 5.6。Revision-aware Project Memory 与受控 Live Editor Write 基础层已经完成；0.7.0-dev 采用双轨并行开发：Memory/Context 建设 Knowledge Tree、Active Work 和 Context Pack，Realtime I/O 建设运行中 UE Editor 的实时增删查改、批量分析和诊断能力。
 
 0.6.0 发布能力包括：
 
@@ -59,7 +63,7 @@
 - Offline 5、Live 23、Workflow 26、Combined 44 Tool；启用 Memory 后为 12、30、33、51；其中 12 个为高层安全写入入口。
 - `main` 的 `ue_apply_asset_property_live` 当前支持 12 个 Data Asset、Material Instance 和 DataTable Operation；统一 Transaction/Evidence、精确 Undo/Discard、授权保存后独立 Verify、可恢复 Journal 和注册式资产域执行器均已完成，但仍不自动保存或开放任意 UObject。
 
-0.5.x 与 0.6.0 已完成并进入维护，Live Editor Write 基础层也已在 0.7.0-dev 完成。当前 P1A 是 Memory Knowledge Tree、Active Work 和渐进式披露；P1B 是 0.7.0 Context Pack、值来源、执行链、影响分析和语义 Diff。
+0.5.x 与 0.6.0 已完成并进入维护，Live Editor Write 基础层也已在 0.7.0-dev 完成。当前两条同级主线分别是 Memory Knowledge Tree/Active Work/Context Pack，以及以运行中 Editor 为主路径的实时 CRUD、批量任务、运行时诊断和 Change Set；离线导出与 Commandlet 继续承担全项目索引、批处理、独立验证、回滚和 CI。
 
 只读分析路径不修改资产；Blueprint Patch、Asset Patch 与 MCP Commit 仅在明确授权后执行。
 

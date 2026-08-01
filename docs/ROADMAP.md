@@ -2,7 +2,7 @@
 
 更新时间：2026-08-01
 
-当前已发布版本为 **0.6.0**，支持 Unreal Engine 5.6。Revision-aware Project Memory 已完成并进入稳定维护；`main` 当前为 **0.7.0-dev**，已完成受控 Live Editor Write 基础层，开发重点转向 Memory 可用性、分层知识树与 Context/Analysis。
+当前已发布版本为 **0.6.0**，支持 Unreal Engine 5.6。Revision-aware Project Memory 已完成并进入稳定维护；`main` 当前为 **0.7.0-dev**，已完成受控 Live Editor Write 基础层。后续采用双轨并行：Realtime I/O 建设运行中 UE Editor 的实时增删查改、批量任务与诊断，Memory/Context 建设分层知识树、Active Work、Context Pack 与分析能力。
 
 ## 总体方向
 
@@ -51,6 +51,8 @@ Combined           44 Tool（Memory 51）
 ## 0.7.0-dev：Live Editor Write 基础层（已完成）
 
 当前 `main` 已完成 12 个受控 Operation、通用 `operation + assetPath + target + value` 请求、Property/Material/DataTable 资产域模块、统一 Transaction/Evidence、精确 Undo/Discard、Authorized Save → Independent Verify、Memory Evidence 和可恢复 Live Apply Journal。新增 Operation 仍必须注册明确 Target、Policy、Snapshot、Undo、失败恢复与真实 UE 回归；注册本身不授予写权限，也不会开放任意 UObject Method、脚本或自动保存。
+
+Realtime I/O 与 Memory/Context 的完整职责、性能预算、风险分级和 Worktree 协作见 [`AI_NATIVE_UE_EDITOR.md`](AI_NATIVE_UE_EDITOR.md) 与 [`BRANCH_WORKTREES.md`](BRANCH_WORKTREES.md)。
 
 ## 0.7.0 前置：Memory 可用性与分层知识树
 
