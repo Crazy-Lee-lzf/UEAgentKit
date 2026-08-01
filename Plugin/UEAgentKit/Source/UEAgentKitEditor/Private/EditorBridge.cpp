@@ -473,6 +473,7 @@ bool FUEAgentKitEditorBridge::Start()
 	}
 	AuthToken = FGuid::NewGuid().ToString(EGuidFormats::Digits) + FGuid::NewGuid().ToString(EGuidFormats::Digits);
 	SessionId = FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphensLower);
+	LiveWriteTransactionRecords.Reset();
 	ProjectPathHash = ComputeProjectPathHash();
 	LogCapture = MakeUnique<FUEAgentKitEditorBridgeLogCapture>();
 	LogCapture->Start();
@@ -889,6 +890,40 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 		FString ErrorMessage;
 		SendActionResult(
 			TryApplyAssetPropertyLiveResult(Operation, AssetPath, PropertyPath, ParameterName, RowName, NewRowName, FieldName, Value, Result, ErrorCode, ErrorMessage),
+			Result,
+			ErrorCode,
+			ErrorMessage);
+	}
+	else if (Method == TEXT("editor.undoAssetPropertyLive"))
+	{
+		FString AssetPath;
+		FString TransactionId;
+		FString ExpectedSessionId;
+		Params->TryGetStringField(TEXT("assetPath"), AssetPath);
+		Params->TryGetStringField(TEXT("transactionId"), TransactionId);
+		Params->TryGetStringField(TEXT("sessionId"), ExpectedSessionId);
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode;
+		FString ErrorMessage;
+		SendActionResult(
+			TryUndoAssetPropertyLiveResult(AssetPath, TransactionId, ExpectedSessionId, Result, ErrorCode, ErrorMessage),
+			Result,
+			ErrorCode,
+			ErrorMessage);
+	}
+	else if (Method == TEXT("editor.discardAssetPropertyLive"))
+	{
+		FString AssetPath;
+		FString TransactionId;
+		FString ExpectedSessionId;
+		Params->TryGetStringField(TEXT("assetPath"), AssetPath);
+		Params->TryGetStringField(TEXT("transactionId"), TransactionId);
+		Params->TryGetStringField(TEXT("sessionId"), ExpectedSessionId);
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode;
+		FString ErrorMessage;
+		SendActionResult(
+			TryDiscardAssetPropertyLiveResult(AssetPath, TransactionId, ExpectedSessionId, Result, ErrorCode, ErrorMessage),
 			Result,
 			ErrorCode,
 			ErrorMessage);

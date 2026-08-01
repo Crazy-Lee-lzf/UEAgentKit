@@ -79,6 +79,15 @@ def _live_write_value_kind(operation: str) -> str:
     return LIVE_WRITE_VALUE_KINDS.get(operation, "unknown")
 
 
+def _is_guid_with_hyphens(value: str) -> bool:
+    if len(value) != 36:
+        return False
+    return all(
+        character in "0123456789abcdefABCDEF" if index not in {8, 13, 18, 23} else character == "-"
+        for index, character in enumerate(value)
+    )
+
+
 class WorkflowError(RuntimeError):
     def __init__(self, code: str, message: str, *, details: dict[str, Any] | None = None) -> None:
         super().__init__(message)
@@ -1578,6 +1587,98 @@ class PatchWorkflowService:
                     "Inspect or Undo the in-editor change. To persist it, preview ue_save_authorized_asset for this exact asset."
                     if changed
                     else "No value change was required."
+                ),
+            }
+
+    def undo_asset_property_live(
+        self,
+        asset_path: str,
+        transaction_id: str,
+        editor_session_id: str,
+    ) -> dict[str, Any]:
+        return self._revert_asset_property_live(
+            "undo",
+            asset_path,
+            transaction_id,
+            editor_session_id,
+        )
+
+    def discard_asset_property_live(
+        self,
+        asset_path: str,
+        transaction_id: str,
+        editor_session_id: str,
+    ) -> dict[str, Any]:
+        return self._revert_asset_property_live(
+            "discard",
+            asset_path,
+            transaction_id,
+            editor_session_id,
+        )
+
+    def _revert_asset_property_live(
+        self,
+        action: str,
+        asset_path: str,
+        transaction_id: str,
+        editor_session_id: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            if not self.config.commit_enabled:
+                raise WorkflowError(
+                    "live-editor-write-disabled",
+                    "Live Editor write reverts require Commit tools to be enabled when the MCP server starts.",
+                )
+            if self.live_editor_service is None:
+                raise WorkflowError(
+                    "live-editor-required",
+                    "Live Editor mode is required to revert an in-editor asset property write.",
+                )
+            asset_path = self._validate_refresh_asset_path(asset_path)
+            if (
+                not isinstance(transaction_id, str)
+                or len(transaction_id) != 36
+                or not _is_guid_with_hyphens(transaction_id)
+            ):
+                raise WorkflowError(
+                    "live-editor-write-undo-invalid-transaction-id",
+                    "transactionId must be the exact transactionId returned by the confirmed live write.",
+                )
+            if not isinstance(editor_session_id, str) or not editor_session_id:
+                raise WorkflowError(
+                    "live-editor-write-undo-session-required",
+                    "editorSessionId must be the exact editorSessionId returned by the confirmed live write.",
+                )
+            try:
+                live_result = self.live_editor_service.call_method(
+                    f"editor.{action}AssetPropertyLive",
+                    {
+                        "assetPath": asset_path,
+                        "transactionId": transaction_id,
+                        "sessionId": editor_session_id,
+                    },
+                )
+            except Exception as exc:
+                if hasattr(exc, "code"):
+                    raise WorkflowError(str(exc.code), str(exc), details=getattr(exc, "details", {})) from exc
+                raise
+            return {
+                "schemaVersion": WORKFLOW_SCHEMA_VERSION,
+                "tool": f"ue_{action}_asset_property_live",
+                "ok": True,
+                "mode": "LiveUndo" if action == "undo" else "LiveDiscard",
+                "assetPath": asset_path,
+                "transactionId": transaction_id,
+                "editorSessionId": editor_session_id,
+                "operation": live_result.get("operation"),
+                "valueKind": live_result.get("valueKind"),
+                "changed": bool(live_result.get("changed")),
+                "saved": False,
+                "diskRevisionChanged": False,
+                "result": live_result,
+                "nextStep": (
+                    "The live write was reverted in Editor memory without saving the package. "
+                    "Re-plan the write to re-apply it."
                 ),
             }
 

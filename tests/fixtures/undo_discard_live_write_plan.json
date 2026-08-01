@@ -1,0 +1,66 @@
+{
+  "schemaVersion": "1.0",
+  "root": "/Game/UEAgentKitWriteTests/UndoDiscard",
+  "fixtures": [
+    {
+      "id": "undo-texture-target",
+      "kind": "duplicateAsset",
+      "sourceAsset": "/Engine/EngineResources/DefaultTexture",
+      "targetAsset": "/Game/UEAgentKitWriteTests/UndoDiscard/T_Target",
+      "expectedClass": "/Script/Engine.Texture2D"
+    },
+    {
+      "id": "undo-scalar-asset",
+      "kind": "scalarAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/UndoDiscard/DA_Scalar",
+      "expectedClass": "/Script/UEAgentKitEditor.UEAgentKitScalarWriteFixtureAsset"
+    },
+    {
+      "id": "undo-reference-asset",
+      "kind": "referenceAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/UndoDiscard/DA_Reference",
+      "expectedClass": "/Script/UEAgentKitEditor.UEAgentKitReferenceWriteFixtureAsset"
+    },
+    {
+      "id": "undo-structured-asset",
+      "kind": "structuredAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/UndoDiscard/DA_Structured",
+      "expectedClass": "/Script/UEAgentKitEditor.UEAgentKitStructuredWriteFixtureAsset"
+    },
+    {
+      "id": "undo-material-parent",
+      "kind": "materialParentAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/UndoDiscard/M_Source",
+      "expectedClass": "/Script/Engine.Material",
+      "parameters": {
+        "Scalar": ["EmissiveIntensity"]
+      }
+    },
+    {
+      "id": "undo-material-asset",
+      "kind": "materialAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/UndoDiscard/MI_Scalar",
+      "expectedClass": "/Script/Engine.MaterialInstanceConstant",
+      "parentAsset": "/Game/UEAgentKitWriteTests/UndoDiscard/M_Source",
+      "values": {
+        "Scalar": {
+          "EmissiveIntensity": 0.25
+        }
+      }
+    },
+    {
+      "id": "undo-datatable-asset",
+      "kind": "dataTableAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/UndoDiscard/DT_Target",
+      "expectedClass": "/Script/Engine.DataTable",
+      "rowStruct": "/Script/UEAgentKitEditor.UEAgentKitDataTableFixtureRow",
+      "rows": {
+        "RowAlpha": {
+          "Count": 1,
+          "Label": "Alpha",
+          "bEnabled": true
+        }
+      }
+    }
+  ]
+}

@@ -56,7 +56,7 @@ namespace UEAgentKitLiveWrite
 
 	bool RunLiveWriteTransaction(
 		const FLiveWriteContext& Context,
-		ILiveWriteValueIO& IO,
+		TUniquePtr<ILiveWriteValueIO>& IO,
 		FLiveWriteEvidence& OutEvidence,
 		FString& OutErrorCode,
 		FString& OutErrorMessage)
@@ -71,59 +71,59 @@ namespace UEAgentKitLiveWrite
 		const bool bPackageDirtyBefore = Context.Package->IsDirty();
 		OutEvidence.bPackageDirtyBefore = bPackageDirtyBefore;
 
-		if (!IO.CaptureSnapshot())
+		if (!IO->CaptureSnapshot())
 		{
 			OutErrorCode = TEXT("live-editor-write-apply-failed");
 			OutErrorMessage = TEXT("Could not capture the live write target snapshot.");
 			return false;
 		}
-		if (!IO.IsSnapshotValid())
+		if (!IO->IsSnapshotValid())
 		{
-			IO.ReleaseSnapshot();
+			IO->ReleaseSnapshot();
 			OutErrorCode = TEXT("live-editor-write-apply-failed");
 			OutErrorMessage = TEXT("The live write target snapshot is not valid.");
 			return false;
 		}
 
 		TSharedPtr<FJsonValue> BeforeValue;
-		if (!IO.ReadBefore(BeforeValue, OutErrorCode, OutErrorMessage))
+		if (!IO->ReadBefore(BeforeValue, OutErrorCode, OutErrorMessage))
 		{
-			IO.ReleaseSnapshot();
+			IO->ReleaseSnapshot();
 			return false;
 		}
 		OutEvidence.BeforeValue = BeforeValue;
 
-		FScopedTransaction Transaction(FText::FromString(Context.TransactionTitle));
+		FScopedTransaction Transaction(TEXT("UEAgentKitLiveWrite"), FText::FromString(Context.TransactionTitle), Context.Asset);
 		Context.Asset->Modify();
 
-		if (!IO.ApplyValue(Context.Value, OutErrorCode, OutErrorMessage))
+		if (!IO->ApplyValue(Context.Value, OutErrorCode, OutErrorMessage))
 		{
-			IO.RestoreSnapshot();
-			IO.NotifyRestored();
+			IO->RestoreSnapshot();
+			IO->NotifyRestored();
 			Context.Package->SetDirtyFlag(bPackageDirtyBefore);
 			Transaction.Cancel();
-			IO.ReleaseSnapshot();
+			IO->ReleaseSnapshot();
 			return false;
 		}
 
 		TSharedPtr<FJsonValue> AfterValue;
-		if (!IO.ReadAfter(Context.Value, AfterValue, OutErrorCode, OutErrorMessage))
+		if (!IO->ReadAfter(Context.Value, AfterValue, OutErrorCode, OutErrorMessage))
 		{
-			IO.RestoreSnapshot();
-			IO.NotifyRestored();
+			IO->RestoreSnapshot();
+			IO->NotifyRestored();
 			Context.Package->SetDirtyFlag(bPackageDirtyBefore);
 			Transaction.Cancel();
-			IO.ReleaseSnapshot();
+			IO->ReleaseSnapshot();
 			return false;
 		}
 		OutEvidence.AfterValue = AfterValue;
 
-		if (IO.SemanticEqual(BeforeValue, AfterValue))
+		if (IO->SemanticEqual(BeforeValue, AfterValue))
 		{
-			IO.RestoreSnapshot();
+			IO->RestoreSnapshot();
 			Context.Package->SetDirtyFlag(bPackageDirtyBefore);
 			Transaction.Cancel();
-			IO.ReleaseSnapshot();
+			IO->ReleaseSnapshot();
 			OutEvidence.bChanged = false;
 			OutEvidence.bTransactionRecorded = false;
 			OutEvidence.TransactionTitle = FString();
@@ -133,21 +133,22 @@ namespace UEAgentKitLiveWrite
 			return true;
 		}
 
-		IO.NotifyChanged();
+		IO->NotifyChanged();
 		Context.Asset->MarkPackageDirty();
 		if (!Context.Package->IsDirty())
 		{
-			IO.RestoreSnapshot();
-			IO.NotifyRestored();
+			IO->RestoreSnapshot();
+			IO->NotifyRestored();
 			Context.Package->SetDirtyFlag(bPackageDirtyBefore);
 			Transaction.Cancel();
-			IO.ReleaseSnapshot();
+			IO->ReleaseSnapshot();
 			OutErrorCode = TEXT("live-editor-write-apply-failed");
 			OutErrorMessage = TEXT("The Editor did not confirm the changed Dirty package state.");
 			return false;
 		}
 
-		IO.ReleaseSnapshot();
+		// The IO keeps its pre-write snapshot so the caller can retain it for an
+		// explicit Undo/Discard of this confirmed write.
 		OutEvidence.bChanged = true;
 		OutEvidence.bTransactionRecorded = true;
 		OutEvidence.TransactionTitle = Context.TransactionTitle;
@@ -187,6 +188,10 @@ namespace UEAgentKitLiveWrite
 		}
 		Result->SetBoolField(TEXT("changed"), Evidence.bChanged);
 		Result->SetBoolField(TEXT("transactionRecorded"), Evidence.bTransactionRecorded);
+		if (!Evidence.TransactionId.IsEmpty())
+		{
+			Result->SetStringField(TEXT("transactionId"), Evidence.TransactionId);
+		}
 		if (bIncludeContext)
 		{
 			Result->SetStringField(TEXT("transactionTitle"), Evidence.TransactionTitle);

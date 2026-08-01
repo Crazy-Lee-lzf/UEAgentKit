@@ -152,6 +152,22 @@ def register_workflow_tools(
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_apply_asset_property_live", exc, read_only=False)
 
+    @server.tool(annotations=destructive_annotations)
+    def ue_undo_asset_property_live(asset_path: str, transaction_id: str, editor_session_id: str) -> dict[str, Any]:
+        """Undo exactly the most recent confirmed live write for one asset in Editor memory (redoable)."""
+        try:
+            return workflow_service.undo_asset_property_live(asset_path, transaction_id, editor_session_id)
+        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_undo_asset_property_live", exc, read_only=False)
+
+    @server.tool(annotations=destructive_annotations)
+    def ue_discard_asset_property_live(asset_path: str, transaction_id: str, editor_session_id: str) -> dict[str, Any]:
+        """Discard the most recent confirmed live write for one asset back to its pre-write Editor state."""
+        try:
+            return workflow_service.discard_asset_property_live(asset_path, transaction_id, editor_session_id)
+        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_discard_asset_property_live", exc, read_only=False)
+
     @server.tool(annotations=planning_annotations)
     def ue_set_asset_reference_property(
         asset_path: str,

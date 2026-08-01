@@ -7,6 +7,10 @@
 class FJsonObject;
 class FSocket;
 class FUEAgentKitEditorBridgeLogCapture;
+namespace UEAgentKitLiveWrite
+{
+	struct FLiveWriteTransactionRecord;
+}
 
 class FUEAgentKitEditorBridge final
 {
@@ -87,6 +91,29 @@ private:
 		TSharedPtr<FJsonObject>& OutResult,
 		FString& OutErrorCode,
 		FString& OutErrorMessage) const;
+	bool TryUndoAssetPropertyLiveResult(
+		const FString& AssetPath,
+		const FString& TransactionId,
+		const FString& ExpectedSessionId,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage) const;
+	bool TryDiscardAssetPropertyLiveResult(
+		const FString& AssetPath,
+		const FString& TransactionId,
+		const FString& ExpectedSessionId,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage) const;
+	bool RevertLiveWriteTransaction(
+		const bool bRedoable,
+		const FString& AssetPath,
+		const FString& TransactionId,
+		const FString& ExpectedSessionId,
+		const FString& Action,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage) const;
 	bool TryPrepareAuthorizedSaveFixtureResult(const FString& AssetPath, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
 	bool TryStartAutomationTest(
 		const FString& TestName,
@@ -118,4 +145,6 @@ private:
 	int32 ListenPort = 0;
 	TUniquePtr<FUEAgentKitEditorBridgeLogCapture> LogCapture;
 	FPendingAutomationRun PendingAutomation;
+	// Confirmed live write transactions per exact asset path; cleared on bridge start.
+	mutable TMap<FString, TSharedPtr<UEAgentKitLiveWrite::FLiveWriteTransactionRecord>> LiveWriteTransactionRecords;
 };

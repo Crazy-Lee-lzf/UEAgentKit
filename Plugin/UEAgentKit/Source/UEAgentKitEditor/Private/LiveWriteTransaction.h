@@ -4,6 +4,7 @@
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "UObject/UnrealType.h"
+#include "UObject/WeakObjectPtr.h"
 
 class UObject;
 class UPackage;
@@ -46,6 +47,7 @@ namespace UEAgentKitLiveWrite
 		bool bChanged = false;
 		bool bTransactionRecorded = false;
 		FString TransactionTitle;
+		FString TransactionId;
 		bool bPackageDirtyBefore = false;
 		bool bPackageDirtyAfter = false;
 		bool bSaved = false;
@@ -94,11 +96,34 @@ namespace UEAgentKitLiveWrite
 		virtual void NotifyRestored() = 0;
 	};
 
+	// Retains one confirmed live write per target asset so the Editor Bridge can
+	// explicitly Undo or Discard exactly that transaction later. The IO keeps the
+	// pre-write snapshot; the record is removed after a successful revert, a
+	// newer confirmed write to the same asset, or bridge stop.
+	struct FLiveWriteTransactionRecord
+	{
+		FString SessionId;
+		FString PackageName;
+		FString AssetPath;
+		FString ClassPath;
+		FString Operation;
+		FString ValueKind;
+		FString TransactionTitle;
+		FGuid TransactionId;
+		bool bDirtyBefore = false;
+		bool bDirtyAfter = false;
+		TWeakObjectPtr<UObject> Asset;
+		TSharedPtr<FJsonValue> BeforeValue;
+		TUniquePtr<ILiveWriteValueIO> IO;
+	};
+
 	// Runs the unified live write transaction lifecycle.
 	// Returns true on success (changed or semantic no-op); false on failure with a stable error.
+	// On a confirmed changed write the IO keeps its pre-write snapshot and its
+	// ownership moves to the caller so it can be retained for explicit Undo/Discard.
 	bool RunLiveWriteTransaction(
 		const FLiveWriteContext& Context,
-		ILiveWriteValueIO& IO,
+		TUniquePtr<ILiveWriteValueIO>& IO,
 		FLiveWriteEvidence& OutEvidence,
 		FString& OutErrorCode,
 		FString& OutErrorMessage);

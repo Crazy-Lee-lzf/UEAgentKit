@@ -57,6 +57,8 @@ EXPECTED_ALL_TOOLS = [
     "ue_set_pin_default",
     "ue_set_asset_property",
     "ue_apply_asset_property_live",
+    "ue_undo_asset_property_live",
+    "ue_discard_asset_property_live",
     "ue_set_asset_reference_property",
     "ue_set_asset_structured_property",
     "ue_set_material_parameter",
@@ -84,7 +86,7 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertEqual(len(tool_names_for_mode()), 5)
         self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 23)
-        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 26)
+        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 28)
         self.assertEqual(
             tool_names_for_mode(memory_enabled=True),
             EXPECTED_ALL_TOOLS[:5] + EXPECTED_MEMORY_TOOLS,
@@ -96,7 +98,7 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
-            33,
+            35,
         )
         self.assertEqual(
             len(
@@ -106,7 +108,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-            51,
+            53,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:
@@ -133,6 +135,9 @@ class ToolRegistryTests(unittest.TestCase):
             "TryStartAutomationTest": "EditorBridgeAutomationHandlers.cpp",
             "TrySaveAuthorizedAssetResult": "EditorBridgeSaveHandlers.cpp",
             "TryApplyAssetPropertyLiveResult": "EditorBridgeWriteHandlers.cpp",
+            "TryUndoAssetPropertyLiveResult": "EditorBridgeWriteHandlers.cpp",
+            "TryDiscardAssetPropertyLiveResult": "EditorBridgeWriteHandlers.cpp",
+            "RevertLiveWriteTransaction": "EditorBridgeWriteHandlers.cpp",
         }
         for symbol, filename in handlers.items():
             self.assertNotIn(f"FUEAgentKitEditorBridge::{symbol}", core, symbol)
@@ -252,9 +257,9 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertIn("Asset->Modify()", live_write_frame)
         self.assertIn("MarkPackageDirty", live_write_frame)
         self.assertIn("CaptureSnapshot", live_write_frame)
-        self.assertIn("IO.RestoreSnapshot()", live_write_frame)
-        self.assertIn("IO.NotifyRestored()", live_write_frame)
-        self.assertIn("IO.NotifyChanged()", live_write_frame)
+        self.assertIn("IO->RestoreSnapshot()", live_write_frame)
+        self.assertIn("IO->NotifyRestored()", live_write_frame)
+        self.assertIn("IO->NotifyChanged()", live_write_frame)
         self.assertIn("Property->ArrayDim != 1", live_write)
         self.assertIn("Live Editor writes do not support native fixed-array properties.", live_write)
         self.assertIn("RunLiveWriteTransaction", live_write)
@@ -270,13 +275,23 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertIn("TryApplyDataTableLive", live_write)
         self.assertIn("DataTable->AddRow", live_write)
         self.assertIn("live-editor-write-data-table-row-not-found", live_write)
+        # Explicit Undo/Discard must reuse the committed Editor transaction and the
+        # retained pre-write snapshot; it must never save the package.
+        self.assertIn("GEditor->UndoTransaction", live_write)
+        self.assertIn("GetUndoContext(false)", live_write)
+        self.assertIn("FLiveWriteTransactionRecord", live_write)
+        self.assertIn("LiveWriteTransactionRecords", live_write)
+        self.assertIn("live-editor-write-undo-not-found", live_write)
+        self.assertIn("live-editor-write-undo-stack-mismatch", live_write)
+        self.assertIn("live-editor-write-undo-package-saved", live_write)
+        self.assertIn("live-editor-write-undo-session-mismatch", live_write)
+        self.assertIn("live-editor-write-undo-verify-failed", live_write)
         self.assertNotIn("SavePackage", live_write)
-        noop_branch = live_write_frame.split("IO.SemanticEqual(BeforeValue, AfterValue))", 1)[1]
-        # A no-op must restore the captured snapshot before restoring the Dirty flag
+        noop_branch = live_write_frame.split("IO->SemanticEqual(BeforeValue, AfterValue))", 1)[1]        # A no-op must restore the captured snapshot before restoring the Dirty flag
         # and cancelling the transaction, because the apply path may already have
         # cleared and rebuilt containers or parameter entries for identical values.
         self.assertLess(
-            noop_branch.index("IO.RestoreSnapshot()"),
+            noop_branch.index("IO->RestoreSnapshot()"),
             noop_branch.index("Transaction.Cancel()"),
         )
         self.assertLess(

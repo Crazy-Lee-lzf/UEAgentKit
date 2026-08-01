@@ -21,10 +21,12 @@ from ue_agent_kit.agent_workflow import (  # noqa: E402
     ProcessResult,
     WorkflowError,
 )
+from ue_agent_kit.editor_bridge import LiveEditorError  # noqa: E402
 from ue_agent_kit.tool_registry import tool_names_for_mode  # noqa: E402
 
 
 PROJECT = "我的项目"
+TRANSACTION_ID = "12345678-1234-1234-1234-123456789abc"
 ASSET_PATH = "/Game/UEAgentKitWriteTests/ScalarRegression/DA_ScalarPatchTarget.DA_ScalarPatchTarget"
 ASSET_CLASS = "/Script/UEAgentKitEditor.UEAgentKitScalarWriteFixtureAsset"
 REFERENCE_ASSET_PATH = "/Game/UEAgentKitWriteTests/References/DA_ReferenceLiveTarget.DA_ReferenceLiveTarget"
@@ -1350,13 +1352,17 @@ class AgentWorkflowTests(unittest.TestCase):
 
     def test_live_write_tool_count_and_names_are_unchanged(self) -> None:
         names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
-        self.assertEqual(len(names), 44)
+        self.assertEqual(len(names), 46)
         self.assertIn("ue_set_asset_property", names)
         self.assertIn("ue_set_asset_reference_property", names)
         self.assertIn("ue_apply_asset_property_live", names)
+        self.assertIn("ue_undo_asset_property_live", names)
+        self.assertIn("ue_discard_asset_property_live", names)
         self.assertEqual(names.count("ue_set_asset_property"), 1)
         self.assertEqual(names.count("ue_set_asset_reference_property"), 1)
         self.assertEqual(names.count("ue_apply_asset_property_live"), 1)
+        self.assertEqual(names.count("ue_undo_asset_property_live"), 1)
+        self.assertEqual(names.count("ue_discard_asset_property_live"), 1)
         self.assertEqual(len(set(names)), len(names))
 
     def test_live_asset_property_write_requires_live_and_commit_modes(self) -> None:
@@ -1928,6 +1934,204 @@ class AgentWorkflowTests(unittest.TestCase):
             self.service.dry_run_patch(plan["planId"])
         self.assertEqual(missing.exception.code, "workflow-report-missing")
         self.assertTrue(missing.exception.details["reportId"].startswith("report_"))
+
+    def test_undo_asset_property_live_passes_identity_and_returns_evidence(self) -> None:
+        class LiveUndoService:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict[str, Any]]] = []
+
+            def call_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+                self.calls.append((method, params))
+                return {
+                    "action": "undo-asset-property-live",
+                    "operation": "setAssetProperty",
+                    "valueKind": "scalar",
+                    "assetPath": ASSET_PATH,
+                    "transactionId": "12345678-1234-1234-1234-123456789abc",
+                    "changed": True,
+                    "transactionRecorded": False,
+                    "packageDirtyBefore": True,
+                    "packageDirtyAfter": False,
+                    "dirtyBefore": True,
+                    "dirtyAfter": False,
+                    "saved": False,
+                    "beforeValue": True,
+                    "afterValue": False,
+                    "editorSessionId": "session-1",
+                }
+
+        bridge = LiveUndoService()
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=FakeFreshnessTracker(),
+            live_editor_service=bridge,
+        )
+        result = service.undo_asset_property_live(
+            ASSET_PATH,
+            "12345678-1234-1234-1234-123456789abc",
+            "session-1",
+        )
+        self.assertEqual(result["mode"], "LiveUndo")
+        self.assertEqual(result["tool"], "ue_undo_asset_property_live")
+        self.assertEqual(result["operation"], "setAssetProperty")
+        self.assertEqual(result["valueKind"], "scalar")
+        self.assertTrue(result["changed"])
+        self.assertFalse(result["saved"])
+        self.assertFalse(result["diskRevisionChanged"])
+        self.assertEqual(
+            bridge.calls,
+            [
+                (
+                    "editor.undoAssetPropertyLive",
+                    {
+                        "assetPath": ASSET_PATH,
+                        "transactionId": "12345678-1234-1234-1234-123456789abc",
+                        "sessionId": "session-1",
+                    },
+                )
+            ],
+        )
+        self.assertEqual(result["result"]["action"], "undo-asset-property-live")
+
+    def test_discard_asset_property_live_passes_identity_and_returns_evidence(self) -> None:
+        class LiveDiscardService:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict[str, Any]]] = []
+
+            def call_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+                self.calls.append((method, params))
+                return {
+                    "action": "discard-asset-property-live",
+                    "operation": "setAssetStructuredProperty",
+                    "valueKind": "structured",
+                    "assetPath": STRUCTURED_ASSET_PATH,
+                    "transactionId": "22345678-2234-2234-2234-223456789abc",
+                    "changed": True,
+                    "transactionRecorded": False,
+                    "packageDirtyBefore": True,
+                    "packageDirtyAfter": False,
+                    "dirtyBefore": True,
+                    "dirtyAfter": False,
+                    "saved": False,
+                    "beforeValue": {"StructValue": {"Count": 2}},
+                    "afterValue": {"StructValue": {"Count": 1}},
+                    "editorSessionId": "session-1",
+                }
+
+        bridge = LiveDiscardService()
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=FakeFreshnessTracker(),
+            live_editor_service=bridge,
+        )
+        result = service.discard_asset_property_live(
+            STRUCTURED_ASSET_PATH,
+            "22345678-2234-2234-2234-223456789abc",
+            "session-1",
+        )
+        self.assertEqual(result["mode"], "LiveDiscard")
+        self.assertEqual(result["tool"], "ue_discard_asset_property_live")
+        self.assertEqual(result["operation"], "setAssetStructuredProperty")
+        self.assertEqual(result["valueKind"], "structured")
+        self.assertEqual(
+            bridge.calls,
+            [
+                (
+                    "editor.discardAssetPropertyLive",
+                    {
+                        "assetPath": STRUCTURED_ASSET_PATH,
+                        "transactionId": "22345678-2234-2234-2234-223456789abc",
+                        "sessionId": "session-1",
+                    },
+                )
+            ],
+        )
+
+    def test_live_write_revert_guards_and_validation(self) -> None:
+        class LiveStubBridge:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict[str, Any]]] = []
+
+            def call_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+                self.calls.append((method, params))
+                return {}
+
+        bridge = LiveStubBridge()
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=FakeFreshnessTracker(),
+            live_editor_service=bridge,
+        )
+        with self.assertRaises(WorkflowError) as invalid_id:
+            service.undo_asset_property_live(ASSET_PATH, "not-a-guid", "session-1")
+        self.assertEqual(invalid_id.exception.code, "live-editor-write-undo-invalid-transaction-id")
+        self.assertEqual(bridge.calls, [])
+
+        with self.assertRaises(WorkflowError) as invalid_path:
+            service.discard_asset_property_live("/Game/NotAnObjectPath", TRANSACTION_ID, "session-1")
+        self.assertEqual(invalid_path.exception.code, "snapshot-refresh-invalid-asset")
+
+        with self.assertRaises(WorkflowError) as missing_session:
+            service.undo_asset_property_live(ASSET_PATH, TRANSACTION_ID, "")
+        self.assertEqual(missing_session.exception.code, "live-editor-write-undo-session-required")
+
+        disabled_config = PatchWorkflowConfig(
+            tool_root=self.config.tool_root,
+            engine_root=self.config.engine_root,
+            project_path=self.config.project_path,
+            policy_path=self.config.policy_path,
+            revision_export=self.config.revision_export,
+            work_root=self.config.work_root,
+            backup_root=self.config.backup_root,
+            commit_enabled=False,
+        )
+        disabled_service = PatchWorkflowService(
+            FakeIndexService(),
+            disabled_config,
+            process_runner=self.runner,
+            freshness_tracker=FakeFreshnessTracker(),
+            live_editor_service=bridge,
+        )
+        with self.assertRaises(WorkflowError) as disabled:
+            disabled_service.undo_asset_property_live(ASSET_PATH, TRANSACTION_ID, "session-1")
+        self.assertEqual(disabled.exception.code, "live-editor-write-disabled")
+
+        no_live_service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=FakeFreshnessTracker(),
+            live_editor_service=None,
+        )
+        with self.assertRaises(WorkflowError) as no_live:
+            no_live_service.discard_asset_property_live(ASSET_PATH, TRANSACTION_ID, "session-1")
+        self.assertEqual(no_live.exception.code, "live-editor-required")
+
+    def test_live_write_revert_propagates_bridge_rejections(self) -> None:
+        class LiveRejectingBridge:
+            def call_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+                del method, params
+                raise LiveEditorError(
+                    "live-editor-write-undo-stack-mismatch",
+                    "Other Editor changes are on top of the live write; undo them first or re-plan the write.",
+                )
+
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=FakeFreshnessTracker(),
+            live_editor_service=LiveRejectingBridge(),
+        )
+        with self.assertRaises(WorkflowError) as stack:
+            service.undo_asset_property_live(ASSET_PATH, TRANSACTION_ID, "session-1")
+        self.assertEqual(stack.exception.code, "live-editor-write-undo-stack-mismatch")
 
 
 

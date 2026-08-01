@@ -6,6 +6,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Dom/JsonValue.h"
 #include "Editor.h"
+#include "Editor/Transactor.h"
 #include "Engine/Blueprint.h"
 #include "Engine/DataTable.h"
 #include "Engine/Texture.h"
@@ -15,6 +16,7 @@
 #include "Materials/MaterialExpressionTextureSampleParameter.h"
 #include "Materials/MaterialExpressionVectorParameter.h"
 #include "Materials/MaterialInstanceConstant.h"
+#include "Misc/ITransaction.h"
 #include "ScopedTransaction.h"
 #include "StaticParameterSet.h"
 #include "UObject/Package.h"
@@ -429,6 +431,47 @@ namespace
 		return true;
 	}
 
+	// Captures the exact identity of the just-committed live write transaction and
+	// retains the IO (with its pre-write snapshot) so the Bridge can later Undo or
+	// Discard only this confirmed write. Returns null for no-op writes.
+	TSharedPtr<UEAgentKitLiveWrite::FLiveWriteTransactionRecord> BuildLiveWriteTransactionRecord(
+		UObject* Asset,
+		UPackage* Package,
+		const FString& AssetPath,
+		const FString& Operation,
+		const FString& ValueKind,
+		const FString& SessionId,
+		UEAgentKitLiveWrite::FLiveWriteEvidence& Evidence,
+		TUniquePtr<UEAgentKitLiveWrite::ILiveWriteValueIO>& IO)
+	{
+		if (!Evidence.bChanged || GEditor == nullptr || GEditor->Trans == nullptr)
+		{
+			return nullptr;
+		}
+		const FTransactionContext UndoContext = GEditor->Trans->GetUndoContext(false);
+		if (!UndoContext.TransactionId.IsValid() || UndoContext.PrimaryObject != Asset)
+		{
+			return nullptr;
+		}
+		TSharedPtr<UEAgentKitLiveWrite::FLiveWriteTransactionRecord> Record =
+			MakeShared<UEAgentKitLiveWrite::FLiveWriteTransactionRecord>();
+		Record->SessionId = SessionId;
+		Record->PackageName = Package->GetName();
+		Record->AssetPath = AssetPath;
+		Record->ClassPath = Asset->GetClass()->GetPathName();
+		Record->Operation = Operation;
+		Record->ValueKind = ValueKind;
+		Record->TransactionTitle = Evidence.TransactionTitle;
+		Record->TransactionId = UndoContext.TransactionId;
+		Record->bDirtyBefore = Evidence.bPackageDirtyBefore;
+		Record->bDirtyAfter = Evidence.bPackageDirtyAfter;
+		Record->Asset = Asset;
+		Record->BeforeValue = Evidence.BeforeValue;
+		Record->IO = MoveTemp(IO);
+		Evidence.TransactionId = UndoContext.TransactionId.ToString(EGuidFormats::DigitsWithHyphens);
+		return Record;
+	}
+
 	class FLiveWriteScalarIO final : public UEAgentKitLiveWrite::ILiveWriteValueIO
 	{
 	public:
@@ -438,7 +481,6 @@ namespace
 			, ValueAddress(InValueAddress)
 		{
 		}
-
 		bool CaptureSnapshot() override
 		{
 			return Snapshot.Capture(Property, ValueAddress);
@@ -2109,11 +2151,12 @@ namespace
 		void* ValueAddress,
 		const TSharedPtr<FJsonValue>& Value,
 		const FString& SessionId,
+		TSharedPtr<UEAgentKitLiveWrite::FLiveWriteTransactionRecord>& OutRecord,
 		TSharedPtr<FJsonObject>& OutResult,
 		FString& OutErrorCode,
 		FString& OutErrorMessage)
 	{
-		FLiveWriteScalarIO IO(Asset, Property, ValueAddress);
+		TUniquePtr<UEAgentKitLiveWrite::ILiveWriteValueIO> IO = MakeUnique<FLiveWriteScalarIO>(Asset, Property, ValueAddress);
 		UEAgentKitLiveWrite::FLiveWriteContext Context;
 		Context.Asset = Asset;
 		Context.Package = Package;
@@ -2128,6 +2171,15 @@ namespace
 		{
 			return false;
 		}
+		OutRecord = BuildLiveWriteTransactionRecord(
+			Asset,
+			Package,
+			AssetPath,
+			TEXT("setAssetProperty"),
+			TEXT("scalar"),
+			SessionId,
+			Evidence,
+			IO);
 
 		TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 		UEAgentKitLiveWrite::FillLiveWriteEvidence(
@@ -2152,6 +2204,7 @@ namespace
 		void* ValueAddress,
 		const TSharedPtr<FJsonValue>& Value,
 		const FString& SessionId,
+		TSharedPtr<UEAgentKitLiveWrite::FLiveWriteTransactionRecord>& OutRecord,
 		TSharedPtr<FJsonObject>& OutResult,
 		FString& OutErrorCode,
 		FString& OutErrorMessage)
@@ -2172,7 +2225,8 @@ namespace
 			return false;
 		}
 
-		FLiveWriteReferenceIO IO(Asset, Property, ValueAddress);
+		TUniquePtr<UEAgentKitLiveWrite::ILiveWriteValueIO> IO = MakeUnique<FLiveWriteReferenceIO>(Asset, Property, ValueAddress);
+		FLiveWriteReferenceIO* ReferenceIO = static_cast<FLiveWriteReferenceIO*>(IO.Get());
 		UEAgentKitLiveWrite::FLiveWriteContext Context;
 		Context.Asset = Asset;
 		Context.Package = Package;
@@ -2187,6 +2241,15 @@ namespace
 		{
 			return false;
 		}
+		OutRecord = BuildLiveWriteTransactionRecord(
+			Asset,
+			Package,
+			AssetPath,
+			TEXT("setAssetReferenceProperty"),
+			TEXT("reference"),
+			SessionId,
+			Evidence,
+			IO);
 
 		TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 		UEAgentKitLiveWrite::FillLiveWriteEvidence(
@@ -2201,7 +2264,7 @@ namespace
 		Result->SetStringField(TEXT("referenceType"), ReferenceTypeName);
 		Result->SetStringField(TEXT("referenceConstraintClass"), ConstraintClass->GetPathName());
 		Result->SetField(TEXT("referencePath"), Evidence.AfterValue);
-		Result->SetStringField(TEXT("resolvedReferenceClass"), Evidence.bChanged ? IO.ResolvedClassPath : FString());
+		Result->SetStringField(TEXT("resolvedReferenceClass"), Evidence.bChanged ? ReferenceIO->ResolvedClassPath : FString());
 		OutResult = Result;
 		return true;
 	}
@@ -2215,6 +2278,7 @@ namespace
 		void* ValueAddress,
 		const TSharedPtr<FJsonValue>& Value,
 		const FString& SessionId,
+		TSharedPtr<UEAgentKitLiveWrite::FLiveWriteTransactionRecord>& OutRecord,
 		TSharedPtr<FJsonObject>& OutResult,
 		FString& OutErrorCode,
 		FString& OutErrorMessage)
@@ -2242,7 +2306,7 @@ namespace
 			return false;
 		}
 
-		FLiveWriteStructuredIO IO(Asset, Property, ValueAddress);
+		TUniquePtr<UEAgentKitLiveWrite::ILiveWriteValueIO> IO = MakeUnique<FLiveWriteStructuredIO>(Asset, Property, ValueAddress);
 		UEAgentKitLiveWrite::FLiveWriteContext Context;
 		Context.Asset = Asset;
 		Context.Package = Package;
@@ -2257,6 +2321,15 @@ namespace
 		{
 			return false;
 		}
+		OutRecord = BuildLiveWriteTransactionRecord(
+			Asset,
+			Package,
+			AssetPath,
+			TEXT("setAssetStructuredProperty"),
+			TEXT("structured"),
+			SessionId,
+			Evidence,
+			IO);
 
 		TArray<TSharedPtr<FJsonValue>> StructuredDiff;
 		bool bStructuredDiffTruncated = false;
@@ -2298,6 +2371,7 @@ namespace
 		const FString& SessionId,
 		const ELiveMaterialParameterKind Kind,
 		const FString& Operation,
+		TSharedPtr<UEAgentKitLiveWrite::FLiveWriteTransactionRecord>& OutRecord,
 		TSharedPtr<FJsonObject>& OutResult,
 		FString& OutErrorCode,
 		FString& OutErrorMessage)
@@ -2368,22 +2442,6 @@ namespace
 			return false;
 		}
 
-		FLiveWriteMaterialIO IO(MaterialInstance, ParameterFName, Kind, ParameterInfo, ParameterExpressionGuid);
-		UEAgentKitLiveWrite::FLiveWriteContext Context;
-		Context.Asset = Asset;
-		Context.Package = Package;
-		Context.SessionId = SessionId;
-		Context.TransactionTitle = TEXT("UE Agent Kit: Set Material Instance Parameter");
-		Context.AssetPath = AssetPath;
-		Context.PropertyPath = ParameterName;
-		Context.Value = Value;
-
-		UEAgentKitLiveWrite::FLiveWriteEvidence Evidence;
-		if (!UEAgentKitLiveWrite::RunLiveWriteTransaction(Context, IO, Evidence, OutErrorCode, OutErrorMessage))
-		{
-			return false;
-		}
-
 		const FString ParameterType = LiveMaterialParameterTypeName(Kind);
 		FString ValueKind;
 		switch (Kind)
@@ -2401,6 +2459,32 @@ namespace
 			ValueKind = TEXT("material-static-switch");
 			break;
 		}
+
+		TUniquePtr<UEAgentKitLiveWrite::ILiveWriteValueIO> IO = MakeUnique<FLiveWriteMaterialIO>(MaterialInstance, ParameterFName, Kind, ParameterInfo, ParameterExpressionGuid);
+		UEAgentKitLiveWrite::FLiveWriteContext Context;
+		Context.Asset = Asset;
+		Context.Package = Package;
+		Context.SessionId = SessionId;
+		Context.TransactionTitle = TEXT("UE Agent Kit: Set Material Instance Parameter");
+		Context.AssetPath = AssetPath;
+		Context.PropertyPath = ParameterName;
+		Context.Value = Value;
+
+		UEAgentKitLiveWrite::FLiveWriteEvidence Evidence;
+		if (!UEAgentKitLiveWrite::RunLiveWriteTransaction(Context, IO, Evidence, OutErrorCode, OutErrorMessage))
+		{
+			return false;
+		}
+		OutRecord = BuildLiveWriteTransactionRecord(
+			Asset,
+			Package,
+			AssetPath,
+			Operation,
+			ValueKind,
+			SessionId,
+			Evidence,
+			IO);
+
 		TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 		UEAgentKitLiveWrite::FillLiveWriteEvidence(
 			Result,
@@ -2430,6 +2514,7 @@ namespace
 		const FString& SessionId,
 		const ELiveDataTableOperationKind Kind,
 		const FString& Operation,
+		TSharedPtr<UEAgentKitLiveWrite::FLiveWriteTransactionRecord>& OutRecord,
 		TSharedPtr<FJsonObject>& OutResult,
 		FString& OutErrorCode,
 		FString& OutErrorMessage)
@@ -2488,7 +2573,8 @@ namespace
 			return false;
 		}
 
-		FLiveWriteDataTableIO IO(DataTable, RowStruct, Kind, RowName, NewRowName);
+		TUniquePtr<UEAgentKitLiveWrite::ILiveWriteValueIO> IO = MakeUnique<FLiveWriteDataTableIO>(DataTable, RowStruct, Kind, RowName, NewRowName);
+		FLiveWriteDataTableIO* DataTableIO = static_cast<FLiveWriteDataTableIO*>(IO.Get());
 		if (Kind == ELiveDataTableOperationKind::Cell)
 		{
 			FString FieldError;
@@ -2499,7 +2585,7 @@ namespace
 				OutErrorMessage = FieldError;
 				return false;
 			}
-			IO.CellFieldName = FieldName;
+			DataTableIO->CellFieldName = FieldName;
 		}
 		else if (Kind == ELiveDataTableOperationKind::RowFields || Kind == ELiveDataTableOperationKind::AddRow)
 		{
@@ -2523,7 +2609,7 @@ namespace
 					OutErrorMessage = FieldError;
 					return false;
 				}
-				IO.FieldProperties.Add(FieldNameEntry, Field);
+				DataTableIO->FieldProperties.Add(FieldNameEntry, Field);
 			}
 		}
 		else if ((Kind == ELiveDataTableOperationKind::RemoveRow || Kind == ELiveDataTableOperationKind::RenameRow)
@@ -2560,6 +2646,15 @@ namespace
 		{
 			return false;
 		}
+		OutRecord = BuildLiveWriteTransactionRecord(
+			Asset,
+			Package,
+			AssetPath,
+			Operation,
+			FString(TEXT("data-table-")) + LiveDataTableOperationKindName(Kind),
+			SessionId,
+			Evidence,
+			IO);
 
 		TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 		UEAgentKitLiveWrite::FillLiveWriteEvidence(
@@ -2697,7 +2792,8 @@ bool FUEAgentKitEditorBridge::TryApplyAssetPropertyLiveResult(
 		{
 			Kind = ELiveMaterialParameterKind::StaticSwitch;
 		}
-		return TryApplyMaterialParameterLive(
+		TSharedPtr<UEAgentKitLiveWrite::FLiveWriteTransactionRecord> Record;
+		const bool bMaterialApplied = TryApplyMaterialParameterLive(
 			Asset,
 			Package,
 			AssetPath,
@@ -2706,9 +2802,15 @@ bool FUEAgentKitEditorBridge::TryApplyAssetPropertyLiveResult(
 			SessionId,
 			Kind,
 			Operation,
+			Record,
 			OutResult,
 			OutErrorCode,
 			OutErrorMessage);
+		if (bMaterialApplied && Record.IsValid())
+		{
+			LiveWriteTransactionRecords.Add(AssetPath, Record);
+		}
+		return bMaterialApplied;
 	}
 	if (bDataTableOperation)
 	{
@@ -2733,7 +2835,8 @@ bool FUEAgentKitEditorBridge::TryApplyAssetPropertyLiveResult(
 		{
 			Kind = ELiveDataTableOperationKind::RenameRow;
 		}
-		return TryApplyDataTableLive(
+		TSharedPtr<UEAgentKitLiveWrite::FLiveWriteTransactionRecord> Record;
+		const bool bDataTableApplied = TryApplyDataTableLive(
 			Asset,
 			Package,
 			AssetPath,
@@ -2744,9 +2847,15 @@ bool FUEAgentKitEditorBridge::TryApplyAssetPropertyLiveResult(
 			SessionId,
 			Kind,
 			Operation,
+			Record,
 			OutResult,
 			OutErrorCode,
 			OutErrorMessage);
+		if (bDataTableApplied && Record.IsValid())
+		{
+			LiveWriteTransactionRecords.Add(AssetPath, Record);
+		}
+		return bDataTableApplied;
 	}
 	FProperty* Property = FindFProperty<FProperty>(Asset->GetClass(), FName(*PropertyPath));
 	if (Property == nullptr)
@@ -2769,9 +2878,11 @@ bool FUEAgentKitEditorBridge::TryApplyAssetPropertyLiveResult(
 		return false;
 	}
 	void* ValueAddress = Property->ContainerPtrToValuePtr<void>(Asset);
+	TSharedPtr<UEAgentKitLiveWrite::FLiveWriteTransactionRecord> Record;
+	bool bPropertyApplied = false;
 	if (Operation.Equals(TEXT("setAssetProperty"), ESearchCase::CaseSensitive))
 	{
-		return TryApplyScalarPropertyLive(
+		bPropertyApplied = TryApplyScalarPropertyLive(
 			Asset,
 			Package,
 			AssetPath,
@@ -2780,13 +2891,14 @@ bool FUEAgentKitEditorBridge::TryApplyAssetPropertyLiveResult(
 			ValueAddress,
 			Value,
 			SessionId,
+			Record,
 			OutResult,
 			OutErrorCode,
 			OutErrorMessage);
 	}
-	if (Operation.Equals(TEXT("setAssetReferenceProperty"), ESearchCase::CaseSensitive))
+	else if (Operation.Equals(TEXT("setAssetReferenceProperty"), ESearchCase::CaseSensitive))
 	{
-		return TryApplyReferencePropertyLive(
+		bPropertyApplied = TryApplyReferencePropertyLive(
 			Asset,
 			Package,
 			AssetPath,
@@ -2795,20 +2907,223 @@ bool FUEAgentKitEditorBridge::TryApplyAssetPropertyLiveResult(
 			ValueAddress,
 			Value,
 			SessionId,
+			Record,
 			OutResult,
 			OutErrorCode,
 			OutErrorMessage);
 	}
-	return TryApplyStructuredPropertyLive(
-		Asset,
-		Package,
+	else
+	{
+		bPropertyApplied = TryApplyStructuredPropertyLive(
+			Asset,
+			Package,
+			AssetPath,
+			PropertyPath,
+			Property,
+			ValueAddress,
+			Value,
+			SessionId,
+			Record,
+			OutResult,
+			OutErrorCode,
+			OutErrorMessage);
+	}
+	if (bPropertyApplied && Record.IsValid())
+	{
+		LiveWriteTransactionRecords.Add(AssetPath, Record);
+	}
+	return bPropertyApplied;
+}
+
+bool FUEAgentKitEditorBridge::TryUndoAssetPropertyLiveResult(
+	const FString& AssetPath,
+	const FString& TransactionId,
+	const FString& ExpectedSessionId,
+	TSharedPtr<FJsonObject>& OutResult,
+	FString& OutErrorCode,
+	FString& OutErrorMessage) const
+{
+	return RevertLiveWriteTransaction(
+		true,
 		AssetPath,
-		PropertyPath,
-		Property,
-		ValueAddress,
-		Value,
-		SessionId,
+		TransactionId,
+		ExpectedSessionId,
+		TEXT("undo-asset-property-live"),
 		OutResult,
 		OutErrorCode,
 		OutErrorMessage);
+}
+
+bool FUEAgentKitEditorBridge::TryDiscardAssetPropertyLiveResult(
+	const FString& AssetPath,
+	const FString& TransactionId,
+	const FString& ExpectedSessionId,
+	TSharedPtr<FJsonObject>& OutResult,
+	FString& OutErrorCode,
+	FString& OutErrorMessage) const
+{
+	return RevertLiveWriteTransaction(
+		false,
+		AssetPath,
+		TransactionId,
+		ExpectedSessionId,
+		TEXT("discard-asset-property-live"),
+		OutResult,
+		OutErrorCode,
+		OutErrorMessage);
+}
+
+bool FUEAgentKitEditorBridge::RevertLiveWriteTransaction(
+	const bool bRedoable,
+	const FString& AssetPath,
+	const FString& TransactionId,
+	const FString& ExpectedSessionId,
+	const FString& Action,
+	TSharedPtr<FJsonObject>& OutResult,
+	FString& OutErrorCode,
+	FString& OutErrorMessage) const
+{
+	if (GEditor == nullptr)
+	{
+		OutErrorCode = TEXT("live-editor-unavailable");
+		OutErrorMessage = TEXT("The Unreal Editor is unavailable.");
+		return false;
+	}
+	if (GEditor->PlayWorld != nullptr)
+	{
+		OutErrorCode = TEXT("live-editor-pie-active");
+		OutErrorMessage = TEXT("Live write Undo and Discard are unavailable while PIE or SIE is active.");
+		return false;
+	}
+	if (!IsSafeGameAssetPath(AssetPath) || ExpectedSessionId.IsEmpty())
+	{
+		OutErrorCode = TEXT("live-editor-invalid-parameters");
+		OutErrorMessage = TEXT("assetPath and one non-empty editorSessionId are required.");
+		return false;
+	}
+	FGuid RequestedTransactionId;
+	if (!FGuid::Parse(TransactionId, RequestedTransactionId) || !RequestedTransactionId.IsValid())
+	{
+		OutErrorCode = TEXT("live-editor-write-undo-invalid-transaction-id");
+		OutErrorMessage = TEXT("transactionId must be the exact transactionId returned by the confirmed live write.");
+		return false;
+	}
+	const TSharedPtr<UEAgentKitLiveWrite::FLiveWriteTransactionRecord>* Found =
+		LiveWriteTransactionRecords.Find(AssetPath);
+	if (Found == nullptr)
+	{
+		OutErrorCode = TEXT("live-editor-write-undo-not-found");
+		OutErrorMessage = TEXT("No confirmed live write transaction is pending for this asset.");
+		return false;
+	}
+	const TSharedPtr<UEAgentKitLiveWrite::FLiveWriteTransactionRecord>& Record = *Found;
+	if (Record->TransactionId != RequestedTransactionId)
+	{
+		OutErrorCode = TEXT("live-editor-write-undo-transaction-mismatch");
+		OutErrorMessage = TEXT("The transactionId does not match the pending live write transaction for this asset.");
+		return false;
+	}
+	if (Record->SessionId != ExpectedSessionId || ExpectedSessionId != SessionId)
+	{
+		OutErrorCode = TEXT("live-editor-write-undo-session-mismatch");
+		OutErrorMessage = TEXT("The Editor session changed after the live write; re-plan the write instead of undoing.");
+		return false;
+	}
+	if (!Record->Asset.IsValid() || Record->Asset.Get() != StaticFindObject(UObject::StaticClass(), nullptr, *AssetPath, false)
+		|| !Record->Asset->IsAsset())
+	{
+		OutErrorCode = TEXT("live-editor-write-undo-asset-mismatch");
+		OutErrorMessage = TEXT("The target asset changed after the live write; re-plan the write instead of undoing.");
+		return false;
+	}
+	UObject* Asset = Record->Asset.Get();
+	if (Asset->GetClass()->GetPathName() != Record->ClassPath)
+	{
+		OutErrorCode = TEXT("live-editor-write-undo-asset-mismatch");
+		OutErrorMessage = TEXT("The target asset Class changed after the live write; re-plan the write instead of undoing.");
+		return false;
+	}
+	UPackage* Package = Asset->GetOutermost();
+	if (Package == nullptr || Package->GetName() != Record->PackageName)
+	{
+		OutErrorCode = TEXT("live-editor-write-undo-asset-mismatch");
+		OutErrorMessage = TEXT("The target asset package changed after the live write; re-plan the write instead of undoing.");
+		return false;
+	}
+	if (Record->bDirtyAfter && !Package->IsDirty())
+	{
+		OutErrorCode = TEXT("live-editor-write-undo-package-saved");
+		OutErrorMessage = TEXT("The target package was saved after the live write; the write can no longer be undone.");
+		return false;
+	}
+	if (GEditor->Trans == nullptr)
+	{
+		OutErrorCode = TEXT("live-editor-write-undo-stack-mismatch");
+		OutErrorMessage = TEXT("The Editor transaction history is unavailable; re-plan the write instead of undoing.");
+		return false;
+	}
+	const FTransactionContext UndoContext = GEditor->Trans->GetUndoContext(false);
+	if (!UndoContext.TransactionId.IsValid() || UndoContext.TransactionId != Record->TransactionId)
+	{
+		OutErrorCode = TEXT("live-editor-write-undo-stack-mismatch");
+		OutErrorMessage = TEXT("Other Editor changes are on top of the live write; undo them first or re-plan the write.");
+		return false;
+	}
+
+	TSharedPtr<FJsonValue> WrittenValue;
+	if (!Record->IO->ReadBefore(WrittenValue, OutErrorCode, OutErrorMessage))
+	{
+		OutErrorCode = TEXT("live-editor-write-undo-verify-failed");
+		OutErrorMessage = TEXT("The written value could not be read back before reverting.");
+		return false;
+	}
+
+	if (!GEditor->UndoTransaction(bRedoable))
+	{
+		Record->IO->RestoreSnapshot();
+		Record->IO->NotifyRestored();
+	}
+	Package->SetDirtyFlag(Record->bDirtyBefore);
+
+	TSharedPtr<FJsonValue> RestoredValue;
+	bool bRestored = Record->IO->ReadBefore(RestoredValue, OutErrorCode, OutErrorMessage)
+		&& Record->IO->SemanticEqual(RestoredValue, Record->BeforeValue);
+	if (!bRestored)
+	{
+		Record->IO->RestoreSnapshot();
+		Record->IO->NotifyRestored();
+		Package->SetDirtyFlag(Record->bDirtyBefore);
+		bRestored = Record->IO->ReadBefore(RestoredValue, OutErrorCode, OutErrorMessage)
+			&& Record->IO->SemanticEqual(RestoredValue, Record->BeforeValue);
+	}
+	if (!bRestored)
+	{
+		OutErrorCode = TEXT("live-editor-write-undo-verify-failed");
+		OutErrorMessage = TEXT("The Editor could not verify the restored live write target value.");
+		return false;
+	}
+	const TSharedPtr<UEAgentKitLiveWrite::FLiveWriteTransactionRecord> RetainedRecord = Record;
+	LiveWriteTransactionRecords.Remove(AssetPath);
+
+	const bool bChanged = !RetainedRecord->IO->SemanticEqual(WrittenValue, RestoredValue);
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetStringField(TEXT("action"), Action);
+	Result->SetStringField(TEXT("operation"), RetainedRecord->Operation);
+	Result->SetStringField(TEXT("valueKind"), RetainedRecord->ValueKind);
+	Result->SetStringField(TEXT("assetPath"), RetainedRecord->AssetPath);
+	Result->SetStringField(TEXT("transactionId"), RetainedRecord->TransactionId.ToString(EGuidFormats::DigitsWithHyphens));
+	Result->SetBoolField(TEXT("changed"), bChanged);
+	Result->SetBoolField(TEXT("transactionRecorded"), false);
+	Result->SetBoolField(TEXT("assetOpen"), true);
+	Result->SetBoolField(TEXT("loadedByBridge"), false);
+	Result->SetBoolField(TEXT("packageDirtyBefore"), RetainedRecord->bDirtyAfter);
+	Result->SetBoolField(TEXT("packageDirtyAfter"), Package->IsDirty());
+	Result->SetBoolField(TEXT("dirtyBefore"), RetainedRecord->bDirtyAfter);
+	Result->SetBoolField(TEXT("dirtyAfter"), Package->IsDirty());
+	Result->SetBoolField(TEXT("saved"), false);
+	Result->SetField(TEXT("beforeValue"), WrittenValue);
+	Result->SetField(TEXT("afterValue"), RestoredValue);
+	Result->SetStringField(TEXT("editorSessionId"), RetainedRecord->SessionId);
+	OutResult = Result;
+	return true;
 }
