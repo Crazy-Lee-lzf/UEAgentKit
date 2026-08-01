@@ -344,3 +344,85 @@ scripts\TestMcpLiveWriteRegression.cmd
 3. 将现有 Live Write 生命周期绑定到一个可查询的 Change Set。
 4. 保持现有 12 个 Live Operation、Undo/Discard、Save/Verify 和全部旧 Tool 兼容。
 5. 用真实 UE5.6 回归证明新增能力，而不是只通过 Mock。
+
+## 11. 2026-08-01 当前执行交接（增量）
+
+> 本节记录本轮 Agent 的实际执行状态。它不表示功能已经实现；下一位 Agent 应从“开始编码”继续，而不是把审计结果当成已提交代码。
+
+### 11.1 Git checkpoint
+
+- 工作区：`E:/WorkSpace/UEAgentKit`
+- 分支：`feature/live-editor-realtime-io`
+- 当前 HEAD：`53f8317578fe8f96b6867dc94e1bd75c1d6439c0`
+- 当前提交：`docs: add realtime io agent handoff`
+- 与 `origin/feature/live-editor-realtime-io`：`0 0`
+- 写入本节前的工作树 checkpoint：干净；没有 staged、unstaged 或 untracked 文件。
+- 本轮没有 Commit、Push、Merge、Tag 或 Release；当前未提交修改为本 handoff 文件和下一位 Agent 提示词文件，均不包含实现代码。
+- `E:/WorkSpace/UEAgentKit-MemoryContext` 未修改。
+
+### 11.2 已完成的工作
+
+1. 已读取本任务要求的 prompt、handoff、架构、项目状态、Bridge/MCP 规范文档。
+2. 已审计现有 C++ Editor Bridge：localhost TCP、newline-delimited JSON、认证、Session、Game Thread 调度、Capability、响应上限和现有 Builder。
+3. 已审计 Python Bridge/MCP：参数归一化、不可用状态、Tool Registry、MCP 注册、Capability Discovery 和旧 live-action 索引兼容约束。
+4. 已审计 Live Write Transaction、Journal、Apply/Undo/Discard/Save/Verify 生命周期及重启恢复边界。
+5. 已确定 Realtime Foundation 的实现拆分：Context、`scanCurrentWorld` Batch Task、Change Set，以及旧 Live Write 行为兼容。
+
+### 11.3 尚未完成的工作
+
+- 尚未修改任何 C++、Python、测试或文档实现文件（本节交接记录除外）。
+- 尚未实现 `ue_get_editor_context`。
+- 尚未实现 Batch Task Manager、分帧扫描、进度、取消、Session/World 失效。
+- 尚未实现 Change Set 或把现有 Live Write 工具接入 Change Set。
+- 尚未运行 Ruff、Python 单元测试、Plugin Build、Live Write Fast/Regression 或真实 UE 回归。
+- 因此不能声称已有编译通过、测试通过或 UE Editor 验证结果。
+
+### 11.4 下一次 Commit 的建议门槛
+
+下一次提交应先做一个可编译、可测试的 Context 垂直切片，不要等待全部 Realtime Foundation 完成。建议包含：
+
+1. `realtime` ToolGroup 和 `ue_get_editor_context` ToolDefinition。
+2. Context 参数归一化、统一错误响应和新增 Capability 校验。
+3. MCP Tool 注册及 Capability Discovery contract。
+4. C++ `editor.getEditorContext` Capability、路由和独立 Context Handler。
+5. 有界 Context sections、`durationMs`、阶段耗时、`truncated` 和 `nextActions`。
+6. Context 正常、不可用、截断以及不修改 Dirty/Selection 的测试。
+7. 至少运行 Python lint/unit test，并记录真实结果。
+
+完成上述门槛后再创建第一个实现 Commit；不要把仅有方案设计的状态误报为功能进度。
+
+### 11.5 后续实现顺序
+
+1. Context vertical slice：先完成并测试，再提交。
+2. Batch Task：新增 `EditorBridgeBatchTaskManager.{h,cpp}`、Handler 和 Python realtime task 层；首版只支持 `scanCurrentWorld`。
+3. Change Set：新增受控 Work Root 内的 Change Set 状态和可选 `change_set_id`，复用现有 Transaction、Receipt、Session、Journal 和错误系统。
+4. Live Write 闭环：Apply → Undo/Discard → Save → Verify，并保持未绑定 Change Set 的旧调用行为完全不变。
+5. 全量门禁：Ruff、Python unittest、Plugin Build、Live Write Fast；保存闭环完成后再运行 Regression。
+6. 最后执行 `git diff --check`、UTF-8 无 BOM/CRLF 检查，并在真实 UE5.6 环境具备条件时运行回归。
+
+### 11.6 下一位 Agent 的启动动作
+
+```bat
+git branch --show-current
+git status --short
+git rev-parse HEAD
+git rev-list --left-right --count origin/feature/live-editor-realtime-io...HEAD
+```
+
+确认工作树仍干净后，直接从 Context vertical slice 开始。推荐先修改/新增：
+
+```text
+src/ue_agent_kit/tool_registry.py
+src/ue_agent_kit/editor_bridge.py
+src/ue_agent_kit/mcp_realtime_tools.py
+src/ue_agent_kit/mcp_server.py
+Plugin/UEAgentKit/Source/UEAgentKitEditor/Private/EditorBridge.h
+Plugin/UEAgentKit/Source/UEAgentKitEditor/Private/EditorBridge.cpp
+Plugin/UEAgentKit/Source/UEAgentKitEditor/Private/EditorBridgeContextHandlers.cpp
+```
+
+不要重新创建第二套 IPC、Session、Envelope、Journal、错误码系统；不要修改 `E:/WorkSpace/UEAgentKit-MemoryContext`；不要加入任意 Python、Console、Shell、SQL、文件系统路径、UObject Method、Save All 或通用 `set_property` 能力。
+
+### 11.7 交接结论
+
+当前状态是“审计和设计完成、实现尚未开始”；当前未提交差异仅包含 handoff 文档和下一位 Agent 提示词，不包含实现代码。与上一份进度报告相比，没有新增代码差异，也没有新增测试结果。下一步的最小可交付目标是完成 Context vertical slice 并形成第一个可验证 Commit。
