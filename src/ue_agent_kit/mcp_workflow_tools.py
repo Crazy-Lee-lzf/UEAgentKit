@@ -145,26 +145,46 @@ def register_workflow_tools(
             return error_response("ue_set_asset_property", exc, read_only=False)
 
     @server.tool(annotations=destructive_annotations)
-    def ue_apply_asset_property_live(plan_id: str, confirmation: str) -> dict[str, Any]:
+    def ue_apply_asset_property_live(plan_id: str, confirmation: str, change_set_id: str = "") -> dict[str, Any]:
         """Apply one authorized setAssetProperty plan to Editor memory without saving the package."""
         try:
-            return workflow_service.apply_asset_property_live(plan_id, confirmation)
+            return workflow_service.apply_asset_property_live(plan_id, confirmation, change_set_id=change_set_id)
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_apply_asset_property_live", exc, read_only=False)
 
     @server.tool(annotations=destructive_annotations)
-    def ue_undo_asset_property_live(asset_path: str, transaction_id: str, editor_session_id: str) -> dict[str, Any]:
+    def ue_undo_asset_property_live(
+        asset_path: str,
+        transaction_id: str,
+        editor_session_id: str,
+        change_set_id: str = "",
+    ) -> dict[str, Any]:
         """Undo exactly the most recent confirmed live write for one asset in Editor memory (redoable)."""
         try:
-            return workflow_service.undo_asset_property_live(asset_path, transaction_id, editor_session_id)
+            return workflow_service.undo_asset_property_live(
+                asset_path,
+                transaction_id,
+                editor_session_id,
+                change_set_id=change_set_id,
+            )
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_undo_asset_property_live", exc, read_only=False)
 
     @server.tool(annotations=destructive_annotations)
-    def ue_discard_asset_property_live(asset_path: str, transaction_id: str, editor_session_id: str) -> dict[str, Any]:
+    def ue_discard_asset_property_live(
+        asset_path: str,
+        transaction_id: str,
+        editor_session_id: str,
+        change_set_id: str = "",
+    ) -> dict[str, Any]:
         """Discard the most recent confirmed live write for one asset back to its pre-write Editor state."""
         try:
-            return workflow_service.discard_asset_property_live(asset_path, transaction_id, editor_session_id)
+            return workflow_service.discard_asset_property_live(
+                asset_path,
+                transaction_id,
+                editor_session_id,
+                change_set_id=change_set_id,
+            )
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_discard_asset_property_live", exc, read_only=False)
 
@@ -393,10 +413,18 @@ def register_workflow_tools(
             return error_response("ue_verify_asset", exc, read_only=True)
 
     @server.tool(annotations=planning_annotations)
-    def ue_verify_live_write(asset_path: str, live_apply_receipt: str = "") -> dict[str, Any]:
+    def ue_verify_live_write(
+        asset_path: str,
+        live_apply_receipt: str = "",
+        change_set_id: str = "",
+    ) -> dict[str, Any]:
         """Verify one exact live write, or the latest pending write for the asset when no receipt is supplied."""
         try:
-            return workflow_service.verify_live_write(asset_path, live_apply_receipt)
+            return workflow_service.verify_live_write(
+                asset_path,
+                live_apply_receipt,
+                change_set_id=change_set_id,
+            )
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_verify_live_write", exc, read_only=True)
 
@@ -425,6 +453,7 @@ def register_workflow_tools(
         mode: Literal["Preview", "Commit"] = "Preview",
         save_receipt: str = "",
         confirmation: str = "",
+        change_set_id: str = "",
     ) -> dict[str, Any]:
         """Preview or explicitly save one policy-authorized loaded Dirty asset with backup and verification."""
         try:
@@ -433,6 +462,7 @@ def register_workflow_tools(
                 mode=mode,
                 save_receipt=save_receipt,
                 confirmation=confirmation,
+                change_set_id=change_set_id,
             )
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_save_authorized_asset", exc, read_only=False)

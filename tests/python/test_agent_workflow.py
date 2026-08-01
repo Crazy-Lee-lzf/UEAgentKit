@@ -1359,7 +1359,7 @@ class AgentWorkflowTests(unittest.TestCase):
 
     def test_live_write_tool_count_and_names_are_unchanged(self) -> None:
         names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
-        self.assertEqual(len(names), 51)
+        self.assertEqual(len(names), 53)
         self.assertIn("ue_set_asset_property", names)
         self.assertIn("ue_set_asset_reference_property", names)
         self.assertIn("ue_apply_asset_property_live", names)
@@ -2557,6 +2557,307 @@ class AgentWorkflowTests(unittest.TestCase):
             saved_service.verify_live_write(ASSET_PATH)
         self.assertEqual(value_mismatch.exception.code, "live-write-verify-value-mismatch")
 
+    def _change_set_service(self, bridge: Any) -> PatchWorkflowService:
+        return PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=self.freshness,
+            live_editor_service=bridge,
+        )
+
+    def _bound_change_set(self, service: PatchWorkflowService) -> str:
+        created = service.create_change_set()
+        self.assertTrue(created["ok"])
+        self.assertTrue(created["changeSetId"].startswith("cs_"))
+        return created["changeSetId"]
+
+    def test_change_set_create_is_journaled_and_reported(self) -> None:
+        service = self._change_set_service(AgentWorkflowTests.ClosedLoopLiveService(dirty=True))
+        change_set_id = self._bound_change_set(service)
+        journal = self.work_root / "change-sets" / f"{change_set_id}.json"
+        self.assertTrue(journal.is_file())
+        self.assertEqual(service.status()["liveWriteJournal"]["changeSetCount"], 1)
+        self.assertEqual(service.status()["liveWriteJournal"]["maxChangeSets"], 50)
+
+        details = service.get_change_set(change_set_id)
+        self.assertEqual(details["tool"], "ue_get_change_set")
+        self.assertEqual(details["changeSetId"], change_set_id)
+        self.assertEqual(details["receiptCount"], 0)
+        self.assertEqual(details["activeReceiptCount"], 0)
+
+    def test_change_set_apply_binds_receipt_after_confirmed_change(self) -> None:
+        bridge = AgentWorkflowTests.ClosedLoopLiveService(dirty=True)
+        service = self._change_set_service(bridge)
+        change_set_id = self._bound_change_set(service)
+        plan = service.plan_patch(
+            asset_path=ASSET_PATH,
+            operation="setAssetProperty",
+            target={"propertyPath": "BoolValue"},
+            value=True,
+            description="Change Set binding",
+        )
+        applied = service.apply_asset_property_live(
+            plan["planId"],
+            f"LIVE APPLY {plan['planId']}",
+            change_set_id=change_set_id,
+        )
+        self.assertTrue(applied["changed"])
+        self.assertTrue(applied["liveApplyReceipt"].startswith("live_"))
+        self.assertEqual(applied["changeSetId"], change_set_id)
+        self.assertTrue(applied["changeSetBound"])
+        self.assertTrue(applied["changeSetJournalPersisted"])
+
+        details = service.get_change_set(change_set_id)
+        self.assertEqual(details["receiptCount"], 1)
+        self.assertEqual(details["activeReceiptCount"], 1)
+        self.assertEqual(details["receipts"][0]["receipt"], applied["liveApplyReceipt"])
+        self.assertTrue(details["receipts"][0]["active"])
+        self.assertEqual(details["receipts"][0]["assetPath"], ASSET_PATH)
+        self.assertEqual(details["receipts"][0]["operation"], "setAssetProperty")
+
+    def test_change_set_apply_rejects_unknown_set_before_bridge_call(self) -> None:
+        bridge = AgentWorkflowTests.ClosedLoopLiveService(dirty=True)
+        service = self._change_set_service(bridge)
+        plan = service.plan_patch(
+            asset_path=ASSET_PATH,
+            operation="setAssetProperty",
+            target={"propertyPath": "BoolValue"},
+            value=True,
+            description="Change Set unknown",
+        )
+        with self.assertRaises(WorkflowError) as missing:
+            service.apply_asset_property_live(
+                plan["planId"],
+                f"LIVE APPLY {plan['planId']}",
+                change_set_id="cs_does-not-exist",
+            )
+        self.assertEqual(missing.exception.code, "change-set-not-found")
+        self.assertEqual(bridge.calls, [])
+
+    def test_change_set_apply_with_invalid_id_is_rejected(self) -> None:
+        service = self._change_set_service(AgentWorkflowTests.ClosedLoopLiveService(dirty=True))
+        plan = service.plan_patch(
+            asset_path=ASSET_PATH,
+            operation="setAssetProperty",
+            target={"propertyPath": "BoolValue"},
+            value=True,
+            description="Change Set invalid id",
+        )
+        with self.assertRaises(WorkflowError) as invalid:
+            service.apply_asset_property_live(plan["planId"], f"LIVE APPLY {plan['planId']}", change_set_id="live_123")
+        self.assertEqual(invalid.exception.code, "change-set-invalid")
+
+    def test_change_set_apply_noop_binds_nothing(self) -> None:
+        class NoopWriteService:
+            def call_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+                return {
+                    "action": "apply-asset-property-live",
+                    "assetPath": ASSET_PATH,
+                    "changed": False,
+                    "transactionRecorded": False,
+                    "saved": False,
+                }
+
+        service = self._change_set_service(NoopWriteService())
+        change_set_id = self._bound_change_set(service)
+        plan = service.plan_patch(
+            asset_path=ASSET_PATH,
+            operation="setAssetProperty",
+            target={"propertyPath": "BoolValue"},
+            value=True,
+            description="Change Set noop",
+        )
+        applied = service.apply_asset_property_live(
+            plan["planId"],
+            f"LIVE APPLY {plan['planId']}",
+            change_set_id=change_set_id,
+        )
+        self.assertFalse(applied["changed"])
+        self.assertEqual(applied["liveApplyReceipt"], "")
+        self.assertFalse(applied["changeSetBound"])
+        self.assertEqual(service.get_change_set(change_set_id)["receiptCount"], 0)
+
+    def test_change_set_undo_member_removes_receipt_and_journal(self) -> None:
+        bridge = AgentWorkflowTests.ClosedLoopLiveService(dirty=True)
+        service = self._change_set_service(bridge)
+        change_set_id = self._bound_change_set(service)
+        plan = service.plan_patch(
+            asset_path=ASSET_PATH,
+            operation="setAssetProperty",
+            target={"propertyPath": "BoolValue"},
+            value=True,
+            description="Change Set undo",
+        )
+        applied = service.apply_asset_property_live(
+            plan["planId"],
+            f"LIVE APPLY {plan['planId']}",
+            change_set_id=change_set_id,
+        )
+        undone = service.undo_asset_property_live(
+            ASSET_PATH,
+            TRANSACTION_ID,
+            "session-1",
+            change_set_id=change_set_id,
+        )
+        self.assertEqual(undone["changeSetId"], change_set_id)
+        self.assertTrue(undone["changeSetRemoved"])
+        details = service.get_change_set(change_set_id)
+        self.assertEqual(details["receiptCount"], 0)
+        self.assertEqual(details["activeReceiptCount"], 0)
+        self.assertFalse(
+            (self.work_root / "live-write-journal" / f"{applied['liveApplyReceipt']}.json").exists()
+        )
+
+    def test_change_set_discard_member_removes_receipt(self) -> None:
+        bridge = AgentWorkflowTests.ClosedLoopLiveService(dirty=True)
+        service = self._change_set_service(bridge)
+        change_set_id = self._bound_change_set(service)
+        plan = service.plan_patch(
+            asset_path=ASSET_PATH,
+            operation="setAssetProperty",
+            target={"propertyPath": "BoolValue"},
+            value=True,
+            description="Change Set discard",
+        )
+        service.apply_asset_property_live(
+            plan["planId"],
+            f"LIVE APPLY {plan['planId']}",
+            change_set_id=change_set_id,
+        )
+        discarded = service.discard_asset_property_live(
+            ASSET_PATH,
+            TRANSACTION_ID,
+            "session-1",
+            change_set_id=change_set_id,
+        )
+        self.assertEqual(discarded["mode"], "LiveDiscard")
+        self.assertEqual(discarded["changeSetId"], change_set_id)
+        self.assertTrue(discarded["changeSetRemoved"])
+        self.assertEqual(service.get_change_set(change_set_id)["receiptCount"], 0)
+
+    def test_change_set_revert_rejects_non_member_before_bridge_call(self) -> None:
+        bridge = AgentWorkflowTests.ClosedLoopLiveService(dirty=True)
+        service = self._change_set_service(bridge)
+        change_set_id = self._bound_change_set(service)
+        self._apply_scalar_live_write(service, bridge)
+        self.assertEqual(len(bridge.calls), 1)
+        with self.assertRaises(WorkflowError) as non_member:
+            service.undo_asset_property_live(
+                ASSET_PATH,
+                TRANSACTION_ID,
+                "session-1",
+                change_set_id=change_set_id,
+            )
+        self.assertEqual(non_member.exception.code, "change-set-transaction-not-member")
+        self.assertEqual(len(bridge.calls), 1)
+
+    def test_change_set_verify_requires_member(self) -> None:
+        bridge = AgentWorkflowTests.ClosedLoopLiveService(dirty=True)
+        service = self._change_set_service(bridge)
+        change_set_id = self._bound_change_set(service)
+        self._apply_scalar_live_write(service, bridge)
+        with self.assertRaises(WorkflowError) as non_member:
+            service.verify_live_write(ASSET_PATH, change_set_id=change_set_id)
+        self.assertEqual(non_member.exception.code, "change-set-transaction-not-member")
+
+        plan = service.plan_patch(
+            asset_path=ASSET_PATH,
+            operation="setAssetProperty",
+            target={"propertyPath": "BoolValue"},
+            value=True,
+            description="Change Set verify",
+        )
+        bound_applied = service.apply_asset_property_live(
+            plan["planId"],
+            f"LIVE APPLY {plan['planId']}",
+            change_set_id=change_set_id,
+        )
+        verified = service.verify_live_write(ASSET_PATH, change_set_id=change_set_id)
+        self.assertEqual(verified["state"], "not-saved")
+        self.assertEqual(verified["changeSetId"], change_set_id)
+        self.assertEqual(verified["liveApplyReceipt"], bound_applied["liveApplyReceipt"])
+
+    def test_change_set_save_requires_member_asset(self) -> None:
+        bridge = AgentWorkflowTests.ClosedLoopLiveService(dirty=True)
+        service = self._change_set_service(bridge)
+        change_set_id = self._bound_change_set(service)
+        self._apply_scalar_live_write(service, bridge)
+        with self.assertRaises(WorkflowError) as non_member:
+            service.save_authorized_asset(ASSET_PATH, change_set_id=change_set_id)
+        self.assertEqual(non_member.exception.code, "change-set-transaction-not-member")
+
+        plan = service.plan_patch(
+            asset_path=ASSET_PATH,
+            operation="setAssetProperty",
+            target={"propertyPath": "BoolValue"},
+            value=True,
+            description="Change Set save",
+        )
+        applied = service.apply_asset_property_live(
+            plan["planId"],
+            f"LIVE APPLY {plan['planId']}",
+            change_set_id=change_set_id,
+        )
+        self.assertTrue(applied["changeSetBound"])
+        preview = service.save_authorized_asset(ASSET_PATH, change_set_id=change_set_id)
+        self.assertEqual(preview["mode"], "Preview")
+        self.assertEqual(preview["changeSetId"], change_set_id)
+        self.assertTrue(preview["saveReceipt"].startswith("save_"))
+
+    def test_change_set_journal_recovers_across_service_restart(self) -> None:
+        bridge = AgentWorkflowTests.ClosedLoopLiveService(dirty=True)
+        service = self._change_set_service(bridge)
+        change_set_id = self._bound_change_set(service)
+        plan = service.plan_patch(
+            asset_path=ASSET_PATH,
+            operation="setAssetProperty",
+            target={"propertyPath": "BoolValue"},
+            value=True,
+            description="Change Set recovery",
+        )
+        applied = service.apply_asset_property_live(
+            plan["planId"],
+            f"LIVE APPLY {plan['planId']}",
+            change_set_id=change_set_id,
+        )
+        recovered = self._change_set_service(bridge)
+        details = recovered.get_change_set(change_set_id)
+        self.assertEqual(details["receiptCount"], 1)
+        self.assertEqual(details["activeReceiptCount"], 1)
+        self.assertEqual(details["receipts"][0]["receipt"], applied["liveApplyReceipt"])
+        self.assertEqual(recovered.status()["liveWriteJournal"]["changeSetCount"], 1)
+
+    def test_change_set_receipt_cap_and_prune_bounds(self) -> None:
+        service = self._change_set_service(AgentWorkflowTests.ClosedLoopLiveService(dirty=True))
+        change_set_id = self._bound_change_set(service)
+        for index in range(100):
+            self.assertTrue(service._bind_apply_receipt(change_set_id, f"live_member_{index}"))
+        with self.assertRaises(WorkflowError) as full:
+            service._bind_apply_receipt(change_set_id, "live_member_100")
+        self.assertEqual(full.exception.code, "change-set-full")
+
+        for index in range(50):
+            self._bound_change_set(service)
+        self.assertLessEqual(len(service._change_sets), 50)
+
+    def test_change_set_absent_member_shows_inactive_after_recovery(self) -> None:
+        service = self._change_set_service(AgentWorkflowTests.ClosedLoopLiveService(dirty=True))
+        change_set_id = self._bound_change_set(service)
+        self.assertTrue(service._bind_apply_receipt(change_set_id, "live_missing"))
+        details = service.get_change_set(change_set_id)
+        self.assertEqual(details["receiptCount"], 1)
+        self.assertEqual(details["activeReceiptCount"], 0)
+        self.assertFalse(details["receipts"][0]["active"])
+
+    def test_change_set_unbound_live_write_response_has_no_change_set_keys(self) -> None:
+        bridge = AgentWorkflowTests.ClosedLoopLiveService(dirty=True)
+        service = self._change_set_service(bridge)
+        applied = self._apply_scalar_live_write(service, bridge)
+        self.assertNotIn("changeSetId", applied)
+        undone = service.undo_asset_property_live(ASSET_PATH, TRANSACTION_ID, "session-1")
+        self.assertNotIn("changeSetId", undone)
+        self.assertEqual(service.status()["liveWriteJournal"]["changeSetCount"], 0)
 
 
 if __name__ == "__main__":

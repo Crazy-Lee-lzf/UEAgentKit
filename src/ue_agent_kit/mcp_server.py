@@ -23,6 +23,7 @@ from .agent_workflow import (
     PatchWorkflowService,
     WorkflowError,
 )
+from .change_sets import register_change_set_tools
 from .config import DEFAULT_DATABASE, DEFAULT_MEMORY_DATABASE
 from .editor_bridge import (
     LiveEditorBridgeConfig,
@@ -82,9 +83,9 @@ def _server_instructions(
         "and ue_find_references for dependency and Blueprint reference edges. "
     )
     live_text = (
-        "The ue_editor_*, ue_get_*, and bounded Batch Task live tools operate on the fixed local Unreal Editor "
-        "Bridge; they never accept endpoints, tokens, filesystem paths, arbitrary UObject calls, Console commands, "
-        "Python, or Shell. "
+        "The ue_editor_*, ue_get_*, bounded Batch Task, and journaled Change Set live tools operate "
+        "on the fixed local Unreal Editor Bridge; they never accept endpoints, tokens, filesystem "
+        "paths, arbitrary UObject calls, Console commands, Python, or Shell. "
         if live_editor_enabled
         else "Live Editor access is not configured. "
     )
@@ -283,6 +284,22 @@ def _capabilities_response(
                 "modifiesSelection": False,
                 "perActorMcpCalls": False,
             },
+            "liveWriteChangeSets": {
+                "available": bool(live_editor_enabled and write_tools_enabled),
+                "createTool": "ue_create_change_set" if live_editor_enabled and write_tools_enabled else "",
+                "getTool": "ue_get_change_set" if live_editor_enabled and write_tools_enabled else "",
+                "maxChangeSets": 50,
+                "maxReceiptsPerChangeSet": 100,
+                "journaled": True,
+                "workRootBound": True,
+                "bindableTools": [
+                    "ue_apply_asset_property_live",
+                    "ue_undo_asset_property_live",
+                    "ue_discard_asset_property_live",
+                    "ue_save_authorized_asset",
+                    "ue_verify_live_write",
+                ],
+            },
         },
         "projectMemory": {
             "configured": memory_enabled,
@@ -377,6 +394,8 @@ def _capabilities_response(
             "liveBatchMaxDetailedActors": 200,
             "liveBatchMaxActorClasses": 50,
             "liveBatchTimeoutSecondsMax": 300,
+            "liveChangeSets": 50,
+            "liveChangeSetMaxReceipts": 100,
             "memorySearchResults": 100,
         },
         "responseContract": {
@@ -578,6 +597,10 @@ def _suggested_action(code: str) -> str:
         "live-editor-batch-task-world-invalidated": "Restart the Batch Task after the World or session stabilized.",
         "live-editor-batch-task-timeout": "Restart the Batch Task with a larger timeoutSeconds or a smaller scan bound.",
         "live-editor-batch-task-failed": "Retry with a smaller bounded scan after reviewing the sanitized task error.",
+        "change-set-invalid": "Use the exact changeSetId returned by ue_create_change_set.",
+        "change-set-not-found": "Create a fresh Change Set with ue_create_change_set and use its exact changeSetId.",
+        "change-set-full": "Finish or revert the Change Set first; a Change Set holds at most 100 bound receipts.",
+        "change-set-transaction-not-member": "Bind the live write to the Change Set at apply time before reverting, saving, or verifying it.",
         "snapshot-refresh-restart-required": "Restart the MCP server so the new paired snapshot generation becomes the frozen session snapshot.",
         "memory-project-mismatch": "Use the Project Memory service fixed to the active index Project Key.",
         "memory-record-project-mismatch": "Use a record ID that belongs to the fixed Project Memory project.",
@@ -754,6 +777,13 @@ def create_mcp_server(
         )
     if workflow_service is not None:
         register_workflow_tools(
+            server=server,
+            workflow_service=workflow_service,
+            read_annotations=read_annotations,
+            tool_annotations_type=ToolAnnotations,
+            error_response=_error_response,
+        )
+        register_change_set_tools(
             server=server,
             workflow_service=workflow_service,
             read_annotations=read_annotations,

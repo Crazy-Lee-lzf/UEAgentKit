@@ -248,6 +248,25 @@ class FakeWorkflowService:
             )
         return response
 
+    def create_change_set(self):
+        return {
+            "ok": True,
+            "tool": "ue_create_change_set",
+            "changeSetId": "cs_fake",
+            "receiptCount": 0,
+            "journalPersisted": True,
+        }
+
+    def get_change_set(self, change_set_id):
+        return {
+            "ok": True,
+            "tool": "ue_get_change_set",
+            "changeSetId": change_set_id,
+            "receiptCount": 0,
+            "activeReceiptCount": 0,
+            "receipts": [],
+        }
+
 
 class FakeLiveEditorService:
     def __init__(self, *, available: bool = True) -> None:
@@ -1372,7 +1391,7 @@ class McpServerTests(unittest.TestCase):
             [tool.name for tool in tools],
             tool_names_for_mode(workflow_enabled=True, memory_enabled=True),
         )
-        self.assertEqual(len(tools), 36)
+        self.assertEqual(len(tools), 38)
 
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
         memory_contract = capabilities["projectMemory"]
@@ -1450,12 +1469,18 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         expected_names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 51)
+        self.assertEqual(len(tools), 53)
         for tool in tools:
             definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
             self.assertEqual(bool(tool.annotations.readOnlyHint), definition.read_only, tool.name)
             self.assertEqual(bool(tool.annotations.destructiveHint), definition.destructive, tool.name)
             self.assertEqual(bool(tool.annotations.idempotentHint), definition.idempotent, tool.name)
+
+        _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
+        change_sets = capabilities["liveEditor"]["liveWriteChangeSets"]
+        self.assertTrue(change_sets["available"])
+        self.assertEqual(change_sets["createTool"], "ue_create_change_set")
+        self.assertEqual(change_sets["getTool"], "ue_get_change_set")
 
         mismatched_live = FakeLiveEditorService()
         mismatched_live.config = SimpleNamespace(
@@ -1596,6 +1621,43 @@ class McpServerTests(unittest.TestCase):
             )
         )
         self.assertEqual(applied["applyReceipt"], "apply_test")
+
+        _, created_set = asyncio.run(server.call_tool("ue_create_change_set", {}))
+        self.assertTrue(created_set["ok"])
+        self.assertEqual(created_set["changeSetId"], "cs_fake")
+        _, read_set = asyncio.run(
+            server.call_tool("ue_get_change_set", {"change_set_id": "cs_fake"})
+        )
+        self.assertEqual(read_set["changeSetId"], "cs_fake")
+        self.assertEqual(read_set["receiptCount"], 0)
+
+        _, capabilities_again = asyncio.run(server.call_tool("ue_get_capabilities", {}))
+        change_sets = capabilities_again["liveEditor"]["liveWriteChangeSets"]
+        self.assertFalse(change_sets["available"])
+        self.assertEqual(change_sets["createTool"], "")
+        self.assertEqual(change_sets["getTool"], "")
+        self.assertEqual(change_sets["maxChangeSets"], 50)
+        self.assertEqual(change_sets["maxReceiptsPerChangeSet"], 100)
+        self.assertTrue(change_sets["journaled"])
+        self.assertTrue(change_sets["workRootBound"])
+        self.assertEqual(
+            change_sets["bindableTools"],
+            [
+                "ue_apply_asset_property_live",
+                "ue_undo_asset_property_live",
+                "ue_discard_asset_property_live",
+                "ue_save_authorized_asset",
+                "ue_verify_live_write",
+            ],
+        )
+        self.assertEqual(
+            capabilities_again["limits"]["liveChangeSets"],
+            50,
+        )
+        self.assertEqual(
+            capabilities_again["limits"]["liveChangeSetMaxReceipts"],
+            100,
+        )
 
     @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
     def test_workflow_diagnostics_use_stable_redacted_error_envelope(self) -> None:

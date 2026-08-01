@@ -92,6 +92,8 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_refresh_asset_index", "workflow", "planning"),
     ToolDefinition("ue_save_authorized_asset", "workflow", "destructive"),
     ToolDefinition("ue_rollback_patch", "workflow", "destructive"),
+    ToolDefinition("ue_create_change_set", "workflow", "planning"),
+    ToolDefinition("ue_get_change_set", "workflow", "read"),
 )
 
 TOOL_DEFINITIONS_BY_NAME = {definition.name: definition for definition in TOOL_REGISTRY}

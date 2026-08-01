@@ -13,6 +13,15 @@ from pathlib import Path
 from typing import Any, Callable, Literal
 
 from .agent_api import IndexQueryService
+from .change_sets import (
+    ChangeSetError,
+    MAX_CHANGE_SETS,
+    MAX_CHANGE_SET_RECEIPTS,
+    ChangeSetRecord,
+    deserialize_change_set_record,
+    serialize_change_set_record,
+    validate_change_set_id,
+)
 from .database import (
     CURRENT_SCHEMA_VERSION,
     assert_fts5_available,
@@ -650,6 +659,7 @@ class PatchWorkflowService:
         self._live_apply_by_asset: dict[str, str] = {}
         self._live_write_journal_errors: list[str] = []
         self._live_write_recovered_count = 0
+        self._change_sets: dict[str, ChangeSetRecord] = {}
         self.live_editor_service = live_editor_service
         self.active_snapshot = self.config.active_snapshot
         self._refresh_applied = False
@@ -660,6 +670,7 @@ class PatchWorkflowService:
             self.config.revision_export,
         )
         self._load_live_write_journal()
+        self._load_change_set_journal()
 
     @property
     def configured_paths(self) -> tuple[Path, ...]:
@@ -770,6 +781,9 @@ class PatchWorkflowService:
                 "recoveredRecordCount": self._live_write_recovered_count,
                 "journalErrorCount": len(self._live_write_journal_errors),
                 "supportsExactReceipt": True,
+                "changeSetCount": len(self._change_sets),
+                "maxChangeSets": MAX_CHANGE_SETS,
+                "maxReceiptsPerChangeSet": MAX_CHANGE_SET_RECEIPTS,
             },
             "indexLifecycle": {
                 "sessionStale": bool(session_stale),
@@ -950,6 +964,153 @@ class PatchWorkflowService:
             )
         return receipt, record
 
+    def _change_set_journal_root(self) -> Path:
+        return self._safe_work_path("change-sets")
+
+    def _change_set_journal_path(self, change_set_id: str) -> Path:
+        try:
+            change_set_id = validate_change_set_id(change_set_id)
+        except ChangeSetError as exc:
+            raise WorkflowError(exc.code, str(exc)) from exc
+        return self._change_set_journal_root() / f"{change_set_id}.json"
+
+    def _persist_change_set(self, record: ChangeSetRecord) -> bool:
+        try:
+            _write_json_atomic(
+                self._change_set_journal_path(record.change_set_id),
+                serialize_change_set_record(record, self.project_name),
+            )
+        except (OSError, TypeError, ValueError):
+            self._record_live_write_journal_error(record.change_set_id)
+            return False
+        if record.change_set_id in self._live_write_journal_errors:
+            self._live_write_journal_errors.remove(record.change_set_id)
+        return True
+
+    def _delete_change_set_journal(self, change_set_id: str) -> bool:
+        path = self._change_set_journal_path(change_set_id)
+        try:
+            if path.is_file():
+                path.unlink()
+        except OSError:
+            self._record_live_write_journal_error(change_set_id)
+            return False
+        if change_set_id in self._live_write_journal_errors:
+            self._live_write_journal_errors.remove(change_set_id)
+        return True
+
+    def _load_change_set_journal(self) -> None:
+        root = self._change_set_journal_root()
+        if not root.is_dir():
+            return
+        for path in sorted(root.glob("cs_*.json")):
+            try:
+                record = deserialize_change_set_record(_read_json(path), self.project_name)
+            except (WorkflowError, OSError, ValueError):
+                self._live_write_journal_errors.append(path.stem)
+                continue
+            self._change_sets[record.change_set_id] = record
+
+    def _resolve_change_set(self, change_set_id: str) -> ChangeSetRecord:
+        try:
+            change_set_id = validate_change_set_id(change_set_id)
+        except ChangeSetError as exc:
+            raise WorkflowError(exc.code, str(exc)) from exc
+        record = self._change_sets.get(change_set_id)
+        if record is None:
+            raise WorkflowError(
+                "change-set-not-found",
+                "The Change Set is not active in this MCP server session.",
+            )
+        return record
+
+    def create_change_set(self) -> dict[str, Any]:
+        with self._lock:
+            change_set_id = "cs_" + secrets.token_urlsafe(16)
+            record = ChangeSetRecord(change_set_id=change_set_id, created_at_utc=utc_now_iso(), receipts=[])
+            self._change_sets[change_set_id] = record
+            journal_persisted = self._persist_change_set(record)
+            self._prune_records()
+            return {
+                "schemaVersion": WORKFLOW_SCHEMA_VERSION,
+                "tool": "ue_create_change_set",
+                "ok": True,
+                "projectName": self.project_name,
+                "changeSetId": change_set_id,
+                "createdAtUtc": record.created_at_utc,
+                "receiptCount": 0,
+                "maxReceiptsPerChangeSet": MAX_CHANGE_SET_RECEIPTS,
+                "journalPersisted": journal_persisted,
+                "nextStep": (
+                    "Pass the changeSetId to ue_apply_asset_property_live to bind confirmed "
+                    "live writes to this Change Set."
+                ),
+            }
+
+    def get_change_set(self, change_set_id: str) -> dict[str, Any]:
+        with self._lock:
+            record = self._resolve_change_set(change_set_id)
+            receipts: list[dict[str, Any]] = []
+            active_count = 0
+            for receipt in record.receipts:
+                live_record = self._live_applies.get(receipt)
+                if live_record is None:
+                    receipts.append({"receipt": receipt, "active": False})
+                    continue
+                active_count += 1
+                receipts.append(
+                    {
+                        "receipt": receipt,
+                        "active": True,
+                        "assetPath": live_record.asset_path,
+                        "operation": live_record.operation,
+                        "planId": live_record.plan_id,
+                        "saved": live_record.saved,
+                        "verified": live_record.verified,
+                    }
+                )
+            return {
+                "schemaVersion": WORKFLOW_SCHEMA_VERSION,
+                "tool": "ue_get_change_set",
+                "ok": True,
+                "projectName": self.project_name,
+                "changeSetId": record.change_set_id,
+                "createdAtUtc": record.created_at_utc,
+                "receiptCount": len(record.receipts),
+                "activeReceiptCount": active_count,
+                "receipts": receipts,
+                "nextStep": (
+                    "Bind more live writes with ue_apply_asset_property_live, or revert members "
+                    "with ue_undo_asset_property_live / ue_discard_asset_property_live."
+                ),
+            }
+
+    def _bind_apply_receipt(self, change_set_id: str, receipt: str) -> bool:
+        record = self._resolve_change_set(change_set_id)
+        if len(record.receipts) >= MAX_CHANGE_SET_RECEIPTS:
+            raise WorkflowError(
+                "change-set-full",
+                f"A Change Set is limited to {MAX_CHANGE_SET_RECEIPTS} bound live write receipts.",
+            )
+        record.receipts.append(receipt)
+        return self._persist_change_set(record)
+
+    def _assert_change_set_member(self, change_set_id: str, receipt: str) -> None:
+        record = self._resolve_change_set(change_set_id)
+        if receipt not in record.receipts:
+            raise WorkflowError(
+                "change-set-transaction-not-member",
+                "The target live write is not bound to this Change Set.",
+                details={"liveApplyReceipt": receipt},
+            )
+
+    def _remove_change_set_receipt(self, change_set_id: str, receipt: str) -> bool:
+        record = self._resolve_change_set(change_set_id)
+        if receipt not in record.receipts:
+            return True
+        record.receipts = [candidate for candidate in record.receipts if candidate != receipt]
+        return self._persist_change_set(record)
+
     def _prune_records(self) -> None:
         for mapping in (self._plans, self._dry_runs, self._applies, self._rollback_dry_runs, self._save_authorizations):
             while len(mapping) > MAX_WORKFLOW_RECORDS:
@@ -958,6 +1119,10 @@ class PatchWorkflowService:
             receipt = next(iter(self._live_applies))
             self._live_applies.pop(receipt)
             self._delete_live_apply_journal(receipt)
+        while len(self._change_sets) > MAX_CHANGE_SETS:
+            change_set_id = next(iter(self._change_sets))
+            self._change_sets.pop(change_set_id)
+            self._delete_change_set_journal(change_set_id)
         self._rebuild_live_apply_index()
 
     def _safe_work_path(self, *parts: str) -> Path:
@@ -1748,7 +1913,7 @@ class PatchWorkflowService:
         )
         return response
 
-    def apply_asset_property_live(self, plan_id: str, confirmation: str) -> dict[str, Any]:
+    def apply_asset_property_live(self, plan_id: str, confirmation: str, change_set_id: str = "") -> dict[str, Any]:
         with self._lock:
             if not self.config.commit_enabled:
                 raise WorkflowError(
@@ -1760,6 +1925,8 @@ class PatchWorkflowService:
                     "live-editor-required",
                     "Live Editor mode is required for an in-editor asset property write.",
                 )
+            if change_set_id:
+                self._resolve_change_set(change_set_id)
             record = self._plans.get(plan_id)
             if record is None:
                 raise WorkflowError("plan-not-found", "The live write plan is not active in this MCP server session.")
@@ -1823,6 +1990,8 @@ class PatchWorkflowService:
                 raise
             changed = bool(live_result.get("changed"))
             live_apply_receipt = ""
+            change_set_bound = False
+            change_set_journal_persisted = True
             if changed:
                 live_apply_receipt = "live_" + secrets.token_urlsafe(16)
                 self._live_applies[live_apply_receipt] = LiveApplyRecord(
@@ -1842,9 +2011,12 @@ class PatchWorkflowService:
                 self._live_apply_by_asset[asset_path] = live_apply_receipt
                 journal_persisted = self._persist_live_apply(self._live_applies[live_apply_receipt])
                 self._prune_records()
+                if change_set_id:
+                    change_set_bound = True
+                    change_set_journal_persisted = self._bind_apply_receipt(change_set_id, live_apply_receipt)
             else:
                 journal_persisted = True
-            return {
+            response = {
                 "schemaVersion": WORKFLOW_SCHEMA_VERSION,
                 "tool": "ue_apply_asset_property_live",
                 "ok": True,
@@ -1874,18 +2046,25 @@ class PatchWorkflowService:
                     else "No value change was required."
                 ),
             }
+            if change_set_id:
+                response["changeSetId"] = change_set_id
+                response["changeSetBound"] = change_set_bound
+                response["changeSetJournalPersisted"] = change_set_journal_persisted
+            return response
 
     def undo_asset_property_live(
         self,
         asset_path: str,
         transaction_id: str,
         editor_session_id: str,
+        change_set_id: str = "",
     ) -> dict[str, Any]:
         return self._revert_asset_property_live(
             "undo",
             asset_path,
             transaction_id,
             editor_session_id,
+            change_set_id,
         )
 
     def discard_asset_property_live(
@@ -1893,12 +2072,14 @@ class PatchWorkflowService:
         asset_path: str,
         transaction_id: str,
         editor_session_id: str,
+        change_set_id: str = "",
     ) -> dict[str, Any]:
         return self._revert_asset_property_live(
             "discard",
             asset_path,
             transaction_id,
             editor_session_id,
+            change_set_id,
         )
 
     def _revert_asset_property_live(
@@ -1907,6 +2088,7 @@ class PatchWorkflowService:
         asset_path: str,
         transaction_id: str,
         editor_session_id: str,
+        change_set_id: str = "",
     ) -> dict[str, Any]:
         with self._lock:
             if not self.config.commit_enabled:
@@ -1934,6 +2116,18 @@ class PatchWorkflowService:
                     "live-editor-write-undo-session-required",
                     "editorSessionId must be the exact editorSessionId returned by the confirmed live write.",
                 )
+            receipt = next(
+                (
+                    candidate_receipt
+                    for candidate_receipt, candidate in self._live_applies.items()
+                    if candidate.asset_path == asset_path
+                    and candidate.transaction_id == transaction_id
+                    and candidate.editor_session_id == editor_session_id
+                ),
+                "",
+            )
+            if change_set_id:
+                self._assert_change_set_member(change_set_id, receipt)
             try:
                 live_result = self.live_editor_service.call_method(
                     f"editor.{action}AssetPropertyLive",
@@ -1947,19 +2141,12 @@ class PatchWorkflowService:
                 if hasattr(exc, "code"):
                     raise WorkflowError(str(exc.code), str(exc), details=getattr(exc, "details", {})) from exc
                 raise
-            receipt = next(
-                (
-                    candidate_receipt
-                    for candidate_receipt, candidate in self._live_applies.items()
-                    if candidate.asset_path == asset_path
-                    and candidate.transaction_id == transaction_id
-                    and candidate.editor_session_id == editor_session_id
-                ),
-                "",
-            )
+            change_set_removed = False
             if receipt:
                 self._remove_live_apply(receipt)
-            return {
+                if change_set_id:
+                    change_set_removed = self._remove_change_set_receipt(change_set_id, receipt)
+            response = {
                 "schemaVersion": WORKFLOW_SCHEMA_VERSION,
                 "tool": f"ue_{action}_asset_property_live",
                 "ok": True,
@@ -1978,6 +2165,10 @@ class PatchWorkflowService:
                     "Re-plan the write to re-apply it."
                 ),
             }
+            if change_set_id:
+                response["changeSetId"] = change_set_id
+                response["changeSetRemoved"] = change_set_removed
+            return response
 
     def _run_script(
         self,
@@ -2283,12 +2474,26 @@ class PatchWorkflowService:
         mode: Literal["Preview", "Commit"] = "Preview",
         save_receipt: str = "",
         confirmation: str = "",
+        change_set_id: str = "",
     ) -> dict[str, Any]:
         with self._lock:
             self._assert_session_current()
             asset_path = self._validate_refresh_asset_path(asset_path)
             if mode not in {"Preview", "Commit"}:
                 raise WorkflowError("authorized-save-invalid-mode", "mode must be Preview or Commit.")
+            if change_set_id:
+                change_set = self._resolve_change_set(change_set_id)
+                member_assets = {
+                    self._live_applies[receipt].asset_path
+                    for receipt in change_set.receipts
+                    if self._live_applies.get(receipt) is not None
+                }
+                if asset_path not in member_assets:
+                    raise WorkflowError(
+                        "change-set-transaction-not-member",
+                        "The target asset has no live write bound to this Change Set.",
+                        details={"changeSetId": change_set_id, "assetPath": asset_path},
+                    )
             if self.live_editor_service is None:
                 raise WorkflowError("live-editor-required", "Authorized save requires Live Editor mode for the fixed project.")
 
@@ -2347,7 +2552,7 @@ class PatchWorkflowService:
                     editor_process_id,
                 )
                 self._prune_records()
-                return {
+                preview_response = {
                     "schemaVersion": WORKFLOW_SCHEMA_VERSION,
                     "tool": "ue_save_authorized_asset",
                     "ok": True,
@@ -2364,6 +2569,9 @@ class PatchWorkflowService:
                     "commitToolsEnabled": self.config.commit_enabled,
                     "nextStep": f"To save exactly this asset, call ue_save_authorized_asset with mode=Commit and confirmation 'SAVE {receipt}'.",
                 }
+                if change_set_id:
+                    preview_response["changeSetId"] = change_set_id
+                return preview_response
 
             if not self.config.commit_enabled:
                 raise WorkflowError("commit-disabled", "Commit tools were not enabled when this MCP server started.")
@@ -2453,7 +2661,7 @@ class PatchWorkflowService:
                 live_record.saved = True
                 live_record.save_receipt = save_receipt
                 journal_persisted = self._persist_live_apply(live_record)
-            return {
+            response = {
                 "schemaVersion": WORKFLOW_SCHEMA_VERSION,
                 "tool": "ue_save_authorized_asset",
                 "ok": True,
@@ -2479,8 +2687,11 @@ class PatchWorkflowService:
                     "independent reload, Revision, and memory Task Record, then refresh the asset index."
                 ),
             }
+            if change_set_id:
+                response["changeSetId"] = change_set_id
+            return response
 
-    def verify_live_write(self, asset_path: str, live_apply_receipt: str = "") -> dict[str, Any]:
+    def verify_live_write(self, asset_path: str, live_apply_receipt: str = "", change_set_id: str = "") -> dict[str, Any]:
         with self._lock:
             if not self.config.commit_enabled:
                 raise WorkflowError(
@@ -2494,6 +2705,8 @@ class PatchWorkflowService:
                 )
             asset_path = self._validate_refresh_asset_path(asset_path)
             receipt, record = self._resolve_live_apply(asset_path, live_apply_receipt)
+            if change_set_id:
+                self._assert_change_set_member(change_set_id, receipt)
             try:
                 inspection = self.live_editor_service.call_tool("ue_inspect_asset_live", {"assetPath": asset_path})
             except Exception as exc:
@@ -2526,7 +2739,7 @@ class PatchWorkflowService:
                     undo_available=True,
                     independent_reload=False,
                 )
-                return {
+                not_saved_response = {
                     "schemaVersion": WORKFLOW_SCHEMA_VERSION,
                     "tool": "ue_verify_live_write",
                     "ok": True,
@@ -2553,6 +2766,9 @@ class PatchWorkflowService:
                         "ue_discard_asset_property_live. A successful revert closes this pending live write."
                     ),
                 }
+                if change_set_id:
+                    not_saved_response["changeSetId"] = change_set_id
+                return not_saved_response
 
             if not record.saved:
                 raise WorkflowError(
@@ -2665,6 +2881,8 @@ class PatchWorkflowService:
                     "ue_refresh_asset_index to activate the new Revision."
                 ),
             }
+            if change_set_id:
+                response["changeSetId"] = change_set_id
             self._remove_live_apply(receipt)
             return response
 

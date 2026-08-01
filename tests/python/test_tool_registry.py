@@ -80,6 +80,8 @@ EXPECTED_ALL_TOOLS = [
     "ue_refresh_asset_index",
     "ue_save_authorized_asset",
     "ue_rollback_patch",
+    "ue_create_change_set",
+    "ue_get_change_set",
 ]
 
 
@@ -91,7 +93,7 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertEqual(len(tool_names_for_mode()), 5)
         self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 27)
-        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 29)
+        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 31)
         self.assertEqual(
             tool_names_for_mode(memory_enabled=True),
             EXPECTED_ALL_TOOLS[:5] + EXPECTED_MEMORY_TOOLS,
@@ -103,7 +105,7 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
-            36,
+            38,
         )
         self.assertEqual(
             len(
@@ -113,7 +115,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-            58,
+            60,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:
@@ -485,6 +487,53 @@ class ToolRegistryTests(unittest.TestCase):
         ):
             self.assertIn(f'TEXT("{method}")', core)
             self.assertNotIn(f"TEXT(\"{method}\")", batch_manager + batch_handlers)
+
+        # Change Sets are journaled under the fixed Work Root and must never accept
+        # client-supplied paths, shell, Python, Console, SQL, or arbitrary writes.
+        change_set_module = (ROOT / "src" / "ue_agent_kit" / "change_sets.py").read_text(encoding="utf-8")
+        for forbidden in (
+            "subprocess",
+            "os.system",
+            "shell=True",
+            "sqlite3",
+            "eval(",
+            "exec(",
+            "Path(",
+            "open(",
+            "resolve(",
+        ):
+            self.assertNotIn(forbidden, change_set_module)
+        for required in (
+            "ChangeSetError",
+            "MAX_CHANGE_SETS",
+            "MAX_CHANGE_SET_RECEIPTS",
+            "MAX_CHANGE_SET_ID_LENGTH",
+            "serialize_change_set_record",
+            "deserialize_change_set_record",
+            "validate_change_set_id",
+            "change-set-invalid",
+            "register_change_set_tools",
+            "ue_create_change_set",
+            "ue_get_change_set",
+            "workflow_service.create_change_set",
+            "workflow_service.get_change_set",
+        ):
+            self.assertIn(required, change_set_module)
+        workflow_module = (ROOT / "src" / "ue_agent_kit" / "mcp_workflow_tools.py").read_text(encoding="utf-8")
+        self.assertEqual(
+            workflow_module.count("change_set_id: str = \"\""),
+            5,
+        )
+        workflow_service_module = (ROOT / "src" / "ue_agent_kit" / "agent_workflow.py").read_text(
+            encoding="utf-8"
+        )
+        for code in (
+            "change-set-not-found",
+            "change-set-full",
+            "change-set-transaction-not-member",
+        ):
+            self.assertIn(code, workflow_service_module)
+        self.assertIn("_load_change_set_journal", workflow_service_module)
 
 
 if __name__ == "__main__":
