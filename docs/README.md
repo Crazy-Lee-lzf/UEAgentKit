@@ -42,7 +42,7 @@
 
 ## 当前版本与开发分支
 
-当前已发布版本为 UE Agent Kit 0.6.0，支持 Unreal Engine 5.6。Revision-aware Project Memory 已完成；`main` 已增加首个 Live Editor Write，并同时推进 Live Write 基础层和 0.7.0 Context/Analysis。
+当前已发布版本为 UE Agent Kit 0.6.0，支持 Unreal Engine 5.6。Revision-aware Project Memory 已完成；`main` 当前为 **0.7.0-dev**，受控 Live Editor Write 基础层已经完成，后续重点是 Memory 可用性、分层知识树和 Context/Analysis。
 
 0.6.0 发布能力包括：
 
@@ -57,9 +57,9 @@
 - Data Asset Object/Class、Soft Object/Class、Struct、Array、Set 和 Map 稳定值模型。
 - Backup Manifest、独立验证和 Revision-aware rollback。
 - Offline 5、Live 23、Workflow 26、Combined 44 Tool；启用 Memory 后为 12、30、33、51；其中 12 个为高层安全写入入口。
-- `main` 新增 `ue_apply_asset_property_live`：对已打开且 Clean 的非 Blueprint 资产执行顶层标量内存修改，进入 Undo 栈并标记 Dirty，但不自动保存。
+- `main` 的 `ue_apply_asset_property_live` 当前支持 12 个 Data Asset、Material Instance 和 DataTable Operation；统一 Transaction/Evidence、精确 Undo/Discard、授权保存后独立 Verify、可恢复 Journal 和注册式资产域执行器均已完成，但仍不自动保存或开放任意 UObject。
 
-0.5.x 与 0.6.0 已完成并进入维护。当前 P0 是 Live Transaction/Undo/Discard/Authorized Save/Evidence 基础层；P1A 是 Memory Knowledge Tree、Active Work 和渐进式披露；P1B 是 0.7.0 Context Pack、值来源、执行链、影响分析和语义 Diff。
+0.5.x 与 0.6.0 已完成并进入维护，Live Editor Write 基础层也已在 0.7.0-dev 完成。当前 P1A 是 Memory Knowledge Tree、Active Work 和渐进式披露；P1B 是 0.7.0 Context Pack、值来源、执行链、影响分析和语义 Diff。
 
 只读分析路径不修改资产；Blueprint Patch、Asset Patch 与 MCP Commit 仅在明确授权后执行。
 

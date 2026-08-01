@@ -8,7 +8,7 @@ UE Agent Kit 是一套面向 Unreal Engine 的开源资产分析、索引与受�
 
 当前已发布版本为 **0.6.0**，支持 **Unreal Engine 5.6**。本版本新增 Revision-aware Project Memory：独立 SQLite/FTS5、六类可追溯记录、来源与状态机、Revision 自动失效、证据摘要、固定工程 MCP/CLI、可审计导出，以及 Workflow/rollback Task Evidence 闭环。
 
-> **发布状态**：最新正式版本仍为 0.6.0。`main` 已完成首个 Live Editor Write 纵向闭环；未启用 Memory 时为 Offline 5、Live 23、Workflow 26、Combined 44 Tool，启用固定 Project Memory 后为 12、30、33、51 Tool。当前开发同时推进 Live Write 基础层、Memory Knowledge Tree/Active Work/渐进式披露，以及 0.7.0 Context/Analysis。
+> **发布状态**：最新正式版本仍为 0.6.0。`main` 当前为 **0.7.0-dev**：已完成 12 个受控 Live Editor Write Operation、统一 Transaction/Evidence、显式 Undo/Discard、Authorized Save → Verify 闭环、可恢复 Live Apply Journal 和注册式 Operation 架构；未启用 Memory 时为 Offline 5、Live 23、Workflow 26、Combined 44 Tool，启用固定 Project Memory 后为 12、30、33、51 Tool。当前开发重点转向 Memory Knowledge Tree/Active Work/渐进式披露和 0.7.0 Context/Analysis。
 
 > **AI Generated**：本项目的代码和文档主要由 AI 生成，并通过人工审查、UE 5.6 编译、自动化测试和真实工程回归验证。
 
@@ -25,6 +25,7 @@ UE Agent Kit 是一套面向 Unreal Engine 的开源资产分析、索引与受�
 - 为成功 Commit 自动生成 Backup Manifest，并在当前 Revision 仍匹配时显式回滚和独立验证恢复结果。
 - 使用声明式 Write Fixture Plan 在安全测试目录内创建或重置测试资产，并独立验证类、Revision 与 Dirty 状态。
 - 通过本地 MCP Server，让 Agent 搜索资产/Symbol、读取单资产和查询引用，并使用 12 个高层安全写入 Tool 自动生成严格 Plan 或执行 Dry Run，不开放 Shell、任意 SQL 或 UObject。
+- 在运行中的 Editor 内，对已打开且初始 Clean 的 Data Asset、Material Instance 和 DataTable 执行 12 种受控 Live Apply；修改可精确 Undo/Discard，授权保存后可独立重载验证，MCP 重启后可从固定 Journal 恢复未完成闭环。
 - 对 Bool、整数、浮点、String、Name、Text 和两类 Enum 执行真实 Dry Run/Commit/重载矩阵，并验证未授权、过期 Revision、错误类型、越界、非法 Enum、属性不存在、Dirty Package、Sidecar 和保存失败均零写入拒绝。
 
 ## 主要能力
@@ -234,7 +235,7 @@ scripts\TestMultiOperationTransactions.cmd ^
 
 当前支持四种 Blueprint Operation、标量 `setAssetProperty`、Data Asset 专用 `setAssetReferenceProperty` 与 `setAssetStructuredProperty`、四种 Material Instance 参数 Operation，以及 DataTable 字段和 Row 操作。每次执行仍严格限制为一个资产，但可在同一原子事务中包含 1–32 个兼容 Operation；多 Operation 会统一预校验、创建一次备份、编译/保存一次，并由一个 Manifest 记录全部 Operation。属性、引用目标、Material 参数和 DataTable 字段继续使用逐目标精确 Policy 授权。`setAssetStructuredProperty` 只替换顶层 Struct、Array、Set 或 Map，使用显式 `valueType` 包络；Struct 必须包含完整字段，Set/Map 必须按 Canonical JSON 唯一排序，并返回递归结构化 Diff。当前仍只接受没有独立 Package 侧文件的单文件资产。
 
-### 6. 启动 MCP Server（0.6.0）
+### 6. 启动 MCP Server（0.6.0 发布版 / 0.7.0-dev `main`）
 
 先安装可选 MCP 依赖并确认 SQLite 索引可读：
 
@@ -245,7 +246,7 @@ scripts\TestMcpStdio.cmd
 scripts\TestMcpClients.cmd
 ```
 
-0.6.0 可以连接固定工程的受限 Live Editor Bridge，并可选择启用 Revision-aware Project Memory：
+0.6.0 可以连接固定工程的受限 Live Editor Bridge，并可选择启用 Revision-aware Project Memory；当前 `main` 的 0.7.0-dev 进一步提供完整 Live Editor Write 基础层：
 
 ```bat
 scripts\TestMcpLiveEditor.cmd ^
@@ -256,12 +257,20 @@ scripts\TestMcpLiveWrite.cmd ^
   -EngineRoot "<UE_5.6>" ^
   -ProjectPath "<TEST_PROJECT>.uproject"
 
+scripts\TestMcpLiveWriteFast.cmd ^
+  -EngineRoot "<UE_5.6>" ^
+  -ProjectPath "<TEST_PROJECT>.uproject"
+
+scripts\TestMcpLiveWriteRegression.cmd ^
+  -EngineRoot "<UE_5.6>" ^
+  -ProjectPath "<TEST_PROJECT>.uproject"
+
 scripts\TestMcpSnapshotRefresh.cmd ^
   -EngineRoot "<UE_5.6>" ^
   -ProjectPath "<TEST_PROJECT>.uproject"
 ```
 
-服务器对 MCP Client 仍只使用本地 `stdio`。默认模式为 5 个离线只读 Tool；`-EnableLiveEditor -ProjectPath <固定工程>` 增加 10 个实时只读 Tool 和 8 个受限 Daily Action，共 23 个 Live Tool；固定 Engine、Project、Policy 和 Revision Export 后的工作流为 26 个；两者组合时共 44 个 Tool。实时读取提供有界 Output Log、编译诊断、不触发加载的内存资产检查，以及普通 Blueprint Editor 的当前 Graph/Node 定位；Daily Action 提供资产打开/聚焦、Content Browser 同步、ActorGuid 聚焦、Blueprint 内存编译和官方 Data Validation，均不保存资产；工作流模式提供四源资产状态和安全单资产索引刷新：
+服务器对 MCP Client 仍只使用本地 `stdio`。默认模式为 5 个离线只读 Tool；`-EnableLiveEditor -ProjectPath <固定工程>` 增加 10 个实时只读 Tool 和 8 个受限 Daily Action，共 23 个 Live Tool；固定 Engine、Project、Policy 和 Revision Export 后的工作流为 26 个；两者组合时共 44 个 Tool。实时读取提供有界 Output Log、编译诊断、不触发加载的内存资产检查，以及普通 Blueprint Editor 的当前 Graph/Node 定位；Daily Action 提供资产打开/聚焦、Content Browser 同步、ActorGuid 聚焦、Blueprint 内存编译和官方 Data Validation，均不保存资产；工作流模式提供四源资产状态和安全单资产索引刷新。0.7.0-dev 不通过增加大量 MCP Tool 扩展写入，而是让既有 `ue_apply_asset_property_live` 按 `operation + assetPath + target + value` 进入注册式资产域执行器，并继续复用 Plan、Policy、Revision 和精确确认门禁：
 
 ```bat
 claude mcp add --transport stdio --scope project ue-agent-kit -- ^
@@ -332,7 +341,7 @@ Output\Blueprints\
 
 ## 安全说明
 
-只读导出器、SQLite 查询和 `ue-agent patch validate` 不修改 UObject 或资产文件。`ue_apply_asset_property_live` 是唯一的编辑器内存写入入口：它复用既有 Policy/Revision Plan，只修改已打开且干净的非 Blueprint 资产，进入 Undo 栈并标记 Dirty，但不自动保存；持久化写入仍由授权保存或独立 `BlueprintPatch`/`AssetPatch` Commandlet 完成。
+只读导出器、SQLite 查询和 `ue-agent patch validate` 不修改 UObject 或资产文件。`ue_apply_asset_property_live` 是唯一的编辑器内存写入入口：它复用既有 Policy/Revision Plan，只修改已打开且初始 Clean 的非 Blueprint、非地图资产，通过注册表限定当前 12 个 Operation，进入 Undo 栈并标记 Dirty，但不自动保存。每次实际修改写入可恢复 Journal，可用精确 Transaction 执行 Undo/Discard；持久化仍必须单独经过授权保存和独立 Verify，或使用隔离的 `BlueprintPatch`/`AssetPatch` Commandlet。
 
 - 默认使用 `DryRun`，磁盘 Revision 必须保持不变。
 - `Commit` 同时要求命令行显式选择和 Policy 的 `commitEnabled=true`。

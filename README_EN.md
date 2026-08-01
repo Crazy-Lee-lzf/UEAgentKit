@@ -8,7 +8,7 @@ UE Agent Kit is an open-source Unreal Engine asset analysis, indexing, and polic
 
 The latest published release is **0.6.0** and targets **Unreal Engine 5.6**. This release adds Revision-aware Project Memory with independent SQLite/FTS5 storage, six traceable record types, provenance and status transitions, Revision invalidation, evidence digests, fixed-project MCP/CLI access, auditable export, and verified Workflow/rollback Task Evidence.
 
-> **Release status**: 0.6.0 remains the latest published release. `main` now contains the first Live Editor Write vertical slice; without Memory the modes are 5/23/26/44 tools, and fixed Project Memory changes them to 12/30/33/51. Active development covers the Live Write foundation, layered Memory/Active Work/progressive disclosure, and 0.7.0 Context/Analysis.
+> **Release status**: 0.6.0 remains the latest published release. `main` is now the **0.7.0-dev** line with 12 controlled Live Editor Write Operations, shared Transaction/Evidence handling, explicit Undo/Discard, an Authorized Save → Verify closeout, a recoverable Live Apply journal, and a registry-driven Operation architecture. Without Memory the modes are 5/23/26/44 tools, and fixed Project Memory changes them to 12/30/33/51. Active development now focuses on the Memory Knowledge Tree, Active Work, progressive disclosure, and 0.7.0 Context/Analysis.
 
 > **AI Generated**: Most code and documentation in this project are AI-generated and reviewed through human inspection, UE 5.6 compilation, automated tests, and real-project regression validation.
 
@@ -25,6 +25,7 @@ The latest published release is **0.6.0** and targets **Unreal Engine 5.6**. Thi
 - Generate a backup manifest after every successful commit, then explicitly roll back and independently verify the restored revision when the current package still matches.
 - Create or reset isolated test assets from a declarative Write Fixture Plan, then independently verify class, revision, and dirty state.
 - Use the local MCP server to search assets/symbols, inspect assets and references, and create strict Plans or Dry Runs through 12 high-level safe-change tools without exposing shell, arbitrary SQL, or UObject access.
+- Apply 12 controlled live changes to already open, initially clean Data Assets, Material Instances, and DataTables; revert them through exact Undo/Discard, independently verify authorized saves, and recover unfinished closeouts from the fixed journal after an MCP restart.
 - Exercise Bool, integer, floating-point, String, Name, Text, and two Enum representations through real dry-run/commit/reload matrices, including zero-write rejections for authorization, stale revisions, wrong types, range errors, invalid enums, missing properties, dirty packages, sidecars, and save failures.
 
 ## Main capabilities
@@ -234,7 +235,7 @@ The regression applies two operations to a Data Asset and a Blueprint. Dry Run u
 
 The executor supports four Blueprint operations, scalar `setAssetProperty`, Data Asset-specific `setAssetReferenceProperty` and `setAssetStructuredProperty`, four Material Instance parameter operations, and DataTable field/row operations. One execution remains limited to one asset but may contain 1–32 compatible operations in one atomic transaction. Multi-operation execution pre-validates every target, creates one backup, compiles/saves once, and records all operations in one manifest. Exact Policy authorization remains per target. `setAssetStructuredProperty` replaces one top-level Struct, Array, Set, or Map through an explicit `valueType` envelope. Struct values must contain every field, while Set and Map values must be uniquely ordered by Canonical JSON; reports include a recursive structured diff. Only single-file packages without external package sidecars are accepted.
 
-### 6. Run the MCP server (0.6.0)
+### 6. Run the MCP server (0.6.0 release / 0.7.0-dev `main`)
 
 Install the optional MCP dependency and validate the SQLite index:
 
@@ -245,7 +246,7 @@ scripts\TestMcpStdio.cmd
 scripts\TestMcpClients.cmd
 ```
 
-Version 0.6.0 can connect to a restricted fixed-project Live Editor Bridge and optionally enable Revision-aware Project Memory:
+Version 0.6.0 can connect to a restricted fixed-project Live Editor Bridge and optionally enable Revision-aware Project Memory. The current 0.7.0-dev `main` line also provides the complete Live Editor Write foundation:
 
 ```bat
 scripts\TestMcpLiveEditor.cmd ^
@@ -256,12 +257,20 @@ scripts\TestMcpLiveWrite.cmd ^
   -EngineRoot "<UE_5.6>" ^
   -ProjectPath "<TEST_PROJECT>.uproject"
 
+scripts\TestMcpLiveWriteFast.cmd ^
+  -EngineRoot "<UE_5.6>" ^
+  -ProjectPath "<TEST_PROJECT>.uproject"
+
+scripts\TestMcpLiveWriteRegression.cmd ^
+  -EngineRoot "<UE_5.6>" ^
+  -ProjectPath "<TEST_PROJECT>.uproject"
+
 scripts\TestMcpSnapshotRefresh.cmd ^
   -EngineRoot "<UE_5.6>" ^
   -ProjectPath "<TEST_PROJECT>.uproject"
 ```
 
-The MCP Client still uses local `stdio` only. Default mode exposes 5 offline read-only tools; `-EnableLiveEditor -ProjectPath <fixed project>` adds 10 live read tools plus 8 bounded Daily Actions for a total of 23; the fixed-project workflow exposes 26; combining both exposes 44. Live reads include bounded Output Log queries, compile diagnostics, non-loading live asset inspection, and focused Graph/Node selection for ordinary Blueprint Editors. Daily Actions open or focus assets, sync the Content Browser, focus an ActorGuid, compile a Blueprint in memory, and run official Data Validation without saving packages. Workflow mode adds four-source asset state and safe single-asset index refresh:
+The MCP Client still uses local `stdio` only. Default mode exposes 5 offline read-only tools; `-EnableLiveEditor -ProjectPath <fixed project>` adds 10 live read tools plus 8 bounded Daily Actions for a total of 23; the fixed-project workflow exposes 26; combining both exposes 44. Live reads include bounded Output Log queries, compile diagnostics, non-loading live asset inspection, and focused Graph/Node selection for ordinary Blueprint Editors. Daily Actions open or focus assets, sync the Content Browser, focus an ActorGuid, compile a Blueprint in memory, and run official Data Validation without saving packages. Workflow mode adds four-source asset state and safe single-asset index refresh. Rather than adding hundreds of MCP tools, 0.7.0-dev routes the existing `ue_apply_asset_property_live` entry through registry-driven domain executors using `operation + assetPath + target + value`, while retaining Plan, Policy, Revision, and exact-confirmation gates:
 
 ```bat
 claude mcp add --transport stdio --scope project ue-agent-kit -- ^
@@ -332,7 +341,7 @@ See [`docs/README.md`](docs/README.md) for the documentation index.
 
 ## Safety
 
-Read-only exporters, SQLite queries, and `ue-agent patch validate` never modify UObjects or asset files. `ue_apply_asset_property_live` is the single in-editor memory-write entry point: it reuses an existing Policy/Revision Plan, changes only an already open and clean non-Blueprint asset, records Undo and marks the package Dirty, but never saves automatically. Persistent mutation still uses authorized save or the isolated `BlueprintPatch`/`AssetPatch` commandlet path.
+Read-only exporters, SQLite queries, and `ue-agent patch validate` never modify UObjects or asset files. `ue_apply_asset_property_live` is the single in-editor memory-write entry point: it reuses an existing Policy/Revision Plan, changes only an already open and initially clean non-Blueprint, non-map asset, limits execution to the 12 currently registered Operations, records Undo, and marks the package Dirty without saving automatically. Every actual change is journaled and can be reverted by exact Transaction Undo/Discard; persistence still requires a separate authorized save followed by independent verification, or the isolated `BlueprintPatch`/`AssetPatch` commandlet path.
 
 - `DryRun` is the default and must preserve the disk revision.
 - `Commit` requires both an explicit command mode and `commitEnabled=true` in policy.

@@ -1,8 +1,8 @@
 # UE Agent Kit 路线图
 
-更新时间：2026-07-31
+更新时间：2026-08-01
 
-当前已发布版本为 **0.6.0**，支持 Unreal Engine 5.6。Revision-aware Project Memory 已完成并进入稳定维护；`main` 已完成首个 Live Editor Write 纵向闭环，当前开发同时推进 Live Write 基础层与 0.7.0 Context/Analysis。
+当前已发布版本为 **0.6.0**，支持 Unreal Engine 5.6。Revision-aware Project Memory 已完成并进入稳定维护；`main` 当前为 **0.7.0-dev**，已完成受控 Live Editor Write 基础层，开发重点转向 Memory 可用性、分层知识树与 Context/Analysis。
 
 ## 总体方向
 
@@ -22,7 +22,7 @@ Combined           44 Tool（Memory 51）
 - 项目级资产与 Blueprint 只读导出、Canonical JSON、BPCTX、Revision、Symbol/Reference、SQLite/FTS5。
 - MCP 查询、稳定分页、Token Budget、固定项目安全配置、错误模型和四源资产状态。
 - 受限 localhost Editor Bridge、日志、编译诊断、资产检查、Graph/Node 定位、Daily Actions、Automation Test 和授权单资产保存。
-- 首个 Live Editor Write：Policy/Revision Plan 后修改已打开 Clean 非 Blueprint 资产的顶层标量属性，记录 Undo、标记 Dirty 且不自动保存。
+- Live Editor Write 基础层：当前注册 12 个 Data Asset、Material Instance 与 DataTable Operation；统一 Transaction/Evidence、显式 Undo/Discard、Authorized Save → Verify、可恢复 Journal、Fast/Full 真实回归和注册式资产域执行器均已完成。
 - Blueprint、Non-Blueprint 标量、Material Instance、DataTable 和 Data Asset 的受控写入。
 - Policy、Revision、Dry Run、显式 Commit、Backup Manifest、独立重载验证和 rollback。
 - DataTable 单 Row 多字段、Row 新增/删除/重命名和 Searchable Name 引用影响门禁。
@@ -48,9 +48,9 @@ Combined           44 Tool（Memory 51）
 - 冲突结论并存，不静默覆盖。
 - Task Record 可关联 Patch、Backup Manifest、验证报告和最终结论。
 
-## 0.6.x 后续开发快照：Live Editor Write
+## 0.7.0-dev：Live Editor Write 基础层（已完成）
 
-首个纵向闭环已经完成，但当前只支持一个已打开、Clean、非 Blueprint 资产的顶层标量属性。下一步不是立即开放任意 UObject，而是先完成统一 Live Transaction/Evidence、显式 Undo/Discard、Reference/Structured Property、Material Instance、DataTable，以及 Live Apply → Authorized Save → Verify → Memory Task 闭环。
+当前 `main` 已完成 12 个受控 Operation、通用 `operation + assetPath + target + value` 请求、Property/Material/DataTable 资产域模块、统一 Transaction/Evidence、精确 Undo/Discard、Authorized Save → Independent Verify、Memory Evidence 和可恢复 Live Apply Journal。新增 Operation 仍必须注册明确 Target、Policy、Snapshot、Undo、失败恢复与真实 UE 回归；注册本身不授予写权限，也不会开放任意 UObject Method、脚本或自动保存。
 
 ## 0.7.0 前置：Memory 可用性与分层知识树
 
