@@ -103,6 +103,13 @@ class LiveEditorBridgeService:
         method = LIVE_EDITOR_METHODS.get(tool_name)
         if method is None:
             raise ValueError(f"Unsupported Live Editor Tool: {tool_name}")
+        if tool_name == "ue_get_editor_context":
+            descriptor = self._read_descriptor()
+            if "editor.getEditorContext" not in descriptor["capabilities"]:
+                raise LiveEditorError(
+                    "live-editor-capability-unavailable",
+                    "The registered Editor Bridge does not expose the editor context capability.",
+                )
         normalized_params = self._normalize_tool_params(tool_name, params or {})
         response_timeout = None
         if tool_name == "ue_run_automation_test":
@@ -224,6 +231,13 @@ class LiveEditorBridgeService:
                 "maxAssets": LiveEditorBridgeService._bounded_integer(params.get("maxAssets", 100), "maxAssets", 1, 500),
                 "maxIssues": LiveEditorBridgeService._bounded_integer(params.get("maxIssues", 100), "maxIssues", 1, 200),
             }
+        if tool_name == "ue_get_editor_context":
+            if params:
+                raise LiveEditorError(
+                    "live-editor-invalid-parameters",
+                    "ue_get_editor_context does not accept parameters.",
+                )
+            return {}
         if params:
             raise LiveEditorError(
                 "live-editor-invalid-parameters",

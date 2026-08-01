@@ -110,6 +110,81 @@ class _BridgeHandler(socketserver.StreamRequestHandler):
                 "assetRegistry": {"found": True},
                 "memory": {"loaded": False, "loadedByBridge": False, "state": "not-loaded"},
             },
+            "editor.getEditorContext": getattr(
+                self.server,
+                "context_result",
+                {
+                    "source": "live-editor-memory",
+                    "state": "available",
+                    "editor": {
+                        "state": "available",
+                        "pluginVersion": self.server.version,
+                        "projectName": self.server.project_name,
+                        "sessionId": "session-test",
+                        "pieState": "stopped",
+                        "dirtyPackageCount": 1,
+                    },
+                    "world": {
+                        "available": True,
+                        "worldPath": "/Game/Maps/Test.Test",
+                        "worldType": "Editor",
+                        "currentLevelPath": "/Game/Maps/Test.Test:PersistentLevel",
+                        "packageDirty": True,
+                        "worldPartitioned": False,
+                    },
+                    "selection": {
+                        "count": 1,
+                        "truncated": False,
+                        "items": [
+                            {
+                                "kind": "Actor",
+                                "name": "TestActor",
+                                "objectPath": "/Game/Maps/Test.Test:PersistentLevel.TestActor",
+                            }
+                        ],
+                    },
+                    "openAssets": {"count": 0, "truncated": False, "items": []},
+                    "dirtyPackages": {
+                        "count": 1,
+                        "truncated": False,
+                        "items": [{"packageName": "/Game/Maps/Test", "assetPaths": ["/Game/Maps/Test.Test"]}],
+                    },
+                    "blueprintGraphSelection": {
+                        "available": False,
+                        "reasonCode": "no-ordinary-blueprint-editor",
+                    },
+                    "compileErrors": {
+                        "diagnosticSource": "captured-output-log",
+                        "diagnosticCount": 0,
+                        "diagnosticsTruncated": False,
+                        "nextSequence": 8,
+                        "loadedBlueprintCount": 1,
+                    },
+                    "outputLogCursor": {
+                        "available": True,
+                        "oldestSequence": 1,
+                        "newestSequence": 7,
+                        "nextSequence": 8,
+                        "droppedCount": 0,
+                        "truncated": False,
+                    },
+                    "durationMs": 3,
+                    "stageDurationsMs": {
+                        "editor": 1,
+                        "world": 0,
+                        "selection": 0,
+                        "openAssets": 0,
+                        "dirtyPackages": 0,
+                        "blueprintGraphSelection": 0,
+                        "compileErrors": 1,
+                        "outputLogCursor": 1,
+                    },
+                    "nextActions": [
+                        {"tool": "ue_get_dirty_assets", "reason": "dirty-packages-present"},
+                        {"tool": "ue_get_output_log", "reason": "incremental-log-available"},
+                    ],
+                },
+            ),
             "editor.openAsset": {
                 "action": "open-asset",
                 "assetPath": params.get("assetPath", ""),
@@ -245,6 +320,8 @@ class EditorBridgeTests(unittest.TestCase):
             "editor.getOutputLog",
             "editor.getCompileErrors",
             "editor.inspectAssetLive",
+            "editor.getBlueprintGraphSelection",
+            "editor.getEditorContext",
             "editor.openAsset",
             "editor.focusAsset",
             "editor.syncContentBrowser",
@@ -424,6 +501,94 @@ class EditorBridgeTests(unittest.TestCase):
                 with self.assertRaises(LiveEditorError) as context:
                     self.service.call_tool(tool_name, params)
                 self.assertEqual(context.exception.code, "live-editor-invalid-parameters")
+
+    def test_editor_context_aggregates_bounded_sections(self) -> None:
+        self._write_descriptor()
+        context = self.service.call_tool("ue_get_editor_context")
+        self.assertTrue(context["ok"])
+        self.assertTrue(context["readOnly"])
+        self.assertEqual(context["source"], "live-editor-memory")
+        result = context["result"]
+        for section in (
+            "source",
+            "editor",
+            "world",
+            "selection",
+            "openAssets",
+            "dirtyPackages",
+            "blueprintGraphSelection",
+            "compileErrors",
+            "outputLogCursor",
+            "durationMs",
+            "stageDurationsMs",
+            "nextActions",
+        ):
+            self.assertIn(section, result)
+        self.assertEqual(result["state"], "available")
+        self.assertEqual(result["editor"]["sessionId"], "session-test")
+        self.assertTrue(result["world"]["available"])
+        self.assertIsInstance(result["durationMs"], (int, float))
+        self.assertIn("editor", result["stageDurationsMs"])
+        self.assertIn("outputLogCursor", result["stageDurationsMs"])
+        self.assertEqual(result["outputLogCursor"]["newestSequence"], 7)
+        self.assertEqual(result["nextActions"][0]["reason"], "dirty-packages-present")
+        request = self.server.requests[-1]  # type: ignore[attr-defined]
+        self.assertEqual(request["method"], "editor.getEditorContext")
+        self.assertEqual(request["params"], {})
+
+    def test_editor_context_rejects_unknown_parameters(self) -> None:
+        self._write_descriptor()
+        invalid_cases = (
+            {"section": "selection"},
+            {"limit": 10},
+            {"assetPath": "/Game/Test/BP_Test.BP_Test"},
+        )
+        for params in invalid_cases:
+            with self.subTest(params=params):
+                with self.assertRaises(LiveEditorError) as context:
+                    self.service.call_tool("ue_get_editor_context", params)
+                self.assertEqual(context.exception.code, "live-editor-invalid-parameters")
+
+    def test_editor_context_rejects_missing_capability(self) -> None:
+        self._write_descriptor(
+            capabilities=[capability for capability in self.capabilities if capability != "editor.getEditorContext"]
+        )
+        with self.assertRaises(LiveEditorError) as context:
+            self.service.call_tool("ue_get_editor_context")
+        self.assertEqual(context.exception.code, "live-editor-capability-unavailable")
+
+    def test_editor_context_reports_truncated_section(self) -> None:
+        self._write_descriptor()
+        self.server.context_result = {  # type: ignore[attr-defined]
+            "source": "live-editor-memory",
+            "state": "available",
+            "editor": {"state": "available", "sessionId": "session-test", "pieState": "stopped", "dirtyPackageCount": 1},
+            "world": {"available": True},
+            "selection": {
+                "count": 60,
+                "truncated": True,
+                "items": [
+                    {
+                        "kind": "Actor",
+                        "name": f"Actor{index}",
+                        "objectPath": f"/Game/Maps/Test.Test:PersistentLevel.Actor{index}",
+                    }
+                    for index in range(50)
+                ],
+            },
+            "openAssets": {"count": 0, "truncated": False, "items": []},
+            "dirtyPackages": {"count": 0, "truncated": False, "items": []},
+            "blueprintGraphSelection": {"available": False, "reasonCode": "no-ordinary-blueprint-editor"},
+            "compileErrors": {"diagnosticCount": 0, "diagnosticsTruncated": False, "nextSequence": 8},
+            "outputLogCursor": {"available": True, "oldestSequence": 1, "newestSequence": 7, "nextSequence": 8, "droppedCount": 0},
+            "durationMs": 4,
+            "stageDurationsMs": {"editor": 1, "selection": 2, "outputLogCursor": 1},
+            "nextActions": [{"tool": "ue_get_selection", "reason": "selection-truncated"}],
+        }
+        result = self.service.call_tool("ue_get_editor_context")["result"]
+        self.assertTrue(result["selection"]["truncated"])
+        self.assertEqual(len(result["selection"]["items"]), 50)
+        self.assertEqual(result["nextActions"][0]["reason"], "selection-truncated")
 
     def test_missing_descriptor_degrades_without_exposing_path(self) -> None:
         status = self.service.status()

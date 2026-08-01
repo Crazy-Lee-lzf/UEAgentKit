@@ -53,6 +53,7 @@ namespace UEAgentKitEditorBridgePrivate
 		TEXT("editor.getCompileErrors"),
 		TEXT("editor.inspectAssetLive"),
 		TEXT("editor.getBlueprintGraphSelection"),
+		TEXT("editor.getEditorContext"),
 		TEXT("editor.openAsset"),
 		TEXT("editor.focusAsset"),
 		TEXT("editor.syncContentBrowser"),
@@ -801,6 +802,10 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 	else if (Method == TEXT("editor.getBlueprintGraphSelection"))
 	{
 		SendResult(Client.Socket, RequestId, BuildBlueprintGraphSelectionResult());
+	}
+	else if (Method == TEXT("editor.getEditorContext"))
+	{
+		SendResult(Client.Socket, RequestId, BuildEditorContextResult());
 	}
 	else if (Method == TEXT("editor.openAsset")
 		|| Method == TEXT("editor.focusAsset")

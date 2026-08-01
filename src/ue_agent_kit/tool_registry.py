@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-ToolGroup = Literal["query", "memory", "live-read", "live-action", "workflow"]
+ToolGroup = Literal["query", "memory", "live-read", "live-action", "realtime", "workflow"]
 AnnotationKind = Literal["read", "planning", "destructive"]
 
 
@@ -64,6 +64,7 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_validate_asset", "live-action", "planning", "editor.validateAsset"),
     ToolDefinition("ue_validate_folder", "live-action", "planning", "editor.validateFolder"),
     ToolDefinition("ue_run_automation_test", "live-action", "planning", "editor.runAutomationTest"),
+    ToolDefinition("ue_get_editor_context", "realtime", "read", "editor.getEditorContext"),
     ToolDefinition("ue_set_blueprint_default", "workflow", "planning", high_level_change=True),
     ToolDefinition("ue_set_component_property", "workflow", "planning", high_level_change=True),
     ToolDefinition("ue_set_pin_default", "workflow", "planning", high_level_change=True),
@@ -94,14 +95,14 @@ TOOL_DEFINITIONS_BY_NAME = {definition.name: definition for definition in TOOL_R
 QUERY_TOOL_NAMES = [definition.name for definition in TOOL_REGISTRY if definition.group == "query"]
 MEMORY_TOOL_NAMES = [definition.name for definition in TOOL_REGISTRY if definition.group == "memory"]
 LIVE_EDITOR_TOOL_NAMES = [
-    definition.name for definition in TOOL_REGISTRY if definition.group in {"live-read", "live-action"}
+    definition.name for definition in TOOL_REGISTRY if definition.group in {"live-read", "live-action", "realtime"}
 ]
 WORKFLOW_TOOL_NAMES = [definition.name for definition in TOOL_REGISTRY if definition.group == "workflow"]
 HIGH_LEVEL_WRITE_TOOL_NAMES = [definition.name for definition in TOOL_REGISTRY if definition.high_level_change]
 LIVE_EDITOR_METHODS = {
     definition.name: definition.live_method
     for definition in TOOL_REGISTRY
-    if definition.group in {"live-read", "live-action"}
+    if definition.group in {"live-read", "live-action", "realtime"}
 }
 
 
@@ -115,7 +116,7 @@ def tool_definitions_for_mode(
     if memory_enabled:
         enabled_groups.add("memory")
     if live_editor_enabled:
-        enabled_groups.update({"live-read", "live-action"})
+        enabled_groups.update({"live-read", "live-action", "realtime"})
     if workflow_enabled:
         enabled_groups.add("workflow")
     return [definition for definition in TOOL_REGISTRY if definition.group in enabled_groups]

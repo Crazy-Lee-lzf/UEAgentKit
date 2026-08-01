@@ -33,6 +33,7 @@ from .mcp_live_action_tools import register_live_action_tools
 from .mcp_live_tools import register_live_read_tools
 from .mcp_memory_tools import register_memory_tools
 from .mcp_query_tools import register_query_tools
+from .mcp_realtime_tools import register_realtime_tools
 from .mcp_workflow_tools import register_workflow_tools
 from .memory_service import ProjectMemoryService, ProjectMemoryServiceError
 from .patches import get_operation_registry
@@ -249,6 +250,16 @@ def _capabilities_response(
                 "controlRigEditorSupported": False,
                 "editingSupported": False,
                 "maxSelectedNodes": 100,
+            },
+            "editorContext": {
+                "available": live_editor_enabled,
+                "tool": "ue_get_editor_context" if live_editor_enabled else "",
+                "readOnly": True,
+                "singleRequestAggregation": True,
+                "truncatedSectionsReported": True,
+                "stageTimingsReported": True,
+                "durationMsReported": True,
+                "suggestedNextActions": True,
             },
         },
         "projectMemory": {
@@ -691,6 +702,12 @@ def create_mcp_server(
             server=server,
             live_editor_service=live_editor_service,
             tool_annotations_type=ToolAnnotations,
+            error_response=_error_response,
+        )
+        register_realtime_tools(
+            server=server,
+            live_editor_service=live_editor_service,
+            read_annotations=read_annotations,
             error_response=_error_response,
         )
     if workflow_service is not None:

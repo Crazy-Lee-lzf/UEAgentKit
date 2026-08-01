@@ -52,6 +52,7 @@ EXPECTED_ALL_TOOLS = [
     "ue_validate_asset",
     "ue_validate_folder",
     "ue_run_automation_test",
+    "ue_get_editor_context",
     "ue_set_blueprint_default",
     "ue_set_component_property",
     "ue_set_pin_default",
@@ -86,7 +87,7 @@ class ToolRegistryTests(unittest.TestCase):
             EXPECTED_ALL_TOOLS,
         )
         self.assertEqual(len(tool_names_for_mode()), 5)
-        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 23)
+        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 24)
         self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 29)
         self.assertEqual(
             tool_names_for_mode(memory_enabled=True),
@@ -95,7 +96,7 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 12)
         self.assertEqual(
             len(tool_names_for_mode(live_editor_enabled=True, memory_enabled=True)),
-            30,
+            31,
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
@@ -109,7 +110,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-            54,
+            55,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:
@@ -120,6 +121,7 @@ class ToolRegistryTests(unittest.TestCase):
             "mcp_memory_tools.py",
             "mcp_live_tools.py",
             "mcp_live_action_tools.py",
+            "mcp_realtime_tools.py",
             "mcp_workflow_tools.py",
         ):
             self.assertIn("@server.tool", (mcp_root / filename).read_text(encoding="utf-8"), filename)
@@ -131,6 +133,7 @@ class ToolRegistryTests(unittest.TestCase):
             "BuildOutputLogResult": "EditorBridgeDiagnosticHandlers.cpp",
             "BuildInspectAssetLiveResult": "EditorBridgeAssetHandlers.cpp",
             "BuildBlueprintGraphSelectionResult": "EditorBridgeGraphHandlers.cpp",
+            "BuildEditorContextResult": "EditorBridgeContextHandlers.cpp",
             "TryOpenAssetResult": "EditorBridgeNavigationHandlers.cpp",
             "TryCompileBlueprintResult": "EditorBridgeValidationHandlers.cpp",
             "TryStartAutomationTest": "EditorBridgeAutomationHandlers.cpp",
@@ -152,7 +155,29 @@ class ToolRegistryTests(unittest.TestCase):
         names = [definition.name for definition in TOOL_REGISTRY]
         self.assertEqual(len(names), len(set(names)))
         self.assertEqual(set(names), set(TOOL_DEFINITIONS_BY_NAME))
-        self.assertEqual(list(LIVE_EDITOR_METHODS), EXPECTED_ALL_TOOLS[5:23])
+        self.assertEqual(list(LIVE_EDITOR_METHODS), EXPECTED_ALL_TOOLS[5:24])
+        self.assertEqual(
+            TOOL_DEFINITIONS_BY_NAME["ue_get_editor_context"].live_method,
+            "editor.getEditorContext",
+        )
+        self.assertTrue(TOOL_DEFINITIONS_BY_NAME["ue_get_editor_context"].read_only)
+        self.assertEqual(
+            TOOL_DEFINITIONS_BY_NAME["ue_get_editor_context"].group,
+            "realtime",
+        )
+        self.assertNotIn("ue_get_editor_context", tool_names_for_mode(workflow_enabled=True))
+        self.assertIn(
+            "ue_get_editor_context",
+            tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True),
+        )
+        self.assertEqual(
+            EXPECTED_ALL_TOOLS[5:23],
+            [
+                definition.name
+                for definition in TOOL_REGISTRY
+                if definition.group in {"live-read", "live-action"}
+            ],
+        )
         descriptors = tool_descriptors_for_mode(
             live_editor_enabled=True,
             workflow_enabled=True,
@@ -340,6 +365,41 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertIn('"DataValidation"', build_rules)
         self.assertIn('"Name": "DataValidation"', plugin_descriptor)
+
+        # The aggregated Editor Context handler must remain read-only: it may only
+        # compose existing builders and bounded log queries, never load, save,
+        # modify selection, execute commands, or expose arbitrary paths.
+        context_handler = (private_root / "EditorBridgeContextHandlers.cpp").read_text(
+            encoding="utf-8"
+        )
+        for forbidden in (
+            "LoadObject",
+            "StaticLoadObject",
+            "UPackage::SavePackage",
+            "SavePackage",
+            "ConsoleCommand",
+            "ProcessEvent",
+            "CallFunctionByName",
+            "SetSelected",
+            "ClearSelection",
+            "MarkPackageDirty",
+            "FScopedTransaction",
+        ):
+            self.assertNotIn(forbidden, context_handler)
+        for required in (
+            "BuildStatusResult",
+            "BuildCurrentLevelResult",
+            "BuildSelectionResult",
+            "BuildOpenAssetsResult",
+            "BuildDirtyAssetsResult",
+            "BuildBlueprintGraphSelectionResult",
+            "BuildCompileErrorsResult",
+            "BuildOutputLogResult",
+            "durationMs",
+            "stageDurationsMs",
+            "nextActions",
+        ):
+            self.assertIn(required, context_handler)
 
 
 if __name__ == "__main__":

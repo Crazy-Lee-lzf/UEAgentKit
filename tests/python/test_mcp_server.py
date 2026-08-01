@@ -354,6 +354,29 @@ class FakeLiveEditorService:
                     }
                 ],
             },
+            "ue_get_editor_context": {
+                "source": "live-editor-memory",
+                "state": "available",
+                "editor": {
+                    "state": "available",
+                    "sessionId": "session-test",
+                    "pieState": "stopped",
+                    "dirtyPackageCount": 1,
+                },
+                "world": {"available": True, "currentLevelPath": "/Game/Maps/Test.Test:PersistentLevel"},
+                "selection": {"count": 1, "truncated": False, "items": [{"kind": "Actor"}]},
+                "openAssets": {"count": 0, "truncated": False, "items": []},
+                "dirtyPackages": {"count": 1, "truncated": False, "items": [{"packageName": "/Game/Test"}]},
+                "blueprintGraphSelection": {"available": True, "blueprintPath": "/Game/Test/BP_Test.BP_Test"},
+                "compileErrors": {"diagnosticSource": "captured-output-log", "diagnosticCount": 0},
+                "outputLogCursor": {"available": True, "oldestSequence": 1, "newestSequence": 11, "nextSequence": 12},
+                "durationMs": 3,
+                "stageDurationsMs": {"editor": 1, "world": 0, "selection": 0, "openAssets": 0, "dirtyPackages": 1, "compileErrors": 1, "outputLogCursor": 0},
+                "nextActions": [
+                    {"tool": "ue_get_dirty_assets", "reason": "dirty-packages-present"},
+                    {"tool": "ue_get_output_log", "reason": "incremental-log-available"},
+                ],
+            },
             "ue_open_asset": {"action": "open-asset", "openedNewEditor": True, "saved": False},
             "ue_focus_asset": {"action": "focus-asset", "focused": True, "saved": False},
             "ue_sync_content_browser": {
@@ -998,6 +1021,15 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(graph_contract["maxSelectedNodes"], 100)
         self.assertFalse(graph_contract["materialEditorSupported"])
         self.assertFalse(graph_contract["editingSupported"])
+        context_contract = capabilities["liveEditor"]["editorContext"]
+        self.assertTrue(context_contract["available"])
+        self.assertEqual(context_contract["tool"], "ue_get_editor_context")
+        self.assertTrue(context_contract["readOnly"])
+        self.assertTrue(context_contract["singleRequestAggregation"])
+        self.assertTrue(context_contract["truncatedSectionsReported"])
+        self.assertTrue(context_contract["stageTimingsReported"])
+        self.assertTrue(context_contract["durationMsReported"])
+        self.assertTrue(context_contract["suggestedNextActions"])
         action_contract = capabilities["liveEditor"]["editorActions"]
         self.assertTrue(action_contract["available"])
         self.assertEqual(action_contract["tools"], expected_names[15:23])
@@ -1024,6 +1056,14 @@ class McpServerTests(unittest.TestCase):
         _, editor_status = asyncio.run(server.call_tool("ue_editor_status", {}))
         self.assertTrue(editor_status["ok"])
         self.assertEqual(editor_status["result"]["state"], "available")
+        _, editor_context = asyncio.run(server.call_tool("ue_get_editor_context", {}))
+        self.assertTrue(editor_context["ok"])
+        self.assertTrue(editor_context["readOnly"])
+        self.assertEqual(editor_context["source"], "live-editor-memory")
+        self.assertIn("stageDurationsMs", editor_context["result"])
+        self.assertIn("nextActions", editor_context["result"])
+        self.assertEqual(live_service.calls[-1][0], "ue_get_editor_context")
+        self.assertEqual(live_service.calls[-1][1], {})
         _, selection = asyncio.run(server.call_tool("ue_get_selection", {}))
         self.assertEqual(selection["source"], "live-editor-memory")
         self.assertEqual(selection["result"]["items"][0]["kind"], "Actor")
@@ -1249,7 +1289,7 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         expected_names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 47)
+        self.assertEqual(len(tools), 48)
         for tool in tools:
             definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
             self.assertEqual(bool(tool.annotations.readOnlyHint), definition.read_only, tool.name)
