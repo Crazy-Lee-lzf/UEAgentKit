@@ -221,7 +221,7 @@ Bridge 注册为 `FOutputDevice`，保留最多 4096 条当前会话日志，并
 - 在 Game Thread 中使用 `FScopedTransaction` 与 `UObject::Modify()`，因此成功修改进入 Editor Undo 栈；修改前创建 Property Value Snapshot，任何失败都会恢复原值、恢复原 Dirty 状态并 `Transaction.Cancel()`，不留下部分修改、Dirty 状态或有效 Undo Transaction；No-op 不制造 Undo 或 Dirty。
 - 三类属性写入与四类材质参数写入共享同一基础层 `UEAgentKitLiveWrite`（`LiveWriteTransaction.h/.cpp`）：统一修改前 Dirty 捕获、目标 Snapshot 捕获/恢复（属性为深拷贝、材质参数为条目存在性+值）、Transaction 创建/取消/标题、`Modify`/Apply/回读/语义 No-op、No-op 与失败恢复、变更通知策略（属性用 `PostEditChangeProperty`，材质参数复用 `UMaterialEditingLibrary`）、成功 Dirty 确认和统一 Evidence；每个 Value Kind 只提供 `ReadBefore`/`ApplyValue`/`ReadAfter`/`SemanticEqual` 与 Snapshot/通知钩子 IO 策略，错误码与返回 JSON 契约不变。
 - 材质参数写入强制复用离线 Patch Schema：Operation 名、`{"parameterName": ...}` Target 与值格式（Scalar=有限 JSON number、Vector=`{r,g,b,a}`、Texture=Object Path 字符串、StaticSwitch=JSON boolean）与 `AssetPatchCommandlet` 完全一致，不引入第二套 JSON 格式；只接受已加载的 `MaterialInstanceConstant`（拒绝 MID/非 MI），参数必须存在且是 Global Association，Texture 目标必须是可加载的 `/Game` Texture 资产；Policy 侧 `allowedMaterialParameters`（`class#Type#ParameterName`）授权由 Plan 阶段强制执行。材质参数的读回校验（值、Override、Expression GUID）与离线命令let一致，失败即回滚。
-- DataTable 写入强制复用离线 Row Schema：行结构必须是可用的 `FTableRowBase` 派生结构，字段只支持 bool/Enum/数值/String/Name/Text 标量（与离线 `SetPropertyFromJson` 一致），`allowedDataTableFields`（`class#RowStruct#FieldName`）授权由 Plan 阶段强制执行；`setDataTableCell`/`setDataTableRowFields` 修改现有行的字段，`addDataTableRow` 创建行（目标行不得存在），`removeDataTableRow`/`renameDataTableRow` 要求 `value=true` 确认、目标行存在、`renameDataTableRow` 要求新行名不同且不存在，并再次执行 Searchable Name 引用影响门禁（有引用即拒绝）。快照为整表行深拷贝，失败时整表恢复；No-op 检测基于整表规范 JSON 相等（写同值不产生 Undo 或 Dirty）。
+- DataTable 写入强制复用离线 Row Schema：行结构必须是可用的 `FTableRowBase` 派生结构，字段只支持 bool/Enum/数值/String/Name/Text 标量（与离线 `SetPropertyFromJson` 一致），`allowedDataTableFields`（`class#RowStruct#FieldName`）授权由 Plan 阶段强制执行；`setDataTableCell`/`setDataTableRowFields` 修改现有行的字段，其中 RowFields 请求是 1–32 个字段的原子子集，未请求字段保持原值，读回只校验请求字段并返回完整行；字段修改后调用 `HandleDataTableChanged(RowName)` 刷新 DataTable 观察者。`addDataTableRow` 创建行（目标行不得存在），`removeDataTableRow`/`renameDataTableRow` 要求 `value=true` 确认、目标行存在、`renameDataTableRow` 要求新行名不同且不存在，并再次执行 Searchable Name 引用影响门禁（有引用即拒绝）。快照为整表行深拷贝，失败时整表恢复；No-op 检测基于整表规范 JSON 相等（写同值不产生 Undo 或 Dirty）。
 - 调用 `PostEditChangeProperty()` 并标记 Package Dirty，但绝不调用 `SavePackage`。
 - 返回 `operation`、`valueKind`、`loadedByBridge=false`、Before/After、Dirty、Transaction、referenceType/referencePath/resolvedReferenceClass 和 Editor Session 证据；结构化写入额外返回 `structuredKind`、`structuredSchema`、`diff` 与 `diffTruncated`；材质参数写入返回 `parameterName`、`parameterType`、`parameterAssociation=Global`（并移除 `propertyPath`），`valueKind` 分别为 `material-scalar`/`material-vector`/`material-texture`/`material-static-switch`；DataTable 写入返回 `rowName`、`dataTableKind`、`rowStructPath`（并移除 `propertyPath`），`valueKind` 为 `data-table-cell`/`data-table-row-fields`/`data-table-row-add`/`data-table-row-remove`/`data-table-row-rename`；成功修改额外返回稳定 `transactionId`（已提交的 Editor Undo Transaction 的 GUID），供 `ue_undo_asset_property_live`/`ue_discard_asset_property_live` 精确回退；标量 Operation 的既有返回字段与值保持兼容。
 - PIE/SIE、地图、Dirty Package、Blueprint、嵌套属性路径、不支持的属性类型、容器、非 MI 资产、不存在的材质参数、非 DataTable 资产、缺失或重复行、不支持的字段、被引用行与 DataTable 之外的 Live Apply 全部拒绝。
@@ -232,8 +232,8 @@ Bridge 注册为 `FOutputDevice`，保留最多 4096 条当前会话日志，并
 
 - 只接受 `assetPath` + `transactionId` + `editorSessionId`（三者在 Apply 结果中返回）；记录按精确资产路径保留一条（最近确认的一次写入），并持有写入前 Snapshot。
 - Undo 调用 `GEditor->UndoTransaction(true)`（可 Redo），Discard 调用 `GEditor->UndoTransaction(false)`（丢弃事务）；两者都只作用于一像素精确的已提交事务，绝不任意回滚编辑器历史或跨资产批量撤销。
-- 回退前强制校验：记录存在且 `transactionId` 完全匹配（否则 `live-editor-write-undo-not-found`/`-transaction-mismatch`）、`editorSessionId` 与记录及当前 Bridge 会话一致（`-session-mismatch`）、资产仍是同一内存对象且 Class/Package 一致（`-asset-mismatch`）、包在写入后未被保存（`-package-saved`）、Undo 栈顶就是本次事务（`GetUndoContext` 的 TransactionId/PrimaryObject 匹配，否则 `-stack-mismatch`）。
-- 回退后显式恢复写入前 Dirty 状态，并用保留 Snapshot 读回验证目标值（不一致时用 Snapshot 兜底恢复），验证失败返回 `live-editor-write-undo-verify-failed`；成功后记录删除，二次 Undo 返回 `-not-found`。
+- 回退前强制校验：记录存在且 `transactionId` 完全匹配（否则 `live-editor-write-undo-not-found`/`-transaction-mismatch`）、`editorSessionId` 与记录及当前 Bridge 会话一致（`-session-mismatch`）、资产仍是同一内存对象且 Class/Package 一致（`-asset-mismatch`）、包在写入后未被保存（`-package-saved`）、Undo 栈顶就是本次事务（`GetUndoContext` 的 TransactionId/PrimaryObject 匹配，否则 `-stack-mismatch`），并读回确认目标仍等于本次 Live Apply 的 `afterValue`；若目标被后续非事务修改，返回 `live-editor-write-undo-target-changed`，不得覆盖较新的值。
+- `GEditor->UndoTransaction(...)` 执行失败返回 `live-editor-write-undo-failed`，不使用 Snapshot 冒充事务成功；回退成功后显式恢复写入前 Dirty 状态，并用保留 Snapshot 读回验证目标值（不一致时用 Snapshot 兜底恢复），验证失败返回 `live-editor-write-undo-verify-failed`；成功后 Bridge 与 Workflow 记录均删除，二次 Undo 或 Verify 返回 not-found。
 - 返回 `action`（`undo-asset-property-live`/`discard-asset-property-live`）、`operation`、`valueKind`、`assetPath`、`transactionId`、回退前/后值、`dirtyBefore`/`dirtyAfter`、`transactionRecorded=false`、`saved=false` 与 `editorSessionId`；整个过程不触碰磁盘、SQLite 或 Revision Export。
 
 该 Capability 不生成磁盘 Revision，也不修改 SQLite/Revision Export。用户检查后可以在编辑器中 Undo，或者通过现有 `ue_save_authorized_asset` Preview/Commit 流程显式保存。
@@ -299,6 +299,8 @@ live-editor-write-undo-session-mismatch
 live-editor-write-undo-asset-mismatch
 live-editor-write-undo-stack-mismatch
 live-editor-write-undo-package-saved
+live-editor-write-undo-target-changed
+live-editor-write-undo-failed
 live-editor-write-undo-verify-failed
 ```
 

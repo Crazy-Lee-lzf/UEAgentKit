@@ -28,16 +28,20 @@ FIXTURE_ASSETS = {
     "scalar": f"{CLOSED_LOOP_ROOT}/DA_Scalar.DA_Scalar",
     "material": f"{CLOSED_LOOP_ROOT}/MI_Scalar.MI_Scalar",
     "datatable": f"{CLOSED_LOOP_ROOT}/DT_Target.DT_Target",
+    "datatable_rename": f"{CLOSED_LOOP_ROOT}/DT_RenameTarget.DT_RenameTarget",
 }
 
 SAVED_FIXTURE_IDS = {
     "closedloop-scalar-asset",
     "closedloop-material-asset",
     "closedloop-datatable-asset",
+    "closedloop-datatable-rename-asset",
 }
 
 ROW_ALPHA = "RowAlpha"
+ROW_RENAMED = "RowRenamed"
 ROW_NEW = {"Count": 42, "Label": "Alpha", "bEnabled": True}
+ROW_RENAME_VALUE = {"Count": 1, "Label": "Alpha", "bEnabled": True}
 
 
 def sha256(path: Path) -> str:
@@ -226,6 +230,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                     or not_saved.get("planId") != scalar_plan_id
                     or not_saved.get("memoryRecorded") is not False
                     or not_saved["memoryTaskEvidence"]["arguments"]["outcome"] != "cancelled"
+                    or not_saved["memoryTaskEvidence"]["arguments"]["validation_evidence_details"]["independentReload"] is not False
                 ):
                     raise RuntimeError(f"not-saved verification contract is broken: {not_saved}")
                 saved = await save_authorized(session, FIXTURE_ASSETS["scalar"])
@@ -313,7 +318,29 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                     raise RuntimeError(f"DataTable verified loop contract is broken: {verified}")
                 closed_loops.append({"asset": "datatable", "state": "verified", "revision": verified.get("actualRevision")})
 
-                # 4. Rejection: verify without any confirmed live write.
+                # 4. DataTable rename: verification must read the destination row name.
+                rename_write = await apply_and_capture(
+                    session,
+                    FIXTURE_ASSETS["datatable_rename"],
+                    "renameDataTableRow",
+                    {"rowName": ROW_ALPHA, "newRowName": ROW_RENAMED},
+                    True,
+                )
+                rename_expected = rename_write.get("result", {}).get("afterValue")
+                if rename_expected != ROW_RENAME_VALUE:
+                    raise RuntimeError(f"DataTable rename LiveApply result is incomplete: {rename_write}")
+                await save_authorized(session, FIXTURE_ASSETS["datatable_rename"])
+                verified = await verify_live(session, FIXTURE_ASSETS["datatable_rename"])
+                if (
+                    not verified.get("ok")
+                    or verified.get("state") != "verified"
+                    or verified.get("expectedValue") != ROW_RENAME_VALUE
+                    or verified.get("exportedValue") != ROW_RENAME_VALUE
+                ):
+                    raise RuntimeError(f"DataTable rename verified loop contract is broken: {verified}")
+                closed_loops.append({"asset": "datatable-rename", "state": "verified", "revision": verified.get("actualRevision")})
+
+                # 5. Rejection: verify without any confirmed live write.
                 rejected = await verify_live(session, f"{CLOSED_LOOP_ROOT}/DA_Nonexistent.DA_Nonexistent")
                 if rejected.get("ok") or error_code(rejected) != "live-write-verify-not-found":
                     raise RuntimeError(f"Expected verify-not-found but got: {rejected}")

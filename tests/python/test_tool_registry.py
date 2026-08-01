@@ -286,7 +286,10 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertIn("live-editor-write-undo-stack-mismatch", live_write)
         self.assertIn("live-editor-write-undo-package-saved", live_write)
         self.assertIn("live-editor-write-undo-session-mismatch", live_write)
+        self.assertIn("live-editor-write-undo-target-changed", live_write)
+        self.assertIn("live-editor-write-undo-failed", live_write)
         self.assertIn("live-editor-write-undo-verify-failed", live_write)
+        self.assertIn("Record->AfterValue", live_write)
         self.assertNotIn("SavePackage", live_write)
         noop_branch = live_write_frame.split("IO->SemanticEqual(BeforeValue, AfterValue))", 1)[1]        # A no-op must restore the captured snapshot before restoring the Dirty flag
         # and cancelling the transaction, because the apply path may already have

@@ -434,6 +434,14 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 if double_undo.get("ok") or error_code(double_undo) != "live-editor-write-undo-not-found":
                     raise RuntimeError(f"Expected double-undo not-found but got: {double_undo}")
                 bridge_rejections.append("double-undo")
+                verify_after_undo = await call(
+                    session,
+                    "ue_verify_live_write",
+                    {"asset_path": FIXTURE_ASSETS["scalar"]},
+                )
+                if verify_after_undo.get("ok") or error_code(verify_after_undo) != "live-write-verify-not-found":
+                    raise RuntimeError(f"Successful Undo did not close the workflow record: {verify_after_undo}")
+                bridge_rejections.append("verify-after-undo-not-found")
                 success_cases.append({"operation": "setAssetProperty", "revert": "undo"})
 
                 structured_write = await apply_and_capture(

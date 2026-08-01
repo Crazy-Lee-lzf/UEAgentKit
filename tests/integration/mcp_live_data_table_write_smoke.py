@@ -51,7 +51,7 @@ ALPHA_INITIAL = {"Count": 1, "Label": "Alpha", "bEnabled": True}
 BETA_INITIAL = {"Count": 2, "Label": "Beta", "bEnabled": False}
 GAMMA_INITIAL = {"Count": 3, "Label": "Gamma", "bEnabled": True}
 ALPHA_NEW = {"Count": 42, "Label": "Alpha", "bEnabled": True}
-BETA_NEW = {"Count": 22, "Label": "Beta New", "bEnabled": True}
+BETA_NEW = {"Count": 22, "Label": "Beta New", "bEnabled": False}
 DELTA_NEW = {"Count": 4, "Label": "Delta", "bEnabled": True}
 
 
@@ -429,7 +429,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                     FIXTURE_ASSETS["fields"],
                     "setDataTableRowFields",
                     {"rowName": ROW_BETA},
-                    {"Count": 22, "Label": "Beta New", "bEnabled": True},
+                    {"Count": 22, "Label": "Beta New"},
                 )
                 if not fields_plan.get("ok") or fields_plan.get("operation") != "setDataTableRowFields":
                     raise RuntimeError(f"DataTable row-fields Plan failed: {fields_plan}")

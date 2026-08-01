@@ -114,6 +114,7 @@ namespace UEAgentKitLiveWrite
 		bool bDirtyAfter = false;
 		TWeakObjectPtr<UObject> Asset;
 		TSharedPtr<FJsonValue> BeforeValue;
+		TSharedPtr<FJsonValue> AfterValue;
 		TUniquePtr<ILiveWriteValueIO> IO;
 	};
 

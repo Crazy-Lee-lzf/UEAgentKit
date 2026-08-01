@@ -58,7 +58,7 @@ $DataTableClass = "/Script/Engine.DataTable"
 $DataTableRowStruct = "/Script/UEAgentKitEditor.UEAgentKitDataTableFixtureRow"
 # The smoke test saves exactly these fixtures through the authorized save flow to
 # close the Apply -> Save -> Verify loop; their disk hashes are expected to change.
-$ExpectedSavedFixtureIds = @("closedloop-scalar-asset", "closedloop-material-asset", "closedloop-datatable-asset")
+$ExpectedSavedFixtureIds = @("closedloop-scalar-asset", "closedloop-material-asset", "closedloop-datatable-asset", "closedloop-datatable-rename-asset")
 $EditorProcess = $null
 $FixtureHashes = @{}
 $DatabaseHashBefore = ""
@@ -168,7 +168,8 @@ try
         allowedOperations = @(
             "setAssetProperty",
             "setMaterialInstanceScalarParameter",
-            "setDataTableCell"
+            "setDataTableCell",
+            "renameDataTableRow"
         )
         allowedAssetClasses = @(
             $ScalarClass,

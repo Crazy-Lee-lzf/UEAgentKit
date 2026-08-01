@@ -182,6 +182,7 @@ def _live_write_memory_task_evidence(
     revision: str,
     report_id: str,
     undo_available: bool,
+    independent_reload: bool,
 ) -> dict[str, Any]:
     manifest_id = f"live-save:{record.save_receipt}" if record.save_receipt else ""
     return {
@@ -227,7 +228,7 @@ def _live_write_memory_task_evidence(
             ),
             "validation_evidence_details": {
                 "reportId": report_id,
-                "independentReload": True,
+                "independentReload": independent_reload,
                 "verified": record.verified,
                 "state": state,
             },
@@ -245,8 +246,9 @@ def _live_write_exported_value(canonical: dict[str, Any], record: LiveApplyRecor
     target = record.target or {}
     if asset_type == "data-table":
         rows = details.get("rows") or []
+        expected_row_name = target.get("newRowName") if record.operation == "renameDataTableRow" else target.get("rowName")
         for row in rows:
-            if not isinstance(row, dict) or row.get("Name") != target.get("rowName"):
+            if not isinstance(row, dict) or row.get("Name") != expected_row_name:
                 continue
             exported = dict(row)
             exported.pop("Name", None)
@@ -1818,6 +1820,15 @@ class PatchWorkflowService:
                 if hasattr(exc, "code"):
                     raise WorkflowError(str(exc.code), str(exc), details=getattr(exc, "details", {})) from exc
                 raise
+            receipt = self._live_apply_by_asset.get(asset_path)
+            record = self._live_applies.get(receipt) if receipt is not None else None
+            if (
+                record is not None
+                and record.transaction_id == transaction_id
+                and record.editor_session_id == editor_session_id
+            ):
+                self._live_apply_by_asset.pop(asset_path, None)
+                self._live_applies.pop(receipt, None)
             return {
                 "schemaVersion": WORKFLOW_SCHEMA_VERSION,
                 "tool": f"ue_{action}_asset_property_live",
@@ -2380,6 +2391,7 @@ class PatchWorkflowService:
                     revision=current_revision,
                     report_id=report_id,
                     undo_available=True,
+                    independent_reload=False,
                 )
                 return {
                     "schemaVersion": WORKFLOW_SCHEMA_VERSION,
@@ -2404,8 +2416,8 @@ class PatchWorkflowService:
                     "indexFreshness": freshness,
                     "nextStep": (
                         "The write is not persisted. Persist it with ue_save_authorized_asset "
-                        "(Preview then Commit) or revert it with ue_undo_asset_property_live / "
-                        "ue_discard_asset_property_live, then verify again."
+                        "(Preview then Commit), or revert it with ue_undo_asset_property_live / "
+                        "ue_discard_asset_property_live. A successful revert closes this pending live write."
                     ),
                 }
 
@@ -2486,6 +2498,7 @@ class PatchWorkflowService:
                 revision=actual_revision,
                 report_id=verification_report_id,
                 undo_available=False,
+                independent_reload=True,
             )
             return {
                 "schemaVersion": WORKFLOW_SCHEMA_VERSION,

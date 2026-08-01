@@ -14,7 +14,9 @@
       "targetAsset": "/Game/UEAgentKitWriteTests/ClosedLoop/M_Source",
       "expectedClass": "/Script/Engine.Material",
       "parameters": {
-        "Scalar": ["EmissiveIntensity"]
+        "Scalar": [
+          "EmissiveIntensity"
+        ]
       }
     },
     {
@@ -33,6 +35,20 @@
       "id": "closedloop-datatable-asset",
       "kind": "dataTableAsset",
       "targetAsset": "/Game/UEAgentKitWriteTests/ClosedLoop/DT_Target",
+      "expectedClass": "/Script/Engine.DataTable",
+      "rowStruct": "/Script/UEAgentKitEditor.UEAgentKitDataTableFixtureRow",
+      "rows": {
+        "RowAlpha": {
+          "Count": 1,
+          "Label": "Alpha",
+          "bEnabled": true
+        }
+      }
+    },
+    {
+      "id": "closedloop-datatable-rename-asset",
+      "kind": "dataTableAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/ClosedLoop/DT_RenameTarget",
       "expectedClass": "/Script/Engine.DataTable",
       "rowStruct": "/Script/UEAgentKitEditor.UEAgentKitDataTableFixtureRow",
       "rows": {

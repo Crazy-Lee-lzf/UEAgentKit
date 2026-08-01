@@ -2168,6 +2168,25 @@ class AgentWorkflowTests(unittest.TestCase):
                     "saved": False,
                     "editorSessionId": "session-1",
                 }
+            if method in {"editor.undoAssetPropertyLive", "editor.discardAssetPropertyLive"}:
+                self.dirty = False
+                return {
+                    "action": "undo-asset-property-live" if method == "editor.undoAssetPropertyLive" else "discard-asset-property-live",
+                    "operation": "setAssetProperty",
+                    "valueKind": "scalar",
+                    "assetPath": ASSET_PATH,
+                    "transactionId": TRANSACTION_ID,
+                    "changed": True,
+                    "transactionRecorded": False,
+                    "packageDirtyBefore": True,
+                    "packageDirtyAfter": False,
+                    "dirtyBefore": True,
+                    "dirtyAfter": False,
+                    "saved": False,
+                    "beforeValue": True,
+                    "afterValue": False,
+                    "editorSessionId": "session-1",
+                }
             if method == "editor.saveAuthorizedAsset":
                 if self.on_save is not None:
                     self.on_save()
@@ -2238,6 +2257,25 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertEqual(evidence["outcome"], "cancelled")
         self.assertEqual(evidence["revision_set"][0]["revision"], BEFORE_REVISION)
         self.assertTrue(evidence["patch_details"]["undoAvailable"])
+        self.assertFalse(evidence["validation_evidence_details"]["independentReload"])
+
+    def test_live_write_undo_closes_pending_workflow_record(self) -> None:
+        bridge = AgentWorkflowTests.ClosedLoopLiveService(dirty=True)
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=self.freshness,
+            live_editor_service=bridge,
+        )
+        applied = self._apply_scalar_live_write(service, bridge)
+        result = service.undo_asset_property_live(ASSET_PATH, TRANSACTION_ID, "session-1")
+        self.assertEqual(result["mode"], "LiveUndo")
+        self.assertNotIn(ASSET_PATH, service._live_apply_by_asset)
+        self.assertNotIn(applied["liveApplyReceipt"], service._live_applies)
+        with self.assertRaises(WorkflowError) as missing:
+            service.verify_live_write(ASSET_PATH)
+        self.assertEqual(missing.exception.code, "live-write-verify-not-found")
 
     def test_live_write_verify_closes_loop_after_authorized_save(self) -> None:
         fresh_bytes = b"x" * 64

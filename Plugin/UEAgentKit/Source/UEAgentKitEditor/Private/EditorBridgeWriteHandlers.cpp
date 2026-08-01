@@ -467,6 +467,7 @@ namespace
 		Record->bDirtyAfter = Evidence.bPackageDirtyAfter;
 		Record->Asset = Asset;
 		Record->BeforeValue = Evidence.BeforeValue;
+		Record->AfterValue = Evidence.AfterValue;
 		Record->IO = MoveTemp(IO);
 		Evidence.TransactionId = UndoContext.TransactionId.ToString(EGuidFormats::DigitsWithHyphens);
 		return Record;
@@ -1785,8 +1786,6 @@ namespace
 		{
 		}
 
-		FName NewRowName;
-
 		bool CaptureSnapshot() override
 		{
 			Snapshot.RowNames = DataTable->GetRowNames();
@@ -2019,17 +2018,14 @@ namespace
 			if (Kind == ELiveDataTableOperationKind::RowFields)
 			{
 				const uint8* RowData = DataTable->FindRowUnchecked(RowName);
-				if (!RowData)
+				if (!RowData || !RequestedRowFieldsMatch(Requested, RowData))
 				{
 					OutErrorCode = TEXT("live-editor-write-data-table-apply-failed");
-					OutErrorMessage = TEXT("DataTable row read-back verification failed.");
+					OutErrorMessage = TEXT("DataTable row-fields read-back verification failed.");
 					return false;
 				}
 				TSharedRef<FJsonObject> Row = MakeShared<FJsonObject>();
-				if (!ExportLiveDataTableRowAsJson(RowStruct, RowData, Row)
-					|| !UEAgentKit::StructuredPropertyJson::JsonEqual(
-						MakeShared<FJsonValueObject>(Row),
-						Requested))
+				if (!ExportLiveDataTableRowAsJson(RowStruct, RowData, Row))
 				{
 					OutErrorCode = TEXT("live-editor-write-data-table-apply-failed");
 					OutErrorMessage = TEXT("DataTable row-fields read-back verification failed.");
@@ -2100,6 +2096,10 @@ namespace
 
 		void NotifyChanged() override
 		{
+			if (Kind == ELiveDataTableOperationKind::Cell || Kind == ELiveDataTableOperationKind::RowFields)
+			{
+				DataTable->HandleDataTableChanged(RowName);
+			}
 		}
 
 		void NotifyRestored() override
@@ -2111,6 +2111,30 @@ namespace
 		TMap<FString, FProperty*> FieldProperties;
 
 	private:
+		bool RequestedRowFieldsMatch(const TSharedPtr<FJsonValue>& Requested, const uint8* RowData) const
+		{
+			if (!Requested.IsValid() || Requested->Type != EJson::Object || RowData == nullptr)
+			{
+				return false;
+			}
+			const TSharedPtr<FJsonObject> RequestedObject = Requested->AsObject();
+			for (const TPair<FString, FProperty*>& FieldEntry : FieldProperties)
+			{
+				TSharedPtr<FJsonValue> ActualValue;
+				if (!ReadScalarValue(
+						FieldEntry.Value,
+						FieldEntry.Value->ContainerPtrToValuePtr<void>(RowData),
+						ActualValue)
+					|| !UEAgentKit::StructuredPropertyJson::JsonEqual(
+						ActualValue,
+						RequestedObject->Values.FindRef(FieldEntry.Key)))
+				{
+					return false;
+				}
+			}
+			return true;
+		}
+
 		bool AppliedRowMatchesRequested(const TSharedPtr<FJsonValue>& Requested) const
 		{
 			FStructOnScope Probe(RowStruct);
@@ -2137,6 +2161,7 @@ namespace
 		UScriptStruct* RowStruct = nullptr;
 		ELiveDataTableOperationKind Kind = ELiveDataTableOperationKind::Cell;
 		FName RowName;
+		FName NewRowName;
 		FLiveDataTableRowSnapshot Snapshot;
 		FString FullTableBeforeJson;
 		bool bSnapshotValid = false;
@@ -3077,11 +3102,18 @@ bool FUEAgentKitEditorBridge::RevertLiveWriteTransaction(
 		OutErrorMessage = TEXT("The written value could not be read back before reverting.");
 		return false;
 	}
+	if (!Record->AfterValue.IsValid() || !Record->IO->SemanticEqual(WrittenValue, Record->AfterValue))
+	{
+		OutErrorCode = TEXT("live-editor-write-undo-target-changed");
+		OutErrorMessage = TEXT("The live write target changed after the confirmed write; re-plan instead of overwriting the newer value.");
+		return false;
+	}
 
 	if (!GEditor->UndoTransaction(bRedoable))
 	{
-		Record->IO->RestoreSnapshot();
-		Record->IO->NotifyRestored();
+		OutErrorCode = TEXT("live-editor-write-undo-failed");
+		OutErrorMessage = TEXT("The Editor could not execute the exact live write transaction.");
+		return false;
 	}
 	Package->SetDirtyFlag(Record->bDirtyBefore);
 
