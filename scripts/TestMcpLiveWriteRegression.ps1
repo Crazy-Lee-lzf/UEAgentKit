@@ -19,7 +19,8 @@ $SubTests = @(
     @{ Name = "StructuredWrite"; Script = Join-Path $PSScriptRoot "TestMcpLiveStructuredWrite.ps1"; OutputDir = "Output\McpLiveStructuredWriteSmoke"; BackupDir = "Backups\McpLiveStructuredWriteSmoke" },
     @{ Name = "MaterialWrite"; Script = Join-Path $PSScriptRoot "TestMcpLiveMaterialWrite.ps1"; OutputDir = "Output\McpLiveMaterialWriteSmoke"; BackupDir = "Backups\McpLiveMaterialWriteSmoke" },
     @{ Name = "DataTableWrite"; Script = Join-Path $PSScriptRoot "TestMcpLiveDataTableWrite.ps1"; OutputDir = "Output\McpLiveDataTableWriteSmoke"; BackupDir = "Backups\McpLiveDataTableWriteSmoke" },
-    @{ Name = "UndoDiscard"; Script = Join-Path $PSScriptRoot "TestMcpLiveUndoDiscard.ps1"; OutputDir = "Output\McpLiveUndoDiscardSmoke"; BackupDir = "Backups\McpLiveUndoDiscardSmoke" }
+    @{ Name = "UndoDiscard"; Script = Join-Path $PSScriptRoot "TestMcpLiveUndoDiscard.ps1"; OutputDir = "Output\McpLiveUndoDiscardSmoke"; BackupDir = "Backups\McpLiveUndoDiscardSmoke" },
+    @{ Name = "ClosedLoop"; Script = Join-Path $PSScriptRoot "TestMcpLiveClosedLoop.ps1"; OutputDir = "Output\McpLiveClosedLoopSmoke"; BackupDir = "Backups\McpLiveClosedLoopSmoke" }
 )
 
 $RegressionRoot = Join-Path $ToolRoot "Output\McpLiveWriteRegression"
@@ -81,4 +82,4 @@ if ($FailedSubtests.Count -gt 0)
     Write-Host "MCP Live Write regression FAILED sub-tests: $($FailedSubtests -join ', ')"
     throw "MCP Live Write regression failed: $($FailedSubtests -join ', ') - logs preserved under $RegressionRoot"
 }
-Write-Host "MCP Live Write regression passed (ScalarWrite, ReferenceWrite, StructuredWrite, MaterialWrite, DataTableWrite, UndoDiscard)."
+Write-Host "MCP Live Write regression passed (ScalarWrite, ReferenceWrite, StructuredWrite, MaterialWrite, DataTableWrite, UndoDiscard, ClosedLoop)."

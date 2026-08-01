@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -1352,17 +1353,19 @@ class AgentWorkflowTests(unittest.TestCase):
 
     def test_live_write_tool_count_and_names_are_unchanged(self) -> None:
         names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
-        self.assertEqual(len(names), 46)
+        self.assertEqual(len(names), 47)
         self.assertIn("ue_set_asset_property", names)
         self.assertIn("ue_set_asset_reference_property", names)
         self.assertIn("ue_apply_asset_property_live", names)
         self.assertIn("ue_undo_asset_property_live", names)
         self.assertIn("ue_discard_asset_property_live", names)
+        self.assertIn("ue_verify_live_write", names)
         self.assertEqual(names.count("ue_set_asset_property"), 1)
         self.assertEqual(names.count("ue_set_asset_reference_property"), 1)
         self.assertEqual(names.count("ue_apply_asset_property_live"), 1)
         self.assertEqual(names.count("ue_undo_asset_property_live"), 1)
         self.assertEqual(names.count("ue_discard_asset_property_live"), 1)
+        self.assertEqual(names.count("ue_verify_live_write"), 1)
         self.assertEqual(len(set(names)), len(names))
 
     def test_live_asset_property_write_requires_live_and_commit_modes(self) -> None:
@@ -2132,6 +2135,299 @@ class AgentWorkflowTests(unittest.TestCase):
         with self.assertRaises(WorkflowError) as stack:
             service.undo_asset_property_live(ASSET_PATH, TRANSACTION_ID, "session-1")
         self.assertEqual(stack.exception.code, "live-editor-write-undo-stack-mismatch")
+
+    class ClosedLoopLiveService:
+        def __init__(self, dirty: bool = True, on_save: Any = None) -> None:
+            self.dirty = dirty
+            self.on_save = on_save
+            self.calls: list[tuple[str, dict[str, Any]]] = []
+
+        def status(self) -> dict[str, Any]:
+            return {"state": "available", "pieState": "stopped", "sessionId": "session-1", "processId": 1234}
+
+        def call_method(self, method: str, params: dict[str, Any], **_: Any) -> dict[str, Any]:
+            self.calls.append((method, params))
+            if method == "editor.applyAssetPropertyLive":
+                return {
+                    "action": "apply-asset-property-live",
+                    "operation": "setAssetProperty",
+                    "assetPath": ASSET_PATH,
+                    "valueKind": "scalar",
+                    "beforeValue": False,
+                    "afterValue": True,
+                    "changed": True,
+                    "transactionRecorded": True,
+                    "transactionId": TRANSACTION_ID,
+                    "transactionTitle": "UE Agent Kit: Set Asset Property",
+                    "assetOpen": True,
+                    "loadedByBridge": False,
+                    "packageDirtyBefore": False,
+                    "packageDirtyAfter": True,
+                    "dirtyBefore": False,
+                    "dirtyAfter": True,
+                    "saved": False,
+                    "editorSessionId": "session-1",
+                }
+            if method == "editor.saveAuthorizedAsset":
+                if self.on_save is not None:
+                    self.on_save()
+                self.dirty = False
+                return {
+                    "action": "save-authorized-asset",
+                    "assetPath": ASSET_PATH,
+                    "saved": True,
+                    "verified": True,
+                    "editorSessionId": "session-1",
+                }
+            raise AssertionError(f"unexpected bridge method: {method}")
+
+        def call_tool(self, tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
+            if tool_name != "ue_inspect_asset_live" or params != {"assetPath": ASSET_PATH}:
+                raise AssertionError(f"unexpected Live Editor tool call: {tool_name} {params}")
+            return {
+                "ok": True,
+                "result": {
+                    "assetRegistry": {"found": True, "classPath": ASSET_CLASS},
+                    "memory": {
+                        "loaded": True,
+                        "packageDirty": self.dirty,
+                        "loadedByBridge": False,
+                        "openInAssetEditor": True,
+                    },
+                },
+            }
+
+    def _apply_scalar_live_write(self, service: Any, bridge: Any) -> dict[str, Any]:
+        plan = service.plan_patch(
+            asset_path=ASSET_PATH,
+            operation="setAssetProperty",
+            target={"propertyPath": "BoolValue"},
+            value=True,
+            description="Live closed loop test",
+        )
+        self.assertTrue(plan["ok"])
+        applied = service.apply_asset_property_live(plan["planId"], f"LIVE APPLY {plan['planId']}")
+        self.assertTrue(applied["changed"])
+        self.assertTrue(applied["liveApplyReceipt"].startswith("live_"))
+        self.assertEqual(bridge.calls[0][0], "editor.applyAssetPropertyLive")
+        return applied
+
+    def test_live_write_verify_reports_unsaved_state_with_undo_available(self) -> None:
+        bridge = AgentWorkflowTests.ClosedLoopLiveService(dirty=True)
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=self.freshness,
+            live_editor_service=bridge,
+        )
+        applied = self._apply_scalar_live_write(service, bridge)
+        verified = service.verify_live_write(ASSET_PATH)
+        self.assertEqual(verified["mode"], "LiveVerify")
+        self.assertEqual(verified["state"], "not-saved")
+        self.assertEqual(verified["liveApplyReceipt"], applied["liveApplyReceipt"])
+        self.assertEqual(verified["planId"], applied["planId"])
+        self.assertEqual(verified["transactionId"], TRANSACTION_ID)
+        self.assertTrue(verified["undoAvailable"])
+        self.assertFalse(verified["saved"])
+        self.assertFalse(verified["verified"])
+        self.assertEqual(verified["diskRevision"], BEFORE_REVISION)
+        self.assertFalse(verified["memoryRecorded"])
+        evidence = verified["memoryTaskEvidence"]["arguments"]
+        self.assertEqual(evidence["task_key"], f"live-write:{applied['planId']}")
+        self.assertEqual(evidence["outcome"], "cancelled")
+        self.assertEqual(evidence["revision_set"][0]["revision"], BEFORE_REVISION)
+        self.assertTrue(evidence["patch_details"]["undoAvailable"])
+
+    def test_live_write_verify_closes_loop_after_authorized_save(self) -> None:
+        fresh_bytes = b"x" * 64
+        saved_bytes = b"y" * 64
+        fresh_revision = "sha256:" + hashlib.sha256(fresh_bytes).hexdigest()
+        saved_revision = "sha256:" + hashlib.sha256(saved_bytes).hexdigest()
+
+        class ClosedLoopTracker(FakeFreshnessTracker):
+            def inspect_asset(self, asset_path: str) -> dict[str, Any]:
+                result = super().inspect_asset(asset_path)
+                result["diskRevision"] = saved_revision if self.state == "stale" else fresh_revision
+                return result
+
+        tracker = ClosedLoopTracker()
+        package_file = (
+            self.project_path.parent
+            / "Content"
+            / "UEAgentKitWriteTests"
+            / "ScalarRegression"
+            / "DA_ScalarPatchTarget.uasset"
+        )
+        package_file.parent.mkdir(parents=True, exist_ok=True)
+        package_file.write_bytes(fresh_bytes)
+        bridge = AgentWorkflowTests.ClosedLoopLiveService(
+            dirty=True,
+            on_save=lambda: package_file.write_bytes(saved_bytes),
+        )
+
+        def catalog_runner(arguments: list[str], cwd: Path, timeout_seconds: int) -> ProcessResult:
+            del cwd, timeout_seconds
+            _, values = FakeWorkflowRunner._arguments(arguments)
+            output = Path(values["-Output"])
+            write_json(
+                output / "manifest.json",
+                {
+                    "projectName": PROJECT,
+                    "assetCount": 1,
+                    "successCount": 1,
+                    "failureCount": 0,
+                    "assets": [
+                        {
+                            "assetPath": ASSET_PATH,
+                            "success": True,
+                            "jsonPath": str(output / "canonical" / "asset.json"),
+                        }
+                    ],
+                },
+            )
+            write_json(
+                output / "canonical" / "asset.json",
+                {
+                    "projectName": PROJECT,
+                    "assetPath": ASSET_PATH,
+                    "packageName": ASSET_PATH.split(".", 1)[0],
+                    "assetClass": ASSET_CLASS,
+                    "revision": {"available": True, "packageDirty": False, "value": saved_revision},
+                    "assetDetails": {
+                        "type": "data-asset",
+                        "properties": [{"name": "BoolValue", "value": True}],
+                    },
+                },
+            )
+            return ProcessResult(0, "", "")
+
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=catalog_runner,
+            freshness_tracker=tracker,
+            live_editor_service=bridge,
+        )
+        applied = self._apply_scalar_live_write(service, bridge)
+        preview = service.save_authorized_asset(ASSET_PATH)
+        saved = service.save_authorized_asset(
+            ASSET_PATH,
+            mode="Commit",
+            save_receipt=preview["saveReceipt"],
+            confirmation=f"SAVE {preview['saveReceipt']}",
+        )
+        self.assertTrue(saved["saved"])
+        self.assertEqual(saved["liveApplyReceipt"], applied["liveApplyReceipt"])
+        self.assertTrue(saved["liveWriteSaved"])
+
+        verified = service.verify_live_write(ASSET_PATH)
+        self.assertEqual(verified["state"], "verified")
+        self.assertEqual(verified["liveApplyReceipt"], applied["liveApplyReceipt"])
+        self.assertEqual(verified["planId"], applied["planId"])
+        self.assertFalse(verified["undoAvailable"])
+        self.assertTrue(verified["saved"])
+        self.assertTrue(verified["verified"])
+        self.assertEqual(verified["actualRevision"], saved_revision)
+        self.assertEqual(verified["exportedValue"], True)
+        self.assertEqual(verified["expectedValue"], True)
+        evidence = verified["memoryTaskEvidence"]["arguments"]
+        self.assertEqual(evidence["task_key"], f"live-write:{applied['planId']}")
+        self.assertEqual(evidence["outcome"], "succeeded")
+        self.assertEqual(evidence["revision_set"][0]["revision"], saved_revision)
+        self.assertEqual(
+            evidence["backup_manifest_ref"],
+            f"backup-manifest:live-save:{preview['saveReceipt']}",
+        )
+        self.assertFalse(evidence["patch_details"]["undoAvailable"])
+        self.assertTrue(evidence["validation_evidence_details"]["independentReload"])
+
+    def test_live_write_verify_guards_and_value_mismatch(self) -> None:
+        bridge = AgentWorkflowTests.ClosedLoopLiveService(dirty=True)
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=self.freshness,
+            live_editor_service=bridge,
+        )
+        with self.assertRaises(WorkflowError) as missing:
+            service.verify_live_write(ASSET_PATH)
+        self.assertEqual(missing.exception.code, "live-write-verify-not-found")
+
+        self._apply_scalar_live_write(service, bridge)
+        with self.assertRaises(WorkflowError) as not_saved:
+            service.verify_live_write("/Game/UEAgentKitWriteTests/ScalarRegression/DA_Other.DA_Other")
+        self.assertEqual(not_saved.exception.code, "live-write-verify-not-found")
+
+        disabled_config = PatchWorkflowConfig(
+            tool_root=self.config.tool_root,
+            engine_root=self.config.engine_root,
+            project_path=self.config.project_path,
+            policy_path=self.config.policy_path,
+            revision_export=self.config.revision_export,
+            work_root=self.config.work_root,
+            backup_root=self.config.backup_root,
+            commit_enabled=False,
+        )
+        disabled_service = PatchWorkflowService(
+            FakeIndexService(),
+            disabled_config,
+            process_runner=self.runner,
+            freshness_tracker=FakeFreshnessTracker(),
+            live_editor_service=bridge,
+        )
+        with self.assertRaises(WorkflowError) as disabled:
+            disabled_service.verify_live_write(ASSET_PATH)
+        self.assertEqual(disabled.exception.code, "live-editor-write-disabled")
+
+        no_live_service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=FakeFreshnessTracker(),
+            live_editor_service=None,
+        )
+        with self.assertRaises(WorkflowError) as no_live:
+            no_live_service.verify_live_write(ASSET_PATH)
+        self.assertEqual(no_live.exception.code, "live-editor-required")
+
+        tracker = FakeFreshnessTracker()
+
+        def mismatched_runner(arguments: list[str], cwd: Path, timeout_seconds: int) -> ProcessResult:
+            del cwd, timeout_seconds
+            _, values = FakeWorkflowRunner._arguments(arguments)
+            output = Path(values["-Output"])
+            write_json(output / "manifest.json", {"projectName": PROJECT, "failureCount": 0})
+            write_json(
+                output / "canonical" / "asset.json",
+                {
+                    "projectName": PROJECT,
+                    "assetPath": ASSET_PATH,
+                    "assetClass": ASSET_CLASS,
+                    "revision": {"available": True, "packageDirty": False, "value": AFTER_REVISION},
+                    "assetDetails": {
+                        "type": "data-asset",
+                        "properties": [{"name": "BoolValue", "value": False}],
+                    },
+                },
+            )
+            return ProcessResult(0, "", "")
+
+        saved_service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=mismatched_runner,
+            freshness_tracker=tracker,
+            live_editor_service=bridge,
+        )
+        applied = self._apply_scalar_live_write(saved_service, bridge)
+        tracker.mark_commit(ASSET_PATH, BEFORE_REVISION, AFTER_REVISION)
+        saved_service._live_applies[applied["liveApplyReceipt"]].saved = True
+        bridge.dirty = False
+        with self.assertRaises(WorkflowError) as value_mismatch:
+            saved_service.verify_live_write(ASSET_PATH)
+        self.assertEqual(value_mismatch.exception.code, "live-write-verify-value-mismatch")
 
 
 

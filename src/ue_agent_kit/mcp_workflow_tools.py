@@ -392,6 +392,14 @@ def register_workflow_tools(
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_verify_asset", exc, read_only=True)
 
+    @server.tool(annotations=planning_annotations)
+    def ue_verify_live_write(asset_path: str) -> dict[str, Any]:
+        """Verify one live write closed loop: unsaved state, or independent reload after an authorized save."""
+        try:
+            return workflow_service.verify_live_write(asset_path)
+        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_verify_live_write", exc, read_only=True)
+
     @server.tool(annotations=read_annotations)
     def ue_get_asset_state(asset_path: str) -> dict[str, Any]:
         """Compare Editor memory, disk Package, Revision Export, and frozen SQLite state for one exact asset."""

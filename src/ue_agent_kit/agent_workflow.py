@@ -154,6 +154,137 @@ class ApplyRecord:
     rolled_back: bool = False
 
 
+@dataclass
+class LiveApplyRecord:
+    receipt: str
+    plan_id: str
+    plan_digest: str
+    asset_path: str
+    operation: str
+    value_kind: str
+    editor_session_id: str
+    transaction_id: str
+    before_value: Any
+    after_value: Any
+    target: dict[str, Any]
+    applied_at_utc: str
+    saved: bool = False
+    save_receipt: str = ""
+    verified: bool = False
+
+
+def _live_write_memory_task_evidence(
+    record: LiveApplyRecord,
+    *,
+    state: str,
+    conclusion: str,
+    outcome: str,
+    revision: str,
+    report_id: str,
+    undo_available: bool,
+) -> dict[str, Any]:
+    manifest_id = f"live-save:{record.save_receipt}" if record.save_receipt else ""
+    return {
+        "schemaVersion": MEMORY_TASK_EVIDENCE_SCHEMA_VERSION,
+        "tool": "ue_memory_record_task",
+        "arguments": {
+            "task_key": f"live-write:{record.plan_id}",
+            "title": f"Live write {record.plan_id} on {record.asset_path}",
+            "conclusion": conclusion,
+            "outcome": outcome,
+            "patch_ref": f"patch:{record.plan_digest}",
+            "backup_manifest_ref": f"backup-manifest:{manifest_id}" if manifest_id else "backup-manifest:not-applicable",
+            "validation_evidence_ref": f"validation-evidence:{report_id}",
+            "revision_set": [
+                {
+                    "assetPath": record.asset_path,
+                    "revision": revision,
+                    "revisionStable": True,
+                }
+            ],
+            "scopes": [
+                {
+                    "scopeType": "asset",
+                    "scopeKey": record.asset_path,
+                }
+            ],
+            "confidence": 1.0,
+            "patch_details": {
+                "planId": record.plan_id,
+                "patchDigest": record.plan_digest,
+                "operation": record.operation,
+                "valueKind": record.value_kind,
+                "transactionId": record.transaction_id,
+                "undoAvailable": undo_available,
+                "saved": record.saved,
+                "verified": record.verified,
+                "state": state,
+            },
+            "backup_manifest_details": (
+                {"manifestId": manifest_id, "kind": "authorized-save-backup"}
+                if manifest_id
+                else {}
+            ),
+            "validation_evidence_details": {
+                "reportId": report_id,
+                "independentReload": True,
+                "verified": record.verified,
+                "state": state,
+            },
+            "details": {
+                "workflowEvidenceSchemaVersion": MEMORY_TASK_EVIDENCE_SCHEMA_VERSION,
+                "workflowTool": "ue_verify_live_write",
+            },
+        },
+    }
+
+
+def _live_write_exported_value(canonical: dict[str, Any], record: LiveApplyRecord) -> Any:
+    details = canonical.get("assetDetails") or {}
+    asset_type = details.get("type")
+    target = record.target or {}
+    if asset_type == "data-table":
+        rows = details.get("rows") or []
+        for row in rows:
+            if not isinstance(row, dict) or row.get("Name") != target.get("rowName"):
+                continue
+            exported = dict(row)
+            exported.pop("Name", None)
+            return exported
+        return None
+    if asset_type == "material-instance":
+        parameter_name = target.get("parameterName")
+        for section in (
+            "scalarParameters",
+            "vectorParameters",
+            "textureParameters",
+            "staticSwitchParameters",
+            "doubleVectorParameters",
+            "fontParameters",
+        ):
+            for parameter in details.get(section) or []:
+                if isinstance(parameter, dict) and parameter.get("name") == parameter_name:
+                    return parameter.get("value")
+        return None
+    properties = details.get("properties") or []
+    for prop in properties:
+        if isinstance(prop, dict) and prop.get("name") == target.get("propertyPath"):
+            return prop.get("value")
+    return None
+
+
+def _live_write_exported_matches(expected: Any, exported: Any) -> bool:
+    if expected is None:
+        return exported in {None, ""}
+    if isinstance(expected, dict) and isinstance(exported, dict):
+        return all(_live_write_exported_matches(value, exported.get(key)) for key, value in expected.items())
+    if isinstance(expected, list) and isinstance(exported, list):
+        return len(expected) == len(exported) and all(
+            _live_write_exported_matches(left, right) for left, right in zip(expected, exported)
+        )
+    return expected == exported
+
+
 def _verified_memory_task_evidence(
     apply: ApplyRecord,
     *,
@@ -525,6 +656,8 @@ class PatchWorkflowService:
         self._applies: dict[str, ApplyRecord] = {}
         self._rollback_dry_runs: dict[str, RollbackDryRunRecord] = {}
         self._save_authorizations: dict[str, SaveAuthorizationRecord] = {}
+        self._live_applies: dict[str, LiveApplyRecord] = {}
+        self._live_apply_by_asset: dict[str, str] = {}
         self.live_editor_service = live_editor_service
         self.active_snapshot = self.config.active_snapshot
         self._refresh_applied = False
@@ -659,9 +792,12 @@ class PatchWorkflowService:
         return sanitized if isinstance(sanitized, dict) else {}
 
     def _prune_records(self) -> None:
-        for mapping in (self._plans, self._dry_runs, self._applies, self._rollback_dry_runs, self._save_authorizations):
+        for mapping in (self._plans, self._dry_runs, self._applies, self._rollback_dry_runs, self._save_authorizations, self._live_applies):
             while len(mapping) > MAX_WORKFLOW_RECORDS:
                 mapping.pop(next(iter(mapping)))
+        self._live_apply_by_asset = {
+            record.asset_path: receipt for receipt, record in self._live_applies.items()
+        }
 
     def _safe_work_path(self, *parts: str) -> Path:
         self._assert_runtime_boundaries()
@@ -1561,6 +1697,25 @@ class PatchWorkflowService:
                     raise WorkflowError(str(exc.code), str(exc), details=getattr(exc, "details", {})) from exc
                 raise
             changed = bool(live_result.get("changed"))
+            live_apply_receipt = ""
+            if changed:
+                live_apply_receipt = "live_" + secrets.token_urlsafe(16)
+                self._live_applies[live_apply_receipt] = LiveApplyRecord(
+                    receipt=live_apply_receipt,
+                    plan_id=plan_id,
+                    plan_digest=record.digest,
+                    asset_path=asset_path,
+                    operation=operation_name,
+                    value_kind=_live_write_value_kind(operation_name),
+                    editor_session_id=str(live_result.get("editorSessionId", "")),
+                    transaction_id=str(live_result.get("transactionId", "")),
+                    before_value=live_result.get("beforeValue"),
+                    after_value=live_result.get("afterValue"),
+                    target=target,
+                    applied_at_utc=utc_now_iso(),
+                )
+                self._live_apply_by_asset[asset_path] = live_apply_receipt
+                self._prune_records()
             return {
                 "schemaVersion": WORKFLOW_SCHEMA_VERSION,
                 "tool": "ue_apply_asset_property_live",
@@ -1582,9 +1737,10 @@ class PatchWorkflowService:
                 "saved": False,
                 "diskRevisionChanged": False,
                 "undoAvailableInEditor": bool(live_result.get("transactionRecorded")),
+                "liveApplyReceipt": live_apply_receipt,
                 "result": live_result,
                 "nextStep": (
-                    "Inspect or Undo the in-editor change. To persist it, preview ue_save_authorized_asset for this exact asset."
+                    "Verify, Save, or Undo the in-editor change. To persist it, preview ue_save_authorized_asset for this exact asset."
                     if changed
                     else "No value change was required."
                 ),
@@ -2142,6 +2298,12 @@ class PatchWorkflowService:
                 if after_revision != before_revision
                 else self.freshness.inspect_asset(asset_path)
             )
+            live_receipt = self._live_apply_by_asset.get(asset_path)
+            if live_receipt is not None:
+                live_record = self._live_applies.get(live_receipt)
+                if live_record is not None:
+                    live_record.saved = True
+                    live_record.save_receipt = save_receipt
             return {
                 "schemaVersion": WORKFLOW_SCHEMA_VERSION,
                 "tool": "ue_save_authorized_asset",
@@ -2158,9 +2320,204 @@ class PatchWorkflowService:
                 "backupManifestId": manifest_path.name,
                 "editorSessionId": editor_session_id,
                 "editorProcessId": editor_process_id,
+                "liveApplyReceipt": live_receipt or "",
+                "liveWriteSaved": live_receipt is not None,
                 "bridge": _safe_report(bridge_result, configured_paths=self.configured_paths),
                 "indexFreshness": freshness_after,
-                "nextStep": "Call ue_refresh_asset_index to preview and activate a paired snapshot generation when the Revision changed.",
+                "nextStep": (
+                    "Call ue_verify_live_write for this exact asset to close the loop with an "
+                    "independent reload, Revision, and memory Task Record, then refresh the asset index."
+                ),
+            }
+
+    def verify_live_write(self, asset_path: str) -> dict[str, Any]:
+        with self._lock:
+            if not self.config.commit_enabled:
+                raise WorkflowError(
+                    "live-editor-write-disabled",
+                    "Live Editor write verification requires Commit tools to be enabled when the MCP server starts.",
+                )
+            if self.live_editor_service is None:
+                raise WorkflowError(
+                    "live-editor-required",
+                    "Live Editor mode is required to verify an in-editor asset property write.",
+                )
+            asset_path = self._validate_refresh_asset_path(asset_path)
+            receipt = self._live_apply_by_asset.get(asset_path)
+            record = self._live_applies.get(receipt) if receipt is not None else None
+            if record is None:
+                raise WorkflowError(
+                    "live-write-verify-not-found",
+                    "No confirmed live write is pending for this asset in this MCP server session.",
+                )
+            try:
+                inspection = self.live_editor_service.call_tool("ue_inspect_asset_live", {"assetPath": asset_path})
+            except Exception as exc:
+                raise WorkflowError("live-editor-status-unavailable", "The target asset could not be inspected before verification.") from exc
+            result = inspection.get("result", {}) if isinstance(inspection, dict) else {}
+            memory = result.get("memory", {}) if isinstance(result, dict) else {}
+            if not isinstance(memory, dict) or memory.get("loaded") is not True:
+                raise WorkflowError(
+                    "live-editor-write-verify-not-loaded",
+                    "The exact asset is no longer loaded in the Editor; re-open it before verification.",
+                )
+            if memory.get("packageDirty") is True:
+                # The live write is still unsaved in Editor memory: the closed loop
+                # must not fake success. Report the terminal not-saved state with
+                # Undo/Discard still available and an unchanged Revision.
+                freshness = self.freshness.inspect_asset(asset_path)
+                current_revision = str(freshness.get("diskRevision", ""))
+                report_id = f"live-write-not-saved:{receipt}"
+                memory_task_evidence = _live_write_memory_task_evidence(
+                    record,
+                    state="not-saved",
+                    conclusion=(
+                        f"The live write {record.plan_id} on {asset_path} is still unsaved in "
+                        f"Editor memory; the package is Dirty and Undo/Discard remain available. "
+                        f"No disk Revision changed."
+                    ),
+                    outcome="cancelled",
+                    revision=current_revision,
+                    report_id=report_id,
+                    undo_available=True,
+                )
+                return {
+                    "schemaVersion": WORKFLOW_SCHEMA_VERSION,
+                    "tool": "ue_verify_live_write",
+                    "ok": True,
+                    "mode": "LiveVerify",
+                    "state": "not-saved",
+                    "assetPath": asset_path,
+                    "planId": record.plan_id,
+                    "patchDigest": record.plan_digest,
+                    "operation": record.operation,
+                    "valueKind": record.value_kind,
+                    "liveApplyReceipt": receipt,
+                    "transactionId": record.transaction_id,
+                    "undoAvailable": True,
+                    "saved": False,
+                    "verified": False,
+                    "diskRevision": current_revision,
+                    "reportId": report_id,
+                    "memoryTaskEvidence": memory_task_evidence,
+                    "memoryRecorded": False,
+                    "indexFreshness": freshness,
+                    "nextStep": (
+                        "The write is not persisted. Persist it with ue_save_authorized_asset "
+                        "(Preview then Commit) or revert it with ue_undo_asset_property_live / "
+                        "ue_discard_asset_property_live, then verify again."
+                    ),
+                }
+
+            if not record.saved:
+                raise WorkflowError(
+                    "live-write-verify-save-unauthorized",
+                    "The target package became clean without a confirmed authorized save; the "
+                    "asset or Session state diverged after the live write. Re-plan the write.",
+                    details={"liveApplyReceipt": receipt},
+                )
+            output = self._safe_work_path("verify-live-write", receipt)
+            if output.exists():
+                shutil.rmtree(output)
+            output.mkdir(parents=True, exist_ok=False)
+            asset_package = asset_path.split(".", 1)[0]
+            result = self._run_script(
+                "RunAssetCatalog.ps1",
+                [
+                    "-EngineRoot", str(self.config.engine_root),
+                    "-ProjectPath", str(self.config.project_path),
+                    "-Asset", asset_package,
+                    "-Output", str(output),
+                ],
+                stage="live-write-verify-export",
+                report_path=output / "manifest.json",
+            )
+            if result.exit_code != 0:
+                self._raise_process_failure(
+                    stage="live-write-verify-export",
+                    result=result,
+                    report_path=output / "manifest.json",
+                    fallback_code="live-write-verify-export-failed",
+                    fallback_message="The independent Unreal reload export failed for the live write.",
+                )
+            canonical_files = list((output / "canonical").rglob("*.json"))
+            if len(canonical_files) != 1:
+                raise WorkflowError("live-write-verify-export-invalid", "Independent reload did not produce exactly one Canonical asset.")
+            canonical = _read_json(canonical_files[0], stage="live-write-verify-canonical")
+            revision = canonical.get("revision", {})
+            actual_revision = revision.get("value", "") if isinstance(revision, dict) else ""
+            if canonical.get("assetPath") != asset_path or not actual_revision.startswith("sha256:"):
+                raise WorkflowError(
+                    "live-write-verify-revision-mismatch",
+                    "Independent Unreal reload did not match the live write target asset and Revision.",
+                    details={"expectedAsset": asset_path, "actualAsset": canonical.get("assetPath", "")},
+                )
+            freshness = self.freshness.inspect_asset(asset_path)
+            if str(freshness.get("diskRevision", "")) != actual_revision:
+                raise WorkflowError(
+                    "live-write-verify-revision-mismatch",
+                    "The independent reload Revision does not match the current disk Package Revision.",
+                    details={"diskRevision": freshness.get("diskRevision", ""), "actualRevision": actual_revision},
+                )
+            if str(freshness.get("indexRevision", "")) == actual_revision:
+                raise WorkflowError(
+                    "live-write-verify-revision-unchanged",
+                    "The disk Package Revision is unchanged from the frozen index; the live write was not persisted.",
+                )
+            exported_value = _live_write_exported_value(canonical, record)
+            if not _live_write_exported_matches(record.after_value, exported_value):
+                raise WorkflowError(
+                    "live-write-verify-value-mismatch",
+                    "The independently reloaded asset value does not match the applied live write value; "
+                    "the asset changed after the live write.",
+                    details={"expectedValue": record.after_value, "exportedValue": exported_value},
+                )
+            record.verified = True
+            verification_report_id = _report_id("live-write-verify-export", output / "manifest.json")
+            memory_task_evidence = _live_write_memory_task_evidence(
+                record,
+                state="verified",
+                conclusion=(
+                    f"The live write {record.plan_id} on {asset_path} was authorized-saved and "
+                    f"independently reloaded at Revision {actual_revision}; the exported value "
+                    f"matches the applied value and the live write is no longer undoable in the Editor."
+                ),
+                outcome="succeeded",
+                revision=actual_revision,
+                report_id=verification_report_id,
+                undo_available=False,
+            )
+            return {
+                "schemaVersion": WORKFLOW_SCHEMA_VERSION,
+                "tool": "ue_verify_live_write",
+                "ok": True,
+                "mode": "LiveVerify",
+                "state": "verified",
+                "assetPath": asset_path,
+                "planId": record.plan_id,
+                "patchDigest": record.plan_digest,
+                "operation": record.operation,
+                "valueKind": record.value_kind,
+                "liveApplyReceipt": receipt,
+                "transactionId": record.transaction_id,
+                "undoAvailable": False,
+                "saved": True,
+                "verified": True,
+                "expectedValue": record.after_value,
+                "exportedValue": exported_value,
+                "expectedDiskRevision": str(freshness.get("diskRevision", "")),
+                "actualRevision": actual_revision,
+                "assetClass": canonical.get("assetClass", ""),
+                "packageDirty": False,
+                "reportId": verification_report_id,
+                "memoryTaskEvidence": memory_task_evidence,
+                "memoryRecorded": False,
+                "indexFreshness": freshness,
+                "nextStep": (
+                    "If Project Memory is enabled, pass memoryTaskEvidence.arguments unchanged to "
+                    "ue_memory_record_task to persist the closed-loop Task Record, then call "
+                    "ue_refresh_asset_index to activate the new Revision."
+                ),
             }
 
     def rollback_patch(

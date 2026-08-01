@@ -1,0 +1,47 @@
+{
+  "schemaVersion": "1.0",
+  "root": "/Game/UEAgentKitWriteTests/ClosedLoop",
+  "fixtures": [
+    {
+      "id": "closedloop-scalar-asset",
+      "kind": "scalarAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/ClosedLoop/DA_Scalar",
+      "expectedClass": "/Script/UEAgentKitEditor.UEAgentKitScalarWriteFixtureAsset"
+    },
+    {
+      "id": "closedloop-material-parent",
+      "kind": "materialParentAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/ClosedLoop/M_Source",
+      "expectedClass": "/Script/Engine.Material",
+      "parameters": {
+        "Scalar": ["EmissiveIntensity"]
+      }
+    },
+    {
+      "id": "closedloop-material-asset",
+      "kind": "materialAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/ClosedLoop/MI_Scalar",
+      "expectedClass": "/Script/Engine.MaterialInstanceConstant",
+      "parentAsset": "/Game/UEAgentKitWriteTests/ClosedLoop/M_Source",
+      "values": {
+        "Scalar": {
+          "EmissiveIntensity": 0.25
+        }
+      }
+    },
+    {
+      "id": "closedloop-datatable-asset",
+      "kind": "dataTableAsset",
+      "targetAsset": "/Game/UEAgentKitWriteTests/ClosedLoop/DT_Target",
+      "expectedClass": "/Script/Engine.DataTable",
+      "rowStruct": "/Script/UEAgentKitEditor.UEAgentKitDataTableFixtureRow",
+      "rows": {
+        "RowAlpha": {
+          "Count": 1,
+          "Label": "Alpha",
+          "bEnabled": true
+        }
+      }
+    }
+  ]
+}
