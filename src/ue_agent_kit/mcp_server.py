@@ -35,6 +35,7 @@ from .mcp_memory_tools import register_memory_tools
 from .mcp_query_tools import register_query_tools
 from .mcp_realtime_tools import register_realtime_tools
 from .mcp_workflow_tools import register_workflow_tools
+from .realtime_tasks import register_batch_task_tools
 from .memory_service import ProjectMemoryService, ProjectMemoryServiceError
 from .patches import get_operation_registry
 from .query_protocol import (
@@ -81,8 +82,9 @@ def _server_instructions(
         "and ue_find_references for dependency and Blueprint reference edges. "
     )
     live_text = (
-        "The ue_editor_* and ue_get_* live tools read registered state from the fixed local Unreal Editor Bridge; "
-        "they never accept endpoints, tokens, filesystem paths, arbitrary UObject calls, Console commands, Python, or Shell. "
+        "The ue_editor_*, ue_get_*, and bounded Batch Task live tools operate on the fixed local Unreal Editor "
+        "Bridge; they never accept endpoints, tokens, filesystem paths, arbitrary UObject calls, Console commands, "
+        "Python, or Shell. "
         if live_editor_enabled
         else "Live Editor access is not configured. "
     )
@@ -261,6 +263,26 @@ def _capabilities_response(
                 "durationMsReported": True,
                 "suggestedNextActions": True,
             },
+            "batchTasks": {
+                "available": live_editor_enabled,
+                "startTool": "ue_start_batch_task" if live_editor_enabled else "",
+                "statusTool": "ue_get_batch_task" if live_editor_enabled else "",
+                "cancelTool": "ue_cancel_batch_task" if live_editor_enabled else "",
+                "concurrentTasks": 1,
+                "operations": ["scanCurrentWorld"],
+                "maxActors": 10000,
+                "maxComponentsPerActor": 500,
+                "maxDetailedActors": 200,
+                "maxActorClassesReported": 50,
+                "timeoutSecondsMax": 300,
+                "frameStepped": True,
+                "cancellable": True,
+                "worldInvalidationDetected": True,
+                "loadsAssets": False,
+                "savesPackages": False,
+                "modifiesSelection": False,
+                "perActorMcpCalls": False,
+            },
         },
         "projectMemory": {
             "configured": memory_enabled,
@@ -349,6 +371,12 @@ def _capabilities_response(
             "liveCompileBlueprintStates": 100,
             "liveBlueprintSelectedNodes": 100,
             "liveAssetPathLength": 512,
+            "liveBatchConcurrentTasks": 1,
+            "liveBatchMaxActors": 10000,
+            "liveBatchMaxComponentsPerActor": 500,
+            "liveBatchMaxDetailedActors": 200,
+            "liveBatchMaxActorClasses": 50,
+            "liveBatchTimeoutSecondsMax": 300,
             "memorySearchResults": 100,
         },
         "responseContract": {
@@ -514,6 +542,8 @@ _RETRYABLE_ERROR_CODES = {
     "live-editor-unavailable",
     "live-editor-timeout",
     "live-editor-connection-closed",
+    "live-editor-batch-task-busy",
+    "live-editor-batch-task-failed",
 }
 
 
@@ -543,6 +573,11 @@ def _suggested_action(code: str) -> str:
         "live-editor-authentication-failed": "Restart the Editor and MCP Server so a new local authenticated session is negotiated.",
         "live-editor-capability-unavailable": "Use only the registered Live Editor capabilities reported by ue_get_capabilities.",
         "live-editor-invalid-parameters": "Use the bounded Live Editor Tool schema and an exact /Game Object Path where required.",
+        "live-editor-batch-task-busy": "Poll the active Batch Task with ue_get_batch_task; only one task runs at a time.",
+        "live-editor-batch-task-not-found": "Start a Batch Task with ue_start_batch_task and use its returned taskId for status or cancel.",
+        "live-editor-batch-task-world-invalidated": "Restart the Batch Task after the World or session stabilized.",
+        "live-editor-batch-task-timeout": "Restart the Batch Task with a larger timeoutSeconds or a smaller scan bound.",
+        "live-editor-batch-task-failed": "Retry with a smaller bounded scan after reviewing the sanitized task error.",
         "snapshot-refresh-restart-required": "Restart the MCP server so the new paired snapshot generation becomes the frozen session snapshot.",
         "memory-project-mismatch": "Use the Project Memory service fixed to the active index Project Key.",
         "memory-record-project-mismatch": "Use a record ID that belongs to the fixed Project Memory project.",
@@ -708,6 +743,13 @@ def create_mcp_server(
             server=server,
             live_editor_service=live_editor_service,
             read_annotations=read_annotations,
+            error_response=_error_response,
+        )
+        register_batch_task_tools(
+            server=server,
+            live_editor_service=live_editor_service,
+            read_annotations=read_annotations,
+            tool_annotations_type=ToolAnnotations,
             error_response=_error_response,
         )
     if workflow_service is not None:

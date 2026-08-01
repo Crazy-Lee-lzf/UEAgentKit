@@ -1,4 +1,5 @@
 #include "EditorBridge.h"
+#include "EditorBridgeBatchTaskManager.h"
 #include "EditorBridgeHandlerUtils.h"
 #include "EditorBridgeLogCapture.h"
 
@@ -54,6 +55,9 @@ namespace UEAgentKitEditorBridgePrivate
 		TEXT("editor.inspectAssetLive"),
 		TEXT("editor.getBlueprintGraphSelection"),
 		TEXT("editor.getEditorContext"),
+		TEXT("editor.batchTask.start"),
+		TEXT("editor.batchTask.status"),
+		TEXT("editor.batchTask.cancel"),
 		TEXT("editor.openAsset"),
 		TEXT("editor.focusAsset"),
 		TEXT("editor.syncContentBrowser"),
@@ -476,6 +480,7 @@ bool FUEAgentKitEditorBridge::Start()
 	AuthToken = FGuid::NewGuid().ToString(EGuidFormats::Digits) + FGuid::NewGuid().ToString(EGuidFormats::Digits);
 	SessionId = FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphensLower);
 	LiveWriteTransactionRecords.Reset();
+	BatchTaskManager = MakeUnique<UEAgentKitBatchTaskPrivate::FBatchTaskManager>();
 	ProjectPathHash = ComputeProjectPathHash();
 	LogCapture = MakeUnique<FUEAgentKitEditorBridgeLogCapture>();
 	LogCapture->Start();
@@ -532,6 +537,7 @@ void FUEAgentKitEditorBridge::Stop()
 		LogCapture->Stop();
 		LogCapture.Reset();
 	}
+	BatchTaskManager.Reset();
 	RemoveDescriptor();
 	ListenPort = 0;
 	AuthToken.Reset();
@@ -550,6 +556,10 @@ bool FUEAgentKitEditorBridge::Tick(float DeltaTime)
 	AcceptConnections();
 	PumpConnections();
 	TickAutomationTest();
+	if (BatchTaskManager.IsValid())
+	{
+		BatchTaskManager->Tick();
+	}
 	return true;
 }
 
@@ -806,6 +816,58 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 	else if (Method == TEXT("editor.getEditorContext"))
 	{
 		SendResult(Client.Socket, RequestId, BuildEditorContextResult());
+	}
+	else if (Method == TEXT("editor.batchTask.start"))
+	{
+		FString Operation;
+		Params->TryGetStringField(TEXT("operation"), Operation);
+		double MaxActorsValue = 2000.0;
+		double MaxComponentsValue = 200.0;
+		double TimeoutValue = 60.0;
+		Params->TryGetNumberField(TEXT("maxActors"), MaxActorsValue);
+		Params->TryGetNumberField(TEXT("maxComponentsPerActor"), MaxComponentsValue);
+		Params->TryGetNumberField(TEXT("timeoutSeconds"), TimeoutValue);
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode;
+		FString ErrorMessage;
+		SendActionResult(
+			TryStartBatchTask(
+				Operation,
+				FMath::Clamp(static_cast<int32>(MaxActorsValue), 1, UEAgentKitBatchTaskPrivate::MaxActorsPerScan),
+				FMath::Clamp(static_cast<int32>(MaxComponentsValue), 1, UEAgentKitBatchTaskPrivate::MaxComponentsPerActorLimit),
+				FMath::Clamp(static_cast<int32>(TimeoutValue), 1, UEAgentKitBatchTaskPrivate::MaxTimeoutSeconds),
+				Result,
+				ErrorCode,
+				ErrorMessage),
+			Result,
+			ErrorCode,
+			ErrorMessage);
+	}
+	else if (Method == TEXT("editor.batchTask.status"))
+	{
+		FString TaskId;
+		Params->TryGetStringField(TEXT("taskId"), TaskId);
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode;
+		FString ErrorMessage;
+		SendActionResult(
+			BuildBatchTaskStatusResult(TaskId, Result, ErrorCode, ErrorMessage),
+			Result,
+			ErrorCode,
+			ErrorMessage);
+	}
+	else if (Method == TEXT("editor.batchTask.cancel"))
+	{
+		FString TaskId;
+		Params->TryGetStringField(TEXT("taskId"), TaskId);
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode;
+		FString ErrorMessage;
+		SendActionResult(
+			BuildBatchTaskCancelResult(TaskId, Result, ErrorCode, ErrorMessage),
+			Result,
+			ErrorCode,
+			ErrorMessage);
 	}
 	else if (Method == TEXT("editor.openAsset")
 		|| Method == TEXT("editor.focusAsset")

@@ -7,6 +7,10 @@
 class FJsonObject;
 class FSocket;
 class FUEAgentKitEditorBridgeLogCapture;
+namespace UEAgentKitBatchTaskPrivate
+{
+	class FBatchTaskManager;
+}
 namespace UEAgentKitLiveWrite
 {
 	struct FLiveWriteTransactionRecord;
@@ -71,6 +75,24 @@ private:
 	TSharedRef<FJsonObject> BuildInspectAssetLiveResult(const FString& AssetPath) const;
 	TSharedRef<FJsonObject> BuildBlueprintGraphSelectionResult() const;
 	TSharedRef<FJsonObject> BuildEditorContextResult() const;
+	bool TryStartBatchTask(
+		const FString& Operation,
+		int32 MaxActors,
+		int32 MaxComponentsPerActor,
+		int32 TimeoutSeconds,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage);
+	bool BuildBatchTaskStatusResult(
+		const FString& TaskId,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage);
+	bool BuildBatchTaskCancelResult(
+		const FString& TaskId,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage);
 
 	bool TryOpenAssetResult(const FString& AssetPath, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
 	bool TryFocusAssetResult(const FString& AssetPath, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
@@ -141,6 +163,8 @@ private:
 	FString DescriptorPath;
 	int32 ListenPort = 0;
 	TUniquePtr<FUEAgentKitEditorBridgeLogCapture> LogCapture;
+	// One frame-stepped Batch Task at a time; cleared on bridge start.
+	TUniquePtr<UEAgentKitBatchTaskPrivate::FBatchTaskManager> BatchTaskManager;
 	FPendingAutomationRun PendingAutomation;
 	// Confirmed live write transactions per exact asset path; cleared on bridge start.
 	mutable TMap<FString, TMap<FGuid, TSharedPtr<UEAgentKitLiveWrite::FLiveWriteTransactionRecord>>> LiveWriteTransactionRecords;

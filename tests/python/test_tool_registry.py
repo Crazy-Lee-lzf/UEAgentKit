@@ -53,6 +53,9 @@ EXPECTED_ALL_TOOLS = [
     "ue_validate_folder",
     "ue_run_automation_test",
     "ue_get_editor_context",
+    "ue_start_batch_task",
+    "ue_get_batch_task",
+    "ue_cancel_batch_task",
     "ue_set_blueprint_default",
     "ue_set_component_property",
     "ue_set_pin_default",
@@ -87,7 +90,7 @@ class ToolRegistryTests(unittest.TestCase):
             EXPECTED_ALL_TOOLS,
         )
         self.assertEqual(len(tool_names_for_mode()), 5)
-        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 24)
+        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 27)
         self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 29)
         self.assertEqual(
             tool_names_for_mode(memory_enabled=True),
@@ -96,7 +99,7 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 12)
         self.assertEqual(
             len(tool_names_for_mode(live_editor_enabled=True, memory_enabled=True)),
-            31,
+            34,
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
@@ -110,7 +113,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-            55,
+            58,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:
@@ -134,6 +137,9 @@ class ToolRegistryTests(unittest.TestCase):
             "BuildInspectAssetLiveResult": "EditorBridgeAssetHandlers.cpp",
             "BuildBlueprintGraphSelectionResult": "EditorBridgeGraphHandlers.cpp",
             "BuildEditorContextResult": "EditorBridgeContextHandlers.cpp",
+            "TryStartBatchTask": "EditorBridgeBatchTaskHandlers.cpp",
+            "BuildBatchTaskStatusResult": "EditorBridgeBatchTaskHandlers.cpp",
+            "BuildBatchTaskCancelResult": "EditorBridgeBatchTaskHandlers.cpp",
             "TryOpenAssetResult": "EditorBridgeNavigationHandlers.cpp",
             "TryCompileBlueprintResult": "EditorBridgeValidationHandlers.cpp",
             "TryStartAutomationTest": "EditorBridgeAutomationHandlers.cpp",
@@ -150,12 +156,22 @@ class ToolRegistryTests(unittest.TestCase):
                 (private_root / filename).read_text(encoding="utf-8"),
                 filename,
             )
+        manager_cpp = (private_root / "EditorBridgeBatchTaskManager.cpp").read_text(encoding="utf-8")
+        for symbol in (
+            "FBatchTaskManager::Tick",
+            "FBatchTaskManager::StartScanCurrentWorld",
+            "FBatchTaskManager::Status",
+            "FBatchTaskManager::Cancel",
+            "FBatchTaskManager::BuildSnapshot",
+        ):
+            self.assertIn(symbol, manager_cpp, symbol)
+            self.assertNotIn(f"FUEAgentKitEditorBridge::{symbol}", manager_cpp, symbol)
 
     def test_registry_drives_live_methods_annotations_and_descriptors(self) -> None:
         names = [definition.name for definition in TOOL_REGISTRY]
         self.assertEqual(len(names), len(set(names)))
         self.assertEqual(set(names), set(TOOL_DEFINITIONS_BY_NAME))
-        self.assertEqual(list(LIVE_EDITOR_METHODS), EXPECTED_ALL_TOOLS[5:24])
+        self.assertEqual(list(LIVE_EDITOR_METHODS), EXPECTED_ALL_TOOLS[5:27])
         self.assertEqual(
             TOOL_DEFINITIONS_BY_NAME["ue_get_editor_context"].live_method,
             "editor.getEditorContext",
@@ -165,11 +181,31 @@ class ToolRegistryTests(unittest.TestCase):
             TOOL_DEFINITIONS_BY_NAME["ue_get_editor_context"].group,
             "realtime",
         )
+        self.assertEqual(
+            TOOL_DEFINITIONS_BY_NAME["ue_start_batch_task"].live_method,
+            "editor.batchTask.start",
+        )
+        self.assertEqual(
+            TOOL_DEFINITIONS_BY_NAME["ue_get_batch_task"].live_method,
+            "editor.batchTask.status",
+        )
+        self.assertEqual(
+            TOOL_DEFINITIONS_BY_NAME["ue_cancel_batch_task"].live_method,
+            "editor.batchTask.cancel",
+        )
+        self.assertEqual(TOOL_DEFINITIONS_BY_NAME["ue_start_batch_task"].group, "realtime")
+        self.assertEqual(TOOL_DEFINITIONS_BY_NAME["ue_get_batch_task"].group, "realtime")
+        self.assertEqual(TOOL_DEFINITIONS_BY_NAME["ue_cancel_batch_task"].group, "realtime")
+        self.assertTrue(TOOL_DEFINITIONS_BY_NAME["ue_get_batch_task"].read_only)
+        self.assertFalse(TOOL_DEFINITIONS_BY_NAME["ue_start_batch_task"].read_only)
+        self.assertFalse(TOOL_DEFINITIONS_BY_NAME["ue_cancel_batch_task"].read_only)
         self.assertNotIn("ue_get_editor_context", tool_names_for_mode(workflow_enabled=True))
         self.assertIn(
             "ue_get_editor_context",
             tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True),
         )
+        self.assertIn("ue_start_batch_task", tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True))
+        self.assertNotIn("ue_start_batch_task", tool_names_for_mode(workflow_enabled=True))
         self.assertEqual(
             EXPECTED_ALL_TOOLS[5:23],
             [
@@ -223,6 +259,7 @@ class ToolRegistryTests(unittest.TestCase):
             encoding="utf-8"
         )
         save = (private_root / "EditorBridgeSaveHandlers.cpp").read_text(encoding="utf-8")
+        core = (private_root / "EditorBridge.cpp").read_text(encoding="utf-8")
         live_write = (private_root / "EditorBridgeWriteHandlers.cpp").read_text(encoding="utf-8")
         live_common = (private_root / "LiveWriteOperationCommon.cpp").read_text(encoding="utf-8")
         live_registry = (private_root / "LiveWriteOperationRegistry.cpp").read_text(encoding="utf-8")
@@ -400,6 +437,54 @@ class ToolRegistryTests(unittest.TestCase):
             "nextActions",
         ):
             self.assertIn(required, context_handler)
+
+        # The Batch Task manager and its scan handler must remain read-only and
+        # frame-stepped: bounded actor/component limits, progress, cancel, and
+        # world/session invalidation, with no asset loading, save, or selection.
+        batch_manager = (private_root / "EditorBridgeBatchTaskManager.cpp").read_text(encoding="utf-8")
+        batch_handlers = (private_root / "EditorBridgeBatchTaskHandlers.cpp").read_text(encoding="utf-8")
+        batch_manager_header = (private_root / "EditorBridgeBatchTaskManager.h").read_text(encoding="utf-8")
+        for forbidden in (
+            "LoadObject",
+            "StaticLoadObject",
+            "UPackage::SavePackage",
+            "SavePackage",
+            "ConsoleCommand",
+            "ProcessEvent",
+            "CallFunctionByName",
+            "SetSelected",
+            "ClearSelection",
+            "MarkPackageDirty",
+            "FScopedTransaction",
+        ):
+            self.assertNotIn(forbidden, batch_manager + batch_handlers)
+        for required in (
+            "TActorIterator",
+            "GetComponents()",
+            "MaxActorsPerTick",
+            "IsValid(Actor)",
+            "live-editor-batch-task-world-invalidated",
+            "live-editor-batch-task-timeout",
+            "completedPercent",
+            "estimatedRemainingSeconds",
+            "bActorLimitReached",
+            "ComponentLimitActorCount",
+            "MaxDetailedActors",
+            "MaxActorClassesReported",
+            "MaxConcurrentTasks",
+            "live-editor-batch-task-busy",
+            "live-editor-batch-task-not-found",
+            "TEXT(\"scanCurrentWorld\")",
+            "IsSafeTaskId",
+        ):
+            self.assertIn(required, batch_manager + batch_handlers + batch_manager_header)
+        for method in (
+            "editor.batchTask.start",
+            "editor.batchTask.status",
+            "editor.batchTask.cancel",
+        ):
+            self.assertIn(f'TEXT("{method}")', core)
+            self.assertNotIn(f"TEXT(\"{method}\")", batch_manager + batch_handlers)
 
 
 if __name__ == "__main__":
