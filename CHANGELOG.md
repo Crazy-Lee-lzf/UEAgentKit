@@ -4,6 +4,11 @@ All notable changes to UE Agent Kit are documented here.
 
 ## Unreleased
 
+- Refactored Live Editor Write into a registry-driven architecture intended to scale beyond the current 12 Operations: generic JSON `target` requests, central asset requirements, separate Property/Material/DataTable domain executors, and a shared Transaction/Evidence layer replace the former monolithic hard-coded dispatcher while retaining legacy flattened Target fields for compatibility.
+- Added metadata-driven Python Live Write dispatch and independent verification through `OperationSpec`, eliminating the duplicate 12-operation whitelist and per-kind Target branching.
+- Added a fixed-work-root Live Apply Journal with strict startup recovery, exact `liveApplyReceipt` verification, truthful `journalPersisted` reporting, and automatic closeout after Undo/Discard or successful independent Verify.
+- Added Fast and Full Live Write regression suites and explicit status version semantics: published protocol/package version 0.6.0, current development line 0.7.0-dev.
+
 - Documented the adopted layered Project Memory architecture: arbitrary-depth Knowledge Tree, separate Active Work/TODO, five-level progressive disclosure, server-enforced token budgets, MCP-primary/thin-Skill usage, and one-local-MCP-per-developer plus shared knowledge-service collaboration.
 
 - Added current project-status and roadmap documents covering implemented reads/writes, explicit gaps, Live Editor Write priorities, Context/Analysis, and collaboration direction.

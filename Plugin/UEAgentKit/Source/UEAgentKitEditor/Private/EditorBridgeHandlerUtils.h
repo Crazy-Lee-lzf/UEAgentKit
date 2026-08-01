@@ -12,6 +12,7 @@ class UWorld;
 namespace UEAgentKitEditorBridgePrivate
 {
 	extern const TCHAR* const PluginVersion;
+	extern const TCHAR* const DevelopmentLine;
 
 	inline constexpr int32 MaxSelectionItems = 200;
 	inline constexpr int32 MaxOpenAssets = 200;

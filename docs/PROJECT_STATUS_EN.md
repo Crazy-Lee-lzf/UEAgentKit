@@ -2,11 +2,11 @@
 
 
 
-Updated: 2026-07-31
+Updated: 2026-08-01
 
 
 
-This document describes the current `main` development snapshot. The latest published release remains **0.6.0** for Unreal Engine 5.6. The first Live Editor Write vertical slice has been completed after 0.6.0 but has not yet been published as a new release.
+This document describes the current **0.7.0-dev** development line on `main`. The latest published release remains **0.6.0** for Unreal Engine 5.6. Live Editor Write, explicit Undo/Discard, the authorized-save closeout, the recoverable journal, and the scalable Operation Registry have not yet been published.
 
 
 
@@ -144,37 +144,27 @@ Open/focus assets, synchronize Content Browser, focus an ActorGuid, compile a Bl
 
 
 
-### First Live Editor Write
+### Live Editor Write foundation
 
-
-
-The current `ue_apply_asset_property_live` vertical slice is:
-
-
+Current closeout:
 
 ```text
-
-Policy/Revision Plan
-
+Policy / Revision Plan
 → exact LIVE APPLY confirmation
-
-→ Game Thread UObject mutation
-
-→ FScopedTransaction / Modify
-
-→ PostEditChangeProperty
-
-→ Package Dirty
-
-→ no automatic save
-
+→ registered Operation executor
+→ FScopedTransaction / Snapshot / Dirty
+→ explicit Undo / Discard, or Authorized Save
+→ independent Unreal reload Verify
+→ Memory Evidence
 ```
 
+The current `0.7.0-dev` registry exposes 12 controlled Operations: Data Asset scalar/reference/Struct/Array/Set/Map values, Material Instance Scalar/Vector/Texture/Static Switch parameters, and DataTable Cell/RowFields/Add/Remove/Rename. It still requires an already loaded, open, initially clean, non-Blueprint, non-map `/Game` asset and rejects arbitrary UObject methods, nested property paths, PIE/SIE mutation, automatic saves, and unauthorized writes.
 
+To scale toward hundreds of Operations, the central Bridge now receives generic `operation + assetPath + target + value` requests and dispatches through `LiveWriteOperationRegistry`. Property, Material, and DataTable logic live in separate domain modules; a shared Transaction/Evidence layer owns snapshots, no-op behavior, failure restoration, Dirty state, and Undo. Python `OperationSpec` metadata drives target validation, valueKind, and independent post-save verification instead of maintaining another hard-coded whitelist.
 
-The current `main` snapshot (not part of the 0.6.0 release) supports three explicit Operations on an already loaded, open, clean, non-Blueprint, non-map asset: `setAssetProperty` for one top-level scalar, enum, String, Name, or Text property, `setAssetReferenceProperty` for one Data Asset top-level Object, Class, SoftObject, or SoftClass reference property (JSON `null` clears the reference), and `setAssetStructuredProperty` for one Data Asset top-level Struct, Array, Set, or Map property (reusing the StructuredPropertyJson schema/import/export/diff path and rejecting fixed arrays and non-structured properties). The change enters the Unreal Undo stack while disk Package, SQLite, and Revision Export remain unchanged; failures restore the original value and Dirty state and cancel the Transaction, no-op applies create no Undo or Dirty, and the Tool never auto-saves. Blueprint, container, Material Instance, and DataTable live apply remain unsupported.
+A fixed-work-root journal persists pending Live Apply receipts. A restarted MCP server can recover strictly validated records, Verify can select an exact `liveApplyReceipt`, and successful Undo/Discard/Verify closes the record. Journal I/O failure never turns an already successful Editor mutation into a false failure.
 
-
+Real regressions are split into Fast (Scalar, Undo/Discard, Closed Loop) and Full (all seven groups). The published protocol/package version remains 0.6.0 while status explicitly reports `developmentLine=0.7.0-dev`.
 
 ### Persistent controlled writes
 
@@ -266,21 +256,14 @@ These are intentional scope and safety boundaries, not documentation omissions.
 
 
 
-### P0: complete the Live Editor Write foundation
+### P0: expand Live Editor Operation coverage
 
+The Live Editor Write foundation, Material/DataTable support, Undo/Discard, Save→Verify→Memory closeout, and registry-based extension architecture are complete. New capabilities should now be added per asset domain without expanding the central dispatcher. Every new Operation must add:
 
-
-- Shared Live Transaction/Evidence framework.
-
-- Controlled live Structured Property changes (Data Asset reference properties are already implemented in the current snapshot).
-
-- Material Instance and DataTable live apply.
-
-- Explicit live Undo/Discard workflow.
-
-- Standard Live Apply → Authorized Save → Verify → Memory Task closure.
-
-
+1. Python `OperationSpec`, Policy authorization, and Plan schema.
+2. A C++ domain executor and Operation Descriptor.
+3. Snapshot, no-op, failure restoration, Dirty, Undo, and independent Verify semantics.
+4. Real UE5.6 success, rejection, restoration, and closeout regressions.
 
 ### P1A: Memory usability and knowledge-tree foundation
 

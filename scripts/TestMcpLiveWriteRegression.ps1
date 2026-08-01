@@ -3,7 +3,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ProjectPath,
     [ValidateRange(30, 300)]
-    [int]$StartupTimeoutSeconds = 120
+    [int]$StartupTimeoutSeconds = 120,
+    [ValidateSet("Fast", "Full")]
+    [string]$Suite = "Full"
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,7 +15,7 @@ $ToolRoot = Get-UeakToolRoot
 $EngineRoot = Resolve-UeakEngineRoot -EngineRoot $EngineRoot
 $ProjectPath = Resolve-UeakProjectPath -ProjectPath $ProjectPath
 
-$SubTests = @(
+$AllSubTests = @(
     @{ Name = "ScalarWrite"; Script = Join-Path $PSScriptRoot "TestMcpLiveWrite.ps1"; OutputDir = "Output\McpLiveWriteSmoke"; BackupDir = "Backups\McpLiveWriteSmoke" },
     @{ Name = "ReferenceWrite"; Script = Join-Path $PSScriptRoot "TestMcpLiveReferenceWrite.ps1"; OutputDir = "Output\McpLiveReferenceWriteSmoke"; BackupDir = "Backups\McpLiveReferenceWriteSmoke" },
     @{ Name = "StructuredWrite"; Script = Join-Path $PSScriptRoot "TestMcpLiveStructuredWrite.ps1"; OutputDir = "Output\McpLiveStructuredWriteSmoke"; BackupDir = "Backups\McpLiveStructuredWriteSmoke" },
@@ -21,9 +23,21 @@ $SubTests = @(
     @{ Name = "DataTableWrite"; Script = Join-Path $PSScriptRoot "TestMcpLiveDataTableWrite.ps1"; OutputDir = "Output\McpLiveDataTableWriteSmoke"; BackupDir = "Backups\McpLiveDataTableWriteSmoke" },
     @{ Name = "UndoDiscard"; Script = Join-Path $PSScriptRoot "TestMcpLiveUndoDiscard.ps1"; OutputDir = "Output\McpLiveUndoDiscardSmoke"; BackupDir = "Backups\McpLiveUndoDiscardSmoke" },
     @{ Name = "ClosedLoop"; Script = Join-Path $PSScriptRoot "TestMcpLiveClosedLoop.ps1"; OutputDir = "Output\McpLiveClosedLoopSmoke"; BackupDir = "Backups\McpLiveClosedLoopSmoke" }
-)
+ )
 
-$RegressionRoot = Join-Path $ToolRoot "Output\McpLiveWriteRegression"
+if ($Suite -eq "Fast")
+{
+    $FastNames = @("ScalarWrite", "UndoDiscard", "ClosedLoop")
+    $SubTests = @($AllSubTests | Where-Object { $FastNames -contains $_.Name })
+    $RegressionDirectory = "McpLiveWriteRegressionFast"
+}
+else
+{
+    $SubTests = $AllSubTests
+    $RegressionDirectory = "McpLiveWriteRegression"
+}
+
+$RegressionRoot = Join-Path $ToolRoot "Output\$RegressionDirectory"
 if (Test-Path -LiteralPath $RegressionRoot)
 {
     Remove-Item -LiteralPath $RegressionRoot -Recurse -Force
@@ -82,4 +96,4 @@ if ($FailedSubtests.Count -gt 0)
     Write-Host "MCP Live Write regression FAILED sub-tests: $($FailedSubtests -join ', ')"
     throw "MCP Live Write regression failed: $($FailedSubtests -join ', ') - logs preserved under $RegressionRoot"
 }
-Write-Host "MCP Live Write regression passed (ScalarWrite, ReferenceWrite, StructuredWrite, MaterialWrite, DataTableWrite, UndoDiscard, ClosedLoop)."
+Write-Host "MCP Live Write $Suite regression passed ($($SubTests.Name -join ", "))."

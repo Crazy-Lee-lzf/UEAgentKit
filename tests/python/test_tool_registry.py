@@ -199,6 +199,12 @@ class ToolRegistryTests(unittest.TestCase):
         )
         save = (private_root / "EditorBridgeSaveHandlers.cpp").read_text(encoding="utf-8")
         live_write = (private_root / "EditorBridgeWriteHandlers.cpp").read_text(encoding="utf-8")
+        live_common = (private_root / "LiveWriteOperationCommon.cpp").read_text(encoding="utf-8")
+        live_registry = (private_root / "LiveWriteOperationRegistry.cpp").read_text(encoding="utf-8")
+        live_property = (private_root / "LiveWritePropertyOperations.cpp").read_text(encoding="utf-8")
+        live_material = (private_root / "LiveWriteMaterialOperations.cpp").read_text(encoding="utf-8")
+        live_data_table = (private_root / "LiveWriteDataTableOperations.cpp").read_text(encoding="utf-8")
+        live_modules = live_write + live_common + live_registry + live_property + live_material + live_data_table
         combined = navigation + validation + automation
         for forbidden in (
             "LoadObject",
@@ -242,15 +248,17 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertIn("UPackage::SavePackage", save)
         self.assertNotIn("SaveAll", save)
         self.assertNotIn("PromptForCheckoutAndSave", save)
-        reference_helpers = live_write.split("bool SetAssetReferenceFromJson(", 1)[1]
-        scalar_section = live_write.split("bool TryApplyScalarPropertyLive(", 1)[1].split("bool TryApplyReferencePropertyLive(", 1)[0]
+        reference_helpers = live_property.split("bool SetAssetReferenceFromJson(", 1)[1]
+        scalar_section = live_property.split("bool TryApplyScalarPropertyLive(", 1)[1].split(
+            "bool TryApplyReferencePropertyLive(", 1
+        )[0]
         # Reference verification is documented to load the target for class validation;
         # the scalar live-write path must remain free of arbitrary object loading.
         self.assertIn("StaticLoadObject", reference_helpers)
         self.assertIn("LoadObject<UClass>", reference_helpers)
         self.assertNotIn("LoadObject", scalar_section)
         self.assertNotIn("StaticLoadObject", scalar_section)
-        self.assertNotIn("SavePackage", live_write)
+        self.assertNotIn("SavePackage", live_modules)
         live_write_frame = (private_root / "LiveWriteTransaction.cpp").read_text(
             encoding="utf-8"
         )
@@ -261,27 +269,55 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertIn("IO->RestoreSnapshot()", live_write_frame)
         self.assertIn("IO->NotifyRestored()", live_write_frame)
         self.assertIn("IO->NotifyChanged()", live_write_frame)
-        self.assertIn("Property->ArrayDim != 1", live_write)
-        self.assertIn("Live Editor writes do not support native fixed-array properties.", live_write)
-        self.assertIn("RunLiveWriteTransaction", live_write)
+        self.assertIn("Property->ArrayDim != 1", live_property)
+        self.assertIn("Live Editor writes do not support native fixed-array properties.", live_property)
+        self.assertIn("RunLiveWriteTransaction", live_modules)
         # The per-target change notification policy lives in the handler IO classes:
         # scalar/reference/structured notify via PostEditChangeProperty, material
         # parameters via the Material Editing Library (which already marks Dirty and
         # refreshes the material instance).
-        self.assertIn("PostEditChangeProperty", live_write)
-        self.assertIn("TryApplyMaterialParameterLive", live_write)
-        self.assertIn("SetMaterialInstanceScalarParameterValue", live_write)
-        self.assertIn("SetMaterialInstanceStaticSwitchParameterValue", live_write)
-        self.assertIn("live-editor-write-material-parameter-not-found", live_write)
-        self.assertIn("TryApplyDataTableLive", live_write)
-        self.assertIn("DataTable->AddRow", live_write)
-        self.assertIn("live-editor-write-data-table-row-not-found", live_write)
+        self.assertIn("PostEditChangeProperty", live_property)
+        self.assertIn("TryApplyMaterialParameterLive", live_material)
+        self.assertIn("SetMaterialInstanceScalarParameterValue", live_material)
+        self.assertIn("SetMaterialInstanceStaticSwitchParameterValue", live_material)
+        self.assertIn("live-editor-write-material-parameter-not-found", live_material)
+        self.assertIn("TryApplyDataTableLive", live_data_table)
+        self.assertIn("DataTable->AddRow", live_data_table)
+        self.assertIn("live-editor-write-data-table-row-not-found", live_data_table)
+        self.assertIn("FLiveWriteOperationRegistry::Get()", live_write)
+        self.assertNotIn("Operation.Equals(TEXT(", live_write)
+        self.assertEqual(
+            live_property.count("Registry.Register({TEXT(")
+            + live_material.count("Registry.Register({TEXT(")
+            + live_data_table.count("Registry.Register({TEXT("),
+            12,
+        )
+        self.assertIn("RegisterPropertyLiveWriteOperations", live_registry)
+        self.assertIn("RegisterMaterialLiveWriteOperations", live_registry)
+        self.assertIn("RegisterDataTableLiveWriteOperations", live_registry)
+        registry_header = (private_root / "LiveWriteOperationRegistry.h").read_text(encoding="utf-8")
+        bridge_header = (private_root / "EditorBridge.h").read_text(encoding="utf-8")
+        bridge_core = (private_root / "EditorBridge.cpp").read_text(encoding="utf-8")
+        self.assertIn("TSharedPtr<FJsonObject> Target", registry_header)
+        self.assertIn("TArray<FString> RequiredTargetFields", registry_header)
+        self.assertIn('TryGetField(TEXT("target"))', bridge_core)
+        bridge_status = (private_root / "EditorBridgeStatusHandlers.cpp").read_text(encoding="utf-8")
+        self.assertIn('SetStringField(TEXT("developmentLine"), DevelopmentLine)', bridge_status)
+        self.assertIn('TEXT("propertyPath")', bridge_core)
+        apply_declaration = bridge_header.split("bool TryApplyAssetPropertyLiveResult(", 1)[1].split(");", 1)[0]
+        self.assertIn("const TSharedPtr<FJsonObject>& Target", apply_declaration)
+        self.assertNotIn("const FString& PropertyPath", apply_declaration)
+        self.assertNotIn("const FString& ParameterName", apply_declaration)
+        self.assertNotIn("const FString& RowName", apply_declaration)
+        self.assertLess(len(live_write), 20000)
+
         # Explicit Undo/Discard must reuse the committed Editor transaction and the
         # retained pre-write snapshot; it must never save the package.
         self.assertIn("GEditor->UndoTransaction", live_write)
         self.assertIn("GetUndoContext(false)", live_write)
         self.assertIn("FLiveWriteTransactionRecord", live_write)
         self.assertIn("LiveWriteTransactionRecords", live_write)
+        self.assertIn("TMap<FString, TMap<FGuid", bridge_header)
         self.assertIn("live-editor-write-undo-not-found", live_write)
         self.assertIn("live-editor-write-undo-stack-mismatch", live_write)
         self.assertIn("live-editor-write-undo-package-saved", live_write)

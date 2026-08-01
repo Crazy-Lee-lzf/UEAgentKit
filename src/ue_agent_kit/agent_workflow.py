@@ -23,7 +23,7 @@ from .database import (
 )
 from .freshness import IndexFreshnessTracker
 from .indexer import build_index
-from .patches import OPERATION_REGISTRY, validate_patch
+from .patches import LIVE_WRITE_OPERATION_REGISTRY, OPERATION_REGISTRY, validate_patch
 from .snapshot_lifecycle import (
     ActiveSnapshot,
     SnapshotLifecycleError,
@@ -38,6 +38,9 @@ from .snapshot_lifecycle import (
 
 WORKFLOW_SCHEMA_VERSION = "1.0"
 MEMORY_TASK_EVIDENCE_SCHEMA_VERSION = "1.0"
+LIVE_WRITE_JOURNAL_SCHEMA_VERSION = "1.0"
+PUBLISHED_VERSION = "0.6.0"
+DEVELOPMENT_LINE = "0.7.0-dev"
 MAX_WORKFLOW_RECORDS = 128
 MAX_PROCESS_OUTPUT_CHARS = 16000
 HIGH_LEVEL_CHANGE_MODES = ("Plan", "DryRun")
@@ -57,26 +60,10 @@ CRASH_MARKERS = (
 )
 CRASH_EXIT_CODES = {-1073741819, -1073741676, -1073740791, 3221225477, 3221225620, 3221226505}
 
-LIVE_WRITE_VALUE_KINDS = {
-    "setAssetProperty": "scalar",
-    "setAssetReferenceProperty": "reference",
-    "setAssetStructuredProperty": "structured",
-    "setMaterialInstanceScalarParameter": "material-scalar",
-    "setMaterialInstanceVectorParameter": "material-vector",
-    "setMaterialInstanceTextureParameter": "material-texture",
-    "setMaterialInstanceStaticSwitchParameter": "material-static-switch",
-    "setDataTableCell": "data-table-cell",
-    "setDataTableRowFields": "data-table-row-fields",
-    "addDataTableRow": "data-table-row-add",
-    "removeDataTableRow": "data-table-row-remove",
-    "renameDataTableRow": "data-table-row-rename",
-}
-
-MATERIAL_PARAMETER_OPERATIONS_NAMES = frozenset(MATERIAL_PARAMETER_OPERATIONS.values())
-
-
 def _live_write_value_kind(operation: str) -> str:
-    return LIVE_WRITE_VALUE_KINDS.get(operation, "unknown")
+    spec = LIVE_WRITE_OPERATION_REGISTRY.get(operation)
+    return spec.live_write_value_kind if spec is not None else "unknown"
+
 
 
 def _is_guid_with_hyphens(value: str) -> bool:
@@ -242,20 +229,20 @@ def _live_write_memory_task_evidence(
 
 def _live_write_exported_value(canonical: dict[str, Any], record: LiveApplyRecord) -> Any:
     details = canonical.get("assetDetails") or {}
-    asset_type = details.get("type")
     target = record.target or {}
-    if asset_type == "data-table":
-        rows = details.get("rows") or []
-        expected_row_name = target.get("newRowName") if record.operation == "renameDataTableRow" else target.get("rowName")
-        for row in rows:
-            if not isinstance(row, dict) or row.get("Name") != expected_row_name:
+    spec = LIVE_WRITE_OPERATION_REGISTRY.get(record.operation)
+    if spec is None:
+        return None
+    selector = target.get(spec.live_write_verification_target)
+    if spec.live_write_verification == "data-table-row":
+        for row in details.get("rows") or []:
+            if not isinstance(row, dict) or row.get("Name") != selector:
                 continue
             exported = dict(row)
             exported.pop("Name", None)
             return exported
         return None
-    if asset_type == "material-instance":
-        parameter_name = target.get("parameterName")
+    if spec.live_write_verification == "material-parameter":
         for section in (
             "scalarParameters",
             "vectorParameters",
@@ -265,14 +252,15 @@ def _live_write_exported_value(canonical: dict[str, Any], record: LiveApplyRecor
             "fontParameters",
         ):
             for parameter in details.get(section) or []:
-                if isinstance(parameter, dict) and parameter.get("name") == parameter_name:
+                if isinstance(parameter, dict) and parameter.get("name") == selector:
                     return parameter.get("value")
         return None
-    properties = details.get("properties") or []
-    for prop in properties:
-        if isinstance(prop, dict) and prop.get("name") == target.get("propertyPath"):
-            return prop.get("value")
+    if spec.live_write_verification == "property":
+        for prop in details.get("properties") or []:
+            if isinstance(prop, dict) and prop.get("name") == selector:
+                return prop.get("value")
     return None
+
 
 
 def _live_write_exported_matches(expected: Any, exported: Any) -> bool:
@@ -660,6 +648,8 @@ class PatchWorkflowService:
         self._save_authorizations: dict[str, SaveAuthorizationRecord] = {}
         self._live_applies: dict[str, LiveApplyRecord] = {}
         self._live_apply_by_asset: dict[str, str] = {}
+        self._live_write_journal_errors: list[str] = []
+        self._live_write_recovered_count = 0
         self.live_editor_service = live_editor_service
         self.active_snapshot = self.config.active_snapshot
         self._refresh_applied = False
@@ -669,6 +659,7 @@ class PatchWorkflowService:
             self.config.project_path,
             self.config.revision_export,
         )
+        self._load_live_write_journal()
 
     @property
     def configured_paths(self) -> tuple[Path, ...]:
@@ -765,6 +756,8 @@ class PatchWorkflowService:
             "schemaVersion": WORKFLOW_SCHEMA_VERSION,
             "tool": "ue_workflow_status",
             "ok": True,
+            "publishedVersion": PUBLISHED_VERSION,
+            "developmentLine": DEVELOPMENT_LINE,
             "projectName": self.project_name,
             "writeToolsEnabled": True,
             "commitToolsEnabled": self.config.commit_enabled,
@@ -772,6 +765,12 @@ class PatchWorkflowService:
             "singleAssetSingleOperation": True,
             "receiptRequiredForCommit": True,
             "receiptRequiredForRollbackCommit": True,
+            "liveWriteJournal": {
+                "pendingRecordCount": len(self._live_applies),
+                "recoveredRecordCount": self._live_write_recovered_count,
+                "journalErrorCount": len(self._live_write_journal_errors),
+                "supportsExactReceipt": True,
+            },
             "indexLifecycle": {
                 "sessionStale": bool(session_stale),
                 "activeSnapshotGenerationId": self.active_snapshot.generation_id if self.active_snapshot is not None else "",
@@ -793,13 +792,173 @@ class PatchWorkflowService:
         sanitized = _safe_report(details, configured_paths=self.configured_paths)
         return sanitized if isinstance(sanitized, dict) else {}
 
+    def _live_write_journal_root(self) -> Path:
+        return self._safe_work_path("live-write-journal")
+
+    @staticmethod
+    def _validate_live_apply_receipt(receipt: str) -> str:
+        if (
+            not isinstance(receipt, str)
+            or not receipt.startswith("live_")
+            or len(receipt) > 96
+            or any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for character in receipt)
+        ):
+            raise WorkflowError("live-write-receipt-invalid", "liveApplyReceipt is not a valid internal receipt.")
+        return receipt
+
+    def _live_write_journal_path(self, receipt: str) -> Path:
+        receipt = self._validate_live_apply_receipt(receipt)
+        return self._live_write_journal_root() / f"{receipt}.json"
+
+    def _serialize_live_apply_record(self, record: LiveApplyRecord) -> dict[str, Any]:
+        return {
+            "schemaVersion": LIVE_WRITE_JOURNAL_SCHEMA_VERSION,
+            "projectName": self.project_name,
+            "receipt": record.receipt,
+            "planId": record.plan_id,
+            "planDigest": record.plan_digest,
+            "assetPath": record.asset_path,
+            "operation": record.operation,
+            "valueKind": record.value_kind,
+            "editorSessionId": record.editor_session_id,
+            "transactionId": record.transaction_id,
+            "beforeValue": record.before_value,
+            "afterValue": record.after_value,
+            "target": record.target,
+            "appliedAtUtc": record.applied_at_utc,
+            "saved": record.saved,
+            "saveReceipt": record.save_receipt,
+            "verified": record.verified,
+        }
+
+    def _deserialize_live_apply_record(self, value: dict[str, Any], expected_receipt: str) -> LiveApplyRecord:
+        if value.get("schemaVersion") != LIVE_WRITE_JOURNAL_SCHEMA_VERSION or value.get("projectName") != self.project_name:
+            raise ValueError("journal identity mismatch")
+        receipt = self._validate_live_apply_receipt(str(value.get("receipt", "")))
+        if receipt != expected_receipt:
+            raise ValueError("journal receipt mismatch")
+        operation = str(value.get("operation", ""))
+        spec = LIVE_WRITE_OPERATION_REGISTRY.get(operation)
+        if spec is None or value.get("valueKind") != spec.live_write_value_kind:
+            raise ValueError("journal operation mismatch")
+        asset_path = self._validate_refresh_asset_path(str(value.get("assetPath", "")))
+        target = value.get("target")
+        if not isinstance(target, dict):
+            raise ValueError("journal target invalid")
+        for field in spec.target_fields:
+            validator = spec.target_validators.get(field)
+            if validator is None or not validator(target.get(field)):
+                raise ValueError("journal target field invalid")
+        transaction_id = str(value.get("transactionId", ""))
+        editor_session_id = str(value.get("editorSessionId", ""))
+        if not _is_guid_with_hyphens(transaction_id) or not editor_session_id:
+            raise ValueError("journal editor identity invalid")
+        plan_id = str(value.get("planId", ""))
+        plan_digest = str(value.get("planDigest", ""))
+        applied_at_utc = str(value.get("appliedAtUtc", ""))
+        saved = value.get("saved")
+        verified = value.get("verified")
+        save_receipt = str(value.get("saveReceipt", ""))
+        if not plan_id or not plan_digest.startswith("sha256:") or not applied_at_utc:
+            raise ValueError("journal plan identity invalid")
+        if not isinstance(saved, bool) or not isinstance(verified, bool) or verified:
+            raise ValueError("journal lifecycle invalid")
+        if saved and not save_receipt.startswith("save_"):
+            raise ValueError("journal save identity invalid")
+        return LiveApplyRecord(
+            receipt=receipt,
+            plan_id=plan_id,
+            plan_digest=plan_digest,
+            asset_path=asset_path,
+            operation=operation,
+            value_kind=spec.live_write_value_kind,
+            editor_session_id=editor_session_id,
+            transaction_id=transaction_id,
+            before_value=value.get("beforeValue"),
+            after_value=value.get("afterValue"),
+            target=dict(target),
+            applied_at_utc=applied_at_utc,
+            saved=saved,
+            save_receipt=save_receipt,
+            verified=False,
+        )
+
+    def _record_live_write_journal_error(self, receipt: str) -> None:
+        if receipt not in self._live_write_journal_errors:
+            self._live_write_journal_errors.append(receipt)
+
+    def _persist_live_apply(self, record: LiveApplyRecord) -> bool:
+        try:
+            _write_json_atomic(self._live_write_journal_path(record.receipt), self._serialize_live_apply_record(record))
+        except (OSError, TypeError, ValueError):
+            self._record_live_write_journal_error(record.receipt)
+            return False
+        if record.receipt in self._live_write_journal_errors:
+            self._live_write_journal_errors.remove(record.receipt)
+        return True
+
+    def _delete_live_apply_journal(self, receipt: str) -> bool:
+        path = self._live_write_journal_path(receipt)
+        try:
+            if path.is_file():
+                path.unlink()
+        except OSError:
+            self._record_live_write_journal_error(receipt)
+            return False
+        if receipt in self._live_write_journal_errors:
+            self._live_write_journal_errors.remove(receipt)
+        return True
+
+    def _rebuild_live_apply_index(self) -> None:
+        latest: dict[str, tuple[str, str]] = {}
+        for receipt, record in self._live_applies.items():
+            current = latest.get(record.asset_path)
+            if current is None or (record.applied_at_utc, receipt) > current:
+                latest[record.asset_path] = (record.applied_at_utc, receipt)
+        self._live_apply_by_asset = {asset_path: receipt for asset_path, (_, receipt) in latest.items()}
+
+    def _load_live_write_journal(self) -> None:
+        root = self._live_write_journal_root()
+        if not root.is_dir():
+            return
+        for path in sorted(root.glob("live_*.json")):
+            try:
+                value = _read_json(path)
+                record = self._deserialize_live_apply_record(value, path.stem)
+            except (WorkflowError, OSError, ValueError):
+                self._live_write_journal_errors.append(path.stem)
+                continue
+            self._live_applies[record.receipt] = record
+            self._live_write_recovered_count += 1
+        self._prune_records()
+
+    def _remove_live_apply(self, receipt: str) -> None:
+        self._live_applies.pop(receipt, None)
+        self._delete_live_apply_journal(receipt)
+        self._rebuild_live_apply_index()
+
+    def _resolve_live_apply(self, asset_path: str, live_apply_receipt: str = "") -> tuple[str, LiveApplyRecord]:
+        if live_apply_receipt:
+            receipt = self._validate_live_apply_receipt(live_apply_receipt)
+        else:
+            receipt = self._live_apply_by_asset.get(asset_path, "")
+        record = self._live_applies.get(receipt)
+        if record is None or record.asset_path != asset_path:
+            raise WorkflowError(
+                "live-write-verify-not-found",
+                "No matching confirmed live write is pending for this asset.",
+            )
+        return receipt, record
+
     def _prune_records(self) -> None:
-        for mapping in (self._plans, self._dry_runs, self._applies, self._rollback_dry_runs, self._save_authorizations, self._live_applies):
+        for mapping in (self._plans, self._dry_runs, self._applies, self._rollback_dry_runs, self._save_authorizations):
             while len(mapping) > MAX_WORKFLOW_RECORDS:
                 mapping.pop(next(iter(mapping)))
-        self._live_apply_by_asset = {
-            record.asset_path: receipt for receipt, record in self._live_applies.items()
-        }
+        while len(self._live_applies) > MAX_WORKFLOW_RECORDS:
+            receipt = next(iter(self._live_applies))
+            self._live_applies.pop(receipt)
+            self._delete_live_apply_journal(receipt)
+        self._rebuild_live_apply_index()
 
     def _safe_work_path(self, *parts: str) -> Path:
         self._assert_runtime_boundaries()
@@ -1620,75 +1779,39 @@ class PatchWorkflowService:
                 raise WorkflowError("plan-invalid", "The live write plan no longer contains exactly one operation.")
             operation = operations[0]
             operation_name = str(operation.get("operation", ""))
-            if operation_name not in {
-                "setAssetProperty",
-                "setAssetReferenceProperty",
-                "setAssetStructuredProperty",
-                "setMaterialInstanceScalarParameter",
-                "setMaterialInstanceVectorParameter",
-                "setMaterialInstanceTextureParameter",
-                "setMaterialInstanceStaticSwitchParameter",
-                "setDataTableCell",
-                "setDataTableRowFields",
-                "addDataTableRow",
-                "removeDataTableRow",
-                "renameDataTableRow",
-            }:
+            operation_spec = LIVE_WRITE_OPERATION_REGISTRY.get(operation_name)
+            if operation_spec is None:
+                supported = ", ".join(sorted(LIVE_WRITE_OPERATION_REGISTRY))
                 raise WorkflowError(
                     "live-editor-write-operation-unsupported",
-                    "Live Editor writes accept only setAssetProperty, setAssetReferenceProperty, setAssetStructuredProperty, setMaterialInstanceScalarParameter, setMaterialInstanceVectorParameter, setMaterialInstanceTextureParameter, setMaterialInstanceStaticSwitchParameter, setDataTableCell, setDataTableRowFields, addDataTableRow, removeDataTableRow, and renameDataTableRow plans.",
+                    f"Unsupported Live Editor write operation. Registered operations: {supported}.",
                 )
-            is_material = operation_name in MATERIAL_PARAMETER_OPERATIONS_NAMES
-            is_data_table = operation_name in {
-                "setDataTableCell",
-                "setDataTableRowFields",
-                "addDataTableRow",
-                "removeDataTableRow",
-                "renameDataTableRow",
-            }
             target = operation.get("target", {})
-            parameter_name = None
-            property_path = None
-            row_name = None
-            new_row_name = None
-            field_name = None
-            if is_material:
-                parameter_name = target.get("parameterName") if isinstance(target, dict) else None
-                if not isinstance(parameter_name, str) or not parameter_name:
-                    raise WorkflowError("plan-invalid", "The live write plan has no exact parameterName.")
-            elif is_data_table:
-                row_name = target.get("rowName") if isinstance(target, dict) else None
-                if not isinstance(row_name, str) or not row_name:
-                    raise WorkflowError("plan-invalid", "The live write plan has no exact rowName.")
-                if operation_name == "setDataTableCell":
-                    field_name = target.get("fieldName") if isinstance(target, dict) else None
-                    if not isinstance(field_name, str) or not field_name:
-                        raise WorkflowError("plan-invalid", "The live write plan has no exact fieldName.")
-                elif operation_name == "renameDataTableRow":
-                    new_row_name = target.get("newRowName") if isinstance(target, dict) else None
-                    if not isinstance(new_row_name, str) or not new_row_name:
-                        raise WorkflowError("plan-invalid", "The live write plan has no exact newRowName.")
-            else:
-                property_path = target.get("propertyPath") if isinstance(target, dict) else None
-                if not isinstance(property_path, str) or not property_path:
-                    raise WorkflowError("plan-invalid", "The live write plan has no exact propertyPath.")
-            asset_path = str(assets[0].get("assetPath", ""))
-            expected_revision = str(assets[0].get("expectedRevision", ""))
-            bridge_parameters = {
+            if not isinstance(target, dict):
+                raise WorkflowError("plan-invalid", "The live write plan target must be an object.")
+            bridge_parameters: dict[str, Any] = {
                 "operation": operation_name,
-                "assetPath": asset_path,
+                "assetPath": str(assets[0].get("assetPath", "")),
+                "target": target,
                 "value": operation.get("value"),
             }
-            if is_material:
-                bridge_parameters["parameterName"] = parameter_name
-            elif is_data_table:
-                bridge_parameters["rowName"] = row_name
-                if new_row_name is not None:
-                    bridge_parameters["newRowName"] = new_row_name
-                if field_name is not None:
-                    bridge_parameters["fieldName"] = field_name
-            else:
-                bridge_parameters["propertyPath"] = property_path
+            for target_field in operation_spec.target_fields:
+                target_value = target.get(target_field)
+                validator = operation_spec.target_validators.get(target_field)
+                if validator is None or not validator(target_value):
+                    raise WorkflowError(
+                        "plan-invalid",
+                        f"The live write plan has no valid exact {target_field}.",
+                    )
+                bridge_parameters[target_field] = target_value
+            property_path = target.get("propertyPath")
+            parameter_name = target.get("parameterName")
+            row_name = target.get("rowName")
+            new_row_name = target.get("newRowName")
+            field_name = target.get("fieldName")
+            asset_path = str(assets[0].get("assetPath", ""))
+            expected_revision = str(assets[0].get("expectedRevision", ""))
+            bridge_parameters["assetPath"] = asset_path
             try:
                 live_result = self.live_editor_service.call_method(
                     "editor.applyAssetPropertyLive",
@@ -1717,7 +1840,10 @@ class PatchWorkflowService:
                     applied_at_utc=utc_now_iso(),
                 )
                 self._live_apply_by_asset[asset_path] = live_apply_receipt
+                journal_persisted = self._persist_live_apply(self._live_applies[live_apply_receipt])
                 self._prune_records()
+            else:
+                journal_persisted = True
             return {
                 "schemaVersion": WORKFLOW_SCHEMA_VERSION,
                 "tool": "ue_apply_asset_property_live",
@@ -1740,6 +1866,7 @@ class PatchWorkflowService:
                 "diskRevisionChanged": False,
                 "undoAvailableInEditor": bool(live_result.get("transactionRecorded")),
                 "liveApplyReceipt": live_apply_receipt,
+                "journalPersisted": journal_persisted,
                 "result": live_result,
                 "nextStep": (
                     "Verify, Save, or Undo the in-editor change. To persist it, preview ue_save_authorized_asset for this exact asset."
@@ -1820,15 +1947,18 @@ class PatchWorkflowService:
                 if hasattr(exc, "code"):
                     raise WorkflowError(str(exc.code), str(exc), details=getattr(exc, "details", {})) from exc
                 raise
-            receipt = self._live_apply_by_asset.get(asset_path)
-            record = self._live_applies.get(receipt) if receipt is not None else None
-            if (
-                record is not None
-                and record.transaction_id == transaction_id
-                and record.editor_session_id == editor_session_id
-            ):
-                self._live_apply_by_asset.pop(asset_path, None)
-                self._live_applies.pop(receipt, None)
+            receipt = next(
+                (
+                    candidate_receipt
+                    for candidate_receipt, candidate in self._live_applies.items()
+                    if candidate.asset_path == asset_path
+                    and candidate.transaction_id == transaction_id
+                    and candidate.editor_session_id == editor_session_id
+                ),
+                "",
+            )
+            if receipt:
+                self._remove_live_apply(receipt)
             return {
                 "schemaVersion": WORKFLOW_SCHEMA_VERSION,
                 "tool": f"ue_{action}_asset_property_live",
@@ -2309,12 +2439,20 @@ class PatchWorkflowService:
                 if after_revision != before_revision
                 else self.freshness.inspect_asset(asset_path)
             )
-            live_receipt = self._live_apply_by_asset.get(asset_path)
-            if live_receipt is not None:
-                live_record = self._live_applies.get(live_receipt)
-                if live_record is not None:
-                    live_record.saved = True
-                    live_record.save_receipt = save_receipt
+            live_candidates = [
+                (candidate.applied_at_utc, candidate_receipt, candidate)
+                for candidate_receipt, candidate in self._live_applies.items()
+                if candidate.asset_path == asset_path
+                and candidate.editor_session_id == editor_session_id
+                and not candidate.saved
+            ]
+            live_receipt = ""
+            journal_persisted = True
+            if live_candidates:
+                _, live_receipt, live_record = max(live_candidates)
+                live_record.saved = True
+                live_record.save_receipt = save_receipt
+                journal_persisted = self._persist_live_apply(live_record)
             return {
                 "schemaVersion": WORKFLOW_SCHEMA_VERSION,
                 "tool": "ue_save_authorized_asset",
@@ -2331,8 +2469,9 @@ class PatchWorkflowService:
                 "backupManifestId": manifest_path.name,
                 "editorSessionId": editor_session_id,
                 "editorProcessId": editor_process_id,
-                "liveApplyReceipt": live_receipt or "",
-                "liveWriteSaved": live_receipt is not None,
+                "liveApplyReceipt": live_receipt,
+                "liveWriteSaved": bool(live_receipt),
+                "journalPersisted": journal_persisted,
                 "bridge": _safe_report(bridge_result, configured_paths=self.configured_paths),
                 "indexFreshness": freshness_after,
                 "nextStep": (
@@ -2341,7 +2480,7 @@ class PatchWorkflowService:
                 ),
             }
 
-    def verify_live_write(self, asset_path: str) -> dict[str, Any]:
+    def verify_live_write(self, asset_path: str, live_apply_receipt: str = "") -> dict[str, Any]:
         with self._lock:
             if not self.config.commit_enabled:
                 raise WorkflowError(
@@ -2354,13 +2493,7 @@ class PatchWorkflowService:
                     "Live Editor mode is required to verify an in-editor asset property write.",
                 )
             asset_path = self._validate_refresh_asset_path(asset_path)
-            receipt = self._live_apply_by_asset.get(asset_path)
-            record = self._live_applies.get(receipt) if receipt is not None else None
-            if record is None:
-                raise WorkflowError(
-                    "live-write-verify-not-found",
-                    "No confirmed live write is pending for this asset in this MCP server session.",
-                )
+            receipt, record = self._resolve_live_apply(asset_path, live_apply_receipt)
             try:
                 inspection = self.live_editor_service.call_tool("ue_inspect_asset_live", {"assetPath": asset_path})
             except Exception as exc:
@@ -2500,7 +2633,7 @@ class PatchWorkflowService:
                 undo_available=False,
                 independent_reload=True,
             )
-            return {
+            response = {
                 "schemaVersion": WORKFLOW_SCHEMA_VERSION,
                 "tool": "ue_verify_live_write",
                 "ok": True,
@@ -2532,6 +2665,8 @@ class PatchWorkflowService:
                     "ue_refresh_asset_index to activate the new Revision."
                 ),
             }
+            self._remove_live_apply(receipt)
+            return response
 
     def rollback_patch(
         self,

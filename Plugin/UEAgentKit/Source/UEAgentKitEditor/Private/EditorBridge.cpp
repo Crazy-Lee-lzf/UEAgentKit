@@ -38,6 +38,7 @@ namespace UEAgentKitEditorBridgePrivate
 {
 	constexpr const TCHAR* ProtocolSchemaVersion = TEXT("1.0");
 	const TCHAR* const PluginVersion = TEXT("0.6.0");
+	const TCHAR* const DevelopmentLine = TEXT("0.7.0-dev");
 	constexpr int32 MaxClients = 8;
 	constexpr int32 MaxRequestBytes = 64 * 1024;
 
@@ -872,24 +873,28 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 	{
 		FString Operation;
 		FString AssetPath;
-		FString PropertyPath;
-		FString ParameterName;
-		FString RowName;
-		FString NewRowName;
-		FString FieldName;
 		Params->TryGetStringField(TEXT("operation"), Operation);
 		Params->TryGetStringField(TEXT("assetPath"), AssetPath);
-		Params->TryGetStringField(TEXT("propertyPath"), PropertyPath);
-		Params->TryGetStringField(TEXT("parameterName"), ParameterName);
-		Params->TryGetStringField(TEXT("rowName"), RowName);
-		Params->TryGetStringField(TEXT("newRowName"), NewRowName);
-		Params->TryGetStringField(TEXT("fieldName"), FieldName);
+		TSharedRef<FJsonObject> Target = MakeShared<FJsonObject>();
+		if (const TSharedPtr<FJsonValue> TargetValue = Params->TryGetField(TEXT("target"));
+			TargetValue.IsValid() && TargetValue->Type == EJson::Object)
+		{
+			Target->Values = TargetValue->AsObject()->Values;
+		}
+		for (const TCHAR* LegacyField : {TEXT("propertyPath"), TEXT("parameterName"), TEXT("rowName"), TEXT("newRowName"), TEXT("fieldName")})
+		{
+			FString LegacyValue;
+			if (!Target->HasField(LegacyField) && Params->TryGetStringField(LegacyField, LegacyValue))
+			{
+				Target->SetStringField(LegacyField, LegacyValue);
+			}
+		}
 		const TSharedPtr<FJsonValue> Value = Params->TryGetField(TEXT("value"));
 		TSharedPtr<FJsonObject> Result;
 		FString ErrorCode;
 		FString ErrorMessage;
 		SendActionResult(
-			TryApplyAssetPropertyLiveResult(Operation, AssetPath, PropertyPath, ParameterName, RowName, NewRowName, FieldName, Value, Result, ErrorCode, ErrorMessage),
+			TryApplyAssetPropertyLiveResult(Operation, AssetPath, Target, Value, Result, ErrorCode, ErrorMessage),
 			Result,
 			ErrorCode,
 			ErrorMessage);

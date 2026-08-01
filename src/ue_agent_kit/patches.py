@@ -26,6 +26,9 @@ class OperationSpec:
     target_validators: dict[str, Callable[[Any], bool]]
     expected_change: str
     asset_type: str
+    live_write_value_kind: str = ""
+    live_write_verification: str = ""
+    live_write_verification_target: str = ""
 
 
 def _is_nonempty_text(value: Any, *, max_length: int = 256) -> bool:
@@ -98,6 +101,9 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
         target_validators={"propertyPath": _is_property_path},
         expected_change="asset-property",
         asset_type="NonBlueprint",
+        live_write_value_kind="scalar",
+        live_write_verification="property",
+        live_write_verification_target="propertyPath",
     ),
     "setAssetReferenceProperty": OperationSpec(
         name="setAssetReferenceProperty",
@@ -106,6 +112,9 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
         target_validators={"propertyPath": _is_top_level_property_name},
         expected_change="asset-reference-property",
         asset_type="NonBlueprint",
+        live_write_value_kind="reference",
+        live_write_verification="property",
+        live_write_verification_target="propertyPath",
     ),
     "setAssetStructuredProperty": OperationSpec(
         name="setAssetStructuredProperty",
@@ -114,6 +123,9 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
         target_validators={"propertyPath": _is_top_level_property_name},
         expected_change="asset-structured-property",
         asset_type="NonBlueprint",
+        live_write_value_kind="structured",
+        live_write_verification="property",
+        live_write_verification_target="propertyPath",
     ),
     "setMaterialInstanceScalarParameter": OperationSpec(
         name="setMaterialInstanceScalarParameter",
@@ -122,6 +134,9 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
         target_validators={"parameterName": _is_nonempty_text},
         expected_change="material-instance-scalar-parameter",
         asset_type="NonBlueprint",
+        live_write_value_kind="material-scalar",
+        live_write_verification="material-parameter",
+        live_write_verification_target="parameterName",
     ),
     "setMaterialInstanceVectorParameter": OperationSpec(
         name="setMaterialInstanceVectorParameter",
@@ -130,6 +145,9 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
         target_validators={"parameterName": _is_nonempty_text},
         expected_change="material-instance-vector-parameter",
         asset_type="NonBlueprint",
+        live_write_value_kind="material-vector",
+        live_write_verification="material-parameter",
+        live_write_verification_target="parameterName",
     ),
     "setMaterialInstanceTextureParameter": OperationSpec(
         name="setMaterialInstanceTextureParameter",
@@ -138,6 +156,9 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
         target_validators={"parameterName": _is_nonempty_text},
         expected_change="material-instance-texture-parameter",
         asset_type="NonBlueprint",
+        live_write_value_kind="material-texture",
+        live_write_verification="material-parameter",
+        live_write_verification_target="parameterName",
     ),
     "setMaterialInstanceStaticSwitchParameter": OperationSpec(
         name="setMaterialInstanceStaticSwitchParameter",
@@ -146,6 +167,9 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
         target_validators={"parameterName": _is_nonempty_text},
         expected_change="material-instance-static-switch-parameter",
         asset_type="NonBlueprint",
+        live_write_value_kind="material-static-switch",
+        live_write_verification="material-parameter",
+        live_write_verification_target="parameterName",
     ),
     "setDataTableCell": OperationSpec(
         name="setDataTableCell",
@@ -157,6 +181,9 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
         },
         expected_change="data-table-cell",
         asset_type="NonBlueprint",
+        live_write_value_kind="data-table-cell",
+        live_write_verification="data-table-row",
+        live_write_verification_target="rowName",
     ),
     "setDataTableRowFields": OperationSpec(
         name="setDataTableRowFields",
@@ -165,6 +192,9 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
         target_validators={"rowName": _is_nonempty_text},
         expected_change="data-table-row-fields",
         asset_type="NonBlueprint",
+        live_write_value_kind="data-table-row-fields",
+        live_write_verification="data-table-row",
+        live_write_verification_target="rowName",
     ),
     "addDataTableRow": OperationSpec(
         name="addDataTableRow",
@@ -173,6 +203,9 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
         target_validators={"rowName": _is_nonempty_text},
         expected_change="data-table-row-add",
         asset_type="NonBlueprint",
+        live_write_value_kind="data-table-row-add",
+        live_write_verification="data-table-row",
+        live_write_verification_target="rowName",
     ),
     "removeDataTableRow": OperationSpec(
         name="removeDataTableRow",
@@ -181,6 +214,9 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
         target_validators={"rowName": _is_nonempty_text},
         expected_change="data-table-row-remove",
         asset_type="NonBlueprint",
+        live_write_value_kind="data-table-row-remove",
+        live_write_verification="data-table-row",
+        live_write_verification_target="rowName",
     ),
     "renameDataTableRow": OperationSpec(
         name="renameDataTableRow",
@@ -192,7 +228,15 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
         },
         expected_change="data-table-row-rename",
         asset_type="NonBlueprint",
+        live_write_value_kind="data-table-row-rename",
+        live_write_verification="data-table-row",
+        live_write_verification_target="newRowName",
     ),
+}
+
+
+LIVE_WRITE_OPERATION_REGISTRY: dict[str, OperationSpec] = {
+    name: spec for name, spec in OPERATION_REGISTRY.items() if spec.live_write_value_kind
 }
 
 

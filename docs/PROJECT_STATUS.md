@@ -2,11 +2,11 @@
 
 
 
-更新时间：2026-07-31
+更新时间：2026-08-01
 
 
 
-本文描述 `main` 分支当前开发快照。最新正式发布版本仍为 **0.6.0**，支持 Unreal Engine 5.6；0.6.0 之后已经完成首个 Live Editor Write 纵向闭环，但尚未作为新版本发布。
+本文描述 `main` 分支当前 **0.7.0-dev** 开发线。最新正式发布版本仍为 **0.6.0**，支持 Unreal Engine 5.6；0.6.0 之后的 Live Editor Write、显式 Undo/Discard、授权保存闭环、可恢复 Journal 与可扩展 Operation Registry 尚未正式发布。
 
 
 
@@ -164,56 +164,27 @@ UTF-8 no BOM / CRLF          passed
 
 
 
-### 4.2 首个 Live Editor Write
+### 4.2 Live Editor Write 基础层
 
-
-
-当前已经通过 `ue_apply_asset_property_live` 打通：
-
-
+当前闭环：
 
 ```text
-
-Policy/Revision Plan
-
+Policy / Revision Plan
 → 精确 LIVE APPLY 确认
-
-→ Game Thread 修改已打开 UObject
-
-→ FScopedTransaction / Modify
-
-→ PostEditChangeProperty
-
-→ Package Dirty
-
-→ 不自动保存
-
+→ 注册式 Operation 执行器
+→ FScopedTransaction / Snapshot / Dirty
+→ 显式 Undo / Discard，或 Authorized Save
+→ 独立 UE 重载 Verify
+→ Memory Evidence
 ```
 
+当前 `0.7.0-dev` 注册表开放 12 个受控 Operation：Data Asset 标量/引用/Struct/Array/Set/Map，Material Instance Scalar/Vector/Texture/Static Switch，以及 DataTable Cell/RowFields/Add/Remove/Rename。它仍只接受已加载、已打开、初始 Clean 的 `/Game` 非 Blueprint、非地图单文件资产，并继续拒绝任意 UObject Method、嵌套属性、PIE/SIE、自动保存和未授权写入。
 
+为后续数百种 Operation 扩展，中央 Bridge 已改为 `operation + assetPath + target + value` 的通用请求和 `LiveWriteOperationRegistry` 分派；Property、Material、DataTable 分属独立域模块，公共 Transaction/Evidence 层统一处理 Snapshot、No-op、失败恢复、Dirty 与 Undo。Python `OperationSpec` 同时驱动 Target 校验、valueKind 和保存后独立验证，不再重复维护硬编码白名单。
 
-当前范围（`main` 开发快照，不是 0.6.0 正式发布能力）：
+Live Apply Workflow 使用固定 Work Root Journal 保存待处理 Receipt；MCP 重启后可恢复经过严格校验的记录，Verify 可指定精确 `liveApplyReceipt`，成功 Undo/Discard/Verify 会关闭记录。Journal I/O 失败不会把已经成功的 Editor 修改伪报成失败。
 
-- 已加载并在资产编辑器中打开的非 Blueprint、非地图资产。
-
-- 当前 Package 必须为 Clean。
-
-- `setAssetProperty`：一个顶层 Bool、整数、浮点、Enum、String、Name 或 Text 属性。
-
-- `setAssetReferenceProperty`：Data Asset 顶层 Object、Class、SoftObject、SoftClass 引用属性，JSON `null` 可清空引用。
-
-- `setAssetStructuredProperty`：Data Asset 顶层 Struct、Array、Set、Map 结构化属性，复用 `StructuredPropertyJson` 的 Schema/导入/导出/Diff，强制拒绝固定数组与非结构化属性。
-
-- 修改进入 UE Undo 栈，磁盘 Package、SQLite 与 Revision Export 保持不变；不自动保存。
-
-- 仍不支持 Blueprint、容器、Material Instance 与 DataTable 的 Live Apply。
-
-- No-op 不制造 Undo 或 Dirty；失败恢复原值、原 Dirty 状态并取消 Transaction。
-
-
-这不是任意 UObject 写入接口。它复用现有 `ue_set_asset_property` 生成的 Policy/Revision Plan，拒绝任意资产路径、任意属性、嵌套字段、PIE/SIE 和 Dirty Package。
-
-
+真实回归分为 Fast（Scalar、Undo/Discard、Closed Loop）和 Full（全部 7 组），正式版本号仍为 0.6.0，状态中明确报告 `developmentLine=0.7.0-dev`。
 
 ### 4.3 持久化安全写入
 
@@ -325,21 +296,14 @@ Live Editor 中已经产生的受控 Dirty 资产，也可以通过 `ue_save_aut
 
 
 
-### P0：完成 Live Editor Write 基础层
+### P0：扩展 Live Editor Operation 覆盖
 
+Live Editor Write 基础层、Material/DataTable、Undo/Discard、Save→Verify→Memory 闭环和注册式扩展架构已经完成。下一阶段不再重写中央分派，而是按资产域逐步增加 Operation，并为每个新增 Operation 补齐：
 
-
-1. 抽取统一 Live Transaction/Evidence 框架，避免每类资产重复实现 Dirty、Undo、失败恢复和会话证据。
-
-2. 将已验证的 Live 标量/Reference 能力扩展到 Data Asset Structured Property。
-
-3. 增加 Material Instance 和 DataTable 的受控 Live Apply。
-
-4. 补充显式 Live Undo/Discard 工作流，而不是只依赖用户手动按 Ctrl+Z。
-
-5. 将 Live Apply → Authorized Save → Verify → Memory Task 做成标准闭环。
-
-
+1. Python `OperationSpec`、Policy 授权和 Plan Schema。
+2. 对应 C++ 域执行器与 Operation Descriptor。
+3. Snapshot、No-op、失败恢复、Dirty、Undo 和独立 Verify 语义。
+4. 真实 UE5.6 成功、拒绝、恢复和闭环回归。
 
 ### P1A：Memory 可用性与知识树前置
 

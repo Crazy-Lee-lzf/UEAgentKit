@@ -565,6 +565,7 @@ class AgentWorkflowTests(unittest.TestCase):
                         "operation": "setAssetProperty",
                         "assetPath": ASSET_PATH,
                         "propertyPath": "BoolValue",
+                        "target": {"propertyPath": "BoolValue"},
                         "value": True,
                     },
                 )
@@ -741,6 +742,7 @@ class AgentWorkflowTests(unittest.TestCase):
                         "operation": "setAssetReferenceProperty",
                         "assetPath": REFERENCE_ASSET_PATH,
                         "propertyPath": "ObjectValue",
+                        "target": {"propertyPath": "ObjectValue"},
                         "value": reference_value,
                     },
                 )
@@ -878,6 +880,7 @@ class AgentWorkflowTests(unittest.TestCase):
                         "operation": "setAssetStructuredProperty",
                         "assetPath": STRUCTURED_ASSET_PATH,
                         "propertyPath": "StructValue",
+                        "target": {"propertyPath": "StructValue"},
                         "value": STRUCTURED_STRUCT_VALUE,
                     },
                 )
@@ -1064,6 +1067,7 @@ class AgentWorkflowTests(unittest.TestCase):
                     {
                         "operation": "setMaterialInstanceScalarParameter",
                         "assetPath": material_path,
+                        "target": {"parameterName": "EmissiveIntensity"},
                         "value": 0.75,
                         "parameterName": "EmissiveIntensity",
                     },
@@ -1233,6 +1237,7 @@ class AgentWorkflowTests(unittest.TestCase):
                     {
                         "operation": "setDataTableCell",
                         "assetPath": DATA_TABLE_PATH,
+                        "target": {"rowName": "Row1", "fieldName": "Count"},
                         "value": 42,
                         "rowName": "Row1",
                         "fieldName": "Count",
@@ -1343,6 +1348,7 @@ class AgentWorkflowTests(unittest.TestCase):
                     {
                         "operation": "renameDataTableRow",
                         "assetPath": DATA_TABLE_PATH,
+                        "target": {"rowName": "Row1", "newRowName": "RowRenamed"},
                         "value": True,
                         "rowName": "Row1",
                         "newRowName": "RowRenamed",
@@ -2273,6 +2279,9 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertEqual(result["mode"], "LiveUndo")
         self.assertNotIn(ASSET_PATH, service._live_apply_by_asset)
         self.assertNotIn(applied["liveApplyReceipt"], service._live_applies)
+        self.assertFalse(
+            (self.work_root / "live-write-journal" / f"{applied['liveApplyReceipt']}.json").exists()
+        )
         with self.assertRaises(WorkflowError) as missing:
             service.verify_live_write(ASSET_PATH)
         self.assertEqual(missing.exception.code, "live-write-verify-not-found")
@@ -2379,6 +2388,87 @@ class AgentWorkflowTests(unittest.TestCase):
         )
         self.assertFalse(evidence["patch_details"]["undoAvailable"])
         self.assertTrue(evidence["validation_evidence_details"]["independentReload"])
+        self.assertNotIn(applied["liveApplyReceipt"], service._live_applies)
+        self.assertFalse(
+            (self.work_root / "live-write-journal" / f"{applied['liveApplyReceipt']}.json").exists()
+        )
+
+    def test_live_write_journal_failure_does_not_hide_successful_editor_write(self) -> None:
+        bridge = AgentWorkflowTests.ClosedLoopLiveService(dirty=True)
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=self.freshness,
+            live_editor_service=bridge,
+        )
+        plan = service.plan_patch(
+            asset_path=ASSET_PATH,
+            operation="setAssetProperty",
+            target={"propertyPath": "BoolValue"},
+            value=True,
+            description="Journal failure remains truthful",
+        )
+        with patch("ue_agent_kit.agent_workflow._write_json_atomic", side_effect=OSError("disk full")):
+            applied = service.apply_asset_property_live(plan["planId"], f"LIVE APPLY {plan['planId']}")
+        self.assertTrue(applied["changed"])
+        self.assertFalse(applied["journalPersisted"])
+        self.assertIn(applied["liveApplyReceipt"], service._live_applies)
+        status = service.status()
+        self.assertEqual(status["publishedVersion"], "0.6.0")
+        self.assertEqual(status["developmentLine"], "0.7.0-dev")
+        self.assertEqual(status["liveWriteJournal"]["journalErrorCount"], 1)
+
+    def test_live_write_journal_recovers_and_closes_exact_receipt(self) -> None:
+        bridge = AgentWorkflowTests.ClosedLoopLiveService(dirty=True)
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=self.freshness,
+            live_editor_service=bridge,
+        )
+        applied = self._apply_scalar_live_write(service, bridge)
+        receipt = applied["liveApplyReceipt"]
+        journal = self.work_root / "live-write-journal" / f"{receipt}.json"
+        self.assertTrue(journal.is_file())
+
+        recovered = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=FakeFreshnessTracker(),
+            live_editor_service=bridge,
+        )
+        self.assertIn(receipt, recovered._live_applies)
+        self.assertEqual(recovered.status()["liveWriteJournal"]["pendingRecordCount"], 1)
+        self.assertEqual(recovered.status()["liveWriteJournal"]["recoveredRecordCount"], 1)
+        pending = recovered.verify_live_write(ASSET_PATH, receipt)
+        self.assertEqual(pending["state"], "not-saved")
+        self.assertEqual(pending["liveApplyReceipt"], receipt)
+
+        recovered.undo_asset_property_live(ASSET_PATH, TRANSACTION_ID, "session-1")
+        self.assertNotIn(receipt, recovered._live_applies)
+        self.assertFalse(journal.exists())
+
+    def test_live_write_exact_receipt_selects_older_same_asset_record(self) -> None:
+        bridge = AgentWorkflowTests.ClosedLoopLiveService(dirty=True)
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=self.freshness,
+            live_editor_service=bridge,
+        )
+        first = self._apply_scalar_live_write(service, bridge)
+        second = self._apply_scalar_live_write(service, bridge)
+        self.assertNotEqual(first["liveApplyReceipt"], second["liveApplyReceipt"])
+        self.assertEqual(service._live_apply_by_asset[ASSET_PATH], second["liveApplyReceipt"])
+
+        selected = service.verify_live_write(ASSET_PATH, first["liveApplyReceipt"])
+        self.assertEqual(selected["liveApplyReceipt"], first["liveApplyReceipt"])
+        latest = service.verify_live_write(ASSET_PATH)
+        self.assertEqual(latest["liveApplyReceipt"], second["liveApplyReceipt"])
 
     def test_live_write_verify_guards_and_value_mismatch(self) -> None:
         bridge = AgentWorkflowTests.ClosedLoopLiveService(dirty=True)

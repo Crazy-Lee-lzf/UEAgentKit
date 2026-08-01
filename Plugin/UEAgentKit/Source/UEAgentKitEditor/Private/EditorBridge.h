@@ -82,11 +82,7 @@ private:
 	bool TryApplyAssetPropertyLiveResult(
 		const FString& Operation,
 		const FString& AssetPath,
-		const FString& PropertyPath,
-		const FString& ParameterName,
-		const FString& RowName,
-		const FString& NewRowName,
-		const FString& FieldName,
+		const TSharedPtr<FJsonObject>& Target,
 		const TSharedPtr<class FJsonValue>& Value,
 		TSharedPtr<FJsonObject>& OutResult,
 		FString& OutErrorCode,
@@ -146,5 +142,5 @@ private:
 	TUniquePtr<FUEAgentKitEditorBridgeLogCapture> LogCapture;
 	FPendingAutomationRun PendingAutomation;
 	// Confirmed live write transactions per exact asset path; cleared on bridge start.
-	mutable TMap<FString, TSharedPtr<UEAgentKitLiveWrite::FLiveWriteTransactionRecord>> LiveWriteTransactionRecords;
+	mutable TMap<FString, TMap<FGuid, TSharedPtr<UEAgentKitLiveWrite::FLiveWriteTransactionRecord>>> LiveWriteTransactionRecords;
 };

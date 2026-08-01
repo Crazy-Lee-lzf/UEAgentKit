@@ -213,13 +213,13 @@ Bridge 注册为 `FOutputDevice`，保留最多 4096 条当前会话日志，并
 当前边界（`main` 开发快照能力，不是 0.6.0 正式发布能力）：
 
 - 仅接受已加载且已打开、当前不 Dirty 的非 Blueprint、非地图 `/Game` 单文件资产。
-- 同一个 Tool 只接受十二个显式 Operation：`setAssetProperty`（一个顶层可编辑标量、Enum、String、Name 或 Text 属性）、`setAssetReferenceProperty`（Data Asset 顶层引用属性）、`setAssetStructuredProperty`（Data Asset 顶层 Struct/Array/Set/Map 结构化属性）、`setMaterialInstanceScalarParameter`、`setMaterialInstanceVectorParameter`、`setMaterialInstanceTextureParameter` 与 `setMaterialInstanceStaticSwitchParameter`（Material Instance 全局参数）、`setDataTableCell`、`setDataTableRowFields`、`addDataTableRow`、`removeDataTableRow` 与 `renameDataTableRow`（DataTable 行与字段）。MCP 请求必须显式携带 `operation`，Bridge 不靠 Value 猜测 Operation；属性写入携带 `propertyPath`，材质参数写入携带 `parameterName`，DataTable 写入携带 `rowName`（`setDataTableCell` 附加 `fieldName`、`renameDataTableRow` 附加 `newRowName`）。
+- 当前注册表只开放十二个显式 Operation：`setAssetProperty`、`setAssetReferenceProperty`、`setAssetStructuredProperty`、四个 Material Instance 参数 Operation，以及五个 DataTable Operation。Bridge 的规范请求为 `operation + assetPath + target + value`；`target` 是最多 32 个字段的 JSON Object，由 Operation Descriptor 声明必需字段并由具体资产域执行器继续验证。旧的顶层 `propertyPath`/`parameterName`/`rowName`/`newRowName`/`fieldName` 仅作为兼容输入合并进 `target`，新增 Operation 不再要求修改中央函数签名。
 - 引用类型只支持 `Object`、`Class`、`SoftObject`、`SoftClass`（按 SoftClass → SoftObject → Class → Object 顺序识别），拒绝 Weak/Lazy Object、Interface、Delegate、固定数组和容器。
 - 引用值沿用 `setAssetReferenceProperty` 契约：设置用 `{"referenceType": ..., "path": "/Game/...Object"}`，清空用 JSON `null`；清空时仍按实际 Property 报告 `referenceType`，`referencePath`/`beforeValue`/`afterValue` 用 JSON `null` 表示空引用。
 - 结构化写入强制复用 `UEAgentKit::StructuredPropertyJson`（`GetKind`/`BuildSchema`/`ExportValue`/`ImportValue`/`CanonicalJson`/`JsonEqual`/`BuildDiff`），不引入第二套序列化逻辑；值在 Bridge 内按导出的稳定 Schema 导入并回读验证。固定数组（ArrayDim != 1）与非结构化属性在 Plan/Bridge 两个阶段都被拒绝；值类型不匹配、Struct 字段不完整、Set/Map 条目未按 Canonical JSON 唯一有序都会在 Plan 阶段被 Python 验证器拒绝。
 - Bridge 独立校验：引用路径必须是合法 `/Game/...Object` Object Path（禁止 Subobject Path），`referenceType` 必须与实际 Property 类型完全一致，目标引用必须存在，Object/Class 必须满足 Property 的 Constraint Class；SoftObject/SoftClass 也会解析并验证实际 Class（第一版允许为了验证而加载目标）。
 - 在 Game Thread 中使用 `FScopedTransaction` 与 `UObject::Modify()`，因此成功修改进入 Editor Undo 栈；修改前创建 Property Value Snapshot，任何失败都会恢复原值、恢复原 Dirty 状态并 `Transaction.Cancel()`，不留下部分修改、Dirty 状态或有效 Undo Transaction；No-op 不制造 Undo 或 Dirty。
-- 三类属性写入与四类材质参数写入共享同一基础层 `UEAgentKitLiveWrite`（`LiveWriteTransaction.h/.cpp`）：统一修改前 Dirty 捕获、目标 Snapshot 捕获/恢复（属性为深拷贝、材质参数为条目存在性+值）、Transaction 创建/取消/标题、`Modify`/Apply/回读/语义 No-op、No-op 与失败恢复、变更通知策略（属性用 `PostEditChangeProperty`，材质参数复用 `UMaterialEditingLibrary`）、成功 Dirty 确认和统一 Evidence；每个 Value Kind 只提供 `ReadBefore`/`ApplyValue`/`ReadAfter`/`SemanticEqual` 与 Snapshot/通知钩子 IO 策略，错误码与返回 JSON 契约不变。
+- 当前十二个 Operation 共享 `UEAgentKitLiveWrite` Transaction/Evidence 基础层。中央 `EditorBridgeWriteHandlers.cpp` 只保留公共 PIE、资产、Package、Dirty 门禁、注册表分派和 Undo/Discard；`LiveWritePropertyOperations.cpp`、`LiveWriteMaterialOperations.cpp`、`LiveWriteDataTableOperations.cpp` 分别拥有资产域逻辑，`LiveWriteOperationRegistry` 负责名称、Target 字段、资产要求和执行器注册。增加同域 Operation 只需扩展对应域模块和 Python OperationSpec；增加新资产域只需新增一个域注册入口，不能绕过 Plan、Policy、Revision 或公共门禁。
 - 材质参数写入强制复用离线 Patch Schema：Operation 名、`{"parameterName": ...}` Target 与值格式（Scalar=有限 JSON number、Vector=`{r,g,b,a}`、Texture=Object Path 字符串、StaticSwitch=JSON boolean）与 `AssetPatchCommandlet` 完全一致，不引入第二套 JSON 格式；只接受已加载的 `MaterialInstanceConstant`（拒绝 MID/非 MI），参数必须存在且是 Global Association，Texture 目标必须是可加载的 `/Game` Texture 资产；Policy 侧 `allowedMaterialParameters`（`class#Type#ParameterName`）授权由 Plan 阶段强制执行。材质参数的读回校验（值、Override、Expression GUID）与离线命令let一致，失败即回滚。
 - DataTable 写入强制复用离线 Row Schema：行结构必须是可用的 `FTableRowBase` 派生结构，字段只支持 bool/Enum/数值/String/Name/Text 标量（与离线 `SetPropertyFromJson` 一致），`allowedDataTableFields`（`class#RowStruct#FieldName`）授权由 Plan 阶段强制执行；`setDataTableCell`/`setDataTableRowFields` 修改现有行的字段，其中 RowFields 请求是 1–32 个字段的原子子集，未请求字段保持原值，读回只校验请求字段并返回完整行；字段修改后调用 `HandleDataTableChanged(RowName)` 刷新 DataTable 观察者。`addDataTableRow` 创建行（目标行不得存在），`removeDataTableRow`/`renameDataTableRow` 要求 `value=true` 确认、目标行存在、`renameDataTableRow` 要求新行名不同且不存在，并再次执行 Searchable Name 引用影响门禁（有引用即拒绝）。快照为整表行深拷贝，失败时整表恢复；No-op 检测基于整表规范 JSON 相等（写同值不产生 Undo 或 Dirty）。
 - 调用 `PostEditChangeProperty()` 并标记 Package Dirty，但绝不调用 `SavePackage`。
@@ -230,13 +230,19 @@ Bridge 注册为 `FOutputDevice`，保留最多 4096 条当前会话日志，并
 
 `editor.undoAssetPropertyLive`（`ue_undo_asset_property_live`）与 `editor.discardAssetPropertyLive`（`ue_discard_asset_property_live`）提供对最近一次已确认 Live Apply 的显式回退，替代依赖用户手动 Ctrl+Z：
 
-- 只接受 `assetPath` + `transactionId` + `editorSessionId`（三者在 Apply 结果中返回）；记录按精确资产路径保留一条（最近确认的一次写入），并持有写入前 Snapshot。
+- 只接受 `assetPath` + `transactionId` + `editorSessionId`（三者在 Apply 结果中返回）。Bridge 按精确 Asset Path + Transaction GUID 保存记录，不再以新记录静默覆盖旧 Transaction；当前 Clean Package 门禁仍保证一个资产同时只有当前未保存写入可撤销，已保存且不可撤销的旧记录会在下一次 Clean Apply 前清理。
 - Undo 调用 `GEditor->UndoTransaction(true)`（可 Redo），Discard 调用 `GEditor->UndoTransaction(false)`（丢弃事务）；两者都只作用于一像素精确的已提交事务，绝不任意回滚编辑器历史或跨资产批量撤销。
 - 回退前强制校验：记录存在且 `transactionId` 完全匹配（否则 `live-editor-write-undo-not-found`/`-transaction-mismatch`）、`editorSessionId` 与记录及当前 Bridge 会话一致（`-session-mismatch`）、资产仍是同一内存对象且 Class/Package 一致（`-asset-mismatch`）、包在写入后未被保存（`-package-saved`）、Undo 栈顶就是本次事务（`GetUndoContext` 的 TransactionId/PrimaryObject 匹配，否则 `-stack-mismatch`），并读回确认目标仍等于本次 Live Apply 的 `afterValue`；若目标被后续非事务修改，返回 `live-editor-write-undo-target-changed`，不得覆盖较新的值。
 - `GEditor->UndoTransaction(...)` 执行失败返回 `live-editor-write-undo-failed`，不使用 Snapshot 冒充事务成功；回退成功后显式恢复写入前 Dirty 状态，并用保留 Snapshot 读回验证目标值（不一致时用 Snapshot 兜底恢复），验证失败返回 `live-editor-write-undo-verify-failed`；成功后 Bridge 与 Workflow 记录均删除，二次 Undo 或 Verify 返回 not-found。
 - 返回 `action`（`undo-asset-property-live`/`discard-asset-property-live`）、`operation`、`valueKind`、`assetPath`、`transactionId`、回退前/后值、`dirtyBefore`/`dirtyAfter`、`transactionRecorded=false`、`saved=false` 与 `editorSessionId`；整个过程不触碰磁盘、SQLite 或 Revision Export。
 
 该 Capability 不生成磁盘 Revision，也不修改 SQLite/Revision Export。用户检查后可以在编辑器中 Undo，或者通过现有 `ue_save_authorized_asset` Preview/Commit 流程显式保存。
+
+## 可恢复 Workflow Journal 与版本语义
+
+- MCP Workflow 将每个成功且有变更的 Live Apply 原子写入固定 Work Root 下的 `live-write-journal/live_*.json`；Authorized Save 更新同一记录，成功 Undo/Discard 或成功 Verify 删除记录。MCP Server 重启后只恢复通过 Project、Schema、Operation、Target、Transaction 和生命周期校验的记录；损坏或身份不匹配记录只计入状态，不会获得写入权限。
+- `ue_verify_live_write` 可携带精确 `liveApplyReceipt`，为空时兼容地选择该资产最新待处理记录。同一资产的多个已保存待验证记录不会互相覆盖。Journal 写盘失败会返回 `journalPersisted=false`，但不会把已经成功的 Editor 修改或授权保存伪报成失败。
+- 对外协议与正式包版本仍为 `0.6.0`；Bridge 和 Workflow 状态额外返回 `developmentLine=0.7.0-dev`，明确当前 `main` 能力尚未作为正式版本发布。
 
 ## 状态与 Revision 语义
 

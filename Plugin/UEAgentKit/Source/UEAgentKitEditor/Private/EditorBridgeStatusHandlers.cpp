@@ -20,6 +20,7 @@ TSharedRef<FJsonObject> FUEAgentKitEditorBridge::BuildStatusResult() const
 	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetStringField(TEXT("state"), TEXT("available"));
 	Result->SetStringField(TEXT("pluginVersion"), PluginVersion);
+	Result->SetStringField(TEXT("developmentLine"), DevelopmentLine);
 	Result->SetStringField(TEXT("projectName"), FApp::GetProjectName());
 	Result->SetStringField(TEXT("engineVersion"), FEngineVersion::Current().ToString());
 	Result->SetNumberField(TEXT("processId"), static_cast<double>(FPlatformProcess::GetCurrentProcessId()));

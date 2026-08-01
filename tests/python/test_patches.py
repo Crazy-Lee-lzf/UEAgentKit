@@ -17,7 +17,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from ue_agent_kit.cli import main  # noqa: E402
-from ue_agent_kit.patches import validate_patch  # noqa: E402
+from ue_agent_kit.patches import LIVE_WRITE_OPERATION_REGISTRY, validate_patch  # noqa: E402
 
 
 PROJECT_NAME = "我的项目"
@@ -156,6 +156,31 @@ def write_export(root: Path, canonical: dict[str, Any], *, failure_count: int = 
 
 
 class PatchValidationTests(unittest.TestCase):
+    def test_live_write_registry_contains_complete_operation_metadata(self) -> None:
+        expected = {
+            "setAssetProperty": ("scalar", "property", "propertyPath"),
+            "setAssetReferenceProperty": ("reference", "property", "propertyPath"),
+            "setAssetStructuredProperty": ("structured", "property", "propertyPath"),
+            "setMaterialInstanceScalarParameter": ("material-scalar", "material-parameter", "parameterName"),
+            "setMaterialInstanceVectorParameter": ("material-vector", "material-parameter", "parameterName"),
+            "setMaterialInstanceTextureParameter": ("material-texture", "material-parameter", "parameterName"),
+            "setMaterialInstanceStaticSwitchParameter": ("material-static-switch", "material-parameter", "parameterName"),
+            "setDataTableCell": ("data-table-cell", "data-table-row", "rowName"),
+            "setDataTableRowFields": ("data-table-row-fields", "data-table-row", "rowName"),
+            "addDataTableRow": ("data-table-row-add", "data-table-row", "rowName"),
+            "removeDataTableRow": ("data-table-row-remove", "data-table-row", "rowName"),
+            "renameDataTableRow": ("data-table-row-rename", "data-table-row", "newRowName"),
+        }
+        self.assertEqual(set(LIVE_WRITE_OPERATION_REGISTRY), set(expected))
+        for name, metadata in expected.items():
+            spec = LIVE_WRITE_OPERATION_REGISTRY[name]
+            self.assertEqual(
+                (spec.live_write_value_kind, spec.live_write_verification, spec.live_write_verification_target),
+                metadata,
+            )
+            self.assertTrue(spec.target_fields)
+            self.assertEqual(set(spec.target_fields), set(spec.target_validators))
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(prefix="ueak_patch_")
         self.root = Path(self.temporary.name)

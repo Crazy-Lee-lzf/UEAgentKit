@@ -393,10 +393,10 @@ def register_workflow_tools(
             return error_response("ue_verify_asset", exc, read_only=True)
 
     @server.tool(annotations=planning_annotations)
-    def ue_verify_live_write(asset_path: str) -> dict[str, Any]:
-        """Verify one live write closed loop: unsaved state, or independent reload after an authorized save."""
+    def ue_verify_live_write(asset_path: str, live_apply_receipt: str = "") -> dict[str, Any]:
+        """Verify one exact live write, or the latest pending write for the asset when no receipt is supplied."""
         try:
-            return workflow_service.verify_live_write(asset_path)
+            return workflow_service.verify_live_write(asset_path, live_apply_receipt)
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_verify_live_write", exc, read_only=True)
 
