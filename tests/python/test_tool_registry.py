@@ -25,6 +25,11 @@ EXPECTED_MEMORY_TOOLS = [
     "ue_memory_record_task",
     "ue_memory_mark_superseded",
     "ue_memory_validate",
+    "ue_memory_get_context",
+    "ue_memory_expand_node",
+    "ue_memory_get_evidence",
+    "ue_memory_update_knowledge",
+    "ue_memory_update_work",
 ]
 
 
@@ -92,14 +97,14 @@ class ToolRegistryTests(unittest.TestCase):
             tool_names_for_mode(memory_enabled=True),
             EXPECTED_ALL_TOOLS[:5] + EXPECTED_MEMORY_TOOLS,
         )
-        self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 12)
+        self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 17)
         self.assertEqual(
             len(tool_names_for_mode(live_editor_enabled=True, memory_enabled=True)),
-            30,
+            35,
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
-            36,
+            41,
         )
         self.assertEqual(
             len(
@@ -109,7 +114,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-            54,
+            59,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:

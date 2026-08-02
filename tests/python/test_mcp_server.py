@@ -722,7 +722,7 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         expected_names = tool_names_for_mode(memory_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 12)
+        self.assertEqual(len(tools), 17)
         forbidden = {
             "database",
             "database_path",
@@ -959,6 +959,214 @@ class McpServerTests(unittest.TestCase):
                 ),
             )
 
+
+    @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
+    def test_fastmcp_progressive_memory_tools_manage_tree_work_and_evidence(self) -> None:
+        memory_service = ProjectMemoryService(
+            database_path=self.temp_root / "progressive-memory.sqlite3",
+            project_key="测试项目",
+        )
+        server = create_mcp_server(self.database_path, memory_service=memory_service)
+        tools_by_name = {tool.name: tool for tool in asyncio.run(server.list_tools())}
+        for tool_name in (
+            "ue_memory_get_context",
+            "ue_memory_expand_node",
+            "ue_memory_get_evidence",
+            "ue_memory_update_knowledge",
+            "ue_memory_update_work",
+        ):
+            self.assertFalse(tools_by_name[tool_name].inputSchema["additionalProperties"])
+
+        _, root = asyncio.run(
+            server.call_tool(
+                "ue_memory_update_knowledge",
+                {
+                    "action": "create_node",
+                    "payload": {
+                        "path": "/project",
+                        "nodeType": "project",
+                        "title": "测试项目",
+                        "summary": "Project root.",
+                    },
+                },
+            )
+        )
+        self.assertTrue(root["ok"])
+        _, combat = asyncio.run(
+            server.call_tool(
+                "ue_memory_update_knowledge",
+                {
+                    "action": "create_node",
+                    "payload": {
+                        "path": "/project/combat",
+                        "nodeType": "system",
+                        "title": "Combat",
+                        "summary": "Damage and health rules.",
+                        "details": {"implementationOverview": "Damage is validated by tests."},
+                    },
+                },
+            )
+        )
+        combat_node = combat["node"]
+        self.assertEqual(combat_node["parentNodeId"], root["node"]["nodeId"])
+
+        _, knowledge = asyncio.run(
+            server.call_tool(
+                "ue_memory_update_knowledge",
+                {
+                    "action": "add_record",
+                    "payload": {
+                        "nodeId": combat_node["nodeId"],
+                        "recordType": "projectRule",
+                        "subjectKey": "combat:damage-rule",
+                        "title": "Damage rule",
+                        "body": "Damage changes require validation.",
+                        "sourceKind": "user-confirmed",
+                        "sourceRef": "test:user",
+                        "scopes": [{"scopeType": "asset", "scopeKey": ASSET_A}],
+                    },
+                },
+            )
+        )
+        record = knowledge["record"]
+        self.assertEqual(record["nodeId"], combat_node["nodeId"])
+
+        _, planned = asyncio.run(
+            server.call_tool(
+                "ue_memory_update_work",
+                {
+                    "action": "plan",
+                    "payload": {
+                        "title": "Validate combat",
+                        "description": "Validate the damage rule.",
+                        "nextAction": "Run automation.",
+                        "nodeIds": [combat_node["nodeId"]],
+                        "assetPaths": [ASSET_A],
+                    },
+                },
+            )
+        )
+        work_id = planned["work"]["workItemId"]
+        self.assertEqual(planned["work"]["status"], "planned")
+        _, started = asyncio.run(
+            server.call_tool(
+                "ue_memory_update_work",
+                {"action": "start", "payload": {"workItemId": work_id}},
+            )
+        )
+        self.assertEqual(started["work"]["status"], "in_progress")
+        _, todo = asyncio.run(
+            server.call_tool(
+                "ue_memory_update_work",
+                {
+                    "action": "add_todo",
+                    "payload": {"workItemId": work_id, "text": "Run smoke test."},
+                },
+            )
+        )
+        self.assertEqual(todo["work"]["todos"][0]["text"], "Run smoke test.")
+        _, blocked = asyncio.run(
+            server.call_tool(
+                "ue_memory_update_work",
+                {
+                    "action": "block",
+                    "payload": {
+                        "workItemId": work_id,
+                        "blockedReason": "Editor unavailable.",
+                    },
+                },
+            )
+        )
+        self.assertEqual(blocked["work"]["status"], "blocked")
+        _, resumed = asyncio.run(
+            server.call_tool(
+                "ue_memory_update_work",
+                {
+                    "action": "resume",
+                    "payload": {"workItemId": work_id, "nextAction": "Retry automation."},
+                },
+            )
+        )
+        self.assertEqual(resumed["work"]["status"], "in_progress")
+
+        _, context = asyncio.run(
+            server.call_tool(
+                "ue_memory_get_context",
+                {
+                    "query": "damage",
+                    "node_path": "/project/combat",
+                    "asset_paths": [ASSET_A],
+                    "detail_level": 2,
+                    "budget_chars": 4000,
+                },
+            )
+        )
+        self.assertTrue(context["ok"])
+        self.assertEqual(context["context"]["nodes"][0]["path"], "/project/combat")
+        self.assertEqual(context["context"]["records"][0]["recordId"], record["recordId"])
+        self.assertEqual(context["context"]["activeWork"][0]["workItemId"], work_id)
+
+        _, expanded = asyncio.run(
+            server.call_tool(
+                "ue_memory_expand_node",
+                {"path": "/project/combat", "detail_level": 3, "depth": 0},
+            )
+        )
+        self.assertEqual(expanded["context"]["records"][0]["body"], record["body"])
+        _, evidence = asyncio.run(
+            server.call_tool("ue_memory_get_evidence", {"record_id": record["recordId"]})
+        )
+        self.assertEqual(evidence["evidence"]["source"]["sourceRef"], "test:user")
+
+        _, completed = asyncio.run(
+            server.call_tool(
+                "ue_memory_update_work",
+                {"action": "complete", "payload": {"workItemId": work_id}},
+            )
+        )
+        self.assertEqual(completed["work"]["status"], "done")
+        _, invalid_terminal = asyncio.run(
+            server.call_tool(
+                "ue_memory_update_work",
+                {
+                    "action": "block",
+                    "payload": {"workItemId": work_id, "blockedReason": "Too late."},
+                },
+            )
+        )
+        self.assertFalse(invalid_terminal["ok"])
+        self.assertEqual(invalid_terminal["error"]["code"], "invalid-arguments")
+
+        _, forbidden_revision = asyncio.run(
+            server.call_tool(
+                "ue_memory_update_knowledge",
+                {
+                    "action": "add_record",
+                    "payload": {
+                        "recordType": "projectFact",
+                        "subjectKey": "forbidden:revision",
+                        "title": "Forbidden",
+                        "body": "Must be rejected.",
+                        "revisionSet": [{"assetPath": ASSET_A, "revision": "sha256:x"}],
+                    },
+                },
+            )
+        )
+        self.assertFalse(forbidden_revision["ok"])
+        self.assertEqual(forbidden_revision["error"]["code"], "invalid-arguments")
+        with self.assertRaisesRegex(Exception, "Extra inputs are not permitted"):
+            asyncio.run(
+                server.call_tool("ue_memory_get_context", {"database": "memory.sqlite3"})
+            )
+        _, missing_evidence = asyncio.run(
+            server.call_tool(
+                "ue_memory_get_evidence",
+                {"record_id": "mem_00000000000000000000000000000000"},
+            )
+        )
+        self.assertFalse(missing_evidence["ok"])
+        self.assertEqual(missing_evidence["error"]["code"], "memory-record-not-found")
+
     @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
     def test_fastmcp_live_editor_mode_registers_bounded_read_tools(self) -> None:
         live_service = FakeLiveEditorService()
@@ -1171,7 +1379,7 @@ class McpServerTests(unittest.TestCase):
             [tool.name for tool in tools],
             tool_names_for_mode(workflow_enabled=True, memory_enabled=True),
         )
-        self.assertEqual(len(tools), 36)
+        self.assertEqual(len(tools), 41)
 
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
         memory_contract = capabilities["projectMemory"]

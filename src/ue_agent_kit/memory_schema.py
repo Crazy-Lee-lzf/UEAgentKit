@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-CURRENT_MEMORY_SCHEMA_VERSION = 2
+CURRENT_MEMORY_SCHEMA_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -214,6 +214,88 @@ ALTER TABLE memory_records
 
 CREATE INDEX memory_records_evidence_idx
     ON memory_records(project_key, evidence_sha256);
+""",
+    ),
+    MemoryMigration(
+        version=3,
+        description="Add knowledge tree, active work, and record bindings",
+        sql=r"""
+CREATE TABLE knowledge_nodes (
+    node_id TEXT PRIMARY KEY,
+    project_key TEXT NOT NULL,
+    path TEXT NOT NULL,
+    parent_node_id TEXT REFERENCES knowledge_nodes(node_id) ON DELETE RESTRICT,
+    node_type TEXT NOT NULL CHECK (
+        node_type IN ('project', 'system', 'feature', 'component', 'entity', 'implementation')
+    ),
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
+    details_json TEXT NOT NULL DEFAULT '{}',
+    UNIQUE(project_key, path)
+);
+
+CREATE INDEX knowledge_nodes_parent_idx
+    ON knowledge_nodes(project_key, parent_node_id, path);
+CREATE INDEX knowledge_nodes_type_idx
+    ON knowledge_nodes(project_key, node_type, path);
+
+ALTER TABLE memory_records
+    ADD COLUMN node_id TEXT REFERENCES knowledge_nodes(node_id) ON DELETE RESTRICT;
+
+CREATE INDEX memory_records_node_idx
+    ON memory_records(project_key, node_id, status, updated_at_utc DESC);
+
+CREATE TABLE active_work_items (
+    work_item_id TEXT PRIMARY KEY,
+    project_key TEXT NOT NULL,
+    title TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (
+        status IN ('planned', 'in_progress', 'blocked', 'done', 'cancelled')
+    ),
+    priority INTEGER NOT NULL CHECK (priority >= 0 AND priority <= 100),
+    description TEXT NOT NULL,
+    next_action TEXT NOT NULL,
+    blocked_reason TEXT NOT NULL,
+    owner TEXT NOT NULL,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
+    completed_at_utc TEXT NOT NULL,
+    details_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE INDEX active_work_items_project_status_idx
+    ON active_work_items(project_key, status, priority DESC, updated_at_utc DESC);
+
+CREATE TABLE active_work_node_links (
+    work_item_id TEXT NOT NULL REFERENCES active_work_items(work_item_id) ON DELETE CASCADE,
+    node_id TEXT NOT NULL REFERENCES knowledge_nodes(node_id) ON DELETE RESTRICT,
+    PRIMARY KEY(work_item_id, node_id)
+);
+
+CREATE INDEX active_work_node_links_node_idx
+    ON active_work_node_links(node_id, work_item_id);
+
+CREATE TABLE active_work_asset_links (
+    work_item_id TEXT NOT NULL REFERENCES active_work_items(work_item_id) ON DELETE CASCADE,
+    asset_path TEXT NOT NULL CHECK (asset_path LIKE '/Game/%'),
+    PRIMARY KEY(work_item_id, asset_path)
+);
+
+CREATE INDEX active_work_asset_links_asset_idx
+    ON active_work_asset_links(asset_path, work_item_id);
+
+CREATE TABLE active_work_todos (
+    todo_id TEXT PRIMARY KEY,
+    work_item_id TEXT NOT NULL REFERENCES active_work_items(work_item_id) ON DELETE CASCADE,
+    text TEXT NOT NULL,
+    created_at_utc TEXT NOT NULL,
+    completed_at_utc TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX active_work_todos_work_idx
+    ON active_work_todos(work_item_id, created_at_utc, todo_id);
 """,
     ),
 )

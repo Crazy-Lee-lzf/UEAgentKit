@@ -387,65 +387,80 @@ CLI 的 stdout/stderr 在入口处固定为 UTF-8，确保 Windows 管道、中�
 
 `scripts\TestMcpWorkflow.cmd` 的真实 UE5.6 回归会在同一固定工程会话中记录 succeeded 与 rolledBack Task，随后运行 `ue_memory_validate`：Commit 后 Revision 在 rollback 后必须变为 `stale`，恢复 Revision 对应的 rolledBack Record 必须保持 `valid`。回归同时验证 Audit Snapshot SHA-256、Package SHA-256 恢复和 immutable Index 零修改。
 
-## 18. 后续 Schema v3 方向：分层知识树与 Active Work
+## 18. Schema v3：Knowledge Tree 与 Active Work
 
-本节是已经确定的后续架构方向，不属于 0.6.0 当前实现。当前稳定实现仍是 Schema v2 的平面 Record、Scope、Revision、Artifact 与状态机。
-
-计划中的 Schema v3 增加：
+`feature/memory-context` 在 0.6.0 Schema v2 平面记录库之上实现本地、单人、固定项目版 Schema v3。新增结构：
 
 ```text
-memory_nodes
-work_items
-work_item_nodes
+knowledge_nodes
 memory_records.node_id
-node_revision / owner / visibility_scope
+active_work_items
+active_work_node_links
+active_work_asset_links
+active_work_todos
 ```
 
-设计原则：
+Knowledge Node 约束：
 
-- `memory_nodes` 使用 `parent_id + path + depth` 支持任意深度 Knowledge Tree，不使用固定三层字段。
-- 默认从 Project Profile、System、Feature/Entity、Implementation 逐层展开，但可以继续向下细分。
-- 现有六类 Record 继续保存知识性质、来源、状态和证据；Knowledge Node 负责知识归属与导航。
-- 当前目标、进行中任务、TODO、阻塞、待确认决策与下一步进入独立 Active Work，不与长期知识混存。
-- Work Item 完成后只提取稳定结论更新 Knowledge Node；Patch、Validation、Revision 和 Task Evidence 继续自动保存。
-- 旧 Record ID、Digest、Revision Set 和 Artifact 必须在迁移中保持不变；尚未归类的记录先绑定 `/project/unclassified`。
+- Path 为规范化绝对路径，例如 `/project/combat/weapons`。
+- 同一 `project_key + path` 唯一，根节点固定为 `/project`。
+- Parent 必须属于同一项目，不允许环。
+- 节点类型为 `project/system/feature/component/entity/implementation`。
+- 有子节点、绑定 Memory Record 或绑定 Active Work 时拒绝删除。
+- 现有六类 Record 继续保存知识性质、来源、状态、Revision 和 Evidence；`node_id` 只负责可选归属与导航。
 
-完整设计见 [`../docs/MEMORY_ARCHITECTURE.md`](../docs/MEMORY_ARCHITECTURE.md)。
+Active Work 约束：
 
-## 19. 渐进式披露与 Token Budget
+- 状态为 `planned/in_progress/blocked/done/cancelled`。
+- 支持 `plan/start/add_todo/set_next_action/block/resume/complete/cancel/set_links`。
+- Work Item 可通过正规化关联表绑定多个 Knowledge Node 和多个 `/Game/...` Asset Path。
+- TODO、阻塞原因和下一步不写入长期知识 Record；完成后的稳定结论再进入 Knowledge Tree 或 Memory Record。
 
-后续 Memory 查询按五级披露：
+Schema v2 数据库可原地迁移到 v3。迁移保持旧 Record ID、内容摘要、Evidence 摘要、Scope、Revision Set、Artifact、Relation 和状态不变；旧记录保持 `node_id IS NULL`，不会被自动猜测分类。新数据库直接创建 v3，重复打开迁移是幂等的。
+
+## 19. 渐进式披露与预算
+
+Context Service 实现五级披露：
 
 ```text
-Level 0  Path、标题、一句话摘要、状态和子节点数量
-Level 1  Project/System/Feature 节点摘要
-Level 2  主要类、资产、入口、数据流、依赖与 Known Issue
-Level 3  Rule、Decision、Finding、Revision 与详细记录
-Level 4  Patch、日志、Blueprint Node、Validation Report 等原始证据
+Level 0  Node Path、标题、最小元数据与状态
+Level 1  节点摘要
+Level 2  实现概览与相关有效记录摘要
+Level 3  完整 Record 正文和 Details
+Level 4  原始 Evidence、Revision 与 Artifact
 ```
 
-服务端必须强制限制返回条数、展开深度和预算，默认过滤 `stale` 与 `superseded`。普通任务的 Memory 上下文目标为约 1,000–2,500 Token，不允许依赖 Skill 中的文字提醒来约束弱 Agent。
+默认只读取低 Detail Level，并由 Service 强制：
 
-## 20. MCP 与 Skill
+- 最大节点数、记录数和展开深度。
+- `maxChars` 硬预算，以及约 `4 chars ≈ 1 token` 的确定性近似。
+- 默认包含 `valid/unverified/conflicted`，过滤 `stale/superseded`。
+- 截断时返回 `truncated=true`、实际预算用量和结构化 `nextActions`。
+- Asset 过滤同时识别 `memory_scopes(scope_type='asset')` 与 `memory_revisions.asset_path`。
 
-后续采用 MCP 为主体、Skill 为薄层引导：
+该预算只是可重复的容量估算，不等同于模型分词器的精确 Token 数。
 
-- MCP Server 负责 Knowledge Tree、Active Work、渐进式披露、Token Budget、去重、冲突、Revision stale、权限和自动 Evidence。
-- 日常只保留一个约 400–800 Token 的 `project-memory` Skill，说明读取顺序与写入原则。
-- 不把读取、写入、维护和 TODO 拆成多个长 Skill。
-- 审计与 Schema Migration 可以使用按需加载的专用 Skill。
+## 20. MCP 高层入口与兼容性
 
-计划中的高层 Tool：
+Schema v3 新增五个固定项目高层 Tool：
 
 ```text
-memory_get_context
-memory_expand_node
-memory_get_evidence
-memory_update_knowledge
-memory_update_work
+ue_memory_get_context
+ue_memory_expand_node
+ue_memory_get_evidence
+ue_memory_update_knowledge
+ue_memory_update_work
 ```
 
-这些名称是后续契约目标，0.6.0 当前仍使用本文件第 14 节列出的 `ue_memory_*` Tool。
+- `ue_memory_get_context` 按 Query、Node Path、Asset Path、Detail Level 和 Budget 组装 Project Profile、Knowledge Nodes、Active Work、少量有效 Record 与 `nextActions`。
+- `ue_memory_expand_node` 按精确 Path、Depth 和 Detail Level 展开。
+- `ue_memory_get_evidence` 只按精确 Record ID 返回 Evidence/Artifact，不做模糊猜测。
+- `ue_memory_update_knowledge` 通过明确 Action 管理 Node、Record 绑定和稳定知识。
+- `ue_memory_update_work` 通过明确 Action 管理 Active Work 生命周期和关联。
+
+五个新 Tool 的顶层参数使用严格 Schema，未知参数会被 FastMCP 拒绝；不得提交数据库路径、Project Key、缓存键、任意 SQL 或 Revision SHA。现有七个 `ue_memory_*` Tool 保持名称、顺序和既有语义兼容。
+
+审计导出保留 Schema v2 的 `records`、`statusEvents` 和原有计数字段，并追加 `knowledgeNodes`、`activeWork`、Node/Work/TODO 数量。多人共享 Knowledge Service、账号权限、团队 Scope 与乐观并发仍属于后续阶段。
 
 ## 21. 多人协作部署方向
 

@@ -4,8 +4,10 @@ import hashlib
 import json
 from typing import Any
 
+from .active_work import WorkItem, get_work_item
 from .database import get_schema_version, utc_now_iso
 from .memory_service import ProjectMemoryService
+from .memory_tree import KnowledgeNode, get_knowledge_node
 from .project_memory import (
     MemoryRecord,
     MemoryScopeType,
@@ -17,6 +19,8 @@ from .project_memory import (
 MEMORY_AUDIT_SCHEMA_VERSION = "1.0"
 MAX_AUDIT_RECORDS = 10_000
 MAX_AUDIT_STATUS_EVENTS = 100_000
+MAX_AUDIT_NODES = 10_000
+MAX_AUDIT_WORK_ITEMS = 10_000
 
 
 def memory_record_payload(record: MemoryRecord) -> dict[str, Any]:
@@ -37,6 +41,7 @@ def memory_record_payload(record: MemoryRecord) -> dict[str, Any]:
         "observedAtUtc": record.observed_at_utc,
         "updatedAtUtc": record.updated_at_utc,
         "supersededByRecordId": record.superseded_by_record_id,
+        "nodeId": record.node_id,
         "scopes": [
             {
                 "scopeType": MemoryScopeType(scope.scope_type).value,
@@ -74,6 +79,50 @@ def memory_record_payload(record: MemoryRecord) -> dict[str, Any]:
     }
 
 
+def knowledge_node_payload(node: KnowledgeNode) -> dict[str, Any]:
+    return {
+        "nodeId": node.node_id,
+        "projectKey": node.project_key,
+        "path": node.path,
+        "parentNodeId": node.parent_node_id,
+        "nodeType": node.node_type.value,
+        "title": node.title,
+        "summary": node.summary,
+        "createdAtUtc": node.created_at_utc,
+        "updatedAtUtc": node.updated_at_utc,
+        "details": node.details,
+    }
+
+
+def active_work_payload(work: WorkItem) -> dict[str, Any]:
+    return {
+        "workItemId": work.work_item_id,
+        "projectKey": work.project_key,
+        "title": work.title,
+        "status": work.status.value,
+        "priority": work.priority,
+        "description": work.description,
+        "nextAction": work.next_action,
+        "blockedReason": work.blocked_reason,
+        "owner": work.owner,
+        "createdAtUtc": work.created_at_utc,
+        "updatedAtUtc": work.updated_at_utc,
+        "completedAtUtc": work.completed_at_utc,
+        "nodeIds": list(work.node_ids),
+        "assetPaths": list(work.asset_paths),
+        "todos": [
+            {
+                "todoId": todo.todo_id,
+                "text": todo.text,
+                "createdAtUtc": todo.created_at_utc,
+                "completedAtUtc": todo.completed_at_utc,
+            }
+            for todo in work.todos
+        ],
+        "details": work.details,
+    }
+
+
 def _read_details(value: str) -> dict[str, Any]:
     decoded = json.loads(value)
     if not isinstance(decoded, dict):
@@ -100,6 +149,8 @@ def build_memory_audit_report(
     *,
     max_records: int = MAX_AUDIT_RECORDS,
     max_status_events: int = MAX_AUDIT_STATUS_EVENTS,
+    max_nodes: int = MAX_AUDIT_NODES,
+    max_work_items: int = MAX_AUDIT_WORK_ITEMS,
 ) -> dict[str, Any]:
     if not isinstance(service, ProjectMemoryService):
         raise TypeError("service must be a ProjectMemoryService.")
@@ -108,6 +159,12 @@ def build_memory_audit_report(
     if max_status_events < 1 or max_status_events > MAX_AUDIT_STATUS_EVENTS:
         raise ValueError(
             f"max_status_events must be between 1 and {MAX_AUDIT_STATUS_EVENTS}."
+        )
+    if max_nodes < 1 or max_nodes > MAX_AUDIT_NODES:
+        raise ValueError(f"max_nodes must be between 1 and {MAX_AUDIT_NODES}.")
+    if max_work_items < 1 or max_work_items > MAX_AUDIT_WORK_ITEMS:
+        raise ValueError(
+            f"max_work_items must be between 1 and {MAX_AUDIT_WORK_ITEMS}."
         )
 
     with open_project_memory_database(service.database_path) as connection:
@@ -120,6 +177,27 @@ def build_memory_audit_report(
         if record_count > max_records:
             raise RuntimeError(
                 f"Project Memory audit contains {record_count} records; maximum is {max_records}."
+            )
+        node_count = int(
+            connection.execute(
+                "SELECT COUNT(*) FROM knowledge_nodes WHERE project_key = ?",
+                (service.project_key,),
+            ).fetchone()[0]
+        )
+        if node_count > max_nodes:
+            raise RuntimeError(
+                f"Project Memory audit contains {node_count} knowledge nodes; maximum is {max_nodes}."
+            )
+        active_work_count = int(
+            connection.execute(
+                "SELECT COUNT(*) FROM active_work_items WHERE project_key = ?",
+                (service.project_key,),
+            ).fetchone()[0]
+        )
+        if active_work_count > max_work_items:
+            raise RuntimeError(
+                "Project Memory audit contains "
+                f"{active_work_count} Active Work items; maximum is {max_work_items}."
             )
         status_event_count = int(
             connection.execute(
@@ -150,6 +228,44 @@ def build_memory_audit_report(
         records = [
             memory_record_payload(get_memory_record(connection, str(row[0])))
             for row in record_rows
+        ]
+        node_rows = connection.execute(
+            """
+            SELECT node_id
+            FROM knowledge_nodes
+            WHERE project_key = ?
+            ORDER BY path, node_id
+            """,
+            (service.project_key,),
+        ).fetchall()
+        knowledge_nodes = [
+            knowledge_node_payload(
+                get_knowledge_node(
+                    connection,
+                    node_id=str(row[0]),
+                    project_key=service.project_key,
+                )
+            )
+            for row in node_rows
+        ]
+        work_rows = connection.execute(
+            """
+            SELECT work_item_id
+            FROM active_work_items
+            WHERE project_key = ?
+            ORDER BY created_at_utc, work_item_id
+            """,
+            (service.project_key,),
+        ).fetchall()
+        active_work = [
+            active_work_payload(
+                get_work_item(
+                    connection,
+                    work_item_id=str(row[0]),
+                    project_key=service.project_key,
+                )
+            )
+            for row in work_rows
         ]
         event_rows = connection.execute(
             """
@@ -204,6 +320,18 @@ def build_memory_audit_report(
                 (service.project_key,),
             ).fetchall()
         )
+        counts_by_work_status = _count_map(
+            connection.execute(
+                """
+                SELECT status, COUNT(*)
+                FROM active_work_items
+                WHERE project_key = ?
+                GROUP BY status
+                ORDER BY status
+                """,
+                (service.project_key,),
+            ).fetchall()
+        )
         memory_schema_version = get_schema_version(connection)
 
     snapshot = {
@@ -211,10 +339,15 @@ def build_memory_audit_report(
         "memorySchemaVersion": memory_schema_version,
         "recordCount": record_count,
         "statusEventCount": status_event_count,
+        "nodeCount": node_count,
+        "activeWorkCount": active_work_count,
         "countsByType": counts_by_type,
         "countsByStatus": counts_by_status,
+        "countsByWorkStatus": counts_by_work_status,
         "records": records,
         "statusEvents": status_events,
+        "knowledgeNodes": knowledge_nodes,
+        "activeWork": active_work,
     }
     return {
         "schemaVersion": MEMORY_AUDIT_SCHEMA_VERSION,

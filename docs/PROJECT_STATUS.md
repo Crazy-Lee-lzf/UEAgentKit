@@ -2,11 +2,11 @@
 
 
 
-更新时间：2026-08-01
+更新时间：2026-08-02
 
 
 
-本文描述 `main` 分支当前 **0.7.0-dev** 开发线。最新正式发布版本仍为 **0.6.0**，支持 Unreal Engine 5.6；0.6.0 之后的 Live Editor Write、显式 Undo/Discard、授权保存闭环、可恢复 Journal 与可扩展 Operation Registry 尚未正式发布。
+本文描述 **0.7.0-dev** 开发线及 `feature/memory-context` 的单人版 Memory/Context MVP。最新正式发布版本仍为 **0.6.0**，支持 Unreal Engine 5.6；Schema v3 Knowledge Tree、Active Work、渐进式 Context，以及 0.6.0 之后的 Live Editor Write 能力均尚未正式发布。
 
 
 
@@ -40,13 +40,13 @@ UE Agent Kit 不是“让 AI 任意遥控 Unreal Editor”的通用自动化层�
 
 模式                 不启用 Memory    启用 Memory
 
-Offline                    5              12
+Offline                    5              17
 
-Live                      23              30
+Live                      23              35
 
-Workflow                  26              33
+Workflow                  29              41
 
-Combined                  44              51
+Combined                  47              59
 
 ```
 
@@ -62,7 +62,7 @@ Tool 数量只表示 MCP 接口数量，不等同于 Unreal Operation 数量。�
 
 ```text
 
-Python tests                 264/264
+Python tests                 299/299
 
 JSON Schemas                 3/3
 
@@ -135,6 +135,14 @@ UTF-8 no BOM / CRLF          passed
 - Scope、Revision Set、Artifact、Confidence、时间与证据摘要。
 
 - Revision 变化后的自动 stale，以及冲突结论并存。
+
+- Schema v3 Knowledge Tree：规范化 `/project/...` Path、同项目 Parent、无环和安全删除约束。
+
+- 独立 Active Work：`planned/in_progress/blocked/done/cancelled`、TODO、下一步和正规化 Node/Asset 关联。
+
+- 0–4 级渐进式 Context、字符预算、默认过滤 `stale/superseded`、截断 `nextActions` 和按需 Evidence。
+
+- 五个新高层 MCP Tool；原有七个 Memory Tool 保持兼容。
 
 
 
