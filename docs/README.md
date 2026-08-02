@@ -10,6 +10,7 @@
 - [`MEMORY_ARCHITECTURE_EN.md`](MEMORY_ARCHITECTURE_EN.md)：English layered memory and collaboration architecture.
 - [`AI_NATIVE_UE_EDITOR.md`](AI_NATIVE_UE_EDITOR.md)：AI 可用 UE5 编辑器的实时 CRUD、项目模型、知识树、性能与风险自适应安全架构。
 - [`AI_NATIVE_UE_EDITOR_EN.md`](AI_NATIVE_UE_EDITOR_EN.md)：English AI-usable UE5 Editor architecture.
+- [`PERFORMANCE_TEST_PLAN.md`](PERFORMANCE_TEST_PLAN.md)：500 GB 商业项目模型、E 盘 SSD 上的 160–180 GB 物理测试工程、原生 SSD 与 50 MB/s HDD 模拟档位、日常交互目标与性能门禁。
 - [`BRANCH_WORKTREES.md`](BRANCH_WORKTREES.md)：Realtime I/O 与 Memory/Context 双分支、Worktree、公共协议和合并规范。
 - [`BRANCH_WORKTREES_EN.md`](BRANCH_WORKTREES_EN.md)：English dual-branch and Worktree workflow.
 - [`Handoffs/MEMORY_CONTEXT_HANDOFF_20260801.md`](Handoffs/MEMORY_CONTEXT_HANDOFF_20260801.md)：Memory/Context 里程碑实现范围、兼容要求与测试门禁。
@@ -49,7 +50,7 @@
 
 ## 当前版本与开发分支
 
-当前已发布版本为 UE Agent Kit 0.6.0，支持 Unreal Engine 5.6。Revision-aware Project Memory 与受控 Live Editor Write 基础层已经完成；0.7.0-dev 采用双轨并行开发：Memory/Context 建设 Knowledge Tree、Active Work 和 Context Pack，Realtime I/O 建设运行中 UE Editor 的实时增删查改、批量分析和诊断能力。
+当前已发布版本为 UE Agent Kit 0.6.0，支持 Unreal Engine 5.6。本地 `main` 已集成 Revision-aware Project Memory、Schema v3 Knowledge Tree/Active Work、Realtime Context/Batch/Change Set 和受控 Live Editor Write 基础层；0.7.0-dev 继续保留 Memory/Context 与 Realtime I/O 两个长期分支并行开发。
 
 0.6.0 发布能力包括：
 
@@ -63,11 +64,11 @@
 - DataTable 多字段、Row 新增/删除/重命名和 Searchable Name 引用影响门禁。
 - Data Asset Object/Class、Soft Object/Class、Struct、Array、Set 和 Map 稳定值模型。
 - Backup Manifest、独立验证和 Revision-aware rollback。
-- Offline 5、Live 23、Workflow 26、Combined 44 Tool；启用 Memory 后为 12、30、33、51；其中 12 个为高层安全写入入口。
+- Offline 5、Live 27、Workflow 31、Combined 53 Tool；启用 Memory 后为 17、39、43、65；其中 12 个为高层安全写入入口，Memory 另提供 12 个低层与渐进式高层入口。
 - `main` 的 `ue_apply_asset_property_live` 当前支持 12 个 Data Asset、Material Instance 和 DataTable Operation；统一 Transaction/Evidence、精确 Undo/Discard、授权保存后独立 Verify、可恢复 Journal 和注册式资产域执行器均已完成，但仍不自动保存或开放任意 UObject。
 
-0.5.x 与 0.6.0 已完成并进入维护，Live Editor Write 基础层也已在 0.7.0-dev 完成。当前两条同级主线分别是 Memory Knowledge Tree/Active Work/Context Pack，以及以运行中 Editor 为主路径的实时 CRUD、批量任务、运行时诊断和 Change Set；离线导出与 Commandlet 继续承担全项目索引、批处理、独立验证、回滚和 CI。
+0.5.x 与 0.6.0 已完成并进入维护，Live Editor Write、Realtime Foundation 和单人 Schema v3 Memory MVP 也已在本地 0.7.0-dev 集成。当前两条同级主线分别继续扩展 Memory/Context 与运行中 Editor 的实时 CRUD；大型项目性能框架作为共享横向能力建设，离线导出与 Commandlet 继续承担全项目索引、批处理、独立验证、回滚和 CI。
 
 只读分析路径不修改资产；Blueprint Patch、Asset Patch 与 MCP Commit 仅在明确授权后执行。
 
-测试资产生成方式见 [`../tests/fixtures/README.md`](../tests/fixtures/README.md)。
+测试资产生成方式见 [`../tests/fixtures/README.md`](../tests/fixtures/README.md)；大型项目规模、物理测试工程和交互耗时目标见 [`PERFORMANCE_TEST_PLAN.md`](PERFORMANCE_TEST_PLAN.md)。
