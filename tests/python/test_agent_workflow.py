@@ -2438,8 +2438,8 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertFalse(applied["journalPersisted"])
         self.assertIn(applied["liveApplyReceipt"], service._live_applies)
         status = service.status()
-        self.assertEqual(status["publishedVersion"], "0.6.0")
-        self.assertEqual(status["developmentLine"], "0.7.0-dev")
+        self.assertEqual(status["publishedVersion"], "0.7.0")
+        self.assertEqual(status["developmentLine"], "0.7.0")
         self.assertEqual(status["liveWriteJournal"]["journalErrorCount"], 1)
 
     def test_live_write_journal_recovers_and_closes_exact_receipt(self) -> None:

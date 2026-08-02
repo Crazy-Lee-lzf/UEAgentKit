@@ -2,7 +2,7 @@
 
 Updated: 2026-08-03
 
-The latest published release is **0.6.0** for Unreal Engine 5.6. The local `main` line now integrates the **0.7.0-dev** Realtime Foundation and the single-user Schema v3 Memory/Context MVP. The long-lived `feature/live-editor-realtime-io` and `feature/memory-context` branches remain available for parallel work after synchronizing from `main`. The immediate priority is broader real-time editing in the running Editor; automatic task context, performance benchmarks, analysis, and the shared multi-user service proceed as cross-cutting or later work.
+The latest published release is **0.7.0** for Unreal Engine 5.6. The Realtime Foundation, registry-driven Live Editor Write, Schema v3 Memory/Context MVP, frame-stepped Batch Tasks, and durable Change Sets are included in the local release. The long-lived Realtime and Memory branches remain available; the immediate priority is 0.8.0-dev Context/Analysis, common Blueprint edits, and large-project performance baselines.
 
 ## Direction
 
@@ -48,15 +48,15 @@ Requirements:
 - Preserve conflicting conclusions instead of silently overwriting them.
 - Link Task Records to patches, backup manifests, verification reports, and final conclusions.
 
-## 0.7.0-dev: Live Editor Write foundation (complete)
+## 0.7.0: Live Editor Write foundation (released)
 
 The current `main` line now includes 12 controlled Operations, generic `operation + assetPath + target + value` requests, separate Property/Material/DataTable domain modules, shared Transaction/Evidence handling, exact Undo/Discard, Authorized Save → Independent Verify, Memory Evidence, and a recoverable Live Apply journal. Every new Operation must still register explicit targets, policy, snapshot, undo, failure-restoration, and real UE regression coverage. Registration does not grant write authority or expose arbitrary UObject methods, scripts, or automatic saves.
 
 See [`AI_NATIVE_UE_EDITOR_EN.md`](AI_NATIVE_UE_EDITOR_EN.md) and [`BRANCH_WORKTREES_EN.md`](BRANCH_WORKTREES_EN.md) for track ownership, performance budgets, risk levels, and Worktree integration rules.
 
-## 0.7.0-dev: Memory usability and layered knowledge tree (single-user MVP complete)
+## 0.7.0: Memory usability and layered knowledge tree (released)
 
-The local `main` line now evolves the 0.6.0 flat record store into a low-maintenance, low-token, single-user usability layer; further Memory work continues on the long-lived feature branch:
+Version 0.7.0 evolves the 0.6.0 flat record store into a low-maintenance, low-token, single-user usability layer; further Memory work continues on the long-lived feature branch:
 
 - Stable paths and parent links provide an arbitrary-depth Knowledge Tree from Project Profile through systems, features/entities, and implementations.
 - Separate durable knowledge, record type, Active Work, and Evidence.
@@ -67,11 +67,11 @@ The local `main` line now evolves the 0.6.0 flat record store into a low-mainten
 
 Next, bind task IDs, Active Work, Change Sets, Editor Sessions, and Evidence, and establish large-project latency baselines. This work does not block parallel Realtime readers and writers. See [`MEMORY_ARCHITECTURE_EN.md`](MEMORY_ARCHITECTURE_EN.md).
 
-## 0.7.0: context and analysis
+## 0.8.0-dev: context and analysis
 
 Planned capabilities include automatic context packs, value-source and execution tracing, impact analysis, semantic asset diffs, evidence-backed hypotheses, change plans, and verification plans. Unsupported conclusions must be marked as inference.
 
-## 0.8.0: collaboration and conflict awareness
+## 0.9.0: collaboration and conflict awareness
 
 Read source-control provider, checkout, lock, owner, and head state; compare local dirty state, disk Revision, and depot/remote head; and model ownership boundaries and multi-user asset conflict risk. The first version may analyze, warn, or block, but must not steal locks or overwrite another developer's work.
 

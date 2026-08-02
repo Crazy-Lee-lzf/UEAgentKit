@@ -4,10 +4,14 @@ All notable changes to UE Agent Kit are documented here.
 
 ## Unreleased
 
+No changes yet.
+
+## 0.7.0 — realtime editor and layered memory foundation
+
 - Refactored Live Editor Write into a registry-driven architecture intended to scale beyond the current 12 Operations: generic JSON `target` requests, central asset requirements, separate Property/Material/DataTable domain executors, and a shared Transaction/Evidence layer replace the former monolithic hard-coded dispatcher while retaining legacy flattened Target fields for compatibility.
 - Added metadata-driven Python Live Write dispatch and independent verification through `OperationSpec`, eliminating the duplicate 12-operation whitelist and per-kind Target branching.
 - Added a fixed-work-root Live Apply Journal with strict startup recovery, exact `liveApplyReceipt` verification, truthful `journalPersisted` reporting, and automatic closeout after Undo/Discard or successful independent Verify.
-- Added Fast and Full Live Write regression suites and explicit status version semantics: published protocol/package version 0.6.0, current development line 0.7.0-dev.
+- Added Fast and Full Live Write regression suites and explicit status version semantics: published protocol/package version 0.7.0 and release line 0.7.0.
 
 - Documented the adopted layered Project Memory architecture: arbitrary-depth Knowledge Tree, separate Active Work/TODO, five-level progressive disclosure, server-enforced token budgets, MCP-primary/thin-Skill usage, and one-local-MCP-per-developer plus shared knowledge-service collaboration.
 
@@ -16,7 +20,7 @@ All notable changes to UE Agent Kit are documented here.
 
 - Added the first Policy/Revision-gated Live Editor Write path: `ue_apply_asset_property_live` applies one existing `setAssetProperty` Plan to an already open, clean non-Blueprint asset inside the running Editor, records an Undo transaction, marks the package Dirty, and never saves automatically.
 - Added a real UE5.6 live-write regression that keeps ordinary `UnrealEditor.exe` running, rejects an invalid confirmation, changes the in-memory scalar value, reports Dirty/Undo evidence, and proves both the `.uasset` SHA-256 and immutable SQLite index remain unchanged.
-- Extended the same `ue_apply_asset_property_live` Tool to Data Asset reference properties: `setAssetReferenceProperty` Plans now apply Object, Class, SoftObject, and SoftClass top-level references (including JSON null clears) to already open, clean Data Assets inside the running Editor, with the same Undo/Dirty/no-save behavior, an explicit Bridge Operation, and full failure restore. This is a `main` development-snapshot capability, not part of the 0.6.0 release; it still never auto-saves and still does not cover Blueprint, container, Material, or DataTable live apply.
+- Extended the same `ue_apply_asset_property_live` Tool to Data Asset reference properties: `setAssetReferenceProperty` Plans now apply Object, Class, SoftObject, and SoftClass top-level references (including JSON null clears) to already open, clean Data Assets inside the running Editor, with the same Undo/Dirty/no-save behavior, an explicit Bridge Operation, and full failure restore. This capability is included in 0.7.0 and retains the same no-auto-save, Policy, Revision, Undo, and failure-restoration boundaries.
 - Added a declarative reference live-write fixture plan (`reference_live_write_plan.json`), a real UE5.6 reference live-write regression harness (`TestMcpLiveReferenceWrite`), and Python contract coverage proving the Bridge receives the explicit Operation and passes reference JSON values through unchanged.
 - Extended the same Tool to Data Asset structured properties: `setAssetStructuredProperty` Plans now apply top-level Struct, Array, Set, and Map values to already open, clean Data Assets inside the running Editor. The Bridge reuses the existing StructuredPropertyJson GetKind/BuildSchema/ExportValue/ImportValue/CanonicalJson/JsonEqual/BuildDiff path (no second serialization layer), snapshots the property, imports, read-backs, and verifies the value, then records Undo, marks Dirty, and reports `structuredKind`/`structuredSchema`/`diff`/`diffTruncated`; failures restore the value and the prior Dirty state and cancel the Transaction, and a no-op apply creates neither Dirty nor Undo. Fixed arrays (ArrayDim != 1), nested property paths, and non-structured properties are rejected during Plan validation or at the Bridge.
 - Added a declarative structured live-write fixture plan (`structured_live_write_plan.json`), a real UE5.6 structured live-write regression harness (`TestMcpLiveStructuredWrite`) covering Plan rejections, confirmation rejection, no-op behavior, Struct/Array/Set/Map success cases, and a Dirty-package Bridge rejection while proving disk `.uasset` SHA-256, SQLite, and Revision Export hashes all remain unchanged, plus Python unit and executable smoke-contract coverage.

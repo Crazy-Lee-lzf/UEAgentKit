@@ -1,6 +1,6 @@
 # Index Freshness and Snapshot Lifecycle
 
-UE Agent Kit 0.6.0 treats the SQLite index and Revision Export as fixed read snapshots. A saved Unreal package can change after those snapshots were built, so the MCP server must never assume that an available index is automatically current.
+UE Agent Kit 0.7.0 treats the SQLite index and Revision Export as fixed read snapshots. A saved Unreal package can change after those snapshots were built, so the MCP server must never assume that an available index is automatically current.
 
 ## Revision sources
 

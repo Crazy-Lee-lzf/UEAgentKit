@@ -22,37 +22,39 @@
 
 ## 使用文档
 
-1. [`RELEASE_0.6.0.md`](RELEASE_0.6.0.md)：Revision-aware Project Memory、证据绑定 Task、审计导出和真实 UE5.6 闭环。
-2. [`RELEASE_0.6.0_EN.md`](RELEASE_0.6.0_EN.md)：0.6.0 English release notes。
-3. [`RELEASE_0.5.5.md`](RELEASE_0.5.5.md)：0.5.x 日常开发能力、原子事务、验证证据与正式发布收口。
-4. [`RELEASE_0.5.5_EN.md`](RELEASE_0.5.5_EN.md)：0.5.5 English release notes。
-5. [`RELEASE_0.5.1.md`](RELEASE_0.5.1.md)：0.5.1 中文发布说明、协议补全、高层安全写入与兼容矩阵。
-6. [`RELEASE_0.5.1_EN.md`](RELEASE_0.5.1_EN.md)：0.5.1 English release notes。
-7. [`RELEASE_0.5.0.md`](RELEASE_0.5.0.md)：0.5.0 固定项目 MCP 工作流发布说明。
-8. [`RELEASE_0.5.0_EN.md`](RELEASE_0.5.0_EN.md)：0.5.0 English release notes。
-9. [`RELEASE_0.4.4.md`](RELEASE_0.4.4.md)：0.4.4 中文发布说明、正式范围、验证结果和升级步骤。
-10. [`RELEASE_0.4.4_EN.md`](RELEASE_0.4.4_EN.md)：0.4.4 English release notes。
-11. [`../CHANGELOG.md`](../CHANGELOG.md)：版本变更摘要。
-12. [`BUILD_AND_RUN.md`](BUILD_AND_RUN.md)：环境要求、插件构建、资产目录、Blueprint 导出和 SQLite 查询。
-13. [`AI_USAGE.md`](AI_USAGE.md)：AI 如何使用资产目录、Blueprint 语义和结构化引用。
-14. [`ROADMAP.md`](ROADMAP.md)：版本目标、完成状态和后续边界。
-15. [`PARALLEL_AGENT_DEVELOPMENT.md`](PARALLEL_AGENT_DEVELOPMENT.md)：并行 Agent、Worktree 和分层测试规则。
-16. [`REFERENCE_POLICY.md`](REFERENCE_POLICY.md)：第三方参考、独立实现和依赖分发规则。
-17. [`../spec/BPCTX_FORMAT.md`](../spec/BPCTX_FORMAT.md)：BPCTX/1 文本格式规范。
-18. [`../spec/PATCH_SCHEMA.md`](../spec/PATCH_SCHEMA.md)：Patch、Policy、Revision、Dry Run 和 Commit 安全边界。
-19. [`../spec/BACKUP_AND_ROLLBACK.md`](../spec/BACKUP_AND_ROLLBACK.md)：Backup Manifest、rollback 与恢复验证。
-20. [`../spec/WRITE_FIXTURE_PLAN.md`](../spec/WRITE_FIXTURE_PLAN.md)：声明式 Fixture 生成、重置和独立验证。
-21. [`../spec/SCALAR_PATCH_REGRESSION.md`](../spec/SCALAR_PATCH_REGRESSION.md)：标量写入与失败路径真实 UE 回归。
-22. [`../spec/MCP_SERVER.md`](../spec/MCP_SERVER.md)：MCP Tool、固定配置、Receipt 和 stdio 契约。
-23. [`../spec/INDEX_FRESHNESS.md`](../spec/INDEX_FRESHNESS.md)：SQLite、Revision Export 与磁盘 Package 新鲜度。
-24. [`../spec/LIVE_EDITOR_BRIDGE.md`](../spec/LIVE_EDITOR_BRIDGE.md)：localhost IPC、固定工程认证与 Daily Actions。
-25. [`../spec/PROJECT_MEMORY.md`](../spec/PROJECT_MEMORY.md)：Revision-aware Project Memory 的独立存储、来源、状态、Scope、Revision、冲突与失效契约。
+1. [`RELEASE_0.7.0.md`](RELEASE_0.7.0.md)：Realtime Foundation、注册式 Live Write、Schema v3 Memory、Batch/Change Set 与发布验证。
+2. [`RELEASE_0.7.0_EN.md`](RELEASE_0.7.0_EN.md)：0.7.0 English release notes。
+3. [`RELEASE_0.6.0.md`](RELEASE_0.6.0.md)：Revision-aware Project Memory、证据绑定 Task、审计导出和真实 UE5.6 闭环。
+4. [`RELEASE_0.6.0_EN.md`](RELEASE_0.6.0_EN.md)：0.6.0 English release notes。
+5. [`RELEASE_0.5.5.md`](RELEASE_0.5.5.md)：0.5.x 日常开发能力、原子事务、验证证据与正式发布收口。
+6. [`RELEASE_0.5.5_EN.md`](RELEASE_0.5.5_EN.md)：0.5.5 English release notes。
+7. [`RELEASE_0.5.1.md`](RELEASE_0.5.1.md)：0.5.1 中文发布说明、协议补全、高层安全写入与兼容矩阵。
+8. [`RELEASE_0.5.1_EN.md`](RELEASE_0.5.1_EN.md)：0.5.1 English release notes。
+9. [`RELEASE_0.5.0.md`](RELEASE_0.5.0.md)：0.5.0 固定项目 MCP 工作流发布说明。
+10. [`RELEASE_0.5.0_EN.md`](RELEASE_0.5.0_EN.md)：0.5.0 English release notes。
+11. [`RELEASE_0.4.4.md`](RELEASE_0.4.4.md)：0.4.4 中文发布说明、正式范围、验证结果和升级步骤。
+12. [`RELEASE_0.4.4_EN.md`](RELEASE_0.4.4_EN.md)：0.4.4 English release notes。
+13. [`../CHANGELOG.md`](../CHANGELOG.md)：版本变更摘要。
+14. [`BUILD_AND_RUN.md`](BUILD_AND_RUN.md)：环境要求、插件构建、资产目录、Blueprint 导出和 SQLite 查询。
+15. [`AI_USAGE.md`](AI_USAGE.md)：AI 如何使用资产目录、Blueprint 语义和结构化引用。
+16. [`ROADMAP.md`](ROADMAP.md)：版本目标、完成状态和后续边界。
+17. [`PARALLEL_AGENT_DEVELOPMENT.md`](PARALLEL_AGENT_DEVELOPMENT.md)：并行 Agent、Worktree 和分层测试规则。
+18. [`REFERENCE_POLICY.md`](REFERENCE_POLICY.md)：第三方参考、独立实现和依赖分发规则。
+19. [`../spec/BPCTX_FORMAT.md`](../spec/BPCTX_FORMAT.md)：BPCTX/1 文本格式规范。
+20. [`../spec/PATCH_SCHEMA.md`](../spec/PATCH_SCHEMA.md)：Patch、Policy、Revision、Dry Run 和 Commit 安全边界。
+21. [`../spec/BACKUP_AND_ROLLBACK.md`](../spec/BACKUP_AND_ROLLBACK.md)：Backup Manifest、rollback 与恢复验证。
+22. [`../spec/WRITE_FIXTURE_PLAN.md`](../spec/WRITE_FIXTURE_PLAN.md)：声明式 Fixture 生成、重置和独立验证。
+23. [`../spec/SCALAR_PATCH_REGRESSION.md`](../spec/SCALAR_PATCH_REGRESSION.md)：标量写入与失败路径真实 UE 回归。
+24. [`../spec/MCP_SERVER.md`](../spec/MCP_SERVER.md)：MCP Tool、固定配置、Receipt 和 stdio 契约。
+25. [`../spec/INDEX_FRESHNESS.md`](../spec/INDEX_FRESHNESS.md)：SQLite、Revision Export 与磁盘 Package 新鲜度。
+26. [`../spec/LIVE_EDITOR_BRIDGE.md`](../spec/LIVE_EDITOR_BRIDGE.md)：localhost IPC、固定工程认证与 Daily Actions。
+27. [`../spec/PROJECT_MEMORY.md`](../spec/PROJECT_MEMORY.md)：Revision-aware Project Memory 的独立存储、来源、状态、Scope、Revision、冲突与失效契约。
 
 ## 当前版本与开发分支
 
-当前已发布版本为 UE Agent Kit 0.6.0，支持 Unreal Engine 5.6。本地 `main` 已集成 Revision-aware Project Memory、Schema v3 Knowledge Tree/Active Work、Realtime Context/Batch/Change Set 和受控 Live Editor Write 基础层；0.7.0-dev 继续保留 Memory/Context 与 Realtime I/O 两个长期分支并行开发。
+当前已发布版本为 UE Agent Kit 0.7.0，支持 Unreal Engine 5.6。本地 `main` 已正式集成 Revision-aware Project Memory、Schema v3 Knowledge Tree/Active Work、Realtime Context/Batch/Change Set 和受控 Live Editor Write 基础层；两个长期功能分支继续保留并从 `main` 同步后并行开发。
 
-0.6.0 发布能力包括：
+0.7.0 发布能力包括：
 
 - 独立 Project Memory SQLite/FTS5、六类记录、来源、Scope、Confidence、Revision Set 和状态机。
 - 固定工程 MCP/CLI、可审计 JSON 导出、证据摘要和读取时篡改检测。
@@ -67,7 +69,7 @@
 - Offline 5、Live 27、Workflow 31、Combined 53 Tool；启用 Memory 后为 17、39、43、65；其中 12 个为高层安全写入入口，Memory 另提供 12 个低层与渐进式高层入口。
 - `main` 的 `ue_apply_asset_property_live` 当前支持 12 个 Data Asset、Material Instance 和 DataTable Operation；统一 Transaction/Evidence、精确 Undo/Discard、授权保存后独立 Verify、可恢复 Journal 和注册式资产域执行器均已完成，但仍不自动保存或开放任意 UObject。
 
-0.5.x 与 0.6.0 已完成并进入维护，Live Editor Write、Realtime Foundation 和单人 Schema v3 Memory MVP 也已在本地 0.7.0-dev 集成。当前两条同级主线分别继续扩展 Memory/Context 与运行中 Editor 的实时 CRUD；大型项目性能框架作为共享横向能力建设，离线导出与 Commandlet 继续承担全项目索引、批处理、独立验证、回滚和 CI。
+0.5.x、0.6.0 与 0.7.0 已完成并进入维护。下一阶段由 Realtime I/O 与 Memory/Context 两条长期分支继续扩展 0.8.0-dev Context/Analysis 和高价值编辑能力；大型项目性能框架作为共享横向能力建设，离线导出与 Commandlet 继续承担全项目索引、批处理、独立验证、回滚和 CI。
 
 只读分析路径不修改资产；Blueprint Patch、Asset Patch 与 MCP Commit 仅在明确授权后执行。
 

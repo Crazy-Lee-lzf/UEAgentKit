@@ -6,9 +6,9 @@
 
 UE Agent Kit is an open-source Unreal Engine asset analysis, indexing, and policy-gated patch toolkit. Its Editor plugin exports asset catalogs, Asset Registry metadata, dependencies, and Blueprint semantics; a Python CLI and SQLite provide a project-wide index, while Policy, Revision checks, dry runs, and backups protect explicit writes.
 
-The latest published release is **0.6.0** and targets **Unreal Engine 5.6**. This release adds Revision-aware Project Memory with independent SQLite/FTS5 storage, six traceable record types, provenance and status transitions, Revision invalidation, evidence digests, fixed-project MCP/CLI access, auditable export, and verified Workflow/rollback Task Evidence.
+The latest published release is **0.7.0** for **Unreal Engine 5.6**. It formally integrates the Realtime Foundation, registry-driven Live Editor Write, Schema v3 Knowledge Trees and Active Work, progressive Context, frame-stepped batch tasks, durable Change Sets, and the complete Transaction/Evidence, Undo/Discard, authorized-save, and independent-verification workflow.
 
-> **Development status**: 0.6.0 remains the latest published release. The local `main` line now integrates the 0.7.0-dev Realtime Foundation and the single-user Schema v3 Memory/Context MVP. Both feature branches remain long-lived and continue parallel development after synchronizing from `main`. Without Memory the modes expose 5/27/31/53 tools; fixed Project Memory changes them to 17/39/43/65. The immediate priority is broader real-time editing in the running Unreal Editor, with task-context binding, performance budgets, and Evidence closeout developed as cross-cutting support.
+> **Current status**: 0.7.0 is closed locally on `main`. Without Memory the modes expose 5/27/31/53 tools; fixed Project Memory changes them to 17/39/43/65. The long-lived Realtime and Memory branches remain available for parallel work. The next line is 0.8.0-dev Context/Analysis plus large-project performance baselines.
 
 > **AI Generated**: Most code and documentation in this project are AI-generated and reviewed through human inspection, UE 5.6 compilation, automated tests, and real-project regression validation.
 
@@ -235,7 +235,7 @@ The regression applies two operations to a Data Asset and a Blueprint. Dry Run u
 
 The executor supports four Blueprint operations, scalar `setAssetProperty`, Data Asset-specific `setAssetReferenceProperty` and `setAssetStructuredProperty`, four Material Instance parameter operations, and DataTable field/row operations. One execution remains limited to one asset but may contain 1–32 compatible operations in one atomic transaction. Multi-operation execution pre-validates every target, creates one backup, compiles/saves once, and records all operations in one manifest. Exact Policy authorization remains per target. `setAssetStructuredProperty` replaces one top-level Struct, Array, Set, or Map through an explicit `valueType` envelope. Struct values must contain every field, while Set and Map values must be uniquely ordered by Canonical JSON; reports include a recursive structured diff. Only single-file packages without external package sidecars are accepted.
 
-### 6. Run the MCP server (0.6.0 release / 0.7.0-dev `main`)
+### 6. Run the MCP server (0.7.0)
 
 Install the optional MCP dependency and validate the SQLite index:
 
@@ -246,7 +246,7 @@ scripts\TestMcpStdio.cmd
 scripts\TestMcpClients.cmd
 ```
 
-Version 0.6.0 can connect to a restricted fixed-project Live Editor Bridge and optionally enable Revision-aware Project Memory. The current 0.7.0-dev `main` line also provides the complete Live Editor Write foundation:
+Version 0.7.0 connects to a restricted fixed-project Live Editor Bridge and can enable Schema v3 Revision-aware Project Memory. The running Editor path includes bounded Context, frame-stepped Batch Tasks, durable Change Sets, and registry-driven Live Editor Write:
 
 ```bat
 scripts\TestMcpLiveEditor.cmd ^
@@ -270,7 +270,7 @@ scripts\TestMcpSnapshotRefresh.cmd ^
   -ProjectPath "<TEST_PROJECT>.uproject"
 ```
 
-The MCP Client still uses local `stdio` only. Default mode exposes 5 offline read-only tools; `-EnableLiveEditor -ProjectPath <fixed project>` adds 10 live read tools plus 8 bounded Daily Actions for a total of 23; the fixed-project workflow exposes 26; combining both exposes 44. Live reads include bounded Output Log queries, compile diagnostics, non-loading live asset inspection, and focused Graph/Node selection for ordinary Blueprint Editors. Daily Actions open or focus assets, sync the Content Browser, focus an ActorGuid, compile a Blueprint in memory, and run official Data Validation without saving packages. Workflow mode adds four-source asset state and safe single-asset index refresh. Rather than adding hundreds of MCP tools, 0.7.0-dev routes the existing `ue_apply_asset_property_live` entry through registry-driven domain executors using `operation + assetPath + target + value`, while retaining Plan, Policy, Revision, and exact-confirmation gates:
+The MCP Client still uses local `stdio` only. Without Memory, Offline, Live, Workflow, and Combined expose 5, 27, 31, and 53 tools; fixed Project Memory changes them to 17, 39, 43, and 65. Realtime paths provide bounded Editor Context, Output Log, compile diagnostics, current Graph/Node selection, frame-stepped `scanCurrentWorld`, paged Batch details, and durable Change Sets. `ue_apply_asset_property_live` routes 12 controlled Operations through registry-driven domain executors while preserving Plan, Policy, Revision, Transaction, exact confirmation, Undo/Discard, authorized one-asset saves, and independent Verify. Arbitrary SQL, Shell, Python, UObject methods, automatic saving, and Save All remain unavailable.
 
 ```bat
 claude mcp add --transport stdio --scope project ue-agent-kit -- ^
@@ -284,7 +284,7 @@ Use `claude mcp list` or `/mcp` inside Claude Code to inspect the connection. Li
 ### 7. Validate the asset catalog
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.6.0
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.7.0
 ```
 
 See [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md) for installation and full command details.
@@ -321,13 +321,14 @@ Output\Blueprints\
 - [`docs/MEMORY_ARCHITECTURE_EN.md`](docs/MEMORY_ARCHITECTURE_EN.md): layered knowledge tree, progressive disclosure, MCP/Skill responsibilities, and shared knowledge-service architecture.
 - [`docs/MEMORY_ARCHITECTURE.md`](docs/MEMORY_ARCHITECTURE.md): Chinese memory architecture.
 
-- [`docs/RELEASE_0.6.0_EN.md`](docs/RELEASE_0.6.0_EN.md): Revision-aware Project Memory, evidence-bound tasks, audit export, and the real UE5.6 closure.
+- [`docs/RELEASE_0.7.0_EN.md`](docs/RELEASE_0.7.0_EN.md): Realtime Foundation, registry-driven Live Write, Schema v3 Memory, Batch/Change Sets, and local release details.
+- [`docs/RELEASE_0.6.0_EN.md`](docs/RELEASE_0.6.0_EN.md): Revision-aware Project Memory, evidence-bound tasks, audit export, and real UE5.6 closure.
 - [`docs/RELEASE_0.5.5_EN.md`](docs/RELEASE_0.5.5_EN.md): 0.5.x daily-development capabilities, atomic transactions, validation evidence, and release closeout.
 - [`docs/RELEASE_0.5.1_EN.md`](docs/RELEASE_0.5.1_EN.md): 0.5.1 query contract, high-level safe changes, diagnostics, and client compatibility.
 - [`docs/RELEASE_0.5.0_EN.md`](docs/RELEASE_0.5.0_EN.md): 0.5.0 fixed-project MCP workflow release notes.
 - [`docs/RELEASE_0.4.4_EN.md`](docs/RELEASE_0.4.4_EN.md): 0.4.4 release scope, verification, and upgrade notes.
 - [`CHANGELOG.md`](CHANGELOG.md): version history summary.
-- [`docs/ROADMAP_EN.md`](docs/ROADMAP_EN.md): Revision-aware memory in 0.6.0, Context/Analysis in 0.7.0, and later collaboration work.
+- [`docs/ROADMAP_EN.md`](docs/ROADMAP_EN.md): released 0.7.0 capabilities, 0.8.0 Context/Analysis, and 0.9.0 collaboration direction.
 - [`spec/BPCTX_FORMAT.md`](spec/BPCTX_FORMAT.md): BPCTX/1 format specification.
 - [`spec/PATCH_SCHEMA.md`](spec/PATCH_SCHEMA.md): declarative patches, policy, revision checks, and validation-only safety boundaries.
 - [`spec/BACKUP_AND_ROLLBACK.md`](spec/BACKUP_AND_ROLLBACK.md): backup manifest, rollback receipt, and restore-verification contract.

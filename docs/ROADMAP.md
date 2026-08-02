@@ -2,7 +2,7 @@
 
 更新时间：2026-08-03
 
-当前已发布版本为 **0.6.0**，支持 Unreal Engine 5.6。本地 `main` 已集成 **0.7.0-dev** 的 Realtime Foundation 与单人 Schema v3 Memory/Context MVP；`feature/live-editor-realtime-io` 和 `feature/memory-context` 两个长期分支继续保留，并在同步 `main` 后并行开发。当前首要目标是扩大运行中 UE Editor 的实时读写覆盖面；自动任务上下文、性能基准、分析能力与多人共享服务作为横向或后续能力推进。
+当前已发布版本为 **0.7.0**，支持 Unreal Engine 5.6。Realtime Foundation、注册式 Live Editor Write、Schema v3 Memory/Context MVP、分帧 Batch Task 和持久化 Change Set 已正式进入本地发布。`feature/live-editor-realtime-io` 与 `feature/memory-context` 继续作为长期分支；当前首要目标转为 0.8.0-dev Context/Analysis、Blueprint 常用编辑扩展和大型项目性能基准。
 
 ## 总体方向
 
@@ -48,15 +48,15 @@ Combined           53 Tool（Memory 65）
 - 冲突结论并存，不静默覆盖。
 - Task Record 可关联 Patch、Backup Manifest、验证报告和最终结论。
 
-## 0.7.0-dev：Live Editor Write 基础层（已完成）
+## 0.7.0：Live Editor Write 基础层（已发布）
 
 当前 `main` 已完成 12 个受控 Operation、通用 `operation + assetPath + target + value` 请求、Property/Material/DataTable 资产域模块、统一 Transaction/Evidence、精确 Undo/Discard、Authorized Save → Independent Verify、Memory Evidence 和可恢复 Live Apply Journal。新增 Operation 仍必须注册明确 Target、Policy、Snapshot、Undo、失败恢复与真实 UE 回归；注册本身不授予写权限，也不会开放任意 UObject Method、脚本或自动保存。
 
 Realtime I/O 与 Memory/Context 的完整职责、性能预算、风险分级和 Worktree 协作见 [`AI_NATIVE_UE_EDITOR.md`](AI_NATIVE_UE_EDITOR.md) 与 [`BRANCH_WORKTREES.md`](BRANCH_WORKTREES.md)。
 
-## 0.7.0-dev：Memory 可用性与分层知识树（单人 MVP 已完成）
+## 0.7.0：Memory 可用性与分层知识树（已发布）
 
-本地 `main` 已把 0.6.0 平面记录库升级为低维护、低 Token 的单人可用层；后续 Memory 开发继续在长期分支中进行：
+0.7.0 已把 0.6.0 平面记录库升级为低维护、低 Token 的单人可用层；后续 Memory 开发继续在长期分支中进行：
 
 - Knowledge Tree 使用稳定 Path 与 Parent/Child 支持任意深度，默认从 Project Profile、System、Feature/Entity 到 Implementation。
 - 长期知识、Record Type、Active Work 与 Evidence 四个概念分离。
@@ -71,11 +71,11 @@ Realtime I/O 与 Memory/Context 的完整职责、性能预算、风险分级和
 
 性能方案以“首次索引允许较慢、日常修改必须接近改代码体验”为核心。计划使用 Reforge、现成 UE5.6 DarkRuins 样本、E 盘 SSD 上的 160–180 GB 物理性能工程，以及 500k Asset/10m Reference 逻辑数据库；同一基准分别运行原生 SSD 和 50 MB/s HDD 模拟档位。普通变量和少量 Blueprint Node 的 Live Apply、Compile、Undo 与单资产保存作为最高优先级交互门禁。完整方案见 [`PERFORMANCE_TEST_PLAN.md`](PERFORMANCE_TEST_PLAN.md)。
 
-## 0.7.0：上下文与分析
+## 0.8.0-dev：上下文与分析
 
 计划能力包括自动 Context Pack、值来源追踪、执行链追踪、影响分析、语义资产 Diff、证据支持的假设、修改计划和验证计划。无法证明的结论必须明确标记为推断。
 
-## 0.8.0：协作与冲突感知
+## 0.9.0：协作与冲突感知
 
 读取 Source Control Provider、Checkout/Lock/Owner/Head，分析 Local Dirty、磁盘 Revision 与 Depot/Remote Head 分歧，并建立资产责任边界和多人冲突风险模型。首版只分析、提示或阻止，不自动抢锁或覆盖他人修改。
 

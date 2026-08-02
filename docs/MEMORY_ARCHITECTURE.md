@@ -2,7 +2,7 @@
 
 更新时间：2026-08-03
 
-> 本地 `main` 已集成单人、本地、固定项目版 Schema v3 MVP：Knowledge Tree、Active Work、0–4 级渐进式披露、按需 Evidence 和五个高层 MCP Tool。`feature/memory-context` 继续作为长期并行开发分支。0.6.0 正式版仍使用 Schema v2；统一任务绑定、性能基准、Shared Knowledge Service、团队权限与乐观并发仍属于后续范围。
+> 0.7.0 已正式集成单人、本地、固定项目版 Schema v3：Knowledge Tree、Active Work、0–4 级渐进式披露、按需 Evidence 和五个高层 MCP Tool。`feature/memory-context` 继续作为长期并行开发分支；统一任务绑定、性能基准、Shared Knowledge Service、团队权限与乐观并发仍属于后续范围。
 
 ## 1. 设计目标
 
@@ -213,7 +213,7 @@ Agent
 
 ## 5. 已实现的高层 MCP Tool
 
-以下 Tool 已在 0.7.0-dev 中注册；0.6.0 正式版不包含这些入口：
+以下 Tool 已在 0.7.0 中正式注册：
 
 ```text
 ue_memory_get_context

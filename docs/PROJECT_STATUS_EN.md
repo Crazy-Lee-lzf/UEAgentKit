@@ -6,7 +6,7 @@ Updated: 2026-08-03
 
 
 
-This document describes the locally integrated **0.7.0-dev** line on `main`. The latest published release remains **0.6.0** for Unreal Engine 5.6. Schema v3 Knowledge Trees, Active Work, progressive Context, the Realtime Foundation, and expanded Live Editor Write capabilities remain unpublished development features. The long-lived `feature/live-editor-realtime-io` and `feature/memory-context` branches are retained for parallel work after synchronizing from `main`.
+This document describes the locally released **0.7.0** line on `main` for Unreal Engine 5.6. Schema v3 Knowledge Trees, Active Work, progressive Context, the Realtime Foundation, Batch/Change Sets, and expanded Live Editor Write are included in the local release. The long-lived Realtime and Memory branches remain available for parallel work after synchronizing from `main`.
 
 
 
@@ -168,13 +168,13 @@ Policy / Revision Plan
 → Memory Evidence
 ```
 
-The current `0.7.0-dev` registry exposes 12 controlled Operations: Data Asset scalar/reference/Struct/Array/Set/Map values, Material Instance Scalar/Vector/Texture/Static Switch parameters, and DataTable Cell/RowFields/Add/Remove/Rename. It still requires an already loaded, open, initially clean, non-Blueprint, non-map `/Game` asset and rejects arbitrary UObject methods, nested property paths, PIE/SIE mutation, automatic saves, and unauthorized writes.
+The 0.7.0 registry exposes 12 controlled Operations: Data Asset scalar/reference/Struct/Array/Set/Map values, Material Instance Scalar/Vector/Texture/Static Switch parameters, and DataTable Cell/RowFields/Add/Remove/Rename. It still requires an already loaded, open, initially clean, non-Blueprint, non-map `/Game` asset and rejects arbitrary UObject methods, nested property paths, PIE/SIE mutation, automatic saves, and unauthorized writes.
 
 To scale toward hundreds of Operations, the central Bridge now receives generic `operation + assetPath + target + value` requests and dispatches through `LiveWriteOperationRegistry`. Property, Material, and DataTable logic live in separate domain modules; a shared Transaction/Evidence layer owns snapshots, no-op behavior, failure restoration, Dirty state, and Undo. Python `OperationSpec` metadata drives target validation, valueKind, and independent post-save verification instead of maintaining another hard-coded whitelist.
 
 A fixed-work-root journal persists pending Live Apply receipts. A restarted MCP server can recover strictly validated records, Verify can select an exact `liveApplyReceipt`, and successful Undo/Discard/Verify closes the record. Journal I/O failure never turns an already successful Editor mutation into a false failure.
 
-Real regressions are split into Fast (Scalar, Undo/Discard, Closed Loop) and Full (all seven groups). The published protocol/package version remains 0.6.0 while status explicitly reports `developmentLine=0.7.0-dev`.
+Real regressions are split into Fast (Scalar, Undo/Discard, Closed Loop) and Full (all seven groups). Release status reports `publishedVersion=0.7.0` and `developmentLine=0.7.0`.
 
 ### Persistent controlled writes
 

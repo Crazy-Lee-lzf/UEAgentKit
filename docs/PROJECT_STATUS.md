@@ -6,7 +6,7 @@
 
 
 
-本文描述本地 `main` 已集成的 **0.7.0-dev** 开发线。最新正式发布版本仍为 **0.6.0**，支持 Unreal Engine 5.6；Schema v3 Knowledge Tree、Active Work、渐进式 Context、Realtime Foundation 和扩展后的 Live Editor Write 均属于尚未正式发布的开发能力。`feature/live-editor-realtime-io` 与 `feature/memory-context` 两个长期功能分支继续保留，并在同步 `main` 后并行开发。
+本文描述本地 `main` 已发布的 **0.7.0** 能力，支持 Unreal Engine 5.6。Schema v3 Knowledge Tree、Active Work、渐进式 Context、Realtime Foundation、Batch/Change Set 和扩展后的 Live Editor Write 已正式纳入本地发布。`feature/live-editor-realtime-io` 与 `feature/memory-context` 两个长期功能分支继续保留，并在同步 `main` 后并行开发。
 
 
 
@@ -188,13 +188,13 @@ Policy / Revision Plan
 → Memory Evidence
 ```
 
-当前 `0.7.0-dev` 注册表开放 12 个受控 Operation：Data Asset 标量/引用/Struct/Array/Set/Map，Material Instance Scalar/Vector/Texture/Static Switch，以及 DataTable Cell/RowFields/Add/Remove/Rename。它仍只接受已加载、已打开、初始 Clean 的 `/Game` 非 Blueprint、非地图单文件资产，并继续拒绝任意 UObject Method、嵌套属性、PIE/SIE、自动保存和未授权写入。
+当前 0.7.0 注册表开放 12 个受控 Operation：Data Asset 标量/引用/Struct/Array/Set/Map，Material Instance Scalar/Vector/Texture/Static Switch，以及 DataTable Cell/RowFields/Add/Remove/Rename。它仍只接受已加载、已打开、初始 Clean 的 `/Game` 非 Blueprint、非地图单文件资产，并继续拒绝任意 UObject Method、嵌套属性、PIE/SIE、自动保存和未授权写入。
 
 为后续数百种 Operation 扩展，中央 Bridge 已改为 `operation + assetPath + target + value` 的通用请求和 `LiveWriteOperationRegistry` 分派；Property、Material、DataTable 分属独立域模块，公共 Transaction/Evidence 层统一处理 Snapshot、No-op、失败恢复、Dirty 与 Undo。Python `OperationSpec` 同时驱动 Target 校验、valueKind 和保存后独立验证，不再重复维护硬编码白名单。
 
 Live Apply Workflow 使用固定 Work Root Journal 保存待处理 Receipt；MCP 重启后可恢复经过严格校验的记录，Verify 可指定精确 `liveApplyReceipt`，成功 Undo/Discard/Verify 会关闭记录。Journal I/O 失败不会把已经成功的 Editor 修改伪报成失败。
 
-真实回归分为 Fast（Scalar、Undo/Discard、Closed Loop）和 Full（全部 7 组），正式版本号仍为 0.6.0，状态中明确报告 `developmentLine=0.7.0-dev`。
+真实回归分为 Fast（Scalar、Undo/Discard、Closed Loop）和 Full（全部 7 组）；发布状态统一报告 `publishedVersion=0.7.0` 与 `developmentLine=0.7.0`。
 
 ### 4.3 持久化安全写入
 

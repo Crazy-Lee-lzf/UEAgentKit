@@ -6,9 +6,9 @@
 
 UE Agent Kit 是一套面向 Unreal Engine 的开源资产分析、索引与受控写入工具。它通过 UE Editor 插件导出项目资产目录、Asset Registry 元数据、依赖关系和 Blueprint 语义，再使用 Python CLI 与 SQLite 建立项目级索引，并通过 Policy、Revision、Dry Run 和备份保护显式写入。
 
-当前已发布版本为 **0.6.0**，支持 **Unreal Engine 5.6**。本版本新增 Revision-aware Project Memory：独立 SQLite/FTS5、六类可追溯记录、来源与状态机、Revision 自动失效、证据摘要、固定工程 MCP/CLI、可审计导出，以及 Workflow/rollback Task Evidence 闭环。
+当前已发布版本为 **0.7.0**，支持 **Unreal Engine 5.6**。本版本正式集成 Realtime Foundation、注册式 Live Editor Write、Schema v3 Knowledge Tree/Active Work、渐进式 Context、分帧批量任务、持久化 Change Set，以及完整 Transaction/Evidence、Undo/Discard、授权保存与独立验证闭环。
 
-> **开发状态**：最新正式版本仍为 0.6.0。当前本地 `main` 已集成 0.7.0-dev 的 Realtime Foundation 与单人 Schema v3 Memory/Context MVP；两个功能分支继续长期保留并从 `main` 同步后并行开发。未启用 Memory 时为 Offline 5、Live 27、Workflow 31、Combined 53 Tool，启用固定 Project Memory 后为 17、39、43、65 Tool。当前首要方向是扩大运行中 UE Editor 的实时读写覆盖面，同时横向完善任务上下文、性能预算和 Evidence 收尾。
+> **当前状态**：0.7.0 已在本地 `main` 收口发布。未启用 Memory 时为 Offline 5、Live 27、Workflow 31、Combined 53 Tool；启用固定 Project Memory 后为 17、39、43、65 Tool。`feature/live-editor-realtime-io` 与 `feature/memory-context` 继续作为长期并行分支；下一阶段为 0.8.0-dev Context/Analysis 与大型项目性能基准。
 
 > **AI Generated**：本项目的代码和文档主要由 AI 生成，并通过人工审查、UE 5.6 编译、自动化测试和真实工程回归验证。
 
@@ -235,7 +235,7 @@ scripts\TestMultiOperationTransactions.cmd ^
 
 当前支持四种 Blueprint Operation、标量 `setAssetProperty`、Data Asset 专用 `setAssetReferenceProperty` 与 `setAssetStructuredProperty`、四种 Material Instance 参数 Operation，以及 DataTable 字段和 Row 操作。每次执行仍严格限制为一个资产，但可在同一原子事务中包含 1–32 个兼容 Operation；多 Operation 会统一预校验、创建一次备份、编译/保存一次，并由一个 Manifest 记录全部 Operation。属性、引用目标、Material 参数和 DataTable 字段继续使用逐目标精确 Policy 授权。`setAssetStructuredProperty` 只替换顶层 Struct、Array、Set 或 Map，使用显式 `valueType` 包络；Struct 必须包含完整字段，Set/Map 必须按 Canonical JSON 唯一排序，并返回递归结构化 Diff。当前仍只接受没有独立 Package 侧文件的单文件资产。
 
-### 6. 启动 MCP Server（0.6.0 发布版 / 0.7.0-dev `main`）
+### 6. 启动 MCP Server（0.7.0）
 
 先安装可选 MCP 依赖并确认 SQLite 索引可读：
 
@@ -246,7 +246,7 @@ scripts\TestMcpStdio.cmd
 scripts\TestMcpClients.cmd
 ```
 
-0.6.0 可以连接固定工程的受限 Live Editor Bridge，并可选择启用 Revision-aware Project Memory；当前 `main` 的 0.7.0-dev 进一步提供完整 Live Editor Write 基础层：
+0.7.0 可以连接固定工程的受限 Live Editor Bridge，并可选择启用 Schema v3 Revision-aware Project Memory；运行中 Editor 提供 Context、分帧 Batch Task、持久化 Change Set 和注册式 Live Editor Write 基础层：
 
 ```bat
 scripts\TestMcpLiveEditor.cmd ^
@@ -270,7 +270,7 @@ scripts\TestMcpSnapshotRefresh.cmd ^
   -ProjectPath "<TEST_PROJECT>.uproject"
 ```
 
-服务器对 MCP Client 仍只使用本地 `stdio`。默认模式为 5 个离线只读 Tool；`-EnableLiveEditor -ProjectPath <固定工程>` 增加 10 个实时只读 Tool 和 8 个受限 Daily Action，共 23 个 Live Tool；固定 Engine、Project、Policy 和 Revision Export 后的工作流为 26 个；两者组合时共 44 个 Tool。实时读取提供有界 Output Log、编译诊断、不触发加载的内存资产检查，以及普通 Blueprint Editor 的当前 Graph/Node 定位；Daily Action 提供资产打开/聚焦、Content Browser 同步、ActorGuid 聚焦、Blueprint 内存编译和官方 Data Validation，均不保存资产；工作流模式提供四源资产状态和安全单资产索引刷新。0.7.0-dev 不通过增加大量 MCP Tool 扩展写入，而是让既有 `ue_apply_asset_property_live` 按 `operation + assetPath + target + value` 进入注册式资产域执行器，并继续复用 Plan、Policy、Revision 和精确确认门禁：
+服务器对 MCP Client 仍只使用本地 `stdio`。未启用 Memory 时，Offline、Live、Workflow、Combined 分别提供 5、27、31、53 个 Tool；启用固定 Project Memory 后分别为 17、39、43、65。实时路径提供有界 Editor Context、Output Log、编译诊断、当前 Graph/Node、分帧 `scanCurrentWorld`、Batch 状态/分页详情与持久化 Change Set。`ue_apply_asset_property_live` 通过注册式资产域执行器支持 12 个受控 Operation，并继续复用 Plan、Policy、Revision、Transaction、精确确认、Undo/Discard、授权单资产保存和独立 Verify；不会开放任意 SQL、Shell、Python、UObject Method、自动保存或 Save All。完整契约见 [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md)、[`spec/LIVE_EDITOR_BRIDGE.md`](spec/LIVE_EDITOR_BRIDGE.md) 与 [`spec/INDEX_FRESHNESS.md`](spec/INDEX_FRESHNESS.md)。
 
 ```bat
 claude mcp add --transport stdio --scope project ue-agent-kit -- ^
@@ -284,7 +284,7 @@ claude mcp add --transport stdio --scope project ue-agent-kit -- ^
 ### 7. 校验通用资产导出
 
 ```bat
-python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.6.0
+python scripts\ValidateAssetCatalog.py --output Output\AssetCatalog --expect-exporter 0.7.0
 ```
 
 完整参数和安装说明见 [`docs/BUILD_AND_RUN.md`](docs/BUILD_AND_RUN.md)。
@@ -321,13 +321,14 @@ Output\Blueprints\
 - [`docs/MEMORY_ARCHITECTURE.md`](docs/MEMORY_ARCHITECTURE.md)：分层知识树、渐进式披露、MCP/Skill 分工和多人共享知识服务设计。
 - [`docs/MEMORY_ARCHITECTURE_EN.md`](docs/MEMORY_ARCHITECTURE_EN.md)：English layered memory and collaboration architecture.
 
+- [`docs/RELEASE_0.7.0.md`](docs/RELEASE_0.7.0.md)：Realtime Foundation、注册式 Live Write、Schema v3 Memory、Batch/Change Set 与本地正式发布说明。
 - [`docs/RELEASE_0.6.0.md`](docs/RELEASE_0.6.0.md)：Revision-aware Project Memory、证据绑定 Task、审计导出和真实 UE5.6 闭环。
 - [`docs/RELEASE_0.5.5.md`](docs/RELEASE_0.5.5.md)：0.5.x 日常开发能力、原子事务、验证证据与正式发布收口。
 - [`docs/RELEASE_0.5.1.md`](docs/RELEASE_0.5.1.md)：0.5.1 查询协议、高层安全写入、诊断和 Client 兼容矩阵。
 - [`docs/RELEASE_0.5.0.md`](docs/RELEASE_0.5.0.md)：0.5.0 固定项目 MCP 工作流发布说明。
 - [`docs/RELEASE_0.4.4.md`](docs/RELEASE_0.4.4.md)：0.4.4 正式发布范围、验证结果和升级说明。
 - [`CHANGELOG.md`](CHANGELOG.md)：版本变更摘要。
-- [`docs/ROADMAP.md`](docs/ROADMAP.md)：0.6.0 Revision-aware Project Memory、0.7.0 Context/Analysis 与后续协作能力路线。
+- [`docs/ROADMAP.md`](docs/ROADMAP.md)：0.7.0 已发布能力、0.8.0 Context/Analysis 与 0.9.0 协作方向。
 - [`spec/BPCTX_FORMAT.md`](spec/BPCTX_FORMAT.md)：BPCTX/1 格式规范。
 - [`spec/PATCH_SCHEMA.md`](spec/PATCH_SCHEMA.md)：声明式 Patch、Policy、Revision 和纯校验安全边界。
 - [`spec/BACKUP_AND_ROLLBACK.md`](spec/BACKUP_AND_ROLLBACK.md)：Backup Manifest、rollback、审计回执和恢复验证规范。

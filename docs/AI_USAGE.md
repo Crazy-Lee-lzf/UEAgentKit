@@ -151,7 +151,7 @@ MCP Receipt 仅在当前 Server 会话中有效；重启后必须重新 Plan 和
 
 ## Project Memory 的后续渐进式使用
 
-0.6.0 当前使用 `ue_memory_search` 和 `ue_memory_get` 查询平面记录。后续不会让 Agent 每轮加载全部 Memory，而是按以下顺序逐层披露：
+0.7.0 优先使用 `ue_memory_get_context`、`ue_memory_expand_node` 和按需 Evidence 获取分层上下文；兼容的 `ue_memory_search` 与 `ue_memory_get` 仍可用于精确读取。后续不会让 Agent 每轮加载全部 Memory，而是按以下顺序逐层披露：
 
 ```text
 Project Profile

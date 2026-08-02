@@ -45,7 +45,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogWriteFixturePlan, Log, All);
 namespace WriteFixturePlanCommandletPrivate
 {
 	constexpr const TCHAR* SchemaVersion = TEXT("1.0");
-	constexpr const TCHAR* ToolVersion = TEXT("0.6.0");
+	constexpr const TCHAR* ToolVersion = TEXT("0.7.0");
 	constexpr int32 MaxFixtures = 64;
 
 	struct FFixtureDefinition

@@ -2,7 +2,7 @@
 
 Updated: 2026-08-03
 
-> The local `main` line now integrates the single-user, local, fixed-project Schema v3 MVP: a Knowledge Tree, Active Work, levels 0–4 progressive disclosure, on-demand Evidence, and five high-level MCP tools. `feature/memory-context` remains a long-lived parallel development branch. The published 0.6.0 release still uses Schema v2; unified task binding, performance benchmarks, the shared knowledge service, team permissions, and optimistic concurrency remain future work.
+> Version 0.7.0 formally integrates the single-user, local, fixed-project Schema v3 layer: Knowledge Trees, Active Work, levels 0–4 progressive disclosure, on-demand Evidence, and five high-level MCP tools. The long-lived Memory branch remains available; unified task binding, performance baselines, the shared knowledge service, team permissions, and optimistic concurrency remain future work.
 
 ## 1. Goals
 
@@ -150,7 +150,7 @@ Do not split ordinary reading, writing, maintenance, and TODO behavior into seve
 
 ## 5. Implemented high-level MCP tools
 
-These tools are registered in 0.7.0-dev; the published 0.6.0 release does not include them:
+These tools are formally registered in 0.7.0:
 
 ```text
 ue_memory_get_context

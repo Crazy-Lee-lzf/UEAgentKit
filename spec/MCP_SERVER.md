@@ -1,6 +1,6 @@
 # UE Agent Kit MCP Server
 
-UE Agent Kit 0.6.0 发布版及当前 0.7.0-dev `main` 通过本地 MCP `stdio` 提供稳定的高层查询和受控资产工作流。MCP 层不会开放任意 SQL、Shell、文件系统路径、Commandlet 参数或 UObject 调用。
+UE Agent Kit 0.7.0 通过本地 MCP `stdio` 提供稳定的高层查询、分层 Memory Context、实时 Editor Context/Batch/Change Set 和受控资产工作流。MCP 层不会开放任意 SQL、Shell、文件系统路径、Commandlet 参数或 UObject 调用。
 
 ## 模式
 
@@ -368,7 +368,7 @@ Live Validation 和 Automation 结果保留 Editor Bridge 返回的 `validationE
 
 ## Client 兼容契约
 
-0.6.0 提供 `scripts\TestMcpClients.cmd`，通过两个独立真实 `stdio` 会话验证：
+0.7.0 提供 `scripts\TestMcpClients.cmd`，通过两个独立真实 `stdio` 会话验证：
 
 ```text
 官方 Python MCP ClientSession
