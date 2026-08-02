@@ -28,6 +28,7 @@ from ue_agent_kit.project_memory import (  # noqa: E402
     MemorySourceKind,
     MemoryStatus,
     _content_sha256,
+    _evidence_sha256,
     create_memory_record,
     get_memory_record,
     invalidate_memory_revisions,
@@ -217,6 +218,139 @@ class ProjectMemoryTests(unittest.TestCase):
                 ).fetchone()[0],
                 record.evidence_sha256,
             )
+
+    def test_schema_v2_migration_preserves_all_legacy_memory_data(self) -> None:
+        self.database_path.parent.mkdir(parents=True, exist_ok=True)
+        first_id = "mem_" + "1" * 32
+        second_id = "mem_" + "2" * 32
+        scope = MemoryScope(MemoryScopeType.ASSET, ASSET, {"assetClass": "Blueprint"})
+        revision = MemoryRevision(ASSET, "sha256:legacy")
+        artifact = MemoryArtifact("validationEvidence", "validation:legacy", {"result": "passed"})
+        first_content = _content_sha256(
+            record_type=MemoryRecordType.PROJECT_FACT,
+            subject_key="asset:player:legacy",
+            title="Legacy player fact",
+            body="Legacy record body.",
+            scopes=(scope,),
+            details={"owner": "legacy"},
+        )
+        first_evidence = _evidence_sha256(
+            project_key=PROJECT,
+            content_sha256=first_content,
+            source_kind=MemorySourceKind.TOOL_OBSERVED,
+            source_ref="legacy:index",
+            confidence=1.0,
+            revisions=(revision,),
+            artifacts=(artifact,),
+        )
+        second_content = _content_sha256(
+            record_type=MemoryRecordType.DECISION_RECORD,
+            subject_key="decision:legacy",
+            title="Legacy decision",
+            body="Keep the legacy behavior.",
+            scopes=(),
+            details={},
+        )
+        second_evidence = _evidence_sha256(
+            project_key=PROJECT,
+            content_sha256=second_content,
+            source_kind=MemorySourceKind.USER_CONFIRMED,
+            source_ref="legacy:user",
+            confidence=0.9,
+            revisions=(),
+            artifacts=(),
+        )
+
+        connection = sqlite3.connect(self.database_path)
+        try:
+            connection.executescript(MEMORY_MIGRATIONS[0].sql)
+            connection.executescript(MEMORY_MIGRATIONS[1].sql)
+            for migration in MEMORY_MIGRATIONS[:2]:
+                connection.execute(
+                    "INSERT INTO memory_schema_migrations(version, description, applied_at_utc) VALUES (?, ?, ?)",
+                    (migration.version, migration.description, "2026-07-29T00:00:00Z"),
+                )
+            connection.execute("PRAGMA user_version = 2")
+            connection.executemany(
+                """
+                INSERT INTO memory_records(
+                    record_id, project_key, record_type, subject_key, title, body,
+                    source_kind, source_ref, confidence, status, content_sha256,
+                    evidence_sha256, created_at_utc, observed_at_utc, updated_at_utc,
+                    details_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    (
+                        first_id, PROJECT, "projectFact", "asset:player:legacy",
+                        "Legacy player fact", "Legacy record body.", "tool-observed",
+                        "legacy:index", 1.0, "conflicted", first_content, first_evidence,
+                        "2026-07-29T00:00:00Z", "2026-07-29T00:00:00Z",
+                        "2026-07-29T00:00:00Z", '{"owner":"legacy"}',
+                    ),
+                    (
+                        second_id, PROJECT, "decisionRecord", "decision:legacy",
+                        "Legacy decision", "Keep the legacy behavior.", "user-confirmed",
+                        "legacy:user", 0.9, "valid", second_content, second_evidence,
+                        "2026-07-29T00:00:01Z", "2026-07-29T00:00:01Z",
+                        "2026-07-29T00:00:01Z", "{}",
+                    ),
+                ),
+            )
+            connection.execute(
+                "INSERT INTO memory_scopes(record_id, ordinal, scope_type, scope_key, details_json) VALUES (?, 0, 'asset', ?, ?)",
+                (first_id, ASSET, '{"assetClass":"Blueprint"}'),
+            )
+            connection.execute(
+                "INSERT INTO memory_revisions(record_id, ordinal, asset_path, revision, revision_stable) VALUES (?, 0, ?, ?, 1)",
+                (first_id, ASSET, "sha256:legacy"),
+            )
+            connection.execute(
+                "INSERT INTO memory_artifacts(record_id, ordinal, artifact_kind, artifact_ref, details_json) VALUES (?, 0, 'validationEvidence', 'validation:legacy', ?)",
+                (first_id, '{"result":"passed"}'),
+            )
+            connection.execute(
+                "INSERT INTO memory_relations(from_record_id, relation_kind, to_record_id, created_at_utc, details_json) VALUES (?, 'supports', ?, ?, ?)",
+                (first_id, second_id, "2026-07-29T00:00:02Z", '{"reason":"legacy"}'),
+            )
+            connection.executemany(
+                "INSERT INTO memory_status_events(record_id, from_status, to_status, reason, changed_at_utc, details_json) VALUES (?, '', ?, 'legacy-import', ?, '{}')",
+                (
+                    (first_id, "conflicted", "2026-07-29T00:00:00Z"),
+                    (second_id, "valid", "2026-07-29T00:00:01Z"),
+                ),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        with open_project_memory_database(self.database_path) as migrated:
+            self.assertEqual(int(migrated.execute("PRAGMA user_version").fetchone()[0]), 3)
+            first = get_memory_record(migrated, first_id)
+            second = get_memory_record(migrated, second_id)
+            self.assertEqual(first.node_id, "")
+            self.assertEqual(first.content_sha256, first_content)
+            self.assertEqual(first.evidence_sha256, first_evidence)
+            self.assertEqual(first.status, MemoryStatus.CONFLICTED)
+            self.assertEqual(first.scopes, (scope,))
+            self.assertEqual(first.revision_set, (revision,))
+            self.assertEqual(first.artifacts, (artifact,))
+            self.assertEqual(first.relations[0].target_record_id, second.record_id)
+            self.assertEqual(first.relations[0].details, {"reason": "legacy"})
+            self.assertEqual(second.content_sha256, second_content)
+            self.assertEqual(second.evidence_sha256, second_evidence)
+            self.assertEqual(
+                [int(row[0]) for row in migrated.execute("SELECT version FROM memory_schema_migrations ORDER BY version")],
+                [1, 2, 3],
+            )
+            self.assertEqual(migrated.execute("SELECT COUNT(*) FROM memory_records").fetchone()[0], 2)
+            self.assertEqual(migrated.execute("SELECT COUNT(*) FROM memory_status_events").fetchone()[0], 2)
+
+        with open_project_memory_database(self.database_path) as reopened:
+            self.assertEqual(int(reopened.execute("PRAGMA user_version").fetchone()[0]), 3)
+            self.assertEqual(reopened.execute("SELECT COUNT(*) FROM memory_schema_migrations").fetchone()[0], 3)
+            self.assertEqual(reopened.execute("SELECT COUNT(*) FROM knowledge_nodes").fetchone()[0], 0)
+            self.assertEqual(reopened.execute("SELECT COUNT(*) FROM active_work_items").fetchone()[0], 0)
 
     def test_content_digest_rejects_record_tampering(self) -> None:
         with open_project_memory_database(self.database_path) as connection:

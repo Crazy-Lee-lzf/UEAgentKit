@@ -113,6 +113,7 @@ class MemoryRecordDraft:
     artifacts: Sequence[MemoryArtifact] = ()
     details: dict[str, Any] = field(default_factory=dict)
     record_id: str = ""
+    node_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -133,6 +134,7 @@ class MemoryRecord:
     observed_at_utc: str
     updated_at_utc: str
     superseded_by_record_id: str
+    node_id: str
     scopes: tuple[MemoryScope, ...]
     revision_set: tuple[MemoryRevision, ...]
     artifacts: tuple[MemoryArtifact, ...]
@@ -609,6 +611,18 @@ def create_memory_record(
     artifacts = _normalize_artifacts(draft.artifacts)
     details = _normalize_details(draft.details, "details")
     details_json = _canonical_json(details, "details")
+    if not isinstance(draft.node_id, str):
+        raise ValueError("node_id must be a string.")
+    node_id = draft.node_id.strip()
+    if node_id:
+        node_row = connection.execute(
+            "SELECT project_key FROM knowledge_nodes WHERE node_id = ?",
+            (node_id,),
+        ).fetchone()
+        if node_row is None:
+            raise KeyError(f"Knowledge node not found: {node_id}")
+        if str(node_row[0]) != project_key:
+            raise ValueError("Knowledge node and memory record must use the same project_key.")
     timestamp = utc_now_iso()
     observed_at_utc = _normalize_utc(draft.observed_at_utc, "observed_at_utc")
     status = _initial_status(source_kind, revisions)
@@ -649,8 +663,9 @@ def create_memory_record(
                 created_at_utc,
                 observed_at_utc,
                 updated_at_utc,
-                details_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                details_json,
+                node_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record_id,
@@ -669,6 +684,7 @@ def create_memory_record(
                 observed_at_utc,
                 timestamp,
                 details_json,
+                node_id or None,
             ),
         )
         for ordinal, scope in enumerate(scopes):
@@ -880,6 +896,7 @@ def get_memory_record(connection: sqlite3.Connection, record_id: str) -> MemoryR
             observed_at_utc,
             updated_at_utc,
             COALESCE(superseded_by_record_id, ''),
+            COALESCE(node_id, ''),
             details_json
         FROM memory_records
         WHERE record_id = ?
@@ -891,7 +908,7 @@ def get_memory_record(connection: sqlite3.Connection, record_id: str) -> MemoryR
     scopes = _load_scopes(connection, normalized_id)
     revisions = _load_revisions(connection, normalized_id)
     artifacts = _load_artifacts(connection, normalized_id)
-    details = _read_json(str(row[16]))
+    details = _read_json(str(row[17]))
     record = MemoryRecord(
         record_id=str(row[0]),
         project_key=str(row[1]),
@@ -909,6 +926,7 @@ def get_memory_record(connection: sqlite3.Connection, record_id: str) -> MemoryR
         observed_at_utc=str(row[13]),
         updated_at_utc=str(row[14]),
         superseded_by_record_id=str(row[15]),
+        node_id=str(row[16]),
         scopes=scopes,
         revision_set=revisions,
         artifacts=artifacts,

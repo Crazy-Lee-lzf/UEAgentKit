@@ -68,6 +68,32 @@ else:
 
 MCP_SERVER_NAME = "UE Agent Kit"
 TOOL_ROOT = Path(__file__).resolve().parents[2]
+STRICT_MEMORY_ARGUMENT_TOOL_NAMES = (
+    "ue_memory_get_context",
+    "ue_memory_expand_node",
+    "ue_memory_get_evidence",
+    "ue_memory_update_knowledge",
+    "ue_memory_update_work",
+)
+
+
+def _enforce_strict_tool_arguments(server: Any, tool_names: Sequence[str]) -> None:
+    tool_manager = getattr(server, "_tool_manager", None)
+    if tool_manager is None:
+        raise RuntimeError("FastMCP Tool Manager is unavailable.")
+    for tool_name in tool_names:
+        tool = tool_manager.get_tool(tool_name)
+        argument_model = getattr(getattr(tool, "fn_metadata", None), "arg_model", None)
+        if tool is None or argument_model is None:
+            raise RuntimeError(f"FastMCP argument model is unavailable for {tool_name}.")
+        argument_model.model_config = {
+            **argument_model.model_config,
+            "extra": "forbid",
+        }
+        argument_model.model_rebuild(force=True)
+        tool.parameters = argument_model.model_json_schema()
+
+
 def _server_instructions(
     write_tools_enabled: bool,
     commit_enabled: bool,
@@ -259,6 +285,8 @@ def _capabilities_response(
             "projectKey": memory_service.project_key if memory_service is not None else "",
             "schemaVersion": memory_status.schema_version if memory_status is not None else None,
             "recordCount": memory_status.record_count if memory_status is not None else 0,
+            "nodeCount": memory_status.node_count if memory_status is not None else 0,
+            "activeWorkCount": memory_status.active_work_count if memory_status is not None else 0,
             "tools": MEMORY_TOOL_NAMES if memory_enabled else [],
             "recordTypes": [
                 "projectFact",
@@ -270,6 +298,17 @@ def _capabilities_response(
             ],
             "sourceKinds": ["user-confirmed", "tool-observed", "model-inferred"],
             "statuses": ["valid", "stale", "conflicted", "superseded", "unverified"],
+            "knowledgeNodeTypes": [
+                "project",
+                "system",
+                "feature",
+                "component",
+                "entity",
+                "implementation",
+            ],
+            "activeWorkStatuses": ["planned", "in_progress", "blocked", "done", "cancelled"],
+            "progressiveContextLevels": [0, 1, 2, 3, 4],
+            "contextTokenEstimateRule": "approximately 4 chars per token",
             "revisionAware": True,
             "workflowEvidenceHandoff": bool(memory_enabled and write_tools_enabled),
             "workflowEvidenceSourceTools": (
@@ -472,6 +511,8 @@ def _project_status_response(
             "projectKey": memory_status.project_key if memory_status is not None else "",
             "schemaVersion": memory_status.schema_version if memory_status is not None else None,
             "recordCount": memory_status.record_count if memory_status is not None else 0,
+            "nodeCount": memory_status.node_count if memory_status is not None else 0,
+            "activeWorkCount": memory_status.active_work_count if memory_status is not None else 0,
             "countsByType": memory_status.counts_by_type if memory_status is not None else {},
             "countsByStatus": memory_status.counts_by_status if memory_status is not None else {},
         },
@@ -680,6 +721,7 @@ def create_mcp_server(
             tool_annotations_type=ToolAnnotations,
             error_response=_error_response,
         )
+        _enforce_strict_tool_arguments(server, STRICT_MEMORY_ARGUMENT_TOOL_NAMES)
     if live_editor_service is not None:
         register_live_read_tools(
             server=server,
@@ -868,6 +910,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "projectKey": memory_status.project_key,
                     "schemaVersion": memory_status.schema_version,
                     "recordCount": memory_status.record_count,
+                    "nodeCount": memory_status.node_count,
+                    "activeWorkCount": memory_status.active_work_count,
                     "countsByType": memory_status.counts_by_type,
                     "countsByStatus": memory_status.counts_by_status,
                 }

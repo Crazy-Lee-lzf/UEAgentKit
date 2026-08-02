@@ -1,8 +1,8 @@
 # UE Agent Kit Roadmap
 
-Updated: 2026-08-01
+Updated: 2026-08-02
 
-The latest published release is **0.6.0** for Unreal Engine 5.6. Revision-aware Project Memory is complete and in stable maintenance; `main` is now the **0.7.0-dev** line with the controlled Live Editor Write foundation complete. Development now runs on two parallel tracks: Realtime I/O for running-Editor CRUD, batch tasks, and diagnostics, and Memory/Context for the layered knowledge tree, Active Work, Context Packs, and analysis.
+The latest published release is **0.6.0** for Unreal Engine 5.6. Revision-aware Project Memory is complete and in stable maintenance; `main` is now the **0.7.0-dev** line with the controlled Live Editor Write foundation complete. Development runs on two parallel tracks. The single-user local Memory/Context MVP now includes the layered Knowledge Tree, Active Work, and progressive Context; Realtime I/O continues toward running-Editor CRUD, batch tasks, and diagnostics. Automatic Context Packs, analysis, and a shared multi-user service remain future work.
 
 ## Direction
 
@@ -11,10 +11,10 @@ UE Agent Kit is evolving into an Unreal Engine project-intelligence layer for AI
 Current server modes:
 
 ```text
-Offline             5 tools (12 with Memory)
-Live               23 tools (30 with Memory)
-Workflow           26 tools (33 with Memory)
-Combined           44 tools (51 with Memory)
+Offline             5 tools (17 with Memory)
+Live               23 tools (35 with Memory)
+Workflow           29 tools (41 with Memory)
+Combined           47 tools (59 with Memory)
 ```
 
 ## Completed foundation
@@ -54,16 +54,16 @@ The current `main` line now includes 12 controlled Operations, generic `operatio
 
 See [`AI_NATIVE_UE_EDITOR_EN.md`](AI_NATIVE_UE_EDITOR_EN.md) and [`BRANCH_WORKTREES_EN.md`](BRANCH_WORKTREES_EN.md) for track ownership, performance budgets, risk levels, and Worktree integration rules.
 
-## Pre-0.7 foundation: Memory usability and layered knowledge tree
+## Pre-0.7 foundation: Memory usability and layered knowledge tree (single-user MVP complete)
 
-Before automatic Context Packs, evolve the 0.6.0 flat record store into a low-maintenance, low-token usability layer:
+`feature/memory-context` has evolved the 0.6.0 flat record store into a low-maintenance, low-token, local single-user usability layer:
 
 - Stable paths and parent links provide an arbitrary-depth Knowledge Tree from Project Profile through systems, features/entities, and implementations.
 - Separate durable knowledge, record type, Active Work, and Evidence.
 - Store objectives, TODO items, blockers, and next actions in Active Work rather than long-term search records.
 - Use five-level progressive disclosure with server-enforced token budgets and summary-first responses.
 - MCP owns storage, retrieval, deduplication, Revision invalidation, automatic Evidence, and maintenance rules; one thin Skill only explains usage order.
-- Plan high-level `memory_get_context`, `memory_expand_node`, `memory_get_evidence`, `memory_update_knowledge`, and `memory_update_work` tools.
+- Provide high-level `ue_memory_get_context`, `ue_memory_expand_node`, `ue_memory_get_evidence`, `ue_memory_update_knowledge`, and `ue_memory_update_work` tools.
 
 Context Packs will then traverse this tree instead of retrieving a flat set of similar records. See [`MEMORY_ARCHITECTURE_EN.md`](MEMORY_ARCHITECTURE_EN.md).
 

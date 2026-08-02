@@ -1,8 +1,8 @@
 # UE Agent Kit 路线图
 
-更新时间：2026-08-01
+更新时间：2026-08-02
 
-当前已发布版本为 **0.6.0**，支持 Unreal Engine 5.6。Revision-aware Project Memory 已完成并进入稳定维护；`main` 当前为 **0.7.0-dev**，已完成受控 Live Editor Write 基础层。后续采用双轨并行：Realtime I/O 建设运行中 UE Editor 的实时增删查改、批量任务与诊断，Memory/Context 建设分层知识树、Active Work、Context Pack 与分析能力。
+当前已发布版本为 **0.6.0**，支持 Unreal Engine 5.6。Revision-aware Project Memory 已完成并进入稳定维护；`main` 当前为 **0.7.0-dev**，已完成受控 Live Editor Write 基础层。双轨并行开发中，Memory/Context 的单人本地 MVP 已完成分层知识树、Active Work 和渐进式 Context；Realtime I/O 继续建设运行中 UE Editor 的实时增删查改、批量任务与诊断。自动 Context Pack、分析能力与多人共享服务仍在后续阶段。
 
 ## 总体方向
 
@@ -11,10 +11,10 @@ UE Agent Kit 的长期定位是面向 AI Agent 的 Unreal Engine 项目智能层
 当前 Server 模式：
 
 ```text
-Offline             5 Tool（Memory 12）
-Live               23 Tool（Memory 30）
-Workflow           26 Tool（Memory 33）
-Combined           44 Tool（Memory 51）
+Offline             5 Tool（Memory 17）
+Live               23 Tool（Memory 35）
+Workflow           29 Tool（Memory 41）
+Combined           47 Tool（Memory 59）
 ```
 
 ## 已完成基础
@@ -54,16 +54,16 @@ Combined           44 Tool（Memory 51）
 
 Realtime I/O 与 Memory/Context 的完整职责、性能预算、风险分级和 Worktree 协作见 [`AI_NATIVE_UE_EDITOR.md`](AI_NATIVE_UE_EDITOR.md) 与 [`BRANCH_WORKTREES.md`](BRANCH_WORKTREES.md)。
 
-## 0.7.0 前置：Memory 可用性与分层知识树
+## 0.7.0 前置：Memory 可用性与分层知识树（单人 MVP 已完成）
 
-在自动 Context Pack 之前，先把 0.6.0 平面记录库升级为低维护、低 Token 的可用层：
+`feature/memory-context` 已把 0.6.0 平面记录库升级为低维护、低 Token 的本地单人可用层：
 
 - Knowledge Tree 使用稳定 Path 与 Parent/Child 支持任意深度，默认从 Project Profile、System、Feature/Entity 到 Implementation。
 - 长期知识、Record Type、Active Work 与 Evidence 四个概念分离。
 - 当前目标、TODO、阻塞和下一步使用独立 Active Work，不污染长期知识搜索。
 - 查询采用五级渐进式披露，默认只返回摘要并由 Server 强制 Token Budget。
 - MCP 负责存储、检索、去重、Revision stale、自动 Evidence 和维护规则；Skill 只保留约 400–800 Token 的薄使用说明。
-- 计划提供 `memory_get_context`、`memory_expand_node`、`memory_get_evidence`、`memory_update_knowledge` 和 `memory_update_work` 高层入口。
+- 已提供 `ue_memory_get_context`、`ue_memory_expand_node`、`ue_memory_get_evidence`、`ue_memory_update_knowledge` 和 `ue_memory_update_work` 高层入口。
 
 该阶段完成后，再让 0.7.0 Context Pack 沿知识树逐级收集上下文。完整设计见 [`MEMORY_ARCHITECTURE.md`](MEMORY_ARCHITECTURE.md)。
 

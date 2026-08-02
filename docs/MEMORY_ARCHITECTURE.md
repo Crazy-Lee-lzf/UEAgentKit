@@ -1,8 +1,8 @@
 # Project Memory 分层架构与协作设计
 
-更新时间：2026-07-31
+更新时间：2026-08-02
 
-> 本文描述已经确定的后续设计方向，不表示这些能力已在 0.6.0 中实现。当前 0.6.0 仍使用 `spec/PROJECT_MEMORY.md` 定义的 Schema v2 平面记录模型；分层知识树、Active Work、渐进式披露和共享知识服务属于后续开发范围。
+> 当前 `feature/memory-context` 已实现单人、本地、固定项目版 Schema v3 MVP：Knowledge Tree、Active Work、0–4 级渐进式披露、按需 Evidence 和五个高层 MCP Tool。0.6.0 正式版仍使用 Schema v2；Shared Knowledge Service、团队权限与乐观并发仍属于后续范围。
 
 ## 1. 设计目标
 
@@ -320,36 +320,39 @@ newContent
 
 若 `expectedRevision` 与服务端当前 Revision 不一致，返回 `knowledge-conflict`，禁止 Last Write Wins 静默覆盖。Project Profile 和系统级摘要必须支持人工确认或显式合并。
 
-## 9. Schema 演进方向
+## 9. Schema v3 实现状态
 
-当前 Schema v2 继续作为 0.6.0 的稳定底层。后续 Schema v3 计划新增：
+`feature/memory-context` 已在 Schema v2 上追加以下本地表和绑定：
 
 ```text
-memory_nodes
-work_items
-work_item_nodes
-record.node_id
-node_revision / owner / scope
+knowledge_nodes
+memory_records.node_id
+active_work_items
+active_work_node_links
+active_work_asset_links
+active_work_todos
 ```
 
 迁移原则：
 
-1. 现有 Record ID、Digest、Revision Set 和 Artifact 不改变。
-2. 旧记录可先绑定到 `/project/unclassified`，再渐进归类。
-3. 不要求一次性由 Agent 重写全部历史记录。
-4. Tree Summary 与原始 Record 分开存储和校验。
-5. MCP Tool 契约在本地与未来共享服务之间保持稳定。
+1. Schema v2 数据库原地升级到 v3，现有 Record ID、内容摘要、Evidence 摘要、Revision Set、Scope、Relation、Artifact 和状态保持不变。
+2. 旧记录迁移后保持 `node_id IS NULL`，不自动猜测归属节点。
+3. 新建数据库直接创建 Schema v3；重复打开不会重复创建表、列或迁移数据。
+4. Knowledge Node 使用规范化绝对 Path、同项目 Parent 和无环约束；根节点固定为 `/project`。
+5. Active Work 使用正规化 Node/Asset 关联表，不把可查询关系只存入 JSON。
 
-## 10. 实施顺序
+## 10. 单人版 MVP 状态
 
-1. 增加任意深度 Knowledge Node 和 Project Profile。
-2. 让现有六类 Record 绑定 Node。
-3. 增加独立 Active Work / TODO。
-4. 实现 `memory_get_context` 与逐层展开。
-5. 增加严格 Token Budget、默认状态过滤和 `nextActions`。
-6. 自动维护 Task、Revision 和 Evidence。
-7. 再基于该结构实现 0.7.0 Context Pack。
-8. 单用户契约稳定后，再增加共享服务、身份、权限和并发控制。
+已实现：
+
+1. 任意深度 Knowledge Tree 与 Project Profile 根节点。
+2. 现有六类 Record 可选绑定 Knowledge Node。
+3. 独立 Active Work、TODO、阻塞和下一步状态机。
+4. `ue_memory_get_context`、`ue_memory_expand_node` 和按需 Evidence。
+5. 0–4 级渐进式披露、确定性字符预算、默认状态过滤和结构化 `nextActions`。
+6. 固定项目高层 Knowledge/Work 更新 Tool，以及兼容式审计导出。
+
+仍属于后续范围：自动 Context Pack、共享知识服务、身份权限、团队 Scope 和乐观并发控制。
 
 ## 11. 非目标
 

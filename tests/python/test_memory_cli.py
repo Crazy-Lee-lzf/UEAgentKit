@@ -17,12 +17,14 @@ for path in (SRC_ROOT, PYTHON_TESTS):
         sys.path.insert(0, str(path))
 
 from test_indexer_queries import ASSET_A, REVISION_A, REVISION_B, make_asset, write_export  # noqa: E402
+from ue_agent_kit.active_work import WorkItemDraft  # noqa: E402
 from ue_agent_kit.cli import build_parser, main as cli_main, run  # noqa: E402
 from ue_agent_kit.database import open_database  # noqa: E402
 from ue_agent_kit.indexer import build_index  # noqa: E402
 from ue_agent_kit.memory_reports import build_memory_audit_report  # noqa: E402
 from ue_agent_kit.memory_service import ProjectMemoryService  # noqa: E402
 from ue_agent_kit.memory_tasks import TaskOutcome, TaskOutcomeDraft  # noqa: E402
+from ue_agent_kit.memory_tree import KnowledgeNodeDraft  # noqa: E402
 from ue_agent_kit.project_memory import (  # noqa: E402
     MemoryRecordDraft,
     MemoryRecordType,
@@ -199,12 +201,77 @@ class ProjectMemoryCliTests(unittest.TestCase):
         self.assertEqual(report["projectKey"], PROJECT)
         self.assertEqual(report["recordCount"], 2)
         self.assertEqual(report["statusEventCount"], 2)
+        self.assertEqual(report["nodeCount"], 0)
+        self.assertEqual(report["activeWorkCount"], 0)
+        self.assertEqual(report["knowledgeNodes"], [])
+        self.assertEqual(report["activeWork"], [])
         self.assertEqual(len(report["records"]), 2)
         self.assertEqual(len(report["statusEvents"]), 2)
         self.assertTrue(report["integrity"]["allRecordDigestsVerified"])
         serialized = json.dumps(report, ensure_ascii=False)
         self.assertNotIn(str(self.memory_path), serialized)
         self.assertNotIn(str(self.index_path), serialized)
+
+    def test_audit_appends_knowledge_tree_and_active_work_without_removing_v2_fields(self) -> None:
+        root = self.service.create_node(
+            KnowledgeNodeDraft(
+                project_key=PROJECT,
+                path="/project",
+                node_type="project",
+                title=PROJECT,
+                summary="Audit project root.",
+            )
+        )
+        node = self.service.create_node(
+            KnowledgeNodeDraft(
+                project_key=PROJECT,
+                path="/project/combat",
+                node_type="system",
+                title="Combat",
+                summary="Combat knowledge.",
+            )
+        )
+        work = self.service.create_work(
+            WorkItemDraft(
+                project_key=PROJECT,
+                title="Validate combat",
+                description="Validate the combat asset.",
+                next_action="Run tests.",
+                node_ids=(node.node_id,),
+                asset_paths=(ASSET_A,),
+            )
+        )
+        work = self.service.add_todo(work_item_id=work.work_item_id, text="Run the smoke test.")
+        report = build_memory_audit_report(self.service)
+
+        self.assertEqual(report["recordCount"], 2)
+        self.assertEqual(report["statusEventCount"], 2)
+        self.assertEqual(report["nodeCount"], 2)
+        self.assertEqual(report["activeWorkCount"], 1)
+        self.assertEqual(report["countsByWorkStatus"], {"in_progress": 1})
+        self.assertEqual([item["path"] for item in report["knowledgeNodes"]], [root.path, node.path])
+        exported_work = report["activeWork"][0]
+        self.assertEqual(exported_work["workItemId"], work.work_item_id)
+        self.assertEqual(exported_work["nodeIds"], [node.node_id])
+        self.assertEqual(exported_work["assetPaths"], [ASSET_A])
+        self.assertEqual(exported_work["todos"][0]["text"], "Run the smoke test.")
+        self.assertIn("records", report)
+        self.assertIn("statusEvents", report)
+        self.assertRegex(report["integrity"]["snapshotSha256"], r"^sha256:[0-9a-f]{64}$")
+
+        with self.assertRaisesRegex(RuntimeError, "knowledge nodes"):
+            build_memory_audit_report(self.service, max_nodes=1)
+        second_work = self.service.create_work(
+            WorkItemDraft(
+                project_key=PROJECT,
+                title="Second work item",
+                description="Second audit item.",
+                next_action="Inspect it.",
+            )
+        )
+        self.assertTrue(second_work.work_item_id)
+        with self.assertRaisesRegex(RuntimeError, "Active Work items"):
+            build_memory_audit_report(self.service, max_work_items=1)
 
     def test_audit_snapshot_digest_is_stable_for_unchanged_data(self) -> None:
         first = build_memory_audit_report(self.service)

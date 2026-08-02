@@ -18,8 +18,10 @@ from .database import assert_fts5_available, get_schema_version, open_database
 from .fixtures import validate_fixture_plan, verify_fixture_export
 from .indexer import build_index
 from .memory_reports import (
+    MAX_AUDIT_NODES,
     MAX_AUDIT_RECORDS,
     MAX_AUDIT_STATUS_EVENTS,
+    MAX_AUDIT_WORK_ITEMS,
     build_memory_audit_report,
     memory_record_payload,
 )
@@ -196,6 +198,8 @@ def build_parser() -> argparse.ArgumentParser:
     _add_memory_arguments(memory_export)
     memory_export.add_argument("--output", type=Path, required=True)
     memory_export.add_argument("--max-records", type=int, default=MAX_AUDIT_RECORDS)
+    memory_export.add_argument("--max-nodes", type=int, default=MAX_AUDIT_NODES)
+    memory_export.add_argument("--max-work-items", type=int, default=MAX_AUDIT_WORK_ITEMS)
     memory_export.add_argument(
         "--max-status-events",
         type=int,
@@ -315,6 +319,8 @@ def run(args: argparse.Namespace) -> tuple[Any, int]:
                 "projectKey": status.project_key,
                 "memorySchemaVersion": status.schema_version,
                 "recordCount": status.record_count,
+                "nodeCount": status.node_count,
+                "activeWorkCount": status.active_work_count,
                 "countsByType": status.counts_by_type,
                 "countsByStatus": status.counts_by_status,
             }, 0
@@ -362,6 +368,8 @@ def run(args: argparse.Namespace) -> tuple[Any, int]:
                 memory_service,
                 max_records=args.max_records,
                 max_status_events=args.max_status_events,
+                max_nodes=args.max_nodes,
+                max_work_items=args.max_work_items,
             )
             _write_json_file(args.output, report)
             return {
@@ -372,6 +380,8 @@ def run(args: argparse.Namespace) -> tuple[Any, int]:
                 "output": str(args.output),
                 "recordCount": report["recordCount"],
                 "statusEventCount": report["statusEventCount"],
+                "nodeCount": report["nodeCount"],
+                "activeWorkCount": report["activeWorkCount"],
                 "snapshotSha256": report["integrity"]["snapshotSha256"],
             }, 0
         raise RuntimeError("Unsupported Project Memory command.")

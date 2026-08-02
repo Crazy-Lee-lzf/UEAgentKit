@@ -1,8 +1,8 @@
 # Layered Project Memory and Collaboration Architecture
 
-Updated: 2026-07-31
+Updated: 2026-08-02
 
-> This document describes the adopted future design. It does not claim that these capabilities are implemented in 0.6.0. The current release still uses the flat Schema v2 record model defined by `spec/PROJECT_MEMORY.md`; the knowledge tree, Active Work, progressive disclosure, and shared knowledge service are planned work.
+> The `feature/memory-context` branch now implements the single-user, local, fixed-project Schema v3 MVP: a Knowledge Tree, Active Work, levels 0–4 progressive disclosure, on-demand Evidence, and five high-level MCP tools. The published 0.6.0 release still uses Schema v2; the shared knowledge service, team permissions, and optimistic concurrency remain future work.
 
 ## 1. Goals
 
@@ -223,36 +223,39 @@ PostgreSQL/API    shared project knowledge, team work, and audit
 
 Shared node updates use optimistic concurrency with `nodeId`, `expectedRevision`, and new content. A mismatch returns `knowledge-conflict`; Project Profiles and system summaries must never use silent last-write-wins behavior.
 
-## 9. Schema evolution
+## 9. Schema v3 implementation status
 
-Schema v2 remains the stable 0.6.0 base. A future Schema v3 is expected to add:
+`feature/memory-context` adds these local tables and bindings on top of Schema v2:
 
 ```text
-memory_nodes
-work_items
-work_item_nodes
-record.node_id
-node_revision / owner / scope
+knowledge_nodes
+memory_records.node_id
+active_work_items
+active_work_node_links
+active_work_asset_links
+active_work_todos
 ```
 
 Migration rules:
 
-1. Preserve existing record IDs, digests, Revision Sets, and artifacts.
-2. Bind old records to `/project/unclassified` before gradual classification.
-3. Do not require an agent to rewrite all historical records at once.
-4. Store and verify tree summaries separately from raw records.
-5. Keep the MCP tool contract stable across local and future shared services.
+1. Upgrade Schema v2 databases in place while preserving record IDs, content digests, Evidence digests, Revision Sets, Scopes, Relations, Artifacts, and statuses.
+2. Keep migrated legacy records at `node_id IS NULL` instead of guessing a node assignment.
+3. Create Schema v3 directly for new databases and make repeated opens idempotent.
+4. Enforce normalized absolute paths, same-project parents, cycle prevention, and the `/project` root for Knowledge Nodes.
+5. Store Active Work node and asset links in normalized association tables rather than query-hostile JSON only.
 
-## 10. Implementation order
+## 10. Single-user MVP status
 
-1. Add arbitrary-depth Knowledge Nodes and a Project Profile.
-2. Bind the existing six record types to nodes.
-3. Add separate Active Work and TODO storage.
-4. Implement `memory_get_context` and progressive node expansion.
-5. Add strict token budgets, default status filters, and `nextActions`.
-6. Automate Task, Revision, and Evidence maintenance.
-7. Build 0.7.0 Context Packs on this structure.
-8. Add shared service identity, permissions, and concurrency after the single-user contract stabilizes.
+Implemented:
+
+1. An arbitrary-depth Knowledge Tree with a Project Profile root.
+2. Optional Knowledge Node bindings for all six existing record types.
+3. Separate Active Work, TODO, blocker, and next-action state handling.
+4. `ue_memory_get_context`, `ue_memory_expand_node`, and on-demand Evidence retrieval.
+5. Levels 0–4 progressive disclosure, deterministic character budgets, default status filters, and structured `nextActions`.
+6. Fixed-project high-level Knowledge/Work update tools and backward-compatible audit exports.
+
+Automatic Context Packs, a shared knowledge service, identity and permissions, team scopes, and optimistic concurrency remain future work.
 
 ## 11. Non-goals
 

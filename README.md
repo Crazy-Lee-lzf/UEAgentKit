@@ -8,7 +8,7 @@ UE Agent Kit 是一套面向 Unreal Engine 的开源资产分析、索引与受�
 
 当前已发布版本为 **0.6.0**，支持 **Unreal Engine 5.6**。本版本新增 Revision-aware Project Memory：独立 SQLite/FTS5、六类可追溯记录、来源与状态机、Revision 自动失效、证据摘要、固定工程 MCP/CLI、可审计导出，以及 Workflow/rollback Task Evidence 闭环。
 
-> **发布状态**：最新正式版本仍为 0.6.0。`main` 当前为 **0.7.0-dev**：已完成 12 个受控 Live Editor Write Operation、统一 Transaction/Evidence、显式 Undo/Discard、Authorized Save → Verify 闭环、可恢复 Live Apply Journal 和注册式 Operation 架构；未启用 Memory 时为 Offline 5、Live 23、Workflow 26、Combined 44 Tool，启用固定 Project Memory 后为 12、30、33、51 Tool。当前采用双轨并行开发：`main` 推进 Memory Knowledge Tree/Active Work/Context/Analysis，`feature/live-editor-realtime-io` 扩展 UE Editor 运行时实时读写能力。实时 Editor I/O 是主要开发辅助路径，离线 Commandlet/索引流程主要用于无编辑器场景、批处理、独立验证、回滚和 CI。
+> **开发状态**：最新正式版本仍为 0.6.0。0.7.0-dev 双轨开发中，`feature/memory-context` 已完成本地单人 Schema v3 MVP：Knowledge Tree、Active Work、0–4 级渐进式 Context、按需 Evidence 和五个高层 MCP Tool；`feature/live-editor-realtime-io` 继续扩展运行中 UE Editor 的实时读写能力。未启用 Memory 时为 Offline 5、Live 23、Workflow 29、Combined 47 Tool，启用固定 Project Memory 后为 17、35、41、59 Tool。自动 Context Pack、分析和多人共享知识服务仍是后续范围。
 
 > **AI Generated**：本项目的代码和文档主要由 AI 生成，并通过人工审查、UE 5.6 编译、自动化测试和真实工程回归验证。
 

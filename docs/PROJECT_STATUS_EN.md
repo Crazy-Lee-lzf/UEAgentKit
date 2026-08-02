@@ -2,11 +2,11 @@
 
 
 
-Updated: 2026-08-01
+Updated: 2026-08-02
 
 
 
-This document describes the current **0.7.0-dev** development line on `main`. The latest published release remains **0.6.0** for Unreal Engine 5.6. Live Editor Write, explicit Undo/Discard, the authorized-save closeout, the recoverable journal, and the scalable Operation Registry have not yet been published.
+This document describes the **0.7.0-dev** development line and the single-user Memory/Context MVP on `feature/memory-context`. The latest published release remains **0.6.0** for Unreal Engine 5.6. Schema v3 Knowledge Trees, Active Work, progressive Context, and post-0.6.0 Live Editor Write capabilities have not yet been published.
 
 
 
@@ -40,13 +40,13 @@ The project is therefore closer to a safe project-knowledge layer plus a verifie
 
 Mode                 Without Memory    With Memory
 
-Offline                     5              12
+Offline                     5              17
 
-Live                       23              30
+Live                       23              35
 
-Workflow                   26              33
+Workflow                   29              41
 
-Combined                   44              51
+Combined                   47              59
 
 ```
 
@@ -62,7 +62,7 @@ Current validation baseline:
 
 ```text
 
-Python tests                 264/264
+Python tests                 299/299
 
 JSON Schemas                 3/3
 
@@ -129,6 +129,14 @@ UTF-8 no BOM / CRLF          passed
 - Source, status, Scope, Revision Set, Artifact, Confidence, time, and evidence digest.
 
 - Automatic stale transitions after Revision changes and coexistence of conflicting conclusions.
+
+- A Schema v3 Knowledge Tree with normalized `/project/...` paths, same-project parents, cycle prevention, and safe deletion rules.
+
+- Separate Active Work with `planned/in_progress/blocked/done/cancelled`, TODO items, next actions, and normalized node/asset links.
+
+- Levels 0–4 progressive Context, character budgets, default `stale/superseded` filtering, truncation `nextActions`, and on-demand Evidence.
+
+- Five new high-level MCP tools while preserving all seven existing Memory tools.
 
 
 
