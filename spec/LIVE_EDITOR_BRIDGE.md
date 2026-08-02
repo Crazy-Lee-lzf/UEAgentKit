@@ -114,6 +114,11 @@ ue_focus_actor
 ue_compile_blueprint
 ue_validate_asset
 ue_validate_folder
+ue_run_automation_test
+ue_get_editor_context
+ue_start_batch_task
+ue_get_batch_task
+ue_cancel_batch_task
 ```
 
 所有 Tool 均返回 `source=live-editor-memory`，不生成磁盘 Revision，也不声称数据来自 SQLite。
@@ -125,9 +130,57 @@ Live Read：
 
 Live Action：
 
-- 7 个 Tool，`readOnlyHint=false`、`destructiveHint=false`。
+- 8 个 Tool，`readOnlyHint=false`、`destructiveHint=false`。
 - 可以改变窗口、选择、资产加载状态或 Blueprint 内存编译状态，但不保存任何 Package。
 - 只接受精确 `/Game/...Asset.Asset`、非根 `/Game/...` Package Path 或当前 Editor World 的 `ActorGuid`；PIE/SIE 期间拒绝执行。
+
+Realtime Foundation：
+
+- `ue_get_editor_context` 为只读聚合 Tool；`ue_start_batch_task` 和 `ue_cancel_batch_task` 为非破坏性 Action；`ue_get_batch_task` 为只读状态查询。
+- Realtime Tool 不接受本机路径、端口、Token、数据库或任意 UObject Method。
+- Context 和 Batch 只读取当前 Editor 内存与已加载 World，不加载未加载资产，不保存 Package，不改变选择。
+
+### ue_get_editor_context
+
+一次请求返回当前工作上下文的有界快照：
+
+```text
+editor
+world
+selection
+openAssets
+dirtyPackages
+blueprintGraphSelection
+compileErrors
+outputLogCursor
+durationMs
+stageDurationsMs
+nextActions
+```
+
+每个集合都有硬上限和 `truncated` 标记。若 Editor 不可用，返回稳定的 `state=unavailable`，而不是回退到 SQLite 或磁盘扫描。
+
+### ue_start_batch_task / ue_get_batch_task / ue_cancel_batch_task
+
+首个固定 Operation 为 `scanCurrentWorld`。它只扫描当前已加载 Editor World 中的 Level、Actor 和 Component，不触发 World Partition Cell 或资产加载。
+
+执行模型：
+
+- 同一 Editor Session 最多一个运行中的 Batch Task。
+- Level 使用弱引用保存；Actor 不跨帧保存裸指针，每次从当前 Level Slot 获取并立即验证。
+- 每 Tick 同时受 `MaxActorSlotsPerTick=256` 和约 `2 ms` 时间预算约束。
+- 任务绑定 `editorSessionId` 与 World Identity；World 切换、PIE/SIE、超时或显式取消均进入明确终态。
+- 终态包括 `completed/cancelled/failed/timed-out/invalidated`。
+
+`ue_get_batch_task` 默认只返回进度和聚合摘要。Actor/Component 详情必须显式请求：
+
+```text
+include_details = true
+detail_offset = 0..
+detail_limit = 1..5
+```
+
+单页最多 5 个 Actor；响应返回 `returnedCount/totalAvailable/hasMore/nextOffset`。该分页契约用于确保最坏情况下的结果仍低于 Python Bridge 的 1 MiB 单响应上限。
 
 ### ue_editor_status
 
@@ -308,6 +361,11 @@ live-editor-write-undo-package-saved
 live-editor-write-undo-target-changed
 live-editor-write-undo-failed
 live-editor-write-undo-verify-failed
+live-editor-batch-task-busy
+live-editor-batch-task-not-found
+live-editor-batch-task-world-invalidated
+live-editor-batch-task-timeout
+live-editor-batch-task-failed
 ```
 
 错误响应沿用 MCP `code/message/retryable/details/suggestedAction` Envelope，不返回本机 Descriptor、Project 或 Token 路径。
@@ -329,7 +387,7 @@ scripts\TestMcpLiveEditor.cmd ^
 1. 拒绝干扰已有 Editor，或显式使用 `-UseExistingEditor`。
 2. 启动测试项目的独立 Unreal Editor。
 3. 等待匹配 PID 的 Descriptor。
-4. 通过真实 MCP `stdio` Client 发现并调用 15 个 Tool；自管理无界面 Editor 验证 Graph Tool 的安全降级，真实选中 Node 的正向结果由 UE5.6 API 编译和 Schema/单元回归覆盖。
+4. 通过真实 MCP `stdio` Client 发现并调用 22 个 Live/Realtime Tool；自管理无界面 Editor 验证 Graph Tool 的安全降级，真实选中 Node 的正向结果由 UE5.6 API 编译和 Schema/单元回归覆盖。
 5. 验证 Token、端口、Descriptor 和固定本机路径不进入 MCP 响应。
 6. 验证临时 immutable SQLite 哈希和目录文件集合不变。
 7. 仅关闭脚本自己创建的 Editor，并清理对应 Descriptor。

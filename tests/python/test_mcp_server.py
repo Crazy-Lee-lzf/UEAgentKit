@@ -248,6 +248,37 @@ class FakeWorkflowService:
             )
         return response
 
+    def create_change_set(self, *, title="Live Editor Change Set", task_id=""):
+        return {
+            "ok": True,
+            "tool": "ue_create_change_set",
+            "changeSetId": "cs_fake",
+            "taskId": task_id or "task_fake",
+            "title": title,
+            "status": "planned",
+            "operationCount": 0,
+            "receiptCount": 0,
+            "journalPersisted": True,
+        }
+
+    def get_change_set(self, change_set_id):
+        return {
+            "ok": True,
+            "tool": "ue_get_change_set",
+            "changeSetId": change_set_id,
+            "taskId": "task_fake",
+            "title": "Live Editor Change Set",
+            "status": "planned",
+            "operations": [],
+            "affectedAssets": [],
+            "transactionIds": [],
+            "validation": {"state": "not-run"},
+            "saveState": {"state": "unsaved"},
+            "receiptCount": 0,
+            "activeReceiptCount": 0,
+            "receipts": [],
+        }
+
 
 class FakeLiveEditorService:
     def __init__(self, *, available: bool = True) -> None:
@@ -286,6 +317,10 @@ class FakeLiveEditorService:
                 "editor.getCompileErrors",
                 "editor.inspectAssetLive",
                 "editor.getBlueprintGraphSelection",
+                "editor.getEditorContext",
+                "editor.batchTask.start",
+                "editor.batchTask.status",
+                "editor.batchTask.cancel",
                 "editor.openAsset",
                 "editor.focusAsset",
                 "editor.syncContentBrowser",
@@ -353,6 +388,113 @@ class FakeLiveEditorService:
                         "title": "BeginPlay",
                     }
                 ],
+            },
+            "ue_get_editor_context": {
+                "source": "live-editor-memory",
+                "state": "available",
+                "editor": {
+                    "state": "available",
+                    "sessionId": "session-test",
+                    "pieState": "stopped",
+                    "dirtyPackageCount": 1,
+                },
+                "world": {"available": True, "currentLevelPath": "/Game/Maps/Test.Test:PersistentLevel"},
+                "selection": {"count": 1, "truncated": False, "items": [{"kind": "Actor"}]},
+                "openAssets": {"count": 0, "truncated": False, "items": []},
+                "dirtyPackages": {"count": 1, "truncated": False, "items": [{"packageName": "/Game/Test"}]},
+                "blueprintGraphSelection": {"available": True, "blueprintPath": "/Game/Test/BP_Test.BP_Test"},
+                "compileErrors": {"diagnosticSource": "captured-output-log", "diagnosticCount": 0},
+                "outputLogCursor": {"available": True, "oldestSequence": 1, "newestSequence": 11, "nextSequence": 12},
+                "durationMs": 3,
+                "stageDurationsMs": {"editor": 1, "world": 0, "selection": 0, "openAssets": 0, "dirtyPackages": 1, "compileErrors": 1, "outputLogCursor": 0},
+                "nextActions": [
+                    {"tool": "ue_get_dirty_assets", "reason": "dirty-packages-present"},
+                    {"tool": "ue_get_output_log", "reason": "incremental-log-available"},
+                ],
+            },
+            "ue_start_batch_task": {
+                "taskId": "11111111-1111-1111-1111-111111111111",
+                "operation": normalized_params.get("operation", "scanCurrentWorld"),
+                "state": "running",
+                "editorSessionId": "session-test",
+                "progress": {"processedActors": 0, "totalActors": 3, "completedPercent": 0},
+                "summary": {
+                    "actorCount": 0,
+                    "totalComponentCount": 0,
+                    "actorClassCounts": [],
+                    "limits": {
+                        "maxActors": normalized_params.get("maxActors", 2000),
+                        "maxComponentsPerActor": normalized_params.get("maxComponentsPerActor", 200),
+                        "actorLimitReached": False,
+                        "componentLimitActorCount": 0,
+                    },
+                },
+                "durationMs": 1,
+            },
+            "ue_get_batch_task": {
+                "taskId": normalized_params.get("taskId", ""),
+                "operation": "scanCurrentWorld",
+                "state": "completed",
+                "editorSessionId": "session-test",
+                "progress": {"processedActors": 3, "totalActors": 3, "completedPercent": 100},
+                "summary": {
+                    "actorCount": 3,
+                    "totalComponentCount": 4,
+                    "actorClassCounts": [
+                        {"classPath": "/Script/Engine.StaticMeshActor", "count": 3}
+                    ],
+                    "actorClassCountsTruncated": False,
+                    "limits": {
+                        "maxActors": 2000,
+                        "maxComponentsPerActor": 200,
+                        "actorLimitReached": False,
+                        "componentLimitActorCount": 0,
+                    },
+                },
+                "details": {
+                    "actorCount": 1,
+                    "truncated": False,
+                    "items": [
+                        {
+                            "actorGuid": "22222222-2222-2222-2222-222222222222",
+                            "label": "SM_Test",
+                            "classPath": "/Script/Engine.StaticMeshActor",
+                            "componentCount": 2,
+                            "componentsTruncated": False,
+                            "components": [
+                                {
+                                    "name": "StaticMeshComponent0",
+                                    "classPath": "/Script/Engine.StaticMeshComponent",
+                                    "nativeClass": True,
+                                }
+                            ],
+                        }
+                    ],
+                },
+                "durationMs": 1000,
+            },
+            "ue_cancel_batch_task": {
+                "taskId": normalized_params.get("taskId", ""),
+                "operation": "scanCurrentWorld",
+                "state": "cancelled",
+                "editorSessionId": "session-test",
+                "progress": {"processedActors": 1, "totalActors": 3, "completedPercent": 33},
+                "summary": {
+                    "actorCount": 1,
+                    "totalComponentCount": 1,
+                    "actorClassCounts": [
+                        {"classPath": "/Script/Engine.StaticMeshActor", "count": 1}
+                    ],
+                    "actorClassCountsTruncated": False,
+                    "limits": {
+                        "maxActors": 2000,
+                        "maxComponentsPerActor": 200,
+                        "actorLimitReached": False,
+                        "componentLimitActorCount": 0,
+                    },
+                },
+                "details": {"actorCount": 1, "truncated": False, "items": []},
+                "durationMs": 500,
             },
             "ue_open_asset": {"action": "open-asset", "openedNewEditor": True, "saved": False},
             "ue_focus_asset": {"action": "focus-asset", "focused": True, "saved": False},
@@ -1206,6 +1348,37 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(graph_contract["maxSelectedNodes"], 100)
         self.assertFalse(graph_contract["materialEditorSupported"])
         self.assertFalse(graph_contract["editingSupported"])
+        context_contract = capabilities["liveEditor"]["editorContext"]
+        self.assertTrue(context_contract["available"])
+        self.assertEqual(context_contract["tool"], "ue_get_editor_context")
+        self.assertTrue(context_contract["readOnly"])
+        self.assertTrue(context_contract["singleRequestAggregation"])
+        self.assertTrue(context_contract["truncatedSectionsReported"])
+        self.assertTrue(context_contract["stageTimingsReported"])
+        self.assertTrue(context_contract["durationMsReported"])
+        self.assertTrue(context_contract["suggestedNextActions"])
+        batch_contract = capabilities["liveEditor"]["batchTasks"]
+        self.assertTrue(batch_contract["available"])
+        self.assertEqual(batch_contract["startTool"], "ue_start_batch_task")
+        self.assertEqual(batch_contract["statusTool"], "ue_get_batch_task")
+        self.assertEqual(batch_contract["cancelTool"], "ue_cancel_batch_task")
+        self.assertEqual(batch_contract["concurrentTasks"], 1)
+        self.assertEqual(batch_contract["operations"], ["scanCurrentWorld"])
+        self.assertEqual(batch_contract["maxActors"], 10000)
+        self.assertEqual(batch_contract["maxComponentsPerActor"], 500)
+        self.assertEqual(batch_contract["maxDetailedActors"], 200)
+        self.assertEqual(batch_contract["maxActorClassesReported"], 50)
+        self.assertEqual(batch_contract["timeoutSecondsMax"], 300)
+        self.assertTrue(batch_contract["frameStepped"])
+        self.assertTrue(batch_contract["cancellable"])
+        self.assertTrue(batch_contract["worldInvalidationDetected"])
+        self.assertFalse(batch_contract["loadsAssets"])
+        self.assertFalse(batch_contract["savesPackages"])
+        self.assertFalse(batch_contract["modifiesSelection"])
+        self.assertFalse(batch_contract["perActorMcpCalls"])
+        self.assertEqual(capabilities["limits"]["liveBatchMaxActors"], 10000)
+        self.assertEqual(capabilities["limits"]["liveBatchConcurrentTasks"], 1)
+        self.assertEqual(capabilities["limits"]["liveBatchTimeoutSecondsMax"], 300)
         action_contract = capabilities["liveEditor"]["editorActions"]
         self.assertTrue(action_contract["available"])
         self.assertEqual(action_contract["tools"], expected_names[15:23])
@@ -1232,6 +1405,14 @@ class McpServerTests(unittest.TestCase):
         _, editor_status = asyncio.run(server.call_tool("ue_editor_status", {}))
         self.assertTrue(editor_status["ok"])
         self.assertEqual(editor_status["result"]["state"], "available")
+        _, editor_context = asyncio.run(server.call_tool("ue_get_editor_context", {}))
+        self.assertTrue(editor_context["ok"])
+        self.assertTrue(editor_context["readOnly"])
+        self.assertEqual(editor_context["source"], "live-editor-memory")
+        self.assertIn("stageDurationsMs", editor_context["result"])
+        self.assertIn("nextActions", editor_context["result"])
+        self.assertEqual(live_service.calls[-1][0], "ue_get_editor_context")
+        self.assertEqual(live_service.calls[-1][1], {})
         _, selection = asyncio.run(server.call_tool("ue_get_selection", {}))
         self.assertEqual(selection["source"], "live-editor-memory")
         self.assertEqual(selection["result"]["items"][0]["kind"], "Actor")
@@ -1290,6 +1471,62 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(
             graph_selection["result"]["selectedNodes"][0]["nodeGuid"],
             "22222222-2222-2222-2222-222222222222",
+        )
+
+        _, batch_started = asyncio.run(
+            server.call_tool(
+                "ue_start_batch_task",
+                {
+                    "operation": "scanCurrentWorld",
+                    "max_actors": 5000,
+                    "max_components_per_actor": 200,
+                    "timeout_seconds": 90,
+                },
+            )
+        )
+        self.assertTrue(batch_started["ok"])
+        self.assertFalse(batch_started["readOnly"])
+        self.assertEqual(batch_started["result"]["state"], "running")
+        self.assertEqual(
+            live_service.calls[-1][1],
+            {
+                "operation": "scanCurrentWorld",
+                "maxActors": 5000,
+                "maxComponentsPerActor": 200,
+                "timeoutSeconds": 90,
+            },
+        )
+        _, batch_status = asyncio.run(
+            server.call_tool(
+                "ue_get_batch_task",
+                {"task_id": "11111111-2222-3333-4444-555555555555"},
+            )
+        )
+        self.assertTrue(batch_status["ok"])
+        self.assertTrue(batch_status["readOnly"])
+        self.assertEqual(batch_status["result"]["state"], "completed")
+        self.assertEqual(batch_status["result"]["summary"]["actorCount"], 3)
+        self.assertEqual(
+            live_service.calls[-1][1],
+            {
+                "taskId": "11111111-2222-3333-4444-555555555555",
+                "includeDetails": False,
+                "detailOffset": 0,
+                "detailLimit": 5,
+            },
+        )
+        _, batch_cancelled = asyncio.run(
+            server.call_tool(
+                "ue_cancel_batch_task",
+                {"task_id": "11111111-2222-3333-4444-555555555555"},
+            )
+        )
+        self.assertTrue(batch_cancelled["ok"])
+        self.assertFalse(batch_cancelled["readOnly"])
+        self.assertEqual(batch_cancelled["result"]["state"], "cancelled")
+        self.assertEqual(
+            live_service.calls[-1][1],
+            {"taskId": "11111111-2222-3333-4444-555555555555"},
         )
 
         _, opened = asyncio.run(
@@ -1379,7 +1616,7 @@ class McpServerTests(unittest.TestCase):
             [tool.name for tool in tools],
             tool_names_for_mode(workflow_enabled=True, memory_enabled=True),
         )
-        self.assertEqual(len(tools), 41)
+        self.assertEqual(len(tools), 43)
 
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
         memory_contract = capabilities["projectMemory"]
@@ -1457,12 +1694,18 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         expected_names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 47)
+        self.assertEqual(len(tools), 53)
         for tool in tools:
             definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
             self.assertEqual(bool(tool.annotations.readOnlyHint), definition.read_only, tool.name)
             self.assertEqual(bool(tool.annotations.destructiveHint), definition.destructive, tool.name)
             self.assertEqual(bool(tool.annotations.idempotentHint), definition.idempotent, tool.name)
+
+        _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
+        change_sets = capabilities["liveEditor"]["liveWriteChangeSets"]
+        self.assertTrue(change_sets["available"])
+        self.assertEqual(change_sets["createTool"], "ue_create_change_set")
+        self.assertEqual(change_sets["getTool"], "ue_get_change_set")
 
         mismatched_live = FakeLiveEditorService()
         mismatched_live.config = SimpleNamespace(
@@ -1603,6 +1846,43 @@ class McpServerTests(unittest.TestCase):
             )
         )
         self.assertEqual(applied["applyReceipt"], "apply_test")
+
+        _, created_set = asyncio.run(server.call_tool("ue_create_change_set", {}))
+        self.assertTrue(created_set["ok"])
+        self.assertEqual(created_set["changeSetId"], "cs_fake")
+        _, read_set = asyncio.run(
+            server.call_tool("ue_get_change_set", {"change_set_id": "cs_fake"})
+        )
+        self.assertEqual(read_set["changeSetId"], "cs_fake")
+        self.assertEqual(read_set["receiptCount"], 0)
+
+        _, capabilities_again = asyncio.run(server.call_tool("ue_get_capabilities", {}))
+        change_sets = capabilities_again["liveEditor"]["liveWriteChangeSets"]
+        self.assertFalse(change_sets["available"])
+        self.assertEqual(change_sets["createTool"], "")
+        self.assertEqual(change_sets["getTool"], "")
+        self.assertEqual(change_sets["maxChangeSets"], 50)
+        self.assertEqual(change_sets["maxReceiptsPerChangeSet"], 100)
+        self.assertTrue(change_sets["journaled"])
+        self.assertTrue(change_sets["workRootBound"])
+        self.assertEqual(
+            change_sets["bindableTools"],
+            [
+                "ue_apply_asset_property_live",
+                "ue_undo_asset_property_live",
+                "ue_discard_asset_property_live",
+                "ue_save_authorized_asset",
+                "ue_verify_live_write",
+            ],
+        )
+        self.assertEqual(
+            capabilities_again["limits"]["liveChangeSets"],
+            50,
+        )
+        self.assertEqual(
+            capabilities_again["limits"]["liveChangeSetMaxReceipts"],
+            100,
+        )
 
     @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
     def test_workflow_diagnostics_use_stable_redacted_error_envelope(self) -> None:

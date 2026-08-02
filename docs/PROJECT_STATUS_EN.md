@@ -2,11 +2,11 @@
 
 
 
-Updated: 2026-08-02
+Updated: 2026-08-03
 
 
 
-This document describes the **0.7.0-dev** development line and the single-user Memory/Context MVP on `feature/memory-context`. The latest published release remains **0.6.0** for Unreal Engine 5.6. Schema v3 Knowledge Trees, Active Work, progressive Context, and post-0.6.0 Live Editor Write capabilities have not yet been published.
+This document describes the locally integrated **0.7.0-dev** line on `main`. The latest published release remains **0.6.0** for Unreal Engine 5.6. Schema v3 Knowledge Trees, Active Work, progressive Context, the Realtime Foundation, and expanded Live Editor Write capabilities remain unpublished development features. The long-lived `feature/live-editor-realtime-io` and `feature/memory-context` branches are retained for parallel work after synchronizing from `main`.
 
 
 
@@ -42,11 +42,11 @@ Mode                 Without Memory    With Memory
 
 Offline                     5              17
 
-Live                       23              35
+Live                       27              39
 
-Workflow                   29              41
+Workflow                   31              43
 
-Combined                   47              59
+Combined                   53              65
 
 ```
 
@@ -62,11 +62,13 @@ Current validation baseline:
 
 ```text
 
-Python tests                 299/299
+Python tests                 334/334
 
 JSON Schemas                 3/3
 
 Patch examples               16/16
+
+Ruff / CompileAll            passed
 
 UE5.6 Direct Build           passed
 
@@ -266,23 +268,30 @@ These are intentional scope and safety boundaries, not documentation omissions.
 
 ### P0A: Realtime Editor CRUD, batch tasks, and diagnostics
 
-The Live Editor Write foundation, Material/DataTable support, Undo/Discard, Save→Verify→Memory closeout, and registry-based extension architecture are complete. Realtime I/O is the primary daily-development path; the next stage prioritizes current Editor Context, batch Query/Task execution, PIE diagnostics, Change Sets, and high-value domain CRUD without expanding the central dispatcher. Every new Operation must add:
+The Live Editor Write foundation, Material/DataTable support, Undo/Discard, Save→Verify→Memory closeout, and registry-based extension architecture are complete. The Realtime Foundation now also includes bounded current Editor Context, the first frame-stepped Batch Task, and durable Change Sets:
+
+- `ue_get_editor_context` aggregates Editor, World, Selection, Open Assets, Dirty Packages, Blueprint Graph Selection, Compile Errors, and Output Log Cursor in one read-only request, with stage timings and structured `nextActions`.
+- `scanCurrentWorld` inspects only the currently loaded World. Level enumeration and Actor/Component processing are constrained by an approximately 2 ms per-frame budget and count limits. Tasks are bound to the Editor Session and World and support progress, cancellation, timeout, invalidation, and partial results.
+- Batch Task status returns summaries by default. Details are retrieved through `include_details/detail_offset/detail_limit`, with at most five Actors per page, keeping responses below the Bridge's 1 MiB limit.
+- Change Set schema v2 durably records Task, Editor Session, Operation, Asset, Transaction, Save Receipt, and Validation lifecycle data. It supports `planned/applied/partially_applied/undone/discarded/saved/verified/failed/unknown` and preserves terminal history.
+- Active Change Sets are never silently evicted by capacity cleanup. Runtime state that cannot be re-proven after an Editor restart explicitly degrades to `unknown`.
+
+Realtime I/O is now the primary development track. The goal is broader inspection, mutation, compile, validation, undo, and authorized-save coverage while the Editor remains open, progressively approaching the practical editing breadth demonstrated by `ue-llm-toolkit`. Readers and writers may be developed on separate branches; Memory/Context remains cross-cutting support and must not block realtime CRUD. Every new Operation must add:
 
 1. Python `OperationSpec`, Policy authorization, and Plan schema.
 2. A C++ domain executor and Operation Descriptor.
 3. Snapshot, no-op, failure restoration, Dirty, Undo, and independent Verify semantics.
 4. Real UE5.6 success, rejection, restoration, and closeout regressions.
 
-### P0B: Memory usability and knowledge-tree foundation
+### P0B: Cross-cutting Memory and task-context integration
 
-The Revision-aware flat record store in 0.6.0 is complete, but maintenance complexity must not be delegated to agent discipline. Before Context Packs, implement:
+Schema v3 Knowledge Trees, Active Work, five-level progressive disclosure, on-demand Evidence, and five high-level Memory tools are implemented and integrated into the local `main` line. The next work is integration rather than further schema expansion:
 
-- An arbitrary-depth Knowledge Tree: Project Profile → System → Feature/Entity → Implementation.
-- Existing rules, findings, decisions, issues, tasks, and evidence bound to Knowledge Nodes.
-- Separate Active Work for objectives, in-progress work, TODO, blockers, pending decisions, and next actions.
-- Five-level progressive disclosure from index summaries to raw evidence.
-- Server-enforced token budgets, default status filters, deduplication, and structured `nextActions`.
-- One thin `project-memory` Skill instead of separate long read/write/maintenance/TODO Skills.
+- Bind `taskId`, `workItemId`, `changeSetId`, `editorSessionId`, and target assets through stable identifiers.
+- Add one high-level task-context entry point that combines necessary Memory, Active Work, Editor Context, and the current Change Set while keeping lower-level tools independent.
+- On Change Set completion, bind validation results, update Active Work, and emit Memory-ready Evidence; durable knowledge promotion remains controlled.
+- Benchmark Knowledge Tree, FTS, Context Pack, and large Memory database latency, result size, and token budgets.
+- Keep one thin `project-memory` Skill and enforce consistency in the server.
 
 See [`MEMORY_ARCHITECTURE_EN.md`](MEMORY_ARCHITECTURE_EN.md).
 

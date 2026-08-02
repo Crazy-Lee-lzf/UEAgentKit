@@ -110,6 +110,81 @@ class _BridgeHandler(socketserver.StreamRequestHandler):
                 "assetRegistry": {"found": True},
                 "memory": {"loaded": False, "loadedByBridge": False, "state": "not-loaded"},
             },
+            "editor.getEditorContext": getattr(
+                self.server,
+                "context_result",
+                {
+                    "source": "live-editor-memory",
+                    "state": "available",
+                    "editor": {
+                        "state": "available",
+                        "pluginVersion": self.server.version,
+                        "projectName": self.server.project_name,
+                        "sessionId": "session-test",
+                        "pieState": "stopped",
+                        "dirtyPackageCount": 1,
+                    },
+                    "world": {
+                        "available": True,
+                        "worldPath": "/Game/Maps/Test.Test",
+                        "worldType": "Editor",
+                        "currentLevelPath": "/Game/Maps/Test.Test:PersistentLevel",
+                        "packageDirty": True,
+                        "worldPartitioned": False,
+                    },
+                    "selection": {
+                        "count": 1,
+                        "truncated": False,
+                        "items": [
+                            {
+                                "kind": "Actor",
+                                "name": "TestActor",
+                                "objectPath": "/Game/Maps/Test.Test:PersistentLevel.TestActor",
+                            }
+                        ],
+                    },
+                    "openAssets": {"count": 0, "truncated": False, "items": []},
+                    "dirtyPackages": {
+                        "count": 1,
+                        "truncated": False,
+                        "items": [{"packageName": "/Game/Maps/Test", "assetPaths": ["/Game/Maps/Test.Test"]}],
+                    },
+                    "blueprintGraphSelection": {
+                        "available": False,
+                        "reasonCode": "no-ordinary-blueprint-editor",
+                    },
+                    "compileErrors": {
+                        "diagnosticSource": "captured-output-log",
+                        "diagnosticCount": 0,
+                        "diagnosticsTruncated": False,
+                        "nextSequence": 8,
+                        "loadedBlueprintCount": 1,
+                    },
+                    "outputLogCursor": {
+                        "available": True,
+                        "oldestSequence": 1,
+                        "newestSequence": 7,
+                        "nextSequence": 8,
+                        "droppedCount": 0,
+                        "truncated": False,
+                    },
+                    "durationMs": 3,
+                    "stageDurationsMs": {
+                        "editor": 1,
+                        "world": 0,
+                        "selection": 0,
+                        "openAssets": 0,
+                        "dirtyPackages": 0,
+                        "blueprintGraphSelection": 0,
+                        "compileErrors": 1,
+                        "outputLogCursor": 1,
+                    },
+                    "nextActions": [
+                        {"tool": "ue_get_dirty_assets", "reason": "dirty-packages-present"},
+                        {"tool": "ue_get_output_log", "reason": "incremental-log-available"},
+                    ],
+                },
+            ),
             "editor.openAsset": {
                 "action": "open-asset",
                 "assetPath": params.get("assetPath", ""),
@@ -195,6 +270,134 @@ class _BridgeHandler(socketserver.StreamRequestHandler):
                     "revisionSet": [],
                 },
             },
+            "editor.batchTask.start": {
+                "taskId": "11111111-1111-1111-1111-111111111111",
+                "operation": params.get("operation", "scanCurrentWorld"),
+                "state": "running",
+                "editorSessionId": "session-test",
+                "startedAtUtc": "2026-08-01T00:00:00.000Z",
+                "progress": {
+                    "processedActors": 0,
+                    "totalActors": 3,
+                    "completedPercent": 0,
+                    "elapsedSeconds": 0.0,
+                    "estimatedRemainingSeconds": 0.0,
+                },
+                "world": {
+                    "name": "Test",
+                    "path": "/Game/Maps/Test.Test:PersistentLevel",
+                    "worldId": 1,
+                    "worldType": "Editor",
+                },
+                "summary": {
+                    "actorCount": 0,
+                    "totalComponentCount": 0,
+                    "actorClassCounts": [],
+                    "actorClassCountsTruncated": False,
+                    "limits": {
+                        "maxActors": params.get("maxActors", 2000),
+                        "maxComponentsPerActor": params.get("maxComponentsPerActor", 200),
+                        "actorLimitReached": False,
+                        "componentLimitActorCount": 0,
+                    },
+                },
+                "durationMs": 1,
+            },
+            "editor.batchTask.status": {
+                "taskId": params.get("taskId", ""),
+                "operation": "scanCurrentWorld",
+                "state": "completed",
+                "editorSessionId": "session-test",
+                "startedAtUtc": "2026-08-01T00:00:00.000Z",
+                "completedAtUtc": "2026-08-01T00:00:01.000Z",
+                "progress": {
+                    "processedActors": 3,
+                    "totalActors": 3,
+                    "completedPercent": 100,
+                    "elapsedSeconds": 1.0,
+                    "estimatedRemainingSeconds": 0.0,
+                },
+                "world": {
+                    "name": "Test",
+                    "path": "/Game/Maps/Test.Test:PersistentLevel",
+                    "worldId": 1,
+                    "worldType": "Editor",
+                },
+                "summary": {
+                    "actorCount": 3,
+                    "totalComponentCount": 4,
+                    "actorClassCounts": [
+                        {"classPath": "/Script/Engine.StaticMeshActor", "count": 3}
+                    ],
+                    "actorClassCountsTruncated": False,
+                    "limits": {
+                        "maxActors": 2000,
+                        "maxComponentsPerActor": 200,
+                        "actorLimitReached": False,
+                        "componentLimitActorCount": 0,
+                    },
+                },
+                "details": {
+                    "actorCount": 1,
+                    "truncated": False,
+                    "items": [
+                        {
+                            "actorGuid": "22222222-2222-2222-2222-222222222222",
+                            "label": "SM_Test",
+                            "classPath": "/Script/Engine.StaticMeshActor",
+                            "actorPath": "/Game/Maps/Test.Test:PersistentLevel.SM_Test",
+                            "levelPath": "/Game/Maps/Test.Test:PersistentLevel",
+                            "componentCount": 2,
+                            "componentsTruncated": False,
+                            "components": [
+                                {
+                                    "name": "StaticMeshComponent0",
+                                    "classPath": "/Script/Engine.StaticMeshComponent",
+                                    "nativeClass": True,
+                                }
+                            ],
+                        }
+                    ],
+                },
+                "durationMs": 1000,
+            },
+            "editor.batchTask.cancel": {
+                "taskId": params.get("taskId", ""),
+                "operation": "scanCurrentWorld",
+                "state": "cancelled",
+                "editorSessionId": "session-test",
+                "startedAtUtc": "2026-08-01T00:00:00.000Z",
+                "completedAtUtc": "2026-08-01T00:00:00.500Z",
+                "progress": {
+                    "processedActors": 1,
+                    "totalActors": 3,
+                    "completedPercent": 33,
+                    "elapsedSeconds": 0.5,
+                    "estimatedRemainingSeconds": 1.0,
+                },
+                "world": {
+                    "name": "Test",
+                    "path": "/Game/Maps/Test.Test:PersistentLevel",
+                    "worldId": 1,
+                    "worldType": "Editor",
+                },
+                "summary": {
+                    "actorCount": 1,
+                    "totalComponentCount": 1,
+                    "actorClassCounts": [
+                        {"classPath": "/Script/Engine.StaticMeshActor", "count": 1}
+                    ],
+                    "actorClassCountsTruncated": False,
+                    "limits": {
+                        "maxActors": 2000,
+                        "maxComponentsPerActor": 200,
+                        "actorLimitReached": False,
+                        "componentLimitActorCount": 0,
+                    },
+                },
+                "details": {"actorCount": 1, "truncated": False, "items": []},
+                "durationMs": 500,
+            },
         }
         result = results.get(method)
         if result is None:
@@ -245,6 +448,11 @@ class EditorBridgeTests(unittest.TestCase):
             "editor.getOutputLog",
             "editor.getCompileErrors",
             "editor.inspectAssetLive",
+            "editor.getBlueprintGraphSelection",
+            "editor.getEditorContext",
+            "editor.batchTask.start",
+            "editor.batchTask.status",
+            "editor.batchTask.cancel",
             "editor.openAsset",
             "editor.focusAsset",
             "editor.syncContentBrowser",
@@ -424,6 +632,200 @@ class EditorBridgeTests(unittest.TestCase):
                 with self.assertRaises(LiveEditorError) as context:
                     self.service.call_tool(tool_name, params)
                 self.assertEqual(context.exception.code, "live-editor-invalid-parameters")
+
+    def test_editor_context_aggregates_bounded_sections(self) -> None:
+        self._write_descriptor()
+        context = self.service.call_tool("ue_get_editor_context")
+        self.assertTrue(context["ok"])
+        self.assertTrue(context["readOnly"])
+        self.assertEqual(context["source"], "live-editor-memory")
+        result = context["result"]
+        for section in (
+            "source",
+            "editor",
+            "world",
+            "selection",
+            "openAssets",
+            "dirtyPackages",
+            "blueprintGraphSelection",
+            "compileErrors",
+            "outputLogCursor",
+            "durationMs",
+            "stageDurationsMs",
+            "nextActions",
+        ):
+            self.assertIn(section, result)
+        self.assertEqual(result["state"], "available")
+        self.assertEqual(result["editor"]["sessionId"], "session-test")
+        self.assertTrue(result["world"]["available"])
+        self.assertIsInstance(result["durationMs"], (int, float))
+        self.assertIn("editor", result["stageDurationsMs"])
+        self.assertIn("outputLogCursor", result["stageDurationsMs"])
+        self.assertEqual(result["outputLogCursor"]["newestSequence"], 7)
+        self.assertEqual(result["nextActions"][0]["reason"], "dirty-packages-present")
+        request = self.server.requests[-1]  # type: ignore[attr-defined]
+        self.assertEqual(request["method"], "editor.getEditorContext")
+        self.assertEqual(request["params"], {})
+
+    def test_editor_context_rejects_unknown_parameters(self) -> None:
+        self._write_descriptor()
+        invalid_cases = (
+            {"section": "selection"},
+            {"limit": 10},
+            {"assetPath": "/Game/Test/BP_Test.BP_Test"},
+        )
+        for params in invalid_cases:
+            with self.subTest(params=params):
+                with self.assertRaises(LiveEditorError) as context:
+                    self.service.call_tool("ue_get_editor_context", params)
+                self.assertEqual(context.exception.code, "live-editor-invalid-parameters")
+
+    def test_editor_context_rejects_missing_capability(self) -> None:
+        self._write_descriptor(
+            capabilities=[capability for capability in self.capabilities if capability != "editor.getEditorContext"]
+        )
+        with self.assertRaises(LiveEditorError) as context:
+            self.service.call_tool("ue_get_editor_context")
+        self.assertEqual(context.exception.code, "live-editor-capability-unavailable")
+
+    def test_editor_context_reports_truncated_section(self) -> None:
+        self._write_descriptor()
+        self.server.context_result = {  # type: ignore[attr-defined]
+            "source": "live-editor-memory",
+            "state": "available",
+            "editor": {"state": "available", "sessionId": "session-test", "pieState": "stopped", "dirtyPackageCount": 1},
+            "world": {"available": True},
+            "selection": {
+                "count": 60,
+                "truncated": True,
+                "items": [
+                    {
+                        "kind": "Actor",
+                        "name": f"Actor{index}",
+                        "objectPath": f"/Game/Maps/Test.Test:PersistentLevel.Actor{index}",
+                    }
+                    for index in range(50)
+                ],
+            },
+            "openAssets": {"count": 0, "truncated": False, "items": []},
+            "dirtyPackages": {"count": 0, "truncated": False, "items": []},
+            "blueprintGraphSelection": {"available": False, "reasonCode": "no-ordinary-blueprint-editor"},
+            "compileErrors": {"diagnosticCount": 0, "diagnosticsTruncated": False, "nextSequence": 8},
+            "outputLogCursor": {"available": True, "oldestSequence": 1, "newestSequence": 7, "nextSequence": 8, "droppedCount": 0},
+            "durationMs": 4,
+            "stageDurationsMs": {"editor": 1, "selection": 2, "outputLogCursor": 1},
+            "nextActions": [{"tool": "ue_get_selection", "reason": "selection-truncated"}],
+        }
+        result = self.service.call_tool("ue_get_editor_context")["result"]
+        self.assertTrue(result["selection"]["truncated"])
+        self.assertEqual(len(result["selection"]["items"]), 50)
+        self.assertEqual(result["nextActions"][0]["reason"], "selection-truncated")
+
+    def test_batch_task_start_normalizes_params_and_reports_running(self) -> None:
+        self._write_descriptor()
+        result = self.service.call_tool(
+            "ue_start_batch_task",
+            {
+                "operation": "scanCurrentWorld",
+                "maxActors": 5000,
+                "maxComponentsPerActor": 200,
+                "timeoutSeconds": 90,
+            },
+        )["result"]
+        self.assertEqual(result["state"], "running")
+        self.assertEqual(result["progress"]["totalActors"], 3)
+        self.assertEqual(result["summary"]["limits"]["maxActors"], 5000)
+        request = self.server.requests[-1]  # type: ignore[attr-defined]
+        self.assertEqual(request["method"], "editor.batchTask.start")
+        self.assertEqual(
+            request["params"],
+            {
+                "operation": "scanCurrentWorld",
+                "maxActors": 5000,
+                "maxComponentsPerActor": 200,
+                "timeoutSeconds": 90,
+            },
+        )
+
+    def test_batch_task_status_and_cancel_roundtrip(self) -> None:
+        self._write_descriptor()
+        task_id = "11111111-2222-3333-4444-555555555555"
+        status = self.service.call_tool(
+            "ue_get_batch_task",
+            {
+                "taskId": task_id,
+                "includeDetails": True,
+                "detailOffset": 5,
+                "detailLimit": 3,
+            },
+        )["result"]
+        self.assertEqual(status["taskId"], task_id)
+        self.assertEqual(status["state"], "completed")
+        self.assertEqual(status["details"]["actorCount"], 1)
+        self.assertEqual(status["summary"]["actorCount"], 3)
+        cancel = self.service.call_tool("ue_cancel_batch_task", {"taskId": task_id})["result"]
+        self.assertEqual(cancel["state"], "cancelled")
+        self.assertEqual(cancel["progress"]["completedPercent"], 33)
+        requests = self.server.requests[-2:]  # type: ignore[attr-defined]
+        self.assertEqual(requests[0]["method"], "editor.batchTask.status")
+        self.assertEqual(
+            requests[0]["params"],
+            {
+                "taskId": task_id,
+                "includeDetails": True,
+                "detailOffset": 5,
+                "detailLimit": 3,
+            },
+        )
+        self.assertEqual(requests[1]["method"], "editor.batchTask.cancel")
+        self.assertEqual(requests[1]["params"], {"taskId": task_id})
+
+    def test_batch_task_rejects_invalid_parameters(self) -> None:
+        self._write_descriptor()
+        invalid_cases = (
+            ("ue_start_batch_task", {"operation": "scanAllAssets"}),
+            ("ue_start_batch_task", {"maxActors": 0}),
+            ("ue_start_batch_task", {"maxActors": 10001}),
+            ("ue_start_batch_task", {"maxComponentsPerActor": 0}),
+            ("ue_start_batch_task", {"maxComponentsPerActor": 201}),
+            ("ue_start_batch_task", {"timeoutSeconds": 4}),
+            ("ue_start_batch_task", {"timeoutSeconds": 301}),
+            ("ue_start_batch_task", {"unknown": 1}),
+            ("ue_get_batch_task", {}),
+            ("ue_get_batch_task", {"taskId": "not-a-guid"}),
+            ("ue_get_batch_task", {"taskId": "11111111-2222-3333-4444-555555555555", "includeDetails": 1}),
+            ("ue_get_batch_task", {"taskId": "11111111-2222-3333-4444-555555555555", "detailOffset": -1}),
+            ("ue_get_batch_task", {"taskId": "11111111-2222-3333-4444-555555555555", "detailOffset": 101}),
+            ("ue_get_batch_task", {"taskId": "11111111-2222-3333-4444-555555555555", "detailLimit": 0}),
+            ("ue_get_batch_task", {"taskId": "11111111-2222-3333-4444-555555555555", "detailLimit": 6}),
+            ("ue_cancel_batch_task", {"taskId": "123"}),
+            ("ue_cancel_batch_task", {"taskId": "11111111-2222-3333-4444-55555555555!"}),
+            ("ue_cancel_batch_task", {"taskId": "11111111-2222-3333-4444-555555555555", "extra": 1}),
+        )
+        for tool_name, params in invalid_cases:
+            with self.subTest(tool=tool_name, params=params):
+                with self.assertRaises(LiveEditorError) as context:
+                    self.service.call_tool(tool_name, params)
+                self.assertEqual(context.exception.code, "live-editor-invalid-parameters")
+
+    def test_batch_task_requires_registered_capabilities(self) -> None:
+        for tool_name, method in (
+            ("ue_start_batch_task", "editor.batchTask.start"),
+            ("ue_get_batch_task", "editor.batchTask.status"),
+            ("ue_cancel_batch_task", "editor.batchTask.cancel"),
+        ):
+            with self.subTest(tool=tool_name):
+                self._write_descriptor(
+                    capabilities=[capability for capability in self.capabilities if capability != method]
+                )
+                params = (
+                    {}
+                    if method == "editor.batchTask.start"
+                    else {"taskId": "11111111-2222-3333-4444-555555555555"}
+                )
+                with self.assertRaises(LiveEditorError) as context:
+                    self.service.call_tool(tool_name, params)
+                self.assertEqual(context.exception.code, "live-editor-capability-unavailable")
 
     def test_missing_descriptor_degrades_without_exposing_path(self) -> None:
         status = self.service.status()

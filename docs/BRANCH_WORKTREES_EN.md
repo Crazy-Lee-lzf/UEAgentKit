@@ -1,6 +1,6 @@
 # Dual-Branch and Worktree Workflow
 
-Updated: 2026-08-01
+Updated: 2026-08-03
 
 ## Current workspace
 
@@ -10,9 +10,12 @@ E:/WorkSpace/UEAgentKit
 
 E:/WorkSpace/UEAgentKit-MemoryContext
     branch: feature/memory-context
+
+E:/WorkSpace/UEAgentKit-Main
+    branch: main (milestone integration and release gates)
 ```
 
-The directories share one Git object database but have separate working trees, indexes, checked-out branches, and uncommitted changes, so both can remain open in VS Code for parallel development.
+The three directories share one Git object database but have separate working trees, indexes, checked-out branches, and uncommitted changes. Both feature branches can remain open for parallel development while the `main` Worktree is reserved for integration, documentation, and release gates.
 
 ## Branch ownership
 
@@ -34,14 +37,22 @@ Project/Asset/Editor Session identity, Task Context, Change Set, operation resul
 
 Shared contracts should land as focused commits in `main`, then both feature branches synchronize from `main`.
 
+## Current integration state
+
+On 2026-08-03 the first Realtime Foundation and Memory/Context MVP milestones were integrated into the local `main` branch. Both feature branches remain long-lived. After the integration gates, the new `main` is synchronized back into both branches for continued parallel work. Remote SSH is currently unavailable, so this milestone is local-only until Fetch and push can be retried.
+
 ## Synchronization rule
 
-Normal flow is only:
+Normal milestone and synchronization flow is:
 
 ```text
+feature/live-editor-realtime-io → main
+feature/memory-context → main
 main → feature/live-editor-realtime-io
 main → feature/memory-context
 ```
+
+Development occurs on the long-lived feature branches. Complete milestones land in `main`, then the new baseline is synchronized back to both branches.
 
 Feature branches do not merge directly into one another. Shared work moves through `main`. Synchronize early when shared schemas, identity, MCP registration, error handling, test baselines, or cross-track dependencies change.
 
@@ -59,7 +70,7 @@ A milestone must:
 6. update bilingual public documentation;
 7. avoid exposing arbitrary Python, console, UObject, or Save All in default agent mode.
 
-## First milestones
+## First milestones (completed 2026-08-03)
 
 ### Realtime I/O
 
@@ -77,7 +88,7 @@ A milestone must:
 - compatibility reads for the 0.6.0 Memory API;
 - minimum progressive Context query.
 
-### First integration point
+### First integration result
 
 ```text
 TaskContext
@@ -86,6 +97,8 @@ EvidenceReference
 AssetIdentity
 RevisionReference
 ```
+
+Production code merged automatically. Only the documentation index and tool-count assertions required manual resolution. The integrated modes expose 5/27/31/53 tools without Memory and 17/39/43/65 with Memory. Gates passed 334/334 Python tests, Ruff, UE5.6 Plugin Build, Memory MCP Smoke, and the real UE5.6 Closed Loop.
 
 ## Git principles
 

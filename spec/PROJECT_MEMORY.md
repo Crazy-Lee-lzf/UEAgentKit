@@ -268,13 +268,13 @@ ue_memory_validate
 启用 Memory 后的 Tool 数量：
 
 ```text
-Offline + Memory   12
-Live + Memory      30
-Workflow + Memory  33
-Combined + Memory  51
+Offline + Memory   17
+Live + Memory      39
+Workflow + Memory  43
+Combined + Memory  65
 ```
 
-未启用 Memory 时继续保持原有 5/23/26/44 Tool 契约。
+未启用 Memory 时的集成开发线 Tool 数量为 5/27/31/53。正式 0.6.0 的历史 Tool 契约保持不变。
 
 ## 15. Task Outcome 契约
 
@@ -389,7 +389,7 @@ CLI 的 stdout/stderr 在入口处固定为 UTF-8，确保 Windows 管道、中�
 
 ## 18. Schema v3：Knowledge Tree 与 Active Work
 
-`feature/memory-context` 在 0.6.0 Schema v2 平面记录库之上实现本地、单人、固定项目版 Schema v3。新增结构：
+0.7.0-dev 本地 `main` 已在 0.6.0 Schema v2 平面记录库之上集成本地、单人、固定项目版 Schema v3；`feature/memory-context` 继续保留用于后续并行开发。新增结构：
 
 ```text
 knowledge_nodes

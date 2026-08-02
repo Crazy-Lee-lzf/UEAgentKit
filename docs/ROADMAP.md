@@ -1,8 +1,8 @@
 # UE Agent Kit 路线图
 
-更新时间：2026-08-02
+更新时间：2026-08-03
 
-当前已发布版本为 **0.6.0**，支持 Unreal Engine 5.6。Revision-aware Project Memory 已完成并进入稳定维护；`main` 当前为 **0.7.0-dev**，已完成受控 Live Editor Write 基础层。双轨并行开发中，Memory/Context 的单人本地 MVP 已完成分层知识树、Active Work 和渐进式 Context；Realtime I/O 继续建设运行中 UE Editor 的实时增删查改、批量任务与诊断。自动 Context Pack、分析能力与多人共享服务仍在后续阶段。
+当前已发布版本为 **0.6.0**，支持 Unreal Engine 5.6。本地 `main` 已集成 **0.7.0-dev** 的 Realtime Foundation 与单人 Schema v3 Memory/Context MVP；`feature/live-editor-realtime-io` 和 `feature/memory-context` 两个长期分支继续保留，并在同步 `main` 后并行开发。当前首要目标是扩大运行中 UE Editor 的实时读写覆盖面；自动任务上下文、性能基准、分析能力与多人共享服务作为横向或后续能力推进。
 
 ## 总体方向
 
@@ -12,9 +12,9 @@ UE Agent Kit 的长期定位是面向 AI Agent 的 Unreal Engine 项目智能层
 
 ```text
 Offline             5 Tool（Memory 17）
-Live               23 Tool（Memory 35）
-Workflow           29 Tool（Memory 41）
-Combined           47 Tool（Memory 59）
+Live               27 Tool（Memory 39）
+Workflow           31 Tool（Memory 43）
+Combined           53 Tool（Memory 65）
 ```
 
 ## 已完成基础
@@ -54,9 +54,9 @@ Combined           47 Tool（Memory 59）
 
 Realtime I/O 与 Memory/Context 的完整职责、性能预算、风险分级和 Worktree 协作见 [`AI_NATIVE_UE_EDITOR.md`](AI_NATIVE_UE_EDITOR.md) 与 [`BRANCH_WORKTREES.md`](BRANCH_WORKTREES.md)。
 
-## 0.7.0 前置：Memory 可用性与分层知识树（单人 MVP 已完成）
+## 0.7.0-dev：Memory 可用性与分层知识树（单人 MVP 已完成）
 
-`feature/memory-context` 已把 0.6.0 平面记录库升级为低维护、低 Token 的本地单人可用层：
+本地 `main` 已把 0.6.0 平面记录库升级为低维护、低 Token 的单人可用层；后续 Memory 开发继续在长期分支中进行：
 
 - Knowledge Tree 使用稳定 Path 与 Parent/Child 支持任意深度，默认从 Project Profile、System、Feature/Entity 到 Implementation。
 - 长期知识、Record Type、Active Work 与 Evidence 四个概念分离。
@@ -65,7 +65,7 @@ Realtime I/O 与 Memory/Context 的完整职责、性能预算、风险分级和
 - MCP 负责存储、检索、去重、Revision stale、自动 Evidence 和维护规则；Skill 只保留约 400–800 Token 的薄使用说明。
 - 已提供 `ue_memory_get_context`、`ue_memory_expand_node`、`ue_memory_get_evidence`、`ue_memory_update_knowledge` 和 `ue_memory_update_work` 高层入口。
 
-该阶段完成后，再让 0.7.0 Context Pack 沿知识树逐级收集上下文。完整设计见 [`MEMORY_ARCHITECTURE.md`](MEMORY_ARCHITECTURE.md)。
+下一步只补齐任务 ID、Active Work、Change Set、Editor Session 和 Evidence 的横向绑定，并建立大型项目耗时基准；这些工作不阻塞 Realtime Reader/Writer 并行扩展。完整设计见 [`MEMORY_ARCHITECTURE.md`](MEMORY_ARCHITECTURE.md)。
 
 ## 0.7.0：上下文与分析
 

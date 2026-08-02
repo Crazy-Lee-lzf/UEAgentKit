@@ -57,6 +57,10 @@ EXPECTED_ALL_TOOLS = [
     "ue_validate_asset",
     "ue_validate_folder",
     "ue_run_automation_test",
+    "ue_get_editor_context",
+    "ue_start_batch_task",
+    "ue_get_batch_task",
+    "ue_cancel_batch_task",
     "ue_set_blueprint_default",
     "ue_set_component_property",
     "ue_set_pin_default",
@@ -81,6 +85,8 @@ EXPECTED_ALL_TOOLS = [
     "ue_refresh_asset_index",
     "ue_save_authorized_asset",
     "ue_rollback_patch",
+    "ue_create_change_set",
+    "ue_get_change_set",
 ]
 
 
@@ -91,8 +97,8 @@ class ToolRegistryTests(unittest.TestCase):
             EXPECTED_ALL_TOOLS,
         )
         self.assertEqual(len(tool_names_for_mode()), 5)
-        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 23)
-        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 29)
+        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 27)
+        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 31)
         self.assertEqual(
             tool_names_for_mode(memory_enabled=True),
             EXPECTED_ALL_TOOLS[:5] + EXPECTED_MEMORY_TOOLS,
@@ -100,11 +106,11 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 17)
         self.assertEqual(
             len(tool_names_for_mode(live_editor_enabled=True, memory_enabled=True)),
-            35,
+            39,
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
-            41,
+            43,
         )
         self.assertEqual(
             len(
@@ -114,7 +120,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-            59,
+            65,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:
@@ -125,6 +131,7 @@ class ToolRegistryTests(unittest.TestCase):
             "mcp_memory_tools.py",
             "mcp_live_tools.py",
             "mcp_live_action_tools.py",
+            "mcp_realtime_tools.py",
             "mcp_workflow_tools.py",
         ):
             self.assertIn("@server.tool", (mcp_root / filename).read_text(encoding="utf-8"), filename)
@@ -136,6 +143,10 @@ class ToolRegistryTests(unittest.TestCase):
             "BuildOutputLogResult": "EditorBridgeDiagnosticHandlers.cpp",
             "BuildInspectAssetLiveResult": "EditorBridgeAssetHandlers.cpp",
             "BuildBlueprintGraphSelectionResult": "EditorBridgeGraphHandlers.cpp",
+            "BuildEditorContextResult": "EditorBridgeContextHandlers.cpp",
+            "TryStartBatchTask": "EditorBridgeBatchTaskHandlers.cpp",
+            "BuildBatchTaskStatusResult": "EditorBridgeBatchTaskHandlers.cpp",
+            "BuildBatchTaskCancelResult": "EditorBridgeBatchTaskHandlers.cpp",
             "TryOpenAssetResult": "EditorBridgeNavigationHandlers.cpp",
             "TryCompileBlueprintResult": "EditorBridgeValidationHandlers.cpp",
             "TryStartAutomationTest": "EditorBridgeAutomationHandlers.cpp",
@@ -152,12 +163,64 @@ class ToolRegistryTests(unittest.TestCase):
                 (private_root / filename).read_text(encoding="utf-8"),
                 filename,
             )
+        manager_cpp = (private_root / "EditorBridgeBatchTaskManager.cpp").read_text(encoding="utf-8")
+        for symbol in (
+            "FBatchTaskManager::Tick",
+            "FBatchTaskManager::StartScanCurrentWorld",
+            "FBatchTaskManager::Status",
+            "FBatchTaskManager::Cancel",
+            "FBatchTaskManager::BuildSnapshot",
+        ):
+            self.assertIn(symbol, manager_cpp, symbol)
+            self.assertNotIn(f"FUEAgentKitEditorBridge::{symbol}", manager_cpp, symbol)
 
     def test_registry_drives_live_methods_annotations_and_descriptors(self) -> None:
         names = [definition.name for definition in TOOL_REGISTRY]
         self.assertEqual(len(names), len(set(names)))
         self.assertEqual(set(names), set(TOOL_DEFINITIONS_BY_NAME))
-        self.assertEqual(list(LIVE_EDITOR_METHODS), EXPECTED_ALL_TOOLS[5:23])
+        self.assertEqual(list(LIVE_EDITOR_METHODS), EXPECTED_ALL_TOOLS[5:27])
+        self.assertEqual(
+            TOOL_DEFINITIONS_BY_NAME["ue_get_editor_context"].live_method,
+            "editor.getEditorContext",
+        )
+        self.assertTrue(TOOL_DEFINITIONS_BY_NAME["ue_get_editor_context"].read_only)
+        self.assertEqual(
+            TOOL_DEFINITIONS_BY_NAME["ue_get_editor_context"].group,
+            "realtime",
+        )
+        self.assertEqual(
+            TOOL_DEFINITIONS_BY_NAME["ue_start_batch_task"].live_method,
+            "editor.batchTask.start",
+        )
+        self.assertEqual(
+            TOOL_DEFINITIONS_BY_NAME["ue_get_batch_task"].live_method,
+            "editor.batchTask.status",
+        )
+        self.assertEqual(
+            TOOL_DEFINITIONS_BY_NAME["ue_cancel_batch_task"].live_method,
+            "editor.batchTask.cancel",
+        )
+        self.assertEqual(TOOL_DEFINITIONS_BY_NAME["ue_start_batch_task"].group, "realtime")
+        self.assertEqual(TOOL_DEFINITIONS_BY_NAME["ue_get_batch_task"].group, "realtime")
+        self.assertEqual(TOOL_DEFINITIONS_BY_NAME["ue_cancel_batch_task"].group, "realtime")
+        self.assertTrue(TOOL_DEFINITIONS_BY_NAME["ue_get_batch_task"].read_only)
+        self.assertFalse(TOOL_DEFINITIONS_BY_NAME["ue_start_batch_task"].read_only)
+        self.assertFalse(TOOL_DEFINITIONS_BY_NAME["ue_cancel_batch_task"].read_only)
+        self.assertNotIn("ue_get_editor_context", tool_names_for_mode(workflow_enabled=True))
+        self.assertIn(
+            "ue_get_editor_context",
+            tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True),
+        )
+        self.assertIn("ue_start_batch_task", tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True))
+        self.assertNotIn("ue_start_batch_task", tool_names_for_mode(workflow_enabled=True))
+        self.assertEqual(
+            EXPECTED_ALL_TOOLS[5:23],
+            [
+                definition.name
+                for definition in TOOL_REGISTRY
+                if definition.group in {"live-read", "live-action"}
+            ],
+        )
         descriptors = tool_descriptors_for_mode(
             live_editor_enabled=True,
             workflow_enabled=True,
@@ -203,6 +266,7 @@ class ToolRegistryTests(unittest.TestCase):
             encoding="utf-8"
         )
         save = (private_root / "EditorBridgeSaveHandlers.cpp").read_text(encoding="utf-8")
+        core = (private_root / "EditorBridge.cpp").read_text(encoding="utf-8")
         live_write = (private_root / "EditorBridgeWriteHandlers.cpp").read_text(encoding="utf-8")
         live_common = (private_root / "LiveWriteOperationCommon.cpp").read_text(encoding="utf-8")
         live_registry = (private_root / "LiveWriteOperationRegistry.cpp").read_text(encoding="utf-8")
@@ -345,6 +409,141 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertIn('"DataValidation"', build_rules)
         self.assertIn('"Name": "DataValidation"', plugin_descriptor)
+
+        # The aggregated Editor Context handler must remain read-only: it may only
+        # compose existing builders and bounded log queries, never load, save,
+        # modify selection, execute commands, or expose arbitrary paths.
+        context_handler = (private_root / "EditorBridgeContextHandlers.cpp").read_text(
+            encoding="utf-8"
+        )
+        for forbidden in (
+            "LoadObject",
+            "StaticLoadObject",
+            "UPackage::SavePackage",
+            "SavePackage",
+            "ConsoleCommand",
+            "ProcessEvent",
+            "CallFunctionByName",
+            "SetSelected",
+            "ClearSelection",
+            "MarkPackageDirty",
+            "FScopedTransaction",
+        ):
+            self.assertNotIn(forbidden, context_handler)
+        for required in (
+            "BuildStatusResult",
+            "BuildCurrentLevelResult",
+            "BuildSelectionResult",
+            "BuildOpenAssetsResult",
+            "BuildDirtyAssetsResult",
+            "BuildBlueprintGraphSelectionResult",
+            "BuildCompileErrorsResult",
+            "BuildOutputLogResult",
+            "durationMs",
+            "stageDurationsMs",
+            "nextActions",
+        ):
+            self.assertIn(required, context_handler)
+
+        # The Batch Task manager and its scan handler must remain read-only and
+        # frame-stepped: bounded actor/component limits, progress, cancel, and
+        # world/session invalidation, with no asset loading, save, or selection.
+        batch_manager = (private_root / "EditorBridgeBatchTaskManager.cpp").read_text(encoding="utf-8")
+        batch_handlers = (private_root / "EditorBridgeBatchTaskHandlers.cpp").read_text(encoding="utf-8")
+        batch_manager_header = (private_root / "EditorBridgeBatchTaskManager.h").read_text(encoding="utf-8")
+        for forbidden in (
+            "LoadObject",
+            "StaticLoadObject",
+            "UPackage::SavePackage",
+            "SavePackage",
+            "ConsoleCommand",
+            "ProcessEvent",
+            "CallFunctionByName",
+            "SetSelected",
+            "ClearSelection",
+            "MarkPackageDirty",
+            "FScopedTransaction",
+        ):
+            self.assertNotIn(forbidden, batch_manager + batch_handlers)
+        for required in (
+            "World->GetLevels()",
+            "TWeakObjectPtr<ULevel>",
+            "GetComponents()",
+            "MaxActorSlotsPerTick",
+            "MaxTickBudgetSeconds",
+            "MaxDetailPageItems",
+            "IsValid(Actor)",
+            "live-editor-batch-task-world-invalidated",
+            "live-editor-batch-task-timeout",
+            "completedPercent",
+            "estimatedRemainingSeconds",
+            "bActorLimitReached",
+            "ComponentLimitActorCount",
+            "MaxDetailedActors",
+            "MaxActorClassesReported",
+            "MaxConcurrentTasks",
+            "live-editor-batch-task-busy",
+            "live-editor-batch-task-not-found",
+            "TEXT(\"scanCurrentWorld\")",
+            "IsSafeTaskId",
+        ):
+            self.assertIn(required, batch_manager + batch_handlers + batch_manager_header)
+        self.assertNotIn("TArray<AActor*>", batch_manager_header)
+        self.assertNotIn("TActorIterator", batch_manager)
+        for method in (
+            "editor.batchTask.start",
+            "editor.batchTask.status",
+            "editor.batchTask.cancel",
+        ):
+            self.assertIn(f'TEXT("{method}")', core)
+            self.assertNotIn(f"TEXT(\"{method}\")", batch_manager + batch_handlers)
+
+        # Change Sets are journaled under the fixed Work Root and must never accept
+        # client-supplied paths, shell, Python, Console, SQL, or arbitrary writes.
+        change_set_module = (ROOT / "src" / "ue_agent_kit" / "change_sets.py").read_text(encoding="utf-8")
+        for forbidden in (
+            "subprocess",
+            "os.system",
+            "shell=True",
+            "sqlite3",
+            "eval(",
+            "exec(",
+            "Path(",
+            "open(",
+            "resolve(",
+        ):
+            self.assertNotIn(forbidden, change_set_module)
+        for required in (
+            "ChangeSetError",
+            "MAX_CHANGE_SETS",
+            "MAX_CHANGE_SET_RECEIPTS",
+            "MAX_CHANGE_SET_ID_LENGTH",
+            "serialize_change_set_record",
+            "deserialize_change_set_record",
+            "validate_change_set_id",
+            "change-set-invalid",
+            "register_change_set_tools",
+            "ue_create_change_set",
+            "ue_get_change_set",
+            "workflow_service.create_change_set",
+            "workflow_service.get_change_set",
+        ):
+            self.assertIn(required, change_set_module)
+        workflow_module = (ROOT / "src" / "ue_agent_kit" / "mcp_workflow_tools.py").read_text(encoding="utf-8")
+        self.assertEqual(
+            workflow_module.count("change_set_id: str = \"\""),
+            5,
+        )
+        workflow_service_module = (ROOT / "src" / "ue_agent_kit" / "agent_workflow.py").read_text(
+            encoding="utf-8"
+        )
+        for code in (
+            "change-set-not-found",
+            "change-set-full",
+            "change-set-transaction-not-member",
+        ):
+            self.assertIn(code, workflow_service_module)
+        self.assertIn("_load_change_set_journal", workflow_service_module)
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import json
 import sys
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -95,50 +96,63 @@ async def plan_write(
     )
 
 
-async def apply_live(session: ClientSession, plan_id: str, confirmation: str) -> dict[str, Any]:
-    return await call(
-        session,
-        "ue_apply_asset_property_live",
-        {"plan_id": plan_id, "confirmation": confirmation},
-    )
+async def apply_live(
+    session: ClientSession,
+    plan_id: str,
+    confirmation: str,
+    change_set_id: str = "",
+) -> dict[str, Any]:
+    params = {"plan_id": plan_id, "confirmation": confirmation}
+    if change_set_id:
+        params["change_set_id"] = change_set_id
+    return await call(session, "ue_apply_asset_property_live", params)
 
 
-async def verify_live(session: ClientSession, asset_path: str) -> dict[str, Any]:
-    return await call(session, "ue_verify_live_write", {"asset_path": asset_path})
+async def verify_live(session: ClientSession, asset_path: str, change_set_id: str = "") -> dict[str, Any]:
+    params = {"asset_path": asset_path}
+    if change_set_id:
+        params["change_set_id"] = change_set_id
+    return await call(session, "ue_verify_live_write", params)
 
 
 async def save_authorized(
     session: ClientSession,
     asset_path: str,
+    change_set_id: str = "",
 ) -> dict[str, Any]:
-    preview = await call(
-        session,
-        "ue_save_authorized_asset",
-        {"asset_path": asset_path, "mode": "Preview"},
-    )
+    preview_params = {"asset_path": asset_path, "mode": "Preview"}
+    if change_set_id:
+        preview_params["change_set_id"] = change_set_id
+    preview = await call(session, "ue_save_authorized_asset", preview_params)
     if not preview.get("ok") or not preview.get("saveReceipt"):
         raise RuntimeError(f"Save Preview failed for {asset_path}: {preview}")
-    saved = await call(
-        session,
-        "ue_save_authorized_asset",
-        {
-            "asset_path": asset_path,
-            "mode": "Commit",
-            "save_receipt": preview["saveReceipt"],
-            "confirmation": f"SAVE {preview['saveReceipt']}",
-        },
-    )
+    commit_params = {
+        "asset_path": asset_path,
+        "mode": "Commit",
+        "save_receipt": preview["saveReceipt"],
+        "confirmation": f"SAVE {preview['saveReceipt']}",
+    }
+    if change_set_id:
+        commit_params["change_set_id"] = change_set_id
+    saved = await call(session, "ue_save_authorized_asset", commit_params)
     if not saved.get("ok") or saved.get("saved") is not True:
         raise RuntimeError(f"Save Commit failed for {asset_path}: {saved}")
     return saved
 
 
-async def apply_and_capture(session: ClientSession, asset_path: str, operation: str, target: dict[str, Any], value: Any) -> dict[str, Any]:
+async def apply_and_capture(
+    session: ClientSession,
+    asset_path: str,
+    operation: str,
+    target: dict[str, Any],
+    value: Any,
+    change_set_id: str = "",
+) -> dict[str, Any]:
     plan = await plan_write(session, asset_path, operation, target, value)
     if not plan.get("ok"):
         raise RuntimeError(f"Plan failed for {asset_path}: {plan}")
     plan_id = str(plan["planId"])
-    applied = await apply_live(session, plan_id, f"LIVE APPLY {plan_id}")
+    applied = await apply_live(session, plan_id, f"LIVE APPLY {plan_id}", change_set_id)
     if not applied.get("ok") or not applied.get("changed"):
         raise RuntimeError(f"LiveApply failed for {asset_path}: {applied}")
     return applied
@@ -202,23 +216,83 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 if not status.get("ok") or status["result"].get("pieState") != "stopped":
                     raise RuntimeError(f"Live Editor is not ready for writes: {status}")
 
+                editor_context = await call(session, "ue_get_editor_context", {})
+                context_result = editor_context.get("result", {})
+                if (
+                    not editor_context.get("ok")
+                    or context_result.get("editor", {}).get("sessionId") != status["result"].get("sessionId")
+                    or "selection" not in context_result
+                    or "outputLogCursor" not in context_result
+                ):
+                    raise RuntimeError(f"Editor Context contract is broken: {editor_context}")
+
+                batch_started = await call(
+                    session,
+                    "ue_start_batch_task",
+                    {
+                        "operation": "scanCurrentWorld",
+                        "max_actors": 500,
+                        "max_components_per_actor": 25,
+                        "timeout_seconds": 30,
+                    },
+                )
+                batch_task_id = str(batch_started.get("result", {}).get("taskId", ""))
+                if not batch_started.get("ok") or not batch_task_id:
+                    raise RuntimeError(f"Batch Task did not start: {batch_started}")
+                batch_status: dict[str, Any] = {}
+                for _ in range(200):
+                    batch_status = await call(session, "ue_get_batch_task", {"task_id": batch_task_id})
+                    if batch_status.get("result", {}).get("state") != "running":
+                        break
+                    await asyncio.sleep(0.05)
+                batch_result = batch_status.get("result", {})
+                if batch_result.get("state") != "completed" or "details" in batch_result:
+                    raise RuntimeError(f"Batch Task summary contract is broken: {batch_status}")
+                batch_page = await call(
+                    session,
+                    "ue_get_batch_task",
+                    {
+                        "task_id": batch_task_id,
+                        "include_details": True,
+                        "detail_offset": 0,
+                        "detail_limit": 2,
+                    },
+                )
+                page_result = batch_page.get("result", {})
+                page_items = page_result.get("details", {}).get("items", [])
+                if (
+                    not batch_page.get("ok")
+                    or len(page_items) > 2
+                    or len(json.dumps(batch_page, ensure_ascii=False).encode("utf-8")) >= 1024 * 1024
+                ):
+                    raise RuntimeError(f"Batch Task paging contract is broken: {batch_page}")
+
                 for asset_path in FIXTURE_ASSETS.values():
                     opened = await call(session, "ue_open_asset", {"asset_path": asset_path})
                     if not opened.get("ok") or not opened["result"].get("openAfter"):
                         raise RuntimeError(f"The fixture {asset_path} was not opened: {opened}")
 
-                # 1. Data Asset scalar: Apply -> Verify(not-saved) -> Save -> Verify(verified).
+                # 1. Data Asset scalar: Change Set -> Apply -> Verify(not-saved) -> Save -> Verify(verified).
+                change_set = await call(
+                    session,
+                    "ue_create_change_set",
+                    {"title": "Real UE5.6 scalar closed loop", "task_id": "task_realtime-scalar-closed-loop"},
+                )
+                change_set_id = str(change_set.get("changeSetId", ""))
+                if not change_set.get("ok") or change_set.get("status") != "planned" or not change_set_id:
+                    raise RuntimeError(f"Change Set creation failed: {change_set}")
                 scalar_write = await apply_and_capture(
                     session,
                     FIXTURE_ASSETS["scalar"],
                     "setAssetProperty",
                     {"propertyPath": "IntValue"},
                     7,
+                    change_set_id,
                 )
                 scalar_result = scalar_write.get("result", {})
                 scalar_expected = scalar_result.get("afterValue")
                 scalar_plan_id = scalar_write["planId"]
-                not_saved = await verify_live(session, FIXTURE_ASSETS["scalar"])
+                not_saved = await verify_live(session, FIXTURE_ASSETS["scalar"], change_set_id)
                 if (
                     not not_saved.get("ok")
                     or not_saved.get("mode") != "LiveVerify"
@@ -233,9 +307,15 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                     or not_saved["memoryTaskEvidence"]["arguments"]["validation_evidence_details"]["independentReload"] is not False
                 ):
                     raise RuntimeError(f"not-saved verification contract is broken: {not_saved}")
-                saved = await save_authorized(session, FIXTURE_ASSETS["scalar"])
+                applied_set = await call(session, "ue_get_change_set", {"change_set_id": change_set_id})
+                if applied_set.get("status") != "applied" or applied_set.get("operationCount") != 1:
+                    raise RuntimeError(f"Applied Change Set contract is broken: {applied_set}")
+                saved = await save_authorized(session, FIXTURE_ASSETS["scalar"], change_set_id)
                 if saved.get("liveWriteSaved") is not True or not saved.get("liveApplyReceipt"):
                     raise RuntimeError(f"Save did not link the live write record: {saved}")
+                saved_set = await call(session, "ue_get_change_set", {"change_set_id": change_set_id})
+                if saved_set.get("status") != "saved" or saved_set.get("saveState", {}).get("state") != "saved":
+                    raise RuntimeError(f"Saved Change Set contract is broken: {saved_set}")
                 # After the authorized save, Undo/Discard must refuse the transaction.
                 rejected = await call(
                     session,
@@ -244,12 +324,13 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                         "asset_path": FIXTURE_ASSETS["scalar"],
                         "transaction_id": scalar_result.get("transactionId"),
                         "editor_session_id": scalar_result.get("editorSessionId"),
+                        "change_set_id": change_set_id,
                     },
                 )
                 if rejected.get("ok") or error_code(rejected) != "live-editor-write-undo-package-saved":
                     raise RuntimeError(f"Expected package-saved Undo rejection but got: {rejected}")
                 rejections.append("undo-after-save")
-                verified = await verify_live(session, FIXTURE_ASSETS["scalar"])
+                verified = await verify_live(session, FIXTURE_ASSETS["scalar"], change_set_id)
                 if (
                     not verified.get("ok")
                     or verified.get("mode") != "LiveVerify"
@@ -263,6 +344,13 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                     or verified.get("memoryRecorded") is not False
                 ):
                     raise RuntimeError(f"Data Asset verified loop contract is broken: {verified}")
+                verified_set = await call(session, "ue_get_change_set", {"change_set_id": change_set_id})
+                if (
+                    verified_set.get("status") != "verified"
+                    or verified_set.get("validation", {}).get("state") != "verified"
+                    or verified_set.get("operations", [{}])[0].get("status") != "verified"
+                ):
+                    raise RuntimeError(f"Verified Change Set contract is broken: {verified_set}")
                 evidence = verified["memoryTaskEvidence"]["arguments"]
                 if (
                     evidence["task_key"] != f"live-write:{scalar_plan_id}"
@@ -380,9 +468,14 @@ def main() -> int:
     parser.add_argument("--error-log", required=True, type=Path)
     parser.add_argument("--session-marker", type=Path)
     args = parser.parse_args()
-    summary = asyncio.run(run(args))
-    print(json.dumps(summary, indent=2, sort_keys=True))
-    return 0
+    try:
+        summary = asyncio.run(run(args))
+    except BaseException:
+        print(traceback.format_exc(), flush=True)
+        return 1
+    else:
+        print(json.dumps(summary, indent=2, sort_keys=True))
+        return 0
 
 
 if __name__ == "__main__":

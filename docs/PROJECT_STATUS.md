@@ -2,11 +2,11 @@
 
 
 
-更新时间：2026-08-02
+更新时间：2026-08-03
 
 
 
-本文描述 **0.7.0-dev** 开发线及 `feature/memory-context` 的单人版 Memory/Context MVP。最新正式发布版本仍为 **0.6.0**，支持 Unreal Engine 5.6；Schema v3 Knowledge Tree、Active Work、渐进式 Context，以及 0.6.0 之后的 Live Editor Write 能力均尚未正式发布。
+本文描述本地 `main` 已集成的 **0.7.0-dev** 开发线。最新正式发布版本仍为 **0.6.0**，支持 Unreal Engine 5.6；Schema v3 Knowledge Tree、Active Work、渐进式 Context、Realtime Foundation 和扩展后的 Live Editor Write 均属于尚未正式发布的开发能力。`feature/live-editor-realtime-io` 与 `feature/memory-context` 两个长期功能分支继续保留，并在同步 `main` 后并行开发。
 
 
 
@@ -42,11 +42,11 @@ UE Agent Kit 不是“让 AI 任意遥控 Unreal Editor”的通用自动化层�
 
 Offline                    5              17
 
-Live                      23              35
+Live                      27              39
 
-Workflow                  29              41
+Workflow                  31              43
 
-Combined                  47              59
+Combined                  53              65
 
 ```
 
@@ -62,19 +62,21 @@ Tool 数量只表示 MCP 接口数量，不等同于 Unreal Operation 数量。�
 
 ```text
 
-Python tests                 299/299
+Python tests                 334/334
 
 JSON Schemas                 3/3
 
 Patch examples               16/16
 
+Ruff / CompileAll            passed
+
 UE5.6 Direct Build           passed
 
-真实 Live Editor Write       passed
+Memory MCP stdio Smoke       passed
 
-真实 Live Editor Reference Write  passed
+真实 UE5.6 Full Regression   passed
 
-真实 Live Editor Structured Write  passed
+真实 UE5.6 Closed Loop       passed
 
 UTF-8 no BOM / CRLF          passed
 
@@ -306,25 +308,32 @@ Live Editor 中已经产生的受控 Dirty 资产，也可以通过 `ue_save_aut
 
 ### P0A：Realtime Editor CRUD、批量任务与诊断
 
-Live Editor Write 基础层、Material/DataTable、Undo/Discard、Save→Verify→Memory 闭环和注册式扩展架构已经完成。Realtime I/O 作为日常开发主路径，下一阶段优先建设当前 Editor Context、批量 Query/Task、PIE 诊断、Change Set 和高价值资产域 CRUD；不再重写中央分派。每个新增 Operation 仍需补齐：
+Live Editor Write 基础层、Material/DataTable、Undo/Discard、Save→Verify→Memory 闭环和注册式扩展架构已经完成。Realtime Foundation 现已补齐当前 Editor Context、首个分帧 Batch Task 和持久化 Change Set：
+
+- `ue_get_editor_context` 在一次只读请求中聚合 Editor、World、Selection、Open Assets、Dirty Packages、Blueprint Graph Selection、Compile Errors 和 Output Log Cursor，并返回阶段耗时与 `nextActions`。
+- `scanCurrentWorld` 只扫描当前已加载 World；枚举和 Actor/Component 处理均受每帧约 2 ms 时间预算与数量上限约束。任务绑定 Editor Session/World，支持进度、取消、超时、失效和部分结果。
+- Batch Task 默认只返回摘要；详情通过 `include_details/detail_offset/detail_limit` 分页读取，单页最多 5 个 Actor，避免超过 Bridge 1 MiB 单响应上限。
+- Change Set 使用 schema v2 持久化 Task、Editor Session、Operation、Asset、Transaction、Save Receipt 和 Validation 生命周期；支持 `planned/applied/partially_applied/undone/discarded/saved/verified/failed/unknown`，并保留终态历史。
+- 活跃 Change Set 不会被容量清理静默删除；Editor 重启后无法重新证明的运行时状态明确降级为 `unknown`。
+
+Realtime I/O 是当前首要开发主线。目标是在 Editor 保持打开时持续扩大读取、修改、编译、验证、撤销和授权保存的覆盖面，逐步接近 `ue-llm-toolkit` 已展示的实际编辑能力。Reader 与 Writer 可以在独立分支并行开发；Memory/Context 作为横向能力持续接入，但不阻塞实时 CRUD 扩展。每个新增 Operation 仍需补齐：
 
 1. Python `OperationSpec`、Policy 授权和 Plan Schema。
 2. 对应 C++ 域执行器与 Operation Descriptor。
 3. Snapshot、No-op、失败恢复、Dirty、Undo 和独立 Verify 语义。
 4. 真实 UE5.6 成功、拒绝、恢复和闭环回归。
 
-### P0B：Memory 可用性与知识树前置
+### P0B：横向 Memory 与任务上下文集成
 
-0.6.0 的 Revision-aware 平面记录库已经完成，但不继续把复杂维护责任直接交给 Agent。Context Pack 之前先完成：
+Schema v3 Knowledge Tree、Active Work、五级渐进式披露、按需 Evidence 和五个高层 Memory Tool 已完成并集成到本地 `main`。下一步不再扩大底层 Memory Schema，而是补齐与实时开发流程的连接：
 
-- 任意深度 Knowledge Tree：Project Profile → System → Feature/Entity → Implementation。
-- 现有 Rule/Finding/Decision/Known Issue/Task/Evidence 绑定 Knowledge Node，记录类型不再作为主要导航。
-- 独立 Active Work：当前目标、进行中、TODO、阻塞、待确认决策和下一步。
-- 五级渐进式披露：索引、节点摘要、实现概览、详细记录、原始证据。
-- MCP Server 强制 Token Budget、默认状态过滤、重复检测和结构化 `nextActions`。
-- 日常采用一个薄 `project-memory` Skill，不把读、写、维护和 TODO 拆成长 Skill。
+- 用稳定 ID 关联 `taskId`、`workItemId`、`changeSetId`、`editorSessionId` 和目标资产。
+- 提供一个高层任务上下文入口，组合必要 Memory、Active Work、Editor Context 和当前 Change Set；底层 Tool 保持独立。
+- Change Set 完成后自动绑定验证结果、更新 Active Work，并生成可直接写入 Memory 的 Evidence；长期知识仍需受控确认。
+- 对 Knowledge Tree、FTS、Context Pack 和大型 Memory 数据库建立时间、结果大小与 Token 预算基准。
+- 保持单一薄 `project-memory` Skill，不让 Agent 手工维护数据库一致性。
 
-完整设计见 [`MEMORY_ARCHITECTURE.md`](MEMORY_ARCHITECTURE.md)。
+完整实现与剩余边界见 [`MEMORY_ARCHITECTURE.md`](MEMORY_ARCHITECTURE.md)。
 
 ### P1：0.7.0 Context/Analysis 主线
 

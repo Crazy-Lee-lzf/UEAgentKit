@@ -1,12 +1,12 @@
 # Layered Project Memory and Collaboration Architecture
 
-Updated: 2026-08-02
+Updated: 2026-08-03
 
-> The `feature/memory-context` branch now implements the single-user, local, fixed-project Schema v3 MVP: a Knowledge Tree, Active Work, levels 0–4 progressive disclosure, on-demand Evidence, and five high-level MCP tools. The published 0.6.0 release still uses Schema v2; the shared knowledge service, team permissions, and optimistic concurrency remain future work.
+> The local `main` line now integrates the single-user, local, fixed-project Schema v3 MVP: a Knowledge Tree, Active Work, levels 0–4 progressive disclosure, on-demand Evidence, and five high-level MCP tools. `feature/memory-context` remains a long-lived parallel development branch. The published 0.6.0 release still uses Schema v2; unified task binding, performance benchmarks, the shared knowledge service, team permissions, and optimistic concurrency remain future work.
 
 ## 1. Goals
 
-The next Project Memory architecture must solve four problems:
+The current Project Memory architecture addresses four problems:
 
 1. Organize knowledge by project structure instead of relying only on flat full-text records.
 2. Use progressive disclosure so ordinary tasks do not load the entire knowledge base.
@@ -148,29 +148,29 @@ The Skill only explains that the agent should read the Project Profile first, ex
 
 Do not split ordinary reading, writing, maintenance, and TODO behavior into several long Skills. Keep one 400–800 token `project-memory` Skill; load audit or migration Skills only when needed.
 
-## 5. Planned high-level MCP tools
+## 5. Implemented high-level MCP tools
 
-These are future design targets and are not registered in 0.6.0:
+These tools are registered in 0.7.0-dev; the published 0.6.0 release does not include them:
 
 ```text
-memory_get_context
-memory_expand_node
-memory_get_evidence
-memory_update_knowledge
-memory_update_work
+ue_memory_get_context
+ue_memory_expand_node
+ue_memory_get_evidence
+ue_memory_update_knowledge
+ue_memory_update_work
 ```
 
-`memory_get_context` is the normal first entry point and returns only the necessary Project Profile fragment, matched paths, system summaries, related Active Work, and suggested next actions.
+`ue_memory_get_context` is the normal first entry point and returns only the necessary Project Profile fragment, matched paths, system summaries, related Active Work, and suggested next actions.
 
-`memory_expand_node` expands one stable path to a requested depth and detail level.
+`ue_memory_expand_node` expands one stable path to a requested depth and detail level.
 
-`memory_get_evidence` retrieves evidence only when a conclusion must be proven.
+`ue_memory_get_evidence` retrieves evidence only when a conclusion must be proven.
 
-`memory_update_knowledge` handles node creation, summary updates, durable conclusion writes, duplicate checks, and confirmation requirements.
+`ue_memory_update_knowledge` handles node creation, summary updates, durable conclusion writes, duplicate checks, and confirmation requirements.
 
-`memory_update_work` manages `start`, `add_todo`, `block`, `complete`, `cancel`, and `set_next_action` actions.
+`ue_memory_update_work` manages `start`, `add_todo`, `block`, `complete`, `cancel`, and `set_next_action` actions.
 
-Deterministic Task Records, Revision Sets, and Workflow Evidence remain automatic outputs of UEAgentKit workflows rather than free-form agent writes.
+Deterministic Task Records, Revision Sets, and Workflow Evidence remain automatic outputs of UEAgentKit workflows rather than free-form agent writes. Active Work, Change Sets, Editor Sessions, and final Evidence are not yet automatically bound into one unified task object; that is cross-cutting integration work and does not block realtime CRUD expansion. Latency benchmarks for the Knowledge Tree, FTS, Context assembly, and large Memory databases are also still pending.
 
 ## 6. Single-user deployment
 

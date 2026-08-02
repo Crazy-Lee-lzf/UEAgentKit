@@ -1,12 +1,12 @@
 # Project Memory 分层架构与协作设计
 
-更新时间：2026-08-02
+更新时间：2026-08-03
 
-> 当前 `feature/memory-context` 已实现单人、本地、固定项目版 Schema v3 MVP：Knowledge Tree、Active Work、0–4 级渐进式披露、按需 Evidence 和五个高层 MCP Tool。0.6.0 正式版仍使用 Schema v2；Shared Knowledge Service、团队权限与乐观并发仍属于后续范围。
+> 本地 `main` 已集成单人、本地、固定项目版 Schema v3 MVP：Knowledge Tree、Active Work、0–4 级渐进式披露、按需 Evidence 和五个高层 MCP Tool。`feature/memory-context` 继续作为长期并行开发分支。0.6.0 正式版仍使用 Schema v2；统一任务绑定、性能基准、Shared Knowledge Service、团队权限与乐观并发仍属于后续范围。
 
 ## 1. 设计目标
 
-Project Memory 后续需要同时解决四个问题：
+当前 Project Memory 架构解决四个问题：
 
 1. 让知识按项目结构组织，而不是只在平面记录中全文搜索。
 2. 采用渐进式披露，避免每次任务加载整个知识库。
@@ -211,19 +211,19 @@ Agent
 
 不建议把读取、写入、维护、TODO 分成多个长 Skill。日常只保留一个约 400–800 Token 的 `project-memory` Skill；审计和迁移可以使用按需加载的专用 Skill。
 
-## 5. 计划中的高层 MCP Tool
+## 5. 已实现的高层 MCP Tool
 
-以下名称是后续设计目标，当前 0.6.0 尚未注册：
+以下 Tool 已在 0.7.0-dev 中注册；0.6.0 正式版不包含这些入口：
 
 ```text
-memory_get_context
-memory_expand_node
-memory_get_evidence
-memory_update_knowledge
-memory_update_work
+ue_memory_get_context
+ue_memory_expand_node
+ue_memory_get_evidence
+ue_memory_update_knowledge
+ue_memory_update_work
 ```
 
-### `memory_get_context`
+### `ue_memory_get_context`
 
 绝大多数任务的第一入口。根据 Query、固定 Project、当前资产和预算返回：
 
@@ -233,23 +233,23 @@ memory_update_work
 - 相关 Active Work。
 - 推荐的下一步展开动作。
 
-### `memory_expand_node`
+### `ue_memory_expand_node`
 
 按一个稳定 Path、指定深度和 Detail Level 展开子节点或实现摘要。
 
-### `memory_get_evidence`
+### `ue_memory_get_evidence`
 
 只在需要证明结论时读取指定 Record 或 Artifact 的证据。
 
-### `memory_update_knowledge`
+### `ue_memory_update_knowledge`
 
 统一处理节点新增、摘要更新、稳定结论写入、重复检测和确认要求。Agent 不直接操作数据库表，也不手工选择 Revision SHA。
 
-### `memory_update_work`
+### `ue_memory_update_work`
 
 通过 `start/add_todo/block/complete/cancel/set_next_action` 等 Action 维护当前工作。
 
-确定性的 Task Record、Revision Set 和 Workflow Evidence 不提供自由手工写入入口，由现有 UEAgentKit 工作流自动生成。
+确定性的 Task Record、Revision Set 和 Workflow Evidence 不提供自由手工写入入口，由现有 UEAgentKit 工作流自动生成。当前仍未把 Active Work、Change Set、Editor Session 和最终 Evidence 自动绑定成一个统一任务对象；这属于横向集成工作，不阻塞 Realtime CRUD 扩展。Knowledge Tree、FTS、Context 组装和大型数据库的耗时基准也尚未完成。
 
 ## 6. 单人部署
 

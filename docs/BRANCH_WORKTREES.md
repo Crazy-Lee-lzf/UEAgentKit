@@ -1,6 +1,6 @@
 # 双分支与 Worktree 协作规范
 
-更新时间：2026-08-01
+更新时间：2026-08-03
 
 ## 当前工作区
 
@@ -10,9 +10,12 @@ E:/WorkSpace/UEAgentKit
 
 E:/WorkSpace/UEAgentKit-MemoryContext
     branch: feature/memory-context
+
+E:/WorkSpace/UEAgentKit-Main
+    branch: main（里程碑集成与发布门禁）
 ```
 
-两个目录共享同一个 Git 仓库对象数据库，但拥有独立工作树、Index、当前分支和未提交修改，因此可以同时在 VS Code 中打开并行开发。
+三个目录共享同一个 Git 仓库对象数据库，但拥有独立工作树、Index、当前分支和未提交修改，因此两个功能分支可以同时在 VS Code 中并行开发，`main` Worktree 专门用于合并、文档同步和集成门禁。
 
 ## 分支职责
 
@@ -43,14 +46,22 @@ E:/WorkSpace/UEAgentKit-MemoryContext
 
 公共协议应先形成独立提交并合入 `main`。两个功能分支再同步 `main`，避免长期产生两套不兼容格式。
 
+## 当前集成状态
+
+2026-08-03 首个 Realtime Foundation 与 Memory/Context MVP 已正式合入本地 `main`。两个功能分支不删除；本次集成门禁完成后，`main` 将分别同步回两个分支，后续继续并行开发。远端 SSH 当前不可用，因此本次只完成本地分支与 Worktree 集成，推送前必须重新 Fetch。
+
 ## 同步规则
 
-日常只允许：
+日常同步与里程碑合入方向：
 
 ```text
+feature/live-editor-realtime-io → main
+feature/memory-context → main
 main → feature/live-editor-realtime-io
 main → feature/memory-context
 ```
+
+功能开发先在对应长期分支完成；达到里程碑门禁后合入 `main`，随后再把新 `main` 同步回两个分支。
 
 功能分支之间不直接互相 Merge。共享内容一律通过 `main` 交换。
 
@@ -70,7 +81,7 @@ main → feature/memory-context
 6. 双语公共文档同步；
 7. 不把任意 Python、Console、UObject 或 Save All 带入默认 Agent 模式。
 
-## 首次里程碑
+## 首次里程碑（2026-08-03 已完成）
 
 ### Realtime I/O
 
@@ -88,7 +99,7 @@ main → feature/memory-context
 - 旧 0.6.0 Memory API 兼容读取；
 - 渐进式 Context 查询最小入口。
 
-### 第一次汇合
+### 第一次汇合结果
 
 共同确定并合入：
 
@@ -99,6 +110,8 @@ EvidenceReference
 AssetIdentity
 RevisionReference
 ```
+
+实际集成结果：生产代码自动合并，仅文档入口与工具数量断言需要人工处理；合并后工具数量为 5/27/31/53，无 Memory/启用 Memory 对应为 17/39/43/65。集成门禁为 334/334 Python、Ruff、UE5.6 Plugin Build、Memory MCP Smoke 与真实 UE5.6 Closed Loop。
 
 ## Git 操作原则
 

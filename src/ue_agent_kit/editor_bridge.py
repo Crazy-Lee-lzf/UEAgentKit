@@ -28,6 +28,13 @@ LIVE_LOG_VERBOSITIES = {
     "veryverbose",
 }
 
+_CAPABILITY_GATED_TOOLS = {
+    "ue_get_editor_context": "editor.getEditorContext",
+    "ue_start_batch_task": "editor.batchTask.start",
+    "ue_get_batch_task": "editor.batchTask.status",
+    "ue_cancel_batch_task": "editor.batchTask.cancel",
+}
+
 
 class LiveEditorError(RuntimeError):
     def __init__(self, code: str, message: str, *, details: dict[str, Any] | None = None) -> None:
@@ -103,6 +110,14 @@ class LiveEditorBridgeService:
         method = LIVE_EDITOR_METHODS.get(tool_name)
         if method is None:
             raise ValueError(f"Unsupported Live Editor Tool: {tool_name}")
+        required_capability = _CAPABILITY_GATED_TOOLS.get(tool_name)
+        if required_capability is not None:
+            descriptor = self._read_descriptor()
+            if required_capability not in descriptor["capabilities"]:
+                raise LiveEditorError(
+                    "live-editor-capability-unavailable",
+                    f"The registered Editor Bridge does not expose the {required_capability} capability.",
+                )
         normalized_params = self._normalize_tool_params(tool_name, params or {})
         response_timeout = None
         if tool_name == "ue_run_automation_test":
@@ -224,6 +239,57 @@ class LiveEditorBridgeService:
                 "maxAssets": LiveEditorBridgeService._bounded_integer(params.get("maxAssets", 100), "maxAssets", 1, 500),
                 "maxIssues": LiveEditorBridgeService._bounded_integer(params.get("maxIssues", 100), "maxIssues", 1, 200),
             }
+        if tool_name == "ue_get_editor_context":
+            if params:
+                raise LiveEditorError(
+                    "live-editor-invalid-parameters",
+                    "ue_get_editor_context does not accept parameters.",
+                )
+            return {}
+        if tool_name == "ue_start_batch_task":
+            allowed = {"operation", "maxActors", "maxComponentsPerActor", "timeoutSeconds"}
+            LiveEditorBridgeService._reject_unknown_params(params, allowed)
+            operation = LiveEditorBridgeService._bounded_string(
+                params.get("operation", "scanCurrentWorld"), "operation", 64
+            )
+            if operation != "scanCurrentWorld":
+                raise LiveEditorError("live-editor-invalid-parameters", "operation must be scanCurrentWorld.")
+            return {
+                "operation": operation,
+                "maxActors": LiveEditorBridgeService._bounded_integer(
+                    params.get("maxActors", 2000), "maxActors", 1, 10000
+                ),
+                "maxComponentsPerActor": LiveEditorBridgeService._bounded_integer(
+                    params.get("maxComponentsPerActor", 100), "maxComponentsPerActor", 1, 200
+                ),
+                "timeoutSeconds": LiveEditorBridgeService._bounded_integer(
+                    params.get("timeoutSeconds", 60), "timeoutSeconds", 5, 300
+                ),
+            }
+        if tool_name == "ue_get_batch_task":
+            allowed = {"taskId", "includeDetails", "detailOffset", "detailLimit"}
+            LiveEditorBridgeService._reject_unknown_params(params, allowed)
+            task_id = LiveEditorBridgeService._bounded_string(params.get("taskId", ""), "taskId", 64)
+            LiveEditorBridgeService._validate_guid(task_id, "taskId")
+            include_details = params.get("includeDetails", False)
+            if not isinstance(include_details, bool):
+                raise LiveEditorError("live-editor-invalid-parameters", "includeDetails must be a boolean.")
+            return {
+                "taskId": task_id.lower(),
+                "includeDetails": include_details,
+                "detailOffset": LiveEditorBridgeService._bounded_integer(
+                    params.get("detailOffset", 0), "detailOffset", 0, 100
+                ),
+                "detailLimit": LiveEditorBridgeService._bounded_integer(
+                    params.get("detailLimit", 5), "detailLimit", 1, 5
+                ),
+            }
+        if tool_name == "ue_cancel_batch_task":
+            allowed = {"taskId"}
+            LiveEditorBridgeService._reject_unknown_params(params, allowed)
+            task_id = LiveEditorBridgeService._bounded_string(params.get("taskId", ""), "taskId", 64)
+            LiveEditorBridgeService._validate_guid(task_id, "taskId")
+            return {"taskId": task_id.lower()}
         if params:
             raise LiveEditorError(
                 "live-editor-invalid-parameters",
