@@ -335,6 +335,18 @@ Schema v3 Knowledge Tree、Active Work、五级渐进式披露、按需 Evidence
 
 完整实现与剩余边界见 [`MEMORY_ARCHITECTURE.md`](MEMORY_ARCHITECTURE.md)。
 
+### P0C：大型项目性能基准
+
+首次建立知识库允许较慢，但日常搜索、变量修改和少量 Blueprint Graph 编辑必须接近修改代码的体验。性能计划采用 Reforge、现成 UE5.6 DarkRuins 样本、E 盘 SSD 上的 160–180 GB 物理测试工程和 500k Asset/10m Reference 逻辑数据库；关键基准分别运行原生 SSD 与机械硬盘 50 MB/s 模拟档位。重点门禁包括：
+
+- Warm 搜索、Reference 和 Memory Context p95 控制在 500–800 ms。
+- 已加载普通属性 Live Apply p95 小于 500 ms。
+- 已加载小型 Blueprint 修改少量 Node 小于 1 秒，不含 Unreal 原生 Compile。
+- 小型 Blueprint 修改加 Compile 的目标 p95 小于 3 秒。
+- Batch 操作在 300 ms 内返回 Task 句柄，并在后台分帧运行。
+
+测试工程项目目录目标 160–180 GB，硬上限 200 GB；总工作集不得超过 260 GB，E 盘剩余空间低于 50 GB 时自动停止生成。完整方案见 [`PERFORMANCE_TEST_PLAN.md`](PERFORMANCE_TEST_PLAN.md)。
+
 ### P1：0.7.0 Context/Analysis 主线
 
 
