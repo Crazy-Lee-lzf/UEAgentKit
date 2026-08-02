@@ -132,7 +132,6 @@ Compress-Archive -LiteralPath $PluginPackage -DestinationPath $PluginZip -Compre
 $PythonOutput = $OutputDirectory
 & $PythonExecutable -m pip wheel $ToolRoot `
     --no-deps `
-    --no-build-isolation `
     --wheel-dir $PythonOutput
 if ($LASTEXITCODE -ne 0) { throw "Python wheel build failed." }
 $Wheels = @(Get-ChildItem -LiteralPath $PythonOutput -Filter "ue_agent_kit-$Version-*.whl" -File)

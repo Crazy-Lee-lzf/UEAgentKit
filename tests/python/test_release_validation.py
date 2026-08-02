@@ -53,6 +53,7 @@ class ReleaseValidationTests(unittest.TestCase):
         self.assertIn("-Method UAT", script)
         self.assertIn("UEAgentKit-$Version-UE5.6-Win64.zip", script)
         self.assertIn("pip wheel", script)
+        self.assertNotIn("--no-build-isolation", script)
         self.assertIn("$PythonOutput = $OutputDirectory", script)
         self.assertNotIn('Join-Path $OutputDirectory "Python"', script)
         self.assertIn("SHA256SUMS.txt", script)

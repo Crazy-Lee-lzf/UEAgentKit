@@ -113,115 +113,101 @@ CRLF audit                   passed
 Git diff --check             passed
 ```
 
-Python 完整测试实测：
+Visual Studio 更新后的正式构建实测：
 
 ```text
-Ran 334 tests in 26.499s
+Ran 334 tests in 25.242s
 OK
+
+UAT BuildPlugin              passed
+UnrealHeaderTool             passed
+C++ actions                  48/48 passed
+Parallel executor            56.63s
+UnrealBuildTool total        72.30s
+AutomationTool total         1m 14s
 ```
 
-正式 `BuildRelease.ps1` 也重新执行并通过了 Ruff、334 项测试、Schema 和示例校验，随后在 UAT BuildPlugin 前被本机 C++ 工具链检查阻止。
+插件已由 UE5.6 AutomationTool 重新编译，不再复用旧 DLL。
 
-## 6. 当前唯一阻塞：本机缺少 MSVC 编译器
+## 6. 工具链恢复与 Release 脚本修复
 
-Visual Studio Installer 当前记录：
+Visual Studio 更新后，`BuildPlugin.ps1` 成功解析并通过 AutoSDK 提供以下工具链：
 
 ```text
-Display Name       Visual Studio Community 2026
-Installation Path  D:\Program Files (x86)\Microsoft Visual Studio\2022\Community
-Installation       incomplete / cancelled
-MSVC directory     VC\Tools\MSVC\14.50.35717
-cl.exe             not present
-clang-cl.exe       not present
+Visual Studio installation
+  D:\Program Files (x86)\Microsoft Visual Studio\2022\Community
+
+Resolved MSVC root
+  D:\Program Files (x86)\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.38.33130
+
+UAT AutoSDK
+  E:\WorkSpace\UEAgentKit-Main\AutoSDK
+
+UnrealBuildTool selected
+  Visual Studio 2022 14.38.33145
+  Windows SDK 10.0.22621.0
+  UBA disabled
 ```
 
-Reforge 的历史编译配置证明该工具链此前确实存在并被 UE5.6 使用：
+此前 Reforge 使用的 `14.50.35717` 不再是本次构建的必要条件；UE5.6 已实际接受并使用恢复后的 14.38 工具链完成 48 个编译、链接和元数据动作。
+
+第一次完整运行在插件成功打包后，Python Wheel 阶段失败：
 
 ```text
-E:\WorkSpace\Reforge\.vscode\compileCommands_Reforge.json
-  D:\Program Files (x86)\Microsoft Visual Studio\2022\Community\
-  VC\Tools\MSVC\14.50.35717\bin\Hostx64\x64\cl.exe
+BackendUnavailable: Cannot import 'setuptools.build_meta'
+Python wheel build failed.
 ```
 
-Reforge 的 `.vsconfig` 同时要求：
+根因不是项目源码，而是 Python 3.12 虚拟环境没有安装 `setuptools`，同时 `BuildRelease.ps1` 使用了 `--no-build-isolation`，导致 Pip 忽略 `pyproject.toml` 中声明的：
 
-- `Microsoft.VisualStudio.Component.VC.Tools.x86.x64`
-- `Microsoft.VisualStudio.Component.VC.14.38.17.8.x86.x64`
-- `Microsoft.VisualStudio.Component.VC.Llvm.Clang`
-- `Microsoft.VisualStudio.Component.Windows11SDK.22621`
-- Native Desktop 与 Native Game 工作负载
-
-当前 Visual Studio Installer 仅保留相关 `_package.json` 清单和官方下载地址，28.5 MB 的 HostX64→TargetX64 编译器 VSIX 载荷本身不在本地缓存中，因此不能通过路径修正或直接复制恢复。
-
-`BuildRelease.ps1` 的失败信息：
-
-```text
-An x64 MSVC toolchain was not found.
-Pass -MsvcToolsRoot or set UEAK_MSVC_TOOLS_ROOT.
+```toml
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
 ```
 
-因此本次不能声称生成了经过重新编译的：
+修复方式是移除 `--no-build-isolation`，恢复标准 PEP 517 隔离构建。隔离构建探针已成功自动安装构建依赖并生成 0.7.0 Wheel，不需要污染 UE Agent Kit 的运行虚拟环境。
+
+## 7. 正式本地 Release 产物
+
+正式 `BuildRelease.ps1` 产物位于：
 
 ```text
-UEAgentKit-0.7.0-UE5.6-Win64.zip
-```
-
-不能直接复用旧 DLL，因为旧二进制中的版本字符串仍属于 0.6.0 / 0.7.0-dev，和 0.7.0 协议不一致。
-
-## 7. 本次本地 Release 产物
-
-在缺少编译器的前提下，本次生成可验证的源码 Release：
-
-```text
-Output\Release\0.7.0\
-├─ UEAgentKit-0.7.0-Source.zip
+E:\WorkSpace\UEAgentKit-Main\Output\Release\0.7.0\
+├─ UEAgentKit-0.7.0-UE5.6-Win64.zip
 ├─ ue_agent_kit-0.7.0-py3-none-any.whl
 ├─ SHA256SUMS.txt
-├─ release-manifest.json
-└─ UEAgentKit-0.7.0-LocalReleaseBundle.zip
+└─ release-manifest.json
 ```
 
-源码 ZIP 由 `git archive` 从干净 Release Commit 生成，因此不包含：
+其中 Win64 ZIP 是本次使用 UE5.6、MSVC 14.38 和 Windows SDK 10.0.22621.0 重新构建的插件包。
 
-- `.git`
-- `.venv`
-- `.local`
-- `Build`
-- `Output`
-- `Backups`
-- `Intermediate`
-- `Saved`
-- `DerivedDataCache`
-- 日志、缓存和本地配置
+插件包只保留允许的发布内容：
 
-总 Bundle 包含源码 ZIP、Python Wheel、SHA-256、Manifest、中文交接文档和中英文发布说明。
+- `Binaries`
+- `Config`
+- `Content`
+- `Resources`
+- `Shaders`
+- `Source`
+- `LICENSE`
+- 中英文发布说明
+- `UEAgentKit.uplugin`
 
-## 8. 补齐正式 Win64 插件包
+发布脚本会删除 `Intermediate`、`Saved`、`DerivedDataCache` 和临时 `HostProject`。
 
-完成 Visual Studio 的“使用 C++ 的桌面开发”安装，并确认存在 x64 `cl.exe` 与 Windows SDK 后，在干净 `main` 上执行：
+## 8. 最终产物核验
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\BuildRelease.ps1 `
-  -EngineRoot E:\EPICGAME\UE_5.6 `
-  -PythonExecutable E:\WorkSpace\UEAgentKit\.venv\Scripts\python.exe
-```
+完整复跑后需要并已纳入自动检查：
 
-通过后应得到：
-
-```text
-UEAgentKit-0.7.0-UE5.6-Win64.zip
-ue_agent_kit-0.7.0-py3-none-any.whl
-SHA256SUMS.txt
-release-manifest.json
-```
-
-需要重新确认：
-
-- UAT BuildPlugin passed。
+- UAT BuildPlugin 成功。
 - ZIP 内存在 `Binaries\Win64\UnrealEditor-UEAgentKitEditor.dll`。
-- ZIP 不含 PDB、Intermediate、Saved、DerivedDataCache 和 HostProject。
+- ZIP 内存在 `Binaries\Win64\UnrealEditor.modules`。
+- ZIP 不含 `Intermediate`、`Saved`、`DerivedDataCache` 和 `HostProject`。
 - `UEAgentKit.uplugin` 的 `VersionName` 为 0.7.0、`Version` 为 27。
-- Release Manifest 的 Git Commit、文件大小和 SHA-256 正确。
+- Python Wheel 元数据版本为 0.7.0。
+- Release Manifest 记录实际 Git Commit、文件大小和 SHA-256。
+- `SHA256SUMS.txt` 覆盖 Win64 插件 ZIP 与 Python Wheel。
 
 ## 9. 后续开发入口
 
@@ -245,6 +231,6 @@ feature/performance-benchmarks
 
 ## 10. 当前交接结论
 
-0.7.0 的代码、版本、协议、测试和文档已经完成本地收口。源码 Release 与 Python Wheel 可立即用于审阅、后续开发和有工具链机器上的编译。
+0.7.0 的代码、版本、协议、测试、文档和本地二进制 Release 已完成收口。UE5.6 Win64 插件由恢复后的 MSVC 14.38 工具链重新编译，Python Wheel 使用标准 PEP 517 隔离环境构建。
 
-唯一未完成项是本机缺少 C++ 编译器导致的 UE5.6 Win64 预编译插件 ZIP。该问题不应通过复用或篡改旧 DLL 绕过；补装 MSVC 后重新运行正式 Release 脚本即可完成最终二进制交付。
+当前没有本地发布阻塞。后续工作可从 `feature/performance-benchmarks` 开始；远端 Push、Tag 和 GitHub Release 仍按本次约束保持未执行。
