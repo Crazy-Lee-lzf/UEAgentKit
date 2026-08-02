@@ -62,11 +62,22 @@ Combined           53 Tool（Memory 65）
 
 ## 发布产物
 
+本次本地机器缺少可用的 x64 MSVC/`cl.exe`，因此不能重新编译并声称生成预编译 Win64 插件包。当前已验证交付为源码 Release：
+
 ```text
-UEAgentKit-0.7.0-UE5.6-Win64.zip
+UEAgentKit-0.7.0-Source.zip
 ue_agent_kit-0.7.0-py3-none-any.whl
 SHA256SUMS.txt
 release-manifest.json
+UEAgentKit-0.7.0-LocalReleaseBundle.zip
 ```
 
-插件 ZIP 不包含 PDB、Intermediate、Saved、DerivedDataCache 或 HostProject。远端 Push、Tag 和 GitHub Release 不属于本次本地发布范围。
+源码 ZIP 由干净 Release Commit 的 `git archive` 生成，不包含 `.git`、`.venv`、Build、Output、Backups、Intermediate、Saved、DerivedDataCache、日志或缓存。总 Bundle 还包含交接文档和发布说明。
+
+补装 Visual Studio“使用 C++ 的桌面开发”、x64 MSVC 和 Windows SDK 后，重新运行 `scripts\BuildRelease.ps1` 才能生成：
+
+```text
+UEAgentKit-0.7.0-UE5.6-Win64.zip
+```
+
+不能复用旧 DLL，因为旧二进制中的版本状态与 0.7.0 不一致。远端 Push、Tag 和 GitHub Release 不属于本次本地发布范围。

@@ -52,11 +52,22 @@ Common Blueprint graph node mutation is not yet a published Operation. Shared Kn
 
 ## Artifacts
 
+The local machine does not currently contain a usable x64 MSVC/`cl.exe`, so this run cannot rebuild and claim a precompiled Win64 plugin package. The verified delivery is a source release:
+
 ```text
-UEAgentKit-0.7.0-UE5.6-Win64.zip
+UEAgentKit-0.7.0-Source.zip
 ue_agent_kit-0.7.0-py3-none-any.whl
 SHA256SUMS.txt
 release-manifest.json
+UEAgentKit-0.7.0-LocalReleaseBundle.zip
 ```
 
-The plugin ZIP excludes PDB, Intermediate, Saved, DerivedDataCache, and HostProject. Push, Tag, and a remote GitHub Release are outside this local release.
+The source ZIP is produced with `git archive` from a clean release commit and excludes `.git`, `.venv`, Build, Output, Backups, Intermediate, Saved, DerivedDataCache, logs, and caches. The bundle also includes the handoff and release notes.
+
+After installing the Visual Studio Desktop development with C++ workload, x64 MSVC, and a Windows SDK, rerun `scripts\BuildRelease.ps1` to produce:
+
+```text
+UEAgentKit-0.7.0-UE5.6-Win64.zip
+```
+
+The old DLL must not be reused because its embedded version status does not match 0.7.0. Push, Tag, and a remote GitHub Release remain outside this local release.

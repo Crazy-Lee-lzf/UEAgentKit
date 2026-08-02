@@ -15,6 +15,7 @@
 - [`BRANCH_WORKTREES_EN.md`](BRANCH_WORKTREES_EN.md)：English dual-branch and Worktree workflow.
 - [`Handoffs/MEMORY_CONTEXT_HANDOFF_20260801.md`](Handoffs/MEMORY_CONTEXT_HANDOFF_20260801.md)：Memory/Context 里程碑实现范围、兼容要求与测试门禁。
 - [`Handoffs/LIVE_EDITOR_REALTIME_IO_HANDOFF_20260801.md`](Handoffs/LIVE_EDITOR_REALTIME_IO_HANDOFF_20260801.md)：Realtime I/O 里程碑实现范围、测试门禁与后续扩展边界。
+- [`Handoffs/UEAGENTKIT_0.7.0_RELEASE_HANDOFF_20260803.md`](Handoffs/UEAGENTKIT_0.7.0_RELEASE_HANDOFF_20260803.md)：0.7.0 本地 Release、验证结果、源码产物、MSVC 阻塞与后续性能测试交接。
 - [`../prompts/LIVE_EDITOR_REALTIME_IO_LOCAL_AGENT_PROMPT_20260801.md`](../prompts/LIVE_EDITOR_REALTIME_IO_LOCAL_AGENT_PROMPT_20260801.md)：可直接复制给本地代码 Agent 的执行提示词。
 
 - [`COMPARISON_UE_LLM_TOOLKIT.md`](COMPARISON_UE_LLM_TOOLKIT.md)：与 ue-llm-toolkit 的读取、写入、Live Editor 和安全闭环对比。
