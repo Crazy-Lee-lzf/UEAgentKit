@@ -298,7 +298,15 @@ Live Editor 中已经产生的受控 Dirty 资产，也可以通过 `ue_save_aut
 
 ### P0A：Realtime Editor CRUD、批量任务与诊断
 
-Live Editor Write 基础层、Material/DataTable、Undo/Discard、Save→Verify→Memory 闭环和注册式扩展架构已经完成。Realtime I/O 作为日常开发主路径，下一阶段优先建设当前 Editor Context、批量 Query/Task、PIE 诊断、Change Set 和高价值资产域 CRUD；不再重写中央分派。每个新增 Operation 仍需补齐：
+Live Editor Write 基础层、Material/DataTable、Undo/Discard、Save→Verify→Memory 闭环和注册式扩展架构已经完成。Realtime Foundation 现已补齐当前 Editor Context、首个分帧 Batch Task 和持久化 Change Set：
+
+- `ue_get_editor_context` 在一次只读请求中聚合 Editor、World、Selection、Open Assets、Dirty Packages、Blueprint Graph Selection、Compile Errors 和 Output Log Cursor，并返回阶段耗时与 `nextActions`。
+- `scanCurrentWorld` 只扫描当前已加载 World；枚举和 Actor/Component 处理均受每帧约 2 ms 时间预算与数量上限约束。任务绑定 Editor Session/World，支持进度、取消、超时、失效和部分结果。
+- Batch Task 默认只返回摘要；详情通过 `include_details/detail_offset/detail_limit` 分页读取，单页最多 5 个 Actor，避免超过 Bridge 1 MiB 单响应上限。
+- Change Set 使用 schema v2 持久化 Task、Editor Session、Operation、Asset、Transaction、Save Receipt 和 Validation 生命周期；支持 `planned/applied/partially_applied/undone/discarded/saved/verified/failed/unknown`，并保留终态历史。
+- 活跃 Change Set 不会被容量清理静默删除；Editor 重启后无法重新证明的运行时状态明确降级为 `unknown`。
+
+Realtime I/O 继续作为日常开发主路径。下一阶段不再重复建设 Context/Batch/Change Set 基础层，而是优先扩展 PIE 诊断、可组合批量查询和高价值资产域 CRUD；不重写中央分派。每个新增 Operation 仍需补齐：
 
 1. Python `OperationSpec`、Policy 授权和 Plan Schema。
 2. 对应 C++ 域执行器与 Operation Descriptor。

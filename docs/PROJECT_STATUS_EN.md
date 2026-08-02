@@ -258,7 +258,15 @@ These are intentional scope and safety boundaries, not documentation omissions.
 
 ### P0A: Realtime Editor CRUD, batch tasks, and diagnostics
 
-The Live Editor Write foundation, Material/DataTable support, Undo/Discard, Save→Verify→Memory closeout, and registry-based extension architecture are complete. Realtime I/O is the primary daily-development path; the next stage prioritizes current Editor Context, batch Query/Task execution, PIE diagnostics, Change Sets, and high-value domain CRUD without expanding the central dispatcher. Every new Operation must add:
+The Live Editor Write foundation, Material/DataTable support, Undo/Discard, Save→Verify→Memory closeout, and registry-based extension architecture are complete. The Realtime Foundation now also includes bounded current Editor Context, the first frame-stepped Batch Task, and durable Change Sets:
+
+- `ue_get_editor_context` aggregates Editor, World, Selection, Open Assets, Dirty Packages, Blueprint Graph Selection, Compile Errors, and Output Log Cursor in one read-only request, with stage timings and structured `nextActions`.
+- `scanCurrentWorld` inspects only the currently loaded World. Level enumeration and Actor/Component processing are constrained by an approximately 2 ms per-frame budget and count limits. Tasks are bound to the Editor Session and World and support progress, cancellation, timeout, invalidation, and partial results.
+- Batch Task status returns summaries by default. Details are retrieved through `include_details/detail_offset/detail_limit`, with at most five Actors per page, keeping responses below the Bridge's 1 MiB limit.
+- Change Set schema v2 durably records Task, Editor Session, Operation, Asset, Transaction, Save Receipt, and Validation lifecycle data. It supports `planned/applied/partially_applied/undone/discarded/saved/verified/failed/unknown` and preserves terminal history.
+- Active Change Sets are never silently evicted by capacity cleanup. Runtime state that cannot be re-proven after an Editor restart explicitly degrades to `unknown`.
+
+Realtime I/O remains the primary daily-development path. The next stage should extend PIE diagnostics, composable batch queries, and high-value domain CRUD rather than rebuilding Context/Batch/Change Set foundations or expanding the central dispatcher. Every new Operation must add:
 
 1. Python `OperationSpec`, Policy authorization, and Plan schema.
 2. A C++ domain executor and Operation Descriptor.

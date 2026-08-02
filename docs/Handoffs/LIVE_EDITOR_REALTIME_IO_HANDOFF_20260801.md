@@ -1,8 +1,8 @@
 # `feature/live-editor-realtime-io` 本地 Agent 开发交接
 
-更新时间：2026-08-01  
-工作区：`E:/WorkSpace/UEAgentKit`  
-分支：`feature/live-editor-realtime-io`  
+更新时间：2026-08-01
+工作区：`E:/WorkSpace/UEAgentKit`
+分支：`feature/live-editor-realtime-io`
 起始基线：`4d1698f docs: define AI-native editor development model`
 
 ## 1. 分支使命
@@ -426,3 +426,33 @@ Plugin/UEAgentKit/Source/UEAgentKitEditor/Private/EditorBridgeContextHandlers.cp
 ### 11.7 交接结论
 
 当前状态是“审计和设计完成、实现尚未开始”；当前未提交差异仅包含 handoff 文档和下一位 Agent 提示词，不包含实现代码。与上一份进度报告相比，没有新增代码差异，也没有新增测试结果。下一步的最小可交付目标是完成 Context vertical slice 并形成第一个可验证 Commit。
+## 12. 2026-08-02 实现完成与合并门禁
+
+本节是后续实现记录，覆盖第 11.3–11.7 节的历史“尚未实现”状态；旧章节保留用于说明最初设计与实施顺序。
+
+### 12.1 已完成能力
+
+1. `ue_get_editor_context` 已完成真实 Editor 纵向闭环：一次有界只读请求返回 Editor、World、Selection、Open Assets、Dirty Packages、Blueprint Graph Selection、Compile Errors、Output Log Cursor、阶段耗时和 `nextActions`。
+2. Batch Task Manager 已完成：首个固定 Operation 为 `scanCurrentWorld`，只扫描当前已加载 World，支持 Start/Status/Cancel、进度、部分结果、超时、Session/World 失效和明确终态。
+3. Batch 扫描不再在启动请求中同步遍历整个 World；Level 使用弱引用，Actor 不跨帧保存裸指针。每 Tick 同时受最多 256 个 Actor Slot 和约 2 ms 时间预算约束。
+4. Batch 状态默认只返回摘要；详情通过 `include_details/detail_offset/detail_limit` 分页读取，单页最多 5 个 Actor，避免超过 Python Bridge 的 1 MiB 单响应上限。
+5. Change Set 已升级为 schema v2：持久化 `taskId/editorSessionId/title/status/operations/affectedAssets/transactionIds/validation/saveState`，复用现有 Plan、Transaction、Receipt、Save 和 Verify 生命周期。
+6. Change Set 状态包括 `planned/applied/partially_applied/undone/discarded/saved/verified/failed/unknown`；Undo/Discard/Verify 后保留历史，重启后无法重新证明的内存状态明确标记为 `unknown`。
+7. Change Set 容量清理只淘汰终态记录；活跃或未决记录不会被静默删除。混合 `verified/undone/discarded/failed` Operation 也按终态处理，避免无活动操作的记录永久占用容量。
+8. Closed Loop 测试诊断会完整展开 Python `ExceptionGroup`，真实契约错误不再被 PowerShell 外层异常掩盖。
+
+### 12.2 已通过门禁
+
+- Python unittest：316/316。
+- Ruff：通过。
+- UE5.6 Plugin Direct Build：通过。
+- 真实 UE5.6 Fast Regression：Scalar Write、Undo/Discard、Closed Loop 全部通过。
+- 真实 UE5.6 Full Regression：Scalar、Reference、Structured、Material、DataTable、Undo/Discard、Closed Loop 七组全部通过。
+- Closed Loop 额外验证 Editor Context、Batch 摘要/分页和 Change Set `planned → applied → saved → verified`；保存后由独立 Unreal 进程重载验证，SQLite Index 与冻结 Revision Export 哈希保持不变。
+
+### 12.3 合并约束
+
+- 本分支可进入与 `feature/memory-context` 的临时集成验证。
+- 两分支生产代码预计可自动合并；文档与 Tool 数量断言需要按合并后实际注册量统一。
+- 正式合并前仍需执行 `git diff --check`、UTF-8 无 BOM/CRLF 检查、完整 Python/Ruff、Plugin Build，并在临时合并副本中复跑关键门禁。
+- 本交接不授权直接 Merge；正式分支合并由后续明确操作完成。

@@ -846,12 +846,25 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 	else if (Method == TEXT("editor.batchTask.status"))
 	{
 		FString TaskId;
+		bool bIncludeDetails = false;
+		double DetailOffsetValue = 0.0;
+		double DetailLimitValue = UEAgentKitBatchTaskPrivate::MaxDetailPageItems;
 		Params->TryGetStringField(TEXT("taskId"), TaskId);
+		Params->TryGetBoolField(TEXT("includeDetails"), bIncludeDetails);
+		Params->TryGetNumberField(TEXT("detailOffset"), DetailOffsetValue);
+		Params->TryGetNumberField(TEXT("detailLimit"), DetailLimitValue);
 		TSharedPtr<FJsonObject> Result;
 		FString ErrorCode;
 		FString ErrorMessage;
 		SendActionResult(
-			BuildBatchTaskStatusResult(TaskId, Result, ErrorCode, ErrorMessage),
+			BuildBatchTaskStatusResult(
+				TaskId,
+				bIncludeDetails,
+				static_cast<int32>(DetailOffsetValue),
+				static_cast<int32>(DetailLimitValue),
+				Result,
+				ErrorCode,
+				ErrorMessage),
 			Result,
 			ErrorCode,
 			ErrorMessage);

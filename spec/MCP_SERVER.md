@@ -124,10 +124,11 @@ Database、Engine、Project、Policy、Revision Export、Work Root、Backup Root
 
 ## Live Editor Tool
 
-Live Editor 能力分为两类，成功结果均标记 `source=live-editor-memory`，都不读取或改写 SQLite、不生成磁盘 Revision，也不改变索引 freshness：
+Live Editor 能力分为三组，成功结果均标记 `source=live-editor-memory`，都不读取或改写 SQLite、不生成磁盘 Revision，也不改变索引 freshness：
 
 - Live Read：10 个 Tool，`readOnlyHint=true`、`destructiveHint=false`。
-- Live Action：7 个 Tool，`readOnlyHint=false`、`destructiveHint=false`；允许改变 Editor 选择、窗口、已加载状态或内存编译状态，但不保存 Package。
+- Live Action：8 个 Tool，`readOnlyHint=false`、`destructiveHint=false`；允许改变 Editor 选择、窗口、已加载状态或内存编译状态，但不保存 Package。
+- Realtime Foundation：4 个 Tool，包括一个有界 Context 聚合读取和一个支持 Start/Status/Cancel 的分帧 Batch Task；只读取当前 Editor 内存与已加载 World。
 
 - `ue_editor_status`：Bridge 可用性、Plugin/Engine 版本、Project、PID、Session、Capability、PIE、当前关卡和 Dirty Package 计数。
 - `ue_get_selection`：Actor、Component、Asset 和 Object 当前选择，去重后最多 200 项。
@@ -146,8 +147,15 @@ Live Editor 能力分为两类，成功结果均标记 `source=live-editor-memor
 - `ue_compile_blueprint`：加载一个精确 Blueprint，在内存中编译并返回前后状态、Dirty 变化和当前会话诊断；不保存。
 - `ue_validate_asset`：使用官方 `UEditorValidatorSubsystem` 验证一个精确资产，最多返回 200 条问题。
 - `ue_validate_folder`：验证一个非根 `/Game/...` Package Path，可选递归；匹配资产数必须不超过 `max_assets`，硬上限 500，最多返回 200 条问题。
+- `ue_run_automation_test`：在隔离子进程中运行一个精确注册的 Automation Test，并返回结构化 Validation Evidence；不接受任意命令或测试前缀。
+- `ue_get_editor_context`：在一次只读请求中聚合 Editor、World、Selection、Open Assets、Dirty Packages、Blueprint Graph Selection、Compile Errors 和 Output Log Cursor；返回每阶段耗时、截断状态和结构化 `nextActions`。
+- `ue_start_batch_task`：启动一个固定 `scanCurrentWorld` 分帧扫描。默认最多 2000 个 Actor、每 Actor 100 个 Component、60 秒超时；Server 和 Bridge 仍执行更严格的硬上限。
+- `ue_get_batch_task`：默认返回进度和聚合摘要；`include_details=true` 时使用 `detail_offset/detail_limit` 读取最多 5 个 Actor 的一页详情。
+- `ue_cancel_batch_task`：取消当前 Editor Session 中唯一运行的 Batch Task。
 
-稳定错误包括通用连接/协议错误，以及 `live-editor-pie-active`、`live-editor-asset-not-found`、`live-editor-asset-load-failed`、`live-editor-asset-editor-unavailable`、`live-editor-asset-not-open`、`live-editor-world-unavailable`、`live-editor-actor-not-found`、`live-editor-actor-guid-ambiguous`、`live-editor-actor-not-selectable`、`live-editor-blueprint-required`、`live-editor-data-validation-unavailable`、`live-editor-folder-empty` 和 `live-editor-asset-limit-exceeded`。
+Batch Task 只扫描当前已加载 World。Level 使用弱引用，Actor 不跨帧保存裸指针；每 Tick 同时受最多 256 个 Actor Slot 和约 2 ms 时间预算约束。World/Session 变化、PIE/SIE、超时或取消均返回明确终态。分页详情用于保证最坏响应仍低于 1 MiB Bridge 上限。
+
+稳定错误包括通用连接/协议错误，以及 `live-editor-pie-active`、`live-editor-asset-not-found`、`live-editor-asset-load-failed`、`live-editor-asset-editor-unavailable`、`live-editor-asset-not-open`、`live-editor-world-unavailable`、`live-editor-actor-not-found`、`live-editor-actor-guid-ambiguous`、`live-editor-actor-not-selectable`、`live-editor-blueprint-required`、`live-editor-data-validation-unavailable`、`live-editor-folder-empty`、`live-editor-asset-limit-exceeded`、`live-editor-batch-task-busy`、`live-editor-batch-task-not-found`、`live-editor-batch-task-world-invalidated`、`live-editor-batch-task-timeout` 和 `live-editor-batch-task-failed`。
 
 ## 查询 Tool
 
@@ -268,6 +276,43 @@ editor_session_id = Apply 结果中的 editorSessionId
 - `memoryRecorded=false` 恒定：Memory Task Record 由 `ue_memory_record_task` 落库，其失败会如实报错，本 Tool 从不声称 Memory 已写入。
 
 该 Tool 不执行 Save All、不自动保存、不保存非授权资产、不让 Memory 反向覆盖源资产；本身不写磁盘、不修改 SQLite/Revision Export。
+
+### Change Set
+
+Change Set 是任务级 Live Write 容器，不替代单次 Plan、Transaction、Receipt、Save 或 Verify。启用 Workflow 时额外注册：
+
+```text
+ue_create_change_set(title, task_id="")
+ue_get_change_set(change_set_id)
+```
+
+创建结果包含固定 `changeSetId`、`taskId`、`editorSessionId`、`title` 和 `status=planned`。以下既有 Tool 接受可选 `change_set_id`：
+
+```text
+ue_apply_asset_property_live
+ue_undo_asset_property_live
+ue_discard_asset_property_live
+ue_save_authorized_asset
+ue_verify_live_write
+```
+
+传入 Change Set 后，每个 Apply 会绑定其 `planId/assetPath/operation/transactionId/editorSessionId/liveApplyReceipt`。后续 Undo、Discard、Save 和 Verify 必须属于同一 Change Set，不能借用其他任务的 Receipt。
+
+持久化 schema v2 保留完整 Operation 历史，状态包括：
+
+```text
+planned
+applied
+partially_applied
+undone
+discarded
+saved
+verified
+failed
+unknown
+```
+
+`ue_get_change_set` 还返回 `affectedAssets`、`transactionIds`、`validation` 和 `saveState` 聚合。成功 Undo/Discard/Verify 不删除历史 Operation；Server 重启后，无法用当前 Editor Session 和 Live Journal 重新证明的运行时状态标记为 `unknown`。最多保留 50 个 Change Set、每个最多 100 个 Operation；容量清理只删除终态记录，若全部仍活跃则拒绝新建，不静默丢失活跃任务。
 
 `ue_set_material_parameter.parameter_type` 仅接受 `Scalar`、`Vector`、`Texture` 或 `StaticSwitch`，Server 映射到现有四个已注册 Operation。高层 Tool 只覆盖当前稳定 Operation；`ue_plan_patch` 继续保留，供已注册但尚无高层封装的 Operation 使用。
 

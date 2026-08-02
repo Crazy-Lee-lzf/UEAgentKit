@@ -728,7 +728,7 @@ class EditorBridgeTests(unittest.TestCase):
             {
                 "operation": "scanCurrentWorld",
                 "maxActors": 5000,
-                "maxComponentsPerActor": 300,
+                "maxComponentsPerActor": 200,
                 "timeoutSeconds": 90,
             },
         )["result"]
@@ -742,7 +742,7 @@ class EditorBridgeTests(unittest.TestCase):
             {
                 "operation": "scanCurrentWorld",
                 "maxActors": 5000,
-                "maxComponentsPerActor": 300,
+                "maxComponentsPerActor": 200,
                 "timeoutSeconds": 90,
             },
         )
@@ -750,7 +750,15 @@ class EditorBridgeTests(unittest.TestCase):
     def test_batch_task_status_and_cancel_roundtrip(self) -> None:
         self._write_descriptor()
         task_id = "11111111-2222-3333-4444-555555555555"
-        status = self.service.call_tool("ue_get_batch_task", {"taskId": task_id})["result"]
+        status = self.service.call_tool(
+            "ue_get_batch_task",
+            {
+                "taskId": task_id,
+                "includeDetails": True,
+                "detailOffset": 5,
+                "detailLimit": 3,
+            },
+        )["result"]
         self.assertEqual(status["taskId"], task_id)
         self.assertEqual(status["state"], "completed")
         self.assertEqual(status["details"]["actorCount"], 1)
@@ -760,7 +768,15 @@ class EditorBridgeTests(unittest.TestCase):
         self.assertEqual(cancel["progress"]["completedPercent"], 33)
         requests = self.server.requests[-2:]  # type: ignore[attr-defined]
         self.assertEqual(requests[0]["method"], "editor.batchTask.status")
-        self.assertEqual(requests[0]["params"], {"taskId": task_id})
+        self.assertEqual(
+            requests[0]["params"],
+            {
+                "taskId": task_id,
+                "includeDetails": True,
+                "detailOffset": 5,
+                "detailLimit": 3,
+            },
+        )
         self.assertEqual(requests[1]["method"], "editor.batchTask.cancel")
         self.assertEqual(requests[1]["params"], {"taskId": task_id})
 
@@ -771,12 +787,17 @@ class EditorBridgeTests(unittest.TestCase):
             ("ue_start_batch_task", {"maxActors": 0}),
             ("ue_start_batch_task", {"maxActors": 10001}),
             ("ue_start_batch_task", {"maxComponentsPerActor": 0}),
-            ("ue_start_batch_task", {"maxComponentsPerActor": 501}),
+            ("ue_start_batch_task", {"maxComponentsPerActor": 201}),
             ("ue_start_batch_task", {"timeoutSeconds": 4}),
             ("ue_start_batch_task", {"timeoutSeconds": 301}),
             ("ue_start_batch_task", {"unknown": 1}),
             ("ue_get_batch_task", {}),
             ("ue_get_batch_task", {"taskId": "not-a-guid"}),
+            ("ue_get_batch_task", {"taskId": "11111111-2222-3333-4444-555555555555", "includeDetails": 1}),
+            ("ue_get_batch_task", {"taskId": "11111111-2222-3333-4444-555555555555", "detailOffset": -1}),
+            ("ue_get_batch_task", {"taskId": "11111111-2222-3333-4444-555555555555", "detailOffset": 101}),
+            ("ue_get_batch_task", {"taskId": "11111111-2222-3333-4444-555555555555", "detailLimit": 0}),
+            ("ue_get_batch_task", {"taskId": "11111111-2222-3333-4444-555555555555", "detailLimit": 6}),
             ("ue_cancel_batch_task", {"taskId": "123"}),
             ("ue_cancel_batch_task", {"taskId": "11111111-2222-3333-4444-55555555555!"}),
             ("ue_cancel_batch_task", {"taskId": "11111111-2222-3333-4444-555555555555", "extra": 1}),

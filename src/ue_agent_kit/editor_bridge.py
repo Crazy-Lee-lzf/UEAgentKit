@@ -260,13 +260,31 @@ class LiveEditorBridgeService:
                     params.get("maxActors", 2000), "maxActors", 1, 10000
                 ),
                 "maxComponentsPerActor": LiveEditorBridgeService._bounded_integer(
-                    params.get("maxComponentsPerActor", 200), "maxComponentsPerActor", 1, 500
+                    params.get("maxComponentsPerActor", 100), "maxComponentsPerActor", 1, 200
                 ),
                 "timeoutSeconds": LiveEditorBridgeService._bounded_integer(
                     params.get("timeoutSeconds", 60), "timeoutSeconds", 5, 300
                 ),
             }
-        if tool_name in {"ue_get_batch_task", "ue_cancel_batch_task"}:
+        if tool_name == "ue_get_batch_task":
+            allowed = {"taskId", "includeDetails", "detailOffset", "detailLimit"}
+            LiveEditorBridgeService._reject_unknown_params(params, allowed)
+            task_id = LiveEditorBridgeService._bounded_string(params.get("taskId", ""), "taskId", 64)
+            LiveEditorBridgeService._validate_guid(task_id, "taskId")
+            include_details = params.get("includeDetails", False)
+            if not isinstance(include_details, bool):
+                raise LiveEditorError("live-editor-invalid-parameters", "includeDetails must be a boolean.")
+            return {
+                "taskId": task_id.lower(),
+                "includeDetails": include_details,
+                "detailOffset": LiveEditorBridgeService._bounded_integer(
+                    params.get("detailOffset", 0), "detailOffset", 0, 100
+                ),
+                "detailLimit": LiveEditorBridgeService._bounded_integer(
+                    params.get("detailLimit", 5), "detailLimit", 1, 5
+                ),
+            }
+        if tool_name == "ue_cancel_batch_task":
             allowed = {"taskId"}
             LiveEditorBridgeService._reject_unknown_params(params, allowed)
             task_id = LiveEditorBridgeService._bounded_string(params.get("taskId", ""), "taskId", 64)

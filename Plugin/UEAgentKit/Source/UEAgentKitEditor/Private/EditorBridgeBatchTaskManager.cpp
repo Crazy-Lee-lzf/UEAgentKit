@@ -5,7 +5,7 @@
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Editor.h"
-#include "EngineUtils.h"
+#include "Engine/Level.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "HAL/PlatformTime.h"
@@ -97,18 +97,14 @@ namespace UEAgentKitBatchTaskPrivate
 		NewTask.WorldPath = World->GetPathName();
 		NewTask.WorldType = GetWorldTypeName(World->WorldType);
 
-		for (TActorIterator<AActor> It(World); It; ++It)
+		for (ULevel* Level : World->GetLevels())
 		{
-			AActor* Actor = *It;
-			if (IsValid(Actor) && !Actor->IsActorBeingDestroyed())
+			if (!IsValid(Level))
 			{
-				NewTask.Actors.Add(Actor);
+				continue;
 			}
-		}
-		if (NewTask.Actors.Num() > NewTask.MaxActors)
-		{
-			NewTask.bActorLimitReached = true;
-			NewTask.Actors.SetNum(NewTask.MaxActors);
+			NewTask.Levels.Add(Level);
+			NewTask.TotalActorSlots += Level->Actors.Num();
 		}
 
 		Task = MakeUnique<FScanTask>(MoveTemp(NewTask));
@@ -116,13 +112,17 @@ namespace UEAgentKitBatchTaskPrivate
 		return true;
 	}
 
-	TSharedPtr<FJsonObject> FBatchTaskManager::Status(const FString& TaskId) const
+	TSharedPtr<FJsonObject> FBatchTaskManager::Status(
+		const FString& TaskId,
+		const bool bIncludeDetails,
+		const int32 DetailOffset,
+		const int32 DetailLimit) const
 	{
 		if (!Task.IsValid() || Task->TaskId != TaskId)
 		{
 			return nullptr;
 		}
-		return BuildSnapshot(*Task, Task->State != ETaskState::Running);
+		return BuildSnapshot(*Task, bIncludeDetails, DetailOffset, DetailLimit);
 	}
 
 	TSharedPtr<FJsonObject> FBatchTaskManager::Cancel(const FString& TaskId)
@@ -135,7 +135,7 @@ namespace UEAgentKitBatchTaskPrivate
 		{
 			CompleteTask(ETaskState::Cancelled, FString(), FString());
 		}
-		return BuildSnapshot(*Task, true);
+		return BuildSnapshot(*Task, false, 0, MaxDetailPageItems);
 	}
 
 	void FBatchTaskManager::Tick()
@@ -171,19 +171,47 @@ namespace UEAgentKitBatchTaskPrivate
 			return;
 		}
 
-		int32 ProcessedThisTick = 0;
-		while (Task->Cursor < Task->Actors.Num() && ProcessedThisTick < MaxActorsPerTick)
+		const double TickStarted = FPlatformTime::Seconds();
+		int32 ScannedThisTick = 0;
+		while (Task->LevelCursor < Task->Levels.Num() && ScannedThisTick < MaxActorSlotsPerTick)
 		{
-			AActor* Actor = Task->Actors[Task->Cursor];
-			++Task->Cursor;
-			++ProcessedThisTick;
-			if (!IsValid(Actor))
+			if (ScannedThisTick > 0 && FPlatformTime::Seconds() - TickStarted >= MaxTickBudgetSeconds)
+			{
+				break;
+			}
+
+			ULevel* Level = Task->Levels[Task->LevelCursor].Get();
+			if (!IsValid(Level))
+			{
+				++Task->LevelCursor;
+				Task->ActorCursor = 0;
+				continue;
+			}
+			if (Task->ActorCursor >= Level->Actors.Num())
+			{
+				++Task->LevelCursor;
+				Task->ActorCursor = 0;
+				continue;
+			}
+
+			AActor* Actor = Level->Actors[Task->ActorCursor].Get();
+			++Task->ActorCursor;
+			++Task->ScannedActorSlots;
+			++ScannedThisTick;
+			if (!IsValid(Actor) || Actor->IsActorBeingDestroyed())
 			{
 				continue;
 			}
+
 			ProcessActor(*Task, Actor);
+			if (Task->ValidActorCount >= Task->MaxActors)
+			{
+				Task->bActorLimitReached = Task->ScannedActorSlots < Task->TotalActorSlots;
+				CompleteTask(ETaskState::Completed, FString(), FString());
+				return;
+			}
 		}
-		if (Task->Cursor >= Task->Actors.Num())
+		if (Task->LevelCursor >= Task->Levels.Num())
 		{
 			CompleteTask(ETaskState::Completed, FString(), FString());
 		}
@@ -199,54 +227,54 @@ namespace UEAgentKitBatchTaskPrivate
 		const FString ClassPath = Actor->GetClass() != nullptr ? Actor->GetClass()->GetPathName() : FString();
 		ScanTask.ActorClassCounts.FindOrAdd(ClassPath) += 1;
 
-		int32 ComponentCount = 0;
-		bool bComponentsTruncated = false;
-		TArray<TSharedPtr<FJsonValue>> ComponentItems;
 		const TSet<UActorComponent*>& Components = Actor->GetComponents();
+		const int32 ComponentCount = Components.Num();
+		ScanTask.TotalComponentCount += ComponentCount;
+		if (ScanTask.DetailItems.Num() >= MaxDetailedActors)
+		{
+			ScanTask.bDetailsTruncated = true;
+			return;
+		}
+
+		TArray<TSharedPtr<FJsonValue>> ComponentItems;
+		int32 SerializedComponentCount = 0;
 		for (UActorComponent* Component : Components)
 		{
 			if (!IsValid(Component))
 			{
 				continue;
 			}
-			++ComponentCount;
-			++ScanTask.TotalComponentCount;
-			if (ComponentItems.Num() >= ScanTask.MaxComponentsPerActor)
+			if (SerializedComponentCount >= ScanTask.MaxComponentsPerActor)
 			{
-				bComponentsTruncated = true;
-				continue;
+				break;
 			}
 			TSharedRef<FJsonObject> Item = MakeShared<FJsonObject>();
 			Item->SetStringField(TEXT("name"), Component->GetName().Left(128));
 			Item->SetStringField(
 				TEXT("classPath"),
-				Component->GetClass() != nullptr ? Component->GetClass()->GetPathName() : FString());
+				Component->GetClass() != nullptr ? Component->GetClass()->GetPathName().Left(256) : FString());
 			Item->SetBoolField(TEXT("nativeClass"), Component->IsNative());
 			ComponentItems.Add(MakeShared<FJsonValueObject>(Item));
+			++SerializedComponentCount;
 		}
+		const bool bComponentsTruncated = ComponentCount > SerializedComponentCount;
 		if (bComponentsTruncated)
 		{
 			++ScanTask.ComponentLimitActorCount;
 		}
-		if (ScanTask.DetailItems.Num() < MaxDetailedActors)
-		{
-			TSharedRef<FJsonObject> Item = MakeShared<FJsonObject>();
-			Item->SetStringField(TEXT("actorGuid"), Actor->GetActorGuid().ToString(EGuidFormats::DigitsWithHyphensLower));
-			Item->SetStringField(TEXT("label"), Actor->GetActorLabel().Left(256));
-			Item->SetStringField(TEXT("classPath"), ClassPath.Left(512));
-			Item->SetStringField(TEXT("actorPath"), Actor->GetPathName().Left(512));
-			Item->SetStringField(
-				TEXT("levelPath"),
-				Actor->GetLevel() != nullptr ? Actor->GetLevel()->GetPathName().Left(512) : FString());
-			Item->SetNumberField(TEXT("componentCount"), ComponentCount);
-			Item->SetBoolField(TEXT("componentsTruncated"), bComponentsTruncated);
-			Item->SetArrayField(TEXT("components"), ComponentItems);
-			ScanTask.DetailItems.Add(Item);
-		}
-		else
-		{
-			ScanTask.bDetailsTruncated = true;
-		}
+
+		TSharedRef<FJsonObject> Item = MakeShared<FJsonObject>();
+		Item->SetStringField(TEXT("actorGuid"), Actor->GetActorGuid().ToString(EGuidFormats::DigitsWithHyphensLower));
+		Item->SetStringField(TEXT("label"), Actor->GetActorLabel().Left(256));
+		Item->SetStringField(TEXT("classPath"), ClassPath.Left(256));
+		Item->SetStringField(TEXT("actorPath"), Actor->GetPathName().Left(384));
+		Item->SetStringField(
+			TEXT("levelPath"),
+			Actor->GetLevel() != nullptr ? Actor->GetLevel()->GetPathName().Left(384) : FString());
+		Item->SetNumberField(TEXT("componentCount"), ComponentCount);
+		Item->SetBoolField(TEXT("componentsTruncated"), bComponentsTruncated);
+		Item->SetArrayField(TEXT("components"), ComponentItems);
+		ScanTask.DetailItems.Add(Item);
 	}
 
 	void FBatchTaskManager::CompleteTask(const ETaskState State, const FString& FailureCode, const FString& FailureMessage)
@@ -262,7 +290,11 @@ namespace UEAgentKitBatchTaskPrivate
 		Task->CompletedAtUtc = FDateTime::UtcNow().ToIso8601();
 	}
 
-	TSharedRef<FJsonObject> FBatchTaskManager::BuildSnapshot(const FScanTask& ScanTask, const bool bIncludeDetails) const
+	TSharedRef<FJsonObject> FBatchTaskManager::BuildSnapshot(
+		const FScanTask& ScanTask,
+		const bool bIncludeDetails,
+		const int32 DetailOffset,
+		const int32 DetailLimit) const
 	{
 		const double Now = FPlatformTime::Seconds();
 		const double ElapsedSeconds = ScanTask.State == ETaskState::Running
@@ -275,6 +307,7 @@ namespace UEAgentKitBatchTaskPrivate
 		Result->SetStringField(TEXT("state"), StateName(ScanTask.State));
 		Result->SetStringField(TEXT("editorSessionId"), ScanTask.EditorSessionId);
 		Result->SetStringField(TEXT("startedAtUtc"), ScanTask.StartedAtUtc);
+		Result->SetBoolField(TEXT("partialResultAvailable"), ScanTask.DetailItems.Num() > 0);
 		if (ScanTask.State != ETaskState::Running)
 		{
 			Result->SetStringField(TEXT("completedAtUtc"), ScanTask.CompletedAtUtc);
@@ -289,19 +322,24 @@ namespace UEAgentKitBatchTaskPrivate
 		}
 
 		TSharedRef<FJsonObject> Progress = MakeShared<FJsonObject>();
-		const int32 TotalActors = ScanTask.Actors.Num();
-		const int32 CompletedPercent = TotalActors <= 0
+		const int32 MaximumProgress = ScanTask.State == ETaskState::Running ? 99 : 100;
+		const int32 CompletedPercent = ScanTask.State == ETaskState::Completed
 			? 100
-			: FMath::Clamp(FMath::RoundToInt32(ScanTask.Cursor * 100.0 / TotalActors), 0, 100);
+			: ScanTask.TotalActorSlots <= 0
+				? 0
+				: FMath::Clamp(
+					FMath::RoundToInt32(ScanTask.ScannedActorSlots * 100.0 / ScanTask.TotalActorSlots), 0, MaximumProgress);
 		double EstimatedRemainingSeconds = 0.0;
-		if (ScanTask.Cursor > 0 && TotalActors > ScanTask.Cursor)
+		if (ScanTask.ScannedActorSlots > 0 && ScanTask.TotalActorSlots > ScanTask.ScannedActorSlots)
 		{
 			EstimatedRemainingSeconds = ElapsedSeconds
-				* static_cast<double>(TotalActors - ScanTask.Cursor)
-				/ static_cast<double>(ScanTask.Cursor);
+				* static_cast<double>(ScanTask.TotalActorSlots - ScanTask.ScannedActorSlots)
+				/ static_cast<double>(ScanTask.ScannedActorSlots);
 		}
-		Progress->SetNumberField(TEXT("processedActors"), ScanTask.Cursor);
-		Progress->SetNumberField(TEXT("totalActors"), TotalActors);
+		Progress->SetStringField(TEXT("phase"), ScanTask.State == ETaskState::Running ? TEXT("scanning") : TEXT("terminal"));
+		Progress->SetNumberField(TEXT("processedActors"), ScanTask.ValidActorCount);
+		Progress->SetNumberField(TEXT("scannedActorSlots"), ScanTask.ScannedActorSlots);
+		Progress->SetNumberField(TEXT("totalActorSlots"), ScanTask.TotalActorSlots);
 		Progress->SetNumberField(TEXT("completedPercent"), CompletedPercent);
 		Progress->SetNumberField(TEXT("elapsedSeconds"), FMath::RoundToFloat(static_cast<float>(ElapsedSeconds * 1000.0)) / 1000.0f);
 		Progress->SetNumberField(TEXT("estimatedRemainingSeconds"), FMath::RoundToFloat(static_cast<float>(EstimatedRemainingSeconds * 1000.0)) / 1000.0f);
@@ -317,6 +355,7 @@ namespace UEAgentKitBatchTaskPrivate
 		TSharedRef<FJsonObject> Summary = MakeShared<FJsonObject>();
 		Summary->SetNumberField(TEXT("actorCount"), ScanTask.ValidActorCount);
 		Summary->SetNumberField(TEXT("totalComponentCount"), ScanTask.TotalComponentCount);
+		Summary->SetNumberField(TEXT("availableDetailCount"), ScanTask.DetailItems.Num());
 		TArray<TSharedPtr<FJsonValue>> ClassCounts;
 		TArray<TPair<FString, int32>> ClassCountList;
 		for (const TPair<FString, int32>& Pair : ScanTask.ActorClassCounts)
@@ -336,7 +375,7 @@ namespace UEAgentKitBatchTaskPrivate
 				break;
 			}
 			TSharedRef<FJsonObject> Item = MakeShared<FJsonObject>();
-			Item->SetStringField(TEXT("classPath"), Pair.Key.Left(512));
+			Item->SetStringField(TEXT("classPath"), Pair.Key.Left(256));
 			Item->SetNumberField(TEXT("count"), Pair.Value);
 			ClassCounts.Add(MakeShared<FJsonValueObject>(Item));
 			++Reported;
@@ -346,6 +385,9 @@ namespace UEAgentKitBatchTaskPrivate
 		TSharedRef<FJsonObject> Limits = MakeShared<FJsonObject>();
 		Limits->SetNumberField(TEXT("maxActors"), ScanTask.MaxActors);
 		Limits->SetNumberField(TEXT("maxComponentsPerActor"), ScanTask.MaxComponentsPerActor);
+		Limits->SetNumberField(TEXT("maxDetailedActors"), MaxDetailedActors);
+		Limits->SetNumberField(TEXT("maxDetailPageItems"), MaxDetailPageItems);
+		Limits->SetNumberField(TEXT("maxTickBudgetMs"), MaxTickBudgetSeconds * 1000.0);
 		Limits->SetBoolField(TEXT("actorLimitReached"), ScanTask.bActorLimitReached);
 		Limits->SetNumberField(TEXT("componentLimitActorCount"), ScanTask.ComponentLimitActorCount);
 		Summary->SetObjectField(TEXT("limits"), Limits);
@@ -353,15 +395,27 @@ namespace UEAgentKitBatchTaskPrivate
 
 		if (bIncludeDetails)
 		{
+			const int32 Offset = FMath::Clamp(DetailOffset, 0, ScanTask.DetailItems.Num());
+			const int32 Limit = FMath::Clamp(DetailLimit, 1, MaxDetailPageItems);
+			const int32 End = FMath::Min(Offset + Limit, ScanTask.DetailItems.Num());
 			TSharedRef<FJsonObject> Details = MakeShared<FJsonObject>();
-			Details->SetNumberField(TEXT("actorCount"), ScanTask.DetailItems.Num());
 			TArray<TSharedPtr<FJsonValue>> Items;
-			for (const TSharedRef<FJsonObject>& Item : ScanTask.DetailItems)
+			for (int32 Index = Offset; Index < End; ++Index)
 			{
-				Items.Add(MakeShared<FJsonValueObject>(Item));
+				Items.Add(MakeShared<FJsonValueObject>(ScanTask.DetailItems[Index]));
+			}
+			const bool bHasMore = End < ScanTask.DetailItems.Num();
+			Details->SetNumberField(TEXT("offset"), Offset);
+			Details->SetNumberField(TEXT("limit"), Limit);
+			Details->SetNumberField(TEXT("returnedCount"), Items.Num());
+			Details->SetNumberField(TEXT("totalAvailable"), ScanTask.DetailItems.Num());
+			Details->SetBoolField(TEXT("hasMore"), bHasMore);
+			if (bHasMore)
+			{
+				Details->SetNumberField(TEXT("nextOffset"), End);
 			}
 			Details->SetArrayField(TEXT("items"), Items);
-			Details->SetBoolField(TEXT("truncated"), ScanTask.bDetailsTruncated);
+			Details->SetBoolField(TEXT("truncated"), ScanTask.bDetailsTruncated || bHasMore);
 			Result->SetObjectField(TEXT("details"), Details);
 		}
 

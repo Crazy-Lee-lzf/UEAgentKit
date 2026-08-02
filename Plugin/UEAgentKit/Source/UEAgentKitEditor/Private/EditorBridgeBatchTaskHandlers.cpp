@@ -63,6 +63,9 @@ bool FUEAgentKitEditorBridge::TryStartBatchTask(
 
 bool FUEAgentKitEditorBridge::BuildBatchTaskStatusResult(
 	const FString& TaskId,
+	const bool bIncludeDetails,
+	const int32 DetailOffset,
+	const int32 DetailLimit,
 	TSharedPtr<FJsonObject>& OutResult,
 	FString& OutErrorCode,
 	FString& OutErrorMessage)
@@ -73,13 +76,19 @@ bool FUEAgentKitEditorBridge::BuildBatchTaskStatusResult(
 		OutErrorMessage = TEXT("taskId is outside the bounded contract.");
 		return false;
 	}
+	if (DetailOffset < 0 || DetailLimit < 1 || DetailLimit > MaxDetailPageItems)
+	{
+		OutErrorCode = TEXT("live-editor-invalid-parameters");
+		OutErrorMessage = TEXT("detailOffset/detailLimit are outside the bounded paging contract.");
+		return false;
+	}
 	if (BatchTaskManager == nullptr)
 	{
 		OutErrorCode = TEXT("live-editor-batch-task-not-found");
 		OutErrorMessage = TEXT("No Batch Task is registered for this Editor session.");
 		return false;
 	}
-	OutResult = BatchTaskManager->Status(TaskId);
+	OutResult = BatchTaskManager->Status(TaskId, bIncludeDetails, DetailOffset, DetailLimit);
 	if (!OutResult.IsValid())
 	{
 		OutErrorCode = TEXT("live-editor-batch-task-not-found");

@@ -85,6 +85,9 @@ private:
 		FString& OutErrorMessage);
 	bool BuildBatchTaskStatusResult(
 		const FString& TaskId,
+		bool bIncludeDetails,
+		int32 DetailOffset,
+		int32 DetailLimit,
 		TSharedPtr<FJsonObject>& OutResult,
 		FString& OutErrorCode,
 		FString& OutErrorMessage);

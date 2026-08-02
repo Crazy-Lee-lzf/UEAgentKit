@@ -461,9 +461,12 @@ class ToolRegistryTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, batch_manager + batch_handlers)
         for required in (
-            "TActorIterator",
+            "World->GetLevels()",
+            "TWeakObjectPtr<ULevel>",
             "GetComponents()",
-            "MaxActorsPerTick",
+            "MaxActorSlotsPerTick",
+            "MaxTickBudgetSeconds",
+            "MaxDetailPageItems",
             "IsValid(Actor)",
             "live-editor-batch-task-world-invalidated",
             "live-editor-batch-task-timeout",
@@ -480,6 +483,8 @@ class ToolRegistryTests(unittest.TestCase):
             "IsSafeTaskId",
         ):
             self.assertIn(required, batch_manager + batch_handlers + batch_manager_header)
+        self.assertNotIn("TArray<AActor*>", batch_manager_header)
+        self.assertNotIn("TActorIterator", batch_manager)
         for method in (
             "editor.batchTask.start",
             "editor.batchTask.status",

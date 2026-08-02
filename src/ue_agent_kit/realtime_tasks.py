@@ -6,8 +6,9 @@ from .editor_bridge import LiveEditorBridgeService, LiveEditorError
 
 BATCH_TASK_OPERATIONS = ("scanCurrentWorld",)
 BATCH_TASK_DEFAULT_MAX_ACTORS = 2000
-BATCH_TASK_DEFAULT_MAX_COMPONENTS_PER_ACTOR = 200
+BATCH_TASK_DEFAULT_MAX_COMPONENTS_PER_ACTOR = 100
 BATCH_TASK_DEFAULT_TIMEOUT_SECONDS = 60
+BATCH_TASK_MAX_DETAIL_PAGE_ITEMS = 5
 
 
 def register_batch_task_tools(
@@ -50,9 +51,22 @@ def register_batch_task_tools(
         )
 
     @server.tool(annotations=read_annotations)
-    def ue_get_batch_task(task_id: str) -> dict[str, Any]:
-        """Return the bounded progress, summary, and terminal details of one registered Batch Task."""
-        return call("ue_get_batch_task", {"taskId": task_id})
+    def ue_get_batch_task(
+        task_id: str,
+        include_details: bool = False,
+        detail_offset: int = 0,
+        detail_limit: int = BATCH_TASK_MAX_DETAIL_PAGE_ITEMS,
+    ) -> dict[str, Any]:
+        """Return progress/summary and optionally one bounded page of partial or terminal details."""
+        return call(
+            "ue_get_batch_task",
+            {
+                "taskId": task_id,
+                "includeDetails": include_details,
+                "detailOffset": detail_offset,
+                "detailLimit": detail_limit,
+            },
+        )
 
     @server.tool(annotations=action_annotations)
     def ue_cancel_batch_task(task_id: str) -> dict[str, Any]:

@@ -248,11 +248,15 @@ class FakeWorkflowService:
             )
         return response
 
-    def create_change_set(self):
+    def create_change_set(self, *, title="Live Editor Change Set", task_id=""):
         return {
             "ok": True,
             "tool": "ue_create_change_set",
             "changeSetId": "cs_fake",
+            "taskId": task_id or "task_fake",
+            "title": title,
+            "status": "planned",
+            "operationCount": 0,
             "receiptCount": 0,
             "journalPersisted": True,
         }
@@ -262,6 +266,14 @@ class FakeWorkflowService:
             "ok": True,
             "tool": "ue_get_change_set",
             "changeSetId": change_set_id,
+            "taskId": "task_fake",
+            "title": "Live Editor Change Set",
+            "status": "planned",
+            "operations": [],
+            "affectedAssets": [],
+            "transactionIds": [],
+            "validation": {"state": "not-run"},
+            "saveState": {"state": "unsaved"},
             "receiptCount": 0,
             "activeReceiptCount": 0,
             "receipts": [],
@@ -1259,7 +1271,7 @@ class McpServerTests(unittest.TestCase):
                 {
                     "operation": "scanCurrentWorld",
                     "max_actors": 5000,
-                    "max_components_per_actor": 300,
+                    "max_components_per_actor": 200,
                     "timeout_seconds": 90,
                 },
             )
@@ -1272,7 +1284,7 @@ class McpServerTests(unittest.TestCase):
             {
                 "operation": "scanCurrentWorld",
                 "maxActors": 5000,
-                "maxComponentsPerActor": 300,
+                "maxComponentsPerActor": 200,
                 "timeoutSeconds": 90,
             },
         )
@@ -1288,7 +1300,12 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(batch_status["result"]["summary"]["actorCount"], 3)
         self.assertEqual(
             live_service.calls[-1][1],
-            {"taskId": "11111111-2222-3333-4444-555555555555"},
+            {
+                "taskId": "11111111-2222-3333-4444-555555555555",
+                "includeDetails": False,
+                "detailOffset": 0,
+                "detailLimit": 5,
+            },
         )
         _, batch_cancelled = asyncio.run(
             server.call_tool(
