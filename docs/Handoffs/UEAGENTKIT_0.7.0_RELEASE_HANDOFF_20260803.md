@@ -194,7 +194,7 @@ E:\WorkSpace\UEAgentKit-Main\Output\Release\0.7.0\
 - 中英文发布说明
 - `UEAgentKit.uplugin`
 
-发布脚本会删除 `Intermediate`、`Saved`、`DerivedDataCache` 和临时 `HostProject`。
+发布脚本会删除 `Intermediate`、`Saved`、`DerivedDataCache`、临时 `HostProject` 和不面向最终用户分发的 PDB 调试符号。
 
 ## 8. 最终产物核验
 
@@ -203,7 +203,7 @@ E:\WorkSpace\UEAgentKit-Main\Output\Release\0.7.0\
 - UAT BuildPlugin 成功。
 - ZIP 内存在 `Binaries\Win64\UnrealEditor-UEAgentKitEditor.dll`。
 - ZIP 内存在 `Binaries\Win64\UnrealEditor.modules`。
-- ZIP 不含 `Intermediate`、`Saved`、`DerivedDataCache` 和 `HostProject`。
+- ZIP 不含 PDB、`Intermediate`、`Saved`、`DerivedDataCache` 和 `HostProject`。
 - `UEAgentKit.uplugin` 的 `VersionName` 为 0.7.0、`Version` 为 27。
 - Python Wheel 元数据版本为 0.7.0。
 - Release Manifest 记录实际 Git Commit、文件大小和 SHA-256。

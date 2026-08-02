@@ -61,6 +61,8 @@ class ReleaseValidationTests(unittest.TestCase):
         self.assertIn("Get-FileHash", script)
         self.assertIn('$TransientPluginDirectories = @("Intermediate", "Saved", "DerivedDataCache", "HostProject")', script)
         self.assertIn("Transient plugin package directory remains after pruning", script)
+        self.assertIn('Where-Object { $_.Extension -ieq ".pdb" }', script)
+        self.assertIn("Debug symbol remains in plugin release package", script)
         self.assertIn('"Binaries\\Win64\\UnrealEditor-UEAgentKitEditor.dll"', script)
         self.assertIn('"Binaries\\Win64\\UnrealEditor.modules"', script)
         self.assertIn("$AllowedTopLevelNames", script)

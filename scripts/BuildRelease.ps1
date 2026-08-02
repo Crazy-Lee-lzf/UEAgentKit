@@ -80,6 +80,19 @@ foreach ($DirectoryName in $TransientPluginDirectories)
     }
 }
 
+$DebugSymbolFiles = @(
+    Get-ChildItem -LiteralPath $PluginPackage -Recurse -File |
+        Where-Object { $_.Extension -ieq ".pdb" }
+)
+foreach ($DebugSymbolFile in $DebugSymbolFiles)
+{
+    Remove-Item -LiteralPath $DebugSymbolFile.FullName -Force
+}
+if (@(Get-ChildItem -LiteralPath $PluginPackage -Recurse -File | Where-Object { $_.Extension -ieq ".pdb" }).Count -ne 0)
+{
+    throw "Debug symbol remains in plugin release package."
+}
+
 Copy-Item -LiteralPath (Join-Path $ToolRoot "LICENSE") -Destination (Join-Path $PluginPackage "LICENSE") -Force
 Copy-Item -LiteralPath (Join-Path $ToolRoot "docs\RELEASE_$Version.md") -Destination (Join-Path $PluginPackage "RELEASE_NOTES.md") -Force
 Copy-Item -LiteralPath (Join-Path $ToolRoot "docs\RELEASE_${Version}_EN.md") -Destination (Join-Path $PluginPackage "RELEASE_NOTES_EN.md") -Force
