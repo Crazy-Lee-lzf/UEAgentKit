@@ -18,8 +18,11 @@ public class UEAgentKitEditor : ModuleRules
 			new string[]
 			{
 				"AssetRegistry",
+				"AssetTools",
 				"BlueprintGraph",
 				"DataValidation",
+				"IKRig",
+				"IKRigEditor",
 				"Json",
 				"JsonUtilities",
 				"Kismet",
@@ -27,6 +30,9 @@ public class UEAgentKitEditor : ModuleRules
 				"Networking",
 				"Niagara",
 				"Projects",
+				"Slate",
+				"SlateCore",
+				"SlateRHIRenderer",
 				"Sockets",
 				"UnrealEd"
 			});
