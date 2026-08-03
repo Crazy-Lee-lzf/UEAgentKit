@@ -61,6 +61,12 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
         "read",
         "editor.getBlueprintGraphSelection",
     ),
+    ToolDefinition(
+        "ue_analyze_animation_retarget",
+        "live-read",
+        "read",
+        "editor.analyzeAnimationRetarget",
+    ),
     ToolDefinition("ue_open_asset", "live-action", "planning", "editor.openAsset"),
     ToolDefinition("ue_focus_asset", "live-action", "planning", "editor.focusAsset"),
     ToolDefinition("ue_sync_content_browser", "live-action", "planning", "editor.syncContentBrowser"),

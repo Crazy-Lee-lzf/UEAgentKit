@@ -140,3 +140,14 @@ def register_live_read_tools(
             return live_editor_service.call_tool("ue_get_blueprint_graph_selection")
         except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
             return error_response("ue_get_blueprint_graph_selection", exc, read_only=True)
+
+    # Retarget read-only tools keep the live-read group order matching the
+    # Tool Registry while living in their own module.
+    from .mcp_retarget_tools import register_retarget_tools
+
+    register_retarget_tools(
+        server=server,
+        live_editor_service=live_editor_service,
+        read_annotations=read_annotations,
+        error_response=error_response,
+    )

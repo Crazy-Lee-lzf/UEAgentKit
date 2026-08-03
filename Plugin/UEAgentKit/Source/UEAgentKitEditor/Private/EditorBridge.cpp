@@ -67,7 +67,8 @@ namespace UEAgentKitEditorBridgePrivate
 		TEXT("editor.validateFolder"),
 		TEXT("editor.runAutomationTest"),
 		TEXT("editor.saveAuthorizedAsset"),
-		TEXT("editor.applyAssetPropertyLive")
+		TEXT("editor.applyAssetPropertyLive"),
+		TEXT("retarget.inspect")
 	};
 
 	FString NormalizeProjectPath()
@@ -975,6 +976,32 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 		FString ErrorMessage;
 		SendActionResult(
 			TryApplyAssetPropertyLiveResult(Operation, AssetPath, Target, Value, Result, ErrorCode, ErrorMessage),
+			Result,
+			ErrorCode,
+			ErrorMessage);
+	}
+	else if (Method == TEXT("editor.analyzeAnimationRetarget"))
+	{
+		FString SourceMeshPath;
+		FString TargetMeshPath;
+		bool bIncludeOptionalChains = true;
+		double MaxBoneDetailsValue = 512.0;
+		Params->TryGetStringField(TEXT("sourceMesh"), SourceMeshPath);
+		Params->TryGetStringField(TEXT("targetMesh"), TargetMeshPath);
+		Params->TryGetBoolField(TEXT("includeOptionalChains"), bIncludeOptionalChains);
+		Params->TryGetNumberField(TEXT("maxBoneDetails"), MaxBoneDetailsValue);
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode;
+		FString ErrorMessage;
+		SendActionResult(
+			TryAnalyzeAnimationRetargetResult(
+				SourceMeshPath,
+				TargetMeshPath,
+				bIncludeOptionalChains,
+				FMath::Clamp(static_cast<int32>(MaxBoneDetailsValue), 64, 4096),
+				Result,
+				ErrorCode,
+				ErrorMessage),
 			Result,
 			ErrorCode,
 			ErrorMessage);

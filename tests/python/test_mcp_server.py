@@ -1381,7 +1381,7 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(capabilities["limits"]["liveBatchTimeoutSecondsMax"], 300)
         action_contract = capabilities["liveEditor"]["editorActions"]
         self.assertTrue(action_contract["available"])
-        self.assertEqual(action_contract["tools"], expected_names[15:23])
+        self.assertEqual(action_contract["tools"], expected_names[16:24])
         self.assertFalse(action_contract["saveSupported"])
         self.assertFalse(action_contract["pieSupported"])
         self.assertEqual(action_contract["actorIdentity"], "current-editor-world-actor-guid")
@@ -1694,7 +1694,7 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         expected_names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 53)
+        self.assertEqual(len(tools), 54)
         for tool in tools:
             definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
             self.assertEqual(bool(tool.annotations.readOnlyHint), definition.read_only, tool.name)

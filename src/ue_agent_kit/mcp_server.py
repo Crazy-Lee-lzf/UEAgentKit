@@ -916,6 +916,7 @@ def _build_live_editor_service(args: argparse.Namespace) -> LiveEditorBridgeServ
         LiveEditorBridgeConfig(
             project_path=args.project_path,
             timeout_seconds=args.live_editor_timeout_seconds,
+            policy_path=args.policy_path,
         ),
         server_version=__version__,
     )

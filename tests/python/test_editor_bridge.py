@@ -249,6 +249,25 @@ class _BridgeHandler(socketserver.StreamRequestHandler):
                     ],
                 },
             },
+            "editor.analyzeAnimationRetarget": {
+                "action": "analyze-animation-retarget",
+                "sourceMesh": params.get("sourceMesh", ""),
+                "targetMesh": params.get("targetMesh", ""),
+                "analysis": {
+                    "compatibility": "compatible_with_warnings",
+                    "sourceSkeleton": "/Game/Source/SK_Source_Skeleton.SK_Source_Skeleton",
+                    "targetSkeleton": "/Game/Target/SK_Target_Skeleton.SK_Target_Skeleton",
+                    "sourceRetargetRootCandidates": ["root", "pelvis"],
+                    "targetRetargetRootCandidates": ["Root"],
+                    "chainCandidates": [],
+                    "unmatchedRequiredChains": [],
+                    "unmatchedOptionalChains": ["LeftThumb", "RightThumb"],
+                    "warnings": ["Optional chain LeftThumb is unmatched."],
+                    "blockingIssues": [],
+                    "truncated": False,
+                },
+                "editorSessionId": "session-test",
+            },
             "editor.runAutomationTest": {
                 "action": "run-automation-test",
                 "testName": params.get("testName", ""),
@@ -850,6 +869,72 @@ class EditorBridgeTests(unittest.TestCase):
         with self.assertRaises(LiveEditorError) as context:
             self.service.call_method("editor.status")
         self.assertEqual(context.exception.code, "live-editor-authentication-failed")
+
+    def test_analyze_animation_retarget_normalizes_params_and_reports_analysis(self) -> None:
+        self._write_descriptor(
+            capabilities=self.capabilities + ["retarget.inspect"],
+        )
+        result = self.service.call_tool(
+            "ue_analyze_animation_retarget",
+            {
+                "sourceMesh": "/Game/Source/SK_Source.SK_Source",
+                "targetMesh": "/Game/Target/SK_Target.SK_Target",
+                "includeOptionalChains": False,
+                "maxBoneDetails": 256,
+            },
+        )
+        self.assertTrue(result["ok"])
+        analysis = result["result"]["analysis"]
+        self.assertEqual(analysis["compatibility"], "compatible_with_warnings")
+        self.assertEqual(result["result"]["sourceMesh"], "/Game/Source/SK_Source.SK_Source")
+        request = self.server.requests[-1]  # type: ignore[attr-defined]
+        self.assertEqual(
+            request["params"],
+            {
+                "sourceMesh": "/Game/Source/SK_Source.SK_Source",
+                "targetMesh": "/Game/Target/SK_Target.SK_Target",
+                "includeOptionalChains": False,
+                "maxBoneDetails": 256,
+            },
+        )
+
+    def test_analyze_animation_retarget_requires_registered_capability(self) -> None:
+        self._write_descriptor(
+            capabilities=[capability for capability in self.capabilities if capability != "retarget.inspect"]
+        )
+        with self.assertRaises(LiveEditorError) as context:
+            self.service.call_tool(
+                "ue_analyze_animation_retarget",
+                {
+                    "sourceMesh": "/Game/Source/SK_Source.SK_Source",
+                    "targetMesh": "/Game/Target/SK_Target.SK_Target",
+                },
+            )
+        self.assertEqual(context.exception.code, "live-editor-capability-unavailable")
+
+    def test_analyze_animation_retarget_rejects_invalid_parameters(self) -> None:
+        self._write_descriptor(
+            capabilities=self.capabilities + ["retarget.inspect"],
+        )
+        with self.assertRaises(LiveEditorError) as invalid_path:
+            self.service.call_tool(
+                "ue_analyze_animation_retarget",
+                {
+                    "sourceMesh": "/Game/NotAnObjectPath",
+                    "targetMesh": "/Game/Target/SK_Target.SK_Target",
+                },
+            )
+        self.assertEqual(invalid_path.exception.code, "live-editor-invalid-parameters")
+        with self.assertRaises(LiveEditorError) as bad_bones:
+            self.service.call_tool(
+                "ue_analyze_animation_retarget",
+                {
+                    "sourceMesh": "/Game/Source/SK_Source.SK_Source",
+                    "targetMesh": "/Game/Target/SK_Target.SK_Target",
+                    "maxBoneDetails": 8,
+                },
+            )
+        self.assertEqual(bad_bones.exception.code, "live-editor-invalid-parameters")
 
 
 if __name__ == "__main__":

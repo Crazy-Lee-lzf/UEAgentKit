@@ -33,6 +33,7 @@ _CAPABILITY_GATED_TOOLS = {
     "ue_start_batch_task": "editor.batchTask.start",
     "ue_get_batch_task": "editor.batchTask.status",
     "ue_cancel_batch_task": "editor.batchTask.cancel",
+    "ue_analyze_animation_retarget": "retarget.inspect",
 }
 
 
@@ -47,6 +48,7 @@ class LiveEditorError(RuntimeError):
 class LiveEditorBridgeConfig:
     project_path: Path
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
+    policy_path: Path | None = None
 
     @property
     def descriptor_path(self) -> Path:
@@ -72,7 +74,7 @@ class LiveEditorBridgeService:
             raise FileNotFoundError(project_path)
         if not 0.1 <= config.timeout_seconds <= 30.0:
             raise ValueError("Live Editor timeout must be from 0.1 through 30 seconds")
-        self.config = LiveEditorBridgeConfig(project_path, config.timeout_seconds)
+        self.config = LiveEditorBridgeConfig(project_path, config.timeout_seconds, config.policy_path)
         self.server_version = server_version
 
     def status(self) -> dict[str, Any]:
@@ -142,6 +144,21 @@ class LiveEditorBridgeService:
     def _normalize_tool_params(tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(params, dict):
             raise LiveEditorError("live-editor-invalid-parameters", "Live Editor Tool parameters must be an object.")
+        if tool_name == "ue_analyze_animation_retarget":
+            allowed = {"sourceMesh", "targetMesh", "includeOptionalChains", "maxBoneDetails"}
+            LiveEditorBridgeService._reject_unknown_params(params, allowed)
+            normalized = {
+                "sourceMesh": LiveEditorBridgeService._bounded_string(
+                    params.get("sourceMesh", ""), "sourceMesh", 512),
+                "targetMesh": LiveEditorBridgeService._bounded_string(
+                    params.get("targetMesh", ""), "targetMesh", 512),
+                "includeOptionalChains": bool(params.get("includeOptionalChains", True)),
+                "maxBoneDetails": LiveEditorBridgeService._bounded_integer(
+                    params.get("maxBoneDetails", 512), "maxBoneDetails", 64, 4096),
+            }
+            LiveEditorBridgeService._validate_game_object_path(normalized["sourceMesh"])
+            LiveEditorBridgeService._validate_game_object_path(normalized["targetMesh"])
+            return normalized
         if tool_name == "ue_get_output_log":
             allowed = {
                 "category",
