@@ -7,6 +7,7 @@ param(
     [switch]$IncludeBlueprints,
     [switch]$IncludeGenerated,
     [switch]$NoTags,
+    [switch]$NoAssetReaders,
     [switch]$CompactJson
 )
 
@@ -67,6 +68,10 @@ if ($IncludeGenerated)
 if ($NoTags)
 {
     $Arguments += "-NoTags"
+}
+if ($NoAssetReaders)
+{
+    $Arguments += "-NoAssetReaders"
 }
 if ($CompactJson)
 {

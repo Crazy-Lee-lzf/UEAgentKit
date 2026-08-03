@@ -102,7 +102,7 @@ def validate_asset(
         errors.append("packageName is empty")
     if not isinstance(registry, dict) or not str(registry.get("assetClassPath", "")):
         errors.append("assetRegistry.assetClassPath is empty")
-    if reader_status not in {"not-handled", "success", "failed"}:
+    if reader_status not in {"not-handled", "disabled", "success", "failed"}:
         errors.append(f"invalid assetReaderStatus: {reader_status!r}")
     if not reader_name:
         errors.append("assetReader is empty")

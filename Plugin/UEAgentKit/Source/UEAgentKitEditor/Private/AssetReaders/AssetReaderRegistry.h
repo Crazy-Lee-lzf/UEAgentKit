@@ -7,6 +7,7 @@
 enum class EAssetReaderStatus : uint8
 {
 	NotHandled,
+	Disabled,
 	Success,
 	Failed
 };

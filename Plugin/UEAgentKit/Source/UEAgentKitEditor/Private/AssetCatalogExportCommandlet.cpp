@@ -360,6 +360,7 @@ namespace AssetCatalogExportPrivate
 		const FAssetData& AssetData,
 		const FString& OutputDirectory,
 		const bool bIncludeTags,
+		const bool bIncludeAssetReaders,
 		const bool bPrettyJson,
 		FAssetCatalogExportResult& OutResult)
 	{
@@ -374,13 +375,17 @@ namespace AssetCatalogExportPrivate
 		TArray<TSharedPtr<FJsonValue>> References = BuildDependencies(AssetRegistry, AssetData, AssetSymbolId);
 
 		TSharedRef<FJsonObject> AssetDetails = MakeShared<FJsonObject>();
-		FString ReaderName;
+		FString ReaderName = bIncludeAssetReaders ? FString() : TEXT("disabled");
 		FString ReaderError;
-		const EAssetReaderStatus ReaderStatus = FAssetReaderRegistry::ReadAssetDetails(
-			AssetData,
-			AssetDetails,
-			ReaderName,
-			ReaderError);
+		EAssetReaderStatus ReaderStatus = EAssetReaderStatus::Disabled;
+		if (bIncludeAssetReaders)
+		{
+			ReaderStatus = FAssetReaderRegistry::ReadAssetDetails(
+				AssetData,
+				AssetDetails,
+				ReaderName,
+				ReaderError);
+		}
 
 		TArray<TSharedPtr<FJsonValue>> ChunkIds;
 		for (const int32 ChunkId : AssetData.GetChunkIDs())
@@ -475,6 +480,7 @@ namespace AssetCatalogExportPrivate
 		const bool bIncludeBlueprints,
 		const bool bIncludeGenerated,
 		const bool bIncludeTags,
+		const bool bIncludeAssetReaders,
 		const int32 SkippedBlueprintCount,
 		const int32 SkippedGeneratedCount,
 		const TArray<FAssetCatalogExportResult>& Results,
@@ -491,6 +497,7 @@ namespace AssetCatalogExportPrivate
 		RootObject->SetBoolField(TEXT("includeBlueprints"), bIncludeBlueprints);
 		RootObject->SetBoolField(TEXT("includeGenerated"), bIncludeGenerated);
 		RootObject->SetBoolField(TEXT("includeTags"), bIncludeTags);
+		RootObject->SetBoolField(TEXT("includeAssetReaders"), bIncludeAssetReaders);
 		RootObject->SetNumberField(TEXT("skippedBlueprintCount"), SkippedBlueprintCount);
 		RootObject->SetNumberField(TEXT("skippedGeneratedCount"), SkippedGeneratedCount);
 
@@ -566,6 +573,7 @@ int32 UAssetCatalogExportCommandlet::Main(const FString& Params)
 	const bool bIncludeBlueprints = FParse::Param(*Params, TEXT("IncludeBlueprints"));
 	const bool bIncludeGenerated = FParse::Param(*Params, TEXT("IncludeGenerated"));
 	const bool bIncludeTags = !FParse::Param(*Params, TEXT("NoTags"));
+	const bool bIncludeAssetReaders = !FParse::Param(*Params, TEXT("NoAssetReaders"));
 	const bool bPrettyJson = !FParse::Param(*Params, TEXT("CompactJson"));
 
 	if (AssetPath.IsEmpty() && RootPath.IsEmpty())
@@ -646,9 +654,10 @@ int32 UAssetCatalogExportCommandlet::Main(const FString& Params)
 	UE_LOG(
 		LogAssetCatalogExport,
 		Display,
-		TEXT("Exporting %d generic asset record(s) to %s."),
+		TEXT("Exporting %d generic asset record(s) to %s. AssetReaders=%s"),
 		AssetDataList.Num(),
-		*OutputDirectory);
+		*OutputDirectory,
+		bIncludeAssetReaders ? TEXT("enabled") : TEXT("disabled"));
 
 	TArray<FAssetCatalogExportResult> Results;
 	Results.Reserve(AssetDataList.Num());
@@ -656,7 +665,14 @@ int32 UAssetCatalogExportCommandlet::Main(const FString& Params)
 	for (const FAssetData& AssetData : AssetDataList)
 	{
 		FAssetCatalogExportResult Result;
-		if (!ExportAsset(AssetRegistry, AssetData, OutputDirectory, bIncludeTags, bPrettyJson, Result))
+		if (!ExportAsset(
+			AssetRegistry,
+			AssetData,
+			OutputDirectory,
+			bIncludeTags,
+			bIncludeAssetReaders,
+			bPrettyJson,
+			Result))
 		{
 			++FailureCount;
 			UE_LOG(LogAssetCatalogExport, Error, TEXT("Failed: %s - %s"), *Result.AssetPath, *Result.Error);
@@ -680,6 +696,7 @@ int32 UAssetCatalogExportCommandlet::Main(const FString& Params)
 		bIncludeBlueprints,
 		bIncludeGenerated,
 		bIncludeTags,
+		bIncludeAssetReaders,
 		SkippedBlueprintCount,
 		SkippedGeneratedCount,
 		Results,

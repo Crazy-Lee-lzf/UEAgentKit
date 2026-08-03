@@ -75,6 +75,8 @@ const TCHAR* FAssetReaderRegistry::StatusToString(const EAssetReaderStatus Statu
 {
 	switch (Status)
 	{
+	case EAssetReaderStatus::Disabled:
+		return TEXT("disabled");
 	case EAssetReaderStatus::Success:
 		return TEXT("success");
 	case EAssetReaderStatus::Failed:
