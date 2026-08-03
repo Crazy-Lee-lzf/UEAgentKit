@@ -15,7 +15,7 @@ if str(SRC_ROOT) not in sys.path:
 
 from ue_agent_kit.agent_api import IndexQueryService  # noqa: E402
 from ue_agent_kit.database import open_database  # noqa: E402
-from ue_agent_kit.indexer import build_index  # noqa: E402
+from ue_agent_kit.indexer import _windows_extended_path, build_index  # noqa: E402
 from ue_agent_kit.queries import (  # noqa: E402
     find_references,
     get_asset,
@@ -331,6 +331,20 @@ def make_generic_asset() -> dict[str, Any]:
 
 
 class IndexerAndQueryTests(unittest.TestCase):
+
+    def test_windows_extended_path_supports_drive_and_unc_paths(self) -> None:
+        separator = chr(92)
+        extended_prefix = separator * 2 + "?" + separator
+        drive_path = "C:" + separator + "deep" + separator + "asset.json"
+        unc_path = separator * 2 + "server" + separator + "share" + separator + "asset.json"
+
+        self.assertEqual(_windows_extended_path(drive_path), extended_prefix + drive_path)
+        self.assertEqual(
+            _windows_extended_path(unc_path),
+            extended_prefix + "UNC" + separator + unc_path[2:],
+        )
+        already_extended = extended_prefix + drive_path
+        self.assertEqual(_windows_extended_path(already_extended), already_extended)
 
     def test_generic_asset_catalog_import_and_class_search(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ueak_generic_assets_") as temporary_root:

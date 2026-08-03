@@ -4,6 +4,7 @@ import argparse
 import collections
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -54,13 +55,30 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def windows_extended_path(value: str) -> str:
+    separator = chr(92)
+    extended_prefix = separator * 2 + "?" + separator
+    unc_prefix = separator * 2
+    if value.startswith(extended_prefix):
+        return value
+    if value.startswith(unc_prefix):
+        return extended_prefix + "UNC" + separator + value[2:]
+    return extended_prefix + value
+
+
+def filesystem_path(path: Path) -> str:
+    value = str(path.resolve())
+    return windows_extended_path(value) if os.name == "nt" else value
+
+
 def load_json(path: Path) -> Any:
-    return json.loads(path.read_text(encoding="utf-8-sig"))
+    with open(filesystem_path(path), encoding="utf-8-sig") as stream:
+        return json.load(stream)
 
 
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
-    with path.open("rb") as stream:
+    with open(filesystem_path(path), "rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()

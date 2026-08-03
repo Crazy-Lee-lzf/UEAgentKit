@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -57,13 +58,34 @@ def _json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+def _windows_extended_path(value: str) -> str:
+    separator = chr(92)
+    extended_prefix = separator * 2 + "?" + separator
+    unc_prefix = separator * 2
+    if value.startswith(extended_prefix):
+        return value
+    if value.startswith(unc_prefix):
+        return extended_prefix + "UNC" + separator + value[2:]
+    return extended_prefix + value
+
+
+def _filesystem_path(path: Path) -> str:
+    value = str(path.resolve())
+    return _windows_extended_path(value) if os.name == "nt" else value
+
+
+def _is_file(path: Path) -> bool:
+    return os.path.isfile(_filesystem_path(path))
+
+
 def _load_json(path: Path) -> Any:
-    return json.loads(path.read_text(encoding="utf-8-sig"))
+    with open(_filesystem_path(path), encoding="utf-8-sig") as stream:
+        return json.load(stream)
 
 
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
-    with path.open("rb") as stream:
+    with open(_filesystem_path(path), "rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
@@ -86,11 +108,11 @@ def _resolve_recorded_path(export_root: Path, recorded_path: str, directory_name
     if marker_index >= 0:
         relative_path = normalized[marker_index + 1 :]
         relocated_path = export_root / Path(relative_path)
-        if relocated_path.is_file():
+        if _is_file(relocated_path):
             return relocated_path.resolve()
 
     direct_path = Path(recorded_path).expanduser()
-    if direct_path.is_file():
+    if _is_file(direct_path):
         return direct_path.resolve()
 
     return None
@@ -128,7 +150,7 @@ def _find_bpctx_path(export_root: Path, manifest_entry: dict[str, Any], canonica
         return None
 
     candidate = export_root / "bpctx" / relative_path.with_suffix(".bpctx")
-    return candidate.resolve() if candidate.is_file() else None
+    return candidate.resolve() if _is_file(candidate) else None
 
 
 def _asset_name(asset_path: str, package_name: str) -> str:
@@ -491,7 +513,7 @@ def build_index(
 ) -> IndexBuildResult:
     export_root = export_root.expanduser().resolve()
     manifest_path = export_root / "manifest.json"
-    if not manifest_path.is_file():
+    if not _is_file(manifest_path):
         raise FileNotFoundError(f"Manifest not found: {manifest_path}")
 
     manifest = _load_json(manifest_path)
