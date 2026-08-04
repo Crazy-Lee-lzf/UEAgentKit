@@ -137,10 +137,46 @@ namespace UEAgentKitRetarget
 		FString& OutErrorCode,
 		FString& OutErrorMessage);
 
+	// Naming rule applied to batch retarget outputs.
+	struct FRetargetBatchNaming
+	{
+		FString Search;
+		FString Replace;
+		FString Prefix;
+		FString Suffix;
+	};
+
+	// One batch retarget output.
+	struct FRetargetBatchOutputAsset
+	{
+		FString InputPath;
+		FString OutputPath;
+	};
+
+	// Runs one batch retarget step over the given source animation assets using
+	// the configured IK Retargeter. Validates input classes and skeleton match,
+	// denies overwriting existing outputs unless enabled, and returns the output
+	// asset object paths.
+	bool RunRetargetBatchStep(
+		const TArray<FString>& SourceAssetPaths,
+		USkeletalMesh* SourceMesh,
+		USkeletalMesh* TargetMesh,
+		UIKRetargeter* Retargeter,
+		const FString& OutputDirectory,
+		const FRetargetBatchNaming& Naming,
+		bool bOverwriteExisting,
+		bool bIncludeReferencedAssets,
+		bool bExportOnlyAnimatedBones,
+		bool bRetainAdditiveFlags,
+		TArray<FRetargetBatchOutputAsset>& OutOutputs,
+		FString& OutErrorCode,
+		FString& OutErrorMessage);
+
 	// Serializes a plan chain list for the JSON report.
 	TSharedRef<FJsonObject> PlanChainToJson(const FRetargetPlanChain& Chain);
 	TSharedRef<FJsonObject> IKRigStateToJson(const FRetargetIKRigState& State);
 	TSharedRef<FJsonObject> AssetChangeToJson(const FRetargetAssetChange& Change);
 	TSharedRef<FJsonObject> MappingReportToJson(const FRetargetMappingReport& Report);
 	TSharedRef<FJsonObject> PoseConfigToJson(const FRetargetPoseConfig& Pose);
+	TSharedRef<FJsonObject> BatchOutputToJson(const FRetargetBatchOutputAsset& Output);
 }

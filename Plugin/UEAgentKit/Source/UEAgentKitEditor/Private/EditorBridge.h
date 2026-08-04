@@ -137,6 +137,20 @@ private:
 		TSharedPtr<FJsonObject>& OutResult,
 		FString& OutErrorCode,
 		FString& OutErrorMessage) const;
+	bool TryRetargetBatchStepResult(
+		const FString& SourceMeshPath,
+		const FString& TargetMeshPath,
+		const FString& RetargeterPath,
+		const TArray<FString>& SourceAssetPaths,
+		const FString& OutputDirectory,
+		const TSharedPtr<FJsonObject>& Naming,
+		bool bOverwriteExisting,
+		bool bIncludeReferencedAssets,
+		bool bExportOnlyAnimatedBones,
+		bool bRetainAdditiveFlags,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage) const;
 	bool TryApplyAssetPropertyLiveResult(
 		const FString& Operation,
 		const FString& AssetPath,

@@ -7,6 +7,7 @@
 #include "Editor.h"
 #include "Engine/SkeletalMesh.h"
 #include "Rig/IKRigDefinition.h"
+#include "Retargeter/IKRetargeter.h"
 #include "UObject/UObjectGlobals.h"
 
 bool FUEAgentKitEditorBridge::TryAnalyzeAnimationRetargetResult(
@@ -498,6 +499,80 @@ bool FUEAgentKitEditorBridge::TryApplyAnimationRetargetSetupResult(
 	}
 	Result->SetBoolField(TEXT("transactionCreated"), bTransactionCreated);
 	Result->SetBoolField(TEXT("assetDirty"), bAssetDirty);
+	Result->SetStringField(TEXT("editorSessionId"), SessionId);
+	OutResult = Result;
+	return true;
+}
+
+bool FUEAgentKitEditorBridge::TryRetargetBatchStepResult(
+	const FString& SourceMeshPath,
+	const FString& TargetMeshPath,
+	const FString& RetargeterPath,
+	const TArray<FString>& SourceAssetPaths,
+	const FString& OutputDirectory,
+	const TSharedPtr<FJsonObject>& Naming,
+	bool bOverwriteExisting,
+	bool bIncludeReferencedAssets,
+	bool bExportOnlyAnimatedBones,
+	bool bRetainAdditiveFlags,
+	TSharedPtr<FJsonObject>& OutResult,
+	FString& OutErrorCode,
+	FString& OutErrorMessage) const
+{
+	FLoadedMeshPair Pair;
+	if (!LoadRetargetMeshPair(SourceMeshPath, TargetMeshPath, Pair, OutErrorCode, OutErrorMessage))
+	{
+		return false;
+	}
+	UIKRetargeter* Retargeter = Cast<UIKRetargeter>(LoadObject<UIKRetargeter>(nullptr, *RetargeterPath));
+	if (Retargeter == nullptr)
+	{
+		OutErrorCode = TEXT("retarget_asset_not_found");
+		OutErrorMessage = TEXT("The IK Retargeter asset is not loaded; load it first.");
+		return false;
+	}
+
+	UEAgentKitRetarget::FRetargetBatchNaming ParsedNaming;
+	if (Naming.IsValid())
+	{
+		ParsedNaming.Search = Naming->GetStringField(TEXT("search"));
+		ParsedNaming.Replace = Naming->GetStringField(TEXT("replace"));
+		ParsedNaming.Prefix = Naming->GetStringField(TEXT("prefix"));
+		ParsedNaming.Suffix = Naming->GetStringField(TEXT("suffix"));
+	}
+
+	TArray<UEAgentKitRetarget::FRetargetBatchOutputAsset> Outputs;
+	if (!UEAgentKitRetarget::RunRetargetBatchStep(
+			SourceAssetPaths,
+			Pair.SourceMesh,
+			Pair.TargetMesh,
+			Retargeter,
+			OutputDirectory,
+			ParsedNaming,
+			bOverwriteExisting,
+			bIncludeReferencedAssets,
+			bExportOnlyAnimatedBones,
+			bRetainAdditiveFlags,
+			Outputs,
+			OutErrorCode,
+			OutErrorMessage))
+	{
+		return false;
+	}
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetStringField(TEXT("action"), TEXT("retarget-batch-step"));
+	Result->SetStringField(TEXT("sourceMesh"), SourceMeshPath);
+	Result->SetStringField(TEXT("targetMesh"), TargetMeshPath);
+	Result->SetStringField(TEXT("retargeter"), RetargeterPath);
+	TArray<TSharedPtr<FJsonValue>> OutputValues;
+	for (const UEAgentKitRetarget::FRetargetBatchOutputAsset& Output : Outputs)
+	{
+		OutputValues.Add(MakeShared<FJsonValueObject>(UEAgentKitRetarget::BatchOutputToJson(Output)));
+	}
+	Result->SetArrayField(TEXT("outputs"), OutputValues);
+	Result->SetBoolField(TEXT("transactionCreated"), !Outputs.IsEmpty());
+	Result->SetBoolField(TEXT("assetDirty"), !Outputs.IsEmpty());
 	Result->SetStringField(TEXT("editorSessionId"), SessionId);
 	OutResult = Result;
 	return true;

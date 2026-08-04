@@ -70,7 +70,8 @@ namespace UEAgentKitEditorBridgePrivate
 		TEXT("editor.applyAssetPropertyLive"),
 		TEXT("retarget.inspect"),
 		TEXT("retarget.plan"),
-		TEXT("retarget.configure")
+		TEXT("retarget.configure"),
+		TEXT("retarget.batch")
 	};
 
 	FString NormalizeProjectPath()
@@ -1072,6 +1073,59 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 				PoseConfig,
 				bAllowLargePoseOffset,
 				bUpdateExisting,
+				Result,
+				ErrorCode,
+				ErrorMessage),
+			Result,
+			ErrorCode,
+			ErrorMessage);
+	}
+	else if (Method == TEXT("editor.retargetBatchStep"))
+	{
+		FString SourceMeshPath;
+		FString TargetMeshPath;
+		FString RetargeterPath;
+		FString OutputDirectory;
+		bool bOverwriteExisting = false;
+		bool bIncludeReferencedAssets = true;
+		bool bExportOnlyAnimatedBones = true;
+		bool bRetainAdditiveFlags = true;
+		Params->TryGetStringField(TEXT("sourceMesh"), SourceMeshPath);
+		Params->TryGetStringField(TEXT("targetMesh"), TargetMeshPath);
+		Params->TryGetStringField(TEXT("retargeter"), RetargeterPath);
+		Params->TryGetStringField(TEXT("outputDirectory"), OutputDirectory);
+		Params->TryGetBoolField(TEXT("overwriteExisting"), bOverwriteExisting);
+		Params->TryGetBoolField(TEXT("includeReferencedAssets"), bIncludeReferencedAssets);
+		Params->TryGetBoolField(TEXT("exportOnlyAnimatedBones"), bExportOnlyAnimatedBones);
+		Params->TryGetBoolField(TEXT("retainAdditiveFlags"), bRetainAdditiveFlags);
+		const TArray<TSharedPtr<FJsonValue>>* SourceAssetPaths = nullptr;
+		Params->TryGetArrayField(TEXT("sourceAssetPaths"), SourceAssetPaths);
+		const TSharedPtr<FJsonObject>* NamingField = nullptr;
+		Params->TryGetObjectField(TEXT("naming"), NamingField);
+		TSharedPtr<FJsonObject> Naming = NamingField != nullptr ? *NamingField : nullptr;
+		TArray<FString> ParsedAssetPaths;
+		if (SourceAssetPaths != nullptr)
+		{
+			for (const TSharedPtr<FJsonValue>& Value : *SourceAssetPaths)
+			{
+				ParsedAssetPaths.Add(Value->AsString());
+			}
+		}
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode;
+		FString ErrorMessage;
+		SendActionResult(
+			TryRetargetBatchStepResult(
+				SourceMeshPath,
+				TargetMeshPath,
+				RetargeterPath,
+				ParsedAssetPaths,
+				OutputDirectory,
+				Naming,
+				bOverwriteExisting,
+				bIncludeReferencedAssets,
+				bExportOnlyAnimatedBones,
+				bRetainAdditiveFlags,
 				Result,
 				ErrorCode,
 				ErrorMessage),

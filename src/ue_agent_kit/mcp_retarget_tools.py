@@ -8,11 +8,15 @@ from .editor_bridge import LiveEditorBridgeService, LiveEditorError
 RETARGET_INSPECT_CAPABILITY = "retarget.inspect"
 RETARGET_PLAN_CAPABILITY = "retarget.plan"
 RETARGET_CONFIGURE_CAPABILITY = "retarget.configure"
+RETARGET_BATCH_CAPABILITY = "retarget.batch"
 
 _CAPABILITY_FOR_TOOL = {
     "ue_analyze_animation_retarget": RETARGET_INSPECT_CAPABILITY,
     "ue_plan_animation_retarget": RETARGET_PLAN_CAPABILITY,
     "ue_apply_animation_retarget_setup": RETARGET_CONFIGURE_CAPABILITY,
+    "ue_start_animation_retarget_batch": RETARGET_BATCH_CAPABILITY,
+    "ue_get_animation_retarget_batch": RETARGET_BATCH_CAPABILITY,
+    "ue_cancel_animation_retarget_batch": RETARGET_BATCH_CAPABILITY,
 }
 
 
@@ -98,6 +102,18 @@ def register_retarget_workflow_tools(
         idempotentHint=False,
         openWorldHint=False,
     )
+    action_annotations = tool_annotations_type(
+        readOnlyHint=False,
+        destructiveHint=True,
+        idempotentHint=False,
+        openWorldHint=False,
+    )
+    read_annotations = tool_annotations_type(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False,
+    )
 
     @server.tool(annotations=planning_annotations)
     def ue_plan_animation_retarget(
@@ -144,3 +160,59 @@ def register_retarget_workflow_tools(
             )
         except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
             return error_response("ue_apply_animation_retarget_setup", exc, read_only=False)
+
+    @server.tool(annotations=action_annotations)
+    def ue_start_animation_retarget_batch(
+        planId: str,
+        retargeter: str,
+        sourceAssets: list[str],
+        outputDirectory: str = "",
+        naming: dict[str, Any] | None = None,
+        overwriteExisting: bool = False,
+        includeReferencedAssets: bool = True,
+        exportOnlyAnimatedBones: bool = True,
+        retainAdditiveFlags: bool = True,
+    ) -> dict[str, Any]:
+        """Queue an animation batch retarget task; poll ue_get_animation_retarget_batch to run it."""
+        try:
+            _assert_retarget_policy_capability(
+                policy_path=workflow_service.config.policy_path,
+                tool_name="ue_start_animation_retarget_batch",
+            )
+            return workflow_service.start_animation_retarget_batch(
+                plan_id=planId,
+                retargeter=retargeter,
+                source_assets=sourceAssets,
+                output_directory=outputDirectory,
+                naming=naming,
+                overwrite_existing=overwriteExisting,
+                include_referenced_assets=includeReferencedAssets,
+                export_only_animated_bones=exportOnlyAnimatedBones,
+                retain_additive_flags=retainAdditiveFlags,
+            )
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_start_animation_retarget_batch", exc, read_only=False)
+
+    @server.tool(annotations=read_annotations)
+    def ue_get_animation_retarget_batch(taskId: str) -> dict[str, Any]:
+        """Advance and return the state of an animation retarget batch task."""
+        try:
+            _assert_retarget_policy_capability(
+                policy_path=workflow_service.config.policy_path,
+                tool_name="ue_get_animation_retarget_batch",
+            )
+            return workflow_service.get_animation_retarget_batch(task_id=taskId)
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_get_animation_retarget_batch", exc, read_only=True)
+
+    @server.tool(annotations=action_annotations)
+    def ue_cancel_animation_retarget_batch(taskId: str) -> dict[str, Any]:
+        """Cancel a queued animation retarget batch task before it runs."""
+        try:
+            _assert_retarget_policy_capability(
+                policy_path=workflow_service.config.policy_path,
+                tool_name="ue_cancel_animation_retarget_batch",
+            )
+            return workflow_service.cancel_animation_retarget_batch(task_id=taskId)
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_cancel_animation_retarget_batch", exc, read_only=False)
