@@ -127,8 +127,9 @@ def register_retarget_workflow_tools(
         confirmation: str,
         changeSetId: str = "",
         updateExisting: bool = False,
+        allowLargePoseOffset: bool = False,
     ) -> dict[str, Any]:
-        """Apply the confirmed retarget plan: create or update the Source and Target IK Rigs."""
+        """Apply the confirmed retarget plan: create or update the Source and Target IK Rigs, the IK Retargeter, chain mappings and retarget pose."""
         try:
             _assert_retarget_policy_capability(
                 policy_path=workflow_service.config.policy_path,
@@ -139,6 +140,7 @@ def register_retarget_workflow_tools(
                 confirmation=confirmation,
                 change_set_id=changeSetId,
                 update_existing=updateExisting,
+                allow_large_pose_offset=allowLargePoseOffset,
             )
         except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
             return error_response("ue_apply_animation_retarget_setup", exc, read_only=False)

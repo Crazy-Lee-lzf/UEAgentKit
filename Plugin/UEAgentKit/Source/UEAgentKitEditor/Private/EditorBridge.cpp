@@ -1033,6 +1033,8 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 		FString TargetRigName;
 		FString SourceRetargetRoot;
 		FString TargetRetargetRoot;
+		FString RetargeterName;
+		bool bAllowLargePoseOffset = false;
 		bool bUpdateExisting = false;
 		Params->TryGetStringField(TEXT("sourceMesh"), SourceMeshPath);
 		Params->TryGetStringField(TEXT("targetMesh"), TargetMeshPath);
@@ -1040,11 +1042,18 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 		Params->TryGetStringField(TEXT("targetRigName"), TargetRigName);
 		Params->TryGetStringField(TEXT("sourceRetargetRoot"), SourceRetargetRoot);
 		Params->TryGetStringField(TEXT("targetRetargetRoot"), TargetRetargetRoot);
+		Params->TryGetStringField(TEXT("retargeterName"), RetargeterName);
+		Params->TryGetBoolField(TEXT("allowLargePoseOffset"), bAllowLargePoseOffset);
 		Params->TryGetBoolField(TEXT("updateExisting"), bUpdateExisting);
 		const TArray<TSharedPtr<FJsonValue>>* SourceChains = nullptr;
 		const TArray<TSharedPtr<FJsonValue>>* TargetChains = nullptr;
+		const TArray<TSharedPtr<FJsonValue>>* Mappings = nullptr;
 		Params->TryGetArrayField(TEXT("sourceChains"), SourceChains);
 		Params->TryGetArrayField(TEXT("targetChains"), TargetChains);
+		Params->TryGetArrayField(TEXT("mappings"), Mappings);
+		const TSharedPtr<FJsonObject>* PoseField = nullptr;
+		Params->TryGetObjectField(TEXT("pose"), PoseField);
+		TSharedPtr<FJsonObject> PoseConfig = PoseField != nullptr ? *PoseField : nullptr;
 		TSharedPtr<FJsonObject> Result;
 		FString ErrorCode;
 		FString ErrorMessage;
@@ -1058,6 +1067,10 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 				TargetRetargetRoot,
 				SourceChains != nullptr ? *SourceChains : TArray<TSharedPtr<FJsonValue>>(),
 				TargetChains != nullptr ? *TargetChains : TArray<TSharedPtr<FJsonValue>>(),
+				RetargeterName,
+				Mappings != nullptr ? *Mappings : TArray<TSharedPtr<FJsonValue>>(),
+				PoseConfig,
+				bAllowLargePoseOffset,
 				bUpdateExisting,
 				Result,
 				ErrorCode,

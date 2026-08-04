@@ -512,6 +512,55 @@ class RetargetWorkflowTests(unittest.TestCase):
         self.assertTrue(apply_result["setupReceipt"].startswith("rtg_"))
         self.assertTrue(apply_result["transactionCreated"])
 
+    def test_apply_passes_retargeter_config_to_bridge(self) -> None:
+        service, _ = self._make_service()
+        result = service.plan_animation_retarget(source_mesh=SOURCE_MESH, target_mesh=TARGET_MESH, output_directory="/Game/Retargeted")
+        service.live_editor_service.call_method.return_value = {
+            "action": "apply-animation-retarget-setup",
+            "sourceMesh": SOURCE_MESH,
+            "targetMesh": TARGET_MESH,
+            "changes": [
+                {"assetPath": "/Game/Characters/Source/IKRig_SK_Source.IKRig_SK_Source", "action": "no_op", "details": []},
+                {"assetPath": "/Game/Characters/Target/IKRig_SK_Target.IKRig_SK_Target", "action": "update", "details": ["required Root"]},
+                {"assetPath": "/Game/Characters/Source/IKRetargeter_SK_Source_to_SK_Target.IKRetargeter_SK_Source_to_SK_Target", "action": "create", "details": ["required Root", "pose TargetPose_A"]},
+            ],
+            "mappingReport": {
+                "mappedRequiredChains": ["Root", "Spine", "Neck", "Head"],
+                "mappedOptionalChains": [],
+                "unmappedSourceChains": [],
+                "unmappedTargetChains": [],
+                "duplicateMappings": [],
+                "mappingConfidence": 1.0,
+            },
+            "poseApplied": True,
+            "poseName": "TargetPose_A",
+            "transactionCreated": True,
+            "assetDirty": True,
+            "editorSessionId": "session-1",
+        }
+        apply_result = service.apply_animation_retarget_setup(
+            plan_id=result["planId"],
+            confirmation=f"{CONFIRMATION_PREFIX} {result['planId']}",
+            allow_large_pose_offset=True,
+        )
+        self.assertTrue(apply_result["ok"])
+        self.assertTrue(apply_result["changed"])
+        self.assertEqual(len(apply_result["changes"]), 3)
+        self.assertTrue(apply_result["poseApplied"])
+        self.assertEqual(apply_result["poseName"], "TargetPose_A")
+        self.assertEqual(apply_result["mappingReport"]["mappedRequiredChains"], ["Root", "Spine", "Neck", "Head"])
+        apply_calls = [
+            call for call in service.live_editor_service.call_method.call_args_list
+            if call.args[0] == "editor.applyAnimationRetargetSetup"
+        ]
+        self.assertEqual(len(apply_calls), 1)
+        sent = apply_calls[0].args[1]
+        self.assertEqual(sent["retargeterName"], "IKRetargeter_SK_Source_to_SK_Target")
+        self.assertIsInstance(sent["mappings"], list)
+        self.assertIn("targetChain", sent["mappings"][0])
+        self.assertEqual(sent["pose"]["poseName"], "TargetPose_A")
+        self.assertTrue(sent["allowLargePoseOffset"])
+
 
 if __name__ == "__main__":
     unittest.main()

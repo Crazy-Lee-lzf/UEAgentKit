@@ -6,6 +6,7 @@
 
 class USkeletalMesh;
 class UIKRigDefinition;
+class UIKRetargeter;
 
 namespace UEAgentKitRetarget
 {
@@ -69,8 +70,77 @@ namespace UEAgentKitRetarget
 		FString& OutErrorCode,
 		FString& OutErrorMessage);
 
+	// One explicit source/target chain mapping from a plan. Target chains are the
+	// semantic chain names written into the target IK Rig; source chains name the
+	// matching chain on the source IK Rig.
+	struct FRetargetChainMappingItem
+	{
+		FString TargetChainName;
+		FString SourceChainName;
+		ERetargetChainRequired Required = ERetargetChainRequired::Optional;
+	};
+
+	// One bone rotation offset in a retarget pose (Target skeleton, local space).
+	struct FRetargetPoseBoneRotation
+	{
+		FString BoneName;
+		FQuat RotationOffset = FQuat::Identity;
+	};
+
+	// Retarget pose configuration carried by a Plan.
+	struct FRetargetPoseConfig
+	{
+		FString PoseName;
+		FVector RootTranslationOffset = FVector::ZeroVector;
+		TArray<FRetargetPoseBoneRotation> BoneRotationOffsets;
+	};
+
+	// Report of applying the plan chain mappings to the IK Retargeter.
+	struct FRetargetMappingReport
+	{
+		TArray<FString> MappedRequiredChains;
+		TArray<FString> MappedOptionalChains;
+		TArray<FString> UnmappedSourceChains;
+		TArray<FString> UnmappedTargetChains;
+		TArray<FString> DuplicateMappings;
+		float MappingConfidence = 1.0f;
+	};
+
+	// Result of applying the IK Retargeter configuration.
+	struct FRetargeterSetupResult
+	{
+		FRetargetAssetChange Change;
+		FRetargetMappingReport Mapping;
+		FString PoseName;
+		bool bPoseApplied = false;
+	};
+
+	// Looks up an existing IK Retargeter that references the given source and
+	// target IK Rigs, both in memory and via the Asset Registry.
+	bool FindRetargeterForRigs(const UIKRigDefinition* SourceRig, const UIKRigDefinition* TargetRig, FString& OutAssetPath);
+
+	// Creates or updates the IK Retargeter bound to the source/target IK Rigs,
+	// applies the explicit chain mappings and the retarget pose. Returns the
+	// resulting change action (create/update/no_op) and the mapping report.
+	bool ApplyRetargeterConfig(
+		UIKRigDefinition* SourceRig,
+		UIKRigDefinition* TargetRig,
+		USkeletalMesh* SourceMesh,
+		USkeletalMesh* TargetMesh,
+		const FString& DesiredAssetName,
+		const TArray<FRetargetChainMappingItem>& Mappings,
+		const FRetargetPoseConfig& Pose,
+		bool bUpdateExisting,
+		bool bAllowCreate,
+		bool bAllowLargePoseOffset,
+		FRetargeterSetupResult& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage);
+
 	// Serializes a plan chain list for the JSON report.
 	TSharedRef<FJsonObject> PlanChainToJson(const FRetargetPlanChain& Chain);
 	TSharedRef<FJsonObject> IKRigStateToJson(const FRetargetIKRigState& State);
 	TSharedRef<FJsonObject> AssetChangeToJson(const FRetargetAssetChange& Change);
+	TSharedRef<FJsonObject> MappingReportToJson(const FRetargetMappingReport& Report);
+	TSharedRef<FJsonObject> PoseConfigToJson(const FRetargetPoseConfig& Pose);
 }

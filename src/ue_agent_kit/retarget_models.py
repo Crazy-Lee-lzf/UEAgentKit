@@ -105,8 +105,9 @@ def build_retarget_plan(
         "sourceIKRigAction": _action_for_existing(source_mesh, analysis),
         "targetIKRigAction": _action_for_existing(target_mesh, analysis),
         "retargeterAction": "create",
+        "retargeter": {"name": pick_retargeter_name(source_mesh, target_mesh), "action": "create"},
         "chains": {"source": source_chains, "target": target_chains},
-        "mappings": [],
+        "mappings": build_chain_mappings(source_chains, target_chains),
         "pose": {"poseName": "TargetPose_A", "rootTranslationOffset": [0.0, 0.0, 0.0], "boneRotationOffsets": []},
         "batchDefaults": {
             "includeReferencedAssets": True,
@@ -231,3 +232,36 @@ def pick_retarget_root(analysis: dict[str, Any], mesh_side: str) -> str:
 def pick_rig_name(mesh_path: str, prefix: str) -> str:
     short_name = mesh_path.rsplit(".", 1)[-1].rsplit("/", 1)[-1]
     return f"{prefix}{short_name}"
+
+
+def pick_retargeter_name(source_mesh: str, target_mesh: str) -> str:
+    source_short = source_mesh.rsplit(".", 1)[-1].rsplit("/", 1)[-1]
+    target_short = target_mesh.rsplit(".", 1)[-1].rsplit("/", 1)[-1]
+    return f"IKRetargeter_{source_short}_to_{target_short}"
+
+
+def build_chain_mappings(
+    source_chains: list[dict[str, Any]],
+    target_chains: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    """Builds explicit target→source chain mappings from the plan chains.
+
+    Both the source and target IK Rigs are written with the same semantic chain
+    names, so every chain present on both sides is mapped by name. Chains that
+    exist on only one side are intentionally omitted; the C++ mapping stage
+    reports them as unmapped rather than failing.
+    """
+    source_by_name = {str(chain.get("chain", "")): chain for chain in source_chains}
+    mappings: list[dict[str, str]] = []
+    for target_chain in target_chains:
+        chain_name = str(target_chain.get("chain", ""))
+        if not chain_name or chain_name not in source_by_name:
+            continue
+        mappings.append(
+            {
+                "targetChain": chain_name,
+                "sourceChain": chain_name,
+                "required": str(target_chain.get("required", "optional")).capitalize(),
+            }
+        )
+    return mappings

@@ -182,6 +182,10 @@ class LiveEditorBridgeService:
                 "targetRetargetRoot",
                 "sourceChains",
                 "targetChains",
+                "retargeterName",
+                "mappings",
+                "pose",
+                "allowLargePoseOffset",
                 "updateExisting",
             }
             LiveEditorBridgeService._reject_unknown_params(params, allowed)
@@ -200,6 +204,11 @@ class LiveEditorBridgeService:
                     params.get("targetRetargetRoot", ""), "targetRetargetRoot", 256),
                 "sourceChains": params.get("sourceChains", []),
                 "targetChains": params.get("targetChains", []),
+                "retargeterName": LiveEditorBridgeService._bounded_string(
+                    params.get("retargeterName", ""), "retargeterName", 256),
+                "mappings": params.get("mappings", []),
+                "pose": params.get("pose", {}),
+                "allowLargePoseOffset": bool(params.get("allowLargePoseOffset", False)),
                 "updateExisting": bool(params.get("updateExisting", False)),
             }
             if not isinstance(normalized["sourceChains"], list) or not isinstance(normalized["targetChains"], list):
@@ -211,6 +220,16 @@ class LiveEditorBridgeService:
                 raise LiveEditorError(
                     "live-editor-invalid-parameters",
                     "A retarget setup is limited to 64 chains per side.",
+                )
+            if not isinstance(normalized["mappings"], list):
+                raise LiveEditorError(
+                    "live-editor-invalid-parameters",
+                    "mappings must be an array of chain mapping objects.",
+                )
+            if not isinstance(normalized["pose"], dict):
+                raise LiveEditorError(
+                    "live-editor-invalid-parameters",
+                    "pose must be a retarget pose configuration object.",
                 )
             LiveEditorBridgeService._validate_game_object_path(normalized["sourceMesh"])
             LiveEditorBridgeService._validate_game_object_path(normalized["targetMesh"])

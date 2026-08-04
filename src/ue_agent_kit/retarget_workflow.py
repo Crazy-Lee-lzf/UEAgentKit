@@ -167,6 +167,7 @@ class RetargetWorkflowMixin:
                 "compatibility": analysis.get("compatibility", ""),
                 "sourceChains": source_chains,
                 "targetChains": target_chains,
+                "mappings": plan.get("mappings", []),
                 "revisions": revisions,
                 "warnings": warnings,
                 "blockingIssues": blocking_issues,
@@ -186,6 +187,7 @@ class RetargetWorkflowMixin:
         confirmation: str,
         change_set_id: str = "",
         update_existing: bool = False,
+        allow_large_pose_offset: bool = False,
     ) -> dict[str, Any]:
         with self._lock:
             if not self.config.commit_enabled:
@@ -235,6 +237,7 @@ class RetargetWorkflowMixin:
 
             source_chains = plan["chains"]["source"]
             target_chains = plan["chains"]["target"]
+            retargeter_name = str(plan.get("retargeter", {}).get("name", "")) or str(plan.get("retargeterName", ""))
             try:
                 self._assert_live_retarget_capability("retarget.configure")
                 live_result = self.live_editor_service.call_method(
@@ -248,6 +251,10 @@ class RetargetWorkflowMixin:
                         "targetRetargetRoot": plan["target"]["retargetRoot"],
                         "sourceChains": source_chains,
                         "targetChains": target_chains,
+                        "retargeterName": retargeter_name,
+                        "mappings": plan.get("mappings", []),
+                        "pose": plan.get("pose", {}),
+                        "allowLargePoseOffset": allow_large_pose_offset,
                         "updateExisting": update_existing,
                     },
                 )
@@ -322,9 +329,12 @@ class RetargetWorkflowMixin:
                 "setupReceipt": setup_receipt,
                 "assetDirty": bool(bridge_result.get("assetDirty")),
                 "transactionCreated": changed,
+                "mappingReport": bridge_result.get("mappingReport", {}),
+                "poseApplied": bool(bridge_result.get("poseApplied")),
+                "poseName": bridge_result.get("poseName", ""),
                 "result": bridge_result,
                 "nextStep": (
-                    "Verify the IK Rig state, then create the IK Retargeter in the next step."
+                    "Verify the IK Rig and IK Retargeter state, then run the animation batch retarget step."
                     if changed
                     else "No configuration change was required."
                 ),

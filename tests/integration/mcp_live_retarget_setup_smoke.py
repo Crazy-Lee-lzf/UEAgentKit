@@ -148,9 +148,10 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 changes = applied.get("changes", [])
                 actions = sorted(change.get("action") for change in changes)
                 # The fixtures already ship an IK Rig for both meshes, so the
-                # Manny source rig with an identical root/chains is a no_op
-                # while the XinYueHu rig is updated to the Plan chains. At
-                # least one asset must be created or updated.
+                # Manny source rig with an identical root/chains is a no_op,
+                # the XinYueHu rig is updated to the Plan chains, and the IK
+                # Retargeter is created. At least one asset must be created or
+                # updated and the retargeter must be created.
                 if (
                     not applied.get("ok")
                     or not applied.get("changed")
@@ -167,10 +168,28 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                     and "IKRig_XinYueHu" in str(change.get("assetPath", ""))
                     for change in changes
                 )
-                if not target_rig_updated:
+                retargeter_created = any(
+                    change.get("action") == "create"
+                    and "IKRetargeter_" in str(change.get("assetPath", ""))
+                    for change in changes
+                )
+                if not target_rig_updated or not retargeter_created:
                     raise RuntimeError(
-                        f"Retarget setup apply did not update the XinYueHu IK Rig: {applied}"
+                        f"Retarget setup apply did not update the XinYueHu IK Rig and create the IK Retargeter: {applied}"
                     )
+                mapping_report = applied.get("mappingReport", {})
+                mapped_required = set(mapping_report.get("mappedRequiredChains", []))
+                if not mapped_required.issuperset(REQUIRED_CHAIN_NAMES):
+                    raise RuntimeError(
+                        f"Retarget mapping is missing required chains: {sorted(REQUIRED_CHAIN_NAMES - mapped_required)}"
+                    )
+                if not applied.get("poseApplied") or applied.get("poseName") != "TargetPose_A":
+                    raise RuntimeError(f"Retarget pose was not applied: {applied}")
+                retargeter_change = next(
+                    (c for c in changes if "IKRetargeter_" in str(c.get("assetPath", ""))), None
+                )
+                if not retargeter_change or not retargeter_change.get("details"):
+                    raise RuntimeError(f"Retargeter change has no chain details: {retargeter_change}")
 
                 re_applied = await call(
                     session,
@@ -190,7 +209,11 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                     "planId": plan_id,
                     "compatibility": planned.get("compatibility"),
                     "sourceChainCount": len(planned.get("sourceChains", [])),
+                    "mappingCount": len(planned.get("mappings", [])),
                     "createdAssets": [change.get("assetPath") for change in changes],
+                    "retargeterAsset": retargeter_change.get("assetPath"),
+                    "mappedRequired": sorted(mapped_required),
+                    "poseApplied": applied.get("poseApplied"),
                     "conflictBlocked": not conflicting.get("ok"),
                     "idempotentThirdApply": not re_applied.get("changed"),
                 }

@@ -35,7 +35,9 @@ def _full_required_analysis(extra: list[dict[str, object]] | None = None) -> dic
 
 from ue_agent_kit.retarget_models import (  # noqa: E402
     HIGH_RISK_BONE_KEYWORDS,
+    build_chain_mappings,
     build_retarget_plan,
+    pick_retargeter_name,
     plan_digest,
     select_chains_from_analysis,
 )
@@ -149,6 +151,44 @@ class ChainSelectionTests(unittest.TestCase):
         self.assertTrue(first.startswith("sha256:"))
         self.assertEqual(plan["confirmationText"], "APPLY RETARGET SETUP plan_x")
         self.assertEqual(plan["schemaVersion"], "retarget-plan-v1")
+
+
+class ChainMappingTests(unittest.TestCase):
+    def _source_chains(self, names: list[str]) -> list[dict[str, str]]:
+        return [
+            {"chain": name, "required": "required" if name in REQUIRED_CHAIN_NAMES_TEST else "optional",
+             "side": "Center", "startBone": name, "endBone": name}
+            for name in names
+        ]
+
+    def test_maps_chains_present_on_both_sides(self) -> None:
+        source = self._source_chains(["Root", "Spine", "Head"])
+        target = self._source_chains(["Root", "Spine", "Head", "LeftHand"])
+        mappings = build_chain_mappings(source, target)
+        self.assertEqual(
+            {(m["targetChain"], m["sourceChain"]) for m in mappings},
+            {("Root", "Root"), ("Spine", "Spine"), ("Head", "Head")},
+        )
+
+    def test_skips_target_only_chains(self) -> None:
+        source = self._source_chains(["Root", "Spine"])
+        target = self._source_chains(["Root", "Spine", "LeftHand"])
+        mappings = build_chain_mappings(source, target)
+        self.assertNotIn("LeftHand", [m["targetChain"] for m in mappings])
+
+    def test_required_flag_is_carried(self) -> None:
+        source = self._source_chains(["Root", "LeftHand"])
+        target = self._source_chains(["Root", "LeftHand"])
+        mappings = build_chain_mappings(source, target)
+        by_name = {m["targetChain"]: m for m in mappings}
+        self.assertEqual(by_name["Root"]["required"], "Required")
+        self.assertEqual(by_name["LeftHand"]["required"], "Optional")
+
+    def test_pick_retargeter_name(self) -> None:
+        self.assertEqual(
+            pick_retargeter_name("/Game/A/SKM_Manny.SKM_Manny", "/Game/B/SK_XinYueHu.SK_XinYueHu"),
+            "IKRetargeter_SKM_Manny_to_SK_XinYueHu",
+        )
 
 
 if __name__ == "__main__":

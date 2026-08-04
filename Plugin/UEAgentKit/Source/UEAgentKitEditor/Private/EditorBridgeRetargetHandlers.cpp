@@ -6,6 +6,7 @@
 #include "Dom/JsonObject.h"
 #include "Editor.h"
 #include "Engine/SkeletalMesh.h"
+#include "Rig/IKRigDefinition.h"
 #include "UObject/UObjectGlobals.h"
 
 bool FUEAgentKitEditorBridge::TryAnalyzeAnimationRetargetResult(
@@ -194,6 +195,97 @@ namespace
 		}
 		return true;
 	}
+
+	bool ParseChainMappings(
+		const TArray<TSharedPtr<FJsonValue>>& Mappings,
+		TArray<UEAgentKitRetarget::FRetargetChainMappingItem>& OutMappings,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
+	{
+		OutMappings.Empty();
+		for (const TSharedPtr<FJsonValue>& Value : Mappings)
+		{
+			const TSharedPtr<FJsonObject> MappingJson = Value.IsValid() ? Value->AsObject() : nullptr;
+			if (!MappingJson.IsValid())
+			{
+				OutErrorCode = TEXT("retarget_chain_ambiguous");
+				OutErrorMessage = TEXT("Each plan chain mapping must be a JSON object.");
+				return false;
+			}
+			UEAgentKitRetarget::FRetargetChainMappingItem Item;
+			Item.TargetChainName = MappingJson->GetStringField(TEXT("targetChain"));
+			Item.SourceChainName = MappingJson->GetStringField(TEXT("sourceChain"));
+			const FString Required = MappingJson->GetStringField(TEXT("required"));
+			Item.Required = Required.ToLower() == TEXT("required")
+				? UEAgentKitRetarget::ERetargetChainRequired::Required
+				: UEAgentKitRetarget::ERetargetChainRequired::Optional;
+			if (Item.TargetChainName.IsEmpty() || Item.SourceChainName.IsEmpty())
+			{
+				OutErrorCode = TEXT("retarget_chain_ambiguous");
+				OutErrorMessage = TEXT("Each plan chain mapping requires targetChain and sourceChain fields.");
+				return false;
+			}
+			OutMappings.Add(Item);
+		}
+		return true;
+	}
+
+	bool ParsePoseConfig(
+		const TSharedPtr<FJsonObject>& PoseJson,
+		UEAgentKitRetarget::FRetargetPoseConfig& OutPose,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
+	{
+		OutPose = UEAgentKitRetarget::FRetargetPoseConfig();
+		if (!PoseJson.IsValid())
+		{
+			return true;
+		}
+		OutPose.PoseName = PoseJson->GetStringField(TEXT("poseName"));
+		if (OutPose.PoseName.IsEmpty())
+		{
+			return true;
+		}
+		const TArray<TSharedPtr<FJsonValue>>* RootValue = nullptr;
+		if (PoseJson->TryGetArrayField(TEXT("rootTranslationOffset"), RootValue) && RootValue->Num() == 3)
+		{
+			OutPose.RootTranslationOffset.X = (*RootValue)[0]->AsNumber();
+			OutPose.RootTranslationOffset.Y = (*RootValue)[1]->AsNumber();
+			OutPose.RootTranslationOffset.Z = (*RootValue)[2]->AsNumber();
+		}
+		const TArray<TSharedPtr<FJsonValue>>* BoneValues = nullptr;
+		if (PoseJson->TryGetArrayField(TEXT("boneRotationOffsets"), BoneValues))
+		{
+			for (const TSharedPtr<FJsonValue>& BoneValue : *BoneValues)
+			{
+				const TSharedPtr<FJsonObject> BoneJson = BoneValue.IsValid() ? BoneValue->AsObject() : nullptr;
+				if (!BoneJson.IsValid())
+				{
+					OutErrorCode = TEXT("retarget_pose_invalid");
+					OutErrorMessage = TEXT("Each pose bone rotation offset must be a JSON object.");
+					return false;
+				}
+				UEAgentKitRetarget::FRetargetPoseBoneRotation Bone;
+				Bone.BoneName = BoneJson->GetStringField(TEXT("bone"));
+				if (Bone.BoneName.IsEmpty())
+				{
+					OutErrorCode = TEXT("retarget_pose_invalid");
+					OutErrorMessage = TEXT("Each pose bone rotation offset requires a bone field.");
+					return false;
+				}
+				const TArray<TSharedPtr<FJsonValue>>* RotationValue = nullptr;
+				if (BoneJson->TryGetArrayField(TEXT("rotation"), RotationValue) && RotationValue->Num() == 4)
+				{
+					Bone.RotationOffset.W = (*RotationValue)[0]->AsNumber();
+					Bone.RotationOffset.X = (*RotationValue)[1]->AsNumber();
+					Bone.RotationOffset.Y = (*RotationValue)[2]->AsNumber();
+					Bone.RotationOffset.Z = (*RotationValue)[3]->AsNumber();
+				}
+				OutPose.BoneRotationOffsets.Add(Bone);
+			}
+		}
+		return true;
+	}
 }
 
 bool FUEAgentKitEditorBridge::TryPlanAnimationRetargetResult(
@@ -254,6 +346,10 @@ bool FUEAgentKitEditorBridge::TryApplyAnimationRetargetSetupResult(
 	const FString& TargetRetargetRoot,
 	const TArray<TSharedPtr<FJsonValue>>& SourceChains,
 	const TArray<TSharedPtr<FJsonValue>>& TargetChains,
+	const FString& RetargeterName,
+	const TArray<TSharedPtr<FJsonValue>>& Mappings,
+	const TSharedPtr<FJsonObject>& PoseConfig,
+	bool bAllowLargePoseOffset,
 	bool bUpdateExisting,
 	TSharedPtr<FJsonObject>& OutResult,
 	FString& OutErrorCode,
@@ -271,13 +367,17 @@ bool FUEAgentKitEditorBridge::TryApplyAnimationRetargetSetupResult(
 	{
 		return false;
 	}
+	TArray<UEAgentKitRetarget::FRetargetChainMappingItem> ParsedMappings;
+	UEAgentKitRetarget::FRetargetPoseConfig ParsedPose;
+	if (!ParseChainMappings(Mappings, ParsedMappings, OutErrorCode, OutErrorMessage)
+		|| !ParsePoseConfig(PoseConfig, ParsedPose, OutErrorCode, OutErrorMessage))
+	{
+		return false;
+	}
 
 	TArray<UEAgentKitRetarget::FRetargetAssetChange> Changes;
-	const bool bSourceAllowedCreate = SourceRigName.IsEmpty() ? false : true;
-	const bool bTargetAllowedCreate = TargetRigName.IsEmpty() ? false : true;
 	// Preflight both rigs before mutating anything so conflict detection never
 	// leaves partial in-memory assets behind.
-	FString PreflightError;
 	if (!UEAgentKitRetarget::PreflightIKRigConfig(
 			Pair.SourceMesh,
 			SourceRetargetRoot,
@@ -300,7 +400,6 @@ bool FUEAgentKitEditorBridge::TryApplyAnimationRetargetSetupResult(
 					   const FString& RigName,
 					   const FString& RetargetRoot,
 					   const TArray<UEAgentKitRetarget::FRetargetPlanChain>& PlanChains,
-					   const TCHAR* Label,
 					   FString& ErrorCode,
 					   FString& ErrorMessage) -> bool
 	{
@@ -322,12 +421,57 @@ bool FUEAgentKitEditorBridge::TryApplyAnimationRetargetSetupResult(
 		return true;
 	};
 
-	FString Error;
-	if (!ApplyRig(Pair.SourceMesh, SourceRigName, SourceRetargetRoot, ParsedSourceChains, TEXT("source"), OutErrorCode, OutErrorMessage)
-		|| !ApplyRig(Pair.TargetMesh, TargetRigName, TargetRetargetRoot, ParsedTargetChains, TEXT("target"), OutErrorCode, OutErrorMessage))
+	if (!ApplyRig(Pair.SourceMesh, SourceRigName, SourceRetargetRoot, ParsedSourceChains, OutErrorCode, OutErrorMessage)
+		|| !ApplyRig(Pair.TargetMesh, TargetRigName, TargetRetargetRoot, ParsedTargetChains, OutErrorCode, OutErrorMessage))
 	{
 		return false;
 	}
+
+	// Load the rigs that were created or updated so the retargeter can reference
+	// them. The rig location is resolved by mesh reference, which finds both
+	// freshly-created in-memory assets and pre-existing on-disk rigs (which can
+	// live in a different folder than the mesh).
+	auto LoadRigForChange = [](USkeletalMesh* Mesh, const UEAgentKitRetarget::FRetargetAssetChange& Change) -> UIKRigDefinition*
+	{
+		if (Change.Action == TEXT("create") || Change.Action == TEXT("update"))
+		{
+			if (UIKRigDefinition* Rig = Cast<UIKRigDefinition>(LoadObject<UIKRigDefinition>(nullptr, *Change.AssetPath)))
+			{
+				return Rig;
+			}
+		}
+		UEAgentKitRetarget::FRetargetIKRigState State;
+		if (UEAgentKitRetarget::FindIKRigForMesh(Mesh, State))
+		{
+			return Cast<UIKRigDefinition>(LoadObject<UIKRigDefinition>(nullptr, *State.AssetPath));
+		}
+		return nullptr;
+	};
+
+	UEAgentKitRetarget::FRetargeterSetupResult RetargeterResult;
+	FString RetargeterErrorCode;
+	FString RetargeterErrorMessage;
+	const bool bRetargeterApplied = UEAgentKitRetarget::ApplyRetargeterConfig(
+		LoadRigForChange(Pair.SourceMesh, Changes[0]),
+		LoadRigForChange(Pair.TargetMesh, Changes[1]),
+		Pair.SourceMesh,
+		Pair.TargetMesh,
+		RetargeterName,
+		ParsedMappings,
+		ParsedPose,
+		bUpdateExisting,
+		RetargeterName.IsEmpty() ? false : true,
+		bAllowLargePoseOffset,
+		RetargeterResult,
+		RetargeterErrorCode,
+		RetargeterErrorMessage);
+	if (!bRetargeterApplied)
+	{
+		OutErrorCode = RetargeterErrorCode;
+		OutErrorMessage = RetargeterErrorMessage;
+		return false;
+	}
+	Changes.Add(RetargeterResult.Change);
 
 	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetStringField(TEXT("action"), TEXT("apply-animation-retarget-setup"));
@@ -339,6 +483,9 @@ bool FUEAgentKitEditorBridge::TryApplyAnimationRetargetSetupResult(
 			ChangeValues.Add(MakeShared<FJsonValueObject>(UEAgentKitRetarget::AssetChangeToJson(Change)));
 	}
 	Result->SetArrayField(TEXT("changes"), ChangeValues);
+	Result->SetField(TEXT("mappingReport"), MakeShared<FJsonValueObject>(UEAgentKitRetarget::MappingReportToJson(RetargeterResult.Mapping)));
+	Result->SetBoolField(TEXT("poseApplied"), RetargeterResult.bPoseApplied);
+	Result->SetStringField(TEXT("poseName"), RetargeterResult.PoseName);
 	bool bTransactionCreated = false;
 	bool bAssetDirty = false;
 	for (const UEAgentKitRetarget::FRetargetAssetChange& Change : Changes)
