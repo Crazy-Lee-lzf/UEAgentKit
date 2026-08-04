@@ -11,12 +11,14 @@
 - [`AI_NATIVE_UE_EDITOR.md`](AI_NATIVE_UE_EDITOR.md)：AI 可用 UE5 编辑器的实时 CRUD、项目模型、知识树、性能与风险自适应安全架构。
 - [`AI_NATIVE_UE_EDITOR_EN.md`](AI_NATIVE_UE_EDITOR_EN.md)：English AI-usable UE5 Editor architecture.
 - [`PERFORMANCE_TEST_PLAN.md`](PERFORMANCE_TEST_PLAN.md)：500 GB 商业项目模型、E 盘 SSD 上的 160–180 GB 物理测试工程、原生 SSD 与 50 MB/s HDD 模拟档位、日常交互目标与性能门禁。
+- [`OFFLINE_INDEX_PERFORMANCE_PLAN.md`](OFFLINE_INDEX_PERFORMANCE_PLAN.md)：L0 Registry、L1 Fast Revision、增量 Manifest、分片输出、External Actor 聚合和按需专用 Reader 的实施计划。
 - [`PERFORMANCE_BASELINE_DARKRUINS_20260803.md`](PERFORMANCE_BASELINE_DARKRUINS_20260803.md)：DarkRuins 真实项目首轮基线、Registry-only 模式、External Actor、小文件、长路径、SQLite 建库与查询结果。
 - [`BRANCH_WORKTREES.md`](BRANCH_WORKTREES.md)：Realtime I/O 与 Memory/Context 双分支、Worktree、公共协议和合并规范。
 - [`BRANCH_WORKTREES_EN.md`](BRANCH_WORKTREES_EN.md)：English dual-branch and Worktree workflow.
 - [`Handoffs/MEMORY_CONTEXT_HANDOFF_20260801.md`](Handoffs/MEMORY_CONTEXT_HANDOFF_20260801.md)：Memory/Context 里程碑实现范围、兼容要求与测试门禁。
 - [`Handoffs/LIVE_EDITOR_REALTIME_IO_HANDOFF_20260801.md`](Handoffs/LIVE_EDITOR_REALTIME_IO_HANDOFF_20260801.md)：Realtime I/O 里程碑实现范围、测试门禁与后续扩展边界。
 - [`Handoffs/UEAGENTKIT_0.7.0_RELEASE_HANDOFF_20260803.md`](Handoffs/UEAGENTKIT_0.7.0_RELEASE_HANDOFF_20260803.md)：0.7.0 本地 Release、验证结果、源码产物、MSVC 阻塞与后续性能测试交接。
+- [`Handoffs/LIVE_ASSET_READ_PLAN_FOR_REALTIME_BRANCH_20260804.md`](Handoffs/LIVE_ASSET_READ_PLAN_FOR_REALTIME_BRANCH_20260804.md)：供 Realtime I/O 分支吸收的已打开/已加载资产深读、显式打开和 Live Write Readback 计划；当前仅存放于性能分支。
 - [`../prompts/LIVE_EDITOR_REALTIME_IO_LOCAL_AGENT_PROMPT_20260801.md`](../prompts/LIVE_EDITOR_REALTIME_IO_LOCAL_AGENT_PROMPT_20260801.md)：可直接复制给本地代码 Agent 的执行提示词。
 
 - [`COMPARISON_UE_LLM_TOOLKIT.md`](COMPARISON_UE_LLM_TOOLKIT.md)：与 ue-llm-toolkit 的读取、写入、Live Editor 和安全闭环对比。

@@ -88,16 +88,23 @@ Blueprint                 5,000–30,000
 
 ## 4. 分层测试环境
 
-### 4.1 日常真实基线：Reforge
+### 4.1 日常功能基线：我的项目与 ModelPreview
 
-用于验证当前实际工作体验：
+使用现有专用工程，不接触 Reforge：
+
+```text
+E:\WorkSpace\我的项目       受控写入、Undo、Save、Verify 和 Fixture 回归
+E:\WorkSpace\ModelPreview  真实角色、材质、动画、Blueprint 和 Editor Context
+```
+
+用于验证日常工作体验：
 
 - 普通资产搜索和引用查询。
 - 当前 Editor Context。
 - Live Apply、Undo、Discard、Save。
 - Data Asset、DataTable、Material Instance 和后续 Blueprint Graph 写入。
 
-这组结果回答“当前项目每天用起来是否足够快”。
+这组结果回答“常用读取和修改每天用起来是否足够快”，并保证所有破坏性测试都发生在可重置的测试资产中。
 
 ### 4.2 中型真实样本：DarkRuinsMegascansSample
 
@@ -120,6 +127,8 @@ External Actor/Object  约 12,018 个小文件
 该样本无需解压，适合测试大美术资产、大文件顺序读取和大量 External Actor 小文件元数据访问。
 
 首轮 NativeSSD 只读基线已完成，包含 Registry-only、External Actor/Object、Windows 长路径、SQLite 建库、未变化增量和查询延迟。结果与结论见 [`PERFORMANCE_BASELINE_DARKRUINS_20260803.md`](PERFORMANCE_BASELINE_DARKRUINS_20260803.md)。
+
+L0 Registry、L1 Fast Revision、增量 Manifest、分片输出和按需专用 Reader 的具体实施顺序见 [`OFFLINE_INDEX_PERFORMANCE_PLAN.md`](OFFLINE_INDEX_PERFORMANCE_PLAN.md)。
 
 ### 4.3 大型物理测试工程：UEAgentKitPerfProject
 
@@ -517,7 +526,7 @@ feature/performance-benchmarks
 ## 12. 实施顺序
 
 1. 增加统一阶段计时与 JSON 报告，不先优化。
-2. 在 Reforge 建立日常查询和 Live Write 基线。
+2. 在“我的项目”和 ModelPreview 建立日常查询、Editor Context 与 Live Write 基线。
 3. 在 DarkRuins 上进行只读 Registry、文件分布和 External Actor 基线。
 4. 建立 500k 资产、10m Reference 的逻辑数据库。
 5. 创建 `UEAgentKitPerfProject`，先达到 50 GB，再验证生成器和磁盘保护。
