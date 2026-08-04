@@ -159,6 +159,62 @@ class LiveEditorBridgeService:
             LiveEditorBridgeService._validate_game_object_path(normalized["sourceMesh"])
             LiveEditorBridgeService._validate_game_object_path(normalized["targetMesh"])
             return normalized
+        if tool_name == "ue_plan_animation_retarget":
+            allowed = {"sourceMesh", "targetMesh", "includeOptionalChains"}
+            LiveEditorBridgeService._reject_unknown_params(params, allowed)
+            normalized = {
+                "sourceMesh": LiveEditorBridgeService._bounded_string(
+                    params.get("sourceMesh", ""), "sourceMesh", 512),
+                "targetMesh": LiveEditorBridgeService._bounded_string(
+                    params.get("targetMesh", ""), "targetMesh", 512),
+                "includeOptionalChains": bool(params.get("includeOptionalChains", True)),
+            }
+            LiveEditorBridgeService._validate_game_object_path(normalized["sourceMesh"])
+            LiveEditorBridgeService._validate_game_object_path(normalized["targetMesh"])
+            return normalized
+        if tool_name == "ue_apply_animation_retarget_setup":
+            allowed = {
+                "sourceMesh",
+                "targetMesh",
+                "sourceRigName",
+                "targetRigName",
+                "sourceRetargetRoot",
+                "targetRetargetRoot",
+                "sourceChains",
+                "targetChains",
+                "updateExisting",
+            }
+            LiveEditorBridgeService._reject_unknown_params(params, allowed)
+            normalized = {
+                "sourceMesh": LiveEditorBridgeService._bounded_string(
+                    params.get("sourceMesh", ""), "sourceMesh", 512),
+                "targetMesh": LiveEditorBridgeService._bounded_string(
+                    params.get("targetMesh", ""), "targetMesh", 512),
+                "sourceRigName": LiveEditorBridgeService._bounded_string(
+                    params.get("sourceRigName", ""), "sourceRigName", 256),
+                "targetRigName": LiveEditorBridgeService._bounded_string(
+                    params.get("targetRigName", ""), "targetRigName", 256),
+                "sourceRetargetRoot": LiveEditorBridgeService._bounded_string(
+                    params.get("sourceRetargetRoot", ""), "sourceRetargetRoot", 256),
+                "targetRetargetRoot": LiveEditorBridgeService._bounded_string(
+                    params.get("targetRetargetRoot", ""), "targetRetargetRoot", 256),
+                "sourceChains": params.get("sourceChains", []),
+                "targetChains": params.get("targetChains", []),
+                "updateExisting": bool(params.get("updateExisting", False)),
+            }
+            if not isinstance(normalized["sourceChains"], list) or not isinstance(normalized["targetChains"], list):
+                raise LiveEditorError(
+                    "live-editor-invalid-parameters",
+                    "sourceChains and targetChains must be arrays of chain objects.",
+                )
+            if len(normalized["sourceChains"]) > 64 or len(normalized["targetChains"]) > 64:
+                raise LiveEditorError(
+                    "live-editor-invalid-parameters",
+                    "A retarget setup is limited to 64 chains per side.",
+                )
+            LiveEditorBridgeService._validate_game_object_path(normalized["sourceMesh"])
+            LiveEditorBridgeService._validate_game_object_path(normalized["targetMesh"])
+            return normalized
         if tool_name == "ue_get_output_log":
             allowed = {
                 "category",

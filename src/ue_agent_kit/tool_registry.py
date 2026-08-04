@@ -97,6 +97,8 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_plan_patch", "workflow", "planning"),
     ToolDefinition("ue_dry_run_patch", "workflow", "planning"),
     ToolDefinition("ue_apply_patch", "workflow", "destructive"),
+    ToolDefinition("ue_plan_animation_retarget", "workflow", "planning"),
+    ToolDefinition("ue_apply_animation_retarget_setup", "workflow", "destructive"),
     ToolDefinition("ue_verify_asset", "workflow", "planning"),
     ToolDefinition("ue_verify_live_write", "workflow", "planning"),
     ToolDefinition("ue_get_asset_state", "workflow", "read"),

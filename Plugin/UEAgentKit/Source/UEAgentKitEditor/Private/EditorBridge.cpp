@@ -68,7 +68,9 @@ namespace UEAgentKitEditorBridgePrivate
 		TEXT("editor.runAutomationTest"),
 		TEXT("editor.saveAuthorizedAsset"),
 		TEXT("editor.applyAssetPropertyLive"),
-		TEXT("retarget.inspect")
+		TEXT("retarget.inspect"),
+		TEXT("retarget.plan"),
+		TEXT("retarget.configure")
 	};
 
 	FString NormalizeProjectPath()
@@ -999,6 +1001,64 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 				TargetMeshPath,
 				bIncludeOptionalChains,
 				FMath::Clamp(static_cast<int32>(MaxBoneDetailsValue), 64, 4096),
+				Result,
+				ErrorCode,
+				ErrorMessage),
+			Result,
+			ErrorCode,
+			ErrorMessage);
+	}
+	else if (Method == TEXT("editor.planAnimationRetarget"))
+	{
+		FString SourceMeshPath;
+		FString TargetMeshPath;
+		bool bIncludeOptionalChains = true;
+		Params->TryGetStringField(TEXT("sourceMesh"), SourceMeshPath);
+		Params->TryGetStringField(TEXT("targetMesh"), TargetMeshPath);
+		Params->TryGetBoolField(TEXT("includeOptionalChains"), bIncludeOptionalChains);
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode;
+		FString ErrorMessage;
+		SendActionResult(
+			TryPlanAnimationRetargetResult(SourceMeshPath, TargetMeshPath, bIncludeOptionalChains, Result, ErrorCode, ErrorMessage),
+			Result,
+			ErrorCode,
+			ErrorMessage);
+	}
+	else if (Method == TEXT("editor.applyAnimationRetargetSetup"))
+	{
+		FString SourceMeshPath;
+		FString TargetMeshPath;
+		FString SourceRigName;
+		FString TargetRigName;
+		FString SourceRetargetRoot;
+		FString TargetRetargetRoot;
+		bool bUpdateExisting = false;
+		Params->TryGetStringField(TEXT("sourceMesh"), SourceMeshPath);
+		Params->TryGetStringField(TEXT("targetMesh"), TargetMeshPath);
+		Params->TryGetStringField(TEXT("sourceRigName"), SourceRigName);
+		Params->TryGetStringField(TEXT("targetRigName"), TargetRigName);
+		Params->TryGetStringField(TEXT("sourceRetargetRoot"), SourceRetargetRoot);
+		Params->TryGetStringField(TEXT("targetRetargetRoot"), TargetRetargetRoot);
+		Params->TryGetBoolField(TEXT("updateExisting"), bUpdateExisting);
+		const TArray<TSharedPtr<FJsonValue>>* SourceChains = nullptr;
+		const TArray<TSharedPtr<FJsonValue>>* TargetChains = nullptr;
+		Params->TryGetArrayField(TEXT("sourceChains"), SourceChains);
+		Params->TryGetArrayField(TEXT("targetChains"), TargetChains);
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode;
+		FString ErrorMessage;
+		SendActionResult(
+			TryApplyAnimationRetargetSetupResult(
+				SourceMeshPath,
+				TargetMeshPath,
+				SourceRigName,
+				TargetRigName,
+				SourceRetargetRoot,
+				TargetRetargetRoot,
+				SourceChains != nullptr ? *SourceChains : TArray<TSharedPtr<FJsonValue>>(),
+				TargetChains != nullptr ? *TargetChains : TArray<TSharedPtr<FJsonValue>>(),
+				bUpdateExisting,
 				Result,
 				ErrorCode,
 				ErrorMessage),

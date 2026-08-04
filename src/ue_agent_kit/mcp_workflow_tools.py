@@ -404,6 +404,15 @@ def register_workflow_tools(
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_apply_patch", exc, read_only=False)
 
+    from .mcp_retarget_tools import register_retarget_workflow_tools
+
+    register_retarget_workflow_tools(
+        server=server,
+        workflow_service=workflow_service,
+        tool_annotations_type=tool_annotations_type,
+        error_response=error_response,
+    )
+
     @server.tool(annotations=planning_annotations)
     def ue_verify_asset(apply_receipt: str) -> dict[str, Any]:
         """Independently reload the committed asset in Unreal and verify its saved SHA-256 Revision."""

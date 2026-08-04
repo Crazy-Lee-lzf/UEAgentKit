@@ -82,7 +82,10 @@ namespace UEAgentKitRetarget
 		FString TargetSkeleton;
 		TArray<FString> SourceRetargetRootCandidates;
 		TArray<FString> TargetRetargetRootCandidates;
+		// Target-side candidate reports (Phase 1 compatibility output).
 		TArray<FRetargetChainCandidateReport> ChainCandidates;
+		// Source-side candidate reports used by the Plan builder.
+		TArray<FRetargetChainCandidateReport> SourceChainCandidates;
 		TArray<FString> UnmatchedRequiredChains;
 		TArray<FString> UnmatchedOptionalChains;
 		TArray<FString> Warnings;

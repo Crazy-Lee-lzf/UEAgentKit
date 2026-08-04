@@ -80,6 +80,8 @@ EXPECTED_ALL_TOOLS = [
     "ue_plan_patch",
     "ue_dry_run_patch",
     "ue_apply_patch",
+    "ue_plan_animation_retarget",
+    "ue_apply_animation_retarget_setup",
     "ue_verify_asset",
     "ue_verify_live_write",
     "ue_get_asset_state",
@@ -99,7 +101,7 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertEqual(len(tool_names_for_mode()), 5)
         self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 28)
-        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 31)
+        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 33)
         self.assertEqual(
             tool_names_for_mode(memory_enabled=True),
             EXPECTED_ALL_TOOLS[:5] + EXPECTED_MEMORY_TOOLS,
@@ -111,7 +113,7 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
-            43,
+            45,
         )
         self.assertEqual(
             len(
@@ -121,7 +123,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-            66,
+            68,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:

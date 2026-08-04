@@ -38,6 +38,7 @@ from .database import (
 from .freshness import IndexFreshnessTracker
 from .indexer import build_index
 from .patches import LIVE_WRITE_OPERATION_REGISTRY, OPERATION_REGISTRY, validate_patch
+from .retarget_workflow import RetargetWorkflowMixin
 from .snapshot_lifecycle import (
     ActiveSnapshot,
     SnapshotLifecycleError,
@@ -628,7 +629,8 @@ def _safe_report(value: Any, *, configured_paths: tuple[Path, ...]) -> Any:
     return sanitize(value)
 
 
-class PatchWorkflowService:
+
+class PatchWorkflowService(RetargetWorkflowMixin):
     """High-level, fixed-path MCP workflow over existing Patch and rollback scripts."""
 
     def __init__(

@@ -113,6 +113,26 @@ private:
 		TSharedPtr<FJsonObject>& OutResult,
 		FString& OutErrorCode,
 		FString& OutErrorMessage) const;
+	bool TryPlanAnimationRetargetResult(
+		const FString& SourceMeshPath,
+		const FString& TargetMeshPath,
+		bool bIncludeOptionalChains,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage) const;
+	bool TryApplyAnimationRetargetSetupResult(
+		const FString& SourceMeshPath,
+		const FString& TargetMeshPath,
+		const FString& SourceRigName,
+		const FString& TargetRigName,
+		const FString& SourceRetargetRoot,
+		const FString& TargetRetargetRoot,
+		const TArray<TSharedPtr<FJsonValue>>& SourceChains,
+		const TArray<TSharedPtr<FJsonValue>>& TargetChains,
+		bool bUpdateExisting,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage) const;
 	bool TryApplyAssetPropertyLiveResult(
 		const FString& Operation,
 		const FString& AssetPath,

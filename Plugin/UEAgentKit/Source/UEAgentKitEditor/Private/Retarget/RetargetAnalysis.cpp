@@ -306,125 +306,130 @@ namespace UEAgentKitRetarget
 			OutReport.BlockingIssues.Add(TEXT("No usable retarget root candidate was found."));
 		}
 
-		// Chain candidates.
+		// Chain candidates are evaluated independently on each skeleton so the
+		// Plan can carry explicit source and target chains.
 		const FVector SourceRootPosition = SourceSnapshot.Bones.Num() > 0 ? SourceSnapshot.Bones[0].ComponentPosition : FVector::ZeroVector;
 		const FVector TargetRootPosition = TargetSnapshot.Bones.Num() > 0 ? TargetSnapshot.Bones[0].ComponentPosition : FVector::ZeroVector;
-		for (const FChainProfile& Profile : HumanoidV1Chains)
+		auto EvaluateChains = [bIncludeOptionalChains](
+								  const FRetargetSkeletonSnapshot& Snapshot,
+								  const FVector& RootPosition,
+								  TArray<FRetargetChainCandidateReport>& OutReports)
 		{
-			if (!bIncludeOptionalChains && !Profile.bRequired)
+			for (const FChainProfile& Profile : HumanoidV1Chains)
 			{
-				continue;
-			}
-			const FString ChainName(Profile.Name);
-			FRetargetChainCandidateReport ChainReport;
-			ChainReport.ChainName = ChainName;
-			ChainReport.Required = Profile.bRequired ? ERetargetChainRequired::Required : ERetargetChainRequired::Optional;
-			const TArray<FString> StartAliases = SplitAliases(Profile.StartAliases);
-			const TArray<FString> EndAliases = SplitAliases(Profile.EndAliases);
+				if (!bIncludeOptionalChains && !Profile.bRequired)
+				{
+					continue;
+				}
+				const FString ChainName(Profile.Name);
+				FRetargetChainCandidateReport ChainReport;
+				ChainReport.ChainName = ChainName;
+				ChainReport.Required = Profile.bRequired ? ERetargetChainRequired::Required : ERetargetChainRequired::Optional;
+				const TArray<FString> StartAliases = SplitAliases(Profile.StartAliases);
+				const TArray<FString> EndAliases = SplitAliases(Profile.EndAliases);
 
-			// Evaluate on the target skeleton; the source skeleton is scored the same way
-			// in Phase 2 when building explicit chains. Phase 1 reports target-side candidates.
-			const FRetargetSkeletonSnapshot& Snapshot = TargetSnapshot;
-			const FVector& RootPosition = TargetRootPosition;
-			for (int32 StartIndex = 0; StartIndex < Snapshot.Bones.Num(); ++StartIndex)
-			{
-				const FString StartName = Snapshot.Bones[StartIndex].Name.ToString();
-				const float StartNameScore = BoneNameMatch(StartName, StartAliases);
-				if (StartNameScore <= 0.0f || IsHighRiskBone(StartName))
+				for (int32 StartIndex = 0; StartIndex < Snapshot.Bones.Num(); ++StartIndex)
 				{
-					continue;
-				}
-				if (ChainName == TEXT("Root") && Snapshot.Bones[StartIndex].Depth != 0)
-				{
-					continue;
-				}
-				// Keep only the deepest matching end per start so equivalent
-				// endpoints of the same semantic chain are not reported as
-				// ambiguous competing candidates.
-				int32 DeepestEndIndex = StartIndex;
-				bool bFoundEnd = false;
-				for (int32 EndIndex = StartIndex; EndIndex < Snapshot.Bones.Num(); ++EndIndex)
-				{
-					const FString EndName = Snapshot.Bones[EndIndex].Name.ToString();
-					if (BoneNameMatch(EndName, EndAliases) <= 0.0f)
+					const FString StartName = Snapshot.Bones[StartIndex].Name.ToString();
+					const float StartNameScore = BoneNameMatch(StartName, StartAliases);
+					if (StartNameScore <= 0.0f || IsHighRiskBone(StartName))
 					{
 						continue;
 					}
-					if (EndIndex > StartIndex && Snapshot.Bones[EndIndex].Depth <= Snapshot.Bones[StartIndex].Depth)
+					if (ChainName == TEXT("Root") && Snapshot.Bones[StartIndex].Depth != 0)
 					{
 						continue;
 					}
-					if (IsHighRiskBone(EndName))
+					// Keep only the deepest matching end per start so equivalent
+					// endpoints of the same semantic chain are not reported as
+					// ambiguous competing candidates.
+					int32 DeepestEndIndex = StartIndex;
+					bool bFoundEnd = false;
+					for (int32 EndIndex = StartIndex; EndIndex < Snapshot.Bones.Num(); ++EndIndex)
+					{
+						const FString EndName = Snapshot.Bones[EndIndex].Name.ToString();
+						if (BoneNameMatch(EndName, EndAliases) <= 0.0f)
+						{
+							continue;
+						}
+						if (EndIndex > StartIndex && Snapshot.Bones[EndIndex].Depth <= Snapshot.Bones[StartIndex].Depth)
+						{
+							continue;
+						}
+						if (IsHighRiskBone(EndName))
+						{
+							continue;
+						}
+						DeepestEndIndex = EndIndex;
+						bFoundEnd = true;
+					}
+					if (!bFoundEnd)
 					{
 						continue;
 					}
-					DeepestEndIndex = EndIndex;
-					bFoundEnd = true;
+					const ERetargetChainSide Side = Profile.Side;
+					const ERetargetChainSide BoneSide = DetectSide(StartName);
+					FRetargetChainCandidate Candidate;
+					Candidate.ChainName = ChainName;
+					Candidate.Required = ChainReport.Required;
+					Candidate.Side = Side;
+					Candidate.StartBone = Snapshot.Bones[StartIndex].Name;
+					Candidate.EndBone = Snapshot.Bones[DeepestEndIndex].Name;
+					Candidate.StartIndex = StartIndex;
+					Candidate.EndIndex = DeepestEndIndex;
+					Candidate.NameScore = FMath::Max(
+						StartNameScore,
+						BoneNameMatch(Candidate.EndBone.ToString(), EndAliases));
+					const bool bSingleBone = DeepestEndIndex == StartIndex;
+					Candidate.HierarchyScore = 1.0f;
+					if (bSingleBone && ExpectedChainLength(Profile) > 1)
+					{
+						Candidate.HierarchyScore = 0.5f;
+					}
+					Candidate.SideScore = BoneSide == Side
+						? 1.0f
+						: (Side == ERetargetChainSide::Center ? 0.5f : 0.1f);
+					Candidate.PositionScore = PositionSideScore(
+						Snapshot.Bones[StartIndex].ComponentPosition,
+						Side,
+						RootPosition);
+					const int32 ChainLength = Snapshot.Bones[DeepestEndIndex].Depth - Snapshot.Bones[StartIndex].Depth;
+					const int32 ExpectedLength = ExpectedChainLength(Profile);
+					Candidate.LengthScore = FMath::Clamp(
+						1.0f - FMath::Abs(ChainLength - ExpectedLength) * 0.25f,
+						0.0f,
+						1.0f);
+					Candidate.ParentContextScore = ParentContextScoreFor(StartName, StartAliases, Snapshot);
+					Candidate.Confidence =
+						0.30f * Candidate.NameScore
+						+ 0.15f * Candidate.HierarchyScore
+						+ 0.10f * Candidate.SideScore
+						+ 0.15f * Candidate.PositionScore
+						+ 0.15f * Candidate.LengthScore
+						+ 0.15f * Candidate.ParentContextScore;
+					Candidate.Reasons.Add(FString::Printf(TEXT("start=%s end=%s"), *Candidate.StartBone.ToString(), *Candidate.EndBone.ToString()));
+					ChainReport.Candidates.Add(Candidate);
 				}
-				if (!bFoundEnd)
+				ChainReport.Candidates.Sort([](const FRetargetChainCandidate& Left, const FRetargetChainCandidate& Right)
 				{
-					continue;
-				}
-				const ERetargetChainSide Side = Profile.Side;
-				const ERetargetChainSide BoneSide = DetectSide(StartName);
-				FRetargetChainCandidate Candidate;
-				Candidate.ChainName = ChainName;
-				Candidate.Required = ChainReport.Required;
-				Candidate.Side = Side;
-				Candidate.StartBone = Snapshot.Bones[StartIndex].Name;
-				Candidate.EndBone = Snapshot.Bones[DeepestEndIndex].Name;
-				Candidate.StartIndex = StartIndex;
-				Candidate.EndIndex = DeepestEndIndex;
-				Candidate.NameScore = FMath::Max(
-					StartNameScore,
-					BoneNameMatch(Candidate.EndBone.ToString(), EndAliases));
-				const bool bSingleBone = DeepestEndIndex == StartIndex;
-				Candidate.HierarchyScore = 1.0f;
-				if (bSingleBone && ExpectedChainLength(Profile) > 1)
+					return Left.Confidence > Right.Confidence;
+				});
+				if (ChainReport.Candidates.Num() > 3)
 				{
-					Candidate.HierarchyScore = 0.5f;
+					ChainReport.Candidates.SetNum(3);
 				}
-				Candidate.SideScore = BoneSide == Side
-					? 1.0f
-					: (Side == ERetargetChainSide::Center ? 0.5f : 0.1f);
-				Candidate.PositionScore = PositionSideScore(
-					Snapshot.Bones[StartIndex].ComponentPosition,
-					Side,
-					RootPosition);
-				const int32 ChainLength = Snapshot.Bones[DeepestEndIndex].Depth - Snapshot.Bones[StartIndex].Depth;
-				const int32 ExpectedLength = ExpectedChainLength(Profile);
-				Candidate.LengthScore = FMath::Clamp(
-					1.0f - FMath::Abs(ChainLength - ExpectedLength) * 0.25f,
-					0.0f,
-					1.0f);
-				Candidate.ParentContextScore = ParentContextScoreFor(StartName, StartAliases, Snapshot);
-				Candidate.Confidence =
-					0.30f * Candidate.NameScore
-					+ 0.15f * Candidate.HierarchyScore
-					+ 0.10f * Candidate.SideScore
-					+ 0.15f * Candidate.PositionScore
-					+ 0.15f * Candidate.LengthScore
-					+ 0.15f * Candidate.ParentContextScore;
-				Candidate.Reasons.Add(FString::Printf(TEXT("start=%s end=%s"), *Candidate.StartBone.ToString(), *Candidate.EndBone.ToString()));
-				ChainReport.Candidates.Add(Candidate);
+				if (ChainReport.Candidates.Num() >= 2
+					&& ChainReport.Candidates[0].Confidence >= 0.7f
+					&& ChainReport.Candidates[1].Confidence >= 0.7f
+					&& ChainReport.Candidates[0].Confidence - ChainReport.Candidates[1].Confidence < 0.05f)
+				{
+					ChainReport.bAmbiguous = true;
+				}
+				OutReports.Add(ChainReport);
 			}
-			ChainReport.Candidates.Sort([](const FRetargetChainCandidate& Left, const FRetargetChainCandidate& Right)
-			{
-				return Left.Confidence > Right.Confidence;
-			});
-			if (ChainReport.Candidates.Num() > 3)
-			{
-				ChainReport.Candidates.SetNum(3);
-			}
-			if (ChainReport.Candidates.Num() >= 2
-				&& ChainReport.Candidates[0].Confidence >= 0.7f
-				&& ChainReport.Candidates[1].Confidence >= 0.7f
-				&& ChainReport.Candidates[0].Confidence - ChainReport.Candidates[1].Confidence < 0.05f)
-			{
-				ChainReport.bAmbiguous = true;
-			}
-			OutReport.ChainCandidates.Add(ChainReport);
-		}
+		};
+		EvaluateChains(SourceSnapshot, SourceRootPosition, OutReport.SourceChainCandidates);
+		EvaluateChains(TargetSnapshot, TargetRootPosition, OutReport.ChainCandidates);
 
 		// Required chain matching summary.
 		for (const FRetargetChainCandidateReport& Chain : OutReport.ChainCandidates)
@@ -515,38 +520,44 @@ namespace UEAgentKitRetarget
 		}
 		Json->SetArrayField(TEXT("targetRetargetRootCandidates"), TargetRoots);
 
-		TArray<TSharedPtr<FJsonValue>> Chains;
-		for (const FRetargetChainCandidateReport& Chain : Report.ChainCandidates)
+		auto SerializeChains = [](const TArray<FRetargetChainCandidateReport>& Reports)
 		{
-			TSharedRef<FJsonObject> ChainJson = MakeShared<FJsonObject>();
-			ChainJson->SetStringField(TEXT("chain"), Chain.ChainName);
-			ChainJson->SetStringField(TEXT("required"), Chain.Required == ERetargetChainRequired::Required ? TEXT("required") : TEXT("optional"));
-			ChainJson->SetBoolField(TEXT("ambiguous"), Chain.bAmbiguous);
-			TArray<TSharedPtr<FJsonValue>> Candidates;
-			for (const FRetargetChainCandidate& Candidate : Chain.Candidates)
+			TArray<TSharedPtr<FJsonValue>> Chains;
+			for (const FRetargetChainCandidateReport& Chain : Reports)
 			{
-				TSharedRef<FJsonObject> CandidateJson = MakeShared<FJsonObject>();
-				CandidateJson->SetStringField(TEXT("startBone"), Candidate.StartBone.ToString());
-				CandidateJson->SetStringField(TEXT("endBone"), Candidate.EndBone.ToString());
-				CandidateJson->SetNumberField(TEXT("nameScore"), Candidate.NameScore);
-				CandidateJson->SetNumberField(TEXT("hierarchyScore"), Candidate.HierarchyScore);
-				CandidateJson->SetNumberField(TEXT("sideScore"), Candidate.SideScore);
-				CandidateJson->SetNumberField(TEXT("positionScore"), Candidate.PositionScore);
-				CandidateJson->SetNumberField(TEXT("lengthScore"), Candidate.LengthScore);
-				CandidateJson->SetNumberField(TEXT("parentContextScore"), Candidate.ParentContextScore);
-				CandidateJson->SetNumberField(TEXT("confidence"), Candidate.Confidence);
-				TArray<TSharedPtr<FJsonValue>> Reasons;
-				for (const FString& Reason : Candidate.Reasons)
+				TSharedRef<FJsonObject> ChainJson = MakeShared<FJsonObject>();
+				ChainJson->SetStringField(TEXT("chain"), Chain.ChainName);
+				ChainJson->SetStringField(TEXT("required"), Chain.Required == ERetargetChainRequired::Required ? TEXT("required") : TEXT("optional"));
+				ChainJson->SetBoolField(TEXT("ambiguous"), Chain.bAmbiguous);
+				TArray<TSharedPtr<FJsonValue>> Candidates;
+				for (const FRetargetChainCandidate& Candidate : Chain.Candidates)
 				{
-					Reasons.Add(MakeShared<FJsonValueString>(Reason));
+					TSharedRef<FJsonObject> CandidateJson = MakeShared<FJsonObject>();
+					CandidateJson->SetStringField(TEXT("startBone"), Candidate.StartBone.ToString());
+					CandidateJson->SetStringField(TEXT("endBone"), Candidate.EndBone.ToString());
+					CandidateJson->SetStringField(TEXT("side"), Candidate.Side == ERetargetChainSide::Left ? TEXT("Left") : (Candidate.Side == ERetargetChainSide::Right ? TEXT("Right") : TEXT("Center")));
+					CandidateJson->SetNumberField(TEXT("nameScore"), Candidate.NameScore);
+					CandidateJson->SetNumberField(TEXT("hierarchyScore"), Candidate.HierarchyScore);
+					CandidateJson->SetNumberField(TEXT("sideScore"), Candidate.SideScore);
+					CandidateJson->SetNumberField(TEXT("positionScore"), Candidate.PositionScore);
+					CandidateJson->SetNumberField(TEXT("lengthScore"), Candidate.LengthScore);
+					CandidateJson->SetNumberField(TEXT("parentContextScore"), Candidate.ParentContextScore);
+					CandidateJson->SetNumberField(TEXT("confidence"), Candidate.Confidence);
+					TArray<TSharedPtr<FJsonValue>> Reasons;
+					for (const FString& Reason : Candidate.Reasons)
+					{
+						Reasons.Add(MakeShared<FJsonValueString>(Reason));
+					}
+					CandidateJson->SetArrayField(TEXT("reason"), Reasons);
+					Candidates.Add(MakeShared<FJsonValueObject>(CandidateJson));
 				}
-				CandidateJson->SetArrayField(TEXT("reason"), Reasons);
-				Candidates.Add(MakeShared<FJsonValueObject>(CandidateJson));
+				ChainJson->SetArrayField(TEXT("candidates"), Candidates);
+				Chains.Add(MakeShared<FJsonValueObject>(ChainJson));
 			}
-			ChainJson->SetArrayField(TEXT("candidates"), Candidates);
-			Chains.Add(MakeShared<FJsonValueObject>(ChainJson));
-		}
-		Json->SetArrayField(TEXT("chainCandidates"), Chains);
+			return Chains;
+		};
+		Json->SetArrayField(TEXT("chainCandidates"), SerializeChains(Report.ChainCandidates));
+		Json->SetArrayField(TEXT("sourceChainCandidates"), SerializeChains(Report.SourceChainCandidates));
 
 		auto Strings = [](const TArray<FString>& Values)
 		{
