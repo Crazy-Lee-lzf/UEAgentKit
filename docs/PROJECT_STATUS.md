@@ -2,7 +2,7 @@
 
 
 
-更新时间：2026-08-03
+更新时间：2026-08-04
 
 
 
@@ -62,7 +62,7 @@ Tool 数量只表示 MCP 接口数量，不等同于 Unreal Operation 数量。�
 
 ```text
 
-Python tests                 334/334
+Python tests                 337/337
 
 JSON Schemas                 3/3
 
@@ -338,6 +338,8 @@ Schema v3 Knowledge Tree、Active Work、五级渐进式披露、按需 Evidence
 ### P0C：大型项目性能基准
 
 首次建立知识库允许较慢，但日常搜索、变量修改和少量 Blueprint Graph 编辑必须接近修改代码的体验。性能计划采用 Reforge、现成 UE5.6 DarkRuins 样本、E 盘 SSD 上的 160–180 GB 物理测试工程和 500k Asset/10m Reference 逻辑数据库；关键基准分别运行原生 SSD 与机械硬盘 50 MB/s 模拟档位。重点门禁包括：
+
+DarkRuins 首轮 NativeSSD 只读基线已完成：Registry-only 导出 13,666 个资产和生成 Package、43,863 条引用，0 失败、0 Content 改写；完整进程 209.9 秒，峰值 Working Set 约 1.64 GiB。SQLite 首次建库 195.7 秒，未变化增量仍需 104.3 秒，暴露出“全量打开并哈希 Canonical JSON”的主要增量缺口。13,666 资产索引中，普通资产搜索 p95 30.6 ms、数据库打开并搜索 p95 37.0 ms、单资产读取 p95 0.73 ms；高入度节点的深度 2 引用遍历 p95 652.6 ms。默认专用 Reader 全量模式会触发大型 Nanite/距离场重建，已明确禁止作为默认索引路径。完整结果见 [`PERFORMANCE_BASELINE_DARKRUINS_20260803.md`](PERFORMANCE_BASELINE_DARKRUINS_20260803.md)。
 
 - Warm 搜索、Reference 和 Memory Context p95 控制在 500–800 ms。
 - 已加载普通属性 Live Apply p95 小于 500 ms。

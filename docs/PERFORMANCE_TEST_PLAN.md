@@ -1,6 +1,6 @@
 # UE Agent Kit 大型项目性能测试方案
 
-更新时间：2026-08-03
+更新时间：2026-08-04
 
 ## 1. 目标
 
@@ -118,6 +118,8 @@ External Actor/Object  约 12,018 个小文件
 ```
 
 该样本无需解压，适合测试大美术资产、大文件顺序读取和大量 External Actor 小文件元数据访问。
+
+首轮 NativeSSD 只读基线已完成，包含 Registry-only、External Actor/Object、Windows 长路径、SQLite 建库、未变化增量和查询延迟。结果与结论见 [`PERFORMANCE_BASELINE_DARKRUINS_20260803.md`](PERFORMANCE_BASELINE_DARKRUINS_20260803.md)。
 
 ### 4.3 大型物理测试工程：UEAgentKitPerfProject
 
@@ -486,6 +488,7 @@ environment.json
 
 ```text
 tests/performance/
+    benchmark_index_queries.py
     benchmark_offline.py
     benchmark_memory.py
     benchmark_editor_context.py
