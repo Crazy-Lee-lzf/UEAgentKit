@@ -20,6 +20,8 @@ _CAPABILITY_FOR_TOOL = {
     "ue_cancel_animation_retarget_batch": RETARGET_BATCH_CAPABILITY,
     "ue_save_animation_retarget_batch": RETARGET_BATCH_CAPABILITY,
     "ue_validate_animation_retarget": RETARGET_VALIDATE_CAPABILITY,
+    "ue_verify_animation_retarget_batch": RETARGET_VALIDATE_CAPABILITY,
+    "ue_rollback_animation_retarget_batch": RETARGET_BATCH_CAPABILITY,
 }
 
 
@@ -221,14 +223,22 @@ def register_retarget_workflow_tools(
             return error_response("ue_cancel_animation_retarget_batch", exc, read_only=False)
 
     @server.tool(annotations=destructive_annotations)
-    def ue_save_animation_retarget_batch(taskId: str, confirmation: str) -> dict[str, Any]:
+    def ue_save_animation_retarget_batch(
+        taskId: str,
+        confirmation: str,
+        changeSetId: str = "",
+    ) -> dict[str, Any]:
         """Save the retargeted animation outputs of a completed batch task to disk."""
         try:
             _assert_retarget_policy_capability(
                 policy_path=workflow_service.config.policy_path,
                 tool_name="ue_save_animation_retarget_batch",
             )
-            return workflow_service.save_animation_retarget_batch(task_id=taskId, confirmation=confirmation)
+            return workflow_service.save_animation_retarget_batch(
+                task_id=taskId,
+                confirmation=confirmation,
+                change_set_id=changeSetId,
+            )
         except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
             return error_response("ue_save_animation_retarget_batch", exc, read_only=False)
 
@@ -249,3 +259,37 @@ def register_retarget_workflow_tools(
             )
         except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
             return error_response("ue_validate_animation_retarget", exc, read_only=True)
+
+    @server.tool(annotations=read_annotations)
+    def ue_verify_animation_retarget_batch(taskId: str) -> dict[str, Any]:
+        """Independently reload saved retarget batch outputs in a fresh Unreal process and compare their SHA-256 Revisions."""
+        try:
+            _assert_retarget_policy_capability(
+                policy_path=workflow_service.config.policy_path,
+                tool_name="ue_verify_animation_retarget_batch",
+            )
+            return workflow_service.verify_animation_retarget_batch(task_id=taskId)
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_verify_animation_retarget_batch", exc, read_only=True)
+
+    @server.tool(annotations=action_annotations)
+    def ue_rollback_animation_retarget_batch(
+        taskId: str,
+        mode: str = "DryRun",
+        rollbackDryRunReceipt: str = "",
+        confirmation: str = "",
+    ) -> dict[str, Any]:
+        """Roll back a retarget batch: restore overwritten outputs from the pre-batch Backup and delete newly created outputs."""
+        try:
+            _assert_retarget_policy_capability(
+                policy_path=workflow_service.config.policy_path,
+                tool_name="ue_rollback_animation_retarget_batch",
+            )
+            return workflow_service.rollback_animation_retarget_batch(
+                task_id=taskId,
+                mode=mode,
+                rollback_dry_run_receipt=rollbackDryRunReceipt,
+                confirmation=confirmation,
+            )
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_rollback_animation_retarget_batch", exc, read_only=False)

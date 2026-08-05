@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 TOOL_ROOT = Path(__file__).resolve().parents[2]
@@ -12,11 +14,19 @@ SRC_ROOT = TOOL_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from ue_agent_kit.retarget_workflow import RetargetWorkflowMixin  # noqa: E402
+from ue_agent_kit.change_sets import ChangeSetRecord  # noqa: E402
+from ue_agent_kit.retarget_workflow import RetargetWorkflowMixin, _retarget_output_object_path  # noqa: E402
 from ue_agent_kit.retarget_models import CONFIRMATION_PREFIX  # noqa: E402
 
 SOURCE_MESH = "/Game/Characters/Source/SK_Source.SK_Source"
 TARGET_MESH = "/Game/Characters/Target/SK_Target.SK_Target"
+
+
+class _FakeProcessResult:
+    def __init__(self, exit_code: int) -> None:
+        self.exit_code = exit_code
+        self.stdout = ""
+        self.stderr = ""
 
 
 class _StubService(RetargetWorkflowMixin):
@@ -27,10 +37,13 @@ class _StubService(RetargetWorkflowMixin):
         self.config.commit_enabled = True
         self.config.policy_path = project_path / "policy.json"
         self.config.policy_path.write_text(json.dumps(policy), encoding="utf-8")
+        self.config.backup_root = project_path / "Backups"
+        self.config.work_root = project_path / "work"
         self._lock = _Lock()
         self._plans: dict[str, object] = {}
         self.live_editor_service = MagicMock()
         self._retarget_plans = {}
+        self._change_sets: dict[str, ChangeSetRecord] = {}
         self.project_name = "HostProject"
 
     def _assert_policy_unchanged(self) -> None:
@@ -41,6 +54,55 @@ class _StubService(RetargetWorkflowMixin):
         del asset_class
         relative_parts = [part for part in package_name[len("/Game/") :].split("/") if part]
         return (project_path / "Content").joinpath(*relative_parts).with_suffix(".uasset")
+
+    def _current_editor_session(self) -> tuple[bool, str]:
+        return True, "session-1"
+
+    def _resolve_change_set(self, change_set_id: str) -> ChangeSetRecord:
+        record = self._change_sets.get(change_set_id)
+        if record is None:
+            raise ValueError("change-set-not-found: " + change_set_id)
+        return record
+
+    def _reconcile_change_set(self, record: ChangeSetRecord, *, persist: bool) -> None:
+        del persist
+        return None
+
+    def _persist_change_set(self, record: ChangeSetRecord) -> bool:
+        self._change_sets[record.change_set_id] = record
+        return True
+
+    def _run_script(
+        self,
+        script_name: str,
+        script_arguments: list[str],
+        *,
+        stage: str,
+        report_path: Path,
+    ) -> _FakeProcessResult:
+        del script_name, stage, report_path
+        asset = script_arguments[script_arguments.index("-Asset") + 1]
+        output = Path(script_arguments[script_arguments.index("-Output") + 1])
+        output.mkdir(parents=True, exist_ok=True)
+        package_file = self._output_package_file(asset)
+        if package_file.is_file():
+            revision = "sha256:" + hashlib.sha256(package_file.read_bytes()).hexdigest()
+            canonical = {
+                "assetPath": asset + "." + asset.rsplit("/", 1)[-1],
+                "projectName": "HostProject",
+                "assetClass": "/Script/Engine.AnimSequence",
+                "revision": {"value": revision, "available": True, "packageDirty": False},
+            }
+            (output / "canonical").mkdir(parents=True, exist_ok=True)
+            (output / "canonical" / (asset.rsplit("/", 1)[-1] + ".json")).write_text(
+                json.dumps(canonical), encoding="utf-8"
+            )
+            manifest = {"projectName": "HostProject", "assetCount": 1, "successCount": 1, "failureCount": 0}
+            (output / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            return _FakeProcessResult(0)
+        manifest = {"projectName": "HostProject", "assetCount": 1, "successCount": 0, "failureCount": 1}
+        (output / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        return _FakeProcessResult(4)
 
 
 class _Lock:
@@ -749,6 +811,216 @@ class RetargetWorkflowTests(unittest.TestCase):
         ]
         self.assertEqual(len(validate_calls), 1)
         self.assertEqual(validate_calls[0].args[1]["retargeter"], "/Game/Retargeted/RTG.RTG")
+
+    def test_predict_output_path_matches_engine_naming_rule(self) -> None:
+        named = _retarget_output_object_path(
+            "/Game/Characters/Mannequins/Idle",
+            "/Game/Retargeted",
+            {"search": "", "replace": "", "prefix": "RTG_", "suffix": ""},
+        )
+        self.assertEqual(named, "/Game/Retargeted/RTG_Idle.RTG_Idle")
+        replaced = _retarget_output_object_path(
+            "/Game/Characters/Mannequins/MF_Unarmed_Walk_Fwd",
+            "/Game/Characters/XinYueHu/Animations/Retargeted",
+            {"search": "MF_Unarmed", "replace": "XinYueHu", "prefix": "", "suffix": "_XinYueHu"},
+        )
+        self.assertEqual(
+            replaced,
+            "/Game/Characters/XinYueHu/Animations/Retargeted/XinYueHu_Walk_Fwd_XinYueHu.XinYueHu_Walk_Fwd_XinYueHu",
+        )
+
+    def _completed_overwrite_task(self, service: _StubService, overwrite_path: str, existing: bytes) -> dict[str, Any]:
+        plan = service.plan_animation_retarget(
+            source_mesh=SOURCE_MESH, target_mesh=TARGET_MESH, output_directory="/Game/Retargeted"
+        )
+        output_package = overwrite_path.rsplit(".", 1)[0]
+        output_file = service._output_package_file(output_package)
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_bytes(existing)
+        service.live_editor_service.call_method.return_value = {
+            "action": "retarget-batch-step",
+            "outputs": [{"inputPath": "/Game/Characters/Mannequins/Idle", "outputPath": overwrite_path}],
+            "transactionCreated": True,
+            "assetDirty": True,
+            "editorSessionId": "session-1",
+        }
+        started = service.start_animation_retarget_batch(
+            plan_id=plan["planId"],
+            retargeter="/Game/Retargeted/IKRetargeter_A.IKRetargeter_A",
+            source_assets=["/Game/Characters/Mannequins/Idle"],
+            output_directory="/Game/Retargeted",
+            naming={"prefix": "RTG_", "suffix": "", "search": "", "replace": ""},
+            overwrite_existing=True,
+        )
+        return service.get_animation_retarget_batch(task_id=started["taskId"])
+
+    def test_batch_captures_pre_batch_backup_of_overwrite_target(self) -> None:
+        service, root = self._make_service()
+        output_path = "/Game/Retargeted/RTG_Idle.RTG_Idle"
+        before = b"pre-batch-output"
+        finished = self._completed_overwrite_task(service, output_path, before)
+        self.assertEqual(finished["status"], "completed")
+        manifest = finished["backupManifest"]
+        self.assertEqual(len(manifest["entries"]), 1)
+        entry = manifest["entries"][0]
+        self.assertEqual(entry["kind"], "overwrite")
+        self.assertEqual(entry["revision"], "sha256:" + hashlib.sha256(before).hexdigest())
+        backup_file = root / "Backups" / "Retarget" / finished["taskId"] / entry["backupRelativePath"]
+        self.assertTrue(backup_file.is_file())
+        self.assertEqual(backup_file.read_bytes(), before)
+
+    def test_batch_captures_new_output_as_create(self) -> None:
+        service, _ = self._make_service()
+        plan = service.plan_animation_retarget(
+            source_mesh=SOURCE_MESH, target_mesh=TARGET_MESH, output_directory="/Game/Retargeted"
+        )
+        service.live_editor_service.call_method.return_value = {
+            "action": "retarget-batch-step",
+            "outputs": [{"inputPath": "/Game/Characters/Mannequins/Idle", "outputPath": "/Game/Retargeted/RTG_Idle.RTG_Idle"}],
+            "transactionCreated": True,
+            "assetDirty": True,
+            "editorSessionId": "session-1",
+        }
+        started = service.start_animation_retarget_batch(
+            plan_id=plan["planId"],
+            retargeter="/Game/Retargeted/IKRetargeter_A.IKRetargeter_A",
+            source_assets=["/Game/Characters/Mannequins/Idle"],
+            output_directory="/Game/Retargeted",
+            naming={"prefix": "RTG_", "suffix": "", "search": "", "replace": ""},
+        )
+        finished = service.get_animation_retarget_batch(task_id=started["taskId"])
+        self.assertEqual(finished["backupManifest"]["entries"][0]["kind"], "create")
+
+    def test_batch_save_returns_backup_manifest_ref(self) -> None:
+        service, _ = self._make_service()
+        output_path = "/Game/Retargeted/RTG_Idle.RTG_Idle"
+        finished = self._completed_overwrite_task(service, output_path, b"old")
+        saved = service.save_animation_retarget_batch(
+            task_id=finished["taskId"],
+            confirmation=f"SAVE RETARGET BATCH {finished['taskId']}",
+        )
+        self.assertEqual(saved["status"], "saved")
+        self.assertEqual(saved["updatedAssets"], [output_path])
+        self.assertEqual(saved["backupManifestRef"], f"backup-manifest:{finished['taskId']}")
+
+    def test_batch_rollback_dry_run_reports_plan(self) -> None:
+        service, _ = self._make_service()
+        finished = self._completed_overwrite_task(service, "/Game/Retargeted/RTG_Idle.RTG_Idle", b"old")
+        dry_run = service.rollback_animation_retarget_batch(task_id=finished["taskId"], mode="DryRun")
+        self.assertEqual(dry_run["mode"], "DryRun")
+        self.assertEqual(dry_run["restoreCount"], 1)
+        self.assertEqual(dry_run["deleteCount"], 0)
+        self.assertTrue(dry_run["rollbackDryRunReceipt"].startswith("rtgrb_dry_"))
+
+    def test_batch_rollback_commit_restores_overwrite_and_verifies(self) -> None:
+        service, root = self._make_service()
+        output_path = "/Game/Retargeted/RTG_Idle.RTG_Idle"
+        before = b"pre-batch-output"
+        finished = self._completed_overwrite_task(service, output_path, before)
+        output_file = service._output_package_file(output_path.rsplit(".", 1)[0])
+        output_file.write_bytes(b"retargeted-output")
+        service.save_animation_retarget_batch(
+            task_id=finished["taskId"],
+            confirmation=f"SAVE RETARGET BATCH {finished['taskId']}",
+        )
+        dry_run = service.rollback_animation_retarget_batch(task_id=finished["taskId"], mode="DryRun")
+        committed = service.rollback_animation_retarget_batch(
+            task_id=finished["taskId"],
+            mode="Commit",
+            rollback_dry_run_receipt=dry_run["rollbackDryRunReceipt"],
+            confirmation=f"ROLLBACK RETARGET BATCH {finished['taskId']}",
+        )
+        self.assertTrue(committed["valid"])
+        self.assertEqual(committed["restoredCount"], 1)
+        self.assertEqual(committed["deletedCount"], 0)
+        self.assertEqual(committed["restored"][0]["revision"], "sha256:" + hashlib.sha256(before).hexdigest())
+        self.assertEqual(output_file.read_bytes(), before)
+        self.assertTrue(committed["independentVerification"][0]["verified"])
+        self.assertEqual(committed["memoryTaskEvidence"]["arguments"]["outcome"], "rolledBack")
+
+    def test_batch_rollback_commit_deletes_created_output(self) -> None:
+        service, _ = self._make_service()
+        output_path = "/Game/Retargeted/RTG_Idle.RTG_Idle"
+        # Run the batch without a pre-existing output so the entry is "create".
+        plan = service.plan_animation_retarget(
+            source_mesh=SOURCE_MESH, target_mesh=TARGET_MESH, output_directory="/Game/Retargeted"
+        )
+        service.live_editor_service.call_method.return_value = {
+            "action": "retarget-batch-step",
+            "outputs": [{"inputPath": "/Game/Characters/Mannequins/Idle", "outputPath": output_path}],
+            "transactionCreated": True,
+            "assetDirty": True,
+            "editorSessionId": "session-1",
+        }
+        started = service.start_animation_retarget_batch(
+            plan_id=plan["planId"],
+            retargeter="/Game/Retargeted/IKRetargeter_A.IKRetargeter_A",
+            source_assets=["/Game/Characters/Mannequins/Idle"],
+            output_directory="/Game/Retargeted",
+            naming={"prefix": "RTG_", "suffix": "", "search": "", "replace": ""},
+        )
+        created = service.get_animation_retarget_batch(task_id=started["taskId"])
+        output_file = service._output_package_file(output_path.rsplit(".", 1)[0])
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_bytes(b"new-output")
+        service.save_animation_retarget_batch(
+            task_id=created["taskId"],
+            confirmation=f"SAVE RETARGET BATCH {created['taskId']}",
+        )
+        dry_run = service.rollback_animation_retarget_batch(task_id=created["taskId"], mode="DryRun")
+        self.assertEqual(dry_run["deleteCount"], 1)
+        committed = service.rollback_animation_retarget_batch(
+            task_id=created["taskId"],
+            mode="Commit",
+            rollback_dry_run_receipt=dry_run["rollbackDryRunReceipt"],
+            confirmation=f"ROLLBACK RETARGET BATCH {created['taskId']}",
+        )
+        self.assertTrue(committed["valid"])
+        self.assertEqual(committed["deletedCount"], 1)
+        self.assertFalse(output_file.exists())
+        self.assertTrue(committed["independentVerification"][0]["verified"])
+
+    def test_batch_verify_independent_reload_matches_disk(self) -> None:
+        service, _ = self._make_service()
+        output_path = "/Game/Retargeted/RTG_Idle.RTG_Idle"
+        finished = self._completed_overwrite_task(service, output_path, b"old")
+        service.save_animation_retarget_batch(
+            task_id=finished["taskId"],
+            confirmation=f"SAVE RETARGET BATCH {finished['taskId']}",
+        )
+        verified = service.verify_animation_retarget_batch(task_id=finished["taskId"])
+        self.assertTrue(verified["verified"])
+        self.assertEqual(verified["verifiedCount"], 1)
+        self.assertEqual(verified["failures"], [])
+        self.assertTrue(verified["memoryTaskEvidence"]["arguments"]["outcome"] == "succeeded")
+
+    def test_save_with_change_set_binds_retarget_save_operations(self) -> None:
+        service, _ = self._make_service()
+        change_set_id = "cs_" + "a" * 20
+        service._change_sets[change_set_id] = ChangeSetRecord(
+            change_set_id=change_set_id,
+            task_id="task_test",
+            editor_session_id="session-1",
+            title="Retarget closed loop",
+            status="planned",
+            created_at_utc="2026-08-05T00:00:00.000Z",
+            updated_at_utc="2026-08-05T00:00:00.000Z",
+            operations=[],
+        )
+        output_path = "/Game/Retargeted/RTG_Idle.RTG_Idle"
+        finished = self._completed_overwrite_task(service, output_path, b"old")
+        saved = service.save_animation_retarget_batch(
+            task_id=finished["taskId"],
+            confirmation=f"SAVE RETARGET BATCH {finished['taskId']}",
+            change_set_id=change_set_id,
+        )
+        self.assertTrue(saved["changeSetUpdated"])
+        self.assertEqual(saved["changeSetId"], change_set_id)
+        change_set = service._change_sets[change_set_id]
+        self.assertEqual(len(change_set.operations), 1)
+        self.assertEqual(change_set.operations[0].operation, "retarget-save")
+        self.assertEqual(change_set.operations[0].status, "saved")
+        self.assertTrue(change_set.operations[0].receipt.startswith("live_rtsave_"))
 
 
 if __name__ == "__main__":

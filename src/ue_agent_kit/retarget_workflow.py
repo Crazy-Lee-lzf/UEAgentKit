@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import secrets
+import shutil
+from pathlib import Path
 from typing import Any
 
 from .change_sets import ChangeSetOperationRecord, MAX_CHANGE_SET_RECEIPTS, derive_change_set_status
@@ -21,16 +23,34 @@ from . import retarget_models
 MAX_RETARGET_PLANS = 32
 MAX_RETARGET_BATCH_ASSETS = 100
 RETARGET_SETUP_RECEIPT_PREFIX = "rtg_"
-
-
-def _chain_name_sorted(chains: list[dict[str, Any]]) -> str:
-    return ",".join(f"{c.get('chain', '')}:{c.get('startBone', '')}..{c.get('endBone', '')}" for c in chains)
+MAX_INDEPENDENT_VERIFY_SAMPLE = 3
+RETARGET_BACKUP_SCHEMA_VERSION = "1.0"
+RETARGET_ROLLBACK_REPORT_SCHEMA_VERSION = "1.0"
 
 
 def _revision_for_mesh(service: Any, mesh_path: str) -> str:
     package_name = mesh_path.rsplit(".", 1)[0]
     package_file = service._package_file(service.config.project_path, package_name, "SkeletalMesh")
     return "sha256:" + sha256_file(package_file)
+
+
+def _retarget_output_object_path(source_asset: str, output_directory: str, naming: dict[str, Any]) -> str:
+    """Predict the batch output object path for one source asset.
+
+    Mirrors the engine naming rule (EditorAnimUtils::FNameDuplicationRule) used
+    by RunRetargetBatchStep so the pre-batch backup can capture the exact files
+    that an overwrite will replace.
+    """
+    package_path, separator, _ = source_asset.rpartition(".")
+    if not separator:
+        package_path = source_asset
+    folder = (output_directory.rstrip("/") if output_directory else package_path.rsplit("/", 1)[0])
+    short_name = package_path.rsplit("/", 1)[-1]
+    search = naming.get("search", "") or ""
+    replace = naming.get("replace", "") or ""
+    new_name = short_name.replace(search, replace)
+    new_name = (naming.get("prefix", "") or "") + new_name + (naming.get("suffix", "") or "")
+    return f"{folder}/{new_name}.{new_name}"
 
 
 class RetargetWorkflowMixin:
@@ -300,7 +320,7 @@ class RetargetWorkflowMixin:
                     for asset_path in all_assets:
                         change_set.operations.append(
                             ChangeSetOperationRecord(
-                                receipt=f"{setup_receipt}:{_chain_name_sorted(changes)}",
+                                receipt="live_rtgsetup_" + secrets.token_urlsafe(16),
                                 plan_id=plan_id,
                                 asset_path=asset_path,
                                 operation="retarget-setup",
@@ -428,6 +448,8 @@ class RetargetWorkflowMixin:
                 "sourceAssets": list(source_assets),
                 "sourceMesh": plan["source"]["mesh"],
                 "targetMesh": plan["target"]["mesh"],
+                "sourceRevision": plan["revisions"].get("sourceMesh", ""),
+                "targetRevision": plan["revisions"].get("targetMesh", ""),
                 "outputDirectory": output_directory,
                 "naming": dict(naming or {}),
                 "overwriteExisting": overwrite_existing,
@@ -436,6 +458,10 @@ class RetargetWorkflowMixin:
                 "retainAdditiveFlags": retain_additive_flags,
                 "outputs": [],
                 "createdAssets": [],
+                "updatedAssets": [],
+                "changeSetId": "",
+                "backupDir": "",
+                "backupManifest": {"schemaVersion": RETARGET_BACKUP_SCHEMA_VERSION, "entries": []},
                 "history": [{"step": "queued", "status": "queued", "atUtc": utc_now_iso()}],
                 "error": None,
             }
@@ -473,6 +499,16 @@ class RetargetWorkflowMixin:
             task["status"] = "validating"
             task["step"] = "validating"
             task["history"].append({"step": "validating", "status": "running", "atUtc": utc_now_iso()})
+            # Capture the pre-batch Backup of any output the batch may overwrite.
+            # The engine overwrite path persists directly to disk, so the original
+            # must be copied before RunRetarget runs.
+            predicted_outputs = [
+                _retarget_output_object_path(source_asset, task["outputDirectory"], task["naming"])
+                for source_asset in task["sourceAssets"]
+            ]
+            backup_dir, backup_manifest = self._capture_retarget_backup(task_id, predicted_outputs)
+            task["backupDir"] = str(backup_dir)
+            task["backupManifest"] = backup_manifest
             try:
                 self._assert_live_retarget_capability("retarget.batch")
                 live_result = self.live_editor_service.call_method(
@@ -529,7 +565,13 @@ class RetargetWorkflowMixin:
                 )
             return self._retarget_batch_task_result(task)
 
-    def save_animation_retarget_batch(self, *, task_id: str, confirmation: str) -> dict[str, Any]:
+    def save_animation_retarget_batch(
+        self,
+        *,
+        task_id: str,
+        confirmation: str,
+        change_set_id: str = "",
+    ) -> dict[str, Any]:
         with self._lock:
             if not self.config.commit_enabled:
                 raise self._workflow_error(
@@ -569,12 +611,12 @@ class RetargetWorkflowMixin:
             save_receipts: list[str] = []
             for asset_path in created_assets:
                 package_name = asset_path.rsplit(".", 1)[0]
-                package_file = self._package_file(self.config.project_path, package_name, "AnimSequence")
-                if package_file.exists():
+                package_file = self._output_package_file(package_name)
+                if package_file.is_file():
                     # The batch overwrite path already persisted this output to
                     # disk, so the package is clean; record it as saved.
                     saved_assets.append(asset_path)
-                    save_receipts.append("rtsave_" + secrets.token_urlsafe(16))
+                    save_receipts.append("live_rtsave_" + secrets.token_urlsafe(16))
                     continue
                 save_result = self.live_editor_service.call_method(
                     "editor.saveAuthorizedAsset",
@@ -591,11 +633,33 @@ class RetargetWorkflowMixin:
                         details={"assetPath": asset_path},
                     )
                 saved_assets.append(asset_path)
-                save_receipts.append("rtsave_" + secrets.token_urlsafe(16))
+                save_receipts.append("live_rtsave_" + secrets.token_urlsafe(16))
             task["status"] = "saved"
             task["savedAssets"] = saved_assets
             task["saveReceipts"] = save_receipts
+            task["updatedAssets"] = [
+                entry.get("outputPath", "")
+                for entry in task.get("backupManifest", {}).get("entries", [])
+                if entry.get("kind") == "overwrite"
+            ]
             task["history"].append({"step": "saved", "status": "saved", "atUtc": utc_now_iso()})
+
+            change_set_updated = False
+            if change_set_id:
+                change_set_updated = self._bind_retarget_save_change_set(
+                    plan_id=task["planId"],
+                    change_set_id=change_set_id,
+                    saved_assets=saved_assets,
+                    save_receipts=save_receipts,
+                    editor_session_id=self._current_editor_session_id(),
+                )
+                task["changeSetId"] = change_set_id
+            backup_manifest = task.get("backupManifest", {})
+            backup_manifest_ref = (
+                f"backup-manifest:{task_id}"
+                if backup_manifest.get("entries")
+                else "backup-manifest:not-applicable"
+            )
             return {
                 "schemaVersion": "1.0",
                 "tool": "ue_save_animation_retarget_batch",
@@ -605,8 +669,17 @@ class RetargetWorkflowMixin:
                 "status": "saved",
                 "savedAssets": saved_assets,
                 "saveReceipts": save_receipts,
+                "updatedAssets": task["updatedAssets"],
+                "createdAssets": created_assets,
                 "outputDirectory": task["outputDirectory"],
-                "nextStep": "The retargeted animations are saved to disk and can be assigned to the XinYueHu skeleton.",
+                "backupManifestRef": backup_manifest_ref,
+                "backupDir": task.get("backupDir", ""),
+                "changeSetId": change_set_id or "",
+                "changeSetUpdated": change_set_updated,
+                "nextStep": (
+                    "The retargeted animations are saved to disk; run ue_verify_animation_retarget_batch "
+                    "to independently reload the outputs, then ue_rollback_animation_retarget_batch if a restore is needed."
+                ),
             }
 
     def validate_animation_retarget(
@@ -652,6 +725,614 @@ class RetargetWorkflowMixin:
                 ),
             }
 
+    def _retarget_work_root(self) -> Path:
+        work_root = getattr(self.config, "work_root", None)
+        if work_root is None:
+            work_root = self.config.project_path.parent
+        return Path(work_root).resolve()
+
+    def _retarget_backup_root(self) -> Path:
+        configured = getattr(self.config, "backup_root", None)
+        root = Path(configured) / "Retarget" if configured is not None else self._retarget_work_root() / "retarget-backups"
+        return root.resolve()
+
+    def _content_root(self) -> Path:
+        project_path = Path(self.config.project_path).resolve()
+        if project_path.is_dir():
+            # Unit-test harness: project_path is the project directory itself.
+            return project_path / "Content"
+        # Production: project_path is the .uproject file, Content is its sibling.
+        return project_path.parent / "Content"
+
+    def _output_package_file(self, package_name: str) -> Path:
+        if not package_name.startswith("/Game/"):
+            raise self._workflow_error(
+                "retarget-batch-invalid",
+                "Output package must be under /Game.",
+            )
+        relative_parts = [part for part in package_name[len("/Game/") :].split("/") if part]
+        if not relative_parts or any(part in {".", ".."} for part in relative_parts):
+            raise self._workflow_error(
+                "retarget-batch-invalid",
+                "Output package path is invalid.",
+            )
+        return self._content_root().joinpath(*relative_parts).with_suffix(".uasset")
+
+    def _capture_retarget_backup(
+        self,
+        task_id: str,
+        predicted_outputs: list[str],
+    ) -> tuple[Path, dict[str, Any]]:
+        backup_dir = self._retarget_backup_root() / task_id
+        if backup_dir.exists():
+            shutil.rmtree(backup_dir)
+        backup_dir.mkdir(parents=True, exist_ok=False)
+        entries: list[dict[str, Any]] = []
+        for index, output_path in enumerate(predicted_outputs):
+            package_path = output_path.rsplit(".", 1)[0]
+            package_file = self._output_package_file(package_path)
+            entry: dict[str, Any] = {
+                "index": index,
+                "outputPath": output_path,
+                "packageFile": str(package_file),
+                "backupRelativePath": "",
+                "revision": "",
+            }
+            if package_file.is_file():
+                backup_file = backup_dir / f"{index:03d}-{package_file.name}"
+                shutil.copy2(package_file, backup_file)
+                entry["kind"] = "overwrite"
+                entry["backupRelativePath"] = backup_file.relative_to(backup_dir).as_posix()
+                entry["revision"] = "sha256:" + sha256_file(backup_file)
+            else:
+                entry["kind"] = "create"
+            entries.append(entry)
+        manifest: dict[str, Any] = {
+            "schemaVersion": RETARGET_BACKUP_SCHEMA_VERSION,
+            "taskId": task_id,
+            "createdUtc": utc_now_iso(),
+            "entries": entries,
+        }
+        (backup_dir / "manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return backup_dir, manifest
+
+    def _load_retarget_backup(self, task_id: str) -> tuple[Path, dict[str, Any]]:
+        backup_dir = self._retarget_backup_root() / task_id
+        manifest_path = backup_dir / "manifest.json"
+        if not manifest_path.is_file():
+            raise self._workflow_error(
+                "retarget-rollback-backup-missing",
+                "The retarget batch has no pre-batch Backup manifest; rollback is not available.",
+                details={"backupDir": str(backup_dir)},
+            )
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise self._workflow_error(
+                "retarget-rollback-backup-invalid",
+                "The retarget batch Backup manifest is unreadable.",
+            ) from exc
+        if not isinstance(manifest, dict) or manifest.get("schemaVersion") != RETARGET_BACKUP_SCHEMA_VERSION:
+            raise self._workflow_error(
+                "retarget-rollback-backup-invalid",
+                "The retarget batch Backup manifest schema is unsupported.",
+            )
+        return backup_dir, manifest
+
+    def _current_editor_session_id(self) -> str:
+        session_reader = getattr(self, "_current_editor_session", None)
+        if session_reader is None:
+            return ""
+        try:
+            available, session_id = session_reader()
+            return session_id if available else ""
+        except (AttributeError, TypeError, ValueError):
+            return ""
+
+    def _bind_retarget_save_change_set(
+        self,
+        *,
+        plan_id: str,
+        change_set_id: str,
+        saved_assets: list[str],
+        save_receipts: list[str],
+        editor_session_id: str,
+    ) -> bool:
+        change_set = self._resolve_change_set(change_set_id)
+        self._reconcile_change_set(change_set, persist=True)
+        if change_set.status in {"undone", "discarded", "verified", "failed", "unknown"}:
+            raise self._workflow_error(
+                "change-set-closed",
+                f"The Change Set is in {change_set.status} state and cannot accept another live write.",
+            )
+        if len(change_set.operations) + len(saved_assets) > MAX_CHANGE_SET_RECEIPTS:
+            raise self._workflow_error(
+                "change-set-full",
+                f"A Change Set is limited to {MAX_CHANGE_SET_RECEIPTS} bound live write operations.",
+            )
+        if change_set.editor_session_id and editor_session_id and change_set.editor_session_id != editor_session_id:
+            raise self._workflow_error(
+                "change-set-editor-session-mismatch",
+                "The retarget save belongs to a different Editor session than the Change Set.",
+            )
+        now = utc_now_iso()
+        if editor_session_id:
+            change_set.editor_session_id = editor_session_id
+        for asset_path, save_receipt in zip(saved_assets, save_receipts, strict=True):
+            change_set.operations.append(
+                ChangeSetOperationRecord(
+                    receipt=save_receipt,
+                    plan_id=plan_id,
+                    asset_path=asset_path,
+                    operation="retarget-save",
+                    transaction_id="",
+                    editor_session_id=editor_session_id,
+                    status="saved",
+                    created_at_utc=now,
+                    updated_at_utc=now,
+                    save_receipt=save_receipt,
+                )
+            )
+        change_set.status = derive_change_set_status(change_set.operations)
+        change_set.updated_at_utc = now
+        return self._persist_change_set(change_set)
+
+    def _run_independent_catalog(self, package_path: str, output_dir: Path, *, stage: str) -> dict[str, Any]:
+        if output_dir.exists():
+            shutil.rmtree(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=False)
+        result = self._run_script(
+            "RunAssetCatalog.ps1",
+            [
+                "-EngineRoot", str(self.config.engine_root),
+                "-ProjectPath", str(self.config.project_path),
+                "-Asset", package_path,
+                "-Output", str(output_dir),
+            ],
+            stage=stage,
+            report_path=output_dir / "manifest.json",
+        )
+        exit_code = int(getattr(result, "exit_code", 1))
+        manifest: dict[str, Any] = {}
+        manifest_path = output_dir / "manifest.json"
+        if manifest_path.is_file():
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                manifest = {}
+        canonical: dict[str, Any] = {}
+        canonical_files = list((output_dir / "canonical").rglob("*.json"))
+        if len(canonical_files) == 1:
+            try:
+                canonical = json.loads(canonical_files[0].read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                canonical = {}
+        return {"exitCode": exit_code, "manifest": manifest, "canonical": canonical}
+
+    def verify_animation_retarget_batch(self, *, task_id: str) -> dict[str, Any]:
+        with self._lock:
+            tasks = getattr(self, "_retarget_batch_tasks", {})
+            task = tasks.get(task_id)
+            if task is None:
+                raise self._workflow_error(
+                    "retarget-batch-task-not-found",
+                    "The retarget batch task is not active in this MCP server session.",
+                )
+            if task["status"] not in {"completed", "saved"}:
+                raise self._workflow_error(
+                    "retarget-batch-task-invalid-state",
+                    f"Only a completed or saved retarget batch task can be verified (current state {task['status']}).",
+                )
+            self._assert_policy_unchanged()
+            self._assert_live_retarget_capability("retarget.validate")
+            outputs = task.get("savedAssets") or task.get("createdAssets") or []
+            if not outputs:
+                raise self._workflow_error(
+                    "retarget-batch-invalid",
+                    "The retarget batch task has no outputs to verify.",
+                )
+            sample = outputs[:MAX_INDEPENDENT_VERIFY_SAMPLE]
+            verified_assets: list[dict[str, Any]] = []
+            failures: list[dict[str, Any]] = []
+            for asset_path in sample:
+                package_path = asset_path.rsplit(".", 1)[0]
+                output_dir = self._retarget_work_root() / "retarget-verify" / task_id / package_path.rsplit("/", 1)[-1]
+                export = self._run_independent_catalog(package_path, output_dir, stage="retarget-verify-export")
+                canonical = export["canonical"]
+                manifest = export["manifest"]
+                revision = canonical.get("revision", {}) if isinstance(canonical, dict) else {}
+                actual_revision = revision.get("value", "") if isinstance(revision, dict) else ""
+                package_file = self._output_package_file(package_path)
+                disk_revision = "sha256:" + sha256_file(package_file) if package_file.is_file() else ""
+                checks = {
+                    "exportExitCodeZero": export["exitCode"] == 0,
+                    "manifestSuccess": (
+                        int(manifest.get("successCount", -1)) == 1 and int(manifest.get("failureCount", -1)) == 0
+                    ),
+                    "canonicalAssetMatch": canonical.get("assetPath") == asset_path,
+                    "revisionMatchesDisk": bool(actual_revision) and actual_revision == disk_revision,
+                    "packageNotDirty": isinstance(revision, dict) and revision.get("packageDirty") is False,
+                }
+                if all(checks.values()):
+                    verified_assets.append({"assetPath": asset_path, "revision": actual_revision, "verified": True})
+                else:
+                    failures.append(
+                        {
+                            "assetPath": asset_path,
+                            "checks": checks,
+                            "actualRevision": actual_revision,
+                            "diskRevision": disk_revision,
+                        }
+                    )
+            verified = not failures and len(verified_assets) == len(sample)
+            validation_report_id = "report_" + secrets.token_urlsafe(20)
+            task["independentValidation"] = {
+                "sampleCount": len(sample),
+                "verifiedCount": len(verified_assets),
+                "verifiedAssets": verified_assets,
+                "failures": failures,
+                "verified": verified,
+                "reportId": validation_report_id,
+            }
+            revision_set = [
+                {
+                    "assetPath": entry["assetPath"],
+                    "revision": entry["revision"],
+                    "revisionStable": True,
+                }
+                for entry in verified_assets
+            ]
+            evidence = self._retarget_memory_task_evidence(
+                task,
+                conclusion=(
+                    f"The retarget batch {task_id} outputs were saved and {len(verified_assets)}/{len(sample)} "
+                    f"were independently reloaded and matched their disk Revision."
+                    if verified
+                    else f"The retarget batch {task_id} independent verification found {len(failures)} failure(s)."
+                ),
+                outcome="succeeded" if verified else "failed",
+                revision_set=revision_set,
+                validation_report_id=validation_report_id,
+                workflow_tool="ue_verify_animation_retarget_batch",
+                state="verified" if verified else "failed",
+            )
+            return {
+                "schemaVersion": "1.0",
+                "tool": "ue_verify_animation_retarget_batch",
+                "ok": True,
+                "mode": "RetargetBatchVerify",
+                "taskId": task_id,
+                "status": task["status"],
+                "verified": verified,
+                "sampleCount": len(sample),
+                "verifiedCount": len(verified_assets),
+                "verifiedAssets": verified_assets,
+                "failures": failures,
+                "reportId": validation_report_id,
+                "memoryTaskEvidence": evidence,
+                "nextStep": (
+                    "The saved outputs were independently reloaded and match disk. If Memory is enabled, "
+                    "pass memoryTaskEvidence.arguments unchanged to ue_memory_record_task."
+                    if verified
+                    else "Resolve the independent verification failures before trusting the saved outputs."
+                ),
+            }
+
+    def rollback_animation_retarget_batch(
+        self,
+        *,
+        task_id: str,
+        mode: str = "DryRun",
+        rollback_dry_run_receipt: str = "",
+        confirmation: str = "",
+    ) -> dict[str, Any]:
+        with self._lock:
+            tasks = getattr(self, "_retarget_batch_tasks", {})
+            task = tasks.get(task_id)
+            if task is None:
+                raise self._workflow_error(
+                    "retarget-batch-task-not-found",
+                    "The retarget batch task is not active in this MCP server session.",
+                )
+            if task["status"] not in {"completed", "saved"}:
+                raise self._workflow_error(
+                    "retarget-batch-task-invalid-state",
+                    f"Only a completed or saved retarget batch task can be rolled back (current state {task['status']}).",
+                )
+            if mode not in {"DryRun", "Commit"}:
+                raise self._workflow_error(
+                    "retarget-rollback-invalid-mode",
+                    "mode must be DryRun or Commit.",
+                )
+            backup_dir, manifest = self._load_retarget_backup(task_id)
+            entries = manifest.get("entries", [])
+            if not isinstance(entries, list) or not entries:
+                raise self._workflow_error(
+                    "retarget-rollback-backup-missing",
+                    "The retarget batch Backup manifest has no captured entries.",
+                )
+            restore_plan = [entry for entry in entries if entry.get("kind") == "overwrite"]
+            delete_plan = [entry for entry in entries if entry.get("kind") == "create"]
+
+            if mode == "DryRun":
+                receipt = "rtgrb_dry_" + secrets.token_urlsafe(16)
+                registry = getattr(self, "_retarget_rollback_dry_runs", {})
+                registry[receipt] = {"taskId": task_id, "receipt": receipt, "consumed": False}
+                self._retarget_rollback_dry_runs = registry
+                report = {
+                    "schemaVersion": RETARGET_ROLLBACK_REPORT_SCHEMA_VERSION,
+                    "mode": "DryRun",
+                    "taskId": task_id,
+                    "valid": True,
+                    "willWriteDisk": False,
+                    "wroteDisk": False,
+                    "restoreCount": len(restore_plan),
+                    "deleteCount": len(delete_plan),
+                    "restorePlan": restore_plan,
+                    "deletePlan": delete_plan,
+                    "backupDir": str(backup_dir),
+                }
+                return {
+                    "schemaVersion": "1.0",
+                    "tool": "ue_rollback_animation_retarget_batch",
+                    "ok": True,
+                    "mode": "DryRun",
+                    "taskId": task_id,
+                    "rollbackDryRunReceipt": receipt,
+                    "restoreCount": len(restore_plan),
+                    "deleteCount": len(delete_plan),
+                    "report": report,
+                    "nextStep": (
+                        f"To restore, call ue_rollback_animation_retarget_batch with mode Commit and "
+                        f"confirmation 'ROLLBACK RETARGET BATCH {task_id}'."
+                    ),
+                }
+
+            if not self.config.commit_enabled:
+                raise self._workflow_error(
+                    "live-editor-write-disabled",
+                    "Retarget rollback requires Commit tools to be enabled when the MCP server starts.",
+                )
+            registry = getattr(self, "_retarget_rollback_dry_runs", {})
+            dry_run = registry.get(rollback_dry_run_receipt)
+            if dry_run is None or dry_run["taskId"] != task_id or dry_run["consumed"]:
+                raise self._workflow_error(
+                    "retarget-rollback-receipt-invalid",
+                    "A fresh retarget rollback Dry Run receipt is required.",
+                )
+            if confirmation != f"ROLLBACK RETARGET BATCH {task_id}":
+                raise self._workflow_error(
+                    "retarget-confirmation-required",
+                    "Retarget rollback confirmation did not exactly match the required taskId phrase.",
+                )
+            dry_run["consumed"] = True
+
+            restored: list[dict[str, Any]] = []
+            deleted: list[dict[str, Any]] = []
+            failures: list[dict[str, Any]] = []
+            for entry in entries:
+                output_path = entry["outputPath"]
+                package_path = output_path.rsplit(".", 1)[0]
+                package_file = self._output_package_file(package_path)
+                if entry.get("kind") == "overwrite":
+                    backup_file = backup_dir / str(entry.get("backupRelativePath", ""))
+                    expected_revision = str(entry.get("revision", ""))
+                    if not backup_file.is_file() or expected_revision != "sha256:" + sha256_file(backup_file):
+                        failures.append(
+                            {
+                                "outputPath": output_path,
+                                "kind": "overwrite",
+                                "error": "retarget-rollback-backup-mismatch",
+                            }
+                        )
+                        continue
+                    shutil.copy2(backup_file, package_file)
+                    actual_revision = "sha256:" + sha256_file(package_file)
+                    if actual_revision != expected_revision:
+                        failures.append(
+                            {
+                                "outputPath": output_path,
+                                "kind": "overwrite",
+                                "error": "retarget-rollback-restore-mismatch",
+                            }
+                        )
+                        continue
+                    restored.append(
+                        {
+                            "outputPath": output_path,
+                            "revision": actual_revision,
+                            "restored": True,
+                        }
+                    )
+                else:
+                    if package_file.is_file():
+                        package_file.unlink()
+                    if package_file.exists():
+                        failures.append(
+                            {
+                                "outputPath": output_path,
+                                "kind": "create",
+                                "error": "retarget-rollback-delete-failed",
+                            }
+                        )
+                        continue
+                    deleted.append({"outputPath": output_path, "deleted": True})
+
+            # Independent reload verification of a bounded sample.
+            verify_sample = (restored + deleted)[:MAX_INDEPENDENT_VERIFY_SAMPLE]
+            verification: list[dict[str, Any]] = []
+            for item in verify_sample:
+                output_path = item["outputPath"]
+                package_path = output_path.rsplit(".", 1)[0]
+                output_dir = self._retarget_work_root() / "retarget-rollback" / task_id / package_path.rsplit("/", 1)[-1]
+                export = self._run_independent_catalog(package_path, output_dir, stage="retarget-rollback-verify")
+                canonical = export["canonical"]
+                manifest_export = export["manifest"]
+                if item.get("restored"):
+                    revision = canonical.get("revision", {}) if isinstance(canonical, dict) else {}
+                    actual = revision.get("value", "") if isinstance(revision, dict) else ""
+                    verified_restore = (
+                        export["exitCode"] == 0
+                        and canonical.get("assetPath") == output_path
+                        and actual == item.get("revision", "")
+                        and revision.get("packageDirty") is False
+                    )
+                    verification.append(
+                        {
+                            "outputPath": output_path,
+                            "kind": "overwrite",
+                            "verified": verified_restore,
+                            "revision": actual,
+                        }
+                    )
+                else:
+                    # A deleted asset must not produce a canonical asset export.
+                    verified_delete = (
+                        export["exitCode"] != 0
+                        or int(manifest_export.get("successCount", 0)) == 0
+                        or not canonical
+                    )
+                    verification.append(
+                        {
+                            "outputPath": output_path,
+                            "kind": "create",
+                            "verified": verified_delete,
+                            "revision": "",
+                        }
+                    )
+            verification_failed = any(not entry["verified"] for entry in verification)
+            rollback_ok = not failures and not verification_failed
+            report = {
+                "schemaVersion": RETARGET_ROLLBACK_REPORT_SCHEMA_VERSION,
+                "mode": "Commit",
+                "taskId": task_id,
+                "valid": rollback_ok,
+                "willWriteDisk": True,
+                "wroteDisk": True,
+                "restoredCount": len(restored),
+                "deletedCount": len(deleted),
+                "restored": restored,
+                "deleted": deleted,
+                "failures": failures,
+                "independentVerification": verification,
+                "verificationFailed": verification_failed,
+                "backupDir": str(backup_dir),
+                "completedUtc": utc_now_iso(),
+            }
+            task["rollbackReport"] = report
+            revision_set = [
+                {"assetPath": entry["outputPath"], "revision": entry["revision"], "revisionStable": True}
+                for entry in restored
+            ]
+            evidence = self._retarget_memory_task_evidence(
+                task,
+                conclusion=(
+                    f"The retarget batch {task_id} was rolled back: {len(restored)} overwritten output(s) restored "
+                    f"to their pre-batch Revision and {len(deleted)} newly created output(s) removed."
+                    if rollback_ok
+                    else f"The retarget batch {task_id} rollback finished with failures and was not fully verified."
+                ),
+                outcome="rolledBack" if rollback_ok else "failed",
+                revision_set=revision_set,
+                validation_report_id="",
+                workflow_tool="ue_rollback_animation_retarget_batch",
+                state="rolled-back" if rollback_ok else "failed",
+            )
+            return {
+                "schemaVersion": "1.0",
+                "tool": "ue_rollback_animation_retarget_batch",
+                "ok": True,
+                "mode": "Commit",
+                "taskId": task_id,
+                "rollbackDryRunReceipt": rollback_dry_run_receipt,
+                "valid": rollback_ok,
+                "restoredCount": len(restored),
+                "deletedCount": len(deleted),
+                "restored": restored,
+                "deleted": deleted,
+                "failures": failures,
+                "independentVerification": verification,
+                "verificationFailed": verification_failed,
+                "report": report,
+                "memoryTaskEvidence": evidence,
+                "nextStep": (
+                    "Rollback was independently verified; the project state matches the pre-batch Backup."
+                    if rollback_ok
+                    else "Rollback did not fully verify; inspect failures before continuing."
+                ),
+            }
+
+    def _retarget_memory_task_evidence(
+        self,
+        task: dict[str, Any],
+        *,
+        conclusion: str,
+        outcome: str,
+        revision_set: list[dict[str, Any]],
+        validation_report_id: str,
+        workflow_tool: str,
+        state: str,
+    ) -> dict[str, Any]:
+        backup_manifest = task.get("backupManifest", {}) or {}
+        entries = backup_manifest.get("entries", []) if isinstance(backup_manifest, dict) else []
+        backup_manifest_ref = f"backup-manifest:{task['taskId']}" if entries else "backup-manifest:not-applicable"
+        return {
+            "schemaVersion": "1.0",
+            "tool": "ue_memory_record_task",
+            "arguments": {
+                "task_key": f"retarget:{task['planId']}",
+                "title": f"Animation retarget batch {task['taskId']}",
+                "conclusion": conclusion,
+                "outcome": outcome,
+                "patch_ref": f"patch:{task.get('planDigest', '')}",
+                "backup_manifest_ref": backup_manifest_ref,
+                "validation_evidence_ref": (
+                    f"validation-evidence:{validation_report_id}" if validation_report_id else "validation-evidence:not-applicable"
+                ),
+                "revision_set": revision_set,
+                "scopes": [
+                    {"scopeType": "asset", "scopeKey": asset_path}
+                    for asset_path in (task.get("savedAssets") or task.get("createdAssets") or [])
+                ],
+                "confidence": 1.0,
+                "patch_details": {
+                    "planId": task.get("planId", ""),
+                    "planDigest": task.get("planDigest", ""),
+                    "retargeter": task.get("retargeter", ""),
+                    "outputDirectory": task.get("outputDirectory", ""),
+                    "overwriteExisting": task.get("overwriteExisting", False),
+                },
+                "backup_manifest_details": {
+                    "manifestId": task.get("taskId", ""),
+                    "backupDir": task.get("backupDir", ""),
+                    "entryCount": len(entries),
+                },
+                "validation_evidence_details": {
+                    "state": state,
+                    "reportId": validation_report_id or task.get("taskId", ""),
+                    "independentReload": True,
+                },
+                "details": {
+                    "retargetTaskId": task.get("taskId", ""),
+                    "changeSetId": task.get("changeSetId", ""),
+                    "planDigest": task.get("planDigest", ""),
+                    "sourceRevision": task.get("sourceRevision", ""),
+                    "targetRevision": task.get("targetRevision", ""),
+                    "createdAssets": task.get("createdAssets", []),
+                    "updatedAssets": task.get("updatedAssets", []),
+                    "outputAnimations": task.get("outputs", []),
+                    "saveReceipts": task.get("saveReceipts", []),
+                    "finalRevisionSet": revision_set,
+                    "outcome": outcome,
+                    "workflowEvidenceSchemaVersion": "1.0",
+                    "workflowTool": workflow_tool,
+                },
+            },
+        }
+
     @staticmethod
     def _retarget_batch_task_result(task: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -669,6 +1350,9 @@ class RetargetWorkflowMixin:
             "outputDirectory": task["outputDirectory"],
             "outputs": task["outputs"],
             "createdAssets": task["createdAssets"],
+            "updatedAssets": task.get("updatedAssets", []),
+            "backupDir": task.get("backupDir", ""),
+            "backupManifest": task.get("backupManifest", {}),
             "history": task["history"],
             "error": task["error"],
             "nextStep": (
