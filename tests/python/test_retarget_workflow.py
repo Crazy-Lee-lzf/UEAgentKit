@@ -390,6 +390,7 @@ class RetargetWorkflowTests(unittest.TestCase):
                     "retarget.configure",
                     "retarget.inspect",
                     "retarget.batch",
+                    "retarget.validate",
                 ],
                 "allowedAssetRoots": ["/Game/Retargeted"],
                 "allowedReferenceRoots": ["/Game/Characters/Mannequins"],
@@ -410,6 +411,7 @@ class RetargetWorkflowTests(unittest.TestCase):
                 "retarget.configure",
                 "retarget.inspect",
                 "retarget.batch",
+                "retarget.validate",
             ]
         }
         return service, root
@@ -721,6 +723,32 @@ class RetargetWorkflowTests(unittest.TestCase):
         with self.assertRaises(Exception) as ctx:
             service.save_animation_retarget_batch(task_id=task_id, confirmation="wrong")
         self.assertEqual(getattr(ctx.exception, "code", ""), "retarget-confirmation-required")
+
+    def test_validate_returns_verdict_and_issues(self) -> None:
+        service, _ = self._make_service()
+        service.live_editor_service.call_method.return_value = {
+            "action": "validate-animation-retarget",
+            "retargeter": "/Game/Retargeted/RTG.RTG",
+            "verdict": "passed_with_warnings",
+            "animationCount": 1,
+            "issues": [
+                {"level": "warning", "code": "retarget_metadata_missing_curve", "message": "No curves.", "scope": "metadata"}
+            ],
+            "editorSessionId": "session-1",
+        }
+        result = service.validate_animation_retarget(
+            retargeter="/Game/Retargeted/RTG.RTG",
+            animation_paths=["/Game/Retargeted/RTG_Idle.RTG_Idle"],
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["verdict"], "passed_with_warnings")
+        self.assertEqual(len(result["issues"]), 1)
+        validate_calls = [
+            call for call in service.live_editor_service.call_method.call_args_list
+            if call.args[0] == "editor.validateAnimationRetarget"
+        ]
+        self.assertEqual(len(validate_calls), 1)
+        self.assertEqual(validate_calls[0].args[1]["retargeter"], "/Game/Retargeted/RTG.RTG")
 
 
 if __name__ == "__main__":

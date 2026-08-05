@@ -9,6 +9,7 @@ RETARGET_INSPECT_CAPABILITY = "retarget.inspect"
 RETARGET_PLAN_CAPABILITY = "retarget.plan"
 RETARGET_CONFIGURE_CAPABILITY = "retarget.configure"
 RETARGET_BATCH_CAPABILITY = "retarget.batch"
+RETARGET_VALIDATE_CAPABILITY = "retarget.validate"
 
 _CAPABILITY_FOR_TOOL = {
     "ue_analyze_animation_retarget": RETARGET_INSPECT_CAPABILITY,
@@ -18,6 +19,7 @@ _CAPABILITY_FOR_TOOL = {
     "ue_get_animation_retarget_batch": RETARGET_BATCH_CAPABILITY,
     "ue_cancel_animation_retarget_batch": RETARGET_BATCH_CAPABILITY,
     "ue_save_animation_retarget_batch": RETARGET_BATCH_CAPABILITY,
+    "ue_validate_animation_retarget": RETARGET_VALIDATE_CAPABILITY,
 }
 
 
@@ -229,3 +231,21 @@ def register_retarget_workflow_tools(
             return workflow_service.save_animation_retarget_batch(task_id=taskId, confirmation=confirmation)
         except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
             return error_response("ue_save_animation_retarget_batch", exc, read_only=False)
+
+    @server.tool(annotations=read_annotations)
+    def ue_validate_animation_retarget(
+        retargeter: str,
+        animationPaths: list[str],
+    ) -> dict[str, Any]:
+        """Validate the IK Retargeter structure and retargeted animation metadata and motion."""
+        try:
+            _assert_retarget_policy_capability(
+                policy_path=workflow_service.config.policy_path,
+                tool_name="ue_validate_animation_retarget",
+            )
+            return workflow_service.validate_animation_retarget(
+                retargeter=retargeter,
+                animation_paths=animationPaths,
+            )
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_validate_animation_retarget", exc, read_only=True)

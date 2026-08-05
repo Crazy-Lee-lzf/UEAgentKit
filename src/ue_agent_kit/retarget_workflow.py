@@ -609,6 +609,49 @@ class RetargetWorkflowMixin:
                 "nextStep": "The retargeted animations are saved to disk and can be assigned to the XinYueHu skeleton.",
             }
 
+    def validate_animation_retarget(
+        self,
+        *,
+        retargeter: str,
+        animation_paths: list[str],
+    ) -> dict[str, Any]:
+        with self._lock:
+            if self.live_editor_service is None:
+                raise self._workflow_error(
+                    "live-editor-required",
+                    "Live Editor mode is required to validate the retarget.",
+                )
+            self._assert_policy_unchanged()
+            self._assert_live_retarget_capability("retarget.validate")
+            if not animation_paths or not isinstance(animation_paths, list):
+                raise self._workflow_error(
+                    "retarget-batch-invalid",
+                    "animationPaths must list at least one animation object path.",
+                )
+            live_result = self.live_editor_service.call_method(
+                "editor.validateAnimationRetarget",
+                {
+                    "retargeter": retargeter,
+                    "animationPaths": animation_paths,
+                },
+            )
+            return {
+                "schemaVersion": "1.0",
+                "tool": "ue_validate_animation_retarget",
+                "ok": True,
+                "mode": "RetargetValidation",
+                "retargeter": retargeter,
+                "verdict": str(live_result.get("verdict", "")),
+                "animationCount": len(animation_paths),
+                "issues": live_result.get("issues", []),
+                "result": live_result,
+                "nextStep": (
+                    "The retargeted animations are valid; they can be assigned to the target character and saved."
+                    if live_result.get("verdict") in {"passed", "passed_with_warnings"}
+                    else "Resolve the validation errors before using the retargeted animations."
+                ),
+            }
+
     @staticmethod
     def _retarget_batch_task_result(task: dict[str, Any]) -> dict[str, Any]:
         return {

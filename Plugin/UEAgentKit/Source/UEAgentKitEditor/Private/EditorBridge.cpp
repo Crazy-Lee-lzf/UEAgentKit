@@ -71,7 +71,8 @@ namespace UEAgentKitEditorBridgePrivate
 		TEXT("retarget.inspect"),
 		TEXT("retarget.plan"),
 		TEXT("retarget.configure"),
-		TEXT("retarget.batch")
+		TEXT("retarget.batch"),
+		TEXT("retarget.validate")
 	};
 
 	FString NormalizeProjectPath()
@@ -1129,6 +1130,29 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 				Result,
 				ErrorCode,
 				ErrorMessage),
+			Result,
+			ErrorCode,
+			ErrorMessage);
+	}
+	else if (Method == TEXT("editor.validateAnimationRetarget"))
+	{
+		FString RetargeterPath;
+		Params->TryGetStringField(TEXT("retargeter"), RetargeterPath);
+		const TArray<TSharedPtr<FJsonValue>>* AnimationPaths = nullptr;
+		Params->TryGetArrayField(TEXT("animationPaths"), AnimationPaths);
+		TArray<FString> ParsedPaths;
+		if (AnimationPaths != nullptr)
+		{
+			for (const TSharedPtr<FJsonValue>& Value : *AnimationPaths)
+			{
+				ParsedPaths.Add(Value->AsString());
+			}
+		}
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode;
+		FString ErrorMessage;
+		SendActionResult(
+			TryValidateAnimationRetargetResult(RetargeterPath, ParsedPaths, Result, ErrorCode, ErrorMessage),
 			Result,
 			ErrorCode,
 			ErrorMessage);

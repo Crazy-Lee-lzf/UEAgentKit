@@ -7,6 +7,7 @@
 #include "Editor.h"
 #include "Engine/SkeletalMesh.h"
 #include "Rig/IKRigDefinition.h"
+#include "Retarget/RetargetValidation.h"
 #include "Retargeter/IKRetargeter.h"
 #include "UObject/UObjectGlobals.h"
 
@@ -573,6 +574,73 @@ bool FUEAgentKitEditorBridge::TryRetargetBatchStepResult(
 	Result->SetArrayField(TEXT("outputs"), OutputValues);
 	Result->SetBoolField(TEXT("transactionCreated"), !Outputs.IsEmpty());
 	Result->SetBoolField(TEXT("assetDirty"), !Outputs.IsEmpty());
+	Result->SetStringField(TEXT("editorSessionId"), SessionId);
+	OutResult = Result;
+	return true;
+}
+
+bool FUEAgentKitEditorBridge::TryValidateAnimationRetargetResult(
+	const FString& RetargeterPath,
+	const TArray<FString>& AnimationPaths,
+	TSharedPtr<FJsonObject>& OutResult,
+	FString& OutErrorCode,
+	FString& OutErrorMessage) const
+{
+	if (GEditor == nullptr)
+	{
+		OutErrorCode = TEXT("live-editor-unavailable");
+		OutErrorMessage = TEXT("The Unreal Editor is unavailable.");
+		return false;
+	}
+	if (GEditor->PlayWorld != nullptr)
+	{
+		OutErrorCode = TEXT("retarget_editor_state_invalid");
+		OutErrorMessage = TEXT("Retarget validation is unavailable while PIE or SIE is active.");
+		return false;
+	}
+	UIKRetargeter* Retargeter = Cast<UIKRetargeter>(LoadObject<UIKRetargeter>(nullptr, *RetargeterPath));
+	if (Retargeter == nullptr)
+	{
+		OutErrorCode = TEXT("retarget_asset_not_found");
+		OutErrorMessage = TEXT("The IK Retargeter asset is not loaded; load it first.");
+		return false;
+	}
+	TArray<FString> LoadedPaths;
+	for (const FString& Path : AnimationPaths)
+	{
+		if (!UEAgentKitEditorBridgePrivate::IsSafeGameAssetPath(Path))
+		{
+			OutErrorCode = TEXT("retarget_asset_not_found");
+			OutErrorMessage = TEXT("Each validation animation must be an exact /Game object path.");
+			return false;
+		}
+		LoadedPaths.Add(Path);
+	}
+
+	TArray<UEAgentKitRetarget::FRetargetValidationIssue> Issues;
+	FString Verdict;
+	if (!UEAgentKitRetarget::ValidateAnimationRetarget(
+			Retargeter,
+			LoadedPaths,
+			Issues,
+			Verdict,
+			OutErrorCode,
+			OutErrorMessage))
+	{
+		return false;
+	}
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetStringField(TEXT("action"), TEXT("validate-animation-retarget"));
+	Result->SetStringField(TEXT("retargeter"), RetargeterPath);
+	Result->SetStringField(TEXT("verdict"), Verdict);
+	Result->SetNumberField(TEXT("animationCount"), LoadedPaths.Num());
+	TArray<TSharedPtr<FJsonValue>> IssueValues;
+	for (const UEAgentKitRetarget::FRetargetValidationIssue& Issue : Issues)
+	{
+		IssueValues.Add(MakeShared<FJsonValueObject>(UEAgentKitRetarget::ValidationIssueToJson(Issue)));
+	}
+	Result->SetArrayField(TEXT("issues"), IssueValues);
 	Result->SetStringField(TEXT("editorSessionId"), SessionId);
 	OutResult = Result;
 	return true;

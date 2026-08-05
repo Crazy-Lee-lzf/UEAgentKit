@@ -137,6 +137,12 @@ private:
 		TSharedPtr<FJsonObject>& OutResult,
 		FString& OutErrorCode,
 		FString& OutErrorMessage) const;
+	bool TryValidateAnimationRetargetResult(
+		const FString& RetargeterPath,
+		const TArray<FString>& AnimationPaths,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage) const;
 	bool TryRetargetBatchStepResult(
 		const FString& SourceMeshPath,
 		const FString& TargetMeshPath,
