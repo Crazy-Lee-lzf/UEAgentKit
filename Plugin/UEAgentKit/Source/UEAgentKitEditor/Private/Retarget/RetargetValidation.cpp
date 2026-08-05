@@ -1,8 +1,10 @@
 #include "Retarget/RetargetValidation.h"
 
+#include "Animation/AnimMontage.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/AnimationAsset.h"
 #include "Animation/AnimationTypes.h"
+#include "Animation/BlendSpace.h"
 #include "Animation/Skeleton.h"
 #include "Engine/SkeletalMesh.h"
 #include "Rig/IKRigDefinition.h"
@@ -195,13 +197,13 @@ namespace UEAgentKitRetarget
 		// Animation metadata + motion diagnostics.
 		for (const FString& AnimationPath : AnimationPaths)
 		{
-			UAnimSequence* Sequence = Cast<UAnimSequence>(LoadObject<UAnimSequence>(nullptr, *AnimationPath));
-			if (Sequence == nullptr)
+			UAnimationAsset* Asset = LoadObject<UAnimationAsset>(nullptr, *AnimationPath);
+			if (Asset == nullptr)
 			{
 				OutIssues.Add({TEXT("error"), TEXT("retarget_metadata_sequence_missing"), TEXT("The output animation could not be loaded."), TEXT("metadata"), AnimationPath, FString(), 0.0f});
 				continue;
 			}
-			USkeleton* SequenceSkeleton = Sequence->GetSkeleton();
+			USkeleton* SequenceSkeleton = Asset->GetSkeleton();
 			if (SequenceSkeleton == nullptr)
 			{
 				OutIssues.Add({TEXT("error"), TEXT("retarget_metadata_null_skeleton"), TEXT("The output animation has no skeleton reference."), TEXT("metadata"), AnimationPath, FString(), 0.0f});
@@ -211,10 +213,29 @@ namespace UEAgentKitRetarget
 			{
 				OutIssues.Add({TEXT("error"), TEXT("retarget_metadata_skeleton_mismatch"), TEXT("The output animation skeleton does not match the target IK Rig skeleton."), TEXT("metadata"), AnimationPath, FString(), 0.0f});
 			}
-			const float PlayLength = Sequence->GetPlayLength();
+			float PlayLength = 0.0f;
+			UAnimSequence* Sequence = Cast<UAnimSequence>(Asset);
+			if (Sequence != nullptr)
+			{
+				PlayLength = Sequence->GetPlayLength();
+			}
+			else if (UBlendSpace* BlendSpace = Cast<UBlendSpace>(Asset))
+			{
+				PlayLength = BlendSpace->GetPlayLength();
+			}
+			else if (UAnimMontage* Montage = Cast<UAnimMontage>(Asset))
+			{
+				PlayLength = Montage->GetPlayLength();
+			}
 			if (!FMath::IsFinite(PlayLength) || PlayLength <= 0.0f)
 			{
 				OutIssues.Add({TEXT("error"), TEXT("retarget_metadata_invalid_play_length"), TEXT("The output animation has no valid play length."), TEXT("metadata"), AnimationPath, FString(), 0.0f});
+				continue;
+			}
+			if (Sequence == nullptr)
+			{
+				// BlendSpaces and Montages are validated structurally; motion
+				// sampling only applies to plain sequences.
 				continue;
 			}
 
