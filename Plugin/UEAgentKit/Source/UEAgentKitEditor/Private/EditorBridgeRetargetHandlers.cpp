@@ -3,8 +3,13 @@
 #include "Retarget/RetargetAnalysis.h"
 #include "Retarget/RetargetTypes.h"
 
+#include "Animation/AnimData/IAnimationDataModel.h"
+#include "Animation/AnimSequence.h"
+#include "Animation/Skeleton.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Dom/JsonObject.h"
 #include "Editor.h"
+#include "Engine/World.h"
 #include "Engine/SkeletalMesh.h"
 #include "Rig/IKRigDefinition.h"
 #include "Retarget/RetargetValidation.h"
@@ -288,6 +293,371 @@ namespace
 		}
 		return true;
 	}
+	TSharedRef<FJsonObject> VectorToJson(const FVector& Value)
+	{
+		TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
+		Json->SetNumberField(TEXT("x"), Value.X);
+		Json->SetNumberField(TEXT("y"), Value.Y);
+		Json->SetNumberField(TEXT("z"), Value.Z);
+		return Json;
+	}
+
+	FVector GetReferenceComponentScale(const USkeleton* Skeleton, const FName BoneName)
+	{
+		if (Skeleton == nullptr)
+		{
+			return FVector::ZeroVector;
+		}
+		const FReferenceSkeleton& ReferenceSkeleton = Skeleton->GetReferenceSkeleton();
+		const int32 BoneIndex = ReferenceSkeleton.FindBoneIndex(BoneName);
+		if (BoneIndex == INDEX_NONE)
+		{
+			return FVector::ZeroVector;
+		}
+		FTransform Component = FTransform::Identity;
+		TArray<int32> Path;
+		for (int32 Index = BoneIndex; Index != INDEX_NONE; Index = ReferenceSkeleton.GetParentIndex(Index))
+		{
+			Path.Insert(Index, 0);
+		}
+		for (const int32 Index : Path)
+		{
+			Component = ReferenceSkeleton.GetRefBonePose()[Index] * Component;
+		}
+		return Component.GetScale3D();
+	}
+
+	TSharedRef<FJsonObject> BuildTrackScaleSummary(
+		const UAnimSequence* Sequence,
+		const USkeleton* Skeleton,
+		const FString& BoneName)
+	{
+		TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
+		Json->SetStringField(TEXT("bone"), BoneName);
+		const FName TrackName(*BoneName);
+		const FReferenceSkeleton& ReferenceSkeleton = Skeleton->GetReferenceSkeleton();
+		const int32 BoneIndex = ReferenceSkeleton.FindBoneIndex(TrackName);
+		Json->SetBoolField(TEXT("boneExists"), BoneIndex != INDEX_NONE);
+		if (BoneIndex != INDEX_NONE)
+		{
+			Json->SetField(TEXT("referenceLocalScale"), MakeShared<FJsonValueObject>(VectorToJson(ReferenceSkeleton.GetRefBonePose()[BoneIndex].GetScale3D())));
+			Json->SetField(TEXT("referenceComponentScale"), MakeShared<FJsonValueObject>(VectorToJson(GetReferenceComponentScale(Skeleton, TrackName))));
+		}
+
+		const IAnimationDataModel* Model = Sequence->GetDataModel();
+		Json->SetBoolField(TEXT("boneCompressedDataValid"), Sequence->IsBoneCompressedDataValid());
+		const bool bTrackExists = Model != nullptr && Model->IsValidBoneTrackName(TrackName);
+		Json->SetBoolField(TEXT("trackExists"), bTrackExists);
+		if (!bTrackExists)
+		{
+			Json->SetNumberField(TEXT("trackKeyCount"), 0);
+			return Json;
+		}
+
+		TArray<FTransform> Transforms;
+		Model->GetBoneTrackTransforms(TrackName, Transforms);
+		Json->SetNumberField(TEXT("trackKeyCount"), Transforms.Num());
+		if (Transforms.IsEmpty())
+		{
+			return Json;
+		}
+
+		FVector Minimum = Transforms[0].GetScale3D();
+		FVector Maximum = Minimum;
+		for (const FTransform& Transform : Transforms)
+		{
+			const FVector Scale = Transform.GetScale3D();
+			Minimum.X = FMath::Min(Minimum.X, Scale.X);
+			Minimum.Y = FMath::Min(Minimum.Y, Scale.Y);
+			Minimum.Z = FMath::Min(Minimum.Z, Scale.Z);
+			Maximum.X = FMath::Max(Maximum.X, Scale.X);
+			Maximum.Y = FMath::Max(Maximum.Y, Scale.Y);
+			Maximum.Z = FMath::Max(Maximum.Z, Scale.Z);
+		}
+		Json->SetField(TEXT("firstScale"), MakeShared<FJsonValueObject>(VectorToJson(Transforms[0].GetScale3D())));
+		Json->SetField(TEXT("middleScale"), MakeShared<FJsonValueObject>(VectorToJson(Transforms[Transforms.Num() / 2].GetScale3D())));
+		Json->SetField(TEXT("lastScale"), MakeShared<FJsonValueObject>(VectorToJson(Transforms.Last().GetScale3D())));
+		Json->SetField(TEXT("minimumScale"), MakeShared<FJsonValueObject>(VectorToJson(Minimum)));
+		Json->SetField(TEXT("maximumScale"), MakeShared<FJsonValueObject>(VectorToJson(Maximum)));
+		if (BoneIndex != INDEX_NONE && Sequence->IsBoneCompressedDataValid())
+		{
+			const double SampleTimes[] = {0.0, Sequence->GetPlayLength() * 0.5, Sequence->GetPlayLength()};
+			const TCHAR* FieldNames[] = {
+				TEXT("compressedFirstScale"),
+				TEXT("compressedMiddleScale"),
+				TEXT("compressedLastScale")};
+			for (int32 SampleIndex = 0; SampleIndex < UE_ARRAY_COUNT(SampleTimes); ++SampleIndex)
+			{
+				FTransform CompressedTransform;
+				const FAnimExtractContext ExtractContext(SampleTimes[SampleIndex]);
+				Sequence->GetBoneTransform(
+					CompressedTransform,
+					FSkeletonPoseBoneIndex(BoneIndex),
+					ExtractContext,
+					false);
+				Json->SetField(FieldNames[SampleIndex], MakeShared<FJsonValueObject>(VectorToJson(CompressedTransform.GetScale3D())));
+			}
+		}
+		return Json;
+	}
+	TSharedRef<FJsonObject> RotatorToJson(const FRotator& Value)
+	{
+		TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
+		Json->SetNumberField(TEXT("pitch"), Value.Pitch);
+		Json->SetNumberField(TEXT("yaw"), Value.Yaw);
+		Json->SetNumberField(TEXT("roll"), Value.Roll);
+		return Json;
+	}
+
+	TArray<TSharedPtr<FJsonValue>> BuildPreviewSamples(
+		UAnimSequence* Sequence,
+		USkeleton* Skeleton,
+		const TArray<FString>& BoneNames,
+		bool bLoadIfNeeded,
+		FString& OutStatus,
+		FString& OutPreviewMeshPath)
+	{
+		TArray<TSharedPtr<FJsonValue>> Samples;
+		OutStatus = TEXT("unavailable");
+		OutPreviewMeshPath.Reset();
+		if (Sequence == nullptr || Skeleton == nullptr)
+		{
+			return Samples;
+		}
+		if (Sequence->IsValidAdditive())
+		{
+			OutStatus = TEXT("unsupported-additive-requires-base-pose");
+			return Samples;
+		}
+
+		USkeletalMesh* PreviewMesh = Sequence->GetPreviewMesh(bLoadIfNeeded);
+		if (PreviewMesh == nullptr)
+		{
+			PreviewMesh = Skeleton->GetPreviewMesh(bLoadIfNeeded);
+		}
+		if (PreviewMesh == nullptr)
+		{
+			OutStatus = TEXT("preview-mesh-unavailable");
+			return Samples;
+		}
+		OutPreviewMeshPath = PreviewMesh->GetPathName();
+
+		UWorld* EditorWorld = GEditor != nullptr ? GEditor->GetEditorWorldContext().World() : nullptr;
+		if (EditorWorld == nullptr)
+		{
+			OutStatus = TEXT("editor-world-unavailable");
+			return Samples;
+		}
+
+		USkeletalMeshComponent* Component = NewObject<USkeletalMeshComponent>(GetTransientPackage(), NAME_None, RF_Transient);
+		if (Component == nullptr)
+		{
+			OutStatus = TEXT("component-create-failed");
+			return Samples;
+		}
+
+		Component->SetVisibility(false, true);
+		Component->SetHiddenInGame(true);
+		Component->SetSkeletalMesh(PreviewMesh);
+		Component->RegisterComponentWithWorld(EditorWorld);
+		if (!Component->IsRegistered())
+		{
+			Component->MarkAsGarbage();
+			OutStatus = TEXT("component-registration-failed");
+			return Samples;
+		}
+		Component->SetUpdateAnimationInEditor(true);
+		Component->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+		Component->SetAnimationMode(EAnimationMode::AnimationSingleNode, true);
+		Component->SetAnimation(Sequence);
+
+		const double Fractions[] = {0.0, 0.5, 1.0};
+		for (const double Fraction : Fractions)
+		{
+			const double Time = Sequence->GetPlayLength() * Fraction;
+			Component->SetPosition(Time, false);
+			Component->TickAnimation(0.0f, false);
+			Component->RefreshBoneTransforms();
+			Component->CompleteParallelAnimationEvaluation(true);
+			Component->UpdateComponentToWorld();
+			Component->UpdateBounds();
+
+			TSharedRef<FJsonObject> Sample = MakeShared<FJsonObject>();
+			Sample->SetNumberField(TEXT("fraction"), Fraction);
+			Sample->SetNumberField(TEXT("time"), Time);
+			const FBoxSphereBounds Bounds = Component->Bounds;
+			Sample->SetField(TEXT("boundsOrigin"), MakeShared<FJsonValueObject>(VectorToJson(Bounds.Origin)));
+			Sample->SetField(TEXT("boundsExtent"), MakeShared<FJsonValueObject>(VectorToJson(Bounds.BoxExtent)));
+			Sample->SetNumberField(TEXT("boundsSphereRadius"), Bounds.SphereRadius);
+			const FDeltaTimeRecord RootMotionDelta(static_cast<float>(Time));
+			const FAnimExtractContext RootMotionContext(0.0, true, RootMotionDelta, false);
+			const FTransform RootMotion = Sequence->ExtractRootMotion(RootMotionContext);
+			Sample->SetField(TEXT("extractedRootMotionTranslation"), MakeShared<FJsonValueObject>(VectorToJson(RootMotion.GetLocation())));
+			Sample->SetField(TEXT("extractedRootMotionRotation"), MakeShared<FJsonValueObject>(RotatorToJson(RootMotion.Rotator())));
+			Sample->SetField(TEXT("extractedRootMotionScale"), MakeShared<FJsonValueObject>(VectorToJson(RootMotion.GetScale3D())));
+
+			TArray<TSharedPtr<FJsonValue>> BoneValues;
+			for (const FString& BoneName : BoneNames)
+			{
+				TSharedRef<FJsonObject> Bone = MakeShared<FJsonObject>();
+				Bone->SetStringField(TEXT("bone"), BoneName);
+				const int32 BoneIndex = Component->GetBoneIndex(FName(*BoneName));
+				Bone->SetBoolField(TEXT("boneExists"), BoneIndex != INDEX_NONE);
+				if (BoneIndex != INDEX_NONE)
+				{
+					const FTransform Transform = Component->GetBoneTransform(BoneIndex, FTransform::Identity);
+					Bone->SetField(TEXT("componentScale"), MakeShared<FJsonValueObject>(VectorToJson(Transform.GetScale3D())));
+					Bone->SetField(TEXT("componentLocation"), MakeShared<FJsonValueObject>(VectorToJson(Transform.GetLocation())));
+				}
+				BoneValues.Add(MakeShared<FJsonValueObject>(Bone));
+			}
+			Sample->SetArrayField(TEXT("bones"), BoneValues);
+			Samples.Add(MakeShared<FJsonValueObject>(Sample));
+		}
+		Component->SetAnimation(nullptr);
+		Component->SetUpdateAnimationInEditor(false);
+		Component->UnregisterComponent();
+		Component->MarkAsGarbage();
+		OutStatus = TEXT("success");
+		return Samples;
+	}
+}
+
+bool FUEAgentKitEditorBridge::TryDiagnoseAnimationScaleResult(
+	const TArray<FString>& AnimationPaths,
+	const TArray<FString>& BoneNames,
+	bool bLoadIfNeeded,
+	TSharedPtr<FJsonObject>& OutResult,
+	FString& OutErrorCode,
+	FString& OutErrorMessage) const
+{
+	if (GEditor == nullptr)
+	{
+		OutErrorCode = TEXT("live-editor-unavailable");
+		OutErrorMessage = TEXT("The Unreal Editor is unavailable.");
+		return false;
+	}
+	if (GEditor->PlayWorld != nullptr)
+	{
+		OutErrorCode = TEXT("retarget_editor_state_invalid");
+		OutErrorMessage = TEXT("Animation scale diagnosis is unavailable while PIE or SIE is active.");
+		return false;
+	}
+	if (AnimationPaths.IsEmpty() || AnimationPaths.Num() > 32 || BoneNames.IsEmpty() || BoneNames.Num() > 16)
+	{
+		OutErrorCode = TEXT("live-editor-invalid-parameters");
+		OutErrorMessage = TEXT("Provide 1-32 animationPaths and 1-16 boneNames.");
+		return false;
+	}
+
+	TArray<TSharedPtr<FJsonValue>> AssetValues;
+	for (const FString& AnimationPath : AnimationPaths)
+	{
+		if (!UEAgentKitEditorBridgePrivate::IsSafeGameAssetPath(AnimationPath))
+		{
+			OutErrorCode = TEXT("retarget_asset_not_found");
+			OutErrorMessage = TEXT("Each animation must be an exact /Game Object Path.");
+			return false;
+		}
+
+		UObject* Existing = StaticFindObject(UObject::StaticClass(), nullptr, *AnimationPath, false);
+		const bool bLoadedBefore = Existing != nullptr;
+		UAnimSequence* Sequence = Cast<UAnimSequence>(Existing);
+		if (Sequence == nullptr && bLoadIfNeeded)
+		{
+			Sequence = LoadObject<UAnimSequence>(nullptr, *AnimationPath);
+		}
+
+		TSharedRef<FJsonObject> AssetJson = MakeShared<FJsonObject>();
+		AssetJson->SetStringField(TEXT("assetPath"), AnimationPath);
+		AssetJson->SetBoolField(TEXT("loadedBefore"), bLoadedBefore);
+		AssetJson->SetBoolField(TEXT("loadedByBridge"), !bLoadedBefore && Sequence != nullptr);
+		if (Sequence == nullptr)
+		{
+			AssetJson->SetStringField(TEXT("status"), bLoadIfNeeded ? TEXT("not-an-animation-sequence") : TEXT("not-loaded"));
+			AssetValues.Add(MakeShared<FJsonValueObject>(AssetJson));
+			continue;
+		}
+
+		USkeleton* Skeleton = Sequence->GetSkeleton();
+		if (Skeleton == nullptr)
+		{
+			AssetJson->SetStringField(TEXT("status"), TEXT("missing-skeleton"));
+			AssetValues.Add(MakeShared<FJsonValueObject>(AssetJson));
+			continue;
+		}
+
+		const IAnimationDataModel* Model = Sequence->GetDataModel();
+		AssetJson->SetStringField(TEXT("status"), TEXT("success"));
+		AssetJson->SetStringField(TEXT("skeletonPath"), Skeleton->GetPathName());
+		AssetJson->SetNumberField(TEXT("playLength"), Sequence->GetPlayLength());
+		AssetJson->SetNumberField(TEXT("additiveAnimType"), static_cast<int32>(Sequence->GetAdditiveAnimType()));
+		AssetJson->SetNumberField(TEXT("additiveBasePoseType"), static_cast<int32>(Sequence->RefPoseType));
+		AssetJson->SetNumberField(TEXT("additiveRefFrameIndex"), Sequence->RefFrameIndex);
+		AssetJson->SetStringField(
+			TEXT("additiveRefSequencePath"),
+			Sequence->RefPoseSeq != nullptr ? Sequence->RefPoseSeq->GetPathName() : FString());
+		AssetJson->SetStringField(TEXT("retargetSourceName"), Sequence->RetargetSource.ToString());
+		AssetJson->SetStringField(
+			TEXT("retargetTransformsSourceName"),
+			Sequence->GetRetargetTransformsSourceName().ToString());
+		AssetJson->SetStringField(
+			TEXT("retargetSourceAssetPath"),
+			Sequence->GetRetargetSourceAsset().ToSoftObjectPath().ToString());
+		AssetJson->SetBoolField(TEXT("enableRootMotion"), Sequence->bEnableRootMotion);
+		AssetJson->SetBoolField(TEXT("forceRootLock"), Sequence->bForceRootLock);
+		AssetJson->SetBoolField(TEXT("useNormalizedRootMotionScale"), Sequence->bUseNormalizedRootMotionScale);
+		AssetJson->SetNumberField(TEXT("rootMotionRootLock"), static_cast<int32>(Sequence->RootMotionRootLock));
+		const TArray<FTransform>& RetargetTransforms = Sequence->GetRetargetTransforms();
+		AssetJson->SetNumberField(TEXT("retargetTransformCount"), RetargetTransforms.Num());
+		AssetJson->SetNumberField(
+			TEXT("retargetSourceAssetReferencePoseCount"),
+			Sequence->RetargetSourceAssetReferencePose.Num());
+		if (!RetargetTransforms.IsEmpty())
+		{
+			AssetJson->SetField(
+				TEXT("retargetRootScale"),
+				MakeShared<FJsonValueObject>(VectorToJson(RetargetTransforms[0].GetScale3D())));
+		}
+		if (Model != nullptr)
+		{
+			AssetJson->SetNumberField(TEXT("frameRate"), Model->GetFrameRate().AsDecimal());
+			AssetJson->SetNumberField(TEXT("frameCount"), Model->GetNumberOfFrames());
+			AssetJson->SetNumberField(TEXT("keyCount"), Model->GetNumberOfKeys());
+			AssetJson->SetNumberField(TEXT("boneTrackCount"), Model->GetNumBoneTracks());
+		}
+
+		TArray<TSharedPtr<FJsonValue>> TrackValues;
+		for (const FString& BoneName : BoneNames)
+		{
+			TrackValues.Add(MakeShared<FJsonValueObject>(BuildTrackScaleSummary(Sequence, Skeleton, BoneName)));
+		}
+		AssetJson->SetArrayField(TEXT("tracks"), TrackValues);
+		FString PreviewStatus;
+		FString PreviewMeshPath;
+		TArray<TSharedPtr<FJsonValue>> PreviewSamples = BuildPreviewSamples(
+			Sequence,
+			Skeleton,
+			BoneNames,
+			bLoadIfNeeded,
+			PreviewStatus,
+			PreviewMeshPath);
+		AssetJson->SetStringField(TEXT("previewEvaluationStatus"), PreviewStatus);
+		AssetJson->SetStringField(TEXT("previewMeshPath"), PreviewMeshPath);
+		AssetJson->SetStringField(TEXT("previewEvaluationSource"), TEXT("editor-world-transient-component"));
+		AssetJson->SetArrayField(
+			TEXT("previewSamples"),
+			PreviewSamples);
+		AssetValues.Add(MakeShared<FJsonValueObject>(AssetJson));
+	}
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetStringField(TEXT("action"), TEXT("diagnose-animation-scale"));
+	Result->SetBoolField(TEXT("loadIfNeeded"), bLoadIfNeeded);
+	Result->SetArrayField(TEXT("assets"), AssetValues);
+	Result->SetStringField(TEXT("editorSessionId"), SessionId);
+	OutResult = Result;
+	return true;
 }
 
 bool FUEAgentKitEditorBridge::TryPlanAnimationRetargetResult(

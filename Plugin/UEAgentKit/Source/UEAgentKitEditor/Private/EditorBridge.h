@@ -120,6 +120,13 @@ private:
 		TSharedPtr<FJsonObject>& OutResult,
 		FString& OutErrorCode,
 		FString& OutErrorMessage) const;
+	bool TryDiagnoseAnimationScaleResult(
+		const TArray<FString>& AnimationPaths,
+		const TArray<FString>& BoneNames,
+		bool bLoadIfNeeded,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage) const;
 	bool TryApplyAnimationRetargetSetupResult(
 		const FString& SourceMeshPath,
 		const FString& TargetMeshPath,

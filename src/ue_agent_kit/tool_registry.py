@@ -67,6 +67,12 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
         "read",
         "editor.analyzeAnimationRetarget",
     ),
+    ToolDefinition(
+        "ue_diagnose_animation_scale",
+        "live-read",
+        "read",
+        "editor.diagnoseAnimationScale",
+    ),
     ToolDefinition("ue_open_asset", "live-action", "planning", "editor.openAsset"),
     ToolDefinition("ue_focus_asset", "live-action", "planning", "editor.focusAsset"),
     ToolDefinition("ue_sync_content_browser", "live-action", "planning", "editor.syncContentBrowser"),

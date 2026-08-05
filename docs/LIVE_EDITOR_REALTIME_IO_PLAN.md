@@ -146,6 +146,53 @@ Idle 等部分动画：角色整体缩小约 100 倍
 5. 某些源动画来自不同导入批次或不同 Skeleton 资产，单位约定不一致；
 6. 当前验证器只检查位置、旋转和有限值，未把 Scale 异常作为失败条件。
 
+### 4.1 2026-08-06 已验证结果
+
+已实现只读工具：
+
+```text
+ue_diagnose_animation_scale
+```
+
+真实 UE5.6 结果：
+
+```text
+心月狐 Skeleton Root Reference Scale        约 100
+97 个重定向 AnimSequence Raw Root Scale      均为 1
+普通动画 Compressed Root Scale                也为 1
+
+MM_Idle_XinYueHu
+    Force Root Lock=false
+    Final Root/Pelvis Component Scale=1
+    最终缩小约 100 倍
+
+MM_Death_Front_01_XinYueHu
+    Force Root Lock=false
+    Final Root/Pelvis Component Scale=1
+    最终缩小约 100 倍
+
+MF_Unarmed_Jog_Fwd_XinYueHu
+    Force Root Lock=true
+    Final Root/Pelvis Component Scale=约 100
+    最终比例正常
+```
+
+同一 Editor Session 重复读取结果一致。关键机制已从“Root Motion 是否开启”收敛为：
+
+> Force Root Lock 会在最终动画求值阶段使用目标 Root Lock Reference Transform，从而恢复目标 Skeleton 的约 100 倍 Root Scale；未锁 Root 的普通动画可能直接使用 Scale=1 的 Root Track。
+
+Additive 动画不能通过独立 `AnimSingleNodeInstance` 得到可信最终姿势。工具会读取 Additive Base Pose 和 Compressed Scale Delta，但返回：
+
+```text
+previewEvaluationStatus=unsupported-additive-requires-base-pose
+```
+
+当前验证必须以最终 Component Space Pose 为主要证据，不能仅凭 Raw Root Scale 与 Reference Scale 的倍率直接判错。
+
+详细结果见：
+
+[`ANIMATION_RETARGET_SCALE_DIAGNOSIS_20260806.md`](ANIMATION_RETARGET_SCALE_DIAGNOSIS_20260806.md)
+
 该问题用来推动以下只读能力：
 
 - Animation Sequence 实时摘要；
@@ -378,6 +425,32 @@ Reference Pose
 ```
 
 ### D. 修复方式门禁
+
+当前心月狐项目的目标值已确认：
+
+```text
+Final Root/Pelvis Component Scale ≈ 100  → 正确
+Final Root/Pelvis Component Scale ≈ 1    → 错误
+```
+
+因此本分支不能只提供只读诊断，必须补齐受控修改能力。建议新增专用写操作，而不是开放任意反射属性写入：
+
+```text
+ue_plan_animation_scale_fix
+ue_apply_animation_scale_fix_live
+ue_save_animation_scale_fix
+ue_verify_animation_scale_fix
+ue_rollback_animation_scale_fix
+```
+
+首批允许修改的字段/动作：
+
+- `Force Root Lock`、Root Motion Root Lock、Normalized Root Motion Scale；
+- 明确 AnimSequence 的 Root Track Scale 修正或重建；
+- Additive Base Pose 引用修正；
+- 修改后以最终 Component Space Pose≈100 为验收条件。
+
+所有修改必须经过 Plan / Policy / Revision / Before Snapshot，并保留 Undo、Authorized Save、Independent Verify 和 Rollback。
 
 未定位前禁止批量“乘 100”或“乘 0.01”。
 

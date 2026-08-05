@@ -268,6 +268,27 @@ class _BridgeHandler(socketserver.StreamRequestHandler):
                 },
                 "editorSessionId": "session-test",
             },
+            "editor.diagnoseAnimationScale": {
+                "action": "diagnose-animation-scale",
+                "loadIfNeeded": params.get("loadIfNeeded", False),
+                "assets": [
+                    {
+                        "assetPath": asset_path,
+                        "status": "success",
+                        "loadedBefore": not params.get("loadIfNeeded", False),
+                        "loadedByBridge": params.get("loadIfNeeded", False),
+                        "previewEvaluationStatus": "success",
+                        "previewEvaluationSource": "editor-world-transient-component",
+                        "tracks": [
+                            {"bone": bone_name, "trackExists": True, "firstScale": {"x": 1, "y": 1, "z": 1}}
+                            for bone_name in params.get("boneNames", [])
+                        ],
+                        "previewSamples": [],
+                    }
+                    for asset_path in params.get("animationPaths", [])
+                ],
+                "editorSessionId": "session-test",
+            },
             "editor.runAutomationTest": {
                 "action": "run-automation-test",
                 "testName": params.get("testName", ""),
@@ -897,6 +918,73 @@ class EditorBridgeTests(unittest.TestCase):
                 "maxBoneDetails": 256,
             },
         )
+
+    def test_diagnose_animation_scale_normalizes_params_and_reports_evaluated_pose(self) -> None:
+        self._write_descriptor(
+            capabilities=self.capabilities + ["retarget.inspect"],
+        )
+        animation_paths = [
+            "/Game/Animations/A_Idle.A_Idle",
+            "/Game/Animations/A_Jog.A_Jog",
+        ]
+        result = self.service.call_tool(
+            "ue_diagnose_animation_scale",
+            {
+                "animationPaths": animation_paths,
+                "boneNames": ["root", "Bip001Pelvis"],
+                "loadIfNeeded": True,
+            },
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["result"]["action"], "diagnose-animation-scale")
+        self.assertEqual(result["result"]["assets"][0]["previewEvaluationStatus"], "success")
+        request = self.server.requests[-1]  # type: ignore[attr-defined]
+        self.assertEqual(request["method"], "editor.diagnoseAnimationScale")
+        self.assertEqual(
+            request["params"],
+            {
+                "animationPaths": animation_paths,
+                "boneNames": ["root", "Bip001Pelvis"],
+                "loadIfNeeded": True,
+            },
+        )
+
+    def test_diagnose_animation_scale_requires_registered_capability(self) -> None:
+        self._write_descriptor(
+            capabilities=[capability for capability in self.capabilities if capability != "retarget.inspect"]
+        )
+        with self.assertRaises(LiveEditorError) as context:
+            self.service.call_tool(
+                "ue_diagnose_animation_scale",
+                {
+                    "animationPaths": ["/Game/Animations/A_Idle.A_Idle"],
+                    "boneNames": ["root"],
+                },
+            )
+        self.assertEqual(context.exception.code, "live-editor-capability-unavailable")
+
+    def test_diagnose_animation_scale_rejects_invalid_parameters(self) -> None:
+        self._write_descriptor(
+            capabilities=self.capabilities + ["retarget.inspect"],
+        )
+        valid = {
+            "animationPaths": ["/Game/Animations/A_Idle.A_Idle"],
+            "boneNames": ["root"],
+        }
+        invalid_cases = (
+            {**valid, "animationPaths": []},
+            {**valid, "animationPaths": [f"/Game/Animations/A_{index}.A_{index}" for index in range(33)]},
+            {**valid, "animationPaths": ["/Game/Animations/NotAnObjectPath"]},
+            {**valid, "boneNames": []},
+            {**valid, "boneNames": [f"bone_{index}" for index in range(17)]},
+            {**valid, "boneNames": [""]},
+            {**valid, "unknown": True},
+        )
+        for params in invalid_cases:
+            with self.subTest(params=params):
+                with self.assertRaises(LiveEditorError) as context:
+                    self.service.call_tool("ue_diagnose_animation_scale", params)
+                self.assertEqual(context.exception.code, "live-editor-invalid-parameters")
 
     def test_analyze_animation_retarget_requires_registered_capability(self) -> None:
         self._write_descriptor(

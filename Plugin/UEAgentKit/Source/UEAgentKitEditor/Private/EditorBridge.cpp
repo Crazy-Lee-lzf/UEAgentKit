@@ -1134,6 +1134,40 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 			ErrorCode,
 			ErrorMessage);
 	}
+	else if (Method == TEXT("editor.diagnoseAnimationScale"))
+	{
+		const TArray<TSharedPtr<FJsonValue>>* AnimationPaths = nullptr;
+		const TArray<TSharedPtr<FJsonValue>>* BoneNames = nullptr;
+		Params->TryGetArrayField(TEXT("animationPaths"), AnimationPaths);
+		Params->TryGetArrayField(TEXT("boneNames"), BoneNames);
+		bool bLoadIfNeeded = false;
+		Params->TryGetBoolField(TEXT("loadIfNeeded"), bLoadIfNeeded);
+		TArray<FString> ParsedAnimationPaths;
+		TArray<FString> ParsedBoneNames;
+		if (AnimationPaths != nullptr)
+		{
+			for (const TSharedPtr<FJsonValue>& Value : *AnimationPaths)
+			{
+				ParsedAnimationPaths.Add(Value->AsString());
+			}
+		}
+		if (BoneNames != nullptr)
+		{
+			for (const TSharedPtr<FJsonValue>& Value : *BoneNames)
+			{
+				ParsedBoneNames.Add(Value->AsString());
+			}
+		}
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode;
+		FString ErrorMessage;
+		SendActionResult(
+			TryDiagnoseAnimationScaleResult(
+				ParsedAnimationPaths, ParsedBoneNames, bLoadIfNeeded, Result, ErrorCode, ErrorMessage),
+			Result,
+			ErrorCode,
+			ErrorMessage);
+	}
 	else if (Method == TEXT("editor.validateAnimationRetarget"))
 	{
 		FString RetargeterPath;

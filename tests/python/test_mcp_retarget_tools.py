@@ -25,6 +25,7 @@ except ImportError:  # pragma: no cover
 
 SOURCE_MESH = "/Game/Characters/Source/SK_Source.SK_Source"
 TARGET_MESH = "/Game/Characters/Target/SK_Target.SK_Target"
+ANIMATION = "/Game/Animations/A_Idle.A_Idle"
 
 
 def _read_only_annotations() -> ToolAnnotations:
@@ -163,6 +164,53 @@ class RetargetToolTests(unittest.TestCase):
             },
         )
 
+
+    def test_diagnose_animation_scale_passes_authorized_request_through(self) -> None:
+        service = _live_service({"retargetCapabilities": ["retarget.inspect"]})
+        service.call_tool.return_value = {
+            "schemaVersion": "1.0",
+            "tool": "ue_diagnose_animation_scale",
+            "ok": True,
+            "readOnly": True,
+            "result": {
+                "action": "diagnose-animation-scale",
+                "assets": [
+                    {
+                        "assetPath": ANIMATION,
+                        "previewEvaluationStatus": "success",
+                    }
+                ],
+                "editorSessionId": "session-1",
+            },
+        }
+        server = FastMCP("probe")
+        register_retarget_tools(
+            server=server,
+            live_editor_service=service,
+            read_annotations=_read_only_annotations(),
+            error_response=_error_response,
+        )
+        result = asyncio.run(
+            server.call_tool(
+                "ue_diagnose_animation_scale",
+                {
+                    "animationPaths": [ANIMATION],
+                    "boneNames": ["root", "Bip001Pelvis"],
+                    "loadIfNeeded": True,
+                },
+            )
+        )
+        _, payload = result
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["result"]["assets"][0]["previewEvaluationStatus"], "success")
+        service.call_tool.assert_called_once_with(
+            "ue_diagnose_animation_scale",
+            {
+                "animationPaths": [ANIMATION],
+                "boneNames": ["root", "Bip001Pelvis"],
+                "loadIfNeeded": True,
+            },
+        )
 
 if __name__ == "__main__":
     unittest.main()

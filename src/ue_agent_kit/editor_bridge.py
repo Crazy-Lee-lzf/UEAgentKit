@@ -34,6 +34,7 @@ _CAPABILITY_GATED_TOOLS = {
     "ue_get_batch_task": "editor.batchTask.status",
     "ue_cancel_batch_task": "editor.batchTask.cancel",
     "ue_analyze_animation_retarget": "retarget.inspect",
+    "ue_diagnose_animation_scale": "retarget.inspect",
 }
 
 
@@ -159,6 +160,41 @@ class LiveEditorBridgeService:
             LiveEditorBridgeService._validate_game_object_path(normalized["sourceMesh"])
             LiveEditorBridgeService._validate_game_object_path(normalized["targetMesh"])
             return normalized
+        if tool_name == "ue_diagnose_animation_scale":
+            allowed = {"animationPaths", "boneNames", "loadIfNeeded"}
+            LiveEditorBridgeService._reject_unknown_params(params, allowed)
+            animation_paths = params.get("animationPaths", [])
+            bone_names = params.get("boneNames", [])
+            if not isinstance(animation_paths, list) or not 1 <= len(animation_paths) <= 32:
+                raise LiveEditorError(
+                    "live-editor-invalid-parameters",
+                    "animationPaths must contain between 1 and 32 Object Paths.",
+                )
+            if not isinstance(bone_names, list) or not 1 <= len(bone_names) <= 16:
+                raise LiveEditorError(
+                    "live-editor-invalid-parameters",
+                    "boneNames must contain between 1 and 16 bone names.",
+                )
+            normalized_paths = [
+                LiveEditorBridgeService._bounded_string(value, "animationPaths", 512)
+                for value in animation_paths
+            ]
+            normalized_bones = [
+                LiveEditorBridgeService._bounded_string(value, "boneNames", 128)
+                for value in bone_names
+            ]
+            for asset_path in normalized_paths:
+                LiveEditorBridgeService._validate_game_object_path(asset_path)
+            if any(not bone_name for bone_name in normalized_bones):
+                raise LiveEditorError(
+                    "live-editor-invalid-parameters",
+                    "boneNames must not contain empty values.",
+                )
+            return {
+                "animationPaths": normalized_paths,
+                "boneNames": normalized_bones,
+                "loadIfNeeded": bool(params.get("loadIfNeeded", False)),
+            }
         if tool_name == "ue_plan_animation_retarget":
             allowed = {"sourceMesh", "targetMesh", "includeOptionalChains"}
             LiveEditorBridgeService._reject_unknown_params(params, allowed)

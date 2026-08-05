@@ -13,6 +13,7 @@ RETARGET_VALIDATE_CAPABILITY = "retarget.validate"
 
 _CAPABILITY_FOR_TOOL = {
     "ue_analyze_animation_retarget": RETARGET_INSPECT_CAPABILITY,
+    "ue_diagnose_animation_scale": RETARGET_INSPECT_CAPABILITY,
     "ue_plan_animation_retarget": RETARGET_PLAN_CAPABILITY,
     "ue_apply_animation_retarget_setup": RETARGET_CONFIGURE_CAPABILITY,
     "ue_start_animation_retarget_batch": RETARGET_BATCH_CAPABILITY,
@@ -87,6 +88,29 @@ def register_retarget_tools(
             )
         except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
             return error_response("ue_analyze_animation_retarget", exc, read_only=True)
+
+    @server.tool(annotations=read_annotations)
+    def ue_diagnose_animation_scale(
+        animationPaths: list[str],
+        boneNames: list[str],
+        loadIfNeeded: bool = False,
+    ) -> dict[str, Any]:
+        """Read raw animation scale tracks and matching Skeleton reference scales."""
+        try:
+            _assert_retarget_policy_capability(
+                policy_path=getattr(live_editor_service.config, "policy_path", None),
+                tool_name="ue_diagnose_animation_scale",
+            )
+            return live_editor_service.call_tool(
+                "ue_diagnose_animation_scale",
+                {
+                    "animationPaths": animationPaths,
+                    "boneNames": boneNames,
+                    "loadIfNeeded": loadIfNeeded,
+                },
+            )
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_diagnose_animation_scale", exc, read_only=True)
 
 
 def register_retarget_workflow_tools(
