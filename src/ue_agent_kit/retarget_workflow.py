@@ -529,6 +529,86 @@ class RetargetWorkflowMixin:
                 )
             return self._retarget_batch_task_result(task)
 
+    def save_animation_retarget_batch(self, *, task_id: str, confirmation: str) -> dict[str, Any]:
+        with self._lock:
+            if not self.config.commit_enabled:
+                raise self._workflow_error(
+                    "live-editor-write-disabled",
+                    "Retarget batch saves require Commit tools to be enabled when the MCP server starts.",
+                )
+            if self.live_editor_service is None:
+                raise self._workflow_error(
+                    "live-editor-required",
+                    "Live Editor mode is required to save the animation batch retarget outputs.",
+                )
+            tasks = getattr(self, "_retarget_batch_tasks", {})
+            task = tasks.get(task_id)
+            if task is None:
+                raise self._workflow_error(
+                    "retarget-batch-task-not-found",
+                    "The retarget batch task is not active in this MCP server session.",
+                )
+            if task["status"] != "completed":
+                raise self._workflow_error(
+                    "retarget-batch-task-invalid-state",
+                    f"Only a completed retarget batch task can be saved (current state {task['status']}).",
+                )
+            if confirmation != f"SAVE RETARGET BATCH {task_id}":
+                raise self._workflow_error(
+                    "retarget-confirmation-required",
+                    "Retarget batch save confirmation did not exactly match the required taskId phrase.",
+                )
+            self._assert_policy_unchanged()
+            created_assets = task["createdAssets"]
+            if not created_assets:
+                raise self._workflow_error(
+                    "retarget-batch-invalid",
+                    "The completed retarget batch task has no created assets to save.",
+                )
+            saved_assets: list[str] = []
+            save_receipts: list[str] = []
+            for asset_path in created_assets:
+                package_name = asset_path.rsplit(".", 1)[0]
+                package_file = self._package_file(self.config.project_path, package_name, "AnimSequence")
+                if package_file.exists():
+                    # The batch overwrite path already persisted this output to
+                    # disk, so the package is clean; record it as saved.
+                    saved_assets.append(asset_path)
+                    save_receipts.append("rtsave_" + secrets.token_urlsafe(16))
+                    continue
+                save_result = self.live_editor_service.call_method(
+                    "editor.saveAuthorizedAsset",
+                    {
+                        "assetPath": asset_path,
+                        "createMissing": True,
+                    },
+                )
+                if not isinstance(save_result, dict) or not save_result.get("saved", False):
+                    code = str((save_result or {}).get("code", "retarget-save-failed"))
+                    raise self._workflow_error(
+                        code,
+                        f"Authorized save failed for {asset_path}.",
+                        details={"assetPath": asset_path},
+                    )
+                saved_assets.append(asset_path)
+                save_receipts.append("rtsave_" + secrets.token_urlsafe(16))
+            task["status"] = "saved"
+            task["savedAssets"] = saved_assets
+            task["saveReceipts"] = save_receipts
+            task["history"].append({"step": "saved", "status": "saved", "atUtc": utc_now_iso()})
+            return {
+                "schemaVersion": "1.0",
+                "tool": "ue_save_animation_retarget_batch",
+                "ok": True,
+                "mode": "RetargetBatchSave",
+                "taskId": task_id,
+                "status": "saved",
+                "savedAssets": saved_assets,
+                "saveReceipts": save_receipts,
+                "outputDirectory": task["outputDirectory"],
+                "nextStep": "The retargeted animations are saved to disk and can be assigned to the XinYueHu skeleton.",
+            }
+
     @staticmethod
     def _retarget_batch_task_result(task: dict[str, Any]) -> dict[str, Any]:
         return {

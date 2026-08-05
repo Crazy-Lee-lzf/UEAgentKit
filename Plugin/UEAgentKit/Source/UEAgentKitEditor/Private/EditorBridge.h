@@ -104,7 +104,7 @@ private:
 	bool TryCompileBlueprintResult(const FString& AssetPath, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
 	bool TryValidateAssetResult(const FString& AssetPath, int32 MaxIssues, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
 	bool TryValidateFolderResult(const FString& PackagePath, bool bRecursive, int32 MaxAssets, int32 MaxIssues, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
-	bool TrySaveAuthorizedAssetResult(const FString& AssetPath, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
+	bool TrySaveAuthorizedAssetResult(const FString& AssetPath, bool bCreateMissing, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
 	bool TryAnalyzeAnimationRetargetResult(
 		const FString& SourceMeshPath,
 		const FString& TargetMeshPath,

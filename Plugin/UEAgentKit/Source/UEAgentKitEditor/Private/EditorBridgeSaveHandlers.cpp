@@ -16,6 +16,7 @@ using namespace UEAgentKitEditorBridgePrivate;
 
 bool FUEAgentKitEditorBridge::TrySaveAuthorizedAssetResult(
 	const FString& AssetPath,
+	bool bCreateMissing,
 	TSharedPtr<FJsonObject>& OutResult,
 	FString& OutErrorCode,
 	FString& OutErrorMessage) const
@@ -69,7 +70,11 @@ bool FUEAgentKitEditorBridge::TrySaveAuthorizedAssetResult(
 	const FString Filename = FPackageName::LongPackageNameToFilename(
 		Package->GetName(),
 		FPackageName::GetAssetPackageExtension());
-	if (Filename.IsEmpty() || !IFileManager::Get().FileExists(*Filename))
+	const bool bFileExists = !Filename.IsEmpty() && IFileManager::Get().FileExists(*Filename);
+	// The modify path requires the package file to already exist. A new asset
+	// created by this session (e.g. a retarget batch output) has no on-disk file
+	// yet; createMissing opts into writing the initial file explicitly.
+	if (Filename.IsEmpty() || (!bFileExists && !bCreateMissing))
 	{
 		OutErrorCode = TEXT("live-editor-save-package-file-missing");
 		OutErrorMessage = TEXT("The exact package file does not already exist on disk.");

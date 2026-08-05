@@ -656,6 +656,72 @@ class RetargetWorkflowTests(unittest.TestCase):
             )
         self.assertEqual(getattr(ctx.exception, "code", ""), "retarget-batch-invalid")
 
+    def test_batch_save_persists_created_outputs(self) -> None:
+        service, _ = self._make_service()
+        plan = service.plan_animation_retarget(
+            source_mesh=SOURCE_MESH, target_mesh=TARGET_MESH, output_directory="/Game/Retargeted"
+        )
+        service.live_editor_service.call_method.return_value = {
+            "action": "retarget-batch-step",
+            "outputs": [
+                {"inputPath": "/Game/Characters/Mannequins/Idle", "outputPath": "/Game/Retargeted/RTG_Idle.RTG_Idle"},
+                {"inputPath": "/Game/Characters/Mannequins/Walk", "outputPath": "/Game/Retargeted/RTG_Walk.RTG_Walk"},
+            ],
+            "transactionCreated": True,
+            "assetDirty": True,
+            "editorSessionId": "session-1",
+        }
+        started = service.start_animation_retarget_batch(
+            plan_id=plan["planId"],
+            retargeter="/Game/Retargeted/IKRetargeter_A.IKRetargeter_A",
+            source_assets=["/Game/Characters/Mannequins/Idle", "/Game/Characters/Mannequins/Walk"],
+            output_directory="/Game/Retargeted",
+        )
+        task_id = started["taskId"]
+        finished = service.get_animation_retarget_batch(task_id=task_id)
+        self.assertEqual(finished["status"], "completed")
+        service.live_editor_service.call_method.return_value = {
+            "assetPath": "/Game/Retargeted/RTG_Idle.RTG_Idle",
+            "saved": True,
+            "editorSessionId": "session-1",
+        }
+        saved = service.save_animation_retarget_batch(
+            task_id=task_id,
+            confirmation=f"SAVE RETARGET BATCH {task_id}",
+        )
+        self.assertEqual(saved["status"], "saved")
+        self.assertEqual(len(saved["savedAssets"]), 2)
+        self.assertTrue(saved["saveReceipts"])
+        save_calls = [
+            call for call in service.live_editor_service.call_method.call_args_list
+            if call.args[0] == "editor.saveAuthorizedAsset"
+        ]
+        self.assertEqual(len(save_calls), 2)
+
+    def test_batch_save_requires_exact_confirmation(self) -> None:
+        service, _ = self._make_service()
+        plan = service.plan_animation_retarget(
+            source_mesh=SOURCE_MESH, target_mesh=TARGET_MESH, output_directory="/Game/Retargeted"
+        )
+        service.live_editor_service.call_method.return_value = {
+            "action": "retarget-batch-step",
+            "outputs": [{"inputPath": "/Game/Characters/Mannequins/Idle", "outputPath": "/Game/Retargeted/RTG_Idle.RTG_Idle"}],
+            "transactionCreated": True,
+            "assetDirty": True,
+            "editorSessionId": "session-1",
+        }
+        started = service.start_animation_retarget_batch(
+            plan_id=plan["planId"],
+            retargeter="/Game/Retargeted/IKRetargeter_A.IKRetargeter_A",
+            source_assets=["/Game/Characters/Mannequins/Idle"],
+            output_directory="/Game/Retargeted",
+        )
+        task_id = started["taskId"]
+        service.get_animation_retarget_batch(task_id=task_id)
+        with self.assertRaises(Exception) as ctx:
+            service.save_animation_retarget_batch(task_id=task_id, confirmation="wrong")
+        self.assertEqual(getattr(ctx.exception, "code", ""), "retarget-confirmation-required")
+
 
 if __name__ == "__main__":
     unittest.main()

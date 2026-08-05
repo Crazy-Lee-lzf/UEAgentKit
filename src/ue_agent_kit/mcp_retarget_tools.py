@@ -17,6 +17,7 @@ _CAPABILITY_FOR_TOOL = {
     "ue_start_animation_retarget_batch": RETARGET_BATCH_CAPABILITY,
     "ue_get_animation_retarget_batch": RETARGET_BATCH_CAPABILITY,
     "ue_cancel_animation_retarget_batch": RETARGET_BATCH_CAPABILITY,
+    "ue_save_animation_retarget_batch": RETARGET_BATCH_CAPABILITY,
 }
 
 
@@ -216,3 +217,15 @@ def register_retarget_workflow_tools(
             return workflow_service.cancel_animation_retarget_batch(task_id=taskId)
         except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
             return error_response("ue_cancel_animation_retarget_batch", exc, read_only=False)
+
+    @server.tool(annotations=destructive_annotations)
+    def ue_save_animation_retarget_batch(taskId: str, confirmation: str) -> dict[str, Any]:
+        """Save the retargeted animation outputs of a completed batch task to disk."""
+        try:
+            _assert_retarget_policy_capability(
+                policy_path=workflow_service.config.policy_path,
+                tool_name="ue_save_animation_retarget_batch",
+            )
+            return workflow_service.save_animation_retarget_batch(task_id=taskId, confirmation=confirmation)
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_save_animation_retarget_batch", exc, read_only=False)

@@ -13,7 +13,7 @@ param(
     [string]$BackupRoot = "",
     [ValidateRange(60, 7200)]
     [int]$ProcessTimeoutSeconds = 1800,
-    [ValidateRange(0.1, 30.0)]
+    [ValidateRange(0.1, 600.0)]
     [double]$LiveEditorTimeoutSeconds = 2.0,
     [switch]$Check
 )

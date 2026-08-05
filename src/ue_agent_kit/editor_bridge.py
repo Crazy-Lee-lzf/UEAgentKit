@@ -72,8 +72,8 @@ class LiveEditorBridgeService:
             raise ValueError("Live Editor project_path must reference a .uproject file")
         if not project_path.is_file():
             raise FileNotFoundError(project_path)
-        if not 0.1 <= config.timeout_seconds <= 30.0:
-            raise ValueError("Live Editor timeout must be from 0.1 through 30 seconds")
+        if not 0.1 <= config.timeout_seconds <= 600.0:
+            raise ValueError("Live Editor timeout must be from 0.1 through 600 seconds")
         self.config = LiveEditorBridgeConfig(project_path, config.timeout_seconds, config.policy_path)
         self.server_version = server_version
 
@@ -486,7 +486,7 @@ class LiveEditorBridgeService:
         descriptor = self._read_descriptor()
         request_id = uuid.uuid4().hex
         response_timeout = self.config.timeout_seconds if timeout_seconds is None else timeout_seconds
-        if not 0.1 <= response_timeout <= 305.0:
+        if not 0.1 <= response_timeout <= 600.0:
             raise ValueError("Live Editor response timeout is outside the supported boundary")
         try:
             with socket.create_connection(

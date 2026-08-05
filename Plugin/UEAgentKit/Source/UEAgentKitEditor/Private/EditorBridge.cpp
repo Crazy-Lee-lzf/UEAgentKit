@@ -1170,12 +1170,14 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 	else if (Method == TEXT("editor.saveAuthorizedAsset"))
 	{
 		FString AssetPath;
+		bool bCreateMissing = false;
 		Params->TryGetStringField(TEXT("assetPath"), AssetPath);
+		Params->TryGetBoolField(TEXT("createMissing"), bCreateMissing);
 		TSharedPtr<FJsonObject> Result;
 		FString ErrorCode;
 		FString ErrorMessage;
 		SendActionResult(
-			TrySaveAuthorizedAssetResult(AssetPath, Result, ErrorCode, ErrorMessage),
+			TrySaveAuthorizedAssetResult(AssetPath, bCreateMissing, Result, ErrorCode, ErrorMessage),
 			Result,
 			ErrorCode,
 			ErrorMessage);
