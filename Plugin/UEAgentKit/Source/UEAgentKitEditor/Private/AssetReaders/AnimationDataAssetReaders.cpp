@@ -1,9 +1,25 @@
 #include "AssetReaders/AssetReaderCommon.h"
 #include "AssetReaders/AssetReaderImplementations.h"
 #include "StructuredPropertyJson.h"
+#include "Animation/AnimData/IAnimationDataModel.h"
 
 namespace AssetReaderRegistryPrivate
 {
+	FString ScaleFixRootMotionRootLockToString(const ERootMotionRootLock::Type Value)
+	{
+		switch (Value)
+		{
+		case ERootMotionRootLock::RefPose:
+			return TEXT("RefPose");
+		case ERootMotionRootLock::AnimFirstFrame:
+			return TEXT("AnimFirstFrame");
+		case ERootMotionRootLock::Zero:
+			return TEXT("Zero");
+		default:
+			return TEXT("Unknown");
+		}
+	}
+
 	EAssetReaderStatus ReadAnimSequence(
 		const FAssetData& AssetData,
 		TSharedRef<FJsonObject>& OutDetails,
@@ -40,6 +56,37 @@ namespace AssetReaderRegistryPrivate
 		RootMotion->SetBoolField(TEXT("forceRootLock"), Sequence->bForceRootLock);
 		RootMotion->SetBoolField(TEXT("normalizedScale"), Sequence->bUseNormalizedRootMotionScale);
 		OutDetails->SetObjectField(TEXT("rootMotion"), RootMotion);
+
+		TSharedRef<FJsonObject> ScaleFixState = MakeShared<FJsonObject>();
+		const USkeleton* Skeleton = Sequence->GetSkeleton();
+		const FReferenceSkeleton* ReferenceSkeleton = Skeleton != nullptr
+			? &Skeleton->GetReferenceSkeleton()
+			: nullptr;
+		const FName RootBone = ReferenceSkeleton != nullptr && ReferenceSkeleton->GetNum() > 0
+			? ReferenceSkeleton->GetBoneName(0)
+			: NAME_None;
+		ScaleFixState->SetStringField(TEXT("rootBone"), RootBone.ToString());
+		ScaleFixState->SetBoolField(TEXT("forceRootLock"), Sequence->bForceRootLock);
+		ScaleFixState->SetBoolField(TEXT("enableRootMotion"), Sequence->bEnableRootMotion);
+		ScaleFixState->SetBoolField(TEXT("useNormalizedRootMotionScale"), Sequence->bUseNormalizedRootMotionScale);
+		ScaleFixState->SetStringField(TEXT("rootMotionRootLock"), ScaleFixRootMotionRootLockToString(Sequence->RootMotionRootLock));
+		ScaleFixState->SetBoolField(TEXT("additive"), Sequence->IsValidAdditive());
+		const IAnimationDataModel* Model = Sequence->GetDataModel();
+		const bool bRootTrackExists = Model != nullptr && !RootBone.IsNone() && Model->IsValidBoneTrackName(RootBone);
+		ScaleFixState->SetBoolField(TEXT("rootTrackExists"), bRootTrackExists);
+		TArray<FTransform> RootTransforms;
+		if (bRootTrackExists)
+		{
+			Model->GetBoneTrackTransforms(RootBone, RootTransforms);
+		}
+		ScaleFixState->SetNumberField(TEXT("rootTrackKeyCount"), RootTransforms.Num());
+		if (!RootTransforms.IsEmpty())
+		{
+			ScaleFixState->SetObjectField(TEXT("rootTrackFirstScale"), VectorToJson(RootTransforms[0].GetScale3D()));
+			ScaleFixState->SetObjectField(TEXT("rootTrackMiddleScale"), VectorToJson(RootTransforms[RootTransforms.Num() / 2].GetScale3D()));
+			ScaleFixState->SetObjectField(TEXT("rootTrackLastScale"), VectorToJson(RootTransforms.Last().GetScale3D()));
+		}
+		OutDetails->SetObjectField(TEXT("scaleFixState"), ScaleFixState);
 
 		FString NotifyError;
 		TArray<TSharedPtr<FJsonValue>> Notifies = BuildNotifyArray(Sequence, NotifyError);

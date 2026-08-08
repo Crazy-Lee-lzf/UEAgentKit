@@ -144,6 +144,47 @@ def register_workflow_tools(
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_set_asset_property", exc, read_only=False)
 
+    @server.tool(annotations=planning_annotations)
+    def ue_plan_animation_scale_fix(
+        asset_path: str,
+        root_bone: str,
+        expected_final_scale: float,
+        force_root_lock: bool | None = None,
+        enable_root_motion: bool | None = None,
+        use_normalized_root_motion_scale: bool | None = None,
+        root_motion_root_lock: Literal["RefPose", "AnimFirstFrame", "Zero"] | None = None,
+        root_track_scale_mode: Literal["Keep", "ReferenceLocal", "Uniform"] = "Keep",
+        uniform_scale: float | None = None,
+        final_scale_tolerance: float | None = None,
+        description: str = "",
+    ) -> dict[str, Any]:
+        """Create a Live-only plan that repairs one AnimSequence Root Scale path and verifies final evaluated scale."""
+        value: dict[str, Any] = {
+            "rootTrackScaleMode": root_track_scale_mode,
+            "expectedFinalScale": expected_final_scale,
+        }
+        optional_values = {
+            "forceRootLock": force_root_lock,
+            "enableRootMotion": enable_root_motion,
+            "useNormalizedRootMotionScale": use_normalized_root_motion_scale,
+            "rootMotionRootLock": root_motion_root_lock,
+            "uniformScale": uniform_scale,
+            "finalScaleTolerance": final_scale_tolerance,
+        }
+        value.update({key: item for key, item in optional_values.items() if item is not None})
+        try:
+            return _run_high_level_change(
+                tool_name="ue_plan_animation_scale_fix",
+                mode="Plan",
+                asset_path=asset_path,
+                operation="setAnimationScaleFix",
+                target={"rootBone": root_bone},
+                value=value,
+                description=description,
+            )
+        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_plan_animation_scale_fix", exc, read_only=False)
+
     @server.tool(annotations=destructive_annotations)
     def ue_apply_asset_property_live(plan_id: str, confirmation: str, change_set_id: str = "") -> dict[str, Any]:
         """Apply one authorized setAssetProperty plan to Editor memory without saving the package."""

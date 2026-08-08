@@ -317,6 +317,25 @@ Root / Pelvis 在 0/25/50/75/100% 的 Local 与 Component Transform
 Scale 的 min/max/non-uniform/negative/near-zero 状态
 ```
 
+当前完成状态（2026-08-06）：
+
+- `ue_diagnose_animation_scale` 已完成 Raw / Compressed Track、Reference Pose 和 Editor World 最终姿势读取；
+- `ue_plan_animation_scale_fix` 已完成专用修复计划入口；
+- `setAnimationScaleFix` 已接入通用 Live Write Transaction；
+- 支持 Root Lock、Root Motion 设置和 Root Scale Track 修改；
+- 支持 `Keep`、`ReferenceLocal`、`Uniform` 三种 Root Track Scale 模式；
+- Live Apply 会验证最终 Component Scale，失败自动恢复；
+- 支持现有 Undo / Discard / Authorized Save / Independent Verify；
+- Additive 默认拒绝脱离 Base Pose 的最终姿势修改和验证。
+
+真实心月狐 Idle 回归已经证明：
+
+```text
+Force Root Lock 路径：最终 Scale 1 → 100，Root Track 保持 1，Undo 成功
+Root Track 路径：Root Track 1 → 100，最终 Scale 1 → 100，Undo 成功
+两条路径均未保存，Package SHA 与 SQLite 均未变化
+```
+
 首版 Skeleton 读取字段：
 
 ```text

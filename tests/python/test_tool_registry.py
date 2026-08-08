@@ -67,6 +67,7 @@ EXPECTED_ALL_TOOLS = [
     "ue_set_component_property",
     "ue_set_pin_default",
     "ue_set_asset_property",
+    "ue_plan_animation_scale_fix",
     "ue_apply_asset_property_live",
     "ue_undo_asset_property_live",
     "ue_discard_asset_property_live",
@@ -109,7 +110,7 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertEqual(len(tool_names_for_mode()), 5)
         self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 29)
-        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 40)
+        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 41)
         self.assertEqual(
             tool_names_for_mode(memory_enabled=True),
             EXPECTED_ALL_TOOLS[:5] + EXPECTED_MEMORY_TOOLS,
@@ -121,7 +122,7 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
-            52,
+            53,
         )
         self.assertEqual(
             len(
@@ -131,7 +132,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-            76,
+            77,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:

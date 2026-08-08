@@ -29,6 +29,8 @@ class OperationSpec:
     live_write_value_kind: str = ""
     live_write_verification: str = ""
     live_write_verification_target: str = ""
+    dry_run_supported: bool = True
+    commit_supported: bool = True
 
 
 def _is_nonempty_text(value: Any, *, max_length: int = 256) -> bool:
@@ -126,6 +128,19 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
         live_write_value_kind="structured",
         live_write_verification="property",
         live_write_verification_target="propertyPath",
+    ),
+    "setAnimationScaleFix": OperationSpec(
+        name="setAnimationScaleFix",
+        risk="high",
+        target_fields=("rootBone",),
+        target_validators={"rootBone": _is_nonempty_text},
+        expected_change="animation-scale-fix",
+        asset_type="NonBlueprint",
+        live_write_value_kind="animation-scale-fix",
+        live_write_verification="animation-scale-fix",
+        live_write_verification_target="rootBone",
+        dry_run_supported=False,
+        commit_supported=False,
     ),
     "setMaterialInstanceScalarParameter": OperationSpec(
         name="setMaterialInstanceScalarParameter",
@@ -272,8 +287,8 @@ def get_operation_registry() -> list[dict[str, Any]]:
             "targetFields": list(spec.target_fields),
             "expectedChange": spec.expected_change,
             "assetType": spec.asset_type,
-            "dryRunSupported": True,
-            "commitSupported": True,
+            "dryRunSupported": spec.dry_run_supported,
+            "commitSupported": spec.commit_supported,
         }
         for spec in OPERATION_REGISTRY.values()
     ]
@@ -995,6 +1010,64 @@ def _validate_scalar_value(value: Any, max_value_bytes: int) -> bool:
         return False
     encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     return len(encoded) <= max_value_bytes
+
+
+def _validate_animation_scale_fix_value(value: Any, max_value_bytes: int) -> tuple[bool, str]:
+    if not isinstance(value, dict) or not 1 <= len(value) <= 8:
+        return False, "Animation scale fix value must be one object with 1 to 8 fields."
+    allowed_fields = {
+        "forceRootLock",
+        "enableRootMotion",
+        "useNormalizedRootMotionScale",
+        "rootMotionRootLock",
+        "rootTrackScaleMode",
+        "uniformScale",
+        "expectedFinalScale",
+        "finalScaleTolerance",
+    }
+    unknown_fields = sorted(set(value) - allowed_fields)
+    if unknown_fields:
+        return False, f"Unsupported animation scale fix fields: {', '.join(unknown_fields)}."
+    try:
+        encoded = _canonical_json(value).encode("utf-8")
+    except (TypeError, ValueError):
+        return False, "Animation scale fix value is not valid finite JSON."
+    if len(encoded) > max_value_bytes:
+        return False, "Animation scale fix value exceeds maxValueBytes."
+
+    for field in ("forceRootLock", "enableRootMotion", "useNormalizedRootMotionScale"):
+        if field in value and not isinstance(value[field], bool):
+            return False, f"{field} must be a boolean."
+
+    root_lock = value.get("rootMotionRootLock")
+    if root_lock is not None and root_lock not in {"RefPose", "AnimFirstFrame", "Zero"}:
+        return False, "rootMotionRootLock must be RefPose, AnimFirstFrame, or Zero."
+
+    scale_mode = value.get("rootTrackScaleMode", "Keep")
+    if scale_mode not in {"Keep", "ReferenceLocal", "Uniform"}:
+        return False, "rootTrackScaleMode must be Keep, ReferenceLocal, or Uniform."
+
+    def valid_number(field: str, *, allow_zero: bool = False) -> bool:
+        if field not in value:
+            return True
+        number = value[field]
+        if isinstance(number, bool) or not isinstance(number, (int, float)) or not math.isfinite(float(number)):
+            return False
+        return 0.0 <= float(number) <= 1_000_000.0 if allow_zero else 0.0 < float(number) <= 1_000_000.0
+
+    if not valid_number("uniformScale"):
+        return False, "uniformScale must be a finite number greater than 0 and at most 1000000."
+    if scale_mode == "Uniform" and "uniformScale" not in value:
+        return False, "uniformScale is required when rootTrackScaleMode is Uniform."
+    if not valid_number("expectedFinalScale"):
+        return False, "expectedFinalScale must be a finite number greater than 0 and at most 1000000."
+    if not valid_number("finalScaleTolerance", allow_zero=True):
+        return False, "finalScaleTolerance must be a finite non-negative number at most 1000000."
+
+    setting_fields = {"forceRootLock", "enableRootMotion", "useNormalizedRootMotionScale", "rootMotionRootLock"}
+    if scale_mode == "Keep" and not setting_fields.intersection(value):
+        return False, "Animation scale fix requires a sequence setting or a non-Keep rootTrackScaleMode."
+    return True, ""
 
 
 def _validate_vector_value(value: Any, max_value_bytes: int) -> bool:
@@ -1872,6 +1945,18 @@ def validate_patch(
                         "asset-structured-type-mismatch",
                         f"Structured value type {value.get('valueType')} does not match property type {property_details.get('structuredType')}.",
                         f"{operation_pointer}.value.valueType",
+                    )
+            elif operation_name == "setAnimationScaleFix":
+                valid_scale_fix, scale_fix_error = _validate_animation_scale_fix_value(
+                    value,
+                    policy["maxValueBytes"],
+                )
+                if not valid_scale_fix:
+                    _issue(
+                        errors,
+                        "operation-value-type",
+                        scale_fix_error,
+                        f"{operation_pointer}.value",
                     )
             elif operation_name == "setMaterialInstanceTextureParameter":
                 valid_reference, reference_package = _validate_asset_path(value)

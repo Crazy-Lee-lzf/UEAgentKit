@@ -209,13 +209,24 @@ Additive 动画必须在明确的 Base Pose 或 Animation Blueprint 上下文中
 
 ## 7. 后续修复方向
 
-普通动画：
+普通动画修复工具已经实现：
 
-1. 检查 IK Retargeter 输出为什么保留 Root Scale=1；
-2. 明确哪些动画应启用 Force Root Lock；
-3. 优先在重定向输出阶段统一 Root Scale / Root Lock 语义；
-4. 使用最终姿势诊断验证修复前后结果；
-5. 禁止未验证的批量 `Scale ×100`。
+```text
+ue_plan_animation_scale_fix
+→ ue_apply_asset_property_live
+→ Final Evaluated Component Scale Readback
+→ Undo / Discard / Authorized Save / Verify
+```
+
+已支持：
+
+1. 修改 Force Root Lock、Enable Root Motion、Normalized Root Motion Scale 和 Root Motion Root Lock；
+2. 保持 Root Track 不变，仅通过 RefPose Root Lock 恢复最终比例；
+3. 将全部 Root Scale Key 改为 Skeleton Reference Local Scale；
+4. 使用明确 Uniform Scale 修正 Root Track；
+5. 修改后强制验证最终 Root Component Scale，不达标自动恢复；
+6. 禁止未验证的批量 `Scale ×100`；
+7. 复用现有 Undo、Discard、授权保存和独立重载验证闭环。
 
 Additive 动画：
 
@@ -234,4 +245,14 @@ Additive 动画：
 - UE5.6 C++ 编译；
 - 同一 Editor Session 重复求值一致；
 - Idle / Death / Jog / Additive 实际资产验证；
-- 未修改或保存任何 Content Package。
+- 专用 `ue_plan_animation_scale_fix` MCP 入口；
+- Live-only `setAnimationScaleFix` Patch Operation；
+- Root Lock 实际修改：最终 Scale `1 → 100`，Root Track 保持 `1`；
+- Root Track 实际修改：Root Track `1 → 100`，最终 Scale `1 → 100`；
+- 两条路径均完成 Undo，并恢复最终 Scale 与 Root Track；
+- Live Apply / Undo 期间未保存任何 Content Package；
+- 动画 Package SHA 和 SQLite Index 均未变化；
+- Python 全量回归 `380 passed`；
+- Ruff 通过。
+
+完整操作契约见 [`ANIMATION_SCALE_FIX_TOOL.md`](ANIMATION_SCALE_FIX_TOOL.md)。

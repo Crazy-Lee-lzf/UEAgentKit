@@ -45,6 +45,7 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
                 "setAssetProperty",
                 "setAssetReferenceProperty",
                 "setAssetStructuredProperty",
+                "setAnimationScaleFix",
                 "setMaterialInstanceScalarParameter",
                 "setMaterialInstanceVectorParameter",
                 "setMaterialInstanceTextureParameter",
@@ -58,9 +59,12 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
 
         )
 
-        self.assertTrue(all(item["dryRunSupported"] for item in operations))
-
-        self.assertTrue(all(item["commitSupported"] for item in operations))
+        live_only = next(item for item in operations if item["operation"] == "setAnimationScaleFix")
+        self.assertFalse(live_only["dryRunSupported"])
+        self.assertFalse(live_only["commitSupported"])
+        executor_operations = [item for item in operations if item["operation"] != "setAnimationScaleFix"]
+        self.assertTrue(all(item["dryRunSupported"] for item in executor_operations))
+        self.assertTrue(all(item["commitSupported"] for item in executor_operations))
         self.assertEqual(
             [item["assetType"] for item in operations],
             [
@@ -68,6 +72,7 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
                 "Blueprint",
                 "Blueprint",
                 "Blueprint",
+                "NonBlueprint",
                 "NonBlueprint",
                 "NonBlueprint",
                 "NonBlueprint",

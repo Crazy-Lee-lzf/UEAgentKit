@@ -245,6 +245,8 @@ def _live_write_memory_task_evidence(
 def _live_write_exported_value(canonical: dict[str, Any], record: LiveApplyRecord) -> Any:
     details = canonical.get("assetDetails") or {}
     target = record.target or {}
+    if record.operation == "setAnimationScaleFix":
+        return details.get("scaleFixState")
     spec = LIVE_WRITE_OPERATION_REGISTRY.get(record.operation)
     if spec is None:
         return None
@@ -275,6 +277,44 @@ def _live_write_exported_value(canonical: dict[str, Any], record: LiveApplyRecor
             if isinstance(prop, dict) and prop.get("name") == selector:
                 return prop.get("value")
     return None
+
+
+def _live_write_expected_exported_value(record: LiveApplyRecord) -> Any:
+    if record.operation != "setAnimationScaleFix" or not isinstance(record.after_value, dict):
+        return record.after_value
+    persisted_fields = (
+        "rootBone",
+        "forceRootLock",
+        "enableRootMotion",
+        "useNormalizedRootMotionScale",
+        "rootMotionRootLock",
+        "additive",
+        "rootTrackExists",
+        "rootTrackKeyCount",
+        "rootTrackFirstScale",
+        "rootTrackMiddleScale",
+        "rootTrackLastScale",
+    )
+    return {
+        field: record.after_value[field]
+        for field in persisted_fields
+        if field in record.after_value
+    }
+
+def _live_write_runtime_verification(record: LiveApplyRecord) -> dict[str, Any] | None:
+    if record.operation != "setAnimationScaleFix" or not isinstance(record.after_value, dict):
+        return None
+    runtime_fields = (
+        "referenceLocalScale",
+        "finalEvaluationStatus",
+        "finalRootScale",
+    )
+    return {
+        field: record.after_value[field]
+        for field in runtime_fields
+        if field in record.after_value
+    }
+
 
 
 
@@ -3094,12 +3134,19 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                     "The disk Package Revision is unchanged from the frozen index; the live write was not persisted.",
                 )
             exported_value = _live_write_exported_value(canonical, record)
-            if not _live_write_exported_matches(record.after_value, exported_value):
+            expected_exported_value = _live_write_expected_exported_value(record)
+            runtime_verification = _live_write_runtime_verification(record)
+            if not _live_write_exported_matches(expected_exported_value, exported_value):
                 raise WorkflowError(
                     "live-write-verify-value-mismatch",
                     "The independently reloaded asset value does not match the applied live write value; "
                     "the asset changed after the live write.",
-                    details={"expectedValue": record.after_value, "exportedValue": exported_value},
+                    details={
+                        "persistedExpectedValue": expected_exported_value,
+                        "exportedPersistedValue": exported_value,
+                        "expectedValue": expected_exported_value,
+                        "exportedValue": exported_value,
+                    },
                 )
             record.verified = True
             verification_report_id = _report_id("live-write-verify-export", output / "manifest.json")
@@ -3133,7 +3180,11 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 "undoAvailable": False,
                 "saved": True,
                 "verified": True,
-                "expectedValue": record.after_value,
+                "appliedValue": record.after_value,
+                "persistedExpectedValue": expected_exported_value,
+                "exportedPersistedValue": exported_value,
+                "runtimeVerification": runtime_verification,
+                "expectedValue": expected_exported_value,
                 "exportedValue": exported_value,
                 "expectedDiskRevision": str(freshness.get("diskRevision", "")),
                 "actualRevision": actual_revision,

@@ -13,10 +13,13 @@
 - [`PERFORMANCE_TEST_PLAN.md`](PERFORMANCE_TEST_PLAN.md)：500 GB 商业项目模型、E 盘 SSD 上的 160–180 GB 物理测试工程、原生 SSD 与 50 MB/s HDD 模拟档位、日常交互目标与性能门禁。
 - [`LIVE_EDITOR_REALTIME_IO_PLAN.md`](LIVE_EDITOR_REALTIME_IO_PLAN.md)：实时资产读取、动画重定向比例诊断、Live Write Readback 与后续 Blueprint 编辑实施计划。
 - [`ANIMATION_RETARGET_SCALE_DIAGNOSIS_20260806.md`](ANIMATION_RETARGET_SCALE_DIAGNOSIS_20260806.md)：Root Scale、Force Root Lock、Compressed Track、Additive Base Pose 与最终 Editor World Pose 的真实 UE5.6 诊断结果。
+- [`ANIMATION_SCALE_FIX_TOOL.md`](ANIMATION_SCALE_FIX_TOOL.md)：AnimSequence Root Lock / Root Scale Track 的受控 Plan、Live Apply、最终姿势验证、Undo、Save 和 Verify 工作流。
+- [`Plans/ANIMATION_TOOLS_FOLLOWUP_PLAN_20260806.md`](Plans/ANIMATION_TOOLS_FOLLOWUP_PLAN_20260806.md)：动画批量审计、批量修复、Additive/Base Pose、浮空、次级运动和 ModelPreview 接入计划。
 - [`BRANCH_WORKTREES.md`](BRANCH_WORKTREES.md)：Realtime I/O 与 Memory/Context 双分支、Worktree、公共协议和合并规范。
 - [`BRANCH_WORKTREES_EN.md`](BRANCH_WORKTREES_EN.md)：English dual-branch and Worktree workflow.
 - [`Handoffs/MEMORY_CONTEXT_HANDOFF_20260801.md`](Handoffs/MEMORY_CONTEXT_HANDOFF_20260801.md)：Memory/Context 里程碑实现范围、兼容要求与测试门禁。
 - [`Handoffs/LIVE_EDITOR_REALTIME_IO_HANDOFF_20260801.md`](Handoffs/LIVE_EDITOR_REALTIME_IO_HANDOFF_20260801.md)：Realtime I/O 里程碑实现范围、测试门禁与后续扩展边界。
+- [`Handoffs/LIVE_EDITOR_ANIMATION_TOOLS_HANDOFF_20260806.md`](Handoffs/LIVE_EDITOR_ANIMATION_TOOLS_HANDOFF_20260806.md)：动画比例诊断、受控修复、真实保存结果、当前工作树和后续接手边界。
 - [`Handoffs/UEAGENTKIT_0.7.0_RELEASE_HANDOFF_20260803.md`](Handoffs/UEAGENTKIT_0.7.0_RELEASE_HANDOFF_20260803.md)：0.7.0 本地 Release、验证结果、源码产物、MSVC 阻塞与后续性能测试交接。
 - [`../prompts/LIVE_EDITOR_REALTIME_IO_LOCAL_AGENT_PROMPT_20260801.md`](../prompts/LIVE_EDITOR_REALTIME_IO_LOCAL_AGENT_PROMPT_20260801.md)：可直接复制给本地代码 Agent 的执行提示词。
 

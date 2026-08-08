@@ -17,10 +17,13 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from ue_agent_kit.agent_workflow import (  # noqa: E402
+    LiveApplyRecord,
     PatchWorkflowConfig,
     PatchWorkflowService,
     ProcessResult,
     WorkflowError,
+    _live_write_expected_exported_value,
+    _live_write_runtime_verification,
 )
 from ue_agent_kit.change_sets import ChangeSetOperationRecord, MAX_CHANGE_SET_RECEIPTS  # noqa: E402
 from ue_agent_kit.editor_bridge import LiveEditorError  # noqa: E402
@@ -322,6 +325,48 @@ class FakeWorkflowRunner:
         if arguments[0] != "powershell.exe" or cwd.name != "tool" or timeout_seconds != 1800:
             raise AssertionError("unsafe process invocation")
 
+
+    def test_animation_live_write_verify_values_separate_runtime_and_persisted_fields(self) -> None:
+        after_value = {
+            "rootBone": "Root",
+            "forceRootLock": True,
+            "enableRootMotion": False,
+            "useNormalizedRootMotionScale": False,
+            "rootMotionRootLock": "RefPose",
+            "additive": False,
+            "rootTrackExists": True,
+            "rootTrackKeyCount": 2,
+            "rootTrackFirstScale": {"x": 1.0, "y": 1.0, "z": 1.0},
+            "rootTrackMiddleScale": {"x": 1.0, "y": 1.0, "z": 1.0},
+            "rootTrackLastScale": {"x": 1.0, "y": 1.0, "z": 1.0},
+            "referenceLocalScale": {"x": 100.0, "y": 100.0, "z": 100.0},
+            "finalEvaluationStatus": "success",
+            "finalRootScale": {"x": 100.0, "y": 100.0, "z": 100.0},
+        }
+        record = LiveApplyRecord(
+            receipt="live-apply-test",
+            plan_id="plan-test",
+            plan_digest="digest-test",
+            asset_path="/Game/Test/Test.Test",
+            operation="setAnimationScaleFix",
+            value_kind="animation-scale-fix",
+            editor_session_id="session-test",
+            transaction_id="transaction-test",
+            before_value={},
+            after_value=after_value,
+            target={"rootBone": "Root"},
+            applied_at_utc="2026-08-06T00:00:00Z",
+        )
+
+        persisted = _live_write_expected_exported_value(record)
+        runtime = _live_write_runtime_verification(record)
+
+        self.assertTrue(persisted["forceRootLock"])
+        self.assertNotIn("referenceLocalScale", persisted)
+        self.assertNotIn("finalEvaluationStatus", persisted)
+        self.assertNotIn("finalRootScale", persisted)
+        self.assertEqual(runtime["finalEvaluationStatus"], "success")
+        self.assertEqual(runtime["finalRootScale"]["x"], 100.0)
 
 class AgentWorkflowTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -1360,7 +1405,7 @@ class AgentWorkflowTests(unittest.TestCase):
 
     def test_live_write_tool_count_and_names_are_unchanged(self) -> None:
         names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
-        self.assertEqual(len(names), 64)
+        self.assertEqual(len(names), 65)
         self.assertIn("ue_set_asset_property", names)
         self.assertIn("ue_set_asset_reference_property", names)
         self.assertIn("ue_apply_asset_property_live", names)
@@ -2395,6 +2440,10 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertTrue(verified["verified"])
         self.assertEqual(verified["actualRevision"], saved_revision)
         self.assertEqual(verified["exportedValue"], True)
+        self.assertEqual(verified["appliedValue"], True)
+        self.assertEqual(verified["persistedExpectedValue"], True)
+        self.assertEqual(verified["exportedPersistedValue"], True)
+        self.assertIsNone(verified["runtimeVerification"])
         self.assertEqual(verified["expectedValue"], True)
         evidence = verified["memoryTaskEvidence"]["arguments"]
         self.assertEqual(evidence["task_key"], f"live-write:{applied['planId']}")

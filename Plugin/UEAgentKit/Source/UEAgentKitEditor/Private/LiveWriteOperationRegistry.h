@@ -101,4 +101,5 @@ namespace UEAgentKitLiveWrite
 	void RegisterPropertyLiveWriteOperations(FLiveWriteOperationRegistry& Registry);
 	void RegisterMaterialLiveWriteOperations(FLiveWriteOperationRegistry& Registry);
 	void RegisterDataTableLiveWriteOperations(FLiveWriteOperationRegistry& Registry);
+	void RegisterAnimationLiveWriteOperations(FLiveWriteOperationRegistry& Registry);
 }

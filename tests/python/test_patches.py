@@ -17,7 +17,11 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from ue_agent_kit.cli import main  # noqa: E402
-from ue_agent_kit.patches import LIVE_WRITE_OPERATION_REGISTRY, validate_patch  # noqa: E402
+from ue_agent_kit.patches import (  # noqa: E402
+    LIVE_WRITE_OPERATION_REGISTRY,
+    _validate_animation_scale_fix_value,
+    validate_patch,
+)
 
 
 PROJECT_NAME = "我的项目"
@@ -161,6 +165,7 @@ class PatchValidationTests(unittest.TestCase):
             "setAssetProperty": ("scalar", "property", "propertyPath"),
             "setAssetReferenceProperty": ("reference", "property", "propertyPath"),
             "setAssetStructuredProperty": ("structured", "property", "propertyPath"),
+            "setAnimationScaleFix": ("animation-scale-fix", "animation-scale-fix", "rootBone"),
             "setMaterialInstanceScalarParameter": ("material-scalar", "material-parameter", "parameterName"),
             "setMaterialInstanceVectorParameter": ("material-vector", "material-parameter", "parameterName"),
             "setMaterialInstanceTextureParameter": ("material-texture", "material-parameter", "parameterName"),
@@ -180,6 +185,26 @@ class PatchValidationTests(unittest.TestCase):
             )
             self.assertTrue(spec.target_fields)
             self.assertEqual(set(spec.target_fields), set(spec.target_validators))
+    def test_animation_scale_fix_value_accepts_non_additive_contract(self) -> None:
+        valid, message = _validate_animation_scale_fix_value(
+            {
+                "forceRootLock": True,
+                "rootMotionRootLock": "RefPose",
+                "rootTrackScaleMode": "Keep",
+                "expectedFinalScale": 100.0,
+            },
+            65536,
+        )
+        self.assertTrue(valid, message)
+
+    def test_animation_scale_fix_value_rejects_additive_bypass_field(self) -> None:
+        valid, message = _validate_animation_scale_fix_value(
+            {"forceRootLock": True, "allowAdditive": True},
+            65536,
+        )
+        self.assertFalse(valid)
+        self.assertIn("allowAdditive", message)
+
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(prefix="ueak_patch_")
