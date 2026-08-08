@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Literal
 
 from .animation_scale_audit import AnimationScaleAuditService
 from .editor_bridge import LiveEditorBridgeService, LiveEditorError
@@ -162,6 +162,8 @@ def register_retarget_tools(
         taskId: str,
         detailOffset: int = 0,
         detailLimit: int = 20,
+        classificationFilter: list[str] | None = None,
+        sortBy: Literal["processed-order", "asset-path", "classification"] = "processed-order",
     ) -> dict[str, Any]:
         """Advance one bounded audit batch and return progress plus paged read-only results."""
         try:
@@ -178,6 +180,8 @@ def register_retarget_tools(
                     task_id=taskId,
                     detail_offset=detailOffset,
                     detail_limit=detailLimit,
+                    classification_filter=classificationFilter,
+                    sort_by=sortBy,
                 ),
             }
         except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:

@@ -158,6 +158,67 @@ class AnimationScaleAuditTests(unittest.TestCase):
         self.assertEqual(second["summary"]["classificationCounts"], {"normal": 2})
         self.assertEqual(live.call_tool.call_count, 2)
 
+    def test_get_filters_details_without_changing_progress_or_summary_counts(self) -> None:
+        service, live = _service()
+        started = service.start(
+            animation_paths=[ANIMATION_A, ANIMATION_B],
+            batch_size=2,
+        )
+        live.call_tool.return_value = {
+            "ok": True,
+            "result": {
+                "assets": [
+                    _diagnosis(ANIMATION_A, final_scale=100.0),
+                    _diagnosis(ANIMATION_B),
+                ]
+            },
+        }
+
+        result = service.get(
+            task_id=str(started["taskId"]),
+            classification_filter=["root-lock-candidate"],
+        )
+
+        self.assertEqual(result["state"], "completed")
+        self.assertEqual(result["progress"]["processedAssets"], 2)
+        self.assertEqual(
+            result["summary"]["classificationCounts"],
+            {"normal": 1, "root-lock-candidate": 1},
+        )
+        self.assertEqual(result["summary"]["availableDetailCount"], 2)
+        self.assertEqual(result["summary"]["filteredDetailCount"], 1)
+        self.assertEqual(result["details"]["totalAvailable"], 1)
+        self.assertEqual(result["details"]["classificationFilter"], ["root-lock-candidate"])
+        self.assertEqual(result["details"]["items"][0]["assetPath"], ANIMATION_B)
+
+    def test_get_sorts_filtered_view_without_reordering_processed_items(self) -> None:
+        service, live = _service()
+        started = service.start(animation_paths=[ANIMATION_B, ANIMATION_A], batch_size=2)
+        live.call_tool.return_value = {
+            "ok": True,
+            "result": {
+                "assets": [
+                    _diagnosis(ANIMATION_B),
+                    _diagnosis(ANIMATION_A, final_scale=100.0),
+                ]
+            },
+        }
+
+        sorted_result = service.get(task_id=str(started["taskId"]), sort_by="asset-path")
+        processed_result = service.get(task_id=str(started["taskId"]), sort_by="processed-order")
+
+        self.assertEqual([item["assetPath"] for item in sorted_result["details"]["items"]], [ANIMATION_A, ANIMATION_B])
+        self.assertEqual([item["assetPath"] for item in processed_result["details"]["items"]], [ANIMATION_B, ANIMATION_A])
+
+    def test_invalid_detail_filter_does_not_advance_audit(self) -> None:
+        service, live = _service()
+        started = service.start(animation_paths=[ANIMATION_A])
+
+        with self.assertRaisesRegex(Exception, "classificationFilter"):
+            service.get(task_id=str(started["taskId"]), classification_filter=["unknown"])
+
+        live.call_tool.assert_not_called()
+
     def test_additive_is_never_suggested_for_direct_scale_repair(self) -> None:
         service, live = _service()
         started = service.start(animation_paths=[ANIMATION_A])

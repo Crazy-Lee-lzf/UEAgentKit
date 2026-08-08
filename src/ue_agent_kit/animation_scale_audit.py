@@ -12,6 +12,22 @@ MAX_AUDIT_BONES = 16
 MAX_AUDIT_BATCH_SIZE = 8
 MAX_AUDIT_PAGE_SIZE = 50
 DEFAULT_AUDIT_BONES = ("Root", "pelvis")
+AUDIT_CLASSIFICATIONS = (
+    "normal",
+    "scale-too-small",
+    "scale-too-large",
+    "root-lock-candidate",
+    "root-track-candidate",
+    "root-motion-review",
+    "additive-requires-base-pose",
+    "unsupported-composite",
+    "load-failed",
+)
+AUDIT_SORT_ORDERS = (
+    "processed-order",
+    "asset-path",
+    "classification",
+)
 
 
 def _utc_now() -> str:
@@ -306,12 +322,27 @@ class AnimationScaleAuditService:
         normalized_paths = [str(path) for path in paths]
         return "immutable-index", normalized_prefix, str(candidates.get("snapshotId") or ""), normalized_paths
 
-    def get(self, *, task_id: str, detail_offset: int = 0, detail_limit: int = 20) -> dict[str, Any]:
+    def get(
+        self,
+        *,
+        task_id: str,
+        detail_offset: int = 0,
+        detail_limit: int = 20,
+        classification_filter: list[str] | None = None,
+        sort_by: str = "processed-order",
+    ) -> dict[str, Any]:
         task = self._require_task(task_id)
         self._validate_page(detail_offset, detail_limit)
+        normalized_filter = self._validate_detail_view(classification_filter, sort_by)
         if task.state == "running":
             self._advance(task)
-        return self._snapshot(task, detail_offset=detail_offset, detail_limit=detail_limit)
+        return self._snapshot(
+            task,
+            detail_offset=detail_offset,
+            detail_limit=detail_limit,
+            classification_filter=normalized_filter,
+            sort_by=sort_by,
+        )
 
     def cancel(self, *, task_id: str) -> dict[str, Any]:
         task = self._require_task(task_id)
@@ -379,16 +410,60 @@ class AnimationScaleAuditService:
             )
 
     @staticmethod
-    def _snapshot(task: AnimationScaleAuditTask, *, detail_offset: int, detail_limit: int) -> dict[str, Any]:
+    def _validate_detail_view(classification_filter: list[str] | None, sort_by: str) -> list[str]:
+        if classification_filter is None:
+            normalized_filter: list[str] = []
+        else:
+            if not isinstance(classification_filter, list) or not classification_filter:
+                raise LiveEditorError(
+                    "live-editor-invalid-parameters",
+                    "classificationFilter must be a non-empty array when provided.",
+                )
+            normalized_filter = []
+            for classification in classification_filter:
+                if not isinstance(classification, str) or classification not in AUDIT_CLASSIFICATIONS:
+                    raise LiveEditorError(
+                        "live-editor-invalid-parameters",
+                        f"classificationFilter values must be one of: {', '.join(AUDIT_CLASSIFICATIONS)}.",
+                    )
+                if classification not in normalized_filter:
+                    normalized_filter.append(classification)
+        if not isinstance(sort_by, str) or sort_by not in AUDIT_SORT_ORDERS:
+            raise LiveEditorError(
+                "live-editor-invalid-parameters",
+                f"sortBy must be one of: {', '.join(AUDIT_SORT_ORDERS)}.",
+            )
+        return normalized_filter
+
+    @staticmethod
+    def _snapshot(
+        task: AnimationScaleAuditTask,
+        *,
+        detail_offset: int,
+        detail_limit: int,
+        classification_filter: list[str] | None = None,
+        sort_by: str = "processed-order",
+    ) -> dict[str, Any]:
         counts: dict[str, int] = {}
         for item in task.items:
             classification = str(item.get("classification") or "unknown")
             counts[classification] = counts.get(classification, 0) + 1
+        filtered_items = task.items
+        if classification_filter:
+            allowed = set(classification_filter)
+            filtered_items = [item for item in filtered_items if item.get("classification") in allowed]
+        if sort_by == "asset-path":
+            filtered_items = sorted(filtered_items, key=lambda item: str(item.get("assetPath") or ""))
+        elif sort_by == "classification":
+            filtered_items = sorted(
+                filtered_items,
+                key=lambda item: (str(item.get("classification") or ""), str(item.get("assetPath") or "")),
+            )
         total = len(task.animation_paths)
         processed = task.cursor
         completed_percent = 100 if task.state == "completed" else int(processed * 100 / total)
-        end = min(detail_offset + detail_limit, len(task.items))
-        details = task.items[detail_offset:end]
+        end = min(detail_offset + detail_limit, len(filtered_items))
+        details = filtered_items[detail_offset:end]
         snapshot: dict[str, Any] = {
             "taskId": task.task_id,
             "state": task.state,
@@ -411,17 +486,20 @@ class AnimationScaleAuditService:
             "summary": {
                 "classificationCounts": counts,
                 "availableDetailCount": len(task.items),
+                "filteredDetailCount": len(filtered_items),
             },
             "details": {
                 "offset": detail_offset,
                 "limit": detail_limit,
+                "classificationFilter": classification_filter or [],
+                "sortBy": sort_by,
                 "returnedCount": len(details),
-                "totalAvailable": len(task.items),
-                "hasMore": end < len(task.items),
+                "totalAvailable": len(filtered_items),
+                "hasMore": end < len(filtered_items),
                 "items": details,
             },
         }
-        if end < len(task.items):
+        if end < len(filtered_items):
             snapshot["details"]["nextOffset"] = end
         if task.completed_at_utc:
             snapshot["completedAtUtc"] = task.completed_at_utc

@@ -113,7 +113,13 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 completed = await call(
                     session,
                     "ue_get_animation_scale_audit",
-                    {"taskId": task_id, "detailOffset": 0, "detailLimit": 20},
+                    {
+                        "taskId": task_id,
+                        "detailOffset": 0,
+                        "detailLimit": 20,
+                        "classificationFilter": ["normal"],
+                        "sortBy": "asset-path",
+                    },
                 )
                 result = completed.get("result", {})
                 items = result.get("details", {}).get("items", [])

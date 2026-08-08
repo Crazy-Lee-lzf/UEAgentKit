@@ -90,6 +90,24 @@ ue_get_animation_scale_audit
 4. 对结果分类；
 5. 返回当前进度、分类统计和分页 Detail。
 
+`Get` 的 Detail 视图支持两个可选参数：
+
+| 参数 | 说明 |
+|---|---|
+| `classificationFilter` | 只返回指定分类的 Detail；不改变任务进度和全量分类统计 |
+| `sortBy` | `processed-order`、`asset-path` 或 `classification` |
+
+筛选和排序只作用于当前已处理结果的分页视图：
+
+```text
+progress / classificationCounts = 全量已处理资产
+summary.availableDetailCount    = 全量已处理 Detail 数
+summary.filteredDetailCount     = 当前筛选后的 Detail 数
+details.totalAvailable          = 当前筛选后的可分页数量
+```
+
+无效分类或排序值会在推进下一个 Batch 之前被拒绝，不会额外触发 Editor 求值。
+
 主要返回：
 
 ```text

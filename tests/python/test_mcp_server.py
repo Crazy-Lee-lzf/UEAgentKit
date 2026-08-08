@@ -1367,6 +1367,17 @@ class McpServerTests(unittest.TestCase):
         self.assertTrue(audit_contract["explicitLoadIfNeeded"])
         self.assertEqual(audit_contract["candidateSources"], ["explicit-list", "immutable-index-path-prefix"])
         self.assertEqual(audit_contract["indexCandidateClass"], "/Script/Engine.AnimSequence")
+        self.assertEqual(
+            audit_contract["detailClassificationFilters"],
+            [
+                "normal", "scale-too-small", "scale-too-large", "root-lock-candidate", "root-track-candidate",
+                "root-motion-review", "additive-requires-base-pose", "unsupported-composite", "load-failed",
+            ],
+        )
+        self.assertEqual(
+            audit_contract["detailSortOrders"],
+            ["processed-order", "asset-path", "classification"],
+        )
         self.assertEqual(audit_contract["maxAssets"], 1000)
         self.assertEqual(audit_contract["maxBatchSize"], 8)
         self.assertEqual(audit_contract["maxPageSize"], 50)

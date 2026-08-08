@@ -152,7 +152,7 @@ git diff --check
 
 ```text
 UE5.6 C++ Direct Build       passed
-Python tests                 389 passed
+Python tests                 392 passed
 Ruff                         passed
 Root Lock Live Apply/Undo    passed
 Root Track Live Apply/Undo   passed
@@ -207,7 +207,7 @@ docs/Plans/ANIMATION_TOOLS_FOLLOWUP_PLAN_20260806.md
 
 ```text
 P0 收口、测试、提交当前单资产工具（收口与门禁已完成，本地提交与本文档一并完成，不推送远程）
-P1 批量只读动画 Audit（显式列表和固定 Index `pathPrefix` 候选生成均已完成；性能门禁、过滤/排序和 Report 导出待继续）
+P1 批量只读动画 Audit（显式列表、固定 Index `pathPrefix`、分类过滤和稳定排序均已完成；性能门禁和 Report 导出待继续）
 P2 批量修复 Plan / Apply / Save / Rollback
 P3 重定向输出后处理
 P4 Additive + Base Pose
