@@ -176,6 +176,9 @@ class AnimationScaleAuditTask:
     load_if_needed: bool
     batch_size: int
     editor_session_id: str
+    candidate_source: str
+    path_prefix: str = ""
+    index_snapshot_id: str = ""
     state: str = "running"
     cursor: int = 0
     started_at_utc: str = field(default_factory=_utc_now)
@@ -186,25 +189,26 @@ class AnimationScaleAuditTask:
 
 
 class AnimationScaleAuditService:
-    def __init__(self, live_editor_service: LiveEditorBridgeService) -> None:
+    def __init__(self, live_editor_service: LiveEditorBridgeService, index_service: Any | None = None) -> None:
         self.live_editor_service = live_editor_service
+        self.index_service = index_service
         self._task: AnimationScaleAuditTask | None = None
 
     def start(
         self,
         *,
-        animation_paths: list[str],
+        animation_paths: list[str] | None = None,
+        path_prefix: str = "",
         bone_names: list[str] | None = None,
         load_if_needed: bool = False,
         batch_size: int = 1,
     ) -> dict[str, Any]:
         if self._task is not None and self._task.state == "running":
             raise LiveEditorError("animation-scale-audit-busy", "Another animation scale audit is already running.")
-        if not isinstance(animation_paths, list) or not 1 <= len(animation_paths) <= MAX_AUDIT_ASSETS:
-            raise LiveEditorError(
-                "live-editor-invalid-parameters",
-                f"animationPaths must contain between 1 and {MAX_AUDIT_ASSETS} Object Paths.",
-            )
+        candidate_source, normalized_prefix, index_snapshot_id, normalized_paths = self._resolve_candidates(
+            animation_paths=animation_paths,
+            path_prefix=path_prefix,
+        )
         if bone_names is not None and not isinstance(bone_names, list):
             raise LiveEditorError(
                 "live-editor-invalid-parameters",
@@ -226,11 +230,6 @@ class AnimationScaleAuditService:
                 "live-editor-invalid-parameters",
                 f"batchSize must be an integer from 1 through {MAX_AUDIT_BATCH_SIZE}.",
             )
-        normalized_paths = [
-            LiveEditorBridgeService._bounded_string(path, "animationPaths", 512) for path in animation_paths
-        ]
-        for path in normalized_paths:
-            LiveEditorBridgeService._validate_game_object_path(path)
 
         status = self.live_editor_service.status()
         if status.get("state") != "available":
@@ -245,9 +244,67 @@ class AnimationScaleAuditService:
             load_if_needed=load_if_needed,
             batch_size=batch_size,
             editor_session_id=str(status.get("sessionId") or ""),
+            candidate_source=candidate_source,
+            path_prefix=normalized_prefix,
+            index_snapshot_id=index_snapshot_id,
         )
         self._task = task
         return self._snapshot(task, detail_offset=0, detail_limit=MAX_AUDIT_PAGE_SIZE)
+
+    def _resolve_candidates(
+        self,
+        *,
+        animation_paths: list[str] | None,
+        path_prefix: str,
+    ) -> tuple[str, str, str, list[str]]:
+        normalized_prefix = LiveEditorBridgeService._bounded_string(path_prefix, "pathPrefix", 512)
+        if animation_paths is not None and not isinstance(animation_paths, list):
+            raise LiveEditorError("live-editor-invalid-parameters", "animationPaths must be an array when provided.")
+        has_explicit_paths = isinstance(animation_paths, list) and bool(animation_paths)
+        has_prefix = bool(normalized_prefix)
+        if has_explicit_paths == has_prefix:
+            raise LiveEditorError(
+                "live-editor-invalid-parameters",
+                "Provide exactly one candidate source: non-empty animationPaths or pathPrefix.",
+            )
+
+        if has_explicit_paths:
+            assert animation_paths is not None
+            if len(animation_paths) > MAX_AUDIT_ASSETS:
+                raise LiveEditorError(
+                    "live-editor-invalid-parameters",
+                    f"animationPaths must not contain more than {MAX_AUDIT_ASSETS} Object Paths.",
+                )
+            normalized_paths = [
+                LiveEditorBridgeService._bounded_string(path, "animationPaths", 512)
+                for path in animation_paths
+            ]
+            for path in normalized_paths:
+                LiveEditorBridgeService._validate_game_object_path(path)
+            return "explicit-list", "", "", normalized_paths
+
+        if normalized_prefix != "/Game" and not normalized_prefix.startswith("/Game/"):
+            raise LiveEditorError("live-editor-invalid-parameters", "pathPrefix must begin with /Game.")
+        if self.index_service is None:
+            raise LiveEditorError(
+                "animation-scale-audit-index-unavailable",
+                "The fixed immutable SQLite index is unavailable for pathPrefix candidate discovery.",
+            )
+        candidates = self.index_service.list_asset_paths(
+            asset_class="/Script/Engine.AnimSequence",
+            path_prefix=normalized_prefix,
+            limit=MAX_AUDIT_ASSETS,
+        )
+        if candidates.get("truncated") is True:
+            raise LiveEditorError(
+                "animation-scale-audit-too-many-candidates",
+                f"pathPrefix matches more than {MAX_AUDIT_ASSETS} AnimSequence assets; narrow the prefix.",
+            )
+        paths = candidates.get("assetPaths", [])
+        if not isinstance(paths, list) or not paths:
+            raise LiveEditorError("animation-scale-audit-no-candidates", "pathPrefix matched no indexed AnimSequence assets.")
+        normalized_paths = [str(path) for path in paths]
+        return "immutable-index", normalized_prefix, str(candidates.get("snapshotId") or ""), normalized_paths
 
     def get(self, *, task_id: str, detail_offset: int = 0, detail_limit: int = 20) -> dict[str, Any]:
         task = self._require_task(task_id)
@@ -338,6 +395,11 @@ class AnimationScaleAuditService:
             "readOnly": True,
             "startedAtUtc": task.started_at_utc,
             "editorSessionId": task.editor_session_id,
+            "candidateSource": task.candidate_source,
+            "candidateSelection": {
+                "pathPrefix": task.path_prefix,
+                "indexSnapshotId": task.index_snapshot_id,
+            },
             "loadIfNeeded": task.load_if_needed,
             "boneNames": task.bone_names,
             "batchSize": task.batch_size,

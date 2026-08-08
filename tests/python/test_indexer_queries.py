@@ -369,6 +369,29 @@ class IndexerAndQueryTests(unittest.TestCase):
                 stats = get_stats(connection)
                 self.assertEqual(stats["assetClasses"]["/Script/Engine.StaticMesh"], 1)
 
+    def test_index_service_lists_exact_class_paths_by_prefix(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ueak_list_paths_") as temporary_root:
+            root = Path(temporary_root)
+            database_path = root / "index.sqlite3"
+            export_root = root / "export"
+            generic = make_generic_asset()
+            blueprint = make_asset(ASSET_A, profile="asset-index", revision=REVISION_A, rich=False)
+            write_export(export_root, [generic, blueprint])
+
+            with open_database(database_path) as connection:
+                result = build_index(connection, export_root, database_path)
+                self.assertEqual((result.added, result.failed), (2, 0))
+
+            listed = IndexQueryService(database_path).list_asset_paths(
+                asset_class="/Script/Engine.StaticMesh",
+                path_prefix="/Game/Environment",
+                limit=10,
+            )
+
+            self.assertEqual(listed["assetPaths"], [GENERIC_ASSET])
+            self.assertFalse(listed["truncated"])
+            self.assertTrue(str(listed["snapshotId"]).startswith("sha256:"))
+
     def test_data_table_row_reference_impact_is_exact_per_row(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ueak_data_table_row_refs_") as temporary_root:
             root = Path(temporary_root)

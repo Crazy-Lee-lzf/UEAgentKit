@@ -298,6 +298,8 @@ def _capabilities_response(
                 "sourceTool": "ue_diagnose_animation_scale" if live_editor_enabled else "",
                 "readOnlyAssets": True,
                 "explicitLoadIfNeeded": True,
+                "candidateSources": ["explicit-list", "immutable-index-path-prefix"],
+                "indexCandidateClass": "/Script/Engine.AnimSequence",
                 "maxAssets": 1000,
                 "maxBatchSize": 8,
                 "maxPageSize": 50,
@@ -812,6 +814,7 @@ def create_mcp_server(
         register_live_read_tools(
             server=server,
             live_editor_service=live_editor_service,
+            index_service=index_service,
             read_annotations=read_annotations,
             tool_annotations_type=ToolAnnotations,
             error_response=_error_response,

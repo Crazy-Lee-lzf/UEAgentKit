@@ -1365,6 +1365,8 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(audit_contract["sourceTool"], "ue_diagnose_animation_scale")
         self.assertTrue(audit_contract["readOnlyAssets"])
         self.assertTrue(audit_contract["explicitLoadIfNeeded"])
+        self.assertEqual(audit_contract["candidateSources"], ["explicit-list", "immutable-index-path-prefix"])
+        self.assertEqual(audit_contract["indexCandidateClass"], "/Script/Engine.AnimSequence")
         self.assertEqual(audit_contract["maxAssets"], 1000)
         self.assertEqual(audit_contract["maxBatchSize"], 8)
         self.assertEqual(audit_contract["maxPageSize"], 50)

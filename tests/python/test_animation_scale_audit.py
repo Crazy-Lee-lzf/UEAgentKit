@@ -113,6 +113,29 @@ class AnimationScaleAuditTests(unittest.TestCase):
             },
         )
 
+    def test_path_prefix_candidates_are_frozen_from_immutable_index(self) -> None:
+        service, live = _service()
+        index = MagicMock()
+        index.list_asset_paths.return_value = {
+            "snapshotId": "sha256:index-snapshot",
+            "assetPaths": [ANIMATION_A, ANIMATION_B],
+            "truncated": False,
+        }
+        service.index_service = index
+
+        started = service.start(path_prefix="/Game/Animations", batch_size=1)
+
+        self.assertEqual(started["candidateSource"], "immutable-index")
+        self.assertEqual(started["candidateSelection"]["pathPrefix"], "/Game/Animations")
+        self.assertEqual(started["candidateSelection"]["indexSnapshotId"], "sha256:index-snapshot")
+        self.assertEqual(started["progress"]["totalAssets"], 2)
+        index.list_asset_paths.assert_called_once_with(
+            asset_class="/Script/Engine.AnimSequence",
+            path_prefix="/Game/Animations",
+            limit=1000,
+        )
+        live.call_tool.assert_not_called()
+
     def test_audit_advances_one_bounded_batch_per_get(self) -> None:
         service, live = _service()
         started = service.start(

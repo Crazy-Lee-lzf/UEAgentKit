@@ -185,6 +185,41 @@ class IndexQueryService:
             response["stats"] = get_stats(connection)
             return response
 
+    def list_asset_paths(
+        self,
+        *,
+        asset_class: str,
+        path_prefix: str,
+        limit: int = 1000,
+    ) -> dict[str, Any]:
+        """Return a bounded exact-class asset path list from the immutable index snapshot."""
+        asset_class = _clean_text(asset_class, name="asset_class", maximum=512)
+        if not asset_class:
+            raise ValueError("asset_class is required")
+        path_prefix = _asset_path(path_prefix, name="path_prefix", required=True)
+        path_prefix = path_prefix.rstrip("/")
+        directory_prefix = path_prefix + "/"
+        limit = _bounded_limit(limit, maximum=10000, name="limit")
+        with self._open() as connection:
+            rows = connection.execute(
+                """
+                SELECT asset_path
+                FROM assets
+                WHERE asset_class = ? AND substr(asset_path, 1, length(?)) = ?
+                ORDER BY asset_path
+                LIMIT ?
+                """,
+                (asset_class, directory_prefix, directory_prefix, limit + 1),
+            ).fetchall()
+            paths = [str(row["asset_path"]) for row in rows]
+            return {
+                "snapshotId": self._snapshot_id(connection),
+                "assetClass": asset_class,
+                "pathPrefix": path_prefix,
+                "assetPaths": paths[:limit],
+                "truncated": len(paths) > limit,
+            }
+
     def get_revision_records(self) -> list[dict[str, Any]]:
         """Return the immutable per-asset Revision fields needed by freshness checks."""
         with self._open() as connection:

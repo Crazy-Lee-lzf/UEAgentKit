@@ -91,7 +91,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                     session,
                     "ue_start_animation_scale_audit",
                     {
-                        "animationPaths": [args.asset],
+                        "pathPrefix": "/Game/Characters/XinYueHu/Animations/Retargeted",
                         "boneNames": ["Root", "pelvis"],
                         "loadIfNeeded": True,
                         "batchSize": 1,
@@ -101,7 +101,13 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                     raise RuntimeError(f"Animation scale audit start failed: {started}")
                 task = started.get("result", {})
                 task_id = str(task.get("taskId") or "")
-                if not task_id or task.get("state") != "running":
+                candidate_selection = task.get("candidateSelection", {})
+                if (
+                    not task_id
+                    or task.get("state") != "running"
+                    or task.get("candidateSource") != "immutable-index"
+                    or not candidate_selection.get("indexSnapshotId")
+                ):
                     raise RuntimeError(f"Animation scale audit start result is invalid: {started}")
 
                 completed = await call(

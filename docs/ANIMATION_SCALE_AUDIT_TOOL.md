@@ -62,12 +62,17 @@ ue_start_animation_scale_audit
 
 | 参数 | 说明 |
 |---|---|
-| `animationPaths` | 1–1000 个精确 `/Game/...Asset.Asset` AnimSequence Object Path |
+| `animationPaths` | 可选，1–1000 个精确 `/Game/...Asset.Asset` AnimSequence Object Path |
+| `pathPrefix` | 可选，从固定 immutable SQLite Index 中按明确 `/Game/...` 前缀枚举 AnimSequence |
 | `boneNames` | 可选，默认 `Root`、`pelvis`，最多 16 个 |
 | `loadIfNeeded` | 是否允许为诊断显式加载目标动画，默认 `false` |
 | `batchSize` | 每次 Get 最多处理多少个动画，1–8，默认 1 |
 
-Start 只创建 MCP 内存任务，不访问或修改动画内容。
+`animationPaths` 与 `pathPrefix` 必须二选一。使用 `pathPrefix` 时只查询 MCP 启动时固定的只读 SQLite Snapshot，不临时扫描 Content 目录；候选路径和 `indexSnapshotId` 会冻结进任务，然后才按正常 Batch 流程访问 Editor。
+
+如果目录命中超过 1000 个 AnimSequence，Start 会要求缩小前缀，不会静默截断。
+
+Start 只创建 MCP 内存任务，不修改动画内容。
 
 ---
 
@@ -165,6 +170,7 @@ MM_Idle_XinYueHu.MM_Idle_XinYueHu
 
 ```text
 Classification          = normal
+Candidate Source        = immutable-index pathPrefix
 Force Root Lock         = true
 Root Track First Scale  = 1
 Evaluated Root Scale    = 100
@@ -179,11 +185,10 @@ SQLite SHA              = unchanged
 
 ## 8. 当前边界
 
-第一版只接受显式 Object Path 列表，还没有增加“给一个目录自动枚举全部动画”的入口。这样可以先把任务状态、批次、分页、取消和分类契约稳定下来。
+当前已支持显式 Object Path 列表，以及从固定 immutable Index 按明确 `pathPrefix` 枚举候选动画。目录模式不会扫描磁盘，也不会把索引外的新资产偷偷纳入任务。
 
 后续 P1 增量可以增加：
 
-- 从固定 SQLite Index / 明确目录生成候选列表；
 - 更丰富的 Root/Pelvis/Foot 统计；
 - 按分类过滤和排序；
 - Audit Report 持久化导出；

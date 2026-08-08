@@ -68,6 +68,7 @@ def register_retarget_tools(
     read_annotations: Any,
     error_response: Any,
     tool_annotations_type: Any = None,
+    index_service: Any = None,
 ) -> None:
     annotations_type = tool_annotations_type or type(read_annotations)
     planning_annotations = annotations_type(
@@ -76,7 +77,7 @@ def register_retarget_tools(
         idempotentHint=False,
         openWorldHint=False,
     )
-    audit_service = AnimationScaleAuditService(live_editor_service)
+    audit_service = AnimationScaleAuditService(live_editor_service, index_service=index_service)
 
     @server.tool(annotations=read_annotations)
     def ue_analyze_animation_retarget(
@@ -128,7 +129,8 @@ def register_retarget_tools(
 
     @server.tool(annotations=planning_annotations)
     def ue_start_animation_scale_audit(
-        animationPaths: list[str],
+        animationPaths: list[str] | None = None,
+        pathPrefix: str = "",
         boneNames: list[str] | None = None,
         loadIfNeeded: bool = False,
         batchSize: int = 1,
@@ -146,6 +148,7 @@ def register_retarget_tools(
                 "readOnly": False,
                 "result": audit_service.start(
                     animation_paths=animationPaths,
+                    path_prefix=pathPrefix,
                     bone_names=boneNames,
                     load_if_needed=loadIfNeeded,
                     batch_size=batchSize,

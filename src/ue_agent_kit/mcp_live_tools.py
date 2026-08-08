@@ -9,6 +9,7 @@ def register_live_read_tools(
     *,
     server: Any,
     live_editor_service: LiveEditorBridgeService,
+    index_service: Any,
     read_annotations: Any,
     tool_annotations_type: Any,
     error_response: Any,
@@ -149,6 +150,7 @@ def register_live_read_tools(
     register_retarget_tools(
         server=server,
         live_editor_service=live_editor_service,
+        index_service=index_service,
         read_annotations=read_annotations,
         tool_annotations_type=tool_annotations_type,
         error_response=error_response,
