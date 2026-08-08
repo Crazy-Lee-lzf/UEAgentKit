@@ -214,6 +214,12 @@ load-failed
 
 ## 4. P2：批量修复计划与 Change Set
 
+P2 第一条规划纵向切片已实现：`ue_plan_animation_scale_fix_batch` 从固定 WorkRoot 的 Completed Audit Report + 显式 `asset_paths` 生成不可变 Batch Plan，`ue_get_animation_scale_fix_batch` 可重新读取并校验该 Plan。每个候选仍复用现有单资产 `ue_plan_animation_scale_fix`，因此 Policy、Revision、Asset Class 和 Operation 校验没有新增旁路。
+
+当前自动策略只接受 `root-lock-candidate` / `root-track-candidate`；其他被用户选中的分类直接拒绝，不静默跳过。默认 `expectedFinalScale` 从每个 Audit Item 的 Skeleton Root Reference Component Scale 推导，不写死 `100`。Root Track 可显式 override 并自动切换为 Uniform；Root Lock override 必须与 Reference Scale 一致。
+
+本切片仍完全不执行 Live Apply、Save 或 Change Set。若创建第 N 个子 Plan 失败，会清理本次已经创建的未消费子 Plan 和 WorkRoot 目录，不留下半成功 Batch Plan。最大 100 个资产，与现有 Change Set 100 Operation 上限对齐。
+
 不能直接提供“修复全部”按钮。应先从审计结果生成不可变批量计划。
 
 建议工具：

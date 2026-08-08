@@ -1405,7 +1405,7 @@ class AgentWorkflowTests(unittest.TestCase):
 
     def test_live_write_tool_count_and_names_are_unchanged(self) -> None:
         names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
-        self.assertEqual(len(names), 69)
+        self.assertEqual(len(names), 71)
         self.assertIn("ue_set_asset_property", names)
         self.assertIn("ue_set_asset_reference_property", names)
         self.assertIn("ue_apply_asset_property_live", names)
@@ -1882,6 +1882,28 @@ class AgentWorkflowTests(unittest.TestCase):
                 target={"propertyPath": "BoolValue"},
                 value=True,
             )
+
+    def test_discard_unconsumed_plans_removes_record_and_work_directory(self) -> None:
+        planned = self.service.prepare_high_level_change(
+            tool_name="ue_set_asset_property",
+            mode="Plan",
+            asset_path=ASSET_PATH,
+            operation="setAssetProperty",
+            target={"propertyPath": "BoolValue"},
+            value=True,
+        )
+        plan_id = str(planned["planId"])
+        record = self.service._plans[plan_id]
+        plan_directory = record.patch_path.parent
+        self.assertTrue(plan_directory.is_dir())
+
+        self.service.discard_unconsumed_plans([plan_id])
+
+        self.assertNotIn(plan_id, self.service._plans)
+        self.assertFalse(plan_directory.exists())
+
+        self.service.discard_unconsumed_plans([plan_id])
+        self.assertNotIn(plan_id, self.service._plans)
 
     def test_dry_run_rechecks_freshness_after_plan_creation(self) -> None:
         plan = self.service.plan_patch(

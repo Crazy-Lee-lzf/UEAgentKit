@@ -2134,6 +2134,24 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 response["referenceImpact"] = reference_impact
             return response
 
+    def discard_unconsumed_plans(self, plan_ids: list[str]) -> None:
+        """Remove newly created session-local Plans that were never exposed for execution."""
+        with self._lock:
+            records: list[PlanRecord] = []
+            for plan_id in plan_ids:
+                record = self._plans.get(plan_id)
+                if record is None:
+                    continue
+                if record.consumed:
+                    raise WorkflowError(
+                        "plan-cleanup-consumed",
+                        "A child Plan was already consumed and cannot be removed during Batch Plan cleanup.",
+                    )
+                records.append(record)
+            for record in records:
+                self._plans.pop(record.plan_id, None)
+                shutil.rmtree(record.patch_path.parent, ignore_errors=True)
+
     def prepare_high_level_change(
         self,
         *,

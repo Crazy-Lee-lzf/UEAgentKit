@@ -1645,7 +1645,7 @@ class McpServerTests(unittest.TestCase):
             [tool.name for tool in tools],
             tool_names_for_mode(workflow_enabled=True, memory_enabled=True),
         )
-        self.assertEqual(len(tools), 53)
+        self.assertEqual(len(tools), 55)
 
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
         memory_contract = capabilities["projectMemory"]
@@ -1723,7 +1723,7 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         expected_names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 69)
+        self.assertEqual(len(tools), 71)
         for tool in tools:
             definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
             self.assertEqual(bool(tool.annotations.readOnlyHint), definition.read_only, tool.name)
@@ -1788,6 +1788,18 @@ class McpServerTests(unittest.TestCase):
         self.assertTrue(capabilities["operations"]["available"])
         self.assertTrue(capabilities["freshness"]["available"])
         self.assertTrue(capabilities["freshness"]["planRequiresFreshIndex"])
+        batch_contract = capabilities["animationScaleFixBatch"]
+        self.assertTrue(batch_contract["available"])
+        self.assertTrue(batch_contract["planningOnly"])
+        self.assertEqual(batch_contract["planTool"], "ue_plan_animation_scale_fix_batch")
+        self.assertEqual(batch_contract["getTool"], "ue_get_animation_scale_fix_batch")
+        self.assertEqual(batch_contract["maxAssets"], 100)
+        self.assertEqual(batch_contract["maxSessionPlans"], 50)
+        self.assertEqual(batch_contract["supportedClassifications"], ["root-lock-candidate", "root-track-candidate"])
+        self.assertEqual(batch_contract["expectedFinalScaleDefault"], "audit-root-skeleton-reference-component-scale")
+        self.assertTrue(batch_contract["childPlansUseSingleAssetPolicyAndRevisionValidation"])
+        self.assertFalse(batch_contract["liveApplyAvailable"])
+
         self.assertTrue(capabilities["highLevelChanges"]["available"])
         self.assertEqual(capabilities["highLevelChanges"]["defaultMode"], "Plan")
         self.assertFalse(capabilities["highLevelChanges"]["commitSupportedDirectly"])

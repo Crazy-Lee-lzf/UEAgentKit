@@ -4,6 +4,7 @@ import sqlite3
 from typing import Any, Literal
 
 from .agent_workflow import MATERIAL_PARAMETER_OPERATIONS, PatchWorkflowService, WorkflowError
+from .animation_scale_fix_batch import AnimationScaleFixBatchService
 
 
 def register_workflow_tools(
@@ -32,6 +33,8 @@ def register_workflow_tools(
         idempotentHint=False,
         openWorldHint=False,
     )
+
+    animation_scale_fix_batch_service = AnimationScaleFixBatchService(workflow_service)
 
     def _run_high_level_change(
         *,
@@ -184,6 +187,48 @@ def register_workflow_tools(
             )
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_plan_animation_scale_fix", exc, read_only=False)
+
+    @server.tool(annotations=planning_annotations)
+    def ue_plan_animation_scale_fix_batch(
+        audit_task_id: str,
+        audit_report_id: str,
+        asset_paths: list[str],
+        expected_final_scale_overrides: dict[str, float] | None = None,
+        final_scale_tolerance: float | None = None,
+        description: str = "",
+    ) -> dict[str, Any]:
+        """Create an immutable multi-asset scale-fix Plan from one fixed WorkRoot Audit Report without touching Editor memory."""
+        try:
+            response = animation_scale_fix_batch_service.plan(
+                audit_task_id=audit_task_id,
+                audit_report_id=audit_report_id,
+                asset_paths=asset_paths,
+                expected_final_scale_overrides=expected_final_scale_overrides,
+                final_scale_tolerance=final_scale_tolerance,
+                description=description,
+            )
+            return {
+                **response,
+                "tool": "ue_plan_animation_scale_fix_batch",
+                "readOnly": False,
+                "nextStep": "Review this immutable Batch Plan. Live Apply is intentionally not enabled in the P2 planning slice.",
+            }
+        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_plan_animation_scale_fix_batch", exc, read_only=False)
+
+    @server.tool(annotations=read_annotations)
+    def ue_get_animation_scale_fix_batch(batch_plan_id: str) -> dict[str, Any]:
+        """Return one immutable animation scale-fix Batch Plan created in the current MCP session."""
+        try:
+            response = animation_scale_fix_batch_service.get(batch_plan_id=batch_plan_id)
+            return {
+                **response,
+                "tool": "ue_get_animation_scale_fix_batch",
+                "readOnly": True,
+                "nextStep": "Review this immutable Batch Plan. Live Apply is intentionally not enabled in the P2 planning slice.",
+            }
+        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_get_animation_scale_fix_batch", exc, read_only=True)
 
     @server.tool(annotations=destructive_annotations)
     def ue_apply_asset_property_live(plan_id: str, confirmation: str, change_set_id: str = "") -> dict[str, Any]:

@@ -18,6 +18,11 @@ from .agent_api import (
     IndexQueryService,
     IndexSnapshotError,
 )
+from .animation_scale_fix_batch import (
+    MAX_BATCH_SCALE_FIX_ASSETS,
+    MAX_BATCH_SCALE_FIX_PLANS,
+    SUPPORTED_BATCH_CLASSIFICATIONS,
+)
 from .agent_workflow import (
     PatchWorkflowConfig,
     PatchWorkflowService,
@@ -407,6 +412,22 @@ def _capabilities_response(
             "vectorDatabase": False,
             "arbitraryDatabaseArguments": False,
             "arbitraryProjectArguments": False,
+        },
+        "animationScaleFixBatch": {
+            "available": write_tools_enabled,
+            "planningOnly": True,
+            "planTool": "ue_plan_animation_scale_fix_batch" if write_tools_enabled else "",
+            "getTool": "ue_get_animation_scale_fix_batch" if write_tools_enabled else "",
+            "sourceReportTool": "ue_export_animation_scale_audit_report",
+            "maxAssets": MAX_BATCH_SCALE_FIX_ASSETS,
+            "maxSessionPlans": MAX_BATCH_SCALE_FIX_PLANS,
+            "supportedClassifications": sorted(SUPPORTED_BATCH_CLASSIFICATIONS),
+            "expectedFinalScaleDefault": "audit-root-skeleton-reference-component-scale",
+            "explicitFinalScaleOverrides": True,
+            "duplicateAssetsRejected": True,
+            "unsupportedSelectedClassificationRejected": True,
+            "childPlansUseSingleAssetPolicyAndRevisionValidation": True,
+            "liveApplyAvailable": False,
         },
         "highLevelChanges": {
             "available": write_tools_enabled,

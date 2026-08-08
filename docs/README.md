@@ -15,6 +15,7 @@
 - [`ANIMATION_RETARGET_SCALE_DIAGNOSIS_20260806.md`](ANIMATION_RETARGET_SCALE_DIAGNOSIS_20260806.md)：Root Scale、Force Root Lock、Compressed Track、Additive Base Pose 与最终 Editor World Pose 的真实 UE5.6 诊断结果。
 - [`ANIMATION_SCALE_FIX_TOOL.md`](ANIMATION_SCALE_FIX_TOOL.md)：AnimSequence Root Lock / Root Scale Track 的受控 Plan、Live Apply、最终姿势验证、Undo、Save 和 Verify 工作流。
 - [`ANIMATION_SCALE_AUDIT_TOOL.md`](ANIMATION_SCALE_AUDIT_TOOL.md)：显式 AnimSequence 列表的有界批量只读比例审计、分类、分页和取消工作流。
+- [`ANIMATION_SCALE_FIX_BATCH_TOOL.md`](ANIMATION_SCALE_FIX_BATCH_TOOL.md)：从固定 Audit Report 和显式候选生成不可变批量比例修复 Plan，复用单资产 Policy / Revision 校验，不执行 Editor 写入。
 - [`Plans/ANIMATION_TOOLS_FOLLOWUP_PLAN_20260806.md`](Plans/ANIMATION_TOOLS_FOLLOWUP_PLAN_20260806.md)：动画批量审计、批量修复、Additive/Base Pose、浮空、次级运动和 ModelPreview 接入计划。
 - [`BRANCH_WORKTREES.md`](BRANCH_WORKTREES.md)：Realtime I/O 与 Memory/Context 双分支、Worktree、公共协议和合并规范。
 - [`BRANCH_WORKTREES_EN.md`](BRANCH_WORKTREES_EN.md)：English dual-branch and Worktree workflow.
