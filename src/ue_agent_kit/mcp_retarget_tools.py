@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from .animation_scale_audit import AnimationScaleAuditService
 from .editor_bridge import LiveEditorBridgeService, LiveEditorError
 
 RETARGET_INSPECT_CAPABILITY = "retarget.inspect"
@@ -14,6 +15,9 @@ RETARGET_VALIDATE_CAPABILITY = "retarget.validate"
 _CAPABILITY_FOR_TOOL = {
     "ue_analyze_animation_retarget": RETARGET_INSPECT_CAPABILITY,
     "ue_diagnose_animation_scale": RETARGET_INSPECT_CAPABILITY,
+    "ue_start_animation_scale_audit": RETARGET_INSPECT_CAPABILITY,
+    "ue_get_animation_scale_audit": RETARGET_INSPECT_CAPABILITY,
+    "ue_cancel_animation_scale_audit": RETARGET_INSPECT_CAPABILITY,
     "ue_plan_animation_retarget": RETARGET_PLAN_CAPABILITY,
     "ue_apply_animation_retarget_setup": RETARGET_CONFIGURE_CAPABILITY,
     "ue_start_animation_retarget_batch": RETARGET_BATCH_CAPABILITY,
@@ -63,7 +67,17 @@ def register_retarget_tools(
     live_editor_service: LiveEditorBridgeService,
     read_annotations: Any,
     error_response: Any,
+    tool_annotations_type: Any = None,
 ) -> None:
+    annotations_type = tool_annotations_type or type(read_annotations)
+    planning_annotations = annotations_type(
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=False,
+        openWorldHint=False,
+    )
+    audit_service = AnimationScaleAuditService(live_editor_service)
+
     @server.tool(annotations=read_annotations)
     def ue_analyze_animation_retarget(
         sourceMesh: str,
@@ -111,6 +125,78 @@ def register_retarget_tools(
             )
         except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
             return error_response("ue_diagnose_animation_scale", exc, read_only=True)
+
+    @server.tool(annotations=planning_annotations)
+    def ue_start_animation_scale_audit(
+        animationPaths: list[str],
+        boneNames: list[str] | None = None,
+        loadIfNeeded: bool = False,
+        batchSize: int = 1,
+    ) -> dict[str, Any]:
+        """Start a bounded read-only AnimSequence scale audit over explicit Object Paths."""
+        try:
+            _assert_retarget_policy_capability(
+                policy_path=getattr(live_editor_service.config, "policy_path", None),
+                tool_name="ue_start_animation_scale_audit",
+            )
+            return {
+                "schemaVersion": "1.0",
+                "tool": "ue_start_animation_scale_audit",
+                "ok": True,
+                "readOnly": False,
+                "result": audit_service.start(
+                    animation_paths=animationPaths,
+                    bone_names=boneNames,
+                    load_if_needed=loadIfNeeded,
+                    batch_size=batchSize,
+                ),
+            }
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_start_animation_scale_audit", exc, read_only=False)
+
+    @server.tool(annotations=read_annotations)
+    def ue_get_animation_scale_audit(
+        taskId: str,
+        detailOffset: int = 0,
+        detailLimit: int = 20,
+    ) -> dict[str, Any]:
+        """Advance one bounded audit batch and return progress plus paged read-only results."""
+        try:
+            _assert_retarget_policy_capability(
+                policy_path=getattr(live_editor_service.config, "policy_path", None),
+                tool_name="ue_get_animation_scale_audit",
+            )
+            return {
+                "schemaVersion": "1.0",
+                "tool": "ue_get_animation_scale_audit",
+                "ok": True,
+                "readOnly": True,
+                "result": audit_service.get(
+                    task_id=taskId,
+                    detail_offset=detailOffset,
+                    detail_limit=detailLimit,
+                ),
+            }
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_get_animation_scale_audit", exc, read_only=True)
+
+    @server.tool(annotations=planning_annotations)
+    def ue_cancel_animation_scale_audit(taskId: str) -> dict[str, Any]:
+        """Cancel the active in-memory animation scale audit without modifying Unreal assets."""
+        try:
+            _assert_retarget_policy_capability(
+                policy_path=getattr(live_editor_service.config, "policy_path", None),
+                tool_name="ue_cancel_animation_scale_audit",
+            )
+            return {
+                "schemaVersion": "1.0",
+                "tool": "ue_cancel_animation_scale_audit",
+                "ok": True,
+                "readOnly": False,
+                "result": audit_service.cancel(task_id=taskId),
+            }
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_cancel_animation_scale_audit", exc, read_only=False)
 
 
 def register_retarget_workflow_tools(

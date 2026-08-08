@@ -146,6 +146,18 @@ feat: add controlled animation scale repair workflow
 
 ## 3. P1：批量动画诊断
 
+2026-08-08 已完成第一条批量只读纵向闭环：
+
+```text
+ue_start_animation_scale_audit
+ue_get_animation_scale_audit
+ue_cancel_animation_scale_audit
+```
+
+当前版本接受显式 AnimSequence Object Path 列表，单任务最多 1000 个资产，`batchSize` 最大 8；每次 Get 只推进一个 Batch，并提供分类统计、分页 Detail、Cancel 和 Editor Session 失效检测。真实 UE5.6 Smoke 已验证 `MM_Idle_XinYueHu` 分类为 `normal`，Root Track Scale=1、最终 Root Scale=100，磁盘 Package 和 SQLite 均未变化。
+
+P1 剩余工作是从固定 Index / 明确目录生成候选列表、大样本性能门禁和可选 Audit Report 导出；不阻塞当前三件套作为独立只读能力使用。
+
 当前工具一次可以读取多个动画，但还没有形成面向 Agent 的批量分类任务。
 
 新增建议：

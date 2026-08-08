@@ -1357,6 +1357,18 @@ class McpServerTests(unittest.TestCase):
         self.assertTrue(context_contract["stageTimingsReported"])
         self.assertTrue(context_contract["durationMsReported"])
         self.assertTrue(context_contract["suggestedNextActions"])
+        audit_contract = capabilities["liveEditor"]["animationScaleAudit"]
+        self.assertTrue(audit_contract["available"])
+        self.assertEqual(audit_contract["startTool"], "ue_start_animation_scale_audit")
+        self.assertEqual(audit_contract["statusTool"], "ue_get_animation_scale_audit")
+        self.assertEqual(audit_contract["cancelTool"], "ue_cancel_animation_scale_audit")
+        self.assertEqual(audit_contract["sourceTool"], "ue_diagnose_animation_scale")
+        self.assertTrue(audit_contract["readOnlyAssets"])
+        self.assertTrue(audit_contract["explicitLoadIfNeeded"])
+        self.assertEqual(audit_contract["maxAssets"], 1000)
+        self.assertEqual(audit_contract["maxBatchSize"], 8)
+        self.assertEqual(audit_contract["maxPageSize"], 50)
+        self.assertFalse(audit_contract["savesPackages"])
         batch_contract = capabilities["liveEditor"]["batchTasks"]
         self.assertTrue(batch_contract["available"])
         self.assertEqual(batch_contract["startTool"], "ue_start_batch_task")
@@ -1381,7 +1393,7 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(capabilities["limits"]["liveBatchTimeoutSecondsMax"], 300)
         action_contract = capabilities["liveEditor"]["editorActions"]
         self.assertTrue(action_contract["available"])
-        self.assertEqual(action_contract["tools"], expected_names[17:25])
+        self.assertEqual(action_contract["tools"], expected_names[20:28])
         self.assertFalse(action_contract["saveSupported"])
         self.assertFalse(action_contract["pieSupported"])
         self.assertEqual(action_contract["actorIdentity"], "current-editor-world-actor-guid")
@@ -1694,7 +1706,7 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         expected_names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 65)
+        self.assertEqual(len(tools), 68)
         for tool in tools:
             definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
             self.assertEqual(bool(tool.annotations.readOnlyHint), definition.read_only, tool.name)

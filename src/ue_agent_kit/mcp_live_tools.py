@@ -10,6 +10,7 @@ def register_live_read_tools(
     server: Any,
     live_editor_service: LiveEditorBridgeService,
     read_annotations: Any,
+    tool_annotations_type: Any,
     error_response: Any,
 ) -> None:
     @server.tool(annotations=read_annotations)
@@ -149,5 +150,6 @@ def register_live_read_tools(
         server=server,
         live_editor_service=live_editor_service,
         read_annotations=read_annotations,
+        tool_annotations_type=tool_annotations_type,
         error_response=error_response,
     )

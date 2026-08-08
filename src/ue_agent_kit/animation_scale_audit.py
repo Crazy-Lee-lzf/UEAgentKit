@@ -1,0 +1,369 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any
+from uuid import uuid4
+
+from .editor_bridge import LiveEditorBridgeService, LiveEditorError
+
+MAX_AUDIT_ASSETS = 1000
+MAX_AUDIT_BONES = 16
+MAX_AUDIT_BATCH_SIZE = 8
+MAX_AUDIT_PAGE_SIZE = 50
+DEFAULT_AUDIT_BONES = ("Root", "pelvis")
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _scale_x(value: Any) -> float | None:
+    if not isinstance(value, dict):
+        return None
+    x = value.get("x")
+    if isinstance(x, bool) or not isinstance(x, (int, float)):
+        return None
+    return float(x)
+
+
+def _find_track(asset: dict[str, Any], bone_name: str) -> dict[str, Any]:
+    tracks = asset.get("tracks")
+    if not isinstance(tracks, list):
+        return {}
+    for item in tracks:
+        if isinstance(item, dict) and item.get("bone") == bone_name:
+            return item
+    return {}
+
+
+def _sample_bone(sample: dict[str, Any], bone_name: str) -> dict[str, Any]:
+    bones = sample.get("bones")
+    if not isinstance(bones, list):
+        return {}
+    for item in bones:
+        if isinstance(item, dict) and item.get("bone") == bone_name:
+            return item
+    return {}
+
+
+def _representative_preview_scale(asset: dict[str, Any], bone_name: str) -> float | None:
+    samples = asset.get("previewSamples")
+    if not isinstance(samples, list):
+        return None
+    values: list[float] = []
+    for sample in samples:
+        if not isinstance(sample, dict):
+            continue
+        value = _scale_x(_sample_bone(sample, bone_name).get("componentScale"))
+        if value is not None:
+            values.append(value)
+    if not values:
+        return None
+    values.sort()
+    return values[len(values) // 2]
+
+
+def _close_scale(left: float, right: float) -> bool:
+    tolerance = max(0.05, abs(right) * 0.05)
+    return abs(left - right) <= tolerance
+
+
+def _compact_pose_samples(asset: dict[str, Any], root_bone: str, pelvis_bone: str) -> list[dict[str, Any]]:
+    samples = asset.get("previewSamples")
+    if not isinstance(samples, list):
+        return []
+    compact: list[dict[str, Any]] = []
+    for sample in samples:
+        if not isinstance(sample, dict):
+            continue
+        root = _sample_bone(sample, root_bone)
+        pelvis = _sample_bone(sample, pelvis_bone) if pelvis_bone else {}
+        compact.append(
+            {
+                "fraction": sample.get("fraction"),
+                "time": sample.get("time"),
+                "rootScale": root.get("componentScale"),
+                "pelvisScale": pelvis.get("componentScale"),
+                "pelvisLocation": pelvis.get("componentLocation"),
+            }
+        )
+    return compact
+
+
+def classify_animation_scale(asset: dict[str, Any], bone_names: list[str]) -> tuple[str, str]:
+    status = str(asset.get("status") or "")
+    if status == "not-an-animation-sequence":
+        return "unsupported-composite", "Use an AnimSequence asset; composite animation types are not handled by this audit."
+    if status != "success":
+        return "load-failed", "Load the AnimSequence and its Skeleton/preview mesh, then rerun the audit."
+
+    preview_status = str(asset.get("previewEvaluationStatus") or "")
+    additive_type = asset.get("additiveAnimType")
+    if additive_type not in (0, None) or preview_status == "unsupported-additive-requires-base-pose":
+        return "additive-requires-base-pose", "Evaluate this Additive animation together with its Base Pose before planning a scale repair."
+    if preview_status != "success":
+        return "load-failed", "Resolve the preview evaluation context, then rerun the audit."
+
+    root_bone = bone_names[0]
+    root_track = _find_track(asset, root_bone)
+    expected = _scale_x(root_track.get("referenceComponentScale"))
+    actual = _representative_preview_scale(asset, root_bone)
+    raw_track = _scale_x(root_track.get("firstScale"))
+    if expected is None or actual is None or abs(expected) < 1e-6:
+        return "load-failed", "The Root reference or evaluated Component Scale is unavailable; review the requested root bone and preview mesh."
+
+    if _close_scale(actual, expected):
+        return "normal", "No animation scale repair is suggested."
+
+    if asset.get("enableRootMotion") is True:
+        return "root-motion-review", "Review Root Motion and Root Lock settings before changing animation scale keys."
+
+    if (
+        asset.get("forceRootLock") is False
+        and raw_track is not None
+        and _close_scale(raw_track, 1.0)
+        and not _close_scale(expected, 1.0)
+    ):
+        return "root-lock-candidate", "Review Force Root Lock with Root Motion Root Lock set to the reference pose before changing Root Scale keys."
+
+    if raw_track is not None and not _close_scale(raw_track, expected):
+        return "root-track-candidate", "Review setting the Root Scale Track from the target Skeleton reference scale."
+
+    ratio = actual / expected
+    if ratio < 0.5:
+        return "scale-too-small", "Review Root Lock first, then the Root Scale Track if the evaluated Root remains too small."
+    if ratio > 2.0:
+        return "scale-too-large", "Review Root Lock and Root Scale Track; the evaluated Root is substantially larger than the Skeleton reference."
+    return "root-track-candidate", "Review Root Lock and Root Scale Track against the target Skeleton reference scale."
+
+
+def build_audit_item(asset: dict[str, Any], bone_names: list[str]) -> dict[str, Any]:
+    root_bone = bone_names[0]
+    pelvis_bone = bone_names[1] if len(bone_names) > 1 else ""
+    classification, suggested_fix = classify_animation_scale(asset, bone_names)
+    root_track = _find_track(asset, root_bone)
+    return {
+        "assetPath": asset.get("assetPath", ""),
+        "assetType": "AnimSequence" if asset.get("status") == "success" else "unknown",
+        "status": asset.get("status", ""),
+        "classification": classification,
+        "suggestedFix": suggested_fix,
+        "loadedBefore": asset.get("loadedBefore", False),
+        "loadedByBridge": asset.get("loadedByBridge", False),
+        "skeletonPath": asset.get("skeletonPath", ""),
+        "additiveAnimType": asset.get("additiveAnimType"),
+        "additiveBasePoseType": asset.get("additiveBasePoseType"),
+        "additiveRefSequencePath": asset.get("additiveRefSequencePath", ""),
+        "enableRootMotion": asset.get("enableRootMotion"),
+        "forceRootLock": asset.get("forceRootLock"),
+        "useNormalizedRootMotionScale": asset.get("useNormalizedRootMotionScale"),
+        "rootMotionRootLock": asset.get("rootMotionRootLock"),
+        "previewEvaluationStatus": asset.get("previewEvaluationStatus", ""),
+        "previewMeshPath": asset.get("previewMeshPath", ""),
+        "rootBone": root_bone,
+        "pelvisBone": pelvis_bone,
+        "rootTrack": root_track,
+        "poseSamples": _compact_pose_samples(asset, root_bone, pelvis_bone),
+    }
+
+
+@dataclass
+class AnimationScaleAuditTask:
+    task_id: str
+    animation_paths: list[str]
+    bone_names: list[str]
+    load_if_needed: bool
+    batch_size: int
+    editor_session_id: str
+    state: str = "running"
+    cursor: int = 0
+    started_at_utc: str = field(default_factory=_utc_now)
+    completed_at_utc: str = ""
+    items: list[dict[str, Any]] = field(default_factory=list)
+    error_code: str = ""
+    error_message: str = ""
+
+
+class AnimationScaleAuditService:
+    def __init__(self, live_editor_service: LiveEditorBridgeService) -> None:
+        self.live_editor_service = live_editor_service
+        self._task: AnimationScaleAuditTask | None = None
+
+    def start(
+        self,
+        *,
+        animation_paths: list[str],
+        bone_names: list[str] | None = None,
+        load_if_needed: bool = False,
+        batch_size: int = 1,
+    ) -> dict[str, Any]:
+        if self._task is not None and self._task.state == "running":
+            raise LiveEditorError("animation-scale-audit-busy", "Another animation scale audit is already running.")
+        if not isinstance(animation_paths, list) or not 1 <= len(animation_paths) <= MAX_AUDIT_ASSETS:
+            raise LiveEditorError(
+                "live-editor-invalid-parameters",
+                f"animationPaths must contain between 1 and {MAX_AUDIT_ASSETS} Object Paths.",
+            )
+        if bone_names is not None and not isinstance(bone_names, list):
+            raise LiveEditorError(
+                "live-editor-invalid-parameters",
+                "boneNames must be an array of bone names.",
+            )
+        normalized_bones = list(DEFAULT_AUDIT_BONES if bone_names is None else bone_names)
+        if not 1 <= len(normalized_bones) <= MAX_AUDIT_BONES:
+            raise LiveEditorError(
+                "live-editor-invalid-parameters",
+                f"boneNames must contain between 1 and {MAX_AUDIT_BONES} bone names.",
+            )
+        normalized_bones = [LiveEditorBridgeService._bounded_string(name, "boneNames", 128) for name in normalized_bones]
+        if any(not name for name in normalized_bones):
+            raise LiveEditorError("live-editor-invalid-parameters", "boneNames must not contain empty values.")
+        if not isinstance(load_if_needed, bool):
+            raise LiveEditorError("live-editor-invalid-parameters", "loadIfNeeded must be a boolean.")
+        if isinstance(batch_size, bool) or not isinstance(batch_size, int) or not 1 <= batch_size <= MAX_AUDIT_BATCH_SIZE:
+            raise LiveEditorError(
+                "live-editor-invalid-parameters",
+                f"batchSize must be an integer from 1 through {MAX_AUDIT_BATCH_SIZE}.",
+            )
+        normalized_paths = [
+            LiveEditorBridgeService._bounded_string(path, "animationPaths", 512) for path in animation_paths
+        ]
+        for path in normalized_paths:
+            LiveEditorBridgeService._validate_game_object_path(path)
+
+        status = self.live_editor_service.status()
+        if status.get("state") != "available":
+            raise LiveEditorError(
+                str(status.get("reasonCode") or "live-editor-unavailable"),
+                str(status.get("reason") or "The fixed Unreal Editor Bridge is unavailable."),
+            )
+        task = AnimationScaleAuditTask(
+            task_id=str(uuid4()),
+            animation_paths=normalized_paths,
+            bone_names=normalized_bones,
+            load_if_needed=load_if_needed,
+            batch_size=batch_size,
+            editor_session_id=str(status.get("sessionId") or ""),
+        )
+        self._task = task
+        return self._snapshot(task, detail_offset=0, detail_limit=MAX_AUDIT_PAGE_SIZE)
+
+    def get(self, *, task_id: str, detail_offset: int = 0, detail_limit: int = 20) -> dict[str, Any]:
+        task = self._require_task(task_id)
+        self._validate_page(detail_offset, detail_limit)
+        if task.state == "running":
+            self._advance(task)
+        return self._snapshot(task, detail_offset=detail_offset, detail_limit=detail_limit)
+
+    def cancel(self, *, task_id: str) -> dict[str, Any]:
+        task = self._require_task(task_id)
+        if task.state == "running":
+            task.state = "cancelled"
+            task.completed_at_utc = _utc_now()
+        return self._snapshot(task, detail_offset=0, detail_limit=MAX_AUDIT_PAGE_SIZE)
+
+    def _advance(self, task: AnimationScaleAuditTask) -> None:
+        status = self.live_editor_service.status()
+        if status.get("state") != "available" or str(status.get("sessionId") or "") != task.editor_session_id:
+            task.state = "failed"
+            task.completed_at_utc = _utc_now()
+            task.error_code = "animation-scale-audit-session-invalidated"
+            task.error_message = "The Unreal Editor session changed or became unavailable while the audit was running."
+            return
+        end = min(task.cursor + task.batch_size, len(task.animation_paths))
+        chunk = task.animation_paths[task.cursor:end]
+        try:
+            response = self.live_editor_service.call_tool(
+                "ue_diagnose_animation_scale",
+                {
+                    "animationPaths": chunk,
+                    "boneNames": task.bone_names,
+                    "loadIfNeeded": task.load_if_needed,
+                },
+            )
+            result = response.get("result", {})
+            assets = result.get("assets", []) if isinstance(result, dict) else []
+            if not isinstance(assets, list) or len(assets) != len(chunk):
+                raise LiveEditorError(
+                    "animation-scale-audit-invalid-result",
+                    "Animation scale diagnosis returned an unexpected asset result count.",
+                )
+            for asset in assets:
+                if not isinstance(asset, dict):
+                    raise LiveEditorError(
+                        "animation-scale-audit-invalid-result",
+                        "Animation scale diagnosis returned a non-object asset result.",
+                    )
+                task.items.append(build_audit_item(asset, task.bone_names))
+            task.cursor = end
+            if task.cursor >= len(task.animation_paths):
+                task.state = "completed"
+                task.completed_at_utc = _utc_now()
+        except LiveEditorError as exc:
+            task.state = "failed"
+            task.completed_at_utc = _utc_now()
+            task.error_code = exc.code
+            task.error_message = str(exc)
+
+    def _require_task(self, task_id: str) -> AnimationScaleAuditTask:
+        if not isinstance(task_id, str) or self._task is None or self._task.task_id != task_id:
+            raise LiveEditorError("animation-scale-audit-not-found", "The animation scale audit task was not found.")
+        return self._task
+
+    @staticmethod
+    def _validate_page(detail_offset: int, detail_limit: int) -> None:
+        if isinstance(detail_offset, bool) or not isinstance(detail_offset, int) or detail_offset < 0:
+            raise LiveEditorError("live-editor-invalid-parameters", "detailOffset must be a non-negative integer.")
+        if isinstance(detail_limit, bool) or not isinstance(detail_limit, int) or not 1 <= detail_limit <= MAX_AUDIT_PAGE_SIZE:
+            raise LiveEditorError(
+                "live-editor-invalid-parameters",
+                f"detailLimit must be an integer from 1 through {MAX_AUDIT_PAGE_SIZE}.",
+            )
+
+    @staticmethod
+    def _snapshot(task: AnimationScaleAuditTask, *, detail_offset: int, detail_limit: int) -> dict[str, Any]:
+        counts: dict[str, int] = {}
+        for item in task.items:
+            classification = str(item.get("classification") or "unknown")
+            counts[classification] = counts.get(classification, 0) + 1
+        total = len(task.animation_paths)
+        processed = task.cursor
+        completed_percent = 100 if task.state == "completed" else int(processed * 100 / total)
+        end = min(detail_offset + detail_limit, len(task.items))
+        details = task.items[detail_offset:end]
+        snapshot: dict[str, Any] = {
+            "taskId": task.task_id,
+            "state": task.state,
+            "readOnly": True,
+            "startedAtUtc": task.started_at_utc,
+            "editorSessionId": task.editor_session_id,
+            "loadIfNeeded": task.load_if_needed,
+            "boneNames": task.bone_names,
+            "batchSize": task.batch_size,
+            "progress": {
+                "processedAssets": processed,
+                "totalAssets": total,
+                "completedPercent": completed_percent,
+            },
+            "summary": {
+                "classificationCounts": counts,
+                "availableDetailCount": len(task.items),
+            },
+            "details": {
+                "offset": detail_offset,
+                "limit": detail_limit,
+                "returnedCount": len(details),
+                "totalAvailable": len(task.items),
+                "hasMore": end < len(task.items),
+                "items": details,
+            },
+        }
+        if end < len(task.items):
+            snapshot["details"]["nextOffset"] = end
+        if task.completed_at_utc:
+            snapshot["completedAtUtc"] = task.completed_at_utc
+        if task.error_code:
+            snapshot["errorCode"] = task.error_code
+            snapshot["errorMessage"] = task.error_message
+        return snapshot

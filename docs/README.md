@@ -14,6 +14,7 @@
 - [`LIVE_EDITOR_REALTIME_IO_PLAN.md`](LIVE_EDITOR_REALTIME_IO_PLAN.md)：实时资产读取、动画重定向比例诊断、Live Write Readback 与后续 Blueprint 编辑实施计划。
 - [`ANIMATION_RETARGET_SCALE_DIAGNOSIS_20260806.md`](ANIMATION_RETARGET_SCALE_DIAGNOSIS_20260806.md)：Root Scale、Force Root Lock、Compressed Track、Additive Base Pose 与最终 Editor World Pose 的真实 UE5.6 诊断结果。
 - [`ANIMATION_SCALE_FIX_TOOL.md`](ANIMATION_SCALE_FIX_TOOL.md)：AnimSequence Root Lock / Root Scale Track 的受控 Plan、Live Apply、最终姿势验证、Undo、Save 和 Verify 工作流。
+- [`ANIMATION_SCALE_AUDIT_TOOL.md`](ANIMATION_SCALE_AUDIT_TOOL.md)：显式 AnimSequence 列表的有界批量只读比例审计、分类、分页和取消工作流。
 - [`Plans/ANIMATION_TOOLS_FOLLOWUP_PLAN_20260806.md`](Plans/ANIMATION_TOOLS_FOLLOWUP_PLAN_20260806.md)：动画批量审计、批量修复、Additive/Base Pose、浮空、次级运动和 ModelPreview 接入计划。
 - [`BRANCH_WORKTREES.md`](BRANCH_WORKTREES.md)：Realtime I/O 与 Memory/Context 双分支、Worktree、公共协议和合并规范。
 - [`BRANCH_WORKTREES_EN.md`](BRANCH_WORKTREES_EN.md)：English dual-branch and Worktree workflow.
@@ -72,7 +73,7 @@
 - DataTable 多字段、Row 新增/删除/重命名和 Searchable Name 引用影响门禁。
 - Data Asset Object/Class、Soft Object/Class、Struct、Array、Set 和 Map 稳定值模型。
 - Backup Manifest、独立验证和 Revision-aware rollback。
-- Offline 5、Live 27、Workflow 31、Combined 53 Tool；启用 Memory 后为 17、39、43、65；其中 12 个为高层安全写入入口，Memory 另提供 12 个低层与渐进式高层入口。
+- Offline 5、Live 32、Workflow 41、Combined 68 Tool；启用 Memory 后为 17、44、53、80；其中 12 个为高层安全写入入口，Memory 另提供 12 个低层与渐进式高层入口。
 - `main` 的 `ue_apply_asset_property_live` 当前支持 12 个 Data Asset、Material Instance 和 DataTable Operation；统一 Transaction/Evidence、精确 Undo/Discard、授权保存后独立 Verify、可恢复 Journal 和注册式资产域执行器均已完成，但仍不自动保存或开放任意 UObject。
 
 0.5.x、0.6.0 与 0.7.0 已完成并进入维护。下一阶段由 Realtime I/O 与 Memory/Context 两条长期分支继续扩展 0.8.0-dev Context/Analysis 和高价值编辑能力；大型项目性能框架作为共享横向能力建设，离线导出与 Commandlet 继续承担全项目索引、批处理、独立验证、回滚和 CI。

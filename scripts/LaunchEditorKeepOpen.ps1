@@ -1,6 +1,8 @@
 param(
     [string]$EngineRoot = "E:\EPICGAME\UE_5.6",
     [string]$ProjectPath = "E:\WorkSpace\我的项目\我的项目.uproject",
+    [ValidateSet("Normal", "Minimized")]
+    [string]$WindowStyle = "Minimized",
     [ValidateRange(30, 600)]
     [int]$StartupTimeoutSeconds = 300
 )
@@ -64,6 +66,7 @@ $EditorProcess = Start-Process `
         "-NoP4",
         "-stdout",
         "-FullStdOutLogOutput") `
+    -WindowStyle $WindowStyle `
     -PassThru `
     -RedirectStandardOutput $EditorStdout `
     -RedirectStandardError $EditorStderr
@@ -90,4 +93,42 @@ if (!$Ready)
     throw "Timed out waiting for the Live Editor Bridge descriptor."
 }
 
-Write-Host "Live Editor Bridge ready (PID $($EditorProcess.Id), port $($Descriptor.port)). Editor left running."
+if ($WindowStyle -eq "Minimized")
+{
+    Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+
+public static class UeakEditorWindow
+{
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsIconic(IntPtr hWnd);
+}
+"@
+    Start-Sleep -Seconds 2
+    $Minimized = $false
+    for ($Attempt = 0; $Attempt -lt 40; $Attempt++)
+    {
+        $EditorProcess.Refresh()
+        if ($EditorProcess.MainWindowHandle -ne [IntPtr]::Zero)
+        {
+            if (![UeakEditorWindow]::IsIconic($EditorProcess.MainWindowHandle))
+            {
+                [UeakEditorWindow]::ShowWindow($EditorProcess.MainWindowHandle, 6) | Out-Null
+            }
+        }
+        Start-Sleep -Milliseconds 250
+    }
+    $EditorProcess.Refresh()
+    $Minimized = $EditorProcess.MainWindowHandle -ne [IntPtr]::Zero -and
+        [UeakEditorWindow]::IsIconic($EditorProcess.MainWindowHandle)
+    if (!$Minimized)
+    {
+        Write-Warning "The Unreal Editor Bridge is ready, but the Editor window could not be confirmed as minimized."
+    }
+}
+
+Write-Host "Live Editor Bridge ready (PID $($EditorProcess.Id), port $($Descriptor.port)). Editor left running ($WindowStyle)."

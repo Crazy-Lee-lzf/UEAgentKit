@@ -290,6 +290,20 @@ def _capabilities_response(
                 "durationMsReported": True,
                 "suggestedNextActions": True,
             },
+            "animationScaleAudit": {
+                "available": live_editor_enabled,
+                "startTool": "ue_start_animation_scale_audit" if live_editor_enabled else "",
+                "statusTool": "ue_get_animation_scale_audit" if live_editor_enabled else "",
+                "cancelTool": "ue_cancel_animation_scale_audit" if live_editor_enabled else "",
+                "sourceTool": "ue_diagnose_animation_scale" if live_editor_enabled else "",
+                "readOnlyAssets": True,
+                "explicitLoadIfNeeded": True,
+                "maxAssets": 1000,
+                "maxBatchSize": 8,
+                "maxPageSize": 50,
+                "pollAdvancesOneBatch": True,
+                "savesPackages": False,
+            },
             "batchTasks": {
                 "available": live_editor_enabled,
                 "startTool": "ue_start_batch_task" if live_editor_enabled else "",
@@ -428,6 +442,9 @@ def _capabilities_response(
             "liveBlueprintSelectedNodes": 100,
             "liveAssetPathLength": 512,
             "liveBatchConcurrentTasks": 1,
+            "liveAnimationScaleAuditMaxAssets": 1000,
+            "liveAnimationScaleAuditMaxBatchSize": 8,
+            "liveAnimationScaleAuditMaxPageSize": 50,
             "liveBatchMaxActors": 10000,
             "liveBatchMaxComponentsPerActor": 500,
             "liveBatchMaxDetailedActors": 200,
@@ -796,6 +813,7 @@ def create_mcp_server(
             server=server,
             live_editor_service=live_editor_service,
             read_annotations=read_annotations,
+            tool_annotations_type=ToolAnnotations,
             error_response=_error_response,
         )
         register_live_action_tools(
