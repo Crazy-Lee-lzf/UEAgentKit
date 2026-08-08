@@ -1405,7 +1405,7 @@ class AgentWorkflowTests(unittest.TestCase):
 
     def test_live_write_tool_count_and_names_are_unchanged(self) -> None:
         names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
-        self.assertEqual(len(names), 71)
+        self.assertEqual(len(names), 73)
         self.assertIn("ue_set_asset_property", names)
         self.assertIn("ue_set_asset_reference_property", names)
         self.assertIn("ue_apply_asset_property_live", names)
@@ -2711,6 +2711,18 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertEqual(details["affectedAssets"], [])
         self.assertEqual(details["validation"]["state"], "not-run")
         self.assertEqual(details["saveState"]["state"], "unsaved")
+
+    def test_empty_change_set_can_be_discarded_without_live_history(self) -> None:
+        created = self.service.create_change_set(title="Empty Batch Set")
+        change_set_id = str(created["changeSetId"])
+        journal_path = self.service._change_set_journal_path(change_set_id)
+        self.assertIn(change_set_id, self.service._change_sets)
+        self.assertTrue(journal_path.is_file())
+
+        self.assertTrue(self.service.discard_empty_change_set(change_set_id))
+
+        self.assertNotIn(change_set_id, self.service._change_sets)
+        self.assertFalse(journal_path.exists())
 
     def test_change_set_apply_binds_durable_operation(self) -> None:
         bridge = AgentWorkflowTests.ClosedLoopLiveService(dirty=True)

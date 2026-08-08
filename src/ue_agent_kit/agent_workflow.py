@@ -1203,6 +1203,17 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 ),
             }
 
+    def discard_empty_change_set(self, change_set_id: str) -> bool:
+        """Delete an internal Change Set only when no live write was ever bound to it."""
+        with self._lock:
+            record = self._resolve_change_set(change_set_id)
+            self._reconcile_change_set(record, persist=True)
+            if record.operations:
+                return False
+            self._change_sets.pop(change_set_id, None)
+            self._delete_change_set_journal(change_set_id)
+            return True
+
     def _change_set_operation_payload(self, operation: ChangeSetOperationRecord) -> dict[str, Any]:
         live_record = self._live_applies.get(operation.receipt)
         return {

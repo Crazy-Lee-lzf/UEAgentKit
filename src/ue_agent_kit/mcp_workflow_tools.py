@@ -211,7 +211,7 @@ def register_workflow_tools(
                 **response,
                 "tool": "ue_plan_animation_scale_fix_batch",
                 "readOnly": False,
-                "nextStep": "Review this immutable Batch Plan. Live Apply is intentionally not enabled in the P2 planning slice.",
+                "nextStep": "Review the immutable Batch Plan, then call ue_apply_animation_scale_fix_batch_live with exact confirmation when ready.",
             }
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_plan_animation_scale_fix_batch", exc, read_only=False)
@@ -225,10 +225,58 @@ def register_workflow_tools(
                 **response,
                 "tool": "ue_get_animation_scale_fix_batch",
                 "readOnly": True,
-                "nextStep": "Review this immutable Batch Plan. Live Apply is intentionally not enabled in the P2 planning slice.",
+                "nextStep": "Inspect execution state. Start or continue bounded Live Apply, or Undo already applied items when needed.",
             }
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_get_animation_scale_fix_batch", exc, read_only=True)
+
+    @server.tool(annotations=destructive_annotations)
+    def ue_apply_animation_scale_fix_batch_live(
+        batch_plan_id: str,
+        confirmation: str = "",
+        batch_apply_receipt: str = "",
+        max_assets: int = 1,
+    ) -> dict[str, Any]:
+        """Start or continue bounded Live Apply for an immutable animation scale-fix Batch Plan."""
+        try:
+            response = animation_scale_fix_batch_service.apply_live(
+                batch_plan_id=batch_plan_id,
+                confirmation=confirmation,
+                batch_apply_receipt=batch_apply_receipt,
+                max_assets=max_assets,
+            )
+            return {
+                **response,
+                "tool": "ue_apply_animation_scale_fix_batch_live",
+                "readOnly": False,
+                "nextStep": "Use ue_get_animation_scale_fix_batch to inspect state. Continue with batchApplyReceipt or Undo applied items if needed.",
+            }
+        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_apply_animation_scale_fix_batch_live", exc, read_only=False)
+
+    @server.tool(annotations=destructive_annotations)
+    def ue_undo_animation_scale_fix_batch(
+        batch_plan_id: str,
+        confirmation: str = "",
+        batch_undo_receipt: str = "",
+        max_assets: int = 1,
+    ) -> dict[str, Any]:
+        """Start or continue bounded reverse-order Undo for a Live-applied animation scale-fix Batch Plan."""
+        try:
+            response = animation_scale_fix_batch_service.undo_live(
+                batch_plan_id=batch_plan_id,
+                confirmation=confirmation,
+                batch_undo_receipt=batch_undo_receipt,
+                max_assets=max_assets,
+            )
+            return {
+                **response,
+                "tool": "ue_undo_animation_scale_fix_batch",
+                "readOnly": False,
+                "nextStep": "Use ue_get_animation_scale_fix_batch to inspect Undo progress. Continue with batchUndoReceipt until state is undone.",
+            }
+        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_undo_animation_scale_fix_batch", exc, read_only=False)
 
     @server.tool(annotations=destructive_annotations)
     def ue_apply_asset_property_live(plan_id: str, confirmation: str, change_set_id: str = "") -> dict[str, Any]:

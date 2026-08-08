@@ -218,7 +218,9 @@ P2 第一条规划纵向切片已实现：`ue_plan_animation_scale_fix_batch` �
 
 当前自动策略只接受 `root-lock-candidate` / `root-track-candidate`；其他被用户选中的分类直接拒绝，不静默跳过。默认 `expectedFinalScale` 从每个 Audit Item 的 Skeleton Root Reference Component Scale 推导，不写死 `100`。Root Track 可显式 override 并自动切换为 Uniform；Root Lock override 必须与 Reference Scale 一致。
 
-本切片仍完全不执行 Live Apply、Save 或 Change Set。若创建第 N 个子 Plan 失败，会清理本次已经创建的未消费子 Plan 和 WorkRoot 目录，不留下半成功 Batch Plan。最大 100 个资产，与现有 Change Set 100 Operation 上限对齐。
+规划切片若创建第 N 个子 Plan 失败，会清理本次已经创建的未消费子 Plan 和 WorkRoot 目录，不留下半成功 Batch Plan。最大 100 个资产，与现有 Change Set 100 Operation 上限对齐。
+
+P2 第二条 Live 纵向切片也已实现：`ue_apply_animation_scale_fix_batch_live` 通过一次精确 Batch confirmation 创建一个现有 Change Set，然后每次最多处理 8 个子 Plan；`ue_get_animation_scale_fix_batch` 始终只读；`ue_undo_animation_scale_fix_batch` 按相反顺序每次最多 Undo 8 个已 applied 事务。子项失败立即 fail-stop，后续项不静默跳过。真实 UE5.6 Smoke 已验证 Root Track `1→100→1`、Runtime Final Root=100、Package/SQLite SHA 不变、Saved=false。下一步进入 Batch Save / Independent Verify / Index Refresh / Rollback。
 
 不能直接提供“修复全部”按钮。应先从审计结果生成不可变批量计划。
 

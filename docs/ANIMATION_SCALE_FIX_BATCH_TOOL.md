@@ -1,6 +1,6 @@
 # Animation Scale Fix Batch Plan
 
-> 状态：P2 第一条纵向切片已实现；当前只生成不可变 Batch Plan，不执行 Live Apply / Save / Rollback。
+> 状态：P2 Plan + bounded Live Apply / Undo 纵向切片已实现并通过真实 UE5.6 Smoke；Save / Independent Verify / Index Refresh / Rollback 待继续。
 
 ## 1. 目标
 
@@ -11,15 +11,13 @@ P1 已能把多个 AnimSequence 审计为 `normal`、`root-lock-candidate`、`ro
 ```text
 ue_plan_animation_scale_fix_batch
 ue_get_animation_scale_fix_batch
+ue_apply_animation_scale_fix_batch_live
+ue_undo_animation_scale_fix_batch
 ```
 
 当前阶段不会：
 
-- 调用 Live Editor 写入；
-- 修改或 Dirty `.uasset`；
 - 保存 Package；
-- 创建 Change Set；
-- 批量 Undo / Rollback；
 - 刷新 Index。
 
 ## 2. 输入来源
@@ -163,11 +161,49 @@ WorkRoot/animation-scale-fix-batches/<batchPlanId>/plan.json
 
 并返回 `batchPlanDigest=sha256:...`。`ue_get_animation_scale_fix_batch` 会重新读取文件并核对 SHA 和内容；文件被修改后会报告 tamper，而不是继续使用。
 
-## 6. 当前限制
+## 6. Bounded Live Apply / Undo
+
+Batch Live Apply 仍复用现有单资产 `ue_apply_asset_property_live` / `ue_undo_asset_property_live`，不新增 UObject 写入实现。
+
+首次 Apply 必须精确确认：
+
+```text
+LIVE APPLY BATCH <batchPlanId>
+```
+
+服务创建一个现有 Change Set，并按 Batch Plan 顺序调用每个子 Plan。单次调用最多处理 8 个资产；若未完成，会返回 session-local `batchApplyReceipt`，后续调用只能携带该 receipt 继续。`ue_get_animation_scale_fix_batch` 只读 execution snapshot，不会在轮询时推进写入。
+
+每个 changed 资产保留自己的 `liveApplyReceipt`、`transactionId`、`editorSessionId` 和 Runtime Verification。单资产 `setAnimationScaleFix` 已在成功返回前完成 Final Component Pose Verify，Batch 层只汇总 `referenceLocalScale`、`finalEvaluationStatus`、`finalRootScale`，不重新实现比例验证。
+
+若第 N 个资产失败，Batch 立即 fail-stop：前面 changed 的资产保持 `applied`，当前项为 `failed`，后续仍为 `pending`，整体为 `partially_applied`；不会静默跳过。若此前没有任何 changed 写入，临时空 Change Set 会被删除。
+
+Batch Undo 首次必须精确确认：
+
+```text
+UNDO BATCH <batchPlanId>
+```
+
+Undo 只处理实际 `applied` 的资产，并按相反顺序逐项调用单资产 Undo；同样每次最多 8 个，通过 `batchUndoReceipt` 继续。尚未执行的 pending 项会标记为 `not-applied`。Undo 失败停在当前事务，可用同一 receipt 重试。
+
+真实 UE5.6 Smoke：
+
+```text
+Persisted Root Track Scale = 1
+Reference Root Scale       = 100
+Batch Live Apply           = 100
+Runtime Final Root Scale   = 100
+Batch Undo                 = 1
+Package SHA                = unchanged
+SQLite SHA                 = unchanged
+Saved                      = false
+Editor Window              = minimized
+```
+
+## 7. 当前限制
 
 当前单个 Batch Plan 最大资产数为 100，与现有 Change Set 最大 100 个 Live Write Operation 对齐，为后续 P2 Apply 阶段保留一一对应关系；单个 MCP session 最多保留 50 个 Batch Plan，超过后拒绝继续创建，避免无界增长。
 
-当前只完成：
+当前已完成：
 
 ```text
 Completed Audit Report
@@ -175,14 +211,16 @@ Completed Audit Report
 → Derived Fix Strategy
 → Validated Per-asset Child Plans
 → Immutable Batch Plan
+→ Bounded Change Set Live Apply
+→ Runtime Verification Snapshot
+→ Reverse-order Bounded Undo
 ```
 
-下一条 P2 纵向切片再实现：
+下一条 P2 纵向切片进入持久化：
 
 ```text
-ue_apply_animation_scale_fix_batch_live
-ue_get_animation_scale_fix_batch   扩展运行状态
-ue_undo_animation_scale_fix_batch
+Batch Save
+Independent Verify
+Index Refresh
+Rollback
 ```
-
-之后才进入批量 Save / Independent Verify / Index Refresh / Rollback。

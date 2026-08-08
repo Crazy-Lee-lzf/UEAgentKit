@@ -96,6 +96,8 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_plan_animation_scale_fix", "workflow", "planning", high_level_change=True),
     ToolDefinition("ue_plan_animation_scale_fix_batch", "workflow", "planning"),
     ToolDefinition("ue_get_animation_scale_fix_batch", "workflow", "read"),
+    ToolDefinition("ue_apply_animation_scale_fix_batch_live", "workflow", "destructive"),
+    ToolDefinition("ue_undo_animation_scale_fix_batch", "workflow", "destructive"),
     ToolDefinition("ue_apply_asset_property_live", "workflow", "destructive"),
     ToolDefinition("ue_undo_asset_property_live", "workflow", "destructive"),
     ToolDefinition("ue_discard_asset_property_live", "workflow", "destructive"),

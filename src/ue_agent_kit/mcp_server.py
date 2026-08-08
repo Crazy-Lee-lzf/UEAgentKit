@@ -21,6 +21,7 @@ from .agent_api import (
 from .animation_scale_fix_batch import (
     MAX_BATCH_SCALE_FIX_ASSETS,
     MAX_BATCH_SCALE_FIX_PLANS,
+    MAX_BATCH_LIVE_STEP,
     SUPPORTED_BATCH_CLASSIFICATIONS,
 )
 from .agent_workflow import (
@@ -415,19 +416,27 @@ def _capabilities_response(
         },
         "animationScaleFixBatch": {
             "available": write_tools_enabled,
-            "planningOnly": True,
+            "planningOnly": False,
             "planTool": "ue_plan_animation_scale_fix_batch" if write_tools_enabled else "",
             "getTool": "ue_get_animation_scale_fix_batch" if write_tools_enabled else "",
+            "applyTool": "ue_apply_animation_scale_fix_batch_live" if write_tools_enabled else "",
+            "undoTool": "ue_undo_animation_scale_fix_batch" if write_tools_enabled else "",
             "sourceReportTool": "ue_export_animation_scale_audit_report",
             "maxAssets": MAX_BATCH_SCALE_FIX_ASSETS,
             "maxSessionPlans": MAX_BATCH_SCALE_FIX_PLANS,
+            "maxLiveStep": MAX_BATCH_LIVE_STEP,
             "supportedClassifications": sorted(SUPPORTED_BATCH_CLASSIFICATIONS),
             "expectedFinalScaleDefault": "audit-root-skeleton-reference-component-scale",
             "explicitFinalScaleOverrides": True,
             "duplicateAssetsRejected": True,
             "unsupportedSelectedClassificationRejected": True,
             "childPlansUseSingleAssetPolicyAndRevisionValidation": True,
-            "liveApplyAvailable": False,
+            "liveApplyAvailable": bool(write_tools_enabled and live_editor_enabled and commit_enabled),
+            "undoAvailable": bool(write_tools_enabled and live_editor_enabled and commit_enabled),
+            "liveApplyConfirmation": "LIVE APPLY BATCH <batchPlanId>",
+            "undoConfirmation": "UNDO BATCH <batchPlanId>",
+            "getAdvancesWrites": False,
+            "changeSetBound": True,
         },
         "highLevelChanges": {
             "available": write_tools_enabled,

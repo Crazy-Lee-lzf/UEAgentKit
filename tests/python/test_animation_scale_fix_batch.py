@@ -56,18 +56,40 @@ def _write_report(work_root: Path, items: list[dict[str, Any]], *, state: str = 
 
 
 class _FakeWorkflowService:
-    def __init__(self, work_root: Path, *, fail_asset: str = "") -> None:
-        self.config = SimpleNamespace(work_root=work_root)
+    def __init__(
+        self,
+        work_root: Path,
+        *,
+        fail_asset: str = "",
+        fail_apply_asset: str = "",
+        no_op_assets: set[str] | None = None,
+        fail_undo_asset_once: str = "",
+    ) -> None:
+        self.config = SimpleNamespace(work_root=work_root, commit_enabled=True)
+        self.live_editor_service = object()
         self.project_name = "TestProject"
         self.fail_asset = fail_asset
+        self.fail_apply_asset = fail_apply_asset
+        self.no_op_assets = set(no_op_assets or set())
+        self.fail_undo_asset_once = fail_undo_asset_once
+        self.undo_failed_once = False
         self.calls: list[dict[str, Any]] = []
         self.discarded: list[str] = []
+        self.plan_assets: dict[str, str] = {}
+        self.plan_values: dict[str, dict[str, Any]] = {}
+        self.change_sets: list[str] = []
+        self.discarded_change_sets: list[str] = []
+        self.changed_change_sets: set[str] = set()
+        self.apply_calls: list[dict[str, str]] = []
+        self.undo_calls: list[dict[str, str]] = []
 
     def prepare_high_level_change(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append(kwargs)
         if kwargs["asset_path"] == self.fail_asset:
             raise WorkflowError("test-child-plan-failed", "Injected child Plan failure.")
         index = len(self.calls)
+        self.plan_assets[f"plan_{index}"] = str(kwargs["asset_path"])
+        self.plan_values[f"plan_{index}"] = dict(kwargs["value"])
         return {
             "planId": f"plan_{index}",
             "patchDigest": "sha256:" + str(index) * 64,
@@ -79,6 +101,72 @@ class _FakeWorkflowService:
 
     def discard_unconsumed_plans(self, plan_ids: list[str]) -> None:
         self.discarded.extend(plan_ids)
+
+    def create_change_set(self, *, title: str = "", task_id: str = "") -> dict[str, Any]:
+        change_set_id = f"cs_{len(self.change_sets) + 1}"
+        self.change_sets.append(change_set_id)
+        return {"changeSetId": change_set_id, "title": title, "taskId": task_id}
+
+    def discard_empty_change_set(self, change_set_id: str) -> bool:
+        if change_set_id in self.changed_change_sets:
+            return False
+        self.discarded_change_sets.append(change_set_id)
+        return True
+
+    def apply_asset_property_live(self, plan_id: str, confirmation: str, change_set_id: str = "") -> dict[str, Any]:
+        asset_path = self.plan_assets[plan_id]
+        self.apply_calls.append(
+            {
+                "planId": plan_id,
+                "assetPath": asset_path,
+                "confirmation": confirmation,
+                "changeSetId": change_set_id,
+            }
+        )
+        if asset_path == self.fail_apply_asset:
+            raise WorkflowError("test-child-live-apply-failed", "Injected Live Apply failure.")
+        if asset_path in self.no_op_assets:
+            return {
+                "changed": False,
+                "liveApplyReceipt": "",
+                "result": {"transactionId": "", "editorSessionId": "session-1"},
+            }
+        self.changed_change_sets.add(change_set_id)
+        expected_scale = float(self.plan_values[plan_id]["expectedFinalScale"])
+        suffix = str(len(self.apply_calls))
+        return {
+            "changed": True,
+            "liveApplyReceipt": f"live_{suffix}",
+            "result": {
+                "transactionId": f"tx_{suffix}",
+                "editorSessionId": "session-1",
+                "afterValue": {
+                    "referenceLocalScale": {"x": expected_scale, "y": expected_scale, "z": expected_scale},
+                    "finalEvaluationStatus": "success",
+                    "finalRootScale": {"x": expected_scale, "y": expected_scale, "z": expected_scale},
+                },
+            },
+        }
+
+    def undo_asset_property_live(
+        self,
+        asset_path: str,
+        transaction_id: str,
+        editor_session_id: str,
+        change_set_id: str = "",
+    ) -> dict[str, Any]:
+        self.undo_calls.append(
+            {
+                "assetPath": asset_path,
+                "transactionId": transaction_id,
+                "editorSessionId": editor_session_id,
+                "changeSetId": change_set_id,
+            }
+        )
+        if asset_path == self.fail_undo_asset_once and not self.undo_failed_once:
+            self.undo_failed_once = True
+            raise WorkflowError("test-child-live-undo-failed", "Injected Live Undo failure.")
+        return {"ok": True, "reverted": True}
 
 
 class AnimationScaleFixBatchTests(unittest.TestCase):
@@ -294,6 +382,304 @@ class AnimationScaleFixBatchTests(unittest.TestCase):
 
             self.assertEqual(workflow.calls, [])
 
+
+    def test_live_apply_is_receipt_continued_and_get_does_not_advance(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ueak_scale_fix_batch_live_") as temporary_root:
+            work_root = Path(temporary_root) / "Work"
+            report_id = _write_report(
+                work_root,
+                [
+                    _audit_item(ANIMATION_A, "root-lock-candidate", 50.0),
+                    _audit_item(ANIMATION_B, "root-track-candidate", 75.0),
+                ],
+            )
+            workflow = _FakeWorkflowService(work_root)
+            service = AnimationScaleFixBatchService(workflow)
+            plan = service.plan(
+                audit_task_id=AUDIT_TASK_ID,
+                audit_report_id=report_id,
+                asset_paths=[ANIMATION_A, ANIMATION_B],
+            )
+            batch_plan_id = str(plan["batchPlanId"])
+
+            first = service.apply_live(
+                batch_plan_id=batch_plan_id,
+                confirmation=f"LIVE APPLY BATCH {batch_plan_id}",
+                max_assets=1,
+            )
+            execution = first["execution"]
+            receipt = str(execution["batchApplyReceipt"])
+            self.assertEqual(execution["state"], "applying")
+            self.assertEqual(execution["progress"]["processedAssets"], 1)
+            self.assertEqual(execution["progress"]["appliedAssets"], 1)
+            self.assertEqual(execution["items"][0]["runtimeVerification"]["finalRootScale"]["x"], 50.0)
+            self.assertEqual(len(workflow.apply_calls), 1)
+
+            polled = service.get(batch_plan_id=batch_plan_id)
+            self.assertEqual(polled["execution"]["state"], "applying")
+            self.assertEqual(len(workflow.apply_calls), 1)
+
+            second = service.apply_live(
+                batch_plan_id=batch_plan_id,
+                batch_apply_receipt=receipt,
+                max_assets=1,
+            )
+            self.assertEqual(second["execution"]["state"], "applied")
+            self.assertEqual(second["execution"]["progress"]["appliedAssets"], 2)
+            self.assertEqual(len(workflow.change_sets), 1)
+            self.assertEqual(len(workflow.apply_calls), 2)
+            self.assertEqual(
+                [call["confirmation"] for call in workflow.apply_calls],
+                ["LIVE APPLY plan_1", "LIVE APPLY plan_2"],
+            )
+            self.assertEqual(
+                {call["changeSetId"] for call in workflow.apply_calls},
+                {workflow.change_sets[0]},
+            )
+
+    def test_live_apply_requires_exact_confirmation_and_receipt(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ueak_scale_fix_batch_live_confirm_") as temporary_root:
+            work_root = Path(temporary_root) / "Work"
+            report_id = _write_report(work_root, [_audit_item(ANIMATION_A, "root-lock-candidate", 50.0)])
+            workflow = _FakeWorkflowService(work_root)
+            service = AnimationScaleFixBatchService(workflow)
+            plan = service.plan(
+                audit_task_id=AUDIT_TASK_ID,
+                audit_report_id=report_id,
+                asset_paths=[ANIMATION_A],
+            )
+            batch_plan_id = str(plan["batchPlanId"])
+
+            with self.assertRaisesRegex(WorkflowError, "confirmation"):
+                service.apply_live(batch_plan_id=batch_plan_id, confirmation="LIVE APPLY BATCH wrong")
+            self.assertEqual(workflow.change_sets, [])
+            self.assertEqual(workflow.apply_calls, [])
+
+            started = service.apply_live(
+                batch_plan_id=batch_plan_id,
+                confirmation=f"LIVE APPLY BATCH {batch_plan_id}",
+                max_assets=1,
+            )
+            self.assertEqual(started["execution"]["state"], "applied")
+            with self.assertRaisesRegex(WorkflowError, "batch_apply_receipt"):
+                service.apply_live(batch_plan_id=batch_plan_id, batch_apply_receipt="asfba_wrong")
+            self.assertEqual(len(workflow.apply_calls), 1)
+
+    def test_partial_failure_is_fail_stop_and_undo_reverts_applied_items(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ueak_scale_fix_batch_partial_live_") as temporary_root:
+            work_root = Path(temporary_root) / "Work"
+            animation_c = "/Game/Animations/A_Run.A_Run"
+            report_id = _write_report(
+                work_root,
+                [
+                    _audit_item(ANIMATION_A, "root-lock-candidate", 50.0),
+                    _audit_item(ANIMATION_B, "root-track-candidate", 75.0),
+                    _audit_item(animation_c, "root-track-candidate", 90.0),
+                ],
+            )
+            workflow = _FakeWorkflowService(work_root, fail_apply_asset=ANIMATION_B)
+            service = AnimationScaleFixBatchService(workflow)
+            plan = service.plan(
+                audit_task_id=AUDIT_TASK_ID,
+                audit_report_id=report_id,
+                asset_paths=[ANIMATION_A, ANIMATION_B, animation_c],
+            )
+            batch_plan_id = str(plan["batchPlanId"])
+
+            result = service.apply_live(
+                batch_plan_id=batch_plan_id,
+                confirmation=f"LIVE APPLY BATCH {batch_plan_id}",
+                max_assets=8,
+            )
+            execution = result["execution"]
+            self.assertEqual(execution["state"], "partially_applied")
+            self.assertEqual([item["state"] for item in execution["items"]], ["applied", "failed", "pending"])
+            self.assertEqual(execution["failureCode"], "test-child-live-apply-failed")
+            self.assertEqual(len(workflow.apply_calls), 2)
+
+            with self.assertRaisesRegex(WorkflowError, "stopped"):
+                service.apply_live(
+                    batch_plan_id=batch_plan_id,
+                    batch_apply_receipt=str(execution["batchApplyReceipt"]),
+                )
+            self.assertEqual(len(workflow.apply_calls), 2)
+
+            undone = service.undo_live(
+                batch_plan_id=batch_plan_id,
+                confirmation=f"UNDO BATCH {batch_plan_id}",
+                max_assets=8,
+            )
+            self.assertEqual(undone["execution"]["state"], "undone")
+            self.assertEqual(
+                [item["state"] for item in undone["execution"]["items"]],
+                ["undone", "failed", "not-applied"],
+            )
+            self.assertEqual([call["assetPath"] for call in workflow.undo_calls], [ANIMATION_A])
+
+    def test_batch_undo_is_reverse_order_and_receipt_continued(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ueak_scale_fix_batch_undo_") as temporary_root:
+            work_root = Path(temporary_root) / "Work"
+            report_id = _write_report(
+                work_root,
+                [
+                    _audit_item(ANIMATION_A, "root-lock-candidate", 50.0),
+                    _audit_item(ANIMATION_B, "root-track-candidate", 75.0),
+                ],
+            )
+            workflow = _FakeWorkflowService(work_root)
+            service = AnimationScaleFixBatchService(workflow)
+            plan = service.plan(
+                audit_task_id=AUDIT_TASK_ID,
+                audit_report_id=report_id,
+                asset_paths=[ANIMATION_A, ANIMATION_B],
+            )
+            batch_plan_id = str(plan["batchPlanId"])
+            applied = service.apply_live(
+                batch_plan_id=batch_plan_id,
+                confirmation=f"LIVE APPLY BATCH {batch_plan_id}",
+                max_assets=8,
+            )
+            self.assertEqual(applied["execution"]["state"], "applied")
+
+            first = service.undo_live(
+                batch_plan_id=batch_plan_id,
+                confirmation=f"UNDO BATCH {batch_plan_id}",
+                max_assets=1,
+            )
+            undo_receipt = str(first["execution"]["undo"]["batchUndoReceipt"])
+            self.assertEqual(first["execution"]["state"], "undoing")
+            self.assertEqual([call["assetPath"] for call in workflow.undo_calls], [ANIMATION_B])
+
+            second = service.undo_live(
+                batch_plan_id=batch_plan_id,
+                batch_undo_receipt=undo_receipt,
+                max_assets=1,
+            )
+            self.assertEqual(second["execution"]["state"], "undone")
+            self.assertEqual([call["assetPath"] for call in workflow.undo_calls], [ANIMATION_B, ANIMATION_A])
+
+    def test_all_no_op_batch_discards_empty_change_set(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ueak_scale_fix_batch_noop_") as temporary_root:
+            work_root = Path(temporary_root) / "Work"
+            report_id = _write_report(work_root, [_audit_item(ANIMATION_A, "root-lock-candidate", 50.0)])
+            workflow = _FakeWorkflowService(work_root, no_op_assets={ANIMATION_A})
+            service = AnimationScaleFixBatchService(workflow)
+            plan = service.plan(
+                audit_task_id=AUDIT_TASK_ID,
+                audit_report_id=report_id,
+                asset_paths=[ANIMATION_A],
+            )
+            batch_plan_id = str(plan["batchPlanId"])
+            result = service.apply_live(
+                batch_plan_id=batch_plan_id,
+                confirmation=f"LIVE APPLY BATCH {batch_plan_id}",
+            )
+            execution = result["execution"]
+            self.assertEqual(execution["state"], "applied")
+            self.assertEqual(execution["progress"]["noOpAssets"], 1)
+            self.assertTrue(execution["emptyChangeSetDiscarded"])
+            self.assertEqual(execution["changeSetId"], "")
+            self.assertEqual(workflow.discarded_change_sets, [workflow.change_sets[0]])
+
+    def test_first_live_apply_failure_discards_empty_change_set(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ueak_scale_fix_batch_first_fail_") as temporary_root:
+            work_root = Path(temporary_root) / "Work"
+            report_id = _write_report(work_root, [_audit_item(ANIMATION_A, "root-lock-candidate", 50.0)])
+            workflow = _FakeWorkflowService(work_root, fail_apply_asset=ANIMATION_A)
+            service = AnimationScaleFixBatchService(workflow)
+            plan = service.plan(
+                audit_task_id=AUDIT_TASK_ID,
+                audit_report_id=report_id,
+                asset_paths=[ANIMATION_A],
+            )
+            batch_plan_id = str(plan["batchPlanId"])
+
+            result = service.apply_live(
+                batch_plan_id=batch_plan_id,
+                confirmation=f"LIVE APPLY BATCH {batch_plan_id}",
+            )
+
+            execution = result["execution"]
+            self.assertEqual(execution["state"], "failed")
+            self.assertEqual(execution["progress"]["failedAssets"], 1)
+            self.assertTrue(execution["emptyChangeSetDiscarded"])
+            self.assertEqual(execution["changeSetId"], "")
+            self.assertEqual(execution["discardedEmptyChangeSetId"], workflow.change_sets[0])
+            self.assertEqual(workflow.discarded_change_sets, [workflow.change_sets[0]])
+
+    def test_undo_failure_retries_same_transaction_with_same_receipt(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ueak_scale_fix_batch_undo_retry_") as temporary_root:
+            work_root = Path(temporary_root) / "Work"
+            report_id = _write_report(
+                work_root,
+                [
+                    _audit_item(ANIMATION_A, "root-lock-candidate", 50.0),
+                    _audit_item(ANIMATION_B, "root-track-candidate", 75.0),
+                ],
+            )
+            workflow = _FakeWorkflowService(work_root, fail_undo_asset_once=ANIMATION_B)
+            service = AnimationScaleFixBatchService(workflow)
+            plan = service.plan(
+                audit_task_id=AUDIT_TASK_ID,
+                audit_report_id=report_id,
+                asset_paths=[ANIMATION_A, ANIMATION_B],
+            )
+            batch_plan_id = str(plan["batchPlanId"])
+            service.apply_live(
+                batch_plan_id=batch_plan_id,
+                confirmation=f"LIVE APPLY BATCH {batch_plan_id}",
+                max_assets=8,
+            )
+
+            failed = service.undo_live(
+                batch_plan_id=batch_plan_id,
+                confirmation=f"UNDO BATCH {batch_plan_id}",
+                max_assets=1,
+            )
+            undo_receipt = str(failed["execution"]["undo"]["batchUndoReceipt"])
+            self.assertEqual(failed["execution"]["state"], "undo_failed")
+            self.assertEqual(failed["execution"]["undo"]["processedAssets"], 0)
+            self.assertEqual([call["assetPath"] for call in workflow.undo_calls], [ANIMATION_B])
+
+            retried = service.undo_live(
+                batch_plan_id=batch_plan_id,
+                batch_undo_receipt=undo_receipt,
+                max_assets=1,
+            )
+            self.assertEqual(retried["execution"]["state"], "undoing")
+            self.assertEqual(retried["execution"]["undo"]["processedAssets"], 1)
+            self.assertEqual([call["assetPath"] for call in workflow.undo_calls], [ANIMATION_B, ANIMATION_B])
+
+            completed = service.undo_live(
+                batch_plan_id=batch_plan_id,
+                batch_undo_receipt=undo_receipt,
+                max_assets=1,
+            )
+            self.assertEqual(completed["execution"]["state"], "undone")
+            self.assertEqual(
+                [call["assetPath"] for call in workflow.undo_calls],
+                [ANIMATION_B, ANIMATION_B, ANIMATION_A],
+            )
+
+    def test_live_step_is_bounded_to_eight_assets(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ueak_scale_fix_batch_step_") as temporary_root:
+            work_root = Path(temporary_root) / "Work"
+            report_id = _write_report(work_root, [_audit_item(ANIMATION_A, "root-lock-candidate", 50.0)])
+            workflow = _FakeWorkflowService(work_root)
+            service = AnimationScaleFixBatchService(workflow)
+            plan = service.plan(
+                audit_task_id=AUDIT_TASK_ID,
+                audit_report_id=report_id,
+                asset_paths=[ANIMATION_A],
+            )
+
+            with self.assertRaisesRegex(WorkflowError, "1 through 8"):
+                service.apply_live(
+                    batch_plan_id=str(plan["batchPlanId"]),
+                    confirmation=f"LIVE APPLY BATCH {plan['batchPlanId']}",
+                    max_assets=9,
+                )
+            self.assertEqual(workflow.change_sets, [])
 
 if __name__ == "__main__":
     unittest.main()
