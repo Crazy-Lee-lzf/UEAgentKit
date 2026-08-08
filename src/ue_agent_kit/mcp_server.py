@@ -295,8 +295,12 @@ def _capabilities_response(
                 "startTool": "ue_start_animation_scale_audit" if live_editor_enabled else "",
                 "statusTool": "ue_get_animation_scale_audit" if live_editor_enabled else "",
                 "cancelTool": "ue_cancel_animation_scale_audit" if live_editor_enabled else "",
+                "reportTool": "ue_export_animation_scale_audit_report" if live_editor_enabled else "",
                 "sourceTool": "ue_diagnose_animation_scale" if live_editor_enabled else "",
                 "readOnlyAssets": True,
+                "reportFormat": "json",
+                "reportWorkRootBound": True,
+                "reportArbitraryPathArguments": False,
                 "explicitLoadIfNeeded": True,
                 "candidateSources": ["explicit-list", "immutable-index-path-prefix"],
                 "indexCandidateClass": "/Script/Engine.AnimSequence",
@@ -750,6 +754,7 @@ def create_mcp_server(
     workflow_service: PatchWorkflowService | None = None,
     live_editor_service: LiveEditorBridgeService | None = None,
     memory_service: ProjectMemoryService | None = None,
+    audit_report_root: Path | None = None,
 ):
     if FastMCP is None or ToolAnnotations is None:
         raise RuntimeError(
@@ -765,6 +770,23 @@ def create_mcp_server(
         raise ValueError("Provide workflow_config or workflow_service, not both.")
     if workflow_service is None and workflow_config is not None:
         workflow_service = PatchWorkflowService(index_service, workflow_config)
+    if live_editor_service is not None:
+        if audit_report_root is None:
+            audit_report_root = (
+                getattr(workflow_service.config, "work_root", TOOL_ROOT / "Output" / "McpWorkflow")
+                if workflow_service is not None
+                else TOOL_ROOT / "Output" / "McpWorkflow"
+            )
+        audit_report_root = audit_report_root.expanduser().resolve()
+        output_root = (TOOL_ROOT / "Output").resolve()
+        try:
+            audit_report_root.relative_to(output_root)
+        except ValueError as exc:
+            raise ValueError("Animation audit report root must be inside the UE Agent Kit Output directory") from exc
+        if audit_report_root == output_root:
+            raise ValueError("Animation audit report root must be a child of the UE Agent Kit Output directory")
+    else:
+        audit_report_root = None
     if (
         workflow_service is not None
         and live_editor_service is not None
@@ -827,6 +849,7 @@ def create_mcp_server(
             server=server,
             live_editor_service=live_editor_service,
             index_service=index_service,
+            audit_report_root=audit_report_root,
             read_annotations=read_annotations,
             tool_annotations_type=ToolAnnotations,
             error_response=_error_response,
@@ -1045,6 +1068,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             workflow_service=workflow_service,
             live_editor_service=live_editor_service,
             memory_service=memory_service,
+            audit_report_root=args.work_root,
         )
         server.run(transport="stdio")
         return 0

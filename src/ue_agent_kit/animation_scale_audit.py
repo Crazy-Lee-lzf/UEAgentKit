@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -205,9 +208,15 @@ class AnimationScaleAuditTask:
 
 
 class AnimationScaleAuditService:
-    def __init__(self, live_editor_service: LiveEditorBridgeService, index_service: Any | None = None) -> None:
+    def __init__(
+        self,
+        live_editor_service: LiveEditorBridgeService,
+        index_service: Any | None = None,
+        report_root: Path | None = None,
+    ) -> None:
         self.live_editor_service = live_editor_service
         self.index_service = index_service
+        self.report_root = report_root.expanduser().resolve() if report_root is not None else None
         self._task: AnimationScaleAuditTask | None = None
 
     def start(
@@ -351,6 +360,101 @@ class AnimationScaleAuditService:
             task.completed_at_utc = _utc_now()
         return self._snapshot(task, detail_offset=0, detail_limit=MAX_AUDIT_PAGE_SIZE)
 
+    def export_report(
+        self,
+        *,
+        task_id: str,
+        classification_filter: list[str] | None = None,
+        sort_by: str = "asset-path",
+    ) -> dict[str, Any]:
+        task = self._require_task(task_id)
+        if task.state == "running":
+            raise LiveEditorError(
+                "animation-scale-audit-report-running",
+                "Finish or cancel the animation scale audit before exporting its report.",
+            )
+        if self.report_root is None:
+            raise LiveEditorError(
+                "animation-scale-audit-report-unavailable",
+                "The fixed animation scale audit report root is unavailable.",
+            )
+        normalized_filter = self._validate_detail_view(classification_filter, sort_by)
+        items = self._select_detail_items(task, normalized_filter, sort_by)
+        snapshot = self._snapshot(
+            task,
+            detail_offset=0,
+            detail_limit=1,
+            classification_filter=normalized_filter,
+            sort_by=sort_by,
+        )
+        report = {
+            "schemaVersion": "1.0",
+            "reportType": "animation-scale-audit",
+            "task": {
+                "taskId": task.task_id,
+                "state": task.state,
+                "startedAtUtc": task.started_at_utc,
+                "completedAtUtc": task.completed_at_utc,
+                "editorSessionId": task.editor_session_id,
+                "candidateSource": task.candidate_source,
+                "candidateSelection": {
+                    "pathPrefix": task.path_prefix,
+                    "indexSnapshotId": task.index_snapshot_id,
+                },
+                "loadIfNeeded": task.load_if_needed,
+                "boneNames": task.bone_names,
+                "batchSize": task.batch_size,
+                "progress": snapshot["progress"],
+            },
+            "summary": {
+                "classificationCounts": snapshot["summary"]["classificationCounts"],
+                "processedItemCount": snapshot["summary"]["availableDetailCount"],
+                "exportedItemCount": len(items),
+                "classificationFilter": normalized_filter,
+                "sortBy": sort_by,
+            },
+            "items": items,
+        }
+        payload = (json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        report_root = self.report_root
+        report_root.mkdir(parents=True, exist_ok=True)
+        reports_root = report_root / "animation-scale-audits"
+        reports_root.mkdir(parents=True, exist_ok=True)
+        resolved_reports_root = reports_root.resolve()
+        try:
+            resolved_reports_root.relative_to(report_root)
+        except ValueError as exc:
+            raise LiveEditorError(
+                "animation-scale-audit-report-path-invalid",
+                "The fixed animation scale audit report root resolves outside the configured WorkRoot.",
+            ) from exc
+        report_directory = resolved_reports_root / task.task_id
+        report_directory.mkdir(exist_ok=True)
+        resolved_directory = report_directory.resolve()
+        try:
+            relative_directory = resolved_directory.relative_to(report_root)
+        except ValueError as exc:
+            raise LiveEditorError(
+                "animation-scale-audit-report-path-invalid",
+                "The fixed animation scale audit report directory resolves outside the configured WorkRoot.",
+            ) from exc
+        report_path = resolved_directory / "report.json"
+        temporary_path = resolved_directory / "report.json.tmp"
+        temporary_path.write_bytes(payload)
+        temporary_path.replace(report_path)
+        digest = hashlib.sha256(payload).hexdigest()
+        return {
+            "taskId": task.task_id,
+            "state": task.state,
+            "format": "json",
+            "reportId": f"sha256:{digest}",
+            "reportRelativePath": (relative_directory / "report.json").as_posix(),
+            "bytes": len(payload),
+            "itemCount": len(items),
+            "classificationFilter": normalized_filter,
+            "sortBy": sort_by,
+        }
+
     def _advance(self, task: AnimationScaleAuditTask) -> None:
         status = self.live_editor_service.status()
         if status.get("state") != "available" or str(status.get("sessionId") or "") != task.editor_session_id:
@@ -436,6 +540,25 @@ class AnimationScaleAuditService:
         return normalized_filter
 
     @staticmethod
+    def _select_detail_items(
+        task: AnimationScaleAuditTask,
+        classification_filter: list[str] | None,
+        sort_by: str,
+    ) -> list[dict[str, Any]]:
+        items = task.items
+        if classification_filter:
+            allowed = set(classification_filter)
+            items = [item for item in items if item.get("classification") in allowed]
+        if sort_by == "asset-path":
+            return sorted(items, key=lambda item: str(item.get("assetPath") or ""))
+        if sort_by == "classification":
+            return sorted(
+                items,
+                key=lambda item: (str(item.get("classification") or ""), str(item.get("assetPath") or "")),
+            )
+        return list(items)
+
+    @staticmethod
     def _snapshot(
         task: AnimationScaleAuditTask,
         *,
@@ -448,17 +571,7 @@ class AnimationScaleAuditService:
         for item in task.items:
             classification = str(item.get("classification") or "unknown")
             counts[classification] = counts.get(classification, 0) + 1
-        filtered_items = task.items
-        if classification_filter:
-            allowed = set(classification_filter)
-            filtered_items = [item for item in filtered_items if item.get("classification") in allowed]
-        if sort_by == "asset-path":
-            filtered_items = sorted(filtered_items, key=lambda item: str(item.get("assetPath") or ""))
-        elif sort_by == "classification":
-            filtered_items = sorted(
-                filtered_items,
-                key=lambda item: (str(item.get("classification") or ""), str(item.get("assetPath") or "")),
-            )
+        filtered_items = AnimationScaleAuditService._select_detail_items(task, classification_filter, sort_by)
         total = len(task.animation_paths)
         processed = task.cursor
         completed_percent = 100 if task.state == "completed" else int(processed * 100 / total)

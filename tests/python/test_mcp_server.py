@@ -1362,8 +1362,12 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(audit_contract["startTool"], "ue_start_animation_scale_audit")
         self.assertEqual(audit_contract["statusTool"], "ue_get_animation_scale_audit")
         self.assertEqual(audit_contract["cancelTool"], "ue_cancel_animation_scale_audit")
+        self.assertEqual(audit_contract["reportTool"], "ue_export_animation_scale_audit_report")
         self.assertEqual(audit_contract["sourceTool"], "ue_diagnose_animation_scale")
         self.assertTrue(audit_contract["readOnlyAssets"])
+        self.assertEqual(audit_contract["reportFormat"], "json")
+        self.assertTrue(audit_contract["reportWorkRootBound"])
+        self.assertFalse(audit_contract["reportArbitraryPathArguments"])
         self.assertTrue(audit_contract["explicitLoadIfNeeded"])
         self.assertEqual(audit_contract["candidateSources"], ["explicit-list", "immutable-index-path-prefix"])
         self.assertEqual(audit_contract["indexCandidateClass"], "/Script/Engine.AnimSequence")
@@ -1406,7 +1410,7 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(capabilities["limits"]["liveBatchTimeoutSecondsMax"], 300)
         action_contract = capabilities["liveEditor"]["editorActions"]
         self.assertTrue(action_contract["available"])
-        self.assertEqual(action_contract["tools"], expected_names[20:28])
+        self.assertEqual(action_contract["tools"], expected_names[21:29])
         self.assertFalse(action_contract["saveSupported"])
         self.assertFalse(action_contract["pieSupported"])
         self.assertEqual(action_contract["actorIdentity"], "current-editor-world-actor-guid")
@@ -1719,7 +1723,7 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         expected_names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 68)
+        self.assertEqual(len(tools), 69)
         for tool in tools:
             definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
             self.assertEqual(bool(tool.annotations.readOnlyHint), definition.read_only, tool.name)

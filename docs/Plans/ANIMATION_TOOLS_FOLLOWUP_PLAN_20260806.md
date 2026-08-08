@@ -156,7 +156,7 @@ ue_cancel_animation_scale_audit
 
 当前版本接受显式 AnimSequence Object Path 列表，单任务最多 1000 个资产，`batchSize` 最大 8；每次 Get 只推进一个 Batch，并提供分类统计、分页 Detail、Cancel 和 Editor Session 失效检测。真实 UE5.6 Smoke 已验证 `MM_Idle_XinYueHu` 分类为 `normal`，Root Track Scale=1、最终 Root Scale=100，磁盘 Package 和 SQLite 均未变化。
 
-P1 已支持显式 Object Path 列表和固定 immutable Index 的 `pathPrefix` 候选生成，并把 Index Snapshot ID 冻结进任务；Get 已支持按分类过滤和稳定排序；1000 候选 / Batch 8 / Page 50 的有界工作量门禁已完成。剩余工作只有可选 Audit Report 导出。
+P1 已完成：显式 Object Path 列表、固定 immutable Index `pathPrefix` 候选生成、Index Snapshot ID 冻结、按分类过滤与稳定排序、1000 候选 / Batch 8 / Page 50 有界工作量门禁，以及固定 WorkRoot 的确定性 JSON Audit Report 均已通过测试；下一步进入 P2 批量 Plan / Apply / Save / Rollback。
 
 当前工具一次可以读取多个动画，但还没有形成面向 Agent 的批量分类任务。
 

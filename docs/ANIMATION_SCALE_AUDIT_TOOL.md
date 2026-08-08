@@ -2,7 +2,7 @@
 
 > 分支：`feature/live-editor-realtime-io`
 > 适用引擎：UE 5.6
-> 状态：P1 第一条纵向闭环已实现并通过真实 UE5.6 Editor Smoke
+> 状态：P1 已完成，并通过真实 UE5.6 Editor Smoke
 
 ---
 
@@ -10,12 +10,13 @@
 
 P1 在单资产 `ue_diagnose_animation_scale` 之上增加面向 Agent 的批量只读任务。它不创建 Patch、不修改 AnimSequence、不产生 Dirty Package，也不保存资产。
 
-当前三件套：
+当前四件套：
 
 ```text
 ue_start_animation_scale_audit
 ue_get_animation_scale_audit
 ue_cancel_animation_scale_audit
+ue_export_animation_scale_audit_report
 ```
 
 执行模型：
@@ -28,6 +29,7 @@ Explicit AnimSequence Object Paths
 → 分类 + 精简证据
 → 分页返回结果
 → Completed / Cancelled / Failed
+→ Optional deterministic JSON Report under fixed MCP WorkRoot
 ```
 
 当前是 MCP Server 侧的有界任务编排，底层复用已经通过真实 Editor 验证的 `ue_diagnose_animation_scale`。没有增加新的 C++ 写入面。
@@ -175,7 +177,27 @@ Cancel 只改变 MCP 内存任务状态。未处理的动画不会被加载，�
 
 ---
 
-## 7. 真实 UE5.6 Smoke
+## 7. Report Export
+
+```text
+ue_export_animation_scale_audit_report
+```
+
+Report 只能在任务结束后导出；`running` 状态会直接拒绝。Tool 不接受输出路径参数，固定写到 MCP 启动时的 `WorkRoot`：
+
+```text
+WorkRoot/animation-scale-audits/<taskId>/report.json
+```
+
+Report 是 UTF-8 JSON，包含任务来源、Index Snapshot ID、全量分类统计以及筛选/排序后的 Detail。可复用 `classificationFilter` 和 `sortBy`，默认按 `asset-path` 稳定排序。
+
+同一 Task + 同一筛选/排序参数重复导出时 JSON 内容确定，因此 `reportId`（`sha256:...`）保持一致。写文件使用同目录临时文件后原子替换；路径会在创建 Task 子目录前验证仍解析在固定 WorkRoot 内。
+
+Report 写入只影响 UEAgentKit 的工作目录，不修改 Content、`.uasset`、SQLite Index 或 Editor Package 状态。
+
+---
+
+## 8. 真实 UE5.6 Smoke
 
 测试资产：
 
@@ -193,15 +215,17 @@ Force Root Lock         = true
 Root Track First Scale  = 1
 Evaluated Root Scale    = 100
 Cancel                  = passed
+Report Export           = passed
+Report SHA              = matched returned reportId
 Disk Package SHA        = unchanged
 SQLite SHA              = unchanged
 ```
 
-这验证的是完整 MCP `start → get → cancel` 路径，并通过真实 UE5.6 Editor Bridge 调用了最终姿势诊断。
+这验证的是完整 MCP `start → get → export report → cancel` 路径，并通过真实 UE5.6 Editor Bridge 调用了最终姿势诊断；Report 写入固定 WorkRoot，动画 Package 与 SQLite Index 保持不变。
 
 ---
 
-## 8. 大候选集结构性能门禁
+## 9. 大候选集结构性能门禁
 
 当前门禁使用最大允许候选数验证任务不会把规模压力集中到一次 Editor 调用或一次 MCP 响应：
 
@@ -219,15 +243,10 @@ Detail Page Size      <= 50
 
 ---
 
-## 9. 当前边界
+## 10. 当前边界
 
 当前已支持显式 Object Path 列表，以及从固定 immutable Index 按明确 `pathPrefix` 枚举候选动画。目录模式不会扫描磁盘，也不会把索引外的新资产偷偷纳入任务。
 
-后续 P1 增量可以增加：
+P1 的既定范围已经闭合：显式列表、immutable Index `pathPrefix`、有界 Batch、分类、过滤/排序、1000 候选结构性能门禁和固定 WorkRoot Report 均已完成。
 
-- 更丰富的 Root/Pelvis/Foot 统计；
-- 按分类过滤和排序；
-- Audit Report 持久化导出；
-- 大样本性能门禁。
-
-这些仍保持只读，不与 P2 批量修复混在同一个 Tool 中。
+更丰富的 Root/Pelvis/Foot 统计仍可作为后续只读增强，但不阻塞进入 P2。下一阶段开始设计批量 Plan / Apply / Save / Rollback，并继续保持 P1 Audit 与 P2 写入工作流分离。

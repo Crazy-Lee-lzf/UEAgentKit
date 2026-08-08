@@ -76,6 +76,7 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_start_animation_scale_audit", "realtime", "planning"),
     ToolDefinition("ue_get_animation_scale_audit", "realtime", "read"),
     ToolDefinition("ue_cancel_animation_scale_audit", "realtime", "planning"),
+    ToolDefinition("ue_export_animation_scale_audit_report", "realtime", "planning"),
     ToolDefinition("ue_open_asset", "live-action", "planning", "editor.openAsset"),
     ToolDefinition("ue_focus_asset", "live-action", "planning", "editor.focusAsset"),
     ToolDefinition("ue_sync_content_browser", "live-action", "planning", "editor.syncContentBrowser"),

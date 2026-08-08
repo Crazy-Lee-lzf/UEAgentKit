@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -76,13 +78,13 @@ def _diagnosis(
     }
 
 
-def _service() -> tuple[AnimationScaleAuditService, MagicMock]:
+def _service(report_root: Path | None = None) -> tuple[AnimationScaleAuditService, MagicMock]:
     live = MagicMock()
     live.status.return_value = {
         "state": "available",
         "sessionId": "session-1",
     }
-    return AnimationScaleAuditService(live), live
+    return AnimationScaleAuditService(live, report_root=report_root), live
 
 
 class AnimationScaleAuditTests(unittest.TestCase):
@@ -218,6 +220,57 @@ class AnimationScaleAuditTests(unittest.TestCase):
             service.get(task_id=str(started["taskId"]), classification_filter=["unknown"])
 
         live.call_tool.assert_not_called()
+
+    def test_report_export_is_deterministic_and_work_root_bound(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ueak_animation_audit_report_") as temporary_root:
+            report_root = Path(temporary_root) / "Work"
+            service, live = _service(report_root)
+            started = service.start(animation_paths=[ANIMATION_B, ANIMATION_A], batch_size=2)
+            task_id = str(started["taskId"])
+            live.call_tool.return_value = {
+                "ok": True,
+                "result": {
+                    "assets": [
+                        _diagnosis(ANIMATION_B),
+                        _diagnosis(ANIMATION_A, final_scale=100.0),
+                    ]
+                },
+            }
+            service.get(task_id=task_id)
+
+            first = service.export_report(
+                task_id=task_id,
+                classification_filter=["root-lock-candidate"],
+                sort_by="asset-path",
+            )
+            second = service.export_report(
+                task_id=task_id,
+                classification_filter=["root-lock-candidate"],
+                sort_by="asset-path",
+            )
+
+            self.assertEqual(first["reportId"], second["reportId"])
+            self.assertTrue(str(first["reportRelativePath"]).startswith("animation-scale-audits/"))
+            report_path = report_root / str(first["reportRelativePath"])
+            self.assertTrue(report_path.is_file())
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(report["reportType"], "animation-scale-audit")
+            self.assertEqual(report["summary"]["processedItemCount"], 2)
+            self.assertEqual(report["summary"]["exportedItemCount"], 1)
+            self.assertEqual(report["summary"]["classificationFilter"], ["root-lock-candidate"])
+            self.assertEqual(report["items"][0]["assetPath"], ANIMATION_B)
+
+    def test_report_export_rejects_running_task_without_writing(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ueak_animation_audit_report_running_") as temporary_root:
+            report_root = Path(temporary_root) / "Work"
+            service, live = _service(report_root)
+            started = service.start(animation_paths=[ANIMATION_A])
+
+            with self.assertRaisesRegex(Exception, "Finish or cancel"):
+                service.export_report(task_id=str(started["taskId"]))
+
+            self.assertFalse(report_root.exists())
+            live.call_tool.assert_not_called()
 
     def test_max_candidate_audit_stays_bounded_per_poll_and_page(self) -> None:
         service, live = _service()

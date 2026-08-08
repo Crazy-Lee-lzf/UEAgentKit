@@ -83,6 +83,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                     "ue_start_animation_scale_audit",
                     "ue_get_animation_scale_audit",
                     "ue_cancel_animation_scale_audit",
+                    "ue_export_animation_scale_audit_report",
                 }
                 if not required.issubset(names):
                     raise RuntimeError(f"Animation scale audit tools are missing: {sorted(required - names)}")
@@ -140,6 +141,30 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 if not pose_samples or abs(scale_x(pose_samples[0].get("rootScale")) - 100.0) > 1.0:
                     raise RuntimeError(f"Unexpected evaluated Root scale: {pose_samples}")
 
+                exported = await call(
+                    session,
+                    "ue_export_animation_scale_audit_report",
+                    {
+                        "taskId": task_id,
+                        "classificationFilter": ["normal"],
+                        "sortBy": "asset-path",
+                    },
+                )
+                report_result = exported.get("result", {})
+                report_relative_path = str(report_result.get("reportRelativePath") or "")
+                report_path = args.work_root / report_relative_path
+                if (
+                    not exported.get("ok")
+                    or report_result.get("itemCount") != 1
+                    or not report_relative_path.startswith("animation-scale-audits/")
+                    or not report_path.is_file()
+                    or report_result.get("reportId") != f"sha256:{sha256(report_path)}"
+                ):
+                    raise RuntimeError(f"Animation scale audit report export failed: {exported}")
+                report_payload = json.loads(report_path.read_text(encoding="utf-8"))
+                if report_payload.get("items", [{}])[0].get("assetPath") != args.asset:
+                    raise RuntimeError(f"Animation scale audit report has unexpected content: {report_payload}")
+
                 cancel_started = await call(
                     session,
                     "ue_start_animation_scale_audit",
@@ -175,6 +200,8 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         "rootTrackFirstScale": scale_x(root_track.get("firstScale")),
         "evaluatedRootScale": scale_x(pose_samples[0].get("rootScale")),
         "cancelSucceeded": True,
+        "reportId": report_result.get("reportId"),
+        "reportRelativePath": report_relative_path,
         "diskPackageHashUnchanged": True,
         "databaseHashUnchanged": True,
     }

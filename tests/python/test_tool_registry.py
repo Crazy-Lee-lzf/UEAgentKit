@@ -54,6 +54,7 @@ EXPECTED_ALL_TOOLS = [
     "ue_start_animation_scale_audit",
     "ue_get_animation_scale_audit",
     "ue_cancel_animation_scale_audit",
+    "ue_export_animation_scale_audit_report",
     "ue_open_asset",
     "ue_focus_asset",
     "ue_sync_content_browser",
@@ -112,7 +113,7 @@ class ToolRegistryTests(unittest.TestCase):
             EXPECTED_ALL_TOOLS,
         )
         self.assertEqual(len(tool_names_for_mode()), 5)
-        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 32)
+        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 33)
         self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 41)
         self.assertEqual(
             tool_names_for_mode(memory_enabled=True),
@@ -121,7 +122,7 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 17)
         self.assertEqual(
             len(tool_names_for_mode(live_editor_enabled=True, memory_enabled=True)),
-            44,
+            45,
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
@@ -135,7 +136,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-            80,
+            81,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:
@@ -197,8 +198,8 @@ class ToolRegistryTests(unittest.TestCase):
             list(LIVE_EDITOR_METHODS),
             [
                 name
-                for name in EXPECTED_ALL_TOOLS[5:32]
-                if name not in {"ue_start_animation_scale_audit", "ue_get_animation_scale_audit", "ue_cancel_animation_scale_audit"}
+                for name in EXPECTED_ALL_TOOLS[5:33]
+                if name not in {"ue_start_animation_scale_audit", "ue_get_animation_scale_audit", "ue_cancel_animation_scale_audit", "ue_export_animation_scale_audit_report"}
             ],
         )
         self.assertEqual(
@@ -238,9 +239,10 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertEqual(
             [
                 name
-                for name in EXPECTED_ALL_TOOLS[5:32]
+                for name in EXPECTED_ALL_TOOLS[5:33]
                 if name not in {
                     "ue_start_animation_scale_audit", "ue_get_animation_scale_audit", "ue_cancel_animation_scale_audit",
+                    "ue_export_animation_scale_audit_report",
                     "ue_get_editor_context", "ue_start_batch_task", "ue_get_batch_task", "ue_cancel_batch_task",
                 }
             ],

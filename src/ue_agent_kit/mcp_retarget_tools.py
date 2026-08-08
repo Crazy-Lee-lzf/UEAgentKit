@@ -18,6 +18,7 @@ _CAPABILITY_FOR_TOOL = {
     "ue_start_animation_scale_audit": RETARGET_INSPECT_CAPABILITY,
     "ue_get_animation_scale_audit": RETARGET_INSPECT_CAPABILITY,
     "ue_cancel_animation_scale_audit": RETARGET_INSPECT_CAPABILITY,
+    "ue_export_animation_scale_audit_report": RETARGET_INSPECT_CAPABILITY,
     "ue_plan_animation_retarget": RETARGET_PLAN_CAPABILITY,
     "ue_apply_animation_retarget_setup": RETARGET_CONFIGURE_CAPABILITY,
     "ue_start_animation_retarget_batch": RETARGET_BATCH_CAPABILITY,
@@ -69,6 +70,7 @@ def register_retarget_tools(
     error_response: Any,
     tool_annotations_type: Any = None,
     index_service: Any = None,
+    report_root: Any = None,
 ) -> None:
     annotations_type = tool_annotations_type or type(read_annotations)
     planning_annotations = annotations_type(
@@ -77,7 +79,11 @@ def register_retarget_tools(
         idempotentHint=False,
         openWorldHint=False,
     )
-    audit_service = AnimationScaleAuditService(live_editor_service, index_service=index_service)
+    audit_service = AnimationScaleAuditService(
+        live_editor_service,
+        index_service=index_service,
+        report_root=report_root,
+    )
 
     @server.tool(annotations=read_annotations)
     def ue_analyze_animation_retarget(
@@ -204,6 +210,32 @@ def register_retarget_tools(
             }
         except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
             return error_response("ue_cancel_animation_scale_audit", exc, read_only=False)
+
+    @server.tool(annotations=planning_annotations)
+    def ue_export_animation_scale_audit_report(
+        taskId: str,
+        classificationFilter: list[str] | None = None,
+        sortBy: Literal["processed-order", "asset-path", "classification"] = "asset-path",
+    ) -> dict[str, Any]:
+        """Export a finished animation scale audit to the fixed MCP WorkRoot as deterministic JSON."""
+        try:
+            _assert_retarget_policy_capability(
+                policy_path=getattr(live_editor_service.config, "policy_path", None),
+                tool_name="ue_export_animation_scale_audit_report",
+            )
+            return {
+                "schemaVersion": "1.0",
+                "tool": "ue_export_animation_scale_audit_report",
+                "ok": True,
+                "readOnly": False,
+                "result": audit_service.export_report(
+                    task_id=taskId,
+                    classification_filter=classificationFilter,
+                    sort_by=sortBy,
+                ),
+            }
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_export_animation_scale_audit_report", exc, read_only=False)
 
 
 def register_retarget_workflow_tools(
