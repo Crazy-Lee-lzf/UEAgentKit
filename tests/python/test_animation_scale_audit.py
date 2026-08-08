@@ -219,6 +219,48 @@ class AnimationScaleAuditTests(unittest.TestCase):
 
         live.call_tool.assert_not_called()
 
+    def test_max_candidate_audit_stays_bounded_per_poll_and_page(self) -> None:
+        service, live = _service()
+        paths = [f"/Game/Animations/A_{index:04d}.A_{index:04d}" for index in range(1000)]
+        started = service.start(animation_paths=paths, batch_size=8)
+
+        def diagnose(_tool: str, params: dict[str, object]) -> dict[str, object]:
+            chunk = params["animationPaths"]
+            assert isinstance(chunk, list)
+            self.assertLessEqual(len(chunk), 8)
+            return {
+                "ok": True,
+                "result": {
+                    "assets": [
+                        _diagnosis(str(path), final_scale=100.0)
+                        for path in chunk
+                    ]
+                },
+            }
+
+        live.call_tool.side_effect = diagnose
+        task_id = str(started["taskId"])
+        result = started
+        while result["state"] == "running":
+            result = service.get(task_id=task_id, detail_limit=50)
+
+        self.assertEqual(result["state"], "completed")
+        self.assertEqual(result["progress"]["processedAssets"], 1000)
+        self.assertEqual(live.call_tool.call_count, 125)
+        self.assertEqual(result["summary"]["availableDetailCount"], 1000)
+        self.assertLessEqual(result["details"]["returnedCount"], 50)
+
+        last_page = service.get(
+            task_id=task_id,
+            detail_offset=950,
+            detail_limit=50,
+            sort_by="asset-path",
+        )
+        self.assertEqual(last_page["details"]["returnedCount"], 50)
+        self.assertEqual(last_page["details"]["totalAvailable"], 1000)
+        self.assertFalse(last_page["details"]["hasMore"])
+        self.assertNotIn("nextOffset", last_page["details"])
+
     def test_additive_is_never_suggested_for_direct_scale_repair(self) -> None:
         service, live = _service()
         started = service.start(animation_paths=[ANIMATION_A])

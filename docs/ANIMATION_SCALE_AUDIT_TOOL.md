@@ -201,7 +201,25 @@ SQLite SHA              = unchanged
 
 ---
 
-## 8. 当前边界
+## 8. 大候选集结构性能门禁
+
+当前门禁使用最大允许候选数验证任务不会把规模压力集中到一次 Editor 调用或一次 MCP 响应：
+
+```text
+候选 AnimSequence     = 1000
+batchSize             = 8
+Editor 诊断调用次数   = 125
+单次 Editor 资产数量  <= 8
+Detail Page Size      <= 50
+```
+
+门禁同时验证 1000 条结果完成后仍可稳定按 `detailOffset/detailLimit` 分页，并且排序只构造返回视图，不改变原始处理顺序。
+
+这里刻意不使用固定毫秒阈值：CI/开发机性能差异会让墙钟时间阈值不稳定。P1 的核心性能契约是**有界工作量**；真实项目性能继续由批次数、资产加载成本和 Editor 诊断耗时观测。
+
+---
+
+## 9. 当前边界
 
 当前已支持显式 Object Path 列表，以及从固定 immutable Index 按明确 `pathPrefix` 枚举候选动画。目录模式不会扫描磁盘，也不会把索引外的新资产偷偷纳入任务。
 
