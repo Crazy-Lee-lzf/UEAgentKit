@@ -1405,7 +1405,7 @@ class AgentWorkflowTests(unittest.TestCase):
 
     def test_live_write_tool_count_and_names_are_unchanged(self) -> None:
         names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
-        self.assertEqual(len(names), 73)
+        self.assertEqual(len(names), 75)
         self.assertIn("ue_set_asset_property", names)
         self.assertIn("ue_set_asset_reference_property", names)
         self.assertIn("ue_apply_asset_property_live", names)
@@ -2486,6 +2486,140 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertFalse(
             (self.work_root / "live-write-journal" / f"{applied['liveApplyReceipt']}.json").exists()
         )
+
+    def test_authorized_save_promotes_standard_rollback_manifest_and_dry_run_is_zero_write(self) -> None:
+        fresh_bytes = b"rollback-before" * 8
+        saved_bytes = b"rollback-after" * 8
+        fresh_revision = "sha256:" + hashlib.sha256(fresh_bytes).hexdigest()
+        saved_revision = "sha256:" + hashlib.sha256(saved_bytes).hexdigest()
+
+        class RollbackIndex(FakeIndexService):
+            def get_asset(self, asset_path: str, **kwargs: Any) -> dict[str, Any]:
+                result = super().get_asset(asset_path, **kwargs)
+                if asset_path == ASSET_PATH and result.get("found"):
+                    result["asset"]["revision_value"] = fresh_revision
+                return result
+
+            def get_revision_record(self, asset_path: str) -> dict[str, Any] | None:
+                record = super().get_revision_record(asset_path)
+                if asset_path == ASSET_PATH and record is not None:
+                    record = dict(record)
+                    record["revision_value"] = fresh_revision
+                return record
+
+        class RollbackTracker(FakeFreshnessTracker):
+            def inspect_asset(self, asset_path: str) -> dict[str, Any]:
+                result = super().inspect_asset(asset_path)
+                result["diskRevision"] = saved_revision if self.state == "stale" else fresh_revision
+                result["indexRevision"] = fresh_revision
+                return result
+
+        write_json(
+            self.revision_export / "canonical" / "asset.json",
+            {
+                "projectName": PROJECT,
+                "assetPath": ASSET_PATH,
+                "packageName": ASSET_PATH.split(".", 1)[0],
+                "assetClass": ASSET_CLASS,
+                "revision": {"available": True, "packageDirty": False, "value": fresh_revision},
+            },
+        )
+        package_file = (
+            self.project_path.parent
+            / "Content"
+            / "UEAgentKitWriteTests"
+            / "ScalarRegression"
+            / "DA_ScalarPatchTarget.uasset"
+        )
+        package_file.parent.mkdir(parents=True, exist_ok=True)
+        package_file.write_bytes(fresh_bytes)
+        bridge = AgentWorkflowTests.ClosedLoopLiveService(
+            dirty=True,
+            on_save=lambda: package_file.write_bytes(saved_bytes),
+        )
+
+        def catalog_runner(arguments: list[str], cwd: Path, timeout_seconds: int) -> ProcessResult:
+            del cwd, timeout_seconds
+            _, values = FakeWorkflowRunner._arguments(arguments)
+            output = Path(values["-Output"])
+            write_json(
+                output / "manifest.json",
+                {
+                    "projectName": PROJECT,
+                    "assetCount": 1,
+                    "successCount": 1,
+                    "failureCount": 0,
+                    "assets": [
+                        {
+                            "assetPath": ASSET_PATH,
+                            "success": True,
+                            "jsonPath": str(output / "canonical" / "asset.json"),
+                        }
+                    ],
+                },
+            )
+            write_json(
+                output / "canonical" / "asset.json",
+                {
+                    "projectName": PROJECT,
+                    "assetPath": ASSET_PATH,
+                    "packageName": ASSET_PATH.split(".", 1)[0],
+                    "assetClass": ASSET_CLASS,
+                    "revision": {"available": True, "packageDirty": False, "value": saved_revision},
+                    "assetDetails": {
+                        "type": "data-asset",
+                        "properties": [{"name": "BoolValue", "value": True}],
+                    },
+                },
+            )
+            return ProcessResult(0, "", "")
+
+        service = PatchWorkflowService(
+            RollbackIndex(),
+            self.config,
+            process_runner=catalog_runner,
+            freshness_tracker=RollbackTracker(),
+            live_editor_service=bridge,
+        )
+        change_set_id = service.create_change_set(title="Rollback manifest")["changeSetId"]
+        plan = service.plan_patch(
+            asset_path=ASSET_PATH,
+            operation="setAssetProperty",
+            target={"propertyPath": "BoolValue"},
+            value=True,
+        )
+        applied = service.apply_asset_property_live(
+            plan["planId"],
+            f"LIVE APPLY {plan['planId']}",
+            change_set_id=change_set_id,
+        )
+        preview = service.save_authorized_asset(ASSET_PATH, change_set_id=change_set_id)
+        saved = service.save_authorized_asset(
+            ASSET_PATH,
+            mode="Commit",
+            save_receipt=preview["saveReceipt"],
+            confirmation=f"SAVE {preview['saveReceipt']}",
+            change_set_id=change_set_id,
+        )
+        self.assertEqual(saved["beforeRevision"], fresh_revision)
+        self.assertEqual(saved["afterRevision"], saved_revision)
+
+        promoted = service.create_authorized_save_rollback_manifest(
+            preview["saveReceipt"],
+            applied["liveApplyReceipt"],
+        )
+        self.assertTrue(promoted["rollbackAvailable"])
+        self.assertTrue(promoted["rollbackManifestId"])
+        rollback_manifest = self.backup_root / "live-save" / preview["saveReceipt"] / "rollback-manifest.json"
+        self.assertTrue(rollback_manifest.is_file())
+
+        disk_before_dry_run = package_file.read_bytes()
+        dry_run = service.rollback_authorized_live_save(preview["saveReceipt"], mode="DryRun")
+        self.assertFalse(dry_run["wroteDisk"])
+        self.assertEqual(dry_run["beforeRollbackRevision"], saved_revision)
+        self.assertEqual(dry_run["expectedRestoredRevision"], fresh_revision)
+        self.assertTrue(dry_run["rollbackDryRunReceipt"].startswith("live_save_rollback_dry_"))
+        self.assertEqual(package_file.read_bytes(), disk_before_dry_run)
 
     def test_live_write_journal_failure_does_not_hide_successful_editor_write(self) -> None:
         bridge = AgentWorkflowTests.ClosedLoopLiveService(dirty=True)

@@ -20,6 +20,7 @@ from ue_agent_kit.animation_scale_fix_batch import AnimationScaleFixBatchService
 AUDIT_TASK_ID = "26083bd4-d963-4f64-93f3-0a8be296879d"
 ANIMATION_A = "/Game/Animations/A_Idle.A_Idle"
 ANIMATION_B = "/Game/Animations/A_Walk.A_Walk"
+ANIMATION_C = "/Game/Animations/A_Run.A_Run"
 
 
 def _audit_item(asset_path: str, classification: str, reference_scale: float) -> dict[str, Any]:
@@ -82,6 +83,13 @@ class _FakeWorkflowService:
         self.changed_change_sets: set[str] = set()
         self.apply_calls: list[dict[str, str]] = []
         self.undo_calls: list[dict[str, str]] = []
+        self.save_receipt_assets: dict[str, str] = {}
+        self.save_preview_calls: list[str] = []
+        self.save_commit_calls: list[str] = []
+        self.rollback_manifest_calls: list[str] = []
+        self.verify_calls: list[str] = []
+        self.fail_manifest_once_asset = ""
+        self.manifest_failed_once = False
 
     def prepare_high_level_change(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append(kwargs)
@@ -168,6 +176,76 @@ class _FakeWorkflowService:
             raise WorkflowError("test-child-live-undo-failed", "Injected Live Undo failure.")
         return {"ok": True, "reverted": True}
 
+
+    def save_authorized_asset(
+        self,
+        asset_path: str,
+        *,
+        mode: str = "Preview",
+        save_receipt: str = "",
+        confirmation: str = "",
+        change_set_id: str = "",
+    ) -> dict[str, Any]:
+        del change_set_id
+        if mode == "Preview":
+            self.save_preview_calls.append(asset_path)
+            receipt = f"save_{len(self.save_preview_calls)}"
+            self.save_receipt_assets[receipt] = asset_path
+            return {"mode": "Preview", "saveReceipt": receipt, "saved": False}
+        if mode != "Commit":
+            raise AssertionError(f"unexpected save mode: {mode}")
+        if self.save_receipt_assets.get(save_receipt) != asset_path:
+            raise AssertionError("save receipt does not belong to asset")
+        if confirmation != f"SAVE {save_receipt}":
+            raise AssertionError("invalid save confirmation")
+        self.save_commit_calls.append(asset_path)
+        return {
+            "mode": "Commit",
+            "assetPath": asset_path,
+            "saveReceipt": save_receipt,
+            "saved": True,
+            "verified": True,
+            "beforeRevision": "sha256:" + "a" * 64,
+            "afterRevision": "sha256:" + "b" * 64,
+            "revisionChanged": True,
+        }
+
+    def create_authorized_save_rollback_manifest(
+        self,
+        save_receipt: str,
+        live_apply_receipt: str,
+    ) -> dict[str, Any]:
+        del live_apply_receipt
+        asset_path = self.save_receipt_assets[save_receipt]
+        self.rollback_manifest_calls.append(asset_path)
+        if asset_path == self.fail_manifest_once_asset and not self.manifest_failed_once:
+            self.manifest_failed_once = True
+            raise WorkflowError("test-rollback-manifest-failed", "Injected rollback-manifest failure.")
+        return {
+            "rollbackAvailable": True,
+            "rollbackManifestId": f"manifest_{len(self.rollback_manifest_calls)}",
+            "assetPath": asset_path,
+        }
+
+    def verify_live_write(
+        self,
+        asset_path: str,
+        live_apply_receipt: str = "",
+        change_set_id: str = "",
+    ) -> dict[str, Any]:
+        del change_set_id
+        self.verify_calls.append(asset_path)
+        return {
+            "state": "verified",
+            "verified": True,
+            "assetPath": asset_path,
+            "liveApplyReceipt": live_apply_receipt,
+            "actualRevision": "sha256:" + "b" * 64,
+            "reportId": f"verify_{len(self.verify_calls)}",
+            "persistedExpectedValue": {"rootTrackFirstScale": {"x": 100.0, "y": 100.0, "z": 100.0}},
+            "exportedPersistedValue": {"rootTrackFirstScale": {"x": 100.0, "y": 100.0, "z": 100.0}},
+            "runtimeVerification": {"finalEvaluationStatus": "success"},
+        }
 
 class AnimationScaleFixBatchTests(unittest.TestCase):
     def test_batch_plan_derives_each_expected_scale_from_audit_reference(self) -> None:
@@ -680,6 +758,138 @@ class AnimationScaleFixBatchTests(unittest.TestCase):
                     max_assets=9,
                 )
             self.assertEqual(workflow.change_sets, [])
+
+    def test_batch_save_and_verify_are_bounded_to_two_assets(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ueak_scale_fix_batch_persist_") as temporary_root:
+            work_root = Path(temporary_root) / "Work"
+            report_id = _write_report(
+                work_root,
+                [
+                    _audit_item(ANIMATION_A, "root-track-candidate", 50.0),
+                    _audit_item(ANIMATION_B, "root-track-candidate", 75.0),
+                    _audit_item(ANIMATION_C, "root-track-candidate", 125.0),
+                ],
+            )
+            workflow = _FakeWorkflowService(work_root)
+            service = AnimationScaleFixBatchService(workflow)
+            plan = service.plan(
+                audit_task_id=AUDIT_TASK_ID,
+                audit_report_id=report_id,
+                asset_paths=[ANIMATION_A, ANIMATION_B, ANIMATION_C],
+            )
+            batch_plan_id = str(plan["batchPlanId"])
+            applied = service.apply_live(
+                batch_plan_id=batch_plan_id,
+                confirmation=f"LIVE APPLY BATCH {batch_plan_id}",
+                max_assets=8,
+            )
+            self.assertEqual(applied["execution"]["state"], "applied")
+
+            first_save = service.save(
+                batch_plan_id=batch_plan_id,
+                confirmation=f"SAVE BATCH {batch_plan_id}",
+                max_assets=2,
+            )
+            batch_save_receipt = str(first_save["execution"]["save"]["batchSaveReceipt"])
+            self.assertEqual(first_save["execution"]["state"], "saving")
+            self.assertEqual(first_save["execution"]["save"]["processedAssets"], 2)
+            self.assertEqual(workflow.save_commit_calls, [ANIMATION_A, ANIMATION_B])
+
+            second_save = service.save(
+                batch_plan_id=batch_plan_id,
+                batch_save_receipt=batch_save_receipt,
+                max_assets=2,
+            )
+            self.assertEqual(second_save["execution"]["state"], "saved")
+            self.assertEqual(second_save["execution"]["save"]["processedAssets"], 3)
+            self.assertEqual(workflow.save_commit_calls, [ANIMATION_A, ANIMATION_B, ANIMATION_C])
+            self.assertEqual(second_save["execution"]["progress"]["savedAssets"], 3)
+            self.assertTrue(all(item["rollbackAvailable"] for item in second_save["execution"]["items"]))
+
+            with self.assertRaisesRegex(WorkflowError, "persisted Batch Rollback"):
+                service.undo_live(
+                    batch_plan_id=batch_plan_id,
+                    confirmation=f"UNDO BATCH {batch_plan_id}",
+                )
+
+            first_verify = service.verify(batch_plan_id=batch_plan_id, max_assets=2)
+            batch_verify_receipt = str(first_verify["execution"]["verify"]["batchVerifyReceipt"])
+            self.assertEqual(first_verify["execution"]["state"], "verifying")
+            self.assertEqual(first_verify["execution"]["verify"]["processedAssets"], 2)
+            self.assertEqual(workflow.verify_calls, [ANIMATION_A, ANIMATION_B])
+
+            second_verify = service.verify(
+                batch_plan_id=batch_plan_id,
+                batch_verify_receipt=batch_verify_receipt,
+                max_assets=2,
+            )
+            self.assertEqual(second_verify["execution"]["state"], "verified")
+            self.assertEqual(second_verify["execution"]["verify"]["processedAssets"], 3)
+            self.assertEqual(workflow.verify_calls, [ANIMATION_A, ANIMATION_B, ANIMATION_C])
+            self.assertEqual(second_verify["execution"]["progress"]["verifiedAssets"], 3)
+
+    def test_rollback_manifest_retry_does_not_save_asset_twice(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ueak_scale_fix_batch_manifest_retry_") as temporary_root:
+            work_root = Path(temporary_root) / "Work"
+            report_id = _write_report(work_root, [_audit_item(ANIMATION_A, "root-track-candidate", 50.0)])
+            workflow = _FakeWorkflowService(work_root)
+            workflow.fail_manifest_once_asset = ANIMATION_A
+            service = AnimationScaleFixBatchService(workflow)
+            plan = service.plan(
+                audit_task_id=AUDIT_TASK_ID,
+                audit_report_id=report_id,
+                asset_paths=[ANIMATION_A],
+            )
+            batch_plan_id = str(plan["batchPlanId"])
+            service.apply_live(
+                batch_plan_id=batch_plan_id,
+                confirmation=f"LIVE APPLY BATCH {batch_plan_id}",
+            )
+
+            failed = service.save(
+                batch_plan_id=batch_plan_id,
+                confirmation=f"SAVE BATCH {batch_plan_id}",
+            )
+            batch_save_receipt = str(failed["execution"]["save"]["batchSaveReceipt"])
+            self.assertEqual(failed["execution"]["state"], "save_failed")
+            self.assertEqual(failed["execution"]["save"]["processedAssets"], 0)
+            self.assertEqual(failed["execution"]["items"][0]["saveState"], "saved")
+            self.assertFalse(failed["execution"]["items"][0]["rollbackAvailable"])
+            self.assertEqual(workflow.save_commit_calls, [ANIMATION_A])
+
+            retried = service.save(
+                batch_plan_id=batch_plan_id,
+                batch_save_receipt=batch_save_receipt,
+            )
+            self.assertEqual(retried["execution"]["state"], "saved")
+            self.assertEqual(retried["execution"]["save"]["processedAssets"], 1)
+            self.assertTrue(retried["execution"]["items"][0]["rollbackAvailable"])
+            self.assertEqual(workflow.save_commit_calls, [ANIMATION_A])
+            self.assertEqual(workflow.rollback_manifest_calls, [ANIMATION_A, ANIMATION_A])
+
+    def test_save_and_verify_steps_reject_more_than_two_assets(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ueak_scale_fix_batch_persist_step_") as temporary_root:
+            work_root = Path(temporary_root) / "Work"
+            report_id = _write_report(work_root, [_audit_item(ANIMATION_A, "root-track-candidate", 50.0)])
+            workflow = _FakeWorkflowService(work_root)
+            service = AnimationScaleFixBatchService(workflow)
+            plan = service.plan(
+                audit_task_id=AUDIT_TASK_ID,
+                audit_report_id=report_id,
+                asset_paths=[ANIMATION_A],
+            )
+            batch_plan_id = str(plan["batchPlanId"])
+            service.apply_live(
+                batch_plan_id=batch_plan_id,
+                confirmation=f"LIVE APPLY BATCH {batch_plan_id}",
+            )
+            with self.assertRaisesRegex(WorkflowError, "1 through 2"):
+                service.save(
+                    batch_plan_id=batch_plan_id,
+                    confirmation=f"SAVE BATCH {batch_plan_id}",
+                    max_assets=3,
+                )
+            self.assertEqual(workflow.save_commit_calls, [])
 
 if __name__ == "__main__":
     unittest.main()

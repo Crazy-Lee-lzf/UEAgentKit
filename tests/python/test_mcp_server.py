@@ -1645,7 +1645,7 @@ class McpServerTests(unittest.TestCase):
             [tool.name for tool in tools],
             tool_names_for_mode(workflow_enabled=True, memory_enabled=True),
         )
-        self.assertEqual(len(tools), 57)
+        self.assertEqual(len(tools), 59)
 
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
         memory_contract = capabilities["projectMemory"]
@@ -1723,7 +1723,7 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         expected_names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 73)
+        self.assertEqual(len(tools), 75)
         for tool in tools:
             definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
             self.assertEqual(bool(tool.annotations.readOnlyHint), definition.read_only, tool.name)
@@ -1794,15 +1794,23 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(batch_contract["planTool"], "ue_plan_animation_scale_fix_batch")
         self.assertEqual(batch_contract["getTool"], "ue_get_animation_scale_fix_batch")
         self.assertEqual(batch_contract["applyTool"], "ue_apply_animation_scale_fix_batch_live")
+        self.assertEqual(batch_contract["saveTool"], "ue_save_animation_scale_fix_batch")
+        self.assertEqual(batch_contract["verifyTool"], "ue_verify_animation_scale_fix_batch")
         self.assertEqual(batch_contract["undoTool"], "ue_undo_animation_scale_fix_batch")
         self.assertEqual(batch_contract["maxAssets"], 100)
         self.assertEqual(batch_contract["maxSessionPlans"], 50)
         self.assertEqual(batch_contract["maxLiveStep"], 8)
+        self.assertEqual(batch_contract["maxSaveStep"], 2)
+        self.assertEqual(batch_contract["maxVerifyStep"], 2)
         self.assertEqual(batch_contract["supportedClassifications"], ["root-lock-candidate", "root-track-candidate"])
         self.assertEqual(batch_contract["expectedFinalScaleDefault"], "audit-root-skeleton-reference-component-scale")
         self.assertTrue(batch_contract["childPlansUseSingleAssetPolicyAndRevisionValidation"])
         self.assertFalse(batch_contract["liveApplyAvailable"])
+        self.assertFalse(batch_contract["saveAvailable"])
+        self.assertFalse(batch_contract["verifyAvailable"])
         self.assertFalse(batch_contract["undoAvailable"])
+        self.assertFalse(batch_contract["persistedRollbackAvailable"])
+        self.assertFalse(batch_contract["indexRefreshAvailable"])
         self.assertFalse(batch_contract["getAdvancesWrites"])
         self.assertTrue(batch_contract["changeSetBound"])
 

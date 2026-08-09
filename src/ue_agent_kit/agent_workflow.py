@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable, Literal
 
 from .agent_api import IndexQueryService
+from .backups import create_backup_manifest, rollback_backup
 from .change_sets import (
     ChangeSetOperationRecord,
     ChangeSetError,
@@ -472,6 +473,15 @@ class SaveAuthorizationRecord:
     consumed: bool = False
 
 
+@dataclass
+class AuthorizedSaveRollbackDryRunRecord:
+    receipt: str
+    save_receipt: str
+    report_path: Path
+    report: dict[str, Any]
+    consumed: bool = False
+
+
 def _default_process_runner(arguments: list[str], cwd: Path, timeout_seconds: int) -> ProcessResult:
     completed = subprocess.run(
         arguments,
@@ -702,6 +712,7 @@ class PatchWorkflowService(RetargetWorkflowMixin):
         self._applies: dict[str, ApplyRecord] = {}
         self._rollback_dry_runs: dict[str, RollbackDryRunRecord] = {}
         self._save_authorizations: dict[str, SaveAuthorizationRecord] = {}
+        self._authorized_save_rollback_dry_runs: dict[str, AuthorizedSaveRollbackDryRunRecord] = {}
         self._live_applies: dict[str, LiveApplyRecord] = {}
         self._live_apply_by_asset: dict[str, str] = {}
         self._live_write_journal_errors: list[str] = []
@@ -1393,7 +1404,14 @@ class PatchWorkflowService(RetargetWorkflowMixin):
         return self._persist_change_set(record)
 
     def _prune_records(self) -> None:
-        for mapping in (self._plans, self._dry_runs, self._applies, self._rollback_dry_runs, self._save_authorizations):
+        for mapping in (
+            self._plans,
+            self._dry_runs,
+            self._applies,
+            self._rollback_dry_runs,
+            self._save_authorizations,
+            self._authorized_save_rollback_dry_runs,
+        ):
             while len(mapping) > MAX_WORKFLOW_RECORDS:
                 mapping.pop(next(iter(mapping)))
         while len(self._live_applies) > MAX_WORKFLOW_RECORDS:
@@ -3027,6 +3045,303 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 response["changeSetUpdated"] = change_set_updated
                 response["changeSetOperationStatus"] = "saved" if live_receipt else "unknown"
             return response
+
+    def create_authorized_save_rollback_manifest(
+        self,
+        save_receipt: str,
+        live_apply_receipt: str,
+    ) -> dict[str, Any]:
+        """Promote an authorized live-save backup to the standard rollback manifest format."""
+        with self._lock:
+            self._assert_session_current()
+            self._assert_policy_unchanged()
+            if not isinstance(save_receipt, str) or not save_receipt.startswith("save_"):
+                raise WorkflowError("save-receipt-invalid", "saveReceipt is not a valid authorized-save receipt.")
+            live_apply_receipt = self._validate_live_apply_receipt(live_apply_receipt)
+            live_record = self._live_applies.get(live_apply_receipt)
+            if live_record is None:
+                raise WorkflowError(
+                    "live-write-verify-not-found",
+                    "The authorized save no longer has its pending live write record.",
+                )
+            if not live_record.saved or live_record.save_receipt != save_receipt:
+                raise WorkflowError(
+                    "authorized-save-rollback-not-ready",
+                    "The live write was not saved by the requested authorized-save receipt.",
+                )
+            plan_record = self._plans.get(live_record.plan_id)
+            if plan_record is None:
+                raise WorkflowError(
+                    "authorized-save-plan-not-found",
+                    "The child Plan required to authorize rollback is no longer active in this MCP session.",
+                )
+            stored_patch = _read_json(plan_record.patch_path)
+            if _sha256_bytes(_json_bytes(stored_patch)) != plan_record.digest or stored_patch != plan_record.patch:
+                raise WorkflowError(
+                    "plan-tampered",
+                    "The child Plan changed before the authorized-save rollback manifest was created.",
+                )
+
+            backup_directory = (self.config.backup_root / "live-save" / save_receipt).resolve()
+            if not _is_within(backup_directory, self.config.backup_root):
+                raise WorkflowError("workflow-path-invalid", "The authorized-save backup escaped the fixed backup root.")
+            legacy_manifest_path = backup_directory / "manifest.json"
+            legacy_manifest = _read_json(legacy_manifest_path, stage="authorized-save-backup")
+            if (
+                legacy_manifest.get("assetPath") != live_record.asset_path
+                or legacy_manifest.get("projectName") != self.project_name
+            ):
+                raise WorkflowError(
+                    "authorized-save-backup-invalid",
+                    "The authorized-save backup identity does not match the pending live write.",
+                )
+            before_revision = str(legacy_manifest.get("beforeRevision", ""))
+            backup_file_name = str(legacy_manifest.get("backupFileName", ""))
+            asset_class = str(legacy_manifest.get("assetClass", ""))
+            package_name = str(legacy_manifest.get("packageName", ""))
+            backup_file = (backup_directory / backup_file_name).resolve()
+            if not backup_file.is_file() or not _is_within(backup_file, backup_directory):
+                raise WorkflowError("authorized-save-backup-invalid", "The authorized-save backup file is missing or invalid.")
+            package_file = self._package_file(self.config.project_path, package_name, asset_class)
+            after_revision = "sha256:" + sha256_file(package_file)
+            if before_revision == after_revision:
+                raise WorkflowError(
+                    "authorized-save-revision-unchanged",
+                    "A rollback manifest requires a real disk Revision transition.",
+                )
+
+            rollback_manifest_path = backup_directory / "rollback-manifest.json"
+            if rollback_manifest_path.is_file():
+                validation = rollback_backup(
+                    rollback_manifest_path,
+                    self.config.policy_path,
+                    self.config.project_path,
+                    self.config.backup_root,
+                    commit=False,
+                )
+                if validation.get("valid") is not True:
+                    raise WorkflowError(
+                        "authorized-save-rollback-manifest-invalid",
+                        "The existing authorized-save rollback manifest no longer validates.",
+                        details={"errors": validation.get("errors", [])},
+                    )
+                return {
+                    "schemaVersion": WORKFLOW_SCHEMA_VERSION,
+                    "ok": True,
+                    "saveReceipt": save_receipt,
+                    "liveApplyReceipt": live_apply_receipt,
+                    "assetPath": live_record.asset_path,
+                    "beforeRevision": validation.get("expectedBackupRevision", before_revision),
+                    "afterRevision": validation.get("expectedCurrentRevision", after_revision),
+                    "rollbackManifestId": validation.get("manifestId", ""),
+                    "rollbackAvailable": True,
+                    "created": False,
+                }
+
+            commit_report_path = backup_directory / "commit-report.json"
+            _write_json_atomic(
+                commit_report_path,
+                {
+                    "schemaVersion": WORKFLOW_SCHEMA_VERSION,
+                    "mode": "Commit",
+                    "saved": True,
+                    "patchId": plan_record.patch.get("patchId", ""),
+                    "projectName": self.project_name,
+                    "assetPath": live_record.asset_path,
+                    "assetClass": asset_class,
+                    "operation": live_record.operation,
+                    "target": live_record.target,
+                    "beforeValue": live_record.before_value,
+                    "afterValue": live_record.after_value,
+                    "beforeRevision": before_revision,
+                    "afterRevision": after_revision,
+                    "backupPath": str(backup_file),
+                    "executorVersion": DEVELOPMENT_LINE,
+                },
+            )
+            try:
+                created = create_backup_manifest(
+                    plan_record.patch_path,
+                    self.config.policy_path,
+                    commit_report_path,
+                    self.config.backup_root,
+                    output_path=rollback_manifest_path,
+                )
+            except (FileNotFoundError, OSError, ValueError) as exc:
+                raise WorkflowError(
+                    "authorized-save-rollback-manifest-failed",
+                    "The authorized-save backup could not be promoted to a rollback-safe manifest.",
+                ) from exc
+            manifest = created.get("manifest", {}) if isinstance(created, dict) else {}
+            return {
+                "schemaVersion": WORKFLOW_SCHEMA_VERSION,
+                "ok": True,
+                "saveReceipt": save_receipt,
+                "liveApplyReceipt": live_apply_receipt,
+                "assetPath": live_record.asset_path,
+                "beforeRevision": before_revision,
+                "afterRevision": after_revision,
+                "rollbackManifestId": str(manifest.get("manifestId", "")),
+                "rollbackAvailable": True,
+                "created": True,
+            }
+
+    def rollback_authorized_live_save(
+        self,
+        save_receipt: str,
+        *,
+        mode: Literal["DryRun", "Commit"] = "DryRun",
+        rollback_dry_run_receipt: str = "",
+        confirmation: str = "",
+        change_set_id: str = "",
+        live_apply_receipt: str = "",
+    ) -> dict[str, Any]:
+        """Rollback one persisted authorized live save through the standard backup engine."""
+        with self._lock:
+            self._assert_session_current()
+            self._assert_policy_unchanged()
+            if not isinstance(save_receipt, str) or not save_receipt.startswith("save_"):
+                raise WorkflowError("save-receipt-invalid", "saveReceipt is not a valid authorized-save receipt.")
+            if mode not in {"DryRun", "Commit"}:
+                raise WorkflowError("authorized-save-rollback-invalid-mode", "mode must be DryRun or Commit.")
+            manifest_path = (self.config.backup_root / "live-save" / save_receipt / "rollback-manifest.json").resolve()
+            if not manifest_path.is_file() or not _is_within(manifest_path, self.config.backup_root):
+                raise WorkflowError(
+                    "authorized-save-rollback-manifest-missing",
+                    "The authorized save has no rollback-safe standard manifest.",
+                )
+
+            if mode == "DryRun":
+                receipt = "live_save_rollback_dry_" + secrets.token_urlsafe(20)
+                report_path = self._safe_work_path("authorized-save-rollback", save_receipt, receipt, "dry-run.json")
+                try:
+                    report = rollback_backup(
+                        manifest_path,
+                        self.config.policy_path,
+                        self.config.project_path,
+                        self.config.backup_root,
+                        commit=False,
+                        report_path=report_path,
+                    )
+                except (OSError, RuntimeError, ValueError) as exc:
+                    raise WorkflowError(
+                        "authorized-save-rollback-dry-run-failed",
+                        "The authorized-save rollback Dry Run failed.",
+                    ) from exc
+                if report.get("valid") is not True or report.get("wroteDisk") is not False:
+                    raise WorkflowError(
+                        "authorized-save-rollback-dry-run-invalid",
+                        "Rollback Dry Run did not confirm a valid zero-write restore.",
+                        details={"errors": report.get("errors", [])},
+                    )
+                self._authorized_save_rollback_dry_runs[receipt] = AuthorizedSaveRollbackDryRunRecord(
+                    receipt=receipt,
+                    save_receipt=save_receipt,
+                    report_path=report_path,
+                    report=report,
+                )
+                self._prune_records()
+                return {
+                    "schemaVersion": WORKFLOW_SCHEMA_VERSION,
+                    "ok": True,
+                    "mode": "DryRun",
+                    "saveReceipt": save_receipt,
+                    "rollbackDryRunReceipt": receipt,
+                    "assetPath": report.get("assetPath", ""),
+                    "beforeRollbackRevision": report.get("currentRevision", ""),
+                    "expectedRestoredRevision": report.get("expectedBackupRevision", ""),
+                    "wroteDisk": False,
+                }
+
+            if not self.config.commit_enabled:
+                raise WorkflowError("commit-disabled", "Authorized-save rollback Commit is disabled for this MCP session.")
+            dry_run = self._authorized_save_rollback_dry_runs.get(rollback_dry_run_receipt)
+            if dry_run is None or dry_run.save_receipt != save_receipt or dry_run.consumed:
+                raise WorkflowError(
+                    "authorized-save-rollback-receipt-invalid",
+                    "A fresh authorized-save rollback Dry Run receipt is required.",
+                )
+            if confirmation != f"ROLLBACK LIVE SAVE {save_receipt}":
+                raise WorkflowError(
+                    "authorized-save-rollback-confirmation-required",
+                    "Rollback confirmation did not exactly match the required saveReceipt phrase.",
+                )
+            operation_root = self._safe_work_path(
+                "authorized-save-rollback",
+                save_receipt,
+                rollback_dry_run_receipt,
+                "commit",
+            )
+            report_path = operation_root / "report.json"
+            verification_output = operation_root / "verify"
+            verification_report = operation_root / "verification.json"
+            result = self._run_script(
+                "RunRollback.ps1",
+                [
+                    "-EngineRoot", str(self.config.engine_root),
+                    "-ProjectPath", str(self.config.project_path),
+                    "-Manifest", str(manifest_path),
+                    "-Policy", str(self.config.policy_path),
+                    "-BackupRoot", str(self.config.backup_root),
+                    "-Mode", "Commit",
+                    "-Report", str(report_path),
+                    "-VerificationOutput", str(verification_output),
+                    "-VerificationReport", str(verification_report),
+                ],
+                stage="authorized-save-rollback-commit",
+                report_path=report_path,
+            )
+            if result.exit_code != 0:
+                self._raise_process_failure(
+                    stage="authorized-save-rollback-commit",
+                    result=result,
+                    report_path=report_path,
+                    fallback_code="authorized-save-rollback-commit-failed",
+                    fallback_message="Authorized-save rollback Commit or independent verification failed.",
+                )
+            report = _read_json(report_path, stage="authorized-save-rollback-commit")
+            verification = _read_json(verification_report, stage="authorized-save-rollback-verification")
+            if report.get("restored") is not True or verification.get("verified") is not True:
+                raise WorkflowError(
+                    "authorized-save-rollback-report-invalid",
+                    "Rollback reports did not confirm restore and independent verification.",
+                )
+            restored_revision = str(
+                verification.get("actualRevision", verification.get("expectedRevision", ""))
+            )
+            if restored_revision != str(dry_run.report.get("expectedBackupRevision", "")):
+                raise WorkflowError(
+                    "authorized-save-rollback-revision-mismatch",
+                    "Rollback verification did not match the pre-save Revision.",
+                )
+            dry_run.consumed = True
+            asset_path = str(report.get("assetPath", dry_run.report.get("assetPath", "")))
+            freshness = self.freshness.mark_rollback(asset_path, restored_revision)
+            change_set_updated = False
+            if change_set_id and live_apply_receipt:
+                change_set_updated = self._update_change_set_operation(
+                    change_set_id,
+                    live_apply_receipt,
+                    "undone",
+                )
+            return {
+                "schemaVersion": WORKFLOW_SCHEMA_VERSION,
+                "ok": True,
+                "mode": "Commit",
+                "saveReceipt": save_receipt,
+                "rollbackDryRunReceipt": rollback_dry_run_receipt,
+                "assetPath": asset_path,
+                "restored": True,
+                "restoredRevision": restored_revision,
+                "reportId": _report_id("authorized-save-rollback-commit", report_path),
+                "verificationReportId": _report_id(
+                    "authorized-save-rollback-verification",
+                    verification_report,
+                ),
+                "changeSetId": change_set_id,
+                "changeSetUpdated": change_set_updated,
+                "indexFreshness": freshness,
+            }
 
     def verify_live_write(self, asset_path: str, live_apply_receipt: str = "", change_set_id: str = "") -> dict[str, Any]:
         with self._lock:

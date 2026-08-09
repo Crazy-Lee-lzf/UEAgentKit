@@ -19,6 +19,9 @@ MAX_BATCH_SCALE_FIX_ASSETS = 100
 MAX_BATCH_SCALE_FIX_PLANS = 50
 MAX_AUDIT_REPORT_BYTES = 16 * 1024 * 1024
 MAX_BATCH_LIVE_STEP = 8
+MAX_BATCH_SAVE_STEP = 2
+MAX_BATCH_VERIFY_STEP = 2
+MAX_BATCH_ROLLBACK_STEP = 2
 SUPPORTED_BATCH_CLASSIFICATIONS = {
     "root-lock-candidate",
     "root-track-candidate",
@@ -141,6 +144,16 @@ class BatchScaleFixExecutionRecord:
     items: list[dict[str, Any]] = field(default_factory=list)
     failure_code: str = ""
     failure_message: str = ""
+    batch_save_receipt: str = ""
+    save_order: list[int] = field(default_factory=list)
+    save_cursor: int = 0
+    save_failure_code: str = ""
+    save_failure_message: str = ""
+    batch_verify_receipt: str = ""
+    verify_order: list[int] = field(default_factory=list)
+    verify_cursor: int = 0
+    verify_failure_code: str = ""
+    verify_failure_message: str = ""
     batch_undo_receipt: str = ""
     undo_order: list[int] = field(default_factory=list)
     undo_cursor: int = 0
@@ -346,8 +359,21 @@ class AnimationScaleFixBatchService:
                             "liveApplyReceipt": "",
                             "transactionId": "",
                             "editorSessionId": "",
+                            "saveState": "not-started",
+                            "verifyState": "not-started",
+                            "saveReceipt": "",
+                            "beforeRevision": "",
+                            "afterRevision": "",
+                            "rollbackManifestId": "",
+                            "rollbackAvailable": False,
+                            "verificationReportId": "",
+                            "actualRevision": "",
                             "failureCode": "",
                             "failureMessage": "",
+                            "saveFailureCode": "",
+                            "saveFailureMessage": "",
+                            "verifyFailureCode": "",
+                            "verifyFailureMessage": "",
                         }
                         for item in record.payload["items"]
                     ],
@@ -413,6 +439,8 @@ class AnimationScaleFixBatchService:
                         "state": "applied" if changed else "no-op",
                         "changed": changed,
                         "runtimeVerified": True,
+                        "saveState": "unsaved" if changed else "not-required",
+                        "verifyState": "pending" if changed else "not-required",
                         "liveApplyReceipt": (
                             str(result.get("liveApplyReceipt") or "") if isinstance(result, dict) else ""
                         ),
@@ -434,6 +462,247 @@ class AnimationScaleFixBatchService:
                 self._discard_empty_change_set_if_possible(execution)
             return self._response(record)
 
+    def save(
+        self,
+        *,
+        batch_plan_id: str,
+        confirmation: str = "",
+        batch_save_receipt: str = "",
+        max_assets: int = 1,
+    ) -> dict[str, Any]:
+        with self._lock:
+            self._validate_persistence_step(max_assets, MAX_BATCH_SAVE_STEP, "save")
+            self.get(batch_plan_id=batch_plan_id)
+            record = self._plans[batch_plan_id]
+            execution = self._executions.get(batch_plan_id)
+            if execution is None:
+                raise WorkflowError(
+                    "animation-scale-fix-batch-not-applied",
+                    "Batch Save requires a Batch Plan that completed Live Apply in this MCP session.",
+                )
+
+            if not execution.batch_save_receipt:
+                if batch_save_receipt:
+                    raise WorkflowError(
+                        "animation-scale-fix-batch-save-receipt-invalid",
+                        "Do not provide batch_save_receipt before Batch Save is started.",
+                    )
+                if confirmation != f"SAVE BATCH {batch_plan_id}":
+                    raise WorkflowError(
+                        "animation-scale-fix-batch-save-confirmation-required",
+                        "Batch Save confirmation did not exactly match the required Batch Plan phrase.",
+                    )
+                if execution.state != "applied":
+                    raise WorkflowError(
+                        "animation-scale-fix-batch-save-state-invalid",
+                        f"Batch Save cannot start from state {execution.state}.",
+                    )
+                execution.batch_save_receipt = "asfbs_" + secrets.token_urlsafe(18)
+                execution.save_order = [
+                    index
+                    for index, item in enumerate(execution.items)
+                    if item.get("state") == "applied" and item.get("changed") is True
+                ]
+                execution.save_cursor = 0
+                execution.state = "saving"
+                execution.updated_at_utc = _utc_now()
+            else:
+                if batch_save_receipt != execution.batch_save_receipt:
+                    raise WorkflowError(
+                        "animation-scale-fix-batch-save-receipt-invalid",
+                        "batch_save_receipt must be the exact receipt returned when Batch Save started.",
+                    )
+                if execution.state == "saved":
+                    return self._response(record)
+                if execution.state not in {"saving", "save_failed"}:
+                    raise WorkflowError(
+                        "animation-scale-fix-batch-save-state-invalid",
+                        f"Batch Save cannot continue from state {execution.state}.",
+                    )
+                execution.state = "saving"
+                execution.save_failure_code = ""
+                execution.save_failure_message = ""
+
+            stop = min(execution.save_cursor + max_assets, len(execution.save_order))
+            while execution.save_cursor < stop:
+                index = execution.save_order[execution.save_cursor]
+                item_state = execution.items[index]
+                try:
+                    if item_state.get("saveState") != "saved":
+                        preview = self.workflow_service.save_authorized_asset(
+                            str(item_state["assetPath"]),
+                            change_set_id=execution.change_set_id,
+                        )
+                        save_receipt = str(preview.get("saveReceipt") or "")
+                        if not save_receipt:
+                            raise WorkflowError(
+                                "animation-scale-fix-batch-child-save-preview-invalid",
+                                "A child authorized-save Preview returned no saveReceipt.",
+                            )
+                        saved = self.workflow_service.save_authorized_asset(
+                            str(item_state["assetPath"]),
+                            mode="Commit",
+                            save_receipt=save_receipt,
+                            confirmation=f"SAVE {save_receipt}",
+                            change_set_id=execution.change_set_id,
+                        )
+                        if saved.get("saved") is not True:
+                            raise WorkflowError(
+                                "animation-scale-fix-batch-child-save-invalid",
+                                "A child authorized save did not confirm persistence.",
+                            )
+                        item_state.update(
+                            {
+                                "saveState": "saved",
+                                "saveReceipt": save_receipt,
+                                "beforeRevision": str(saved.get("beforeRevision") or ""),
+                                "afterRevision": str(saved.get("afterRevision") or ""),
+                                "revisionChanged": bool(saved.get("revisionChanged")),
+                                "rollbackAvailable": False,
+                            }
+                        )
+                        if not item_state["revisionChanged"]:
+                            raise WorkflowError(
+                                "animation-scale-fix-batch-child-save-revision-unchanged",
+                                "A changed Batch item was saved without a disk Revision transition.",
+                            )
+
+                    if not item_state.get("rollbackAvailable"):
+                        rollback = self.workflow_service.create_authorized_save_rollback_manifest(
+                            str(item_state["saveReceipt"]),
+                            str(item_state["liveApplyReceipt"]),
+                        )
+                        if rollback.get("rollbackAvailable") is not True:
+                            raise WorkflowError(
+                                "animation-scale-fix-batch-child-rollback-manifest-invalid",
+                                "A saved child item did not produce a rollback-safe manifest.",
+                            )
+                        item_state["rollbackAvailable"] = True
+                        item_state["rollbackManifestId"] = str(rollback.get("rollbackManifestId") or "")
+                    item_state["saveFailureCode"] = ""
+                    item_state["saveFailureMessage"] = ""
+                except Exception as exc:
+                    item_state["saveFailureCode"] = str(
+                        getattr(exc, "code", "animation-scale-fix-batch-child-save-failed")
+                    )
+                    item_state["saveFailureMessage"] = "A child authorized save or rollback-manifest step failed."
+                    execution.save_failure_code = item_state["saveFailureCode"]
+                    execution.save_failure_message = item_state["saveFailureMessage"]
+                    execution.state = "save_failed"
+                    execution.updated_at_utc = _utc_now()
+                    break
+                execution.save_cursor += 1
+                execution.updated_at_utc = _utc_now()
+
+            if execution.state == "saving" and execution.save_cursor >= len(execution.save_order):
+                execution.state = "saved"
+                execution.updated_at_utc = _utc_now()
+            return self._response(record)
+
+    def verify(
+        self,
+        *,
+        batch_plan_id: str,
+        batch_verify_receipt: str = "",
+        max_assets: int = 1,
+    ) -> dict[str, Any]:
+        with self._lock:
+            self._validate_persistence_step(max_assets, MAX_BATCH_VERIFY_STEP, "verify")
+            self.get(batch_plan_id=batch_plan_id)
+            record = self._plans[batch_plan_id]
+            execution = self._executions.get(batch_plan_id)
+            if execution is None:
+                raise WorkflowError(
+                    "animation-scale-fix-batch-not-saved",
+                    "Batch Verify requires a Batch Plan that completed Batch Save in this MCP session.",
+                )
+
+            if not execution.batch_verify_receipt:
+                if batch_verify_receipt:
+                    raise WorkflowError(
+                        "animation-scale-fix-batch-verify-receipt-invalid",
+                        "Do not provide batch_verify_receipt before Batch Verify is started.",
+                    )
+                if execution.state != "saved":
+                    raise WorkflowError(
+                        "animation-scale-fix-batch-verify-state-invalid",
+                        f"Batch Verify cannot start from state {execution.state}.",
+                    )
+                if any(
+                    execution.items[index].get("rollbackAvailable") is not True
+                    for index in execution.save_order
+                ):
+                    raise WorkflowError(
+                        "animation-scale-fix-batch-verify-rollback-not-ready",
+                        "Every saved Batch item must have a rollback-safe manifest before verification starts.",
+                    )
+                execution.batch_verify_receipt = "asfbv_" + secrets.token_urlsafe(18)
+                execution.verify_order = list(execution.save_order)
+                execution.verify_cursor = 0
+                execution.state = "verifying"
+                execution.updated_at_utc = _utc_now()
+            else:
+                if batch_verify_receipt != execution.batch_verify_receipt:
+                    raise WorkflowError(
+                        "animation-scale-fix-batch-verify-receipt-invalid",
+                        "batch_verify_receipt must be the exact receipt returned when Batch Verify started.",
+                    )
+                if execution.state == "verified":
+                    return self._response(record)
+                if execution.state not in {"verifying", "verify_failed"}:
+                    raise WorkflowError(
+                        "animation-scale-fix-batch-verify-state-invalid",
+                        f"Batch Verify cannot continue from state {execution.state}.",
+                    )
+                execution.state = "verifying"
+                execution.verify_failure_code = ""
+                execution.verify_failure_message = ""
+
+            stop = min(execution.verify_cursor + max_assets, len(execution.verify_order))
+            while execution.verify_cursor < stop:
+                index = execution.verify_order[execution.verify_cursor]
+                item_state = execution.items[index]
+                try:
+                    verified = self.workflow_service.verify_live_write(
+                        str(item_state["assetPath"]),
+                        str(item_state["liveApplyReceipt"]),
+                        execution.change_set_id,
+                    )
+                    if verified.get("verified") is not True or verified.get("state") != "verified":
+                        raise WorkflowError(
+                            "animation-scale-fix-batch-child-verify-invalid",
+                            "A child live-write verification did not close the persisted write.",
+                        )
+                    item_state.update(
+                        {
+                            "verifyState": "verified",
+                            "verificationReportId": str(verified.get("reportId") or ""),
+                            "actualRevision": str(verified.get("actualRevision") or ""),
+                            "persistedExpectedValue": verified.get("persistedExpectedValue"),
+                            "exportedPersistedValue": verified.get("exportedPersistedValue"),
+                            "runtimeVerification": verified.get("runtimeVerification") or item_state.get("runtimeVerification", {}),
+                            "verifyFailureCode": "",
+                            "verifyFailureMessage": "",
+                        }
+                    )
+                except Exception as exc:
+                    item_state["verifyFailureCode"] = str(
+                        getattr(exc, "code", "animation-scale-fix-batch-child-verify-failed")
+                    )
+                    item_state["verifyFailureMessage"] = "A child independent live-write verification failed."
+                    execution.verify_failure_code = item_state["verifyFailureCode"]
+                    execution.verify_failure_message = item_state["verifyFailureMessage"]
+                    execution.state = "verify_failed"
+                    execution.updated_at_utc = _utc_now()
+                    break
+                execution.verify_cursor += 1
+                execution.updated_at_utc = _utc_now()
+
+            if execution.state == "verifying" and execution.verify_cursor >= len(execution.verify_order):
+                execution.state = "verified"
+                execution.updated_at_utc = _utc_now()
+            return self._response(record)
+
     def undo_live(
         self,
         *,
@@ -451,6 +720,12 @@ class AnimationScaleFixBatchService:
                 raise WorkflowError(
                     "animation-scale-fix-batch-not-applied",
                     "Batch Undo requires a Batch Plan that has started Live Apply in this MCP session.",
+                )
+
+            if any(item.get("saveState") == "saved" for item in execution.items):
+                raise WorkflowError(
+                    "animation-scale-fix-batch-persisted-requires-rollback",
+                    "Batch Live Undo cannot revert an item after authorized Save; use persisted Batch Rollback.",
                 )
 
             if not execution.batch_undo_receipt:
@@ -526,6 +801,14 @@ class AnimationScaleFixBatchService:
                 execution.updated_at_utc = _utc_now()
                 self._discard_empty_change_set_if_possible(execution)
             return self._response(record)
+
+    @staticmethod
+    def _validate_persistence_step(max_assets: int, limit: int, operation: str) -> None:
+        if isinstance(max_assets, bool) or not isinstance(max_assets, int) or not 1 <= max_assets <= limit:
+            raise WorkflowError(
+                "animation-scale-fix-batch-step-invalid",
+                f"{operation} max_assets must be an integer from 1 through {limit}.",
+            )
 
     @staticmethod
     def _validate_live_step(max_assets: int) -> None:
@@ -801,6 +1084,8 @@ class AnimationScaleFixBatchService:
                     "state": "pending",
                     "changed": False,
                     "runtimeVerified": False,
+                    "saveState": "not-started",
+                    "verifyState": "not-started",
                 }
                 for item in record.payload["items"]
             ]
@@ -810,6 +1095,22 @@ class AnimationScaleFixBatchService:
                 "changeSetId": "",
                 "progress": self._execution_progress(items),
                 "items": items,
+                "save": {
+                    "batchSaveReceipt": "",
+                    "processedAssets": 0,
+                    "totalAssets": 0,
+                    "remainingAssets": 0,
+                    "failureCode": "",
+                    "failureMessage": "",
+                },
+                "verify": {
+                    "batchVerifyReceipt": "",
+                    "processedAssets": 0,
+                    "totalAssets": 0,
+                    "remainingAssets": 0,
+                    "failureCode": "",
+                    "failureMessage": "",
+                },
                 "undo": {
                     "batchUndoReceipt": "",
                     "processedAssets": 0,
@@ -839,6 +1140,22 @@ class AnimationScaleFixBatchService:
             "failureMessage": execution.failure_message,
             "progress": self._execution_progress(items),
             "items": items,
+            "save": {
+                "batchSaveReceipt": execution.batch_save_receipt,
+                "processedAssets": execution.save_cursor,
+                "totalAssets": len(execution.save_order),
+                "remainingAssets": max(0, len(execution.save_order) - execution.save_cursor),
+                "failureCode": execution.save_failure_code,
+                "failureMessage": execution.save_failure_message,
+            },
+            "verify": {
+                "batchVerifyReceipt": execution.batch_verify_receipt,
+                "processedAssets": execution.verify_cursor,
+                "totalAssets": len(execution.verify_order),
+                "remainingAssets": max(0, len(execution.verify_order) - execution.verify_cursor),
+                "failureCode": execution.verify_failure_code,
+                "failureMessage": execution.verify_failure_message,
+            },
             "undo": {
                 "batchUndoReceipt": execution.batch_undo_receipt,
                 "processedAssets": execution.undo_cursor,
@@ -856,6 +1173,9 @@ class AnimationScaleFixBatchService:
             for state in ("pending", "applied", "no-op", "failed", "not-applied", "undone")
         }
         processed = len(items) - counts["pending"]
+        saved = sum(1 for item in items if item.get("saveState") == "saved")
+        verified = sum(1 for item in items if item.get("verifyState") == "verified")
+        unsaved = sum(1 for item in items if item.get("saveState") == "unsaved")
         return {
             "processedAssets": processed,
             "totalAssets": len(items),
@@ -865,4 +1185,7 @@ class AnimationScaleFixBatchService:
             "failedAssets": counts["failed"],
             "notAppliedAssets": counts["not-applied"],
             "undoneAssets": counts["undone"],
+            "unsavedAssets": unsaved,
+            "savedAssets": saved,
+            "verifiedAssets": verified,
         }

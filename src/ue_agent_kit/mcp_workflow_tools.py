@@ -255,6 +255,52 @@ def register_workflow_tools(
             return error_response("ue_apply_animation_scale_fix_batch_live", exc, read_only=False)
 
     @server.tool(annotations=destructive_annotations)
+    def ue_save_animation_scale_fix_batch(
+        batch_plan_id: str,
+        confirmation: str = "",
+        batch_save_receipt: str = "",
+        max_assets: int = 1,
+    ) -> dict[str, Any]:
+        """Start or continue bounded authorized Save for changed items in an animation scale-fix Batch."""
+        try:
+            response = animation_scale_fix_batch_service.save(
+                batch_plan_id=batch_plan_id,
+                confirmation=confirmation,
+                batch_save_receipt=batch_save_receipt,
+                max_assets=max_assets,
+            )
+            return {
+                **response,
+                "tool": "ue_save_animation_scale_fix_batch",
+                "readOnly": False,
+                "nextStep": "Continue with batchSaveReceipt until state is saved, then call ue_verify_animation_scale_fix_batch.",
+            }
+        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_save_animation_scale_fix_batch", exc, read_only=False)
+
+    @server.tool(annotations=planning_annotations)
+    def ue_verify_animation_scale_fix_batch(
+        batch_plan_id: str,
+        batch_verify_receipt: str = "",
+        max_assets: int = 1,
+    ) -> dict[str, Any]:
+        """Start or continue bounded independent persisted-value verification for a saved scale-fix Batch."""
+        try:
+            response = animation_scale_fix_batch_service.verify(
+                batch_plan_id=batch_plan_id,
+                batch_verify_receipt=batch_verify_receipt,
+                max_assets=max_assets,
+            )
+            return {
+                **response,
+                "tool": "ue_verify_animation_scale_fix_batch",
+                "readOnly": False,
+                "nextStep": "Continue with batchVerifyReceipt until state is verified; Index Refresh remains a separate explicit step.",
+            }
+        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_verify_animation_scale_fix_batch", exc, read_only=False)
+
+    @server.tool(annotations=destructive_annotations)
     def ue_undo_animation_scale_fix_batch(
         batch_plan_id: str,
         confirmation: str = "",
