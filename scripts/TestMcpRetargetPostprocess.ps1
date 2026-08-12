@@ -119,7 +119,8 @@ try
         allowedProjectNames = @($ProjectName)
         allowedAssetRoots = @("/Game/UEAgentKitRetargetTests", "/Game/Characters")
         allowedReferenceRoots = @("/Game/Characters")
-        retargetCapabilities = @("retarget.inspect", "retarget.plan", "retarget.batch")
+        allowedAssetClasses = @("/Script/Engine.AnimSequence")
+        retargetCapabilities = @("retarget.inspect", "retarget.plan", "retarget.batch", "retarget.validate")
         requireRevision = $true
         rejectDirtyPackages = $false
         maxAssetsPerPatch = 1

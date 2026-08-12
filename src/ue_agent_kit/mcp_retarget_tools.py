@@ -27,6 +27,8 @@ _CAPABILITY_FOR_TOOL = {
     "ue_start_animation_retarget_postprocess": RETARGET_INSPECT_CAPABILITY,
     "ue_get_animation_retarget_postprocess": RETARGET_INSPECT_CAPABILITY,
     "ue_plan_animation_retarget_postprocess": RETARGET_INSPECT_CAPABILITY,
+    "ue_reopen_animation_retarget_postprocess": RETARGET_INSPECT_CAPABILITY,
+    "ue_refresh_animation_retarget_postprocess_index": RETARGET_BATCH_CAPABILITY,
     "ue_cancel_animation_retarget_batch": RETARGET_BATCH_CAPABILITY,
     "ue_save_animation_retarget_batch": RETARGET_BATCH_CAPABILITY,
     "ue_validate_animation_retarget": RETARGET_VALIDATE_CAPABILITY,
@@ -421,6 +423,54 @@ def register_retarget_workflow_tools(
             return postprocess_service.plan(postprocess_id=postprocessId, description=description)
         except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
             return error_response("ue_plan_animation_retarget_postprocess", exc, read_only=True)
+
+    @server.tool(annotations=read_annotations)
+    def ue_reopen_animation_retarget_postprocess(planRelativePath: str) -> dict[str, Any]:
+        """Reopen a persisted immutable retarget post-process Plan after an MCP restart to rebuild trusted read-only context."""
+        try:
+            _assert_retarget_policy_capability(
+                policy_path=workflow_service.config.policy_path,
+                tool_name="ue_reopen_animation_retarget_postprocess",
+            )
+            return postprocess_service.reopen(plan_relative_path=planRelativePath)
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_reopen_animation_retarget_postprocess", exc, read_only=True)
+
+    @server.tool(annotations=planning_annotations)
+    def ue_refresh_animation_retarget_postprocess_index(
+        postprocessId: str,
+        mode: Literal["Preview", "Apply"] = "Preview",
+        confirmation: str = "",
+        refreshReceipt: str = "",
+        maxAssets: int = 1,
+    ) -> dict[str, Any]:
+        """Prepare or atomically activate one paired snapshot generation for a saved and verified retarget batch's eligible AnimSequence outputs."""
+        try:
+            _assert_retarget_policy_capability(
+                policy_path=workflow_service.config.policy_path,
+                tool_name="ue_refresh_animation_retarget_postprocess_index",
+            )
+            response = postprocess_service.refresh_index(
+                postprocess_id=postprocessId,
+                mode=mode,
+                confirmation=confirmation,
+                refresh_receipt=refreshReceipt,
+                max_assets=maxAssets,
+            )
+            return {
+                "tool": "ue_refresh_animation_retarget_postprocess_index",
+                "ok": True,
+                "readOnly": False,
+                "result": response,
+                "nextStep": (
+                    "Continue Preview with refreshReceipt until indexRefreshState is ready; then Apply with confirmation "
+                    "'REFRESH RETARGET POSTPROCESS <postprocessId>'."
+                    if mode == "Preview"
+                    else "Restart the MCP server after a successful Apply so the new paired snapshot becomes the frozen session snapshot."
+                ),
+            }
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_refresh_animation_retarget_postprocess_index", exc, read_only=False)
 
     @server.tool(annotations=action_annotations)
     def ue_cancel_animation_retarget_batch(taskId: str) -> dict[str, Any]:

@@ -123,6 +123,8 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_start_animation_retarget_postprocess", "workflow", "planning"),
     ToolDefinition("ue_get_animation_retarget_postprocess", "workflow", "read"),
     ToolDefinition("ue_plan_animation_retarget_postprocess", "workflow", "planning"),
+    ToolDefinition("ue_reopen_animation_retarget_postprocess", "workflow", "read"),
+    ToolDefinition("ue_refresh_animation_retarget_postprocess_index", "workflow", "planning"),
     ToolDefinition("ue_cancel_animation_retarget_batch", "workflow", "destructive"),
     ToolDefinition("ue_save_animation_retarget_batch", "workflow", "destructive"),
     ToolDefinition("ue_validate_animation_retarget", "workflow", "read"),

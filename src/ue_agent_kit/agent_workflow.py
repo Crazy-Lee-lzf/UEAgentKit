@@ -1928,7 +1928,7 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 candidate = self._export_refresh_candidate(asset_path, candidate_root)
                 freshness = self.freshness.inspect_asset(asset_path)
                 disk_revision = str(freshness.get("diskRevision", ""))
-                if disk_revision != str(candidate.get("revision", "")):
+                if disk_revision and disk_revision != str(candidate.get("revision", "")):
                     raise WorkflowError(
                         "snapshot-refresh-revision-mismatch",
                         "The prepared Batch refresh candidate does not match the current disk Package Revision.",

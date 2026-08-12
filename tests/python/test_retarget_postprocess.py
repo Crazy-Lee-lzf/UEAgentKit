@@ -74,7 +74,14 @@ def _diagnosis(asset_path: str, *, additive: bool = False) -> dict[str, Any]:
 
 
 class _FakeWorkflow:
-    def __init__(self, work_root: Path, outputs: list[dict[str, Any]]) -> None:
+    def __init__(
+        self,
+        work_root: Path,
+        outputs: list[dict[str, Any]],
+        *,
+        status: str = "completed",
+        verification: dict[str, Any] | None = None,
+    ) -> None:
         self.config = SimpleNamespace(work_root=work_root)
         self.project_name = "我的项目"
         self.index_service = None
@@ -82,6 +89,8 @@ class _FakeWorkflow:
         self.live_editor_service.status.return_value = {"state": "available", "sessionId": "editor-session-1"}
         self._outputs = outputs
         self.context_calls = 0
+        self.status = status
+        self.verification = verification or {"verified": False, "sampleCount": 0, "verifiedCount": 0, "verifiedAssets": []}
 
     @staticmethod
     def _workflow_error(code: str, message: str, *, details: dict[str, Any] | None = None) -> WorkflowError:
@@ -93,7 +102,7 @@ class _FakeWorkflow:
             raise self._workflow_error("retarget-batch-task-not-found", "not found")
         return {
             "taskId": task_id,
-            "status": "completed",
+            "status": self.status,
             "planId": "plan_test",
             "planDigest": "sha256:" + "a" * 64,
             "retargeter": "/Game/Retarget/RTG_Test.RTG_Test",
@@ -102,7 +111,29 @@ class _FakeWorkflow:
             "outputDirectory": "/Game/Retargeted",
             "outputs": [dict(item) for item in self._outputs],
             "savedAssets": [],
+            "verification": dict(self.verification),
         }
+
+    def prepare_batch_index_refresh_candidate(self, asset_path: str) -> dict[str, Any]:
+        return {
+            "candidateId": "irc_" + asset_path.rsplit("/", 1)[-1].replace(".", "_"),
+            "assetPath": asset_path,
+            "assetClass": "/Script/Engine.AnimSequence",
+            "revision": "sha256:" + "b" * 64,
+            "diskFileSize": 1234,
+            "liveState": {"state": "offline", "loaded": False, "packageDirty": False},
+        }
+
+    def apply_batch_index_refresh(self, candidate_ids: list[str]) -> dict[str, Any]:
+        return {
+            "applied": True,
+            "activeSnapshotChanged": True,
+            "newGeneration": {"generationId": "gen_test"},
+            "restartRequired": True,
+        }
+
+    def discard_batch_index_refresh_candidates(self, candidate_ids: list[str]) -> None:
+        return None
 
 
 class RetargetPostprocessTests(unittest.TestCase):
@@ -205,6 +236,137 @@ class RetargetPostprocessTests(unittest.TestCase):
             self.assertEqual(started["suggestions"]["referenceFollowupCount"], 1)
             self.assertEqual(started["suggestions"]["referenceFollowups"][0]["assetType"], "AimOffset")
             workflow.live_editor_service.call_tool.assert_not_called()
+
+
+def _analyzed_and_planned(workflow: _FakeWorkflow) -> tuple[RetargetPostprocessService, str]:
+    workflow.live_editor_service.call_tool.return_value = {
+        "ok": True,
+        "result": {"assets": [_diagnosis(ANIM_A)]},
+    }
+    service = RetargetPostprocessService(workflow)
+    started = service.start(retarget_task_id="rtg_batch_test", batch_size=1)
+    analyzed = service.get(postprocess_id=str(started["postprocessId"]))
+    service.plan(postprocess_id=str(analyzed["postprocessId"]), description="review retarget outputs")
+    return service, str(analyzed["postprocessId"])
+
+
+def _verified_revision(revision: str) -> dict[str, Any]:
+    return {
+        "verified": True,
+        "sampleCount": 1,
+        "verifiedCount": 1,
+        "verifiedAssets": [{"assetPath": ANIM_A, "revision": revision}],
+    }
+
+
+class RetargetPostprocessIndexRefreshTests(unittest.TestCase):
+    def _saved_workflow(self, work_root: Path, revision: str) -> _FakeWorkflow:
+        outputs = [{"outputPath": ANIM_A, "assetType": "AnimSequence", "assetClass": "/Script/Engine.AnimSequence"}]
+        return _FakeWorkflow(work_root, outputs, status="saved", verification=_verified_revision(revision))
+
+    def test_index_refresh_requires_saved_and_verified(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ueak_rtpp_ir_gate_") as temporary_root:
+            outputs = [{"outputPath": ANIM_A, "assetType": "AnimSequence", "assetClass": "/Script/Engine.AnimSequence"}]
+
+            not_saved = _FakeWorkflow(Path(temporary_root) / "WorkA", outputs, status="completed")
+            service, postprocess_id = _analyzed_and_planned(not_saved)
+            with self.assertRaisesRegex(WorkflowError, "saved first"):
+                service.refresh_index(postprocess_id=postprocess_id, mode="Preview")
+
+            saved_unverified = _FakeWorkflow(Path(temporary_root) / "WorkB", outputs, status="saved")
+            service2, postprocess_id2 = _analyzed_and_planned(saved_unverified)
+            with self.assertRaisesRegex(WorkflowError, "independent verification"):
+                service2.refresh_index(postprocess_id=postprocess_id2, mode="Preview")
+
+    def test_index_refresh_preview_reaches_ready(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ueak_rtpp_ir_ready_") as temporary_root:
+            workflow = self._saved_workflow(Path(temporary_root) / "Work", "sha256:" + "b" * 64)
+            service, postprocess_id = _analyzed_and_planned(workflow)
+
+            ready = service.refresh_index(postprocess_id=postprocess_id, mode="Preview", max_assets=1)
+            self.assertEqual(ready["indexRefresh"]["state"], "ready")
+            self.assertTrue(ready["indexRefresh"]["receipt"])
+            self.assertEqual(ready["indexRefresh"]["orderedAssetCount"], 1)
+            self.assertEqual(ready["indexRefresh"]["preparedCount"], 1)
+            self.assertEqual(ready["indexRefresh"]["candidateAssetPaths"], [ANIM_A])
+
+    def test_index_refresh_apply_requires_confirmation_and_refreshes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ueak_rtpp_ir_apply_") as temporary_root:
+            workflow = self._saved_workflow(Path(temporary_root) / "Work", "sha256:" + "b" * 64)
+            service, postprocess_id = _analyzed_and_planned(workflow)
+
+            ready = service.refresh_index(postprocess_id=postprocess_id, mode="Preview", max_assets=1)
+            self.assertEqual(ready["indexRefresh"]["state"], "ready")
+            receipt = ready["indexRefresh"]["receipt"]
+
+            with self.assertRaisesRegex(WorkflowError, "confirmation"):
+                service.refresh_index(
+                    postprocess_id=postprocess_id,
+                    mode="Apply",
+                    confirmation="wrong",
+                    refresh_receipt=receipt,
+                )
+
+            applied = service.refresh_index(
+                postprocess_id=postprocess_id,
+                mode="Apply",
+                confirmation=f"REFRESH RETARGET POSTPROCESS {postprocess_id}",
+                refresh_receipt=receipt,
+            )
+            self.assertEqual(applied["indexRefresh"]["state"], "refreshed")
+            self.assertTrue(applied["indexRefresh"]["restartRequired"])
+            self.assertEqual(applied["indexRefresh"]["generation"]["generationId"], "gen_test")
+
+    def test_index_refresh_revision_mismatch_fails_prepare(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ueak_rtpp_ir_mismatch_") as temporary_root:
+            workflow = self._saved_workflow(Path(temporary_root) / "Work", "sha256:" + "c" * 64)
+            service, postprocess_id = _analyzed_and_planned(workflow)
+
+            result = service.refresh_index(postprocess_id=postprocess_id, mode="Preview", max_assets=1)
+            self.assertEqual(result["indexRefresh"]["state"], "prepare_failed")
+            self.assertEqual(
+                result["indexRefresh"]["failureCode"],
+                "retarget-postprocess-index-refresh-revision-mismatch",
+            )
+
+
+class RetargetPostprocessReopenTests(unittest.TestCase):
+    def test_reopen_reads_persisted_plan(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ueak_rtpp_reopen_") as temporary_root:
+            workflow = _FakeWorkflow(
+                Path(temporary_root) / "Work",
+                [{"outputPath": ANIM_A, "assetType": "AnimSequence", "assetClass": "/Script/Engine.AnimSequence"}],
+            )
+            workflow.live_editor_service.call_tool.return_value = {
+                "ok": True,
+                "result": {"assets": [_diagnosis(ANIM_A)]},
+            }
+            service = RetargetPostprocessService(workflow)
+            started = service.start(retarget_task_id="rtg_batch_test")
+            analyzed = service.get(postprocess_id=str(started["postprocessId"]))
+            planned = service.plan(postprocess_id=str(analyzed["postprocessId"]), description="review")
+
+            reopened = service.reopen(plan_relative_path=str(planned["planRelativePath"]))
+            self.assertTrue(reopened["ok"])
+            self.assertTrue(reopened["readOnly"])
+            self.assertEqual(reopened["postprocessId"], str(analyzed["postprocessId"]))
+            self.assertEqual(reopened["outputSummary"]["animationSequencePaths"], [ANIM_A])
+            self.assertEqual(reopened["suggestions"]["scaleFixCandidateCount"], 1)
+            self.assertTrue(reopened["planDigest"].startswith("sha256:"))
+            self.assertFalse(reopened["executionBoundary"]["modifiesAssets"])
+
+    def test_reopen_rejects_invalid_or_missing_paths(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ueak_rtpp_reopen_bad_") as temporary_root:
+            workflow = _FakeWorkflow(
+                Path(temporary_root) / "Work",
+                [{"outputPath": ANIM_A, "assetType": "AnimSequence", "assetClass": "/Script/Engine.AnimSequence"}],
+            )
+            service = RetargetPostprocessService(workflow)
+            for bad in ("../outside/plan.json", "retarget-postprocess/x/other.json", "plan.json"):
+                with self.assertRaisesRegex(WorkflowError, "exact relative path"):
+                    service.reopen(plan_relative_path=bad)
+            with self.assertRaisesRegex(WorkflowError, "missing"):
+                service.reopen(plan_relative_path="retarget-postprocess/nope/plan.json")
 
 
 if __name__ == "__main__":

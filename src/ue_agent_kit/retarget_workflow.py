@@ -1360,6 +1360,24 @@ class RetargetWorkflowMixin:
                     "retarget-postprocess-invalid-outputs",
                     "The retarget batch output records are invalid.",
                 )
+            independent_validation = task.get("independentValidation")
+            verification = (
+                {
+                    "verified": bool(independent_validation.get("verified")),
+                    "sampleCount": int(independent_validation.get("sampleCount", 0)),
+                    "verifiedCount": int(independent_validation.get("verifiedCount", 0)),
+                    "verifiedAssets": [
+                        {
+                            "assetPath": str(entry.get("assetPath", "")),
+                            "revision": str(entry.get("revision", "")),
+                        }
+                        for entry in independent_validation.get("verifiedAssets", [])
+                        if isinstance(entry, dict) and entry.get("assetPath")
+                    ],
+                }
+                if isinstance(independent_validation, dict)
+                else {"verified": False, "sampleCount": 0, "verifiedCount": 0, "verifiedAssets": []}
+            )
             return {
                 "taskId": task["taskId"],
                 "status": task["status"],
@@ -1371,6 +1389,7 @@ class RetargetWorkflowMixin:
                 "outputDirectory": task["outputDirectory"],
                 "outputs": [dict(item) for item in outputs],
                 "savedAssets": list(task.get("savedAssets", [])),
+                "verification": verification,
             }
 
     @staticmethod

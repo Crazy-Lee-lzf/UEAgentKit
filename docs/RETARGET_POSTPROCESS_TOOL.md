@@ -118,19 +118,36 @@ UnrealEditor after test          = closed
 
 Smoke 使用 D3D11 Editor。Catalog commandlet 仍使用既有 NullRHI 路径读取 source/target mesh；没有打开动画编辑器窗口的 NullRHI Slate 场景。
 
-## 7. 下一条 P3 纵向切片
+## 7. P3 第二阶段：持久化 / Index Refresh / Restart 边界
 
-当前不能直接把 Suggested Plan 转成 P2 Batch Plan。下一步先实现 Retarget 输出的持久化 / paired Index Refresh 边界：
+P3 第一阶段只生成只读 Suggested Plan。第二阶段把它安全接到 P2，闭环如下：
 
 ```text
 Retarget Batch Complete
 → P3 Audit + Suggested Plan
 → User Review
-→ Authorized Retarget Save / Independent Verify
-→ paired Revision Export + SQLite Refresh
+→ Authorized Retarget Save (ue_save_animation_retarget_batch)
+→ Independent Verify (ue_verify_animation_retarget_batch)
+→ paired Revision Export + SQLite Refresh (ue_refresh_animation_retarget_postprocess_index Preview/Apply)
 → MCP Restart
-→ Rebuild/validate suggestions against fresh Index Revision
-→ convert eligible AnimSequence suggestions to existing P2 Batch Plan
+→ Reopen persisted Plan (ue_reopen_animation_retarget_postprocess)
+→ Revalidate against fresh Index Revision (ue_get_asset_state / re-audit)
+→ convert eligible AnimSequence suggestions to existing P2 Batch Plan (ue_plan_animation_scale_fix_batch)
 ```
+
+### 7.1 Retarget Output Index Refresh
+
+新增工具 `ue_refresh_animation_retarget_postprocess_index`（`retarget.batch` 能力，Preview/Apply）：
+
+- 前置：Retarget Task `status = saved` 且 `independentValidation.verified = true`，且已生成不可变 Suggested Plan。
+- 范围：仅 `root-lock-candidate` / `root-track-candidate` 的 AnimSequence 输出。
+- Preview：复用 `prepare_batch_index_refresh_candidate` 逐批准备独立 Export candidate（零写入），并把 candidate Revision 与独立验证 Revision 比对，不一致 fail-stop。
+- Apply：复用 `apply_batch_index_refresh` 一次性原子切换 paired SQLite + Revision Export generation，确认短语 `REFRESH RETARGET POSTPROCESS <postprocessId>`，成功后当前 session 必须重启。
+
+P3 不复制第二套 Package Save / Index 写入；Save/Verify/Rollback 继续复用 `ue_save_animation_retarget_batch` / `ue_verify_animation_retarget_batch` / `ue_rollback_animation_retarget_batch`，Index 原子生成复用 P2 的 paired snapshot 基础设施。
+
+### 7.2 Restart 后重建可信上下文
+
+新增只读工具 `ue_reopen_animation_retarget_postprocess(planRelativePath)`：从固定 WorkRoot 下 `retarget-postprocess/<postprocessId>/plan.json` 重读不可变 Suggested Plan，返回输出路径、suggestions、executionBoundary 与重新计算的 SHA-256 digest。重启后内存 record 丢失，Agent 应依赖该持久化 artifact + fresh Index 重新验证，而不是信任重启前的运行时求值。
 
 之后再单独处理 BlendSpace / AimOffset / Montage 引用更新。Additive + Base Pose 仍属于 P4，不在 P3 中绕过。

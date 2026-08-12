@@ -189,6 +189,18 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 if not plan_relative_path.startswith("retarget-postprocess/"):
                     raise RuntimeError(f"P3 Suggested Plan escaped the fixed WorkRoot contract: {suggested_plan}")
 
+                reopened = await call(
+                    session,
+                    "ue_reopen_animation_retarget_postprocess",
+                    {"planRelativePath": plan_relative_path},
+                )
+                if (
+                    not reopened.get("ok")
+                    or reopened.get("postprocessId") != postprocess_id
+                    or reopened.get("outputSummary", {}).get("animationSequenceCount", 0) != 1
+                ):
+                    raise RuntimeError(f"P3 persisted Plan did not reopen after planning: {reopened}")
+
                 saved = await call(
                     session,
                     "ue_save_animation_retarget_batch",
@@ -198,6 +210,41 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                     raise RuntimeError(f"Retarget output save failed before rollback: {saved}")
                 if not output_file.is_file():
                     raise RuntimeError(f"Saved P3 smoke output is missing: {output_file}")
+
+                verified = await call(session, "ue_verify_animation_retarget_batch", {"taskId": task_id})
+                if not verified.get("verified"):
+                    raise RuntimeError(f"Retarget output independent verification failed before Index Refresh: {verified}")
+
+                if suggestions.get("scaleFixCandidateCount", 0) < 1:
+                    raise RuntimeError(
+                        f"P3 post-process produced no scale-fix candidate for the Index Refresh slice: {analyzed}"
+                    )
+
+                refresh_preview = await call(
+                    session,
+                    "ue_refresh_animation_retarget_postprocess_index",
+                    {"postprocessId": postprocess_id, "mode": "Preview", "maxAssets": 1},
+                )
+                refresh_state = refresh_preview.get("result", {}).get("indexRefresh", {})
+                if refresh_state.get("state") != "ready" or refresh_state.get("orderedAssetCount") != 1:
+                    raise RuntimeError(f"P3 Retarget Output Index Refresh Preview did not become ready: {refresh_preview}")
+                refresh_receipt = str(refresh_state.get("receipt") or "")
+                if not refresh_receipt:
+                    raise RuntimeError(f"P3 Index Refresh Preview returned no receipt: {refresh_preview}")
+
+                refresh_applied = await call(
+                    session,
+                    "ue_refresh_animation_retarget_postprocess_index",
+                    {
+                        "postprocessId": postprocess_id,
+                        "mode": "Apply",
+                        "confirmation": f"REFRESH RETARGET POSTPROCESS {postprocess_id}",
+                        "refreshReceipt": refresh_receipt,
+                    },
+                )
+                applied_state = refresh_applied.get("result", {}).get("indexRefresh", {})
+                if applied_state.get("state") != "refreshed" or applied_state.get("restartRequired") is not True:
+                    raise RuntimeError(f"P3 Retarget Output Index Refresh Apply did not report a restart-required atomic switch: {refresh_applied}")
 
                 dry_run = await call(
                     session,

@@ -1,5 +1,7 @@
 # `feature/live-editor-realtime-io` 动画工具交接
 
+> 当前 P3 接手请优先阅读 `docs/Handoffs/RETARGET_POSTPROCESS_HANDOFF_20260813.md`。P3 第一阶段已提交为 `05f9cf2 feat: add retarget output postprocess suggestions`；本文件保留 P0-P2 历史背景。
+
 更新时间：2026-08-12
 工作区：`E:/WorkSpace/UEAgentKit-RealtimeIO`
 分支：`feature/live-editor-realtime-io`
