@@ -721,6 +721,7 @@ class PatchWorkflowService(RetargetWorkflowMixin):
         self.live_editor_service = live_editor_service
         self.active_snapshot = self.config.active_snapshot
         self._refresh_applied = False
+        self._index_refresh_candidates: dict[str, tuple[Path, dict[str, Any]]] = {}
         self._validate_config()
         self.freshness = freshness_tracker or IndexFreshnessTracker(
             self.index_service,
@@ -1684,12 +1685,12 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 matches.append(candidate)
         return matches
 
-    def _merge_refresh_export(self, active_export: Path, next_export: Path, candidate_root: Path, candidate: dict[str, Any]) -> None:
-        clone_tree(
-            active_export,
-            next_export,
-            prefer_hardlinks=bool(self.active_snapshot and not self.active_snapshot.legacy),
-        )
+    def _replace_refresh_export_candidate(
+        self,
+        next_export: Path,
+        candidate_root: Path,
+        candidate: dict[str, Any],
+    ) -> None:
         asset_path = str(candidate["canonical"].get("assetPath", ""))
         old_canonical = self._find_export_canonical(next_export, asset_path)
         for path in old_canonical:
@@ -1748,7 +1749,25 @@ class PatchWorkflowService(RetargetWorkflowMixin):
         )
         _write_json_atomic(manifest_path, manifest)
 
-    def _validate_next_database(self, database: Path, asset_path: str, expected_revision: str) -> dict[str, Any]:
+    def _merge_refresh_export(
+        self,
+        active_export: Path,
+        next_export: Path,
+        candidate_root: Path,
+        candidate: dict[str, Any],
+    ) -> None:
+        clone_tree(
+            active_export,
+            next_export,
+            prefer_hardlinks=bool(self.active_snapshot and not self.active_snapshot.legacy),
+        )
+        self._replace_refresh_export_candidate(next_export, candidate_root, candidate)
+
+    def _validate_next_database_assets(
+        self,
+        database: Path,
+        expected_revisions: dict[str, str],
+    ) -> dict[str, Any]:
         assert_quiescent_database(database)
         with open_database(database, readonly=True, migrate=False, immutable=True) as connection:
             integrity = connection.execute("PRAGMA integrity_check").fetchone()
@@ -1759,19 +1778,47 @@ class PatchWorkflowService(RetargetWorkflowMixin):
             assert_fts5_available(connection)
             if get_metadata(connection, "project_key", "") != self.project_name:
                 raise WorkflowError("snapshot-refresh-database-invalid", "The next SQLite generation has the wrong project identity.")
-            row = connection.execute(
-                "SELECT revision_value, package_dirty, canonical_relpath FROM assets WHERE asset_path = ?",
-                (asset_path,),
-            ).fetchone()
-            if row is None or str(row["revision_value"]) != expected_revision or bool(row["package_dirty"]):
-                raise WorkflowError("snapshot-refresh-database-invalid", "The next SQLite generation does not contain the clean refreshed Revision.")
+            for asset_path, expected_revision in expected_revisions.items():
+                row = connection.execute(
+                    "SELECT revision_value, package_dirty, canonical_relpath FROM assets WHERE asset_path = ?",
+                    (asset_path,),
+                ).fetchone()
+                if row is None or str(row["revision_value"]) != expected_revision or bool(row["package_dirty"]):
+                    raise WorkflowError(
+                        "snapshot-refresh-database-invalid",
+                        "The next SQLite generation does not contain every clean refreshed Revision.",
+                        details={"assetPath": asset_path, "expectedRevision": expected_revision},
+                    )
             asset_count = int(connection.execute("SELECT COUNT(*) FROM assets").fetchone()[0])
-        return {"assetCount": asset_count, "targetRevision": expected_revision}
+        return {
+            "assetCount": asset_count,
+            "targetRevisions": [
+                {"assetPath": asset_path, "revision": revision}
+                for asset_path, revision in expected_revisions.items()
+            ],
+        }
 
-    def _build_snapshot_generation(self, asset_path: str, candidate_root: Path, candidate: dict[str, Any]) -> dict[str, Any]:
+    def _validate_next_database(self, database: Path, asset_path: str, expected_revision: str) -> dict[str, Any]:
+        validation = self._validate_next_database_assets(database, {asset_path: expected_revision})
+        return {"assetCount": validation["assetCount"], "targetRevision": expected_revision}
+
+    def _build_snapshot_generation_batch(
+        self,
+        prepared_candidates: list[tuple[Path, dict[str, Any]]],
+    ) -> dict[str, Any]:
         if self.active_snapshot is None:
             raise WorkflowError("snapshot-refresh-unavailable", "This workflow session was not started from a frozen active snapshot pair.")
+        if not prepared_candidates:
+            raise WorkflowError("snapshot-refresh-batch-empty", "At least one prepared refresh candidate is required.")
         active = self.active_snapshot
+        expected_revisions: dict[str, str] = {}
+        for _, candidate in prepared_candidates:
+            asset_path = str(candidate.get("canonical", {}).get("assetPath", ""))
+            revision = str(candidate.get("revision", ""))
+            if not asset_path or asset_path in expected_revisions or not revision.startswith("sha256:"):
+                raise WorkflowError("snapshot-refresh-batch-invalid", "Prepared refresh candidates must have unique exact assets and SHA-256 Revisions.")
+            expected_revisions[asset_path] = revision
+
         generation_id = new_generation_id()
         snapshots_root = self._safe_work_path("snapshots")
         snapshots_root.mkdir(parents=True, exist_ok=True)
@@ -1779,7 +1826,13 @@ class PatchWorkflowService(RetargetWorkflowMixin):
         final_root = snapshots_root / generation_id
         if staging.exists() or final_root.exists():
             raise WorkflowError("snapshot-refresh-generation-exists", "The generated snapshot ID already exists.")
-        required_bytes = self._tree_size(active.revision_export) + active.database.stat().st_size * 2 + 64 * 1024 * 1024
+        candidate_bytes = sum(self._tree_size(root) for root, _ in prepared_candidates)
+        required_bytes = (
+            self._tree_size(active.revision_export)
+            + active.database.stat().st_size * 2
+            + candidate_bytes
+            + 64 * 1024 * 1024
+        )
         free_bytes = shutil.disk_usage(snapshots_root).free
         if free_bytes < required_bytes:
             raise WorkflowError(
@@ -1791,37 +1844,54 @@ class PatchWorkflowService(RetargetWorkflowMixin):
         pointer_written = False
         try:
             next_export = staging / "revision-export"
-            self._merge_refresh_export(active.revision_export, next_export, candidate_root, candidate)
+            clone_tree(
+                active.revision_export,
+                next_export,
+                prefer_hardlinks=bool(self.active_snapshot and not self.active_snapshot.legacy),
+            )
+            for candidate_root, candidate in prepared_candidates:
+                self._replace_refresh_export_candidate(next_export, candidate_root, candidate)
+
             next_database = staging / "index.sqlite3"
             assert_quiescent_database(active.database)
             shutil.copy2(active.database, next_database)
+            build_summaries: list[dict[str, Any]] = []
             with open_database(next_database) as connection:
-                build_result = build_index(
-                    connection,
-                    candidate_root,
-                    next_database,
-                    force=True,
-                    project_key=self.project_name,
-                )
-                if build_result.failed or build_result.errors or build_result.updated + build_result.added != 1:
-                    raise WorkflowError(
-                        "snapshot-refresh-index-build-failed",
-                        "The next SQLite generation did not update exactly one requested asset.",
-                        details={"build": build_result.to_dict(include_assets=False)},
+                for candidate_root, candidate in prepared_candidates:
+                    build_result = build_index(
+                        connection,
+                        candidate_root,
+                        next_database,
+                        force=True,
+                        project_key=self.project_name,
                     )
+                    if build_result.failed or build_result.errors or build_result.updated + build_result.added != 1:
+                        raise WorkflowError(
+                            "snapshot-refresh-index-build-failed",
+                            "The next SQLite generation did not update exactly one requested asset for every Batch candidate.",
+                            details={"build": build_result.to_dict(include_assets=False)},
+                        )
+                    build_summaries.append(build_result.to_dict(include_assets=False))
                 set_metadata(connection, "last_export_root", str(final_root / "revision-export"))
-            database_validation = self._validate_next_database(next_database, asset_path, str(candidate["revision"]))
+
+            database_validation = self._validate_next_database_assets(next_database, expected_revisions)
             manifest_path = next_export / "manifest.json"
             manifest_sha = sha256_file(manifest_path)
             database_sha = sha256_file(next_database)
             os.replace(staging, final_root)
+            refreshed_assets = [
+                {"assetPath": asset_path, "revision": revision}
+                for asset_path, revision in expected_revisions.items()
+            ]
+            first = refreshed_assets[0]
             write_active_pointer(
                 active,
                 generation_id=generation_id,
                 database_sha256=database_sha,
                 revision_export_manifest_sha256=manifest_sha,
-                refreshed_asset_path=asset_path,
-                refreshed_revision=str(candidate["revision"]),
+                refreshed_asset_path=first["assetPath"],
+                refreshed_revision=first["revision"],
+                refreshed_assets=refreshed_assets,
             )
             pointer_written = True
             return {
@@ -1829,7 +1899,9 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 "databaseSha256": "sha256:" + database_sha,
                 "revisionExportManifestSha256": "sha256:" + manifest_sha,
                 "assetCount": database_validation["assetCount"],
-                "targetRevision": candidate["revision"],
+                "refreshedAssetCount": len(refreshed_assets),
+                "targetRevisions": refreshed_assets,
+                "builds": build_summaries,
             }
         except SnapshotLifecycleError as exc:
             raise WorkflowError(exc.code, str(exc), details=exc.details) from exc
@@ -1837,6 +1909,100 @@ class PatchWorkflowService(RetargetWorkflowMixin):
             shutil.rmtree(staging, ignore_errors=True)
             if final_root.exists() and not pointer_written:
                 shutil.rmtree(final_root, ignore_errors=True)
+
+    def _build_snapshot_generation(self, asset_path: str, candidate_root: Path, candidate: dict[str, Any]) -> dict[str, Any]:
+        generation = self._build_snapshot_generation_batch([(candidate_root, candidate)])
+        generation["targetRevision"] = candidate["revision"]
+        return generation
+
+    def prepare_batch_index_refresh_candidate(self, asset_path: str) -> dict[str, Any]:
+        """Prepare one short-path, independently exported candidate for an atomic Batch snapshot refresh."""
+        with self._lock:
+            self._assert_session_current()
+            asset_path = self._validate_refresh_asset_path(asset_path)
+            self._assert_refresh_policy(asset_path)
+            live_state = self._inspect_refresh_live_state(asset_path)
+            candidate_id = "irc_" + secrets.token_urlsafe(10)
+            candidate_root = self._safe_work_path("ir", candidate_id)
+            try:
+                candidate = self._export_refresh_candidate(asset_path, candidate_root)
+                freshness = self.freshness.inspect_asset(asset_path)
+                disk_revision = str(freshness.get("diskRevision", ""))
+                if disk_revision != str(candidate.get("revision", "")):
+                    raise WorkflowError(
+                        "snapshot-refresh-revision-mismatch",
+                        "The prepared Batch refresh candidate does not match the current disk Package Revision.",
+                    )
+                self._index_refresh_candidates[candidate_id] = (candidate_root, candidate)
+                return {
+                    "candidateId": candidate_id,
+                    "assetPath": asset_path,
+                    "assetClass": candidate["assetClass"],
+                    "revision": candidate["revision"],
+                    "diskFileSize": candidate["diskFileSize"],
+                    "liveState": live_state,
+                }
+            except Exception:
+                shutil.rmtree(candidate_root, ignore_errors=True)
+                raise
+
+    def discard_batch_index_refresh_candidates(self, candidate_ids: list[str]) -> None:
+        with self._lock:
+            for candidate_id in candidate_ids:
+                prepared = self._index_refresh_candidates.pop(candidate_id, None)
+                if prepared is not None:
+                    shutil.rmtree(prepared[0], ignore_errors=True)
+
+    def apply_batch_index_refresh(self, candidate_ids: list[str]) -> dict[str, Any]:
+        """Atomically activate one paired snapshot generation containing every prepared Batch candidate."""
+        with self._lock:
+            self._assert_session_current()
+            if not candidate_ids or len(candidate_ids) != len(set(candidate_ids)):
+                raise WorkflowError("snapshot-refresh-batch-invalid", "Batch refresh candidate IDs must be non-empty and unique.")
+            prepared_candidates: list[tuple[Path, dict[str, Any]]] = []
+            for candidate_id in candidate_ids:
+                prepared = self._index_refresh_candidates.get(candidate_id)
+                if prepared is None:
+                    raise WorkflowError("snapshot-refresh-batch-candidate-missing", "A prepared Batch refresh candidate is missing from this MCP session.")
+                candidate_root, candidate = prepared
+                package_file = self._package_file(
+                    self.config.project_path,
+                    str(candidate["packageName"]),
+                    str(candidate["assetClass"]),
+                )
+                current_revision = "sha256:" + sha256_file(package_file)
+                if current_revision != str(candidate["revision"]):
+                    raise WorkflowError(
+                        "snapshot-refresh-revision-mismatch",
+                        "A Batch refresh target changed on disk after candidate preparation.",
+                        details={"assetPath": candidate["canonical"].get("assetPath", "")},
+                    )
+                prepared_candidates.append((candidate_root, candidate))
+
+            generation = self._build_snapshot_generation_batch(prepared_candidates)
+            for candidate_id in candidate_ids:
+                prepared = self._index_refresh_candidates.pop(candidate_id, None)
+                if prepared is not None:
+                    shutil.rmtree(prepared[0], ignore_errors=True)
+            invalidated = {
+                "planCount": len(self._plans),
+                "dryRunReceiptCount": len(self._dry_runs),
+                "applyReceiptCount": len(self._applies),
+                "rollbackReceiptCount": len(self._rollback_dry_runs),
+            }
+            self._plans.clear()
+            self._dry_runs.clear()
+            self._applies.clear()
+            self._rollback_dry_runs.clear()
+            self._refresh_applied = True
+            return {
+                "applied": True,
+                "activeSnapshotChanged": True,
+                "newGeneration": generation,
+                "invalidated": invalidated,
+                "currentSessionUsesPreviousSnapshot": True,
+                "restartRequired": True,
+            }
 
     def get_asset_state(self, asset_path: str) -> dict[str, Any]:
         """Combine Editor memory with the frozen SQLite, Revision Export, and current disk Package state."""
@@ -3273,8 +3439,12 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 "commit",
             )
             report_path = operation_root / "report.json"
-            verification_output = operation_root / "verify"
-            verification_report = operation_root / "verification.json"
+            verification_key = hashlib.sha256(
+                f"{save_receipt}:{rollback_dry_run_receipt}".encode("utf-8")
+            ).hexdigest()[:16]
+            verification_root = self._safe_work_path("rollback-verify", verification_key)
+            verification_output = verification_root / "export"
+            verification_report = verification_root / "verification.json"
             result = self._run_script(
                 "RunRollback.ps1",
                 [

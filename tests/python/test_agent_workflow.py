@@ -1405,13 +1405,14 @@ class AgentWorkflowTests(unittest.TestCase):
 
     def test_live_write_tool_count_and_names_are_unchanged(self) -> None:
         names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
-        self.assertEqual(len(names), 75)
+        self.assertEqual(len(names), 77)
         self.assertIn("ue_set_asset_property", names)
         self.assertIn("ue_set_asset_reference_property", names)
         self.assertIn("ue_apply_asset_property_live", names)
         self.assertIn("ue_undo_asset_property_live", names)
         self.assertIn("ue_discard_asset_property_live", names)
         self.assertIn("ue_verify_live_write", names)
+        self.assertIn("ue_refresh_animation_scale_fix_batch_index", names)
         self.assertEqual(names.count("ue_set_asset_property"), 1)
         self.assertEqual(names.count("ue_set_asset_reference_property"), 1)
         self.assertEqual(names.count("ue_apply_asset_property_live"), 1)
@@ -2620,6 +2621,55 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertEqual(dry_run["expectedRestoredRevision"], fresh_revision)
         self.assertTrue(dry_run["rollbackDryRunReceipt"].startswith("live_save_rollback_dry_"))
         self.assertEqual(package_file.read_bytes(), disk_before_dry_run)
+
+        rollback_invocation: dict[str, str] = {}
+
+        def rollback_runner(arguments: list[str], cwd: Path, timeout_seconds: int) -> ProcessResult:
+            del cwd, timeout_seconds
+            script, values = FakeWorkflowRunner._arguments(arguments)
+            self.assertEqual(script, "RunRollback.ps1")
+            rollback_invocation.update(values)
+            write_json(
+                Path(values["-Report"]),
+                {
+                    "valid": True,
+                    "wroteDisk": True,
+                    "restored": True,
+                    "assetPath": ASSET_PATH,
+                },
+            )
+            write_json(
+                Path(values["-VerificationReport"]),
+                {
+                    "verified": True,
+                    "actualRevision": fresh_revision,
+                    "assetPath": ASSET_PATH,
+                },
+            )
+            return ProcessResult(0, "", "")
+
+        service._runner = rollback_runner
+        committed = service.rollback_authorized_live_save(
+            preview["saveReceipt"],
+            mode="Commit",
+            rollback_dry_run_receipt=dry_run["rollbackDryRunReceipt"],
+            confirmation=f"ROLLBACK LIVE SAVE {preview['saveReceipt']}",
+        )
+        self.assertTrue(committed["restored"])
+        self.assertEqual(committed["restoredRevision"], fresh_revision)
+        verification_output = Path(rollback_invocation["-VerificationOutput"])
+        self.assertEqual(verification_output.parent.parent.name, "rollback-verify")
+        real_sample_canonical = (
+            verification_output
+            / "canonical"
+            / "Game"
+            / "Characters"
+            / "XinYueHu"
+            / "Animations"
+            / "Retargeted"
+            / "MM_Idle_XinYueHu_MM_Idle_XinYueHu.json"
+        )
+        self.assertLess(len(str(real_sample_canonical)), 260)
 
     def test_live_write_journal_failure_does_not_hide_successful_editor_write(self) -> None:
         bridge = AgentWorkflowTests.ClosedLoopLiveService(dirty=True)

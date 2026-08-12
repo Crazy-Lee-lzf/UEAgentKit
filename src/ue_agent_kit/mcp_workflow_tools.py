@@ -300,6 +300,68 @@ def register_workflow_tools(
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_verify_animation_scale_fix_batch", exc, read_only=False)
 
+    @server.tool(annotations=planning_annotations)
+    def ue_refresh_animation_scale_fix_batch_index(
+        batch_plan_id: str,
+        mode: Literal["Preview", "Apply"] = "Preview",
+        confirmation: str = "",
+        batch_index_refresh_receipt: str = "",
+        max_assets: int = 1,
+    ) -> dict[str, Any]:
+        """Prepare or atomically activate one paired snapshot generation for a verified scale-fix Batch."""
+        try:
+            response = animation_scale_fix_batch_service.refresh_index(
+                batch_plan_id=batch_plan_id,
+                mode=mode,
+                confirmation=confirmation,
+                batch_index_refresh_receipt=batch_index_refresh_receipt,
+                max_assets=max_assets,
+            )
+            return {
+                **response,
+                "tool": "ue_refresh_animation_scale_fix_batch_index",
+                "readOnly": False,
+                "nextStep": (
+                    "Continue Preview with batchIndexRefreshReceipt until state is index_refresh_ready; then Apply with confirmation "
+                    "'REFRESH BATCH <batchPlanId>'."
+                    if mode == "Preview"
+                    else "Restart the MCP server after a successful Apply so the new paired snapshot becomes the frozen session snapshot."
+                ),
+            }
+        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_refresh_animation_scale_fix_batch_index", exc, read_only=False)
+
+    @server.tool(annotations=destructive_annotations)
+    def ue_rollback_animation_scale_fix_batch(
+        batch_plan_id: str,
+        mode: str = "DryRun",
+        confirmation: str = "",
+        batch_rollback_receipt: str = "",
+        max_assets: int = 1,
+    ) -> dict[str, Any]:
+        """Dry-run or commit bounded reverse-order rollback for persisted animation scale-fix Batch items."""
+        try:
+            response = animation_scale_fix_batch_service.rollback(
+                batch_plan_id=batch_plan_id,
+                mode=mode,
+                confirmation=confirmation,
+                batch_rollback_receipt=batch_rollback_receipt,
+                max_assets=max_assets,
+            )
+            return {
+                **response,
+                "tool": "ue_rollback_animation_scale_fix_batch",
+                "readOnly": False,
+                "nextStep": (
+                    "Continue DryRun with batchRollbackReceipt until state is rollback_ready; then close the target Editor "
+                    "and Commit with confirmation 'ROLLBACK BATCH <batchPlanId>'."
+                    if mode == "DryRun"
+                    else "Continue Commit with batchRollbackReceipt until state is rolled_back."
+                ),
+            }
+        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_rollback_animation_scale_fix_batch", exc, read_only=False)
+
     @server.tool(annotations=destructive_annotations)
     def ue_undo_animation_scale_fix_batch(
         batch_plan_id: str,

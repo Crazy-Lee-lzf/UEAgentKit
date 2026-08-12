@@ -1,6 +1,6 @@
 # Animation Scale Fix Batch Plan
 
-> 状态：P2 Plan + bounded Live Apply / Undo 纵向切片已实现并通过真实 UE5.6 Smoke；Save / Independent Verify / Index Refresh / Rollback 待继续。
+> 状态：P2 已完整实现 Plan / bounded Live Apply / Undo / Save / Independent Verify / Atomic Index Refresh / Persisted Rollback。真实 UE5.6 样本已通过持久化与 Index Refresh Preview / Rollback Smoke；多资产 Index Apply 由真实临时 SQLite + Revision Export Fixture 验证。
 
 ## 1. 目标
 
@@ -12,13 +12,18 @@ P1 已能把多个 AnimSequence 审计为 `normal`、`root-lock-candidate`、`ro
 ue_plan_animation_scale_fix_batch
 ue_get_animation_scale_fix_batch
 ue_apply_animation_scale_fix_batch_live
+ue_save_animation_scale_fix_batch
+ue_verify_animation_scale_fix_batch
+ue_refresh_animation_scale_fix_batch_index
+ue_rollback_animation_scale_fix_batch
 ue_undo_animation_scale_fix_batch
 ```
 
-当前阶段不会：
+当前安全边界：
 
-- 保存 Package；
-- 刷新 Index。
+- 不提供 Save All；持久化步骤有明确数量上限；
+- Index Refresh Preview 不切换 active pointer，Apply 只允许一次原子 paired-generation 切换；
+- Persisted Rollback Commit 要求目标 Unreal Editor 已关闭。
 
 ## 2. 输入来源
 
@@ -199,11 +204,89 @@ Saved                      = false
 Editor Window              = minimized
 ```
 
-## 7. 当前限制
+## 7. 持久化闭环
 
-当前单个 Batch Plan 最大资产数为 100，与现有 Change Set 最大 100 个 Live Write Operation 对齐，为后续 P2 Apply 阶段保留一一对应关系；单个 MCP session 最多保留 50 个 Batch Plan，超过后拒绝继续创建，避免无界增长。
+P2 持久化仍复用已经验证过的单资产 Save / Verify / Backup / Rollback / Snapshot Refresh 能力，Batch 层只负责有界编排，不实现 Save All 或任意文件复制。
 
-当前已完成：
+### Batch Save
+
+首次 Save 必须精确确认：
+
+```text
+SAVE BATCH <batchPlanId>
+```
+
+只保存实际 changed 的资产，每次最多 2 个。每个资产仍执行单资产 Authorized Save：保存前备份、精确 Policy / Revision 校验、保存后独立 Unreal Export。保存成功后，原备份会提升为标准 Rollback Manifest。若 Package 已保存但 Rollback Manifest 生成失败，使用同一个 Batch receipt 重试只补 Manifest，不会再次保存同一资产。
+
+### Independent Verify
+
+`ue_verify_animation_scale_fix_batch` 每次最多验证 2 个已保存资产，并复用单资产 `ue_verify_live_write`。Batch 只在 `actualRevision` 与持久化预期值都通过独立重载验证后把子项标记为 `verified`。
+
+### 保留修改：Atomic Index Refresh
+
+`ue_refresh_animation_scale_fix_batch_index` 分两阶段：
+
+```text
+Preview / Prepare   max 2 assets per call
+→ all candidates ready
+→ REFRESH BATCH <batchPlanId>
+→ Apply once
+→ one paired SQLite + Revision Export generation
+→ atomic active pointer switch
+→ restart MCP session
+```
+
+Preview 只在固定 WorkRoot 下生成短路径、独立导出的 candidate，不修改当前 SQLite，也不切换 active pointer。Apply 前会重新计算每个目标 Package 的 SHA-256，防止 Preview 后磁盘发生变化。
+
+Apply 不循环调用单资产 `ue_refresh_asset_index`。它只 clone 当前 Revision Export 一次、复制 SQLite 一次，然后把所有 candidate 合入同一个 staging generation；所有 Revision 与数据库完整性检查通过后才一次性切换 active pointer。任一资产失败都不会产生半刷新的 active snapshot。
+
+正式 XinYueHu UE5.6 Smoke 只执行到 Index Refresh Preview，确认 Package / SQLite SHA 均不变；没有对正式样本执行 active pointer Apply。多资产 Apply 的原子 paired-generation 行为由真实临时 SQLite + Revision Export Fixture 验证：同一 generation 同时更新 A、加入 B、保留无关旧资产与导出文件，并在 pointer 中记录完整 `refreshedAssets`。
+
+### 撤销修改：Persisted Rollback
+
+Persisted Rollback 使用保存时生成的标准 Rollback Manifest，顺序与 Save 相反：
+
+```text
+Rollback DryRun     max 2 assets per call, zero write
+→ all saved items ready
+→ close target Unreal Editor
+→ ROLLBACK BATCH <batchPlanId>
+→ Commit            max 2 assets per call
+→ independent reload verification
+```
+
+Commit 继续复用 `RunRollback.ps1`，因此目标 UE Editor 未关闭时会硬拒绝。若某个 Commit 子项失败，cursor 不前移，可使用同一个 receipt 重试当前资产。
+
+如果 Batch Save 在中途失败，已经保存的项与仍在 Editor 内存中的未保存项会分层恢复：先用 `UNDO BATCH` 只撤销 `saveState=unsaved` 的 Live 项，再关闭 Editor，对已保存项执行 persisted Rollback。已经 `rolled-back` 的项不会再次被误判为未保存 Live 写入。
+
+Rollback 独立验证使用短路径：
+
+```text
+WorkRoot/rollback-verify/<short-id>/...
+```
+
+避免 Windows / UE Canonical Export 因过深的 Save Receipt / DryRun Receipt 目录导致路径超过常见 Win32 路径限制。真实问题曾产生约 300 字符 Canonical 路径；缩短后真实样本路径约 212 字符。
+
+真实 UE5.6 持久化 Smoke：
+
+```text
+Baseline Package SHA       = a3cb62ec5d0f804e5612e4cc383a9b9dbdf9f9e9dd9d01625479c9440b5d7f5d
+Temporary Saved Revision   = 8ee5391dffd95cd223b4a0db7c257aee8fe5da7ca7b6810b1a6cb57939202abc
+Independent Verify         = passed
+Index Refresh Preview      = passed
+Index Preview SQLite write = none
+Rollback DryRun write      = none
+Rollback Commit            = passed
+Restored Package SHA       = exact baseline
+SQLite SHA                 = unchanged
+Editor before Rollback     = closed
+```
+
+## 8. 当前限制与 P2 收口
+
+单个 Batch Plan 最大 100 个资产，与现有 Change Set 最大 100 个 Live Write Operation 对齐；单个 MCP session 最多保留 50 个 Batch Plan。Live Apply / Undo 每次最多 8 个资产；Save / Independent Verify / Index Refresh Preview / Persisted Rollback 每次最多 2 个资产。
+
+当前 P2 已完成：
 
 ```text
 Completed Audit Report
@@ -213,14 +296,11 @@ Completed Audit Report
 → Immutable Batch Plan
 → Bounded Change Set Live Apply
 → Runtime Verification Snapshot
-→ Reverse-order Bounded Undo
+→ [Unsaved branch] Reverse-order Bounded Undo
+→ [Persist branch] Bounded Authorized Save
+→ Independent Verify
+→ [Keep branch] Bounded Index Preview → Atomic Paired Snapshot Apply → MCP Restart
+→ [Revert branch] Rollback DryRun → Editor Closed → Reverse Persisted Rollback Commit
 ```
 
-下一条 P2 纵向切片进入持久化：
-
-```text
-Batch Save
-Independent Verify
-Index Refresh
-Rollback
-```
+P2 的 Plan / Live Apply / Save / Verify / Index Refresh / Rollback 纵向链路已闭合。后续进入 P3 Retarget Output Post-processing，而不是继续扩张当前 Batch API。

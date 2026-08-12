@@ -10,7 +10,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from .agent_workflow import WorkflowError
 
@@ -22,6 +22,7 @@ MAX_BATCH_LIVE_STEP = 8
 MAX_BATCH_SAVE_STEP = 2
 MAX_BATCH_VERIFY_STEP = 2
 MAX_BATCH_ROLLBACK_STEP = 2
+MAX_BATCH_INDEX_REFRESH_STEP = 2
 SUPPORTED_BATCH_CLASSIFICATIONS = {
     "root-lock-candidate",
     "root-track-candidate",
@@ -154,6 +155,19 @@ class BatchScaleFixExecutionRecord:
     verify_cursor: int = 0
     verify_failure_code: str = ""
     verify_failure_message: str = ""
+    batch_index_refresh_receipt: str = ""
+    index_refresh_order: list[int] = field(default_factory=list)
+    index_refresh_cursor: int = 0
+    index_refresh_candidate_ids: dict[int, str] = field(default_factory=dict)
+    index_refresh_failure_code: str = ""
+    index_refresh_failure_message: str = ""
+    index_refresh_generation: dict[str, Any] = field(default_factory=dict)
+    batch_rollback_receipt: str = ""
+    rollback_order: list[int] = field(default_factory=list)
+    rollback_dry_run_cursor: int = 0
+    rollback_commit_cursor: int = 0
+    rollback_failure_code: str = ""
+    rollback_failure_message: str = ""
     batch_undo_receipt: str = ""
     undo_order: list[int] = field(default_factory=list)
     undo_cursor: int = 0
@@ -361,6 +375,10 @@ class AnimationScaleFixBatchService:
                             "editorSessionId": "",
                             "saveState": "not-started",
                             "verifyState": "not-started",
+                            "indexRefreshState": "not-started",
+                            "rollbackState": "not-ready",
+                            "rollbackDryRunReceipt": "",
+                            "restoredRevision": "",
                             "saveReceipt": "",
                             "beforeRevision": "",
                             "afterRevision": "",
@@ -392,7 +410,7 @@ class AnimationScaleFixBatchService:
                         "animation-scale-fix-batch-apply-stopped",
                         "Batch Live Apply stopped after a per-asset failure. Review the Batch state and Undo applied items.",
                     )
-                if execution.state in {"undoing", "undo_failed", "undone"}:
+                if execution.state in {"undoing", "undo_failed", "undone", "persisted_partial"}:
                     raise WorkflowError(
                         "animation-scale-fix-batch-apply-closed",
                         "Batch Live Apply cannot continue after Batch Undo has started.",
@@ -441,6 +459,7 @@ class AnimationScaleFixBatchService:
                         "runtimeVerified": True,
                         "saveState": "unsaved" if changed else "not-required",
                         "verifyState": "pending" if changed else "not-required",
+                        "indexRefreshState": "not-ready" if changed else "not-required",
                         "liveApplyReceipt": (
                             str(result.get("liveApplyReceipt") or "") if isinstance(result, dict) else ""
                         ),
@@ -579,6 +598,7 @@ class AnimationScaleFixBatchService:
                             )
                         item_state["rollbackAvailable"] = True
                         item_state["rollbackManifestId"] = str(rollback.get("rollbackManifestId") or "")
+                        item_state["rollbackState"] = "available"
                     item_state["saveFailureCode"] = ""
                     item_state["saveFailureMessage"] = ""
                 except Exception as exc:
@@ -676,6 +696,7 @@ class AnimationScaleFixBatchService:
                     item_state.update(
                         {
                             "verifyState": "verified",
+                            "indexRefreshState": "pending",
                             "verificationReportId": str(verified.get("reportId") or ""),
                             "actualRevision": str(verified.get("actualRevision") or ""),
                             "persistedExpectedValue": verified.get("persistedExpectedValue"),
@@ -703,6 +724,371 @@ class AnimationScaleFixBatchService:
                 execution.updated_at_utc = _utc_now()
             return self._response(record)
 
+    def refresh_index(
+        self,
+        *,
+        batch_plan_id: str,
+        mode: Literal["Preview", "Apply"] = "Preview",
+        confirmation: str = "",
+        batch_index_refresh_receipt: str = "",
+        max_assets: int = 1,
+    ) -> dict[str, Any]:
+        with self._lock:
+            self._validate_persistence_step(max_assets, MAX_BATCH_INDEX_REFRESH_STEP, "index refresh")
+            self.get(batch_plan_id=batch_plan_id)
+            record = self._plans[batch_plan_id]
+            execution = self._executions.get(batch_plan_id)
+            if execution is None:
+                raise WorkflowError(
+                    "animation-scale-fix-batch-not-verified",
+                    "Batch Index Refresh requires a Batch Plan that completed independent verification.",
+                )
+            if mode not in {"Preview", "Apply"}:
+                raise WorkflowError(
+                    "animation-scale-fix-batch-index-refresh-mode-invalid",
+                    "mode must be Preview or Apply.",
+                )
+
+            if not execution.batch_index_refresh_receipt:
+                if batch_index_refresh_receipt:
+                    raise WorkflowError(
+                        "animation-scale-fix-batch-index-refresh-receipt-invalid",
+                        "Do not provide batch_index_refresh_receipt before Batch Index Refresh Preview starts.",
+                    )
+                if mode != "Preview":
+                    raise WorkflowError(
+                        "animation-scale-fix-batch-index-refresh-preview-required",
+                        "Batch Index Refresh must start with bounded Preview candidate preparation.",
+                    )
+                if execution.state != "verified":
+                    raise WorkflowError(
+                        "animation-scale-fix-batch-index-refresh-state-invalid",
+                        f"Batch Index Refresh cannot start from state {execution.state}.",
+                    )
+                execution.index_refresh_order = [
+                    index
+                    for index in execution.verify_order
+                    if execution.items[index].get("saveState") == "saved"
+                    and execution.items[index].get("verifyState") == "verified"
+                ]
+                if not execution.index_refresh_order:
+                    raise WorkflowError(
+                        "animation-scale-fix-batch-index-refresh-empty",
+                        "No verified persisted Batch items require Index Refresh.",
+                    )
+                execution.batch_index_refresh_receipt = "asfbi_" + secrets.token_urlsafe(18)
+                execution.index_refresh_cursor = 0
+                execution.index_refresh_candidate_ids.clear()
+                execution.index_refresh_failure_code = ""
+                execution.index_refresh_failure_message = ""
+                execution.index_refresh_generation.clear()
+                execution.state = "index_refresh_preparing"
+                execution.updated_at_utc = _utc_now()
+            elif batch_index_refresh_receipt != execution.batch_index_refresh_receipt:
+                raise WorkflowError(
+                    "animation-scale-fix-batch-index-refresh-receipt-invalid",
+                    "batch_index_refresh_receipt must be the exact receipt returned by Batch Index Refresh Preview.",
+                )
+
+            if mode == "Preview":
+                if execution.state == "index_refresh_ready":
+                    return self._response(record)
+                if execution.state not in {"index_refresh_preparing", "index_refresh_prepare_failed"}:
+                    raise WorkflowError(
+                        "animation-scale-fix-batch-index-refresh-state-invalid",
+                        f"Batch Index Refresh Preview cannot continue from state {execution.state}.",
+                    )
+                execution.state = "index_refresh_preparing"
+                execution.index_refresh_failure_code = ""
+                execution.index_refresh_failure_message = ""
+                stop = min(
+                    execution.index_refresh_cursor + max_assets,
+                    len(execution.index_refresh_order),
+                )
+                while execution.index_refresh_cursor < stop:
+                    index = execution.index_refresh_order[execution.index_refresh_cursor]
+                    item_state = execution.items[index]
+                    try:
+                        prepared = self.workflow_service.prepare_batch_index_refresh_candidate(
+                            str(item_state["assetPath"])
+                        )
+                        candidate_id = str(prepared.get("candidateId") or "")
+                        candidate_revision = str(prepared.get("revision") or "")
+                        expected_revision = str(item_state.get("actualRevision") or item_state.get("afterRevision") or "")
+                        if not candidate_id or candidate_revision != expected_revision:
+                            if candidate_id:
+                                self.workflow_service.discard_batch_index_refresh_candidates([candidate_id])
+                            raise WorkflowError(
+                                "animation-scale-fix-batch-index-refresh-revision-mismatch",
+                                "A prepared Index Refresh candidate does not match the independently verified persisted Revision.",
+                            )
+                        execution.index_refresh_candidate_ids[index] = candidate_id
+                        item_state["indexRefreshState"] = "ready"
+                    except Exception as exc:
+                        execution.index_refresh_failure_code = str(
+                            getattr(exc, "code", "animation-scale-fix-batch-index-refresh-candidate-failed")
+                        )
+                        execution.index_refresh_failure_message = "A Batch Index Refresh candidate could not be prepared."
+                        execution.state = "index_refresh_prepare_failed"
+                        execution.updated_at_utc = _utc_now()
+                        break
+                    execution.index_refresh_cursor += 1
+                    execution.updated_at_utc = _utc_now()
+                if (
+                    execution.state == "index_refresh_preparing"
+                    and execution.index_refresh_cursor >= len(execution.index_refresh_order)
+                ):
+                    execution.state = "index_refresh_ready"
+                    execution.updated_at_utc = _utc_now()
+                return self._response(record)
+
+            if confirmation != f"REFRESH BATCH {batch_plan_id}":
+                raise WorkflowError(
+                    "animation-scale-fix-batch-index-refresh-confirmation-required",
+                    "Batch Index Refresh Apply confirmation did not exactly match the required Batch Plan phrase.",
+                )
+            if execution.index_refresh_cursor != len(execution.index_refresh_order):
+                raise WorkflowError(
+                    "animation-scale-fix-batch-index-refresh-preview-required",
+                    "Every verified persisted child item must complete Index Refresh Preview before Apply.",
+                )
+            if execution.state == "index_refreshed":
+                return self._response(record)
+            if execution.state not in {"index_refresh_ready", "index_refresh_failed"}:
+                raise WorkflowError(
+                    "animation-scale-fix-batch-index-refresh-state-invalid",
+                    f"Batch Index Refresh Apply cannot continue from state {execution.state}.",
+                )
+            candidate_ids = [
+                execution.index_refresh_candidate_ids[index]
+                for index in execution.index_refresh_order
+            ]
+            execution.state = "index_refresh_applying"
+            execution.index_refresh_failure_code = ""
+            execution.index_refresh_failure_message = ""
+            try:
+                refreshed = self.workflow_service.apply_batch_index_refresh(candidate_ids)
+                if refreshed.get("applied") is not True or refreshed.get("restartRequired") is not True:
+                    raise WorkflowError(
+                        "animation-scale-fix-batch-index-refresh-apply-invalid",
+                        "The paired Batch snapshot refresh did not report an atomic active-pointer switch.",
+                    )
+            except Exception as exc:
+                execution.index_refresh_failure_code = str(
+                    getattr(exc, "code", "animation-scale-fix-batch-index-refresh-apply-failed")
+                )
+                execution.index_refresh_failure_message = "The paired Batch snapshot generation could not be activated."
+                execution.state = "index_refresh_failed"
+                execution.updated_at_utc = _utc_now()
+                return self._response(record)
+
+            execution.index_refresh_generation = dict(refreshed.get("newGeneration") or {})
+            for index in execution.index_refresh_order:
+                execution.items[index]["indexRefreshState"] = "refreshed"
+            execution.state = "index_refreshed"
+            execution.updated_at_utc = _utc_now()
+            return self._response(record)
+
+    def rollback(
+        self,
+        *,
+        batch_plan_id: str,
+        mode: Literal["DryRun", "Commit"] = "DryRun",
+        confirmation: str = "",
+        batch_rollback_receipt: str = "",
+        max_assets: int = 1,
+    ) -> dict[str, Any]:
+        with self._lock:
+            self._validate_persistence_step(max_assets, MAX_BATCH_ROLLBACK_STEP, "rollback")
+            self.get(batch_plan_id=batch_plan_id)
+            record = self._plans[batch_plan_id]
+            execution = self._executions.get(batch_plan_id)
+            if execution is None:
+                raise WorkflowError(
+                    "animation-scale-fix-batch-not-persisted",
+                    "Persisted Batch Rollback requires a Batch Plan with saved child items.",
+                )
+            if mode not in {"DryRun", "Commit"}:
+                raise WorkflowError(
+                    "animation-scale-fix-batch-rollback-mode-invalid",
+                    "mode must be DryRun or Commit.",
+                )
+            if any(
+                item.get("state") == "applied" and item.get("saveState") == "unsaved"
+                for item in execution.items
+            ):
+                raise WorkflowError(
+                    "animation-scale-fix-batch-rollback-unsaved-live-items",
+                    "Undo the remaining unsaved Live Apply items before persisted Batch Rollback.",
+                )
+
+            if execution.index_refresh_candidate_ids:
+                self.workflow_service.discard_batch_index_refresh_candidates(
+                    list(execution.index_refresh_candidate_ids.values())
+                )
+                for index in execution.index_refresh_order:
+                    if execution.items[index].get("indexRefreshState") == "ready":
+                        execution.items[index]["indexRefreshState"] = "discarded"
+                execution.index_refresh_candidate_ids.clear()
+
+            persisted_indexes = [
+                index
+                for index, item in enumerate(execution.items)
+                if item.get("saveState") == "saved"
+            ]
+            if not persisted_indexes:
+                if execution.state == "rolled_back":
+                    return self._response(record)
+                raise WorkflowError(
+                    "animation-scale-fix-batch-rollback-nothing-persisted",
+                    "No saved Batch item remains to roll back.",
+                )
+            if any(execution.items[index].get("rollbackAvailable") is not True for index in persisted_indexes):
+                raise WorkflowError(
+                    "animation-scale-fix-batch-rollback-manifest-not-ready",
+                    "Every persisted Batch item must have a rollback-safe manifest before rollback starts.",
+                )
+
+            if not execution.batch_rollback_receipt:
+                if batch_rollback_receipt:
+                    raise WorkflowError(
+                        "animation-scale-fix-batch-rollback-receipt-invalid",
+                        "Do not provide batch_rollback_receipt before persisted Batch Rollback starts.",
+                    )
+                if mode != "DryRun":
+                    raise WorkflowError(
+                        "animation-scale-fix-batch-rollback-dry-run-required",
+                        "Persisted Batch Rollback must start with DryRun.",
+                    )
+                execution.batch_rollback_receipt = "asfbr_" + secrets.token_urlsafe(18)
+                execution.rollback_order = list(reversed(persisted_indexes))
+                execution.rollback_dry_run_cursor = 0
+                execution.rollback_commit_cursor = 0
+                execution.rollback_failure_code = ""
+                execution.rollback_failure_message = ""
+                execution.state = "rollback_dry_run"
+                execution.updated_at_utc = _utc_now()
+            elif batch_rollback_receipt != execution.batch_rollback_receipt:
+                raise WorkflowError(
+                    "animation-scale-fix-batch-rollback-receipt-invalid",
+                    "batch_rollback_receipt must be the exact receipt returned by persisted Batch Rollback.",
+                )
+
+            if mode == "DryRun":
+                if execution.state == "rollback_ready":
+                    return self._response(record)
+                if execution.state not in {"rollback_dry_run", "rollback_dry_run_failed"}:
+                    raise WorkflowError(
+                        "animation-scale-fix-batch-rollback-state-invalid",
+                        f"Rollback DryRun cannot continue from state {execution.state}.",
+                    )
+                execution.state = "rollback_dry_run"
+                execution.rollback_failure_code = ""
+                execution.rollback_failure_message = ""
+                stop = min(
+                    execution.rollback_dry_run_cursor + max_assets,
+                    len(execution.rollback_order),
+                )
+                while execution.rollback_dry_run_cursor < stop:
+                    index = execution.rollback_order[execution.rollback_dry_run_cursor]
+                    item_state = execution.items[index]
+                    try:
+                        dry_run = self.workflow_service.rollback_authorized_live_save(
+                            str(item_state["saveReceipt"]),
+                            mode="DryRun",
+                        )
+                        dry_run_receipt = str(dry_run.get("rollbackDryRunReceipt") or "")
+                        if not dry_run_receipt or dry_run.get("wroteDisk") is not False:
+                            raise WorkflowError(
+                                "animation-scale-fix-batch-child-rollback-dry-run-invalid",
+                                "A child persisted rollback DryRun did not return a valid zero-write receipt.",
+                            )
+                        item_state["rollbackState"] = "ready"
+                        item_state["rollbackDryRunReceipt"] = dry_run_receipt
+                        item_state["expectedRestoredRevision"] = str(
+                            dry_run.get("expectedRestoredRevision") or ""
+                        )
+                    except Exception as exc:
+                        execution.rollback_failure_code = str(
+                            getattr(exc, "code", "animation-scale-fix-batch-child-rollback-dry-run-failed")
+                        )
+                        execution.rollback_failure_message = "A child persisted rollback DryRun failed."
+                        execution.state = "rollback_dry_run_failed"
+                        execution.updated_at_utc = _utc_now()
+                        break
+                    execution.rollback_dry_run_cursor += 1
+                    execution.updated_at_utc = _utc_now()
+                if (
+                    execution.state == "rollback_dry_run"
+                    and execution.rollback_dry_run_cursor >= len(execution.rollback_order)
+                ):
+                    execution.state = "rollback_ready"
+                    execution.updated_at_utc = _utc_now()
+                return self._response(record)
+
+            if confirmation != f"ROLLBACK BATCH {batch_plan_id}":
+                raise WorkflowError(
+                    "animation-scale-fix-batch-rollback-confirmation-required",
+                    "Persisted Batch Rollback confirmation did not exactly match the required Batch Plan phrase.",
+                )
+            if execution.rollback_dry_run_cursor != len(execution.rollback_order):
+                raise WorkflowError(
+                    "animation-scale-fix-batch-rollback-dry-run-required",
+                    "Every persisted child item must complete Rollback DryRun before Commit.",
+                )
+            if execution.state == "rolled_back":
+                return self._response(record)
+            if execution.state not in {"rollback_ready", "rollback_committing", "rollback_failed"}:
+                raise WorkflowError(
+                    "animation-scale-fix-batch-rollback-state-invalid",
+                    f"Rollback Commit cannot continue from state {execution.state}.",
+                )
+            execution.state = "rollback_committing"
+            execution.rollback_failure_code = ""
+            execution.rollback_failure_message = ""
+            stop = min(
+                execution.rollback_commit_cursor + max_assets,
+                len(execution.rollback_order),
+            )
+            while execution.rollback_commit_cursor < stop:
+                index = execution.rollback_order[execution.rollback_commit_cursor]
+                item_state = execution.items[index]
+                try:
+                    restored = self.workflow_service.rollback_authorized_live_save(
+                        str(item_state["saveReceipt"]),
+                        mode="Commit",
+                        rollback_dry_run_receipt=str(item_state["rollbackDryRunReceipt"]),
+                        confirmation=f"ROLLBACK LIVE SAVE {item_state['saveReceipt']}",
+                        change_set_id=execution.change_set_id,
+                        live_apply_receipt=str(item_state["liveApplyReceipt"]),
+                    )
+                    if restored.get("restored") is not True:
+                        raise WorkflowError(
+                            "animation-scale-fix-batch-child-rollback-invalid",
+                            "A child persisted rollback did not confirm independent restore verification.",
+                        )
+                    item_state["rollbackState"] = "rolled-back"
+                    item_state["restoredRevision"] = str(restored.get("restoredRevision") or "")
+                    item_state["saveState"] = "rolled-back"
+                except Exception as exc:
+                    execution.rollback_failure_code = str(
+                        getattr(exc, "code", "animation-scale-fix-batch-child-rollback-failed")
+                    )
+                    execution.rollback_failure_message = "A child persisted rollback Commit failed."
+                    execution.state = "rollback_failed"
+                    execution.updated_at_utc = _utc_now()
+                    break
+                execution.rollback_commit_cursor += 1
+                execution.updated_at_utc = _utc_now()
+
+            if (
+                execution.state == "rollback_committing"
+                and execution.rollback_commit_cursor >= len(execution.rollback_order)
+            ):
+                execution.state = "rolled_back"
+                execution.updated_at_utc = _utc_now()
+            return self._response(record)
+
     def undo_live(
         self,
         *,
@@ -722,10 +1108,16 @@ class AnimationScaleFixBatchService:
                     "Batch Undo requires a Batch Plan that has started Live Apply in this MCP session.",
                 )
 
-            if any(item.get("saveState") == "saved" for item in execution.items):
+            persisted_items = [item for item in execution.items if item.get("saveState") == "saved"]
+            unsaved_applied_items = [
+                item
+                for item in execution.items
+                if item.get("state") == "applied" and item.get("saveState") == "unsaved"
+            ]
+            if persisted_items and not unsaved_applied_items:
                 raise WorkflowError(
                     "animation-scale-fix-batch-persisted-requires-rollback",
-                    "Batch Live Undo cannot revert an item after authorized Save; use persisted Batch Rollback.",
+                    "All remaining Batch changes are persisted; use persisted Batch Rollback instead of Editor Undo.",
                 )
 
             if not execution.batch_undo_receipt:
@@ -739,7 +1131,7 @@ class AnimationScaleFixBatchService:
                         "animation-scale-fix-batch-undo-confirmation-required",
                         "Batch Undo confirmation did not exactly match the required Batch Plan phrase.",
                     )
-                if execution.state in {"undoing", "undo_failed", "undone"}:
+                if execution.state in {"undoing", "undo_failed", "undone", "persisted_partial"}:
                     raise WorkflowError(
                         "animation-scale-fix-batch-undo-state-invalid",
                         "Batch Undo is already active or completed.",
@@ -749,6 +1141,7 @@ class AnimationScaleFixBatchService:
                     index
                     for index in range(len(execution.items) - 1, -1, -1)
                     if execution.items[index]["state"] == "applied"
+                    and execution.items[index].get("saveState") == "unsaved"
                 ]
                 execution.undo_cursor = 0
                 for item in execution.items:
@@ -762,7 +1155,7 @@ class AnimationScaleFixBatchService:
                         "animation-scale-fix-batch-undo-receipt-invalid",
                         "batch_undo_receipt must be the exact receipt returned when Batch Undo started.",
                     )
-                if execution.state == "undone":
+                if execution.state in {"undone", "persisted_partial"}:
                     return self._response(record)
                 if execution.state not in {"undoing", "undo_failed"}:
                     raise WorkflowError(
@@ -797,9 +1190,10 @@ class AnimationScaleFixBatchService:
                 execution.updated_at_utc = _utc_now()
 
             if execution.state == "undoing" and execution.undo_cursor >= len(execution.undo_order):
-                execution.state = "undone"
+                execution.state = "persisted_partial" if persisted_items else "undone"
                 execution.updated_at_utc = _utc_now()
-                self._discard_empty_change_set_if_possible(execution)
+                if not persisted_items:
+                    self._discard_empty_change_set_if_possible(execution)
             return self._response(record)
 
     @staticmethod
@@ -1086,6 +1480,10 @@ class AnimationScaleFixBatchService:
                     "runtimeVerified": False,
                     "saveState": "not-started",
                     "verifyState": "not-started",
+                    "indexRefreshState": "not-started",
+                    "rollbackState": "not-ready",
+                    "rollbackDryRunReceipt": "",
+                    "restoredRevision": "",
                 }
                 for item in record.payload["items"]
             ]
@@ -1108,6 +1506,26 @@ class AnimationScaleFixBatchService:
                     "processedAssets": 0,
                     "totalAssets": 0,
                     "remainingAssets": 0,
+                    "failureCode": "",
+                    "failureMessage": "",
+                },
+                "indexRefresh": {
+                    "batchIndexRefreshReceipt": "",
+                    "processedAssets": 0,
+                    "totalAssets": 0,
+                    "remainingAssets": 0,
+                    "preparedAssets": 0,
+                    "applied": False,
+                    "restartRequired": False,
+                    "generation": {},
+                    "failureCode": "",
+                    "failureMessage": "",
+                },
+                "rollback": {
+                    "batchRollbackReceipt": "",
+                    "dryRunProcessedAssets": 0,
+                    "commitProcessedAssets": 0,
+                    "totalAssets": 0,
                     "failureCode": "",
                     "failureMessage": "",
                 },
@@ -1156,6 +1574,26 @@ class AnimationScaleFixBatchService:
                 "failureCode": execution.verify_failure_code,
                 "failureMessage": execution.verify_failure_message,
             },
+            "indexRefresh": {
+                "batchIndexRefreshReceipt": execution.batch_index_refresh_receipt,
+                "processedAssets": execution.index_refresh_cursor,
+                "totalAssets": len(execution.index_refresh_order),
+                "remainingAssets": max(0, len(execution.index_refresh_order) - execution.index_refresh_cursor),
+                "preparedAssets": len(execution.index_refresh_candidate_ids),
+                "applied": execution.state == "index_refreshed",
+                "restartRequired": execution.state == "index_refreshed",
+                "generation": dict(execution.index_refresh_generation),
+                "failureCode": execution.index_refresh_failure_code,
+                "failureMessage": execution.index_refresh_failure_message,
+            },
+            "rollback": {
+                "batchRollbackReceipt": execution.batch_rollback_receipt,
+                "dryRunProcessedAssets": execution.rollback_dry_run_cursor,
+                "commitProcessedAssets": execution.rollback_commit_cursor,
+                "totalAssets": len(execution.rollback_order),
+                "failureCode": execution.rollback_failure_code,
+                "failureMessage": execution.rollback_failure_message,
+            },
             "undo": {
                 "batchUndoReceipt": execution.batch_undo_receipt,
                 "processedAssets": execution.undo_cursor,
@@ -1176,6 +1614,8 @@ class AnimationScaleFixBatchService:
         saved = sum(1 for item in items if item.get("saveState") == "saved")
         verified = sum(1 for item in items if item.get("verifyState") == "verified")
         unsaved = sum(1 for item in items if item.get("saveState") == "unsaved")
+        rolled_back = sum(1 for item in items if item.get("rollbackState") == "rolled-back")
+        index_refreshed = sum(1 for item in items if item.get("indexRefreshState") == "refreshed")
         return {
             "processedAssets": processed,
             "totalAssets": len(items),
@@ -1188,4 +1628,6 @@ class AnimationScaleFixBatchService:
             "unsavedAssets": unsaved,
             "savedAssets": saved,
             "verifiedAssets": verified,
+            "rolledBackAssets": rolled_back,
+            "indexRefreshedAssets": index_refreshed,
         }

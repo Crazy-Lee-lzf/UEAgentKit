@@ -220,19 +220,27 @@ P2 第一条规划纵向切片已实现：`ue_plan_animation_scale_fix_batch` �
 
 规划切片若创建第 N 个子 Plan 失败，会清理本次已经创建的未消费子 Plan 和 WorkRoot 目录，不留下半成功 Batch Plan。最大 100 个资产，与现有 Change Set 100 Operation 上限对齐。
 
-P2 第二条 Live 纵向切片也已实现：`ue_apply_animation_scale_fix_batch_live` 通过一次精确 Batch confirmation 创建一个现有 Change Set，然后每次最多处理 8 个子 Plan；`ue_get_animation_scale_fix_batch` 始终只读；`ue_undo_animation_scale_fix_batch` 按相反顺序每次最多 Undo 8 个已 applied 事务。子项失败立即 fail-stop，后续项不静默跳过。真实 UE5.6 Smoke 已验证 Root Track `1→100→1`、Runtime Final Root=100、Package/SQLite SHA 不变、Saved=false。下一步进入 Batch Save / Independent Verify / Index Refresh / Rollback。
+P2 已完整实现并通过当前门禁。Live 阶段：`ue_apply_animation_scale_fix_batch_live` 通过一次精确 Batch confirmation 创建现有 Change Set，每次最多处理 8 个子 Plan；`ue_get_animation_scale_fix_batch` 始终只读；`ue_undo_animation_scale_fix_batch` 按相反顺序每次最多 Undo 8 个未持久化事务。子项失败立即 fail-stop，后续项不静默跳过。
 
-不能直接提供“修复全部”按钮。应先从审计结果生成不可变批量计划。
+持久化阶段：`ue_save_animation_scale_fix_batch` 与 `ue_verify_animation_scale_fix_batch` 每次最多处理 2 个资产，继续复用单资产 Authorized Save / Backup Manifest / Independent Reload Verify。保存成功后每个资产都具备标准 Rollback Manifest；若 Package 已保存但 Manifest 生成失败，重试只补 Manifest，不会再次保存同一资产。
 
-建议工具：
+验证后的“保留修改”分支由 `ue_refresh_animation_scale_fix_batch_index` 完成：Preview 每次最多准备 2 个短路径独立 Export candidate；全部 Ready 后以 `REFRESH BATCH <batchPlanId>` 一次性构建一个同时包含整批目标的 paired SQLite + Revision Export generation，并原子切换 active pointer。Apply 成功后当前 MCP session 必须重启。正式 XinYueHu 样本只实测到 Index Preview，确认 Package / SQLite SHA 零写入；多资产 Apply 的原子 generation 行为由真实临时 SQLite + Revision Export Fixture 验证。
+
+验证后的“撤销修改”分支由 `ue_rollback_animation_scale_fix_batch` 完成：DryRun 每次最多 2 个且零写入；全部 Ready 后必须关闭目标 Unreal Editor，再用 `ROLLBACK BATCH <batchPlanId>` 按 Save 反序每次最多 Commit 2 个资产，并做独立重载验证。部分 Save 失败时，先 Live Undo 仍为 `unsaved` 的内存项，再 persisted rollback 已保存项。
+
+真实 UE5.6 持久化 Smoke 已验证：Root Track `1→100`、Authorized Save 到临时 Revision `8ee5391d...`、Independent Verify 通过、Index Refresh Preview 不改变 SQLite、Rollback DryRun 零写入、关闭 Editor 后 Commit 成功，Package SHA 精确恢复正式基线 `a3cb62ec...`，SQLite SHA 全程不变。Rollback 独立验证路径已缩短到 `WorkRoot/rollback-verify/<short-id>`，修复了 Windows 下约 300 字符 Canonical Export 路径导致的写文件失败。
+
+当前 P2 工具：
 
 ```text
 ue_plan_animation_scale_fix_batch
-ue_apply_animation_scale_fix_batch_live
 ue_get_animation_scale_fix_batch
-ue_undo_animation_scale_fix_batch
+ue_apply_animation_scale_fix_batch_live
 ue_save_animation_scale_fix_batch
 ue_verify_animation_scale_fix_batch
+ue_refresh_animation_scale_fix_batch_index
+ue_rollback_animation_scale_fix_batch
+ue_undo_animation_scale_fix_batch
 ```
 
 执行语义：
@@ -241,14 +249,12 @@ ue_verify_animation_scale_fix_batch
 Audit Report
 → Candidate Selection
 → Immutable Batch Plan
-→ User Confirmation
-→ Per-asset Live Apply
-→ Per-asset Runtime Verify
-→ Change Set Summary
-→ Save Preview
-→ Authorized Save
+→ Bounded Live Apply + Runtime Verify
+→ [Unsaved branch] Reverse Live Undo
+→ [Persist branch] Bounded Authorized Save
 → Independent Verify
-→ Index Refresh
+→ [Keep branch] Bounded Index Preview → Atomic Paired Snapshot Apply → MCP Restart
+→ [Revert branch] Rollback DryRun → Editor Closed → Reverse Persisted Rollback Commit
 ```
 
 批量修改必须：

@@ -152,13 +152,17 @@ git diff --check
 
 ```text
 UE5.6 C++ Direct Build       passed
-Python tests                 415 passed
+Python tests                 425 passed
 Ruff                         passed
 Root Lock Live Apply/Undo    passed
 Root Track Live Apply/Undo   passed
 Authorized Save              passed
 Independent Reload Verify    verified
 Index Refresh                passed
+Batch Save / Verify          passed
+Batch Persisted Rollback     passed
+Batch Index Preview          passed
+Atomic Batch Snapshot Fixture passed
 git diff --check             passed
 ```
 
@@ -175,6 +179,8 @@ runtimeVerification
 
 测试环境备注：D3D12 Editor 曾出现 `DXGI_ERROR_DEVICE_REMOVED`；`-NullRHI` 在打开动画资产后又触发 Slate `GetRestoredDimensions` Fatal。最终保存恢复与独立验证使用 D3D11 Editor 完成。这两个崩溃发生在测试 Editor/RHI 层，不改变上述资产写入和验证结论。
 
+真实 Batch Persisted Rollback 曾暴露 Windows 路径长度问题：嵌套 Save Receipt / DryRun Receipt 的独立验证 Canonical 路径约 300 字符，导致 `Failed to write Canonical JSON`。验证输出已改为固定 `WorkRoot/rollback-verify/<short-id>` 短路径，真实样本约 212 字符；修复后完整 Save → Verify → Index Preview → Rollback Smoke 通过。
+
 `scripts/LaunchEditorKeepOpen.ps1` 现在默认使用 `WindowStyle=Minimized`，并在 Bridge 就绪后短暂守护 UE 最终主窗口。真实 Windows `IsIconic` 检查确认脚本结束后和 2 秒后窗口均保持最小化；测试仍使用正常 RHI/Slate，不使用 `-NullRHI`。
 
 ---
@@ -185,9 +191,11 @@ runtimeVerification
 
 当前只读工具会返回 Base Pose 元数据，但修改工具无条件拒绝 Additive，并且 MCP/Patch Schema 不提供 `allowAdditive` 绕过。必须实现 Base Pose 组合求值后才能开放。
 
-### 5.2 当前只有单资产修改能力
+### 5.2 批量修改闭环已实现，但仍有范围限制
 
-批量只读 Audit 第一版已经实现；仍没有批量修复 Plan、Change Set 批量 Apply、批量 Save 和 Rollback。
+P2 已具备不可变 Batch Plan、bounded Change Set Live Apply / Undo、Authorized Save、Independent Verify、Atomic Index Refresh 和 Persisted Rollback。当前自动修复仍只接受 `root-lock-candidate` / `root-track-candidate`；Additive 仍必须等待 Base Pose 组合求值。
+
+Index Refresh Apply 会一次性切换 paired SQLite + Revision Export generation，并要求当前 MCP session 重启；正式 XinYueHu 样本只实测到 Index Preview，正式 active pointer 未被切换。多资产 Apply 的原子行为由真实临时 Snapshot Fixture 验证。
 
 ### 5.3 项目级写入配置尚未正式产品化
 
@@ -208,7 +216,7 @@ docs/Plans/ANIMATION_TOOLS_FOLLOWUP_PLAN_20260806.md
 ```text
 P0 收口、测试、提交当前单资产工具（收口与门禁已完成，本地提交与本文档一并完成，不推送远程）
 P1 批量只读动画 Audit 已完成（显式列表、固定 Index `pathPrefix`、分类过滤、稳定排序、1000 候选有界性能门禁、固定 WorkRoot 确定性 JSON Report 和真实 UE5.6 Smoke 均通过）
-P2 批量修复（不可变 Batch Plan + Get + bounded Change Set Live Apply / reverse Undo 已实现并通过真实 UE5.6 Smoke；Save / Independent Verify / Index Refresh / Rollback 待继续）
+P2 批量修复已完成（不可变 Batch Plan + bounded Live Apply / Undo + Save + Independent Verify + Atomic Index Refresh + Persisted Rollback；真实 UE5.6 持久化 / Index Preview / Rollback Smoke 与多资产 Snapshot Fixture 均通过）
 P3 重定向输出后处理
 P4 Additive + Base Pose
 P5 浮空诊断 Reader

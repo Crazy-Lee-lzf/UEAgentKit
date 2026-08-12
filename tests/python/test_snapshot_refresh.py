@@ -31,6 +31,7 @@ from ue_agent_kit.snapshot_lifecycle import (  # noqa: E402
 
 PROJECT = "我的项目"
 ASSET_PATH = "/Game/UEAgentKitWriteTests/Refresh/DA_RefreshTarget.DA_RefreshTarget"
+ASSET_PATH_B = "/Game/UEAgentKitWriteTests/Refresh/DA_RefreshTargetB.DA_RefreshTargetB"
 PACKAGE_NAME = ASSET_PATH.split(".", 1)[0]
 ASSET_CLASS = "/Script/Engine.PrimaryAssetLabel"
 
@@ -44,16 +45,17 @@ def write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8", newline="\r\n")
 
 
-def canonical_payload(revision: str) -> dict[str, Any]:
+def canonical_payload(revision: str, asset_path: str = ASSET_PATH) -> dict[str, Any]:
+    package_name, _, asset_name = asset_path.partition(".")
     return {
         "schemaVersion": "1.1",
         "exporterVersion": "0.5.1",
         "engineVersion": "5.6.1",
         "projectName": PROJECT,
         "profile": "asset-index",
-        "assetPath": ASSET_PATH,
-        "packageName": PACKAGE_NAME,
-        "assetName": "DA_RefreshTarget",
+        "assetPath": asset_path,
+        "packageName": package_name,
+        "assetName": asset_name,
         "assetClass": ASSET_CLASS,
         "blueprintType": "",
         "parentClass": "",
@@ -72,9 +74,11 @@ def canonical_payload(revision: str) -> dict[str, Any]:
     }
 
 
-def write_export(root: Path, revision: str) -> None:
-    canonical = root / "canonical" / "Game" / "UEAgentKitWriteTests" / "Refresh" / "DA_RefreshTarget.json"
-    write_json(canonical, canonical_payload(revision))
+def write_export(root: Path, revision: str, asset_path: str = ASSET_PATH) -> None:
+    package_name, _, asset_name = asset_path.partition(".")
+    relative = package_name.removeprefix("/Game/").split("/")
+    canonical = root / "canonical" / "Game" / Path(*relative[:-1]) / f"{asset_name}.json"
+    write_json(canonical, canonical_payload(revision, asset_path))
     write_json(
         root / "manifest.json",
         {
@@ -91,7 +95,7 @@ def write_export(root: Path, revision: str) -> None:
             "readerFailureCount": 0,
             "assets": [
                 {
-                    "assetPath": ASSET_PATH,
+                    "assetPath": asset_path,
                     "success": True,
                     "jsonPath": str(canonical),
                     "symbols": 0,
@@ -102,6 +106,26 @@ def write_export(root: Path, revision: str) -> None:
             ],
         },
     )
+
+
+def candidate_from_export(root: Path, asset_path: str, disk_file_size: int) -> dict[str, Any]:
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    canonical_files = list((root / "canonical").rglob("*.json"))
+    if len(canonical_files) != 1:
+        raise AssertionError("candidate fixture must contain one Canonical JSON")
+    canonical_path = canonical_files[0]
+    canonical = json.loads(canonical_path.read_text(encoding="utf-8"))
+    return {
+        "manifest": manifest,
+        "manifestEntry": dict(manifest["assets"][0]),
+        "canonical": canonical,
+        "canonicalPath": canonical_path,
+        "bpctxPath": None,
+        "revision": canonical["revision"]["value"],
+        "assetClass": ASSET_CLASS,
+        "packageName": asset_path.split(".", 1)[0],
+        "diskFileSize": disk_file_size,
+    }
 
 
 class FakeLiveEditorService:
@@ -278,6 +302,56 @@ class SnapshotRefreshTests(unittest.TestCase):
         self.assertEqual(new_index.get_revision_record(ASSET_PATH)["revision_value"], after_revision)
         with self.assertRaisesRegex(WorkflowError, "must be restarted"):
             service.refresh_asset_index(ASSET_PATH, mode="Preview")
+
+    def test_batch_generation_atomically_merges_multiple_candidates(self) -> None:
+        service = self.make_service()
+        self.package_file.write_bytes(b"package-after-a")
+        revision_a = sha256_revision(self.package_file)
+        package_b = (
+            self.project_path.parent
+            / "Content"
+            / "UEAgentKitWriteTests"
+            / "Refresh"
+            / "DA_RefreshTargetB.uasset"
+        )
+        package_b.write_bytes(b"package-after-b")
+        revision_b = sha256_revision(package_b)
+
+        candidate_root_a = self.work_root / "candidate-a"
+        candidate_root_b = self.work_root / "candidate-b"
+        write_export(candidate_root_a, revision_a, ASSET_PATH)
+        write_export(candidate_root_b, revision_b, ASSET_PATH_B)
+        candidate_a = candidate_from_export(candidate_root_a, ASSET_PATH, self.package_file.stat().st_size)
+        candidate_b = candidate_from_export(candidate_root_b, ASSET_PATH_B, package_b.stat().st_size)
+
+        generation = service._build_snapshot_generation_batch(
+            [(candidate_root_a, candidate_a), (candidate_root_b, candidate_b)]
+        )
+        self.assertEqual(generation["refreshedAssetCount"], 2)
+        self.assertEqual(
+            generation["targetRevisions"],
+            [
+                {"assetPath": ASSET_PATH, "revision": revision_a},
+                {"assetPath": ASSET_PATH_B, "revision": revision_b},
+            ],
+        )
+
+        resolved = resolve_active_snapshot(self.database, self.revision_export, self.work_root, PROJECT)
+        new_index = IndexQueryService(resolved.database)
+        self.assertEqual(new_index.get_revision_record(ASSET_PATH)["revision_value"], revision_a)
+        self.assertEqual(new_index.get_revision_record(ASSET_PATH_B)["revision_value"], revision_b)
+        self.assertEqual(
+            (resolved.revision_export / "unchanged.txt").read_bytes(),
+            b"external-before",
+        )
+        manifest = json.loads((resolved.revision_export / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(
+            sorted(item["assetPath"] for item in manifest["assets"] if item.get("success")),
+            sorted([ASSET_PATH, ASSET_PATH_B]),
+        )
+        pointer = json.loads(self.active.pointer_path.read_text(encoding="utf-8"))
+        self.assertEqual(pointer["refreshedAssetCount"], 2)
+        self.assertEqual(pointer["refreshedAssets"], generation["targetRevisions"])
 
     def test_dirty_live_asset_is_rejected_before_export(self) -> None:
         runner = RefreshRunner(self.package_file)

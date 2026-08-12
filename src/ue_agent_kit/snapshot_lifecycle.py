@@ -286,6 +286,7 @@ def write_active_pointer(
     revision_export_manifest_sha256: str,
     refreshed_asset_path: str,
     refreshed_revision: str,
+    refreshed_assets: list[dict[str, str]] | None = None,
 ) -> Path:
     if not GENERATION_ID_PATTERN.fullmatch(generation_id):
         raise SnapshotLifecycleError("snapshot-generation-invalid", "The generated snapshot ID is invalid.")
@@ -305,6 +306,9 @@ def write_active_pointer(
         "refreshedRevision": refreshed_revision,
         "createdUtc": utc_now_iso(),
     }
+    if refreshed_assets is not None:
+        payload["refreshedAssetCount"] = len(refreshed_assets)
+        payload["refreshedAssets"] = refreshed_assets
     temporary = active.pointer_path.with_name(active.pointer_path.name + ".tmp-" + uuid.uuid4().hex)
     data = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8") + b"\n"
     try:
