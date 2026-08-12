@@ -1,8 +1,8 @@
 # UEAgentKit 动画工具后续开发计划
 
-更新时间：2026-08-08
+更新时间：2026-08-12
 目标分支：`feature/live-editor-realtime-io`
-当前提交基线：`afb25ba feat: add live animation scale diagnosis`
+当前已完成基线：`5310387 feat: complete animation scale fix batch workflow`
 测试工程：`E:\\WorkSpace\\我的项目\\我的项目.uproject`
 目标接入工程：`E:\\WorkSpace\\ModelPreview\\ModelPreview.uproject`
 
@@ -279,31 +279,65 @@ Target Skeleton Root Reference Component Scale
 
 ## 5. P3：重定向输出后处理
 
-动画比例修复最终应并入动画重定向工作流，而不是每次重定向完成后人工扫描。
+P3 第一条只读纵向切片已实现并通过真实 UE5.6 零残留 Smoke。Retarget Batch 完成后不再重新扫描整个输出目录，而是直接使用该 Task 已记录的精确 `outputs[]`。每个输出现在额外带 `assetClass`、`assetType`、`skeletonPath`，因此后处理不按文件名猜类型。
 
-目标链路：
+新增工具：
 
 ```text
-Retarget Batch Complete
-→ Classify Output Assets
-→ Audit AnimSequence
-→ Build Suggested Fix Plan
-→ User Review
-→ Apply / Save / Verify
-→ Update BlendSpace / AimOffset / Montage References
+ue_start_animation_retarget_postprocess
+ue_get_animation_retarget_postprocess
+ue_plan_animation_retarget_postprocess
 ```
 
-需要区分：
+当前链路：
 
-- 普通 AnimSequence；
-- Root Motion AnimSequence；
-- Additive AnimSequence；
-- BlendSpace；
-- AimOffset；
-- AnimMontage；
-- 被其他资产引用的输出。
+```text
+Completed / Saved Retarget Batch
+→ Exact Output Classification
+→ AnimSequence only: existing bounded Animation Scale Audit
+→ Build Suggested Fix / Manual Review / Reference Follow-up
+→ Immutable Suggested Post-process Plan under WorkRoot
+```
 
-不得在 `Retarget Batch` 内静默修改 Root Lock 或 Root Track。建议只生成后处理建议，由单独确认阶段执行。
+只有 `AnimSequence` 会进入现有 P1 Scale Audit。`BlendSpace` / `AimOffset` / `AnimMontage` 当前只进入 `referenceFollowups`，不修改引用资产。Additive / Root Motion Review 等不能安全自动修复的分类进入 `manualReview`，不新增旁路。
+
+Suggested Plan 明确保持只读：
+
+```text
+modifiesAssets = false
+autoApplyAllowed = false
+requiresUserReview = true
+referenceAssetMutationImplemented = false
+```
+
+这里不能直接生成可执行 P2 Batch Plan。新 Retarget 输出在 Batch 完成后可能尚未进入 immutable SQLite，而 P2 Plan 强制依赖 fresh Index Revision。存在 `root-lock-candidate` / `root-track-candidate` 时，P3 Suggested Plan 会显式返回：
+
+```text
+requiresRetargetOutputIndexRefreshBeforeP2Plan = true
+p2Workflow = animation-scale-fix-batch
+```
+
+真实 UE5.6 Smoke 使用已有 IK Retargeter，只创建随机命名的一个新 AnimSequence，不调用 Retarget Setup、不覆盖现有动画。输出被 C++ 分类为 `AnimSequence`，Scale Audit 得到 `root-lock-candidate`，Suggested Plan 写入固定 WorkRoot；随后 Retarget Save + Rollback DryRun/Commit 删除临时输出。最终 `P3_*.uasset` 数量为 0，UnrealEditor 已关闭。
+
+完整第一阶段契约见：
+
+```text
+docs/RETARGET_POSTPROCESS_TOOL.md
+```
+
+P3 下一条纵向切片解决 Retarget 输出的持久化 / paired Index Refresh / MCP Restart 边界，然后才把 eligible AnimSequence suggestion 转换为现有 P2 Batch Plan：
+
+```text
+P3 Suggested Plan
+→ User Review
+→ Authorized Retarget Save / Independent Verify
+→ Paired Revision Export + SQLite Refresh
+→ MCP Restart
+→ Revalidate against fresh Index Revision
+→ Existing P2 Animation Scale Fix Batch Plan
+```
+
+之后再单独实现 BlendSpace / AimOffset / Montage 引用更新。仍不得在 `Retarget Batch` 内静默修改 Root Lock 或 Root Track；Additive + Base Pose 继续属于 P4。
 
 ---
 

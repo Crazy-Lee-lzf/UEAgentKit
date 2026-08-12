@@ -1022,6 +1022,39 @@ class RetargetWorkflowTests(unittest.TestCase):
         self.assertEqual(change_set.operations[0].status, "saved")
         self.assertTrue(change_set.operations[0].receipt.startswith("live_rtsave_"))
 
+    def test_retarget_postprocess_context_does_not_advance_queued_batch(self) -> None:
+        service, _ = self._make_service()
+        plan = service.plan_animation_retarget(
+            source_mesh=SOURCE_MESH,
+            target_mesh=TARGET_MESH,
+            output_directory="/Game/Retargeted",
+        )
+        service.live_editor_service.call_method.reset_mock()
+        started = service.start_animation_retarget_batch(
+            plan_id=plan["planId"],
+            retargeter="/Game/Retargeted/IKRetargeter_A.IKRetargeter_A",
+            source_assets=["/Game/Characters/Mannequins/Idle"],
+            output_directory="/Game/Retargeted",
+            naming={"prefix": "RTG_", "suffix": "", "search": "", "replace": ""},
+        )
+
+        with self.assertRaises(Exception) as context:
+            service.get_animation_retarget_postprocess_context(task_id=started["taskId"])
+
+        self.assertEqual(getattr(context.exception, "code", ""), "retarget-postprocess-task-invalid-state")
+        self.assertEqual(service._retarget_batch_tasks[started["taskId"]]["status"], "queued")
+        service.live_editor_service.call_method.assert_not_called()
+
+        service._retarget_batch_tasks[started["taskId"]].update(
+            status="completed",
+            outputs=[{"outputPath": "/Game/Retargeted/RTG_Idle.RTG_Idle", "assetType": "AnimSequence"}],
+        )
+        readback = service.get_animation_retarget_postprocess_context(task_id=started["taskId"])
+        self.assertEqual(readback["status"], "completed")
+        self.assertEqual(readback["outputs"][0]["assetType"], "AnimSequence")
+        service.live_editor_service.call_method.assert_not_called()
+
+
 
 if __name__ == "__main__":
     unittest.main()

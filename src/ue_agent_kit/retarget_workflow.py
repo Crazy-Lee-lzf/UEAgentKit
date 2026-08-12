@@ -1333,6 +1333,46 @@ class RetargetWorkflowMixin:
             },
         }
 
+    def get_animation_retarget_postprocess_context(self, *, task_id: str) -> dict[str, Any]:
+        """Return one completed retarget batch context without advancing or mutating the task."""
+        with self._lock:
+            tasks = getattr(self, "_retarget_batch_tasks", {})
+            task = tasks.get(task_id)
+            if task is None:
+                raise self._workflow_error(
+                    "retarget-batch-task-not-found",
+                    "The retarget batch task is not active in this MCP server session.",
+                )
+            if task["status"] not in {"completed", "saved"}:
+                raise self._workflow_error(
+                    "retarget-postprocess-task-invalid-state",
+                    f"Only a completed or saved retarget batch can be post-processed (current state {task['status']}).",
+                )
+            rollback_report = task.get("rollbackReport")
+            if isinstance(rollback_report, dict) and rollback_report.get("valid") is True:
+                raise self._workflow_error(
+                    "retarget-postprocess-task-rolled-back",
+                    "The retarget batch was already rolled back and no longer has valid outputs to post-process.",
+                )
+            outputs = task.get("outputs", [])
+            if not isinstance(outputs, list) or any(not isinstance(item, dict) for item in outputs):
+                raise self._workflow_error(
+                    "retarget-postprocess-invalid-outputs",
+                    "The retarget batch output records are invalid.",
+                )
+            return {
+                "taskId": task["taskId"],
+                "status": task["status"],
+                "planId": task["planId"],
+                "planDigest": task.get("planDigest", ""),
+                "retargeter": task["retargeter"],
+                "sourceMesh": task["sourceMesh"],
+                "targetMesh": task["targetMesh"],
+                "outputDirectory": task["outputDirectory"],
+                "outputs": [dict(item) for item in outputs],
+                "savedAssets": list(task.get("savedAssets", [])),
+            }
+
     @staticmethod
     def _retarget_batch_task_result(task: dict[str, Any]) -> dict[str, Any]:
         return {

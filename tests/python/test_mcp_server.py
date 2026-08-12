@@ -1645,7 +1645,7 @@ class McpServerTests(unittest.TestCase):
             [tool.name for tool in tools],
             tool_names_for_mode(workflow_enabled=True, memory_enabled=True),
         )
-        self.assertEqual(len(tools), 61)
+        self.assertEqual(len(tools), 64)
 
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
         memory_contract = capabilities["projectMemory"]
@@ -1723,7 +1723,7 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         expected_names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 77)
+        self.assertEqual(len(tools), 80)
         for tool in tools:
             definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
             self.assertEqual(bool(tool.annotations.readOnlyHint), definition.read_only, tool.name)
@@ -1731,6 +1731,16 @@ class McpServerTests(unittest.TestCase):
             self.assertEqual(bool(tool.annotations.idempotentHint), definition.idempotent, tool.name)
 
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
+        postprocess = capabilities["liveEditor"]["retargetPostprocess"]
+        self.assertTrue(postprocess["available"])
+        self.assertEqual(postprocess["startTool"], "ue_start_animation_retarget_postprocess")
+        self.assertEqual(postprocess["statusTool"], "ue_get_animation_retarget_postprocess")
+        self.assertEqual(postprocess["planTool"], "ue_plan_animation_retarget_postprocess")
+        self.assertFalse(postprocess["assetWrites"])
+        self.assertFalse(postprocess["autoApplyAllowed"])
+        self.assertTrue(postprocess["requiresUserReview"])
+        self.assertTrue(postprocess["requiresRetargetOutputIndexRefreshBeforeP2Plan"])
+        self.assertFalse(postprocess["referenceAssetMutationImplemented"])
         change_sets = capabilities["liveEditor"]["liveWriteChangeSets"]
         self.assertTrue(change_sets["available"])
         self.assertEqual(change_sets["createTool"], "ue_create_change_set")

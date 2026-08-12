@@ -183,6 +183,10 @@ namespace UEAgentKitRetarget
 					TEXT("Batch retarget did not produce the expected output %s."), *Output.OutputPath);
 				return false;
 			}
+
+			FRetargetBatchOutputAsset VerifiedOutput = Output;
+			VerifiedOutput.AssetClass = Created->GetClass()->GetPathName();
+			VerifiedOutput.AssetType = TEXT("Other");
 			if (UAnimationAsset* CreatedAnim = Cast<UAnimationAsset>(Created))
 			{
 				if (CreatedAnim->GetSkeleton() != TargetMesh->GetSkeleton())
@@ -192,8 +196,29 @@ namespace UEAgentKitRetarget
 						TEXT("Batch output %s was not retargeted to the target skeleton."), *Output.OutputPath);
 					return false;
 				}
+				VerifiedOutput.SkeletonPath = CreatedAnim->GetSkeleton() != nullptr
+					? CreatedAnim->GetSkeleton()->GetPathName()
+					: FString();
+				if (Created->IsA<UAnimSequence>())
+				{
+					VerifiedOutput.AssetType = TEXT("AnimSequence");
+				}
+				else if (Created->IsA<UAnimMontage>())
+				{
+					VerifiedOutput.AssetType = TEXT("AnimMontage");
+				}
+				else if (Created->IsA<UBlendSpace>())
+				{
+					VerifiedOutput.AssetType = Created->GetClass()->GetName().Contains(TEXT("AimOffset"))
+						? TEXT("AimOffset")
+						: TEXT("BlendSpace");
+				}
+				else
+				{
+					VerifiedOutput.AssetType = TEXT("AnimationAsset");
+				}
 			}
-			OutOutputs.Add(Output);
+			OutOutputs.Add(MoveTemp(VerifiedOutput));
 		}
 		return true;
 	}
@@ -203,6 +228,9 @@ namespace UEAgentKitRetarget
 		TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
 		Json->SetStringField(TEXT("inputPath"), Output.InputPath);
 		Json->SetStringField(TEXT("outputPath"), Output.OutputPath);
+		Json->SetStringField(TEXT("assetClass"), Output.AssetClass);
+		Json->SetStringField(TEXT("assetType"), Output.AssetType);
+		Json->SetStringField(TEXT("skeletonPath"), Output.SkeletonPath);
 		return Json;
 	}
 }

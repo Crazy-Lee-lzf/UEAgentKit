@@ -151,6 +151,9 @@ namespace UEAgentKitRetarget
 	{
 		FString InputPath;
 		FString OutputPath;
+		FString AssetClass;
+		FString AssetType;
+		FString SkeletonPath;
 	};
 
 	// Runs one batch retarget step over the given source animation assets using

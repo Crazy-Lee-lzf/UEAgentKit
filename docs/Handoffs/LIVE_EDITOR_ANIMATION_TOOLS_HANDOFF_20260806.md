@@ -1,9 +1,9 @@
 # `feature/live-editor-realtime-io` 动画工具交接
 
-更新时间：2026-08-08
+更新时间：2026-08-12
 工作区：`E:/WorkSpace/UEAgentKit-RealtimeIO`
 分支：`feature/live-editor-realtime-io`
-P0 工作基线：`afb25ba feat: add live animation scale diagnosis`
+当前已完成基线：`5310387 feat: complete animation scale fix batch workflow`
 远程状态：本地分支领先远程，未推送
 
 ---
@@ -122,20 +122,22 @@ Final Index Generation = gen_20260808T091840Z_56f7279aced2
 
 ## 3. 当前工作树状态
 
-P0 单资产修复纵向切片已本地提交：
+P2 批量动画比例修复闭环已本地提交：
 
 ```text
-7180fa9 feat: add controlled animation scale repair workflow
+5310387 feat: complete animation scale fix batch workflow
 ```
 
-当前未提交工作树属于 P1 第一条只读批量 Audit 纵向切片，主要包含：
+当前未提交工作树属于 P3 第一条 Retarget Output Post-process 只读纵向切片，主要包含：
 
-- MCP `ue_start_animation_scale_audit` / `ue_get_animation_scale_audit` / `ue_cancel_animation_scale_audit`；
-- 有界 Batch、分页、Cancel 和 Editor Session 失效检测；
-- `normal` / Root Lock / Root Track / Root Motion / Additive 等分类；
-- 真实 UE5.6 只读 Audit Smoke；
-- 测试 Editor 默认最小化启动；
-- P1 文档和 Tool Registry / Capability 契约更新。
+- Retarget Batch output 增加 `assetClass` / `assetType` / `skeletonPath`；
+- MCP `ue_start_animation_retarget_postprocess` / `ue_get_animation_retarget_postprocess` / `ue_plan_animation_retarget_postprocess`；
+- 只把精确 Retarget outputs 中的 `AnimSequence` 送入现有 bounded Scale Audit；
+- BlendSpace / AimOffset / AnimMontage 只生成 reference follow-up，不修改引用；
+- Additive / Root Motion Review 等进入 manual review；
+- Suggested Plan 固定写入 WorkRoot，`modifiesAssets=false`、`autoApplyAllowed=false`；
+- 真实 UE5.6 Smoke 创建随机临时 Retarget AnimSequence，完成 P3 Audit/Plan 后通过 Retarget Rollback 删除，磁盘零残留；
+- P3 工具契约见 `docs/RETARGET_POSTPROCESS_TOOL.md`。
 
 接手后第一件事必须运行：
 
@@ -152,7 +154,7 @@ git diff --check
 
 ```text
 UE5.6 C++ Direct Build       passed
-Python tests                 425 passed
+Python tests                 430 passed
 Ruff                         passed
 Root Lock Live Apply/Undo    passed
 Root Track Live Apply/Undo   passed
@@ -163,6 +165,8 @@ Batch Save / Verify          passed
 Batch Persisted Rollback     passed
 Batch Index Preview          passed
 Atomic Batch Snapshot Fixture passed
+P3 Retarget Postprocess      passed
+P3 zero-residue Rollback     passed
 git diff --check             passed
 ```
 
@@ -197,7 +201,15 @@ P2 已具备不可变 Batch Plan、bounded Change Set Live Apply / Undo、Author
 
 Index Refresh Apply 会一次性切换 paired SQLite + Revision Export generation，并要求当前 MCP session 重启；正式 XinYueHu 样本只实测到 Index Preview，正式 active pointer 未被切换。多资产 Apply 的原子行为由真实临时 Snapshot Fixture 验证。
 
-### 5.3 项目级写入配置尚未正式产品化
+### 5.3 P3 当前只生成 Suggested Plan
+
+P3 第一阶段已把 Retarget Batch 的精确 outputs 接入现有 Animation Scale Audit，并生成 WorkRoot 内不可变 Suggested Plan。当前 `modifiesAssets=false`、`autoApplyAllowed=false`，BlendSpace / AimOffset / Montage 也只记录 reference follow-up。
+
+不能直接把 Retarget 新输出转成 P2 executable Batch Plan，因为新输出可能尚未进入 immutable SQLite，而 P2 强制依赖 fresh Index Revision。下一条 P3 纵向切片必须先闭合 Authorized Retarget Save / Independent Verify / paired Index Refresh / MCP Restart，再基于新 Index Revision 重建或校验建议并接入 P2。
+
+真实 UE5.6 P3 Smoke 已创建随机临时 Retarget AnimSequence，输出分类和 Suggested Plan 均正确；随后 Retarget Rollback 删除临时输出，最终 `P3_*.uasset` 为 0，UnrealEditor 已关闭。
+
+### 5.4 项目级写入配置尚未正式产品化
 
 当前测试通过命令行固定 Policy 启用。用户提到“取消我的项目只读”，正确后续是建立项目级 Write Profile，而不是全局开放 `/Game`。
 
@@ -217,7 +229,7 @@ docs/Plans/ANIMATION_TOOLS_FOLLOWUP_PLAN_20260806.md
 P0 收口、测试、提交当前单资产工具（收口与门禁已完成，本地提交与本文档一并完成，不推送远程）
 P1 批量只读动画 Audit 已完成（显式列表、固定 Index `pathPrefix`、分类过滤、稳定排序、1000 候选有界性能门禁、固定 WorkRoot 确定性 JSON Report 和真实 UE5.6 Smoke 均通过）
 P2 批量修复已完成（不可变 Batch Plan + bounded Live Apply / Undo + Save + Independent Verify + Atomic Index Refresh + Persisted Rollback；真实 UE5.6 持久化 / Index Preview / Rollback Smoke 与多资产 Snapshot Fixture 均通过）
-P3 重定向输出后处理
+P3 第一阶段已完成（exact outputs 分类 + AnimSequence bounded Audit + Suggested Plan + 真实 UE5.6 零残留 Smoke）；下一步闭合 Retarget Save / paired Index Refresh / MCP Restart 后再接入 P2
 P4 Additive + Base Pose
 P5 浮空诊断 Reader
 P6 尾巴/衣服/Physics/Cloth Reader

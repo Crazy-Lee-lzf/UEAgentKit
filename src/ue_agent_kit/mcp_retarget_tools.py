@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from .animation_scale_audit import AnimationScaleAuditService
 from .editor_bridge import LiveEditorBridgeService, LiveEditorError
+from .retarget_postprocess import RetargetPostprocessService
 
 RETARGET_INSPECT_CAPABILITY = "retarget.inspect"
 RETARGET_PLAN_CAPABILITY = "retarget.plan"
@@ -23,6 +24,9 @@ _CAPABILITY_FOR_TOOL = {
     "ue_apply_animation_retarget_setup": RETARGET_CONFIGURE_CAPABILITY,
     "ue_start_animation_retarget_batch": RETARGET_BATCH_CAPABILITY,
     "ue_get_animation_retarget_batch": RETARGET_BATCH_CAPABILITY,
+    "ue_start_animation_retarget_postprocess": RETARGET_INSPECT_CAPABILITY,
+    "ue_get_animation_retarget_postprocess": RETARGET_INSPECT_CAPABILITY,
+    "ue_plan_animation_retarget_postprocess": RETARGET_INSPECT_CAPABILITY,
     "ue_cancel_animation_retarget_batch": RETARGET_BATCH_CAPABILITY,
     "ue_save_animation_retarget_batch": RETARGET_BATCH_CAPABILITY,
     "ue_validate_animation_retarget": RETARGET_VALIDATE_CAPABILITY,
@@ -269,6 +273,8 @@ def register_retarget_workflow_tools(
         openWorldHint=False,
     )
 
+    postprocess_service = RetargetPostprocessService(workflow_service)
+
     @server.tool(annotations=planning_annotations)
     def ue_plan_animation_retarget(
         sourceMesh: str,
@@ -358,6 +364,63 @@ def register_retarget_workflow_tools(
             return workflow_service.get_animation_retarget_batch(task_id=taskId)
         except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
             return error_response("ue_get_animation_retarget_batch", exc, read_only=True)
+
+    @server.tool(annotations=planning_annotations)
+    def ue_start_animation_retarget_postprocess(
+        retargetTaskId: str,
+        loadIfNeeded: bool = True,
+        batchSize: int = 1,
+    ) -> dict[str, Any]:
+        """Start read-only post-processing over the exact outputs of one completed retarget batch."""
+        try:
+            _assert_retarget_policy_capability(
+                policy_path=workflow_service.config.policy_path,
+                tool_name="ue_start_animation_retarget_postprocess",
+            )
+            return {
+                "tool": "ue_start_animation_retarget_postprocess",
+                "ok": True,
+                "readOnly": True,
+                "result": postprocess_service.start(
+                    retarget_task_id=retargetTaskId,
+                    load_if_needed=loadIfNeeded,
+                    batch_size=batchSize,
+                ),
+            }
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_start_animation_retarget_postprocess", exc, read_only=True)
+
+    @server.tool(annotations=read_annotations)
+    def ue_get_animation_retarget_postprocess(postprocessId: str) -> dict[str, Any]:
+        """Advance at most one bounded AnimSequence audit batch and return post-process suggestions."""
+        try:
+            _assert_retarget_policy_capability(
+                policy_path=workflow_service.config.policy_path,
+                tool_name="ue_get_animation_retarget_postprocess",
+            )
+            return {
+                "tool": "ue_get_animation_retarget_postprocess",
+                "ok": True,
+                "readOnly": True,
+                "result": postprocess_service.get(postprocess_id=postprocessId),
+            }
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_get_animation_retarget_postprocess", exc, read_only=True)
+
+    @server.tool(annotations=planning_annotations)
+    def ue_plan_animation_retarget_postprocess(
+        postprocessId: str,
+        description: str = "",
+    ) -> dict[str, Any]:
+        """Persist an immutable read-only suggested post-process Plan under the fixed WorkRoot."""
+        try:
+            _assert_retarget_policy_capability(
+                policy_path=workflow_service.config.policy_path,
+                tool_name="ue_plan_animation_retarget_postprocess",
+            )
+            return postprocess_service.plan(postprocess_id=postprocessId, description=description)
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_plan_animation_retarget_postprocess", exc, read_only=True)
 
     @server.tool(annotations=action_annotations)
     def ue_cancel_animation_retarget_batch(taskId: str) -> dict[str, Any]:
