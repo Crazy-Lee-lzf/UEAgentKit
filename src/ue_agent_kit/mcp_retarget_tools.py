@@ -7,6 +7,7 @@ from .additive_diagnose import build_additive_diagnosis_item
 from .additive_evaluation import build_additive_evaluation_item
 from .additive_fix_plan import build_additive_fix_plan
 from .animation_scale_audit import AnimationScaleAuditService
+from .character_ground_contact import build_ground_contact_item
 from .editor_bridge import LiveEditorBridgeService, LiveEditorError
 from .retarget_postprocess import RetargetPostprocessService
 
@@ -22,6 +23,7 @@ _CAPABILITY_FOR_TOOL = {
     "ue_diagnose_additive_animation": RETARGET_INSPECT_CAPABILITY,
     "ue_evaluate_animation_with_base_pose": RETARGET_INSPECT_CAPABILITY,
     "ue_plan_additive_base_pose_fix": RETARGET_INSPECT_CAPABILITY,
+    "ue_diagnose_character_ground_contact": RETARGET_INSPECT_CAPABILITY,
     "ue_start_animation_scale_audit": RETARGET_INSPECT_CAPABILITY,
     "ue_get_animation_scale_audit": RETARGET_INSPECT_CAPABILITY,
     "ue_cancel_animation_scale_audit": RETARGET_INSPECT_CAPABILITY,
@@ -238,6 +240,41 @@ def register_retarget_tools(
             return response
         except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
             return error_response("ue_plan_additive_base_pose_fix", exc, read_only=True)
+
+    @server.tool(annotations=read_annotations)
+    def ue_diagnose_character_ground_contact(
+        characterPath: str,
+        animationPath: str = "",
+        rootBone: str = "root",
+        pelvisBone: str = "pelvis",
+        leftFootBone: str = "foot_l",
+        rightFootBone: str = "foot_r",
+        loadIfNeeded: bool = False,
+    ) -> dict[str, Any]:
+        """Read-only ground-contact diagnosis: capsule, mesh offset and animation foot grounding."""
+        try:
+            _assert_retarget_policy_capability(
+                policy_path=getattr(live_editor_service.config, "policy_path", None),
+                tool_name="ue_diagnose_character_ground_contact",
+            )
+            response = live_editor_service.call_tool(
+                "ue_diagnose_character_ground_contact",
+                {
+                    "characterPath": characterPath,
+                    "animationPath": animationPath,
+                    "rootBone": rootBone,
+                    "pelvisBone": pelvisBone,
+                    "leftFootBone": leftFootBone,
+                    "rightFootBone": rightFootBone,
+                    "loadIfNeeded": loadIfNeeded,
+                },
+            )
+            result = response.get("result")
+            if isinstance(result, dict):
+                response["result"] = build_ground_contact_item(result)
+            return response
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_diagnose_character_ground_contact", exc, read_only=True)
 
     @server.tool(annotations=planning_annotations)
     def ue_start_animation_scale_audit(

@@ -251,6 +251,51 @@ class LiveEditorBridgeService:
                 "boneNames": normalized_bones,
                 "loadIfNeeded": bool(params.get("loadIfNeeded", False)),
             }
+        if tool_name == "ue_diagnose_character_ground_contact":
+            allowed = {
+                "characterPath",
+                "animationPath",
+                "rootBone",
+                "pelvisBone",
+                "leftFootBone",
+                "rightFootBone",
+                "loadIfNeeded",
+            }
+            LiveEditorBridgeService._reject_unknown_params(params, allowed)
+            character_path = LiveEditorBridgeService._bounded_string(
+                params.get("characterPath", ""), "characterPath", 512)
+            if not character_path:
+                raise LiveEditorError(
+                    "live-editor-invalid-parameters",
+                    "characterPath must be a non-empty /Game Object Path.",
+                )
+            LiveEditorBridgeService._validate_game_object_path(character_path)
+            animation_path = LiveEditorBridgeService._bounded_string(
+                params.get("animationPath", ""), "animationPath", 512)
+            if animation_path:
+                LiveEditorBridgeService._validate_game_object_path(animation_path)
+            root_bone = LiveEditorBridgeService._bounded_string(
+                params.get("rootBone", "root"), "rootBone", 128)
+            pelvis_bone = LiveEditorBridgeService._bounded_string(
+                params.get("pelvisBone", "pelvis"), "pelvisBone", 128)
+            left_foot_bone = LiveEditorBridgeService._bounded_string(
+                params.get("leftFootBone", "foot_l"), "leftFootBone", 128)
+            right_foot_bone = LiveEditorBridgeService._bounded_string(
+                params.get("rightFootBone", "foot_r"), "rightFootBone", 128)
+            if not all((root_bone, pelvis_bone, left_foot_bone, right_foot_bone)):
+                raise LiveEditorError(
+                    "live-editor-invalid-parameters",
+                    "Bone names must not be empty.",
+                )
+            return {
+                "characterPath": character_path,
+                "animationPath": animation_path,
+                "rootBone": root_bone,
+                "pelvisBone": pelvis_bone,
+                "leftFootBone": left_foot_bone,
+                "rightFootBone": right_foot_bone,
+                "loadIfNeeded": bool(params.get("loadIfNeeded", False)),
+            }
         if tool_name == "ue_plan_animation_retarget":
             allowed = {"sourceMesh", "targetMesh", "includeOptionalChains"}
             LiveEditorBridgeService._reject_unknown_params(params, allowed)

@@ -33,6 +33,8 @@ G9  文档已同步（新工具 docs/*.md + 本计划状态勾选 + tool_registr
 
 ## 1. P5 浮空诊断 Reader（`ue_diagnose_character_ground_contact`）
 
+> **状态（2026-08-15）**：P5.1–P5.5 全部完成。C++ 读取器 `editor.diagnoseCharacterGroundContact`、Python 分类 `character_ground_contact.py`、MCP 工具 + `tool_registry` 注册 + 参数归一化、真实 UE5.6 Smoke、`docs/CHARACTER_GROUND_CONTACT_TOOL.md` 均已落地。**capability 决策变更**：P5.4 未新增独立 `character.ground-contact.inspect`，而是复用现有 `retarget.inspect`（与 `ue_diagnose_animation_scale` / `ue_diagnose_additive_animation` 等同门禁，避免重新引入 `retargetCapabilities` 不在 `POLICY_FIELDS` 的 policy 冲突）。
+
 **目标**：只读诊断「浮空」来源（碰撞胶囊 / Mesh Offset / 动画），输出分类，不做任何修改。
 
 **依赖**：无。可与 P6 / P7 并行。

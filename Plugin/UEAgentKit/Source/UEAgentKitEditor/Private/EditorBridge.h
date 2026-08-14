@@ -140,6 +140,17 @@ private:
 		TSharedPtr<FJsonObject>& OutResult,
 		FString& OutErrorCode,
 		FString& OutErrorMessage) const;
+	bool TryDiagnoseCharacterGroundContactResult(
+		const FString& CharacterPath,
+		const FString& AnimationPath,
+		const FString& RootBone,
+		const FString& PelvisBone,
+		const FString& LeftFootBone,
+		const FString& RightFootBone,
+		bool bLoadIfNeeded,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage) const;
 	bool TryApplyAnimationRetargetSetupResult(
 		const FString& SourceMeshPath,
 		const FString& TargetMeshPath,

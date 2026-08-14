@@ -91,6 +91,12 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
         "read",
         "editor.diagnoseAdditiveAnimation",
     ),
+    ToolDefinition(
+        "ue_diagnose_character_ground_contact",
+        "live-read",
+        "read",
+        "editor.diagnoseCharacterGroundContact",
+    ),
     ToolDefinition("ue_start_animation_scale_audit", "realtime", "planning"),
     ToolDefinition("ue_get_animation_scale_audit", "realtime", "read"),
     ToolDefinition("ue_cancel_animation_scale_audit", "realtime", "planning"),

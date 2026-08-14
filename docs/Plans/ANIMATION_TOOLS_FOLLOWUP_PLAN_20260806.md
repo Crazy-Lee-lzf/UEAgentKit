@@ -389,6 +389,8 @@ ue_plan_additive_base_pose_fix
 
 ## 7. P5：浮空诊断 Reader
 
+> **状态（2026-08-15）**：已完成。新增只读工具 `ue_diagnose_character_ground_contact`（C++ `editor.diagnoseCharacterGroundContact` + Python 分类 `character_ground_contact.py` + capability 复用 `retarget.inspect`）。详细子项与实现见 `docs/Plans/ANIMATION_TOOLS_P5_P9_DETAILED_PLAN_20260815.md` §1 与 `docs/CHARACTER_GROUND_CONTACT_TOOL.md`。
+
 ModelPreview 后续需要判断浮空到底来自碰撞、Mesh Offset 还是动画。UEAgentKit 应提供只读诊断，而不是让 Agent直接猜。
 
 建议工具：

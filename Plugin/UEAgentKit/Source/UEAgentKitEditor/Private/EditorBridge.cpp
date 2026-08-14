@@ -1226,6 +1226,41 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 			ErrorCode,
 			ErrorMessage);
 	}
+	else if (Method == TEXT("editor.diagnoseCharacterGroundContact"))
+	{
+		FString CharacterPath;
+		Params->TryGetStringField(TEXT("characterPath"), CharacterPath);
+		FString AnimationPath;
+		Params->TryGetStringField(TEXT("animationPath"), AnimationPath);
+		FString RootBone = TEXT("root");
+		Params->TryGetStringField(TEXT("rootBone"), RootBone);
+		FString PelvisBone = TEXT("pelvis");
+		Params->TryGetStringField(TEXT("pelvisBone"), PelvisBone);
+		FString LeftFootBone = TEXT("foot_l");
+		Params->TryGetStringField(TEXT("leftFootBone"), LeftFootBone);
+		FString RightFootBone = TEXT("foot_r");
+		Params->TryGetStringField(TEXT("rightFootBone"), RightFootBone);
+		bool bLoadIfNeeded = false;
+		Params->TryGetBoolField(TEXT("loadIfNeeded"), bLoadIfNeeded);
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode;
+		FString ErrorMessage;
+		SendActionResult(
+			TryDiagnoseCharacterGroundContactResult(
+				CharacterPath,
+				AnimationPath,
+				RootBone,
+				PelvisBone,
+				LeftFootBone,
+				RightFootBone,
+				bLoadIfNeeded,
+				Result,
+				ErrorCode,
+				ErrorMessage),
+			Result,
+			ErrorCode,
+			ErrorMessage);
+	}
 	else if (Method == TEXT("editor.validateAnimationRetarget"))
 	{
 		FString RetargeterPath;
