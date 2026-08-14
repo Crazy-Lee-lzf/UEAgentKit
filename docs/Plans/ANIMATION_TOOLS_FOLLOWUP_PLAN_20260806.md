@@ -343,7 +343,7 @@ P3 Suggested Plan
 
 ## 6. P4：Additive / Base Pose 求值
 
-> 状态（2026-08-14）：第一片（只读诊断 `ue_diagnose_additive_animation`）与第二片（只读组合求值 `ue_evaluate_animation_with_base_pose`）均已完成。第二片用引擎内置路径（`GetAdditiveBasePose` → `GetBonePose_Additive` → `AccumulateAdditivePose` → `FCSPose`）实际合成 Base Pose + Additive Delta，输出 base/additiveDelta/combined 三层 Scale 与 Location，并通过真实 UE5.6 Smoke 证实：重定向心月狐 Additive 的最终 ≈99 比例完全来自 Base Pose（自引用 + 越界 RefFrame 被钳制），Additive Delta Scale 近似 0。修复（`ue_plan_additive_base_pose_fix`）仍待第三片。详见 `docs/ADDITIVE_ANIMATION_DIAGNOSIS_TOOL.md`、`docs/ADDITIVE_ANIMATION_EVALUATION_TOOL.md` 与 `dev_docs/ANIMATION_ADDITIVE_EVALUATION_RESULT.md`。
+> 状态（2026-08-14）：第一片（只读诊断 `ue_diagnose_additive_animation`）、第二片（只读组合求值 `ue_evaluate_animation_with_base_pose`）与第三片（只读修复计划 `ue_plan_additive_base_pose_fix`）均已完成。第二片用引擎内置路径（`GetAdditiveBasePose` → `GetBonePose_Additive` → `AccumulateAdditivePose` → `FCSPose`）实际合成 Base Pose + Additive Delta，输出 base/additiveDelta/combined 三层 Scale 与 Location，并通过真实 UE5.6 Smoke 证实：重定向心月狐 Additive 的最终 ≈99 比例完全来自 Base Pose（自引用 + 越界 RefFrame 被钳制），Additive Delta Scale 近似 0。第三片纯 Python 复用诊断产出逐字段修复计划（区分可自动推导 vs 需人工选择），只读不写。**剩余**：修复计划的**执行写入**（替换 Base Pose 引用、修正 RefFrame、在组合上下文验证最终 Scale）尚未实现，属于后续 apply 切片。详见 `docs/ADDITIVE_ANIMATION_DIAGNOSIS_TOOL.md`、`docs/ADDITIVE_ANIMATION_EVALUATION_TOOL.md`、`docs/ADDITIVE_BASE_POSE_FIX_PLAN_TOOL.md` 与 `dev_docs/ANIMATION_ADDITIVE_EVALUATION_RESULT.md`。
 
 这是动画工具下一阶段最重要的技术问题。
 

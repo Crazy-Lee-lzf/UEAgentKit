@@ -352,5 +352,69 @@ class RetargetToolTests(unittest.TestCase):
             },
         )
 
+    def test_plan_additive_base_pose_fix_derives_read_only_plan(self) -> None:
+        service = _live_service({"retargetCapabilities": ["retarget.inspect"]})
+        service.call_tool.return_value = {
+            "schemaVersion": "1.0",
+            "tool": "ue_diagnose_additive_animation",
+            "ok": True,
+            "readOnly": True,
+            "result": {
+                "action": "diagnose-additive-animation",
+                "assets": [
+                    {
+                        "assetPath": ANIMATION,
+                        "status": "success",
+                        "skeletonPath": "/Game/Characters/SK_Skeleton.SK_Skeleton",
+                        "additiveAnimType": 1,
+                        "additiveTypeName": "LocalSpaceBase",
+                        "additiveBasePoseType": 3,
+                        "basePoseTypeName": "AnimationFrame",
+                        "additiveRefFrameIndex": 99,
+                        "additiveRefSequencePath": ANIMATION,
+                        "basePose": {
+                            "refSequenceResolved": True,
+                            "skeletonPath": "/Game/Characters/SK_Skeleton.SK_Skeleton",
+                            "skeletonCompatible": True,
+                            "frameCount": 30,
+                            "refFrameValid": False,
+                        },
+                    }
+                ],
+                "editorSessionId": "session-1",
+            },
+        }
+        server = FastMCP("probe")
+        register_retarget_tools(
+            server=server,
+            live_editor_service=service,
+            read_annotations=_read_only_annotations(),
+            error_response=_error_response,
+        )
+        result = asyncio.run(
+            server.call_tool(
+                "ue_plan_additive_base_pose_fix",
+                {
+                    "animationPaths": [ANIMATION],
+                    "loadIfNeeded": True,
+                },
+            )
+        )
+        _, payload = result
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["result"]["action"], "plan-additive-base-pose-fix")
+        asset = payload["result"]["assets"][0]
+        self.assertEqual(asset["classification"], "additive-base-pose-ref-frame-invalid")
+        self.assertTrue(asset["fixPlan"]["fixesNeeded"])
+        self.assertTrue(asset["fixPlan"]["referenceMutationRequired"])
+        self.assertFalse(asset["fixPlan"]["autoApplyAllowed"])
+        service.call_tool.assert_called_once_with(
+            "ue_diagnose_additive_animation",
+            {
+                "animationPaths": [ANIMATION],
+                "loadIfNeeded": True,
+            },
+        )
+
 if __name__ == "__main__":
     unittest.main()

@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from .additive_diagnose import build_additive_diagnosis_item
 from .additive_evaluation import build_additive_evaluation_item
+from .additive_fix_plan import build_additive_fix_plan
 from .animation_scale_audit import AnimationScaleAuditService
 from .editor_bridge import LiveEditorBridgeService, LiveEditorError
 from .retarget_postprocess import RetargetPostprocessService
@@ -20,6 +21,7 @@ _CAPABILITY_FOR_TOOL = {
     "ue_diagnose_animation_scale": RETARGET_INSPECT_CAPABILITY,
     "ue_diagnose_additive_animation": RETARGET_INSPECT_CAPABILITY,
     "ue_evaluate_animation_with_base_pose": RETARGET_INSPECT_CAPABILITY,
+    "ue_plan_additive_base_pose_fix": RETARGET_INSPECT_CAPABILITY,
     "ue_start_animation_scale_audit": RETARGET_INSPECT_CAPABILITY,
     "ue_get_animation_scale_audit": RETARGET_INSPECT_CAPABILITY,
     "ue_cancel_animation_scale_audit": RETARGET_INSPECT_CAPABILITY,
@@ -200,6 +202,42 @@ def register_retarget_tools(
             return response
         except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
             return error_response("ue_evaluate_animation_with_base_pose", exc, read_only=True)
+
+    @server.tool(annotations=read_annotations)
+    def ue_plan_additive_base_pose_fix(
+        animationPaths: list[str],
+        loadIfNeeded: bool = False,
+    ) -> dict[str, Any]:
+        """Derive a read-only Base Pose fix plan for additive AnimSequences (no assets are written)."""
+        try:
+            _assert_retarget_policy_capability(
+                policy_path=getattr(live_editor_service.config, "policy_path", None),
+                tool_name="ue_plan_additive_base_pose_fix",
+            )
+            response = live_editor_service.call_tool(
+                "ue_diagnose_additive_animation",
+                {
+                    "animationPaths": animationPaths,
+                    "loadIfNeeded": loadIfNeeded,
+                },
+            )
+            result = response.get("result", {})
+            assets = result.get("assets", []) if isinstance(result, dict) else []
+            if isinstance(assets, list):
+                enriched: list[dict[str, Any]] = []
+                for asset in assets:
+                    if not isinstance(asset, dict):
+                        continue
+                    item = build_additive_diagnosis_item(asset)
+                    item["fixPlan"] = build_additive_fix_plan(item)
+                    enriched.append(item)
+                result["assets"] = enriched
+                result["action"] = "plan-additive-base-pose-fix"
+            response["tool"] = "ue_plan_additive_base_pose_fix"
+            response["readOnly"] = True
+            return response
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_plan_additive_base_pose_fix", exc, read_only=True)
 
     @server.tool(annotations=planning_annotations)
     def ue_start_animation_scale_audit(
