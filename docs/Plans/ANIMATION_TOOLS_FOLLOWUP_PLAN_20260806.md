@@ -343,7 +343,7 @@ P3 Suggested Plan
 
 ## 6. P4：Additive / Base Pose 求值
 
-> 状态（2026-08-14）：第一片已完成——只读诊断 `ue_diagnose_additive_animation`（retarget.inspect），解析 Base Pose 引用 / Skeleton 兼容性 / RefFrame 有效性，产出分类与 `combinedEvaluationFeasible`；已通过真实 UE5.6 Smoke（4 个 Additive 样本 + 1 个非 Additive 对照）。组合求值（`ue_evaluate_animation_with_base_pose`）与修复（`ue_plan_additive_base_pose_fix`）仍待后续片。详见 `docs/ADDITIVE_ANIMATION_DIAGNOSIS_TOOL.md` 与 `dev_docs/ANIMATION_ADDITIVE_DIAGNOSIS_RESULT.md`。
+> 状态（2026-08-14）：第一片（只读诊断 `ue_diagnose_additive_animation`）与第二片（只读组合求值 `ue_evaluate_animation_with_base_pose`）均已完成。第二片用引擎内置路径（`GetAdditiveBasePose` → `GetBonePose_Additive` → `AccumulateAdditivePose` → `FCSPose`）实际合成 Base Pose + Additive Delta，输出 base/additiveDelta/combined 三层 Scale 与 Location，并通过真实 UE5.6 Smoke 证实：重定向心月狐 Additive 的最终 ≈99 比例完全来自 Base Pose（自引用 + 越界 RefFrame 被钳制），Additive Delta Scale 近似 0。修复（`ue_plan_additive_base_pose_fix`）仍待第三片。详见 `docs/ADDITIVE_ANIMATION_DIAGNOSIS_TOOL.md`、`docs/ADDITIVE_ANIMATION_EVALUATION_TOOL.md` 与 `dev_docs/ANIMATION_ADDITIVE_EVALUATION_RESULT.md`。
 
 这是动画工具下一阶段最重要的技术问题。
 

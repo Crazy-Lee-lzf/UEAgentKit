@@ -317,6 +317,53 @@ class _BridgeHandler(socketserver.StreamRequestHandler):
                 ],
                 "editorSessionId": "session-test",
             },
+            "editor.evaluateAnimationWithBasePose": {
+                "action": "evaluate-animation-with-base-pose",
+                "loadIfNeeded": params.get("loadIfNeeded", False),
+                "assets": [
+                    {
+                        "assetPath": asset_path,
+                        "status": "success",
+                        "loadedBefore": not params.get("loadIfNeeded", False),
+                        "loadedByBridge": params.get("loadIfNeeded", False),
+                        "skeletonPath": "/Game/Characters/SK_Skeleton.SK_Skeleton",
+                        "additiveAnimType": 1,
+                        "additiveTypeName": "LocalSpaceBase",
+                        "additiveBasePoseType": 3,
+                        "basePoseTypeName": "AnimationFrame",
+                        "additiveRefFrameIndex": 0,
+                        "additiveRefSequencePath": "/Game/Animations/A_Base.A_Base",
+                        "basePose": {
+                            "refSequenceResolved": True,
+                            "skeletonPath": "/Game/Characters/SK_Skeleton.SK_Skeleton",
+                            "skeletonCompatible": True,
+                            "frameCount": 30,
+                            "refFrameValid": True,
+                        },
+                        "evaluation": {
+                            "status": "evaluated",
+                            "source": "editor-bone-pose-additive-accumulate",
+                            "refFrameClamped": False,
+                            "samples": [
+                                {
+                                    "fraction": 0.0,
+                                    "time": 0.0,
+                                    "bones": [
+                                        {
+                                            "bone": bone_name,
+                                            "boneExists": True,
+                                            "combinedComponentScale": {"x": 100, "y": 100, "z": 100},
+                                        }
+                                        for bone_name in params.get("boneNames", [])
+                                    ],
+                                }
+                            ],
+                        },
+                    }
+                    for asset_path in params.get("animationPaths", [])
+                ],
+                "editorSessionId": "session-test",
+            },
             "editor.runAutomationTest": {
                 "action": "run-automation-test",
                 "testName": params.get("testName", ""),
@@ -1069,6 +1116,64 @@ class EditorBridgeTests(unittest.TestCase):
             with self.subTest(params=params):
                 with self.assertRaises(LiveEditorError) as context:
                     self.service.call_tool("ue_diagnose_additive_animation", params)
+                self.assertEqual(context.exception.code, "live-editor-invalid-parameters")
+
+    def test_evaluate_animation_with_base_pose_normalizes_params_and_evaluates(self) -> None:
+        self._write_descriptor(
+            capabilities=self.capabilities + ["retarget.inspect"],
+        )
+        animation_paths = ["/Game/Animations/A_Add.A_Add"]
+        bone_names = ["root", "pelvis"]
+        result = self.service.call_tool(
+            "ue_evaluate_animation_with_base_pose",
+            {
+                "animationPaths": animation_paths,
+                "boneNames": bone_names,
+                "loadIfNeeded": True,
+            },
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["result"]["action"], "evaluate-animation-with-base-pose")
+        self.assertEqual(result["result"]["assets"][0]["evaluation"]["status"], "evaluated")
+        request = self.server.requests[-1]  # type: ignore[attr-defined]
+        self.assertEqual(request["method"], "editor.evaluateAnimationWithBasePose")
+        self.assertEqual(
+            request["params"],
+            {
+                "animationPaths": animation_paths,
+                "boneNames": bone_names,
+                "loadIfNeeded": True,
+            },
+        )
+
+    def test_evaluate_animation_with_base_pose_requires_registered_capability(self) -> None:
+        self._write_descriptor(
+            capabilities=[capability for capability in self.capabilities if capability != "retarget.inspect"]
+        )
+        with self.assertRaises(LiveEditorError) as context:
+            self.service.call_tool(
+                "ue_evaluate_animation_with_base_pose",
+                {
+                    "animationPaths": ["/Game/Animations/A_Add.A_Add"],
+                    "boneNames": ["root"],
+                },
+            )
+        self.assertEqual(context.exception.code, "live-editor-capability-unavailable")
+
+    def test_evaluate_animation_with_base_pose_rejects_invalid_parameters(self) -> None:
+        self._write_descriptor(
+            capabilities=self.capabilities + ["retarget.inspect"],
+        )
+        invalid_cases = (
+            {"animationPaths": [], "boneNames": ["root"]},
+            {"animationPaths": ["/Game/Animations/A_Add.A_Add"], "boneNames": []},
+            {"animationPaths": ["/Game/Animations/NotAnObjectPath"], "boneNames": ["root"]},
+            {"animationPaths": ["/Game/Animations/A_Add.A_Add"], "boneNames": ["root"], "unknown": True},
+        )
+        for params in invalid_cases:
+            with self.subTest(params=params):
+                with self.assertRaises(LiveEditorError) as context:
+                    self.service.call_tool("ue_evaluate_animation_with_base_pose", params)
                 self.assertEqual(context.exception.code, "live-editor-invalid-parameters")
 
     def test_analyze_animation_retarget_requires_registered_capability(self) -> None:

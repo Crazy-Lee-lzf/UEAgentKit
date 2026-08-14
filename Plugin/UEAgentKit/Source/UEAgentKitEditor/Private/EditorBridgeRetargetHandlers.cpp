@@ -4,14 +4,21 @@
 #include "Retarget/RetargetAnalysis.h"
 #include "Retarget/RetargetTypes.h"
 
+#include "Animation/AnimCurveTypes.h"
 #include "Animation/AnimData/IAnimationDataModel.h"
 #include "Animation/AnimSequence.h"
+#include "Animation/AnimationPoseData.h"
+#include "Animation/AttributesContainer.h"
 #include "Animation/Skeleton.h"
+#include "AnimationRuntime.h"
+#include "BoneContainer.h"
+#include "BonePose.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Dom/JsonObject.h"
 #include "Editor.h"
 #include "Engine/World.h"
 #include "Engine/SkeletalMesh.h"
+#include "Misc/MemStack.h"
 #include "Rig/IKRigDefinition.h"
 #include "Retarget/RetargetValidation.h"
 #include "Retargeter/IKRetargeter.h"
@@ -522,6 +529,126 @@ namespace
 		OutStatus = TEXT("success");
 		return Samples;
 	}
+
+	// Evaluate an additive sequence as Base Pose + Additive Delta -> combined Component Pose.
+	// This is read-only: it uses FCompactPose accumulation and never touches a component or package.
+	TArray<TSharedPtr<FJsonValue>> BuildAdditiveEvaluationSamples(
+		UAnimSequence* Sequence,
+		USkeleton* Skeleton,
+		const TArray<FString>& BoneNames,
+		FString& OutStatus)
+	{
+		TArray<TSharedPtr<FJsonValue>> Samples;
+		OutStatus = TEXT("unavailable");
+		if (Sequence == nullptr || Skeleton == nullptr)
+		{
+			return Samples;
+		}
+
+		const FReferenceSkeleton& ReferenceSkeleton = Skeleton->GetReferenceSkeleton();
+		const int32 NumBones = ReferenceSkeleton.GetNum();
+		if (NumBones <= 0)
+		{
+			OutStatus = TEXT("skeleton-empty");
+			return Samples;
+		}
+
+		TArray<FBoneIndexType> RequiredBoneIndices;
+		RequiredBoneIndices.Reserve(NumBones);
+		for (int32 Index = 0; Index < NumBones; ++Index)
+		{
+			RequiredBoneIndices.Add(static_cast<FBoneIndexType>(Index));
+		}
+		ReferenceSkeleton.EnsureParentsExistAndSort(RequiredBoneIndices);
+
+		FBoneContainer RequiredBones;
+		UE::Anim::FCurveFilterSettings CurveFilterSettings;
+		RequiredBones.InitializeTo(RequiredBoneIndices, CurveFilterSettings, *Skeleton);
+		if (!RequiredBones.IsValid())
+		{
+			OutStatus = TEXT("bone-container-invalid");
+			return Samples;
+		}
+
+		const EAdditiveAnimationType AdditiveType = static_cast<EAdditiveAnimationType>(Sequence->AdditiveAnimType.GetValue());
+
+		const double Fractions[] = {0.0, 0.5, 1.0};
+		for (const double Fraction : Fractions)
+		{
+			FMemMark Mark(FMemStack::Get());
+			const double Time = Sequence->GetPlayLength() * Fraction;
+			const FAnimExtractContext ExtractionContext(Time);
+
+			// Base Pose (absolute). ABPT_RefPose leaves the ref pose in place;
+			// sequence-based base poses are resolved by GetAdditiveBasePose.
+			FCompactPose BasePose;
+			BasePose.SetBoneContainer(&RequiredBones);
+			BasePose.ResetToRefPose();
+			FBlendedCurve BaseCurve;
+			BaseCurve.InitFrom(RequiredBones);
+			UE::Anim::FStackAttributeContainer BaseAttributes;
+			FAnimationPoseData BasePoseData(BasePose, BaseCurve, BaseAttributes);
+			Sequence->GetAdditiveBasePose(BasePoseData, ExtractionContext);
+
+			// Additive Delta (additive identity + compressed additive delta).
+			FCompactPose AdditivePose;
+			AdditivePose.SetBoneContainer(&RequiredBones);
+			AdditivePose.ResetToAdditiveIdentity();
+			FBlendedCurve AdditiveCurve;
+			AdditiveCurve.InitFrom(RequiredBones);
+			UE::Anim::FStackAttributeContainer AdditiveAttributes;
+			FAnimationPoseData AdditivePoseData(AdditivePose, AdditiveCurve, AdditiveAttributes);
+			Sequence->GetBonePose_Additive(AdditivePoseData, ExtractionContext);
+
+			// Combined = Base Pose + Additive Delta.
+			FAnimationRuntime::AccumulateAdditivePose(BasePoseData, AdditivePoseData, 1.0f, AdditiveType);
+
+			FCSPose<FCompactPose> BaseComponentPose;
+			BaseComponentPose.InitPose(BasePoseData.GetPose());
+			FCSPose<FCompactPose> AdditiveComponentPose;
+			AdditiveComponentPose.InitPose(AdditivePoseData.GetPose());
+			FCSPose<FCompactPose> CombinedComponentPose;
+			CombinedComponentPose.InitPose(BasePoseData.GetPose());
+
+			TSharedRef<FJsonObject> Sample = MakeShared<FJsonObject>();
+			Sample->SetNumberField(TEXT("fraction"), Fraction);
+			Sample->SetNumberField(TEXT("time"), Time);
+
+			TArray<TSharedPtr<FJsonValue>> BoneValues;
+			for (const FString& BoneName : BoneNames)
+			{
+				TSharedRef<FJsonObject> Bone = MakeShared<FJsonObject>();
+				Bone->SetStringField(TEXT("bone"), BoneName);
+				const int32 SkeletonBoneIndex = ReferenceSkeleton.FindBoneIndex(FName(*BoneName));
+				Bone->SetBoolField(TEXT("boneExists"), SkeletonBoneIndex != INDEX_NONE);
+				if (SkeletonBoneIndex != INDEX_NONE)
+				{
+					const FCompactPoseBoneIndex CompactBoneIndex =
+						RequiredBones.MakeCompactPoseIndex(FMeshPoseBoneIndex(SkeletonBoneIndex));
+					if (CompactBoneIndex.IsValid())
+					{
+						const FTransform BaseTransform = BaseComponentPose.GetComponentSpaceTransform(CompactBoneIndex);
+						const FTransform CombinedTransform = CombinedComponentPose.GetComponentSpaceTransform(CompactBoneIndex);
+						const FTransform AdditiveLocalTransform = AdditivePose[CompactBoneIndex];
+						const FTransform AdditiveComponentTransform = AdditiveComponentPose.GetComponentSpaceTransform(CompactBoneIndex);
+
+						Bone->SetField(TEXT("baseComponentScale"), MakeShared<FJsonValueObject>(VectorToJson(BaseTransform.GetScale3D())));
+						Bone->SetField(TEXT("baseComponentLocation"), MakeShared<FJsonValueObject>(VectorToJson(BaseTransform.GetLocation())));
+						Bone->SetField(TEXT("additiveDeltaLocalScale"), MakeShared<FJsonValueObject>(VectorToJson(AdditiveLocalTransform.GetScale3D())));
+						Bone->SetField(TEXT("additiveDeltaComponentScale"), MakeShared<FJsonValueObject>(VectorToJson(AdditiveComponentTransform.GetScale3D())));
+						Bone->SetField(TEXT("combinedComponentScale"), MakeShared<FJsonValueObject>(VectorToJson(CombinedTransform.GetScale3D())));
+						Bone->SetField(TEXT("combinedComponentLocation"), MakeShared<FJsonValueObject>(VectorToJson(CombinedTransform.GetLocation())));
+					}
+				}
+				BoneValues.Add(MakeShared<FJsonValueObject>(Bone));
+			}
+			Sample->SetArrayField(TEXT("bones"), BoneValues);
+			Samples.Add(MakeShared<FJsonValueObject>(Sample));
+		}
+
+		OutStatus = TEXT("success");
+		return Samples;
+	}
 }
 
 bool FUEAgentKitEditorBridge::TryDiagnoseAnimationScaleResult(
@@ -762,6 +889,156 @@ bool FUEAgentKitEditorBridge::TryDiagnoseAdditiveAnimationResult(
 
 	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetStringField(TEXT("action"), TEXT("diagnose-additive-animation"));
+	Result->SetBoolField(TEXT("loadIfNeeded"), bLoadIfNeeded);
+	Result->SetArrayField(TEXT("assets"), AssetValues);
+	Result->SetStringField(TEXT("editorSessionId"), SessionId);
+	OutResult = Result;
+	return true;
+}
+
+bool FUEAgentKitEditorBridge::TryEvaluateAnimationWithBasePoseResult(
+	const TArray<FString>& AnimationPaths,
+	const TArray<FString>& BoneNames,
+	bool bLoadIfNeeded,
+	TSharedPtr<FJsonObject>& OutResult,
+	FString& OutErrorCode,
+	FString& OutErrorMessage) const
+{
+	if (GEditor == nullptr)
+	{
+		OutErrorCode = TEXT("live-editor-unavailable");
+		OutErrorMessage = TEXT("The Unreal Editor is unavailable.");
+		return false;
+	}
+	if (GEditor->PlayWorld != nullptr)
+	{
+		OutErrorCode = TEXT("retarget_editor_state_invalid");
+		OutErrorMessage = TEXT("Additive evaluation is unavailable while PIE or SIE is active.");
+		return false;
+	}
+	if (AnimationPaths.IsEmpty() || AnimationPaths.Num() > 32 || BoneNames.IsEmpty() || BoneNames.Num() > 16)
+	{
+		OutErrorCode = TEXT("live-editor-invalid-parameters");
+		OutErrorMessage = TEXT("Provide 1-32 animationPaths and 1-16 boneNames.");
+		return false;
+	}
+
+	TArray<TSharedPtr<FJsonValue>> AssetValues;
+	for (const FString& AnimationPath : AnimationPaths)
+	{
+		if (!UEAgentKitEditorBridgePrivate::IsSafeGameAssetPath(AnimationPath))
+		{
+			OutErrorCode = TEXT("retarget_asset_not_found");
+			OutErrorMessage = TEXT("Each animation must be an exact /Game Object Path.");
+			return false;
+		}
+
+		UObject* Existing = StaticFindObject(UObject::StaticClass(), nullptr, *AnimationPath, false);
+		const bool bLoadedBefore = Existing != nullptr;
+		UAnimSequence* Sequence = Cast<UAnimSequence>(Existing);
+		if (Sequence == nullptr && bLoadIfNeeded)
+		{
+			Sequence = LoadObject<UAnimSequence>(nullptr, *AnimationPath);
+		}
+
+		TSharedRef<FJsonObject> AssetJson = MakeShared<FJsonObject>();
+		AssetJson->SetStringField(TEXT("assetPath"), AnimationPath);
+		AssetJson->SetBoolField(TEXT("loadedBefore"), bLoadedBefore);
+		AssetJson->SetBoolField(TEXT("loadedByBridge"), !bLoadedBefore && Sequence != nullptr);
+		if (Sequence == nullptr)
+		{
+			AssetJson->SetStringField(TEXT("status"), bLoadIfNeeded ? TEXT("not-an-animation-sequence") : TEXT("not-loaded"));
+			AssetValues.Add(MakeShared<FJsonValueObject>(AssetJson));
+			continue;
+		}
+
+		USkeleton* Skeleton = Sequence->GetSkeleton();
+		if (Skeleton == nullptr)
+		{
+			AssetJson->SetStringField(TEXT("status"), TEXT("missing-skeleton"));
+			AssetValues.Add(MakeShared<FJsonValueObject>(AssetJson));
+			continue;
+		}
+
+		const EAdditiveAnimationType AdditiveType = static_cast<EAdditiveAnimationType>(Sequence->AdditiveAnimType.GetValue());
+		const EAdditiveBasePoseType BasePoseType = static_cast<EAdditiveBasePoseType>(Sequence->RefPoseType.GetValue());
+		UAnimSequence* RefPoseSeq = Sequence->RefPoseSeq.Get();
+
+		AssetJson->SetStringField(TEXT("status"), TEXT("success"));
+		AssetJson->SetStringField(TEXT("skeletonPath"), Skeleton->GetPathName());
+		AssetJson->SetNumberField(TEXT("additiveAnimType"), static_cast<int32>(AdditiveType));
+		AssetJson->SetStringField(TEXT("additiveTypeName"), AssetReaderRegistryPrivate::AdditiveAnimationTypeToString(AdditiveType));
+		AssetJson->SetNumberField(TEXT("additiveBasePoseType"), static_cast<int32>(BasePoseType));
+		AssetJson->SetStringField(TEXT("basePoseTypeName"), AssetReaderRegistryPrivate::AdditiveBasePoseTypeToString(BasePoseType));
+		AssetJson->SetNumberField(TEXT("additiveRefFrameIndex"), Sequence->RefFrameIndex);
+		AssetJson->SetStringField(
+			TEXT("additiveRefSequencePath"),
+			RefPoseSeq != nullptr ? RefPoseSeq->GetPathName() : FString());
+
+		bool bRefFrameValid = true;
+		TSharedRef<FJsonObject> BasePoseJson = MakeShared<FJsonObject>();
+		const bool bRefSequenceResolved = RefPoseSeq != nullptr;
+		BasePoseJson->SetBoolField(TEXT("refSequenceResolved"), bRefSequenceResolved);
+		if (bRefSequenceResolved)
+		{
+			USkeleton* RefSkeleton = RefPoseSeq->GetSkeleton();
+			BasePoseJson->SetStringField(
+				TEXT("skeletonPath"),
+				RefSkeleton != nullptr ? RefSkeleton->GetPathName() : FString());
+			BasePoseJson->SetBoolField(TEXT("skeletonCompatible"), RefSkeleton != nullptr && RefSkeleton == Skeleton);
+			const IAnimationDataModel* RefModel = RefPoseSeq->GetDataModel();
+			const int32 RefFrameCount = RefModel != nullptr ? RefModel->GetNumberOfFrames() : 0;
+			BasePoseJson->SetNumberField(TEXT("frameCount"), RefFrameCount);
+			const int32 RefFrameIndex = Sequence->RefFrameIndex;
+			bRefFrameValid = RefFrameIndex >= 0 && RefFrameIndex < RefFrameCount;
+			BasePoseJson->SetBoolField(TEXT("refFrameValid"), bRefFrameValid);
+		}
+		AssetJson->SetObjectField(TEXT("basePose"), BasePoseJson);
+
+		TSharedRef<FJsonObject> EvaluationJson = MakeShared<FJsonObject>();
+		const bool bAdditive = Sequence->IsValidAdditive();
+		if (!bAdditive)
+		{
+			EvaluationJson->SetStringField(TEXT("status"), TEXT("skipped-non-additive"));
+		}
+		else
+		{
+			const bool bNeedsSequence = BasePoseType == ABPT_AnimScaled || BasePoseType == ABPT_AnimFrame;
+			const bool bSkeletonCompatible = !bNeedsSequence
+				|| (RefPoseSeq != nullptr && RefPoseSeq->GetSkeleton() == Skeleton);
+			if (bNeedsSequence && RefPoseSeq == nullptr)
+			{
+				EvaluationJson->SetStringField(TEXT("status"), TEXT("skipped-missing-base-pose"));
+			}
+			else if (!bSkeletonCompatible)
+			{
+				EvaluationJson->SetStringField(TEXT("status"), TEXT("skipped-skeleton-mismatch"));
+			}
+			else
+			{
+				FString EvalStatus;
+				TArray<TSharedPtr<FJsonValue>> Samples = BuildAdditiveEvaluationSamples(
+					Sequence,
+					Skeleton,
+					BoneNames,
+					EvalStatus);
+				EvaluationJson->SetStringField(TEXT("status"), EvalStatus == TEXT("success") ? TEXT("evaluated") : EvalStatus);
+				if (EvalStatus == TEXT("success"))
+				{
+					EvaluationJson->SetStringField(TEXT("source"), TEXT("editor-bone-pose-additive-accumulate"));
+					const bool bFrameBased = BasePoseType == ABPT_AnimFrame || BasePoseType == ABPT_LocalAnimFrame;
+					EvaluationJson->SetBoolField(TEXT("refFrameClamped"), bFrameBased && !bRefFrameValid);
+					EvaluationJson->SetArrayField(TEXT("samples"), Samples);
+				}
+			}
+		}
+		AssetJson->SetObjectField(TEXT("evaluation"), EvaluationJson);
+
+		AssetValues.Add(MakeShared<FJsonValueObject>(AssetJson));
+	}
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetStringField(TEXT("action"), TEXT("evaluate-animation-with-base-pose"));
 	Result->SetBoolField(TEXT("loadIfNeeded"), bLoadIfNeeded);
 	Result->SetArrayField(TEXT("assets"), AssetValues);
 	Result->SetStringField(TEXT("editorSessionId"), SessionId);

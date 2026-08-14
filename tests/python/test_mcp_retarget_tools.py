@@ -273,5 +273,84 @@ class RetargetToolTests(unittest.TestCase):
             },
         )
 
+    def test_evaluate_animation_with_base_pose_passes_through_and_enriches(self) -> None:
+        service = _live_service({"retargetCapabilities": ["retarget.inspect"]})
+        service.call_tool.return_value = {
+            "schemaVersion": "1.0",
+            "tool": "ue_evaluate_animation_with_base_pose",
+            "ok": True,
+            "readOnly": True,
+            "result": {
+                "action": "evaluate-animation-with-base-pose",
+                "assets": [
+                    {
+                        "assetPath": ANIMATION,
+                        "status": "success",
+                        "skeletonPath": "/Game/Characters/SK_Skeleton.SK_Skeleton",
+                        "additiveAnimType": 1,
+                        "additiveTypeName": "LocalSpaceBase",
+                        "additiveBasePoseType": 3,
+                        "basePoseTypeName": "AnimationFrame",
+                        "additiveRefFrameIndex": 0,
+                        "additiveRefSequencePath": "/Game/Animations/A_Base.A_Base",
+                        "basePose": {
+                            "refSequenceResolved": True,
+                            "skeletonPath": "/Game/Characters/SK_Skeleton.SK_Skeleton",
+                            "skeletonCompatible": True,
+                            "frameCount": 30,
+                            "refFrameValid": True,
+                        },
+                        "evaluation": {
+                            "status": "evaluated",
+                            "source": "editor-bone-pose-additive-accumulate",
+                            "refFrameClamped": False,
+                            "samples": [
+                                {
+                                    "fraction": 0.0,
+                                    "time": 0.0,
+                                    "bones": [
+                                        {"bone": "root", "boneExists": True, "combinedComponentScale": {"x": 100, "y": 100, "z": 100}}
+                                    ],
+                                }
+                            ],
+                        },
+                    }
+                ],
+                "editorSessionId": "session-1",
+            },
+        }
+        server = FastMCP("probe")
+        register_retarget_tools(
+            server=server,
+            live_editor_service=service,
+            read_annotations=_read_only_annotations(),
+            error_response=_error_response,
+        )
+        result = asyncio.run(
+            server.call_tool(
+                "ue_evaluate_animation_with_base_pose",
+                {
+                    "animationPaths": [ANIMATION],
+                    "boneNames": ["root"],
+                    "loadIfNeeded": True,
+                },
+            )
+        )
+        _, payload = result
+        self.assertTrue(payload["ok"])
+        asset = payload["result"]["assets"][0]
+        self.assertEqual(asset["classification"], "additive-valid")
+        self.assertTrue(asset["combinedEvaluationFeasible"])
+        self.assertTrue(asset["evaluationFeasible"])
+        self.assertEqual(asset["evaluation"]["status"], "evaluated")
+        service.call_tool.assert_called_once_with(
+            "ue_evaluate_animation_with_base_pose",
+            {
+                "animationPaths": [ANIMATION],
+                "boneNames": ["root"],
+                "loadIfNeeded": True,
+            },
+        )
+
 if __name__ == "__main__":
     unittest.main()

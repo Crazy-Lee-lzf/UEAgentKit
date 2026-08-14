@@ -4,6 +4,7 @@ import json
 from typing import Any, Literal
 
 from .additive_diagnose import build_additive_diagnosis_item
+from .additive_evaluation import build_additive_evaluation_item
 from .animation_scale_audit import AnimationScaleAuditService
 from .editor_bridge import LiveEditorBridgeService, LiveEditorError
 from .retarget_postprocess import RetargetPostprocessService
@@ -18,6 +19,7 @@ _CAPABILITY_FOR_TOOL = {
     "ue_analyze_animation_retarget": RETARGET_INSPECT_CAPABILITY,
     "ue_diagnose_animation_scale": RETARGET_INSPECT_CAPABILITY,
     "ue_diagnose_additive_animation": RETARGET_INSPECT_CAPABILITY,
+    "ue_evaluate_animation_with_base_pose": RETARGET_INSPECT_CAPABILITY,
     "ue_start_animation_scale_audit": RETARGET_INSPECT_CAPABILITY,
     "ue_get_animation_scale_audit": RETARGET_INSPECT_CAPABILITY,
     "ue_cancel_animation_scale_audit": RETARGET_INSPECT_CAPABILITY,
@@ -168,6 +170,36 @@ def register_retarget_tools(
             return response
         except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
             return error_response("ue_diagnose_additive_animation", exc, read_only=True)
+
+    @server.tool(annotations=read_annotations)
+    def ue_evaluate_animation_with_base_pose(
+        animationPaths: list[str],
+        boneNames: list[str],
+        loadIfNeeded: bool = False,
+    ) -> dict[str, Any]:
+        """Evaluate additive animations as Base Pose + Additive Delta into a combined Component Pose."""
+        try:
+            _assert_retarget_policy_capability(
+                policy_path=getattr(live_editor_service.config, "policy_path", None),
+                tool_name="ue_evaluate_animation_with_base_pose",
+            )
+            response = live_editor_service.call_tool(
+                "ue_evaluate_animation_with_base_pose",
+                {
+                    "animationPaths": animationPaths,
+                    "boneNames": boneNames,
+                    "loadIfNeeded": loadIfNeeded,
+                },
+            )
+            result = response.get("result", {})
+            assets = result.get("assets", []) if isinstance(result, dict) else []
+            if isinstance(assets, list):
+                result["assets"] = [
+                    build_additive_evaluation_item(asset) for asset in assets if isinstance(asset, dict)
+                ]
+            return response
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_evaluate_animation_with_base_pose", exc, read_only=True)
 
     @server.tool(annotations=planning_annotations)
     def ue_start_animation_scale_audit(
