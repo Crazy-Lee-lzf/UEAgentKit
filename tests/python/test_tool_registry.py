@@ -55,6 +55,7 @@ EXPECTED_ALL_TOOLS = [
     "ue_evaluate_animation_with_base_pose",
     "ue_plan_additive_base_pose_fix",
     "ue_diagnose_character_ground_contact",
+    "ue_inspect_skeletal_secondary_motion",
     "ue_start_animation_scale_audit",
     "ue_get_animation_scale_audit",
     "ue_cancel_animation_scale_audit",
@@ -131,7 +132,7 @@ class ToolRegistryTests(unittest.TestCase):
             EXPECTED_ALL_TOOLS,
         )
         self.assertEqual(len(tool_names_for_mode()), 5)
-        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 37)
+        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 38)
         self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 55)
         self.assertEqual(
             tool_names_for_mode(memory_enabled=True),
@@ -140,7 +141,7 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 17)
         self.assertEqual(
             len(tool_names_for_mode(live_editor_enabled=True, memory_enabled=True)),
-            49,
+            50,
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
@@ -154,7 +155,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-            99,
+            100,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:
@@ -216,7 +217,7 @@ class ToolRegistryTests(unittest.TestCase):
             list(LIVE_EDITOR_METHODS),
             [
                 name
-                for name in EXPECTED_ALL_TOOLS[5:37]
+                for name in EXPECTED_ALL_TOOLS[5:38]
                 if name not in {"ue_start_animation_scale_audit", "ue_get_animation_scale_audit", "ue_cancel_animation_scale_audit", "ue_export_animation_scale_audit_report"}
             ],
         )
@@ -257,7 +258,7 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertEqual(
             [
                 name
-                for name in EXPECTED_ALL_TOOLS[5:37]
+                for name in EXPECTED_ALL_TOOLS[5:38]
                 if name not in {
                     "ue_start_animation_scale_audit", "ue_get_animation_scale_audit", "ue_cancel_animation_scale_audit",
                     "ue_export_animation_scale_audit_report",

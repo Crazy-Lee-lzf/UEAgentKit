@@ -1261,6 +1261,32 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 			ErrorCode,
 			ErrorMessage);
 	}
+	else if (Method == TEXT("editor.inspectSkeletalSecondaryMotion"))
+	{
+		FString SkeletalMeshPath;
+		Params->TryGetStringField(TEXT("skeletalMeshPath"), SkeletalMeshPath);
+		FString AnimationPath;
+		Params->TryGetStringField(TEXT("animationPath"), AnimationPath);
+		FString AnimationBlueprintPath;
+		Params->TryGetStringField(TEXT("animationBlueprintPath"), AnimationBlueprintPath);
+		bool bLoadIfNeeded = false;
+		Params->TryGetBoolField(TEXT("loadIfNeeded"), bLoadIfNeeded);
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode;
+		FString ErrorMessage;
+		SendActionResult(
+			TryInspectSkeletalSecondaryMotionResult(
+				SkeletalMeshPath,
+				AnimationPath,
+				AnimationBlueprintPath,
+				bLoadIfNeeded,
+				Result,
+				ErrorCode,
+				ErrorMessage),
+			Result,
+			ErrorCode,
+			ErrorMessage);
+	}
 	else if (Method == TEXT("editor.validateAnimationRetarget"))
 	{
 		FString RetargeterPath;

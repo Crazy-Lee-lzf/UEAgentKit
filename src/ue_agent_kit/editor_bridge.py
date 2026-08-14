@@ -296,6 +296,36 @@ class LiveEditorBridgeService:
                 "rightFootBone": right_foot_bone,
                 "loadIfNeeded": bool(params.get("loadIfNeeded", False)),
             }
+        if tool_name == "ue_inspect_skeletal_secondary_motion":
+            allowed = {
+                "skeletalMeshPath",
+                "animationPath",
+                "animationBlueprintPath",
+                "loadIfNeeded",
+            }
+            LiveEditorBridgeService._reject_unknown_params(params, allowed)
+            mesh_path = LiveEditorBridgeService._bounded_string(
+                params.get("skeletalMeshPath", ""), "skeletalMeshPath", 512)
+            if not mesh_path:
+                raise LiveEditorError(
+                    "live-editor-invalid-parameters",
+                    "skeletalMeshPath must be a non-empty /Game Object Path.",
+                )
+            LiveEditorBridgeService._validate_game_object_path(mesh_path)
+            animation_path = LiveEditorBridgeService._bounded_string(
+                params.get("animationPath", ""), "animationPath", 512)
+            if animation_path:
+                LiveEditorBridgeService._validate_game_object_path(animation_path)
+            anim_blueprint_path = LiveEditorBridgeService._bounded_string(
+                params.get("animationBlueprintPath", ""), "animationBlueprintPath", 512)
+            if anim_blueprint_path:
+                LiveEditorBridgeService._validate_game_object_path(anim_blueprint_path)
+            return {
+                "skeletalMeshPath": mesh_path,
+                "animationPath": animation_path,
+                "animationBlueprintPath": anim_blueprint_path,
+                "loadIfNeeded": bool(params.get("loadIfNeeded", False)),
+            }
         if tool_name == "ue_plan_animation_retarget":
             allowed = {"sourceMesh", "targetMesh", "includeOptionalChains"}
             LiveEditorBridgeService._reject_unknown_params(params, allowed)

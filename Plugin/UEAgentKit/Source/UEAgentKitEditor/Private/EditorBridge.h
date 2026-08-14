@@ -151,6 +151,14 @@ private:
 		TSharedPtr<FJsonObject>& OutResult,
 		FString& OutErrorCode,
 		FString& OutErrorMessage) const;
+	bool TryInspectSkeletalSecondaryMotionResult(
+		const FString& SkeletalMeshPath,
+		const FString& AnimationPath,
+		const FString& AnimationBlueprintPath,
+		bool bLoadIfNeeded,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage) const;
 	bool TryApplyAnimationRetargetSetupResult(
 		const FString& SourceMeshPath,
 		const FString& TargetMeshPath,

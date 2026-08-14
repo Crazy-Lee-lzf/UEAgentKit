@@ -83,6 +83,8 @@ G9  文档已同步（新工具 docs/*.md + 本计划状态勾选 + tool_registr
 
 ## 2. P6 尾巴 / 衣服 / Cloth Reader（`ue_inspect_skeletal_secondary_motion`）
 
+> **状态（2026-08-15）**：P6.1–P6.5 全部完成。C++ 读取器 `editor.inspectSkeletalSecondaryMotion`、Python 分类 `skeletal_secondary_motion.py`（8 分类）、MCP 工具 + `tool_registry` 注册 + 参数归一化、真实 UE5.6 Smoke、`docs/SKELETAL_SECONDARY_MOTION_TOOL.md` 均已落地。**capability 决策与 P5 一致**：P6.4 未新增独立 `character.secondary-motion.inspect`，复用现有 `retarget.inspect`（见 §1 注）。
+
 **目标**：只读结构化读取 SkeletalMesh 次级运动（附加骨骼链 / 蒙皮 / 物理 / Cloth / AnimBP 节点），不做修改。**明确禁止**实现通用 AnimGraph 节点写入。
 
 **依赖**：无。可与 P5 / P7 并行（难度高于 P5，物理/Cloth 读取更繁重）。

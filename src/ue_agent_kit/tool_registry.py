@@ -97,6 +97,12 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
         "read",
         "editor.diagnoseCharacterGroundContact",
     ),
+    ToolDefinition(
+        "ue_inspect_skeletal_secondary_motion",
+        "live-read",
+        "read",
+        "editor.inspectSkeletalSecondaryMotion",
+    ),
     ToolDefinition("ue_start_animation_scale_audit", "realtime", "planning"),
     ToolDefinition("ue_get_animation_scale_audit", "realtime", "read"),
     ToolDefinition("ue_cancel_animation_scale_audit", "realtime", "planning"),
