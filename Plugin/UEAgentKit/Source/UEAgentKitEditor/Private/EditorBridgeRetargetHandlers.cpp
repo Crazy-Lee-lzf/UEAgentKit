@@ -600,13 +600,17 @@ namespace
 			FAnimationPoseData AdditivePoseData(AdditivePose, AdditiveCurve, AdditiveAttributes);
 			Sequence->GetBonePose_Additive(AdditivePoseData, ExtractionContext);
 
-			// Combined = Base Pose + Additive Delta.
-			FAnimationRuntime::AccumulateAdditivePose(BasePoseData, AdditivePoseData, 1.0f, AdditiveType);
-
+			// Capture the true Base Pose component pose BEFORE AccumulateAdditivePose mutates
+			// BasePoseData in place to hold the combined result (FCSPose::InitPose stores a
+			// reference, so sampling after the accumulate would alias the combined pose).
 			FCSPose<FCompactPose> BaseComponentPose;
 			BaseComponentPose.InitPose(BasePoseData.GetPose());
 			FCSPose<FCompactPose> AdditiveComponentPose;
 			AdditiveComponentPose.InitPose(AdditivePoseData.GetPose());
+
+			// Combined = Base Pose + Additive Delta.
+			FAnimationRuntime::AccumulateAdditivePose(BasePoseData, AdditivePoseData, 1.0f, AdditiveType);
+
 			FCSPose<FCompactPose> CombinedComponentPose;
 			CombinedComponentPose.InitPose(BasePoseData.GetPose());
 
