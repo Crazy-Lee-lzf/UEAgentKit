@@ -181,16 +181,6 @@ namespace
 		return OutStatus == TEXT("success");
 	}
 
-	// Forward declaration: defined after the additive Base Pose fix IO below.
-	bool EvaluateAdditiveCombinedScale(
-		UAnimSequence* Sequence,
-		const FName BoneName,
-		const double Fraction,
-		FVector& OutBaseScale,
-		FVector& OutDeltaLocalScale,
-		FVector& OutCombinedScale,
-		FString& OutStatus);
-
 	struct FAnimationScaleFixSnapshot
 	{
 		bool bForceRootLock = false;
@@ -313,6 +303,13 @@ namespace
 				OutErrorMessage = TEXT("rootTrackScaleMode must be Keep, ReferenceLocal, or Uniform.");
 				return false;
 			}
+			if (Sequence->IsValidAdditive())
+			{
+				OutErrorCode = TEXT("retarget_additive_scale_fix_requires_base_pose");
+				OutErrorMessage = TEXT("Additive animations require an explicit Base Pose-aware repair and are not supported by setAnimationScaleFix.");
+				return false;
+			}
+
 			bool bAnyRequestedChange = ScaleMode != TEXT("Keep");
 			bool BoolValue = false;
 			if (Requested->TryGetBoolField(TEXT("forceRootLock"), BoolValue))
@@ -436,27 +433,16 @@ namespace
 				OutErrorMessage = TEXT("expectedFinalScale must be one finite number greater than 0.");
 				return false;
 			}
-			FVector EvaluatedScale;
-			FString EvaluationStatus;
-			bool bScaleAvailable = false;
 			if (Sequence->IsValidAdditive())
 			{
-				FVector BaseScale;
-				FVector DeltaLocalScale;
-				bScaleAvailable = EvaluateAdditiveCombinedScale(
-					Sequence,
-					RootBone,
-					0.0,
-					BaseScale,
-					DeltaLocalScale,
-					EvaluatedScale,
-					EvaluationStatus);
+				OutErrorCode = TEXT("retarget_additive_scale_fix_requires_base_pose");
+				OutErrorMessage = TEXT("Final Additive pose scale cannot be verified without its Base Pose context.");
+				return false;
 			}
-			else
-			{
-				bScaleAvailable = TryEvaluateFinalRootScale(Sequence, RootBone, EvaluatedScale, EvaluationStatus);
-			}
-			if (!bScaleAvailable)
+
+			FVector EvaluatedScale;
+			FString EvaluationStatus;
+			if (!TryEvaluateFinalRootScale(Sequence, RootBone, EvaluatedScale, EvaluationStatus))
 			{
 				OutErrorCode = TEXT("retarget_final_scale_evaluation_failed");
 				OutErrorMessage = FString::Printf(TEXT("Final Root Scale evaluation failed: %s."), *EvaluationStatus);
@@ -574,24 +560,7 @@ namespace
 
 			FVector FinalScale;
 			FString FinalStatus;
-			bool bFinalScaleAvailable = false;
-			if (Sequence->IsValidAdditive())
-			{
-				FVector BaseScale;
-				FVector DeltaLocalScale;
-				bFinalScaleAvailable = EvaluateAdditiveCombinedScale(
-					Sequence,
-					RootBone,
-					0.0,
-					BaseScale,
-					DeltaLocalScale,
-					FinalScale,
-					FinalStatus);
-			}
-			else
-			{
-				bFinalScaleAvailable = TryEvaluateFinalRootScale(Sequence, RootBone, FinalScale, FinalStatus);
-			}
+			const bool bFinalScaleAvailable = TryEvaluateFinalRootScale(Sequence, RootBone, FinalScale, FinalStatus);
 			State->SetStringField(TEXT("finalEvaluationStatus"), FinalStatus);
 			if (bFinalScaleAvailable)
 			{

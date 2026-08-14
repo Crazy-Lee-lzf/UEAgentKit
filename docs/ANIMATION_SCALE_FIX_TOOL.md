@@ -210,17 +210,18 @@ commitSupported = false
 
 ---
 
-## 5. Additive 行为
+## 5. Additive 限制
 
-Additive 动画的最终姿势是「Base Pose + Additive Delta」合成而来，因此最终比例必须用组合求值验证，不能用非 Additive 的 `AnimSingleNodeInstance` 独立求值。
+Additive 动画不能脱离 Base Pose 独立判断最终姿势。
 
-`setAnimationScaleFix` 现在**支持 Additive**：
+默认行为：
 
-- `rootTrackScaleMode = Uniform / ReferenceLocal` 正常写回 Root Track Scale（Additive 的 Root Track 存的是 Raw 绝对数据，与非 Additive 同构）；
-- `expected_final_scale` 的最终比例验收改用引擎内置组合路径（`GetAdditiveBasePose` → `GetBonePose_Additive` → `AccumulateAdditivePose` → `FCSPose`）验证 **Combined Scale**，而非非 Additive 的独立最终比例；
-- 失配同样回滚。
+- 允许读取 Raw / Compressed Track 和 Additive 元数据；
+- `setAnimationScaleFix` 对 Additive 全面拒绝，不修改 Root Lock、Root Motion 设置或 Root Track；
+- 拒绝 `expected_final_scale` 最终姿势验收；
+- 返回 `retarget_additive_scale_fix_requires_base_pose`。
 
-注意：修改 Additive 的 Root Track Scale 会同时改变 Raw 与 Delta（`delta = raw ⊖ base`），因此「正确 base pose」应和 raw 的 scale 一致——即「重定向后的原始 Base Pose」。直接用 Skeleton Reference Pose（scale≈1）当 base 会让 delta 变成 ≈×99，反而更糟。这条不改变 Root Lock / Root Motion 设置。
+实测结论（2026-08-15）：Additive 的 `combined ≈ 99` 是 **raw 数据**里的重定向残留（`combined = raw` 恒成立），而 Additive 的 **delta ≈ 0**（运行时几乎不改变 scale）。因此 Additive **不需要 scale-fix**——它应用在当前姿势上时 scale 几乎不变。真正的 minor 问题是自引用 Base Pose 造成的 delta ≈ -0.01（该是 0），由 `setAdditiveBasePoseFix`（P4）修正，而不是本工具。曾尝试扩展 `setAnimationScaleFix` 支持 Additive（root track scale → 1），但实测 root track 改动不会改变 Additive 的 combined scale，故保持拒绝。
 
 ---
 
