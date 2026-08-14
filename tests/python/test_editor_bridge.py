@@ -289,6 +289,34 @@ class _BridgeHandler(socketserver.StreamRequestHandler):
                 ],
                 "editorSessionId": "session-test",
             },
+            "editor.diagnoseAdditiveAnimation": {
+                "action": "diagnose-additive-animation",
+                "loadIfNeeded": params.get("loadIfNeeded", False),
+                "assets": [
+                    {
+                        "assetPath": asset_path,
+                        "status": "success",
+                        "loadedBefore": not params.get("loadIfNeeded", False),
+                        "loadedByBridge": params.get("loadIfNeeded", False),
+                        "skeletonPath": "/Game/Characters/SK_Skeleton.SK_Skeleton",
+                        "additiveAnimType": 1,
+                        "additiveTypeName": "LocalSpaceBase",
+                        "additiveBasePoseType": 3,
+                        "basePoseTypeName": "AnimationFrame",
+                        "additiveRefFrameIndex": 0,
+                        "additiveRefSequencePath": "/Game/Animations/A_Base.A_Base",
+                        "basePose": {
+                            "refSequenceResolved": True,
+                            "skeletonPath": "/Game/Characters/SK_Skeleton.SK_Skeleton",
+                            "skeletonCompatible": True,
+                            "frameCount": 30,
+                            "refFrameValid": True,
+                        },
+                    }
+                    for asset_path in params.get("animationPaths", [])
+                ],
+                "editorSessionId": "session-test",
+            },
             "editor.runAutomationTest": {
                 "action": "run-automation-test",
                 "testName": params.get("testName", ""),
@@ -984,6 +1012,63 @@ class EditorBridgeTests(unittest.TestCase):
             with self.subTest(params=params):
                 with self.assertRaises(LiveEditorError) as context:
                     self.service.call_tool("ue_diagnose_animation_scale", params)
+                self.assertEqual(context.exception.code, "live-editor-invalid-parameters")
+
+    def test_diagnose_additive_animation_normalizes_params_and_reports_additive(self) -> None:
+        self._write_descriptor(
+            capabilities=self.capabilities + ["retarget.inspect"],
+        )
+        animation_paths = [
+            "/Game/Animations/A_Idle.A_Idle",
+            "/Game/Animations/A_Jog.A_Jog",
+        ]
+        result = self.service.call_tool(
+            "ue_diagnose_additive_animation",
+            {
+                "animationPaths": animation_paths,
+                "loadIfNeeded": True,
+            },
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["result"]["action"], "diagnose-additive-animation")
+        self.assertEqual(result["result"]["assets"][0]["additiveTypeName"], "LocalSpaceBase")
+        request = self.server.requests[-1]  # type: ignore[attr-defined]
+        self.assertEqual(request["method"], "editor.diagnoseAdditiveAnimation")
+        self.assertEqual(
+            request["params"],
+            {
+                "animationPaths": animation_paths,
+                "loadIfNeeded": True,
+            },
+        )
+
+    def test_diagnose_additive_animation_requires_registered_capability(self) -> None:
+        self._write_descriptor(
+            capabilities=[capability for capability in self.capabilities if capability != "retarget.inspect"]
+        )
+        with self.assertRaises(LiveEditorError) as context:
+            self.service.call_tool(
+                "ue_diagnose_additive_animation",
+                {
+                    "animationPaths": ["/Game/Animations/A_Idle.A_Idle"],
+                },
+            )
+        self.assertEqual(context.exception.code, "live-editor-capability-unavailable")
+
+    def test_diagnose_additive_animation_rejects_invalid_parameters(self) -> None:
+        self._write_descriptor(
+            capabilities=self.capabilities + ["retarget.inspect"],
+        )
+        invalid_cases = (
+            {"animationPaths": []},
+            {"animationPaths": [f"/Game/Animations/A_{index}.A_{index}" for index in range(33)]},
+            {"animationPaths": ["/Game/Animations/NotAnObjectPath"]},
+            {"animationPaths": ["/Game/Animations/A_Idle.A_Idle"], "unknown": True},
+        )
+        for params in invalid_cases:
+            with self.subTest(params=params):
+                with self.assertRaises(LiveEditorError) as context:
+                    self.service.call_tool("ue_diagnose_additive_animation", params)
                 self.assertEqual(context.exception.code, "live-editor-invalid-parameters")
 
     def test_analyze_animation_retarget_requires_registered_capability(self) -> None:

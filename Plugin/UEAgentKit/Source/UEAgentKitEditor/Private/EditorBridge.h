@@ -127,6 +127,12 @@ private:
 		TSharedPtr<FJsonObject>& OutResult,
 		FString& OutErrorCode,
 		FString& OutErrorMessage) const;
+	bool TryDiagnoseAdditiveAnimationResult(
+		const TArray<FString>& AnimationPaths,
+		bool bLoadIfNeeded,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage) const;
 	bool TryApplyAnimationRetargetSetupResult(
 		const FString& SourceMeshPath,
 		const FString& TargetMeshPath,

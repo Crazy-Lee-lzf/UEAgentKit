@@ -1,3 +1,4 @@
+#include "AssetReaders/AssetReaderCommon.h"
 #include "EditorBridge.h"
 #include "EditorBridgeHandlerUtils.h"
 #include "Retarget/RetargetAnalysis.h"
@@ -653,6 +654,114 @@ bool FUEAgentKitEditorBridge::TryDiagnoseAnimationScaleResult(
 
 	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetStringField(TEXT("action"), TEXT("diagnose-animation-scale"));
+	Result->SetBoolField(TEXT("loadIfNeeded"), bLoadIfNeeded);
+	Result->SetArrayField(TEXT("assets"), AssetValues);
+	Result->SetStringField(TEXT("editorSessionId"), SessionId);
+	OutResult = Result;
+	return true;
+}
+
+bool FUEAgentKitEditorBridge::TryDiagnoseAdditiveAnimationResult(
+	const TArray<FString>& AnimationPaths,
+	bool bLoadIfNeeded,
+	TSharedPtr<FJsonObject>& OutResult,
+	FString& OutErrorCode,
+	FString& OutErrorMessage) const
+{
+	if (GEditor == nullptr)
+	{
+		OutErrorCode = TEXT("live-editor-unavailable");
+		OutErrorMessage = TEXT("The Unreal Editor is unavailable.");
+		return false;
+	}
+	if (GEditor->PlayWorld != nullptr)
+	{
+		OutErrorCode = TEXT("retarget_editor_state_invalid");
+		OutErrorMessage = TEXT("Additive animation diagnosis is unavailable while PIE or SIE is active.");
+		return false;
+	}
+	if (AnimationPaths.IsEmpty() || AnimationPaths.Num() > 32)
+	{
+		OutErrorCode = TEXT("live-editor-invalid-parameters");
+		OutErrorMessage = TEXT("Provide 1-32 animationPaths.");
+		return false;
+	}
+
+	TArray<TSharedPtr<FJsonValue>> AssetValues;
+	for (const FString& AnimationPath : AnimationPaths)
+	{
+		if (!UEAgentKitEditorBridgePrivate::IsSafeGameAssetPath(AnimationPath))
+		{
+			OutErrorCode = TEXT("retarget_asset_not_found");
+			OutErrorMessage = TEXT("Each animation must be an exact /Game Object Path.");
+			return false;
+		}
+
+		UObject* Existing = StaticFindObject(UObject::StaticClass(), nullptr, *AnimationPath, false);
+		const bool bLoadedBefore = Existing != nullptr;
+		UAnimSequence* Sequence = Cast<UAnimSequence>(Existing);
+		if (Sequence == nullptr && bLoadIfNeeded)
+		{
+			Sequence = LoadObject<UAnimSequence>(nullptr, *AnimationPath);
+		}
+
+		TSharedRef<FJsonObject> AssetJson = MakeShared<FJsonObject>();
+		AssetJson->SetStringField(TEXT("assetPath"), AnimationPath);
+		AssetJson->SetBoolField(TEXT("loadedBefore"), bLoadedBefore);
+		AssetJson->SetBoolField(TEXT("loadedByBridge"), !bLoadedBefore && Sequence != nullptr);
+		if (Sequence == nullptr)
+		{
+			AssetJson->SetStringField(TEXT("status"), bLoadIfNeeded ? TEXT("not-an-animation-sequence") : TEXT("not-loaded"));
+			AssetValues.Add(MakeShared<FJsonValueObject>(AssetJson));
+			continue;
+		}
+
+		USkeleton* Skeleton = Sequence->GetSkeleton();
+		if (Skeleton == nullptr)
+		{
+			AssetJson->SetStringField(TEXT("status"), TEXT("missing-skeleton"));
+			AssetValues.Add(MakeShared<FJsonValueObject>(AssetJson));
+			continue;
+		}
+
+		const EAdditiveAnimationType AdditiveType = static_cast<EAdditiveAnimationType>(Sequence->AdditiveAnimType.GetValue());
+		const EAdditiveBasePoseType BasePoseType = static_cast<EAdditiveBasePoseType>(Sequence->RefPoseType.GetValue());
+		UAnimSequence* RefPoseSeq = Sequence->RefPoseSeq.Get();
+
+		AssetJson->SetStringField(TEXT("status"), TEXT("success"));
+		AssetJson->SetStringField(TEXT("skeletonPath"), Skeleton->GetPathName());
+		AssetJson->SetNumberField(TEXT("additiveAnimType"), static_cast<int32>(AdditiveType));
+		AssetJson->SetStringField(TEXT("additiveTypeName"), AssetReaderRegistryPrivate::AdditiveAnimationTypeToString(AdditiveType));
+		AssetJson->SetNumberField(TEXT("additiveBasePoseType"), static_cast<int32>(BasePoseType));
+		AssetJson->SetStringField(TEXT("basePoseTypeName"), AssetReaderRegistryPrivate::AdditiveBasePoseTypeToString(BasePoseType));
+		AssetJson->SetNumberField(TEXT("additiveRefFrameIndex"), Sequence->RefFrameIndex);
+		AssetJson->SetStringField(
+			TEXT("additiveRefSequencePath"),
+			RefPoseSeq != nullptr ? RefPoseSeq->GetPathName() : FString());
+
+		TSharedRef<FJsonObject> BasePoseJson = MakeShared<FJsonObject>();
+		const bool bRefSequenceResolved = RefPoseSeq != nullptr;
+		BasePoseJson->SetBoolField(TEXT("refSequenceResolved"), bRefSequenceResolved);
+		if (bRefSequenceResolved)
+		{
+			USkeleton* RefSkeleton = RefPoseSeq->GetSkeleton();
+			BasePoseJson->SetStringField(
+				TEXT("skeletonPath"),
+				RefSkeleton != nullptr ? RefSkeleton->GetPathName() : FString());
+			BasePoseJson->SetBoolField(TEXT("skeletonCompatible"), RefSkeleton != nullptr && RefSkeleton == Skeleton);
+			const IAnimationDataModel* RefModel = RefPoseSeq->GetDataModel();
+			const int32 RefFrameCount = RefModel != nullptr ? RefModel->GetNumberOfFrames() : 0;
+			BasePoseJson->SetNumberField(TEXT("frameCount"), RefFrameCount);
+			const int32 RefFrameIndex = Sequence->RefFrameIndex;
+			BasePoseJson->SetBoolField(TEXT("refFrameValid"), RefFrameIndex >= 0 && RefFrameIndex < RefFrameCount);
+		}
+		AssetJson->SetObjectField(TEXT("basePose"), BasePoseJson);
+
+		AssetValues.Add(MakeShared<FJsonValueObject>(AssetJson));
+	}
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetStringField(TEXT("action"), TEXT("diagnose-additive-animation"));
 	Result->SetBoolField(TEXT("loadIfNeeded"), bLoadIfNeeded);
 	Result->SetArrayField(TEXT("assets"), AssetValues);
 	Result->SetStringField(TEXT("editorSessionId"), SessionId);

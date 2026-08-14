@@ -343,6 +343,8 @@ P3 Suggested Plan
 
 ## 6. P4：Additive / Base Pose 求值
 
+> 状态（2026-08-14）：第一片已完成——只读诊断 `ue_diagnose_additive_animation`（retarget.inspect），解析 Base Pose 引用 / Skeleton 兼容性 / RefFrame 有效性，产出分类与 `combinedEvaluationFeasible`；已通过真实 UE5.6 Smoke（4 个 Additive 样本 + 1 个非 Additive 对照）。组合求值（`ue_evaluate_animation_with_base_pose`）与修复（`ue_plan_additive_base_pose_fix`）仍待后续片。详见 `docs/ADDITIVE_ANIMATION_DIAGNOSIS_TOOL.md` 与 `dev_docs/ANIMATION_ADDITIVE_DIAGNOSIS_RESULT.md`。
+
 这是动画工具下一阶段最重要的技术问题。
 
 当前限制：

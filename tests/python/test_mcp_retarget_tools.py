@@ -212,5 +212,66 @@ class RetargetToolTests(unittest.TestCase):
             },
         )
 
+    def test_diagnose_additive_animation_passes_through_and_classifies(self) -> None:
+        service = _live_service({"retargetCapabilities": ["retarget.inspect"]})
+        service.call_tool.return_value = {
+            "schemaVersion": "1.0",
+            "tool": "ue_diagnose_additive_animation",
+            "ok": True,
+            "readOnly": True,
+            "result": {
+                "action": "diagnose-additive-animation",
+                "assets": [
+                    {
+                        "assetPath": ANIMATION,
+                        "status": "success",
+                        "skeletonPath": "/Game/Characters/SK_Skeleton.SK_Skeleton",
+                        "additiveAnimType": 1,
+                        "additiveTypeName": "LocalSpaceBase",
+                        "additiveBasePoseType": 3,
+                        "basePoseTypeName": "AnimationFrame",
+                        "additiveRefFrameIndex": 0,
+                        "additiveRefSequencePath": "/Game/Animations/A_Base.A_Base",
+                        "basePose": {
+                            "refSequenceResolved": True,
+                            "skeletonPath": "/Game/Characters/SK_Skeleton.SK_Skeleton",
+                            "skeletonCompatible": True,
+                            "frameCount": 30,
+                            "refFrameValid": True,
+                        },
+                    }
+                ],
+                "editorSessionId": "session-1",
+            },
+        }
+        server = FastMCP("probe")
+        register_retarget_tools(
+            server=server,
+            live_editor_service=service,
+            read_annotations=_read_only_annotations(),
+            error_response=_error_response,
+        )
+        result = asyncio.run(
+            server.call_tool(
+                "ue_diagnose_additive_animation",
+                {
+                    "animationPaths": [ANIMATION],
+                    "loadIfNeeded": True,
+                },
+            )
+        )
+        _, payload = result
+        self.assertTrue(payload["ok"])
+        asset = payload["result"]["assets"][0]
+        self.assertEqual(asset["classification"], "additive-valid")
+        self.assertTrue(asset["combinedEvaluationFeasible"])
+        service.call_tool.assert_called_once_with(
+            "ue_diagnose_additive_animation",
+            {
+                "animationPaths": [ANIMATION],
+                "loadIfNeeded": True,
+            },
+        )
+
 if __name__ == "__main__":
     unittest.main()

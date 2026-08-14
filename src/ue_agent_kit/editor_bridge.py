@@ -35,6 +35,7 @@ _CAPABILITY_GATED_TOOLS = {
     "ue_cancel_batch_task": "editor.batchTask.cancel",
     "ue_analyze_animation_retarget": "retarget.inspect",
     "ue_diagnose_animation_scale": "retarget.inspect",
+    "ue_diagnose_additive_animation": "retarget.inspect",
 }
 
 
@@ -193,6 +194,25 @@ class LiveEditorBridgeService:
             return {
                 "animationPaths": normalized_paths,
                 "boneNames": normalized_bones,
+                "loadIfNeeded": bool(params.get("loadIfNeeded", False)),
+            }
+        if tool_name == "ue_diagnose_additive_animation":
+            allowed = {"animationPaths", "loadIfNeeded"}
+            LiveEditorBridgeService._reject_unknown_params(params, allowed)
+            animation_paths = params.get("animationPaths", [])
+            if not isinstance(animation_paths, list) or not 1 <= len(animation_paths) <= 32:
+                raise LiveEditorError(
+                    "live-editor-invalid-parameters",
+                    "animationPaths must contain between 1 and 32 Object Paths.",
+                )
+            normalized_paths = [
+                LiveEditorBridgeService._bounded_string(value, "animationPaths", 512)
+                for value in animation_paths
+            ]
+            for asset_path in normalized_paths:
+                LiveEditorBridgeService._validate_game_object_path(asset_path)
+            return {
+                "animationPaths": normalized_paths,
                 "loadIfNeeded": bool(params.get("loadIfNeeded", False)),
             }
         if tool_name == "ue_plan_animation_retarget":

@@ -1168,6 +1168,30 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 			ErrorCode,
 			ErrorMessage);
 	}
+	else if (Method == TEXT("editor.diagnoseAdditiveAnimation"))
+	{
+		const TArray<TSharedPtr<FJsonValue>>* AnimationPaths = nullptr;
+		Params->TryGetArrayField(TEXT("animationPaths"), AnimationPaths);
+		bool bLoadIfNeeded = false;
+		Params->TryGetBoolField(TEXT("loadIfNeeded"), bLoadIfNeeded);
+		TArray<FString> ParsedAnimationPaths;
+		if (AnimationPaths != nullptr)
+		{
+			for (const TSharedPtr<FJsonValue>& Value : *AnimationPaths)
+			{
+				ParsedAnimationPaths.Add(Value->AsString());
+			}
+		}
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode;
+		FString ErrorMessage;
+		SendActionResult(
+			TryDiagnoseAdditiveAnimationResult(
+				ParsedAnimationPaths, bLoadIfNeeded, Result, ErrorCode, ErrorMessage),
+			Result,
+			ErrorCode,
+			ErrorMessage);
+	}
 	else if (Method == TEXT("editor.validateAnimationRetarget"))
 	{
 		FString RetargeterPath;
