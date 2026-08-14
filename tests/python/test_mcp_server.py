@@ -1645,7 +1645,7 @@ class McpServerTests(unittest.TestCase):
             [tool.name for tool in tools],
             tool_names_for_mode(workflow_enabled=True, memory_enabled=True),
         )
-        self.assertEqual(len(tools), 66)
+        self.assertEqual(len(tools), 67)
 
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
         memory_contract = capabilities["projectMemory"]
@@ -1723,7 +1723,7 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         expected_names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 85)
+        self.assertEqual(len(tools), 86)
         for tool in tools:
             definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
             self.assertEqual(bool(tool.annotations.readOnlyHint), definition.read_only, tool.name)
@@ -1838,7 +1838,7 @@ class McpServerTests(unittest.TestCase):
         self.assertTrue(capabilities["highLevelChanges"]["available"])
         self.assertEqual(capabilities["highLevelChanges"]["defaultMode"], "Plan")
         self.assertFalse(capabilities["highLevelChanges"]["commitSupportedDirectly"])
-        self.assertEqual(len(capabilities["highLevelChanges"]["tools"]), 13)
+        self.assertEqual(len(capabilities["highLevelChanges"]["tools"]), 14)
         self.assertTrue(capabilities["assetState"]["available"])
         self.assertEqual(
             capabilities["assetState"]["sources"],

@@ -19,6 +19,7 @@ if str(SRC_ROOT) not in sys.path:
 from ue_agent_kit.cli import main  # noqa: E402
 from ue_agent_kit.patches import (  # noqa: E402
     LIVE_WRITE_OPERATION_REGISTRY,
+    _validate_additive_base_pose_fix_value,
     _validate_animation_scale_fix_value,
     validate_patch,
 )
@@ -166,6 +167,7 @@ class PatchValidationTests(unittest.TestCase):
             "setAssetReferenceProperty": ("reference", "property", "propertyPath"),
             "setAssetStructuredProperty": ("structured", "property", "propertyPath"),
             "setAnimationScaleFix": ("animation-scale-fix", "animation-scale-fix", "rootBone"),
+            "setAdditiveBasePoseFix": ("additive-base-pose-fix", "additive-base-pose-fix", ""),
             "setMaterialInstanceScalarParameter": ("material-scalar", "material-parameter", "parameterName"),
             "setMaterialInstanceVectorParameter": ("material-vector", "material-parameter", "parameterName"),
             "setMaterialInstanceTextureParameter": ("material-texture", "material-parameter", "parameterName"),
@@ -183,7 +185,8 @@ class PatchValidationTests(unittest.TestCase):
                 (spec.live_write_value_kind, spec.live_write_verification, spec.live_write_verification_target),
                 metadata,
             )
-            self.assertTrue(spec.target_fields)
+            if name != "setAdditiveBasePoseFix":
+                self.assertTrue(spec.target_fields)
             self.assertEqual(set(spec.target_fields), set(spec.target_validators))
     def test_animation_scale_fix_value_accepts_non_additive_contract(self) -> None:
         valid, message = _validate_animation_scale_fix_value(
@@ -204,6 +207,71 @@ class PatchValidationTests(unittest.TestCase):
         )
         self.assertFalse(valid)
         self.assertIn("allowAdditive", message)
+
+    def test_additive_base_pose_fix_value_accepts_contract(self) -> None:
+        valid, message = _validate_additive_base_pose_fix_value(
+            {
+                "refSequencePath": "/Game/Animations/A_Base.A_Base",
+                "refFrameIndex": 0,
+                "expectedCombinedRootScale": 1.0,
+            },
+            65536,
+        )
+        self.assertTrue(valid, message)
+
+    def test_additive_base_pose_fix_value_rejects_missing_required_fields(self) -> None:
+        valid, message = _validate_additive_base_pose_fix_value(
+            {"refFrameIndex": 0, "additiveAnimType": "LocalSpaceBase"},
+            65536,
+        )
+        self.assertFalse(valid)
+        self.assertIn("refSequencePath", message)
+        valid, message = _validate_additive_base_pose_fix_value(
+            {"refSequencePath": "/Game/Animations/A_Base.A_Base", "additiveAnimType": "LocalSpaceBase"},
+            65536,
+        )
+        self.assertFalse(valid)
+        self.assertIn("refFrameIndex", message)
+
+    def test_additive_base_pose_fix_value_rejects_bad_ref_path(self) -> None:
+        valid, message = _validate_additive_base_pose_fix_value(
+            {"refSequencePath": "NotAValidPath", "refFrameIndex": 0},
+            65536,
+        )
+        self.assertFalse(valid)
+        self.assertIn("refSequencePath", message)
+
+    def test_additive_base_pose_fix_value_rejects_bad_frame_index(self) -> None:
+        valid, message = _validate_additive_base_pose_fix_value(
+            {"refSequencePath": "/Game/Animations/A_Base.A_Base", "refFrameIndex": -1},
+            65536,
+        )
+        self.assertFalse(valid)
+        self.assertIn("refFrameIndex", message)
+
+    def test_additive_base_pose_fix_value_rejects_unknown_field(self) -> None:
+        valid, message = _validate_additive_base_pose_fix_value(
+            {
+                "refSequencePath": "/Game/Animations/A_Base.A_Base",
+                "refFrameIndex": 0,
+                "allowAdditive": True,
+            },
+            65536,
+        )
+        self.assertFalse(valid)
+        self.assertIn("allowAdditive", message)
+
+    def test_additive_base_pose_fix_value_rejects_bad_base_pose_type(self) -> None:
+        valid, message = _validate_additive_base_pose_fix_value(
+            {
+                "refSequencePath": "/Game/Animations/A_Base.A_Base",
+                "refFrameIndex": 0,
+                "additiveBasePoseType": "NotAType",
+            },
+            65536,
+        )
+        self.assertFalse(valid)
+        self.assertIn("additiveBasePoseType", message)
 
 
     def setUp(self) -> None:
@@ -553,6 +621,50 @@ class PatchValidationTests(unittest.TestCase):
         self.canonical["assetDetails"]["properties"] = []
         self.flush()
         self.assertIn("asset-reference-property-missing", self.error_codes(self.validate()))
+
+    def configure_additive_base_pose_fix_operation(
+        self,
+        *,
+        ref_sequence_path: str = "/Game/UEAgentKitWriteTests/BasePoses/AM_Base.AM_Base",
+    ) -> None:
+        asset_path = "/Game/UEAgentKitWriteTests/AM_Additive.AM_Additive"
+        asset_class = "/Script/Engine.AnimSequence"
+        asset = self.patch["assets"][0]
+        asset["assetPath"] = asset_path
+        asset["expectedAssetClass"] = asset_class
+        asset["operations"] = [
+            {
+                "operationId": "set-additive-base-pose",
+                "operation": "setAdditiveBasePoseFix",
+                "target": {},
+                "value": {
+                    "refSequencePath": ref_sequence_path,
+                    "refFrameIndex": 0,
+                },
+            }
+        ]
+        self.policy["allowedOperations"].append("setAdditiveBasePoseFix")
+        self.policy["allowedAssetClasses"].append(asset_class)
+        self.policy["allowedReferenceRoots"] = ["/Game/UEAgentKitWriteTests/BasePoses"]
+        self.canonical["assetPath"] = asset_path
+        self.canonical["packageName"] = asset_path.rsplit(".", 1)[0]
+        self.canonical["assetClass"] = asset_class
+        self.flush()
+
+    def test_additive_base_pose_fix_operation_is_valid(self) -> None:
+        self.configure_additive_base_pose_fix_operation()
+        result = self.validate()
+        self.assertTrue(result["valid"])
+        expected = result["assets"][0]["operations"][0]["expectedChange"]
+        self.assertEqual(expected["kind"], "additive-base-pose-fix")
+
+    def test_additive_base_pose_fix_rejects_outside_reference_root(self) -> None:
+        self.configure_additive_base_pose_fix_operation()
+        self.patch["assets"][0]["operations"][0]["value"]["refSequencePath"] = (
+            "/Game/Outside/AM_Outside.AM_Outside"
+        )
+        self.flush()
+        self.assertIn("reference-not-allowed", self.error_codes(self.validate()))
 
     def test_asset_property_rejects_blueprint(self) -> None:
         self.patch["assets"][0]["operations"] = [

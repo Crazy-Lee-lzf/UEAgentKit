@@ -189,6 +189,46 @@ def register_workflow_tools(
             return error_response("ue_plan_animation_scale_fix", exc, read_only=False)
 
     @server.tool(annotations=planning_annotations)
+    def ue_plan_additive_base_pose_fix_apply(
+        asset_path: str,
+        ref_sequence_path: str,
+        ref_frame_index: int,
+        additive_anim_type: Literal["None", "LocalSpaceBase", "RotationOffsetMeshSpace"] | None = None,
+        additive_base_pose_type: Literal[
+            "None", "ReferencePose", "AnimationScaled", "AnimationFrame", "LocalAnimationFrame"
+        ] | None = None,
+        expected_combined_root_scale: float | None = None,
+        combined_scale_tolerance: float | None = None,
+        root_bone: str | None = None,
+        description: str = "",
+    ) -> dict[str, Any]:
+        """Plan a policy-authorized Additive Base Pose fix that replaces RefPoseSeq and RefFrameIndex and verifies the combined Root Scale."""
+        value: dict[str, Any] = {
+            "refSequencePath": ref_sequence_path,
+            "refFrameIndex": ref_frame_index,
+        }
+        optional_values = {
+            "additiveAnimType": additive_anim_type,
+            "additiveBasePoseType": additive_base_pose_type,
+            "expectedCombinedRootScale": expected_combined_root_scale,
+            "combinedScaleTolerance": combined_scale_tolerance,
+            "rootBone": root_bone,
+        }
+        value.update({key: item for key, item in optional_values.items() if item is not None})
+        try:
+            return _run_high_level_change(
+                tool_name="ue_plan_additive_base_pose_fix_apply",
+                mode="Plan",
+                asset_path=asset_path,
+                operation="setAdditiveBasePoseFix",
+                target={},
+                value=value,
+                description=description,
+            )
+        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_plan_additive_base_pose_fix_apply", exc, read_only=False)
+
+    @server.tool(annotations=planning_annotations)
     def ue_plan_animation_scale_fix_batch(
         audit_task_id: str,
         audit_report_id: str,

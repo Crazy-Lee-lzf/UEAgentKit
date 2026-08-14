@@ -142,6 +142,19 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
         dry_run_supported=False,
         commit_supported=False,
     ),
+    "setAdditiveBasePoseFix": OperationSpec(
+        name="setAdditiveBasePoseFix",
+        risk="high",
+        target_fields=(),
+        target_validators={},
+        expected_change="additive-base-pose-fix",
+        asset_type="NonBlueprint",
+        live_write_value_kind="additive-base-pose-fix",
+        live_write_verification="additive-base-pose-fix",
+        live_write_verification_target="",
+        dry_run_supported=False,
+        commit_supported=False,
+    ),
     "setMaterialInstanceScalarParameter": OperationSpec(
         name="setMaterialInstanceScalarParameter",
         risk="medium",
@@ -1070,6 +1083,79 @@ def _validate_animation_scale_fix_value(value: Any, max_value_bytes: int) -> tup
     return True, ""
 
 
+def _validate_additive_base_pose_fix_value(value: Any, max_value_bytes: int) -> tuple[bool, str]:
+    if not isinstance(value, dict) or not 2 <= len(value) <= 7:
+        return False, "Additive base pose fix value must be one object with 2 to 7 fields."
+    allowed_fields = {
+        "refSequencePath",
+        "refFrameIndex",
+        "additiveAnimType",
+        "additiveBasePoseType",
+        "expectedCombinedRootScale",
+        "combinedScaleTolerance",
+        "rootBone",
+    }
+    unknown_fields = sorted(set(value) - allowed_fields)
+    if unknown_fields:
+        return False, f"Unsupported additive base pose fix fields: {', '.join(unknown_fields)}."
+    if "refSequencePath" not in value:
+        return False, "refSequencePath is required."
+    if "refFrameIndex" not in value:
+        return False, "refFrameIndex is required."
+    try:
+        encoded = _canonical_json(value).encode("utf-8")
+    except (TypeError, ValueError):
+        return False, "Additive base pose fix value is not valid finite JSON."
+    if len(encoded) > max_value_bytes:
+        return False, "Additive base pose fix value exceeds maxValueBytes."
+
+    ref_sequence_path = value["refSequencePath"]
+    valid_ref, _ = _validate_asset_path(ref_sequence_path)
+    if not valid_ref:
+        return False, "refSequencePath must be a valid /Game/Package.Asset object path."
+
+    frame_index = value["refFrameIndex"]
+    if isinstance(frame_index, bool) or not isinstance(frame_index, int) or frame_index < 0:
+        return False, "refFrameIndex must be a non-negative integer."
+
+    additive_anim_type = value.get("additiveAnimType")
+    if additive_anim_type is not None and additive_anim_type not in {
+        "None",
+        "LocalSpaceBase",
+        "RotationOffsetMeshSpace",
+    }:
+        return False, "additiveAnimType must be None, LocalSpaceBase, or RotationOffsetMeshSpace."
+
+    additive_base_pose_type = value.get("additiveBasePoseType")
+    if additive_base_pose_type is not None and additive_base_pose_type not in {
+        "None",
+        "ReferencePose",
+        "AnimationScaled",
+        "AnimationFrame",
+        "LocalAnimationFrame",
+    }:
+        return False, "additiveBasePoseType must be None, ReferencePose, AnimationScaled, AnimationFrame, or LocalAnimationFrame."
+
+    def valid_number(field: str, *, allow_zero: bool = False) -> bool:
+        if field not in value:
+            return True
+        number = value[field]
+        if isinstance(number, bool) or not isinstance(number, (int, float)) or not math.isfinite(float(number)):
+            return False
+        return 0.0 <= float(number) <= 1_000_000.0 if allow_zero else 0.0 < float(number) <= 1_000_000.0
+
+    if not valid_number("expectedCombinedRootScale"):
+        return False, "expectedCombinedRootScale must be a finite number greater than 0 and at most 1000000."
+    if not valid_number("combinedScaleTolerance", allow_zero=True):
+        return False, "combinedScaleTolerance must be a finite non-negative number at most 1000000."
+
+    root_bone = value.get("rootBone")
+    if root_bone is not None and not _is_nonempty_text(root_bone, max_length=256):
+        return False, "rootBone must be a non-empty bone name."
+
+    return True, ""
+
+
 def _validate_vector_value(value: Any, max_value_bytes: int) -> bool:
     if not isinstance(value, dict) or set(value) != {"r", "g", "b", "a"}:
         return False
@@ -1326,6 +1412,8 @@ def _transaction_target_keys(
         ]
     if operation_name == "setBlueprintDescription":
         return ["blueprint-description"]
+    if operation_name == "setAdditiveBasePoseFix":
+        return ["additive-base-pose-fix"]
     if operation_name in {
         "setAssetProperty",
         "setAssetReferenceProperty",
@@ -1958,6 +2046,27 @@ def validate_patch(
                         scale_fix_error,
                         f"{operation_pointer}.value",
                     )
+            elif operation_name == "setAdditiveBasePoseFix":
+                valid_fix, fix_error = _validate_additive_base_pose_fix_value(
+                    value,
+                    policy["maxValueBytes"],
+                )
+                if not valid_fix:
+                    _issue(
+                        errors,
+                        "operation-value-type",
+                        fix_error,
+                        f"{operation_pointer}.value",
+                    )
+                else:
+                    _, ref_package = _validate_asset_path(value["refSequencePath"])
+                    if not _path_is_allowed(ref_package, policy["allowedReferenceRoots"]):
+                        _issue(
+                            errors,
+                            "reference-not-allowed",
+                            f"Referenced asset is outside allowedReferenceRoots: {value['refSequencePath']}",
+                            f"{operation_pointer}.value.refSequencePath",
+                        )
             elif operation_name == "setMaterialInstanceTextureParameter":
                 valid_reference, reference_package = _validate_asset_path(value)
                 if not valid_reference:

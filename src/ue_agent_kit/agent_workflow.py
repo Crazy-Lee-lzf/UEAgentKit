@@ -248,6 +248,13 @@ def _live_write_exported_value(canonical: dict[str, Any], record: LiveApplyRecor
     target = record.target or {}
     if record.operation == "setAnimationScaleFix":
         return details.get("scaleFixState")
+    if record.operation == "setAdditiveBasePoseFix":
+        return {
+            "refSequencePath": details.get("basePoseSequencePath"),
+            "refFrameIndex": details.get("basePoseFrameIndex"),
+            "additiveAnimType": details.get("additiveType"),
+            "additiveBasePoseType": details.get("basePoseType"),
+        }
     spec = LIVE_WRITE_OPERATION_REGISTRY.get(record.operation)
     if spec is None:
         return None
