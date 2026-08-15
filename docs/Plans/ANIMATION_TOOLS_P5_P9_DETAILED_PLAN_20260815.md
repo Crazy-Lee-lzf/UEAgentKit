@@ -151,6 +151,8 @@ G9  文档已同步（新工具 docs/*.md + 本计划状态勾选 + tool_registr
 
 ## 4. P8 ModelPreview 接入（执行手册，非代码）
 
+> **状态（2026-08-15）**：执行手册已撰写（`docs/MODELPREVIEW_INTEGRATION_MANUAL.md`，9 步有序清单 + 前置侦察结果 + 安全门禁）。**尚未对 ModelPreview 执行任何改动** —— 任何 ModelPreview 改动（步骤 1 装插件 / 步骤 5 复制资产 / 步骤 8–9 写动画）都触及 standing constraint「不得修改其他工程内容」，须先获得用户逐步显式授权。侦察结论：ModelPreview 已声明 `UEAgentKit` 插件，但 `Plugins/UEAgentKit` 为 07-30 旧版全量拷贝（早于 P5/P6/P7），需更新到 `Build/Compiled/UEAgentKit`（08-15，2.4MB）。
+
 **目标**：把已验证的工作流接入 `E:\WorkSpace\ModelPreview`。这是一份**有序执行手册**，Agent 按顺序逐步执行并回报，不是一次性代码任务。
 
 **依赖**：P7（配置就绪）+ P5/P6（只读基线）。
