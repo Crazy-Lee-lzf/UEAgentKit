@@ -67,6 +67,12 @@ from .snapshot_lifecycle import (
     freeze_active_snapshot,
     resolve_active_snapshot,
 )
+from .task_context import (
+    MAX_TASK_CONTEXT_ASSETS,
+    TASK_CONTEXT_SCHEMA_VERSION,
+    TaskContextService,
+    register_task_context_tools,
+)
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -88,6 +94,7 @@ STRICT_MEMORY_ARGUMENT_TOOL_NAMES = (
     "ue_memory_update_knowledge",
     "ue_memory_update_work",
 )
+STRICT_TASK_CONTEXT_ARGUMENT_TOOL_NAMES = ("ue_get_task_context",)
 
 
 def _enforce_strict_tool_arguments(server: Any, tool_names: Sequence[str]) -> None:
@@ -117,6 +124,8 @@ def _server_instructions(
         "Use ue_get_capabilities to inspect the active server contract and ue_get_project_status for the fixed "
         "project and index state. Use ue_search to locate assets or symbols, ue_get_asset for one exact asset path, "
         "and ue_find_references for dependency and Blueprint reference edges. "
+        "Use ue_get_task_context with the task query and explicit target asset paths to obtain bounded Index, "
+        "Revision, Memory, and Live Editor facts plus deterministic risks in one request. "
     )
     live_text = (
         "The ue_editor_*, ue_get_*, bounded Batch Task, and journaled Change Set live tools operate "
@@ -517,6 +526,36 @@ def _capabilities_response(
             "restartRequiredAfterApply": True,
             "arbitraryPaths": False,
         },
+        "taskContext": {
+            "available": True,
+            "tool": "ue_get_task_context",
+            "schemaVersion": TASK_CONTEXT_SCHEMA_VERSION,
+            "readOnly": True,
+            "queryRequired": True,
+            "maxAssets": MAX_TASK_CONTEXT_ASSETS,
+            "sources": [
+                "immutable-sqlite-index",
+                "sqlite-revision-export-disk-sha256",
+                "project-memory",
+                "project-memory-active-work",
+                "live-editor-memory",
+                "change-set-journal",
+            ],
+            "sourceAvailability": {
+                "index": True,
+                "revisionFreshness": write_tools_enabled,
+                "memory": memory_enabled,
+                "liveEditor": live_editor_enabled,
+                "changeSet": write_tools_enabled,
+            },
+            "unavailableSectionsDegrade": True,
+            "risksAreDeterministicOnly": True,
+            "modelInference": False,
+            "autoRelevantAssetExpansion": False,
+            "relevantAssetsInV1": [],
+            "outputBudgetBounded": True,
+            "evidenceOnDemand": True,
+        },
         "limits": {
             "searchResults": MAX_MCP_SEARCH_LIMIT,
             "assetSymbols": MAX_MCP_SYMBOL_LIMIT,
@@ -550,6 +589,7 @@ def _capabilities_response(
             "liveChangeSets": 50,
             "liveChangeSetMaxReceipts": 100,
             "memorySearchResults": 100,
+            "taskContextMaxAssets": MAX_TASK_CONTEXT_ASSETS,
         },
         "responseContract": {
             "schemaVersion": "1.0",
@@ -699,6 +739,14 @@ def _project_status_response(
         },
         "freshness": freshness_status,
         "liveEditor": live_editor_status,
+        "taskContext": {
+            "available": True,
+            "tool": "ue_get_task_context",
+            "revisionFreshness": write_tools_enabled,
+            "memory": memory_service is not None,
+            "liveEditor": live_editor_service is not None,
+            "changeSet": write_tools_enabled,
+        },
     }
 
 
@@ -913,6 +961,21 @@ def create_mcp_server(
             memory_service,
         ),
     )
+    register_task_context_tools(
+        server=server,
+        task_context_service=TaskContextService(
+            index_service=index_service,
+            memory_service=memory_service,
+            live_editor_service=live_editor_service,
+            workflow_service=workflow_service,
+            freshness_tracker=(
+                getattr(workflow_service, "freshness", None) if workflow_service is not None else None
+            ),
+        ),
+        read_annotations=read_annotations,
+        error_response=_error_response,
+    )
+    _enforce_strict_tool_arguments(server, STRICT_TASK_CONTEXT_ARGUMENT_TOOL_NAMES)
     if memory_service is not None:
         register_memory_tools(
             server=server,

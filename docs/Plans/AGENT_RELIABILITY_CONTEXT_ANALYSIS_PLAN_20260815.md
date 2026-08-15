@@ -1,9 +1,9 @@
 # UEAgentKit 0.8.x Context / Analysis / Agent Reliability 执行计划
 
 > 更新时间：2026-08-15
-> 当前基线：`main@22632c7`
-> 当前状态：`main` 工作树干净，领先 `origin/main` 57 commits；Realtime Animation Tools 已合入 `main`，动画功能扩展暂缓。
-> 建议开发分支：`feature/agent-reliability`
+> 当前基线：`main@22632c7`（本地最新 `main` 为 `cc1f0c9`）
+> 当前状态：R0.0（现状审计 + 复用矩阵 + 最小 Schema）与 R0.1（`ue_get_task_context` 第一条纵向切片）已完成并本地提交到 `feature/agent-reliability`，停止等待下一片决策；R0.2/R0.3 与 R1–R5 未开始。
+> 建议开发分支：`feature/agent-reliability`（已创建，勿 Push）
 > 横向长期分支：`feature/performance-benchmarks`
 > 执行方式：分里程碑推进，不要求一次完成；每个里程碑必须可独立测试、提交和交接。
 
@@ -591,36 +591,22 @@ G9  本地 Commit
 
 ## 13. 本地 Agent 接手后的第一项任务
 
-不要直接实现 R0 全部功能。
+~~第一轮只做 **R0.0 现状审计 + R0.1 接口设计**~~（已完成，见下）
 
-第一轮只做 **R0.0 现状审计 + R0.1 接口设计**：
+第一轮（R0.0 + R0.1）已于 2026-08-15 完成并本地提交到 `feature/agent-reliability`：
 
 ```text
-1. 从本地最新 main 创建/确认 feature/agent-reliability。
-2. 读取：
-   - docs/ROADMAP.md
-   - docs/PROJECT_STATUS.md
-   - docs/MEMORY_ARCHITECTURE.md
-   - docs/AI_NATIVE_UE_EDITOR.md
-   - 本计划
-3. 审计现有：
-   - Index/Search API
-   - ue_memory_get_context
-   - Active Work
-   - ue_get_editor_context
-   - Change Set
-   - Revision/Freshness
-   - Token/Result Budget
-4. 输出 R0 复用矩阵：已有能力 / 缺口 / 不应重复实现的模块。
-5. 给出 `ue_get_task_context` 最小 Request/Response Schema。
-6. 先写契约测试，再实现第一条纵向切片：
-   query + explicit assetPaths
-   → Index facts
-   → optional Memory summary
-   → optional Live Editor summary
-   → freshness/dirty risks
-   → bounded response
-7. 通过门禁后独立 Commit。
+1. 从本地最新 main（cc1f0c9，包含 22632c7）创建 feature/agent-reliability。
+2. 读取全部指定文档，主 Agent + 两个 Flash 只读审计完成现状盘点。
+3. 复用矩阵与最小 Schema 落盘：docs/Plans/AGENT_RELIABILITY_R0_AUDIT_AND_SCHEMA_20260815.md。
+4. 实现 src/ue_agent_kit/task_context.py（TaskContextService + ue_get_task_context 注册）；
+   注册进 tool_registry（query 组，全模式可用）与 mcp_server（capabilities.taskContext、
+   server instructions、project status、严格参数）。
+5. 契约测试 tests/python/test_task_context.py（T1–T10 + 校验 + MCP 注册/降级，14 用例）。
+6. 门禁：Ruff 通过；Python 全量 530/530 通过；Tool Registry / MCP counts 契约更新
+   （6/18、39/51、89/101）；无 C++ 变更、无 Live Editor 行为变更，无需 UE Build/Smoke。
+7. 文档同步：ROADMAP.md、PROJECT_STATUS.md、spec/MCP_SERVER.md、本计划、新 Handoff。
+8. 独立本地 Commit（不 Push）。
 ```
 
 R0.0/R0.1 完成后再决定 R0.2（自动相关资产检索）和 R0.3（Active Work / Change Set 深度绑定），不要一次展开全部。

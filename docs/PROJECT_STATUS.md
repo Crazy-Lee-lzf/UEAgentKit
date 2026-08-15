@@ -40,11 +40,11 @@ UE Agent Kit 不是“让 AI 任意遥控 Unreal Editor”的通用自动化层�
 
 模式                 不启用 Memory    启用 Memory
 
-Offline                    5              17
+Offline                    6              18
 
-Live                      38              50
+Live                      39              51
 
-Workflow                  88              100
+Workflow                  89              101
 
 ```
 
@@ -60,7 +60,7 @@ Tool 数量只表示 MCP 接口数量，不等同于 Unreal Operation 数量。�
 
 ```text
 
-Python tests                 516/516
+Python tests                 530/530
 
 JSON Schemas                 3/3
 
@@ -387,6 +387,8 @@ R5  Value Provenance / Execution Trace（由 Benchmark 决定）
 ```
 
 当前第一优先级是 R0：提供一个高层只读任务上下文入口，把已有 Index/Search、Revision、Memory/Active Work、Live Editor Context、Dirty/Revision State 和 Change Set 组合成有界、可追溯、渐进式展开的事实集。第一版不新增 Memory Schema，也不在 Server 内做模型推断。
+
+R0.0（现状审计 + 复用矩阵 + 最小 Schema）与 R0.1（`ue_get_task_context` 第一条纵向切片）已完成并本地提交到 `feature/agent-reliability`：query + 显式 assetPaths → targetAssets → revisionState → 可选 Memory 摘要 / Live Editor 摘要 / Change Set → 确定性 risks → 有界输出；所有可选来源支持 section 级降级。复用矩阵与 Schema 见 [`Plans/AGENT_RELIABILITY_R0_AUDIT_AND_SCHEMA_20260815.md`](Plans/AGENT_RELIABILITY_R0_AUDIT_AND_SCHEMA_20260815.md)。R0.2（自动相关资产扩展）尚未开始。
 
 R1/R2 随后分别解决「修改会影响什么」和「实际发生了什么变化」。R3 再把现有 Persistence / Compile / Reference / Semantic Evidence 组合成统一 Verification Plan 与 Trust Verdict；保存和独立重载成功只能证明 Persistence，不自动等同于整个任务成功。
 

@@ -14,11 +14,12 @@ ue_get_project_status
 ue_search
 ue_get_asset
 ue_find_references
+ue_get_task_context
 ```
 
 ### 固定项目 Live Editor 模式
 
-使用 `-EnableLiveEditor -ProjectPath <固定 .uproject>` 后，在五个离线查询 Tool 之外注册：
+使用 `-EnableLiveEditor -ProjectPath <固定 .uproject>` 后，在六个离线查询 Tool 之外注册：
 
 ```text
 ue_editor_status
@@ -203,6 +204,27 @@ nodes
 - `depth` 为 1 至 3；大于 1 时必须提供锚点 `asset_path`。
 - `project_only=true` 只返回目标资产也存在于当前 SQLite 索引中的边。
 - 深层遍历不接受源/目标 Symbol 与目标资产端点组合，避免产生含义不稳定的跨层过滤。
+
+### `ue_get_task_context`
+
+一次只读请求把任务相关的确定性事实源聚合为有界 Task Context：
+
+```text
+query                 必填，任务的自然语言描述
+asset_paths           可选，精确 /Game Object Path，最多 10 个
+work_item_id          可选，Active Work Item ID
+change_set_id         可选，Change Set ID
+include_live_context  默认 true
+include_memory        默认 true
+max_output_tokens     默认 4096，范围 256–32768
+```
+
+返回结构按 `request / project / targetAssets / relevantAssets / memory / activeWork / liveEditor / revisionState / changeSet / risks / nextExpansions / degradedSources / outputBudget` 组织。每个事实带 `source`；Revision 状态来自 SQLite / Revision Export / 磁盘 Package 三方 SHA-256 比较；Memory 摘要复用有界 `ue_memory_get_context`；Live Editor 摘要复用 Bridge 的 `editor.getEditorContext`；Change Set 复用 journal 状态机。
+
+- `risks` 只包含确定性事实：`target-dirty-in-editor`、`asset-stale`、`asset-revision-unavailable`、`target-not-indexed`、`memory-stale-records`、`memory-conflicted-records`、`change-set-not-found`、`change-set-terminal`、`work-item-not-found` 等；不包含模型推断，禁止把猜测混成事实。
+- 某一来源不可用时只降级对应 section（例如 Offline 模式 `revisionState.available=false, reason=revision-export-not-configured`，Live Editor 未启用时 `liveEditor.reason=live-editor-disabled`），不会让整个请求失败；降级明细在 `degradedSources` 中显式列出。
+- 输出受 `max_output_tokens` 强制约束：超预算时按固定优先级阶梯裁剪可展开内容（Change Set operations → Live Editor summary → Memory records/nodes → Active Work items → 目标资产 metadata/summary → Revision comparisons → project stats → nextExpansions → risk details → 深层标识字段），并在 `outputBudget.truncated/truncationReason` 中显式报告；裁剪的展开路径进入 `nextExpansions`。`relevantAssets` 第一版恒为空，自动相关资产扩展属于 R0.2。
+- Memory 的 stale 检测复用现有 FTS 检索（按 asset scope + `stale` 状态过滤）；Memory FTS 对纯中文短语的匹配能力受上游 `unicode61` tokenizer 限制，检测不到只代表“本次检索未命中”，不代表“不存在 stale 记录”。
 
 ## 高层安全写入 Tool
 

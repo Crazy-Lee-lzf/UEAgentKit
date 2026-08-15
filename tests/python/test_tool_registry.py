@@ -39,6 +39,7 @@ EXPECTED_ALL_TOOLS = [
     "ue_search",
     "ue_get_asset",
     "ue_find_references",
+    "ue_get_task_context",
     "ue_editor_status",
     "ue_get_selection",
     "ue_get_open_assets",
@@ -131,21 +132,21 @@ class ToolRegistryTests(unittest.TestCase):
             tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True),
             EXPECTED_ALL_TOOLS,
         )
-        self.assertEqual(len(tool_names_for_mode()), 5)
-        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 38)
-        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 55)
+        self.assertEqual(len(tool_names_for_mode()), 6)
+        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 39)
+        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 56)
         self.assertEqual(
             tool_names_for_mode(memory_enabled=True),
-            EXPECTED_ALL_TOOLS[:5] + EXPECTED_MEMORY_TOOLS,
+            EXPECTED_ALL_TOOLS[:6] + EXPECTED_MEMORY_TOOLS,
         )
-        self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 17)
+        self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 18)
         self.assertEqual(
             len(tool_names_for_mode(live_editor_enabled=True, memory_enabled=True)),
-            50,
+            51,
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
-            67,
+            68,
         )
         self.assertEqual(
             len(
@@ -155,7 +156,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-            100,
+            101,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:
@@ -217,7 +218,7 @@ class ToolRegistryTests(unittest.TestCase):
             list(LIVE_EDITOR_METHODS),
             [
                 name
-                for name in EXPECTED_ALL_TOOLS[5:38]
+                for name in EXPECTED_ALL_TOOLS[6:39]
                 if name not in {"ue_start_animation_scale_audit", "ue_get_animation_scale_audit", "ue_cancel_animation_scale_audit", "ue_export_animation_scale_audit_report"}
             ],
         )
@@ -230,6 +231,10 @@ class ToolRegistryTests(unittest.TestCase):
             TOOL_DEFINITIONS_BY_NAME["ue_get_editor_context"].group,
             "realtime",
         )
+        self.assertTrue(TOOL_DEFINITIONS_BY_NAME["ue_get_task_context"].read_only)
+        self.assertEqual(TOOL_DEFINITIONS_BY_NAME["ue_get_task_context"].group, "query")
+        self.assertIn("ue_get_task_context", tool_names_for_mode())
+        self.assertEqual(TOOL_DEFINITIONS_BY_NAME["ue_get_task_context"].live_method, "")
         self.assertEqual(
             TOOL_DEFINITIONS_BY_NAME["ue_start_batch_task"].live_method,
             "editor.batchTask.start",
@@ -258,7 +263,7 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertEqual(
             [
                 name
-                for name in EXPECTED_ALL_TOOLS[5:38]
+                for name in EXPECTED_ALL_TOOLS[6:39]
                 if name not in {
                     "ue_start_animation_scale_audit", "ue_get_animation_scale_audit", "ue_cancel_animation_scale_audit",
                     "ue_export_animation_scale_audit_report",
@@ -294,7 +299,7 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertEqual(
             [item["name"] for item in memory_descriptors],
-            EXPECTED_ALL_TOOLS[:5] + EXPECTED_MEMORY_TOOLS,
+            EXPECTED_ALL_TOOLS[:6] + EXPECTED_MEMORY_TOOLS,
         )
 
     def test_live_action_handlers_keep_bounded_execution_surface(self) -> None:
