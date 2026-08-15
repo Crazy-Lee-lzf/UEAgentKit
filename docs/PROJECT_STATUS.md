@@ -6,7 +6,7 @@
 
 
 
-本文描述本地 `main` 的能力，支持 Unreal Engine 5.6。已发布 **0.7.0**（Schema v3 Knowledge Tree、Active Work、渐进式 Context、Realtime Foundation、Batch/Change Set 和扩展后的 Live Editor Write），并在此基础上完成 **Realtime Animation Tools**（动画比例诊断/修复/批量/重定向/Additive/浮空诊断/次级运动/项目级可写配置）。`feature/live-editor-realtime-io` 已 **fast-forward 合并进 `main`**；`feature/performance-benchmarks` 作为长期性能分支继续保留。
+本文描述本地 `main` 的能力，支持 Unreal Engine 5.6。已发布 **0.7.0**（Schema v3 Knowledge Tree、Active Work、渐进式 Context、Realtime Foundation、Batch/Change Set 和扩展后的 Live Editor Write），并在此基础上完成 **Realtime Animation Tools**（动画比例诊断/修复/批量/重定向/Additive/浮空诊断/次级运动/项目级可写配置）。`feature/live-editor-realtime-io` 已 **fast-forward 合并进 `main`**，动画扩展暂缓；下一产品主线为 `feature/agent-reliability` 上的 Context / Analysis / Agent Reliability，`feature/performance-benchmarks` 作为长期横向性能分支继续保留。
 
 
 
@@ -342,7 +342,7 @@ Live Editor Write 基础层、Material/DataTable、Undo/Discard、Save→Verify�
 - Change Set 使用 schema v2 持久化 Task、Editor Session、Operation、Asset、Transaction、Save Receipt 和 Validation 生命周期；支持 `planned/applied/partially_applied/undone/discarded/saved/verified/failed/unknown`，并保留终态历史。
 - 活跃 Change Set 不会被容量清理静默删除；Editor 重启后无法重新证明的运行时状态明确降级为 `unknown`。
 
-Realtime I/O 是当前首要开发主线。目标是在 Editor 保持打开时持续扩大读取、修改、编译、验证、撤销和授权保存的覆盖面，逐步接近 `ue-llm-toolkit` 已展示的实际编辑能力。Reader 与 Writer 可以在独立分支并行开发；Memory/Context 作为横向能力持续接入，但不阻塞实时 CRUD 扩展。每个新增 Operation 仍需补齐：
+Realtime I/O 基础层已经达到可复用状态，后续进入需求驱动维护，不再以持续扩大 CRUD / Writer 广度或追平 `ue-llm-toolkit` Tool 覆盖面作为首要目标。新的 Writer 只有在 Reforge 真实任务或 Agent Benchmark 反复暴露明确缺口时再增加；每个新增 Operation 仍必须补齐：
 
 1. Python `OperationSpec`、Policy 授权和 Plan Schema。
 2. 对应 C++ 域执行器与 Operation Descriptor。
@@ -373,31 +373,30 @@ Schema v3 Knowledge Tree、Active Work、五级渐进式披露、按需 Evidence
 
 测试工程项目目录目标 160–180 GB，硬上限 200 GB；总工作集不得超过 260 GB，E 盘剩余空间低于 50 GB 时自动停止生成。完整方案见 [`PERFORMANCE_TEST_PLAN.md`](PERFORMANCE_TEST_PLAN.md)。
 
-### P1：0.7.0 Context/Analysis 主线
+### P1：0.8.x Context / Analysis / Agent Reliability（当前主线）
 
+基础设施阶段已经基本完成，本阶段不再以新增 Tool / Asset Class / Writer 数量作为主进度。推荐在 `feature/agent-reliability` 上按可独立提交、可中断的里程碑推进，详细计划见 [`Plans/AGENT_RELIABILITY_CONTEXT_ANALYSIS_PLAN_20260815.md`](Plans/AGENT_RELIABILITY_CONTEXT_ANALYSIS_PLAN_20260815.md)。
 
+```text
+R0  Task Context / Context Pack MVP
+R1  Impact Analysis
+R2  Semantic Diff
+R3  Verification Plan + Trust Verdict
+R4  Real Agent Benchmark v1
+R5  Value Provenance / Execution Trace（由 Benchmark 决定）
+```
 
-- 自动 Context Pack：按任务只收集必要资产、Symbol、Reference、Memory 和 Live 状态。
+当前第一优先级是 R0：提供一个高层只读任务上下文入口，把已有 Index/Search、Revision、Memory/Active Work、Live Editor Context、Dirty/Revision State 和 Change Set 组合成有界、可追溯、渐进式展开的事实集。第一版不新增 Memory Schema，也不在 Server 内做模型推断。
 
-- 值来源追踪：一个属性、参数或默认值由哪里定义、覆盖和消费。
+R1/R2 随后分别解决「修改会影响什么」和「实际发生了什么变化」。R3 再把现有 Persistence / Compile / Reference / Semantic Evidence 组合成统一 Verification Plan 与 Trust Verdict；保存和独立重载成功只能证明 Persistence，不自动等同于整个任务成功。
 
-- 执行链追踪：Blueprint Exec、函数、接口、Dispatcher 和跨资产调用路径。
-
-- 影响分析：修改前列出直接/间接受影响资产、引用和验证范围。
-
-- 语义 Diff：比较 Blueprint、Data Asset、Material Instance、DataTable 的可读变化，而不是只比较二进制哈希。
-
-- Evidence-backed Hypothesis：区分已证明结论与模型推断。
-
-- 自动 Change Plan 与 Verification Plan。
+R4 用跨 Data Asset / DataTable / Material Instance / Blueprint / Context / stale / rollback 的真实 Agent Case 统计 Trusted Completion、False Success、Wrong Asset、Unintended Change 和 Recovery。动画只作为已有成熟 Domain 的少量样本，不再作为主开发方向。
 
 
 
 ### P2：高价值专用写入
 
-
-
-在 Context/Analysis 和 Live Transaction 基础稳定后，再按真实需求逐项扩展：
+本项改为**需求驱动候选池**，不属于当前固定排期。只有 Reforge 真实任务或 R4 Agent Benchmark 反复暴露明确缺口时，再按收益排序解冻：
 
 
 
@@ -405,7 +404,7 @@ Schema v3 Knowledge Tree、Active Work、五级渐进式披露、按需 Evidence
 
 - Enhanced Input / Input Mapping Context。
 
-- 常用 Animation 资产的窄范围编辑。
+- Animation Writer 扩展暂缓；现有 Realtime Animation Tools 保留为已完成能力和验证样本。
 
 - Level Actor 的受限 Transform/Property 操作。
 
@@ -415,7 +414,7 @@ Schema v3 Knowledge Tree、Active Work、五级渐进式披露、按需 Evidence
 
 
 
-### P3：0.8.0 Collaboration
+### P3：0.9.0 Collaboration（延后）
 
 多人部署采用混合架构：每名开发者运行本地 MCP 并连接本机 UEAgentKit Plugin/Editor；团队共享的是独立 Knowledge Service，而不是一个能够直接控制所有开发者编辑器的中央 MCP。共享层计划使用 PostgreSQL/API，本地 SQLite 保留资产索引、缓存、个人和 Session 数据。
 

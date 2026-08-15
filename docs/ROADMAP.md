@@ -2,7 +2,7 @@
 
 更新时间：2026-08-15
 
-当前已发布版本为 **0.7.0**，支持 Unreal Engine 5.6。Realtime Foundation、注册式 Live Editor Write、Schema v3 Memory/Context MVP、分帧 Batch Task 和持久化 Change Set 已正式进入本地发布。`feature/live-editor-realtime-io` 已 **fast-forward 合并进 `main`**（`5eb1759 → 56afc91`，含完整 Realtime Animation Tools 线）；`feature/performance-benchmarks` 继续作为长期性能分支。当前首要目标转为 0.8.0-dev Context/Analysis、Blueprint 常用编辑扩展和大型项目性能基准。
+当前已发布版本为 **0.7.0**，支持 Unreal Engine 5.6。Realtime Foundation、注册式 Live Editor Write、Schema v3 Memory/Context MVP、分帧 Batch Task 和持久化 Change Set 已正式进入本地发布。`feature/live-editor-realtime-io` 已 **fast-forward 合并进 `main`**（`5eb1759 → 56afc91`，含完整 Realtime Animation Tools 线）；动画功能扩展暂缓，后续只在真实任务或 Benchmark 证明存在高价值缺口时解冻。`feature/performance-benchmarks` 继续作为长期横向性能分支。当前首要目标转为 **0.8.x Context / Analysis / Agent Reliability**：先把现有 Index、Memory、Live Editor、Revision、Change Set 和验证证据组合成任务上下文、影响分析、语义 Diff 与可信结果判断，再由真实 Agent Benchmark 决定下一批 Writer。
 
 ## 总体方向
 
@@ -55,7 +55,7 @@ Realtime I/O 与 Memory/Context 的完整职责、性能预算、风险分级和
 
 ## 0.7.0：Memory 可用性与分层知识树（已发布）
 
-0.7.0 已把 0.6.0 平面记录库升级为低维护、低 Token 的单人可用层；后续 Memory 开发继续在长期分支中进行：
+0.7.0 已把 0.6.0 平面记录库升级为低维护、低 Token 的单人可用层；Memory 底层 Schema 暂停扩张，后续只在 `feature/agent-reliability` 主线中做 Task Context / Active Work / Change Set / Evidence 的横向整合：
 
 - Knowledge Tree 使用稳定 Path 与 Parent/Child 支持任意深度，默认从 Project Profile、System、Feature/Entity 到 Implementation。
 - 长期知识、Record Type、Active Work 与 Evidence 四个概念分离。
@@ -86,9 +86,26 @@ Realtime I/O 与 Memory/Context 的完整职责、性能预算、风险分级和
 
 只读诊断能力沿用 `retarget.inspect` 门禁（避免重复 policy 字段冲突）；写入走单资产 `setAnimationScaleFix` / `setAdditiveBasePoseFix` + 批量 `*_batch` 的 Policy / Revision / Snapshot / Undo / Save / Verify / Rollback 闭环。
 
-## 下一步：上下文与分析（0.8.0 后续）
+## 0.8.x：Context / Analysis / Agent Reliability（当前主线）
 
-计划能力包括自动 Context Pack、值来源追踪、执行链追踪、影响分析、语义资产 Diff、证据支持的假设、修改计划和验证计划。无法证明的结论必须明确标记为推断。
+下一阶段不再以 Tool 数量、资产类型数量或 Writer 广度作为主要进度指标。基础设施已经能够提供项目索引、Revision-aware Memory、Live Editor 状态、受控写入、独立验证和 Rollback；当前重点是把这些能力组合成 Agent 可直接使用的高层分析与信任层。
+
+推荐开发分支：`feature/agent-reliability`。详细执行计划见 [`Plans/AGENT_RELIABILITY_CONTEXT_ANALYSIS_PLAN_20260815.md`](Plans/AGENT_RELIABILITY_CONTEXT_ANALYSIS_PLAN_20260815.md)。
+
+里程碑按可独立提交、可中断的方式推进：
+
+```text
+R0  Task Context / Context Pack MVP
+R1  Impact Analysis
+R2  Semantic Diff
+R3  Verification Plan + Trust Verdict
+R4  Real Agent Benchmark v1
+R5  Value Provenance / Execution Trace（由 Benchmark 决定优先级）
+```
+
+首批目标不是新增大量 UE 写入，而是回答：Agent 当前应该改什么、修改会影响什么、以及有什么证据证明结果正确。无法证明的结论必须明确标记为推断；保存成功和独立重载成功只属于 Persistence Evidence，不自动等同于整个任务成功。
+
+动画线作为已完成的纵向能力保留，Additive Batch、Composite Mutation、Retarget → P2 一键桥接等非阻塞尾巴默认冻结。Blueprint Graph、Level Actor 通用 CRUD 等新 Writer 同样改为由 Reforge 真实需求或 Agent Benchmark 失败数据驱动。
 
 ## 0.9.0：协作与冲突感知
 
