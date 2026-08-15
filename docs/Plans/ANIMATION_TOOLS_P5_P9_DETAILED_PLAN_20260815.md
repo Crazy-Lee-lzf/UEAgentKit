@@ -122,6 +122,8 @@ G9  文档已同步（新工具 docs/*.md + 本计划状态勾选 + tool_registr
 
 ## 3. P7 项目级可写配置
 
+> **状态（2026-08-15）**：P7.1–P7.3 全部完成。`config.py` 新增 `resolve_project_policy`（manifest 驱动的项目路径 → Policy 解析）、`mcp_server.py` 新增 `--policy-profile` 自动解析、`RunMcp.ps1` 新增 `-PolicyProfile` 并支持省略 `-Policy` 自动解析；`config/projects/` 落地 `manifest.json` + 三个示例 Policy（`my-project-write.json` / `model-preview-read.json` / `model-preview-animation-write.json`）；`patches.py` 将 `retargetCapabilities` 登记进 `POLICY_FIELDS` 并校验（修复其此前无法通过 `_validate_policy` 的冲突）；`docs/PROJECT_LEVEL_CONFIG.md` + `tests/python/test_config.py` 落地。
+
 **目标**：把「我的项目可写 / ModelPreview 默认只读 / ModelPreview 动画写单独 Policy」固化为项目级配置，禁止用 `allowedAssetRoots=/Game` 之类实现「取消只读」。
 
 **依赖**：无（当前 `config.py` 尚无 policy 加载逻辑，需新做）。可与 P5 / P6 并行。

@@ -1372,6 +1372,18 @@ class PatchValidationTests(unittest.TestCase):
         self.flush()
         self.assertIn("unknown-field", self.error_codes(self.validate()))
 
+    def test_retarget_capability_unknown_is_rejected(self) -> None:
+        self.policy["retargetCapabilities"] = ["retarget.inspect", "retarget.mystery"]
+        self.flush()
+        self.assertIn("policy-retarget-capability-unknown", self.error_codes(self.validate()))
+
+    def test_retarget_capabilities_are_optional_and_normalized(self) -> None:
+        self.policy["retargetCapabilities"] = ["retarget.batch", "retarget.inspect"]
+        self.flush()
+        result = self.validate()
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["policy"]["retargetCapabilities"], ["retarget.batch", "retarget.inspect"])
+
     def test_duplicate_json_key_is_rejected(self) -> None:
         self.patch_path.write_text(
             '{"schemaVersion":"1.0","schemaVersion":"1.0","patchId":"x","projectName":"我的项目","assets":[]}',

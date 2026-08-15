@@ -34,7 +34,7 @@ from .agent_workflow import (
     WorkflowError,
 )
 from .change_sets import register_change_set_tools
-from .config import DEFAULT_DATABASE, DEFAULT_MEMORY_DATABASE
+from .config import DEFAULT_DATABASE, DEFAULT_MEMORY_DATABASE, resolve_project_policy
 from .editor_bridge import (
     LiveEditorBridgeConfig,
     LiveEditorBridgeService,
@@ -995,6 +995,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--engine-root", type=Path)
     parser.add_argument("--project", dest="project_path", type=Path)
     parser.add_argument("--policy", dest="policy_path", type=Path)
+    parser.add_argument(
+        "--policy-profile",
+        default=None,
+        help=(
+            "Project-level Policy profile to resolve from --project when --policy "
+            "is omitted (e.g. 'animation-write'). Ignored when --policy is explicit."
+        ),
+    )
     parser.add_argument("--revision-export", type=Path)
     parser.add_argument("--work-root", type=Path, default=TOOL_ROOT / "Output" / "McpWorkflow")
     parser.add_argument("--backup-root", type=Path, default=TOOL_ROOT / "Backups" / "McpWorkflow")
@@ -1057,10 +1065,26 @@ def _build_live_editor_service(args: argparse.Namespace) -> LiveEditorBridgeServ
     )
 
 
+def _resolve_policy_argument(args: argparse.Namespace) -> None:
+    """Auto-resolve the project-level Policy when --policy was omitted.
+
+    Resolution only applies to the write-tools path (Policy is irrelevant in
+    read-only mode) and requires --project. An explicit --policy always wins.
+    """
+    if args.policy_path is not None:
+        return
+    if not args.enable_write_tools:
+        return
+    if args.project_path is None:
+        return
+    args.policy_path = resolve_project_policy(args.project_path, profile=args.policy_profile)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     frozen_snapshot: FrozenSessionSnapshot | None = None
     try:
+        _resolve_policy_argument(args)
         base_workflow_config = _build_workflow_config(args)
         live_editor_service = _build_live_editor_service(args)
         workflow_config: PatchWorkflowConfig | None = None

@@ -286,8 +286,22 @@ POLICY_FIELDS = {
     "maxAssetsPerPatch",
     "maxOperationsPerAsset",
     "maxValueBytes",
+    "retargetCapabilities",
 }
 PATCH_FIELDS = {"schemaVersion", "patchId", "projectName", "description", "assets"}
+
+# Optional policy field consumed by the Live Editor retarget tools (mcp_retarget_tools).
+# It is kept in POLICY_FIELDS so a project-level policy can declare both write
+# operations and retarget capabilities without tripping the unknown-field check.
+RETARGET_CAPABILITIES = frozenset(
+    {
+        "retarget.inspect",
+        "retarget.plan",
+        "retarget.configure",
+        "retarget.batch",
+        "retarget.validate",
+    }
+)
 ASSET_FIELDS = {"assetPath", "expectedRevision", "expectedAssetClass", "operations"}
 OPERATION_FIELDS = {"operationId", "operation", "target", "value"}
 
@@ -386,6 +400,7 @@ def _validate_policy(policy: dict[str, Any], errors: list[dict[str, str]]) -> di
         "allowedDataTableFields",
         "allowedReferenceRoots",
         "allowedReferenceClasses",
+        "retargetCapabilities",
     }
     _require_fields(policy, required_fields, path=path, errors=errors)
 
@@ -760,6 +775,35 @@ def _validate_policy(policy: dict[str, Any], errors: list[dict[str, str]]) -> di
                 "policy.allowedReferenceClasses",
             )
 
+    retarget_capabilities_value = policy.get("retargetCapabilities", [])
+    normalized_retarget_capabilities: list[str] = []
+    if not isinstance(retarget_capabilities_value, list):
+        _issue(
+            errors,
+            "policy-retarget-capabilities",
+            "retargetCapabilities must be a unique string array.",
+            "policy.retargetCapabilities",
+        )
+    else:
+        string_items = [item for item in retarget_capabilities_value if isinstance(item, str)]
+        if len(set(string_items)) != len(retarget_capabilities_value):
+            _issue(
+                errors,
+                "policy-retarget-capabilities",
+                "retargetCapabilities must contain unique strings.",
+                "policy.retargetCapabilities",
+            )
+        for index, item in enumerate(retarget_capabilities_value):
+            if not isinstance(item, str) or item not in RETARGET_CAPABILITIES:
+                _issue(
+                    errors,
+                    "policy-retarget-capability-unknown",
+                    f"Unknown retarget capability: {item!r}",
+                    f"policy.retargetCapabilities[{index}]",
+                )
+            else:
+                normalized_retarget_capabilities.append(item)
+
     require_revision = policy.get("requireRevision")
     if not isinstance(require_revision, bool):
         _issue(errors, "policy-type", "requireRevision must be a boolean.", "policy.requireRevision")
@@ -807,6 +851,7 @@ def _validate_policy(policy: dict[str, Any], errors: list[dict[str, str]]) -> di
         "allowedDataTableFields": sorted(set(normalized_data_table_fields)),
         "requireRevision": require_revision is True,
         "rejectDirtyPackages": reject_dirty_packages is True,
+        "retargetCapabilities": sorted(set(normalized_retarget_capabilities)),
         **limits,
     }
 

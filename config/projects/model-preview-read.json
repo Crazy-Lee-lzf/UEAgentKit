@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "1.0",
+  "validationEnabled": true,
+  "commitEnabled": false,
+  "allowedProjectNames": [
+    "ModelPreview"
+  ],
+  "allowedAssetRoots": [
+    "/Game/Characters"
+  ],
+  "allowedReferenceRoots": [],
+  "allowedOperations": [
+    "setAnimationScaleFix"
+  ],
+  "allowedAssetClasses": [
+    "/Script/Engine.AnimSequence"
+  ],
+  "allowedAssetProperties": [],
+  "allowedMaterialParameters": [],
+  "allowedDataTableFields": [],
+  "retargetCapabilities": [
+    "retarget.inspect"
+  ],
+  "requireRevision": true,
+  "rejectDirtyPackages": false,
+  "maxAssetsPerPatch": 1,
+  "maxOperationsPerAsset": 1,
+  "maxValueBytes": 4096
+}

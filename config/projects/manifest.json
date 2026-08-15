@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1.0",
+  "projects": {
+    "我的项目": {
+      "default": "my-project-write.json"
+    },
+    "ModelPreview": {
+      "default": "model-preview-read.json",
+      "profiles": {
+        "read": "model-preview-read.json",
+        "animation-write": "model-preview-animation-write.json"
+      }
+    }
+  }
+}

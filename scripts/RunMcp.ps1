@@ -8,6 +8,7 @@ param(
     [string]$EngineRoot = "",
     [string]$ProjectPath = "",
     [string]$Policy = "",
+    [string]$PolicyProfile = "",
     [string]$RevisionExport = "",
     [string]$WorkRoot = "",
     [string]$BackupRoot = "",
@@ -63,18 +64,20 @@ if ($EnableWriteTools -or $EnableLiveEditor)
 if ($EnableWriteTools)
 {
     $EngineRoot = Resolve-UeakEngineRoot -EngineRoot $EngineRoot
-    if ([string]::IsNullOrWhiteSpace($Policy))
-    {
-        throw "Policy is required when EnableWriteTools is set."
-    }
     if ([string]::IsNullOrWhiteSpace($RevisionExport))
     {
         throw "RevisionExport is required when EnableWriteTools is set."
     }
-    $Policy = [System.IO.Path]::GetFullPath($Policy)
     $RevisionExport = [System.IO.Path]::GetFullPath($RevisionExport)
-    Assert-UeakPath -Path $Policy -Description "write policy JSON" -PathType File
     Assert-UeakPath -Path $RevisionExport -Description "Revision Export" -PathType Directory
+    if (![string]::IsNullOrWhiteSpace($Policy))
+    {
+        $Policy = [System.IO.Path]::GetFullPath($Policy)
+        Assert-UeakPath -Path $Policy -Description "write policy JSON" -PathType File
+    }
+    # When -Policy is omitted, ue-agent-mcp.py resolves a project-level Policy
+    # from --project + --policy-profile. It reports a clear error if the project
+    # has no project-level Policy mapping.
     if ([string]::IsNullOrWhiteSpace($WorkRoot))
     {
         $WorkRoot = Join-Path $ToolRoot "Output\McpWorkflow"
@@ -95,12 +98,19 @@ if ($EnableWriteTools)
         "--enable-write-tools",
         "--engine-root", $EngineRoot,
         "--project", $ProjectPath,
-        "--policy", $Policy,
         "--revision-export", $RevisionExport,
         "--work-root", $WorkRoot,
         "--backup-root", $BackupRoot,
         "--process-timeout-seconds", [string]$ProcessTimeoutSeconds
     )
+    if (![string]::IsNullOrWhiteSpace($Policy))
+    {
+        $Arguments += @("--policy", $Policy)
+    }
+    if (![string]::IsNullOrWhiteSpace($PolicyProfile))
+    {
+        $Arguments += @("--policy-profile", $PolicyProfile)
+    }
     if ($EnableCommitTools)
     {
         $Arguments += "--enable-commit-tools"
@@ -123,13 +133,14 @@ if (
     !$EnableWriteTools -and (
         ![string]::IsNullOrWhiteSpace($EngineRoot) -or
         ![string]::IsNullOrWhiteSpace($Policy) -or
+        ![string]::IsNullOrWhiteSpace($PolicyProfile) -or
         ![string]::IsNullOrWhiteSpace($RevisionExport) -or
         ![string]::IsNullOrWhiteSpace($WorkRoot) -or
         ![string]::IsNullOrWhiteSpace($BackupRoot)
     )
 )
 {
-    throw "Engine, Policy, RevisionExport, WorkRoot, and BackupRoot require EnableWriteTools."
+    throw "Engine, Policy, PolicyProfile, RevisionExport, WorkRoot, and BackupRoot require EnableWriteTools."
 }
 if (!$EnableWriteTools -and !$EnableLiveEditor -and ![string]::IsNullOrWhiteSpace($ProjectPath))
 {
