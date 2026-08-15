@@ -430,6 +430,8 @@ insufficient-context
 
 ## 8. P6：尾巴、衣服和 Cloth 资产诊断
 
+> **状态（2026-08-15）**：已完成。只读工具 `ue_inspect_skeletal_secondary_motion`（C++ `editor.inspectSkeletalSecondaryMotion` + Python 分类 `skeletal_secondary_motion.py`，8 分类）+ `docs/SKELETAL_SECONDARY_MOTION_TOOL.md` 落地，capability 复用 `retarget.inspect`。子项见 `ANIMATION_TOOLS_P5_P9_DETAILED_PLAN_20260815.md` §2。
+
 UEAgentKit 不应先实现“自动开启 Cloth”，而应先提供结构读取能力。
 
 建议新增 Skeletal Mesh / Physics Reader：
@@ -481,6 +483,8 @@ cloth-binding-incomplete
 
 ## 9. P7：项目级可写配置
 
+> **状态（2026-08-15）**：已完成。`resolve_project_policy` 项目级 policy 解析、`--policy-profile` 自动解析、三个示例 policy（`my-project-write` / `model-preview-read` / `model-preview-animation-write`）、`retargetCapabilities` 登记进 `POLICY_FIELDS`。子项见 `ANIMATION_TOOLS_P5_P9_DETAILED_PLAN_20260815.md` §3。
+
 “我的项目”是主要写入沙箱，但不能简单使用全局取消只读。
 
 正确方案是项目级固定配置：
@@ -515,6 +519,8 @@ config/projects/model-preview-animation-write.json
 ---
 
 ## 10. P8：ModelPreview 接入
+
+> **状态（2026-08-15，收口）**：只读基线（步骤 1–4）已执行完成并达成验证目的；写阶段（步骤 5–9）废弃。执行手册 `docs/MODELPREVIEW_INTEGRATION_MANUAL.md`，子项见 `ANIMATION_TOOLS_P5_P9_DETAILED_PLAN_20260815.md` §4。
 
 接入 ModelPreview 时按以下顺序：
 
@@ -567,18 +573,18 @@ ModelPreview 第一轮禁止修改：
 
 ---
 
-## 12. 推荐执行顺序
+## 12. 推荐执行顺序（最终状态）
 
 ```text
-第一步：收口并提交当前单资产修复工具
-第二步：批量只读 Audit
-第三步：批量 Plan / Apply / Save / Rollback
-第四步：重定向后处理集成
-第五步：Additive + Base Pose
-第六步：浮空诊断 Reader
-第七步：尾巴/衣服/Physics/Cloth Reader
-第八步：ModelPreview 小范围写入接入
-第九步：0.8.0-dev 合并准备
+第一步：收口并提交当前单资产修复工具          ✅
+第二步：批量只读 Audit                       ✅
+第三步：批量 Plan / Apply / Save / Rollback  ✅
+第四步：重定向后处理集成                      ✅
+第五步：Additive + Base Pose                 ✅
+第六步：浮空诊断 Reader                      ✅
+第七步：尾巴/衣服/Physics/Cloth Reader       ✅
+第八步：ModelPreview 小范围写入接入           ❌（只读基线完成，写阶段废弃）
+第九步：0.8.0-dev 合并准备                    ✅（已 fast-forward 合并进 main）
 ```
 
 当前不要同时推进 Additive、Cloth、AnimGraph 写入和批量保存。先完成每条纵向闭环，再进入下一层。

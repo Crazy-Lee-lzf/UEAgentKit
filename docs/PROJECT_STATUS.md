@@ -2,11 +2,11 @@
 
 
 
-更新时间：2026-08-03
+更新时间：2026-08-15
 
 
 
-本文描述本地 `main` 已发布的 **0.7.0** 能力，支持 Unreal Engine 5.6。Schema v3 Knowledge Tree、Active Work、渐进式 Context、Realtime Foundation、Batch/Change Set 和扩展后的 Live Editor Write 已正式纳入本地发布。`feature/live-editor-realtime-io` 与 `feature/memory-context` 两个长期功能分支继续保留，并在同步 `main` 后并行开发。
+本文描述本地 `main` 的能力，支持 Unreal Engine 5.6。已发布 **0.7.0**（Schema v3 Knowledge Tree、Active Work、渐进式 Context、Realtime Foundation、Batch/Change Set 和扩展后的 Live Editor Write），并在此基础上完成 **Realtime Animation Tools**（动画比例诊断/修复/批量/重定向/Additive/浮空诊断/次级运动/项目级可写配置）。`feature/live-editor-realtime-io` 已 **fast-forward 合并进 `main`**；`feature/performance-benchmarks` 作为长期性能分支继续保留。
 
 
 
@@ -42,11 +42,9 @@ UE Agent Kit 不是“让 AI 任意遥控 Unreal Editor”的通用自动化层�
 
 Offline                    5              17
 
-Live                      27              39
+Live                      38              50
 
-Workflow                  31              43
-
-Combined                  53              65
+Workflow                  88              100
 
 ```
 
@@ -62,7 +60,7 @@ Tool 数量只表示 MCP 接口数量，不等同于 Unreal Operation 数量。�
 
 ```text
 
-Python tests                 334/334
+Python tests                 516/516
 
 JSON Schemas                 3/3
 
@@ -268,6 +266,34 @@ Live Editor 中已经产生的受控 Dirty 资产，也可以通过 `ue_save_aut
 
 
 
+### 4.5 Realtime Animation Tools 写入
+
+
+
+2026-08 新增动画比例修复与批量闭环（`feature/live-editor-realtime-io`，已合并 `main`）：
+
+
+
+- 单资产：`ue_plan_animation_scale_fix` + `setAnimationScaleFix`（Force Root Lock / Root Motion / Root Track Scale）+ Undo / Discard / Authorized Save / Independent Verify / Index Refresh。
+
+
+
+- Additive：`ue_plan_additive_base_pose_fix` + `setAdditiveBasePoseFix`（RefPoseSeq / RefFrameIndex / AdditiveAnimType / RefPoseType 修正 + 组合姿势验证）。
+
+
+
+- 批量：`ue_plan_animation_scale_fix_batch` + Live Apply / Save / Verify / Index Refresh / Rollback（不可变 Batch Plan，分片 8，持久化分片 2）。
+
+
+
+- 重定向：批重定向闭环 `ue_analyze/plan/apply/save/verify/rollback_animation_retarget*` + 输出后处理 `ue_*_animation_retarget_postprocess`。
+
+
+
+写入仍走 Policy（含 `retargetCapabilities`）/ Revision / Snapshot / Transaction / Undo / Save / Verify / Rollback 门禁；复合资产（Montage / BlendSpace / AimOffset）重建仍在范围外。
+
+
+
 ## 5. 当前明确未实现的能力
 
 
@@ -278,7 +304,7 @@ Live Editor 中已经产生的受控 Dirty 资产，也可以通过 `ue_save_aut
 
 - 通用 Blueprint Graph 节点创建、删除、连线和自动布局。
 
-- Anim Blueprint State Machine、Montage、Blend Space、Anim Sequence 写入。
+- Anim Blueprint State Machine、Montage、Blend Space、AimOffset 写入（AnimSequence 窄范围写入——Root Lock / Root Track Scale / Additive Base Pose——已实现，见 §4.5）。
 
 - Control Rig、IK Retargeter 和 RigVM Graph 写入。
 

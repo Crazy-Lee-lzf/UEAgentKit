@@ -1,8 +1,8 @@
 # UE Agent Kit 路线图
 
-更新时间：2026-08-03
+更新时间：2026-08-15
 
-当前已发布版本为 **0.7.0**，支持 Unreal Engine 5.6。Realtime Foundation、注册式 Live Editor Write、Schema v3 Memory/Context MVP、分帧 Batch Task 和持久化 Change Set 已正式进入本地发布。`feature/live-editor-realtime-io` 与 `feature/memory-context` 继续作为长期分支；当前首要目标转为 0.8.0-dev Context/Analysis、Blueprint 常用编辑扩展和大型项目性能基准。
+当前已发布版本为 **0.7.0**，支持 Unreal Engine 5.6。Realtime Foundation、注册式 Live Editor Write、Schema v3 Memory/Context MVP、分帧 Batch Task 和持久化 Change Set 已正式进入本地发布。`feature/live-editor-realtime-io` 已 **fast-forward 合并进 `main`**（`5eb1759 → 56afc91`，含完整 Realtime Animation Tools 线）；`feature/performance-benchmarks` 继续作为长期性能分支。当前首要目标转为 0.8.0-dev Context/Analysis、Blueprint 常用编辑扩展和大型项目性能基准。
 
 ## 总体方向
 
@@ -12,9 +12,8 @@ UE Agent Kit 的长期定位是面向 AI Agent 的 Unreal Engine 项目智能层
 
 ```text
 Offline             5 Tool（Memory 17）
-Live               27 Tool（Memory 39）
-Workflow           31 Tool（Memory 43）
-Combined           53 Tool（Memory 65）
+Live               38 Tool（Memory 50）
+Workflow           88 Tool（Memory 100）
 ```
 
 ## 已完成基础
@@ -71,7 +70,23 @@ Realtime I/O 与 Memory/Context 的完整职责、性能预算、风险分级和
 
 性能方案以“首次索引允许较慢、日常修改必须接近改代码体验”为核心。计划使用 Reforge、现成 UE5.6 DarkRuins 样本、E 盘 SSD 上的 160–180 GB 物理性能工程，以及 500k Asset/10m Reference 逻辑数据库；同一基准分别运行原生 SSD 和 50 MB/s HDD 模拟档位。普通变量和少量 Blueprint Node 的 Live Apply、Compile、Undo 与单资产保存作为最高优先级交互门禁。完整方案见 [`PERFORMANCE_TEST_PLAN.md`](PERFORMANCE_TEST_PLAN.md)。
 
-## 0.8.0-dev：上下文与分析
+## 0.8.0-dev：Realtime Animation Tools（已完成，已合并 main）
+
+2026-08 在 `feature/live-editor-realtime-io` 上完成动画比例诊断与受控修复的完整纵向闭环，并已 fast-forward 合并进 `main`。逐阶段交付与验收见 [`Plans/ANIMATION_TOOLS_FOLLOWUP_PLAN_20260806.md`](Plans/ANIMATION_TOOLS_FOLLOWUP_PLAN_20260806.md) 与 [`Plans/ANIMATION_TOOLS_P5_P9_DETAILED_PLAN_20260815.md`](Plans/ANIMATION_TOOLS_P5_P9_DETAILED_PLAN_20260815.md)。
+
+- **P0 单资产动画比例修复**：`ue_diagnose_animation_scale` → `ue_plan_animation_scale_fix` → `setAnimationScaleFix`（Force Root Lock / Root Motion / Root Track Scale）+ Undo / Discard / Authorized Save / Independent Verify / Index Refresh 闭环。
+- **P1 批量只读审计**：`ue_start_animation_scale_audit` / `ue_get_animation_scale_audit` / `ue_cancel_animation_scale_audit` / `ue_export_animation_scale_audit_report`（显式列表，1000 上限 / Batch 8 / Page 50）。
+- **P2 批量修复**：`ue_plan_animation_scale_fix_batch` + Live Apply / Save / Verify / Index Refresh / Rollback（不可变 Batch Plan，分片 8，持久化分片 2）。
+- **P3 重定向 + 后处理**：`ue_analyze/plan/apply/save/verify/rollback_animation_retarget*` + `ue_start/get/plan/refresh/reopen_animation_retarget_postprocess`（批重定向闭环 + 输出后处理分类/建议）。
+- **P4 Additive / Base Pose**：`ue_diagnose_additive_animation` / `ue_evaluate_animation_with_base_pose` / `ue_plan_additive_base_pose_fix` / `setAdditiveBasePoseFix`（组合求值 + 自引用 Base Pose 修正）。
+- **P5 浮空诊断**：`ue_diagnose_character_ground_contact`（只读，Capsule / Mesh Offset / 动画来源分类）。
+- **P6 次级运动读取**：`ue_inspect_skeletal_secondary_motion`（只读，附加骨骼链 / Skin Weight / Physics / Cloth / AnimBP 节点）。
+- **P7 项目级可写配置**：`resolve_project_policy` + `--policy-profile` + 三个示例 Policy + `retargetCapabilities` 校验。
+- **P8 ModelPreview 接入**：只读基线（插件 junction / Editor Status / 104 资产索引 / 比例诊断）验证完成；**写阶段（步骤 5–9）废弃**（接入仅为验证工具正确性，已达成；发现 ModelPreview 98 个重定向 AnimSequence 的 Skeleton 引用损坏，但不再修复）。
+
+只读诊断能力沿用 `retarget.inspect` 门禁（避免重复 policy 字段冲突）；写入走单资产 `setAnimationScaleFix` / `setAdditiveBasePoseFix` + 批量 `*_batch` 的 Policy / Revision / Snapshot / Undo / Save / Verify / Rollback 闭环。
+
+## 下一步：上下文与分析（0.8.0 后续）
 
 计划能力包括自动 Context Pack、值来源追踪、执行链追踪、影响分析、语义资产 Diff、证据支持的假设、修改计划和验证计划。无法证明的结论必须明确标记为推断。
 

@@ -151,7 +151,7 @@ G9  文档已同步（新工具 docs/*.md + 本计划状态勾选 + tool_registr
 
 ## 4. P8 ModelPreview 接入（执行手册，非代码）
 
-> **状态（2026-08-15）**：执行手册已撰写（`docs/MODELPREVIEW_INTEGRATION_MANUAL.md`）。用户已显式授权「全流程」，**只读基线（步骤 1–4）已执行完成**：步骤 1 插件已 junction 到 `Build/Compiled/UEAgentKit`（旧拷贝备份为 `.bak-20260731`）；步骤 2 Editor Status 通过（`pluginVersion 0.7.0`、`projectName=ModelPreview`、`state=available`）；步骤 3 资产扫描导出 104 资产（98 AnimSequence + 3 AnimMontage + 2 AimOffsetBlendSpace + 1 BlendSpace，`failureCount=0`）并建成 SQLite 索引；步骤 4 比例诊断完成。**关键阻塞发现：ModelPreview 全部 98 个重定向 AnimSequence 的 Skeleton 引用损坏**（导出侧 `skeletonPath=""`、运行时 `ue_diagnose_animation_scale` 返回 `missing-skeleton`），而同一动画在「我的项目」有效。写阶段（步骤 5–9）因此阻塞，需先修复骨架引用（重新重定向 / 修复 redirector）。
+> **状态（2026-08-15，收口）**：执行手册已撰写（`docs/MODELPREVIEW_INTEGRATION_MANUAL.md`）。用户已显式授权「全流程」，**只读基线（步骤 1–4）已执行完成**：步骤 1 插件已 junction 到 `Build/Compiled/UEAgentKit`（旧拷贝备份为 `.bak-20260731`）；步骤 2 Editor Status 通过（`pluginVersion 0.7.0`、`projectName=ModelPreview`、`state=available`）；步骤 3 资产扫描导出 104 资产（98 AnimSequence + 3 AnimMontage + 2 AimOffsetBlendSpace + 1 BlendSpace，`failureCount=0`）并建成 SQLite 索引；步骤 4 比例诊断完成。**关键发现：ModelPreview 全部 98 个重定向 AnimSequence 的 Skeleton 引用损坏**（导出侧 `skeletonPath=""`、运行时 `ue_diagnose_animation_scale` 返回 `missing-skeleton`），而同一动画在「我的项目」有效。**写阶段（步骤 5–9）已废弃（2026-08-15）**：用户确认 P8 接入的目的只是验证工具正确性，只读基线已达成该验证目的（插件版本握手、资产索引、只读诊断均通过，并定位到 skeleton 引用损坏问题），因此不再推进 ModelPreview 写入，也无需修复骨架引用。P8 收口为「只读基线验证完成 + 写阶段放弃」。
 
 **目标**：把已验证的工作流接入 `E:\WorkSpace\ModelPreview`。这是一份**有序执行手册**，Agent 按顺序逐步执行并回报，不是一次性代码任务。
 
@@ -171,7 +171,7 @@ G9  文档已同步（新工具 docs/*.md + 本计划状态勾选 + tool_registr
 
 **第一轮禁止修改**：Skeleton / Skeletal Mesh / Physics Asset / Animation Blueprint / Capsule / Cloth / 正式关卡。只验证 AnimSequence Root Lock / Root Track 工作流。
 
-**验收**：每步回报结果；第 9 步后正式动画「保存 + 独立验证」通过，ModelPreview 只读基线可复现。
+**验收（收口）**：步骤 1–4 只读基线可复现（插件版本握手 / 资产索引 / 只读诊断）；步骤 5–9 放弃，不再验收。
 
 ---
 
