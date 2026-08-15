@@ -2,7 +2,7 @@
 
 > 更新时间：2026-08-15
 > 当前基线：`main@22632c7`（本地最新 `main` 为 `cc1f0c9`）
-> 当前状态：R0.0（现状审计 + 复用矩阵 + 最小 Schema）与 R0.1（`ue_get_task_context` 第一条纵向切片）已完成并本地提交到 `feature/agent-reliability`，停止等待下一片决策；R0.2/R0.3 与 R1–R5 未开始。
+> 当前状态：R0.0（现状审计 + 复用矩阵 + 最小 Schema）与 R0.1（`ue_get_task_context` 第一条纵向切片）已完成并本地提交到 `feature/agent-reliability`。下一片先执行真实 Reforge Context Smoke（R0-S），通过后再实现 R0.2 Deterministic Relevant Asset Discovery；R0.3 与 R1–R5 未开始。
 > 建议开发分支：`feature/agent-reliability`（已创建，勿 Push）
 > 横向长期分支：`feature/performance-benchmarks`
 > 执行方式：分里程碑推进，不要求一次完成；每个里程碑必须可独立测试、提交和交接。
