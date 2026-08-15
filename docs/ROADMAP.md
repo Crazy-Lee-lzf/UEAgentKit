@@ -103,13 +103,14 @@ R4  Real Agent Benchmark v1
 R5  Value Provenance / Execution Trace（由 Benchmark 决定优先级）
 ```
 
-### R0 状态（2026-08-15）
+### R0 状态（2026-08-16）
 
-R0.0（现状审计 + 复用矩阵 + 最小 Schema）与 R0.1（`ue_get_task_context` 第一条纵向切片）已在 `feature/agent-reliability` 完成并本地提交：
+R0.0（现状审计 + 复用矩阵 + 最小 Schema）、R0.1（`ue_get_task_context` 第一条纵向切片）、R0-S（真实 Reforge Context Smoke）与 R0.2（Deterministic Relevant Asset Discovery）已在 `feature/agent-reliability` 完成并本地提交：
 
 - `ue_get_task_context(query + assetPaths → targetAssets → revisionState → memory/activeWork → liveEditor → changeSet → risks → nextExpansions)` 在全部模式下注册为只读 query 组 Tool；Memory / Live / Change Set / Revision 任一来源不可用时只降级对应 section，不拖垮整个请求。
 - `risks` 仅包含确定性事实（dirty/stale/conflicted/not-found 等），零模型推断；输出受 `max_output_tokens` 强制裁剪并在 `outputBudget` 中显式报告。
-- 复用矩阵、Request/Response Schema 与已知边界见 [`Plans/AGENT_RELIABILITY_R0_AUDIT_AND_SCHEMA_20260815.md`](Plans/AGENT_RELIABILITY_R0_AUDIT_AND_SCHEMA_20260815.md)；下一片（R0.2 自动相关资产扩展）尚未开始。
+- R0.2：`relevantAssets` 为确定性相关资产候选集——query 分词（≤8 term）+ 复用 Asset Search 与少量 Symbol Search 补充、与显式目标互斥、固定排序、Top N≤8，每条带 `assetPath / assetClass / source / whyIncluded / matchKind`，无 score/confidence；预算不足时先裁候选 metadata 再减候选数量，候选永不优先于 target identity / high risk / revision summary。真实 Reforge Smoke 观察与验证见 [`Plans/AGENT_RELIABILITY_R0_REAL_CONTEXT_SMOKE_20260816.md`](Plans/AGENT_RELIABILITY_R0_REAL_CONTEXT_SMOKE_20260816.md)。
+- 复用矩阵、Request/Response Schema 与已知边界见 [`Plans/AGENT_RELIABILITY_R0_AUDIT_AND_SCHEMA_20260815.md`](Plans/AGENT_RELIABILITY_R0_AUDIT_AND_SCHEMA_20260815.md)；R0.3（Active Work / Change Set 深度绑定）与 R1 尚未开始。
 
 首批目标不是新增大量 UE 写入，而是回答：Agent 当前应该改什么、修改会影响什么、以及有什么证据证明结果正确。无法证明的结论必须明确标记为推断；保存成功和独立重载成功只属于 Persistence Evidence，不自动等同于整个任务成功。
 

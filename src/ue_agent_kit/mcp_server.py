@@ -68,7 +68,9 @@ from .snapshot_lifecycle import (
     resolve_active_snapshot,
 )
 from .task_context import (
+    MAX_CANDIDATE_SEARCH_TERMS,
     MAX_TASK_CONTEXT_ASSETS,
+    MAX_TASK_CONTEXT_CANDIDATES,
     TASK_CONTEXT_SCHEMA_VERSION,
     TaskContextService,
     register_task_context_tools,
@@ -551,8 +553,16 @@ def _capabilities_response(
             "unavailableSectionsDegrade": True,
             "risksAreDeterministicOnly": True,
             "modelInference": False,
-            "autoRelevantAssetExpansion": False,
-            "relevantAssetsInV1": [],
+            "autoRelevantAssetExpansion": True,
+            "relevantAssets": {
+                "available": True,
+                "deterministic": True,
+                "source": "immutable-sqlite-index",
+                "maxAssets": MAX_TASK_CONTEXT_CANDIDATES,
+                "maxSearchTerms": MAX_CANDIDATE_SEARCH_TERMS,
+                "symbolSupplement": True,
+                "modelInference": False,
+            },
             "outputBudgetBounded": True,
             "evidenceOnDemand": True,
         },
@@ -746,6 +756,10 @@ def _project_status_response(
             "memory": memory_service is not None,
             "liveEditor": live_editor_service is not None,
             "changeSet": write_tools_enabled,
+            "relevantAssets": {
+                "maxAssets": MAX_TASK_CONTEXT_CANDIDATES,
+                "deterministic": True,
+            },
         },
     }
 

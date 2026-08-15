@@ -10,6 +10,9 @@
         "read": "model-preview-read.json",
         "animation-write": "model-preview-animation-write.json"
       }
+    },
+    "Reforge": {
+      "default": "reforge-read.json"
     }
   }
 }

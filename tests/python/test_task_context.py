@@ -35,6 +35,7 @@ from ue_agent_kit.project_memory import (  # noqa: E402
 )
 from ue_agent_kit.task_context import (  # noqa: E402
     MAX_TASK_CONTEXT_ASSETS,
+    MAX_TASK_CONTEXT_CANDIDATES,
     TaskContextService,
 )
 
@@ -190,6 +191,8 @@ class TaskContextTests(unittest.TestCase):
         self.assertEqual(context["tool"], "ue_get_task_context")
         self.assertEqual(context["request"]["query"], "检查 BP_TestActor 的伤害")
         self.assertEqual(context["project"]["projectKey"], PROJECT)
+        # R0.2: the only query term matching the index ("BP_TestActor") belongs
+        # to the explicit target, so it must never be duplicated as a candidate.
         self.assertEqual(context["relevantAssets"], [])
 
         self.assertEqual(len(context["targetAssets"]), 1)
@@ -396,6 +399,171 @@ class TaskContextTests(unittest.TestCase):
         self.assertEqual(len(context["targetAssets"]), 1)
         self.assertEqual(context["revisionState"]["assets"][ASSET_A]["state"], "fresh")
 
+    def _fleet_service(self) -> tuple[TaskContextService, list[str]]:
+        root = Path(self.temporary.name)
+        fleet_paths = [
+            f"/Game/Fleet/BP_Vehicle_{index:02d}.BP_Vehicle_{index:02d}"
+            for index in range(1, 11)
+        ]
+        fleet_assets = [
+            make_asset(path, profile="logic", revision=f"{index:064x}", rich=False)
+            for index, path in enumerate(fleet_paths, start=1)
+        ]
+        export_root = root / "fleet-export"
+        database_path = root / "fleet.sqlite3"
+        write_export(export_root, fleet_assets)
+        with open_database(database_path) as connection:
+            result = build_index(connection, export_root, database_path)
+            self.assertEqual((result.added, result.failed), (10, 0))
+        return TaskContextService(index_service=IndexQueryService(database_path)), fleet_paths
+
+    def test_r2_1_query_only_returns_stable_relevant_assets(self) -> None:
+        service, _ = self._fleet_service()
+        context = service.get_task_context(query="vehicle customization")
+        candidates = context["relevantAssets"]
+        self.assertTrue(context["ok"])
+        self.assertEqual(len(candidates), MAX_TASK_CONTEXT_CANDIDATES)
+        repeated = service.get_task_context(query="vehicle customization")["relevantAssets"]
+        self.assertEqual(
+            [candidate["assetPath"] for candidate in candidates],
+            [candidate["assetPath"] for candidate in repeated],
+        )
+
+    def test_r2_2_explicit_target_is_not_duplicated_in_candidates(self) -> None:
+        service, fleet_paths = self._fleet_service()
+        target = fleet_paths[0]
+        context = service.get_task_context(query="vehicle", asset_paths=[target])
+        candidate_paths = [candidate["assetPath"] for candidate in context["relevantAssets"]]
+        self.assertNotIn(target, candidate_paths)
+        self.assertEqual(context["targetAssets"][0]["assetPath"], target)
+
+    def test_r2_3_no_search_results_is_empty_not_error(self) -> None:
+        service = self.make_service(memory_service=None, freshness_tracker=None)
+        context = service.get_task_context(query="zzz absent term")
+        self.assertTrue(context["ok"])
+        self.assertEqual(context["relevantAssets"], [])
+        kinds = {risk["kind"] for risk in context["risks"]}
+        self.assertNotIn("relevant-assets-search-failed", kinds)
+
+    def test_r2_4_same_input_ordering_is_deterministic(self) -> None:
+        service, _ = self._fleet_service()
+        first = service.get_task_context(query="vehicle module")
+        second = service.get_task_context(query="vehicle module")
+        self.assertEqual(first["relevantAssets"], second["relevantAssets"])
+
+    def test_r2_5_candidate_count_is_bounded(self) -> None:
+        service, _ = self._fleet_service()
+        context = service.get_task_context(query="vehicle")
+        self.assertEqual(len(context["relevantAssets"]), MAX_TASK_CONTEXT_CANDIDATES)
+        self.assertLessEqual(len(context["relevantAssets"]), MAX_TASK_CONTEXT_CANDIDATES)
+
+    def test_r2_6_symbol_hits_dedupe_and_supplement_asset_candidates(self) -> None:
+        service = self.make_service(memory_service=None, freshness_tracker=None)
+        context = service.get_task_context(query="BP_SecondActor")
+        candidate_paths = [candidate["assetPath"] for candidate in context["relevantAssets"]]
+        self.assertEqual(candidate_paths.count(ASSET_B), 1)
+        self.assertEqual(context["relevantAssets"][0]["whyIncluded"], "asset-search-query-term")
+
+        root = Path(self.temporary.name)
+        asset = make_asset(ASSET_B, profile="logic", revision=self.revision_b, rich=False)
+        asset["symbols"].append(
+            {
+                "id": f"variable|{ASSET_B}|wheel-controller",
+                "kind": "variable",
+                "name": "WheelController",
+                "assetPath": ASSET_B,
+                "ownerSymbolId": f"asset|{ASSET_B}",
+            }
+        )
+        export_root = root / "symbol-export"
+        database_path = root / "symbol.sqlite3"
+        write_export(export_root, [asset])
+        with open_database(database_path) as connection:
+            result = build_index(connection, export_root, database_path)
+            self.assertEqual((result.added, result.failed), (1, 0))
+        symbol_service = TaskContextService(index_service=IndexQueryService(database_path))
+        context = symbol_service.get_task_context(query="WheelController")
+        self.assertEqual(len(context["relevantAssets"]), 1)
+        candidate = context["relevantAssets"][0]
+        self.assertEqual(candidate["assetPath"], ASSET_B)
+        self.assertEqual(candidate["whyIncluded"], "symbol-search-query-term")
+        self.assertEqual(candidate["matchKind"], "symbol-name-exact")
+        self.assertEqual(candidate["matchedSymbol"]["name"], "WheelController")
+        self.assertEqual(candidate["assetClass"], "/Script/Engine.Blueprint")
+
+    def test_r2_7_candidate_fields_are_complete(self) -> None:
+        service = self.make_service(memory_service=None, freshness_tracker=None)
+        context = service.get_task_context(query="BP_SecondActor")
+        candidate = context["relevantAssets"][0]
+        for field in ("assetPath", "assetClass", "source", "whyIncluded", "matchKind"):
+            self.assertIn(field, candidate)
+        self.assertEqual(candidate["assetClass"], "/Script/Engine.Blueprint")
+        self.assertEqual(candidate["source"], "immutable-sqlite-index")
+        self.assertIn("matchedTerms", candidate)
+        self.assertEqual(candidate["matchCount"], 1)
+
+    def test_r2_8_low_budget_reduces_candidates_but_keeps_core(self) -> None:
+        service, fleet_paths = self._fleet_service()
+        target = fleet_paths[0]
+        full = service.get_task_context(query="vehicle", asset_paths=[target], max_output_tokens=4096)
+        tight = service.get_task_context(query="vehicle", asset_paths=[target], max_output_tokens=600)
+        budget = tight["outputBudget"]
+        self.assertTrue(budget["truncated"])
+        self.assertLess(len(tight["relevantAssets"]), len(full["relevantAssets"]))
+        reasons = budget["truncationReason"].split(",")
+        self.assertTrue(any(reason.startswith("relevant-assets-") for reason in reasons))
+        self.assertTrue(tight["targetAssets"][0]["found"])
+        self.assertIn("identity", tight["targetAssets"][0])
+        self.assertIn("riskSummary", tight)
+
+    def test_r2_9_memory_and_live_disabled_do_not_affect_discovery(self) -> None:
+        service = self.make_service(memory_service=None, freshness_tracker=None)
+        context = service.get_task_context(query="BP_SecondActor")
+        self.assertFalse(context["memory"]["available"])
+        self.assertFalse(context["liveEditor"]["available"])
+        self.assertEqual(len(context["relevantAssets"]), 1)
+        self.assertEqual(context["relevantAssets"][0]["assetPath"], ASSET_B)
+
+    def test_r2_10_search_failure_follows_error_model_without_fake_results(self) -> None:
+        class FlakyIndexService:
+            def __init__(self, inner: IndexQueryService, fail_scopes: set[str]) -> None:
+                self.inner = inner
+                self.fail_scopes = fail_scopes
+
+            def search(self, query: str = "", *, scope: str = "assets", **kwargs: Any):
+                if scope in self.fail_scopes:
+                    raise RuntimeError("search unavailable")
+                return self.inner.search(query=query, scope=scope, **kwargs)
+
+            def __getattr__(self, name: str):
+                return getattr(self.inner, name)
+
+        flaky_all = FlakyIndexService(self.index_service, {"assets", "symbols"})
+        service = self.make_service(index_service=flaky_all, memory_service=None, freshness_tracker=None)
+        context = service.get_task_context(query="BP_SecondActor")
+        self.assertTrue(context["ok"])
+        self.assertEqual(context["relevantAssets"], [])
+        kinds = {risk["kind"] for risk in context["risks"]}
+        self.assertIn("relevant-assets-search-failed", kinds)
+        degraded_sections = [item["section"] for item in context["degradedSources"]]
+        self.assertIn("relevantAssets", degraded_sections)
+
+        flaky_symbols = FlakyIndexService(self.index_service, {"symbols"})
+        service = self.make_service(index_service=flaky_symbols, memory_service=None, freshness_tracker=None)
+        context = service.get_task_context(query="BP_SecondActor")
+        self.assertEqual(
+            [candidate["assetPath"] for candidate in context["relevantAssets"]],
+            [ASSET_B],
+        )
+        kinds = {risk["kind"] for risk in context["risks"]}
+        self.assertNotIn("relevant-assets-search-failed", kinds)
+        reasons = [
+            item["reason"]
+            for item in context["degradedSources"]
+            if item["section"] == "relevantAssets"
+        ]
+        self.assertEqual(reasons, ["symbol-search-failed"])
+
     def test_request_validation_rejects_invalid_arguments(self) -> None:
         service = self.make_service()
         with self.assertRaisesRegex(ValueError, "query is required"):
@@ -482,7 +650,10 @@ class TaskContextMcpTests(unittest.TestCase):
         self.assertEqual(contract["tool"], "ue_get_task_context")
         self.assertTrue(contract["risksAreDeterministicOnly"])
         self.assertFalse(contract["modelInference"])
-        self.assertFalse(contract["autoRelevantAssetExpansion"])
+        self.assertTrue(contract["autoRelevantAssetExpansion"])
+        self.assertEqual(contract["relevantAssets"]["maxAssets"], MAX_TASK_CONTEXT_CANDIDATES)
+        self.assertTrue(contract["relevantAssets"]["deterministic"])
+        self.assertFalse(contract["relevantAssets"]["modelInference"])
         self.assertEqual(contract["sourceAvailability"]["memory"], True)
         self.assertEqual(contract["sourceAvailability"]["liveEditor"], True)
         self.assertEqual(capabilities["limits"]["taskContextMaxAssets"], MAX_TASK_CONTEXT_ASSETS)

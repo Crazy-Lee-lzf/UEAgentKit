@@ -14,7 +14,7 @@ from .query_protocol import (
     normalize_output_token_budget,
 )
 
-TASK_CONTEXT_SCHEMA_VERSION = "1.0"
+TASK_CONTEXT_SCHEMA_VERSION = "1.1"
 MAX_TASK_CONTEXT_ASSETS = 10
 MAX_QUERY_CHARS = 2048
 MAX_ASSET_PATH_CHARS = 512
@@ -25,8 +25,72 @@ MAX_MEMORY_STALE_SAMPLES = 5
 MEMORY_BUDGET_FRACTION = 0.35
 BUDGET_ENVELOPE_SLACK_CHARS = 128
 CHANGE_SET_TERMINAL_STATUSES = {"undone", "discarded", "verified", "failed"}
+MAX_TASK_CONTEXT_CANDIDATES = 8
+MAX_CANDIDATE_SEARCH_TERMS = 8
+MAX_CANDIDATES_PER_TERM = 8
+CANDIDATE_MATCH_KIND_RANK = {
+    "asset-name-exact": 0,
+    "symbol-name-exact": 1,
+    "asset-name-prefix": 2,
+    "symbol-name-prefix": 3,
+    "asset-name-substring": 4,
+    "symbol-name-substring": 5,
+    "asset-path-substring": 6,
+    "asset-search-hit": 7,
+    "symbol-search-hit": 8,
+}
 
 _SEARCH_TOKEN_PATTERN = re.compile(r"[\w./:-]+", flags=re.UNICODE)
+
+
+def _candidate_terms(query: str) -> list[str]:
+    """Split a query into deterministic search terms for candidate discovery.
+
+    Terms preserve query order and are deduplicated. Terms without any
+    alphanumeric character are dropped because a pure-punctuation term would
+    match the whole index through the SQL LIKE fallback.
+    """
+    terms: list[str] = []
+    for term in _SEARCH_TOKEN_PATTERN.findall(query):
+        if not term or not any(character.isalnum() for character in term):
+            continue
+        if term not in terms:
+            terms.append(term)
+    return terms[:MAX_CANDIDATE_SEARCH_TERMS]
+
+
+def _asset_match_kind(term: str, hit: dict[str, Any]) -> str:
+    folded = term.casefold()
+    name = str(hit.get("asset_name", "")).casefold()
+    if name == folded:
+        return "asset-name-exact"
+    if name.startswith(folded):
+        return "asset-name-prefix"
+    if folded in name:
+        return "asset-name-substring"
+    path = str(hit.get("asset_path", "")).casefold()
+    package = str(hit.get("package_name", "")).casefold()
+    if folded in path or folded in package:
+        return "asset-path-substring"
+    return "asset-search-hit"
+
+
+def _symbol_match_kind(term: str, hit: dict[str, Any]) -> str:
+    folded = term.casefold()
+    name = str(hit.get("name", "")).casefold()
+    if name == folded:
+        return "symbol-name-exact"
+    if name.startswith(folded):
+        return "symbol-name-prefix"
+    if folded in name:
+        return "symbol-name-substring"
+    return "symbol-search-hit"
+
+
+def _better_match_kind(current: str, incoming: str) -> str:
+    current_rank = CANDIDATE_MATCH_KIND_RANK.get(current, 100)
+    incoming_rank = CANDIDATE_MATCH_KIND_RANK.get(incoming, 100)
+    return incoming if incoming_rank < current_rank else current
 
 
 def _utc_now_iso() -> str:
@@ -139,7 +203,11 @@ class TaskContextService:
         }
         response["project"] = self._build_project()
         response["targetAssets"] = self._build_target_assets(normalized_assets)
-        response["relevantAssets"] = []
+        relevant_assets, relevant_failures = self._build_relevant_assets(
+            normalized_query,
+            excluded_paths=set(normalized_assets),
+        )
+        response["relevantAssets"] = relevant_assets
         memory_section, active_work_section = self._build_memory_and_work(
             normalized_query,
             normalized_assets,
@@ -156,6 +224,8 @@ class TaskContextService:
             query=normalized_query,
             asset_paths=normalized_assets,
             target_assets=response["targetAssets"],
+            relevant_assets=response["relevantAssets"],
+            relevant_failures=relevant_failures,
             memory_section=memory_section,
             active_work_section=active_work_section,
             live_section=response["liveEditor"],
@@ -169,7 +239,10 @@ class TaskContextService:
             memory_section=memory_section,
             change_set_section=response["changeSet"],
         )
-        response["degradedSources"] = self._degraded_sources(response)
+        response["degradedSources"] = self._degraded_sources(
+            response,
+            relevant_failures=relevant_failures,
+        )
         self._finalize_budget(response, max_output_tokens)
         return response
 
@@ -241,6 +314,134 @@ class TaskContextService:
                 target["reason"] = "asset-not-indexed"
             targets.append(target)
         return targets
+
+    @staticmethod
+    def _search_hits(response: dict[str, Any] | None) -> list[dict[str, Any]]:
+        if not isinstance(response, dict):
+            return []
+        results = response.get("results")
+        return [item for item in results if isinstance(item, dict)] if isinstance(results, list) else []
+
+    def _candidate_asset_class(self, asset_path: str) -> str:
+        try:
+            section = self.index_service.get_asset(
+                asset_path,
+                sections=("identity",),
+                max_output_tokens=DEFAULT_OUTPUT_TOKEN_BUDGET,
+            )
+        except (OSError, ValueError, RuntimeError, TypeError, sqlite3.Error):
+            return ""
+        payload = section.get("asset") if isinstance(section, dict) else None
+        return str(payload.get("asset_class", "")) if isinstance(payload, dict) else ""
+
+    def _build_relevant_assets(
+        self,
+        query: str,
+        *,
+        excluded_paths: set[str],
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """Deterministic small relevant-asset candidate set from immutable Index search only.
+
+        Query terms (in order, deduplicated) drive Asset Search first and a
+        bounded Symbol Search supplement second. Results are merged on exact
+        asset path, explicit target assets are never duplicated, ordering is
+        fixed (more matched terms first, then first matched term position, then
+        asset path), and the list is bounded by MAX_TASK_CONTEXT_CANDIDATES.
+        No score, confidence, or model inference is produced.
+        """
+        terms = _candidate_terms(query)
+        failures: list[str] = []
+        merged: dict[str, dict[str, Any]] = {}
+        for term_index, term in enumerate(terms):
+            try:
+                asset_response = self.index_service.search(
+                    query=term,
+                    scope="assets",
+                    limit=MAX_CANDIDATES_PER_TERM,
+                )
+            except (OSError, ValueError, RuntimeError, TypeError, sqlite3.Error):
+                asset_response = None
+                failures.append("asset-search-failed")
+            for hit in self._search_hits(asset_response):
+                asset_path = str(hit.get("asset_path", "")).strip()
+                if not asset_path or asset_path in excluded_paths:
+                    continue
+                existing = merged.get(asset_path)
+                match_kind = _asset_match_kind(term, hit)
+                if existing is None:
+                    merged[asset_path] = {
+                        "assetPath": asset_path,
+                        "assetClass": str(hit.get("asset_class", "")),
+                        "source": "immutable-sqlite-index",
+                        "whyIncluded": "asset-search-query-term",
+                        "matchKind": match_kind,
+                        "matchedTerms": [term],
+                        "matchCount": 1,
+                        "firstTermIndex": term_index,
+                    }
+                    continue
+                existing["whyIncluded"] = "asset-search-query-term"
+                existing["matchKind"] = _better_match_kind(existing["matchKind"], match_kind)
+                if term not in existing["matchedTerms"]:
+                    existing["matchedTerms"].append(term)
+                existing["matchCount"] = len(existing["matchedTerms"])
+                existing["firstTermIndex"] = min(int(existing["firstTermIndex"]), term_index)
+
+            try:
+                symbol_response = self.index_service.search(
+                    query=term,
+                    scope="symbols",
+                    limit=MAX_CANDIDATES_PER_TERM,
+                )
+            except (OSError, ValueError, RuntimeError, TypeError, sqlite3.Error):
+                symbol_response = None
+                failures.append("symbol-search-failed")
+            for hit in self._search_hits(symbol_response):
+                asset_path = str(hit.get("asset_path", "")).strip()
+                if not asset_path or asset_path in excluded_paths:
+                    continue
+                existing = merged.get(asset_path)
+                match_kind = _symbol_match_kind(term, hit)
+                matched_symbol = {
+                    "name": str(hit.get("name", "")),
+                    "kind": str(hit.get("kind", "")),
+                }
+                if existing is None:
+                    merged[asset_path] = {
+                        "assetPath": asset_path,
+                        "assetClass": "",
+                        "source": "immutable-sqlite-index",
+                        "whyIncluded": "symbol-search-query-term",
+                        "matchKind": match_kind,
+                        "matchedTerms": [term],
+                        "matchCount": 1,
+                        "firstTermIndex": term_index,
+                        "matchedSymbol": matched_symbol,
+                    }
+                    continue
+                existing["matchKind"] = _better_match_kind(existing["matchKind"], match_kind)
+                if term not in existing["matchedTerms"]:
+                    existing["matchedTerms"].append(term)
+                existing["matchCount"] = len(existing["matchedTerms"])
+                existing["firstTermIndex"] = min(int(existing["firstTermIndex"]), term_index)
+                if "matchedSymbol" not in existing:
+                    existing["matchedSymbol"] = matched_symbol
+
+        for candidate in merged.values():
+            if not candidate.get("assetClass"):
+                candidate["assetClass"] = self._candidate_asset_class(candidate["assetPath"])
+
+        ordered = sorted(
+            merged.values(),
+            key=lambda candidate: (
+                -int(candidate.get("matchCount", 0)),
+                int(candidate.get("firstTermIndex", 0)),
+                str(candidate.get("assetPath", "")).casefold(),
+            ),
+        )
+        for candidate in ordered:
+            candidate.pop("firstTermIndex", None)
+        return ordered[:MAX_TASK_CONTEXT_CANDIDATES], failures
 
     def _build_revision_state(self, asset_paths: Sequence[str]) -> dict[str, Any]:
         if self.freshness is None:
@@ -549,6 +750,8 @@ class TaskContextService:
         query: str,
         asset_paths: Sequence[str],
         target_assets: list[dict[str, Any]],
+        relevant_assets: list[dict[str, Any]],
+        relevant_failures: Sequence[str],
         memory_section: dict[str, Any],
         active_work_section: dict[str, Any],
         live_section: dict[str, Any],
@@ -744,6 +947,16 @@ class TaskContextService:
                 }
             )
 
+        if relevant_failures and not relevant_assets:
+            risks.append(
+                {
+                    "kind": "relevant-assets-search-failed",
+                    "severity": "info",
+                    "source": "immutable-sqlite-index",
+                    "details": {"failedSources": list(relevant_failures)},
+                }
+            )
+
         severity_counts: dict[str, int] = {"high": 0, "medium": 0, "info": 0}
         for risk in risks:
             severity = str(risk.get("severity", "info"))
@@ -814,8 +1027,14 @@ class TaskContextService:
         return expansions[:MAX_TASK_CONTEXT_EXPANSIONS]
 
     @staticmethod
-    def _degraded_sources(response: dict[str, Any]) -> list[dict[str, Any]]:
+    def _degraded_sources(
+        response: dict[str, Any],
+        *,
+        relevant_failures: Sequence[str] = (),
+    ) -> list[dict[str, Any]]:
         entries: list[dict[str, Any]] = []
+        for failure in relevant_failures:
+            entries.append({"section": "relevantAssets", "reason": failure})
         revision = response.get("revisionState", {})
         if not revision.get("available"):
             entries.append({"section": "revisionState", "reason": revision.get("reason", "")})
@@ -898,6 +1117,23 @@ class TaskContextService:
             items.pop()
             active["truncated"] = True
             return self._record_reason(reasons, "active-work-items")
+        relevant = response.get("relevantAssets")
+        if isinstance(relevant, list):
+            for candidate in reversed(relevant):
+                if not isinstance(candidate, dict):
+                    continue
+                removable = [
+                    key
+                    for key in ("matchedTerms", "matchCount", "matchedSymbol")
+                    if key in candidate
+                ]
+                if removable:
+                    for key in removable:
+                        candidate.pop(key)
+                    return self._record_reason(reasons, "relevant-assets-metadata")
+            if relevant:
+                relevant.pop()
+                return self._record_reason(reasons, "relevant-assets-count")
         for target in reversed(response.get("targetAssets", [])):
             if "metadata" in target:
                 target.pop("metadata")

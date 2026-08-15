@@ -92,7 +92,10 @@ TaskContext
 ├─ project           projectKey、projectName、index(snapshotId/lastIndexedAtUtc/schema/immutable/quiescent)、stats、sources
 ├─ targetAssets[]    每资产：assetPath、found、whyIncluded=explicit-asset-path、source=immutable-sqlite-index、
 │                    identity、summary、metadata（未命中 → reason=asset-not-indexed）
-├─ relevantAssets    []（自动相关资产扩展属 R0.2，第一版恒为空）
+├─ relevantAssets    R0.2 起为确定性候选集：query 分词（≤8 term）复用 Asset Search + 少量 Symbol Search，
+│                    与显式目标互斥、固定排序（matchCount 降序 → 首个命中 term 位置 → assetPath）、Top N≤8；
+│                    每条含 assetPath/assetClass/source/whyIncluded/matchKind，可附 matchedTerms/matchCount/
+│                    matchedSymbol；无 score/confidence；搜索子源异常降级 degradedSources，不伪造结果
 ├─ memory            available/included/reason/source=project-memory、
 │                    summary(projectProfile/nodes/records/truncated/usage/nextActions)、staleRecordCount
 ├─ activeWork        available/included/items[]、truncated、requestedWorkItem（workItemId 精确查询，含 found/reason）
@@ -108,7 +111,7 @@ TaskContext
 └─ outputBudget      maxTokens/estimatedTokens/truncated/truncationReason
 ```
 
-风险 kind 全集（R0.1）：
+风险 kind 全集（R0.2）：
 
 ```text
 target-dirty-in-editor (high)        Editor Dirty Package 命中目标
@@ -126,6 +129,7 @@ work-item-not-found (medium)         workItemId 不存在
 live-editor-unavailable (info)       Bridge 不可达（其余 section 正常返回）
 memory-context-failed (info)         Memory 上下文构建失败（其余 section 正常返回）
 revision-state-unavailable (info)    未配置 Revision Export（Offline/Live 模式常态）
+relevant-assets-search-failed (info) 候选搜索子源全部失败（relevantAssets=[]，无伪造候选）
 ```
 
 ## 7. 预算裁剪阶梯（固定优先级，晚者先裁）
@@ -136,24 +140,26 @@ revision-state-unavailable (info)    未配置 Revision Export（Offline/Live �
 3. memory.summary.records → 逐条移除
 4. memory.summary.nodes → 逐条移除
 5. activeWork.items → 逐条移除
-6. targetAssets[].metadata → 移除
-7. targetAssets[].summary → 移除
-8. revisionState.assets[].comparisons → 移除
-9. project.stats → 移除
-10. nextExpansions → 逐条移除
-11. risks[].details → 清空
-12. revisionState.assets[] 修订字段 → 只保留 state/reason
-13. targetAssets[].identity → 只保留 asset_path/asset_class
-14. degradedSources → 清空
-15. request 冗余字段 → 移除
-16. project.sources / project.index.snapshotId / memory 摘要冗余字段 → 移除
+6. relevantAssets[].matchedTerms/matchCount/matchedSymbol → 移除（先裁候选 metadata）
+7. relevantAssets → 逐条移除（再减候选数量）
+8. targetAssets[].metadata → 移除
+9. targetAssets[].summary → 移除
+10. revisionState.assets[].comparisons → 移除
+11. project.stats → 移除
+12. nextExpansions → 逐条移除
+13. risks[].details → 清空
+14. revisionState.assets[] 修订字段 → 只保留 state/reason
+15. targetAssets[].identity → 只保留 asset_path/asset_class
+16. degradedSources → 清空
+17. request 冗余字段 → 移除
+18. project.sources / project.index.snapshotId / memory 摘要冗余字段 → 移除
 ```
 
 裁剪到最小封套仍超预算时，诚实报告 `truncationReason=minimal-envelope-exceeds-token-budget` 并保留核心身份事实，不伪造“已满足预算”。
 
-## 8. 已知边界（R0.1 记录，不本轮修复）
+## 8. 已知边界（R0.2 记录，不本轮修复）
 
-1. Memory FTS 为 `unicode61`，纯中文短语查询命中不可靠（实测英文/ASCII token 正常）。R0.1 的 stale 检测因此在无 ASCII token 时可能漏报；检测不到只代表“本次检索未命中”，不代表“不存在 stale 记录”。修复方向属于 Memory 层，按禁止范围不在 R0 展开。
+1. Memory FTS 为 `unicode61`，纯中文短语查询命中不可靠（实测英文/ASCII token 正常）。stale 检测因此在无 ASCII token 时可能漏报；检测不到只代表“本次检索未命中”，不代表“不存在 stale 记录”。修复方向属于 Memory 层，按禁止范围不在 R0 展开。
 2. `revisionState` 依赖 Workflow 模式的 Revision Export 配置；Offline/Live 模式降级为 unavailable 并如实报告。
-3. `workItemId` 与 Change Set 的深度绑定（自动完成→证据回流）属 R0.3，不在 R0.1。
-4. 自动多跳相关资产（relevantAssets）属 R0.2，第一版恒为空。
+3. `workItemId` 与 Change Set 的深度绑定（自动完成→证据回流）属 R0.3，不在 R0.2。
+4. R0.2 `relevantAssets` 只做分词检索召回，不做引用图遍历（多跳属 R1）；候选来自当前索引子树；符号补充在真实 Smoke 上未带来新资产（只提供符号级证据）；不产出 score/confidence。

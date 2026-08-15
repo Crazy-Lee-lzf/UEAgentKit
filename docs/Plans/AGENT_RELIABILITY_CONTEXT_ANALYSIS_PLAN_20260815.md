@@ -1,8 +1,8 @@
 # UEAgentKit 0.8.x Context / Analysis / Agent Reliability 执行计划
 
-> 更新时间：2026-08-15
+> 更新时间：2026-08-16
 > 当前基线：`main@22632c7`（本地最新 `main` 为 `cc1f0c9`）
-> 当前状态：R0.0（现状审计 + 复用矩阵 + 最小 Schema）与 R0.1（`ue_get_task_context` 第一条纵向切片）已完成并本地提交到 `feature/agent-reliability`。下一片先执行真实 Reforge Context Smoke（R0-S），通过后再实现 R0.2 Deterministic Relevant Asset Discovery；R0.3 与 R1–R5 未开始。
+> 当前状态：R0.0（现状审计 + 复用矩阵 + 最小 Schema）、R0.1（`ue_get_task_context` 第一条纵向切片）、R0-S（真实 Reforge Context Smoke）与 R0.2（Deterministic Relevant Asset Discovery）已完成并本地提交到 `feature/agent-reliability`。R0.3 与 R1–R5 未开始。
 > 建议开发分支：`feature/agent-reliability`（已创建，勿 Push）
 > 横向长期分支：`feature/performance-benchmarks`
 > 执行方式：分里程碑推进，不要求一次完成；每个里程碑必须可独立测试、提交和交接。
@@ -609,7 +609,30 @@ G9  本地 Commit
 8. 独立本地 Commit（不 Push）。
 ```
 
-R0.0/R0.1 完成后再决定 R0.2（自动相关资产检索）和 R0.3（Active Work / Change Set 深度绑定），不要一次展开全部。
+R0.0/R0.1 完成后按交接执行 R0-S（真实 Reforge Context Smoke）+ R0.2（Deterministic Relevant Asset Discovery），2026-08-16 完成并本地提交；R0.3（Active Work / Change Set 深度绑定）与 R1 仍未开始，需新的显式指令。
+
+R0-S + R0.2 概览：
+
+```text
+1. 真实 Reforge（48 资产 logic 索引）只读 Smoke：S1 显式目标 4096（1274 tokens 零裁剪，
+   revisionState fresh 三方 SHA-256 相等）、S2 query-only 4096（R0.1 基线无任何候选；
+   整句搜索 0 命中、分词搜索有命中）、S3 显式目标 1024（880 tokens，阶梯裁剪可解释）。
+2. 结构化观察落盘：docs/Plans/AGENT_RELIABILITY_R0_REAL_CONTEXT_SMOKE_20260816.md。
+3. R0.2 实现：task_context.py 新增确定性 relevantAssets 候选发现（query 分词 ≤8 term，
+   复用 IndexQueryService.search 的 Asset Search + Symbol Search 补充，精确 assetPath 去重，
+   与显式目标互斥，固定排序（matchCount 降序 → 首个命中 term 位置 → assetPath），Top N≤8，
+   每条含 assetPath/assetClass/source/whyIncluded/matchKind，可附 matchedTerms/matchCount/
+   matchedSymbol；搜索子源异常按既有错误模型降级，不伪造结果）。
+4. 预算阶梯插入候选裁剪档（relevant-assets-metadata → relevant-assets-count），位于
+   target identity / high risk / revision summary 之前，符合交接 §4.5。
+5. 契约更新：TASK_CONTEXT_SCHEMA_VERSION 1.0→1.1；capabilities.taskContext 的
+   autoRelevantAssetExpansion=true + relevantAssets 契约块；spec/MCP_SERVER.md 同步。
+6. 测试：test_task_context.py 新增 R2.1–R2.10（10 用例覆盖交接 §5 全部要求）。
+7. 门禁：Ruff 通过；Python 全量 540/540 通过；真实 Reforge Smoke 复跑验证（S2 返回
+   8 条确定性候选，S3 先裁候选再裁 target metadata，身份/风险/修订核心保留）。
+8. 文档同步：ROADMAP.md、PROJECT_STATUS.md、spec/MCP_SERVER.md、本计划。
+9. 独立本地 Commit（不 Push）。
+```
 
 ---
 
