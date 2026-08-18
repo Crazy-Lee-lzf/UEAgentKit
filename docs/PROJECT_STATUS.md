@@ -40,11 +40,11 @@ UE Agent Kit 不是“让 AI 任意遥控 Unreal Editor”的通用自动化层�
 
 模式                 不启用 Memory    启用 Memory
 
-Offline                    6              18
+Offline                    7              19
 
-Live                      39              51
+Live                      40              52
 
-Workflow                  89              101
+Workflow                  90              102
 
 ```
 
@@ -400,7 +400,7 @@ R4 用跨 Data Asset / DataTable / Material Instance / Blueprint / Context / sta
 
 
 
-**当前执行状态（2026-08-18）**：R0 已完成；**R1 Impact Analysis 已完成并本地提交，R1 里程碑标记完成**。新增只读 query 组 Tool `ue_analyze_change_impact`（1..8 个精确 `/Game` 目标、depth 1..3、bounded consumer/edge/path 上限、max_output_tokens 裁剪阶梯）：Direct Consumers + Bounded Indirect Consumers（BFS 精确键分块查询、防环、shortestDepth/Impact Path 稳定、多目标共享 consumer 去重合并）、Reference Kind 确定性归一化（7 类，未知 kind 原样保留）、Unknown/Unsupported 边界（`unsupported-impact-subject` / `analysisGaps` / `target-not-indexed`）、`validationTargets`（Tier 0/1/2 确定排序）、确定性 risks（high-fanout / truncated / not-indexed / unknown-kind）、`runtimeSensitiveConsumers=not-proven-with-current-evidence`（不凭资产类型猜测）。结构化 subject 仅 `asset-level` 与 `blueprint-symbol`（精确 stable_id）可被现有 Index 机械证明。`ue_get_task_context.nextExpansions` 增加 impact-analysis 渐进入口。真实 Reforge 只读 Smoke S1–S4 通过（S1 fan-out 23 direct / 14.4 ms；S2 真实 2 跳 24 indirect；S3 多目标共享 consumer 合并；S4 零消费者边界），Python 全量 592/592。设计/审计见 [`Plans/AGENT_RELIABILITY_R1_IMPACT_ANALYSIS_DESIGN_20260818.md`](Plans/AGENT_RELIABILITY_R1_IMPACT_ANALYSIS_DESIGN_20260818.md)，执行规范见 [`Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md`](Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md)。**R2（Semantic Diff）未开始，等待指令。**
+**当前执行状态（2026-08-18）**：R0 已完成；**R1 Impact Analysis 已完成并本地提交，R1 里程碑标记完成**。新增只读 query 组 Tool `ue_analyze_change_impact`（1..8 个精确 `/Game` 目标、depth 1..3、bounded consumer/edge/path 上限、max_output_tokens 裁剪阶梯）：Direct Consumers + Bounded Indirect Consumers（BFS 精确键分块查询、防环、shortestDepth/Impact Path 稳定、多目标共享 consumer 去重合并）、Reference Kind 确定性归一化（7 类，未知 kind 原样保留）、Unknown/Unsupported 边界（`unsupported-impact-subject` / `analysisGaps` / `target-not-indexed`）、`validationTargets`（Tier 0/1/2 确定排序）、确定性 risks（high-fanout / truncated / not-indexed / unknown-kind）、`runtimeSensitiveConsumers=not-proven-with-current-evidence`（不凭资产类型猜测）。结构化 subject 仅 `asset-level` 与 `blueprint-symbol`（精确 stable_id）可被现有 Index 机械证明。`ue_get_task_context.nextExpansions` 增加 impact-analysis 渐进入口。真实 Reforge 只读 Smoke S1–S4 通过（S1 fan-out 23 direct / 14.4 ms；S2 真实 2 跳 24 indirect；S3 多目标共享 consumer 合并；S4 零消费者边界），Python 全量 592/592。设计/审计见 [`Plans/AGENT_RELIABILITY_R1_IMPACT_ANALYSIS_DESIGN_20260818.md`](Plans/AGENT_RELIABILITY_R1_IMPACT_ANALYSIS_DESIGN_20260818.md)，执行规范见 [`Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md`](Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md)。**R2（Semantic Diff）已获明确指令，按完整大任务一次性推进；执行规范见 `Handoffs/AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md`，完成后统一汇报并停止，不进入 R3。**
 
 
 ### P2：高价值专用写入

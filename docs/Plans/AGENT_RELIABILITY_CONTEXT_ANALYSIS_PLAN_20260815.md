@@ -1,11 +1,11 @@
 # UEAgentKit 0.8.x Context / Analysis / Agent Reliability 执行计划
 
 > 更新时间：2026-08-18
-> 当前基线：`feature/agent-reliability@c624bc1`
-> 当前状态：R0 里程碑已全部完成。R1 Impact Analysis 已获明确指令，改为一个完整大任务一次性推进：主 Agent 可内部拆分/并行/做 checkpoint，但不中途等待用户逐片确认；完成整个 R1、真实 Reforge Smoke、全量门禁与文档同步后一次性汇报并停止。R2–R5 未开始。
+> 当前基线：`feature/agent-reliability@b9203e4`
+> 当前状态：R0 Task Context 与 R1 Impact Analysis 已全部完成并本地提交。R2 Semantic Diff 已获明确指令，按一个完整大任务一次性推进：主 Agent 可内部拆分/并行/做 checkpoint，但不中途等待用户逐片确认；完成整个 R2、真实 UE/Reforge Smoke、全量门禁与文档同步后一次性汇报并停止。R3–R5 未开始。
 > 建议开发分支：`feature/agent-reliability`（已创建，勿 Push）
 > 横向长期分支：`feature/performance-benchmarks`
-> 执行方式：按大里程碑推进。R1 当前按单个完整任务执行，详细边界见 `docs/Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md`。
+> 执行方式：按大里程碑推进。R2 当前按单个完整任务执行，详细边界见 `docs/Handoffs/AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md`。
 
 ---
 
@@ -332,9 +332,9 @@ riskLevel
 
 每个影响结论要带证据来源。
 
-### 5.0 当前执行指令（2026-08-18）
+### 5.0 R1 完成状态（2026-08-18）
 
-R1 不再按 Slice 1 / Slice 2 逐片等待用户确认，而是作为**一个完整大任务**一次性完成。主 Agent 可以内部拆分为审计、Direct、Indirect、Domain Evidence、Validation Targets、Budget、Smoke 等工程步骤，也可以使用 DeepSeek Flash 子代理并行做只读审计和测试，但对用户只保留一个 R1 最终验收点。
+R1 已按**一个完整大任务**一次性完成并本地提交到 `feature/agent-reliability@b9203e4`。Public Tool `ue_analyze_change_impact` 已覆盖 Direct Consumers、bounded Indirect Consumers、多目标去重与 shortest Impact Path、Reference Kind 确定性归一化、Unknown/Unsupported、Validation Targets、确定性 Risks、Graph/Token Budget 与 R0 渐进展开入口；真实 Reforge S1–S4 Smoke、Python 全量 592/592、Ruff 与文档门禁均已通过。
 
 完整执行规范、硬边界、测试矩阵和最终汇报格式见：
 
@@ -407,6 +407,29 @@ SHA before != SHA after
 ```
 
 优先从现有 Snapshot / OperationSpec / Canonical Export 派生，不要重新加载整项目。
+
+### 6.2 当前执行指令（2026-08-18）
+
+R2 已获明确指令，按**一个完整大任务**一次性完成，不再按小 Slice 等待逐片确认。主 Agent 可以内部拆分 R2.0 复用审计、SemanticDiffService、Domain Adapter、MCP 契约、真实 UE Smoke 与全量回归，并使用 DeepSeek Flash 子代理并行做只读审计、测试和 Smoke 结果结构化，但对用户只保留一个 R2 最终验收点。
+
+完整执行规范见：
+
+`docs/Handoffs/AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md`
+
+R2 完成必须至少覆盖：
+
+```text
+Change Set 驱动的 ue_analyze_semantic_diff
+Expected / Actual / Matched / Unexpected / Missing / Unchanged Critical
+live / persisted / verified Evidence Stage
+Data Asset / DataTable / Material Instance / Blueprint 窄写入 Domain Adapter
+Multi-operation / Multi-asset / same semantic path chain
+Revision/Freshness/Gap/Risk/Token Budget
+R0/R1 渐进展开集成
+真实 UE/Reforge Smoke + 全量门禁
+```
+
+R2 不生成最终 Trust Verdict；Semantic Diff 是否足以证明任务正确留给 R3。R2 完成后必须停止，不自动进入 R3。
 
 ---
 

@@ -11,9 +11,9 @@ UE Agent Kit 的长期定位是面向 AI Agent 的 Unreal Engine 项目智能层
 当前 Server 模式：
 
 ```text
-Offline             6 Tool（Memory 18）
-Live               39 Tool（Memory 51）
-Workflow           89 Tool（Memory 101）
+Offline             7 Tool（Memory 19）
+Live               40 Tool（Memory 52）
+Workflow           90 Tool（Memory 102）
 ```
 
 ## 已完成基础
@@ -122,7 +122,13 @@ R1（Impact Analysis）已在 `feature/agent-reliability` 一次性完成并本�
 - Unknown / Unsupported 一等公民：`targets[].found=false`、`unsupported-impact-subject`（结构化 subject 仅 `asset-level` 与 `blueprint-symbol` 可被现有 Index 机械证明）、`analysisGaps`（no-consumer-evidence / unknown-reference-kind / runtime-sensitivity-not-proven / frontier-truncated）。
 - `validationTargets`（Tier 0 目标 / Tier 1 Direct / Tier 2 Indirect，确定排序）；确定性 risks（`high-fanout-target / impact-analysis-truncated / impact-target-not-indexed / unknown-reference-kind`）；`runtimeSensitiveConsumers` 固定 `not-proven-with-current-evidence`，不凭资产类型猜测。
 - R0 集成：`ue_get_task_context.nextExpansions` 增加 impact-analysis 渐进入口（显式目标 / relevantAssets hint），默认 Context 不自动展开引用图。
-- 真实 Reforge 只读 Smoke（48 资产 immutable 索引）S1–S4 全部通过：S1 fan-out（23 direct / 282 edges / 14.4 ms）、S2 真实 2 跳（Wheel←VehicleBase←CargoBase，24 indirect）、S3 多目标共享 consumer 合并（24 direct / 8 indirect）、S4 零消费者边界语义。设计、复用审计、边界与建议性能指标见 [`Plans/AGENT_RELIABILITY_R1_IMPACT_ANALYSIS_DESIGN_20260818.md`](Plans/AGENT_RELIABILITY_R1_IMPACT_ANALYSIS_DESIGN_20260818.md)；完整执行规范见 [`Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md`](Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md)。**R2（Semantic Diff）未开始，等待指令。**
+- 真实 Reforge 只读 Smoke（48 资产 immutable 索引）S1–S4 全部通过：S1 fan-out（23 direct / 282 edges / 14.4 ms）、S2 真实 2 跳（Wheel←VehicleBase←CargoBase，24 indirect）、S3 多目标共享 consumer 合并（24 direct / 8 indirect）、S4 零消费者边界语义。设计、复用审计、边界与建议性能指标见 [`Plans/AGENT_RELIABILITY_R1_IMPACT_ANALYSIS_DESIGN_20260818.md`](Plans/AGENT_RELIABILITY_R1_IMPACT_ANALYSIS_DESIGN_20260818.md)；完整执行规范见 [`Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md`](Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md)。
+
+### R2 状态（已获指令，完整大任务）
+
+R2（Semantic Diff）已获明确指令，按一个完整大任务一次性推进，不再按小 Slice 中途停。目标是新增 Change Set 驱动的只读 `ue_analyze_semantic_diff`，统一 Expected / Actual / Matched / Unexpected / Missing / Unchanged Critical 语义，并区分 live / persisted / verified Evidence Stage；首批必须覆盖当前已有稳定结构化 Evidence 的 Data Asset、DataTable、Material Instance 与 Blueprint 窄写入。完整执行规范见 [`Handoffs/AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md`](Handoffs/AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md)。
+
+R2 只负责事实级 Semantic Diff，不生成最终 Trust Verdict；最终任务是否可信留给 R3。R2 完成真实 UE/Reforge Smoke、全量门禁与文档同步后一次性汇报并停止。
 
 首批目标不是新增大量 UE 写入，而是回答：Agent 当前应该改什么、修改会影响什么、以及有什么证据证明结果正确。无法证明的结论必须明确标记为推断；保存成功和独立重载成功只属于 Persistence Evidence，不自动等同于整个任务成功。
 
