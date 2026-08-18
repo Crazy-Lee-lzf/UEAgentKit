@@ -102,7 +102,9 @@ R0–R5 都在 `feature/agent-reliability` 上按独立 Commit 推进。
 
 ### 3.1 推荐角色
 
-**主 Agent：DeepSeek Pro**
+**Primary Agent（主 Agent）**
+
+具体由哪个 Agent / Harness / 模型承担，不写死在项目文档中。仓库当前状态、Handoff、代码与测试结果是执行事实基线，不使用模型自身的旧记忆替代当前仓库事实。
 
 负责：
 
@@ -114,7 +116,7 @@ R0–R5 都在 `feature/agent-reliability` 上按独立 Commit 推进。
 - 最终运行门禁、审查 Diff、提交；
 - 维护本计划状态与交接文档。
 
-**子 Agent：DeepSeek Flash**
+**Subagent（子代理）**
 
 适合委派：
 
@@ -129,7 +131,7 @@ R0–R5 都在 `feature/agent-reliability` 上按独立 Commit 推进。
 
 ### 3.2 子代理边界
 
-Flash 子代理默认不得：
+子代理默认不得：
 
 - 独立修改公共 Schema；
 - 独立决定新的长期 API；
@@ -148,23 +150,23 @@ Flash 子代理默认不得：
 风险
 ```
 
-主 Agent 再决定是否实施。
+Primary Agent 再决定是否实施。
 
 ### 3.3 每个里程碑推荐工作节奏
 
 ```text
-主 Agent：定义问题与验收标准
+Primary Agent：定义问题与验收标准
     ↓
-Flash A：审计现有代码 / 可复用接口
-Flash B：审计测试 / 文档 / Registry
+Subagent A：审计现有代码 / 可复用接口
+Subagent B：审计测试 / 文档 / Registry
     ↓
-主 Agent：确定最小设计
+Primary Agent：确定最小设计
     ↓
-主 Agent 或 Flash：分块实现
+Primary Agent 或 Subagent：分块实现
     ↓
-Flash：补测试 / 静态审查
+Subagent：补测试 / 静态审查
     ↓
-主 Agent：全量门禁 + Diff Review
+Primary Agent：全量门禁 + Diff Review
     ↓
 本地 Commit
     ↓
@@ -410,7 +412,7 @@ SHA before != SHA after
 
 ### 6.2 当前执行指令（2026-08-18）
 
-R2 已获明确指令，按**一个完整大任务**一次性完成，不再按小 Slice 等待逐片确认。主 Agent 可以内部拆分 R2.0 复用审计、SemanticDiffService、Domain Adapter、MCP 契约、真实 UE Smoke 与全量回归，并使用 DeepSeek Flash 子代理并行做只读审计、测试和 Smoke 结果结构化，但对用户只保留一个 R2 最终验收点。
+R2 已获明确指令，按**一个完整大任务**一次性完成，不再按小 Slice 等待逐片确认。Primary Agent 可以内部拆分 R2.0 复用审计、SemanticDiffService、Domain Adapter、MCP 契约、真实 UE Smoke 与全量回归，并使用 Subagent 并行做只读审计、测试和 Smoke 结果结构化，但对用户只保留一个 R2 最终验收点。允许根据当前仓库中更合适的既有抽象调整实现方式，但不得偏离目标、边界和验收标准；任何实质偏离必须在最终汇报说明原因。
 
 完整执行规范见：
 

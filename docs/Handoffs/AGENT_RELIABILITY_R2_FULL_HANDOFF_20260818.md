@@ -2,10 +2,12 @@
 
 > 日期：2026-08-18  
 > 开发分支：`feature/agent-reliability`  
-> 起始基线：`b9203e4`（R1 Impact Analysis 已完成）  
-> 执行模型：DeepSeek Pro 主 Agent，可并行使用 DeepSeek Flash 子代理做只读审计、测试补齐、真实 Smoke 与文档一致性检查  
+> 最低代码基线：`b9203e4`（R1 Impact Analysis 已完成）；实际执行必须从当前 `feature/agent-reliability` HEAD 开始，并先确认该 HEAD 包含本 Handoff 与 R1 提交。
+> 执行模型：模型/Harness 无关。Primary Agent 负责架构、公共协议、核心实现、最终 Review、门禁与提交；可并行使用 Subagent 做只读审计、测试补齐、真实 Smoke 与文档一致性检查。
 > 任务模式：**一次性完成整个 R2；允许内部拆分 checkpoint/commit，但不要在中途等待用户确认。R2 全部完成后统一汇报并停止，不进入 R3。**  
 > Git 纪律：不 Push；不 Reset/Stash/Rebase/Revert 用户工作；不提交 Output/Backups/Intermediate/Saved/日志/临时 UE 资产。
+> 事实基线：先读取当前 Git 状态、Handoff、代码和测试；不得用 Agent 自身历史上下文、缓存记忆或旧计划替代当前仓库事实。
+> 实现自由度：若当前仓库已有比 Handoff 建议更合适的复用抽象，可以调整实现方式，但不得扩大 Scope、改变停止点或降低验收标准；最终汇报必须说明实质偏离及依据。
 
 ---
 
@@ -90,9 +92,9 @@ outputBudget
 
 ## 3. R2.0：先做复用审计，但不中途停
 
-主 Agent 开始实现前，至少并行安排 2–3 个 Flash 只读审计。
+Primary Agent 开始实现前，至少并行安排 2–3 个 Subagent 只读审计。
 
-### Flash A：Workflow / Change Set Evidence 审计
+### Subagent A：Workflow / Change Set Evidence 审计
 
 重点确认：
 
@@ -117,7 +119,7 @@ Authorized Save report
 - 哪些字段能被独立 Verify 再确认；
 - 哪些字段只是 workflow bookkeeping，不能作为 Semantic Diff Evidence。
 
-### Flash B：Domain Snapshot / Canonical State 审计
+### Subagent B：Domain Snapshot / Canonical State 审计
 
 重点审计当前所有 **非动画已注册 Writer**：
 
@@ -143,7 +145,7 @@ Critical unchanged set
 Unsupported edge cases
 ```
 
-### Flash C：测试 / Registry / MCP 契约审计
+### Subagent C：测试 / Registry / MCP 契约审计
 
 列出：
 
@@ -156,7 +158,7 @@ Unsupported edge cases
 - 既有 Domain tests 可复用 fixture；
 - 真实 UE smoke harness。
 
-主 Agent 必须核对审计结论后再定最终 schema，但**不需要向用户中途汇报**。
+Primary Agent 必须核对审计结论后再定最终 schema，但**不需要向用户中途汇报**。
 
 ---
 
@@ -454,7 +456,7 @@ SemanticDiffAdapter
   normalize_value(...)
 ```
 
-是否落成 class/protocol 由主 Agent决定；重点是避免四个 Domain 互相污染。
+是否落成 class/protocol 由 Primary Agent 决定；重点是避免四个 Domain 互相污染。
 
 ### 9.1 Data Asset / Non-Blueprint Property
 
@@ -872,18 +874,18 @@ ChangeSet Schema 持久化扩展（除非 R2.0 证明现有 Evidence 无法实�
 虽然用户要求 R2 一次性完成，但内部仍建议分工：
 
 ```text
-主 Agent：R2.0 审计编排 + 最终 Schema
-  ├─ Flash A Workflow Evidence
-  ├─ Flash B Domain Snapshot Matrix
-  └─ Flash C Tests/Registry/Smoke
+Primary Agent：R2.0 审计编排 + 最终 Schema
+  ├─ Subagent A Workflow Evidence
+  ├─ Subagent B Domain Snapshot Matrix
+  └─ Subagent C Tests/Registry/Smoke
 
-主 Agent：SemanticDiffService + Public Tool skeleton
+Primary Agent：SemanticDiffService + Public Tool skeleton
 
 并行：
-  Flash/主 Agent A DataAsset adapter
-  Flash/主 Agent B DataTable adapter
-  Flash/主 Agent C MaterialInstance adapter
-  主 Agent Blueprint adapter / common normalization review
+  Subagent/Primary Agent A DataAsset adapter
+  Subagent/Primary Agent B DataTable adapter
+  Subagent/Primary Agent C MaterialInstance adapter
+  Primary Agent Blueprint adapter / common normalization review
 
 → Core tests
 → Domain tests
@@ -895,7 +897,7 @@ ChangeSet Schema 持久化扩展（除非 R2.0 证明现有 Evidence 无法实�
 → 停止
 ```
 
-若多个子代理需要实际编辑同一公共文件（例如 `mcp_server.py`），不要并发直接改；由主 Agent 统一集成，子代理优先提供建议/测试或修改低冲突独立模块。
+若多个 Subagent 需要实际编辑同一公共文件（例如 `mcp_server.py`），不要并发直接改；由 Primary Agent 统一集成，Subagent 优先提供建议/测试或修改低冲突独立模块。
 
 ---
 

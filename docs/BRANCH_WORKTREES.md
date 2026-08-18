@@ -157,16 +157,16 @@ Verification / Trust Verdict 公共结构
 
 ## 6. Agent 并行方式
 
-推荐：DeepSeek Pro 作为主 Agent，Flash 作为子代理。
+执行模型使用角色而不是绑定具体模型：Primary Agent（主 Agent）负责集成与最终决策，Subagent（子代理）负责可委派的低冲突工作。具体 Agent / Harness / 模型由本地运行配置决定。
 
-主 Agent负责：
+Primary Agent 负责：
 
 - 公共接口与数据模型；
 - 任务拆分；
 - 核心实现与最终 Review；
 - 门禁和 Commit。
 
-Flash 子代理适合：
+Subagent 适合：
 
 - 代码搜索/现状审计；
 - 测试缺口；
