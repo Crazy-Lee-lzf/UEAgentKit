@@ -400,6 +400,9 @@ R4 用跨 Data Asset / DataTable / Material Instance / Blueprint / Context / sta
 
 
 
+**当前执行状态（2026-08-18）**：R0 已完成；R1 Impact Analysis 已按一个完整大任务启动，基线为 `feature/agent-reliability@c624bc1`。本轮一次性完成 Direct / Bounded Indirect Consumers、多目标 Impact Path、Reference Kind / Domain Evidence、Unknown / Unsupported、Validation Targets、Graph/Token Budget、R0 渐进展开入口与真实 Reforge Smoke；中途不按 Slice 等待确认，完成后统一验收并停止在 R2 之前。执行规范见 [`Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md`](Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md)。
+
+
 ### P2：高价值专用写入
 
 本项改为**需求驱动候选池**，不属于当前固定排期。只有 Reforge 真实任务或 R4 Agent Benchmark 反复暴露明确缺口时，再按收益排序解冻：

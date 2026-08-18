@@ -1,6 +1,6 @@
 # UE Agent Kit 路线图
 
-更新时间：2026-08-15
+更新时间：2026-08-18
 
 当前已发布版本为 **0.7.0**，支持 Unreal Engine 5.6。Realtime Foundation、注册式 Live Editor Write、Schema v3 Memory/Context MVP、分帧 Batch Task 和持久化 Change Set 已正式进入本地发布。`feature/live-editor-realtime-io` 已 **fast-forward 合并进 `main`**（`5eb1759 → 56afc91`，含完整 Realtime Animation Tools 线）；动画功能扩展暂缓，后续只在真实任务或 Benchmark 证明存在高价值缺口时解冻。`feature/performance-benchmarks` 继续作为长期横向性能分支。当前首要目标转为 **0.8.x Context / Analysis / Agent Reliability**：先把现有 Index、Memory、Live Editor、Revision、Change Set 和验证证据组合成任务上下文、影响分析、语义 Diff 与可信结果判断，再由真实 Agent Benchmark 决定下一批 Writer。
 
@@ -103,7 +103,7 @@ R4  Real Agent Benchmark v1
 R5  Value Provenance / Execution Trace（由 Benchmark 决定优先级）
 ```
 
-### R0 状态（2026-08-16：已完成，R1 等待指令）
+### R0 状态（已完成）/ R1 状态（2026-08-18：完整里程碑任务已启动）
 
 R0.0（现状审计 + 复用矩阵 + 最小 Schema）、R0.1（`ue_get_task_context` 第一条纵向切片）、R0-S（真实 Reforge Context Smoke）、R0.2（Deterministic Relevant Asset Discovery）与 R0.3（只读 Cross-source Correlation）已在 `feature/agent-reliability` 完成并本地提交，R0 里程碑标记完成：
 
@@ -111,7 +111,7 @@ R0.0（现状审计 + 复用矩阵 + 最小 Schema）、R0.1（`ue_get_task_cont
 - `risks` 仅包含确定性事实（dirty/stale/conflicted/not-found/session-mismatch 等），零模型推断；输出受 `max_output_tokens` 强制裁剪并在 `outputBudget` 中显式报告。
 - R0.2：`relevantAssets` 为确定性相关资产候选集——query 分词（≤8 term）+ 复用 Asset Search 与少量 Symbol Search 补充、与显式目标互斥、固定排序、Top N≤8，每条带 `assetPath / assetClass / source / whyIncluded / matchKind`，无 score/confidence；预算不足时先裁候选 metadata 再减候选数量，候选永不优先于 target identity / high risk / revision summary。真实 Reforge Smoke 观察与验证见 [`Plans/AGENT_RELIABILITY_R0_REAL_CONTEXT_SMOKE_20260816.md`](Plans/AGENT_RELIABILITY_R0_REAL_CONTEXT_SMOKE_20260816.md)。
 - R0.3：`correlation` 为只读、非持久化、零模型推断的 Cross-source Correlation——精确键联接 Active Work、显式 Change Set、Live Editor Session 与 Memory Evidence（session id 相等、资产路径集合交集、changeSetId 字面量、资产 scope Evidence）；不新增 Memory/ChangeSet Schema、不扫描 workflow 私有 `_change_sets`、不自动发现 Change Set、无引用遍历；链接固定排序上限 16 条，边界计数在 summary 如实报告；预算不足时先裁 correlation links/summary。交接见 [`Handoffs/AGENT_RELIABILITY_R0_SLICE3_HANDOFF_20260816.md`](Handoffs/AGENT_RELIABILITY_R0_SLICE3_HANDOFF_20260816.md)。
-- 复用矩阵、Request/Response Schema 与已知边界见 [`Plans/AGENT_RELIABILITY_R0_AUDIT_AND_SCHEMA_20260815.md`](Plans/AGENT_RELIABILITY_R0_AUDIT_AND_SCHEMA_20260815.md)；R1（Impact Analysis）尚未开始。
+- 复用矩阵、Request/Response Schema 与已知边界见 [`Plans/AGENT_RELIABILITY_R0_AUDIT_AND_SCHEMA_20260815.md`](Plans/AGENT_RELIABILITY_R0_AUDIT_AND_SCHEMA_20260815.md)。R1（Impact Analysis）已按**单个完整大任务**启动：一次完成 Direct + Bounded Indirect Consumers、多目标 Impact Path、Reference Kind / Domain Evidence 解释、Unknown / Unsupported、Validation Targets、Graph/Token Budget、R0 渐进展开入口与真实 Reforge Smoke；完整接手规范见 [`Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md`](Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md)。R1 中途不按 Slice 等待确认，最终一次性验收，完成后停止在 R2 之前。
 
 首批目标不是新增大量 UE 写入，而是回答：Agent 当前应该改什么、修改会影响什么、以及有什么证据证明结果正确。无法证明的结论必须明确标记为推断；保存成功和独立重载成功只属于 Persistence Evidence，不自动等同于整个任务成功。
 

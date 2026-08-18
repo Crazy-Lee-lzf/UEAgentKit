@@ -1,11 +1,11 @@
 # UEAgentKit 0.8.x Context / Analysis / Agent Reliability 执行计划
 
-> 更新时间：2026-08-16
-> 当前基线：`main@22632c7`（本地最新 `main` 为 `cc1f0c9`）
-> 当前状态：R0 里程碑已全部完成并本地提交到 `feature/agent-reliability`（R0.0/R0.1 现状审计 + 最小切片、R0-S 真实 Reforge Context Smoke、R0.2 Deterministic Relevant Asset Discovery、R0.3 只读 Cross-source Correlation）。R1–R5 未开始，等待明确指令。
+> 更新时间：2026-08-18
+> 当前基线：`feature/agent-reliability@c624bc1`
+> 当前状态：R0 里程碑已全部完成。R1 Impact Analysis 已获明确指令，改为一个完整大任务一次性推进：主 Agent 可内部拆分/并行/做 checkpoint，但不中途等待用户逐片确认；完成整个 R1、真实 Reforge Smoke、全量门禁与文档同步后一次性汇报并停止。R2–R5 未开始。
 > 建议开发分支：`feature/agent-reliability`（已创建，勿 Push）
 > 横向长期分支：`feature/performance-benchmarks`
-> 执行方式：分里程碑推进，不要求一次完成；每个里程碑必须可独立测试、提交和交接。
+> 执行方式：按大里程碑推进。R1 当前按单个完整任务执行，详细边界见 `docs/Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md`。
 
 ---
 
@@ -331,6 +331,33 @@ riskLevel
 不要把「有引用」直接等同于「一定受影响」。
 
 每个影响结论要带证据来源。
+
+### 5.0 当前执行指令（2026-08-18）
+
+R1 不再按 Slice 1 / Slice 2 逐片等待用户确认，而是作为**一个完整大任务**一次性完成。主 Agent 可以内部拆分为审计、Direct、Indirect、Domain Evidence、Validation Targets、Budget、Smoke 等工程步骤，也可以使用 DeepSeek Flash 子代理并行做只读审计和测试，但对用户只保留一个 R1 最终验收点。
+
+完整执行规范、硬边界、测试矩阵和最终汇报格式见：
+
+`docs/Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md`
+
+R1 完成必须至少覆盖：
+
+```text
+ue_analyze_change_impact
+Direct Consumers
+Bounded Indirect Consumers
+多目标去重 + Impact Path
+Reference Kind / Domain Evidence 的确定性解释
+Unknown / Unsupported 边界
+Validation Targets
+Deterministic Risks
+Graph / Token Budget
+R0 Task Context 渐进展开入口
+真实 Reforge Smoke
+全量门禁与文档同步
+```
+
+不得为了“完成 R1”使用模型推断填补证据空白；无法证明的 runtime sensitivity / field-level impact 必须明确标记为 `unknown / unsupported / insufficient-evidence`，运行时执行链和值来源继续留给 R5。
 
 ## 5.2 R1 与 R0 的关系
 
