@@ -14,7 +14,7 @@ from .query_protocol import (
     normalize_output_token_budget,
 )
 
-TASK_CONTEXT_SCHEMA_VERSION = "1.1"
+TASK_CONTEXT_SCHEMA_VERSION = "1.2"
 MAX_TASK_CONTEXT_ASSETS = 10
 MAX_QUERY_CHARS = 2048
 MAX_ASSET_PATH_CHARS = 512
@@ -38,6 +38,27 @@ CANDIDATE_MATCH_KIND_RANK = {
     "asset-path-substring": 6,
     "asset-search-hit": 7,
     "symbol-search-hit": 8,
+}
+
+# R0.3 Cross-source Correlation bounds. Every join is read-only, computed per
+# request, and derives from exact keys only (session id, asset path, change set
+# id literal). No Memory/Change Set schema is extended and no workflow journal
+# is written; the private _change_sets mapping is never scanned.
+MAX_CORRELATION_LINKS = 16
+MAX_CORRELATION_WORK_ITEMS = 5
+MAX_CORRELATION_WORK_ASSETS = 4
+MAX_CORRELATION_CHANGE_SET_ASSETS = 8
+MAX_CORRELATION_EVIDENCE_PER_ASSET = 3
+MAX_CORRELATION_EVIDENCE_LOOKUPS = 12
+CORRELATION_METHOD = "deterministic-key-matching"
+CORRELATION_KIND_RANK = {
+    "change-set-editor-session": 0,
+    "change-set-asset-in-editor": 1,
+    "change-set-asset-memory-evidence": 2,
+    "work-change-set-asset-overlap": 3,
+    "work-references-change-set": 4,
+    "work-asset-in-editor": 5,
+    "work-asset-memory-evidence": 6,
 }
 
 _SEARCH_TOKEN_PATTERN = re.compile(r"[\w./:-]+", flags=re.UNICODE)
@@ -142,7 +163,16 @@ def _validate_flag(value: bool, name: str) -> bool:
 
 
 class TaskContextService:
-    """Aggregate deterministic Index, Revision, Memory, Live Editor, and Change Set facts into one bounded, read-only Task Context."""
+    """Aggregate deterministic Index, Revision, Memory, Live Editor, and Change Set facts into one bounded, read-only Task Context.
+
+    R0.3 additionally joins the included sources into a `correlation` section:
+    Active Work, the explicitly requested Change Set, the Live Editor session,
+    and Memory Evidence are correlated through exact keys only (session id,
+    asset path, change set id literal). The correlation is computed per request,
+    writes nothing back to Memory or the workflow journal, performs no model
+    inference, never scans the workflow's private change set store, and never
+    discovers Change Sets that were not explicitly requested.
+    """
 
     def __init__(
         self,
@@ -220,6 +250,13 @@ class TaskContextService:
         response["liveEditor"] = self._build_live_editor(include_live_context)
         response["revisionState"] = self._build_revision_state(normalized_assets)
         response["changeSet"] = self._build_change_set(normalized_change_set)
+        correlation_result = self._build_correlation(
+            active_work_section=active_work_section,
+            change_set_section=response["changeSet"],
+            live_section=response["liveEditor"],
+            memory_included=bool(memory_section.get("included")),
+        )
+        response["correlation"] = correlation_result["section"]
         response["risks"], risk_summary = self._build_risks(
             query=normalized_query,
             asset_paths=normalized_assets,
@@ -232,6 +269,7 @@ class TaskContextService:
             revision_state=response["revisionState"],
             change_set_section=response["changeSet"],
             work_item_id=normalized_work_item,
+            correlation=correlation_result,
         )
         response["riskSummary"] = risk_summary
         response["nextExpansions"] = self._build_expansions(
@@ -699,6 +737,338 @@ class TaskContextService:
         return section
 
     @staticmethod
+    def _live_asset_sets(live_section: dict[str, Any]) -> tuple[set[str], set[str]]:
+        summary = live_section.get("summary")
+        if not isinstance(summary, dict):
+            return set(), set()
+        dirty: set[str] = set()
+        for item in TaskContextService._section_items(summary, "dirtyPackages"):
+            dirty.update(TaskContextService._item_asset_paths(item))
+        opened: set[str] = set()
+        for item in TaskContextService._section_items(summary, "openAssets"):
+            opened.update(TaskContextService._item_asset_paths(item))
+        return dirty, opened
+
+    @staticmethod
+    def _correlation_work_items(active_work_section: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
+        """Ordered, deduplicated work items considered for correlation.
+
+        The explicitly requested work item comes first, followed by the memory
+        context's related active work items, skipping duplicate work item ids.
+        Returns the considered items plus the deduplicated total count of
+        available work items (requested + related, capped only for consideration).
+        """
+        ordered: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        total = 0
+        requested = active_work_section.get("requestedWorkItem")
+        if isinstance(requested, dict) and requested.get("found"):
+            work = requested.get("work")
+            if isinstance(work, dict):
+                ordered.append(work)
+                seen.add(str(work.get("workItemId", "")))
+                total += 1
+        items = active_work_section.get("items")
+        if isinstance(items, list):
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                work_item_id = str(item.get("workItemId", ""))
+                if work_item_id and work_item_id in seen:
+                    continue
+                seen.add(work_item_id)
+                total += 1
+                if len(ordered) < MAX_CORRELATION_WORK_ITEMS:
+                    ordered.append(item)
+        return ordered, total
+
+    @staticmethod
+    def _work_asset_paths(work: dict[str, Any], limit: int) -> tuple[list[str], bool]:
+        listed = work.get("assetPaths")
+        paths = [str(entry) for entry in listed if isinstance(entry, str) and entry] if isinstance(listed, list) else []
+        return paths[:limit], len(paths) > limit
+
+    @staticmethod
+    def _work_text_fields(work: dict[str, Any]) -> dict[str, str]:
+        fields: dict[str, str] = {}
+        for key in ("title", "description", "nextAction", "blockedReason"):
+            value = work.get(key)
+            if isinstance(value, str) and value:
+                fields[key] = value
+        details = work.get("details")
+        if isinstance(details, dict) and details:
+            fields["details"] = " ".join(f"{key}: {value}" for key, value in details.items())
+        return fields
+
+    @staticmethod
+    def _evidence_query_tokens(asset_path: str) -> str:
+        leaf = asset_path.rsplit("/", 1)[-1]
+        name = leaf.split(".", 1)[0]
+        return " ".join(_SEARCH_TOKEN_PATTERN.findall(name))[:80]
+
+    def _asset_evidence_refs(self, asset_path: str) -> list[dict[str, Any]]:
+        """Compact read-only Memory Evidence references scoped to one asset.
+
+        Reuses the public scoped search path (FTS token match on the asset
+        name + asset scope filter, all statuses). A miss only means "not
+        matched by this deterministic lookup", never "no records exist".
+        """
+        if self.memory_service is None:
+            return []
+        query = self._evidence_query_tokens(asset_path)
+        if not query:
+            return []
+        try:
+            hits = self.memory_service.search_records(
+                query=query,
+                statuses=(),
+                scope_type="asset",
+                scope_key=asset_path,
+                limit=MAX_CORRELATION_EVIDENCE_PER_ASSET,
+            )
+        except (ProjectMemoryServiceError, OSError, TypeError, ValueError, RuntimeError, sqlite3.Error):
+            return []
+        refs: list[dict[str, Any]] = []
+        for hit in hits:
+            record = hit.record
+            refs.append(
+                {
+                    "recordId": record.record_id,
+                    "status": record.status.value,
+                    "recordType": record.record_type.value,
+                    "title": record.title,
+                }
+            )
+        return refs
+
+    def _build_correlation(
+        self,
+        *,
+        active_work_section: dict[str, Any],
+        change_set_section: dict[str, Any],
+        live_section: dict[str, Any],
+        memory_included: bool,
+    ) -> dict[str, Any]:
+        """Build the read-only, non-persistent Cross-source Correlation section.
+
+        Joins are exact-key matches only (editor session id, asset path, change
+        set id literal); no model inference and no workflow journal writes. The
+        Change Set is only ever correlated when explicitly requested and found;
+        the private _change_sets mapping is never scanned.
+        """
+        change_set_id = str(change_set_section.get("changeSetId", ""))
+        change_set_found = bool(change_set_section.get("found")) and bool(change_set_id)
+        change_set_summary = change_set_section.get("summary")
+        if not isinstance(change_set_summary, dict):
+            change_set_summary = {}
+        live_included = bool(live_section.get("included"))
+        work_items, work_items_total = self._correlation_work_items(active_work_section)
+
+        links: list[dict[str, Any]] = []
+        summary: dict[str, Any] = {
+            "linkCount": 0,
+            "countsByKind": {},
+            "workItemsConsidered": len(work_items),
+            "workItemsTotal": work_items_total,
+            "changeSetAffectedAssetsSampled": 0,
+            "changeSetAffectedAssetsTotal": 0,
+            "changeSetAffectedAssetsTruncated": False,
+            "evidenceLookups": 0,
+            "evidenceLookupsTruncated": False,
+            "linksTruncated": False,
+        }
+        session_mismatch: dict[str, Any] | None = None
+
+        dirty_candidates: set[str] = set()
+        open_candidates: set[str] = set()
+        if live_included:
+            dirty_candidates, open_candidates = self._live_asset_sets(live_section)
+
+        if change_set_found and live_included:
+            change_set_session = str(change_set_summary.get("editorSessionId", ""))
+            live_session = str(live_section.get("editorSessionId", ""))
+            if change_set_session and live_session:
+                matches = change_set_session == live_session
+                links.append(
+                    {
+                        "kind": "change-set-editor-session",
+                        "sources": ["change-set-journal", "live-editor-memory"],
+                        "changeSetId": change_set_id,
+                        "details": {
+                            "changeSetEditorSessionId": change_set_session,
+                            "liveEditorSessionId": live_session,
+                            "matches": matches,
+                        },
+                    }
+                )
+                if not matches:
+                    session_mismatch = {
+                        "changeSetEditorSessionId": change_set_session,
+                        "liveEditorSessionId": live_session,
+                    }
+
+        affected = change_set_summary.get("affectedAssets") if change_set_found else None
+        affected_assets = [str(entry) for entry in affected if isinstance(entry, str) and entry] if isinstance(affected, list) else []
+        affected_set = set(affected_assets)
+        summary["changeSetAffectedAssetsTotal"] = len(affected_assets)
+        summary["changeSetAffectedAssetsSampled"] = min(len(affected_assets), MAX_CORRELATION_CHANGE_SET_ASSETS)
+        summary["changeSetAffectedAssetsTruncated"] = len(affected_assets) > MAX_CORRELATION_CHANGE_SET_ASSETS
+
+        evidence_lookups = 0
+
+        def fetch_evidence(asset_path: str) -> list[dict[str, Any]]:
+            nonlocal evidence_lookups
+            if evidence_lookups >= MAX_CORRELATION_EVIDENCE_LOOKUPS:
+                return []
+            evidence_lookups += 1
+            return self._asset_evidence_refs(asset_path)
+
+        for asset_path in affected_assets[:MAX_CORRELATION_CHANGE_SET_ASSETS]:
+            if live_included:
+                if self._matches_asset(asset_path, dirty_candidates):
+                    links.append(
+                        {
+                            "kind": "change-set-asset-in-editor",
+                            "sources": ["change-set-journal", "live-editor-memory"],
+                            "assetPath": asset_path,
+                            "changeSetId": change_set_id,
+                            "details": {"observedVia": "editor-dirty-packages"},
+                        }
+                    )
+                if self._matches_asset(asset_path, open_candidates):
+                    links.append(
+                        {
+                            "kind": "change-set-asset-in-editor",
+                            "sources": ["change-set-journal", "live-editor-memory"],
+                            "assetPath": asset_path,
+                            "changeSetId": change_set_id,
+                            "details": {"observedVia": "editor-open-assets"},
+                        }
+                    )
+            if memory_included:
+                for ref in fetch_evidence(asset_path):
+                    links.append(
+                        {
+                            "kind": "change-set-asset-memory-evidence",
+                            "sources": ["change-set-journal", "project-memory"],
+                            "assetPath": asset_path,
+                            "changeSetId": change_set_id,
+                            "details": ref,
+                        }
+                    )
+
+        for work in work_items:
+            work_item_id = str(work.get("workItemId", ""))
+            work_paths, _ = self._work_asset_paths(work, MAX_CORRELATION_WORK_ASSETS)
+            if change_set_found:
+                overlap = [asset_path for asset_path in work_paths if asset_path in affected_set]
+                for asset_path in overlap:
+                    links.append(
+                        {
+                            "kind": "work-change-set-asset-overlap",
+                            "sources": ["project-memory-active-work", "change-set-journal"],
+                            "assetPath": asset_path,
+                            "workItemId": work_item_id,
+                            "changeSetId": change_set_id,
+                            "details": {},
+                        }
+                    )
+                matched_fields = [
+                    field for field, text in self._work_text_fields(work).items() if change_set_id in text
+                ]
+                if matched_fields:
+                    links.append(
+                        {
+                            "kind": "work-references-change-set",
+                            "sources": ["project-memory-active-work", "change-set-journal"],
+                            "workItemId": work_item_id,
+                            "changeSetId": change_set_id,
+                            "details": {"matchedIn": matched_fields},
+                        }
+                    )
+            if live_included:
+                for asset_path in work_paths:
+                    if self._matches_asset(asset_path, dirty_candidates):
+                        links.append(
+                            {
+                                "kind": "work-asset-in-editor",
+                                "sources": ["project-memory-active-work", "live-editor-memory"],
+                                "assetPath": asset_path,
+                                "workItemId": work_item_id,
+                                "details": {"observedVia": "editor-dirty-packages"},
+                            }
+                        )
+                    if self._matches_asset(asset_path, open_candidates):
+                        links.append(
+                            {
+                                "kind": "work-asset-in-editor",
+                                "sources": ["project-memory-active-work", "live-editor-memory"],
+                                "assetPath": asset_path,
+                                "workItemId": work_item_id,
+                                "details": {"observedVia": "editor-open-assets"},
+                            }
+                        )
+            if memory_included:
+                for asset_path in work_paths:
+                    for ref in fetch_evidence(asset_path):
+                        links.append(
+                            {
+                                "kind": "work-asset-memory-evidence",
+                                "sources": ["project-memory-active-work", "project-memory"],
+                                "assetPath": asset_path,
+                                "workItemId": work_item_id,
+                                "details": ref,
+                            }
+                        )
+
+        summary["evidenceLookups"] = evidence_lookups
+        summary["evidenceLookupsTruncated"] = evidence_lookups >= MAX_CORRELATION_EVIDENCE_LOOKUPS
+
+        def link_sort_key(link: dict[str, Any]) -> tuple[Any, ...]:
+            details = link.get("details")
+            if not isinstance(details, dict):
+                details = {}
+            return (
+                CORRELATION_KIND_RANK.get(str(link.get("kind", "")), 99),
+                str(link.get("assetPath", "")).casefold(),
+                str(link.get("workItemId") or link.get("changeSetId") or ""),
+                str(details.get("recordId", "")),
+                str(details.get("observedVia", "")),
+            )
+
+        links.sort(key=link_sort_key)
+        summary["linksTruncated"] = len(links) > MAX_CORRELATION_LINKS
+        links = links[:MAX_CORRELATION_LINKS]
+        for link in links:
+            kind = str(link["kind"])
+            summary["countsByKind"][kind] = summary["countsByKind"].get(kind, 0) + 1
+        summary["linkCount"] = len(links)
+
+        pair_present = (
+            (change_set_found and live_included)
+            or (change_set_found and memory_included)
+            or (live_included and bool(work_items))
+        )
+        if links or pair_present:
+            return {
+                "section": {
+                    "available": True,
+                    "method": CORRELATION_METHOD,
+                    "summary": summary,
+                    "links": links,
+                },
+                "sessionMismatch": session_mismatch,
+            }
+        return {
+            "section": {
+                "available": False,
+                "method": CORRELATION_METHOD,
+                "reason": "insufficient-correlatable-sources",
+            },
+            "sessionMismatch": None,
+        }
+
+    @staticmethod
     def _section_items(summary: dict[str, Any], field: str) -> list[dict[str, Any]]:
         value = summary.get(field)
         if not isinstance(value, dict):
@@ -758,6 +1128,7 @@ class TaskContextService:
         revision_state: dict[str, Any],
         change_set_section: dict[str, Any],
         work_item_id: str,
+        correlation: dict[str, Any] | None = None,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         risks: list[dict[str, Any]] = []
 
@@ -926,6 +1297,21 @@ class TaskContextService:
                             "severity": "info",
                             "source": "change-set-journal",
                             "details": {"status": status},
+                        }
+                    )
+                session_mismatch = (correlation or {}).get("sessionMismatch")
+                if isinstance(session_mismatch, dict):
+                    risks.append(
+                        {
+                            "kind": "change-set-editor-session-mismatch",
+                            "severity": "medium",
+                            "source": "cross-source-correlation",
+                            "details": {
+                                "changeSetEditorSessionId": session_mismatch.get(
+                                    "changeSetEditorSessionId", ""
+                                ),
+                                "liveEditorSessionId": session_mismatch.get("liveEditorSessionId", ""),
+                            },
                         }
                     )
 
@@ -1134,6 +1520,21 @@ class TaskContextService:
             if relevant:
                 relevant.pop()
                 return self._record_reason(reasons, "relevant-assets-count")
+        correlation = response.get("correlation")
+        if isinstance(correlation, dict):
+            correlation_links = correlation.get("links")
+            if correlation_links:
+                correlation_links.pop()
+                if "summary" in correlation:
+                    correlation["summary"]["linkCount"] = len(correlation_links)
+                return self._record_reason(reasons, "correlation-links")
+            if correlation.get("available") and not correlation.get("omittedDueToBudget"):
+                response["correlation"] = {
+                    "available": True,
+                    "method": CORRELATION_METHOD,
+                    "omittedDueToBudget": True,
+                }
+                return self._record_reason(reasons, "correlation-summary")
         for target in reversed(response.get("targetAssets", [])):
             if "metadata" in target:
                 target.pop("metadata")
@@ -1262,7 +1663,14 @@ def register_task_context_tools(
         include_memory: bool = True,
         max_output_tokens: int = DEFAULT_OUTPUT_TOKEN_BUDGET,
     ) -> dict[str, Any]:
-        """Aggregate bounded Index, Revision, Memory, Live Editor, and Change Set facts for one task in a single read-only request."""
+        """Aggregate bounded Index, Revision, Memory, Live Editor, and Change Set facts for one task in a single read-only request.
+
+        R0.3 adds a deterministic Cross-source Correlation section that joins
+        Active Work, the explicitly requested Change Set, the Live Editor
+        session, and Memory Evidence through exact keys only. Correlation is
+        computed per request, persists nothing, and never discovers Change Sets
+        that were not explicitly provided via change_set_id.
+        """
         try:
             return task_context_service.get_task_context(
                 query=query,

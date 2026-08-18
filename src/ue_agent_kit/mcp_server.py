@@ -69,6 +69,7 @@ from .snapshot_lifecycle import (
 )
 from .task_context import (
     MAX_CANDIDATE_SEARCH_TERMS,
+    MAX_CORRELATION_LINKS,
     MAX_TASK_CONTEXT_ASSETS,
     MAX_TASK_CONTEXT_CANDIDATES,
     TASK_CONTEXT_SCHEMA_VERSION,
@@ -127,7 +128,9 @@ def _server_instructions(
         "project and index state. Use ue_search to locate assets or symbols, ue_get_asset for one exact asset path, "
         "and ue_find_references for dependency and Blueprint reference edges. "
         "Use ue_get_task_context with the task query and explicit target asset paths to obtain bounded Index, "
-        "Revision, Memory, and Live Editor facts plus deterministic risks in one request. "
+        "Revision, Memory, and Live Editor facts plus deterministic risks in one request; its correlation "
+        "section deterministically joins Active Work, an explicitly requested Change Set, the Live Editor "
+        "session, and Memory Evidence without model inference or persistence. "
     )
     live_text = (
         "The ue_editor_*, ue_get_*, bounded Batch Task, and journaled Change Set live tools operate "
@@ -563,6 +566,22 @@ def _capabilities_response(
                 "symbolSupplement": True,
                 "modelInference": False,
             },
+            "crossSourceCorrelation": {
+                "available": True,
+                "deterministic": True,
+                "modelInference": False,
+                "readOnly": True,
+                "persistent": False,
+                "sources": [
+                    "project-memory-active-work",
+                    "change-set-journal",
+                    "live-editor-memory",
+                    "project-memory",
+                ],
+                "maxLinks": MAX_CORRELATION_LINKS,
+                "changeSetExplicitOnly": True,
+                "changeSetAutoDiscovery": False,
+            },
             "outputBudgetBounded": True,
             "evidenceOnDemand": True,
         },
@@ -759,6 +778,11 @@ def _project_status_response(
             "relevantAssets": {
                 "maxAssets": MAX_TASK_CONTEXT_CANDIDATES,
                 "deterministic": True,
+            },
+            "crossSourceCorrelation": {
+                "available": True,
+                "maxLinks": MAX_CORRELATION_LINKS,
+                "changeSetExplicitOnly": True,
             },
         },
     }

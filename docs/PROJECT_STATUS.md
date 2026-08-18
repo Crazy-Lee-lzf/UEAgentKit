@@ -60,7 +60,7 @@ Tool 数量只表示 MCP 接口数量，不等同于 Unreal Operation 数量。�
 
 ```text
 
-Python tests                 540/540
+Python tests                 557/557
 
 JSON Schemas                 3/3
 
@@ -390,7 +390,9 @@ R5  Value Provenance / Execution Trace（由 Benchmark 决定）
 
 R0.0（现状审计 + 复用矩阵 + 最小 Schema）与 R0.1（`ue_get_task_context` 第一条纵向切片）已完成并本地提交到 `feature/agent-reliability`：query + 显式 assetPaths → targetAssets → revisionState → 可选 Memory 摘要 / Live Editor 摘要 / Change Set → 确定性 risks → 有界输出；所有可选来源支持 section 级降级。复用矩阵与 Schema 见 [`Plans/AGENT_RELIABILITY_R0_AUDIT_AND_SCHEMA_20260815.md`](Plans/AGENT_RELIABILITY_R0_AUDIT_AND_SCHEMA_20260815.md)。
 
-R0-S（真实 Reforge Context Smoke）与 R0.2（Deterministic Relevant Asset Discovery）已完成并本地提交：真实 Reforge 索引（48 资产，logic profile）上 S1/S2/S3 三个 Case 记录见 [`Plans/AGENT_RELIABILITY_R0_REAL_CONTEXT_SMOKE_20260816.md`](Plans/AGENT_RELIABILITY_R0_REAL_CONTEXT_SMOKE_20260816.md)；`relevantAssets` 现为确定性候选集（query 分词 + Asset/Symbol Search 复用、与显式目标互斥、固定排序、Top N=8、可解释 whyIncluded/matchKind、无 score/confidence），预算不足时先裁候选 metadata 再减候选数量，绝不优先于 target identity / high risk / revision summary。R0.3（Active Work / Change Set 深度绑定）与 R1 尚未开始。
+R0-S（真实 Reforge Context Smoke）与 R0.2（Deterministic Relevant Asset Discovery）已完成并本地提交：真实 Reforge 索引（48 资产，logic profile）上 S1/S2/S3 三个 Case 记录见 [`Plans/AGENT_RELIABILITY_R0_REAL_CONTEXT_SMOKE_20260816.md`](Plans/AGENT_RELIABILITY_R0_REAL_CONTEXT_SMOKE_20260816.md)；`relevantAssets` 现为确定性候选集（query 分词 + Asset/Symbol Search 复用、与显式目标互斥、固定排序、Top N=8、可解释 whyIncluded/matchKind、无 score/confidence），预算不足时先裁候选 metadata 再减候选数量，绝不优先于 target identity / high risk / revision summary。
+
+R0.3（只读 Cross-source Correlation）已完成并本地提交，**R0 里程碑标记完成**：`ue_get_task_context` 新增 `correlation` section（schemaVersion 1.2），用精确键把 Active Work、显式 Change Set、Live Editor Session 与 Memory Evidence 关联起来（session id 相等性、资产路径集合交集、changeSetId 字面量、资产 scope Evidence），只读、非持久化、零模型推断；不新增 Memory/ChangeSet Schema、不扫描 workflow 私有 `_change_sets`、不自动发现 Change Set、不做 R1 引用遍历。链接固定排序上限 16 条，边界计数如实报告；新增确定性风险 `change-set-editor-session-mismatch`（medium）；预算阶梯先裁 correlation links/summary，绝不优先于 target identity / high risk / revision summary。交接见 [`Handoffs/AGENT_RELIABILITY_R0_SLICE3_HANDOFF_20260816.md`](Handoffs/AGENT_RELIABILITY_R0_SLICE3_HANDOFF_20260816.md)。R1（Impact Analysis）尚未开始，等待指令。
 
 R1/R2 随后分别解决「修改会影响什么」和「实际发生了什么变化」。R3 再把现有 Persistence / Compile / Reference / Semantic Evidence 组合成统一 Verification Plan 与 Trust Verdict；保存和独立重载成功只能证明 Persistence，不自动等同于整个任务成功。
 

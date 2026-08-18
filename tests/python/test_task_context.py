@@ -34,6 +34,7 @@ from ue_agent_kit.project_memory import (  # noqa: E402
     MemorySourceKind,
 )
 from ue_agent_kit.task_context import (  # noqa: E402
+    MAX_CORRELATION_LINKS,
     MAX_TASK_CONTEXT_ASSETS,
     MAX_TASK_CONTEXT_CANDIDATES,
     TaskContextService,
@@ -181,6 +182,52 @@ class TaskContextTests(unittest.TestCase):
         }
         defaults.update(kwargs)
         return TaskContextService(**defaults)
+
+    def make_change_set(
+        self,
+        *,
+        change_set_id: str,
+        editor_session_id: str = "",
+        affected_assets: tuple[str, ...] = (),
+        status: str = "planned",
+    ) -> dict[str, dict[str, Any]]:
+        return {
+            change_set_id: {
+                "ok": True,
+                "tool": "ue_get_change_set",
+                "changeSetId": change_set_id,
+                "taskId": "task-1",
+                "editorSessionId": editor_session_id,
+                "title": "Damage tuning",
+                "status": status,
+                "operations": [],
+                "affectedAssets": list(affected_assets),
+                "transactionIds": [],
+                "validation": {"state": "not-run"},
+                "saveState": {"state": "unsaved"},
+                "receiptCount": 0,
+            }
+        }
+
+    def add_asset_record(self, *, asset_path: str, body: str, title: str = "Evidence record") -> str:
+        record = self.memory_service.add_record(
+            MemoryRecordDraft(
+                project_key=PROJECT,
+                record_type="runtimeEvidence",
+                subject_key=f"evidence:{asset_path}",
+                title=title,
+                body=body,
+                source_kind=MemorySourceKind.TOOL_OBSERVED,
+                scopes=(MemoryScope("asset", asset_path),),
+            )
+        )
+        return record.record_id
+
+    @staticmethod
+    def correlation_links(context: dict[str, Any], kind: str) -> list[dict[str, Any]]:
+        section = context["correlation"]
+        links = section.get("links", [])
+        return [link for link in links if link.get("kind") == kind]
 
     def test_t1_single_explicit_asset_with_memory_and_live_disabled(self) -> None:
         service = self.make_service(memory_service=None)
@@ -564,6 +611,421 @@ class TaskContextTests(unittest.TestCase):
         ]
         self.assertEqual(reasons, ["symbol-search-failed"])
 
+    def test_r3_1_change_set_editor_session_match_is_linked(self) -> None:
+        known = self.make_change_set(change_set_id="cs_sess", editor_session_id="session-test")
+        service = self.make_service(
+            workflow_service=FakeChangeSetWorkflow(known=known),
+            live_editor_service=FakeLiveEditor(session_id="session-test"),
+        )
+        context = service.get_task_context(query="检查伤害", change_set_id="cs_sess")
+        section = context["correlation"]
+        self.assertTrue(section["available"])
+        self.assertEqual(section["method"], "deterministic-key-matching")
+        session_links = self.correlation_links(context, "change-set-editor-session")
+        self.assertEqual(len(session_links), 1)
+        link = session_links[0]
+        self.assertEqual(link["changeSetId"], "cs_sess")
+        self.assertEqual(link["sources"], ["change-set-journal", "live-editor-memory"])
+        self.assertTrue(link["details"]["matches"])
+        self.assertEqual(link["details"]["changeSetEditorSessionId"], "session-test")
+        self.assertEqual(link["details"]["liveEditorSessionId"], "session-test")
+        kinds = {risk["kind"] for risk in context["risks"]}
+        self.assertNotIn("change-set-editor-session-mismatch", kinds)
+
+    def test_r3_2_change_set_editor_session_mismatch_is_a_medium_risk(self) -> None:
+        known = self.make_change_set(change_set_id="cs_sess", editor_session_id="session-other")
+        service = self.make_service(
+            workflow_service=FakeChangeSetWorkflow(known=known),
+            live_editor_service=FakeLiveEditor(session_id="session-test"),
+        )
+        context = service.get_task_context(query="检查伤害", change_set_id="cs_sess")
+        session_links = self.correlation_links(context, "change-set-editor-session")
+        self.assertEqual(len(session_links), 1)
+        self.assertFalse(session_links[0]["details"]["matches"])
+        mismatch = next(
+            risk for risk in context["risks"] if risk["kind"] == "change-set-editor-session-mismatch"
+        )
+        self.assertEqual(mismatch["severity"], "medium")
+        self.assertEqual(mismatch["source"], "cross-source-correlation")
+        self.assertEqual(mismatch["details"]["changeSetEditorSessionId"], "session-other")
+        self.assertEqual(mismatch["details"]["liveEditorSessionId"], "session-test")
+
+    def test_r3_3_change_set_affected_assets_in_editor_are_linked(self) -> None:
+        known = self.make_change_set(change_set_id="cs_dirty", affected_assets=(ASSET_A,))
+        service = self.make_service(
+            workflow_service=FakeChangeSetWorkflow(known=known),
+            live_editor_service=FakeLiveEditor(dirty_packages=(PACKAGE_A,), open_assets=(ASSET_A,)),
+        )
+        context = service.get_task_context(query="检查伤害", change_set_id="cs_dirty")
+        links = self.correlation_links(context, "change-set-asset-in-editor")
+        observed = {(link["assetPath"], link["details"]["observedVia"]) for link in links}
+        self.assertIn((ASSET_A, "editor-dirty-packages"), observed)
+        self.assertIn((ASSET_A, "editor-open-assets"), observed)
+
+    def test_r3_4_change_set_affected_assets_correlate_with_memory_evidence(self) -> None:
+        record_id = self.add_asset_record(
+            asset_path=ASSET_A,
+            body="BP_TestActor damage rules were verified by automation.",
+        )
+        known = self.make_change_set(change_set_id="cs_evid", affected_assets=(ASSET_A,))
+        service = self.make_service(workflow_service=FakeChangeSetWorkflow(known=known))
+        context = service.get_task_context(query="检查伤害", change_set_id="cs_evid")
+        links = self.correlation_links(context, "change-set-asset-memory-evidence")
+        self.assertEqual(len(links), 1)
+        link = links[0]
+        self.assertEqual(link["assetPath"], ASSET_A)
+        self.assertEqual(link["changeSetId"], "cs_evid")
+        self.assertEqual(link["sources"], ["change-set-journal", "project-memory"])
+        self.assertEqual(link["details"]["recordId"], record_id)
+        self.assertEqual(link["details"]["recordType"], "runtimeEvidence")
+        self.assertIn("status", link["details"])
+
+    def test_r3_5_work_item_assets_overlapping_change_set_are_linked(self) -> None:
+        work = self.memory_service.create_work(
+            WorkItemDraft(
+                project_key=PROJECT,
+                title="Verify damage",
+                description="Verify combat damage.",
+                next_action="Run automation tests.",
+                asset_paths=(ASSET_A,),
+            )
+        )
+        known = self.make_change_set(change_set_id="cs_over", affected_assets=(ASSET_A,))
+        service = self.make_service(workflow_service=FakeChangeSetWorkflow(known=known))
+        context = service.get_task_context(
+            query="检查伤害",
+            change_set_id="cs_over",
+            work_item_id=work.work_item_id,
+        )
+        links = self.correlation_links(context, "work-change-set-asset-overlap")
+        self.assertEqual(len(links), 1)
+        link = links[0]
+        self.assertEqual(link["workItemId"], work.work_item_id)
+        self.assertEqual(link["changeSetId"], "cs_over")
+        self.assertEqual(link["assetPath"], ASSET_A)
+
+    def test_r3_6_work_item_referencing_change_set_literal_is_linked(self) -> None:
+        work = self.memory_service.create_work(
+            WorkItemDraft(
+                project_key=PROJECT,
+                title="Resume cs_ref",
+                description="Continue after change set cs_ref is saved.",
+                next_action="Verify.",
+                asset_paths=(ASSET_A,),
+            )
+        )
+        known = self.make_change_set(change_set_id="cs_ref", affected_assets=(ASSET_A,))
+        service = self.make_service(workflow_service=FakeChangeSetWorkflow(known=known))
+        context = service.get_task_context(
+            query="检查伤害",
+            change_set_id="cs_ref",
+            work_item_id=work.work_item_id,
+        )
+        links = self.correlation_links(context, "work-references-change-set")
+        self.assertEqual(len(links), 1)
+        link = links[0]
+        self.assertEqual(link["workItemId"], work.work_item_id)
+        self.assertEqual(link["changeSetId"], "cs_ref")
+        self.assertEqual(link["details"]["matchedIn"], ["title", "description"])
+
+    def test_r3_7_work_item_assets_in_editor_are_linked(self) -> None:
+        work = self.memory_service.create_work(
+            WorkItemDraft(
+                project_key=PROJECT,
+                title="Verify damage",
+                description="Verify combat damage.",
+                next_action="Run automation tests.",
+                asset_paths=(ASSET_A,),
+            )
+        )
+        service = self.make_service(live_editor_service=FakeLiveEditor(dirty_packages=(PACKAGE_A,)))
+        context = service.get_task_context(query="检查伤害", work_item_id=work.work_item_id)
+        links = self.correlation_links(context, "work-asset-in-editor")
+        self.assertEqual(len(links), 1)
+        link = links[0]
+        self.assertEqual(link["workItemId"], work.work_item_id)
+        self.assertEqual(link["assetPath"], ASSET_A)
+        self.assertEqual(link["details"]["observedVia"], "editor-dirty-packages")
+
+    def test_r3_8_work_item_assets_correlate_with_memory_evidence(self) -> None:
+        work = self.memory_service.create_work(
+            WorkItemDraft(
+                project_key=PROJECT,
+                title="Verify second actor",
+                description="Verify BP_SecondActor.",
+                next_action="Run automation tests.",
+                asset_paths=(ASSET_B,),
+            )
+        )
+        record_id = self.add_asset_record(
+            asset_path=ASSET_B,
+            body="BP_SecondActor was verified by the latest automation run.",
+        )
+        service = self.make_service()
+        context = service.get_task_context(query="检查伤害", work_item_id=work.work_item_id)
+        links = self.correlation_links(context, "work-asset-memory-evidence")
+        self.assertEqual(len(links), 1)
+        self.assertEqual(links[0]["workItemId"], work.work_item_id)
+        self.assertEqual(links[0]["assetPath"], ASSET_B)
+        self.assertEqual(links[0]["details"]["recordId"], record_id)
+
+    def test_r3_9_without_change_set_id_no_change_set_links_are_produced(self) -> None:
+        self.add_asset_record(
+            asset_path=ASSET_A,
+            body="BP_TestActor damage rules were verified.",
+        )
+        service = self.make_service(
+            workflow_service=FakeChangeSetWorkflow(
+                known=self.make_change_set(change_set_id="cs_idle", affected_assets=(ASSET_A,))
+            ),
+            live_editor_service=FakeLiveEditor(dirty_packages=(PACKAGE_A,)),
+        )
+        context = service.get_task_context(query="检查伤害")
+        kinds = {link["kind"] for link in context["correlation"].get("links", [])}
+        self.assertFalse(any(kind.startswith("change-set-") for kind in kinds))
+        self.assertFalse(any(kind.startswith("work-change-set") for kind in kinds))
+
+        bare = self.make_service(memory_service=None, freshness_tracker=None)
+        bare_context = bare.get_task_context(query="检查伤害")
+        self.assertFalse(bare_context["correlation"]["available"])
+        self.assertEqual(
+            bare_context["correlation"]["reason"],
+            "insufficient-correlatable-sources",
+        )
+
+    def test_r3_10_degraded_sources_produce_no_fake_correlation(self) -> None:
+        known = self.make_change_set(change_set_id="cs_gone", affected_assets=(ASSET_A,))
+        service = self.make_service(
+            workflow_service=FakeChangeSetWorkflow(known=known),
+            live_editor_service=FakeLiveEditor(dirty_packages=(PACKAGE_A,)),
+        )
+        missing = service.get_task_context(query="检查伤害", change_set_id="cs_missing")
+        self.assertFalse(missing["changeSet"]["found"])
+        link_kinds = [link["kind"] for link in missing["correlation"].get("links", [])]
+        self.assertFalse(any(kind.startswith("change-set-") for kind in link_kinds))
+
+        no_memory = service.get_task_context(
+            query="检查伤害",
+            change_set_id="cs_gone",
+            include_memory=False,
+        )
+        link_kinds = [link["kind"] for link in no_memory["correlation"].get("links", [])]
+        self.assertFalse(any("memory-evidence" in kind for kind in link_kinds))
+
+        no_live = service.get_task_context(
+            query="检查伤害",
+            change_set_id="cs_gone",
+            include_live_context=False,
+        )
+        link_kinds = [link["kind"] for link in no_live["correlation"].get("links", [])]
+        self.assertFalse(any("in-editor" in kind or kind == "change-set-editor-session" for kind in link_kinds))
+
+    def test_r3_11_correlation_is_deterministic_for_identical_inputs(self) -> None:
+        work = self.memory_service.create_work(
+            WorkItemDraft(
+                project_key=PROJECT,
+                title="Verify damage cs_det",
+                description="Verify combat damage after cs_det.",
+                next_action="Run automation tests.",
+                asset_paths=(ASSET_A,),
+            )
+        )
+        self.add_asset_record(
+            asset_path=ASSET_A,
+            body="BP_TestActor damage rules were verified.",
+        )
+        known = self.make_change_set(
+            change_set_id="cs_det",
+            editor_session_id="session-other",
+            affected_assets=(ASSET_A,),
+        )
+        service = self.make_service(
+            workflow_service=FakeChangeSetWorkflow(known=known),
+            live_editor_service=FakeLiveEditor(dirty_packages=(PACKAGE_A,)),
+        )
+        first = service.get_task_context(query="检查伤害", change_set_id="cs_det", work_item_id=work.work_item_id)
+        second = service.get_task_context(query="检查伤害", change_set_id="cs_det", work_item_id=work.work_item_id)
+        self.assertEqual(first["correlation"], second["correlation"])
+
+    def test_r3_12_correlation_is_bounded_and_reports_honest_counts(self) -> None:
+        affected = tuple(f"/Game/Many/BP_M_{index:02d}.BP_M_{index:02d}" for index in range(12))
+        known = self.make_change_set(change_set_id="cs_bound", affected_assets=affected)
+        for index in range(10):
+            self.memory_service.create_work(
+                WorkItemDraft(
+                    project_key=PROJECT,
+                    title=f"damage audit item {index}",
+                    description="Audit vehicle damage rules.",
+                    next_action="Review evidence.",
+                    asset_paths=(affected[index],),
+                )
+            )
+        service = self.make_service(
+            workflow_service=FakeChangeSetWorkflow(known=known),
+            live_editor_service=FakeLiveEditor(
+                dirty_packages=tuple(path.rsplit(".", 1)[0] for path in affected)
+            ),
+        )
+        context = service.get_task_context(query="damage audit", change_set_id="cs_bound")
+        section = context["correlation"]
+        self.assertTrue(section["available"])
+        summary = section["summary"]
+        self.assertEqual(summary["workItemsTotal"], 10)
+        self.assertEqual(summary["workItemsConsidered"], 5)
+        self.assertEqual(summary["changeSetAffectedAssetsTotal"], 12)
+        self.assertEqual(summary["changeSetAffectedAssetsSampled"], 8)
+        self.assertTrue(summary["changeSetAffectedAssetsTruncated"])
+        self.assertEqual(summary["evidenceLookups"], 12)
+        self.assertTrue(summary["evidenceLookupsTruncated"])
+        self.assertTrue(summary["linksTruncated"])
+        self.assertEqual(len(section["links"]), MAX_CORRELATION_LINKS)
+        self.assertEqual(summary["linkCount"], MAX_CORRELATION_LINKS)
+        repeated = service.get_task_context(query="damage audit", change_set_id="cs_bound")
+        self.assertEqual(section["links"], repeated["correlation"]["links"])
+
+    def test_r3_13_correlation_is_non_persistent(self) -> None:
+        self.add_asset_record(
+            asset_path=ASSET_A,
+            body="BP_TestActor damage rules were verified.",
+        )
+        work = self.memory_service.create_work(
+            WorkItemDraft(
+                project_key=PROJECT,
+                title="Verify damage",
+                description="Verify combat damage.",
+                next_action="Run automation tests.",
+                asset_paths=(ASSET_A,),
+            )
+        )
+        known = self.make_change_set(change_set_id="cs_nop", affected_assets=(ASSET_A,))
+        service = self.make_service(
+            workflow_service=FakeChangeSetWorkflow(known=known),
+            live_editor_service=FakeLiveEditor(dirty_packages=(PACKAGE_A,)),
+        )
+        before = self.memory_service.status()
+        service.get_task_context(
+            query="检查伤害",
+            change_set_id="cs_nop",
+            work_item_id=work.work_item_id,
+        )
+        after = self.memory_service.status()
+        self.assertEqual(before.record_count, after.record_count)
+        self.assertEqual(before.active_work_count, after.active_work_count)
+        self.assertEqual(before.counts_by_status, after.counts_by_status)
+
+    def test_r3_14_low_budget_trims_correlation_before_target_metadata(self) -> None:
+        work = self.memory_service.create_work(
+            WorkItemDraft(
+                project_key=PROJECT,
+                title="Verify damage cs_trim",
+                description="Verify combat damage after cs_trim.",
+                next_action="Run automation tests.",
+                asset_paths=(ASSET_A,),
+            )
+        )
+        for index in range(4):
+            self.add_asset_record(
+                asset_path=ASSET_A,
+                title=f"Damage evidence {index}",
+                body="BP_TestActor base damage is " + "10" * (index + 2) + " and validated by automation.",
+            )
+        known = self.make_change_set(
+            change_set_id="cs_trim",
+            editor_session_id="session-test",
+            affected_assets=(ASSET_A,),
+        )
+        service = self.make_service(
+            workflow_service=FakeChangeSetWorkflow(known=known),
+            live_editor_service=FakeLiveEditor(dirty_packages=(PACKAGE_A,)),
+        )
+        full = service.get_task_context(
+            query="检查伤害",
+            asset_paths=[ASSET_A],
+            change_set_id="cs_trim",
+            work_item_id=work.work_item_id,
+        )
+        self.assertGreater(len(full["correlation"]["links"]), 0)
+        tight = service.get_task_context(
+            query="检查伤害",
+            asset_paths=[ASSET_A],
+            change_set_id="cs_trim",
+            work_item_id=work.work_item_id,
+            max_output_tokens=600,
+        )
+        budget = tight["outputBudget"]
+        self.assertTrue(budget["truncated"])
+        reasons = budget["truncationReason"].split(",")
+        self.assertTrue(any(reason.startswith("correlation-") for reason in reasons))
+        full_kinds = {link["kind"] for link in full["correlation"]["links"]}
+        tight_kinds = {link["kind"] for link in tight["correlation"].get("links", [])}
+        self.assertTrue(tight_kinds <= full_kinds)
+        self.assertTrue(tight["targetAssets"][0]["found"])
+        self.assertIn("identity", tight["targetAssets"][0])
+        self.assertIn("riskSummary", tight)
+
+    def test_r3_15_requested_work_item_duplicated_in_items_is_considered_once(self) -> None:
+        work = self.memory_service.create_work(
+            WorkItemDraft(
+                project_key=PROJECT,
+                title="Verify damage",
+                description="Verify combat damage.",
+                next_action="Run automation tests.",
+                asset_paths=(ASSET_A,),
+            )
+        )
+        known = self.make_change_set(change_set_id="cs_dup", affected_assets=(ASSET_A,))
+        service = self.make_service(
+            workflow_service=FakeChangeSetWorkflow(known=known),
+            live_editor_service=FakeLiveEditor(dirty_packages=(PACKAGE_A,)),
+        )
+        context = service.get_task_context(
+            query="damage verify",
+            change_set_id="cs_dup",
+            work_item_id=work.work_item_id,
+        )
+        summary = context["correlation"]["summary"]
+        self.assertEqual(summary["workItemsTotal"], 1)
+        self.assertEqual(summary["workItemsConsidered"], 1)
+        overlap = self.correlation_links(context, "work-change-set-asset-overlap")
+        self.assertEqual(len(overlap), 1)
+        self.assertEqual(overlap[0]["workItemId"], work.work_item_id)
+
+    def test_r3_16_work_item_asset_paths_are_bounded_for_correlation(self) -> None:
+        synthetic = tuple(f"/Game/Work/W_{index}.W_{index}" for index in range(1, 6))
+        work = self.memory_service.create_work(
+            WorkItemDraft(
+                project_key=PROJECT,
+                title="Verify damage",
+                description="Verify combat damage.",
+                next_action="Run automation tests.",
+                asset_paths=(ASSET_A, *synthetic),
+            )
+        )
+        service = self.make_service(
+            live_editor_service=FakeLiveEditor(
+                dirty_packages=(PACKAGE_A, *tuple(path.rsplit(".", 1)[0] for path in synthetic)),
+            )
+        )
+        context = service.get_task_context(query="damage verify", work_item_id=work.work_item_id)
+        links = self.correlation_links(context, "work-asset-in-editor")
+        linked = {link["assetPath"] for link in links}
+        self.assertEqual(len(links), 4)
+        self.assertIn(ASSET_A, linked)
+        self.assertNotIn(synthetic[4], linked)
+
+    def test_r3_17_change_set_without_editor_session_produces_no_session_link(self) -> None:
+        known = self.make_change_set(change_set_id="cs_nosess", affected_assets=(ASSET_A,))
+        service = self.make_service(
+            workflow_service=FakeChangeSetWorkflow(known=known),
+            live_editor_service=FakeLiveEditor(session_id="session-test"),
+        )
+        context = service.get_task_context(query="检查伤害", change_set_id="cs_nosess")
+        self.assertTrue(context["correlation"]["available"])
+        session_links = self.correlation_links(context, "change-set-editor-session")
+        self.assertEqual(session_links, [])
+        kinds = {risk["kind"] for risk in context["risks"]}
+        self.assertNotIn("change-set-editor-session-mismatch", kinds)
+
     def test_request_validation_rejects_invalid_arguments(self) -> None:
         service = self.make_service()
         with self.assertRaisesRegex(ValueError, "query is required"):
@@ -654,6 +1116,24 @@ class TaskContextMcpTests(unittest.TestCase):
         self.assertEqual(contract["relevantAssets"]["maxAssets"], MAX_TASK_CONTEXT_CANDIDATES)
         self.assertTrue(contract["relevantAssets"]["deterministic"])
         self.assertFalse(contract["relevantAssets"]["modelInference"])
+        correlation_contract = contract["crossSourceCorrelation"]
+        self.assertTrue(correlation_contract["available"])
+        self.assertTrue(correlation_contract["deterministic"])
+        self.assertFalse(correlation_contract["modelInference"])
+        self.assertTrue(correlation_contract["readOnly"])
+        self.assertFalse(correlation_contract["persistent"])
+        self.assertEqual(correlation_contract["maxLinks"], MAX_CORRELATION_LINKS)
+        self.assertTrue(correlation_contract["changeSetExplicitOnly"])
+        self.assertFalse(correlation_contract["changeSetAutoDiscovery"])
+        self.assertEqual(
+            set(correlation_contract["sources"]),
+            {
+                "project-memory-active-work",
+                "change-set-journal",
+                "live-editor-memory",
+                "project-memory",
+            },
+        )
         self.assertEqual(contract["sourceAvailability"]["memory"], True)
         self.assertEqual(contract["sourceAvailability"]["liveEditor"], True)
         self.assertEqual(capabilities["limits"]["taskContextMaxAssets"], MAX_TASK_CONTEXT_ASSETS)
@@ -672,6 +1152,8 @@ class TaskContextMcpTests(unittest.TestCase):
         self.assertTrue(payload["memory"]["included"])
         self.assertFalse(payload["revisionState"]["available"])
         self.assertEqual(payload["revisionState"]["reason"], "revision-export-not-configured")
+        self.assertIn("correlation", payload)
+        self.assertEqual(payload["correlation"]["method"], "deterministic-key-matching")
 
         with self.assertRaisesRegex(Exception, "Extra inputs are not permitted"):
             asyncio.run(
@@ -695,6 +1177,11 @@ class TaskContextMcpTests(unittest.TestCase):
         self.assertEqual(payload["changeSet"]["summary"]["status"], "planned")
         self.assertFalse(payload["memory"]["available"])
         self.assertFalse(payload["liveEditor"]["available"])
+        self.assertFalse(payload["correlation"]["available"])
+        self.assertEqual(
+            payload["correlation"]["reason"],
+            "insufficient-correlatable-sources",
+        )
 
 
 if __name__ == "__main__":

@@ -1,9 +1,9 @@
 # UEAgentKit R0.0 现状审计、复用矩阵与最小 Schema
 
-> 日期：2026-08-15
+> 日期：2026-08-15（R0.3 更新：2026-08-16）
 > 分支：`feature/agent-reliability`（从本地 `main@cc1f0c9` 创建）
-> 阶段：R0 Task Context / Context Pack MVP 的第一条纵向切片（R0.0 + R0.1）
-> 状态：R0.0 审计完成；R0.1 `ue_get_task_context` 已实现并通过门禁（见对应 Commit）
+> 阶段：R0 Task Context / Context Pack MVP 的第一条纵向切片（R0.0 + R0.1），R0-S/R0.2/R0.3 依次完成
+> 状态：R0.0 审计完成；R0.1 `ue_get_task_context` 已实现并通过门禁（见对应 Commit）；R0-S/R0.2（真实 Smoke + 确定性候选发现）与 R0.3（只读 Cross-source Correlation）已本地提交，R0 里程碑完成，R1 等待指令
 
 ---
 
@@ -103,6 +103,18 @@ TaskContext
 ├─ revisionState     available/source=sqlite-revision-export-disk-sha256、overall、
 │                    assets{path: state/reason/indexRevision/revisionExportRevision/diskRevision/comparisons/comparedAtUtc}
 ├─ changeSet         requested/available/found/changeSetId/summary（journal 状态机原样）
+├─ correlation       R0.3 起为只读、每请求现算、零持久化、零模型推断的 Cross-source Correlation：
+│                    available/method=deterministic-key-matching/summary/links[]（无来源可关联时
+│                    available=false + reason=insufficient-correlatable-sources）。仅精确键联接：
+│                    Change Set editorSessionId ↔ Live Editor sessionId（matches + 不等时
+│                    change-set-editor-session-mismatch medium 风险）、affectedAssets/work assetPaths ↔
+│                    Editor dirty/open、work assetPaths ↔ affectedAssets、work 文本字段含 changeSetId
+│                    字面量、资产 scope 的 Memory Evidence（复用 scoped search_records，全部状态，
+│                    每条 recordId/status/recordType/title）。Change Set 仅显式传入且 found 时参与，
+│                    绝不自动发现、不扫描 workflow 私有 _change_sets；include_* 关闭或来源降级时对应
+│                    联接缺席，不伪造。links 固定排序、上限 16；summary 如实报告
+│                    workItemsConsidered/Total、affectedAssetsSampled/Total、evidenceLookups、
+│                    linksTruncated 等边界计数
 ├─ risks[]           仅确定性事实，每项 kind/severity/source/assetPath?/details
 ├─ riskSummary       count/highCount/mediumCount/infoCount
 ├─ nextExpansions[]  tool/reason/arguments，引导 ue_get_asset / ue_find_references / ue_memory_get_evidence /
@@ -130,6 +142,8 @@ live-editor-unavailable (info)       Bridge 不可达（其余 section 正常返
 memory-context-failed (info)         Memory 上下文构建失败（其余 section 正常返回）
 revision-state-unavailable (info)    未配置 Revision Export（Offline/Live 模式常态）
 relevant-assets-search-failed (info) 候选搜索子源全部失败（relevantAssets=[]，无伪造候选）
+change-set-editor-session-mismatch (medium) R0.3 起：Change Set 绑定的 editorSessionId 与当前
+                                  Live Editor sessionId 不一致（cross-source-correlation 观察事实）
 ```
 
 ## 7. 预算裁剪阶梯（固定优先级，晚者先裁）
@@ -142,24 +156,27 @@ relevant-assets-search-failed (info) 候选搜索子源全部失败（relevantAs
 5. activeWork.items → 逐条移除
 6. relevantAssets[].matchedTerms/matchCount/matchedSymbol → 移除（先裁候选 metadata）
 7. relevantAssets → 逐条移除（再减候选数量）
-8. targetAssets[].metadata → 移除
-9. targetAssets[].summary → 移除
-10. revisionState.assets[].comparisons → 移除
-11. project.stats → 移除
-12. nextExpansions → 逐条移除
-13. risks[].details → 清空
-14. revisionState.assets[] 修订字段 → 只保留 state/reason
-15. targetAssets[].identity → 只保留 asset_path/asset_class
-16. degradedSources → 清空
-17. request 冗余字段 → 移除
-18. project.sources / project.index.snapshotId / memory 摘要冗余字段 → 移除
+8. correlation.links → 逐条移除（R0.3 起；先裁关联明细）
+9. correlation → 折叠为 {available, method, omittedDueToBudget}（再裁关联摘要）
+10. targetAssets[].metadata → 移除
+11. targetAssets[].summary → 移除
+12. revisionState.assets[].comparisons → 移除
+13. project.stats → 移除
+14. nextExpansions → 逐条移除
+15. risks[].details → 清空
+16. revisionState.assets[] 修订字段 → 只保留 state/reason
+17. targetAssets[].identity → 只保留 asset_path/asset_class
+18. degradedSources → 清空
+19. request 冗余字段 → 移除
+20. project.sources / project.index.snapshotId / memory 摘要冗余字段 → 移除
 ```
 
 裁剪到最小封套仍超预算时，诚实报告 `truncationReason=minimal-envelope-exceeds-token-budget` 并保留核心身份事实，不伪造“已满足预算”。
 
-## 8. 已知边界（R0.2 记录，不本轮修复）
+## 8. 已知边界（R0.3 更新，不本轮修复）
 
-1. Memory FTS 为 `unicode61`，纯中文短语查询命中不可靠（实测英文/ASCII token 正常）。stale 检测因此在无 ASCII token 时可能漏报；检测不到只代表“本次检索未命中”，不代表“不存在 stale 记录”。修复方向属于 Memory 层，按禁止范围不在 R0 展开。
+1. Memory FTS 为 `unicode61`，纯中文短语查询命中不可靠（实测英文/ASCII token 正常）。stale 检测与 R0.3 Evidence 关联检索因此在无 ASCII token 时可能漏报；检测不到只代表“本次检索未命中”，不代表“不存在 stale 记录 / 不存在证据”。修复方向属于 Memory 层，按禁止范围不在 R0 展开。
 2. `revisionState` 依赖 Workflow 模式的 Revision Export 配置；Offline/Live 模式降级为 unavailable 并如实报告。
-3. `workItemId` 与 Change Set 的深度绑定（自动完成→证据回流）属 R0.3，不在 R0.2。
+3. R0.3 已把 Active Work 与 Change Set 绑定为**只读**的 Cross-source Correlation（精确键联接 + 零持久化）。交接 §4.4 曾预期的「自动完成 → 证据回流」（工作项完成时自动回流证据）属写路径，仍不在 R0：correlation 不写回 Memory/Change Set，工作项完成/证据回流由既有 Memory 写 Tool 显式完成。
 4. R0.2 `relevantAssets` 只做分词检索召回，不做引用图遍历（多跳属 R1）；候选来自当前索引子树；符号补充在真实 Smoke 上未带来新资产（只提供符号级证据）；不产出 score/confidence。
+5. R0.3 `correlation` 的 Evidence 关联复用 scoped `search_records`（资产名 token FTS + asset scope 过滤），只覆盖记录正文含资产名 token 的记录；Change Set 只在显式传入且 `found` 时参与，不扫描 workflow 私有 `_change_sets`、不自动发现 Change Set；链接上限 16 条、受影响资产采样 8、工作项 5、每次请求证据检索 ≤12 次，超出部分在 summary 中如实计数，不做 Impact Analysis 式遍历。

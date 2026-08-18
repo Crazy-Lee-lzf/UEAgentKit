@@ -2,7 +2,7 @@
 
 > 更新时间：2026-08-16
 > 当前基线：`main@22632c7`（本地最新 `main` 为 `cc1f0c9`）
-> 当前状态：R0.0（现状审计 + 复用矩阵 + 最小 Schema）、R0.1（`ue_get_task_context` 第一条纵向切片）、R0-S（真实 Reforge Context Smoke）与 R0.2（Deterministic Relevant Asset Discovery）已完成并本地提交到 `feature/agent-reliability`。R0.3 与 R1–R5 未开始。
+> 当前状态：R0 里程碑已全部完成并本地提交到 `feature/agent-reliability`（R0.0/R0.1 现状审计 + 最小切片、R0-S 真实 Reforge Context Smoke、R0.2 Deterministic Relevant Asset Discovery、R0.3 只读 Cross-source Correlation）。R1–R5 未开始，等待明确指令。
 > 建议开发分支：`feature/agent-reliability`（已创建，勿 Push）
 > 横向长期分支：`feature/performance-benchmarks`
 > 执行方式：分里程碑推进，不要求一次完成；每个里程碑必须可独立测试、提交和交接。
@@ -609,7 +609,7 @@ G9  本地 Commit
 8. 独立本地 Commit（不 Push）。
 ```
 
-R0.0/R0.1 完成后按交接执行 R0-S（真实 Reforge Context Smoke）+ R0.2（Deterministic Relevant Asset Discovery），2026-08-16 完成并本地提交；R0.3（Active Work / Change Set 深度绑定）与 R1 仍未开始，需新的显式指令。
+R0.0/R0.1 完成后按交接执行 R0-S（真实 Reforge Context Smoke）+ R0.2（Deterministic Relevant Asset Discovery），2026-08-16 完成并本地提交；随后按新指令完成 R0.3（只读 Cross-source Correlation），R0 里程碑至此完成，R1 等待新的显式指令。
 
 R0-S + R0.2 概览：
 
@@ -632,6 +632,35 @@ R0-S + R0.2 概览：
    8 条确定性候选，S3 先裁候选再裁 target metadata，身份/风险/修订核心保留）。
 8. 文档同步：ROADMAP.md、PROJECT_STATUS.md、spec/MCP_SERVER.md、本计划。
 9. 独立本地 Commit（不 Push）。
+```
+
+R0.3（Cross-source Correlation，2026-08-16 完成并本地提交）概览：
+
+```text
+1. task_context.py 新增 correlation section（schemaVersion 1.1→1.2）：只读、每请求现算、
+   零持久化、零模型推断的 Cross-source Correlation，把 Active Work、显式 Change Set、
+   Live Editor Session、Memory Evidence 用精确键联接（editorSessionId ↔ sessionId、
+   affectedAssets/work assetPaths ↔ Editor dirty/open、work assetPaths ↔ affectedAssets、
+   work 文本字段含 changeSetId 字面量、资产 scope Evidence 复用 scoped search_records）。
+2. 硬约束落实：不新增 Memory/ChangeSet Schema；只调用 workflow_service.get_change_set()，
+   不扫描私有 _change_sets；Change Set 仅显式 change_set_id 且 found 时参与，绝不自动发现；
+   不写回 Memory/journal；无 R1 Reference/Impact Analysis。
+3. 7 种固定 link kind、固定排序、上限 16 条；受影响资产采样 8、工作项 5、证据检索 ≤12 次，
+   summary 如实报告边界计数；无来源可关联时 available=false + reason。
+4. 新确定性风险 change-set-editor-session-mismatch（medium，cross-source-correlation 观察事实）。
+5. 预算阶梯插入 correlation-links → correlation-summary（先裁关联明细再裁关联摘要），位于
+   relevant-assets-count 之后、target metadata 之前；候选/关联永不优先于 target identity、
+   high risk、revision summary。
+6. 契约：capabilities.taskContext.crossSourceCorrelation（available/deterministic/
+   modelInference=false/readOnly/persistent=false/sources/maxLinks=16/changeSetExplicitOnly=
+   true/changeSetAutoDiscovery=false）；_project_status_response 同步。
+7. 测试：test_task_context.py 新增 R3.1–R3.17（会话匹配/失配、资产交集、Evidence 关联、
+   work↔cs 两种链接、无 changeSetId 不产生 cs 链接、降级不伪造、确定性、边界诚实计数、
+   非持久化回归、低预算先裁 correlation、requested∩items 去重、work 资产数有界、
+   cs 无 editorSessionId 不产生 session 链接）+ MCP capability 契约断言。
+8. 门禁：Ruff 通过；Python 全量 557/557（原 540，+17）；git diff --check 通过；无 C++ 变更。
+9. 文档同步：ROADMAP.md、PROJECT_STATUS.md、spec/MCP_SERVER.md、审计 Schema 文档、本计划、
+   新 Slice 3 Handoff。R0 里程碑标记完成，等待 R1 指令。
 ```
 
 ---
