@@ -40,6 +40,16 @@ from .editor_bridge import (
     LiveEditorBridgeService,
     LiveEditorError,
 )
+from .impact_analysis import (
+    MAX_IMPACT_CONSUMERS,
+    MAX_IMPACT_DEPTH,
+    MAX_IMPACT_EDGES,
+    MAX_IMPACT_PATHS,
+    MAX_IMPACT_TARGETS,
+    ImpactAnalysisError,
+    SUPPORTED_SUBJECT_KINDS,
+    UNSUPPORTED_SUBJECT_KINDS,
+)
 from .mcp_live_action_tools import register_live_action_tools
 from .mcp_live_tools import register_live_read_tools
 from .mcp_memory_tools import register_memory_tools
@@ -98,6 +108,7 @@ STRICT_MEMORY_ARGUMENT_TOOL_NAMES = (
     "ue_memory_update_work",
 )
 STRICT_TASK_CONTEXT_ARGUMENT_TOOL_NAMES = ("ue_get_task_context",)
+STRICT_IMPACT_ARGUMENT_TOOL_NAMES = ("ue_analyze_change_impact",)
 
 
 def _enforce_strict_tool_arguments(server: Any, tool_names: Sequence[str]) -> None:
@@ -131,6 +142,9 @@ def _server_instructions(
         "Revision, Memory, and Live Editor facts plus deterministic risks in one request; its correlation "
         "section deterministically joins Active Work, an explicitly requested Change Set, the Live Editor "
         "session, and Memory Evidence without model inference or persistence. "
+        "Use ue_analyze_change_impact with exact /Game target paths for a deterministic bounded "
+        "reverse-reference impact analysis (direct and indirect consumers, validation targets, and "
+        "deterministic risks); static references never prove runtime breakage. "
     )
     live_text = (
         "The ue_editor_*, ue_get_*, bounded Batch Task, and journaled Change Set live tools operate "
@@ -585,6 +599,29 @@ def _capabilities_response(
             "outputBudgetBounded": True,
             "evidenceOnDemand": True,
         },
+        "impactAnalysis": {
+            "available": True,
+            "tool": "ue_analyze_change_impact",
+            "readOnly": True,
+            "deterministic": True,
+            "modelInference": False,
+            "direction": "consumer-to-target",
+            "method": "reverse-reference-bfs-exact-key",
+            "source": "immutable-sqlite-index",
+            "maxTargets": MAX_IMPACT_TARGETS,
+            "maxDepth": MAX_IMPACT_DEPTH,
+            "defaultDepth": 2,
+            "supportsIndirect": True,
+            "supportsValidationTargets": True,
+            "supportsRuntimeSensitivityClassification": False,
+            "runtimeSensitivityState": "not-proven-with-current-evidence",
+            "maxConsumers": MAX_IMPACT_CONSUMERS,
+            "maxEdges": MAX_IMPACT_EDGES,
+            "maxPaths": MAX_IMPACT_PATHS,
+            "subjectKinds": list(SUPPORTED_SUBJECT_KINDS),
+            "unsupportedSubjectKinds": list(UNSUPPORTED_SUBJECT_KINDS),
+            "highFanoutThreshold": 15,
+        },
         "limits": {
             "searchResults": MAX_MCP_SEARCH_LIMIT,
             "assetSymbols": MAX_MCP_SYMBOL_LIMIT,
@@ -619,6 +656,11 @@ def _capabilities_response(
             "liveChangeSetMaxReceipts": 100,
             "memorySearchResults": 100,
             "taskContextMaxAssets": MAX_TASK_CONTEXT_ASSETS,
+            "impactTargets": MAX_IMPACT_TARGETS,
+            "impactDepth": MAX_IMPACT_DEPTH,
+            "impactConsumers": MAX_IMPACT_CONSUMERS,
+            "impactEdges": MAX_IMPACT_EDGES,
+            "impactPaths": MAX_IMPACT_PATHS,
         },
         "responseContract": {
             "schemaVersion": "1.0",
@@ -785,6 +827,24 @@ def _project_status_response(
                 "changeSetExplicitOnly": True,
             },
         },
+        "impactAnalysis": {
+            "available": True,
+            "tool": "ue_analyze_change_impact",
+            "readOnly": True,
+            "deterministic": True,
+            "modelInference": False,
+            "method": "reverse-reference-bfs-exact-key",
+            "maxTargets": MAX_IMPACT_TARGETS,
+            "maxDepth": MAX_IMPACT_DEPTH,
+            "defaultDepth": 2,
+            "maxConsumers": MAX_IMPACT_CONSUMERS,
+            "maxEdges": MAX_IMPACT_EDGES,
+            "maxPaths": MAX_IMPACT_PATHS,
+            "supportsIndirect": True,
+            "supportsValidationTargets": True,
+            "supportsRuntimeSensitivityClassification": False,
+            "runtimeSensitivityState": "not-proven-with-current-evidence",
+        },
     }
 
 
@@ -852,6 +912,9 @@ def _suggested_action(code: str) -> str:
         "snapshot-refresh-revision-mismatch": "Save or revert the asset, then retry after its disk Package Revision is stable.",
         "snapshot-refresh-disk-space": "Free disk space under the fixed workflow root before retrying snapshot refresh.",
         "live-editor-asset-dirty": "Save or revert the target asset in Unreal Editor before refreshing its disk-backed index record.",
+        "unsupported-impact-subject": "Use subject_kind asset-level or blueprint-symbol, or repeat the analysis without a structured subject.",
+        "impact-subject-not-found": "Pass the exact symbol stable ID as reported by ue_search or ue_get_asset symbols.",
+        "impact-subject-asset-mismatch": "Use the exact /Game asset path that owns the blueprint-symbol subject.",
     }
     if code in exact:
         return exact[code]
@@ -889,6 +952,8 @@ def _error_response(tool: str, error: Exception, *, read_only: bool) -> dict[str
         code = "index-not-quiescent"
     elif isinstance(error, ContinuationTokenError):
         code = "invalid-continuation-token"
+    elif isinstance(error, ImpactAnalysisError):
+        code = error.code
     elif isinstance(error, ValueError):
         code = "invalid-arguments"
     elif isinstance(error, sqlite3.Error):
@@ -999,6 +1064,7 @@ def create_mcp_server(
             memory_service,
         ),
     )
+    _enforce_strict_tool_arguments(server, STRICT_IMPACT_ARGUMENT_TOOL_NAMES)
     register_task_context_tools(
         server=server,
         task_context_service=TaskContextService(

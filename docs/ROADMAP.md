@@ -103,7 +103,7 @@ R4  Real Agent Benchmark v1
 R5  Value Provenance / Execution Trace（由 Benchmark 决定优先级）
 ```
 
-### R0 状态（已完成）/ R1 状态（2026-08-18：完整里程碑任务已启动）
+### R0 状态（已完成）/ R1 状态（已完成，2026-08-18）
 
 R0.0（现状审计 + 复用矩阵 + 最小 Schema）、R0.1（`ue_get_task_context` 第一条纵向切片）、R0-S（真实 Reforge Context Smoke）、R0.2（Deterministic Relevant Asset Discovery）与 R0.3（只读 Cross-source Correlation）已在 `feature/agent-reliability` 完成并本地提交，R0 里程碑标记完成：
 
@@ -111,7 +111,18 @@ R0.0（现状审计 + 复用矩阵 + 最小 Schema）、R0.1（`ue_get_task_cont
 - `risks` 仅包含确定性事实（dirty/stale/conflicted/not-found/session-mismatch 等），零模型推断；输出受 `max_output_tokens` 强制裁剪并在 `outputBudget` 中显式报告。
 - R0.2：`relevantAssets` 为确定性相关资产候选集——query 分词（≤8 term）+ 复用 Asset Search 与少量 Symbol Search 补充、与显式目标互斥、固定排序、Top N≤8，每条带 `assetPath / assetClass / source / whyIncluded / matchKind`，无 score/confidence；预算不足时先裁候选 metadata 再减候选数量，候选永不优先于 target identity / high risk / revision summary。真实 Reforge Smoke 观察与验证见 [`Plans/AGENT_RELIABILITY_R0_REAL_CONTEXT_SMOKE_20260816.md`](Plans/AGENT_RELIABILITY_R0_REAL_CONTEXT_SMOKE_20260816.md)。
 - R0.3：`correlation` 为只读、非持久化、零模型推断的 Cross-source Correlation——精确键联接 Active Work、显式 Change Set、Live Editor Session 与 Memory Evidence（session id 相等、资产路径集合交集、changeSetId 字面量、资产 scope Evidence）；不新增 Memory/ChangeSet Schema、不扫描 workflow 私有 `_change_sets`、不自动发现 Change Set、无引用遍历；链接固定排序上限 16 条，边界计数在 summary 如实报告；预算不足时先裁 correlation links/summary。交接见 [`Handoffs/AGENT_RELIABILITY_R0_SLICE3_HANDOFF_20260816.md`](Handoffs/AGENT_RELIABILITY_R0_SLICE3_HANDOFF_20260816.md)。
-- 复用矩阵、Request/Response Schema 与已知边界见 [`Plans/AGENT_RELIABILITY_R0_AUDIT_AND_SCHEMA_20260815.md`](Plans/AGENT_RELIABILITY_R0_AUDIT_AND_SCHEMA_20260815.md)。R1（Impact Analysis）已按**单个完整大任务**启动：一次完成 Direct + Bounded Indirect Consumers、多目标 Impact Path、Reference Kind / Domain Evidence 解释、Unknown / Unsupported、Validation Targets、Graph/Token Budget、R0 渐进展开入口与真实 Reforge Smoke；完整接手规范见 [`Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md`](Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md)。R1 中途不按 Slice 等待确认，最终一次性验收，完成后停止在 R2 之前。
+- 复用矩阵、Request/Response Schema 与已知边界见 [`Plans/AGENT_RELIABILITY_R0_AUDIT_AND_SCHEMA_20260815.md`](Plans/AGENT_RELIABILITY_R0_AUDIT_AND_SCHEMA_20260815.md)。
+
+### R1 状态（已完成）
+
+R1（Impact Analysis）已在 `feature/agent-reliability` 一次性完成并本地提交，**R1 里程碑标记完成**：
+
+- 新增只读 query 组 Tool `ue_analyze_change_impact`：1..8 个精确 `/Game` 目标、`maxDepth` 1..3（默认 2）、bounded consumer/edge/path 上限与 `max_output_tokens`；方向契约固定 consumer → target，BFS 只按精确键（`target_asset_path IN frontier`）分块查询、全局 visited 防环、shortestDepth/Impact Path 稳定。
+- Direct Consumers（多 kind 合并、`impactedTargets[]` 去重）+ Bounded Indirect Consumers + 多目标共享 consumer 合并；Reference Kind 确定性归一化（`asset-reference / class-reference / blueprint-symbol-reference / parent-reference / unknown-reference` 等 7 类），未覆盖 kind 原样保留绝不猜测。
+- Unknown / Unsupported 一等公民：`targets[].found=false`、`unsupported-impact-subject`（结构化 subject 仅 `asset-level` 与 `blueprint-symbol` 可被现有 Index 机械证明）、`analysisGaps`（no-consumer-evidence / unknown-reference-kind / runtime-sensitivity-not-proven / frontier-truncated）。
+- `validationTargets`（Tier 0 目标 / Tier 1 Direct / Tier 2 Indirect，确定排序）；确定性 risks（`high-fanout-target / impact-analysis-truncated / impact-target-not-indexed / unknown-reference-kind`）；`runtimeSensitiveConsumers` 固定 `not-proven-with-current-evidence`，不凭资产类型猜测。
+- R0 集成：`ue_get_task_context.nextExpansions` 增加 impact-analysis 渐进入口（显式目标 / relevantAssets hint），默认 Context 不自动展开引用图。
+- 真实 Reforge 只读 Smoke（48 资产 immutable 索引）S1–S4 全部通过：S1 fan-out（23 direct / 282 edges / 14.4 ms）、S2 真实 2 跳（Wheel←VehicleBase←CargoBase，24 indirect）、S3 多目标共享 consumer 合并（24 direct / 8 indirect）、S4 零消费者边界语义。设计、复用审计、边界与建议性能指标见 [`Plans/AGENT_RELIABILITY_R1_IMPACT_ANALYSIS_DESIGN_20260818.md`](Plans/AGENT_RELIABILITY_R1_IMPACT_ANALYSIS_DESIGN_20260818.md)；完整执行规范见 [`Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md`](Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md)。**R2（Semantic Diff）未开始，等待指令。**
 
 首批目标不是新增大量 UE 写入，而是回答：Agent 当前应该改什么、修改会影响什么、以及有什么证据证明结果正确。无法证明的结论必须明确标记为推断；保存成功和独立重载成功只属于 Persistence Evidence，不自动等同于整个任务成功。
 

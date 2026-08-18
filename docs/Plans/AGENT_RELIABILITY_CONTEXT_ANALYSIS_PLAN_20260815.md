@@ -636,7 +636,7 @@ G9  本地 Commit
 8. 独立本地 Commit（不 Push）。
 ```
 
-R0.0/R0.1 完成后按交接执行 R0-S（真实 Reforge Context Smoke）+ R0.2（Deterministic Relevant Asset Discovery），2026-08-16 完成并本地提交；随后按新指令完成 R0.3（只读 Cross-source Correlation），R0 里程碑至此完成，R1 等待新的显式指令。
+R0.0/R0.1 完成后按交接执行 R0-S（真实 Reforge Context Smoke）+ R0.2（Deterministic Relevant Asset Discovery），2026-08-16 完成并本地提交；随后按新指令完成 R0.3（只读 Cross-source Correlation），R0 里程碑至此完成；2026-08-18 按 `AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md` 一次性完成整个 R1（Impact Analysis），R1 里程碑标记完成，停止在 R2 之前。
 
 R0-S + R0.2 概览：
 
@@ -688,6 +688,46 @@ R0.3（Cross-source Correlation，2026-08-16 完成并本地提交）概览：
 8. 门禁：Ruff 通过；Python 全量 557/557（原 540，+17）；git diff --check 通过；无 C++ 变更。
 9. 文档同步：ROADMAP.md、PROJECT_STATUS.md、spec/MCP_SERVER.md、审计 Schema 文档、本计划、
    新 Slice 3 Handoff。R0 里程碑标记完成，等待 R1 指令。
+```
+
+R1（Impact Analysis，2026-08-18 一次性完成并本地提交，R1 里程碑标记完成）概览：
+
+```text
+1. R1.0 复用审计（3 个 Flash 只读审计并行）：现有 find_references 的 incoming 方向、
+   depth≤3 遍历、13 种 reference kind 真实取证、Tool Registry / MCP capability / strict
+   args / 测试断言的完整同步清单；结论——references_table 行归 consumer 所有、
+   target_asset_path 恒定是被引用目标，反向查询可直接复用 references_target_asset_idx，
+   不新建第二套引用数据库。
+2. 新公共只读 Tool ue_analyze_change_impact（query 组，全模式可用）：1..8 个精确 /Game
+   目标、maxDepth 1..3（默认 2）、maxConsumers≤100 / maxEdges≤1000 / maxPaths≤100、
+   max_output_tokens 裁剪阶梯；方向契约 consumer → target；BFS 只按精确键分块查询
+   （target_asset_path IN frontier，500/批），全局 visited 防环、每 consumer 对每 target
+   的 shortestDepth 稳定、Impact Path 可解释（hops=中间 consumer 链）；同 consumer 多
+   kind 合并（impactedTargets/referenceKinds/evidence/paths）；自引用不作为 consumer。
+3. Reference Kind 确定性归一化 7 类（asset/soft/class/blueprint-symbol/searchable-name/
+   parent/unknown-reference），只基于 exporter kind 事实，未知 kind 原样保留绝不猜测。
+4. Unknown/Unsupported 一等公民：targets[].found=false + target-not-indexed；结构化
+   subject 枚举 8 种，仅 asset-level 与 blueprint-symbol（精确 stable_id）被机械支持，
+   其余 6 种显式返回 unsupported-impact-subject；analysisGaps 区分 no-consumer-evidence
+   与 unknown-reference-kind / runtime-sensitivity-not-proven / frontier-truncated。
+5. validationTargets（Tier 0/1/2 + priorityOrder 确定排序）；确定性 risks（high-fanout
+   ≥15 / impact-analysis-truncated / impact-target-not-indexed / unknown-reference-kind）；
+   runtimeSensitiveConsumers 固定 not-proven-with-current-evidence，不凭资产类型猜。
+6. R0 集成：ue_get_task_context.nextExpansions 增加 impact-analysis-explicit-targets /
+   impact-analysis-relevant-asset-hint 渐进入口；默认 Context 不自动遍历 depth≥2 引用图。
+7. 测试：tests/python/test_impact_analysis.py 新增 T1–T20 + 域测试（共 33 用例，含
+   edge/path-limit 截断、symbol depth-2、多目标混合深度计数、确定性、strict args、
+   capabilities 契约）；test_task_context.py 新增 r4_1/r4_2；Tool Registry / MCP 工具
+   计数 7/19/40/52/57/69/90/102 全部同步。
+8. 真实 Reforge 只读 Smoke（48 资产 immutable 索引，无 UE Editor 进程）：S1 BP_VehicleBase
+   depth1（23 direct / 282 edges / 14.4 ms / high-fanout risk）、S2 BP_SphereTraceWheel_V2
+   depth2（3 direct / 24 indirect / 27.2 ms / 样本路径 Wheel←VehicleBase←CargoBase）、
+   S3 多目标（24 direct / 8 indirect / 共享 consumer 合并 / 32.5 ms）、S4 BP_GM_main
+   零消费者边界（5.9 ms，no-consumer-evidence-in-index gap 正确）；索引 SHA-256 前后
+   不变、输出完全确定。
+9. 门禁：Ruff 通过；Python 全量 592/592（原 557，+35）；git diff --check 通过；无 C++
+   变更无需 UE Build。文档同步：spec/MCP_SERVER.md、ROADMAP.md、PROJECT_STATUS.md、
+   本计划、新 R1 设计/审计文档。独立本地 Commit（不 Push），停止在 R2 之前。
 ```
 
 ---

@@ -228,6 +228,39 @@ max_output_tokens     默认 4096，范围 256–32768
 - 输出受 `max_output_tokens` 强制约束：超预算时按固定优先级阶梯裁剪可展开内容（Change Set operations → Live Editor summary → Memory records/nodes → Active Work items → Relevant Assets 候选 metadata → 候选数量 → Correlation links → Correlation summary → 目标资产 metadata/summary → Revision comparisons → project stats → nextExpansions → risk details → 深层标识字段），并在 `outputBudget.truncated/truncationReason` 中显式报告；裁剪的展开路径进入 `nextExpansions`。候选与 Correlation 永不优先于 target identity、high risk 与 revision summary 等更高优先级信息。
 - Memory 的 stale 检测复用现有 FTS 检索（按 asset scope + `stale` 状态过滤）；Memory FTS 对纯中文短语的匹配能力受上游 `unicode61` tokenizer 限制，检测不到只代表“本次检索未命中”，不代表“不存在 stale 记录”。
 
+### `ue_analyze_change_impact`（R1）
+
+对 1..8 个精确 `/Game` Object Path 目标做确定性的有界逆向引用影响分析。方向契约固定为 **consumer → target**（`references_table` 行归 consumer 资产所有，`target_asset_path` 是被引用目标），因此 `Target T ← Direct Consumer A ← Consumer C of A` 中 A/B 为 depth=1、C 为 depth=2。
+
+```text
+target_asset_paths  必填，1..8 个精确 /Game Object Path，不可重复
+subject_kind        默认 asset-level；结构化 subject 枚举共 8 种，仅
+                     asset-level 与 blueprint-symbol（subject=精确 symbol
+                     stable_id，且必须属于唯一目标资产）被现有 Index 证据
+                     机械支持；其余 6 种（data-table-row / searchable-name /
+                     data-asset-object / material-instance-parent /
+                     material-instance-parameter / blueprint-member）显式
+                     返回 unsupported-impact-subject，不猜测
+subject             结构化 subject 的精确 stable_id；asset-level 必须为空
+max_depth           1..3，默认 2
+max_consumers       1..100，默认 100
+max_edges           1..1000，默认 500（证据行预算）
+max_paths           1..100，默认 50（Impact Path 条数预算）
+max_output_tokens   默认 4096，范围 256–32768
+```
+
+返回结构按 `request / direction / summary / targets / directConsumers / indirectConsumers / runtimeSensitiveConsumers / analysisGaps / validationTargets / risks / riskSummary / nextActions / outputBudget` 组织：
+
+- 遍历是纯精确键的 BFS：每层只查询 `target_asset_path IN (frontier)`（按 500 一批分块），全局 visited 防环、BFS 保证每个 consumer 对每个 target 的 shortestDepth 稳定；同一 consumer 的多条引用边合并为一条记录（`impactedTargets[]` + `referenceKinds[]` + `evidence[]` + `paths[]`）。自引用（consumer == target）不作为 consumer 收录。
+- `referenceKinds` 每项含 `rawReferenceKind / normalizedReferenceKind / source / edgeCount`；归一化类别固定为 `asset-reference / soft-reference / class-reference / blueprint-symbol-reference / searchable-name-reference / parent-reference / unknown-reference`，映射只基于 exporter 写入的 kind 事实（`inherits→parent-reference`、`depends-hard-package→asset-reference`、`casts/implements→class-reference`、`calls/macro-calls/interface-calls/reads/writes/returns/delegate-*→blueprint-symbol-reference`），未覆盖的 kind 原样保留并归一化为 `unknown-reference`，绝不根据资产名猜测。
+- `runtimeSensitiveConsumers` 永远只含能被 Index 显式证明运行时消费语义的对象；当前 Index 无 runtime/editor 分类证据，固定返回 `classificationState=not-proven-with-current-evidence`、`items=[]`，不凭资产类型启发式猜测（运行时执行链属 R5）。
+- `analysisGaps` 区分“没有找到 Consumer”（`no-consumer-evidence-in-index`，仅当该目标确无任何 incoming 引用行时出现）与“当前证据无法证明”（`unknown-reference-kind`、`runtime-sensitivity-not-proven`、`frontier-truncated`）；不索引的目标在 `targets[].found=false, reason=target-not-indexed` 显式表达。
+- `validationTargets` 是确定性的建议验证范围：Tier 0 目标自身、Tier 1 Direct Consumers、Tier 2 有界 Indirect Consumers，按 tier → depth → assetPath 固定排序并给 `priorityOrder`；这是引用图的整理结果，不构成“已验证通过”的声明（Verification Plan 属 R3）。
+- `risks` 只含确定性事实：`high-fanout-target`（直连消费者 ≥15）、`impact-analysis-truncated`、`impact-target-not-indexed`、`unknown-reference-kind`；风险等级只描述分析/修改范围风险，禁止 likely-to-break / confidence / modelScore。
+- `summary` 如实报告 `targetCount / visitedAssetCount / visitedEdgeCount / directConsumerCount / indirectConsumerCount / maxDepthRequested / maxDepthReached / consumerLimit / edgeLimit / pathLimit / truncated / truncationReasons[] / frontierOmittedCount / omittedEdgeCount / omittedPathCount / pathCount / unknownReferenceKindCount`；任何超限部分不静默消失。
+- 输出受 `max_output_tokens` 强制约束，裁剪阶梯固定：完整 Impact Path 明细 → consumer evidence → indirect consumer 列表（summary 计数保留）→ consumer referenceKinds → validationTargets → target identity 细节 → analysisGaps；summary、risks、nextActions 与 outputBudget 永不裁剪，裁剪原因显式返回。
+- 该 Tool 是纯只读 Query 能力，Offline / Live / Workflow 全模式可用；核心事实全部来自 immutable Index，不依赖 Memory / Live Editor / Workflow。`ue_get_task_context` 的 `nextExpansions` 在有显式 `asset_paths` 时建议 `impact-analysis-explicit-targets`、仅有 `relevantAssets` 时给有界 `impact-analysis-relevant-asset-hint`，但不会在默认 Context 中自动展开 depth≥2 引用图。
+
 ## 高层安全写入 Tool
 
 常见修改优先使用以下 Tool，Agent 不需要填写底层 Operation 名称或 Patch Target：

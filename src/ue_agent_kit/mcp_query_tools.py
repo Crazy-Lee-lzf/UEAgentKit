@@ -5,6 +5,12 @@ from typing import Any, Literal
 
 from .agent_api import IndexQueryService
 from .agent_workflow import PatchWorkflowService, WorkflowError
+from .impact_analysis import (
+    DEFAULT_IMPACT_DEPTH,
+    DEFAULT_IMPACT_EDGES,
+    DEFAULT_IMPACT_PATHS,
+    MAX_IMPACT_CONSUMERS,
+)
 from .query_protocol import DEFAULT_OUTPUT_TOKEN_BUDGET
 
 
@@ -133,3 +139,38 @@ def register_query_tools(
             )
         except (FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_find_references", exc, read_only=True)
+
+    @server.tool(annotations=read_annotations)
+    def ue_analyze_change_impact(
+        target_asset_paths: list[str],
+        subject_kind: Literal[
+            "asset-level",
+            "blueprint-symbol",
+            "data-table-row",
+            "searchable-name",
+            "data-asset-object",
+            "material-instance-parent",
+            "material-instance-parameter",
+            "blueprint-member",
+        ] = "asset-level",
+        subject: str = "",
+        max_depth: int = DEFAULT_IMPACT_DEPTH,
+        max_consumers: int = MAX_IMPACT_CONSUMERS,
+        max_edges: int = DEFAULT_IMPACT_EDGES,
+        max_paths: int = DEFAULT_IMPACT_PATHS,
+        max_output_tokens: int = DEFAULT_OUTPUT_TOKEN_BUDGET,
+    ) -> dict[str, Any]:
+        """Analyze deterministic bounded reverse-reference impact for one or more exact /Game targets."""
+        try:
+            return index_service.analyze_change_impact(
+                target_asset_paths,
+                subject_kind=subject_kind,
+                subject=subject,
+                max_depth=max_depth,
+                max_consumers=max_consumers,
+                max_edges=max_edges,
+                max_paths=max_paths,
+                max_output_tokens=max_output_tokens,
+            )
+        except (FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_analyze_change_impact", exc, read_only=True)

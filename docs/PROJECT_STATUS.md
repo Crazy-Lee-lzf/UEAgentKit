@@ -60,7 +60,7 @@ Tool 数量只表示 MCP 接口数量，不等同于 Unreal Operation 数量。�
 
 ```text
 
-Python tests                 557/557
+Python tests                 592/592
 
 JSON Schemas                 3/3
 
@@ -392,7 +392,7 @@ R0.0（现状审计 + 复用矩阵 + 最小 Schema）与 R0.1（`ue_get_task_con
 
 R0-S（真实 Reforge Context Smoke）与 R0.2（Deterministic Relevant Asset Discovery）已完成并本地提交：真实 Reforge 索引（48 资产，logic profile）上 S1/S2/S3 三个 Case 记录见 [`Plans/AGENT_RELIABILITY_R0_REAL_CONTEXT_SMOKE_20260816.md`](Plans/AGENT_RELIABILITY_R0_REAL_CONTEXT_SMOKE_20260816.md)；`relevantAssets` 现为确定性候选集（query 分词 + Asset/Symbol Search 复用、与显式目标互斥、固定排序、Top N=8、可解释 whyIncluded/matchKind、无 score/confidence），预算不足时先裁候选 metadata 再减候选数量，绝不优先于 target identity / high risk / revision summary。
 
-R0.3（只读 Cross-source Correlation）已完成并本地提交，**R0 里程碑标记完成**：`ue_get_task_context` 新增 `correlation` section（schemaVersion 1.2），用精确键把 Active Work、显式 Change Set、Live Editor Session 与 Memory Evidence 关联起来（session id 相等性、资产路径集合交集、changeSetId 字面量、资产 scope Evidence），只读、非持久化、零模型推断；不新增 Memory/ChangeSet Schema、不扫描 workflow 私有 `_change_sets`、不自动发现 Change Set、不做 R1 引用遍历。链接固定排序上限 16 条，边界计数如实报告；新增确定性风险 `change-set-editor-session-mismatch`（medium）；预算阶梯先裁 correlation links/summary，绝不优先于 target identity / high risk / revision summary。交接见 [`Handoffs/AGENT_RELIABILITY_R0_SLICE3_HANDOFF_20260816.md`](Handoffs/AGENT_RELIABILITY_R0_SLICE3_HANDOFF_20260816.md)。R1（Impact Analysis）尚未开始，等待指令。
+R0.3（只读 Cross-source Correlation）已完成并本地提交，**R0 里程碑标记完成**：`ue_get_task_context` 新增 `correlation` section（schemaVersion 1.2），用精确键把 Active Work、显式 Change Set、Live Editor Session 与 Memory Evidence 关联起来（session id 相等性、资产路径集合交集、changeSetId 字面量、资产 scope Evidence），只读、非持久化、零模型推断；不新增 Memory/ChangeSet Schema、不扫描 workflow 私有 `_change_sets`、不自动发现 Change Set、不做 R1 引用遍历。链接固定排序上限 16 条，边界计数如实报告；新增确定性风险 `change-set-editor-session-mismatch`（medium）；预算阶梯先裁 correlation links/summary，绝不优先于 target identity / high risk / revision summary。交接见 [`Handoffs/AGENT_RELIABILITY_R0_SLICE3_HANDOFF_20260816.md`](Handoffs/AGENT_RELIABILITY_R0_SLICE3_HANDOFF_20260816.md)。
 
 R1/R2 随后分别解决「修改会影响什么」和「实际发生了什么变化」。R3 再把现有 Persistence / Compile / Reference / Semantic Evidence 组合成统一 Verification Plan 与 Trust Verdict；保存和独立重载成功只能证明 Persistence，不自动等同于整个任务成功。
 
@@ -400,7 +400,7 @@ R4 用跨 Data Asset / DataTable / Material Instance / Blueprint / Context / sta
 
 
 
-**当前执行状态（2026-08-18）**：R0 已完成；R1 Impact Analysis 已按一个完整大任务启动，基线为 `feature/agent-reliability@c624bc1`。本轮一次性完成 Direct / Bounded Indirect Consumers、多目标 Impact Path、Reference Kind / Domain Evidence、Unknown / Unsupported、Validation Targets、Graph/Token Budget、R0 渐进展开入口与真实 Reforge Smoke；中途不按 Slice 等待确认，完成后统一验收并停止在 R2 之前。执行规范见 [`Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md`](Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md)。
+**当前执行状态（2026-08-18）**：R0 已完成；**R1 Impact Analysis 已完成并本地提交，R1 里程碑标记完成**。新增只读 query 组 Tool `ue_analyze_change_impact`（1..8 个精确 `/Game` 目标、depth 1..3、bounded consumer/edge/path 上限、max_output_tokens 裁剪阶梯）：Direct Consumers + Bounded Indirect Consumers（BFS 精确键分块查询、防环、shortestDepth/Impact Path 稳定、多目标共享 consumer 去重合并）、Reference Kind 确定性归一化（7 类，未知 kind 原样保留）、Unknown/Unsupported 边界（`unsupported-impact-subject` / `analysisGaps` / `target-not-indexed`）、`validationTargets`（Tier 0/1/2 确定排序）、确定性 risks（high-fanout / truncated / not-indexed / unknown-kind）、`runtimeSensitiveConsumers=not-proven-with-current-evidence`（不凭资产类型猜测）。结构化 subject 仅 `asset-level` 与 `blueprint-symbol`（精确 stable_id）可被现有 Index 机械证明。`ue_get_task_context.nextExpansions` 增加 impact-analysis 渐进入口。真实 Reforge 只读 Smoke S1–S4 通过（S1 fan-out 23 direct / 14.4 ms；S2 真实 2 跳 24 indirect；S3 多目标共享 consumer 合并；S4 零消费者边界），Python 全量 592/592。设计/审计见 [`Plans/AGENT_RELIABILITY_R1_IMPACT_ANALYSIS_DESIGN_20260818.md`](Plans/AGENT_RELIABILITY_R1_IMPACT_ANALYSIS_DESIGN_20260818.md)，执行规范见 [`Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md`](Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md)。**R2（Semantic Diff）未开始，等待指令。**
 
 
 ### P2：高价值专用写入

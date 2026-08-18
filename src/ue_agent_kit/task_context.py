@@ -274,6 +274,7 @@ class TaskContextService:
         response["riskSummary"] = risk_summary
         response["nextExpansions"] = self._build_expansions(
             asset_paths=normalized_assets,
+            relevant_assets=response["relevantAssets"],
             memory_section=memory_section,
             change_set_section=response["changeSet"],
         )
@@ -1359,6 +1360,7 @@ class TaskContextService:
         self,
         *,
         asset_paths: Sequence[str],
+        relevant_assets: Sequence[dict[str, Any]],
         memory_section: dict[str, Any],
         change_set_section: dict[str, Any],
     ) -> list[dict[str, Any]]:
@@ -1379,6 +1381,29 @@ class TaskContextService:
                     "tool": "ue_find_references",
                     "reason": "target-reference-edges",
                     "arguments": {"asset_path": asset_path, "direction": "both", "depth": 1},
+                }
+            )
+        if asset_paths:
+            expansions.append(
+                {
+                    "tool": "ue_analyze_change_impact",
+                    "reason": "impact-analysis-explicit-targets",
+                    "arguments": {
+                        "target_asset_paths": list(asset_paths[:2]),
+                        "max_depth": 2,
+                    },
+                }
+            )
+        elif relevant_assets:
+            first = relevant_assets[0]
+            expansions.append(
+                {
+                    "tool": "ue_analyze_change_impact",
+                    "reason": "impact-analysis-relevant-asset-hint",
+                    "arguments": {
+                        "target_asset_paths": [str(first.get("assetPath", ""))],
+                        "max_depth": 2,
+                    },
                 }
             )
         if memory_section.get("included"):

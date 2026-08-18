@@ -801,6 +801,7 @@ class McpServerTests(unittest.TestCase):
                 "ue_search",
                 "ue_get_asset",
                 "ue_find_references",
+                "ue_analyze_change_impact",
                 "ue_get_task_context",
             ],
         )
@@ -871,7 +872,7 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         expected_names = tool_names_for_mode(memory_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 18)
+        self.assertEqual(len(tools), 19)
         forbidden = {
             "database",
             "database_path",
@@ -895,7 +896,7 @@ class McpServerTests(unittest.TestCase):
         self.assertTrue(memory_contract["configured"])
         self.assertTrue(memory_contract["persistent"])
         self.assertEqual(memory_contract["projectKey"], "测试项目")
-        self.assertEqual(memory_contract["tools"], expected_names[6:])
+        self.assertEqual(memory_contract["tools"], expected_names[7:])
         self.assertFalse(memory_contract["arbitraryDatabaseArguments"])
         self.assertFalse(memory_contract["arbitraryProjectArguments"])
         self.assertFalse(memory_contract["vectorDatabase"])
@@ -1346,7 +1347,7 @@ class McpServerTests(unittest.TestCase):
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
         self.assertTrue(capabilities["liveEditor"]["configured"])
         self.assertEqual(capabilities["liveEditor"]["transport"], "localhost-tcp")
-        self.assertEqual(capabilities["liveEditor"]["tools"], expected_names[6:])
+        self.assertEqual(capabilities["liveEditor"]["tools"], expected_names[7:])
         self.assertFalse(capabilities["liveEditor"]["arbitraryEndpointArguments"])
         self.assertFalse(capabilities["liveEditor"]["arbitraryUObject"])
         graph_contract = capabilities["liveEditor"]["graphSelection"]
@@ -1417,7 +1418,7 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(capabilities["limits"]["liveBatchTimeoutSecondsMax"], 300)
         action_contract = capabilities["liveEditor"]["editorActions"]
         self.assertTrue(action_contract["available"])
-        self.assertEqual(action_contract["tools"], expected_names[27:35])
+        self.assertEqual(action_contract["tools"], expected_names[28:36])
         self.assertFalse(action_contract["saveSupported"])
         self.assertFalse(action_contract["pieSupported"])
         self.assertEqual(action_contract["actorIdentity"], "current-editor-world-actor-guid")
@@ -1652,7 +1653,7 @@ class McpServerTests(unittest.TestCase):
             [tool.name for tool in tools],
             tool_names_for_mode(workflow_enabled=True, memory_enabled=True),
         )
-        self.assertEqual(len(tools), 68)
+        self.assertEqual(len(tools), 69)
 
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
         memory_contract = capabilities["projectMemory"]
@@ -1730,7 +1731,7 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         expected_names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 89)
+        self.assertEqual(len(tools), 90)
         for tool in tools:
             definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
             self.assertEqual(bool(tool.annotations.readOnlyHint), definition.read_only, tool.name)

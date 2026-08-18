@@ -37,6 +37,7 @@ from ue_agent_kit.task_context import (  # noqa: E402
     MAX_CORRELATION_LINKS,
     MAX_TASK_CONTEXT_ASSETS,
     MAX_TASK_CONTEXT_CANDIDATES,
+    MAX_TASK_CONTEXT_EXPANSIONS,
     TaskContextService,
 )
 
@@ -1065,6 +1066,37 @@ class TaskContextTests(unittest.TestCase):
         self.assertFalse(missing["activeWork"]["requestedWorkItem"]["found"])
         kinds = {risk["kind"] for risk in missing["risks"]}
         self.assertIn("work-item-not-found", kinds)
+
+    def test_r4_1_explicit_targets_suggest_impact_analysis(self) -> None:
+        service = self.make_service()
+        context = service.get_task_context(query="检查伤害", asset_paths=[ASSET_A, ASSET_B])
+        expansions = context["nextExpansions"]
+        impact = [
+            item
+            for item in expansions
+            if item["tool"] == "ue_analyze_change_impact"
+        ]
+        self.assertEqual(len(impact), 1)
+        self.assertEqual(impact[0]["reason"], "impact-analysis-explicit-targets")
+        self.assertEqual(impact[0]["arguments"]["target_asset_paths"], [ASSET_A, ASSET_B])
+        self.assertEqual(impact[0]["arguments"]["max_depth"], 2)
+        self.assertIn("ue_find_references", [item["tool"] for item in expansions])
+        self.assertLessEqual(len(expansions), MAX_TASK_CONTEXT_EXPANSIONS)
+
+    def test_r4_2_relevant_assets_only_give_bounded_impact_hint(self) -> None:
+        service, _ = self._fleet_service()
+        context = service.get_task_context(query="vehicle customization", asset_paths=[])
+        first_relevant = context["relevantAssets"][0]["assetPath"]
+        expansions = context["nextExpansions"]
+        impact = [
+            item
+            for item in expansions
+            if item["tool"] == "ue_analyze_change_impact"
+        ]
+        self.assertEqual(len(impact), 1)
+        self.assertEqual(impact[0]["reason"], "impact-analysis-relevant-asset-hint")
+        self.assertEqual(impact[0]["arguments"]["target_asset_paths"], [first_relevant])
+        self.assertEqual(impact[0]["arguments"]["max_depth"], 2)
 
 
 @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")

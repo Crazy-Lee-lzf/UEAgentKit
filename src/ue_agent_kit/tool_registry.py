@@ -34,6 +34,7 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_search", "query", "read"),
     ToolDefinition("ue_get_asset", "query", "read"),
     ToolDefinition("ue_find_references", "query", "read"),
+    ToolDefinition("ue_analyze_change_impact", "query", "read"),
     ToolDefinition("ue_get_task_context", "query", "read"),
     ToolDefinition("ue_memory_search", "memory", "read"),
     ToolDefinition("ue_memory_get", "memory", "read"),

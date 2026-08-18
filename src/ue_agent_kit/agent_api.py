@@ -9,6 +9,20 @@ from pathlib import Path
 from typing import Any, Iterator, Literal, Sequence
 
 from .database import assert_fts5_available, get_metadata, get_schema_version, open_database
+from .impact_analysis import (
+    DEFAULT_IMPACT_DEPTH,
+    DEFAULT_IMPACT_EDGES,
+    DEFAULT_IMPACT_PATHS,
+    MAX_IMPACT_CONSUMERS,
+    MAX_IMPACT_DEPTH,
+    MAX_IMPACT_EDGES,
+    MAX_IMPACT_PATHS,
+    analyze_impact_graph,
+    normalize_subject,
+    trim_impact_response,
+    validate_subject_kind,
+    validate_target_paths,
+)
 from .queries import find_references, get_asset as query_get_asset, get_stats, search_assets, search_symbols
 from .query_protocol import (
     DEFAULT_OUTPUT_TOKEN_BUDGET,
@@ -808,3 +822,57 @@ class IndexQueryService:
                 token_state=state,
                 source=source,
             )
+
+    def analyze_change_impact(
+        self,
+        target_asset_paths: Sequence[str],
+        *,
+        subject_kind: str = "asset-level",
+        subject: str = "",
+        max_depth: int = DEFAULT_IMPACT_DEPTH,
+        max_consumers: int = MAX_IMPACT_CONSUMERS,
+        max_edges: int = DEFAULT_IMPACT_EDGES,
+        max_paths: int = DEFAULT_IMPACT_PATHS,
+        max_output_tokens: int = DEFAULT_OUTPUT_TOKEN_BUDGET,
+    ) -> dict[str, Any]:
+        """Run the deterministic bounded reverse-reference impact analysis over the immutable index."""
+        normalized_targets = validate_target_paths(target_asset_paths)
+        normalized_subject_kind = validate_subject_kind(subject_kind)
+        normalized_subject = normalize_subject(normalized_subject_kind, subject)
+        if isinstance(max_depth, bool) or not isinstance(max_depth, int):
+            raise ValueError("max_depth must be an integer")
+        if max_depth < 1 or max_depth > MAX_IMPACT_DEPTH:
+            raise ValueError(f"max_depth must be from 1 through {MAX_IMPACT_DEPTH}")
+        max_consumers = _bounded_limit(
+            max_consumers,
+            maximum=MAX_IMPACT_CONSUMERS,
+            name="max_consumers",
+        )
+        max_edges = _bounded_limit(max_edges, maximum=MAX_IMPACT_EDGES, name="max_edges")
+        max_paths = _bounded_limit(max_paths, maximum=MAX_IMPACT_PATHS, name="max_paths")
+        max_output_tokens = normalize_output_token_budget(max_output_tokens)
+        with self._open() as connection:
+            response = self._base_response(connection, "ue_analyze_change_impact")
+            response["request"] = {
+                "targetAssetPaths": list(normalized_targets),
+                "subjectKind": normalized_subject_kind,
+                "subject": normalized_subject,
+                "maxDepth": max_depth,
+                "maxConsumers": max_consumers,
+                "maxEdges": max_edges,
+                "maxPaths": max_paths,
+                "maxOutputTokens": max_output_tokens,
+            }
+            response.update(
+                analyze_impact_graph(
+                    connection,
+                    target_paths=normalized_targets,
+                    subject_kind=normalized_subject_kind,
+                    subject=normalized_subject,
+                    max_depth=max_depth,
+                    max_consumers=max_consumers,
+                    max_edges=max_edges,
+                    max_paths=max_paths,
+                )
+            )
+            return trim_impact_response(response, max_output_tokens)
