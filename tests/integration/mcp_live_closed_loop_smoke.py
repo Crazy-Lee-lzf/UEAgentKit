@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import json
 import sys
+import time
 import traceback
 from pathlib import Path
 from typing import Any
@@ -74,6 +75,79 @@ def error_code(result: dict[str, Any]) -> str:
 
 async def call(session: ClientSession, tool: str, params: dict[str, Any]) -> dict[str, Any]:
     return payload(await session.call_tool(tool, params), tool)
+
+
+async def create_change_set(session: ClientSession, name: str) -> str:
+    created = await call(
+        session,
+        "ue_create_change_set",
+        {
+            "title": f"Real UE5.6 {name} Semantic Diff closed loop",
+            "task_id": f"task_r2-{name}-semantic-diff",
+        },
+    )
+    change_set_id = str(created.get("changeSetId", ""))
+    if not created.get("ok") or created.get("status") != "planned" or not change_set_id:
+        raise RuntimeError(f"Change Set creation failed for {name}: {created}")
+    return change_set_id
+
+
+async def capture_semantic_diff(
+    session: ClientSession,
+    change_set_id: str,
+    asset_path: str,
+    stage: str,
+) -> dict[str, Any]:
+    started = time.perf_counter()
+    result = await call(
+        session,
+        "ue_analyze_semantic_diff",
+        {
+            "change_set_id": change_set_id,
+            "stage": stage,
+            "asset_paths": [asset_path],
+            "include_unchanged": True,
+            "max_changes": 64,
+            "max_output_tokens": 4096,
+        },
+    )
+    elapsed_ms = round((time.perf_counter() - started) * 1000.0, 3)
+    summary = result.get("summary", {})
+    assets = result.get("assets", [])
+    budget = result.get("outputBudget", {})
+    if (
+        not result.get("ok")
+        or result.get("readOnly") is not True
+        or result.get("evidenceStage", {}).get("selected") != stage
+        or len(assets) != 1
+        or assets[0].get("assetPath") != asset_path
+        or int(summary.get("expectedCount", 0)) < 1
+        or summary.get("actualCount") != summary.get("expectedCount")
+        or summary.get("matchedCount") != summary.get("expectedCount")
+        or summary.get("unexpectedCount") != 0
+        or summary.get("missingExpectedCount") != 0
+        or int(budget.get("estimatedTokens", 0)) <= 0
+    ):
+        raise RuntimeError(
+            f"Semantic Diff {stage} contract failed for {asset_path}: {result}"
+        )
+    asset = assets[0]
+    return {
+        "stage": stage,
+        "elapsedMs": elapsed_ms,
+        "beforeRevision": asset.get("beforeRevision", ""),
+        "afterRevision": asset.get("afterRevision", ""),
+        "stageEvidenceRevision": asset.get("stageEvidenceRevision", ""),
+        "expectedCount": summary.get("expectedCount", 0),
+        "actualCount": summary.get("actualCount", 0),
+        "matchedCount": summary.get("matchedCount", 0),
+        "unexpectedCount": summary.get("unexpectedCount", 0),
+        "missingExpectedCount": summary.get("missingExpectedCount", 0),
+        "unchangedCriticalCount": summary.get("unchangedCriticalCount", 0),
+        "analysisGapCount": summary.get("analysisGapCount", 0),
+        "estimatedTokens": budget.get("estimatedTokens", 0),
+        "truncated": budget.get("truncated", False),
+    }
 
 
 async def plan_write(
@@ -201,6 +275,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     )
     args.error_log.parent.mkdir(parents=True, exist_ok=True)
     closed_loops: list[dict[str, Any]] = []
+    semantic_diffs: list[dict[str, Any]] = []
     rejections: list[str] = []
     with args.error_log.open("w", encoding="utf-8", newline="\n") as stderr:
         async with stdio_client(parameters, errlog=stderr) as (read_stream, write_stream):
@@ -273,14 +348,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                         raise RuntimeError(f"The fixture {asset_path} was not opened: {opened}")
 
                 # 1. Data Asset scalar: Change Set -> Apply -> Verify(not-saved) -> Save -> Verify(verified).
-                change_set = await call(
-                    session,
-                    "ue_create_change_set",
-                    {"title": "Real UE5.6 scalar closed loop", "task_id": "task_realtime-scalar-closed-loop"},
-                )
-                change_set_id = str(change_set.get("changeSetId", ""))
-                if not change_set.get("ok") or change_set.get("status") != "planned" or not change_set_id:
-                    raise RuntimeError(f"Change Set creation failed: {change_set}")
+                change_set_id = await create_change_set(session, "data-asset")
                 scalar_write = await apply_and_capture(
                     session,
                     FIXTURE_ASSETS["scalar"],
@@ -292,6 +360,17 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 scalar_result = scalar_write.get("result", {})
                 scalar_expected = scalar_result.get("afterValue")
                 scalar_plan_id = scalar_write["planId"]
+                semantic_diffs.append(
+                    {
+                        "domain": "data-asset",
+                        **await capture_semantic_diff(
+                            session,
+                            change_set_id,
+                            FIXTURE_ASSETS["scalar"],
+                            "live",
+                        ),
+                    }
+                )
                 not_saved = await verify_live(session, FIXTURE_ASSETS["scalar"], change_set_id)
                 if (
                     not not_saved.get("ok")
@@ -316,6 +395,17 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 saved_set = await call(session, "ue_get_change_set", {"change_set_id": change_set_id})
                 if saved_set.get("status") != "saved" or saved_set.get("saveState", {}).get("state") != "saved":
                     raise RuntimeError(f"Saved Change Set contract is broken: {saved_set}")
+                semantic_diffs.append(
+                    {
+                        "domain": "data-asset",
+                        **await capture_semantic_diff(
+                            session,
+                            change_set_id,
+                            FIXTURE_ASSETS["scalar"],
+                            "persisted",
+                        ),
+                    }
+                )
                 # After the authorized save, Undo/Discard must refuse the transaction.
                 rejected = await call(
                     session,
@@ -351,6 +441,17 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                     or verified_set.get("operations", [{}])[0].get("status") != "verified"
                 ):
                     raise RuntimeError(f"Verified Change Set contract is broken: {verified_set}")
+                semantic_diffs.append(
+                    {
+                        "domain": "data-asset",
+                        **await capture_semantic_diff(
+                            session,
+                            change_set_id,
+                            FIXTURE_ASSETS["scalar"],
+                            "verified",
+                        ),
+                    }
+                )
                 evidence = verified["memoryTaskEvidence"]["arguments"]
                 if (
                     evidence["task_key"] != f"live-write:{scalar_plan_id}"
@@ -367,16 +468,44 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 closed_loops.append({"asset": "scalar", "state": "verified", "revision": verified.get("actualRevision")})
 
                 # 2. Material Instance: Apply -> Save -> Verify (exported parameter value).
+                material_change_set_id = await create_change_set(session, "material-instance")
                 material_write = await apply_and_capture(
                     session,
                     FIXTURE_ASSETS["material"],
                     "setMaterialInstanceScalarParameter",
                     {"parameterName": "EmissiveIntensity"},
                     0.5,
+                    material_change_set_id,
                 )
                 material_expected = material_write.get("result", {}).get("afterValue")
-                await save_authorized(session, FIXTURE_ASSETS["material"])
-                verified = await verify_live(session, FIXTURE_ASSETS["material"])
+                semantic_diffs.append(
+                    {
+                        "domain": "material-instance",
+                        **await capture_semantic_diff(
+                            session,
+                            material_change_set_id,
+                            FIXTURE_ASSETS["material"],
+                            "live",
+                        ),
+                    }
+                )
+                await save_authorized(
+                    session, FIXTURE_ASSETS["material"], material_change_set_id
+                )
+                semantic_diffs.append(
+                    {
+                        "domain": "material-instance",
+                        **await capture_semantic_diff(
+                            session,
+                            material_change_set_id,
+                            FIXTURE_ASSETS["material"],
+                            "persisted",
+                        ),
+                    }
+                )
+                verified = await verify_live(
+                    session, FIXTURE_ASSETS["material"], material_change_set_id
+                )
                 if (
                     not verified.get("ok")
                     or verified.get("state") != "verified"
@@ -384,19 +513,58 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                     or verified.get("exportedValue") != material_expected
                 ):
                     raise RuntimeError(f"Material verified loop contract is broken: {verified}")
+                semantic_diffs.append(
+                    {
+                        "domain": "material-instance",
+                        **await capture_semantic_diff(
+                            session,
+                            material_change_set_id,
+                            FIXTURE_ASSETS["material"],
+                            "verified",
+                        ),
+                    }
+                )
                 closed_loops.append({"asset": "material", "state": "verified", "revision": verified.get("actualRevision")})
 
                 # 3. DataTable: Apply -> Save -> Verify (exported row value).
+                datatable_change_set_id = await create_change_set(session, "data-table-cell")
                 datatable_write = await apply_and_capture(
                     session,
                     FIXTURE_ASSETS["datatable"],
                     "setDataTableCell",
                     {"rowName": ROW_ALPHA, "fieldName": "Count"},
                     42,
+                    datatable_change_set_id,
                 )
                 datatable_expected = datatable_write.get("result", {}).get("afterValue")
-                await save_authorized(session, FIXTURE_ASSETS["datatable"])
-                verified = await verify_live(session, FIXTURE_ASSETS["datatable"])
+                semantic_diffs.append(
+                    {
+                        "domain": "data-table",
+                        **await capture_semantic_diff(
+                            session,
+                            datatable_change_set_id,
+                            FIXTURE_ASSETS["datatable"],
+                            "live",
+                        ),
+                    }
+                )
+                await save_authorized(
+                    session, FIXTURE_ASSETS["datatable"], datatable_change_set_id
+                )
+                semantic_diffs.append(
+                    {
+                        "domain": "data-table",
+                        **await capture_semantic_diff(
+                            session,
+                            datatable_change_set_id,
+                            FIXTURE_ASSETS["datatable"],
+                            "persisted",
+                        ),
+                    }
+                )
+                verified = await verify_live(
+                    session, FIXTURE_ASSETS["datatable"], datatable_change_set_id
+                )
                 if (
                     not verified.get("ok")
                     or verified.get("state") != "verified"
@@ -404,21 +572,64 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                     or verified.get("exportedValue") != datatable_expected
                 ):
                     raise RuntimeError(f"DataTable verified loop contract is broken: {verified}")
+                semantic_diffs.append(
+                    {
+                        "domain": "data-table",
+                        **await capture_semantic_diff(
+                            session,
+                            datatable_change_set_id,
+                            FIXTURE_ASSETS["datatable"],
+                            "verified",
+                        ),
+                    }
+                )
                 closed_loops.append({"asset": "datatable", "state": "verified", "revision": verified.get("actualRevision")})
 
                 # 4. DataTable rename: verification must read the destination row name.
+                rename_change_set_id = await create_change_set(session, "data-table-rename")
                 rename_write = await apply_and_capture(
                     session,
                     FIXTURE_ASSETS["datatable_rename"],
                     "renameDataTableRow",
                     {"rowName": ROW_ALPHA, "newRowName": ROW_RENAMED},
                     True,
+                    rename_change_set_id,
                 )
                 rename_expected = rename_write.get("result", {}).get("afterValue")
                 if rename_expected != ROW_RENAME_VALUE:
                     raise RuntimeError(f"DataTable rename LiveApply result is incomplete: {rename_write}")
-                await save_authorized(session, FIXTURE_ASSETS["datatable_rename"])
-                verified = await verify_live(session, FIXTURE_ASSETS["datatable_rename"])
+                semantic_diffs.append(
+                    {
+                        "domain": "data-table-rename",
+                        **await capture_semantic_diff(
+                            session,
+                            rename_change_set_id,
+                            FIXTURE_ASSETS["datatable_rename"],
+                            "live",
+                        ),
+                    }
+                )
+                await save_authorized(
+                    session,
+                    FIXTURE_ASSETS["datatable_rename"],
+                    rename_change_set_id,
+                )
+                semantic_diffs.append(
+                    {
+                        "domain": "data-table-rename",
+                        **await capture_semantic_diff(
+                            session,
+                            rename_change_set_id,
+                            FIXTURE_ASSETS["datatable_rename"],
+                            "persisted",
+                        ),
+                    }
+                )
+                verified = await verify_live(
+                    session,
+                    FIXTURE_ASSETS["datatable_rename"],
+                    rename_change_set_id,
+                )
                 if (
                     not verified.get("ok")
                     or verified.get("state") != "verified"
@@ -426,6 +637,17 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                     or verified.get("exportedValue") != ROW_RENAME_VALUE
                 ):
                     raise RuntimeError(f"DataTable rename verified loop contract is broken: {verified}")
+                semantic_diffs.append(
+                    {
+                        "domain": "data-table-rename",
+                        **await capture_semantic_diff(
+                            session,
+                            rename_change_set_id,
+                            FIXTURE_ASSETS["datatable_rename"],
+                            "verified",
+                        ),
+                    }
+                )
                 closed_loops.append({"asset": "datatable-rename", "state": "verified", "revision": verified.get("actualRevision")})
 
                 # 5. Rejection: verify without any confirmed live write.
@@ -448,6 +670,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         "protocolVersion": initialized.protocolVersion,
         "toolCount": len(tool_names),
         "closedLoops": closed_loops,
+        "semanticDiffs": semantic_diffs,
         "savedPackageDiskHashesChanged": sorted(changed_ids),
         "rejections": rejections,
         "databaseHashUnchanged": True,
@@ -467,6 +690,7 @@ def main() -> int:
     parser.add_argument("--fixture-report", required=True, type=Path)
     parser.add_argument("--error-log", required=True, type=Path)
     parser.add_argument("--session-marker", type=Path)
+    parser.add_argument("--summary-report", type=Path)
     args = parser.parse_args()
     try:
         summary = asyncio.run(run(args))
@@ -474,6 +698,13 @@ def main() -> int:
         print(traceback.format_exc(), flush=True)
         return 1
     else:
+        if args.summary_report is not None:
+            args.summary_report.parent.mkdir(parents=True, exist_ok=True)
+            args.summary_report.write_text(
+                json.dumps(summary, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
         print(json.dumps(summary, indent=2, sort_keys=True))
         return 0
 

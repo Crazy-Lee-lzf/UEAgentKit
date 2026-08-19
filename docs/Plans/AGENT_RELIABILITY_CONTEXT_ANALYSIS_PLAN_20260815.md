@@ -1,11 +1,11 @@
 # UEAgentKit 0.8.x Context / Analysis / Agent Reliability 执行计划
 
-> 更新时间：2026-08-18
-> 当前基线：`feature/agent-reliability@b9203e4`
-> 当前状态：R0 Task Context 与 R1 Impact Analysis 已全部完成并本地提交。R2 Semantic Diff 已获明确指令，按一个完整大任务一次性推进：主 Agent 可内部拆分/并行/做 checkpoint，但不中途等待用户逐片确认；完成整个 R2、真实 UE/Reforge Smoke、全量门禁与文档同步后一次性汇报并停止。R3–R5 未开始。
+> 更新时间：2026-08-19
+> R2 执行起始基线：`feature/agent-reliability@8d90aa5`（包含 R1 commit `b9203e4`）
+> 当前状态：R0 Task Context、R1 Impact Analysis 与 R2 Semantic Diff 已全部完成。R2 已完成真实 UE5.6 Smoke、全量门禁与文档同步，并在 R3 停止点前停下；R3–R5 未开始。
 > 建议开发分支：`feature/agent-reliability`（已创建，勿 Push）
 > 横向长期分支：`feature/performance-benchmarks`
-> 执行方式：按大里程碑推进。R2 当前按单个完整任务执行，详细边界见 `docs/Handoffs/AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md`。
+> 执行方式：按大里程碑推进。R2 完成结果见 `docs/Plans/AGENT_RELIABILITY_R2_SEMANTIC_DIFF_DESIGN_20260819.md`，执行边界见 `docs/Handoffs/AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md`。
 
 ---
 
@@ -410,9 +410,9 @@ SHA before != SHA after
 
 优先从现有 Snapshot / OperationSpec / Canonical Export 派生，不要重新加载整项目。
 
-### 6.2 当前执行指令（2026-08-18）
+### 6.2 完成结果（2026-08-19）
 
-R2 已获明确指令，按**一个完整大任务**一次性完成，不再按小 Slice 等待逐片确认。Primary Agent 可以内部拆分 R2.0 复用审计、SemanticDiffService、Domain Adapter、MCP 契约、真实 UE Smoke 与全量回归，并使用 Subagent 并行做只读审计、测试和 Smoke 结果结构化，但对用户只保留一个 R2 最终验收点。允许根据当前仓库中更合适的既有抽象调整实现方式，但不得偏离目标、边界和验收标准；任何实质偏离必须在最终汇报说明原因。
+R2 已按**一个完整大任务**一次性完成。实现复用了既有 Change Set journal、Plan、LiveApply transaction、Authorized Save、Canonical Export 与 Independent Verify evidence，没有新增 Change Set 持久化 Schema，也没有扩大 Writer。新增 `ue_analyze_semantic_diff` 只接受显式 Change Set，以确定性 Domain Adapter 对齐 intent 与 live/persisted/verified actual evidence；expected no-op 使用独立 `noop_*` Operation 收束，避免伪造事务、保存或验证证据。
 
 完整执行规范见：
 
@@ -432,6 +432,10 @@ R0/R1 渐进展开集成
 ```
 
 R2 不生成最终 Trust Verdict；Semantic Diff 是否足以证明任务正确留给 R3。R2 完成后必须停止，不自动进入 R3。
+
+详细设计、R2.0 复用矩阵、测试和真实 Smoke 结果见：
+
+`docs/Plans/AGENT_RELIABILITY_R2_SEMANTIC_DIFF_DESIGN_20260819.md`
 
 ---
 
@@ -661,7 +665,7 @@ G9  本地 Commit
 8. 独立本地 Commit（不 Push）。
 ```
 
-R0.0/R0.1 完成后按交接执行 R0-S（真实 Reforge Context Smoke）+ R0.2（Deterministic Relevant Asset Discovery），2026-08-16 完成并本地提交；随后按新指令完成 R0.3（只读 Cross-source Correlation），R0 里程碑至此完成；2026-08-18 按 `AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md` 一次性完成整个 R1（Impact Analysis），R1 里程碑标记完成，停止在 R2 之前。
+R0.0/R0.1 完成后按交接执行 R0-S（真实 Reforge Context Smoke）+ R0.2（Deterministic Relevant Asset Discovery），2026-08-16 完成并本地提交；随后按新指令完成 R0.3（只读 Cross-source Correlation），R0 里程碑至此完成；2026-08-18 按 `AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md` 一次性完成整个 R1（Impact Analysis）；2026-08-19 按 `AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md` 一次性完成整个 R2（Semantic Diff），并停止在 R3 之前。
 
 R0-S + R0.2 概览：
 
@@ -753,6 +757,34 @@ R1（Impact Analysis，2026-08-18 一次性完成并本地提交，R1 里程碑�
 9. 门禁：Ruff 通过；Python 全量 592/592（原 557，+35）；git diff --check 通过；无 C++
    变更无需 UE Build。文档同步：spec/MCP_SERVER.md、ROADMAP.md、PROJECT_STATUS.md、
    本计划、新 R1 设计/审计文档。独立本地 Commit（不 Push），停止在 R2 之前。
+```
+
+R2（Semantic Diff，2026-08-19 一次性完成，R2 里程碑标记完成）概览：
+
+```text
+1. R2.0 evidence audit 完成：确认 Change Set Plan、LiveApply transaction、Persisted Canonical/
+   commandlet report 与独立 Verify Canonical 的真实证据边界；verified actual 不复用 Commit report。
+2. 新公共只读 Tool ue_analyze_semantic_diff：只接受显式 change_set_id，支持 auto/live/
+   persisted/verified、精确 /Game 资产过滤、include_unchanged、max_changes 与 Token 硬预算；
+   返回 Expected/Actual/Matched/Unexpected/Missing Expected/Unchanged Critical、Gap、Risk。
+3. 四个既有受控域 Adapter 落地：Data Asset scalar/reference/Struct/Array/Set/Map，DataTable
+   cell/row-fields/add/remove/rename，Material Instance scalar/vector/texture/static-switch，
+   Blueprint variable/component/pin-default；没有扩展 Writer 或任意 UObject/脚本执行能力。
+4. 多 Operation、多资产、同路径 operationChain、stable SHA-256 ID、固定排序、Revision
+   freshness/stale、显式 truncation 与全局边界均有契约和回归测试；分析对 Change Set 使用深拷贝，
+   只读调用不会改写状态。
+5. expected no-op 使用独立 noop_* Operation，终态 no-op、validation=no-op、saveState=
+   not-required；仅 baseline Canonical Revision 精确匹配 expectedRevision 时形成 persisted evidence，
+   不伪造 transaction/receipt/journal/save/verify。
+6. R0 仅在显式 Change Set found 时建议 R2；R2 遇到 missing/unexpected 只建议显式调用 R1，
+   不自动展开引用图。
+7. 真实 UE5.6 DirectHost（不是 Reforge）Smoke 通过：ClosedLoop 四域共 12 个 live/persisted/
+   verified 结果全部 expected=actual=matched=1、unexpected=missing=0；Blueprint commandlet 的
+   persisted/verified 同样匹配，verified actual 来自独立 full Canonical；fixture/Revision/SQLite
+   恢复与清理门禁通过。
+8. Ruff 通过，Python 全量 628/628，PowerShell parser、git diff --check、UTF-8/CRLF 与残留
+   清理门禁通过；无 C++ 变更，无需 UE Direct Build。文档同步并在本轮本地 Commit（不 Push），
+   严格停止在 R3 之前。
 ```
 
 ---

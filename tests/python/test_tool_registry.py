@@ -11,6 +11,8 @@ if str(SRC_ROOT) not in sys.path:
 
 from ue_agent_kit.tool_registry import (  # noqa: E402
     LIVE_EDITOR_METHODS,
+    LIVE_EDITOR_TOOL_NAMES,
+    QUERY_TOOL_NAMES,
     TOOL_DEFINITIONS_BY_NAME,
     TOOL_REGISTRY,
     tool_descriptors_for_mode,
@@ -40,6 +42,7 @@ EXPECTED_ALL_TOOLS = [
     "ue_get_asset",
     "ue_find_references",
     "ue_analyze_change_impact",
+    "ue_analyze_semantic_diff",
     "ue_get_task_context",
     "ue_editor_status",
     "ue_get_selection",
@@ -133,21 +136,21 @@ class ToolRegistryTests(unittest.TestCase):
             tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True),
             EXPECTED_ALL_TOOLS,
         )
-        self.assertEqual(len(tool_names_for_mode()), 7)
-        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 40)
-        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 57)
+        self.assertEqual(len(tool_names_for_mode()), 8)
+        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 41)
+        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 58)
         self.assertEqual(
             tool_names_for_mode(memory_enabled=True),
-            EXPECTED_ALL_TOOLS[:7] + EXPECTED_MEMORY_TOOLS,
+            QUERY_TOOL_NAMES + EXPECTED_MEMORY_TOOLS,
         )
-        self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 19)
+        self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 20)
         self.assertEqual(
             len(tool_names_for_mode(live_editor_enabled=True, memory_enabled=True)),
-            52,
+            53,
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
-            69,
+            70,
         )
         self.assertEqual(
             len(
@@ -157,7 +160,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-            102,
+            103,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:
@@ -219,8 +222,14 @@ class ToolRegistryTests(unittest.TestCase):
             list(LIVE_EDITOR_METHODS),
             [
                 name
-                for name in EXPECTED_ALL_TOOLS[7:40]
-                if name not in {"ue_start_animation_scale_audit", "ue_get_animation_scale_audit", "ue_cancel_animation_scale_audit", "ue_export_animation_scale_audit_report"}
+                for name in LIVE_EDITOR_TOOL_NAMES
+                if name
+                not in {
+                    "ue_start_animation_scale_audit",
+                    "ue_get_animation_scale_audit",
+                    "ue_cancel_animation_scale_audit",
+                    "ue_export_animation_scale_audit_report",
+                }
             ],
         )
         self.assertEqual(
@@ -236,6 +245,9 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertEqual(TOOL_DEFINITIONS_BY_NAME["ue_get_task_context"].group, "query")
         self.assertIn("ue_get_task_context", tool_names_for_mode())
         self.assertEqual(TOOL_DEFINITIONS_BY_NAME["ue_get_task_context"].live_method, "")
+        self.assertTrue(TOOL_DEFINITIONS_BY_NAME["ue_analyze_semantic_diff"].read_only)
+        self.assertEqual(TOOL_DEFINITIONS_BY_NAME["ue_analyze_semantic_diff"].group, "query")
+        self.assertEqual(TOOL_DEFINITIONS_BY_NAME["ue_analyze_semantic_diff"].live_method, "")
         self.assertEqual(
             TOOL_DEFINITIONS_BY_NAME["ue_start_batch_task"].live_method,
             "editor.batchTask.start",
@@ -264,18 +276,20 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertEqual(
             [
                 name
-                for name in EXPECTED_ALL_TOOLS[7:40]
-                if name not in {
-                    "ue_start_animation_scale_audit", "ue_get_animation_scale_audit", "ue_cancel_animation_scale_audit",
+                for name in LIVE_EDITOR_TOOL_NAMES
+                if name
+                not in {
+                    "ue_start_animation_scale_audit",
+                    "ue_get_animation_scale_audit",
+                    "ue_cancel_animation_scale_audit",
                     "ue_export_animation_scale_audit_report",
-                    "ue_get_editor_context", "ue_start_batch_task", "ue_get_batch_task", "ue_cancel_batch_task",
+                    "ue_get_editor_context",
+                    "ue_start_batch_task",
+                    "ue_get_batch_task",
+                    "ue_cancel_batch_task",
                 }
             ],
-            [
-                definition.name
-                for definition in TOOL_REGISTRY
-                if definition.group in {"live-read", "live-action"}
-            ],
+            [definition.name for definition in TOOL_REGISTRY if definition.group in {"live-read", "live-action"}],
         )
         descriptors = tool_descriptors_for_mode(
             live_editor_enabled=True,
@@ -300,27 +314,14 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertEqual(
             [item["name"] for item in memory_descriptors],
-            EXPECTED_ALL_TOOLS[:7] + EXPECTED_MEMORY_TOOLS,
+            QUERY_TOOL_NAMES + EXPECTED_MEMORY_TOOLS,
         )
 
     def test_live_action_handlers_keep_bounded_execution_surface(self) -> None:
-        private_root = (
-            ROOT
-            / "Plugin"
-            / "UEAgentKit"
-            / "Source"
-            / "UEAgentKitEditor"
-            / "Private"
-        )
-        navigation = (private_root / "EditorBridgeNavigationHandlers.cpp").read_text(
-            encoding="utf-8"
-        )
-        validation = (private_root / "EditorBridgeValidationHandlers.cpp").read_text(
-            encoding="utf-8"
-        )
-        automation = (private_root / "EditorBridgeAutomationHandlers.cpp").read_text(
-            encoding="utf-8"
-        )
+        private_root = ROOT / "Plugin" / "UEAgentKit" / "Source" / "UEAgentKitEditor" / "Private"
+        navigation = (private_root / "EditorBridgeNavigationHandlers.cpp").read_text(encoding="utf-8")
+        validation = (private_root / "EditorBridgeValidationHandlers.cpp").read_text(encoding="utf-8")
+        automation = (private_root / "EditorBridgeAutomationHandlers.cpp").read_text(encoding="utf-8")
         save = (private_root / "EditorBridgeSaveHandlers.cpp").read_text(encoding="utf-8")
         core = (private_root / "EditorBridge.cpp").read_text(encoding="utf-8")
         live_write = (private_root / "EditorBridgeWriteHandlers.cpp").read_text(encoding="utf-8")
@@ -360,16 +361,9 @@ class ToolRegistryTests(unittest.TestCase):
             self.assertIn(required, combined)
 
         build_rules = (
-            ROOT
-            / "Plugin"
-            / "UEAgentKit"
-            / "Source"
-            / "UEAgentKitEditor"
-            / "UEAgentKitEditor.Build.cs"
+            ROOT / "Plugin" / "UEAgentKit" / "Source" / "UEAgentKitEditor" / "UEAgentKitEditor.Build.cs"
         ).read_text(encoding="utf-8")
-        plugin_descriptor = (
-            ROOT / "Plugin" / "UEAgentKit" / "UEAgentKit.uplugin"
-        ).read_text(encoding="utf-8")
+        plugin_descriptor = (ROOT / "Plugin" / "UEAgentKit" / "UEAgentKit.uplugin").read_text(encoding="utf-8")
         self.assertIn("UPackage::SavePackage", save)
         self.assertNotIn("SaveAll", save)
         self.assertNotIn("PromptForCheckoutAndSave", save)
@@ -384,9 +378,7 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertNotIn("LoadObject", scalar_section)
         self.assertNotIn("StaticLoadObject", scalar_section)
         self.assertNotIn("SavePackage", live_modules)
-        live_write_frame = (private_root / "LiveWriteTransaction.cpp").read_text(
-            encoding="utf-8"
-        )
+        live_write_frame = (private_root / "LiveWriteTransaction.cpp").read_text(encoding="utf-8")
         self.assertIn("FScopedTransaction", live_write_frame)
         self.assertIn("Asset->Modify()", live_write_frame)
         self.assertIn("MarkPackageDirty", live_write_frame)
@@ -452,7 +444,9 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertIn("live-editor-write-undo-verify-failed", live_write)
         self.assertIn("Record->AfterValue", live_write)
         self.assertNotIn("SavePackage", live_write)
-        noop_branch = live_write_frame.split("IO->SemanticEqual(BeforeValue, AfterValue))", 1)[1]        # A no-op must restore the captured snapshot before restoring the Dirty flag
+        noop_branch = live_write_frame.split("IO->SemanticEqual(BeforeValue, AfterValue))", 1)[
+            1
+        ]  # A no-op must restore the captured snapshot before restoring the Dirty flag
         # and cancelling the transaction, because the apply path may already have
         # cleared and rebuilt containers or parameter entries for identical values.
         self.assertLess(
@@ -469,9 +463,7 @@ class ToolRegistryTests(unittest.TestCase):
         # The aggregated Editor Context handler must remain read-only: it may only
         # compose existing builders and bounded log queries, never load, save,
         # modify selection, execute commands, or expose arbitrary paths.
-        context_handler = (private_root / "EditorBridgeContextHandlers.cpp").read_text(
-            encoding="utf-8"
-        )
+        context_handler = (private_root / "EditorBridgeContextHandlers.cpp").read_text(encoding="utf-8")
         for forbidden in (
             "LoadObject",
             "StaticLoadObject",
@@ -540,7 +532,7 @@ class ToolRegistryTests(unittest.TestCase):
             "MaxConcurrentTasks",
             "live-editor-batch-task-busy",
             "live-editor-batch-task-not-found",
-            "TEXT(\"scanCurrentWorld\")",
+            'TEXT("scanCurrentWorld")',
             "IsSafeTaskId",
         ):
             self.assertIn(required, batch_manager + batch_handlers + batch_manager_header)
@@ -552,7 +544,7 @@ class ToolRegistryTests(unittest.TestCase):
             "editor.batchTask.cancel",
         ):
             self.assertIn(f'TEXT("{method}")', core)
-            self.assertNotIn(f"TEXT(\"{method}\")", batch_manager + batch_handlers)
+            self.assertNotIn(f'TEXT("{method}")', batch_manager + batch_handlers)
 
         # Change Sets are journaled under the fixed Work Root and must never accept
         # client-supplied paths, shell, Python, Console, SQL, or arbitrary writes.
@@ -587,12 +579,10 @@ class ToolRegistryTests(unittest.TestCase):
             self.assertIn(required, change_set_module)
         workflow_module = (ROOT / "src" / "ue_agent_kit" / "mcp_workflow_tools.py").read_text(encoding="utf-8")
         self.assertEqual(
-            workflow_module.count("change_set_id: str = \"\""),
-            5,
+            workflow_module.count('change_set_id: str = ""'),
+            7,
         )
-        workflow_service_module = (ROOT / "src" / "ue_agent_kit" / "agent_workflow.py").read_text(
-            encoding="utf-8"
-        )
+        workflow_service_module = (ROOT / "src" / "ue_agent_kit" / "agent_workflow.py").read_text(encoding="utf-8")
         for code in (
             "change-set-not-found",
             "change-set-full",

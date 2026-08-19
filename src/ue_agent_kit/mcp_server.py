@@ -65,6 +65,14 @@ from .query_protocol import (
     MIN_OUTPUT_TOKEN_BUDGET,
     ContinuationTokenError,
 )
+from .semantic_diff import (
+    MAX_SEMANTIC_DIFF_ASSETS,
+    MAX_SEMANTIC_DIFF_CHANGES,
+    MAX_SEMANTIC_DIFF_GAPS,
+    MAX_SEMANTIC_DIFF_UNCHANGED,
+    SEMANTIC_DIFF_SCHEMA_VERSION,
+)
+from .semantic_diff_workflow import SemanticDiffEvidenceError
 from .tool_registry import (
     HIGH_LEVEL_WRITE_TOOL_NAMES,
     LIVE_EDITOR_TOOL_NAMES,
@@ -109,6 +117,7 @@ STRICT_MEMORY_ARGUMENT_TOOL_NAMES = (
 )
 STRICT_TASK_CONTEXT_ARGUMENT_TOOL_NAMES = ("ue_get_task_context",)
 STRICT_IMPACT_ARGUMENT_TOOL_NAMES = ("ue_analyze_change_impact",)
+STRICT_SEMANTIC_DIFF_ARGUMENT_TOOL_NAMES = ("ue_analyze_semantic_diff",)
 
 
 def _enforce_strict_tool_arguments(server: Any, tool_names: Sequence[str]) -> None:
@@ -145,6 +154,9 @@ def _server_instructions(
         "Use ue_analyze_change_impact with exact /Game target paths for a deterministic bounded "
         "reverse-reference impact analysis (direct and indirect consumers, validation targets, and "
         "deterministic risks); static references never prove runtime breakage. "
+        "Use ue_analyze_semantic_diff only with an explicit change_set_id to align Plan intent with "
+        "live, persisted, or independently verified evidence; it is read-only, never discovers private "
+        "Change Sets, and does not issue an R3 trust verdict. "
     )
     live_text = (
         "The ue_editor_*, ue_get_*, bounded Batch Task, and journaled Change Set live tools operate "
@@ -622,6 +634,29 @@ def _capabilities_response(
             "unsupportedSubjectKinds": list(UNSUPPORTED_SUBJECT_KINDS),
             "highFanoutThreshold": 15,
         },
+        "semanticDiff": {
+            "available": True,
+            "workflowEvidenceAvailable": write_tools_enabled,
+            "tool": "ue_analyze_semantic_diff",
+            "schemaVersion": SEMANTIC_DIFF_SCHEMA_VERSION,
+            "readOnly": True,
+            "deterministic": True,
+            "modelInference": False,
+            "changeSetExplicitOnly": True,
+            "changeSetAutoDiscovery": False,
+            "stages": ["auto", "live", "persisted", "verified"],
+            "verifiedStageIsTrustVerdict": False,
+            "domains": {
+                "blueprintNarrowWrite": ["property", "component", "pin-default"],
+                "dataAssetProperty": ["scalar", "object-class-ref", "soft-ref", "struct", "array", "set", "map"],
+                "dataTable": ["cell", "row-fields", "row-add", "row-remove", "row-rename"],
+                "materialInstance": ["scalar", "vector", "texture", "static-switch"],
+            },
+            "maxAssets": MAX_SEMANTIC_DIFF_ASSETS,
+            "maxChanges": MAX_SEMANTIC_DIFF_CHANGES,
+            "maxUnchangedCriticalFields": MAX_SEMANTIC_DIFF_UNCHANGED,
+            "maxAnalysisGaps": MAX_SEMANTIC_DIFF_GAPS,
+        },
         "limits": {
             "searchResults": MAX_MCP_SEARCH_LIMIT,
             "assetSymbols": MAX_MCP_SYMBOL_LIMIT,
@@ -661,6 +696,10 @@ def _capabilities_response(
             "impactConsumers": MAX_IMPACT_CONSUMERS,
             "impactEdges": MAX_IMPACT_EDGES,
             "impactPaths": MAX_IMPACT_PATHS,
+            "semanticDiffAssets": MAX_SEMANTIC_DIFF_ASSETS,
+            "semanticDiffChanges": MAX_SEMANTIC_DIFF_CHANGES,
+            "semanticDiffUnchangedCriticalFields": MAX_SEMANTIC_DIFF_UNCHANGED,
+            "semanticDiffAnalysisGaps": MAX_SEMANTIC_DIFF_GAPS,
         },
         "responseContract": {
             "schemaVersion": "1.0",
@@ -845,6 +884,18 @@ def _project_status_response(
             "supportsRuntimeSensitivityClassification": False,
             "runtimeSensitivityState": "not-proven-with-current-evidence",
         },
+        "semanticDiff": {
+            "available": True,
+            "workflowEvidenceAvailable": write_tools_enabled,
+            "tool": "ue_analyze_semantic_diff",
+            "schemaVersion": SEMANTIC_DIFF_SCHEMA_VERSION,
+            "readOnly": True,
+            "deterministic": True,
+            "modelInference": False,
+            "changeSetExplicitOnly": True,
+            "changeSetAutoDiscovery": False,
+            "stages": ["auto", "live", "persisted", "verified"],
+        },
     }
 
 
@@ -915,6 +966,9 @@ def _suggested_action(code: str) -> str:
         "unsupported-impact-subject": "Use subject_kind asset-level or blueprint-symbol, or repeat the analysis without a structured subject.",
         "impact-subject-not-found": "Pass the exact symbol stable ID as reported by ue_search or ue_get_asset symbols.",
         "impact-subject-asset-mismatch": "Use the exact /Game asset path that owns the blueprint-symbol subject.",
+        "insufficient-evidence": "Use an explicit Change Set with bound operations and retain its fixed Workflow evidence artifacts.",
+        "semantic-diff-stage-unavailable": "Request one of the availableStages reported in details, or complete save and independent verify first.",
+        "semantic-diff-evidence-stale": "Refresh or independently verify the exact affected assets before re-running Semantic Diff.",
     }
     if code in exact:
         return exact[code]
@@ -954,6 +1008,9 @@ def _error_response(tool: str, error: Exception, *, read_only: bool) -> dict[str
         code = "invalid-continuation-token"
     elif isinstance(error, ImpactAnalysisError):
         code = error.code
+    elif isinstance(error, SemanticDiffEvidenceError):
+        code = error.code
+        details = error.details
     elif isinstance(error, ValueError):
         code = "invalid-arguments"
     elif isinstance(error, sqlite3.Error):
@@ -1065,6 +1122,7 @@ def create_mcp_server(
         ),
     )
     _enforce_strict_tool_arguments(server, STRICT_IMPACT_ARGUMENT_TOOL_NAMES)
+    _enforce_strict_tool_arguments(server, STRICT_SEMANTIC_DIFF_ARGUMENT_TOOL_NAMES)
     register_task_context_tools(
         server=server,
         task_context_service=TaskContextService(

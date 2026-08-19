@@ -325,7 +325,6 @@ class FakeWorkflowRunner:
         if arguments[0] != "powershell.exe" or cwd.name != "tool" or timeout_seconds != 1800:
             raise AssertionError("unsafe process invocation")
 
-
     def test_animation_live_write_verify_values_separate_runtime_and_persisted_fields(self) -> None:
         after_value = {
             "rootBone": "Root",
@@ -367,6 +366,7 @@ class FakeWorkflowRunner:
         self.assertNotIn("finalRootScale", persisted)
         self.assertEqual(runtime["finalEvaluationStatus"], "success")
         self.assertEqual(runtime["finalRootScale"]["x"], 100.0)
+
 
 class AgentWorkflowTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -528,7 +528,9 @@ class AgentWorkflowTests(unittest.TestCase):
                 }
 
             def call_method(self, method: str, params: dict[str, Any], *, timeout_seconds: float) -> dict[str, Any]:
-                raise AssertionError(f"save should not execute during Preview or invalid confirmation: {method} {params} {timeout_seconds}")
+                raise AssertionError(
+                    f"save should not execute during Preview or invalid confirmation: {method} {params} {timeout_seconds}"
+                )
 
         service = PatchWorkflowService(
             FakeIndexService(),
@@ -540,7 +542,7 @@ class AgentWorkflowTests(unittest.TestCase):
         preview = service.save_authorized_asset(ASSET_PATH)
         self.assertEqual(preview["mode"], "Preview")
         self.assertTrue(preview["saveReceipt"].startswith("save_"))
-        self.assertTrue(preview["packageDirty"] )
+        self.assertTrue(preview["packageDirty"])
         self.assertFalse(preview["saved"])
         with self.assertRaises(WorkflowError) as invalid:
             service.save_authorized_asset(
@@ -1331,6 +1333,7 @@ class AgentWorkflowTests(unittest.TestCase):
                 },
             },
         )
+
         class LiveDataTableRenameService:
             def __init__(self) -> None:
                 self.calls: list[tuple[str, dict[str, Any]]] = []
@@ -1403,10 +1406,11 @@ class AgentWorkflowTests(unittest.TestCase):
             ],
         )
 
-    def test_live_write_tool_count_and_names_are_unchanged(self) -> None:
+    def test_live_write_tool_count_and_names_include_semantic_diff(self) -> None:
         names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
-        self.assertEqual(len(names), 90)
+        self.assertEqual(len(names), 91)
         self.assertIn("ue_analyze_change_impact", names)
+        self.assertIn("ue_analyze_semantic_diff", names)
         self.assertIn("ue_set_asset_property", names)
         self.assertIn("ue_set_asset_reference_property", names)
         self.assertIn("ue_apply_asset_property_live", names)
@@ -1467,6 +1471,7 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertEqual(disabled.exception.code, "live-editor-write-disabled")
 
     def test_complete_plan_dry_run_apply_verify_and_rollback_lifecycle(self) -> None:
+        change_set_id = self.service.create_change_set(title="Commandlet semantic evidence")["changeSetId"]
         plan = self.service.plan_patch(
             asset_path=ASSET_PATH,
             operation="setAssetProperty",
@@ -1489,7 +1494,13 @@ class AgentWorkflowTests(unittest.TestCase):
             plan["planId"],
             dry_run["dryRunReceipt"],
             f"COMMIT {plan['planId']}",
+            change_set_id=change_set_id,
         )
+        self.assertEqual(applied["changeSetId"], change_set_id)
+        self.assertTrue(applied["changeSetUpdated"])
+        saved_change_set = self.service.get_change_set(change_set_id)
+        self.assertEqual(saved_change_set["status"], "saved")
+        self.assertTrue(saved_change_set["operations"][0]["receipt"].startswith("apply_"))
         self.assertEqual(applied["afterRevision"], AFTER_REVISION)
         self.assertEqual(applied["indexFreshness"]["state"], "stale")
         lifecycle = self.service.status()["indexLifecycle"]
@@ -1511,8 +1522,10 @@ class AgentWorkflowTests(unittest.TestCase):
                 f"COMMIT {plan['planId']}",
             )
 
-        verified = self.service.verify_asset(applied["applyReceipt"])
+        verified = self.service.verify_asset(applied["applyReceipt"], change_set_id=change_set_id)
         self.assertTrue(verified["verified"])
+        self.assertEqual(verified["changeSetId"], change_set_id)
+        self.assertEqual(self.service.get_change_set(change_set_id)["status"], "verified")
         self.assertEqual(verified["actualRevision"], AFTER_REVISION)
         self.assertEqual(verified["indexFreshness"]["state"], "stale")
         evidence = verified["memoryTaskEvidence"]
@@ -1638,6 +1651,64 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertIn("memoryTaskEvidence.arguments", restored["nextStep"])
         self.assertFalse(self.service.status()["indexLifecycle"]["sessionStale"])
         self.assertEqual(self.runner.revision, BEFORE_REVISION)
+
+    def test_blueprint_verify_uses_full_export_with_unchanged_defaults(self) -> None:
+        class BlueprintVerifyRunner(FakeWorkflowRunner):
+            def __init__(self) -> None:
+                super().__init__()
+                self.export_arguments: list[str] = []
+
+            def __call__(self, arguments: list[str], cwd: Path, timeout_seconds: int) -> ProcessResult:
+                script, values = self._arguments(arguments)
+                if script != "RunExport.ps1":
+                    return super().__call__(arguments, cwd, timeout_seconds)
+                self.assert_safe(arguments, cwd, timeout_seconds)
+                self.calls.append((script, values))
+                self.export_arguments = list(arguments)
+                output = Path(values["-Output"])
+                write_json(output / "manifest.json", {"projectName": PROJECT, "failureCount": 0})
+                write_json(
+                    output / "canonical" / "asset.json",
+                    {
+                        "projectName": PROJECT,
+                        "assetPath": ASSET_PATH,
+                        "assetClass": "/Script/Engine.Blueprint",
+                        "revision": {"available": True, "packageDirty": False, "value": self.revision},
+                    },
+                )
+                return ProcessResult(0, "", "")
+
+        export_script = self.tool_root / "scripts" / "RunExport.ps1"
+        export_script.write_text("# fixture\n", encoding="utf-8")
+        runner = BlueprintVerifyRunner()
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=runner,
+            freshness_tracker=self.freshness,
+        )
+        plan = service.plan_patch(
+            asset_path=ASSET_PATH,
+            operation="setAssetProperty",
+            target={"propertyPath": "BoolValue"},
+            value=True,
+        )
+        dry_run = service.dry_run_patch(plan["planId"])
+        applied = service.apply_patch(
+            plan["planId"],
+            dry_run["dryRunReceipt"],
+            f"COMMIT {plan['planId']}",
+        )
+        service._applies[applied["applyReceipt"]].report["assetClass"] = "/Script/Engine.Blueprint"
+
+        verified = service.verify_asset(applied["applyReceipt"])
+
+        self.assertTrue(verified["verified"])
+        self.assertEqual(runner.calls[-1][0], "RunExport.ps1")
+        self.assertEqual(runner.calls[-1][1]["-Asset"], ASSET_PATH.split(".", 1)[0])
+        self.assertEqual(runner.calls[-1][1]["-Profile"], "full")
+        self.assertEqual(runner.calls[-1][1]["-Format"], "json")
+        self.assertIn("-IncludeUnchangedDefaults", runner.export_arguments)
 
     def test_plan_rejects_stale_or_unavailable_index_state(self) -> None:
         self.freshness.state = "stale"
@@ -1835,7 +1906,6 @@ class AgentWorkflowTests(unittest.TestCase):
                 process_runner=self.runner,
                 freshness_tracker=FakeFreshnessTracker(),
             )
-
 
     def test_high_level_change_defaults_to_plan_and_can_run_dry_run(self) -> None:
         planned = self.service.prepare_high_level_change(
@@ -2250,7 +2320,9 @@ class AgentWorkflowTests(unittest.TestCase):
             if method in {"editor.undoAssetPropertyLive", "editor.discardAssetPropertyLive"}:
                 self.dirty = False
                 return {
-                    "action": "undo-asset-property-live" if method == "editor.undoAssetPropertyLive" else "discard-asset-property-live",
+                    "action": "undo-asset-property-live"
+                    if method == "editor.undoAssetPropertyLive"
+                    else "discard-asset-property-live",
                     "operation": "setAssetProperty",
                     "valueKind": "scalar",
                     "assetPath": ASSET_PATH,
@@ -2352,9 +2424,7 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertEqual(result["mode"], "LiveUndo")
         self.assertNotIn(ASSET_PATH, service._live_apply_by_asset)
         self.assertNotIn(applied["liveApplyReceipt"], service._live_applies)
-        self.assertFalse(
-            (self.work_root / "live-write-journal" / f"{applied['liveApplyReceipt']}.json").exists()
-        )
+        self.assertFalse((self.work_root / "live-write-journal" / f"{applied['liveApplyReceipt']}.json").exists())
         with self.assertRaises(WorkflowError) as missing:
             service.verify_live_write(ASSET_PATH)
         self.assertEqual(missing.exception.code, "live-write-verify-not-found")
@@ -2488,9 +2558,7 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertEqual(verified_change_set["saveState"]["state"], "saved")
         self.assertEqual(verified_change_set["operations"][0]["status"], "verified")
         self.assertNotIn(applied["liveApplyReceipt"], service._live_applies)
-        self.assertFalse(
-            (self.work_root / "live-write-journal" / f"{applied['liveApplyReceipt']}.json").exists()
-        )
+        self.assertFalse((self.work_root / "live-write-journal" / f"{applied['liveApplyReceipt']}.json").exists())
 
     def test_authorized_save_promotes_standard_rollback_manifest_and_dry_run_is_zero_write(self) -> None:
         fresh_bytes = b"rollback-before" * 8
@@ -2953,7 +3021,7 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertEqual(missing.exception.code, "change-set-not-found")
         self.assertEqual(bridge.calls, [])
 
-    def test_change_set_apply_noop_binds_nothing(self) -> None:
+    def test_change_set_apply_noop_binds_terminal_noop_without_live_transaction(self) -> None:
         class NoopWriteService:
             def call_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
                 del method, params
@@ -2968,8 +3036,29 @@ class AgentWorkflowTests(unittest.TestCase):
         applied = self._apply_bound_change_set(service, change_set_id, description="Change Set noop")
         self.assertFalse(applied["changed"])
         self.assertEqual(applied["liveApplyReceipt"], "")
-        self.assertFalse(applied["changeSetBound"])
-        self.assertEqual(service.get_change_set(change_set_id)["status"], "planned")
+        self.assertFalse(applied["journalPersisted"])
+        self.assertTrue(applied["changeSetBound"])
+        self.assertTrue(applied["changeSetJournalPersisted"])
+        self.assertTrue(applied["changeSetOperationId"].startswith("noop_"))
+        details = service.get_change_set(change_set_id)
+        self.assertEqual(details["status"], "no-op")
+        self.assertEqual(details["transactionIds"], [])
+        self.assertEqual(details["activeReceiptCount"], 0)
+        self.assertEqual(details["validation"]["state"], "no-op")
+        self.assertEqual(details["saveState"]["state"], "not-required")
+        operation = details["operations"][0]
+        self.assertEqual(operation["operationId"], applied["changeSetOperationId"])
+        self.assertEqual(operation["liveApplyReceipt"], "")
+        self.assertEqual(operation["transactionId"], "")
+        self.assertEqual(operation["status"], "no-op")
+        self.assertTrue(operation["noOp"])
+        self.assertFalse(operation["active"])
+        self.assertFalse(operation["saved"])
+        self.assertFalse(operation["verified"])
+        self.assertEqual(service._live_applies, {})
+        self.assertFalse(
+            (self.work_root / "live-write-journal" / f"{applied['changeSetOperationId']}.json").exists()
+        )
 
     def test_change_set_undo_preserves_terminal_history(self) -> None:
         bridge = AgentWorkflowTests.ClosedLoopLiveService(dirty=True)
@@ -2989,9 +3078,7 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertEqual(details["receiptCount"], 1)
         self.assertEqual(details["activeReceiptCount"], 0)
         self.assertEqual(details["operations"][0]["status"], "undone")
-        self.assertFalse(
-            (self.work_root / "live-write-journal" / f"{applied['liveApplyReceipt']}.json").exists()
-        )
+        self.assertFalse((self.work_root / "live-write-journal" / f"{applied['liveApplyReceipt']}.json").exists())
 
     def test_change_set_discard_preserves_terminal_history(self) -> None:
         bridge = AgentWorkflowTests.ClosedLoopLiveService(dirty=True)

@@ -1,6 +1,6 @@
 # UE Agent Kit 路线图
 
-更新时间：2026-08-18
+更新时间：2026-08-19
 
 当前已发布版本为 **0.7.0**，支持 Unreal Engine 5.6。Realtime Foundation、注册式 Live Editor Write、Schema v3 Memory/Context MVP、分帧 Batch Task 和持久化 Change Set 已正式进入本地发布。`feature/live-editor-realtime-io` 已 **fast-forward 合并进 `main`**（`5eb1759 → 56afc91`，含完整 Realtime Animation Tools 线）；动画功能扩展暂缓，后续只在真实任务或 Benchmark 证明存在高价值缺口时解冻。`feature/performance-benchmarks` 继续作为长期横向性能分支。当前首要目标转为 **0.8.x Context / Analysis / Agent Reliability**：先把现有 Index、Memory、Live Editor、Revision、Change Set 和验证证据组合成任务上下文、影响分析、语义 Diff 与可信结果判断，再由真实 Agent Benchmark 决定下一批 Writer。
 
@@ -11,9 +11,10 @@ UE Agent Kit 的长期定位是面向 AI Agent 的 Unreal Engine 项目智能层
 当前 Server 模式：
 
 ```text
-Offline             7 Tool（Memory 19）
-Live               40 Tool（Memory 52）
-Workflow           90 Tool（Memory 102）
+Offline             8 Tool（Memory 20）
+Live               41 Tool（Memory 53）
+Workflow-only       58 Tool（Memory 70）
+Live + Workflow     91 Tool（Memory 103）
 ```
 
 ## 已完成基础
@@ -124,11 +125,19 @@ R1（Impact Analysis）已在 `feature/agent-reliability` 一次性完成并本�
 - R0 集成：`ue_get_task_context.nextExpansions` 增加 impact-analysis 渐进入口（显式目标 / relevantAssets hint），默认 Context 不自动展开引用图。
 - 真实 Reforge 只读 Smoke（48 资产 immutable 索引）S1–S4 全部通过：S1 fan-out（23 direct / 282 edges / 14.4 ms）、S2 真实 2 跳（Wheel←VehicleBase←CargoBase，24 indirect）、S3 多目标共享 consumer 合并（24 direct / 8 indirect）、S4 零消费者边界语义。设计、复用审计、边界与建议性能指标见 [`Plans/AGENT_RELIABILITY_R1_IMPACT_ANALYSIS_DESIGN_20260818.md`](Plans/AGENT_RELIABILITY_R1_IMPACT_ANALYSIS_DESIGN_20260818.md)；完整执行规范见 [`Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md`](Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md)。
 
-### R2 状态（已获指令，完整大任务）
+### R2 状态（已完成，2026-08-19）
 
-R2（Semantic Diff）已获明确指令，按一个完整大任务一次性推进，不再按小 Slice 中途停。目标是新增 Change Set 驱动的只读 `ue_analyze_semantic_diff`，统一 Expected / Actual / Matched / Unexpected / Missing / Unchanged Critical 语义，并区分 live / persisted / verified Evidence Stage；首批必须覆盖当前已有稳定结构化 Evidence 的 Data Asset、DataTable、Material Instance 与 Blueprint 窄写入。完整执行规范见 [`Handoffs/AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md`](Handoffs/AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md)。
+R2（Semantic Diff）已在 `feature/agent-reliability` 一次性完成，**R2 里程碑标记完成**：
 
-R2 只负责事实级 Semantic Diff，不生成最终 Trust Verdict；最终任务是否可信留给 R3。R2 完成真实 UE/Reforge Smoke、全量门禁与文档同步后一次性汇报并停止。
+- 新增只读 query 组 Tool `ue_analyze_semantic_diff`，只接受显式 `change_set_id`；`stage=auto|live|persisted|verified`、精确 `/Game` 资产过滤（最多 8）、`include_unchanged`、有界 `max_changes` 与 Token Budget 均有严格契约，不扫描私有 Change Set，也不接受任意本地 before/after 文件。
+- 统一资产中心的 Expected / Actual / Matched / Unexpected / Missing Expected / Unchanged Critical / Analysis Gaps / Risks；稳定 SHA-256 ID、固定排序与裁剪规则覆盖单资产多 Operation、Change Set 多资产和同一路径多次修改（保留 `operationChain`，最终只比较首个 before 与最终 expected/actual）。
+- 四个确定性 Adapter 覆盖 Data Asset scalar/reference/struct/array/set/map、DataTable cell/row-fields/add/remove/rename、Material Instance scalar/vector/texture/static-switch，以及 Blueprint property/component/pin-default 窄写入；证据不足时显式保留 Gap，不扩展 Writer。
+- Evidence Stage 明确区分 Editor Memory LiveApply、授权保存后的 Canonical/commandlet Persisted、独立重载 Canonical Verified；`auto` 只选择所有返回 Operation 都完整具备的最高阶段，请求不可用阶段返回 `semantic-diff-stage-unavailable`。Verified Semantic Diff 仍不等于 R3 Trust Verdict。
+- `changed=false` 的 expected no-op 现在绑定独立 `noop_*` Change Set Operation，并以 `no-op` / `not-required` 终态收束；不制造假 Transaction、LiveApply Receipt、Live Journal、Save 或 Verify 证据。固定基线 Canonical Revision 与 Plan `expectedRevision` 完全一致时才可形成 persisted no-op evidence。
+- R0 仅在显式 Change Set 存在时建议 Semantic Diff；R2 在 missing/unexpected 时建议 R1 `ue_analyze_change_impact`，两者都不自动展开。
+- 真实 UE5.6 DirectHost Smoke 已覆盖 Data Asset、Material Instance、DataTable cell/rename 的 live/persisted/verified 共 12 个结果，以及 Blueprint `setVariableDefault` 的 commandlet persisted/verified；全部 expected=actual=matched、unexpected=missing=0，并完成恢复验证。无 C++ 变更，因此不要求 UE Direct Build。
+
+R2 设计、复用审计、协议、测试和边界见 [`Plans/AGENT_RELIABILITY_R2_SEMANTIC_DIFF_DESIGN_20260819.md`](Plans/AGENT_RELIABILITY_R2_SEMANTIC_DIFF_DESIGN_20260819.md)；完整执行规范见 [`Handoffs/AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md`](Handoffs/AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md)。R3 尚未开始，R2 完成后在 R3 停止点前停下。
 
 首批目标不是新增大量 UE 写入，而是回答：Agent 当前应该改什么、修改会影响什么、以及有什么证据证明结果正确。无法证明的结论必须明确标记为推断；保存成功和独立重载成功只属于 Persistence Evidence，不自动等同于整个任务成功。
 

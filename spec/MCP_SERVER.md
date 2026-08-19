@@ -15,11 +15,13 @@ ue_search
 ue_get_asset
 ue_find_references
 ue_get_task_context
+ue_analyze_change_impact
+ue_analyze_semantic_diff
 ```
 
 ### 固定项目 Live Editor 模式
 
-使用 `-EnableLiveEditor -ProjectPath <固定 .uproject>` 后，在六个离线查询 Tool 之外注册：
+使用 `-EnableLiveEditor -ProjectPath <固定 .uproject>` 后，在八个离线查询 Tool 之外注册：
 
 ```text
 ue_editor_status
@@ -261,6 +263,61 @@ max_output_tokens   默认 4096，范围 256–32768
 - 输出受 `max_output_tokens` 强制约束，裁剪阶梯固定：完整 Impact Path 明细 → consumer evidence → indirect consumer 列表（summary 计数保留）→ consumer referenceKinds → validationTargets → target identity 细节 → analysisGaps；summary、risks、nextActions 与 outputBudget 永不裁剪，裁剪原因显式返回。
 - 该 Tool 是纯只读 Query 能力，Offline / Live / Workflow 全模式可用；核心事实全部来自 immutable Index，不依赖 Memory / Live Editor / Workflow。`ue_get_task_context` 的 `nextExpansions` 在有显式 `asset_paths` 时建议 `impact-analysis-explicit-targets`、仅有 `relevantAssets` 时给有界 `impact-analysis-relevant-asset-hint`，但不会在默认 Context 中自动展开 depth≥2 引用图。
 
+### `ue_analyze_semantic_diff`（R2）
+
+以显式 Change Set 为唯一入口，将固定 Plan intent 与选定 Workflow Evidence Stage 的 before/after 状态对齐。该 Tool 属 query 组，`readOnly=true`、确定性、零模型推断；它不会创建、保存、验证或修改 Change Set，也不会扫描私有 `_change_sets`。
+
+```text
+change_set_id       必填，当前 Workflow 中的显式 Change Set ID
+stage               auto | live | persisted | verified，默认 auto
+asset_paths         可选，最多 8 个不重复的精确 /Game Object Path
+include_unchanged   默认 true
+max_changes         默认 64，范围 1..128
+max_output_tokens   默认 4096，范围 256..32768
+```
+
+请求不接受数据库、项目、Policy、before/after JSON 或任意本地路径；不自动发现 Change Set。请求阶段不完整时返回结构化 `semantic-diff-stage-unavailable` 并列出 `availableStages`，不会静默降级。
+
+响应 schema 1.0 以资产为中心，顶层按 `request / changeSet / evidenceStage / assets / analysisGaps / risks / riskSummary / summary / nextActions / outputBudget` 组织。每个资产报告 `beforeRevision / afterRevision / revisionChanged / stageEvidenceRevision`，以及：
+
+- `expectedChanges`：只来自固定 Plan target/value intent。
+- `actualChanges`：只来自 before evidence 与 selected-stage after evidence 的比较，不复制 expected。
+- `matchedChanges`：stable semantic identity 与语义值均一致。
+- `unexpectedChanges`：actual 中无法匹配任何 expected 的变化。
+- `missingExpectedChanges`：expected 在 selected stage 未被实际观察到。
+- `unchangedCriticalFields`：Adapter 能机械证明保持不变的少量关键字段；证据不足进入 `analysisGaps`。
+
+Change Entry 使用稳定 SHA-256 `changeId`、`assetPath/domain/operation/semanticPath/changeKind/beforeValue/afterValue/expectedValue/source/stage/status/details`。排序固定为 asset path → semantic path → change kind → stable ID；同一语义路径连续写入折叠为首个 before 到最终 expected/actual，并在 `details.operationChain` 保留中间 intent。资产过滤只改变返回视图，不改原 Evidence。输出硬上限为 8 资产、128 change、64 unchanged critical、32 gap；Token 裁剪优先去除辅助 details 和低优先级重复项，始终保留 Change Set、stage、资产身份、unexpected/missing 摘要、风险和 truncation 状态。
+
+Stage 规则：
+
+- `live`：LiveApply before/after transaction，仅证明 Editor Memory。
+- `persisted`：Authorized Save 后的 Canonical 或 commandlet apply report，证明 disk-backed 状态。
+- `verified`：独立进程重载的 Canonical，证明 reload 后语义状态；**不等于 R3 Trust Verdict**。
+- `auto`：只选择所有返回 Operation 都完整具备的最高阶段，并显式返回 `selected/selectionReason/sources`。
+
+四个 Adapter 只覆盖既有稳定受控写入：Data Asset scalar/object-class/soft reference/struct/array/set/map；DataTable cell/row-fields/add/remove/rename；Material Instance scalar/vector/texture/static-switch；Blueprint property/component/pin-default 窄写入。Set 使用无序 Canonical、Map 使用稳定 key identity、Struct 按字段、引用按资产/类路径；DataTable rename 保留 row-renamed 语义，Material Instance 区分 override add/remove/change。缺少完整 domain snapshot 时报告 gap，不扩展 Blueprint Graph、动画或通用 Writer。
+
+expected no-op 使用独立 `noop_*` Change Set Operation：没有 LiveApply receipt、transaction、journal、save 或 independent verify，状态为 `no-op`，validation 为 `no-op`，saveState 为 `not-required`。仅当固定 baseline Canonical Revision 精确等于 Plan `expectedRevision` 时可形成 persisted no-op evidence；no-op 没有 live/verified stage。同一资产混合 no-op 与真实写时，无法证明统一最终 snapshot 的阶段保守 unavailable。
+
+`ue_get_task_context` 只在显式 Change Set found 时建议 `semantic-diff-explicit-change-set`，不会自动运行 R2；Semantic Diff 出现 missing/unexpected 时，`nextActions` 可建议对显式资产调用 R1 `ue_analyze_change_impact`，不会在 R2 内遍历引用图。
+
+R2 的最终真实 UE5.6 验收使用 DirectHost regression fixture，不冒充 Reforge：
+
+```powershell
+scripts/TestMcpLiveClosedLoop.ps1 `
+  -EngineRoot E:\EPICGAME\UE_5.6 `
+  -ProjectPath E:\WorkSpace\UEAgentKit\Build\DirectHost\HostProject.uproject
+
+scripts/TestMcpBlueprintSemanticDiff.ps1 `
+  -EngineRoot E:\EPICGAME\UE_5.6 `
+  -ProjectPath E:\WorkSpace\UEAgentKit\Build\DirectHost\HostProject.uproject
+```
+
+ClosedLoop 覆盖 Data Asset、Material Instance、DataTable cell 与 rename 的 live/persisted/verified，共 12 个结果；全部 expected=actual=matched=1、unexpected=missing=0、`truncated=false`。恢复采用独立 Canonical fixture verification，5/5 通过；UE Reset 会重写语义等价的 package bytes，因此不把精确 hash 恢复作为该组测试的必要条件，冻结 Revision Export 与 SQLite 必须保持不变。
+
+Blueprint commandlet 使用已有 `setVariableDefault`，persisted/verified 均 expected=actual=matched=1、unexpected=missing=0；verified actual 必须来自独立 `full` Canonical Export（含 `IncludeUnchangedDefaults`），不能复用 Commit report。Rollback 后 package hash 恢复，Revision Export 不变，Transactions fixture 清理。两组本地 summary 位于 `Output/McpLiveClosedLoopSmoke/semantic-diff-summary.json` 与 `Output/McpBlueprintSemanticDiffSmoke/semantic-diff-summary.json`，只作本地证据，不纳入提交。
+
 ## 高层安全写入 Tool
 
 常见修改优先使用以下 Tool，Agent 不需要填写底层 Operation 名称或 Patch Target：
@@ -329,7 +386,7 @@ editor_session_id = Apply 结果中的 editorSessionId
 - Apply/Save 返回 `journalPersisted`。Journal I/O 失败不会反转已经成功的 Editor 操作，只在 `ue_workflow_status.liveWriteJournal` 中报告 `pendingRecordCount`、`recoveredRecordCount` 与 `journalErrorCount`。
 - 若目标包仍 Dirty：返回 `state=not-saved` 终态（`saved=false`、`verified=false`、`undoAvailable=true`、磁盘 Revision 未变），不伪装成功；`memoryTaskEvidence` 以 `cancelled` 结论记录“未持久化，可保存或撤销”，并明确 `independentReload=false`，因为该分支没有启动独立重载。下一步提示继续授权保存或 Undo/Discard；成功回退会直接关闭待处理 Live Apply 记录。
 - 若包干净但未经过授权保存（外部保存/手工撤销/Session 分叉）：拒绝 `live-write-verify-save-unauthorized` 并要求重新 Plan。
-- 若已授权保存：独立 Unreal 进程重载磁盘资产（RunAssetCatalog），校验导出的资产路径、干净的 SHA-256 Revision 与磁盘一致、Revision 相对冻结索引已变化（`live-write-verify-revision-unchanged` 拒绝未持久化），并按 Kind 提取导出值（DataAsset 属性 / MI 参数 / DataTable 行字段）与应用时 `afterValue` 做 JSON 级比对（`live-write-verify-value-mismatch` 拒绝保存前后被人工改动）。DataTable Rename 按 `newRowName` 提取目标行，其余 DataTable 操作按 `rowName`；通过后返回 `state=verified`、`actualRevision`、`expectedValue`/`exportedValue`、`undoAvailable=false`，并生成 `memoryTaskEvidence`（`succeeded` 结论，`independentReload=true`，task_key=`live-write:<planId>`，含 Plan/Apply（transactionId、undo 可用性）/Save（授权保存 backup-manifest 引用）/Verify（独立重载报告）证据与最终 Revision Set）。
+- 若已授权保存：独立 Unreal 进程重载磁盘资产；Data Asset、Material Instance 与 DataTable 复用 `RunAssetCatalog.ps1`，Blueprint apply report 则复用既有 `RunExport.ps1 -Profile full -Format json -IncludeUnchangedDefaults`，同时保留 defaults/components 与 graph/pin Canonical。验证校验导出的资产路径、干净的 SHA-256 Revision 与磁盘一致、Revision 相对冻结索引已变化，并按 Kind 提取导出值与应用时 `afterValue` 做 JSON 级比对。DataTable Rename 按 `newRowName` 提取目标行，其余 DataTable 操作按 `rowName`；通过后返回 `state=verified`、`actualRevision`、`expectedValue`/`exportedValue`、`undoAvailable=false`，并生成独立重载 `memoryTaskEvidence`。
 - `memoryRecorded=false` 恒定：Memory Task Record 由 `ue_memory_record_task` 落库，其失败会如实报错，本 Tool 从不声称 Memory 已写入。
 
 该 Tool 不执行 Save All、不自动保存、不保存非授权资产、不让 Memory 反向覆盖源资产；本身不写磁盘、不修改 SQLite/Revision Export。
@@ -351,6 +408,8 @@ ue_undo_asset_property_live
 ue_discard_asset_property_live
 ue_save_authorized_asset
 ue_verify_live_write
+ue_apply_patch
+ue_verify_asset
 ```
 
 传入 Change Set 后，每个 Apply 会绑定其 `planId/assetPath/operation/transactionId/editorSessionId/liveApplyReceipt`。后续 Undo、Discard、Save 和 Verify 必须属于同一 Change Set，不能借用其他任务的 Receipt。
@@ -365,11 +424,14 @@ undone
 discarded
 saved
 verified
+no-op
 failed
 unknown
 ```
 
 `ue_get_change_set` 还返回 `affectedAssets`、`transactionIds`、`validation` 和 `saveState` 聚合。成功 Undo/Discard/Verify 不删除历史 Operation；Server 重启后，无法用当前 Editor Session 和 Live Journal 重新证明的运行时状态标记为 `unknown`。最多保留 50 个 Change Set、每个最多 100 个 Operation；容量清理只删除终态记录，若全部仍活跃则拒绝新建，不静默丢失活跃任务。
+
+`ue_apply_patch` 与 `ue_verify_asset` 的可选 `change_set_id` 为 commandlet workflow bridge，必须绑定同一 Plan/Apply receipt/资产。expected no-op 使用 `noop_*` Operation ID，公共 payload 返回 `noOp=true`；它是终态但没有伪造的 LiveApply receipt、transaction、journal、save 或 verify。Change Set journal 自身的持久化结果与 Live journal 分开报告。
 
 `ue_set_material_parameter.parameter_type` 仅接受 `Scalar`、`Vector`、`Texture` 或 `StaticSwitch`，Server 映射到现有四个已注册 Operation。高层 Tool 只覆盖当前稳定 Operation；`ue_plan_patch` 继续保留，供已注册但尚无高层封装的 Operation 使用。
 
@@ -511,7 +573,7 @@ beforeRevision==afterRevision
 
 ### `ue_verify_asset`
 
-使用独立 Unreal Editor 进程重新导出目标资产，并核对 Object Path 与 Commit 后 SHA-256 Revision。该 Tool 不修改项目资产，但会在固定 Work Root 写验证报告，因此 MCP Annotation 不是纯 read-only。
+使用独立 Unreal Editor 进程重新导出目标资产，并核对 Object Path 与 Commit 后 SHA-256 Revision。非 Blueprint 使用 `RunAssetCatalog.ps1`；Blueprint apply report 使用既有 `RunExport.ps1` 的 `full/json/IncludeUnchangedDefaults` 路由，确保同一 Canonical 能验证变量 defaults、component overrides 与 pin defaults。该 Tool 不修改项目资产，但会在固定 Work Root 写验证报告，因此 MCP Annotation 不是纯 read-only。
 
 ### `ue_rollback_patch`
 

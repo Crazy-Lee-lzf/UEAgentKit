@@ -24,7 +24,7 @@ MAX_TASK_CONTEXT_EXPANSIONS = 10
 MAX_MEMORY_STALE_SAMPLES = 5
 MEMORY_BUDGET_FRACTION = 0.35
 BUDGET_ENVELOPE_SLACK_CHARS = 128
-CHANGE_SET_TERMINAL_STATUSES = {"undone", "discarded", "verified", "failed"}
+CHANGE_SET_TERMINAL_STATUSES = {"undone", "discarded", "verified", "no-op", "failed"}
 MAX_TASK_CONTEXT_CANDIDATES = 8
 MAX_CANDIDATE_SEARCH_TERMS = 8
 MAX_CANDIDATES_PER_TERM = 8
@@ -1432,6 +1432,13 @@ class TaskContextService:
                 {
                     "tool": "ue_get_change_set",
                     "reason": "change-set-detail",
+                    "arguments": {"change_set_id": change_set_section.get("changeSetId", "")},
+                }
+            )
+            expansions.append(
+                {
+                    "tool": "ue_analyze_semantic_diff",
+                    "reason": "semantic-diff-explicit-change-set",
                     "arguments": {"change_set_id": change_set_section.get("changeSetId", "")},
                 }
             )

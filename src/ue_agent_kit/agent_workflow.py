@@ -24,6 +24,7 @@ from .change_sets import (
     derive_change_set_status,
     is_terminal_change_set,
     serialize_change_set_record,
+    validate_change_set_operation_receipt,
     validate_change_set_id,
     validate_change_set_task_id,
     validate_change_set_title,
@@ -40,6 +41,7 @@ from .freshness import IndexFreshnessTracker
 from .indexer import build_index
 from .patches import LIVE_WRITE_OPERATION_REGISTRY, OPERATION_REGISTRY, validate_patch
 from .retarget_workflow import RetargetWorkflowMixin
+from .semantic_diff_workflow import analyze_workflow_semantic_diff
 from .snapshot_lifecycle import (
     ActiveSnapshot,
     SnapshotLifecycleError,
@@ -278,7 +280,11 @@ def _live_write_exported_value(canonical: dict[str, Any], record: LiveApplyRecor
         ):
             for parameter in details.get(section) or []:
                 if isinstance(parameter, dict) and parameter.get("name") == selector:
-                    return parameter.get("value")
+                    return (
+                        parameter.get("valuePath")
+                        if record.operation == "setMaterialInstanceTextureParameter"
+                        else parameter.get("value")
+                    )
         return None
     if spec.live_write_verification == "property":
         for prop in details.get("properties") or []:
@@ -1109,6 +1115,7 @@ class PatchWorkflowService(RetargetWorkflowMixin):
         changed = False
         for operation in record.operations:
             live_record = self._live_applies.get(operation.receipt)
+            apply_record = self._applies.get(operation.receipt)
             desired_status = operation.status
             if live_record is not None:
                 if not operation.plan_id:
@@ -1139,6 +1146,8 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                     desired_status = "unknown"
             elif operation.status == "applied":
                 desired_status = "unknown"
+            if apply_record is not None:
+                desired_status = "verified" if apply_record.verified else "saved"
             if desired_status != operation.status:
                 operation.status = desired_status
                 operation.updated_at_utc = utc_now_iso()
@@ -1235,11 +1244,12 @@ class PatchWorkflowService(RetargetWorkflowMixin):
 
     def _change_set_operation_payload(self, operation: ChangeSetOperationRecord) -> dict[str, Any]:
         live_record = self._live_applies.get(operation.receipt)
+        apply_record = self._applies.get(operation.receipt)
         return {
             "operationId": operation.receipt,
             "receipt": operation.receipt,
-            "liveApplyReceipt": operation.receipt,
-            "active": live_record is not None,
+            "liveApplyReceipt": operation.receipt if operation.receipt.startswith("live_") else "",
+            "active": live_record is not None or apply_record is not None,
             "planId": operation.plan_id,
             "assetPath": operation.asset_path,
             "operation": operation.operation,
@@ -1248,6 +1258,7 @@ class PatchWorkflowService(RetargetWorkflowMixin):
             "status": operation.status,
             "saved": operation.status in {"saved", "verified"},
             "verified": operation.status == "verified",
+            "noOp": operation.status == "no-op",
             "saveReceipt": operation.save_receipt,
             "failureCode": operation.failure_code,
             "createdAtUtc": operation.created_at_utc,
@@ -1258,8 +1269,11 @@ class PatchWorkflowService(RetargetWorkflowMixin):
     def _change_set_validation(record: ChangeSetRecord) -> dict[str, Any]:
         statuses = [operation.status for operation in record.operations]
         verified_count = sum(status == "verified" for status in statuses)
+        no_op_count = sum(status == "no-op" for status in statuses)
         if any(status == "unknown" for status in statuses):
             state = "unknown"
+        elif statuses and no_op_count == len(statuses):
+            state = "no-op"
         elif statuses and verified_count == len(statuses):
             state = "verified"
         elif verified_count:
@@ -1269,6 +1283,7 @@ class PatchWorkflowService(RetargetWorkflowMixin):
         return {
             "state": state,
             "verifiedOperationCount": verified_count,
+            "noOpOperationCount": no_op_count,
             "operationCount": len(statuses),
         }
 
@@ -1276,9 +1291,12 @@ class PatchWorkflowService(RetargetWorkflowMixin):
     def _change_set_save_state(record: ChangeSetRecord) -> dict[str, Any]:
         statuses = [operation.status for operation in record.operations]
         saved_count = sum(status in {"saved", "verified"} for status in statuses)
+        no_op_count = sum(status == "no-op" for status in statuses)
         if any(status == "unknown" for status in statuses):
             state = "unknown"
-        elif statuses and saved_count == len(statuses):
+        elif statuses and no_op_count == len(statuses):
+            state = "not-required"
+        elif statuses and saved_count + no_op_count == len(statuses):
             state = "saved"
         elif saved_count:
             state = "partial"
@@ -1287,6 +1305,7 @@ class PatchWorkflowService(RetargetWorkflowMixin):
         return {
             "state": state,
             "savedOperationCount": saved_count,
+            "noOpOperationCount": no_op_count,
             "operationCount": len(statuses),
         }
 
@@ -1339,10 +1358,31 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 "nextStep": self._change_set_next_step(record),
             }
 
+    def analyze_semantic_diff(
+        self,
+        change_set_id: str,
+        *,
+        stage: str = "auto",
+        asset_paths: list[str] | None = None,
+        include_unchanged: bool = True,
+        max_changes: int = 64,
+        max_output_tokens: int = 4096,
+    ) -> dict[str, Any]:
+        """Analyze only the evidence reachable from one explicit project-bound Change Set."""
+        return analyze_workflow_semantic_diff(
+            self,
+            change_set_id,
+            stage=stage,
+            asset_paths=asset_paths,
+            include_unchanged=include_unchanged,
+            max_changes=max_changes,
+            max_output_tokens=max_output_tokens,
+        )
+
     def _bind_apply_operation(self, change_set_id: str, live_record: LiveApplyRecord) -> bool:
         record = self._resolve_change_set(change_set_id)
         record.status = derive_change_set_status(record.operations)
-        if record.status in {"undone", "discarded", "verified", "failed", "unknown"}:
+        if record.status in {"undone", "discarded", "verified", "no-op", "failed", "unknown"}:
             raise WorkflowError(
                 "change-set-closed",
                 f"The Change Set is in {record.status} state and cannot accept another live write.",
@@ -1379,7 +1419,102 @@ class PatchWorkflowService(RetargetWorkflowMixin):
         record.updated_at_utc = now
         return self._persist_change_set(record)
 
+    def _bind_noop_operation(
+        self,
+        change_set_id: str,
+        plan_record: PlanRecord,
+        asset_path: str,
+        operation_name: str,
+        live_result: dict[str, Any],
+    ) -> tuple[str, bool]:
+        record = self._resolve_change_set(change_set_id)
+        record.status = derive_change_set_status(record.operations)
+        if record.status in {"undone", "discarded", "verified", "no-op", "failed", "unknown"}:
+            raise WorkflowError(
+                "change-set-closed",
+                f"The Change Set is in {record.status} state and cannot accept another live write.",
+            )
+        if len(record.operations) >= MAX_CHANGE_SET_RECEIPTS:
+            raise WorkflowError(
+                "change-set-full",
+                f"A Change Set is limited to {MAX_CHANGE_SET_RECEIPTS} bound live write operations.",
+            )
+        editor_session_id = str(live_result.get("editorSessionId", ""))
+        if record.editor_session_id and editor_session_id and record.editor_session_id != editor_session_id:
+            raise WorkflowError(
+                "change-set-editor-session-mismatch",
+                "The confirmed no-op belongs to a different Editor session than the Change Set.",
+            )
+        receipt = "noop_" + secrets.token_urlsafe(16)
+        now = utc_now_iso()
+        record.editor_session_id = record.editor_session_id or editor_session_id
+        record.operations.append(
+            ChangeSetOperationRecord(
+                receipt=receipt,
+                plan_id=plan_record.plan_id,
+                asset_path=asset_path,
+                operation=operation_name,
+                transaction_id="",
+                editor_session_id=editor_session_id,
+                status="no-op",
+                created_at_utc=now,
+                updated_at_utc=now,
+            )
+        )
+        record.status = derive_change_set_status(record.operations)
+        record.updated_at_utc = now
+        return receipt, self._persist_change_set(record)
+
+    def _bind_committed_apply(
+        self,
+        change_set_id: str,
+        apply_record: ApplyRecord,
+        plan_record: PlanRecord,
+    ) -> bool:
+        record = self._resolve_change_set(change_set_id)
+        record.status = derive_change_set_status(record.operations)
+        if record.status in {"undone", "discarded", "verified", "no-op", "failed", "unknown"}:
+            raise WorkflowError(
+                "change-set-closed",
+                f"The Change Set is in {record.status} state and cannot accept another committed patch.",
+            )
+        if len(record.operations) >= MAX_CHANGE_SET_RECEIPTS:
+            raise WorkflowError(
+                "change-set-full",
+                f"A Change Set is limited to {MAX_CHANGE_SET_RECEIPTS} bound workflow operations.",
+            )
+        if apply_record.receipt in record.receipts:
+            return True
+        assets = plan_record.patch.get("assets", [])
+        patch_operations = assets[0].get("operations", []) if len(assets) == 1 and isinstance(assets[0], dict) else []
+        operation_name = (
+            str(patch_operations[0].get("operation", ""))
+            if len(patch_operations) == 1 and isinstance(patch_operations[0], dict)
+            else "multiOperationTransaction"
+        )
+        now = utc_now_iso()
+        record.operations.append(
+            ChangeSetOperationRecord(
+                receipt=apply_record.receipt,
+                plan_id=apply_record.plan_id,
+                asset_path=apply_record.asset_path,
+                operation=operation_name,
+                transaction_id="",
+                editor_session_id="",
+                status="verified" if apply_record.verified else "saved",
+                created_at_utc=now,
+                updated_at_utc=now,
+            )
+        )
+        record.status = derive_change_set_status(record.operations)
+        record.updated_at_utc = now
+        return self._persist_change_set(record)
+
     def _assert_change_set_member(self, change_set_id: str, receipt: str) -> ChangeSetOperationRecord:
+        try:
+            receipt = validate_change_set_operation_receipt(receipt)
+        except ValueError as exc:
+            raise WorkflowError("change-set-transaction-not-member", str(exc)) from exc
         record = self._resolve_change_set(change_set_id)
         operation = next((candidate for candidate in record.operations if candidate.receipt == receipt), None)
         if operation is None:
@@ -2415,7 +2550,7 @@ class PatchWorkflowService(RetargetWorkflowMixin):
             if change_set_id:
                 change_set = self._resolve_change_set(change_set_id)
                 self._reconcile_change_set(change_set, persist=True)
-                if change_set.status in {"undone", "discarded", "verified", "failed", "unknown"}:
+                if change_set.status in {"undone", "discarded", "verified", "no-op", "failed", "unknown"}:
                     raise WorkflowError(
                         "change-set-closed",
                         f"The Change Set is in {change_set.status} state and cannot accept another live write.",
@@ -2498,6 +2633,7 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 raise
             changed = bool(live_result.get("changed"))
             live_apply_receipt = ""
+            change_set_operation_id = ""
             change_set_bound = False
             change_set_journal_persisted = True
             if changed:
@@ -2523,9 +2659,15 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                     change_set_journal_persisted = self._bind_apply_operation(
                         change_set_id, self._live_applies[live_apply_receipt]
                     )
+                    change_set_operation_id = live_apply_receipt
                 self._prune_records()
             else:
-                journal_persisted = True
+                journal_persisted = False
+                if change_set_id:
+                    change_set_operation_id, change_set_journal_persisted = self._bind_noop_operation(
+                        change_set_id, record, asset_path, operation_name, live_result
+                    )
+                    change_set_bound = True
             response = {
                 "schemaVersion": WORKFLOW_SCHEMA_VERSION,
                 "tool": "ue_apply_asset_property_live",
@@ -2559,6 +2701,7 @@ class PatchWorkflowService(RetargetWorkflowMixin):
             if change_set_id:
                 response["changeSetId"] = change_set_id
                 response["changeSetBound"] = change_set_bound
+                response["changeSetOperationId"] = change_set_operation_id
                 response["changeSetJournalPersisted"] = change_set_journal_persisted
             return response
 
@@ -2818,7 +2961,13 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 "nextStep": f"To commit, call ue_apply_patch with confirmation 'COMMIT {plan_id}'.",
             }
 
-    def apply_patch(self, plan_id: str, dry_run_receipt: str, confirmation: str) -> dict[str, Any]:
+    def apply_patch(
+        self,
+        plan_id: str,
+        dry_run_receipt: str,
+        confirmation: str,
+        change_set_id: str = "",
+    ) -> dict[str, Any]:
         with self._lock:
             if not self.config.commit_enabled:
                 raise WorkflowError("commit-disabled", "Commit tools were not enabled when this MCP server started.")
@@ -2830,6 +2979,14 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 raise WorkflowError("commit-confirmation-required", "Commit confirmation did not exactly match the required planId phrase.")
             if dry_run.consumed or dry_run.plan_id != plan_id or dry_run.plan_digest != record.digest:
                 raise WorkflowError("receipt-invalid", "The Dry Run receipt is used, stale, or belongs to another plan.")
+            if change_set_id:
+                change_set = self._resolve_change_set(change_set_id)
+                self._reconcile_change_set(change_set, persist=True)
+                if change_set.status in {"undone", "discarded", "verified", "no-op", "failed", "unknown"}:
+                    raise WorkflowError(
+                        "change-set-closed",
+                        f"The Change Set is in {change_set.status} state and cannot accept this patch.",
+                    )
             validation = self._validate_plan_file(record)
             if not validation.get("commitAllowedByPolicy"):
                 raise WorkflowError("commit-not-allowed", "The fixed Policy does not enable Commit.")
@@ -2893,8 +3050,13 @@ class PatchWorkflowService(RetargetWorkflowMixin):
             )
             dry_run.consumed = True
             record.consumed = True
+            change_set_updated = (
+                self._bind_committed_apply(change_set_id, self._applies[receipt], record)
+                if change_set_id
+                else False
+            )
             self._prune_records()
-            return {
+            response = {
                 "schemaVersion": WORKFLOW_SCHEMA_VERSION,
                 "tool": "ue_apply_patch",
                 "ok": True,
@@ -2910,26 +3072,57 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 "report": _safe_report(report, configured_paths=self.configured_paths),
                 "nextStep": "Call ue_verify_asset with this applyReceipt. The fixed index remains stale until refreshed or rolled back.",
             }
+            if change_set_id:
+                response["changeSetId"] = change_set_id
+                response["changeSetUpdated"] = change_set_updated
+            return response
 
-    def verify_asset(self, apply_receipt: str) -> dict[str, Any]:
+    def verify_asset(self, apply_receipt: str, change_set_id: str = "") -> dict[str, Any]:
         with self._lock:
             self._assert_session_current()
             apply = self._applies.get(apply_receipt)
             if apply is None:
                 raise WorkflowError("apply-receipt-not-found", "The applyReceipt is not active in this MCP server session.")
+            if change_set_id:
+                self._assert_change_set_member(change_set_id, apply_receipt)
             output = self._safe_work_path("verify", apply_receipt)
             if output.exists():
                 shutil.rmtree(output)
             output.mkdir(parents=True, exist_ok=False)
             asset_package = apply.asset_path.split(".", 1)[0]
+            asset_class = str(apply.report.get("assetClass", ""))
+            if asset_class == "/Script/Engine.Blueprint":
+                verify_script = "RunExport.ps1"
+                verify_arguments = [
+                    "-EngineRoot",
+                    str(self.config.engine_root),
+                    "-ProjectPath",
+                    str(self.config.project_path),
+                    "-Asset",
+                    asset_package,
+                    "-Output",
+                    str(output),
+                    "-Profile",
+                    "full",
+                    "-Format",
+                    "json",
+                    "-IncludeUnchangedDefaults",
+                ]
+            else:
+                verify_script = "RunAssetCatalog.ps1"
+                verify_arguments = [
+                    "-EngineRoot",
+                    str(self.config.engine_root),
+                    "-ProjectPath",
+                    str(self.config.project_path),
+                    "-Asset",
+                    asset_package,
+                    "-Output",
+                    str(output),
+                ]
             result = self._run_script(
-                "RunAssetCatalog.ps1",
-                [
-                    "-EngineRoot", str(self.config.engine_root),
-                    "-ProjectPath", str(self.config.project_path),
-                    "-Asset", asset_package,
-                    "-Output", str(output),
-                ],
+                verify_script,
+                verify_arguments,
                 stage="verify-export",
                 report_path=output / "manifest.json",
             )
@@ -2955,6 +3148,11 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                     details={"expectedRevision": apply.after_revision, "actualRevision": actual_revision},
                 )
             apply.verified = True
+            change_set_updated = (
+                self._update_change_set_operation(change_set_id, apply_receipt, "verified")
+                if change_set_id
+                else False
+            )
             freshness = self.freshness.inspect_asset(apply.asset_path)
             verification_report_id = _report_id("verify-export", output / "manifest.json")
             memory_task_evidence = _verified_memory_task_evidence(
@@ -2962,7 +3160,7 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 validation_report_id=verification_report_id,
                 actual_revision=actual_revision,
             )
-            return {
+            response = {
                 "schemaVersion": WORKFLOW_SCHEMA_VERSION,
                 "tool": "ue_verify_asset",
                 "ok": True,
@@ -2982,6 +3180,10 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                     "or call ue_rollback_patch in DryRun mode before an explicit rollback Commit."
                 ),
             }
+            if change_set_id:
+                response["changeSetId"] = change_set_id
+                response["changeSetUpdated"] = change_set_updated
+            return response
 
     def save_authorized_asset(
         self,

@@ -25,14 +25,14 @@ foreach ($Required in @($VenvPython, $FixtureScript, $CatalogScript, $FixturePla
     Assert-UeakPath -Path $Required -Description ([System.IO.Path]::GetFileName($Required)) -PathType File
 }
 
-$Output = Join-Path $ToolRoot "Output\McpLiveUndoDiscardSmoke"
+$Output = Join-Path $ToolRoot "Output\McpLiveClosedLoopSmoke"
 if (Test-Path -LiteralPath $Output)
 {
     Remove-Item -LiteralPath $Output -Recurse -Force
 }
 New-Item -ItemType Directory -Path $Output -Force | Out-Null
 
-$BackupRoot = Join-Path $ToolRoot "Backups\McpLiveUndoDiscardSmoke"
+$BackupRoot = Join-Path $ToolRoot "Backups\McpLiveClosedLoopSmoke"
 if (Test-Path -LiteralPath $BackupRoot)
 {
     Remove-Item -LiteralPath $BackupRoot -Recurse -Force
@@ -47,6 +47,7 @@ $Policy = Join-Path $Output "policy.json"
 $WorkRoot = Join-Path $Output "Workflow"
 $ErrorLog = Join-Path $Output "Logs\mcp-stderr.log"
 $SessionMarker = Join-Path $Output "session-initialized.marker"
+$SemanticDiffSummary = Join-Path $Output "semantic-diff-summary.json"
 $EditorStdout = Join-Path $Output "Logs\Editor-stdout.log"
 $EditorStderr = Join-Path $Output "Logs\Editor-stderr.log"
 $DescriptorPath = Join-Path $ProjectDirectory "Saved\UEAgentKit\EditorBridge.json"
@@ -260,7 +261,8 @@ try
             --backup-root $BackupRoot `
             --fixture-report $FixtureReport `
             --error-log $ErrorLog `
-            --session-marker $SessionMarker
+            --session-marker $SessionMarker `
+            --summary-report $SemanticDiffSummary
         $ClientExitCode = $LASTEXITCODE
         if ($ClientExitCode -eq 0)
         {
@@ -338,6 +340,46 @@ finally
                 -ValidationReport (Join-Path $Output "Recovery\validation-report.json") `
                 -VerificationOutput (Join-Path $Output "Recovery\Reload") `
                 -VerificationReport (Join-Path $Output "Recovery\verification-report.json") | Out-Host
+            $RecoveryExitCode = $LASTEXITCODE
+            if ($RecoveryExitCode -ne 0)
+            {
+                $Succeeded = $false
+                Write-Warning "Closed Loop fixture recovery failed with exit code $RecoveryExitCode"
+            }
+            else
+            {
+                $RecoveryFailures = @()
+                foreach ($FixtureEntry in $Fixture.fixtures)
+                {
+                    $PackageFile = [string]$FixtureEntry.packageFilename
+                    $Id = [string]$FixtureEntry.id
+                    if (!(Test-Path -LiteralPath $PackageFile))
+                    {
+                        $RecoveryFailures += "$Id (missing)"
+                    }
+                }
+                $RecoveryVerificationPath = Join-Path $Output "Recovery\verification-report.json"
+                if (!(Test-Path -LiteralPath $RecoveryVerificationPath))
+                {
+                    $RecoveryFailures += "verification report (missing)"
+                }
+                else
+                {
+                    $RecoveryVerification = [IO.File]::ReadAllText(
+                        $RecoveryVerificationPath,
+                        [Text.Encoding]::UTF8) | ConvertFrom-Json
+                    if ($RecoveryVerification.verified -ne $true -or
+                        [int]$RecoveryVerification.verifiedCount -ne [int]$RecoveryVerification.expectedCount)
+                    {
+                        $RecoveryFailures += "independent Canonical verification (failed)"
+                    }
+                }
+                if ($RecoveryFailures.Count -gt 0)
+                {
+                    $Succeeded = $false
+                    Write-Warning "Closed Loop fixture recovery did not restore the semantic baseline: $($RecoveryFailures -join ', ')"
+                }
+            }
         }
     }
 }

@@ -12,6 +12,7 @@ from .impact_analysis import (
     MAX_IMPACT_CONSUMERS,
 )
 from .query_protocol import DEFAULT_OUTPUT_TOKEN_BUDGET
+from .semantic_diff_workflow import SemanticDiffEvidenceError
 
 
 def register_query_tools(
@@ -174,3 +175,30 @@ def register_query_tools(
             )
         except (FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_analyze_change_impact", exc, read_only=True)
+
+    @server.tool(annotations=read_annotations)
+    def ue_analyze_semantic_diff(
+        change_set_id: str,
+        stage: Literal["auto", "live", "persisted", "verified"] = "auto",
+        asset_paths: list[str] | None = None,
+        include_unchanged: bool = True,
+        max_changes: int = 64,
+        max_output_tokens: int = DEFAULT_OUTPUT_TOKEN_BUDGET,
+    ) -> dict[str, Any]:
+        """Align explicit Change Set intent with bounded live, persisted, or independently verified evidence."""
+        try:
+            if workflow_service is None:
+                raise SemanticDiffEvidenceError(
+                    "insufficient-evidence",
+                    "Semantic Diff requires the fixed project Workflow evidence service.",
+                )
+            return workflow_service.analyze_semantic_diff(
+                change_set_id,
+                stage=stage,
+                asset_paths=asset_paths,
+                include_unchanged=include_unchanged,
+                max_changes=max_changes,
+                max_output_tokens=max_output_tokens,
+            )
+        except (FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_analyze_semantic_diff", exc, read_only=True)

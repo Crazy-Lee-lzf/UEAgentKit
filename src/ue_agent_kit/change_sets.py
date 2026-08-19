@@ -19,6 +19,7 @@ CHANGE_SET_STATUSES = {
     "discarded",
     "saved",
     "verified",
+    "no-op",
     "failed",
     "unknown",
 }
@@ -28,10 +29,11 @@ CHANGE_SET_OPERATION_STATUSES = {
     "discarded",
     "saved",
     "verified",
+    "no-op",
     "failed",
     "unknown",
 }
-TERMINAL_CHANGE_SET_STATUSES = {"undone", "discarded", "verified", "failed"}
+TERMINAL_CHANGE_SET_STATUSES = {"undone", "discarded", "verified", "no-op", "failed"}
 
 _SAFE_ID_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
 
@@ -128,6 +130,14 @@ def validate_live_receipt_id(value: str) -> str:
     return value
 
 
+def validate_change_set_operation_receipt(value: str) -> str:
+    if not isinstance(value, str) or not value.startswith(("live_", "apply_", "noop_")):
+        raise ValueError("invalid Change Set operation receipt")
+    if len(value) > 96 or any(character not in _SAFE_ID_CHARS for character in value):
+        raise ValueError("invalid Change Set operation receipt")
+    return value
+
+
 def derive_change_set_status(operations: list[ChangeSetOperationRecord]) -> str:
     if not operations:
         return "planned"
@@ -137,6 +147,10 @@ def derive_change_set_status(operations: list[ChangeSetOperationRecord]) -> str:
     if any(status == "failed" for status in statuses):
         return "failed"
     if all(status == "verified" for status in statuses):
+        return "verified"
+    if all(status == "no-op" for status in statuses):
+        return "no-op"
+    if all(status in {"verified", "no-op"} for status in statuses):
         return "verified"
     if all(status in {"saved", "verified"} for status in statuses):
         return "saved"
@@ -191,7 +205,7 @@ def _deserialize_operation(value: Any) -> ChangeSetOperationRecord:
     if not isinstance(value, dict):
         raise ValueError("change set operation record invalid")
     try:
-        receipt = validate_live_receipt_id(str(value.get("receipt", "")))
+        receipt = validate_change_set_operation_receipt(str(value.get("receipt", "")))
     except ValueError:
         raise ValueError("change set journal receipt invalid") from None
     status = str(value.get("status", ""))

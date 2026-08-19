@@ -679,10 +679,15 @@ def register_workflow_tools(
             return error_response("ue_dry_run_patch", exc, read_only=False)
 
     @server.tool(annotations=destructive_annotations)
-    def ue_apply_patch(plan_id: str, dry_run_receipt: str, confirmation: str) -> dict[str, Any]:
+    def ue_apply_patch(
+        plan_id: str,
+        dry_run_receipt: str,
+        confirmation: str,
+        change_set_id: str = "",
+    ) -> dict[str, Any]:
         """Explicitly commit a plan using a fresh one-time Dry Run receipt and exact confirmation phrase."""
         try:
-            return workflow_service.apply_patch(plan_id, dry_run_receipt, confirmation)
+            return workflow_service.apply_patch(plan_id, dry_run_receipt, confirmation, change_set_id=change_set_id)
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_apply_patch", exc, read_only=False)
 
@@ -696,10 +701,10 @@ def register_workflow_tools(
     )
 
     @server.tool(annotations=planning_annotations)
-    def ue_verify_asset(apply_receipt: str) -> dict[str, Any]:
+    def ue_verify_asset(apply_receipt: str, change_set_id: str = "") -> dict[str, Any]:
         """Independently reload the committed asset in Unreal and verify its saved SHA-256 Revision."""
         try:
-            return workflow_service.verify_asset(apply_receipt)
+            return workflow_service.verify_asset(apply_receipt, change_set_id=change_set_id)
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_verify_asset", exc, read_only=True)
 

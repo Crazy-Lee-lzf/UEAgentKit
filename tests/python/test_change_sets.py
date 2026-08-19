@@ -89,6 +89,24 @@ class ChangeSetValidationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 validate_live_receipt_id(invalid)
 
+    def test_commandlet_apply_receipt_roundtrips_as_change_set_member(self) -> None:
+        source = record([operation("saved", receipt="apply_commandlet")])
+        serialized = serialize_change_set_record(source, PROJECT)
+        restored = deserialize_change_set_record(serialized, PROJECT)
+        self.assertEqual(restored.operations[0].receipt, "apply_commandlet")
+
+    def test_noop_receipt_roundtrips_as_terminal_change_set_member(self) -> None:
+        noop = operation("no-op", receipt="noop_expected")
+        noop.transaction_id = ""
+        noop.save_receipt = ""
+        source = record([noop])
+        serialized = serialize_change_set_record(source, PROJECT)
+        restored = deserialize_change_set_record(serialized, PROJECT)
+        self.assertEqual(restored.operations[0].receipt, "noop_expected")
+        self.assertEqual(restored.operations[0].transaction_id, "")
+        self.assertEqual(restored.status, "no-op")
+        self.assertTrue(is_terminal_change_set(restored))
+
     def test_serialize_deserialize_roundtrip(self) -> None:
         source = record([operation("verified")])
         serialized = serialize_change_set_record(source, PROJECT)
@@ -103,6 +121,13 @@ class ChangeSetValidationTests(unittest.TestCase):
         self.assertEqual(derive_change_set_status([operation("applied")]), "applied")
         self.assertEqual(derive_change_set_status([operation("saved")]), "saved")
         self.assertEqual(derive_change_set_status([operation("verified")]), "verified")
+        self.assertEqual(derive_change_set_status([operation("no-op", "noop_first")]), "no-op")
+        self.assertEqual(
+            derive_change_set_status(
+                [operation("verified"), operation("no-op", "noop_second")]
+            ),
+            "verified",
+        )
         self.assertEqual(
             derive_change_set_status([operation("verified"), operation("applied", "live_second")]),
             "partially_applied",

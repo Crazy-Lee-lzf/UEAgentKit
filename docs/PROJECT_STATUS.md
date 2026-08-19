@@ -2,11 +2,11 @@
 
 
 
-更新时间：2026-08-15
+更新时间：2026-08-19
 
 
 
-本文描述本地 `main` 的能力，支持 Unreal Engine 5.6。已发布 **0.7.0**（Schema v3 Knowledge Tree、Active Work、渐进式 Context、Realtime Foundation、Batch/Change Set 和扩展后的 Live Editor Write），并在此基础上完成 **Realtime Animation Tools**（动画比例诊断/修复/批量/重定向/Additive/浮空诊断/次级运动/项目级可写配置）。`feature/live-editor-realtime-io` 已 **fast-forward 合并进 `main`**，动画扩展暂缓；下一产品主线为 `feature/agent-reliability` 上的 Context / Analysis / Agent Reliability，`feature/performance-benchmarks` 作为长期横向性能分支继续保留。
+本文描述已发布的本地 `main` 基线及当前 `feature/agent-reliability` 开发状态，支持 Unreal Engine 5.6。已发布 **0.7.0**（Schema v3 Knowledge Tree、Active Work、渐进式 Context、Realtime Foundation、Batch/Change Set 和扩展后的 Live Editor Write），并在此基础上完成 **Realtime Animation Tools**。`feature/agent-reliability` 当前已完成 R0 Task Context、R1 Impact Analysis 与 R2 Semantic Diff，但这些开发态能力尚不表示已经合入 `main`；动画扩展继续暂缓，`feature/performance-benchmarks` 作为长期横向性能分支保留。
 
 
 
@@ -40,11 +40,13 @@ UE Agent Kit 不是“让 AI 任意遥控 Unreal Editor”的通用自动化层�
 
 模式                 不启用 Memory    启用 Memory
 
-Offline                    7              19
+Offline                    8              20
 
-Live                      40              52
+Live                      41              53
 
-Workflow                  90              102
+Workflow-only             58              70
+
+Live + Workflow           91             103
 
 ```
 
@@ -60,7 +62,7 @@ Tool 数量只表示 MCP 接口数量，不等同于 Unreal Operation 数量。�
 
 ```text
 
-Python tests                 592/592
+Python tests                 628/628
 
 JSON Schemas                 3/3
 
@@ -68,7 +70,7 @@ Patch examples               16/16
 
 Ruff / CompileAll            passed
 
-UE5.6 Direct Build           passed
+UE5.6 Direct Build           not required（R2 无 C++ 变更）
 
 Memory MCP stdio Smoke       passed
 
@@ -339,8 +341,9 @@ Live Editor Write 基础层、Material/DataTable、Undo/Discard、Save→Verify�
 - `ue_get_editor_context` 在一次只读请求中聚合 Editor、World、Selection、Open Assets、Dirty Packages、Blueprint Graph Selection、Compile Errors 和 Output Log Cursor，并返回阶段耗时与 `nextActions`。
 - `scanCurrentWorld` 只扫描当前已加载 World；枚举和 Actor/Component 处理均受每帧约 2 ms 时间预算与数量上限约束。任务绑定 Editor Session/World，支持进度、取消、超时、失效和部分结果。
 - Batch Task 默认只返回摘要；详情通过 `include_details/detail_offset/detail_limit` 分页读取，单页最多 5 个 Actor，避免超过 Bridge 1 MiB 单响应上限。
-- Change Set 使用 schema v2 持久化 Task、Editor Session、Operation、Asset、Transaction、Save Receipt 和 Validation 生命周期；支持 `planned/applied/partially_applied/undone/discarded/saved/verified/failed/unknown`，并保留终态历史。
+- Change Set 使用 schema v2 持久化 Task、Editor Session、Operation、Asset、Transaction、Save Receipt 和 Validation 生命周期；支持 `planned/applied/partially_applied/undone/discarded/saved/verified/no-op/failed/unknown`，并保留终态历史。
 - 活跃 Change Set 不会被容量清理静默删除；Editor 重启后无法重新证明的运行时状态明确降级为 `unknown`。
+- expected no-op 绑定独立 `noop_*` Operation 并直接进入 `no-op` 终态：`liveApplyReceipt=""`、`changeSetBound=true`、`journalPersisted=false`，validation 聚合为 `no-op`、saveState 为 `not-required`；不制造 Transaction、LiveApply journal、授权保存或 Independent Verify。只有固定基线 Canonical Revision 与 Plan `expectedRevision` 完全一致时才有 persisted no-op evidence；无 live/verified no-op stage，同资产 no-op 与真实写混合时保守报告 stage unavailable。
 
 Realtime I/O 基础层已经达到可复用状态，后续进入需求驱动维护，不再以持续扩大 CRUD / Writer 广度或追平 `ue-llm-toolkit` Tool 覆盖面作为首要目标。新的 Writer 只有在 Reforge 真实任务或 Agent Benchmark 反复暴露明确缺口时再增加；每个新增 Operation 仍必须补齐：
 
@@ -386,7 +389,7 @@ R4  Real Agent Benchmark v1
 R5  Value Provenance / Execution Trace（由 Benchmark 决定）
 ```
 
-当前第一优先级是 R0：提供一个高层只读任务上下文入口，把已有 Index/Search、Revision、Memory/Active Work、Live Editor Context、Dirty/Revision State 和 Change Set 组合成有界、可追溯、渐进式展开的事实集。第一版不新增 Memory Schema，也不在 Server 内做模型推断。
+R0–R2 已完成：高层任务上下文、逆向引用影响分析与事实级 Semantic Diff 已形成渐进式只读分析链；当前停在 R3 之前，不新增 Memory Schema，也不在 Server 内做模型推断。
 
 R0.0（现状审计 + 复用矩阵 + 最小 Schema）与 R0.1（`ue_get_task_context` 第一条纵向切片）已完成并本地提交到 `feature/agent-reliability`：query + 显式 assetPaths → targetAssets → revisionState → 可选 Memory 摘要 / Live Editor 摘要 / Change Set → 确定性 risks → 有界输出；所有可选来源支持 section 级降级。复用矩阵与 Schema 见 [`Plans/AGENT_RELIABILITY_R0_AUDIT_AND_SCHEMA_20260815.md`](Plans/AGENT_RELIABILITY_R0_AUDIT_AND_SCHEMA_20260815.md)。
 
@@ -394,13 +397,13 @@ R0-S（真实 Reforge Context Smoke）与 R0.2（Deterministic Relevant Asset Di
 
 R0.3（只读 Cross-source Correlation）已完成并本地提交，**R0 里程碑标记完成**：`ue_get_task_context` 新增 `correlation` section（schemaVersion 1.2），用精确键把 Active Work、显式 Change Set、Live Editor Session 与 Memory Evidence 关联起来（session id 相等性、资产路径集合交集、changeSetId 字面量、资产 scope Evidence），只读、非持久化、零模型推断；不新增 Memory/ChangeSet Schema、不扫描 workflow 私有 `_change_sets`、不自动发现 Change Set、不做 R1 引用遍历。链接固定排序上限 16 条，边界计数如实报告；新增确定性风险 `change-set-editor-session-mismatch`（medium）；预算阶梯先裁 correlation links/summary，绝不优先于 target identity / high risk / revision summary。交接见 [`Handoffs/AGENT_RELIABILITY_R0_SLICE3_HANDOFF_20260816.md`](Handoffs/AGENT_RELIABILITY_R0_SLICE3_HANDOFF_20260816.md)。
 
-R1/R2 随后分别解决「修改会影响什么」和「实际发生了什么变化」。R3 再把现有 Persistence / Compile / Reference / Semantic Evidence 组合成统一 Verification Plan 与 Trust Verdict；保存和独立重载成功只能证明 Persistence，不自动等同于整个任务成功。
+R1/R2 已分别解决「修改会影响什么」和「实际发生了什么变化」。R3 尚未开始；后续才会把现有 Persistence / Compile / Reference / Semantic Evidence 组合成统一 Verification Plan 与 Trust Verdict。保存、独立重载成功或 verified Semantic Diff 都不自动等同于整个任务成功。
 
 R4 用跨 Data Asset / DataTable / Material Instance / Blueprint / Context / stale / rollback 的真实 Agent Case 统计 Trusted Completion、False Success、Wrong Asset、Unintended Change 和 Recovery。动画只作为已有成熟 Domain 的少量样本，不再作为主开发方向。
 
 
 
-**当前执行状态（2026-08-18）**：R0 已完成；**R1 Impact Analysis 已完成并本地提交，R1 里程碑标记完成**。新增只读 query 组 Tool `ue_analyze_change_impact`（1..8 个精确 `/Game` 目标、depth 1..3、bounded consumer/edge/path 上限、max_output_tokens 裁剪阶梯）：Direct Consumers + Bounded Indirect Consumers（BFS 精确键分块查询、防环、shortestDepth/Impact Path 稳定、多目标共享 consumer 去重合并）、Reference Kind 确定性归一化（7 类，未知 kind 原样保留）、Unknown/Unsupported 边界（`unsupported-impact-subject` / `analysisGaps` / `target-not-indexed`）、`validationTargets`（Tier 0/1/2 确定排序）、确定性 risks（high-fanout / truncated / not-indexed / unknown-kind）、`runtimeSensitiveConsumers=not-proven-with-current-evidence`（不凭资产类型猜测）。结构化 subject 仅 `asset-level` 与 `blueprint-symbol`（精确 stable_id）可被现有 Index 机械证明。`ue_get_task_context.nextExpansions` 增加 impact-analysis 渐进入口。真实 Reforge 只读 Smoke S1–S4 通过（S1 fan-out 23 direct / 14.4 ms；S2 真实 2 跳 24 indirect；S3 多目标共享 consumer 合并；S4 零消费者边界），Python 全量 592/592。设计/审计见 [`Plans/AGENT_RELIABILITY_R1_IMPACT_ANALYSIS_DESIGN_20260818.md`](Plans/AGENT_RELIABILITY_R1_IMPACT_ANALYSIS_DESIGN_20260818.md)，执行规范见 [`Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md`](Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md)。**R2（Semantic Diff）已获明确指令，按完整大任务一次性推进；执行规范见 `Handoffs/AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md`，完成后统一汇报并停止，不进入 R3。**
+**当前执行状态（2026-08-19）**：R0、R1 与 **R2 Semantic Diff 均已完成**。R2 新增显式 Change Set 驱动的只读 `ue_analyze_semantic_diff`：统一 Expected / Actual / Matched / Unexpected / Missing Expected / Unchanged Critical、Analysis Gaps 与 Risks；区分 `auto/live/persisted/verified` stage，覆盖 Data Asset、DataTable、Material Instance 与 Blueprint property/component/pin-default 四个 Adapter，支持多 Operation、多资产、同路径 `operationChain`、expected no-op、稳定 ID、固定排序和有界 Token 裁剪。R0 只在显式 Change Set 存在时提供渐进入口，R2 在 missing/unexpected 时建议 R1，不自动展开。真实 UE5.6 DirectHost（不是 Reforge）Smoke 覆盖 Data Asset/Material Instance/DataTable 的 12 个 live/persisted/verified 结果与 Blueprint commandlet persisted/verified；全部 expected=actual=matched、unexpected=missing=0，并完成 Canonical/rollback 恢复检查。Python 全量 628/628，Ruff 通过；R2 无 C++ 变更，因此 UE Direct Build 不要求。详细设计见 [`Plans/AGENT_RELIABILITY_R2_SEMANTIC_DIFF_DESIGN_20260819.md`](Plans/AGENT_RELIABILITY_R2_SEMANTIC_DIFF_DESIGN_20260819.md)，执行规范见 [`Handoffs/AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md`](Handoffs/AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md)。**R3 未开始，当前停止在 R3 之前。**
 
 
 ### P2：高价值专用写入
