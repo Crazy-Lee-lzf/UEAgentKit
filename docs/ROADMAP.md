@@ -1,6 +1,6 @@
 # UE Agent Kit 路线图
 
-更新时间：2026-08-19
+更新时间：2026-08-20
 
 当前已发布版本为 **0.7.0**，支持 Unreal Engine 5.6。Realtime Foundation、注册式 Live Editor Write、Schema v3 Memory/Context MVP、分帧 Batch Task 和持久化 Change Set 已正式进入本地发布。`feature/live-editor-realtime-io` 已 **fast-forward 合并进 `main`**（`5eb1759 → 56afc91`，含完整 Realtime Animation Tools 线）；动画功能扩展暂缓，后续只在真实任务或 Benchmark 证明存在高价值缺口时解冻。`feature/performance-benchmarks` 继续作为长期横向性能分支。当前首要目标转为 **0.8.x Context / Analysis / Agent Reliability**：先把现有 Index、Memory、Live Editor、Revision、Change Set 和验证证据组合成任务上下文、影响分析、语义 Diff 与可信结果判断，再由真实 Agent Benchmark 决定下一批 Writer。
 
@@ -137,7 +137,18 @@ R2（Semantic Diff）已在 `feature/agent-reliability` 一次性完成，**R2 �
 - R0 仅在显式 Change Set 存在时建议 Semantic Diff；R2 在 missing/unexpected 时建议 R1 `ue_analyze_change_impact`，两者都不自动展开。
 - 真实 UE5.6 DirectHost Smoke 已覆盖 Data Asset、Material Instance、DataTable cell/rename 的 live/persisted/verified 共 12 个结果，以及 Blueprint `setVariableDefault` 的 commandlet persisted/verified；全部 expected=actual=matched、unexpected=missing=0，并完成恢复验证。无 C++ 变更，因此不要求 UE Direct Build。
 
-R2 设计、复用审计、协议、测试和边界见 [`Plans/AGENT_RELIABILITY_R2_SEMANTIC_DIFF_DESIGN_20260819.md`](Plans/AGENT_RELIABILITY_R2_SEMANTIC_DIFF_DESIGN_20260819.md)；完整执行规范见 [`Handoffs/AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md`](Handoffs/AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md)。R3 尚未开始，R2 完成后在 R3 停止点前停下。
+R2 设计、复用审计、协议、测试和边界见 [`Plans/AGENT_RELIABILITY_R2_SEMANTIC_DIFF_DESIGN_20260819.md`](Plans/AGENT_RELIABILITY_R2_SEMANTIC_DIFF_DESIGN_20260819.md)；完整执行规范见 [`Handoffs/AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md`](Handoffs/AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md)。
+
+### R3 状态（当前大任务，2026-08-20）
+
+R3（Verification Plan + Trust Verdict）已获明确指令，按一个完整大任务一次性推进。完整执行规范见 [`Handoffs/AGENT_RELIABILITY_R3_FULL_HANDOFF_20260820.md`](Handoffs/AGENT_RELIABILITY_R3_FULL_HANDOFF_20260820.md)。
+
+- 建议新增只读 `ue_build_verification_plan` 与 `ue_evaluate_trust_verdict`：前者从显式 Change Set、Operation Domain、R1 Impact 与 R2 Semantic Diff 生成确定性验证义务；后者只消费适用于当前 Change Set / Revision / Editor Session 的已有 Evidence。
+- Assertion 固定区分 `required / recommended / informational` 与 `pass / fail / unknown / not-applicable`；Required Evidence 缺失必须保持 UNKNOWN，不能由 Agent 或模型补全。
+- Verdict 固定为 `verified / suspicious / failed / insufficient-evidence`。Required FAIL 优先得到 failed；无 FAIL 但 Required UNKNOWN 得到 insufficient-evidence；Required 全关闭但仍有确定性 non-blocking risk 得到 suspicious；只有 Required Assertions 全部通过/不适用且无阻断风险才能得到 scoped verified。
+- R3 复用现有 Persistence / Independent Verify、R2 Semantic Diff、R1 Impact、Blueprint Compile、Data Validation、Automation 与 Revision/Freshness Evidence；不得再造 Writer、Diff 或 Reference Graph。
+- Trust Tool 不自动执行 Compile / Validate / Automation / Save / Verify，只返回 exact nextActions；若现有验证结果无法跨调用安全复用，只允许增加固定项目、无任意 JSON 注入、有界的 session-local Evidence Capture。
+- `verified` 必须同时返回 verification scope / unverified dimensions，不能被表述成“玩法/视觉/性能/所有运行时行为绝对正确”。R3 完成后停止，不自动进入 R4。
 
 首批目标不是新增大量 UE 写入，而是回答：Agent 当前应该改什么、修改会影响什么、以及有什么证据证明结果正确。无法证明的结论必须明确标记为推断；保存成功和独立重载成功只属于 Persistence Evidence，不自动等同于整个任务成功。
 

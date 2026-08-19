@@ -1,11 +1,11 @@
 # UEAgentKit 0.8.x Context / Analysis / Agent Reliability 执行计划
 
-> 更新时间：2026-08-19
-> R2 执行起始基线：`feature/agent-reliability@8d90aa5`（包含 R1 commit `b9203e4`）
-> 当前状态：R0 Task Context、R1 Impact Analysis 与 R2 Semantic Diff 已全部完成。R2 已完成真实 UE5.6 Smoke、全量门禁与文档同步，并在 R3 停止点前停下；R3–R5 未开始。
+> 更新时间：2026-08-20
+> 当前实现基线：`feature/agent-reliability@b5071aff5b116336d7baa16c84baaf64016c828a`（R2 Semantic Diff 已完成）
+> 当前状态：R0 Task Context、R1 Impact Analysis 与 R2 Semantic Diff 已全部完成。R3 Verification Plan + Trust Verdict 已获明确指令，按一个完整大任务一次性推进；Primary Agent 可内部拆分、并行和 checkpoint，但不中途等待逐片确认。R4–R5 未开始。
 > 建议开发分支：`feature/agent-reliability`（已创建，勿 Push）
 > 横向长期分支：`feature/performance-benchmarks`
-> 执行方式：按大里程碑推进。R2 完成结果见 `docs/Plans/AGENT_RELIABILITY_R2_SEMANTIC_DIFF_DESIGN_20260819.md`，执行边界见 `docs/Handoffs/AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md`。
+> 执行方式：按大里程碑推进。R3 当前完整执行边界见 `docs/Handoffs/AGENT_RELIABILITY_R3_FULL_HANDOFF_20260820.md`；R2 完成结果见 `docs/Plans/AGENT_RELIABILITY_R2_SEMANTIC_DIFF_DESIGN_20260819.md`。
 
 ---
 
@@ -475,6 +475,30 @@ TrustVerdict
 核心要求：
 
 > 「保存成功」「独立重载成功」只能作为 Persistence PASS，不能自动等同于整个任务 Verified。
+
+### 7.1 当前执行指令（2026-08-20）
+
+R3 已获明确指令，按**一个完整大任务**一次性完成，不再按小 Slice 等待逐片确认。完整 Handoff：
+
+`docs/Handoffs/AGENT_RELIABILITY_R3_FULL_HANDOFF_20260820.md`
+
+R3 当前要求至少一次性完成：
+
+```text
+R3.0 Evidence Audit
+ue_build_verification_plan
+ue_evaluate_trust_verdict
+Required / Recommended / Informational Assertions
+pass / fail / unknown / not-applicable
+verified / suspicious / failed / insufficient-evidence
+Persistence / Semantic / Freshness / Compile / Data Validation / Reference / Automation / Recovery
+Evidence applicability（Change Set / Revision / Editor Session / Project）
+R1/R2/R0 渐进式集成
+真实 UE5.6 Success / Insufficient / Failure / Suspicious Smoke
+全量门禁与文档同步
+```
+
+Trust Tool 只消费已有证据并生成明确 nextActions，禁止在内部自动 Compile / Validate / Automation / Save / Verify，也禁止任意 Evidence JSON 注入。`verified` 只表示当前 Verification Plan 的 Required Assertions 全部被适用的确定性 Evidence 关闭，不表示玩法、视觉、性能等所有未验证维度都绝对正确。R3 完成后必须停止，不自动进入 R4。
 
 ---
 
