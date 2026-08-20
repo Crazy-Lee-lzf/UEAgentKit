@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "1.0",
+  "caseId": "r4-readonly-impact-002",
+  "title": "Real two-hop Wheel impact analysis",
+  "category": "readonly-impact",
+  "fixtureProfile": "reforge-readonly",
+  "userIntent": "Analyze the depth-2 consumers of BP_SphereTraceWheel_V2. Distinguish direct and indirect consumers, include the VehicleBase to CargoBase chain, and do not claim runtime breakage from static references.",
+  "initialState": {"projectKey": "Reforge", "maxDepth": 2, "runtimeEvidenceAvailable": false},
+  "allowedAssets": [
+    "/Game/ModularOffroadCars/BP/Components/BP_SphereTraceWheel_V2.BP_SphereTraceWheel_V2",
+    "/Game/ModularOffroadCars/BP/Components/BP_VehicleBase.BP_VehicleBase",
+    "/Game/ModularOffroadCars/BP/Components/BP_CargoBase.BP_CargoBase"
+  ],
+  "allowedChanges": [],
+  "forbiddenAssets": [],
+  "forbiddenChanges": ["package-mutation", "runtime-breakage-claim"],
+  "expectedSemanticResult": {
+    "targetAssets": ["/Game/ModularOffroadCars/BP/Components/BP_SphereTraceWheel_V2.BP_SphereTraceWheel_V2"],
+    "directConsumerCount": 3,
+    "indirectConsumerCount": 24,
+    "visitedEdgeCount": 836,
+    "runtimeSensitivityState": "not-proven-with-current-evidence"
+  },
+  "requiredEvidence": ["two-hop-path-grounded", "static-runtime-boundary", "reforge-snapshot-unchanged"],
+  "expectedAgentOutcome": "success",
+  "expectedTrustState": null,
+  "recoveryRequirement": "none",
+  "setupId": "reforge-readonly-clean",
+  "cleanupId": "verify-reforge-readonly-unchanged",
+  "maxToolCalls": 18,
+  "maxElapsedSeconds": 300,
+  "tags": ["a2", "r1", "readonly", "impact"],
+  "profiles": ["full-r0-r3", "legacy-low-level"]
+}

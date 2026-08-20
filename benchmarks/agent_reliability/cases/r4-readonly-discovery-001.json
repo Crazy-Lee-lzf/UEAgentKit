@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "1.0",
+  "caseId": "r4-readonly-discovery-001",
+  "title": "Query-only vehicle customization target discovery",
+  "category": "readonly-discovery",
+  "fixtureProfile": "reforge-readonly",
+  "userIntent": "Find the main Blueprint for vehicle customization and module integration, including BP_VehicleBase, and state which assets should be inspected next. Do not modify anything.",
+  "initialState": {"projectKey": "Reforge", "queryOnly": true, "snapshotAssetCount": 48},
+  "allowedAssets": [
+    "/Game/ModularOffroadCars/BP/Components/BP_VehicleBase.BP_VehicleBase",
+    "/Game/ModularOffroadCars/BP/Components/VehicleCustomization/BP_CarChangeSender_Base.BP_CarChangeSender_Base",
+    "/Game/ModularOffroadCars/BP/Components/VehicleCustomization/BP_CarChangeSender_Modules.BP_CarChangeSender_Modules"
+  ],
+  "allowedChanges": [],
+  "forbiddenAssets": [],
+  "forbiddenChanges": ["package-mutation", "editor-launch"],
+  "expectedSemanticResult": {
+    "targetAssets": ["/Game/ModularOffroadCars/BP/Components/BP_VehicleBase.BP_VehicleBase"],
+    "topCandidate": "/Game/ModularOffroadCars/BP/Components/BP_VehicleBase.BP_VehicleBase",
+    "queryOnly": true
+  },
+  "requiredEvidence": ["asset-selection-grounded", "reforge-snapshot-unchanged"],
+  "expectedAgentOutcome": "success",
+  "expectedTrustState": null,
+  "recoveryRequirement": "none",
+  "setupId": "reforge-readonly-clean",
+  "cleanupId": "verify-reforge-readonly-unchanged",
+  "maxToolCalls": 16,
+  "maxElapsedSeconds": 300,
+  "tags": ["a1", "r0", "readonly", "query-only"],
+  "profiles": ["full-r0-r3", "legacy-low-level"]
+}

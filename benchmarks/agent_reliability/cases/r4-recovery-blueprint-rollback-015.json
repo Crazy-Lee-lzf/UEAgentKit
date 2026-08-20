@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "1.0",
+  "caseId": "r4-recovery-blueprint-rollback-015",
+  "title": "Blueprint exact rollback recovery",
+  "category": "recovery",
+  "fixtureProfile": "directhost-write",
+  "userIntent": "Change TransactionInt on BP_TransactionBlueprint from 0 to 42, verify the persisted semantic change, then perform the controlled rollback and prove the package bytes, Canonical value, revision, dirty state, and fixture inventory are exactly back at baseline.",
+  "initialState": {"fixtureRoot": "/Game/UEAgentKitWriteTests/Transactions", "variableName": "TransactionInt", "beforeValue": "0"},
+  "allowedAssets": ["/Game/UEAgentKitWriteTests/Transactions/BP_TransactionBlueprint.BP_TransactionBlueprint"],
+  "allowedChanges": ["transient:variable-default:TransactionInt:0->42", "rollback:TransactionInt:42->0"],
+  "forbiddenAssets": ["/Game/UEAgentKitWriteTests/Transactions/DA_TransactionAsset.DA_TransactionAsset"],
+  "forbiddenChanges": ["other-variable", "graph", "other-package", "residual-dirty-state"],
+  "expectedSemanticResult": {
+    "targetAssets": ["/Game/UEAgentKitWriteTests/Transactions/BP_TransactionBlueprint.BP_TransactionBlueprint"],
+    "operation": "rollback",
+    "variableName": "TransactionInt",
+    "finalValue": "0",
+    "packageHashRestored": true
+  },
+  "requiredEvidence": ["agent-rollback-exact", "exact-recovery", "no-mutation"],
+  "expectedAgentOutcome": "success",
+  "expectedTrustState": null,
+  "recoveryRequirement": "exact",
+  "setupId": "directhost-transaction-reset",
+  "cleanupId": "directhost-reset-and-verify",
+  "maxToolCalls": 46,
+  "maxElapsedSeconds": 1200,
+  "tags": ["c4", "r2", "r3", "recovery", "blueprint"],
+  "profiles": ["full-r0-r3"]
+}

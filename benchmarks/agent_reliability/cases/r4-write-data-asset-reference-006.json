@@ -1,0 +1,33 @@
+{
+  "schemaVersion": "1.0",
+  "caseId": "r4-write-data-asset-reference-006",
+  "title": "Data Asset object reference write",
+  "category": "write-reference",
+  "fixtureProfile": "directhost-write",
+  "userIntent": "Set ObjectValue on DA_Ref_Object to T_Target using the typed Object reference operation. Save and verify the exact reference without changing the other reference fixtures.",
+  "initialState": {"fixtureRoot": "/Game/UEAgentKitWriteTests/References", "propertyPath": "ObjectValue", "beforeValue": null},
+  "allowedAssets": ["/Game/UEAgentKitWriteTests/References/DA_Ref_Object.DA_Ref_Object"],
+  "allowedChanges": ["property:ObjectValue:null->T_Target"],
+  "forbiddenAssets": [
+    "/Game/UEAgentKitWriteTests/References/DA_Ref_Class.DA_Ref_Class",
+    "/Game/UEAgentKitWriteTests/References/DA_Ref_SoftObject.DA_Ref_SoftObject"
+  ],
+  "forbiddenChanges": ["other-reference-property", "other-package"],
+  "expectedSemanticResult": {
+    "targetAssets": ["/Game/UEAgentKitWriteTests/References/DA_Ref_Object.DA_Ref_Object"],
+    "operation": "setAssetReferenceProperty",
+    "propertyPath": "ObjectValue",
+    "referenceType": "Object",
+    "afterValue": "/Game/UEAgentKitWriteTests/References/T_Target.T_Target"
+  },
+  "requiredEvidence": ["typed-reference-grounded", "independent-verify", "trust-verified"],
+  "expectedAgentOutcome": "success",
+  "expectedTrustState": "verified",
+  "recoveryRequirement": "none",
+  "setupId": "directhost-reference-reset",
+  "cleanupId": "directhost-reset-and-verify",
+  "maxToolCalls": 38,
+  "maxElapsedSeconds": 900,
+  "tags": ["b2", "r1", "r2", "r3", "write", "reference"],
+  "profiles": ["full-r0-r3"]
+}

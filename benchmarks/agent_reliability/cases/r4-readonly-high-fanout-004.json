@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "1.0",
+  "caseId": "r4-readonly-high-fanout-004",
+  "title": "High-fanout bounded impact",
+  "category": "readonly-impact",
+  "fixtureProfile": "reforge-readonly",
+  "userIntent": "Assess the direct impact scope of BP_VehicleBase. Identify high fanout, give a bounded validation scope, and state honestly whether runtime sensitivity is proven.",
+  "initialState": {"projectKey": "Reforge", "maxDepth": 1, "highFanoutThreshold": 15},
+  "allowedAssets": ["/Game/ModularOffroadCars/BP/Components/BP_VehicleBase.BP_VehicleBase"],
+  "allowedChanges": [],
+  "forbiddenAssets": [],
+  "forbiddenChanges": ["package-mutation", "runtime-sensitivity-overclaim"],
+  "expectedSemanticResult": {
+    "targetAssets": ["/Game/ModularOffroadCars/BP/Components/BP_VehicleBase.BP_VehicleBase"],
+    "directConsumerCount": 23,
+    "visitedEdgeCount": 282,
+    "riskKinds": ["high-fanout-target"],
+    "runtimeSensitivityState": "not-proven-with-current-evidence"
+  },
+  "requiredEvidence": ["high-fanout-grounded", "bounded-validation-scope", "reforge-snapshot-unchanged"],
+  "expectedAgentOutcome": "success",
+  "expectedTrustState": null,
+  "recoveryRequirement": "none",
+  "setupId": "reforge-readonly-clean",
+  "cleanupId": "verify-reforge-readonly-unchanged",
+  "maxToolCalls": 18,
+  "maxElapsedSeconds": 300,
+  "tags": ["a4", "r1", "readonly", "high-fanout"],
+  "profiles": ["full-r0-r3", "legacy-low-level"]
+}

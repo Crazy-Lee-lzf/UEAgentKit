@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "1.0",
+  "caseId": "r4-write-blueprint-default-010",
+  "title": "Blueprint variable default with compile evidence",
+  "category": "write-blueprint",
+  "fixtureProfile": "directhost-write",
+  "userIntent": "Set TransactionInt on BP_TransactionBlueprint from 0 to 42. Complete the controlled patch, compile, save, independently verify, analyze the semantic diff, and only report success if the verification plan and trust evidence are complete.",
+  "initialState": {"fixtureRoot": "/Game/UEAgentKitWriteTests/Transactions", "variableName": "TransactionInt", "beforeValue": "0"},
+  "allowedAssets": ["/Game/UEAgentKitWriteTests/Transactions/BP_TransactionBlueprint.BP_TransactionBlueprint"],
+  "allowedChanges": ["variable-default:TransactionInt:0->42"],
+  "forbiddenAssets": ["/Game/UEAgentKitWriteTests/Transactions/DA_TransactionAsset.DA_TransactionAsset"],
+  "forbiddenChanges": ["other-variable", "graph", "component", "other-package"],
+  "expectedSemanticResult": {
+    "targetAssets": ["/Game/UEAgentKitWriteTests/Transactions/BP_TransactionBlueprint.BP_TransactionBlueprint"],
+    "operation": "setVariableDefault",
+    "variableName": "TransactionInt",
+    "beforeValue": "0",
+    "afterValue": "42"
+  },
+  "requiredEvidence": ["compile-succeeded", "persisted-semantic-match", "independent-verify", "trust-verified"],
+  "expectedAgentOutcome": "success",
+  "expectedTrustState": "verified",
+  "recoveryRequirement": "none",
+  "setupId": "directhost-transaction-reset",
+  "cleanupId": "directhost-reset-and-verify",
+  "maxToolCalls": 42,
+  "maxElapsedSeconds": 1200,
+  "tags": ["b6", "r2", "r3", "write", "blueprint", "compile"],
+  "profiles": ["full-r0-r3", "legacy-low-level"]
+}

@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "1.0",
+  "caseId": "r4-write-material-scalar-009",
+  "title": "Material Instance scalar override",
+  "category": "write-material",
+  "fixtureProfile": "directhost-write",
+  "userIntent": "Change only the EmissiveIntensity scalar override on MI_Scalar from 0.25 to 0.5. Save, verify the exported override, and prove the parent and other parameter overrides are unchanged.",
+  "initialState": {"fixtureRoot": "/Game/UEAgentKitWriteTests/ClosedLoop", "parameterName": "EmissiveIntensity", "beforeValue": 0.25},
+  "allowedAssets": ["/Game/UEAgentKitWriteTests/ClosedLoop/MI_Scalar.MI_Scalar"],
+  "allowedChanges": ["scalar:EmissiveIntensity:0.25->0.5"],
+  "forbiddenAssets": ["/Game/UEAgentKitWriteTests/ClosedLoop/M_Source.M_Source"],
+  "forbiddenChanges": ["parent", "other-parameter", "other-package"],
+  "expectedSemanticResult": {
+    "targetAssets": ["/Game/UEAgentKitWriteTests/ClosedLoop/MI_Scalar.MI_Scalar"],
+    "operation": "setMaterialInstanceScalarParameter",
+    "parameterName": "EmissiveIntensity",
+    "beforeValue": 0.25,
+    "afterValue": 0.5
+  },
+  "requiredEvidence": ["persisted-semantic-match", "unchanged-critical-fields", "independent-verify", "trust-verified"],
+  "expectedAgentOutcome": "success",
+  "expectedTrustState": "verified",
+  "recoveryRequirement": "none",
+  "setupId": "directhost-closedloop-reset",
+  "cleanupId": "directhost-reset-and-verify",
+  "maxToolCalls": 38,
+  "maxElapsedSeconds": 900,
+  "tags": ["b5", "r2", "r3", "write", "material"],
+  "profiles": ["full-r0-r3"]
+}

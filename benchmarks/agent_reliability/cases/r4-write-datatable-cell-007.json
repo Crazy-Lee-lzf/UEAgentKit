@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "1.0",
+  "caseId": "r4-write-datatable-cell-007",
+  "title": "DataTable single-cell closed loop",
+  "category": "write-datatable",
+  "fixtureProfile": "directhost-write",
+  "userIntent": "Change only RowAlpha.Count in DT_Target from 1 to 42, then save, independently verify, and prove that Label, bEnabled, and every other row or field stayed unchanged.",
+  "initialState": {"fixtureRoot": "/Game/UEAgentKitWriteTests/ClosedLoop", "rowName": "RowAlpha", "fieldName": "Count", "beforeValue": 1},
+  "allowedAssets": ["/Game/UEAgentKitWriteTests/ClosedLoop/DT_Target.DT_Target"],
+  "allowedChanges": ["row:RowAlpha.field:Count:1->42"],
+  "forbiddenAssets": [],
+  "forbiddenChanges": ["row:RowAlpha.field:Label", "row:RowAlpha.field:bEnabled", "other-row", "other-package"],
+  "expectedSemanticResult": {
+    "targetAssets": ["/Game/UEAgentKitWriteTests/ClosedLoop/DT_Target.DT_Target"],
+    "operation": "setDataTableCell",
+    "rowName": "RowAlpha",
+    "fieldName": "Count",
+    "beforeValue": 1,
+    "afterValue": 42
+  },
+  "requiredEvidence": ["persisted-semantic-match", "unchanged-critical-fields", "independent-verify", "trust-verified"],
+  "expectedAgentOutcome": "success",
+  "expectedTrustState": "verified",
+  "recoveryRequirement": "none",
+  "setupId": "directhost-closedloop-reset",
+  "cleanupId": "directhost-reset-and-verify",
+  "maxToolCalls": 38,
+  "maxElapsedSeconds": 900,
+  "tags": ["b3", "r2", "r3", "write", "datatable"],
+  "profiles": ["full-r0-r3"]
+}

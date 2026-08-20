@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "1.0",
+  "caseId": "r4-noop-material-011",
+  "title": "Expected Material Instance no-op",
+  "category": "no-op",
+  "fixtureProfile": "directhost-write",
+  "userIntent": "Ensure MI_Noop EmissiveIntensity is 0.5. It is already 0.5, so recognize the no-op and do not create a transaction, save, verify receipt, or fabricated evidence.",
+  "initialState": {"fixtureRoot": "/Game/UEAgentKitWriteTests/Materials", "parameterName": "EmissiveIntensity", "beforeValue": 0.5},
+  "allowedAssets": ["/Game/UEAgentKitWriteTests/Materials/MI_Noop.MI_Noop"],
+  "allowedChanges": [],
+  "forbiddenAssets": [],
+  "forbiddenChanges": ["transaction", "save", "verify-receipt", "package-mutation"],
+  "expectedSemanticResult": {
+    "targetAssets": ["/Game/UEAgentKitWriteTests/Materials/MI_Noop.MI_Noop"],
+    "operation": "no-op",
+    "parameterName": "EmissiveIntensity",
+    "value": 0.5
+  },
+  "requiredEvidence": ["semantic-no-op", "no-mutation"],
+  "expectedAgentOutcome": "no-op",
+  "expectedTrustState": null,
+  "recoveryRequirement": "none",
+  "setupId": "directhost-material-reset",
+  "cleanupId": "directhost-reset-and-verify",
+  "maxToolCalls": 18,
+  "maxElapsedSeconds": 600,
+  "tags": ["b7", "r2", "no-op", "material"],
+  "profiles": ["full-r0-r3", "legacy-low-level"]
+}

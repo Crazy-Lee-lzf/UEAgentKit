@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "1.0",
+  "caseId": "r4-write-data-asset-scalar-005",
+  "title": "Data Asset scalar closed loop",
+  "category": "write-data-asset",
+  "fixtureProfile": "directhost-write",
+  "userIntent": "Set IntValue on DA_Scalar from -17 to 7. Use a Change Set, live apply, authorized save, independent verification, semantic diff, verification plan, and a final evidence-backed trust verdict.",
+  "initialState": {"fixtureRoot": "/Game/UEAgentKitWriteTests/ClosedLoop", "propertyPath": "IntValue", "beforeValue": -17},
+  "allowedAssets": ["/Game/UEAgentKitWriteTests/ClosedLoop/DA_Scalar.DA_Scalar"],
+  "allowedChanges": ["property:IntValue:-17->7"],
+  "forbiddenAssets": [],
+  "forbiddenChanges": ["other-property", "other-package"],
+  "expectedSemanticResult": {
+    "targetAssets": ["/Game/UEAgentKitWriteTests/ClosedLoop/DA_Scalar.DA_Scalar"],
+    "operation": "setAssetProperty",
+    "propertyPath": "IntValue",
+    "beforeValue": -17,
+    "afterValue": 7
+  },
+  "requiredEvidence": ["persisted-semantic-match", "independent-verify", "trust-verified"],
+  "expectedAgentOutcome": "success",
+  "expectedTrustState": "verified",
+  "recoveryRequirement": "none",
+  "setupId": "directhost-closedloop-reset",
+  "cleanupId": "directhost-reset-and-verify",
+  "maxToolCalls": 38,
+  "maxElapsedSeconds": 900,
+  "tags": ["b1", "r2", "r3", "write", "data-asset"],
+  "profiles": ["full-r0-r3", "legacy-low-level"]
+}

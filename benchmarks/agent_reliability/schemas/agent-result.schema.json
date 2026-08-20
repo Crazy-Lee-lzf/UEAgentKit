@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ueagentkit.local/schemas/agent-reliability/agent-result-1.0.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["benchmarkResult"],
+  "properties": {
+    "benchmarkResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "targetAssets",
+        "changeSetId",
+        "claimedSemanticResult",
+        "trustVerdict",
+        "evidenceIds",
+        "notes"
+      ],
+      "properties": {
+        "status": {"enum": ["success", "blocked", "failed", "insufficient-evidence"]},
+        "targetAssets": {"type": "array", "items": {"type": "string"}},
+        "changeSetId": {"type": "string"},
+        "claimedSemanticResult": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "targetAssets",
+            "topCandidate",
+            "queryOnly",
+            "directConsumerCount",
+            "indirectConsumerCount",
+            "visitedEdgeCount",
+            "riskKinds",
+            "runtimeSensitivityState",
+            "operation",
+            "parameterName",
+            "propertyPath",
+            "referenceType",
+            "rowName",
+            "fieldName",
+            "variableName",
+            "conflict",
+            "requiredEvidenceKind",
+            "trustState",
+            "referenceCount",
+            "safeToApply",
+            "automationTimedOut",
+            "packageHashRestored",
+            "value",
+            "beforeValue",
+            "afterValue",
+            "finalValue"
+          ],
+          "properties": {
+            "targetAssets": {"type": "array", "items": {"type": "string"}},
+            "topCandidate": {"type": ["string", "null"]},
+            "queryOnly": {"type": ["boolean", "null"]},
+            "directConsumerCount": {"type": ["integer", "null"]},
+            "indirectConsumerCount": {"type": ["integer", "null"]},
+            "visitedEdgeCount": {"type": ["integer", "null"]},
+            "riskKinds": {"type": ["array", "null"], "items": {"type": "string"}},
+            "runtimeSensitivityState": {"type": ["string", "null"]},
+            "operation": {"type": ["string", "null"]},
+            "parameterName": {"type": ["string", "null"]},
+            "propertyPath": {"type": ["string", "null"]},
+            "referenceType": {"type": ["string", "null"]},
+            "rowName": {"type": ["string", "null"]},
+            "fieldName": {"type": ["string", "null"]},
+            "variableName": {"type": ["string", "null"]},
+            "conflict": {"type": ["string", "null"]},
+            "requiredEvidenceKind": {"type": ["string", "null"]},
+            "trustState": {"type": ["string", "null"]},
+            "referenceCount": {"type": ["integer", "null"]},
+            "safeToApply": {"type": ["boolean", "null"]},
+            "automationTimedOut": {"type": ["boolean", "null"]},
+            "packageHashRestored": {"type": ["boolean", "null"]},
+            "value": {"type": ["string", "number", "boolean", "null"]},
+            "beforeValue": {"type": ["string", "number", "boolean", "null"]},
+            "afterValue": {"type": ["string", "number", "boolean", "null"]},
+            "finalValue": {"type": ["string", "number", "boolean", "null"]}
+          }
+        },
+        "trustVerdict": {"type": "string"},
+        "evidenceIds": {"type": "array", "items": {"type": "string"}},
+        "notes": {"type": "string"}
+      }
+    }
+  }
+}

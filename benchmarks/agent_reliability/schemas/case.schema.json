@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ueagentkit.local/schemas/agent-reliability/case-1.0.json",
+  "title": "UE Agent Kit R4 Agent Reliability Case",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "caseId",
+    "title",
+    "category",
+    "fixtureProfile",
+    "userIntent",
+    "initialState",
+    "allowedAssets",
+    "allowedChanges",
+    "forbiddenAssets",
+    "forbiddenChanges",
+    "expectedSemanticResult",
+    "requiredEvidence",
+    "expectedAgentOutcome",
+    "expectedTrustState",
+    "recoveryRequirement",
+    "setupId",
+    "cleanupId",
+    "maxToolCalls",
+    "maxElapsedSeconds",
+    "tags",
+    "profiles"
+  ],
+  "properties": {
+    "schemaVersion": {"const": "1.0"},
+    "caseId": {"type": "string", "pattern": "^r4-[a-z0-9]+(?:-[a-z0-9]+)*-[0-9]{3}$"},
+    "title": {"type": "string", "minLength": 1},
+    "category": {"type": "string", "minLength": 1},
+    "fixtureProfile": {
+      "enum": ["reforge-readonly", "directhost-write", "directhost-controlled-failure"]
+    },
+    "userIntent": {"type": "string", "minLength": 1},
+    "initialState": {"type": "object"},
+    "allowedAssets": {"$ref": "#/$defs/assets"},
+    "allowedChanges": {"$ref": "#/$defs/strings"},
+    "forbiddenAssets": {"$ref": "#/$defs/assets"},
+    "forbiddenChanges": {"$ref": "#/$defs/strings"},
+    "expectedSemanticResult": {"type": "object"},
+    "requiredEvidence": {"$ref": "#/$defs/strings"},
+    "expectedAgentOutcome": {"enum": ["success", "safe-failure", "blocked", "no-op"]},
+    "expectedTrustState": {"type": ["string", "null"]},
+    "recoveryRequirement": {"enum": ["none", "exact"]},
+    "setupId": {
+      "enum": [
+        "reforge-readonly-clean",
+        "directhost-closedloop-reset",
+        "directhost-scalar-reset",
+        "directhost-reference-reset",
+        "directhost-datatable-reset",
+        "directhost-datatable-reference-impact",
+        "directhost-material-reset",
+        "directhost-transaction-reset",
+        "directhost-stale-revision",
+        "directhost-controlled-validation-failure",
+        "directhost-controlled-semantic-mismatch",
+        "directhost-dirty-context"
+      ]
+    },
+    "cleanupId": {
+      "enum": ["verify-reforge-readonly-unchanged", "directhost-reset-and-verify"]
+    },
+    "maxToolCalls": {"type": "integer", "minimum": 1, "maximum": 200},
+    "maxElapsedSeconds": {"type": "integer", "minimum": 10, "maximum": 3600},
+    "tags": {"$ref": "#/$defs/strings"},
+    "profiles": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "contains": {"const": "full-r0-r3"},
+      "items": {"enum": ["full-r0-r3", "legacy-low-level"]}
+    }
+  },
+  "$defs": {
+    "strings": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "assets": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^/Game(?:/[A-Za-z0-9_]+)+(?:\\.[A-Za-z0-9_]+)?$"
+      }
+    }
+  }
+}

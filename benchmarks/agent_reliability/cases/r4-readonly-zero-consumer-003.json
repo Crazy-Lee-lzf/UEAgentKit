@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "1.0",
+  "caseId": "r4-readonly-zero-consumer-003",
+  "title": "Zero-consumer boundary",
+  "category": "readonly-impact",
+  "fixtureProfile": "reforge-readonly",
+  "userIntent": "Determine the depth-2 consumers of BP_GM_main from the fixed Reforge index. Do not invent a consumer when no indexed edge exists.",
+  "initialState": {"projectKey": "Reforge", "maxDepth": 2},
+  "allowedAssets": ["/Game/ModularOffroadCars/BP/Components/BP_GM_main.BP_GM_main"],
+  "allowedChanges": [],
+  "forbiddenAssets": [],
+  "forbiddenChanges": ["package-mutation", "invented-consumer"],
+  "expectedSemanticResult": {
+    "targetAssets": ["/Game/ModularOffroadCars/BP/Components/BP_GM_main.BP_GM_main"],
+    "directConsumerCount": 0,
+    "indirectConsumerCount": 0,
+    "visitedEdgeCount": 0
+  },
+  "requiredEvidence": ["zero-consumer-grounded", "reforge-snapshot-unchanged"],
+  "expectedAgentOutcome": "success",
+  "expectedTrustState": null,
+  "recoveryRequirement": "none",
+  "setupId": "reforge-readonly-clean",
+  "cleanupId": "verify-reforge-readonly-unchanged",
+  "maxToolCalls": 14,
+  "maxElapsedSeconds": 300,
+  "tags": ["a3", "r1", "readonly", "zero-consumer"],
+  "profiles": ["full-r0-r3"]
+}
