@@ -1406,11 +1406,13 @@ class AgentWorkflowTests(unittest.TestCase):
             ],
         )
 
-    def test_live_write_tool_count_and_names_include_semantic_diff(self) -> None:
+    def test_live_write_tool_count_and_names_include_verification_trust(self) -> None:
         names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
-        self.assertEqual(len(names), 91)
+        self.assertEqual(len(names), 93)
         self.assertIn("ue_analyze_change_impact", names)
         self.assertIn("ue_analyze_semantic_diff", names)
+        self.assertIn("ue_build_verification_plan", names)
+        self.assertIn("ue_evaluate_trust_verdict", names)
         self.assertIn("ue_set_asset_property", names)
         self.assertIn("ue_set_asset_reference_property", names)
         self.assertIn("ue_apply_asset_property_live", names)

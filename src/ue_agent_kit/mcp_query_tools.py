@@ -13,6 +13,7 @@ from .impact_analysis import (
 )
 from .query_protocol import DEFAULT_OUTPUT_TOKEN_BUDGET
 from .semantic_diff_workflow import SemanticDiffEvidenceError
+from .verification_trust import VerificationTrustError
 
 
 def register_query_tools(
@@ -202,3 +203,53 @@ def register_query_tools(
             )
         except (FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_analyze_semantic_diff", exc, read_only=True)
+
+    @server.tool(annotations=read_annotations)
+    def ue_build_verification_plan(
+        change_set_id: str,
+        impact_depth: int = 1,
+        required_automation_tests: list[str] | None = None,
+        extra_validation_assets: list[str] | None = None,
+        max_output_tokens: int = DEFAULT_OUTPUT_TOKEN_BUDGET,
+    ) -> dict[str, Any]:
+        """Build deterministic verification obligations for one explicit Change Set without executing actions."""
+        try:
+            if workflow_service is None:
+                raise VerificationTrustError(
+                    "insufficient-evidence",
+                    "Verification Plan requires the fixed project Workflow evidence service.",
+                )
+            return workflow_service.build_verification_plan(
+                change_set_id,
+                impact_depth=impact_depth,
+                required_automation_tests=required_automation_tests,
+                extra_validation_assets=extra_validation_assets,
+                max_output_tokens=max_output_tokens,
+            )
+        except (FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_build_verification_plan", exc, read_only=True)
+
+    @server.tool(annotations=read_annotations)
+    def ue_evaluate_trust_verdict(
+        change_set_id: str,
+        impact_depth: int = 1,
+        required_automation_tests: list[str] | None = None,
+        extra_validation_assets: list[str] | None = None,
+        max_output_tokens: int = DEFAULT_OUTPUT_TOKEN_BUDGET,
+    ) -> dict[str, Any]:
+        """Evaluate deterministic evidence applicability without executing Compile, Validate, Verify, or writes."""
+        try:
+            if workflow_service is None:
+                raise VerificationTrustError(
+                    "insufficient-evidence",
+                    "Trust Verdict requires the fixed project Workflow evidence service.",
+                )
+            return workflow_service.evaluate_trust_verdict(
+                change_set_id,
+                impact_depth=impact_depth,
+                required_automation_tests=required_automation_tests,
+                extra_validation_assets=extra_validation_assets,
+                max_output_tokens=max_output_tokens,
+            )
+        except (FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_evaluate_trust_verdict", exc, read_only=True)

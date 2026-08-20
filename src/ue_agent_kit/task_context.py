@@ -1442,6 +1442,20 @@ class TaskContextService:
                     "arguments": {"change_set_id": change_set_section.get("changeSetId", "")},
                 }
             )
+            expansions.append(
+                {
+                    "tool": "ue_build_verification_plan",
+                    "reason": "verification-plan-explicit-change-set",
+                    "arguments": {"change_set_id": change_set_section.get("changeSetId", "")},
+                }
+            )
+            expansions.append(
+                {
+                    "tool": "ue_evaluate_trust_verdict",
+                    "reason": "trust-verdict-explicit-change-set",
+                    "arguments": {"change_set_id": change_set_section.get("changeSetId", "")},
+                }
+            )
         return expansions[:MAX_TASK_CONTEXT_EXPANSIONS]
 
     @staticmethod

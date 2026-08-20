@@ -9,6 +9,7 @@ def register_live_action_tools(
     *,
     server: Any,
     live_editor_service: LiveEditorBridgeService,
+    verification_evidence_store: Any | None = None,
     tool_annotations_type: Any,
     error_response: Any,
 ) -> None:
@@ -20,8 +21,16 @@ def register_live_action_tools(
     )
 
     def call(tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
+        capture_token = (
+            verification_evidence_store.begin_registered_tool(tool_name, params)
+            if verification_evidence_store is not None
+            else None
+        )
         try:
-            return live_editor_service.call_tool(tool_name, params)
+            response = live_editor_service.call_tool(tool_name, params)
+            if verification_evidence_store is not None:
+                verification_evidence_store.finish_registered_tool(capture_token, response)
+            return response
         except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
             return error_response(tool_name, exc, read_only=False)
 

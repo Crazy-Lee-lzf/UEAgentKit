@@ -380,6 +380,30 @@ class TaskContextTests(unittest.TestCase):
         self.assertNotIn("change-set-not-found", kinds)
         expansion_tools = [item["tool"] for item in context["nextExpansions"]]
         self.assertIn("ue_get_change_set", expansion_tools)
+        self.assertIn("ue_analyze_semantic_diff", expansion_tools)
+        self.assertIn("ue_build_verification_plan", expansion_tools)
+        self.assertIn("ue_evaluate_trust_verdict", expansion_tools)
+        verification_expansions = {
+            item["tool"]: item
+            for item in context["nextExpansions"]
+            if item["tool"] in {"ue_build_verification_plan", "ue_evaluate_trust_verdict"}
+        }
+        self.assertEqual(
+            verification_expansions["ue_build_verification_plan"],
+            {
+                "tool": "ue_build_verification_plan",
+                "reason": "verification-plan-explicit-change-set",
+                "arguments": {"change_set_id": "cs_valid"},
+            },
+        )
+        self.assertEqual(
+            verification_expansions["ue_evaluate_trust_verdict"],
+            {
+                "tool": "ue_evaluate_trust_verdict",
+                "reason": "trust-verdict-explicit-change-set",
+                "arguments": {"change_set_id": "cs_valid"},
+            },
+        )
 
     def test_t8_change_set_id_invalid_degrades_section_and_adds_risk(self) -> None:
         service = self.make_service(workflow_service=FakeChangeSetWorkflow())
@@ -782,6 +806,9 @@ class TaskContextTests(unittest.TestCase):
             live_editor_service=FakeLiveEditor(dirty_packages=(PACKAGE_A,)),
         )
         context = service.get_task_context(query="检查伤害")
+        expansion_tools = {item["tool"] for item in context["nextExpansions"]}
+        self.assertNotIn("ue_build_verification_plan", expansion_tools)
+        self.assertNotIn("ue_evaluate_trust_verdict", expansion_tools)
         kinds = {link["kind"] for link in context["correlation"].get("links", [])}
         self.assertFalse(any(kind.startswith("change-set-") for kind in kinds))
         self.assertFalse(any(kind.startswith("work-change-set") for kind in kinds))

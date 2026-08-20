@@ -702,6 +702,19 @@ class SemanticDiffWorkflowContractTests(unittest.TestCase):
             self.assertEqual(result["assets"][0]["beforeRevision"], BEFORE_REVISION)
             self.assertEqual(result["assets"][0]["afterRevision"], "")
             self.assertIn("revision-evidence-unavailable", {gap["code"] for gap in result["analysisGaps"]})
+            r3_actions = {
+                action["tool"]: action
+                for action in result["nextActions"]
+                if action["tool"] in {"ue_build_verification_plan", "ue_evaluate_trust_verdict"}
+            }
+            self.assertEqual(
+                r3_actions["ue_build_verification_plan"]["arguments"],
+                {"change_set_id": "cs_explicit"},
+            )
+            self.assertEqual(
+                r3_actions["ue_evaluate_trust_verdict"]["arguments"],
+                {"change_set_id": "cs_explicit"},
+            )
             self.assertEqual(service.reconcile_calls, 1)
 
     def test_commandlet_verified_stage_uses_canonical_actual_not_commit_report(self) -> None:

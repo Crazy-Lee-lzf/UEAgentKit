@@ -811,6 +811,31 @@ R2（Semantic Diff，2026-08-19 一次性完成，R2 里程碑标记完成）概
    严格停止在 R3 之前。
 ```
 
+R3（Verification Plan + Trust Verdict，2026-08-20 一次性完成）概览：
+
+```text
+1. R3.0 三路 Evidence Audit 完成：Workflow/Persistence/Semantic、Compile/Validation/Automation、
+   R1 Impact/Scope/Registry；Evidence Matrix 与设计见
+   AGENT_RELIABILITY_R3_VERIFICATION_TRUST_DESIGN_20260820.md。
+2. 新增只读 query Tool ue_build_verification_plan 与 ue_evaluate_trust_verdict；只接受显式
+   change_set_id，impact_depth 0..2，exact automation tests/extra validation assets 各≤8，
+   max_output_tokens 有界；不接受任意 Assertion/Evidence JSON、项目或数据库路径。
+3. 统一 Assertion family：persistence/semantic/freshness/compile/data-validation/
+   reference-impact/automation/recovery；requirement、status、applicability、stable ID、固定排序、
+   planFingerprint 和 Token 裁剪均为确定性协议。
+4. Verdict 固定为 verified/suspicious/failed/insufficient-evidence：Required FAIL 优先 failed；
+   Required UNKNOWN/blocking risk 为 insufficient；Recommended unresolved/non-blocking risk 为
+   suspicious；其余才是 scoped verified，并始终暴露 unverifiedDimensions。
+5. 直接复用 R2 Semantic Diff 与 R1 bounded Impact；reference-sensitive operation 生成 Required
+   scope assertion，最多 8 个 direct Blueprint consumer compile；no-op 不制造 Save/Verify。
+6. Compile/Validation/Automation 通过固定项目、bounded、persistent=false、arbitraryIngest=false
+   的 session-local Evidence Store 捕获；Trust Tool 不自动执行任何 Live Action。
+7. R0 仅在显式 Change Set found 时建议 Plan/Verdict；R2 对显式 Change Set建议 Plan，clean
+   semantic result 再建议 Verdict；两者都不自动执行 R3。
+8. Registry 契约计数更新为 10/22、43/55、60/72、93/105。真实 UE5.6 S1–S5 覆盖四态并完成
+   fixture recovery；Ruff 全仓、Python 648/648、PowerShell parser 与 diff/编码门禁通过；本轮停止在 R3。
+```
+
 ---
 
 ## 14. 下一大阶段完成标准

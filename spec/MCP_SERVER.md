@@ -17,6 +17,8 @@ ue_find_references
 ue_get_task_context
 ue_analyze_change_impact
 ue_analyze_semantic_diff
+ue_build_verification_plan
+ue_evaluate_trust_verdict
 ```
 
 ### 固定项目 Live Editor 模式
@@ -474,6 +476,53 @@ revisionExportStale=true
 ## Validation Evidence
 
 Live Validation 和 Automation 结果保留 Editor Bridge 返回的 `validationEvidence`，MCP Server 不重写 Evidence ID、项目哈希、Editor Session、UTC 时间或 Revision Set。`ue_get_capabilities` 的 `liveActionContract` 声明 Evidence Schema 版本、项目绑定和 Revision Set 绑定语义。
+
+## R3 Verification Plan 与 Trust Verdict
+
+Query 组新增两个全模式只读 Tool：
+
+```text
+ue_build_verification_plan
+ue_evaluate_trust_verdict
+```
+
+两者都要求显式 `change_set_id`，并共享严格参数：`impact_depth=0..2`、最多 8 个 exact `required_automation_tests`、最多 8 个 exact `/Game` `extra_validation_assets`、`max_output_tokens=256..32768`。不接受自动 Change Set discovery、项目/数据库/Evidence 路径、任意 Assertion DSL 或任意 Evidence JSON。
+
+Plan 输出包含确定性 `planId/planFingerprint`、scope、Assertions、risks 和 exact nextActions。Assertion family 固定为：
+
+```text
+persistence
+semantic
+freshness
+compile
+data-validation
+reference-impact
+automation
+recovery
+```
+
+每条 Assertion 固定区分 `required/recommended/informational`、`pass/fail/unknown/not-applicable` 和 Evidence applicability。Stable ID 与排序由 rule version、Change Set、kind、subject 和 requirement 决定。
+
+Evaluator 重新生成同一 Plan，只消费当前适用 Evidence，不执行 Compile、Validate、Automation、Save、Verify、Rollback 或 Writer。Verdict 规则固定：Required FAIL → `failed`；Required UNKNOWN 或 blocking risk → `insufficient-evidence`；Required 全关闭但 Recommended unresolved/non-blocking risk 存在 → `suspicious`；否则 → scoped `verified`。响应始终报告 verification scope 与 runtime/visual/performance/network/external/runtime-trace 等未覆盖维度；`verified` 不表示普遍正确。
+
+R3 直接复用 R2 Semantic Diff 和 R1 Impact Analysis，不复制 Diff Adapter 或 Reference Graph。真实写入要求 verified semantic/persistence/freshness；expected no-op 使用 R2 persisted baseline exact-revision 特例，不伪造 Save/Verify。reference-sensitive operation 固定为 `setAssetReferenceProperty/removeDataTableRow/renameDataTableRow`，其 bounded R1 scope 为 Required，并可将最多 8 个 direct Blueprint consumers 升级为 Required Compile。
+
+### Session-local Evidence Capture
+
+Workflow session 的 `VerificationEvidenceStore` 仅由已注册 Tool wrapper 捕获：
+
+```text
+ue_compile_blueprint
+ue_validate_asset
+ue_validate_folder
+ue_run_automation_test
+```
+
+契约为 `persistent=false / arbitraryIngest=false / projectBound=true / bounded=true`，最多 256 条。Compile capture 补固定项目 action 前后 disk SHA-256、Session 与 Dirty；Validation/Automation 保留 Validation Evidence 1.0。Automation 的 `revisionCoverage=not-applicable` 只证明 exact test 的 fixed project/session execution，不证明 asset Revision。Server restart 后 Store 丢失，Trust 必须返回 UNKNOWN/insufficient evidence，不能重建 PASS。
+
+R3 bounds：affected assets≤8、Assertions≤128、Evidence refs≤128、impact depth≤2。Token 裁剪优先移除 Evidence details、optional assertion details、informational Assertions 和 non-blocking risk messages，保留 Verdict、Required FAIL/UNKNOWN、blocking risk、scope 与 nextActions。
+
+`ue_get_capabilities.verificationTrust` 和 `ue_get_project_status.verificationTrust` 暴露上述只读、deterministic、`modelInference=false`、auto-execute=false 与 Evidence Capture 边界。当前 Tool Count 契约：Offline 10、Offline+Memory 22、Live 43、Live+Memory 55、Workflow 60、Workflow+Memory 72、Live+Workflow 93、Combined+Memory 105。
 
 ## 分页与输出预算
 

@@ -73,6 +73,20 @@ from .semantic_diff import (
     SEMANTIC_DIFF_SCHEMA_VERSION,
 )
 from .semantic_diff_workflow import SemanticDiffEvidenceError
+from .verification_trust import (
+    ASSERTION_FAMILIES,
+    ASSERTION_REQUIREMENTS,
+    ASSERTION_STATUSES,
+    MAX_EXTRA_VALIDATION_ASSETS,
+    MAX_REQUIRED_AUTOMATION_TESTS,
+    MAX_VERIFICATION_ASSERTIONS,
+    MAX_VERIFICATION_ASSETS,
+    MAX_VERIFICATION_EVIDENCE_REFS,
+    TRUST_VERDICT_STATES,
+    VERIFICATION_RULE_VERSION,
+    VERIFICATION_TRUST_SCHEMA_VERSION,
+    VerificationTrustError,
+)
 from .tool_registry import (
     HIGH_LEVEL_WRITE_TOOL_NAMES,
     LIVE_EDITOR_TOOL_NAMES,
@@ -118,6 +132,10 @@ STRICT_MEMORY_ARGUMENT_TOOL_NAMES = (
 STRICT_TASK_CONTEXT_ARGUMENT_TOOL_NAMES = ("ue_get_task_context",)
 STRICT_IMPACT_ARGUMENT_TOOL_NAMES = ("ue_analyze_change_impact",)
 STRICT_SEMANTIC_DIFF_ARGUMENT_TOOL_NAMES = ("ue_analyze_semantic_diff",)
+STRICT_VERIFICATION_TRUST_ARGUMENT_TOOL_NAMES = (
+    "ue_build_verification_plan",
+    "ue_evaluate_trust_verdict",
+)
 
 
 def _enforce_strict_tool_arguments(server: Any, tool_names: Sequence[str]) -> None:
@@ -157,6 +175,10 @@ def _server_instructions(
         "Use ue_analyze_semantic_diff only with an explicit change_set_id to align Plan intent with "
         "live, persisted, or independently verified evidence; it is read-only, never discovers private "
         "Change Sets, and does not issue an R3 trust verdict. "
+        "Use ue_build_verification_plan and ue_evaluate_trust_verdict only with an explicit change_set_id; "
+        "they are read-only, deterministic, never ingest arbitrary evidence, and never auto-execute Compile, "
+        "Validation, Automation, Save, Verify, rollback, or a Writer. A verified verdict is scoped to the "
+        "generated plan and does not claim universal gameplay, visual, performance, or runtime correctness. "
     )
     live_text = (
         "The ue_editor_*, ue_get_*, bounded Batch Task, and journaled Change Set live tools operate "
@@ -242,6 +264,19 @@ def _capabilities_response(
     live_editor_enabled = live_editor_service is not None
     memory_enabled = memory_service is not None
     memory_status = memory_service.status() if memory_service is not None else None
+    verification_evidence_status = (
+        workflow_service.verification_evidence_store.status()
+        if workflow_service is not None
+        else {
+            "persistent": False,
+            "arbitraryIngest": False,
+            "projectBound": True,
+            "bounded": True,
+            "recordCount": 0,
+            "maxRecords": 256,
+            "capturedTools": [],
+        }
+    )
     return {
         "schemaVersion": "1.0",
         "tool": "ue_get_capabilities",
@@ -657,6 +692,38 @@ def _capabilities_response(
             "maxUnchangedCriticalFields": MAX_SEMANTIC_DIFF_UNCHANGED,
             "maxAnalysisGaps": MAX_SEMANTIC_DIFF_GAPS,
         },
+        "verificationTrust": {
+            "available": True,
+            "workflowEvidenceAvailable": write_tools_enabled,
+            "schemaVersion": VERIFICATION_TRUST_SCHEMA_VERSION,
+            "ruleVersion": VERIFICATION_RULE_VERSION,
+            "readOnly": True,
+            "deterministic": True,
+            "modelInference": False,
+            "changeSetExplicitOnly": True,
+            "changeSetAutoDiscovery": False,
+            "planTool": "ue_build_verification_plan",
+            "verdictTool": "ue_evaluate_trust_verdict",
+            "verdictStates": list(TRUST_VERDICT_STATES),
+            "assertionStatuses": list(ASSERTION_STATUSES),
+            "assertionRequirements": list(ASSERTION_REQUIREMENTS),
+            "assertionFamilies": list(ASSERTION_FAMILIES),
+            "autoExecutesValidation": False,
+            "autoExecutesCompile": False,
+            "autoExecutesAutomation": False,
+            "autoExecutesSaveOrVerify": False,
+            "verifiedMeansUniversalCorrectness": False,
+            "evidenceCapture": {
+                **verification_evidence_status,
+                "available": bool(write_tools_enabled and live_editor_enabled),
+            },
+            "maxAssets": MAX_VERIFICATION_ASSETS,
+            "maxAssertions": MAX_VERIFICATION_ASSERTIONS,
+            "maxEvidenceRefs": MAX_VERIFICATION_EVIDENCE_REFS,
+            "maxAutomationTests": MAX_REQUIRED_AUTOMATION_TESTS,
+            "maxExtraValidationAssets": MAX_EXTRA_VALIDATION_ASSETS,
+            "maxImpactDepth": 2,
+        },
         "limits": {
             "searchResults": MAX_MCP_SEARCH_LIMIT,
             "assetSymbols": MAX_MCP_SYMBOL_LIMIT,
@@ -700,6 +767,11 @@ def _capabilities_response(
             "semanticDiffChanges": MAX_SEMANTIC_DIFF_CHANGES,
             "semanticDiffUnchangedCriticalFields": MAX_SEMANTIC_DIFF_UNCHANGED,
             "semanticDiffAnalysisGaps": MAX_SEMANTIC_DIFF_GAPS,
+            "verificationAssets": MAX_VERIFICATION_ASSETS,
+            "verificationAssertions": MAX_VERIFICATION_ASSERTIONS,
+            "verificationEvidenceRefs": MAX_VERIFICATION_EVIDENCE_REFS,
+            "verificationAutomationTests": MAX_REQUIRED_AUTOMATION_TESTS,
+            "verificationExtraValidationAssets": MAX_EXTRA_VALIDATION_ASSETS,
         },
         "responseContract": {
             "schemaVersion": "1.0",
@@ -896,6 +968,34 @@ def _project_status_response(
             "changeSetAutoDiscovery": False,
             "stages": ["auto", "live", "persisted", "verified"],
         },
+        "verificationTrust": {
+            "available": True,
+            "workflowEvidenceAvailable": write_tools_enabled,
+            "schemaVersion": VERIFICATION_TRUST_SCHEMA_VERSION,
+            "ruleVersion": VERIFICATION_RULE_VERSION,
+            "planTool": "ue_build_verification_plan",
+            "verdictTool": "ue_evaluate_trust_verdict",
+            "readOnly": True,
+            "deterministic": True,
+            "modelInference": False,
+            "changeSetExplicitOnly": True,
+            "changeSetAutoDiscovery": False,
+            "autoExecutesLiveActions": False,
+            "verifiedMeansUniversalCorrectness": False,
+            "evidenceCapture": (
+                workflow_service.verification_evidence_store.status()
+                if workflow_service is not None
+                else {
+                    "persistent": False,
+                    "arbitraryIngest": False,
+                    "projectBound": True,
+                    "bounded": True,
+                    "recordCount": 0,
+                    "maxRecords": 256,
+                    "capturedTools": [],
+                }
+            ),
+        },
     }
 
 
@@ -969,6 +1069,8 @@ def _suggested_action(code: str) -> str:
         "insufficient-evidence": "Use an explicit Change Set with bound operations and retain its fixed Workflow evidence artifacts.",
         "semantic-diff-stage-unavailable": "Request one of the availableStages reported in details, or complete save and independent verify first.",
         "semantic-diff-evidence-stale": "Refresh or independently verify the exact affected assets before re-running Semantic Diff.",
+        "verification-trust-invalid-arguments": "Use the strict R3 request schema with one explicit Change Set and bounded exact inputs.",
+        "verification-plan-empty-change-set": "Bind at least one controlled operation to the explicit Change Set before building its Verification Plan.",
     }
     if code in exact:
         return exact[code]
@@ -1011,6 +1113,8 @@ def _error_response(tool: str, error: Exception, *, read_only: bool) -> dict[str
     elif isinstance(error, SemanticDiffEvidenceError):
         code = error.code
         details = error.details
+    elif isinstance(error, VerificationTrustError):
+        code = error.code
     elif isinstance(error, ValueError):
         code = "invalid-arguments"
     elif isinstance(error, sqlite3.Error):
@@ -1123,6 +1227,7 @@ def create_mcp_server(
     )
     _enforce_strict_tool_arguments(server, STRICT_IMPACT_ARGUMENT_TOOL_NAMES)
     _enforce_strict_tool_arguments(server, STRICT_SEMANTIC_DIFF_ARGUMENT_TOOL_NAMES)
+    _enforce_strict_tool_arguments(server, STRICT_VERIFICATION_TRUST_ARGUMENT_TOOL_NAMES)
     register_task_context_tools(
         server=server,
         task_context_service=TaskContextService(
@@ -1161,6 +1266,11 @@ def create_mcp_server(
         register_live_action_tools(
             server=server,
             live_editor_service=live_editor_service,
+            verification_evidence_store=(
+                workflow_service.verification_evidence_store
+                if workflow_service is not None
+                else None
+            ),
             tool_annotations_type=ToolAnnotations,
             error_response=_error_response,
         )

@@ -42,6 +42,8 @@ from .indexer import build_index
 from .patches import LIVE_WRITE_OPERATION_REGISTRY, OPERATION_REGISTRY, validate_patch
 from .retarget_workflow import RetargetWorkflowMixin
 from .semantic_diff_workflow import analyze_workflow_semantic_diff
+from .verification_evidence import VerificationEvidenceStore
+from .verification_trust import build_verification_plan, evaluate_trust_verdict
 from .snapshot_lifecycle import (
     ActiveSnapshot,
     SnapshotLifecycleError,
@@ -736,6 +738,10 @@ class PatchWorkflowService(RetargetWorkflowMixin):
         self._refresh_applied = False
         self._index_refresh_candidates: dict[str, tuple[Path, dict[str, Any]]] = {}
         self._validate_config()
+        self.verification_evidence_store = VerificationEvidenceStore(
+            project_name=self.project_name,
+            project_path=self.config.project_path,
+        )
         self.freshness = freshness_tracker or IndexFreshnessTracker(
             self.index_service,
             self.config.project_path,
@@ -1376,6 +1382,43 @@ class PatchWorkflowService(RetargetWorkflowMixin):
             asset_paths=asset_paths,
             include_unchanged=include_unchanged,
             max_changes=max_changes,
+            max_output_tokens=max_output_tokens,
+        )
+
+    def build_verification_plan(
+        self,
+        change_set_id: str,
+        *,
+        impact_depth: int = 1,
+        required_automation_tests: list[str] | None = None,
+        extra_validation_assets: list[str] | None = None,
+        max_output_tokens: int = 4096,
+    ) -> dict[str, Any]:
+        return build_verification_plan(
+            self,
+            change_set_id,
+            impact_depth=impact_depth,
+            required_automation_tests=required_automation_tests,
+            extra_validation_assets=extra_validation_assets,
+            max_output_tokens=max_output_tokens,
+        )
+
+    def evaluate_trust_verdict(
+        self,
+        change_set_id: str,
+        *,
+        impact_depth: int = 1,
+        required_automation_tests: list[str] | None = None,
+        extra_validation_assets: list[str] | None = None,
+        max_output_tokens: int = 4096,
+    ) -> dict[str, Any]:
+        return evaluate_trust_verdict(
+            self,
+            self.verification_evidence_store,
+            change_set_id,
+            impact_depth=impact_depth,
+            required_automation_tests=required_automation_tests,
+            extra_validation_assets=extra_validation_assets,
             max_output_tokens=max_output_tokens,
         )
 

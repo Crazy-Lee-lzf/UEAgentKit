@@ -773,6 +773,23 @@ def analyze_semantic_evidence(
                 "reason": "Re-run after independent verification when that evidence becomes available.",
             }
         )
+    explicit_change_set_id = str(change_set.get("changeSetId", ""))
+    if explicit_change_set_id:
+        next_actions.append(
+            {
+                "tool": "ue_build_verification_plan",
+                "arguments": {"change_set_id": explicit_change_set_id},
+                "reason": "Generate the deterministic R3 verification obligations for this explicit Change Set.",
+            }
+        )
+        if not all_unexpected and not all_missing:
+            next_actions.append(
+                {
+                    "tool": "ue_evaluate_trust_verdict",
+                    "arguments": {"change_set_id": explicit_change_set_id},
+                    "reason": "Evaluate currently applicable evidence against the generated Verification Plan.",
+                }
+            )
 
     total_assets = len(assets) if total_asset_count is None else total_asset_count
     response = {

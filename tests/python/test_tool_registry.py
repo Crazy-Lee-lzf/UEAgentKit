@@ -43,6 +43,8 @@ EXPECTED_ALL_TOOLS = [
     "ue_find_references",
     "ue_analyze_change_impact",
     "ue_analyze_semantic_diff",
+    "ue_build_verification_plan",
+    "ue_evaluate_trust_verdict",
     "ue_get_task_context",
     "ue_editor_status",
     "ue_get_selection",
@@ -136,21 +138,21 @@ class ToolRegistryTests(unittest.TestCase):
             tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True),
             EXPECTED_ALL_TOOLS,
         )
-        self.assertEqual(len(tool_names_for_mode()), 8)
-        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 41)
-        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 58)
+        self.assertEqual(len(tool_names_for_mode()), 10)
+        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 43)
+        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 60)
         self.assertEqual(
             tool_names_for_mode(memory_enabled=True),
             QUERY_TOOL_NAMES + EXPECTED_MEMORY_TOOLS,
         )
-        self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 20)
+        self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 22)
         self.assertEqual(
             len(tool_names_for_mode(live_editor_enabled=True, memory_enabled=True)),
-            53,
+            55,
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
-            70,
+            72,
         )
         self.assertEqual(
             len(
@@ -160,7 +162,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-            103,
+            105,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:
@@ -248,6 +250,15 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertTrue(TOOL_DEFINITIONS_BY_NAME["ue_analyze_semantic_diff"].read_only)
         self.assertEqual(TOOL_DEFINITIONS_BY_NAME["ue_analyze_semantic_diff"].group, "query")
         self.assertEqual(TOOL_DEFINITIONS_BY_NAME["ue_analyze_semantic_diff"].live_method, "")
+        for tool_name in ("ue_build_verification_plan", "ue_evaluate_trust_verdict"):
+            with self.subTest(tool=tool_name):
+                definition = TOOL_DEFINITIONS_BY_NAME[tool_name]
+                self.assertTrue(definition.read_only)
+                self.assertTrue(definition.idempotent)
+                self.assertFalse(definition.destructive)
+                self.assertEqual(definition.group, "query")
+                self.assertEqual(definition.live_method, "")
+                self.assertIn(tool_name, tool_names_for_mode())
         self.assertEqual(
             TOOL_DEFINITIONS_BY_NAME["ue_start_batch_task"].live_method,
             "editor.batchTask.start",

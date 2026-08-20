@@ -6,7 +6,7 @@
 
 
 
-本文描述已发布的本地 `main` 基线及当前 `feature/agent-reliability` 开发状态，支持 Unreal Engine 5.6。已发布 **0.7.0**（Schema v3 Knowledge Tree、Active Work、渐进式 Context、Realtime Foundation、Batch/Change Set 和扩展后的 Live Editor Write），并在此基础上完成 **Realtime Animation Tools**。`feature/agent-reliability` 当前已完成 R0 Task Context、R1 Impact Analysis 与 R2 Semantic Diff，并已启动 R3 Verification Plan + Trust Verdict 完整里程碑；这些开发态能力尚不表示已经合入 `main`。动画扩展继续暂缓，`feature/performance-benchmarks` 作为长期横向性能分支保留。
+本文描述已发布的本地 `main` 基线及当前 `feature/agent-reliability` 开发状态，支持 Unreal Engine 5.6。已发布 **0.7.0**（Schema v3 Knowledge Tree、Active Work、渐进式 Context、Realtime Foundation、Batch/Change Set 和扩展后的 Live Editor Write），并在此基础上完成 **Realtime Animation Tools**。`feature/agent-reliability` 当前已完成 R0 Task Context、R1 Impact Analysis、R2 Semantic Diff 与 R3 Verification Plan + Trust Verdict。这些开发态能力尚不表示已经合入 `main`。动画扩展继续暂缓，`feature/performance-benchmarks` 作为长期横向性能分支保留。
 
 
 
@@ -40,13 +40,13 @@ UE Agent Kit 不是“让 AI 任意遥控 Unreal Editor”的通用自动化层�
 
 模式                 不启用 Memory    启用 Memory
 
-Offline                    8              20
+Offline                   10              22
 
-Live                      41              53
+Live                      43              55
 
-Workflow-only             58              70
+Workflow-only             60              72
 
-Live + Workflow           91             103
+Live + Workflow           93             105
 
 ```
 
@@ -56,7 +56,7 @@ Tool 数量只表示 MCP 接口数量，不等同于 Unreal Operation 数量。�
 
 
 
-当前自动化门禁基线：
+当前 R3 自动化门禁基线：
 
 
 
@@ -389,7 +389,7 @@ R4  Real Agent Benchmark v1
 R5  Value Provenance / Execution Trace（由 Benchmark 决定）
 ```
 
-R0–R2 已完成：高层任务上下文、逆向引用影响分析与事实级 Semantic Diff 已形成渐进式只读分析链。R3 当前按完整大任务推进，把现有 Persistence / Semantic / Compile / Data Validation / Reference / Automation / Revision Evidence 组合为 Verification Plan 与 Trust Verdict；仍不新增 Memory Schema，也不在 Server 内做模型推断。
+R0–R2 已完成：高层任务上下文、逆向引用影响分析与事实级 Semantic Diff 已形成渐进式只读分析链。R3 已实现显式 Change Set 驱动的 Verification Plan 与 Evidence-gated Trust Verdict，把 Persistence / Semantic / Compile / Data Validation / Reference / Automation / Revision Evidence 组合为固定规则；仍不新增 Memory Schema，也不在 Server 内做模型推断。
 
 R0.0（现状审计 + 复用矩阵 + 最小 Schema）与 R0.1（`ue_get_task_context` 第一条纵向切片）已完成并本地提交到 `feature/agent-reliability`：query + 显式 assetPaths → targetAssets → revisionState → 可选 Memory 摘要 / Live Editor 摘要 / Change Set → 确定性 risks → 有界输出；所有可选来源支持 section 级降级。复用矩阵与 Schema 见 [`Plans/AGENT_RELIABILITY_R0_AUDIT_AND_SCHEMA_20260815.md`](Plans/AGENT_RELIABILITY_R0_AUDIT_AND_SCHEMA_20260815.md)。
 
@@ -397,13 +397,13 @@ R0-S（真实 Reforge Context Smoke）与 R0.2（Deterministic Relevant Asset Di
 
 R0.3（只读 Cross-source Correlation）已完成并本地提交，**R0 里程碑标记完成**：`ue_get_task_context` 新增 `correlation` section（schemaVersion 1.2），用精确键把 Active Work、显式 Change Set、Live Editor Session 与 Memory Evidence 关联起来（session id 相等性、资产路径集合交集、changeSetId 字面量、资产 scope Evidence），只读、非持久化、零模型推断；不新增 Memory/ChangeSet Schema、不扫描 workflow 私有 `_change_sets`、不自动发现 Change Set、不做 R1 引用遍历。链接固定排序上限 16 条，边界计数如实报告；新增确定性风险 `change-set-editor-session-mismatch`（medium）；预算阶梯先裁 correlation links/summary，绝不优先于 target identity / high risk / revision summary。交接见 [`Handoffs/AGENT_RELIABILITY_R0_SLICE3_HANDOFF_20260816.md`](Handoffs/AGENT_RELIABILITY_R0_SLICE3_HANDOFF_20260816.md)。
 
-R1/R2 已分别解决「修改会影响什么」和「实际发生了什么变化」。R3 已启动，完整执行规范见 [`Handoffs/AGENT_RELIABILITY_R3_FULL_HANDOFF_20260820.md`](Handoffs/AGENT_RELIABILITY_R3_FULL_HANDOFF_20260820.md)：计划提供确定性的 Verification Plan 与 Evidence-gated Trust Verdict，固定区分 required/recommended/informational Assertions、pass/fail/unknown/not-applicable 状态，以及 verified/suspicious/failed/insufficient-evidence 四态结果。保存、独立重载成功或 verified Semantic Diff 都不自动等同于整个任务成功。
+R1/R2 已分别解决「修改会影响什么」和「实际发生了什么变化」。R3 实现见 [`Plans/AGENT_RELIABILITY_R3_VERIFICATION_TRUST_DESIGN_20260820.md`](Plans/AGENT_RELIABILITY_R3_VERIFICATION_TRUST_DESIGN_20260820.md)，执行规范见 [`Handoffs/AGENT_RELIABILITY_R3_FULL_HANDOFF_20260820.md`](Handoffs/AGENT_RELIABILITY_R3_FULL_HANDOFF_20260820.md)：两个只读 Tool 固定区分 required/recommended/informational、pass/fail/unknown/not-applicable，以及 verified/suspicious/failed/insufficient-evidence。Compile/Validation/Automation 仅由有界、无任意注入、session-local Store 捕获；Trust Tool 不自动执行动作。保存、独立重载或 verified Semantic Diff 都不自动等同于整个任务成功。
 
 R4 用跨 Data Asset / DataTable / Material Instance / Blueprint / Context / stale / rollback 的真实 Agent Case 统计 Trusted Completion、False Success、Wrong Asset、Unintended Change 和 Recovery。动画只作为已有成熟 Domain 的少量样本，不再作为主开发方向。
 
 
 
-**当前执行状态（2026-08-19）**：R0、R1 与 **R2 Semantic Diff 均已完成**。R2 新增显式 Change Set 驱动的只读 `ue_analyze_semantic_diff`：统一 Expected / Actual / Matched / Unexpected / Missing Expected / Unchanged Critical、Analysis Gaps 与 Risks；区分 `auto/live/persisted/verified` stage，覆盖 Data Asset、DataTable、Material Instance 与 Blueprint property/component/pin-default 四个 Adapter，支持多 Operation、多资产、同路径 `operationChain`、expected no-op、稳定 ID、固定排序和有界 Token 裁剪。R0 只在显式 Change Set 存在时提供渐进入口，R2 在 missing/unexpected 时建议 R1，不自动展开。真实 UE5.6 DirectHost（不是 Reforge）Smoke 覆盖 Data Asset/Material Instance/DataTable 的 12 个 live/persisted/verified 结果与 Blueprint commandlet persisted/verified；全部 expected=actual=matched、unexpected=missing=0，并完成 Canonical/rollback 恢复检查。Python 全量 628/628，Ruff 通过；R2 无 C++ 变更，因此 UE Direct Build 不要求。详细设计见 [`Plans/AGENT_RELIABILITY_R2_SEMANTIC_DIFF_DESIGN_20260819.md`](Plans/AGENT_RELIABILITY_R2_SEMANTIC_DIFF_DESIGN_20260819.md)，执行规范见 [`Handoffs/AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md`](Handoffs/AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md)。**R3 已获明确指令并作为当前完整大任务推进；R3 完成前不进入 R4。**
+**当前执行状态（2026-08-20）**：R0–R3 已完成。R3 的 `ue_build_verification_plan`、`ue_evaluate_trust_verdict`、八类 Assertion、四态 Verdict、R1/R2 复用、R0/R2 渐进入口和 session-local Evidence Capture 已进入当前代码；Registry 计数为 10/22、43/55、60/72、93/105。真实 UE5.6 S1–S5 覆盖四态且 fixture recovery 通过；Ruff 全仓通过、Python 648/648 通过、PowerShell parser 与 diff/编码门禁通过。本轮无 C++ 变更，因此不要求 UE Direct Build。R3 在本地提交后停止，不自动进入 R4。
 
 
 ### P2：高价值专用写入

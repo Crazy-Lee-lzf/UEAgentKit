@@ -49,6 +49,45 @@ from ue_agent_kit.tool_registry import (  # noqa: E402
 MCP_AVAILABLE = importlib.util.find_spec("mcp") is not None
 
 
+class FakeVerificationEvidenceStore:
+    def __init__(self) -> None:
+        self.begun: list[tuple[str, dict[str, object]]] = []
+        self.finished: list[tuple[object, dict[str, object]]] = []
+
+    def begin_registered_tool(self, tool_name, params):
+        if tool_name not in {
+            "ue_compile_blueprint",
+            "ue_validate_asset",
+            "ue_validate_folder",
+            "ue_run_automation_test",
+        }:
+            return None
+        token = (tool_name, dict(params))
+        self.begun.append(token)
+        return token
+
+    def finish_registered_tool(self, token, response):
+        if token is None:
+            return
+        self.finished.append((token, response))
+
+    def status(self):
+        return {
+            "persistent": False,
+            "arbitraryIngest": False,
+            "projectBound": True,
+            "bounded": True,
+            "recordCount": len(self.finished),
+            "maxRecords": 256,
+            "capturedTools": [
+                "ue_compile_blueprint",
+                "ue_run_automation_test",
+                "ue_validate_asset",
+                "ue_validate_folder",
+            ],
+        }
+
+
 class FakeWorkflowService:
     def __init__(self) -> None:
         self.config = SimpleNamespace(
@@ -56,6 +95,7 @@ class FakeWorkflowService:
             engine_root=Path("missing-engine"),
             project_path=Path("C:/Projects/TestProject/TestProject.uproject"),
         )
+        self.verification_evidence_store = FakeVerificationEvidenceStore()
 
     def status(self):
         return {
@@ -276,6 +316,29 @@ class FakeWorkflowService:
             "receiptCount": 0,
             "activeReceiptCount": 0,
             "receipts": [],
+        }
+
+    def build_verification_plan(self, change_set_id, **kwargs):
+        return {
+            "schemaVersion": "1.0",
+            "tool": "ue_build_verification_plan",
+            "ok": True,
+            "readOnly": True,
+            "changeSet": {"changeSetId": change_set_id},
+            "request": kwargs,
+            "assertions": [],
+        }
+
+    def evaluate_trust_verdict(self, change_set_id, **kwargs):
+        return {
+            "schemaVersion": "1.0",
+            "tool": "ue_evaluate_trust_verdict",
+            "ok": True,
+            "readOnly": True,
+            "changeSet": {"changeSetId": change_set_id},
+            "request": kwargs,
+            "verdict": {"state": "insufficient-evidence"},
+            "assertions": [],
         }
 
 
@@ -812,6 +875,8 @@ class McpServerTests(unittest.TestCase):
                 "ue_find_references",
                 "ue_analyze_change_impact",
                 "ue_analyze_semantic_diff",
+                "ue_build_verification_plan",
+                "ue_evaluate_trust_verdict",
                 "ue_get_task_context",
             ],
         )
@@ -834,6 +899,22 @@ class McpServerTests(unittest.TestCase):
             set(semantic_tool.inputSchema["properties"]),
             {"change_set_id", "stage", "asset_paths", "include_unchanged", "max_changes", "max_output_tokens"},
         )
+        verification_properties = {
+            "change_set_id",
+            "impact_depth",
+            "required_automation_tests",
+            "extra_validation_assets",
+            "max_output_tokens",
+        }
+        for tool_name in ("ue_build_verification_plan", "ue_evaluate_trust_verdict"):
+            with self.subTest(tool=tool_name):
+                tool = next(item for item in tools if item.name == tool_name)
+                self.assertFalse(tool.inputSchema["additionalProperties"])
+                self.assertEqual(tool.inputSchema["required"], ["change_set_id"])
+                self.assertEqual(set(tool.inputSchema["properties"]), verification_properties)
+                self.assertTrue(tool.annotations.readOnlyHint)
+                self.assertTrue(tool.annotations.idempotentHint)
+                self.assertFalse(tool.annotations.destructiveHint)
 
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
         self.assertEqual(capabilities["server"]["version"], __version__)
@@ -851,6 +932,30 @@ class McpServerTests(unittest.TestCase):
         self.assertFalse(semantic_contract["changeSetAutoDiscovery"])
         self.assertEqual(semantic_contract["stages"], ["auto", "live", "persisted", "verified"])
         self.assertFalse(semantic_contract["verifiedStageIsTrustVerdict"])
+        trust_contract = capabilities["verificationTrust"]
+        self.assertTrue(trust_contract["available"])
+        self.assertFalse(trust_contract["workflowEvidenceAvailable"])
+        self.assertTrue(trust_contract["readOnly"])
+        self.assertTrue(trust_contract["deterministic"])
+        self.assertFalse(trust_contract["modelInference"])
+        self.assertTrue(trust_contract["changeSetExplicitOnly"])
+        self.assertFalse(trust_contract["changeSetAutoDiscovery"])
+        self.assertEqual(trust_contract["planTool"], "ue_build_verification_plan")
+        self.assertEqual(trust_contract["verdictTool"], "ue_evaluate_trust_verdict")
+        self.assertEqual(
+            trust_contract["verdictStates"],
+            ["verified", "suspicious", "failed", "insufficient-evidence"],
+        )
+        self.assertEqual(trust_contract["assertionStatuses"], ["pass", "fail", "unknown", "not-applicable"])
+        self.assertEqual(trust_contract["assertionRequirements"], ["required", "recommended", "informational"])
+        self.assertFalse(trust_contract["autoExecutesValidation"])
+        self.assertFalse(trust_contract["autoExecutesCompile"])
+        self.assertFalse(trust_contract["autoExecutesAutomation"])
+        self.assertFalse(trust_contract["autoExecutesSaveOrVerify"])
+        self.assertFalse(trust_contract["verifiedMeansUniversalCorrectness"])
+        self.assertFalse(trust_contract["evidenceCapture"]["available"])
+        self.assertFalse(trust_contract["evidenceCapture"]["persistent"])
+        self.assertFalse(trust_contract["evidenceCapture"]["arbitraryIngest"])
         self.assertEqual(
             [item["name"] for item in capabilities["tools"]],
             [tool.name for tool in tools],
@@ -863,6 +968,10 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(project_status["liveEditor"]["state"], "unavailable")
         self.assertTrue(project_status["semanticDiff"]["available"])
         self.assertFalse(project_status["semanticDiff"]["workflowEvidenceAvailable"])
+        self.assertTrue(project_status["verificationTrust"]["available"])
+        self.assertFalse(project_status["verificationTrust"]["workflowEvidenceAvailable"])
+        self.assertFalse(project_status["verificationTrust"]["autoExecutesLiveActions"])
+        self.assertFalse(project_status["verificationTrust"]["verifiedMeansUniversalCorrectness"])
 
         _, semantic_error = asyncio.run(server.call_tool("ue_analyze_semantic_diff", {"change_set_id": "cs_explicit"}))
         self.assertEqual(semantic_error["error"]["code"], "insufficient-evidence")
@@ -876,6 +985,17 @@ class McpServerTests(unittest.TestCase):
                     {"change_set_id": "cs_explicit", "database": "forbidden"},
                 )
             )
+        for tool_name in ("ue_build_verification_plan", "ue_evaluate_trust_verdict"):
+            _, trust_error = asyncio.run(server.call_tool(tool_name, {"change_set_id": "cs_explicit"}))
+            self.assertEqual(trust_error["error"]["code"], "insufficient-evidence")
+            self.assertTrue(trust_error["readOnly"])
+            with self.assertRaisesRegex(Exception, "Extra inputs are not permitted"):
+                asyncio.run(
+                    server.call_tool(
+                        tool_name,
+                        {"change_set_id": "cs_explicit", "evidence": {"forged": True}},
+                    )
+                )
 
         content, payload = asyncio.run(
             server.call_tool(
@@ -912,7 +1032,7 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         expected_names = tool_names_for_mode(memory_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 20)
+        self.assertEqual(len(tools), 22)
         forbidden = {
             "database",
             "database_path",
@@ -1701,7 +1821,7 @@ class McpServerTests(unittest.TestCase):
             [tool.name for tool in tools],
             tool_names_for_mode(workflow_enabled=True, memory_enabled=True),
         )
-        self.assertEqual(len(tools), 70)
+        self.assertEqual(len(tools), 72)
 
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
         memory_contract = capabilities["projectMemory"]
@@ -1775,7 +1895,7 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         expected_names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 91)
+        self.assertEqual(len(tools), 93)
         for tool in tools:
             definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
             self.assertEqual(bool(tool.annotations.readOnlyHint), definition.read_only, tool.name)
@@ -1797,6 +1917,40 @@ class McpServerTests(unittest.TestCase):
         self.assertTrue(change_sets["available"])
         self.assertEqual(change_sets["createTool"], "ue_create_change_set")
         self.assertEqual(change_sets["getTool"], "ue_get_change_set")
+        trust_contract = capabilities["verificationTrust"]
+        self.assertTrue(trust_contract["available"])
+        self.assertTrue(trust_contract["workflowEvidenceAvailable"])
+        self.assertTrue(trust_contract["evidenceCapture"]["available"])
+        self.assertFalse(trust_contract["evidenceCapture"]["persistent"])
+        self.assertFalse(trust_contract["evidenceCapture"]["arbitraryIngest"])
+        self.assertTrue(trust_contract["evidenceCapture"]["projectBound"])
+        self.assertTrue(trust_contract["evidenceCapture"]["bounded"])
+        self.assertEqual(
+            trust_contract["evidenceCapture"]["capturedTools"],
+            [
+                "ue_compile_blueprint",
+                "ue_run_automation_test",
+                "ue_validate_asset",
+                "ue_validate_folder",
+            ],
+        )
+
+        store = workflow_service.verification_evidence_store
+        asyncio.run(server.call_tool("ue_open_asset", {"asset_path": "/Game/Test/BP_Test.BP_Test"}))
+        self.assertEqual(store.begun, [])
+        asyncio.run(server.call_tool("ue_compile_blueprint", {"asset_path": "/Game/Test/BP_Test.BP_Test"}))
+        asyncio.run(server.call_tool("ue_validate_asset", {"asset_path": "/Game/Test/BP_Test.BP_Test"}))
+        asyncio.run(
+            server.call_tool(
+                "ue_run_automation_test",
+                {"test_name": "UEAgentKit.EditorBridge.LiveActionSmoke"},
+            )
+        )
+        self.assertEqual(
+            [tool_name for tool_name, _ in store.begun],
+            ["ue_compile_blueprint", "ue_validate_asset", "ue_run_automation_test"],
+        )
+        self.assertEqual(len(store.finished), 3)
 
         mismatched_live = FakeLiveEditorService()
         mismatched_live.config = SimpleNamespace(
@@ -1854,12 +2008,34 @@ class McpServerTests(unittest.TestCase):
         verify_tool = next(tool for tool in tools if tool.name == "ue_verify_asset")
         self.assertFalse(verify_tool.annotations.readOnlyHint)
         self.assertFalse(verify_tool.annotations.destructiveHint)
+        verification_properties = {
+            "change_set_id",
+            "impact_depth",
+            "required_automation_tests",
+            "extra_validation_assets",
+            "max_output_tokens",
+        }
+        for tool_name in ("ue_build_verification_plan", "ue_evaluate_trust_verdict"):
+            with self.subTest(tool=tool_name):
+                trust_tool = next(tool for tool in tools if tool.name == tool_name)
+                self.assertFalse(trust_tool.inputSchema["additionalProperties"])
+                self.assertEqual(trust_tool.inputSchema["required"], ["change_set_id"])
+                self.assertEqual(set(trust_tool.inputSchema["properties"]), verification_properties)
+                self.assertTrue(trust_tool.annotations.readOnlyHint)
+                self.assertTrue(trust_tool.annotations.idempotentHint)
+                self.assertFalse(trust_tool.annotations.destructiveHint)
 
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
         self.assertEqual(capabilities["server"]["mode"], "fixed-project-commit")
         self.assertTrue(capabilities["operations"]["available"])
         self.assertTrue(capabilities["freshness"]["available"])
         self.assertTrue(capabilities["freshness"]["planRequiresFreshIndex"])
+        trust_contract = capabilities["verificationTrust"]
+        self.assertTrue(trust_contract["available"])
+        self.assertTrue(trust_contract["workflowEvidenceAvailable"])
+        self.assertFalse(trust_contract["evidenceCapture"]["available"])
+        self.assertFalse(trust_contract["evidenceCapture"]["persistent"])
+        self.assertFalse(trust_contract["evidenceCapture"]["arbitraryIngest"])
         batch_contract = capabilities["animationScaleFixBatch"]
         self.assertTrue(batch_contract["available"])
         self.assertFalse(batch_contract["planningOnly"])
@@ -1918,6 +2094,30 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(project_status["engine"]["state"], "unknown")
         self.assertEqual(project_status["freshness"]["state"], "fresh")
         self.assertTrue(project_status["freshness"]["indexFresh"])
+        self.assertTrue(project_status["verificationTrust"]["available"])
+        self.assertTrue(project_status["verificationTrust"]["workflowEvidenceAvailable"])
+        self.assertEqual(project_status["verificationTrust"]["evidenceCapture"]["recordCount"], 0)
+
+        _, verification_plan = asyncio.run(
+            server.call_tool(
+                "ue_build_verification_plan",
+                {
+                    "change_set_id": "cs_fake",
+                    "impact_depth": 2,
+                    "required_automation_tests": ["UEAgentKit.EditorBridge.LiveActionSmoke"],
+                    "extra_validation_assets": [ASSET_A],
+                    "max_output_tokens": 2048,
+                },
+            )
+        )
+        self.assertTrue(verification_plan["readOnly"])
+        self.assertEqual(verification_plan["changeSet"]["changeSetId"], "cs_fake")
+        self.assertEqual(verification_plan["request"]["impact_depth"], 2)
+        _, trust_verdict = asyncio.run(
+            server.call_tool("ue_evaluate_trust_verdict", {"change_set_id": "cs_fake"})
+        )
+        self.assertTrue(trust_verdict["readOnly"])
+        self.assertEqual(trust_verdict["verdict"]["state"], "insufficient-evidence")
 
         high_level_cases = [
             (
