@@ -149,7 +149,18 @@ R3（Verification Plan + Trust Verdict）已完成公共协议、核心实现、
 - R3 复用现有 Persistence / Independent Verify、R2 Semantic Diff、R1 Impact、Blueprint Compile、Data Validation、Automation 与 Revision/Freshness Evidence；不得再造 Writer、Diff 或 Reference Graph。
 - Trust Tool 不自动执行 Compile / Validate / Automation / Save / Verify，只返回 exact nextActions；Compile、Validation、Automation 由固定项目、无任意 JSON 注入、有界且不持久化的 session-local Evidence Store 捕获。
 - `verified` 必须同时返回 verification scope / unverified dimensions，不能被表述成“玩法/视觉/性能/所有运行时行为绝对正确”。R3 完成后停止，不自动进入 R4。
-- Registry 当前计数契约为 Offline 10、Offline+Memory 22、Live 43、Live+Memory 55、Workflow 60、Workflow+Memory 72、Live+Workflow 93、Combined+Memory 105。真实 UE5.6 S1–S5 观察到四态并完成 fixture recovery；Ruff 全仓与 Python 648/648 通过。本轮停止在 R3，不自动进入 R4。
+- Registry 当前计数契约为 Offline 10、Offline+Memory 22、Live 43、Live+Memory 55、Workflow 60、Workflow+Memory 72、Live+Workflow 93、Combined+Memory 105。真实 UE5.6 S1–S5 观察到四态并完成 fixture recovery；Ruff 全仓与 Python 648/648 通过。R3 已完成并在进入 R4 前形成独立提交。
+
+### R4 状态（当前完整大任务，2026-08-20）
+
+R4（Real Agent Benchmark v1）当前按一个完整大任务推进，执行规范见 [`Handoffs/AGENT_RELIABILITY_R4_FULL_HANDOFF_20260820.md`](Handoffs/AGENT_RELIABILITY_R4_FULL_HANDOFF_20260820.md)：
+
+- 不以新增 Tool 为主目标，而是建立版本化 Case、真实 Agent Runner/Adapter、确定性 Ground Truth Grader 与指标汇总。
+- 同一 Agent/Harness/模型/Case 对比 `full-r0-r3` 与 `legacy-low-level`；Legacy 只隐藏 R0–R3 高层 Tool，不降低安全门禁。
+- 第一版定义 12–16 个跨 Data Asset / DataTable / Material Instance / Blueprint / Context / stale / failure / recovery 的 Case；Reforge 仅做只读真实分析，写入使用可恢复 DirectHost Fixture。
+- 北极星指标固定为 Trusted Completion Rate 与 False Success Rate，同时统计 Wrong Asset、Unintended Change、Stale Detection、Recovery、Tool Calls、Token、Elapsed 和 Human Intervention。
+- Ground Truth 不使用 LLM-as-judge；写入事实由 Canonical、Package SHA-256、Revision、R2 Semantic Diff 与 R3 Trust Verdict 等确定性证据判定。
+- R4 最终必须输出失败分类并据此决定 R5 是否值得做以及先做 Value Provenance 还是 Execution Trace；R4 不实现 R5。
 
 首批目标不是新增大量 UE 写入，而是回答：Agent 当前应该改什么、修改会影响什么、以及有什么证据证明结果正确。无法证明的结论必须明确标记为推断；保存成功和独立重载成功只属于 Persistence Evidence，不自动等同于整个任务成功。
 

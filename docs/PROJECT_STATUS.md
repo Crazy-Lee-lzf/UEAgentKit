@@ -56,13 +56,13 @@ Tool 数量只表示 MCP 接口数量，不等同于 Unreal Operation 数量。�
 
 
 
-当前 R3 自动化门禁基线：
+当前 R3 完成门禁基线：
 
 
 
 ```text
 
-Python tests                 628/628
+Python tests                 648/648
 
 JSON Schemas                 3/3
 
@@ -70,7 +70,7 @@ Patch examples               16/16
 
 Ruff / CompileAll            passed
 
-UE5.6 Direct Build           not required（R2 无 C++ 变更）
+UE5.6 Direct Build           not required（R3 无 C++ 变更）
 
 Memory MCP stdio Smoke       passed
 
@@ -403,7 +403,7 @@ R4 用跨 Data Asset / DataTable / Material Instance / Blueprint / Context / sta
 
 
 
-**当前执行状态（2026-08-20）**：R0–R3 已完成。R3 的 `ue_build_verification_plan`、`ue_evaluate_trust_verdict`、八类 Assertion、四态 Verdict、R1/R2 复用、R0/R2 渐进入口和 session-local Evidence Capture 已进入当前代码；Registry 计数为 10/22、43/55、60/72、93/105。真实 UE5.6 S1–S5 覆盖四态且 fixture recovery 通过；Ruff 全仓通过、Python 648/648 通过、PowerShell parser 与 diff/编码门禁通过。本轮无 C++ 变更，因此不要求 UE Direct Build。R3 在本地提交后停止，不自动进入 R4。
+**当前执行状态（2026-08-20）**：R0–R3 已完成，当前进入 **R4 Real Agent Benchmark v1**。R3 的 `ue_build_verification_plan`、`ue_evaluate_trust_verdict`、八类 Assertion、四态 Verdict、R1/R2 复用、R0/R2 渐进入口和 session-local Evidence Capture 已进入当前代码；Registry 计数为 10/22、43/55、60/72、93/105。真实 UE5.6 S1–S5 覆盖四态且 fixture recovery 通过；Ruff 全仓通过、Python 648/648 通过、PowerShell parser 与 diff/编码门禁通过。R4 将使用同一真实 Agent 对比 `full-r0-r3` 与 `legacy-low-level` Tool Profile，Reforge 仅用于只读真实 Case，写入使用可恢复 DirectHost Fixture，以确定性 Ground Truth 统计 Trusted Completion / False Success 等指标。完整执行规范见 [`Handoffs/AGENT_RELIABILITY_R4_FULL_HANDOFF_20260820.md`](Handoffs/AGENT_RELIABILITY_R4_FULL_HANDOFF_20260820.md)。R5 尚未开始。
 
 
 ### P2：高价值专用写入

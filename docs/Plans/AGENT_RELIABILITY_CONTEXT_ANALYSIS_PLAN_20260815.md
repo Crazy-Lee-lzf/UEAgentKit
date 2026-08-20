@@ -1,11 +1,11 @@
 # UEAgentKit 0.8.x Context / Analysis / Agent Reliability 执行计划
 
 > 更新时间：2026-08-20
-> 当前实现基线：`feature/agent-reliability@b5071aff5b116336d7baa16c84baaf64016c828a`（R2 Semantic Diff 已完成）
-> 当前状态：R0 Task Context、R1 Impact Analysis 与 R2 Semantic Diff 已全部完成。R3 Verification Plan + Trust Verdict 已获明确指令，按一个完整大任务一次性推进；Primary Agent 可内部拆分、并行和 checkpoint，但不中途等待逐片确认。R4–R5 未开始。
+> 当前实现基线：`feature/agent-reliability@59eb29c2b716ca10ac700c17c96332a0fbeb8e55`（R3 Verification Plan + Trust Verdict 已完成）
+> 当前状态：R0 Task Context、R1 Impact Analysis、R2 Semantic Diff 与 R3 Verification Plan + Trust Verdict 已全部完成。R4 Real Agent Benchmark v1 已获明确指令，按一个完整大任务一次性推进；Primary Agent 可内部拆分、并行、真实 Agent A/B 跑分和 checkpoint，但不中途等待逐片确认。R5 未开始。
 > 建议开发分支：`feature/agent-reliability`（已创建，勿 Push）
 > 横向长期分支：`feature/performance-benchmarks`
-> 执行方式：按大里程碑推进。R3 当前完整执行边界见 `docs/Handoffs/AGENT_RELIABILITY_R3_FULL_HANDOFF_20260820.md`；R2 完成结果见 `docs/Plans/AGENT_RELIABILITY_R2_SEMANTIC_DIFF_DESIGN_20260819.md`。
+> 执行方式：按大里程碑推进。R4 当前完整执行边界见 `docs/Handoffs/AGENT_RELIABILITY_R4_FULL_HANDOFF_20260820.md`；R3 完成结果见 `docs/Plans/AGENT_RELIABILITY_R3_VERIFICATION_TRUST_DESIGN_20260820.md`。
 
 ---
 
@@ -476,13 +476,13 @@ TrustVerdict
 
 > 「保存成功」「独立重载成功」只能作为 Persistence PASS，不能自动等同于整个任务 Verified。
 
-### 7.1 当前执行指令（2026-08-20）
+### 7.1 完成状态（2026-08-20）
 
-R3 已获明确指令，按**一个完整大任务**一次性完成，不再按小 Slice 等待逐片确认。完整 Handoff：
+R3 已按**一个完整大任务**一次性完成并本地提交到 `feature/agent-reliability@59eb29c`。完整 Handoff：
 
 `docs/Handoffs/AGENT_RELIABILITY_R3_FULL_HANDOFF_20260820.md`
 
-R3 当前要求至少一次性完成：
+R3 已一次性完成：
 
 ```text
 R3.0 Evidence Audit
@@ -498,7 +498,7 @@ R1/R2/R0 渐进式集成
 全量门禁与文档同步
 ```
 
-Trust Tool 只消费已有证据并生成明确 nextActions，禁止在内部自动 Compile / Validate / Automation / Save / Verify，也禁止任意 Evidence JSON 注入。`verified` 只表示当前 Verification Plan 的 Required Assertions 全部被适用的确定性 Evidence 关闭，不表示玩法、视觉、性能等所有未验证维度都绝对正确。R3 完成后必须停止，不自动进入 R4。
+Trust Tool 只消费已有证据并生成明确 nextActions，禁止在内部自动 Compile / Validate / Automation / Save / Verify，也禁止任意 Evidence JSON 注入。`verified` 只表示当前 Verification Plan 的 Required Assertions 全部被适用的确定性 Evidence 关闭，不表示玩法、视觉、性能等所有未验证维度都绝对正确。R3 已完成并停在 R4 之前。
 
 ---
 
@@ -574,6 +574,14 @@ Benchmark 不是发布展示，而是决定下一步开发优先级。
 ```
 
 以后新增 Writer 必须优先由真实失败数据驱动，而不是因为 Roadmap 上「还没覆盖」。
+
+### 8.4 当前执行指令（2026-08-20）
+
+R4 已获明确指令，按**一个完整大任务**一次性完成。完整 Handoff：
+
+`docs/Handoffs/AGENT_RELIABILITY_R4_FULL_HANDOFF_20260820.md`
+
+R4 v1 必须建立真实 Agent Runner、版本化 Case、确定性 Ground Truth Grader、指标汇总与 Full/Legacy A/B Tool Profile；Full Profile 运行全部 12–16 个跨域 Case，Legacy 至少运行 8 个 matched Case。两组必须保持同一 Agent/Harness/模型/Prompt/Fixture，Legacy 只能隐藏 R0–R3 高层分析/Trust Tool，不能削弱任何 Policy/Revision/Confirm/Verify 安全门禁。Reforge 只做只读真实分析 Case，写入统一使用可恢复 DirectHost Fixture。R4 结束必须用真实失败分类决定是否进入 R5 以及先做 Value Provenance 还是 Execution Trace，并停止在 R5 实现之前。
 
 ---
 
@@ -861,7 +869,7 @@ False Success 是否下降？
 哪些失败仍然无法解释？
 ```
 
-只有这些数据能证明继续做 R3/R5 或新增 Writer 是否值得。
+只有这些数据能证明继续做 R5、补 Writer、补 Index/Exporter 或优化 Agent UX 是否值得。
 
 ---
 
