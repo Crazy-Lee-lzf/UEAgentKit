@@ -151,18 +151,18 @@ R3（Verification Plan + Trust Verdict）已完成公共协议、核心实现、
 - `verified` 必须同时返回 verification scope / unverified dimensions，不能被表述成“玩法/视觉/性能/所有运行时行为绝对正确”。R3 完成后停止，不自动进入 R4。
 - Registry 当前计数契约为 Offline 10、Offline+Memory 22、Live 43、Live+Memory 55、Workflow 60、Workflow+Memory 72、Live+Workflow 93、Combined+Memory 105。真实 UE5.6 S1–S5 观察到四态并完成 fixture recovery；Ruff 全仓与 Python 648/648 通过。R3 已完成并在进入 R4 前形成独立提交。
 
-### R4 状态（当前完整大任务，2026-08-20）
+### R4 状态（已完成，2026-08-22）
 
-R4（Real Agent Benchmark v1）当前按一个完整大任务推进，执行规范见 [`Handoffs/AGENT_RELIABILITY_R4_FULL_HANDOFF_20260820.md`](Handoffs/AGENT_RELIABILITY_R4_FULL_HANDOFF_20260820.md)：
+R4（Real Agent Benchmark v1）已完成。设计见 [`Plans/AGENT_RELIABILITY_R4_BENCHMARK_DESIGN_20260820.md`](Plans/AGENT_RELIABILITY_R4_BENCHMARK_DESIGN_20260820.md)，正式结果与限制见 [`Plans/AGENT_RELIABILITY_R4_BENCHMARK_RESULT_20260820.md`](Plans/AGENT_RELIABILITY_R4_BENCHMARK_RESULT_20260820.md)：
 
-- 不以新增 Tool 为主目标，而是建立版本化 Case、真实 Agent Runner/Adapter、确定性 Ground Truth Grader 与指标汇总。
-- 同一 Agent/Harness/模型/Case 对比 `full-r0-r3` 与 `legacy-low-level`；Legacy 只隐藏 R0–R3 高层 Tool，不降低安全门禁。
-- 第一版定义 12–16 个跨 Data Asset / DataTable / Material Instance / Blueprint / Context / stale / failure / recovery 的 Case；Reforge 仅做只读真实分析，写入使用可恢复 DirectHost Fixture。
-- 北极星指标固定为 Trusted Completion Rate 与 False Success Rate，同时统计 Wrong Asset、Unintended Change、Stale Detection、Recovery、Tool Calls、Token、Elapsed 和 Human Intervention。
-- Ground Truth 不使用 LLM-as-judge；写入事实由 Canonical、Package SHA-256、Revision、R2 Semantic Diff 与 R3 Trust Verdict 等确定性证据判定。
-- R4 最终必须输出失败分类并据此决定 R5 是否值得做以及先做 Value Provenance 还是 Execution Trace；R4 不实现 R5。
+- 15 个 Full Case、9 个 matched Legacy Case，共 24 个真实 attempt；24/24 保留，0 infrastructure failure，9/9 fairness matched，17/17 DirectHost 精确恢复，7/7 Reforge 只读不变。
+- Paired `Full - Legacy`：Task Completion `+44.44 pp`、Trusted Completion `+22.22 pp`、False Success `-11.11 pp`、Wrong Asset `-22.22 pp`、Tool Calls `-4.11`。
+- Full 的绝对 Trusted Completion 仍只有 `26.67%`，False Success / all cases 仍为 `33.33%`；stale detection 比 Legacy 差，R0–R3 只能判定为局部有效。
+- 最大 raw failure 类是 `trust-evidence-gap=8`；Agent/tool/context/harness 类合计 8。Value Provenance 与 Execution Trace 均为 0 次 primary failure。
+- Reference derived-edge normalization 与 `trustVerdict` exact-string contract 会保守压低部分指标，结果文档同时报告 raw grader 数字与审计限定。
+- 数据不支持立即进入 R5。下一步先修 Agent guidance / Tool ergonomics / result contract、Trust Evidence 闭环、Blueprint 窄 rollback，并用 paired repeat anchors 做 R4.1。
 
-首批目标不是新增大量 UE 写入，而是回答：Agent 当前应该改什么、修改会影响什么、以及有什么证据证明结果正确。无法证明的结论必须明确标记为推断；保存成功和独立重载成功只属于 Persistence Evidence，不自动等同于整个任务成功。
+R4 证明首批目标不应转回“新增大量 UE 写入”：Agent 仍需要更稳定地回答应该改什么、会影响什么、以及哪些证据足以支持结果。保存成功和独立重载成功只属于 Persistence Evidence，不自动等同于整个任务成功。
 
 动画线作为已完成的纵向能力保留，Additive Batch、Composite Mutation、Retarget → P2 一键桥接等非阻塞尾巴默认冻结。Blueprint Graph、Level Actor 通用 CRUD 等新 Writer 同样改为由 Reforge 真实需求或 Agent Benchmark 失败数据驱动。
 

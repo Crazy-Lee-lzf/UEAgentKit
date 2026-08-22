@@ -389,7 +389,7 @@ R4  Real Agent Benchmark v1
 R5  Value Provenance / Execution Trace（由 Benchmark 决定）
 ```
 
-R0–R2 已完成：高层任务上下文、逆向引用影响分析与事实级 Semantic Diff 已形成渐进式只读分析链。R3 已实现显式 Change Set 驱动的 Verification Plan 与 Evidence-gated Trust Verdict，把 Persistence / Semantic / Compile / Data Validation / Reference / Automation / Revision Evidence 组合为固定规则；仍不新增 Memory Schema，也不在 Server 内做模型推断。
+R0–R4 已完成：高层任务上下文、逆向引用影响分析、事实级 Semantic Diff、Evidence-gated Verification/Trust 与第一版真实 Agent Benchmark 已形成可测量链路；仍不新增 Memory Schema，也不在 Server 内做模型推断。
 
 R0.0（现状审计 + 复用矩阵 + 最小 Schema）与 R0.1（`ue_get_task_context` 第一条纵向切片）已完成并本地提交到 `feature/agent-reliability`：query + 显式 assetPaths → targetAssets → revisionState → 可选 Memory 摘要 / Live Editor 摘要 / Change Set → 确定性 risks → 有界输出；所有可选来源支持 section 级降级。复用矩阵与 Schema 见 [`Plans/AGENT_RELIABILITY_R0_AUDIT_AND_SCHEMA_20260815.md`](Plans/AGENT_RELIABILITY_R0_AUDIT_AND_SCHEMA_20260815.md)。
 
@@ -399,11 +399,11 @@ R0.3（只读 Cross-source Correlation）已完成并本地提交，**R0 里程�
 
 R1/R2 已分别解决「修改会影响什么」和「实际发生了什么变化」。R3 实现见 [`Plans/AGENT_RELIABILITY_R3_VERIFICATION_TRUST_DESIGN_20260820.md`](Plans/AGENT_RELIABILITY_R3_VERIFICATION_TRUST_DESIGN_20260820.md)，执行规范见 [`Handoffs/AGENT_RELIABILITY_R3_FULL_HANDOFF_20260820.md`](Handoffs/AGENT_RELIABILITY_R3_FULL_HANDOFF_20260820.md)：两个只读 Tool 固定区分 required/recommended/informational、pass/fail/unknown/not-applicable，以及 verified/suspicious/failed/insufficient-evidence。Compile/Validation/Automation 仅由有界、无任意注入、session-local Store 捕获；Trust Tool 不自动执行动作。保存、独立重载或 verified Semantic Diff 都不自动等同于整个任务成功。
 
-R4 用跨 Data Asset / DataTable / Material Instance / Blueprint / Context / stale / rollback 的真实 Agent Case 统计 Trusted Completion、False Success、Wrong Asset、Unintended Change 和 Recovery。动画只作为已有成熟 Domain 的少量样本，不再作为主开发方向。
+R4 已用跨 Data Asset / DataTable / Material Instance / Blueprint / Context / stale / rollback 的真实 Agent Case 统计 Trusted Completion、False Success、Wrong Asset、Unintended Change 和 Recovery。15 个 Full + 9 个 matched Legacy attempt 共 24/24 保留，0 infrastructure failure、0 fairness mismatch、全部 fixture 精确恢复。Paired Full 相对 Legacy 的 Task Completion `+44.44 pp`、Trusted Completion `+22.22 pp`、False Success `-11.11 pp`、Wrong Asset `-22.22 pp`、Tool Calls `-4.11`；但 Full 绝对 Trusted Completion 仅 `26.67%`，False Success / all cases 仍为 `33.33%`，stale detection 还出现退化。完整结果见 [`Plans/AGENT_RELIABILITY_R4_BENCHMARK_RESULT_20260820.md`](Plans/AGENT_RELIABILITY_R4_BENCHMARK_RESULT_20260820.md)。动画没有进入 v1 Case，不再作为主开发方向。
 
 
 
-**当前执行状态（2026-08-20）**：R0–R3 已完成，当前进入 **R4 Real Agent Benchmark v1**。R3 的 `ue_build_verification_plan`、`ue_evaluate_trust_verdict`、八类 Assertion、四态 Verdict、R1/R2 复用、R0/R2 渐进入口和 session-local Evidence Capture 已进入当前代码；Registry 计数为 10/22、43/55、60/72、93/105。真实 UE5.6 S1–S5 覆盖四态且 fixture recovery 通过；Ruff 全仓通过、Python 648/648 通过、PowerShell parser 与 diff/编码门禁通过。R4 将使用同一真实 Agent 对比 `full-r0-r3` 与 `legacy-low-level` Tool Profile，Reforge 仅用于只读真实 Case，写入使用可恢复 DirectHost Fixture，以确定性 Ground Truth 统计 Trusted Completion / False Success 等指标。完整执行规范见 [`Handoffs/AGENT_RELIABILITY_R4_FULL_HANDOFF_20260820.md`](Handoffs/AGENT_RELIABILITY_R4_FULL_HANDOFF_20260820.md)。R5 尚未开始。
+**当前执行状态（2026-08-22）**：R0–R4 已完成并停在 R5 之前。正式 R4 v1 证明 R0–R3 在 high-fanout、2-hop impact 和 reference-sensitive safe block 上有真实收益，但绝对可靠性仍不足；raw failure taxonomy 没有 Value Provenance 或 Execution Trace 信号。下一步优先 Agent guidance / Tool ergonomics / result contract、Trust Evidence 闭环、Blueprint 窄 rollback 与 R4.1 repeat measurement；**R5 尚未开始，也不应现在自动启动**。R4 结果、single-attempt 限制、grader 审计限定与数据驱动优先级见 [`Plans/AGENT_RELIABILITY_R4_BENCHMARK_RESULT_20260820.md`](Plans/AGENT_RELIABILITY_R4_BENCHMARK_RESULT_20260820.md)。
 
 
 ### P2：高价值专用写入

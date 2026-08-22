@@ -1,11 +1,11 @@
 # UEAgentKit 0.8.x Context / Analysis / Agent Reliability 执行计划
 
-> 更新时间：2026-08-20
-> 当前实现基线：`feature/agent-reliability@59eb29c2b716ca10ac700c17c96332a0fbeb8e55`（R3 Verification Plan + Trust Verdict 已完成）
-> 当前状态：R0 Task Context、R1 Impact Analysis、R2 Semantic Diff 与 R3 Verification Plan + Trust Verdict 已全部完成。R4 Real Agent Benchmark v1 已获明确指令，按一个完整大任务一次性推进；Primary Agent 可内部拆分、并行、真实 Agent A/B 跑分和 checkpoint，但不中途等待逐片确认。R5 未开始。
+> 更新时间：2026-08-22
+> 当前实现基线：`feature/agent-reliability`；R4 正式运行代码基线为 `3d539d2`
+> 当前状态：R0–R4 已完成。R4 Real Agent Benchmark v1 已完成 15 个 Full + 9 个 matched Legacy attempt，并形成确定性结果与限制审计。R5 未开始，当前数据不支持立即进入 R5。
 > 建议开发分支：`feature/agent-reliability`（已创建，勿 Push）
 > 横向长期分支：`feature/performance-benchmarks`
-> 执行方式：按大里程碑推进。R4 当前完整执行边界见 `docs/Handoffs/AGENT_RELIABILITY_R4_FULL_HANDOFF_20260820.md`；R3 完成结果见 `docs/Plans/AGENT_RELIABILITY_R3_VERIFICATION_TRUST_DESIGN_20260820.md`。
+> 执行方式：按大里程碑推进。R4 设计与正式结果见 `docs/Plans/AGENT_RELIABILITY_R4_BENCHMARK_DESIGN_20260820.md`、`docs/Plans/AGENT_RELIABILITY_R4_BENCHMARK_RESULT_20260820.md`；本轮停止在 R5 实现之前。
 
 ---
 
@@ -575,13 +575,13 @@ Benchmark 不是发布展示，而是决定下一步开发优先级。
 
 以后新增 Writer 必须优先由真实失败数据驱动，而不是因为 Roadmap 上「还没覆盖」。
 
-### 8.4 当前执行指令（2026-08-20）
+### 8.4 完成结果（2026-08-22）
 
-R4 已获明确指令，按**一个完整大任务**一次性完成。完整 Handoff：
+R4 v1 已按完整 Handoff 完成：真实 Agent Runner、版本化 Case、确定性 Ground Truth、Full/Legacy Tool Profile、fixture fail-closed、raw attempt retention、aggregate 与 paired delta 均已实现。正式运行 15 个 Full + 9 个 matched Legacy attempt，24/24 保留、0 infrastructure failure、9/9 fairness matched、17/17 DirectHost exact recovery、7/7 Reforge readonly unchanged。
 
-`docs/Handoffs/AGENT_RELIABILITY_R4_FULL_HANDOFF_20260820.md`
+Paired Full 相对 Legacy 的 Task Completion `+44.44 pp`、Trusted Completion `+22.22 pp`、False Success `-11.11 pp`、Wrong Asset `-22.22 pp`、Tool Calls `-4.11`。但 Full 绝对 Trusted Completion 仅 `26.67%`，False Success / all cases 为 `33.33%`，stale Case 退化。正式 raw taxonomy 以 `trust-evidence-gap=8` 和 Agent/tool/context/harness 类合计 8 为主，Value Provenance / Execution Trace 均为 0。
 
-R4 v1 必须建立真实 Agent Runner、版本化 Case、确定性 Ground Truth Grader、指标汇总与 Full/Legacy A/B Tool Profile；Full Profile 运行全部 12–16 个跨域 Case，Legacy 至少运行 8 个 matched Case。两组必须保持同一 Agent/Harness/模型/Prompt/Fixture，Legacy 只能隐藏 R0–R3 高层分析/Trust Tool，不能削弱任何 Policy/Revision/Confirm/Verify 安全门禁。Reforge 只做只读真实分析 Case，写入统一使用可恢复 DirectHost Fixture。R4 结束必须用真实失败分类决定是否进入 R5 以及先做 Value Provenance 还是 Execution Trace，并停止在 R5 实现之前。
+因此 R5 继续冻结。先修 Agent guidance / Tool ergonomics / result contract、Trust Evidence 闭环、Blueprint 窄 rollback 与 benchmark grader contract，再用 paired repeat anchors 做 R4.1。完整结果与审计限定：`docs/Plans/AGENT_RELIABILITY_R4_BENCHMARK_RESULT_20260820.md`。
 
 ---
 
@@ -589,7 +589,7 @@ R4 v1 必须建立真实 Agent Runner、版本化 Case、确定性 Ground Truth 
 
 ## 9. R5 定位
 
-R5 不要求在 R0 后立即开发。
+R5 不要求在 R0 后立即开发。R4 v1 已给出第一次数据决策：当前没有 Value Provenance / Execution Trace primary failure，故不立即进入 R5。
 
 当前候选：
 
@@ -858,6 +858,8 @@ Task Context MVP
 + Semantic Diff MVP
 + 至少一版真实跨域 Agent Benchmark
 ```
+
+该停点已于 2026-08-22 达到。R4 v1 复盘结果：Tool Calls 在 paired Case 平均减少 4.11，Wrong Asset 减少 22.22 pp，False Success 减少 11.11 pp；但 Full stale detection 退化、绝对 Trusted Completion 仅 26.67%，且 single-attempt/harness contract 仍限制结论。后续先做 R4.1 质量修复与 repeat measurement，而不是自动进入 R5。
 
 达到这里后必须复盘：
 
