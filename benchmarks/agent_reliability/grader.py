@@ -3,6 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 
+GRADER_VERSION = "r4.1.0"
+
+
 def _tools(trace: list[dict[str, Any]]) -> set[str]:
     return {
         str(call.get("tool") or call.get("name") or "")
@@ -16,7 +19,11 @@ def _semantic(expected: dict[str, Any], actual: dict[str, Any]) -> bool:
     for key, value in expected.items():
         candidate = actual.get(key)
         if isinstance(value, list):
-            if not isinstance(candidate, list) or not set(value).issubset(candidate):
+            if not isinstance(candidate, list):
+                return False
+            if key == "targetAssets" and set(value) != set(candidate):
+                return False
+            if key != "targetAssets" and not set(value).issubset(candidate):
                 return False
         elif candidate != value:
             return False
@@ -34,11 +41,7 @@ class GroundTruthGrader:
         claimed_assets, changed = set(claim.get("targetAssets", [])), set(after.get("changedAssets", []))
         targets = set(case["expectedSemanticResult"].get("targetAssets", allowed))
         wrong_mutation = bool(changed & forbidden or changed - allowed)
-        wrong_claim = bool(
-            (targets and not targets <= claimed_assets)
-            or (allowed and bool(claimed_assets - allowed))
-            or bool(claimed_assets & forbidden)
-        )
+        wrong_claim = bool(claimed_assets != targets or claimed_assets & forbidden)
         wrong = wrong_mutation or wrong_claim
         unintended = bool(after.get("forbiddenChanges") or after.get("unexpectedChangeCount", 0))
         expected = dict(case["expectedSemanticResult"])

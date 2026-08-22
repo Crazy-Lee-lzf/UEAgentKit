@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import traceback
 from pathlib import Path
 from typing import Any
@@ -8,7 +9,7 @@ from typing import Any
 from .adapters import AgentAdapter, AgentRunRequest, AgentRunResult, UNAVAILABLE
 from .claims import parse_agent_claim
 from .fixtures import FixtureAdapter
-from .grader import GroundTruthGrader
+from .grader import GRADER_VERSION, GroundTruthGrader
 from .io import fingerprint_json, redact, write_json
 from .metrics import MetricsAggregator
 
@@ -19,6 +20,18 @@ _VOLATILE_FIXTURE_FINGERPRINT_FIELDS = frozenset(
         "editorProcessId",
         "revisionExportFingerprint",
     }
+)
+MEASUREMENT_VERSION = "r4.1"
+PROMPT_VERSION = "r4.1-result-contract-1.5"
+_MEASUREMENT_SOURCE_PATHS = (
+    "benchmarks/agent_reliability/claims.py",
+    "benchmarks/agent_reliability/grader.py",
+    "benchmarks/agent_reliability/metrics.py",
+    "benchmarks/agent_reliability/profiles.py",
+    "benchmarks/agent_reliability/real_fixtures.py",
+    "benchmarks/agent_reliability/runner.py",
+    "benchmarks/agent_reliability/schemas/agent-result.schema.json",
+    "benchmarks/agent_reliability/schemas/case.schema.json",
 )
 
 
@@ -44,23 +57,99 @@ def build_agent_prompt(case: dict[str, Any]) -> str:
         "Complete the following Unreal Engine task using only the exposed UE Agent Kit MCP tools. "
         "Do not inspect this repository, benchmark definitions, fixture files, or local shell state. "
         "Treat tool results as evidence, do not claim runtime behavior that static evidence does not prove, "
-        "and stop safely when revision, dirty-state, policy, validation, or recovery evidence is insufficient.\n\n"
+        "and stop safely when revision, dirty-state, policy, validation, or recovery evidence is insufficient. "
+        "For task understanding prefer ue_get_task_context; for impact use ue_analyze_change_impact; after a "
+        "persistent write, first create a Change Set and pass that same change_set_id through apply, save, and "
+        "independent verify; then use ue_analyze_semantic_diff, "
+        "ue_build_verification_plan, execute every missing required evidence action, and finally use "
+        "ue_evaluate_trust_verdict. Do not mechanically call inapplicable high-level tools for read-only or "
+        "no-op tasks. For a task whose requested final state is exact rollback, independently verify the transient "
+        "persisted write and perform the rollback before optional Compile, Validation, or Trust actions that can "
+        "load the asset. Once independent evidence proves package bytes, canonical state, frozen revision, dirty "
+        "state, and package inventory exactly match the baseline, the rollback task is successful: do not evaluate "
+        "Trust against the transient Change Set revision, and report trustVerdict not-evaluated. Harness cleanup is "
+        "not Agent recovery. Persistence verification alone is not a scoped "
+        "Trust verdict.\n\n"
         f"Task:\n{case['userIntent']}\n\n"
+        "Result rules:\n"
+        "- targetAssets contains only assets the user actually asked to read, modify, or verify. Put search "
+        "candidates, related assets, reference consumers, impact validation targets, and compile consumers in "
+        "claimedSemanticResult or notes, never in targetAssets.\n"
+        "- status is exactly success, blocked, failed, or insufficient-evidence. Detecting a stale/dirty/policy/"
+        "evidence block is not success. Do not use success while any required Verification Plan assertion is open.\n"
+        "- trustVerdict is exactly verified, suspicious, failed, insufficient-evidence, or not-evaluated. Put "
+        "explanation in notes, not in trustVerdict.\n"
+        "- claimedSemanticResult.operation is exactly null, no-op, renameDataTableRow, rollback, setAssetProperty, "
+        "setAssetReferenceProperty, setDataTableCell, setMaterialInstanceScalarParameter, or setVariableDefault. "
+        "Copy the exact structured Tool operation; do not paraphrase it.\n"
+        "- claimedSemanticResult.conflict is exactly null, stale-revision, dirty-package, "
+        "required-evidence-missing, policy-block, unexpected-semantic-change, or recovery-failed. Put explanation "
+        "in notes.\n\n"
+        "- Preserve exact JSON value types from the strongest structured Tool or canonical evidence. For "
+        "setVariableDefault claims and Blueprint exact-rollback claims, beforeValue, afterValue, finalValue, and "
+        "value use canonical Blueprint default strings such as \"0\" and \"42\", even if R2 displays normalized "
+        "numbers such as 0.0 and 42.0; never coerce those canonical strings to JSON numbers.\n\n"
         "End with a JSON object matching this exact outer contract:\n"
         '{"benchmarkResult":{"status":"success|blocked|failed|insufficient-evidence",'
         '"targetAssets":[],"changeSetId":"","claimedSemanticResult":{},'
-        '"trustVerdict":"","evidenceIds":[],"notes":""}}'
+        '"trustVerdict":"verified|suspicious|failed|insufficient-evidence|not-evaluated",'
+        '"evidenceIds":[],"notes":""}}'
     )
 
 
-def build_schedule(cases: list[dict[str, Any]]) -> list[tuple[dict[str, Any], str, int]]:
+def build_schedule(
+    cases: list[dict[str, Any]],
+    *,
+    attempts_per_profile: int = 1,
+) -> list[tuple[dict[str, Any], str, int]]:
+    if attempts_per_profile < 1 or attempts_per_profile > 10:
+        raise ValueError("attempts_per_profile must be between 1 and 10")
     schedule: list[tuple[dict[str, Any], str, int]] = []
     for position, case in enumerate(cases):
-        profiles = list(case["profiles"])
-        if len(profiles) > 1 and position % 2:
-            profiles.reverse()
-        schedule.extend((case, profile, 1) for profile in profiles)
+        for attempt_index in range(1, attempts_per_profile + 1):
+            profiles = list(case["profiles"])
+            if len(profiles) > 1 and (position + attempt_index - 1) % 2:
+                profiles.reverse()
+            schedule.extend((case, profile, attempt_index) for profile in profiles)
     return schedule
+
+
+def _sha256_file(path: Path) -> str:
+    return (
+        "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+        if path.is_file()
+        else "unavailable"
+    )
+
+
+def measurement_contract(
+    tool_root: Path,
+    cases: list[dict[str, Any]],
+    visible_tools_by_profile: dict[str, tuple[str, ...]],
+) -> dict[str, Any]:
+    source_fingerprints = {
+        relative: _sha256_file(tool_root / relative)
+        for relative in _MEASUREMENT_SOURCE_PATHS
+    }
+    components = {
+        "measurementVersion": MEASUREMENT_VERSION,
+        "promptVersion": PROMPT_VERSION,
+        "graderVersion": GRADER_VERSION,
+        "cases": [_public_case(case) for case in cases],
+        "prompts": {
+            str(case["caseId"]): fingerprint_json({"prompt": build_agent_prompt(case)})
+            for case in cases
+        },
+        "toolProfiles": {
+            profile: list(tools)
+            for profile, tools in sorted(visible_tools_by_profile.items())
+        },
+        "sourceFingerprints": source_fingerprints,
+    }
+    return {
+        **components,
+        "fingerprint": fingerprint_json(components),
+    }
 
 
 def _empty_result(reason: str) -> AgentRunResult:
@@ -269,18 +358,26 @@ class BenchmarkRunner:
         cases: list[dict[str, Any]],
         *,
         visible_tools_by_profile: dict[str, tuple[str, ...]],
+        attempts_per_profile: int = 1,
     ) -> dict[str, Any]:
         if self.output_root.exists() and any(self.output_root.iterdir()):
             raise ValueError(f"Benchmark run directory must be fresh: {self.output_root}")
         self.output_root.mkdir(parents=True, exist_ok=True)
         started_at = dt.datetime.now(dt.timezone.utc)
         runtime = self.agent.describe_runtime()
+        frozen_contract = measurement_contract(
+            self.tool_root,
+            cases,
+            visible_tools_by_profile,
+        )
         run_manifest: dict[str, Any] = {
             "schemaVersion": "1.0",
             "status": "running",
             "startedAt": started_at.isoformat(),
             "runtime": runtime,
-            "scheduledAttempts": sum(len(case["profiles"]) for case in cases),
+            "measurementContract": frozen_contract,
+            "attemptsPerProfile": attempts_per_profile,
+            "scheduledAttempts": attempts_per_profile * sum(len(case["profiles"]) for case in cases),
             "caseIds": [case["caseId"] for case in cases],
             "toolProfiles": {
                 profile: list(tools) for profile, tools in visible_tools_by_profile.items()
@@ -289,9 +386,30 @@ class BenchmarkRunner:
         write_json(self.output_root / "run.json", run_manifest)
         attempts: list[dict[str, Any]] = []
         mutation_latched = False
+        measurement_drift = False
         try:
-            for case, profile, attempt_index in build_schedule(cases):
+            for case, profile, attempt_index in build_schedule(
+                cases,
+                attempts_per_profile=attempts_per_profile,
+            ):
                 mutation_case = case["fixtureProfile"] != "reforge-readonly"
+                current_contract = measurement_contract(
+                    self.tool_root,
+                    cases,
+                    visible_tools_by_profile,
+                )
+                if current_contract["fingerprint"] != frozen_contract["fingerprint"]:
+                    measurement_drift = True
+                if measurement_drift:
+                    attempts.append(
+                        self._skipped_attempt(
+                            case,
+                            profile,
+                            attempt_index,
+                            "measurement-contract-drift",
+                        )
+                    )
+                    continue
                 if mutation_case and mutation_latched:
                     attempts.append(
                         self._skipped_attempt(
@@ -323,6 +441,14 @@ class BenchmarkRunner:
                     cleanup_failed = mutation_case
                 attempts.append(attempt)
                 mutation_latched = mutation_latched or cleanup_failed
+                current_contract = measurement_contract(
+                    self.tool_root,
+                    cases,
+                    visible_tools_by_profile,
+                )
+                measurement_drift = measurement_drift or (
+                    current_contract["fingerprint"] != frozen_contract["fingerprint"]
+                )
         finally:
             self.agent.close()
         by_profile = {
@@ -336,15 +462,17 @@ class BenchmarkRunner:
             "profiles": by_profile,
             "paired": self.metrics.compare_profiles(attempts),
             "mutationFailClosedTriggered": mutation_latched,
+            "measurementDriftDetected": measurement_drift,
             "attemptsRetained": len(attempts),
         }
         write_json(self.output_root / "summary.json", summary)
         run_manifest.update(
             {
-                "status": "completed",
+                "status": "invalid-measurement" if measurement_drift else "completed",
                 "completedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
                 "attemptsRetained": len(attempts),
                 "mutationFailClosedTriggered": mutation_latched,
+                "measurementDriftDetected": measurement_drift,
             }
         )
         write_json(self.output_root / "run.json", run_manifest)

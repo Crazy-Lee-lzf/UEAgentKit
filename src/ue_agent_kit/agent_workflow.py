@@ -1231,9 +1231,23 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 "receiptCount": 0,
                 "maxReceiptsPerChangeSet": MAX_CHANGE_SET_RECEIPTS,
                 "journalPersisted": journal_persisted,
+                "bindingContract": {
+                    "changeSetIdArgument": "change_set_id",
+                    "sameIdRequired": True,
+                    "passToApplicableTools": [
+                        "ue_apply_asset_property_live",
+                        "ue_apply_patch",
+                        "ue_save_authorized_asset",
+                        "ue_verify_live_write",
+                        "ue_verify_asset",
+                        "ue_analyze_semantic_diff",
+                        "ue_build_verification_plan",
+                        "ue_evaluate_trust_verdict",
+                    ],
+                },
                 "nextStep": (
-                    "Pass the changeSetId to ue_apply_asset_property_live to bind confirmed "
-                    "live writes to this Change Set."
+                    "Pass this same changeSetId unchanged through the applicable write, save, independent verify, "
+                    "Semantic Diff, Verification Plan, and Trust Verdict tools."
                 ),
             }
 
@@ -1724,6 +1738,85 @@ class PatchWorkflowService(RetargetWorkflowMixin):
             "state": str(memory.get("state", "unknown")),
             "loaded": bool(memory.get("loaded")),
             "packageDirty": bool(memory.get("packageDirty")),
+        }
+
+    def _inspect_rollback_live_state(self, asset_path: str) -> dict[str, Any]:
+        descriptor = self.config.project_path.parent / "Saved" / "UEAgentKit" / "EditorBridge.json"
+        if self.live_editor_service is None:
+            return {
+                "state": "offline",
+                "allowOpenEditor": False,
+                "assetPath": asset_path,
+            }
+        try:
+            status = self.live_editor_service.status()
+        except Exception as exc:
+            raise WorkflowError(
+                "rollback-live-editor-status-unavailable",
+                "Live Editor state could not be checked before rollback Commit.",
+            ) from exc
+        if not isinstance(status, dict) or status.get("state") != "available":
+            if descriptor.is_file():
+                raise WorkflowError(
+                    "rollback-live-editor-status-unavailable",
+                    "The fixed Editor Bridge descriptor exists but cannot prove the rollback target is unloaded and clean.",
+                )
+            return {
+                "state": "offline",
+                "allowOpenEditor": False,
+                "assetPath": asset_path,
+            }
+        try:
+            payload = self.live_editor_service.call_tool(
+                "ue_inspect_asset_live",
+                {"assetPath": asset_path},
+            )
+        except Exception as exc:
+            raise WorkflowError(
+                "rollback-live-editor-status-unavailable",
+                "The rollback target could not be inspected in the fixed Editor session.",
+            ) from exc
+        result = payload.get("result", {}) if isinstance(payload, dict) else {}
+        memory = result.get("memory", {}) if isinstance(result, dict) else {}
+        registry = result.get("assetRegistry", {}) if isinstance(result, dict) else {}
+        if not isinstance(memory, dict) or not isinstance(registry, dict) or registry.get("found") is not True:
+            raise WorkflowError(
+                "rollback-live-editor-status-unavailable",
+                "The fixed Editor session did not return exact target asset state for rollback.",
+            )
+        if (
+            not isinstance(memory.get("loaded"), bool)
+            or not isinstance(memory.get("packageDirty"), bool)
+            or not isinstance(memory.get("openInAssetEditor"), bool)
+            or not isinstance(memory.get("state"), str)
+        ):
+            raise WorkflowError(
+                "rollback-live-editor-status-unavailable",
+                "The fixed Editor session did not explicitly prove loaded, dirty, and Asset Editor state for rollback.",
+            )
+        if memory.get("packageDirty") is True:
+            raise WorkflowError(
+                "rollback-live-editor-asset-dirty",
+                "Rollback Commit is blocked because the exact target has unsaved Editor memory changes.",
+            )
+        if (
+            memory.get("loaded") is not False
+            or memory.get("openInAssetEditor") is not False
+            or memory.get("state") != "not-loaded"
+        ):
+            raise WorkflowError(
+                "rollback-live-editor-asset-loaded",
+                "Rollback Commit while the project is open requires the exact target to be not-loaded and not open in an Asset Editor.",
+            )
+        return {
+            "state": "verified-unloaded-clean",
+            "allowOpenEditor": True,
+            "assetPath": asset_path,
+            "editorSessionId": str(status.get("sessionId", "")),
+            "editorProcessId": int(status.get("processId", 0) or 0),
+            "loaded": False,
+            "packageDirty": False,
+            "openInAssetEditor": False,
         }
 
     @staticmethod
@@ -2740,6 +2833,21 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                     if changed
                     else "No value change was required."
                 ),
+                "nextActions": (
+                    [
+                        {
+                            "tool": "ue_save_authorized_asset",
+                            "arguments": {
+                                "asset_path": asset_path,
+                                "mode": "Preview",
+                                **({"change_set_id": change_set_id} if change_set_id else {}),
+                            },
+                            "reason": "Authorize persistence for the exact live-written asset.",
+                        }
+                    ]
+                    if changed
+                    else []
+                ),
             }
             if change_set_id:
                 response["changeSetId"] = change_set_id
@@ -3114,6 +3222,16 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 "indexFreshness": freshness,
                 "report": _safe_report(report, configured_paths=self.configured_paths),
                 "nextStep": "Call ue_verify_asset with this applyReceipt. The fixed index remains stale until refreshed or rolled back.",
+                "nextActions": [
+                    {
+                        "tool": "ue_verify_asset",
+                        "arguments": {
+                            "apply_receipt": receipt,
+                            **({"change_set_id": change_set_id} if change_set_id else {}),
+                        },
+                        "reason": "Independently reload and verify the exact persisted revision.",
+                    }
+                ],
             }
             if change_set_id:
                 response["changeSetId"] = change_set_id
@@ -3218,9 +3336,22 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 "memoryTaskEvidence": memory_task_evidence,
                 "indexFreshness": freshness,
                 "nextStep": (
-                    "If Project Memory is enabled, pass memoryTaskEvidence.arguments unchanged to "
-                    "ue_memory_record_task. Otherwise keep the change and refresh the asset index, "
-                    "or call ue_rollback_patch in DryRun mode before an explicit rollback Commit."
+                    "Call ue_analyze_semantic_diff at stage=verified, build the Verification Plan, close every "
+                    "Required assertion, and evaluate the scoped Trust verdict before refreshing the frozen index."
+                    if change_set_id
+                    else "The persisted revision is independently verified. Bind future writes to a Change Set "
+                    "to continue through Semantic Diff and scoped Trust evaluation."
+                ),
+                "nextActions": (
+                    [
+                        {
+                            "tool": "ue_analyze_semantic_diff",
+                            "arguments": {"change_set_id": change_set_id, "stage": "verified"},
+                            "reason": "Compare the independently verified semantics before planning Trust obligations.",
+                        }
+                    ]
+                    if change_set_id
+                    else []
                 ),
             }
             if change_set_id:
@@ -3455,8 +3586,18 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 "indexFreshness": freshness_after,
                 "nextStep": (
                     "Call ue_verify_live_write for this exact asset to close the loop with an "
-                    "independent reload, Revision, and memory Task Record, then refresh the asset index."
+                    "independent reload and Revision. Do not refresh the frozen index before the scoped Trust verdict."
                 ),
+                "nextActions": [
+                    {
+                        "tool": "ue_verify_live_write",
+                        "arguments": {
+                            "asset_path": asset_path,
+                            **({"change_set_id": change_set_id} if change_set_id else {}),
+                        },
+                        "reason": "Independently reload and verify the exact saved live write.",
+                    }
+                ],
             }
             if change_set_id:
                 response["changeSetId"] = change_set_id
@@ -3839,6 +3980,17 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                         "(Preview then Commit), or revert it with ue_undo_asset_property_live / "
                         "ue_discard_asset_property_live. A successful revert closes this pending live write."
                     ),
+                    "nextActions": [
+                        {
+                            "tool": "ue_save_authorized_asset",
+                            "arguments": {
+                                "asset_path": asset_path,
+                                "mode": "Preview",
+                                **({"change_set_id": change_set_id} if change_set_id else {}),
+                            },
+                            "reason": "Persist the exact pending live write before independent verification.",
+                        }
+                    ],
                 }
                 if change_set_id:
                     not_saved_response["changeSetId"] = change_set_id
@@ -3961,9 +4113,22 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 "memoryRecorded": False,
                 "indexFreshness": freshness,
                 "nextStep": (
-                    "If Project Memory is enabled, pass memoryTaskEvidence.arguments unchanged to "
-                    "ue_memory_record_task to persist the closed-loop Task Record, then call "
-                    "ue_refresh_asset_index to activate the new Revision."
+                    "Call ue_analyze_semantic_diff at stage=verified, build the Verification Plan, close every "
+                    "Required assertion, and evaluate the scoped Trust verdict before refreshing the frozen index."
+                    if change_set_id
+                    else "The persisted live write is independently verified. Bind future writes to a Change Set "
+                    "to continue through Semantic Diff and scoped Trust evaluation."
+                ),
+                "nextActions": (
+                    [
+                        {
+                            "tool": "ue_analyze_semantic_diff",
+                            "arguments": {"change_set_id": change_set_id, "stage": "verified"},
+                            "reason": "Compare independently verified semantics before planning Trust obligations.",
+                        }
+                    ]
+                    if change_set_id
+                    else []
                 ),
             }
             if change_set_id:
@@ -4044,23 +4209,27 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 raise WorkflowError("rollback-receipt-invalid", "A fresh rollback Dry Run receipt is required.")
             if confirmation != f"ROLLBACK {apply_receipt}":
                 raise WorkflowError("rollback-confirmation-required", "Rollback confirmation did not exactly match the required applyReceipt phrase.")
+            live_editor_safety = self._inspect_rollback_live_state(apply.asset_path)
             directory = self._safe_work_path("rollback", apply_receipt, "commit")
             report_path = directory / "report.json"
             verification_output = directory / "verify"
             verification_report = directory / "verification.json"
+            script_arguments = [
+                "-EngineRoot", str(self.config.engine_root),
+                "-ProjectPath", str(self.config.project_path),
+                "-Manifest", str(apply.manifest_path),
+                "-Policy", str(self.config.policy_path),
+                "-BackupRoot", str(self.config.backup_root),
+                "-Mode", "Commit",
+                "-Report", str(report_path),
+                "-VerificationOutput", str(verification_output),
+                "-VerificationReport", str(verification_report),
+            ]
+            if live_editor_safety["allowOpenEditor"]:
+                script_arguments.append("-AllowOpenEditorForVerifiedUnloadedAsset")
             result = self._run_script(
                 "RunRollback.ps1",
-                [
-                    "-EngineRoot", str(self.config.engine_root),
-                    "-ProjectPath", str(self.config.project_path),
-                    "-Manifest", str(apply.manifest_path),
-                    "-Policy", str(self.config.policy_path),
-                    "-BackupRoot", str(self.config.backup_root),
-                    "-Mode", "Commit",
-                    "-Report", str(report_path),
-                    "-VerificationOutput", str(verification_output),
-                    "-VerificationReport", str(verification_report),
-                ],
+                script_arguments,
                 stage="rollback-commit",
                 report_path=report_path,
             )
@@ -4113,6 +4282,7 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 "indexFreshness": freshness,
                 "verification": _safe_report(verification, configured_paths=self.configured_paths),
                 "report": _safe_report(report, configured_paths=self.configured_paths),
+                "liveEditorSafety": live_editor_safety,
                 "nextStep": (
                     "If Project Memory is enabled, pass memoryTaskEvidence.arguments unchanged to "
                     "ue_memory_record_task."

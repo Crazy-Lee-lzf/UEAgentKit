@@ -20,7 +20,7 @@ class MetricsAggregator:
         self,
         attempts: list[dict[str, Any]],
         *,
-        primary_only: bool = True,
+        primary_only: bool = False,
     ) -> dict[str, Any]:
         all_attempts = list(attempts)
         if primary_only:
@@ -44,6 +44,11 @@ class MetricsAggregator:
         elapsed = [int(attempt["usage"].get("elapsedMs", 0)) for attempt in attempts]
         humans = [attempt["usage"].get("humanInterventions", 0) for attempt in attempts]
         retries = [int(attempt["usage"].get("agentRetries", 0)) for attempt in attempts]
+        timeouts = [
+            attempt
+            for attempt in attempts
+            if attempt.get("termination", {}).get("status") == "timeout"
+        ]
         tool_counts: Counter[str] = Counter()
         for attempt in attempts:
             tool_counts.update(attempt["usage"].get("toolCallsByTool", {}))
@@ -64,7 +69,20 @@ class MetricsAggregator:
         return {
             "attempts": total,
             "scheduledCases": len({attempt["case"]["caseId"] for attempt in attempts}),
-            "anchorRepeatAttempts": len(all_attempts) - len(attempts),
+            "anchorRepeatAttempts": len(all_attempts)
+            - len(
+                {
+                    (attempt["case"]["caseId"], attempt["profile"])
+                    for attempt in all_attempts
+                }
+            ),
+            "outcomeDistribution": {
+                "taskCompleted": sum(g["groundTruthCorrect"] for g in grades),
+                "trustedCompleted": sum(g["trustedCompletion"] for g in grades),
+                "falseSuccess": false_successes,
+                "wrongAsset": sum(a["grade"]["wrongAsset"] for a in asset_cases),
+                "staleDirtyDetected": sum(g["staleDirtyDetected"] for g in stale),
+            },
             "taskCompletionRate": _ratio(sum(g["groundTruthCorrect"] for g in grades), total),
             "semanticCorrectnessRate": _ratio(
                 sum(g["semanticResultCorrect"] for g in semantic), len(semantic)
@@ -88,10 +106,21 @@ class MetricsAggregator:
             "toolCalls": {
                 "total": sum(calls),
                 "mean": round(mean(calls), 3) if calls else None,
+                "min": min(calls) if calls else None,
+                "max": max(calls) if calls else None,
                 "byTool": dict(sorted(tool_counts.items())),
                 "highLevelTotal": sum(high_level_calls),
             },
-            "elapsedMs": {"total": sum(elapsed), "mean": round(mean(elapsed), 3) if elapsed else None},
+            "elapsedMs": {
+                "total": sum(elapsed),
+                "mean": round(mean(elapsed), 3) if elapsed else None,
+                "min": min(elapsed) if elapsed else None,
+                "max": max(elapsed) if elapsed else None,
+            },
+            "timeouts": {
+                "count": len(timeouts),
+                "rate": _ratio(len(timeouts), total),
+            },
             "humanInterventions": {
                 "total": sum(humans),
                 "mean": round(mean(humans), 3) if humans else None,
@@ -110,6 +139,9 @@ class MetricsAggregator:
                         else "unavailable"
                     ),
                     "total": sum(values) if values else None,
+                    "mean": round(mean(values), 3) if values else None,
+                    "min": min(values) if values else None,
+                    "max": max(values) if values else None,
                     "attemptsUnavailable": total - len(values),
                 }
                 for field, values in token_fields.items()

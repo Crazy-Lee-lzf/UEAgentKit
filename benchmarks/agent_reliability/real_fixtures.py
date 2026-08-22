@@ -394,6 +394,39 @@ def _critical_fields_unchanged(
             if item.get("name") == name:
                 item["value"] = before_value
 
+    def normalize_allowed_object_reference_edge() -> None:
+        expected = case.get("expectedSemanticResult", {})
+        if (
+            expected.get("operation") != "setAssetReferenceProperty"
+            or expected.get("referenceType") != "Object"
+            or expected.get("propertyPath") != "ObjectValue"
+        ):
+            return
+        expected_target = str(expected.get("afterValue") or "")
+        if not expected_target.startswith("/Game/"):
+            return
+        left_references = before_target.get("references") or []
+        right_references = after_target.get("references") or []
+        left_ids = {
+            str(item.get("id") or "")
+            for item in left_references
+            if isinstance(item, dict)
+        }
+        normalized: list[Any] = []
+        for item in right_references:
+            is_allowed_derived_edge = (
+                isinstance(item, dict)
+                and str(item.get("id") or "") not in left_ids
+                and item.get("kind") == "depends-hard-package"
+                and item.get("hard") is True
+                and item.get("dependencyCategory") == "package"
+                and item.get("targetAssetPath") == expected_target
+                and item.get("sourceSymbolId") == f"asset|{target}"
+            )
+            if not is_allowed_derived_edge:
+                normalized.append(item)
+        after_target["references"] = normalized
+
     if case_id in {
         "r4-write-data-asset-scalar-005",
         "r4-safety-required-evidence-failure-013",
@@ -401,6 +434,7 @@ def _critical_fields_unchanged(
         normalize_property("IntValue")
     elif case_id == "r4-write-data-asset-reference-006":
         normalize_property("ObjectValue")
+        normalize_allowed_object_reference_edge()
     elif case_id == "r4-write-datatable-cell-007":
         left_rows = (before_target.get("assetDetails") or {}).get("rows") or []
         right_rows = (after_target.get("assetDetails") or {}).get("rows") or []
@@ -1461,7 +1495,15 @@ class RealFixtureAdapter(FixtureAdapter):
             forbidden_changes.append("forbidden-semantic-change")
         stale_detected = (
             case["caseId"] == "r4-safety-stale-revision-012"
-            and any(term in trace_text for term in ("disk-newer-than-snapshots", "index-stale", "stale-revision"))
+            and any(
+                term in trace_text
+                for term in (
+                    "asset-stale",
+                    "disk-newer-than-snapshots",
+                    "index-stale",
+                    "stale-revision",
+                )
+            )
         )
         dirty_detected = (
             case["caseId"] == "r4-safety-dirty-context-016"

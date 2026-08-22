@@ -11,7 +11,8 @@ param(
     [string]$Mode = "DryRun",
     [string]$Report = "",
     [string]$VerificationOutput = "",
-    [string]$VerificationReport = ""
+    [string]$VerificationReport = "",
+    [switch]$AllowOpenEditorForVerifiedUnloadedAsset
 )
 
 $ErrorActionPreference = "Stop"
@@ -43,7 +44,7 @@ else
 }
 New-Item -ItemType Directory -Path ([System.IO.Path]::GetDirectoryName($Report)) -Force | Out-Null
 
-if ($Mode -eq "Commit")
+if ($Mode -eq "Commit" -and !$AllowOpenEditorForVerifiedUnloadedAsset)
 {
     try
     {
@@ -68,6 +69,10 @@ if ($Mode -eq "Commit")
         $ProcessIds = ($RunningEditors | ForEach-Object { $_.ProcessId }) -join ", "
         throw "Rollback Commit requires the target Unreal project to be closed. Running process IDs: $ProcessIds"
     }
+}
+elseif ($Mode -eq "Commit")
+{
+    Write-Host "Open Editor exception: fixed Editor Bridge verified the exact target is unloaded and clean."
 }
 
 Write-Host "Validating rollback..."

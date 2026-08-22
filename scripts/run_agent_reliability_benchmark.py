@@ -187,6 +187,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", type=Path, default=_default_output())
     parser.add_argument("--profiles", nargs="+", choices=PROFILES, default=list(PROFILES))
     parser.add_argument("--case", action="append", default=[])
+    parser.add_argument("--attempts-per-profile", type=int, choices=range(1, 11), default=1)
     parser.add_argument("--dry-validate", action="store_true")
     parser.add_argument("--fixture-preflight", action="store_true")
     parser.add_argument("--codex-executable", default=os.environ.get("UEAK_BENCHMARK_CODEX", ""))
@@ -245,7 +246,8 @@ def main() -> int:
         raise ValueError("A fixed model is required; pass --model or set UEAK_BENCHMARK_MODEL")
     validation = {
         "cases": len(cases),
-        "scheduledAttempts": sum(len(case["profiles"]) for case in cases),
+        "attemptsPerProfile": args.attempts_per_profile,
+        "scheduledAttempts": args.attempts_per_profile * sum(len(case["profiles"]) for case in cases),
         "profiles": {
             profile: len(visible_tools[profile])
             for profile in args.profiles
@@ -294,9 +296,13 @@ def main() -> int:
             profile: visible_tools[profile]
             for profile in args.profiles
         },
+        attempts_per_profile=args.attempts_per_profile,
     )
     print(json.dumps(result["summary"], ensure_ascii=False, indent=2))
-    return 1 if result["run"]["mutationFailClosedTriggered"] else 0
+    return 1 if (
+        result["run"]["mutationFailClosedTriggered"]
+        or result["run"]["measurementDriftDetected"]
+    ) else 0
 
 
 if __name__ == "__main__":

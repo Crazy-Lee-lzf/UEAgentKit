@@ -555,6 +555,14 @@ def _unique_actions(assertions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [actions[key] for key in sorted(actions)]
 
 
+def _verdict_action(change_set_id: str, *, reason: str) -> dict[str, Any]:
+    return {
+        "tool": "ue_evaluate_trust_verdict",
+        "arguments": {"change_set_id": change_set_id},
+        "reason": reason,
+    }
+
+
 def _trim_response(response: dict[str, Any], max_output_tokens: int) -> dict[str, Any]:
     result = copy.deepcopy(response)
     reasons: list[str] = []
@@ -650,6 +658,13 @@ def build_verification_plan(
     fingerprint = "sha256:" + hashlib.sha256(
         _canonical_json(fingerprint_input).encode("utf-8")
     ).hexdigest()
+    next_actions = _unique_actions(assertions)
+    next_actions.append(
+        _verdict_action(
+            change_set_id,
+            reason="After every Required assertion is closed, evaluate the scoped final Trust verdict.",
+        )
+    )
     response = {
         "schemaVersion": VERIFICATION_TRUST_SCHEMA_VERSION,
         "tool": "ue_build_verification_plan",
@@ -670,7 +685,13 @@ def build_verification_plan(
         "assertions": assertions,
         "summary": _summary(assertions),
         "risks": risks,
-        "nextActions": _unique_actions(assertions),
+        "nextActions": next_actions,
+        "evidenceLifecycle": {
+            "capturedActionEvidencePersistent": False,
+            "restartInvalidatesCapturedActionEvidence": True,
+            "restartRecovery": "Re-run the exact registered Compile, Validation, or Automation actions.",
+            "indexRefreshTiming": "after-scoped-trust-verdict",
+        },
     }
     return _trim_response(response, request["maxOutputTokens"])
 
@@ -1319,6 +1340,14 @@ def evaluate_trust_verdict(
         "analysisGapCount": len(gaps),
         "unexpectedChangeCount": len(unexpected),
     })
+    recommended_next_actions = _unique_actions(assertions)
+    if state != "verified":
+        recommended_next_actions.append(
+            _verdict_action(
+                change_set_id,
+                reason="After resolving the listed Required assertions, re-evaluate this scoped Trust verdict.",
+            )
+        )
     response = {
         "schemaVersion": VERIFICATION_TRUST_SCHEMA_VERSION,
         "tool": "ue_evaluate_trust_verdict",
@@ -1347,6 +1376,12 @@ def evaluate_trust_verdict(
         "analysisGaps": copy.deepcopy(gaps)[:32],
         "unexpectedChanges": copy.deepcopy(unexpected)[:32],
         "summary": summary,
-        "recommendedNextActions": _unique_actions(assertions),
+        "recommendedNextActions": recommended_next_actions,
+        "evidenceLifecycle": {
+            "capturedActionEvidencePersistent": False,
+            "restartInvalidatesCapturedActionEvidence": True,
+            "restartRecovery": "Re-run the exact registered Compile, Validation, or Automation actions.",
+            "indexRefreshTiming": "after-scoped-trust-verdict",
+        },
     }
     return _trim_response(response, request["maxOutputTokens"])

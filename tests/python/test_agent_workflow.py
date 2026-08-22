@@ -219,7 +219,12 @@ class FakeWorkflowRunner:
         index = arguments.index("-File") + 2
         while index < len(arguments):
             key = arguments[index]
-            if key.startswith("-") and index + 1 < len(arguments):
+            if key.startswith("-") and (
+                index + 1 >= len(arguments) or arguments[index + 1].startswith("-")
+            ):
+                values[key] = "true"
+                index += 1
+            elif key.startswith("-") and index + 1 < len(arguments):
                 values[key] = arguments[index + 1]
                 index += 2
             else:
@@ -1504,6 +1509,7 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertEqual(saved_change_set["status"], "saved")
         self.assertTrue(saved_change_set["operations"][0]["receipt"].startswith("apply_"))
         self.assertEqual(applied["afterRevision"], AFTER_REVISION)
+        self.assertEqual(applied["nextActions"][0]["tool"], "ue_verify_asset")
         self.assertEqual(applied["indexFreshness"]["state"], "stale")
         lifecycle = self.service.status()["indexLifecycle"]
         self.assertTrue(lifecycle["sessionStale"])
@@ -1580,7 +1586,12 @@ class AgentWorkflowTests(unittest.TestCase):
         )
         self.assertNotIn("applyReceipt", json.dumps(evidence, ensure_ascii=False))
         self.assertNotIn(str(self.tool_root), json.dumps(evidence, ensure_ascii=False))
-        self.assertIn("memoryTaskEvidence.arguments", verified["nextStep"])
+        self.assertEqual(verified["nextActions"][0], {
+            "tool": "ue_analyze_semantic_diff",
+            "arguments": {"change_set_id": change_set_id, "stage": "verified"},
+            "reason": "Compare the independently verified semantics before planning Trust obligations.",
+        })
+        self.assertIn("before refreshing the frozen index", verified["nextStep"])
 
         rollback_dry = self.service.rollback_patch(applied["applyReceipt"])
         self.assertEqual(rollback_dry["mode"], "DryRun")
@@ -1653,6 +1664,116 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertIn("memoryTaskEvidence.arguments", restored["nextStep"])
         self.assertFalse(self.service.status()["indexLifecycle"]["sessionStale"])
         self.assertEqual(self.runner.revision, BEFORE_REVISION)
+
+    def test_rollback_commit_allows_only_bridge_verified_unloaded_clean_target(self) -> None:
+        class LiveState:
+            def __init__(self, *, loaded: bool, dirty: bool, state: str) -> None:
+                self.loaded = loaded
+                self.dirty = dirty
+                self.state = state
+
+            def status(self) -> dict[str, Any]:
+                return {
+                    "state": "available",
+                    "sessionId": "rollback-session",
+                    "processId": 4321,
+                }
+
+            def call_tool(self, tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
+                self.assert_request(tool_name, params)
+                return {
+                    "ok": True,
+                    "result": {
+                        "assetRegistry": {"found": True, "classPath": ASSET_CLASS},
+                        "memory": {
+                            "state": self.state,
+                            "loaded": self.loaded,
+                            "packageDirty": self.dirty,
+                            "openInAssetEditor": self.loaded,
+                        },
+                    },
+                }
+
+            @staticmethod
+            def assert_request(tool_name: str, params: dict[str, Any]) -> None:
+                if tool_name != "ue_inspect_asset_live" or params != {"assetPath": ASSET_PATH}:
+                    raise AssertionError(f"unexpected Live Editor request: {tool_name} {params}")
+
+        for live, code in (
+            (LiveState(loaded=True, dirty=False, state="loaded-clean"), "rollback-live-editor-asset-loaded"),
+            (LiveState(loaded=True, dirty=True, state="loaded-unsaved"), "rollback-live-editor-asset-dirty"),
+        ):
+            with self.subTest(code=code):
+                service = PatchWorkflowService(
+                    FakeIndexService(),
+                    self.config,
+                    process_runner=FakeWorkflowRunner(),
+                    freshness_tracker=FakeFreshnessTracker(),
+                    live_editor_service=live,
+                )
+                with self.assertRaises(WorkflowError) as blocked:
+                    service._inspect_rollback_live_state(ASSET_PATH)
+                self.assertEqual(blocked.exception.code, code)
+
+        class IncompleteLiveState(LiveState):
+            def __init__(self, missing: str) -> None:
+                super().__init__(loaded=False, dirty=False, state="not-loaded")
+                self.missing = missing
+
+            def call_tool(self, tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
+                payload = super().call_tool(tool_name, params)
+                payload["result"]["memory"].pop(self.missing)
+                return payload
+
+        for missing in ("loaded", "packageDirty", "openInAssetEditor", "state"):
+            with self.subTest(missing=missing):
+                service = PatchWorkflowService(
+                    FakeIndexService(),
+                    self.config,
+                    process_runner=FakeWorkflowRunner(),
+                    freshness_tracker=FakeFreshnessTracker(),
+                    live_editor_service=IncompleteLiveState(missing),
+                )
+                with self.assertRaises(WorkflowError) as blocked:
+                    service._inspect_rollback_live_state(ASSET_PATH)
+                self.assertEqual(
+                    blocked.exception.code,
+                    "rollback-live-editor-status-unavailable",
+                )
+
+        runner = FakeWorkflowRunner()
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=runner,
+            freshness_tracker=FakeFreshnessTracker(),
+            live_editor_service=LiveState(loaded=False, dirty=False, state="not-loaded"),
+        )
+        plan = service.plan_patch(
+            asset_path=ASSET_PATH,
+            operation="setAssetProperty",
+            target={"propertyPath": "BoolValue"},
+            value=True,
+        )
+        dry_run = service.dry_run_patch(plan["planId"])
+        applied = service.apply_patch(
+            plan["planId"],
+            dry_run["dryRunReceipt"],
+            f"COMMIT {plan['planId']}",
+        )
+        rollback_dry = service.rollback_patch(applied["applyReceipt"])
+        restored = service.rollback_patch(
+            applied["applyReceipt"],
+            mode="Commit",
+            rollback_dry_run_receipt=rollback_dry["rollbackDryRunReceipt"],
+            confirmation=f"ROLLBACK {applied['applyReceipt']}",
+        )
+        self.assertTrue(restored["restored"])
+        self.assertEqual(restored["liveEditorSafety"]["state"], "verified-unloaded-clean")
+        self.assertEqual(
+            runner.calls[-1][1]["-AllowOpenEditorForVerifiedUnloadedAsset"],
+            "true",
+        )
 
     def test_blueprint_verify_uses_full_export_with_unchanged_defaults(self) -> None:
         class BlueprintVerifyRunner(FakeWorkflowRunner):
@@ -2514,6 +2635,7 @@ class AgentWorkflowTests(unittest.TestCase):
             f"LIVE APPLY {plan['planId']}",
             change_set_id=change_set_id,
         )
+        self.assertEqual(applied["nextActions"][0]["tool"], "ue_save_authorized_asset")
         preview = service.save_authorized_asset(ASSET_PATH, change_set_id=change_set_id)
         saved = service.save_authorized_asset(
             ASSET_PATH,
@@ -2525,6 +2647,7 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertTrue(saved["saved"])
         self.assertEqual(saved["liveApplyReceipt"], applied["liveApplyReceipt"])
         self.assertTrue(saved["liveWriteSaved"])
+        self.assertEqual(saved["nextActions"][0]["tool"], "ue_verify_live_write")
 
         saved_change_set = service.get_change_set(change_set_id)
         self.assertEqual(saved_change_set["status"], "saved")
@@ -2544,6 +2667,12 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertEqual(verified["exportedPersistedValue"], True)
         self.assertIsNone(verified["runtimeVerification"])
         self.assertEqual(verified["expectedValue"], True)
+        self.assertEqual(verified["nextActions"][0], {
+            "tool": "ue_analyze_semantic_diff",
+            "arguments": {"change_set_id": change_set_id, "stage": "verified"},
+            "reason": "Compare independently verified semantics before planning Trust obligations.",
+        })
+        self.assertIn("before refreshing the frozen index", verified["nextStep"])
         evidence = verified["memoryTaskEvidence"]["arguments"]
         self.assertEqual(evidence["task_key"], f"live-write:{applied['planId']}")
         self.assertEqual(evidence["outcome"], "succeeded")
@@ -2929,6 +3058,11 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertTrue(created["ok"])
         self.assertTrue(created["changeSetId"].startswith("cs_"))
         self.assertEqual(created["status"], "planned")
+        self.assertTrue(created["bindingContract"]["sameIdRequired"])
+        self.assertIn(
+            "ue_evaluate_trust_verdict",
+            created["bindingContract"]["passToApplicableTools"],
+        )
         return created["changeSetId"]
 
     def _apply_bound_change_set(

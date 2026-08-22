@@ -36,7 +36,11 @@ from ue_agent_kit.agent_workflow import WorkflowError  # noqa: E402
 from ue_agent_kit.database import open_database  # noqa: E402
 from ue_agent_kit.editor_bridge import LiveEditorError  # noqa: E402
 from ue_agent_kit.indexer import build_index  # noqa: E402
-from ue_agent_kit.mcp_server import create_mcp_server, main as mcp_main  # noqa: E402
+from ue_agent_kit.mcp_server import (  # noqa: E402
+    _server_instructions,
+    create_mcp_server,
+    main as mcp_main,
+)
 from ue_agent_kit.memory_service import ProjectMemoryService  # noqa: E402
 from ue_agent_kit.tool_registry import (  # noqa: E402
     LIVE_EDITOR_TOOL_NAMES,
@@ -682,6 +686,29 @@ class McpServerTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
 
+    def test_server_guidance_freezes_trust_evidence_ladder(self) -> None:
+        instructions = _server_instructions(True, True, True, True)
+        self.assertIn("Persistence verified is not Trust verified.", instructions)
+        self.assertIn(
+            "Do not refresh the frozen asset index or restart the MCP server before that scoped verdict",
+            instructions,
+        )
+        self.assertIn(
+            "session-local and must be re-run after a restart",
+            instructions,
+        )
+        self.assertIn(
+            "Required-evidence-missing work is not successful",
+            instructions,
+        )
+        self.assertIn("first create a Change Set", instructions)
+        self.assertIn("Harness cleanup is not Agent recovery", instructions)
+        self.assertIn(
+            "do not evaluate Trust against the transient Change Set revision",
+            instructions,
+        )
+        self.assertIn("report trustVerdict not-evaluated", instructions)
+
     def test_index_service_is_read_only_and_returns_stable_envelopes(self) -> None:
         before_hash = sha256(self.database_path)
         status = self.service.check()
@@ -956,6 +983,14 @@ class McpServerTests(unittest.TestCase):
         self.assertFalse(trust_contract["evidenceCapture"]["available"])
         self.assertFalse(trust_contract["evidenceCapture"]["persistent"])
         self.assertFalse(trust_contract["evidenceCapture"]["arbitraryIngest"])
+        self.assertEqual(
+            trust_contract["evidenceCapture"]["restartBehavior"],
+            "session-local-evidence-cleared-rerun-registered-tools",
+        )
+        self.assertEqual(
+            trust_contract["indexRefreshTiming"],
+            "after-scoped-trust-verdict",
+        )
         self.assertEqual(
             [item["name"] for item in capabilities["tools"]],
             [tool.name for tool in tools],
@@ -2036,6 +2071,14 @@ class McpServerTests(unittest.TestCase):
         self.assertFalse(trust_contract["evidenceCapture"]["available"])
         self.assertFalse(trust_contract["evidenceCapture"]["persistent"])
         self.assertFalse(trust_contract["evidenceCapture"]["arbitraryIngest"])
+        self.assertEqual(
+            trust_contract["evidenceCapture"]["restartBehavior"],
+            "session-local-evidence-cleared-rerun-registered-tools",
+        )
+        self.assertEqual(
+            trust_contract["indexRefreshTiming"],
+            "after-scoped-trust-verdict",
+        )
         batch_contract = capabilities["animationScaleFixBatch"]
         self.assertTrue(batch_contract["available"])
         self.assertFalse(batch_contract["planningOnly"])

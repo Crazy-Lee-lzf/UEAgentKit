@@ -24,6 +24,7 @@ from ue_agent_kit.semantic_diff import (  # noqa: E402
 )
 from ue_agent_kit.semantic_diff_workflow import (  # noqa: E402
     SemanticDiffEvidenceError,
+    _snapshot_actual_only,
     analyze_workflow_semantic_diff,
 )
 
@@ -619,6 +620,107 @@ class _FakeWorkflow:
 
 
 class SemanticDiffWorkflowContractTests(unittest.TestCase):
+    @staticmethod
+    def _blueprint_with_pin_defaults(
+        values: dict[str, object],
+        categories: dict[str, str] | None = None,
+    ) -> dict[str, object]:
+        categories = categories or {}
+        return canonical_asset(
+            revision=BEFORE_REVISION,
+            asset_class="/Script/Engine.Blueprint",
+            graphs=[
+                {
+                    "guid": "graph-guid",
+                    "nodes": [
+                        {
+                            "guid": "node-guid",
+                            "pins": [
+                                {
+                                    "name": name,
+                                    "defaultValue": value,
+                                    "type": {"category": categories.get(name, "string")},
+                                }
+                                for name, value in values.items()
+                            ],
+                        }
+                    ],
+                }
+            ],
+        )
+
+    def test_blueprint_compile_materialized_pin_type_defaults_are_not_unexpected(self) -> None:
+        before = self._blueprint_with_pin_defaults(
+            {"StringPin": None, "NumberPin": None, "BoolPin": None, "RequestedPin": None}
+        )
+        after = self._blueprint_with_pin_defaults(
+            {"StringPin": "", "NumberPin": "0.0", "BoolPin": "False", "RequestedPin": "42"},
+            {
+                "StringPin": "string",
+                "NumberPin": "real",
+                "BoolPin": "bool",
+                "RequestedPin": "int",
+            },
+        )
+        expected_operations = [
+            {
+                "operation": "setPinDefault",
+                "target": {
+                    "graphGuid": "graph-guid",
+                    "nodeGuid": "node-guid",
+                    "pinName": "RequestedPin",
+                },
+                "value": "42",
+            }
+        ]
+
+        actual_only = _snapshot_actual_only(
+            ASSET_A,
+            "/Script/Engine.Blueprint",
+            before,
+            after,
+            "verified",
+            expected_operations,
+        )
+
+        self.assertEqual(actual_only, [])
+
+    def test_blueprint_unset_pin_materialized_to_non_default_remains_unexpected(self) -> None:
+        before = self._blueprint_with_pin_defaults({"UnexpectedPin": None})
+        after = self._blueprint_with_pin_defaults(
+            {"UnexpectedPin": "0"},
+            {"UnexpectedPin": "string"},
+        )
+
+        actual_only = _snapshot_actual_only(
+            ASSET_A,
+            "/Script/Engine.Blueprint",
+            before,
+            after,
+            "verified",
+            [],
+        )
+
+        self.assertEqual(len(actual_only), 1)
+        self.assertEqual(actual_only[0].actual_value, "0")
+
+    def test_blueprint_existing_non_default_pin_change_remains_unexpected(self) -> None:
+        before = self._blueprint_with_pin_defaults({"UnexpectedPin": "before"})
+        after = self._blueprint_with_pin_defaults({"UnexpectedPin": "after"})
+
+        actual_only = _snapshot_actual_only(
+            ASSET_A,
+            "/Script/Engine.Blueprint",
+            before,
+            after,
+            "verified",
+            [],
+        )
+
+        self.assertEqual(len(actual_only), 1)
+        self.assertEqual(actual_only[0].before_value, "before")
+        self.assertEqual(actual_only[0].actual_value, "after")
+
     def test_t12_explicit_requested_stage_unavailable_is_structured(self) -> None:
         service = _FakeWorkflow()
         with self.assertRaises(SemanticDiffEvidenceError) as caught:

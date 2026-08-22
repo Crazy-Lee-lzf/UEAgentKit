@@ -45,6 +45,57 @@ def _safe_id(value: str, prefix: str) -> bool:
     )
 
 
+def _is_materialized_blueprint_pin_type_default(
+    before_value: Any,
+    after_value: Any,
+    pin_type: dict[str, Any],
+) -> bool:
+    if before_value is not None:
+        return False
+    category = str(pin_type.get("category") or "").casefold()
+    if category == "bool":
+        return after_value is False or (
+            isinstance(after_value, str) and after_value.casefold() == "false"
+        )
+    if category in {
+        "byte",
+        "double",
+        "float",
+        "int",
+        "int32",
+        "int64",
+        "real",
+        "uint32",
+        "uint64",
+    }:
+        if isinstance(after_value, bool):
+            return False
+        if isinstance(after_value, (int, float)):
+            return after_value == 0
+        if isinstance(after_value, str):
+            try:
+                return float(after_value.strip()) == 0
+            except ValueError:
+                return False
+        return False
+    if category in {
+        "class",
+        "delegate",
+        "exec",
+        "interface",
+        "mcdelegate",
+        "multicastdelegate",
+        "name",
+        "object",
+        "softclass",
+        "softobject",
+        "string",
+        "text",
+    }:
+        return after_value == ""
+    return False
+
+
 def _load_plan(service: Any, plan_id: str) -> dict[str, Any] | None:
     if not _safe_id(plan_id, "plan_"):
         return None
@@ -550,8 +601,10 @@ def _snapshot_actual_only(
                     )
                 )
 
-    def pin_defaults(canonical: dict[str, Any]) -> dict[tuple[str, str, str], Any]:
-        values: dict[tuple[str, str, str], Any] = {}
+    def pin_defaults(
+        canonical: dict[str, Any],
+    ) -> dict[tuple[str, str, str], tuple[Any, dict[str, Any]]]:
+        values: dict[tuple[str, str, str], tuple[Any, dict[str, Any]]] = {}
         for graph in canonical.get("graphs") or []:
             if not isinstance(graph, dict):
                 continue
@@ -562,17 +615,30 @@ def _snapshot_actual_only(
                 node_id = str(node.get("guid", node.get("id", "")))
                 for pin in node.get("pins") or []:
                     if isinstance(pin, dict) and isinstance(pin.get("name"), str):
-                        values[(graph_id, node_id, str(pin["name"]))] = pin.get("defaultValue", pin.get("default"))
+                        pin_type = pin.get("type")
+                        values[(graph_id, node_id, str(pin["name"]))] = (
+                            pin.get("defaultValue", pin.get("default")),
+                            pin_type if isinstance(pin_type, dict) else {},
+                        )
         return values
 
     before_pins = pin_defaults(before)
     after_pins = pin_defaults(after)
     for graph_id, node_id, pin_name in sorted(set(before_pins) | set(after_pins)):
-        left = before_pins.get((graph_id, node_id, pin_name))
-        right = after_pins.get((graph_id, node_id, pin_name))
+        pin_key = (graph_id, node_id, pin_name)
+        left_entry = before_pins.get(pin_key)
+        right_entry = after_pins.get(pin_key)
+        left = left_entry[0] if left_entry is not None else None
+        right = right_entry[0] if right_entry is not None else None
+        right_type = right_entry[1] if right_entry is not None else {}
         target = {"graphGuid": graph_id, "nodeGuid": node_id, "pinName": pin_name}
         key = ("setPinDefault", json.dumps(target, sort_keys=True, separators=(",", ":")))
-        if key not in expected_keys and not semantic_equal(left, right):
+        materialized_type_default = _is_materialized_blueprint_pin_type_default(
+            left,
+            right,
+            right_type,
+        )
+        if key not in expected_keys and not semantic_equal(left, right) and not materialized_type_default:
             result.append(
                 SemanticOperationEvidence(
                     operation_id=f"snapshot-blueprint-pin:{graph_id}:{node_id}:{pin_name}",

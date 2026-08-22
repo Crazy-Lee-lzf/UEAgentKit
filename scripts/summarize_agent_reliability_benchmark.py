@@ -25,6 +25,24 @@ def _read_json(path: Path) -> dict[str, Any]:
     return value
 
 
+def _legacy_profile_shape(profile: dict[str, Any]) -> dict[str, Any]:
+    profile.pop("outcomeDistribution", None)
+    profile.pop("timeouts", None)
+    for field in ("toolCalls", "elapsedMs"):
+        value = profile.get(field)
+        if isinstance(value, dict):
+            value.pop("min", None)
+            value.pop("max", None)
+    tokens = profile.get("tokens")
+    if isinstance(tokens, dict):
+        for value in tokens.values():
+            if isinstance(value, dict):
+                value.pop("mean", None)
+                value.pop("min", None)
+                value.pop("max", None)
+    return profile
+
+
 def summarize(run_root: Path) -> dict[str, Any]:
     run_root = bounded_output_root(TOOL_ROOT, run_root)
     run = _read_json(run_root / "run.json")
@@ -52,6 +70,12 @@ def summarize(run_root: Path) -> dict[str, Any]:
         )
         for profile in run.get("toolProfiles") or {}
     }
+    legacy_run = "measurementContract" not in run
+    if legacy_run:
+        profiles = {
+            profile: _legacy_profile_shape(value)
+            for profile, value in profiles.items()
+        }
     summary = {
         "schemaVersion": "1.0",
         "profiles": profiles,
@@ -59,6 +83,8 @@ def summarize(run_root: Path) -> dict[str, Any]:
         "mutationFailClosedTriggered": bool(run.get("mutationFailClosedTriggered")),
         "attemptsRetained": len(attempts),
     }
+    if not legacy_run:
+        summary["measurementDriftDetected"] = bool(run.get("measurementDriftDetected"))
     return summary
 
 

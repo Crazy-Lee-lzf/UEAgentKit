@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://ueagentkit.local/schemas/agent-reliability/agent-result-1.0.json",
+  "$id": "https://ueagentkit.local/schemas/agent-reliability/agent-result-1.2.json",
   "type": "object",
   "additionalProperties": false,
   "required": ["benchmarkResult"],
@@ -61,16 +61,47 @@
             "visitedEdgeCount": {"type": ["integer", "null"]},
             "riskKinds": {"type": ["array", "null"], "items": {"type": "string"}},
             "runtimeSensitivityState": {"type": ["string", "null"]},
-            "operation": {"type": ["string", "null"]},
+            "operation": {
+              "enum": [
+                null,
+                "no-op",
+                "renameDataTableRow",
+                "rollback",
+                "setAssetProperty",
+                "setAssetReferenceProperty",
+                "setDataTableCell",
+                "setMaterialInstanceScalarParameter",
+                "setVariableDefault"
+              ]
+            },
             "parameterName": {"type": ["string", "null"]},
             "propertyPath": {"type": ["string", "null"]},
             "referenceType": {"type": ["string", "null"]},
             "rowName": {"type": ["string", "null"]},
             "fieldName": {"type": ["string", "null"]},
             "variableName": {"type": ["string", "null"]},
-            "conflict": {"type": ["string", "null"]},
+            "conflict": {
+              "enum": [
+                null,
+                "stale-revision",
+                "dirty-package",
+                "required-evidence-missing",
+                "policy-block",
+                "unexpected-semantic-change",
+                "recovery-failed"
+              ]
+            },
             "requiredEvidenceKind": {"type": ["string", "null"]},
-            "trustState": {"type": ["string", "null"]},
+            "trustState": {
+              "enum": [
+                null,
+                "verified",
+                "suspicious",
+                "failed",
+                "insufficient-evidence",
+                "not-evaluated"
+              ]
+            },
             "referenceCount": {"type": ["integer", "null"]},
             "safeToApply": {"type": ["boolean", "null"]},
             "automationTimedOut": {"type": ["boolean", "null"]},
@@ -81,7 +112,15 @@
             "finalValue": {"type": ["string", "number", "boolean", "null"]}
           }
         },
-        "trustVerdict": {"type": "string"},
+        "trustVerdict": {
+          "enum": [
+            "verified",
+            "suspicious",
+            "failed",
+            "insufficient-evidence",
+            "not-evaluated"
+          ]
+        },
         "evidenceIds": {"type": "array", "items": {"type": "string"}},
         "notes": {"type": "string"}
       }

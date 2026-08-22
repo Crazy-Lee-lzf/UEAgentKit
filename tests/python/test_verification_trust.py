@@ -500,6 +500,14 @@ class VerificationPlanTests(EvidenceFixture):
         self.assertEqual(required, {"freshness", "persistence", "semantic", "data-validation"})
         self.assertNotIn("compile", required)
         self.assertEqual(workflow.index_service.calls[0]["max_depth"], 1)
+        self.assertEqual(first["nextActions"][-1], {
+            "tool": "ue_evaluate_trust_verdict",
+            "arguments": {"change_set_id": CHANGE_SET_ID},
+            "reason": "After every Required assertion is closed, evaluate the scoped final Trust verdict.",
+        })
+        self.assertFalse(first["evidenceLifecycle"]["capturedActionEvidencePersistent"])
+        self.assertTrue(first["evidenceLifecycle"]["restartInvalidatesCapturedActionEvidence"])
+        self.assertEqual(first["evidenceLifecycle"]["indexRefreshTiming"], "after-scoped-trust-verdict")
 
     def test_blueprint_and_reference_sensitive_domain_rules(self) -> None:
         blueprint = FakeWorkflow(
@@ -624,6 +632,8 @@ class TrustVerdictTests(EvidenceFixture):
         self.assertEqual(workflow.record, before_record)
         self.assertEqual(store.snapshot(), before_evidence)
         self.assertEqual(result["verificationScope"]["verifiedAssets"], [ASSET])
+        self.assertEqual(result["recommendedNextActions"], [])
+        self.assertTrue(result["evidenceLifecycle"]["restartInvalidatesCapturedActionEvidence"])
 
     def test_missing_and_unexpected_semantic_changes_are_failed(self) -> None:
         for missing, unexpected, reason in (
@@ -724,6 +734,10 @@ class TrustVerdictTests(EvidenceFixture):
                 validation = assertion_by_kind(result, "data-validation")
                 self.assertEqual(validation["status"], "unknown")
                 self.assertEqual(validation["reasonCode"], reason)
+                self.assertEqual(
+                    result["recommendedNextActions"][-1]["tool"],
+                    "ue_evaluate_trust_verdict",
+                )
 
     def test_current_revision_and_dirty_memory_gate_real_and_no_op_evidence(self) -> None:
         cases = (

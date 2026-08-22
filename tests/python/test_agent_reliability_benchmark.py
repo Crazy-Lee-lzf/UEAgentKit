@@ -21,6 +21,7 @@ from benchmarks.agent_reliability.cases import (
     validate_case_inventory,
 )
 from benchmarks.agent_reliability.codex_adapter import CodexCliAgentAdapter, McpLaunchConfig
+from benchmarks.agent_reliability.claims import parse_agent_claim
 from benchmarks.agent_reliability.fixtures import (
     FixtureAdapter,
     FixtureSession,
@@ -39,11 +40,15 @@ from benchmarks.agent_reliability.profiles import (
 from benchmarks.agent_reliability.real_fixtures import (
     RealFixtureAdapter,
     _benchmark_backup_root,
+    _critical_fields_unchanged,
 )
 from benchmarks.agent_reliability.runner import (
     BenchmarkRunner,
+    build_agent_prompt,
+    build_schedule,
     bounded_output_root,
     fixture_fairness_fingerprint,
+    measurement_contract,
 )
 
 
@@ -106,7 +111,7 @@ def _claim(case: dict[str, Any], status: str | None = None) -> dict[str, Any]:
         "targetAssets": list(case["expectedSemanticResult"].get("targetAssets", [])),
         "changeSetId": "",
         "claimedSemanticResult": copy.deepcopy(case["expectedSemanticResult"]),
-        "trustVerdict": case.get("expectedTrustState") or "",
+        "trustVerdict": case.get("expectedTrustState") or "not-evaluated",
         "evidenceIds": [],
         "notes": "",
     }
@@ -504,6 +509,18 @@ def test_t23_failed_attempts_are_retained() -> None:
         primary_only=False,
     )
     assert summary["attempts"] == 2
+    assert summary["anchorRepeatAttempts"] == 1
+    assert summary["toolCalls"]["min"] == 2
+    assert summary["toolCalls"]["max"] == 2
+    assert summary["timeouts"] == {"count": 0, "rate": 0.0}
+    paired_baseline = MetricsAggregator().aggregate(
+        [
+            _attempt(case, "full-r0-r3", grade),
+            _attempt(case, "legacy-low-level", grade),
+        ],
+        primary_only=False,
+    )
+    assert paired_baseline["anchorRepeatAttempts"] == 0
 
 
 def test_t24_infrastructure_failure_is_explicit_not_dropped() -> None:
@@ -691,7 +708,7 @@ def test_t30_agent_result_schema_is_closed_and_strict() -> None:
             "targetAssets": [],
             "changeSetId": "",
             "claimedSemanticResult": semantic,
-            "trustVerdict": "",
+            "trustVerdict": "not-evaluated",
             "evidenceIds": [],
             "notes": "",
         }
@@ -971,6 +988,212 @@ def test_t38_prepared_directhost_namespace_is_reused_and_drift_checked(
             "/Game/Fixture",
             tmp_path / "attempt-2",
         )
+
+
+def test_t39_result_contract_enums_and_safe_failure_guidance_are_machine_closed() -> None:
+    schema = json.loads((SCHEMA_ROOT / "agent-result.schema.json").read_text(encoding="utf-8"))
+    benchmark_schema = schema["properties"]["benchmarkResult"]
+    semantic_schema = benchmark_schema["properties"]["claimedSemanticResult"]
+    assert set(benchmark_schema["properties"]["trustVerdict"]["enum"]) == {
+        "verified",
+        "suspicious",
+        "failed",
+        "insufficient-evidence",
+        "not-evaluated",
+    }
+    assert "stale-revision" in semantic_schema["properties"]["conflict"]["enum"]
+    assert "dirty-package" in semantic_schema["properties"]["conflict"]["enum"]
+
+    case = _case("r4-safety-stale-revision-012")
+    claim = _claim(case, status="blocked")
+    parsed, error = parse_agent_claim(json.dumps({"benchmarkResult": claim}))
+    assert error is None and parsed == claim
+    prose_trust = copy.deepcopy(claim)
+    prose_trust["trustVerdict"] = "Verified with independent evidence."
+    assert parse_agent_claim(json.dumps({"benchmarkResult": prose_trust}))[1] == (
+        "result-contract-invalid-trust-verdict"
+    )
+    prose_conflict = copy.deepcopy(claim)
+    prose_conflict["claimedSemanticResult"]["conflict"] = "The frozen revision is stale."
+    assert parse_agent_claim(json.dumps({"benchmarkResult": prose_conflict}))[1] == (
+        "result-contract-invalid-conflict"
+    )
+    prose_operation = copy.deepcopy(claim)
+    prose_operation["claimedSemanticResult"]["operation"] = "set material scalar override"
+    assert parse_agent_claim(json.dumps({"benchmarkResult": prose_operation}))[1] == (
+        "result-contract-invalid-operation"
+    )
+
+    prompt = build_agent_prompt(case)
+    assert "Detecting a stale/dirty/policy/evidence block is not success" in prompt
+    assert "Persistence verification alone is not a scoped Trust verdict" in prompt
+    assert "search candidates" in prompt and "never in targetAssets" in prompt
+    assert "first create a Change Set" in prompt
+    assert "Copy the exact structured Tool operation" in prompt
+    assert "Harness cleanup is not Agent recovery" in prompt
+    assert "do not evaluate Trust against the transient Change Set revision" in prompt
+    assert "report trustVerdict not-evaluated" in prompt
+    assert "setVariableDefault claims and Blueprint exact-rollback claims" in prompt
+    assert 'canonical Blueprint default strings such as "0" and "42"' in prompt
+
+
+def test_t40_target_assets_exclude_discovery_candidates_and_impact_consumers() -> None:
+    for case_id in ("r4-readonly-discovery-001", "r4-readonly-impact-002"):
+        case = _case(case_id)
+        claim = _claim(case)
+        extra = next(
+            asset
+            for asset in case["allowedAssets"]
+            if asset not in case["expectedSemanticResult"]["targetAssets"]
+        )
+        claim["targetAssets"].append(extra)
+        claim["claimedSemanticResult"]["targetAssets"].append(extra)
+        grade = GroundTruthGrader().grade(
+            case,
+            {"packageInventory": {}},
+            _after(case),
+            claim,
+            [],
+            cleanup={"passed": True, "exactRecovery": True},
+        )
+        assert grade["wrongAsset"] is True
+        assert grade["claimSemanticCorrect"] is False
+
+
+def test_t41_reference_normalization_accepts_only_the_allowed_derived_hard_edge() -> None:
+    case = _case("r4-write-data-asset-reference-006")
+    source = case["allowedAssets"][0]
+    expected_target = case["expectedSemanticResult"]["afterValue"]
+
+    def document(value: str, references: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "assetClass": "/Script/UEAgentKitEditor.UEAgentKitReferenceWriteFixtureAsset",
+            "assetDetails": {"properties": [{"name": "ObjectValue", "value": value}]},
+            "variables": [],
+            "components": [],
+            "graphs": [],
+            "references": references,
+        }
+
+    baseline_edge = {
+        "id": f"reference|depends-hard-package|asset|{source}|package|/Script/UEAgentKitEditor",
+        "kind": "depends-hard-package",
+        "sourceSymbolId": f"asset|{source}",
+        "targetAssetPath": "",
+        "dependencyCategory": "package",
+        "hard": True,
+    }
+    derived_edge = {
+        "id": f"reference|depends-hard-package|asset|{source}|asset|{expected_target}",
+        "kind": "depends-hard-package",
+        "sourceSymbolId": f"asset|{source}",
+        "targetAssetPath": expected_target,
+        "dependencyCategory": "package",
+        "hard": True,
+    }
+    before = {source: document("", [baseline_edge])}
+    after = {source: document(expected_target, [derived_edge, baseline_edge])}
+    assert _critical_fields_unchanged(case, before, after) is True
+
+    unrelated = copy.deepcopy(derived_edge)
+    unrelated["id"] = f"reference|depends-hard-package|asset|{source}|asset|/Game/Other.Other"
+    unrelated["targetAssetPath"] = "/Game/Other.Other"
+    after_with_unrelated = {
+        source: document(expected_target, [derived_edge, baseline_edge, unrelated])
+    }
+    assert _critical_fields_unchanged(case, before, after_with_unrelated) is False
+
+
+def test_t42_repeat_schedule_and_measurement_contract_are_frozen() -> None:
+    case = _case("r4-write-data-asset-scalar-005")
+    schedule = build_schedule([case], attempts_per_profile=3)
+    assert len(schedule) == 6
+    assert [item[2] for item in schedule] == [1, 1, 2, 2, 3, 3]
+    assert all(
+        {item[1] for item in schedule if item[2] == index} == set(case["profiles"])
+        for index in range(1, 4)
+    )
+
+    tools = {
+        profile: tools_for_profile(
+            profile,
+            live_editor_enabled=True,
+            workflow_enabled=True,
+        )
+        for profile in case["profiles"]
+    }
+    first = measurement_contract(TOOL_ROOT, [case], tools)
+    second = measurement_contract(TOOL_ROOT, [case], tools)
+    assert first == second
+    assert first["measurementVersion"] == "r4.1"
+    assert first["graderVersion"] == "r4.1.0"
+    assert first["promptVersion"] == "r4.1-result-contract-1.5"
+    assert first["sourceFingerprints"][
+        "benchmarks/agent_reliability/schemas/agent-result.schema.json"
+    ].startswith("sha256:")
+    assert first["sourceFingerprints"][
+        "benchmarks/agent_reliability/metrics.py"
+    ].startswith("sha256:")
+
+
+def test_t43_measurement_drift_invalidates_run_and_retains_skipped_attempts(
+    tmp_path: Path,
+) -> None:
+    case = _case("r4-readonly-discovery-001")
+    source = tmp_path / "benchmarks" / "agent_reliability" / "claims.py"
+
+    class _MeasurementDriftingFixture(FixtureAdapter):
+        def setup(self, case: dict[str, Any], attempt_root: Path) -> FixtureSession:
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text("drift\n", encoding="utf-8")
+            return FixtureSession(
+                case_id=case["caseId"],
+                setup_id=case["setupId"],
+                cleanup_id=case["cleanupId"],
+                attempt_root=attempt_root,
+                before={"packageInventory": {}},
+            )
+
+        def capture_after(
+            self,
+            case: dict[str, Any],
+            session: FixtureSession,
+            agent_result: Any,
+        ) -> dict[str, Any]:
+            return _after(case)
+
+        def cleanup(
+            self,
+            case: dict[str, Any],
+            session: FixtureSession,
+        ) -> dict[str, Any]:
+            return {"passed": True, "exactRecovery": True}
+
+    runner = BenchmarkRunner(
+        tool_root=tmp_path,
+        output_root=tmp_path / "Output" / "AgentReliabilityBenchmark" / "drift-run",
+        agent=_FakeAgent(),
+        fixture=_MeasurementDriftingFixture(),
+    )
+    tools = {profile: ("ue_search",) for profile in case["profiles"]}
+    result = runner.run(
+        [case],
+        visible_tools_by_profile=tools,
+        attempts_per_profile=2,
+    )
+
+    assert result["run"]["status"] == "invalid-measurement"
+    assert result["run"]["measurementDriftDetected"] is True
+    assert result["run"]["attemptsRetained"] == 4
+    assert result["summary"]["attemptsRetained"] == 4
+    assert result["attempts"][0]["termination"]["status"] == "completed"
+    assert [attempt["termination"]["reason"] for attempt in result["attempts"][1:]] == [
+        "measurement-contract-drift",
+        "measurement-contract-drift",
+        "measurement-contract-drift",
+    ]
+    retained = list((runner.output_root / "attempts").glob("*.json"))
+    assert len(retained) == 4
 
 
 class AgentReliabilityBenchmarkTests(unittest.TestCase):

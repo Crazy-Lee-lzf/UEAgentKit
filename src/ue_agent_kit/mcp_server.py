@@ -179,6 +179,17 @@ def _server_instructions(
         "they are read-only, deterministic, never ingest arbitrary evidence, and never auto-execute Compile, "
         "Validation, Automation, Save, Verify, rollback, or a Writer. A verified verdict is scoped to the "
         "generated plan and does not claim universal gameplay, visual, performance, or runtime correctness. "
+        "For a persistent real write, first create a Change Set, then pass the same change_set_id through write, "
+        "authorized save, independent verify, verified Semantic Diff, Verification Plan, every missing Required "
+        "evidence action, and Trust Verdict. For an exact-rollback task, independently verify the transient write "
+        "and complete rollback before optional actions that can load the asset. Once independent evidence proves "
+        "package bytes, canonical state, frozen revision, dirty state, and package inventory exactly match the "
+        "baseline, the rollback task is successful: do not evaluate Trust against the transient Change Set revision, "
+        "and report trustVerdict not-evaluated. Harness cleanup is not Agent recovery. Do not refresh the frozen "
+        "asset index or "
+        "restart the MCP server before that scoped verdict; captured Compile, Validation, and Automation evidence is "
+        "session-local and must be re-run after a restart. Persistence verified is not Trust verified. Stale, Dirty, "
+        "policy-blocked, or Required-evidence-missing work is not successful merely because the block was detected. "
     )
     live_text = (
         "The ue_editor_*, ue_get_*, bounded Batch Task, and journaled Change Set live tools operate "
@@ -716,7 +727,9 @@ def _capabilities_response(
             "evidenceCapture": {
                 **verification_evidence_status,
                 "available": bool(write_tools_enabled and live_editor_enabled),
+                "restartBehavior": "session-local-evidence-cleared-rerun-registered-tools",
             },
+            "indexRefreshTiming": "after-scoped-trust-verdict",
             "maxAssets": MAX_VERIFICATION_ASSETS,
             "maxAssertions": MAX_VERIFICATION_ASSERTIONS,
             "maxEvidenceRefs": MAX_VERIFICATION_EVIDENCE_REFS,
