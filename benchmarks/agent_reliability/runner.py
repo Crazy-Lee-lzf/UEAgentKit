@@ -13,6 +13,24 @@ from .io import fingerprint_json, redact, write_json
 from .metrics import MetricsAggregator
 
 
+_VOLATILE_FIXTURE_FINGERPRINT_FIELDS = frozenset(
+    {
+        "databaseSha256",
+        "editorProcessId",
+        "revisionExportFingerprint",
+    }
+)
+
+
+def fixture_fairness_fingerprint(before: dict[str, Any]) -> str:
+    stable = {
+        key: value
+        for key, value in before.items()
+        if key not in _VOLATILE_FIXTURE_FINGERPRINT_FIELDS
+    }
+    return fingerprint_json(stable)
+
+
 def bounded_output_root(tool_root: Path, requested: Path) -> Path:
     boundary = (tool_root / "Output" / "AgentReliabilityBenchmark").resolve()
     resolved = requested.resolve()
@@ -165,7 +183,7 @@ class BenchmarkRunner:
         before = dict(session.before)
         prompt = build_agent_prompt(case)
         prompt_fingerprint = fingerprint_json({"prompt": prompt})
-        fixture_fingerprint = fingerprint_json(before)
+        fixture_fingerprint = fixture_fairness_fingerprint(before)
         request = AgentRunRequest(
             case=case,
             profile=profile,

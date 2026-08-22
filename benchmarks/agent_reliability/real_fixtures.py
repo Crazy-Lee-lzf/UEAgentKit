@@ -640,6 +640,7 @@ class RealFixtureAdapter(FixtureAdapter):
     def __init__(self, config: RealFixtureConfig) -> None:
         self.config = config.validated()
         self._setup_emergency: dict[str, Any] = {}
+        self._prepared_setups: dict[str, dict[str, dict[str, Any]]] = {}
 
     @property
     def _editor_executable(self) -> Path:
@@ -690,6 +691,26 @@ class RealFixtureAdapter(FixtureAdapter):
                 f"DirectHost already has an active Live Editor Bridge process (PID {process_id})"
             )
         self._descriptor_path.unlink(missing_ok=True)
+
+    def _prepare_directhost_namespace(
+        self,
+        setup_id: str,
+        package_root: str,
+        attempt_root: Path,
+    ) -> Path:
+        expected = self._prepared_setups.get(setup_id)
+        if expected is None:
+            self._reset_fixture(setup_id, attempt_root)
+        namespace = _namespace_directory(self.config.directhost_project, package_root)
+        if not namespace.is_dir():
+            raise FileNotFoundError(f"DirectHost fixture namespace does not exist: {namespace}")
+        if expected is not None:
+            actual = capture_package_inventory(namespace)
+            if actual != expected:
+                raise RuntimeError(
+                    f"Prepared DirectHost fixture drifted before reuse: {setup_id}"
+                )
+        return namespace
 
     def _reset_fixture(self, setup_id: str, attempt_root: Path) -> None:
         plan_name = PLAN_BY_SETUP.get(setup_id)
@@ -1162,10 +1183,7 @@ class RealFixtureAdapter(FixtureAdapter):
         package_root = ROOT_BY_SETUP.get(setup_id)
         if package_root is None:
             raise ValueError(f"No fixed DirectHost namespace for setup hook: {setup_id}")
-        self._reset_fixture(setup_id, attempt_root)
-        namespace = _namespace_directory(self.config.directhost_project, package_root)
-        if not namespace.is_dir():
-            raise FileNotFoundError(f"DirectHost fixture namespace does not exist: {namespace}")
+        namespace = self._prepare_directhost_namespace(setup_id, package_root, attempt_root)
         backup = attempt_root / "exact-package-backup"
         recovery_inventory = _copy_package_snapshot(namespace, backup)
         self._setup_emergency.update(
@@ -1278,6 +1296,7 @@ class RealFixtureAdapter(FixtureAdapter):
                 ),
             }
         )
+        self._prepared_setups.setdefault(setup_id, recovery_inventory)
         self._setup_emergency = {}
         return session
 

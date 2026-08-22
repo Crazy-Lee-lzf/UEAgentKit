@@ -25,6 +25,7 @@ from benchmarks.agent_reliability.fixtures import (
     FixtureAdapter,
     FixtureSession,
     RegisteredFixtureAdapter,
+    capture_package_inventory,
 )
 from benchmarks.agent_reliability.grader import GroundTruthGrader
 from benchmarks.agent_reliability.io import redact, write_json
@@ -39,7 +40,11 @@ from benchmarks.agent_reliability.real_fixtures import (
     RealFixtureAdapter,
     _benchmark_backup_root,
 )
-from benchmarks.agent_reliability.runner import BenchmarkRunner, bounded_output_root
+from benchmarks.agent_reliability.runner import (
+    BenchmarkRunner,
+    bounded_output_root,
+    fixture_fairness_fingerprint,
+)
 
 
 TOOL_ROOT = Path(__file__).resolve().parents[2]
@@ -903,6 +908,69 @@ def test_t36_fixture_setup_error_detail_is_retained_and_redacted(tmp_path: Path)
     serialized = next((output_root / "attempts").glob("*.json")).read_text(encoding="utf-8")
     assert secret not in serialized
     assert expected_detail in serialized
+
+
+def test_t37_fairness_fingerprint_ignores_only_volatile_fixture_fields() -> None:
+    before = {
+        "packageInventory": {"target.uasset": {"sha256": "stable", "bytes": 1}},
+        "canonicalFingerprint": "canonical",
+        "revisionValues": {"/Game/Target.Target": "revision"},
+        "databaseSha256": "database-a",
+        "revisionExportFingerprint": "export-a",
+        "editorProcessId": 100,
+        "policySha256": "policy",
+        "semanticResult": {"controlledStale": False},
+    }
+    volatile_changed = copy.deepcopy(before)
+    volatile_changed.update(
+        {
+            "databaseSha256": "database-b",
+            "revisionExportFingerprint": "export-b",
+            "editorProcessId": 200,
+        }
+    )
+    semantic_changed = copy.deepcopy(volatile_changed)
+    semantic_changed["packageInventory"]["target.uasset"]["sha256"] = "changed"
+
+    assert fixture_fairness_fingerprint(before) == fixture_fairness_fingerprint(
+        volatile_changed
+    )
+    assert fixture_fairness_fingerprint(before) != fixture_fairness_fingerprint(
+        semantic_changed
+    )
+
+
+def test_t38_prepared_directhost_namespace_is_reused_and_drift_checked(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "HostProject.uproject"
+    project.write_text("", encoding="utf-8")
+    namespace = tmp_path / "Content" / "Fixture"
+    namespace.mkdir(parents=True)
+    package = namespace / "Target.uasset"
+    package.write_bytes(b"stable")
+
+    adapter = object.__new__(RealFixtureAdapter)
+    adapter.config = type("_Config", (), {"directhost_project": project})()
+    expected = capture_package_inventory(namespace)
+    adapter._prepared_setups = {"known-setup": expected}
+
+    with patch.object(adapter, "_reset_fixture") as reset:
+        prepared = adapter._prepare_directhost_namespace(
+            "known-setup",
+            "/Game/Fixture",
+            tmp_path / "attempt",
+        )
+    assert prepared == namespace
+    reset.assert_not_called()
+
+    package.write_bytes(b"drift")
+    with raises(RuntimeError, match="drifted before reuse"):
+        adapter._prepare_directhost_namespace(
+            "known-setup",
+            "/Game/Fixture",
+            tmp_path / "attempt-2",
+        )
 
 
 class AgentReliabilityBenchmarkTests(unittest.TestCase):
