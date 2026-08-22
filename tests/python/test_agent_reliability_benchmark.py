@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import jsonschema
 
@@ -34,7 +35,10 @@ from benchmarks.agent_reliability.profiles import (
     REQUIRED_LEGACY_SAFETY_TOOLS,
     tools_for_profile,
 )
-from benchmarks.agent_reliability.real_fixtures import _benchmark_backup_root
+from benchmarks.agent_reliability.real_fixtures import (
+    RealFixtureAdapter,
+    _benchmark_backup_root,
+)
 from benchmarks.agent_reliability.runner import BenchmarkRunner, bounded_output_root
 
 
@@ -792,6 +796,113 @@ def test_t34_tool_budget_failure_is_agent_tool_selection() -> None:
     )
     assert grade["resultContractError"] == "max-tool-calls-exceeded"
     assert grade["primaryFailureCause"] == "agent-tool-selection"
+
+
+def test_t35_each_reforge_case_builds_readonly_truth_with_valid_bounds() -> None:
+    cases = [case for case in _cases() if case["fixtureProfile"] == "reforge-readonly"]
+    expected_by_target = {
+        case["expectedSemanticResult"]["targetAssets"][0]: case["expectedSemanticResult"]
+        for case in cases
+        if case["caseId"] != "r4-readonly-discovery-001"
+    }
+    impact_calls: list[dict[str, Any]] = []
+
+    class _IndexService:
+        def get_asset(self, target: str, *, sections: tuple[str, ...]) -> dict[str, Any]:
+            assert sections == ("identity",)
+            return {"asset": {"assetPath": target}}
+
+        def analyze_change_impact(
+            self,
+            target_asset_paths: list[str],
+            **kwargs: Any,
+        ) -> dict[str, Any]:
+            impact_calls.append(kwargs)
+            expected = expected_by_target[target_asset_paths[0]]
+            return {
+                "summary": {
+                    "directConsumerCount": expected["directConsumerCount"],
+                    "indirectConsumerCount": expected.get("indirectConsumerCount", 0),
+                    "visitedEdgeCount": expected["visitedEdgeCount"],
+                },
+                "risks": [{"kind": kind} for kind in expected.get("riskKinds", [])],
+                "runtimeSensitiveConsumers": {"classificationState": expected.get("runtimeSensitivityState", "")},
+            }
+
+    adapter = object.__new__(RealFixtureAdapter)
+    adapter.config = type(
+        "_Config",
+        (),
+        {"reforge_database": Path("reforge.sqlite3")},
+    )()
+    with patch(
+        "benchmarks.agent_reliability.real_fixtures.IndexQueryService",
+        return_value=_IndexService(),
+    ) as service_factory:
+        for case in cases:
+            assert adapter._readonly_truth(case) == case["expectedSemanticResult"]
+
+    assert len(cases) == 4
+    assert service_factory.call_count == 4
+    assert len(impact_calls) == 3
+    assert {call["max_depth"] for call in impact_calls} == {1, 2}
+    assert all(
+        call
+        == {
+            "max_depth": call["max_depth"],
+            "max_consumers": 100,
+            "max_edges": 1000,
+            "max_paths": 100,
+            "max_output_tokens": 32768,
+        }
+        for call in impact_calls
+    )
+
+
+def test_t36_fixture_setup_error_detail_is_retained_and_redacted(tmp_path: Path) -> None:
+    secret = "Bearer abcdefghijklmnop"
+
+    class _SetupFailureFixture(FixtureAdapter):
+        def setup(self, case: dict[str, Any], attempt_root: Path) -> FixtureSession:
+            raise ValueError(f"max_consumers must not exceed 100; auth={secret}")
+
+        def capture_after(
+            self,
+            case: dict[str, Any],
+            session: FixtureSession,
+            agent_result: Any,
+        ) -> dict[str, Any]:
+            raise AssertionError("capture_after must not run after setup failure")
+
+        def cleanup(
+            self,
+            case: dict[str, Any],
+            session: FixtureSession,
+        ) -> dict[str, Any]:
+            raise AssertionError("cleanup must not run after setup failure")
+
+    case = _case("r4-readonly-impact-002")
+    case["profiles"] = ["full-r0-r3"]
+    output_root = tmp_path / "Output" / "AgentReliabilityBenchmark" / "run"
+    runner = BenchmarkRunner(
+        tool_root=tmp_path,
+        output_root=output_root,
+        agent=_FakeAgent(),
+        fixture=_SetupFailureFixture(),
+    )
+    result = runner.run(
+        [case],
+        visible_tools_by_profile={"full-r0-r3": ("ue_search",)},
+    )
+
+    attempt = result["attempts"][0]
+    expected_detail = "ValueError: max_consumers must not exceed 100; auth=[REDACTED]"
+    assert attempt["termination"]["reason"] == "fixture-setup-failed:ValueError"
+    assert attempt["termination"]["detail"] == expected_detail
+    assert attempt["diagnostics"][-1] == expected_detail
+    serialized = next((output_root / "attempts").glob("*.json")).read_text(encoding="utf-8")
+    assert secret not in serialized
+    assert expected_detail in serialized
 
 
 class AgentReliabilityBenchmarkTests(unittest.TestCase):

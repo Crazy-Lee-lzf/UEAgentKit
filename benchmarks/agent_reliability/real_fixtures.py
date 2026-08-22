@@ -1076,9 +1076,9 @@ class RealFixtureAdapter(FixtureAdapter):
         impact = service.analyze_change_impact(
             [target],
             max_depth=max_depth,
-            max_consumers=500,
-            max_edges=5000,
-            max_paths=1000,
+            max_consumers=100,
+            max_edges=1000,
+            max_paths=100,
             max_output_tokens=32768,
         )
         summary = impact.get("summary") or {}

@@ -132,10 +132,12 @@ def _run_fixture_preflight(
     seen: set[str] = set()
     for case in cases:
         setup_id = str(case["setupId"])
-        if setup_id in seen:
+        case_id = str(case["caseId"])
+        preflight_key = case_id if case["fixtureProfile"] == "reforge-readonly" else setup_id
+        if preflight_key in seen:
             continue
-        seen.add(setup_id)
-        attempt_root = output_root / "fixtures" / setup_id
+        seen.add(preflight_key)
+        attempt_root = output_root / "fixtures" / preflight_key
         try:
             session = fixture.setup(case, attempt_root)
         except Exception as exc:

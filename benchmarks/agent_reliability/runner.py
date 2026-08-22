@@ -9,7 +9,7 @@ from .adapters import AgentAdapter, AgentRunRequest, AgentRunResult, UNAVAILABLE
 from .claims import parse_agent_claim
 from .fixtures import FixtureAdapter
 from .grader import GroundTruthGrader
-from .io import fingerprint_json, write_json
+from .io import fingerprint_json, redact, write_json
 from .metrics import MetricsAggregator
 
 
@@ -115,8 +115,13 @@ class BenchmarkRunner:
         profile: str,
         attempt_index: int,
         reason: str,
+        *,
+        detail: str = "",
     ) -> dict[str, Any]:
         result = _empty_result(reason)
+        safe_detail = str(redact(detail)) if detail else ""
+        if safe_detail:
+            result.diagnostics.append(safe_detail)
         cleanup = {"passed": False, "exactRecovery": False, "reason": reason}
         grade = self.grader.grade(
             case,
@@ -143,6 +148,7 @@ class BenchmarkRunner:
             "fairness": {},
             "diagnostics": result.diagnostics,
         }
+        attempt["termination"]["detail"] = safe_detail
         self._record_attempt(attempt, {}, {}, cleanup)
         return attempt
 
@@ -294,6 +300,7 @@ class BenchmarkRunner:
                         profile,
                         attempt_index,
                         f"fixture-setup-failed:{type(exc).__name__}",
+                        detail=f"{type(exc).__name__}: {exc}",
                     )
                     cleanup_failed = mutation_case
                 attempts.append(attempt)
