@@ -160,7 +160,13 @@ R4（Real Agent Benchmark v1）已完成。设计见 [`Plans/AGENT_RELIABILITY_R
 - Full 的绝对 Trusted Completion 仍只有 `26.67%`，False Success / all cases 仍为 `33.33%`；stale detection 比 Legacy 差，R0–R3 只能判定为局部有效。
 - 最大 raw failure 类是 `trust-evidence-gap=8`；Agent/tool/context/harness 类合计 8。Value Provenance 与 Execution Trace 均为 0 次 primary failure。
 - Reference derived-edge normalization 与 `trustVerdict` exact-string contract 会保守压低部分指标，结果文档同时报告 raw grader 数字与审计限定。
-- 数据不支持立即进入 R5。下一步先修 Agent guidance / Tool ergonomics / result contract、Trust Evidence 闭环、Blueprint 窄 rollback，并用 paired repeat anchors 做 R4.1。
+- 数据不支持立即进入 R5。R5 继续冻结。
+
+### 0.8.x Closeout（当前阶段，2026-08-22）
+
+当前不新增新的 R 编号里程碑，改为一次性完成 0.8.x 收口：`C0 Agent UX / Result Contract` → `C1 Trust Evidence` → `C2 Narrow Reliability / Recovery` → `C3 R4.1 Repeat` → `C4 Read/Write Capability Gap Audit` → `C5 Must-fix Gaps` → `C6 Release Review / Scope Freeze`。完整 Handoff：[`Handoffs/AGENT_RELIABILITY_0_8_CLOSEOUT_FULL_HANDOFF_20260822.md`](Handoffs/AGENT_RELIABILITY_0_8_CLOSEOUT_FULL_HANDOFF_20260822.md)。
+
+读写能力审计只补真实 Benchmark / Reforge 工作流证明的高价值窄缺口，不回到 Generic Writer coverage race；C5 允许 0 个新增 Tool。只有后续真实数据反复出现 Value Provenance / Execution Trace 阻塞，R5 才解冻。
 
 R4 证明首批目标不应转回“新增大量 UE 写入”：Agent 仍需要更稳定地回答应该改什么、会影响什么、以及哪些证据足以支持结果。保存成功和独立重载成功只属于 Persistence Evidence，不自动等同于整个任务成功。
 

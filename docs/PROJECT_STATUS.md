@@ -403,7 +403,7 @@ R4 已用跨 Data Asset / DataTable / Material Instance / Blueprint / Context / 
 
 
 
-**当前执行状态（2026-08-22）**：R0–R4 已完成并停在 R5 之前。正式 R4 v1 证明 R0–R3 在 high-fanout、2-hop impact 和 reference-sensitive safe block 上有真实收益，但绝对可靠性仍不足；raw failure taxonomy 没有 Value Provenance 或 Execution Trace 信号。下一步优先 Agent guidance / Tool ergonomics / result contract、Trust Evidence 闭环、Blueprint 窄 rollback 与 R4.1 repeat measurement；**R5 尚未开始，也不应现在自动启动**。R4 结果、single-attempt 限制、grader 审计限定与数据驱动优先级见 [`Plans/AGENT_RELIABILITY_R4_BENCHMARK_RESULT_20260820.md`](Plans/AGENT_RELIABILITY_R4_BENCHMARK_RESULT_20260820.md)。
+**当前执行状态（2026-08-22）**：R0–R4 已完成，当前进入 **0.8.x Closeout**，不进入 R5。Closeout 一次性覆盖 Agent guidance / result contract、Trust Evidence 闭环、Blueprint 窄 rollback 与 reference grader normalization、R4.1 paired repeats、Read/Write Capability Gap Audit、Must-fix 能力补齐和 0.8 Release Review / Scope Freeze。完整执行边界见 [`Handoffs/AGENT_RELIABILITY_0_8_CLOSEOUT_FULL_HANDOFF_20260822.md`](Handoffs/AGENT_RELIABILITY_0_8_CLOSEOUT_FULL_HANDOFF_20260822.md)。R5 当前为 benchmark-evidence-driven deferred：只有后续真实 Case 反复出现 Value Provenance / Execution Trace primary blocker 才解冻。
 
 
 ### P2：高价值专用写入

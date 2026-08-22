@@ -1,11 +1,11 @@
 # UEAgentKit 0.8.x Context / Analysis / Agent Reliability 执行计划
 
 > 更新时间：2026-08-22
-> 当前实现基线：`feature/agent-reliability`；R4 正式运行代码基线为 `3d539d2`
-> 当前状态：R0–R4 已完成。R4 Real Agent Benchmark v1 已完成 15 个 Full + 9 个 matched Legacy attempt，并形成确定性结果与限制审计。R5 未开始，当前数据不支持立即进入 R5。
+> 当前实现基线：`feature/agent-reliability@d851122`（R4 Real Agent Benchmark v1 已完成）
+> 当前状态：R0–R4 已完成。当前进入 **0.8.x Closeout**：优先修 R4 暴露的 Agent guidance / result contract、Trust Evidence 闭环和窄 recovery 问题，再做 R4.1 repeat、读写能力缺口审计、Must-fix 补齐与 Release Review。R5 继续冻结。
 > 建议开发分支：`feature/agent-reliability`（已创建，勿 Push）
 > 横向长期分支：`feature/performance-benchmarks`
-> 执行方式：按大里程碑推进。R4 设计与正式结果见 `docs/Plans/AGENT_RELIABILITY_R4_BENCHMARK_DESIGN_20260820.md`、`docs/Plans/AGENT_RELIABILITY_R4_BENCHMARK_RESULT_20260820.md`；本轮停止在 R5 实现之前。
+> 执行方式：Closeout 按一个完整大任务一次性推进，完整边界见 `docs/Handoffs/AGENT_RELIABILITY_0_8_CLOSEOUT_FULL_HANDOFF_20260822.md`；R4 正式结果见 `docs/Plans/AGENT_RELIABILITY_R4_BENCHMARK_RESULT_20260820.md`。
 
 ---
 
@@ -582,6 +582,32 @@ R4 v1 已按完整 Handoff 完成：真实 Agent Runner、版本化 Case、确�
 Paired Full 相对 Legacy 的 Task Completion `+44.44 pp`、Trusted Completion `+22.22 pp`、False Success `-11.11 pp`、Wrong Asset `-22.22 pp`、Tool Calls `-4.11`。但 Full 绝对 Trusted Completion 仅 `26.67%`，False Success / all cases 为 `33.33%`，stale Case 退化。正式 raw taxonomy 以 `trust-evidence-gap=8` 和 Agent/tool/context/harness 类合计 8 为主，Value Provenance / Execution Trace 均为 0。
 
 因此 R5 继续冻结。先修 Agent guidance / Tool ergonomics / result contract、Trust Evidence 闭环、Blueprint 窄 rollback 与 benchmark grader contract，再用 paired repeat anchors 做 R4.1。完整结果与审计限定：`docs/Plans/AGENT_RELIABILITY_R4_BENCHMARK_RESULT_20260820.md`。
+
+---
+
+# 0.8.x Closeout：Reliability Fixes + Capability Audit + Release Review
+
+R4 已证明 R0–R3 有真实收益，但也证明当前绝对 Trusted Completion 仍不足。0.8.x 不再机械进入 R5，而是先完成一次数据驱动的产品收口。
+
+完整执行边界：
+
+`docs/Handoffs/AGENT_RELIABILITY_0_8_CLOSEOUT_FULL_HANDOFF_20260822.md`
+
+当前 Closeout 固定为：
+
+```text
+C0  Agent UX / Result Contract / Guidance
+C1  Trust Evidence Closed Loop
+C2  Narrow Reliability / Recovery Fixes
+C3  R4.1 Repeat Measurement
+C4  Read / Write Capability Gap Audit
+C5  Must-fix Capability Gaps
+C6  0.8 Release Review / Scope Freeze
+```
+
+读写审计不以 Tool 数量或竞品覆盖率为目标；只有 R4/R4.1、Reforge 高频任务或可靠性闭环能证明价值的窄缺口才允许进入 C5。C5 可以合法得到“0 个新 Tool”的结论。
+
+0.8.x 完成定义改为：R0–R4 完成 + Closeout C0–C6 完成 + Full Regression + Release Docs + Scope Freeze。R5 只有在后续真实数据反复出现 `value-provenance-gap` 或 `execution-trace-gap` 时才解冻。
 
 ---
 
