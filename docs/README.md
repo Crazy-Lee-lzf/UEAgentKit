@@ -8,6 +8,7 @@
 - [`PROJECT_STATUS_EN.md`](PROJECT_STATUS_EN.md)：English project status.
 - [Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md](Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md)：0.8 capability closeout 之后的统一开发入口，覆盖 Editor-resident Writer、性能、Agent UX、维护/CI 与 0.9 协作。
 - [Plans/UEAGENTKIT_EDITOR_RESIDENT_WRITER_W0_W1_DETAILED_PLAN_20260823.md](Plans/UEAGENTKIT_EDITOR_RESIDENT_WRITER_W0_W1_DETAILED_PLAN_20260823.md)：下一阶段 W0/W1 的直接执行计划，覆盖 Writer latency baseline、Blueprint 三个窄 Live Apply、compile recovery、测试与 commit 门禁。
+- [Plans/UEAGENTKIT_EDITOR_RESIDENT_WRITER_W1_ACCEPTANCE_PLAN_20260824.md](Plans/UEAGENTKIT_EDITOR_RESIDENT_WRITER_W1_ACCEPTANCE_PLAN_20260824.md)：W1 implementation 完成后的验收执行文档，覆盖 B3 fixture、真实 UE5.6 resident smoke、Undo/Discard、compile recovery、Save/Verify、Semantic Diff/Trust 与 Exit Gate。
 - [`Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md`](Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md)：R4.1 24-attempt paired repeat 的完整结果、成本、稳定性与失败限定。
 - [`Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`](Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md)：105 个公共 Tool、18 个 Patch Operation 的 Read/Write Gap Audit 与 Scope Freeze。
 - [`Plans/UEAGENTKIT_0_8_RELEASE_REVIEW_20260823.md`](Plans/UEAGENTKIT_0_8_RELEASE_REVIEW_20260823.md)：0.8 capability Release Review、known limitations 与正式发布边界。

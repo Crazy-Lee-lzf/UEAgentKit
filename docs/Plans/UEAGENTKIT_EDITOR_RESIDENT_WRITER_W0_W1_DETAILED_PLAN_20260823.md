@@ -1,5 +1,9 @@
 # UEAgentKit Editor-Resident Writer W0/W1 Detailed Plan
 
+> Execution update (2026-08-24): W0 baseline checkpoint `142ca1e` and W1 implementation checkpoint `e2c0994` are complete. W1 is now in acceptance-pending state; W2 must not start before the acceptance gate closes.
+>
+> Detailed acceptance plan: [`UEAGENTKIT_EDITOR_RESIDENT_WRITER_W1_ACCEPTANCE_PLAN_20260824.md`](UEAGENTKIT_EDITOR_RESIDENT_WRITER_W1_ACCEPTANCE_PLAN_20260824.md)
+
 > 日期：2026-08-23
 >
 > 文档基线：`feature/agent-reliability@9010122`
