@@ -7,6 +7,7 @@ import secrets
 import shutil
 import subprocess
 import threading
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -107,6 +108,7 @@ class ProcessResult:
     exit_code: int
     stdout: str
     stderr: str
+    elapsed_ms: float = 0.0
 
 
 ProcessRunner = Callable[[list[str], Path, int], ProcessResult]
@@ -498,6 +500,7 @@ class AuthorizedSaveRollbackDryRunRecord:
 
 
 def _default_process_runner(arguments: list[str], cwd: Path, timeout_seconds: int) -> ProcessResult:
+    started = time.perf_counter()
     completed = subprocess.run(
         arguments,
         cwd=str(cwd),
@@ -509,7 +512,8 @@ def _default_process_runner(arguments: list[str], cwd: Path, timeout_seconds: in
         timeout=timeout_seconds,
         check=False,
     )
-    return ProcessResult(completed.returncode, completed.stdout, completed.stderr)
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
+    return ProcessResult(completed.returncode, completed.stdout, completed.stderr, elapsed_ms)
 
 
 def _json_bytes(value: Any) -> bytes:
