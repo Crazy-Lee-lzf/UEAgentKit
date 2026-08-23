@@ -26,6 +26,13 @@ namespace
 		{
 		}
 
+		void UpdateTarget(const FResolvedBlueprintTarget& NewTarget)
+		{
+			OwnerObject = NewTarget.OwnerObject;
+			Property = NewTarget.Property;
+			ValueAddress = NewTarget.ValueAddress;
+		}
+
 		bool CaptureSnapshot() override
 		{
 			return Snapshot.Capture(Property, ValueAddress);
@@ -129,6 +136,11 @@ namespace
 			: Blueprint(InBlueprint)
 			, Pin(InPin)
 		{
+		}
+
+		void UpdatePin(UEdGraphPin* NewPin)
+		{
+			Pin = NewPin;
 		}
 
 		bool CaptureSnapshot() override
@@ -334,9 +346,25 @@ namespace
 		Context.AssetPath = AssetPath;
 		Context.PropertyPath = Target.Description;
 		Context.Value = Value;
-		Context.CompileAfterWrite = [Blueprint](FString& CompileError) -> bool
+		Context.CompileAfterWrite = [Blueprint, &IO, Operation, TargetObject](FString& CompileError) -> bool
 		{
-			return CompileBlueprintLambda(Blueprint, CompileError);
+			if (!CompileBlueprintLambda(Blueprint, CompileError))
+			{
+				return false;
+			}
+			FResolvedBlueprintTarget RefreshedTarget;
+			if (!ResolveBlueprintTarget(Blueprint, Operation, TargetObject, RefreshedTarget, CompileError))
+			{
+				CompileError = TEXT("Blueprint compile succeeded but the target could not be re-resolved: ") + CompileError;
+				return false;
+			}
+			if (RefreshedTarget.Kind != FResolvedBlueprintTarget::EKind::Property)
+			{
+				CompileError = TEXT("Blueprint compile succeeded but the target kind changed.");
+				return false;
+			}
+			static_cast<FLiveWriteBlueprintPropertyIO*>(IO.Get())->UpdateTarget(RefreshedTarget);
+			return true;
 		};
 		Context.RecompileBaselineAfterRestore = [Blueprint](FString& CompileError) -> bool
 		{
@@ -473,9 +501,25 @@ namespace
 		TransactionContext.AssetPath = Request.AssetPath;
 		TransactionContext.PropertyPath = Target.Description;
 		TransactionContext.Value = Request.Value;
-		TransactionContext.CompileAfterWrite = [Blueprint](FString& CompileError) -> bool
+		TransactionContext.CompileAfterWrite = [Blueprint, &IO, Request](FString& CompileError) -> bool
 		{
-			return CompileBlueprintLambda(Blueprint, CompileError);
+			if (!CompileBlueprintLambda(Blueprint, CompileError))
+			{
+				return false;
+			}
+			FResolvedBlueprintTarget RefreshedTarget;
+			if (!ResolveBlueprintTarget(Blueprint, TEXT("setPinDefault"), Request.Target, RefreshedTarget, CompileError))
+			{
+				CompileError = TEXT("Blueprint compile succeeded but the pin could not be re-resolved: ") + CompileError;
+				return false;
+			}
+			if (RefreshedTarget.Kind != FResolvedBlueprintTarget::EKind::Pin || RefreshedTarget.Pin == nullptr)
+			{
+				CompileError = TEXT("Blueprint compile succeeded but the pin target kind changed.");
+				return false;
+			}
+			static_cast<FLiveWriteBlueprintPinIO*>(IO.Get())->UpdatePin(RefreshedTarget.Pin);
+			return true;
 		};
 		TransactionContext.RecompileBaselineAfterRestore = [Blueprint](FString& CompileError) -> bool
 		{

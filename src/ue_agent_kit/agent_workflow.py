@@ -386,6 +386,18 @@ def _live_write_exported_matches(expected: Any, exported: Any) -> bool:
         return len(expected) == len(exported) and all(
             _live_write_exported_matches(left, right) for left, right in zip(expected, exported)
         )
+    if isinstance(expected, bool) and isinstance(exported, str):
+        return exported.lower() in {"true", "false"} and (exported.lower() == "true") == expected
+    if isinstance(expected, (int, float)) and isinstance(exported, str):
+        try:
+            return float(exported) == float(expected)
+        except (TypeError, ValueError):
+            return False
+    if isinstance(exported, (int, float)) and isinstance(expected, str):
+        try:
+            return float(expected) == float(exported)
+        except (TypeError, ValueError):
+            return False
     return expected == exported
 
 
@@ -1884,7 +1896,7 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 return candidate.resolve()
         raise WorkflowError("snapshot-refresh-package-missing", "The exported asset Package file is missing from the fixed project.")
 
-    def _export_refresh_candidate(self, asset_path: str, output: Path) -> dict[str, Any]:
+    def _export_refresh_candidate(self, asset_path: str, output: Path, *, include_blueprint: bool = False) -> dict[str, Any]:
         if output.exists():
             shutil.rmtree(output)
         output.mkdir(parents=True, exist_ok=False)
@@ -1896,6 +1908,7 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 "-ProjectPath", str(self.config.project_path),
                 "-Asset", package_path,
                 "-Output", str(output),
+                *(["-IncludeBlueprints"] if include_blueprint else []),
             ],
             stage="snapshot-refresh-export",
             report_path=output / "manifest.json",
@@ -3571,7 +3584,11 @@ class PatchWorkflowService(RetargetWorkflowMixin):
 
             after_revision = "sha256:" + sha256_file(package_file)
             verification_root = self._safe_work_path("authorized-save", save_receipt, "verify")
-            candidate = self._export_refresh_candidate(asset_path, verification_root)
+            candidate = self._export_refresh_candidate(
+                asset_path,
+                verification_root,
+                include_blueprint=("Blueprint" in asset_class),
+            )
             if candidate.get("revision") != after_revision:
                 raise WorkflowError(
                     "authorized-save-verification-failed",
@@ -4053,14 +4070,29 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 shutil.rmtree(output)
             output.mkdir(parents=True, exist_ok=False)
             asset_package = asset_path.split(".", 1)[0]
-            result = self._run_script(
-                "RunAssetCatalog.ps1",
-                [
+            is_blueprint_live_write = record.operation in {"setVariableDefault", "setComponentProperty", "setPinDefault"}
+            if is_blueprint_live_write:
+                verify_script = "RunExport.ps1"
+                verify_arguments = [
                     "-EngineRoot", str(self.config.engine_root),
                     "-ProjectPath", str(self.config.project_path),
                     "-Asset", asset_package,
                     "-Output", str(output),
-                ],
+                    "-Profile", "full",
+                    "-Format", "json",
+                    "-IncludeUnchangedDefaults",
+                ]
+            else:
+                verify_script = "RunAssetCatalog.ps1"
+                verify_arguments = [
+                    "-EngineRoot", str(self.config.engine_root),
+                    "-ProjectPath", str(self.config.project_path),
+                    "-Asset", asset_package,
+                    "-Output", str(output),
+                ]
+            result = self._run_script(
+                verify_script,
+                verify_arguments,
                 stage="live-write-verify-export",
                 report_path=output / "manifest.json",
             )
