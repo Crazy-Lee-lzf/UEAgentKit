@@ -8,7 +8,7 @@ UE Agent Kit 是一套面向 Unreal Engine 的开源资产分析、索引与受�
 
 当前已发布版本为 **0.7.0**，支持 **Unreal Engine 5.6**。本版本正式集成 Realtime Foundation、注册式 Live Editor Write、Schema v3 Knowledge Tree/Active Work、渐进式 Context、分帧批量任务、持久化 Change Set，以及完整 Transaction/Evidence、Undo/Discard、授权保存与独立验证闭环。
 
-> **当前状态**：0.7.0 已在本地 `main` 收口发布。当前 `feature/live-editor-realtime-io` 未启用 Memory 时为 Offline 5、Live 32、Workflow 41、Combined 68 Tool；启用固定 Project Memory 后为 17、44、53、80 Tool。`feature/live-editor-realtime-io` 与 `feature/memory-context` 继续作为长期并行分支；下一阶段为 0.8.0-dev Context/Analysis 与大型项目性能基准。
+> **当前状态**：最新正式发布仍是 0.7.0。`feature/agent-reliability` 上的 0.8.x Context / Analysis / Agent Reliability capability scope 已完成本地 Closeout：R0–R4、R4.1 repeat、Read/Write Gap Audit 与 Scope Freeze 均已有确定性证据；0 Must-fix new tools，R5 继续由 benchmark evidence 延期。未启用 Memory 时为 Offline 10、Live 43、Workflow-only 60、Live + Workflow 93 Tool；启用固定 Project Memory 后分别为 22、55、72、105。本轮未修改 0.7.0 published version、Tag 或 Release 产物。
 
 > **AI Generated**：本项目的代码和文档主要由 AI 生成，并通过人工审查、UE 5.6 编译、自动化测试和真实工程回归验证。
 
@@ -270,7 +270,7 @@ scripts\TestMcpSnapshotRefresh.cmd ^
   -ProjectPath "<TEST_PROJECT>.uproject"
 ```
 
-服务器对 MCP Client 仍只使用本地 `stdio`。未启用 Memory 时，Offline、Live、Workflow、Combined 分别提供 5、27、31、53 个 Tool；启用固定 Project Memory 后分别为 17、39、43、65。实时路径提供有界 Editor Context、Output Log、编译诊断、当前 Graph/Node、分帧 `scanCurrentWorld`、Batch 状态/分页详情与持久化 Change Set。`ue_apply_asset_property_live` 通过注册式资产域执行器支持 12 个受控 Operation，并继续复用 Plan、Policy、Revision、Transaction、精确确认、Undo/Discard、授权单资产保存和独立 Verify；不会开放任意 SQL、Shell、Python、UObject Method、自动保存或 Save All。完整契约见 [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md)、[`spec/LIVE_EDITOR_BRIDGE.md`](spec/LIVE_EDITOR_BRIDGE.md) 与 [`spec/INDEX_FRESHNESS.md`](spec/INDEX_FRESHNESS.md)。
+服务器对 MCP Client 仍只使用本地 `stdio`。未启用 Memory 时，Offline、Live、Workflow-only、Live + Workflow 分别提供 10、43、60、93 个 Tool；启用固定 Project Memory 后分别为 22、55、72、105。实时路径提供有界 Editor Context、Output Log、编译诊断、当前 Graph/Node、分帧 `scanCurrentWorld`、Batch 状态/分页详情与持久化 Change Set；R0–R3 额外提供 Task Context、Impact Analysis、Semantic Diff、Verification Plan 与 Trust Verdict。`ue_apply_asset_property_live` 通过注册式资产域执行器支持受控 Operation，并继续复用 Plan、Policy、Revision、Transaction、精确确认、Undo/Discard、授权单资产保存和独立 Verify；不会开放任意 SQL、Shell、Python、UObject Method、自动保存或 Save All。完整契约见 [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md)、[`spec/LIVE_EDITOR_BRIDGE.md`](spec/LIVE_EDITOR_BRIDGE.md) 与 [`spec/INDEX_FRESHNESS.md`](spec/INDEX_FRESHNESS.md)。
 
 ```bat
 claude mcp add --transport stdio --scope project ue-agent-kit -- ^
@@ -329,6 +329,10 @@ Output\Blueprints\
 - [`docs/RELEASE_0.4.4.md`](docs/RELEASE_0.4.4.md)：0.4.4 正式发布范围、验证结果和升级说明。
 - [`CHANGELOG.md`](CHANGELOG.md)：版本变更摘要。
 - [`docs/ROADMAP.md`](docs/ROADMAP.md)：0.7.0 已发布能力、0.8.0 Context/Analysis 与 0.9.0 协作方向。
+- [`docs/Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md`](docs/Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md)：R4.1 24-attempt paired repeat 的完整分布、成本与已知限制。
+- [`docs/Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`](docs/Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md)：全部公共 Tool / Operation 的 0.8 Read/Write Gap Audit 与 Scope Freeze。
+- [`docs/Plans/UEAGENTKIT_0_8_RELEASE_REVIEW_20260823.md`](docs/Plans/UEAGENTKIT_0_8_RELEASE_REVIEW_20260823.md)：0.8 capability acceptance、正式发布边界与最终门禁。
+- [`docs/Handoffs/UEAGENTKIT_0_8_CAPABILITY_CLOSEOUT_HANDOFF_20260823.md`](docs/Handoffs/UEAGENTKIT_0_8_CAPABILITY_CLOSEOUT_HANDOFF_20260823.md)：0.8 capability closeout 的最终状态、门禁证据与后续接手边界。
 - [`spec/BPCTX_FORMAT.md`](spec/BPCTX_FORMAT.md)：BPCTX/1 格式规范。
 - [`spec/PATCH_SCHEMA.md`](spec/PATCH_SCHEMA.md)：声明式 Patch、Policy、Revision 和纯校验安全边界。
 - [`spec/BACKUP_AND_ROLLBACK.md`](spec/BACKUP_AND_ROLLBACK.md)：Backup Manifest、rollback、审计回执和恢复验证规范。

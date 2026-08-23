@@ -376,7 +376,7 @@ Schema v3 Knowledge Tree、Active Work、五级渐进式披露、按需 Evidence
 
 测试工程项目目录目标 160–180 GB，硬上限 200 GB；总工作集不得超过 260 GB，E 盘剩余空间低于 50 GB 时自动停止生成。完整方案见 [`PERFORMANCE_TEST_PLAN.md`](PERFORMANCE_TEST_PLAN.md)。
 
-### P1：0.8.x Context / Analysis / Agent Reliability（当前主线）
+### P1：0.8.x Context / Analysis / Agent Reliability（capability scope 已完成）
 
 基础设施阶段已经基本完成，本阶段不再以新增 Tool / Asset Class / Writer 数量作为主进度。推荐在 `feature/agent-reliability` 上按可独立提交、可中断的里程碑推进，详细计划见 [`Plans/AGENT_RELIABILITY_CONTEXT_ANALYSIS_PLAN_20260815.md`](Plans/AGENT_RELIABILITY_CONTEXT_ANALYSIS_PLAN_20260815.md)。
 
@@ -403,7 +403,9 @@ R4 已用跨 Data Asset / DataTable / Material Instance / Blueprint / Context / 
 
 
 
-**当前执行状态（2026-08-22）**：R0–R4 已完成，当前进入 **0.8.x Closeout**，不进入 R5。Closeout 一次性覆盖 Agent guidance / result contract、Trust Evidence 闭环、Blueprint 窄 rollback 与 reference grader normalization、R4.1 paired repeats、Read/Write Capability Gap Audit、Must-fix 能力补齐和 0.8 Release Review / Scope Freeze。完整执行边界见 [`Handoffs/AGENT_RELIABILITY_0_8_CLOSEOUT_FULL_HANDOFF_20260822.md`](Handoffs/AGENT_RELIABILITY_0_8_CLOSEOUT_FULL_HANDOFF_20260822.md)。R5 当前为 benchmark-evidence-driven deferred：只有后续真实 Case 反复出现 Value Provenance / Execution Trace primary blocker 才解冻。
+**当前执行状态（2026-08-23）**：0.8.x Closeout C0–C6 已完成。R4.1 以冻结 fingerprint 运行 4 anchors × 2 profiles × 3 repeats，24/24 retained、12/12 paired fairness matched、0 drift、0 infrastructure failure、24/24 exact recovery。Full stale 与 Blueprint default 均 3/3 Trusted；high-fanout 3/3 越过 direct-only bound，scalar 2/3 将 numeric beforeValue stringify，均作为真实 False Success 保留。结果见 [`Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md`](Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md)。
+
+Read/Write Audit 已分类 105 个公共 Tool 与 18 个 Patch Operation，结论为 `0 Must-fix new tools`；Generic Graph/Actor/Material Graph/Niagara/Sequencer/Control Rig 与 arbitrary script 继续明确延期。Scope Freeze 见 [`Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`](Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md)。R5 保持 `deferred by benchmark evidence`：只有后续真实 Case 反复出现 Value Provenance / Execution Trace primary blocker 才解冻。最新正式发布版本仍为 0.7.0，本次 capability closeout 不修改 published version、Tag 或远端。
 
 
 ### P2：高价值专用写入

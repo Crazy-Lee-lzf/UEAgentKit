@@ -4,7 +4,16 @@ All notable changes to UE Agent Kit are documented here.
 
 ## Unreleased
 
-No changes yet.
+### 0.8.x Context / Analysis / Agent Reliability closeout
+
+- Added deterministic Task Context, bounded reverse-reference Impact Analysis, Change-Set-bound Semantic Diff, Evidence-gated Verification Plans/Trust Verdicts, and a real-agent benchmark with deterministic ground truth across the R0–R4 line.
+- Closed the benchmark result contract with machine-checkable status/trust/conflict/operation enums, exact task `targetAssets` semantics, Change Set identity across write/save/verify/R2/R3, and fail-closed success rules when required evidence is missing.
+- Added a Trust Evidence next-action ladder while preserving the boundary that Trust tools never auto-save, compile, validate, run automation, verify, roll back, or ingest arbitrary evidence.
+- Narrowed Blueprint pin-default normalization to typed empty/zero/false values, normalized only the mechanically derived reference edge authorized by an exact reference mutation, and hardened saved-Blueprint rollback to require exact unloaded/clean/not-open Bridge evidence.
+- Added R4.1 repeat scheduling, alternating Full/Legacy ordering, frozen measurement fingerprints including metrics, failed-attempt retention, drift/mutation fail-closed checks, repeat distributions, ranges, token availability, timeout aggregation, and raw-summary regeneration checks.
+- Retained all 24 formal R4.1 attempts with 12/12 paired fairness matches, zero measurement drift/infrastructure failures, and 24/24 exact recovery. Stale and Blueprint Full anchors reached 3/3 Trusted each; high-fanout bound violations and scalar final-claim typing failures remain documented rather than filtered.
+- Completed a Read/Write Capability Gap Audit covering all 105 public tools and 18 registered Patch Operations. The 0.8 scope freezes with zero must-fix new tools; generic mutation families and R5 Value Provenance/Execution Trace remain evidence-driven deferred work.
+- The latest published version remains 0.7.0. This closeout does not change package/plugin versions, create tags or release artifacts, or push remote state.
 
 ## 0.7.0 — realtime editor and layered memory foundation
 

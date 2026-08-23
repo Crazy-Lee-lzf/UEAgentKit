@@ -8,7 +8,7 @@ UE Agent Kit is an open-source Unreal Engine asset analysis, indexing, and polic
 
 The latest published release is **0.7.0** for **Unreal Engine 5.6**. It formally integrates the Realtime Foundation, registry-driven Live Editor Write, Schema v3 Knowledge Trees and Active Work, progressive Context, frame-stepped batch tasks, durable Change Sets, and the complete Transaction/Evidence, Undo/Discard, authorized-save, and independent-verification workflow.
 
-> **Current status**: 0.7.0 is closed locally on `main`. Without Memory the modes expose 5/27/31/53 tools; fixed Project Memory changes them to 17/39/43/65. The long-lived Realtime and Memory branches remain available for parallel work. The next line is 0.8.0-dev Context/Analysis plus large-project performance baselines.
+> **Current status**: the latest published release remains 0.7.0. The 0.8.x Context / Analysis / Agent Reliability capability scope is locally closed on `feature/agent-reliability`: R0–R4, the R4.1 repeat, the Read/Write Gap Audit, and Scope Freeze all have deterministic evidence. There are 0 must-fix new tools, and R5 remains deferred by benchmark evidence. Without Memory the modes expose 10/43/60/93 tools for Offline/Live/Workflow-only/Live + Workflow; fixed Project Memory changes them to 22/55/72/105. This closeout does not change the published 0.7.0 version, tags, or release artifacts.
 
 > **AI Generated**: Most code and documentation in this project are AI-generated and reviewed through human inspection, UE 5.6 compilation, automated tests, and real-project regression validation.
 
@@ -270,7 +270,7 @@ scripts\TestMcpSnapshotRefresh.cmd ^
   -ProjectPath "<TEST_PROJECT>.uproject"
 ```
 
-The MCP Client still uses local `stdio` only. Without Memory, Offline, Live, Workflow, and Combined expose 5, 27, 31, and 53 tools; fixed Project Memory changes them to 17, 39, 43, and 65. Realtime paths provide bounded Editor Context, Output Log, compile diagnostics, current Graph/Node selection, frame-stepped `scanCurrentWorld`, paged Batch details, and durable Change Sets. `ue_apply_asset_property_live` routes 12 controlled Operations through registry-driven domain executors while preserving Plan, Policy, Revision, Transaction, exact confirmation, Undo/Discard, authorized one-asset saves, and independent Verify. Arbitrary SQL, Shell, Python, UObject methods, automatic saving, and Save All remain unavailable.
+The MCP Client still uses local `stdio` only. Without Memory, Offline, Live, Workflow-only, and Live + Workflow expose 10, 43, 60, and 93 tools; fixed Project Memory changes them to 22, 55, 72, and 105. Realtime paths provide bounded Editor Context, Output Log, compile diagnostics, current Graph/Node selection, frame-stepped `scanCurrentWorld`, paged Batch details, and durable Change Sets; R0–R3 add Task Context, Impact Analysis, Semantic Diff, Verification Plans, and Trust Verdicts. `ue_apply_asset_property_live` routes controlled Operations through registry-driven domain executors while preserving Plan, Policy, Revision, Transaction, exact confirmation, Undo/Discard, authorized one-asset saves, and independent Verify. Arbitrary SQL, Shell, Python, UObject methods, automatic saving, and Save All remain unavailable.
 
 ```bat
 claude mcp add --transport stdio --scope project ue-agent-kit -- ^
@@ -329,6 +329,10 @@ Output\Blueprints\
 - [`docs/RELEASE_0.4.4_EN.md`](docs/RELEASE_0.4.4_EN.md): 0.4.4 release scope, verification, and upgrade notes.
 - [`CHANGELOG.md`](CHANGELOG.md): version history summary.
 - [`docs/ROADMAP_EN.md`](docs/ROADMAP_EN.md): released 0.7.0 capabilities, 0.8.0 Context/Analysis, and 0.9.0 collaboration direction.
+- [`docs/Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md`](docs/Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md): full distributions, costs, and known limitations from the 24-attempt R4.1 paired repeat.
+- [`docs/Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`](docs/Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md): the 0.8 Read/Write Gap Audit and Scope Freeze for every public tool and registered operation.
+- [`docs/Plans/UEAGENTKIT_0_8_RELEASE_REVIEW_20260823.md`](docs/Plans/UEAGENTKIT_0_8_RELEASE_REVIEW_20260823.md): 0.8 capability acceptance, formal-release boundaries, and final engineering gates.
+- [`docs/Handoffs/UEAGENTKIT_0_8_CAPABILITY_CLOSEOUT_HANDOFF_20260823.md`](docs/Handoffs/UEAGENTKIT_0_8_CAPABILITY_CLOSEOUT_HANDOFF_20260823.md): final 0.8 capability closeout state, gate evidence, and continuation boundaries.
 - [`spec/BPCTX_FORMAT.md`](spec/BPCTX_FORMAT.md): BPCTX/1 format specification.
 - [`spec/PATCH_SCHEMA.md`](spec/PATCH_SCHEMA.md): declarative patches, policy, revision checks, and validation-only safety boundaries.
 - [`spec/BACKUP_AND_ROLLBACK.md`](spec/BACKUP_AND_ROLLBACK.md): backup manifest, rollback receipt, and restore-verification contract.

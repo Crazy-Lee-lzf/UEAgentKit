@@ -1,8 +1,8 @@
 # UE Agent Kit 路线图
 
-更新时间：2026-08-20
+更新时间：2026-08-23
 
-当前已发布版本为 **0.7.0**，支持 Unreal Engine 5.6。Realtime Foundation、注册式 Live Editor Write、Schema v3 Memory/Context MVP、分帧 Batch Task 和持久化 Change Set 已正式进入本地发布。`feature/live-editor-realtime-io` 已 **fast-forward 合并进 `main`**（`5eb1759 → 56afc91`，含完整 Realtime Animation Tools 线）；动画功能扩展暂缓，后续只在真实任务或 Benchmark 证明存在高价值缺口时解冻。`feature/performance-benchmarks` 继续作为长期横向性能分支。当前首要目标转为 **0.8.x Context / Analysis / Agent Reliability**：先把现有 Index、Memory、Live Editor、Revision、Change Set 和验证证据组合成任务上下文、影响分析、语义 Diff 与可信结果判断，再由真实 Agent Benchmark 决定下一批 Writer。
+当前已发布版本为 **0.7.0**，支持 Unreal Engine 5.6，正式版本保持不变。`feature/agent-reliability` 上的 **0.8.x Context / Analysis / Agent Reliability capability scope** 已完成本地收口：R0-R4、R4.1 repeat、Read/Write Gap Audit 与 Scope Freeze 均已有确定性证据，Must-fix new tools 为 0，R5 继续 `deferred by benchmark evidence`。本次 closeout 不修改 Package/Plugin version，不创建 Tag 或 Release artifact，也不 Push；正式 0.8 package release 如后续启动，应作为独立流程执行。
 
 ## 总体方向
 
@@ -162,13 +162,15 @@ R4（Real Agent Benchmark v1）已完成。设计见 [`Plans/AGENT_RELIABILITY_R
 - Reference derived-edge normalization 与 `trustVerdict` exact-string contract 会保守压低部分指标，结果文档同时报告 raw grader 数字与审计限定。
 - 数据不支持立即进入 R5。R5 继续冻结。
 
-### 0.8.x Closeout（当前阶段，2026-08-22）
+### 0.8.x Closeout（已完成，2026-08-23）
 
-当前不新增新的 R 编号里程碑，改为一次性完成 0.8.x 收口：`C0 Agent UX / Result Contract` → `C1 Trust Evidence` → `C2 Narrow Reliability / Recovery` → `C3 R4.1 Repeat` → `C4 Read/Write Capability Gap Audit` → `C5 Must-fix Gaps` → `C6 Release Review / Scope Freeze`。完整 Handoff：[`Handoffs/AGENT_RELIABILITY_0_8_CLOSEOUT_FULL_HANDOFF_20260822.md`](Handoffs/AGENT_RELIABILITY_0_8_CLOSEOUT_FULL_HANDOFF_20260822.md)。
+`C0 Agent UX / Result Contract` → `C1 Trust Evidence` → `C2 Narrow Reliability / Recovery` → `C3 R4.1 Repeat` → `C4 Read/Write Capability Gap Audit` → `C5 Must-fix Gaps` → `C6 Release Review / Scope Freeze` 已一次性完成。执行边界见 [`Handoffs/AGENT_RELIABILITY_0_8_CLOSEOUT_FULL_HANDOFF_20260822.md`](Handoffs/AGENT_RELIABILITY_0_8_CLOSEOUT_FULL_HANDOFF_20260822.md)。
 
-读写能力审计只补真实 Benchmark / Reforge 工作流证明的高价值窄缺口，不回到 Generic Writer coverage race；C5 允许 0 个新增 Tool。只有后续真实数据反复出现 Value Provenance / Execution Trace 阻塞，R5 才解冻。
+R4.1 使用冻结 fingerprint 的 high-fanout、stale、Blueprint default、Data Asset scalar 四个 anchor，Full/Legacy 各 3 次，共 24/24 retained、12/12 paired fairness matched、0 measurement drift、0 infrastructure failure、24/24 exact recovery。Full stale 与 Blueprint 均 3/3 Trusted；high-fanout 3/3 因越过 direct-only bound 形成 False Success；scalar 只有 1/3 exact claim Trusted，另两次把 numeric beforeValue stringify。完整分布见 [`Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md`](Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md)。
 
-R4 证明首批目标不应转回“新增大量 UE 写入”：Agent 仍需要更稳定地回答应该改什么、会影响什么、以及哪些证据足以支持结果。保存成功和独立重载成功只属于 Persistence Evidence，不自动等同于整个任务成功。
+Read/Write Audit 已覆盖 105 个公共 Tool 与 18 个 Patch Operation，C5 结论为 `0 Must-fix new tools`。剩余问题属于 Agent bound/value typing、静态证据边界与 Full 写链成本，不是缺 UE Read/Write capability；完整 Scope Freeze 见 [`Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`](Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md)。
+
+0.8 capability scope 已完成本地收口，但最新正式发布版本、Package 与 Plugin Version 仍保持 0.7.0；本阶段没有创建 Tag、Release artifact 或 Push。只有后续真实数据反复出现 Value Provenance / Execution Trace blocker，R5 才解冻。
 
 动画线作为已完成的纵向能力保留，Additive Batch、Composite Mutation、Retarget → P2 一键桥接等非阻塞尾巴默认冻结。Blueprint Graph、Level Actor 通用 CRUD 等新 Writer 同样改为由 Reforge 真实需求或 Agent Benchmark 失败数据驱动。
 

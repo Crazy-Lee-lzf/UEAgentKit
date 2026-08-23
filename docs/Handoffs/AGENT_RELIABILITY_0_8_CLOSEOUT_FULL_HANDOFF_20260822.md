@@ -1,5 +1,15 @@
 # UEAgentKit 0.8.x Closeout Full Handoff
 
+> **完成更新（2026-08-23）**：本 Handoff 定义的 C0–C6 已全部执行完成。Reliability checkpoint 为 `79d4d87`；R4.1 正式运行 24/24 retained、12/12 paired fairness matched、0 drift、0 infrastructure failure、24/24 exact recovery。Capability Audit 结论为 0 Must-fix new tools，R5 继续 `deferred by benchmark evidence`。
+>
+> 正式结果：[`../Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md`](../Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md)
+>
+> 能力审计：[`../Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`](../Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md)
+>
+> 最终交接：[`UEAGENTKIT_0_8_CAPABILITY_CLOSEOUT_HANDOFF_20260823.md`](UEAGENTKIT_0_8_CAPABILITY_CLOSEOUT_HANDOFF_20260823.md)
+>
+> 本文件以下内容保留为执行边界与验收来源，不再表示“当前待执行”。
+
 > 日期：2026-08-22
 > 分支：`feature/agent-reliability`
 > 起始事实基线：`d851122092c86435134debafd05f70e310dcb67a`（R4 Real Agent Benchmark v1 已完成）

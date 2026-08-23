@@ -505,6 +505,25 @@ recovery
 
 Evaluator 重新生成同一 Plan，只消费当前适用 Evidence，不执行 Compile、Validate、Automation、Save、Verify、Rollback 或 Writer。Verdict 规则固定：Required FAIL → `failed`；Required UNKNOWN 或 blocking risk → `insufficient-evidence`；Required 全关闭但 Recommended unresolved/non-blocking risk 存在 → `suspicious`；否则 → scoped `verified`。响应始终报告 verification scope 与 runtime/visual/performance/network/external/runtime-trace 等未覆盖维度；`verified` 不表示普遍正确。
 
+0.8 reliability guidance 固定以下 Evidence Ladder；它是 `nextActions` 协议，不是 Server 内自动编排：
+
+```text
+live write applied
+  -> ue_save_authorized_asset
+persisted but not independently verified
+  -> ue_verify_live_write / ue_verify_asset
+verified persistence, semantic not checked
+  -> ue_analyze_semantic_diff(stage=verified)
+semantic state known, obligations unknown
+  -> ue_build_verification_plan
+required compile / validation / automation unknown
+  -> run the exact registered action tool
+required assertions closed
+  -> ue_evaluate_trust_verdict
+```
+
+Persistence verified、独立 reload 或 Semantic Diff clean 均不能单独升级为整体 success。stale/dirty/policy block、Required FAIL/UNKNOWN 或 scoped Trust 未关闭时，Agent 必须保持 blocked/failed/insufficient-evidence 对应语义，不能因为“成功识别阻断”而输出 success。
+
 R3 直接复用 R2 Semantic Diff 和 R1 Impact Analysis，不复制 Diff Adapter 或 Reference Graph。真实写入要求 verified semantic/persistence/freshness；expected no-op 使用 R2 persisted baseline exact-revision 特例，不伪造 Save/Verify。reference-sensitive operation 固定为 `setAssetReferenceProperty/removeDataTableRow/renameDataTableRow`，其 bounded R1 scope 为 Required，并可将最多 8 个 direct Blueprint consumers 升级为 Required Compile。
 
 ### Session-local Evidence Capture
@@ -518,7 +537,7 @@ ue_validate_folder
 ue_run_automation_test
 ```
 
-契约为 `persistent=false / arbitraryIngest=false / projectBound=true / bounded=true`，最多 256 条。Compile capture 补固定项目 action 前后 disk SHA-256、Session 与 Dirty；Validation/Automation 保留 Validation Evidence 1.0。Automation 的 `revisionCoverage=not-applicable` 只证明 exact test 的 fixed project/session execution，不证明 asset Revision。Server restart 后 Store 丢失，Trust 必须返回 UNKNOWN/insufficient evidence，不能重建 PASS。
+契约为 `persistent=false / arbitraryIngest=false / projectBound=true / bounded=true`，最多 256 条。Compile capture 补固定项目 action 前后 disk SHA-256、Session 与 Dirty；Validation/Automation 保留 Validation Evidence 1.0。Automation 的 `revisionCoverage=not-applicable` 只证明 exact test 的 fixed project/session execution，不证明 asset Revision。Server restart 后 Store 丢失，Trust 必须返回 UNKNOWN/insufficient evidence，不能凭旧 receipt 重建 PASS。允许复用独立 Canonical/Revision persistence evidence，并在新 Session 重跑可安全重复的 exact Compile/Validation/Automation action；不允许导入任意 Evidence JSON。
 
 R3 bounds：affected assets≤8、Assertions≤128、Evidence refs≤128、impact depth≤2。Token 裁剪优先移除 Evidence details、optional assertion details、informational Assertions 和 non-blocking risk messages，保留 Verdict、Required FAIL/UNKNOWN、blocking risk、scope 与 nextActions。
 
@@ -630,6 +649,17 @@ beforeRevision==afterRevision
 
 1. 默认 `mode=DryRun`，验证 Manifest、Policy、当前 Revision 和备份完整性，返回一次性 `rollbackDryRunReceipt`。
 2. `mode=Commit` 要求 Receipt 和精确 `ROLLBACK <applyReceipt>`，执行原子恢复并由独立 UE 进程验证恢复后的 Revision。
+
+Blueprint saved-revision rollback 在 Editor 进程存在时额外 fail closed。只有 Bridge 对目标精确返回以下全部事实，才允许进入恢复：
+
+```text
+loaded=false
+packageDirty=false
+openInAssetEditor=false
+state=not-loaded
+```
+
+任一事实缺失、unknown 或不满足时拒绝 rollback；不得根据进程存在、窗口不可见、资产名或磁盘状态推断内存对象安全。恢复仍要求 Manifest/Policy/current Revision/backup digest/receipt 全部匹配，并在 Commit 后用独立 UE 重载验证 exact restored Revision。
 
 ## 会话锁与失效
 

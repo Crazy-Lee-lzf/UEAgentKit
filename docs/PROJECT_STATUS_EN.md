@@ -2,11 +2,11 @@
 
 
 
-Updated: 2026-08-03
+Updated: 2026-08-23
 
 
 
-This document describes the locally released **0.7.0** line on `main` for Unreal Engine 5.6. Schema v3 Knowledge Trees, Active Work, progressive Context, the Realtime Foundation, Batch/Change Sets, and expanded Live Editor Write are included in the local release. The long-lived Realtime and Memory branches remain available for parallel work after synchronizing from `main`.
+The latest published line remains **0.7.0** on `main` for Unreal Engine 5.6. The 0.8.x Context / Analysis / Agent Reliability capability scope is locally closed on `feature/agent-reliability`, while the package/plugin version, tags, release artifacts, and remote branches remain unchanged.
 
 
 
@@ -40,19 +40,19 @@ The project is therefore closer to a safe project-knowledge layer plus a verifie
 
 Mode                 Without Memory    With Memory
 
-Offline                     5              17
+Offline                    10              22
 
-Live                       27              39
+Live                       43              55
 
-Workflow                   31              43
+Workflow-only              60              72
 
-Combined                   53              65
+Live + Workflow            93             105
 
 ```
 
 
 
-Tool count is not equivalent to Unreal operation count. Workflow currently includes 12 high-level safe-change entry points, the low-level Patch workflow, Live Editor Write, authorized save, verification, index refresh, and rollback.
+Tool count is not equivalent to Unreal operation count. The registry contains 105 public tools across Query, optional Memory, Live Read/Action, Realtime, and Workflow groups, plus 18 registered Patch Operations. The 0.8 gap audit classifies every entry and identifies zero must-fix new tools.
 
 
 
@@ -295,21 +295,15 @@ Schema v3 Knowledge Trees, Active Work, five-level progressive disclosure, on-de
 
 See [`MEMORY_ARCHITECTURE_EN.md`](MEMORY_ARCHITECTURE_EN.md).
 
-### P1: 0.7.0 Context/Analysis
+### P1: 0.8.x Context / Analysis / Agent Reliability (capability scope complete)
 
+R0–R4 provide deterministic Task Context, bounded Impact Analysis, Change-Set-bound Semantic Diff, Evidence-gated Verification Plans and Trust Verdicts, and a real-agent deterministic benchmark. The C0–C6 closeout added closed result enums and target semantics, Trust next-action guidance, narrow rollback/reference normalization, R4.1 repeat measurement, a complete Read/Write Gap Audit, and Scope Freeze.
 
+R4.1 retained 24/24 attempts across four Full/Legacy anchors, with 12/12 paired fairness matches, no measurement drift, no infrastructure failure, and 24/24 exact recovery. Full achieved 3/3 Trusted stale safe-stops and 3/3 Trusted Blueprint defaults. It also retained 3/3 high-fanout False Success caused by exceeding the direct-only bound, plus two scalar False Success claims caused by stringifying a numeric before-value. See [`Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md`](Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md).
 
-- Automatic task-scoped Context Packs.
+The capability audit covers all 105 public tools and 18 Patch Operations and concludes `0 must-fix new tools`. Generic graph/actor/material-graph/Niagara/Sequencer/Control Rig mutation and arbitrary scripting remain explicitly deferred. See [`Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`](Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md).
 
-- Value-source and execution-chain tracing.
-
-- Change-impact analysis.
-
-- Semantic asset diffs.
-
-- Evidence-backed hypotheses.
-
-- Automatic Change Plans and Verification Plans.
+R5 Value Provenance / Execution Trace remains deferred by benchmark evidence and may reopen only after repeated real cases identify either as the primary blocker.
 
 
 
@@ -331,7 +325,7 @@ Full graph mutation will require stable node/pin identity, structural diffs, com
 
 
 
-### P3: 0.8.0 Collaboration
+### P3: 0.9.0 Collaboration
 
 Use a hybrid deployment: each developer runs a local MCP connected to the local UEAgentKit plugin and editor, while the team shares a separate Knowledge Service. The shared layer is expected to use PostgreSQL/API; local SQLite remains responsible for the asset index, caches, private data, and session data.
 

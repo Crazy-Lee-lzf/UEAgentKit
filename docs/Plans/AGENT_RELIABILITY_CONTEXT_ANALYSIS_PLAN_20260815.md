@@ -1,11 +1,11 @@
 # UEAgentKit 0.8.x Context / Analysis / Agent Reliability 执行计划
 
-> 更新时间：2026-08-22
-> 当前实现基线：`feature/agent-reliability@d851122`（R4 Real Agent Benchmark v1 已完成）
-> 当前状态：R0–R4 已完成。当前进入 **0.8.x Closeout**：优先修 R4 暴露的 Agent guidance / result contract、Trust Evidence 闭环和窄 recovery 问题，再做 R4.1 repeat、读写能力缺口审计、Must-fix 补齐与 Release Review。R5 继续冻结。
+> 更新时间：2026-08-23
+> 当前实现基线：`feature/agent-reliability@79d4d87`（C0–C2 reliability fixes 与 R4.1 measurement contract）
+> 当前状态：R0–R4 与 0.8.x Closeout C0–C6 已完成。R4.1 24-attempt repeat、Capability Gap Audit 与 Scope Freeze 已形成确定性证据；0 Must-fix new tools。R5 继续 `deferred by benchmark evidence`。
 > 建议开发分支：`feature/agent-reliability`（已创建，勿 Push）
 > 横向长期分支：`feature/performance-benchmarks`
-> 执行方式：Closeout 按一个完整大任务一次性推进，完整边界见 `docs/Handoffs/AGENT_RELIABILITY_0_8_CLOSEOUT_FULL_HANDOFF_20260822.md`；R4 正式结果见 `docs/Plans/AGENT_RELIABILITY_R4_BENCHMARK_RESULT_20260820.md`。
+> 执行结果：完整边界见 `docs/Handoffs/AGENT_RELIABILITY_0_8_CLOSEOUT_FULL_HANDOFF_20260822.md`；R4.1 正式结果见 `docs/Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md`；能力审计见 `docs/Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`。
 
 ---
 
@@ -593,21 +593,21 @@ R4 已证明 R0–R3 有真实收益，但也证明当前绝对 Trusted Completi
 
 `docs/Handoffs/AGENT_RELIABILITY_0_8_CLOSEOUT_FULL_HANDOFF_20260822.md`
 
-当前 Closeout 固定为：
+Closeout 完成状态：
 
 ```text
-C0  Agent UX / Result Contract / Guidance
-C1  Trust Evidence Closed Loop
-C2  Narrow Reliability / Recovery Fixes
-C3  R4.1 Repeat Measurement
-C4  Read / Write Capability Gap Audit
-C5  Must-fix Capability Gaps
-C6  0.8 Release Review / Scope Freeze
+C0  Agent UX / Result Contract / Guidance       complete
+C1  Trust Evidence Closed Loop                  complete
+C2  Narrow Reliability / Recovery Fixes         complete
+C3  R4.1 Repeat Measurement                     complete
+C4  Read / Write Capability Gap Audit           complete
+C5  Must-fix Capability Gaps                    complete: 0 new tools
+C6  0.8 Release Review / Scope Freeze           complete
 ```
 
-读写审计不以 Tool 数量或竞品覆盖率为目标；只有 R4/R4.1、Reforge 高频任务或可靠性闭环能证明价值的窄缺口才允许进入 C5。C5 可以合法得到“0 个新 Tool”的结论。
+R4.1 以冻结 fingerprint 运行 high-fanout、stale、Blueprint default、Data Asset scalar 四个 anchor 的 Full/Legacy 各 3 次：24/24 retained、12/12 fairness matched、0 drift、0 infrastructure failure、24/24 exact recovery。stale 与 Blueprint 的 Full 结果均为 3/3 Trusted；high-fanout direct-only bound 和 scalar final value typing 仍不稳定，已作为 known limitations 保留。
 
-0.8.x 完成定义改为：R0–R4 完成 + Closeout C0–C6 完成 + Full Regression + Release Docs + Scope Freeze。R5 只有在后续真实数据反复出现 `value-provenance-gap` 或 `execution-trace-gap` 时才解冻。
+读写审计覆盖全部 105 个公共 Tool 与 18 个 Patch Operation，没有发现 `missing-high-value` 或 `missing-narrow-high-value`；C5 正式结论为 0 Must-fix new tools。0.8 capability scope 已完成本地收口，正式 published version 仍保持 0.7.0。R5 只有在后续真实数据反复出现 `value-provenance-gap` 或 `execution-trace-gap` 时才解冻。
 
 ---
 
@@ -885,7 +885,7 @@ Task Context MVP
 + 至少一版真实跨域 Agent Benchmark
 ```
 
-该停点已于 2026-08-22 达到。R4 v1 复盘结果：Tool Calls 在 paired Case 平均减少 4.11，Wrong Asset 减少 22.22 pp，False Success 减少 11.11 pp；但 Full stale detection 退化、绝对 Trusted Completion 仅 26.67%，且 single-attempt/harness contract 仍限制结论。后续先做 R4.1 质量修复与 repeat measurement，而不是自动进入 R5。
+第一个停点于 2026-08-22 达到；完整 0.8 capability closeout 停点于 2026-08-23 达到。R4.1 证明 stale safe-stop 和 Blueprint verified closed loop 稳定改善，也如实暴露 high-fanout bound 与 scalar claim typing 仍不稳定。失败 taxonomy 没有 Value Provenance / Execution Trace 或新 Writer gap，因此不自动进入 R5。
 
 达到这里后必须复盘：
 

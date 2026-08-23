@@ -6,6 +6,11 @@
 
 - [`PROJECT_STATUS.md`](PROJECT_STATUS.md)：当前已实现能力、明确未实现能力、P0–P3 优先级和后续方向。
 - [`PROJECT_STATUS_EN.md`](PROJECT_STATUS_EN.md)：English project status.
+- [`Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md`](Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md)：R4.1 24-attempt paired repeat 的完整结果、成本、稳定性与失败限定。
+- [`Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`](Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md)：105 个公共 Tool、18 个 Patch Operation 的 Read/Write Gap Audit 与 Scope Freeze。
+- [`Plans/UEAGENTKIT_0_8_RELEASE_REVIEW_20260823.md`](Plans/UEAGENTKIT_0_8_RELEASE_REVIEW_20260823.md)：0.8 capability Release Review、known limitations 与正式发布边界。
+- [`Handoffs/AGENT_RELIABILITY_0_8_CLOSEOUT_FULL_HANDOFF_20260822.md`](Handoffs/AGENT_RELIABILITY_0_8_CLOSEOUT_FULL_HANDOFF_20260822.md)：0.8 Closeout C0–C6 的执行边界与完成入口。
+- [`Handoffs/UEAGENTKIT_0_8_CAPABILITY_CLOSEOUT_HANDOFF_20260823.md`](Handoffs/UEAGENTKIT_0_8_CAPABILITY_CLOSEOUT_HANDOFF_20260823.md)：0.8 capability closeout 的最终状态、完整门禁证据与后续接手边界。
 - [`MEMORY_ARCHITECTURE.md`](MEMORY_ARCHITECTURE.md)：分层知识树、Active Work、渐进式披露、MCP/Skill 分工和多人共享知识服务设计。
 - [`MEMORY_ARCHITECTURE_EN.md`](MEMORY_ARCHITECTURE_EN.md)：English layered memory and collaboration architecture.
 - [`AI_NATIVE_UE_EDITOR.md`](AI_NATIVE_UE_EDITOR.md)：AI 可用 UE5 编辑器的实时 CRUD、项目模型、知识树、性能与风险自适应安全架构。
@@ -74,10 +79,10 @@
 - DataTable 多字段、Row 新增/删除/重命名和 Searchable Name 引用影响门禁。
 - Data Asset Object/Class、Soft Object/Class、Struct、Array、Set 和 Map 稳定值模型。
 - Backup Manifest、独立验证和 Revision-aware rollback。
-- Offline 5、Live 32、Workflow 41、Combined 68 Tool；启用 Memory 后为 17、44、53、80；其中 12 个为高层安全写入入口，Memory 另提供 12 个低层与渐进式高层入口。
-- `main` 的 `ue_apply_asset_property_live` 当前支持 12 个 Data Asset、Material Instance 和 DataTable Operation；统一 Transaction/Evidence、精确 Undo/Discard、授权保存后独立 Verify、可恢复 Journal 和注册式资产域执行器均已完成，但仍不自动保存或开放任意 UObject。
+- Offline 10、Live 43、Workflow-only 60、Live + Workflow 93 Tool；启用 Memory 后分别为 22、55、72、105；全部 105 个公共 Tool 与 18 个 Patch Operation 已完成 capability 分类。
+- `ue_apply_asset_property_live` 通过注册式资产域执行器支持受控 Data Asset、Material Instance 与 DataTable Operation；统一 Transaction/Evidence、精确 Undo/Discard、授权保存后独立 Verify 和可恢复 Journal 均已完成，但仍不自动保存或开放任意 UObject。
 
-0.5.x、0.6.0 与 0.7.0 已完成并进入维护。下一阶段由 Realtime I/O 与 Memory/Context 两条长期分支继续扩展 0.8.0-dev Context/Analysis 和高价值编辑能力；大型项目性能框架作为共享横向能力建设，离线导出与 Commandlet 继续承担全项目索引、批处理、独立验证、回滚和 CI。
+0.5.x、0.6.0 与 0.7.0 已完成并进入维护；最新正式发布仍为 0.7.0。0.8.x Context / Analysis / Agent Reliability capability scope 已在 `feature/agent-reliability` 本地收口，后续只按真实 Case 证据处理 demand-driven backlog；正式 0.8 package release、R5 与远端发布均需独立授权。大型项目性能框架继续作为共享横向能力建设，离线导出与 Commandlet 继续承担全项目索引、批处理、独立验证、回滚和 CI。
 
 只读分析路径不修改资产；Blueprint Patch、Asset Patch 与 MCP Commit 仅在明确授权后执行。
 

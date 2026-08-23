@@ -1,8 +1,8 @@
 # UE Agent Kit Roadmap
 
-Updated: 2026-08-03
+Updated: 2026-08-23
 
-The latest published release is **0.7.0** for Unreal Engine 5.6. The Realtime Foundation, registry-driven Live Editor Write, Schema v3 Memory/Context MVP, frame-stepped Batch Tasks, and durable Change Sets are included in the local release. The long-lived Realtime and Memory branches remain available; the immediate priority is 0.8.0-dev Context/Analysis, common Blueprint edits, and large-project performance baselines.
+The latest published release is **0.7.0** for Unreal Engine 5.6 and remains unchanged. The 0.8.x Context / Analysis / Agent Reliability capability scope is locally closed on `feature/agent-reliability`, including R0–R4, R4.1 repeat evidence, a complete Read/Write Gap Audit, and Scope Freeze. This closeout does not change the published package/plugin version, create a tag, build release artifacts, or push.
 
 ## Direction
 
@@ -11,10 +11,10 @@ UE Agent Kit is evolving into an Unreal Engine project-intelligence layer for AI
 Current server modes:
 
 ```text
-Offline             5 tools (17 with Memory)
-Live               27 tools (39 with Memory)
-Workflow           31 tools (43 with Memory)
-Combined           53 tools (65 with Memory)
+Offline            10 tools (22 with Memory)
+Live               43 tools (55 with Memory)
+Workflow-only      60 tools (72 with Memory)
+Live + Workflow    93 tools (105 with Memory)
 ```
 
 ## Completed foundation
@@ -67,9 +67,15 @@ Version 0.7.0 evolves the 0.6.0 flat record store into a low-maintenance, low-to
 
 Next, bind task IDs, Active Work, Change Sets, Editor Sessions, and Evidence, and establish large-project latency baselines. This work does not block parallel Realtime readers and writers. See [`MEMORY_ARCHITECTURE_EN.md`](MEMORY_ARCHITECTURE_EN.md).
 
-## 0.8.0-dev: context and analysis
+## 0.8.x: context, analysis, and agent reliability (capability scope complete)
 
-Planned capabilities include automatic context packs, value-source and execution tracing, impact analysis, semantic asset diffs, evidence-backed hypotheses, change plans, and verification plans. Unsupported conclusions must be marked as inference.
+R0–R4 now provide deterministic Task Context, bounded Impact Analysis, Change-Set-bound Semantic Diff, Evidence-gated Verification Plans and Trust Verdicts, and a real-agent benchmark with deterministic ground truth. C0–C6 then closed result enums, target semantics, Trust next-action guidance, narrow Blueprint rollback/reference normalization, repeat measurement, the capability audit, and release scope.
+
+R4.1 retained all 24 attempts across four Full/Legacy paired anchors, with 12/12 fairness matches, zero measurement drift, zero infrastructure failures, and 24/24 exact recovery. Full achieved 3/3 Trusted results for both stale safe-stop and Blueprint default. It still produced 3/3 False Success on the direct-only high-fanout anchor and only 1/3 exact Trusted scalar claims because two claims stringified a numeric before-value. These failures remain visible and define known Agent-boundary limitations; they are not evidence for another UE read or write tool.
+
+The audit covers all 105 public tools and 18 registered Patch Operations and concludes `0 must-fix new tools`. See [`Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md`](Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md) and [`Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`](Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md).
+
+Value Provenance and Execution Trace remain deferred by benchmark evidence. R5 may be reopened only after repeated real cases identify either as the primary blocker and show higher expected value than guidance, Writer, or Index fixes.
 
 ## 0.9.0: collaboration and conflict awareness
 
