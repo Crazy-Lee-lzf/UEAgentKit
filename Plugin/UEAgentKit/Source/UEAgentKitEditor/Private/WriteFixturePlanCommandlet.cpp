@@ -8,6 +8,10 @@
 #include "Engine/Blueprint.h"
 #include "Engine/Texture2D.h"
 #include "EdGraphSchema_K2.h"
+#include "EdGraph/EdGraph.h"
+#include "EdGraph/EdGraphNode.h"
+#include "K2Node_CallFunction.h"
+#include "Kismet/KismetMathLibrary.h"
 #include "GameFramework/Actor.h"
 #include "HAL/FileManager.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
@@ -893,6 +897,31 @@ namespace WriteFixturePlanCommandletPrivate
 			{
 				OutError = TEXT("Could not create transaction Blueprint fixture variables.");
 				return nullptr;
+			}
+
+			// Deterministic editable input-pin fixture for setPinDefault acceptance.
+			// The node is a simple integer-add call node; its A/B input pins are
+			// editable, unlinked, and non-readonly by default.
+			if (Blueprint->UbergraphPages.Num() > 0)
+			{
+				UEdGraph* EventGraph = Blueprint->UbergraphPages[0];
+				EventGraph->GraphGuid = FGuid(0x12345678, 0x9ABCDEF0, 0x12345678, 0x9ABCDEF0);
+				UK2Node_CallFunction* AddNode = NewObject<UK2Node_CallFunction>(EventGraph);
+				AddNode->CreateNewGuid();
+				AddNode->NodeGuid = FGuid(0x11111111, 0x22222222, 0x33333333, 0x44444444);
+				AddNode->SetFlags(RF_Transactional);
+				AddNode->PostPlacedNewNode();
+				UFunction* AddIntInt = UKismetMathLibrary::StaticClass()->FindFunctionByName(TEXT("Add_IntInt"));
+				if (AddIntInt != nullptr)
+				{
+					AddNode->SetFromFunction(AddIntInt);
+					AddNode->AllocateDefaultPins();
+					AddNode->NodePosX = -400;
+					AddNode->NodePosY = 200;
+					EventGraph->AddNode(AddNode, true);
+					EventGraph->NotifyGraphChanged();
+					FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+				}
 			}
 		}
 		FAssetRegistryModule::AssetCreated(Blueprint);

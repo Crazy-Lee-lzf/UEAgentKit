@@ -155,11 +155,18 @@ fixture_recovery: ok（Commit 后从 raw backup 精确恢复 baseline sha256:423
 
 说明：当前 DirectHost `BP_TransactionBlueprint` 自带 `DefaultSceneRoot` 组件，因此 B2 可执行。B2 的完整 Semantic Diff / Trust 闭环可在 W1 测试矩阵中补全。
 
-#### B3 — Blueprint pin default（阻塞）
+#### B3 — Blueprint pin default（W1 Acceptance 已补测）
 
-- 当前 DirectHost transaction fixture 的 EventGraph / UserConstructionScript 只有 Event/FunctionEntry 的 **output/exec** pin，没有可写、未连接、非只读的 **input default** pin；
-- 因此 B3 无法在不新增 fixture node 的前提下运行；
-- 这需要 W1 阶段补充一个带可写 input pin 的 fixture（例如算术/函数调用节点），再补测 B3 cold-path baseline。
+- W1 Acceptance 新增确定性 fixture：EventGraph 内 `Add_IntInt` 调用节点，`graphGuid=12345678-9abc-def0-1234-56789abcdef0`，`nodeGuid=11111111-2222-2222-3333-333344444444`，input pin `A` 默认 `0`、`B` 默认 `1`。
+- 当前 cold path 已实测：
+
+```text
+dry_run_ms = 8283.3
+commit_ms   = 8269.9
+cold-start count = 2
+fixture_recovery: ok（Commit 后从 raw backup 精确恢复 baseline sha256:ec11...）
+```
+
 - 代码路径事实不变：`setPinDefault` 当前经 `RunPatch.ps1` → `BlueprintPatchCommandlet`。
 
 ### 4.6 记录模板
