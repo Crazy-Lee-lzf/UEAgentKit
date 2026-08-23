@@ -6,6 +6,7 @@
 
 - [`PROJECT_STATUS.md`](PROJECT_STATUS.md)：当前已实现能力、明确未实现能力、P0–P3 优先级和后续方向。
 - [`PROJECT_STATUS_EN.md`](PROJECT_STATUS_EN.md)：English project status.
+- [Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md](Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md)：0.8 capability closeout 之后的统一开发入口，覆盖 Editor-resident Writer、性能、Agent UX、维护/CI 与 0.9 协作。
 - [`Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md`](Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md)：R4.1 24-attempt paired repeat 的完整结果、成本、稳定性与失败限定。
 - [`Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`](Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md)：105 个公共 Tool、18 个 Patch Operation 的 Read/Write Gap Audit 与 Scope Freeze。
 - [`Plans/UEAGENTKIT_0_8_RELEASE_REVIEW_20260823.md`](Plans/UEAGENTKIT_0_8_RELEASE_REVIEW_20260823.md)：0.8 capability Release Review、known limitations 与正式发布边界。

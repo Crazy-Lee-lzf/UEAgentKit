@@ -65,7 +65,7 @@ Realtime I/O 与 Memory/Context 的完整职责、性能预算、风险分级和
 - MCP 负责存储、检索、去重、Revision stale、自动 Evidence 和维护规则；Skill 只保留约 400–800 Token 的薄使用说明。
 - 已提供 `ue_memory_get_context`、`ue_memory_expand_node`、`ue_memory_get_evidence`、`ue_memory_update_knowledge` 和 `ue_memory_update_work` 高层入口。
 
-下一步只补齐任务 ID、Active Work、Change Set、Editor Session 和 Evidence 的横向绑定，并建立大型项目耗时基准；这些工作不阻塞 Realtime Reader/Writer 并行扩展。完整设计见 [`MEMORY_ARCHITECTURE.md`](MEMORY_ARCHITECTURE.md)。
+0.8 capability scope 已完成 Task Context、Change Set、Editor Session 与 Evidence 的横向绑定；Memory 后续不再扩 Schema，主要保留大型数据量性能、维护与未来团队共享需求。完整设计见 [`MEMORY_ARCHITECTURE.md`](MEMORY_ARCHITECTURE.md)。
 
 ## 横向：大型项目性能基准
 
@@ -87,9 +87,9 @@ Realtime I/O 与 Memory/Context 的完整职责、性能预算、风险分级和
 
 只读诊断能力沿用 `retarget.inspect` 门禁（避免重复 policy 字段冲突）；写入走单资产 `setAnimationScaleFix` / `setAdditiveBasePoseFix` + 批量 `*_batch` 的 Policy / Revision / Snapshot / Undo / Save / Verify / Rollback 闭环。
 
-## 0.8.x：Context / Analysis / Agent Reliability（当前主线）
+## 0.8.x：Context / Analysis / Agent Reliability（capability scope 已完成）
 
-下一阶段不再以 Tool 数量、资产类型数量或 Writer 广度作为主要进度指标。基础设施已经能够提供项目索引、Revision-aware Memory、Live Editor 状态、受控写入、独立验证和 Rollback；当前重点是把这些能力组合成 Agent 可直接使用的高层分析与信任层。
+该阶段已完成 R0–R4、R4.1 与 C0–C6 capability closeout。当前不再继续扩展这一阶段本身；R5 保持冻结。后续产品重点转向 Editor-resident Writer 的低延迟连续写入、大型项目性能与小范围 Agent UX hardening。
 
 推荐开发分支：`feature/agent-reliability`。详细执行计划见 [`Plans/AGENT_RELIABILITY_CONTEXT_ANALYSIS_PLAN_20260815.md`](Plans/AGENT_RELIABILITY_CONTEXT_ANALYSIS_PLAN_20260815.md)。
 
@@ -173,6 +173,25 @@ Read/Write Audit 已覆盖 105 个公共 Tool 与 18 个 Patch Operation，C5 �
 0.8 capability scope 已完成本地收口，但最新正式发布版本、Package 与 Plugin Version 仍保持 0.7.0；本阶段没有创建 Tag、Release artifact 或 Push。只有后续真实数据反复出现 Value Provenance / Execution Trace blocker，R5 才解冻。
 
 动画线作为已完成的纵向能力保留，Additive Batch、Composite Mutation、Retarget → P2 一键桥接等非阻塞尾巴默认冻结。Blueprint Graph、Level Actor 通用 CRUD 等新 Writer 同样改为由 Reforge 真实需求或 Agent Benchmark 失败数据驱动。
+
+## Post-0.8 当前执行顺序
+
+详细计划见 [`Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md`](Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md)。当前推荐顺序：
+
+```text
+1. Writer W0：建立当前写链 cold-start / stage latency 基线
+2. Writer W1：把现有 Blueprint default/component/pin 窄写入迁移到常驻 Editor Bridge
+3. Performance P1/P2：Registry-only + Fast Revision（与 Writer 并行）
+4. Writer W2：Fast Resident Verify
+5. Writer W3：Checkpoint Strong Independent Verify
+6. Performance P3/P4：True Incremental + Index Ingestion
+7. Agent UX：requested-bound binding + operation-discriminated typed result
+8. Writer bounded multi-operation / real-project acceptance
+9. Maintainability：拆分 workflow、Tool Profile、计数单一来源、UE build CI
+10. 0.9 Source Control / Collaboration
+```
+
+正式 0.8 package release 独立执行：只有用户授权后才 merge `main`、更新 published version、构建 artifact、Tag/Push。它不要求等待上述技术计划完成。
 
 ## 0.9.0：协作与冲突感知
 

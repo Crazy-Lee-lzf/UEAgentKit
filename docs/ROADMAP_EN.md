@@ -77,6 +77,10 @@ The audit covers all 105 public tools and 18 registered Patch Operations and con
 
 Value Provenance and Execution Trace remain deferred by benchmark evidence. R5 may be reopened only after repeated real cases identify either as the primary blocker and show higher expected value than guidance, Writer, or Index fixes.
 
+## Post-0.8 execution order
+
+See [`Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md`](Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md) for the current implementation plan. The priority is Editor-resident low-latency write paths, parallel Registry-only/Fast-Revision performance work, checkpointed independent verification, narrow Agent result/bound hardening, then maintainability/CI and 0.9 collaboration. Formal 0.8 package release is a separate user-authorized track and does not block technical development.
+
 ## 0.9.0: collaboration and conflict awareness
 
 Read source-control provider, checkout, lock, owner, and head state; compare local dirty state, disk Revision, and depot/remote head; and model ownership boundaries and multi-user asset conflict risk. The first version may analyze, warn, or block, but must not steal locks or overwrite another developer's work.

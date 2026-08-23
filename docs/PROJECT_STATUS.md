@@ -2,11 +2,11 @@
 
 
 
-更新时间：2026-08-20
+更新时间：2026-08-23
 
 
 
-本文描述已发布的本地 `main` 基线及当前 `feature/agent-reliability` 开发状态，支持 Unreal Engine 5.6。已发布 **0.7.0**（Schema v3 Knowledge Tree、Active Work、渐进式 Context、Realtime Foundation、Batch/Change Set 和扩展后的 Live Editor Write），并在此基础上完成 **Realtime Animation Tools**。`feature/agent-reliability` 当前已完成 R0 Task Context、R1 Impact Analysis、R2 Semantic Diff 与 R3 Verification Plan + Trust Verdict。这些开发态能力尚不表示已经合入 `main`。动画扩展继续暂缓，`feature/performance-benchmarks` 作为长期横向性能分支保留。
+本文描述已发布的本地 `main` 基线及当前开发状态，支持 Unreal Engine 5.6。最新正式发布仍为 **0.7.0**。`feature/agent-reliability@2aadb66` 已完成 0.8.x Context / Analysis / Agent Reliability capability closeout：R0–R4、R4.1 repeat、C0–C6、Read/Write Gap Audit 与 Scope Freeze 均已完成，但尚未合入 `main`，也未执行 0.8 package release。R5 继续 `deferred by benchmark evidence`。后续技术主线转向 Editor-resident Writer 的低延迟连续写入与大型项目性能；详细入口见 [`Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md`](Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md)。
 
 
 
@@ -56,30 +56,19 @@ Tool 数量只表示 MCP 接口数量，不等同于 Unreal Operation 数量。�
 
 
 
-当前 R3 完成门禁基线：
-
-
+当前 0.8 capability closeout 最终门禁基线：
 
 ```text
-
-Python tests                 648/648
-
-JSON Schemas                 3/3
-
-Patch examples               16/16
-
-Ruff / CompileAll            passed
-
-UE5.6 Direct Build           not required（R3 无 C++ 变更）
-
-Memory MCP stdio Smoke       passed
-
-真实 UE5.6 Full Regression   passed
-
-真实 UE5.6 Closed Loop       passed
-
-UTF-8 no BOM / CRLF          passed
-
+Portable unittest            696 passed
+Python full suite             739 passed
+JSON Schemas / Patch examples 3 / 16
+Ruff / compileall             passed
+PowerShell parser             61 / 61
+R4.1 raw summary --check      passed
+Tool / Operation audit        105 / 18
+UTF-8 no BOM / CRLF           passed
+C++ changed                   0
+Direct Build                  not triggered
 ```
 
 
@@ -332,9 +321,21 @@ Live Editor 中已经产生的受控 Dirty 资产，也可以通过 `ue_save_aut
 
 ## 6. 待做功能与优先级
 
+当前后续工作的唯一总入口为 [`Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md`](Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md)。优先级不再按 Tool 数量推进：
+
+```text
+P0  Editor-resident Writer / low-latency write path
+P0  Large-project performance / true incremental（可并行）
+P1  Agent UX reliability tail：requested-bound + typed result
+P2  Maintainability / Tool Profile / UE build CI
+P3  0.9 source-control / collaboration
+```
+
+正式 0.8 package release 是独立授权轨道，不阻塞以上技术开发；R5 继续冻结。
 
 
-### P0A：Realtime Editor CRUD、批量任务与诊断
+
+### 已完成基础 / 当前延伸：Realtime Editor CRUD、批量任务与诊断
 
 Live Editor Write 基础层、Material/DataTable、Undo/Discard、Save→Verify→Memory 闭环和注册式扩展架构已经完成。Realtime Foundation 现已补齐当前 Editor Context、首个分帧 Batch Task 和持久化 Change Set：
 
@@ -345,22 +346,23 @@ Live Editor Write 基础层、Material/DataTable、Undo/Discard、Save→Verify�
 - 活跃 Change Set 不会被容量清理静默删除；Editor 重启后无法重新证明的运行时状态明确降级为 `unknown`。
 - expected no-op 绑定独立 `noop_*` Operation 并直接进入 `no-op` 终态：`liveApplyReceipt=""`、`changeSetBound=true`、`journalPersisted=false`，validation 聚合为 `no-op`、saveState 为 `not-required`；不制造 Transaction、LiveApply journal、授权保存或 Independent Verify。只有固定基线 Canonical Revision 与 Plan `expectedRevision` 完全一致时才有 persisted no-op evidence；无 live/verified no-op stage，同资产 no-op 与真实写混合时保守报告 stage unavailable。
 
-Realtime I/O 基础层已经达到可复用状态，后续进入需求驱动维护，不再以持续扩大 CRUD / Writer 广度或追平 `ue-llm-toolkit` Tool 覆盖面作为首要目标。新的 Writer 只有在 Reforge 真实任务或 Agent Benchmark 反复暴露明确缺口时再增加；每个新增 Operation 仍必须补齐：
+Realtime I/O 基础层已经达到可复用状态，后续进入需求驱动维护，不再以持续扩大 CRUD / Writer 广度或追平 `ue-llm-toolkit` Tool 覆盖面作为首要目标。 Post-0.8 的当前延伸重点不是增加新的 Operation family，而是把现有 Blueprint default/component/pin 窄写入迁移到常驻 Editor Bridge，并将昂贵 Independent Verify 收束到任务 checkpoint；详见 post-0.8 总计划。新的 Writer 只有在 Reforge 真实任务或 Agent Benchmark 反复暴露明确缺口时再增加；每个新增 Operation 仍必须补齐：
 
 1. Python `OperationSpec`、Policy 授权和 Plan Schema。
 2. 对应 C++ 域执行器与 Operation Descriptor。
 3. Snapshot、No-op、失败恢复、Dirty、Undo 和独立 Verify 语义。
 4. 真实 UE5.6 成功、拒绝、恢复和闭环回归。
 
-### P0B：横向 Memory 与任务上下文集成
+### 已完成基础：横向 Memory 与任务上下文集成
 
-Schema v3 Knowledge Tree、Active Work、五级渐进式披露、按需 Evidence 和五个高层 Memory Tool 已完成并集成到本地 `main`。下一步不再扩大底层 Memory Schema，而是补齐与实时开发流程的连接：
+Schema v3 Knowledge Tree、Active Work、五级渐进式披露、按需 Evidence 和五个高层 Memory Tool 已完成；0.8 R0/C1 又补齐了 Task Context、Change Set、Editor Session、Revision 与 Evidence 的确定性关联。因此这条线不再承担新的高层 Context 功能开发。
 
-- 用稳定 ID 关联 `taskId`、`workItemId`、`changeSetId`、`editorSessionId` 和目标资产。
-- 提供一个高层任务上下文入口，组合必要 Memory、Active Work、Editor Context 和当前 Change Set；底层 Tool 保持独立。
-- Change Set 完成后自动绑定验证结果、更新 Active Work，并生成可直接写入 Memory 的 Evidence；长期知识仍需受控确认。
-- 对 Knowledge Tree、FTS、Context Pack 和大型 Memory 数据库建立时间、结果大小与 Token 预算基准。
-- 保持单一薄 `project-memory` Skill，不让 Agent 手工维护数据库一致性。
+剩余工作仅保留：
+
+- Knowledge Tree、FTS、Context Pack 和大型 Memory 数据库的时间、结果大小与 Token 预算基准；
+- Change Set / Active Work / Memory Evidence 的低维护自动收束体验；
+- 未来 0.9 团队共享 Knowledge Service 的项目级知识与冲突模型；
+- 保持单一薄 `project-memory` Skill，不再扩大底层 Memory Schema。
 
 完整实现与剩余边界见 [`MEMORY_ARCHITECTURE.md`](MEMORY_ARCHITECTURE.md)。
 
@@ -414,7 +416,7 @@ Read/Write Audit 已分类 105 个公共 Tool 与 18 个 Patch Operation，结�
 
 
 
-- Blueprint Default、Component、Pin 的 Live Apply 与编译验证。
+- 现有 Blueprint Default、Component、Pin 的 Editor-resident Live Apply 已提升为 Post-0.8 W1，不再作为“新增 Writer family”候选；本池只保留新的 Operation family。
 
 - Enhanced Input / Input Mapping Context。
 

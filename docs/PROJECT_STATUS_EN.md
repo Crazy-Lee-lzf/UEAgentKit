@@ -56,30 +56,19 @@ Tool count is not equivalent to Unreal operation count. The registry contains 10
 
 
 
-Current validation baseline:
-
-
+Current 0.8 capability-closeout validation baseline:
 
 ```text
-
-Python tests                 334/334
-
-JSON Schemas                 3/3
-
-Patch examples               16/16
-
-Ruff / CompileAll            passed
-
-UE5.6 Direct Build           passed
-
-Real Live Editor Write       passed
-
-Real Live Editor Reference Write  passed
-
-Real Live Editor Structured Write  passed
-
-UTF-8 no BOM / CRLF          passed
-
+Portable unittest             696 passed
+Full Python suite              739 passed
+JSON Schemas / Patch examples  3 / 16
+Ruff / compileall              passed
+PowerShell parser              61 / 61
+R4.1 raw summary --check       passed
+Tool / Operation audit         105 / 18
+UTF-8 no BOM / CRLF            passed
+C++ changed                    0
+Direct Build                   not triggered
 ```
 
 
@@ -264,6 +253,8 @@ These are intentional scope and safety boundaries, not documentation omissions.
 
 ## 6. Planned work
 
+The single post-0.8 planning entry point is [`Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md`](Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md). Immediate priorities are Editor-resident low-latency writes and large-project performance, followed by narrow Agent UX hardening, maintainability/CI, and 0.9 collaboration. Formal 0.8 package release remains a separate user-authorized track; R5 remains deferred.
+
 
 
 ### P0A: Realtime Editor CRUD, batch tasks, and diagnostics
@@ -276,22 +267,23 @@ The Live Editor Write foundation, Material/DataTable support, Undo/Discard, Save
 - Change Set schema v2 durably records Task, Editor Session, Operation, Asset, Transaction, Save Receipt, and Validation lifecycle data. It supports `planned/applied/partially_applied/undone/discarded/saved/verified/failed/unknown` and preserves terminal history.
 - Active Change Sets are never silently evicted by capacity cleanup. Runtime state that cannot be re-proven after an Editor restart explicitly degrades to `unknown`.
 
-Realtime I/O is now the primary development track. The goal is broader inspection, mutation, compile, validation, undo, and authorized-save coverage while the Editor remains open, progressively approaching the practical editing breadth demonstrated by `ue-llm-toolkit`. Readers and writers may be developed on separate branches; Memory/Context remains cross-cutting support and must not block realtime CRUD. Every new Operation must add:
+Post-0.8 realtime work remains a primary development track, but the immediate goal is no longer broad Tool-count expansion. It is to migrate already proven narrow Blueprint default/component/pin writes into the resident Editor path, add fast session-local read-back/compile evidence, and move expensive independent verification to explicit task checkpoints without weakening Trust. New Operation families remain demand-driven. Every genuinely new Operation must add:
 
 1. Python `OperationSpec`, Policy authorization, and Plan schema.
 2. A C++ domain executor and Operation Descriptor.
 3. Snapshot, no-op, failure restoration, Dirty, Undo, and independent Verify semantics.
 4. Real UE5.6 success, rejection, restoration, and closeout regressions.
 
-### P0B: Cross-cutting Memory and task-context integration
+### Completed foundation: cross-cutting Memory and task-context integration
 
-Schema v3 Knowledge Trees, Active Work, five-level progressive disclosure, on-demand Evidence, and five high-level Memory tools are implemented and integrated into the local `main` line. The next work is integration rather than further schema expansion:
+Schema v3 Knowledge Trees, Active Work, five-level progressive disclosure, on-demand Evidence, and five high-level Memory tools are complete. The 0.8 R0/C1 work also completed deterministic Task Context and correlation across Change Sets, Editor Sessions, Revisions, and Evidence. This track no longer owns new high-level Context feature work.
 
-- Bind `taskId`, `workItemId`, `changeSetId`, `editorSessionId`, and target assets through stable identifiers.
-- Add one high-level task-context entry point that combines necessary Memory, Active Work, Editor Context, and the current Change Set while keeping lower-level tools independent.
-- On Change Set completion, bind validation results, update Active Work, and emit Memory-ready Evidence; durable knowledge promotion remains controlled.
-- Benchmark Knowledge Tree, FTS, Context Pack, and large Memory database latency, result size, and token budgets.
-- Keep one thin `project-memory` Skill and enforce consistency in the server.
+Remaining work is limited to:
+
+- latency/result-size/token-budget benchmarks for Knowledge Tree, FTS, Context Pack, and large Memory databases;
+- low-maintenance closure from Change Set / Active Work into Memory-ready Evidence;
+- future 0.9 shared Knowledge Service and team-conflict semantics;
+- keeping one thin `project-memory` Skill without expanding the base Memory schema.
 
 See [`MEMORY_ARCHITECTURE_EN.md`](MEMORY_ARCHITECTURE_EN.md).
 
@@ -311,7 +303,7 @@ R5 Value Provenance / Execution Trace remains deferred by benchmark evidence and
 
 
 
-- Live Blueprint default/component/pin changes with compile evidence.
+- Existing Blueprint default/component/pin Editor-resident Live Apply is promoted to the post-0.8 W1 track; this pool is only for genuinely new Operation families.
 
 - Enhanced Input / Input Mapping Context.
 
