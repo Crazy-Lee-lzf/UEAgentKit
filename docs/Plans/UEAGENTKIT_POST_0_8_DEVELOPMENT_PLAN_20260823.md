@@ -92,6 +92,8 @@ push                          no
 
 ## 4. Track B — Editor-Resident Writer / Low-Latency Write Path（最高技术优先级）
 
+W0/W1 可直接执行的详细计划见 [UEAGENTKIT_EDITOR_RESIDENT_WRITER_W0_W1_DETAILED_PLAN_20260823.md](UEAGENTKIT_EDITOR_RESIDENT_WRITER_W0_W1_DETAILED_PLAN_20260823.md)。
+
 ### 4.1 为什么优先
 
 当前产品已经能安全完成多类写入，但大型 UE 项目中仍存在明显的 cold-start 成本：
