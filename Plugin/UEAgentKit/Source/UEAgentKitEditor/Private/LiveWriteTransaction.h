@@ -40,6 +40,11 @@ namespace UEAgentKitLiveWrite
 		FString AssetPath;
 		FString PropertyPath;
 		TSharedPtr<FJsonValue> Value;
+		TFunction<bool(FString&)> CompileAfterWrite;
+		TFunction<bool(FString&)> RecompileBaselineAfterRestore;
+		TArray<FString> CompileErrors;
+		bool bCompileAttempted = false;
+		bool bCompileSucceeded = false;
 	};
 
 	struct FLiveWriteEvidence
@@ -123,7 +128,7 @@ namespace UEAgentKitLiveWrite
 	// On a confirmed changed write the IO keeps its pre-write snapshot and its
 	// ownership moves to the caller so it can be retained for explicit Undo/Discard.
 	bool RunLiveWriteTransaction(
-		const FLiveWriteContext& Context,
+		FLiveWriteContext& Context,
 		TUniquePtr<ILiveWriteValueIO>& IO,
 		FLiveWriteEvidence& OutEvidence,
 		FString& OutErrorCode,

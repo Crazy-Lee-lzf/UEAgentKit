@@ -249,8 +249,49 @@ def _live_write_memory_task_evidence(
     }
 
 
+def _live_write_blueprint_exported_value(canonical: dict[str, Any], record: LiveApplyRecord) -> Any:
+    target = record.target or {}
+    operation = record.operation
+    if operation == "setVariableDefault":
+        name = str(target.get("variableName", ""))
+        for variable in canonical.get("variables") or []:
+            if isinstance(variable, dict) and variable.get("name") == name:
+                return variable.get("defaultValue")
+        return None
+    if operation == "setComponentProperty":
+        component_name = str(target.get("componentName", ""))
+        property_path = str(target.get("propertyPath", ""))
+        for component in canonical.get("components") or []:
+            if not isinstance(component, dict) or component.get("name") != component_name:
+                continue
+            value: Any = component.get("templateOverrides")
+            for segment in property_path.split("."):
+                if not isinstance(value, dict) or segment not in value:
+                    return None
+                value = value[segment]
+            return value
+        return None
+    if operation == "setPinDefault":
+        graph_id = str(target.get("graphGuid", ""))
+        node_id = str(target.get("nodeGuid", ""))
+        pin_name = str(target.get("pinName", ""))
+        for graph in canonical.get("graphs") or []:
+            if not isinstance(graph, dict) or str(graph.get("guid", graph.get("id", ""))) != graph_id:
+                continue
+            for node in graph.get("nodes") or []:
+                if not isinstance(node, dict) or str(node.get("guid", node.get("id", ""))) != node_id:
+                    continue
+                for pin in node.get("pins") or []:
+                    if isinstance(pin, dict) and pin.get("name") == pin_name:
+                        return pin.get("defaultValue", pin.get("default"))
+        return None
+    return None
+
+
 def _live_write_exported_value(canonical: dict[str, Any], record: LiveApplyRecord) -> Any:
     details = canonical.get("assetDetails") or {}
+    if record.operation in {"setVariableDefault", "setComponentProperty", "setPinDefault"}:
+        return _live_write_blueprint_exported_value(canonical, record)
     target = record.target or {}
     if record.operation == "setAnimationScaleFix":
         return details.get("scaleFixState")

@@ -177,6 +177,9 @@ class PatchValidationTests(unittest.TestCase):
             "addDataTableRow": ("data-table-row-add", "data-table-row", "rowName"),
             "removeDataTableRow": ("data-table-row-remove", "data-table-row", "rowName"),
             "renameDataTableRow": ("data-table-row-rename", "data-table-row", "newRowName"),
+            "setVariableDefault": ("blueprint-variable-default", "blueprint-variable", "variableName"),
+            "setComponentProperty": ("blueprint-component-property", "blueprint-component", "componentName"),
+            "setPinDefault": ("blueprint-pin-default", "blueprint-pin", "pinName"),
         }
         self.assertEqual(set(LIVE_WRITE_OPERATION_REGISTRY), set(expected))
         for name, metadata in expected.items():

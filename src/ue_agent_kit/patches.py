@@ -64,6 +64,9 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
         target_validators={"variableName": _is_nonempty_text},
         expected_change="variable-default",
         asset_type="Blueprint",
+        live_write_value_kind="blueprint-variable-default",
+        live_write_verification="blueprint-variable",
+        live_write_verification_target="variableName",
     ),
     "setComponentProperty": OperationSpec(
         name="setComponentProperty",
@@ -75,6 +78,9 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
         },
         expected_change="component-property",
         asset_type="Blueprint",
+        live_write_value_kind="blueprint-component-property",
+        live_write_verification="blueprint-component",
+        live_write_verification_target="componentName",
     ),
     "setPinDefault": OperationSpec(
         name="setPinDefault",
@@ -87,6 +93,9 @@ OPERATION_REGISTRY: dict[str, OperationSpec] = {
         },
         expected_change="pin-default",
         asset_type="Blueprint",
+        live_write_value_kind="blueprint-pin-default",
+        live_write_verification="blueprint-pin",
+        live_write_verification_target="pinName",
     ),
     "setBlueprintDescription": OperationSpec(
         name="setBlueprintDescription",

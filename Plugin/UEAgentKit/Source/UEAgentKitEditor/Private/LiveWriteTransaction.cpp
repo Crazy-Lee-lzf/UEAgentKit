@@ -55,7 +55,7 @@ namespace UEAgentKitLiveWrite
 	}
 
 	bool RunLiveWriteTransaction(
-		const FLiveWriteContext& Context,
+		FLiveWriteContext& Context,
 		TUniquePtr<ILiveWriteValueIO>& IO,
 		FLiveWriteEvidence& OutEvidence,
 		FString& OutErrorCode,
@@ -131,6 +131,66 @@ namespace UEAgentKitLiveWrite
 			OutEvidence.bPackageDirtyAfter = Context.Package->IsDirty();
 			OutEvidence.bSaved = false;
 			return true;
+		}
+
+		if (Context.CompileAfterWrite)
+		{
+			Context.bCompileAttempted = true;
+			FString CompileError;
+			if (!Context.CompileAfterWrite(CompileError))
+			{
+				Context.bCompileSucceeded = false;
+				Context.CompileErrors.Add(CompileError);
+				IO->RestoreSnapshot();
+				IO->NotifyRestored();
+				Context.Package->SetDirtyFlag(bPackageDirtyBefore);
+				Transaction.Cancel();
+				if (Context.RecompileBaselineAfterRestore)
+				{
+					FString RecompileError;
+					if (!Context.RecompileBaselineAfterRestore(RecompileError))
+					{
+						IO->ReleaseSnapshot();
+						OutErrorCode = TEXT("live-editor-write-recovery-failed");
+						OutErrorMessage = TEXT("Compile failed and baseline recompile could not be proven: ") + RecompileError;
+						return false;
+					}
+				}
+				IO->ReleaseSnapshot();
+				OutErrorCode = TEXT("live-editor-write-compile-failed");
+				OutErrorMessage = CompileError;
+				return false;
+			}
+			Context.bCompileSucceeded = true;
+			TSharedPtr<FJsonValue> CompiledAfterValue;
+			if (!IO->ReadAfter(Context.Value, CompiledAfterValue, OutErrorCode, OutErrorMessage)
+				|| !IO->SemanticEqual(CompiledAfterValue, AfterValue))
+			{
+				Context.CompileErrors.Add(TEXT("Blueprint compile succeeded but the target value did not remain exact after compile."));
+				IO->RestoreSnapshot();
+				IO->NotifyRestored();
+				Context.Package->SetDirtyFlag(bPackageDirtyBefore);
+				Transaction.Cancel();
+				if (Context.RecompileBaselineAfterRestore)
+				{
+					FString RecompileError;
+					if (!Context.RecompileBaselineAfterRestore(RecompileError))
+					{
+						IO->ReleaseSnapshot();
+						OutErrorCode = TEXT("live-editor-write-recovery-failed");
+						OutErrorMessage = TEXT("Compile failed and baseline recompile could not be proven: ") + RecompileError;
+						return false;
+					}
+				}
+				IO->ReleaseSnapshot();
+				if (OutErrorMessage.IsEmpty())
+				{
+					OutErrorMessage = TEXT("Blueprint compile succeeded but the target value did not remain exact after compile.");
+				}
+				OutErrorCode = TEXT("live-editor-write-compile-readback-failed");
+				return false;
+			}
+			OutEvidence.AfterValue = CompiledAfterValue;
 		}
 
 		IO->NotifyChanged();

@@ -9,6 +9,7 @@ namespace UEAgentKitLiveWrite
 		RegisterMaterialLiveWriteOperations(*this);
 		RegisterDataTableLiveWriteOperations(*this);
 		RegisterAnimationLiveWriteOperations(*this);
+		RegisterBlueprintLiveWriteOperations(*this);
 		SupportedOperationNames.Sort();
 	}
 
