@@ -1413,7 +1413,7 @@ class AgentWorkflowTests(unittest.TestCase):
 
     def test_live_write_tool_count_and_names_include_verification_trust(self) -> None:
         names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
-        self.assertEqual(len(names), 93)
+        self.assertEqual(len(names), 94)
         self.assertIn("ue_analyze_change_impact", names)
         self.assertIn("ue_analyze_semantic_diff", names)
         self.assertIn("ue_build_verification_plan", names)
@@ -2407,6 +2407,103 @@ class AgentWorkflowTests(unittest.TestCase):
         with self.assertRaises(WorkflowError) as stack:
             service.undo_asset_property_live(ASSET_PATH, TRANSACTION_ID, "session-1")
         self.assertEqual(stack.exception.code, "live-editor-write-undo-stack-mismatch")
+
+    def _fast_verify_service(self, bridge: Any) -> PatchWorkflowService:
+        return PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=self.freshness,
+            live_editor_service=bridge,
+        )
+
+    def test_fast_resident_verify_success_and_typed_evidence(self) -> None:
+        class FastVerifyBridge(AgentWorkflowTests.ClosedLoopLiveService):
+            def call_method(self, method: str, params: dict[str, Any], **_: Any) -> dict[str, Any]:
+                if method == "editor.verifyAssetPropertyLiveFast":
+                    self.calls.append((method, params))
+                    return {
+                        "assetPath": ASSET_PATH,
+                        "editorSessionId": "session-1",
+                        "editorProcessId": 1234,
+                        "packageDirty": self.dirty,
+                        "targetResolved": True,
+                        "value": True,
+                        "compileRequired": False,
+                        "compileAttempted": False,
+                        "compileSucceeded": False,
+                    }
+                return super().call_method(method, params, **_)
+
+        bridge = FastVerifyBridge(dirty=True)
+        service = self._fast_verify_service(bridge)
+        applied = self._apply_scalar_live_write(service, bridge)
+        verified = service.verify_live_write_fast(ASSET_PATH, applied["liveApplyReceipt"])
+
+        self.assertEqual(verified["status"], "success")
+        self.assertEqual(verified["verificationKind"], "resident-fast")
+        self.assertTrue(verified["verified"])
+        self.assertEqual(verified["operation"], "setAssetProperty")
+        self.assertEqual(verified["liveApplyReceipt"], applied["liveApplyReceipt"])
+        self.assertEqual(verified["expectedValue"], True)
+        self.assertEqual(verified["actualValue"], True)
+        self.assertTrue(verified["targetResolved"])
+        self.assertTrue(verified["valueMatched"])
+        self.assertFalse(verified["validationAttempted"])
+        self.assertFalse(verified["validationSucceeded"])
+        self.assertEqual(verified["nextAction"], "authorized-save-at-checkpoint")
+        self.assertEqual(bridge.calls[-1][0], "editor.verifyAssetPropertyLiveFast")
+
+    def test_fast_resident_verify_wrong_session_rejected(self) -> None:
+        class WrongSessionFastVerifyBridge(AgentWorkflowTests.ClosedLoopLiveService):
+            def call_method(self, method: str, params: dict[str, Any], **_: Any) -> dict[str, Any]:
+                if method == "editor.verifyAssetPropertyLiveFast":
+                    return {
+                        "assetPath": ASSET_PATH,
+                        "editorSessionId": "other-session",
+                        "editorProcessId": 9999,
+                        "packageDirty": self.dirty,
+                        "targetResolved": True,
+                        "value": True,
+                    }
+                return super().call_method(method, params, **_)
+
+        bridge = WrongSessionFastVerifyBridge(dirty=True)
+        service = self._fast_verify_service(bridge)
+        applied = self._apply_scalar_live_write(service, bridge)
+        with self.assertRaises(WorkflowError) as exc:
+            service.verify_live_write_fast(ASSET_PATH, applied["liveApplyReceipt"])
+        self.assertEqual(exc.exception.code, "live-fast-verify-session-mismatch")
+
+    def test_fast_resident_verify_value_mismatch_rejected(self) -> None:
+        class MismatchFastVerifyBridge(AgentWorkflowTests.ClosedLoopLiveService):
+            def call_method(self, method: str, params: dict[str, Any], **_: Any) -> dict[str, Any]:
+                if method == "editor.verifyAssetPropertyLiveFast":
+                    return {
+                        "assetPath": ASSET_PATH,
+                        "editorSessionId": "session-1",
+                        "editorProcessId": 1234,
+                        "packageDirty": self.dirty,
+                        "targetResolved": True,
+                        "value": False,
+                    }
+                return super().call_method(method, params, **_)
+
+        bridge = MismatchFastVerifyBridge(dirty=True)
+        service = self._fast_verify_service(bridge)
+        applied = self._apply_scalar_live_write(service, bridge)
+        with self.assertRaises(WorkflowError) as exc:
+            service.verify_live_write_fast(ASSET_PATH, applied["liveApplyReceipt"])
+        self.assertEqual(exc.exception.code, "live-fast-verify-value-mismatch")
+
+    def test_fast_resident_verify_stale_after_undo(self) -> None:
+        bridge = AgentWorkflowTests.ClosedLoopLiveService(dirty=True)
+        service = self._fast_verify_service(bridge)
+        applied = self._apply_scalar_live_write(service, bridge)
+        service.undo_asset_property_live(ASSET_PATH, TRANSACTION_ID, "session-1")
+        with self.assertRaises(WorkflowError) as exc:
+            service.verify_live_write_fast(ASSET_PATH, applied["liveApplyReceipt"])
+        self.assertEqual(exc.exception.code, "live-write-verify-not-found")
 
     class ClosedLoopLiveService:
         def __init__(self, dirty: bool = True, on_save: Any = None) -> None:
