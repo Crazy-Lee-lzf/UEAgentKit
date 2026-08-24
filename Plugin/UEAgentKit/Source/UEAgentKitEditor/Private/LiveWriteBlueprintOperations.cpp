@@ -19,38 +19,82 @@ namespace
 	class FLiveWriteBlueprintPropertyIO final : public ILiveWriteValueIO
 	{
 	public:
-		FLiveWriteBlueprintPropertyIO(UObject* InOwnerObject, FProperty* InProperty, void* InValueAddress)
-			: OwnerObject(InOwnerObject)
+		FLiveWriteBlueprintPropertyIO(
+			UBlueprint* InBlueprint,
+			const FString& InOperation,
+			const TSharedPtr<FJsonObject>& InTargetObject,
+			UObject* InOwnerObject,
+			FProperty* InProperty,
+			void* InValueAddress)
+			: Blueprint(InBlueprint)
+			, Operation(InOperation)
+			, TargetObject(InTargetObject)
+			, OwnerObject(InOwnerObject)
 			, Property(InProperty)
 			, ValueAddress(InValueAddress)
 		{
 		}
 
-		void UpdateTarget(const FResolvedBlueprintTarget& NewTarget)
+		bool RefreshTarget(FString& OutError) override
 		{
-			OwnerObject = NewTarget.OwnerObject;
-			Property = NewTarget.Property;
-			ValueAddress = NewTarget.ValueAddress;
+			UBlueprint* BlueprintPtr = Blueprint.Get();
+			if (BlueprintPtr == nullptr || !TargetObject.IsValid())
+			{
+				OutError = TEXT("Blueprint or target identity is no longer available.");
+				return false;
+			}
+			FResolvedBlueprintTarget Resolved;
+			if (!ResolveBlueprintTarget(BlueprintPtr, Operation, TargetObject, Resolved, OutError))
+			{
+				return false;
+			}
+			if (Resolved.Kind != FResolvedBlueprintTarget::EKind::Property
+				|| Resolved.OwnerObject == nullptr
+				|| Resolved.Property == nullptr
+				|| Resolved.ValueAddress == nullptr)
+			{
+				OutError = TEXT("The re-resolved Blueprint target is no longer a complete property target.");
+				return false;
+			}
+			OwnerObject = Resolved.OwnerObject;
+			Property = Resolved.Property;
+			ValueAddress = Resolved.ValueAddress;
+			return true;
 		}
 
 		bool CaptureSnapshot() override
 		{
-			return Snapshot.Capture(Property, ValueAddress);
+			FString RefreshError;
+			if (!RefreshTarget(RefreshError))
+			{
+				return false;
+			}
+			return ReadScalarValue(Property, ValueAddress, SnapshotValue);
 		}
 
 		bool IsSnapshotValid() const override
 		{
-			return Snapshot.IsValid();
+			return SnapshotValue.IsValid();
 		}
 
 		void RestoreSnapshot() override
 		{
-			Snapshot.Restore(ValueAddress);
+			if (!SnapshotValue.IsValid())
+			{
+				return;
+			}
+			FString RefreshError;
+			if (!RefreshTarget(RefreshError))
+			{
+				return;
+			}
+			FString SetError;
+			SetScalarValue(Property, ValueAddress, SnapshotValue, SetError);
 		}
 
 		void ReleaseSnapshot() override
 		{
-			Snapshot.Reset();
+			SnapshotValue.Reset();
 		}
 
 		bool ReadBefore(
@@ -58,6 +102,13 @@ namespace
 			FString& OutErrorCode,
 			FString& OutErrorMessage) override
 		{
+			FString RefreshError;
+			if (!RefreshTarget(RefreshError))
+			{
+				OutErrorCode = TEXT("live-editor-write-blueprint-target-invalid");
+				OutErrorMessage = TEXT("The Blueprint target could not be re-resolved: ") + RefreshError;
+				return false;
+			}
 			if (!ReadScalarValue(Property, ValueAddress, OutValue))
 			{
 				OutErrorCode = TEXT("live-editor-write-blueprint-property-type-unsupported");
@@ -72,6 +123,13 @@ namespace
 			FString& OutErrorCode,
 			FString& OutErrorMessage) override
 		{
+			FString RefreshError;
+			if (!RefreshTarget(RefreshError))
+			{
+				OutErrorCode = TEXT("live-editor-write-blueprint-target-invalid");
+				OutErrorMessage = TEXT("The Blueprint target could not be re-resolved: ") + RefreshError;
+				return false;
+			}
 			FString SetError;
 			if (!SetScalarValue(Property, ValueAddress, Value, SetError))
 			{
@@ -88,6 +146,13 @@ namespace
 			FString& OutErrorCode,
 			FString& OutErrorMessage) override
 		{
+			FString RefreshError;
+			if (!RefreshTarget(RefreshError))
+			{
+				OutErrorCode = TEXT("live-editor-write-blueprint-target-invalid");
+				OutErrorMessage = TEXT("The Blueprint target could not be re-resolved: ") + RefreshError;
+				return false;
+			}
 			if (!ReadScalarValue(Property, ValueAddress, OutValue))
 			{
 				OutErrorCode = TEXT("live-editor-write-apply-failed");
@@ -123,29 +188,56 @@ namespace
 			OwnerObject->PostEditChangeProperty(ChangedEvent);
 		}
 
+		TWeakObjectPtr<UBlueprint> Blueprint;
+		FString Operation;
+		TSharedPtr<FJsonObject> TargetObject;
 		UObject* OwnerObject = nullptr;
 		FProperty* Property = nullptr;
 		void* ValueAddress = nullptr;
-		FLiveWriteSnapshot Snapshot;
+		TSharedPtr<FJsonValue> SnapshotValue;
 	};
 
 	class FLiveWriteBlueprintPinIO final : public ILiveWriteValueIO
 	{
 	public:
-		FLiveWriteBlueprintPinIO(UBlueprint* InBlueprint, UEdGraphPin* InPin)
+		FLiveWriteBlueprintPinIO(
+			UBlueprint* InBlueprint,
+			const FString& InOperation,
+			const TSharedPtr<FJsonObject>& InTargetObject,
+			UEdGraphPin* InPin)
 			: Blueprint(InBlueprint)
+			, Operation(InOperation)
+			, TargetObject(InTargetObject)
 			, Pin(InPin)
 		{
 		}
 
-		void UpdatePin(UEdGraphPin* NewPin)
+		bool RefreshTarget(FString& OutError) override
 		{
-			Pin = NewPin;
+			UBlueprint* BlueprintPtr = Blueprint.Get();
+			if (BlueprintPtr == nullptr || !TargetObject.IsValid())
+			{
+				OutError = TEXT("Blueprint or target identity is no longer available.");
+				return false;
+			}
+			FResolvedBlueprintTarget Resolved;
+			if (!ResolveBlueprintTarget(BlueprintPtr, Operation, TargetObject, Resolved, OutError))
+			{
+				return false;
+			}
+			if (Resolved.Kind != FResolvedBlueprintTarget::EKind::Pin || Resolved.Pin == nullptr)
+			{
+				OutError = TEXT("The re-resolved Blueprint target is no longer a complete pin target.");
+				return false;
+			}
+			Pin = Resolved.Pin;
+			return true;
 		}
 
 		bool CaptureSnapshot() override
 		{
-			if (Pin == nullptr)
+			FString RefreshError;
+			if (!RefreshTarget(RefreshError) || Pin == nullptr)
 			{
 				return false;
 			}
@@ -155,12 +247,13 @@ namespace
 
 		bool IsSnapshotValid() const override
 		{
-			return Pin != nullptr;
+			return Pin != nullptr && !OldDefaultValue.IsEmpty();
 		}
 
 		void RestoreSnapshot() override
 		{
-			if (Pin == nullptr)
+			FString RefreshError;
+			if (!RefreshTarget(RefreshError) || Pin == nullptr)
 			{
 				return;
 			}
@@ -182,10 +275,11 @@ namespace
 			FString& OutErrorCode,
 			FString& OutErrorMessage) override
 		{
-			if (Pin == nullptr)
+			FString RefreshError;
+			if (!RefreshTarget(RefreshError) || Pin == nullptr)
 			{
 				OutErrorCode = TEXT("live-editor-write-blueprint-pin-invalid");
-				OutErrorMessage = TEXT("The target pin is no longer valid.");
+				OutErrorMessage = TEXT("The target pin is no longer valid: ") + RefreshError;
 				return false;
 			}
 			OutValue = MakeShared<FJsonValueString>(Pin->DefaultValue);
@@ -197,10 +291,11 @@ namespace
 			FString& OutErrorCode,
 			FString& OutErrorMessage) override
 		{
-			if (Pin == nullptr)
+			FString RefreshError;
+			if (!RefreshTarget(RefreshError) || Pin == nullptr)
 			{
 				OutErrorCode = TEXT("live-editor-write-blueprint-pin-invalid");
-				OutErrorMessage = TEXT("The target pin is no longer valid.");
+				OutErrorMessage = TEXT("The target pin is no longer valid: ") + RefreshError;
 				return false;
 			}
 			FString DefaultValue;
@@ -235,10 +330,11 @@ namespace
 			FString& OutErrorCode,
 			FString& OutErrorMessage) override
 		{
-			if (Pin == nullptr)
+			FString RefreshError;
+			if (!RefreshTarget(RefreshError) || Pin == nullptr)
 			{
 				OutErrorCode = TEXT("live-editor-write-blueprint-pin-invalid");
-				OutErrorMessage = TEXT("The target pin is no longer valid.");
+				OutErrorMessage = TEXT("The target pin is no longer valid: ") + RefreshError;
 				return false;
 			}
 			OutValue = MakeShared<FJsonValueString>(Pin->DefaultValue);
@@ -278,6 +374,8 @@ namespace
 		}
 
 		TWeakObjectPtr<UBlueprint> Blueprint;
+		FString Operation;
+		TSharedPtr<FJsonObject> TargetObject;
 		UEdGraphPin* Pin = nullptr;
 		FString OldDefaultValue;
 	};
@@ -334,6 +432,9 @@ namespace
 		}
 
 		TUniquePtr<ILiveWriteValueIO> IO = MakeUnique<FLiveWriteBlueprintPropertyIO>(
+			Blueprint,
+			Operation,
+			TargetObject,
 			Target.OwnerObject,
 			Target.Property,
 			Target.ValueAddress);
@@ -363,7 +464,12 @@ namespace
 				CompileError = TEXT("Blueprint compile succeeded but the target kind changed.");
 				return false;
 			}
-			static_cast<FLiveWriteBlueprintPropertyIO*>(IO.Get())->UpdateTarget(RefreshedTarget);
+			FString RefreshError;
+			if (!static_cast<FLiveWriteBlueprintPropertyIO*>(IO.Get())->RefreshTarget(RefreshError))
+			{
+				CompileError = TEXT("Blueprint compile succeeded but the target could not be refreshed: ") + RefreshError;
+				return false;
+			}
 			return true;
 		};
 		Context.RecompileBaselineAfterRestore = [Blueprint](FString& CompileError) -> bool
@@ -394,7 +500,7 @@ namespace
 			Evidence,
 			Operation,
 			ValueKind,
-			Target.Property->GetClass()->GetName(),
+			Target.TypeName,
 			true,
 			true);
 		AddCompileEvidence(Result, Context);
@@ -491,7 +597,11 @@ namespace
 			return false;
 		}
 
-		TUniquePtr<ILiveWriteValueIO> IO = MakeUnique<FLiveWriteBlueprintPinIO>(Blueprint, Target.Pin);
+		TUniquePtr<ILiveWriteValueIO> IO = MakeUnique<FLiveWriteBlueprintPinIO>(
+			Blueprint,
+			TEXT("setPinDefault"),
+			Request.Target,
+			Target.Pin);
 
 		FLiveWriteContext TransactionContext;
 		TransactionContext.Asset = Blueprint;
@@ -518,7 +628,12 @@ namespace
 				CompileError = TEXT("Blueprint compile succeeded but the pin target kind changed.");
 				return false;
 			}
-			static_cast<FLiveWriteBlueprintPinIO*>(IO.Get())->UpdatePin(RefreshedTarget.Pin);
+			FString RefreshError;
+			if (!static_cast<FLiveWriteBlueprintPinIO*>(IO.Get())->RefreshTarget(RefreshError))
+			{
+				CompileError = TEXT("Blueprint compile succeeded but the pin could not be refreshed: ") + RefreshError;
+				return false;
+			}
 			return true;
 		};
 		TransactionContext.RecompileBaselineAfterRestore = [Blueprint](FString& CompileError) -> bool

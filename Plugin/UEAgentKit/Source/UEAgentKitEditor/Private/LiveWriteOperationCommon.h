@@ -13,7 +13,7 @@ namespace UEAgentKitLiveWrite
 {
 	bool IsUnsignedIntegerProperty(const FNumericProperty* Property);
 	bool IsSafeTopLevelPropertyPath(const FString& PropertyPath);
-	bool IsSafeLiveWriteSelector(const FString& Selector);
+	bool IsSafeLiveWriteSelector(const FString& Selector, bool bAllowDots = false);
 	bool ReadScalarValue(FProperty* Property, const void* ValueAddress, TSharedPtr<FJsonValue>& OutValue);
 	bool SetScalarValue(
 		FProperty* Property,

@@ -204,6 +204,38 @@ def _property_value(canonical: dict[str, Any] | None, property_path: str) -> tup
     return False, None, ""
 
 
+def _parse_ue_struct_literal(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, str) or not (value.startswith("(") and value.endswith(")")):
+        return None
+    result: dict[str, Any] = {}
+    for part in value[1:-1].split(","):
+        if "=" not in part:
+            continue
+        key, raw = part.split("=", 1)
+        key = key.strip()
+        raw = raw.strip()
+        if key:
+            result[key] = raw
+    return result
+
+
+def _lookup_nested_property_path(value: Any, segments: list[str]) -> Any:
+    for segment in segments:
+        if isinstance(value, dict):
+            if segment not in value:
+                return None
+            value = value[segment]
+            continue
+        if isinstance(value, str):
+            parsed = _parse_ue_struct_literal(value)
+            if parsed is None or segment not in parsed:
+                return None
+            value = parsed[segment]
+            continue
+        return None
+    return value
+
+
 def _blueprint_value(
     canonical: dict[str, Any] | None,
     operation: str,
@@ -223,14 +255,8 @@ def _blueprint_value(
         for component in canonical.get("components") or []:
             if not isinstance(component, dict) or component.get("name") != component_name:
                 continue
-            value: Any = component.get("templateOverrides")
-            found = True
-            for segment in property_path.split("."):
-                if not isinstance(value, dict) or segment not in value:
-                    found = False
-                    value = None
-                    break
-                value = value[segment]
+            value = _lookup_nested_property_path(component.get("templateOverrides"), property_path.split("."))
+            found = value is not None
             return found, value, "component-property", {
                 "componentId": component.get("id", ""),
                 "componentClass": component.get("class", ""),
@@ -479,6 +505,14 @@ def _snapshot_actual_only(
         if item.get("operation") in {"setAssetProperty", "setAssetReferenceProperty", "setAssetStructuredProperty"}
         and isinstance(item.get("target"), dict)
     }
+    expected_component_paths = {
+        (
+            str(item.get("target", {}).get("componentName", "")),
+            str(item.get("target", {}).get("propertyPath", "")),
+        )
+        for item in expected_operations
+        if item.get("operation") == "setComponentProperty" and isinstance(item.get("target"), dict)
+    }
     for item in expected_operations:
         if item.get("operation") != "setDataTableRowFields" or not isinstance(item.get("target"), dict):
             continue
@@ -580,7 +614,12 @@ def _snapshot_actual_only(
             right = right_values.get(property_name)
             target = {"componentName": component_name, "propertyPath": property_name}
             key = ("setComponentProperty", json.dumps(target, sort_keys=True, separators=(",", ":")))
-            if key not in expected_keys and not semantic_equal(left, right):
+            is_parent_of_expected_nested = any(
+                exp_component == component_name
+                and exp_path.startswith(property_name + ".")
+                for exp_component, exp_path in expected_component_paths
+            )
+            if key not in expected_keys and not semantic_equal(left, right) and not is_parent_of_expected_nested:
                 result.append(
                     SemanticOperationEvidence(
                         operation_id=f"snapshot-blueprint-component:{component_name}:{property_name}",

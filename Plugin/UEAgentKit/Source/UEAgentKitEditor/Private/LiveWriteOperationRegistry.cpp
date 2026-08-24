@@ -58,7 +58,8 @@ namespace UEAgentKitLiveWrite
 		for (const FString& Field : Descriptor.RequiredTargetFields)
 		{
 			FString Value;
-			if (!Request.Target->TryGetStringField(Field, Value) || !IsSafeLiveWriteSelector(Value))
+			const bool bAllowDots = Descriptor.Name == TEXT("setComponentProperty") && Field == TEXT("propertyPath");
+			if (!Request.Target->TryGetStringField(Field, Value) || !IsSafeLiveWriteSelector(Value, bAllowDots))
 			{
 				OutErrorCode = TEXT("live-editor-invalid-parameters");
 				OutErrorMessage = FString::Printf(TEXT("target.%s must be one exact non-empty string."), *Field);

@@ -71,6 +71,14 @@ namespace UEAgentKitLiveWrite
 		// Captures the exact pre-write target state; called before the transaction.
 		virtual bool CaptureSnapshot() = 0;
 		virtual bool IsSnapshotValid() const = 0;
+		// Re-resolves the target from stable identity before recovery-time IO
+		// access. Non-Blueprint IO can leave this as a no-op. Blueprint IO must
+		// refresh transient pointers because compile can rebuild GeneratedClass,
+		// CDO, SCS ComponentTemplate, or graph pin objects.
+		virtual bool RefreshTarget(FString& OutError)
+		{
+			return true;
+		}
 		// Restores the captured state after a failed apply, failed read-back, or
 		// a semantic no-op. Must be safe to call even after ReleaseSnapshot.
 		virtual void RestoreSnapshot() = 0;

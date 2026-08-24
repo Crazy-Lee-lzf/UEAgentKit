@@ -218,9 +218,9 @@ bool SetScalarValue(
 	return false;
 }
 
-	bool IsSafeLiveWriteSelector(const FString& Selector)
+	bool IsSafeLiveWriteSelector(const FString& Selector, bool bAllowDots)
 	{
-		if (Selector.IsEmpty() || Selector.Len() > 256 || Selector.Contains(TEXT(".")))
+		if (Selector.IsEmpty() || Selector.Len() > 256 || (!bAllowDots && Selector.Contains(TEXT("."))))
 		{
 			return false;
 		}

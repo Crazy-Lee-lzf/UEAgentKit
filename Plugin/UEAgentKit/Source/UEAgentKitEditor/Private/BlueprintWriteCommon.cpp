@@ -21,6 +21,23 @@ namespace UEAgentKitBlueprintWrite
 			return false;
 		}
 
+		// Test-only compile-failure seam. It is off by default and is used by
+		// acceptance to exercise the exact compile-failure recovery path without
+		// exposing a public MCP tool or destabilizing real Blueprint graphs.
+		static bool bForceCompileFailureOnce =
+			FPlatformMisc::GetEnvironmentVariable(TEXT("UEAK_TEST_FORCE_COMPILE_FAILURE_ONCE")) == TEXT("1");
+		static const bool bForceCompileFailureAlways =
+			FPlatformMisc::GetEnvironmentVariable(TEXT("UEAK_TEST_FORCE_COMPILE_FAILURE_ALWAYS")) == TEXT("1");
+		if (bForceCompileFailureAlways || bForceCompileFailureOnce)
+		{
+			if (bForceCompileFailureOnce)
+			{
+				bForceCompileFailureOnce = false;
+			}
+			OutError = TEXT("Test-only forced Blueprint compile failure (UEAK_TEST_FORCE_COMPILE_FAILURE_ONCE/ALWAYS).");
+			return false;
+		}
+
 		FKismetEditorUtilities::CompileBlueprint(Blueprint, EBlueprintCompileOptions::SkipGarbageCollection);
 		if (Blueprint->Status == BS_Error)
 		{

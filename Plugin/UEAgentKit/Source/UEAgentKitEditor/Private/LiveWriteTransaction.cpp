@@ -141,7 +141,17 @@ namespace UEAgentKitLiveWrite
 			{
 				Context.bCompileSucceeded = false;
 				Context.CompileErrors.Add(CompileError);
-				IO->RestoreSnapshot();
+				{
+					FString RecoveryRefreshError;
+					if (!IO->RefreshTarget(RecoveryRefreshError))
+					{
+						IO->ReleaseSnapshot();
+						OutErrorCode = TEXT("live-editor-write-recovery-failed");
+						OutErrorMessage = TEXT("Could not re-resolve the live write target after compile failure: ") + RecoveryRefreshError;
+						return false;
+					}
+					IO->RestoreSnapshot();
+				}
 				IO->NotifyRestored();
 				Context.Package->SetDirtyFlag(bPackageDirtyBefore);
 				Transaction.Cancel();
@@ -167,7 +177,17 @@ namespace UEAgentKitLiveWrite
 				|| !IO->SemanticEqual(CompiledAfterValue, AfterValue))
 			{
 				Context.CompileErrors.Add(TEXT("Blueprint compile succeeded but the target value did not remain exact after compile."));
-				IO->RestoreSnapshot();
+				{
+					FString RecoveryRefreshError;
+					if (!IO->RefreshTarget(RecoveryRefreshError))
+					{
+						IO->ReleaseSnapshot();
+						OutErrorCode = TEXT("live-editor-write-recovery-failed");
+						OutErrorMessage = TEXT("Could not re-resolve the live write target after compile read-back failure: ") + RecoveryRefreshError;
+						return false;
+					}
+					IO->RestoreSnapshot();
+				}
 				IO->NotifyRestored();
 				Context.Package->SetDirtyFlag(bPackageDirtyBefore);
 				Transaction.Cancel();

@@ -249,6 +249,38 @@ def _live_write_memory_task_evidence(
     }
 
 
+def _parse_ue_struct_literal(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, str) or not (value.startswith("(") and value.endswith(")")):
+        return None
+    result: dict[str, Any] = {}
+    for part in value[1:-1].split(","):
+        if "=" not in part:
+            continue
+        key, raw = part.split("=", 1)
+        key = key.strip()
+        raw = raw.strip()
+        if key:
+            result[key] = raw
+    return result
+
+
+def _lookup_nested_property_path(value: Any, segments: list[str]) -> Any:
+    for segment in segments:
+        if isinstance(value, dict):
+            if segment not in value:
+                return None
+            value = value[segment]
+            continue
+        if isinstance(value, str):
+            parsed = _parse_ue_struct_literal(value)
+            if parsed is None or segment not in parsed:
+                return None
+            value = parsed[segment]
+            continue
+        return None
+    return value
+
+
 def _live_write_blueprint_exported_value(canonical: dict[str, Any], record: LiveApplyRecord) -> Any:
     target = record.target or {}
     operation = record.operation
@@ -264,12 +296,7 @@ def _live_write_blueprint_exported_value(canonical: dict[str, Any], record: Live
         for component in canonical.get("components") or []:
             if not isinstance(component, dict) or component.get("name") != component_name:
                 continue
-            value: Any = component.get("templateOverrides")
-            for segment in property_path.split("."):
-                if not isinstance(value, dict) or segment not in value:
-                    return None
-                value = value[segment]
-            return value
+            return _lookup_nested_property_path(component.get("templateOverrides"), property_path.split("."))
         return None
     if operation == "setPinDefault":
         graph_id = str(target.get("graphGuid", ""))

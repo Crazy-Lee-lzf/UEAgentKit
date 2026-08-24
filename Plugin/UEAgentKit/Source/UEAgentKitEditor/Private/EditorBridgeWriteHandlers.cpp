@@ -284,6 +284,14 @@ bool FUEAgentKitEditorBridge::RevertLiveWriteTransaction(
 		return false;
 	}
 
+	FString RefreshError;
+	if (!Record->IO->RefreshTarget(RefreshError))
+	{
+		OutErrorCode = TEXT("live-editor-write-undo-target-invalid");
+		OutErrorMessage = TEXT("The live write target could not be re-resolved before Undo: ") + RefreshError;
+		return false;
+	}
+
 	TSharedPtr<FJsonValue> WrittenValue;
 	if (!Record->IO->ReadBefore(WrittenValue, OutErrorCode, OutErrorMessage))
 	{
@@ -306,12 +314,34 @@ bool FUEAgentKitEditorBridge::RevertLiveWriteTransaction(
 	}
 	Package->SetDirtyFlag(Record->bDirtyBefore);
 
+	RefreshError.Reset();
+	if (!Record->IO->RefreshTarget(RefreshError))
+	{
+		OutErrorCode = TEXT("live-editor-write-undo-target-invalid");
+		OutErrorMessage = TEXT("The live write target could not be re-resolved after Undo: ") + RefreshError;
+		return false;
+	}
+
 	TSharedPtr<FJsonValue> RestoredValue;
 	bool bRestored = Record->IO->ReadBefore(RestoredValue, OutErrorCode, OutErrorMessage)
 		&& Record->IO->SemanticEqual(RestoredValue, Record->BeforeValue);
 	if (!bRestored)
 	{
+		RefreshError.Reset();
+		if (!Record->IO->RefreshTarget(RefreshError))
+		{
+			OutErrorCode = TEXT("live-editor-write-undo-target-invalid");
+			OutErrorMessage = TEXT("The live write target could not be re-resolved before fallback restore: ") + RefreshError;
+			return false;
+		}
 		Record->IO->RestoreSnapshot();
+		RefreshError.Reset();
+		if (!Record->IO->RefreshTarget(RefreshError))
+		{
+			OutErrorCode = TEXT("live-editor-write-undo-target-invalid");
+			OutErrorMessage = TEXT("The live write target could not be re-resolved before notifying restoration: ") + RefreshError;
+			return false;
+		}
 		Record->IO->NotifyRestored();
 		Package->SetDirtyFlag(Record->bDirtyBefore);
 		bRestored = Record->IO->ReadBefore(RestoredValue, OutErrorCode, OutErrorMessage)
