@@ -2,6 +2,8 @@
 #include "EditorBridgeHandlerUtils.h"
 #include "LiveWriteOperationRegistry.h"
 #include "LiveWriteTransaction.h"
+#include "BlueprintWriteCommon.h"
+#include "LiveWriteOperationCommon.h"
 
 #include "Editor.h"
 #include "Editor/Transactor.h"
@@ -146,6 +148,160 @@ bool FUEAgentKitEditorBridge::TryApplyAssetPropertyLiveResult(
 		LiveWriteTransactionRecords.FindOrAdd(AssetPath).Add(Record->TransactionId, Record);
 	}
 	return bApplied;
+}
+
+bool FUEAgentKitEditorBridge::TryVerifyAssetPropertyLiveFastResult(
+	const FString& Operation,
+	const FString& AssetPath,
+	const TSharedPtr<FJsonObject>& Target,
+	TSharedPtr<FJsonObject>& OutResult,
+	FString& OutErrorCode,
+	FString& OutErrorMessage) const
+{
+	if (GEditor == nullptr)
+	{
+		OutErrorCode = TEXT("live-editor-unavailable");
+		OutErrorMessage = TEXT("The Unreal Editor is unavailable.");
+		return false;
+	}
+	if (GEditor->PlayWorld != nullptr)
+	{
+		OutErrorCode = TEXT("live-editor-pie-active");
+		OutErrorMessage = TEXT("Fast Resident Verify is unavailable while PIE or SIE is active.");
+		return false;
+	}
+	if (!IsSafeGameAssetPath(AssetPath))
+	{
+		OutErrorCode = TEXT("live-editor-invalid-parameters");
+		OutErrorMessage = TEXT("assetPath must be one exact /Game Object Path.");
+		return false;
+	}
+
+	UObject* Asset = StaticFindObject(UObject::StaticClass(), nullptr, *AssetPath, false);
+	if (Asset == nullptr || !Asset->IsAsset())
+	{
+		OutErrorCode = TEXT("live-fast-verify-asset-not-loaded");
+		OutErrorMessage = TEXT("Fast Resident Verify requires the exact asset to be loaded.");
+		return false;
+	}
+	UPackage* Package = Asset->GetOutermost();
+	if (Package == nullptr)
+	{
+		OutErrorCode = TEXT("live-fast-verify-asset-not-loaded");
+		OutErrorMessage = TEXT("The target asset package is unavailable.");
+		return false;
+	}
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetStringField(TEXT("assetPath"), AssetPath);
+	Result->SetStringField(TEXT("editorSessionId"), SessionId);
+	Result->SetNumberField(TEXT("editorProcessId"), static_cast<double>(FPlatformProcess::GetCurrentProcessId()));
+	Result->SetBoolField(TEXT("packageDirty"), Package->IsDirty());
+	Result->SetBoolField(TEXT("targetResolved"), false);
+	Result->SetBoolField(TEXT("compileRequired"), false);
+	Result->SetBoolField(TEXT("compileAttempted"), false);
+	Result->SetBoolField(TEXT("compileSucceeded"), false);
+	Result->SetBoolField(TEXT("blueprintUpToDate"), false);
+	Result->SetBoolField(TEXT("blueprintError"), false);
+
+	TSharedPtr<FJsonValue> Value;
+	const bool bBlueprintOperation =
+		Operation == TEXT("setVariableDefault")
+		|| Operation == TEXT("setComponentProperty")
+		|| Operation == TEXT("setPinDefault");
+	if (bBlueprintOperation)
+	{
+		UBlueprint* Blueprint = Cast<UBlueprint>(Asset);
+		if (Blueprint == nullptr)
+		{
+			OutErrorCode = TEXT("live-fast-verify-target-not-found");
+			OutErrorMessage = TEXT("Fast Resident Verify target is not a loaded Blueprint.");
+			return false;
+		}
+		if (!Target.IsValid())
+		{
+			OutErrorCode = TEXT("live-fast-verify-target-invalid");
+			OutErrorMessage = TEXT("Fast Resident Verify requires the exact operation target.");
+			return false;
+		}
+		UEAgentKitBlueprintWrite::FResolvedBlueprintTarget Resolved;
+		if (!UEAgentKitBlueprintWrite::ResolveBlueprintTarget(Blueprint, Operation, Target, Resolved, OutErrorMessage))
+		{
+			OutErrorCode = TEXT("live-fast-verify-target-not-found");
+			return false;
+		}
+		if (Resolved.Kind == UEAgentKitBlueprintWrite::FResolvedBlueprintTarget::EKind::Property)
+		{
+			if (Resolved.Property == nullptr
+				|| Resolved.ValueAddress == nullptr
+				|| !UEAgentKitLiveWrite::ReadScalarValue(Resolved.Property, Resolved.ValueAddress, Value))
+			{
+				OutErrorCode = TEXT("live-fast-verify-target-not-found");
+				OutErrorMessage = TEXT("The resolved Blueprint property could not be read back.");
+				return false;
+			}
+			Result->SetStringField(TEXT("targetKind"), TEXT("property"));
+		}
+		else if (Resolved.Kind == UEAgentKitBlueprintWrite::FResolvedBlueprintTarget::EKind::Pin && Resolved.Pin != nullptr)
+		{
+			Value = MakeShared<FJsonValueString>(Resolved.Pin->DefaultValue);
+			Result->SetStringField(TEXT("targetKind"), TEXT("pin"));
+		}
+		else
+		{
+			OutErrorCode = TEXT("live-fast-verify-target-not-found");
+			OutErrorMessage = TEXT("Fast Resident Verify resolved an incomplete Blueprint target.");
+			return false;
+		}
+		Result->SetBoolField(TEXT("targetResolved"), true);
+		Result->SetBoolField(TEXT("compileRequired"), true);
+		Result->SetBoolField(TEXT("blueprintUpToDate"), Blueprint->IsUpToDate());
+		Result->SetBoolField(TEXT("blueprintError"), Blueprint->Status == BS_Error);
+		Result->SetBoolField(TEXT("compileSucceeded"), Blueprint->Status != BS_Error);
+	}
+	else if (Operation == TEXT("setAssetProperty"))
+	{
+		if (!Target.IsValid())
+		{
+			OutErrorCode = TEXT("live-fast-verify-target-invalid");
+			OutErrorMessage = TEXT("Fast Resident Verify requires the exact propertyPath target.");
+			return false;
+		}
+		FString PropertyPath;
+		Target->TryGetStringField(TEXT("propertyPath"), PropertyPath);
+		if (!UEAgentKitLiveWrite::IsSafeTopLevelPropertyPath(PropertyPath))
+		{
+			OutErrorCode = TEXT("live-fast-verify-target-invalid");
+			OutErrorMessage = TEXT("target.propertyPath must be one exact top-level property name.");
+			return false;
+		}
+		FProperty* Property = FindFProperty<FProperty>(Asset->GetClass(), FName(*PropertyPath));
+		if (Property == nullptr || Property->ArrayDim != 1)
+		{
+			OutErrorCode = TEXT("live-fast-verify-target-not-found");
+			OutErrorMessage = TEXT("The exact top-level property was not found on the loaded asset.");
+			return false;
+		}
+		void* ValueAddress = Property->ContainerPtrToValuePtr<void>(Asset);
+		if (!UEAgentKitLiveWrite::ReadScalarValue(Property, ValueAddress, Value))
+		{
+			OutErrorCode = TEXT("live-fast-verify-target-not-found");
+			OutErrorMessage = TEXT("The resolved property could not be read back.");
+			return false;
+		}
+		Result->SetStringField(TEXT("targetKind"), TEXT("property"));
+		Result->SetBoolField(TEXT("targetResolved"), true);
+	}
+	else
+	{
+		OutErrorCode = TEXT("live-fast-verify-operation-unsupported");
+		OutErrorMessage = TEXT("Fast Resident Verify currently supports setAssetProperty, setVariableDefault, setComponentProperty, and setPinDefault.");
+		return false;
+	}
+
+	Result->SetField(TEXT("value"), Value.IsValid() ? Value : MakeShared<FJsonValueNull>());
+	OutResult = Result;
+	return true;
 }
 
 bool FUEAgentKitEditorBridge::TryUndoAssetPropertyLiveResult(

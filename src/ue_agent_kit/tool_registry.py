@@ -168,6 +168,7 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_rollback_animation_retarget_batch", "workflow", "destructive"),
     ToolDefinition("ue_verify_asset", "workflow", "planning"),
     ToolDefinition("ue_verify_live_write", "workflow", "planning"),
+    ToolDefinition("ue_verify_live_write_fast", "workflow", "read"),
     ToolDefinition("ue_get_asset_state", "workflow", "read"),
     ToolDefinition("ue_refresh_asset_index", "workflow", "planning"),
     ToolDefinition("ue_save_authorized_asset", "workflow", "destructive"),

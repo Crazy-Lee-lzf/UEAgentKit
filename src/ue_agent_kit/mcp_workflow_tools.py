@@ -725,6 +725,22 @@ def register_workflow_tools(
             return error_response("ue_verify_live_write", exc, read_only=True)
 
     @server.tool(annotations=read_annotations)
+    def ue_verify_live_write_fast(
+        asset_path: str,
+        live_apply_receipt: str = "",
+        change_set_id: str = "",
+    ) -> dict[str, Any]:
+        """Verify one exact pending live write against the current Editor session without any independent reload or Commandlet."""
+        try:
+            return workflow_service.verify_live_write_fast(
+                asset_path,
+                live_apply_receipt,
+                change_set_id=change_set_id,
+            )
+        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_verify_live_write_fast", exc, read_only=True)
+
+    @server.tool(annotations=read_annotations)
     def ue_get_asset_state(asset_path: str) -> dict[str, Any]:
         """Compare Editor memory, disk Package, Revision Export, and frozen SQLite state for one exact asset."""
         try:

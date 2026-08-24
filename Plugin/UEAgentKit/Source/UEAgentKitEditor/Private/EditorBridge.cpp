@@ -68,6 +68,7 @@ namespace UEAgentKitEditorBridgePrivate
 		TEXT("editor.runAutomationTest"),
 		TEXT("editor.saveAuthorizedAsset"),
 		TEXT("editor.applyAssetPropertyLive"),
+		TEXT("editor.verifyAssetPropertyLiveFast"),
 		TEXT("retarget.inspect"),
 		TEXT("retarget.plan"),
 		TEXT("retarget.configure"),
@@ -980,6 +981,35 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 		FString ErrorMessage;
 		SendActionResult(
 			TryApplyAssetPropertyLiveResult(Operation, AssetPath, Target, Value, Result, ErrorCode, ErrorMessage),
+			Result,
+			ErrorCode,
+			ErrorMessage);
+	}
+	else if (Method == TEXT("editor.verifyAssetPropertyLiveFast"))
+	{
+		FString Operation;
+		FString AssetPath;
+		Params->TryGetStringField(TEXT("operation"), Operation);
+		Params->TryGetStringField(TEXT("assetPath"), AssetPath);
+		TSharedRef<FJsonObject> Target = MakeShared<FJsonObject>();
+		if (const TSharedPtr<FJsonValue> TargetValue = Params->TryGetField(TEXT("target"));
+			TargetValue.IsValid() && TargetValue->Type == EJson::Object)
+		{
+			Target->Values = TargetValue->AsObject()->Values;
+		}
+		for (const TCHAR* LegacyField : {TEXT("propertyPath"), TEXT("parameterName"), TEXT("rowName"), TEXT("newRowName"), TEXT("fieldName")})
+		{
+			FString LegacyValue;
+			if (!Target->HasField(LegacyField) && Params->TryGetStringField(LegacyField, LegacyValue))
+			{
+				Target->SetStringField(LegacyField, LegacyValue);
+			}
+		}
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode;
+		FString ErrorMessage;
+		SendActionResult(
+			TryVerifyAssetPropertyLiveFastResult(Operation, AssetPath, Target, Result, ErrorCode, ErrorMessage),
 			Result,
 			ErrorCode,
 			ErrorMessage);

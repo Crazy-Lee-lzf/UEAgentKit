@@ -204,6 +204,13 @@ private:
 		TSharedPtr<FJsonObject>& OutResult,
 		FString& OutErrorCode,
 		FString& OutErrorMessage) const;
+	bool TryVerifyAssetPropertyLiveFastResult(
+		const FString& Operation,
+		const FString& AssetPath,
+		const TSharedPtr<FJsonObject>& Target,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage) const;
 	bool TryUndoAssetPropertyLiveResult(
 		const FString& AssetPath,
 		const FString& TransactionId,

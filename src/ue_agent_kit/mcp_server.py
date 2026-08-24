@@ -477,6 +477,7 @@ def _capabilities_response(
                     "ue_discard_asset_property_live",
                     "ue_save_authorized_asset",
                     "ue_verify_live_write",
+                    "ue_verify_live_write_fast",
                 ],
             },
         },

@@ -3995,6 +3995,104 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 "indexFreshness": freshness,
             }
 
+    def verify_live_write_fast(self, asset_path: str, live_apply_receipt: str = "", change_set_id: str = "") -> dict[str, Any]:
+        with self._lock:
+            if not self.config.commit_enabled:
+                raise WorkflowError(
+                    "live-editor-write-disabled",
+                    "Fast Resident Verify requires Commit tools to be enabled when the MCP server starts.",
+                )
+            if self.live_editor_service is None:
+                raise WorkflowError(
+                    "live-editor-required",
+                    "Live Editor mode is required to run Fast Resident Verify.",
+                )
+            asset_path = self._validate_refresh_asset_path(asset_path)
+            receipt, record = self._resolve_live_apply(asset_path, live_apply_receipt)
+            if change_set_id:
+                self._assert_change_set_member(change_set_id, receipt)
+
+            bridge_parameters: dict[str, Any] = {
+                "operation": record.operation,
+                "assetPath": asset_path,
+                "target": record.target,
+            }
+            try:
+                inspection = self.live_editor_service.call_method(
+                    "editor.verifyAssetPropertyLiveFast",
+                    bridge_parameters,
+                )
+            except Exception as exc:
+                raise WorkflowError(
+                    "live-fast-verify-failed",
+                    "The Editor could not complete Fast Resident Verify.",
+                    details=getattr(exc, "details", {}),
+                ) from exc
+            result = inspection if isinstance(inspection, dict) else {}
+            if not isinstance(result, dict) or result.get("targetResolved") is not True:
+                raise WorkflowError(
+                    "live-fast-verify-target-not-found",
+                    "Fast Resident Verify could not re-resolve the exact target in the current Editor session.",
+                )
+            bridge_session = str(result.get("editorSessionId", ""))
+            if bridge_session != record.editor_session_id:
+                raise WorkflowError(
+                    "live-fast-verify-session-mismatch",
+                    "The current Editor session does not match the live write session; resident evidence is no longer applicable.",
+                    details={"expected_session": record.editor_session_id, "actual_session": bridge_session},
+                )
+            actual_value = result.get("value")
+            value_matched = _live_write_exported_matches(record.after_value, actual_value)
+            if not value_matched:
+                raise WorkflowError(
+                    "live-fast-verify-value-mismatch",
+                    "The current resident value does not match the live write after-value.",
+                    details={"expectedValue": record.after_value, "actualValue": actual_value},
+                )
+
+            package_dirty = bool(result.get("packageDirty", False))
+            compile_required = bool(result.get("compileRequired", False))
+            compile_attempted = bool(result.get("compileAttempted", False))
+            compile_succeeded = bool(result.get("compileSucceeded", False))
+            response: dict[str, Any] = {
+                "schemaVersion": WORKFLOW_SCHEMA_VERSION,
+                "tool": "ue_verify_live_write_fast",
+                "ok": True,
+                "mode": "FastResidentVerify",
+                "status": "success",
+                "verificationKind": "resident-fast",
+                "verified": True,
+                "assetPath": asset_path,
+                "operation": record.operation,
+                "valueKind": record.value_kind,
+                "target": record.target,
+                "expectedValue": record.after_value,
+                "actualValue": actual_value,
+                "editorSessionId": bridge_session,
+                "editorProcessId": result.get("editorProcessId"),
+                "changeSetId": change_set_id,
+                "liveApplyReceipt": receipt,
+                "transactionId": record.transaction_id,
+                "packageDirty": package_dirty,
+                "compileRequired": compile_required,
+                "compileAttempted": compile_attempted,
+                "compileSucceeded": compile_succeeded,
+                "targetResolved": True,
+                "valueMatched": True,
+                "transactionApplicable": bool(record.transaction_id),
+                "changeSetApplicable": bool(change_set_id),
+                "validationAttempted": False,
+                "validationSucceeded": False,
+                "failureCode": "",
+                "saved": record.saved,
+                "diskRevisionChanged": False,
+                "nextAction": "authorized-save-at-checkpoint" if not record.saved else "continue-resident-editing",
+                "nextActions": [],
+            }
+            if change_set_id:
+                response["changeSetUpdated"] = False
+            return response
+
     def verify_live_write(self, asset_path: str, live_apply_receipt: str = "", change_set_id: str = "") -> dict[str, Any]:
         with self._lock:
             if not self.config.commit_enabled:
