@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 
 TOOL_ROOT = Path(__file__).resolve().parents[2]
@@ -378,6 +379,27 @@ class SnapshotRefreshTests(unittest.TestCase):
         self.assertEqual(context.exception.code, "snapshot-refresh-export-invalid")
         self.assertFalse(self.active.pointer_path.exists())
         self.assertEqual(IndexQueryService(self.database).get_revision_record(ASSET_PATH)["revision_value"], self.before_revision)
+
+    def test_blueprint_refresh_forwards_include_blueprints_from_index_class(self) -> None:
+        class CapturingRefreshRunner(RefreshRunner):
+            def __init__(self, package_file: Path) -> None:
+                super().__init__(package_file)
+                self.include_blueprints = False
+
+            def __call__(self, arguments: list[str], cwd: Path, timeout_seconds: int) -> ProcessResult:
+                self.include_blueprints = "-IncludeBlueprints" in arguments
+                return super().__call__(arguments, cwd, timeout_seconds)
+
+        runner = CapturingRefreshRunner(self.package_file)
+        service = self.make_service(runner=runner)
+        with patch.object(
+            service.index_service,
+            "get_revision_record",
+            return_value={"asset_class": "/Script/Engine.Blueprint"},
+        ), patch.object(service, "_assert_refresh_policy", return_value=None):
+            preview = service.refresh_asset_index(ASSET_PATH, mode="Preview")
+        self.assertTrue(preview["ok"])
+        self.assertTrue(runner.include_blueprints)
 
 
 if __name__ == "__main__":

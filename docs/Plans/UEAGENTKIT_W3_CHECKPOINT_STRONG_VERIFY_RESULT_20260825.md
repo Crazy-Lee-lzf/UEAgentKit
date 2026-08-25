@@ -17,11 +17,13 @@ W3 Checkpoint Strong Verify optimization = blocked
 Exact blocker:
 
 ```text
-Real UE5.6 Blueprint multi-operation checkpoint (C2) is not yet proven.
-After a real Blueprint save/clean cycle, the BP snapshot-refresh commandlet export
-(RunAssetCatalog.ps1 -IncludeBlueprints) fails with exitCode 1 in this acceptance
-environment, so the frozen index cannot be advanced to the saved BP Revision before
-running the variable+component+pin one-checkpoint case. C5/C6 also remain unit-only.
+Real UE5.6 Blueprint multi-operation checkpoint (C2) is still not proven.
+The snapshot-refresh blocker is fixed (RunAssetCatalog.ps1 -IncludeBlueprints is now
+forwarded for Blueprint assets), and real R1/R2 pass. The remaining blocker is a
+Blueprint fixture/package lifecycle issue: after ue_open_asset in the resident
+Editor, BP_TransactionBlueprint becomes Dirty asynchronously, so a subsequent
+ue_apply_asset_property_live is rejected with live-editor-write-package-dirty.
+C5/C6 also remain unit-only.
 ```
 
 ## 2. Implemented Product Surface
@@ -147,7 +149,7 @@ Added/extended tests cover:
 Full discovered Python suite:
 
 ```text
-Ran 710 tests
+Ran 711 tests
 OK
 ```
 
@@ -174,28 +176,65 @@ The existing `ue_verify_live_write` strong semantics are untouched.
 [ ] C3 same-target supersession real UE pass
 [ ] C5 controlled disk Revision stale real UE pass
 [ ] C6 canonical mismatch real UE pass
-[ ] BP snapshot refresh after a real clean save works in this acceptance env
 ```
 
-## 7. Known Limitation / Blocker Detail
+## 7. Blocker Closure Progress
 
-During real W3 acceptance:
+### Root cause found and fixed
 
-1. The Blueprint fixture starts with a Dirty package in the resident Editor even
-   after restoring the exact W1 baseline file; an authorized immediate save is
-   required before a new live apply can proceed.
-2. After that clean save, the BP package Revision changes on disk.
-3. Advancing the frozen snapshot for the new BP Revision via
-   `ue_refresh_asset_index mode=Apply` fails in the commandlet export stage with
-   exit code 1 (sanitized by the MCP error envelope).
-4. Because the snapshot cannot be refreshed to the saved BP Revision, the next
-   resident plan reports `index-stale`, so the variable+component+pin checkpoint
-   cannot be executed in a real UE session in this environment.
+The snapshot-refresh failure was not a Commandlet binary issue:
 
-This is not a product code failure observed in the checkpoint implementation
-itself; the implementation passed unit contracts and the real non-BP/single-BP
-checkpoint paths. It is a remaining real-acceptance blocker in the UE snapshot
-refresh/export environment.
+```text
+ue_refresh_asset_index → _export_refresh_candidate()
+was called without include_blueprint=True for Blueprint assets
+→ RunAssetCatalog.ps1 -IncludeBlueprints was missing
+→ AssetCatalogExportCommandlet: "No matching assets found." (exit 2)
+→ surface error exitCode 1 from PowerShell
+```
+
+Fix:
+
+```text
+refresh_asset_index() now reads the indexed asset class and forwards
+include_blueprint=("Blueprint" in asset_class) to _export_refresh_candidate().
+```
+
+Raw evidence captured from the failing Commandlet:
+
+```text
+LogAssetCatalogExport: Error: No matching assets found.
+Commandlet->Main return this error code: 2
+```
+
+### R1 — real BP snapshot refresh after resident save
+
+```text
+resident BP save → disk Revision 5d9d...
+ue_refresh_asset_index mode=Apply → PASS
+frozen snapshot Revision == saved disk Revision 5d9d...
+```
+
+### R2 — planning after refresh
+
+```text
+new ue_plan_patch on same BP with the refreshed snapshot → PASS
+no index-stale
+```
+
+### Remaining real blocker
+
+After a refreshed clean BP session:
+
+```text
+ue_open_asset(BP_TransactionBlueprint)
+→ packageDirtyBefore=false, packageDirtyAfter=false
+→ asynchronously BP becomes Dirty
+→ ue_apply_asset_property_live is rejected with live-editor-write-package-dirty
+```
+
+This is a Blueprint fixture/package lifecycle issue in the real Editor, not a W3
+checkpoint logic defect. The W3 checkpoint implementation is already proven by
+unit contracts and by real C0/C1.
 
 ## 8. Final W3 Status
 

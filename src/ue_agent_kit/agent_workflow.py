@@ -2774,11 +2774,16 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 raise WorkflowError("snapshot-refresh-unavailable", "Snapshot refresh is unavailable because this session has no frozen active snapshot pair.")
             self._assert_refresh_policy(asset_path)
             live_state = self._inspect_refresh_live_state(asset_path)
+            current_record = self.index_service.get_revision_record(asset_path)
+            asset_class = str((current_record or {}).get("asset_class", ""))
             operation_root = self._safe_work_path("refresh", uuid.uuid4().hex)
             candidate_root = operation_root / "candidate"
             try:
-                candidate = self._export_refresh_candidate(asset_path, candidate_root)
-                current_record = self.index_service.get_revision_record(asset_path)
+                candidate = self._export_refresh_candidate(
+                    asset_path,
+                    candidate_root,
+                    include_blueprint=("Blueprint" in asset_class),
+                )
                 action = "add" if current_record is None else "update"
                 base = {
                     "schemaVersion": WORKFLOW_SCHEMA_VERSION,

@@ -52,46 +52,17 @@ async def plan_bp(
     value: Any,
     description: str,
 ) -> dict[str, Any]:
-    if operation == "setVariableDefault":
-        return await call(
-            session,
-            "ue_set_blueprint_default",
-            {
-                "asset_path": BP_ASSET,
-                "variable_name": target["variableName"],
-                "value": value,
-                "mode": "Plan",
-                "description": description,
-            },
-        )
-    if operation == "setComponentProperty":
-        return await call(
-            session,
-            "ue_set_component_property",
-            {
-                "asset_path": BP_ASSET,
-                "component_name": target["componentName"],
-                "property_path": target["propertyPath"],
-                "value": value,
-                "mode": "Plan",
-                "description": description,
-            },
-        )
-    if operation == "setPinDefault":
-        return await call(
-            session,
-            "ue_set_pin_default",
-            {
-                "asset_path": BP_ASSET,
-                "graph_guid": target["graphGuid"],
-                "node_guid": target["nodeGuid"],
-                "pin_name": target["pinName"],
-                "value": value,
-                "mode": "Plan",
-                "description": description,
-            },
-        )
-    raise RuntimeError(f"Unsupported BP operation: {operation}")
+    return await call(
+        session,
+        "ue_plan_patch",
+        {
+            "asset_path": BP_ASSET,
+            "operation": operation,
+            "target": target,
+            "value": value,
+            "description": description,
+        },
+    )
 
 
 async def apply_live(session: ClientSession, plan: dict[str, Any], change_set_id: str) -> dict[str, Any]:
@@ -249,7 +220,7 @@ async def run_bp_multi(session: ClientSession) -> dict[str, Any]:
     await open_asset(session, BP_ASSET)
     cs2 = await create_change_set(session, "W3 C2 BP multi-op checkpoint", "task_w3_c2_bp_multi")
     operations = [
-        ("setVariableDefault", {"variableName": "TransactionInt"}, 100),
+        ("setVariableDefault", {"variableName": "TransactionInt"}, 200),
         ("setComponentProperty", {"componentName": "DefaultSceneRoot", "propertyPath": "RelativeLocation.X"}, 10),
         ("setPinDefault", {"graphGuid": PIN_GRAPH, "nodeGuid": PIN_NODE, "pinName": PIN_NAME}, 5),
     ]
