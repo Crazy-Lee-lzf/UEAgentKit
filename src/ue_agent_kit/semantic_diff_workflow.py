@@ -853,6 +853,16 @@ def _artifact_canonical(service: Any, member: Any, stage: str) -> dict[str, Any]
         if stage != "verified":
             return None
         root = service._safe_work_path("verify", member.receipt)
+    elif stage == "verified" and getattr(member, "checkpoint_id", ""):
+        checkpoint = service._checkpoints.get(member.checkpoint_id)
+        if (
+            checkpoint is None
+            or checkpoint.state != "verified"
+            or not checkpoint.strong_artifact_root
+            or not _path_within(Path(checkpoint.strong_artifact_root), service.config.work_root)
+        ):
+            return None
+        root = Path(checkpoint.strong_artifact_root)
     elif stage == "verified":
         root = service._safe_work_path("verify-live-write", member.receipt)
     elif stage == "persisted" and member.save_receipt:

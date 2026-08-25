@@ -124,6 +124,7 @@ EXPECTED_ALL_TOOLS = [
     "ue_verify_asset",
     "ue_verify_live_write",
     "ue_verify_live_write_fast",
+    "ue_verify_live_write_checkpoint",
     "ue_get_asset_state",
     "ue_refresh_asset_index",
     "ue_save_authorized_asset",
@@ -141,7 +142,7 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertEqual(len(tool_names_for_mode()), 10)
         self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 43)
-        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 61)
+        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 62)
         self.assertEqual(
             tool_names_for_mode(memory_enabled=True),
             QUERY_TOOL_NAMES + EXPECTED_MEMORY_TOOLS,
@@ -153,7 +154,7 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
-            73,
+            74,
         )
         self.assertEqual(
             len(
@@ -163,7 +164,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-            106,
+            107,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:
@@ -592,7 +593,7 @@ class ToolRegistryTests(unittest.TestCase):
         workflow_module = (ROOT / "src" / "ue_agent_kit" / "mcp_workflow_tools.py").read_text(encoding="utf-8")
         self.assertEqual(
             workflow_module.count('change_set_id: str = ""'),
-            8,
+            9,
         )
         workflow_service_module = (ROOT / "src" / "ue_agent_kit" / "agent_workflow.py").read_text(encoding="utf-8")
         for code in (

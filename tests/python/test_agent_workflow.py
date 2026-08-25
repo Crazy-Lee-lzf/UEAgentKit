@@ -1413,7 +1413,7 @@ class AgentWorkflowTests(unittest.TestCase):
 
     def test_live_write_tool_count_and_names_include_verification_trust(self) -> None:
         names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
-        self.assertEqual(len(names), 94)
+        self.assertEqual(len(names), 95)
         self.assertIn("ue_analyze_change_impact", names)
         self.assertIn("ue_analyze_semantic_diff", names)
         self.assertIn("ue_build_verification_plan", names)
@@ -1424,6 +1424,7 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertIn("ue_undo_asset_property_live", names)
         self.assertIn("ue_discard_asset_property_live", names)
         self.assertIn("ue_verify_live_write", names)
+        self.assertIn("ue_verify_live_write_checkpoint", names)
         self.assertIn("ue_refresh_animation_scale_fix_batch_index", names)
         self.assertIn("ue_start_animation_retarget_postprocess", names)
         self.assertIn("ue_get_animation_retarget_postprocess", names)
@@ -3465,6 +3466,307 @@ class AgentWorkflowTests(unittest.TestCase):
         undone = service.undo_asset_property_live(ASSET_PATH, TRANSACTION_ID, "session-1")
         self.assertNotIn("changeSetId", undone)
         self.assertEqual(service.status()["liveWriteJournal"]["changeSetCount"], 0)
+
+    def _checkpoint_nonbp_runner(
+        self,
+        runner_calls: list[str],
+        saved_revision: str,
+        *,
+        property_value: Any = True,
+    ):
+        def runner(arguments: list[str], cwd: Path, timeout_seconds: int) -> ProcessResult:
+            del cwd, timeout_seconds
+            script, values = FakeWorkflowRunner._arguments(arguments)
+            runner_calls.append(script)
+            output = Path(values["-Output"])
+            write_json(
+                output / "manifest.json",
+                {
+                    "projectName": PROJECT,
+                    "assetCount": 1,
+                    "successCount": 1,
+                    "failureCount": 0,
+                    "assets": [
+                        {
+                            "assetPath": ASSET_PATH,
+                            "success": True,
+                            "jsonPath": str(output / "canonical" / "asset.json"),
+                        }
+                    ],
+                },
+            )
+            write_json(
+                output / "canonical" / "asset.json",
+                {
+                    "projectName": PROJECT,
+                    "assetPath": ASSET_PATH,
+                    "packageName": ASSET_PATH.split(".", 1)[0],
+                    "assetClass": ASSET_CLASS,
+                    "revision": {"available": True, "packageDirty": False, "value": saved_revision},
+                    "assetDetails": {
+                        "type": "data-asset",
+                        "properties": [{"name": "BoolValue", "value": property_value}],
+                    },
+                },
+            )
+            return ProcessResult(0, "", "")
+        return runner
+
+    def _checkpoint_bridge_and_package(self, saved_bytes: bytes):
+        package_file = (
+            self.project_path.parent
+            / "Content"
+            / "UEAgentKitWriteTests"
+            / "ScalarRegression"
+            / "DA_ScalarPatchTarget.uasset"
+        )
+        package_file.parent.mkdir(parents=True, exist_ok=True)
+        package_file.write_bytes(b"fresh-bytes" * 8)
+
+        class CheckpointBridge(AgentWorkflowTests.ClosedLoopLiveService):
+            def call_method(self, method: str, params: dict[str, Any], **_: Any) -> dict[str, Any]:
+                if method == "editor.verifyAssetPropertyLiveFast":
+                    self.calls.append((method, params))
+                    return {
+                        "assetPath": ASSET_PATH,
+                        "editorSessionId": "session-1",
+                        "editorProcessId": 1234,
+                        "packageDirty": self.dirty,
+                        "targetResolved": True,
+                        "value": True,
+                        "compileRequired": False,
+                        "compileAttempted": False,
+                        "compileSucceeded": False,
+                    }
+                return super().call_method(method, params, **_)
+
+        bridge = CheckpointBridge(dirty=True, on_save=lambda: package_file.write_bytes(saved_bytes))
+        return bridge, package_file
+
+    def test_checkpoint_save_uses_zero_exports_and_strong_verify_uses_one(self) -> None:
+        fresh_bytes = b"checkpoint-before" * 8
+        saved_bytes = b"checkpoint-after" * 8
+        fresh_revision = "sha256:" + hashlib.sha256(fresh_bytes).hexdigest()
+        saved_revision = "sha256:" + hashlib.sha256(saved_bytes).hexdigest()
+        bridge, package_file = self._checkpoint_bridge_and_package(saved_bytes)
+        package_file.write_bytes(fresh_bytes)
+
+        class ClosedLoopTracker(FakeFreshnessTracker):
+            def inspect_asset(self, asset_path: str) -> dict[str, Any]:
+                result = super().inspect_asset(asset_path)
+                result["diskRevision"] = saved_revision if self.state == "stale" else fresh_revision
+                return result
+
+        tracker = ClosedLoopTracker()
+        runner_calls: list[str] = []
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self._checkpoint_nonbp_runner(runner_calls, saved_revision),
+            freshness_tracker=tracker,
+            live_editor_service=bridge,
+        )
+        change_set_id = self._bound_change_set(service)
+        applied = self._apply_bound_change_set(service, change_set_id)
+        preview = service.save_authorized_asset(
+            ASSET_PATH,
+            change_set_id=change_set_id,
+            verification_mode="checkpoint",
+        )
+        self.assertEqual(preview["verificationMode"], "checkpoint")
+        self.assertTrue(preview["checkpointId"].startswith("cp_"))
+        self.assertEqual(preview["effectiveReceiptCount"], 1)
+        self.assertEqual(runner_calls, [])
+
+        saved = service.save_authorized_asset(
+            ASSET_PATH,
+            mode="Commit",
+            save_receipt=preview["saveReceipt"],
+            confirmation=f"SAVE {preview['saveReceipt']}",
+            change_set_id=change_set_id,
+            verification_mode="checkpoint",
+        )
+        self.assertTrue(saved["saved"])
+        self.assertFalse(saved["verified"])
+        self.assertEqual(saved["verificationKind"], "persisted-action")
+        self.assertEqual(runner_calls, [])
+        self.assertEqual(package_file.read_bytes(), saved_bytes)
+        checkpoint_record = service._checkpoints[preview["checkpointId"]]
+        self.assertEqual(checkpoint_record.state, "saved")
+        self.assertEqual(checkpoint_record.after_disk_revision, saved_revision)
+
+        verified = service.verify_live_write_checkpoint(preview["checkpointId"])
+        self.assertTrue(verified["verified"])
+        self.assertEqual(verified["verificationKind"], "independent-verified")
+        self.assertEqual(verified["checkpointId"], preview["checkpointId"])
+        self.assertEqual(verified["childUnrealProcessCount"], 1)
+        self.assertEqual(verified["effectiveOperationCount"], 1)
+        self.assertEqual(verified["verifiedOperationCount"], 1)
+        self.assertEqual(runner_calls, ["RunAssetCatalog.ps1"])
+        self.assertEqual(service.get_change_set(change_set_id)["status"], "verified")
+        self.assertNotIn(applied["liveApplyReceipt"], service._live_applies)
+
+        # Idempotent repeat uses no additional export.
+        runner_calls.clear()
+        repeated = service.verify_live_write_checkpoint(preview["checkpointId"])
+        self.assertTrue(repeated["verified"])
+        self.assertEqual(repeated["childUnrealProcessCount"], 0)
+        self.assertEqual(runner_calls, [])
+
+    def test_checkpoint_same_target_supersession_keeps_audit_history(self) -> None:
+        fresh_bytes = b"supersede-before" * 8
+        saved_bytes = b"supersede-after" * 8
+        fresh_revision = "sha256:" + hashlib.sha256(fresh_bytes).hexdigest()
+        saved_revision = "sha256:" + hashlib.sha256(saved_bytes).hexdigest()
+        bridge, package_file = self._checkpoint_bridge_and_package(saved_bytes)
+        package_file.write_bytes(fresh_bytes)
+
+        class ClosedLoopTracker(FakeFreshnessTracker):
+            def inspect_asset(self, asset_path: str) -> dict[str, Any]:
+                result = super().inspect_asset(asset_path)
+                result["diskRevision"] = saved_revision if self.state == "stale" else fresh_revision
+                return result
+
+        runner_calls: list[str] = []
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self._checkpoint_nonbp_runner(runner_calls, saved_revision),
+            freshness_tracker=ClosedLoopTracker(),
+            live_editor_service=bridge,
+        )
+        change_set_id = self._bound_change_set(service)
+        first = self._apply_bound_change_set(service, change_set_id)
+        second = self._apply_bound_change_set(service, change_set_id)
+        preview = service.save_authorized_asset(
+            ASSET_PATH,
+            change_set_id=change_set_id,
+            verification_mode="checkpoint",
+        )
+        self.assertEqual(preview["effectiveReceiptCount"], 1)
+        self.assertEqual(preview["supersededReceiptCount"], 1)
+        self.assertIn(first["liveApplyReceipt"], preview["supersededReceipts"])
+        self.assertIn(second["liveApplyReceipt"], preview["effectiveReceipts"])
+
+        service.save_authorized_asset(
+            ASSET_PATH,
+            mode="Commit",
+            save_receipt=preview["saveReceipt"],
+            confirmation=f"SAVE {preview['saveReceipt']}",
+            change_set_id=change_set_id,
+            verification_mode="checkpoint",
+        )
+        change_set = service.get_change_set(change_set_id)
+        first_operation = next(op for op in change_set["operations"] if op["receipt"] == first["liveApplyReceipt"])
+        second_operation = next(op for op in change_set["operations"] if op["receipt"] == second["liveApplyReceipt"])
+        self.assertEqual(first_operation["status"], "superseded")
+        self.assertEqual(first_operation["superseded"], True)
+        self.assertEqual(second_operation["status"], "saved")
+
+        verified = service.verify_live_write_checkpoint(preview["checkpointId"])
+        change_set_after = service.get_change_set(change_set_id)
+        first_after = next(op for op in change_set_after["operations"] if op["receipt"] == first["liveApplyReceipt"])
+        second_after = next(op for op in change_set_after["operations"] if op["receipt"] == second["liveApplyReceipt"])
+        self.assertEqual(first_after["status"], "superseded")
+        self.assertFalse(first_after["verified"])
+        self.assertEqual(second_after["status"], "verified")
+        self.assertEqual(change_set_after["status"], "verified")
+        self.assertEqual(change_set_after["validation"]["state"], "verified")
+        self.assertTrue(verified["verified"])
+
+    def test_checkpoint_stale_disk_revision_fails_closed(self) -> None:
+        fresh_bytes = b"stale-before" * 8
+        saved_bytes = b"stale-after" * 8
+        changed_bytes = b"stale-changed" * 8
+        fresh_revision = "sha256:" + hashlib.sha256(fresh_bytes).hexdigest()
+        saved_revision = "sha256:" + hashlib.sha256(saved_bytes).hexdigest()
+        bridge, package_file = self._checkpoint_bridge_and_package(saved_bytes)
+        package_file.write_bytes(fresh_bytes)
+
+        class ClosedLoopTracker(FakeFreshnessTracker):
+            def inspect_asset(self, asset_path: str) -> dict[str, Any]:
+                result = super().inspect_asset(asset_path)
+                result["diskRevision"] = saved_revision if self.state == "stale" else fresh_revision
+                return result
+
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=FakeWorkflowRunner(),
+            freshness_tracker=ClosedLoopTracker(),
+            live_editor_service=bridge,
+        )
+        change_set_id = self._bound_change_set(service)
+        self._apply_bound_change_set(service, change_set_id)
+        preview = service.save_authorized_asset(
+            ASSET_PATH,
+            change_set_id=change_set_id,
+            verification_mode="checkpoint",
+        )
+        saved = service.save_authorized_asset(
+            ASSET_PATH,
+            mode="Commit",
+            save_receipt=preview["saveReceipt"],
+            confirmation=f"SAVE {preview['saveReceipt']}",
+            change_set_id=change_set_id,
+            verification_mode="checkpoint",
+        )
+        self.assertTrue(saved["saved"])
+        package_file.write_bytes(changed_bytes)
+        with self.assertRaises(WorkflowError) as stale:
+            service.verify_live_write_checkpoint(preview["checkpointId"])
+        self.assertEqual(stale.exception.code, "checkpoint-revision-stale")
+        self.assertEqual(service._checkpoints[preview["checkpointId"]].state, "stale")
+
+    def test_checkpoint_canonical_mismatch_leaves_saved_not_verified(self) -> None:
+        fresh_bytes = b"mismatch-before" * 8
+        saved_bytes = b"mismatch-after" * 8
+        fresh_revision = "sha256:" + hashlib.sha256(fresh_bytes).hexdigest()
+        saved_revision = "sha256:" + hashlib.sha256(saved_bytes).hexdigest()
+        bridge, package_file = self._checkpoint_bridge_and_package(saved_bytes)
+        package_file.write_bytes(fresh_bytes)
+
+        class ClosedLoopTracker(FakeFreshnessTracker):
+            def inspect_asset(self, asset_path: str) -> dict[str, Any]:
+                result = super().inspect_asset(asset_path)
+                result["diskRevision"] = saved_revision if self.state == "stale" else fresh_revision
+                return result
+
+        runner_calls: list[str] = []
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self._checkpoint_nonbp_runner(runner_calls, saved_revision, property_value=False),
+            freshness_tracker=ClosedLoopTracker(),
+            live_editor_service=bridge,
+        )
+        change_set_id = self._bound_change_set(service)
+        applied = self._apply_bound_change_set(service, change_set_id)
+        preview = service.save_authorized_asset(
+            ASSET_PATH,
+            change_set_id=change_set_id,
+            verification_mode="checkpoint",
+        )
+        saved = service.save_authorized_asset(
+            ASSET_PATH,
+            mode="Commit",
+            save_receipt=preview["saveReceipt"],
+            confirmation=f"SAVE {preview['saveReceipt']}",
+            change_set_id=change_set_id,
+            verification_mode="checkpoint",
+        )
+        self.assertTrue(saved["saved"])
+        with self.assertRaises(WorkflowError) as mismatch:
+            service.verify_live_write_checkpoint(preview["checkpointId"])
+        self.assertEqual(mismatch.exception.code, "checkpoint-value-mismatch")
+        checkpoint = service._checkpoints[preview["checkpointId"]]
+        self.assertEqual(checkpoint.state, "saved")
+        self.assertFalse(checkpoint.strong_verification_kind)
+        change_set = service.get_change_set(change_set_id)
+        operation = next(op for op in change_set["operations"] if op["receipt"] == applied["liveApplyReceipt"])
+        self.assertEqual(operation["status"], "saved")
+        self.assertFalse(operation["verified"])
+        self.assertIn(applied["liveApplyReceipt"], service._live_applies)
 
 
 if __name__ == "__main__":

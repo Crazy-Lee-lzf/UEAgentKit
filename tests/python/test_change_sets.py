@@ -193,6 +193,30 @@ class ChangeSetValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             deserialize_change_set_record(serialized, PROJECT)
 
+    def test_superseded_status_is_neutral_and_roundtrips_checkpoint_binding(self) -> None:
+        superseded = operation("superseded", receipt="live_old")
+        superseded.save_receipt = "save_checkpoint"
+        superseded.checkpoint_id = "cp_checkpoint"
+        source = record([superseded])
+        self.assertEqual(derive_change_set_status(source.operations), "no-op")
+        self.assertTrue(is_terminal_change_set(source))
+        serialized = serialize_change_set_record(source, PROJECT)
+        self.assertEqual(serialized["operations"][0]["status"], "superseded")
+        self.assertEqual(serialized["operations"][0]["checkpointId"], "cp_checkpoint")
+        restored = deserialize_change_set_record(serialized, PROJECT)
+        self.assertEqual(restored.operations[0].status, "superseded")
+        self.assertEqual(restored.operations[0].checkpoint_id, "cp_checkpoint")
+        self.assertEqual(restored.operations[0].save_receipt, "save_checkpoint")
+
+    def test_verified_plus_superseded_derives_verified(self) -> None:
+        values = [
+            operation("verified", receipt="live_final"),
+            operation("superseded", receipt="live_old"),
+        ]
+        self.assertEqual(derive_change_set_status(values), "verified")
+        source = record(values)
+        self.assertTrue(is_terminal_change_set(source))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -478,6 +478,7 @@ def _capabilities_response(
                     "ue_save_authorized_asset",
                     "ue_verify_live_write",
                     "ue_verify_live_write_fast",
+                    "ue_verify_live_write_checkpoint",
                 ],
             },
         },

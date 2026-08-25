@@ -741,6 +741,22 @@ def register_workflow_tools(
             return error_response("ue_verify_live_write_fast", exc, read_only=True)
 
     @server.tool(annotations=read_annotations)
+    def ue_verify_live_write_checkpoint(
+        checkpoint_id: str,
+        change_set_id: str = "",
+        asset_path: str = "",
+    ) -> dict[str, Any]:
+        """Run exactly one independent export to verify all effective writes bound to a saved asset checkpoint."""
+        try:
+            return workflow_service.verify_live_write_checkpoint(
+                checkpoint_id,
+                change_set_id=change_set_id,
+                asset_path=asset_path,
+            )
+        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_verify_live_write_checkpoint", exc, read_only=True)
+
+    @server.tool(annotations=read_annotations)
     def ue_get_asset_state(asset_path: str) -> dict[str, Any]:
         """Compare Editor memory, disk Package, Revision Export, and frozen SQLite state for one exact asset."""
         try:
@@ -766,6 +782,7 @@ def register_workflow_tools(
         save_receipt: str = "",
         confirmation: str = "",
         change_set_id: str = "",
+        verification_mode: Literal["immediate", "checkpoint"] = "immediate",
     ) -> dict[str, Any]:
         """Preview or explicitly save one policy-authorized loaded Dirty asset with backup and verification."""
         try:
@@ -775,6 +792,7 @@ def register_workflow_tools(
                 save_receipt=save_receipt,
                 confirmation=confirmation,
                 change_set_id=change_set_id,
+                verification_mode=verification_mode,
             )
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_save_authorized_asset", exc, read_only=False)

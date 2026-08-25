@@ -30,10 +30,18 @@ CHANGE_SET_OPERATION_STATUSES = {
     "saved",
     "verified",
     "no-op",
+    "superseded",
     "failed",
     "unknown",
 }
-TERMINAL_CHANGE_SET_STATUSES = {"undone", "discarded", "verified", "no-op", "failed"}
+TERMINAL_CHANGE_SET_STATUSES = {
+    "undone",
+    "discarded",
+    "verified",
+    "no-op",
+    "superseded",
+    "failed",
+}
 
 _SAFE_ID_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
 
@@ -57,6 +65,7 @@ class ChangeSetOperationRecord:
     updated_at_utc: str
     save_receipt: str = ""
     failure_code: str = ""
+    checkpoint_id: str = ""
 
 
 @dataclass
@@ -150,8 +159,14 @@ def derive_change_set_status(operations: list[ChangeSetOperationRecord]) -> str:
         return "verified"
     if all(status == "no-op" for status in statuses):
         return "no-op"
+    if all(status == "superseded" for status in statuses):
+        return "no-op"
+    if all(status in {"verified", "no-op", "superseded"} for status in statuses):
+        return "verified" if any(status == "verified" for status in statuses) else "no-op"
     if all(status in {"verified", "no-op"} for status in statuses):
         return "verified"
+    if all(status in {"saved", "verified", "superseded"} for status in statuses):
+        return "saved"
     if all(status in {"saved", "verified"} for status in statuses):
         return "saved"
     if all(status == "undone" for status in statuses):
@@ -182,6 +197,7 @@ def _serialize_operation(operation: ChangeSetOperationRecord) -> dict[str, Any]:
         "updatedAtUtc": operation.updated_at_utc,
         "saveReceipt": operation.save_receipt,
         "failureCode": operation.failure_code,
+        "checkpointId": operation.checkpoint_id,
     }
 
 
@@ -221,6 +237,7 @@ def _deserialize_operation(value: Any) -> ChangeSetOperationRecord:
         "editor_session_id": str(value.get("editorSessionId", "")),
         "save_receipt": str(value.get("saveReceipt", "")),
         "failure_code": str(value.get("failureCode", "")),
+        "checkpoint_id": str(value.get("checkpointId", "")),
     }
     if any(len(item) > 512 for item in fields.values()):
         raise ValueError("change set operation field exceeds bounded contract")

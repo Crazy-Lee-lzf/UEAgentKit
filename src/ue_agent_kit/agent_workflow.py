@@ -9,7 +9,7 @@ import subprocess
 import threading
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Literal
 
@@ -60,6 +60,7 @@ from .snapshot_lifecycle import (
 WORKFLOW_SCHEMA_VERSION = "1.0"
 MEMORY_TASK_EVIDENCE_SCHEMA_VERSION = "1.0"
 LIVE_WRITE_JOURNAL_SCHEMA_VERSION = "1.0"
+CHECKPOINT_RECORD_SCHEMA_VERSION = "1.0"
 PUBLISHED_VERSION = "0.7.0"
 DEVELOPMENT_LINE = "0.7.0"
 MAX_WORKFLOW_RECORDS = 128
@@ -84,6 +85,23 @@ CRASH_EXIT_CODES = {-1073741819, -1073741676, -1073740791, 3221225477, 322122562
 def _live_write_value_kind(operation: str) -> str:
     spec = LIVE_WRITE_OPERATION_REGISTRY.get(operation)
     return spec.live_write_value_kind if spec is not None else "unknown"
+
+
+def _live_write_stable_target_key(operation: str, target: dict[str, Any]) -> str:
+    if operation == "setVariableDefault":
+        return f"blueprint-variable:{target.get('variableName', '')}"
+    if operation == "setComponentProperty":
+        return f"blueprint-component:{target.get('componentName', '')}:{target.get('propertyPath', '')}"
+    if operation == "setPinDefault":
+        return (
+            f"blueprint-pin:{target.get('graphGuid', '')}:"
+            f"{target.get('nodeGuid', '')}:{target.get('pinName', '')}"
+        )
+    spec = LIVE_WRITE_OPERATION_REGISTRY.get(operation)
+    selector_field = spec.live_write_verification_target if spec is not None else ""
+    if selector_field and target.get(selector_field):
+        return f"{operation}:{target.get(selector_field)}"
+    return f"{operation}:{json.dumps(target, ensure_ascii=False, sort_keys=True)}"
 
 
 
@@ -180,6 +198,39 @@ class LiveApplyRecord:
     saved: bool = False
     save_receipt: str = ""
     verified: bool = False
+    checkpoint_id: str = ""
+
+
+@dataclass
+class LiveWriteCheckpointRecord:
+    checkpoint_id: str
+    change_set_id: str
+    asset_path: str
+    asset_class: str
+    package_name: str
+    state: str
+    created_at_utc: str
+    saved_at_utc: str = ""
+    verified_at_utc: str = ""
+    editor_session_id_at_prepare: str = ""
+    editor_process_id_at_prepare: int = 0
+    before_disk_revision: str = ""
+    after_disk_revision: str = ""
+    save_receipt: str = ""
+    backup_manifest_id: str = ""
+    included_receipts: list[str] = field(default_factory=list)
+    effective_receipts: list[str] = field(default_factory=list)
+    superseded_receipts: list[str] = field(default_factory=list)
+    effective_operations: list[dict[str, Any]] = field(default_factory=list)
+    effective_operation_digest: str = ""
+    strong_verification_kind: str = ""
+    strong_verification_report_id: str = ""
+    strong_artifact_root: str = ""
+    strong_artifact_revision: str = ""
+    strong_artifact_digest: str = ""
+    child_unreal_process_count: int = 0
+    mismatch_diagnostics: list[dict[str, Any]] = field(default_factory=list)
+    verified_operation_coverage: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _live_write_memory_task_evidence(
@@ -568,6 +619,13 @@ class SaveAuthorizationRecord:
     editor_session_id: str
     editor_process_id: int
     consumed: bool = False
+    verification_mode: str = "immediate"
+    change_set_id: str = ""
+    checkpoint_id: str = ""
+    included_receipts: tuple[str, ...] = ()
+    effective_receipts: tuple[str, ...] = ()
+    superseded_receipts: tuple[str, ...] = ()
+    effective_operation_digest: str = ""
 
 
 @dataclass
@@ -816,6 +874,9 @@ class PatchWorkflowService(RetargetWorkflowMixin):
         self._live_apply_by_asset: dict[str, str] = {}
         self._live_write_journal_errors: list[str] = []
         self._live_write_recovered_count = 0
+        self._checkpoints: dict[str, LiveWriteCheckpointRecord] = {}
+        self._checkpoint_journal_errors: list[str] = []
+        self._checkpoint_recovered_count = 0
         self._change_sets: dict[str, ChangeSetRecord] = {}
         self.live_editor_service = live_editor_service
         self.active_snapshot = self.config.active_snapshot
@@ -832,6 +893,7 @@ class PatchWorkflowService(RetargetWorkflowMixin):
             self.config.revision_export,
         )
         self._load_live_write_journal()
+        self._load_checkpoint_journal()
         self._load_change_set_journal()
 
     @property
@@ -1005,6 +1067,7 @@ class PatchWorkflowService(RetargetWorkflowMixin):
             "saved": record.saved,
             "saveReceipt": record.save_receipt,
             "verified": record.verified,
+            "checkpointId": record.checkpoint_id,
         }
 
     def _deserialize_live_apply_record(self, value: dict[str, Any], expected_receipt: str) -> LiveApplyRecord:
@@ -1021,9 +1084,9 @@ class PatchWorkflowService(RetargetWorkflowMixin):
         target = value.get("target")
         if not isinstance(target, dict):
             raise ValueError("journal target invalid")
-        for field in spec.target_fields:
-            validator = spec.target_validators.get(field)
-            if validator is None or not validator(target.get(field)):
+        for target_field in spec.target_fields:
+            validator = spec.target_validators.get(target_field)
+            if validator is None or not validator(target.get(target_field)):
                 raise ValueError("journal target field invalid")
         transaction_id = str(value.get("transactionId", ""))
         editor_session_id = str(value.get("editorSessionId", ""))
@@ -1057,6 +1120,7 @@ class PatchWorkflowService(RetargetWorkflowMixin):
             saved=saved,
             save_receipt=save_receipt,
             verified=False,
+            checkpoint_id=str(value.get("checkpointId", "")),
         )
 
     def _record_live_write_journal_error(self, receipt: str) -> None:
@@ -1107,6 +1171,181 @@ class PatchWorkflowService(RetargetWorkflowMixin):
             self._live_applies[record.receipt] = record
             self._live_write_recovered_count += 1
         self._prune_records()
+
+    def _checkpoint_journal_root(self) -> Path:
+        return self._safe_work_path("checkpoints")
+
+    @staticmethod
+    def _validate_checkpoint_id(checkpoint_id: str) -> str:
+        if (
+            not isinstance(checkpoint_id, str)
+            or not checkpoint_id.startswith("cp_")
+            or len(checkpoint_id) <= 3
+            or len(checkpoint_id) > 96
+            or any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for character in checkpoint_id)
+        ):
+            raise WorkflowError("checkpoint-invalid", "checkpointId is not a valid UEAgentKit checkpoint identifier.")
+        return checkpoint_id
+
+    def _checkpoint_journal_path(self, checkpoint_id: str) -> Path:
+        checkpoint_id = self._validate_checkpoint_id(checkpoint_id)
+        return self._checkpoint_journal_root() / f"{checkpoint_id}.json"
+
+    @staticmethod
+    def _serialize_checkpoint_record(record: LiveWriteCheckpointRecord) -> dict[str, Any]:
+        return {
+            "schemaVersion": CHECKPOINT_RECORD_SCHEMA_VERSION,
+            "projectName": None,  # filled by instance method below
+            "checkpointId": record.checkpoint_id,
+            "changeSetId": record.change_set_id,
+            "assetPath": record.asset_path,
+            "assetClass": record.asset_class,
+            "packageName": record.package_name,
+            "state": record.state,
+            "createdAtUtc": record.created_at_utc,
+            "savedAtUtc": record.saved_at_utc,
+            "verifiedAtUtc": record.verified_at_utc,
+            "editorSessionIdAtPrepare": record.editor_session_id_at_prepare,
+            "editorProcessIdAtPrepare": record.editor_process_id_at_prepare,
+            "beforeDiskRevision": record.before_disk_revision,
+            "afterDiskRevision": record.after_disk_revision,
+            "saveReceipt": record.save_receipt,
+            "backupManifestId": record.backup_manifest_id,
+            "includedReceipts": list(record.included_receipts),
+            "effectiveReceipts": list(record.effective_receipts),
+            "supersededReceipts": list(record.superseded_receipts),
+            "effectiveOperations": list(record.effective_operations),
+            "effectiveOperationDigest": record.effective_operation_digest,
+            "strongVerificationKind": record.strong_verification_kind,
+            "strongVerificationReportId": record.strong_verification_report_id,
+            "strongArtifactRoot": record.strong_artifact_root,
+            "strongArtifactRevision": record.strong_artifact_revision,
+            "strongArtifactDigest": record.strong_artifact_digest,
+            "childUnrealProcessCount": record.child_unreal_process_count,
+            "mismatchDiagnostics": list(record.mismatch_diagnostics),
+            "verifiedOperationCoverage": list(record.verified_operation_coverage),
+        }
+
+    def _persist_checkpoint(self, record: LiveWriteCheckpointRecord) -> bool:
+        payload = self._serialize_checkpoint_record(record)
+        payload["projectName"] = self.project_name
+        try:
+            _write_json_atomic(
+                self._checkpoint_journal_path(record.checkpoint_id),
+                payload,
+            )
+        except (OSError, TypeError, ValueError):
+            self._record_checkpoint_journal_error(record.checkpoint_id)
+            return False
+        if record.checkpoint_id in self._checkpoint_journal_errors:
+            self._checkpoint_journal_errors.remove(record.checkpoint_id)
+        return True
+
+    def _record_checkpoint_journal_error(self, checkpoint_id: str) -> None:
+        if checkpoint_id not in self._checkpoint_journal_errors:
+            self._checkpoint_journal_errors.append(checkpoint_id)
+
+    def _delete_checkpoint_journal(self, checkpoint_id: str) -> bool:
+        path = self._checkpoint_journal_path(checkpoint_id)
+        try:
+            if path.is_file():
+                path.unlink()
+        except OSError:
+            self._record_checkpoint_journal_error(checkpoint_id)
+            return False
+        if checkpoint_id in self._checkpoint_journal_errors:
+            self._checkpoint_journal_errors.remove(checkpoint_id)
+        return True
+
+    def _deserialize_checkpoint_record(self, value: dict[str, Any], expected_id: str) -> LiveWriteCheckpointRecord:
+        if (
+            value.get("schemaVersion") != CHECKPOINT_RECORD_SCHEMA_VERSION
+            or value.get("projectName") != self.project_name
+        ):
+            raise ValueError("checkpoint journal identity mismatch")
+        checkpoint_id = self._validate_checkpoint_id(str(value.get("checkpointId", "")))
+        if checkpoint_id != expected_id:
+            raise ValueError("checkpoint journal id mismatch")
+        change_set_id = validate_change_set_id(str(value.get("changeSetId", "")))
+        asset_path = self._validate_refresh_asset_path(str(value.get("assetPath", "")))
+        asset_class = str(value.get("assetClass", ""))
+        package_name = str(value.get("packageName", ""))
+        state = str(value.get("state", ""))
+        created_at_utc = str(value.get("createdAtUtc", ""))
+        if (
+            not asset_class
+            or not package_name
+            or state not in {"prepared", "saved", "verified", "failed", "stale"}
+            or not created_at_utc
+        ):
+            raise ValueError("checkpoint journal lifecycle invalid")
+        included = [self._validate_live_apply_receipt(str(item)) for item in value.get("includedReceipts", [])]
+        effective = [self._validate_live_apply_receipt(str(item)) for item in value.get("effectiveReceipts", [])]
+        superseded = [self._validate_live_apply_receipt(str(item)) for item in value.get("supersededReceipts", [])]
+        operations_value = value.get("effectiveOperations")
+        if not isinstance(operations_value, list) or not all(isinstance(item, dict) for item in operations_value):
+            raise ValueError("checkpoint effective operations invalid")
+        save_receipt = str(value.get("saveReceipt", ""))
+        after_disk_revision = str(value.get("afterDiskRevision", ""))
+        before_disk_revision = str(value.get("beforeDiskRevision", ""))
+        if state in {"saved", "verified", "stale", "failed"}:
+            if not save_receipt.startswith("save_") or not after_disk_revision.startswith("sha256:"):
+                raise ValueError("checkpoint saved identity invalid")
+        return LiveWriteCheckpointRecord(
+            checkpoint_id=checkpoint_id,
+            change_set_id=change_set_id,
+            asset_path=asset_path,
+            asset_class=asset_class,
+            package_name=package_name,
+            state=state,
+            created_at_utc=created_at_utc,
+            saved_at_utc=str(value.get("savedAtUtc", "")),
+            verified_at_utc=str(value.get("verifiedAtUtc", "")),
+            editor_session_id_at_prepare=str(value.get("editorSessionIdAtPrepare", "")),
+            editor_process_id_at_prepare=int(value.get("editorProcessIdAtPrepare", 0) or 0),
+            before_disk_revision=before_disk_revision,
+            after_disk_revision=after_disk_revision,
+            save_receipt=save_receipt,
+            backup_manifest_id=str(value.get("backupManifestId", "")),
+            included_receipts=included,
+            effective_receipts=effective,
+            superseded_receipts=superseded,
+            effective_operations=[dict(item) for item in operations_value],
+            effective_operation_digest=str(value.get("effectiveOperationDigest", "")),
+            strong_verification_kind=str(value.get("strongVerificationKind", "")),
+            strong_verification_report_id=str(value.get("strongVerificationReportId", "")),
+            strong_artifact_root=str(value.get("strongArtifactRoot", "")),
+            strong_artifact_revision=str(value.get("strongArtifactRevision", "")),
+            strong_artifact_digest=str(value.get("strongArtifactDigest", "")),
+            child_unreal_process_count=int(value.get("childUnrealProcessCount", 0) or 0),
+            mismatch_diagnostics=[dict(item) for item in value.get("mismatchDiagnostics", []) if isinstance(item, dict)],
+            verified_operation_coverage=[
+                dict(item) for item in value.get("verifiedOperationCoverage", []) if isinstance(item, dict)
+            ],
+        )
+
+    def _load_checkpoint_journal(self) -> None:
+        root = self._checkpoint_journal_root()
+        if not root.is_dir():
+            return
+        for path in sorted(root.glob("cp_*.json")):
+            try:
+                record = self._deserialize_checkpoint_record(_read_json(path), path.stem)
+            except (WorkflowError, OSError, ValueError):
+                self._checkpoint_journal_errors.append(path.stem)
+                continue
+            self._checkpoints[record.checkpoint_id] = record
+            self._checkpoint_recovered_count += 1
+
+    def _resolve_checkpoint(self, checkpoint_id: str) -> LiveWriteCheckpointRecord:
+        checkpoint_id = self._validate_checkpoint_id(checkpoint_id)
+        record = self._checkpoints.get(checkpoint_id)
+        if record is None:
+            raise WorkflowError(
+                "checkpoint-invalid",
+                "The checkpoint is not present in this MCP server session.",
+            )
+        return record
 
     def _remove_live_apply(self, receipt: str) -> None:
         self._live_applies.pop(receipt, None)
@@ -1207,7 +1446,26 @@ class PatchWorkflowService(RetargetWorkflowMixin):
             live_record = self._live_applies.get(operation.receipt)
             apply_record = self._applies.get(operation.receipt)
             desired_status = operation.status
-            if live_record is not None:
+            if operation.status == "superseded" and live_record is not None:
+                if not operation.plan_id:
+                    operation.plan_id = live_record.plan_id
+                    changed = True
+                if not operation.asset_path:
+                    operation.asset_path = live_record.asset_path
+                    changed = True
+                if not operation.operation:
+                    operation.operation = live_record.operation
+                    changed = True
+                if not operation.transaction_id:
+                    operation.transaction_id = live_record.transaction_id
+                    changed = True
+                if not operation.editor_session_id:
+                    operation.editor_session_id = live_record.editor_session_id
+                    changed = True
+                if not operation.save_receipt and live_record.save_receipt:
+                    operation.save_receipt = live_record.save_receipt
+                    changed = True
+            elif live_record is not None:
                 if not operation.plan_id:
                     operation.plan_id = live_record.plan_id
                     changed = True
@@ -1364,6 +1622,8 @@ class PatchWorkflowService(RetargetWorkflowMixin):
             "verified": operation.status == "verified",
             "noOp": operation.status == "no-op",
             "saveReceipt": operation.save_receipt,
+            "checkpointId": operation.checkpoint_id,
+            "superseded": operation.status == "superseded",
             "failureCode": operation.failure_code,
             "createdAtUtc": operation.created_at_utc,
             "updatedAtUtc": operation.updated_at_utc,
@@ -1374,11 +1634,14 @@ class PatchWorkflowService(RetargetWorkflowMixin):
         statuses = [operation.status for operation in record.operations]
         verified_count = sum(status == "verified" for status in statuses)
         no_op_count = sum(status == "no-op" for status in statuses)
+        superseded_count = sum(status == "superseded" for status in statuses)
+        neutral_count = no_op_count + superseded_count
+        effective_count = len(statuses) - neutral_count
         if any(status == "unknown" for status in statuses):
             state = "unknown"
-        elif statuses and no_op_count == len(statuses):
+        elif statuses and neutral_count == len(statuses):
             state = "no-op"
-        elif statuses and verified_count == len(statuses):
+        elif statuses and verified_count == effective_count:
             state = "verified"
         elif verified_count:
             state = "partial"
@@ -1388,6 +1651,7 @@ class PatchWorkflowService(RetargetWorkflowMixin):
             "state": state,
             "verifiedOperationCount": verified_count,
             "noOpOperationCount": no_op_count,
+            "supersededOperationCount": superseded_count,
             "operationCount": len(statuses),
         }
 
@@ -1396,11 +1660,13 @@ class PatchWorkflowService(RetargetWorkflowMixin):
         statuses = [operation.status for operation in record.operations]
         saved_count = sum(status in {"saved", "verified"} for status in statuses)
         no_op_count = sum(status == "no-op" for status in statuses)
+        superseded_count = sum(status == "superseded" for status in statuses)
+        neutral_count = no_op_count + superseded_count
         if any(status == "unknown" for status in statuses):
             state = "unknown"
-        elif statuses and no_op_count == len(statuses):
+        elif statuses and neutral_count == len(statuses):
             state = "not-required"
-        elif statuses and saved_count + no_op_count == len(statuses):
+        elif statuses and saved_count + neutral_count == len(statuses):
             state = "saved"
         elif saved_count:
             state = "partial"
@@ -1410,6 +1676,7 @@ class PatchWorkflowService(RetargetWorkflowMixin):
             "state": state,
             "savedOperationCount": saved_count,
             "noOpOperationCount": no_op_count,
+            "supersededOperationCount": superseded_count,
             "operationCount": len(statuses),
         }
 
@@ -1674,11 +1941,14 @@ class PatchWorkflowService(RetargetWorkflowMixin):
         *,
         save_receipt: str = "",
         failure_code: str = "",
+        checkpoint_id: str = "",
     ) -> bool:
         operation = self._assert_change_set_member(change_set_id, receipt)
         operation.status = status
         if save_receipt:
             operation.save_receipt = save_receipt
+        if checkpoint_id:
+            operation.checkpoint_id = checkpoint_id
         if failure_code:
             operation.failure_code = failure_code
         operation.updated_at_utc = utc_now_iso()
@@ -3444,6 +3714,410 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 response["changeSetUpdated"] = change_set_updated
             return response
 
+    def _fast_verify_live_record(self, record: LiveApplyRecord) -> dict[str, Any]:
+        bridge_parameters: dict[str, Any] = {
+            "operation": record.operation,
+            "assetPath": record.asset_path,
+            "target": record.target,
+        }
+        try:
+            inspection = self.live_editor_service.call_method(
+                "editor.verifyAssetPropertyLiveFast",
+                bridge_parameters,
+            )
+        except Exception as exc:
+            raise WorkflowError(
+                "live-fast-verify-failed",
+                "The Editor could not complete Fast Resident Verify.",
+                details=getattr(exc, "details", {}),
+            ) from exc
+        result = inspection if isinstance(inspection, dict) else {}
+        if not isinstance(result, dict) or result.get("targetResolved") is not True:
+            raise WorkflowError(
+                "live-fast-verify-target-not-found",
+                "Fast Resident Verify could not re-resolve the exact target in the current Editor session.",
+            )
+        bridge_session = str(result.get("editorSessionId", ""))
+        if bridge_session != record.editor_session_id:
+            raise WorkflowError(
+                "live-fast-verify-session-mismatch",
+                "The current Editor session does not match the live write session; resident evidence is no longer applicable.",
+                details={"expected_session": record.editor_session_id, "actual_session": bridge_session},
+            )
+        actual_value = result.get("value")
+        if not _live_write_exported_matches(record.after_value, actual_value):
+            raise WorkflowError(
+                "live-fast-verify-value-mismatch",
+                "The current resident value does not match the live write after-value.",
+                details={"expectedValue": record.after_value, "actualValue": actual_value},
+            )
+        return result
+
+    def _derive_checkpoint_operations(
+        self,
+        change_set_id: str,
+        asset_path: str,
+        editor_session_id: str,
+    ) -> dict[str, Any]:
+        change_set = self._resolve_change_set(change_set_id)
+        candidates: list[tuple[str, str, LiveApplyRecord]] = []
+        for operation in change_set.operations:
+            live_record = self._live_applies.get(operation.receipt)
+            if (
+                live_record is None
+                or live_record.asset_path != asset_path
+                or live_record.editor_session_id != editor_session_id
+                or operation.status != "applied"
+                or live_record.saved
+                or live_record.verified
+            ):
+                continue
+            candidates.append((live_record.applied_at_utc, operation.receipt, live_record))
+        candidates.sort(key=lambda item: (item[0], item[1]))
+        grouped: dict[str, list[tuple[str, str, LiveApplyRecord]]] = {}
+        for applied_at, receipt, live_record in candidates:
+            key = _live_write_stable_target_key(live_record.operation, live_record.target)
+            grouped.setdefault(key, []).append((applied_at, receipt, live_record))
+        effective_receipts: list[str] = []
+        superseded_receipts: list[str] = []
+        effective_operations: list[dict[str, Any]] = []
+        for entries in grouped.values():
+            entries.sort(key=lambda item: (item[0], item[1]))
+            last = entries[-1]
+            effective_receipts.append(last[1])
+            effective_operations.append(
+                {
+                    "receipt": last[1],
+                    "operation": last[2].operation,
+                    "valueKind": last[2].value_kind,
+                    "stableTargetKey": _live_write_stable_target_key(last[2].operation, last[2].target),
+                    "target": last[2].target,
+                    "expectedValue": last[2].after_value,
+                    "transactionId": last[2].transaction_id,
+                    "appliedAtUtc": last[2].applied_at_utc,
+                }
+            )
+            superseded_receipts.extend(receipt for _, receipt, _ in entries[:-1])
+        included_receipts = [receipt for _, receipt, _ in candidates]
+        effective_receipts.sort()
+        superseded_receipts.sort()
+        included_receipts.sort()
+        effective_operations.sort(key=lambda item: item["stableTargetKey"])
+        digest = _sha256_bytes(
+            _json_bytes(
+                {
+                    "assetPath": asset_path,
+                    "changeSetId": change_set_id,
+                    "includedReceipts": included_receipts,
+                    "effectiveReceipts": effective_receipts,
+                    "supersededReceipts": superseded_receipts,
+                    "effectiveOperations": effective_operations,
+                }
+            )
+        )
+        return {
+            "includedReceipts": included_receipts,
+            "effectiveReceipts": effective_receipts,
+            "supersededReceipts": superseded_receipts,
+            "effectiveOperations": effective_operations,
+            "effectiveOperationDigest": digest,
+        }
+
+    def _restore_live_record_from_checkpoint_operation(
+        self,
+        checkpoint: LiveWriteCheckpointRecord,
+        operation: dict[str, Any],
+    ) -> LiveApplyRecord:
+        return LiveApplyRecord(
+            receipt=str(operation["receipt"]),
+            plan_id="",
+            plan_digest="",
+            asset_path=checkpoint.asset_path,
+            operation=str(operation["operation"]),
+            value_kind=str(operation.get("valueKind", "")),
+            editor_session_id=checkpoint.editor_session_id_at_prepare,
+            transaction_id=str(operation.get("transactionId", "")),
+            before_value=None,
+            after_value=operation.get("expectedValue"),
+            target=dict(operation.get("target") or {}),
+            applied_at_utc=str(operation.get("appliedAtUtc", checkpoint.created_at_utc)),
+            checkpoint_id=checkpoint.checkpoint_id,
+        )
+
+    def _checkpoint_authorized_save(
+        self,
+        asset_path: str,
+        asset_class: str,
+        package_name: str,
+        expected_revision: str,
+        editor_session_id: str,
+        editor_process_id: int,
+        *,
+        mode: Literal["Preview", "Commit"],
+        save_receipt: str,
+        confirmation: str,
+        change_set_id: str,
+    ) -> dict[str, Any]:
+        if not change_set_id:
+            raise WorkflowError(
+                "checkpoint-invalid",
+                "checkpoint verification_mode requires an exact change_set_id.",
+            )
+        derived = self._derive_checkpoint_operations(change_set_id, asset_path, editor_session_id)
+        if not derived["effectiveReceipts"]:
+            raise WorkflowError(
+                "checkpoint-invalid",
+                "The Change Set has no active effective live writes for this asset in the current Editor session.",
+                details={"changeSetId": change_set_id, "assetPath": asset_path},
+            )
+
+        if mode == "Preview":
+            checkpoint_id = "cp_" + secrets.token_urlsafe(16)
+            for receipt in derived["effectiveReceipts"]:
+                record = self._live_applies.get(receipt)
+                if record is None:
+                    raise WorkflowError("checkpoint-invalid", "A checkpoint effective receipt is no longer active.")
+                self._fast_verify_live_record(record)
+            now = utc_now_iso()
+            checkpoint = LiveWriteCheckpointRecord(
+                checkpoint_id=checkpoint_id,
+                change_set_id=change_set_id,
+                asset_path=asset_path,
+                asset_class=asset_class,
+                package_name=package_name,
+                state="prepared",
+                created_at_utc=now,
+                editor_session_id_at_prepare=editor_session_id,
+                editor_process_id_at_prepare=editor_process_id,
+                before_disk_revision=expected_revision,
+                included_receipts=derived["includedReceipts"],
+                effective_receipts=derived["effectiveReceipts"],
+                superseded_receipts=derived["supersededReceipts"],
+                effective_operations=derived["effectiveOperations"],
+                effective_operation_digest=derived["effectiveOperationDigest"],
+            )
+            self._checkpoints[checkpoint_id] = checkpoint
+            self._persist_checkpoint(checkpoint)
+            receipt = "save_" + secrets.token_urlsafe(24)
+            self._save_authorizations[receipt] = SaveAuthorizationRecord(
+                receipt,
+                asset_path,
+                asset_class,
+                package_name,
+                expected_revision,
+                editor_session_id,
+                editor_process_id,
+                verification_mode="checkpoint",
+                change_set_id=change_set_id,
+                checkpoint_id=checkpoint_id,
+                included_receipts=tuple(derived["includedReceipts"]),
+                effective_receipts=tuple(derived["effectiveReceipts"]),
+                superseded_receipts=tuple(derived["supersededReceipts"]),
+                effective_operation_digest=derived["effectiveOperationDigest"],
+            )
+            self._prune_records()
+            return {
+                "schemaVersion": WORKFLOW_SCHEMA_VERSION,
+                "tool": "ue_save_authorized_asset",
+                "ok": True,
+                "mode": "Preview",
+                "verificationMode": "checkpoint",
+                "assetPath": asset_path,
+                "assetClass": asset_class,
+                "changeSetId": change_set_id,
+                "checkpointId": checkpoint_id,
+                "expectedDiskRevision": expected_revision,
+                "editorSessionId": editor_session_id,
+                "editorProcessId": editor_process_id,
+                "loaded": True,
+                "packageDirty": True,
+                "saveReceipt": receipt,
+                "includedReceiptCount": len(derived["includedReceipts"]),
+                "effectiveReceiptCount": len(derived["effectiveReceipts"]),
+                "supersededReceiptCount": len(derived["supersededReceipts"]),
+                "effectiveReceipts": derived["effectiveReceipts"],
+                "supersededReceipts": derived["supersededReceipts"],
+                "saved": False,
+                "verified": False,
+                "commitToolsEnabled": self.config.commit_enabled,
+                "nextStep": f"To save exactly this checkpoint, call ue_save_authorized_asset with mode=Commit, verification_mode=checkpoint, confirmation 'SAVE {receipt}', and the same change_set_id.",
+            }
+
+        if not self.config.commit_enabled:
+            raise WorkflowError("commit-disabled", "Commit tools were not enabled when this MCP server started.")
+        authorization = self._save_authorizations.get(save_receipt)
+        if authorization is None or authorization.consumed:
+            raise WorkflowError("save-receipt-invalid", "A fresh one-time saveReceipt is required.")
+        if authorization.asset_path != asset_path:
+            raise WorkflowError("save-receipt-invalid", "The saveReceipt belongs to another asset.")
+        if confirmation != f"SAVE {save_receipt}":
+            raise WorkflowError("save-confirmation-required", "Save confirmation did not exactly match the required receipt phrase.")
+        if (
+            authorization.verification_mode != "checkpoint"
+            or authorization.change_set_id != change_set_id
+            or authorization.asset_class != asset_class
+            or authorization.package_name != package_name
+            or authorization.expected_disk_revision != expected_revision
+            or authorization.editor_session_id != editor_session_id
+            or authorization.editor_process_id != editor_process_id
+        ):
+            raise WorkflowError("save-receipt-stale", "The checkpoint asset, disk Revision, or Editor session changed after Preview.")
+        if not authorization.checkpoint_id:
+            raise WorkflowError("save-receipt-stale", "The authorized save does not bind a checkpoint.")
+        checkpoint = self._checkpoints.get(authorization.checkpoint_id)
+        if checkpoint is None or checkpoint.state != "prepared":
+            raise WorkflowError("checkpoint-stale", "The checkpoint is not in prepared state for Commit.")
+
+        current_derived = self._derive_checkpoint_operations(change_set_id, asset_path, editor_session_id)
+        if (
+            list(current_derived["includedReceipts"]) != list(authorization.included_receipts)
+            or list(current_derived["effectiveReceipts"]) != list(authorization.effective_receipts)
+            or list(current_derived["supersededReceipts"]) != list(authorization.superseded_receipts)
+            or current_derived["effectiveOperationDigest"] != authorization.effective_operation_digest
+        ):
+            raise WorkflowError(
+                "checkpoint-membership-changed",
+                "The Change Set receipt membership or effective operation set changed after checkpoint Preview.",
+            )
+        for receipt in authorization.effective_receipts:
+            record = self._live_applies.get(receipt)
+            if record is None:
+                raise WorkflowError("checkpoint-membership-changed", "A checkpoint effective receipt is no longer active.")
+            self._fast_verify_live_record(record)
+
+        package_file = self._package_file(self.config.project_path, package_name, asset_class)
+        before_revision = "sha256:" + sha256_file(package_file)
+        if before_revision != expected_revision:
+            raise WorkflowError("revision-conflict", "The disk Package changed after checkpoint Preview.")
+        backup_directory = self.config.backup_root / "live-save" / save_receipt
+        if backup_directory.exists():
+            raise WorkflowError("backup-exists", "The fixed authorized-save backup directory already exists.")
+        backup_directory.mkdir(parents=True, exist_ok=False)
+        backup_file = backup_directory / package_file.name
+        shutil.copy2(package_file, backup_file)
+        manifest_path = backup_directory / "manifest.json"
+        _write_json_atomic(
+            manifest_path,
+            {
+                "schemaVersion": "1.0",
+                "operation": "authorized-live-save-checkpoint",
+                "projectName": self.project_name,
+                "assetPath": asset_path,
+                "assetClass": asset_class,
+                "packageName": package_name,
+                "changeSetId": change_set_id,
+                "checkpointId": checkpoint.checkpoint_id,
+                "beforeRevision": before_revision,
+                "backupFileName": backup_file.name,
+                "createdUtc": utc_now_iso(),
+            },
+        )
+        try:
+            bridge_result = self.live_editor_service.call_method(
+                "editor.saveAuthorizedAsset",
+                {"assetPath": asset_path},
+                timeout_seconds=30.0,
+            )
+        except Exception as exc:
+            raise WorkflowError(
+                "authorized-save-failed",
+                "The fixed Editor rejected or failed the exact checkpoint authorized save.",
+                details={"backupManifestId": manifest_path.name},
+            ) from exc
+        if bridge_result.get("saved") is not True or bridge_result.get("assetPath") != asset_path:
+            raise WorkflowError("authorized-save-report-invalid", "The Editor did not confirm the exact saved asset.")
+
+        after_revision = "sha256:" + sha256_file(package_file)
+        checkpoint.after_disk_revision = after_revision
+        checkpoint.saved_at_utc = utc_now_iso()
+        checkpoint.save_receipt = save_receipt
+        checkpoint.backup_manifest_id = manifest_path.name
+        checkpoint.state = "saved"
+        self._persist_checkpoint(checkpoint)
+        authorization.consumed = True
+
+        journal_persisted = True
+        change_set_updated = False
+        for receipt in authorization.effective_receipts:
+            live_record = self._live_applies.get(receipt)
+            if live_record is not None:
+                live_record.saved = True
+                live_record.save_receipt = save_receipt
+                live_record.checkpoint_id = checkpoint.checkpoint_id
+                journal_persisted = self._persist_live_apply(live_record) and journal_persisted
+            if change_set_id:
+                change_set_updated = (
+                    self._update_change_set_operation(
+                        change_set_id,
+                        receipt,
+                        "saved",
+                        save_receipt=save_receipt,
+                        checkpoint_id=checkpoint.checkpoint_id,
+                    )
+                    or change_set_updated
+                )
+        for receipt in authorization.superseded_receipts:
+            live_record = self._live_applies.get(receipt)
+            if live_record is not None:
+                live_record.checkpoint_id = checkpoint.checkpoint_id
+                self._persist_live_apply(live_record)
+            if change_set_id:
+                change_set_updated = (
+                    self._update_change_set_operation(
+                        change_set_id,
+                        receipt,
+                        "superseded",
+                        save_receipt=save_receipt,
+                        checkpoint_id=checkpoint.checkpoint_id,
+                    )
+                    or change_set_updated
+                )
+            self._remove_live_apply(receipt)
+
+        freshness_after = (
+            self.freshness.mark_commit(asset_path, before_revision, after_revision)
+            if after_revision != before_revision
+            else self.freshness.inspect_asset(asset_path)
+        )
+        return {
+            "schemaVersion": WORKFLOW_SCHEMA_VERSION,
+            "tool": "ue_save_authorized_asset",
+            "ok": True,
+            "mode": "Commit",
+            "verificationMode": "checkpoint",
+            "assetPath": asset_path,
+            "assetClass": asset_class,
+            "saveReceipt": save_receipt,
+            "saved": True,
+            "verified": False,
+            "verificationKind": "persisted-action",
+            "checkpointId": checkpoint.checkpoint_id,
+            "changeSetId": change_set_id,
+            "beforeRevision": before_revision,
+            "afterRevision": after_revision,
+            "revisionChanged": before_revision != after_revision,
+            "backupManifestId": manifest_path.name,
+            "editorSessionId": editor_session_id,
+            "editorProcessId": editor_process_id,
+            "includedReceiptCount": len(authorization.included_receipts),
+            "effectiveReceiptCount": len(authorization.effective_receipts),
+            "supersededReceiptCount": len(authorization.superseded_receipts),
+            "effectiveReceipts": list(authorization.effective_receipts),
+            "supersededReceipts": list(authorization.superseded_receipts),
+            "journalPersisted": journal_persisted,
+            "changeSetUpdated": change_set_updated,
+            "bridge": _safe_report(bridge_result, configured_paths=self.configured_paths),
+            "indexFreshness": freshness_after,
+            "nextStep": "Call ue_verify_live_write_checkpoint with this checkpointId to perform exactly one independent export and verify all effective operations.",
+            "nextActions": [
+                {
+                    "tool": "ue_verify_live_write_checkpoint",
+                    "arguments": {"checkpoint_id": checkpoint.checkpoint_id},
+                    "reason": "Run exactly one independent Unreal export and verify all effective writes covered by this checkpoint.",
+                }
+            ],
+        }
+
     def save_authorized_asset(
         self,
         asset_path: str,
@@ -3452,12 +4126,15 @@ class PatchWorkflowService(RetargetWorkflowMixin):
         save_receipt: str = "",
         confirmation: str = "",
         change_set_id: str = "",
+        verification_mode: Literal["immediate", "checkpoint"] = "immediate",
     ) -> dict[str, Any]:
         with self._lock:
             self._assert_session_current()
             asset_path = self._validate_refresh_asset_path(asset_path)
             if mode not in {"Preview", "Commit"}:
                 raise WorkflowError("authorized-save-invalid-mode", "mode must be Preview or Commit.")
+            if verification_mode not in {"immediate", "checkpoint"}:
+                raise WorkflowError("authorized-save-invalid-mode", "verification_mode must be immediate or checkpoint.")
             if change_set_id:
                 change_set = self._resolve_change_set(change_set_id)
                 member_assets = {
@@ -3516,6 +4193,20 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 raise WorkflowError("live-editor-save-asset-not-loaded", "Authorized save only accepts an already loaded exact asset.")
             if memory.get("packageDirty") is not True:
                 raise WorkflowError("live-editor-save-not-dirty", "The exact loaded package is not Dirty.")
+
+            if verification_mode == "checkpoint":
+                return self._checkpoint_authorized_save(
+                    asset_path,
+                    asset_class,
+                    package_name,
+                    expected_revision,
+                    editor_session_id,
+                    editor_process_id,
+                    mode=mode,
+                    save_receipt=save_receipt,
+                    confirmation=confirmation,
+                    change_set_id=change_set_id,
+                )
 
             if mode == "Preview":
                 receipt = "save_" + secrets.token_urlsafe(24)
@@ -4092,6 +4783,251 @@ class PatchWorkflowService(RetargetWorkflowMixin):
             if change_set_id:
                 response["changeSetUpdated"] = False
             return response
+
+    def verify_live_write_checkpoint(
+        self,
+        checkpoint_id: str,
+        change_set_id: str = "",
+        asset_path: str = "",
+    ) -> dict[str, Any]:
+        with self._lock:
+            if not self.config.commit_enabled:
+                raise WorkflowError(
+                    "live-editor-write-disabled",
+                    "Live Editor write checkpoint verification requires Commit tools to be enabled when the MCP server starts.",
+                )
+            checkpoint = self._resolve_checkpoint(checkpoint_id)
+            if change_set_id and checkpoint.change_set_id != change_set_id:
+                raise WorkflowError(
+                    "checkpoint-invalid",
+                    "The supplied changeSetId does not match the checkpoint binding.",
+                )
+            if asset_path and checkpoint.asset_path != asset_path:
+                raise WorkflowError(
+                    "checkpoint-invalid",
+                    "The supplied assetPath does not match the checkpoint binding.",
+                )
+            if checkpoint.state == "verified":
+                return self._checkpoint_verified_response(checkpoint, child_unreal_process_count=0)
+            if checkpoint.state != "saved":
+                raise WorkflowError(
+                    "checkpoint-not-saved",
+                    "A Strong Checkpoint Verify requires a saved checkpoint.",
+                    details={"checkpointState": checkpoint.state},
+                )
+
+            package_file = self._package_file(
+                self.config.project_path,
+                checkpoint.package_name,
+                checkpoint.asset_class,
+            )
+            current_disk_revision = "sha256:" + sha256_file(package_file)
+            if current_disk_revision != checkpoint.after_disk_revision:
+                checkpoint.state = "stale"
+                self._persist_checkpoint(checkpoint)
+                raise WorkflowError(
+                    "checkpoint-revision-stale",
+                    "The current disk Package Revision no longer matches the saved checkpoint Revision.",
+                    details={
+                        "expectedRevision": checkpoint.after_disk_revision,
+                        "actualRevision": current_disk_revision,
+                    },
+                )
+
+            output = self._safe_work_path("W3CheckpointVerify", checkpoint.checkpoint_id)
+            if output.exists():
+                shutil.rmtree(output)
+            output.mkdir(parents=True, exist_ok=False)
+            asset_package = checkpoint.asset_path.split(".", 1)[0]
+            blueprint_operations = {"setVariableDefault", "setComponentProperty", "setPinDefault"}
+            is_blueprint_checkpoint = "Blueprint" in checkpoint.asset_class or any(
+                operation.get("operation") in blueprint_operations
+                for operation in checkpoint.effective_operations
+            )
+            if is_blueprint_checkpoint:
+                verify_script = "RunExport.ps1"
+                verify_arguments = [
+                    "-EngineRoot", str(self.config.engine_root),
+                    "-ProjectPath", str(self.config.project_path),
+                    "-Asset", asset_package,
+                    "-Output", str(output),
+                    "-Profile", "full",
+                    "-Format", "json",
+                    "-IncludeUnchangedDefaults",
+                ]
+            else:
+                verify_script = "RunAssetCatalog.ps1"
+                verify_arguments = [
+                    "-EngineRoot", str(self.config.engine_root),
+                    "-ProjectPath", str(self.config.project_path),
+                    "-Asset", asset_package,
+                    "-Output", str(output),
+                ]
+            result = self._run_script(
+                verify_script,
+                verify_arguments,
+                stage="checkpoint-verify-export",
+                report_path=output / "manifest.json",
+            )
+            if result.exit_code != 0:
+                self._raise_process_failure(
+                    stage="checkpoint-verify-export",
+                    result=result,
+                    report_path=output / "manifest.json",
+                    fallback_code="checkpoint-export-failed",
+                    fallback_message="The independent Unreal reload export failed for the checkpoint.",
+                )
+            canonical_files = list((output / "canonical").rglob("*.json"))
+            if len(canonical_files) != 1:
+                raise WorkflowError(
+                    "checkpoint-export-invalid",
+                    "Independent checkpoint reload did not produce exactly one Canonical asset.",
+                )
+            canonical_path = canonical_files[0]
+            canonical = _read_json(canonical_path, stage="checkpoint-verify-canonical")
+            revision = canonical.get("revision", {})
+            canonical_revision = str(revision.get("value", "")) if isinstance(revision, dict) else ""
+            if (
+                canonical.get("projectName") != self.project_name
+                or canonical.get("assetPath") != checkpoint.asset_path
+                or canonical.get("packageName") != checkpoint.package_name
+                or canonical.get("assetClass") != checkpoint.asset_class
+                or not isinstance(revision, dict)
+                or not revision.get("available")
+                or revision.get("packageDirty")
+                or not canonical_revision.startswith("sha256:")
+            ):
+                raise WorkflowError(
+                    "checkpoint-export-invalid",
+                    "The independent checkpoint artifact does not match the exact asset identity.",
+                )
+            if canonical_revision != checkpoint.after_disk_revision:
+                checkpoint.state = "stale"
+                self._persist_checkpoint(checkpoint)
+                raise WorkflowError(
+                    "checkpoint-revision-stale",
+                    "The independent canonical Revision does not match the checkpoint afterRevision.",
+                    details={"canonicalRevision": canonical_revision, "expectedRevision": checkpoint.after_disk_revision},
+                )
+            after_export_disk_revision = "sha256:" + sha256_file(package_file)
+            if after_export_disk_revision != checkpoint.after_disk_revision:
+                checkpoint.state = "stale"
+                self._persist_checkpoint(checkpoint)
+                raise WorkflowError(
+                    "checkpoint-revision-stale",
+                    "The disk Package Revision changed while the independent checkpoint export ran.",
+                )
+
+            coverage: list[dict[str, Any]] = []
+            for operation in checkpoint.effective_operations:
+                record = self._restore_live_record_from_checkpoint_operation(checkpoint, operation)
+                expected_value = _live_write_expected_exported_value(record)
+                exported_value = _live_write_exported_value(canonical, record)
+                matched = _live_write_exported_matches(expected_value, exported_value)
+                coverage.append(
+                    {
+                        "receipt": operation["receipt"],
+                        "operation": operation["operation"],
+                        "target": operation["target"],
+                        "expectedValue": expected_value,
+                        "exportedValue": exported_value,
+                        "matched": matched,
+                    }
+                )
+            mismatches = [item for item in coverage if not item["matched"]]
+            if mismatches:
+                checkpoint.mismatch_diagnostics = mismatches
+                self._persist_checkpoint(checkpoint)
+                raise WorkflowError(
+                    "checkpoint-value-mismatch",
+                    "One or more effective checkpoint operations did not match the independently reloaded asset.",
+                    details={
+                        "checkpointId": checkpoint.checkpoint_id,
+                        "mismatches": mismatches,
+                        "state": checkpoint.state,
+                    },
+                )
+
+            checkpoint.state = "verified"
+            checkpoint.verified_at_utc = utc_now_iso()
+            checkpoint.strong_verification_kind = "independent-verified"
+            checkpoint.strong_verification_report_id = _report_id(
+                "checkpoint-verify-export",
+                output / "manifest.json",
+            )
+            checkpoint.strong_artifact_root = str(output)
+            checkpoint.strong_artifact_revision = canonical_revision
+            checkpoint.strong_artifact_digest = "sha256:" + sha256_file(canonical_path)
+            checkpoint.child_unreal_process_count = 1
+            checkpoint.mismatch_diagnostics = []
+            checkpoint.verified_operation_coverage = coverage
+            self._persist_checkpoint(checkpoint)
+
+            change_set_updated = False
+            for operation in checkpoint.effective_operations:
+                receipt = str(operation["receipt"])
+                change_set = self._change_sets.get(checkpoint.change_set_id)
+                if change_set is not None:
+                    change_set_updated = (
+                        self._update_change_set_operation(
+                            checkpoint.change_set_id,
+                            receipt,
+                            "verified",
+                            save_receipt=checkpoint.save_receipt,
+                            checkpoint_id=checkpoint.checkpoint_id,
+                        )
+                        or change_set_updated
+                    )
+                live_record = self._live_applies.get(receipt)
+                if live_record is not None:
+                    live_record.verified = True
+                    live_record.checkpoint_id = checkpoint.checkpoint_id
+                    self._persist_live_apply(live_record)
+                    self._remove_live_apply(receipt)
+
+            return self._checkpoint_verified_response(checkpoint, child_unreal_process_count=1)
+
+    def _checkpoint_verified_response(
+        self,
+        checkpoint: LiveWriteCheckpointRecord,
+        *,
+        child_unreal_process_count: int,
+    ) -> dict[str, Any]:
+        return {
+            "schemaVersion": WORKFLOW_SCHEMA_VERSION,
+            "tool": "ue_verify_live_write_checkpoint",
+            "ok": True,
+            "status": "success",
+            "verificationKind": checkpoint.strong_verification_kind or "independent-verified",
+            "checkpointId": checkpoint.checkpoint_id,
+            "changeSetId": checkpoint.change_set_id,
+            "assetPath": checkpoint.asset_path,
+            "afterRevision": checkpoint.after_disk_revision,
+            "independentReload": True,
+            "verified": True,
+            "effectiveOperationCount": len(checkpoint.effective_receipts),
+            "verifiedOperationCount": len(checkpoint.verified_operation_coverage),
+            "supersededOperationCount": len(checkpoint.superseded_receipts),
+            "reportId": checkpoint.strong_verification_report_id,
+            "artifactRevision": checkpoint.strong_artifact_revision,
+            "artifactDigest": checkpoint.strong_artifact_digest,
+            "childUnrealProcessCount": child_unreal_process_count,
+            "perOperationCoverage": checkpoint.verified_operation_coverage,
+            "nextStep": (
+                "Call ue_analyze_semantic_diff at stage=verified, build the Verification Plan, "
+                "close every Required assertion, and evaluate the scoped Trust verdict before refreshing the frozen index."
+            ),
+            "nextActions": [
+                {
+                    "tool": "ue_analyze_semantic_diff",
+                    "arguments": {
+                        "change_set_id": checkpoint.change_set_id,
+                        "stage": "verified",
+                    },
+                    "reason": "Compare the independently verified checkpoint semantics before planning Trust obligations.",
+                }
+            ],
+        }
 
     def verify_live_write(self, asset_path: str, live_apply_receipt: str = "", change_set_id: str = "") -> dict[str, Any]:
         with self._lock:
