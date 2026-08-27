@@ -380,15 +380,29 @@ class SnapshotRefreshTests(unittest.TestCase):
         self.assertFalse(self.active.pointer_path.exists())
         self.assertEqual(IndexQueryService(self.database).get_revision_record(ASSET_PATH)["revision_value"], self.before_revision)
 
-    def test_blueprint_refresh_forwards_include_blueprints_from_index_class(self) -> None:
+    def test_blueprint_refresh_uses_full_semantic_export_from_index_class(self) -> None:
         class CapturingRefreshRunner(RefreshRunner):
             def __init__(self, package_file: Path) -> None:
                 super().__init__(package_file)
-                self.include_blueprints = False
+                self.script = ""
+                self.arguments: list[str] = []
 
             def __call__(self, arguments: list[str], cwd: Path, timeout_seconds: int) -> ProcessResult:
-                self.include_blueprints = "-IncludeBlueprints" in arguments
-                return super().__call__(arguments, cwd, timeout_seconds)
+                self.calls += 1
+                self.assert_safe(arguments, cwd, timeout_seconds)
+                self.arguments = list(arguments)
+                self.script = Path(arguments[arguments.index("-File") + 1]).name
+                output = Path(arguments[arguments.index("-Output") + 1])
+                write_export(output, sha256_revision(self.package_file))
+                manifest_path = output / "manifest.json"
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                manifest["profile"] = "full"
+                write_json(manifest_path, manifest)
+                canonical_path = next((output / "canonical").rglob("*.json"))
+                canonical = json.loads(canonical_path.read_text(encoding="utf-8"))
+                canonical["profile"] = "full"
+                write_json(canonical_path, canonical)
+                return ProcessResult(0, "", "")
 
         runner = CapturingRefreshRunner(self.package_file)
         service = self.make_service(runner=runner)
@@ -399,7 +413,11 @@ class SnapshotRefreshTests(unittest.TestCase):
         ), patch.object(service, "_assert_refresh_policy", return_value=None):
             preview = service.refresh_asset_index(ASSET_PATH, mode="Preview")
         self.assertTrue(preview["ok"])
-        self.assertTrue(runner.include_blueprints)
+        self.assertEqual(runner.script, "RunExport.ps1")
+        self.assertEqual(runner.arguments[runner.arguments.index("-Profile") + 1], "full")
+        self.assertEqual(runner.arguments[runner.arguments.index("-Format") + 1], "json")
+        self.assertIn("-IncludeUnchangedDefaults", runner.arguments)
+        self.assertNotIn("-IncludeBlueprints", runner.arguments)
 
 
 if __name__ == "__main__":

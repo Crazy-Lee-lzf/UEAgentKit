@@ -3236,6 +3236,25 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertEqual(details["affectedAssets"], [ASSET_PATH])
         self.assertEqual(details["transactionIds"], [TRANSACTION_ID])
 
+    def test_change_set_live_write_continues_exact_previous_transaction(self) -> None:
+        bridge = AgentWorkflowTests.ClosedLoopLiveService(dirty=True)
+        service = self._change_set_service(bridge)
+        change_set_id = self._bound_change_set(service)
+
+        self._apply_bound_change_set(service, change_set_id, description="First chained write")
+        self._apply_bound_change_set(service, change_set_id, description="Second chained write")
+
+        apply_calls = [params for method, params in bridge.calls if method == "editor.applyAssetPropertyLive"]
+        self.assertEqual(len(apply_calls), 2)
+        self.assertNotIn("previousTransactionId", apply_calls[0])
+        self.assertEqual(apply_calls[1]["previousTransactionId"], TRANSACTION_ID)
+
+        other_change_set_id = self._bound_change_set(service, title="Independent Change Set")
+        self._apply_bound_change_set(service, other_change_set_id, description="Independent write")
+        apply_calls = [params for method, params in bridge.calls if method == "editor.applyAssetPropertyLive"]
+        self.assertEqual(len(apply_calls), 3)
+        self.assertNotIn("previousTransactionId", apply_calls[2])
+
     def test_change_set_apply_rejects_unknown_set_before_bridge_call(self) -> None:
         bridge = AgentWorkflowTests.ClosedLoopLiveService(dirty=True)
         service = self._change_set_service(bridge)

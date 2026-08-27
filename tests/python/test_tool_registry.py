@@ -439,7 +439,8 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertNotIn("const FString& PropertyPath", apply_declaration)
         self.assertNotIn("const FString& ParameterName", apply_declaration)
         self.assertNotIn("const FString& RowName", apply_declaration)
-        self.assertLess(len(live_write), 24000)
+        # Keep the live-write handler bounded while allowing the exact transaction-chain safety guards.
+        self.assertLess(len(live_write), 24500)
 
         # Explicit Undo/Discard must reuse the committed Editor transaction and the
         # retained pre-write snapshot; it must never save the package.
