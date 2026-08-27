@@ -2,6 +2,8 @@
 
 Updated: 2026-08-23
 
+> Development snapshot note (2026-08-27): W0-W3 of the Editor-resident Writer line are now complete and W4 bounded multi-operation is next. The current planning authority is the Chinese [`Plans/README.md`](Plans/README.md), Master Development Plan, and W4 Detailed Plan. This English document remains a 2026-08-23 snapshot until a full translation refresh.
+
 The latest published release is **0.7.0** for Unreal Engine 5.6 and remains unchanged. The 0.8.x Context / Analysis / Agent Reliability capability scope is locally closed on `feature/agent-reliability`, including R0–R4, R4.1 repeat evidence, a complete Read/Write Gap Audit, and Scope Freeze. This closeout does not change the published package/plugin version, create a tag, build release artifacts, or push.
 
 ## Direction

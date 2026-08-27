@@ -1,8 +1,8 @@
 # UE Agent Kit 路线图
 
-更新时间：2026-08-23
+更新时间：2026-08-27
 
-当前已发布版本为 **0.7.0**，支持 Unreal Engine 5.6，正式版本保持不变。`feature/agent-reliability` 上的 **0.8.x Context / Analysis / Agent Reliability capability scope** 已完成本地收口：R0-R4、R4.1 repeat、Read/Write Gap Audit 与 Scope Freeze 均已有确定性证据，Must-fix new tools 为 0，R5 继续 `deferred by benchmark evidence`。本次 closeout 不修改 Package/Plugin version，不创建 Tag 或 Release artifact，也不 Push；正式 0.8 package release 如后续启动，应作为独立流程执行。
+当前已发布版本为 **0.7.0**，支持 Unreal Engine 5.6，正式版本保持不变。0.8.x Context / Analysis / Agent Reliability capability scope 已完成本地收口，R5 继续 `deferred by benchmark evidence`。当前 `feature/live-writer-expansion` 已完成 W0-W3，下一 Writer 主线为 W4 Multi-operation / Bounded Batch。项目级方向与跨 Track 依赖不再在本路线图重复维护，统一从 [`Plans/README.md`](Plans/README.md) 进入 2026-08-27 Master Plan / Midterm Spec。正式 package release、Tag 与 Push 仍是独立授权流程。
 
 ## 总体方向
 
@@ -56,7 +56,9 @@ Realtime I/O 与 Memory/Context 的完整职责、性能预算、风险分级和
 
 ## 0.7.0：Memory 可用性与分层知识树（已发布）
 
-0.7.0 已把 0.6.0 平面记录库升级为低维护、低 Token 的单人可用层；Memory 底层 Schema 暂停扩张，后续只在 `feature/agent-reliability` 主线中做 Task Context / Active Work / Change Set / Evidence 的横向整合：
+0.7.0 已把 0.6.0 平面记录库升级为低维护、低 Token 的单人可用层。0.8 capability closeout 期间曾冻结 Memory Schema 扩张；该冻结不再代表 2026-08-27 中期计划。W4 冻结 Change Set 结构后，后续 Memory Track 可按 Master/Midterm 的效率门禁逐步引入 v4 L0 事件索引与 v5 embedding 存储，同时继续保持低 Token、确定性来源和可选依赖降级。
+
+当前已完成的 0.7.0 Memory 基础包括：
 
 - Knowledge Tree 使用稳定 Path 与 Parent/Child 支持任意深度，默认从 Project Profile、System、Feature/Entity 到 Implementation。
 - 长期知识、Record Type、Active Work 与 Evidence 四个概念分离。
@@ -174,28 +176,30 @@ Read/Write Audit 已覆盖 105 个公共 Tool 与 18 个 Patch Operation，C5 �
 
 动画线作为已完成的纵向能力保留，Additive Batch、Composite Mutation、Retarget → P2 一键桥接等非阻塞尾巴默认冻结。Blueprint Graph、Level Actor 通用 CRUD 等新 Writer 同样改为由 Reforge 真实需求或 Agent Benchmark 失败数据驱动。
 
-## Post-0.8 当前执行顺序
+## 当前开发入口（2026-08-27）
 
-详细计划见 [`Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md`](Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md)。当前推荐顺序：
+原 [`Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md`](Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md) 已完成其从 0.8 closeout 向 Editor-resident Writer 过渡的历史作用，继续保留但不再作为当前唯一计划入口。
 
 ```text
-1. Writer W0：建立当前写链 cold-start / stage latency 基线
-2. Writer W1：把现有 Blueprint default/component/pin 窄写入迁移到常驻 Editor Bridge
-3. Performance P1/P2：Registry-only + Fast Revision（与 Writer 并行）
-4. Writer W2：Fast Resident Verify
-5. Writer W3：Checkpoint Strong Independent Verify
-6. Performance P3/P4：True Incremental + Index Ingestion
-7. Agent UX：requested-bound binding + operation-discriminated typed result
-8. Writer bounded multi-operation / real-project acceptance
-9. Maintainability：拆分 workflow、Tool Profile、计数单一来源、UE build CI
-10. 0.9 Source Control / Collaboration
+W0 baseline                     complete
+W1 Blueprint resident write     complete
+W2 Fast Resident Verify         complete
+W3 Checkpoint Strong Verify     complete
+W4 bounded multi-operation      next
 ```
 
-正式 0.8 package release 独立执行：只有用户授权后才 merge `main`、更新 published version、构建 artifact、Tag/Push。它不要求等待上述技术计划完成。
+当前权威入口：
+
+- [`Plans/README.md`](Plans/README.md)：计划文档索引与优先级说明。
+- [`Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md`](Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md)：项目级方向与架构取舍。
+- [`Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md`](Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md)：跨 Track 依赖与验收契约。
+- [`Plans/UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_DETAILED_PLAN_20260826.md`](Plans/UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_DETAILED_PLAN_20260826.md)：当前 W4 实现权威。
+
+正式 package release 独立执行：只有用户授权后才更新 published version、构建 release artifact、Tag/Push。
 
 ## 0.9.0：协作与冲突感知
 
-读取 Source Control Provider、Checkout/Lock/Owner/Head，分析 Local Dirty、磁盘 Revision 与 Depot/Remote Head 分歧，并建立资产责任边界和多人冲突风险模型。首版只分析、提示或阻止，不自动抢锁或覆盖他人修改。
+读取 Source Control Provider、Checkout/Lock/Head/Changelist 等可验证状态，分析 Local Dirty、磁盘 Revision 与 Depot/Remote Head 分歧，并建立多人冲突风险模型。首版只分析、提示或阻止，不自动抢锁或覆盖他人修改；不会仅根据历史 checkout 活动推断资产 Owner。
 
 部署采用每人一个 Local MCP + 团队共享 Knowledge Service。Local MCP 连接本机 Editor Bridge，并在内部访问共享服务；不让 Agent 同时管理 Local UE MCP 与 Shared Knowledge MCP，也不使用一个中央 MCP 直接路由所有开发者的编辑器。共享服务保存 `/project` 与 `/team` 知识和 Active Work，本地保留 `/user`、`/session`、Editor 状态和资产索引。共享更新使用乐观并发与 `knowledge-conflict`，禁止静默覆盖。
 

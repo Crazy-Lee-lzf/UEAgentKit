@@ -4,11 +4,13 @@
 
 ## 当前状态与对比
 
-- [`PROJECT_STATUS.md`](PROJECT_STATUS.md)：当前已实现能力、明确未实现能力、P0–P3 优先级和后续方向。
-- [`PROJECT_STATUS_EN.md`](PROJECT_STATUS_EN.md)：English project status.
-- [Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md](Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md)：0.8 capability closeout 之后的统一开发入口，覆盖 Editor-resident Writer、性能、Agent UX、维护/CI 与 0.9 协作。
-- [Plans/UEAGENTKIT_EDITOR_RESIDENT_WRITER_W0_W1_DETAILED_PLAN_20260823.md](Plans/UEAGENTKIT_EDITOR_RESIDENT_WRITER_W0_W1_DETAILED_PLAN_20260823.md)：下一阶段 W0/W1 的直接执行计划，覆盖 Writer latency baseline、Blueprint 三个窄 Live Apply、compile recovery、测试与 commit 门禁。
-- [Plans/UEAGENTKIT_EDITOR_RESIDENT_WRITER_W1_ACCEPTANCE_PLAN_20260824.md](Plans/UEAGENTKIT_EDITOR_RESIDENT_WRITER_W1_ACCEPTANCE_PLAN_20260824.md)：W1 implementation 完成后的验收执行文档，覆盖 B3 fixture、真实 UE5.6 resident smoke、Undo/Discard、compile recovery、Save/Verify、Semantic Diff/Trust 与 Exit Gate。
+- [`PROJECT_STATUS.md`](PROJECT_STATUS.md)：当前已实现能力、当前开发阶段与明确未实现边界。
+- [`Plans/README.md`](Plans/README.md)：**当前计划文档唯一导航入口**，区分主计划、当前 W4、已完成结果与历史计划。
+- [`Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md`](Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md)：当前项目级方向、Track 边界与架构取舍。
+- [`Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md`](Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md)：当前跨 Track 依赖与验收规格。
+- [`Plans/UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_DETAILED_PLAN_20260826.md`](Plans/UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_DETAILED_PLAN_20260826.md)：当前 Writer 主线 W4-0～W4-7 的权威实现计划。
+- [`Plans/UEAGENTKIT_W3_CHECKPOINT_STRONG_VERIFY_RESULT_20260825.md`](Plans/UEAGENTKIT_W3_CHECKPOINT_STRONG_VERIFY_RESULT_20260825.md)：最近完成的 W3 C0-C6 真实 UE5.6 收口结果。
+- [`PROJECT_STATUS_EN.md`](PROJECT_STATUS_EN.md)：English project status snapshot；当前开发计划以中文 Master/Plans 索引为准。
 - [`Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md`](Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md)：R4.1 24-attempt paired repeat 的完整结果、成本、稳定性与失败限定。
 - [`Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`](Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md)：105 个公共 Tool、18 个 Patch Operation 的 Read/Write Gap Audit 与 Scope Freeze。
 - [`Plans/UEAGENTKIT_0_8_RELEASE_REVIEW_20260823.md`](Plans/UEAGENTKIT_0_8_RELEASE_REVIEW_20260823.md)：0.8 capability Release Review、known limitations 与正式发布边界。
@@ -85,7 +87,7 @@
 - Offline 10、Live 43、Workflow-only 60、Live + Workflow 93 Tool；启用 Memory 后分别为 22、55、72、105；全部 105 个公共 Tool 与 18 个 Patch Operation 已完成 capability 分类。
 - `ue_apply_asset_property_live` 通过注册式资产域执行器支持受控 Data Asset、Material Instance 与 DataTable Operation；统一 Transaction/Evidence、精确 Undo/Discard、授权保存后独立 Verify 和可恢复 Journal 均已完成，但仍不自动保存或开放任意 UObject。
 
-0.5.x、0.6.0 与 0.7.0 已完成并进入维护；最新正式发布仍为 0.7.0。0.8.x Context / Analysis / Agent Reliability capability scope 已在 `feature/agent-reliability` 本地收口，后续只按真实 Case 证据处理 demand-driven backlog；正式 0.8 package release、R5 与远端发布均需独立授权。大型项目性能框架继续作为共享横向能力建设，离线导出与 Commandlet 继续承担全项目索引、批处理、独立验证、回滚和 CI。
+0.5.x、0.6.0 与 0.7.0 已完成并进入维护；最新正式发布仍为 0.7.0。0.8.x Context / Analysis / Agent Reliability capability scope 已在 `feature/agent-reliability` 本地收口。`feature/live-writer-expansion` 已完成 W0-W3，当前下一主线为 W4 Multi-operation / Bounded Batch；后续项目方向以 [`Plans/README.md`](Plans/README.md) 与 2026-08-27 Master Plan 为准。正式 0.8 package release、R5 与远端发布均需独立授权。
 
 只读分析路径不修改资产；Blueprint Patch、Asset Patch 与 MCP Commit 仅在明确授权后执行。
 

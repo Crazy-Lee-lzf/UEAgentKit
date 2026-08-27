@@ -6,48 +6,104 @@
 
 UE Agent Kit 是一套面向 Unreal Engine 的开源资产分析、索引与受控写入工具。它通过 UE Editor 插件导出项目资产目录、Asset Registry 元数据、依赖关系和 Blueprint 语义，再使用 Python CLI 与 SQLite 建立项目级索引，并通过 Policy、Revision、Dry Run 和备份保护显式写入。
 
-当前已发布版本为 **0.7.0**，支持 **Unreal Engine 5.6**。本版本正式集成 Realtime Foundation、注册式 Live Editor Write、Schema v3 Knowledge Tree/Active Work、渐进式 Context、分帧批量任务、持久化 Change Set，以及完整 Transaction/Evidence、Undo/Discard、授权保存与独立验证闭环。
-
-> **当前状态**：最新正式发布仍是 0.7.0。`feature/agent-reliability` 上的 0.8.x Context / Analysis / Agent Reliability capability scope 已完成本地 Closeout：R0–R4、R4.1 repeat、Read/Write Gap Audit 与 Scope Freeze 均已有确定性证据；0 Must-fix new tools，R5 继续由 benchmark evidence 延期。未启用 Memory 时为 Offline 10、Live 43、Workflow-only 60、Live + Workflow 93 Tool；启用固定 Project Memory 后分别为 22、55、72、105。本轮未修改 0.7.0 published version、Tag 或 Release 产物。
+当前已发布版本为 **0.7.0**，支持 **Unreal Engine 5.6**。
 
 > **AI Generated**：本项目的代码和文档主要由 AI 生成，并通过人工审查、UE 5.6 编译、自动化测试和真实工程回归验证。
 
-## 可以用来做什么
+## 它解决什么问题
 
-- 列出项目中的 Static Mesh、Skeletal Mesh、Material、Texture、Animation、DataTable、Niagara、World 等资产。
-- 按资产名称、路径或 Asset Class 搜索。
-- 查询资产的 Hard/Soft Package 依赖和反向引用。
-- 查看 Asset Registry Tags、Package 信息、文件大小和 SHA-256 Revision。
-- 查询 Blueprint 变量在哪里被读取或写入。
-- 查询函数、接口消息、宏、Dynamic Cast 和 Event Dispatcher 的调用关系。
-- 查看 Blueprint 的 Graph、Node、Pin 和连接结构。
-- 使用 Policy、Revision 和导出快照校验 Patch，并对授权 Blueprint、非 Blueprint 标量属性、Data Asset Object/Class/Soft 引用、Struct/Array/Set/Map、Material Instance 参数，以及 DataTable 单元格、多字段和 Row 结构操作执行 Dry Run 或显式 Commit。
-- 为成功 Commit 自动生成 Backup Manifest，并在当前 Revision 仍匹配时显式回滚和独立验证恢复结果。
-- 使用声明式 Write Fixture Plan 在安全测试目录内创建或重置测试资产，并独立验证类、Revision 与 Dirty 状态。
-- 通过本地 MCP Server，让 Agent 搜索资产/Symbol、读取单资产和查询引用，并使用 12 个高层安全写入 Tool 自动生成严格 Plan 或执行 Dry Run，不开放 Shell、任意 SQL 或 UObject。
-- 在运行中的 Editor 内，对已打开且初始 Clean 的 Data Asset、Material Instance 和 DataTable 执行 12 种受控 Live Apply；修改可精确 Undo/Discard，授权保存后可独立重载验证，MCP 重启后可从固定 Journal 恢复未完成闭环。
-- 对 Bool、整数、浮点、String、Name、Text 和两类 Enum 执行真实 Dry Run/Commit/重载矩阵，并验证未授权、过期 Revision、错误类型、越界、非法 Enum、属性不存在、Dirty Package、Sidecar 和保存失败均零写入拒绝。
+Unreal 项目的知识大多锁在二进制资产里。Blueprint 的调用关系、材质参数的实际取值、
+某个 Mesh 被谁引用——这些问题通常只能靠人打开编辑器逐个点开确认，AI Agent 更是完全看不见。
+
+UE Agent Kit 把这些信息导出成可检索的结构化数据，再让 Agent 在明确的安全边界内改回去：
+
+```text
+读    UE Editor 插件导出资产目录、Asset Registry 元数据、依赖关系与 Blueprint 语义
+索引  Python CLI 建立 SQLite/FTS5 项目级索引，支持全文与引用查询
+写    Policy 授权 + SHA-256 Revision 校验 + Dry Run + 外部备份 + 独立验证
+```
+
+写入路径的设计前提是**不信任调用方**：每一步都可拒绝，默认不落盘，出错可回滚。
+
+## 能回答的问题
+
+**资产与依赖**
+
+- 项目里有哪些 Static Mesh / Skeletal Mesh / Material / Texture / Animation / DataTable / Niagara / World 资产
+- 某个资产依赖谁、又被谁引用（Hard / Soft Package 双向）
+- 某个资产的 Registry Tags、Package 信息、文件大小与 SHA-256 Revision
+
+**Blueprint 语义**
+
+- 某个变量在哪里被读、在哪里被写
+- 函数、接口消息、宏、Dynamic Cast、Event Dispatcher 的调用关系
+- Graph / Node / Pin 的完整连接结构
+
+## 能安全修改什么
+
+所有写入都要经过 Policy 授权与 Revision 校验，默认 Dry Run，Commit 需显式选择。
+
+**离线 Patch**（独立进程，工程可关闭）
+
+- Blueprint 变量默认值、组件属性、Pin 默认值
+- 非 Blueprint 标量属性：Bool、整数、浮点、String、Name、Text、两类 Enum
+- Data Asset 的 Object / Class / Soft 引用，以及 Struct / Array / Set / Map
+- Material Instance 的 Scalar / Vector / Texture / Static Switch 参数
+- DataTable 的单元格、多字段与 Row 结构操作
+
+**Editor 内 Live Apply**（工程运行中，12 种受控 Operation）
+
+- 对已打开且初始 Clean 的 Data Asset、Material Instance、DataTable 即时生效
+- 修改进入 Undo 栈，可精确 Undo / Discard
+- 授权保存后独立重载验证；MCP 重启可从固定 Journal 恢复未完成闭环
+
+**安全网**
+
+- 成功 Commit 自动生成不可覆盖的 Backup Manifest，Revision 仍匹配时可显式回滚并独立验证
+- 失败路径全部零写入拒绝：未授权、过期 Revision、类型错误、越界、非法 Enum、
+  属性不存在、Dirty Package、Sidecar 冲突、保存失败
+- 声明式 Write Fixture Plan 可在隔离测试目录创建或重置测试资产
+
+## 给 AI Agent 用
+
+通过本地 MCP Server 接入，Agent 可以搜索资产与 Symbol、读取单资产、查询引用，
+并调用高层写入 Tool 自动生成严格 Plan 或执行 Dry Run。
+
+**不开放**：Shell、任意 SQL、任意 UObject Method、自动保存。
 
 ## 主要能力
 
 ### 通用资产目录
 
-- 导出 Asset Registry 可见的项目资产。
-- 默认排除 Blueprint 和 World Partition 外部 Actor/Object 包，避免与 Blueprint 深度导出重复或产生大量生成记录。
-- 输出资产路径、Asset Class、Package、Chunk、Registry Tags、Revision 和依赖关系。
-- Static Mesh 专用 Reader 额外输出 LOD/Section、材质槽、Nanite、Bounds、Lightmap、碰撞和 Socket。
-- Skeletal Mesh 专用 Reader 输出 Skeleton/Physics Asset、LOD、材质槽、Bounds、骨骼摘要、Morph Target 和 Socket；Skeleton Reader 输出完整骨骼层级、参考姿势、Virtual Bone、Socket、兼容项和 Curve 元数据。
-- Physics Asset Reader 输出预览 Mesh、Body→Bone 映射、Shape 统计、禁碰撞对、Constraint 两端骨骼/参考帧和 Profile。
-- Material Reader 输出 Domain、Blend Mode、Shading Model、双面/薄表面、Opacity Mask 和 Expression Class 摘要；Material Instance Reader version 2 输出 Parent、渲染属性以及 Scalar/Vector/Texture/Font/Static Switch 参数覆盖，并为四类可写参数导出 Override 与 Expression GUID。
-- Material Function Reader 输出描述、库暴露状态、输入/输出稳定 GUID、类型、默认预览值以及 Expression Class 摘要。
-- Texture2D Reader 输出 Source 尺寸/格式、Platform Data 可用性、压缩、sRGB、LOD Group、Mip、Filter、寻址、Streaming 和 Virtual Texture 设置，不读取像素或 BulkData。
-- Anim Sequence Reader 输出 Skeleton、时长/采样、Additive、Root Motion、Notify、Curve 和 Sync Marker；Anim Montage Reader 输出 Section、Slot、Segment、Notify 和 Branching Point 摘要。
-- Blend Space / Aim Offset Reader 输出轴配置与稳定排序样本；DataTable Reader 输出 Row Struct、排序后的 Row Name 和结构化行数据。
-- 通用 Data Asset Reader 只读导出 Edit/Blueprint/Config/Searchable 属性、PrimaryAssetId 和对象/软对象路径，覆盖 Input Action、Input Mapping Context、Primary Asset Label 等派生资产。
-- Niagara System Reader 输出系统 Warmup/Fixed Tick/Bounds、User Parameter、Emitter、Script、Renderer、事件处理器和 Simulation Stage 摘要，不读取模拟缓存或 GPU 数据。
-- World Reader 输出 Persistent Level、World Settings、Streaming/World Partition、Actor/Component 类别计数与有界明细，并在 Actor Descriptor 元数据可用时只读输出外部 Actor 摘要，不主动加载外部 Actor，也不触发 BeginPlay 或关卡保存。
-- Reader Registry 使用按 Asset Class 注册的分发表；Mesh、Material、Animation/Data、Niagara 和 World Reader 独立编译，未知类型仍安全回退到通用 Asset Registry 记录。
-- 不批量加载所有 UObject，适合项目级快速扫描。
+导出 Asset Registry 可见的项目资产，输出路径、Asset Class、Package、Chunk、
+Registry Tags、Revision 与依赖关系。默认排除 Blueprint 和 World Partition 外部
+Actor/Object 包，避免与 Blueprint 深度导出重复。
+
+**不批量加载所有 UObject**，适合项目级快速扫描。
+
+在通用记录之上，按 Asset Class 注册了专用 Reader：
+
+| Reader | 额外输出 |
+|---|---|
+| Static Mesh | LOD/Section、材质槽、Nanite、Bounds、Lightmap、碰撞、Socket |
+| Skeletal Mesh | Skeleton/Physics Asset、LOD、材质槽、Bounds、骨骼摘要、Morph Target、Socket |
+| Skeleton | 完整骨骼层级、参考姿势、Virtual Bone、Socket、兼容项、Curve 元数据 |
+| Physics Asset | 预览 Mesh、Body→Bone 映射、Shape 统计、禁碰撞对、Constraint、Profile |
+| Material | Domain、Blend Mode、Shading Model、双面/薄表面、Opacity Mask、Expression 摘要 |
+| Material Instance | Parent、渲染属性、Scalar/Vector/Texture/Font/Static Switch 覆盖、Override 与 Expression GUID |
+| Material Function | 描述、库暴露状态、输入/输出稳定 GUID、类型、默认预览值 |
+| Texture2D | Source 尺寸/格式、压缩、sRGB、LOD Group、Mip、Filter、寻址、Streaming、Virtual Texture |
+| Anim Sequence | Skeleton、时长/采样、Additive、Root Motion、Notify、Curve、Sync Marker |
+| Anim Montage | Section、Slot、Segment、Notify、Branching Point |
+| Blend Space / Aim Offset | 轴配置与稳定排序样本 |
+| DataTable | Row Struct、排序后 Row Name、结构化行数据 |
+| Data Asset（通用） | Edit/Blueprint/Config/Searchable 属性、PrimaryAssetId、对象/软对象路径 |
+| Niagara System | Warmup/Fixed Tick/Bounds、User Parameter、Emitter、Script、Renderer、Simulation Stage |
+| World | Persistent Level、World Settings、Streaming/World Partition、Actor/Component 计数与有界明细 |
+
+**只读边界**：Texture2D 不读像素与 BulkData；Niagara 不读模拟缓存与 GPU 数据；
+World 不主动加载外部 Actor、不触发 BeginPlay、不保存关卡。未知 Asset Class 安全
+回退到通用 Asset Registry 记录。
 
 ### Blueprint 深度分析
 
@@ -233,7 +289,28 @@ scripts\TestMultiOperationTransactions.cmd ^
 
 脚本分别对 Data Asset 和 Blueprint 执行两个 Operation：Dry Run 使用 `process-discard` 且磁盘 Revision 不变；Commit 只创建一个 Package 备份、只保存一次，并生成包含全部 Operation 与授权键的 Manifest；随后通过独立 UE 进程验证结果并整体 rollback，最终 Revision 必须与各自基线完全一致。
 
-当前支持四种 Blueprint Operation、标量 `setAssetProperty`、Data Asset 专用 `setAssetReferenceProperty` 与 `setAssetStructuredProperty`、四种 Material Instance 参数 Operation，以及 DataTable 字段和 Row 操作。每次执行仍严格限制为一个资产，但可在同一原子事务中包含 1–32 个兼容 Operation；多 Operation 会统一预校验、创建一次备份、编译/保存一次，并由一个 Manifest 记录全部 Operation。属性、引用目标、Material 参数和 DataTable 字段继续使用逐目标精确 Policy 授权。`setAssetStructuredProperty` 只替换顶层 Struct、Array、Set 或 Map，使用显式 `valueType` 包络；Struct 必须包含完整字段，Set/Map 必须按 Canonical JSON 唯一排序，并返回递归结构化 Diff。当前仍只接受没有独立 Package 侧文件的单文件资产。
+**当前支持的 Operation**
+
+```text
+Blueprint              4 种
+标量属性                setAssetProperty
+Data Asset 引用         setAssetReferenceProperty
+Data Asset 结构/容器    setAssetStructuredProperty
+Material Instance      4 种参数 Operation
+DataTable              字段操作 + Row 操作
+```
+
+**事务边界**
+
+每次执行严格限制为**一个资产**，但同一原子事务可包含 1–32 个兼容 Operation。
+多 Operation 会统一预校验、创建一次备份、编译/保存一次，并由一个 Manifest 记录全部 Operation。
+
+属性、引用目标、Material 参数与 DataTable 字段均使用**逐目标精确 Policy 授权**。
+
+`setAssetStructuredProperty` 只替换顶层 Struct / Array / Set / Map，使用显式 `valueType`
+包络：Struct 必须包含完整字段，Set/Map 必须按 Canonical JSON 唯一排序，返回递归结构化 Diff。
+
+当前只接受没有独立 Package 侧文件的单文件资产。
 
 ### 6. 启动 MCP Server（0.7.0）
 
@@ -270,7 +347,33 @@ scripts\TestMcpSnapshotRefresh.cmd ^
   -ProjectPath "<TEST_PROJECT>.uproject"
 ```
 
-服务器对 MCP Client 仍只使用本地 `stdio`。未启用 Memory 时，Offline、Live、Workflow-only、Live + Workflow 分别提供 10、43、60、93 个 Tool；启用固定 Project Memory 后分别为 22、55、72、105。实时路径提供有界 Editor Context、Output Log、编译诊断、当前 Graph/Node、分帧 `scanCurrentWorld`、Batch 状态/分页详情与持久化 Change Set；R0–R3 额外提供 Task Context、Impact Analysis、Semantic Diff、Verification Plan 与 Trust Verdict。`ue_apply_asset_property_live` 通过注册式资产域执行器支持受控 Operation，并继续复用 Plan、Policy、Revision、Transaction、精确确认、Undo/Discard、授权单资产保存和独立 Verify；不会开放任意 SQL、Shell、Python、UObject Method、自动保存或 Save All。完整契约见 [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md)、[`spec/LIVE_EDITOR_BRIDGE.md`](spec/LIVE_EDITOR_BRIDGE.md) 与 [`spec/INDEX_FRESHNESS.md`](spec/INDEX_FRESHNESS.md)。
+服务器对 MCP Client 只使用本地 `stdio`。
+
+**Tool 数量按模式与 Memory 开关变化**
+
+| 模式 | 不启用 Memory | 启用 Project Memory |
+|---|---|---|
+| Offline | 10 | 22 |
+| Live | 43 | 55 |
+| Workflow-only | 60 | 72 |
+| Live + Workflow | 93 | 105 |
+
+**实时路径提供**
+
+```text
+有界 Editor Context / Output Log / 编译诊断 / 当前 Graph/Node
+分帧 scanCurrentWorld / Batch 状态与分页详情 / 持久化 Change Set
+Task Context / Impact Analysis / Semantic Diff / Verification Plan / Trust Verdict
+```
+
+`ue_apply_asset_property_live` 通过注册式资产域执行器支持受控 Operation，复用 Plan、
+Policy、Revision、Transaction、精确确认、Undo/Discard、授权单资产保存与独立 Verify。
+
+**不开放**：任意 SQL、Shell、Python、UObject Method、自动保存、Save All。
+
+完整契约见 [`spec/MCP_SERVER.md`](spec/MCP_SERVER.md)、
+[`spec/LIVE_EDITOR_BRIDGE.md`](spec/LIVE_EDITOR_BRIDGE.md) 与
+[`spec/INDEX_FRESHNESS.md`](spec/INDEX_FRESHNESS.md)。
 
 ```bat
 claude mcp add --transport stdio --scope project ue-agent-kit -- ^
@@ -346,7 +449,20 @@ Output\Blueprints\
 
 ## 安全说明
 
-只读导出器、SQLite 查询和 `ue-agent patch validate` 不修改 UObject 或资产文件。`ue_apply_asset_property_live` 是唯一的编辑器内存写入入口：它复用既有 Policy/Revision Plan，只修改已打开且初始 Clean 的非 Blueprint、非地图资产，通过注册表限定当前 12 个 Operation，进入 Undo 栈并标记 Dirty，但不自动保存。每次实际修改写入可恢复 Journal，可用精确 Transaction 执行 Undo/Discard；持久化仍必须单独经过授权保存和独立 Verify，或使用隔离的 `BlueprintPatch`/`AssetPatch` Commandlet。
+**只读的部分**：导出器、SQLite 查询和 `ue-agent patch validate` 不修改 UObject 或资产文件。
+
+**唯一的编辑器内写入入口**是 `ue_apply_asset_property_live`：
+
+```text
+复用既有 Policy / Revision Plan
+只修改已打开且初始 Clean 的非 Blueprint、非地图资产
+通过注册表限定当前 12 个 Operation
+进入 Undo 栈并标记 Dirty，但不自动保存
+每次实际修改写入可恢复 Journal，可用精确 Transaction 执行 Undo/Discard
+```
+
+持久化必须单独经过**授权保存 + 独立 Verify**，或使用隔离的
+`BlueprintPatch` / `AssetPatch` Commandlet。
 
 - 默认使用 `DryRun`，磁盘 Revision 必须保持不变。
 - `Commit` 同时要求命令行显式选择和 Policy 的 `commitEnabled=true`。

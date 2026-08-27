@@ -2,11 +2,11 @@
 
 
 
-更新时间：2026-08-23
+更新时间：2026-08-27
 
 
 
-本文描述已发布的本地 `main` 基线及当前开发状态，支持 Unreal Engine 5.6。最新正式发布仍为 **0.7.0**。`feature/agent-reliability@2aadb66` 已完成 0.8.x Context / Analysis / Agent Reliability capability closeout：R0–R4、R4.1 repeat、C0–C6、Read/Write Gap Audit 与 Scope Freeze 均已完成，但尚未合入 `main`，也未执行 0.8 package release。R5 继续 `deferred by benchmark evidence`。后续技术主线转向 Editor-resident Writer 的低延迟连续写入与大型项目性能；详细入口见 [`Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md`](Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md)。
+本文描述已发布的 `main` 基线及当前开发状态，支持 Unreal Engine 5.6。最新正式发布仍为 **0.7.0**。0.8.x Context / Analysis / Agent Reliability capability scope 已完成本地 closeout，R5 继续 `deferred by benchmark evidence`。当前 `feature/live-writer-expansion` 已完成 W0–W3：Blueprint 窄范围常驻写入、Fast Resident Verify 与 Checkpoint Strong Verify 均已通过真实 UE5.6 验收；下一主线是 W4 Multi-operation / Bounded Batch。当前计划入口统一见 [`Plans/README.md`](Plans/README.md)，项目级方向见 [`Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md`](Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md)。
 
 
 
@@ -56,7 +56,7 @@ Tool 数量只表示 MCP 接口数量，不等同于 Unreal Operation 数量。�
 
 
 
-当前 0.8 capability closeout 最终门禁基线：
+0.8 capability closeout 历史门禁基线（2026-08-23）：
 
 ```text
 Portable unittest            696 passed
@@ -71,7 +71,18 @@ C++ changed                   0
 Direct Build                  not triggered
 ```
 
+当前 `feature/live-writer-expansion` 的 W3 收口基线（2026-08-27）：
 
+```text
+Python full suite             712 / 712 passed
+ValidateRelease               0.7.0 passed
+Ruff / compileall             passed
+UE5.6 Direct Build            passed
+git diff --check              passed
+W3 real acceptance            C0-C6 PASS
+```
+
+测试数量是阶段证据，不作为未来分支永久固定值。
 
 ## 3. 已实现的读取能力
 
@@ -184,6 +195,8 @@ Policy / Revision Plan
 Live Apply Workflow 使用固定 Work Root Journal 保存待处理 Receipt；MCP 重启后可恢复经过严格校验的记录，Verify 可指定精确 `liveApplyReceipt`，成功 Undo/Discard/Verify 会关闭记录。Journal I/O 失败不会把已经成功的 Editor 修改伪报成失败。
 
 真实回归分为 Fast（Scalar、Undo/Discard、Closed Loop）和 Full（全部 7 组）；发布状态统一报告 `publishedVersion=0.7.0` 与 `developmentLine=0.7.0`。
+
+开发线 `feature/live-writer-expansion` 已在此基础上完成 W1-W3：Blueprint `setVariableDefault` / `setComponentProperty` / `setPinDefault` 可在常驻 Editor 中安全连续写入；W2 提供 Fast Resident Verify；W3 提供零子进程 checkpoint save 与随后独立 Strong Verify，并保留 exact transaction continuation、supersession、Semantic Diff / Trust 与恢复边界。
 
 ### 4.3 持久化安全写入
 
@@ -321,7 +334,7 @@ Live Editor 中已经产生的受控 Dirty 资产，也可以通过 `ue_save_aut
 
 ## 6. 待做功能与优先级
 
-当前后续工作的唯一总入口为 [`Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md`](Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md)。优先级不再按 Tool 数量推进：
+当前后续工作的文档入口为 [`Plans/README.md`](Plans/README.md)。项目级方向由 2026-08-27 Master Plan 统一管理，当前 Writer 实现以 W4 Detailed Plan 为准。`UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md` 继续保留为从 0.8 closeout 进入 Writer 阶段的历史桥接计划。优先级不再按 Tool 数量推进：
 
 ```text
 P0  Editor-resident Writer / low-latency write path
@@ -353,18 +366,13 @@ Realtime I/O 基础层已经达到可复用状态，后续进入需求驱动维�
 3. Snapshot、No-op、失败恢复、Dirty、Undo 和独立 Verify 语义。
 4. 真实 UE5.6 成功、拒绝、恢复和闭环回归。
 
-### 已完成基础：横向 Memory 与任务上下文集成
+### 已完成基础 / 后续增强：Memory 与任务上下文
 
-Schema v3 Knowledge Tree、Active Work、五级渐进式披露、按需 Evidence 和五个高层 Memory Tool 已完成；0.8 R0/C1 又补齐了 Task Context、Change Set、Editor Session、Revision 与 Evidence 的确定性关联。因此这条线不再承担新的高层 Context 功能开发。
+Schema v3 Knowledge Tree、Active Work、渐进式披露、按需 Evidence 与现有 Memory Tool 已完成；0.8 R0-R3 又补齐了 Task Context、Change Set、Editor Session、Revision 与 Evidence 的确定性关联。旧的“Schema 暂停扩张”结论只适用于 0.8 capability closeout，不再代表当前中期计划。
 
-剩余工作仅保留：
+W4 完成并冻结 Change Set 结构后，Memory Track 计划按 2026-08-27 Master/Midterm 继续：先建立效率门禁，再以确定性 L0 事件索引扩展 Schema v4，随后在独立迁移中加入 v5 embedding 存储与可选混合召回。自动蒸馏只使用 `tool-observed` 证据，不在任务同步链路调用 LLM。
 
-- Knowledge Tree、FTS、Context Pack 和大型 Memory 数据库的时间、结果大小与 Token 预算基准；
-- Change Set / Active Work / Memory Evidence 的低维护自动收束体验；
-- 未来 0.9 团队共享 Knowledge Service 的项目级知识与冲突模型；
-- 保持单一薄 `project-memory` Skill，不再扩大底层 Memory Schema。
-
-完整实现与剩余边界见 [`MEMORY_ARCHITECTURE.md`](MEMORY_ARCHITECTURE.md)。
+当前实现细节见 [`MEMORY_ARCHITECTURE.md`](MEMORY_ARCHITECTURE.md)；未来增强契约以 [`Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md`](Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md) 和 Midterm Spec 为准。
 
 ### P0C：大型项目性能基准
 
