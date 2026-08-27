@@ -1,0 +1,29 @@
+{
+    "schemaVersion": "1.0",
+    "validationEnabled": true,
+    "commitEnabled": true,
+    "allowedProjectNames": ["HostProject"],
+    "allowedAssetRoots": ["/Game/UEAgentKitWriteTests/Transactions"],
+    "allowedReferenceRoots": [],
+    "allowedReferenceClasses": [],
+    "allowedOperations": [
+        "setAssetProperty",
+        "setVariableDefault",
+        "setComponentProperty",
+        "setPinDefault"
+    ],
+    "allowedAssetClasses": [
+        "/Script/UEAgentKitEditor.UEAgentKitScalarWriteFixtureAsset",
+        "/Script/Engine.Blueprint"
+    ],
+    "allowedAssetProperties": [
+        "/Script/UEAgentKitEditor.UEAgentKitScalarWriteFixtureAsset#IntValue"
+    ],
+    "allowedMaterialParameters": [],
+    "allowedDataTableFields": [],
+    "requireRevision": true,
+    "rejectDirtyPackages": true,
+    "maxAssetsPerPatch": 4,
+    "maxOperationsPerAsset": 8,
+    "maxValueBytes": 16384
+}

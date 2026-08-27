@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from .agent_workflow import MATERIAL_PARAMETER_OPERATIONS, PatchWorkflowService, WorkflowError
 from .animation_scale_fix_batch import AnimationScaleFixBatchService
+from .bounded_batch import BoundedBatchService
 
 
 def register_workflow_tools(
@@ -35,6 +36,7 @@ def register_workflow_tools(
     )
 
     animation_scale_fix_batch_service = AnimationScaleFixBatchService(workflow_service)
+    bounded_batch_service = BoundedBatchService(workflow_service)
 
     def _run_high_level_change(
         *,
@@ -669,6 +671,17 @@ def register_workflow_tools(
             )
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_plan_patch", exc, read_only=False)
+
+    @server.tool(annotations=planning_annotations)
+    def ue_plan_live_write_batch(
+        assets: list[dict[str, Any]],
+        description: str = "",
+    ) -> dict[str, Any]:
+        """Create one read-only, policy-gated bounded batch plan for W4 supported operations."""
+        try:
+            return bounded_batch_service.plan(assets=assets, description=description)
+        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_plan_live_write_batch", exc, read_only=False)
 
     @server.tool(annotations=dry_run_annotations)
     def ue_dry_run_patch(plan_id: str) -> dict[str, Any]:

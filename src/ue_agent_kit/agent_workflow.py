@@ -105,6 +105,11 @@ def _live_write_stable_target_key(operation: str, target: dict[str, Any]) -> str
 
 
 
+def live_write_stable_target_key(operation: str, target: dict[str, Any]) -> str:
+    """Public behavior-preserving alias for the W3 stable live-write target identity."""
+    return _live_write_stable_target_key(operation, target)
+
+
 def _is_guid_with_hyphens(value: str) -> bool:
     if len(value) != 36:
         return False
@@ -2875,6 +2880,34 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 phase="stored-plan-validation",
             )
         return validation
+
+    def bind_asset_for_batch(self, asset_path: str) -> dict[str, Any]:
+        """Bind one exact indexed asset Class and SHA-256 Revision for W4 Batch planning."""
+        with self._lock:
+            self._assert_policy_unchanged()
+            asset_path = self._validate_refresh_asset_path(asset_path)
+            asset_result = self.index_service.get_asset(
+                asset_path,
+                symbol_limit=1,
+                reference_limit=1,
+                graph_limit=1,
+                node_limit=1,
+            )
+            if not asset_result.get("found") or not isinstance(asset_result.get("asset"), dict):
+                raise WorkflowError("asset-not-indexed", "The requested asset is not present in the fixed SQLite index.")
+            asset = asset_result["asset"]
+            self._assert_asset_fresh(asset_path)
+            revision = asset.get("revision_value")
+            asset_class = asset.get("asset_class")
+            if not isinstance(revision, str) or not revision.startswith("sha256:"):
+                raise WorkflowError("revision-unavailable", "The indexed asset has no usable SHA-256 Revision.")
+            if not isinstance(asset_class, str) or not asset_class:
+                raise WorkflowError("asset-class-unavailable", "The indexed asset has no usable Asset Class.")
+            return {
+                "assetPath": asset_path,
+                "assetClass": asset_class,
+                "expectedRevision": revision,
+            }
 
     def plan_patch(
         self,

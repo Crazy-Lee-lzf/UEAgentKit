@@ -226,7 +226,9 @@ def _server_instructions(
         "Fixed-project UE Agent Kit workflow. " + base + live_text + memory_text +
         "Prefer the ue_set_* tools for common Blueprint, asset, Material Instance, and DataTable changes. "
         "They create a strict Plan by default and may run Plan plus Dry Run, but never Commit. Use ue_apply_patch only "
-        "with the returned planId and one-time Dry Run receipt. The low-level ue_plan_patch remains available for "
+        "with the returned planId and one-time Dry Run receipt. When a request contains multiple W4 operations "
+        "(setAssetProperty, setVariableDefault, setComponentProperty, setPinDefault), prefer the read-only "
+        "ue_plan_live_write_batch planner. The low-level ue_plan_patch remains available for "
         "registered Operations not covered by a high-level Tool. Tool arguments cannot choose filesystem paths, policies, projects, "
         "engines, databases, Editor Bridge endpoints, or arbitrary Unreal commands. "
         + memory_workflow_text

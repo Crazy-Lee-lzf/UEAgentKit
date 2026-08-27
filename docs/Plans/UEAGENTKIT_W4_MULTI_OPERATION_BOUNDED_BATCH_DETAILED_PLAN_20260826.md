@@ -467,6 +467,8 @@ baseline recorded
 
 ## W4-1 — Bounded Batch Plan
 
+Execution detail: `UEAGENTKIT_W4_1_BOUNDED_BATCH_PLAN_DETAILED_PLAN_20260828.md`.
+
 Primary files likely:
 
 ```text
