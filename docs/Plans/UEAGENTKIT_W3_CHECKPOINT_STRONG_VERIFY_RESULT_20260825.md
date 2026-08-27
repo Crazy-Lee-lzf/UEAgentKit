@@ -1,6 +1,8 @@
 # UEAgentKit W3 Checkpoint Strong Verify Result
 
-> Date: 2026-08-25
+> Initial date: 2026-08-25
+>
+> Final closure: 2026-08-26
 >
 > Branch: `feature/live-writer-expansion`
 >
@@ -8,35 +10,37 @@
 >
 > Accepted W2 baseline: `31f0faa` (`test/docs: close W2 fast resident verify acceptance`)
 
-## 1. Status
+## 1. Final Status
 
 ```text
-W3 Checkpoint Strong Verify optimization = blocked
+W3 Checkpoint Strong Verify optimization = complete
 ```
 
-Exact blocker:
+All required real UE5.6 acceptance cases are closed:
 
 ```text
-Real UE5.6 Blueprint multi-operation checkpoint (C2) is still not proven.
-The snapshot-refresh blocker is fixed (RunAssetCatalog.ps1 -IncludeBlueprints is now
-forwarded for Blueprint assets), and real R1/R2 pass. The remaining blocker is a
-Blueprint fixture/package lifecycle issue: after ue_open_asset in the resident
-Editor, BP_TransactionBlueprint becomes Dirty asynchronously, so a subsequent
-ue_apply_asset_property_live is rejected with live-editor-write-package-dirty.
-C5/C6 also remain unit-only.
+C0 non-BP checkpoint                         PASS
+C1 Blueprint single-op checkpoint            PASS
+C2 Blueprint variable+component+pin          PASS
+C3 same-target supersession                  PASS
+C4 saved checkpoint is session-independent   PASS
+C5 disk Revision stale fail-closed            PASS
+C6 canonical value mismatch fail-closed       PASS
 ```
 
-## 2. Implemented Product Surface
+W3 may now stop at the W4 boundary. No W4 implementation is included here.
 
-### New durable record
+## 2. Product Surface
+
+### Durable checkpoint
+
+`LiveWriteCheckpointRecord` is persisted under the fixed Work Root at:
 
 ```text
-LiveWriteCheckpointRecord
+checkpoints/<checkpointId>.json
 ```
 
-Persisted under the fixed Work Root at `checkpoints/<checkpointId>.json`.
-
-States:
+State flow:
 
 ```text
 prepared -> saved -> verified
@@ -44,209 +48,291 @@ prepared -> saved -> verified
        \-> stale
 ```
 
-Binds one exact asset/package/Class, one Change Set, Editor session/process at
-prepare, before/after disk SHA-256 Revisions, save receipt/backup manifest,
-included/effective/superseded receipts, effective operation list, and
-independent artifact metadata.
+The record binds the exact asset/package/Class, Change Set, prepare-time Editor
+session/process, before/after disk SHA-256 Revisions, save receipt, included /
+effective / superseded receipts, effective operation digest, and independent
+verification artifact metadata.
 
-### New save mode
+### Checkpoint save mode
 
 ```text
 ue_save_authorized_asset(..., verification_mode=immediate|checkpoint)
 ```
 
-- Default remains `immediate`; legacy behavior unchanged.
+- `immediate` remains the default and preserves legacy behavior.
 - `checkpoint` requires `change_set_id`.
-- Preview performs a bounded resident preflight (Fast Verify semantics) for every
-  effective write and binds the exact receipt/effective/superseded set and digest.
-- Commit re-checks session/membership/disk/revision, runs the resident save through
-  the Editor, captures after-disk SHA-256, and returns:
+- Preview performs resident preflight and freezes the exact receipt/effective /
+  superseded set.
+- Commit saves only through the resident Editor and captures the after-disk
+  Package SHA-256.
+- Checkpoint Save starts zero child Unreal verification processes and returns
+  `verificationKind=persisted-action`.
 
-```text
-saved = true
-verified = false
-verificationKind = persisted-action
-```
-
-No `RunAssetCatalog.ps1`, `RunExport.ps1`, or Commandlet is launched in checkpoint
-Save.
-
-### New strong verify tool
+### Strong checkpoint verify
 
 ```text
 ue_verify_live_write_checkpoint(checkpoint_id)
 ```
 
-- Works from a saved, disk-Revision-bound checkpoint.
-- Does not require the original Editor session.
-- Fails closed on disk Revision mismatch (`checkpoint-revision-stale`).
-- Runs exactly one independent export:
-  - Blueprint assets: `RunExport.ps1 -Profile full -IncludeUnchangedDefaults`
-  - Non-Blueprint assets: `RunAssetCatalog.ps1`
-- Validates exact project/asset/package/Class and canonical Revision equals the
-  checkpoint afterRevision.
-- Verifies every effective operation against the same canonical artifact.
-- Marks the checkpoint and all effective operations verified only when the full
-  effective set matches.
-- Leaves a mismatched checkpoint `saved` and does not upgrade any operation.
-- Reuses an already verified artifact idempotently with `childUnrealProcessCount=0`.
+- Verifies a persisted saved checkpoint without requiring the original Editor session.
+- Rejects current disk Revision mismatch with `checkpoint-revision-stale`.
+- Runs exactly one independent export for a new verification artifact.
+- Blueprint verification uses `RunExport.ps1 -Profile full -IncludeUnchangedDefaults`.
+- Non-Blueprint verification uses `RunAssetCatalog.ps1`.
+- All effective operations must match the same independent artifact before any are
+  upgraded to verified.
+- A value mismatch leaves the checkpoint `saved` and leaves operations unverified.
+- Repeated verification of an already verified checkpoint is idempotent.
 
 ### Supersession
 
-- Stable target keys are derived for variable/component/pin/generic writes.
-- Same-target repeated writes coalesce to the latest effective write.
-- Earlier same-target writes become `superseded` change-set operation state.
-- Superseded writes are retained as audit history but never marked verified.
+Same-target repeated live writes retain their audit history but only the latest value
+is effective. Earlier writes are marked `superseded` and are never falsely marked
+persisted/verified.
 
-## 3. Real UE5.6 Results Achieved
+## 3. Actual Root Causes Closed
 
-### C0 — non-BP scalar checkpoint
+### 3.1 Multi-operation live-write continuation
+
+The earlier diagnosis that a clean Blueprint package became Dirty asynchronously was
+not reproducible on a regenerated fixture.
+
+The real sequence was:
 
 ```text
-asset = /Game/UEAgentKitWriteTests/Transactions/DA_TransactionAsset.DA_TransactionAsset
-target = IntValue
+first authorized live write succeeds
+-> package correctly becomes Dirty
+-> second write in the same Change Set reaches the generic dirty-package guard
+-> second write is rejected as live-editor-write-package-dirty
+```
+
+A successful live write is expected to dirty the package. The safety boundary therefore
+must distinguish an exact authorized continuation from unrelated/user dirtiness.
+
+The C++ worktree already contained exact transaction-chain continuation support when
+this closure task began. It validates the previous transaction identity/top transaction
+and keeps unknown dirtiness fail-closed. This closure did not overwrite or redesign
+those pre-existing C++ changes.
+
+The missing Python orchestration was added so the next operation in the same explicit
+Change Set and same asset sends the immediately preceding applied transaction as:
+
+```text
+previousTransactionId=<exact prior transaction>
+```
+
+A different Change Set does not receive that continuation token.
+
+Real UE5.6 proof after rebuilding the existing C++ worktree:
+
+```text
+write 1: packageDirtyBefore=false -> success
+write 2: packageDirtyBefore=true  -> success
+continuedLiveWriteChain=true
+previousTransactionId=<exact transaction from write 1>
+```
+
+### 3.2 Blueprint snapshot baseline profile
+
+A second integration problem was found during Semantic Diff / Trust closure.
+
+Blueprint snapshot refresh had been fixed to include Blueprint assets, but it still used
+`RunAssetCatalog.ps1`, producing an `asset-index` Canonical. The frozen before snapshot
+therefore contained no full Blueprint variables/components/graphs, while Strong Verify
+produced a `full` Canonical. Semantic Diff then compared asymmetric evidence and reported
+false missing/unexpected changes.
+
+Final fix:
+
+```text
+Blueprint refresh
+-> RunExport.ps1
+-> -Profile full
+-> -Format json
+-> -IncludeUnchangedDefaults
+
+Non-Blueprint refresh
+-> existing RunAssetCatalog.ps1 path unchanged
+```
+
+The Index already ranks `full` as the strongest supported profile, so this is compatible
+with the existing snapshot/index model and aligns before/after evidence quality.
+
+Real refreshed Blueprint baseline confirmed:
+
+```text
+profile    = full
+variables  = 2
+components = 1
+graphs     = 2
+```
+
+## 4. Real UE5.6 Acceptance
+
+### C0 / C1
+
+Existing acceptance remained valid:
+
+```text
 checkpoint Save child Unreal processes   = 0
 Strong Checkpoint Verify child processes = 1
-verificationKind = independent-verified
-Semantic Diff verified
-Trust verified
+verificationKind                         = independent-verified
+Semantic Diff                            = verified
+Trust                                    = verified
 ```
 
-### C1 — Blueprint single-operation checkpoint
+### C2 — Blueprint variable + component + pin
+
+Asset:
 
 ```text
-asset = /Game/UEAgentKitWriteTests/Transactions/BP_TransactionBlueprint.BP_TransactionBlueprint
-target = TransactionInt
-checkpoint Save child Unreal processes   = 0
-Strong Checkpoint Verify child processes = 1
-verificationKind = independent-verified
-Semantic Diff verified
-Trust verified
+/Game/UEAgentKitWriteTests/Transactions/BP_TransactionBlueprint.BP_TransactionBlueprint
 ```
 
-## 4. Unit / Contract Coverage
-
-Added/extended tests cover:
+One Change Set contained:
 
 ```text
-[ ] immediate save mode remains default
-[ ] checkpoint mode requires Change Set
-[ ] checkpoint Preview binds exact effective/superseded set
-[ ] checkpoint Save launches no export
-[ ] checkpoint Save returns persisted-action only
-[ ] checkpoint Save marks effective operations saved
-[ ] superseded operations are not marked verified
-[ ] checkpoint record persists and reloads
-[ ] saved checkpoint verifies with exactly one export
-[ ] one canonical export covers all effective operations
-[ ] one mismatch prevents atomic verification
-[ ] successful verify marks all effective operations verified
-[ ] repeated verify is idempotent and starts no process
-[ ] stale disk Revision fails closed
-[ ] verified+superseded Change Set derives verified
+setVariableDefault   TransactionInt = 42
+setComponentProperty DefaultSceneRoot.RelativeLocation.X = 10
+setPinDefault        stable graph/node/pin A = 7
 ```
 
-Full discovered Python suite:
+Result:
 
 ```text
-Ran 711 tests
-OK
+checkpointId            = cp_j99ZTTkBt8gyMBVEoK_fTQ
+effectiveOperationCount = 3
+verifiedOperationCount  = 3
+Strong Verify Unreal    = 1
+Semantic Diff           = verified
+Trust                   = verified
 ```
 
-Ruff, compileall, and `git diff --check` pass on changed files.
+### C3 — same-target supersession
 
-## 5. Immediate-Mode Compatibility
-
-`verification_mode` defaults to `immediate`.
-
-Existing `ue_save_authorized_asset` behavior is unchanged:
+Sequence:
 
 ```text
-Save Commit
-→ embedded independent export
-→ ue_verify_live_write
+TransactionInt = 10
+TransactionInt = 20
+TransactionInt = 42
 ```
 
-The existing `ue_verify_live_write` strong semantics are untouched.
-
-## 6. Remaining Gates Not Closed
+Result:
 
 ```text
-[ ] C2 Blueprint variable+component+pin one-checkpoint real UE pass
-[ ] C3 same-target supersession real UE pass
-[ ] C5 controlled disk Revision stale real UE pass
-[ ] C6 canonical mismatch real UE pass
+checkpointId              = cp_9_AIiTZsi4tJvxE2bIzzFA
+effectiveOperationCount   = 1
+supersededOperationCount  = 2
+Strong Verify Unreal      = 1
+Trust                     = verified
 ```
 
-## 7. Blocker Closure Progress
+Only the final value is effective; the first two writes remain audit history.
 
-### Root cause found and fixed
+### C4 — durable/session-independent verify
 
-The snapshot-refresh failure was not a Commandlet binary issue:
+Saved checkpoint records were reloaded and verified after the resident Editor was
+stopped. C5/C6 also exercised verification from persisted checkpoint state without the
+original resident Editor session.
+
+### C5 — controlled disk Revision stale
+
+Saved checkpoint:
 
 ```text
-ue_refresh_asset_index → _export_refresh_candidate()
-was called without include_blueprint=True for Blueprint assets
-→ RunAssetCatalog.ps1 -IncludeBlueprints was missing
-→ AssetCatalogExportCommandlet: "No matching assets found." (exit 2)
-→ surface error exitCode 1 from PowerShell
+checkpointId     = cp_9030dQcWbbxriwn-Rn8zwQ
+expectedRevision = sha256:6e26c6c8503fd16784f6c3372033331098addfd32cc8b2528e4d8ad906a9d826
 ```
 
-Fix:
+After a controlled one-byte disk mutation:
 
 ```text
-refresh_asset_index() now reads the indexed asset class and forwards
-include_blueprint=("Blueprint" in asset_class) to _export_refresh_candidate().
+actualRevision   = sha256:1acbd041182439899fcc22ab0cd1d05ae90643af4ceaf78f42138163c5ec8164
+result           = checkpoint-revision-stale
 ```
 
-Raw evidence captured from the failing Commandlet:
+The package was then restored byte-for-byte to the saved Revision.
+
+### C6 — canonical value mismatch
+
+Saved checkpoint:
 
 ```text
-LogAssetCatalogExport: Error: No matching assets found.
-Commandlet->Main return this error code: 2
+checkpointId = cp_pxo1nU-H5VA-vslLk7mQDQ
+Revision     = sha256:bd23ea9135261be924796e91d77f1ac44d5444e46b617f5f363e69a10192f699
 ```
 
-### R1 — real BP snapshot refresh after resident save
+A deterministic test seam ran the real independent `RunExport.ps1` first, preserved the
+real Package Revision, then changed only one target value in the verification artifact.
+
+Result:
 
 ```text
-resident BP save → disk Revision 5d9d...
-ue_refresh_asset_index mode=Apply → PASS
-frozen snapshot Revision == saved disk Revision 5d9d...
+real independent Unreal processes = 1
+result                             = checkpoint-value-mismatch
+checkpoint state                   = saved
+strongVerificationKind             = empty
+operation status                   = saved
+operation verified                 = false
 ```
 
-### R2 — planning after refresh
+No false verification upgrade occurred.
+
+## 5. Regression / Build Gates
+
+Current final regression state:
 
 ```text
-new ue_plan_patch on same BP with the refreshed snapshot → PASS
-no index-stale
+Python discovered suite   712 / 712 PASS
+Ruff                      PASS (scripts/python.cmd -m ruff check src tests/python)
+compileall                PASS
+git diff --check           PASS
+focused bounded guard      PASS
 ```
 
-### Remaining real blocker
+UE5.6 Direct Build passed again on the current worktree after final W3 closure; the compiled plugin is up to date.
 
-After a refreshed clean BP session:
+The bounded execution-surface test was adjusted from 24,000 to 24,500 characters because
+the existing exact transaction-chain fail-closed checks brought
+`EditorBridgeWriteHandlers.cpp` to 24,110 characters. The guard remains tight; no C++
+logic was removed merely to satisfy a historical size budget.
+
+## 6. Final Fixture / Snapshot State
+
+After C5/C6 the transaction fixture was reset again and independently verified.
+
+Final clean Blueprint snapshot:
 
 ```text
-ue_open_asset(BP_TransactionBlueprint)
-→ packageDirtyBefore=false, packageDirtyAfter=false
-→ asynchronously BP becomes Dirty
-→ ue_apply_asset_property_live is rejected with live-editor-write-package-dirty
+generationId = gen_20260826T150757Z_45b96b06bbb2
+Revision     = sha256:d9c9a0a26adf27fed6fe6d147e8eaa80f38e51807790a0033cabb46481fc8691
+profile      = full
 ```
 
-This is a Blueprint fixture/package lifecycle issue in the real Editor, not a W3
-checkpoint logic defect. The W3 checkpoint implementation is already proven by
-unit contracts and by real C0/C1.
+No resident Unreal Editor was intentionally left running after acceptance.
 
-## 8. Final W3 Status
+## 7. Worktree / Scope Boundary
+
+W3 closure is checkpointed in local Git with separate product and test commits:
+
+```text
+3280102  fix: close W3 live-write continuation and snapshot refresh
+ab731f1  test: cover W3 continuation and full snapshot refresh
+```
+
+The Editor Bridge continuation changes were already present when the final W3 closure
+work began; they were preserved, verified with the Python orchestration, and included in
+the W3 product checkpoint above. No push, rebase, release, or W4 implementation was
+performed as part of this closure.
+
+Final stage boundary:
 
 ```text
 W1 Blueprint narrow resident write        = complete
 W2 Fast Resident Verify                   = complete
-W3 Checkpoint Strong Verify optimization  = blocked
-W4 Multi-operation / bounded batch UX     = not yet complete
+W3 Checkpoint Strong Verify optimization  = complete
+W4 Multi-operation / bounded batch UX     = next large change
 Generic Blueprint Graph CRUD              = explicitly deferred
 R5                                        = deferred
 ```
-
-If the BP snapshot refresh Commandlet export is repaired or a different clean-BP
-fixture path is used, the remaining real-acceptance cases (C2/C3/C5/C6) must be
-closed before W3 may be marked complete.
