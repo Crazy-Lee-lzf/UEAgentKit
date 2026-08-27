@@ -30,6 +30,7 @@ bool FUEAgentKitEditorBridge::TryApplyAssetPropertyLiveResult(
 	const FString& AssetPath,
 	const TSharedPtr<FJsonObject>& Target,
 	const TSharedPtr<FJsonValue>& Value,
+	const FString& PreviousTransactionId,
 	TSharedPtr<FJsonObject>& OutResult,
 	FString& OutErrorCode,
 	FString& OutErrorMessage) const
@@ -120,17 +121,94 @@ bool FUEAgentKitEditorBridge::TryApplyAssetPropertyLiveResult(
 		OutErrorMessage = TEXT("The registered operation requires one non-map project Content package.");
 		return false;
 	}
-	if (HasRequirement(*Descriptor, ELiveWriteAssetRequirement::CleanPackage) && Package->IsDirty())
+
+	const bool bRequiresCleanPackage = HasRequirement(*Descriptor, ELiveWriteAssetRequirement::CleanPackage);
+	bool bContinuedLiveWriteChain = false;
+	if (bRequiresCleanPackage && Package->IsDirty())
 	{
-		OutErrorCode = TEXT("live-editor-write-package-dirty");
-		OutErrorMessage = TEXT("Save or revert the target package before applying an AI live write.");
+		if (PreviousTransactionId.IsEmpty())
+		{
+			OutErrorCode = TEXT("live-editor-write-package-dirty");
+			OutErrorMessage = TEXT("Save or revert the target package before applying an AI live write.");
+			return false;
+		}
+
+		FGuid PreviousId;
+		const TMap<FGuid, TSharedPtr<FLiveWriteTransactionRecord>>* AssetRecords =
+			LiveWriteTransactionRecords.Find(AssetPath);
+		const TSharedPtr<FLiveWriteTransactionRecord>* Found = nullptr;
+		if (FGuid::Parse(PreviousTransactionId, PreviousId) && PreviousId.IsValid() && AssetRecords != nullptr)
+		{
+			Found = AssetRecords->Find(PreviousId);
+		}
+		if (Found == nullptr || !Found->IsValid())
+		{
+			OutErrorCode = TEXT("live-editor-write-chain-mismatch");
+			OutErrorMessage = TEXT("The dirty package is not backed by the exact previous UE Agent Kit live-write transaction.");
+			return false;
+		}
+
+		const TSharedPtr<FLiveWriteTransactionRecord>& PreviousRecord = *Found;
+		if (PreviousRecord->SessionId != SessionId
+			|| !PreviousRecord->Asset.IsValid()
+			|| PreviousRecord->Asset.Get() != Asset
+			|| PreviousRecord->ClassPath != Asset->GetClass()->GetPathName()
+			|| PreviousRecord->PackageName != Package->GetName()
+			|| !PreviousRecord->bDirtyAfter
+			|| PreviousRecord->IO == nullptr)
+		{
+			OutErrorCode = TEXT("live-editor-write-chain-mismatch");
+			OutErrorMessage = TEXT("The previous live-write transaction no longer matches this Editor asset and session.");
+			return false;
+		}
+		if (GEditor->Trans == nullptr)
+		{
+			OutErrorCode = TEXT("live-editor-write-chain-mismatch");
+			OutErrorMessage = TEXT("The Editor transaction history is unavailable; the dirty package cannot be continued safely.");
+			return false;
+		}
+		const FTransactionContext UndoContext = GEditor->Trans->GetUndoContext(false);
+		if (!UndoContext.TransactionId.IsValid() || UndoContext.TransactionId != PreviousRecord->TransactionId)
+		{
+			OutErrorCode = TEXT("live-editor-write-chain-mismatch");
+			OutErrorMessage = TEXT("Another Editor transaction is on top of the previous live write; save, revert, or re-plan before continuing.");
+			return false;
+		}
+
+		FString RefreshError;
+		if (!PreviousRecord->IO->RefreshTarget(RefreshError))
+		{
+			OutErrorCode = TEXT("live-editor-write-chain-mismatch");
+			OutErrorMessage = TEXT("The previous live-write target could not be re-resolved before continuing: ") + RefreshError;
+			return false;
+		}
+		TSharedPtr<FJsonValue> CurrentPreviousValue;
+		FString ReadErrorCode;
+		FString ReadErrorMessage;
+		if (!PreviousRecord->IO->ReadBefore(CurrentPreviousValue, ReadErrorCode, ReadErrorMessage)
+			|| !PreviousRecord->AfterValue.IsValid()
+			|| !PreviousRecord->IO->SemanticEqual(CurrentPreviousValue, PreviousRecord->AfterValue))
+		{
+			OutErrorCode = TEXT("live-editor-write-chain-mismatch");
+			OutErrorMessage = TEXT("The previous live-write target changed after confirmation; the dirty package cannot be continued safely.");
+			return false;
+		}
+		bContinuedLiveWriteChain = true;
+	}
+	else if (!PreviousTransactionId.IsEmpty())
+	{
+		OutErrorCode = TEXT("live-editor-write-chain-mismatch");
+		OutErrorMessage = TEXT("The previous live-write transaction cannot be continued because the target package is no longer dirty.");
 		return false;
 	}
 
-	// A clean package means any older transaction record for this asset was already
-	// saved or otherwise left the undoable live-write lifecycle. Drop those stale
-	// records before retaining the next confirmed write.
-	LiveWriteTransactionRecords.Remove(AssetPath);
+	if (!bContinuedLiveWriteChain)
+	{
+		// A clean package means any older transaction record for this asset was already
+		// saved or otherwise left the undoable live-write lifecycle. Drop those stale
+		// records before retaining the next confirmed write.
+		LiveWriteTransactionRecords.Remove(AssetPath);
+	}
 
 	FLiveWriteOperationContext Context;
 	Context.Asset = Asset;
@@ -146,6 +224,11 @@ bool FUEAgentKitEditorBridge::TryApplyAssetPropertyLiveResult(
 	if (bApplied && Record.IsValid())
 	{
 		LiveWriteTransactionRecords.FindOrAdd(AssetPath).Add(Record->TransactionId, Record);
+	}
+	if (bApplied && OutResult.IsValid())
+	{
+		OutResult->SetBoolField(TEXT("continuedLiveWriteChain"), bContinuedLiveWriteChain);
+		OutResult->SetStringField(TEXT("previousTransactionId"), bContinuedLiveWriteChain ? PreviousTransactionId : FString());
 	}
 	return bApplied;
 }

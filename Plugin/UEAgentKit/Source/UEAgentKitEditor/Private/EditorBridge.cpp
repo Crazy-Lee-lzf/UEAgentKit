@@ -976,11 +976,13 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 			}
 		}
 		const TSharedPtr<FJsonValue> Value = Params->TryGetField(TEXT("value"));
+		FString PreviousTransactionId;
+		Params->TryGetStringField(TEXT("previousTransactionId"), PreviousTransactionId);
 		TSharedPtr<FJsonObject> Result;
 		FString ErrorCode;
 		FString ErrorMessage;
 		SendActionResult(
-			TryApplyAssetPropertyLiveResult(Operation, AssetPath, Target, Value, Result, ErrorCode, ErrorMessage),
+			TryApplyAssetPropertyLiveResult(Operation, AssetPath, Target, Value, PreviousTransactionId, Result, ErrorCode, ErrorMessage),
 			Result,
 			ErrorCode,
 			ErrorMessage);

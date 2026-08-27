@@ -201,6 +201,7 @@ private:
 		const FString& AssetPath,
 		const TSharedPtr<FJsonObject>& Target,
 		const TSharedPtr<class FJsonValue>& Value,
+		const FString& PreviousTransactionId,
 		TSharedPtr<FJsonObject>& OutResult,
 		FString& OutErrorCode,
 		FString& OutErrorMessage) const;

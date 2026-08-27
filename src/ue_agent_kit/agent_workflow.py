@@ -2198,15 +2198,28 @@ class PatchWorkflowService(RetargetWorkflowMixin):
             shutil.rmtree(output)
         output.mkdir(parents=True, exist_ok=False)
         package_path = asset_path.split(".", 1)[0]
-        result = self._run_script(
-            "RunAssetCatalog.ps1",
-            [
+        if include_blueprint:
+            export_script = "RunExport.ps1"
+            export_arguments = [
                 "-EngineRoot", str(self.config.engine_root),
                 "-ProjectPath", str(self.config.project_path),
                 "-Asset", package_path,
                 "-Output", str(output),
-                *(["-IncludeBlueprints"] if include_blueprint else []),
-            ],
+                "-Profile", "full",
+                "-Format", "json",
+                "-IncludeUnchangedDefaults",
+            ]
+        else:
+            export_script = "RunAssetCatalog.ps1"
+            export_arguments = [
+                "-EngineRoot", str(self.config.engine_root),
+                "-ProjectPath", str(self.config.project_path),
+                "-Asset", package_path,
+                "-Output", str(output),
+            ]
+        result = self._run_script(
+            export_script,
+            export_arguments,
             stage="snapshot-refresh-export",
             report_path=output / "manifest.json",
         )
@@ -3118,6 +3131,14 @@ class PatchWorkflowService(RetargetWorkflowMixin):
             asset_path = str(assets[0].get("assetPath", ""))
             expected_revision = str(assets[0].get("expectedRevision", ""))
             bridge_parameters["assetPath"] = asset_path
+            if change_set_id and change_set.operations:
+                previous_operation = change_set.operations[-1]
+                if (
+                    previous_operation.asset_path == asset_path
+                    and previous_operation.status == "applied"
+                    and previous_operation.transaction_id
+                ):
+                    bridge_parameters["previousTransactionId"] = previous_operation.transaction_id
             try:
                 live_result = self.live_editor_service.call_method(
                     "editor.applyAssetPropertyLive",
