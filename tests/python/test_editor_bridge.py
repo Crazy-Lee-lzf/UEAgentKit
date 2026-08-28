@@ -191,6 +191,22 @@ class _BridgeHandler(socketserver.StreamRequestHandler):
                 "openAfter": True,
                 "saved": False,
             },
+            "editor.prepareAssetForDiskRollback": {
+                "action": "prepare-asset-for-disk-rollback",
+                "assetPath": params.get("assetPath", ""),
+                "loadedBefore": True,
+                "openBefore": True,
+                "packageDirtyBefore": False,
+                "closedEditorCount": 1,
+                "releasedTransactionCount": 3,
+                "unloadRequested": True,
+                "unloadChangedLoadedPackages": True,
+                "loadedAfter": False,
+                "openAfter": False,
+                "packageDirtyAfter": False,
+                "readyForDiskRollback": True,
+                "saved": False,
+            },
             "editor.focusAsset": {"action": "focus-asset", "focused": True, "saved": False},
             "editor.syncContentBrowser": {
                 "action": "sync-content-browser",
@@ -569,6 +585,7 @@ class EditorBridgeTests(unittest.TestCase):
             "editor.batchTask.status",
             "editor.batchTask.cancel",
             "editor.openAsset",
+            "editor.prepareAssetForDiskRollback",
             "editor.focusAsset",
             "editor.syncContentBrowser",
             "editor.focusActor",
@@ -674,6 +691,28 @@ class EditorBridgeTests(unittest.TestCase):
                 with self.assertRaises(LiveEditorError) as context:
                     self.service.call_tool(tool_name, params)
                 self.assertEqual(context.exception.code, "live-editor-invalid-parameters")
+
+    def test_internal_rollback_prepare_is_capability_gated_and_bounded(self) -> None:
+        self._write_descriptor()
+        result = self.service.prepare_asset_for_disk_rollback(
+            "/Game/Test/BP_Test.BP_Test"
+        )
+        self.assertTrue(result["readyForDiskRollback"])
+        self.assertFalse(result["loadedAfter"])
+        request = self.server.requests[-1]  # type: ignore[attr-defined]
+        self.assertEqual(request["method"], "editor.prepareAssetForDiskRollback")
+        self.assertEqual(request["params"], {"assetPath": "/Game/Test/BP_Test.BP_Test"})
+
+        self._write_descriptor(
+            capabilities=[
+                capability
+                for capability in self.capabilities
+                if capability != "editor.prepareAssetForDiskRollback"
+            ]
+        )
+        with self.assertRaises(LiveEditorError) as caught:
+            self.service.prepare_asset_for_disk_rollback("/Game/Test/BP_Test.BP_Test")
+        self.assertEqual(caught.exception.code, "live-editor-capability-unavailable")
 
     def test_live_action_parameters_are_bounded_and_non_read_only(self) -> None:
         self._write_descriptor()

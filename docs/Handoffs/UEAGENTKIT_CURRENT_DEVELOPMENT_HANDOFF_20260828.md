@@ -1,6 +1,6 @@
 # UEAgentKit Current Development Handoff
 
-> Date: 2026-08-28
+> Date: 2026-08-29
 >
 > Scope: project-level current development handoff. This is the first document to read when a new Chat / Agent takes over the UEAgentKit development line.
 >
@@ -8,11 +8,30 @@
 >
 > Active branch: `feature/live-writer-expansion`
 >
-> Current implementation HEAD before this handoff-only update: `71400c9` (`feat: add W4-1 bounded batch planning`)
+> Current committed HEAD before the current uncommitted W4-6 work: `f4ba1c4` (`feat: add W4-5 aggregate strong verify semantic diff trust`)
 >
 > Latest published product version: `0.7.0` for Unreal Engine 5.6
 >
 > This document records current repository facts, accepted architecture decisions, Track dependencies, safety rules, and the next execution boundary. It does not authorize Push / Rebase / Tag / Release or future implementation commits.
+
+## 0. 2026-08-29 W4-6 Closure Supersession Note
+
+This note overrides older takeover wording later in this file where W4-2 is still described as `next`.
+
+```text
+W4-2 through W4-6                         complete
+W4-7 Full Acceptance / Documentation      NEXT
+current committed HEAD                    f4ba1c4
+current W4-6 discovered Python suite       766 / 766 PASS
+real UE W4-6 H1-H6                         PASS
+final transaction fixture                  2 / 2 independently verified
+```
+
+Authoritative W4-6 closure evidence:
+
+`docs/Plans/UEAGENTKIT_W4_6_RECOVERY_AND_RESTART_HARDENING_RESULT_20260829.md`
+
+Sections 10, 11, 19, 21, and 22 retain older historical snapshots from earlier handoff updates. Where they conflict with this note, the current state above, `docs/Plans/README.md`, and the W4-6 Result take precedence. The working tree currently contains uncommitted W4-6 implementation/tests/docs; do not reset, clean, or overwrite those changes. No commit is authorized by this handoff update.
 
 ## 1. Read This First
 
@@ -30,25 +49,27 @@ W4-2 Single-Asset Multi-operation Apply complete
 W4-3 Multi-Asset Resident Apply         complete
 W4-4 Multi-Asset Checkpoint Save        complete
 W4-5 Aggregate Strong Verify / Trust    complete
-W4-6 Recovery and Restart Hardening     NEXT
+W4-6 Recovery and Restart Hardening     complete
+W4-7 Full Acceptance / Documentation    NEXT
 ```
 
-The current implementation checkpoint before this W4-5 update:
+The current committed implementation checkpoint before the uncommitted W4-6 closure:
 
 ```text
-d277369 feat: add W4-4 multi-asset checkpoint save
+f4ba1c4 feat: add W4-5 aggregate strong verify semantic diff trust
 ```
 
-Current validation baseline after W4-5:
+Current validation baseline after W4-6:
 
 ```text
-Python discovered suite                    760 / 760 PASS
+Python discovered suite                    766 / 766 PASS
 Ruff                                       PASS
 compileall                                 PASS
 ValidateRelease 0.7.0                      PASS
 git diff --check                           PASS
-UE5.6 Direct Build                         not rerun for W4-5; no C++ changed
-last required Direct Build baseline        W3 PASS
+UE5.6 Direct Build                         PASS
+real UE W4-6 H1-H6                         PASS
+final transaction fixture verify           2 / 2 PASS
 ```
 
 Current Tool Registry counts after W4-5:
@@ -60,7 +81,7 @@ combined live + workflow                   99
 combined live + workflow + memory         111
 ```
 
-No Push / Rebase / Tag / Release has been performed for W3, W4-0, W4-1, W4-2, W4-3, W4-4, or W4-5.
+No Push / Rebase / Tag / Release has been performed for W3 or W4-0 through W4-6.
 
 ## 2. Project Positioning
 

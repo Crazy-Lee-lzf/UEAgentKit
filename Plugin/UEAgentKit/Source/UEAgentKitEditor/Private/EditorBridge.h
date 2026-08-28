@@ -98,6 +98,7 @@ private:
 		FString& OutErrorMessage);
 
 	bool TryOpenAssetResult(const FString& AssetPath, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
+	bool TryPrepareAssetForDiskRollbackResult(const FString& AssetPath, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
 	bool TryFocusAssetResult(const FString& AssetPath, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
 	bool TrySyncContentBrowserResult(const FString& AssetPath, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
 	bool TryFocusActorResult(const FString& ActorGuid, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;

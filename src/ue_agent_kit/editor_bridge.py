@@ -111,6 +111,19 @@ class LiveEditorBridgeService:
             "dirtyPackageCount": result.get("dirtyPackageCount", 0),
         }
 
+    def prepare_asset_for_disk_rollback(self, asset_path: str) -> dict[str, Any]:
+        """Close and unload one exact clean asset before an authorized disk rollback."""
+        normalized = self._bounded_string(asset_path, "assetPath", 512)
+        self._validate_game_object_path(normalized)
+        capability = "editor.prepareAssetForDiskRollback"
+        descriptor = self._read_descriptor()
+        if capability not in descriptor["capabilities"]:
+            raise LiveEditorError(
+                "live-editor-capability-unavailable",
+                f"The registered Editor Bridge does not expose the {capability} capability.",
+            )
+        return self.call_method(capability, {"assetPath": normalized})
+
     def call_tool(self, tool_name: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         method = LIVE_EDITOR_METHODS.get(tool_name)
         if method is None:

@@ -177,6 +177,7 @@ class _FakeWorkflow:
                 "checkpointId": checkpoint_id,
                 "saveReceipt": save_receipt,
                 "afterRevision": f"sha256:after:{asset_path}",
+                "effectiveReceipts": [f"live_{asset_path}"],
             }
         raise WorkflowError("invalid-mode", "mode invalid")
 
@@ -198,6 +199,18 @@ class _FakeWorkflow:
         if not checkpoint_id:
             raise WorkflowError("save-receipt-invalid", "receipt invalid")
         return {"ok": True, "checkpointId": checkpoint_id, "assetPath": asset_path}
+
+    def create_authorized_save_rollback_manifest(self, save_receipt: str, live_apply_receipt: str = "") -> dict[str, Any]:
+        return {
+            "ok": True,
+            "saveReceipt": save_receipt,
+            "liveApplyReceipt": live_apply_receipt,
+            "assetPath": "asset",
+            "beforeRevision": "sha256:before",
+            "afterRevision": "sha256:after",
+            "rollbackManifestId": f"rm_{save_receipt}",
+            "rollbackAvailable": True,
+        }
 
     def verify_live_write_checkpoint(
         self,

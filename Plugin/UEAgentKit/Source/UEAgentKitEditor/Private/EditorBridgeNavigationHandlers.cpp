@@ -7,6 +7,7 @@
 #include "EngineUtils.h"
 #include "GameFramework/Actor.h"
 #include "Modules/ModuleManager.h"
+#include "PackageTools.h"
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "UObject/SoftObjectPath.h"
 #include "UObject/UObjectGlobals.h"
@@ -128,6 +129,120 @@ bool FUEAgentKitEditorBridge::TryOpenAssetResult(
 	return true;
 }
 
+bool FUEAgentKitEditorBridge::TryPrepareAssetForDiskRollbackResult(
+	const FString& AssetPath,
+	TSharedPtr<FJsonObject>& OutResult,
+	FString& OutErrorCode,
+	FString& OutErrorMessage) const
+{
+	if (!RequireStoppedEditor(OutErrorCode, OutErrorMessage))
+	{
+		return false;
+	}
+	FAssetData AssetData;
+	if (!ResolveAssetData(AssetPath, AssetData, OutErrorCode, OutErrorMessage))
+	{
+		return false;
+	}
+
+	UObject* Asset = StaticFindObject(UObject::StaticClass(), nullptr, *AssetPath, false);
+	const bool bLoadedBefore = Asset != nullptr && Asset->IsAsset();
+	if (!bLoadedBefore)
+	{
+		TSharedRef<FJsonObject> Result = MakeActionBase(TEXT("prepare-asset-for-disk-rollback"), SessionId, GetPieStateName());
+		Result->SetStringField(TEXT("assetPath"), AssetData.GetObjectPathString());
+		Result->SetStringField(TEXT("classPath"), AssetData.AssetClassPath.ToString());
+		Result->SetBoolField(TEXT("loadedBefore"), false);
+		Result->SetBoolField(TEXT("openBefore"), false);
+		Result->SetBoolField(TEXT("packageDirtyBefore"), false);
+		Result->SetNumberField(TEXT("closedEditorCount"), 0);
+		Result->SetNumberField(TEXT("releasedTransactionCount"), 0);
+		Result->SetBoolField(TEXT("unloadRequested"), false);
+		Result->SetBoolField(TEXT("unloadChangedLoadedPackages"), false);
+		Result->SetBoolField(TEXT("loadedAfter"), false);
+		Result->SetBoolField(TEXT("openAfter"), false);
+		Result->SetBoolField(TEXT("packageDirtyAfter"), false);
+		Result->SetBoolField(TEXT("readyForDiskRollback"), true);
+		OutResult = Result;
+		return true;
+	}
+
+	UPackage* Package = Asset->GetOutermost();
+	if (Package == nullptr)
+	{
+		OutErrorCode = TEXT("live-editor-rollback-package-unavailable");
+		OutErrorMessage = TEXT("The exact rollback target has no valid package.");
+		return false;
+	}
+	if (Package->IsDirty())
+	{
+		OutErrorCode = TEXT("live-editor-rollback-asset-dirty");
+		OutErrorMessage = TEXT("The exact rollback target has unsaved Editor changes and cannot be unloaded.");
+		return false;
+	}
+
+	UAssetEditorSubsystem* AssetEditorSubsystem = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
+	if (AssetEditorSubsystem == nullptr)
+	{
+		OutErrorCode = TEXT("live-editor-asset-editor-unavailable");
+		OutErrorMessage = TEXT("The Asset Editor Subsystem is unavailable.");
+		return false;
+	}
+	const bool bOpenBefore = IsAssetOpenInEditor(Asset);
+	const int32 ClosedEditorCount = bOpenBefore ? AssetEditorSubsystem->CloseAllEditorsForAsset(Asset) : 0;
+	if (IsAssetOpenInEditor(Asset))
+	{
+		OutErrorCode = TEXT("live-editor-rollback-asset-editor-open");
+		OutErrorMessage = TEXT("The exact rollback target is still open in an Asset Editor after the close request.");
+		return false;
+	}
+	if (Package->IsDirty())
+	{
+		OutErrorCode = TEXT("live-editor-rollback-asset-dirty");
+		OutErrorMessage = TEXT("Closing the Asset Editor left the rollback target dirty, so unload is blocked.");
+		return false;
+	}
+
+	int32 ReleasedTransactionCount = 0;
+	if (const TMap<FGuid, TSharedPtr<UEAgentKitLiveWrite::FLiveWriteTransactionRecord>>* Records = LiveWriteTransactionRecords.Find(AssetPath))
+	{
+		ReleasedTransactionCount = Records->Num();
+	}
+	// Release retained live-write snapshots while their Blueprint/property objects are still valid.
+	// Persisted assets recover from disk backup material and must not retain resident Undo snapshots across unload.
+	LiveWriteTransactionRecords.Remove(AssetPath);
+
+	TArray<UPackage*> PackagesToUnload;
+	PackagesToUnload.Add(Package);
+	FText UnloadError;
+	const bool bUnloadChangedLoadedPackages = UPackageTools::UnloadPackages(PackagesToUnload, UnloadError, false);
+	UObject* LoadedAfter = StaticFindObject(UObject::StaticClass(), nullptr, *AssetPath, false);
+	if (LoadedAfter != nullptr && LoadedAfter->IsAsset())
+	{
+		OutErrorCode = TEXT("live-editor-rollback-asset-unload-failed");
+		OutErrorMessage = UnloadError.IsEmpty()
+			? TEXT("The exact rollback target remained loaded after the unload request.")
+			: UnloadError.ToString();
+		return false;
+	}
+
+	TSharedRef<FJsonObject> Result = MakeActionBase(TEXT("prepare-asset-for-disk-rollback"), SessionId, GetPieStateName());
+	Result->SetStringField(TEXT("assetPath"), AssetData.GetObjectPathString());
+	Result->SetStringField(TEXT("classPath"), AssetData.AssetClassPath.ToString());
+	Result->SetBoolField(TEXT("loadedBefore"), true);
+	Result->SetBoolField(TEXT("openBefore"), bOpenBefore);
+	Result->SetBoolField(TEXT("packageDirtyBefore"), false);
+	Result->SetNumberField(TEXT("closedEditorCount"), ClosedEditorCount);
+	Result->SetNumberField(TEXT("releasedTransactionCount"), ReleasedTransactionCount);
+	Result->SetBoolField(TEXT("unloadRequested"), true);
+	Result->SetBoolField(TEXT("unloadChangedLoadedPackages"), bUnloadChangedLoadedPackages);
+	Result->SetBoolField(TEXT("loadedAfter"), false);
+	Result->SetBoolField(TEXT("openAfter"), false);
+	Result->SetBoolField(TEXT("packageDirtyAfter"), false);
+	Result->SetBoolField(TEXT("readyForDiskRollback"), true);
+	OutResult = Result;
+	return true;
+}
 bool FUEAgentKitEditorBridge::TryFocusAssetResult(
 	const FString& AssetPath,
 	TSharedPtr<FJsonObject>& OutResult,

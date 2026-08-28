@@ -391,9 +391,47 @@ class CheckpointSetService:
                     ) from exc
                 if str(committed.get("checkpointId") or "") != child["checkpointId"]:
                     raise WorkflowError("checkpoint-set-child-mismatch", "The W3 child checkpoint identity did not match.")
+                effective_receipts = committed.get("effectiveReceipts") or []
+                live_receipt = str(effective_receipts[0]) if effective_receipts else ""
+                try:
+                    promoted = self.workflow_service.create_authorized_save_rollback_manifest(
+                        str(committed.get("saveReceipt") or child["saveReceipt"]),
+                        live_receipt,
+                    )
+                except Exception as exc:
+                    child["state"] = "saved_unrecoverable"
+                    child["rollbackPromotionFailure"] = _safe_error(exc)
+                    payload["failedAsset"] = asset_path
+                    payload["pendingAssets"] = [
+                        c["assetPath"]
+                        for c in payload["childCheckpoints"]
+                        if c["assetPath"] not in persisted_assets
+                    ]
+                    payload["persistedAssets"] = list(persisted_assets)
+                    payload["failureBoundary"] = {"phase": "rollback-promotion", **_safe_error(exc)}
+                    payload["state"] = "partially_saved" if persisted_assets else "failed"
+                    payload["savedCount"] = len(persisted_assets)
+                    payload["updatedAtUtc"] = _utc_now()
+                    self._persist(payload)
+                    raise WorkflowError(
+                        "checkpoint-set-rollback-promotion-failed",
+                        "The package Save succeeded but rollback-manifest promotion failed; recovery readiness is incomplete.",
+                        details={
+                            "checkpointSetId": checkpoint_set_id,
+                            "failedAsset": asset_path,
+                            "persistedAssets": payload["persistedAssets"],
+                            "pendingAssets": payload["pendingAssets"],
+                            "failureBoundary": payload["failureBoundary"],
+                        },
+                    ) from exc
                 child["state"] = "saved"
                 child["saveReceipt"] = str(committed.get("saveReceipt") or child["saveReceipt"])
                 child["afterRevision"] = str(committed.get("afterRevision") or "")
+                child["rollbackManifestId"] = str(promoted.get("rollbackManifestId", ""))
+                child["rollbackManifestPath"] = str(
+                    self.workflow_service.config.backup_root / "live-save" / child["saveReceipt"] / "rollback-manifest.json"
+                )
+                child["rollbackState"] = "ready"
                 child["savedAtUtc"] = _utc_now()
                 persisted_assets.append(asset_path)
                 payload["savedCount"] = len(persisted_assets)
@@ -684,6 +722,10 @@ class CheckpointSetService:
                 }
             ] if verification.get("state") != "verified" else [],
         }
+
+    def load_payload(self, checkpoint_set_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self._load(checkpoint_set_id).payload
 
     def get(self, *, checkpoint_set_id: str) -> dict[str, Any]:
         with self._lock:

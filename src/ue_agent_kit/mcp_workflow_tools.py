@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from .agent_workflow import MATERIAL_PARAMETER_OPERATIONS, PatchWorkflowService, WorkflowError
 from .animation_scale_fix_batch import AnimationScaleFixBatchService
+from .batch_recovery import BatchRecoveryService
 from .bounded_batch import BoundedBatchService
 from .checkpoint_sets import CheckpointSetService
 
@@ -39,6 +40,7 @@ def register_workflow_tools(
     animation_scale_fix_batch_service = AnimationScaleFixBatchService(workflow_service)
     bounded_batch_service = BoundedBatchService(workflow_service)
     checkpoint_set_service = CheckpointSetService(workflow_service, bounded_batch_service)
+    batch_recovery_service = BatchRecoveryService(workflow_service, bounded_batch_service, checkpoint_set_service)
 
     def _run_high_level_change(
         *,
@@ -728,6 +730,26 @@ def register_workflow_tools(
             return checkpoint_set_service.verify(checkpoint_set_id=checkpoint_set_id)
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_verify_change_set_checkpoint", exc, read_only=True)
+
+    @server.tool(annotations=destructive_annotations)
+    def ue_recover_live_write_batch(
+        batch_execution_id: str,
+        mode: Literal["Preview", "Commit", "Get"],
+        confirmation: str = "",
+    ) -> dict[str, Any]:
+        """Preview, Commit, or Get durable recovery for one W4 Batch Execution.
+
+        In Preview/Get mode `batch_execution_id` is the Batch Execution or Recovery id.
+        In Commit mode `batch_execution_id` is the Recovery id returned by Preview.
+        """
+        try:
+            if mode == "Preview":
+                return batch_recovery_service.preview(batch_execution_id=batch_execution_id)
+            if mode == "Get":
+                return batch_recovery_service.get(recovery_id=batch_execution_id)
+            return batch_recovery_service.commit(recovery_id=batch_execution_id, confirmation=confirmation)
+        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_recover_live_write_batch", exc, read_only=False)
 
     @server.tool(annotations=dry_run_annotations)
     def ue_dry_run_patch(plan_id: str) -> dict[str, Any]:

@@ -154,6 +154,7 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_apply_live_write_batch", "workflow", "destructive"),
     ToolDefinition("ue_save_change_set_checkpoint", "workflow", "destructive"),
     ToolDefinition("ue_verify_change_set_checkpoint", "workflow", "read"),
+    ToolDefinition("ue_recover_live_write_batch", "workflow", "destructive"),
     ToolDefinition("ue_dry_run_patch", "workflow", "planning"),
     ToolDefinition("ue_apply_patch", "workflow", "destructive"),
     ToolDefinition("ue_plan_animation_retarget", "workflow", "planning"),

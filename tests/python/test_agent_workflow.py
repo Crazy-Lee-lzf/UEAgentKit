@@ -1413,7 +1413,7 @@ class AgentWorkflowTests(unittest.TestCase):
 
     def test_live_write_tool_count_and_names_include_verification_trust(self) -> None:
         names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
-        self.assertEqual(len(names), 99)
+        self.assertEqual(len(names), 100)
         self.assertIn("ue_analyze_change_impact", names)
         self.assertIn("ue_analyze_semantic_diff", names)
         self.assertIn("ue_build_verification_plan", names)
@@ -2509,6 +2509,8 @@ class AgentWorkflowTests(unittest.TestCase):
     class ClosedLoopLiveService:
         def __init__(self, dirty: bool = True, on_save: Any = None) -> None:
             self.dirty = dirty
+            self.loaded = True
+            self.open_in_asset_editor = True
             self.on_save = on_save
             self.calls: list[tuple[str, dict[str, Any]]] = []
 
@@ -2580,10 +2582,11 @@ class AgentWorkflowTests(unittest.TestCase):
                 "result": {
                     "assetRegistry": {"found": True, "classPath": ASSET_CLASS},
                     "memory": {
-                        "loaded": True,
+                        "loaded": self.loaded,
                         "packageDirty": self.dirty,
                         "loadedByBridge": False,
-                        "openInAssetEditor": True,
+                        "openInAssetEditor": self.open_in_asset_editor,
+                        "state": "not-loaded" if not self.loaded else ("loaded-unsaved" if self.dirty else "loaded-saved"),
                     },
                 },
             }
@@ -2950,6 +2953,8 @@ class AgentWorkflowTests(unittest.TestCase):
             return ProcessResult(0, "", "")
 
         service._runner = rollback_runner
+        bridge.loaded = False
+        bridge.open_in_asset_editor = False
         committed = service.rollback_authorized_live_save(
             preview["saveReceipt"],
             mode="Commit",

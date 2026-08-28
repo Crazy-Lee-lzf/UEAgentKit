@@ -59,6 +59,7 @@ namespace UEAgentKitEditorBridgePrivate
 		TEXT("editor.batchTask.status"),
 		TEXT("editor.batchTask.cancel"),
 		TEXT("editor.openAsset"),
+		TEXT("editor.prepareAssetForDiskRollback"),
 		TEXT("editor.focusAsset"),
 		TEXT("editor.syncContentBrowser"),
 		TEXT("editor.focusActor"),
@@ -889,6 +890,7 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 			ErrorMessage);
 	}
 	else if (Method == TEXT("editor.openAsset")
+		|| Method == TEXT("editor.prepareAssetForDiskRollback")
 		|| Method == TEXT("editor.focusAsset")
 		|| Method == TEXT("editor.syncContentBrowser")
 		|| Method == TEXT("editor.compileBlueprint")
@@ -903,6 +905,10 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 		if (Method == TEXT("editor.openAsset"))
 		{
 			bSucceeded = TryOpenAssetResult(AssetPath, Result, ErrorCode, ErrorMessage);
+		}
+		else if (Method == TEXT("editor.prepareAssetForDiskRollback"))
+		{
+			bSucceeded = TryPrepareAssetForDiskRollbackResult(AssetPath, Result, ErrorCode, ErrorMessage);
 		}
 		else if (Method == TEXT("editor.focusAsset"))
 		{

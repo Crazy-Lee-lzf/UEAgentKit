@@ -2099,6 +2099,55 @@ class PatchWorkflowService(RetargetWorkflowMixin):
             "packageDirty": bool(memory.get("packageDirty")),
         }
 
+    def prepare_asset_for_disk_rollback(self, asset_path: str) -> dict[str, Any]:
+        """Close/unload one exact clean resident asset, then prove the W3 rollback precondition."""
+        descriptor = self.config.project_path.parent / "Saved" / "UEAgentKit" / "EditorBridge.json"
+        if self.live_editor_service is None:
+            return {"state": "offline", "assetPath": asset_path, "prepared": False}
+        try:
+            status = self.live_editor_service.status()
+        except Exception as exc:
+            raise WorkflowError(
+                "rollback-live-editor-status-unavailable",
+                "Live Editor state could not be checked before rollback preparation.",
+            ) from exc
+        if not isinstance(status, dict) or status.get("state") != "available":
+            if descriptor.is_file():
+                raise WorkflowError(
+                    "rollback-live-editor-status-unavailable",
+                    "The fixed Editor Bridge descriptor exists but rollback preparation cannot prove the target state.",
+                )
+            return {"state": "offline", "assetPath": asset_path, "prepared": False}
+        try:
+            prepared = self.live_editor_service.prepare_asset_for_disk_rollback(asset_path)
+        except Exception as exc:
+            raise WorkflowError(
+                "rollback-live-editor-prepare-failed",
+                "The fixed Editor session could not safely close and unload the rollback target.",
+                details={"assetPath": asset_path, "cause": getattr(exc, "code", exc.__class__.__name__)},
+            ) from exc
+        if (
+            not isinstance(prepared, dict)
+            or prepared.get("readyForDiskRollback") is not True
+            or prepared.get("loadedAfter") is not False
+            or prepared.get("openAfter") is not False
+            or prepared.get("packageDirtyAfter") is not False
+        ):
+            raise WorkflowError(
+                "rollback-live-editor-prepare-invalid",
+                "Rollback preparation did not prove the exact target is unloaded, closed, and clean.",
+                details={"assetPath": asset_path},
+            )
+        verified = self._inspect_rollback_live_state(asset_path)
+        return {
+            "state": "prepared",
+            "assetPath": asset_path,
+            "prepared": True,
+            "editorSessionId": verified.get("editorSessionId", ""),
+            "editorProcessId": verified.get("editorProcessId", 0),
+            "bridgeResult": prepared,
+        }
+
     def _inspect_rollback_live_state(self, asset_path: str) -> dict[str, Any]:
         descriptor = self.config.project_path.parent / "Saved" / "UEAgentKit" / "EditorBridge.json"
         if self.live_editor_service is None:
@@ -4768,19 +4817,24 @@ class PatchWorkflowService(RetargetWorkflowMixin):
             verification_root = self._safe_work_path("rollback-verify", verification_key)
             verification_output = verification_root / "export"
             verification_report = verification_root / "verification.json"
+            rollback_asset_path = str(dry_run.report.get("assetPath", ""))
+            live_editor_safety = self._inspect_rollback_live_state(rollback_asset_path)
+            script_arguments = [
+                "-EngineRoot", str(self.config.engine_root),
+                "-ProjectPath", str(self.config.project_path),
+                "-Manifest", str(manifest_path),
+                "-Policy", str(self.config.policy_path),
+                "-BackupRoot", str(self.config.backup_root),
+                "-Mode", "Commit",
+                "-Report", str(report_path),
+                "-VerificationOutput", str(verification_output),
+                "-VerificationReport", str(verification_report),
+            ]
+            if live_editor_safety["allowOpenEditor"]:
+                script_arguments.append("-AllowOpenEditorForVerifiedUnloadedAsset")
             result = self._run_script(
                 "RunRollback.ps1",
-                [
-                    "-EngineRoot", str(self.config.engine_root),
-                    "-ProjectPath", str(self.config.project_path),
-                    "-Manifest", str(manifest_path),
-                    "-Policy", str(self.config.policy_path),
-                    "-BackupRoot", str(self.config.backup_root),
-                    "-Mode", "Commit",
-                    "-Report", str(report_path),
-                    "-VerificationOutput", str(verification_output),
-                    "-VerificationReport", str(verification_report),
-                ],
+                script_arguments,
                 stage="authorized-save-rollback-commit",
                 report_path=report_path,
             )
