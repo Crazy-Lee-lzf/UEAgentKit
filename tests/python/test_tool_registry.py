@@ -106,6 +106,7 @@ EXPECTED_ALL_TOOLS = [
     "ue_rename_datatable_row",
     "ue_plan_patch",
     "ue_plan_live_write_batch",
+    "ue_apply_live_write_batch",
     "ue_dry_run_patch",
     "ue_apply_patch",
     "ue_plan_animation_retarget",
@@ -143,7 +144,7 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertEqual(len(tool_names_for_mode()), 10)
         self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 43)
-        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 63)
+        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 64)
         self.assertEqual(
             tool_names_for_mode(memory_enabled=True),
             QUERY_TOOL_NAMES + EXPECTED_MEMORY_TOOLS,
@@ -155,7 +156,7 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
-            75,
+            76,
         )
         self.assertEqual(
             len(
@@ -165,7 +166,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-            108,
+            109,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:

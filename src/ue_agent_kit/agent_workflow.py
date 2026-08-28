@@ -2909,6 +2909,17 @@ class PatchWorkflowService(RetargetWorkflowMixin):
                 "expectedRevision": revision,
             }
 
+    def assert_plan_available_for_batch(self, plan_id: str) -> None:
+        """Fail closed unless an existing child Plan is present and unconsumed."""
+        with self._lock:
+            if not isinstance(plan_id, str) or not plan_id.startswith("plan_"):
+                raise WorkflowError("plan-not-found", "The child Plan identity is invalid.")
+            record = self._plans.get(plan_id)
+            if record is None:
+                raise WorkflowError("plan-not-found", "The child Plan is not active in this MCP session.")
+            if record.consumed:
+                raise WorkflowError("plan-consumed", "The child Plan has already been consumed.")
+
     def plan_patch(
         self,
         *,

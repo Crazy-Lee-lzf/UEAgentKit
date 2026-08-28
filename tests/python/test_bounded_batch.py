@@ -110,6 +110,8 @@ class _FakeWorkflowService:
         fail_bind_asset: str = "",
         fail_bind_code: str = "asset-not-indexed",
         fail_plan_on_call: int = 0,
+        fail_apply_on_call: int = 0,
+        fail_fast_on_call: int = 0,
     ) -> None:
         self.config = SimpleNamespace(
             work_root=work_root,
@@ -121,10 +123,15 @@ class _FakeWorkflowService:
         self.bind_calls: list[str] = []
         self.plan_calls: list[dict[str, Any]] = []
         self.discarded: list[str] = []
+        self.apply_calls: list[dict[str, Any]] = []
+        self.verify_calls: list[dict[str, Any]] = []
+        self.plan_available_checks: list[str] = []
         self.plan_counter = 0
         self.fail_bind_asset = fail_bind_asset
         self.fail_bind_code = fail_bind_code
         self.fail_plan_on_call = fail_plan_on_call
+        self.fail_apply_on_call = fail_apply_on_call
+        self.fail_fast_on_call = fail_fast_on_call
 
     def bind_asset_for_batch(self, asset_path: str) -> dict[str, Any]:
         self.bind_calls.append(asset_path)
@@ -162,6 +169,53 @@ class _FakeWorkflowService:
 
     def discard_unconsumed_plans(self, plan_ids: list[str]) -> None:
         self.discarded.extend(plan_ids)
+
+    def get_change_set(self, change_set_id: str) -> dict[str, Any]:
+        return {"ok": True, "changeSetId": change_set_id, "operations": []}
+
+    def assert_plan_available_for_batch(self, plan_id: str) -> None:
+        self.plan_available_checks.append(plan_id)
+
+    def apply_asset_property_live(self, plan_id: str, confirmation: str, change_set_id: str = "") -> dict[str, Any]:
+        self.apply_calls.append(
+            {
+                "planId": plan_id,
+                "confirmation": confirmation,
+                "changeSetId": change_set_id,
+            }
+        )
+        if self.fail_apply_on_call and len(self.apply_calls) == self.fail_apply_on_call:
+            raise WorkflowError("injected-apply-failure", "Injected resident Apply failure.")
+        index = len(self.apply_calls)
+        return {
+            "changed": True,
+            "liveApplyReceipt": f"live_{index}",
+            "result": {
+                "transactionId": f"tx_{index}",
+                "editorSessionId": "session-1",
+                "afterValue": index,
+            },
+        }
+
+    def verify_live_write_fast(self, asset_path: str, live_apply_receipt: str, change_set_id: str = "") -> dict[str, Any]:
+        self.verify_calls.append(
+            {
+                "assetPath": asset_path,
+                "liveApplyReceipt": live_apply_receipt,
+                "changeSetId": change_set_id,
+            }
+        )
+        if self.fail_fast_on_call and len(self.verify_calls) == self.fail_fast_on_call:
+            raise WorkflowError("injected-fast-failure", "Injected Fast Verify failure.")
+        return {
+            "ok": True,
+            "verified": True,
+            "verificationKind": "resident-fast",
+            "assetPath": asset_path,
+            "liveApplyReceipt": live_apply_receipt,
+            "transactionId": f"tx_{len(self.verify_calls)}",
+            "editorSessionId": "session-1",
+        }
 
 
 def _bp_ops() -> list[dict[str, Any]]:
@@ -519,6 +573,204 @@ class BoundedBatchTests(unittest.TestCase):
             [BP_ASSET, BP_ASSET, BP_ASSET, DA_ASSET],
         )
         self.assertTrue((self.work_root / "batch-plans").exists())
+
+
+    def _plan_b0(self) -> dict[str, Any]:
+        return self.service.plan(
+            assets=[{"assetPath": BP_ASSET, "operations": _bp_ops()}],
+            description="W4-2 B0 single BP",
+        )
+
+    def test_apply_success_single_bp_three_ops(self) -> None:
+        plan = self._plan_b0()
+        batch_plan_id = plan["batchPlanId"]
+        result = self.service.apply_live_write_batch(
+            batch_plan_id=batch_plan_id,
+            confirmation=f"APPLY LIVE WRITE BATCH {batch_plan_id}",
+            change_set_id="cs_test",
+        )
+        self.assertEqual(result["state"], "applied")
+        self.assertEqual(result["operationCount"], 3)
+        self.assertEqual(result["appliedCount"], 3)
+        self.assertEqual(result["savePerformed"], False)
+        self.assertTrue(result["batchExecutionId"].startswith("lwbe_"))
+        self.assertTrue(all(op["fastVerified"] for op in result["operations"]))
+        self.assertEqual(len(self.workflow.apply_calls), 3)
+        self.assertEqual(len(self.workflow.verify_calls), 3)
+        execution = self.service._executions[batch_plan_id].payload
+        self.assertEqual(
+            [op["previousTransactionId"] for op in execution["operations"]],
+            ["", "tx_1", "tx_2"],
+        )
+        self.assertEqual(
+            [op["transactionId"] for op in execution["operations"]],
+            ["tx_1", "tx_2", "tx_3"],
+        )
+
+    def test_apply_same_target_repeated_writes_retained(self) -> None:
+        plan = self.service.plan(
+            assets=[
+                {
+                    "assetPath": BP_ASSET,
+                    "operations": [
+                        {"operation": "setVariableDefault", "target": {"variableName": "TransactionInt"}, "value": 10},
+                        {"operation": "setVariableDefault", "target": {"variableName": "TransactionInt"}, "value": 20},
+                    ],
+                }
+            ],
+            description="W4-2 same-target",
+        )
+        batch_plan_id = plan["batchPlanId"]
+        result = self.service.apply_live_write_batch(
+            batch_plan_id=batch_plan_id,
+            confirmation=f"APPLY LIVE WRITE BATCH {batch_plan_id}",
+            change_set_id="cs_test",
+        )
+        self.assertEqual(result["state"], "applied")
+        self.assertEqual(result["operationCount"], 2)
+        self.assertEqual(len(result["operations"]), 2)
+        self.assertTrue(all(op["fastVerified"] for op in result["operations"]))
+        self.assertEqual(len(self.workflow.apply_calls), 2)
+        self.assertEqual(len(self.workflow.verify_calls), 2)
+
+    def test_apply_bad_confirmation_zero_mutation(self) -> None:
+        plan = self._plan_b0()
+        batch_plan_id = plan["batchPlanId"]
+        with self.assertRaises(WorkflowError) as caught:
+            self.service.apply_live_write_batch(
+                batch_plan_id=batch_plan_id,
+                confirmation="wrong",
+                change_set_id="cs_test",
+            )
+        self.assertEqual(
+            caught.exception.code,
+            "live-write-batch-apply-confirmation-required",
+        )
+        self.assertEqual(self.workflow.apply_calls, [])
+
+    def test_apply_multi_asset_scope_reject(self) -> None:
+        plan = self.service.plan(**self._request_b1())
+        batch_plan_id = plan["batchPlanId"]
+        with self.assertRaises(WorkflowError) as caught:
+            self.service.apply_live_write_batch(
+                batch_plan_id=batch_plan_id,
+                confirmation=f"APPLY LIVE WRITE BATCH {batch_plan_id}",
+                change_set_id="cs_test",
+            )
+        self.assertEqual(caught.exception.code, "live-write-batch-apply-multi-asset-unsupported")
+        self.assertEqual(self.workflow.apply_calls, [])
+
+    def test_apply_replay_rejected(self) -> None:
+        plan = self._plan_b0()
+        batch_plan_id = plan["batchPlanId"]
+        self.service.apply_live_write_batch(
+            batch_plan_id=batch_plan_id,
+            confirmation=f"APPLY LIVE WRITE BATCH {batch_plan_id}",
+            change_set_id="cs_test",
+        )
+        with self.assertRaises(WorkflowError) as caught:
+            self.service.apply_live_write_batch(
+                batch_plan_id=batch_plan_id,
+                confirmation=f"APPLY LIVE WRITE BATCH {batch_plan_id}",
+                change_set_id="cs_test",
+            )
+        self.assertEqual(caught.exception.code, "live-write-batch-apply-already-started")
+
+    def test_apply_op2_failure_partial_boundary(self) -> None:
+        workflow = _FakeWorkflowService(
+            self.work_root,
+            self.policy_path,
+            self.revision_export,
+            fail_apply_on_call=2,
+        )
+        service = BoundedBatchService(workflow)
+        plan = service.plan(
+            assets=[{"assetPath": BP_ASSET, "operations": _bp_ops()}],
+            description="W4-2 partial",
+        )
+        batch_plan_id = plan["batchPlanId"]
+        with self.assertRaises(WorkflowError) as caught:
+            service.apply_live_write_batch(
+                batch_plan_id=batch_plan_id,
+                confirmation=f"APPLY LIVE WRITE BATCH {batch_plan_id}",
+                change_set_id="cs_test",
+            )
+        self.assertEqual(caught.exception.code, "live-write-batch-apply-failed")
+        execution = service._executions[batch_plan_id].payload
+        self.assertEqual(execution["state"], "partially_applied")
+        self.assertEqual(execution["lastSuccessfulOperation"], "bop_0001")
+        self.assertEqual(execution["failedOperation"], "bop_0002")
+        self.assertEqual(execution["notStarted"], ["bop_0003"])
+        self.assertEqual(execution["recoveryOrder"], ["bop_0001"])
+        self.assertEqual(len(workflow.apply_calls), 2)
+
+    def test_apply_fast_verify_failure_partial_boundary(self) -> None:
+        workflow = _FakeWorkflowService(
+            self.work_root,
+            self.policy_path,
+            self.revision_export,
+            fail_fast_on_call=2,
+        )
+        service = BoundedBatchService(workflow)
+        plan = service.plan(
+            assets=[{"assetPath": BP_ASSET, "operations": _bp_ops()}],
+            description="W4-2 fast partial",
+        )
+        batch_plan_id = plan["batchPlanId"]
+        with self.assertRaises(WorkflowError) as caught:
+            service.apply_live_write_batch(
+                batch_plan_id=batch_plan_id,
+                confirmation=f"APPLY LIVE WRITE BATCH {batch_plan_id}",
+                change_set_id="cs_test",
+            )
+        self.assertEqual(caught.exception.code, "live-write-batch-apply-fast-verify-failed")
+        execution = service._executions[batch_plan_id].payload
+        self.assertEqual(execution["state"], "partially_applied")
+        self.assertEqual(execution["lastSuccessfulOperation"], "bop_0001")
+        self.assertEqual(execution["failedOperation"], "bop_0002")
+        self.assertEqual(execution["notStarted"], ["bop_0003"])
+        self.assertEqual(execution["recoveryOrder"], ["bop_0002", "bop_0001"])
+
+    def test_apply_tampered_plan_zero_mutation(self) -> None:
+        plan = self._plan_b0()
+        batch_plan_id = plan["batchPlanId"]
+        plan_path = self.work_root / "batch-plans" / batch_plan_id / "plan.json"
+        payload = json.loads(plan_path.read_text(encoding="utf-8"))
+        payload["state"] = "tampered"
+        plan_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        with self.assertRaises(WorkflowError) as caught:
+            self.service.apply_live_write_batch(
+                batch_plan_id=batch_plan_id,
+                confirmation=f"APPLY LIVE WRITE BATCH {batch_plan_id}",
+                change_set_id="cs_test",
+            )
+        self.assertEqual(caught.exception.code, "live-write-batch-plan-tampered")
+        self.assertEqual(self.workflow.apply_calls, [])
+
+    def test_apply_persistence_failure_stops_after_mutation(self) -> None:
+        from unittest.mock import patch
+
+        plan = self._plan_b0()
+        batch_plan_id = plan["batchPlanId"]
+        original_persist = self.service._persist_execution
+        persist_count = 0
+
+        def failing_persist(payload: dict[str, Any]) -> Any:
+            nonlocal persist_count
+            persist_count += 1
+            if persist_count == 2:
+                raise RuntimeError("persist failed")
+            return original_persist(payload)
+
+        with patch.object(self.service, "_persist_execution", side_effect=failing_persist):
+            with self.assertRaises(RuntimeError):
+                self.service.apply_live_write_batch(
+                    batch_plan_id=batch_plan_id,
+                    confirmation=f"APPLY LIVE WRITE BATCH {batch_plan_id}",
+                    change_set_id="cs_test",
+                )
+        self.assertEqual(len(self.workflow.apply_calls), 1)
+        self.assertEqual(len(self.workflow.verify_calls), 1)
 
 
 if __name__ == "__main__":

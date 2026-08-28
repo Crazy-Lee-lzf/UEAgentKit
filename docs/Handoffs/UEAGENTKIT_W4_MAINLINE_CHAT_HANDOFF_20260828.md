@@ -1,5 +1,7 @@
 # UEAgentKit W4 Mainline Chat Handoff
 
+> Scope notice: this is a W3 → W4 mainline Chat snapshot written before W4-1 completion. For project-wide current development takeover, read [`UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260828.md`](UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260828.md) first.
+
 > Date: 2026-08-28
 >
 > Repository worktree: `E:\WorkSpace\UEAgentKit-LiveWriter`

@@ -16,11 +16,13 @@ from .agent_workflow import WorkflowError
 from .patches import validate_patch
 
 LIVE_WRITE_BATCH_PLAN_SCHEMA_VERSION = "1.0"
+LIVE_WRITE_BATCH_EXECUTION_SCHEMA_VERSION = "1.0"
 MAX_BATCH_ASSETS = 4
 MAX_BATCH_OPERATIONS_PER_ASSET = 8
 MAX_BATCH_OPERATIONS_TOTAL = 16
 MAX_BATCH_REQUEST_BYTES = 64 * 1024
 MAX_BATCH_PLANS = 100
+MAX_BATCH_EXECUTIONS = 100
 MAX_BATCH_DESCRIPTION_BYTES = 1024
 
 W4_BATCH_OPERATIONS = {
@@ -31,6 +33,7 @@ W4_BATCH_OPERATIONS = {
 }
 
 BATCH_PLAN_PREFIX = "lwbp_"
+BATCH_EXECUTION_PREFIX = "lwbe_"
 BATCH_OPERATION_PREFIX = "bop_"
 BATCH_CONFIRMATION_PREFIX = "APPLY LIVE WRITE BATCH "
 
@@ -228,6 +231,14 @@ class LiveWriteBatchPlanRecord:
     path: Path
 
 
+@dataclass(frozen=True)
+class LiveWriteBatchExecutionRecord:
+    batch_execution_id: str
+    digest: str
+    payload: dict[str, Any]
+    path: Path
+
+
 class BoundedBatchService:
     """Read-only W4 bounded batch planner over existing single-operation child Plans."""
 
@@ -236,6 +247,7 @@ class BoundedBatchService:
         configured_work_root = getattr(workflow_service.config, "work_root", None)
         self.work_root = Path(configured_work_root).expanduser().resolve() if configured_work_root is not None else None
         self._plans: dict[str, LiveWriteBatchPlanRecord] = {}
+        self._executions: dict[str, LiveWriteBatchExecutionRecord] = {}
         self._lock = threading.RLock()
 
     def _batch_plan_directory(self, batch_plan_id: str) -> Path:
@@ -244,6 +256,14 @@ class BoundedBatchService:
         path = self.work_root / "batch-plans" / batch_plan_id
         if not _is_within(path, self.work_root):
             raise WorkflowError("live-write-batch-plan-rejected", "Batch Plan path escaped the fixed Work Root.")
+        return path
+
+    def _batch_execution_directory(self, batch_execution_id: str) -> Path:
+        if self.work_root is None:
+            raise WorkflowError("live-write-batch-apply-failed", "Batch execution requires a fixed Work Root.")
+        path = self.work_root / "batch-executions" / batch_execution_id
+        if not _is_within(path, self.work_root):
+            raise WorkflowError("live-write-batch-apply-failed", "Batch execution path escaped the fixed Work Root.")
         return path
 
     def plan(self, *, assets: Any, description: str = "") -> dict[str, Any]:
@@ -373,6 +393,288 @@ class BoundedBatchService:
                     "The stored W4 Batch Plan changed after it was created.",
                 )
             return self._response(record)
+
+    def _get_plan_record(self, batch_plan_id: str) -> LiveWriteBatchPlanRecord:
+        if not isinstance(batch_plan_id, str) or not batch_plan_id.startswith(BATCH_PLAN_PREFIX):
+            raise WorkflowError(
+                "live-write-batch-plan-not-found",
+                "batch_plan_id must be the exact identifier returned by ue_plan_live_write_batch.",
+            )
+        record = self._plans.get(batch_plan_id)
+        if record is None:
+            raise WorkflowError(
+                "live-write-batch-plan-not-found",
+                "The W4 Batch Plan was not found in this MCP session.",
+            )
+        current_bytes = record.path.read_bytes()
+        if _sha256_digest(current_bytes) != record.digest or json.loads(current_bytes) != record.payload:
+            raise WorkflowError(
+                "live-write-batch-plan-tampered",
+                "The stored W4 Batch Plan changed after it was created.",
+            )
+        return record
+
+    def _persist_execution(self, payload: dict[str, Any]) -> LiveWriteBatchExecutionRecord:
+        batch_execution_id = str(payload["batchExecutionId"])
+        plan_id = str(payload["batchPlanId"])
+        path = self._batch_execution_directory(batch_execution_id) / "execution.json"
+        payload_bytes = _json_bytes(payload)
+        digest = _sha256_digest(payload_bytes)
+        self._write_atomic(path, payload_bytes)
+        record = LiveWriteBatchExecutionRecord(batch_execution_id, digest, payload, path)
+        self._executions[plan_id] = record
+        return record
+
+    def _finalize_apply_failure(
+        self,
+        exec_payload: dict[str, Any],
+        failed_index: int,
+        verified_batch_ids: list[str],
+        mutated_batch_ids: list[str],
+    ) -> None:
+        operations = exec_payload["operations"]
+        failed_id = operations[failed_index]["batchOperationId"]
+        not_started = [operation["batchOperationId"] for operation in operations[failed_index + 1:]]
+        exec_payload["failedOperation"] = failed_id
+        exec_payload["notStarted"] = not_started
+        exec_payload["lastSuccessfulOperation"] = verified_batch_ids[-1] if verified_batch_ids else ""
+        exec_payload["recoveryOrder"] = list(reversed(mutated_batch_ids))
+        exec_payload["state"] = "partially_applied" if mutated_batch_ids else "failed"
+        exec_payload["updatedAtUtc"] = _utc_now()
+
+    def apply_live_write_batch(
+        self,
+        *,
+        batch_plan_id: str,
+        confirmation: str,
+        change_set_id: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            plan_record = self._get_plan_record(batch_plan_id)
+            plan = plan_record.payload
+            if plan.get("state") != "planned":
+                raise WorkflowError(
+                    "live-write-batch-apply-plan-state-invalid",
+                    f"W4 Batch Plan is in state {plan.get('state')!r}, not planned.",
+                )
+            expected_confirmation = BATCH_CONFIRMATION_PREFIX + batch_plan_id
+            if confirmation != expected_confirmation:
+                raise WorkflowError(
+                    "live-write-batch-apply-confirmation-required",
+                    "Batch Apply confirmation did not exactly match the required Batch Plan phrase.",
+                )
+            if plan.get("assetCount") != 1:
+                raise WorkflowError(
+                    "live-write-batch-apply-multi-asset-unsupported",
+                    "W4-2 supports only one-asset Batch Plans; multi-asset Apply belongs to W4-3.",
+                    details={"assetCount": plan.get("assetCount")},
+                )
+            if not isinstance(change_set_id, str) or not change_set_id.startswith("cs_"):
+                raise WorkflowError(
+                    "live-write-batch-apply-change-set-required",
+                    "W4-2 Apply requires one exact existing Change Set identity.",
+                )
+            change_set = self.workflow_service.get_change_set(change_set_id)
+            if not isinstance(change_set, dict) or change_set.get("ok") is not True:
+                raise WorkflowError(
+                    "live-write-batch-apply-change-set-invalid",
+                    "The supplied Change Set is not valid in the current workflow service.",
+                )
+            if batch_plan_id in self._executions:
+                raise WorkflowError(
+                    "live-write-batch-apply-already-started",
+                    "This W4 Batch Plan already has a Batch Execution record; replay is not allowed.",
+                )
+            if len(self._executions) >= MAX_BATCH_EXECUTIONS:
+                raise WorkflowError(
+                    "live-write-batch-apply-capacity",
+                    f"This MCP session already holds {MAX_BATCH_EXECUTIONS} Batch Executions.",
+                )
+            asset = plan["assets"][0]
+            asset_path = str(asset["assetPath"])
+            operations = asset["operations"]
+            for operation in operations:
+                self.workflow_service.assert_plan_available_for_batch(str(operation["childPlanId"]))
+
+            now = _utc_now()
+            execution_id = BATCH_EXECUTION_PREFIX + secrets.token_urlsafe(18)
+            execution_operations = [
+                {
+                    "sequenceIndex": operation["sequenceIndex"],
+                    "batchOperationId": operation["batchOperationId"],
+                    "childPlanId": operation["childPlanId"],
+                    "operation": operation["operation"],
+                    "stableTargetKey": operation["stableTargetKey"],
+                    "state": "pending",
+                    "liveApplyReceipt": "",
+                    "transactionId": "",
+                    "previousTransactionId": "",
+                    "fastVerifyResult": {},
+                    "failure": {},
+                }
+                for operation in operations
+            ]
+            exec_payload: dict[str, Any] = {
+                "schemaVersion": LIVE_WRITE_BATCH_EXECUTION_SCHEMA_VERSION,
+                "batchExecutionId": execution_id,
+                "batchPlanId": batch_plan_id,
+                "batchPlanDigest": plan_record.digest,
+                "changeSetId": change_set_id,
+                "state": "applying",
+                "assetPath": asset_path,
+                "editorSessionId": "",
+                "startedAtUtc": now,
+                "updatedAtUtc": now,
+                "completedAtUtc": "",
+                "operations": execution_operations,
+                "lastSuccessfulOperation": "",
+                "failedOperation": "",
+                "notStarted": [],
+                "recoveryOrder": [],
+            }
+            self._persist_execution(exec_payload)
+
+            last_transaction_id = ""
+            verified_batch_ids: list[str] = []
+            mutated_batch_ids: list[str] = []
+            for index, operation_meta in enumerate(execution_operations):
+                operation_meta["previousTransactionId"] = last_transaction_id
+                child_plan_id = str(operation_meta["childPlanId"])
+                try:
+                    applied = self.workflow_service.apply_asset_property_live(
+                        child_plan_id,
+                        f"LIVE APPLY {child_plan_id}",
+                        change_set_id,
+                    )
+                except Exception as exc:
+                    operation_meta["state"] = "failed"
+                    operation_meta["failure"] = {
+                        "code": getattr(exc, "code", "live-write-batch-child-apply-failed"),
+                        "message": str(exc),
+                    }
+                    self._finalize_apply_failure(
+                        exec_payload,
+                        index,
+                        verified_batch_ids,
+                        mutated_batch_ids,
+                    )
+                    self._persist_execution(exec_payload)
+                    raise WorkflowError(
+                        "live-write-batch-apply-failed",
+                        "A child resident Apply failed; resident sequence stopped.",
+                        details={
+                            "batchExecutionId": execution_id,
+                            "causeCode": getattr(exc, "code", exc.__class__.__name__),
+                            "causeMessage": str(exc),
+                        },
+                    ) from exc
+
+                if applied.get("changed") is not True:
+                    operation_meta["state"] = "no-op"
+                    self._persist_execution(exec_payload)
+                    continue
+
+                receipt = str(applied.get("liveApplyReceipt") or "")
+                bridge_result = applied.get("result") if isinstance(applied.get("result"), dict) else {}
+                transaction_id = str(bridge_result.get("transactionId") or "")
+                editor_session_id = str(bridge_result.get("editorSessionId") or "")
+                operation_meta.update(
+                    {
+                        "state": "applied",
+                        "liveApplyReceipt": receipt,
+                        "transactionId": transaction_id,
+                        "editorSessionId": editor_session_id,
+                    }
+                )
+                mutated_batch_ids.append(operation_meta["batchOperationId"])
+                if transaction_id:
+                    last_transaction_id = transaction_id
+                try:
+                    fast_verify = self.workflow_service.verify_live_write_fast(
+                        asset_path,
+                        receipt,
+                        change_set_id,
+                    )
+                    operation_meta["state"] = "verified"
+                    operation_meta["fastVerifyResult"] = fast_verify
+                    verified_batch_ids.append(operation_meta["batchOperationId"])
+                except Exception as exc:
+                    operation_meta["state"] = "applied_unverified"
+                    operation_meta["failure"] = {
+                        "code": getattr(exc, "code", "live-write-batch-fast-verify-failed"),
+                        "message": str(exc),
+                    }
+                    self._finalize_apply_failure(
+                        exec_payload,
+                        index,
+                        verified_batch_ids,
+                        mutated_batch_ids,
+                    )
+                    self._persist_execution(exec_payload)
+                    raise WorkflowError(
+                        "live-write-batch-apply-fast-verify-failed",
+                        "Fast Resident Verify failed after a resident Apply; sequence stopped before the next operation.",
+                        details={
+                            "batchExecutionId": execution_id,
+                            "causeCode": getattr(exc, "code", exc.__class__.__name__),
+                            "causeMessage": str(exc),
+                        },
+                    ) from exc
+                self._persist_execution(exec_payload)
+
+            exec_payload["state"] = "applied"
+            exec_payload["lastSuccessfulOperation"] = (
+                execution_operations[-1]["batchOperationId"] if execution_operations else ""
+            )
+            exec_payload["completedAtUtc"] = _utc_now()
+            exec_payload["updatedAtUtc"] = _utc_now()
+            self._persist_execution(exec_payload)
+            return self._execution_response(exec_payload)
+
+    def _execution_response(self, exec_payload: dict[str, Any]) -> dict[str, Any]:
+        operations = exec_payload["operations"]
+        return {
+            "schemaVersion": LIVE_WRITE_BATCH_EXECUTION_SCHEMA_VERSION,
+            "tool": "ue_apply_live_write_batch",
+            "ok": True,
+            "batchExecutionId": exec_payload["batchExecutionId"],
+            "batchPlanId": exec_payload["batchPlanId"],
+            "changeSetId": exec_payload["changeSetId"],
+            "state": exec_payload["state"],
+            "assetPath": exec_payload["assetPath"],
+            "operationCount": len(operations),
+            "appliedCount": sum(
+                1 for operation in operations if operation["state"] in {"verified", "applied", "applied_unverified"}
+            ),
+            "operations": [
+                {
+                    "batchOperationId": operation["batchOperationId"],
+                    "sequenceIndex": operation["sequenceIndex"],
+                    "operation": operation["operation"],
+                    "state": operation["state"],
+                    "transactionId": operation["transactionId"],
+                    "liveApplyReceipt": operation["liveApplyReceipt"],
+                    "fastVerified": operation["state"] == "verified",
+                }
+                for operation in operations
+            ],
+            "lastTransactionId": next(
+                (operation["transactionId"] for operation in reversed(operations) if operation["transactionId"]),
+                "",
+            ),
+            "lastSuccessfulOperation": exec_payload.get("lastSuccessfulOperation", ""),
+            "failedOperation": exec_payload.get("failedOperation", ""),
+            "notStarted": exec_payload.get("notStarted", []),
+            "recoveryOrder": exec_payload.get("recoveryOrder", []),
+            "savePerformed": False,
+            "nextActions": [
+                {
+                    "tool": "ue_get_change_set",
+                    "arguments": {"change_set_id": exec_payload["changeSetId"]},
+                    "reason": "Confirm all successful operations are bound to the exact Change Set.",
+                }
+            ],
+        }
 
     def _bind_asset(self, normalized_assets: list[dict[str, Any]]) -> list[dict[str, Any]]:
         bindings = []

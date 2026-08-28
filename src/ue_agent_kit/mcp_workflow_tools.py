@@ -683,6 +683,22 @@ def register_workflow_tools(
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_plan_live_write_batch", exc, read_only=False)
 
+    @server.tool(annotations=destructive_annotations)
+    def ue_apply_live_write_batch(
+        batch_plan_id: str,
+        confirmation: str,
+        change_set_id: str,
+    ) -> dict[str, Any]:
+        """Apply one immutable one-asset W4 Batch Plan through the existing resident Writer."""
+        try:
+            return bounded_batch_service.apply_live_write_batch(
+                batch_plan_id=batch_plan_id,
+                confirmation=confirmation,
+                change_set_id=change_set_id,
+            )
+        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_apply_live_write_batch", exc, read_only=False)
+
     @server.tool(annotations=dry_run_annotations)
     def ue_dry_run_patch(plan_id: str) -> dict[str, Any]:
         """Run the stored plan through Unreal, restore memory state, and require unchanged disk Revision."""

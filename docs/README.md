@@ -5,6 +5,7 @@
 ## 当前状态与对比
 
 - [`PROJECT_STATUS.md`](PROJECT_STATUS.md)：当前已实现能力、当前开发阶段与明确未实现边界。
+- [`Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260828.md`](Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260828.md)：**当前项目级开发总交接**，新 Chat / Agent 接手时优先读取。
 - [`Plans/README.md`](Plans/README.md)：**当前计划文档唯一导航入口**，区分主计划、当前 W4、已完成结果与历史计划。
 - [`Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md`](Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md)：当前项目级方向、Track 边界与架构取舍。
 - [`Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md`](Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md)：当前跨 Track 依赖与验收规格。

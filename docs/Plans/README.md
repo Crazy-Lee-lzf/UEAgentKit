@@ -1,6 +1,6 @@
 # UEAgentKit Plans 文档索引
 
-> 更新时间：2026-08-27
+> 更新时间：2026-08-28
 >
 > 本目录保留当前计划、阶段结果与历史执行记录。历史文件不删除、不移动；后续工作应先从本索引进入，避免误用已经完成或被新计划取代的旧文档。
 
@@ -8,11 +8,14 @@
 
 | 层级 | 文档 | 用途 | 状态 |
 |---|---|---|---|
+| 项目总交接 | [`../Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260828.md`](../Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260828.md) | 当前 HEAD、全 Track 状态、安全边界与接手步骤 | **新 Chat / Agent 先读** |
 | 项目方向 | [`UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md`](UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md) | 项目级优先级、Track 边界、架构取舍 | 当前主计划 |
 | 中期拆解 | [`UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md`](UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md) | 任务依赖、验收契约与跨 Track 关系 | 当前执行规格 |
 | 当前实现 | [`UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_DETAILED_PLAN_20260826.md`](UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_DETAILED_PLAN_20260826.md) | W4-0～W4-7 的具体实现与真实 UE 验收 | 下一主线 |
 | 当前子阶段 | [`UEAGENTKIT_W4_1_BOUNDED_BATCH_PLAN_DETAILED_PLAN_20260828.md`](UEAGENTKIT_W4_1_BOUNDED_BATCH_PLAN_DETAILED_PLAN_20260828.md) | W4-1 只读 Bounded Batch Plan 的实现与验收契约 | complete |
 | 当前子阶段结果 | [`UEAGENTKIT_W4_1_BOUNDED_BATCH_PLAN_RESULT_20260828.md`](UEAGENTKIT_W4_1_BOUNDED_BATCH_PLAN_RESULT_20260828.md) | W4-1 真实 fixed-project S1/S2 只读规划证据 | complete |
+| 当前子阶段 | [`UEAGENTKIT_W4_2_SINGLE_ASSET_MULTI_OPERATION_APPLY_DETAILED_PLAN_20260828.md`](UEAGENTKIT_W4_2_SINGLE_ASSET_MULTI_OPERATION_APPLY_DETAILED_PLAN_20260828.md) | W4-2 单资产多操作 resident Apply 的实现与验收契约 | complete |
+| 当前子阶段结果 | [`UEAGENTKIT_W4_2_SINGLE_ASSET_MULTI_OPERATION_APPLY_RESULT_20260828.md`](UEAGENTKIT_W4_2_SINGLE_ASSET_MULTI_OPERATION_APPLY_RESULT_20260828.md) | W4-2 真实 UE C1 与精确 transaction 链证据 | complete |
 | 当前步骤 | [`UEAGENTKIT_W4_0_CONTRACT_FREEZE_AND_BASELINE_PLAN_20260827.md`](UEAGENTKIT_W4_0_CONTRACT_FREEZE_AND_BASELINE_PLAN_20260827.md) | W4-0 契约冻结与 W3 手工编排基线采集 | complete |
 | 当前步骤结果 | [`UEAGENTKIT_W4_0_CONTRACT_FREEZE_AND_BASELINE_RESULT_20260827.md`](UEAGENTKIT_W4_0_CONTRACT_FREEZE_AND_BASELINE_RESULT_20260827.md) | W4-0 B0/B1 真实 UE 手工编排基线与冻结契约 | complete |
 | 最近完成 | [`UEAGENTKIT_W3_CHECKPOINT_STRONG_VERIFY_RESULT_20260825.md`](UEAGENTKIT_W3_CHECKPOINT_STRONG_VERIFY_RESULT_20260825.md) | W3 C0-C6 最终证据与 W4 入口基线 | complete |
@@ -45,7 +48,7 @@ W0 resident writer baseline             = complete
 W1 Blueprint narrow resident write      = complete
 W2 Fast Resident Verify                 = complete
 W3 Checkpoint Strong Verify             = complete
-W4 bounded multi-operation / multi-asset = W4-0/W4-1 complete; W4-2 next
+W4 bounded multi-operation / multi-asset = W4-0/W4-1/W4-2 complete; W4-3 next
 R5 Value Provenance / Execution Trace   = deferred by benchmark evidence
 ```
 
@@ -57,7 +60,7 @@ ab731f1 test: cover W3 continuation and full snapshot refresh
 45e6ea2 docs: close W3 checkpoint strong verify
 ```
 
-当前验证基线：712/712 Python tests、0.7.0 release validation、UE5.6 Direct Build 均通过。
+当前 W4-1 验证基线：729/729 Python tests、Ruff、compileall、0.7.0 release validation 与 git diff --check 均通过；W4-1 未改 C++，UE5.6 Direct Build 沿用 W3 PASS 基线。
 
 ## Writer 历史链
 
@@ -79,6 +82,8 @@ UEAGENTKIT_W4_0_CONTRACT_FREEZE_AND_BASELINE_PLAN_20260827.md
 UEAGENTKIT_W4_0_CONTRACT_FREEZE_AND_BASELINE_RESULT_20260827.md
 UEAGENTKIT_W4_1_BOUNDED_BATCH_PLAN_DETAILED_PLAN_20260828.md
 UEAGENTKIT_W4_1_BOUNDED_BATCH_PLAN_RESULT_20260828.md
+UEAGENTKIT_W4_2_SINGLE_ASSET_MULTI_OPERATION_APPLY_DETAILED_PLAN_20260828.md
+UEAGENTKIT_W4_2_SINGLE_ASSET_MULTI_OPERATION_APPLY_RESULT_20260828.md
 ```
 
 其中 PLAN 表示当时的执行设计，RESULT 表示最终事实。阶段完成后，RESULT 优先于同阶段 PLAN 中的中间状态或 blocker 描述。

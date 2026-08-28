@@ -151,6 +151,7 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_rename_datatable_row", "workflow", "planning", high_level_change=True),
     ToolDefinition("ue_plan_patch", "workflow", "planning"),
     ToolDefinition("ue_plan_live_write_batch", "workflow", "planning"),
+    ToolDefinition("ue_apply_live_write_batch", "workflow", "destructive"),
     ToolDefinition("ue_dry_run_patch", "workflow", "planning"),
     ToolDefinition("ue_apply_patch", "workflow", "destructive"),
     ToolDefinition("ue_plan_animation_retarget", "workflow", "planning"),
