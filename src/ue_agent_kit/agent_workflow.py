@@ -4188,6 +4188,86 @@ class PatchWorkflowService(RetargetWorkflowMixin):
             ],
         }
 
+    def preflight_checkpoint_commit(
+        self,
+        asset_path: str,
+        save_receipt: str,
+        change_set_id: str = "",
+    ) -> dict[str, Any]:
+        """Read-only all-assets preflight for W4 checkpoint-set Commit.
+
+        It validates one prepared W3 checkpoint exactly as Commit would,
+        without invoking the Editor save and without consuming the receipt.
+        """
+        with self._lock:
+            self._assert_session_current()
+            asset_path = self._validate_refresh_asset_path(asset_path)
+            if not self.config.commit_enabled:
+                raise WorkflowError("commit-disabled", "Commit tools were not enabled when this MCP server started.")
+            if not change_set_id:
+                raise WorkflowError("checkpoint-invalid", "checkpoint preflight requires an exact change_set_id.")
+            authorization = self._save_authorizations.get(save_receipt)
+            if authorization is None or authorization.consumed:
+                raise WorkflowError("save-receipt-invalid", "A fresh one-time saveReceipt is required.")
+            if authorization.asset_path != asset_path:
+                raise WorkflowError("save-receipt-invalid", "The saveReceipt belongs to another asset.")
+            if (
+                authorization.verification_mode != "checkpoint"
+                or authorization.change_set_id != change_set_id
+            ):
+                raise WorkflowError("save-receipt-stale", "The checkpoint asset or Change Set changed after Preview.")
+            checkpoint = self._checkpoints.get(authorization.checkpoint_id)
+            if checkpoint is None or checkpoint.state != "prepared":
+                raise WorkflowError("checkpoint-stale", "The checkpoint is not in prepared state for Commit.")
+            if self.live_editor_service is None:
+                raise WorkflowError("live-editor-required", "Checkpoint preflight requires Live Editor mode.")
+            try:
+                status = self.live_editor_service.status()
+            except Exception as exc:
+                raise WorkflowError("live-editor-status-unavailable", "The fixed Editor session could not be inspected.") from exc
+            if status.get("state") != "available" or status.get("pieState") != "stopped":
+                raise WorkflowError("live-editor-unavailable", "The fixed Editor must be available and stopped before Commit.")
+            editor_session_id = str(status.get("sessionId", ""))
+            editor_process_id = int(status.get("processId") or 0)
+            if (
+                not editor_session_id
+                or editor_process_id <= 0
+                or editor_session_id != authorization.editor_session_id
+                or editor_process_id != authorization.editor_process_id
+            ):
+                raise WorkflowError("save-receipt-stale", "The Editor session changed after checkpoint Preview.")
+            freshness = self._assert_asset_fresh(asset_path)
+            expected_revision = str(freshness.get("diskRevision", ""))
+            if not expected_revision.startswith("sha256:") or expected_revision != authorization.expected_disk_revision:
+                raise WorkflowError("revision-conflict", "The disk Revision changed after checkpoint Preview.")
+            current_derived = self._derive_checkpoint_operations(change_set_id, asset_path, editor_session_id)
+            if (
+                list(current_derived["includedReceipts"]) != list(authorization.included_receipts)
+                or list(current_derived["effectiveReceipts"]) != list(authorization.effective_receipts)
+                or list(current_derived["supersededReceipts"]) != list(authorization.superseded_receipts)
+                or current_derived["effectiveOperationDigest"] != authorization.effective_operation_digest
+            ):
+                raise WorkflowError(
+                    "checkpoint-membership-changed",
+                    "The Change Set receipt membership or effective operation set changed after checkpoint Preview.",
+                )
+            for receipt in authorization.effective_receipts:
+                record = self._live_applies.get(receipt)
+                if record is None:
+                    raise WorkflowError("checkpoint-membership-changed", "A checkpoint effective receipt is no longer active.")
+                self._fast_verify_live_record(record)
+            package_file = self._package_file(self.config.project_path, authorization.package_name, authorization.asset_class)
+            before_revision = "sha256:" + sha256_file(package_file)
+            if before_revision != expected_revision:
+                raise WorkflowError("revision-conflict", "The disk Package changed after checkpoint Preview.")
+            return {
+                "ok": True,
+                "checkpointId": checkpoint.checkpoint_id,
+                "assetPath": asset_path,
+                "beforeRevision": before_revision,
+                "editorSessionId": editor_session_id,
+            }
+
     def save_authorized_asset(
         self,
         asset_path: str,

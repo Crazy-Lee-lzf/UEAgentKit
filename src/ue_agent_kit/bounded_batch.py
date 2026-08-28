@@ -425,6 +425,30 @@ class BoundedBatchService:
         self._executions[plan_id] = record
         return record
 
+    def get_batch_execution(self, batch_execution_id: str) -> LiveWriteBatchExecutionRecord:
+        with self._lock:
+            path = self._batch_execution_directory(batch_execution_id) / "execution.json"
+            if not path.exists():
+                raise WorkflowError(
+                    "live-write-batch-execution-not-found",
+                    f"W4 Batch Execution {batch_execution_id} was not found.",
+                )
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except Exception as exc:
+                raise WorkflowError(
+                    "live-write-batch-execution-tampered",
+                    "The stored W4 Batch Execution could not be decoded.",
+                ) from exc
+            if str(payload.get("batchExecutionId") or "") != batch_execution_id:
+                raise WorkflowError(
+                    "live-write-batch-execution-tampered",
+                    "The stored W4 Batch Execution identity does not match its path.",
+                )
+            current_bytes = _json_bytes(payload)
+            digest = _sha256_digest(current_bytes)
+            return LiveWriteBatchExecutionRecord(batch_execution_id, digest, payload, path)
+
     def _finalize_apply_failure(
         self,
         exec_payload: dict[str, Any],

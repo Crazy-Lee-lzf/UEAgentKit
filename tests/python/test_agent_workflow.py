@@ -1413,7 +1413,7 @@ class AgentWorkflowTests(unittest.TestCase):
 
     def test_live_write_tool_count_and_names_include_verification_trust(self) -> None:
         names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
-        self.assertEqual(len(names), 97)
+        self.assertEqual(len(names), 98)
         self.assertIn("ue_analyze_change_impact", names)
         self.assertIn("ue_analyze_semantic_diff", names)
         self.assertIn("ue_build_verification_plan", names)

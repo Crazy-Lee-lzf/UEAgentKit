@@ -6,6 +6,7 @@ from typing import Any, Literal
 from .agent_workflow import MATERIAL_PARAMETER_OPERATIONS, PatchWorkflowService, WorkflowError
 from .animation_scale_fix_batch import AnimationScaleFixBatchService
 from .bounded_batch import BoundedBatchService
+from .checkpoint_sets import CheckpointSetService
 
 
 def register_workflow_tools(
@@ -37,6 +38,7 @@ def register_workflow_tools(
 
     animation_scale_fix_batch_service = AnimationScaleFixBatchService(workflow_service)
     bounded_batch_service = BoundedBatchService(workflow_service)
+    checkpoint_set_service = CheckpointSetService(workflow_service, bounded_batch_service)
 
     def _run_high_level_change(
         *,
@@ -698,6 +700,26 @@ def register_workflow_tools(
             )
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_apply_live_write_batch", exc, read_only=False)
+
+    @server.tool(annotations=destructive_annotations)
+    def ue_save_change_set_checkpoint(
+        batch_execution_id: str,
+        mode: Literal["Preview", "Commit", "Get"],
+        confirmation: str = "",
+    ) -> dict[str, Any]:
+        """Preview, Commit, or Get an aggregate checkpoint-set for one W4 Batch Execution.
+
+        In Preview mode `batch_execution_id` is a W4 Batch Execution id.
+        In Commit/Get mode `batch_execution_id` is the checkpoint-set id returned by Preview.
+        """
+        try:
+            if mode == "Preview":
+                return checkpoint_set_service.preview(batch_execution_id=batch_execution_id)
+            if mode == "Get":
+                return checkpoint_set_service.get(checkpoint_set_id=batch_execution_id)
+            return checkpoint_set_service.commit(checkpoint_set_id=batch_execution_id, confirmation=confirmation)
+        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_save_change_set_checkpoint", exc, read_only=False)
 
     @server.tool(annotations=dry_run_annotations)
     def ue_dry_run_patch(plan_id: str) -> dict[str, Any]:
