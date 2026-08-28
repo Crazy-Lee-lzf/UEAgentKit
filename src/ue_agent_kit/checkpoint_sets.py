@@ -73,6 +73,7 @@ class CheckpointSetService:
         # Private test-only fault seam; never exposed as a public parameter.
         self._fault_after_saved_asset = ""
         self._fail_next_save = False
+        self._fault_verify_asset = ""
 
     def _directory(self, checkpoint_set_id: str) -> Path:
         if self.work_root is None:
@@ -410,6 +411,279 @@ class CheckpointSetService:
             payload["updatedAtUtc"] = _utc_now()
             self._persist(payload)
             return self._commit_response(payload)
+
+    def _run_live_action(self, tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
+        live_editor = getattr(self.workflow_service, "live_editor_service", None)
+        if live_editor is None:
+            raise WorkflowError("live-editor-required", "W4-5 validation actions require Live Editor mode.")
+        evidence_store = getattr(self.workflow_service, "verification_evidence_store", None)
+        token = None
+        if evidence_store is not None:
+            token = evidence_store.begin_registered_tool(tool_name, params)
+        response = live_editor.call_tool(tool_name, params)
+        if evidence_store is not None:
+            evidence_store.finish_registered_tool(token, response)
+        return response
+
+    def verify(self, *, checkpoint_set_id: str) -> dict[str, Any]:
+        with self._lock:
+            record = self._load(checkpoint_set_id)
+            payload = record.payload
+            if payload["state"] != "saved":
+                raise WorkflowError(
+                    "checkpoint-set-verify-not-saved",
+                    "Aggregate verification requires a fully saved Checkpoint Set.",
+                    details={"checkpointSetId": checkpoint_set_id, "state": payload["state"]},
+                )
+            existing = payload.get("verification")
+            if isinstance(existing, dict) and existing.get("state") == "verified":
+                return self._verification_response(payload, strong_verify_process_count=0)
+
+            verification: dict[str, Any] = {
+                "state": "verifying",
+                "startedAtUtc": (existing or {}).get("startedAtUtc") or _utc_now(),
+                "updatedAtUtc": _utc_now(),
+                "completedAtUtc": "",
+                "childResults": list((existing or {}).get("childResults", [])),
+                "verifiedCount": int((existing or {}).get("verifiedCount", 0)),
+                "failedCount": int((existing or {}).get("failedCount", 0)),
+                "semanticDiff": {},
+                "verificationPlan": {},
+                "validationActions": [],
+                "unsupportedRequiredActions": [],
+                "trust": {},
+                "failureBoundary": {},
+            }
+            payload["verification"] = verification
+            self._persist(payload)
+
+            change_set_id = str(payload["changeSetId"])
+            existing_results = {str(item["assetPath"]): item for item in verification["childResults"]}
+            child_results: list[dict[str, Any]] = []
+            strong_verify_process_count = 0
+            for child in payload["childCheckpoints"]:
+                asset_path = str(child["assetPath"])
+                previous = existing_results.get(asset_path, {})
+                if previous.get("verified") is True:
+                    child_results.append(previous)
+                    continue
+                try:
+                    if self._fault_verify_asset == asset_path:
+                        raise WorkflowError("checkpoint-canonical-mismatch", "Test-only canonical mismatch seam.")
+                    result = self.workflow_service.verify_live_write_checkpoint(
+                        str(child["checkpointId"]),
+                        change_set_id=change_set_id,
+                        asset_path=asset_path,
+                    )
+                    strong_verify_process_count += int(result.get("childUnrealProcessCount") or 0)
+                    child_results.append(
+                        {
+                            "assetPath": asset_path,
+                            "checkpointId": child["checkpointId"],
+                            "verified": True,
+                            "state": "verified",
+                            "verificationKind": result.get("verificationKind", "independent-verified"),
+                            "afterRevision": child.get("afterRevision", ""),
+                            "strongVerificationRevision": result.get("artifactRevision", ""),
+                            "evidenceId": result.get("reportId", ""),
+                            "failure": {},
+                        }
+                    )
+                except Exception as exc:
+                    child_results.append(
+                        {
+                            "assetPath": asset_path,
+                            "checkpointId": child["checkpointId"],
+                            "verified": False,
+                            "state": "failed",
+                            "verificationKind": "",
+                            "afterRevision": child.get("afterRevision", ""),
+                            "strongVerificationRevision": "",
+                            "evidenceId": "",
+                            "failure": _safe_error(exc),
+                        }
+                    )
+            verification["childResults"] = child_results
+            verification["verifiedCount"] = sum(1 for item in child_results if item["verified"])
+            verification["failedCount"] = sum(1 for item in child_results if not item["verified"])
+            verification["updatedAtUtc"] = _utc_now()
+            self._persist(payload)
+
+            semantic_diff: dict[str, Any] = {}
+            semantic_failure: dict[str, Any] = {}
+            try:
+                semantic_diff = self.workflow_service.analyze_semantic_diff(change_set_id, stage="verified")
+            except Exception as exc:
+                semantic_failure = _safe_error(exc)
+            verification["semanticDiff"] = {
+                "stage": semantic_diff.get("evidenceStage", {}).get("selected", ""),
+                "verified": bool(
+                    semantic_diff
+                    and semantic_diff.get("evidenceStage", {}).get("selected") == "verified"
+                    and semantic_diff.get("summary", {}).get("missingExpectedCount", 0) == 0
+                    and semantic_diff.get("summary", {}).get("unexpectedCount", 0) == 0
+                    and semantic_diff.get("summary", {}).get("analysisGapCount", 0) == 0
+                ),
+                "missingExpectedCount": semantic_diff.get("summary", {}).get("missingExpectedCount", 0),
+                "unexpectedCount": semantic_diff.get("summary", {}).get("unexpectedCount", 0),
+                "analysisGapCount": semantic_diff.get("summary", {}).get("analysisGapCount", 0),
+                "totalAssetCount": semantic_diff.get("summary", {}).get("totalAssetCount", 0),
+                "returnedAssetCount": semantic_diff.get("summary", {}).get("returnedAssetCount", 0),
+                "failure": semantic_failure,
+            }
+
+            plan: dict[str, Any] = {}
+            plan_failure: dict[str, Any] = {}
+            try:
+                plan = self.workflow_service.build_verification_plan(change_set_id)
+            except Exception as exc:
+                plan_failure = _safe_error(exc)
+            verification["verificationPlan"] = {
+                "planId": plan.get("planId", ""),
+                "planFingerprint": plan.get("planFingerprint", ""),
+                "requiredAssertionCount": plan.get("summary", {}).get("required", 0),
+                "failure": plan_failure,
+            }
+
+            unsupported_required: list[dict[str, Any]] = []
+            validation_actions: list[dict[str, Any]] = []
+            if plan:
+                allowed_assets = set(payload["assetOrder"])
+                for assertion in plan.get("assertions", []):
+                    if assertion.get("requirement") != "required":
+                        continue
+                    next_action = assertion.get("nextAction") or {}
+                    tool_name = str(next_action.get("tool", ""))
+                    subject = str((next_action.get("arguments") or {}).get("asset_path", ""))
+                    if tool_name in {"ue_analyze_semantic_diff", "ue_verify_asset"}:
+                        continue
+                    if tool_name not in {"ue_compile_blueprint", "ue_validate_asset"} or subject not in allowed_assets:
+                        unsupported_required.append(
+                            {
+                                "tool": tool_name,
+                                "subject": subject,
+                                "reason": "Required action is outside the bounded W4-5 automatic closure set.",
+                            }
+                        )
+                seen: set[tuple[str, str]] = set()
+                for assertion in plan.get("assertions", []):
+                    if assertion.get("requirement") != "required":
+                        continue
+                    next_action = assertion.get("nextAction") or {}
+                    tool_name = str(next_action.get("tool", ""))
+                    if tool_name not in {"ue_compile_blueprint", "ue_validate_asset"}:
+                        continue
+                    subject = str((next_action.get("arguments") or {}).get("asset_path", ""))
+                    if subject not in allowed_assets:
+                        continue
+                    key = (tool_name, subject)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    try:
+                        response = self._run_live_action(tool_name, {"assetPath": subject})
+                        result = response.get("result") if isinstance(response.get("result"), dict) else {}
+                        validation = result.get("validationEvidence") if isinstance(result.get("validationEvidence"), dict) else {}
+                        validation_actions.append(
+                            {
+                                "tool": tool_name,
+                                "subject": subject,
+                                "state": "success",
+                                "evidenceId": result.get("evidenceId", "") or validation.get("evidenceId", ""),
+                            }
+                        )
+                    except Exception as exc:
+                        validation_actions.append(
+                            {
+                                "tool": tool_name,
+                                "subject": subject,
+                                "state": "failed",
+                                "evidenceId": "",
+                                "failure": _safe_error(exc),
+                            }
+                        )
+            verification["validationActions"] = validation_actions
+            verification["unsupportedRequiredActions"] = unsupported_required
+
+            trust: dict[str, Any] = {}
+            trust_failure: dict[str, Any] = {}
+            try:
+                trust = self.workflow_service.evaluate_trust_verdict(change_set_id)
+            except Exception as exc:
+                trust_failure = _safe_error(exc)
+            verdict = trust.get("verdict") if isinstance(trust.get("verdict"), dict) else {}
+            verification["trust"] = {
+                "state": verdict.get("state", ""),
+                "reasonCodes": verdict.get("reasonCodes", []),
+                "statement": verdict.get("statement", ""),
+                "verifiedAssets": trust.get("verificationScope", {}).get("verifiedAssets", []),
+                "unresolvedRiskCount": trust.get("summary", {}).get("unresolvedRiskCount", 0),
+                "analysisGapCount": trust.get("summary", {}).get("analysisGapCount", 0),
+                "unexpectedChangeCount": trust.get("summary", {}).get("unexpectedChangeCount", 0),
+                "failure": trust_failure,
+            }
+
+            all_children_verified = verification["verifiedCount"] == len(payload["childCheckpoints"])
+            semantic_ok = bool(verification["semanticDiff"].get("verified"))
+            actions_ok = not unsupported_required and all(item["state"] == "success" for item in validation_actions)
+            trust_ok = verification["trust"].get("state") == "verified"
+            if all_children_verified and semantic_ok and actions_ok and trust_ok:
+                verification["state"] = "verified"
+            elif verification["verifiedCount"] > 0:
+                verification["state"] = "partially_verified"
+            else:
+                verification["state"] = "failed"
+            verification["completedAtUtc"] = _utc_now()
+            verification["updatedAtUtc"] = _utc_now()
+            payload["verification"] = verification
+            self._persist(payload)
+            return self._verification_response(payload, strong_verify_process_count=strong_verify_process_count)
+
+    def _verification_response(
+        self,
+        payload: dict[str, Any],
+        *,
+        strong_verify_process_count: int,
+    ) -> dict[str, Any]:
+        verification = payload.get("verification", {})
+        child_results = verification.get("childResults", [])
+        return {
+            "schemaVersion": CHECKPOINT_SET_SCHEMA_VERSION,
+            "tool": "ue_verify_change_set_checkpoint",
+            "ok": True,
+            "checkpointSetId": payload["checkpointSetId"],
+            "changeSetId": payload["changeSetId"],
+            "state": verification.get("state", "failed"),
+            "assetCount": len(payload["assetOrder"]),
+            "savedCount": payload.get("savedCount", 0),
+            "verifiedCount": verification.get("verifiedCount", 0),
+            "children": [
+                {
+                    "assetPath": item.get("assetPath", ""),
+                    "checkpointId": item.get("checkpointId", ""),
+                    "verified": item.get("verified", False),
+                    "state": item.get("state", ""),
+                    "verificationKind": item.get("verificationKind", ""),
+                    "afterRevision": item.get("afterRevision", ""),
+                    "strongVerificationRevision": item.get("strongVerificationRevision", ""),
+                    "failure": item.get("failure", {}),
+                }
+                for item in child_results
+            ],
+            "semanticDiff": verification.get("semanticDiff", {}),
+            "verificationPlan": verification.get("verificationPlan", {}),
+            "validationActions": verification.get("validationActions", []),
+            "unsupportedRequiredActions": verification.get("unsupportedRequiredActions", []),
+            "trust": verification.get("trust", {}),
+            "strongVerifyProcessCount": strong_verify_process_count,
+            "nextActions": [
+                {
+                    "tool": "ue_verify_change_set_checkpoint",
+                    "arguments": {"checkpoint_set_id": payload["checkpointSetId"]},
+                    "reason": "Re-run aggregate verification only after resolving any incomplete required evidence.",
+                }
+            ] if verification.get("state") != "verified" else [],
+        }
 
     def get(self, *, checkpoint_set_id: str) -> dict[str, Any]:
         with self._lock:

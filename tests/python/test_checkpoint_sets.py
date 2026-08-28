@@ -73,6 +73,27 @@ class _FakeBoundedBatch:
         return SimpleNamespace(payload=self.execution_payload, digest="sha256:exec")
 
 
+class _FakeLiveEditor:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self.fail_asset = ""
+
+    def call_tool(self, tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append({"tool": tool_name, "params": params})
+        asset_path = str(params.get("assetPath", ""))
+        if asset_path == self.fail_asset:
+            return {"ok": False, "tool": tool_name, "error": {"code": "injected-validation-failure", "message": "failed"}}
+        return {
+            "ok": True,
+            "tool": tool_name,
+            "result": {
+                "assetPath": asset_path,
+                "validationEvidence": {"evidenceId": f"ev_{tool_name}_{asset_path}"},
+                "evidenceId": f"ev_{tool_name}_{asset_path}",
+            },
+        }
+
+
 class _FakeWorkflow:
     def __init__(self, work_root: Path) -> None:
         self.config = SimpleNamespace(
@@ -89,6 +110,13 @@ class _FakeWorkflow:
         self.fail_preview_asset = ""
         self.fail_preflight_asset = ""
         self.fail_commit_asset = ""
+        self.verify_calls: list[dict[str, Any]] = []
+        self.fail_verify_asset = ""
+        self.semantic_diff_incomplete = False
+        self.trust_state = "verified"
+        self.live_editor_service = _FakeLiveEditor()
+        self.verification_evidence_store = None
+        self.plan_assertions: list[dict[str, Any]] | None = None
 
     def save_authorized_asset(
         self,
@@ -170,6 +198,99 @@ class _FakeWorkflow:
         if not checkpoint_id:
             raise WorkflowError("save-receipt-invalid", "receipt invalid")
         return {"ok": True, "checkpointId": checkpoint_id, "assetPath": asset_path}
+
+    def verify_live_write_checkpoint(
+        self,
+        checkpoint_id: str,
+        change_set_id: str = "",
+        asset_path: str = "",
+    ) -> dict[str, Any]:
+        self.verify_calls.append(
+            {"checkpointId": checkpoint_id, "changeSetId": change_set_id, "assetPath": asset_path}
+        )
+        if asset_path == self.fail_verify_asset:
+            raise WorkflowError("checkpoint-canonical-mismatch", "Canonical mismatch.")
+        return {
+            "ok": True,
+            "verified": True,
+            "checkpointId": checkpoint_id,
+            "changeSetId": change_set_id,
+            "assetPath": asset_path,
+            "verificationKind": "independent-verified",
+            "artifactRevision": f"sha256:artifact:{asset_path}",
+            "reportId": f"report_{checkpoint_id}",
+            "childUnrealProcessCount": 1,
+        }
+
+    def analyze_semantic_diff(
+        self,
+        change_set_id: str,
+        *,
+        stage: str = "auto",
+        **_: Any,
+    ) -> dict[str, Any]:
+        incomplete = self.semantic_diff_incomplete
+        return {
+            "ok": True,
+            "evidenceStage": {"requested": stage, "selected": "verified" if not incomplete else "persisted"},
+            "summary": {
+                "totalAssetCount": 2,
+                "returnedAssetCount": 2 if not incomplete else 1,
+                "missingExpectedCount": 1 if incomplete else 0,
+                "unexpectedCount": 0,
+                "analysisGapCount": 1 if incomplete else 0,
+            },
+        }
+
+    def build_verification_plan(self, change_set_id: str, **_: Any) -> dict[str, Any]:
+        assertions = self.plan_assertions
+        if assertions is None:
+            assertions = [
+                {
+                    "requirement": "required",
+                    "kind": "compile",
+                    "subject": BP_ASSET,
+                    "nextAction": {"tool": "ue_compile_blueprint", "arguments": {"asset_path": BP_ASSET}},
+                },
+                {
+                    "requirement": "required",
+                    "kind": "data-validation",
+                    "subject": BP_ASSET,
+                    "nextAction": {"tool": "ue_validate_asset", "arguments": {"asset_path": BP_ASSET}},
+                },
+                {
+                    "requirement": "required",
+                    "kind": "data-validation",
+                    "subject": DA_ASSET,
+                    "nextAction": {"tool": "ue_validate_asset", "arguments": {"asset_path": DA_ASSET}},
+                },
+            ]
+        return {
+            "ok": True,
+            "planId": "verification_plan_test",
+            "planFingerprint": "sha256:plan",
+            "assertions": assertions,
+            "summary": {"required": sum(a["requirement"] == "required" for a in assertions)},
+        }
+
+    def evaluate_trust_verdict(self, change_set_id: str, **_: Any) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "verificationScope": {
+                "verifiedAssets": [BP_ASSET, DA_ASSET] if self.trust_state == "verified" else [],
+                "affectedAssets": [BP_ASSET, DA_ASSET],
+            },
+            "verdict": {
+                "state": self.trust_state,
+                "reasonCodes": [] if self.trust_state == "verified" else ["trust-required-evidence-missing"],
+                "statement": "verified" if self.trust_state == "verified" else "not verified",
+            },
+            "summary": {
+                "unresolvedRiskCount": 0,
+                "analysisGapCount": 0,
+                "unexpectedChangeCount": 0,
+            },
+        }
 
 
 class CheckpointSetTests(unittest.TestCase):
@@ -349,6 +470,97 @@ class CheckpointSetTests(unittest.TestCase):
             [asset["assetPath"] for asset in loaded["assets"]],
             [BP_ASSET, DA_ASSET],
         )
+
+
+    def test_verify_fully_saved_set_uses_children_semantic_plan_trust(self) -> None:
+        preview = self._preview()
+        self._commit(preview)
+        result = self.service.verify(checkpoint_set_id=preview["checkpointSetId"])
+        self.assertEqual(result["state"], "verified")
+        self.assertEqual(result["verifiedCount"], 2)
+        self.assertEqual(result["strongVerifyProcessCount"], 2)
+        self.assertEqual(
+            [call["assetPath"] for call in self.workflow.verify_calls],
+            [BP_ASSET, DA_ASSET],
+        )
+        self.assertEqual(
+            [action["tool"] for action in result["validationActions"]],
+            ["ue_compile_blueprint", "ue_validate_asset", "ue_validate_asset"],
+        )
+        self.assertEqual(result["trust"]["state"], "verified")
+
+    def test_verify_replay_is_idempotent_no_new_strong_process(self) -> None:
+        preview = self._preview()
+        self._commit(preview)
+        self.service.verify(checkpoint_set_id=preview["checkpointSetId"])
+        before = len(self.workflow.verify_calls)
+        second = self.service.verify(checkpoint_set_id=preview["checkpointSetId"])
+        self.assertEqual(second["state"], "verified")
+        self.assertEqual(second["strongVerifyProcessCount"], 0)
+        self.assertEqual(len(self.workflow.verify_calls), before)
+
+    def test_verify_partially_saved_checkpoint_set_rejected(self) -> None:
+        self.workflow.fail_commit_asset = DA_ASSET
+        preview = self._preview()
+        with self.assertRaises(WorkflowError):
+            self._commit(preview)
+        with self.assertRaises(WorkflowError) as verify_caught:
+            self.service.verify(checkpoint_set_id=preview["checkpointSetId"])
+        self.assertEqual(verify_caught.exception.code, "checkpoint-set-verify-not-saved")
+        self.assertEqual(self.workflow.verify_calls, [])
+
+    def test_verify_child_two_failure_produces_partial_verified(self) -> None:
+        self.workflow.fail_verify_asset = DA_ASSET
+        preview = self._preview()
+        self._commit(preview)
+        result = self.service.verify(checkpoint_set_id=preview["checkpointSetId"])
+        self.assertEqual(result["state"], "partially_verified")
+        self.assertEqual(result["verifiedCount"], 1)
+        bp = next(child for child in result["children"] if child["assetPath"] == BP_ASSET)
+        da = next(child for child in result["children"] if child["assetPath"] == DA_ASSET)
+        self.assertTrue(bp["verified"])
+        self.assertFalse(da["verified"])
+        self.assertEqual(da["failure"]["code"], "checkpoint-canonical-mismatch")
+
+    def test_verify_incomplete_semantic_diff_blocks_verified(self) -> None:
+        self.workflow.semantic_diff_incomplete = True
+        preview = self._preview()
+        self._commit(preview)
+        result = self.service.verify(checkpoint_set_id=preview["checkpointSetId"])
+        self.assertNotEqual(result["state"], "verified")
+        self.assertFalse(result["semanticDiff"]["verified"])
+
+    def test_verify_trust_not_verified_blocks_verified(self) -> None:
+        self.workflow.trust_state = "insufficient-evidence"
+        preview = self._preview()
+        self._commit(preview)
+        result = self.service.verify(checkpoint_set_id=preview["checkpointSetId"])
+        self.assertNotEqual(result["state"], "verified")
+        self.assertEqual(result["trust"]["state"], "insufficient-evidence")
+
+    def test_verify_private_fault_seam_makes_child_two_mismatch(self) -> None:
+        preview = self._preview()
+        self._commit(preview)
+        self.service._fault_verify_asset = DA_ASSET
+        result = self.service.verify(checkpoint_set_id=preview["checkpointSetId"])
+        self.assertEqual(result["state"], "partially_verified")
+        da = next(child for child in result["children"] if child["assetPath"] == DA_ASSET)
+        self.assertEqual(da["failure"]["code"], "checkpoint-canonical-mismatch")
+
+    def test_verify_unsupported_required_action_not_executed(self) -> None:
+        self.workflow.plan_assertions = [
+            {
+                "requirement": "required",
+                "kind": "automation",
+                "subject": "Test.Something",
+                "nextAction": {"tool": "ue_run_automation_test", "arguments": {"test_name": "Test.Something"}},
+            }
+        ]
+        preview = self._preview()
+        self._commit(preview)
+        result = self.service.verify(checkpoint_set_id=preview["checkpointSetId"])
+        self.assertEqual(result["validationActions"], [])
+        self.assertNotEqual(result["state"], "verified")
 
 
 if __name__ == "__main__":

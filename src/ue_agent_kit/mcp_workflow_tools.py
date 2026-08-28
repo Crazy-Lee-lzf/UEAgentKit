@@ -721,6 +721,14 @@ def register_workflow_tools(
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_save_change_set_checkpoint", exc, read_only=False)
 
+    @server.tool(annotations=read_annotations)
+    def ue_verify_change_set_checkpoint(checkpoint_set_id: str) -> dict[str, Any]:
+        """Run aggregate Strong Verify / Semantic Diff / Verification Plan / Trust for one saved W4 Checkpoint Set."""
+        try:
+            return checkpoint_set_service.verify(checkpoint_set_id=checkpoint_set_id)
+        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_verify_change_set_checkpoint", exc, read_only=True)
+
     @server.tool(annotations=dry_run_annotations)
     def ue_dry_run_patch(plan_id: str) -> dict[str, Any]:
         """Run the stored plan through Unreal, restore memory state, and require unchanged disk Revision."""

@@ -29,37 +29,38 @@ W4-1 Bounded Batch Plan                 complete
 W4-2 Single-Asset Multi-operation Apply complete
 W4-3 Multi-Asset Resident Apply         complete
 W4-4 Multi-Asset Checkpoint Save        complete
-W4-5 Aggregate Strong Verify / Trust    NEXT
+W4-5 Aggregate Strong Verify / Trust    complete
+W4-6 Recovery and Restart Hardening     NEXT
 ```
 
-The current implementation checkpoint before this W4-4 update:
+The current implementation checkpoint before this W4-5 update:
 
 ```text
-76f90b3 feat: add W4-3 multi-asset resident apply
+d277369 feat: add W4-4 multi-asset checkpoint save
 ```
 
-Current validation baseline after W4-4:
+Current validation baseline after W4-5:
 
 ```text
-Python discovered suite                    752 / 752 PASS
+Python discovered suite                    760 / 760 PASS
 Ruff                                       PASS
 compileall                                 PASS
 ValidateRelease 0.7.0                      PASS
 git diff --check                           PASS
-UE5.6 Direct Build                         not rerun for W4-4; no C++ changed
+UE5.6 Direct Build                         not rerun for W4-5; no C++ changed
 last required Direct Build baseline        W3 PASS
 ```
 
-Current Tool Registry counts after W4-4:
+Current Tool Registry counts after W4-5:
 
 ```text
-workflow-only                              65
-workflow + memory                          77
-combined live + workflow                   98
-combined live + workflow + memory         110
+workflow-only                              66
+workflow + memory                          78
+combined live + workflow                   99
+combined live + workflow + memory         111
 ```
 
-No Push / Rebase / Tag / Release has been performed for W3, W4-0, W4-1, W4-2, W4-3, or W4-4.
+No Push / Rebase / Tag / Release has been performed for W3, W4-0, W4-1, W4-2, W4-3, W4-4, or W4-5.
 
 ## 2. Project Positioning
 
