@@ -463,12 +463,6 @@ class BoundedBatchService:
                     "live-write-batch-apply-confirmation-required",
                     "Batch Apply confirmation did not exactly match the required Batch Plan phrase.",
                 )
-            if plan.get("assetCount") != 1:
-                raise WorkflowError(
-                    "live-write-batch-apply-multi-asset-unsupported",
-                    "W4-2 supports only one-asset Batch Plans; multi-asset Apply belongs to W4-3.",
-                    details={"assetCount": plan.get("assetCount")},
-                )
             if not isinstance(change_set_id, str) or not change_set_id.startswith("cs_"):
                 raise WorkflowError(
                     "live-write-batch-apply-change-set-required",
@@ -490,30 +484,34 @@ class BoundedBatchService:
                     "live-write-batch-apply-capacity",
                     f"This MCP session already holds {MAX_BATCH_EXECUTIONS} Batch Executions.",
                 )
-            asset = plan["assets"][0]
-            asset_path = str(asset["assetPath"])
-            operations = asset["operations"]
-            for operation in operations:
-                self.workflow_service.assert_plan_available_for_batch(str(operation["childPlanId"]))
+            plan_assets = plan["assets"]
+            asset_path = str(plan_assets[0]["assetPath"]) if plan_assets else ""
+            for asset in plan_assets:
+                for operation in asset["operations"]:
+                    self.workflow_service.assert_plan_available_for_batch(str(operation["childPlanId"]))
 
             now = _utc_now()
             execution_id = BATCH_EXECUTION_PREFIX + secrets.token_urlsafe(18)
-            execution_operations = [
-                {
-                    "sequenceIndex": operation["sequenceIndex"],
-                    "batchOperationId": operation["batchOperationId"],
-                    "childPlanId": operation["childPlanId"],
-                    "operation": operation["operation"],
-                    "stableTargetKey": operation["stableTargetKey"],
-                    "state": "pending",
-                    "liveApplyReceipt": "",
-                    "transactionId": "",
-                    "previousTransactionId": "",
-                    "fastVerifyResult": {},
-                    "failure": {},
-                }
-                for operation in operations
-            ]
+            execution_operations: list[dict[str, Any]] = []
+            for asset_index, asset in enumerate(plan_assets):
+                for operation in asset["operations"]:
+                    execution_operations.append(
+                        {
+                            "sequenceIndex": operation["sequenceIndex"],
+                            "assetIndex": asset_index,
+                            "assetPath": asset["assetPath"],
+                            "batchOperationId": operation["batchOperationId"],
+                            "childPlanId": operation["childPlanId"],
+                            "operation": operation["operation"],
+                            "stableTargetKey": operation["stableTargetKey"],
+                            "state": "pending",
+                            "liveApplyReceipt": "",
+                            "transactionId": "",
+                            "previousTransactionId": "",
+                            "fastVerifyResult": {},
+                            "failure": {},
+                        }
+                    )
             exec_payload: dict[str, Any] = {
                 "schemaVersion": LIVE_WRITE_BATCH_EXECUTION_SCHEMA_VERSION,
                 "batchExecutionId": execution_id,
@@ -523,9 +521,22 @@ class BoundedBatchService:
                 "state": "applying",
                 "assetPath": asset_path,
                 "editorSessionId": "",
+                "assetOrder": [asset["assetPath"] for asset in plan_assets],
+                "assets": [
+                    {
+                        "assetPath": asset["assetPath"],
+                        "assetClass": asset["assetClass"],
+                        "expectedRevision": asset["expectedRevision"],
+                        "state": "pending",
+                        "operationCount": len(asset["operations"]),
+                        "appliedCount": 0,
+                    }
+                    for asset in plan_assets
+                ],
                 "startedAtUtc": now,
                 "updatedAtUtc": now,
                 "completedAtUtc": "",
+                "appliedCount": 0,
                 "operations": execution_operations,
                 "lastSuccessfulOperation": "",
                 "failedOperation": "",
@@ -535,9 +546,13 @@ class BoundedBatchService:
             self._persist_execution(exec_payload)
 
             last_transaction_id = ""
+            current_asset_index: int | None = None
             verified_batch_ids: list[str] = []
             mutated_batch_ids: list[str] = []
             for index, operation_meta in enumerate(execution_operations):
+                if current_asset_index is None or operation_meta["assetIndex"] != current_asset_index:
+                    current_asset_index = operation_meta["assetIndex"]
+                    last_transaction_id = ""
                 operation_meta["previousTransactionId"] = last_transaction_id
                 child_plan_id = str(operation_meta["childPlanId"])
                 try:
@@ -552,6 +567,7 @@ class BoundedBatchService:
                         "code": getattr(exc, "code", "live-write-batch-child-apply-failed"),
                         "message": str(exc),
                     }
+                    exec_payload["assets"][operation_meta["assetIndex"]]["state"] = "failed"
                     self._finalize_apply_failure(
                         exec_payload,
                         index,
@@ -587,16 +603,21 @@ class BoundedBatchService:
                     }
                 )
                 mutated_batch_ids.append(operation_meta["batchOperationId"])
+                asset_summary = exec_payload["assets"][operation_meta["assetIndex"]]
+                asset_summary["appliedCount"] += 1
+                exec_payload["appliedCount"] += 1
+                asset_summary["state"] = "applied"
                 if transaction_id:
                     last_transaction_id = transaction_id
                 try:
                     fast_verify = self.workflow_service.verify_live_write_fast(
-                        asset_path,
+                        operation_meta["assetPath"],
                         receipt,
                         change_set_id,
                     )
                     operation_meta["state"] = "verified"
                     operation_meta["fastVerifyResult"] = fast_verify
+                    asset_summary["state"] = "verified"
                     verified_batch_ids.append(operation_meta["batchOperationId"])
                 except Exception as exc:
                     operation_meta["state"] = "applied_unverified"
@@ -623,9 +644,13 @@ class BoundedBatchService:
                 self._persist_execution(exec_payload)
 
             exec_payload["state"] = "applied"
+            for asset_summary in exec_payload["assets"]:
+                if asset_summary["state"] not in {"failed", "applied_unverified"}:
+                    asset_summary["state"] = "verified"
             exec_payload["lastSuccessfulOperation"] = (
                 execution_operations[-1]["batchOperationId"] if execution_operations else ""
             )
+            exec_payload["recoveryOrder"] = list(reversed(mutated_batch_ids))
             exec_payload["completedAtUtc"] = _utc_now()
             exec_payload["updatedAtUtc"] = _utc_now()
             self._persist_execution(exec_payload)
@@ -642,6 +667,8 @@ class BoundedBatchService:
             "changeSetId": exec_payload["changeSetId"],
             "state": exec_payload["state"],
             "assetPath": exec_payload["assetPath"],
+            "assetOrder": exec_payload.get("assetOrder", []),
+            "assets": exec_payload.get("assets", []),
             "operationCount": len(operations),
             "appliedCount": sum(
                 1 for operation in operations if operation["state"] in {"verified", "applied", "applied_unverified"}
@@ -650,6 +677,8 @@ class BoundedBatchService:
                 {
                     "batchOperationId": operation["batchOperationId"],
                     "sequenceIndex": operation["sequenceIndex"],
+                    "assetIndex": operation.get("assetIndex", 0),
+                    "assetPath": operation.get("assetPath", exec_payload.get("assetPath", "")),
                     "operation": operation["operation"],
                     "state": operation["state"],
                     "transactionId": operation["transactionId"],

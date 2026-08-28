@@ -648,17 +648,29 @@ class BoundedBatchTests(unittest.TestCase):
         )
         self.assertEqual(self.workflow.apply_calls, [])
 
-    def test_apply_multi_asset_scope_reject(self) -> None:
+    def test_apply_multi_asset_success_passes_and_resets_previous_transaction(self) -> None:
         plan = self.service.plan(**self._request_b1())
         batch_plan_id = plan["batchPlanId"]
-        with self.assertRaises(WorkflowError) as caught:
-            self.service.apply_live_write_batch(
-                batch_plan_id=batch_plan_id,
-                confirmation=f"APPLY LIVE WRITE BATCH {batch_plan_id}",
-                change_set_id="cs_test",
-            )
-        self.assertEqual(caught.exception.code, "live-write-batch-apply-multi-asset-unsupported")
-        self.assertEqual(self.workflow.apply_calls, [])
+        result = self.service.apply_live_write_batch(
+            batch_plan_id=batch_plan_id,
+            confirmation=f"APPLY LIVE WRITE BATCH {batch_plan_id}",
+            change_set_id="cs_test",
+        )
+        self.assertEqual(result["state"], "applied")
+        self.assertEqual(result["operationCount"], 4)
+        self.assertEqual(result["appliedCount"], 4)
+        self.assertEqual(result["assetOrder"], [BP_ASSET, DA_ASSET])
+        execution = self.service._executions[batch_plan_id].payload
+        self.assertEqual(
+            [op["previousTransactionId"] for op in execution["operations"]],
+            ["", "tx_1", "tx_2", ""],
+        )
+        self.assertEqual(
+            [op["assetIndex"] for op in execution["operations"]],
+            [0, 0, 0, 1],
+        )
+        self.assertEqual(len(self.workflow.apply_calls), 4)
+        self.assertEqual(len(self.workflow.verify_calls), 4)
 
     def test_apply_replay_rejected(self) -> None:
         plan = self._plan_b0()
@@ -730,6 +742,58 @@ class BoundedBatchTests(unittest.TestCase):
         self.assertEqual(execution["failedOperation"], "bop_0002")
         self.assertEqual(execution["notStarted"], ["bop_0003"])
         self.assertEqual(execution["recoveryOrder"], ["bop_0002", "bop_0001"])
+
+    def test_apply_later_asset_failure_partial_boundary(self) -> None:
+        workflow = _FakeWorkflowService(
+            self.work_root,
+            self.policy_path,
+            self.revision_export,
+            fail_apply_on_call=4,
+        )
+        service = BoundedBatchService(workflow)
+        plan = service.plan(**self._request_b1())
+        batch_plan_id = plan["batchPlanId"]
+        with self.assertRaises(WorkflowError) as caught:
+            service.apply_live_write_batch(
+                batch_plan_id=batch_plan_id,
+                confirmation=f"APPLY LIVE WRITE BATCH {batch_plan_id}",
+                change_set_id="cs_test",
+            )
+        self.assertEqual(caught.exception.code, "live-write-batch-apply-failed")
+        execution = service._executions[batch_plan_id].payload
+        self.assertEqual(execution["state"], "partially_applied")
+        self.assertEqual(execution["lastSuccessfulOperation"], "bop_0003")
+        self.assertEqual(execution["failedOperation"], "bop_0004")
+        self.assertEqual(execution["notStarted"], [])
+        self.assertEqual(execution["recoveryOrder"], ["bop_0003", "bop_0002", "bop_0001"])
+        self.assertEqual(len(workflow.apply_calls), 4)
+
+    def test_apply_later_asset_fast_verify_failure_partial_boundary(self) -> None:
+        workflow = _FakeWorkflowService(
+            self.work_root,
+            self.policy_path,
+            self.revision_export,
+            fail_fast_on_call=4,
+        )
+        service = BoundedBatchService(workflow)
+        plan = service.plan(**self._request_b1())
+        batch_plan_id = plan["batchPlanId"]
+        with self.assertRaises(WorkflowError) as caught:
+            service.apply_live_write_batch(
+                batch_plan_id=batch_plan_id,
+                confirmation=f"APPLY LIVE WRITE BATCH {batch_plan_id}",
+                change_set_id="cs_test",
+            )
+        self.assertEqual(caught.exception.code, "live-write-batch-apply-fast-verify-failed")
+        execution = service._executions[batch_plan_id].payload
+        self.assertEqual(execution["state"], "partially_applied")
+        self.assertEqual(execution["lastSuccessfulOperation"], "bop_0003")
+        self.assertEqual(execution["failedOperation"], "bop_0004")
+        self.assertEqual(execution["notStarted"], [])
+        self.assertEqual(
+            execution["recoveryOrder"],
+            ["bop_0004", "bop_0003", "bop_0002", "bop_0001"],
+        )
 
     def test_apply_tampered_plan_zero_mutation(self) -> None:
         plan = self._plan_b0()
