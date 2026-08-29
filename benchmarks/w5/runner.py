@@ -261,10 +261,13 @@ def run_resident(args: argparse.Namespace) -> dict[str, Any]:
     workload = scenario_for_id(args.scenario)
     workflow, bounded, checkpoint_sets, recovery = build_services(args)
     before_revisions: dict[str, str] = {}
-    # Open assets first if WarmLoaded.
-    if args.cache_state == "WarmLoaded":
-        for asset_path in workload.asset_paths:
-            workflow.live_editor_service.call_tool("ue_open_asset", {"assetPath": asset_path})
+    # WarmLoaded and WarmUnloaded both need the target loaded before Live Apply.
+    # WarmUnloaded measures the editor-warm asset-load cost; it is captured
+    # separately in assetLoadMs so it is not hidden inside Apply.
+    asset_load_started = time.perf_counter()
+    for asset_path in workload.asset_paths:
+        workflow.live_editor_service.call_tool("ue_open_asset", {"assetPath": asset_path})
+    asset_load_ms = _elapsed(asset_load_started)
     started = time.perf_counter()
     result = _stages_apply(
         workflow,
@@ -314,7 +317,7 @@ def run_resident(args: argparse.Namespace) -> dict[str, Any]:
         "residentBridgeCallCount": result["residentBridgeCallCount"],
         "childUnrealProcessCount": result["childUnrealProcessCount"],
         "resultBytes": result["resultBytes"],
-        "stages": result["stages"],
+        "stages": {**result["stages"], "assetLoadMs": asset_load_ms},
         "totalMs": total_ms,
         "recoveryOrResetMs": recovery_or_reset_ms,
         "recoveryResults": recovery_results,
@@ -323,7 +326,8 @@ def run_resident(args: argparse.Namespace) -> dict[str, Any]:
         "finalTrustState": result["finalTrustState"],
         "beforeRevisions": before_revisions,
         "afterRevisions": result["afterRevisions"],
-        "measurementGaps": ["policyRevisionMs", "compileMs", "fastVerifyMs"],
+        "measurementGaps": ["policyRevisionMs", "compileMs", "fastVerifyMs"] if args.cache_state == "WarmLoaded"
+        else ["policyRevisionMs", "compileMs", "fastVerifyMs", "assetLoadIsolation"],
     }
     return attempt
 

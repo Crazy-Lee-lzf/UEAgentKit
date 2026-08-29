@@ -9,6 +9,7 @@ from typing import Any
 STAGE_FIELDS = (
     "planMs",
     "policyRevisionMs",
+    "assetLoadMs",
     "applyMs",
     "fastVerifyMs",
     "compileMs",
