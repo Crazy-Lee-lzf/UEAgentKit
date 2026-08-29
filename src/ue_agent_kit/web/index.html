@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UEAgentKit 知识库（只读）</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --border: #d9dee5;
+    --text: #1c2430;
+    --muted: #66707d;
+    --accent: #2563eb;
+    --accent-soft: #eaf1fe;
+    --mono: Consolas, "Courier New", monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.55 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  header {
+    background: var(--panel); border-bottom: 1px solid var(--border);
+    padding: 10px 18px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 16px; margin: 0; }
+  header .ro-badge {
+    background: #ecfdf3; color: #067647; border: 1px solid #abefc6;
+    border-radius: 999px; padding: 2px 10px; font-size: 12px;
+  }
+  header .meta { color: var(--muted); font-size: 12px; }
+  nav { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+  nav button {
+    border: 1px solid var(--border); background: var(--panel); color: var(--text);
+    border-radius: 8px; padding: 6px 12px; cursor: pointer; font-size: 13px;
+  }
+  nav button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  main { padding: 14px 18px 40px; }
+  .view { display: none; }
+  .view.active { display: block; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; }
+  .pad { padding: 12px 14px; }
+  .muted { color: var(--muted); }
+  .mono { font-family: var(--mono); font-size: 12px; word-break: break-all; }
+  /* chips */
+  .chip {
+    display: inline-block; border-radius: 999px; padding: 1px 9px; font-size: 12px;
+    border: 1px solid transparent; vertical-align: middle;
+  }
+  .chip-valid      { background:#ecfdf3; color:#067647; border-color:#abefc6; }
+  .chip-stale      { background:#fff6e6; color:#b54708; border-color:#fedf89; }
+  .chip-conflicted { background:#fef3f2; color:#b42318; border-color:#fecdca; }
+  .chip-superseded { background:#f2f4f7; color:#475467; border-color:#d0d5dd; text-decoration:line-through; }
+  .chip-unverified { background:#eff8ff; color:#175cd3; border-color:#b2ddff; }
+  .chip-type { background:#f8f9fc; color:#3a4454; border-color:#d9dee5; }
+  /* tree layout */
+  .split { display: grid; grid-template-columns: minmax(260px, 34%) 1fr; gap: 12px; }
+  .tree-node { padding: 4px 8px; border-radius: 6px; cursor: pointer; display: flex; gap: 6px; align-items: baseline; }
+  .tree-node:hover { background: var(--accent-soft); }
+  .tree-node.selected { background: var(--accent); color: #fff; }
+  .tree-node .counts { color: var(--muted); font-size: 11px; margin-left: auto; white-space: nowrap; }
+  .tree-node.selected .counts { color: #dbe7ff; }
+  .tree-children { margin-left: 16px; border-left: 1px dashed var(--border); padding-left: 6px; }
+  .tree-toggle { cursor: pointer; user-select: none; width: 14px; display: inline-block; color: var(--muted); }
+  /* tables */
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; white-space: nowrap; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: var(--accent-soft); }
+  /* forms */
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+  .filters select, .filters input {
+    border: 1px solid var(--border); border-radius: 8px; padding: 6px 9px;
+    font: inherit; background: #fff; color: var(--text);
+  }
+  .filters input[type="text"] { min-width: 180px; }
+  .btn {
+    border: 1px solid var(--border); background: #fff; border-radius: 8px;
+    padding: 6px 12px; cursor: pointer; font: inherit;
+  }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .pager { display: flex; gap: 10px; align-items: center; margin-top: 10px; }
+  /* detail cards */
+  .kv { display: grid; grid-template-columns: 160px 1fr; gap: 4px 12px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; }
+  .section { margin-top: 14px; }
+  .section h3 { margin: 0 0 8px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .pill-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pill {
+    border: 1px solid var(--border); background: #fff; border-radius: 8px;
+    padding: 3px 9px; font-size: 12px; font-family: var(--mono); word-break: break-all;
+    cursor: pointer;
+  }
+  .pill:hover { border-color: var(--accent); }
+  pre.body {
+    background: #f8f9fc; border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; white-space: pre-wrap; word-break: break-word; font-family: var(--mono);
+    font-size: 12.5px; max-height: 420px; overflow: auto;
+  }
+  .error-box {
+    background: #fef3f2; border: 1px solid #fecdca; color: #b42318;
+    border-radius: 8px; padding: 10px 12px; margin: 10px 0;
+  }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 10px; }
+  .statusbar { position: fixed; bottom: 0; left: 0; right: 0; background: var(--panel);
+    border-top: 1px solid var(--border); padding: 5px 18px; font-size: 12px; color: var(--muted); }
+  .todo-done { text-decoration: line-through; color: var(--muted); }
+  .card-list > div { border-top: 1px solid var(--border); padding: 8px 0; }
+  .card-list > div:first-child { border-top: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>UEAgentKit 知识库</h1>
+  <span class="ro-badge">只读浏览 · 修改须由 Agent 执行</span>
+  <span class="meta" id="status-meta">加载中…</span>
+  <nav>
+    <button data-view="tree" class="active">知识树</button>
+    <button data-view="records">记录</button>
+    <button data-view="work">Active Work</button>
+    <button data-view="search">检索</button>
+  </nav>
+</header>
+<main>
+  <div id="error-slot"></div>
+
+  <!-- ============ 知识树 ============ -->
+  <section class="view active" id="view-tree">
+    <div class="split">
+      <div class="panel pad">
+        <div class="hint" style="margin:0 0 8px">知识树（懒加载，点击展开子节点）</div>
+        <div id="tree-root"></div>
+      </div>
+      <div class="panel pad" id="node-detail">
+        <div class="muted">在左侧选择一个节点查看详情。</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 记录 ============ -->
+  <section class="view" id="view-records">
+    <div class="filters">
+      <select id="f-type"><option value="">全部类型</option></select>
+      <select id="f-status"><option value="">全部状态</option></select>
+      <select id="f-source"><option value="">全部来源</option></select>
+      <input type="text" id="f-node" placeholder="node_id（可留空）">
+      <input type="text" id="f-subject" placeholder="subject（精确匹配）">
+      <button class="btn primary" id="f-apply">筛选</button>
+      <span class="muted" id="f-total"></span>
+    </div>
+    <div class="panel">
+      <table>
+        <thead><tr>
+          <th>标题</th><th>类型</th><th>状态</th><th>来源</th><th>subject</th><th>更新时间</th><th>摘要</th>
+        </tr></thead>
+        <tbody id="records-body"></tbody>
+      </table>
+    </div>
+    <div class="pager">
+      <button class="btn" id="r-prev">上一页</button>
+      <button class="btn" id="r-next">下一页</button>
+      <span class="muted" id="r-page"></span>
+    </div>
+  </section>
+
+  <!-- ============ Active Work ============ -->
+  <section class="view" id="view-work">
+    <div class="filters">
+      <select id="w-status"><option value="">全部状态</option></select>
+      <button class="btn primary" id="w-apply">筛选</button>
+      <span class="muted" id="w-total"></span>
+    </div>
+    <div class="panel">
+      <table>
+        <thead><tr>
+          <th>目标 / 标题</th><th>状态</th><th>优先级</th><th>下一步</th><th>阻塞原因</th><th>更新时间</th>
+        </tr></thead>
+        <tbody id="work-body"></tbody>
+      </table>
+    </div>
+    <div class="pager">
+      <button class="btn" id="w-prev">上一页</button>
+      <button class="btn" id="w-next">下一页</button>
+      <span class="muted" id="w-page"></span>
+    </div>
+  </section>
+
+  <!-- ============ 检索 ============ -->
+  <section class="view" id="view-search">
+    <div class="filters">
+      <input type="text" id="s-q" placeholder="FTS5 关键词，如：生命值 或 BP_Player" style="min-width:320px">
+      <button class="btn primary" id="s-apply">检索</button>
+      <span class="muted">覆盖全部状态（含 stale / superseded）</span>
+    </div>
+    <div class="panel pad card-list" id="search-results">
+      <div class="muted">输入关键词开始检索。</div>
+    </div>
+  </section>
+
+  <!-- ============ 详情浮层 ============ -->
+  <div id="detail-overlay" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:50;">
+    <div class="panel" style="max-width:900px; margin:4vh auto; max-height:90vh; overflow:auto;">
+      <div class="pad" style="display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--border);">
+        <strong id="detail-title">详情</strong>
+        <span id="detail-chips" class="pill-row"></span>
+        <button class="btn" style="margin-left:auto" id="detail-close">关闭</button>
+      </div>
+      <div class="pad" id="detail-body"></div>
+    </div>
+  </div>
+</main>
+<div class="statusbar">
+  本界面为本地开发工具，仅监听 127.0.0.1，数据库以只读模式打开；任何修改请让 Agent 通过 MCP 工具执行。
+</div>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const API = {
+  get: async (path) => {
+    const response = await fetch(path, { headers: { "Accept": "application/json" } });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const message = payload && payload.error ? payload.error.message : ("HTTP " + response.status);
+      throw new Error(message);
+    }
+    return payload;
+  },
+};
+
+function esc(value) {
+  const div = document.createElement("div");
+  div.textContent = value == null ? "" : String(value);
+  return div.innerHTML;
+}
+function chip(kind, value) {
+  if (!value) return "";
+  return '<span class="chip chip-' + esc(kind) + '">' + esc(value) + "</span>";
+}
+function statusChip(status) { return chip(status, status); }
+function typeChip(type) { return '<span class="chip chip-type">' + esc(type) + "</span>"; }
+function showError(message) {
+  $("error-slot").innerHTML = '<div class="error-box">' + esc(message) + "</div>";
+}
+function clearError() { $("error-slot").innerHTML = ""; }
+
+/* ---------------- 状态摘要 ---------------- */
+async function loadStatus() {
+  try {
+    const status = await API.get("/api/status");
+    const memory = status.memoryDatabase || {};
+    const asset = status.assetDatabase || {};
+    const parts = [];
+    parts.push("项目: " + (status.projectKey || "(未设置)"));
+    parts.push("记忆库: " + (memory.present ? (memory.recordCount + " 条记录 / schema v" + memory.schemaVersion) : "缺失"));
+    if (memory.countsByStatus) {
+      const staleParts = Object.entries(memory.countsByStatus).map(([k, v]) => k + " " + v);
+      parts.push(staleParts.join(" · "));
+    }
+    parts.push("资产索引: " + (asset.present ? (asset.assetCount + " 资产 / " + asset.referenceCount + " 引用") : "缺失"));
+    $("status-meta").textContent = parts.join(" ｜ ");
+  } catch (error) {
+    $("status-meta").textContent = "状态加载失败: " + error.message;
+  }
+}
+
+/* ---------------- 知识树（懒加载） ---------------- */
+async function loadRootTree() {
+  const container = $("tree-root");
+  container.innerHTML = '<div class="muted">加载中…</div>';
+  try {
+    const payload = await API.get("/api/tree?limit=200");
+    container.innerHTML = "";
+    if (!payload.items.length) {
+      container.innerHTML = '<div class="muted">当前项目没有知识节点。</div>';
+      return;
+    }
+    for (const node of payload.items) container.appendChild(treeItem(node));
+  } catch (error) {
+    container.innerHTML = '<div class="error-box">' + esc(error.message) + "</div>";
+  }
+}
+function treeItem(node) {
+  const wrap = document.createElement("div");
+  wrap.className = "tree-node";
+  wrap.dataset.nodeId = node.nodeId;
+  const toggle = document.createElement("span");
+  toggle.className = "tree-toggle";
+  toggle.textContent = node.childCount > 0 ? "▸" : "·";
+  const label = document.createElement("span");
+  label.textContent = node.path + " — " + node.title;
+  const counts = document.createElement("span");
+  counts.className = "counts";
+  counts.textContent = (node.childCount ? "子 " + node.childCount : "") +
+    (node.recordCount ? " 记录 " + node.recordCount : "");
+  wrap.append(toggle, label, counts);
+  wrap.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    document.querySelectorAll(".tree-node.selected").forEach((el) => el.classList.remove("selected"));
+    wrap.classList.add("selected");
+    openNodeDetail(node.nodeId);
+    if (node.childCount > 0 && !wrap.dataset.loaded) {
+      wrap.dataset.loaded = "1";
+      toggle.textContent = "▾";
+      const childrenBox = document.createElement("div");
+      childrenBox.className = "tree-children";
+      childrenBox.innerHTML = '<div class="muted">加载中…</div>';
+      wrap.after(childrenBox);
+      try {
+        const payload = await API.get("/api/tree?parent=" + encodeURIComponent(node.nodeId) + "&limit=200");
+        childrenBox.innerHTML = "";
+        for (const child of payload.items) childrenBox.appendChild(treeItem(child));
+        if (!payload.items.length) childrenBox.innerHTML = '<div class="muted">无子节点</div>';
+      } catch (error) {
+        childrenBox.innerHTML = '<div class="error-box">' + esc(error.message) + "</div>";
+      }
+    } else if (wrap.dataset.loaded) {
+      const box = wrap.nextElementSibling;
+      const collapsed = box && box.style.display === "none";
+      if (box) box.style.display = collapsed ? "block" : "none";
+      toggle.textContent = collapsed ? "▾" : "▸";
+    }
+  });
+  return wrap;
+}
+async function openNodeDetail(nodeId) {
+  const box = $("node-detail");
+  box.innerHTML = '<div class="muted">加载中…</div>';
+  try {
+    const payload = await API.get("/api/node/" + encodeURIComponent(nodeId) + "?recordLimit=200");
+    const node = payload.node;
+    let html = "<dl class='kv'>" +
+      "<dt>路径</dt><dd class='mono'>" + esc(node.path) + "</dd>" +
+      "<dt>标题</dt><dd>" + esc(node.title) + "</dd>" +
+      "<dt>类型</dt><dd>" + typeChip(node.nodeType) + "</dd>" +
+      "<dt>摘要</dt><dd>" + esc(node.summary) + "</dd>" +
+      "<dt>子节点数</dt><dd>" + payload.childCount + "</dd>" +
+      "<dt>更新时间</dt><dd class='mono'>" + esc(node.updatedAtUtc) + "</dd>" +
+      "</dl>";
+    html += "<div class='section'><h3>挂载记录（" + payload.records.length + "）</h3>";
+    if (payload.records.length) {
+      html += "<div class='card-list'>";
+      for (const record of payload.records) {
+        html += "<div><span class='mono' style='cursor:pointer;color:var(--accent)' data-record='" +
+          esc(record.recordId) + "'>" + esc(record.title) + "</span> " +
+          typeChip(record.recordType) + " " + statusChip(record.status) +
+          " <span class='muted mono'>" + esc(record.updatedAtUtc) + "</span></div>";
+      }
+      html += "</div>";
+    } else {
+      html += "<div class='muted'>该节点没有直接挂载的记录。</div>";
+    }
+    html += "</div>";
+    box.innerHTML = html;
+    box.querySelectorAll("[data-record]").forEach((el) => {
+      el.addEventListener("click", () => openRecordDetail(el.dataset.record));
+    });
+  } catch (error) {
+    box.innerHTML = '<div class="error-box">' + esc(error.message) + "</div>";
+  }
+}
+
+/* ---------------- 记录列表 ---------------- */
+const recordState = { limit: 50, offset: 0 };
+function fillSelect(id, values, label) {
+  const select = $(id);
+  select.innerHTML = '<option value="">' + label + "</option>";
+  for (const value of values) {
+    const option = document.createElement("option");
+    option.value = value; option.textContent = value;
+    select.appendChild(option);
+  }
+}
+async function loadRecords() {
+  const params = new URLSearchParams();
+  params.set("limit", String(recordState.limit));
+  params.set("offset", String(recordState.offset));
+  if ($("f-type").value) params.set("type", $("f-type").value);
+  if ($("f-status").value) params.set("status", $("f-status").value);
+  if ($("f-source").value) params.set("source", $("f-source").value);
+  if ($("f-node").value.trim()) params.set("node", $("f-node").value.trim());
+  if ($("f-subject").value.trim()) params.set("subject", $("f-subject").value.trim());
+  const body = $("records-body");
+  body.innerHTML = '<tr><td colspan="7" class="muted">加载中…</td></tr>';
+  try {
+    const payload = await API.get("/api/records?" + params.toString());
+    $("f-total").textContent = "共 " + payload.total + " 条";
+    body.innerHTML = "";
+    if (!payload.items.length) {
+      body.innerHTML = '<tr><td colspan="7" class="muted">没有匹配的记录。</td></tr>';
+    }
+    for (const item of payload.items) {
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        "<td>" + esc(item.title) + "</td>" +
+        "<td>" + typeChip(item.recordType) + "</td>" +
+        "<td>" + statusChip(item.status) + "</td>" +
+        "<td>" + esc(item.sourceKind) + "</td>" +
+        "<td class='mono'>" + esc(item.subjectKey) + "</td>" +
+        "<td class='mono'>" + esc(item.updatedAtUtc) + "</td>" +
+        "<td class='muted'>" + esc(item.bodyPreview) + (item.bodyTruncated ? "…" : "") + "</td>";
+      tr.addEventListener("click", () => openRecordDetail(item.recordId));
+      body.appendChild(tr);
+    }
+    $("r-page").textContent = "第 " + (payload.offset + 1) + " - " +
+      (payload.offset + payload.itemCount) + " 条 / 共 " + payload.total;
+    $("r-prev").disabled = payload.offset === 0;
+    $("r-next").disabled = payload.offset + payload.itemCount >= payload.total;
+  } catch (error) {
+    body.innerHTML = '<tr><td colspan="7"><div class="error-box">' + esc(error.message) + "</div></td></tr>";
+  }
+}
+
+/* ---------------- Active Work ---------------- */
+const workState = { limit: 50, offset: 0 };
+async function loadWork() {
+  const params = new URLSearchParams();
+  params.set("limit", String(workState.limit));
+  params.set("offset", String(workState.offset));
+  if ($("w-status").value) params.set("status", $("w-status").value);
+  const body = $("work-body");
+  body.innerHTML = '<tr><td colspan="6" class="muted">加载中…</td></tr>';
+  try {
+    const payload = await API.get("/api/work?" + params.toString());
+    $("w-total").textContent = "共 " + payload.total + " 项";
+    body.innerHTML = "";
+    if (!payload.items.length) body.innerHTML = '<tr><td colspan="6" class="muted">没有匹配的工作项。</td></tr>';
+    for (const item of payload.items) {
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        "<td>" + esc(item.title) + "</td>" +
+        "<td>" + chip(item.status, item.status) + "</td>" +
+        "<td>" + item.priority + "</td>" +
+        "<td>" + esc(item.nextAction || "-") + "</td>" +
+        "<td>" + esc(item.blockedReason || "-") + "</td>" +
+        "<td class='mono'>" + esc(item.updatedAtUtc) + "</td>";
+      tr.addEventListener("click", () => openWorkDetail(item.workItemId));
+      body.appendChild(tr);
+    }
+    $("w-page").textContent = "第 " + (payload.offset + 1) + " - " +
+      (payload.offset + payload.itemCount) + " 项 / 共 " + payload.total;
+    $("w-prev").disabled = payload.offset === 0;
+    $("w-next").disabled = payload.offset + payload.itemCount >= payload.total;
+  } catch (error) {
+    body.innerHTML = '<tr><td colspan="6"><div class="error-box">' + esc(error.message) + "</div></td></tr>";
+  }
+}
+async function openWorkDetail(workItemId) {
+  $("detail-title").textContent = "Active Work 详情";
+  $("detail-chips").innerHTML = "";
+  $("detail-body").innerHTML = '<div class="muted">加载中…</div>';
+  $("detail-overlay").style.display = "block";
+  try {
+    const work = await API.get("/api/work/" + encodeURIComponent(workItemId));
+    $("detail-chips").innerHTML = chip(work.status, work.status);
+    let html = "<dl class='kv'>" +
+      "<dt>workItemId</dt><dd class='mono'>" + esc(work.workItemId) + "</dd>" +
+      "<dt>目标 / 标题</dt><dd>" + esc(work.title) + "</dd>" +
+      "<dt>描述</dt><dd>" + esc(work.description) + "</dd>" +
+      "<dt>下一步</dt><dd>" + esc(work.nextAction) + "</dd>" +
+      "<dt>阻塞原因</dt><dd>" + esc(work.blockedReason || "-") + "</dd>" +
+      "<dt>负责人</dt><dd>" + esc(work.owner || "-") + "</dd>" +
+      "<dt>优先级</dt><dd>" + work.priority + "</dd>" +
+      "<dt>更新时间</dt><dd class='mono'>" + esc(work.updatedAtUtc) + "</dd>" +
+      "</dl>";
+    html += "<div class='section'><h3>TODO</h3><div class='card-list'>";
+    if (work.todos.length) {
+      for (const todo of work.todos) {
+        const done = todo.completedAtUtc !== "";
+        html += "<div class='" + (done ? "todo-done" : "") + "'>" + esc(todo.text) +
+          (done ? " <span class='muted mono'>✓ " + esc(todo.completedAtUtc) + "</span>" : "") + "</div>";
+      }
+    } else { html += "<div class='muted'>无 TODO。</div>"; }
+    html += "</div></div>";
+    html += "<div class='section'><h3>关联知识节点</h3><div class='pill-row'>";
+    html += work.nodeIds.length
+      ? work.nodeIds.map((id) => "<span class='pill'>" + esc(id) + "</span>").join("")
+      : "<span class='muted'>无</span>";
+    html += "</div></div>";
+    html += "<div class='section'><h3>关联资产</h3><div class='pill-row'>";
+    html += work.assetPaths.length
+      ? work.assetPaths.map((p) => "<span class='pill'>" + esc(p) + "</span>").join("")
+      : "<span class='muted'>无</span>";
+    html += "</div></div>";
+    html += "<div class='hint'>本页面只做检查，不提供完成 / 恢复 / 编辑操作；修改请由 Agent 执行。</div>";
+    $("detail-body").innerHTML = html;
+  } catch (error) {
+    $("detail-body").innerHTML = '<div class="error-box">' + esc(error.message) + "</div>";
+  }
+}
+
+/* ---------------- 检索 ---------------- */
+async function runSearch() {
+  const q = $("s-q").value.trim();
+  const box = $("search-results");
+  if (!q) { box.innerHTML = '<div class="muted">输入关键词开始检索。</div>'; return; }
+  box.innerHTML = '<div class="muted">检索中…</div>';
+  try {
+    const payload = await API.get("/api/search?q=" + encodeURIComponent(q) + "&limit=50");
+    if (!payload.items.length) { box.innerHTML = '<div class="muted">没有命中。</div>'; return; }
+    box.innerHTML = "";
+    for (const hit of payload.items) {
+      const record = hit.record;
+      const row = document.createElement("div");
+      row.innerHTML =
+        "<span class='mono' style='cursor:pointer;color:var(--accent)' data-record='" +
+        esc(record.recordId) + "'>" + esc(record.title) + "</span> " +
+        typeChip(record.recordType) + " " + statusChip(record.status) +
+        " <span class='muted'>rank " + hit.rank.toFixed(3) + "</span>" +
+        "<div class='muted mono'>" + esc(record.subjectKey) + "</div>";
+      row.querySelector("[data-record]").addEventListener("click", () => openRecordDetail(record.recordId));
+      box.appendChild(row);
+    }
+  } catch (error) {
+    box.innerHTML = '<div class="error-box">' + esc(error.message) + "</div>";
+  }
+}
+
+/* ---------------- 记录详情（含 Evidence） ---------------- */
+async function openRecordDetail(recordId) {
+  $("detail-title").textContent = "记录详情";
+  $("detail-chips").innerHTML = "";
+  $("detail-body").innerHTML = '<div class="muted">加载中…</div>';
+  $("detail-overlay").style.display = "block";
+  try {
+    const record = await API.get("/api/record/" + encodeURIComponent(recordId));
+    $("detail-chips").innerHTML = typeChip(record.recordType) + " " + statusChip(record.status);
+    let html = "<dl class='kv'>" +
+      "<dt>recordId</dt><dd class='mono'>" + esc(record.recordId) + "</dd>" +
+      "<dt>标题</dt><dd>" + esc(record.title) + "</dd>" +
+      "<dt>subject</dt><dd class='mono'>" + esc(record.subjectKey) + "</dd>" +
+      "<dt>来源</dt><dd>" + esc(record.sourceKind) +
+        (record.sourceRef ? " <span class='mono muted'>" + esc(record.sourceRef) + "</span>" : "") + "</dd>" +
+      "<dt>置信度</dt><dd>" + record.confidence + "</dd>" +
+      "<dt>observed</dt><dd class='mono'>" + esc(record.observedAtUtc) + "</dd>" +
+      "<dt>updated</dt><dd class='mono'>" + esc(record.updatedAtUtc) + "</dd>" +
+      (record.supersededByRecordId
+        ? "<dt>superseded by</dt><dd class='mono' style='cursor:pointer;color:var(--accent)' data-record='" +
+          esc(record.supersededByRecordId) + "'>" + esc(record.supersededByRecordId) + "</dd>"
+        : "") +
+      (record.nodeId ? "<dt>node</dt><dd class='mono'>" + esc(record.nodeId) + "</dd>" : "") +
+      "</dl>";
+    html += "<div class='section'><h3>正文</h3><pre class='body'>" + esc(record.body) + "</pre></div>";
+    html += "<div class='section'><h3>Evidence</h3><dl class='kv'>" +
+      "<dt>contentSha256</dt><dd class='mono'>" + esc(record.contentSha256) + "</dd>" +
+      "<dt>evidenceSha256</dt><dd class='mono'>" + esc(record.evidenceSha256 || "(空)") + "</dd>" +
+      "</dl>";
+    html += "<div class='section'><h3>Revision 绑定</h3><div class='pill-row'>";
+    html += record.revisionSet.length
+      ? record.revisionSet.map((rev) =>
+          "<span class='pill'>" + esc(rev.assetPath) + " @ " + esc(rev.revision) +
+          (rev.revisionStable ? " [stable]" : "") + "</span>").join("")
+      : "<span class='muted'>无</span>";
+    html += "</div><div class='section'><h3>Artifacts</h3><div class='pill-row'>";
+    html += record.artifacts.length
+      ? record.artifacts.map((a) =>
+          "<span class='pill'>" + esc(a.artifactKind) + ": " + esc(a.artifactRef) + "</span>").join("")
+      : "<span class='muted'>无</span>";
+    html += "</div><div class='section'><h3>Scopes</h3><div class='pill-row'>";
+    html += record.scopes.length
+      ? record.scopes.map((s) =>
+          "<span class='pill'>" + esc(s.scopeType) + ": " + esc(s.scopeKey) + "</span>").join("")
+      : "<span class='muted'>无</span>";
+    html += "</div></div>";
+    html += "<div class='section'><h3>Relations</h3><div class='card-list'>";
+    const relations = (record.relations || []).concat(record.inboundRelations || []);
+    if (relations.length) {
+      for (const rel of relations) {
+        const target = rel.targetRecordId || rel.fromRecordId;
+        html += "<div><span class='pill'>" + esc(rel.relationKind) + "</span> <span class='mono' " +
+          "style='cursor:pointer;color:var(--accent)' data-record='" + esc(target) + "'>" +
+          esc(target) + "</span>" +
+          (rel.createdAtUtc ? " <span class='muted mono'>" + esc(rel.createdAtUtc) + "</span>" : "") +
+          "</div>";
+      }
+    } else { html += "<div class='muted'>无关系记录。</div>"; }
+    html += "</div></div>";
+    html += "<div class='section'><h3>Status History</h3><div class='card-list'>";
+    if (record.statusHistory && record.statusHistory.length) {
+      for (const event of record.statusHistory) {
+        html += "<div>" + esc(event.fromStatus) + " → " + statusChip(event.toStatus) +
+          " <span class='muted'>" + esc(event.reason) + "</span> " +
+          "<span class='muted mono'>" + esc(event.changedAtUtc) + "</span></div>";
+      }
+    } else { html += "<div class='muted'>无状态变更历史。</div>"; }
+    html += "</div><div class='hint'>如需修正此记录，请复制 recordId 交给 Agent 执行。</div></div>";
+    $("detail-body").innerHTML = html;
+    $("detail-body").querySelectorAll("[data-record]").forEach((el) => {
+      el.addEventListener("click", () => openRecordDetail(el.dataset.record));
+    });
+  } catch (error) {
+    $("detail-body").innerHTML = '<div class="error-box">' + esc(error.message) + "</div>";
+  }
+}
+
+/* ---------------- 导航与事件 ---------------- */
+document.querySelectorAll("nav button").forEach((button) => {
+  button.addEventListener("click", () => {
+    document.querySelectorAll("nav button").forEach((el) => el.classList.remove("active"));
+    button.classList.add("active");
+    document.querySelectorAll(".view").forEach((el) => el.classList.remove("active"));
+    $("view-" + button.dataset.view).classList.add("active");
+    if (button.dataset.view === "records") loadRecords();
+    if (button.dataset.view === "work") loadWork();
+  });
+});
+$("f-apply").addEventListener("click", () => { recordState.offset = 0; loadRecords(); });
+$("r-prev").addEventListener("click", () => { recordState.offset = Math.max(0, recordState.offset - recordState.limit); loadRecords(); });
+$("r-next").addEventListener("click", () => { recordState.offset += recordState.limit; loadRecords(); });
+$("w-apply").addEventListener("click", () => { workState.offset = 0; loadWork(); });
+$("w-prev").addEventListener("click", () => { workState.offset = Math.max(0, workState.offset - workState.limit); loadWork(); });
+$("w-next").addEventListener("click", () => { workState.offset += workState.limit; loadWork(); });
+$("s-apply").addEventListener("click", runSearch);
+$("s-q").addEventListener("keydown", (event) => { if (event.key === "Enter") runSearch(); });
+$("detail-close").addEventListener("click", () => { $("detail-overlay").style.display = "none"; });
+$("detail-overlay").addEventListener("click", (event) => {
+  if (event.target === $("detail-overlay")) $("detail-overlay").style.display = "none";
+});
+
+(async function init() {
+  fillSelect("f-type", ["projectFact", "projectRule", "decisionRecord", "knownIssue", "taskRecord", "runtimeEvidence"], "全部类型");
+  fillSelect("f-status", ["valid", "stale", "conflicted", "superseded", "unverified"], "全部状态");
+  fillSelect("f-source", ["user-confirmed", "tool-observed", "model-inferred"], "全部来源");
+  fillSelect("w-status", ["planned", "in_progress", "blocked", "done", "cancelled"], "全部状态");
+  await loadStatus();
+  await loadRootTree();
+})();
+</script>
+</body>
+</html>

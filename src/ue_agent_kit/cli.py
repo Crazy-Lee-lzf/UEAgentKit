@@ -17,6 +17,7 @@ from .config import DEFAULT_DATABASE, DEFAULT_MEMORY_DATABASE
 from .database import assert_fts5_available, get_schema_version, open_database
 from .fixtures import validate_fixture_plan, verify_fixture_export
 from .indexer import build_index
+from .knowledge_view import KnowledgeViewConfig, serve as serve_knowledge_view
 from .memory_reports import (
     MAX_AUDIT_NODES,
     MAX_AUDIT_RECORDS,
@@ -275,6 +276,19 @@ def build_parser() -> argparse.ArgumentParser:
     fixtures_verify.add_argument("--export", dest="fixture_export_root", type=Path, required=True)
     fixtures_verify.add_argument("--report", dest="fixture_verification_report_path", type=Path)
 
+    knowledge_view_parser = subparsers.add_parser(
+        "knowledge-view",
+        help="Serve the local read-only Knowledge Web UI (loopback only).",
+    )
+    _add_memory_arguments(knowledge_view_parser)
+    _add_database_argument(knowledge_view_parser)
+    knowledge_view_parser.add_argument("--port", type=int, default=8765)
+    knowledge_view_parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Bind address. Loopback only; non-loopback addresses are rejected.",
+    )
+
     return parser
 
 
@@ -306,6 +320,18 @@ def _open_query_database(path: Path):
 
 
 def run(args: argparse.Namespace) -> tuple[Any, int]:
+    if args.command == "knowledge-view":
+        summary = serve_knowledge_view(
+            KnowledgeViewConfig(
+                memory_database=args.memory_database,
+                database=args.database,
+                project_key=args.project_key,
+                host=args.host,
+                port=args.port,
+            )
+        )
+        return summary, 0
+
     if args.command == "memory":
         memory_service = ProjectMemoryService(
             database_path=args.memory_database,
