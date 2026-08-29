@@ -101,7 +101,15 @@ Evidence: `Output/W5Acceptance/reforge-readonly-inventory.json`.
 
 ## 7. Regression Gates
 
-Pending final full gates run (Python/Ruff/compileall/ValidateRelease/git diff --check). R1/R5 raw evidence under `Output/W5Acceptance/w5r-final-matrix/`; Reforge inventory under `Output/W5Acceptance/`.
+```text
+Python discovered suite           776 / 776 PASS
+Ruff                              PASS
+compileall                        PASS
+ValidateRelease 0.7.0             PASS
+git diff --check                  PASS
+```
+
+R1/R5 raw evidence under `Output/W5Acceptance/w5r-final-matrix/`; Reforge inventory under `Output/W5Acceptance/`.
 
 ## 8. M6 Decision Input
 
@@ -128,8 +136,8 @@ Pending final full gates run (Python/Ruff/compileall/ValidateRelease/git diff --
 [ ] 50 GB generator validated                             BLOCKED
 [ ] 50 GB checkpoint Save + Strong Verify                 BLOCKED
 [ ] 160–180 GB / SimulatedHDD50 reported separately       BLOCKED/deferred
-[ ] full Python/release gates                             PENDING
-[ ] Result document written                               PASS
+[x] full Python/release gates                             PASS (776/776, Ruff, compileall, ValidateRelease 0.7.0, diff check)
+[x] Result document written                               PASS
 ```
 
 Overall outcome:
