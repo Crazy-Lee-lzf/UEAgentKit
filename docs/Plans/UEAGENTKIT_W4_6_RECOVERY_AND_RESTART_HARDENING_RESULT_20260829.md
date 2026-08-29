@@ -273,4 +273,10 @@ W4-7 may begin:
 W4-7 Full Acceptance / Documentation
 ```
 
-W4-6 changes are currently uncommitted. No Push / Rebase / Tag / Release was performed.
+W4-6 was checkpoint-committed as:
+
+```text
+55919bd feat: close W4-6 recovery and restart hardening
+```
+
+No Push / Rebase / Tag / Release was performed.

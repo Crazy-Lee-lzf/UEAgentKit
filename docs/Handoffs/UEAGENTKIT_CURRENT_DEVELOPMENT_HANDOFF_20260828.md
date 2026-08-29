@@ -8,30 +8,30 @@
 >
 > Active branch: `feature/live-writer-expansion`
 >
-> Current committed HEAD before the current uncommitted W4-6 work: `f4ba1c4` (`feat: add W4-5 aggregate strong verify semantic diff trust`)
+> Current committed HEAD: local W4-7 closure commit (see section 0)
 >
 > Latest published product version: `0.7.0` for Unreal Engine 5.6
 >
 > This document records current repository facts, accepted architecture decisions, Track dependencies, safety rules, and the next execution boundary. It does not authorize Push / Rebase / Tag / Release or future implementation commits.
 
-## 0. 2026-08-29 W4-6 Closure Supersession Note
+## 0. 2026-08-29 W4 Closure Supersession Note
 
-This note overrides older takeover wording later in this file where W4-2 is still described as `next`.
+This note overrides older takeover wording later in this file where W4-2/W4-7 is still described as `next`.
 
 ```text
-W4-2 through W4-6                         complete
-W4-7 Full Acceptance / Documentation      NEXT
-current committed HEAD                    f4ba1c4
-current W4-6 discovered Python suite       766 / 766 PASS
-real UE W4-6 H1-H6                         PASS
-final transaction fixture                  2 / 2 independently verified
+W4-0 through W4-7                         complete
+current committed HEAD                    local W4-7 closure commit (see below)
+current W4 discovered Python suite        766 / 766 PASS
+real UE W4 C1-C12                         PASS (fresh)
+real UE W4-6 H1-H6                        PASS (frozen valid)
+final transaction fixture                 2 / 2 independently verified
 ```
 
-Authoritative W4-6 closure evidence:
+Authoritative W4 closure evidence:
 
-`docs/Plans/UEAGENTKIT_W4_6_RECOVERY_AND_RESTART_HARDENING_RESULT_20260829.md`
+`docs/Plans/UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_RESULT_20260829.md`
 
-Sections 10, 11, 19, 21, and 22 retain older historical snapshots from earlier handoff updates. Where they conflict with this note, the current state above, `docs/Plans/README.md`, and the W4-6 Result take precedence. The working tree currently contains uncommitted W4-6 implementation/tests/docs; do not reset, clean, or overwrite those changes. No commit is authorized by this handoff update.
+Sections later in this file that describe W4-7 as `NEXT` or list the W4-5 Tool counts are historical. Where they conflict with this note, the current state above, `docs/Plans/README.md`, and the final W4 Result take precedence. W4-7 implementation/tests/docs are checkpoint-committed locally; the next work should be the post-W4 sequence defined by the Master Plan. No Push / Rebase / Tag / Release is authorized by this handoff update.
 
 ## 1. Read This First
 
@@ -50,16 +50,17 @@ W4-3 Multi-Asset Resident Apply         complete
 W4-4 Multi-Asset Checkpoint Save        complete
 W4-5 Aggregate Strong Verify / Trust    complete
 W4-6 Recovery and Restart Hardening     complete
-W4-7 Full Acceptance / Documentation    NEXT
+W4-7 Full Acceptance / Documentation    complete
+W4                                      complete
 ```
 
-The current committed implementation checkpoint before the uncommitted W4-6 closure:
+The current committed implementation checkpoint after W4 closure:
 
 ```text
-f4ba1c4 feat: add W4-5 aggregate strong verify semantic diff trust
+local W4-7 closure commit (see section 0)
 ```
 
-Current validation baseline after W4-6:
+Current validation baseline after W4:
 
 ```text
 Python discovered suite                    766 / 766 PASS
@@ -67,21 +68,23 @@ Ruff                                       PASS
 compileall                                 PASS
 ValidateRelease 0.7.0                      PASS
 git diff --check                           PASS
-UE5.6 Direct Build                         PASS
-real UE W4-6 H1-H6                         PASS
+UE5.6 Direct Build                         PASS (at 55919bd; no C++ change in W4-7)
+real UE W4 C1-C12                          PASS (fresh)
+real UE W4-6 H1-H6                         PASS (frozen valid)
 final transaction fixture verify           2 / 2 PASS
 ```
 
-Current Tool Registry counts after W4-5:
+Current Tool Registry counts after W4:
 
 ```text
-workflow-only                              66
-workflow + memory                          78
-combined live + workflow                   99
-combined live + workflow + memory         111
+workflow-only                              67
+workflow + memory                          79
+combined live + workflow                  100
+combined live + workflow + memory         112
+Patch operation count                      18
 ```
 
-No Push / Rebase / Tag / Release has been performed for W3 or W4-0 through W4-6.
+No Push / Rebase / Tag / Release has been performed for W3 or W4-0 through W4-7.
 
 ## 2. Project Positioning
 
@@ -512,17 +515,17 @@ Unreal child processes               0
 C++ changes                          none
 ```
 
-W4-1 explicitly did not implement Apply / Save / Verify / Recovery execution.
+W4-1 historical records describe the planning-only slice; W4 closure supersedes them.
 
-## 10. Next Mainline Task — W4-2
+## 10. W4-2 Historical Task
 
-W4-2 is the next required mainline stage:
+W4-2 was the then-next mainline stage and is now complete:
 
 ```text
 W4-2 Single-Asset Multi-operation Apply
 ```
 
-The next Chat / Agent should write a dedicated W4-2 Detailed Plan before implementing it, using `71400c9` as the entry checkpoint.
+Its historical entry checkpoint was `71400c9`; the current closure is documented in the final W4 Result.
 
 Primary real UE slice:
 
@@ -593,12 +596,12 @@ Authoritative phase list:
 ```text
 W4-0 Contract Freeze and Baseline                       complete
 W4-1 Bounded Batch Plan                                 complete
-W4-2 Single-Asset Multi-operation Apply                 next
-W4-3 Multi-Asset Resident Apply
-W4-4 Multi-Asset Checkpoint Save
-W4-5 Aggregate Strong Verify / Semantic Diff / Trust
-W4-6 Recovery and Restart Hardening
-W4-7 Full Acceptance / Documentation
+W4-2 Single-Asset Multi-operation Apply                 complete
+W4-3 Multi-Asset Resident Apply                         complete
+W4-4 Multi-Asset Checkpoint Save                        complete
+W4-5 Aggregate Strong Verify / Semantic Diff / Trust    complete
+W4-6 Recovery and Restart Hardening                     complete
+W4-7 Full Acceptance / Documentation                    complete
 ```
 
 ### W4-3
@@ -659,9 +662,9 @@ Never:
 
 ### W4-7
 
-Run full C1-C12 real UE acceptance, fixture exact recovery, performance comparison against W4-0 B0/B1, and final documentation closure.
+Complete. Fresh C1-C12 real UE acceptance, fixture exact recovery, performance comparison against W4-0 B0/B1, and final documentation closure are recorded in `docs/Plans/UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_RESULT_20260829.md`.
 
-W4-7 must also freeze/document the final Change Set / batch receipt structure because downstream Memory Track M2 consumes it.
+The final Change Set / batch receipt structure is frozen there for downstream Memory Track M2.
 
 ## 12. Post-W4 Writer / Maintenance Direction
 
@@ -1068,27 +1071,18 @@ A fresh Chat / Agent should do the following:
 1. Read this file.
 2. Read docs/Plans/README.md.
 3. Read W4 parent Detailed Plan.
-4. Read W4-1 Result.
+4. Read final W4 Result.
 5. Inspect actual git status / HEAD; do not assume they are unchanged.
-6. Write a dedicated W4-2 Detailed Plan against the actual HEAD.
-7. Implement only W4-2 single-BP multi-operation Apply.
-8. Run unit/regression gates.
-9. Run real UE C1.
-10. Recover fixture exactly.
-11. Write W4-2 Result.
-12. Do not enter W4-3 until C1 is proven.
+6. Confirm W4 is complete and select the next post-W4 item from the Master Plan (W5 and/or D1 per dependency order).
+7. Do not begin W5/D1/Memory implementation until this file and README show W4 complete.
+8. Run relevant regression gates before starting new work.
 ```
 
-The immediate implementation objective is therefore:
+The immediate implementation objective after W4 is therefore:
 
 ```text
-W4-2:
-immutable W4-1 Batch Plan
-→ ordered single-asset resident apply
-→ exact previousTransactionId chain
-→ Fast Verify after every op
-→ durable exact partial-applied boundary
-→ no Save
+post-W4 sequence defined by the Master Plan
+→ W5 and/or D1 according to the current dependency order
 ```
 
 ## 23. Key Documents
@@ -1107,10 +1101,10 @@ Writer current chain:
 
 ```text
 docs/Plans/UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_DETAILED_PLAN_20260826.md
+docs/Plans/UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_RESULT_20260829.md
+docs/Plans/UEAGENTKIT_W4_7_FULL_ACCEPTANCE_AND_DOCUMENTATION_DETAILED_PLAN_20260829.md
 docs/Plans/UEAGENTKIT_W4_0_CONTRACT_FREEZE_AND_BASELINE_RESULT_20260827.md
-docs/Plans/UEAGENTKIT_W4_1_BOUNDED_BATCH_PLAN_DETAILED_PLAN_20260828.md
 docs/Plans/UEAGENTKIT_W4_1_BOUNDED_BATCH_PLAN_RESULT_20260828.md
-docs/Plans/UEAGENTKIT_W3_CHECKPOINT_STRONG_VERIFY_RESULT_20260825.md
 ```
 
 Historical closeout:
