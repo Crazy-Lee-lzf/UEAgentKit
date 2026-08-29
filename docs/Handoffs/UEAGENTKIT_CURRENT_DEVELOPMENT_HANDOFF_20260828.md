@@ -14,26 +14,29 @@
 >
 > This document records current repository facts, accepted architecture decisions, Track dependencies, safety rules, and the next execution boundary. It does not authorize Push / Rebase / Tag / Release or future implementation commits.
 
-## 0. 2026-08-29 D1 Closure Supersession Note
+## 0. 2026-08-29 W5 Blocked/Deferred Supersession Note
 
-This note overrides older takeover wording later in this file where W4-7 or D1 is still described as `next`.
+This note overrides older takeover wording later in this file where W4-7, D1, or W5 is still described as `next` or `current` without the W5 status below.
 
 ```text
 W4-0 through W4-7                         complete
 D1 agent_workflow split                   complete
-current committed HEAD                    local D1 closure commit (see below)
-current Python discovered suite           766 / 766 PASS
+W5-R R1 / R5 real DirectHost matrices     complete (R5 n=10 per cache state)
+W5-R R20 20-op workload                   blocked by DirectHost fixture/package lifecycle
+W5-S 50 GB scale fixture                  blocked/deferred (generator source created, not built/validated)
+current committed HEAD                    local W5 closure commits (see below)
+current Python discovered suite           766 / 766 PASS (re-run at W5 closure if gates run)
 real UE W4 C1-C12                         PASS (frozen valid)
 real UE W4-6 H1-H6                        PASS (frozen valid)
 D1-R1 / D1-R2 real UE smokes              PASS (fresh)
 final transaction fixture                 2 / 2 independently verified
 ```
 
-Authoritative D1 closure evidence:
+Authoritative W5 evidence:
 
-`docs/Plans/UEAGENTKIT_D1_AGENT_WORKFLOW_SPLIT_RESULT_20260829.md`
+`docs/Plans/UEAGENTKIT_W5_REAL_PROJECT_ACCEPTANCE_RESULT_20260829.md`
 
-Sections later in this file that describe W4-7 or D1 as `NEXT` or list old Tool counts are historical. Where they conflict with this note, the current state above, `docs/Plans/README.md`, and the D1 Result take precedence. W4-7 implementation/tests/docs and D1 split implementation/tests/docs are checkpoint-committed locally; the next work should be W5 real-project acceptance per the Master Plan. No Push / Rebase / Tag / Release is authorized by this handoff update.
+Sections later in this file that describe W4-7, D1, or W5 as `NEXT` or list old Tool counts are historical. Where they conflict with this note, the current state above, `docs/Plans/README.md`, and the W5 Result take precedence. No Push / Rebase / Tag / Release is authorized by this handoff update.
 
 ## 1. Read This First
 
