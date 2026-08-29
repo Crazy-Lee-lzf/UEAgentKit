@@ -142,6 +142,7 @@ def _stages_apply(
     result_bytes = 0
     change_set_ids: list[str] = []
     checkpoint_set_ids: list[str] = []
+    batch_execution_ids: list[str] = []
     after_revisions: dict[str, str] = {}
 
     for batch in workload.batches:
@@ -178,6 +179,7 @@ def _stages_apply(
         stages["applyMs"] = (stages["applyMs"] or 0.0) + _elapsed(apply_started)
         public_mcp_call_count += 1
         resident_bridge_call_count += len(applied.get("operations") or [])
+        batch_execution_ids.append(str(applied["batchExecutionId"]))
         fast_verified = sum(1 for op in applied.get("operations") or [] if op.get("fastVerified") is True)
         stages["fastVerifyMs"] = (stages["fastVerifyMs"] or 0.0) + 0.0
         # Fast Verify wall time is inside apply in the product path; keep the
@@ -249,6 +251,7 @@ def _stages_apply(
         "operationsPerBatch": workload.operations_per_batch,
         "changeSetIds": change_set_ids,
         "checkpointSetIds": checkpoint_set_ids,
+        "batchExecutionIds": batch_execution_ids,
         "finalTrustState": "verified",
         "afterRevisions": after_revisions,
     }
@@ -256,7 +259,7 @@ def _stages_apply(
 
 def run_resident(args: argparse.Namespace) -> dict[str, Any]:
     workload = scenario_for_id(args.scenario)
-    workflow, bounded, checkpoint_sets, _ = build_services(args)
+    workflow, bounded, checkpoint_sets, recovery = build_services(args)
     before_revisions: dict[str, str] = {}
     # Open assets first if WarmLoaded.
     if args.cache_state == "WarmLoaded":
@@ -273,6 +276,25 @@ def run_resident(args: argparse.Namespace) -> dict[str, Any]:
         before_revisions=before_revisions,
     )
     total_ms = _elapsed(started)
+
+    # Restore all saved batches to their exact pre-write disk baseline through
+    # the product Batch Recovery path when requested. The full matrix uses an
+    # external official fixture reset + snapshot refresh per sample instead, so
+    # this can be skipped with --no-recover.
+    recovery_started = time.perf_counter()
+    recovery_results: list[dict[str, Any]] = []
+    if not getattr(args, "no_recover", False):
+        for batch_execution_id in result["batchExecutionIds"]:
+            preview = recovery.preview(batch_execution_id=batch_execution_id)
+            require(preview["state"] == "recovery_prepared", preview)
+            recovered = recovery.commit(
+                recovery_id=preview["recoveryId"],
+                confirmation=preview["confirmationRequired"],
+            )
+            require(recovered["state"] == "recovered", recovered)
+            recovery_results.append(recovered)
+    recovery_or_reset_ms = _elapsed(recovery_started)
+
     attempt = {
         "schemaVersion": "1.0",
         "runId": args.run_id,
@@ -294,6 +316,8 @@ def run_resident(args: argparse.Namespace) -> dict[str, Any]:
         "resultBytes": result["resultBytes"],
         "stages": result["stages"],
         "totalMs": total_ms,
+        "recoveryOrResetMs": recovery_or_reset_ms,
+        "recoveryResults": recovery_results,
         "success": True,
         "errorCode": None,
         "finalTrustState": result["finalTrustState"],
@@ -402,6 +426,7 @@ def main() -> int:
     resident.add_argument("--scenario", choices=("R1", "R5", "R20"), required=True)
     resident.add_argument("--sample-index", type=int, required=True)
     resident.add_argument("--cache-state", choices=("WarmLoaded", "WarmUnloaded"), required=True)
+    resident.add_argument("--no-recover", action="store_true", help="Skip in-editor Batch Recovery after the run.")
     resident.add_argument("--database", type=Path, required=True)
     resident.add_argument("--revision-export", type=Path, required=True)
     resident.add_argument("--policy", type=Path, required=True)
