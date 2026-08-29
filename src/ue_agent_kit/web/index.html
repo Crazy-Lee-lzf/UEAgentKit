@@ -122,6 +122,11 @@
     <button data-view="records">记录</button>
     <button data-view="work">Active Work</button>
     <button data-view="search">检索</button>
+    <button data-view="graph">依赖图</button>
+    <button data-view="impact">影响</button>
+    <button data-view="coverage">覆盖</button>
+    <button data-view="timeline">时间线</button>
+    <button data-view="stale">陈旧</button>
   </nav>
 </header>
 <main>
@@ -198,6 +203,127 @@
     <div class="panel pad card-list" id="search-results">
       <div class="muted">输入关键词开始检索。</div>
     </div>
+  </section>
+
+  <!-- ============ 依赖图（V2，Canvas） ============ -->
+  <section class="view" id="view-graph">
+    <div class="filters">
+      <input type="text" id="g-root" placeholder="资产路径，如 /Game/Maps/Example" style="min-width:300px">
+      <select id="g-depth">
+        <option value="0">depth 0</option>
+        <option value="1" selected>depth 1</option>
+        <option value="2">depth 2</option>
+        <option value="3">depth 3</option>
+      </select>
+      <select id="g-direction">
+        <option value="outgoing" selected>outgoing</option>
+        <option value="incoming">incoming</option>
+        <option value="both">both</option>
+      </select>
+      <input type="number" id="g-limit" value="300" min="1" max="5000" style="width:90px" title="节点上限">
+      <label><input type="checkbox" id="g-stress"> stress 5000</label>
+      <button class="btn primary" id="g-apply">绘制</button>
+      <span class="muted" id="g-meta"></span>
+    </div>
+    <div id="g-error"></div>
+    <div class="panel" style="position:relative; height:540px; overflow:hidden;">
+      <canvas id="g-canvas" style="width:100%; height:100%; display:block; cursor:grab;"></canvas>
+      <div class="muted" style="position:absolute; left:10px; top:8px; font-size:11px; pointer-events:none;">
+        滚轮缩放 · 拖拽平移 · 双击复位 · 点击节点查看影响
+      </div>
+    </div>
+    <div class="hint">资产引用图（资产级聚合，方向感知，BFS 有界遍历）。limit 默认 300，最大 1000；超过 1000 需勾选 stress。</div>
+  </section>
+
+  <!-- ============ 影响（V2） ============ -->
+  <section class="view" id="view-impact">
+    <div class="filters">
+      <input type="text" id="i-asset" placeholder="资产路径（被谁引用）" style="min-width:300px">
+      <input type="text" id="i-kind" placeholder="kind 过滤（可留空）" style="width:170px">
+      <button class="btn primary" id="i-apply">查询影响</button>
+      <span class="muted" id="i-meta"></span>
+    </div>
+    <div id="i-error"></div>
+    <div class="panel">
+      <table>
+        <thead><tr><th>消费者资产</th><th>类别</th><th>引用 kinds</th><th>引用数</th></tr></thead>
+        <tbody id="i-body"></tbody>
+      </table>
+    </div>
+    <div class="pager">
+      <button class="btn" id="i-prev">上一页</button>
+      <button class="btn" id="i-next">下一页</button>
+      <span class="muted" id="i-page"></span>
+    </div>
+    <div class="hint">仅表示索引中的依赖/引用影响（引用图分析），不代表运行时游戏行为影响。点击消费者行可下钻。</div>
+  </section>
+
+  <!-- ============ 覆盖（V2） ============ -->
+  <section class="view" id="view-coverage">
+    <div class="filters">
+      <input type="text" id="c-prefix" placeholder="path 前缀过滤（可留空）" style="min-width:220px">
+      <button class="btn primary" id="c-apply">查询</button>
+      <span class="muted" id="c-totals"></span>
+    </div>
+    <div class="panel">
+      <table>
+        <thead><tr>
+          <th>path</th><th>类型</th><th>标题</th><th>记录数</th>
+          <th>valid</th><th>stale</th><th>conflicted</th><th>superseded</th><th>unverified</th><th>最后更新</th>
+        </tr></thead>
+        <tbody id="c-body"></tbody>
+      </table>
+    </div>
+    <div class="pager">
+      <button class="btn" id="c-prev">上一页</button>
+      <button class="btn" id="c-next">下一页</button>
+      <span class="muted" id="c-page"></span>
+    </div>
+    <div class="hint">覆盖只报告计数，不输出百分比；recordCount 为 0 的节点也会列出以暴露盲区。总数在分页前计算。</div>
+  </section>
+
+  <!-- ============ 时间线（V2） ============ -->
+  <section class="view" id="view-timeline">
+    <div class="filters">
+      <select id="t-type"><option value="">全部类型</option></select>
+      <select id="t-status"><option value="">全部状态</option></select>
+      <label><input type="checkbox" id="t-status-events"> 合并状态变更事件</label>
+      <button class="btn primary" id="t-apply">查询</button>
+      <span class="muted" id="t-meta"></span>
+    </div>
+    <div class="panel pad card-list" id="t-body"><div class="muted">加载中…</div></div>
+    <div class="pager">
+      <button class="btn" id="t-prev">上一页</button>
+      <button class="btn" id="t-next">下一页</button>
+      <span class="muted" id="t-page"></span>
+    </div>
+    <div class="hint">只展示当前读模型中的事实；状态变更事件为 opt-in（includeStatusEvents）。点击 recordId 查看记录详情。</div>
+  </section>
+
+  <!-- ============ 陈旧（V2） ============ -->
+  <section class="view" id="view-stale">
+    <div class="filters">
+      <select id="st-group">
+        <option value="nodePath" selected>按知识节点 path</option>
+        <option value="scope">按 scope</option>
+        <option value="recordType">按记录类型</option>
+        <option value="ageBucket">按年龄桶</option>
+      </select>
+      <button class="btn primary" id="st-apply">查询</button>
+      <span class="muted" id="st-totals"></span>
+    </div>
+    <div class="panel">
+      <table>
+        <thead><tr><th>分组</th><th>记录数</th><th>byStatus</th><th>年龄分布</th><th>样例记录</th></tr></thead>
+        <tbody id="st-body"></tbody>
+      </table>
+    </div>
+    <div class="pager">
+      <button class="btn" id="st-prev">上一页</button>
+      <button class="btn" id="st-next">下一页</button>
+      <span class="muted" id="st-page"></span>
+    </div>
+    <div class="hint">输入集 = stale / conflicted / superseded 记录；年龄桶 0-7d / 8-30d / 31-90d / 90d+（按 updated_at_utc 相对服务器当前 UTC 时间）。</div>
   </section>
 
   <!-- ============ 详情浮层 ============ -->
@@ -595,15 +721,391 @@ async function openRecordDetail(recordId) {
   }
 }
 
+/* ---------------- V2: 依赖图（Canvas 渲染） ---------------- */
+const graphState = { root: "", depth: 1, direction: "outgoing", limit: 300, stress: false };
+let graphData = null;
+let graphLayout = null;
+let graphTransform = { scale: 1, x: 0, y: 0 };
+let graphSelected = null;
+
+function canvasSize() {
+  const canvas = $("g-canvas");
+  const rect = canvas.getBoundingClientRect();
+  return { w: Math.max(1, rect.width), h: Math.max(1, rect.height) };
+}
+
+function computeGraphLayout(nodes, edges) {
+  const depthOf = {};
+  const adjacency = {};
+  for (const edge of edges) {
+    (adjacency[edge.source] = adjacency[edge.source] || []).push(edge);
+    if (edge.source !== edge.target) (adjacency[edge.target] = adjacency[edge.target] || []).push(edge);
+  }
+  const queue = [graphData.meta.root];
+  depthOf[graphData.meta.root] = 0;
+  while (queue.length) {
+    const current = queue.shift();
+    for (const edge of adjacency[current] || []) {
+      const neighbor = edge.source === current ? edge.target : edge.source;
+      if (depthOf[neighbor] === undefined) {
+        depthOf[neighbor] = depthOf[current] + 1;
+        queue.push(neighbor);
+      }
+    }
+  }
+  const byDepth = {};
+  for (const node of nodes) {
+    const depth = depthOf[node.assetPath] === undefined ? 1 : depthOf[node.assetPath];
+    (byDepth[depth] = byDepth[depth] || []).push(node.assetPath);
+  }
+  const positions = {};
+  for (const depthText of Object.keys(byDepth)) {
+    const depth = Number(depthText);
+    const list = byDepth[depth];
+    const radius = 90 + depth * 130;
+    const angleStep = (Math.PI * 2) / list.length;
+    list.forEach((path, index) => {
+      const angle = -Math.PI / 2 + index * angleStep;
+      positions[path] = { x: radius * Math.cos(angle), y: radius * Math.sin(angle), depth };
+    });
+  }
+  return { positions };
+}
+
+function graphDraw() {
+  const canvas = $("g-canvas");
+  if (!graphData) {
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    return;
+  }
+  const { w, h } = canvasSize();
+  const pixelW = Math.floor(w * devicePixelRatio);
+  const pixelH = Math.floor(h * devicePixelRatio);
+  if (canvas.width !== pixelW || canvas.height !== pixelH) {
+    canvas.width = pixelW;
+    canvas.height = pixelH;
+  }
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.save();
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+  const transform = graphTransform;
+  ctx.translate(w / 2 + transform.x, h / 2 + transform.y);
+  ctx.scale(transform.scale, transform.scale);
+  const positions = graphLayout ? graphLayout.positions : {};
+  ctx.lineWidth = 1 / Math.max(1, transform.scale);
+  for (const edge of graphData.edges) {
+    const source = positions[edge.source];
+    const target = positions[edge.target];
+    if (!source || !target) continue;
+    ctx.strokeStyle = edge.selfLoop ? "#f0abfc" : (edge.kinds.length > 1 ? "#93b4f5" : "#c3cbd8");
+    ctx.beginPath();
+    if (edge.selfLoop) {
+      ctx.arc(source.x, source.y - 16, 9, 0, Math.PI * 2);
+    } else {
+      ctx.moveTo(source.x, source.y);
+      ctx.lineTo(target.x, target.y);
+    }
+    ctx.stroke();
+  }
+  for (const node of graphData.nodes) {
+    const position = positions[node.assetPath];
+    if (!position) continue;
+    const selected = graphSelected === node.assetPath;
+    const radius = node.root ? 9 : 6;
+    ctx.beginPath();
+    ctx.arc(position.x, position.y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = selected ? "#f97316" : (node.root ? "#2563eb" : "#3f8cff");
+    ctx.fill();
+    ctx.strokeStyle = selected ? "#7c2d12" : "#1d4ed8";
+    ctx.lineWidth = node.root ? 2 : 1;
+    ctx.stroke();
+    if (transform.scale >= 0.7) {
+      ctx.font = "10px Segoe UI, Microsoft YaHei, sans-serif";
+      ctx.fillStyle = "#1c2430";
+      ctx.textAlign = "left";
+      ctx.fillText(node.assetName || node.assetPath, position.x + 7, position.y + 3);
+    }
+  }
+  ctx.restore();
+}
+
+function graphToWorld(clientX, clientY) {
+  const rect = $("g-canvas").getBoundingClientRect();
+  const { w, h } = canvasSize();
+  const transform = graphTransform;
+  return {
+    x: (clientX - rect.left - w / 2 - transform.x) / transform.scale,
+    y: (clientY - rect.top - h / 2 - transform.y) / transform.scale,
+  };
+}
+
+function graphNodeAt(clientX, clientY) {
+  const point = graphToWorld(clientX, clientY);
+  const positions = graphLayout ? graphLayout.positions : {};
+  let best = null;
+  let bestDistance = Infinity;
+  for (const node of graphData.nodes) {
+    const position = positions[node.assetPath];
+    if (!position) continue;
+    const dx = position.x - point.x;
+    const dy = position.y - point.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    const radius = node.root ? 12 : 9;
+    if (distance <= radius && distance < bestDistance) {
+      bestDistance = distance;
+      best = node;
+    }
+  }
+  return best;
+}
+
+async function loadGraph() {
+  const root = $("g-root").value.trim();
+  if (!root) {
+    graphData = null;
+    graphLayout = null;
+    $("g-meta").textContent = "输入根资产路径后绘制。";
+    graphDraw();
+    return;
+  }
+  const params = new URLSearchParams();
+  params.set("root", root);
+  params.set("depth", String(graphState.depth));
+  params.set("direction", graphState.direction);
+  params.set("limit", String(graphState.limit));
+  if (graphState.stress) params.set("stress", "1");
+  $("g-meta").textContent = "加载中…";
+  try {
+    const httpStart = performance.now();
+    const payload = await API.get("/api/graph?" + params.toString());
+    const httpEnd = performance.now();
+    graphData = payload;
+    graphSelected = null;
+    graphTransform = { scale: 1, x: 0, y: 0 };
+    const layoutStart = performance.now();
+    graphLayout = computeGraphLayout(payload.nodes, payload.edges);
+    graphDraw();
+    const layoutEnd = performance.now();
+    const meta = payload.meta;
+    $("g-meta").textContent =
+      meta.nodeCount + " 节点 / " + meta.edgeCount + " 边 · 服务端 " + meta.queryMs +
+      "ms · HTTP " + (httpEnd - httpStart).toFixed(0) + "ms · 布局+渲染 " +
+      (layoutEnd - layoutStart).toFixed(0) + "ms";
+    $("g-error").innerHTML = payload.truncated
+      ? '<div class="error-box">已截断：达到节点上限 ' + payload.truncated.limit +
+        "（返回 " + payload.truncated.count + " 个节点）。增大 limit 或启用 stress。</div>"
+      : "";
+  } catch (error) {
+    $("g-error").innerHTML = '<div class="error-box">' + esc(error.message) + "</div>";
+  }
+}
+
+/* ---------------- V2: 影响 ---------------- */
+const impactState = { limit: 50, offset: 0 };
+async function loadImpact() {
+  const assetPath = $("i-asset").value.trim();
+  if (!assetPath) { $("i-body").innerHTML = '<tr><td colspan="4" class="muted">输入资产路径。</td></tr>'; return; }
+  const params = new URLSearchParams();
+  params.set("limit", String(impactState.limit));
+  params.set("offset", String(impactState.offset));
+  if ($("i-kind").value.trim()) params.set("kind", $("i-kind").value.trim());
+  const body = $("i-body");
+  body.innerHTML = '<tr><td colspan="4" class="muted">加载中…</td></tr>';
+  try {
+    const payload = await API.get("/api/impact/" + encodeURIComponent(assetPath) + "?" + params.toString());
+    const counts = Object.keys(payload.countsByKind).length
+      ? Object.entries(payload.countsByKind)
+          .map(([kind, count]) => "<span class='pill'>" + esc(kind) + " × " + count + "</span>").join(" ")
+      : "<span class='muted'>无引用</span>";
+    $("i-meta").innerHTML =
+      "<strong>" + esc(payload.asset.assetPath) + "</strong> · 消费者资产 " + payload.totalConsumerAssets +
+      " · " + counts + (payload.truncated ? " · ⚠ 已截断" : "");
+    body.innerHTML = "";
+    if (!payload.consumers.length) {
+      body.innerHTML = '<tr><td colspan="4" class="muted">没有索引到的消费者（空结果合法）。</td></tr>';
+    }
+    for (const consumer of payload.consumers) {
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        "<td class='mono'>" + esc(consumer.assetPath) + "</td>" +
+        "<td>" + esc(consumer.assetClass) + "</td>" +
+        "<td>" + consumer.kinds.map((kind) => "<span class='pill'>" + esc(kind) + "</span>").join(" ") + "</td>" +
+        "<td>" + consumer.referenceCount + "</td>";
+      tr.addEventListener("click", () => {
+        $("i-asset").value = consumer.assetPath;
+        impactState.offset = 0;
+        loadImpact();
+      });
+      body.appendChild(tr);
+    }
+    $("i-page").textContent = "第 " + (payload.meta ? payload.meta.queryMs : "?") + "ms";
+    $("i-prev").disabled = impactState.offset === 0;
+    $("i-next").disabled = impactState.offset + payload.consumers.length >= payload.totalConsumerAssets;
+  } catch (error) {
+    body.innerHTML = '<tr><td colspan="4"><div class="error-box">' + esc(error.message) + "</div></td></tr>";
+  }
+}
+
+/* ---------------- V2: 覆盖 ---------------- */
+const coverageState = { limit: 50, offset: 0 };
+async function loadCoverage() {
+  const params = new URLSearchParams();
+  params.set("limit", String(coverageState.limit));
+  params.set("offset", String(coverageState.offset));
+  if ($("c-prefix").value.trim()) params.set("pathPrefix", $("c-prefix").value.trim());
+  const body = $("c-body");
+  body.innerHTML = '<tr><td colspan="10" class="muted">加载中…</td></tr>';
+  try {
+    const payload = await API.get("/api/coverage?" + params.toString());
+    const totals = payload.totals;
+    $("c-totals").textContent =
+      "节点 " + payload.nodes.length + "/页 · 记录总数 " + totals.recordCount +
+      "（valid " + totals.validCount + " / stale " + totals.staleCount +
+      " / conflicted " + totals.conflictedCount + " / superseded " + totals.supersededCount +
+      " / unverified " + totals.unverifiedCount + "）";
+    body.innerHTML = "";
+    if (!payload.nodes.length) body.innerHTML = '<tr><td colspan="10" class="muted">没有匹配的节点。</td></tr>';
+    for (const node of payload.nodes) {
+      const tr = document.createElement("tr");
+      const ratio = node.recordCount > 0
+        ? " <span class='muted'>" + node.validCount + "/" + node.recordCount + " valid</span>"
+        : "";
+      tr.innerHTML =
+        "<td class='mono'>" + esc(node.path) + "</td>" +
+        "<td>" + esc(node.nodeType) + "</td>" +
+        "<td>" + esc(node.title) + ratio + "</td>" +
+        "<td>" + node.recordCount + "</td>" +
+        "<td>" + node.validCount + "</td>" +
+        "<td>" + node.staleCount + "</td>" +
+        "<td>" + node.conflictedCount + "</td>" +
+        "<td>" + node.supersededCount + "</td>" +
+        "<td>" + node.unverifiedCount + "</td>" +
+        "<td class='mono'>" + esc(node.lastUpdatedUtc || "-") + "</td>";
+      body.appendChild(tr);
+    }
+    $("c-page").textContent = "第 " + (coverageState.offset + 1) + " - " +
+      (coverageState.offset + payload.nodes.length) + " 个节点";
+    $("c-prev").disabled = coverageState.offset === 0;
+    $("c-next").disabled = !payload.truncated;
+  } catch (error) {
+    body.innerHTML = '<tr><td colspan="10"><div class="error-box">' + esc(error.message) + "</div></td></tr>";
+  }
+}
+
+/* ---------------- V2: 时间线 ---------------- */
+const timelineState = { limit: 50, offset: 0 };
+async function loadTimeline() {
+  const params = new URLSearchParams();
+  params.set("limit", String(timelineState.limit));
+  params.set("offset", String(timelineState.offset));
+  if ($("t-type").value) params.set("recordType", $("t-type").value);
+  if ($("t-status").value) params.set("status", $("t-status").value);
+  if ($("t-status-events").checked) params.set("includeStatusEvents", "true");
+  const body = $("t-body");
+  body.innerHTML = '<div class="muted">加载中…</div>';
+  try {
+    const payload = await API.get("/api/timeline?" + params.toString());
+    const meta = payload.meta || {};
+    $("t-meta").textContent = payload.truncated ? "⚠ 已截断（每页最多 " + timelineState.limit + "）" : "";
+    body.innerHTML = "";
+    if (!payload.events.length) body.innerHTML = '<div class="muted">没有匹配的事件。</div>';
+    for (const event of payload.events) {
+      const row = document.createElement("div");
+      let extra = "";
+      if (event.kind === "statusChanged") {
+        extra = " " + esc(event.fromStatus) + " → " + statusChip(event.toStatus);
+      }
+      row.innerHTML =
+        "<span class='pill " + (event.kind === "statusChanged" ? "chip-type" : "chip-valid") + "'>" +
+        esc(event.kind) + "</span> " +
+        "<span class='mono muted'>" + esc(event.timestampUtc) + "</span> " +
+        "<span class='mono' style='cursor:pointer;color:var(--accent)' data-record='" +
+        esc(event.recordId) + "'>" + esc(event.recordId) + "</span> " +
+        typeChip(event.recordType) + statusChip(event.status) + extra +
+        "<div>" + esc(event.titlePreview) + "</div>";
+      row.querySelector("[data-record]").addEventListener("click", () => openRecordDetail(event.recordId));
+      body.appendChild(row);
+    }
+    $("t-page").textContent = "第 " + (timelineState.offset + 1) + " - " +
+      (timelineState.offset + payload.events.length) + " 个事件" +
+      (meta.queryMs !== undefined ? " · " + meta.queryMs + "ms" : "");
+    $("t-prev").disabled = timelineState.offset === 0;
+    $("t-next").disabled = !payload.truncated;
+  } catch (error) {
+    body.innerHTML = '<div class="error-box">' + esc(error.message) + "</div>";
+  }
+}
+
+/* ---------------- V2: 陈旧 ---------------- */
+const staleState = { limit: 50, offset: 0 };
+async function loadStale() {
+  const params = new URLSearchParams();
+  params.set("groupBy", $("st-group").value);
+  params.set("limit", String(staleState.limit));
+  params.set("offset", String(staleState.offset));
+  const body = $("st-body");
+  body.innerHTML = '<tr><td colspan="5" class="muted">加载中…</td></tr>';
+  try {
+    const payload = await API.get("/api/stale?" + params.toString());
+    const totals = payload.totals;
+    $("st-totals").textContent =
+      "记录总数 " + totals.recordCount +
+      "（stale " + (totals.byStatus.stale || 0) +
+      " / conflicted " + (totals.byStatus.conflicted || 0) +
+      " / superseded " + (totals.byStatus.superseded || 0) + "）";
+    body.innerHTML = "";
+    if (!payload.buckets.length) body.innerHTML = '<tr><td colspan="5" class="muted">没有 stale / conflicted / superseded 记录。</td></tr>';
+    for (const bucket of payload.buckets) {
+      const tr = document.createElement("tr");
+      const samples = bucket.sampleRecordIds.map((id) =>
+        "<span class='pill' style='cursor:pointer' data-record='" + esc(id) + "'>" + esc(id) + "</span>").join(" ");
+      tr.innerHTML =
+        "<td class='mono'>" + esc(bucket.groupKey) + "</td>" +
+        "<td>" + bucket.recordCount + "</td>" +
+        "<td>" + Object.entries(bucket.byStatus)
+          .filter(([, count]) => count > 0)
+          .map(([status, count]) => chip(status, status + " " + count)).join(" ") + "</td>" +
+        "<td class='mono muted'>" + Object.entries(bucket.ageBuckets)
+          .filter(([, count]) => count > 0)
+          .map(([bucketName, count]) => bucketName + ": " + count).join(" ") + "</td>" +
+        "<td>" + samples + "</td>";
+      tr.querySelectorAll("[data-record]").forEach((el) => {
+        el.addEventListener("click", () => openRecordDetail(el.dataset.record));
+      });
+      body.appendChild(tr);
+    }
+    $("st-page").textContent = "第 " + (staleState.offset + 1) + " - " +
+      (staleState.offset + payload.buckets.length) + " 个分组";
+    $("st-prev").disabled = staleState.offset === 0;
+    $("st-next").disabled = !payload.truncated;
+  } catch (error) {
+    body.innerHTML = '<tr><td colspan="5"><div class="error-box">' + esc(error.message) + "</div></td></tr>";
+  }
+}
+
 /* ---------------- 导航与事件 ---------------- */
+function switchView(name) {
+  document.querySelectorAll("nav button").forEach((el) => {
+    el.classList.toggle("active", el.dataset.view === name);
+  });
+  document.querySelectorAll(".view").forEach((el) => {
+    el.classList.toggle("active", el.id === "view-" + name);
+  });
+}
 document.querySelectorAll("nav button").forEach((button) => {
   button.addEventListener("click", () => {
-    document.querySelectorAll("nav button").forEach((el) => el.classList.remove("active"));
-    button.classList.add("active");
-    document.querySelectorAll(".view").forEach((el) => el.classList.remove("active"));
-    $("view-" + button.dataset.view).classList.add("active");
+    switchView(button.dataset.view);
     if (button.dataset.view === "records") loadRecords();
     if (button.dataset.view === "work") loadWork();
+    if (button.dataset.view === "graph") loadGraph();
+    if (button.dataset.view === "impact") loadImpact();
+    if (button.dataset.view === "coverage") loadCoverage();
+    if (button.dataset.view === "timeline") loadTimeline();
+    if (button.dataset.view === "stale") loadStale();
   });
 });
 $("f-apply").addEventListener("click", () => { recordState.offset = 0; loadRecords(); });
@@ -614,6 +1116,87 @@ $("w-prev").addEventListener("click", () => { workState.offset = Math.max(0, wor
 $("w-next").addEventListener("click", () => { workState.offset += workState.limit; loadWork(); });
 $("s-apply").addEventListener("click", runSearch);
 $("s-q").addEventListener("keydown", (event) => { if (event.key === "Enter") runSearch(); });
+/* V2 controls */
+$("g-apply").addEventListener("click", () => {
+  graphState.root = $("g-root").value.trim();
+  graphState.depth = Number($("g-depth").value);
+  graphState.direction = $("g-direction").value;
+  graphState.limit = Number($("g-limit").value) || 300;
+  graphState.stress = $("g-stress").checked;
+  loadGraph();
+});
+$("g-root").addEventListener("keydown", (event) => { if (event.key === "Enter") $("g-apply").click(); });
+$("i-apply").addEventListener("click", () => { impactState.offset = 0; loadImpact(); });
+$("i-asset").addEventListener("keydown", (event) => { if (event.key === "Enter") $("i-apply").click(); });
+$("i-prev").addEventListener("click", () => { impactState.offset = Math.max(0, impactState.offset - impactState.limit); loadImpact(); });
+$("i-next").addEventListener("click", () => { impactState.offset += impactState.limit; loadImpact(); });
+$("c-apply").addEventListener("click", () => { coverageState.offset = 0; loadCoverage(); });
+$("c-prev").addEventListener("click", () => { coverageState.offset = Math.max(0, coverageState.offset - coverageState.limit); loadCoverage(); });
+$("c-next").addEventListener("click", () => { coverageState.offset += coverageState.limit; loadCoverage(); });
+$("t-apply").addEventListener("click", () => { timelineState.offset = 0; loadTimeline(); });
+$("t-prev").addEventListener("click", () => { timelineState.offset = Math.max(0, timelineState.offset - timelineState.limit); loadTimeline(); });
+$("t-next").addEventListener("click", () => { timelineState.offset += timelineState.limit; loadTimeline(); });
+$("st-apply").addEventListener("click", () => { staleState.offset = 0; loadStale(); });
+$("st-prev").addEventListener("click", () => { staleState.offset = Math.max(0, staleState.offset - staleState.limit); loadStale(); });
+$("st-next").addEventListener("click", () => { staleState.offset += staleState.limit; loadStale(); });
+/* canvas interactions */
+(function bindCanvas() {
+  const canvas = $("g-canvas");
+  let dragging = false;
+  let moved = false;
+  let startX = 0;
+  let startY = 0;
+  canvas.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const mx = event.clientX - rect.left;
+    const my = event.clientY - rect.top;
+    const { w, h } = canvasSize();
+    const factor = event.deltaY < 0 ? 1.12 : 0.89;
+    const nextScale = Math.min(6, Math.max(0.2, graphTransform.scale * factor));
+    graphTransform.x = mx - ((mx - graphTransform.x) * nextScale) / graphTransform.scale;
+    graphTransform.y = my - ((my - graphTransform.y) * nextScale) / graphTransform.scale;
+    graphTransform.scale = nextScale;
+    graphDraw();
+  }, { passive: false });
+  canvas.addEventListener("mousedown", (event) => {
+    dragging = true;
+    moved = false;
+    startX = event.clientX;
+    startY = event.clientY;
+  });
+  window.addEventListener("mousemove", (event) => {
+    if (!dragging) return;
+    const dx = event.clientX - startX;
+    const dy = event.clientY - startY;
+    if (Math.abs(dx) + Math.abs(dy) > 2) moved = true;
+    graphTransform.x += dx;
+    graphTransform.y += dy;
+    startX = event.clientX;
+    startY = event.clientY;
+    graphDraw();
+  });
+  window.addEventListener("mouseup", (event) => {
+    if (!dragging) return;
+    dragging = false;
+    if (moved || !graphData) return;
+    const node = graphNodeAt(event.clientX, event.clientY);
+    if (node) {
+      graphSelected = node.assetPath;
+      $("i-asset").value = node.assetPath;
+      $("i-kind").value = "";
+      impactState.offset = 0;
+      loadImpact();
+      switchView("impact");
+      graphDraw();
+    }
+  });
+  canvas.addEventListener("dblclick", () => {
+    graphTransform = { scale: 1, x: 0, y: 0 };
+    graphSelected = null;
+    graphDraw();
+  });
+})();
 $("detail-close").addEventListener("click", () => { $("detail-overlay").style.display = "none"; });
 $("detail-overlay").addEventListener("click", (event) => {
   if (event.target === $("detail-overlay")) $("detail-overlay").style.display = "none";
@@ -624,6 +1207,8 @@ $("detail-overlay").addEventListener("click", (event) => {
   fillSelect("f-status", ["valid", "stale", "conflicted", "superseded", "unverified"], "全部状态");
   fillSelect("f-source", ["user-confirmed", "tool-observed", "model-inferred"], "全部来源");
   fillSelect("w-status", ["planned", "in_progress", "blocked", "done", "cancelled"], "全部状态");
+  fillSelect("t-type", ["projectFact", "projectRule", "decisionRecord", "knownIssue", "taskRecord", "runtimeEvidence"], "全部类型");
+  fillSelect("t-status", ["valid", "stale", "conflicted", "superseded", "unverified"], "全部状态");
   await loadStatus();
   await loadRootTree();
 })();

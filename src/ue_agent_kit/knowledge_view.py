@@ -20,12 +20,14 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Iterator
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from .active_work import WorkStatus, get_work_item
 from .config import DEFAULT_DATABASE, DEFAULT_MEMORY_DATABASE
@@ -57,6 +59,19 @@ WORK_STATUSES = tuple(item.value for item in WorkStatus)
 RECORD_TYPES = tuple(item.value for item in MemoryRecordType)
 RECORD_STATUSES = tuple(item.value for item in MemoryStatus)
 SOURCE_KINDS = tuple(item.value for item in MemorySourceKind)
+
+# V2 graph limits (frozen by V2 plan section 4.2 / decision D2)
+GRAPH_DEFAULT_LIMIT = 300
+GRAPH_MAX_LIMIT = 1000
+GRAPH_STRESS_LIMIT = 5000
+GRAPH_MAX_DEPTH = 3
+GRAPH_DIRECTIONS = ("outgoing", "incoming", "both")
+
+# V2 stale grouping (frozen by V2 plan section 4.6 / decision D5)
+STALE_GROUPINGS = ("nodePath", "scope", "recordType", "ageBucket")
+STALE_STATUSES = ("stale", "conflicted", "superseded")
+STALE_SAMPLE_LIMIT = 5
+STALE_AGE_BUCKET_NAMES = ("0-7d", "8-30d", "31-90d", "90d+")
 
 _INDEX_HTML_PATH = Path(__file__).resolve().parent / "web" / "index.html"
 
@@ -121,6 +136,31 @@ def _require_choice(value: str, allowed: tuple[str, ...], field_name: str) -> st
     if value and value not in allowed:
         raise ValueError(f"{field_name} must be one of: {', '.join(allowed)}.")
     return value
+
+
+def _utc_age_days(updated_at_utc: str, now: datetime) -> float:
+    """Age of an ISO-8601 UTC timestamp in days (0.0 for future/unknown)."""
+    text = str(updated_at_utc).strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return 0.0
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return max(0.0, (now - parsed).total_seconds() / 86400.0)
+
+
+def _age_bucket_name(age_days: float) -> str:
+    """Frozen stale age buckets: 0-7d / 8-30d / 31-90d / 90d+."""
+    if age_days <= 7.0:
+        return "0-7d"
+    if age_days <= 30.0:
+        return "8-30d"
+    if age_days <= 90.0:
+        return "31-90d"
+    return "90d+"
 
 
 class KnowledgeViewReadService:
@@ -611,6 +651,638 @@ class KnowledgeViewReadService:
                 "items": items,
             }
 
+    # ------------------------------------------------------------------
+    # V2: asset reference graph (frozen contract V2 plan section 4.2)
+    # ------------------------------------------------------------------
+
+    def graph(
+        self,
+        *,
+        root: str,
+        depth: int = 1,
+        direction: str = "outgoing",
+        limit: int = GRAPH_DEFAULT_LIMIT,
+        stress: int = 0,
+    ) -> dict[str, Any]:
+        started = time.perf_counter()
+        root = root.strip()
+        if not root:
+            raise ValueError("root must be a non-empty asset path.")
+        try:
+            normalized_depth = int(depth)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("depth must be an integer.") from exc
+        if normalized_depth < 0 or normalized_depth > GRAPH_MAX_DEPTH:
+            raise ValueError(f"depth must be between 0 and {GRAPH_MAX_DEPTH}.")
+        if direction not in GRAPH_DIRECTIONS:
+            raise ValueError(
+                f"direction must be one of: {', '.join(GRAPH_DIRECTIONS)}."
+            )
+        try:
+            normalized_limit = int(limit)
+            normalized_stress = int(stress)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("limit and stress must be integers.") from exc
+        if normalized_stress not in (0, 1):
+            raise ValueError("stress must be 0 or 1.")
+        max_limit = (
+            GRAPH_STRESS_LIMIT if normalized_stress == 1 else GRAPH_MAX_LIMIT
+        )
+        if normalized_limit < 1 or normalized_limit > max_limit:
+            if normalized_limit > GRAPH_MAX_LIMIT and normalized_stress == 0:
+                raise ValueError("stress=1 required above 1000.")
+            raise ValueError(f"limit must be between 1 and {max_limit}.")
+        with self._asset_connection() as connection:
+            if connection is None:
+                raise KnowledgeViewError(
+                    "assetDatabaseMissing",
+                    "Asset index database is not configured or not found.",
+                    http_status=500,
+                )
+            root_row = connection.execute(
+                "SELECT asset_path, asset_class, asset_name, package_name "
+                "FROM assets WHERE asset_path = ?",
+                (root,),
+            ).fetchone()
+            if root_row is None:
+                raise KnowledgeViewError(
+                    "assetNotFound", f"Asset not found: {root}", http_status=404
+                )
+            project_assets: set[str] = {
+                str(row[0])
+                for row in connection.execute("SELECT asset_path FROM assets")
+            }
+            node_order: list[str] = [root]
+            nodes: dict[str, dict[str, Any]] = {
+                root: {
+                    "assetPath": root,
+                    "assetClass": str(root_row["asset_class"]),
+                    "assetName": str(root_row["asset_name"]),
+                    "packageName": str(root_row["package_name"]),
+                    "referenceCount": 0,
+                    "root": True,
+                }
+            }
+            edges: dict[tuple[str, str], dict[str, Any]] = {}
+            frontier: list[str] = [root]
+            truncated_cap = False
+            for _hop in range(1, normalized_depth + 1):
+                if not frontier:
+                    break
+                placeholders = ",".join("?" for _ in frontier)
+                if direction == "outgoing":
+                    where = f"a.asset_path IN ({placeholders})"
+                    parameters: list[Any] = list(frontier)
+                elif direction == "incoming":
+                    where = f"r.target_asset_path IN ({placeholders})"
+                    parameters = list(frontier)
+                else:
+                    where = (
+                        f"(a.asset_path IN ({placeholders}) "
+                        f"OR r.target_asset_path IN ({placeholders}))"
+                    )
+                    parameters = [*frontier, *frontier]
+                rows = connection.execute(
+                    f"""
+                    SELECT a.asset_path AS source_path,
+                           r.target_asset_path AS target_path, r.kind
+                    FROM references_table AS r
+                    JOIN assets AS a ON a.id = r.asset_id
+                    WHERE {where}
+                    """,
+                    parameters,
+                ).fetchall()
+                next_frontier: list[str] = []
+                for row in rows:
+                    source = str(row["source_path"])
+                    target = str(row["target_path"])
+                    for endpoint in (source, target):
+                        if endpoint not in nodes and endpoint in project_assets:
+                            if len(nodes) >= normalized_limit:
+                                truncated_cap = True
+                            else:
+                                asset_row = connection.execute(
+                                    "SELECT asset_path, asset_class, asset_name, "
+                                    "package_name FROM assets WHERE asset_path = ?",
+                                    (endpoint,),
+                                ).fetchone()
+                                nodes[endpoint] = {
+                                    "assetPath": endpoint,
+                                    "assetClass": str(asset_row["asset_class"]),
+                                    "assetName": str(asset_row["asset_name"]),
+                                    "packageName": str(asset_row["package_name"]),
+                                    "referenceCount": 0,
+                                    "root": False,
+                                }
+                                node_order.append(endpoint)
+                                next_frontier.append(endpoint)
+                    if source in nodes and target in nodes:
+                        edge = edges.setdefault(
+                            (source, target),
+                            {
+                                "source": source,
+                                "target": target,
+                                "kinds": [],
+                                "referenceCount": 0,
+                                "selfLoop": source == target,
+                            },
+                        )
+                        kind = str(row["kind"])
+                        if kind not in edge["kinds"]:
+                            edge["kinds"].append(kind)
+                        edge["referenceCount"] += 1
+                frontier = next_frontier
+            for (source, target), edge in edges.items():
+                if source == target:
+                    nodes[source]["referenceCount"] += edge["referenceCount"]
+                else:
+                    nodes[source]["referenceCount"] += edge["referenceCount"]
+                    nodes[target]["referenceCount"] += edge["referenceCount"]
+            for edge in edges.values():
+                edge["kinds"].sort()
+            node_list = [nodes[path] for path in node_order]
+            edge_list = [
+                edges[key] for key in sorted(edges, key=lambda item: (item[0], item[1]))
+            ]
+            truncated: dict[str, Any] | None = None
+            if truncated_cap:
+                truncated = {
+                    "reason": "nodeLimit",
+                    "limit": normalized_limit,
+                    "count": len(node_list),
+                }
+            return {
+                "meta": {
+                    "root": root,
+                    "depth": normalized_depth,
+                    "direction": direction,
+                    "nodeLimit": normalized_limit,
+                    "nodeCount": len(node_list),
+                    "edgeCount": len(edge_list),
+                    "queryMs": round((time.perf_counter() - started) * 1000, 1),
+                    "truncated": truncated is not None,
+                },
+                "nodes": node_list,
+                "edges": edge_list,
+                "truncated": truncated,
+            }
+
+    # ------------------------------------------------------------------
+    # V2: impact / consumer view (frozen contract V2 plan section 4.3)
+    # ------------------------------------------------------------------
+
+    def impact(
+        self,
+        *,
+        asset_path: str,
+        limit: int = DEFAULT_PAGE_LIMIT,
+        offset: int = 0,
+        kind: str = "",
+    ) -> dict[str, Any]:
+        started = time.perf_counter()
+        asset_path = asset_path.strip()
+        if not asset_path:
+            raise ValueError("asset_path must be a non-empty asset path.")
+        limit, offset = _page_bounds(limit, offset)
+        with self._asset_connection() as connection:
+            if connection is None:
+                raise KnowledgeViewError(
+                    "assetDatabaseMissing",
+                    "Asset index database is not configured or not found.",
+                    http_status=500,
+                )
+            asset_row = connection.execute(
+                "SELECT asset_path, asset_class, asset_name FROM assets "
+                "WHERE asset_path = ?",
+                (asset_path,),
+            ).fetchone()
+            if asset_row is None:
+                raise KnowledgeViewError(
+                    "assetNotFound", f"Asset not found: {asset_path}", http_status=404
+                )
+            clauses = ["r.target_asset_path = ?"]
+            parameters: list[Any] = [asset_path]
+            if kind:
+                clauses.append("r.kind = ?")
+                parameters.append(kind)
+            where = " AND ".join(clauses)
+            total_consumer_assets = int(
+                connection.execute(
+                    f"SELECT COUNT(DISTINCT r.asset_id) FROM references_table AS r "
+                    f"WHERE {where}",
+                    parameters,
+                ).fetchone()[0]
+            )
+            counts_by_kind: dict[str, int] = {}
+            for row in connection.execute(
+                f"SELECT r.kind, COUNT(*) AS total FROM references_table AS r "
+                f"WHERE {where} GROUP BY r.kind ORDER BY r.kind",
+                parameters,
+            ):
+                counts_by_kind[str(row["kind"])] = int(row["total"])
+            consumer_rows = connection.execute(
+                f"""
+                SELECT a.asset_path, a.asset_class, a.asset_name
+                FROM references_table AS r
+                JOIN assets AS a ON a.id = r.asset_id
+                WHERE {where}
+                GROUP BY a.asset_path, a.asset_class, a.asset_name
+                ORDER BY a.asset_path
+                LIMIT ? OFFSET ?
+                """,
+                [*parameters, limit, offset],
+            ).fetchall()
+            kind_rows = connection.execute(
+                f"""
+                SELECT a.asset_path, r.kind, COUNT(*) AS total
+                FROM references_table AS r
+                JOIN assets AS a ON a.id = r.asset_id
+                WHERE {where}
+                GROUP BY a.asset_path, r.kind
+                ORDER BY a.asset_path, r.kind
+                """,
+                parameters,
+            ).fetchall()
+            kind_map: dict[str, dict[str, int]] = {}
+            for row in kind_rows:
+                path = str(row["asset_path"])
+                bucket = kind_map.setdefault(path, {})
+                bucket[str(row["kind"])] = int(row["total"])
+            consumers = [
+                {
+                    "assetPath": str(row["asset_path"]),
+                    "assetClass": str(row["asset_class"]),
+                    "assetName": str(row["asset_name"]),
+                    "kinds": list(kind_map.get(str(row["asset_path"]), {})),
+                    "referenceCount": sum(
+                        kind_map.get(str(row["asset_path"]), {}).values()
+                    ),
+                }
+                for row in consumer_rows
+            ]
+            truncated: dict[str, Any] | None = None
+            if offset + len(consumers) < total_consumer_assets:
+                truncated = {
+                    "reason": "limit",
+                    "limit": limit,
+                    "count": len(consumers),
+                }
+            return {
+                "asset": {
+                    "assetPath": str(asset_row["asset_path"]),
+                    "assetClass": str(asset_row["asset_class"]),
+                    "assetName": str(asset_row["asset_name"]),
+                },
+                "consumers": consumers,
+                "countsByKind": counts_by_kind,
+                "totalConsumerAssets": total_consumer_assets,
+                "truncated": truncated,
+                "meta": {
+                    "queryMs": round((time.perf_counter() - started) * 1000, 1),
+                },
+            }
+
+    # ------------------------------------------------------------------
+    # V2: knowledge coverage (frozen contract V2 plan section 4.4)
+    # ------------------------------------------------------------------
+
+    def coverage(
+        self,
+        *,
+        limit: int = DEFAULT_PAGE_LIMIT,
+        offset: int = 0,
+        path_prefix: str = "",
+    ) -> dict[str, Any]:
+        started = time.perf_counter()
+        limit, offset = _page_bounds(limit, offset)
+        path_prefix = path_prefix.strip()
+        with self._memory_connection() as connection:
+            filter_sql = ""
+            filter_parameters: list[Any] = []
+            if path_prefix:
+                filter_sql = " AND kn.path LIKE ?"
+                filter_parameters.append(path_prefix + "%")
+            total_nodes = int(
+                connection.execute(
+                    f"SELECT COUNT(*) FROM knowledge_nodes AS kn "
+                    f"WHERE kn.project_key = ?{filter_sql}",
+                    [self.project_key, *filter_parameters],
+                ).fetchone()[0]
+            )
+            totals_row = connection.execute(
+                f"""
+                SELECT COUNT(mr.record_id) AS record_count,
+                       SUM(CASE WHEN mr.status = 'valid' THEN 1 ELSE 0 END) AS valid_count,
+                       SUM(CASE WHEN mr.status = 'stale' THEN 1 ELSE 0 END) AS stale_count,
+                       SUM(CASE WHEN mr.status = 'conflicted' THEN 1 ELSE 0 END) AS conflicted_count,
+                       SUM(CASE WHEN mr.status = 'superseded' THEN 1 ELSE 0 END) AS superseded_count,
+                       SUM(CASE WHEN mr.status = 'unverified' THEN 1 ELSE 0 END) AS unverified_count
+                FROM knowledge_nodes AS kn
+                LEFT JOIN memory_records AS mr
+                       ON mr.node_id = kn.node_id AND mr.project_key = kn.project_key
+                WHERE kn.project_key = ?{filter_sql}
+                """,
+                [self.project_key, *filter_parameters],
+            ).fetchone()
+            rows = connection.execute(
+                f"""
+                SELECT kn.node_id, kn.path, kn.node_type, kn.title,
+                       COUNT(mr.record_id) AS record_count,
+                       SUM(CASE WHEN mr.status = 'valid' THEN 1 ELSE 0 END) AS valid_count,
+                       SUM(CASE WHEN mr.status = 'stale' THEN 1 ELSE 0 END) AS stale_count,
+                       SUM(CASE WHEN mr.status = 'conflicted' THEN 1 ELSE 0 END) AS conflicted_count,
+                       SUM(CASE WHEN mr.status = 'superseded' THEN 1 ELSE 0 END) AS superseded_count,
+                       SUM(CASE WHEN mr.status = 'unverified' THEN 1 ELSE 0 END) AS unverified_count,
+                       MAX(mr.updated_at_utc) AS last_updated_utc
+                FROM knowledge_nodes AS kn
+                LEFT JOIN memory_records AS mr
+                       ON mr.node_id = kn.node_id AND mr.project_key = kn.project_key
+                WHERE kn.project_key = ?{filter_sql}
+                GROUP BY kn.node_id, kn.path, kn.node_type, kn.title
+                ORDER BY kn.path
+                LIMIT ? OFFSET ?
+                """,
+                [self.project_key, *filter_parameters, limit, offset],
+            ).fetchall()
+
+            def _count(value: Any) -> int:
+                return 0 if value is None else int(value)
+
+            totals = {
+                "recordCount": _count(totals_row["record_count"]),
+                "validCount": _count(totals_row["valid_count"]),
+                "staleCount": _count(totals_row["stale_count"]),
+                "conflictedCount": _count(totals_row["conflicted_count"]),
+                "supersededCount": _count(totals_row["superseded_count"]),
+                "unverifiedCount": _count(totals_row["unverified_count"]),
+            }
+            node_items = [
+                {
+                    "nodeId": str(row["node_id"]),
+                    "path": str(row["path"]),
+                    "nodeType": str(row["node_type"]),
+                    "title": str(row["title"]),
+                    "recordCount": _count(row["record_count"]),
+                    "validCount": _count(row["valid_count"]),
+                    "staleCount": _count(row["stale_count"]),
+                    "conflictedCount": _count(row["conflicted_count"]),
+                    "supersededCount": _count(row["superseded_count"]),
+                    "unverifiedCount": _count(row["unverified_count"]),
+                    "lastUpdatedUtc": (
+                        str(row["last_updated_utc"])
+                        if row["last_updated_utc"] is not None
+                        else None
+                    ),
+                }
+                for row in rows
+            ]
+            truncated: dict[str, Any] | None = None
+            if offset + len(node_items) < total_nodes:
+                truncated = {
+                    "reason": "limit",
+                    "limit": limit,
+                    "count": len(node_items),
+                }
+            return {
+                "nodes": node_items,
+                "totals": totals,
+                "truncated": truncated,
+                "meta": {
+                    "queryMs": round((time.perf_counter() - started) * 1000, 1),
+                    "truncated": truncated,
+                },
+            }
+
+    # ------------------------------------------------------------------
+    # V2: change / trust timeline (frozen contract V2 plan section 4.5)
+    # ------------------------------------------------------------------
+
+    def timeline(
+        self,
+        *,
+        limit: int = DEFAULT_PAGE_LIMIT,
+        offset: int = 0,
+        record_type: str = "",
+        status: str = "",
+        include_status_events: bool = False,
+    ) -> dict[str, Any]:
+        started = time.perf_counter()
+        limit, offset = _page_bounds(limit, offset)
+        record_type = _require_choice(record_type, RECORD_TYPES, "type")
+        status = _require_choice(status, RECORD_STATUSES, "status")
+        with self._memory_connection() as connection:
+            clauses = ["project_key = ?"]
+            parameters: list[Any] = [self.project_key]
+            if record_type:
+                clauses.append("record_type = ?")
+                parameters.append(record_type)
+            if status:
+                clauses.append("status = ?")
+                parameters.append(status)
+            where = " AND ".join(clauses)
+            rows = connection.execute(
+                f"""
+                SELECT record_id, record_type, status, source_kind, title, updated_at_utc
+                FROM memory_records
+                WHERE {where}
+                ORDER BY updated_at_utc DESC, record_id DESC
+                """,
+                parameters,
+            ).fetchall()
+            events: list[dict[str, Any]] = []
+            for row in rows:
+                record_id = str(row["record_id"])
+                title = str(row["title"])
+                events.append(
+                    {
+                        "eventId": f"{record_id}#updated",
+                        "kind": "recordUpdated",
+                        "timestampUtc": str(row["updated_at_utc"]),
+                        "recordId": record_id,
+                        "recordType": str(row["record_type"]),
+                        "status": str(row["status"]),
+                        "sourceKind": str(row["source_kind"]),
+                        "titlePreview": title[:DEFAULT_RECORD_PREVIEW_CHARS],
+                        "fromStatus": None,
+                        "toStatus": None,
+                    }
+                )
+            if include_status_events:
+                status_clauses = ["r.project_key = ?"]
+                status_parameters: list[Any] = [self.project_key]
+                if record_type:
+                    status_clauses.append("r.record_type = ?")
+                    status_parameters.append(record_type)
+                if status:
+                    status_clauses.append("r.status = ?")
+                    status_parameters.append(status)
+                status_where = " AND ".join(status_clauses)
+                status_rows = connection.execute(
+                    f"""
+                    SELECT e.event_id, e.record_id, e.from_status, e.to_status,
+                           e.changed_at_utc, r.record_type, r.status, r.source_kind, r.title
+                    FROM memory_status_events AS e
+                    JOIN memory_records AS r ON r.record_id = e.record_id
+                    WHERE {status_where}
+                    """,
+                    status_parameters,
+                ).fetchall()
+                for row in status_rows:
+                    record_id = str(row["record_id"])
+                    title = str(row["title"])
+                    events.append(
+                        {
+                            "eventId": f"{record_id}#status:{int(row['event_id'])}",
+                            "kind": "statusChanged",
+                            "timestampUtc": str(row["changed_at_utc"]),
+                            "recordId": record_id,
+                            "recordType": str(row["record_type"]),
+                            "status": str(row["status"]),
+                            "sourceKind": str(row["source_kind"]),
+                            "titlePreview": title[:DEFAULT_RECORD_PREVIEW_CHARS],
+                            "fromStatus": str(row["from_status"]),
+                            "toStatus": str(row["to_status"]),
+                        }
+                    )
+            events.sort(
+                key=lambda event: (event["timestampUtc"], event["eventId"]),
+                reverse=True,
+            )
+            page = events[offset : offset + limit]
+            truncated: dict[str, Any] | None = None
+            if offset + len(page) < len(events):
+                truncated = {
+                    "reason": "limit",
+                    "limit": limit,
+                    "count": len(page),
+                }
+            return {
+                "events": page,
+                "truncated": truncated,
+                "meta": {
+                    "queryMs": round((time.perf_counter() - started) * 1000, 1),
+                    "truncated": truncated,
+                },
+            }
+
+    # ------------------------------------------------------------------
+    # V2: stale distribution (frozen contract V2 plan section 4.6)
+    # ------------------------------------------------------------------
+
+    def stale(
+        self,
+        *,
+        group_by: str = "nodePath",
+        limit: int = DEFAULT_PAGE_LIMIT,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        started = time.perf_counter()
+        limit, offset = _page_bounds(limit, offset)
+        if group_by not in STALE_GROUPINGS:
+            raise ValueError(
+                f"groupBy must be one of: {', '.join(STALE_GROUPINGS)}."
+            )
+        now = datetime.now(timezone.utc)
+        with self._memory_connection() as connection:
+            if group_by == "scope":
+                select_sql = (
+                    "mr.record_id, mr.status, mr.record_type, mr.updated_at_utc, "
+                    "COALESCE(sc.scope_key, '<unattached>') AS group_key "
+                    "FROM memory_records AS mr "
+                    "LEFT JOIN (SELECT record_id, MIN(scope_key) AS scope_key "
+                    "FROM memory_scopes GROUP BY record_id) AS sc "
+                    "ON sc.record_id = mr.record_id "
+                    "LEFT JOIN knowledge_nodes AS kn ON kn.node_id = mr.node_id"
+                )
+            elif group_by == "nodePath":
+                select_sql = (
+                    "mr.record_id, mr.status, mr.record_type, mr.updated_at_utc, "
+                    "COALESCE(kn.path, '<unattached>') AS group_key "
+                    "FROM memory_records AS mr "
+                    "LEFT JOIN knowledge_nodes AS kn ON kn.node_id = mr.node_id"
+                )
+            elif group_by == "recordType":
+                select_sql = (
+                    "mr.record_id, mr.status, mr.record_type, mr.updated_at_utc "
+                    "FROM memory_records AS mr"
+                )
+            else:
+                select_sql = (
+                    "mr.record_id, mr.status, mr.record_type, mr.updated_at_utc "
+                    "FROM memory_records AS mr"
+                )
+            rows = list(
+                connection.execute(
+                    f"SELECT {select_sql} WHERE mr.project_key = ? "
+                    f"AND mr.status IN ('stale', 'conflicted', 'superseded')",
+                    (self.project_key,),
+                ).fetchall()
+            )
+        rows.sort(
+            key=lambda row: (str(row["updated_at_utc"]), str(row["record_id"])),
+            reverse=True,
+        )
+        buckets: dict[str, dict[str, Any]] = {}
+        total_records = 0
+        total_by_status: dict[str, int] = {
+            "stale": 0,
+            "conflicted": 0,
+            "superseded": 0,
+        }
+        for row in rows:
+            record_id = str(row["record_id"])
+            status = str(row["status"])
+            age_days = _utc_age_days(str(row["updated_at_utc"]), now)
+            age_bucket = _age_bucket_name(age_days)
+            if group_by == "ageBucket":
+                group_key = age_bucket
+            elif group_by == "recordType":
+                group_key = str(row["record_type"])
+            else:
+                group_key = str(row["group_key"])
+            bucket = buckets.setdefault(
+                group_key,
+                {
+                    "recordCount": 0,
+                    "byStatus": {"stale": 0, "conflicted": 0, "superseded": 0},
+                    "ageBuckets": {
+                        "0-7d": 0,
+                        "8-30d": 0,
+                        "31-90d": 0,
+                        "90d+": 0,
+                    },
+                    "sampleRecordIds": [],
+                },
+            )
+            bucket["recordCount"] += 1
+            bucket["byStatus"][status] += 1
+            bucket["ageBuckets"][age_bucket] += 1
+            if len(bucket["sampleRecordIds"]) < STALE_SAMPLE_LIMIT:
+                bucket["sampleRecordIds"].append(record_id)
+            total_records += 1
+            total_by_status[status] += 1
+        bucket_list = [
+            {"groupKey": key, "label": key, **buckets[key]}
+            for key in sorted(buckets)
+        ]
+        page = bucket_list[offset : offset + limit]
+        truncated: dict[str, Any] | None = None
+        if offset + len(page) < len(bucket_list):
+            truncated = {
+                "reason": "limit",
+                "limit": limit,
+                "count": len(page),
+            }
+        return {
+            "buckets": page,
+            "totals": {"recordCount": total_records, "byStatus": total_by_status},
+            "truncated": truncated,
+            "meta": {
+                "queryMs": round((time.perf_counter() - started) * 1000, 1),
+                "truncated": truncated,
+            },
+        }
+
 
 # ----------------------------------------------------------------------
 # HTTP layer
@@ -643,6 +1315,14 @@ _QUERY_PARAMS: dict[str, frozenset[str]] = {
     ),
     "/api/work": frozenset({"status", "limit", "offset"}),
     "/api/search": frozenset({"q", "limit"}),
+    # V2 visualization routes (frozen V2 plan section 4)
+    "/api/graph": frozenset({"root", "depth", "direction", "limit", "stress"}),
+    "/api/impact": frozenset({"limit", "offset", "kind"}),
+    "/api/coverage": frozenset({"limit", "offset", "pathPrefix"}),
+    "/api/timeline": frozenset(
+        {"limit", "offset", "recordType", "status", "includeStatusEvents"}
+    ),
+    "/api/stale": frozenset({"groupBy", "limit", "offset"}),
 }
 _DEFAULT_LIMIT = str(DEFAULT_PAGE_LIMIT)
 
@@ -714,6 +1394,19 @@ class KnowledgeViewHandler(BaseHTTPRequestHandler):
                 _send_json(self, 200, self.service.work_detail(work_item_id))
             elif path == "/api/search":
                 self._handle_search(query)
+            elif path == "/api/graph":
+                self._handle_graph(query)
+            elif path == "/api/coverage":
+                self._handle_coverage(query)
+            elif path == "/api/timeline":
+                self._handle_timeline(query)
+            elif path == "/api/stale":
+                self._handle_stale(query)
+            elif path.startswith("/api/impact/"):
+                asset_path = path.removeprefix("/api/impact/")
+                if not asset_path or "/" in asset_path:
+                    raise ValueError("asset path must be a single path segment.")
+                self._handle_impact(asset_path, query)
             else:
                 _send_error_json(self, 404, "notFound", f"Unknown route: {path}")
         except KnowledgeViewError as exc:
@@ -779,6 +1472,65 @@ class KnowledgeViewHandler(BaseHTTPRequestHandler):
             raise ValueError("q must contain at least one searchable token.")
         limit = _single_query_value(query, "limit", _DEFAULT_LIMIT)
         _send_json(self, 200, self.service.search(q, int(limit)))
+
+    # -- V2 route bodies ------------------------------------------------
+
+    def _handle_graph(self, query: dict[str, list[str]]) -> None:
+        payload = self.service.graph(
+            root=_single_query_value(query, "root"),
+            depth=int(_single_query_value(query, "depth", "1")),
+            direction=_single_query_value(query, "direction", "outgoing"),
+            limit=int(
+                _single_query_value(query, "limit", str(GRAPH_DEFAULT_LIMIT))
+            ),
+            stress=int(_single_query_value(query, "stress", "0")),
+        )
+        _send_json(self, 200, payload)
+
+    def _handle_impact(
+        self, asset_path: str, query: dict[str, list[str]]
+    ) -> None:
+        unknown = sorted(set(query) - {"limit", "offset", "kind"})
+        if unknown:
+            raise ValueError(
+                f"unknown parameter(s): {', '.join(unknown)} for /api/impact."
+            )
+        payload = self.service.impact(
+            asset_path=unquote(asset_path),
+            limit=int(_single_query_value(query, "limit", _DEFAULT_LIMIT)),
+            offset=int(_single_query_value(query, "offset", "0")),
+            kind=_single_query_value(query, "kind"),
+        )
+        _send_json(self, 200, payload)
+
+    def _handle_coverage(self, query: dict[str, list[str]]) -> None:
+        payload = self.service.coverage(
+            limit=int(_single_query_value(query, "limit", _DEFAULT_LIMIT)),
+            offset=int(_single_query_value(query, "offset", "0")),
+            path_prefix=_single_query_value(query, "pathPrefix"),
+        )
+        _send_json(self, 200, payload)
+
+    def _handle_timeline(self, query: dict[str, list[str]]) -> None:
+        payload = self.service.timeline(
+            limit=int(_single_query_value(query, "limit", _DEFAULT_LIMIT)),
+            offset=int(_single_query_value(query, "offset", "0")),
+            record_type=_single_query_value(query, "recordType"),
+            status=_single_query_value(query, "status"),
+            include_status_events=_single_query_value(
+                query, "includeStatusEvents", "false"
+            ).lower()
+            in ("1", "true", "yes"),
+        )
+        _send_json(self, 200, payload)
+
+    def _handle_stale(self, query: dict[str, list[str]]) -> None:
+        payload = self.service.stale(
+            group_by=_single_query_value(query, "groupBy", "nodePath"),
+            limit=int(_single_query_value(query, "limit", _DEFAULT_LIMIT)),
+            offset=int(_single_query_value(query, "offset", "0")),
+        )
+        _send_json(self, 200, payload)
 
     # -- verbs -----------------------------------------------------------
 
