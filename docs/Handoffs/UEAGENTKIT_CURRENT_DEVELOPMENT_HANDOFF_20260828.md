@@ -8,30 +8,32 @@
 >
 > Active branch: `feature/live-writer-expansion`
 >
-> Current committed HEAD: local W4-7 closure commit (see section 0)
+> Current committed HEAD: local D1 closure commit (see section 0)
 >
 > Latest published product version: `0.7.0` for Unreal Engine 5.6
 >
 > This document records current repository facts, accepted architecture decisions, Track dependencies, safety rules, and the next execution boundary. It does not authorize Push / Rebase / Tag / Release or future implementation commits.
 
-## 0. 2026-08-29 W4 Closure Supersession Note
+## 0. 2026-08-29 D1 Closure Supersession Note
 
-This note overrides older takeover wording later in this file where W4-2/W4-7 is still described as `next`.
+This note overrides older takeover wording later in this file where W4-7 or D1 is still described as `next`.
 
 ```text
 W4-0 through W4-7                         complete
-current committed HEAD                    local W4-7 closure commit (see below)
-current W4 discovered Python suite        766 / 766 PASS
-real UE W4 C1-C12                         PASS (fresh)
+D1 agent_workflow split                   complete
+current committed HEAD                    local D1 closure commit (see below)
+current Python discovered suite           766 / 766 PASS
+real UE W4 C1-C12                         PASS (frozen valid)
 real UE W4-6 H1-H6                        PASS (frozen valid)
+D1-R1 / D1-R2 real UE smokes              PASS (fresh)
 final transaction fixture                 2 / 2 independently verified
 ```
 
-Authoritative W4 closure evidence:
+Authoritative D1 closure evidence:
 
-`docs/Plans/UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_RESULT_20260829.md`
+`docs/Plans/UEAGENTKIT_D1_AGENT_WORKFLOW_SPLIT_RESULT_20260829.md`
 
-Sections later in this file that describe W4-7 as `NEXT` or list the W4-5 Tool counts are historical. Where they conflict with this note, the current state above, `docs/Plans/README.md`, and the final W4 Result take precedence. W4-7 implementation/tests/docs are checkpoint-committed locally; the next work should be the post-W4 sequence defined by the Master Plan. No Push / Rebase / Tag / Release is authorized by this handoff update.
+Sections later in this file that describe W4-7 or D1 as `NEXT` or list old Tool counts are historical. Where they conflict with this note, the current state above, `docs/Plans/README.md`, and the D1 Result take precedence. W4-7 implementation/tests/docs and D1 split implementation/tests/docs are checkpoint-committed locally; the next work should be W5 real-project acceptance per the Master Plan. No Push / Rebase / Tag / Release is authorized by this handoff update.
 
 ## 1. Read This First
 
@@ -52,15 +54,16 @@ W4-5 Aggregate Strong Verify / Trust    complete
 W4-6 Recovery and Restart Hardening     complete
 W4-7 Full Acceptance / Documentation    complete
 W4                                      complete
+D1 agent_workflow split                 complete
 ```
 
-The current committed implementation checkpoint after W4 closure:
+The current committed implementation checkpoint after D1:
 
 ```text
-local W4-7 closure commit (see section 0)
+local D1 closure commit (see section 0 / D1 Result)
 ```
 
-Current validation baseline after W4:
+Current validation baseline after D1:
 
 ```text
 Python discovered suite                    766 / 766 PASS
@@ -68,13 +71,15 @@ Ruff                                       PASS
 compileall                                 PASS
 ValidateRelease 0.7.0                      PASS
 git diff --check                           PASS
-UE5.6 Direct Build                         PASS (at 55919bd; no C++ change in W4-7)
-real UE W4 C1-C12                          PASS (fresh)
+UE5.6 Direct Build                         PASS (at 55919bd; no C++ change in W4-7 or D1)
+real UE W4 C1-C12                          PASS (frozen valid)
 real UE W4-6 H1-H6                         PASS (frozen valid)
+D1-R1 real UE full happy-path smoke        PASS
+D1-R2 real UE resident recovery smoke      PASS
 final transaction fixture verify           2 / 2 PASS
 ```
 
-Current Tool Registry counts after W4:
+Current Tool Registry counts after D1:
 
 ```text
 workflow-only                              67
@@ -82,9 +87,10 @@ workflow + memory                          79
 combined live + workflow                  100
 combined live + workflow + memory         112
 Patch operation count                      18
+Live-write operation count                 17
 ```
 
-No Push / Rebase / Tag / Release has been performed for W3 or W4-0 through W4-7.
+No Push / Rebase / Tag / Release has been performed for W3, W4-0 through W4-7, or D1.
 
 ## 2. Project Positioning
 
@@ -138,13 +144,14 @@ Do not assume the two worktrees are interchangeable. Always inspect actual Git s
 ### Recent Writer checkpoints
 
 ```text
-1b65209 fix: forward IncludeBlueprints for Blueprint snapshot refresh
-3280102 fix: close W3 live-write continuation and snapshot refresh
-ab731f1 test: cover W3 continuation and full snapshot refresh
-45e6ea2 docs: close W3 checkpoint strong verify
-90f6a11 docs: close W4-0 contract freeze and baseline
-71400c9 feat: add W4-1 bounded batch planning
+1c68f4d docs: add D1 agent workflow split plan
+24bf088 docs: close W4 full acceptance and documentation
+55919bd feat: close W4-6 recovery and restart hardening
+f4ba1c4 feat: add W4-5 aggregate strong verify semantic diff trust
+d277369 feat: add W4-4 multi-asset checkpoint save
+76f90b3 feat: add W4-3 multi-asset resident apply
 ```
+
 
 Historical 0.8 capability closeout checkpoint:
 
@@ -670,7 +677,7 @@ The final Change Set / batch receipt structure is frozen there for downstream Me
 
 ### W5 — real-project acceptance + scale baseline
 
-W5 starts after W4.
+W5 starts after D1.
 
 Purpose:
 
@@ -683,30 +690,9 @@ Do not hard-code assumptions about project size/storage as universal acceptance 
 
 ### D1 — split `agent_workflow.py`
 
-D1 is scheduled immediately after W4 and before Track M / X code starts touching the same orchestration area.
+Complete. `agent_workflow.py` is now a thin facade assembled from `workflow_common.py`, `workflow_plan.py`, `workflow_live.py`, `workflow_verify.py`, and `workflow_batch.py`. Pure-move AST proof is 0 mismatches; Tool Registry / public imports / serialized contracts are unchanged; D1-R1 and D1-R2 real UE smokes pass.
 
-Constraint:
-
-```text
-pure refactor / import movement
-no behavior or public API change
-preserve serialized contracts
-preserve discovered tests
-```
-
-Do not hard-code historical test counts such as 739.
-
-Recommended target split from Master:
-
-```text
-workflow_plan.py
-workflow_live.py
-workflow_verify.py
-workflow_batch.py
-workflow_common.py
-```
-
-W4 itself may add new domain modules such as `bounded_batch.py` / later `checkpoint_sets.py`; D1 remains the broader post-W4 cleanup.
+Authoritative evidence: `docs/Plans/UEAGENTKIT_D1_AGENT_WORKFLOW_SPLIT_RESULT_20260829.md`.
 
 ### D2-D4
 
@@ -1072,17 +1058,18 @@ A fresh Chat / Agent should do the following:
 2. Read docs/Plans/README.md.
 3. Read W4 parent Detailed Plan.
 4. Read final W4 Result.
-5. Inspect actual git status / HEAD; do not assume they are unchanged.
-6. Confirm W4 is complete and select the next post-W4 item from the Master Plan (W5 and/or D1 per dependency order).
-7. Do not begin W5/D1/Memory implementation until this file and README show W4 complete.
-8. Run relevant regression gates before starting new work.
+5. Read final D1 Result.
+6. Inspect actual git status / HEAD; do not assume they are unchanged.
+7. Confirm W4 and D1 are complete and select the next post-D1 item from the Master Plan (W5 per dependency order).
+8. Do not begin W5/Memory implementation until this file and README show W4 and D1 complete.
+9. Run relevant regression gates before starting new work.
 ```
 
-The immediate implementation objective after W4 is therefore:
+The immediate implementation objective after D1 is therefore:
 
 ```text
-post-W4 sequence defined by the Master Plan
-→ W5 and/or D1 according to the current dependency order
+post-W4/post-D1 sequence defined by the Master Plan
+→ W5 real-project acceptance
 ```
 
 ## 23. Key Documents
@@ -1102,9 +1089,9 @@ Writer current chain:
 ```text
 docs/Plans/UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_DETAILED_PLAN_20260826.md
 docs/Plans/UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_RESULT_20260829.md
-docs/Plans/UEAGENTKIT_W4_7_FULL_ACCEPTANCE_AND_DOCUMENTATION_DETAILED_PLAN_20260829.md
+docs/Plans/UEAGENTKIT_D1_AGENT_WORKFLOW_SPLIT_DETAILED_PLAN_20260829.md
+docs/Plans/UEAGENTKIT_D1_AGENT_WORKFLOW_SPLIT_RESULT_20260829.md
 docs/Plans/UEAGENTKIT_W4_0_CONTRACT_FREEZE_AND_BASELINE_RESULT_20260827.md
-docs/Plans/UEAGENTKIT_W4_1_BOUNDED_BATCH_PLAN_RESULT_20260828.md
 ```
 
 Historical closeout:

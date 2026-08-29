@@ -26,7 +26,8 @@
 | 当前子阶段结果 | [`UEAGENTKIT_W4_6_RECOVERY_AND_RESTART_HARDENING_RESULT_20260829.md`](UEAGENTKIT_W4_6_RECOVERY_AND_RESTART_HARDENING_RESULT_20260829.md) | W4-6 真实 UE H1-H6、最终 fixture 与回归门禁证据 | complete |
 | 当前子阶段 | [`UEAGENTKIT_W4_7_FULL_ACCEPTANCE_AND_DOCUMENTATION_DETAILED_PLAN_20260829.md`](UEAGENTKIT_W4_7_FULL_ACCEPTANCE_AND_DOCUMENTATION_DETAILED_PLAN_20260829.md) | W4-7 C1-C12 全量真实 UE、B0/B1 对比、证据契约冻结与最终文档收口 | complete |
 | 当前子阶段结果 | [`UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_RESULT_20260829.md`](UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_RESULT_20260829.md) | W4 最终 C1-C12 全量验收、W4 vs W3 指标、证据契约冻结与文档收口 | **complete / 当前 W4 结果** |
-| 当前任务 | [`UEAGENTKIT_D1_AGENT_WORKFLOW_SPLIT_DETAILED_PLAN_20260829.md`](UEAGENTKIT_D1_AGENT_WORKFLOW_SPLIT_DETAILED_PLAN_20260829.md) | W4 后立即执行的 `agent_workflow.py` 纯重构拆分；冻结 API / Tool / serialized evidence 行为 | **current** |
+| 当前任务 | [`UEAGENTKIT_D1_AGENT_WORKFLOW_SPLIT_DETAILED_PLAN_20260829.md`](UEAGENTKIT_D1_AGENT_WORKFLOW_SPLIT_DETAILED_PLAN_20260829.md) | W4 后立即执行的 `agent_workflow.py` 纯重构拆分；冻结 API / Tool / serialized evidence 行为 | complete |
+| 当前任务结果 | [`UEAGENTKIT_D1_AGENT_WORKFLOW_SPLIT_RESULT_20260829.md`](UEAGENTKIT_D1_AGENT_WORKFLOW_SPLIT_RESULT_20260829.md) | D1 纯 AST 移动 0 mismatch、Tool/API 不变、真实 UE R1/R2 与最终 fixture 验收 | **complete / 当前 D1 结果** |
 | 当前步骤 | [`UEAGENTKIT_W4_0_CONTRACT_FREEZE_AND_BASELINE_PLAN_20260827.md`](UEAGENTKIT_W4_0_CONTRACT_FREEZE_AND_BASELINE_PLAN_20260827.md) | W4-0 契约冻结与 W3 手工编排基线采集 | complete |
 | 当前步骤结果 | [`UEAGENTKIT_W4_0_CONTRACT_FREEZE_AND_BASELINE_RESULT_20260827.md`](UEAGENTKIT_W4_0_CONTRACT_FREEZE_AND_BASELINE_RESULT_20260827.md) | W4-0 B0/B1 真实 UE 手工编排基线与冻结契约 | complete |
 | 最近完成 | [`UEAGENTKIT_W3_CHECKPOINT_STRONG_VERIFY_RESULT_20260825.md`](UEAGENTKIT_W3_CHECKPOINT_STRONG_VERIFY_RESULT_20260825.md) | W3 C0-C6 最终证据与 W4 入口基线 | complete |
@@ -60,8 +61,8 @@ W1 Blueprint narrow resident write      = complete
 W2 Fast Resident Verify                 = complete
 W3 Checkpoint Strong Verify             = complete
 W4 bounded multi-operation / multi-asset = complete (W4-0..W4-7)
-D1 agent_workflow split                  = next / current plan
-W5 real-project acceptance               = blocked on D1
+D1 agent_workflow split                  = complete
+W5 real-project acceptance               = next / current plan
 R5 Value Provenance / Execution Trace   = deferred by benchmark evidence
 ```
 
@@ -108,6 +109,7 @@ UEAGENTKIT_W4_6_RECOVERY_AND_RESTART_HARDENING_RESULT_20260829.md
 UEAGENTKIT_W4_7_FULL_ACCEPTANCE_AND_DOCUMENTATION_DETAILED_PLAN_20260829.md
 UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_RESULT_20260829.md
 UEAGENTKIT_D1_AGENT_WORKFLOW_SPLIT_DETAILED_PLAN_20260829.md
+UEAGENTKIT_D1_AGENT_WORKFLOW_SPLIT_RESULT_20260829.md
 ```
 
 其中 PLAN 表示当时的执行设计，RESULT 表示最终事实。阶段完成后，RESULT 优先于同阶段 PLAN 中的中间状态或 blocker 描述。
