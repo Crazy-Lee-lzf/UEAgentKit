@@ -155,7 +155,7 @@ elseif ($Action -eq "GeneratePerfProject")
     $EditorCmd = Join-Path $EngineRoot "Engine\Binaries\Win64\UnrealEditor-Cmd.exe"
     $PerfReport = Join-Path $OutputDir "perf-$PerfAction-report.json"
     & $EditorCmd $PerfUproject `
-        "-run=UEAgentKitPerformanceFixture" `
+        "-run=PerformanceFixture" `
         "-Action=$PerfAction" `
         "-ProjectPath=$PerfProjectPath" `
         "-Report=$PerfReport" `

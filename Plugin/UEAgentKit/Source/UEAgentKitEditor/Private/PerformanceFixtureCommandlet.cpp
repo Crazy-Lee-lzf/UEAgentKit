@@ -10,6 +10,7 @@
 #include "HAL/FileManager.h"
 #include "HAL/PlatformFileManager.h"
 #include "HAL/PlatformMisc.h"
+#include "HAL/PlatformTime.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "Misc/DateTime.h"
 #include "Kismet2/KismetEditorUtilities.h"
@@ -40,6 +41,27 @@ namespace PerformanceFixtureCommandletPrivate
 	constexpr int64 SmallBatchSize = 100;
 	constexpr int32 MaxSmallAssets = 20000;
 	constexpr int32 MaxSimpleBlueprints = 3000;
+	constexpr int32 MaxArtPayloadCopies = 300;
+
+	const TCHAR* ArtPayloadSources[] = {
+		TEXT("/Game/MS/3D/Leather_Luggage_Suitcase_wk2iafu/T_Leather_Luggage_Suitcase_wk2iafu_D.T_Leather_Luggage_Suitcase_wk2iafu_D"),
+		TEXT("/Game/MS/3D/Leather_Luggage_Suitcase_wk2iafu/T_LeatherLuggageSuitcase_wk2iafu_DpR.T_LeatherLuggageSuitcase_wk2iafu_DpR"),
+		TEXT("/Game/MS/3D/Leather_Luggage_Suitcase_wk2iafu/T_Leather_Luggage_Suitcase_wk2iafu_N.T_Leather_Luggage_Suitcase_wk2iafu_N"),
+		TEXT("/Game/MS/3D/Scatter_Mushroom_Set_rlms3/T_Scatter_Mushroom_Set_rlms3_D.T_Scatter_Mushroom_Set_rlms3_D"),
+		TEXT("/Game/MS/Surfaces/Gravel_Ground_vi0maebg/T_Gravel_Ground_vi0maebg_N.T_Gravel_Ground_vi0maebg_N"),
+		TEXT("/Game/MS/3D/Sword_uitlbiaga/T_Sword_uitlbiaga_D.T_Sword_uitlbiaga_D"),
+		TEXT("/Game/MS/Surfaces/Beach_Cliff_xdhicfv/T_Beach_Cliff_xdhicfv_N.T_Beach_Cliff_xdhicfv_N"),
+		TEXT("/Game/MS/3D/Rope_Coil_vcsoddfs/T_Rope_Coil_vcsoddfs_D.T_Rope_Coil_vcsoddfs_D"),
+		TEXT("/Game/MS/Surfaces/Beach_Cliff_wdpmebr/T_Beach_Cliff_wdpmebr_N.T_Beach_Cliff_wdpmebr_N"),
+		TEXT("/Game/MS/Surfaces/Seaweed_ueupcenew/T_Seaweed_ueupcenew_N.T_Seaweed_ueupcenew_N"),
+		TEXT("/Game/MS/Surfaces/Rocky_Soil_Ground_vb2qdgwew/T_Rocky_Soil_Ground_vb2qdgwew_N.T_Rocky_Soil_Ground_vb2qdgwew_N"),
+		TEXT("/Game/MS/Surfaces/Roman_Stone_Floor_thsjdfxq/T_Roman_Stone_Floor_thsjdfxq_N.T_Roman_Stone_Floor_thsjdfxq_N"),
+		TEXT("/Game/MS/3D/Dead_Tree_rlthg/T_Dead_Tree_rlthg_N.T_Dead_Tree_rlthg_N"),
+		TEXT("/Game/MS/Surfaces/Layered_Rock_Cliff_ubulehofw/T_Layered_Rock_Cliff_ubulehofw_N.T_Layered_Rock_Cliff_ubulehofw_N"),
+		TEXT("/Game/MS/Decals/Dry_Grass_sf2kpzh/T_Dry_Grass_sf2kpzh_N.T_Dry_Grass_sf2kpzh_N"),
+		TEXT("/Game/MS/3D/Dead_Tree_qlEtl/T_Dead_Tree_qlEtl_N.T_Dead_Tree_qlEtl_N"),
+	};
+	constexpr int32 ArtPayloadSourceCount = UE_ARRAY_COUNT(ArtPayloadSources);
 
 	FString GetProjectPath(const FString& Params)
 	{
@@ -237,15 +259,30 @@ namespace PerformanceFixtureCommandletPrivate
 
 		TArray<FString> Files;
 		IFileManager::Get().FindFilesRecursive(Files, *SeedContent, TEXT("*"), true, false, false);
+		const FString NormalizedSeed = FPaths::ConvertRelativePathToFull(SeedContent);
 		for (const FString& SourceFile : Files)
 		{
-			FString Relative = SourceFile;
-			FPaths::MakePathRelativeTo(Relative, *SeedContent);
+			const FString NormalizedSource = FPaths::ConvertRelativePathToFull(SourceFile);
+			if (!NormalizedSource.StartsWith(NormalizedSeed))
+			{
+				OutError = FString::Printf(TEXT("Seed file escaped the seed Content root: %s"), *SourceFile);
+				return false;
+			}
+			FString Relative = NormalizedSource.RightChop(NormalizedSeed.Len());
+			Relative.RemoveFromStart(TEXT("/"));
+			Relative.RemoveFromStart(TEXT("\\"));
 			const FString Destination = FPaths::Combine(TargetContent, Relative);
 			IFileManager::Get().MakeDirectory(*FPaths::GetPath(Destination), true);
-			if (!IFileManager::Get().Copy(*Destination, *SourceFile, true, true))
+			if (IFileManager::Get().FileSize(*Destination) == IFileManager::Get().FileSize(*SourceFile))
 			{
-				OutError = FString::Printf(TEXT("Could not copy seed file: %s"), *SourceFile);
+				// Resume-safe: an equal-size completed file is already present.
+				continue;
+			}
+			IFileManager::Get().Delete(*Destination, false, true);
+			const uint32 CopyResult = IFileManager::Get().Copy(*Destination, *SourceFile, true, true);
+			if (CopyResult != COPY_OK || IFileManager::Get().FileSize(*Destination) != IFileManager::Get().FileSize(*SourceFile))
+			{
+				OutError = FString::Printf(TEXT("Could not copy seed file: %s -> %s"), *SourceFile, *Destination);
 				return false;
 			}
 		}
@@ -296,8 +333,8 @@ namespace PerformanceFixtureCommandletPrivate
 		IFileManager::Get().MakeDirectory(*FPaths::GetPath(CheckpointFile), true);
 
 		FString JsonText;
-		const TSharedRef<TJsonWriter<TCHAR, TCompactJsonPrintPolicy<TCHAR>>> Writer =
-			TJsonWriterFactory<TCHAR, TCompactJsonPrintPolicy<TCHAR>>::Create(&JsonText);
+		const TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
+			TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&JsonText);
 		if (!FJsonSerializer::Serialize(Entry, Writer))
 		{
 			OutError = TEXT("Could not serialize checkpoint entry.");
@@ -414,6 +451,82 @@ namespace PerformanceFixtureCommandletPrivate
 		return true;
 	}
 
+	bool GenerateArtPayload(const FString& ProjectRoot, const TSharedPtr<FJsonObject>& Manifest, FString& OutError)
+	{
+		const FString Root = TEXT("/Game/PerfArt");
+		const int32 Existing = CountCheckpointLines(ProjectRoot, TEXT("GenerateArtPayload"));
+		int32 Generated = Existing;
+		while (Generated < MaxArtPayloadCopies)
+		{
+			const int32 SourceIndex = Generated % ArtPayloadSourceCount;
+			const FString SourceAsset = ArtPayloadSources[SourceIndex];
+			const FString TargetPackage = FString::Printf(TEXT("%s/AP_%06d"), *Root, Generated + 1);
+			const FString TargetObject = FString::Printf(TEXT("%s.%s"), *TargetPackage, *FPaths::GetBaseFilename(TargetPackage));
+			if (LoadObject<UObject>(nullptr, *TargetObject))
+			{
+				// Already exists; record as a resumed no-op so deterministic
+				// targets remain skipped on restart.
+				TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+				Entry->SetNumberField(TEXT("batch"), (Generated + 1) / SmallBatchSize);
+				Entry->SetStringField(TEXT("action"), TEXT("GenerateArtPayload"));
+				Entry->SetNumberField(TEXT("count"), Generated + 1);
+				Entry->SetStringField(TEXT("source"), SourceAsset);
+				Entry->SetStringField(TEXT("target"), TargetPackage);
+				Entry->SetStringField(TEXT("status"), TEXT("resumed-existing"));
+				Entry->SetStringField(TEXT("completedUtc"), *FDateTime::UtcNow().ToString());
+				if (!AppendCheckpoint(ProjectRoot, TEXT("GenerateArtPayload"), Entry.ToSharedRef(), OutError))
+				{
+					return false;
+				}
+				++Generated;
+				continue;
+			}
+
+			const double Started = FPlatformTime::Seconds();
+			if (!DuplicateSmallAsset(SourceAsset, TargetPackage, OutError))
+			{
+				UE_LOG(LogPerformanceFixture, Error, TEXT("Art payload duplicate failed: %s -> %s (%s)"), *SourceAsset, *TargetPackage, *OutError);
+				return false;
+			}
+			const double Elapsed = FPlatformTime::Seconds() - Started;
+
+			TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+			Entry->SetNumberField(TEXT("batch"), (Generated + 1) / SmallBatchSize);
+			Entry->SetStringField(TEXT("action"), TEXT("GenerateArtPayload"));
+			Entry->SetNumberField(TEXT("count"), Generated + 1);
+			Entry->SetStringField(TEXT("source"), SourceAsset);
+			Entry->SetStringField(TEXT("target"), TargetPackage);
+			Entry->SetNumberField(TEXT("elapsedSeconds"), Elapsed);
+			Entry->SetStringField(TEXT("status"), TEXT("created"));
+			Entry->SetStringField(TEXT("completedUtc"), *FDateTime::UtcNow().ToString());
+			if (!AppendCheckpoint(ProjectRoot, TEXT("GenerateArtPayload"), Entry.ToSharedRef(), OutError))
+			{
+				return false;
+			}
+			++Generated;
+
+			// Duplicating large assets through AssetTools retains transient
+			// objects and source references; collect after every copy to keep
+			// the commandlet within a bounded memory envelope for 50 GB.
+			CollectGarbage(RF_NoFlags, true);
+
+			const int64 ProjectSize = GetDirectorySize(ProjectRoot);
+			if (ProjectSize >= Target50GB)
+			{
+				Manifest->SetStringField(TEXT("status"), TEXT("target_reached"));
+				UE_LOG(LogPerformanceFixture, Display, TEXT("Art-payload generation reached target size."));
+				break;
+			}
+			if (GetFreeDiskSpace(ProjectRoot) < MinFreeDisk)
+			{
+				OutError = TEXT("Free disk space below minimum while generating art payload.");
+				return false;
+			}
+		}
+		Manifest->SetNumberField(TEXT("artPayloadGenerated"), Generated);
+		return true;
+	}
+
 	bool ValidateFixture(const FString& ProjectRoot, const TSharedPtr<FJsonObject>& Manifest, FString& OutError)
 	{
 		const FString ContentRoot = FPaths::Combine(ProjectRoot, TEXT("Content"));
@@ -514,6 +627,15 @@ int32 UPerformanceFixtureCommandlet::Main(const FString& Params)
 		}
 		Manifest->SetStringField(TEXT("lastAction"), TEXT("GenerateBlueprintSuite"));
 	}
+	else if (Action == TEXT("GenerateArtPayload"))
+	{
+		if (!GenerateArtPayload(ProjectRoot, Manifest, Error))
+		{
+			UE_LOG(LogPerformanceFixture, Error, TEXT("%s"), *Error);
+			return 9;
+		}
+		Manifest->SetStringField(TEXT("lastAction"), TEXT("GenerateArtPayload"));
+	}
 	else if (Action == TEXT("ValidateFixture"))
 	{
 		if (!ValidateFixture(ProjectRoot, Manifest, Error))
@@ -527,6 +649,7 @@ int32 UPerformanceFixtureCommandlet::Main(const FString& Params)
 	{
 		IFileManager::Get().DeleteDirectory(*FPaths::Combine(ProjectRoot, TEXT("Content"), TEXT("PerfSmall")), false, true);
 		IFileManager::Get().DeleteDirectory(*FPaths::Combine(ProjectRoot, TEXT("Content"), TEXT("PerfBlueprints")), false, true);
+		IFileManager::Get().DeleteDirectory(*FPaths::Combine(ProjectRoot, TEXT("Content"), TEXT("PerfArt")), false, true);
 		Manifest->SetStringField(TEXT("status"), TEXT("cleaned"));
 		Manifest->SetStringField(TEXT("lastAction"), TEXT("CleanupFixture"));
 	}
@@ -536,7 +659,7 @@ int32 UPerformanceFixtureCommandlet::Main(const FString& Params)
 		return 6;
 	}
 
-	Manifest->SetNumberField(TEXT("checkpointCount"), CountCheckpointLines(ProjectRoot, TEXT("GenerateSmallAssets")) + CountCheckpointLines(ProjectRoot, TEXT("GenerateBlueprintSuite")));
+	Manifest->SetNumberField(TEXT("checkpointCount"), CountCheckpointLines(ProjectRoot, TEXT("GenerateSmallAssets")) + CountCheckpointLines(ProjectRoot, TEXT("GenerateBlueprintSuite")) + CountCheckpointLines(ProjectRoot, TEXT("GenerateArtPayload")));
 	Manifest->SetStringField(TEXT("updatedUtc"), *FDateTime::UtcNow().ToString());
 
 	if (!SaveManifest(ProjectRoot, Manifest, Error))

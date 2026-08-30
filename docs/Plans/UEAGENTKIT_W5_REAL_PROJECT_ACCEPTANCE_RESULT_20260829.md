@@ -1,6 +1,6 @@
 # UEAgentKit W5 Real-project Acceptance + Scale Baseline Result
 
-> Date: 2026-08-29
+> Date: 2026-08-29 (updated by W5 blocker-closure pass 2026-08-30)
 >
 > Branch: `feature/live-writer-expansion`
 >
@@ -8,22 +8,28 @@
 >
 > Plan: `UEAGENTKIT_W5_REAL_PROJECT_ACCEPTANCE_AND_SCALE_BASELINE_DETAILED_PLAN_20260829.md`
 >
+> Blocker closure plan: `UEAGENTKIT_W5_BLOCKER_CLOSURE_R20_AND_50GB_SCALE_DETAILED_PLAN_20260829.md`
+>
 > Owner revision: DirectHost controlled writes; Reforge strictly read-only; W5-S 50 GB intermediate first.
 
 ## 1. Result Summary
 
-W5 is **blocked/deferred** as a whole.
+W5 is **partial / blocked-deferred** as a whole.
 
 W5-R:
 - **R1** complete: 5 measured samples per cache state, all Trust=verified.
 - **R5** complete: 10 measured samples per cache state, all Trust=verified, p95 claimable.
-- **R20** **blocked by DirectHost fixture/package lifecycle behavior**: after each official fixture reset and even in a stabilized single-Editor session with exact baseline proof immediately before the run, the Editor asynchronously rewrites the freshly-created fixture packages (BP/DA) so the fixed SQLite/Revision Export no longer matches disk at Plan time. This is an environment/package-lifecycle issue, not a W4 product failure. Evidence preserved in `Output/W5Acceptance/w5r20-stabilized/` and matrix logs.
+- **R20** **blocked by DirectHost fixture/package lifecycle behavior** after bounded blocker-closure diagnosis. The closure pass reproduced the package rewrite deterministically and classified it as **semantic fixture mutation** (DA `IntValue` changed from `-17` to `108`; BP size changed 29793→29995) while the resident Editor was alive. The product freshness/Revision gate correctly rejected the stale disk. No Revision/Policy/Dirty/Recovery check was weakened. Original R20 remains blocked.
+- **Fail-closed case** captured: Policy rejection produced zero mutation and zero writes; before/after DA revision identical.
+- **Resident-vs-cold paired comparison** remains **deferred** (was coupled to the blocked R20 evidence slot in the original W5 pass; not required to complete the 50 GB W5-S checkpoint).
 - Reforge read-only inventory captured; no Reforge asset modified.
 
 W5-S:
-- `PerformanceFixtureCommandlet` source and project skeleton created.
-- **50 GB generation not completed/validated** in this pass; therefore W5-S is blocked/deferred at the 50 GB checkpoint.
-- 160–180 GB and SimulatedHDD50 remain blocked/deferred (no I/O Governor, no large fixture).
+- **50 GB intermediate fixture generated and validated** in `E:\WorkSpace\UEAgentKitPerfProject`.
+- `PerformanceFixtureCommandlet` completed with `GenerateArtPayload` (deterministic real Texture/StaticMesh package duplication), checkpoint/resume, disk guards, hard cap, and bounded memory collection.
+- Project size at validation: **53,715,786,581 bytes** (~50.03 GiB), **13,980 .uasset**, **79 .umap**, free disk > 50 GB.
+- Controlled disposable write fixture measured: **3 valid samples**, all Trust=verified; p50/min/max/mean reported, p95 marked unavailable (n=3).
+- 160–180 GB / SimulatedHDD50 remain **not authorized / not claimed**.
 
 ## 2. DirectHost R1 Results
 
@@ -67,12 +73,21 @@ Stage contribution (mean): Strong Verify dominates (~73–74%), assetLoad ~7%, a
 
 ## 4. R20 Blocked Evidence
 
-R20 = 20 logical operations split into two legal W4 batches (16-op batch + 4-op batch). It was attempted multiple ways:
+R20 = 20 logical operations split into two legal W4 batches (16-op batch + 4-op batch).
 
-1. Standard matrix per-sample reset/refresh: failed because Editor first-open after commandlet reset rewrites fixture packages.
-2. Stabilized single-Editor session (pre-open targets, live-enabled refresh, exact baseline proof immediately before run): baseline matched at proof time, but disk still changed before Plan, failing `The requested asset differs from the fixed SQLite index or Revision Export`.
+The W5 blocker-closure pass performed a bounded deterministic diagnosis:
 
-Per owner instruction, the attempt was bounded and is now **blocked**. No R20 samples are reported.
+1. Official `WriteFixturePlan Reset` + independent verification.
+2. Fresh Editor sessions and `ue_open_asset` on BP/DA targets.
+3. Captured disk SHA-256, size, mtime, `packageDirty`, open state, and canonical semantic exports before/after.
+4. Reproduced the rewrite in an active runner session: DA package changed on disk while the Editor stayed alive, even though `packageDirty=false` at inspection time.
+5. Canonical semantic comparison found a real semantic change: DA `IntValue` `-17 → 108`; BP size `29793 → 29995`.
+
+Classification: **A — semantic-changing fixture mutation** (not merely binary canonicalization). The DirectHost fixture generation/editor lifecycle is not stable for the original BP/DA R20 workload under resident measurement. The product's freshness/Revision gate correctly rejected the stale disk.
+
+No R20 samples are reported. Original R20 remains **blocked**. A separate stable orchestration workload was not used to replace it.
+
+Evidence: `Output/W5Acceptance/r20-fixture-lifecycle/`, `Output/W5Acceptance/r20-closure/`, and `Output/W5Acceptance/w5r20-stabilized/`.
 
 ## 5. Reforge Read-only Measurements
 
@@ -94,10 +109,62 @@ Evidence: `Output/W5Acceptance/reforge-readonly-inventory.json`.
 
 ## 6. W5-S Status
 
-- `PerformanceFixtureCommandlet` (CreateProjectProfile / CopySeedContent / GenerateSmallAssets / GenerateBlueprintSuite / ValidateFixture / CleanupFixture) source committed in `1d13965`.
-- `E:\WorkSpace\UEAgentKitPerfProject` skeleton created (uproject + minimal module), but **no commandlet build and no 50 GB generation** was completed.
-- W5-S is **blocked/deferred** at the 50 GB checkpoint.
-- 160–180 GB / SimulatedHDD50 are **not claimed**.
+### 6.1 Generator completion
+
+`PerformanceFixtureCommandlet` now supports:
+
+```text
+CreateProjectProfile
+CopySeedContent
+GenerateSmallAssets
+GenerateBlueprintSuite
+GenerateArtPayload   (new in blocker closure)
+ValidateFixture
+CleanupFixture
+```
+
+The new `GenerateArtPayload` stage uses deterministic legal UE package duplication of large real seed textures/static meshes from DarkRuins into `/Game/PerfArt/AP_*`, with:
+
+- JSONL checkpoint/resume per completed target
+- source/target/bytes/elapsed recorded
+- free-disk guard before every batch
+- project hard cap 200 GB
+- target stop boundary 50 GB
+- `CollectGarbage` after each duplicate to bound memory
+
+### 6.2 Validated 50 GB fixture
+
+```text
+projectPath              E:\WorkSpace\UEAgentKitPerfProject
+projectSizeBytes         53,715,786,581
+uassetCount              13,980
+umapCount                79
+seedContentBytes         27,339,598,713
+artPayloadGenerated      263
+status                   validated
+freeDiskBytes            273,224,110,080
+```
+
+`E:\WorkSpace\UEAgentKitPerfProject` was built (editor target + plugin link), and the commandlet ran against UE5.6.
+
+### 6.3 Controlled 50 GB disposable write fixture
+
+Fixture: `/Game/PerfWrite/DA_PerfWrite.DA_PerfWrite` (scalar write fixture, 1 logical op). Each sample used official fixture reset + independent verification + snapshot refresh before measurement. 3 measured WarmLoaded samples, all Trust=verified.
+
+| Metric (ms) | min | p50 | max | mean | stddev |
+|---|---:|---:|---:|---:|---:|
+| totalMs | 12832.642 | 13154.177 | 16610.624 | 14199.148 | 2094.579 |
+| planMs | 62.535 | 78.250 | 91.343 | 77.376 | 14.424 |
+| applyMs | 222.308 | 235.937 | 294.334 | 250.860 | 38.262 |
+| checkpointPreviewMs | 128.453 | 129.055 | 149.411 | 135.640 | 11.930 |
+| saveMs | 314.661 | 347.110 | 391.371 | 351.048 | 38.506 |
+| strongVerifyMs | 11211.932 | 11401.885 | 14614.950 | 12409.589 | 1912.259 |
+| semanticDiffMs | 80.796 | 82.969 | 97.062 | 86.942 | 8.831 |
+| validationMs | 38.819 | 44.529 | 44.805 | 42.718 | 3.379 |
+| trustMs | 472.654 | 473.833 | 524.991 | 490.493 | 29.882 |
+| assetLoadMs | 91.843 | 118.138 | 122.760 | 110.914 | 16.677 |
+
+p95 is **not claimable** for n=3. All 3 samples `Trust=verified`. Raw evidence under `Output/W5Acceptance/w5s-measure/attempt-*.json`.
 
 ## 7. Regression Gates
 
@@ -107,16 +174,21 @@ Ruff                              PASS
 compileall                        PASS
 ValidateRelease 0.7.0             PASS
 git diff --check                  PASS
+UE5.6 Direct Build                PASS (after PerformanceFixture C++ changes)
+UEAgentKitPerfProject editor      PASS (built against UE5.6)
+final DirectHost fixture Reset    PASS (2/2 independently verified)
+deterministic fail-closed case    PASS (zero mutation)
 ```
 
-R1/R5 raw evidence under `Output/W5Acceptance/w5r-final-matrix/`; Reforge inventory under `Output/W5Acceptance/`.
+R1/R5 raw evidence under `Output/W5Acceptance/w5r-final-matrix/`; Reforge inventory under `Output/W5Acceptance/`; R20 lifecycle evidence under `Output/W5Acceptance/r20-fixture-lifecycle/`; W5-S evidence under `Output/W5Acceptance/w5s-generate/` and `Output/W5Acceptance/w5s-measure/`.
 
 ## 8. M6 Decision Input
 
 - Strong Verify dominates real UE workflow wall time; it is the primary candidate for future scaling/optimization discussion.
 - Public result size is not a material bottleneck at R1/R5 sizes.
-- No failure corpus beyond the DirectHost fixture lifecycle blocker was collected because R20 blocked the planned failure-path evidence slot.
-- Large scale evidence remains blocked; M6 symbolic compression remains data-driven and not yet justified.
+- R20 remains blocked by DirectHost fixture lifecycle; original R20 evidence remains unavailable.
+- Deterministic fail-closed case is now available for failure-corpus/Memory input.
+- 50 GB scale checkpoint is validated and measured; expansion to 100 GB / 160–180 GB / SimulatedHDD50 requires separate owner approval.
 
 ## 9. Exit Gate Status
 
@@ -128,14 +200,14 @@ R1/R5 raw evidence under `Output/W5Acceptance/w5r-final-matrix/`; Reforge invent
 [x] all targets return to independently verified baseline  PASS (official reset before/after)
 [x] R1 stage breakdown                                     PASS
 [x] R5 stage breakdown                                     PASS
-[ ] R20 20-logical-op workload                             BLOCKED
-[ ] resident-vs-cold paired comparison                     BLOCKED (deferred with R20)
-[ ] raw attempts + p50/p95/sample counts                   PASS for R1/R5
-[ ] at least one deterministic fail-closed case            BLOCKED (deferred)
-[ ] Reforge read-only scale inventory                      PASS
-[ ] 50 GB generator validated                             BLOCKED
-[ ] 50 GB checkpoint Save + Strong Verify                 BLOCKED
-[ ] 160–180 GB / SimulatedHDD50 reported separately       BLOCKED/deferred
+[ ] R20 20-logical-op workload                             BLOCKED (semantic fixture mutation reproduced)
+[ ] resident-vs-cold paired comparison                     DEFERRED (not required for 50 GB closure)
+[x] raw attempts + p50/p95/sample counts                   PASS for R1/R5
+[x] at least one deterministic fail-closed case            PASS (policy rejection, zero mutation)
+[x] Reforge read-only scale inventory                      PASS
+[x] 50 GB generator validated                             PASS (53.7 GB, 13,980 uassets)
+[x] 50 GB checkpoint Save + Strong Verify                 PASS (3/3 Trust=verified; p95 unavailable)
+[ ] 160–180 GB / SimulatedHDD50 reported separately       BLOCKED/deferred (owner approval required)
 [x] full Python/release gates                             PASS (776/776, Ruff, compileall, ValidateRelease 0.7.0, diff check)
 [x] Result document written                               PASS
 ```
@@ -143,7 +215,7 @@ R1/R5 raw evidence under `Output/W5Acceptance/w5r-final-matrix/`; Reforge invent
 Overall outcome:
 
 ```text
-W5-R = partial (R1/R5 complete, R20 blocked)
-W5-S = blocked/deferred at 50 GB checkpoint
-W5   = blocked/deferred
+W5-R = partial (R1/R5 complete; R20 blocked; fail-closed PASS; cold-pair deferred)
+W5-S = 50 GB checkpoint PASS (validated + 3 measured samples); further scale deferred
+W5   = partial / blocked-deferred (R20 remains blocked; 50 GB W5-S checkpoint closed)
 ```
