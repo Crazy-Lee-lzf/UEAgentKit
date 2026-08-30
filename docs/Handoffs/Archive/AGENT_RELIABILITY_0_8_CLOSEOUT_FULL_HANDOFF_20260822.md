@@ -2,9 +2,9 @@
 
 > **完成更新（2026-08-23）**：本 Handoff 定义的 C0–C6 已全部执行完成。Reliability checkpoint 为 `79d4d87`；R4.1 正式运行 24/24 retained、12/12 paired fairness matched、0 drift、0 infrastructure failure、24/24 exact recovery。Capability Audit 结论为 0 Must-fix new tools，R5 继续 `deferred by benchmark evidence`。
 >
-> 正式结果：[`../Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md`](../Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md)
+> 正式结果：[`../../Plans/Archive/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md`](../../Plans/Archive/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md)
 >
-> 能力审计：[`../Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`](../Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md)
+> 能力审计：[`../../Plans/Archive/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`](../../Plans/Archive/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md)
 >
 > 最终交接：[`UEAGENTKIT_0_8_CAPABILITY_CLOSEOUT_HANDOFF_20260823.md`](UEAGENTKIT_0_8_CAPABILITY_CLOSEOUT_HANDOFF_20260823.md)
 >

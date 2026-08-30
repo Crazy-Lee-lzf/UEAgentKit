@@ -3,7 +3,7 @@
 > 日期：2026-08-19
 > 分支：`feature/agent-reliability`
 > 状态：R2 Semantic Diff 已完成实现、真实 UE5.6 Smoke、全量门禁与文档同步；停止在 R3 之前
-> 执行规范：[`../Handoffs/AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md`](../Handoffs/AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md)
+> 执行规范：[`../../Handoffs/Archive/AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md`](../../Handoffs/Archive/AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md)
 
 ## 1. 目标与停止点
 

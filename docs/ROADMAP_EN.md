@@ -2,7 +2,7 @@
 
 Updated: 2026-08-23
 
-> Development snapshot note (2026-08-27): W0-W3 of the Editor-resident Writer line are now complete and W4 bounded multi-operation is next. The current planning authority is the Chinese [`Plans/README.md`](Plans/README.md), Master Development Plan, and W4 Detailed Plan. This English document remains a 2026-08-23 snapshot until a full translation refresh.
+> Development snapshot note (2026-08-27): W0-W3 of the Editor-resident Writer line are now complete and W4 bounded multi-operation is next. The current planning authority is the Chinese [`Plans/README.md`](Plans/Archive/README.md), Master Development Plan, and W4 Detailed Plan. This English document remains a 2026-08-23 snapshot until a full translation refresh.
 
 The latest published release is **0.7.0** for Unreal Engine 5.6 and remains unchanged. The 0.8.x Context / Analysis / Agent Reliability capability scope is locally closed on `feature/agent-reliability`, including R0–R4, R4.1 repeat evidence, a complete Read/Write Gap Audit, and Scope Freeze. This closeout does not change the published package/plugin version, create a tag, build release artifacts, or push.
 
@@ -75,13 +75,13 @@ R0–R4 now provide deterministic Task Context, bounded Impact Analysis, Change-
 
 R4.1 retained all 24 attempts across four Full/Legacy paired anchors, with 12/12 fairness matches, zero measurement drift, zero infrastructure failures, and 24/24 exact recovery. Full achieved 3/3 Trusted results for both stale safe-stop and Blueprint default. It still produced 3/3 False Success on the direct-only high-fanout anchor and only 1/3 exact Trusted scalar claims because two claims stringified a numeric before-value. These failures remain visible and define known Agent-boundary limitations; they are not evidence for another UE read or write tool.
 
-The audit covers all 105 public tools and 18 registered Patch Operations and concludes `0 must-fix new tools`. See [`Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md`](Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md) and [`Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`](Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md).
+The audit covers all 105 public tools and 18 registered Patch Operations and concludes `0 must-fix new tools`. See [`Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md`](Plans/Archive/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md) and [`Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`](Plans/Archive/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md).
 
 Value Provenance and Execution Trace remain deferred by benchmark evidence. R5 may be reopened only after repeated real cases identify either as the primary blocker and show higher expected value than guidance, Writer, or Index fixes.
 
 ## Post-0.8 execution order
 
-See [`Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md`](Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md) for the current implementation plan. The priority is Editor-resident low-latency write paths, parallel Registry-only/Fast-Revision performance work, checkpointed independent verification, narrow Agent result/bound hardening, then maintainability/CI and 0.9 collaboration. Formal 0.8 package release is a separate user-authorized track and does not block technical development.
+See [`Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md`](Plans/Archive/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md) for the current implementation plan. The priority is Editor-resident low-latency write paths, parallel Registry-only/Fast-Revision performance work, checkpointed independent verification, narrow Agent result/bound hardening, then maintainability/CI and 0.9 collaboration. Formal 0.8 package release is a separate user-authorized track and does not block technical development.
 
 ## 0.9.0: collaboration and conflict awareness
 

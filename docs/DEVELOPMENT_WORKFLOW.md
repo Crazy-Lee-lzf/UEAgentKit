@@ -27,7 +27,7 @@ Before writing or revising any Detailed Plan / blocker-closure plan:
 
 ```text
 1. Inspect actual git status / branch / HEAD.
-2. Read docs/Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260828.md.
+2. Read docs/Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260830.md.
 3. Read docs/DEVELOPMENT_WORKFLOW.md (this file).
 4. Read docs/Plans/README.md.
 5. Read the current parent Track plan and latest Result.
@@ -400,7 +400,7 @@ exactly as many times as needed
 
 ## 13. Deferred test-suite cleanup after current Track integration
 
-Test-suite restructuring is **recorded but intentionally deferred** until the currently active development Tracks have reached stable checkpoints and their work has been integrated. Do not start broad test refactors while W / M / C / X / V integration is still in flight merely to reduce test count.
+Test-suite restructuring was **recorded and deferred until the W + V integration checkpoint**. That checkpoint is now complete, so the maintenance task is eligible to start, but it must still be selected explicitly by the owner. Do not begin broad test refactors merely to reduce raw test count while another selected feature Track is in flight.
 
 Current audit snapshot (2026-08-30):
 
@@ -413,7 +413,7 @@ structurally similar candidates            20 groups / 47 tests
 
 The audit indicates that the primary cleanup opportunity is **test structure and execution tiering**, not wholesale deletion of coverage. Several validation/error-boundary tests are the same structural template with different operations or parameters and are candidates for table-driven/subTest conversion. Some `*_smoke_contract.py` tests statically assert script text that may overlap with real integration/UE behavior coverage and should be reviewed case by case.
 
-The deferred cleanup should begin only after the current integration checkpoint and should first measure, not guess:
+When the owner selects this cleanup task, begin by measuring rather than guessing:
 
 ```text
 1. produce per-module / per-test timing data;

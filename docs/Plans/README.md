@@ -1,148 +1,89 @@
-# UEAgentKit Plans 文档索引
+# UEAgentKit Plans — Current Navigation
 
-> 更新时间：2026-08-30
+> Updated: 2026-08-30
 >
-> 本目录保留当前计划、阶段结果与历史执行记录。历史文件不删除、不移动；后续工作应先从本索引进入，避免误用已经完成或被新计划取代的旧文档。
+> This directory now keeps only **current project-level planning/navigation documents** at the root. Completed phase Plans/Results are preserved under `Archive/`.
 
-## 当前权威入口
+## Read first
 
-| 层级 | 文档 | 用途 | 状态 |
-|---|---|---|---|
-| 项目总交接 | [`../Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260828.md`](../Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260828.md) | 当前 HEAD、全 Track 状态、安全边界与接手步骤 | **新 Chat / Agent 先读** |
-| 开发执行规范 | [`../DEVELOPMENT_WORKFLOW.md`](../DEVELOPMENT_WORKFLOW.md) | G0-G3 测试分级、U0-U3 UE 验收、UE lease、性能采样与文档粒度 | **任何 Detailed Plan / Blocker Plan 强制前置** |
-| W+V 集成清单 | [`UEAGENTKIT_W_V_INTEGRATION_CHECKLIST_20260830.md`](UEAGENTKIT_W_V_INTEGRATION_CHECKLIST_20260830.md) | Writer + Knowledge Web 本地集成顺序、边界与 G3 预算 | executed |
-| W+V 集成结果 | [`UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md`](UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md) | W/V 合并、845 项 G3、R20 延后解释与 Git worktree 注意事项 | **G3 PASS / 当前集成结果** |
-| 项目方向 | [`UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md`](UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md) | 项目级优先级、Track 边界、架构取舍 | 当前主计划 |
-| 中期拆解 | [`UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md`](UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md) | 任务依赖、验收契约与跨 Track 关系 | 当前执行规格 |
-| Track V 计划 | [`UEAGENTKIT_TRACK_V_READ_ONLY_KNOWLEDGE_WEB_DETAILED_PLAN_20260829.md`](UEAGENTKIT_TRACK_V_READ_ONLY_KNOWLEDGE_WEB_DETAILED_PLAN_20260829.md) | V1 本地只读知识浏览器 → V2 可视化分析面板；独立 worktree、零 UE Editor 占用 | complete |
-| Track V V2 计划 | [`UEAGENTKIT_V2_KNOWLEDGE_VISUALIZATION_DETAILED_PLAN_20260829.md`](UEAGENTKIT_V2_KNOWLEDGE_VISUALIZATION_DETAILED_PLAN_20260829.md) | V2 可视化面板：V2-0 数据/API 契约冻结 → V2-1 图/影响 → V2-2 覆盖/时间线/陈旧 → V2-3 5000 节点性能门禁 | complete |
-| Track V V2 结果 | [`UEAGENTKIT_V2_KNOWLEDGE_VISUALIZATION_RESULT_20260829.md`](UEAGENTKIT_V2_KNOWLEDGE_VISUALIZATION_RESULT_20260829.md) | V2 可视化面板结果：5 个只读端点 + Canvas 图 + 43 个新测试 + 5000 节点性能基准 | **complete / integrated** |
-| Track V V1 结果 | [`UEAGENTKIT_V1_READ_ONLY_KNOWLEDGE_BROWSER_RESULT_20260829.md`](UEAGENTKIT_V1_READ_ONLY_KNOWLEDGE_BROWSER_RESULT_20260829.md) | V1 本地只读知识浏览器：全部验收 PASS，全量 792 测试 OK，已提交 49b8fa61 | complete |
-| 当前实现 | [`UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_DETAILED_PLAN_20260826.md`](UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_DETAILED_PLAN_20260826.md) | W4-0～W4-7 的具体实现与真实 UE 验收 | complete |
-| 当前子阶段 | [`UEAGENTKIT_W4_1_BOUNDED_BATCH_PLAN_DETAILED_PLAN_20260828.md`](UEAGENTKIT_W4_1_BOUNDED_BATCH_PLAN_DETAILED_PLAN_20260828.md) | W4-1 只读 Bounded Batch Plan 的实现与验收契约 | complete |
-| 当前子阶段结果 | [`UEAGENTKIT_W4_1_BOUNDED_BATCH_PLAN_RESULT_20260828.md`](UEAGENTKIT_W4_1_BOUNDED_BATCH_PLAN_RESULT_20260828.md) | W4-1 真实 fixed-project S1/S2 只读规划证据 | complete |
-| 当前子阶段 | [`UEAGENTKIT_W4_2_SINGLE_ASSET_MULTI_OPERATION_APPLY_DETAILED_PLAN_20260828.md`](UEAGENTKIT_W4_2_SINGLE_ASSET_MULTI_OPERATION_APPLY_DETAILED_PLAN_20260828.md) | W4-2 单资产多操作 resident Apply 的实现与验收契约 | complete |
-| 当前子阶段结果 | [`UEAGENTKIT_W4_2_SINGLE_ASSET_MULTI_OPERATION_APPLY_RESULT_20260828.md`](UEAGENTKIT_W4_2_SINGLE_ASSET_MULTI_OPERATION_APPLY_RESULT_20260828.md) | W4-2 真实 UE C1 与精确 transaction 链证据 | complete |
-| 当前子阶段 | [`UEAGENTKIT_W4_3_MULTI_ASSET_RESIDENT_APPLY_DETAILED_PLAN_20260828.md`](UEAGENTKIT_W4_3_MULTI_ASSET_RESIDENT_APPLY_DETAILED_PLAN_20260828.md) | W4-3 多资产 resident Apply 与 resident-only 恢复的验收契约 | complete |
-| 当前子阶段结果 | [`UEAGENTKIT_W4_3_MULTI_ASSET_RESIDENT_APPLY_RESULT_20260828.md`](UEAGENTKIT_W4_3_MULTI_ASSET_RESIDENT_APPLY_RESULT_20260828.md) | W4-3 真实 UE C2-C4 证据与最终 fixture 恢复 | complete |
-| 当前子阶段 | [`UEAGENTKIT_W4_4_MULTI_ASSET_CHECKPOINT_SAVE_DETAILED_PLAN_20260828.md`](UEAGENTKIT_W4_4_MULTI_ASSET_CHECKPOINT_SAVE_DETAILED_PLAN_20260828.md) | W4-4 多资产 checkpoint save 的验收契约 | complete |
-| 当前子阶段结果 | [`UEAGENTKIT_W4_4_MULTI_ASSET_CHECKPOINT_SAVE_RESULT_20260828.md`](UEAGENTKIT_W4_4_MULTI_ASSET_CHECKPOINT_SAVE_RESULT_20260828.md) | W4-4 真实 UE C5-C8 证据与最终 fixture 恢复 | complete |
-| 当前子阶段 | [`UEAGENTKIT_W4_5_AGGREGATE_STRONG_VERIFY_SEMANTIC_DIFF_TRUST_DETAILED_PLAN_20260828.md`](UEAGENTKIT_W4_5_AGGREGATE_STRONG_VERIFY_SEMANTIC_DIFF_TRUST_DETAILED_PLAN_20260828.md) | W4-5 aggregate Strong Verify / Semantic Diff / Trust 的验收契约 | complete |
-| 当前子阶段结果 | [`UEAGENTKIT_W4_5_AGGREGATE_STRONG_VERIFY_SEMANTIC_DIFF_TRUST_RESULT_20260828.md`](UEAGENTKIT_W4_5_AGGREGATE_STRONG_VERIFY_SEMANTIC_DIFF_TRUST_RESULT_20260828.md) | W4-5 真实 UE C9-C12 证据与最终 fixture 恢复 | complete |
-| 当前子阶段 | [`UEAGENTKIT_W4_6_RECOVERY_AND_RESTART_HARDENING_DETAILED_PLAN_20260829.md`](UEAGENTKIT_W4_6_RECOVERY_AND_RESTART_HARDENING_DETAILED_PLAN_20260829.md) | W4-6 Recovery / Restart / partial recovery 的验收契约与 UE5.6 顺序校正 | complete |
-| 当前子阶段结果 | [`UEAGENTKIT_W4_6_RECOVERY_AND_RESTART_HARDENING_RESULT_20260829.md`](UEAGENTKIT_W4_6_RECOVERY_AND_RESTART_HARDENING_RESULT_20260829.md) | W4-6 真实 UE H1-H6、最终 fixture 与回归门禁证据 | complete |
-| 当前子阶段 | [`UEAGENTKIT_W4_7_FULL_ACCEPTANCE_AND_DOCUMENTATION_DETAILED_PLAN_20260829.md`](UEAGENTKIT_W4_7_FULL_ACCEPTANCE_AND_DOCUMENTATION_DETAILED_PLAN_20260829.md) | W4-7 C1-C12 全量真实 UE、B0/B1 对比、证据契约冻结与最终文档收口 | complete |
-| 当前子阶段结果 | [`UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_RESULT_20260829.md`](UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_RESULT_20260829.md) | W4 最终 C1-C12 全量验收、W4 vs W3 指标、证据契约冻结与文档收口 | **complete / 当前 W4 结果** |
-| 当前任务 | [`UEAGENTKIT_D1_AGENT_WORKFLOW_SPLIT_DETAILED_PLAN_20260829.md`](UEAGENTKIT_D1_AGENT_WORKFLOW_SPLIT_DETAILED_PLAN_20260829.md) | W4 后立即执行的 `agent_workflow.py` 纯重构拆分；冻结 API / Tool / serialized evidence 行为 | complete |
-| 当前任务结果 | [`UEAGENTKIT_D1_AGENT_WORKFLOW_SPLIT_RESULT_20260829.md`](UEAGENTKIT_D1_AGENT_WORKFLOW_SPLIT_RESULT_20260829.md) | D1 纯 AST 移动 0 mismatch、Tool/API 不变、真实 UE R1/R2 与最终 fixture 验收 | **complete / 当前 D1 结果** |
-| 当前任务 | [`UEAGENTKIT_W5_REAL_PROJECT_ACCEPTANCE_AND_SCALE_BASELINE_DETAILED_PLAN_20260829.md`](UEAGENTKIT_W5_REAL_PROJECT_ACCEPTANCE_AND_SCALE_BASELINE_DETAILED_PLAN_20260829.md) | DirectHost 写入验收 + Reforge 只读 + 50 GB 规模门禁 | complete (R20 blocked; W5-S 50 GB closed) |
-| W5 结果 | [`UEAGENTKIT_W5_REAL_PROJECT_ACCEPTANCE_RESULT_20260829.md`](UEAGENTKIT_W5_REAL_PROJECT_ACCEPTANCE_RESULT_20260829.md) | 原计划 R1/R5 完整、R20 blocked；50 GB checkpoint validated + 3 samples；fail-closed PASS | historical result partial; **project-level R20 now deferred fixture debt** |
-| 当前 blocker closure | [`UEAGENTKIT_W5_BLOCKER_CLOSURE_R20_AND_50GB_SCALE_DETAILED_PLAN_20260829.md`](UEAGENTKIT_W5_BLOCKER_CLOSURE_R20_AND_50GB_SCALE_DETAILED_PLAN_20260829.md) | R20 稳定 Fixture 闭环 + owner 已授权的 50 GB PerformanceFixture checkpoint | **complete (R20 remains blocked; W5-S checkpoint closed)** |
-| 当前步骤 | [`UEAGENTKIT_W4_0_CONTRACT_FREEZE_AND_BASELINE_PLAN_20260827.md`](UEAGENTKIT_W4_0_CONTRACT_FREEZE_AND_BASELINE_PLAN_20260827.md) | W4-0 契约冻结与 W3 手工编排基线采集 | complete |
-| 当前步骤结果 | [`UEAGENTKIT_W4_0_CONTRACT_FREEZE_AND_BASELINE_RESULT_20260827.md`](UEAGENTKIT_W4_0_CONTRACT_FREEZE_AND_BASELINE_RESULT_20260827.md) | W4-0 B0/B1 真实 UE 手工编排基线与冻结契约 | complete |
-| 最近完成 | [`UEAGENTKIT_W3_CHECKPOINT_STRONG_VERIFY_RESULT_20260825.md`](UEAGENTKIT_W3_CHECKPOINT_STRONG_VERIFY_RESULT_20260825.md) | W3 C0-C6 最终证据与 W4 入口基线 | complete |
-| 计划审计 | [`UEAGENTKIT_MASTER_PLAN_CORRECTION_NOTES_20260827.md`](UEAGENTKIT_MASTER_PLAN_CORRECTION_NOTES_20260827.md) | 2026-08-27 主计划校正记录 | 已处理的审计记录，不是新规格 |
+| Order | Document | Purpose |
+|---:|---|---|
+| 1 | [`../Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260830.md`](../Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260830.md) | Canonical current repository/Track/worktree takeover state |
+| 2 | [`../DEVELOPMENT_WORKFLOW.md`](../DEVELOPMENT_WORKFLOW.md) | Mandatory G0-G3 test gates, U0-U3 UE validation, UE lease, documentation/commit rules |
+| 3 | [`UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md`](UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md) | Writer + Knowledge Web combined G3 evidence and R20 interpretation |
+| 4 | [`UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md`](UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md) | Project direction / Track architecture; status wording may be historical |
+| 5 | [`UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md`](UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md) | Cross-Track dependencies and acceptance contracts; current handoff overrides stale progress wording |
 
-### 冲突时的解释顺序
+## Current project state
 
 ```text
-项目优先级 / Track 取舍
-→ MASTER_DEVELOPMENT_PLAN
-
-跨 Track 依赖 / 任务验收
-→ MIDTERM_EXECUTION_SPEC
-
-W4 内部阶段、状态机、失败恢复与 C1-C12
-→ W4 Detailed Plan
-
-已经完成的事实与真实 UE 证据
-→ 对应 RESULT 文档
+published product                     0.7.0 / UE5.6
+Track W / Writer                      complete
+  W0-W4                              complete
+  D1                                 complete
+  W5 authorized scope                complete
+  W5-S 50 GiB                        PASS
+  R20                                deferred DirectHost fixture-lifecycle debt
+Track V / Knowledge Web              complete
+W + V integration                    G3 PASS
+portable integration suite           845 / 845 PASS
 ```
 
-若这些文档之间出现新冲突，应修正文档本身，不依赖对话记忆覆盖磁盘事实。
+R20 is not a project-level Writer blocker. The product correctly fails closed on the DirectHost fixture's semantic disk drift.
 
-## 当前阶段
+No 100 GiB / 160–180 GiB / SimulatedHDD50 expansion is currently authorized or claimed.
+
+## What belongs in this root
+
+Keep only documents that are needed to decide or execute the **current** development line:
 
 ```text
-0.7.0 published                         = unchanged
-0.8 capability scope                    = locally closed
-Track W / Writer                        = complete
-  W0-W4                                 = complete
-  D1                                    = complete
-  W5 authorized scope                   = complete; R20 deferred fixture debt
-  W5-S 50 GB                            = PASS
-Track V / Knowledge Web                 = complete (V1 + V2)
-W + V integration                       = G3 PASS (845/845)
-R5 Value Provenance / Execution Trace   = deferred by benchmark evidence
+README.md
+current project-level plan/spec
+latest cross-Track integration result
 ```
 
-当前 `feature/live-writer-expansion` 的 W3 收口 checkpoint：
+A normal new stage should add at most:
 
 ```text
-3280102 fix: close W3 live-write continuation and snapshot refresh
-ab731f1 test: cover W3 continuation and full snapshot refresh
-45e6ea2 docs: close W3 checkpoint strong verify
+ONE Detailed Plan
+ONE Result
 ```
 
-W4 已收口：C1-C12 全量真实 UE 验收 PASS、W4 vs W3 B0/B1 指标已记录、证据契约已冻结、最终 transaction fixture 独立验证为 2/2、active paired snapshot 已同步到最终 Revisions。最终事实以 `UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_RESULT_20260829.md` 为准。
+After the stage is integrated/closed, move its Plan/Result to `Archive/` during a later documentation-maintenance pass.
 
-## Writer 历史链
+Create a separate blocker-closure Plan only for a real blocker with a different investigation/exit gate.
 
-按时间顺序保留：
+## Historical plans and results
+
+All completed/historical phase documents are preserved at:
+
+[`Archive/`](Archive/)
+
+This includes Agent Reliability R0-R4, 0.8 capability closeout, Writer W0-W5, D1, Track V V1/V2, animation follow-up plans, correction notes, and the executed W+V integration checklist.
+
+Archive documents are historical evidence. When their status wording conflicts with current state, precedence is:
 
 ```text
-UEAGENTKIT_EDITOR_RESIDENT_WRITER_W0_BASELINE_20260823.md
-UEAGENTKIT_EDITOR_RESIDENT_WRITER_W0_W1_DETAILED_PLAN_20260823.md
-UEAGENTKIT_EDITOR_RESIDENT_WRITER_W1_ACCEPTANCE_PLAN_20260824.md
-UEAGENTKIT_EDITOR_RESIDENT_WRITER_W1_RECOVERY_CLOSURE_PLAN_20260824.md
-UEAGENTKIT_EDITOR_RESIDENT_WRITER_W1_ACCEPTANCE_RESULT_20260824.md
-UEAGENTKIT_W2_FAST_RESIDENT_VERIFY_DETAILED_PLAN_20260824.md
-UEAGENTKIT_W2_FAST_RESIDENT_VERIFY_RESULT_20260824.md
-UEAGENTKIT_W3_CHECKPOINT_STRONG_VERIFY_DETAILED_PLAN_20260825.md
-UEAGENTKIT_W3_BP_SNAPSHOT_REFRESH_BLOCKER_CLOSURE_PLAN_20260825.md
-UEAGENTKIT_W3_CHECKPOINT_STRONG_VERIFY_RESULT_20260825.md
-UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_DETAILED_PLAN_20260826.md
-UEAGENTKIT_W4_0_CONTRACT_FREEZE_AND_BASELINE_PLAN_20260827.md
-UEAGENTKIT_W4_0_CONTRACT_FREEZE_AND_BASELINE_RESULT_20260827.md
-UEAGENTKIT_W4_1_BOUNDED_BATCH_PLAN_DETAILED_PLAN_20260828.md
-UEAGENTKIT_W4_1_BOUNDED_BATCH_PLAN_RESULT_20260828.md
-UEAGENTKIT_W4_2_SINGLE_ASSET_MULTI_OPERATION_APPLY_DETAILED_PLAN_20260828.md
-UEAGENTKIT_W4_2_SINGLE_ASSET_MULTI_OPERATION_APPLY_RESULT_20260828.md
-UEAGENTKIT_W4_3_MULTI_ASSET_RESIDENT_APPLY_DETAILED_PLAN_20260828.md
-UEAGENTKIT_W4_3_MULTI_ASSET_RESIDENT_APPLY_RESULT_20260828.md
-UEAGENTKIT_W4_4_MULTI_ASSET_CHECKPOINT_SAVE_DETAILED_PLAN_20260828.md
-UEAGENTKIT_W4_4_MULTI_ASSET_CHECKPOINT_SAVE_RESULT_20260828.md
-UEAGENTKIT_W4_5_AGGREGATE_STRONG_VERIFY_SEMANTIC_DIFF_TRUST_DETAILED_PLAN_20260828.md
-UEAGENTKIT_W4_5_AGGREGATE_STRONG_VERIFY_SEMANTIC_DIFF_TRUST_RESULT_20260828.md
-UEAGENTKIT_W4_6_RECOVERY_AND_RESTART_HARDENING_DETAILED_PLAN_20260829.md
-UEAGENTKIT_W4_6_RECOVERY_AND_RESTART_HARDENING_RESULT_20260829.md
-UEAGENTKIT_W4_7_FULL_ACCEPTANCE_AND_DOCUMENTATION_DETAILED_PLAN_20260829.md
-UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_RESULT_20260829.md
-UEAGENTKIT_D1_AGENT_WORKFLOW_SPLIT_DETAILED_PLAN_20260829.md
-UEAGENTKIT_D1_AGENT_WORKFLOW_SPLIT_RESULT_20260829.md
-UEAGENTKIT_W5_REAL_PROJECT_ACCEPTANCE_AND_SCALE_BASELINE_DETAILED_PLAN_20260829.md
+actual Git/repository facts
+→ current 2026-08-30 handoff
+→ DEVELOPMENT_WORKFLOW.md
+→ current Plans README
+→ latest Result for the relevant capability
+→ historical Plan/Handoff wording
 ```
 
-其中 PLAN 表示当时的执行设计，RESULT 表示最终事实。阶段完成后，RESULT 优先于同阶段 PLAN 中的中间状态或 blocker 描述。
+## Next work
 
-## 0.8 Closeout 历史
+No next functional Track is automatically selected by this index.
 
-以下文档记录 2026-08-23 的 0.8 capability closeout，继续作为历史证据保留：
+Current candidate families are still described by Master/Midterm:
 
 ```text
-UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md
-UEAGENTKIT_0_8_RELEASE_REVIEW_20260823.md
-UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md
+M  Memory accumulation / retrieval
+C  Source Control / P4 awareness
+X  deeper UE read/write/analysis capabilities
+D  engineering maintenance (tool metadata, CI, API docs, test-suite cleanup, Git worktree cleanup)
 ```
 
-`UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md` 是从 0.8 closeout 进入 Writer 工作的历史桥接计划；当前项目规划入口已经由 2026-08-27 Master Plan / Midterm Spec 接替。其历史基线（例如 739 项 full Python suite）不应被解释为当前 live-writer 分支的固定测试数量。
-
-## 维护规则
-
-- 不删除历史 PLAN/RESULT/Handoff，只标注当前入口与状态。
-- 不把测试数量永久硬编码为未来门禁；使用当前分支实际 discovered suite，并在结果文档记录当次值。
-- 新的大阶段优先新增一个 Detailed Plan + 一个最终 Result，不在多个总计划中复制阶段内部状态机。
-- 任何新 Detailed Plan / Blocker Closure Plan 必须先读取 `docs/DEVELOPMENT_WORKFLOW.md`，并包含 Validation Budget（G0/G1/G2 + U-level）。
-- 全量 Python suite 在同一阶段收口 pass 中最多执行一次；若已独立执行 full suite + Ruff，`ValidateRelease.py` 必须使用 `--skip-tests --skip-ruff`，避免重复门禁。
-- `MASTER_DEVELOPMENT_PLAN` 负责方向；具体阶段的 Detailed Plan 负责实现细节，避免双重维护。
-- 发布版本、Tag、Push、Release artifact 始终属于独立授权流程，不由计划文档自动授权。
+Before starting one, create/read its current Detailed Plan and include a Validation Budget from `docs/DEVELOPMENT_WORKFLOW.md`.

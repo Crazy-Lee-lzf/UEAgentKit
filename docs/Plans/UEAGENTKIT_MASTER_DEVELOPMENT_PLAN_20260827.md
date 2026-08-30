@@ -385,7 +385,7 @@ ab731f1 test: cover W3 continuation and full snapshot refresh
 ### W4锛氬鎿嶄綔 / 鏈夌晫鎵归噺锛堜富绾匡紝璇︾粏璁″垝宸插喕缁擄級
 
 W4 璇︾粏璁″垝瑙?
-[`UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_DETAILED_PLAN_20260826.md`](UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_DETAILED_PLAN_20260826.md)锛?
+[`UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_DETAILED_PLAN_20260826.md`](Archive/UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_DETAILED_PLAN_20260826.md)锛?
 鏈富璁″垝涓嶉噸澶嶅叾鍐呭锛屽彧鍥哄畾瀹冨湪椤圭洰灞傜殑浣嶇疆涓庢帓鏈熴€?
 
 闃舵瀹氫箟浠?W4 璇︾粏璁″垝绗?10銆?5 鑺備负鍞竴鏉冨▉鏉ユ簮锛涙湰涓昏鍒掍笉缁存姢绗簩濂楅樁娈电紪鍙枫€傚綋鍓嶆潈濞侀樁娈典负锛?

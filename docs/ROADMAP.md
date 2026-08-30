@@ -2,7 +2,7 @@
 
 更新时间：2026-08-27
 
-当前已发布版本为 **0.7.0**，支持 Unreal Engine 5.6，正式版本保持不变。0.8.x Context / Analysis / Agent Reliability capability scope 已完成本地收口，R5 继续 `deferred by benchmark evidence`。当前 `feature/live-writer-expansion` 已完成 W0-W3，下一 Writer 主线为 W4 Multi-operation / Bounded Batch。项目级方向与跨 Track 依赖不再在本路线图重复维护，统一从 [`Plans/README.md`](Plans/README.md) 进入 2026-08-27 Master Plan / Midterm Spec。正式 package release、Tag 与 Push 仍是独立授权流程。
+当前已发布版本为 **0.7.0**，支持 Unreal Engine 5.6，正式版本保持不变。0.8.x Context / Analysis / Agent Reliability capability scope 已完成本地收口，R5 继续 `deferred by benchmark evidence`。当前 `feature/live-writer-expansion` 已完成 W0-W3，下一 Writer 主线为 W4 Multi-operation / Bounded Batch。项目级方向与跨 Track 依赖不再在本路线图重复维护，统一从 [`Plans/README.md`](Plans/Archive/README.md) 进入 2026-08-27 Master Plan / Midterm Spec。正式 package release、Tag 与 Push 仍是独立授权流程。
 
 ## 总体方向
 
@@ -75,7 +75,7 @@ Realtime I/O 与 Memory/Context 的完整职责、性能预算、风险分级和
 
 ## 0.8.0-dev：Realtime Animation Tools（已完成，已合并 main）
 
-2026-08 在 `feature/live-editor-realtime-io` 上完成动画比例诊断与受控修复的完整纵向闭环，并已 fast-forward 合并进 `main`。逐阶段交付与验收见 [`Plans/ANIMATION_TOOLS_FOLLOWUP_PLAN_20260806.md`](Plans/ANIMATION_TOOLS_FOLLOWUP_PLAN_20260806.md) 与 [`Plans/ANIMATION_TOOLS_P5_P9_DETAILED_PLAN_20260815.md`](Plans/ANIMATION_TOOLS_P5_P9_DETAILED_PLAN_20260815.md)。
+2026-08 在 `feature/live-editor-realtime-io` 上完成动画比例诊断与受控修复的完整纵向闭环，并已 fast-forward 合并进 `main`。逐阶段交付与验收见 [`Plans/ANIMATION_TOOLS_FOLLOWUP_PLAN_20260806.md`](Plans/Archive/ANIMATION_TOOLS_FOLLOWUP_PLAN_20260806.md) 与 [`Plans/ANIMATION_TOOLS_P5_P9_DETAILED_PLAN_20260815.md`](Plans/Archive/ANIMATION_TOOLS_P5_P9_DETAILED_PLAN_20260815.md)。
 
 - **P0 单资产动画比例修复**：`ue_diagnose_animation_scale` → `ue_plan_animation_scale_fix` → `setAnimationScaleFix`（Force Root Lock / Root Motion / Root Track Scale）+ Undo / Discard / Authorized Save / Independent Verify / Index Refresh 闭环。
 - **P1 批量只读审计**：`ue_start_animation_scale_audit` / `ue_get_animation_scale_audit` / `ue_cancel_animation_scale_audit` / `ue_export_animation_scale_audit_report`（显式列表，1000 上限 / Batch 8 / Page 50）。
@@ -93,7 +93,7 @@ Realtime I/O 与 Memory/Context 的完整职责、性能预算、风险分级和
 
 该阶段已完成 R0–R4、R4.1 与 C0–C6 capability closeout。当前不再继续扩展这一阶段本身；R5 保持冻结。后续产品重点转向 Editor-resident Writer 的低延迟连续写入、大型项目性能与小范围 Agent UX hardening。
 
-推荐开发分支：`feature/agent-reliability`。详细执行计划见 [`Plans/AGENT_RELIABILITY_CONTEXT_ANALYSIS_PLAN_20260815.md`](Plans/AGENT_RELIABILITY_CONTEXT_ANALYSIS_PLAN_20260815.md)。
+推荐开发分支：`feature/agent-reliability`。详细执行计划见 [`Plans/AGENT_RELIABILITY_CONTEXT_ANALYSIS_PLAN_20260815.md`](Plans/Archive/AGENT_RELIABILITY_CONTEXT_ANALYSIS_PLAN_20260815.md)。
 
 里程碑按可独立提交、可中断的方式推进：
 
@@ -112,9 +112,9 @@ R0.0（现状审计 + 复用矩阵 + 最小 Schema）、R0.1（`ue_get_task_cont
 
 - `ue_get_task_context(query + assetPaths → targetAssets → revisionState → memory/activeWork → liveEditor → changeSet → correlation → risks → nextExpansions)` 在全部模式下注册为只读 query 组 Tool；Memory / Live / Change Set / Revision 任一来源不可用时只降级对应 section，不拖垮整个请求。
 - `risks` 仅包含确定性事实（dirty/stale/conflicted/not-found/session-mismatch 等），零模型推断；输出受 `max_output_tokens` 强制裁剪并在 `outputBudget` 中显式报告。
-- R0.2：`relevantAssets` 为确定性相关资产候选集——query 分词（≤8 term）+ 复用 Asset Search 与少量 Symbol Search 补充、与显式目标互斥、固定排序、Top N≤8，每条带 `assetPath / assetClass / source / whyIncluded / matchKind`，无 score/confidence；预算不足时先裁候选 metadata 再减候选数量，候选永不优先于 target identity / high risk / revision summary。真实 Reforge Smoke 观察与验证见 [`Plans/AGENT_RELIABILITY_R0_REAL_CONTEXT_SMOKE_20260816.md`](Plans/AGENT_RELIABILITY_R0_REAL_CONTEXT_SMOKE_20260816.md)。
-- R0.3：`correlation` 为只读、非持久化、零模型推断的 Cross-source Correlation——精确键联接 Active Work、显式 Change Set、Live Editor Session 与 Memory Evidence（session id 相等、资产路径集合交集、changeSetId 字面量、资产 scope Evidence）；不新增 Memory/ChangeSet Schema、不扫描 workflow 私有 `_change_sets`、不自动发现 Change Set、无引用遍历；链接固定排序上限 16 条，边界计数在 summary 如实报告；预算不足时先裁 correlation links/summary。交接见 [`Handoffs/AGENT_RELIABILITY_R0_SLICE3_HANDOFF_20260816.md`](Handoffs/AGENT_RELIABILITY_R0_SLICE3_HANDOFF_20260816.md)。
-- 复用矩阵、Request/Response Schema 与已知边界见 [`Plans/AGENT_RELIABILITY_R0_AUDIT_AND_SCHEMA_20260815.md`](Plans/AGENT_RELIABILITY_R0_AUDIT_AND_SCHEMA_20260815.md)。
+- R0.2：`relevantAssets` 为确定性相关资产候选集——query 分词（≤8 term）+ 复用 Asset Search 与少量 Symbol Search 补充、与显式目标互斥、固定排序、Top N≤8，每条带 `assetPath / assetClass / source / whyIncluded / matchKind`，无 score/confidence；预算不足时先裁候选 metadata 再减候选数量，候选永不优先于 target identity / high risk / revision summary。真实 Reforge Smoke 观察与验证见 [`Plans/AGENT_RELIABILITY_R0_REAL_CONTEXT_SMOKE_20260816.md`](Plans/Archive/AGENT_RELIABILITY_R0_REAL_CONTEXT_SMOKE_20260816.md)。
+- R0.3：`correlation` 为只读、非持久化、零模型推断的 Cross-source Correlation——精确键联接 Active Work、显式 Change Set、Live Editor Session 与 Memory Evidence（session id 相等、资产路径集合交集、changeSetId 字面量、资产 scope Evidence）；不新增 Memory/ChangeSet Schema、不扫描 workflow 私有 `_change_sets`、不自动发现 Change Set、无引用遍历；链接固定排序上限 16 条，边界计数在 summary 如实报告；预算不足时先裁 correlation links/summary。交接见 [`Handoffs/AGENT_RELIABILITY_R0_SLICE3_HANDOFF_20260816.md`](Handoffs/Archive/AGENT_RELIABILITY_R0_SLICE3_HANDOFF_20260816.md)。
+- 复用矩阵、Request/Response Schema 与已知边界见 [`Plans/AGENT_RELIABILITY_R0_AUDIT_AND_SCHEMA_20260815.md`](Plans/Archive/AGENT_RELIABILITY_R0_AUDIT_AND_SCHEMA_20260815.md)。
 
 ### R1 状态（已完成）
 
@@ -125,7 +125,7 @@ R1（Impact Analysis）已在 `feature/agent-reliability` 一次性完成并本�
 - Unknown / Unsupported 一等公民：`targets[].found=false`、`unsupported-impact-subject`（结构化 subject 仅 `asset-level` 与 `blueprint-symbol` 可被现有 Index 机械证明）、`analysisGaps`（no-consumer-evidence / unknown-reference-kind / runtime-sensitivity-not-proven / frontier-truncated）。
 - `validationTargets`（Tier 0 目标 / Tier 1 Direct / Tier 2 Indirect，确定排序）；确定性 risks（`high-fanout-target / impact-analysis-truncated / impact-target-not-indexed / unknown-reference-kind`）；`runtimeSensitiveConsumers` 固定 `not-proven-with-current-evidence`，不凭资产类型猜测。
 - R0 集成：`ue_get_task_context.nextExpansions` 增加 impact-analysis 渐进入口（显式目标 / relevantAssets hint），默认 Context 不自动展开引用图。
-- 真实 Reforge 只读 Smoke（48 资产 immutable 索引）S1–S4 全部通过：S1 fan-out（23 direct / 282 edges / 14.4 ms）、S2 真实 2 跳（Wheel←VehicleBase←CargoBase，24 indirect）、S3 多目标共享 consumer 合并（24 direct / 8 indirect）、S4 零消费者边界语义。设计、复用审计、边界与建议性能指标见 [`Plans/AGENT_RELIABILITY_R1_IMPACT_ANALYSIS_DESIGN_20260818.md`](Plans/AGENT_RELIABILITY_R1_IMPACT_ANALYSIS_DESIGN_20260818.md)；完整执行规范见 [`Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md`](Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md)。
+- 真实 Reforge 只读 Smoke（48 资产 immutable 索引）S1–S4 全部通过：S1 fan-out（23 direct / 282 edges / 14.4 ms）、S2 真实 2 跳（Wheel←VehicleBase←CargoBase，24 indirect）、S3 多目标共享 consumer 合并（24 direct / 8 indirect）、S4 零消费者边界语义。设计、复用审计、边界与建议性能指标见 [`Plans/AGENT_RELIABILITY_R1_IMPACT_ANALYSIS_DESIGN_20260818.md`](Plans/Archive/AGENT_RELIABILITY_R1_IMPACT_ANALYSIS_DESIGN_20260818.md)；完整执行规范见 [`Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md`](Handoffs/Archive/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md)。
 
 ### R2 状态（已完成，2026-08-19）
 
@@ -139,11 +139,11 @@ R2（Semantic Diff）已在 `feature/agent-reliability` 一次性完成，**R2 �
 - R0 仅在显式 Change Set 存在时建议 Semantic Diff；R2 在 missing/unexpected 时建议 R1 `ue_analyze_change_impact`，两者都不自动展开。
 - 真实 UE5.6 DirectHost Smoke 已覆盖 Data Asset、Material Instance、DataTable cell/rename 的 live/persisted/verified 共 12 个结果，以及 Blueprint `setVariableDefault` 的 commandlet persisted/verified；全部 expected=actual=matched、unexpected=missing=0，并完成恢复验证。无 C++ 变更，因此不要求 UE Direct Build。
 
-R2 设计、复用审计、协议、测试和边界见 [`Plans/AGENT_RELIABILITY_R2_SEMANTIC_DIFF_DESIGN_20260819.md`](Plans/AGENT_RELIABILITY_R2_SEMANTIC_DIFF_DESIGN_20260819.md)；完整执行规范见 [`Handoffs/AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md`](Handoffs/AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md)。
+R2 设计、复用审计、协议、测试和边界见 [`Plans/AGENT_RELIABILITY_R2_SEMANTIC_DIFF_DESIGN_20260819.md`](Plans/Archive/AGENT_RELIABILITY_R2_SEMANTIC_DIFF_DESIGN_20260819.md)；完整执行规范见 [`Handoffs/AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md`](Handoffs/Archive/AGENT_RELIABILITY_R2_FULL_HANDOFF_20260818.md)。
 
 ### R3 状态（已完成，2026-08-20）
 
-R3（Verification Plan + Trust Verdict）已完成公共协议、核心实现、真实 UE Smoke、全量门禁与文档同步。完整执行规范见 [`Handoffs/AGENT_RELIABILITY_R3_FULL_HANDOFF_20260820.md`](Handoffs/AGENT_RELIABILITY_R3_FULL_HANDOFF_20260820.md)，设计与 Evidence Audit 见 [`Plans/AGENT_RELIABILITY_R3_VERIFICATION_TRUST_DESIGN_20260820.md`](Plans/AGENT_RELIABILITY_R3_VERIFICATION_TRUST_DESIGN_20260820.md)。
+R3（Verification Plan + Trust Verdict）已完成公共协议、核心实现、真实 UE Smoke、全量门禁与文档同步。完整执行规范见 [`Handoffs/AGENT_RELIABILITY_R3_FULL_HANDOFF_20260820.md`](Handoffs/Archive/AGENT_RELIABILITY_R3_FULL_HANDOFF_20260820.md)，设计与 Evidence Audit 见 [`Plans/AGENT_RELIABILITY_R3_VERIFICATION_TRUST_DESIGN_20260820.md`](Plans/Archive/AGENT_RELIABILITY_R3_VERIFICATION_TRUST_DESIGN_20260820.md)。
 
 - 已新增只读 `ue_build_verification_plan` 与 `ue_evaluate_trust_verdict`：前者从显式 Change Set、Operation Domain、R1 Impact 与 R2 Semantic Diff 生成确定性验证义务；后者只消费适用于当前 Change Set / Revision / Editor Session 的已有 Evidence。
 - Assertion 固定区分 `required / recommended / informational` 与 `pass / fail / unknown / not-applicable`；Required Evidence 缺失必须保持 UNKNOWN，不能由 Agent 或模型补全。
@@ -155,7 +155,7 @@ R3（Verification Plan + Trust Verdict）已完成公共协议、核心实现、
 
 ### R4 状态（已完成，2026-08-22）
 
-R4（Real Agent Benchmark v1）已完成。设计见 [`Plans/AGENT_RELIABILITY_R4_BENCHMARK_DESIGN_20260820.md`](Plans/AGENT_RELIABILITY_R4_BENCHMARK_DESIGN_20260820.md)，正式结果与限制见 [`Plans/AGENT_RELIABILITY_R4_BENCHMARK_RESULT_20260820.md`](Plans/AGENT_RELIABILITY_R4_BENCHMARK_RESULT_20260820.md)：
+R4（Real Agent Benchmark v1）已完成。设计见 [`Plans/AGENT_RELIABILITY_R4_BENCHMARK_DESIGN_20260820.md`](Plans/Archive/AGENT_RELIABILITY_R4_BENCHMARK_DESIGN_20260820.md)，正式结果与限制见 [`Plans/AGENT_RELIABILITY_R4_BENCHMARK_RESULT_20260820.md`](Plans/Archive/AGENT_RELIABILITY_R4_BENCHMARK_RESULT_20260820.md)：
 
 - 15 个 Full Case、9 个 matched Legacy Case，共 24 个真实 attempt；24/24 保留，0 infrastructure failure，9/9 fairness matched，17/17 DirectHost 精确恢复，7/7 Reforge 只读不变。
 - Paired `Full - Legacy`：Task Completion `+44.44 pp`、Trusted Completion `+22.22 pp`、False Success `-11.11 pp`、Wrong Asset `-22.22 pp`、Tool Calls `-4.11`。
@@ -166,11 +166,11 @@ R4（Real Agent Benchmark v1）已完成。设计见 [`Plans/AGENT_RELIABILITY_R
 
 ### 0.8.x Closeout（已完成，2026-08-23）
 
-`C0 Agent UX / Result Contract` → `C1 Trust Evidence` → `C2 Narrow Reliability / Recovery` → `C3 R4.1 Repeat` → `C4 Read/Write Capability Gap Audit` → `C5 Must-fix Gaps` → `C6 Release Review / Scope Freeze` 已一次性完成。执行边界见 [`Handoffs/AGENT_RELIABILITY_0_8_CLOSEOUT_FULL_HANDOFF_20260822.md`](Handoffs/AGENT_RELIABILITY_0_8_CLOSEOUT_FULL_HANDOFF_20260822.md)。
+`C0 Agent UX / Result Contract` → `C1 Trust Evidence` → `C2 Narrow Reliability / Recovery` → `C3 R4.1 Repeat` → `C4 Read/Write Capability Gap Audit` → `C5 Must-fix Gaps` → `C6 Release Review / Scope Freeze` 已一次性完成。执行边界见 [`Handoffs/AGENT_RELIABILITY_0_8_CLOSEOUT_FULL_HANDOFF_20260822.md`](Handoffs/Archive/AGENT_RELIABILITY_0_8_CLOSEOUT_FULL_HANDOFF_20260822.md)。
 
-R4.1 使用冻结 fingerprint 的 high-fanout、stale、Blueprint default、Data Asset scalar 四个 anchor，Full/Legacy 各 3 次，共 24/24 retained、12/12 paired fairness matched、0 measurement drift、0 infrastructure failure、24/24 exact recovery。Full stale 与 Blueprint 均 3/3 Trusted；high-fanout 3/3 因越过 direct-only bound 形成 False Success；scalar 只有 1/3 exact claim Trusted，另两次把 numeric beforeValue stringify。完整分布见 [`Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md`](Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md)。
+R4.1 使用冻结 fingerprint 的 high-fanout、stale、Blueprint default、Data Asset scalar 四个 anchor，Full/Legacy 各 3 次，共 24/24 retained、12/12 paired fairness matched、0 measurement drift、0 infrastructure failure、24/24 exact recovery。Full stale 与 Blueprint 均 3/3 Trusted；high-fanout 3/3 因越过 direct-only bound 形成 False Success；scalar 只有 1/3 exact claim Trusted，另两次把 numeric beforeValue stringify。完整分布见 [`Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md`](Plans/Archive/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md)。
 
-Read/Write Audit 已覆盖 105 个公共 Tool 与 18 个 Patch Operation，C5 结论为 `0 Must-fix new tools`。剩余问题属于 Agent bound/value typing、静态证据边界与 Full 写链成本，不是缺 UE Read/Write capability；完整 Scope Freeze 见 [`Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`](Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md)。
+Read/Write Audit 已覆盖 105 个公共 Tool 与 18 个 Patch Operation，C5 结论为 `0 Must-fix new tools`。剩余问题属于 Agent bound/value typing、静态证据边界与 Full 写链成本，不是缺 UE Read/Write capability；完整 Scope Freeze 见 [`Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`](Plans/Archive/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md)。
 
 0.8 capability scope 已完成本地收口，但最新正式发布版本、Package 与 Plugin Version 仍保持 0.7.0；本阶段没有创建 Tag、Release artifact 或 Push。只有后续真实数据反复出现 Value Provenance / Execution Trace blocker，R5 才解冻。
 
@@ -178,7 +178,7 @@ Read/Write Audit 已覆盖 105 个公共 Tool 与 18 个 Patch Operation，C5 �
 
 ## 当前开发入口（2026-08-27）
 
-原 [`Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md`](Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md) 已完成其从 0.8 closeout 向 Editor-resident Writer 过渡的历史作用，继续保留但不再作为当前唯一计划入口。
+原 [`Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md`](Plans/Archive/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md) 已完成其从 0.8 closeout 向 Editor-resident Writer 过渡的历史作用，继续保留但不再作为当前唯一计划入口。
 
 ```text
 W0 baseline                     complete
@@ -190,10 +190,10 @@ W4 bounded multi-operation      next
 
 当前权威入口：
 
-- [`Plans/README.md`](Plans/README.md)：计划文档索引与优先级说明。
+- [`Plans/README.md`](Plans/Archive/README.md)：计划文档索引与优先级说明。
 - [`Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md`](Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md)：项目级方向与架构取舍。
 - [`Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md`](Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md)：跨 Track 依赖与验收契约。
-- [`Plans/UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_DETAILED_PLAN_20260826.md`](Plans/UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_DETAILED_PLAN_20260826.md)：当前 W4 实现权威。
+- [`Plans/UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_DETAILED_PLAN_20260826.md`](Plans/Archive/UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_DETAILED_PLAN_20260826.md)：当前 W4 实现权威。
 
 正式 package release 独立执行：只有用户授权后才更新 published version、构建 release artifact、Tag/Push。
 

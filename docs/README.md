@@ -1,97 +1,107 @@
 # UE Agent Kit 文档
 
-本目录保留当前公开版本与 `main` 开发快照的用户文档。项目概览和快速示例见仓库根目录 [`README.md`](../README.md)。
+本目录同时包含两类内容：
 
-## 当前状态与对比
+1. **当前开发接管/规划文档**：给新 Chat、Agent 和维护者使用；
+2. **产品/架构/使用文档**：面向 UEAgentKit 的功能、构建、协议和发布版本。
 
-- [`PROJECT_STATUS.md`](PROJECT_STATUS.md)：当前已实现能力、当前开发阶段与明确未实现边界。
-- [`Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260828.md`](Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260828.md)：**当前项目级开发总交接**，新 Chat / Agent 接手时优先读取。
-- [`Plans/UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md`](Plans/UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md)：Writer + Knowledge Web 本地集成结果、G3 门禁与 R20 延后边界。
-- [`Plans/README.md`](Plans/README.md)：**当前计划文档唯一导航入口**，区分主计划、当前 W4、已完成结果与历史计划。
-- [`Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md`](Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md)：当前项目级方向、Track 边界与架构取舍。
-- [`Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md`](Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md)：当前跨 Track 依赖与验收规格。
-- [`Plans/UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_DETAILED_PLAN_20260826.md`](Plans/UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_DETAILED_PLAN_20260826.md)：当前 Writer 主线 W4-0～W4-7 的权威实现计划。
-- [`Plans/UEAGENTKIT_W3_CHECKPOINT_STRONG_VERIFY_RESULT_20260825.md`](Plans/UEAGENTKIT_W3_CHECKPOINT_STRONG_VERIFY_RESULT_20260825.md)：最近完成的 W3 C0-C6 真实 UE5.6 收口结果。
-- [`PROJECT_STATUS_EN.md`](PROJECT_STATUS_EN.md)：English project status snapshot；当前开发计划以中文 Master/Plans 索引为准。
-- [`Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md`](Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md)：R4.1 24-attempt paired repeat 的完整结果、成本、稳定性与失败限定。
-- [`Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`](Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md)：105 个公共 Tool、18 个 Patch Operation 的 Read/Write Gap Audit 与 Scope Freeze。
-- [`Plans/UEAGENTKIT_0_8_RELEASE_REVIEW_20260823.md`](Plans/UEAGENTKIT_0_8_RELEASE_REVIEW_20260823.md)：0.8 capability Release Review、known limitations 与正式发布边界。
-- [`Handoffs/AGENT_RELIABILITY_0_8_CLOSEOUT_FULL_HANDOFF_20260822.md`](Handoffs/AGENT_RELIABILITY_0_8_CLOSEOUT_FULL_HANDOFF_20260822.md)：0.8 Closeout C0–C6 的执行边界与完成入口。
-- [`Handoffs/UEAGENTKIT_0_8_CAPABILITY_CLOSEOUT_HANDOFF_20260823.md`](Handoffs/UEAGENTKIT_0_8_CAPABILITY_CLOSEOUT_HANDOFF_20260823.md)：0.8 capability closeout 的最终状态、完整门禁证据与后续接手边界。
-- [`MEMORY_ARCHITECTURE.md`](MEMORY_ARCHITECTURE.md)：分层知识树、Active Work、渐进式披露、MCP/Skill 分工和多人共享知识服务设计。
-- [`MEMORY_ARCHITECTURE_EN.md`](MEMORY_ARCHITECTURE_EN.md)：English layered memory and collaboration architecture.
-- [`AI_NATIVE_UE_EDITOR.md`](AI_NATIVE_UE_EDITOR.md)：AI 可用 UE5 编辑器的实时 CRUD、项目模型、知识树、性能与风险自适应安全架构。
-- [`AI_NATIVE_UE_EDITOR_EN.md`](AI_NATIVE_UE_EDITOR_EN.md)：English AI-usable UE5 Editor architecture.
-- [`PERFORMANCE_TEST_PLAN.md`](PERFORMANCE_TEST_PLAN.md)：500 GB 商业项目模型、E 盘 SSD 上的 160–180 GB 物理测试工程、原生 SSD 与 50 MB/s HDD 模拟档位、日常交互目标与性能门禁。
-- [`LIVE_EDITOR_REALTIME_IO_PLAN.md`](LIVE_EDITOR_REALTIME_IO_PLAN.md)：实时资产读取、动画重定向比例诊断、Live Write Readback 与后续 Blueprint 编辑实施计划。
-- [`ANIMATION_RETARGET_SCALE_DIAGNOSIS_20260806.md`](ANIMATION_RETARGET_SCALE_DIAGNOSIS_20260806.md)：Root Scale、Force Root Lock、Compressed Track、Additive Base Pose 与最终 Editor World Pose 的真实 UE5.6 诊断结果。
-- [`ANIMATION_SCALE_FIX_TOOL.md`](ANIMATION_SCALE_FIX_TOOL.md)：AnimSequence Root Lock / Root Scale Track 的受控 Plan、Live Apply、最终姿势验证、Undo、Save 和 Verify 工作流。
-- [`ANIMATION_SCALE_AUDIT_TOOL.md`](ANIMATION_SCALE_AUDIT_TOOL.md)：显式 AnimSequence 列表的有界批量只读比例审计、分类、分页和取消工作流。
-- [`ANIMATION_SCALE_FIX_BATCH_TOOL.md`](ANIMATION_SCALE_FIX_BATCH_TOOL.md)：从固定 Audit Report 和显式候选生成不可变批量比例修复 Plan，复用单资产 Policy / Revision 校验，不执行 Editor 写入。
-- [`Plans/ANIMATION_TOOLS_FOLLOWUP_PLAN_20260806.md`](Plans/ANIMATION_TOOLS_FOLLOWUP_PLAN_20260806.md)：动画批量审计、批量修复、Additive/Base Pose、浮空、次级运动和 ModelPreview 接入计划。
-- [`BRANCH_WORKTREES.md`](BRANCH_WORKTREES.md)：Realtime I/O 与 Memory/Context 双分支、Worktree、公共协议和合并规范。
-- [`BRANCH_WORKTREES_EN.md`](BRANCH_WORKTREES_EN.md)：English dual-branch and Worktree workflow.
-- [`Handoffs/MEMORY_CONTEXT_HANDOFF_20260801.md`](Handoffs/MEMORY_CONTEXT_HANDOFF_20260801.md)：Memory/Context 里程碑实现范围、兼容要求与测试门禁。
-- [`Handoffs/LIVE_EDITOR_REALTIME_IO_HANDOFF_20260801.md`](Handoffs/LIVE_EDITOR_REALTIME_IO_HANDOFF_20260801.md)：Realtime I/O 里程碑实现范围、测试门禁与后续扩展边界。
-- [`Handoffs/LIVE_EDITOR_ANIMATION_TOOLS_HANDOFF_20260806.md`](Handoffs/LIVE_EDITOR_ANIMATION_TOOLS_HANDOFF_20260806.md)：动画比例诊断、受控修复、真实保存结果、当前工作树和后续接手边界。
-- [`Handoffs/UEAGENTKIT_0.7.0_RELEASE_HANDOFF_20260803.md`](Handoffs/UEAGENTKIT_0.7.0_RELEASE_HANDOFF_20260803.md)：0.7.0 本地 Release、验证结果、源码产物、MSVC 阻塞与后续性能测试交接。
-- [`../prompts/LIVE_EDITOR_REALTIME_IO_LOCAL_AGENT_PROMPT_20260801.md`](../prompts/LIVE_EDITOR_REALTIME_IO_LOCAL_AGENT_PROMPT_20260801.md)：可直接复制给本地代码 Agent 的执行提示词。
+历史开发计划和旧交接已经归档，不再全部堆在默认导航页。
 
-- [`COMPARISON_UE_LLM_TOOLKIT.md`](COMPARISON_UE_LLM_TOOLKIT.md)：与 ue-llm-toolkit 的读取、写入、Live Editor 和安全闭环对比。
-- [`COMPARISON_UE_LLM_TOOLKIT_EN.md`](COMPARISON_UE_LLM_TOOLKIT_EN.md)：English comparison with ue-llm-toolkit.
+## 新 Chat / Agent：先读这里
 
-## 使用文档
+按顺序读取：
 
-1. [`RELEASE_0.7.0.md`](RELEASE_0.7.0.md)：Realtime Foundation、注册式 Live Write、Schema v3 Memory、Batch/Change Set 与发布验证。
-2. [`RELEASE_0.7.0_EN.md`](RELEASE_0.7.0_EN.md)：0.7.0 English release notes。
-3. [`RELEASE_0.6.0.md`](RELEASE_0.6.0.md)：Revision-aware Project Memory、证据绑定 Task、审计导出和真实 UE5.6 闭环。
-4. [`RELEASE_0.6.0_EN.md`](RELEASE_0.6.0_EN.md)：0.6.0 English release notes。
-5. [`RELEASE_0.5.5.md`](RELEASE_0.5.5.md)：0.5.x 日常开发能力、原子事务、验证证据与正式发布收口。
-6. [`RELEASE_0.5.5_EN.md`](RELEASE_0.5.5_EN.md)：0.5.5 English release notes。
-7. [`RELEASE_0.5.1.md`](RELEASE_0.5.1.md)：0.5.1 中文发布说明、协议补全、高层安全写入与兼容矩阵。
-8. [`RELEASE_0.5.1_EN.md`](RELEASE_0.5.1_EN.md)：0.5.1 English release notes。
-9. [`RELEASE_0.5.0.md`](RELEASE_0.5.0.md)：0.5.0 固定项目 MCP 工作流发布说明。
-10. [`RELEASE_0.5.0_EN.md`](RELEASE_0.5.0_EN.md)：0.5.0 English release notes。
-11. [`RELEASE_0.4.4.md`](RELEASE_0.4.4.md)：0.4.4 中文发布说明、正式范围、验证结果和升级步骤。
-12. [`RELEASE_0.4.4_EN.md`](RELEASE_0.4.4_EN.md)：0.4.4 English release notes。
-13. [`../CHANGELOG.md`](../CHANGELOG.md)：版本变更摘要。
-14. [`BUILD_AND_RUN.md`](BUILD_AND_RUN.md)：环境要求、插件构建、资产目录、Blueprint 导出和 SQLite 查询。
-15. [`AI_USAGE.md`](AI_USAGE.md)：AI 如何使用资产目录、Blueprint 语义和结构化引用。
-16. [`ROADMAP.md`](ROADMAP.md)：版本目标、完成状态和后续边界。
-17. [`DEVELOPMENT_WORKFLOW.md`](DEVELOPMENT_WORKFLOW.md)：项目级开发执行规范；G0-G3 测试分级、U0-U3 UE 验收、UE lease、性能采样与阶段收口。
-18. [`PARALLEL_AGENT_DEVELOPMENT.md`](PARALLEL_AGENT_DEVELOPMENT.md)：并行 Agent、Worktree、文件所有权与共享 UE 资源规则。
-19. [`REFERENCE_POLICY.md`](REFERENCE_POLICY.md)：第三方参考、独立实现和依赖分发规则。
-20. [`../spec/BPCTX_FORMAT.md`](../spec/BPCTX_FORMAT.md)：BPCTX/1 文本格式规范。
-21. [`../spec/PATCH_SCHEMA.md`](../spec/PATCH_SCHEMA.md)：Patch、Policy、Revision、Dry Run 和 Commit 安全边界。
-22. [`../spec/BACKUP_AND_ROLLBACK.md`](../spec/BACKUP_AND_ROLLBACK.md)：Backup Manifest、rollback 与恢复验证。
-23. [`../spec/WRITE_FIXTURE_PLAN.md`](../spec/WRITE_FIXTURE_PLAN.md)：声明式 Fixture 生成、重置和独立验证。
-24. [`../spec/SCALAR_PATCH_REGRESSION.md`](../spec/SCALAR_PATCH_REGRESSION.md)：标量写入与失败路径真实 UE 回归。
-25. [`../spec/MCP_SERVER.md`](../spec/MCP_SERVER.md)：MCP Tool、固定配置、Receipt 和 stdio 契约。
-26. [`../spec/INDEX_FRESHNESS.md`](../spec/INDEX_FRESHNESS.md)：SQLite、Revision Export 与磁盘 Package 新鲜度。
-27. [`../spec/LIVE_EDITOR_BRIDGE.md`](../spec/LIVE_EDITOR_BRIDGE.md)：localhost IPC、固定工程认证与 Daily Actions。
-28. [`../spec/PROJECT_MEMORY.md`](../spec/PROJECT_MEMORY.md)：Revision-aware Project Memory 的独立存储、来源、状态、Scope、Revision、冲突与失效契约。
+1. [`Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260830.md`](Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260830.md) — **当前项目级完整交接**；仓库、分支、Track、Git 异常、R20、测试规范和下一步边界。
+2. [`DEVELOPMENT_WORKFLOW.md`](DEVELOPMENT_WORKFLOW.md) — **强制开发执行规范**；G0-G3 测试分级、U0-U3 UE 验收、UE lease、性能采样和文档粒度。
+3. [`Plans/README.md`](Plans/Archive/README.md) — 当前计划唯一导航入口。
+4. [`Plans/UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md`](Plans/UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md) — Writer + Knowledge Web 合并后的 G3 证据。
+5. [`Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md`](Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md) / [`Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md`](Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md) — 项目方向和跨 Track 依赖；其中旧进度文字由当前 handoff 覆盖。
 
-## 当前版本与开发分支
+### 当前开发状态摘要
 
-当前已发布版本为 UE Agent Kit 0.7.0，支持 Unreal Engine 5.6。本地 `main` 已正式集成 Revision-aware Project Memory、Schema v3 Knowledge Tree/Active Work、Realtime Context/Batch/Change Set 和受控 Live Editor Write 基础层；两个长期功能分支继续保留并从 `main` 同步后并行开发。
+```text
+正式发布版本                    0.7.0 / UE5.6
+Track W / Writer               complete
+  W0-W4                        complete
+  D1                           complete
+  W5 当前授权范围              complete
+  W5-S 50 GiB                  PASS
+  R20                          deferred fixture-lifecycle debt
+Track V / Knowledge Web        complete
+W + V integration             G3 PASS
+组合 Python suite             845 / 845 PASS
+```
 
-0.7.0 发布能力包括：
+R20 是 DirectHost Fixture 在 resident Editor 生命周期中的语义漂移，不再阻塞 Writer；产品 Revision/Freshness gate 正确 fail-closed。
 
-- 独立 Project Memory SQLite/FTS5、六类记录、来源、Scope、Confidence、Revision Set 和状态机。
-- 固定工程 MCP/CLI、可审计 JSON 导出、证据摘要和读取时篡改检测。
-- Workflow/rollback 证据原样持久化为 Task Record，并在 Revision 变化后自动 stale。
+## 历史开发文档
 
-- 通用资产/Blueprint 导出、SQLite/FTS、Revision、引用和四源资产状态。
-- Live Editor 状态、日志、编译诊断、导航、验证、Automation 和授权单资产保存。
-- Blueprint、标量 Asset、Material Instance、DataTable 和 Data Asset 的受控写入。
-- DataTable 多字段、Row 新增/删除/重命名和 Searchable Name 引用影响门禁。
-- Data Asset Object/Class、Soft Object/Class、Struct、Array、Set 和 Map 稳定值模型。
-- Backup Manifest、独立验证和 Revision-aware rollback。
-- Offline 10、Live 43、Workflow-only 60、Live + Workflow 93 Tool；启用 Memory 后分别为 22、55、72、105；全部 105 个公共 Tool 与 18 个 Patch Operation 已完成 capability 分类。
-- `ue_apply_asset_property_live` 通过注册式资产域执行器支持受控 Data Asset、Material Instance 与 DataTable Operation；统一 Transaction/Evidence、精确 Undo/Discard、授权保存后独立 Verify 和可恢复 Journal 均已完成，但仍不自动保存或开放任意 UObject。
+完成/被取代的开发文档仍完整保留：
 
-0.5.x、0.6.0 与 0.7.0 已完成并进入维护；最新正式发布仍为 0.7.0。0.8.x Context / Analysis / Agent Reliability capability scope 已在 `feature/agent-reliability` 本地收口。`feature/live-writer-expansion` 的 W0-W4、D1 与 W5 当前授权范围已完成，Track V 的 V1/V2 也已完成，并通过 W+V 本地 G3 集成。R20 因 DirectHost fixture lifecycle 语义漂移转为独立延后维护项，不再阻塞 Writer 主线；后续项目方向以 [`Plans/README.md`](Plans/README.md) 与 Master/Midterm 为准。正式 package release、R5 Value Provenance / Execution Trace 与远端发布均需独立授权。
+- [`Plans/Archive/`](Plans/Archive/) — Agent Reliability、Writer W0-W5、D1、V1/V2、旧 correction/bridge/integration checklist 等 Plan/Result；
+- [`Handoffs/Archive/`](Handoffs/Archive/) — 旧 milestone / feature / release / chat handoff。
 
-只读分析路径不修改资产；Blueprint Patch、Asset Patch 与 MCP Commit 仅在明确授权后执行。
+历史文件是证据，不是当前入口。需要调查某个旧能力时再按需打开。
 
-测试资产生成方式见 [`../tests/fixtures/README.md`](../tests/fixtures/README.md)；大型项目规模、物理测试工程和交互耗时目标见 [`PERFORMANCE_TEST_PLAN.md`](PERFORMANCE_TEST_PLAN.md)。
+## 当前产品状态 / 架构
+
+- [`PROJECT_STATUS.md`](PROJECT_STATUS.md)：产品能力与已知边界快照。
+- [`PROJECT_STATUS_EN.md`](PROJECT_STATUS_EN.md)：English project status snapshot。
+- [`AI_NATIVE_UE_EDITOR.md`](AI_NATIVE_UE_EDITOR.md)：AI 可用 UE5 编辑器的知识、实时 CRUD、性能与安全架构。
+- [`AI_NATIVE_UE_EDITOR_EN.md`](AI_NATIVE_UE_EDITOR_EN.md)：English AI-usable UE5 Editor architecture。
+- [`MEMORY_ARCHITECTURE.md`](MEMORY_ARCHITECTURE.md)：Project Memory / Knowledge Tree / Active Work 架构。
+- [`MEMORY_ARCHITECTURE_EN.md`](MEMORY_ARCHITECTURE_EN.md)：English memory architecture。
+- [`PERFORMANCE_TEST_PLAN.md`](PERFORMANCE_TEST_PLAN.md)：大型项目、PerfProject、SSD/HDD 模拟与性能门禁设计。
+- [`REFERENCE_POLICY.md`](REFERENCE_POLICY.md)：第三方参考、独立实现与依赖分发规则。
+
+## 构建和使用
+
+- [`BUILD_AND_RUN.md`](BUILD_AND_RUN.md)：环境、插件构建、导出、SQLite 查询。
+- [`AI_USAGE.md`](AI_USAGE.md)：AI 如何使用资产目录、Blueprint 语义和结构化引用。
+- [`MODELPREVIEW_INTEGRATION_MANUAL.md`](MODELPREVIEW_INTEGRATION_MANUAL.md)：ModelPreview 集成说明。
+- [`BRANCH_WORKTREES.md`](BRANCH_WORKTREES.md)：Worktree/分支工作方式（当前具体 ref 状态以 2026-08-30 handoff 为准）。
+- [`BRANCH_WORKTREES_EN.md`](BRANCH_WORKTREES_EN.md)：English worktree workflow。
+- [`PARALLEL_AGENT_DEVELOPMENT.md`](PARALLEL_AGENT_DEVELOPMENT.md)：并行 Agent、文件所有权和共享 UE 资源规则。
+
+## Live Editor / 动画工具文档
+
+- [`LIVE_EDITOR_REALTIME_IO_PLAN.md`](LIVE_EDITOR_REALTIME_IO_PLAN.md)
+- [`ANIMATION_RETARGET_SCALE_DIAGNOSIS_20260806.md`](ANIMATION_RETARGET_SCALE_DIAGNOSIS_20260806.md)
+- [`ANIMATION_SCALE_FIX_TOOL.md`](ANIMATION_SCALE_FIX_TOOL.md)
+- [`ANIMATION_SCALE_AUDIT_TOOL.md`](ANIMATION_SCALE_AUDIT_TOOL.md)
+- [`ANIMATION_SCALE_FIX_BATCH_TOOL.md`](ANIMATION_SCALE_FIX_BATCH_TOOL.md)
+- [`ADDITIVE_ANIMATION_DIAGNOSIS_TOOL.md`](ADDITIVE_ANIMATION_DIAGNOSIS_TOOL.md)
+- [`ADDITIVE_ANIMATION_EVALUATION_TOOL.md`](ADDITIVE_ANIMATION_EVALUATION_TOOL.md)
+- [`ADDITIVE_BASE_POSE_FIX_PLAN_TOOL.md`](ADDITIVE_BASE_POSE_FIX_PLAN_TOOL.md)
+- [`ADDITIVE_BASE_POSE_FIX_WRITE_TOOL.md`](ADDITIVE_BASE_POSE_FIX_WRITE_TOOL.md)
+- [`CHARACTER_GROUND_CONTACT_TOOL.md`](CHARACTER_GROUND_CONTACT_TOOL.md)
+- [`SKELETAL_SECONDARY_MOTION_TOOL.md`](SKELETAL_SECONDARY_MOTION_TOOL.md)
+- [`RETARGET_POSTPROCESS_TOOL.md`](RETARGET_POSTPROCESS_TOOL.md)
+
+## 协议 / 安全规范
+
+核心规范位于仓库 [`spec/`](../spec/)：
+
+- [`BPCTX_FORMAT.md`](../spec/BPCTX_FORMAT.md)
+- [`PATCH_SCHEMA.md`](../spec/PATCH_SCHEMA.md)
+- [`BACKUP_AND_ROLLBACK.md`](../spec/BACKUP_AND_ROLLBACK.md)
+- [`WRITE_FIXTURE_PLAN.md`](../spec/WRITE_FIXTURE_PLAN.md)
+- [`SCALAR_PATCH_REGRESSION.md`](../spec/SCALAR_PATCH_REGRESSION.md)
+- [`MCP_SERVER.md`](../spec/MCP_SERVER.md)
+- [`INDEX_FRESHNESS.md`](../spec/INDEX_FRESHNESS.md)
+- [`LIVE_EDITOR_BRIDGE.md`](../spec/LIVE_EDITOR_BRIDGE.md)
+- [`PROJECT_MEMORY.md`](../spec/PROJECT_MEMORY.md)
+
+## 发布文档
+
+最新正式发布仍为 **0.7.0 / UE5.6**：
+
+- [`RELEASE_0.7.0.md`](RELEASE_0.7.0.md) / [`RELEASE_0.7.0_EN.md`](RELEASE_0.7.0_EN.md)
+- [`RELEASE_0.6.0.md`](RELEASE_0.6.0.md) / [`RELEASE_0.6.0_EN.md`](RELEASE_0.6.0_EN.md)
+- [`RELEASE_0.5.5.md`](RELEASE_0.5.5.md) / [`RELEASE_0.5.5_EN.md`](RELEASE_0.5.5_EN.md)
+- [`RELEASE_0.5.1.md`](RELEASE_0.5.1.md) / [`RELEASE_0.5.1_EN.md`](RELEASE_0.5.1_EN.md)
+- [`RELEASE_0.5.0.md`](RELEASE_0.5.0.md) / [`RELEASE_0.5.0_EN.md`](RELEASE_0.5.0_EN.md)
+- [`RELEASE_0.4.4.md`](RELEASE_0.4.4.md) / [`RELEASE_0.4.4_EN.md`](RELEASE_0.4.4_EN.md)
+- [`../CHANGELOG.md`](../CHANGELOG.md)
+
+本地开发能力进入 `main` 不等于正式 package release。Push / Tag / Release / version change 仍需要独立授权。

@@ -41,7 +41,7 @@
 
 ### 大型项目性能方案
 
-完整方案：[`../PERFORMANCE_TEST_PLAN.md`](../PERFORMANCE_TEST_PLAN.md)
+完整方案：[`../../PERFORMANCE_TEST_PLAN.md`](../../PERFORMANCE_TEST_PLAN.md)
 
 最终约束：
 

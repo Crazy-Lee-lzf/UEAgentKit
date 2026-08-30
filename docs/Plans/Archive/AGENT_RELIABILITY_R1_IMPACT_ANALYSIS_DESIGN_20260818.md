@@ -3,7 +3,7 @@
 > 日期：2026-08-18
 > 分支：`feature/agent-reliability`
 > 状态：R1 已完成并本地提交（未 Push）
-> 关联：执行规范 [`../../Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md`](../../Handoffs/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md)
+> 关联：执行规范 [`../../Handoffs/Archive/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md`](../../Handoffs/Archive/AGENT_RELIABILITY_R1_FULL_HANDOFF_20260818.md)
 
 本文档记录 R1（Impact Analysis）的 R1.0 复用审计结论、最终设计决策、硬边界、支持矩阵、性能观察与建议移交 `feature/performance-benchmarks` 的正式性能指标。R1 的核心原则：
 

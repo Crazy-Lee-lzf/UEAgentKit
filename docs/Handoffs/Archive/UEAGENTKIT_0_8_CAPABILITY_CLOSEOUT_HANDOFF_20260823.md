@@ -27,9 +27,9 @@ Published version                 0.7.0
 
 ## 2. 交付物
 
-- [`../Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md`](../Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md)：R4.1 正式 repeat 的完整分布、成本、失败与恢复证据；
-- [`../Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`](../Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md)：105 个公共 Tool 与 18 个 Patch Operation 的逐项分类、Must-fix 决策和 Scope Freeze；
-- [`../Plans/UEAGENTKIT_0_8_RELEASE_REVIEW_20260823.md`](../Plans/UEAGENTKIT_0_8_RELEASE_REVIEW_20260823.md)：Capability acceptance、最终工程门禁、known limitations 与正式发布边界；
+- [`../../Plans/Archive/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md`](../../Plans/Archive/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md)：R4.1 正式 repeat 的完整分布、成本、失败与恢复证据；
+- [`../../Plans/Archive/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`](../../Plans/Archive/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md)：105 个公共 Tool 与 18 个 Patch Operation 的逐项分类、Must-fix 决策和 Scope Freeze；
+- [`../../Plans/Archive/UEAGENTKIT_0_8_RELEASE_REVIEW_20260823.md`](../../Plans/Archive/UEAGENTKIT_0_8_RELEASE_REVIEW_20260823.md)：Capability acceptance、最终工程门禁、known limitations 与正式发布边界；
 - [`AGENT_RELIABILITY_0_8_CLOSEOUT_FULL_HANDOFF_20260822.md`](AGENT_RELIABILITY_0_8_CLOSEOUT_FULL_HANDOFF_20260822.md)：C0-C6 的原始执行定义与验收来源。
 
 公共状态已同步到 `README.md`、`README_EN.md`、`CHANGELOG.md`、Roadmap、Project Status、总计划、文档索引和 `spec/MCP_SERVER.md`。
