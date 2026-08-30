@@ -56,7 +56,7 @@ Because V + documentation introduce no C++ delta relative to the already validat
 
 ## Git / Worktree Note
 
-The repository `main` ref is valid. The legacy root worktree `E:\WorkSpace\UEAgentKit` still has a symbolic HEAD pointing at the missing `feature/agent-reliability` ref and therefore appears as an unborn branch. Integration deliberately did not reset, repair, or commit that worktree. `main` is updated using a separate clean worktree after the integration documentation checkpoint passes its doc-only gates.
+The repository `main` ref is valid. Three legacy worktrees currently point at missing feature refs and appear unborn: `E:\WorkSpace\UEAgentKit` (`feature/agent-reliability`), `E:\WorkSpace\UEAgentKit-Performance` (`feature/performance-benchmarks`), and `E:\WorkSpace\UEAgentKit-RealtimeIO` (`feature/live-editor-realtime-io`). `git fsck --full --no-dangling` reports only these unborn-worktree notices and no missing/corrupt object. Integration deliberately did not reset, repair, or commit those worktrees. `main` is updated using a separate clean worktree.
 
 No Push / Rebase / Tag / Release or published-version change is part of this integration. Published version remains `0.7.0`.
 

@@ -164,9 +164,17 @@ Path       E:\WorkSpace\UEAgentKit
 HEAD       symbolic refs/heads/feature/agent-reliability
 Problem    that feature ref is currently missing
 main ref   valid
+
+Path       E:\WorkSpace\UEAgentKit-Performance
+HEAD       symbolic refs/heads/feature/performance-benchmarks
+Problem    that feature ref is currently missing
+
+Path       E:\WorkSpace\UEAgentKit-RealtimeIO
+HEAD       symbolic refs/heads/feature/live-editor-realtime-io
+Problem    that feature ref is currently missing
 ```
 
-Do not interpret the legacy root worktree's staged-all/unborn appearance as a new repository root. Do not reset/clean/recommit it. The integration uses a separate worktree specifically to avoid touching that broken symbolic HEAD.
+`git fsck --full --no-dangling` reports these as unborn-worktree notices only; no missing/corrupt object was reported. Do not interpret their staged-all/unborn appearance as new repository roots. Do not reset/clean/recommit them. Integration uses a separate worktree specifically to avoid touching broken symbolic HEADs.
 
 Always inspect actual Git status / refs / HEAD before changing files.
 
