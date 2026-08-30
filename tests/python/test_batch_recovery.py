@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -72,6 +74,49 @@ class _FakeWorkflow:
         self.rollback_dry_calls: list[str] = []
         self.rollback_commit_calls: list[str] = []
         self.events: list[tuple[str, str]] = []
+        self.capture_batches: list[list[dict[str, Any]]] = []
+        self.capture_suppression_depth = 0
+        self.unsuppressed_child_capture_attempts = 0
+
+    @contextmanager
+    def suppress_memory_l0_capture(self) -> Iterator[None]:
+        self.capture_suppression_depth += 1
+        try:
+            yield
+        finally:
+            self.capture_suppression_depth -= 1
+
+    @staticmethod
+    def memory_l0_outcome(state: str) -> str:
+        if "partial" in state:
+            return "partial"
+        if state == "recovered":
+            return "recovered"
+        return "failed" if state in {"failed", "blocked"} else "success"
+
+    @staticmethod
+    def memory_l0_change_set_artifact(
+        change_set_id: str,
+    ) -> dict[str, Any] | None:
+        return None
+
+    def capture_memory_l0_artifacts(
+        self,
+        artifacts: list[dict[str, Any]],
+        *,
+        response: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self.capture_batches.append(artifacts)
+        result = {
+            "enabled": True,
+            "capturedCount": len(artifacts),
+            "existingCount": 0,
+            "failedCount": 0,
+            "eventIds": [f"event_{len(self.capture_batches)}"],
+        }
+        if response is not None:
+            response["memoryCapture"] = result
+        return result
 
     def prepare_asset_for_disk_rollback(self, asset_path: str) -> dict[str, Any]:
         self.prepare_calls.append(asset_path)
@@ -85,6 +130,8 @@ class _FakeWorkflow:
         editor_session_id: str,
         change_set_id: str = "",
     ) -> dict[str, Any]:
+        if self.capture_suppression_depth == 0:
+            self.unsuppressed_child_capture_attempts += 1
         self.undo_calls.append((asset_path, transaction_id, editor_session_id, change_set_id))
         self.events.append(("undo", asset_path))
         return {"ok": True, "assetPath": asset_path, "transactionId": transaction_id}
@@ -137,6 +184,13 @@ class BatchRecoveryTests(unittest.TestCase):
             [DA, BP, BP, BP],
         )
         self.assertEqual(result["fullyRecovered"], True)
+        self.assertEqual(self.workflow.unsuppressed_child_capture_attempts, 0)
+        self.assertEqual(len(self.workflow.capture_batches), 1)
+        self.assertEqual(
+            self.workflow.capture_batches[0][0]["event_kind"],
+            "recovery",
+        )
+        self.assertEqual(result["memoryCapture"]["capturedCount"], 1)
 
     def test_editor_session_mismatch_blocks_zero_undo(self) -> None:
         self.workflow = _FakeWorkflow(self.root, session="session-other")

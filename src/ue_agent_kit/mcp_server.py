@@ -123,6 +123,8 @@ else:
 MCP_SERVER_NAME = "UE Agent Kit"
 TOOL_ROOT = Path(__file__).resolve().parents[2]
 STRICT_MEMORY_ARGUMENT_TOOL_NAMES = (
+    "ue_memory_list_l0_events",
+    "ue_memory_get_l0_event",
     "ue_memory_get_context",
     "ue_memory_expand_node",
     "ue_memory_get_evidence",
@@ -494,6 +496,13 @@ def _capabilities_response(
             "recordCount": memory_status.record_count if memory_status is not None else 0,
             "nodeCount": memory_status.node_count if memory_status is not None else 0,
             "activeWorkCount": memory_status.active_work_count if memory_status is not None else 0,
+            "l0EventCount": memory_status.l0_event_count if memory_status is not None else 0,
+            "pendingL0EventCount": (
+                memory_status.pending_l0_event_count if memory_status is not None else 0
+            ),
+            "evidenceChainCount": (
+                memory_status.evidence_chain_count if memory_status is not None else 0
+            ),
             "tools": MEMORY_TOOL_NAMES if memory_enabled else [],
             "recordTypes": [
                 "projectFact",
@@ -924,6 +933,13 @@ def _project_status_response(
             "recordCount": memory_status.record_count if memory_status is not None else 0,
             "nodeCount": memory_status.node_count if memory_status is not None else 0,
             "activeWorkCount": memory_status.active_work_count if memory_status is not None else 0,
+            "l0EventCount": memory_status.l0_event_count if memory_status is not None else 0,
+            "pendingL0EventCount": (
+                memory_status.pending_l0_event_count if memory_status is not None else 0
+            ),
+            "evidenceChainCount": (
+                memory_status.evidence_chain_count if memory_status is not None else 0
+            ),
             "countsByType": memory_status.counts_by_type if memory_status is not None else {},
             "countsByStatus": memory_status.counts_by_status if memory_status is not None else {},
         },
@@ -1178,6 +1194,18 @@ def create_mcp_server(
         raise ValueError("Provide workflow_config or workflow_service, not both.")
     if workflow_service is None and workflow_config is not None:
         workflow_service = PatchWorkflowService(index_service, workflow_config)
+    if workflow_service is not None and memory_service is not None:
+        bind_capture = getattr(
+            workflow_service,
+            "bind_memory_l0_capture_service",
+            None,
+        )
+        work_root = getattr(workflow_service.config, "work_root", None)
+        if callable(bind_capture) and isinstance(work_root, Path):
+            capture_service = memory_service.l0_capture_service(
+                artifact_root=work_root
+            )
+            bind_capture(capture_service)
     if live_editor_service is not None:
         if audit_report_root is None:
             audit_report_root = (
@@ -1513,6 +1541,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "recordCount": memory_status.record_count,
                     "nodeCount": memory_status.node_count,
                     "activeWorkCount": memory_status.active_work_count,
+                    "l0EventCount": memory_status.l0_event_count,
+                    "pendingL0EventCount": memory_status.pending_l0_event_count,
+                    "evidenceChainCount": memory_status.evidence_chain_count,
                     "countsByType": memory_status.counts_by_type,
                     "countsByStatus": memory_status.counts_by_status,
                 }

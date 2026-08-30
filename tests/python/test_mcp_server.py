@@ -1067,7 +1067,7 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         expected_names = tool_names_for_mode(memory_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 22)
+        self.assertEqual(len(tools), 24)
         forbidden = {
             "database",
             "database_path",
@@ -1104,6 +1104,57 @@ class McpServerTests(unittest.TestCase):
         self.assertTrue(project_status["project"]["fixedProject"])
         self.assertTrue(project_status["projectMemory"]["configured"])
         self.assertEqual(project_status["projectMemory"]["recordCount"], 0)
+        self.assertEqual(project_status["projectMemory"]["l0EventCount"], 0)
+        self.assertEqual(project_status["projectMemory"]["pendingL0EventCount"], 0)
+        self.assertEqual(project_status["projectMemory"]["evidenceChainCount"], 0)
+
+        artifact_root = self.temp_root / "workflow"
+        artifact_root.mkdir()
+        artifact = artifact_root / "live-write.json"
+        artifact.write_text('{"state":"applied"}', encoding="utf-8")
+        capture = memory_service.l0_capture_service(artifact_root=artifact_root)
+        capture_result = capture.append_event(
+            capture.artifact_draft(
+                artifact_path=artifact,
+                event_kind="live_write",
+                lifecycle_state="applied",
+                outcome="success",
+                asset_paths=(ASSET_A,),
+                change_set_id="cs_l0",
+                details={"operationCount": 1},
+            )
+        )
+        event_id = capture_result.event_ids[0]
+        _, listed = asyncio.run(
+            server.call_tool(
+                "ue_memory_list_l0_events",
+                {
+                    "event_kinds": ["live_write"],
+                    "change_set_id": "cs_l0",
+                    "distilled": False,
+                    "limit": 50,
+                },
+            )
+        )
+        self.assertTrue(listed["readOnly"])
+        self.assertEqual(listed["resultCount"], 1)
+        self.assertEqual(listed["items"][0]["artifactRef"], "live-write.json")
+        self.assertNotIn(str(self.temp_root), str(listed))
+        _, exact = asyncio.run(
+            server.call_tool(
+                "ue_memory_get_l0_event",
+                {"event_id": event_id},
+            )
+        )
+        self.assertEqual(exact["event"]["eventId"], event_id)
+        self.assertNotIn("artifactContents", exact["event"])
+        with self.assertRaisesRegex(Exception, "Extra inputs are not permitted"):
+            asyncio.run(
+                server.call_tool(
+                    "ue_memory_list_l0_events",
+                    {"project_key": "Other"},
+                )
+            )
 
         _, rule = asyncio.run(
             server.call_tool(
@@ -1859,7 +1910,7 @@ class McpServerTests(unittest.TestCase):
             [tool.name for tool in tools],
             tool_names_for_mode(workflow_enabled=True, memory_enabled=True),
         )
-        self.assertEqual(len(tools), 79)
+        self.assertEqual(len(tools), 81)
 
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
         memory_contract = capabilities["projectMemory"]

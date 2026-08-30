@@ -41,6 +41,8 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_get_task_context", "query", "read"),
     ToolDefinition("ue_memory_search", "memory", "read"),
     ToolDefinition("ue_memory_get", "memory", "read"),
+    ToolDefinition("ue_memory_list_l0_events", "memory", "read"),
+    ToolDefinition("ue_memory_get_l0_event", "memory", "read"),
     ToolDefinition("ue_memory_add_rule", "memory", "planning"),
     ToolDefinition("ue_memory_record_finding", "memory", "planning"),
     ToolDefinition("ue_memory_record_task", "memory", "planning"),

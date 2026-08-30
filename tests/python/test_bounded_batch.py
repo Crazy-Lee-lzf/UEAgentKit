@@ -4,6 +4,8 @@ import json
 import sys
 import tempfile
 import unittest
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -132,6 +134,47 @@ class _FakeWorkflowService:
         self.fail_plan_on_call = fail_plan_on_call
         self.fail_apply_on_call = fail_apply_on_call
         self.fail_fast_on_call = fail_fast_on_call
+        self.capture_batches: list[list[dict[str, Any]]] = []
+        self.capture_suppression_depth = 0
+        self.unsuppressed_child_capture_attempts = 0
+
+    @contextmanager
+    def suppress_memory_l0_capture(self) -> Iterator[None]:
+        self.capture_suppression_depth += 1
+        try:
+            yield
+        finally:
+            self.capture_suppression_depth -= 1
+
+    @staticmethod
+    def memory_l0_outcome(state: str) -> str:
+        if "partial" in state:
+            return "partial"
+        return "failed" if state == "failed" else "success"
+
+    @staticmethod
+    def memory_l0_change_set_artifact(
+        change_set_id: str,
+    ) -> dict[str, Any] | None:
+        return None
+
+    def capture_memory_l0_artifacts(
+        self,
+        artifacts: list[dict[str, Any]],
+        *,
+        response: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self.capture_batches.append(artifacts)
+        result = {
+            "enabled": True,
+            "capturedCount": len(artifacts),
+            "existingCount": 0,
+            "failedCount": 0,
+            "eventIds": [f"event_{len(self.capture_batches)}"],
+        }
+        if response is not None:
+            response["memoryCapture"] = result
+        return result
 
     def bind_asset_for_batch(self, asset_path: str) -> dict[str, Any]:
         self.bind_calls.append(asset_path)
@@ -177,6 +220,8 @@ class _FakeWorkflowService:
         self.plan_available_checks.append(plan_id)
 
     def apply_asset_property_live(self, plan_id: str, confirmation: str, change_set_id: str = "") -> dict[str, Any]:
+        if self.capture_suppression_depth == 0:
+            self.unsuppressed_child_capture_attempts += 1
         self.apply_calls.append(
             {
                 "planId": plan_id,
@@ -597,6 +642,13 @@ class BoundedBatchTests(unittest.TestCase):
         self.assertTrue(all(op["fastVerified"] for op in result["operations"]))
         self.assertEqual(len(self.workflow.apply_calls), 3)
         self.assertEqual(len(self.workflow.verify_calls), 3)
+        self.assertEqual(self.workflow.unsuppressed_child_capture_attempts, 0)
+        self.assertEqual(len(self.workflow.capture_batches), 1)
+        self.assertEqual(
+            [item["event_kind"] for item in self.workflow.capture_batches[0]],
+            ["batch_execution"],
+        )
+        self.assertEqual(result["memoryCapture"]["capturedCount"], 1)
         execution = self.service._executions[batch_plan_id].payload
         self.assertEqual(
             [op["previousTransactionId"] for op in execution["operations"]],
@@ -715,6 +767,12 @@ class BoundedBatchTests(unittest.TestCase):
         self.assertEqual(execution["notStarted"], ["bop_0003"])
         self.assertEqual(execution["recoveryOrder"], ["bop_0001"])
         self.assertEqual(len(workflow.apply_calls), 2)
+        self.assertEqual(workflow.unsuppressed_child_capture_attempts, 0)
+        self.assertEqual(len(workflow.capture_batches), 1)
+        self.assertEqual(
+            workflow.capture_batches[0][0]["lifecycle_state"],
+            "partially_applied",
+        )
 
     def test_apply_fast_verify_failure_partial_boundary(self) -> None:
         workflow = _FakeWorkflowService(

@@ -42,6 +42,44 @@ def register_workflow_tools(
     checkpoint_set_service = CheckpointSetService(workflow_service, bounded_batch_service)
     batch_recovery_service = BatchRecoveryService(workflow_service, bounded_batch_service, checkpoint_set_service)
 
+    def _captured_error_response(
+        tool_name: str,
+        error: Exception,
+        *,
+        read_only: bool,
+        asset_paths: tuple[str, ...] = (),
+        change_set_id: str = "",
+        target_identity: str = "",
+    ) -> dict[str, Any]:
+        response = error_response(tool_name, error, read_only=read_only)
+        details = getattr(error, "details", {})
+        durable_failure = bool(
+            isinstance(details, dict)
+            and {
+                "batchExecutionId",
+                "checkpointId",
+                "checkpointSetId",
+                "recoveryId",
+            }.intersection(details)
+        )
+        if not durable_failure:
+            capture_rejection = getattr(
+                workflow_service,
+                "capture_memory_l0_rejection",
+                None,
+            )
+            if callable(capture_rejection):
+                capture = capture_rejection(
+                    operation=tool_name,
+                    error=error,
+                    asset_paths=asset_paths,
+                    change_set_id=change_set_id,
+                    target_identity=target_identity,
+                )
+                if capture is not None:
+                    response["memoryCapture"] = capture
+        return response
+
     def _run_high_level_change(
         *,
         tool_name: str,
@@ -438,7 +476,13 @@ def register_workflow_tools(
         try:
             return workflow_service.apply_asset_property_live(plan_id, confirmation, change_set_id=change_set_id)
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-            return error_response("ue_apply_asset_property_live", exc, read_only=False)
+            return _captured_error_response(
+                "ue_apply_asset_property_live",
+                exc,
+                read_only=False,
+                change_set_id=change_set_id,
+                target_identity=plan_id,
+            )
 
     @server.tool(annotations=destructive_annotations)
     def ue_undo_asset_property_live(
@@ -456,7 +500,14 @@ def register_workflow_tools(
                 change_set_id=change_set_id,
             )
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-            return error_response("ue_undo_asset_property_live", exc, read_only=False)
+            return _captured_error_response(
+                "ue_undo_asset_property_live",
+                exc,
+                read_only=False,
+                asset_paths=(asset_path,),
+                change_set_id=change_set_id,
+                target_identity=transaction_id,
+            )
 
     @server.tool(annotations=destructive_annotations)
     def ue_discard_asset_property_live(
@@ -474,7 +525,14 @@ def register_workflow_tools(
                 change_set_id=change_set_id,
             )
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-            return error_response("ue_discard_asset_property_live", exc, read_only=False)
+            return _captured_error_response(
+                "ue_discard_asset_property_live",
+                exc,
+                read_only=False,
+                asset_paths=(asset_path,),
+                change_set_id=change_set_id,
+                target_identity=transaction_id,
+            )
 
     @server.tool(annotations=planning_annotations)
     def ue_set_asset_reference_property(
@@ -701,7 +759,13 @@ def register_workflow_tools(
                 change_set_id=change_set_id,
             )
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-            return error_response("ue_apply_live_write_batch", exc, read_only=False)
+            return _captured_error_response(
+                "ue_apply_live_write_batch",
+                exc,
+                read_only=False,
+                change_set_id=change_set_id,
+                target_identity=batch_plan_id,
+            )
 
     @server.tool(annotations=destructive_annotations)
     def ue_save_change_set_checkpoint(
@@ -721,7 +785,12 @@ def register_workflow_tools(
                 return checkpoint_set_service.get(checkpoint_set_id=batch_execution_id)
             return checkpoint_set_service.commit(checkpoint_set_id=batch_execution_id, confirmation=confirmation)
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-            return error_response("ue_save_change_set_checkpoint", exc, read_only=False)
+            return _captured_error_response(
+                "ue_save_change_set_checkpoint",
+                exc,
+                read_only=False,
+                target_identity=batch_execution_id,
+            )
 
     @server.tool(annotations=read_annotations)
     def ue_verify_change_set_checkpoint(checkpoint_set_id: str) -> dict[str, Any]:
@@ -729,7 +798,12 @@ def register_workflow_tools(
         try:
             return checkpoint_set_service.verify(checkpoint_set_id=checkpoint_set_id)
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-            return error_response("ue_verify_change_set_checkpoint", exc, read_only=True)
+            return _captured_error_response(
+                "ue_verify_change_set_checkpoint",
+                exc,
+                read_only=True,
+                target_identity=checkpoint_set_id,
+            )
 
     @server.tool(annotations=destructive_annotations)
     def ue_recover_live_write_batch(
@@ -749,7 +823,12 @@ def register_workflow_tools(
                 return batch_recovery_service.get(recovery_id=batch_execution_id)
             return batch_recovery_service.commit(recovery_id=batch_execution_id, confirmation=confirmation)
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-            return error_response("ue_recover_live_write_batch", exc, read_only=False)
+            return _captured_error_response(
+                "ue_recover_live_write_batch",
+                exc,
+                read_only=False,
+                target_identity=batch_execution_id,
+            )
 
     @server.tool(annotations=dry_run_annotations)
     def ue_dry_run_patch(plan_id: str) -> dict[str, Any]:
@@ -835,7 +914,14 @@ def register_workflow_tools(
                 asset_path=asset_path,
             )
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-            return error_response("ue_verify_live_write_checkpoint", exc, read_only=True)
+            return _captured_error_response(
+                "ue_verify_live_write_checkpoint",
+                exc,
+                read_only=True,
+                asset_paths=(asset_path,) if asset_path else (),
+                change_set_id=change_set_id,
+                target_identity=checkpoint_id,
+            )
 
     @server.tool(annotations=read_annotations)
     def ue_get_asset_state(asset_path: str) -> dict[str, Any]:
@@ -876,7 +962,14 @@ def register_workflow_tools(
                 verification_mode=verification_mode,
             )
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-            return error_response("ue_save_authorized_asset", exc, read_only=False)
+            return _captured_error_response(
+                "ue_save_authorized_asset",
+                exc,
+                read_only=False,
+                asset_paths=(asset_path,),
+                change_set_id=change_set_id,
+                target_identity=save_receipt,
+            )
 
     @server.tool(annotations=destructive_annotations)
     def ue_rollback_patch(

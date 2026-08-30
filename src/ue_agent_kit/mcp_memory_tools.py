@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from .active_work import WorkItem, WorkItemDraft, WorkStatus
 from .memory_context import ContextBudget, RecallBudget
+from .memory_l0 import MemoryL0Event
 from .memory_reports import memory_record_payload
 from .memory_service import ProjectMemoryService, ProjectMemoryServiceError
 from .memory_tree import KnowledgeNode, KnowledgeNodeDraft
@@ -95,6 +96,25 @@ def _work_item_payload(work: WorkItem) -> dict[str, Any]:
     }
 
 
+def _l0_event_payload(event: MemoryL0Event) -> dict[str, Any]:
+    return {
+        "eventId": event.event_id,
+        "projectKey": event.project_key,
+        "eventKind": event.event_kind,
+        "occurredAtUtc": event.occurred_at_utc,
+        "sourceRef": event.source_ref,
+        "artifactRef": event.artifact_ref,
+        "artifactDigest": event.artifact_digest,
+        "lifecycleState": event.lifecycle_state,
+        "outcome": event.outcome,
+        "assetPaths": list(event.asset_paths),
+        "changeSetId": event.change_set_id,
+        "hypothesisId": event.hypothesis_id,
+        "details": event.details,
+        "distilled": event.distilled,
+    }
+
+
 def _strict_object(value: Any, field_name: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"{field_name} must be one object.")
@@ -168,6 +188,8 @@ def _memory_error(error: Exception) -> Exception:
             return ProjectMemoryServiceError("memory-node-not-found", message)
         if message.startswith("Active Work"):
             return ProjectMemoryServiceError("memory-work-not-found", message)
+        if message.startswith("L0 event"):
+            return ProjectMemoryServiceError("memory-l0-event-not-found", message)
         return ProjectMemoryServiceError("memory-record-not-found", message)
     return error
 
@@ -258,6 +280,76 @@ def register_memory_tools(
             sqlite3.Error,
         ) as exc:
             return error_response("ue_memory_get", _memory_error(exc), read_only=True)
+
+    @server.tool(annotations=read_annotations)
+    def ue_memory_list_l0_events(
+        event_kinds: list[str] | None = None,
+        change_set_id: str = "",
+        distilled: bool | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """List bounded deterministic L0 evidence pointers for the fixed project."""
+        try:
+            events = memory_service.list_l0_events(
+                event_kinds=tuple(event_kinds or ()),
+                change_set_id=change_set_id,
+                distilled=distilled,
+                limit=limit,
+            )
+            return {
+                "schemaVersion": "1.0",
+                "tool": "ue_memory_list_l0_events",
+                "ok": True,
+                "readOnly": True,
+                "projectKey": memory_service.project_key,
+                "resultCount": len(events),
+                "items": [_l0_event_payload(event) for event in events],
+            }
+        except (
+            ProjectMemoryServiceError,
+            FileNotFoundError,
+            KeyError,
+            OSError,
+            TypeError,
+            ValueError,
+            RuntimeError,
+            sqlite3.Error,
+        ) as exc:
+            return error_response(
+                "ue_memory_list_l0_events",
+                _memory_error(exc),
+                read_only=True,
+            )
+
+    @server.tool(annotations=read_annotations)
+    def ue_memory_get_l0_event(event_id: str) -> dict[str, Any]:
+        """Get one exact L0 evidence pointer; referenced artifact contents are not read."""
+        try:
+            return {
+                "schemaVersion": "1.0",
+                "tool": "ue_memory_get_l0_event",
+                "ok": True,
+                "readOnly": True,
+                "projectKey": memory_service.project_key,
+                "event": _l0_event_payload(
+                    memory_service.get_l0_event(event_id)
+                ),
+            }
+        except (
+            ProjectMemoryServiceError,
+            FileNotFoundError,
+            KeyError,
+            OSError,
+            TypeError,
+            ValueError,
+            RuntimeError,
+            sqlite3.Error,
+        ) as exc:
+            return error_response(
+                "ue_memory_get_l0_event",
+                _memory_error(exc),
+                read_only=True,
+            )
 
     @server.tool(annotations=planning_annotations)
     def ue_memory_add_rule(

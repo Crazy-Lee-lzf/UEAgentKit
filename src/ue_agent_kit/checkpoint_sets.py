@@ -4,6 +4,7 @@ import hashlib
 import json
 import secrets
 import threading
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -195,6 +196,75 @@ class CheckpointSetService:
             response["failureBoundary"] = payload.get("failureBoundary", {})
         return response
 
+    def _capture(
+        self,
+        payload: dict[str, Any],
+        *,
+        verification: bool = False,
+        response: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        capture = getattr(
+            self.workflow_service,
+            "capture_memory_l0_artifacts",
+            None,
+        )
+        if not callable(capture):
+            return None
+        enabled = getattr(
+            self.workflow_service,
+            "_memory_l0_capture_enabled",
+            None,
+        )
+        if callable(enabled) and not enabled():
+            return None
+        change_set_id = str(payload.get("changeSetId", ""))
+        state = (
+            str((payload.get("verification") or {}).get("state", "failed"))
+            if verification
+            else str(payload.get("state", "failed"))
+        )
+        common = {
+            "artifact_path": (
+                self._directory(str(payload["checkpointSetId"]))
+                / "checkpoint-set.json"
+            ),
+            "lifecycle_state": state,
+            "outcome": self.workflow_service.memory_l0_outcome(state),
+            "asset_paths": tuple(payload.get("assetOrder", ())),
+            "change_set_id": change_set_id,
+        }
+        event_kinds = (
+            ("checkpoint_set", "semantic_diff", "trust")
+            if verification
+            else ("checkpoint_set",)
+        )
+        artifacts = [
+            {
+                **common,
+                "event_kind": event_kind,
+                "details": {
+                    "checkpointSetId": payload["checkpointSetId"],
+                    "savedCount": int(payload.get("savedCount", 0)),
+                    "verifiedCount": int(
+                        (payload.get("verification") or {}).get(
+                            "verifiedCount",
+                            0,
+                        )
+                    ),
+                },
+            }
+            for event_kind in event_kinds
+        ]
+        change_set_artifact = (
+            self.workflow_service.memory_l0_change_set_artifact(change_set_id)
+        )
+        if change_set_artifact is not None:
+            artifacts.append(change_set_artifact)
+        return capture(
+            artifacts,
+            response=response,
+        )
+
     def preview(self, *, batch_execution_id: str) -> dict[str, Any]:
         with self._lock:
             exec_payload = self._require_applied_execution(batch_execution_id)
@@ -331,6 +401,7 @@ class CheckpointSetService:
                     payload["failureBoundary"] = {"phase": "commit-preflight", **_safe_error(exc)}
                     payload["updatedAtUtc"] = _utc_now()
                     self._persist(payload)
+                    self._capture(payload)
                     raise WorkflowError(
                         "checkpoint-set-commit-preflight-failed",
                         "Commit-time global revalidation failed before any package Save.",
@@ -355,14 +426,20 @@ class CheckpointSetService:
                             "injected-mid-save-failure",
                             "Test-only fault seam injected before this child Save.",
                         )
-                    committed = self.workflow_service.save_authorized_asset(
-                        asset_path,
-                        mode="Commit",
-                        verification_mode="checkpoint",
-                        save_receipt=child["saveReceipt"],
-                        confirmation=f"SAVE {child['saveReceipt']}",
-                        change_set_id=change_set_id,
+                    suppress = getattr(
+                        self.workflow_service,
+                        "suppress_memory_l0_capture",
+                        nullcontext,
                     )
+                    with suppress():
+                        committed = self.workflow_service.save_authorized_asset(
+                            asset_path,
+                            mode="Commit",
+                            verification_mode="checkpoint",
+                            save_receipt=child["saveReceipt"],
+                            confirmation=f"SAVE {child['saveReceipt']}",
+                            change_set_id=change_set_id,
+                        )
                 except Exception as exc:
                     child["state"] = "failed"
                     child["failure"] = _safe_error(exc)
@@ -378,6 +455,7 @@ class CheckpointSetService:
                     payload["savedCount"] = len(persisted_assets)
                     payload["updatedAtUtc"] = _utc_now()
                     self._persist(payload)
+                    self._capture(payload)
                     raise WorkflowError(
                         "checkpoint-set-save-failed",
                         "A child checkpoint Save failed; the checkpoint set is not fully saved.",
@@ -413,6 +491,7 @@ class CheckpointSetService:
                     payload["savedCount"] = len(persisted_assets)
                     payload["updatedAtUtc"] = _utc_now()
                     self._persist(payload)
+                    self._capture(payload)
                     raise WorkflowError(
                         "checkpoint-set-rollback-promotion-failed",
                         "The package Save succeeded but rollback-manifest promotion failed; recovery readiness is incomplete.",
@@ -448,7 +527,9 @@ class CheckpointSetService:
             payload["savedAtUtc"] = _utc_now()
             payload["updatedAtUtc"] = _utc_now()
             self._persist(payload)
-            return self._commit_response(payload)
+            response = self._commit_response(payload)
+            self._capture(payload, response=response)
+            return response
 
     def _run_live_action(self, tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
         live_editor = getattr(self.workflow_service, "live_editor_service", None)
@@ -475,7 +556,12 @@ class CheckpointSetService:
                 )
             existing = payload.get("verification")
             if isinstance(existing, dict) and existing.get("state") == "verified":
-                return self._verification_response(payload, strong_verify_process_count=0)
+                response = self._verification_response(
+                    payload,
+                    strong_verify_process_count=0,
+                )
+                self._capture(payload, verification=True, response=response)
+                return response
 
             verification: dict[str, Any] = {
                 "state": "verifying",
@@ -508,11 +594,19 @@ class CheckpointSetService:
                 try:
                     if self._fault_verify_asset == asset_path:
                         raise WorkflowError("checkpoint-canonical-mismatch", "Test-only canonical mismatch seam.")
-                    result = self.workflow_service.verify_live_write_checkpoint(
-                        str(child["checkpointId"]),
-                        change_set_id=change_set_id,
-                        asset_path=asset_path,
+                    suppress = getattr(
+                        self.workflow_service,
+                        "suppress_memory_l0_capture",
+                        nullcontext,
                     )
+                    with suppress():
+                        result = (
+                            self.workflow_service.verify_live_write_checkpoint(
+                                str(child["checkpointId"]),
+                                change_set_id=change_set_id,
+                                asset_path=asset_path,
+                            )
+                        )
                     strong_verify_process_count += int(result.get("childUnrealProcessCount") or 0)
                     child_results.append(
                         {
@@ -675,7 +769,12 @@ class CheckpointSetService:
             verification["updatedAtUtc"] = _utc_now()
             payload["verification"] = verification
             self._persist(payload)
-            return self._verification_response(payload, strong_verify_process_count=strong_verify_process_count)
+            response = self._verification_response(
+                payload,
+                strong_verify_process_count=strong_verify_process_count,
+            )
+            self._capture(payload, verification=True, response=response)
+            return response
 
     def _verification_response(
         self,

@@ -55,10 +55,13 @@ class MemoryTreeTests(unittest.TestCase):
             ),
         )
 
-    def test_schema_v3_contains_tree_and_nullable_record_binding(self) -> None:
+    def test_schema_v4_preserves_tree_and_nullable_record_binding(self) -> None:
         with open_project_memory_database(self.database_path) as connection:
-            self.assertEqual(int(connection.execute("PRAGMA user_version").fetchone()[0]), 3)
-            self.assertEqual(CURRENT_MEMORY_SCHEMA_VERSION, 3)
+            self.assertEqual(
+                int(connection.execute("PRAGMA user_version").fetchone()[0]),
+                4,
+            )
+            self.assertEqual(CURRENT_MEMORY_SCHEMA_VERSION, 4)
             tables = {
                 str(row[0])
                 for row in connection.execute(
@@ -67,6 +70,8 @@ class MemoryTreeTests(unittest.TestCase):
             }
             self.assertIn("knowledge_nodes", tables)
             self.assertIn("active_work_items", tables)
+            self.assertIn("memory_l0_events", tables)
+            self.assertIn("memory_evidence_chains", tables)
             columns = {
                 str(row[1]) for row in connection.execute("PRAGMA table_info(memory_records)").fetchall()
             }

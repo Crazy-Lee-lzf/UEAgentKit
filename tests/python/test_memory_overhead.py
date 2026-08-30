@@ -36,6 +36,9 @@ class MemoryOverheadReportTests(unittest.TestCase):
             "scenarios": {
                 "B3_direct_automatic_recall": {"elapsedMs": {"p95Ms": 1.0}},
                 "B4_task_end_append": {"elapsedMs": {"p95Ms": 1.0}},
+                "B5_single_l0_capture": {"elapsedMs": {"p95Ms": 2.0}},
+                "B6_four_event_l0_capture_batch": {"elapsedMs": {"p95Ms": 3.0}},
+                "B7_exact_state_duplicate_replay": {"elapsedMs": {"p95Ms": 4.0}},
             },
             "derived": {"first_tool_memory_incremental_p95Ms": 1.0},
         }
@@ -51,6 +54,7 @@ class MemoryOverheadReportTests(unittest.TestCase):
         self.assertEqual(report["fixture"]["projectKey"], MeasureMemoryOverhead.PROJECT_KEY)
         self.assertNotIn("outputPath", report)
         self.assertIn("No absolute user paths are recorded", report["fixture"]["note"])
+        self.assertEqual(report["summary"]["fourEventL0CaptureBatchP95Ms"], 3.0)
         environment = report["environment"]
         self.assertEqual(environment["hostnameHash"], "")
         self.assertNotIn("\\", environment["platform"])

@@ -402,6 +402,32 @@ class WorkflowLiveMixin:
                 response["changeSetBound"] = change_set_bound
                 response["changeSetOperationId"] = change_set_operation_id
                 response["changeSetJournalPersisted"] = change_set_journal_persisted
+            if not self._memory_l0_capture_enabled():
+                return response
+            artifacts: list[dict[str, Any]] = []
+            if changed and journal_persisted:
+                artifacts.append(
+                    {
+                        "artifact_path": self._live_write_journal_path(
+                            live_apply_receipt
+                        ),
+                        "event_kind": "live_write",
+                        "lifecycle_state": "applied",
+                        "outcome": "success",
+                        "asset_paths": (asset_path,),
+                        "change_set_id": change_set_id,
+                        "details": {
+                            "operation": operation_name,
+                            "liveApplyReceipt": live_apply_receipt,
+                        },
+                    }
+                )
+            change_set_artifact = self.memory_l0_change_set_artifact(
+                change_set_id
+            )
+            if change_set_artifact is not None:
+                artifacts.append(change_set_artifact)
+            self.capture_memory_l0_artifacts(artifacts, response=response)
             return response
 
 
@@ -529,6 +555,15 @@ class WorkflowLiveMixin:
                 response["changeSetId"] = change_set_id
                 response["changeSetUpdated"] = change_set_updated
                 response["changeSetOperationStatus"] = change_set_operation_status
+            if not self._memory_l0_capture_enabled():
+                return response
+            change_set_artifact = self.memory_l0_change_set_artifact(
+                change_set_id
+            )
+            self.capture_memory_l0_artifacts(
+                [change_set_artifact] if change_set_artifact is not None else [],
+                response=response,
+            )
             return response
 
 
@@ -671,6 +706,36 @@ class WorkflowLiveMixin:
             return response
 
 
+    def _capture_checkpoint_failure_l0(
+        self,
+        checkpoint: LiveWriteCheckpointRecord,
+        *,
+        lifecycle_state: str | None = None,
+        outcome: str | None = None,
+    ) -> dict[str, Any] | None:
+        if not self._memory_l0_capture_enabled():
+            return None
+        state = lifecycle_state or checkpoint.state
+        artifacts: list[dict[str, Any]] = [
+            {
+                "artifact_path": self._checkpoint_journal_path(checkpoint.checkpoint_id),
+                "event_kind": "checkpoint",
+                "lifecycle_state": state,
+                "outcome": outcome or self.memory_l0_outcome(state),
+                "asset_paths": (checkpoint.asset_path,),
+                "change_set_id": checkpoint.change_set_id,
+                "details": {
+                    "checkpointId": checkpoint.checkpoint_id,
+                    "effectiveOperationCount": len(checkpoint.effective_receipts),
+                },
+            }
+        ]
+        change_set_artifact = self.memory_l0_change_set_artifact(checkpoint.change_set_id)
+        if change_set_artifact is not None:
+            artifacts.append(change_set_artifact)
+        return self.capture_memory_l0_artifacts(artifacts)
+
+
     def verify_live_write_checkpoint(
         self,
         checkpoint_id: str,
@@ -712,13 +777,18 @@ class WorkflowLiveMixin:
             if current_disk_revision != checkpoint.after_disk_revision:
                 checkpoint.state = "stale"
                 self._persist_checkpoint(checkpoint)
+                memory_capture = self._capture_checkpoint_failure_l0(checkpoint)
+                details = {
+                    "checkpointId": checkpoint.checkpoint_id,
+                    "expectedRevision": checkpoint.after_disk_revision,
+                    "actualRevision": current_disk_revision,
+                }
+                if memory_capture is not None:
+                    details["memoryCapture"] = memory_capture
                 raise WorkflowError(
                     "checkpoint-revision-stale",
                     "The current disk Package Revision no longer matches the saved checkpoint Revision.",
-                    details={
-                        "expectedRevision": checkpoint.after_disk_revision,
-                        "actualRevision": current_disk_revision,
-                    },
+                    details=details,
                 )
 
             output = self._safe_work_path("W3CheckpointVerify", checkpoint.checkpoint_id)
@@ -791,18 +861,31 @@ class WorkflowLiveMixin:
             if canonical_revision != checkpoint.after_disk_revision:
                 checkpoint.state = "stale"
                 self._persist_checkpoint(checkpoint)
+                memory_capture = self._capture_checkpoint_failure_l0(checkpoint)
+                details = {
+                    "checkpointId": checkpoint.checkpoint_id,
+                    "canonicalRevision": canonical_revision,
+                    "expectedRevision": checkpoint.after_disk_revision,
+                }
+                if memory_capture is not None:
+                    details["memoryCapture"] = memory_capture
                 raise WorkflowError(
                     "checkpoint-revision-stale",
                     "The independent canonical Revision does not match the checkpoint afterRevision.",
-                    details={"canonicalRevision": canonical_revision, "expectedRevision": checkpoint.after_disk_revision},
+                    details=details,
                 )
             after_export_disk_revision = "sha256:" + sha256_file(package_file)
             if after_export_disk_revision != checkpoint.after_disk_revision:
                 checkpoint.state = "stale"
                 self._persist_checkpoint(checkpoint)
+                memory_capture = self._capture_checkpoint_failure_l0(checkpoint)
+                details = {"checkpointId": checkpoint.checkpoint_id}
+                if memory_capture is not None:
+                    details["memoryCapture"] = memory_capture
                 raise WorkflowError(
                     "checkpoint-revision-stale",
                     "The disk Package Revision changed while the independent checkpoint export ran.",
+                    details=details,
                 )
 
             coverage: list[dict[str, Any]] = []
@@ -825,14 +908,22 @@ class WorkflowLiveMixin:
             if mismatches:
                 checkpoint.mismatch_diagnostics = mismatches
                 self._persist_checkpoint(checkpoint)
+                memory_capture = self._capture_checkpoint_failure_l0(
+                    checkpoint,
+                    lifecycle_state="value_mismatch",
+                    outcome="failed",
+                )
+                details = {
+                    "checkpointId": checkpoint.checkpoint_id,
+                    "mismatches": mismatches,
+                    "state": checkpoint.state,
+                }
+                if memory_capture is not None:
+                    details["memoryCapture"] = memory_capture
                 raise WorkflowError(
                     "checkpoint-value-mismatch",
                     "One or more effective checkpoint operations did not match the independently reloaded asset.",
-                    details={
-                        "checkpointId": checkpoint.checkpoint_id,
-                        "mismatches": mismatches,
-                        "state": checkpoint.state,
-                    },
+                    details=details,
                 )
 
             checkpoint.state = "verified"
@@ -881,7 +972,7 @@ class WorkflowLiveMixin:
         *,
         child_unreal_process_count: int,
     ) -> dict[str, Any]:
-        return {
+        response = {
             "schemaVersion": WORKFLOW_SCHEMA_VERSION,
             "tool": "ue_verify_live_write_checkpoint",
             "ok": True,
@@ -916,6 +1007,33 @@ class WorkflowLiveMixin:
                 }
             ],
         }
+        if not self._memory_l0_capture_enabled():
+            return response
+        artifacts = [
+            {
+                "artifact_path": self._checkpoint_journal_path(
+                    checkpoint.checkpoint_id
+                ),
+                "event_kind": "checkpoint",
+                "lifecycle_state": checkpoint.state,
+                "outcome": self.memory_l0_outcome(checkpoint.state),
+                "asset_paths": (checkpoint.asset_path,),
+                "change_set_id": checkpoint.change_set_id,
+                "details": {
+                    "checkpointId": checkpoint.checkpoint_id,
+                    "effectiveOperationCount": len(
+                        checkpoint.effective_receipts
+                    ),
+                },
+            }
+        ]
+        change_set_artifact = self.memory_l0_change_set_artifact(
+            checkpoint.change_set_id
+        )
+        if change_set_artifact is not None:
+            artifacts.append(change_set_artifact)
+        self.capture_memory_l0_artifacts(artifacts, response=response)
+        return response
 
 
     def verify_live_write(self, asset_path: str, live_apply_receipt: str = "", change_set_id: str = "") -> dict[str, Any]:

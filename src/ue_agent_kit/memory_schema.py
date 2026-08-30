@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-CURRENT_MEMORY_SCHEMA_VERSION = 3
+CURRENT_MEMORY_SCHEMA_VERSION = 4
 
 
 @dataclass(frozen=True)
@@ -296,6 +296,54 @@ CREATE TABLE active_work_todos (
 
 CREATE INDEX active_work_todos_work_idx
     ON active_work_todos(work_item_id, created_at_utc, todo_id);
+""",
+    ),
+    MemoryMigration(
+        version=4,
+        description="Add deterministic L0 events and Evidence Chain foundation",
+        sql=r"""
+CREATE TABLE memory_evidence_chains (
+    chain_id TEXT PRIMARY KEY,
+    project_key TEXT NOT NULL,
+    hypothesis TEXT NOT NULL,
+    context_json TEXT NOT NULL DEFAULT '{}',
+    verdict TEXT NOT NULL CHECK (verdict IN ('supported', 'rejected', 'inconclusive')),
+    confidence TEXT NOT NULL CHECK (confidence IN ('high', 'medium', 'low')),
+    created_at_utc TEXT NOT NULL,
+    verified_at_utc TEXT NOT NULL DEFAULT '',
+    superseded_by TEXT REFERENCES memory_evidence_chains(chain_id) ON DELETE SET NULL
+);
+
+CREATE INDEX memory_evidence_chain_project_idx
+    ON memory_evidence_chains(project_key, verdict, created_at_utc);
+
+CREATE TABLE memory_l0_events (
+    event_id TEXT PRIMARY KEY,
+    project_key TEXT NOT NULL,
+    event_kind TEXT NOT NULL,
+    occurred_at_utc TEXT NOT NULL,
+    source_ref TEXT NOT NULL,
+    artifact_ref TEXT NOT NULL DEFAULT '',
+    artifact_digest TEXT NOT NULL,
+    lifecycle_state TEXT NOT NULL,
+    outcome TEXT NOT NULL CHECK (
+        outcome IN ('success', 'partial', 'failed', 'rejected', 'no-op', 'recovered', 'superseded')
+    ),
+    asset_paths_json TEXT NOT NULL DEFAULT '[]',
+    change_set_id TEXT NOT NULL DEFAULT '',
+    hypothesis_id TEXT REFERENCES memory_evidence_chains(chain_id) ON DELETE SET NULL,
+    details_json TEXT NOT NULL DEFAULT '{}',
+    distilled INTEGER NOT NULL DEFAULT 0 CHECK (distilled IN (0, 1)),
+    UNIQUE(project_key, event_kind, source_ref, artifact_digest)
+);
+
+CREATE INDEX memory_l0_pending_idx
+    ON memory_l0_events(project_key, distilled, occurred_at_utc, event_id);
+CREATE INDEX memory_l0_change_set_idx
+    ON memory_l0_events(project_key, change_set_id, occurred_at_utc, event_id);
+CREATE INDEX memory_l0_hypothesis_idx
+    ON memory_l0_events(project_key, hypothesis_id, occurred_at_utc, event_id)
+    WHERE hypothesis_id IS NOT NULL;
 """,
     ),
 )

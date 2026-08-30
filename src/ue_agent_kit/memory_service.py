@@ -28,6 +28,12 @@ from .memory_context import (
     evidence_payload,
     expand_memory_node,
 )
+from .memory_l0 import (
+    MemoryEvidenceChain,
+    MemoryEvidenceChainDraft,
+    MemoryL0CaptureService,
+    MemoryL0Event,
+)
 from .memory_tasks import TaskOutcomeDraft, build_task_outcome_record
 from .memory_tree import (
     KnowledgeNode,
@@ -75,6 +81,9 @@ class ProjectMemoryStatus:
     record_count: int
     node_count: int
     active_work_count: int
+    l0_event_count: int
+    pending_l0_event_count: int
+    evidence_chain_count: int
     counts_by_type: dict[str, int]
     counts_by_status: dict[str, int]
 
@@ -119,6 +128,32 @@ class ProjectMemoryService:
                     (self.project_key,),
                 ).fetchone()[0]
             )
+            l0_event_count = int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM memory_l0_events WHERE project_key = ?",
+                    (self.project_key,),
+                ).fetchone()[0]
+            )
+            pending_l0_event_count = int(
+                connection.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM memory_l0_events
+                    WHERE project_key = ? AND distilled = 0
+                    """,
+                    (self.project_key,),
+                ).fetchone()[0]
+            )
+            evidence_chain_count = int(
+                connection.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM memory_evidence_chains
+                    WHERE project_key = ?
+                    """,
+                    (self.project_key,),
+                ).fetchone()[0]
+            )
             type_rows = connection.execute(
                 """
                 SELECT record_type, COUNT(*)
@@ -146,9 +181,63 @@ class ProjectMemoryService:
                 record_count=record_count,
                 node_count=node_count,
                 active_work_count=active_work_count,
+                l0_event_count=l0_event_count,
+                pending_l0_event_count=pending_l0_event_count,
+                evidence_chain_count=evidence_chain_count,
                 counts_by_type={str(row[0]): int(row[1]) for row in type_rows},
                 counts_by_status={str(row[0]): int(row[1]) for row in status_rows},
             )
+
+    def l0_capture_service(self, *, artifact_root: Path) -> MemoryL0CaptureService:
+        return MemoryL0CaptureService(
+            database_path=self.database_path,
+            project_key=self.project_key,
+            artifact_root=artifact_root,
+        )
+
+    def list_l0_events(
+        self,
+        *,
+        event_kinds: Sequence[str] = (),
+        change_set_id: str = "",
+        distilled: bool | None = None,
+        limit: int = 50,
+    ) -> tuple[MemoryL0Event, ...]:
+        return self.l0_capture_service(
+            artifact_root=self.database_path.parent
+        ).list_events(
+            event_kinds=event_kinds,
+            change_set_id=change_set_id,
+            distilled=distilled,
+            limit=limit,
+        )
+
+    def get_l0_event(self, event_id: str) -> MemoryL0Event:
+        return self.l0_capture_service(
+            artifact_root=self.database_path.parent
+        ).get_event(event_id)
+
+    def create_evidence_chain(
+        self,
+        draft: MemoryEvidenceChainDraft,
+    ) -> MemoryEvidenceChain:
+        return self.l0_capture_service(
+            artifact_root=self.database_path.parent
+        ).create_evidence_chain(draft)
+
+    def get_evidence_chain(self, chain_id: str) -> MemoryEvidenceChain:
+        return self.l0_capture_service(
+            artifact_root=self.database_path.parent
+        ).get_evidence_chain(chain_id)
+
+    def list_evidence_chains(
+        self,
+        *,
+        limit: int = 50,
+    ) -> tuple[MemoryEvidenceChain, ...]:
+        return self.l0_capture_service(
+            artifact_root=self.database_path.parent
+        ).list_evidence_chains(limit=limit)
 
     def add_record(self, draft: MemoryRecordDraft) -> MemoryRecord:
         if not isinstance(draft, MemoryRecordDraft):

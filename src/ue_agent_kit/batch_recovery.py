@@ -4,6 +4,7 @@ import hashlib
 import json
 import secrets
 import threading
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -101,6 +102,69 @@ class BatchRecoveryService:
             record = LiveWriteBatchRecoveryRecord(recovery_id, actual, payload, path)
             self._recoveries[recovery_id] = record
             return record
+
+    def _capture(
+        self,
+        payload: dict[str, Any],
+        *,
+        response: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        capture = getattr(
+            self.workflow_service,
+            "capture_memory_l0_artifacts",
+            None,
+        )
+        if not callable(capture):
+            return None
+        enabled = getattr(
+            self.workflow_service,
+            "_memory_l0_capture_enabled",
+            None,
+        )
+        if callable(enabled) and not enabled():
+            return None
+        change_set_id = str(payload.get("changeSetId", ""))
+        state = str(payload.get("state", "failed"))
+        artifacts = [
+            {
+                "artifact_path": (
+                    self._directory(str(payload["recoveryId"]))
+                    / "recovery.json"
+                ),
+                "event_kind": "recovery",
+                "lifecycle_state": state,
+                "outcome": self.workflow_service.memory_l0_outcome(state),
+                "asset_paths": tuple(
+                    dict.fromkeys(
+                        [
+                            str(item.get("assetPath", ""))
+                            for item in payload.get("savedAssets", ())
+                        ]
+                        + [
+                            str(item.get("assetPath", ""))
+                            for item in payload.get("residentOperations", ())
+                        ]
+                    )
+                ),
+                "change_set_id": change_set_id,
+                "details": {
+                    "recoveryId": payload["recoveryId"],
+                    "completedStepCount": len(
+                        payload.get("completedSteps", ())
+                    ),
+                    "pendingStepCount": len(payload.get("pendingSteps", ())),
+                },
+            }
+        ]
+        change_set_artifact = (
+            self.workflow_service.memory_l0_change_set_artifact(change_set_id)
+        )
+        if change_set_artifact is not None:
+            artifacts.append(change_set_artifact)
+        return capture(
+            artifacts,
+            response=response,
+        )
 
     def _execution_asset_order(self, exec_payload: dict[str, Any]) -> list[str]:
         order = exec_payload.get("assetOrder")
@@ -246,7 +310,9 @@ class BatchRecoveryService:
             record = self._load(recovery_id)
             payload = record.payload
             if payload["state"] == "recovered":
-                return self._commit_response(payload)
+                response = self._commit_response(payload)
+                self._capture(payload, response=response)
+                return response
             if payload["state"] not in {"recovery_prepared", "blocked", "partially_recovered"}:
                 raise WorkflowError(
                     "batch-recovery-commit-invalid-state",
@@ -304,6 +370,7 @@ class BatchRecoveryService:
                 payload["blockedReasons"] = blocked
                 payload["updatedAtUtc"] = _utc_now()
                 self._persist(payload)
+                self._capture(payload)
                 raise WorkflowError(
                     "batch-recovery-blocked",
                     "Recovery Commit global preflight failed before any recovery mutation.",
@@ -315,12 +382,20 @@ class BatchRecoveryService:
 
             for operation in remaining_plan["residentOperations"]:
                 try:
-                    undone = self.workflow_service.undo_asset_property_live(
-                        operation["assetPath"],
-                        operation["transactionId"],
-                        operation["editorSessionId"],
-                        change_set_id=payload["changeSetId"],
+                    suppress = getattr(
+                        self.workflow_service,
+                        "suppress_memory_l0_capture",
+                        nullcontext,
                     )
+                    with suppress():
+                        undone = (
+                            self.workflow_service.undo_asset_property_live(
+                                operation["assetPath"],
+                                operation["transactionId"],
+                                operation["editorSessionId"],
+                                change_set_id=payload["changeSetId"],
+                            )
+                        )
                     completed_steps.append(
                         {
                             "kind": "resident-undo",
@@ -340,6 +415,7 @@ class BatchRecoveryService:
                     payload["failureBoundary"] = {"phase": "resident-undo", **_safe_error(exc)}
                     payload["updatedAtUtc"] = _utc_now()
                     self._persist(payload)
+                    self._capture(payload)
                     raise WorkflowError(
                         "batch-recovery-resident-undo-failed",
                         "A resident Undo failed during Batch Recovery.",
@@ -391,6 +467,7 @@ class BatchRecoveryService:
                     payload["failureBoundary"] = {"phase": "disk-rollback", **_safe_error(exc)}
                     payload["updatedAtUtc"] = _utc_now()
                     self._persist(payload)
+                    self._capture(payload)
                     raise WorkflowError(
                         "batch-recovery-disk-rollback-failed",
                         "A persisted asset disk rollback failed during Batch Recovery.",
@@ -412,7 +489,9 @@ class BatchRecoveryService:
             payload["completedAtUtc"] = _utc_now()
             payload["updatedAtUtc"] = _utc_now()
             self._persist(payload)
-            return self._commit_response(payload)
+            response = self._commit_response(payload)
+            self._capture(payload, response=response)
+            return response
 
     def _commit_response(self, payload: dict[str, Any]) -> dict[str, Any]:
         return {

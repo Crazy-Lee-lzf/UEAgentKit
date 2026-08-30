@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -117,6 +119,55 @@ class _FakeWorkflow:
         self.live_editor_service = _FakeLiveEditor()
         self.verification_evidence_store = None
         self.plan_assertions: list[dict[str, Any]] | None = None
+        self.capture_batches: list[list[dict[str, Any]]] = []
+        self.capture_suppression_depth = 0
+        self.unsuppressed_child_capture_attempts = 0
+
+    @contextmanager
+    def suppress_memory_l0_capture(self) -> Iterator[None]:
+        self.capture_suppression_depth += 1
+        try:
+            yield
+        finally:
+            self.capture_suppression_depth -= 1
+
+    @staticmethod
+    def memory_l0_outcome(state: str) -> str:
+        if "partial" in state:
+            return "partial"
+        return "failed" if state == "failed" else "success"
+
+    def memory_l0_change_set_artifact(
+        self,
+        change_set_id: str,
+    ) -> dict[str, Any]:
+        return {
+            "artifact_path": self.config.work_root
+            / "change-sets"
+            / f"{change_set_id}.json",
+            "event_kind": "change_set",
+            "lifecycle_state": "saved",
+            "outcome": "success",
+            "change_set_id": change_set_id,
+        }
+
+    def capture_memory_l0_artifacts(
+        self,
+        artifacts: list[dict[str, Any]],
+        *,
+        response: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self.capture_batches.append(artifacts)
+        result = {
+            "enabled": True,
+            "capturedCount": len(artifacts),
+            "existingCount": 0,
+            "failedCount": 0,
+            "eventIds": [f"event_{len(self.capture_batches)}"],
+        }
+        if response is not None:
+            response["memoryCapture"] = result
+        return result
 
     def save_authorized_asset(
         self,
@@ -153,6 +204,8 @@ class _FakeWorkflow:
                 "expectedDiskRevision": f"sha256:before:{asset_path}",
             }
         if mode == "Commit":
+            if self.capture_suppression_depth == 0:
+                self.unsuppressed_child_capture_attempts += 1
             self.commit_calls.append(
                 {
                     "asset_path": asset_path,
@@ -218,6 +271,8 @@ class _FakeWorkflow:
         change_set_id: str = "",
         asset_path: str = "",
     ) -> dict[str, Any]:
+        if self.capture_suppression_depth == 0:
+            self.unsuppressed_child_capture_attempts += 1
         self.verify_calls.append(
             {"checkpointId": checkpoint_id, "changeSetId": change_set_id, "assetPath": asset_path}
         )
@@ -355,6 +410,12 @@ class CheckpointSetTests(unittest.TestCase):
             [call["asset_path"] for call in self.workflow.commit_calls],
             [BP_ASSET, DA_ASSET],
         )
+        self.assertEqual(self.workflow.unsuppressed_child_capture_attempts, 0)
+        self.assertEqual(
+            [item["event_kind"] for item in self.workflow.capture_batches[-1]],
+            ["checkpoint_set", "change_set"],
+        )
+        self.assertEqual(result["memoryCapture"]["capturedCount"], 2)
 
     def test_partially_applied_execution_rejected(self) -> None:
         self.bounded.execution_payload["state"] = "partially_applied"
@@ -501,6 +562,12 @@ class CheckpointSetTests(unittest.TestCase):
             ["ue_compile_blueprint", "ue_validate_asset", "ue_validate_asset"],
         )
         self.assertEqual(result["trust"]["state"], "verified")
+        self.assertEqual(self.workflow.unsuppressed_child_capture_attempts, 0)
+        self.assertEqual(
+            [item["event_kind"] for item in self.workflow.capture_batches[-1]],
+            ["checkpoint_set", "semantic_diff", "trust", "change_set"],
+        )
+        self.assertEqual(result["memoryCapture"]["capturedCount"], 4)
 
     def test_verify_replay_is_idempotent_no_new_strong_process(self) -> None:
         preview = self._preview()

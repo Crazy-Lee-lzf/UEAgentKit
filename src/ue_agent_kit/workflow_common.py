@@ -5,9 +5,11 @@ import json
 import subprocess
 import threading
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator, Sequence
 from .agent_api import (
     IndexQueryService,
 )
@@ -855,6 +857,11 @@ class WorkflowCommonBase:
         self._checkpoint_journal_errors: list[str] = []
         self._checkpoint_recovered_count = 0
         self._change_sets: dict[str, ChangeSetRecord] = {}
+        self._memory_l0_capture_service: Any | None = None
+        self._memory_l0_capture_suppression_depth: ContextVar[int] = ContextVar(
+            f"ueak_memory_l0_capture_suppression_{id(self)}",
+            default=0,
+        )
         self.live_editor_service = live_editor_service
         self.active_snapshot = self.config.active_snapshot
         self._refresh_applied = False
@@ -873,6 +880,165 @@ class WorkflowCommonBase:
         self._load_checkpoint_journal()
         self._load_change_set_journal()
 
+    def bind_memory_l0_capture_service(self, service: Any) -> None:
+        if service is None:
+            raise ValueError("Memory L0 capture service is required.")
+        if str(getattr(service, "project_key", "")) != self.project_name:
+            raise ValueError(
+                "Workflow and Memory L0 capture must use the same fixed project."
+            )
+        artifact_root = getattr(service, "artifact_root", None)
+        if not isinstance(artifact_root, Path):
+            raise ValueError("Memory L0 capture requires one fixed artifact root.")
+        if artifact_root.resolve() != self.config.work_root:
+            raise ValueError(
+                "Memory L0 capture artifact root must match the fixed workflow work_root."
+            )
+        if (
+            self._memory_l0_capture_service is not None
+            and self._memory_l0_capture_service is not service
+        ):
+            raise ValueError(
+                "Workflow Memory L0 capture is already bound and cannot be rebound."
+            )
+        self._memory_l0_capture_service = service
+
+    @contextmanager
+    def suppress_memory_l0_capture(self) -> Iterator[None]:
+        depth = self._memory_l0_capture_suppression_depth.get()
+        token = self._memory_l0_capture_suppression_depth.set(depth + 1)
+        try:
+            yield
+        finally:
+            self._memory_l0_capture_suppression_depth.reset(token)
+
+    def _memory_l0_capture_enabled(self) -> bool:
+        return (
+            self._memory_l0_capture_service is not None
+            and self._memory_l0_capture_suppression_depth.get() == 0
+        )
+
+    def capture_memory_l0_artifacts(
+        self,
+        artifacts: Sequence[dict[str, Any]],
+        *,
+        response: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        service = self._memory_l0_capture_service
+        if service is None or self._memory_l0_capture_suppression_depth.get():
+            return None
+        specs = [dict(spec) for spec in artifacts]
+        if not specs:
+            result = {
+                "enabled": True,
+                "capturedCount": 0,
+                "existingCount": 0,
+                "failedCount": 0,
+                "eventIds": [],
+            }
+        else:
+            try:
+                drafts = tuple(service.artifact_draft(**spec) for spec in specs)
+                result = service.append_events(drafts).to_payload()
+            except Exception as exc:
+                result = {
+                    "enabled": True,
+                    "capturedCount": 0,
+                    "existingCount": 0,
+                    "failedCount": len(specs),
+                    "eventIds": [],
+                    "errorCode": str(
+                        getattr(exc, "code", "memory-l0-capture-failed")
+                    ),
+                }
+        if response is not None:
+            response["memoryCapture"] = result
+        return result
+
+    def capture_memory_l0_rejection(
+        self,
+        *,
+        operation: str,
+        error: Exception,
+        asset_paths: Sequence[str] = (),
+        change_set_id: str = "",
+        target_identity: str = "",
+    ) -> dict[str, Any] | None:
+        service = self._memory_l0_capture_service
+        if (
+            service is None
+            or self._memory_l0_capture_suppression_depth.get()
+            or not hasattr(error, "code")
+        ):
+            return None
+        try:
+            return service.capture_rejection(
+                operation=operation,
+                error_code=str(error.code),
+                asset_paths=asset_paths,
+                change_set_id=change_set_id,
+                target_identity=target_identity,
+            ).to_payload()
+        except Exception as exc:
+            return {
+                "enabled": True,
+                "capturedCount": 0,
+                "existingCount": 0,
+                "failedCount": 1,
+                "eventIds": [],
+                "errorCode": str(
+                    getattr(exc, "code", "memory-l0-capture-failed")
+                ),
+            }
+
+    def memory_l0_change_set_artifact(
+        self,
+        change_set_id: str,
+    ) -> dict[str, Any] | None:
+        if not change_set_id:
+            return None
+        path = self._change_set_journal_path(change_set_id)
+        if not path.is_file():
+            return None
+        record = self._change_sets.get(change_set_id)
+        return {
+            "artifact_path": path,
+            "event_kind": "change_set",
+            "lifecycle_state": record.status if record is not None else "unknown",
+            "outcome": self.memory_l0_outcome(
+                record.status if record is not None else "unknown"
+            ),
+            "asset_paths": tuple(
+                dict.fromkeys(
+                    operation.asset_path
+                    for operation in record.operations
+                    if operation.asset_path
+                )
+            )
+            if record is not None
+            else (),
+            "change_set_id": change_set_id,
+            "details": {
+                "operationCount": len(record.operations) if record is not None else 0
+            },
+        }
+
+    @staticmethod
+    def memory_l0_outcome(state: str) -> str:
+        normalized = str(state).lower()
+        if "partial" in normalized:
+            return "partial"
+        if normalized in {"failed", "blocked", "stale", "unknown"}:
+            return "failed"
+        if normalized in {"rejected"}:
+            return "rejected"
+        if normalized in {"no-op", "noop"}:
+            return "no-op"
+        if normalized in {"recovered", "partially_recovered"}:
+            return "recovered"
+        if normalized in {"superseded"}:
+            return "superseded"
+        return "success"
 
     @property
     def configured_paths(self) -> tuple[Path, ...]:

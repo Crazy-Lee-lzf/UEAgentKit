@@ -64,6 +64,7 @@ DOMAIN_MODULES: dict[str, tuple[str, ...]] = {
         "test_agent_workflow",
         "test_memory_cli",
         "test_memory_context",
+        "test_memory_l0",
         "test_memory_overhead",
         "test_memory_service",
         "test_memory_tasks",

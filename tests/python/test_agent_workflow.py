@@ -5,6 +5,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,7 @@ from ue_agent_kit.agent_workflow import (  # noqa: E402
 )
 from ue_agent_kit.change_sets import ChangeSetOperationRecord, MAX_CHANGE_SET_RECEIPTS  # noqa: E402
 from ue_agent_kit.editor_bridge import LiveEditorError  # noqa: E402
+from ue_agent_kit.memory_service import ProjectMemoryService  # noqa: E402
 from ue_agent_kit.tool_registry import tool_names_for_mode  # noqa: E402
 
 
@@ -3241,6 +3243,170 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertEqual(details["affectedAssets"], [ASSET_PATH])
         self.assertEqual(details["transactionIds"], [TRANSACTION_ID])
 
+    def test_memory_l0_direct_live_write_is_optional_and_coalesced(self) -> None:
+        bridge = AgentWorkflowTests.ClosedLoopLiveService(dirty=True)
+        service = self._change_set_service(bridge)
+        change_set_id = self._bound_change_set(service)
+        without_memory = self._apply_bound_change_set(
+            service,
+            change_set_id,
+            description="Memory disabled",
+        )
+        self.assertNotIn("memoryCapture", without_memory)
+
+        with patch.object(
+            service,
+            "memory_l0_change_set_artifact",
+            side_effect=AssertionError("disabled capture must stay a cheap no-op"),
+        ):
+            disabled_change_set = self._bound_change_set(service)
+            disabled_again = self._apply_bound_change_set(
+                service,
+                disabled_change_set,
+                description="Memory still disabled",
+            )
+        self.assertNotIn("memoryCapture", disabled_again)
+
+        service = self._change_set_service(
+            AgentWorkflowTests.ClosedLoopLiveService(dirty=True)
+        )
+        memory = ProjectMemoryService(
+            database_path=self.root / "memory.sqlite3",
+            project_key=PROJECT,
+        )
+        capture = memory.l0_capture_service(artifact_root=self.work_root)
+        service.bind_memory_l0_capture_service(capture)
+        change_set_id = self._bound_change_set(service)
+        applied = self._apply_bound_change_set(
+            service,
+            change_set_id,
+            description="Memory enabled",
+        )
+        self.assertEqual(applied["memoryCapture"]["capturedCount"], 2)
+        events = memory.list_l0_events(change_set_id=change_set_id)
+        self.assertEqual(
+            {event.event_kind for event in events},
+            {"live_write", "change_set"},
+        )
+        self.assertTrue(
+            all(not Path(event.artifact_ref).is_absolute() for event in events)
+        )
+
+        with service.suppress_memory_l0_capture():
+            second_change_set = self._bound_change_set(service)
+            suppressed = self._apply_bound_change_set(
+                service,
+                second_change_set,
+                description="Memory suppressed",
+            )
+        self.assertNotIn("memoryCapture", suppressed)
+        self.assertEqual(
+            memory.list_l0_events(change_set_id=second_change_set),
+            (),
+        )
+
+    def test_memory_l0_suppression_is_execution_context_local(self) -> None:
+        service = self._change_set_service(
+            AgentWorkflowTests.ClosedLoopLiveService(dirty=True)
+        )
+        memory = ProjectMemoryService(
+            database_path=self.root / "context-local-memory.sqlite3",
+            project_key=PROJECT,
+        )
+        service.bind_memory_l0_capture_service(
+            memory.l0_capture_service(artifact_root=self.work_root)
+        )
+        entered = threading.Barrier(2)
+        release = threading.Barrier(2)
+        observed: dict[str, bool] = {}
+
+        def suppressed_context() -> None:
+            with service.suppress_memory_l0_capture():
+                observed["suppressed"] = service._memory_l0_capture_enabled()
+                entered.wait()
+                release.wait()
+
+        def independent_context() -> None:
+            entered.wait()
+            observed["independent"] = service._memory_l0_capture_enabled()
+            release.wait()
+
+        first = threading.Thread(target=suppressed_context)
+        second = threading.Thread(target=independent_context)
+        first.start()
+        second.start()
+        first.join(timeout=5)
+        second.join(timeout=5)
+
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        self.assertFalse(observed["suppressed"])
+        self.assertTrue(observed["independent"])
+        self.assertTrue(service._memory_l0_capture_enabled())
+
+    def test_memory_l0_capture_failure_does_not_fail_writer_result(self) -> None:
+        class FailingCapture:
+            project_key = PROJECT
+            artifact_root = self.work_root
+
+            @staticmethod
+            def artifact_draft(**_: Any) -> Any:
+                raise OSError("injected capture failure")
+
+        service = self._change_set_service(
+            AgentWorkflowTests.ClosedLoopLiveService(dirty=True)
+        )
+        service.bind_memory_l0_capture_service(FailingCapture())
+        change_set_id = self._bound_change_set(service)
+        applied = self._apply_bound_change_set(service, change_set_id)
+        self.assertTrue(applied["ok"])
+        self.assertTrue(applied["changed"])
+        self.assertEqual(applied["memoryCapture"]["capturedCount"], 0)
+        self.assertEqual(applied["memoryCapture"]["failedCount"], 2)
+        self.assertEqual(
+            applied["memoryCapture"]["errorCode"],
+            "memory-l0-capture-failed",
+        )
+
+    def test_memory_l0_deterministic_rejection_is_bounded_and_generic_error_ignored(self) -> None:
+        memory = ProjectMemoryService(
+            database_path=self.root / "rejection-memory.sqlite3",
+            project_key=PROJECT,
+        )
+        self.service.bind_memory_l0_capture_service(
+            memory.l0_capture_service(artifact_root=self.work_root)
+        )
+        capture = self.service.capture_memory_l0_rejection(
+            operation="ue_apply_asset_property_live",
+            error=WorkflowError(
+                "revision-conflict",
+                "This message must not be persisted.",
+            ),
+            asset_paths=(ASSET_PATH,),
+            change_set_id="cs_rejected",
+            target_identity="plan_rejected",
+        )
+        self.assertIsNotNone(capture)
+        self.assertEqual(capture["capturedCount"], 1)
+        event = memory.list_l0_events(
+            event_kinds=("workflow_rejection",)
+        )[0]
+        self.assertEqual(event.outcome, "rejected")
+        self.assertEqual(event.details["errorCode"], "revision-conflict")
+        self.assertNotIn("message", event.details)
+        self.assertNotIn("persisted", str(event.details))
+
+        ignored = self.service.capture_memory_l0_rejection(
+            operation="ue_apply_asset_property_live",
+            error=OSError("generic filesystem failure"),
+            asset_paths=(ASSET_PATH,),
+        )
+        self.assertIsNone(ignored)
+        self.assertEqual(
+            len(memory.list_l0_events(event_kinds=("workflow_rejection",))),
+            1,
+        )
+
     def test_change_set_live_write_continues_exact_previous_transaction(self) -> None:
         bridge = AgentWorkflowTests.ClosedLoopLiveService(dirty=True)
         service = self._change_set_service(bridge)
@@ -3590,6 +3756,13 @@ class AgentWorkflowTests(unittest.TestCase):
             freshness_tracker=tracker,
             live_editor_service=bridge,
         )
+        memory = ProjectMemoryService(
+            database_path=self.root / "checkpoint-memory.sqlite3",
+            project_key=PROJECT,
+        )
+        service.bind_memory_l0_capture_service(
+            memory.l0_capture_service(artifact_root=self.work_root)
+        )
         change_set_id = self._bound_change_set(service)
         applied = self._apply_bound_change_set(service, change_set_id)
         preview = service.save_authorized_asset(
@@ -3618,6 +3791,13 @@ class AgentWorkflowTests(unittest.TestCase):
         checkpoint_record = service._checkpoints[preview["checkpointId"]]
         self.assertEqual(checkpoint_record.state, "saved")
         self.assertEqual(checkpoint_record.after_disk_revision, saved_revision)
+        self.assertEqual(saved["memoryCapture"]["capturedCount"], 2)
+        self.assertEqual(
+            {event.event_kind for event in memory.list_l0_events(
+                change_set_id=change_set_id
+            )},
+            {"live_write", "change_set", "checkpoint"},
+        )
 
         verified = service.verify_live_write_checkpoint(preview["checkpointId"])
         self.assertTrue(verified["verified"])
@@ -3629,6 +3809,10 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertEqual(runner_calls, ["RunAssetCatalog.ps1"])
         self.assertEqual(service.get_change_set(change_set_id)["status"], "verified")
         self.assertNotIn(applied["liveApplyReceipt"], service._live_applies)
+        self.assertEqual(verified["memoryCapture"]["capturedCount"], 2)
+        before_replay = len(
+            memory.list_l0_events(change_set_id=change_set_id)
+        )
 
         # Idempotent repeat uses no additional export.
         runner_calls.clear()
@@ -3636,6 +3820,77 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertTrue(repeated["verified"])
         self.assertEqual(repeated["childUnrealProcessCount"], 0)
         self.assertEqual(runner_calls, [])
+        self.assertEqual(repeated["memoryCapture"]["capturedCount"], 0)
+        self.assertEqual(repeated["memoryCapture"]["existingCount"], 2)
+        self.assertEqual(
+            len(memory.list_l0_events(change_set_id=change_set_id)),
+            before_replay,
+        )
+
+    def test_checkpoint_stale_verify_captures_durable_failure_l0(self) -> None:
+        fresh_bytes = b"checkpoint-stale-before" * 8
+        saved_bytes = b"checkpoint-stale-saved" * 8
+        drift_bytes = b"checkpoint-stale-drift" * 8
+        fresh_revision = "sha256:" + hashlib.sha256(fresh_bytes).hexdigest()
+        saved_revision = "sha256:" + hashlib.sha256(saved_bytes).hexdigest()
+        bridge, package_file = self._checkpoint_bridge_and_package(saved_bytes)
+        package_file.write_bytes(fresh_bytes)
+
+        class ClosedLoopTracker(FakeFreshnessTracker):
+            def inspect_asset(self, asset_path: str) -> dict[str, Any]:
+                result = super().inspect_asset(asset_path)
+                result["diskRevision"] = saved_revision if self.state == "stale" else fresh_revision
+                return result
+
+        runner_calls: list[str] = []
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self._checkpoint_nonbp_runner(runner_calls, saved_revision),
+            freshness_tracker=ClosedLoopTracker(),
+            live_editor_service=bridge,
+        )
+        memory = ProjectMemoryService(
+            database_path=self.root / "checkpoint-stale-memory.sqlite3",
+            project_key=PROJECT,
+        )
+        service.bind_memory_l0_capture_service(
+            memory.l0_capture_service(artifact_root=self.work_root)
+        )
+        change_set_id = self._bound_change_set(service)
+        self._apply_bound_change_set(service, change_set_id)
+        preview = service.save_authorized_asset(
+            ASSET_PATH,
+            change_set_id=change_set_id,
+            verification_mode="checkpoint",
+        )
+        service.save_authorized_asset(
+            ASSET_PATH,
+            mode="Commit",
+            save_receipt=preview["saveReceipt"],
+            confirmation=f"SAVE {preview['saveReceipt']}",
+            change_set_id=change_set_id,
+            verification_mode="checkpoint",
+        )
+        package_file.write_bytes(drift_bytes)
+
+        with self.assertRaises(WorkflowError) as stale:
+            service.verify_live_write_checkpoint(preview["checkpointId"])
+        self.assertEqual(stale.exception.code, "checkpoint-revision-stale")
+        self.assertEqual(stale.exception.details["checkpointId"], preview["checkpointId"])
+        self.assertEqual(stale.exception.details["memoryCapture"]["capturedCount"], 1)
+        self.assertEqual(runner_calls, [])
+        checkpoint_events = memory.list_l0_events(
+            event_kinds=("checkpoint",),
+            change_set_id=change_set_id,
+        )
+        self.assertTrue(
+            any(event.lifecycle_state == "stale" and event.outcome == "failed" for event in checkpoint_events)
+        )
+        self.assertEqual(
+            memory.list_l0_events(event_kinds=("workflow_rejection",)),
+            (),
+        )
 
     def test_checkpoint_same_target_supersession_keeps_audit_history(self) -> None:
         fresh_bytes = b"supersede-before" * 8

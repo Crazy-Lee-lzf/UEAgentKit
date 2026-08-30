@@ -1,4 +1,4 @@
-"""Measure UEAgentKit Memory overhead and enforce M1 hard performance gates.
+"""Measure UEAgentKit Memory overhead and enforce M1/M2 hard performance gates.
 
 M1-0 measurement harness. Standard-library only, U0, no network, no external
 project. It creates temporary deterministic SQLite fixtures and measures:
@@ -8,6 +8,9 @@ project. It creates temporary deterministic SQLite fixtures and measures:
   B2  Memory-enabled first Task Context call with a populated fixture
   B3  direct automatic recall (ProjectMemoryService.get_context)
   B4  task-end append (record_task_outcome)
+  B5  single artifact-backed L0 capture
+  B6  four-event L0 capture batch in one transaction
+  B7  exact-state duplicate L0 replay
 
 The report uses stable JSON schema/key ordering and machine/timing metadata
 without absolute user paths. In --gate mode a non-zero exit is returned when a
@@ -50,6 +53,7 @@ from ue_agent_kit.memory_context import (  # noqa: E402
     RECALL_MAX_ESTIMATED_TOKENS,
     RECALL_MAX_ITEMS,
 )
+from ue_agent_kit.memory_l0 import MemoryL0CaptureService  # noqa: E402
 from ue_agent_kit.memory_service import ProjectMemoryService  # noqa: E402
 from ue_agent_kit.memory_tasks import TaskOutcomeDraft  # noqa: E402
 from ue_agent_kit.memory_tree import KnowledgeNodeDraft  # noqa: E402
@@ -61,7 +65,7 @@ from ue_agent_kit.project_memory import (  # noqa: E402
 )
 from ue_agent_kit.task_context import TaskContextService  # noqa: E402
 
-REPORT_SCHEMA = "ueagentkit-memory-overhead/1.0"
+REPORT_SCHEMA = "ueagentkit-memory-overhead/2.0"
 PROJECT_KEY = "benchmark-project"
 MEMORY_ASSET = "/Game/Perf/MemorySubject.MemorySubject"
 MEMORY_ASSET2 = "/Game/Perf/MemorySubject2.MemorySubject2"
@@ -71,6 +75,7 @@ RECALL_QUERY = "memory benchmark subject"
 FIRST_TOOL_MEMORY_INCREMENTAL_P95_MS = 200.0
 DIRECT_RECALL_P95_MS = 300.0
 TASK_END_APPEND_P95_MS = 100.0
+L0_CAPTURE_BATCH_P95_MS = 100.0
 
 
 def _hash_asset(path: str, index: int) -> str:
@@ -408,11 +413,97 @@ def _measure(
         elapsed_ms, _record = _task_end_append(memory_service=populated_memory, index=index)
         b4_ms.append(elapsed_ms)
 
+    artifact_root = populated_memory.database_path.parent / "workflow"
+    artifact_root.mkdir(parents=True, exist_ok=True)
+    l0_service = MemoryL0CaptureService(
+        database_path=populated_memory.database_path,
+        project_key=populated_memory.project_key,
+        artifact_root=artifact_root,
+    )
+
+    # B5: Exact persisted bytes are digested and one artifact-backed event is appended.
+    b5_ms: list[float] = []
+    for index in range(samples):
+        artifact = artifact_root / "single" / f"{index}.json"
+        artifact.parent.mkdir(parents=True, exist_ok=True)
+        artifact.write_text(
+            json.dumps({"sample": index}, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        started = time.perf_counter()
+        result = l0_service.append_event(
+            l0_service.artifact_draft(
+                artifact_path=artifact,
+                event_kind="live_write",
+                lifecycle_state="applied",
+                outcome="success",
+                asset_paths=(MEMORY_ASSET,),
+                change_set_id=f"cs_b5_{index}",
+                details={"operationCount": 1},
+            )
+        )
+        b5_ms.append((time.perf_counter() - started) * 1000.0)
+        if result.captured_count != 1:
+            raise RuntimeError("single L0 capture did not append exactly one row")
+
+    # B6: Four evidence pointers are digested and committed in one SQLite transaction.
+    b6_ms: list[float] = []
+    replay_drafts = ()
+    for index in range(samples):
+        artifacts = []
+        for ordinal in range(4):
+            artifact = artifact_root / "batch" / f"{index}-{ordinal}.json"
+            artifact.parent.mkdir(parents=True, exist_ok=True)
+            artifact.write_text(
+                json.dumps(
+                    {"sample": index, "ordinal": ordinal},
+                    separators=(",", ":"),
+                ),
+                encoding="utf-8",
+            )
+            artifacts.append(artifact)
+        started = time.perf_counter()
+        drafts = tuple(
+            l0_service.artifact_draft(
+                artifact_path=artifact,
+                event_kind=event_kind,
+                lifecycle_state="verified",
+                outcome="success",
+                asset_paths=(MEMORY_ASSET, MEMORY_ASSET2),
+                change_set_id=f"cs_b6_{index}",
+                details={"artifactOrdinal": ordinal},
+            )
+            for ordinal, (artifact, event_kind) in enumerate(
+                zip(
+                    artifacts,
+                    ("checkpoint_set", "semantic_diff", "trust", "change_set"),
+                    strict=True,
+                )
+            )
+        )
+        result = l0_service.append_events(drafts)
+        b6_ms.append((time.perf_counter() - started) * 1000.0)
+        if result.captured_count != 4:
+            raise RuntimeError("four-event L0 batch did not append exactly four rows")
+        replay_drafts = drafts
+
+    # B7: Replaying the same exact durable states must allocate zero new rows.
+    b7_ms: list[float] = []
+    for _ in range(samples):
+        started = time.perf_counter()
+        result = l0_service.append_events(replay_drafts)
+        b7_ms.append((time.perf_counter() - started) * 1000.0)
+        if result.captured_count != 0 or result.existing_count != 4:
+            raise RuntimeError("exact-state duplicate replay created new L0 rows")
+
     b0_stats = _sample_stats(b0_first_ms)
     b1_stats = _sample_stats(b1_first_ms)
     b2_stats = _sample_stats(b2_first_ms)
     b3_stats = _sample_stats(b3_ms)
     b4_stats = _sample_stats(b4_ms)
+    b5_stats = _sample_stats(b5_ms)
+    b6_stats = _sample_stats(b6_ms)
+    b7_stats = _sample_stats(b7_ms)
     first_incrementals = [
         max(0.0, b1 - b0) for b1, b0 in zip(b1_first_ms, b0_first_ms, strict=True)
     ]
@@ -507,6 +598,19 @@ def _measure(
                 "description": "Deterministic record_task_outcome append with fixed evidence references.",
                 "elapsedMs": b4_stats,
             },
+            "B5_single_l0_capture": {
+                "description": "Single exact artifact digest plus L0 append.",
+                "elapsedMs": b5_stats,
+            },
+            "B6_four_event_l0_capture_batch": {
+                "description": "Four exact artifact digests plus one L0 SQLite transaction.",
+                "elapsedMs": b6_stats,
+            },
+            "B7_exact_state_duplicate_replay": {
+                "description": "Replay four exact L0 states with zero new rows.",
+                "elapsedMs": b7_stats,
+                "createdRows": 0,
+            },
         },
         "derived": {
             "first_tool_memory_incremental_p95Ms": first_incremental_stats["p95Ms"],
@@ -527,6 +631,16 @@ def _measure(
                 "limitMs": TASK_END_APPEND_P95_MS,
                 "actualMs": b4_stats["p95Ms"],
                 "pass": b4_stats["p95Ms"] < TASK_END_APPEND_P95_MS,
+            },
+            "four_event_l0_capture_batch_p95_lt_100ms": {
+                "limitMs": L0_CAPTURE_BATCH_P95_MS,
+                "actualMs": b6_stats["p95Ms"],
+                "pass": b6_stats["p95Ms"] < L0_CAPTURE_BATCH_P95_MS,
+            },
+            "exact_state_duplicate_replay_creates_zero_rows": {
+                "expectedRows": 0,
+                "actualRows": 0,
+                "pass": True,
             },
             "automatic_recall_items_lte_5": {
                 "limit": RECALL_MAX_ITEMS,
@@ -582,6 +696,9 @@ def _build_report(
         "firstToolMemoryIncrementalP95Ms": measurements["derived"]["first_tool_memory_incremental_p95Ms"],
         "directRecallP95Ms": measurements["scenarios"]["B3_direct_automatic_recall"]["elapsedMs"]["p95Ms"],
         "taskEndAppendP95Ms": measurements["scenarios"]["B4_task_end_append"]["elapsedMs"]["p95Ms"],
+        "singleL0CaptureP95Ms": measurements["scenarios"]["B5_single_l0_capture"]["elapsedMs"]["p95Ms"],
+        "fourEventL0CaptureBatchP95Ms": measurements["scenarios"]["B6_four_event_l0_capture_batch"]["elapsedMs"]["p95Ms"],
+        "duplicateReplayP95Ms": measurements["scenarios"]["B7_exact_state_duplicate_replay"]["elapsedMs"]["p95Ms"],
     }
     return report
 
@@ -647,9 +764,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.gate:
         passed = _run_gate_check(report)
         if not passed:
-            print("GATE FAILED: one or more M1 hard performance gates are not met", file=sys.stderr)
+            print("GATE FAILED: one or more M1/M2 hard performance gates are not met", file=sys.stderr)
             return 1
-        print("GATE PASS: all M1 hard performance gates are met")
+        print("GATE PASS: all M1/M2 hard performance gates are met")
     return 0
 
 

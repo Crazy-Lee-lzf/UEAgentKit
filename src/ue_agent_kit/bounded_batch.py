@@ -7,6 +7,7 @@ import shutil
 import tempfile
 import threading
 import uuid
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -580,11 +581,17 @@ class BoundedBatchService:
                 operation_meta["previousTransactionId"] = last_transaction_id
                 child_plan_id = str(operation_meta["childPlanId"])
                 try:
-                    applied = self.workflow_service.apply_asset_property_live(
-                        child_plan_id,
-                        f"LIVE APPLY {child_plan_id}",
-                        change_set_id,
+                    suppress = getattr(
+                        self.workflow_service,
+                        "suppress_memory_l0_capture",
+                        nullcontext,
                     )
+                    with suppress():
+                        applied = self.workflow_service.apply_asset_property_live(
+                            child_plan_id,
+                            f"LIVE APPLY {child_plan_id}",
+                            change_set_id,
+                        )
                 except Exception as exc:
                     operation_meta["state"] = "failed"
                     operation_meta["failure"] = {
@@ -599,6 +606,7 @@ class BoundedBatchService:
                         mutated_batch_ids,
                     )
                     self._persist_execution(exec_payload)
+                    self._capture_execution(exec_payload)
                     raise WorkflowError(
                         "live-write-batch-apply-failed",
                         "A child resident Apply failed; resident sequence stopped.",
@@ -656,6 +664,7 @@ class BoundedBatchService:
                         mutated_batch_ids,
                     )
                     self._persist_execution(exec_payload)
+                    self._capture_execution(exec_payload)
                     raise WorkflowError(
                         "live-write-batch-apply-fast-verify-failed",
                         "Fast Resident Verify failed after a resident Apply; sequence stopped before the next operation.",
@@ -678,7 +687,61 @@ class BoundedBatchService:
             exec_payload["completedAtUtc"] = _utc_now()
             exec_payload["updatedAtUtc"] = _utc_now()
             self._persist_execution(exec_payload)
-            return self._execution_response(exec_payload)
+            response = self._execution_response(exec_payload)
+            self._capture_execution(exec_payload, response=response)
+            return response
+
+    def _capture_execution(
+        self,
+        exec_payload: dict[str, Any],
+        *,
+        response: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        capture = getattr(
+            self.workflow_service,
+            "capture_memory_l0_artifacts",
+            None,
+        )
+        if not callable(capture):
+            return None
+        enabled = getattr(
+            self.workflow_service,
+            "_memory_l0_capture_enabled",
+            None,
+        )
+        if callable(enabled) and not enabled():
+            return None
+        execution_id = str(exec_payload["batchExecutionId"])
+        change_set_id = str(exec_payload.get("changeSetId", ""))
+        artifacts = [
+            {
+                "artifact_path": (
+                    self._batch_execution_directory(execution_id)
+                    / "execution.json"
+                ),
+                "event_kind": "batch_execution",
+                "lifecycle_state": str(exec_payload["state"]),
+                "outcome": self.workflow_service.memory_l0_outcome(
+                    str(exec_payload["state"])
+                ),
+                "asset_paths": tuple(exec_payload.get("assetOrder", ())),
+                "change_set_id": change_set_id,
+                "details": {
+                    "batchExecutionId": execution_id,
+                    "operationCount": len(exec_payload.get("operations", ())),
+                    "appliedCount": int(exec_payload.get("appliedCount", 0)),
+                },
+            }
+        ]
+        change_set_artifact = (
+            self.workflow_service.memory_l0_change_set_artifact(change_set_id)
+        )
+        if change_set_artifact is not None:
+            artifacts.append(change_set_artifact)
+        return capture(
+            artifacts,
+            response=response,
+        )
 
     def _execution_response(self, exec_payload: dict[str, Any]) -> dict[str, Any]:
         operations = exec_payload["operations"]

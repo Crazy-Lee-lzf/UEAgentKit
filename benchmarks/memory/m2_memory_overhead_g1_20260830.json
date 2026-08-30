@@ -1,0 +1,267 @@
+{
+  "environment": {
+    "hostnameHash": "",
+    "implementation": "CPython",
+    "machine": "AMD64",
+    "platform": "Windows-10-10.0.19045-SP0",
+    "python": "3.12.10"
+  },
+  "fixture": {
+    "indexAssets": 2,
+    "note": "No absolute user paths are recorded. Timestamps are generatedAtUtc only.",
+    "populatedNodes": 13,
+    "populatedRecords": 30,
+    "populatedWorkItems": 20,
+    "projectKey": "benchmark-project",
+    "recallQuery": "memory benchmark subject"
+  },
+  "generatedAtUtc": "2026-08-30T15:42:54Z",
+  "measurements": {
+    "derived": {
+      "first_tool_memory_incremental_p95Ms": 21.515,
+      "first_tool_memory_incremental_samples": {
+        "maxMs": 25.415,
+        "meanMs": 18.954,
+        "medianMs": 19.04,
+        "minMs": 14.566,
+        "n": 20,
+        "p95Ms": 21.515,
+        "stddevMs": 2.51
+      }
+    },
+    "gates": {
+      "automatic_recall_content_chars_lte_2000": {
+        "actual": 1633,
+        "limit": 2000,
+        "pass": true
+      },
+      "automatic_recall_estimated_tokens_lte_800": {
+        "actual": 769,
+        "limit": 800,
+        "pass": true
+      },
+      "automatic_recall_items_lte_5": {
+        "actual": 3,
+        "limit": 5,
+        "pass": true
+      },
+      "direct_recall_p95_lt_300ms": {
+        "actualMs": 21.099,
+        "limitMs": 300.0,
+        "pass": true
+      },
+      "exact_state_duplicate_replay_creates_zero_rows": {
+        "actualRows": 0,
+        "expectedRows": 0,
+        "pass": true
+      },
+      "first_tool_memory_incremental_p95_lt_200ms": {
+        "actualMs": 21.515,
+        "limitMs": 200.0,
+        "pass": true
+      },
+      "four_event_l0_capture_batch_p95_lt_100ms": {
+        "actualMs": 16.635,
+        "limitMs": 100.0,
+        "pass": true
+      },
+      "no_hit_recall_is_empty": {
+        "actualContentChars": 0,
+        "actualItems": 0,
+        "expectedContentChars": 0,
+        "expectedItems": 0,
+        "pass": true
+      },
+      "task_end_append_p95_lt_100ms": {
+        "actualMs": 17.947,
+        "limitMs": 100.0,
+        "pass": true
+      }
+    },
+    "scenarios": {
+      "B0_memory_disabled_first_tool": {
+        "contentChars": {
+          "max": 0,
+          "median": 0,
+          "min": 0,
+          "n": 20
+        },
+        "description": "Memory-disabled first Task Context call on a fresh service instance.",
+        "elapsedMs": {
+          "maxMs": 38.972,
+          "meanMs": 33.552,
+          "medianMs": 33.475,
+          "minMs": 29.96,
+          "n": 20,
+          "p95Ms": 37.284,
+          "stddevMs": 2.346
+        },
+        "recalledItemCount": {
+          "max": 0,
+          "median": 0,
+          "min": 0,
+          "n": 20
+        }
+      },
+      "B1_memory_enabled_empty": {
+        "contentChars": {
+          "max": 0,
+          "median": 0,
+          "min": 0,
+          "n": 20
+        },
+        "description": "Memory-enabled first Task Context call with an empty/no-hit Memory DB.",
+        "elapsedMs": {
+          "maxMs": 59.599,
+          "meanMs": 52.506,
+          "medianMs": 52.369,
+          "minMs": 47.401,
+          "n": 20,
+          "p95Ms": 57.868,
+          "stddevMs": 3.361
+        },
+        "estimatedTokens": {
+          "max": 186,
+          "median": 186,
+          "min": 186,
+          "n": 20
+        },
+        "recalledItemCount": {
+          "max": 0,
+          "median": 0,
+          "min": 0,
+          "n": 20
+        }
+      },
+      "B2_memory_enabled_populated": {
+        "contentChars": {
+          "max": 1633,
+          "median": 1633,
+          "min": 1633,
+          "n": 20
+        },
+        "description": "Memory-enabled first Task Context call with a populated fixture.",
+        "elapsedMs": {
+          "maxMs": 69.422,
+          "meanMs": 61.11,
+          "medianMs": 61.26,
+          "minMs": 56.782,
+          "n": 20,
+          "p95Ms": 66.096,
+          "stddevMs": 3.228
+        },
+        "estimatedTokens": {
+          "max": 769,
+          "median": 769,
+          "min": 769,
+          "n": 20
+        },
+        "recalledItemCount": {
+          "max": 3,
+          "median": 3,
+          "min": 3,
+          "n": 20
+        }
+      },
+      "B3_direct_automatic_recall": {
+        "contentChars": {
+          "max": 1633,
+          "median": 1633,
+          "min": 1633,
+          "n": 20
+        },
+        "description": "Direct ProjectMemoryService.get_context on the populated fixture.",
+        "elapsedMs": {
+          "maxMs": 21.601,
+          "meanMs": 18.018,
+          "medianMs": 17.785,
+          "minMs": 15.856,
+          "n": 20,
+          "p95Ms": 21.099,
+          "stddevMs": 1.659
+        },
+        "estimatedTokens": {
+          "max": 748,
+          "median": 748,
+          "min": 748,
+          "n": 20
+        },
+        "recalledItemCount": {
+          "max": 3,
+          "median": 3,
+          "min": 3,
+          "n": 20
+        },
+        "truncated": {
+          "falseCount": 0,
+          "n": 20,
+          "trueCount": 20
+        },
+        "truncationReasons": [
+          "recall-content-budget-truncated",
+          "recall-item-budget-truncated"
+        ]
+      },
+      "B4_task_end_append": {
+        "description": "Deterministic record_task_outcome append with fixed evidence references.",
+        "elapsedMs": {
+          "maxMs": 17.96,
+          "meanMs": 16.197,
+          "medianMs": 16.285,
+          "minMs": 13.929,
+          "n": 20,
+          "p95Ms": 17.947,
+          "stddevMs": 1.032
+        }
+      },
+      "B5_single_l0_capture": {
+        "description": "Single exact artifact digest plus L0 append.",
+        "elapsedMs": {
+          "maxMs": 11.584,
+          "meanMs": 9.982,
+          "medianMs": 9.727,
+          "minMs": 8.874,
+          "n": 20,
+          "p95Ms": 11.102,
+          "stddevMs": 0.653
+        }
+      },
+      "B6_four_event_l0_capture_batch": {
+        "description": "Four exact artifact digests plus one L0 SQLite transaction.",
+        "elapsedMs": {
+          "maxMs": 16.787,
+          "meanMs": 14.665,
+          "medianMs": 14.628,
+          "minMs": 13.128,
+          "n": 20,
+          "p95Ms": 16.635,
+          "stddevMs": 0.914
+        }
+      },
+      "B7_exact_state_duplicate_replay": {
+        "createdRows": 0,
+        "description": "Replay four exact L0 states with zero new rows.",
+        "elapsedMs": {
+          "maxMs": 8.84,
+          "meanMs": 5.351,
+          "medianMs": 5.019,
+          "minMs": 4.668,
+          "n": 20,
+          "p95Ms": 6.271,
+          "stddevMs": 0.936
+        }
+      }
+    }
+  },
+  "mode": "gate",
+  "samples": 20,
+  "schema": "ueagentkit-memory-overhead/2.0",
+  "summary": {
+    "directRecallP95Ms": 21.099,
+    "duplicateReplayP95Ms": 6.271,
+    "firstToolMemoryIncrementalP95Ms": 21.515,
+    "fourEventL0CaptureBatchP95Ms": 16.635,
+    "singleL0CaptureP95Ms": 11.102,
+    "taskEndAppendP95Ms": 17.947
+  }
+}

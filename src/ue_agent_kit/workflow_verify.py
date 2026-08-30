@@ -73,7 +73,7 @@ class WorkflowVerifyMixin:
 
     @staticmethod
     def _serialize_checkpoint_record(record: LiveWriteCheckpointRecord) -> dict[str, Any]:
-        return {
+        response = {
             "schemaVersion": CHECKPOINT_RECORD_SCHEMA_VERSION,
             "projectName": None,  # filled by instance method below
             "checkpointId": record.checkpoint_id,
@@ -105,6 +105,7 @@ class WorkflowVerifyMixin:
             "mismatchDiagnostics": list(record.mismatch_diagnostics),
             "verifiedOperationCoverage": list(record.verified_operation_coverage),
         }
+        return response
 
 
     def _persist_checkpoint(self, record: LiveWriteCheckpointRecord) -> bool:
@@ -562,7 +563,7 @@ class WorkflowVerifyMixin:
             if after_revision != before_revision
             else self.freshness.inspect_asset(asset_path)
         )
-        return {
+        response = {
             "schemaVersion": WORKFLOW_SCHEMA_VERSION,
             "tool": "ue_save_authorized_asset",
             "ok": True,
@@ -600,6 +601,31 @@ class WorkflowVerifyMixin:
                 }
             ],
         }
+        if not self._memory_l0_capture_enabled():
+            return response
+        artifacts = [
+            {
+                "artifact_path": self._checkpoint_journal_path(
+                    checkpoint.checkpoint_id
+                ),
+                "event_kind": "checkpoint",
+                "lifecycle_state": checkpoint.state,
+                "outcome": self.memory_l0_outcome(checkpoint.state),
+                "asset_paths": (asset_path,),
+                "change_set_id": change_set_id,
+                "details": {
+                    "checkpointId": checkpoint.checkpoint_id,
+                    "effectiveOperationCount": len(
+                        checkpoint.effective_receipts
+                    ),
+                },
+            }
+        ]
+        change_set_artifact = self.memory_l0_change_set_artifact(change_set_id)
+        if change_set_artifact is not None:
+            artifacts.append(change_set_artifact)
+        self.capture_memory_l0_artifacts(artifacts, response=response)
+        return response
 
 
     def preflight_checkpoint_commit(
