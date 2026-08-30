@@ -162,19 +162,19 @@ Read in this order:
 1. docs/Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260828.md
    → current project-level takeover state
 
-2. docs/Plans/README.md
+2. docs/DEVELOPMENT_WORKFLOW.md
+   → mandatory development/test/UE-resource rules for every new plan
+
+3. docs/Plans/README.md
    → current plan navigation and stage status
 
-3. docs/Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md
+4. docs/Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md
    → project priority / Track direction / architecture decisions
 
-4. docs/Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md
+5. docs/Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md
    → cross-Track dependencies, task cards, acceptance contracts
 
-5. docs/Plans/UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_DETAILED_PLAN_20260826.md
-   → authoritative W4-0 ... W4-7 parent contract
-
-6. current W4 sub-stage Detailed Plan / Result
+6. current Track Detailed Plan / latest Result
    → phase-specific implementation and factual evidence
 ```
 
@@ -1009,17 +1009,13 @@ For C++ changes:
 
 For no-C++ stages such as W4-1, a new Direct Build is not mandatory if the last required C++ baseline remains valid.
 
-Always include:
+Validation intensity is governed by `docs/DEVELOPMENT_WORKFLOW.md`.
 
-```text
-Ruff
-Python full discovered suite
-compileall
-git diff --check
-ValidateRelease 0.7.0
-```
+Do **not** run the full discovered Python suite after every modification. Use G0 focused tests during development, G1 domain/checkpoint tests for coherent sub-capabilities, G2 once at stage closure, and G3 only at integration/release boundaries.
 
-plus real UE acceptance when the phase mutates or verifies resident/disk state.
+At G2, full Python and Ruff must not be duplicated by `ValidateRelease.py`: either run full `ValidateRelease.py` once, or run full Python + Ruff once and then run `ValidateRelease.py --skip-tests --skip-ruff` for its unique version/schema/release checks.
+
+Real UE acceptance uses the U0-U3 classification and only covers behavior whose correctness actually depends on UE state. A Python/Web/docs-only stage does not inherit Writer-era full real-UE matrices.
 
 ## 20. Repo / Agent Operating Rules
 
@@ -1029,8 +1025,9 @@ Before any change:
 1. inspect git status
 2. inspect latest commit
 3. read this handoff
-4. read Plans/README.md
-5. read the current stage Detailed Plan / previous Result
+4. read docs/DEVELOPMENT_WORKFLOW.md
+5. read Plans/README.md
+6. read the current stage Detailed Plan / previous Result
 ```
 
 Do not:
@@ -1069,13 +1066,13 @@ A fresh Chat / Agent should do the following:
 
 ```text
 1. Read this file.
-2. Read docs/Plans/README.md.
-3. Read W4 parent Detailed Plan.
-4. Read final W4 Result.
+2. Read docs/DEVELOPMENT_WORKFLOW.md.
+3. Read docs/Plans/README.md.
+4. Read the current Track parent Detailed Plan / latest Result.
 5. Inspect actual git status / HEAD; do not assume they are unchanged.
-6. Confirm W4 is complete and select the next post-W4 item from the Master Plan (W5 and/or D1 per dependency order).
-7. Do not begin W5/D1/Memory implementation until this file and README show W4 complete.
-8. Run relevant regression gates before starting new work.
+6. Select the next item from the current Master/Midterm dependency order.
+7. Before writing its Detailed Plan, declare the Validation Budget (G0/G1/G2 + U-level).
+8. Run only the relevant entry/checkpoint gates; do not pre-emptively run full regression twice.
 ```
 
 The immediate implementation objective after W4 is therefore:
@@ -1091,6 +1088,7 @@ Current project / execution:
 
 ```text
 docs/Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260828.md
+docs/DEVELOPMENT_WORKFLOW.md
 docs/Plans/README.md
 docs/Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md
 docs/Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md
