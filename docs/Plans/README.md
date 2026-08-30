@@ -1,6 +1,6 @@
 # UEAgentKit Plans 文档索引
 
-> 更新时间：2026-08-29
+> 更新时间：2026-08-30
 >
 > 本目录保留当前计划、阶段结果与历史执行记录。历史文件不删除、不移动；后续工作应先从本索引进入，避免误用已经完成或被新计划取代的旧文档。
 
@@ -10,11 +10,13 @@
 |---|---|---|---|
 | 项目总交接 | [`../Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260828.md`](../Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260828.md) | 当前 HEAD、全 Track 状态、安全边界与接手步骤 | **新 Chat / Agent 先读** |
 | 开发执行规范 | [`../DEVELOPMENT_WORKFLOW.md`](../DEVELOPMENT_WORKFLOW.md) | G0-G3 测试分级、U0-U3 UE 验收、UE lease、性能采样与文档粒度 | **任何 Detailed Plan / Blocker Plan 强制前置** |
+| W+V 集成清单 | [`UEAGENTKIT_W_V_INTEGRATION_CHECKLIST_20260830.md`](UEAGENTKIT_W_V_INTEGRATION_CHECKLIST_20260830.md) | Writer + Knowledge Web 本地集成顺序、边界与 G3 预算 | executed |
+| W+V 集成结果 | [`UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md`](UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md) | W/V 合并、845 项 G3、R20 延后解释与 Git worktree 注意事项 | **G3 PASS / 当前集成结果** |
 | 项目方向 | [`UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md`](UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md) | 项目级优先级、Track 边界、架构取舍 | 当前主计划 |
 | 中期拆解 | [`UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md`](UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md) | 任务依赖、验收契约与跨 Track 关系 | 当前执行规格 |
-| Track V 当前计划 | [`UEAGENTKIT_TRACK_V_READ_ONLY_KNOWLEDGE_WEB_DETAILED_PLAN_20260829.md`](UEAGENTKIT_TRACK_V_READ_ONLY_KNOWLEDGE_WEB_DETAILED_PLAN_20260829.md) | V1 本地只读知识浏览器 → V2 可视化分析面板；独立 worktree、零 UE Editor 占用 | **feature/knowledge-web-view current** |
-| Track V V2 计划 | [`UEAGENTKIT_V2_KNOWLEDGE_VISUALIZATION_DETAILED_PLAN_20260829.md`](UEAGENTKIT_V2_KNOWLEDGE_VISUALIZATION_DETAILED_PLAN_20260829.md) | V2 可视化面板：V2-0 数据/API 契约冻结 → V2-1 图/影响 → V2-2 覆盖/时间线/陈旧 → V2-3 5000 节点性能门禁 | **V2-0 入口检查点** |
-| Track V V2 结果 | [`UEAGENTKIT_V2_KNOWLEDGE_VISUALIZATION_RESULT_20260829.md`](UEAGENTKIT_V2_KNOWLEDGE_VISUALIZATION_RESULT_20260829.md) | V2 可视化面板结果：5 个只读端点 + Canvas 图 + 43 个新测试 + 5000 节点性能基准 | **V2 完成（待授权提交）** |
+| Track V 计划 | [`UEAGENTKIT_TRACK_V_READ_ONLY_KNOWLEDGE_WEB_DETAILED_PLAN_20260829.md`](UEAGENTKIT_TRACK_V_READ_ONLY_KNOWLEDGE_WEB_DETAILED_PLAN_20260829.md) | V1 本地只读知识浏览器 → V2 可视化分析面板；独立 worktree、零 UE Editor 占用 | complete |
+| Track V V2 计划 | [`UEAGENTKIT_V2_KNOWLEDGE_VISUALIZATION_DETAILED_PLAN_20260829.md`](UEAGENTKIT_V2_KNOWLEDGE_VISUALIZATION_DETAILED_PLAN_20260829.md) | V2 可视化面板：V2-0 数据/API 契约冻结 → V2-1 图/影响 → V2-2 覆盖/时间线/陈旧 → V2-3 5000 节点性能门禁 | complete |
+| Track V V2 结果 | [`UEAGENTKIT_V2_KNOWLEDGE_VISUALIZATION_RESULT_20260829.md`](UEAGENTKIT_V2_KNOWLEDGE_VISUALIZATION_RESULT_20260829.md) | V2 可视化面板结果：5 个只读端点 + Canvas 图 + 43 个新测试 + 5000 节点性能基准 | **complete / integrated** |
 | Track V V1 结果 | [`UEAGENTKIT_V1_READ_ONLY_KNOWLEDGE_BROWSER_RESULT_20260829.md`](UEAGENTKIT_V1_READ_ONLY_KNOWLEDGE_BROWSER_RESULT_20260829.md) | V1 本地只读知识浏览器：全部验收 PASS，全量 792 测试 OK，已提交 49b8fa61 | complete |
 | 当前实现 | [`UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_DETAILED_PLAN_20260826.md`](UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_DETAILED_PLAN_20260826.md) | W4-0～W4-7 的具体实现与真实 UE 验收 | complete |
 | 当前子阶段 | [`UEAGENTKIT_W4_1_BOUNDED_BATCH_PLAN_DETAILED_PLAN_20260828.md`](UEAGENTKIT_W4_1_BOUNDED_BATCH_PLAN_DETAILED_PLAN_20260828.md) | W4-1 只读 Bounded Batch Plan 的实现与验收契约 | complete |
@@ -34,7 +36,7 @@
 | 当前任务 | [`UEAGENTKIT_D1_AGENT_WORKFLOW_SPLIT_DETAILED_PLAN_20260829.md`](UEAGENTKIT_D1_AGENT_WORKFLOW_SPLIT_DETAILED_PLAN_20260829.md) | W4 后立即执行的 `agent_workflow.py` 纯重构拆分；冻结 API / Tool / serialized evidence 行为 | complete |
 | 当前任务结果 | [`UEAGENTKIT_D1_AGENT_WORKFLOW_SPLIT_RESULT_20260829.md`](UEAGENTKIT_D1_AGENT_WORKFLOW_SPLIT_RESULT_20260829.md) | D1 纯 AST 移动 0 mismatch、Tool/API 不变、真实 UE R1/R2 与最终 fixture 验收 | **complete / 当前 D1 结果** |
 | 当前任务 | [`UEAGENTKIT_W5_REAL_PROJECT_ACCEPTANCE_AND_SCALE_BASELINE_DETAILED_PLAN_20260829.md`](UEAGENTKIT_W5_REAL_PROJECT_ACCEPTANCE_AND_SCALE_BASELINE_DETAILED_PLAN_20260829.md) | DirectHost 写入验收 + Reforge 只读 + 50 GB 规模门禁 | complete (R20 blocked; W5-S 50 GB closed) |
-| 当前任务结果 | [`UEAGENTKIT_W5_REAL_PROJECT_ACCEPTANCE_RESULT_20260829.md`](UEAGENTKIT_W5_REAL_PROJECT_ACCEPTANCE_RESULT_20260829.md) | R1/R5 完整，R20 blocked；50 GB checkpoint validated + 3 samples；fail-closed PASS | **partial / blocked-deferred / 当前 W5 结果** |
+| W5 结果 | [`UEAGENTKIT_W5_REAL_PROJECT_ACCEPTANCE_RESULT_20260829.md`](UEAGENTKIT_W5_REAL_PROJECT_ACCEPTANCE_RESULT_20260829.md) | 原计划 R1/R5 完整、R20 blocked；50 GB checkpoint validated + 3 samples；fail-closed PASS | historical result partial; **project-level R20 now deferred fixture debt** |
 | 当前 blocker closure | [`UEAGENTKIT_W5_BLOCKER_CLOSURE_R20_AND_50GB_SCALE_DETAILED_PLAN_20260829.md`](UEAGENTKIT_W5_BLOCKER_CLOSURE_R20_AND_50GB_SCALE_DETAILED_PLAN_20260829.md) | R20 稳定 Fixture 闭环 + owner 已授权的 50 GB PerformanceFixture checkpoint | **complete (R20 remains blocked; W5-S checkpoint closed)** |
 | 当前步骤 | [`UEAGENTKIT_W4_0_CONTRACT_FREEZE_AND_BASELINE_PLAN_20260827.md`](UEAGENTKIT_W4_0_CONTRACT_FREEZE_AND_BASELINE_PLAN_20260827.md) | W4-0 契约冻结与 W3 手工编排基线采集 | complete |
 | 当前步骤结果 | [`UEAGENTKIT_W4_0_CONTRACT_FREEZE_AND_BASELINE_RESULT_20260827.md`](UEAGENTKIT_W4_0_CONTRACT_FREEZE_AND_BASELINE_RESULT_20260827.md) | W4-0 B0/B1 真实 UE 手工编排基线与冻结契约 | complete |
@@ -64,13 +66,13 @@ W4 内部阶段、状态机、失败恢复与 C1-C12
 ```text
 0.7.0 published                         = unchanged
 0.8 capability scope                    = locally closed
-W0 resident writer baseline             = complete
-W1 Blueprint narrow resident write      = complete
-W2 Fast Resident Verify                 = complete
-W3 Checkpoint Strong Verify             = complete
-W4 bounded multi-operation / multi-asset = complete (W4-0..W4-7)
-D1 agent_workflow split                  = complete
-W5 real-project acceptance               = partial; R20 blocked; W5-S 50 GB checkpoint closed
+Track W / Writer                        = complete
+  W0-W4                                 = complete
+  D1                                    = complete
+  W5 authorized scope                   = complete; R20 deferred fixture debt
+  W5-S 50 GB                            = PASS
+Track V / Knowledge Web                 = complete (V1 + V2)
+W + V integration                       = G3 PASS (845/845)
 R5 Value Provenance / Execution Trace   = deferred by benchmark evidence
 ```
 

@@ -6,6 +6,7 @@
 
 - [`PROJECT_STATUS.md`](PROJECT_STATUS.md)：当前已实现能力、当前开发阶段与明确未实现边界。
 - [`Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260828.md`](Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260828.md)：**当前项目级开发总交接**，新 Chat / Agent 接手时优先读取。
+- [`Plans/UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md`](Plans/UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md)：Writer + Knowledge Web 本地集成结果、G3 门禁与 R20 延后边界。
 - [`Plans/README.md`](Plans/README.md)：**当前计划文档唯一导航入口**，区分主计划、当前 W4、已完成结果与历史计划。
 - [`Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md`](Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md)：当前项目级方向、Track 边界与架构取舍。
 - [`Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md`](Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md)：当前跨 Track 依赖与验收规格。
@@ -89,7 +90,7 @@
 - Offline 10、Live 43、Workflow-only 60、Live + Workflow 93 Tool；启用 Memory 后分别为 22、55、72、105；全部 105 个公共 Tool 与 18 个 Patch Operation 已完成 capability 分类。
 - `ue_apply_asset_property_live` 通过注册式资产域执行器支持受控 Data Asset、Material Instance 与 DataTable Operation；统一 Transaction/Evidence、精确 Undo/Discard、授权保存后独立 Verify 和可恢复 Journal 均已完成，但仍不自动保存或开放任意 UObject。
 
-0.5.x、0.6.0 与 0.7.0 已完成并进入维护；最新正式发布仍为 0.7.0。0.8.x Context / Analysis / Agent Reliability capability scope 已在 `feature/agent-reliability` 本地收口。`feature/live-writer-expansion` 已完成 W0-W3，当前下一主线为 W4 Multi-operation / Bounded Batch；后续项目方向以 [`Plans/README.md`](Plans/README.md) 与 2026-08-27 Master Plan 为准。正式 0.8 package release、R5 与远端发布均需独立授权。
+0.5.x、0.6.0 与 0.7.0 已完成并进入维护；最新正式发布仍为 0.7.0。0.8.x Context / Analysis / Agent Reliability capability scope 已在 `feature/agent-reliability` 本地收口。`feature/live-writer-expansion` 的 W0-W4、D1 与 W5 当前授权范围已完成，Track V 的 V1/V2 也已完成，并通过 W+V 本地 G3 集成。R20 因 DirectHost fixture lifecycle 语义漂移转为独立延后维护项，不再阻塞 Writer 主线；后续项目方向以 [`Plans/README.md`](Plans/README.md) 与 Master/Midterm 为准。正式 package release、R5 Value Provenance / Execution Trace 与远端发布均需独立授权。
 
 只读分析路径不修改资产；Blueprint Patch、Asset Patch 与 MCP Commit 仅在明确授权后执行。
 

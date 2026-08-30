@@ -1,99 +1,105 @@
 # UEAgentKit Current Development Handoff
 
-> Date: 2026-08-29
+> Date: 2026-08-30
 >
 > Scope: project-level current development handoff. This is the first document to read when a new Chat / Agent takes over the UEAgentKit development line.
 >
-> Active worktree: `E:\WorkSpace\UEAgentKit-LiveWriter`
+> Validated integration worktree: `E:\WorkSpace\UEAgentKit-Integration`
 >
-> Active branch: `feature/live-writer-expansion`
+> Integration branch: `integration/w-v-20260830`
 >
-> Current committed HEAD: local D1 closure commit (see section 0)
+> First validated combined merge checkpoint: `576d5ec05d983067b8257d34a15da9f4ee0a621a` (documentation closure follows on the same integration branch)
 >
 > Latest published product version: `0.7.0` for Unreal Engine 5.6
 >
 > This document records current repository facts, accepted architecture decisions, Track dependencies, safety rules, and the next execution boundary. It does not authorize Push / Rebase / Tag / Release or future implementation commits.
 
-## 0. 2026-08-29 W5 Blocked/Deferred Supersession Note
+## 0. 2026-08-30 W + V Integration Supersession Note
 
-This note overrides older takeover wording later in this file where W4-7, D1, or W5 is still described as `next` or `current` without the W5 status below.
+This note overrides older wording later in this handoff where W5 or Track V is still described as `next`, `current`, or blocked at a project level.
+
+Frozen integration inputs:
 
 ```text
-W4-0 through W4-7                         complete
-D1 agent_workflow split                   complete
-W5-R R1 / R5 real DirectHost matrices     complete (R5 n=10 per cache state)
-W5-R R20 20-op workload                   blocked by DirectHost fixture/package lifecycle
-W5-S 50 GB scale fixture                  blocked/deferred (generator source created, not built/validated)
-current committed HEAD                    local W5 closure commits (see below)
-current Python discovered suite           766 / 766 PASS (re-run at W5 closure if gates run)
-real UE W4 C1-C12                         PASS (frozen valid)
-real UE W4-6 H1-H6                        PASS (frozen valid)
-D1-R1 / D1-R2 real UE smokes              PASS (fresh)
-final transaction fixture                 2 / 2 independently verified
+Writer branch / HEAD                feature/live-writer-expansion / 7107971
+Knowledge Web product HEAD          f2e6875
+Knowledge Web + workflow docs       fa562d1
+first combined merge checkpoint     576d5ec
+published product version           0.7.0 (unchanged)
 ```
 
-Authoritative W5 evidence:
+Current project-level status:
 
-`docs/Plans/UEAGENTKIT_W5_REAL_PROJECT_ACCEPTANCE_RESULT_20260829.md`
+```text
+Track W / Writer                     COMPLETE
+  W0-W4                              complete
+  D1 workflow split                  complete
+  W5 authorized execution scope     complete
+  W5-S 50 GB checkpoint             PASS
+  R20 valid performance samples     DEFERRED as DirectHost fixture-lifecycle debt
+  R20 product fail-closed           PASS; no safety gate weakened
 
-Sections later in this file that describe W4-7, D1, or W5 as `NEXT` or list old Tool counts are historical. Where they conflict with this note, the current state above, `docs/Plans/README.md`, and the W5 Result take precedence. No Push / Rebase / Tag / Release is authorized by this handoff update.
+Track V / Knowledge Web              COMPLETE
+  V1 read-only browser              complete
+  V2 visualization                  complete
+
+W + V combined G3                    PASS
+```
+
+R20 was deterministically classified as **semantic fixture mutation** in DirectHost (`DA IntValue -17 -> 108`, Blueprint package size `29793 -> 29995`) while the Editor was alive. The product freshness/Revision gate correctly rejected the stale disk. The original W5 Result keeps its historical `partial / blocked-deferred` wording for the original R20/further-scale exit gates, but R20 no longer blocks Track W integration. Do not weaken Policy, Revision, Dirty-package, recovery, Strong Verify, or W4 batch bounds to close it.
+
+Combined G3 evidence:
+
+```text
+full discovered Python suite        845 / 845 PASS (95.524 s)
+Ruff                                PASS
+compileall                          PASS
+ValidateRelease 0.7.0              PASS (--skip-tests --skip-ruff; no duplicate full suite)
+git diff --check                    PASS
+CLI + knowledge-view smoke          PASS
+C++ delta vs Writer 7107971         none
+```
+
+No UE5.6 Direct Build or historical W4/W5/V2 large matrix was repeated because the integration adds no C++ delta beyond the already validated Writer checkpoint and the product-code merge surfaces are disjoint.
+
+Git/worktree warning: repository `main` is a valid ref, but the legacy root worktree `E:\WorkSpace\UEAgentKit` still has symbolic HEAD `feature/agent-reliability`, whose ref is missing. That worktree therefore appears unborn. Integration intentionally does **not** reset, clean, recommit, or blindly repair it. Use the validated integration/main ref or a fresh worktree until that legacy ref issue is separately handled.
+
+Authoritative integration evidence: `docs/Plans/UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md`.
 
 ## 1. Read This First
 
 The current development state is:
 
 ```text
+0.7.0 published product                 unchanged
 0.8 capability scope                    locally closed
-W0 Editor-resident baseline             complete
-W1 Blueprint narrow resident write      complete
-W2 Fast Resident Verify                 complete
-W3 Checkpoint Strong Verify             complete
-W4-0 Contract Freeze + Baseline         complete
-W4-1 Bounded Batch Plan                 complete
-W4-2 Single-Asset Multi-operation Apply complete
-W4-3 Multi-Asset Resident Apply         complete
-W4-4 Multi-Asset Checkpoint Save        complete
-W4-5 Aggregate Strong Verify / Trust    complete
-W4-6 Recovery and Restart Hardening     complete
-W4-7 Full Acceptance / Documentation    complete
-W4                                      complete
-D1 agent_workflow split                 complete
+W0-W4 Writer                            complete
+D1 workflow split                       complete
+W5 authorized execution scope           complete
+R20                                     deferred fixture-lifecycle debt
+W5-S 50 GB checkpoint                   PASS
+Track W                                 complete
+V1 read-only Knowledge Browser          complete
+V2 Knowledge Visualization              complete
+Track V                                 complete
+W + V integration                       G3 PASS
 ```
 
-The current committed implementation checkpoint after D1:
+Current combined validation baseline:
 
 ```text
-local D1 closure commit (see section 0 / D1 Result)
+Python discovered suite                 845 / 845 PASS
+Ruff                                    PASS
+compileall                              PASS
+ValidateRelease 0.7.0                   PASS (tests/Ruff intentionally skipped inside it)
+git diff --check                        PASS
+CLI / knowledge-view integration smoke  PASS
+C++ integration delta vs 7107971        none
 ```
 
-Current validation baseline after D1:
+Frozen real-UE evidence from Writer remains valid: W4 C1-C12, W4-6 H1-H6, W5 R1/R5, W5 fail-closed evidence, W5 50 GB checkpoint, and final DirectHost reset/verification. They were not rerun merely for the W+V merge.
 
-```text
-Python discovered suite                    766 / 766 PASS
-Ruff                                       PASS
-compileall                                 PASS
-ValidateRelease 0.7.0                      PASS
-git diff --check                           PASS
-UE5.6 Direct Build                         PASS (at 55919bd; no C++ change in W4-7 or D1)
-real UE W4 C1-C12                          PASS (frozen valid)
-real UE W4-6 H1-H6                         PASS (frozen valid)
-D1-R1 real UE full happy-path smoke        PASS
-D1-R2 real UE resident recovery smoke      PASS
-final transaction fixture verify           2 / 2 PASS
-```
-
-Current Tool Registry counts after D1:
-
-```text
-workflow-only                              67
-workflow + memory                          79
-combined live + workflow                  100
-combined live + workflow + memory         112
-Patch operation count                      18
-Live-write operation count                 17
-```
-
-No Push / Rebase / Tag / Release has been performed for W3, W4-0 through W4-7, or D1.
+No Push / Rebase / Tag / Release or published-version change is authorized or performed by this integration.
 
 ## 2. Project Positioning
 
@@ -127,40 +133,42 @@ Latest published version remains `0.7.0`. The 0.8 capability work and current Wr
 
 ## 3. Repository / Worktree Baseline
 
-### Active Writer worktree
+### Validated integration worktree
 
 ```text
-Path       E:\WorkSpace\UEAgentKit-LiveWriter
-Branch     feature/live-writer-expansion
-UE root    E:\EPICGAME\UE_5.6
+Path       E:\WorkSpace\UEAgentKit-Integration
+Branch     integration/w-v-20260830
+Base       main cc1f0c9
+Writer     7107971
+V + docs   fa562d1
 ```
 
-### Other known repo worktree
+### Source worktrees
+
+```text
+Writer
+  Path     E:\WorkSpace\UEAgentKit-LiveWriter
+  Branch   feature/live-writer-expansion
+  HEAD     7107971
+
+Knowledge Web
+  Path     E:\WorkSpace\UEAgentKit-KnowledgeWeb
+  Branch   feature/knowledge-web-view
+  HEAD     fa562d1
+```
+
+### Legacy root worktree warning
 
 ```text
 Path       E:\WorkSpace\UEAgentKit
-Branch     feature/agent-reliability
+HEAD       symbolic refs/heads/feature/agent-reliability
+Problem    that feature ref is currently missing
+main ref   valid
 ```
 
-Do not assume the two worktrees are interchangeable. Always inspect actual Git status / branch / HEAD before changing files.
+Do not interpret the legacy root worktree's staged-all/unborn appearance as a new repository root. Do not reset/clean/recommit it. The integration uses a separate worktree specifically to avoid touching that broken symbolic HEAD.
 
-### Recent Writer checkpoints
-
-```text
-1c68f4d docs: add D1 agent workflow split plan
-24bf088 docs: close W4 full acceptance and documentation
-55919bd feat: close W4-6 recovery and restart hardening
-f4ba1c4 feat: add W4-5 aggregate strong verify semantic diff trust
-d277369 feat: add W4-4 multi-asset checkpoint save
-76f90b3 feat: add W4-3 multi-asset resident apply
-```
-
-
-Historical 0.8 capability closeout checkpoint:
-
-```text
-2aadb66 docs: close 0.8 capability scope
-```
+Always inspect actual Git status / refs / HEAD before changing files.
 
 ## 4. Documentation Authority
 
@@ -835,30 +843,32 @@ Do not store model-inferred ownership as `tool-observed`.
 
 ## 15. Track V — Read-only Knowledge Browser
 
-V1 has no dependency on T0/W4 and can run independently if explicitly prioritized.
+Track V is **complete** and included in the W+V integration.
 
-Permanent architectural constraint:
+```text
+V1 local read-only browser          complete   49b8fa6
+V2 visualization dashboard          complete   f2e6875
+workflow/integration docs checkpoint           fa562d1
+```
+
+Permanent architectural constraints remain:
 
 ```text
 Web UI is read-only
+SQLite opened with mode=ro
+localhost only
+no POST / PUT / PATCH / DELETE mutation path
 knowledge DB manual editing is not provided
 writes remain Agent-controlled
+no required runtime dependency / no npm build pipeline
 ```
 
-Planned shape:
+Authoritative evidence:
 
 ```text
-V1 local browser
-  Python stdlib HTTP + sqlite3 mode=ro
-  localhost only
-  no FastAPI/uvicorn runtime dependency
-  no npm build requirement
-
-V2 visualization
-  asset/reference/impact/knowledge/stale/change-set views
+docs/Plans/UEAGENTKIT_V1_READ_ONLY_KNOWLEDGE_BROWSER_RESULT_20260829.md
+docs/Plans/UEAGENTKIT_V2_KNOWLEDGE_VISUALIZATION_RESULT_20260829.md
 ```
-
-Track V is not the current mainline priority; W4 remains primary.
 
 ## 16. Track X — Medium-term Capability Expansion
 
@@ -1057,19 +1067,14 @@ A fresh Chat / Agent should do the following:
 1. Read this file.
 2. Read docs/DEVELOPMENT_WORKFLOW.md.
 3. Read docs/Plans/README.md.
-4. Read the current Track parent Detailed Plan / latest Result.
-5. Inspect actual git status / HEAD; do not assume they are unchanged.
+4. Read docs/Plans/UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md.
+5. Inspect actual git status / refs / HEAD; do not assume the legacy root worktree is usable.
 6. Select the next item from the current Master/Midterm dependency order.
-7. Before writing its Detailed Plan, declare the Validation Budget (G0/G1/G2 + U-level).
-8. Run only the relevant entry/checkpoint gates; do not pre-emptively run full regression twice.
+7. Before writing a Detailed Plan, declare its Validation Budget (G0/G1/G2 + U-level).
+8. Run only the relevant entry/checkpoint gates; do not duplicate full regression.
 ```
 
-The immediate implementation objective after D1 is therefore:
-
-```text
-post-W4/post-D1 sequence defined by the Master Plan
-→ W5 real-project acceptance
-```
+Track W and Track V no longer block the next capability track. R20 remains a deferred DirectHost fixture-lifecycle maintenance item, not a Writer safety blocker. Test-suite structural cleanup is also deferred until the current integration is fully landed, as recorded in `docs/DEVELOPMENT_WORKFLOW.md`.
 
 ## 23. Key Documents
 
@@ -1079,6 +1084,8 @@ Current project / execution:
 docs/Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260828.md
 docs/DEVELOPMENT_WORKFLOW.md
 docs/Plans/README.md
+docs/Plans/UEAGENTKIT_W_V_INTEGRATION_CHECKLIST_20260830.md
+docs/Plans/UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md
 docs/Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md
 docs/Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md
 docs/Plans/UEAGENTKIT_MASTER_PLAN_CORRECTION_NOTES_20260827.md
