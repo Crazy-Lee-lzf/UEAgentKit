@@ -50,13 +50,13 @@ Later on 2026-08-30, the owner explicitly authorized remote synchronization and 
 Current synchronized state after housekeeping:
 
 ```text
-main                              d5d7509e41f0e9acacd5e16b521e014e94a686b8
-origin/main                       d5d7509e41f0e9acacd5e16b521e014e94a686b8
-origin/feature/memory-context     d5d7509e41f0e9acacd5e16b521e014e94a686b8
+main / origin/main / origin/feature/memory-context
+  synchronized to the same current post-housekeeping HEAD
+  (always run git rev-parse HEAD / git fetch before relying on a hash)
 
 registered worktrees:
-E:\WorkSpace\UEAgentKit-Integration   main @ d5d7509
-E:\WorkSpace\UEAgentKit               detached @ d5d7509 (repository backing worktree; retains only historical untracked CONOUT$)
+E:\WorkSpace\UEAgentKit-Integration   main @ current post-housekeeping HEAD
+E:\WorkSpace\UEAgentKit               detached at the same checkpoint (repository backing worktree; retains only historical untracked CONOUT$)
 ```
 
 Completed local branches/worktrees `feature/live-writer-expansion`, `feature/knowledge-web-view`, `integration/w-v-20260830`, and `docs/closeout-plan-amendment-20260823` were removed after their relevant history was preserved. The old remote `feature/live-editor-realtime-io` was also removed because its history is already contained in `main`.
