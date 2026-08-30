@@ -84,7 +84,7 @@ feature/live-writer-expansion     dae0b1f42a4e8d83b6d1debc0cf430829d41cf90
 feature/knowledge-web-view        dae0b1f42a4e8d83b6d1debc0cf430829d41cf90
 ```
 
-This handoff/archive cleanup is performed on the integration branch and is expected to advance `main` and then fast-forward the valid W/V branches again. Therefore **always run `git rev-parse HEAD` / `git show-ref --heads` instead of assuming the hash above is still final**.
+The documentation/archive cleanup was performed on the integration branch, after which `main` and the valid W/V branches were fast-forwarded again. Therefore **always run `git rev-parse HEAD` / `git show-ref --heads` instead of assuming the pre-cleanup hash above is still final**.
 
 Validated integration worktree:
 
@@ -474,6 +474,7 @@ Main integration checkpoints:
 576d5ec integration:merge-writer-and-knowledge-web
 83fc619 docs:close-w-v-integration
 dae0b1f docs:record-unborn-worktree-notices
+fdaf393 docs:archive-history-and-refresh-handoff
 ```
 
 Combined G3 portable validation:
