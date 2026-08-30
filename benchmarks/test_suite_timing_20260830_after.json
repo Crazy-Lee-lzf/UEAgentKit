@@ -1,0 +1,4553 @@
+{
+  "schemaVersion": 1,
+  "discovery": {
+    "startDirectory": "tests/python",
+    "pattern": "test_*.py"
+  },
+  "summary": {
+    "testsRun": 853,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "elapsedSeconds": 84.08790729999964
+  },
+  "modules": [
+    {
+      "module": "test_knowledge_view_visualization",
+      "testCount": 43,
+      "elapsedSeconds": 23.5845399999871
+    },
+    {
+      "module": "test_editor_bridge",
+      "testCount": 27,
+      "elapsedSeconds": 13.909326900000451
+    },
+    {
+      "module": "test_knowledge_view",
+      "testCount": 26,
+      "elapsedSeconds": 13.821397199997591
+    },
+    {
+      "module": "test_agent_workflow",
+      "testCount": 69,
+      "elapsedSeconds": 11.933925999997882
+    },
+    {
+      "module": "test_task_context",
+      "testCount": 43,
+      "elapsedSeconds": 4.872727900004975
+    },
+    {
+      "module": "test_snapshot_lifecycle",
+      "testCount": 5,
+      "elapsedSeconds": 2.894789900001342
+    },
+    {
+      "module": "test_mcp_server",
+      "testCount": 19,
+      "elapsedSeconds": 1.9511586999997235
+    },
+    {
+      "module": "test_patches",
+      "testCount": 92,
+      "elapsedSeconds": 1.4413991999917926
+    },
+    {
+      "module": "test_snapshot_refresh",
+      "testCount": 6,
+      "elapsedSeconds": 1.0605016999979853
+    },
+    {
+      "module": "test_impact_analysis",
+      "testCount": 33,
+      "elapsedSeconds": 0.8985995000002731
+    },
+    {
+      "module": "test_bounded_batch",
+      "testCount": 28,
+      "elapsedSeconds": 0.7704245999939303
+    },
+    {
+      "module": "test_agent_reliability_benchmark",
+      "testCount": 43,
+      "elapsedSeconds": 0.646466899994266
+    },
+    {
+      "module": "test_backups",
+      "testCount": 23,
+      "elapsedSeconds": 0.592595899996013
+    },
+    {
+      "module": "test_project_memory",
+      "testCount": 17,
+      "elapsedSeconds": 0.5420421000071656
+    },
+    {
+      "module": "test_memory_context",
+      "testCount": 6,
+      "elapsedSeconds": 0.4688997000030213
+    },
+    {
+      "module": "test_memory_cli",
+      "testCount": 9,
+      "elapsedSeconds": 0.41527639999912935
+    },
+    {
+      "module": "test_verification_trust",
+      "testCount": 20,
+      "elapsedSeconds": 0.3947555000013381
+    },
+    {
+      "module": "test_indexer_queries",
+      "testCount": 8,
+      "elapsedSeconds": 0.3377803999992466
+    },
+    {
+      "module": "test_checkpoint_sets",
+      "testCount": 20,
+      "elapsedSeconds": 0.28134659999705036
+    },
+    {
+      "module": "test_retarget_workflow",
+      "testCount": 26,
+      "elapsedSeconds": 0.26386520000596647
+    },
+    {
+      "module": "test_memory_service",
+      "testCount": 8,
+      "elapsedSeconds": 0.25511940000069444
+    },
+    {
+      "module": "test_animation_scale_fix_batch",
+      "testCount": 26,
+      "elapsedSeconds": 0.24480339999900025
+    },
+    {
+      "module": "test_freshness",
+      "testCount": 5,
+      "elapsedSeconds": 0.24062210000010964
+    },
+    {
+      "module": "test_python_test_runner",
+      "testCount": 8,
+      "elapsedSeconds": 0.183522900000753
+    },
+    {
+      "module": "test_mcp_retarget_tools",
+      "testCount": 7,
+      "elapsedSeconds": 0.14395200000035402
+    },
+    {
+      "module": "test_release_validation",
+      "testCount": 6,
+      "elapsedSeconds": 0.12770109999837587
+    },
+    {
+      "module": "test_semantic_diff",
+      "testCount": 36,
+      "elapsedSeconds": 0.09376420000808139
+    },
+    {
+      "module": "test_batch_recovery",
+      "testCount": 5,
+      "elapsedSeconds": 0.09115920000112965
+    },
+    {
+      "module": "test_retarget_postprocess",
+      "testCount": 10,
+      "elapsedSeconds": 0.08403010000074573
+    },
+    {
+      "module": "test_memory_tree",
+      "testCount": 5,
+      "elapsedSeconds": 0.08202479999999923
+    },
+    {
+      "module": "test_active_work",
+      "testCount": 4,
+      "elapsedSeconds": 0.07191889999921841
+    },
+    {
+      "module": "test_memory_tasks",
+      "testCount": 8,
+      "elapsedSeconds": 0.05821499999728985
+    },
+    {
+      "module": "test_fixtures",
+      "testCount": 12,
+      "elapsedSeconds": 0.05181230000562209
+    },
+    {
+      "module": "test_config",
+      "testCount": 13,
+      "elapsedSeconds": 0.041483299999526935
+    },
+    {
+      "module": "test_animation_scale_audit",
+      "testCount": 12,
+      "elapsedSeconds": 0.04110870000295108
+    },
+    {
+      "module": "test_database",
+      "testCount": 2,
+      "elapsedSeconds": 0.03822729999956209
+    },
+    {
+      "module": "test_reader_architecture",
+      "testCount": 3,
+      "elapsedSeconds": 0.022233700001379475
+    },
+    {
+      "module": "test_live_structured_write_smoke_contract",
+      "testCount": 5,
+      "elapsedSeconds": 0.01467650000085996
+    },
+    {
+      "module": "test_portability",
+      "testCount": 4,
+      "elapsedSeconds": 0.013323799999852781
+    },
+    {
+      "module": "test_tool_registry",
+      "testCount": 4,
+      "elapsedSeconds": 0.011888400000316324
+    },
+    {
+      "module": "test_blueprint_patch_executor",
+      "testCount": 10,
+      "elapsedSeconds": 0.00603650000084599
+    },
+    {
+      "module": "test_workflow_memory_smoke_contract",
+      "testCount": 1,
+      "elapsedSeconds": 0.004698200000348152
+    },
+    {
+      "module": "test_w5_benchmark",
+      "testCount": 10,
+      "elapsedSeconds": 0.00459940000109782
+    },
+    {
+      "module": "test_scalar_regression",
+      "testCount": 5,
+      "elapsedSeconds": 0.0033597000019653933
+    },
+    {
+      "module": "test_live_reference_write_smoke_contract",
+      "testCount": 1,
+      "elapsedSeconds": 0.0031781999987288145
+    },
+    {
+      "module": "test_change_sets",
+      "testCount": 16,
+      "elapsedSeconds": 0.0014857000005576992
+    },
+    {
+      "module": "test_live_write_smoke_contract",
+      "testCount": 1,
+      "elapsedSeconds": 0.0007306000006792601
+    },
+    {
+      "module": "test_retarget_models",
+      "testCount": 11,
+      "elapsedSeconds": 0.0005879000018467195
+    },
+    {
+      "module": "test_character_ground_contact",
+      "testCount": 10,
+      "elapsedSeconds": 0.00015519999942625873
+    },
+    {
+      "module": "test_additive_fix_plan",
+      "testCount": 9,
+      "elapsedSeconds": 0.00015160000111791305
+    },
+    {
+      "module": "test_additive_diagnose",
+      "testCount": 12,
+      "elapsedSeconds": 0.00015039999925647862
+    },
+    {
+      "module": "test_skeletal_secondary_motion",
+      "testCount": 10,
+      "elapsedSeconds": 0.00013240000225778203
+    },
+    {
+      "module": "test_additive_evaluation",
+      "testCount": 7,
+      "elapsedSeconds": 8.560000060242601e-05
+    },
+    {
+      "module": "test_blueprint_recovery_helpers",
+      "testCount": 4,
+      "elapsedSeconds": 8.10999990790151e-05
+    }
+  ],
+  "tests": [
+    {
+      "id": "test_snapshot_lifecycle.SnapshotLifecycleTests.test_startup_freeze_gives_up_after_bounded_retries",
+      "module": "test_snapshot_lifecycle",
+      "elapsedSeconds": 2.527789499999926
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_change_set_terminal_record_can_be_pruned_for_capacity",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.746748599998682
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_change_set_active_capacity_is_not_silently_pruned",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.6686712999999145
+    },
+    {
+      "id": "test_knowledge_view.ReadOnlyProofTests.test_exercising_every_route_does_not_modify_the_database",
+      "module": "test_knowledge_view",
+      "elapsedSeconds": 0.5846912999986671
+    },
+    {
+      "id": "test_knowledge_view_visualization.SecurityRegressionTests.test_exercising_v2_routes_does_not_modify_databases",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5709736000007979
+    },
+    {
+      "id": "test_knowledge_view_visualization.ImpactTests.test_paging_truncation",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5608058999987406
+    },
+    {
+      "id": "test_knowledge_view.ReadModelTests.test_record_list_is_deterministically_paginated",
+      "module": "test_knowledge_view",
+      "elapsedSeconds": 0.5593449999996665
+    },
+    {
+      "id": "test_knowledge_view.ReadModelTests.test_work_list_and_detail",
+      "module": "test_knowledge_view",
+      "elapsedSeconds": 0.559198799999649
+    },
+    {
+      "id": "test_knowledge_view.ReadModelTests.test_record_list_filters_by_status_and_type",
+      "module": "test_knowledge_view",
+      "elapsedSeconds": 0.5589312000010977
+    },
+    {
+      "id": "test_knowledge_view.ReadModelTests.test_unicode_round_trip",
+      "module": "test_knowledge_view",
+      "elapsedSeconds": 0.5588501000001997
+    },
+    {
+      "id": "test_knowledge_view.RoutingTests.test_invalid_enum_value_is_rejected",
+      "module": "test_knowledge_view",
+      "elapsedSeconds": 0.5588304000011703
+    },
+    {
+      "id": "test_knowledge_view.ReadModelTests.test_status_reports_counts_and_readonly",
+      "module": "test_knowledge_view",
+      "elapsedSeconds": 0.5583270000006451
+    },
+    {
+      "id": "test_knowledge_view.RoutingTests.test_index_html_only_allows_known_names",
+      "module": "test_knowledge_view",
+      "elapsedSeconds": 0.558220099999744
+    },
+    {
+      "id": "test_knowledge_view.ReadModelTests.test_tree_parent_missing_returns_404",
+      "module": "test_knowledge_view",
+      "elapsedSeconds": 0.5580558999990899
+    },
+    {
+      "id": "test_knowledge_view.RoutingTests.test_mutation_methods_answer_405",
+      "module": "test_knowledge_view",
+      "elapsedSeconds": 0.5579914999998437
+    },
+    {
+      "id": "test_knowledge_view.ReadModelTests.test_node_detail_lists_attached_records",
+      "module": "test_knowledge_view",
+      "elapsedSeconds": 0.5578927000005933
+    },
+    {
+      "id": "test_knowledge_view.RoutingTests.test_unknown_api_route_returns_404",
+      "module": "test_knowledge_view",
+      "elapsedSeconds": 0.5564154000003327
+    },
+    {
+      "id": "test_knowledge_view_visualization.GraphTests.test_invalid_depth_and_direction_rejected",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5562089000013657
+    },
+    {
+      "id": "test_knowledge_view_visualization.GraphTests.test_stress_required_above_1000_and_caps",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.556173699998908
+    },
+    {
+      "id": "test_knowledge_view_visualization.GraphTests.test_node_limit_truncation_is_in_band",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5559890999993513
+    },
+    {
+      "id": "test_knowledge_view_visualization.TimelineTests.test_paging",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5551580999999715
+    },
+    {
+      "id": "test_knowledge_view_visualization.GraphTests.test_outgoing_aggregates_kinds_counts_and_self_loop",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5551421000000119
+    },
+    {
+      "id": "test_knowledge_view.ReadModelTests.test_tree_lazy_navigation",
+      "module": "test_knowledge_view",
+      "elapsedSeconds": 0.5545858000004955
+    },
+    {
+      "id": "test_knowledge_view.RoutingTests.test_unknown_query_parameter_is_rejected",
+      "module": "test_knowledge_view",
+      "elapsedSeconds": 0.5544836000008218
+    },
+    {
+      "id": "test_knowledge_view_visualization.SecurityRegressionTests.test_mutation_methods_answer_405_on_v2_routes",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5544620000000577
+    },
+    {
+      "id": "test_knowledge_view_visualization.CoverageTests.test_no_percentage_emitted",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5542287999996915
+    },
+    {
+      "id": "test_knowledge_view_visualization.StaleTests.test_group_by_record_type",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5540177999992011
+    },
+    {
+      "id": "test_knowledge_view_visualization.GraphTests.test_depth_zero_returns_root_only",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5539976000000024
+    },
+    {
+      "id": "test_knowledge_view.ReadOnlyProofTests.test_asset_connection_is_readonly_at_sqlite_level",
+      "module": "test_knowledge_view",
+      "elapsedSeconds": 0.5539051999985531
+    },
+    {
+      "id": "test_knowledge_view_visualization.ImpactTests.test_page_bounds_enforced",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5538323000000673
+    },
+    {
+      "id": "test_knowledge_view_visualization.ImpactTests.test_missing_asset_returns_404",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5537198000001808
+    },
+    {
+      "id": "test_knowledge_view.RoutingTests.test_missing_record_returns_404",
+      "module": "test_knowledge_view",
+      "elapsedSeconds": 0.5536150999996607
+    },
+    {
+      "id": "test_knowledge_view.ReadModelTests.test_record_detail_exposes_status_history_and_inbound_relations",
+      "module": "test_knowledge_view",
+      "elapsedSeconds": 0.5535953999988124
+    },
+    {
+      "id": "test_knowledge_view_visualization.StaleTests.test_invalid_group_by_rejected",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5535086999989289
+    },
+    {
+      "id": "test_knowledge_view.RoutingTests.test_index_html_is_served_from_whitelist",
+      "module": "test_knowledge_view",
+      "elapsedSeconds": 0.5533637999997154
+    },
+    {
+      "id": "test_knowledge_view_visualization.GraphTests.test_both_direction_union",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5533400999993319
+    },
+    {
+      "id": "test_knowledge_view.ReadModelTests.test_search_finds_unicode_content",
+      "module": "test_knowledge_view",
+      "elapsedSeconds": 0.5532024999993155
+    },
+    {
+      "id": "test_knowledge_view_visualization.SecurityRegressionTests.test_unknown_query_parameter_rejected_on_all_v2_routes",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5531193999995594
+    },
+    {
+      "id": "test_knowledge_view_visualization.GraphTests.test_root_is_required",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5524719000004552
+    },
+    {
+      "id": "test_knowledge_view_visualization.TimelineTests.test_filters",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5520119999982853
+    },
+    {
+      "id": "test_knowledge_view_visualization.GraphTests.test_unknown_parameter_rejected",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5519733999990422
+    },
+    {
+      "id": "test_knowledge_view.ReadModelTests.test_record_detail_exposes_evidence",
+      "module": "test_knowledge_view",
+      "elapsedSeconds": 0.5516141999996762
+    },
+    {
+      "id": "test_knowledge_view_visualization.CoverageTests.test_path_prefix_filter",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5513037999990047
+    },
+    {
+      "id": "test_knowledge_view_visualization.StaleTests.test_group_by_age_bucket",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5493967000002158
+    },
+    {
+      "id": "test_knowledge_view_visualization.GraphTests.test_depth_two_reaches_back_edge",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5482596000001649
+    },
+    {
+      "id": "test_knowledge_view_visualization.CoverageTests.test_status_splits_and_zero_record_nodes",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5465815999996266
+    },
+    {
+      "id": "test_knowledge_view_visualization.GraphTests.test_valid_root_without_edges_returns_root_only",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5455142999999225
+    },
+    {
+      "id": "test_knowledge_view.ReadOnlyProofTests.test_memory_connection_is_readonly_at_sqlite_level",
+      "module": "test_knowledge_view",
+      "elapsedSeconds": 0.5453530000013416
+    },
+    {
+      "id": "test_knowledge_view_visualization.GraphTests.test_limit_bounds_rejected",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5452987999997276
+    },
+    {
+      "id": "test_knowledge_view_visualization.GraphTests.test_incoming_direction",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5451455999991595
+    },
+    {
+      "id": "test_knowledge_view_visualization.ImpactTests.test_unknown_parameter_rejected",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5447552999994514
+    },
+    {
+      "id": "test_knowledge_view_visualization.TimelineTests.test_record_updated_default",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5443144999990182
+    },
+    {
+      "id": "test_knowledge_view.RoutingTests.test_page_limit_cap_is_enforced",
+      "module": "test_knowledge_view",
+      "elapsedSeconds": 0.5442191000001912
+    },
+    {
+      "id": "test_knowledge_view.RoutingTests.test_unknown_route_returns_404_json",
+      "module": "test_knowledge_view",
+      "elapsedSeconds": 0.5439150999991398
+    },
+    {
+      "id": "test_knowledge_view_visualization.GraphTests.test_unicode_root_round_trip",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5419557000004716
+    },
+    {
+      "id": "test_knowledge_view_visualization.SecurityRegressionTests.test_no_traceback_leak",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5418148999997356
+    },
+    {
+      "id": "test_knowledge_view_visualization.CoverageTests.test_totals_before_paging",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.541681200000312
+    },
+    {
+      "id": "test_knowledge_view_visualization.StaleTests.test_group_by_scope",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5415382999999565
+    },
+    {
+      "id": "test_knowledge_view_visualization.ImpactTests.test_empty_consumers_is_valid",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5413741000011214
+    },
+    {
+      "id": "test_knowledge_view_visualization.TimelineTests.test_status_changed_is_opt_in",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5413407999985793
+    },
+    {
+      "id": "test_knowledge_view_visualization.GraphTests.test_missing_root_asset_returns_404",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5412030999996205
+    },
+    {
+      "id": "test_knowledge_view_visualization.ImpactTests.test_slash_route_segment_rejected",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5410268999985419
+    },
+    {
+      "id": "test_knowledge_view_visualization.StaleTests.test_totals_and_sample_bound",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5407765999989351
+    },
+    {
+      "id": "test_knowledge_view_visualization.CoverageTests.test_page_bounds_enforced",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5407424000004539
+    },
+    {
+      "id": "test_knowledge_view_visualization.TimelineTests.test_invalid_filters_rejected",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5406493999998929
+    },
+    {
+      "id": "test_knowledge_view_visualization.StaleTests.test_group_by_node_path",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5401559000001726
+    },
+    {
+      "id": "test_knowledge_view_visualization.ImpactTests.test_unicode_asset_segment",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5401165999992372
+    },
+    {
+      "id": "test_knowledge_view_visualization.ImpactTests.test_kind_filter",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5395260999994207
+    },
+    {
+      "id": "test_editor_bridge.EditorBridgeTests.test_live_action_parameters_are_bounded_and_non_read_only",
+      "module": "test_editor_bridge",
+      "elapsedSeconds": 0.5389950999997382
+    },
+    {
+      "id": "test_knowledge_view_visualization.ImpactTests.test_consumers_kinds_and_counts",
+      "module": "test_knowledge_view_visualization",
+      "elapsedSeconds": 0.5389326000004075
+    },
+    {
+      "id": "test_editor_bridge.EditorBridgeTests.test_authenticated_status_and_selection",
+      "module": "test_editor_bridge",
+      "elapsedSeconds": 0.5309521999988647
+    },
+    {
+      "id": "test_editor_bridge.EditorBridgeTests.test_bounded_log_compile_and_live_asset_parameters",
+      "module": "test_editor_bridge",
+      "elapsedSeconds": 0.5301655999992363
+    },
+    {
+      "id": "test_editor_bridge.EditorBridgeTests.test_batch_task_status_and_cancel_roundtrip",
+      "module": "test_editor_bridge",
+      "elapsedSeconds": 0.5282915000007051
+    },
+    {
+      "id": "test_editor_bridge.EditorBridgeTests.test_analyze_animation_retarget_normalizes_params_and_reports_analysis",
+      "module": "test_editor_bridge",
+      "elapsedSeconds": 0.5282576999998128
+    },
+    {
+      "id": "test_editor_bridge.EditorBridgeTests.test_internal_rollback_prepare_is_capability_gated_and_bounded",
+      "module": "test_editor_bridge",
+      "elapsedSeconds": 0.5237639999995736
+    },
+    {
+      "id": "test_knowledge_view.FailureModeTests.test_missing_memory_database_reports_clear_error",
+      "module": "test_knowledge_view",
+      "elapsedSeconds": 0.5193503999998939
+    },
+    {
+      "id": "test_editor_bridge.EditorBridgeTests.test_analyze_animation_retarget_requires_registered_capability",
+      "module": "test_editor_bridge",
+      "elapsedSeconds": 0.5145721999997477
+    },
+    {
+      "id": "test_editor_bridge.EditorBridgeTests.test_evaluate_animation_with_base_pose_normalizes_params_and_evaluates",
+      "module": "test_editor_bridge",
+      "elapsedSeconds": 0.5140367999993032
+    },
+    {
+      "id": "test_editor_bridge.EditorBridgeTests.test_diagnose_animation_scale_normalizes_params_and_reports_evaluated_pose",
+      "module": "test_editor_bridge",
+      "elapsedSeconds": 0.5132991000009497
+    },
+    {
+      "id": "test_editor_bridge.EditorBridgeTests.test_batch_task_start_normalizes_params_and_reports_running",
+      "module": "test_editor_bridge",
+      "elapsedSeconds": 0.5132049000003462
+    },
+    {
+      "id": "test_editor_bridge.EditorBridgeTests.test_editor_context_rejects_missing_capability",
+      "module": "test_editor_bridge",
+      "elapsedSeconds": 0.5129123000006075
+    },
+    {
+      "id": "test_knowledge_view.FailureModeTests.test_schema_mismatch_is_reported_not_migrated",
+      "module": "test_knowledge_view",
+      "elapsedSeconds": 0.5125059000001784
+    },
+    {
+      "id": "test_editor_bridge.EditorBridgeTests.test_batch_task_rejects_invalid_parameters",
+      "module": "test_editor_bridge",
+      "elapsedSeconds": 0.5119412000003649
+    },
+    {
+      "id": "test_editor_bridge.EditorBridgeTests.test_editor_context_reports_truncated_section",
+      "module": "test_editor_bridge",
+      "elapsedSeconds": 0.5116925000002084
+    },
+    {
+      "id": "test_editor_bridge.EditorBridgeTests.test_diagnose_additive_animation_normalizes_params_and_reports_additive",
+      "module": "test_editor_bridge",
+      "elapsedSeconds": 0.5111739000003581
+    },
+    {
+      "id": "test_editor_bridge.EditorBridgeTests.test_editor_context_aggregates_bounded_sections",
+      "module": "test_editor_bridge",
+      "elapsedSeconds": 0.5111584999995102
+    },
+    {
+      "id": "test_editor_bridge.EditorBridgeTests.test_diagnose_additive_animation_rejects_invalid_parameters",
+      "module": "test_editor_bridge",
+      "elapsedSeconds": 0.5110446999988199
+    },
+    {
+      "id": "test_editor_bridge.EditorBridgeTests.test_descriptor_rejects_version_project_and_non_local_address",
+      "module": "test_editor_bridge",
+      "elapsedSeconds": 0.5108920000002399
+    },
+    {
+      "id": "test_editor_bridge.EditorBridgeTests.test_evaluate_animation_with_base_pose_rejects_invalid_parameters",
+      "module": "test_editor_bridge",
+      "elapsedSeconds": 0.5108162000015
+    },
+    {
+      "id": "test_editor_bridge.EditorBridgeTests.test_batch_task_requires_registered_capabilities",
+      "module": "test_editor_bridge",
+      "elapsedSeconds": 0.5106059000008827
+    },
+    {
+      "id": "test_editor_bridge.EditorBridgeTests.test_evaluate_animation_with_base_pose_requires_registered_capability",
+      "module": "test_editor_bridge",
+      "elapsedSeconds": 0.5103687999999238
+    },
+    {
+      "id": "test_editor_bridge.EditorBridgeTests.test_diagnose_additive_animation_requires_registered_capability",
+      "module": "test_editor_bridge",
+      "elapsedSeconds": 0.5101647999999841
+    },
+    {
+      "id": "test_editor_bridge.EditorBridgeTests.test_missing_descriptor_degrades_without_exposing_path",
+      "module": "test_editor_bridge",
+      "elapsedSeconds": 0.509683700000096
+    },
+    {
+      "id": "test_editor_bridge.EditorBridgeTests.test_authentication_failure_is_stable",
+      "module": "test_editor_bridge",
+      "elapsedSeconds": 0.5093866999995953
+    },
+    {
+      "id": "test_editor_bridge.EditorBridgeTests.test_analyze_animation_retarget_rejects_invalid_parameters",
+      "module": "test_editor_bridge",
+      "elapsedSeconds": 0.5093587999999727
+    },
+    {
+      "id": "test_editor_bridge.EditorBridgeTests.test_diagnose_animation_scale_rejects_invalid_parameters",
+      "module": "test_editor_bridge",
+      "elapsedSeconds": 0.5087832999997772
+    },
+    {
+      "id": "test_editor_bridge.EditorBridgeTests.test_diagnose_animation_scale_requires_registered_capability",
+      "module": "test_editor_bridge",
+      "elapsedSeconds": 0.5086265000009007
+    },
+    {
+      "id": "test_editor_bridge.EditorBridgeTests.test_editor_context_rejects_unknown_parameters",
+      "module": "test_editor_bridge",
+      "elapsedSeconds": 0.5051779999994324
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_rollback_commit_allows_only_bridge_verified_unloaded_clean_target",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.49164569999993546
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_checkpoint_same_target_supersession_keeps_audit_history",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.35505080000075395
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_live_write_verify_guards_and_value_mismatch",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.3301807000007102
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_authorized_save_promotes_standard_rollback_manifest_and_dry_run_is_zero_write",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.3114101999999548
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_checkpoint_save_uses_zero_exports_and_strong_verify_uses_one",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.27922769999895536
+    },
+    {
+      "id": "test_snapshot_refresh.SnapshotRefreshTests.test_preview_does_not_switch_and_apply_is_visible_only_to_new_snapshot",
+      "module": "test_snapshot_refresh",
+      "elapsedSeconds": 0.2777108999998745
+    },
+    {
+      "id": "test_snapshot_lifecycle.SnapshotLifecycleTests.test_startup_freeze_retries_transient_replace_lock",
+      "module": "test_snapshot_lifecycle",
+      "elapsedSeconds": 0.27638219999971625
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_live_write_verify_closes_loop_after_authorized_save",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.2617904999988241
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_change_set_live_write_continues_exact_previous_transaction",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.2603756999997131
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_r3_12_correlation_is_bounded_and_reports_honest_counts",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.250803699998869
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_checkpoint_canonical_mismatch_leaves_saved_not_verified",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.24659730000166746
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_complete_plan_dry_run_apply_verify_and_rollback_lifecycle",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.23844820000158506
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_checkpoint_stale_disk_revision_fails_closed",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.23034270000061952
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t33_profile_proxy_propagates_early_server_exit",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.2243430000016815
+    },
+    {
+      "id": "test_snapshot_refresh.SnapshotRefreshTests.test_batch_generation_atomically_merges_multiple_candidates",
+      "module": "test_snapshot_refresh",
+      "elapsedSeconds": 0.221974300000511
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_change_set_journal_recovers_matching_session",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.2131681999999273
+    },
+    {
+      "id": "test_mcp_server.McpServerTests.test_fastmcp_combined_live_and_workflow_mode_has_exact_tool_order",
+      "module": "test_mcp_server",
+      "elapsedSeconds": 0.20766169999842532
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_change_set_restart_marks_unprovable_state_unknown",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.20269290000032925
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_blueprint_verify_uses_full_export_with_unchanged_defaults",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.20200309999927413
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_t9_budget_truncation_keeps_target_identity",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.20020760000079463
+    },
+    {
+      "id": "test_mcp_server.McpServerTests.test_fastmcp_project_memory_mode_is_fixed_and_revision_aware",
+      "module": "test_mcp_server",
+      "elapsedSeconds": 0.19741659999999683
+    },
+    {
+      "id": "test_mcp_server.McpServerTests.test_fastmcp_progressive_memory_tools_manage_tree_work_and_evidence",
+      "module": "test_mcp_server",
+      "elapsedSeconds": 0.19711450000067998
+    },
+    {
+      "id": "test_mcp_server.McpServerTests.test_fastmcp_workflow_memory_mode_hands_off_verified_evidence",
+      "module": "test_mcp_server",
+      "elapsedSeconds": 0.1953974999996717
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_live_write_journal_recovers_and_closes_exact_receipt",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.19356400000106078
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_r2_4_same_input_ordering_is_deterministic",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.19165129999964847
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_change_set_save_requires_member_asset",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.1911130000007688
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_live_write_revert_guards_and_validation",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.19013629999972181
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_r2_8_low_budget_reduces_candidates_but_keeps_core",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.18425419999948645
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_r2_1_query_only_returns_stable_relevant_assets",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.18218340000021271
+    },
+    {
+      "id": "test_impact_analysis.ImpactMcpTests.test_impact_t18c_mode_consistency",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.1793725000006816
+    },
+    {
+      "id": "test_mcp_server.McpServerTests.test_fastmcp_live_editor_mode_registers_bounded_read_tools",
+      "module": "test_mcp_server",
+      "elapsedSeconds": 0.17903889999979583
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_change_set_undo_preserves_terminal_history",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.1777189999993425
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_r3_14_low_budget_trims_correlation_before_target_metadata",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.1776231000003463
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_change_set_discard_preserves_terminal_history",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.17709329999888723
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_r4_2_relevant_assets_only_give_bounded_impact_hint",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.17649270000038086
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_structural_data_table_plan_rejects_exact_row_referencers",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.1751129000003857
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_live_write_exact_receipt_selects_older_same_asset_record",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.17508139999881678
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_high_level_change_defaults_to_plan_and_can_run_dry_run",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.17093319999912637
+    },
+    {
+      "id": "test_project_memory.ProjectMemoryTests.test_schema_v2_migration_preserves_all_legacy_memory_data",
+      "module": "test_project_memory",
+      "elapsedSeconds": 0.16835820000051172
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_r2_2_explicit_target_is_not_duplicated_in_candidates",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.16493810000065423
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_r2_5_candidate_count_is_bounded",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.16053409999949508
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_change_set_apply_binds_durable_operation",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.1594132999998692
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_live_write_undo_closes_pending_workflow_record",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.1587613000010606
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_change_set_verify_not_saved_keeps_applied_state",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.1578243999992992
+    },
+    {
+      "id": "test_mcp_server.McpServerTests.test_fastmcp_full_workflow_registers_status_query_and_workflow_tools",
+      "module": "test_mcp_server",
+      "elapsedSeconds": 0.15407739999864134
+    },
+    {
+      "id": "test_task_context.TaskContextMcpTests.test_task_context_tool_registers_in_every_mode_and_degrades",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.15371799999957148
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_change_set_operation_cap_rejects_before_bridge_call",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.15267230000063137
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_change_set_revert_rejects_non_member_before_bridge_call",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.15103149999958987
+    },
+    {
+      "id": "test_snapshot_refresh.SnapshotRefreshTests.test_blueprint_refresh_uses_full_semantic_export_from_index_class",
+      "module": "test_snapshot_refresh",
+      "elapsedSeconds": 0.15008839999973134
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_fast_resident_verify_stale_after_undo",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.14789120000023104
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_change_set_apply_noop_binds_terminal_noop_without_live_transaction",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.14721409999947355
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_change_set_unbound_live_write_response_has_no_change_set_keys",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.1468390999998519
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_r3_8_work_item_assets_correlate_with_memory_evidence",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.14677640000081738
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_commit_can_be_disabled_at_server_configuration",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.1462972000008449
+    },
+    {
+      "id": "test_snapshot_refresh.SnapshotRefreshTests.test_invalid_single_asset_manifest_is_rejected_without_switch",
+      "module": "test_snapshot_refresh",
+      "elapsedSeconds": 0.1460224999991624
+    },
+    {
+      "id": "test_snapshot_refresh.SnapshotRefreshTests.test_export_failure_keeps_previous_active_pair",
+      "module": "test_snapshot_refresh",
+      "elapsedSeconds": 0.14439309999943362
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_live_structured_property_write_passes_operation_and_preserves_json_value",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.14401589999943099
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_live_reference_property_write_passes_json_null",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.14326120000077935
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_live_data_table_cell_write_passes_row_and_field_names",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.14311300000008487
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_live_material_parameter_write_passes_parameter_name_and_value",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.14273009999851638
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_live_reference_property_write_passes_operation_and_preserves_json_value",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.14186400000107824
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_live_data_table_rename_passes_new_row_name",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.14058769999974174
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_fast_resident_verify_value_mismatch_rejected",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.13955199999873003
+    },
+    {
+      "id": "test_memory_context.MemoryContextTests.test_character_budget_truncates_with_structured_next_action",
+      "module": "test_memory_context",
+      "elapsedSeconds": 0.13951750000160246
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_live_write_verify_reports_unsaved_state_with_undo_available",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.13930530000106955
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_live_asset_property_write_requires_plan_confirmation_and_keeps_disk_unchanged",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.13796080000065558
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_fast_resident_verify_wrong_session_rejected",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.13791520000086166
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_fast_resident_verify_success_and_typed_evidence",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.13788670000030834
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_live_write_journal_failure_does_not_hide_successful_editor_write",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.13752239999848825
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_live_asset_property_write_requires_live_and_commit_modes",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.13727659999858588
+    },
+    {
+      "id": "test_mcp_server.McpServerTests.test_workflow_diagnostics_use_stable_redacted_error_envelope",
+      "module": "test_mcp_server",
+      "elapsedSeconds": 0.13570570000047155
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_live_structured_property_write_reports_noop",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.13377590000163764
+    },
+    {
+      "id": "test_task_context.TaskContextMcpTests.test_task_context_tool_with_workflow_change_set",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.13111330000174348
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_r3_11_correlation_is_deterministic_for_identical_inputs",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.1281543999994028
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_live_material_parameter_write_requires_parameter_name",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.12681329999941227
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_timeout_and_invalid_report_are_separate_errors",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.12633649999952468
+    },
+    {
+      "id": "test_release_validation.ReleaseValidationTests.test_schemas_and_examples_are_release_ready",
+      "module": "test_release_validation",
+      "elapsedSeconds": 0.12050479999925301
+    },
+    {
+      "id": "test_snapshot_refresh.SnapshotRefreshTests.test_dirty_live_asset_is_rejected_before_export",
+      "module": "test_snapshot_refresh",
+      "elapsedSeconds": 0.1203124999992724
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_change_set_apply_rejects_unknown_set_before_bridge_call",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.11917259999972885
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_requested_work_item_is_reported",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.1177600999999413
+    },
+    {
+      "id": "test_mcp_server.McpServerTests.test_fastmcp_registers_read_only_status_and_query_tools",
+      "module": "test_mcp_server",
+      "elapsedSeconds": 0.11717999999927997
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t1_valid_case_schema",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.11585809999996854
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_t6_stale_revision_and_stale_memory_are_reported",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.11469050000050629
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_change_set_create_is_journaled_and_reported",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.11402180000004591
+    },
+    {
+      "id": "test_project_memory.ProjectMemoryTests.test_schema_v1_migration_backfills_evidence_digest",
+      "module": "test_project_memory",
+      "elapsedSeconds": 0.11144489999969664
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_r3_13_correlation_is_non_persistent",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.1058776999998372
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_live_write_revert_propagates_bridge_rejections",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.10562949999984994
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_unreal_crash_is_classified_with_sanitized_diagnostics",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.10443280000072264
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_r4_1_explicit_targets_suggest_impact_analysis",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.10397410000041418
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_undo_asset_property_live_passes_identity_and_returns_evidence",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.10378099999979895
+    },
+    {
+      "id": "test_memory_context.MemoryContextTests.test_final_usage_matches_complete_serialized_response",
+      "module": "test_memory_context",
+      "elapsedSeconds": 0.10373419999996258
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_r2_6_symbol_hits_dedupe_and_supplement_asset_candidates",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.10290229999918665
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_discard_asset_property_live_passes_identity_and_returns_evidence",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.1028478999996878
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_asset_state_prioritizes_dirty_editor_memory",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.10186410000096657
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_authorized_save_preview_requires_dirty_loaded_asset_and_exact_confirmation",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.10112440000011702
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_r3_10_degraded_sources_produce_no_fake_correlation",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.10099569999874802
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_r3_16_work_item_asset_paths_are_bounded_for_correlation",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.10020690000055765
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_missing_report_has_specific_error_and_report_id",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.10010340000008
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_t2_multiple_explicit_assets",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.10004200000003038
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_t5_target_dirty_in_editor_is_a_high_risk",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.09736999999950058
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_r3_15_requested_work_item_duplicated_in_items_is_considered_once",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.09428499999921769
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_fixed_project_revision_export_and_index_must_match",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.09421929999916756
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_r3_9_without_change_set_id_no_change_set_links_are_produced",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.09192450000045937
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_t7_change_set_id_valid",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.0899716999992961
+    },
+    {
+      "id": "test_python_test_runner.PythonTestRunnerTests.test_full_suite_matches_direct_discovery_count",
+      "module": "test_python_test_runner",
+      "elapsedSeconds": 0.08957229999941774
+    },
+    {
+      "id": "test_python_test_runner.PythonTestRunnerTests.test_measurement_discovery_matches_full_runner",
+      "module": "test_python_test_runner",
+      "elapsedSeconds": 0.08942740000020422
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_r3_6_work_item_referencing_change_set_literal_is_linked",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.08906759999990754
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_empty_change_set_can_be_discarded_without_live_history",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.08876730000156385
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_r3_5_work_item_assets_overlapping_change_set_are_linked",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.08813680000093882
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_t10_optional_source_failure_keeps_other_sections",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.08663820000037958
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_r3_7_work_item_assets_in_editor_are_linked",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.08615300000019488
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_t3_memory_excluded_by_request_flag",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.08608230000027106
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_t4_live_editor_excluded_by_request_flag",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.08605139999963285
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_t8_change_set_id_invalid_degrades_section_and_adds_risk",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.08589310000024852
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_stored_plan_revision_conflict_has_specific_code",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.0855701999989833
+    },
+    {
+      "id": "test_memory_cli.ProjectMemoryCliTests.test_validate_marks_revision_bound_task_stale",
+      "module": "test_memory_cli",
+      "elapsedSeconds": 0.0853726999994251
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_r3_4_change_set_affected_assets_correlate_with_memory_evidence",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.08499940000001516
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_t1_single_explicit_asset_with_memory_and_live_disabled",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.08449620000101277
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_plan_and_policy_are_locked_after_creation",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.08325209999929939
+    },
+    {
+      "id": "test_memory_context.MemoryContextTests.test_default_context_excludes_stale_and_superseded_records",
+      "module": "test_memory_context",
+      "elapsedSeconds": 0.08277360000101908
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_dry_run_rechecks_freshness_after_plan_creation",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.08172340000055556
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_plan_rejects_policy_mismatch_and_unindexed_assets",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.07905369999934919
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_discard_unconsumed_plans_removes_record_and_work_directory",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.07852819999970961
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_r3_3_change_set_affected_assets_in_editor_are_linked",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.07684020000124292
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_r3_17_change_set_without_editor_session_produces_no_session_link",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.07605680000051507
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_r2_3_no_search_results_is_empty_not_error",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.07524029999876802
+    },
+    {
+      "id": "test_memory_cli.ProjectMemoryCliTests.test_audit_appends_knowledge_tree_and_active_work_without_removing_v2_fields",
+      "module": "test_memory_cli",
+      "elapsedSeconds": 0.07367209999938495
+    },
+    {
+      "id": "test_indexer_queries.IndexerAndQueryTests.test_incremental_index_search_and_prune",
+      "module": "test_indexer_queries",
+      "elapsedSeconds": 0.07318929999928514
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_r3_2_change_set_editor_session_mismatch_is_a_medium_risk",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.07264950000171666
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_r3_1_change_set_editor_session_match_is_linked",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.07215019999966898
+    },
+    {
+      "id": "test_mcp_server.McpServerTests.test_check_mode_outputs_json_without_starting_protocol",
+      "module": "test_mcp_server",
+      "elapsedSeconds": 0.07165610000083689
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_work_and_backup_roots_must_stay_inside_tool_root",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.06860079999933077
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_plan_rejects_stale_or_unavailable_index_state",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.06733709999934945
+    },
+    {
+      "id": "test_mcp_server.McpServerTests.test_runtime_database_loss_returns_sanitized_error",
+      "module": "test_mcp_server",
+      "elapsedSeconds": 0.06674779999957536
+    },
+    {
+      "id": "test_mcp_server.McpServerTests.test_fastmcp_returns_quiescent_snapshot_error",
+      "module": "test_mcp_server",
+      "elapsedSeconds": 0.0666588000003685
+    },
+    {
+      "id": "test_bounded_batch.BoundedBatchTests.test_request_digest_deterministic_and_revision_sensitive",
+      "module": "test_bounded_batch",
+      "elapsedSeconds": 0.06661249999888241
+    },
+    {
+      "id": "test_memory_service.ProjectMemoryServiceTests.test_validate_against_index_marks_mismatched_revision_stale",
+      "module": "test_memory_service",
+      "elapsedSeconds": 0.06648889999996754
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_r2_10_search_failure_follows_error_model_without_fake_results",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.06560320000062347
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_r2_7_candidate_fields_are_complete",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.06540740000127698
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_r2_9_memory_and_live_disabled_do_not_affect_discovery",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.06468289999975241
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_runtime_boundary_rejects_reparse_components",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.06408929999997781
+    },
+    {
+      "id": "test_memory_context.MemoryContextTests.test_levels_progress_from_summary_to_exact_evidence",
+      "module": "test_memory_context",
+      "elapsedSeconds": 0.06332400000064808
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_live_write_tool_count_and_names_include_verification_trust",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.061613200001374935
+    },
+    {
+      "id": "test_agent_workflow.AgentWorkflowTests.test_asset_state_reports_synchronized_and_disk_newer_states",
+      "module": "test_agent_workflow",
+      "elapsedSeconds": 0.061226199999509845
+    },
+    {
+      "id": "test_backups.BackupRollbackTests.test_rollback_restores_safety_backup_when_audit_write_fails",
+      "module": "test_backups",
+      "elapsedSeconds": 0.05937830000038957
+    },
+    {
+      "id": "test_backups.BackupRollbackTests.test_verify_rollback_export_checks_exact_package_revision",
+      "module": "test_backups",
+      "elapsedSeconds": 0.05915619999905175
+    },
+    {
+      "id": "test_mcp_server.McpServerTests.test_search_continuation_path_prefix_and_output_budget",
+      "module": "test_mcp_server",
+      "elapsedSeconds": 0.05827820000013162
+    },
+    {
+      "id": "test_task_context.TaskContextTests.test_request_validation_rejects_invalid_arguments",
+      "module": "test_task_context",
+      "elapsedSeconds": 0.05812859999969078
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t43_measurement_drift_invalidates_run_and_retains_skipped_attempts",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.05807300000014948
+    },
+    {
+      "id": "test_freshness.FreshnessTests.test_commit_marks_stale_and_exact_rollback_clears_session_state",
+      "module": "test_freshness",
+      "elapsedSeconds": 0.05543589999979304
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_t19_task_context_expansion_integration",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.055097799999202834
+    },
+    {
+      "id": "test_freshness.FreshnessTests.test_disk_change_and_export_change_are_reported_separately",
+      "module": "test_freshness",
+      "elapsedSeconds": 0.05210559999977704
+    },
+    {
+      "id": "test_impact_analysis.ImpactMcpTests.test_impact_t18_registry_capabilities_and_strict_args",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.051632900000186055
+    },
+    {
+      "id": "test_indexer_queries.IndexerAndQueryTests.test_reference_direction_depth_and_project_filter",
+      "module": "test_indexer_queries",
+      "elapsedSeconds": 0.05161720000069181
+    },
+    {
+      "id": "test_mcp_server.McpServerTests.test_service_requires_bounded_and_filtered_queries",
+      "module": "test_mcp_server",
+      "elapsedSeconds": 0.05131660000006377
+    },
+    {
+      "id": "test_mcp_server.McpServerTests.test_index_service_is_read_only_and_returns_stable_envelopes",
+      "module": "test_mcp_server",
+      "elapsedSeconds": 0.05078890000004321
+    },
+    {
+      "id": "test_freshness.FreshnessTests.test_missing_package_is_unavailable_not_fresh",
+      "module": "test_freshness",
+      "elapsedSeconds": 0.04914259999895876
+    },
+    {
+      "id": "test_backups.BackupRollbackTests.test_rollback_commit_is_atomic_and_keeps_safety_backup",
+      "module": "test_backups",
+      "elapsedSeconds": 0.04908629999954428
+    },
+    {
+      "id": "test_memory_cli.ProjectMemoryCliTests.test_status_search_and_get_use_fixed_project_without_exposing_database_path",
+      "module": "test_memory_cli",
+      "elapsedSeconds": 0.04815310000049067
+    },
+    {
+      "id": "test_freshness.FreshnessTests.test_project_and_asset_are_fresh_when_all_revisions_match",
+      "module": "test_freshness",
+      "elapsedSeconds": 0.047989300001063384
+    },
+    {
+      "id": "test_mcp_server.McpServerTests.test_asset_sections_have_independent_continuations",
+      "module": "test_mcp_server",
+      "elapsedSeconds": 0.04587780000110797
+    },
+    {
+      "id": "test_indexer_queries.IndexerAndQueryTests.test_relocated_export_prefers_current_copy",
+      "module": "test_indexer_queries",
+      "elapsedSeconds": 0.0447729999996227
+    },
+    {
+      "id": "test_memory_context.MemoryContextTests.test_asset_context_uses_revision_bindings_and_keeps_node_linked_work",
+      "module": "test_memory_context",
+      "elapsedSeconds": 0.04447070000060194
+    },
+    {
+      "id": "test_impact_analysis.ImpactMcpTests.test_impact_t18b_mcp_error_envelopes",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.044292099999438506
+    },
+    {
+      "id": "test_bounded_batch.BoundedBatchTests.test_apply_multi_asset_success_passes_and_resets_previous_transaction",
+      "module": "test_bounded_batch",
+      "elapsedSeconds": 0.043024099999456666
+    },
+    {
+      "id": "test_verification_trust.TrustVerdictTests.test_compile_validation_and_automation_capture_can_pass_or_fail",
+      "module": "test_verification_trust",
+      "elapsedSeconds": 0.042300799999793526
+    },
+    {
+      "id": "test_bounded_batch.BoundedBatchTests.test_apply_later_asset_fast_verify_failure_partial_boundary",
+      "module": "test_bounded_batch",
+      "elapsedSeconds": 0.041930800000045565
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_project_mismatch_is_rejected",
+      "module": "test_patches",
+      "elapsedSeconds": 0.04175129999930505
+    },
+    {
+      "id": "test_bounded_batch.BoundedBatchTests.test_apply_later_asset_failure_partial_boundary",
+      "module": "test_bounded_batch",
+      "elapsedSeconds": 0.041582200001357705
+    },
+    {
+      "id": "test_memory_cli.ProjectMemoryCliTests.test_audit_refuses_partial_snapshot_and_detects_tampering",
+      "module": "test_memory_cli",
+      "elapsedSeconds": 0.04120689999945171
+    },
+    {
+      "id": "test_bounded_batch.BoundedBatchTests.test_apply_replay_rejected",
+      "module": "test_bounded_batch",
+      "elapsedSeconds": 0.04116530000101193
+    },
+    {
+      "id": "test_bounded_batch.BoundedBatchTests.test_apply_success_single_bp_three_ops",
+      "module": "test_bounded_batch",
+      "elapsedSeconds": 0.04094909999912488
+    },
+    {
+      "id": "test_verification_trust.TrustVerdictTests.test_current_revision_and_dirty_memory_gate_real_and_no_op_evidence",
+      "module": "test_verification_trust",
+      "elapsedSeconds": 0.04071529999964696
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t25_cleanup_failure_stops_later_write_cases",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.04056660000060219
+    },
+    {
+      "id": "test_mcp_server.McpServerTests.test_mcp_packaging_and_stdio_boundary_are_explicit",
+      "module": "test_mcp_server",
+      "elapsedSeconds": 0.0405138000005536
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_asset_structured_property_models_are_valid",
+      "module": "test_patches",
+      "elapsedSeconds": 0.03959210000175517
+    },
+    {
+      "id": "test_mcp_server.McpServerTests.test_missing_asset_is_not_an_exception",
+      "module": "test_mcp_server",
+      "elapsedSeconds": 0.039518300000054296
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_data_table_row_fields_rejects_empty_nested_null_and_too_many",
+      "module": "test_patches",
+      "elapsedSeconds": 0.03919849999874714
+    },
+    {
+      "id": "test_indexer_queries.IndexerAndQueryTests.test_index_service_lists_exact_class_paths_by_prefix",
+      "module": "test_indexer_queries",
+      "elapsedSeconds": 0.03900439999961236
+    },
+    {
+      "id": "test_mcp_server.McpServerTests.test_active_sqlite_sidecar_is_rejected",
+      "module": "test_mcp_server",
+      "elapsedSeconds": 0.038608999999269145
+    },
+    {
+      "id": "test_verification_trust.TrustVerdictTests.test_wrong_session_and_revision_are_insufficient_evidence",
+      "module": "test_verification_trust",
+      "elapsedSeconds": 0.038204599999517086
+    },
+    {
+      "id": "test_verification_trust.TrustVerdictTests.test_missing_and_unexpected_semantic_changes_are_failed",
+      "module": "test_verification_trust",
+      "elapsedSeconds": 0.038091299998995964
+    },
+    {
+      "id": "test_memory_service.ProjectMemoryServiceTests.test_search_is_fixed_project_filtered_and_supports_scope",
+      "module": "test_memory_service",
+      "elapsedSeconds": 0.038008600000466686
+    },
+    {
+      "id": "test_memory_cli.ProjectMemoryCliTests.test_export_writes_portable_complete_audit_with_crlf",
+      "module": "test_memory_cli",
+      "elapsedSeconds": 0.037929199999780394
+    },
+    {
+      "id": "test_bounded_batch.BoundedBatchTests.test_apply_same_target_repeated_writes_retained",
+      "module": "test_bounded_batch",
+      "elapsedSeconds": 0.0376972999983991
+    },
+    {
+      "id": "test_mcp_server.McpServerTests.test_server_guidance_freezes_trust_evidence_ladder",
+      "module": "test_mcp_server",
+      "elapsedSeconds": 0.03760110000075656
+    },
+    {
+      "id": "test_bounded_batch.BoundedBatchTests.test_apply_fast_verify_failure_partial_boundary",
+      "module": "test_bounded_batch",
+      "elapsedSeconds": 0.0366942000000563
+    },
+    {
+      "id": "test_memory_service.ProjectMemoryServiceTests.test_service_supersede_keeps_fixed_project_boundary",
+      "module": "test_memory_service",
+      "elapsedSeconds": 0.0365827999994508
+    },
+    {
+      "id": "test_freshness.FreshnessTests.test_unindexed_asset_is_unavailable",
+      "module": "test_freshness",
+      "elapsedSeconds": 0.03594870000051742
+    },
+    {
+      "id": "test_bounded_batch.BoundedBatchTests.test_apply_op2_failure_partial_boundary",
+      "module": "test_bounded_batch",
+      "elapsedSeconds": 0.035836399998515844
+    },
+    {
+      "id": "test_indexer_queries.IndexerAndQueryTests.test_data_table_row_reference_impact_is_exact_per_row",
+      "module": "test_indexer_queries",
+      "elapsedSeconds": 0.035821800000121584
+    },
+    {
+      "id": "test_memory_service.ProjectMemoryServiceTests.test_status_initializes_database_and_reports_counts",
+      "module": "test_memory_service",
+      "elapsedSeconds": 0.03558270000030461
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_cli_operations_and_validate_exit_codes",
+      "module": "test_patches",
+      "elapsedSeconds": 0.03536390000044776
+    },
+    {
+      "id": "test_indexer_queries.IndexerAndQueryTests.test_project_identity_mismatch_is_rejected",
+      "module": "test_indexer_queries",
+      "elapsedSeconds": 0.03524690000085684
+    },
+    {
+      "id": "test_memory_context.MemoryContextTests.test_budget_and_detail_level_are_strictly_validated",
+      "module": "test_memory_context",
+      "elapsedSeconds": 0.03507969999918714
+    },
+    {
+      "id": "test_memory_service.ProjectMemoryServiceTests.test_search_excludes_stale_by_default_but_can_include_it",
+      "module": "test_memory_service",
+      "elapsedSeconds": 0.034805400000550435
+    },
+    {
+      "id": "test_memory_cli.ProjectMemoryCliTests.test_cli_main_reports_missing_record_without_traceback",
+      "module": "test_memory_cli",
+      "elapsedSeconds": 0.034260799999174196
+    },
+    {
+      "id": "test_memory_cli.ProjectMemoryCliTests.test_audit_snapshot_digest_is_stable_for_unchanged_data",
+      "module": "test_memory_cli",
+      "elapsedSeconds": 0.033600299999307026
+    },
+    {
+      "id": "test_memory_cli.ProjectMemoryCliTests.test_cli_requires_project_key_and_exposes_no_sql_argument",
+      "module": "test_memory_cli",
+      "elapsedSeconds": 0.033305300001302385
+    },
+    {
+      "id": "test_snapshot_lifecycle.SnapshotLifecycleTests.test_atomic_pointer_resolves_one_paired_generation",
+      "module": "test_snapshot_lifecycle",
+      "elapsedSeconds": 0.03289240000049176
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_nan_and_infinity_are_rejected",
+      "module": "test_patches",
+      "elapsedSeconds": 0.031393799999932526
+    },
+    {
+      "id": "test_snapshot_lifecycle.SnapshotLifecycleTests.test_pointer_hash_and_configuration_mismatch_are_rejected",
+      "module": "test_snapshot_lifecycle",
+      "elapsedSeconds": 0.030772800000704592
+    },
+    {
+      "id": "test_bounded_batch.BoundedBatchTests.test_apply_persistence_failure_stops_after_mutation",
+      "module": "test_bounded_batch",
+      "elapsedSeconds": 0.03038890000061656
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_cli_report_output_is_stable",
+      "module": "test_patches",
+      "elapsedSeconds": 0.03024569999979576
+    },
+    {
+      "id": "test_indexer_queries.IndexerAndQueryTests.test_generic_asset_catalog_import_and_class_search",
+      "module": "test_indexer_queries",
+      "elapsedSeconds": 0.02978409999923315
+    },
+    {
+      "id": "test_indexer_queries.IndexerAndQueryTests.test_prune_is_blocked_when_manifest_has_failures",
+      "module": "test_indexer_queries",
+      "elapsedSeconds": 0.028343699999823002
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t36_fixture_setup_error_detail_is_retained_and_redacted",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.02812670000093931
+    },
+    {
+      "id": "test_backups.BackupRollbackTests.test_rollback_rejects_manifest_outside_backup_root",
+      "module": "test_backups",
+      "elapsedSeconds": 0.02788420000069891
+    },
+    {
+      "id": "test_backups.BackupRollbackTests.test_rollback_dry_run_does_not_modify_package",
+      "module": "test_backups",
+      "elapsedSeconds": 0.027829799999381066
+    },
+    {
+      "id": "test_memory_cli.ProjectMemoryCliTests.test_process_smoke_and_runner_keep_utf8_cli_contract",
+      "module": "test_memory_cli",
+      "elapsedSeconds": 0.027776000000812928
+    },
+    {
+      "id": "test_backups.BackupRollbackTests.test_rollback_rejects_changed_policy",
+      "module": "test_backups",
+      "elapsedSeconds": 0.02768869999999879
+    },
+    {
+      "id": "test_bounded_batch.BoundedBatchTests.test_four_eight_sixteen_boundaries_accepted",
+      "module": "test_bounded_batch",
+      "elapsedSeconds": 0.027412199999162112
+    },
+    {
+      "id": "test_backups.BackupRollbackTests.test_rollback_rejects_wrong_package_kind_and_backup_size",
+      "module": "test_backups",
+      "elapsedSeconds": 0.027326600000378676
+    },
+    {
+      "id": "test_backups.BackupRollbackTests.test_rollback_rejects_noncanonical_asset_path",
+      "module": "test_backups",
+      "elapsedSeconds": 0.02722849999918253
+    },
+    {
+      "id": "test_bounded_batch.BoundedBatchTests.test_no_extra_side_effect_methods_called",
+      "module": "test_bounded_batch",
+      "elapsedSeconds": 0.027029800001400872
+    },
+    {
+      "id": "test_bounded_batch.BoundedBatchTests.test_apply_tampered_plan_zero_mutation",
+      "module": "test_bounded_batch",
+      "elapsedSeconds": 0.026978099998814287
+    },
+    {
+      "id": "test_snapshot_lifecycle.SnapshotLifecycleTests.test_legacy_snapshot_freezes_database_and_export_bytes",
+      "module": "test_snapshot_lifecycle",
+      "elapsedSeconds": 0.02695300000050338
+    },
+    {
+      "id": "test_backups.BackupRollbackTests.test_rollback_rejects_tampered_backup",
+      "module": "test_backups",
+      "elapsedSeconds": 0.026807300000655232
+    },
+    {
+      "id": "test_bounded_batch.BoundedBatchTests.test_tamper_and_not_found",
+      "module": "test_bounded_batch",
+      "elapsedSeconds": 0.026770700000270153
+    },
+    {
+      "id": "test_bounded_batch.BoundedBatchTests.test_apply_bad_confirmation_zero_mutation",
+      "module": "test_bounded_batch",
+      "elapsedSeconds": 0.026763199999550125
+    },
+    {
+      "id": "test_bounded_batch.BoundedBatchTests.test_supersession_preview",
+      "module": "test_bounded_batch",
+      "elapsedSeconds": 0.026486700000532437
+    },
+    {
+      "id": "test_backups.BackupRollbackTests.test_rollback_rejects_stale_current_revision",
+      "module": "test_backups",
+      "elapsedSeconds": 0.026426899999933084
+    },
+    {
+      "id": "test_memory_tasks.TaskMemoryTests.test_task_evidence_changes_digest_without_changing_semantic_content",
+      "module": "test_memory_tasks",
+      "elapsedSeconds": 0.026296099998944555
+    },
+    {
+      "id": "test_bounded_batch.BoundedBatchTests.test_happy_path_b1_shape_and_ordering",
+      "module": "test_bounded_batch",
+      "elapsedSeconds": 0.026158700000451063
+    },
+    {
+      "id": "test_retarget_workflow.RetargetWorkflowTests.test_batch_rollback_commit_restores_overwrite_and_verifies",
+      "module": "test_retarget_workflow",
+      "elapsedSeconds": 0.025592000001779525
+    },
+    {
+      "id": "test_backups.BackupRollbackTests.test_create_backup_manifest_refuses_overwrite",
+      "module": "test_backups",
+      "elapsedSeconds": 0.025427000000490807
+    },
+    {
+      "id": "test_backups.BackupRollbackTests.test_rollback_rejects_asset_path_traversal",
+      "module": "test_backups",
+      "elapsedSeconds": 0.02529369999865594
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_symbol_subject_direct_consumers",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.025259899999582558
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_symbol_subject_indirect_consumers",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.02518899999995483
+    },
+    {
+      "id": "test_verification_trust.TrustVerdictTests.test_extra_validation_evidence_must_match_current_revision",
+      "module": "test_verification_trust",
+      "elapsedSeconds": 0.025016800000230432
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_t7_cycle_no_infinite_expansion",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.02470089999951597
+    },
+    {
+      "id": "test_batch_recovery.BatchRecoveryTests.test_partial_recovery_reload_resumes_without_replaying_completed_undo",
+      "module": "test_batch_recovery",
+      "elapsedSeconds": 0.02404460000070685
+    },
+    {
+      "id": "test_project_memory.ProjectMemoryTests.test_revision_mismatch_marks_record_stale_and_records_reason",
+      "module": "test_project_memory",
+      "elapsedSeconds": 0.02373540000007779
+    },
+    {
+      "id": "test_verification_trust.TrustVerdictTests.test_minimum_token_envelope_keeps_verdict_and_required_failures",
+      "module": "test_verification_trust",
+      "elapsedSeconds": 0.023574099999677856
+    },
+    {
+      "id": "test_animation_scale_audit.AnimationScaleAuditTests.test_max_candidate_audit_stays_bounded_per_poll_and_page",
+      "module": "test_animation_scale_audit",
+      "elapsedSeconds": 0.02332410000053642
+    },
+    {
+      "id": "test_memory_service.ProjectMemoryServiceTests.test_get_record_rejects_record_from_another_project",
+      "module": "test_memory_service",
+      "elapsedSeconds": 0.023036599999613827
+    },
+    {
+      "id": "test_retarget_workflow.RetargetWorkflowTests.test_batch_verify_independent_reload_matches_disk",
+      "module": "test_retarget_workflow",
+      "elapsedSeconds": 0.02289520000158518
+    },
+    {
+      "id": "test_verification_trust.TrustVerdictTests.test_service_reaches_verified_and_is_read_only",
+      "module": "test_verification_trust",
+      "elapsedSeconds": 0.022654700000202865
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_t9_max_depth_boundary",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.022325699999782955
+    },
+    {
+      "id": "test_checkpoint_sets.CheckpointSetTests.test_verify_replay_is_idempotent_no_new_strong_process",
+      "module": "test_checkpoint_sets",
+      "elapsedSeconds": 0.02216049999879033
+    },
+    {
+      "id": "test_bounded_batch.BoundedBatchTests.test_policy_limits_win_over_hard",
+      "module": "test_bounded_batch",
+      "elapsedSeconds": 0.022095899999840185
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_argument_validation",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.022069099999498576
+    },
+    {
+      "id": "test_verification_trust.TrustVerdictTests.test_global_semantic_truncation_blocks_required_coverage_once",
+      "module": "test_verification_trust",
+      "elapsedSeconds": 0.021991899999193265
+    },
+    {
+      "id": "test_bounded_batch.BoundedBatchTests.test_policy_max_operations_per_asset_limits_request",
+      "module": "test_bounded_batch",
+      "elapsedSeconds": 0.021884699999645818
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffWorkflowContractTests.test_expected_noop_uses_exact_persisted_baseline_without_live_or_verified_claim",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.021803800000270712
+    },
+    {
+      "id": "test_verification_trust.TrustVerdictTests.test_data_validation_not_applicable_preserves_unreal_semantics",
+      "module": "test_verification_trust",
+      "elapsedSeconds": 0.0217224999996688
+    },
+    {
+      "id": "test_bounded_batch.BoundedBatchTests.test_validation_failure_leaves_no_batch_plan_directory",
+      "module": "test_bounded_batch",
+      "elapsedSeconds": 0.021706300000005285
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t30_agent_result_schema_is_closed_and_strict",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.021681599999283208
+    },
+    {
+      "id": "test_bounded_batch.BoundedBatchTests.test_child_failure_cleans_up_previous_children_and_no_payload",
+      "module": "test_bounded_batch",
+      "elapsedSeconds": 0.02162490000046091
+    },
+    {
+      "id": "test_mcp_retarget_tools.RetargetToolTests.test_analyze_tool_passes_authorized_request_through",
+      "module": "test_mcp_retarget_tools",
+      "elapsedSeconds": 0.02153340000040771
+    },
+    {
+      "id": "test_backups.BackupRollbackTests.test_rollback_rejects_report_collision_with_manifest",
+      "module": "test_backups",
+      "elapsedSeconds": 0.02146770000035758
+    },
+    {
+      "id": "test_retarget_workflow.RetargetWorkflowTests.test_batch_rollback_commit_deletes_created_output",
+      "module": "test_retarget_workflow",
+      "elapsedSeconds": 0.021385000000009313
+    },
+    {
+      "id": "test_memory_tasks.TaskMemoryTests.test_service_records_evidence_bound_task_outcome",
+      "module": "test_memory_tasks",
+      "elapsedSeconds": 0.0212165000011737
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_t17_deterministic_output",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.02117749999888474
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_self_reference_excluded",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.021053000000392785
+    },
+    {
+      "id": "test_checkpoint_sets.CheckpointSetTests.test_verify_fully_saved_set_uses_children_semantic_plan_trust",
+      "module": "test_checkpoint_sets",
+      "elapsedSeconds": 0.021048800001153722
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_asset_structured_property_rejects_unsorted_set",
+      "module": "test_patches",
+      "elapsedSeconds": 0.02104710000094201
+    },
+    {
+      "id": "test_mcp_retarget_tools.RetargetToolTests.test_diagnose_additive_animation_passes_through_and_classifies",
+      "module": "test_mcp_retarget_tools",
+      "elapsedSeconds": 0.020990099999835365
+    },
+    {
+      "id": "test_project_memory.ProjectMemoryTests.test_schema_migration_and_fts_round_trip",
+      "module": "test_project_memory",
+      "elapsedSeconds": 0.02088480000020354
+    },
+    {
+      "id": "test_mcp_retarget_tools.RetargetToolTests.test_analyze_tool_rejects_missing_policy_capability",
+      "module": "test_mcp_retarget_tools",
+      "elapsedSeconds": 0.02079559999947378
+    },
+    {
+      "id": "test_project_memory.ProjectMemoryTests.test_supersede_preserves_both_records_and_links_replacement",
+      "module": "test_project_memory",
+      "elapsedSeconds": 0.02070810000077472
+    },
+    {
+      "id": "test_checkpoint_sets.CheckpointSetTests.test_verify_private_fault_seam_makes_child_two_mismatch",
+      "module": "test_checkpoint_sets",
+      "elapsedSeconds": 0.020530100000542006
+    },
+    {
+      "id": "test_bounded_batch.BoundedBatchTests.test_malformed_bp_target_rejected",
+      "module": "test_bounded_batch",
+      "elapsedSeconds": 0.020511499998974614
+    },
+    {
+      "id": "test_checkpoint_sets.CheckpointSetTests.test_verify_trust_not_verified_blocks_verified",
+      "module": "test_checkpoint_sets",
+      "elapsedSeconds": 0.020486900000832975
+    },
+    {
+      "id": "test_batch_recovery.BatchRecoveryTests.test_partially_saved_recovery_resident_first_then_disk",
+      "module": "test_batch_recovery",
+      "elapsedSeconds": 0.02048610000019835
+    },
+    {
+      "id": "test_backups.BackupRollbackTests.test_rollback_rejects_report_inside_project_content",
+      "module": "test_backups",
+      "elapsedSeconds": 0.020474200000535347
+    },
+    {
+      "id": "test_mcp_retarget_tools.RetargetToolTests.test_evaluate_animation_with_base_pose_passes_through_and_enriches",
+      "module": "test_mcp_retarget_tools",
+      "elapsedSeconds": 0.020413700000062818
+    },
+    {
+      "id": "test_mcp_retarget_tools.RetargetToolTests.test_plan_additive_base_pose_fix_derives_read_only_plan",
+      "module": "test_mcp_retarget_tools",
+      "elapsedSeconds": 0.020394499999383697
+    },
+    {
+      "id": "test_checkpoint_sets.CheckpointSetTests.test_verify_incomplete_semantic_diff_blocks_verified",
+      "module": "test_checkpoint_sets",
+      "elapsedSeconds": 0.020358499999929336
+    },
+    {
+      "id": "test_backups.BackupRollbackTests.test_multi_operation_manifest_records_each_authorization",
+      "module": "test_backups",
+      "elapsedSeconds": 0.02035299999988638
+    },
+    {
+      "id": "test_checkpoint_sets.CheckpointSetTests.test_verify_child_two_failure_produces_partial_verified",
+      "module": "test_checkpoint_sets",
+      "elapsedSeconds": 0.020244499999535037
+    },
+    {
+      "id": "test_checkpoint_sets.CheckpointSetTests.test_verify_unsupported_required_action_not_executed",
+      "module": "test_checkpoint_sets",
+      "elapsedSeconds": 0.020211200000630924
+    },
+    {
+      "id": "test_mcp_retarget_tools.RetargetToolTests.test_diagnose_animation_scale_passes_authorized_request_through",
+      "module": "test_mcp_retarget_tools",
+      "elapsedSeconds": 0.020094500001505367
+    },
+    {
+      "id": "test_backups.BackupRollbackTests.test_manifest_derives_all_data_table_row_field_authorizations",
+      "module": "test_backups",
+      "elapsedSeconds": 0.020063199999640347
+    },
+    {
+      "id": "test_reader_architecture.ReaderArchitectureTests.test_reader_implementations_are_unique_and_grouped",
+      "module": "test_reader_architecture",
+      "elapsedSeconds": 0.01996289999988221
+    },
+    {
+      "id": "test_backups.BackupRollbackTests.test_manifest_allows_data_table_row_remove_without_field_authorizations",
+      "module": "test_backups",
+      "elapsedSeconds": 0.01983019999897806
+    },
+    {
+      "id": "test_mcp_retarget_tools.RetargetToolTests.test_analyze_tool_rejects_unlisted_capability",
+      "module": "test_mcp_retarget_tools",
+      "elapsedSeconds": 0.019730199999685283
+    },
+    {
+      "id": "test_batch_recovery.BatchRecoveryTests.test_recovery_record_reload_after_restart",
+      "module": "test_batch_recovery",
+      "elapsedSeconds": 0.01964170000064769
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_t10_consumer_limit_truncation",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.019432899998719222
+    },
+    {
+      "id": "test_backups.BackupRollbackTests.test_manifest_derives_all_added_data_table_row_authorizations",
+      "module": "test_backups",
+      "elapsedSeconds": 0.01942119999876013
+    },
+    {
+      "id": "test_active_work.ActiveWorkTests.test_create_work_persists_normalized_links_and_todos",
+      "module": "test_active_work",
+      "elapsedSeconds": 0.019363999999768566
+    },
+    {
+      "id": "test_database.DatabaseTests.test_migration_and_fts_triggers",
+      "module": "test_database",
+      "elapsedSeconds": 0.01928810000026715
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_symbol_subject_not_found",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.019229199999244884
+    },
+    {
+      "id": "test_verification_trust.TrustVerdictTests.test_invalid_recovery_manifest_does_not_count_as_material",
+      "module": "test_verification_trust",
+      "elapsedSeconds": 0.01917470000080357
+    },
+    {
+      "id": "test_project_memory.ProjectMemoryTests.test_tool_observation_requires_stable_revision_to_start_valid",
+      "module": "test_project_memory",
+      "elapsedSeconds": 0.019156399999701534
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_t10b_edge_limit_truncation",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.019151600001350744
+    },
+    {
+      "id": "test_project_memory.ProjectMemoryTests.test_newer_memory_schema_is_rejected",
+      "module": "test_project_memory",
+      "elapsedSeconds": 0.01894960000026913
+    },
+    {
+      "id": "test_database.DatabaseTests.test_newer_schema_is_rejected",
+      "module": "test_database",
+      "elapsedSeconds": 0.018939199999294942
+    },
+    {
+      "id": "test_project_memory.ProjectMemoryTests.test_task_records_do_not_auto_conflict",
+      "module": "test_project_memory",
+      "elapsedSeconds": 0.018848400000933907
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_t16_low_budget_trim_order",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.01879460000054678
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_t6_indirect_consumer",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.018763899999612477
+    },
+    {
+      "id": "test_project_memory.ProjectMemoryTests.test_user_confirmed_record_is_valid_and_round_trips_bindings",
+      "module": "test_project_memory",
+      "elapsedSeconds": 0.018708000001424807
+    },
+    {
+      "id": "test_retarget_postprocess.RetargetPostprocessIndexRefreshTests.test_index_refresh_requires_saved_and_verified",
+      "module": "test_retarget_postprocess",
+      "elapsedSeconds": 0.018679899998460314
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_t12_unknown_reference_kind_not_fabricated",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.018662799999219715
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_t20_mode_independent_service_result",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.01865189999989525
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_t5_multi_target_shared_consumer_dedupe",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.018646000000444474
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_reference_kind_categories",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.018594699999084696
+    },
+    {
+      "id": "test_project_memory.ProjectMemoryTests.test_conflicting_records_coexist_without_overwrite",
+      "module": "test_project_memory",
+      "elapsedSeconds": 0.01858650000031048
+    },
+    {
+      "id": "test_memory_service.ProjectMemoryServiceTests.test_validate_against_index_rejects_other_project",
+      "module": "test_memory_service",
+      "elapsedSeconds": 0.018579800000225077
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_t11_target_not_indexed",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.0185643999993772
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_t1_single_target_no_consumers",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.018554300000687363
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_t2_single_target_one_direct_consumer",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.018549399999756133
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_t8_shortest_depth_and_path_stable",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.018519600000217906
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_t3_multiple_direct_consumers_fixed_order",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.018442599999616505
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffWorkflowContractTests.test_datatable_rename_reports_accompanying_row_payload_mutation",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.018415500000628526
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_inter_target_edge",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.018372200000158045
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_t10c_path_limit_truncation",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.018359900001087226
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_t4_same_consumer_multiple_kinds_merge",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.018311000001631328
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_symbol_subject_requires_single_target",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.018288199999005883
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffWorkflowContractTests.test_blueprint_verified_stage_detects_unexpected_state_or_reports_snapshot_gap",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.018287599999894155
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_t14_validation_targets_ordering",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.018287300001247786
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_symbol_subject_asset_mismatch",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.01826970000001893
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_t15_runtime_sensitivity_not_proven",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.018161700001655845
+    },
+    {
+      "id": "test_active_work.ActiveWorkTests.test_links_validate_assets_nodes_and_protect_node_delete",
+      "module": "test_active_work",
+      "elapsedSeconds": 0.018045799999526935
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffWorkflowContractTests.test_commandlet_verified_stage_uses_canonical_actual_not_commit_report",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.018031700001301942
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_asset_structured_property_rejects_unsupported_reader_schema",
+      "module": "test_patches",
+      "elapsedSeconds": 0.0179865999998583
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_additive_base_pose_fix_rejects_outside_reference_root",
+      "module": "test_patches",
+      "elapsedSeconds": 0.017978199999561184
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_asset_structured_property_rejects_canonical_numeric_duplicates",
+      "module": "test_patches",
+      "elapsedSeconds": 0.01794289999998
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_asset_structured_property_rejects_incomplete_struct",
+      "module": "test_patches",
+      "elapsedSeconds": 0.017934900000909693
+    },
+    {
+      "id": "test_backups.BackupRollbackTests.test_create_backup_manifest_records_exact_revisions",
+      "module": "test_backups",
+      "elapsedSeconds": 0.01792340000065451
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_asset_structured_property_rejects_duplicate_map_keys",
+      "module": "test_patches",
+      "elapsedSeconds": 0.017857200000435114
+    },
+    {
+      "id": "test_project_memory.ProjectMemoryTests.test_evidence_digest_covers_sources_revisions_and_artifacts",
+      "module": "test_project_memory",
+      "elapsedSeconds": 0.01778089999970689
+    },
+    {
+      "id": "test_memory_tree.MemoryTreeTests.test_delete_rejects_children_and_attached_records",
+      "module": "test_memory_tree",
+      "elapsedSeconds": 0.017740499999490567
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_asset_structured_property_rejects_type_mismatch",
+      "module": "test_patches",
+      "elapsedSeconds": 0.017706900000121095
+    },
+    {
+      "id": "test_batch_recovery.BatchRecoveryTests.test_resident_only_preview_and_commit_undo_reverse",
+      "module": "test_batch_recovery",
+      "elapsedSeconds": 0.017482299999755924
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_structural_data_table_row_operation_must_be_single",
+      "module": "test_patches",
+      "elapsedSeconds": 0.017356399999698624
+    },
+    {
+      "id": "test_active_work.ActiveWorkTests.test_state_machine_rejects_invalid_transitions",
+      "module": "test_active_work",
+      "elapsedSeconds": 0.01729899999918416
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_asset_reference_property_null_clear_is_valid",
+      "module": "test_patches",
+      "elapsedSeconds": 0.017244399999981397
+    },
+    {
+      "id": "test_active_work.ActiveWorkTests.test_list_filters_active_status_node_asset_and_query",
+      "module": "test_active_work",
+      "elapsedSeconds": 0.01721010000073875
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_asset_reference_property_rejects_type_mismatch",
+      "module": "test_patches",
+      "elapsedSeconds": 0.017116900000473834
+    },
+    {
+      "id": "test_project_memory.ProjectMemoryTests.test_content_digest_rejects_record_tampering",
+      "module": "test_project_memory",
+      "elapsedSeconds": 0.016994900001009228
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_asset_reference_property_rejects_unauthorized_root",
+      "module": "test_patches",
+      "elapsedSeconds": 0.01689259999875503
+    },
+    {
+      "id": "test_project_memory.ProjectMemoryTests.test_evidence_digest_rejects_artifact_tampering",
+      "module": "test_project_memory",
+      "elapsedSeconds": 0.016765200000008917
+    },
+    {
+      "id": "test_project_memory.ProjectMemoryTests.test_model_inferred_record_starts_unverified",
+      "module": "test_project_memory",
+      "elapsedSeconds": 0.016737100000682403
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_asset_reference_property_requires_reader_metadata",
+      "module": "test_patches",
+      "elapsedSeconds": 0.01668719999906898
+    },
+    {
+      "id": "test_memory_tree.MemoryTreeTests.test_moving_node_updates_descendant_paths",
+      "module": "test_memory_tree",
+      "elapsedSeconds": 0.01665780000075756
+    },
+    {
+      "id": "test_project_memory.ProjectMemoryTests.test_matching_revision_remains_valid",
+      "module": "test_project_memory",
+      "elapsedSeconds": 0.01632920000156446
+    },
+    {
+      "id": "test_memory_tree.MemoryTreeTests.test_parent_cannot_cross_project_or_create_cycle",
+      "module": "test_memory_tree",
+      "elapsedSeconds": 0.01610900000014226
+    },
+    {
+      "id": "test_verification_trust.TrustVerdictTests.test_suspicious_and_no_op_verified_complete_the_four_states",
+      "module": "test_verification_trust",
+      "elapsedSeconds": 0.015992299999197712
+    },
+    {
+      "id": "test_memory_tree.MemoryTreeTests.test_paths_normalize_and_require_existing_structural_parent",
+      "module": "test_memory_tree",
+      "elapsedSeconds": 0.015902200000709854
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_invalid_asset_property_allowlist_entry_is_rejected",
+      "module": "test_patches",
+      "elapsedSeconds": 0.01586950000091747
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_asset_reference_property_object_model_is_valid",
+      "module": "test_patches",
+      "elapsedSeconds": 0.015832299999601673
+    },
+    {
+      "id": "test_impact_analysis.ImpactAnalysisTests.test_impact_t13_unsupported_subject_kind",
+      "module": "test_impact_analysis",
+      "elapsedSeconds": 0.0158212000005733
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_material_texture_parameter_rejects_outside_reference_root",
+      "module": "test_patches",
+      "elapsedSeconds": 0.015812499999810825
+    },
+    {
+      "id": "test_checkpoint_sets.CheckpointSetTests.test_get_reloads_after_restart",
+      "module": "test_checkpoint_sets",
+      "elapsedSeconds": 0.01580889999968349
+    },
+    {
+      "id": "test_project_memory.ProjectMemoryTests.test_invalid_drafts_are_rejected_before_storage",
+      "module": "test_project_memory",
+      "elapsedSeconds": 0.015681299999414477
+    },
+    {
+      "id": "test_memory_tree.MemoryTreeTests.test_schema_v3_contains_tree_and_nullable_record_binding",
+      "module": "test_memory_tree",
+      "elapsedSeconds": 0.01561529999889899
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_commit_enabled_policy_reports_executor_support",
+      "module": "test_patches",
+      "elapsedSeconds": 0.015561899999738671
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_material_scalar_parameter_rejects_wrong_asset_class",
+      "module": "test_patches",
+      "elapsedSeconds": 0.015452499999810243
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_data_table_cell_requires_policy_allowlist",
+      "module": "test_patches",
+      "elapsedSeconds": 0.015310700000554789
+    },
+    {
+      "id": "test_checkpoint_sets.CheckpointSetTests.test_replay_saved_is_idempotent_no_duplicate_save",
+      "module": "test_checkpoint_sets",
+      "elapsedSeconds": 0.01528399999915564
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_unknown_field_is_rejected",
+      "module": "test_patches",
+      "elapsedSeconds": 0.015158899999732967
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_retarget_capabilities_are_optional_and_normalized",
+      "module": "test_patches",
+      "elapsedSeconds": 0.015077500000188593
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_material_static_switch_parameter_requires_boolean",
+      "module": "test_patches",
+      "elapsedSeconds": 0.015031999999337131
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_asset_property_requires_policy_allowlist",
+      "module": "test_patches",
+      "elapsedSeconds": 0.0150298999997176
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_remove_data_table_row_is_valid",
+      "module": "test_patches",
+      "elapsedSeconds": 0.015014799999335082
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_invalid_property_path_is_rejected",
+      "module": "test_patches",
+      "elapsedSeconds": 0.015004700000645244
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_duplicate_asset_is_rejected",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014999199998783297
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_invalid_material_parameter_allowlist_entry_is_rejected",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014990199999374454
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_add_data_table_row_is_valid",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014983499999289052
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_add_data_table_row_rejects_existing_row",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014967400000386988
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_blueprint_description_operation_is_valid",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014934799999537063
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_incomplete_export_is_rejected",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014885800001138705
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_asset_property_requires_exact_authorization",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014878400001180125
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_asset_property_operation_is_valid",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014858500000627828
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_multi_operation_plan_rejects_duplicate_target",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014857799998935661
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_additive_base_pose_fix_operation_is_valid",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014854299999569776
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_material_texture_parameter_operation_is_valid",
+      "module": "test_patches",
+      "elapsedSeconds": 0.01485069999944244
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_canonical_project_mismatch_is_rejected",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014839299999948707
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_material_vector_parameter_requires_exact_rgba_object",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014822299999650568
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_entire_game_root_cannot_be_authorized",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014818899999227142
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_operation_not_authorized_is_rejected",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014818600000580773
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_data_table_row_fields_operation_is_valid",
+      "module": "test_patches",
+      "elapsedSeconds": 0.01478809999935038
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_blueprint_description_rejects_nonempty_target",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014771100000871229
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_rename_data_table_row_rejects_unchanged_name",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014744699999937438
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_rename_data_table_row_is_valid",
+      "module": "test_patches",
+      "elapsedSeconds": 0.01473479999913252
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_dirty_package_is_rejected",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014724200000273413
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_invalid_guid_is_rejected",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014718099999299739
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_material_scalar_parameter_requires_policy_allowlist",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014701599999170867
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_material_vector_parameter_requires_exact_authorization",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014699100000143517
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_remove_data_table_row_rejects_missing_row",
+      "module": "test_patches",
+      "elapsedSeconds": 0.01469829999950889
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_data_table_row_fields_requires_every_field_authorized",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014695300000312272
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_rename_data_table_row_requires_true",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014660400000138907
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_data_table_cell_operation_is_valid",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014619400000810856
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_remove_data_table_row_requires_true",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014610899999752291
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_errors_are_stably_sorted",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014608199999202043
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_asset_class_mismatch_is_rejected",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014579499998944812
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_rename_data_table_row_rejects_missing_source",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014577800000552088
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_add_data_table_row_requires_every_field_authorized",
+      "module": "test_patches",
+      "elapsedSeconds": 0.01455320000059146
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_material_scalar_parameter_requires_exact_authorization",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014544899999236804
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_material_static_switch_parameter_operation_is_valid",
+      "module": "test_patches",
+      "elapsedSeconds": 0.0145436000002519
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_value_over_policy_limit_is_rejected",
+      "module": "test_patches",
+      "elapsedSeconds": 0.01452170000084152
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_asset_property_rejects_blueprint",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014521200000672252
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_data_table_cell_rejects_null",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014507900001262897
+    },
+    {
+      "id": "test_checkpoint_sets.CheckpointSetTests.test_commit_revalidates_all_assets_before_first_save_and_saves_in_order",
+      "module": "test_checkpoint_sets",
+      "elapsedSeconds": 0.014494099999865284
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_material_scalar_parameter_requires_numeric_value",
+      "module": "test_patches",
+      "elapsedSeconds": 0.01449250000041502
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_duplicate_operation_id_is_rejected",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014471999998932006
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_unknown_operation_is_rejected",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014471200000116369
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_asset_outside_authorized_root_is_rejected",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014451000000917702
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_material_static_switch_parameter_requires_exact_authorization",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014434400000027381
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_material_texture_parameter_requires_reference_policy",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014424099999814644
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_data_table_cell_requires_exact_authorization",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014370300001246505
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_revision_conflict_is_rejected",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014368599999215803
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_material_vector_parameter_operation_is_valid",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014300900000307593
+    },
+    {
+      "id": "test_retarget_workflow.RetargetWorkflowTests.test_batch_rollback_dry_run_reports_plan",
+      "module": "test_retarget_workflow",
+      "elapsedSeconds": 0.014262099999541533
+    },
+    {
+      "id": "test_retarget_workflow.RetargetWorkflowTests.test_save_with_change_set_binds_retarget_save_operations",
+      "module": "test_retarget_workflow",
+      "elapsedSeconds": 0.01424829999996291
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_retarget_capability_unknown_is_rejected",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014215100000001257
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_material_scalar_parameter_operation_is_valid",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014169899999615154
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_rename_data_table_row_rejects_existing_destination",
+      "module": "test_patches",
+      "elapsedSeconds": 0.014151099998343852
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_revision_unavailable_is_rejected",
+      "module": "test_patches",
+      "elapsedSeconds": 0.01414199999999255
+    },
+    {
+      "id": "test_retarget_workflow.RetargetWorkflowTests.test_batch_save_returns_backup_manifest_ref",
+      "module": "test_retarget_workflow",
+      "elapsedSeconds": 0.014131699999779812
+    },
+    {
+      "id": "test_checkpoint_sets.CheckpointSetTests.test_verify_partially_saved_checkpoint_set_rejected",
+      "module": "test_checkpoint_sets",
+      "elapsedSeconds": 0.01372810000066238
+    },
+    {
+      "id": "test_retarget_workflow.RetargetWorkflowTests.test_batch_captures_pre_batch_backup_of_overwrite_target",
+      "module": "test_retarget_workflow",
+      "elapsedSeconds": 0.013702199999897857
+    },
+    {
+      "id": "test_verification_trust.VerificationPlanTests.test_blueprint_and_reference_sensitive_domain_rules",
+      "module": "test_verification_trust",
+      "elapsedSeconds": 0.013477899999998044
+    },
+    {
+      "id": "test_retarget_workflow.RetargetWorkflowTests.test_batch_save_persists_created_outputs",
+      "module": "test_retarget_workflow",
+      "elapsedSeconds": 0.013306500000908272
+    },
+    {
+      "id": "test_checkpoint_sets.CheckpointSetTests.test_second_save_failure_partially_saved",
+      "module": "test_checkpoint_sets",
+      "elapsedSeconds": 0.012759900000673952
+    },
+    {
+      "id": "test_backups.BackupRollbackTests.test_multi_operation_manifest_rejects_report_order_mismatch",
+      "module": "test_backups",
+      "elapsedSeconds": 0.012754800000038813
+    },
+    {
+      "id": "test_animation_scale_fix_batch.AnimationScaleFixBatchTests.test_batch_index_refresh_preview_is_bounded_then_apply_switches_once",
+      "module": "test_animation_scale_fix_batch",
+      "elapsedSeconds": 0.012713199999780045
+    },
+    {
+      "id": "test_portability.PortabilityTests.test_unicode_json_and_sqlite_round_trip",
+      "module": "test_portability",
+      "elapsedSeconds": 0.012712499999906868
+    },
+    {
+      "id": "test_animation_scale_audit.AnimationScaleAuditTests.test_report_export_is_deterministic_and_work_root_bound",
+      "module": "test_animation_scale_audit",
+      "elapsedSeconds": 0.012628400001631235
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_valid_patch_is_validation_only",
+      "module": "test_patches",
+      "elapsedSeconds": 0.012572100000397768
+    },
+    {
+      "id": "test_backups.BackupRollbackTests.test_create_backup_manifest_rejects_target_mismatch",
+      "module": "test_backups",
+      "elapsedSeconds": 0.01239519999944605
+    },
+    {
+      "id": "test_animation_scale_fix_batch.AnimationScaleFixBatchTests.test_persisted_rollback_commit_failure_retries_same_child",
+      "module": "test_animation_scale_fix_batch",
+      "elapsedSeconds": 0.0123634999999922
+    },
+    {
+      "id": "test_checkpoint_sets.CheckpointSetTests.test_private_fault_seam_produces_partial_saved_after_real_first_save",
+      "module": "test_checkpoint_sets",
+      "elapsedSeconds": 0.012272199999642908
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_multi_operation_plan_declares_atomic_transaction",
+      "module": "test_patches",
+      "elapsedSeconds": 0.012209100001200568
+    },
+    {
+      "id": "test_animation_scale_fix_batch.AnimationScaleFixBatchTests.test_partial_save_failure_can_undo_unsaved_then_rollback_persisted",
+      "module": "test_animation_scale_fix_batch",
+      "elapsedSeconds": 0.011916800000108196
+    },
+    {
+      "id": "test_animation_scale_fix_batch.AnimationScaleFixBatchTests.test_live_apply_is_receipt_continued_and_get_does_not_advance",
+      "module": "test_animation_scale_fix_batch",
+      "elapsedSeconds": 0.011762900001485832
+    },
+    {
+      "id": "test_animation_scale_fix_batch.AnimationScaleFixBatchTests.test_batch_save_and_verify_are_bounded_to_two_assets",
+      "module": "test_animation_scale_fix_batch",
+      "elapsedSeconds": 0.011721599999873433
+    },
+    {
+      "id": "test_animation_scale_fix_batch.AnimationScaleFixBatchTests.test_persisted_rollback_is_bounded_reverse_order_dry_run_then_commit",
+      "module": "test_animation_scale_fix_batch",
+      "elapsedSeconds": 0.011701000001266948
+    },
+    {
+      "id": "test_fixtures.FixturePlanTests.test_verify_fixture_export_checks_class_revision_and_dirty_state",
+      "module": "test_fixtures",
+      "elapsedSeconds": 0.01169330000084301
+    },
+    {
+      "id": "test_retarget_postprocess.RetargetPostprocessReopenTests.test_reopen_reads_persisted_plan",
+      "module": "test_retarget_postprocess",
+      "elapsedSeconds": 0.011660500000289176
+    },
+    {
+      "id": "test_animation_scale_fix_batch.AnimationScaleFixBatchTests.test_get_rejects_tampered_batch_plan_file",
+      "module": "test_animation_scale_fix_batch",
+      "elapsedSeconds": 0.011568800000532065
+    },
+    {
+      "id": "test_animation_scale_fix_batch.AnimationScaleFixBatchTests.test_batch_rollback_discards_prepared_index_refresh_candidates",
+      "module": "test_animation_scale_fix_batch",
+      "elapsedSeconds": 0.011495299999296549
+    },
+    {
+      "id": "test_verification_trust.VerificationEvidenceStoreTests.test_store_is_bounded_deduplicated_and_returns_deep_copies",
+      "module": "test_verification_trust",
+      "elapsedSeconds": 0.01142979999895033
+    },
+    {
+      "id": "test_retarget_postprocess.RetargetPostprocessTests.test_suggested_plan_is_work_root_bound_non_applying_and_tamper_checked",
+      "module": "test_retarget_postprocess",
+      "elapsedSeconds": 0.011278600000878214
+    },
+    {
+      "id": "test_animation_scale_fix_batch.AnimationScaleFixBatchTests.test_live_apply_requires_exact_confirmation_and_receipt",
+      "module": "test_animation_scale_fix_batch",
+      "elapsedSeconds": 0.01122149999901012
+    },
+    {
+      "id": "test_retarget_workflow.RetargetWorkflowTests.test_batch_start_queues_and_get_runs_to_completion",
+      "module": "test_retarget_workflow",
+      "elapsedSeconds": 0.01115609999942535
+    },
+    {
+      "id": "test_animation_scale_fix_batch.AnimationScaleFixBatchTests.test_partial_failure_is_fail_stop_and_undo_reverts_applied_items",
+      "module": "test_animation_scale_fix_batch",
+      "elapsedSeconds": 0.01112459999967541
+    },
+    {
+      "id": "test_animation_scale_fix_batch.AnimationScaleFixBatchTests.test_undo_failure_retries_same_transaction_with_same_receipt",
+      "module": "test_animation_scale_fix_batch",
+      "elapsedSeconds": 0.011081599999670289
+    },
+    {
+      "id": "test_animation_scale_fix_batch.AnimationScaleFixBatchTests.test_rollback_manifest_retry_does_not_save_asset_twice",
+      "module": "test_animation_scale_fix_batch",
+      "elapsedSeconds": 0.01099909999902593
+    },
+    {
+      "id": "test_checkpoint_sets.CheckpointSetTests.test_first_save_failure_failed_zero_saved",
+      "module": "test_checkpoint_sets",
+      "elapsedSeconds": 0.01076199999988603
+    },
+    {
+      "id": "test_retarget_workflow.RetargetWorkflowTests.test_batch_captures_new_output_as_create",
+      "module": "test_retarget_workflow",
+      "elapsedSeconds": 0.010748700000476674
+    },
+    {
+      "id": "test_animation_scale_fix_batch.AnimationScaleFixBatchTests.test_first_live_apply_failure_discards_empty_change_set",
+      "module": "test_animation_scale_fix_batch",
+      "elapsedSeconds": 0.010691100000258302
+    },
+    {
+      "id": "test_animation_scale_fix_batch.AnimationScaleFixBatchTests.test_save_and_verify_steps_reject_more_than_two_assets",
+      "module": "test_animation_scale_fix_batch",
+      "elapsedSeconds": 0.010652200000549783
+    },
+    {
+      "id": "test_verification_trust.VerificationPlanTests.test_multi_operation_rules_and_fingerprint_survive_plan_recovery",
+      "module": "test_verification_trust",
+      "elapsedSeconds": 0.010528200000408106
+    },
+    {
+      "id": "test_backups.BackupRollbackTests.test_cli_exposes_manifest_rollback_and_verification_commands",
+      "module": "test_backups",
+      "elapsedSeconds": 0.010519100000237813
+    },
+    {
+      "id": "test_animation_scale_fix_batch.AnimationScaleFixBatchTests.test_batch_plan_derives_each_expected_scale_from_audit_reference",
+      "module": "test_animation_scale_fix_batch",
+      "elapsedSeconds": 0.010508999999728985
+    },
+    {
+      "id": "test_animation_scale_fix_batch.AnimationScaleFixBatchTests.test_all_no_op_batch_discards_empty_change_set",
+      "module": "test_animation_scale_fix_batch",
+      "elapsedSeconds": 0.010502600000108941
+    },
+    {
+      "id": "test_verification_trust.VerificationPlanTests.test_reference_sensitive_depth_zero_is_blocking_and_no_op_avoids_fake_requirements",
+      "module": "test_verification_trust",
+      "elapsedSeconds": 0.010451200001625693
+    },
+    {
+      "id": "test_animation_scale_fix_batch.AnimationScaleFixBatchTests.test_batch_undo_is_reverse_order_and_receipt_continued",
+      "module": "test_animation_scale_fix_batch",
+      "elapsedSeconds": 0.010444300000017392
+    },
+    {
+      "id": "test_animation_scale_fix_batch.AnimationScaleFixBatchTests.test_live_step_is_bounded_to_eight_assets",
+      "module": "test_animation_scale_fix_batch",
+      "elapsedSeconds": 0.010342499999751453
+    },
+    {
+      "id": "test_retarget_postprocess.RetargetPostprocessIndexRefreshTests.test_index_refresh_apply_requires_confirmation_and_refreshes",
+      "module": "test_retarget_postprocess",
+      "elapsedSeconds": 0.010327500000130385
+    },
+    {
+      "id": "test_bounded_batch.BoundedBatchTests.test_request_too_large",
+      "module": "test_bounded_batch",
+      "elapsedSeconds": 0.010002999999414897
+    },
+    {
+      "id": "test_bounded_batch.BoundedBatchTests.test_stale_revision_rejected_before_child_plans",
+      "module": "test_bounded_batch",
+      "elapsedSeconds": 0.009970199998861062
+    },
+    {
+      "id": "test_bounded_batch.BoundedBatchTests.test_duplicate_asset_rejected_before_child_plans",
+      "module": "test_bounded_batch",
+      "elapsedSeconds": 0.00994419999915408
+    },
+    {
+      "id": "test_animation_scale_fix_batch.AnimationScaleFixBatchTests.test_root_track_explicit_override_switches_to_uniform_strategy",
+      "module": "test_animation_scale_fix_batch",
+      "elapsedSeconds": 0.009928500001478824
+    },
+    {
+      "id": "test_retarget_workflow.RetargetWorkflowTests.test_batch_save_requires_exact_confirmation",
+      "module": "test_retarget_workflow",
+      "elapsedSeconds": 0.009917800000039279
+    },
+    {
+      "id": "test_bounded_batch.BoundedBatchTests.test_unsupported_operation_rejected",
+      "module": "test_bounded_batch",
+      "elapsedSeconds": 0.009893000000374741
+    },
+    {
+      "id": "test_retarget_postprocess.RetargetPostprocessIndexRefreshTests.test_index_refresh_preview_reaches_ready",
+      "module": "test_retarget_postprocess",
+      "elapsedSeconds": 0.009864499999821419
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t38_prepared_directhost_namespace_is_reused_and_drift_checked",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.009734200000821147
+    },
+    {
+      "id": "test_bounded_batch.BoundedBatchTests.test_bind_failure_aborts_with_zero_child_plans",
+      "module": "test_bounded_batch",
+      "elapsedSeconds": 0.009727599999678205
+    },
+    {
+      "id": "test_bounded_batch.BoundedBatchTests.test_hard_bounds",
+      "module": "test_bounded_batch",
+      "elapsedSeconds": 0.009583099999872502
+    },
+    {
+      "id": "test_batch_recovery.BatchRecoveryTests.test_editor_session_mismatch_blocks_zero_undo",
+      "module": "test_batch_recovery",
+      "elapsedSeconds": 0.009504499999820837
+    },
+    {
+      "id": "test_retarget_postprocess.RetargetPostprocessIndexRefreshTests.test_index_refresh_revision_mismatch_fails_prepare",
+      "module": "test_retarget_postprocess",
+      "elapsedSeconds": 0.009367399999973713
+    },
+    {
+      "id": "test_verification_trust.VerificationPlanTests.test_request_boundaries_and_normalization",
+      "module": "test_verification_trust",
+      "elapsedSeconds": 0.009347900000648224
+    },
+    {
+      "id": "test_verification_trust.VerificationEvidenceStoreTests.test_compile_fallback_requires_explicit_clean_session_binding",
+      "module": "test_verification_trust",
+      "elapsedSeconds": 0.009303800001362106
+    },
+    {
+      "id": "test_checkpoint_sets.CheckpointSetTests.test_uncertain_persistence_boundary_never_claims_saved",
+      "module": "test_checkpoint_sets",
+      "elapsedSeconds": 0.009277900000597583
+    },
+    {
+      "id": "test_verification_trust.VerificationPlanTests.test_plan_is_deterministic_read_only_and_has_data_asset_rules",
+      "module": "test_verification_trust",
+      "elapsedSeconds": 0.009266200000638491
+    },
+    {
+      "id": "test_checkpoint_sets.CheckpointSetTests.test_commit_preflight_failure_on_asset_two_zero_save",
+      "module": "test_checkpoint_sets",
+      "elapsedSeconds": 0.009242100000847131
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t32_benchmark_backup_root_stays_below_tool_backups",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.009117100000366918
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_duplicate_json_key_is_rejected",
+      "module": "test_patches",
+      "elapsedSeconds": 0.009008400000311667
+    },
+    {
+      "id": "test_retarget_workflow.RetargetWorkflowTests.test_apply_rejects_revision_conflict",
+      "module": "test_retarget_workflow",
+      "elapsedSeconds": 0.008726299998670584
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t42_repeat_schedule_and_measurement_contract_are_frozen",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.008684000000357628
+    },
+    {
+      "id": "test_retarget_workflow.RetargetWorkflowTests.test_apply_success_returns_changes",
+      "module": "test_retarget_workflow",
+      "elapsedSeconds": 0.008568799999920884
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t3_unknown_setup_cleanup_rejected",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.008344099998794263
+    },
+    {
+      "id": "test_retarget_workflow.RetargetWorkflowTests.test_apply_passes_retargeter_config_to_bridge",
+      "module": "test_retarget_workflow",
+      "elapsedSeconds": 0.00831790000120236
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t40_target_assets_exclude_discovery_candidates_and_impact_consumers",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.008046699998885742
+    },
+    {
+      "id": "test_backups.BackupRollbackTests.test_backup_manifest_schema_declares_security_fields",
+      "module": "test_backups",
+      "elapsedSeconds": 0.007860399999117362
+    },
+    {
+      "id": "test_checkpoint_sets.CheckpointSetTests.test_tampered_checkpoint_set_zero_save",
+      "module": "test_checkpoint_sets",
+      "elapsedSeconds": 0.007499599998482154
+    },
+    {
+      "id": "test_live_structured_write_smoke_contract.LiveStructuredWriteSmokeContractTests.test_smoke_hash_helpers_execute_and_detect_changes",
+      "module": "test_live_structured_write_smoke_contract",
+      "elapsedSeconds": 0.00731150000137859
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_additive_base_pose_fix_value_accepts_contract",
+      "module": "test_patches",
+      "elapsedSeconds": 0.007288499999049236
+    },
+    {
+      "id": "test_checkpoint_sets.CheckpointSetTests.test_bad_confirmation_zero_save",
+      "module": "test_checkpoint_sets",
+      "elapsedSeconds": 0.007166399998823181
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_animation_scale_fix_value_accepts_non_additive_contract",
+      "module": "test_patches",
+      "elapsedSeconds": 0.006927800000994466
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_additive_base_pose_fix_value_rejects_bad_ref_path",
+      "module": "test_patches",
+      "elapsedSeconds": 0.006871499999760999
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_additive_base_pose_fix_value_rejects_bad_frame_index",
+      "module": "test_patches",
+      "elapsedSeconds": 0.006802299998525996
+    },
+    {
+      "id": "test_retarget_workflow.RetargetWorkflowTests.test_apply_blocked_by_plan_issues",
+      "module": "test_retarget_workflow",
+      "elapsedSeconds": 0.006787000000258558
+    },
+    {
+      "id": "test_retarget_workflow.RetargetWorkflowTests.test_apply_requires_exact_confirmation",
+      "module": "test_retarget_workflow",
+      "elapsedSeconds": 0.0067102000011800556
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_live_write_registry_contains_complete_operation_metadata",
+      "module": "test_patches",
+      "elapsedSeconds": 0.00662689999990107
+    },
+    {
+      "id": "test_config.ResolveProjectPolicyTests.test_resolves_profile_when_requested",
+      "module": "test_config",
+      "elapsedSeconds": 0.006569400000444148
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_additive_base_pose_fix_value_rejects_bad_base_pose_type",
+      "module": "test_patches",
+      "elapsedSeconds": 0.0064908999993349425
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_additive_base_pose_fix_value_rejects_missing_required_fields",
+      "module": "test_patches",
+      "elapsedSeconds": 0.006483899998784182
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_animation_scale_fix_value_rejects_additive_bypass_field",
+      "module": "test_patches",
+      "elapsedSeconds": 0.0063999999983934686
+    },
+    {
+      "id": "test_verification_trust.VerificationEvidenceStoreTests.test_store_constructor_and_diagnostics_bounds",
+      "module": "test_verification_trust",
+      "elapsedSeconds": 0.00638980000076117
+    },
+    {
+      "id": "test_tool_registry.ToolRegistryTests.test_live_action_handlers_keep_bounded_execution_surface",
+      "module": "test_tool_registry",
+      "elapsedSeconds": 0.006323899999188143
+    },
+    {
+      "id": "test_retarget_workflow.RetargetWorkflowTests.test_batch_cancel_before_start",
+      "module": "test_retarget_workflow",
+      "elapsedSeconds": 0.006321000000752974
+    },
+    {
+      "id": "test_patches.PatchValidationTests.test_additive_base_pose_fix_value_rejects_unknown_field",
+      "module": "test_patches",
+      "elapsedSeconds": 0.0063171999991027405
+    },
+    {
+      "id": "test_release_validation.ReleaseValidationTests.test_current_version_sources_are_consistent",
+      "module": "test_release_validation",
+      "elapsedSeconds": 0.006269999999858555
+    },
+    {
+      "id": "test_retarget_workflow.RetargetWorkflowTests.test_batch_rejects_source_outside_reference_roots",
+      "module": "test_retarget_workflow",
+      "elapsedSeconds": 0.006252899998798966
+    },
+    {
+      "id": "test_retarget_workflow.RetargetWorkflowTests.test_batch_rejects_uncovered_output_directory",
+      "module": "test_retarget_workflow",
+      "elapsedSeconds": 0.006199299999934738
+    },
+    {
+      "id": "test_retarget_workflow.RetargetWorkflowTests.test_plan_blocked_by_required_chain_absence",
+      "module": "test_retarget_workflow",
+      "elapsedSeconds": 0.006197000000611297
+    },
+    {
+      "id": "test_retarget_workflow.RetargetWorkflowTests.test_retarget_postprocess_context_does_not_advance_queued_batch",
+      "module": "test_retarget_workflow",
+      "elapsedSeconds": 0.006064400000468595
+    },
+    {
+      "id": "test_retarget_workflow.RetargetWorkflowTests.test_plan_creates_immutable_plan_with_digest",
+      "module": "test_retarget_workflow",
+      "elapsedSeconds": 0.00598330000138958
+    },
+    {
+      "id": "test_retarget_workflow.RetargetWorkflowTests.test_plan_requires_output_directory",
+      "module": "test_retarget_workflow",
+      "elapsedSeconds": 0.005915300000197021
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t31_codex_command_requires_registered_mcp_server",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.005821499999001389
+    },
+    {
+      "id": "test_checkpoint_sets.CheckpointSetTests.test_preview_creates_two_w3_prepared_checkpoints_and_zero_save",
+      "module": "test_checkpoint_sets",
+      "elapsedSeconds": 0.005509499998879619
+    },
+    {
+      "id": "test_config.ResolveProjectPolicyTests.test_resolves_default_by_project_name",
+      "module": "test_config",
+      "elapsedSeconds": 0.0054584000008617295
+    },
+    {
+      "id": "test_fixtures.FixturePlanTests.test_cli_exposes_fixture_validate_and_verify",
+      "module": "test_fixtures",
+      "elapsedSeconds": 0.005345300000044517
+    },
+    {
+      "id": "test_retarget_workflow.RetargetWorkflowTests.test_validate_returns_verdict_and_issues",
+      "module": "test_retarget_workflow",
+      "elapsedSeconds": 0.005344799999875249
+    },
+    {
+      "id": "test_tool_registry.ToolRegistryTests.test_mcp_registration_and_editor_readers_remain_split",
+      "module": "test_tool_registry",
+      "elapsedSeconds": 0.005283000000417815
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t28_output_root_is_bounded",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.005277700000078767
+    },
+    {
+      "id": "test_verification_trust.VerificationEvidenceStoreTests.test_store_accepts_only_registered_successful_project_bound_outputs",
+      "module": "test_verification_trust",
+      "elapsedSeconds": 0.005121700000017881
+    },
+    {
+      "id": "test_retarget_workflow.RetargetWorkflowTests.test_apply_rejects_plan_not_found",
+      "module": "test_retarget_workflow",
+      "elapsedSeconds": 0.005107799999677809
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t39_result_contract_enums_and_safe_failure_guidance_are_machine_closed",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.005017800000132411
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t35_each_reforge_case_builds_readonly_truth_with_valid_bounds",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.004946199998812517
+    },
+    {
+      "id": "test_animation_scale_fix_batch.AnimationScaleFixBatchTests.test_child_plan_failure_cleans_previously_created_children",
+      "module": "test_animation_scale_fix_batch",
+      "elapsedSeconds": 0.004937400000926573
+    },
+    {
+      "id": "test_animation_scale_fix_batch.AnimationScaleFixBatchTests.test_partial_audit_report_is_rejected_before_child_plans",
+      "module": "test_animation_scale_fix_batch",
+      "elapsedSeconds": 0.004932399999233894
+    },
+    {
+      "id": "test_animation_scale_fix_batch.AnimationScaleFixBatchTests.test_root_lock_override_must_match_reference_scale",
+      "module": "test_animation_scale_fix_batch",
+      "elapsedSeconds": 0.004900399999314686
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t11_claimed_success_with_wrong_truth_is_false_success",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.004818399998839595
+    },
+    {
+      "id": "test_workflow_memory_smoke_contract.WorkflowMemorySmokeContractTests.test_real_workflow_smoke_binds_fixed_memory_database",
+      "module": "test_workflow_memory_smoke_contract",
+      "elapsedSeconds": 0.004698200000348152
+    },
+    {
+      "id": "test_retarget_postprocess.RetargetPostprocessReopenTests.test_reopen_rejects_invalid_or_missing_paths",
+      "module": "test_retarget_postprocess",
+      "elapsedSeconds": 0.004612000000633998
+    },
+    {
+      "id": "test_config.ResolveProjectPolicyTests.test_rejects_missing_policy_file",
+      "module": "test_config",
+      "elapsedSeconds": 0.004599600000801729
+    },
+    {
+      "id": "test_config.ResolveProjectPolicyTests.test_rejects_unknown_profile",
+      "module": "test_config",
+      "elapsedSeconds": 0.004585599999700207
+    },
+    {
+      "id": "test_animation_scale_fix_batch.AnimationScaleFixBatchTests.test_unsupported_selected_classification_is_rejected_without_child_plans",
+      "module": "test_animation_scale_fix_batch",
+      "elapsedSeconds": 0.004581400000461144
+    },
+    {
+      "id": "test_animation_scale_fix_batch.AnimationScaleFixBatchTests.test_nonuniform_reference_scale_is_rejected_before_child_plans",
+      "module": "test_animation_scale_fix_batch",
+      "elapsedSeconds": 0.004581199998938246
+    },
+    {
+      "id": "test_animation_scale_fix_batch.AnimationScaleFixBatchTests.test_report_digest_mismatch_is_rejected_before_child_plans",
+      "module": "test_animation_scale_fix_batch",
+      "elapsedSeconds": 0.004576599998472375
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t26_reforge_mutation_case_rejected",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.0045743999999103835
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t4_arbitrary_command_field_rejected",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.004569000000628876
+    },
+    {
+      "id": "test_config.ResolveProjectPolicyTests.test_returns_none_when_project_not_in_manifest",
+      "module": "test_config",
+      "elapsedSeconds": 0.00453419999939797
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t5_asset_normalization_and_overlap",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.004462700000658515
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t34_tool_budget_failure_is_agent_tool_selection",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.004381900000225869
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t21_paired_full_legacy_delta",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.004344999999375432
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t20_both_false_success_denominators",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.004318200000852812
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t15_stale_detection_metric",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.004193699998722877
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t24_infrastructure_failure_is_explicit_not_dropped",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.004177899998467183
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t23_failed_attempts_are_retained",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.0041751999997359235
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t18_semantic_denominator_is_applicable_only",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.0041739999996934785
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t22_unavailable_token_data_remains_unavailable",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.004148899999563582
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t19_trusted_completion_formula",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.004118900000321446
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t12_safe_block_is_trusted_completion",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.004082699999344186
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t16_exact_recovery_hash_mismatch_fails",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.004075099999681697
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t41_reference_normalization_accepts_only_the_allowed_derived_hard_edge",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.004069499998877291
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t6_profile_inventory_requirements",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.004051599999002065
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t13_wrong_asset_detection",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.004026299999168259
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t17_missing_result_contract_recorded",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.004011900000477908
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t14_unintended_package_change_detection",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.003995399998530047
+    },
+    {
+      "id": "test_config.ResolveProjectPolicyTests.test_rejects_malformed_manifest",
+      "module": "test_config",
+      "elapsedSeconds": 0.003896399999575806
+    },
+    {
+      "id": "test_fixtures.FixturePlanTests.test_reference_asset_accepts_valid_initial_values",
+      "module": "test_fixtures",
+      "elapsedSeconds": 0.0038453000015579164
+    },
+    {
+      "id": "test_fixtures.FixturePlanTests.test_structured_asset_requires_exact_fixture_class",
+      "module": "test_fixtures",
+      "elapsedSeconds": 0.0038233000013860874
+    },
+    {
+      "id": "test_w5_benchmark.RunnerOfflineTests.test_utc_stamp_and_write_json",
+      "module": "test_w5_benchmark",
+      "elapsedSeconds": 0.0038193000000319444
+    },
+    {
+      "id": "test_fixtures.FixturePlanTests.test_reference_asset_rejects_invalid_initial_values",
+      "module": "test_fixtures",
+      "elapsedSeconds": 0.003817200000412413
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffWorkflowContractTests.test_live_workflow_collects_plan_intent_and_transaction_actual",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.003722899999047513
+    },
+    {
+      "id": "test_fixtures.FixturePlanTests.test_plan_rejects_source_target_overlap",
+      "module": "test_fixtures",
+      "elapsedSeconds": 0.0036849000007350696
+    },
+    {
+      "id": "test_animation_scale_fix_batch.AnimationScaleFixBatchTests.test_duplicate_selection_is_rejected",
+      "module": "test_animation_scale_fix_batch",
+      "elapsedSeconds": 0.0035539000000426313
+    },
+    {
+      "id": "test_fixtures.FixturePlanTests.test_plan_rejects_object_suffix_on_target",
+      "module": "test_fixtures",
+      "elapsedSeconds": 0.003528500001266366
+    },
+    {
+      "id": "test_fixtures.FixturePlanTests.test_scalar_asset_requires_exact_fixture_class",
+      "module": "test_fixtures",
+      "elapsedSeconds": 0.0034933000006276416
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t2_duplicate_case_id_rejected",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.003472700000202167
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffWorkflowContractTests.test_workflow_analysis_does_not_mutate_change_set_during_reconcile",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.0034512999991420656
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t27_secrets_are_not_serialized",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.0034476000000722706
+    },
+    {
+      "id": "test_fixtures.FixturePlanTests.test_plan_rejects_target_outside_root_and_duplicate_id",
+      "module": "test_fixtures",
+      "elapsedSeconds": 0.003411799998502829
+    },
+    {
+      "id": "test_fixtures.FixturePlanTests.test_structured_live_write_plan_is_parsed_by_real_validator",
+      "module": "test_fixtures",
+      "elapsedSeconds": 0.0033576999994693324
+    },
+    {
+      "id": "test_live_reference_write_smoke_contract.LiveReferenceWriteSmokeContractTests.test_harness_runs_live_reference_workflow_and_preserves_disk",
+      "module": "test_live_reference_write_smoke_contract",
+      "elapsedSeconds": 0.0031781999987288145
+    },
+    {
+      "id": "test_live_structured_write_smoke_contract.LiveStructuredWriteSmokeContractTests.test_harness_runs_live_structured_workflow_and_preserves_disk",
+      "module": "test_live_structured_write_smoke_contract",
+      "elapsedSeconds": 0.003129099999569007
+    },
+    {
+      "id": "test_fixtures.FixturePlanTests.test_valid_plan_is_read_only_validation",
+      "module": "test_fixtures",
+      "elapsedSeconds": 0.0029668000006495276
+    },
+    {
+      "id": "test_fixtures.FixturePlanTests.test_commandlet_and_wrapper_contain_safety_gates",
+      "module": "test_fixtures",
+      "elapsedSeconds": 0.0028449000001273816
+    },
+    {
+      "id": "test_retarget_postprocess.RetargetPostprocessTests.test_output_class_fallback_detects_aim_offset_without_auditing_it",
+      "module": "test_retarget_postprocess",
+      "elapsedSeconds": 0.002815499999996973
+    },
+    {
+      "id": "test_blueprint_patch_executor.BlueprintPatchExecutorTests.test_release_version_is_consistent",
+      "module": "test_blueprint_patch_executor",
+      "elapsedSeconds": 0.0027566999997361563
+    },
+    {
+      "id": "test_retarget_postprocess.RetargetPostprocessTests.test_additive_output_remains_manual_review",
+      "module": "test_retarget_postprocess",
+      "elapsedSeconds": 0.0027157000004081056
+    },
+    {
+      "id": "test_retarget_postprocess.RetargetPostprocessTests.test_only_anim_sequences_are_audited_and_composites_become_followups",
+      "module": "test_retarget_postprocess",
+      "elapsedSeconds": 0.0027085000001534354
+    },
+    {
+      "id": "test_checkpoint_sets.CheckpointSetTests.test_partially_applied_execution_rejected",
+      "module": "test_checkpoint_sets",
+      "elapsedSeconds": 0.002501399998436682
+    },
+    {
+      "id": "test_config.ResolveProjectPolicyTests.test_returns_none_when_manifest_missing",
+      "module": "test_config",
+      "elapsedSeconds": 0.002399699998932192
+    },
+    {
+      "id": "test_project_memory.ProjectMemoryTests.test_readonly_open_rejects_uninitialized_database",
+      "module": "test_project_memory",
+      "elapsedSeconds": 0.002373200000874931
+    },
+    {
+      "id": "test_live_structured_write_smoke_contract.LiveStructuredWriteSmokeContractTests.test_smoke_fixture_assets_are_the_ones_validated_by_the_real_validator",
+      "module": "test_live_structured_write_smoke_contract",
+      "elapsedSeconds": 0.0022351999996317318
+    },
+    {
+      "id": "test_config.RepoProjectPoliciesTests.test_real_manifest_resolves_model_preview_default_read",
+      "module": "test_config",
+      "elapsedSeconds": 0.0021851999990758486
+    },
+    {
+      "id": "test_animation_scale_audit.AnimationScaleAuditTests.test_report_export_rejects_running_task_without_writing",
+      "module": "test_animation_scale_audit",
+      "elapsedSeconds": 0.00213150000126916
+    },
+    {
+      "id": "test_config.RepoProjectPoliciesTests.test_real_manifest_resolves_model_preview_animation_write_profile",
+      "module": "test_config",
+      "elapsedSeconds": 0.0020922999992762925
+    },
+    {
+      "id": "test_reader_architecture.ReaderArchitectureTests.test_reader_modules_stay_bounded",
+      "module": "test_reader_architecture",
+      "elapsedSeconds": 0.002047700001639896
+    },
+    {
+      "id": "test_memory_service.ProjectMemoryServiceTests.test_add_record_rejects_non_fixed_project",
+      "module": "test_memory_service",
+      "elapsedSeconds": 0.0020346000001154607
+    },
+    {
+      "id": "test_memory_tasks.TaskMemoryTests.test_task_artifact_refs_reject_absolute_and_parent_paths",
+      "module": "test_memory_tasks",
+      "elapsedSeconds": 0.0020204999982524896
+    },
+    {
+      "id": "test_config.RepoProjectPoliciesTests.test_real_manifest_resolves_my_project_default",
+      "module": "test_config",
+      "elapsedSeconds": 0.0019910999999410706
+    },
+    {
+      "id": "test_memory_tasks.TaskMemoryTests.test_task_key_prefix_and_all_terminal_outcomes_are_supported",
+      "module": "test_memory_tasks",
+      "elapsedSeconds": 0.001809399998819572
+    },
+    {
+      "id": "test_memory_tasks.TaskMemoryTests.test_task_scope_and_reserved_details_are_fixed",
+      "module": "test_memory_tasks",
+      "elapsedSeconds": 0.001784300000508665
+    },
+    {
+      "id": "test_memory_tasks.TaskMemoryTests.test_task_input_rejects_invalid_outcome_and_control_characters",
+      "module": "test_memory_tasks",
+      "elapsedSeconds": 0.0017797000000427943
+    },
+    {
+      "id": "test_config.ResolveProjectPolicyTests.test_rejects_non_uproject_path",
+      "module": "test_config",
+      "elapsedSeconds": 0.001765200000590994
+    },
+    {
+      "id": "test_memory_tasks.TaskMemoryTests.test_task_outcome_requires_stable_revision_evidence",
+      "module": "test_memory_tasks",
+      "elapsedSeconds": 0.001720000000204891
+    },
+    {
+      "id": "test_memory_tasks.TaskMemoryTests.test_task_conclusion_allows_normalized_multiline_text",
+      "module": "test_memory_tasks",
+      "elapsedSeconds": 0.0015884999993431848
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffDomainMatrixTests.test_data_table_cell_row_fields_add_remove_and_rename",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.0013353000013012206
+    },
+    {
+      "id": "test_scalar_regression.ScalarRegressionTests.test_scalar_fixture_plan_is_valid",
+      "module": "test_scalar_regression",
+      "elapsedSeconds": 0.0012507000010373304
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffDomainMatrixTests.test_material_instance_four_categories_and_override_identity",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.0011023000006389339
+    },
+    {
+      "id": "test_live_structured_write_smoke_contract.LiveStructuredWriteSmokeContractTests.test_smoke_payload_and_error_helpers_execute",
+      "module": "test_live_structured_write_smoke_contract",
+      "elapsedSeconds": 0.0010712000002968125
+    },
+    {
+      "id": "test_python_test_runner.PythonTestRunnerTests.test_unknown_or_missing_domain_is_rejected",
+      "module": "test_python_test_runner",
+      "elapsedSeconds": 0.0010569000005489215
+    },
+    {
+      "id": "test_change_sets.ChangeSetValidationTests.test_deserialize_rejects_oversized_membership",
+      "module": "test_change_sets",
+      "elapsedSeconds": 0.0010437000000820262
+    },
+    {
+      "id": "test_python_test_runner.PythonTestRunnerTests.test_fast_is_a_strict_subset_and_excludes_measured_slow_modules",
+      "module": "test_python_test_runner",
+      "elapsedSeconds": 0.0010038000000349712
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffCoreTests.test_more_than_eight_assets_reports_explicit_truncation",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.0009461999998165993
+    },
+    {
+      "id": "test_knowledge_view.FailureModeTests.test_non_loopback_host_is_rejected",
+      "module": "test_knowledge_view",
+      "elapsedSeconds": 0.0009386999990965705
+    },
+    {
+      "id": "test_live_structured_write_smoke_contract.LiveStructuredWriteSmokeContractTests.test_smoke_fixture_values_match_the_real_structured_schema_shapes",
+      "module": "test_live_structured_write_smoke_contract",
+      "elapsedSeconds": 0.0009294999999838183
+    },
+    {
+      "id": "test_scalar_regression.ScalarRegressionTests.test_failure_injection_is_strictly_scoped_to_scalar_fixture",
+      "module": "test_scalar_regression",
+      "elapsedSeconds": 0.0009033000005729264
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t29_fixture_setup_hooks_are_allowlisted",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 0.0008851000002323417
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffDomainMatrixTests.test_data_asset_real_structured_writer_wrappers_match",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.000742500000342261
+    },
+    {
+      "id": "test_blueprint_patch_executor.BlueprintPatchExecutorTests.test_asset_commandlet_contains_required_safety_gates",
+      "module": "test_blueprint_patch_executor",
+      "elapsedSeconds": 0.000735200001145131
+    },
+    {
+      "id": "test_python_test_runner.PythonTestRunnerTests.test_all_domain_modules_exist",
+      "module": "test_python_test_runner",
+      "elapsedSeconds": 0.0007329999989451608
+    },
+    {
+      "id": "test_live_write_smoke_contract.LiveWriteSmokeContractTests.test_harness_runs_live_workflow_and_preserves_disk",
+      "module": "test_live_write_smoke_contract",
+      "elapsedSeconds": 0.0007306000006792601
+    },
+    {
+      "id": "test_config.RepoProjectPoliciesTests.test_real_project_policies_pass_validate_policy",
+      "module": "test_config",
+      "elapsedSeconds": 0.0007077000009303447
+    },
+    {
+      "id": "test_config.ResolveProjectPolicyTests.test_returns_none_when_project_path_is_none",
+      "module": "test_config",
+      "elapsedSeconds": 0.000698499999998603
+    },
+    {
+      "id": "test_blueprint_patch_executor.BlueprintPatchExecutorTests.test_validation_evidence_is_project_and_revision_bound",
+      "module": "test_blueprint_patch_executor",
+      "elapsedSeconds": 0.0006559000012202887
+    },
+    {
+      "id": "test_python_test_runner.PythonTestRunnerTests.test_memory_domain_includes_memory_and_cross_layer_workflow_tests",
+      "module": "test_python_test_runner",
+      "elapsedSeconds": 0.0006131000009190757
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffDomainMatrixTests.test_data_asset_operation_matrix",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.0006013000001985347
+    },
+    {
+      "id": "test_python_test_runner.PythonTestRunnerTests.test_unknown_mode_is_rejected",
+      "module": "test_python_test_runner",
+      "elapsedSeconds": 0.0005779000002803514
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffDomainMatrixTests.test_blueprint_property_component_and_pin_paths",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.0005713000009563984
+    },
+    {
+      "id": "test_python_test_runner.PythonTestRunnerTests.test_multiple_domains_are_deduplicated",
+      "module": "test_python_test_runner",
+      "elapsedSeconds": 0.0005385000004025642
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffCoreTests.test_t10_low_budget_and_change_limit_are_explicit",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.0005161999997653766
+    },
+    {
+      "id": "test_animation_scale_audit.AnimationScaleAuditTests.test_additive_is_never_suggested_for_direct_scale_repair",
+      "module": "test_animation_scale_audit",
+      "elapsedSeconds": 0.00043510000068636145
+    },
+    {
+      "id": "test_scalar_regression.ScalarRegressionTests.test_scalar_regression_script_covers_dry_run_commit_reload_and_reset",
+      "module": "test_scalar_regression",
+      "elapsedSeconds": 0.00043229999937466346
+    },
+    {
+      "id": "test_blueprint_patch_executor.BlueprintPatchExecutorTests.test_transaction_fixture_declares_two_blueprint_variables",
+      "module": "test_blueprint_patch_executor",
+      "elapsedSeconds": 0.00042980000034731347
+    },
+    {
+      "id": "test_animation_scale_audit.AnimationScaleAuditTests.test_root_lock_candidate_is_classified_from_bounded_diagnosis",
+      "module": "test_animation_scale_audit",
+      "elapsedSeconds": 0.00042469999971217476
+    },
+    {
+      "id": "test_animation_scale_audit.AnimationScaleAuditTests.test_path_prefix_candidates_are_frozen_from_immutable_index",
+      "module": "test_animation_scale_audit",
+      "elapsedSeconds": 0.00040499999886378646
+    },
+    {
+      "id": "test_scalar_regression.ScalarRegressionTests.test_fixture_schema_accepts_scalar_regression_plan",
+      "module": "test_scalar_regression",
+      "elapsedSeconds": 0.00040380000064033084
+    },
+    {
+      "id": "test_portability.PortabilityTests.test_pyproject_python_range",
+      "module": "test_portability",
+      "elapsedSeconds": 0.00040160000025935005
+    },
+    {
+      "id": "test_blueprint_patch_executor.BlueprintPatchExecutorTests.test_multi_operation_transaction_regression_contract",
+      "module": "test_blueprint_patch_executor",
+      "elapsedSeconds": 0.000398000000132015
+    },
+    {
+      "id": "test_w5_benchmark.MetricsTests.test_summarize_attempts_separates_failures",
+      "module": "test_w5_benchmark",
+      "elapsedSeconds": 0.0003741000000445638
+    },
+    {
+      "id": "test_animation_scale_audit.AnimationScaleAuditTests.test_audit_advances_one_bounded_batch_per_get",
+      "module": "test_animation_scale_audit",
+      "elapsedSeconds": 0.00037169999995967373
+    },
+    {
+      "id": "test_scalar_regression.ScalarRegressionTests.test_scalar_fixture_declares_all_supported_types_and_defaults",
+      "module": "test_scalar_regression",
+      "elapsedSeconds": 0.0003696000003401423
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffCoreTests.test_t9_repeated_output_is_deterministic",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.00033960000109800603
+    },
+    {
+      "id": "test_animation_scale_audit.AnimationScaleAuditTests.test_get_filters_details_without_changing_progress_or_summary_counts",
+      "module": "test_animation_scale_audit",
+      "elapsedSeconds": 0.00031879999914963264
+    },
+    {
+      "id": "test_animation_scale_audit.AnimationScaleAuditTests.test_cancelled_task_does_not_touch_editor",
+      "module": "test_animation_scale_audit",
+      "elapsedSeconds": 0.0003181000010954449
+    },
+    {
+      "id": "test_blueprint_patch_executor.BlueprintPatchExecutorTests.test_material_instance_reader_exports_override_metadata",
+      "module": "test_blueprint_patch_executor",
+      "elapsedSeconds": 0.0002998999989358708
+    },
+    {
+      "id": "test_blueprint_patch_executor.BlueprintPatchExecutorTests.test_commandlet_contains_required_safety_gates",
+      "module": "test_blueprint_patch_executor",
+      "elapsedSeconds": 0.00029319999885046855
+    },
+    {
+      "id": "test_animation_scale_audit.AnimationScaleAuditTests.test_invalid_detail_filter_does_not_advance_audit",
+      "module": "test_animation_scale_audit",
+      "elapsedSeconds": 0.0002719000003708061
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffCoreTests.test_asset_filter_preserves_complete_change_set_affected_assets",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.0002674000006663846
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffCoreTests.test_t15_analysis_is_read_only_and_does_not_mutate_inputs",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.00026729999990493525
+    },
+    {
+      "id": "test_release_validation.ReleaseValidationTests.test_release_builder_requires_clean_tree_and_emits_hashed_artifacts",
+      "module": "test_release_validation",
+      "elapsedSeconds": 0.00026049999905808363
+    },
+    {
+      "id": "test_animation_scale_audit.AnimationScaleAuditTests.test_get_sorts_filtered_view_without_reordering_processed_items",
+      "module": "test_animation_scale_audit",
+      "elapsedSeconds": 0.00025970000024244655
+    },
+    {
+      "id": "test_release_validation.ReleaseValidationTests.test_github_workflow_runs_supported_python_matrix",
+      "module": "test_release_validation",
+      "elapsedSeconds": 0.00025290000121458434
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffCoreTests.test_t7_multi_asset_change_set",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.0002445999998599291
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffCoreTests.test_t3_unexpected_actual_change",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.00024059999850578606
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffCoreTests.test_t5_multiple_operations_same_asset",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.00023409999994328246
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffCoreTests.test_revision_mismatch_is_automatically_reported_as_stale",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.0002243999988422729
+    },
+    {
+      "id": "test_reader_architecture.ReaderArchitectureTests.test_registry_remains_dispatch_only",
+      "module": "test_reader_architecture",
+      "elapsedSeconds": 0.00022309999985736795
+    },
+    {
+      "id": "test_retarget_models.ChainSelectionTests.test_high_risk_accessory_chain_is_never_mapped",
+      "module": "test_retarget_models",
+      "elapsedSeconds": 0.00022230000104173087
+    },
+    {
+      "id": "test_animation_scale_audit.AnimationScaleAuditTests.test_editor_session_change_fails_without_processing_more_assets",
+      "module": "test_animation_scale_audit",
+      "elapsedSeconds": 0.00021969999943394214
+    },
+    {
+      "id": "test_blueprint_patch_executor.BlueprintPatchExecutorTests.test_material_reader_exports_static_switch_identity",
+      "module": "test_blueprint_patch_executor",
+      "elapsedSeconds": 0.00021670000023732428
+    },
+    {
+      "id": "test_release_validation.ReleaseValidationTests.test_uat_plugin_builder_uses_the_resolved_autosdk_toolchain",
+      "module": "test_release_validation",
+      "elapsedSeconds": 0.0002119999990100041
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffCoreTests.test_t13_revision_mismatch_and_stale_gap_are_visible",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.00020680000125139486
+    },
+    {
+      "id": "test_blueprint_patch_executor.BlueprintPatchExecutorTests.test_run_patch_validates_before_unreal_execution",
+      "module": "test_blueprint_patch_executor",
+      "elapsedSeconds": 0.00020640000002458692
+    },
+    {
+      "id": "test_release_validation.ReleaseValidationTests.test_pyproject_declares_portable_build_and_dev_dependencies",
+      "module": "test_release_validation",
+      "elapsedSeconds": 0.00020089999998162966
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffWorkflowContractTests.test_t12_explicit_requested_stage_unavailable_is_structured",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.00020030000086990185
+    },
+    {
+      "id": "test_portability.PortabilityTests.test_requirements_have_no_unpinned_packages",
+      "module": "test_portability",
+      "elapsedSeconds": 0.0001953999999386724
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffCoreTests.test_t2_expected_change_missing",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.0001914000004035188
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffCoreTests.test_t8_exact_asset_filter_only_changes_returned_view",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.00019120000069960952
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffCoreTests.test_t6_same_semantic_path_collapses_operation_chain",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.00018869999985327013
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffWorkflowContractTests.test_workflow_stage_probe_is_read_only_and_explicit",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.00018500000078347512
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffCoreTests.test_t1_single_expected_equals_actual",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.00018430000091029797
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffCoreTests.test_t14_source_is_explicit_change_set_without_private_discovery",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.00018260000069858506
+    },
+    {
+      "id": "test_tool_registry.ToolRegistryTests.test_registry_drives_live_methods_annotations_and_descriptors",
+      "module": "test_tool_registry",
+      "elapsedSeconds": 0.00018040000031760428
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffCoreTests.test_unchanged_details_are_not_removed_when_response_is_within_budget",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.00017859999934444204
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffCoreTests.test_t4_expected_no_op_is_not_missing",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.00017049999951268546
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffCoreTests.test_t11_unsupported_operation_is_a_gap",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.00014379999993252568
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffCoreTests.test_request_bounds_reject_invalid_filters_and_limits",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 0.0001412999990861863
+    },
+    {
+      "id": "test_tool_registry.ToolRegistryTests.test_mode_counts_and_public_order_are_stable",
+      "module": "test_tool_registry",
+      "elapsedSeconds": 0.00010110000039276201
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffDomainMatrixTests.test_data_asset_scalar_ref_struct_array_set_and_map_normalization",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 9.42999995459104e-05
+    },
+    {
+      "id": "test_w5_benchmark.MetricsTests.test_summarize_numeric_p95_only_when_10",
+      "module": "test_w5_benchmark",
+      "elapsedSeconds": 8.889999844541308e-05
+    },
+    {
+      "id": "test_retarget_models.ChainSelectionTests.test_digest_stability",
+      "module": "test_retarget_models",
+      "elapsedSeconds": 8.590000106778461e-05
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t37_fairness_fingerprint_ignores_only_volatile_fixture_fields",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 8.460000026389025e-05
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffWorkflowContractTests.test_blueprint_compile_materialized_pin_type_defaults_are_not_unexpected",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 8.450000132143032e-05
+    },
+    {
+      "id": "test_w5_benchmark.MetricsTests.test_paired_ratios",
+      "module": "test_w5_benchmark",
+      "elapsedSeconds": 8.39000003907131e-05
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t8_legacy_hides_exact_high_level_tools_and_leaks",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 7.849999929021578e-05
+    },
+    {
+      "id": "test_w5_benchmark.MetricsTests.test_noise_groups",
+      "module": "test_w5_benchmark",
+      "elapsedSeconds": 6.410000059986487e-05
+    },
+    {
+      "id": "test_retarget_models.ChainSelectionTests.test_ambiguous_chain_is_blocking",
+      "module": "test_retarget_models",
+      "elapsedSeconds": 5.9300000430084765e-05
+    },
+    {
+      "id": "test_change_sets.ChangeSetValidationTests.test_status_derivation_covers_mixed_and_unknown",
+      "module": "test_change_sets",
+      "elapsedSeconds": 5.219999911787454e-05
+    },
+    {
+      "id": "test_change_sets.ChangeSetValidationTests.test_change_set_id_rejects_bad_prefix_length_and_charset",
+      "module": "test_change_sets",
+      "elapsedSeconds": 5.090000013296958e-05
+    },
+    {
+      "id": "test_change_sets.ChangeSetValidationTests.test_commandlet_apply_receipt_roundtrips_as_change_set_member",
+      "module": "test_change_sets",
+      "elapsedSeconds": 5.000000055588316e-05
+    },
+    {
+      "id": "test_w5_benchmark.WorkloadTests.test_cold_commandlet_specs_per_asset",
+      "module": "test_w5_benchmark",
+      "elapsedSeconds": 4.890000127488747e-05
+    },
+    {
+      "id": "test_retarget_models.ChainSelectionTests.test_high_confidence_required_and_optional_are_selected",
+      "module": "test_retarget_models",
+      "elapsedSeconds": 4.799999987881165e-05
+    },
+    {
+      "id": "test_blueprint_patch_executor.BlueprintPatchExecutorTests.test_operation_registry_reports_executor_support",
+      "module": "test_blueprint_patch_executor",
+      "elapsedSeconds": 4.470000021683518e-05
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffWorkflowContractTests.test_blueprint_existing_non_default_pin_change_remains_unexpected",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 4.1200000850949436e-05
+    },
+    {
+      "id": "test_w5_benchmark.MetricsTests.test_stage_contribution",
+      "module": "test_w5_benchmark",
+      "elapsedSeconds": 4.050000097777229e-05
+    },
+    {
+      "id": "test_additive_fix_plan.AdditiveFixPlanTests.test_unresolvable_classifications_have_no_fix",
+      "module": "test_additive_fix_plan",
+      "elapsedSeconds": 3.930000093532726e-05
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t7_full_exposes_r0_r3",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 3.840000135824084e-05
+    },
+    {
+      "id": "test_retarget_models.ChainSelectionTests.test_optional_excluded_when_not_requested",
+      "module": "test_retarget_models",
+      "elapsedSeconds": 3.6100000215810724e-05
+    },
+    {
+      "id": "test_change_sets.ChangeSetValidationTests.test_deserialize_rejects_invalid_member_receipts",
+      "module": "test_change_sets",
+      "elapsedSeconds": 3.459999970800709e-05
+    },
+    {
+      "id": "test_retarget_models.ChainSelectionTests.test_low_confidence_required_is_blocking",
+      "module": "test_retarget_models",
+      "elapsedSeconds": 3.440000000409782e-05
+    },
+    {
+      "id": "test_semantic_diff.SemanticDiffWorkflowContractTests.test_blueprint_unset_pin_materialized_to_non_default_remains_unexpected",
+      "module": "test_semantic_diff",
+      "elapsedSeconds": 3.380000089237001e-05
+    },
+    {
+      "id": "test_retarget_models.ChainSelectionTests.test_medium_confidence_requires_review_warning",
+      "module": "test_retarget_models",
+      "elapsedSeconds": 3.3599999369471334e-05
+    },
+    {
+      "id": "test_change_sets.ChangeSetValidationTests.test_noop_receipt_roundtrips_as_terminal_change_set_member",
+      "module": "test_change_sets",
+      "elapsedSeconds": 3.3399999665562063e-05
+    },
+    {
+      "id": "test_w5_benchmark.WorkloadTests.test_default_workloads_valid_and_respect_w4_bounds",
+      "module": "test_w5_benchmark",
+      "elapsedSeconds": 3.169999945384916e-05
+    },
+    {
+      "id": "test_blueprint_recovery_helpers.BlueprintRecoveryHelperTests.test_component_missing_nested_field_returns_none",
+      "module": "test_blueprint_recovery_helpers",
+      "elapsedSeconds": 3.130000004603062e-05
+    },
+    {
+      "id": "test_change_sets.ChangeSetValidationTests.test_serialize_deserialize_roundtrip",
+      "module": "test_change_sets",
+      "elapsedSeconds": 3.130000004603062e-05
+    },
+    {
+      "id": "test_change_sets.ChangeSetValidationTests.test_superseded_status_is_neutral_and_roundtrips_checkpoint_binding",
+      "module": "test_change_sets",
+      "elapsedSeconds": 3.1000001399661414e-05
+    },
+    {
+      "id": "test_additive_diagnose.AdditiveDiagnoseTests.test_base_pose_ref_frame_invalid",
+      "module": "test_additive_diagnose",
+      "elapsedSeconds": 3.079999987676274e-05
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t9_legacy_retains_low_level_safety_tools",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 3.079999987676274e-05
+    },
+    {
+      "id": "test_character_ground_contact.GroundContactClassifyTests.test_animation_root_z_candidate",
+      "module": "test_character_ground_contact",
+      "elapsedSeconds": 2.990000029967632e-05
+    },
+    {
+      "id": "test_retarget_models.ChainMappingTests.test_maps_chains_present_on_both_sides",
+      "module": "test_retarget_models",
+      "elapsedSeconds": 2.9899998480686918e-05
+    },
+    {
+      "id": "test_skeletal_secondary_motion.SecondaryMotionClassifyTests.test_build_item_includes_classification",
+      "module": "test_skeletal_secondary_motion",
+      "elapsedSeconds": 2.680000034160912e-05
+    },
+    {
+      "id": "test_w5_benchmark.WorkloadTests.test_r20_is_split_into_legal_batches",
+      "module": "test_w5_benchmark",
+      "elapsedSeconds": 2.6599998818710446e-05
+    },
+    {
+      "id": "test_change_sets.ChangeSetValidationTests.test_change_set_id_accepts_generated_form",
+      "module": "test_change_sets",
+      "elapsedSeconds": 2.5800000003073364e-05
+    },
+    {
+      "id": "test_change_sets.ChangeSetValidationTests.test_legacy_record_migrates_to_unknown_operations",
+      "module": "test_change_sets",
+      "elapsedSeconds": 2.5699999241624027e-05
+    },
+    {
+      "id": "test_character_ground_contact.GroundContactClassifyTests.test_build_item_includes_classification",
+      "module": "test_character_ground_contact",
+      "elapsedSeconds": 2.370000038354192e-05
+    },
+    {
+      "id": "test_retarget_workflow.RetargetWorkflowTests.test_predict_output_path_matches_engine_naming_rule",
+      "module": "test_retarget_workflow",
+      "elapsedSeconds": 2.3599999622092582e-05
+    },
+    {
+      "id": "test_w5_benchmark.WorkloadTests.test_over_bounds_raises",
+      "module": "test_w5_benchmark",
+      "elapsedSeconds": 2.1400001060101204e-05
+    },
+    {
+      "id": "test_change_sets.ChangeSetValidationTests.test_task_id_and_title_are_bounded",
+      "module": "test_change_sets",
+      "elapsedSeconds": 2.1000001652282663e-05
+    },
+    {
+      "id": "test_change_sets.ChangeSetValidationTests.test_deserialize_rejects_identity_and_unknown_version",
+      "module": "test_change_sets",
+      "elapsedSeconds": 2.0399998902576044e-05
+    },
+    {
+      "id": "test_agent_reliability_benchmark.AgentReliabilityBenchmarkTests.test_t10_profile_filter_does_not_mutate_production_tools",
+      "module": "test_agent_reliability_benchmark",
+      "elapsedSeconds": 2.0200001017656177e-05
+    },
+    {
+      "id": "test_additive_fix_plan.AdditiveFixPlanTests.test_local_anim_frame_self_reference_is_not_flagged",
+      "module": "test_additive_fix_plan",
+      "elapsedSeconds": 2.0199999198666774e-05
+    },
+    {
+      "id": "test_additive_evaluation.AdditiveEvaluationTests.test_build_item_evaluated_reuses_classification",
+      "module": "test_additive_evaluation",
+      "elapsedSeconds": 2.010000025620684e-05
+    },
+    {
+      "id": "test_change_sets.ChangeSetValidationTests.test_live_receipt_id_rejects_bad_form",
+      "module": "test_change_sets",
+      "elapsedSeconds": 1.950000114447903e-05
+    },
+    {
+      "id": "test_blueprint_recovery_helpers.BlueprintRecoveryHelperTests.test_component_nested_struct_literal_is_extracted",
+      "module": "test_blueprint_recovery_helpers",
+      "elapsedSeconds": 1.9499999325489625e-05
+    },
+    {
+      "id": "test_additive_fix_plan.AdditiveFixPlanTests.test_ref_frame_invalid_self_referential_requires_user_selection",
+      "module": "test_additive_fix_plan",
+      "elapsedSeconds": 1.8599999748403206e-05
+    },
+    {
+      "id": "test_change_sets.ChangeSetValidationTests.test_verified_plus_superseded_derives_verified",
+      "module": "test_change_sets",
+      "elapsedSeconds": 1.7899999875226058e-05
+    },
+    {
+      "id": "test_change_sets.ChangeSetValidationTests.test_deserialize_rejects_missing_fields",
+      "module": "test_change_sets",
+      "elapsedSeconds": 1.7099999240599573e-05
+    },
+    {
+      "id": "test_skeletal_secondary_motion.SecondaryMotionClassifyTests.test_missing_skin_weights",
+      "module": "test_skeletal_secondary_motion",
+      "elapsedSeconds": 1.6699999832781032e-05
+    },
+    {
+      "id": "test_character_ground_contact.GroundContactClassifyTests.test_capsule_size_candidate",
+      "module": "test_character_ground_contact",
+      "elapsedSeconds": 1.6599999071331695e-05
+    },
+    {
+      "id": "test_additive_fix_plan.AdditiveFixPlanTests.test_missing_base_pose_requires_reference_selection",
+      "module": "test_additive_fix_plan",
+      "elapsedSeconds": 1.650000012887176e-05
+    },
+    {
+      "id": "test_blueprint_recovery_helpers.BlueprintRecoveryHelperTests.test_semantic_diff_blueprint_value_parses_component_nested_path",
+      "module": "test_blueprint_recovery_helpers",
+      "elapsedSeconds": 1.6199999663513154e-05
+    },
+    {
+      "id": "test_skeletal_secondary_motion.SecondaryMotionClassifyTests.test_cloth_binding_incomplete",
+      "module": "test_skeletal_secondary_motion",
+      "elapsedSeconds": 1.610000072105322e-05
+    },
+    {
+      "id": "test_additive_diagnose.AdditiveDiagnoseTests.test_build_item_includes_classification_fields",
+      "module": "test_additive_diagnose",
+      "elapsedSeconds": 1.539999902888667e-05
+    },
+    {
+      "id": "test_character_ground_contact.GroundContactClassifyTests.test_foot_ik_needed",
+      "module": "test_character_ground_contact",
+      "elapsedSeconds": 1.5100000382517464e-05
+    },
+    {
+      "id": "test_additive_evaluation.AdditiveEvaluationTests.test_build_item_ref_frame_invalid_is_feasible_but_flagged",
+      "module": "test_additive_evaluation",
+      "elapsedSeconds": 1.489999885961879e-05
+    },
+    {
+      "id": "test_character_ground_contact.GroundContactClassifyTests.test_pelvis_offset_candidate",
+      "module": "test_character_ground_contact",
+      "elapsedSeconds": 1.4799999917158857e-05
+    },
+    {
+      "id": "test_portability.PortabilityTests.test_supported_python_version",
+      "module": "test_portability",
+      "elapsedSeconds": 1.4299999747890979e-05
+    },
+    {
+      "id": "test_blueprint_recovery_helpers.BlueprintRecoveryHelperTests.test_semantic_diff_blueprint_value_keeps_parent_unexpected_only_when_no_nested_expected",
+      "module": "test_blueprint_recovery_helpers",
+      "elapsedSeconds": 1.4100000043981709e-05
+    },
+    {
+      "id": "test_additive_fix_plan.AdditiveFixPlanTests.test_skeleton_mismatch_requires_reference_selection",
+      "module": "test_additive_fix_plan",
+      "elapsedSeconds": 1.3900000340072438e-05
+    },
+    {
+      "id": "test_retarget_models.ChainMappingTests.test_pick_retargeter_name",
+      "module": "test_retarget_models",
+      "elapsedSeconds": 1.3700000636163168e-05
+    },
+    {
+      "id": "test_additive_diagnose.AdditiveDiagnoseTests.test_base_pose_skeleton_mismatch",
+      "module": "test_additive_diagnose",
+      "elapsedSeconds": 1.359999987471383e-05
+    },
+    {
+      "id": "test_retarget_models.ChainMappingTests.test_required_flag_is_carried",
+      "module": "test_retarget_models",
+      "elapsedSeconds": 1.359999987471383e-05
+    },
+    {
+      "id": "test_character_ground_contact.GroundContactClassifyTests.test_no_animation_ref_pose_grounded",
+      "module": "test_character_ground_contact",
+      "elapsedSeconds": 1.3499999113264494e-05
+    },
+    {
+      "id": "test_additive_diagnose.AdditiveDiagnoseTests.test_resolved_sequence_is_valid",
+      "module": "test_additive_diagnose",
+      "elapsedSeconds": 1.2900000001536682e-05
+    },
+    {
+      "id": "test_additive_fix_plan.AdditiveFixPlanTests.test_ref_frame_invalid_non_self_referential_is_frame_only",
+      "module": "test_additive_fix_plan",
+      "elapsedSeconds": 1.2700000297627412e-05
+    },
+    {
+      "id": "test_skeletal_secondary_motion.SecondaryMotionClassifyTests.test_cloth_data_present",
+      "module": "test_skeletal_secondary_motion",
+      "elapsedSeconds": 1.2099999366910197e-05
+    },
+    {
+      "id": "test_additive_evaluation.AdditiveEvaluationTests.test_build_item_skipped_missing_base_pose_is_not_feasible",
+      "module": "test_additive_evaluation",
+      "elapsedSeconds": 1.1800000720540993e-05
+    },
+    {
+      "id": "test_character_ground_contact.GroundContactClassifyTests.test_mesh_offset",
+      "module": "test_character_ground_contact",
+      "elapsedSeconds": 1.179999890155159e-05
+    },
+    {
+      "id": "test_skeletal_secondary_motion.SecondaryMotionClassifyTests.test_cloth_data_missing_fallback",
+      "module": "test_skeletal_secondary_motion",
+      "elapsedSeconds": 1.1599999197642319e-05
+    },
+    {
+      "id": "test_change_sets.ChangeSetValidationTests.test_live_receipt_id_accepts_generated_form",
+      "module": "test_change_sets",
+      "elapsedSeconds": 1.1199999789823778e-05
+    },
+    {
+      "id": "test_retarget_models.ChainMappingTests.test_skips_target_only_chains",
+      "module": "test_retarget_models",
+      "elapsedSeconds": 1.1100000847363845e-05
+    },
+    {
+      "id": "test_skeletal_secondary_motion.SecondaryMotionClassifyTests.test_classifications_are_stable",
+      "module": "test_skeletal_secondary_motion",
+      "elapsedSeconds": 1.0900001143454574e-05
+    },
+    {
+      "id": "test_additive_evaluation.AdditiveEvaluationTests.test_evaluation_feasible_only_when_evaluated",
+      "module": "test_additive_evaluation",
+      "elapsedSeconds": 1.0800000382005237e-05
+    },
+    {
+      "id": "test_additive_fix_plan.AdditiveFixPlanTests.test_fixable_fields_are_stable",
+      "module": "test_additive_fix_plan",
+      "elapsedSeconds": 1.0800000382005237e-05
+    },
+    {
+      "id": "test_additive_diagnose.AdditiveDiagnoseTests.test_scaled_base_pose_ignores_ref_frame",
+      "module": "test_additive_diagnose",
+      "elapsedSeconds": 1.06999996205559e-05
+    },
+    {
+      "id": "test_additive_fix_plan.AdditiveFixPlanTests.test_no_fix_for_non_additive",
+      "module": "test_additive_fix_plan",
+      "elapsedSeconds": 1.06999996205559e-05
+    },
+    {
+      "id": "test_additive_evaluation.AdditiveEvaluationTests.test_build_item_skipped_skeleton_mismatch_is_not_feasible",
+      "module": "test_additive_evaluation",
+      "elapsedSeconds": 1.0600000678095967e-05
+    },
+    {
+      "id": "test_additive_diagnose.AdditiveDiagnoseTests.test_non_additive",
+      "module": "test_additive_diagnose",
+      "elapsedSeconds": 1.049999991664663e-05
+    },
+    {
+      "id": "test_skeletal_secondary_motion.SecondaryMotionClassifyTests.test_no_animation_tracks",
+      "module": "test_skeletal_secondary_motion",
+      "elapsedSeconds": 1.049999991664663e-05
+    },
+    {
+      "id": "test_character_ground_contact.GroundContactClassifyTests.test_missing_capsule_is_insufficient",
+      "module": "test_character_ground_contact",
+      "elapsedSeconds": 1.0300000212737359e-05
+    },
+    {
+      "id": "test_additive_diagnose.AdditiveDiagnoseTests.test_missing_base_pose_sequence",
+      "module": "test_additive_diagnose",
+      "elapsedSeconds": 1.0100000508828089e-05
+    },
+    {
+      "id": "test_additive_evaluation.AdditiveEvaluationTests.test_build_item_skipped_non_additive_is_not_feasible",
+      "module": "test_additive_evaluation",
+      "elapsedSeconds": 1.0100000508828089e-05
+    },
+    {
+      "id": "test_character_ground_contact.GroundContactClassifyTests.test_missing_character_is_insufficient",
+      "module": "test_character_ground_contact",
+      "elapsedSeconds": 1.0100000508828089e-05
+    },
+    {
+      "id": "test_additive_diagnose.AdditiveDiagnoseTests.test_load_failed",
+      "module": "test_additive_diagnose",
+      "elapsedSeconds": 9.800000043469481e-06
+    },
+    {
+      "id": "test_additive_diagnose.AdditiveDiagnoseTests.test_unsupported_composite",
+      "module": "test_additive_diagnose",
+      "elapsedSeconds": 9.800000043469481e-06
+    },
+    {
+      "id": "test_additive_diagnose.AdditiveDiagnoseTests.test_reference_pose_needs_no_sequence",
+      "module": "test_additive_diagnose",
+      "elapsedSeconds": 9.699999282020144e-06
+    },
+    {
+      "id": "test_skeletal_secondary_motion.SecondaryMotionClassifyTests.test_no_physics_bodies",
+      "module": "test_skeletal_secondary_motion",
+      "elapsedSeconds": 9.500001397100277e-06
+    },
+    {
+      "id": "test_skeletal_secondary_motion.SecondaryMotionClassifyTests.test_missing_bones",
+      "module": "test_skeletal_secondary_motion",
+      "elapsedSeconds": 9.499999578110874e-06
+    },
+    {
+      "id": "test_character_ground_contact.GroundContactClassifyTests.test_classifications_are_stable",
+      "module": "test_character_ground_contact",
+      "elapsedSeconds": 9.40000063565094e-06
+    },
+    {
+      "id": "test_additive_fix_plan.AdditiveFixPlanTests.test_no_fix_for_valid_additive",
+      "module": "test_additive_fix_plan",
+      "elapsedSeconds": 8.900000466383062e-06
+    },
+    {
+      "id": "test_additive_diagnose.AdditiveDiagnoseTests.test_classifications_are_stable",
+      "module": "test_additive_diagnose",
+      "elapsedSeconds": 8.799999704933725e-06
+    },
+    {
+      "id": "test_skeletal_secondary_motion.SecondaryMotionClassifyTests.test_no_secondary_motion_node",
+      "module": "test_skeletal_secondary_motion",
+      "elapsedSeconds": 8.700000762473792e-06
+    },
+    {
+      "id": "test_additive_diagnose.AdditiveDiagnoseTests.test_feasible_only_for_valid",
+      "module": "test_additive_diagnose",
+      "elapsedSeconds": 8.300001354655251e-06
+    },
+    {
+      "id": "test_additive_evaluation.AdditiveEvaluationTests.test_statuses_are_stable",
+      "module": "test_additive_evaluation",
+      "elapsedSeconds": 7.2999991971300915e-06
+    }
+  ]
+}

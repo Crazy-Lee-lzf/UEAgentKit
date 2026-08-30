@@ -74,7 +74,7 @@ class ReleaseValidationTests(unittest.TestCase):
         self.assertIn('build-backend = "setuptools.build_meta"', pyproject)
         self.assertIn('dev = [', pyproject)
         self.assertIn('"jsonschema>=4.23,<5"', pyproject)
-        self.assertIn('"ruff>=0.12,<1"', pyproject)
+        self.assertIn('"ruff>=0.12,<0.13"', pyproject)
 
 
 if __name__ == "__main__":

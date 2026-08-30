@@ -61,6 +61,16 @@ syntax / import check
 small deterministic fixture
 ```
 
+Preferred repository entry points after the 2026-08-30 test-tiering maintenance:
+
+```text
+python scripts/RunPythonTests.py fast
+python scripts/RunPythonTests.py domain <name>
+python scripts/RunPythonTests.py full
+```
+
+Use `fast` as the broad G0 sanity gate, an affected `domain` group as the default G1 gate, and `full` only at G2/G3 or when diagnosing cross-domain behavior. Domain names are reported by `RunPythonTests.py --help`; multiple domains may be combined in one invocation.
+
 Do **not** run the full discovered Python suite after every edit.
 Do **not** run full `ValidateRelease.py` after every edit.
 Do **not** start Unreal merely because the final stage will eventually need Unreal evidence.
@@ -91,7 +101,7 @@ Use once when a Detailed Plan reaches its exit gate, or when a significant block
 Default portable gate:
 
 ```text
-1. full discovered Python suite — once
+1. full discovered Python suite — once (`python scripts/RunPythonTests.py full`)
 2. repository Ruff — once
 3. compileall
 4. ValidateRelease version/schema/release checks without duplicating #1/#2
@@ -427,3 +437,9 @@ When the owner selects this cleanup task, begin by measuring rather than guessin
 ```
 
 Do **not** use a smaller raw test count as the success criterion. The target is shorter G0/G1 feedback with unchanged safety coverage and a measured reduction in G2 wall time.
+
+### 13.1 2026-08-30 tiering completion
+
+The first test-suite tiering maintenance pass is complete. The canonical entry points are now `RunPythonTests.py fast`, `RunPythonTests.py domain <name>`, and `RunPythonTests.py full`. Measured closure was 396 tests / 4.643 s for `fast`, 170 tests / 18.562 s for the `memory` domain, and 853 tests / 84.088 s for the final full suite.
+
+This closes the prerequisite tiering task. Do not start a broad second cleanup pass automatically. Further fixture/test rewrites should be selected only when timing data shows that a specific domain is obstructing development.

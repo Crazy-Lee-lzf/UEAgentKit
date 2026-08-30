@@ -73,6 +73,32 @@ The physical directories `E:\WorkSpace\UEAgentKit-Performance` and `E:\WorkSpace
 
 Two previously untracked planning documents were preserved under `docs/Plans/Archive/` before cleanup: the 0.8 Closeout Plan Amendment and Agentic Game R&D Reference Directions.
 
+### 0.2 Test-suite tiering completion update
+
+The previously deferred test-suite structure/tiering maintenance was selected and completed later on 2026-08-30. This update supersedes older wording in this handoff that still describes test-suite cleanup as only deferred/eligible.
+
+Current portable development entry points are:
+
+```text
+python scripts/RunPythonTests.py fast
+python scripts/RunPythonTests.py domain <name>
+python scripts/RunPythonTests.py full
+```
+
+Measured closure evidence:
+
+```text
+baseline full before tiering       845 tests / 84.071 s / PASS
+fast G0                            396 tests / 4.643 s / PASS
+memory G1                          170 tests / 18.562 s / PASS
+index G1                            29 tests / 4.629 s / PASS
+final full after 8 new tests       853 tests / 84.088 s / PASS
+```
+
+Full regression coverage was not reduced. The measured-heavy Knowledge View, Editor Bridge, Agent Workflow, Task Context and related modules remain in `full` and their affected domains; they are only omitted from the broad `fast` gate. The stage also narrowed the development Ruff dependency to `ruff>=0.12,<0.13` after a clean install of Ruff 0.16.5 demonstrated rule-drift against the historical repository while Ruff 0.12.12 passed the repository gate.
+
+Detailed evidence: `docs/Plans/UEAGENTKIT_TEST_SUITE_TIERING_RESULT_20260830.md`. No UE validation was required (U0). Future structural test cleanup is optional/evidence-driven rather than an immediate prerequisite for Track M.
+
 ## 1. Mandatory Read Order for a New Chat / Agent
 
 Read in this order:
@@ -595,7 +621,7 @@ When the user owns the UE Editor, Agents should continue only offline work: Pyth
 
 Do not hold the UE lease throughout a long implementation task; implement offline first and use a bounded acceptance window.
 
-## 11. Test-suite cleanup — recorded maintenance item
+## 11. Test-suite tiering — first maintenance pass complete
 
 A static audit before W+V integration found:
 
@@ -606,23 +632,27 @@ exact duplicate test bodies     0
 structurally similar          20 groups / 47 tests
 ```
 
-Do not optimize toward an arbitrary lower test count.
-
-The intended maintenance task is:
+The owner selected this maintenance item after W+V integration. The first pass is now complete and intentionally optimized **execution tiering rather than raw test count**:
 
 ```text
-per-module / per-test timing profile
-→ classify fast / domain / full / release
-→ identify layer-overlap
-→ table-drive structural duplicates
-→ review smoke_contract string-presence tests
-→ split workflow tests by D1 domain
-→ provide explicit fast/domain/full suite entrypoints
+baseline full before tiering       845 tests / 84.071 s / PASS
+fast G0                            396 tests / 4.643 s / PASS
+memory G1                          170 tests / 18.562 s / PASS
+index G1                            29 tests / 4.629 s / PASS
+final full after 8 new tests       853 tests / 84.088 s / PASS
 ```
 
-Safety coverage for Policy / Revision / recovery / persistence / Trust / tamper detection must not be reduced.
+Canonical entry points:
 
-Now that W+V integration is complete, this maintenance item is eligible to be scheduled, but **do not auto-start it unless the owner selects it as the next task**.
+```text
+python scripts/RunPythonTests.py fast
+python scripts/RunPythonTests.py domain <name>
+python scripts/RunPythonTests.py full
+```
+
+Safety coverage for Policy / Revision / recovery / persistence / Trust / tamper detection was not reduced. The measured-heavy modules remain in `full` and in the relevant domain gates.
+
+Future table-driving, smoke-contract review, fixture-lifecycle optimization, or module splitting is **optional second-pass maintenance**. Do not auto-start another broad cleanup unless timing evidence shows a real development bottleneck.
 
 ## 12. Documentation organization after 2026-08-30 cleanup
 
@@ -786,7 +816,7 @@ Known candidates:
 D2 Tool metadata/count single source
 D3 UE Direct Build CI
 D4 generated API/tool reference
-Test-suite structure/timing cleanup
+Measured test optimization (optional follow-up; first tiering pass complete)
 Git worktree/ref housekeeping
 ```
 
@@ -823,12 +853,12 @@ Performance convenience may never weaken product correctness gates.
 Before making any change:
 
 ```text
-1. cd / use E:\WorkSpace\UEAgentKit-Integration or another known-valid worktree.
+1. use E:\WorkSpace\UEAgentKit-Integration as the normal valid development worktree.
 2. git status --short --branch
 3. git rev-parse HEAD
 4. git show-ref --heads
-5. confirm main/integration/active feature refs are valid.
-6. do NOT use the three unborn legacy worktrees without first fixing their refs.
+5. git worktree list --porcelain
+6. confirm the active branch/ref is valid; compare origin/main only when remote freshness matters.
 7. read this handoff.
 8. read docs/DEVELOPMENT_WORKFLOW.md.
 9. read docs/Plans/README.md.
@@ -836,10 +866,12 @@ Before making any change:
 11. read its current parent specification / archived evidence if needed.
 12. write a concise Detailed Plan with Validation Budget before implementation.
 13. check whether the user currently owns the UE lease.
-14. use G0 focused tests during development; do not begin with full regression.
+14. use RunPythonTests.py fast for broad G0 and the affected domain for G1; do not begin with full regression.
 ```
 
-If a new worktree is needed, first decide whether the existing ref-integrity problem should be cleaned up. Do not proliferate worktrees while branch metadata is unexplained.
+`E:\WorkSpace\UEAgentKit-Performance` and `E:\WorkSpace\UEAgentKit-RealtimeIO` may still exist physically because ignored Output/Build/Backups evidence was deliberately preserved, but they are no longer registered Git worktrees. Do not treat those directories as active development repositories.
+
+If a new worktree is needed, create it from the current valid `main` only after re-checking `git worktree list`; do not reuse an old evidence directory as a worktree path without an explicit cleanup decision.
 
 ## 18. Prohibited implicit actions
 
@@ -855,11 +887,11 @@ publish artifacts
 weaken Writer safety gates
 mutate Reforge for acceptance
 run overlapping UE/UBT workloads against another owner
-repair/delete legacy worktree refs blindly
+delete preserved local Output/Build/Backups evidence without review
 start 100/160-180 GiB/HDD50 scale expansion
 ```
 
-Local commits are allowed only when the current task explicitly authorizes them; the 2026-08-30 sync/archive work is such an authorized repository-maintenance task.
+Local commits are allowed only when the current task explicitly authorizes them. The 2026-08-30 repository sync/archive housekeeping and the selected test-suite tiering maintenance were both explicitly authorized tasks.
 
 ## 19. Historical evidence lookup
 
@@ -897,11 +929,11 @@ E:\WorkSpace\UEAgentKit-Integration\docs\Handoffs\UEAGENTKIT_CURRENT_DEVELOPMENT
 E:\WorkSpace\UEAgentKit-Integration\docs\DEVELOPMENT_WORKFLOW.md
 E:\WorkSpace\UEAgentKit-Integration\docs\Plans\README.md
 
-Before modifying anything, inspect git status, HEAD, show-ref, and worktree state. Three legacy worktrees have missing branch refs and must not be reset/cleaned or blindly repaired.
+Before modifying anything, inspect git status, HEAD, show-ref, and worktree state. Use E:\WorkSpace\UEAgentKit-Integration as the normal valid development worktree. Old Performance/RealtimeIO physical directories may still contain preserved local evidence but are no longer registered worktrees.
 
-Track W and Track V are complete and integrated. R20 is deferred DirectHost fixture-lifecycle debt, not a Writer blocker. Published version remains 0.7.0. Do not push/rebase/tag/release unless explicitly authorized.
+Track W and Track V are complete and integrated. R20 is deferred DirectHost fixture-lifecycle debt, not a Writer blocker. Test-suite tiering is complete: use RunPythonTests.py fast for broad G0, the affected domain for G1, and full only at G2/G3. Published version remains 0.7.0. Do not push/rebase/tag/release unless explicitly authorized.
 
-Use the G0-G3 / U0-U3 validation budget; do not duplicate full-suite validation. Respect the single-machine UE lease.
+Respect the G0-G3 / U0-U3 validation budget and the single-machine UE lease.
 
 Then select the owner-requested next task, read only the relevant archived Plan/Result evidence, write a concise Detailed Plan, and proceed from repository facts rather than stale chat history.
 ```

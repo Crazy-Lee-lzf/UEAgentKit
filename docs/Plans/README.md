@@ -27,6 +27,10 @@ Track W / Writer                      complete
 Track V / Knowledge Web              complete
 W + V integration                    G3 PASS
 portable integration suite           845 / 845 PASS
+test-suite tiering                  COMPLETE / U0 / G2 PASS
+  fast G0                           396 tests / ~4.6 s
+  memory G1                         170 tests / ~18.6 s
+  current full                      853 tests / ~84.1 s
 ```
 
 R20 is not a project-level Writer blocker. The product correctly fails closed on the DirectHost fixture's semantic disk drift.
@@ -83,7 +87,7 @@ Current candidate families are still described by Master/Midterm:
 M  Memory accumulation / retrieval
 C  Source Control / P4 awareness
 X  deeper UE read/write/analysis capabilities
-D  engineering maintenance (tool metadata, CI, API docs, test-suite cleanup, Git worktree cleanup)
+D  engineering maintenance (tool metadata, CI, API docs, measured test optimization, Git housekeeping)
 ```
 
 Before starting one, create/read its current Detailed Plan and include a Validation Budget from `docs/DEVELOPMENT_WORKFLOW.md`.
