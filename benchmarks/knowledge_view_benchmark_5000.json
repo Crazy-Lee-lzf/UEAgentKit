@@ -1,0 +1,70 @@
+{
+  "schema": "knowledge-view-benchmark/1.0",
+  "environment": {
+    "python": "3.12.10",
+    "platform": "Windows-10-10.0.19045-SP0",
+    "machine": "AMD64"
+  },
+  "syntheticData": {
+    "assetDatabase": {
+      "assets": 5221,
+      "references": 10132
+    },
+    "memoryDatabase": {
+      "nodes": 20,
+      "records": 2000
+    },
+    "graphNodeLimit": 5000
+  },
+  "measurements": {
+    "status": {
+      "httpMs": 9.8,
+      "jsonBytes": 724
+    },
+    "graph": {
+      "httpMs": 66.8,
+      "jsonBytes": 1408676,
+      "serverQueryMs": 55.3,
+      "nodeCount": 5000,
+      "edgeCount": 4999,
+      "truncated": {
+        "reason": "nodeLimit",
+        "limit": 5000,
+        "count": 5000
+      }
+    },
+    "impact": {
+      "httpMs": 18.1,
+      "jsonBytes": 27807,
+      "serverQueryMs": 16.1,
+      "totalConsumerAssets": 4913,
+      "truncated": {
+        "reason": "limit",
+        "limit": 200,
+        "count": 200
+      }
+    },
+    "coverage": {
+      "httpMs": 8.8,
+      "jsonBytes": 6482,
+      "serverQueryMs": 7.5
+    },
+    "timeline": {
+      "httpMs": 22.1,
+      "jsonBytes": 70128,
+      "serverQueryMs": 19.7
+    },
+    "stale": {
+      "httpMs": 13.1,
+      "jsonBytes": 5257,
+      "serverQueryMs": 12.0
+    },
+    "client": {
+      "renderMs": 6.5,
+      "frameMs": 1.8216666664928198,
+      "fps": 548.947850006642,
+      "browser": "chrome.exe",
+      "note": "headless chrome --dump-dom under --virtual-time-budget; fps/frameMs are relative (virtual time), renderMs is the layout+first-draw sample"
+    }
+  }
+}

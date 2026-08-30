@@ -9,8 +9,13 @@
 | 层级 | 文档 | 用途 | 状态 |
 |---|---|---|---|
 | 项目总交接 | [`../Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260828.md`](../Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260828.md) | 当前 HEAD、全 Track 状态、安全边界与接手步骤 | **新 Chat / Agent 先读** |
+| 开发执行规范 | [`../DEVELOPMENT_WORKFLOW.md`](../DEVELOPMENT_WORKFLOW.md) | G0-G3 测试分级、U0-U3 UE 验收、UE lease、性能采样与文档粒度 | **任何 Detailed Plan / Blocker Plan 强制前置** |
 | 项目方向 | [`UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md`](UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md) | 项目级优先级、Track 边界、架构取舍 | 当前主计划 |
 | 中期拆解 | [`UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md`](UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md) | 任务依赖、验收契约与跨 Track 关系 | 当前执行规格 |
+| Track V 当前计划 | [`UEAGENTKIT_TRACK_V_READ_ONLY_KNOWLEDGE_WEB_DETAILED_PLAN_20260829.md`](UEAGENTKIT_TRACK_V_READ_ONLY_KNOWLEDGE_WEB_DETAILED_PLAN_20260829.md) | V1 本地只读知识浏览器 → V2 可视化分析面板；独立 worktree、零 UE Editor 占用 | **feature/knowledge-web-view current** |
+| Track V V2 计划 | [`UEAGENTKIT_V2_KNOWLEDGE_VISUALIZATION_DETAILED_PLAN_20260829.md`](UEAGENTKIT_V2_KNOWLEDGE_VISUALIZATION_DETAILED_PLAN_20260829.md) | V2 可视化面板：V2-0 数据/API 契约冻结 → V2-1 图/影响 → V2-2 覆盖/时间线/陈旧 → V2-3 5000 节点性能门禁 | **V2-0 入口检查点** |
+| Track V V2 结果 | [`UEAGENTKIT_V2_KNOWLEDGE_VISUALIZATION_RESULT_20260829.md`](UEAGENTKIT_V2_KNOWLEDGE_VISUALIZATION_RESULT_20260829.md) | V2 可视化面板结果：5 个只读端点 + Canvas 图 + 43 个新测试 + 5000 节点性能基准 | **V2 完成（待授权提交）** |
+| Track V V1 结果 | [`UEAGENTKIT_V1_READ_ONLY_KNOWLEDGE_BROWSER_RESULT_20260829.md`](UEAGENTKIT_V1_READ_ONLY_KNOWLEDGE_BROWSER_RESULT_20260829.md) | V1 本地只读知识浏览器：全部验收 PASS，全量 792 测试 OK，已提交 49b8fa61 | complete |
 | 当前实现 | [`UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_DETAILED_PLAN_20260826.md`](UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_DETAILED_PLAN_20260826.md) | W4-0～W4-7 的具体实现与真实 UE 验收 | complete |
 | 当前子阶段 | [`UEAGENTKIT_W4_1_BOUNDED_BATCH_PLAN_DETAILED_PLAN_20260828.md`](UEAGENTKIT_W4_1_BOUNDED_BATCH_PLAN_DETAILED_PLAN_20260828.md) | W4-1 只读 Bounded Batch Plan 的实现与验收契约 | complete |
 | 当前子阶段结果 | [`UEAGENTKIT_W4_1_BOUNDED_BATCH_PLAN_RESULT_20260828.md`](UEAGENTKIT_W4_1_BOUNDED_BATCH_PLAN_RESULT_20260828.md) | W4-1 真实 fixed-project S1/S2 只读规划证据 | complete |
@@ -135,5 +140,7 @@ UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md
 - 不删除历史 PLAN/RESULT/Handoff，只标注当前入口与状态。
 - 不把测试数量永久硬编码为未来门禁；使用当前分支实际 discovered suite，并在结果文档记录当次值。
 - 新的大阶段优先新增一个 Detailed Plan + 一个最终 Result，不在多个总计划中复制阶段内部状态机。
+- 任何新 Detailed Plan / Blocker Closure Plan 必须先读取 `docs/DEVELOPMENT_WORKFLOW.md`，并包含 Validation Budget（G0/G1/G2 + U-level）。
+- 全量 Python suite 在同一阶段收口 pass 中最多执行一次；若已独立执行 full suite + Ruff，`ValidateRelease.py` 必须使用 `--skip-tests --skip-ruff`，避免重复门禁。
 - `MASTER_DEVELOPMENT_PLAN` 负责方向；具体阶段的 Detailed Plan 负责实现细节，避免双重维护。
 - 发布版本、Tag、Push、Release artifact 始终属于独立授权流程，不由计划文档自动授权。
