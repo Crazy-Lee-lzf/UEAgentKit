@@ -33,6 +33,8 @@ Track V / Knowledge Web              COMPLETE
 W + V integration                    G3 PASS
 Current portable full suite          866 / 866 PASS
 Track M / M1                         COMPLETE / REVIEWED / G2 PASS / U0
+Track M / M2                         READY FOR IMPLEMENTATION / U0
+M2 base                              6d9cf711f368f359fc8f2343e1a065942f8f58f5
 Published-version change             none
 M1 reviewed benchmark gates          PASS
 ```
@@ -138,12 +140,12 @@ Final measured values are `20.177 / 18.631 / 16.178 ms` respectively. The post-A
 Detailed evidence:
 
 ```text
-docs/Plans/UEAGENTKIT_M1_MEMORY_EFFICIENCY_BASELINE_AND_BUDGET_RESULT_20260830.md
+docs/Plans/Archive/UEAGENTKIT_M1_MEMORY_EFFICIENCY_BASELINE_AND_BUDGET_RESULT_20260830.md
 benchmarks/memory/m1_memory_overhead_before_20260830.json
 benchmarks/memory/m1_memory_overhead_after_20260830.json
 ```
 
-The next Track M stage is M2 deterministic L0 automatic capture / Evidence Chain foundation. M2 is not blocked by P4. Its implementation should remain offline/U0 until a narrow real-Writer acceptance is specifically needed at closure.
+The next Track M stage is **M2 deterministic L0 automatic capture / Evidence Chain foundation**. Its authoritative Detailed Plan is `docs/Plans/UEAGENTKIT_M2_DETERMINISTIC_L0_AUTO_CAPTURE_DETAILED_PLAN_20260830.md`. M2 is based on local M1 checkpoint `6d9cf711`, is not blocked by P4, and its required implementation/closure path is U0. Any real-Writer UE spot-check is optional evidence unless the owner explicitly promotes it to a required gate.
 
 ## 1. Mandatory Read Order for a New Chat / Agent
 
@@ -153,10 +155,11 @@ Read in this order:
 1. docs/Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260830.md
 2. docs/DEVELOPMENT_WORKFLOW.md
 3. docs/Plans/README.md
-4. docs/Plans/UEAGENTKIT_M1_MEMORY_EFFICIENCY_BASELINE_AND_BUDGET_DETAILED_PLAN_20260830.md
-5. docs/Plans/UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md
-6. docs/Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md
-7. docs/Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md
+4. docs/Plans/UEAGENTKIT_M2_DETERMINISTIC_L0_AUTO_CAPTURE_DETAILED_PLAN_20260830.md
+5. docs/Plans/Archive/UEAGENTKIT_M1_MEMORY_EFFICIENCY_BASELINE_AND_BUDGET_RESULT_20260830.md
+6. docs/Plans/UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md
+7. docs/Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md
+8. docs/Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md
 ```
 
 Historical completed Plans/Results are now under:
@@ -177,18 +180,18 @@ Do not reconstruct current project state from old Chat history when this handoff
 
 ### 2.1 Current development refs
 
-Repository housekeeping and remote synchronization were completed before M1 planning.
+Repository housekeeping and remote synchronization were completed before M1 planning. M1 is now locally committed and M2 planning is being closed on top of that checkpoint.
 
-At the start of the M1 planning Chat the refs were:
+Remote refs remain at the pre-M1 synchronized checkpoint until an explicit push is authorized:
 
 ```text
 main                           137c3a35e943f2c8e65f13dd8befe95aec3c6612
 origin/main                    137c3a35e943f2c8e65f13dd8befe95aec3c6612
-feature/memory-context         137c3a35e943f2c8e65f13dd8befe95aec3c6612
+feature/memory-context         6d9cf711f368f359fc8f2343e1a065942f8f58f5  (M1 local checkpoint)
 origin/feature/memory-context  137c3a35e943f2c8e65f13dd8befe95aec3c6612
 ```
 
-The active M1 worktree has switched to `feature/memory-context`. The planning documents described in Section 0.3 are intentionally uncommitted, so the next Agent must inspect the live repository state rather than require an exact clean-tree/hash match.
+The active development worktree remains on `feature/memory-context`. M1 product work is committed at `6d9cf711`; the M2 planning checkpoint is local-only and must be confirmed from live Git state. After this handoff closure the intended state is a clean tree with two local commits ahead of `origin/feature/memory-context`.
 
 ### 2.2 Registered worktrees
 
@@ -683,7 +686,7 @@ New rule:
 ```text
 docs/Plans/
   README.md
-  UEAGENTKIT_M1_MEMORY_EFFICIENCY_BASELINE_AND_BUDGET_DETAILED_PLAN_20260830.md
+  UEAGENTKIT_M2_DETERMINISTIC_L0_AUTO_CAPTURE_DETAILED_PLAN_20260830.md
   UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md
   UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md
   UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md
@@ -768,7 +771,7 @@ src/ue_agent_kit/web/index.html
 src/ue_agent_kit/cli.py
 ```
 
-### Memory / active M1 surface
+### Memory / active M2 surface
 
 ```text
 src/ue_agent_kit/memory_context.py
@@ -780,7 +783,7 @@ tests/python/test_mcp_server.py
 tests/python/test_task_context.py
 ```
 
-The M1 Agent should begin with the measurement harness and baseline before changing these product paths.
+The M2 Agent must preserve the M1 RecallBudget/deadline/performance contract while adding deterministic L0 capture. It should follow the M2 Plan's capture-boundary design rather than wiring Memory writes into every low-level journal persist.
 
 ### W5 / scale
 
@@ -800,7 +803,7 @@ The Master/Midterm documents still define the broader direction, but their old p
 
 ```text
 M1 performance/budget foundation       COMPLETE / U0 / G2 PASS
-M2 deterministic L0 capture            NEXT
+M2 deterministic L0 capture            READY FOR IMPLEMENTATION / U0
 M3 L0 -> L1 deterministic distillation deferred
 M4 FTS + optional Vector + RRF          deferred
 M5 L2/L3 injection                     deferred
@@ -862,11 +865,11 @@ Before making any change:
 4. read this handoff.
 5. read docs/DEVELOPMENT_WORKFLOW.md.
 6. read docs/Plans/README.md.
-7. read the current M2 Detailed Plan once it exists; do not invent a competing M2 plan.
+7. read docs/Plans/UEAGENTKIT_M2_DETERMINISTIC_L0_AUTO_CAPTURE_DETAILED_PLAN_20260830.md; do not invent a competing M2 plan.
 8. preserve every M1 RecallBudget/performance gate.
 9. batch-read the implementation files needed for each slice; avoid one-function-at-a-time tool churn.
 10. use focused tests for edits, fast at meaningful G0 checkpoints, domain memory for G1, full once at G2.
-11. do not start UE during normal M2 implementation; use a narrow UE acceptance only if the M2 Plan explicitly requires it.
+11. M2 required closure is U0: do not start UE for the normal implementation or required G2. A real-Writer UE spot-check is optional evidence unless the owner explicitly makes it required.
 12. do not touch P4/Track C as an M2 prerequisite.
 13. do not commit/push/rebase/tag/release unless explicitly authorized for that task.
 ```
@@ -919,9 +922,9 @@ Archive documents preserve their historical stage wording. Current status is det
 
 ## 20. Next local-Agent handoff
 
-M1 is closed. The next local coding Agent should execute **M2** from the repository-prepared M2 Detailed Plan, not reconstruct Track M architecture from chat history.
+M1 is closed and archived. The next local coding Agent should execute **M2** from `docs/Plans/UEAGENTKIT_M2_DETERMINISTIC_L0_AUTO_CAPTURE_DETAILED_PLAN_20260830.md`, based on local checkpoint `6d9cf711`, rather than reconstruct Track M architecture from chat history.
 
-Until that M2 Detailed Plan is present, do not begin implementation. Once present, the Agent should report only:
+The M2 Detailed Plan is present and authoritative. The Agent should report only:
 
 ```text
 verified Git facts
