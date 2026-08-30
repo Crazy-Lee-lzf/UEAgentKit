@@ -31,9 +31,10 @@ Track V / Knowledge Web              COMPLETE
   V2 visualization                   complete
 
 W + V integration                    G3 PASS
-Current portable full suite          845 / 845 PASS
+Current portable full suite          866 / 866 PASS
+Track M / M1                         COMPLETE / REVIEWED / G2 PASS / U0
 Published-version change             none
-Push / Rebase / Tag / Release        none
+M1 reviewed benchmark gates          PASS
 ```
 
 The key project-management interpretation is:
@@ -41,7 +42,7 @@ The key project-management interpretation is:
 - **Track W is no longer blocked by R20.** R20 was deterministically classified as a DirectHost fixture lifecycle defect that mutates test semantics while the resident Editor is alive. UEAgentKit's freshness gate correctly rejects that drift.
 - **Track V is complete and integrated.** Its Web/SQLite surface remains strictly read-only.
 - **W and V have already been combined and portable-regression tested.** Do not rerun the historical W4/W5/V2 heavy matrices merely because a new Chat starts.
-- **The repository still has a separate Git/worktree ref-integrity issue on three legacy worktrees.** Do not mistake their unborn/staged-all appearance for a new repository.
+- **Repository branch/worktree housekeeping is complete.** Do not reconstruct the old missing-ref/unborn worktree problem from historical sections or old Chat context.
 
 ### 0.1 Post-sync repository housekeeping update
 
@@ -99,6 +100,51 @@ Full regression coverage was not reduced. The measured-heavy Knowledge View, Edi
 
 Detailed evidence: `docs/Plans/UEAGENTKIT_TEST_SUITE_TIERING_RESULT_20260830.md`. No UE validation was required (U0). Future structural test cleanup is optional/evidence-driven rather than an immediate prerequisite for Track M.
 
+### 0.3 Track M / M1 completion update
+
+Track M is active and **M1 — Memory Efficiency Baseline and Budget Gate is complete**.
+
+Final reviewed state:
+
+```text
+normal worktree          E:\WorkSpace\UEAgentKit-Integration
+branch                   feature/memory-context
+M1 base                  137c3a35e943f2c8e65f13dd8befe95aec3c6612
+UE level                 U0
+M1 implementation        COMPLETE
+M1 review                COMPLETE
+final Memory G1          183 / 183 PASS / 25.987 s
+final full G2            866 / 866 PASS / 92.518 s
+Ruff / compileall        PASS
+ValidateRelease 0.7.0    PASS
+M1 benchmark gate        PASS
+push                     none
+```
+
+Frozen M1 automatic-recall contract:
+
+```text
+<= 5 recalled items
+<= 2000 recalled content chars
+<= 800 estimated final-envelope tokens
+<= 300 ms real recall deadline
+first Tool Memory incremental p95 < 200 ms
+recall p95 < 300 ms
+task-end append p95 < 100 ms
+```
+
+Final measured values are `20.177 / 18.631 / 16.178 ms` respectively. The post-Agent review also hardened exact final-envelope accounting, SQLite deadline handler cleanup/error semantics, true paired first-Tool measurement, and functional benchmark gates.
+
+Detailed evidence:
+
+```text
+docs/Plans/UEAGENTKIT_M1_MEMORY_EFFICIENCY_BASELINE_AND_BUDGET_RESULT_20260830.md
+benchmarks/memory/m1_memory_overhead_before_20260830.json
+benchmarks/memory/m1_memory_overhead_after_20260830.json
+```
+
+The next Track M stage is M2 deterministic L0 automatic capture / Evidence Chain foundation. M2 is not blocked by P4. Its implementation should remain offline/U0 until a narrow real-Writer acceptance is specifically needed at closure.
+
 ## 1. Mandatory Read Order for a New Chat / Agent
 
 Read in this order:
@@ -107,10 +153,10 @@ Read in this order:
 1. docs/Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260830.md
 2. docs/DEVELOPMENT_WORKFLOW.md
 3. docs/Plans/README.md
-4. docs/Plans/UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md
-5. docs/Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md
-6. docs/Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md
-7. the Detailed Plan / Result for the Track actually selected next
+4. docs/Plans/UEAGENTKIT_M1_MEMORY_EFFICIENCY_BASELINE_AND_BUDGET_DETAILED_PLAN_20260830.md
+5. docs/Plans/UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md
+6. docs/Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md
+7. docs/Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md
 ```
 
 Historical completed Plans/Results are now under:
@@ -129,89 +175,63 @@ Do not reconstruct current project state from old Chat history when this handoff
 
 ## 2. Repository, Branch, and Worktree State
 
-### 2.1 Valid synchronized development refs
+### 2.1 Current development refs
 
-Immediately before the 2026-08-30 documentation/archive cleanup, the following valid refs were synchronized to the same integration baseline:
+Repository housekeeping and remote synchronization were completed before M1 planning.
+
+At the start of the M1 planning Chat the refs were:
 
 ```text
-main                              dae0b1f42a4e8d83b6d1debc0cf430829d41cf90
-integration/w-v-20260830          dae0b1f42a4e8d83b6d1debc0cf430829d41cf90
-feature/live-writer-expansion     dae0b1f42a4e8d83b6d1debc0cf430829d41cf90
-feature/knowledge-web-view        dae0b1f42a4e8d83b6d1debc0cf430829d41cf90
+main                           137c3a35e943f2c8e65f13dd8befe95aec3c6612
+origin/main                    137c3a35e943f2c8e65f13dd8befe95aec3c6612
+feature/memory-context         137c3a35e943f2c8e65f13dd8befe95aec3c6612
+origin/feature/memory-context  137c3a35e943f2c8e65f13dd8befe95aec3c6612
 ```
 
-The documentation/archive cleanup was performed on the integration branch, after which `main` and the valid W/V branches were fast-forwarded again. Therefore **always run `git rev-parse HEAD` / `git show-ref --heads` instead of assuming the pre-cleanup hash above is still final**.
+The active M1 worktree has switched to `feature/memory-context`. The planning documents described in Section 0.3 are intentionally uncommitted, so the next Agent must inspect the live repository state rather than require an exact clean-tree/hash match.
 
-Validated integration worktree:
+### 2.2 Registered worktrees
+
+Current registered Git worktrees are intentionally minimal:
 
 ```text
 E:\WorkSpace\UEAgentKit-Integration
-branch: integration/w-v-20260830
-```
+  active development worktree
+  branch: feature/memory-context
 
-Writer worktree:
-
-```text
-E:\WorkSpace\UEAgentKit-LiveWriter
-branch: feature/live-writer-expansion
-```
-
-Knowledge Web worktree:
-
-```text
-E:\WorkSpace\UEAgentKit-KnowledgeWeb
-branch: feature/knowledge-web-view
-```
-
-### 2.2 Legacy worktrees with missing branch refs — do not use blindly
-
-Final `git fsck --full --no-dangling` after W+V integration reported no missing/corrupt objects, but three registered worktrees point at branch refs that are currently absent:
-
-```text
 E:\WorkSpace\UEAgentKit
-  symbolic HEAD -> refs/heads/feature/agent-reliability
-  branch ref     missing
-
-E:\WorkSpace\UEAgentKit-Performance
-  symbolic HEAD -> refs/heads/feature/performance-benchmarks
-  branch ref     missing
-
-E:\WorkSpace\UEAgentKit-RealtimeIO
-  symbolic HEAD -> refs/heads/feature/live-editor-realtime-io
-  branch ref     missing
+  repository backing worktree
+  detached at the synchronized checkpoint
+  retains historical untracked CONOUT$
 ```
 
-Git therefore reports these worktrees as unborn and may show all repository files as staged additions.
+The old Writer, Knowledge Web, PlanReview, Performance, and RealtimeIO Git worktrees are no longer registered.
 
-**Do not:**
+Physical directories `E:\WorkSpace\UEAgentKit-Performance` and `E:\WorkSpace\UEAgentKit-RealtimeIO` may still exist because ignored `Output` / `Build` / `Backups` evidence was deliberately preserved. They are **not active repositories/worktrees** and must not be reused for development without an explicit cleanup decision.
+
+### 2.3 Current remote refs
+
+The intentionally retained remote branches are:
 
 ```text
-git reset --hard
- git clean
-blindly create replacement root commits
-blindly recreate missing refs
-run aggressive git gc
+origin/main
+origin/feature/memory-context
+origin/archive/performance-benchmarks-legacy-20260830
 ```
 
-Treat this as a **worktree/ref metadata problem**, not product-source loss. Before repairing/removing any of those worktrees, inspect raw worktree HEAD files, reflogs, commit objects, and intended historical branch tip. Repair requires an explicit housekeeping decision; it is not part of feature implementation.
-
-### 2.3 Remote state
-
-At the W+V main fast-forward checkpoint, local `main` was ahead of `origin/main` by more than one hundred local development commits. No push was performed.
-
-Do not infer that local development is published merely because it is now on local `main`.
+The Performance archive preserves four historical commits not reachable from `main`; it is evidence/archive history, not an active development base.
 
 ## 3. Important Machine / Project Paths
 
 ```text
-UEAgentKit integration      E:\WorkSpace\UEAgentKit-Integration
-Writer worktree             E:\WorkSpace\UEAgentKit-LiveWriter
-Knowledge Web worktree      E:\WorkSpace\UEAgentKit-KnowledgeWeb
+UEAgentKit development      E:\WorkSpace\UEAgentKit-Integration
+Repository backing tree     E:\WorkSpace\UEAgentKit
 UE5.6 engine                E:\EPICGAME\UE_5.6
-DirectHost project          E:\WorkSpace\UEAgentKit-LiveWriter\Build\DirectHost\HostProject.uproject
 Performance project         E:\WorkSpace\UEAgentKitPerfProject
 Reforge                     E:\WorkSpace\Reforge\Reforge.uproject
 DarkRuins seed              F:\UELecture\DarkRuinsMegascansSample
+Preserved evidence dirs     E:\WorkSpace\UEAgentKit-Performance
+                            E:\WorkSpace\UEAgentKit-RealtimeIO
 ```
 
 Reforge is a real user project and was **strictly read-only** during W5. Do not turn it into a write fixture.
@@ -663,6 +683,7 @@ New rule:
 ```text
 docs/Plans/
   README.md
+  UEAGENTKIT_M1_MEMORY_EFFICIENCY_BASELINE_AND_BUDGET_DETAILED_PLAN_20260830.md
   UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md
   UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md
   UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md
@@ -747,6 +768,20 @@ src/ue_agent_kit/web/index.html
 src/ue_agent_kit/cli.py
 ```
 
+### Memory / active M1 surface
+
+```text
+src/ue_agent_kit/memory_context.py
+src/ue_agent_kit/memory_service.py
+src/ue_agent_kit/mcp_memory_tools.py
+src/ue_agent_kit/task_context.py
+tests/python/test_memory_context.py
+tests/python/test_mcp_server.py
+tests/python/test_task_context.py
+```
+
+The M1 Agent should begin with the measurement harness and baseline before changing these product paths.
+
 ### W5 / scale
 
 ```text
@@ -755,72 +790,40 @@ scripts/RunW5Acceptance.ps1
 Plugin/UEAgentKit/Source/UEAgentKitEditor/Private/PerformanceFixtureCommandlet.cpp
 ```
 
-## 15. Remaining project tracks / candidate next work
+## 15. Active Track and deferred project tracks
 
-No new functional Track is automatically selected by this handoff.
+**Track M is active. M1 is complete; M2 is next.**
 
-The Master/Midterm documents still define the broader direction, but their old status wording is historical where it conflicts with this handoff.
+The Master/Midterm documents still define the broader direction, but their old progress wording is historical where it conflicts with this handoff or the latest Track M Result/Plan.
 
-### Track M — automatic Memory accumulation
-
-High-level progression:
+### Track M — automatic Memory accumulation (ACTIVE)
 
 ```text
-M1 performance/budget foundation
-M2 L0 capture
-M3 L0 -> L1 deterministic distillation
-M4 FTS + optional Vector + RRF
-M5 L2/L3 injection
-M6 optional symbolic compression
+M1 performance/budget foundation       COMPLETE / U0 / G2 PASS
+M2 deterministic L0 capture            NEXT
+M3 L0 -> L1 deterministic distillation deferred
+M4 FTS + optional Vector + RRF          deferred
+M5 L2/L3 injection                     deferred
+M6 optional symbolic compression       deferred / data-driven
 ```
 
-Most early M work is Python/SQLite and can be U0. M2 full Writer capture acceptance may need narrow UE evidence later.
+M1 gates are now persistent regression requirements for M2-M5.
 
-Important schema direction already frozen in prior planning:
+The W4 durable evidence identity chain is frozen for M2: Change Set, batch plan/execution, per-operation stable identities, checkpoint/checkpoint-set revisions, aggregate Strong Verify, Semantic Diff, Trust, and optional recovery boundaries. M2 must point at existing durable artifacts rather than duplicate their full payloads.
 
-```text
-v3 -> v4  M2 L0 events
-v4 -> v5  M4 embedding/vector metadata
-```
+P4 / Track C is **not** a prerequisite for Track M. Later P4 observations may become an additional L0 source, but M2 must not wait for or implement Track C.
 
 ### Track C — Source Control / P4 awareness
 
-Initial direction remains conservative:
-
-```text
-read-only provider observation first
-pre-write conflict checks
-no automatic checkout
-no automatic submit
-```
-
-C1 should capability-probe actual UE5.6 provider fields rather than assume every Perforce field is universally available.
+Deferred while M2 is active unless the owner explicitly changes priority. Conservative direction remains read-only provider observation first, then pre-write conflict checks; no automatic checkout/submit.
 
 ### Track X — deeper UE capabilities
 
-Independent branches after W/D1:
-
-```text
-X1 Widget Blueprint Reader -> X2 AnimBP State Machine -> X3 Graph Writer (demand gated)
-X4 Level Actor Reader -> X6 Asset Performance Analysis
-X5 C++ Reflection Symbol Index
-```
-
-X5 is largely static/U0. X3 is high-risk and should remain demand-gated.
+Deferred while M2 is active.
 
 ### Track D — maintenance / engineering quality
 
-Known candidates:
-
-```text
-D2 Tool metadata/count single source
-D3 UE Direct Build CI
-D4 generated API/tool reference
-Measured test optimization (optional follow-up; first tiering pass complete)
-Git worktree/ref housekeeping
-```
-
-A good next Chat should choose one main task rather than opening all tracks simultaneously.
+Deferred unless a concrete maintenance blocker prevents M2. Test-tiering and Git housekeeping prerequisites are already complete.
 
 ## 16. Performance / fixture boundary
 
@@ -848,30 +851,27 @@ avoid unnecessary cold-reset rebuilds
 
 Performance convenience may never weaken product correctness gates.
 
-## 17. Exact takeover procedure for the next Chat
+## 17. Exact takeover procedure for the next Track M execution Agent
 
 Before making any change:
 
 ```text
-1. use E:\WorkSpace\UEAgentKit-Integration as the normal valid development worktree.
-2. git status --short --branch
-3. git rev-parse HEAD
-4. git show-ref --heads
-5. git worktree list --porcelain
-6. confirm the active branch/ref is valid; compare origin/main only when remote freshness matters.
-7. read this handoff.
-8. read docs/DEVELOPMENT_WORKFLOW.md.
-9. read docs/Plans/README.md.
-10. select exactly one next Track/maintenance task.
-11. read its current parent specification / archived evidence if needed.
-12. write a concise Detailed Plan with Validation Budget before implementation.
-13. check whether the user currently owns the UE lease.
-14. use RunPythonTests.py fast for broad G0 and the affected domain for G1; do not begin with full regression.
+1. use E:\WorkSpace\UEAgentKit-Integration.
+2. inspect git status --short --branch, HEAD, upstream and worktrees.
+3. confirm branch feature/memory-context and preserve any documented planning changes.
+4. read this handoff.
+5. read docs/DEVELOPMENT_WORKFLOW.md.
+6. read docs/Plans/README.md.
+7. read the current M2 Detailed Plan once it exists; do not invent a competing M2 plan.
+8. preserve every M1 RecallBudget/performance gate.
+9. batch-read the implementation files needed for each slice; avoid one-function-at-a-time tool churn.
+10. use focused tests for edits, fast at meaningful G0 checkpoints, domain memory for G1, full once at G2.
+11. do not start UE during normal M2 implementation; use a narrow UE acceptance only if the M2 Plan explicitly requires it.
+12. do not touch P4/Track C as an M2 prerequisite.
+13. do not commit/push/rebase/tag/release unless explicitly authorized for that task.
 ```
 
-`E:\WorkSpace\UEAgentKit-Performance` and `E:\WorkSpace\UEAgentKit-RealtimeIO` may still exist physically because ignored Output/Build/Backups evidence was deliberately preserved, but they are no longer registered Git worktrees. Do not treat those directories as active development repositories.
-
-If a new worktree is needed, create it from the current valid `main` only after re-checking `git worktree list`; do not reuse an old evidence directory as a worktree path without an explicit cleanup decision.
+`E:\WorkSpace\UEAgentKit-Performance` and `E:\WorkSpace\UEAgentKit-RealtimeIO` may still contain preserved ignored evidence but are not registered worktrees. Do not use or clean them.
 
 ## 18. Prohibited implicit actions
 
@@ -917,23 +917,17 @@ AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md
 
 Archive documents preserve their historical stage wording. Current status is determined by this handoff, the current Plans README, and current Git facts.
 
-## 20. New-chat startup prompt
+## 20. Next local-Agent handoff
 
-A concise startup prompt for the next Chat / coding Agent:
+M1 is closed. The next local coding Agent should execute **M2** from the repository-prepared M2 Detailed Plan, not reconstruct Track M architecture from chat history.
+
+Until that M2 Detailed Plan is present, do not begin implementation. Once present, the Agent should report only:
 
 ```text
-Work on UEAgentKit from the current synchronized local development state.
-
-First read:
-E:\WorkSpace\UEAgentKit-Integration\docs\Handoffs\UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260830.md
-E:\WorkSpace\UEAgentKit-Integration\docs\DEVELOPMENT_WORKFLOW.md
-E:\WorkSpace\UEAgentKit-Integration\docs\Plans\README.md
-
-Before modifying anything, inspect git status, HEAD, show-ref, and worktree state. Use E:\WorkSpace\UEAgentKit-Integration as the normal valid development worktree. Old Performance/RealtimeIO physical directories may still contain preserved local evidence but are no longer registered worktrees.
-
-Track W and Track V are complete and integrated. R20 is deferred DirectHost fixture-lifecycle debt, not a Writer blocker. Test-suite tiering is complete: use RunPythonTests.py fast for broad G0, the affected domain for G1, and full only at G2/G3. Published version remains 0.7.0. Do not push/rebase/tag/release unless explicitly authorized.
-
-Respect the G0-G3 / U0-U3 validation budget and the single-machine UE lease.
-
-Then select the owner-requested next task, read only the relevant archived Plan/Result evidence, write a concise Detailed Plan, and proceed from repository facts rather than stale chat history.
+verified Git facts
+plan/repository conflicts if any
+M2 execution slices
+measured elapsed time / validation time at completion
 ```
+
+Routine implementation/debugging should proceed autonomously inside the frozen Plan boundaries; stop for owner input only for an actual architecture/safety/scope conflict.

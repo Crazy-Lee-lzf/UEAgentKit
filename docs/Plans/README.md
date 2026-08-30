@@ -2,92 +2,82 @@
 
 > Updated: 2026-08-30
 >
-> This directory now keeps only **current project-level planning/navigation documents** at the root. Completed phase Plans/Results are preserved under `Archive/`.
+> Root keeps current project-level navigation and the stage currently being prepared/executed. Completed phase material is preserved under `Archive/` during the next planning transition.
 
 ## Read first
 
 | Order | Document | Purpose |
 |---:|---|---|
-| 1 | [`../Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260830.md`](../Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260830.md) | Canonical current repository/Track/worktree takeover state |
-| 2 | [`../DEVELOPMENT_WORKFLOW.md`](../DEVELOPMENT_WORKFLOW.md) | Mandatory G0-G3 test gates, U0-U3 UE validation, UE lease, documentation/commit rules |
-| 3 | [`UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md`](UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md) | Writer + Knowledge Web combined G3 evidence and R20 interpretation |
-| 4 | [`UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md`](UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md) | Project direction / Track architecture; status wording may be historical |
-| 5 | [`UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md`](UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md) | Cross-Track dependencies and acceptance contracts; current handoff overrides stale progress wording |
+| 1 | [`../Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260830.md`](../Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260830.md) | Canonical repository/Track/worktree takeover state |
+| 2 | [`../DEVELOPMENT_WORKFLOW.md`](../DEVELOPMENT_WORKFLOW.md) | Mandatory G0-G3 gates, U0-U3 UE validation, UE lease, Git/documentation rules |
+| 3 | [`UEAGENTKIT_M1_MEMORY_EFFICIENCY_BASELINE_AND_BUDGET_RESULT_20260830.md`](UEAGENTKIT_M1_MEMORY_EFFICIENCY_BASELINE_AND_BUDGET_RESULT_20260830.md) | Latest completed Track M evidence; M1 reviewed and closed |
+| 4 | [`UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md`](UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md) | Project direction / Track architecture; progress wording may be historical |
+| 5 | [`UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md`](UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md) | Cross-Track dependencies and acceptance contracts |
+| 6 | [`UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md`](UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md) | Writer + Knowledge Web integration evidence |
 
 ## Current project state
 
 ```text
 published product                     0.7.0 / UE5.6
 Track W / Writer                      complete
-  W0-W4                              complete
-  D1                                 complete
-  W5 authorized scope                complete
-  W5-S 50 GiB                        PASS
-  R20                                deferred DirectHost fixture-lifecycle debt
 Track V / Knowledge Web              complete
 W + V integration                    G3 PASS
-portable integration suite           845 / 845 PASS
-test-suite tiering                  COMPLETE / U0 / G2 PASS
-  fast G0                           396 tests / ~4.6 s
-  memory G1                         170 tests / ~18.6 s
-  current full                      853 tests / ~84.1 s
+R20                                  deferred DirectHost fixture-lifecycle debt
+
+test-suite tiering                   COMPLETE / U0 / G2 PASS
+Track M                              ACTIVE
+  M1 Memory efficiency/budget        COMPLETE / U0 / REVIEWED / G2 PASS
+  current portable full              866 / 866 PASS / 92.518 s
+  current memory G1                  183 / 183 PASS / 25.987 s
+  M2 deterministic L0 capture        NEXT / plan being prepared
 ```
 
-R20 is not a project-level Writer blocker. The product correctly fails closed on the DirectHost fixture's semantic disk drift.
-
-No 100 GiB / 160–180 GiB / SimulatedHDD50 expansion is currently authorized or claimed.
-
-## What belongs in this root
-
-Keep only documents that are needed to decide or execute the **current** development line:
+M1 final gates:
 
 ```text
-README.md
-current project-level plan/spec
-latest cross-Track integration result
+automatic recall              <= 5 items / <= 2000 chars / <= 800 estimated tokens
+real recall deadline          <= 300 ms
+first Tool Memory delta p95    20.177 ms  (<200 ms)
+direct recall p95              18.631 ms  (<300 ms)
+task-end append p95            16.178 ms  (<100 ms)
 ```
 
-A normal new stage should add at most:
+## Current branch
+
+```text
+worktree   E:\WorkSpace\UEAgentKit-Integration
+branch     feature/memory-context
+M1 base    137c3a3
+```
+
+Use actual Git facts rather than assuming the base hash remains current after local checkpoints.
+
+## Documentation rule
+
+Normal stage footprint:
 
 ```text
 ONE Detailed Plan
 ONE Result
 ```
 
-After the stage is integrated/closed, move its Plan/Result to `Archive/` during a later documentation-maintenance pass.
+Create a blocker-closure document only for a genuine technical blocker with a different investigation/exit gate. Do not recreate W4-style micro-document density for ordinary Track M work.
 
-Create a separate blocker-closure Plan only for a real blocker with a different investigation/exit gate.
-
-## Historical plans and results
-
-All completed/historical phase documents are preserved at:
-
-[`Archive/`](Archive/)
-
-This includes Agent Reliability R0-R4, 0.8 capability closeout, Writer W0-W5, D1, Track V V1/V2, animation follow-up plans, correction notes, and the executed W+V integration checklist.
-
-Archive documents are historical evidence. When their status wording conflicts with current state, precedence is:
+Completed/historical phase documents are preserved in [`Archive/`](Archive/). Precedence is:
 
 ```text
 actual Git/repository facts
-→ current 2026-08-30 handoff
+→ current handoff
 → DEVELOPMENT_WORKFLOW.md
 → current Plans README
-→ latest Result for the relevant capability
-→ historical Plan/Handoff wording
+→ current Detailed Plan / latest Result
+→ historical documents
 ```
 
 ## Next work
 
-No next functional Track is automatically selected by this index.
+M1 is closed. Prepare and execute **M2 — deterministic L0 automatic capture / Evidence Chain foundation** on the same `feature/memory-context` line.
 
-Current candidate families are still described by Master/Midterm:
+M2 does not depend on P4. Its implementation is primarily Python/SQLite and should remain U0 until a final narrow Writer integration acceptance is specifically required. M1 performance/budget gates remain mandatory regression gates throughout M2.
 
-```text
-M  Memory accumulation / retrieval
-C  Source Control / P4 awareness
-X  deeper UE read/write/analysis capabilities
-D  engineering maintenance (tool metadata, CI, API docs, measured test optimization, Git housekeeping)
-```
-
-Before starting one, create/read its current Detailed Plan and include a Validation Budget from `docs/DEVELOPMENT_WORKFLOW.md`.
+Do not begin M3-M6 while M2 is active.

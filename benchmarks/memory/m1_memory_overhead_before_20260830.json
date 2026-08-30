@@ -1,0 +1,182 @@
+{
+  "environment": {
+    "hostnameHash": "",
+    "implementation": "CPython",
+    "machine": "AMD64",
+    "platform": "Windows-10-10.0.19045-SP0",
+    "python": "3.12.10"
+  },
+  "fixture": {
+    "indexAssets": 2,
+    "note": "No absolute user paths are recorded. Timestamps are generatedAtUtc only.",
+    "populatedNodes": 13,
+    "populatedRecords": 30,
+    "populatedWorkItems": 20,
+    "projectKey": "benchmark-project",
+    "recallQuery": "memory benchmark subject"
+  },
+  "generatedAtUtc": "2026-08-30T12:40:58Z",
+  "measurements": {
+    "derived": {
+      "first_tool_memory_incremental_p95Ms": 13.613,
+      "first_tool_memory_incremental_samples": {
+        "maxMs": 15.219,
+        "meanMs": 12.257,
+        "medianMs": 12.091,
+        "minMs": 10.746,
+        "n": 20,
+        "p95Ms": 13.613,
+        "stddevMs": 0.997
+      }
+    },
+    "gates": {
+      "direct_recall_p95_lt_300ms": {
+        "actualMs": 12.079,
+        "limitMs": 300.0,
+        "pass": true
+      },
+      "first_tool_memory_incremental_p95_lt_200ms": {
+        "actualMs": 13.613,
+        "limitMs": 200.0,
+        "pass": true
+      },
+      "task_end_append_p95_lt_100ms": {
+        "actualMs": 13.065,
+        "limitMs": 100.0,
+        "pass": true
+      }
+    },
+    "scenarios": {
+      "B0_memory_disabled_first_tool": {
+        "contentChars": {
+          "max": 0,
+          "median": 0,
+          "min": 0,
+          "n": 20
+        },
+        "description": "Memory-disabled first Task Context call on a fresh service instance.",
+        "elapsedMs": {
+          "maxMs": 21.512,
+          "meanMs": 20.263,
+          "medianMs": 20.347,
+          "minMs": 19.003,
+          "n": 20,
+          "p95Ms": 21.486,
+          "stddevMs": 0.717
+        },
+        "recalledItemCount": {
+          "max": 0,
+          "median": 0,
+          "min": 0,
+          "n": 20
+        }
+      },
+      "B1_memory_enabled_empty": {
+        "contentChars": {
+          "max": 0,
+          "median": 0,
+          "min": 0,
+          "n": 20
+        },
+        "description": "Memory-enabled first Task Context call with an empty/no-hit Memory DB.",
+        "elapsedMs": {
+          "maxMs": 35.647,
+          "meanMs": 32.52,
+          "medianMs": 32.524,
+          "minMs": 30.205,
+          "n": 20,
+          "p95Ms": 35.045,
+          "stddevMs": 1.298
+        },
+        "recalledItemCount": {
+          "max": 1,
+          "median": 1,
+          "min": 1,
+          "n": 20
+        }
+      },
+      "B2_memory_enabled_populated": {
+        "contentChars": {
+          "max": 4702,
+          "median": 4702,
+          "min": 4702,
+          "n": 20
+        },
+        "description": "Memory-enabled first Task Context call with a populated fixture.",
+        "elapsedMs": {
+          "maxMs": 98.711,
+          "meanMs": 42.977,
+          "medianMs": 39.803,
+          "minMs": 38.389,
+          "n": 20,
+          "p95Ms": 46.954,
+          "stddevMs": 13.185
+        },
+        "recalledItemCount": {
+          "max": 9,
+          "median": 9,
+          "min": 9,
+          "n": 20
+        }
+      },
+      "B3_direct_automatic_recall": {
+        "contentChars": {
+          "max": 7156,
+          "median": 7156,
+          "min": 7156,
+          "n": 20
+        },
+        "description": "Direct ProjectMemoryService.get_context on the populated fixture.",
+        "elapsedMs": {
+          "maxMs": 13.273,
+          "meanMs": 11.618,
+          "medianMs": 11.568,
+          "minMs": 10.942,
+          "n": 20,
+          "p95Ms": 12.079,
+          "stddevMs": 0.5
+        },
+        "estimatedTokens": {
+          "max": 1968,
+          "median": 1968,
+          "min": 1968,
+          "n": 20
+        },
+        "recalledItemCount": {
+          "max": 14,
+          "median": 14,
+          "min": 14,
+          "n": 20
+        },
+        "truncated": {
+          "falseCount": 0,
+          "n": 20,
+          "trueCount": 20
+        },
+        "truncationReasons": [
+          "truncated"
+        ]
+      },
+      "B4_task_end_append": {
+        "description": "Deterministic record_task_outcome append with fixed evidence references.",
+        "elapsedMs": {
+          "maxMs": 13.193,
+          "meanMs": 12.305,
+          "medianMs": 12.33,
+          "minMs": 11.321,
+          "n": 20,
+          "p95Ms": 13.065,
+          "stddevMs": 0.548
+        }
+      }
+    }
+  },
+  "mode": "baseline",
+  "samples": 20,
+  "schema": "ueagentkit-memory-overhead/1.0",
+  "summary": {
+    "directRecallP95Ms": 12.079,
+    "firstToolMemoryIncrementalP95Ms": 13.613,
+    "taskEndAppendP95Ms": 13.065
+  }
+}

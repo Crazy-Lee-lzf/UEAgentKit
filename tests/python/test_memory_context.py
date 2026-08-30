@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -13,7 +15,15 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from ue_agent_kit.active_work import WorkItemDraft  # noqa: E402
-from ue_agent_kit.memory_context import ContextBudget, estimate_tokens  # noqa: E402
+from ue_agent_kit.memory_context import (  # noqa: E402
+    RECALL_MAX_CONTENT_CHARS,
+    RECALL_MAX_ESTIMATED_TOKENS,
+    RECALL_MAX_ITEMS,
+    ContextBudget,
+    RecallBudget,
+    build_memory_context,
+    estimate_tokens,
+)
 from ue_agent_kit.memory_service import ProjectMemoryService  # noqa: E402
 from ue_agent_kit.memory_tree import KnowledgeNodeDraft  # noqa: E402
 from ue_agent_kit.project_memory import (  # noqa: E402
@@ -241,6 +251,159 @@ class MemoryContextTests(unittest.TestCase):
             context["usage"]["estimatedTokens"],
             estimate_tokens(len(serialized)),
         )
+
+    def test_automatic_recall_is_hard_capped_at_5_items_2000_chars_and_800_tokens(self) -> None:
+        for index in range(12):
+            self.add_record(
+                title=f"Recall rule {index}",
+                body=("Detailed combat implementation and validation evidence. " * 8) + str(index),
+                source_kind=MemorySourceKind.USER_CONFIRMED,
+            )
+        self.service.create_work(
+            WorkItemDraft(
+                project_key=PROJECT,
+                title="Verify damage",
+                description="Verify combat damage after the latest asset change.",
+                next_action="Run automation tests.",
+                node_ids=(self.combat.node_id,),
+                asset_paths=(ASSET,),
+            )
+        )
+        context = self.service.get_context(
+            query="Damage",
+            node_path=self.combat.path,
+            asset_paths=(ASSET,),
+            detail_level=2,
+        )
+        item_count = len(context["nodes"]) + len(context["activeWork"]) + len(context["records"])
+        self.assertLessEqual(item_count, RECALL_MAX_ITEMS)
+        self.assertLessEqual(context["contentChars"], RECALL_MAX_CONTENT_CHARS)
+        self.assertLessEqual(context["estimatedTokens"], RECALL_MAX_ESTIMATED_TOKENS)
+        self.assertTrue(context["truncated"])
+        self.assertTrue(context["truncationReasons"])
+        self.assertEqual(context["recalledItemCount"], item_count)
+        serialized = json.dumps(context, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        self.assertEqual(context["usage"]["usedChars"], len(serialized))
+        self.assertEqual(context["usage"]["estimatedTokens"], estimate_tokens(len(serialized)))
+        self.assertEqual(context["estimatedTokens"], context["usage"]["estimatedTokens"])
+
+    def test_large_requested_recall_bounds_are_clamped_not_rejected(self) -> None:
+        context = self.service.get_context(
+            query="Damage",
+            node_path=self.combat.path,
+            detail_level=2,
+            recall_budget=RecallBudget(
+                max_items=999,
+                max_content_chars=999_999,
+                max_estimated_tokens=999_999,
+                deadline_ms=999_999,
+            ),
+        )
+        effective = context["recallBudget"]["effective"]
+        self.assertEqual(effective["maxItems"], RECALL_MAX_ITEMS)
+        self.assertEqual(effective["maxContentChars"], RECALL_MAX_CONTENT_CHARS)
+        self.assertEqual(effective["maxEstimatedTokens"], RECALL_MAX_ESTIMATED_TOKENS)
+        self.assertEqual(effective["deadlineMs"], 300)
+        requested = context["recallBudget"]["requested"]
+        self.assertEqual(requested["maxItems"], 999)
+        self.assertEqual(requested["maxContentChars"], 999_999)
+        self.assertEqual(requested["maxEstimatedTokens"], 999_999)
+        self.assertEqual(requested["deadlineMs"], 999_999)
+
+    def test_smaller_caller_recall_bounds_remain_respected(self) -> None:
+        for index in range(8):
+            self.add_record(
+                title=f"Small budget {index}",
+                body="Small budget record body.",
+                source_kind=MemorySourceKind.USER_CONFIRMED,
+            )
+        context = self.service.get_context(
+            query="Damage",
+            node_path=self.combat.path,
+            detail_level=2,
+            recall_budget=RecallBudget(max_items=2, max_content_chars=4000, max_estimated_tokens=300),
+        )
+        item_count = len(context["nodes"]) + len(context["activeWork"]) + len(context["records"])
+        self.assertLessEqual(item_count, 2)
+        self.assertLessEqual(context["contentChars"], 2000)
+        self.assertLessEqual(context["estimatedTokens"], 300)
+        self.assertEqual(context["recallBudget"]["effective"]["maxItems"], 2)
+        self.assertEqual(context["recallBudget"]["effective"]["maxContentChars"], 2000)
+        self.assertEqual(context["recallBudget"]["effective"]["maxEstimatedTokens"], 300)
+
+    def test_no_hit_automatic_recall_has_zero_items_and_zero_content(self) -> None:
+        context = self.service.get_context(query="zzz-no-such-token", asset_paths=(), detail_level=2)
+        item_count = len(context["nodes"]) + len(context["activeWork"]) + len(context["records"])
+        self.assertEqual(item_count, 0)
+        self.assertEqual(context["recalledItemCount"], 0)
+        self.assertEqual(context["contentChars"], 0)
+        self.assertFalse(context["truncated"])
+        self.assertEqual(context["truncationReasons"], [])
+
+    def test_expired_deadline_returns_empty_bounded_recall_and_cleans_progress_handler(self) -> None:
+        requested = RecallBudget(
+            max_items=999,
+            max_content_chars=999_999,
+            max_estimated_tokens=999_999,
+            deadline_ms=999_999,
+        )
+        with open_project_memory_database(self.database_path) as connection:
+            context = build_memory_context(
+                connection,
+                project_key=PROJECT,
+                query="Damage",
+                detail_level=2,
+                recall_budget=requested,
+                start_deadline=time.monotonic() - 1.0,
+            )
+            self.assertTrue(context["truncated"])
+            self.assertEqual(context["truncationReasons"], ["recall-deadline"])
+            self.assertEqual(context["recalledItemCount"], 0)
+            self.assertEqual(context["contentChars"], 0)
+            self.assertLessEqual(context["estimatedTokens"], RECALL_MAX_ESTIMATED_TOKENS)
+            self.assertEqual(context["recallBudget"]["requested"]["maxItems"], 999)
+            self.assertEqual(context["recallBudget"]["effective"]["maxItems"], RECALL_MAX_ITEMS)
+            serialized = json.dumps(context, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            self.assertEqual(context["usage"]["usedChars"], len(serialized))
+            self.assertEqual(context["usage"]["estimatedTokens"], estimate_tokens(len(serialized)))
+            self.assertEqual(context["estimatedTokens"], context["usage"]["estimatedTokens"])
+            # The recall progress handler must be removed in finally. If the
+            # expired handler leaked, this trivial statement would be interrupted.
+            self.assertEqual(connection.execute("SELECT 1").fetchone()[0], 1)
+
+    def test_non_timeout_sqlite_operational_error_is_not_converted_to_deadline_success(self) -> None:
+        connection = sqlite3.connect(":memory:")
+        try:
+            with self.assertRaises(sqlite3.OperationalError):
+                build_memory_context(
+                    connection,
+                    project_key=PROJECT,
+                    query="Damage",
+                    detail_level=2,
+                    recall_budget=RecallBudget(),
+                )
+            # The progress handler is also removed on genuine SQL failure.
+            self.assertEqual(connection.execute("SELECT 1").fetchone()[0], 1)
+        finally:
+            connection.close()
+
+    def test_explicit_expand_node_remains_deeper_than_automatic_recall_caps(self) -> None:
+        for index in range(8):
+            self.add_record(
+                title=f"Expand record {index}",
+                body="Explicit expand evidence body " + str(index),
+                source_kind=MemorySourceKind.USER_CONFIRMED,
+            )
+        expanded = self.service.expand_node(
+            path=self.combat.path,
+            detail_level=3,
+            depth=1,
+            budget=ContextBudget(max_chars=12_000, max_nodes=30, max_records=50, max_depth=4),
+        )
+        item_count = len(expanded["nodes"]) + len(expanded["activeWork"]) + len(expanded["records"])
+        self.assertGreater(item_count, RECALL_MAX_ITEMS)
+        self.assertNotIn("recalledItemCount", expanded)
+        self.assertNotIn("recallBudget", expanded)
 
 
 if __name__ == "__main__":

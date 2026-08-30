@@ -1447,6 +1447,9 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(context["context"]["nodes"][0]["path"], "/project/combat")
         self.assertEqual(context["context"]["records"][0]["recordId"], record["recordId"])
         self.assertEqual(context["context"]["activeWork"][0]["workItemId"], work_id)
+        self.assertEqual(context["context"]["recallBudget"]["effective"]["maxItems"], 5)
+        self.assertEqual(context["context"]["recallBudget"]["effective"]["maxContentChars"], 2000)
+        self.assertEqual(context["context"]["recallBudget"]["effective"]["maxEstimatedTokens"], 800)
 
         _, expanded = asyncio.run(
             server.call_tool(

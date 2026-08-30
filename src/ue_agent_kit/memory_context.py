@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import sqlite3
+import time
 from dataclasses import dataclass
 from typing import Any, Sequence
 
@@ -28,6 +29,11 @@ MAX_CONTEXT_CHARS = 100_000
 MAX_CONTEXT_NODES = 100
 MAX_CONTEXT_RECORDS = 200
 MAX_CONTEXT_DEPTH = 16
+RECALL_MAX_ITEMS = 5
+RECALL_MAX_CONTENT_CHARS = 2_000
+RECALL_MAX_ESTIMATED_TOKENS = 800
+RECALL_DEADLINE_MS = 300
+RECALL_PROGRESS_HANDLER_STEPS = 1_000
 DEFAULT_CONTEXT_STATUSES = (
     MemoryStatus.VALID,
     MemoryStatus.UNVERIFIED,
@@ -69,13 +75,53 @@ class ContextBudget:
         return self
 
 
+@dataclass(frozen=True)
+class RecallBudget:
+    """Hard server-side ceilings for automatic Memory recall.
+
+    Automatic recall includes `ue_memory_get_context` and the Memory section
+    of Task Context. Explicit progressive reads such as `ue_memory_expand_node`
+    remain bounded by :class:ContextBudget and are not capped by these values.
+    """
+
+    max_items: int = RECALL_MAX_ITEMS
+    max_content_chars: int = RECALL_MAX_CONTENT_CHARS
+    max_estimated_tokens: int = RECALL_MAX_ESTIMATED_TOKENS
+    deadline_ms: int = RECALL_DEADLINE_MS
+
+    def effective(self) -> RecallBudget:
+        """Return a normalized budget that can only tighten the frozen ceilings."""
+        if isinstance(self.max_items, bool) or not isinstance(self.max_items, int):
+            raise ValueError("max_items must be an integer.")
+        if self.max_items < 0:
+            raise ValueError("max_items must not be negative.")
+        if isinstance(self.max_content_chars, bool) or not isinstance(self.max_content_chars, int):
+            raise ValueError("max_content_chars must be an integer.")
+        if self.max_content_chars < 0:
+            raise ValueError("max_content_chars must not be negative.")
+        if isinstance(self.max_estimated_tokens, bool) or not isinstance(self.max_estimated_tokens, int):
+            raise ValueError("max_estimated_tokens must be an integer.")
+        if self.max_estimated_tokens < 0:
+            raise ValueError("max_estimated_tokens must not be negative.")
+        if isinstance(self.deadline_ms, bool) or not isinstance(self.deadline_ms, int):
+            raise ValueError("deadline_ms must be an integer.")
+        if self.deadline_ms < 1:
+            raise ValueError("deadline_ms must be at least 1.")
+        return RecallBudget(
+            max_items=min(self.max_items, RECALL_MAX_ITEMS),
+            max_content_chars=min(self.max_content_chars, RECALL_MAX_CONTENT_CHARS),
+            max_estimated_tokens=min(self.max_estimated_tokens, RECALL_MAX_ESTIMATED_TOKENS),
+            deadline_ms=min(self.deadline_ms, RECALL_DEADLINE_MS),
+        )
+
+
+
 def validate_detail_level(value: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError("detail_level must be an integer between 0 and 4.")
     if value < 0 or value > 4:
         raise ValueError("detail_level must be an integer between 0 and 4.")
     return value
-
 
 def estimate_tokens(character_count: int) -> int:
     if character_count <= 0:
@@ -476,7 +522,11 @@ def _nodes_for_context(
     asset_paths: Sequence[str],
     max_nodes: int,
     max_depth: int,
+    state: dict[str, Any] | None = None,
+    allow_root_fallback: bool = True,
 ) -> tuple[tuple[KnowledgeNode, int], ...]:
+    if state is not None and state.get("deadlineExceeded"):
+        return ()
     if node_path:
         return expand_knowledge_tree(
             connection,
@@ -486,6 +536,8 @@ def _nodes_for_context(
             max_nodes=max_nodes,
         )
     candidates: list[KnowledgeNode] = []
+    if state is not None and state.get("deadlineExceeded"):
+        return ()
     if query:
         candidates.extend(
             search_knowledge_nodes(
@@ -495,6 +547,8 @@ def _nodes_for_context(
                 limit=max_nodes,
             )
         )
+    if state is not None and state.get("deadlineExceeded"):
+        return tuple((candidate, candidate.path.count("/") - 1) for candidate in candidates[:max_nodes])
     if asset_paths and len(candidates) < max_nodes:
         candidates.extend(
             _nodes_by_assets(
@@ -504,6 +558,8 @@ def _nodes_for_context(
                 limit=max_nodes - len(candidates),
             )
         )
+    if state is not None and state.get("deadlineExceeded"):
+        return tuple((candidate, candidate.path.count("/") - 1) for candidate in candidates[:max_nodes])
     if candidates:
         unique: dict[str, KnowledgeNode] = {}
         for node in candidates:
@@ -511,6 +567,8 @@ def _nodes_for_context(
         return tuple(
             (node, node.path.count("/") - 1) for node in list(unique.values())[:max_nodes]
         )
+    if not allow_root_fallback:
+        return ()
     try:
         root = get_knowledge_node_by_path(
             connection,
@@ -530,8 +588,11 @@ def _related_work_items(
     asset_paths: Sequence[str],
     query: str,
     limit: int,
+    state: dict[str, Any] | None = None,
 ) -> tuple[WorkItem, ...]:
     batches: list[tuple[WorkItem, ...]] = []
+    if state is not None and state.get("deadlineExceeded"):
+        return ()
     if node_ids:
         batches.append(
             list_work_items(
@@ -562,6 +623,8 @@ def _related_work_items(
                 limit=limit,
             )
         )
+    if state is not None and state.get("deadlineExceeded"):
+        return ()
     if not batches:
         batches.append(
             list_work_items(
@@ -677,6 +740,272 @@ def _finalize_context_budget(response: dict[str, Any], max_chars: int) -> dict[s
     return response
 
 
+def _recalled_item_count(response: dict[str, Any]) -> int:
+    return len(response.get("nodes", [])) + len(response.get("activeWork", [])) + len(response.get("records", []))
+
+
+def _recalled_content_chars(response: dict[str, Any]) -> int:
+    if _recalled_item_count(response) == 0:
+        return 0
+    return _serialized_chars(
+        {
+            "nodes": response.get("nodes", []),
+            "activeWork": response.get("activeWork", []),
+            "records": response.get("records", []),
+        }
+    )
+
+
+def _finalize_recall_budget(
+    response: dict[str, Any],
+    limits: RecallBudget,
+) -> dict[str, Any]:
+    """Trim an automatic recall context to the hard M1 item/content/token ceilings.
+
+    The structured envelope is preserved; only recalled items (nodes + activeWork
+    + records) are trimmed. Trimming follows deterministic insertion order:
+    records last, then active work, then nodes. The final estimated token count
+    covers the complete structured context envelope.
+    """
+    reasons: list[str] = response.setdefault("truncationReasons", [])
+    if _recalled_item_count(response) > limits.max_items:
+        response["truncated"] = True
+        if "recall-item-budget-truncated" not in reasons:
+            reasons.append("recall-item-budget-truncated")
+        while _recalled_item_count(response) > limits.max_items:
+            if response["records"]:
+                removed = response["records"].pop()
+                _add_next_action(
+                    response,
+                    {
+                        "tool": "ue_memory_get_evidence" if response["detailLevel"] >= 3 else "ue_memory_get",
+                        "reason": "recall-item-budget-truncated",
+                        "arguments": {"record_id": removed["recordId"]},
+                    },
+                )
+                continue
+            if response["activeWork"]:
+                removed = response["activeWork"].pop()
+                _add_next_action(
+                    response,
+                    {
+                        "tool": "ue_memory_update_work",
+                        "reason": "recall-item-budget-truncated",
+                        "arguments": {
+                            "action": "get",
+                            "payload": {"workItemId": removed["workItemId"]},
+                        },
+                    },
+                )
+                continue
+            if response["nodes"]:
+                removed = response["nodes"].pop()
+                _add_next_action(
+                    response,
+                    {
+                        "tool": "ue_memory_expand_node",
+                        "reason": "recall-item-budget-truncated",
+                        "arguments": {
+                            "path": removed["path"],
+                            "detail_level": response["detailLevel"],
+                        },
+                    },
+                )
+                continue
+            break
+
+    if _recalled_content_chars(response) > limits.max_content_chars:
+        response["truncated"] = True
+        if "recall-content-budget-truncated" not in reasons:
+            reasons.append("recall-content-budget-truncated")
+        while _recalled_content_chars(response) > limits.max_content_chars:
+            if response["records"]:
+                removed = response["records"].pop()
+                _add_next_action(
+                    response,
+                    {
+                        "tool": "ue_memory_get_evidence" if response["detailLevel"] >= 3 else "ue_memory_get",
+                        "reason": "recall-content-budget-truncated",
+                        "arguments": {"record_id": removed["recordId"]},
+                    },
+                )
+                continue
+            if response["activeWork"]:
+                removed = response["activeWork"].pop()
+                _add_next_action(
+                    response,
+                    {
+                        "tool": "ue_memory_update_work",
+                        "reason": "recall-content-budget-truncated",
+                        "arguments": {
+                            "action": "get",
+                            "payload": {"workItemId": removed["workItemId"]},
+                        },
+                    },
+                )
+                continue
+            if response["nodes"]:
+                removed = response["nodes"].pop()
+                _add_next_action(
+                    response,
+                    {
+                        "tool": "ue_memory_expand_node",
+                        "reason": "recall-content-budget-truncated",
+                        "arguments": {
+                            "path": removed["path"],
+                            "detail_level": response["detailLevel"],
+                        },
+                    },
+                )
+                continue
+            break
+
+    # Keep the final complete envelope within the estimated-token ceiling. The
+    # accounting fields themselves are part of that envelope, so settle them before
+    # evaluating the cap and after every deterministic trim.
+    if _set_recall_usage(response) > limits.max_estimated_tokens:
+        response["truncated"] = True
+        if "recall-token-budget-truncated" not in reasons:
+            reasons.append("recall-token-budget-truncated")
+        while _set_recall_usage(response) > limits.max_estimated_tokens:
+            if response["records"]:
+                removed = response["records"].pop()
+                _add_next_action(
+                    response,
+                    {
+                        "tool": "ue_memory_get_evidence" if response["detailLevel"] >= 3 else "ue_memory_get",
+                        "reason": "recall-token-budget-truncated",
+                        "arguments": {"record_id": removed["recordId"]},
+                    },
+                )
+                continue
+            if response["activeWork"]:
+                removed = response["activeWork"].pop()
+                _add_next_action(
+                    response,
+                    {
+                        "tool": "ue_memory_update_work",
+                        "reason": "recall-token-budget-truncated",
+                        "arguments": {
+                            "action": "get",
+                            "payload": {"workItemId": removed["workItemId"]},
+                        },
+                    },
+                )
+                continue
+            if response["nodes"]:
+                removed = response["nodes"].pop()
+                _add_next_action(
+                    response,
+                    {
+                        "tool": "ue_memory_expand_node",
+                        "reason": "recall-token-budget-truncated",
+                        "arguments": {
+                            "path": removed["path"],
+                            "detail_level": response["detailLevel"],
+                        },
+                    },
+                )
+                continue
+            if response["nextActions"]:
+                response["nextActions"].pop()
+                continue
+            break
+    _set_recall_usage(response)
+    return response
+
+def _set_recall_usage(response: dict[str, Any]) -> int:
+    """Set exact final-envelope recall metrics and return estimated tokens.
+
+    `usage` and the top-level `estimatedTokens` field are part of the serialized
+    response, so they are iterated to a stable value instead of being computed
+    before the accounting fields are added.
+    """
+    response["recalledItemCount"] = _recalled_item_count(response)
+    response["contentChars"] = _recalled_content_chars(response)
+    response.setdefault("estimatedTokens", 0)
+    for _ in range(12):
+        _set_usage(response)
+        estimated = int(response["usage"]["estimatedTokens"])
+        if response["estimatedTokens"] == estimated:
+            return estimated
+        response["estimatedTokens"] = estimated
+    _set_usage(response)
+    response["estimatedTokens"] = int(response["usage"]["estimatedTokens"])
+    _set_usage(response)
+    return int(response["usage"]["estimatedTokens"])
+
+
+def _install_deadline_handler(
+    connection: sqlite3.Connection,
+    deadline_seconds: float,
+    state: dict[str, Any],
+) -> None:
+    def progress_handler() -> int:
+        if state.get("deadlineExceeded"):
+            return 1
+        if time.monotonic() > deadline_seconds:
+            state["deadlineExceeded"] = True
+            return 1
+        return 0
+
+    connection.set_progress_handler(progress_handler, RECALL_PROGRESS_HANDLER_STEPS)
+
+
+def _recall_budget_payload(requested: RecallBudget, effective: RecallBudget) -> dict[str, Any]:
+    return {
+        "requested": {
+            "maxItems": requested.max_items,
+            "maxContentChars": requested.max_content_chars,
+            "maxEstimatedTokens": requested.max_estimated_tokens,
+            "deadlineMs": requested.deadline_ms,
+        },
+        "effective": {
+            "maxItems": effective.max_items,
+            "maxContentChars": effective.max_content_chars,
+            "maxEstimatedTokens": effective.max_estimated_tokens,
+            "deadlineMs": effective.deadline_ms,
+        },
+    }
+
+
+def _deadline_truncated_response(
+    *,
+    project_key: str,
+    detail_level: int,
+    requested_limits: RecallBudget,
+    effective_limits: RecallBudget,
+    context_budget: ContextBudget,
+    query: str,
+    node_path: str,
+    asset_paths: Sequence[str],
+    elapsed_ms: float,
+) -> dict[str, Any]:
+    """Return an empty bounded recall with explicit deadline truncation metadata."""
+    response: dict[str, Any] = {
+        "schemaVersion": "1.0",
+        "projectProfile": {"projectKey": project_key, "title": project_key, "summary": "", "rootPath": "/project"},
+        "detailLevel": detail_level,
+        "budget": {
+            "maxChars": context_budget.max_chars,
+            "maxNodes": context_budget.max_nodes,
+            "maxRecords": context_budget.max_records,
+            "maxDepth": context_budget.max_depth,
+            "tokenEstimateRule": "approximately 4 chars per token",
+        },
+        "nodes": [],
+        "activeWork": [],
+        "records": [],
+        "truncated": True,
+        "truncationReasons": ["recall-deadline"],
+        "nextActions": [],
+        "usage": {"usedChars": 0, "estimatedTokens": 0},
+        "recallBudget": _recall_budget_payload(requested_limits, effective_limits),
+    }
+    response["elapsedMs"] = round(elapsed_ms, 3)
+    _set_recall_usage(response)
+    return response
+
 def build_memory_context(
     connection: sqlite3.Connection,
     *,
@@ -686,6 +1015,8 @@ def build_memory_context(
     asset_paths: Sequence[str] = (),
     detail_level: int = 1,
     budget: ContextBudget = ContextBudget(),
+    recall_budget: RecallBudget | None = None,
+    start_deadline: float | None = None,
 ) -> dict[str, Any]:
     normalized_project = project_key.strip() if isinstance(project_key, str) else ""
     if not normalized_project:
@@ -706,158 +1037,245 @@ def build_memory_context(
         normalized_assets.append(normalized_asset)
     level = validate_detail_level(detail_level)
     limits = budget.validated()
+    recall_limits = recall_budget.effective() if recall_budget is not None else None
 
-    node_pairs = _nodes_for_context(
-        connection,
-        project_key=normalized_project,
-        query=query.strip(),
-        node_path=node_path.strip(),
-        asset_paths=normalized_assets,
-        max_nodes=limits.max_nodes,
-        max_depth=limits.max_depth,
-    )
-    node_ids = tuple(node.node_id for node, _ in node_pairs)
-    record_ids = _ordered_unique(
-        [
-            *_record_ids_by_node(
-                connection,
-                project_key=normalized_project,
-                node_ids=node_ids,
-                limit=limits.max_records,
-            ),
-            *_record_ids_by_assets(
-                connection,
-                project_key=normalized_project,
-                asset_paths=normalized_assets,
-                limit=limits.max_records,
-            ),
-            *_query_record_ids(
+    state: dict[str, Any] = {"deadlineExceeded": False}
+    started = time.perf_counter()
+    if recall_limits is not None:
+        deadline_seconds = (
+            start_deadline
+            if start_deadline is not None
+            else time.monotonic() + recall_limits.deadline_ms / 1000.0
+        )
+        _install_deadline_handler(connection, deadline_seconds, state)
+        if time.monotonic() > deadline_seconds:
+            state["deadlineExceeded"] = True
+
+    try:
+        if recall_limits is not None and not query.strip() and not node_path.strip() and not normalized_assets:
+            node_pairs = ()
+        else:
+            node_pairs = _nodes_for_context(
                 connection,
                 project_key=normalized_project,
                 query=query.strip(),
-                limit=limits.max_records,
-            ),
-        ]
-    )[: limits.max_records]
-    records = [get_memory_record(connection, record_id) for record_id in record_ids]
-    records_by_node: dict[str, list[str]] = {}
-    for record in records:
-        if record.node_id:
-            records_by_node.setdefault(record.node_id, []).append(record.record_id)
-
-    work_items = _related_work_items(
-        connection,
-        project_key=normalized_project,
-        node_ids=node_ids,
-        asset_paths=normalized_assets,
-        query=query.strip(),
-        limit=min(50, limits.max_nodes + limits.max_records + 5),
-    )
-
-
-    response: dict[str, Any] = {
-        "schemaVersion": "1.0",
-        "projectProfile": _project_profile(connection, normalized_project),
-        "detailLevel": level,
-        "budget": {
-            "maxChars": limits.max_chars,
-            "maxNodes": limits.max_nodes,
-            "maxRecords": limits.max_records,
-            "maxDepth": limits.max_depth,
-            "tokenEstimateRule": "approximately 4 chars per token",
-        },
-        "nodes": [],
-        "activeWork": [],
-        "records": [],
-        "truncated": False,
-        "nextActions": [],
-        "usage": {"usedChars": 0, "estimatedTokens": 0},
-    }
-
-    omitted_node_path = ""
-    for node, depth in node_pairs:
-        item = _node_payload(
-            connection,
-            node=node,
-            depth=depth,
-            detail_level=level,
-            record_ids=records_by_node.get(node.node_id, ()),
-        )
-        if not _append_with_budget(
-            response,
-            collection="nodes",
-            item=item,
-            max_chars=limits.max_chars,
-        ):
-            omitted_node_path = node.path
-            response["truncated"] = True
-            break
-
-    omitted_work_id = ""
-    for work in work_items:
-        item = _work_payload(work, level)
-        if not _append_with_budget(
-            response,
-            collection="activeWork",
-            item=item,
-            max_chars=limits.max_chars,
-        ):
-            omitted_work_id = work.work_item_id
-            response["truncated"] = True
-            break
-
-    omitted_record_id = ""
-    if level >= 2:
+                node_path=node_path.strip(),
+                asset_paths=normalized_assets,
+                max_nodes=limits.max_nodes,
+                max_depth=limits.max_depth,
+                state=state,
+                allow_root_fallback=recall_limits is None,
+            )
+        if recall_limits is not None and state.get("deadlineExceeded"):
+            return _deadline_truncated_response(
+                project_key=normalized_project,
+                detail_level=level,
+                requested_limits=recall_budget,
+                effective_limits=recall_limits,
+                context_budget=limits,
+                query=query,
+                node_path=node_path,
+                asset_paths=normalized_assets,
+                elapsed_ms=(time.perf_counter() - started) * 1000.0,
+            )
+        node_ids = tuple(node.node_id for node, _ in node_pairs)
+        record_ids = _ordered_unique(
+            [
+                *_record_ids_by_node(
+                    connection,
+                    project_key=normalized_project,
+                    node_ids=node_ids,
+                    limit=limits.max_records,
+                ),
+                *_record_ids_by_assets(
+                    connection,
+                    project_key=normalized_project,
+                    asset_paths=normalized_assets,
+                    limit=limits.max_records,
+                ),
+                *_query_record_ids(
+                    connection,
+                    project_key=normalized_project,
+                    query=query.strip(),
+                    limit=limits.max_records,
+                ),
+            ]
+        )[: limits.max_records]
+        if recall_limits is not None and state.get("deadlineExceeded"):
+            return _deadline_truncated_response(
+                project_key=normalized_project,
+                detail_level=level,
+                requested_limits=recall_budget,
+                effective_limits=recall_limits,
+                context_budget=limits,
+                query=query,
+                node_path=node_path,
+                asset_paths=normalized_assets,
+                elapsed_ms=(time.perf_counter() - started) * 1000.0,
+            )
+        records = [get_memory_record(connection, record_id) for record_id in record_ids]
+        records_by_node: dict[str, list[str]] = {}
         for record in records:
-            item = _record_payload(record, level)
+            if record.node_id:
+                records_by_node.setdefault(record.node_id, []).append(record.record_id)
+
+        work_items = _related_work_items(
+            connection,
+            project_key=normalized_project,
+            node_ids=node_ids,
+            asset_paths=normalized_assets,
+            query=query.strip(),
+            limit=min(50, limits.max_nodes + limits.max_records + 5),
+            state=state,
+        )
+        if recall_limits is not None and state.get("deadlineExceeded"):
+            return _deadline_truncated_response(
+                project_key=normalized_project,
+                detail_level=level,
+                requested_limits=recall_budget,
+                effective_limits=recall_limits,
+                context_budget=limits,
+                query=query,
+                node_path=node_path,
+                asset_paths=normalized_assets,
+                elapsed_ms=(time.perf_counter() - started) * 1000.0,
+            )
+
+        response: dict[str, Any] = {
+            "schemaVersion": "1.0",
+            "projectProfile": _project_profile(connection, normalized_project),
+            "detailLevel": level,
+            "budget": {
+                "maxChars": limits.max_chars,
+                "maxNodes": limits.max_nodes,
+                "maxRecords": limits.max_records,
+                "maxDepth": limits.max_depth,
+                "tokenEstimateRule": "approximately 4 chars per token",
+            },
+            "nodes": [],
+            "activeWork": [],
+            "records": [],
+            "truncated": False,
+            "truncationReasons": [],
+            "nextActions": [],
+            "usage": {"usedChars": 0, "estimatedTokens": 0},
+        }
+        if recall_limits is not None:
+            response["recallBudget"] = _recall_budget_payload(recall_budget, recall_limits)
+
+        omitted_node_path = ""
+        for node, depth in node_pairs:
+            if recall_limits is not None and state.get("deadlineExceeded"):
+                break
+            item = _node_payload(
+                connection,
+                node=node,
+                depth=depth,
+                detail_level=level,
+                record_ids=records_by_node.get(node.node_id, ()),
+            )
             if not _append_with_budget(
                 response,
-                collection="records",
+                collection="nodes",
                 item=item,
                 max_chars=limits.max_chars,
             ):
-                omitted_record_id = record.record_id
+                omitted_node_path = node.path
                 response["truncated"] = True
                 break
 
-    if omitted_node_path:
-        response["nextActions"].append(
-            {
-                "tool": "ue_memory_expand_node",
-                "reason": "node-budget-truncated",
-                "arguments": {"path": omitted_node_path, "detail_level": level},
-            }
-        )
-    if omitted_work_id:
-        response["nextActions"].append(
-            {
-                "tool": "ue_memory_update_work",
-                "reason": "active-work-budget-truncated",
-                "arguments": {
-                    "action": "get",
-                    "payload": {"workItemId": omitted_work_id},
-                },
-            }
-        )
-    if omitted_record_id:
-        response["nextActions"].append(
-            {
-                "tool": "ue_memory_get_evidence" if level >= 3 else "ue_memory_get",
-                "reason": "record-budget-truncated",
-                "arguments": {"record_id": omitted_record_id},
-            }
-        )
-    if not response["truncated"] and level < 4 and records:
-        response["nextActions"].append(
-            {
-                "tool": "ue_memory_get_evidence",
-                "reason": "evidence-available-on-demand",
-                "arguments": {"record_id": records[0].record_id},
-            }
-        )
+        omitted_work_id = ""
+        for work in work_items:
+            if recall_limits is not None and state.get("deadlineExceeded"):
+                break
+            item = _work_payload(work, level)
+            if not _append_with_budget(
+                response,
+                collection="activeWork",
+                item=item,
+                max_chars=limits.max_chars,
+            ):
+                omitted_work_id = work.work_item_id
+                response["truncated"] = True
+                break
 
-    return _finalize_context_budget(response, limits.max_chars)
+        omitted_record_id = ""
+        if level >= 2:
+            for record in records:
+                if recall_limits is not None and state.get("deadlineExceeded"):
+                    break
+                item = _record_payload(record, level)
+                if not _append_with_budget(
+                    response,
+                    collection="records",
+                    item=item,
+                    max_chars=limits.max_chars,
+                ):
+                    omitted_record_id = record.record_id
+                    response["truncated"] = True
+                    break
 
+        if recall_limits is not None and state.get("deadlineExceeded"):
+            response["truncated"] = True
+            if "recall-deadline" not in response["truncationReasons"]:
+                response["truncationReasons"].append("recall-deadline")
+
+        if omitted_node_path:
+            response["nextActions"].append(
+                {
+                    "tool": "ue_memory_expand_node",
+                    "reason": "node-budget-truncated",
+                    "arguments": {"path": omitted_node_path, "detail_level": level},
+                }
+            )
+        if omitted_work_id:
+            response["nextActions"].append(
+                {
+                    "tool": "ue_memory_update_work",
+                    "reason": "active-work-budget-truncated",
+                    "arguments": {
+                        "action": "get",
+                        "payload": {"workItemId": omitted_work_id},
+                    },
+                }
+            )
+        if omitted_record_id:
+            response["nextActions"].append(
+                {
+                    "tool": "ue_memory_get_evidence" if level >= 3 else "ue_memory_get",
+                    "reason": "record-budget-truncated",
+                    "arguments": {"record_id": omitted_record_id},
+                }
+            )
+        if not response["truncated"] and level < 4 and records:
+            response["nextActions"].append(
+                {
+                    "tool": "ue_memory_get_evidence",
+                    "reason": "evidence-available-on-demand",
+                    "arguments": {"record_id": records[0].record_id},
+                }
+            )
+
+        if recall_limits is not None:
+            return _finalize_recall_budget(response, recall_limits)
+        return _finalize_context_budget(response, limits.max_chars)
+    except sqlite3.OperationalError:
+        if recall_limits is not None and state.get("deadlineExceeded"):
+            return _deadline_truncated_response(
+                project_key=normalized_project,
+                detail_level=level,
+                requested_limits=recall_budget,
+                effective_limits=recall_limits,
+                context_budget=limits,
+                query=query,
+                node_path=node_path,
+                asset_paths=normalized_assets,
+                elapsed_ms=(time.perf_counter() - started) * 1000.0,
+            )
+        raise
+    finally:
+        if recall_limits is not None:
+            connection.set_progress_handler(None, 0)
 
 def expand_memory_node(
     connection: sqlite3.Connection,

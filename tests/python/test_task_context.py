@@ -25,6 +25,11 @@ from ue_agent_kit.database import open_database  # noqa: E402
 from ue_agent_kit.editor_bridge import LiveEditorError  # noqa: E402
 from ue_agent_kit.freshness import IndexFreshnessTracker  # noqa: E402
 from ue_agent_kit.indexer import build_index  # noqa: E402
+from ue_agent_kit.memory_context import (  # noqa: E402
+    RECALL_MAX_CONTENT_CHARS,
+    RECALL_MAX_ESTIMATED_TOKENS,
+    RECALL_MAX_ITEMS,
+)
 from ue_agent_kit.memory_service import ProjectMemoryService  # noqa: E402
 from ue_agent_kit.memory_tree import KnowledgeNodeDraft  # noqa: E402
 from ue_agent_kit.project_memory import (  # noqa: E402
@@ -298,6 +303,55 @@ class TaskContextTests(unittest.TestCase):
         self.assertFalse(context["activeWork"]["included"])
         self.assertEqual(context["activeWork"]["reason"], "include-memory-false")
         self.assertTrue(context["revisionState"]["available"])
+
+    def test_m1_task_context_memory_cannot_bypass_automatic_recall_caps(self) -> None:
+        for index in range(10):
+            self.memory_service.add_record(
+                MemoryRecordDraft(
+                    project_key=PROJECT,
+                    record_type="projectFact",
+                    subject_key=f"combat:m1-{index}",
+                    title=f"Damage memory {index}",
+                    body=("Damage memory benchmark content. " * 10) + str(index),
+                    source_kind=MemorySourceKind.TOOL_OBSERVED,
+                    revision_set=(MemoryRevision(ASSET_A, f"sha256:{self.revision_a}"),),
+                    scopes=(MemoryScope("asset", ASSET_A),),
+                )
+            )
+        for index in range(8):
+            self.memory_service.create_work(
+                WorkItemDraft(
+                    project_key=PROJECT,
+                    title=f"Damage audit {index}",
+                    description="Audit damage memory evidence.",
+                    next_action="Review damage evidence.",
+                    asset_paths=(ASSET_A,),
+                )
+            )
+        context = self.make_service().get_task_context(
+            query="damage memory audit",
+            asset_paths=[ASSET_A],
+        )
+        summary = context["memory"]["summary"]
+        active = context["activeWork"].get("items", [])
+        item_count = len(summary["nodes"]) + len(summary["records"]) + len(active)
+        self.assertEqual(summary["recalledItemCount"], item_count)
+        self.assertLessEqual(item_count, RECALL_MAX_ITEMS)
+        self.assertLessEqual(summary["contentChars"], RECALL_MAX_CONTENT_CHARS)
+        self.assertLessEqual(summary["estimatedTokens"], RECALL_MAX_ESTIMATED_TOKENS)
+        effective = summary["recallBudget"]["effective"]
+        self.assertEqual(effective["maxItems"], RECALL_MAX_ITEMS)
+        self.assertEqual(effective["maxContentChars"], RECALL_MAX_CONTENT_CHARS)
+        self.assertEqual(effective["maxEstimatedTokens"], RECALL_MAX_ESTIMATED_TOKENS)
+
+    def test_m1_task_context_no_hit_has_no_placeholder_recall_content(self) -> None:
+        context = self.make_service().get_task_context(query="zzz-no-such-memory-token")
+        summary = context["memory"]["summary"]
+        self.assertEqual(summary["recalledItemCount"], 0)
+        self.assertEqual(summary["contentChars"], 0)
+        self.assertEqual(summary["nodes"], [])
+        self.assertEqual(summary["records"], [])
+        self.assertEqual(context["activeWork"].get("items", []), [])
 
     def test_t4_live_editor_excluded_by_request_flag(self) -> None:
         service = self.make_service(live_editor_service=FakeLiveEditor())
@@ -898,7 +952,9 @@ class TaskContextTests(unittest.TestCase):
         section = context["correlation"]
         self.assertTrue(section["available"])
         summary = section["summary"]
-        self.assertEqual(summary["workItemsTotal"], 10)
+        # M1 automatic recall caps total recalled items (nodes + activeWork +
+        # records) at 5, so only the bounded activeWork subset is visible here.
+        self.assertEqual(summary["workItemsTotal"], 5)
         self.assertEqual(summary["workItemsConsidered"], 5)
         self.assertEqual(summary["changeSetAffectedAssetsTotal"], 12)
         self.assertEqual(summary["changeSetAffectedAssetsSampled"], 8)

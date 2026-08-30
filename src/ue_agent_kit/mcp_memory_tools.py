@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from .active_work import WorkItem, WorkItemDraft, WorkStatus
-from .memory_context import ContextBudget
+from .memory_context import ContextBudget, RecallBudget
 from .memory_reports import memory_record_payload
 from .memory_service import ProjectMemoryService, ProjectMemoryServiceError
 from .memory_tree import KnowledgeNode, KnowledgeNodeDraft
@@ -514,7 +514,11 @@ def register_memory_tools(
         max_records: int = 20,
         max_depth: int = 2,
     ) -> dict[str, Any]:
-        """Get budgeted progressive context for the fixed project; evidence stays on demand."""
+        """Get budgeted progressive context for the fixed project; evidence stays on demand.
+
+        This is an automatic-recall surface: server hard M1 RecallBudget ceilings
+        are always active and cannot be widened by caller parameters.
+        """
         try:
             context = memory_service.get_context(
                 query=query,
@@ -527,6 +531,7 @@ def register_memory_tools(
                     max_records=max_records,
                     max_depth=max_depth,
                 ),
+                recall_budget=RecallBudget(),
             )
             return {
                 "schemaVersion": "1.0",

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Sequence
 
 from .agent_api import IDENTITY_FIELDS, IndexQueryService
-from .memory_context import MAX_CONTEXT_CHARS, MIN_CONTEXT_CHARS, ContextBudget
+from .memory_context import MAX_CONTEXT_CHARS, MIN_CONTEXT_CHARS, ContextBudget, RecallBudget
 from .memory_service import ProjectMemoryService, ProjectMemoryServiceError
 from .query_protocol import (
     DEFAULT_OUTPUT_TOKEN_BUDGET,
@@ -587,6 +587,7 @@ class TaskContextService:
                 asset_paths=tuple(asset_paths),
                 detail_level=2,
                 budget=ContextBudget(max_chars=self._memory_budget_chars(max_output_tokens)),
+                recall_budget=RecallBudget(),
             )
         except (
             ProjectMemoryServiceError,
@@ -609,6 +610,11 @@ class TaskContextService:
             "nodes": context.get("nodes", []),
             "records": context.get("records", []),
             "truncated": bool(context.get("truncated")),
+            "truncationReasons": context.get("truncationReasons", []),
+            "recalledItemCount": context.get("recalledItemCount", 0),
+            "contentChars": context.get("contentChars", 0),
+            "estimatedTokens": context.get("estimatedTokens", 0),
+            "recallBudget": context.get("recallBudget", {}),
             "usage": context.get("usage", {}),
             "nextActions": context.get("nextActions", []),
         }
@@ -1655,6 +1661,9 @@ class TaskContextService:
             if "projectProfile" in memory_summary:
                 memory_summary.pop("projectProfile")
                 return self._record_reason(reasons, "memory-project-profile")
+            if "recallBudget" in memory_summary:
+                memory_summary.pop("recallBudget")
+                return self._record_reason(reasons, "memory-recall-budget")
             if "usage" in memory_summary:
                 memory_summary.pop("usage")
                 return self._record_reason(reasons, "memory-usage")

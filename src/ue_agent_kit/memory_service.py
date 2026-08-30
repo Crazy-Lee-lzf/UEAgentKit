@@ -23,6 +23,7 @@ from .active_work import (
 from .database import get_metadata, get_schema_version, open_database
 from .memory_context import (
     ContextBudget,
+    RecallBudget,
     build_memory_context,
     evidence_payload,
     expand_memory_node,
@@ -445,6 +446,8 @@ class ProjectMemoryService:
         asset_paths: Sequence[str] = (),
         detail_level: int = 1,
         budget: ContextBudget = ContextBudget(),
+        recall_budget: RecallBudget = RecallBudget(),
+        start_deadline: float | None = None,
     ) -> dict[str, Any]:
         with open_project_memory_database(self.database_path) as connection:
             return build_memory_context(
@@ -455,6 +458,8 @@ class ProjectMemoryService:
                 asset_paths=asset_paths,
                 detail_level=detail_level,
                 budget=budget,
+                recall_budget=recall_budget,
+                start_deadline=start_deadline,
             )
 
     def expand_node(
