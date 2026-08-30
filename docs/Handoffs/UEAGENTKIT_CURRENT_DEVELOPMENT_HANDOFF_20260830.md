@@ -43,6 +43,36 @@ The key project-management interpretation is:
 - **W and V have already been combined and portable-regression tested.** Do not rerun the historical W4/W5/V2 heavy matrices merely because a new Chat starts.
 - **The repository still has a separate Git/worktree ref-integrity issue on three legacy worktrees.** Do not mistake their unborn/staged-all appearance for a new repository.
 
+### 0.1 Post-sync repository housekeeping update
+
+Later on 2026-08-30, the owner explicitly authorized remote synchronization and branch/worktree housekeeping. This subsection supersedes the older repository/worktree wording in Section 2 where the two conflict.
+
+Current synchronized state after housekeeping:
+
+```text
+main                              d5d7509e41f0e9acacd5e16b521e014e94a686b8
+origin/main                       d5d7509e41f0e9acacd5e16b521e014e94a686b8
+origin/feature/memory-context     d5d7509e41f0e9acacd5e16b521e014e94a686b8
+
+registered worktrees:
+E:\WorkSpace\UEAgentKit-Integration   main @ d5d7509
+E:\WorkSpace\UEAgentKit               detached @ d5d7509 (repository backing worktree; retains only historical untracked CONOUT$)
+```
+
+Completed local branches/worktrees `feature/live-writer-expansion`, `feature/knowledge-web-view`, `integration/w-v-20260830`, and `docs/closeout-plan-amendment-20260823` were removed after their relevant history was preserved. The old remote `feature/live-editor-realtime-io` was also removed because its history is already contained in `main`.
+
+The old Performance line contained four commits not reachable from `main`; they were preserved remotely as:
+
+```text
+origin/archive/performance-benchmarks-legacy-20260830 @ a7c5ae9
+```
+
+Do not use that archive branch as a new development base without reviewing/cherry-picking the still-useful pieces. It contains historical registry-only / long-path performance work plus DarkRuins baseline material.
+
+The physical directories `E:\WorkSpace\UEAgentKit-Performance` and `E:\WorkSpace\UEAgentKit-RealtimeIO` may still exist because they contain ignored local `Output` / `Build` / `Backups` acceptance evidence, but they are **no longer registered Git worktrees**. Do not treat them as active repositories.
+
+Two previously untracked planning documents were preserved under `docs/Plans/Archive/` before cleanup: the 0.8 Closeout Plan Amendment and Agentic Game R&D Reference Directions.
+
 ## 1. Mandatory Read Order for a New Chat / Agent
 
 Read in this order:
