@@ -31,12 +31,13 @@ Track V / Knowledge Web              COMPLETE
   V2 visualization                   complete
 
 W + V integration                    G3 PASS
-Current portable full suite          866 / 866 PASS
+Current portable full suite          885 / 885 PASS
 Track M / M1                         COMPLETE / REVIEWED / G2 PASS / U0
-Track M / M2                         READY FOR IMPLEMENTATION / U0
-M2 base                              6d9cf711f368f359fc8f2343e1a065942f8f58f5
+Track M / M2                         COMPLETE / REVIEWED / G2 PASS / U0
+Track M / M3                         READY FOR IMPLEMENTATION / U0
+M3 base                              d38c23c70fdf710117e6bd31f738b20665c20cd9
 Published-version change             none
-M1 reviewed benchmark gates          PASS
+M1/M2 regression benchmark gates     PASS
 ```
 
 The key project-management interpretation is:
@@ -48,9 +49,9 @@ The key project-management interpretation is:
 
 ### 0.1 Post-sync repository housekeeping update
 
-Later on 2026-08-30, the owner explicitly authorized remote synchronization and branch/worktree housekeeping. This subsection supersedes the older repository/worktree wording in Section 2 where the two conflict.
+Later on 2026-08-30, the owner explicitly authorized remote synchronization and branch/worktree housekeeping. This subsection records that housekeeping checkpoint. Current Track M development refs are superseded by Section 0.4 and Section 2.
 
-Current synchronized state after housekeeping:
+Synchronized checkpoint immediately after housekeeping:
 
 ```text
 main / origin/main / origin/feature/memory-context
@@ -145,7 +146,55 @@ benchmarks/memory/m1_memory_overhead_before_20260830.json
 benchmarks/memory/m1_memory_overhead_after_20260830.json
 ```
 
-The next Track M stage is **M2 deterministic L0 automatic capture / Evidence Chain foundation**. Its authoritative Detailed Plan is `docs/Plans/UEAGENTKIT_M2_DETERMINISTIC_L0_AUTO_CAPTURE_DETAILED_PLAN_20260830.md`. M2 is based on local M1 checkpoint `6d9cf711`, is not blocked by P4, and its required implementation/closure path is U0. Any real-Writer UE spot-check is optional evidence unless the owner explicitly promotes it to a required gate.
+At M1 closure, the next Track M stage was **M2 deterministic L0 automatic capture / Evidence Chain foundation**. Its now-historical Detailed Plan is `docs/Plans/Archive/UEAGENTKIT_M2_DETERMINISTIC_L0_AUTO_CAPTURE_DETAILED_PLAN_20260830.md`. M2 later completed and is superseded by the 2026-08-31 update below.
+
+### 0.4 Track M / M2 completion and M3 planning update — 2026-08-31
+
+M2 is now complete, reviewed, locally committed, and archived. The active next stage is **M3 — Deterministic L0 → L1 Distillation**.
+
+Final reviewed M2 state:
+
+```text
+branch                    feature/memory-context
+M2 planning checkpoint    16fde234aea9004734515b13715720f14148cb2c5
+M2 implementation         d38c23c70fdf710117e6bd31f738b20665c20cd9
+UE level                  U0
+Memory schema             v4
+final Memory G1           202 / 202 PASS / 21.483 s
+final reviewer G2         885 / 885 PASS / 86.141 s
+Ruff / compileall         PASS
+ValidateRelease 0.7.0     PASS
+M1/M2 benchmark gate      PASS
+push                      none
+```
+
+The post-Agent review hardened three M2 details before the final checkpoint:
+
+```text
+capture suppression       ContextVar-scoped instead of process-global integer state
+artifact SHA-256          bounded streaming hash instead of whole-file read_bytes()
+checkpoint failures       durable checkpoint failure artifact takes precedence over duplicate inline rejection
+```
+
+Final reviewed benchmark snapshot:
+
+```text
+first Tool Memory incremental p95     13.525 ms   < 200 ms
+direct automatic recall p95           12.247 ms   < 300 ms
+task-end append p95                    13.439 ms   < 100 ms
+four-event L0 capture p95              14.972 ms   < 100 ms
+exact-state duplicate replay rows           0      PASS
+```
+
+M2 Plan/Result are now historical evidence under `docs/Plans/Archive/`.
+
+The active M3 contract is:
+
+```text
+docs/Plans/UEAGENTKIT_M3_DETERMINISTIC_L0_TO_L1_DISTILLATION_DETAILED_PLAN_20260831.md
+```
+
+M3 is U0 and keeps Memory schema v4. It adds explicit offline deterministic distillation only; no LLM, vector retrieval, prompt injection, P4, C++, UE, idle/startup background scheduler, or new required dependency. Historical Policy rejection events that lack an exact Policy digest must never be promoted to `projectRule`.
 
 ## 1. Mandatory Read Order for a New Chat / Agent
 
@@ -155,11 +204,12 @@ Read in this order:
 1. docs/Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260830.md
 2. docs/DEVELOPMENT_WORKFLOW.md
 3. docs/Plans/README.md
-4. docs/Plans/UEAGENTKIT_M2_DETERMINISTIC_L0_AUTO_CAPTURE_DETAILED_PLAN_20260830.md
-5. docs/Plans/Archive/UEAGENTKIT_M1_MEMORY_EFFICIENCY_BASELINE_AND_BUDGET_RESULT_20260830.md
-6. docs/Plans/UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md
-7. docs/Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md
-8. docs/Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md
+4. docs/Plans/UEAGENTKIT_M3_DETERMINISTIC_L0_TO_L1_DISTILLATION_DETAILED_PLAN_20260831.md
+5. docs/Plans/Archive/UEAGENTKIT_M2_DETERMINISTIC_L0_AUTO_CAPTURE_RESULT_20260830.md
+6. docs/Plans/Archive/UEAGENTKIT_M1_MEMORY_EFFICIENCY_BASELINE_AND_BUDGET_RESULT_20260830.md
+7. docs/Plans/UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md
+8. docs/Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md
+9. docs/Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md
 ```
 
 Historical completed Plans/Results are now under:
@@ -180,18 +230,18 @@ Do not reconstruct current project state from old Chat history when this handoff
 
 ### 2.1 Current development refs
 
-Repository housekeeping and remote synchronization were completed before M1 planning. M1 is now locally committed and M2 planning is being closed on top of that checkpoint.
+Repository housekeeping and remote synchronization were completed before M1 planning. M1 and M2 are now locally committed; M3 planning is being closed on top of the reviewed M2 checkpoint.
 
 Remote refs remain at the pre-M1 synchronized checkpoint until an explicit push is authorized:
 
 ```text
 main                           137c3a35e943f2c8e65f13dd8befe95aec3c6612
 origin/main                    137c3a35e943f2c8e65f13dd8befe95aec3c6612
-feature/memory-context         6d9cf711f368f359fc8f2343e1a065942f8f58f5  (M1 local checkpoint)
+feature/memory-context         d38c23c70fdf710117e6bd31f738b20665c20cd9  (reviewed M2 local checkpoint)
 origin/feature/memory-context  137c3a35e943f2c8e65f13dd8befe95aec3c6612
 ```
 
-The active development worktree remains on `feature/memory-context`. M1 product work is committed at `6d9cf711`; the M2 planning checkpoint is local-only and must be confirmed from live Git state. After this handoff closure the intended state is a clean tree with two local commits ahead of `origin/feature/memory-context`.
+The active development worktree remains on `feature/memory-context`. M2 implementation/review is committed at `d38c23c`; the M3 planning checkpoint is local-only and must be confirmed from live Git state. After this handoff closure the intended state is a clean tree with four local commits ahead of `origin/feature/memory-context`.
 
 ### 2.2 Registered worktrees
 
@@ -686,7 +736,7 @@ New rule:
 ```text
 docs/Plans/
   README.md
-  UEAGENTKIT_M2_DETERMINISTIC_L0_AUTO_CAPTURE_DETAILED_PLAN_20260830.md
+  UEAGENTKIT_M3_DETERMINISTIC_L0_TO_L1_DISTILLATION_DETAILED_PLAN_20260831.md
   UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md
   UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md
   UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md
@@ -771,19 +821,20 @@ src/ue_agent_kit/web/index.html
 src/ue_agent_kit/cli.py
 ```
 
-### Memory / active M2 surface
+### Memory / active M3 surface
 
 ```text
+src/ue_agent_kit/memory_l0.py
 src/ue_agent_kit/memory_context.py
 src/ue_agent_kit/memory_service.py
-src/ue_agent_kit/mcp_memory_tools.py
-src/ue_agent_kit/task_context.py
-tests/python/test_memory_context.py
-tests/python/test_mcp_server.py
-tests/python/test_task_context.py
+src/ue_agent_kit/project_memory.py
+src/ue_agent_kit/memory_tree.py
+src/ue_agent_kit/cli.py
+src/ue_agent_kit/workflow_common.py
+tests/python/test_memory_l0.py
 ```
 
-The M2 Agent must preserve the M1 RecallBudget/deadline/performance contract while adding deterministic L0 capture. It should follow the M2 Plan's capture-boundary design rather than wiring Memory writes into every low-level journal persist.
+M3 is expected to add `src/ue_agent_kit/memory_distill.py` plus focused distillation tests. The M3 Agent must preserve the M1 RecallBudget/deadline contract and M2 append-only/idempotent L0 contract. It must not turn missing historical provenance into inferred facts.
 
 ### W5 / scale
 
@@ -795,7 +846,7 @@ Plugin/UEAgentKit/Source/UEAgentKitEditor/Private/PerformanceFixtureCommandlet.c
 
 ## 15. Active Track and deferred project tracks
 
-**Track M is active. M1 is complete; M2 is next.**
+**Track M is active. M1 and M2 are complete; M3 is next.**
 
 The Master/Midterm documents still define the broader direction, but their old progress wording is historical where it conflicts with this handoff or the latest Track M Result/Plan.
 
@@ -803,30 +854,30 @@ The Master/Midterm documents still define the broader direction, but their old p
 
 ```text
 M1 performance/budget foundation       COMPLETE / U0 / G2 PASS
-M2 deterministic L0 capture            READY FOR IMPLEMENTATION / U0
-M3 L0 -> L1 deterministic distillation deferred
+M2 deterministic L0 capture            COMPLETE / REVIEWED / U0 / G2 PASS
+M3 L0 -> L1 deterministic distillation READY FOR IMPLEMENTATION / U0
 M4 FTS + optional Vector + RRF          deferred
 M5 L2/L3 injection                     deferred
 M6 optional symbolic compression       deferred / data-driven
 ```
 
-M1 gates are now persistent regression requirements for M2-M5.
+M1 gates and the M2 L0 performance/idempotence gates are persistent regression requirements for M3-M5.
 
 The W4 durable evidence identity chain is frozen for M2: Change Set, batch plan/execution, per-operation stable identities, checkpoint/checkpoint-set revisions, aggregate Strong Verify, Semantic Diff, Trust, and optional recovery boundaries. M2 must point at existing durable artifacts rather than duplicate their full payloads.
 
-P4 / Track C is **not** a prerequisite for Track M. Later P4 observations may become an additional L0 source, but M2 must not wait for or implement Track C.
+P4 / Track C is **not** a prerequisite for Track M. Later P4 observations may become an additional L0 source, but M3 must not wait for or implement Track C.
 
 ### Track C — Source Control / P4 awareness
 
-Deferred while M2 is active unless the owner explicitly changes priority. Conservative direction remains read-only provider observation first, then pre-write conflict checks; no automatic checkout/submit.
+Deferred while M3 is active unless the owner explicitly changes priority. Conservative direction remains read-only provider observation first, then pre-write conflict checks; no automatic checkout/submit.
 
 ### Track X — deeper UE capabilities
 
-Deferred while M2 is active.
+Deferred while M3 is active.
 
 ### Track D — maintenance / engineering quality
 
-Deferred unless a concrete maintenance blocker prevents M2. Test-tiering and Git housekeeping prerequisites are already complete.
+Deferred unless a concrete maintenance blocker prevents M3. Test-tiering and Git housekeeping prerequisites are already complete.
 
 ## 16. Performance / fixture boundary
 
@@ -865,13 +916,15 @@ Before making any change:
 4. read this handoff.
 5. read docs/DEVELOPMENT_WORKFLOW.md.
 6. read docs/Plans/README.md.
-7. read docs/Plans/UEAGENTKIT_M2_DETERMINISTIC_L0_AUTO_CAPTURE_DETAILED_PLAN_20260830.md; do not invent a competing M2 plan.
-8. preserve every M1 RecallBudget/performance gate.
+7. read docs/Plans/UEAGENTKIT_M3_DETERMINISTIC_L0_TO_L1_DISTILLATION_DETAILED_PLAN_20260831.md; do not invent a competing M3 plan.
+8. preserve every M1 RecallBudget/performance gate and M2 L0 capture/idempotence gate.
 9. batch-read the implementation files needed for each slice; avoid one-function-at-a-time tool churn.
 10. use focused tests for edits, fast at meaningful G0 checkpoints, domain memory for G1, full once at G2.
-11. M2 required closure is U0: do not start UE for the normal implementation or required G2. A real-Writer UE spot-check is optional evidence unless the owner explicitly makes it required.
-12. do not touch P4/Track C as an M2 prerequisite.
-13. do not commit/push/rebase/tag/release unless explicitly authorized for that task.
+11. M3 required closure is U0: do not start UE for implementation or required G2.
+12. do not touch P4/Track C, M4 Vector work, or M5 prompt injection as an M3 prerequisite.
+13. do not add idle/startup background distillation; the required M3 trigger is explicit offline `ue-agent memory distill`.
+14. historical policy rejection without exact Policy digest must never become `projectRule`.
+15. do not commit/push/rebase/tag/release unless explicitly authorized for that task.
 ```
 
 `E:\WorkSpace\UEAgentKit-Performance` and `E:\WorkSpace\UEAgentKit-RealtimeIO` may still contain preserved ignored evidence but are not registered worktrees. Do not use or clean them.
@@ -922,14 +975,14 @@ Archive documents preserve their historical stage wording. Current status is det
 
 ## 20. Next local-Agent handoff
 
-M1 is closed and archived. The next local coding Agent should execute **M2** from `docs/Plans/UEAGENTKIT_M2_DETERMINISTIC_L0_AUTO_CAPTURE_DETAILED_PLAN_20260830.md`, based on local checkpoint `6d9cf711`, rather than reconstruct Track M architecture from chat history.
+M1 and M2 are closed and archived. The next local coding Agent should execute **M3** from `docs/Plans/UEAGENTKIT_M3_DETERMINISTIC_L0_TO_L1_DISTILLATION_DETAILED_PLAN_20260831.md`, based on reviewed local checkpoint `d38c23c`, rather than reconstruct Track M architecture from chat history.
 
-The M2 Detailed Plan is present and authoritative. The Agent should report only:
+The M3 Detailed Plan is present and authoritative. The Agent should report only:
 
 ```text
 verified Git facts
 plan/repository conflicts if any
-M2 execution slices
+M3 execution slices
 measured elapsed time / validation time at completion
 ```
 
