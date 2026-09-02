@@ -31,13 +31,14 @@ Track V / Knowledge Web              COMPLETE
   V2 visualization                   complete
 
 W + V integration                    G3 PASS
-Current portable full suite          885 / 885 PASS
+Current portable full suite          909 / 909 PASS
 Track M / M1                         COMPLETE / REVIEWED / G2 PASS / U0
 Track M / M2                         COMPLETE / REVIEWED / G2 PASS / U0
-Track M / M3                         READY FOR IMPLEMENTATION / U0
-M3 base                              d38c23c70fdf710117e6bd31f738b20665c20cd9
+Track M / M3                         COMPLETE / REVIEWED / G2 PASS / U0
+Track M / M4                         READY FOR IMPLEMENTATION / U0
+M4 base                              30449274b7d8f417af89be07c36d1a317cdc0390
 Published-version change             none
-M1/M2 regression benchmark gates     PASS
+M1/M2/M3 regression benchmark gates  PASS
 ```
 
 The key project-management interpretation is:
@@ -196,6 +197,48 @@ docs/Plans/UEAGENTKIT_M3_DETERMINISTIC_L0_TO_L1_DISTILLATION_DETAILED_PLAN_20260
 
 M3 is U0 and keeps Memory schema v4. It adds explicit offline deterministic distillation only; no LLM, vector retrieval, prompt injection, P4, C++, UE, idle/startup background scheduler, or new required dependency. Historical Policy rejection events that lack an exact Policy digest must never be promoted to `projectRule`.
 
+### 0.5 Track M / M3 completion and M4 planning update — 2026-09-02
+
+M3 is complete, independently reviewed, locally committed, and archived. The active next stage is **M4 — Hybrid Recall (FTS5 + optional local Vector + RRF)**.
+
+Final M3 state:
+
+```text
+branch                    feature/memory-context
+M3 planning checkpoint    2f4c85b7a0b6e07d50f91ffc65e3c6ba608dbcbd
+M3 implementation         30449274b7d8f417af89be07c36d1a317cdc0390
+UE level                  U0
+Memory schema             v4
+final Memory G1           226 / 226 PASS / 27.360 s
+final portable G2         909 / 909 PASS / 95.298 s
+Ruff / compileall         PASS
+ValidateRelease 0.7.0     PASS
+M3 100-event distill      263.852 ms / <5000 ms PASS
+push                      none
+```
+
+The interrupted first M3 Agent left broad sandbox-only `tempfile -> repo .tmp` edits. The takeover Agent classified each dirty file, reverted 20 unrelated sandbox-only changes, repaired the six actual M3 contract gaps, and closed M3 without a blanket reset. Owner review then removed the untracked `.tmp/` debug/test residue and obsolete 2026-08-31 benchmark drafts.
+
+Final M1/M2 regression snapshot at M3 closure:
+
+```text
+first Tool Memory incremental p95     13.924 ms   < 200 ms
+direct automatic recall p95           12.983 ms   < 300 ms
+task-end append p95                    14.133 ms   < 100 ms
+four-event L0 capture p95              15.026 ms   < 100 ms
+exact-state duplicate replay rows           0      PASS
+```
+
+M3 Plan/Result are now historical evidence under `docs/Plans/Archive/`.
+
+The active M4 contract is:
+
+```text
+docs/Plans/UEAGENTKIT_M4_HYBRID_RECALL_FTS5_VECTOR_RRF_DETAILED_PLAN_20260902.md
+```
+
+M4 is U0. It upgrades Memory schema v4 -> v5 additively, keeps required dependencies `[]`, and capability-probes the optional local vector stack before freezing it. The v5 persistent schema must be identical whether optional vector dependencies are installed or not. Automatic Task Context remains FTS-only in M4; hybrid retrieval is limited to explicit Memory Search so M1 first-Tool/Recall latency cannot become model-load dependent. No LLM, remote embedding API, implicit model download, P4, C++, or UE work belongs in M4.
+
 ## 1. Mandatory Read Order for a New Chat / Agent
 
 Read in this order:
@@ -204,12 +247,13 @@ Read in this order:
 1. docs/Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260830.md
 2. docs/DEVELOPMENT_WORKFLOW.md
 3. docs/Plans/README.md
-4. docs/Plans/UEAGENTKIT_M3_DETERMINISTIC_L0_TO_L1_DISTILLATION_DETAILED_PLAN_20260831.md
-5. docs/Plans/Archive/UEAGENTKIT_M2_DETERMINISTIC_L0_AUTO_CAPTURE_RESULT_20260830.md
-6. docs/Plans/Archive/UEAGENTKIT_M1_MEMORY_EFFICIENCY_BASELINE_AND_BUDGET_RESULT_20260830.md
-7. docs/Plans/UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md
-8. docs/Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md
-9. docs/Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md
+4. docs/Plans/UEAGENTKIT_M4_HYBRID_RECALL_FTS5_VECTOR_RRF_DETAILED_PLAN_20260902.md
+5. docs/Plans/Archive/UEAGENTKIT_M3_DETERMINISTIC_L0_TO_L1_DISTILLATION_RESULT_20260902.md
+6. docs/Plans/Archive/UEAGENTKIT_M2_DETERMINISTIC_L0_AUTO_CAPTURE_RESULT_20260830.md
+7. docs/Plans/Archive/UEAGENTKIT_M1_MEMORY_EFFICIENCY_BASELINE_AND_BUDGET_RESULT_20260830.md
+8. docs/Plans/UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md
+9. docs/Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md
+10. docs/Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md
 ```
 
 Historical completed Plans/Results are now under:
@@ -230,18 +274,18 @@ Do not reconstruct current project state from old Chat history when this handoff
 
 ### 2.1 Current development refs
 
-Repository housekeeping and remote synchronization were completed before M1 planning. M1 and M2 are now locally committed; M3 planning is being closed on top of the reviewed M2 checkpoint.
+Repository housekeeping and remote synchronization were completed before M1 planning. M1, M2, and M3 are now locally committed; M4 planning is being closed on top of the reviewed M3 checkpoint.
 
 Remote refs remain at the pre-M1 synchronized checkpoint until an explicit push is authorized:
 
 ```text
 main                           137c3a35e943f2c8e65f13dd8befe95aec3c6612
 origin/main                    137c3a35e943f2c8e65f13dd8befe95aec3c6612
-feature/memory-context         d38c23c70fdf710117e6bd31f738b20665c20cd9  (reviewed M2 local checkpoint)
+feature/memory-context         30449274b7d8f417af89be07c36d1a317cdc0390  (reviewed M3 local checkpoint)
 origin/feature/memory-context  137c3a35e943f2c8e65f13dd8befe95aec3c6612
 ```
 
-The active development worktree remains on `feature/memory-context`. M2 implementation/review is committed at `d38c23c`; the M3 planning checkpoint is local-only and must be confirmed from live Git state. After this handoff closure the intended state is a clean tree with four local commits ahead of `origin/feature/memory-context`.
+The active development worktree remains on `feature/memory-context`. M3 implementation/review is committed at `3044927`; the M4 planning checkpoint is local-only and must be confirmed from live Git state. No Track M commit has been pushed; always inspect live ahead/behind counts before modifying anything.
 
 ### 2.2 Registered worktrees
 
@@ -736,7 +780,7 @@ New rule:
 ```text
 docs/Plans/
   README.md
-  UEAGENTKIT_M3_DETERMINISTIC_L0_TO_L1_DISTILLATION_DETAILED_PLAN_20260831.md
+  UEAGENTKIT_M4_HYBRID_RECALL_FTS5_VECTOR_RRF_DETAILED_PLAN_20260902.md
   UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md
   UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md
   UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md
@@ -821,20 +865,20 @@ src/ue_agent_kit/web/index.html
 src/ue_agent_kit/cli.py
 ```
 
-### Memory / active M3 surface
+### Memory / active M4 surface
 
 ```text
-src/ue_agent_kit/memory_l0.py
+src/ue_agent_kit/memory_schema.py
+src/ue_agent_kit/project_memory.py
 src/ue_agent_kit/memory_context.py
 src/ue_agent_kit/memory_service.py
-src/ue_agent_kit/project_memory.py
-src/ue_agent_kit/memory_tree.py
+src/ue_agent_kit/memory_distill.py
 src/ue_agent_kit/cli.py
-src/ue_agent_kit/workflow_common.py
-tests/python/test_memory_l0.py
+src/ue_agent_kit/mcp_memory_tools.py
+pyproject.toml
 ```
 
-M3 is expected to add `src/ue_agent_kit/memory_distill.py` plus focused distillation tests. The M3 Agent must preserve the M1 RecallBudget/deadline contract and M2 append-only/idempotent L0 contract. It must not turn missing historical provenance into inferred facts.
+M4 is expected to add `src/ue_agent_kit/memory_vector.py`, schema v5, optional local embedding/backfill support, and deterministic hybrid retrieval tests/benchmarks. Required dependencies must remain empty. Automatic Task Context stays FTS-only in M4; a missing/failing optional vector stack must degrade to FTS without weakening any M1-M3 gate.
 
 ### W5 / scale
 
@@ -846,7 +890,7 @@ Plugin/UEAgentKit/Source/UEAgentKitEditor/Private/PerformanceFixtureCommandlet.c
 
 ## 15. Active Track and deferred project tracks
 
-**Track M is active. M1 and M2 are complete; M3 is next.**
+**Track M is active. M1-M3 are complete; M4 is next.**
 
 The Master/Midterm documents still define the broader direction, but their old progress wording is historical where it conflicts with this handoff or the latest Track M Result/Plan.
 
@@ -855,29 +899,29 @@ The Master/Midterm documents still define the broader direction, but their old p
 ```text
 M1 performance/budget foundation       COMPLETE / U0 / G2 PASS
 M2 deterministic L0 capture            COMPLETE / REVIEWED / U0 / G2 PASS
-M3 L0 -> L1 deterministic distillation READY FOR IMPLEMENTATION / U0
-M4 FTS + optional Vector + RRF          deferred
+M3 L0 -> L1 deterministic distillation COMPLETE / REVIEWED / U0 / G2 PASS
+M4 FTS5 + optional Vector + RRF         READY FOR IMPLEMENTATION / U0
 M5 L2/L3 injection                     deferred
 M6 optional symbolic compression       deferred / data-driven
 ```
 
-M1 gates and the M2 L0 performance/idempotence gates are persistent regression requirements for M3-M5.
+M1 gates, M2 L0 performance/idempotence gates, and the M3 deterministic-distillation gate are persistent regression requirements for M4-M5.
 
 The W4 durable evidence identity chain is frozen for M2: Change Set, batch plan/execution, per-operation stable identities, checkpoint/checkpoint-set revisions, aggregate Strong Verify, Semantic Diff, Trust, and optional recovery boundaries. M2 must point at existing durable artifacts rather than duplicate their full payloads.
 
-P4 / Track C is **not** a prerequisite for Track M. Later P4 observations may become an additional L0 source, but M3 must not wait for or implement Track C.
+P4 / Track C is **not** a prerequisite for Track M. Later P4 observations may become an additional L0 source, but M4 must not wait for or implement Track C.
 
 ### Track C — Source Control / P4 awareness
 
-Deferred while M3 is active unless the owner explicitly changes priority. Conservative direction remains read-only provider observation first, then pre-write conflict checks; no automatic checkout/submit.
+Deferred while M4 is active unless the owner explicitly changes priority. Conservative direction remains read-only provider observation first, then pre-write conflict checks; no automatic checkout/submit.
 
 ### Track X — deeper UE capabilities
 
-Deferred while M3 is active.
+Deferred while M4 is active.
 
 ### Track D — maintenance / engineering quality
 
-Deferred unless a concrete maintenance blocker prevents M3. Test-tiering and Git housekeeping prerequisites are already complete.
+Deferred unless a concrete maintenance blocker prevents M4. Test-tiering and Git housekeeping prerequisites are already complete.
 
 ## 16. Performance / fixture boundary
 
@@ -916,15 +960,18 @@ Before making any change:
 4. read this handoff.
 5. read docs/DEVELOPMENT_WORKFLOW.md.
 6. read docs/Plans/README.md.
-7. read docs/Plans/UEAGENTKIT_M3_DETERMINISTIC_L0_TO_L1_DISTILLATION_DETAILED_PLAN_20260831.md; do not invent a competing M3 plan.
-8. preserve every M1 RecallBudget/performance gate and M2 L0 capture/idempotence gate.
-9. batch-read the implementation files needed for each slice; avoid one-function-at-a-time tool churn.
-10. use focused tests for edits, fast at meaningful G0 checkpoints, domain memory for G1, full once at G2.
-11. M3 required closure is U0: do not start UE for implementation or required G2.
-12. do not touch P4/Track C, M4 Vector work, or M5 prompt injection as an M3 prerequisite.
-13. do not add idle/startup background distillation; the required M3 trigger is explicit offline `ue-agent memory distill`.
-14. historical policy rejection without exact Policy digest must never become `projectRule`.
-15. do not commit/push/rebase/tag/release unless explicitly authorized for that task.
+7. read docs/Plans/UEAGENTKIT_M4_HYBRID_RECALL_FTS5_VECTOR_RRF_DETAILED_PLAN_20260902.md; do not invent a competing M4 plan.
+8. preserve every M1 RecallBudget/performance gate, M2 L0 capture/idempotence gate, and M3 distillation gate.
+9. begin with M4-0 capability probe + frozen 20-query relevance corpus before tuning retrieval.
+10. batch-read the implementation files needed for each slice; avoid one-function-at-a-time tool churn.
+11. use focused tests for edits, fast only at meaningful G0 checkpoints, domain memory once at G1, full once at G2.
+12. M4 required closure is U0: do not start UE/UBT.
+13. keep required dependencies `[]`; vector dependencies are optional and missing/failure must degrade to FTS.
+14. keep automatic Task Context FTS-only in M4; do not make first Tool Memory depend on model loading.
+15. do not create a dependency-conditional persistent sqlite-vec schema; v5 structure must be deterministic.
+16. no implicit model download/network access in MCP/query paths.
+17. do not touch P4/Track C, M5 prompt injection, M6 compression, C++, or UE.
+18. do not commit/push/rebase/tag/release unless explicitly authorized for that task.
 ```
 
 `E:\WorkSpace\UEAgentKit-Performance` and `E:\WorkSpace\UEAgentKit-RealtimeIO` may still contain preserved ignored evidence but are not registered worktrees. Do not use or clean them.
@@ -975,14 +1022,16 @@ Archive documents preserve their historical stage wording. Current status is det
 
 ## 20. Next local-Agent handoff
 
-M1 and M2 are closed and archived. The next local coding Agent should execute **M3** from `docs/Plans/UEAGENTKIT_M3_DETERMINISTIC_L0_TO_L1_DISTILLATION_DETAILED_PLAN_20260831.md`, based on reviewed local checkpoint `d38c23c`, rather than reconstruct Track M architecture from chat history.
+M1-M3 are closed and archived. The next local coding Agent should execute **M4** from `docs/Plans/UEAGENTKIT_M4_HYBRID_RECALL_FTS5_VECTOR_RRF_DETAILED_PLAN_20260902.md`, based on reviewed local checkpoint `3044927`, rather than reconstruct Track M architecture from chat history.
 
-The M3 Detailed Plan is present and authoritative. The Agent should report only:
+The M4 Detailed Plan is present and authoritative. The Agent should report only:
 
 ```text
 verified Git facts
+M4-0 optional-stack capability probe facts
 plan/repository conflicts if any
-M3 execution slices
+M4 execution slices
+quality/latency benchmark results
 measured elapsed time / validation time at completion
 ```
 
