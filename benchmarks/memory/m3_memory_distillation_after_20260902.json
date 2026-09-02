@@ -1,0 +1,46 @@
+{
+  "environment": {
+    "hostnameHash": "",
+    "implementation": "CPython",
+    "machine": "AMD64",
+    "platform": "Windows-10-10.0.19045-SP0",
+    "python": "3.12.10"
+  },
+  "fixture": {
+    "events": 100,
+    "mix": [
+      "verified-checkpoint-set (R1 projectFact)",
+      "workflow-rejection (R2 knownIssue)",
+      "policy-rejection-with-digest (R3 projectRule)",
+      "verified-semantic-diff (R4 projectFact)",
+      "verified-recovery (R1 projectFact)",
+      "partial-recovery (R2 knownIssue)",
+      "supersession-pair: live-write journal + change set (R5 decisionRecord)",
+      "resident-live-write-no-output",
+      "no-op-change-set-no-output"
+    ],
+    "note": "No absolute user paths are recorded.",
+    "projectKey": "benchmark-distill-project"
+  },
+  "gates": {
+    "100_l0_deterministic_distillation_lt_5s": {
+      "actualMs": 263.852,
+      "limitMs": 5000.0,
+      "pass": true
+    }
+  },
+  "generatedAtUtc": "2026-09-02T14:26:23Z",
+  "measurements": {
+    "deferredCount": 0,
+    "distillElapsedMs": 263.852,
+    "distilledCount": 100,
+    "evaluatedCount": 100,
+    "failedCount": 0,
+    "pendingAfter": 0,
+    "producedRecordCount": 70,
+    "reusedRecordCount": 0,
+    "selectedCount": 100
+  },
+  "mode": "gate",
+  "schema": "ueagentkit-memory-distillation/1.0"
+}

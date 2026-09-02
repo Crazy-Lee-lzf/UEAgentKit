@@ -972,12 +972,17 @@ class WorkflowCommonBase:
         ):
             return None
         try:
+            error_code = str(error.code)
+            policy_digest = ""
+            if error_code == "policy-rejected" or error_code.startswith("policy-"):
+                policy_digest = getattr(self, "policy_digest", "").removeprefix("sha256:")
             return service.capture_rejection(
                 operation=operation,
-                error_code=str(error.code),
+                error_code=error_code,
                 asset_paths=asset_paths,
                 change_set_id=change_set_id,
                 target_identity=target_identity,
+                policy_digest=policy_digest,
             ).to_payload()
         except Exception as exc:
             return {

@@ -192,6 +192,37 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Immutable index used for Revision validation. Default: {DEFAULT_DATABASE}",
     )
 
+    memory_distill = memory_subparsers.add_parser(
+        "distill",
+        help="Deterministically distill pending L0 events into L1 Project Memory records.",
+    )
+    _add_memory_arguments(memory_distill)
+    memory_distill.add_argument(
+        "--artifact-root",
+        type=Path,
+        required=True,
+        help="Fixed M2 Writer work_root containing durable L0 artifacts.",
+    )
+    memory_distill.add_argument(
+        "--index-database",
+        type=Path,
+        default=DEFAULT_DATABASE,
+        help=f"Immutable index used for Revision source validation. Default: {DEFAULT_DATABASE}",
+    )
+    memory_distill.add_argument(
+        "--policy",
+        dest="policy_path",
+        type=Path,
+        required=True,
+        help="Fixed Project Write Policy path used for policy-digest source validation.",
+    )
+    memory_distill.add_argument(
+        "--max-events",
+        type=int,
+        default=100,
+        help="Maximum pending L0 events to distill. Default: 100, hard max: 100.",
+    )
+
     memory_export = memory_subparsers.add_parser(
         "export",
         help="Write a portable audit JSON with all records and status events.",
@@ -389,6 +420,18 @@ def run(args: argparse.Namespace) -> tuple[Any, int]:
                 "staleRecordIds": list(result.invalidation.stale_record_ids),
                 "reasons": result.invalidation.reasons,
             }, 0
+        if args.memory_command == "distill":
+            distiller = memory_service.distillation_service(
+                artifact_root=args.artifact_root,
+                index_database=args.index_database,
+                policy_path=args.policy_path,
+            )
+            distillation = distiller.distill(max_events=args.max_events)
+            payload = distillation.to_payload()
+            payload["projectKey"] = memory_service.project_key
+            payload["sourceValidation"] = distiller.validate_source_bindings()
+            payload["evidenceChainVerdicts"] = distiller.evaluate_evidence_chains()
+            return payload, 0
         if args.memory_command == "export":
             report = build_memory_audit_report(
                 memory_service,

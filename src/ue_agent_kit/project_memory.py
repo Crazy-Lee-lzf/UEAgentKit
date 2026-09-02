@@ -453,6 +453,49 @@ def _evidence_sha256(
     return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def record_provenance_digest(
+    *,
+    project_key: str,
+    record_type: MemoryRecordType | str,
+    subject_key: str,
+    title: str,
+    body: str,
+    source_kind: MemorySourceKind | str,
+    source_ref: str,
+    confidence: float,
+    scopes: Sequence[MemoryScope],
+    revisions: Sequence[MemoryRevision],
+    artifacts: Sequence[MemoryArtifact],
+    details: dict[str, Any],
+) -> tuple[str, str]:
+    """Narrow M3 helper: canonical (content, evidence) digests for one record.
+
+    M3 uses this to prove that an existing deterministic L1 record still
+    matches the exact expected rule output before reusing it. The digests are
+    identical in construction to the values ``create_memory_record`` stores, so
+    a mismatch means the stored record was produced by a different rule output
+    or was modified after creation.
+    """
+    content = _content_sha256(
+        record_type=MemoryRecordType(record_type),
+        subject_key=subject_key,
+        title=title,
+        body=body,
+        scopes=scopes,
+        details=details,
+    )
+    evidence = _evidence_sha256(
+        project_key=project_key,
+        content_sha256=content,
+        source_kind=MemorySourceKind(source_kind),
+        source_ref=source_ref,
+        confidence=confidence,
+        revisions=revisions,
+        artifacts=artifacts,
+    )
+    return content, evidence
+
+
 def _backfill_evidence_sha256(connection: sqlite3.Connection) -> None:
     rows = connection.execute(
         """

@@ -454,11 +454,20 @@ class MemoryL0CaptureService:
         asset_paths: Sequence[str] = (),
         change_set_id: str = "",
         target_identity: str = "",
+        policy_digest: str = "",
         outcome: str = "rejected",
     ) -> MemoryL0EventDraft:
         operation = _bounded_text(operation, "operation", 128)
         bounded_assets = list(asset_paths[:MAX_L0_ASSET_PATHS])
-        payload = {
+        bounded_digest = _bounded_text(
+            policy_digest,
+            "policy_digest",
+            64,
+            required=False,
+        )
+        if bounded_digest and not re.fullmatch(r"[0-9a-f]{64}", bounded_digest):
+            raise ValueError("policy_digest must be one lowercase SHA-256 digest.")
+        payload: dict[str, Any] = {
             "operation": operation,
             "errorCode": _bounded_text(error_code, "error_code", 128),
             "assetPaths": bounded_assets,
@@ -475,6 +484,15 @@ class MemoryL0CaptureService:
                 required=False,
             ),
         }
+        if bounded_digest:
+            payload["policyDigest"] = bounded_digest
+        details: dict[str, Any] = {
+            "operation": operation,
+            "errorCode": payload["errorCode"],
+            "targetIdentity": payload["targetIdentity"],
+        }
+        if bounded_digest:
+            details["policyDigest"] = bounded_digest
         digest = hashlib.sha256(
             _canonical_json(payload, "rejection payload").encode("utf-8")
         ).hexdigest()
@@ -487,11 +505,7 @@ class MemoryL0CaptureService:
             outcome=outcome,
             asset_paths=asset_paths,
             change_set_id=change_set_id,
-            details={
-                "operation": operation,
-                "errorCode": payload["errorCode"],
-                "targetIdentity": payload["targetIdentity"],
-            },
+            details=details,
         )
 
     def capture_rejection(self, **kwargs: Any) -> MemoryL0CaptureResult:
@@ -563,6 +577,27 @@ class MemoryL0CaptureService:
                 params,
             ).fetchall()
         return tuple(_row_event(row) for row in rows)
+
+    def mark_event_distilled(self, event_id: str) -> None:
+        """Narrow M3 primitive: mark one exact L0 event as deterministically evaluated.
+
+        This is the only L0 mutation M3 is allowed to perform. It never exposes
+        generic update/delete and never changes event content.
+        """
+        if not _EVENT_ID_PATTERN.fullmatch(event_id):
+            raise ValueError("event_id must match l0_<32 lowercase hex characters>.")
+        with open_project_memory_database(self.database_path) as connection:
+            cursor = connection.execute(
+                """
+                UPDATE memory_l0_events
+                SET distilled = 1
+                WHERE project_key = ? AND event_id = ?
+                """,
+                (self.project_key, event_id),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(f"L0 event not found: {event_id}")
+            connection.commit()
 
     def create_evidence_chain(
         self,

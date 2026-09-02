@@ -28,6 +28,11 @@ from .memory_context import (
     evidence_payload,
     expand_memory_node,
 )
+from .memory_distill import (
+    DistillationBudget,
+    DistillationResult,
+    MemoryDistillationService,
+)
 from .memory_l0 import (
     MemoryEvidenceChain,
     MemoryEvidenceChainDraft,
@@ -572,6 +577,39 @@ class ProjectMemoryService:
     def get_evidence(self, record_id: str) -> dict[str, Any]:
         record = self.get_record(record_id)
         return evidence_payload(record)
+
+    def distillation_service(
+        self,
+        *,
+        artifact_root: Path,
+        index_database: Path,
+        policy_path: Path,
+        budget: DistillationBudget = DistillationBudget(),
+    ) -> MemoryDistillationService:
+        return MemoryDistillationService(
+            memory_database=self.database_path,
+            project_key=self.project_key,
+            artifact_root=artifact_root,
+            index_database=index_database,
+            policy_path=policy_path,
+            budget=budget,
+        )
+
+    def distill_l0(
+        self,
+        *,
+        artifact_root: Path,
+        index_database: Path,
+        policy_path: Path,
+        max_events: int = 100,
+        budget: DistillationBudget = DistillationBudget(),
+    ) -> DistillationResult:
+        return self.distillation_service(
+            artifact_root=artifact_root,
+            index_database=index_database,
+            policy_path=policy_path,
+            budget=budget,
+        ).distill(max_events=max_events)
 
     def validate_against_index(self, index_database_path: Path) -> ProjectMemoryIndexValidation:
         resolved_index = index_database_path.expanduser().resolve()

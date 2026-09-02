@@ -98,6 +98,99 @@ class ProjectMemoryCliTests(unittest.TestCase):
             result = build_index(connection, export_root, self.index_path)
         self.assertEqual((result.added, result.failed), (1, 0))
 
+    def test_memory_distill_reports_validation_and_chain_verdicts(self) -> None:
+        artifact_root = self.root / "workflow"
+        artifact_root.mkdir(parents=True, exist_ok=True)
+        revision = "sha256:" + REVISION_A
+        artifact = artifact_root / "verified" / "cli.json"
+        artifact.parent.mkdir(parents=True, exist_ok=True)
+        artifact.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": "1.0",
+                    "projectName": PROJECT,
+                    "assetPath": ASSET_A,
+                    "assetRevisions": [
+                        {"assetPath": ASSET_A, "revision": revision, "revisionStable": True}
+                    ],
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+        policy_path = self.root / "policy.json"
+        policy_path.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": "1.0",
+                    "allowedProjectNames": [PROJECT],
+                    "allowedAssetRoots": ["/Game/"],
+                    "allowedAssetClasses": [],
+                    "allowedOperations": [],
+                    "commitEnabled": True,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            encoding="utf-8",
+        )
+        capture = self.service.l0_capture_service(artifact_root=artifact_root)
+        capture.append_event(
+            capture.artifact_draft(
+                artifact_path=artifact,
+                event_kind="checkpoint_set",
+                lifecycle_state="verified",
+                outcome="success",
+                asset_paths=(ASSET_A,),
+                change_set_id="cs_cli",
+                details={"checkpointSetId": "cps_cli"},
+            )
+        )
+
+        result, code = run(
+            self.parse(
+                "memory",
+                "distill",
+                *self.memory_arguments(),
+                "--artifact-root",
+                str(artifact_root),
+                "--index-database",
+                str(self.index_path),
+                "--policy",
+                str(policy_path),
+            )
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(result["selectedCount"], 1)
+        self.assertEqual(result["evaluatedCount"], 1)
+        self.assertEqual(result["distilledCount"], 1)
+        self.assertEqual(result["producedRecordCount"], 1)
+        self.assertTrue(str(result["producedRecordIds"][0]).startswith("mem_"))
+        self.assertIn("sourceValidation", result)
+        self.assertIn("evidenceChainVerdicts", result)
+        self.assertEqual(result["sourceValidation"]["staleRecordIds"], [])
+        self.assertEqual(result["pendingAfter"], 0)
+
+        # The explicit offline command is idempotent: a rerun has nothing to do.
+        rerun, rerun_code = run(
+            self.parse(
+                "memory",
+                "distill",
+                *self.memory_arguments(),
+                "--artifact-root",
+                str(artifact_root),
+                "--index-database",
+                str(self.index_path),
+                "--policy",
+                str(policy_path),
+            )
+        )
+        self.assertEqual(rerun_code, 0)
+        self.assertEqual(rerun["selectedCount"], 0)
+        self.assertEqual(rerun["producedRecordCount"], 0)
+
     def test_status_search_and_get_use_fixed_project_without_exposing_database_path(self) -> None:
         status, status_code = run(
             self.parse("memory", "status", *self.memory_arguments())
