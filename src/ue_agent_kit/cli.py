@@ -27,7 +27,18 @@ from .memory_reports import (
     memory_record_payload,
 )
 from .memory_service import ProjectMemoryService
-from .project_memory import MemoryRecordType, MemoryScopeType, MemoryStatus
+from .memory_vector import (
+    Model2VecProvider,
+    backfill_embeddings,
+    ensure_embeddings_for_records,
+    vector_model_path_from_env,
+)
+from .project_memory import (
+    MemoryRecordType,
+    MemoryScopeType,
+    MemoryStatus,
+    open_project_memory_database,
+)
 from .patches import PATCH_SCHEMA_VERSION, get_operation_registry, validate_patch
 from .queries import find_references, get_asset, get_stats, search_assets, search_symbols
 from .schema import CURRENT_SCHEMA_VERSION
@@ -175,6 +186,37 @@ def build_parser() -> argparse.ArgumentParser:
     )
     memory_search.add_argument("--scope-key", default="")
     memory_search.add_argument("--limit", type=int, default=20)
+
+    memory_backfill = memory_subparsers.add_parser(
+        "backfill-embeddings",
+        help=(
+            "Deterministically backfill Project Memory embeddings using the optional "
+            "local model2vec vector model (offline command; never runs on query paths)."
+        ),
+    )
+    _add_memory_arguments(memory_backfill)
+    memory_backfill.add_argument(
+        "--model-dir",
+        dest="model_dir",
+        type=Path,
+        default=None,
+        help=(
+            "Existing local model2vec model directory containing model.safetensors. "
+            "Defaults to the UEAGENTKIT_MEMORY_VECTOR_MODEL environment variable."
+        ),
+    )
+    memory_backfill.add_argument(
+        "--batch-size",
+        type=int,
+        default=64,
+        help="Bounded batch size for selection and embedding. Default: 64, hard max: 500.",
+    )
+    memory_backfill.add_argument(
+        "--max-records",
+        type=int,
+        default=0,
+        help="Optional bound on records processed in this run (0 = unbounded).",
+    )
 
     memory_get = memory_subparsers.add_parser("get", help="Get one exact Memory record.")
     _add_memory_arguments(memory_get)
@@ -350,6 +392,30 @@ def _open_query_database(path: Path):
     return context, connection
 
 
+def _ensure_distill_embeddings(memory_service: ProjectMemoryService, *, produced_ids: tuple[str, ...]) -> dict[str, Any]:
+    """M4 post-distill integration: ensure embeddings only when vector mode is
+    explicitly configured. Vector-disabled distillation is unchanged; a vector
+    failure is reported with a stable reason and never fails the distillation."""
+    if vector_model_path_from_env() is None:
+        return {"enabled": False, "reason": "vector-model-not-configured"}
+    if not produced_ids:
+        return {"enabled": True, "selected": 0, "created": 0, "rebuilt": 0, "failed": 0}
+    try:
+        provider = Model2VecProvider.from_local_dir(vector_model_path_from_env())
+        with open_project_memory_database(memory_service.database_path) as connection:
+            report = ensure_embeddings_for_records(
+                connection,
+                provider,
+                project_key=memory_service.project_key,
+                record_ids=produced_ids,
+            )
+        payload = {"enabled": True}
+        payload.update(report.to_payload())
+        return payload
+    except Exception:
+        return {"enabled": True, "error": "vector-backfill-failed"}
+
+
 def run(args: argparse.Namespace) -> tuple[Any, int]:
     if args.command == "knowledge-view":
         summary = serve_knowledge_view(
@@ -391,15 +457,16 @@ def run(args: argparse.Namespace) -> tuple[Any, int]:
             }
             if args.statuses is not None:
                 kwargs["statuses"] = tuple(args.statuses)
-            hits = memory_service.search_records(**kwargs)
+            result = memory_service.search_records(**kwargs)
             return {
                 "schemaVersion": "1.0",
                 "tool": "ue_memory_search",
                 "projectKey": memory_service.project_key,
-                "resultCount": len(hits),
+                "resultCount": len(result.hits),
+                "retrieval": result.to_payload(),
                 "items": [
                     {"rank": hit.rank, "record": memory_record_payload(hit.record)}
-                    for hit in hits
+                    for hit in result.hits
                 ],
             }, 0
         if args.memory_command == "get":
@@ -420,6 +487,36 @@ def run(args: argparse.Namespace) -> tuple[Any, int]:
                 "staleRecordIds": list(result.invalidation.stale_record_ids),
                 "reasons": result.invalidation.reasons,
             }, 0
+        if args.memory_command == "backfill-embeddings":
+            model_dir = args.model_dir if args.model_dir is not None else vector_model_path_from_env()
+            if model_dir is None:
+                return {
+                    "schemaVersion": "1.0",
+                    "tool": "ue_memory_backfill_embeddings",
+                    "projectKey": memory_service.project_key,
+                    "valid": False,
+                    "error": "vector-model-not-configured",
+                    "message": (
+                        "Provide --model-dir or set UEAGENTKIT_MEMORY_VECTOR_MODEL to an "
+                        "existing local model2vec model directory."
+                    ),
+                }, 2
+            provider = Model2VecProvider.from_local_dir(model_dir)
+            with open_project_memory_database(memory_service.database_path) as connection:
+                report = backfill_embeddings(
+                    connection,
+                    provider,
+                    project_key=memory_service.project_key,
+                    batch_size=args.batch_size,
+                    max_records=args.max_records,
+                )
+            payload = {
+                "schemaVersion": "1.0",
+                "tool": "ue_memory_backfill_embeddings",
+                "projectKey": memory_service.project_key,
+            }
+            payload.update(report.to_payload())
+            return payload, 0 if report.failed == 0 else 1
         if args.memory_command == "distill":
             distiller = memory_service.distillation_service(
                 artifact_root=args.artifact_root,
@@ -431,6 +528,10 @@ def run(args: argparse.Namespace) -> tuple[Any, int]:
             payload["projectKey"] = memory_service.project_key
             payload["sourceValidation"] = distiller.validate_source_bindings()
             payload["evidenceChainVerdicts"] = distiller.evaluate_evidence_chains()
+            payload["embeddingBackfill"] = _ensure_distill_embeddings(
+                memory_service,
+                produced_ids=distillation.produced_record_ids + distillation.reused_record_ids,
+            )
             return payload, 0
         if args.memory_command == "export":
             report = build_memory_audit_report(

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-CURRENT_MEMORY_SCHEMA_VERSION = 4
+CURRENT_MEMORY_SCHEMA_VERSION = 5
 
 
 @dataclass(frozen=True)
@@ -344,6 +344,25 @@ CREATE INDEX memory_l0_change_set_idx
 CREATE INDEX memory_l0_hypothesis_idx
     ON memory_l0_events(project_key, hypothesis_id, occurred_at_utc, event_id)
     WHERE hypothesis_id IS NOT NULL;
+""",
+    ),
+    MemoryMigration(
+        version=5,
+        description="Add optional Project Memory embedding storage (ordinary table, vector-extra independent)",
+        sql=r"""
+CREATE TABLE memory_embeddings (
+    record_id           TEXT PRIMARY KEY
+                        REFERENCES memory_records(record_id) ON DELETE CASCADE,
+    model_id            TEXT NOT NULL,
+    dim                 INTEGER NOT NULL CHECK (dim > 0),
+    content_sha256      TEXT NOT NULL,
+    embedding           BLOB NOT NULL,
+    created_at_utc      TEXT NOT NULL,
+    updated_at_utc      TEXT NOT NULL
+);
+
+CREATE INDEX memory_embeddings_model_idx
+    ON memory_embeddings(model_id, record_id);
 """,
     ),
 )

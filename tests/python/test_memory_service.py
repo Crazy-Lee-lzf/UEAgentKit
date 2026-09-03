@@ -140,15 +140,19 @@ class ProjectMemoryServiceTests(unittest.TestCase):
                 self.draft(project_key=OTHER_PROJECT, body="Player max health is 999."),
             )
 
-        hits = self.service.search_records(
+        result = self.service.search_records(
             query="max health",
             scope_type=MemoryScopeType.ASSET,
             scope_key=ASSET,
         )
-        self.assertEqual([hit.record.record_id for hit in hits], [expected.record_id])
-        self.assertIsInstance(hits[0].rank, float)
+        self.assertEqual([hit.record.record_id for hit in result.hits], [expected.record_id])
+        self.assertIsInstance(result.hits[0].rank, float)
+        self.assertEqual(result.retrieval_mode, "fts")
+        self.assertFalse(result.vector_available)
+        self.assertEqual(result.vector_fallback, "vector-model-not-configured")
+        self.assertEqual(result.query_embedding_count, 0)
         quoted = self.service.search_records(query='max "health"')
-        self.assertEqual([hit.record.record_id for hit in quoted], [expected.record_id])
+        self.assertEqual([hit.record.record_id for hit in quoted.hits], [expected.record_id])
         with self.assertRaisesRegex(ValueError, "searchable token"):
             self.service.search_records(query='""')
 
@@ -166,9 +170,9 @@ class ProjectMemoryServiceTests(unittest.TestCase):
                 current_revisions={ASSET: "sha256:b"},
             )
 
-        self.assertEqual(self.service.search_records(query="max health"), ())
-        hits = self.service.search_records(query="max health", statuses=(MemoryStatus.STALE,))
-        self.assertEqual([hit.record.record_id for hit in hits], [record.record_id])
+        self.assertEqual(self.service.search_records(query="max health").hits, ())
+        result = self.service.search_records(query="max health", statuses=(MemoryStatus.STALE,))
+        self.assertEqual([hit.record.record_id for hit in result.hits], [record.record_id])
 
     def test_validate_against_index_marks_mismatched_revision_stale(self) -> None:
         record = self.service.add_record(

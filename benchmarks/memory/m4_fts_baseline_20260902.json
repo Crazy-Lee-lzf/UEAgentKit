@@ -1,0 +1,284 @@
+{
+  "stage": "M4-0 pre-M4 FTS baseline over frozen corpus (search_memory_records, zero-extra interpreter)",
+  "projectKey": "M4Benchmark",
+  "recordCount": 25,
+  "perQuery": [
+    {
+      "queryId": "L01",
+      "kind": "lexical",
+      "text": "material TintColor parameter value",
+      "relevantIds": [
+        "mem_4b000000000000000000000000000001"
+      ],
+      "ftsTop5": [
+        "mem_4b000000000000000000000000000001"
+      ],
+      "firstRelevantRank": 1,
+      "recallAt5": 1,
+      "mrr": 1.0
+    },
+    {
+      "queryId": "L02",
+      "kind": "lexical",
+      "text": "Blueprint compile transient pointers",
+      "relevantIds": [
+        "mem_4b000000000000000000000000000002"
+      ],
+      "ftsTop5": [
+        "mem_4b000000000000000000000000000002"
+      ],
+      "firstRelevantRank": 1,
+      "recallAt5": 1,
+      "mrr": 1.0
+    },
+    {
+      "queryId": "L03",
+      "kind": "lexical",
+      "text": "recall budget deadline milliseconds",
+      "relevantIds": [
+        "mem_4b000000000000000000000000000003"
+      ],
+      "ftsTop5": [
+        "mem_4b000000000000000000000000000003"
+      ],
+      "firstRelevantRank": 1,
+      "recallAt5": 1,
+      "mrr": 1.0
+    },
+    {
+      "queryId": "L04",
+      "kind": "lexical",
+      "text": "schema migration embeddings backfill",
+      "relevantIds": [
+        "mem_4b000000000000000000000000000004"
+      ],
+      "ftsTop5": [
+        "mem_4b000000000000000000000000000004"
+      ],
+      "firstRelevantRank": 1,
+      "recallAt5": 1,
+      "mrr": 1.0
+    },
+    {
+      "queryId": "L05",
+      "kind": "lexical",
+      "text": "Strong Verify persistence evidence",
+      "relevantIds": [
+        "mem_4b000000000000000000000000000005"
+      ],
+      "ftsTop5": [
+        "mem_4b000000000000000000000000000005"
+      ],
+      "firstRelevantRank": 1,
+      "recallAt5": 1,
+      "mrr": 1.0
+    },
+    {
+      "queryId": "L06",
+      "kind": "lexical",
+      "text": "batch recovery reverse order",
+      "relevantIds": [
+        "mem_4b000000000000000000000000000006"
+      ],
+      "ftsTop5": [
+        "mem_4b000000000000000000000000000006"
+      ],
+      "firstRelevantRank": 1,
+      "recallAt5": 1,
+      "mrr": 1.0
+    },
+    {
+      "queryId": "L07",
+      "kind": "lexical",
+      "text": "texture streaming pool overrun",
+      "relevantIds": [
+        "mem_4b000000000000000000000000000007"
+      ],
+      "ftsTop5": [
+        "mem_4b000000000000000000000000000007"
+      ],
+      "firstRelevantRank": 1,
+      "recallAt5": 1,
+      "mrr": 1.0
+    },
+    {
+      "queryId": "L08",
+      "kind": "lexical",
+      "text": "Nanite shadow cascade flicker",
+      "relevantIds": [
+        "mem_4b000000000000000000000000000008"
+      ],
+      "ftsTop5": [
+        "mem_4b000000000000000000000000000008"
+      ],
+      "firstRelevantRank": 1,
+      "recallAt5": 1,
+      "mrr": 1.0
+    },
+    {
+      "queryId": "L09",
+      "kind": "lexical",
+      "text": "GameplayTags ability state design",
+      "relevantIds": [
+        "mem_4b000000000000000000000000000009"
+      ],
+      "ftsTop5": [
+        "mem_4b000000000000000000000000000009"
+      ],
+      "firstRelevantRank": 1,
+      "recallAt5": 1,
+      "mrr": 1.0
+    },
+    {
+      "queryId": "L10",
+      "kind": "lexical",
+      "text": "ASTC mobile compression package size",
+      "relevantIds": [
+        "mem_4b000000000000000000000000000010"
+      ],
+      "ftsTop5": [
+        "mem_4b000000000000000000000000000010"
+      ],
+      "firstRelevantRank": 1,
+      "recallAt5": 1,
+      "mrr": 1.0
+    },
+    {
+      "queryId": "S01",
+      "kind": "semantic",
+      "text": "why is the third person boom shortened",
+      "relevantIds": [
+        "mem_4b000000000000000000000000000011"
+      ],
+      "ftsTop5": [],
+      "firstRelevantRank": null,
+      "recallAt5": 0,
+      "mrr": 0.0
+    },
+    {
+      "queryId": "S02",
+      "kind": "semantic",
+      "text": "geometry disappearing with morning sun angle",
+      "relevantIds": [
+        "mem_4b000000000000000000000000000008"
+      ],
+      "ftsTop5": [],
+      "firstRelevantRank": null,
+      "recallAt5": 0,
+      "mrr": 0.0
+    },
+    {
+      "queryId": "S03",
+      "kind": "semantic",
+      "text": "rationale behind tag system selection for skills",
+      "relevantIds": [
+        "mem_4b000000000000000000000000000009"
+      ],
+      "ftsTop5": [],
+      "firstRelevantRank": null,
+      "recallAt5": 0,
+      "mrr": 0.0
+    },
+    {
+      "queryId": "S04",
+      "kind": "semantic",
+      "text": "how player progress storage prevents corrupted files",
+      "relevantIds": [
+        "mem_4b000000000000000000000000000012"
+      ],
+      "ftsTop5": [],
+      "firstRelevantRank": null,
+      "recallAt5": 0,
+      "mrr": 0.0
+    },
+    {
+      "queryId": "S05",
+      "kind": "semantic",
+      "text": "changed key bindings do not apply until relaunching",
+      "relevantIds": [
+        "mem_4b000000000000000000000000000013"
+      ],
+      "ftsTop5": [],
+      "firstRelevantRank": null,
+      "recallAt5": 0,
+      "mrr": 0.0
+    },
+    {
+      "queryId": "S06",
+      "kind": "semantic",
+      "text": "remote rendering workers ignored during bake",
+      "relevantIds": [
+        "mem_4b000000000000000000000000000014"
+      ],
+      "ftsTop5": [],
+      "firstRelevantRank": null,
+      "recallAt5": 0,
+      "mrr": 0.0
+    },
+    {
+      "queryId": "S07",
+      "kind": "semantic",
+      "text": "how guards notice the character",
+      "relevantIds": [
+        "mem_4b000000000000000000000000000015"
+      ],
+      "ftsTop5": [],
+      "firstRelevantRank": null,
+      "recallAt5": 0,
+      "mrr": 0.0
+    },
+    {
+      "queryId": "S08",
+      "kind": "semantic",
+      "text": "reason the interface images shrank the installer",
+      "relevantIds": [
+        "mem_4b000000000000000000000000000010"
+      ],
+      "ftsTop5": [],
+      "firstRelevantRank": null,
+      "recallAt5": 0,
+      "mrr": 0.0
+    },
+    {
+      "queryId": "S09",
+      "kind": "semantic",
+      "text": "editing shader parents breaks downstream variants",
+      "relevantIds": [
+        "mem_4b000000000000000000000000000016"
+      ],
+      "ftsTop5": [],
+      "firstRelevantRank": null,
+      "recallAt5": 0,
+      "mrr": 0.0
+    },
+    {
+      "queryId": "S10",
+      "kind": "semantic",
+      "text": "car physics update rate for bumpy ground",
+      "relevantIds": [
+        "mem_4b000000000000000000000000000017"
+      ],
+      "ftsTop5": [],
+      "firstRelevantRank": null,
+      "recallAt5": 0,
+      "mrr": 0.0
+    }
+  ],
+  "summary": {
+    "lexical": {
+      "queries": 10,
+      "recallAt5": 1.0,
+      "mrr": 1.0
+    },
+    "semantic": {
+      "queries": 10,
+      "recallAt5": 0.0,
+      "mrr": 0.0
+    },
+    "aggregate": {
+      "queries": 20,
+      "recallAt5": 0.5,
+      "mrr": 0.5
+    }
+  }
+}

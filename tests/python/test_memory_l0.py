@@ -210,7 +210,7 @@ class MemoryL0Tests(unittest.TestCase):
                 reopened.execute(
                     "SELECT COUNT(*) FROM memory_schema_migrations"
                 ).fetchone()[0],
-                4,
+                CURRENT_MEMORY_SCHEMA_VERSION,
             )
 
     def test_changed_artifact_at_same_path_appends_new_state(self) -> None:

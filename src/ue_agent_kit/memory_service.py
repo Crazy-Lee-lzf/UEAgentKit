@@ -40,6 +40,10 @@ from .memory_l0 import (
     MemoryL0Event,
 )
 from .memory_tasks import TaskOutcomeDraft, build_task_outcome_record
+from .memory_vector import (
+    get_shared_provider,
+    hybrid_search_memory_records,
+)
 from .memory_tree import (
     KnowledgeNode,
     KnowledgeNodeDraft,
@@ -99,6 +103,34 @@ class ProjectMemoryIndexValidation:
     index_database_path: Path
     indexed_asset_count: int
     invalidation: RevisionInvalidationResult
+
+
+@dataclass(frozen=True)
+class MemorySearchResult:
+    """Explicit Memory Search result with inspectable retrieval provenance.
+
+    ``retrieval_mode`` is ``fts`` or ``hybrid``. ``vector_fallback`` carries a
+    stable reason code when vector mode was unavailable; it never contains
+    exception text or model filesystem paths.
+    """
+
+    hits: tuple[MemorySearchHit, ...]
+    retrieval_mode: str
+    vector_available: bool
+    vector_fallback: str
+    query_embedding_count: int
+
+    def __iter__(self):
+        return iter(self.hits)
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "retrievalMode": self.retrieval_mode,
+            "vectorAvailable": self.vector_available,
+            "vectorFallback": self.vector_fallback,
+            "queryEmbeddingCount": self.query_embedding_count,
+            "corpusEmbeddingCount": 0,
+        }
 
 
 class ProjectMemoryService:
@@ -295,10 +327,34 @@ class ProjectMemoryService:
         scope_type: MemoryScopeType | str | None = None,
         scope_key: str = "",
         limit: int = 20,
-    ) -> tuple[MemorySearchHit, ...]:
+    ) -> MemorySearchResult:
+        """Explicit Memory Search: hybrid (FTS5 + optional vector + RRF) when the
+        optional local vector stack is available, otherwise a deterministic FTS
+        fallback with a stable reason code. Automatic Task Context recall never
+        uses this method and stays FTS-only in M4."""
         with open_project_memory_database(self.database_path) as connection:
-            return search_memory_records(
+            provider, fallback_reason = get_shared_provider()
+            if provider is None:
+                hits = search_memory_records(
+                    connection,
+                    project_key=self.project_key,
+                    query=query,
+                    record_types=record_types,
+                    statuses=statuses,
+                    scope_type=scope_type,
+                    scope_key=scope_key,
+                    limit=limit,
+                )
+                return MemorySearchResult(
+                    hits=hits,
+                    retrieval_mode="fts",
+                    vector_available=False,
+                    vector_fallback=fallback_reason,
+                    query_embedding_count=0,
+                )
+            outcome = hybrid_search_memory_records(
                 connection,
+                provider=provider,
                 project_key=self.project_key,
                 query=query,
                 record_types=record_types,
@@ -306,6 +362,13 @@ class ProjectMemoryService:
                 scope_type=scope_type,
                 scope_key=scope_key,
                 limit=limit,
+            )
+            return MemorySearchResult(
+                hits=outcome.hits,
+                retrieval_mode=outcome.retrieval_mode,
+                vector_available=outcome.vector_available,
+                vector_fallback=outcome.vector_fallback,
+                query_embedding_count=outcome.query_embedding_count,
             )
 
     def mark_superseded(

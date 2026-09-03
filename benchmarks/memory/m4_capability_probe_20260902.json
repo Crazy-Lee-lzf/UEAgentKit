@@ -1,0 +1,63 @@
+{
+  "date_utc": "2026-09-02",
+  "stage": "M4-0 capability probe",
+  "python_probed": {
+    "version": "3.12.10",
+    "sqlite_version": "3.49.1",
+    "note": "repo .venv (optional vector extra installed); system py -3.12 is the same CPython 3.12.10 build and is the zero-extra scenario"
+  },
+  "sqlite_fts5": {
+    "fts5_available": true,
+    "fts5_match_after_vec_load": true
+  },
+  "extension_loading": {
+    "has_enable_load_extension": true
+  },
+  "sqlite_vec": {
+    "package_version": "0.1.9",
+    "import": true,
+    "load_mechanism": "conn.enable_load_extension(True); sqlite_vec.load(conn); conn.enable_load_extension(False)",
+    "scalar_cosine_on_ordinary_blob_column": true,
+    "scalar_cosine_values_expected_match": true,
+    "scalar_cosine_expected": {"a_parallel": 0.0, "c_60deg": 0.292893, "b_perpendicular": 1.0, "d_antiparallel": 2.0},
+    "scalar_l2_on_ordinary_blob_column": true,
+    "aux_functions": ["vec_length", "vec_to_json", "vec_normalize", "vec_f32", "vec_quantize_binary", "vec_quantize_int8", "vec_slice", "vec_add", "vec_sub", "vec_distance_hamming", "vec_distance_l1"],
+    "invalid_blob_length_error": "OperationalError: Error reading 2nd vector: invalid float32 vector BLOB length. Must be divisible by 4, found 3",
+    "zero_vector_cosine_returns_null": true,
+    "scalar_scan_ms_5000rows_256dim": {"p50": 3.313, "min": 2.668, "max": 3.526},
+    "scalar_scan_ms_20000rows_256dim": {"p50": 12.966, "min": 12.666, "max": 13.518}
+  },
+  "model2vec": {
+    "package_version": "0.9.0",
+    "candidate_model": "minishlab/potion-base-8M",
+    "model_files_total_bytes": 30922193,
+    "model_safetensors_bytes": 30236760,
+    "model_safetensors_sha256": "f65d0f325faadc1e121c319e2faa41170d3fa07d8c89abd48ca5358d9a223de2",
+    "local_dir": "C:/Users/Administrator/.cache/ueagentkit/model2vec/potion-base-8M",
+    "cpu_only": true,
+    "no_torch_required": true,
+    "cold_load_ms": 1399.164,
+    "embedding_type": "numpy.ndarray",
+    "embedding_dtype": "float32",
+    "embedding_dimension": 256,
+    "deterministic_same_text_byte_identical": true,
+    "all_values_finite": true,
+    "warm_encode_ms": {"n": 200, "p50": 0.0814, "p95": 0.112, "min": 0.0742, "max": 0.2143},
+    "batch_encode_512_ms": 10.481,
+    "offline_load_proven": "loaded and encoded with HF_HUB_OFFLINE=1 + TRANSFORMERS_OFFLINE=1",
+    "missing_local_dir_offline_error": "HFValidationError (no download attempted)"
+  },
+  "acceptance_constraints": {
+    "cpu_only": "PASS",
+    "no_gpu_requirement": "PASS",
+    "model_artifact_under_100mb": "PASS (28.8 MB safetensors / 29.5 MB all files)",
+    "single_short_text_embedding_p95_under_10ms": "PASS (0.112 ms)",
+    "finite_deterministic_output": "PASS",
+    "no_implicit_network_in_accepted_runtime_path": "PASS (offline-env load from explicit local dir)"
+  },
+  "architecture_verdict": {
+    "preferred_shape_viable": true,
+    "statement": "sqlite-vec 0.1.9 scalar vec_distance_cosine operates directly on ordinary BLOB columns, so the plan's preferred v5 shape (ordinary memory_embeddings table, no conditional vec0 virtual table) is viable. Persistent v5 schema will be identical with and without the vector extra.",
+    "model_load_14s_confirms_automatic_recall_must_stay_fts_only": true
+  }
+}

@@ -1,0 +1,752 @@
+{
+  "stage": "M4 hybrid recall quality benchmark (frozen 20-query corpus)",
+  "corpusPath": "E:\\WorkSpace\\UEAgentKit-Integration\\benchmarks\\memory\\m4_frozen_relevance_corpus_20260902.json",
+  "modelDir": "C:\\Users\\Administrator\\.cache\\ueagentkit\\model2vec\\potion-base-8M",
+  "modelId": "model2vec:potion-base-8M:sha256:f65d0f325faadc1e121c319e2faa41170d3fa07d8c89abd48ca5358d9a223de2",
+  "corpus": {
+    "projectKey": "M4Benchmark",
+    "recordCount": 25,
+    "queryCount": 20
+  },
+  "backfill": {
+    "selected": 25,
+    "created": 25,
+    "reused": 25,
+    "rebuilt": 0,
+    "failed": 0,
+    "remaining": 0,
+    "modelId": "model2vec:potion-base-8M:sha256:f65d0f325faadc1e121c319e2faa41170d3fa07d8c89abd48ca5358d9a223de2",
+    "elapsedMs": 12.457,
+    "failedRecordIds": []
+  },
+  "corpusEmbedCallsDuringBackfill": 25,
+  "fts": {
+    "summary": {
+      "lexical": {
+        "queries": 10,
+        "recallAt5": 1.0,
+        "mrr": 1.0
+      },
+      "semantic": {
+        "queries": 10,
+        "recallAt5": 0.0,
+        "mrr": 0.0
+      },
+      "aggregate": {
+        "queries": 20,
+        "recallAt5": 0.5,
+        "mrr": 0.5
+      }
+    },
+    "latencyMs": {
+      "p50": 0.167,
+      "p95": 0.229,
+      "samples": 100
+    },
+    "perQuery": [
+      {
+        "queryId": "L01",
+        "kind": "lexical",
+        "text": "material TintColor parameter value",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000001"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000001"
+        ],
+        "firstRelevantRank": 1,
+        "recallAt5": 1,
+        "mrr": 1.0
+      },
+      {
+        "queryId": "L02",
+        "kind": "lexical",
+        "text": "Blueprint compile transient pointers",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000002"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000002"
+        ],
+        "firstRelevantRank": 1,
+        "recallAt5": 1,
+        "mrr": 1.0
+      },
+      {
+        "queryId": "L03",
+        "kind": "lexical",
+        "text": "recall budget deadline milliseconds",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000003"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000003"
+        ],
+        "firstRelevantRank": 1,
+        "recallAt5": 1,
+        "mrr": 1.0
+      },
+      {
+        "queryId": "L04",
+        "kind": "lexical",
+        "text": "schema migration embeddings backfill",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000004"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000004"
+        ],
+        "firstRelevantRank": 1,
+        "recallAt5": 1,
+        "mrr": 1.0
+      },
+      {
+        "queryId": "L05",
+        "kind": "lexical",
+        "text": "Strong Verify persistence evidence",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000005"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000005"
+        ],
+        "firstRelevantRank": 1,
+        "recallAt5": 1,
+        "mrr": 1.0
+      },
+      {
+        "queryId": "L06",
+        "kind": "lexical",
+        "text": "batch recovery reverse order",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000006"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000006"
+        ],
+        "firstRelevantRank": 1,
+        "recallAt5": 1,
+        "mrr": 1.0
+      },
+      {
+        "queryId": "L07",
+        "kind": "lexical",
+        "text": "texture streaming pool overrun",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000007"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000007"
+        ],
+        "firstRelevantRank": 1,
+        "recallAt5": 1,
+        "mrr": 1.0
+      },
+      {
+        "queryId": "L08",
+        "kind": "lexical",
+        "text": "Nanite shadow cascade flicker",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000008"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000008"
+        ],
+        "firstRelevantRank": 1,
+        "recallAt5": 1,
+        "mrr": 1.0
+      },
+      {
+        "queryId": "L09",
+        "kind": "lexical",
+        "text": "GameplayTags ability state design",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000009"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000009"
+        ],
+        "firstRelevantRank": 1,
+        "recallAt5": 1,
+        "mrr": 1.0
+      },
+      {
+        "queryId": "L10",
+        "kind": "lexical",
+        "text": "ASTC mobile compression package size",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000010"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000010"
+        ],
+        "firstRelevantRank": 1,
+        "recallAt5": 1,
+        "mrr": 1.0
+      },
+      {
+        "queryId": "S01",
+        "kind": "semantic",
+        "text": "why is the third person boom shortened",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000011"
+        ],
+        "top5": [],
+        "firstRelevantRank": null,
+        "recallAt5": 0,
+        "mrr": 0.0
+      },
+      {
+        "queryId": "S02",
+        "kind": "semantic",
+        "text": "geometry disappearing with morning sun angle",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000008"
+        ],
+        "top5": [],
+        "firstRelevantRank": null,
+        "recallAt5": 0,
+        "mrr": 0.0
+      },
+      {
+        "queryId": "S03",
+        "kind": "semantic",
+        "text": "rationale behind tag system selection for skills",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000009"
+        ],
+        "top5": [],
+        "firstRelevantRank": null,
+        "recallAt5": 0,
+        "mrr": 0.0
+      },
+      {
+        "queryId": "S04",
+        "kind": "semantic",
+        "text": "how player progress storage prevents corrupted files",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000012"
+        ],
+        "top5": [],
+        "firstRelevantRank": null,
+        "recallAt5": 0,
+        "mrr": 0.0
+      },
+      {
+        "queryId": "S05",
+        "kind": "semantic",
+        "text": "changed key bindings do not apply until relaunching",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000013"
+        ],
+        "top5": [],
+        "firstRelevantRank": null,
+        "recallAt5": 0,
+        "mrr": 0.0
+      },
+      {
+        "queryId": "S06",
+        "kind": "semantic",
+        "text": "remote rendering workers ignored during bake",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000014"
+        ],
+        "top5": [],
+        "firstRelevantRank": null,
+        "recallAt5": 0,
+        "mrr": 0.0
+      },
+      {
+        "queryId": "S07",
+        "kind": "semantic",
+        "text": "how guards notice the character",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000015"
+        ],
+        "top5": [],
+        "firstRelevantRank": null,
+        "recallAt5": 0,
+        "mrr": 0.0
+      },
+      {
+        "queryId": "S08",
+        "kind": "semantic",
+        "text": "reason the interface images shrank the installer",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000010"
+        ],
+        "top5": [],
+        "firstRelevantRank": null,
+        "recallAt5": 0,
+        "mrr": 0.0
+      },
+      {
+        "queryId": "S09",
+        "kind": "semantic",
+        "text": "editing shader parents breaks downstream variants",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000016"
+        ],
+        "top5": [],
+        "firstRelevantRank": null,
+        "recallAt5": 0,
+        "mrr": 0.0
+      },
+      {
+        "queryId": "S10",
+        "kind": "semantic",
+        "text": "car physics update rate for bumpy ground",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000017"
+        ],
+        "top5": [],
+        "firstRelevantRank": null,
+        "recallAt5": 0,
+        "mrr": 0.0
+      }
+    ]
+  },
+  "hybrid": {
+    "summary": {
+      "lexical": {
+        "queries": 10,
+        "recallAt5": 1.0,
+        "mrr": 1.0
+      },
+      "semantic": {
+        "queries": 10,
+        "recallAt5": 0.9,
+        "mrr": 0.6583
+      },
+      "aggregate": {
+        "queries": 20,
+        "recallAt5": 0.95,
+        "mrr": 0.8292
+      }
+    },
+    "latencyMs": {
+      "p50": 0.987,
+      "p95": 1.388,
+      "samples": 100
+    },
+    "retrievalModes": [
+      "hybrid"
+    ],
+    "perQuery": [
+      {
+        "queryId": "L01",
+        "kind": "lexical",
+        "text": "material TintColor parameter value",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000001"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000001",
+          "mem_4b000000000000000000000000000010",
+          "mem_4b000000000000000000000000000016",
+          "mem_4b000000000000000000000000000025",
+          "mem_4b000000000000000000000000000002"
+        ],
+        "firstRelevantRank": 1,
+        "recallAt5": 1,
+        "mrr": 1.0,
+        "retrievalMode": "hybrid",
+        "vectorFallback": ""
+      },
+      {
+        "queryId": "L02",
+        "kind": "lexical",
+        "text": "Blueprint compile transient pointers",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000002"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000002",
+          "mem_4b000000000000000000000000000004",
+          "mem_4b000000000000000000000000000022",
+          "mem_4b000000000000000000000000000010",
+          "mem_4b000000000000000000000000000013"
+        ],
+        "firstRelevantRank": 1,
+        "recallAt5": 1,
+        "mrr": 1.0,
+        "retrievalMode": "hybrid",
+        "vectorFallback": ""
+      },
+      {
+        "queryId": "L03",
+        "kind": "lexical",
+        "text": "recall budget deadline milliseconds",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000003"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000003",
+          "mem_4b000000000000000000000000000004",
+          "mem_4b000000000000000000000000000013",
+          "mem_4b000000000000000000000000000012",
+          "mem_4b000000000000000000000000000022"
+        ],
+        "firstRelevantRank": 1,
+        "recallAt5": 1,
+        "mrr": 1.0,
+        "retrievalMode": "hybrid",
+        "vectorFallback": ""
+      },
+      {
+        "queryId": "L04",
+        "kind": "lexical",
+        "text": "schema migration embeddings backfill",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000004"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000004",
+          "mem_4b000000000000000000000000000013",
+          "mem_4b000000000000000000000000000002",
+          "mem_4b000000000000000000000000000010",
+          "mem_4b000000000000000000000000000001"
+        ],
+        "firstRelevantRank": 1,
+        "recallAt5": 1,
+        "mrr": 1.0,
+        "retrievalMode": "hybrid",
+        "vectorFallback": ""
+      },
+      {
+        "queryId": "L05",
+        "kind": "lexical",
+        "text": "Strong Verify persistence evidence",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000005"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000005",
+          "mem_4b000000000000000000000000000002",
+          "mem_4b000000000000000000000000000009",
+          "mem_4b000000000000000000000000000004",
+          "mem_4b000000000000000000000000000012"
+        ],
+        "firstRelevantRank": 1,
+        "recallAt5": 1,
+        "mrr": 1.0,
+        "retrievalMode": "hybrid",
+        "vectorFallback": ""
+      },
+      {
+        "queryId": "L06",
+        "kind": "lexical",
+        "text": "batch recovery reverse order",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000006"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000006",
+          "mem_4b000000000000000000000000000003",
+          "mem_4b000000000000000000000000000004",
+          "mem_4b000000000000000000000000000023",
+          "mem_4b000000000000000000000000000022"
+        ],
+        "firstRelevantRank": 1,
+        "recallAt5": 1,
+        "mrr": 1.0,
+        "retrievalMode": "hybrid",
+        "vectorFallback": ""
+      },
+      {
+        "queryId": "L07",
+        "kind": "lexical",
+        "text": "texture streaming pool overrun",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000007"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000007",
+          "mem_4b000000000000000000000000000024",
+          "mem_4b000000000000000000000000000012",
+          "mem_4b000000000000000000000000000008",
+          "mem_4b000000000000000000000000000021"
+        ],
+        "firstRelevantRank": 1,
+        "recallAt5": 1,
+        "mrr": 1.0,
+        "retrievalMode": "hybrid",
+        "vectorFallback": ""
+      },
+      {
+        "queryId": "L08",
+        "kind": "lexical",
+        "text": "Nanite shadow cascade flicker",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000008"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000008",
+          "mem_4b000000000000000000000000000014",
+          "mem_4b000000000000000000000000000007",
+          "mem_4b000000000000000000000000000020",
+          "mem_4b000000000000000000000000000022"
+        ],
+        "firstRelevantRank": 1,
+        "recallAt5": 1,
+        "mrr": 1.0,
+        "retrievalMode": "hybrid",
+        "vectorFallback": ""
+      },
+      {
+        "queryId": "L09",
+        "kind": "lexical",
+        "text": "GameplayTags ability state design",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000009"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000009",
+          "mem_4b000000000000000000000000000010",
+          "mem_4b000000000000000000000000000021",
+          "mem_4b000000000000000000000000000022",
+          "mem_4b000000000000000000000000000012"
+        ],
+        "firstRelevantRank": 1,
+        "recallAt5": 1,
+        "mrr": 1.0,
+        "retrievalMode": "hybrid",
+        "vectorFallback": ""
+      },
+      {
+        "queryId": "L10",
+        "kind": "lexical",
+        "text": "ASTC mobile compression package size",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000010"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000010",
+          "mem_4b000000000000000000000000000001",
+          "mem_4b000000000000000000000000000021",
+          "mem_4b000000000000000000000000000022",
+          "mem_4b000000000000000000000000000004"
+        ],
+        "firstRelevantRank": 1,
+        "recallAt5": 1,
+        "mrr": 1.0,
+        "retrievalMode": "hybrid",
+        "vectorFallback": ""
+      },
+      {
+        "queryId": "S01",
+        "kind": "semantic",
+        "text": "why is the third person boom shortened",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000011"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000011",
+          "mem_4b000000000000000000000000000023",
+          "mem_4b000000000000000000000000000015",
+          "mem_4b000000000000000000000000000008",
+          "mem_4b000000000000000000000000000017"
+        ],
+        "firstRelevantRank": 1,
+        "recallAt5": 1,
+        "mrr": 1.0,
+        "retrievalMode": "hybrid",
+        "vectorFallback": ""
+      },
+      {
+        "queryId": "S02",
+        "kind": "semantic",
+        "text": "geometry disappearing with morning sun angle",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000008"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000024",
+          "mem_4b000000000000000000000000000011",
+          "mem_4b000000000000000000000000000015",
+          "mem_4b000000000000000000000000000008",
+          "mem_4b000000000000000000000000000020"
+        ],
+        "firstRelevantRank": 4,
+        "recallAt5": 1,
+        "mrr": 0.25,
+        "retrievalMode": "hybrid",
+        "vectorFallback": ""
+      },
+      {
+        "queryId": "S03",
+        "kind": "semantic",
+        "text": "rationale behind tag system selection for skills",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000009"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000009",
+          "mem_4b000000000000000000000000000021",
+          "mem_4b000000000000000000000000000012",
+          "mem_4b000000000000000000000000000022",
+          "mem_4b000000000000000000000000000010"
+        ],
+        "firstRelevantRank": 1,
+        "recallAt5": 1,
+        "mrr": 1.0,
+        "retrievalMode": "hybrid",
+        "vectorFallback": ""
+      },
+      {
+        "queryId": "S04",
+        "kind": "semantic",
+        "text": "how player progress storage prevents corrupted files",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000012"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000005",
+          "mem_4b000000000000000000000000000012",
+          "mem_4b000000000000000000000000000007",
+          "mem_4b000000000000000000000000000021",
+          "mem_4b000000000000000000000000000011"
+        ],
+        "firstRelevantRank": 2,
+        "recallAt5": 1,
+        "mrr": 0.5,
+        "retrievalMode": "hybrid",
+        "vectorFallback": ""
+      },
+      {
+        "queryId": "S05",
+        "kind": "semantic",
+        "text": "changed key bindings do not apply until relaunching",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000013"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000013",
+          "mem_4b000000000000000000000000000006",
+          "mem_4b000000000000000000000000000022",
+          "mem_4b000000000000000000000000000002",
+          "mem_4b000000000000000000000000000010"
+        ],
+        "firstRelevantRank": 1,
+        "recallAt5": 1,
+        "mrr": 1.0,
+        "retrievalMode": "hybrid",
+        "vectorFallback": ""
+      },
+      {
+        "queryId": "S06",
+        "kind": "semantic",
+        "text": "remote rendering workers ignored during bake",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000014"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000014",
+          "mem_4b000000000000000000000000000006",
+          "mem_4b000000000000000000000000000020",
+          "mem_4b000000000000000000000000000013",
+          "mem_4b000000000000000000000000000017"
+        ],
+        "firstRelevantRank": 1,
+        "recallAt5": 1,
+        "mrr": 1.0,
+        "retrievalMode": "hybrid",
+        "vectorFallback": ""
+      },
+      {
+        "queryId": "S07",
+        "kind": "semantic",
+        "text": "how guards notice the character",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000015"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000015",
+          "mem_4b000000000000000000000000000011",
+          "mem_4b000000000000000000000000000016",
+          "mem_4b000000000000000000000000000009",
+          "mem_4b000000000000000000000000000021"
+        ],
+        "firstRelevantRank": 1,
+        "recallAt5": 1,
+        "mrr": 1.0,
+        "retrievalMode": "hybrid",
+        "vectorFallback": ""
+      },
+      {
+        "queryId": "S08",
+        "kind": "semantic",
+        "text": "reason the interface images shrank the installer",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000010"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000002",
+          "mem_4b000000000000000000000000000013",
+          "mem_4b000000000000000000000000000010",
+          "mem_4b000000000000000000000000000004",
+          "mem_4b000000000000000000000000000001"
+        ],
+        "firstRelevantRank": 3,
+        "recallAt5": 1,
+        "mrr": 0.3333333333333333,
+        "retrievalMode": "hybrid",
+        "vectorFallback": ""
+      },
+      {
+        "queryId": "S09",
+        "kind": "semantic",
+        "text": "editing shader parents breaks downstream variants",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000016"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000013",
+          "mem_4b000000000000000000000000000017",
+          "mem_4b000000000000000000000000000020",
+          "mem_4b000000000000000000000000000011",
+          "mem_4b000000000000000000000000000008"
+        ],
+        "firstRelevantRank": null,
+        "recallAt5": 0,
+        "mrr": 0.0,
+        "retrievalMode": "hybrid",
+        "vectorFallback": ""
+      },
+      {
+        "queryId": "S10",
+        "kind": "semantic",
+        "text": "car physics update rate for bumpy ground",
+        "relevantIds": [
+          "mem_4b000000000000000000000000000017"
+        ],
+        "top5": [
+          "mem_4b000000000000000000000000000020",
+          "mem_4b000000000000000000000000000017",
+          "mem_4b000000000000000000000000000023",
+          "mem_4b000000000000000000000000000013",
+          "mem_4b000000000000000000000000000001"
+        ],
+        "firstRelevantRank": 2,
+        "recallAt5": 1,
+        "mrr": 0.5,
+        "retrievalMode": "hybrid",
+        "vectorFallback": ""
+      }
+    ]
+  },
+  "providerLoad": {
+    "coldLoadMs": 2215.881,
+    "note": "one-time per process; automatic Task Context never loads the model"
+  },
+  "lexicalSafetyViolations": [],
+  "acceptance": {
+    "semanticRecallAt5HybridGreaterThanFts": true,
+    "aggregateMrrHybridNotBelowFts": true,
+    "lexicalTop5SafetyHolds": true,
+    "hybridP95Under300ms": true,
+    "queryEmbeddingCallsExactlyOnePerQuery": true,
+    "corpusEmbeddingCallsDuringQueryZero": true,
+    "hybridModeActive": true
+  }
+}

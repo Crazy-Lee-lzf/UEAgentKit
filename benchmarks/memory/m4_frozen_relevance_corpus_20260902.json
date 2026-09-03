@@ -1,0 +1,358 @@
+{
+  "frozenAtUtc": "2026-09-02T15:20:00Z",
+  "stage": "M4-0 frozen 20-query relevance benchmark",
+  "projectKey": "M4Benchmark",
+  "freezeRule": "Frozen before any RRF tuning or hybrid implementation. Queries and relevant record IDs must not change after implementation starts.",
+  "recordIdScheme": "mem_4b + 28 zero digits + 2-digit index (hex, 32 chars after mem_)",
+  "records": [
+    {
+      "record_id": "mem_4b000000000000000000000000000001",
+      "record_type": "projectFact",
+      "subject_key": "/Game/Materials/M_MaterialMaster",
+      "title": "Master material TintColor parameter default",
+      "body": "The master material exposes a TintColor parameter; its default value is linear (0.8, 0.2, 0.1) and instance overrides must stay within the sRGB 0.0-1.0 range.",
+      "source_kind": "user-confirmed",
+      "confidence": 1.0
+    },
+    {
+      "record_id": "mem_4b000000000000000000000000000002",
+      "record_type": "knownIssue",
+      "subject_key": "/Game/Blueprints/BP_CharacterBase",
+      "title": "Blueprint compile invalidates transient pointers",
+      "body": "Blueprint compile invalidates transient pointers to CDO properties and graph pins; re-resolve every stable identity after a compile completes.",
+      "source_kind": "user-confirmed",
+      "confidence": 1.0
+    },
+    {
+      "record_id": "mem_4b000000000000000000000000000003",
+      "record_type": "projectRule",
+      "subject_key": "memory-recall-budget",
+      "title": "Automatic recall budget and deadline",
+      "body": "Automatic recall must finish within a 300 milliseconds deadline; the recall budget caps 5 items, 2000 characters, and 800 estimated tokens.",
+      "source_kind": "user-confirmed",
+      "confidence": 1.0
+    },
+    {
+      "record_id": "mem_4b000000000000000000000000000004",
+      "record_type": "decisionRecord",
+      "subject_key": "memory-schema-v5",
+      "title": "Schema v5 additive migration decision",
+      "body": "Memory schema v5 adds the memory_embeddings table via an additive v4 to v5 migration; the deterministic backfill command fills vectors in bounded batches without changing FTS behavior.",
+      "source_kind": "user-confirmed",
+      "confidence": 1.0
+    },
+    {
+      "record_id": "mem_4b000000000000000000000000000005",
+      "record_type": "projectRule",
+      "subject_key": "writer-verify-boundary",
+      "title": "Strong Verify is independent persistence evidence",
+      "body": "Strong Verify is independent persistence evidence produced after the resident Fast Verify checkpoint; it must read the saved disk artifact.",
+      "source_kind": "user-confirmed",
+      "confidence": 1.0
+    },
+    {
+      "record_id": "mem_4b000000000000000000000000000006",
+      "record_type": "projectFact",
+      "subject_key": "writer-batch-recovery",
+      "title": "Batch recovery undoes in strict reverse order",
+      "body": "W4 batch recovery undoes successful operations in strict reverse execution order and verifies the restored state independently.",
+      "source_kind": "user-confirmed",
+      "confidence": 1.0
+    },
+    {
+      "record_id": "mem_4b000000000000000000000000000007",
+      "record_type": "knownIssue",
+      "subject_key": "/Game/Maps/OpenWorldMain",
+      "title": "Texture streaming pool overrun in open world",
+      "body": "Texture streaming pool overrun causes blurry materials in the open world level; raise the pool budget before cooking large maps.",
+      "source_kind": "user-confirmed",
+      "confidence": 1.0
+    },
+    {
+      "record_id": "mem_4b000000000000000000000000000008",
+      "record_type": "knownIssue",
+      "subject_key": "/Game/Environment/NaniteCliffs",
+      "title": "Nanite flicker from overlapping shadow cascades",
+      "body": "Nanite meshes flicker when shadow cascades overlap at dawn lighting scenarios; mitigated by clamping cascade count to 3.",
+      "source_kind": "user-confirmed",
+      "confidence": 1.0
+    },
+    {
+      "record_id": "mem_4b000000000000000000000000000009",
+      "record_type": "decisionRecord",
+      "subject_key": "ability-state-representation",
+      "title": "GameplayTags chosen over boolean flags",
+      "body": "We chose GameplayTags over boolean flags for ability state because designers compose effects without programmer time; this design keeps gameplay data-driven.",
+      "source_kind": "user-confirmed",
+      "confidence": 1.0
+    },
+    {
+      "record_id": "mem_4b000000000000000000000000000010",
+      "record_type": "decisionRecord",
+      "subject_key": "/Game/UI/T_UICommon",
+      "title": "ASTC compression adopted for mobile targets",
+      "body": "UI textures switched to ASTC compression for mobile targets after the package size regression pushed installs past 200 megabytes.",
+      "source_kind": "user-confirmed",
+      "confidence": 1.0
+    },
+    {
+      "record_id": "mem_4b000000000000000000000000000011",
+      "record_type": "projectFact",
+      "subject_key": "/Game/Characters/BP_HeroCamera",
+      "title": "Spring arm length for dialogue framing",
+      "body": "Camera arm length was set to 40 centimetres because the character capsule clipped through close-up framing during dialogue scenes; do not reduce it below 35.",
+      "source_kind": "user-confirmed",
+      "confidence": 1.0
+    },
+    {
+      "record_id": "mem_4b000000000000000000000000000012",
+      "record_type": "projectFact",
+      "subject_key": "save-system-slots",
+      "title": "Staging slot before primary save slot",
+      "body": "The save system writes each checkpoint into a staging slot first and swaps it into the primary slot only after checksum validation passes.",
+      "source_kind": "user-confirmed",
+      "confidence": 1.0
+    },
+    {
+      "record_id": "mem_4b000000000000000000000000000013",
+      "record_type": "projectRule",
+      "subject_key": "input-mapping-context",
+      "title": "Input mapping context needs editor restart",
+      "body": "Any edit to the input mapping context requires a full editor restart to take effect in packaged builds; hot reload lies about input changes.",
+      "source_kind": "user-confirmed",
+      "confidence": 1.0
+    },
+    {
+      "record_id": "mem_4b000000000000000000000000000014",
+      "record_type": "knownIssue",
+      "subject_key": "lightmap-baking-farm",
+      "title": "Swarm baking farm agent limit",
+      "body": "Swarm distribution fails when the baking farm has more than 16 agents; lightmaps fall back to local computation instead.",
+      "source_kind": "user-confirmed",
+      "confidence": 1.0
+    },
+    {
+      "record_id": "mem_4b000000000000000000000000000015",
+      "subject_key": "/Game/AI/BP_GuardPerception",
+      "record_type": "projectFact",
+      "title": "Guard perception sight cone and hearing",
+      "body": "Enemy AI perceives players through a sight cone of 70 degrees and hearing radius of 12 metres.",
+      "source_kind": "user-confirmed",
+      "confidence": 1.0
+    },
+    {
+      "record_id": "mem_4b000000000000000000000000000016",
+      "record_type": "projectRule",
+      "subject_key": "/Game/Materials/M_MaterialMaster",
+      "title": "Material edits must use child instances",
+      "body": "Never modify materials directly in the master file; create a child material instance and override parameters there.",
+      "source_kind": "user-confirmed",
+      "confidence": 1.0
+    },
+    {
+      "record_id": "mem_4b000000000000000000000000000017",
+      "record_type": "projectFact",
+      "subject_key": "/Game/Vehicles/BP_Offroader",
+      "title": "Suspension sampling rate for offroad vehicles",
+      "body": "Vehicles sample suspension force at 120 Hz to keep tyre contact stable on rough terrain.",
+      "source_kind": "user-confirmed",
+      "confidence": 1.0
+    },
+    {
+      "record_id": "mem_4b000000000000000000000000000018",
+      "record_type": "projectFact",
+      "subject_key": "/Game/Materials/M_MaterialMaster",
+      "title": "Deprecated TintColor linear default",
+      "body": "The master material previously exposed a TintColor parameter whose default value was linear (1.0, 1.0, 1.0); replaced by the 2026-06 palette revision.",
+      "source_kind": "user-confirmed",
+      "confidence": 1.0,
+      "makeSupersededByIndex": 1
+    },
+    {
+      "record_id": "mem_4b000000000000000000000000000019",
+      "record_type": "knownIssue",
+      "subject_key": "/Game/Environment/NaniteCliffs",
+      "title": "Nanite flicker from overlapping shadow cascades",
+      "body": "Nanite meshes flicker when shadow cascades overlap at dusk lighting scenarios; mitigation pending.",
+      "source_kind": "tool-observed",
+      "confidence": 1.0,
+      "makeStale": true
+    },
+    {
+      "record_id": "mem_4b000000000000000000000000000020",
+      "record_type": "projectFact",
+      "subject_key": "/Game/Camera/CameraShakeCurve",
+      "title": "Camera shake amplitude curve",
+      "body": "Camera shake amplitude scales with impact velocity; the tuning curve lives in CameraShakeCurve and caps at 2.0.",
+      "source_kind": "user-confirmed",
+      "confidence": 1.0
+    },
+    {
+      "record_id": "mem_4b000000000000000000000000000021",
+      "record_type": "projectFact",
+      "subject_key": "/Game/UI/W_SaveSlotList",
+      "title": "Save slot list ordering",
+      "body": "The save slot list widget shows the five most recent checkpoints ordered by total playtime.",
+      "source_kind": "user-confirmed",
+      "confidence": 1.0
+    },
+    {
+      "record_id": "mem_4b000000000000000000000000000022",
+      "record_type": "projectFact",
+      "subject_key": "/Game/UI/W_InventoryFocus",
+      "title": "Inventory widget focus navigation",
+      "body": "Inventory widgets restore keyboard focus to the previously selected cell when the panel reopens.",
+      "source_kind": "user-confirmed",
+      "confidence": 1.0
+    },
+    {
+      "record_id": "mem_4b000000000000000000000000000023",
+      "record_type": "projectFact",
+      "subject_key": "/Game/Audio/ReverbZones",
+      "title": "Interior reverb zone volumes",
+      "body": "Interior reverb zones use a 400 hertz crossover and attenuate exterior ambience by 12 decibels.",
+      "source_kind": "user-confirmed",
+      "confidence": 1.0
+    },
+    {
+      "record_id": "mem_4b000000000000000000000000000024",
+      "record_type": "projectFact",
+      "subject_key": "/Game/Landscape/GrassDensity",
+      "title": "Landscape grass density culling",
+      "body": "Landscape grass density is culled beyond 80 metres to protect the frame budget on low-end hardware.",
+      "source_kind": "user-confirmed",
+      "confidence": 1.0
+    },
+    {
+      "record_id": "mem_4b000000000000000000000000000025",
+      "record_type": "projectFact",
+      "subject_key": "localization-string-tables",
+      "title": "Localization string table naming",
+      "body": "Localization string tables are split per menu screen and use the STV_ prefix plus a two-letter language code.",
+      "source_kind": "user-confirmed",
+      "confidence": 1.0
+    }
+  ],
+  "queries": [
+    {
+      "id": "L01",
+      "kind": "lexical",
+      "text": "material TintColor parameter value",
+      "relevant_ids": ["mem_4b000000000000000000000000000001"]
+    },
+    {
+      "id": "L02",
+      "kind": "lexical",
+      "text": "Blueprint compile transient pointers",
+      "relevant_ids": ["mem_4b000000000000000000000000000002"]
+    },
+    {
+      "id": "L03",
+      "kind": "lexical",
+      "text": "recall budget deadline milliseconds",
+      "relevant_ids": ["mem_4b000000000000000000000000000003"]
+    },
+    {
+      "id": "L04",
+      "kind": "lexical",
+      "text": "schema migration embeddings backfill",
+      "relevant_ids": ["mem_4b000000000000000000000000000004"]
+    },
+    {
+      "id": "L05",
+      "kind": "lexical",
+      "text": "Strong Verify persistence evidence",
+      "relevant_ids": ["mem_4b000000000000000000000000000005"]
+    },
+    {
+      "id": "L06",
+      "kind": "lexical",
+      "text": "batch recovery reverse order",
+      "relevant_ids": ["mem_4b000000000000000000000000000006"]
+    },
+    {
+      "id": "L07",
+      "kind": "lexical",
+      "text": "texture streaming pool overrun",
+      "relevant_ids": ["mem_4b000000000000000000000000000007"]
+    },
+    {
+      "id": "L08",
+      "kind": "lexical",
+      "text": "Nanite shadow cascade flicker",
+      "relevant_ids": ["mem_4b000000000000000000000000000008"]
+    },
+    {
+      "id": "L09",
+      "kind": "lexical",
+      "text": "GameplayTags ability state design",
+      "relevant_ids": ["mem_4b000000000000000000000000000009"]
+    },
+    {
+      "id": "L10",
+      "kind": "lexical",
+      "text": "ASTC mobile compression package size",
+      "relevant_ids": ["mem_4b000000000000000000000000000010"]
+    },
+    {
+      "id": "S01",
+      "kind": "semantic",
+      "text": "why is the third person boom shortened",
+      "relevant_ids": ["mem_4b000000000000000000000000000011"]
+    },
+    {
+      "id": "S02",
+      "kind": "semantic",
+      "text": "geometry disappearing with morning sun angle",
+      "relevant_ids": ["mem_4b000000000000000000000000000008"]
+    },
+    {
+      "id": "S03",
+      "kind": "semantic",
+      "text": "rationale behind tag system selection for skills",
+      "relevant_ids": ["mem_4b000000000000000000000000000009"]
+    },
+    {
+      "id": "S04",
+      "kind": "semantic",
+      "text": "how player progress storage prevents corrupted files",
+      "relevant_ids": ["mem_4b000000000000000000000000000012"]
+    },
+    {
+      "id": "S05",
+      "kind": "semantic",
+      "text": "changed key bindings do not apply until relaunching",
+      "relevant_ids": ["mem_4b000000000000000000000000000013"]
+    },
+    {
+      "id": "S06",
+      "kind": "semantic",
+      "text": "remote rendering workers ignored during bake",
+      "relevant_ids": ["mem_4b000000000000000000000000000014"]
+    },
+    {
+      "id": "S07",
+      "kind": "semantic",
+      "text": "how guards notice the character",
+      "relevant_ids": ["mem_4b000000000000000000000000000015"]
+    },
+    {
+      "id": "S08",
+      "kind": "semantic",
+      "text": "reason the interface images shrank the installer",
+      "relevant_ids": ["mem_4b000000000000000000000000000010"]
+    },
+    {
+      "id": "S09",
+      "kind": "semantic",
+      "text": "editing shader parents breaks downstream variants",
+      "relevant_ids": ["mem_4b000000000000000000000000000016"]
+    },
+    {
+      "id": "S10",
+      "kind": "semantic",
+      "text": "car physics update rate for bumpy ground",
+      "relevant_ids": ["mem_4b000000000000000000000000000017"]
+    }
+  ]
+}

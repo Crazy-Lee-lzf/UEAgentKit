@@ -232,16 +232,17 @@ def register_memory_tools(
                 if not statuses:
                     raise ValueError("statuses must be omitted or contain at least one status.")
                 kwargs["statuses"] = tuple(statuses)
-            hits = memory_service.search_records(**kwargs)
+            result = memory_service.search_records(**kwargs)
             return {
                 "schemaVersion": "1.0",
                 "tool": "ue_memory_search",
                 "ok": True,
                 "readOnly": True,
                 "projectKey": memory_service.project_key,
-                "resultCount": len(hits),
+                "resultCount": len(result.hits),
+                "retrieval": result.to_payload(),
                 "items": [
-                    {"rank": hit.rank, "record": memory_record_payload(hit.record)} for hit in hits
+                    {"rank": hit.rank, "record": memory_record_payload(hit.record)} for hit in result.hits
                 ],
             }
         except (

@@ -344,7 +344,7 @@ class ProjectMemoryTests(unittest.TestCase):
             self.assertEqual(second.evidence_sha256, second_evidence)
             self.assertEqual(
                 [int(row[0]) for row in migrated.execute("SELECT version FROM memory_schema_migrations ORDER BY version")],
-                [1, 2, 3, 4],
+                list(range(1, CURRENT_MEMORY_SCHEMA_VERSION + 1)),
             )
             self.assertEqual(migrated.execute("SELECT COUNT(*) FROM memory_records").fetchone()[0], 2)
             self.assertEqual(migrated.execute("SELECT COUNT(*) FROM memory_status_events").fetchone()[0], 2)
@@ -358,7 +358,7 @@ class ProjectMemoryTests(unittest.TestCase):
                 reopened.execute(
                     "SELECT COUNT(*) FROM memory_schema_migrations"
                 ).fetchone()[0],
-                4,
+                CURRENT_MEMORY_SCHEMA_VERSION,
             )
             self.assertEqual(reopened.execute("SELECT COUNT(*) FROM knowledge_nodes").fetchone()[0], 0)
             self.assertEqual(reopened.execute("SELECT COUNT(*) FROM active_work_items").fetchone()[0], 0)
