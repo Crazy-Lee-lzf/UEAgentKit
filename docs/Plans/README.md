@@ -10,15 +10,15 @@
 |---:|---|---|
 | 1 | [`../Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260830.md`](../Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260830.md) | Canonical repository/Track/worktree takeover state |
 | 2 | [`../DEVELOPMENT_WORKFLOW.md`](../DEVELOPMENT_WORKFLOW.md) | Mandatory G0-G3 gates, U0-U3 UE validation, UE lease, Git/documentation rules |
-| 3 | [`UEAGENTKIT_M5_L2_L3_STABLE_CONTEXT_INJECTION_DETAILED_PLAN_20260903.md`](UEAGENTKIT_M5_L2_L3_STABLE_CONTEXT_INJECTION_DETAILED_PLAN_20260903.md) | **Active M5 implementation contract and Validation Budget** |
-| 4 | [`Archive/UEAGENTKIT_M4_HYBRID_RECALL_FTS5_VECTOR_RRF_RESULT_20260902.md`](Archive/UEAGENTKIT_M4_HYBRID_RECALL_FTS5_VECTOR_RRF_RESULT_20260902.md) | M4 reviewed completion evidence |
-| 5 | [`Archive/UEAGENTKIT_M3_DETERMINISTIC_L0_TO_L1_DISTILLATION_RESULT_20260902.md`](Archive/UEAGENTKIT_M3_DETERMINISTIC_L0_TO_L1_DISTILLATION_RESULT_20260902.md) | M3 reviewed completion evidence |
-| 6 | [`Archive/UEAGENTKIT_M2_DETERMINISTIC_L0_AUTO_CAPTURE_RESULT_20260830.md`](Archive/UEAGENTKIT_M2_DETERMINISTIC_L0_AUTO_CAPTURE_RESULT_20260830.md) | M2 reviewed completion evidence |
-| 7 | [`Archive/UEAGENTKIT_M1_MEMORY_EFFICIENCY_BASELINE_AND_BUDGET_RESULT_20260830.md`](Archive/UEAGENTKIT_M1_MEMORY_EFFICIENCY_BASELINE_AND_BUDGET_RESULT_20260830.md) | M1 reviewed completion evidence |
-| 8 | [`UEAGENTKIT_P4_AGENT_OPERATION_BOUNDARY_DECISION_20260903.md`](UEAGENTKIT_P4_AGENT_OPERATION_BOUNDARY_DECISION_20260903.md) | Frozen post-M5 P4 Agent permission/advisory boundary |
-| 9 | [`UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md`](UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md) | Project direction / Track architecture; progress wording may be historical |
-| 10 | [`UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md`](UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md) | Cross-Track dependencies and historical acceptance contracts |
-| 11 | [`UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md`](UEAGENTKIT_W_V_INTEGRATION_RESULT_20260830.md) | Writer + Knowledge Web integration evidence |
+| 3 | [`UEAGENTKIT_C1_C2_P4_MINIMUM_DOGFOOD_DETAILED_PLAN_20260903.md`](UEAGENTKIT_C1_C2_P4_MINIMUM_DOGFOOD_DETAILED_PLAN_20260903.md) | **Active C1/C2 implementation contract and Validation Budget** |
+| 4 | [`UEAGENTKIT_P4_AGENT_OPERATION_BOUNDARY_DECISION_20260903.md`](UEAGENTKIT_P4_AGENT_OPERATION_BOUNDARY_DECISION_20260903.md) | Frozen P4 Agent permission/advisory authority |
+| 5 | [`Archive/UEAGENTKIT_M5_L2_L3_STABLE_CONTEXT_INJECTION_RESULT_20260903.md`](Archive/UEAGENTKIT_M5_L2_L3_STABLE_CONTEXT_INJECTION_RESULT_20260903.md) | M5 reviewed completion evidence |
+| 6 | [`Archive/UEAGENTKIT_M4_HYBRID_RECALL_FTS5_VECTOR_RRF_RESULT_20260902.md`](Archive/UEAGENTKIT_M4_HYBRID_RECALL_FTS5_VECTOR_RRF_RESULT_20260902.md) | M4 reviewed completion evidence |
+| 7 | [`Archive/UEAGENTKIT_M3_DETERMINISTIC_L0_TO_L1_DISTILLATION_RESULT_20260902.md`](Archive/UEAGENTKIT_M3_DETERMINISTIC_L0_TO_L1_DISTILLATION_RESULT_20260902.md) | M3 reviewed completion evidence |
+| 8 | [`Archive/UEAGENTKIT_M2_DETERMINISTIC_L0_AUTO_CAPTURE_RESULT_20260830.md`](Archive/UEAGENTKIT_M2_DETERMINISTIC_L0_AUTO_CAPTURE_RESULT_20260830.md) | M2 reviewed completion evidence |
+| 9 | [`Archive/UEAGENTKIT_M1_MEMORY_EFFICIENCY_BASELINE_AND_BUDGET_RESULT_20260830.md`](Archive/UEAGENTKIT_M1_MEMORY_EFFICIENCY_BASELINE_AND_BUDGET_RESULT_20260830.md) | M1 reviewed completion evidence |
+| 10 | [`UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md`](UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md) | Project direction; Track C permission wording is historical where it conflicts with the 2026-09-03 boundary decision |
+| 11 | [`UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md`](UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md) | Historical cross-Track acceptance contracts |
 
 ## Current project state
 
@@ -30,31 +30,34 @@ W + V integration                    G3 PASS
 R20                                  deferred DirectHost fixture-lifecycle debt
 
 test-suite tiering                   COMPLETE / U0 / G2 PASS
-Track M                              ACTIVE
+Track M required usability stages    COMPLETE through M5
   M1 Memory efficiency/budget        COMPLETE / REVIEWED / U0
-    checkpoint                       6d9cf711
   M2 deterministic L0 capture        COMPLETE / REVIEWED / U0
-    implementation checkpoint        d38c23c7
   M3 deterministic L0 -> L1          COMPLETE / REVIEWED / U0 / G2 PASS
-    implementation checkpoint        30449274
   M4 hybrid recall                   COMPLETE / REVIEWED / U0 / G2 PASS
-    planning checkpoint              bc403c0e
     implementation checkpoint        212f5443
-    Memory G1                        266 / 266 PASS
-    portable full                    949 / 949 PASS / 96.774 s
-    hybrid semantic Recall@5         0.90
-    aggregate Recall@5               0.95
+    semantic Recall@5                0.90
     aggregate MRR                    0.8292
-    hybrid p95                       1.388 ms
-  M5 L2/L3 stable context injection  READY FOR IMPLEMENTATION / required U0
+  M5 L2/L3 stable context injection  COMPLETE / REVIEWED / U0 / G2 PASS
+    implementation checkpoint        c0b01aac
+    Memory G1                        285 / 285 PASS / 31.365 s
+    portable full                    968 / 968 PASS / 99.344 s
+    injection p95                    5.748 ms
+    first Tool Memory delta p95      19.354 ms
+    automatic recall p95             15.493 ms
   M6 symbolic compression            optional / data-driven / do not auto-start
+
+Track C / P4                         ACTIVE NEXT
+  C1 Source Control Awareness        READY FOR IMPLEMENTATION
+  C2 Advisory + local-write assist   READY FOR IMPLEMENTATION
+  C3 CL preparation / Resolve        deferred until after minimum dogfood layer
+  C4 Memory integration              optional
 ```
 
-Persistent Track M regression gates:
+Persistent Memory regression gates remain required during C1/C2 where affected:
 
 ```text
-automatic recall                     <= 5 items / <= 2000 chars / <= 800 estimated tokens
-real recall deadline                 <= 300 ms
+automatic recall                     <= 800 estimated tokens
 first Tool Memory delta p95          < 200 ms
 direct recall p95                    < 300 ms
 task-end append p95                  < 100 ms
@@ -62,64 +65,68 @@ task-end append p95                  < 100 ms
 duplicate replay new rows            0
 M3 100-event distillation            < 5000 ms
 M4 explicit hybrid p95               < 300 ms
-M4 query embeddings/query            exactly 1 in hybrid mode
-M4 corpus embeddings/query           exactly 0
+M5 automatic injection p95           < 100 ms
 ```
 
 ## Current branch
 
 ```text
-worktree       E:\WorkSpace\UEAgentKit-Integration
-branch         feature/memory-context
-M5 baseline    212f5443bec2e0a4e496bfdf3e1f981f92cfc77a
-planning HEAD  1952cf1830d7d2323aa2711c60b550cc7d067fab
-upstream       origin/feature/memory-context @ 137c3a35e943f2c8e65f13dd8befe95aec3c6612
-push           none
+worktree          E:\WorkSpace\UEAgentKit-Integration
+branch            feature/memory-context
+C1/C2 baseline    c0b01aac4201710466ae9c9a5ee39f8965704b36
+upstream          origin/feature/memory-context @ 137c3a35e943f2c8e65f13dd8befe95aec3c6612
+push              none
 ```
 
 Always inspect actual Git state before modifying anything. Repository facts beat this navigation if they later differ.
 
-## Documentation rule
+## P4 owner decision — authoritative boundary
 
-Normal stage footprint:
+`UEAGENTKIT_P4_AGENT_OPERATION_BOUNDARY_DECISION_20260903.md` supersedes older fail-closed/no-checkout Track C wording.
 
-```text
-ONE Detailed Plan
-ONE Result
-```
-
-Create a blocker-closure document only for a genuine technical blocker with a different investigation/exit gate.
-
-Completed/historical phase documents are preserved in [`Archive/`](Archive/). Precedence is:
+Frozen rule:
 
 ```text
-actual Git/repository facts
-→ current handoff
-→ DEVELOPMENT_WORKFLOW.md
-→ current Plans README
-→ active Detailed Plan / latest Result
-→ historical documents
+P4 collaboration state
+→ advisory / warning / strong warning / readiness
+→ never independently hard-blocks local Writer testing
+
+Agent MAY:
+  inspect status
+  checkout / p4 edit
+  local writable override when explicit
+  bounded safe sync when cleanliness is proven
+  later, bounded resolve / CL preparation in C3
+
+Agent MUST NEVER:
+  submit
+  revert
+  delete P4-managed files
 ```
+
+Submit/revert/delete remain human-only even if the user asks the Agent directly.
 
 ## Active next work
 
-Execute **M5 — L2/L3 Stable Context Injection** from the active Detailed Plan.
+Execute **C1/C2 — P4 Minimum Dogfood** from the active Detailed Plan.
 
-Frozen M5 direction:
+Frozen implementation direction:
 
 ```text
-baseline                       212f5443bec2e0a4e496bfdf3e1f981f92cfc77a
 required UE                    U0 / no UE
-Memory schema                  v5 -> v6 additive
 required dependencies          remain []
-LLM / remote inference         forbidden
-automatic vector/model load    forbidden
-L2/L3 build                    explicit/offline deterministic snapshot
-Task Context automatic memory  L3 + deterministically matched L2 only
-L1/L0 automatic body injection forbidden
-explicit ue_memory_get_context remains backward-compatible
-stale/missing snapshot         empty injection; never synchronous rebuild
-M1 total automatic budget      remains <=800 estimated tokens
+P4Python                       not required
+preferred P4 transport         p4 -G + stdlib marshal after capability probe
+generic P4 command passthrough forbidden
+universal Task Context P4 call forbidden in C1/C2
+P4 hard-block of Writer        forbidden
+checkout / p4 edit             allowed
+local writable override        explicit + auditable
+safe sync                      only exact clean files with proven preconditions
+submit / revert / delete       permanently unavailable
+C3 Resolve/CL organization     deferred
 ```
 
-M5 is the final required Track M usability stage. After successful M5 closure, **do not auto-start M6**. Move to the minimal P4 dogfood path defined by `UEAGENTKIT_P4_AGENT_OPERATION_BOUNDARY_DECISION_20260903.md`: C1 Source Control Awareness, then C2 Advisory + checkout/local-write assistance, then real-project write-enabled dogfood.
+Current machine read-only probe established P4 CLI/P4D 2025.1 and a reachable configured local test server/client. The UEAgentKit Git worktree itself is not depot-backed, so real C2 mutation acceptance requires an owner-designated safe mapped fixture; automated tests must not use Agent-side revert for cleanup.
+
+After C1/C2 closes, begin real-project write-enabled dogfood. Do not auto-start M6.
