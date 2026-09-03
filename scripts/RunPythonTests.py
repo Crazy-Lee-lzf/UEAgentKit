@@ -109,6 +109,10 @@ DOMAIN_MODULES: dict[str, tuple[str, ...]] = {
         "test_knowledge_view",
         "test_knowledge_view_visualization",
     ),
+    "source-control": (
+        "test_mcp_source_control_tools",
+        "test_source_control",
+    ),
     "retarget": (
         "test_additive_diagnose",
         "test_additive_evaluation",

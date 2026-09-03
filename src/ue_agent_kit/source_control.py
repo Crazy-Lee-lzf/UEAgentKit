@@ -23,6 +23,7 @@ import os
 import shutil
 import stat
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -34,6 +35,8 @@ MAX_FILES_PER_REQUEST = 16
 MAX_PATH_CHARS = 1024
 MAX_OTHER_USERS = 8
 MAX_WARNINGS_PER_FILE = 8
+P4_MAX_STDOUT_BYTES = 2 * 1024 * 1024
+P4_MAX_STDERR_BYTES = 64 * 1024
 
 # Read-only commands plus the two structured mutation operations allowed inside
 # the runner. ``sync`` is reachable only through the safe-sync precondition
@@ -147,13 +150,16 @@ def _decode_marshal_records(payload: bytes) -> list[dict[str, Any]]:
     """
     stream = io.BytesIO(payload)
     records: list[dict[str, Any]] = []
-    while True:
+    payload_size = len(payload)
+    while stream.tell() < payload_size:
         try:
             obj = marshal.load(stream)
-        except Exception:
-            break
+        except EOFError as exc:
+            raise SourceControlCommandError("Malformed or truncated p4 -G marshal output.") from exc
+        except Exception as exc:
+            raise SourceControlCommandError("Malformed or truncated p4 -G marshal output.") from exc
         if not isinstance(obj, dict) or not obj:
-            break
+            raise SourceControlCommandError("Malformed p4 -G output: expected a non-empty record dictionary.")
         records.append(
             {_decode_marshal_value(key): _decode_marshal_value(value) for key, value in obj.items()}
         )
@@ -260,11 +266,27 @@ class P4CommandRunner:
         self._validate_argv(tokens)
         started = time.perf_counter()
         try:
-            proc = subprocess.run(
-                [self._p4_executable, "-G", *tokens],
-                capture_output=True,
-                timeout=self._timeout_seconds,
-            )
+            with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+                proc = subprocess.run(
+                    [self._p4_executable, "-G", *tokens],
+                    stdout=stdout_file,
+                    stderr=stderr_file,
+                    timeout=self._timeout_seconds,
+                )
+                stdout_size = stdout_file.tell()
+                stderr_size = stderr_file.tell()
+                if stdout_size > P4_MAX_STDOUT_BYTES:
+                    raise SourceControlCommandError(
+                        f"P4 {tokens[0]} output exceeded the {P4_MAX_STDOUT_BYTES} byte stdout limit."
+                    )
+                if stderr_size > P4_MAX_STDERR_BYTES:
+                    raise SourceControlCommandError(
+                        f"P4 {tokens[0]} output exceeded the {P4_MAX_STDERR_BYTES} byte stderr limit."
+                    )
+                stdout_file.seek(0)
+                stderr_file.seek(0)
+                stdout_payload = stdout_file.read(P4_MAX_STDOUT_BYTES + 1)
+                stderr_payload = stderr_file.read(P4_MAX_STDERR_BYTES + 1)
         except subprocess.TimeoutExpired as exc:
             raise SourceControlCommandError(
                 f"P4 {tokens[0]} timed out after {self._timeout_seconds:g}s."
@@ -273,11 +295,11 @@ class P4CommandRunner:
             raise SourceControlCommandError(
                 f"Unable to start the P4 executable '{self._p4_executable}': {exc}"
             ) from exc
-        records = tuple(_decode_marshal_records(proc.stdout))
+        records = tuple(_decode_marshal_records(stdout_payload))
         return _P4CommandResult(
             exit_code=proc.returncode,
             records=records,
-            stderr_text=proc.stderr.decode("utf-8", errors="replace")[:2000],
+            stderr_text=stderr_payload.decode("utf-8", errors="replace")[:2000],
             duration_ms=round((time.perf_counter() - started) * 1000, 2),
         )
 
@@ -823,20 +845,27 @@ class P4SourceControlService:
             if str(row.get("depotFile", "")) != depot_file:
                 continue
             user = str(row.get("user", ""))
-            if user == provider.user:
+            client = str(row.get("client", ""))
+            is_current_client_open = bool(
+                user == provider.user and client and client == provider.client
+            )
+            if is_current_client_open:
                 if not opened_by_current:
                     opened_by_current = True
                     opened_for_edit = True
                     own_action = str(row.get("action", own_action))
                     own_change = str(row.get("change", own_change))
                 continue
-            if user and user not in other_users:
-                other_users.append(user)
+            display_owner = user
+            if user == provider.user and client:
+                display_owner = f"{user}@{client}"
+            if display_owner and display_owner not in other_users:
+                other_users.append(display_owner)
             marker = str(row.get("locked", ""))
             is_exclusive = "+l" in file_type or "+l" in head_type
             if is_exclusive or marker.lower() in {"yes", "true"}:
-                if user and user not in other_locks:
-                    other_locks.append(user)
+                if display_owner and display_owner not in other_locks:
+                    other_locks.append(display_owner)
         other_users = other_users[:MAX_OTHER_USERS]
         other_locks = other_locks[:MAX_OTHER_USERS]
         locked_by_other = bool(other_locks)
@@ -891,7 +920,13 @@ class P4SourceControlService:
                 )
             )
 
-        submit_ready = bool(opened_for_edit and have_num is not None and not locked_by_other)
+        submit_ready = bool(
+            opened_for_edit
+            and opened_by_current
+            and have_num is not None
+            and not behind_head
+            and not locked_by_other
+        )
         return SourceControlFileState(
             input_path=resolved.input_path,
             local_path=local_text,
@@ -999,6 +1034,8 @@ class P4SourceControlService:
                 continue
             if file_state.behind_head:
                 if request_safe_sync and self._safe_sync_permitted(file_state, item):
+                    # Do not enqueue edit yet. A behind-head file reaches checkout
+                    # only after the requested exact clean sync succeeds.
                     sync_targets.append((item, file_state))
                 else:
                     skipped.append(
@@ -1008,7 +1045,7 @@ class P4SourceControlService:
                             "behind head; exact clean sync not requested or not provably clean",
                         )
                     )
-                    continue
+                continue
             # A checkout is attempted even when another user holds an exclusive
             # lock: the P4 failure is surfaced as a receipt instead of being
             # converted into a Writer rejection. Override remains optional.
@@ -1029,6 +1066,9 @@ class P4SourceControlService:
                 receipts.append(
                     {"file": item.input_path, "action": "sync", "ok": True, "message": "synced-exact-clean-file"}
                 )
+                # The explicit safe-sync succeeded, so this exact file may now
+                # proceed to the normal checkout attempt.
+                edit_targets.append((item, _file_state))
 
         # 2) p4 edit / checkout assistance.
         for item, _file_state in edit_targets:
@@ -1055,10 +1095,13 @@ class P4SourceControlService:
                     continue
                 if not (file_state.mapped and file_state.writable is False):
                     continue
-                # Never override a file that a checkout/sync receipt already made
-                # legitimately writable or opened in this client.
+                # Never override a file that a successful checkout already made
+                # legitimately writable and opened in this client. A successful
+                # sync alone must not suppress override after a later edit failure.
                 if any(
-                    receipt.get("file") == item.input_path and receipt.get("ok") is True
+                    receipt.get("file") == item.input_path
+                    and receipt.get("action") == "edit"
+                    and receipt.get("ok") is True
                     for receipt in receipts
                 ):
                     continue

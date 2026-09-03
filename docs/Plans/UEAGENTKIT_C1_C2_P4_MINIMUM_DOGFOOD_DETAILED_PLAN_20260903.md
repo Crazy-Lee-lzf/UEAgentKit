@@ -2,13 +2,15 @@
 
 > Date: 2026-09-03
 >
-> Integration branch: `main` (implementation may use a fresh feature branch based on current `main`)
+> Branch: `feature/source-control-collaboration`
+>
+> Branch baseline: `fdf6b5c12aceaefb0e61478bee7a9eefdf5ade76` (`main == origin/main` after M1-M5 integration and release-validation CI repair)
 >
 > Product baseline: `c0b01aac4201710466ae9c9a5ee39f8965704b36` (M5 COMPLETE)
 >
-> Planning checkpoint: `1c7e2ff39b28a9ff6d7a1bbf4d1151dfcc923d42` (merged into `main`)
+> Prior planning checkpoint: `1c7e2ff39b28a9ff6d7a1bbf4d1151dfcc923d42` (merged into `main`; retained as historical planning ancestor)
 >
-> State: **READY FOR IMPLEMENTATION**
+> State: **IMPLEMENTED / OWNER CORRECTIVE REVIEW PASS / A25 OWNER-FIXTURE BLOCKED**
 >
 > Required UE level: **U0**
 >
@@ -565,7 +567,7 @@ A21 prohibited private runner operations rejected                     PASS
 A22 no destructive filesystem-delete bypass                           PASS
 A23 CLI/MCP contract tests PASS                                       PASS
 A24 real local P4 read-only smoke PASS                                PASS
-A25 real one-file edit acceptance PASS or owner-fixture BLOCKED       PASS*
+A25 real one-file edit acceptance PASS or owner-fixture BLOCKED       BLOCKED*
 A26 portable G2 PASS                                                  PASS
 A27 UE/UBT runs = 0                                                   PASS
 ```

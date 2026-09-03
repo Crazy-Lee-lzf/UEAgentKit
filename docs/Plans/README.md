@@ -48,8 +48,10 @@ Track M required usability stages    COMPLETE through M5
   M6 symbolic compression            optional / data-driven / do not auto-start
 
 Track C / P4                         ACTIVE NEXT
-  C1 Source Control Awareness        READY FOR IMPLEMENTATION
-  C2 Advisory + local-write assist   READY FOR IMPLEMENTATION
+  C1 Source Control Awareness        COMPLETE / OWNER REVIEW PASS / U0 / G2 PASS
+  C2 Advisory + local-write assist   COMPLETE / OWNER REVIEW PASS / U0 / G2 PASS
+    A25 real mutation fixture        BLOCKED / prior unauthorized evidence excluded
+    corrective full                  1014 / 1014 PASS / 99.780 s
   C3 CL preparation / Resolve        deferred until after minimum dogfood layer
   C4 Memory integration              optional
 ```
@@ -72,12 +74,15 @@ M5 automatic injection p95           < 100 ms
 
 ```text
 worktree               E:\WorkSpace\UEAgentKit-Integration
-integration branch     main
+branch                 feature/source-control-collaboration
+branch baseline        fdf6b5c12aceaefb0e61478bee7a9eefdf5ade76
+initial C1/C2 commit    c9b6bbde15360070ccd71a750a45aa5c9f77cf84 (pre-owner-review implementation; commit was not explicitly authorized)
+owner corrective state uncommitted / G2 PASS / checkpoint authorization pending
 C1/C2 product baseline c0b01aac4201710466ae9c9a5ee39f8965704b36
-planning checkpoint    1c7e2ff39b28a9ff6d7a1bbf4d1151dfcc923d42
-feature merge source   feature/memory-context @ ae307372961345cbe98c594e9cfd469da70e68a1
-origin/main             synchronized with main by authorized 2026-09-03 push (verify live refs)
-push                    completed / no force / no rebase / no tag / no release
+prior plan checkpoint  1c7e2ff39b28a9ff6d7a1bbf4d1151dfcc923d42
+main / origin/main     fdf6b5c12aceaefb0e61478bee7a9eefdf5ade76 / synchronized before branch creation
+branch upstream         none / local-only planning branch
+push                    none for Track C branch
 ```
 
 Always inspect actual Git state before modifying anything. Repository facts beat this navigation if they later differ.
@@ -110,7 +115,7 @@ Submit/revert/delete remain human-only even if the user asks the Agent directly.
 
 ## Active next work
 
-Execute **C1/C2 — P4 Minimum Dogfood** from the active Detailed Plan.
+C1/C2 implementation and owner corrective review are complete. **Do not start C3 yet**: first checkpoint the current corrective diff and archive/synchronize C1/C2 docs after owner authorization.
 
 Frozen implementation direction:
 
@@ -131,4 +136,4 @@ C3 Resolve/CL organization     deferred
 
 Current machine read-only probe established P4 CLI/P4D 2025.1 and a reachable configured local test server/client. The UEAgentKit Git worktree itself is not depot-backed, so real C2 mutation acceptance requires an owner-designated safe mapped fixture; automated tests must not use Agent-side revert for cleanup.
 
-After C1/C2 closes, begin real-project write-enabled dogfood. Do not auto-start M6.
+After the C1/C2 corrective checkpoint closes, begin real-project write-enabled dogfood; use observed gaps to decide whether C3 should start immediately. Do not auto-start M6.

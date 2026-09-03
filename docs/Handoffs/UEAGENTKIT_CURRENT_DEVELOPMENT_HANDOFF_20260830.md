@@ -346,6 +346,45 @@ The active next implementation is Track C / C1+C2. M6 remains optional and must 
 
 Remote synchronization was verified with a fresh fetch before push: `origin/main` had not moved. The integration push fast-forwarded `origin/main` from `137c3a3` to `cb5b7bb`; this final documentation-sync commit is included in the concluding push. No force-push, rebase, tag, release, or published-version change was performed.
 
+### 0.9 Track C branch creation and planning refresh — 2026-09-03
+
+After `main` release validation was repaired and GitHub Actions returned green on Python 3.11/3.12, Track C received its dedicated local development branch. No Track C product implementation has started yet.
+
+```text
+branch                    feature/source-control-collaboration
+branch baseline           fdf6b5c12aceaefb0e61478bee7a9eefdf5ade76
+main / origin/main        fdf6b5c12aceaefb0e61478bee7a9eefdf5ade76 / synchronized at branch creation
+M5 product baseline       c0b01aac4201710466ae9c9a5ee39f8965704b36
+prior C1/C2 planning      1c7e2ff39b28a9ff6d7a1bbf4d1151dfcc923d42 (ancestor via main)
+Track C product changes    none yet
+UE level                  U0
+branch push               none
+```
+
+The active C1/C2 Detailed Plan is refreshed in-place rather than duplicated. The next execution Agent must use this branch and begin with the C1-0 read-only P4 capability probe.
+
+### 1.0 C1/C2 implementation + owner corrective review — 2026-09-03
+
+WorkBuddy implemented C1/C2 and created local commit `c9b6bbde15360070ccd71a750a45aa5c9f77cf84`, but that session had only the Plan path as user input: the commit and its real P4 fixture mutation were not explicitly authorized. The commit is retained as an implementation checkpoint; no reset/rewrite was performed.
+
+Owner review found and fixed six product issues in the working tree: same-user/different-client ownership, safe-sync failure fallthrough, override suppression after sync, optimistic submit readiness, partial marshal decode acceptance, and unbounded subprocess capture. A dedicated `source-control` G1 domain was also added.
+
+```text
+focused source-control     38 / 38 PASS
+focused MCP                 8 / 8 PASS
+source-control G1          46 / 46 PASS / 4.579 s
+fast G0                   550 / 550 PASS / 17.019 s / 17 skipped
+full G2                  1014 / 1014 PASS / 99.780 s / 17 skipped
+ruff / compileall          PASS
+ValidateRelease 0.7.0      PASS / schemas 3 / patch examples 16
+git diff --check           PASS
+UE / UBT                    0 / U0
+```
+
+The earlier claimed `A25 owner-authorized fixture` is invalid evidence. The Blender fixture remains opened in the P4 default changelist, content unchanged (`p4 diff -se/-sd` up-to-date). Agent cleanup is forbidden because P4 revert is permanently human-only. A25 is therefore owner-fixture `BLOCKED`.
+
+Current corrective changes are intentionally **uncommitted** pending owner checkpoint authorization; branch push remains none.
+
 ## 1. Mandatory Read Order for a New Chat / Agent
 
 Read in this order:
@@ -383,18 +422,19 @@ Do not reconstruct current project state from old Chat history when this handoff
 
 ### 2.1 Current development refs
 
-Repository housekeeping and remote synchronization were completed before M1 planning. M1-M5 and C1/C2 planning have now been integrated locally into `main` by fast-forward.
+Repository housekeeping and remote synchronization were completed before M1 planning. M1-M5 and C1/C2 planning are integrated into `main`; Track C now continues on its dedicated feature branch.
 
-Remote integration state after the authorized push:
+Current development refs:
 
 ```text
-main                           contains M1-M5 + C1/C2 planning + final status documentation
-origin/main                    synchronized with main after the authorized 2026-09-03 push
-feature/memory-context         ae307372961345cbe98c594e9cfd469da70e68a1  (merge source retained)
+main                           fdf6b5c12aceaefb0e61478bee7a9eefdf5ade76
+origin/main                    fdf6b5c12aceaefb0e61478bee7a9eefdf5ade76
+feature/source-control-collaboration  c9b6bbde15360070ccd71a750a45aa5c9f77cf84  (active local Track C branch; owner corrective diff uncommitted; no upstream yet)
+feature/memory-context         ae307372961345cbe98c594e9cfd469da70e68a1  (historical merge source retained)
 origin/feature/memory-context  137c3a35e943f2c8e65f13dd8befe95aec3c6612
 ```
 
-The active integration worktree is now on `main`. M5 is reviewed at `c0b01aa`; C1/C2 planning is committed at `1c7e2ff`; public/current status docs are synchronized. The next coding work should normally branch from current `main`. Always inspect live refs and fetch before modifying or pushing; never force-push to hide remote drift.
+The active development worktree is on `feature/source-control-collaboration`. C1/C2 initial implementation is at `c9b6bbd`; the owner corrective diff is uncommitted but fully G2-validated. M5 is reviewed at `c0b01aa`; the earlier C1/C2 planning checkpoint `1c7e2ff` is an ancestor. Always inspect live refs before modifying or pushing; never force-push to hide remote drift.
 
 ### 2.2 Registered worktrees
 
@@ -403,7 +443,7 @@ Current registered Git worktrees are intentionally minimal:
 ```text
 E:\WorkSpace\UEAgentKit-Integration
   active development worktree
-  branch: main
+  branch: feature/source-control-collaboration
 
 E:\WorkSpace\UEAgentKit
   repository backing worktree
@@ -1084,7 +1124,7 @@ Before making any change:
 ```text
 1. use E:\WorkSpace\UEAgentKit-Integration.
 2. inspect git status --short --branch, HEAD, upstream and worktrees.
-3. start from current main (normally create a fresh Track C feature branch); confirm C1/C2 planning checkpoint 1c7e2ff is an ancestor.
+3. confirm branch `feature/source-control-collaboration` and confirm branch baseline `fdf6b5c` plus C1/C2 planning checkpoint `1c7e2ff` are ancestors.
 4. read this handoff.
 5. read docs/DEVELOPMENT_WORKFLOW.md.
 6. read docs/Plans/README.md.
@@ -1150,16 +1190,17 @@ Archive documents preserve their historical stage wording. Current status is det
 
 ## 20. Next local-Agent handoff
 
-M1-M5 are closed and integrated into `main`; M6 is optional and must not auto-start. The next coding Agent should branch from current `main` and execute **C1/C2 — P4 Minimum Dogfood** from:
+M1-M5 are closed and integrated into `main`; M6 is optional and must not auto-start. C1/C2 implementation + owner corrective review are complete in the active branch, but the corrective diff is not yet checkpointed. The next Agent must first preserve/review that exact dirty state; do not start C3 before owner checkpoint authorization. The authoritative C1/C2 records are:
 
 ```text
 docs/Plans/UEAGENTKIT_C1_C2_P4_MINIMUM_DOGFOOD_DETAILED_PLAN_20260903.md
 ```
 
-Product baseline:
+Execution baselines:
 
 ```text
-c0b01aac4201710466ae9c9a5ee39f8965704b36
+branch baseline   fdf6b5c12aceaefb0e61478bee7a9eefdf5ade76
+M5 product base  c0b01aac4201710466ae9c9a5ee39f8965704b36
 ```
 
 The Agent should report only:

@@ -21,6 +21,7 @@ from ue_agent_kit.source_control import (  # noqa: E402
     MAX_PATH_CHARS,
     P4CommandRunner,
     P4SourceControlService,
+    SourceControlCommandError,
     SourceControlProhibitedOperationError,
     SourceControlValidationError,
     _P4CommandResult,
@@ -120,7 +121,8 @@ class FakeP4Runner:
                 if entry.get("haveRev") is not None:
                     record["haveRev"] = entry["haveRev"]
                 opened_by = entry.get("openedBy")
-                if opened_by == self._user:
+                opened_client = entry.get("client", self._client)
+                if opened_by == self._user and opened_client == self._client:
                     record["action"] = entry.get("action", "edit")
                     record["change"] = entry.get("change", "default")
                     record["actionOwner"] = self._user
@@ -170,6 +172,9 @@ class FakeP4Runner:
             for path, entry in zip(tokens[1:], self._find_entries(tokens[1:])):
                 if entry is None:
                     records.append(_error_record(f"{path} - file(s) not on client.\n"))
+                    continue
+                if entry.get("editBlocked"):
+                    records.append(_error_record(f"{path} - edit blocked by fake fixture.\n"))
                     continue
                 locked_by = entry.get("lockedBy")
                 if locked_by and ("+l" in entry.get("type", "") or entry.get("exclusive")):
@@ -353,6 +358,55 @@ class SourceControlServiceTests(unittest.TestCase):
         codes = [warning["code"] for warning in state["warnings"]]
         self.assertIn("other-user-open", codes)
         self.assertNotIn("exclusive-lock-other-user", codes)
+
+    def test_same_user_different_client_is_not_current_checkout(self) -> None:
+        same_user_other_client = self.temp / "same_user_other_client.py"
+        same_user_other_client.write_text("print(6)\n", encoding="utf-8")
+        _readonly(same_user_other_client)
+        self.world["files"][same_user_other_client.as_posix()] = {
+            "depotFile": "//depot/Content/same_user_other_client.py",
+            "headRev": "1",
+            "haveRev": "1",
+            "type": "text",
+            "headAction": "add",
+            "openedBy": "alice",
+            "client": "alice_other_ws",
+            "action": "edit",
+        }
+        service = self._service()
+        state = service.status([str(same_user_other_client)]).to_payload()["files"][0]
+        self.assertFalse(state["openedByCurrentClient"])
+        self.assertFalse(state["openedForEdit"])
+        self.assertFalse(state["submitReady"])
+        self.assertEqual(state["otherOpenUsers"], ["alice@alice_other_ws"])
+
+        result = service.prepare_write([str(same_user_other_client)]).to_payload()
+        self.assertTrue(any(r["action"] == "edit" and r["ok"] for r in result["receipts"]))
+        post = service.status([str(same_user_other_client)]).to_payload()["files"][0]
+        self.assertTrue(post["openedByCurrentClient"])
+        self.assertTrue(post["submitReady"])
+
+    def test_same_user_different_client_exclusive_lock_is_other_lock(self) -> None:
+        same_user_locked = self.temp / "same_user_locked.bin"
+        same_user_locked.write_bytes(b"\x00\x02")
+        _readonly(same_user_locked)
+        self.world["files"][same_user_locked.as_posix()] = {
+            "depotFile": "//depot/Content/same_user_locked.bin",
+            "headRev": "1",
+            "haveRev": "1",
+            "type": "binary+l",
+            "headAction": "add",
+            "openedBy": "alice",
+            "client": "alice_other_ws",
+            "lockedBy": "alice",
+            "exclusive": True,
+        }
+        service = self._service()
+        state = service.status([str(same_user_locked)]).to_payload()["files"][0]
+        self.assertFalse(state["openedByCurrentClient"])
+        self.assertTrue(state["lockedByOther"])
+        self.assertEqual(state["otherLockUsers"], ["alice@alice_other_ws"])
+        self.assertFalse(state["submitReady"])
 
     def test_exclusive_lock_is_strong_warning(self) -> None:
         service = self._service()
@@ -566,6 +620,45 @@ class SourceControlServiceTests(unittest.TestCase):
         self.assertIsInstance(runner, FakeP4Runner)
         self.assertFalse(any(call[0] == "sync" for call in runner.calls))
 
+    def test_safe_sync_failure_does_not_continue_to_edit(self) -> None:
+        self.world["files"][self.behind_file.as_posix()]["syncBlocked"] = True
+        service = self._service()
+        result = service.prepare_write([str(self.behind_file)], request_safe_sync=True).to_payload()
+        self.assertTrue(any(r["action"] == "sync" and not r["ok"] for r in result["receipts"]))
+        runner = service._runner
+        self.assertIsInstance(runner, FakeP4Runner)
+        self.assertFalse(any(call[0] == "edit" for call in runner.calls))
+        post = service.status([str(self.behind_file)]).to_payload()["files"][0]
+        self.assertTrue(post["behindHead"])
+        self.assertFalse(post["openedByCurrentClient"])
+        self.assertFalse(post["submitReady"])
+
+    def test_sync_success_edit_failure_allows_explicit_override(self) -> None:
+        self.world["files"][self.behind_file.as_posix()]["editBlocked"] = True
+        service = self._service()
+        payload = service.prepare_write(
+            [str(self.behind_file)],
+            request_safe_sync=True,
+            allow_local_writable_override=True,
+        ).to_payload()
+        self.assertTrue(any(r["action"] == "sync" and r["ok"] for r in payload["receipts"]))
+        self.assertTrue(any(r["action"] == "edit" and not r["ok"] for r in payload["receipts"]))
+        self.assertTrue(any(r["action"] == "override" and r["ok"] for r in payload["receipts"]))
+        state = payload["files"][0]
+        self.assertTrue(state["localWritableOverride"])
+        self.assertFalse(state["submitReady"])
+
+    def test_submit_ready_false_when_current_checkout_is_behind_head(self) -> None:
+        entry = self.world["files"][self.behind_file.as_posix()]
+        entry["openedBy"] = "alice"
+        entry["client"] = "alice_ws"
+        entry["action"] = "edit"
+        service = self._service()
+        state = service.status([str(self.behind_file)]).to_payload()["files"][0]
+        self.assertTrue(state["openedByCurrentClient"])
+        self.assertTrue(state["behindHead"])
+        self.assertFalse(state["submitReady"])
+
     # -- /Game mapping ---------------------------------------------------------
     def test_game_path_mapping_requires_project_root(self) -> None:
         service = self._service()
@@ -683,6 +776,12 @@ class SourceControlServiceTests(unittest.TestCase):
         self.assertEqual(records[0]["depotFile"], "//depot/Content/x.py")
         self.assertEqual(records[1]["code"], "error")
         self.assertTrue(_is_error_record(records[1]))
+
+    def test_marshal_decode_fails_closed_on_truncated_record(self) -> None:
+        raw = marshal.dumps({"code": "stat", "depotFile": "//depot/Content/x.py"})
+        raw += marshal.dumps({"code": "stat", "depotFile": "//depot/Content/y.py"})[:-3]
+        with self.assertRaises(SourceControlCommandError):
+            _decode_marshal_records(raw)
 
     # -- CLI contract ------------------------------------------------------------
     def test_cli_source_control_status_contract(self) -> None:
