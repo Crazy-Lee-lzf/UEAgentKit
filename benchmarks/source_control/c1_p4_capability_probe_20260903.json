@@ -1,0 +1,486 @@
+{
+  "probeDate": "2026-09-03",
+  "note": "C1-0 deterministic read-only P4 capability probe against the configured local server/client.",
+  "p4Executable": "E:\\Program Files\\p4.EXE",
+  "mappedExample": "E:\\WorkSpace\\Blender\\XinYueHu\\Blender_AutoLink_XinYueHu_Textures_Relative.py",
+  "unmappedExample": "E:/WorkSpace/UEAgentKit-Integration/pyproject.toml",
+  "sections": {
+    "version": {
+      "argv": [
+        "E:\\Program Files\\p4.EXE",
+        "-V"
+      ],
+      "exitCode": 0,
+      "stdoutText": "Perforce - The Fast Software Configuration Management System.\r\nCopyright 1995-2025 Perforce Software.  All rights reserved.\r\nThis product includes software developed by the OpenSSL Project\r\nfor use in the OpenSSL Toolkit (http://www.openssl.org/)\r\nVersion of OpenSSL Libraries: OpenSSL 3.0.15 3 Sep 2024\r\nSee 'p4 help [ -l ] legal' for additional license information on\r\nthese licenses and others.\r\nExtensions/scripting support built-in.\r\nParallel sync threading built-in.\r\nRev. P4/NTX64/2025.1/2810567 (2025/08/05).\r\n",
+      "stderrText": "",
+      "durationMs": 287.86,
+      "timedOut": false
+    },
+    "infoHuman": {
+      "argv": [
+        "E:\\Program Files\\p4.EXE",
+        "info"
+      ],
+      "exitCode": 0,
+      "stdoutText": "User name: lzf\r\nClient name: lzf_DESKTOP-8HD8KUO_8637\r\nClient host: DESKTOP-8HD8KUO\r\nClient root: E:/WorkSpace\r\nCurrent directory: /e/WorkSpace/UEAgentKit-Integration\r\nPeer address: 127.0.0.1:57050\r\nClient address: 127.0.0.1\r\nServer address: localhost.sangfor.com.cn:1666\r\nServer root: E:\\P4V_Server\\\r\nServer date: 2026/09/03 22:04:28 +0800\r\nServer uptime: 03:13:27\r\nServer version: P4D/NTX64/2025.1/2810567 (2025/08/05)\r\nServer license: none\r\nCase Handling: insensitive\r\n",
+      "stderrText": "",
+      "durationMs": 239.24,
+      "timedOut": false
+    },
+    "infoG": {
+      "argv": [
+        "E:\\Program Files\\p4.EXE",
+        "-G",
+        "info"
+      ],
+      "exitCode": 0,
+      "stdoutBytes": 885,
+      "recordCount": 1,
+      "records": [
+        {
+          "code": "stat",
+          "userName": "lzf",
+          "clientName": "lzf_DESKTOP-8HD8KUO_8637",
+          "clientRoot": "E:/WorkSpace",
+          "clientLock": "none",
+          "clientCwd": "/e/WorkSpace/UEAgentKit-Integration",
+          "clientHost": "DESKTOP-8HD8KUO",
+          "clientCase": "insensitive",
+          "peerAddress": "127.0.0.1:57051",
+          "clientAddress": "127.0.0.1",
+          "serverName": "Perforce",
+          "unicode": "enabled",
+          "serverAddress": "localhost.sangfor.com.cn:1666",
+          "serverRoot": "E:\\P4V_Server\\",
+          "serverDate": "2026/09/03 22:04:28 +0800",
+          "tzoffset": "28800",
+          "serverUptime": "03:13:27",
+          "serverVersion": "P4D/NTX64/2025.1/2810567 (2025/08/05)",
+          "serverServices": "standard",
+          "serverLicense": "none",
+          "caseHandling": "insensitive",
+          "allowStreamSpecInteg": "1",
+          "parentViewDefault": "inheritAll",
+          "unloadSupport": "disabled",
+          "extensionsSupport": "enabled",
+          "memoryManager": "mimalloc 212"
+        }
+      ],
+      "stderrText": "",
+      "durationMs": 265.92,
+      "timedOut": false,
+      "rawMarshalValuesAreBytes": true
+    },
+    "ztagInfo": {
+      "argv": [
+        "E:\\Program Files\\p4.EXE",
+        "-ztag",
+        "info"
+      ],
+      "exitCode": 0,
+      "stdoutText": "... userName lzf\r\n... clientName lzf_DESKTOP-8HD8KUO_8637\r\n... clientRoot E:/WorkSpace\r\n... clientLock none\r\n... clientCwd /e/WorkSpace/UEAgentKit-Integration\r\n... clientHost DESKTOP-8HD8KUO\r\n... clientCase insensitive\r\n... peerAddress 127.0.0.1:57052\r\n... clientAddress 127.0.0.1\r\n... serverName Perforce\r\n... unicode enabled\r\n... serverAddress localhost.sangfor.com.cn:1666\r\n... serverRoot E:\\P4V_Server\\\r\n... serverDate 2026/09/03 22:04:28 +0800\r\n... tzoffset 28800\r\n... serverUptime 03:13:27\r\n... serverVersion P4D/NTX64/2025.1/2810567 (2025/08/05)\r\n... serverServices standard\r\n... serverLicense none\r\n... caseHandling insensitive\r\n... allowStreamSpecInteg 1\r\n... parentViewDefault inheritAll\r\n... unloadSupport disabled\r\n... extensionsSupport enabled\r\n... memoryManager mimalloc 212\r\n\r\n",
+      "stderrText": "",
+      "durationMs": 312.17,
+      "timedOut": false
+    },
+    "whereMapped": {
+      "argv": [
+        "E:\\Program Files\\p4.EXE",
+        "where",
+        "E:\\WorkSpace\\Blender\\XinYueHu\\Blender_AutoLink_XinYueHu_Textures_Relative.py"
+      ],
+      "exitCode": 0,
+      "stdoutText": "//depot/Blender/XinYueHu/Blender_AutoLink_XinYueHu_Textures_Relative.py //lzf_DESKTOP-8HD8KUO_8637/Blender/XinYueHu/Blender_AutoLink_XinYueHu_Textures_Relative.py E:/WorkSpace\\Blender\\XinYueHu\\Blender_AutoLink_XinYueHu_Textures_Relative.py\r\n",
+      "stderrText": "",
+      "durationMs": 257.58,
+      "timedOut": false
+    },
+    "whereUnmapped": {
+      "argv": [
+        "E:\\Program Files\\p4.EXE",
+        "where",
+        "E:/WorkSpace/UEAgentKit-Integration/pyproject.toml"
+      ],
+      "exitCode": 0,
+      "stdoutText": "//depot/UEAgentKit-Integration/pyproject.toml //lzf_DESKTOP-8HD8KUO_8637/UEAgentKit-Integration/pyproject.toml E:/WorkSpace\\UEAgentKit-Integration\\pyproject.toml\r\n",
+      "stderrText": "",
+      "durationMs": 246.49,
+      "timedOut": false
+    },
+    "whereSpaceG": {
+      "argv": [
+        "E:\\Program Files\\p4.EXE",
+        "-G",
+        "where",
+        "E:/WorkSpace/Blender/A Folder With Spaces/x file.txt"
+      ],
+      "exitCode": 0,
+      "stdoutBytes": 238,
+      "recordCount": 1,
+      "records": [
+        {
+          "code": "stat",
+          "depotFile": "//depot/Blender/A Folder With Spaces/x file.txt",
+          "clientFile": "//lzf_DESKTOP-8HD8KUO_8637/Blender/A Folder With Spaces/x file.txt",
+          "path": "E:/WorkSpace\\Blender\\A Folder With Spaces\\x file.txt"
+        }
+      ],
+      "stderrText": "",
+      "durationMs": 261.35,
+      "timedOut": false,
+      "rawMarshalValuesAreBytes": true
+    },
+    "fstatMappedHuman": {
+      "argv": [
+        "E:\\Program Files\\p4.EXE",
+        "fstat",
+        "E:\\WorkSpace\\Blender\\XinYueHu\\Blender_AutoLink_XinYueHu_Textures_Relative.py"
+      ],
+      "exitCode": 0,
+      "stdoutText": "... depotFile //depot/Blender/XinYueHu/Blender_AutoLink_XinYueHu_Textures_Relative.py\r\n... clientFile E:/WorkSpace\\Blender\\XinYueHu\\Blender_AutoLink_XinYueHu_Textures_Relative.py\r\n... isMapped \r\n... headAction add\r\n... headType unicode\r\n... headTime 1783863110\r\n... headRev 1\r\n... headChange 22\r\n... headModTime 1783859448\r\n... haveRev 1\r\n\r\n",
+      "stderrText": "",
+      "durationMs": 244.82,
+      "timedOut": false
+    },
+    "fstatMappedG": {
+      "argv": [
+        "E:\\Program Files\\p4.EXE",
+        "-G",
+        "fstat",
+        "E:\\WorkSpace\\Blender\\XinYueHu\\Blender_AutoLink_XinYueHu_Textures_Relative.py"
+      ],
+      "exitCode": 0,
+      "stdoutBytes": 389,
+      "recordCount": 1,
+      "records": [
+        {
+          "code": "stat",
+          "depotFile": "//depot/Blender/XinYueHu/Blender_AutoLink_XinYueHu_Textures_Relative.py",
+          "clientFile": "E:/WorkSpace\\Blender\\XinYueHu\\Blender_AutoLink_XinYueHu_Textures_Relative.py",
+          "isMapped": "",
+          "headAction": "add",
+          "headType": "unicode",
+          "headTime": "1783863110",
+          "headRev": "1",
+          "headChange": "22",
+          "headModTime": "1783859448",
+          "haveRev": "1"
+        }
+      ],
+      "stderrText": "",
+      "durationMs": 245.55,
+      "timedOut": false,
+      "rawMarshalValuesAreBytes": true
+    },
+    "fstatUnmappedG": {
+      "argv": [
+        "E:\\Program Files\\p4.EXE",
+        "-G",
+        "fstat",
+        "E:/WorkSpace/UEAgentKit-Integration/pyproject.toml"
+      ],
+      "exitCode": 0,
+      "stdoutBytes": 140,
+      "recordCount": 1,
+      "records": [
+        {
+          "code": "error",
+          "data": "E:/WorkSpace/UEAgentKit-Integration/pyproject.toml - no such file(s).\n",
+          "severity": 2,
+          "generic": 17
+        }
+      ],
+      "stderrText": "",
+      "durationMs": 264.52,
+      "timedOut": false,
+      "rawMarshalValuesAreBytes": true
+    },
+    "fstatSpaceG": {
+      "argv": [
+        "E:\\Program Files\\p4.EXE",
+        "-G",
+        "fstat",
+        "E:/WorkSpace/Blender/A Folder With Spaces/x file.txt"
+      ],
+      "exitCode": 0,
+      "stdoutBytes": 142,
+      "recordCount": 1,
+      "records": [
+        {
+          "code": "error",
+          "data": "E:/WorkSpace/Blender/A Folder With Spaces/x file.txt - no such file(s).\n",
+          "severity": 2,
+          "generic": 17
+        }
+      ],
+      "stderrText": "",
+      "durationMs": 315.33,
+      "timedOut": false,
+      "rawMarshalValuesAreBytes": true
+    },
+    "openedG": {
+      "argv": [
+        "E:\\Program Files\\p4.EXE",
+        "-G",
+        "opened",
+        "E:\\WorkSpace\\Blender\\XinYueHu\\Blender_AutoLink_XinYueHu_Textures_Relative.py"
+      ],
+      "exitCode": 0,
+      "stdoutBytes": 0,
+      "recordCount": 0,
+      "records": [],
+      "stderrText": "",
+      "durationMs": 245.38,
+      "timedOut": false,
+      "rawMarshalValuesAreBytes": false
+    },
+    "openedAllG": {
+      "argv": [
+        "E:\\Program Files\\p4.EXE",
+        "-G",
+        "opened",
+        "-a"
+      ],
+      "exitCode": 0,
+      "stdoutBytes": 103224,
+      "recordCount": 205,
+      "records": [
+        {
+          "code": "stat",
+          "depotFile": "//depot/Blender/XinYueHu/XinYueHu_render.blend",
+          "clientFile": "//lzf_DESKTOP-8HD8KUO_8637/Blender/XinYueHu/XinYueHu_render.blend",
+          "rev": "1",
+          "haveRev": "1",
+          "action": "edit",
+          "change": "default",
+          "type": "binary",
+          "user": "lzf",
+          "client": "lzf_DESKTOP-8HD8KUO_8637"
+        },
+        {
+          "code": "stat",
+          "depotFile": "//depot/Reforge/Reforge.uproject",
+          "clientFile": "//lzf_DESKTOP-8HD8KUO_8637/Reforge/Reforge.uproject",
+          "rev": "1",
+          "haveRev": "none",
+          "action": "add",
+          "change": "default",
+          "type": "text",
+          "user": "lzf",
+          "client": "lzf_DESKTOP-8HD8KUO_8637"
+        },
+        {
+          "code": "stat",
+          "depotFile": "//DepotReforge/stream_reforge/ModelPreview/Content/XinYueHu_RenderRef/Maps/L_XinYueHu_RenderRef.umap",
+          "clientFile": "//lzf_DESKTOP-8HD8KUO_9691/ModelPreview/Content/XinYueHu_RenderRef/Maps/L_XinYueHu_RenderRef.umap",
+          "rev": "1",
+          "haveRev": "none",
+          "action": "add",
+          "change": "default",
+          "type": "binary",
+          "user": "lzf",
+          "client": "lzf_DESKTOP-8HD8KUO_9691"
+        },
+        {
+          "code": "stat",
+          "depotFile": "//DepotReforge/stream_reforge/ModelPreview/Content/XinYueHu_RenderRef/Materials/EarTests/M_XinYueHu_Bangs_Masked_045.uasset",
+          "clientFile": "//lzf_DESKTOP-8HD8KUO_9691/ModelPreview/Content/XinYueHu_RenderRef/Materials/EarTests/M_XinYueHu_Bangs_Masked_045.uasset",
+          "rev": "1",
+          "haveRev": "none",
+          "action": "add",
+          "change": "default",
+          "type": "binary",
+          "user": "lzf",
+          "client": "lzf_DESKTOP-8HD8KUO_9691"
+        },
+        {
+          "code": "stat",
+          "depotFile": "//DepotReforge/stream_reforge/ModelPreview/Content/XinYueHu_RenderRef/Materials/EarTests/M_XinYueHu_Bangs_Masked_055.uasset",
+          "clientFile": "//lzf_DESKTOP-8HD8KUO_9691/ModelPreview/Content/XinYueHu_RenderRef/Materials/EarTests/M_XinYueHu_Bangs_Masked_055.uasset",
+          "rev": "1",
+          "haveRev": "none",
+          "action": "add",
+          "change": "default",
+          "type": "binary",
+          "user": "lzf",
+          "client": "lzf_DESKTOP-8HD8KUO_9691"
+        },
+        {
+          "code": "stat",
+          "depotFile": "//DepotReforge/stream_reforge/ModelPreview/Content/XinYueHu_RenderRef/Materials/EarTests/M_XinYueHu_Bangs_Masked_065.uasset",
+          "clientFile": "//lzf_DESKTOP-8HD8KUO_9691/ModelPreview/Content/XinYueHu_RenderRef/Materials/EarTests/M_XinYueHu_Bangs_Masked_065.uasset",
+          "rev": "1",
+          "haveRev": "none",
+          "action": "add",
+          "change": "default",
+          "type": "binary",
+          "user": "lzf",
+          "client": "lzf_DESKTOP-8HD8KUO_9691"
+        }
+      ],
+      "stderrText": "",
+      "durationMs": 251.02,
+      "timedOut": false,
+      "rawMarshalValuesAreBytes": true
+    },
+    "diffSeLocalChangeProbe": {
+      "argv": [
+        "E:\\Program Files\\p4.EXE",
+        "diff",
+        "-se",
+        "E:\\WorkSpace\\Blender\\XinYueHu\\Blender_AutoLink_XinYueHu_Textures_Relative.py"
+      ],
+      "exitCode": 0,
+      "stdoutText": "",
+      "stderrText": "",
+      "durationMs": 241.51,
+      "timedOut": false
+    },
+    "diffSdLocalChangeProbe": {
+      "argv": [
+        "E:\\Program Files\\p4.EXE",
+        "diff",
+        "-sd",
+        "E:\\WorkSpace\\Blender\\XinYueHu\\Blender_AutoLink_XinYueHu_Textures_Relative.py"
+      ],
+      "exitCode": 0,
+      "stdoutText": "",
+      "stderrText": "",
+      "durationMs": 231.86,
+      "timedOut": false
+    },
+    "syncNPreview": {
+      "argv": [
+        "E:\\Program Files\\p4.EXE",
+        "sync",
+        "-n",
+        "E:\\WorkSpace\\Blender\\XinYueHu\\Blender_AutoLink_XinYueHu_Textures_Relative.py"
+      ],
+      "exitCode": 0,
+      "stdoutText": "",
+      "stderrText": "E:\\WorkSpace\\Blender\\XinYueHu\\Blender_AutoLink_XinYueHu_Textures_Relative.py - file(s) up-to-date.\r\n",
+      "durationMs": 255.98,
+      "timedOut": false
+    },
+    "clientSpec": {
+      "argv": [
+        "E:\\Program Files\\p4.EXE",
+        "client",
+        "-o"
+      ],
+      "exitCode": 0,
+      "stdoutText": "# A Perforce Client Specification.\r\n#\r\n#  Client:      The client name.\r\n#  Update:      The date this specification was last modified.\r\n#  Access:      The date this client was last used in any way.\r\n#  Owner:       The Perforce user name of the user who owns the client\r\n#               workspace. The default is the user who created the\r\n#               client workspace.\r\n#  Host:        If set, restricts access to the named host.\r\n#  Description: A short description of the client (optional).\r\n#  Root:        The base directory of the client workspace.\r\n#  AltRoots:    Up to two alternate client workspace roots.\r\n#  Options:     Client options:\r\n#                      [no]allwrite [no]clobber [no]compress\r\n#                      [un]locked [no]modtime [no]rmdir [no]altsync\r\n#  SubmitOptions:\r\n#                      submitunchanged/submitunchanged+reopen\r\n#                      revertunchanged/revertunchanged+reopen\r\n#                      leaveunchanged/leaveunchanged+reopen\r\n#  LineEnd:     Text file line endings on client: local/unix/mac/win/share.\r\n#  Type:        Type of client: writeable/readonly/graph/partitioned/\r\n#                                   partitioned-jnl.\r\n#  ServerID:    If set, restricts access to the named server.\r\n#  View:        Lines to map depot files into the client workspace.\r\n#  ChangeView:  Lines to restrict depot files to specific changelists.\r\n#  Stream:      The stream to which this client's view will be dedicated.\r\n#               (Files in stream paths can be submitted only by dedicated\r\n#               stream clients.) When this optional field is set, the\r\n#               View field will be automatically replaced by a stream\r\n#               view as the client spec is saved.\r\n#  StreamAtChange:  A changelist number that sets a back-in-time view of a\r\n#                   stream ( Stream field is required ).\r\n#                   Changes cannot be submitted when this field is set.\r\n#\r\n# Use 'p4 help client' to see more about client views and options.\r\n\r\nClient:\tlzf_DESKTOP-8HD8KUO_8637\r\n\r\nUpdate:\t2026/07/12 21:24:57\r\n\r\nAccess:\t2026/09/03 22:04:28\r\n\r\nOwner:\tlzf\r\n\r\nHost:\tDESKTOP-8HD8KUO\r\n\r\nDescription:\r\n\tCreated by lzf.\r\n\r\nRoot:\tE:/WorkSpace\r\n\r\nOptions:\tnoallwrite noclobber nocompress unlocked nomodtime normdir noaltsync\r\n\r\nSubmitOptions:\tsubmitunchanged\r\n\r\nLineEnd:\tlocal\r\n\r\nView:\r\n\t//depot/... //lzf_DESKTOP-8HD8KUO_8637/...\r\n\r\n",
+      "stderrText": "",
+      "durationMs": 224.24,
+      "timedOut": false
+    },
+    "depotFilesSample": {
+      "argv": [
+        "E:\\Program Files\\p4.EXE",
+        "files",
+        "-m",
+        "5",
+        "//depot/Blender/XinYueHu/*"
+      ],
+      "exitCode": 0,
+      "stdoutText": "//depot/Blender/XinYueHu/Blender_AutoLink_XinYueHu_Textures_Relative.py#1 - add change 22 (unicode)\r\n//depot/Blender/XinYueHu/preview.png#1 - add change 22 (binary)\r\n//depot/Blender/XinYueHu/XinYueHu.blend#1 - add change 22 (binary)\r\n//depot/Blender/XinYueHu/XinYueHu.blend1#1 - add change 22 (binary)\r\n//depot/Blender/XinYueHu/XinYueHu_material_backup.blend#1 - add change 22 (binary)\r\n",
+      "stderrText": "",
+      "durationMs": 9402.4,
+      "timedOut": false
+    },
+    "filesGMulti": {
+      "argv": [
+        "E:\\Program Files\\p4.EXE",
+        "-G",
+        "files",
+        "-m",
+        "5",
+        "//depot/Blender/XinYueHu/*"
+      ],
+      "exitCode": 0,
+      "stdoutBytes": 912,
+      "recordCount": 5,
+      "records": [
+        {
+          "code": "stat",
+          "depotFile": "//depot/Blender/XinYueHu/Blender_AutoLink_XinYueHu_Textures_Relative.py",
+          "rev": "1",
+          "change": "22",
+          "action": "add",
+          "type": "unicode",
+          "time": "1783863110"
+        },
+        {
+          "code": "stat",
+          "depotFile": "//depot/Blender/XinYueHu/preview.png",
+          "rev": "1",
+          "change": "22",
+          "action": "add",
+          "type": "binary",
+          "time": "1783863110"
+        },
+        {
+          "code": "stat",
+          "depotFile": "//depot/Blender/XinYueHu/XinYueHu.blend",
+          "rev": "1",
+          "change": "22",
+          "action": "add",
+          "type": "binary",
+          "time": "1783863110"
+        },
+        {
+          "code": "stat",
+          "depotFile": "//depot/Blender/XinYueHu/XinYueHu.blend1",
+          "rev": "1",
+          "change": "22",
+          "action": "add",
+          "type": "binary",
+          "time": "1783863110"
+        },
+        {
+          "code": "stat",
+          "depotFile": "//depot/Blender/XinYueHu/XinYueHu_material_backup.blend",
+          "rev": "1",
+          "change": "22",
+          "action": "add",
+          "type": "binary",
+          "time": "1783863110"
+        }
+      ],
+      "stderrText": "",
+      "durationMs": 228.84,
+      "timedOut": false,
+      "rawMarshalValuesAreBytes": true
+    },
+    "providerClosedPortHuman": {
+      "argv": [
+        "E:\\Program Files\\p4.EXE",
+        "-p",
+        "tcp:127.0.0.1:1",
+        "info"
+      ],
+      "exitCode": 1,
+      "stdoutText": "",
+      "stderrText": "Perforce client error:\n\tConnect to server failed; check $P4PORT.\n\tTCP connect to 127.0.0.1:1 failed.\n\tconnect: 127.0.0.1:1: WSAECONNREFUSED, ����Ŀ�����������ܾ����޷����ӡ� \n",
+      "durationMs": 2228.1,
+      "timedOut": false
+    },
+    "providerClosedPortG": {
+      "argv": [
+        "E:\\Program Files\\p4.EXE",
+        "-G",
+        "-p",
+        "tcp:127.0.0.1:1",
+        "info"
+      ],
+      "exitCode": 1,
+      "stdoutBytes": 0,
+      "recordCount": 0,
+      "records": [],
+      "stderrText": "Perforce client error:\n\tConnect to server failed; check $P4PORT.\n\tTCP connect to 127.0.0.1:1 failed.\n\tconnect: 127.0.0.1:1: WSAECONNREFUSED, ����Ŀ�����������ܾ����޷����ӡ� \n",
+      "durationMs": 2251.09,
+      "timedOut": false,
+      "rawMarshalValuesAreBytes": false
+    }
+  }
+}

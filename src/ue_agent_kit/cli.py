@@ -42,6 +42,7 @@ from .project_memory import (
 from .patches import PATCH_SCHEMA_VERSION, get_operation_registry, validate_patch
 from .queries import find_references, get_asset, get_stats, search_assets, search_symbols
 from .schema import CURRENT_SCHEMA_VERSION
+from .source_control import P4SourceControlService
 
 
 def _add_database_argument(parser: argparse.ArgumentParser) -> None:
@@ -389,6 +390,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="Bind address. Loopback only; non-loopback addresses are rejected.",
     )
 
+    source_control_parser = subparsers.add_parser(
+        "source-control",
+        help="Inspect advisory Perforce collaboration state (read-only, no P4 mutation).",
+    )
+    source_control_subparsers = source_control_parser.add_subparsers(
+        dest="source_control_command",
+        required=True,
+    )
+    source_control_status = source_control_subparsers.add_parser(
+        "status",
+        help="Report advisory P4 state for up to 16 exact local or /Game file paths.",
+    )
+    source_control_status.add_argument("paths", nargs="+")
+    source_control_status.add_argument(
+        "--project",
+        type=Path,
+        default=None,
+        help="Project root used to map /Game package paths onto <project>/Content/...",
+    )
+
     return parser
 
 
@@ -644,6 +665,10 @@ def run(args: argparse.Namespace) -> tuple[Any, int]:
         if args.fixture_verification_report_path is not None:
             _write_json_file(args.fixture_verification_report_path, result)
         return result, 0 if result["verified"] else 1
+
+    if args.command == "source-control" and args.source_control_command == "status":
+        service = P4SourceControlService(project_root=args.project)
+        return service.status(args.paths).to_payload(), 0
 
     if args.command == "index" and args.index_command == "build":
         with open_database(args.database) as connection:
