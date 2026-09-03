@@ -2,7 +2,7 @@
 
 更新时间：2026-09-03
 
-当前已发布版本仍为 **0.7.0**，支持 Unreal Engine 5.6。开发线已完成 Track W / Writer、Track V / Knowledge Web，以及 Track M 的 M1–M5 必要阶段；M6 继续 optional / data-driven。当前下一主线已经切换到 **Track C / C1+C2 P4 Minimum Dogfood**，随后直接进入真实项目 write-enabled dogfood。项目级当前入口统一从 [`Plans/README.md`](Plans/README.md) 进入；正式 package release、Tag 与版本号变更仍是独立授权流程。
+当前已发布版本为 **0.7.0**，支持 Unreal Engine 5.6。开发线已完成 Track W / Writer、Track V / Knowledge Web，以及 Track M 的 M1–M5 必要阶段；M6 继续 optional / data-driven。当前下一主线已经切换到 **Track C / C1+C2 P4 Minimum Dogfood**，随后直接进入真实项目 write-enabled dogfood。项目级当前入口统一从 [`Plans/README.md`](Plans/README.md) 进入；正式 package release、Tag 与版本号变更仍是独立授权流程。
 
 ## 总体方向
 
