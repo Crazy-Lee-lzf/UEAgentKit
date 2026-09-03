@@ -324,7 +324,7 @@ C3 may later add bounded Resolve and changelist preparation.
 Agent submit / revert / P4-managed delete are permanently human-only.
 ```
 
-### 0.8 Main integration and remote-push preparation update — 2026-09-03
+### 0.8 Main integration and remote synchronization update — 2026-09-03
 
 The owner authorized merging the completed M1-M5 development line plus C1/C2 planning into `main`, updating current status documentation, and pushing `main` to the remote.
 
@@ -344,7 +344,7 @@ published product         0.7.0 / UE5.6 unchanged
 
 The active next implementation is Track C / C1+C2. M6 remains optional and must not auto-start. Future implementation should begin from current `main` (normally on a fresh feature branch) and treat the C1/C2 planning checkpoint as an ancestor, not require HEAD to equal it exactly.
 
-Remote synchronization is separately verified at push time. If `origin/main` has moved, reconcile before push; do not force-push.
+Remote synchronization was verified with a fresh fetch before push: `origin/main` had not moved. The integration push fast-forwarded `origin/main` from `137c3a3` to `cb5b7bb`; this final documentation-sync commit is included in the concluding push. No force-push, rebase, tag, release, or published-version change was performed.
 
 ## 1. Mandatory Read Order for a New Chat / Agent
 
@@ -385,11 +385,11 @@ Do not reconstruct current project state from old Chat history when this handoff
 
 Repository housekeeping and remote synchronization were completed before M1 planning. M1-M5 and C1/C2 planning have now been integrated locally into `main` by fast-forward.
 
-Current local refs before the authorized remote push:
+Remote integration state after the authorized push:
 
 ```text
-main                           includes ae307372961345cbe98c594e9cfd469da70e68a1 and this post-merge docs sync
-origin/main                    137c3a35e943f2c8e65f13dd8befe95aec3c6612  (last-known; refresh before push)
+main                           contains M1-M5 + C1/C2 planning + final status documentation
+origin/main                    synchronized with main after the authorized 2026-09-03 push
 feature/memory-context         ae307372961345cbe98c594e9cfd469da70e68a1  (merge source retained)
 origin/feature/memory-context  137c3a35e943f2c8e65f13dd8befe95aec3c6612
 ```
