@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-CURRENT_MEMORY_SCHEMA_VERSION = 5
+CURRENT_MEMORY_SCHEMA_VERSION = 6
 
 
 @dataclass(frozen=True)
@@ -363,6 +363,62 @@ CREATE TABLE memory_embeddings (
 
 CREATE INDEX memory_embeddings_model_idx
     ON memory_embeddings(model_id, record_id);
+""",
+    ),
+    MemoryMigration(
+        version=6,
+        description=(
+            "Add persisted L2/L3 context snapshots and deterministic source-generation "
+            "invalidation for automatic Task Context injection"
+        ),
+        sql=r"""
+CREATE TABLE memory_context_state (
+    project_key          TEXT PRIMARY KEY,
+    source_generation    INTEGER NOT NULL DEFAULT 0,
+    built_generation     INTEGER NOT NULL DEFAULT -1,
+    snapshot_id          TEXT NOT NULL DEFAULT '',
+    index_snapshot_id    TEXT NOT NULL DEFAULT '',
+    source_digest        TEXT NOT NULL DEFAULT '',
+    built_at_utc         TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE memory_context_entries (
+    entry_id             TEXT PRIMARY KEY,
+    project_key          TEXT NOT NULL,
+    layer                TEXT NOT NULL CHECK (layer IN ('L2', 'L3')),
+    context_key          TEXT NOT NULL,
+    ordinal              INTEGER NOT NULL CHECK (ordinal >= 0),
+    title                TEXT NOT NULL,
+    body                 TEXT NOT NULL,
+    match_json           TEXT NOT NULL DEFAULT '{}',
+    source_bindings_json TEXT NOT NULL DEFAULT '[]',
+    content_sha256       TEXT NOT NULL,
+    UNIQUE(project_key, layer, context_key)
+);
+
+CREATE INDEX memory_context_entries_project_layer_idx
+    ON memory_context_entries(project_key, layer, ordinal, context_key);
+
+CREATE TRIGGER memory_records_ctx_gen_ai AFTER INSERT ON memory_records BEGIN
+    UPDATE memory_context_state
+    SET source_generation = source_generation + 1
+    WHERE project_key = NEW.project_key;
+END;
+
+CREATE TRIGGER memory_records_ctx_gen_ad AFTER DELETE ON memory_records BEGIN
+    UPDATE memory_context_state
+    SET source_generation = source_generation + 1
+    WHERE project_key = OLD.project_key;
+END;
+
+CREATE TRIGGER memory_records_ctx_gen_au AFTER UPDATE ON memory_records BEGIN
+    UPDATE memory_context_state
+    SET source_generation = source_generation + 1
+    WHERE project_key = OLD.project_key;
+    UPDATE memory_context_state
+    SET source_generation = source_generation + 1
+    WHERE project_key = NEW.project_key AND NEW.project_key <> OLD.project_key;
+END;
 """,
     ),
 )

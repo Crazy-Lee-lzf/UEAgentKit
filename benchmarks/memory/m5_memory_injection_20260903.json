@@ -1,0 +1,76 @@
+{
+  "schemaVersion": "1.0",
+  "benchmark": "m5_memory_injection",
+  "requiredUe": "U0",
+  "requiredDependencies": [],
+  "project": "benchmark-project",
+  "scenarios": {
+    "B0_memory_disabled": {
+      "ok": true,
+      "detail": "covered-by-task-context-memory-disabled",
+      "textEmpty": true
+    },
+    "B1_empty_no_snapshot": {
+      "ok": true,
+      "available": false,
+      "reason": "context-snapshot-missing",
+      "textEmpty": true,
+      "contentChars": 0
+    },
+    "B2_l3_only_snapshot": {
+      "ok": true,
+      "l3Count": 4,
+      "l2Count": 0,
+      "contentChars": 314,
+      "estimatedTokens": 79,
+      "stable": true
+    },
+    "B3_matching_l2_task": {
+      "ok": true,
+      "l2Count": 1,
+      "l3Count": 4
+    },
+    "B4_unrelated_task": {
+      "ok": true,
+      "l2Count": 0
+    },
+    "B5_repeated_identical_request": {
+      "ok": true,
+      "textStable": true,
+      "hashStable": true
+    },
+    "B6_record_change_stale": {
+      "ok": true,
+      "reason": "context-snapshot-stale"
+    },
+    "B7_stale_request_no_rebuild": {
+      "ok": true,
+      "stateUnchanged": true
+    },
+    "B8_explicit_rebuild": {
+      "ok": true,
+      "available": true,
+      "snapshotId": "ctxsnap_eb94d57b3e9db49a1b2cf38327e8b6de"
+    },
+    "B9_rebuild_unchanged_sources": {
+      "ok": true,
+      "reused": true,
+      "snapshotStable": true
+    },
+    "B10_index_change_not_injected": {
+      "ok": true,
+      "reason": "index-snapshot-mismatch"
+    },
+    "request_path_latency": {
+      "n": 25,
+      "minMs": 4.851,
+      "p50Ms": 5.212,
+      "p95Ms": 5.748,
+      "maxMs": 5.896,
+      "requiredP95Ms": 100.0,
+      "ok": true
+    }
+  },
+  "elapsedMs": 396.615,
+  "allOk": true
+}

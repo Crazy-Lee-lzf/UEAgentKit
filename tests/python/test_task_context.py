@@ -28,7 +28,6 @@ from ue_agent_kit.indexer import build_index  # noqa: E402
 from ue_agent_kit.memory_context import (  # noqa: E402
     RECALL_MAX_CONTENT_CHARS,
     RECALL_MAX_ESTIMATED_TOKENS,
-    RECALL_MAX_ITEMS,
 )
 from ue_agent_kit.memory_service import ProjectMemoryService  # noqa: E402
 from ue_agent_kit.memory_tree import KnowledgeNodeDraft  # noqa: E402
@@ -304,54 +303,45 @@ class TaskContextTests(unittest.TestCase):
         self.assertEqual(context["activeWork"]["reason"], "include-memory-false")
         self.assertTrue(context["revisionState"]["available"])
 
-    def test_m1_task_context_memory_cannot_bypass_automatic_recall_caps(self) -> None:
-        for index in range(10):
+    def test_m5_task_context_automatic_memory_respects_injection_caps(self) -> None:
+        # M5: automatic Task Context Memory is persisted L3/L2 injection only and
+        # must stay under the frozen automatic budget without bypassing it.
+        for index in range(12):
             self.memory_service.add_record(
                 MemoryRecordDraft(
                     project_key=PROJECT,
-                    record_type="projectFact",
-                    subject_key=f"combat:m1-{index}",
-                    title=f"Damage memory {index}",
-                    body=("Damage memory benchmark content. " * 10) + str(index),
-                    source_kind=MemorySourceKind.TOOL_OBSERVED,
-                    revision_set=(MemoryRevision(ASSET_A, f"sha256:{self.revision_a}"),),
-                    scopes=(MemoryScope("asset", ASSET_A),),
+                    record_type="projectRule",
+                    subject_key=f"combat:rule-{index}",
+                    title=f"Damage rule {index}",
+                    body=("Damage memory benchmark content. " * 12) + str(index),
+                    source_kind=MemorySourceKind.USER_CONFIRMED,
                 )
             )
-        for index in range(8):
-            self.memory_service.create_work(
-                WorkItemDraft(
-                    project_key=PROJECT,
-                    title=f"Damage audit {index}",
-                    description="Audit damage memory evidence.",
-                    next_action="Review damage evidence.",
-                    asset_paths=(ASSET_A,),
-                )
-            )
+        self.memory_service.build_context(index_database=self.database_path)
         context = self.make_service().get_task_context(
             query="damage memory audit",
             asset_paths=[ASSET_A],
         )
         summary = context["memory"]["summary"]
-        active = context["activeWork"].get("items", [])
-        item_count = len(summary["nodes"]) + len(summary["records"]) + len(active)
-        self.assertEqual(summary["recalledItemCount"], item_count)
-        self.assertLessEqual(item_count, RECALL_MAX_ITEMS)
+        self.assertTrue(context["memory"]["explicitSearchAvailable"])
+        self.assertTrue(summary["available"])
         self.assertLessEqual(summary["contentChars"], RECALL_MAX_CONTENT_CHARS)
         self.assertLessEqual(summary["estimatedTokens"], RECALL_MAX_ESTIMATED_TOKENS)
-        effective = summary["recallBudget"]["effective"]
-        self.assertEqual(effective["maxItems"], RECALL_MAX_ITEMS)
-        self.assertEqual(effective["maxContentChars"], RECALL_MAX_CONTENT_CHARS)
-        self.assertEqual(effective["maxEstimatedTokens"], RECALL_MAX_ESTIMATED_TOKENS)
+        # L1/L0 bodies are not automatically included in the Task Context payload.
+        self.assertNotIn("records", summary)
+        self.assertNotIn("nodes", summary)
 
-    def test_m1_task_context_no_hit_has_no_placeholder_recall_content(self) -> None:
+    def test_m5_task_context_missing_snapshot_injects_no_placeholder(self) -> None:
         context = self.make_service().get_task_context(query="zzz-no-such-memory-token")
         summary = context["memory"]["summary"]
-        self.assertEqual(summary["recalledItemCount"], 0)
+        self.assertEqual(summary["available"], False)
+        self.assertEqual(summary["reason"], "context-snapshot-missing")
+        self.assertEqual(summary["injectionText"], "")
         self.assertEqual(summary["contentChars"], 0)
-        self.assertEqual(summary["nodes"], [])
-        self.assertEqual(summary["records"], [])
+        self.assertEqual(summary["estimatedTokens"], 0)
         self.assertEqual(context["activeWork"].get("items", []), [])
+        self.assertNotIn("No project memory available", str(context["memory"]))
+        self.assertNotIn("No relevant memory found", str(context["memory"]))
 
     def test_t4_live_editor_excluded_by_request_flag(self) -> None:
         service = self.make_service(live_editor_service=FakeLiveEditor())

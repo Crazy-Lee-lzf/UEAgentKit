@@ -115,12 +115,12 @@ class MemoryVectorSchemaTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
-    def test_fresh_database_reaches_v5_with_ordinary_embeddings_table(self) -> None:
+    def test_fresh_database_reaches_latest_schema_with_ordinary_embeddings_table(self) -> None:
         with open_project_memory_database(self.database_path) as connection:
-            self.assertEqual(CURRENT_MEMORY_SCHEMA_VERSION, 5)
+            self.assertEqual(CURRENT_MEMORY_SCHEMA_VERSION, 6)
             self.assertEqual(
                 int(connection.execute("PRAGMA user_version").fetchone()[0]),
-                5,
+                6,
             )
             self.assertTrue(memory_embeddings_table_exists(connection))
             tables = {
@@ -152,7 +152,7 @@ class MemoryVectorSchemaTests(unittest.TestCase):
             ).fetchone()
             self.assertEqual(str(row[0]), expected_sql)
 
-    def test_v4_database_migrates_to_v5_without_optional_extras(self) -> None:
+    def test_v4_database_migrates_to_latest_without_optional_extras(self) -> None:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.database_path)
         try:
@@ -189,7 +189,7 @@ class MemoryVectorSchemaTests(unittest.TestCase):
         with open_project_memory_database(self.database_path) as migrated:
             self.assertEqual(
                 int(migrated.execute("PRAGMA user_version").fetchone()[0]),
-                5,
+                6,
             )
             self.assertTrue(memory_embeddings_table_exists(migrated))
             remaining = migrated.execute(
@@ -201,26 +201,26 @@ class MemoryVectorSchemaTests(unittest.TestCase):
                 0,
             )
 
-    def test_v5_reopen_is_idempotent(self) -> None:
+    def test_latest_reopen_is_idempotent(self) -> None:
         with open_project_memory_database(self.database_path):
             pass
         with open_project_memory_database(self.database_path) as connection:
             self.assertEqual(
                 int(connection.execute("PRAGMA user_version").fetchone()[0]),
-                5,
+                6,
             )
             migration_rows = connection.execute(
-                "SELECT COUNT(*) FROM memory_schema_migrations WHERE version = 5"
+                "SELECT COUNT(*) FROM memory_schema_migrations WHERE version = 6"
             ).fetchone()[0]
             self.assertEqual(int(migration_rows), 1)
 
-    def test_v5_readonly_open_accepted(self) -> None:
+    def test_latest_readonly_open_accepted(self) -> None:
         with open_project_memory_database(self.database_path):
             pass
         with open_project_memory_database(self.database_path, readonly=True) as connection:
             self.assertEqual(
                 int(connection.execute("PRAGMA user_version").fetchone()[0]),
-                5,
+                6,
             )
 
     def test_record_delete_cascades_embedding_row(self) -> None:

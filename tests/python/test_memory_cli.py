@@ -98,6 +98,41 @@ class ProjectMemoryCliTests(unittest.TestCase):
             result = build_index(connection, export_root, self.index_path)
         self.assertEqual((result.added, result.failed), (1, 0))
 
+    def test_memory_build_context_reports_deterministic_snapshot(self) -> None:
+        self.build_index("sha256:" + REVISION_A)
+        args = self.parse(
+            "memory",
+            "build-context",
+            *self.memory_arguments(),
+            "--index-database",
+            str(self.index_path),
+        )
+        result, code = run(args)
+        self.assertEqual(code, 0)
+        self.assertEqual(result["tool"], "ue_memory_build_context")
+        self.assertEqual(result["projectKey"], PROJECT)
+        self.assertEqual(result["builtGeneration"], result["sourceGeneration"])
+        self.assertRegex(result["snapshotId"], r"^ctxsnap_[0-9a-f]{32}$")
+        self.assertRegex(result["indexSnapshotId"], r"^sha256:")
+        self.assertGreaterEqual(result["l3Entries"], 1)
+        self.assertLessEqual(result["estimatedTokens"], 800)
+
+    def test_memory_build_context_reuse_is_idempotent_and_stable(self) -> None:
+        self.build_index("sha256:" + REVISION_A)
+        args = self.parse(
+            "memory",
+            "build-context",
+            *self.memory_arguments(),
+            "--index-database",
+            str(self.index_path),
+        )
+        first, first_code = run(args)
+        second, second_code = run(args)
+        self.assertEqual((first_code, second_code), (0, 0))
+        self.assertEqual(first["snapshotId"], second["snapshotId"])
+        self.assertFalse(first["reused"])
+        self.assertTrue(second["reused"])
+
     def test_memory_distill_reports_validation_and_chain_verdicts(self) -> None:
         artifact_root = self.root / "workflow"
         artifact_root.mkdir(parents=True, exist_ok=True)

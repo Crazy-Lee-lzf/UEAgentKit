@@ -280,6 +280,33 @@ def build_parser() -> argparse.ArgumentParser:
         default=MAX_AUDIT_STATUS_EVENTS,
     )
 
+    memory_build_context = memory_subparsers.add_parser(
+        "build-context",
+        help=(
+            "Deterministically build the persisted L2/L3 Task Context injection "
+            "snapshot (offline command; automatic Task Context only reads it)."
+        ),
+    )
+    _add_memory_arguments(memory_build_context)
+    memory_build_context.add_argument(
+        "--index-database",
+        type=Path,
+        default=DEFAULT_DATABASE,
+        help=f"Immutable fixed index used for asset-class facts. Default: {DEFAULT_DATABASE}",
+    )
+    memory_build_context.add_argument(
+        "--max-l2-groups",
+        type=int,
+        default=8,
+        help="Bounded deterministic L2 recipe groups. Default: 8, hard max: 8.",
+    )
+    memory_build_context.add_argument(
+        "--max-l3-entries",
+        type=int,
+        default=48,
+        help="Bounded deterministic L3 entries. Default: 48, hard max: 48.",
+    )
+
     patch_parser = subparsers.add_parser("patch", help="Inspect or validate declarative Blueprint patches.")
     patch_subparsers = patch_parser.add_subparsers(dest="patch_command", required=True)
 
@@ -554,6 +581,13 @@ def run(args: argparse.Namespace) -> tuple[Any, int]:
                 "activeWorkCount": report["activeWorkCount"],
                 "snapshotSha256": report["integrity"]["snapshotSha256"],
             }, 0
+        if args.memory_command == "build-context":
+            result = memory_service.build_context(
+                index_database=args.index_database,
+                max_l2_groups=args.max_l2_groups,
+                max_l3_entries=args.max_l3_entries,
+            )
+            return result.to_payload(), 0
         raise RuntimeError("Unsupported Project Memory command.")
 
     if args.command == "patch" and args.patch_command == "operations":

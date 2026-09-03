@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from typing import Any, Sequence
 
 from .agent_api import IDENTITY_FIELDS, IndexQueryService
-from .memory_context import MAX_CONTEXT_CHARS, MIN_CONTEXT_CHARS, ContextBudget, RecallBudget
 from .memory_service import ProjectMemoryService, ProjectMemoryServiceError
 from .query_protocol import (
     DEFAULT_OUTPUT_TOKEN_BUDGET,
@@ -14,7 +13,7 @@ from .query_protocol import (
     normalize_output_token_budget,
 )
 
-TASK_CONTEXT_SCHEMA_VERSION = "1.2"
+TASK_CONTEXT_SCHEMA_VERSION = "1.3"
 MAX_TASK_CONTEXT_ASSETS = 10
 MAX_QUERY_CHARS = 2048
 MAX_ASSET_PATH_CHARS = 512
@@ -22,7 +21,7 @@ MAX_WORK_ITEM_ID_CHARS = 128
 MAX_CHANGE_SET_ID_CHARS = 64
 MAX_TASK_CONTEXT_EXPANSIONS = 10
 MAX_MEMORY_STALE_SAMPLES = 5
-MEMORY_BUDGET_FRACTION = 0.35
+MAX_AUTOMATIC_WORK_ITEMS = 5
 BUDGET_ENVELOPE_SLACK_CHARS = 128
 CHANGE_SET_TERMINAL_STATUSES = {"undone", "discarded", "verified", "no-op", "failed"}
 MAX_TASK_CONTEXT_CANDIDATES = 8
@@ -233,6 +232,14 @@ class TaskContextService:
         }
         response["project"] = self._build_project()
         response["targetAssets"] = self._build_target_assets(normalized_assets)
+        target_asset_classes = tuple(
+            str(item.get("identity", {}).get("asset_class", ""))
+            for item in response["targetAssets"]
+            if isinstance(item, dict)
+            and isinstance(item.get("identity"), dict)
+            and item["identity"].get("asset_class")
+        )
+        index_snapshot_id = str(response["project"].get("index", {}).get("snapshotId", ""))
         relevant_assets, relevant_failures = self._build_relevant_assets(
             normalized_query,
             excluded_paths=set(normalized_assets),
@@ -244,6 +251,8 @@ class TaskContextService:
             include_memory,
             max_output_tokens,
             normalized_work_item,
+            asset_classes=target_asset_classes,
+            index_snapshot_id=index_snapshot_id,
         )
         response["memory"] = memory_section
         response["activeWork"] = active_work_section
@@ -273,6 +282,7 @@ class TaskContextService:
         )
         response["riskSummary"] = risk_summary
         response["nextExpansions"] = self._build_expansions(
+            query=normalized_query,
             asset_paths=normalized_assets,
             relevant_assets=response["relevantAssets"],
             memory_section=memory_section,
@@ -538,10 +548,6 @@ class TaskContextService:
                 "error": str(exc),
             }
 
-    def _memory_budget_chars(self, max_output_tokens: int) -> int:
-        chars = int(max_output_tokens * 4 * MEMORY_BUDGET_FRACTION)
-        return max(MIN_CONTEXT_CHARS, min(MAX_CONTEXT_CHARS, chars))
-
     def _memory_stale_record_count(self) -> int:
         if self.memory_service is None:
             return 0
@@ -552,6 +558,60 @@ class TaskContextService:
         statuses = getattr(counts, "counts_by_status", {})
         return int(statuses.get("stale", 0)) if isinstance(statuses, dict) else 0
 
+    @staticmethod
+    def _serialize_work_item(work: Any) -> dict[str, Any]:
+        node_ids = list(work.node_ids) if hasattr(work, "node_ids") else []
+        asset_paths = list(work.asset_paths) if hasattr(work, "asset_paths") else []
+        todos = [
+            {
+                "todoId": todo.todo_id,
+                "text": todo.text,
+                "createdAtUtc": todo.created_at_utc,
+                "completedAtUtc": todo.completed_at_utc,
+            }
+            for todo in work.todos
+        ] if hasattr(work, "todos") else []
+        return {
+            "workItemId": work.work_item_id,
+            "title": work.title,
+            "status": work.status.value,
+            "priority": work.priority,
+            "nextAction": work.next_action,
+            "description": work.description,
+            "blockedReason": work.blocked_reason,
+            "owner": work.owner,
+            "updatedAtUtc": work.updated_at_utc,
+            "nodeIds": node_ids,
+            "assetPaths": asset_paths,
+            "todos": todos,
+        }
+
+    def _automatic_work_items(
+        self,
+        *,
+        query: str,
+        asset_paths: Sequence[str],
+    ) -> list[dict[str, Any]]:
+        if self.memory_service is None:
+            return []
+        try:
+            items = self.memory_service.list_work(
+                query=query,
+                asset_paths=tuple(asset_paths),
+                limit=MAX_AUTOMATIC_WORK_ITEMS,
+            )
+        except (ProjectMemoryServiceError, OSError, TypeError, ValueError, RuntimeError, sqlite3.Error):
+            return []
+        serialized = [self._serialize_work_item(item) for item in items]
+        serialized.sort(
+            key=lambda item: (
+                -int(item.get("priority", 0)),
+                str(item.get("updatedAtUtc", "")),
+                str(item.get("workItemId", "")),
+            )
+        )
+        return serialized[:MAX_AUTOMATIC_WORK_ITEMS]
+
     def _build_memory_and_work(
         self,
         query: str,
@@ -559,6 +619,9 @@ class TaskContextService:
         include_memory: bool,
         max_output_tokens: int,
         work_item_id: str,
+        *,
+        asset_classes: Sequence[str] = (),
+        index_snapshot_id: str = "",
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         memory_section: dict[str, Any] = {
             "available": self.memory_service is not None,
@@ -575,6 +638,7 @@ class TaskContextService:
             active_work["reason"] = "memory-disabled"
             self._attach_requested_work(active_work, work_item_id, unavailable_reason="memory-disabled")
             return memory_section, active_work
+        memory_section["explicitSearchAvailable"] = True
         memory_section["staleRecordCount"] = self._memory_stale_record_count()
         if not include_memory:
             memory_section["reason"] = "include-memory-false"
@@ -582,12 +646,10 @@ class TaskContextService:
             self._attach_requested_work(active_work, work_item_id, unavailable_reason="include-memory-false")
             return memory_section, active_work
         try:
-            context = self.memory_service.get_context(
+            payload = self.memory_service.get_injection_context(
                 query=query,
-                asset_paths=tuple(asset_paths),
-                detail_level=2,
-                budget=ContextBudget(max_chars=self._memory_budget_chars(max_output_tokens)),
-                recall_budget=RecallBudget(),
+                asset_classes=tuple(asset_classes),
+                index_snapshot_id=index_snapshot_id,
             )
         except (
             ProjectMemoryServiceError,
@@ -605,22 +667,20 @@ class TaskContextService:
             return memory_section, active_work
         memory_section["included"] = True
         memory_section["summary"] = {
-            "projectProfile": context.get("projectProfile", {}),
-            "detailLevel": context.get("detailLevel", 1),
-            "nodes": context.get("nodes", []),
-            "records": context.get("records", []),
-            "truncated": bool(context.get("truncated")),
-            "truncationReasons": context.get("truncationReasons", []),
-            "recalledItemCount": context.get("recalledItemCount", 0),
-            "contentChars": context.get("contentChars", 0),
-            "estimatedTokens": context.get("estimatedTokens", 0),
-            "recallBudget": context.get("recallBudget", {}),
-            "usage": context.get("usage", {}),
-            "nextActions": context.get("nextActions", []),
+            "available": bool(payload.get("available")),
+            "stale": bool(payload.get("stale")),
+            "reason": str(payload.get("reason", "")),
+            "snapshotId": str(payload.get("snapshotId", "")),
+            "injectionHash": str(payload.get("injectionHash", "")),
+            "injectionText": str(payload.get("text", "")),
+            "l3Count": int(payload.get("l3Count", 0)),
+            "l2Count": int(payload.get("l2Count", 0)),
+            "contentChars": int(payload.get("contentChars", 0)),
+            "estimatedTokens": int(payload.get("estimatedTokens", 0)),
         }
         active_work["included"] = True
-        active_work["items"] = context.get("activeWork", [])
-        active_work["truncated"] = bool(context.get("truncated"))
+        active_work["items"] = self._automatic_work_items(query=query, asset_paths=asset_paths)
+        active_work["truncated"] = False
         self._attach_requested_work(active_work, work_item_id, unavailable_reason="")
         return memory_section, active_work
 
@@ -826,7 +886,7 @@ class TaskContextService:
         if not query:
             return []
         try:
-            hits = self.memory_service.search_records(
+            hits = self.memory_service.search_records_fts(
                 query=query,
                 statuses=(),
                 scope_type="asset",
@@ -1110,11 +1170,32 @@ class TaskContextService:
         if not terms:
             return []
         try:
-            hits = self.memory_service.search_records(
+            hits = self.memory_service.search_records_fts(
                 query=" ".join(terms[:8]),
                 statuses=("stale",),
                 scope_type="asset",
                 scope_key=asset_path,
+                limit=MAX_MEMORY_STALE_SAMPLES,
+            )
+        except (ProjectMemoryServiceError, OSError, TypeError, ValueError, RuntimeError, sqlite3.Error):
+            return []
+        return [hit.record.record_id for hit in hits]
+
+    def _conflicted_record_ids(self, query: str) -> list[str]:
+        """Narrow FTS-only metadata lookup replacing automatic record bodies.
+
+        M5 Task Context no longer carries L1 record bodies, but conflicted-record
+        risk reporting stays truthful through this compact internal query.
+        """
+        if self.memory_service is None:
+            return []
+        terms = _SEARCH_TOKEN_PATTERN.findall(query)
+        if not terms:
+            return []
+        try:
+            hits = self.memory_service.search_records_fts(
+                query=" ".join(terms[:8]),
+                statuses=("conflicted",),
                 limit=MAX_MEMORY_STALE_SAMPLES,
             )
         except (ProjectMemoryServiceError, OSError, TypeError, ValueError, RuntimeError, sqlite3.Error):
@@ -1228,25 +1309,19 @@ class TaskContextService:
             )
 
         if memory_section.get("included"):
-            records = memory_section.get("summary", {}).get("records", [])
-            if isinstance(records, list):
-                conflicted_ids = [
-                    str(record.get("recordId"))
-                    for record in records
-                    if isinstance(record, dict) and record.get("status") == "conflicted" and record.get("recordId")
-                ]
-                if conflicted_ids:
-                    risks.append(
-                        {
-                            "kind": "memory-conflicted-records",
-                            "severity": "medium",
-                            "source": "project-memory",
-                            "details": {
-                                "recordIds": conflicted_ids[:MAX_MEMORY_STALE_SAMPLES],
-                                "sampleTruncated": len(conflicted_ids) > MAX_MEMORY_STALE_SAMPLES,
-                            },
-                        }
-                    )
+            conflicted_ids = self._conflicted_record_ids(query)
+            if conflicted_ids:
+                risks.append(
+                    {
+                        "kind": "memory-conflicted-records",
+                        "severity": "medium",
+                        "source": "project-memory",
+                        "details": {
+                            "recordIds": conflicted_ids[:MAX_MEMORY_STALE_SAMPLES],
+                            "sampleTruncated": len(conflicted_ids) > MAX_MEMORY_STALE_SAMPLES,
+                        },
+                    }
+                )
             for asset_path in asset_paths:
                 stale_ids = self._stale_record_ids(query, asset_path)
                 if stale_ids:
@@ -1365,6 +1440,7 @@ class TaskContextService:
     def _build_expansions(
         self,
         *,
+        query: str,
         asset_paths: Sequence[str],
         relevant_assets: Sequence[dict[str, Any]],
         memory_section: dict[str, Any],
@@ -1414,25 +1490,18 @@ class TaskContextService:
             )
         if memory_section.get("included"):
             summary = memory_section.get("summary", {})
-            records = summary.get("records", []) if isinstance(summary, dict) else []
-            if records:
+            if isinstance(summary, dict) and summary.get("injectionText"):
                 expansions.append(
                     {
-                        "tool": "ue_memory_get_evidence",
-                        "reason": "evidence-available-on-demand",
-                        "arguments": {"record_id": records[0].get("recordId", "")},
+                        "tool": "ue_memory_search",
+                        "reason": "explicit-memory-search-on-demand",
+                        "arguments": {"query": query},
                     }
                 )
-            next_actions = summary.get("nextActions", []) if isinstance(summary, dict) else []
-            for action in next_actions:
-                if isinstance(action, dict) and action.get("tool"):
-                    expansions.append(
-                        {
-                            "tool": str(action.get("tool", "")),
-                            "reason": str(action.get("reason", "")),
-                            "arguments": action.get("arguments") or {},
-                        }
-                    )
+            # The automatic Memory section is L3/L2 injection only. Explicit
+            # progressive L1/L0 reads remain available through ue_memory_search /
+            # ue_memory_get_context; no L1 record body is auto-injected, so no
+            # evidence expansion is synthesized from the automatic payload.
         if change_set_section.get("requested") and change_set_section.get("found"):
             expansions.append(
                 {
@@ -1538,17 +1607,15 @@ class TaskContextService:
             return self._record_reason(reasons, "live-editor-summary")
         memory = response.get("memory", {})
         memory_summary = memory.get("summary")
-        if isinstance(memory_summary, dict):
-            records = memory_summary.get("records")
-            if records:
-                records.pop()
-                memory_summary["truncated"] = True
-                return self._record_reason(reasons, "memory-records")
-            nodes = memory_summary.get("nodes")
-            if nodes:
-                nodes.pop()
-                memory_summary["truncated"] = True
-                return self._record_reason(reasons, "memory-nodes")
+        if isinstance(memory_summary, dict) and memory_summary.get("injectionText"):
+            memory_summary["injectionText"] = ""
+            memory_summary["injectionHash"] = ""
+            memory_summary["contentChars"] = 0
+            memory_summary["estimatedTokens"] = 0
+            memory_summary["l3Count"] = 0
+            memory_summary["l2Count"] = 0
+            memory_summary["truncated"] = True
+            return self._record_reason(reasons, "memory-injection-text")
         active = response.get("activeWork", {})
         items = active.get("items")
         if items:
@@ -1658,18 +1725,17 @@ class TaskContextService:
         memory = response.get("memory", {})
         memory_summary = memory.get("summary")
         if isinstance(memory_summary, dict):
-            if "projectProfile" in memory_summary:
-                memory_summary.pop("projectProfile")
-                return self._record_reason(reasons, "memory-project-profile")
-            if "recallBudget" in memory_summary:
-                memory_summary.pop("recallBudget")
-                return self._record_reason(reasons, "memory-recall-budget")
-            if "usage" in memory_summary:
-                memory_summary.pop("usage")
-                return self._record_reason(reasons, "memory-usage")
-            if "nextActions" in memory_summary:
-                memory_summary.pop("nextActions")
-                return self._record_reason(reasons, "memory-next-actions")
+            for key in ("injectionHash", "snapshotId", "available", "stale", "reason"):
+                if key in memory_summary:
+                    memory_summary.pop(key)
+                    return self._record_reason(reasons, "memory-injection-metadata")
+            for key in ("l3Count", "l2Count", "contentChars", "estimatedTokens"):
+                if key in memory_summary:
+                    memory_summary.pop(key)
+                    return self._record_reason(reasons, "memory-injection-metadata")
+            if "truncated" in memory_summary:
+                memory_summary.pop("truncated")
+                return self._record_reason(reasons, "memory-injection-metadata")
         active = response.get("activeWork", {})
         if "requestedWorkItem" in active:
             active.pop("requestedWorkItem")

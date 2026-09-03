@@ -40,6 +40,11 @@ from .memory_l0 import (
     MemoryL0Event,
 )
 from .memory_tasks import TaskOutcomeDraft, build_task_outcome_record
+from .memory_injection import (
+    MemoryContextBuildResult,
+    build_memory_context_snapshot,
+    get_injection_context,
+)
 from .memory_vector import (
     get_shared_provider,
     hybrid_search_memory_records,
@@ -618,6 +623,82 @@ class ProjectMemoryService:
                 recall_budget=recall_budget,
                 start_deadline=start_deadline,
             )
+
+    def search_records_fts(
+        self,
+        *,
+        query: str,
+        record_types: Sequence[MemoryRecordType | str] = (),
+        statuses: Sequence[MemoryStatus | str] = (
+            MemoryStatus.VALID,
+            MemoryStatus.UNVERIFIED,
+            MemoryStatus.CONFLICTED,
+        ),
+        scope_type: MemoryScopeType | str | None = None,
+        scope_key: str = "",
+        limit: int = 20,
+    ) -> MemorySearchResult:
+        """Model-free FTS-only record search for internal request paths.
+
+        Task Context risk/correlation metadata uses this method so automatic
+        Task Context can never load the optional vector model. Explicit Memory
+        Search keeps using :meth:`search_records` (hybrid when available).
+        """
+        with open_project_memory_database(self.database_path) as connection:
+            hits = search_memory_records(
+                connection,
+                project_key=self.project_key,
+                query=query,
+                record_types=record_types,
+                statuses=statuses,
+                scope_type=scope_type,
+                scope_key=scope_key,
+                limit=limit,
+            )
+        return MemorySearchResult(
+            hits=hits,
+            retrieval_mode="fts",
+            vector_available=False,
+            vector_fallback="fts-only-internal-request-path",
+            query_embedding_count=0,
+        )
+
+    def get_injection_context(
+        self,
+        *,
+        query: str = "",
+        asset_classes: Sequence[str] = (),
+        index_snapshot_id: str = "",
+    ) -> dict[str, Any]:
+        """Read the current persisted L3/L2 snapshot for automatic injection.
+
+        Request-path only: never distills, never loads a vector model, never
+        rebuilds. Stale/missing snapshots return empty text with a stable reason.
+        """
+        with open_project_memory_database(self.database_path) as connection:
+            return get_injection_context(
+                connection,
+                project_key=self.project_key,
+                query=query,
+                asset_classes=asset_classes,
+                index_snapshot_id=index_snapshot_id,
+            )
+
+    def build_context(
+        self,
+        *,
+        index_database: Path,
+        max_l2_groups: int = 8,
+        max_l3_entries: int = 48,
+    ) -> MemoryContextBuildResult:
+        """Offline deterministic L2/L3 snapshot build for this project."""
+        return build_memory_context_snapshot(
+            memory_database=self.database_path,
+            project_key=self.project_key,
+            index_database=index_database,
+            max_l2_groups=max_l2_groups,
+            max_l3_entries=max_l3_entries,
+        )
 
     def expand_node(
         self,
