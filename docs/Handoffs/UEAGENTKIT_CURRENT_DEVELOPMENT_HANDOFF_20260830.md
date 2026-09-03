@@ -324,6 +324,28 @@ C3 may later add bounded Resolve and changelist preparation.
 Agent submit / revert / P4-managed delete are permanently human-only.
 ```
 
+### 0.8 Main integration and remote-push preparation update — 2026-09-03
+
+The owner authorized merging the completed M1-M5 development line plus C1/C2 planning into `main`, updating current status documentation, and pushing `main` to the remote.
+
+Local integration completed by fast-forward:
+
+```text
+merge source              feature/memory-context
+source checkpoint         ae307372961345cbe98c594e9cfd469da70e68a1
+integration branch        main
+merge method              fast-forward
+M5 implementation         c0b01aac4201710466ae9c9a5ee39f8965704b36
+C1/C2 planning checkpoint 1c7e2ff39b28a9ff6d7a1bbf4d1151dfcc923d42
+published product         0.7.0 / UE5.6 unchanged
+```
+
+`README.md`, `README_EN.md`, `docs/PROJECT_STATUS.md`, and `docs/ROADMAP.md` were synchronized before integration so development-line M1-M5/C1-C2 status is not confused with the published 0.7.0 release.
+
+The active next implementation is Track C / C1+C2. M6 remains optional and must not auto-start. Future implementation should begin from current `main` (normally on a fresh feature branch) and treat the C1/C2 planning checkpoint as an ancestor, not require HEAD to equal it exactly.
+
+Remote synchronization is separately verified at push time. If `origin/main` has moved, reconcile before push; do not force-push.
+
 ## 1. Mandatory Read Order for a New Chat / Agent
 
 Read in this order:
@@ -361,18 +383,18 @@ Do not reconstruct current project state from old Chat history when this handoff
 
 ### 2.1 Current development refs
 
-Repository housekeeping and remote synchronization were completed before M1 planning. M1-M5 are now locally committed; C1/C2 planning is being closed on top of the reviewed M5 checkpoint.
+Repository housekeeping and remote synchronization were completed before M1 planning. M1-M5 and C1/C2 planning have now been integrated locally into `main` by fast-forward.
 
-Remote refs remain at the pre-M1 synchronized checkpoint until an explicit push is authorized:
+Current local refs before the authorized remote push:
 
 ```text
-main                           137c3a35e943f2c8e65f13dd8befe95aec3c6612
-origin/main                    137c3a35e943f2c8e65f13dd8befe95aec3c6612
-feature/memory-context         c0b01aac4201710466ae9c9a5ee39f8965704b36  (reviewed M5 local checkpoint; C1/C2 planning follows locally)
+main                           includes ae307372961345cbe98c594e9cfd469da70e68a1 and this post-merge docs sync
+origin/main                    137c3a35e943f2c8e65f13dd8befe95aec3c6612  (last-known; refresh before push)
+feature/memory-context         ae307372961345cbe98c594e9cfd469da70e68a1  (merge source retained)
 origin/feature/memory-context  137c3a35e943f2c8e65f13dd8befe95aec3c6612
 ```
 
-The active development worktree remains on `feature/memory-context`. M5 implementation/review is committed at `c0b01aa`; the P4 boundary decision is committed at `1952cf1`; the C1/C2 planning checkpoint is local-only until committed and must be confirmed from live Git state. No Track M/Track C development commit has been pushed; always inspect live ahead/behind counts before modifying anything.
+The active integration worktree is now on `main`. M5 is reviewed at `c0b01aa`; C1/C2 planning is committed at `1c7e2ff`; public/current status docs are synchronized. The next coding work should normally branch from current `main`. Always inspect live refs and fetch before modifying or pushing; never force-push to hide remote drift.
 
 ### 2.2 Registered worktrees
 
@@ -381,7 +403,7 @@ Current registered Git worktrees are intentionally minimal:
 ```text
 E:\WorkSpace\UEAgentKit-Integration
   active development worktree
-  branch: feature/memory-context
+  branch: main
 
 E:\WorkSpace\UEAgentKit
   repository backing worktree
@@ -1062,7 +1084,7 @@ Before making any change:
 ```text
 1. use E:\WorkSpace\UEAgentKit-Integration.
 2. inspect git status --short --branch, HEAD, upstream and worktrees.
-3. confirm branch feature/memory-context and preserve documented planning changes.
+3. start from current main (normally create a fresh Track C feature branch); confirm C1/C2 planning checkpoint 1c7e2ff is an ancestor.
 4. read this handoff.
 5. read docs/DEVELOPMENT_WORKFLOW.md.
 6. read docs/Plans/README.md.
@@ -1128,7 +1150,7 @@ Archive documents preserve their historical stage wording. Current status is det
 
 ## 20. Next local-Agent handoff
 
-M1-M5 are closed; M6 is optional and must not auto-start. The next coding Agent should execute **C1/C2 — P4 Minimum Dogfood** from:
+M1-M5 are closed and integrated into `main`; M6 is optional and must not auto-start. The next coding Agent should branch from current `main` and execute **C1/C2 — P4 Minimum Dogfood** from:
 
 ```text
 docs/Plans/UEAGENTKIT_C1_C2_P4_MINIMUM_DOGFOOD_DETAILED_PLAN_20260903.md

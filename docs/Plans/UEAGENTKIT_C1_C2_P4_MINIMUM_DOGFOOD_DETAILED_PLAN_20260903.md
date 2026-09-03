@@ -2,9 +2,11 @@
 
 > Date: 2026-09-03
 >
-> Branch: `feature/memory-context`
+> Integration branch: `main` (implementation may use a fresh feature branch based on current `main`)
 >
 > Product baseline: `c0b01aac4201710466ae9c9a5ee39f8965704b36` (M5 COMPLETE)
+>
+> Planning checkpoint: `1c7e2ff39b28a9ff6d7a1bbf4d1151dfcc923d42` (merged into `main`)
 >
 > State: **READY FOR IMPLEMENTATION**
 >
