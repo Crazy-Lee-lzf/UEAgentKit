@@ -2,13 +2,34 @@
 
 
 
-更新时间：2026-08-27
+更新时间：2026-09-03
 
 
 
-本文描述已发布的 `main` 基线及当前开发状态，支持 Unreal Engine 5.6。最新正式发布仍为 **0.7.0**。0.8.x Context / Analysis / Agent Reliability capability scope 已完成本地 closeout，R5 继续 `deferred by benchmark evidence`。当前 `feature/live-writer-expansion` 已完成 W0–W3：Blueprint 窄范围常驻写入、Fast Resident Verify 与 Checkpoint Strong Verify 均已通过真实 UE5.6 验收；下一主线是 W4 Multi-operation / Bounded Batch。当前计划入口统一见 [`Plans/README.md`](Plans/Archive/README.md)，项目级方向见 [`Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md`](Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md)。
+本文描述已发布的 `main` 基线及当前开发状态，支持 Unreal Engine 5.6。最新正式发布仍为 **0.7.0**；开发线已经完成 Track W / Writer、Track V / Knowledge Web、W+V G3，以及 Track M 的 M1–M5 必要阶段。M5 已完成 Schema v6 持久化 L2/L3 稳定上下文注入，portable full **968/968 PASS**、自动注入 p95 **5.748 ms**；M6 保持 optional / data-driven。当前下一主线是 **Track C / C1+C2 P4 Minimum Dogfood**，权威入口见 [`Plans/README.md`](Plans/README.md) 与 [`Plans/UEAGENTKIT_C1_C2_P4_MINIMUM_DOGFOOD_DETAILED_PLAN_20260903.md`](Plans/UEAGENTKIT_C1_C2_P4_MINIMUM_DOGFOOD_DETAILED_PLAN_20260903.md)。
 
 
+
+## 0. 2026-09-03 开发线检查点
+
+```text
+Published product                    0.7.0 / UE5.6 (unchanged)
+Track W / Writer                     COMPLETE
+Track V / Knowledge Web             COMPLETE
+W + V integration                   G3 PASS
+Track M required usability stages   COMPLETE through M5
+  M1                                COMPLETE
+  M2                                COMPLETE
+  M3                                COMPLETE
+  M4                                COMPLETE
+  M5                                COMPLETE / G2 PASS / U0
+  M6                                optional / do not auto-start
+Track C / P4                         ACTIVE NEXT
+  C1 Source Control Awareness       READY FOR IMPLEMENTATION
+  C2 Advisory + local-write assist  READY FOR IMPLEMENTATION
+```
+
+P4 的当前 owner boundary 是 **advisory + human final authority**：P4 lock/checkout/behind/unresolved 等协作状态可产生 warning / strong warning / readiness，但不单独 hard-block UEAgentKit 的本地 Writer 测试。Agent 可做状态读取、`p4 edit`、显式 local writable override、严格前置条件下的 exact-file safe sync；**Submit / Revert / P4-managed Delete 永久人工执行**。Resolve 允许，但放在后续 C3 bounded workflow，不属于当前 C1/C2 最小实现。
 
 ## 1. 当前定位
 
@@ -324,7 +345,7 @@ Live Editor 中已经产生的受控 Dirty 资产，也可以通过 `ue_save_aut
 
 - Editor/Visual Studio 自动关闭、重启和构建调度。
 
-- Source Control Checkout、Lock、Owner 和 Depot Head 冲突处理。
+- Source Control C1/C2 尚未实现，但 Detailed Plan 已冻结：Checkout/Lock/Have/Head/CL/Resolve 状态读取与 advisory、`p4 edit`、local writable override、严格 safe sync 为当前下一阶段；Submit/Revert/P4-managed Delete 永久人工执行。
 
 
 
@@ -334,14 +355,15 @@ Live Editor 中已经产生的受控 Dirty 资产，也可以通过 `ue_save_aut
 
 ## 6. 待做功能与优先级
 
-当前后续工作的文档入口为 [`Plans/README.md`](Plans/Archive/README.md)。项目级方向由 2026-08-27 Master Plan 统一管理，当前 Writer 实现以 W4 Detailed Plan 为准。`UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md` 继续保留为从 0.8 closeout 进入 Writer 阶段的历史桥接计划。优先级不再按 Tool 数量推进：
+当前后续工作的权威入口为 [`Plans/README.md`](Plans/README.md)。Track M 的 M1–M5 必要阶段已经完成；M6 不自动启动。当前固定主线为 `C1 Source Control Awareness → C2 Advisory + Local Write Assistance → real-project write-enabled dogfood`。P4 权限边界以 [`Plans/UEAGENTKIT_P4_AGENT_OPERATION_BOUNDARY_DECISION_20260903.md`](Plans/UEAGENTKIT_P4_AGENT_OPERATION_BOUNDARY_DECISION_20260903.md) 为准，旧 Master/Midterm 中与其冲突的 fail-closed/no-checkout 描述视为历史。
 
 ```text
-P0  Editor-resident Writer / low-latency write path
-P0  Large-project performance / true incremental（可并行）
-P1  Agent UX reliability tail：requested-bound + typed result
-P2  Maintainability / Tool Profile / UE build CI
-P3  0.9 source-control / collaboration
+P0  C1 Source Control Awareness
+P0  C2 Advisory + checkout/local-write assistance
+P0  real-project write-enabled dogfood after C1/C2
+P1  dogfood-driven Track X / C3 gaps
+P2  M6 symbolic compression only if data proves it useful
+P3  broader team/shared Knowledge Service collaboration
 ```
 
 正式 0.8 package release 是独立授权轨道，不阻塞以上技术开发；R5 继续冻结。

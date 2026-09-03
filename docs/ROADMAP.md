@@ -1,8 +1,8 @@
 # UE Agent Kit 路线图
 
-更新时间：2026-08-27
+更新时间：2026-09-03
 
-当前已发布版本为 **0.7.0**，支持 Unreal Engine 5.6，正式版本保持不变。0.8.x Context / Analysis / Agent Reliability capability scope 已完成本地收口，R5 继续 `deferred by benchmark evidence`。当前 `feature/live-writer-expansion` 已完成 W0-W3，下一 Writer 主线为 W4 Multi-operation / Bounded Batch。项目级方向与跨 Track 依赖不再在本路线图重复维护，统一从 [`Plans/README.md`](Plans/Archive/README.md) 进入 2026-08-27 Master Plan / Midterm Spec。正式 package release、Tag 与 Push 仍是独立授权流程。
+当前已发布版本仍为 **0.7.0**，支持 Unreal Engine 5.6。开发线已完成 Track W / Writer、Track V / Knowledge Web，以及 Track M 的 M1–M5 必要阶段；M6 继续 optional / data-driven。当前下一主线已经切换到 **Track C / C1+C2 P4 Minimum Dogfood**，随后直接进入真实项目 write-enabled dogfood。项目级当前入口统一从 [`Plans/README.md`](Plans/README.md) 进入；正式 package release、Tag 与版本号变更仍是独立授权流程。
 
 ## 总体方向
 
@@ -176,30 +176,36 @@ Read/Write Audit 已覆盖 105 个公共 Tool 与 18 个 Patch Operation，C5 �
 
 动画线作为已完成的纵向能力保留，Additive Batch、Composite Mutation、Retarget → P2 一键桥接等非阻塞尾巴默认冻结。Blueprint Graph、Level Actor 通用 CRUD 等新 Writer 同样改为由 Reforge 真实需求或 Agent Benchmark 失败数据驱动。
 
-## 当前开发入口（2026-08-27）
-
-原 [`Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md`](Plans/Archive/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md) 已完成其从 0.8 closeout 向 Editor-resident Writer 过渡的历史作用，继续保留但不再作为当前唯一计划入口。
+## 当前开发入口（2026-09-03）
 
 ```text
-W0 baseline                     complete
-W1 Blueprint resident write     complete
-W2 Fast Resident Verify         complete
-W3 Checkpoint Strong Verify     complete
-W4 bounded multi-operation      next
+Track W / Writer                      COMPLETE
+Track V / Knowledge Web              COMPLETE
+Track M                              COMPLETE through M5
+  M1-M5                              COMPLETE
+  M6                                 optional / do not auto-start
+Track C                              ACTIVE NEXT
+  C1 Source Control Awareness        READY FOR IMPLEMENTATION
+  C2 Advisory + local-write assist   READY FOR IMPLEMENTATION
+  C3 CL preparation / Resolve        after minimum dogfood layer
+  C4 shared-memory integration       optional
 ```
 
 当前权威入口：
 
-- [`Plans/README.md`](Plans/Archive/README.md)：计划文档索引与优先级说明。
-- [`Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md`](Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md)：项目级方向与架构取舍。
-- [`Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md`](Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md)：跨 Track 依赖与验收契约。
-- [`Plans/UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_DETAILED_PLAN_20260826.md`](Plans/Archive/UEAGENTKIT_W4_MULTI_OPERATION_BOUNDED_BATCH_DETAILED_PLAN_20260826.md)：当前 W4 实现权威。
+- [`Plans/README.md`](Plans/README.md)：当前状态、读取顺序与 active stage。
+- [`Plans/UEAGENTKIT_C1_C2_P4_MINIMUM_DOGFOOD_DETAILED_PLAN_20260903.md`](Plans/UEAGENTKIT_C1_C2_P4_MINIMUM_DOGFOOD_DETAILED_PLAN_20260903.md)：C1/C2 实现与 Validation Budget。
+- [`Plans/UEAGENTKIT_P4_AGENT_OPERATION_BOUNDARY_DECISION_20260903.md`](Plans/UEAGENTKIT_P4_AGENT_OPERATION_BOUNDARY_DECISION_20260903.md)：P4 Agent 权限边界。
+- [`Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260830.md`](Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260830.md)：canonical takeover state。
 
-正式 package release 独立执行：只有用户授权后才更新 published version、构建 release artifact、Tag/Push。
+M1–M5 关闭后不继续闭门堆功能。C1/C2 完成后进入真实商业项目 dogfood，再根据真实缺口决定 C3 / Track X / M6 的优先级。
+
 
 ## 0.9.0：协作与冲突感知
 
-读取 Source Control Provider、Checkout/Lock/Head/Changelist 等可验证状态，分析 Local Dirty、磁盘 Revision 与 Depot/Remote Head 分歧，并建立多人冲突风险模型。首版只分析、提示或阻止，不自动抢锁或覆盖他人修改；不会仅根据历史 checkout 活动推断资产 Owner。
+Track C 首先落地本地 **C1 Source Control Awareness + C2 Advisory / Local Write Assistance**。读取 Provider、Checkout/Open、Lock/Exclusive Lock、Have/Head、Pending Changelist 与 Resolve 状态，并把 Local Dirty、磁盘 Revision 与 Depot Head 分歧呈现为可审计的 warning/readiness。
+
+P4 协作状态本身**不 hard-block 本地 Writer 测试**。Agent 可以读取状态、执行 `p4 edit`、在明确标记下做 local writable override，以及在证明文件 clean/未 open/unresolved=0 等前置条件后做 exact-file safe sync。**Submit / Revert / P4-managed Delete 永久由人手动执行**；即使用户要求 Agent 直接执行也不能越过该产品边界。Resolve 允许，但进入后续 C3 的 bounded/evidence-driven workflow；不做盲目 bulk accept yours/theirs。
 
 部署采用每人一个 Local MCP + 团队共享 Knowledge Service。Local MCP 连接本机 Editor Bridge，并在内部访问共享服务；不让 Agent 同时管理 Local UE MCP 与 Shared Knowledge MCP，也不使用一个中央 MCP 直接路由所有开发者的编辑器。共享服务保存 `/project` 与 `/team` 知识和 Active Work，本地保留 `/user`、`/session`、Editor 状态和资产索引。共享更新使用乐观并发与 `knowledge-conflict`，禁止静默覆盖。
 

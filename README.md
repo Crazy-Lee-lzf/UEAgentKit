@@ -8,6 +8,8 @@ UE Agent Kit 是一套面向 Unreal Engine 的开源资产分析、索引与受�
 
 当前已发布版本为 **0.7.0**，支持 **Unreal Engine 5.6**。
 
+> **当前开发线状态（2026-09-03）**：已完成 Track W / Writer、Track V / Knowledge Web，以及 Track M 的 M1–M5 必要阶段。Memory 已具备确定性 L0→L1、可选本地 Vector + RRF 显式混合检索、持久化 L2/L3 稳定自动上下文；M5 portable full 为 **968/968 PASS**，自动注入 p95 **5.748 ms**。M6 保持 optional / data-driven。下一开发阶段是 **C1/C2 P4 Minimum Dogfood**：P4 状态只做 advisory/readiness；Agent 可做状态读取、`p4 edit`、显式 local writable override 与满足严格前置条件的 safe sync，但 **Submit / Revert / P4-managed Delete 永久只允许人工执行**。上述均为开发线能力，**不改变当前已发布版本 0.7.0**。
+
 > **AI Generated**：本项目的代码和文档主要由 AI 生成，并通过人工审查、UE 5.6 编译、自动化测试和真实工程回归验证。
 
 ## 它解决什么问题
