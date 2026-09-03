@@ -381,9 +381,25 @@ git diff --check           PASS
 UE / UBT                    0 / U0
 ```
 
-The earlier claimed `A25 owner-authorized fixture` is invalid evidence. The Blender fixture remains opened in the P4 default changelist, content unchanged (`p4 diff -se/-sd` up-to-date). Agent cleanup is forbidden because P4 revert is permanently human-only. A25 is therefore owner-fixture `BLOCKED`.
+The original A25 real `p4 edit` occurred before explicit fixture authorization and remains documented as a process deviation. During owner review, the owner explicitly ratified that exact Blender file as the A25 fixture; preserved pre/post evidence therefore counts as A25 PASS without a second mutation. The fixture remains opened in the P4 default changelist and content remains unchanged (`p4 diff -se/-sd` up-to-date). Agent cleanup is forbidden because P4 revert is permanently human-only.
 
-Current corrective changes are intentionally **uncommitted** pending owner checkpoint authorization; branch push remains none.
+Owner corrective changes were checkpointed at `5366a70cdc30e3c4b9a10234d4d9f1ee2a967e5e` (`fix:close-C1-C2-owner-review`). Branch push remains none.
+
+### 1.1 C1/C2 archive + C3 planning — 2026-09-03
+
+C1/C2 Plan and Result are archived after owner review. C3 planning is now active on the same source-control collaboration branch.
+
+```text
+C1/C2 closure checkpoint      5366a70cdc30e3c4b9a10234d4d9f1ee2a967e5e
+C1/C2 A25                     PASS / owner ratified preserved real-edit evidence
+C1/C2 Plan/Result             docs/Plans/Archive/
+C3 Detailed Plan              docs/Plans/UEAGENTKIT_C3_CHANGELIST_RESOLVE_AUDIT_DETAILED_PLAN_20260903.md
+C3 required UE                U0
+C3 product baseline           5366a70c
+branch push                   none
+```
+
+Read-only C3-0 probe on P4 2025.1 confirmed `change -o/-i`, `reopen -c`, and `resolve -n/-o/-am/-c`. `p4 -G change -o` returned structured Change/Client/User/Status/Description fields. The frozen C3 plan permits current-user/current-client pending CL preparation and exact conflict-free text `resolve -am`, while `.uasset/.umap` automatic content resolve remains out of scope. Submit/revert/delete remain permanently human-only.
 
 ## 1. Mandatory Read Order for a New Chat / Agent
 
@@ -429,12 +445,12 @@ Current development refs:
 ```text
 main                           fdf6b5c12aceaefb0e61478bee7a9eefdf5ade76
 origin/main                    fdf6b5c12aceaefb0e61478bee7a9eefdf5ade76
-feature/source-control-collaboration  c9b6bbde15360070ccd71a750a45aa5c9f77cf84  (active local Track C branch; owner corrective diff uncommitted; no upstream yet)
+feature/source-control-collaboration  5366a70cdc30e3c4b9a10234d4d9f1ee2a967e5e  (active local Track C branch; C1/C2 closed; C3 planning dirty; no upstream yet)
 feature/memory-context         ae307372961345cbe98c594e9cfd469da70e68a1  (historical merge source retained)
 origin/feature/memory-context  137c3a35e943f2c8e65f13dd8befe95aec3c6612
 ```
 
-The active development worktree is on `feature/source-control-collaboration`. C1/C2 initial implementation is at `c9b6bbd`; the owner corrective diff is uncommitted but fully G2-validated. M5 is reviewed at `c0b01aa`; the earlier C1/C2 planning checkpoint `1c7e2ff` is an ancestor. Always inspect live refs before modifying or pushing; never force-push to hide remote drift.
+The active development worktree is on `feature/source-control-collaboration`. C1/C2 initial implementation is at `c9b6bbd` and owner-reviewed closure is at `5366a70c`; C3 planning is the only active dirty state. M5 is reviewed at `c0b01aa`. Always inspect live refs before modifying or pushing; never force-push to hide remote drift.
 
 ### 2.2 Registered worktrees
 
@@ -1055,7 +1071,7 @@ Plugin/UEAgentKit/Source/UEAgentKitEditor/Private/PerformanceFixtureCommandlet.c
 
 ## 15. Active Track and deferred project tracks
 
-**Track M required usability stages are complete through M5. Track C1/C2 is active next.**
+**Track M required usability stages are complete through M5. Track C1/C2 is complete; C3 is active next.**
 
 The Master/Midterm documents still define broader direction, but older Track C fail-closed/no-checkout wording is superseded by the 2026-09-03 P4 boundary decision.
 
@@ -1072,24 +1088,24 @@ M6 optional symbolic compression        deferred / data-driven / do not auto-sta
 
 M1-M5 regression gates remain persistent. M6 is not a prerequisite for dogfood.
 
-### Track C — Source Control / P4 awareness (ACTIVE NEXT)
+### Track C — Source Control / P4 collaboration (ACTIVE)
 
 ```text
-C1 Source Control Awareness             READY FOR IMPLEMENTATION
-C2 Advisory + checkout/local-write      READY FOR IMPLEMENTATION
-C3 Changelist Preparation + Resolve     deferred until minimum dogfood layer
+C1 Source Control Awareness             COMPLETE / OWNER REVIEW PASS
+C2 Advisory + checkout/local-write      COMPLETE / OWNER REVIEW PASS
+C3 Changelist Preparation + Resolve     READY FOR IMPLEMENTATION / U0
 C4 optional Memory integration          deferred
 ```
 
-P4 collaboration state is advisory; checkout/edit and explicit local writable override are allowed. Proven-safe exact-file sync may be assisted. Submit/revert/P4-managed delete are permanently human-only. Resolve is allowed by owner policy but belongs to C3, not the minimum C1/C2 slice.
+P4 collaboration state remains advisory. C3 may create/update current-user/current-client pending changelists, reopen exact already-opened files, and perform exact conflict-free text `resolve -am`. `.uasset/.umap` automatic content resolve is not part of this C3 scope. Submit/revert/P4-managed delete remain permanently human-only.
 
 ### Track X — deeper UE capabilities
 
-Deferred while C1/C2 is active and until real-project dogfood identifies the next useful capability.
+Deferred while C3 is active; after C3, real-project dogfood should determine the next UE capability gap.
 
 ### Track D — maintenance / engineering quality
 
-Deferred unless a concrete maintenance blocker prevents C1/C2. Test-tiering and Git housekeeping prerequisites are already complete.
+Deferred unless a concrete maintenance blocker prevents C3. Test-tiering and Git housekeeping prerequisites are already complete.
 
 ## 16. Performance / fixture boundary
 
@@ -1117,27 +1133,27 @@ avoid unnecessary cold-reset rebuilds
 
 Performance convenience may never weaken product correctness gates.
 
-## 17. Exact takeover procedure for the next Track C1/C2 execution Agent
+## 17. Exact takeover procedure for the next Track C3 execution Agent
 
 Before making any change:
 
 ```text
 1. use E:\WorkSpace\UEAgentKit-Integration.
 2. inspect git status --short --branch, HEAD, upstream and worktrees.
-3. confirm branch `feature/source-control-collaboration` and confirm branch baseline `fdf6b5c` plus C1/C2 planning checkpoint `1c7e2ff` are ancestors.
+3. confirm branch `feature/source-control-collaboration` and confirm C1/C2 closure checkpoint `5366a70c` is an ancestor.
 4. read this handoff.
 5. read docs/DEVELOPMENT_WORKFLOW.md.
 6. read docs/Plans/README.md.
-7. read docs/Plans/UEAGENTKIT_C1_C2_P4_MINIMUM_DOGFOOD_DETAILED_PLAN_20260903.md.
+7. read docs/Plans/UEAGENTKIT_C3_CHANGELIST_RESOLVE_AUDIT_DETAILED_PLAN_20260903.md.
 8. read docs/Plans/UEAGENTKIT_P4_AGENT_OPERATION_BOUNDARY_DECISION_20260903.md.
 9. confirm M5 checkpoint c0b01aa is an ancestor; do not reopen M6.
-10. begin with C1-0 actual P4 capability probe; prefer structured -G output if proven.
+10. begin with C3-0 structured changelist/resolve capability freeze; reuse the existing p4 -G runner.
 11. do not implement arbitrary P4 command passthrough or add P4Python as a required dependency.
 12. P4 collaboration state is advisory only; never turn it into a Writer hard-block.
 13. submit/revert/delete must remain absent from Agent capabilities, including private runner allowlists.
-14. use fake P4 fixtures for mutation matrices; real p4 edit requires an owner-designated safe mapped fixture.
-15. real mutation acceptance must stop before cleanup; the human performs any final revert.
-16. C1/C2 required closure is U0: do not start UE/UBT.
+14. use fake P4 fixtures for mutation matrices; real change/reopen/resolve mutations require an explicitly owner-designated safe mapped fixture.
+15. real mutation acceptance must stop before any human-only cleanup/final action; the human performs revert/submit/delete.
+16. C3 frozen scope is U0: do not start UE/UBT; binary package replay is out of scope.
 17. use focused tests during edits, one affected-domain G1, one final G2.
 18. do not push/rebase/tag/release/version-change unless separately authorized.
 ```
@@ -1190,31 +1206,32 @@ Archive documents preserve their historical stage wording. Current status is det
 
 ## 20. Next local-Agent handoff
 
-M1-M5 are closed and integrated into `main`; M6 is optional and must not auto-start. C1/C2 implementation + owner corrective review are complete in the active branch, but the corrective diff is not yet checkpointed. The next Agent must first preserve/review that exact dirty state; do not start C3 before owner checkpoint authorization. The authoritative C1/C2 records are:
+M1-M5 are closed and integrated into `main`; M6 is optional and must not auto-start. C1/C2 are complete, owner-reviewed, checkpointed at `5366a70c`, and archived. The next Agent should execute C3 from:
 
 ```text
-docs/Plans/UEAGENTKIT_C1_C2_P4_MINIMUM_DOGFOOD_DETAILED_PLAN_20260903.md
+docs/Plans/UEAGENTKIT_C3_CHANGELIST_RESOLVE_AUDIT_DETAILED_PLAN_20260903.md
 ```
 
-Execution baselines:
+Execution baseline:
 
 ```text
-branch baseline   fdf6b5c12aceaefb0e61478bee7a9eefdf5ade76
-M5 product base  c0b01aac4201710466ae9c9a5ee39f8965704b36
+branch              feature/source-control-collaboration
+C3 product baseline 5366a70cdc30e3c4b9a10234d4d9f1ee2a967e5e
+UE level            U0
 ```
 
 The Agent should report only:
 
 ```text
-verified Git facts
-actual P4 CLI/server capability probe facts
-structured provider/parser design
-warning/readiness behavior
-checkout/local writable override/safe-sync evidence
-proof that submit/revert/delete capabilities are absent
-real P4 read-only smoke and owner-assisted mutation status
+verified Git/P4 facts
+pending changelist structured form/ownership behavior
+exact reopen receipts and durable audit linkage
+resolve preview + conflict-free text resolve evidence
+binary package unresolved/handoff behavior
+proof submit/revert/delete remain unreachable
 G0/G1/G2 counts and elapsed time
+real owner-authorized mutation status
 UE runs (expected 0)
 ```
 
-Routine implementation/debugging should proceed autonomously inside the frozen Plan and P4 boundary decision. Stop for owner input only if a safe real-mutation fixture is required or an actual architecture/safety conflict appears.
+Routine implementation/debugging should proceed autonomously inside the frozen C3 Plan and P4 boundary decision. Stop for owner input only if a safe real-mutation fixture is required or an actual architecture/safety conflict appears.

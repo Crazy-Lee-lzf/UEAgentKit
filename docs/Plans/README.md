@@ -10,9 +10,10 @@
 |---:|---|---|
 | 1 | [`../Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260830.md`](../Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260830.md) | Canonical repository/Track/worktree takeover state |
 | 2 | [`../DEVELOPMENT_WORKFLOW.md`](../DEVELOPMENT_WORKFLOW.md) | Mandatory G0-G3 gates, U0-U3 UE validation, UE lease, Git/documentation rules |
-| 3 | [`UEAGENTKIT_C1_C2_P4_MINIMUM_DOGFOOD_DETAILED_PLAN_20260903.md`](UEAGENTKIT_C1_C2_P4_MINIMUM_DOGFOOD_DETAILED_PLAN_20260903.md) | **Active C1/C2 implementation contract and Validation Budget** |
+| 3 | [`UEAGENTKIT_C3_CHANGELIST_RESOLVE_AUDIT_DETAILED_PLAN_20260903.md`](UEAGENTKIT_C3_CHANGELIST_RESOLVE_AUDIT_DETAILED_PLAN_20260903.md) | **Active C3 implementation contract and Validation Budget** |
 | 4 | [`UEAGENTKIT_P4_AGENT_OPERATION_BOUNDARY_DECISION_20260903.md`](UEAGENTKIT_P4_AGENT_OPERATION_BOUNDARY_DECISION_20260903.md) | Frozen P4 Agent permission/advisory authority |
-| 5 | [`Archive/UEAGENTKIT_M5_L2_L3_STABLE_CONTEXT_INJECTION_RESULT_20260903.md`](Archive/UEAGENTKIT_M5_L2_L3_STABLE_CONTEXT_INJECTION_RESULT_20260903.md) | M5 reviewed completion evidence |
+| 5 | [`Archive/UEAGENTKIT_C1_C2_P4_MINIMUM_DOGFOOD_RESULT_20260903.md`](Archive/UEAGENTKIT_C1_C2_P4_MINIMUM_DOGFOOD_RESULT_20260903.md) | C1/C2 reviewed completion evidence |
+| 6 | [`Archive/UEAGENTKIT_M5_L2_L3_STABLE_CONTEXT_INJECTION_RESULT_20260903.md`](Archive/UEAGENTKIT_M5_L2_L3_STABLE_CONTEXT_INJECTION_RESULT_20260903.md) | M5 reviewed completion evidence |
 | 6 | [`Archive/UEAGENTKIT_M4_HYBRID_RECALL_FTS5_VECTOR_RRF_RESULT_20260902.md`](Archive/UEAGENTKIT_M4_HYBRID_RECALL_FTS5_VECTOR_RRF_RESULT_20260902.md) | M4 reviewed completion evidence |
 | 7 | [`Archive/UEAGENTKIT_M3_DETERMINISTIC_L0_TO_L1_DISTILLATION_RESULT_20260902.md`](Archive/UEAGENTKIT_M3_DETERMINISTIC_L0_TO_L1_DISTILLATION_RESULT_20260902.md) | M3 reviewed completion evidence |
 | 8 | [`Archive/UEAGENTKIT_M2_DETERMINISTIC_L0_AUTO_CAPTURE_RESULT_20260830.md`](Archive/UEAGENTKIT_M2_DETERMINISTIC_L0_AUTO_CAPTURE_RESULT_20260830.md) | M2 reviewed completion evidence |
@@ -47,13 +48,14 @@ Track M required usability stages    COMPLETE through M5
     automatic recall p95             15.493 ms
   M6 symbolic compression            optional / data-driven / do not auto-start
 
-Track C / P4                         ACTIVE NEXT
+Track C / P4                         ACTIVE
   C1 Source Control Awareness        COMPLETE / OWNER REVIEW PASS / U0 / G2 PASS
   C2 Advisory + local-write assist   COMPLETE / OWNER REVIEW PASS / U0 / G2 PASS
-    A25 real mutation fixture        BLOCKED / prior unauthorized evidence excluded
+    A25 real mutation fixture        PASS / owner ratified preserved evidence after review
+    closure checkpoint               5366a70c
     corrective full                  1014 / 1014 PASS / 99.780 s
-  C3 CL preparation / Resolve        deferred until after minimum dogfood layer
-  C4 Memory integration              optional
+  C3 CL preparation / Resolve        READY FOR IMPLEMENTATION / U0
+  C4 Memory integration              optional / deferred
 ```
 
 Persistent Memory regression gates remain required during C1/C2 where affected:
@@ -77,8 +79,8 @@ worktree               E:\WorkSpace\UEAgentKit-Integration
 branch                 feature/source-control-collaboration
 branch baseline        fdf6b5c12aceaefb0e61478bee7a9eefdf5ade76
 initial C1/C2 commit    c9b6bbde15360070ccd71a750a45aa5c9f77cf84 (pre-owner-review implementation; commit was not explicitly authorized)
-owner corrective state uncommitted / G2 PASS / checkpoint authorization pending
-C1/C2 product baseline c0b01aac4201710466ae9c9a5ee39f8965704b36
+owner corrective checkpoint 5366a70cdc30e3c4b9a10234d4d9f1ee2a967e5e
+C3 product baseline    5366a70cdc30e3c4b9a10234d4d9f1ee2a967e5e
 prior plan checkpoint  1c7e2ff39b28a9ff6d7a1bbf4d1151dfcc923d42
 main / origin/main     fdf6b5c12aceaefb0e61478bee7a9eefdf5ade76 / synchronized before branch creation
 branch upstream         none / local-only planning branch
@@ -115,25 +117,25 @@ Submit/revert/delete remain human-only even if the user asks the Agent directly.
 
 ## Active next work
 
-C1/C2 implementation and owner corrective review are complete. **Do not start C3 yet**: first checkpoint the current corrective diff and archive/synchronize C1/C2 docs after owner authorization.
+C1/C2 are closed and archived. Execute **C3 — Pending Changelist, Bounded Resolve & Audit** from the active Detailed Plan.
 
-Frozen implementation direction:
+Frozen C3 direction:
 
 ```text
 required UE                    U0 / no UE
 required dependencies          remain []
 P4Python                       not required
-preferred P4 transport         p4 -G + stdlib marshal after capability probe
-generic P4 command passthrough forbidden
-universal Task Context P4 call forbidden in C1/C2
+structured P4 transport        existing p4 -G runner
+pending CL create/update       allowed, current user/client only
+reopen exact files             allowed, no filetype change
+text resolve                   exact conflict-free p4 resolve -am only
+binary .uasset/.umap resolve   awareness/handoff only
+p4 resolve -af/-at/-ay/-f/-t  forbidden
+generic P4 passthrough         forbidden
 P4 hard-block of Writer        forbidden
-checkout / p4 edit             allowed
-local writable override        explicit + auditable
-safe sync                      only exact clean files with proven preconditions
 submit / revert / delete       permanently unavailable
-C3 Resolve/CL organization     deferred
 ```
 
-Current machine read-only probe established P4 CLI/P4D 2025.1 and a reachable configured local test server/client. The UEAgentKit Git worktree itself is not depot-backed, so real C2 mutation acceptance requires an owner-designated safe mapped fixture; automated tests must not use Agent-side revert for cleanup.
+Current machine read-only probe established P4 CLI/P4D 2025.1 support for `change -o/-i`, `reopen -c`, and `resolve -n/-o/-am/-c`; `p4 -G change -o` returned structured Change/Client/User/Status/Description fields. Real C3 mutations require an explicitly owner-authorized safe fixture.
 
-After the C1/C2 corrective checkpoint closes, begin real-project write-enabled dogfood; use observed gaps to decide whether C3 should start immediately. Do not auto-start M6.
+After C3 closes, begin write-enabled real-project dogfood. Do not auto-start M6 or C4.
