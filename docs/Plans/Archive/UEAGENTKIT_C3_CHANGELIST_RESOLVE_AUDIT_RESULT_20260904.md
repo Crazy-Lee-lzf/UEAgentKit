@@ -6,13 +6,15 @@
 >
 > C3 product baseline: `5366a70cdc30e3c4b9a10234d4d9f1ee2a967e5e`
 >
-> Plan: `docs/Plans/UEAGENTKIT_C3_CHANGELIST_RESOLVE_AUDIT_DETAILED_PLAN_20260903.md`
+> Plan: `docs/Plans/Archive/UEAGENTKIT_C3_CHANGELIST_RESOLVE_AUDIT_DETAILED_PLAN_20260903.md`
 >
 > Authority: `docs/Plans/UEAGENTKIT_P4_AGENT_OPERATION_BOUNDARY_DECISION_20260903.md`
 >
-> State: **IMPLEMENTED / OWNER CORRECTIVE REVIEW PASS / VALIDATED IN WORKING TREE / AWAITING CHECKPOINT**
+> State: **COMPLETE / OWNER CORRECTIVE REVIEW PASS / CHECKPOINTED**
 >
-> Git commit for C3 implementation: **none** (not authorized; final work left in the working tree for owner review)
+> C3 closure checkpoint: `09a4c55c59e6388d729b745a4479ca5d7f64801c` (`feat:close-C3-changelist-resolve-audit`)
+>
+> Push: **none**
 
 ## 1. Verified repository facts
 
@@ -20,6 +22,7 @@
 worktree                 E:\WorkSpace\UEAgentKit-Integration
 branch                   feature/source-control-collaboration
 planning HEAD            8d3a39e786b0147eba3710eb62b633d892f59183
+C3 closure checkpoint   09a4c55c59e6388d729b745a4479ca5d7f64801c
 C3 product baseline      5366a70cdc30e3c4b9a10234d4d9f1ee2a967e5e  (ancestor verified)
 working tree            clean before C3; only C3 files changed after execution
 push / rebase / tag     none
@@ -301,7 +304,7 @@ A27  real CL/reopen/resolve mutation on owner-authorized fixture OWNER-FIXTURE B
 - `resolve -o` is supported by the runner shape but intentionally not used by automatic preview/merge flows to keep subprocess output bounded; this is a documented behavior choice within the frozen plan.
 - `.txt`/`.md` were not added to the text-resolve extension set.
 - The owner-designated audit root (`Output/<work-root>/source-control/`) is wired through the MCP `--enable-source-control` path; direct service callers get in-memory receipts unless they pass `audit_report_root`.
-- No Git commit was created for C3 (not authorized). The validated implementation and this Result remain in the working tree for owner review; the owner may then authorize a checkpoint commit and, separately, a real C3 mutation fixture.
+- The owner subsequently authorized the validated C3 checkpoint. The implementation was committed locally as `09a4c55c59e6388d729b745a4479ca5d7f64801c` (`feat:close-C3-changelist-resolve-audit`). No push occurred. A27 remains independently blocked until a real C3 mutation fixture is explicitly designated.
 
 
 ## 19. Owner corrective review — 2026-09-06
@@ -371,4 +374,4 @@ The first full-suite invocation through WebAgents lost its completion response a
 
 A27 remains **OWNER-FIXTURE BLOCKED**. The corrective pass executed only real read-only P4 queries and did not reuse, move, resolve, revert, or otherwise mutate the A25 fixture.
 
-Current closure state: **C3 implementation complete / owner corrective review PASS / A27 truthfully BLOCKED / awaiting owner-authorized Git checkpoint**.
+Current closure state: **C3 COMPLETE / owner corrective review PASS / checkpoint `09a4c55` / A27 truthfully OWNER-FIXTURE BLOCKED / push none**.
