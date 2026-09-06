@@ -8,7 +8,7 @@ UE Agent Kit 是一套面向 Unreal Engine 的开源资产分析、索引与受�
 
 当前已发布版本为 **0.7.0**，支持 **Unreal Engine 5.6**。
 
-> **当前开发线状态（2026-09-03）**：已完成 Track W / Writer、Track V / Knowledge Web，以及 Track M 的 M1–M5 必要阶段。Memory 已具备确定性 L0→L1、可选本地 Vector + RRF 显式混合检索、持久化 L2/L3 稳定自动上下文；M5 portable full 为 **968/968 PASS**，自动注入 p95 **5.748 ms**。M6 保持 optional / data-driven。下一开发阶段是 **C1/C2 P4 Minimum Dogfood**：P4 状态只做 advisory/readiness；Agent 可做状态读取、`p4 edit`、显式 local writable override 与满足严格前置条件的 safe sync，但 **Submit / Revert / P4-managed Delete 永久只允许人工执行**。上述均为开发线能力，**不改变当前已发布版本 0.7.0**。
+> **当前开发线状态（2026-09-06）**：Track W / Writer、Track V / Knowledge Web、Track M 必要阶段 M1–M5，以及 Track C 的 C1–C3 均已完成并通过 owner review。C3 收口 checkpoint 为 `5b705a7`；最终 Source Control G1 为 **94/94 PASS**，portable full 为 **1062/1062 PASS（17 skipped）**。Source Control 仍为 opt-in：Agent 可读取 P4 状态、执行 `p4 edit`、显式 local writable override、严格 safe sync、pending changelist 准备、exact-file `reopen` 与冲突安全的文本 `resolve -am`；`.uasset/.umap` 不自动做内容 resolve，**Submit / Revert / P4-managed Delete 永久人工执行**。M6 与 C4 继续 optional/deferred；下一主线切到 **真实商业项目 write-enabled dogfood**，由真实阻塞决定后续 Track X / C4 / M6。上述均为开发线能力，**不改变当前已发布版本 0.7.0 / UE5.6**。
 
 > **AI Generated**：本项目的代码和文档主要由 AI 生成，并通过人工审查、UE 5.6 编译、自动化测试和真实工程回归验证。
 
@@ -71,7 +71,7 @@ UE Agent Kit 把这些信息导出成可检索的结构化数据，再让 Agent 
 通过本地 MCP Server 接入，Agent 可以搜索资产与 Symbol、读取单资产、查询引用，
 并调用高层写入 Tool 自动生成严格 Plan 或执行 Dry Run。
 
-**不开放**：Shell、任意 SQL、任意 UObject Method、自动保存。
+**不开放**：Shell、任意 SQL、任意 UObject Method、自动保存，以及 Agent 侧 P4 Submit / Revert / Delete。
 
 ## 主要能力
 
@@ -351,7 +351,7 @@ scripts\TestMcpSnapshotRefresh.cmd ^
 
 服务器对 MCP Client 只使用本地 `stdio`。
 
-**Tool 数量按模式与 Memory 开关变化**
+**0.7.0 已发布基线 Tool 数量**
 
 | 模式 | 不启用 Memory | 启用 Project Memory |
 |---|---|---|
@@ -359,6 +359,15 @@ scripts\TestMcpSnapshotRefresh.cmd ^
 | Live | 43 | 55 |
 | Workflow-only | 60 | 72 |
 | Live + Workflow | 93 | 105 |
+
+当前开发线在 M5/C3 后增加了 Memory 与 opt-in Source Control Tool。`source-control` 默认关闭，开启后每种模式增加 6 个 Source Control Tool：
+
+| 模式 | 开发线基础 | + Memory | + Source Control | + Memory + Source Control |
+|---|---:|---:|---:|---:|
+| Offline | 10 | 24 | 16 | 30 |
+| Live | 43 | 57 | 49 | 63 |
+| Workflow-only | 67 | 81 | 73 | 87 |
+| Live + Workflow | 100 | 114 | 106 | 120 |
 
 **实时路径提供**
 
@@ -434,10 +443,10 @@ Output\Blueprints\
 - [`docs/RELEASE_0.4.4.md`](docs/RELEASE_0.4.4.md)：0.4.4 正式发布范围、验证结果和升级说明。
 - [`CHANGELOG.md`](CHANGELOG.md)：版本变更摘要。
 - [`docs/ROADMAP.md`](docs/ROADMAP.md)：0.7.0 已发布能力、0.8.0 Context/Analysis 与 0.9.0 协作方向。
-- [`docs/Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md`](docs/Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md)：R4.1 24-attempt paired repeat 的完整分布、成本与已知限制。
-- [`docs/Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`](docs/Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md)：全部公共 Tool / Operation 的 0.8 Read/Write Gap Audit 与 Scope Freeze。
-- [`docs/Plans/UEAGENTKIT_0_8_RELEASE_REVIEW_20260823.md`](docs/Plans/UEAGENTKIT_0_8_RELEASE_REVIEW_20260823.md)：0.8 capability acceptance、正式发布边界与最终门禁。
-- [`docs/Handoffs/UEAGENTKIT_0_8_CAPABILITY_CLOSEOUT_HANDOFF_20260823.md`](docs/Handoffs/UEAGENTKIT_0_8_CAPABILITY_CLOSEOUT_HANDOFF_20260823.md)：0.8 capability closeout 的最终状态、门禁证据与后续接手边界。
+- [`docs/Plans/Archive/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md`](docs/Plans/Archive/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md)：R4.1 24-attempt paired repeat 的完整分布、成本与已知限制。
+- [`docs/Plans/Archive/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`](docs/Plans/Archive/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md)：全部公共 Tool / Operation 的 0.8 Read/Write Gap Audit 与 Scope Freeze。
+- [`docs/Plans/Archive/UEAGENTKIT_0_8_RELEASE_REVIEW_20260823.md`](docs/Plans/Archive/UEAGENTKIT_0_8_RELEASE_REVIEW_20260823.md)：0.8 capability acceptance、正式发布边界与最终门禁。
+- [`docs/Handoffs/Archive/UEAGENTKIT_0_8_CAPABILITY_CLOSEOUT_HANDOFF_20260823.md`](docs/Handoffs/Archive/UEAGENTKIT_0_8_CAPABILITY_CLOSEOUT_HANDOFF_20260823.md)：0.8 capability closeout 的最终状态、门禁证据与后续接手边界。
 - [`spec/BPCTX_FORMAT.md`](spec/BPCTX_FORMAT.md)：BPCTX/1 格式规范。
 - [`spec/PATCH_SCHEMA.md`](spec/PATCH_SCHEMA.md)：声明式 Patch、Policy、Revision 和纯校验安全边界。
 - [`spec/BACKUP_AND_ROLLBACK.md`](spec/BACKUP_AND_ROLLBACK.md)：Backup Manifest、rollback、审计回执和恢复验证规范。

@@ -1,8 +1,8 @@
 # UE Agent Kit 路线图
 
-更新时间：2026-09-03
+更新时间：2026-09-06
 
-当前已发布版本为 **0.7.0**，支持 Unreal Engine 5.6。开发线已完成 Track W / Writer、Track V / Knowledge Web，以及 Track M 的 M1–M5 必要阶段；M6 继续 optional / data-driven。当前下一主线已经切换到 **Track C / C1+C2 P4 Minimum Dogfood**，随后直接进入真实项目 write-enabled dogfood。项目级当前入口统一从 [`Plans/README.md`](Plans/README.md) 进入；正式 package release、Tag 与版本号变更仍是独立授权流程。
+当前已发布版本为 **0.7.0**，支持 Unreal Engine 5.6。开发线已完成 Track W / Writer、Track V / Knowledge Web、Track M 必要阶段 M1–M5，以及 Track C 的 C1–C3；C3 owner-reviewed closure checkpoint 为 `5b705a7`，最终 portable full **1062/1062 PASS（17 skipped）**。M6 与 C4 继续 optional/deferred。当前下一主线已经切换到 **真实商业项目 write-enabled dogfood**，后续 Track X / C4 / M6 仅由真实阻塞数据驱动。项目级当前入口统一从 [`Plans/README.md`](Plans/README.md) 进入；正式 package release、Tag 与版本号变更仍是独立授权流程。
 
 ## 总体方向
 
@@ -11,10 +11,19 @@ UE Agent Kit 的长期定位是面向 AI Agent 的 Unreal Engine 项目智能层
 当前 Server 模式：
 
 ```text
-Offline            10 Tool（Memory 22）
-Live               43 Tool（Memory 55）
-Workflow-only       60 Tool（Memory 72）
-Live + Workflow     93 Tool（Memory 105）
+开发线默认（Source Control 关闭）：
+Offline            10 Tool（Memory 24）
+Live               43 Tool（Memory 57）
+Workflow-only       67 Tool（Memory 81）
+Live + Workflow    100 Tool（Memory 114）
+
+启用 opt-in Source Control：
+Offline            16 Tool（Memory 30）
+Live               49 Tool（Memory 63）
+Workflow-only       73 Tool（Memory 87）
+Live + Workflow    106 Tool（Memory 120）
+
+发布版 0.7.0 仍保留 release-time 10/22、43/55、60/72、93/105 Tool 计数。
 ```
 
 ## 已完成基础
@@ -170,7 +179,7 @@ R4（Real Agent Benchmark v1）已完成。设计见 [`Plans/AGENT_RELIABILITY_R
 
 R4.1 使用冻结 fingerprint 的 high-fanout、stale、Blueprint default、Data Asset scalar 四个 anchor，Full/Legacy 各 3 次，共 24/24 retained、12/12 paired fairness matched、0 measurement drift、0 infrastructure failure、24/24 exact recovery。Full stale 与 Blueprint 均 3/3 Trusted；high-fanout 3/3 因越过 direct-only bound 形成 False Success；scalar 只有 1/3 exact claim Trusted，另两次把 numeric beforeValue stringify。完整分布见 [`Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md`](Plans/Archive/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md)。
 
-Read/Write Audit 已覆盖 105 个公共 Tool 与 18 个 Patch Operation，C5 结论为 `0 Must-fix new tools`。剩余问题属于 Agent bound/value typing、静态证据边界与 Full 写链成本，不是缺 UE Read/Write capability；完整 Scope Freeze 见 [`Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`](Plans/Archive/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md)。
+Read/Write Audit 已覆盖 105 个公共 Tool 与 18 个 Patch Operation，C5 结论为 `0 Must-fix new tools`。剩余问题属于 Agent bound/value typing、静态证据边界与 Full 写链成本，不是缺 UE Read/Write capability；完整 Scope Freeze 见 [`Plans/Archive/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`](Plans/Archive/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md)。
 
 0.8 capability scope 已完成本地收口，但最新正式发布版本、Package 与 Plugin Version 仍保持 0.7.0；本阶段没有创建 Tag、Release artifact 或 Push。只有后续真实数据反复出现 Value Provenance / Execution Trace blocker，R5 才解冻。
 
@@ -184,26 +193,28 @@ Track V / Knowledge Web              COMPLETE
 Track M                              COMPLETE through M5
   M1-M5                              COMPLETE
   M6                                 optional / do not auto-start
-Track C                              ACTIVE NEXT
-  C1 Source Control Awareness        READY FOR IMPLEMENTATION
-  C2 Advisory + local-write assist   READY FOR IMPLEMENTATION
-  C3 CL preparation / Resolve        after minimum dogfood layer
-  C4 shared-memory integration       optional
+Track C                              COMPLETE through C3
+  C1 Source Control Awareness        COMPLETE / OWNER REVIEW PASS
+  C2 Advisory + local-write assist   COMPLETE / OWNER REVIEW PASS
+  C3 CL preparation / Resolve        COMPLETE / OWNER REVIEW PASS @ 5b705a7
+  A27 real C3 mutation               OWNER-FIXTURE BLOCKED
+  C4 shared-memory integration       optional / deferred
+Next                                 real-project write-enabled dogfood
 ```
 
 当前权威入口：
 
 - [`Plans/README.md`](Plans/README.md)：当前状态、读取顺序与 active stage。
-- [`Plans/UEAGENTKIT_C1_C2_P4_MINIMUM_DOGFOOD_DETAILED_PLAN_20260903.md`](Plans/UEAGENTKIT_C1_C2_P4_MINIMUM_DOGFOOD_DETAILED_PLAN_20260903.md)：C1/C2 实现与 Validation Budget。
+- [`Plans/Archive/UEAGENTKIT_C3_CHANGELIST_RESOLVE_AUDIT_RESULT_20260904.md`](Plans/Archive/UEAGENTKIT_C3_CHANGELIST_RESOLVE_AUDIT_RESULT_20260904.md)：C1–C3 Source Control 收口后的最新验收证据与 A27 状态。
 - [`Plans/UEAGENTKIT_P4_AGENT_OPERATION_BOUNDARY_DECISION_20260903.md`](Plans/UEAGENTKIT_P4_AGENT_OPERATION_BOUNDARY_DECISION_20260903.md)：P4 Agent 权限边界。
 - [`Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260830.md`](Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260830.md)：canonical takeover state。
 
-M1–M5 关闭后不继续闭门堆功能。C1/C2 完成后进入真实商业项目 dogfood，再根据真实缺口决定 C3 / Track X / M6 的优先级。
+M1–M5 与 C1–C3 关闭后不继续闭门堆功能。现在直接进入真实商业项目 dogfood，再根据真实缺口决定 Track X / C4 / M6 的优先级。
 
 
 ## 0.9.0：协作与冲突感知
 
-Track C 首先落地本地 **C1 Source Control Awareness + C2 Advisory / Local Write Assistance**。读取 Provider、Checkout/Open、Lock/Exclusive Lock、Have/Head、Pending Changelist 与 Resolve 状态，并把 Local Dirty、磁盘 Revision 与 Depot Head 分歧呈现为可审计的 warning/readiness。
+Track C 的本地 **C1 Source Control Awareness + C2 Advisory / Local Write Assistance + C3 Pending Changelist / Bounded Resolve / Audit** 已完成。开发线可以读取 Provider、Checkout/Open、Lock/Exclusive Lock、Have/Head、Pending Changelist 与 Resolve 状态，把 Local Dirty、磁盘 Revision 与 Depot Head 分歧呈现为可审计 warning/readiness，并在 current user/client 边界内准备 pending CL、reopen exact files 与执行冲突安全的文本 `resolve -am`。A27 真实 C3 mutation 仍等待 owner 指定安全 fixture。
 
 P4 协作状态本身**不 hard-block 本地 Writer 测试**。Agent 可以读取状态、执行 `p4 edit`、在明确标记下做 local writable override，以及在证明文件 clean/未 open/unresolved=0 等前置条件后做 exact-file safe sync。**Submit / Revert / P4-managed Delete 永久由人手动执行**；即使用户要求 Agent 直接执行也不能越过该产品边界。Resolve 允许，但进入后续 C3 的 bounded/evidence-driven workflow；不做盲目 bulk accept yours/theirs。
 

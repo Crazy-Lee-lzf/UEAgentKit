@@ -1,8 +1,8 @@
 # UE Agent Kit Roadmap
 
-Updated: 2026-08-23
+Updated: 2026-09-06
 
-> Development snapshot note (2026-08-27): W0-W3 of the Editor-resident Writer line are now complete and W4 bounded multi-operation is next. The current planning authority is the Chinese [`Plans/README.md`](Plans/Archive/README.md), Master Development Plan, and W4 Detailed Plan. This English document remains a 2026-08-23 snapshot until a full translation refresh.
+> Current development note (2026-09-06): Track W / Writer, Track V / Knowledge Web, required Track M M1-M5, and Track C C1-C3 are complete. C3 owner-reviewed closure is `5b705a7` with 1062/1062 portable tests PASS (17 skipped). The next primary stage is real-project write-enabled dogfood; C4 and M6 remain optional/deferred. [`Plans/README.md`](Plans/README.md), the canonical handoff, and the P4 boundary are authoritative for current execution state.
 
 The latest published release is **0.7.0** for Unreal Engine 5.6 and remains unchanged. The 0.8.x Context / Analysis / Agent Reliability capability scope is locally closed on `feature/agent-reliability`, including R0–R4, R4.1 repeat evidence, a complete Read/Write Gap Audit, and Scope Freeze. This closeout does not change the published package/plugin version, create a tag, build release artifacts, or push.
 
@@ -13,10 +13,19 @@ UE Agent Kit is evolving into an Unreal Engine project-intelligence layer for AI
 Current server modes:
 
 ```text
-Offline            10 tools (22 with Memory)
-Live               43 tools (55 with Memory)
-Workflow-only      60 tools (72 with Memory)
-Live + Workflow    93 tools (105 with Memory)
+Current development line, Source Control off by default:
+Offline            10 tools (24 with Memory)
+Live               43 tools (57 with Memory)
+Workflow-only      67 tools (81 with Memory)
+Live + Workflow   100 tools (114 with Memory)
+
+With opt-in Source Control enabled:
+Offline            16 tools (30 with Memory)
+Live               49 tools (63 with Memory)
+Workflow-only      73 tools (87 with Memory)
+Live + Workflow   106 tools (120 with Memory)
+
+Published 0.7.0 retains the release-time 10/22, 43/55, 60/72, 93/105 counts.
 ```
 
 ## Completed foundation
@@ -75,17 +84,17 @@ R0–R4 now provide deterministic Task Context, bounded Impact Analysis, Change-
 
 R4.1 retained all 24 attempts across four Full/Legacy paired anchors, with 12/12 fairness matches, zero measurement drift, zero infrastructure failures, and 24/24 exact recovery. Full achieved 3/3 Trusted results for both stale safe-stop and Blueprint default. It still produced 3/3 False Success on the direct-only high-fanout anchor and only 1/3 exact Trusted scalar claims because two claims stringified a numeric before-value. These failures remain visible and define known Agent-boundary limitations; they are not evidence for another UE read or write tool.
 
-The audit covers all 105 public tools and 18 registered Patch Operations and concludes `0 must-fix new tools`. See [`Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md`](Plans/Archive/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md) and [`Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`](Plans/Archive/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md).
+The audit covers all 105 public tools and 18 registered Patch Operations and concludes `0 must-fix new tools`. See [`Plans/Archive/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md`](Plans/Archive/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md) and [`Plans/Archive/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`](Plans/Archive/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md).
 
 Value Provenance and Execution Trace remain deferred by benchmark evidence. R5 may be reopened only after repeated real cases identify either as the primary blocker and show higher expected value than guidance, Writer, or Index fixes.
 
 ## Post-0.8 execution order
 
-See [`Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md`](Plans/Archive/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md) for the current implementation plan. The priority is Editor-resident low-latency write paths, parallel Registry-only/Fast-Revision performance work, checkpointed independent verification, narrow Agent result/bound hardening, then maintainability/CI and 0.9 collaboration. Formal 0.8 package release is a separate user-authorized track and does not block technical development.
+The current execution entry point is [`Plans/README.md`](Plans/README.md). Writer, required Memory M1-M5, and Source Control C1-C3 are closed. The priority is now write-enabled dogfood in an owner-designated real commercial project; new Writer, Track X, C4, or M6 work should be opened only when repeated real tasks expose a concrete gap. Formal package release remains a separate user-authorized track.
 
 ## 0.9.0: collaboration and conflict awareness
 
-Read source-control provider, checkout, lock, owner, and head state; compare local dirty state, disk Revision, and depot/remote head; and model ownership boundaries and multi-user asset conflict risk. The first version may analyze, warn, or block, but must not steal locks or overwrite another developer's work.
+C1-C3 are implemented on the development line: read provider/checkout/lock/have/head/pending-CL/resolve state; provide advisory readiness and bounded checkout/safe-sync assistance; prepare current-user/current-client pending changelists; reopen exact files; and run conflict-safe text `resolve -am` with durable audit. `.uasset/.umap` content is never auto-resolved. Submit, Revert, and P4-managed Delete remain permanently human-only. A27 real C3 mutation is still owner-fixture blocked and may be satisfied naturally during dogfood.
 
 Deployment uses one local MCP per developer plus a shared Knowledge Service. The local MCP connects to the local Editor Bridge and internally accesses the shared service; the agent should not orchestrate separate local-UE and shared-knowledge MCPs, and one central MCP must not route every developer's editor. Shared `/project` and `/team` knowledge and Active Work live in the service, while `/user`, `/session`, editor state, and asset indexes remain local. Shared updates use optimistic concurrency and explicit `knowledge-conflict` responses.
 

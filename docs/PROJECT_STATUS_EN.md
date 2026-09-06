@@ -2,9 +2,9 @@
 
 
 
-Updated: 2026-08-23
+Updated: 2026-09-06
 
-> Development snapshot note (2026-08-27): W0-W3 of the Editor-resident Writer line are now complete and W4 bounded multi-operation is next. The current planning authority is the Chinese [`Plans/README.md`](Plans/Archive/README.md), Master Development Plan, and W4 Detailed Plan. This English document remains a 2026-08-23 snapshot until a full translation refresh.
+> Current development note (2026-09-06): Track W / Writer, Track V / Knowledge Web, required Track M M1-M5, and Track C C1-C3 are complete and owner-reviewed. C3 closed at `5b705a7`; Source Control G1 is 94/94 PASS and portable full is 1062/1062 PASS (17 skipped). The next primary stage is real-project write-enabled dogfood. M6/C4 remain optional/deferred. [`Plans/README.md`](Plans/README.md), the canonical handoff, and the P4 boundary decision are authoritative for current stage facts; older milestone sections below remain useful historical detail.
 
 
 
@@ -40,21 +40,25 @@ The project is therefore closer to a safe project-knowledge layer plus a verifie
 
 ```text
 
-Mode                 Without Memory    With Memory
+Current development line, Source Control disabled by default:
 
-Offline                    10              22
+Mode                        Base       + Memory
 
-Live                       43              55
+Offline                       10              24
 
-Workflow-only              60              72
+Live                          43              57
 
-Live + Workflow            93             105
+Workflow-only                 67              81
+
+Live + Workflow              100             114
+
+Opt-in Source Control adds six tools: Offline 16/30, Live 49/63, Workflow-only 73/87, Live+Workflow 106/120 (without/with Memory). Published 0.7.0 retains its release-time 10/22, 43/55, 60/72, 93/105 counts.
 
 ```
 
 
 
-Tool count is not equivalent to Unreal operation count. The registry contains 105 public tools across Query, optional Memory, Live Read/Action, Realtime, and Workflow groups, plus 18 registered Patch Operations. The 0.8 gap audit classifies every entry and identifies zero must-fix new tools.
+Tool count is not equivalent to Unreal operation count. The historical 0.8 capability audit covered 105 public tools and 18 registered Patch Operations and identified zero must-fix new tools. The current development registry can expose up to 120 tools when both Memory and the opt-in Source Control group are enabled; current mode counts are listed above.
 
 
 
@@ -245,7 +249,7 @@ Add confirmed rules, record observed or inferred findings, persist evidence-boun
 
 - Editor/Visual Studio lifecycle and build dispatch automation.
 
-- Source-control checkout, locks, ownership, and depot-head conflict handling.
+- Agent-side P4 Submit/Revert/P4-managed Delete, generic P4 passthrough, blind accept-yours/theirs, and automatic `.uasset/.umap` content resolve. C1-C3 awareness/checkout assistance/pending-CL/bounded text-resolve/audit are implemented on the development line; A27 real C3 mutation awaits an owner-designated fixture.
 
 
 
@@ -255,7 +259,7 @@ These are intentional scope and safety boundaries, not documentation omissions.
 
 ## 6. Planned work
 
-The single post-0.8 planning entry point is [`Plans/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md`](Plans/Archive/UEAGENTKIT_POST_0_8_DEVELOPMENT_PLAN_20260823.md). Immediate priorities are Editor-resident low-latency writes and large-project performance, followed by narrow Agent UX hardening, maintainability/CI, and 0.9 collaboration. Formal 0.8 package release remains a separate user-authorized track; R5 remains deferred.
+The current planning entry point is [`Plans/README.md`](Plans/README.md). Required Memory stages M1-M5 and Source Control C1-C3 are closed. The immediate priority is write-enabled dogfood in an owner-designated real commercial project, using observed failures to decide any Track X, C4, or M6 work. Formal package release remains a separate user-authorized track; R5 remains deferred.
 
 
 
@@ -295,7 +299,7 @@ R0–R4 provide deterministic Task Context, bounded Impact Analysis, Change-Set-
 
 R4.1 retained 24/24 attempts across four Full/Legacy anchors, with 12/12 paired fairness matches, no measurement drift, no infrastructure failure, and 24/24 exact recovery. Full achieved 3/3 Trusted stale safe-stops and 3/3 Trusted Blueprint defaults. It also retained 3/3 high-fanout False Success caused by exceeding the direct-only bound, plus two scalar False Success claims caused by stringifying a numeric before-value. See [`Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md`](Plans/Archive/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md).
 
-The capability audit covers all 105 public tools and 18 Patch Operations and concludes `0 must-fix new tools`. Generic graph/actor/material-graph/Niagara/Sequencer/Control Rig mutation and arbitrary scripting remain explicitly deferred. See [`Plans/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`](Plans/Archive/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md).
+The capability audit covers all 105 public tools and 18 Patch Operations and concludes `0 must-fix new tools`. Generic graph/actor/material-graph/Niagara/Sequencer/Control Rig mutation and arbitrary scripting remain explicitly deferred. See [`Plans/Archive/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`](Plans/Archive/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md).
 
 R5 Value Provenance / Execution Trace remains deferred by benchmark evidence and may reopen only after repeated real cases identify either as the primary blocker.
 

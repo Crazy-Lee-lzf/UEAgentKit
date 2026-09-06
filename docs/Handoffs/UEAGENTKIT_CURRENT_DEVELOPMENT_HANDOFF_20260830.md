@@ -31,7 +31,7 @@ Track V / Knowledge Web              COMPLETE
   V2 visualization                   complete
 
 W + V integration                    G3 PASS
-Current portable full suite          968 / 968 PASS
+Current portable full suite         1062 / 1062 PASS / 17 skipped
 Track M / M1                         COMPLETE / REVIEWED / G2 PASS / U0
 Track M / M2                         COMPLETE / REVIEWED / G2 PASS / U0
 Track M / M3                         COMPLETE / REVIEWED / G2 PASS / U0
@@ -39,7 +39,10 @@ Track M / M4                         COMPLETE / REVIEWED / G2 PASS / U0
 Track M / M5                         COMPLETE / REVIEWED / G2 PASS / U0
 M5 implementation                    c0b01aac4201710466ae9c9a5ee39f8965704b36
 Track M required usability stages    COMPLETE through M5
-Track C / C1+C2                      READY FOR IMPLEMENTATION / U0
+Track C / C1-C3                      COMPLETE / OWNER REVIEW PASS / U0
+Public Track C feature checkpoint      5b705a7b693eff4af9ceb808df978f09e329dca9
+A27 real C3 mutation                   OWNER-FIXTURE BLOCKED
+Next primary stage                     real-project write-enabled dogfood
 Published-version change             none
 M1-M5 regression benchmark gates     PASS
 ```
@@ -304,7 +307,7 @@ M5 automatic Task Context now injects only persisted deterministic L3 plus match
 The active next stage is **C1/C2 — P4 Minimum Dogfood**:
 
 ```text
-docs/Plans/UEAGENTKIT_C1_C2_P4_MINIMUM_DOGFOOD_DETAILED_PLAN_20260903.md
+docs/Plans/Archive/UEAGENTKIT_C1_C2_P4_MINIMUM_DOGFOOD_DETAILED_PLAN_20260903.md
 ```
 
 The owner-approved P4 authority remains:
@@ -346,6 +349,87 @@ The active next implementation is Track C / C1+C2. M6 remains optional and must 
 
 Remote synchronization was verified with a fresh fetch before push: `origin/main` had not moved. The integration push fast-forwarded `origin/main` from `137c3a3` to `cb5b7bb`; this final documentation-sync commit is included in the concluding push. No force-push, rebase, tag, release, or published-version change was performed.
 
+### 0.9 Track C branch creation and planning refresh — 2026-09-03
+
+After `main` release validation was repaired and GitHub Actions returned green on Python 3.11/3.12, Track C received its dedicated local development branch. No Track C product implementation has started yet.
+
+```text
+branch                    feature/source-control-collaboration
+branch baseline           fdf6b5c12aceaefb0e61478bee7a9eefdf5ade76
+main / origin/main        fdf6b5c12aceaefb0e61478bee7a9eefdf5ade76 / synchronized at branch creation
+M5 product baseline       c0b01aac4201710466ae9c9a5ee39f8965704b36
+prior C1/C2 planning      1c7e2ff39b28a9ff6d7a1bbf4d1151dfcc923d42 (ancestor via main)
+Track C product changes    none yet
+UE level                  U0
+branch push               none
+```
+
+The active C1/C2 Detailed Plan is refreshed in-place rather than duplicated. The next execution Agent must use this branch and begin with the C1-0 read-only P4 capability probe.
+
+### 1.0 C1/C2 implementation + owner corrective review — 2026-09-03
+
+WorkBuddy implemented C1/C2 and created local commit `c9b6bbde15360070ccd71a750a45aa5c9f77cf84`, but that session had only the Plan path as user input: the commit and its real P4 fixture mutation were not explicitly authorized. The commit is retained as an implementation checkpoint; no reset/rewrite was performed.
+
+Owner review found and fixed six product issues in the working tree: same-user/different-client ownership, safe-sync failure fallthrough, override suppression after sync, optimistic submit readiness, partial marshal decode acceptance, and unbounded subprocess capture. A dedicated `source-control` G1 domain was also added.
+
+```text
+focused source-control     38 / 38 PASS
+focused MCP                 8 / 8 PASS
+source-control G1          46 / 46 PASS / 4.579 s
+fast G0                   550 / 550 PASS / 17.019 s / 17 skipped
+full G2                  1014 / 1014 PASS / 99.780 s / 17 skipped
+ruff / compileall          PASS
+ValidateRelease 0.7.0      PASS / schemas 3 / patch examples 16
+git diff --check           PASS
+UE / UBT                    0 / U0
+```
+
+The original A25 real `p4 edit` occurred before explicit fixture authorization and remains documented as a process deviation. During owner review, the owner explicitly ratified that exact Blender file as the A25 fixture; preserved pre/post evidence therefore counts as A25 PASS without a second mutation. The fixture remains opened in the P4 default changelist and content remains unchanged (`p4 diff -se/-sd` up-to-date). Agent cleanup is forbidden because P4 revert is permanently human-only.
+
+Owner corrective changes were checkpointed at `5366a70cdc30e3c4b9a10234d4d9f1ee2a967e5e` (`fix:close-C1-C2-owner-review`). Branch push remains none.
+
+### 1.1 C1/C2 archive + C3 planning — 2026-09-03
+
+C1/C2 Plan and Result are archived after owner review. C3 planning is now active on the same source-control collaboration branch.
+
+```text
+C1/C2 closure checkpoint      5366a70cdc30e3c4b9a10234d4d9f1ee2a967e5e
+C1/C2 A25                     PASS / owner ratified preserved real-edit evidence
+C1/C2 Plan/Result             docs/Plans/Archive/
+C3 Detailed Plan              docs/Plans/Archive/UEAGENTKIT_C3_CHANGELIST_RESOLVE_AUDIT_DETAILED_PLAN_20260903.md
+C3 required UE                U0
+C3 product baseline           5366a70c
+branch push                   none
+```
+
+Read-only C3-0 probe on P4 2025.1 confirmed `change -o/-i`, `reopen -c`, and `resolve -n/-o/-am/-c`. `p4 -G change -o` returned structured Change/Client/User/Status/Description fields. The frozen C3 plan permits current-user/current-client pending CL preparation and exact conflict-free text `resolve -am`, while `.uasset/.umap` automatic content resolve remains out of scope. Submit/revert/delete remain permanently human-only.
+
+### 1.2 C3 completion + owner corrective review + checkpoint — 2026-09-06
+
+C3 is now complete, owner-reviewed, locally checkpointed, and archived. The implementation remained U0 and did not execute any new real C3 mutation without an owner-designated fixture.
+
+```text
+branch                    feature/source-control-collaboration
+C3 product baseline       5366a70cdc30e3c4b9a10234d4d9f1ee2a967e5e
+C3 planning checkpoint    8d3a39e786b0147eba3710eb62b633d892f59183
+C3 closure checkpoint     09a4c55c59e6388d729b745a4479ca5d7f64801c
+source-control G1         94 / 94 PASS / 12.394 s
+portable full G2         1062 / 1062 PASS / 121.295 s / 17 skipped
+Ruff / compileall         PASS
+ValidateRelease 0.7.0     PASS
+UE / UBT                  0 / U0
+A27 real C3 mutation      OWNER-FIXTURE BLOCKED
+push                      none
+```
+
+Owner corrective review closed the real `change -i` subprocess contract, real `Files0/Files1/...` changelist form handling, exact changelist resolve scope, post-mutation verification audit truthfulness, tagged P4 error semantics, generic-binary vs Unreal-package classification, manual final-action handoff metadata, and the real P4 `no file(s) to resolve` benign preview record.
+
+The final real P4 smoke was read-only: pending changelist list returned zero, the still-open A25 fixture reported `needsResolve=false`, `resolveStateUnknown=false`, and `submitReady=true`; no real `change -i`, `reopen`, or `resolve -am` was executed. Submit/revert/delete remain unreachable by product design.
+
+C3 Detailed Plan and Result are now historical evidence under `docs/Plans/Archive/`. The next primary stage is **real-project write-enabled dogfood**. Do not auto-start C4, M6, R5, broad Writer expansion, or another Source Control track without real dogfood evidence.
+
+> **Publication note — 2026-09-06:** the owner-local C1/C2/C3 multi-checkpoint development history was intentionally squashed for the public branch. The publication-safe implementation checkpoint is `5b705a7b693eff4af9ceb808df978f09e329dca9`. Earlier Track C hashes in Sections 0.9–1.2 are owner-local audit history and are not expected to resolve on the public branch. Raw P4 machine/user/client/depot inventory was removed from published probe evidence.
+
 ## 1. Mandatory Read Order for a New Chat / Agent
 
 Read in this order:
@@ -354,16 +438,15 @@ Read in this order:
 1. docs/Handoffs/UEAGENTKIT_CURRENT_DEVELOPMENT_HANDOFF_20260830.md
 2. docs/DEVELOPMENT_WORKFLOW.md
 3. docs/Plans/README.md
-4. docs/Plans/UEAGENTKIT_C1_C2_P4_MINIMUM_DOGFOOD_DETAILED_PLAN_20260903.md
-5. docs/Plans/UEAGENTKIT_P4_AGENT_OPERATION_BOUNDARY_DECISION_20260903.md
-6. docs/Plans/Archive/UEAGENTKIT_M5_L2_L3_STABLE_CONTEXT_INJECTION_RESULT_20260903.md
-7. docs/Plans/Archive/UEAGENTKIT_M4_HYBRID_RECALL_FTS5_VECTOR_RRF_RESULT_20260902.md
-8. docs/Plans/Archive/UEAGENTKIT_M3_DETERMINISTIC_L0_TO_L1_DISTILLATION_RESULT_20260902.md
-9. docs/Plans/Archive/UEAGENTKIT_M2_DETERMINISTIC_L0_AUTO_CAPTURE_RESULT_20260830.md
-10. docs/Plans/Archive/UEAGENTKIT_M1_MEMORY_EFFICIENCY_BASELINE_AND_BUDGET_RESULT_20260830.md
-11. docs/Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md
-12. docs/Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md
+4. docs/Plans/UEAGENTKIT_P4_AGENT_OPERATION_BOUNDARY_DECISION_20260903.md
+5. docs/Plans/Archive/UEAGENTKIT_C3_CHANGELIST_RESOLVE_AUDIT_RESULT_20260904.md
+6. docs/Plans/Archive/UEAGENTKIT_C1_C2_P4_MINIMUM_DOGFOOD_RESULT_20260903.md
+7. docs/Plans/Archive/UEAGENTKIT_M5_L2_L3_STABLE_CONTEXT_INJECTION_RESULT_20260903.md
+8. docs/Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md
+9. docs/Plans/UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md
 ```
+
+Historical completed Plans/Results are now under:```
 
 Historical completed Plans/Results are now under:
 
@@ -383,37 +466,36 @@ Do not reconstruct current project state from old Chat history when this handoff
 
 ### 2.1 Current development refs
 
-Repository housekeeping and remote synchronization were completed before M1 planning. M1-M5 and C1/C2 planning have now been integrated locally into `main` by fast-forward.
-
-Remote integration state after the authorized push:
+The public-ready Track C branch is rebuilt from current `origin/main` plus the owner-reviewed final Track C state. Pre-publication local checkpoints remain available only in the original local worktree as audit history.
 
 ```text
-main                           contains M1-M5 + C1/C2 planning + final status documentation
-origin/main                    synchronized with main after the authorized 2026-09-03 push
-feature/memory-context         ae307372961345cbe98c594e9cfd469da70e68a1  (merge source retained)
-origin/feature/memory-context  137c3a35e943f2c8e65f13dd8befe95aec3c6612
+main / origin/main                       fdf6b5c12aceaefb0e61478bee7a9eefdf5ade76
+feature/source-control-collaboration-publish
+                                         5b705a7b693eff4af9ceb808df978f09e329dca9  (public-safe C1-C3 feature checkpoint; no upstream yet)
+feature/source-control-collaboration      local pre-publication audit branch; do not push
 ```
 
-The active integration worktree is now on `main`. M5 is reviewed at `c0b01aa`; C1/C2 planning is committed at `1c7e2ff`; public/current status docs are synchronized. The next coding work should normally branch from current `main`. Always inspect live refs and fetch before modifying or pushing; never force-push to hide remote drift.
+The active publication worktree is `E:\WorkSpace\UEAgentKit-TrackC-Publish`. Its source/tests are normalized-content identical to the owner-reviewed C3 source state; only publication-safe probe/document redaction differs. Always fetch before the first push. Do not push the pre-publication audit branch because its history contains raw owner-local P4 environment evidence.
 
 ### 2.2 Registered worktrees
 
-Current registered Git worktrees are intentionally minimal:
+Current registered Git worktrees relevant to takeover:
 
 ```text
+E:\WorkSpace\UEAgentKit-TrackC-Publish
+  publication-ready Track C worktree
+  branch: feature/source-control-collaboration-publish
+
 E:\WorkSpace\UEAgentKit-Integration
-  active development worktree
-  branch: main
+  pre-publication Track C audit worktree
+  branch: feature/source-control-collaboration
+  keep local; do not push its raw-evidence history
 
 E:\WorkSpace\UEAgentKit
-  repository backing worktree
-  detached at the synchronized checkpoint
-  retains historical untracked CONOUT$
+  repository backing worktree / historical local evidence
 ```
 
-The old Writer, Knowledge Web, PlanReview, Performance, and RealtimeIO Git worktrees are no longer registered.
-
-Physical directories `E:\WorkSpace\UEAgentKit-Performance` and `E:\WorkSpace\UEAgentKit-RealtimeIO` may still exist because ignored `Output` / `Build` / `Backups` evidence was deliberately preserved. They are **not active repositories/worktrees** and must not be reused for development without an explicit cleanup decision.
+Old Writer, Knowledge Web, Performance, and RealtimeIO directories may still contain ignored evidence but are not active development bases unless current Git worktree facts say otherwise.
 
 ### 2.3 Current remote refs
 
@@ -889,7 +971,6 @@ New rule:
 ```text
 docs/Plans/
   README.md
-  UEAGENTKIT_C1_C2_P4_MINIMUM_DOGFOOD_DETAILED_PLAN_20260903.md
   UEAGENTKIT_P4_AGENT_OPERATION_BOUNDARY_DECISION_20260903.md
   UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md
   UEAGENTKIT_MIDTERM_EXECUTION_SPEC_20260827.md
@@ -991,9 +1072,9 @@ pyproject.toml
 M4 added `memory_vector.py` and explicit hybrid retrieval. M5 added `memory_injection.py`, schema v6, offline deterministic L2/L3 snapshots, and model-free automatic Task Context injection. Required dependencies remain empty; M1-M5 are now closed and their regression gates remain protected.
 
 
-### Source Control / active C1+C2 surface
+### Source Control / completed C1-C3 surface
 
-Expected new surface:
+Current surface:
 
 ```text
 src/ue_agent_kit/source_control.py
@@ -1003,7 +1084,7 @@ tests/python/test_source_control.py
 benchmarks/source_control/
 ```
 
-There is no existing product P4 provider implementation to preserve. The new layer must remain narrow: structured P4 operations only, no shell passthrough, no P4Python required dependency, and no submit/revert/delete capability.
+The completed layer remains narrow: structured `p4 -G` operations only, no shell/generic argv passthrough, no P4Python required dependency, and no submit/revert/delete capability. C3 adds owned pending-CL preparation, exact-file reopen, bounded conflict-safe text `resolve -am`, durable audit, and human final-action metadata; `.uasset/.umap` automatic content resolve remains unavailable.
 
 ### W5 / scale
 
@@ -1015,7 +1096,7 @@ Plugin/UEAgentKit/Source/UEAgentKitEditor/Private/PerformanceFixtureCommandlet.c
 
 ## 15. Active Track and deferred project tracks
 
-**Track M required usability stages are complete through M5. Track C1/C2 is active next.**
+**Track M required usability stages are complete through M5. Track C1-C3 is complete; real-project write-enabled dogfood is active next.**
 
 The Master/Midterm documents still define broader direction, but older Track C fail-closed/no-checkout wording is superseded by the 2026-09-03 P4 boundary decision.
 
@@ -1032,24 +1113,25 @@ M6 optional symbolic compression        deferred / data-driven / do not auto-sta
 
 M1-M5 regression gates remain persistent. M6 is not a prerequisite for dogfood.
 
-### Track C — Source Control / P4 awareness (ACTIVE NEXT)
+### Track C — Source Control / P4 collaboration (ACTIVE)
 
 ```text
-C1 Source Control Awareness             READY FOR IMPLEMENTATION
-C2 Advisory + checkout/local-write      READY FOR IMPLEMENTATION
-C3 Changelist Preparation + Resolve     deferred until minimum dogfood layer
+C1 Source Control Awareness             COMPLETE / OWNER REVIEW PASS
+C2 Advisory + checkout/local-write      COMPLETE / OWNER REVIEW PASS
+C3 Changelist Preparation + Resolve     COMPLETE / OWNER REVIEW PASS / U0
+A27 real C3 mutation                    OWNER-FIXTURE BLOCKED
 C4 optional Memory integration          deferred
 ```
 
-P4 collaboration state is advisory; checkout/edit and explicit local writable override are allowed. Proven-safe exact-file sync may be assisted. Submit/revert/P4-managed delete are permanently human-only. Resolve is allowed by owner policy but belongs to C3, not the minimum C1/C2 slice.
+P4 collaboration state remains advisory. C3 may create/update current-user/current-client pending changelists, reopen exact already-opened files, and perform exact conflict-free text `resolve -am`. `.uasset/.umap` automatic content resolve is not part of this C3 scope. Submit/revert/P4-managed delete remain permanently human-only.
 
 ### Track X — deeper UE capabilities
 
-Deferred while C1/C2 is active and until real-project dogfood identifies the next useful capability.
+Deferred by default. Real-project dogfood now determines whether any deeper UE capability gap is valuable enough to open.
 
 ### Track D — maintenance / engineering quality
 
-Deferred unless a concrete maintenance blocker prevents C1/C2. Test-tiering and Git housekeeping prerequisites are already complete.
+Deferred unless a concrete maintenance blocker prevents dogfood/integration. Test-tiering and Git housekeeping prerequisites are already complete.
 
 ## 16. Performance / fixture boundary
 
@@ -1077,32 +1159,24 @@ avoid unnecessary cold-reset rebuilds
 
 Performance convenience may never weaken product correctness gates.
 
-## 17. Exact takeover procedure for the next Track C1/C2 execution Agent
+## 17. Exact takeover procedure for the next real-project dogfood Agent
 
 Before making any change:
 
 ```text
-1. use E:\WorkSpace\UEAgentKit-Integration.
-2. inspect git status --short --branch, HEAD, upstream and worktrees.
-3. start from current main (normally create a fresh Track C feature branch); confirm C1/C2 planning checkpoint 1c7e2ff is an ancestor.
-4. read this handoff.
-5. read docs/DEVELOPMENT_WORKFLOW.md.
-6. read docs/Plans/README.md.
-7. read docs/Plans/UEAGENTKIT_C1_C2_P4_MINIMUM_DOGFOOD_DETAILED_PLAN_20260903.md.
-8. read docs/Plans/UEAGENTKIT_P4_AGENT_OPERATION_BOUNDARY_DECISION_20260903.md.
-9. confirm M5 checkpoint c0b01aa is an ancestor; do not reopen M6.
-10. begin with C1-0 actual P4 capability probe; prefer structured -G output if proven.
-11. do not implement arbitrary P4 command passthrough or add P4Python as a required dependency.
-12. P4 collaboration state is advisory only; never turn it into a Writer hard-block.
-13. submit/revert/delete must remain absent from Agent capabilities, including private runner allowlists.
-14. use fake P4 fixtures for mutation matrices; real p4 edit requires an owner-designated safe mapped fixture.
-15. real mutation acceptance must stop before cleanup; the human performs any final revert.
-16. C1/C2 required closure is U0: do not start UE/UBT.
-17. use focused tests during edits, one affected-domain G1, one final G2.
-18. do not push/rebase/tag/release/version-change unless separately authorized.
+1. use E:\WorkSpace\UEAgentKit-TrackC-Publish for publication/integration review.
+2. inspect git status --short --branch, HEAD, upstream, worktrees and fetch origin.
+3. confirm branch feature/source-control-collaboration-publish contains public Track C checkpoint 5b705a7.
+4. confirm origin/main is still fdf6b5c12aceaefb0e61478bee7a9eefdf5ade76 or inspect any newer remote movement before proceeding.
+5. read this handoff, docs/DEVELOPMENT_WORKFLOW.md, docs/Plans/README.md and the P4 boundary decision.
+6. M1-M5 and C1-C3 are complete; do not reopen M6/C4/R5 automatically.
+7. begin real-project dogfood with read-only project/P4 inspection before any mutation.
+8. any real write requires an owner-designated target and the existing Policy/Revision/Writer safety chain.
+9. submit/revert/P4-managed delete remain human-only.
+10. A27 may be satisfied only if the owner explicitly designates a real C3 mutation fixture during dogfood.
+11. do not push the pre-publication feature/source-control-collaboration branch; it preserves raw local P4 audit evidence.
+12. use focused tests during changes, one affected-domain G1, and one G2 at closure.
 ```
-
-The current configured local P4 server/client is suitable for read-only capability smoke, but the UEAgentKit Git worktree itself is not depot-backed.
 
 ## 18. Prohibited implicit actions
 
@@ -1150,30 +1224,18 @@ Archive documents preserve their historical stage wording. Current status is det
 
 ## 20. Next local-Agent handoff
 
-M1-M5 are closed and integrated into `main`; M6 is optional and must not auto-start. The next coding Agent should branch from current `main` and execute **C1/C2 — P4 Minimum Dogfood** from:
+M1-M5 and C1-C3 are closed and owner-reviewed. M6/C4/R5 remain optional/deferred. The next Agent should **not** implement another planned capability by default; it should begin real-project write-enabled dogfood from the current stack.
 
 ```text
-docs/Plans/UEAGENTKIT_C1_C2_P4_MINIMUM_DOGFOOD_DETAILED_PLAN_20260903.md
+publication worktree       E:\WorkSpace\UEAgentKit-TrackC-Publish
+branch                     feature/source-control-collaboration-publish
+public Track C checkpoint  5b705a7b693eff4af9ceb808df978f09e329dca9
+base                       fdf6b5c12aceaefb0e61478bee7a9eefdf5ade76
+source-control G1          94 / 94 PASS / 6.699 s
+final portable G2          1062 / 1062 PASS / 101.414 s / 3 skipped
+UE level for Track C       U0
+A27                        OWNER-FIXTURE BLOCKED
+push                       none yet
 ```
 
-Product baseline:
-
-```text
-c0b01aac4201710466ae9c9a5ee39f8965704b36
-```
-
-The Agent should report only:
-
-```text
-verified Git facts
-actual P4 CLI/server capability probe facts
-structured provider/parser design
-warning/readiness behavior
-checkout/local writable override/safe-sync evidence
-proof that submit/revert/delete capabilities are absent
-real P4 read-only smoke and owner-assisted mutation status
-G0/G1/G2 counts and elapsed time
-UE runs (expected 0)
-```
-
-Routine implementation/debugging should proceed autonomously inside the frozen Plan and P4 boundary decision. Stop for owner input only if a safe real-mutation fixture is required or an actual architecture/safety conflict appears.
+The first remote push must target a feature branch explicitly and allow GitHub Actions to validate Python 3.11/3.12 before any main integration. The original local `feature/source-control-collaboration` branch is audit-only and must not be pushed because it contains raw owner-local P4 probe history.
