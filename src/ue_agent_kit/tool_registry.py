@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-ToolGroup = Literal["query", "memory", "live-read", "live-action", "realtime", "workflow"]
+ToolGroup = Literal["query", "memory", "live-read", "live-action", "realtime", "workflow", "source-control"]
 AnnotationKind = Literal["read", "planning", "destructive"]
 
 
@@ -183,6 +183,12 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_rollback_patch", "workflow", "destructive"),
     ToolDefinition("ue_create_change_set", "workflow", "planning"),
     ToolDefinition("ue_get_change_set", "workflow", "read"),
+    ToolDefinition("ue_source_control_status", "source-control", "read"),
+    ToolDefinition("ue_source_control_prepare_write", "source-control", "planning"),
+    ToolDefinition("ue_source_control_changelists", "source-control", "read"),
+    ToolDefinition("ue_source_control_prepare_changelist", "source-control", "planning"),
+    ToolDefinition("ue_source_control_resolve_status", "source-control", "read"),
+    ToolDefinition("ue_source_control_resolve_text", "source-control", "planning"),
 )
 
 TOOL_DEFINITIONS_BY_NAME = {definition.name: definition for definition in TOOL_REGISTRY}
@@ -192,6 +198,9 @@ LIVE_EDITOR_TOOL_NAMES = [
     definition.name for definition in TOOL_REGISTRY if definition.group in {"live-read", "live-action", "realtime"}
 ]
 WORKFLOW_TOOL_NAMES = [definition.name for definition in TOOL_REGISTRY if definition.group == "workflow"]
+SOURCE_CONTROL_TOOL_NAMES = [
+    definition.name for definition in TOOL_REGISTRY if definition.group == "source-control"
+]
 HIGH_LEVEL_WRITE_TOOL_NAMES = [definition.name for definition in TOOL_REGISTRY if definition.high_level_change]
 LIVE_EDITOR_METHODS = {
     definition.name: definition.live_method
@@ -206,6 +215,7 @@ def tool_definitions_for_mode(
     live_editor_enabled: bool,
     workflow_enabled: bool,
     memory_enabled: bool = False,
+    source_control_enabled: bool = False,
 ) -> list[ToolDefinition]:
     enabled_groups: set[ToolGroup] = {"query"}
     if memory_enabled:
@@ -214,6 +224,8 @@ def tool_definitions_for_mode(
         enabled_groups.update({"live-read", "live-action", "realtime"})
     if workflow_enabled:
         enabled_groups.add("workflow")
+    if source_control_enabled:
+        enabled_groups.add("source-control")
     return [definition for definition in TOOL_REGISTRY if definition.group in enabled_groups]
 
 
@@ -222,6 +234,7 @@ def tool_names_for_mode(
     live_editor_enabled: bool = False,
     workflow_enabled: bool = False,
     memory_enabled: bool = False,
+    source_control_enabled: bool = False,
 ) -> list[str]:
     return [
         definition.name
@@ -229,6 +242,7 @@ def tool_names_for_mode(
             live_editor_enabled=live_editor_enabled,
             workflow_enabled=workflow_enabled,
             memory_enabled=memory_enabled,
+            source_control_enabled=source_control_enabled,
         )
     ]
 
@@ -238,6 +252,7 @@ def tool_descriptors_for_mode(
     live_editor_enabled: bool,
     workflow_enabled: bool,
     memory_enabled: bool = False,
+    source_control_enabled: bool = False,
 ) -> list[dict[str, object]]:
     return [
         {
@@ -249,5 +264,6 @@ def tool_descriptors_for_mode(
             live_editor_enabled=live_editor_enabled,
             workflow_enabled=workflow_enabled,
             memory_enabled=memory_enabled,
+            source_control_enabled=source_control_enabled,
         )
     ]

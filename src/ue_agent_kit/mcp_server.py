@@ -55,6 +55,7 @@ from .mcp_live_tools import register_live_read_tools
 from .mcp_memory_tools import register_memory_tools
 from .mcp_query_tools import register_query_tools
 from .mcp_realtime_tools import register_realtime_tools
+from .mcp_source_control_tools import register_source_control_tools
 from .mcp_workflow_tools import register_workflow_tools
 from .realtime_tasks import register_batch_task_tools
 from .memory_service import ProjectMemoryService, ProjectMemoryServiceError
@@ -87,10 +88,12 @@ from .verification_trust import (
     VERIFICATION_TRUST_SCHEMA_VERSION,
     VerificationTrustError,
 )
+from .source_control import P4SourceControlService
 from .tool_registry import (
     HIGH_LEVEL_WRITE_TOOL_NAMES,
     LIVE_EDITOR_TOOL_NAMES,
     MEMORY_TOOL_NAMES,
+    SOURCE_CONTROL_TOOL_NAMES,
     tool_descriptors_for_mode,
 )
 from .snapshot_lifecycle import (
@@ -137,6 +140,14 @@ STRICT_SEMANTIC_DIFF_ARGUMENT_TOOL_NAMES = ("ue_analyze_semantic_diff",)
 STRICT_VERIFICATION_TRUST_ARGUMENT_TOOL_NAMES = (
     "ue_build_verification_plan",
     "ue_evaluate_trust_verdict",
+)
+STRICT_SOURCE_CONTROL_ARGUMENT_TOOL_NAMES = (
+    "ue_source_control_status",
+    "ue_source_control_prepare_write",
+    "ue_source_control_changelists",
+    "ue_source_control_prepare_changelist",
+    "ue_source_control_resolve_status",
+    "ue_source_control_resolve_text",
 )
 
 
@@ -273,11 +284,13 @@ def _capabilities_response(
     workflow_service: PatchWorkflowService | None,
     live_editor_service: LiveEditorBridgeService | None,
     memory_service: ProjectMemoryService | None,
+    source_control_service: P4SourceControlService | None = None,
 ) -> dict[str, Any]:
     write_tools_enabled = workflow_service is not None
     commit_enabled = bool(workflow_service and workflow_service.config.commit_enabled)
     live_editor_enabled = live_editor_service is not None
     memory_enabled = memory_service is not None
+    source_control_enabled = source_control_service is not None
     memory_status = memory_service.status() if memory_service is not None else None
     verification_evidence_status = (
         workflow_service.verification_evidence_store.status()
@@ -307,10 +320,25 @@ def _capabilities_response(
             live_editor_enabled=live_editor_enabled,
             workflow_enabled=write_tools_enabled,
             memory_enabled=memory_enabled,
+            source_control_enabled=source_control_enabled,
         ),
         "operations": {
             "available": write_tools_enabled,
             "items": get_operation_registry() if write_tools_enabled else [],
+        },
+        "sourceControl": {
+            "configured": source_control_enabled,
+            "advisory": True,
+            "tools": SOURCE_CONTROL_TOOL_NAMES if source_control_enabled else [],
+            "submitCapability": False,
+            "revertCapability": False,
+            "deleteCapability": False,
+            "arbitraryCommandExecution": False,
+            "shellPassthrough": False,
+            "providerUnavailableDegradesToAdvisory": True,
+            "pendingChangelistPreparation": source_control_enabled,
+            "boundedTextResolve": source_control_enabled,
+            "binaryAutomaticResolve": False,
         },
         "liveEditor": {
             "configured": live_editor_enabled,
@@ -1178,6 +1206,7 @@ def create_mcp_server(
     workflow_service: PatchWorkflowService | None = None,
     live_editor_service: LiveEditorBridgeService | None = None,
     memory_service: ProjectMemoryService | None = None,
+    source_control_service: P4SourceControlService | None = None,
     audit_report_root: Path | None = None,
 ):
     if FastMCP is None or ToolAnnotations is None:
@@ -1262,6 +1291,7 @@ def create_mcp_server(
             workflow,
             live,
             memory_service,
+            source_control_service,
         ),
         project_status_response=lambda index, workflow, live: _project_status_response(
             index,
@@ -1288,6 +1318,15 @@ def create_mcp_server(
         error_response=_error_response,
     )
     _enforce_strict_tool_arguments(server, STRICT_TASK_CONTEXT_ARGUMENT_TOOL_NAMES)
+    if source_control_service is not None:
+        register_source_control_tools(
+            server=server,
+            source_control_service=source_control_service,
+            read_annotations=read_annotations,
+            tool_annotations_type=ToolAnnotations,
+            error_response=_error_response,
+        )
+        _enforce_strict_tool_arguments(server, STRICT_SOURCE_CONTROL_ARGUMENT_TOOL_NAMES)
     if memory_service is not None:
         register_memory_tools(
             server=server,
@@ -1372,6 +1411,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enable-write-tools", action="store_true")
     parser.add_argument("--enable-commit-tools", action="store_true")
     parser.add_argument("--enable-live-editor", action="store_true")
+    parser.add_argument("--enable-source-control", action="store_true")
     parser.add_argument("--engine-root", type=Path)
     parser.add_argument("--project", dest="project_path", type=Path)
     parser.add_argument("--policy", dest="policy_path", type=Path)
@@ -1518,6 +1558,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             if workflow_config is not None
             else None
         )
+        source_control_service: P4SourceControlService | None = None
+        if args.enable_source_control:
+            source_control_service = P4SourceControlService(
+                project_root=args.project_path,
+                audit_report_root=args.work_root,
+            )
         if args.check:
             payload: dict[str, Any] = {
                 "schemaVersion": "1.0",
@@ -1528,6 +1574,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "commitToolsEnabled": bool(workflow_service and workflow_service.config.commit_enabled),
                 "liveEditorEnabled": live_editor_service is not None,
                 "projectMemoryEnabled": memory_service is not None,
+                "sourceControlEnabled": source_control_service is not None,
             }
             if workflow_service is not None:
                 payload["workflow"] = workflow_service.status()
@@ -1547,6 +1594,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "countsByType": memory_status.counts_by_type,
                     "countsByStatus": memory_status.counts_by_status,
                 }
+            if source_control_service is not None:
+                payload["sourceControl"] = source_control_service.provider_capabilities()
             print(json.dumps(payload, ensure_ascii=False, indent=2))
             return 0
         server = create_mcp_server(
@@ -1554,6 +1603,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             workflow_service=workflow_service,
             live_editor_service=live_editor_service,
             memory_service=memory_service,
+            source_control_service=source_control_service,
             audit_report_root=args.work_root,
         )
         server.run(transport="stdio")

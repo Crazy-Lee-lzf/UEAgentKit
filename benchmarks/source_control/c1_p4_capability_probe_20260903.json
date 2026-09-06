@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "1.0",
+  "probe": "c1-p4-capability-read-only-20260903",
+  "probeDate": "2026-09-03",
+  "publicationSanitized": true,
+  "note": "Publication-safe summary derived from the owner-local read-only C1-0 P4 probe. Machine, user, client, server-root, depot, and fixture identifiers are intentionally omitted.",
+  "provider": {
+    "available": true,
+    "clientVersion": "P4/NTX64/2025.1/2810567 (2025/08/05)",
+    "serverVersion": "P4D/NTX64/2025.1/2810567 (2025/08/05)",
+    "unicode": "enabled",
+    "caseHandling": "insensitive",
+    "clientAllWrite": false
+  },
+  "structuredProtocol": {
+    "p4GSupported": true,
+    "encoding": "consecutive Python marshal dictionary records",
+    "rawValuesObservedAsBytes": true,
+    "parseUntilEof": true,
+    "taggedErrorsMayUseExitCodeZero": true,
+    "stateMustUseRecordsNotExitCodeAlone": true
+  },
+  "capabilityFacts": {
+    "mappedExactFile": true,
+    "unmappedExactFileReturnsTaggedError": true,
+    "pathWithSpacesRoundTripsViaArgvArray": true,
+    "fstatMappedProvidesHaveAndHeadRevision": true,
+    "openedAllProvidesUserClientActionChangeType": true,
+    "localChangeProbeCommands": [
+      "diff -se",
+      "diff -sd"
+    ],
+    "safeSyncPreview": "sync -n",
+    "fstatDashAUnsupported": true,
+    "otherOpenFactsSource": "opened -a",
+    "nonOpenedSyncedFileObservedReadOnly": true,
+    "providerUnavailableProbeFailsClosed": true
+  },
+  "safety": {
+    "realMutationDuringCapabilityProbe": false,
+    "credentialsOrTicketsCaptured": false,
+    "rawEnvironmentInventoryPublished": false
+  }
+}

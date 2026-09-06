@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "1.0",
+  "probe": "c3-p4-capability-read-only-20260904",
+  "occurredAtUtc": "2026-09-04T13:54:02+00:00",
+  "publicationSanitized": true,
+  "note": "Publication-safe summary derived from the owner-local read-only C3 probe. Provider identity and fixture paths are intentionally omitted.",
+  "provider": {
+    "available": true,
+    "serverVersion": "P4D/NTX64/2025.1/2810567 (2025/08/05)",
+    "currentUserAndClientResolved": true
+  },
+  "realMutations": "none",
+  "readOnlySmoke": {
+    "statusFixture": "<OWNER_FIXTURE>",
+    "status": {
+      "mapped": true,
+      "haveRev": "1",
+      "headRev": "1",
+      "openedByCurrentClient": true,
+      "action": "edit",
+      "change": "default",
+      "submitReady": true
+    },
+    "changelists": {
+      "ok": true,
+      "readOnly": true,
+      "pendingCount": 0
+    },
+    "resolvePreview": {
+      "needsResolve": false,
+      "resolveStateUnknown": false,
+      "mergeableText": false,
+      "binaryPackage": false
+    }
+  },
+  "safety": {
+    "credentialsOrTicketsCaptured": false,
+    "rawEnvironmentInventoryPublished": false
+  }
+}
