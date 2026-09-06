@@ -160,8 +160,8 @@ Ideas not to copy directly:
 Do not target short-term parity with “37 tools / 200+ operations.” Instead:
 
 1. Complete the shared Live Transaction, Undo/Discard, Authorized Save, and Evidence foundation.
-2. Complete 0.7.0 Context Packs, value-source tracing, execution tracing, impact analysis, and semantic diffs.
-3. Add the highest-frequency Reforge write domains.
+2. 0.8.0 provides Context Packs, impact analysis, semantic diffs, and evidence-backed verification workflows.
+3. Add the highest-frequency write domains observed in real projects.
 4. Require real UE5.6 regression, failure recovery, and independent verification for each new write domain.
 5. Expand into graph, animation, actor, and PIE automation only after those foundations are stable.
 

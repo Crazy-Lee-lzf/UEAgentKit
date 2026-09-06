@@ -1,6 +1,5 @@
 # 角色浮空（Ground Contact）诊断工具
 
-> 分支：`feature/live-editor-realtime-io`
 > 适用引擎：UE 5.6
 > 状态：只读诊断，已实现
 
@@ -38,7 +37,7 @@ ue_diagnose_character_ground_contact
 | `rightFootBone` | 右脚骨骼名，默认 `foot_r` |
 | `loadIfNeeded` | 允许按需 LoadObject |
 
-> 骨骼名需按目标骨架填写。心月狐骨架（`SK_XinYueHu_Skeleton`）为 Biped 命名：
+> 骨骼名需按目标骨架填写。示例角色骨架（`SK_ExampleCharacter_Skeleton`）为 Biped 命名：
 > `Root` / `Bip001Pelvis` / `Bip001LFoot` / `Bip001RFoot`。
 
 ---
@@ -110,8 +109,8 @@ insufficient-context        数据不足或未检测到浮空源
 测试资产：
 
 ```text
-Character:  /Game/Characters/XinYueHu/Blueprints/BP_XinYueHu_Character
-Animation:  /Game/Characters/XinYueHu/Animations/Retargeted/MM_Idle_XinYueHu
+Character:  /Game/Characters/ExampleCharacter/Blueprints/BP_ExampleCharacter_Character
+Animation:  /Game/Characters/ExampleCharacter/Animations/Retargeted/MM_Idle_ExampleCharacter
 Bones:      Root / Bip001Pelvis / Bip001LFoot / Bip001RFoot
 ```
 

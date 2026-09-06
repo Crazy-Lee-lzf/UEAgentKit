@@ -703,7 +703,7 @@ if ($AfterFailures.revision.value -ne $ResetRevision)
 
 $Summary = [ordered]@{
     schemaVersion = "1.0"
-    toolVersion = "0.7.0"
+    toolVersion = "0.8.0"
     projectPath = $ProjectPath
     assetPath = $AssetPath
     assetClass = $AssetClass

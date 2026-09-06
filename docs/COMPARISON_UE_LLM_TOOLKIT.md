@@ -200,8 +200,8 @@ Agent 选择 Tool/Operation
 UE Agent Kit 不应以短期追平“37 Tool / 200+ Operation”为目标。更合理的顺序是：
 
 1. 完成 Live Transaction、Undo/Discard、Authorized Save 和 Evidence 的通用基础层。
-2. 完成 0.7.0 Context Pack、值来源、执行链、影响分析和语义 Diff。
-3. 选择 Reforge 中最高频的写入域，例如 Data Asset、Material Instance、DataTable、Enhanced Input 和窄范围 Blueprint 修改。
+2. 0.8.0 已提供 Context Pack、影响分析、语义 Diff 和证据化验证链。
+3. 选择真实项目中最高频的写入域，例如 Data Asset、Material Instance、DataTable、Enhanced Input 和窄范围 Blueprint 修改。
 4. 每个新写入域都要求真实 UE5.6 回归、失败恢复和独立验证。
 5. 最后再考虑 Graph、Animation、Actor 和 PIE 自动化等更宽能力。
 

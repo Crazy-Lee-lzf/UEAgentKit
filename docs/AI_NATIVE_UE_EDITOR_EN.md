@@ -122,8 +122,8 @@ Undo validates that the transaction still matches, the target was not subsequent
 
 ## 9. Branch ownership
 
-- `feature/live-editor-realtime-io`: live context, real-time CRUD, batch tasks, runtime diagnostics, Change Sets, and transactions.
-- `feature/memory-context`: Knowledge Tree, Active Work, Context Packs, evidence, and durable project understanding.
+- **Live Editor / Writer**: live context, controlled realtime writes, batch tasks, runtime diagnostics, Change Sets, and transactions.
+- **Project Memory**: Knowledge Tree, Active Work, Context Packs, evidence, and durable project understanding.
 - `main`: stable integration baseline for verified shared contracts and capabilities.
 
 The tracks connect through shared Task Context, Change Set, Evidence, Asset Identity, and Revision contracts. Shared contracts should land in `main` first and then be synchronized into both feature branches.

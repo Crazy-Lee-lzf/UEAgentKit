@@ -1,505 +1,143 @@
-# UE Agent Kit 项目现状
+# UE Agent Kit 0.8.0 能力状态
 
+当前已发布版本：**0.8.0**
+目标环境：**Unreal Engine 5.6 / Windows / Python 3.11–3.12**
 
 
-更新时间：2026-09-06
+## 产品定位
 
+UE Agent Kit 是 Unreal Engine 的**项目知识层 + 受控修改工作流**，重点是：
 
+1. 把 Unreal 资产、Blueprint 语义、引用关系和 Editor 状态转换为稳定、可搜索的数据。
+2. 为 AI Agent 提供项目上下文、影响分析和验证证据。
+3. 通过 Policy / Revision / Transaction / Save / Verify 等门禁执行窄范围写入。
+4. 保留可追踪的 Project Memory 和变更证据。
 
-本文描述已发布的 `main` 基线及当前开发状态，支持 Unreal Engine 5.6。最新正式发布仍为 **0.7.0**；开发线已经完成 Track W / Writer、Track V / Knowledge Web、W+V G3、Track M 必要阶段 M1–M5，以及 Track C 的 C1–C3。C3 owner-reviewed closure checkpoint 为 `5b705a7`，最终 Source Control G1 **94/94 PASS**、portable full **1062/1062 PASS（17 skipped）**，UE/UBT 为 U0/0。M6 与 C4 保持 optional/deferred。当前下一主线是 **真实商业项目 write-enabled dogfood**；权威入口见 [`Plans/README.md`](Plans/README.md)、[`Plans/UEAGENTKIT_P4_AGENT_OPERATION_BOUNDARY_DECISION_20260903.md`](Plans/UEAGENTKIT_P4_AGENT_OPERATION_BOUNDARY_DECISION_20260903.md) 与 [`Plans/Archive/UEAGENTKIT_C3_CHANGELIST_RESOLVE_AUDIT_RESULT_20260904.md`](Plans/Archive/UEAGENTKIT_C3_CHANGELIST_RESOLVE_AUDIT_RESULT_20260904.md)。
+它不是通用远程桌面，也不是任意 Unreal Python / Shell 执行器。
 
+## 读取能力
 
+### 离线项目读取
 
-## 0. 2026-09-03 开发线检查点
+- Asset Registry 可见资产目录和 Package 信息。
+- Static Mesh、Skeletal Mesh、Skeleton、Physics Asset、Material、Material Instance、Texture、Animation、DataTable、Data Asset、Niagara、World 等专用读取。
+- Blueprint Graph / Node / Pin、变量、函数、宏、接口、Cast、Delegate 等语义。
+- Canonical JSON、BPCTX/1、SQLite/FTS5 索引。
+- Asset / Symbol / Reference 搜索与反向引用查询。
+- Package SHA-256 Revision 与索引新鲜度比较。
 
-```text
-Published product                    0.7.0 / UE5.6 (unchanged)
-Track W / Writer                     COMPLETE
-Track V / Knowledge Web             COMPLETE
-W + V integration                   G3 PASS
-Track M required usability stages   COMPLETE through M5
-  M1-M5                             COMPLETE / REVIEWED / U0 / G2 PASS
-  M6                                optional / do not auto-start
-Track C / P4                         COMPLETE through C3
-  C1 Source Control Awareness       COMPLETE / OWNER REVIEW PASS
-  C2 Advisory + local-write assist  COMPLETE / OWNER REVIEW PASS
-  C3 CL preparation / Resolve       COMPLETE / OWNER REVIEW PASS / U0
-    closure checkpoint              5b705a7
-    source-control G1               94 / 94 PASS
-    portable full                   1062 / 1062 PASS / 17 skipped
-    A27 real C3 mutation            OWNER-FIXTURE BLOCKED
-  C4 Memory integration             optional / deferred
-Next primary stage                  real-project write-enabled dogfood
-```
+### Live Editor 读取
 
-P4 的 owner boundary 是 **advisory + human final authority**：P4 lock/checkout/behind/unresolved 等协作状态可产生 warning / strong warning / readiness，但不单独 hard-block UEAgentKit 的本地 Writer 测试。C1–C3 已实现状态读取、`p4 edit`、显式 local writable override、严格 safe sync、当前 user/client 的 pending changelist 准备、exact-file `reopen`、bounded conflict-free text `resolve -am` 与 durable audit/human handoff；`.uasset/.umap` 自动内容 Resolve 仍禁止。**Submit / Revert / P4-managed Delete 永久人工执行**。
+- Editor / PIE/SIE / World / Selection。
+- Open Assets 和 Dirty Packages。
+- Output Log 和 Blueprint 编译诊断。
+- 精确资产 Live Inspect，不为只读查询主动加载无关资产。
+- 当前 Blueprint Graph 和选中 Node。
 
-## 1. 当前定位
+### Project Memory / Knowledge
 
+- Rule、Finding、Decision、Known Issue、Task Record、Runtime Evidence。
+- Revision-aware stale / superseded / conflicted 状态。
+- 确定性 L0 capture 和 L1 distillation。
+- FTS5 召回，以及可选的 Vector + RRF hybrid recall。
+- 持久化 L2/L3 项目上下文和有界自动注入。
+- 只读 Knowledge Web。
 
+## 写入能力
 
-UE Agent Kit 不是“让 AI 任意遥控 Unreal Editor”的通用自动化层，而是面向 AI Agent 的 Unreal Engine **项目智能与受控修改层**：
+### Blueprint
 
+支持已注册的窄范围操作，例如变量默认值、组件属性、Pin 默认值和描述。写入受 Policy / Revision / Editor 状态约束，并支持 Transaction、Undo/Discard、显式 Save 和 Verify。
 
+### Data Asset
 
-1. 把二进制资产、Blueprint 语义、引用关系和编辑器运行状态转成稳定、可搜索的数据。
+- 标量属性。
+- Object / Class / Soft Object / Soft Class 引用。
+- Struct / Array / Set / Map 完整值。
 
-2. 让 Agent 在修改前获得可追溯的项目上下文，而不是只依赖临时截图、日志或猜测。
+### Material Instance
 
-3. 对写入执行 Policy、Revision、Plan、Dry Run、显式确认、备份、验证和 rollback 门禁。
+- Scalar
+- Vector
+- Texture
+- Static Switch
 
-4. 用 Revision-aware Project Memory 保存规则、发现、决策、任务结论与证据，并在资产变化后自动失效旧结论。
+### DataTable
 
+- 单元格。
+- 多字段 Row 更新。
+- Add / Remove / Rename Row。
 
+### Animation
 
-因此，项目当前更接近“安全的 UE 项目知识层 + 修改工作流”，而不是覆盖所有编辑器操作的远程控制台。
+提供有限的 AnimSequence 实时诊断/修复、Additive Base Pose、比例修复、批处理和重定向辅助 Tool。它不是完整的动画资产编辑器替代品。
 
+## Agent 工作流能力
 
+- Task Context。
+- Relevant Asset Discovery。
+- Impact Analysis。
+- Change Set。
+- Semantic Diff。
+- Verification Plan。
+- Trust Verdict。
+- Authorized Save / Strong Verify。
+- Recovery / rollback evidence。
 
-## 2. 当前规模
+## P4 / Perforce
 
+Source Control 为 opt-in 功能。
 
+支持：
 
-```text
+- mapping / opened / lock / owner / client / have / head 查询；
+- exact-file `p4 edit`；
+- 受限 safe sync；
+- pending changelist 查询/创建/描述更新；
+- exact-file `reopen`；
+- resolve preview；
+- 满足条件的普通文本 `resolve -am`；
+- durable audit receipt。
 
-当前开发线（Source Control 默认关闭）：
+不支持并且不计划通过通用入口绕过：
 
-模式                 基础            + Memory
+- Agent-side P4 Submit；
+- P4 Revert；
+- P4-managed Delete；
+- generic P4 command passthrough；
+- `.uasset/.umap` 自动 accept yours/theirs 或自动内容 Resolve。
 
-Offline                   10              24
+## MCP Tool 规模
 
-Live                      43              57
+Source Control 默认关闭。0.8.0 当前组合模式为：
 
-Workflow-only             67              81
+| 模式 | 基础 | + Memory | + Source Control | + Memory + Source Control |
+|---|---:|---:|---:|---:|
+| Offline | 10 | 24 | 16 | 30 |
+| Live | 43 | 57 | 49 | 63 |
+| Workflow-only | 67 | 81 | 73 | 87 |
+| Live + Workflow | 100 | 114 | 106 | 120 |
 
-Live + Workflow          100             114
+Tool 数量只是接口规模，不代表每个 Tool 都会修改资产；大量 Tool 是只读查询、规划、验证和状态读取。
 
-启用 opt-in Source Control 后每种模式增加 6 个 Tool：Offline 16/30、Live 49/63、Workflow-only 73/87、Live+Workflow 106/120（无 Memory / +Memory）。发布版 0.7.0 仍保持其 release-time 10/22、43/55、60/72、93/105 计数。
+## 明确不支持的通用能力
 
-```
+- 任意 Blueprint Graph Node CRUD / 自动布线。
+- 任意 Level Actor Spawn/Delete/Transform/Property 编辑。
+- Material Graph / Niagara / Sequencer / Control Rig 通用写入。
+- PIE 输入注入和录制回放系统。
+- 任意 Asset Import / Duplicate / Rename / Delete / Migrate。
+- 任意 Console / Python / Shell / UObject Method 执行。
+- 自动 Save All。
 
+## 安全模型
 
+核心原则：
 
-Tool 数量只表示 MCP 接口数量，不等同于 Unreal Operation 数量。当前 Workflow 包含 12 个高层安全写入入口、底层 Patch 工作流、Live Editor Write、授权保存、验证、索引刷新和 rollback。
-
-
-
-0.8 capability closeout 历史门禁基线（2026-08-23）：
-
-```text
-Portable unittest            696 passed
-Python full suite             739 passed
-JSON Schemas / Patch examples 3 / 16
-Ruff / compileall             passed
-PowerShell parser             61 / 61
-R4.1 raw summary --check      passed
-Tool / Operation audit        105 / 18
-UTF-8 no BOM / CRLF           passed
-C++ changed                   0
-Direct Build                  not triggered
-```
-
-当前 `feature/live-writer-expansion` 的 W3 收口基线（2026-08-27）：
-
-```text
-Python full suite             712 / 712 passed
-ValidateRelease               0.7.0 passed
-Ruff / compileall             passed
-UE5.6 Direct Build            passed
-git diff --check              passed
-W3 real acceptance            C0-C6 PASS
-```
-
-测试数量是阶段证据，不作为未来分支永久固定值。
-
-## 3. 已实现的读取能力
-
-
-
-### 3.1 离线项目读取
-
-
-
-- 资产目录：Static Mesh、Skeletal Mesh、Material、Texture、Animation、DataTable、Niagara、World 等 Asset Registry 可见资产。
-
-- Blueprint 语义：Graph、Node、Pin、连接、变量读写、函数、宏、接口调用、Dynamic Cast、Event Dispatcher 等。
-
-- Canonical JSON 与 BPCTX/1：为稳定比较、索引和 AI 上下文提供两种输出层。
-
-- 资产 Revision：以 Package SHA-256 为基础，和导出快照、SQLite 记录配对。
-
-- 项目级搜索：Asset、Symbol、Reference、全文搜索、路径过滤和稳定分页。
-
-- 引用查询：Hard/Soft Package 依赖、反向引用、限定深度的双向引用查询。
-
-- 四源资产状态：Editor Memory、磁盘 Package、Revision Export、SQLite 分开报告，不把 Dirty 内存伪装成磁盘 Revision。
-
-
-
-### 3.2 Live Editor 读取
-
-
-
-- Editor、PIE/SIE、当前关卡和当前选择状态。
-
-- 已打开资产和 Dirty Package。
-
-- Output Log 增量读取与 Blueprint 编译错误。
-
-- 不触发加载的实时资产检查。
-
-- 普通 Blueprint Editor 当前 Graph 和选中 Node 定位。
-
-
-
-### 3.3 Project Memory 读取
-
-
-
-- Rule、Finding、Decision、Known Issue、Task Record 和 Runtime Evidence。
-
-- 来源区分：`user-confirmed`、`tool-observed`、`model-inferred`。
-
-- 状态区分：`valid`、`stale`、`conflicted`、`superseded`、`unverified`。
-
-- Scope、Revision Set、Artifact、Confidence、时间与证据摘要。
-
-- Revision 变化后的自动 stale，以及冲突结论并存。
-
-- Schema v3 Knowledge Tree：规范化 `/project/...` Path、同项目 Parent、无环和安全删除约束。
-
-- 独立 Active Work：`planned/in_progress/blocked/done/cancelled`、TODO、下一步和正规化 Node/Asset 关联。
-
-- 0–4 级渐进式 Context、字符预算、默认过滤 `stale/superseded`、截断 `nextActions` 和按需 Evidence。
-
-- 五个新高层 MCP Tool；原有七个 Memory Tool 保持兼容。
-
-
-
-## 4. 已实现的写入与操作能力
-
-
-
-### 4.1 非持久化 Live Action
-
-
-
-以下操作会改变编辑器界面、内存编译状态或验证状态，但不直接保存 Package：
-
-
-
-- 打开或聚焦资产。
-
-- Content Browser 同步。
-
-- 按 ActorGuid 聚焦 Actor。
-
-- Blueprint 内存编译。
-
-- 单资产或文件夹 Data Validation。
-
-- 精确名称 Automation Test。
-
-
-
-### 4.2 Live Editor Write 基础层
-
-当前闭环：
-
-```text
-Policy / Revision Plan
-→ 精确 LIVE APPLY 确认
-→ 注册式 Operation 执行器
-→ FScopedTransaction / Snapshot / Dirty
-→ 显式 Undo / Discard，或 Authorized Save
-→ 独立 UE 重载 Verify
-→ Memory Evidence
-```
-
-当前 0.7.0 注册表开放 12 个受控 Operation：Data Asset 标量/引用/Struct/Array/Set/Map，Material Instance Scalar/Vector/Texture/Static Switch，以及 DataTable Cell/RowFields/Add/Remove/Rename。它仍只接受已加载、已打开、初始 Clean 的 `/Game` 非 Blueprint、非地图单文件资产，并继续拒绝任意 UObject Method、嵌套属性、PIE/SIE、自动保存和未授权写入。
-
-为后续数百种 Operation 扩展，中央 Bridge 已改为 `operation + assetPath + target + value` 的通用请求和 `LiveWriteOperationRegistry` 分派；Property、Material、DataTable 分属独立域模块，公共 Transaction/Evidence 层统一处理 Snapshot、No-op、失败恢复、Dirty 与 Undo。Python `OperationSpec` 同时驱动 Target 校验、valueKind 和保存后独立验证，不再重复维护硬编码白名单。
-
-Live Apply Workflow 使用固定 Work Root Journal 保存待处理 Receipt；MCP 重启后可恢复经过严格校验的记录，Verify 可指定精确 `liveApplyReceipt`，成功 Undo/Discard/Verify 会关闭记录。Journal I/O 失败不会把已经成功的 Editor 修改伪报成失败。
-
-真实回归分为 Fast（Scalar、Undo/Discard、Closed Loop）和 Full（全部 7 组）；发布状态统一报告 `publishedVersion=0.7.0` 与 `developmentLine=0.7.0`。
-
-开发线 `feature/live-writer-expansion` 已在此基础上完成 W1-W3：Blueprint `setVariableDefault` / `setComponentProperty` / `setPinDefault` 可在常驻 Editor 中安全连续写入；W2 提供 Fast Resident Verify；W3 提供零子进程 checkpoint save 与随后独立 Strong Verify，并保留 exact transaction continuation、supersession、Semantic Diff / Trust 与恢复边界。
-
-### 4.3 持久化安全写入
-
-
-
-当前已支持：
-
-
-
-- Blueprint：变量默认值、组件属性、Pin 默认值、描述等已注册 Operation。
-
-- Data Asset 标量属性。
-
-- Data Asset Object/Class、Soft Object/Class 引用。
-
-- Data Asset Struct、Array、Set、Map 完整稳定值。
-
-- Material Instance Scalar、Vector、Texture、Static Switch 参数。
-
-- DataTable 单字段、多字段、Row 新增、删除和重命名。
-
-- 单资产 1–32 个兼容 Operation 原子事务。
-
-
-
-持久化闭环：
-
-
-
-```text
-
-Plan
-
-→ Dry Run
-
-→ 一次性 Receipt
-
-→ 精确 COMMIT 确认
-
-→ 外部备份
-
-→ UE 保存
-
-→ 独立进程重新加载验证
-
-→ Task Evidence
-
-→ 可验证 rollback
-
-```
-
-
-
-Live Editor 中已经产生的受控 Dirty 资产，也可以通过 `ue_save_authorized_asset` 单独执行 Policy/Revision/Session 绑定的授权保存。
-
-
-
-### 4.4 Memory 写入
-
-
-
-- 添加用户确认规则。
-
-- 记录工具观察或模型推断的 Finding。
-
-- 记录带 Patch、Backup Manifest、Validation Evidence 和最终 Revision 的 Task。
-
-- 显式标记旧记录 superseded。
-
-- 校验当前 Revision 并更新 stale 状态。
-
-
-
-### 4.5 Realtime Animation Tools 写入
-
-
-
-2026-08 新增动画比例修复与批量闭环（`feature/live-editor-realtime-io`，已合并 `main`）：
-
-
-
-- 单资产：`ue_plan_animation_scale_fix` + `setAnimationScaleFix`（Force Root Lock / Root Motion / Root Track Scale）+ Undo / Discard / Authorized Save / Independent Verify / Index Refresh。
-
-
-
-- Additive：`ue_plan_additive_base_pose_fix` + `setAdditiveBasePoseFix`（RefPoseSeq / RefFrameIndex / AdditiveAnimType / RefPoseType 修正 + 组合姿势验证）。
-
-
-
-- 批量：`ue_plan_animation_scale_fix_batch` + Live Apply / Save / Verify / Index Refresh / Rollback（不可变 Batch Plan，分片 8，持久化分片 2）。
-
-
-
-- 重定向：批重定向闭环 `ue_analyze/plan/apply/save/verify/rollback_animation_retarget*` + 输出后处理 `ue_*_animation_retarget_postprocess`。
-
-
-
-写入仍走 Policy（含 `retargetCapabilities`）/ Revision / Snapshot / Transaction / Undo / Save / Verify / Rollback 门禁；复合资产（Montage / BlendSpace / AimOffset）重建仍在范围外。
-
-
-
-## 5. 当前明确未实现的能力
-
-
-
-以下能力不能因为存在“读到相关信息”就视为已支持写入：
-
-
-
-- 通用 Blueprint Graph 节点创建、删除、连线和自动布局。
-
-- Anim Blueprint State Machine、Montage、Blend Space、AimOffset 写入（AnimSequence 窄范围写入——Root Lock / Root Track Scale / Additive Base Pose——已实现，见 §4.5）。
-
-- Control Rig、IK Retargeter 和 RigVM Graph 写入。
-
-- Material Graph、Niagara、Sequencer、UMG Widget Tree 写入。
-
-- Level Actor 的通用 Spawn、Delete、Transform 和任意属性修改。
-
-- PIE 输入注入、录制、确定性回放和 Viewport 截图闭环。
-
-- Asset Import、Duplicate、Rename、Delete、Migrate 等生命周期操作。
-
-- Console Command、任意 Python、任意 C++/脚本执行。
-
-- Editor/Visual Studio 自动关闭、重启和构建调度。
-
-- Source Control C1–C3 已实现。仍明确不支持 Agent 侧 P4 Submit / Revert / P4-managed Delete、generic P4 passthrough、盲目 accept-yours/theirs，以及 `.uasset/.umap` 自动内容 resolve；A27 真实 C3 mutation 仍等待 owner 指定安全 fixture。
-
-
-
-这些不是遗漏文档，而是当前有意保留的安全与范围边界。
-
-
-
-## 6. 待做功能与优先级
-
-当前后续工作的权威入口为 [`Plans/README.md`](Plans/README.md)。Track M 的 M1–M5 与 Track C 的 C1–C3 都已完成；M6/C4 不自动启动。当前固定主线已经切换为 **real-project write-enabled dogfood**。P4 权限边界以 [`Plans/UEAGENTKIT_P4_AGENT_OPERATION_BOUNDARY_DECISION_20260903.md`](Plans/UEAGENTKIT_P4_AGENT_OPERATION_BOUNDARY_DECISION_20260903.md) 为准，旧 Master/Midterm 中与其冲突的 fail-closed/no-checkout 描述视为历史。
-
-```text
-P0  real-project write-enabled dogfood
-P1  dogfood-driven Track X / Writer / Source-Control gaps
-P2  C4 shared-memory/source-control integration only if dogfood needs it
-P2  M6 symbolic compression only if data proves it useful
-P3  broader team/shared Knowledge Service collaboration
-```
-
-A27 的真实 C3 mutation 不需要为了“补绿”单独造场景；如果 dogfood 中出现 owner 指定的安全 CL/reopen/resolve fixture，可顺带完成真实验收。
-
-正式 0.8 package release 是独立授权轨道，不阻塞以上技术开发；R5 继续冻结。
-
-
-
-### 已完成基础 / 当前延伸：Realtime Editor CRUD、批量任务与诊断
-
-Live Editor Write 基础层、Material/DataTable、Undo/Discard、Save→Verify→Memory 闭环和注册式扩展架构已经完成。Realtime Foundation 现已补齐当前 Editor Context、首个分帧 Batch Task 和持久化 Change Set：
-
-- `ue_get_editor_context` 在一次只读请求中聚合 Editor、World、Selection、Open Assets、Dirty Packages、Blueprint Graph Selection、Compile Errors 和 Output Log Cursor，并返回阶段耗时与 `nextActions`。
-- `scanCurrentWorld` 只扫描当前已加载 World；枚举和 Actor/Component 处理均受每帧约 2 ms 时间预算与数量上限约束。任务绑定 Editor Session/World，支持进度、取消、超时、失效和部分结果。
-- Batch Task 默认只返回摘要；详情通过 `include_details/detail_offset/detail_limit` 分页读取，单页最多 5 个 Actor，避免超过 Bridge 1 MiB 单响应上限。
-- Change Set 使用 schema v2 持久化 Task、Editor Session、Operation、Asset、Transaction、Save Receipt 和 Validation 生命周期；支持 `planned/applied/partially_applied/undone/discarded/saved/verified/no-op/failed/unknown`，并保留终态历史。
-- 活跃 Change Set 不会被容量清理静默删除；Editor 重启后无法重新证明的运行时状态明确降级为 `unknown`。
-- expected no-op 绑定独立 `noop_*` Operation 并直接进入 `no-op` 终态：`liveApplyReceipt=""`、`changeSetBound=true`、`journalPersisted=false`，validation 聚合为 `no-op`、saveState 为 `not-required`；不制造 Transaction、LiveApply journal、授权保存或 Independent Verify。只有固定基线 Canonical Revision 与 Plan `expectedRevision` 完全一致时才有 persisted no-op evidence；无 live/verified no-op stage，同资产 no-op 与真实写混合时保守报告 stage unavailable。
-
-Realtime I/O 基础层已经达到可复用状态，后续进入需求驱动维护，不再以持续扩大 CRUD / Writer 广度或追平 `ue-llm-toolkit` Tool 覆盖面作为首要目标。 Post-0.8 的当前延伸重点不是增加新的 Operation family，而是把现有 Blueprint default/component/pin 窄写入迁移到常驻 Editor Bridge，并将昂贵 Independent Verify 收束到任务 checkpoint；详见 post-0.8 总计划。新的 Writer 只有在 Reforge 真实任务或 Agent Benchmark 反复暴露明确缺口时再增加；每个新增 Operation 仍必须补齐：
-
-1. Python `OperationSpec`、Policy 授权和 Plan Schema。
-2. 对应 C++ 域执行器与 Operation Descriptor。
-3. Snapshot、No-op、失败恢复、Dirty、Undo 和独立 Verify 语义。
-4. 真实 UE5.6 成功、拒绝、恢复和闭环回归。
-
-### 已完成基础 / 后续增强：Memory 与任务上下文
-
-Schema v3 Knowledge Tree、Active Work、渐进式披露、按需 Evidence 与现有 Memory Tool 已完成；0.8 R0-R3 又补齐了 Task Context、Change Set、Editor Session、Revision 与 Evidence 的确定性关联。旧的“Schema 暂停扩张”结论只适用于 0.8 capability closeout，不再代表当前中期计划。
-
-W4 完成并冻结 Change Set 结构后，Memory Track 计划按 2026-08-27 Master/Midterm 继续：先建立效率门禁，再以确定性 L0 事件索引扩展 Schema v4，随后在独立迁移中加入 v5 embedding 存储与可选混合召回。自动蒸馏只使用 `tool-observed` 证据，不在任务同步链路调用 LLM。
-
-当前实现细节见 [`MEMORY_ARCHITECTURE.md`](MEMORY_ARCHITECTURE.md)；未来增强契约以 [`Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md`](Plans/UEAGENTKIT_MASTER_DEVELOPMENT_PLAN_20260827.md) 和 Midterm Spec 为准。
-
-### P0C：大型项目性能基准
-
-首次建立知识库允许较慢，但日常搜索、变量修改和少量 Blueprint Graph 编辑必须接近修改代码的体验。性能计划采用 Reforge、现成 UE5.6 DarkRuins 样本、E 盘 SSD 上的 160–180 GB 物理测试工程和 500k Asset/10m Reference 逻辑数据库；关键基准分别运行原生 SSD 与机械硬盘 50 MB/s 模拟档位。重点门禁包括：
-
-- Warm 搜索、Reference 和 Memory Context p95 控制在 500–800 ms。
-- 已加载普通属性 Live Apply p95 小于 500 ms。
-- 已加载小型 Blueprint 修改少量 Node 小于 1 秒，不含 Unreal 原生 Compile。
-- 小型 Blueprint 修改加 Compile 的目标 p95 小于 3 秒。
-- Batch 操作在 300 ms 内返回 Task 句柄，并在后台分帧运行。
-
-测试工程项目目录目标 160–180 GB，硬上限 200 GB；总工作集不得超过 260 GB，E 盘剩余空间低于 50 GB 时自动停止生成。完整方案见 [`PERFORMANCE_TEST_PLAN.md`](PERFORMANCE_TEST_PLAN.md)。
-
-### P1：0.8.x Context / Analysis / Agent Reliability（capability scope 已完成）
-
-基础设施阶段已经基本完成，本阶段不再以新增 Tool / Asset Class / Writer 数量作为主进度。推荐在 `feature/agent-reliability` 上按可独立提交、可中断的里程碑推进，详细计划见 [`Plans/AGENT_RELIABILITY_CONTEXT_ANALYSIS_PLAN_20260815.md`](Plans/Archive/AGENT_RELIABILITY_CONTEXT_ANALYSIS_PLAN_20260815.md)。
-
-```text
-R0  Task Context / Context Pack MVP
-R1  Impact Analysis
-R2  Semantic Diff
-R3  Verification Plan + Trust Verdict
-R4  Real Agent Benchmark v1
-R5  Value Provenance / Execution Trace（由 Benchmark 决定）
-```
-
-R0–R4 已完成：高层任务上下文、逆向引用影响分析、事实级 Semantic Diff、Evidence-gated Verification/Trust 与第一版真实 Agent Benchmark 已形成可测量链路；仍不新增 Memory Schema，也不在 Server 内做模型推断。
-
-R0.0（现状审计 + 复用矩阵 + 最小 Schema）与 R0.1（`ue_get_task_context` 第一条纵向切片）已完成并本地提交到 `feature/agent-reliability`：query + 显式 assetPaths → targetAssets → revisionState → 可选 Memory 摘要 / Live Editor 摘要 / Change Set → 确定性 risks → 有界输出；所有可选来源支持 section 级降级。复用矩阵与 Schema 见 [`Plans/AGENT_RELIABILITY_R0_AUDIT_AND_SCHEMA_20260815.md`](Plans/Archive/AGENT_RELIABILITY_R0_AUDIT_AND_SCHEMA_20260815.md)。
-
-R0-S（真实 Reforge Context Smoke）与 R0.2（Deterministic Relevant Asset Discovery）已完成并本地提交：真实 Reforge 索引（48 资产，logic profile）上 S1/S2/S3 三个 Case 记录见 [`Plans/AGENT_RELIABILITY_R0_REAL_CONTEXT_SMOKE_20260816.md`](Plans/Archive/AGENT_RELIABILITY_R0_REAL_CONTEXT_SMOKE_20260816.md)；`relevantAssets` 现为确定性候选集（query 分词 + Asset/Symbol Search 复用、与显式目标互斥、固定排序、Top N=8、可解释 whyIncluded/matchKind、无 score/confidence），预算不足时先裁候选 metadata 再减候选数量，绝不优先于 target identity / high risk / revision summary。
-
-R0.3（只读 Cross-source Correlation）已完成并本地提交，**R0 里程碑标记完成**：`ue_get_task_context` 新增 `correlation` section（schemaVersion 1.2），用精确键把 Active Work、显式 Change Set、Live Editor Session 与 Memory Evidence 关联起来（session id 相等性、资产路径集合交集、changeSetId 字面量、资产 scope Evidence），只读、非持久化、零模型推断；不新增 Memory/ChangeSet Schema、不扫描 workflow 私有 `_change_sets`、不自动发现 Change Set、不做 R1 引用遍历。链接固定排序上限 16 条，边界计数如实报告；新增确定性风险 `change-set-editor-session-mismatch`（medium）；预算阶梯先裁 correlation links/summary，绝不优先于 target identity / high risk / revision summary。交接见 [`Handoffs/AGENT_RELIABILITY_R0_SLICE3_HANDOFF_20260816.md`](Handoffs/Archive/AGENT_RELIABILITY_R0_SLICE3_HANDOFF_20260816.md)。
-
-R1/R2 已分别解决「修改会影响什么」和「实际发生了什么变化」。R3 实现见 [`Plans/AGENT_RELIABILITY_R3_VERIFICATION_TRUST_DESIGN_20260820.md`](Plans/Archive/AGENT_RELIABILITY_R3_VERIFICATION_TRUST_DESIGN_20260820.md)，执行规范见 [`Handoffs/AGENT_RELIABILITY_R3_FULL_HANDOFF_20260820.md`](Handoffs/Archive/AGENT_RELIABILITY_R3_FULL_HANDOFF_20260820.md)：两个只读 Tool 固定区分 required/recommended/informational、pass/fail/unknown/not-applicable，以及 verified/suspicious/failed/insufficient-evidence。Compile/Validation/Automation 仅由有界、无任意注入、session-local Store 捕获；Trust Tool 不自动执行动作。保存、独立重载或 verified Semantic Diff 都不自动等同于整个任务成功。
-
-R4 已用跨 Data Asset / DataTable / Material Instance / Blueprint / Context / stale / rollback 的真实 Agent Case 统计 Trusted Completion、False Success、Wrong Asset、Unintended Change 和 Recovery。15 个 Full + 9 个 matched Legacy attempt 共 24/24 保留，0 infrastructure failure、0 fairness mismatch、全部 fixture 精确恢复。Paired Full 相对 Legacy 的 Task Completion `+44.44 pp`、Trusted Completion `+22.22 pp`、False Success `-11.11 pp`、Wrong Asset `-22.22 pp`、Tool Calls `-4.11`；但 Full 绝对 Trusted Completion 仅 `26.67%`，False Success / all cases 仍为 `33.33%`，stale detection 还出现退化。完整结果见 [`Plans/AGENT_RELIABILITY_R4_BENCHMARK_RESULT_20260820.md`](Plans/Archive/AGENT_RELIABILITY_R4_BENCHMARK_RESULT_20260820.md)。动画没有进入 v1 Case，不再作为主开发方向。
-
-
-
-**当前执行状态（2026-08-23）**：0.8.x Closeout C0–C6 已完成。R4.1 以冻结 fingerprint 运行 4 anchors × 2 profiles × 3 repeats，24/24 retained、12/12 paired fairness matched、0 drift、0 infrastructure failure、24/24 exact recovery。Full stale 与 Blueprint default 均 3/3 Trusted；high-fanout 3/3 越过 direct-only bound，scalar 2/3 将 numeric beforeValue stringify，均作为真实 False Success 保留。结果见 [`Plans/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md`](Plans/Archive/AGENT_RELIABILITY_R4_1_REPEAT_RESULT_20260823.md)。
-
-Read/Write Audit 已分类 105 个公共 Tool 与 18 个 Patch Operation，结论为 `0 Must-fix new tools`；Generic Graph/Actor/Material Graph/Niagara/Sequencer/Control Rig 与 arbitrary script 继续明确延期。Scope Freeze 见 [`Plans/Archive/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md`](Plans/Archive/UEAGENTKIT_0_8_CAPABILITY_GAP_AUDIT_20260823.md)。R5 保持 `deferred by benchmark evidence`：只有后续真实 Case 反复出现 Value Provenance / Execution Trace primary blocker 才解冻。最新正式发布版本仍为 0.7.0，本次 capability closeout 不修改 published version、Tag 或远端。
-
-
-### P2：高价值专用写入
-
-本项改为**需求驱动候选池**，不属于当前固定排期。只有 Reforge 真实任务或 R4 Agent Benchmark 反复暴露明确缺口时，再按收益排序解冻：
-
-
-
-- 现有 Blueprint Default、Component、Pin 的 Editor-resident Live Apply 已提升为 Post-0.8 W1，不再作为“新增 Writer family”候选；本池只保留新的 Operation family。
-
-- Enhanced Input / Input Mapping Context。
-
-- Animation Writer 扩展暂缓；现有 Realtime Animation Tools 保留为已完成能力和验证样本。
-
-- Level Actor 的受限 Transform/Property 操作。
-
-
-
-完整 Graph 结构写入必须先具备稳定 Node/Pin Identity、结构化 Diff、编译验证和失败恢复；不会为了追求 Tool 数量直接开放任意 Graph 操作。
-
-
-
-### P3：0.9.0 Collaboration（延后）
-
-多人部署采用混合架构：每名开发者运行本地 MCP 并连接本机 UEAgentKit Plugin/Editor；团队共享的是独立 Knowledge Service，而不是一个能够直接控制所有开发者编辑器的中央 MCP。共享层计划使用 PostgreSQL/API，本地 SQLite 保留资产索引、缓存、个人和 Session 数据。
-
-
-
-- Source Control Provider、Checkout、Lock、Owner、Head Revision 读取。
-
-- Local Dirty、磁盘 Revision、Depot/Remote Head 分歧分析。
-
-- 多人修改风险、责任边界和阻断策略。
-
-- 首版只分析、警告或阻止，不自动抢锁或覆盖他人修改。
-
-
-
-## 7. 后续方向原则
-
-
-
-1. **先理解，再修改**：优先提高上下文、引用和影响分析质量。
-
-2. **先窄后宽**：每个写入域先做一个真实纵向闭环，再扩展 Operation 数量。
-
-3. **Live 不等于无门禁**：编辑器内存写入仍必须经过固定项目、Policy、Revision、Plan 和显式确认。
-
-4. **不把保存等同于成功**：成功必须包含独立验证和可追溯证据。
-
-5. **不追求任意脚本能力**：Console/Python/Shell 虽然扩展快，但会绕过 UE Agent Kit 的核心安全模型。
-
-6. **以真实项目需求排序**：优先实现 Reforge 实际开发中反复出现、能明显减少人工操作的能力。
-
-7. **渐进式披露**：默认只加载 Project Profile 和直接相关节点摘要，详细实现与原始证据必须显式展开。
-
-8. **本地执行、共享知识**：UE 编辑器状态和写入会话留在本机，长期项目知识与团队任务由共享服务管理。
+- 先理解，再修改。
+- 默认只读；写入必须显式启用。
+- Write Policy 决定可修改范围。
+- Revision 防止基于过期状态写入。
+- Dirty Package、Session、Target Identity 等条件不满足时拒绝操作。
+- Save 和“任务成功”不是同一件事；成功需要独立验证和证据。
+- P4 最终 Submit/Revert/Delete 由人执行。

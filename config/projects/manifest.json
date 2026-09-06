@@ -1,18 +1,25 @@
 {
+
   "schemaVersion": "1.0",
+
   "projects": {
-    "我的项目": {
-      "default": "my-project-write.json"
-    },
-    "ModelPreview": {
-      "default": "model-preview-read.json",
+
+    "ExampleProject": {
+
+      "default": "example-read.json",
+
       "profiles": {
-        "read": "model-preview-read.json",
-        "animation-write": "model-preview-animation-write.json"
+
+        "read": "example-read.json",
+
+        "test-write": "example-write.json",
+
+        "animation-write": "example-animation-write.json"
+
       }
-    },
-    "Reforge": {
-      "default": "reforge-read.json"
+
     }
+
   }
+
 }

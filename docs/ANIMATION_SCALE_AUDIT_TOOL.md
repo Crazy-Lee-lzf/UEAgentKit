@@ -1,6 +1,5 @@
 # 批量动画比例只读审计工具
 
-> 分支：`feature/live-editor-realtime-io`
 > 适用引擎：UE 5.6
 > 状态：P1 已完成，并通过真实 UE5.6 Editor Smoke
 
@@ -202,8 +201,8 @@ Report 写入只影响 UEAgentKit 的工作目录，不修改 Content、`.uasset
 测试资产：
 
 ```text
-/Game/Characters/XinYueHu/Animations/Retargeted/
-MM_Idle_XinYueHu.MM_Idle_XinYueHu
+/Game/Characters/ExampleCharacter/Animations/Retargeted/
+MM_Idle_ExampleCharacter.MM_Idle_ExampleCharacter
 ```
 
 真实结果：

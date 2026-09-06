@@ -274,7 +274,7 @@ Workflow + Memory  43
 Combined + Memory  65
 ```
 
-0.7.0 未启用 Memory 时的 Tool 数量为 5/27/31/53；启用固定 Project Memory 后为 17/39/43/65。0.6.0 的历史低层 Memory API 保持兼容读取。
+0.8.0 未启用 Memory 时的 Offline/Live/Workflow-only/Live+Workflow Tool 数量为 10/43/67/100；启用固定 Project Memory 后为 24/57/81/114。opt-in Source Control 在每种模式上额外增加 6 个 Tool。0.6.0 的历史低层 Memory API 保持兼容读取。
 
 ## 15. Task Outcome 契约
 
@@ -389,7 +389,7 @@ CLI 的 stdout/stderr 在入口处固定为 UTF-8，确保 Windows 管道、中�
 
 ## 18. Schema v3：Knowledge Tree 与 Active Work
 
-0.7.0 已在 0.6.0 Schema v2 平面记录库之上正式集成本地、单人、固定项目版 Schema v3；`feature/memory-context` 继续保留用于后续并行开发。新增结构：
+0.8.0 在早期平面记录库之上提供固定项目 Knowledge Tree、Active Work、确定性 L0/L1、可选 Hybrid Recall 与持久化 L2/L3 Context。核心结构包括：
 
 ```text
 knowledge_nodes

@@ -1,6 +1,6 @@
 # UE Agent Kit MCP Server
 
-UE Agent Kit 0.7.0 通过本地 MCP `stdio` 提供稳定的高层查询、分层 Memory Context、实时 Editor Context/Batch/Change Set 和受控资产工作流。MCP 层不会开放任意 SQL、Shell、文件系统路径、Commandlet 参数或 UObject 调用。
+UE Agent Kit 0.8.0 通过本地 MCP `stdio` 提供稳定的高层查询、分层 Memory Context、实时 Editor Context/Batch/Change Set、Knowledge/Verification 和受控资产工作流。MCP 层不会开放任意 SQL、Shell、文件系统路径、Commandlet 参数或 UObject 调用。
 
 ## 模式
 
@@ -304,7 +304,6 @@ expected no-op 使用独立 `noop_*` Change Set Operation：没有 LiveApply rec
 
 `ue_get_task_context` 只在显式 Change Set found 时建议 `semantic-diff-explicit-change-set`，不会自动运行 R2；Semantic Diff 出现 missing/unexpected 时，`nextActions` 可建议对显式资产调用 R1 `ue_analyze_change_impact`，不会在 R2 内遍历引用图。
 
-R2 的最终真实 UE5.6 验收使用 DirectHost regression fixture，不冒充 Reforge：
 
 ```powershell
 scripts/TestMcpLiveClosedLoop.ps1 `
@@ -555,7 +554,7 @@ R3 bounds：affected assets≤8、Assertions≤128、Evidence refs≤128、impac
 
 ## Client 兼容契约
 
-0.7.0 提供 `scripts\TestMcpClients.cmd`，通过两个独立真实 `stdio` 会话验证：
+0.8.0 提供 `scripts\TestMcpClients.cmd`，通过两个独立真实 `stdio` 会话验证：
 
 ```text
 官方 Python MCP ClientSession

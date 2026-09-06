@@ -28,7 +28,6 @@ UE Agent Kit 0.7.0 面向 Unreal Engine 5.6，正式发布 Realtime Foundation�
 
 ### 大型项目性能规划
 
-- 新增 `docs/PERFORMANCE_TEST_PLAN.md`。
 - 物理测试工程目标 160–180 GB，硬上限 200 GB，存放于 SSD。
 - 同一套基准分别运行 `NativeSSD` 和 `SimulatedHDD50`；后者采用 50 MB/s 顺序上限、8/10/15 ms 文件寻道档位和队列深度 1。
 - 首次索引允许较慢，普通搜索、变量修改、少量 Blueprint 节点修改、Compile、Undo 和单资产保存作为最高优先级交互门禁。

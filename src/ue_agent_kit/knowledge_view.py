@@ -1339,7 +1339,7 @@ def _single_query_value(query: dict[str, list[str]], key: str, default: str = ""
 class KnowledgeViewHandler(BaseHTTPRequestHandler):
     """GET-only whitelist router. No mutation route exists by design."""
 
-    server_version = "UEAgentKitKnowledgeView/0.7.0"
+    server_version = "UEAgentKitKnowledgeView/0.8.0"
     protocol_version = "HTTP/1.1"
 
     @property

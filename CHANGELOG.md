@@ -4,16 +4,18 @@ All notable changes to UE Agent Kit are documented here.
 
 ## Unreleased
 
-### 0.8.x Context / Analysis / Agent Reliability closeout
+- No unreleased changes.
 
-- Added deterministic Task Context, bounded reverse-reference Impact Analysis, Change-Set-bound Semantic Diff, Evidence-gated Verification Plans/Trust Verdicts, and a real-agent benchmark with deterministic ground truth across the R0–R4 line.
-- Closed the benchmark result contract with machine-checkable status/trust/conflict/operation enums, exact task `targetAssets` semantics, Change Set identity across write/save/verify/R2/R3, and fail-closed success rules when required evidence is missing.
-- Added a Trust Evidence next-action ladder while preserving the boundary that Trust tools never auto-save, compile, validate, run automation, verify, roll back, or ingest arbitrary evidence.
-- Narrowed Blueprint pin-default normalization to typed empty/zero/false values, normalized only the mechanically derived reference edge authorized by an exact reference mutation, and hardened saved-Blueprint rollback to require exact unloaded/clean/not-open Bridge evidence.
-- Added R4.1 repeat scheduling, alternating Full/Legacy ordering, frozen measurement fingerprints including metrics, failed-attempt retention, drift/mutation fail-closed checks, repeat distributions, ranges, token availability, timeout aggregation, and raw-summary regeneration checks.
-- Retained all 24 formal R4.1 attempts with 12/12 paired fairness matches, zero measurement drift/infrastructure failures, and 24/24 exact recovery. Stale and Blueprint Full anchors reached 3/3 Trusted each; high-fanout bound violations and scalar final-claim typing failures remain documented rather than filtered.
-- Completed a Read/Write Capability Gap Audit covering all 105 public tools and 18 registered Patch Operations. The 0.8 scope freezes with zero must-fix new tools; generic mutation families and R5 Value Provenance/Execution Trace remain evidence-driven deferred work.
-- The latest published version remains 0.7.0. This closeout does not change package/plugin versions, create tags or release artifacts, or push remote state.
+## 0.8.0 — agent workflow, memory, knowledge web, and P4 collaboration
+
+- Completed the resident Writer workflow with bounded multi-operation/multi-asset planning, Fast Verify, Checkpoint Strong Verify, explicit Save, recovery, Semantic Diff, and evidence-gated Trust.
+- Added Task Context, relevant-asset discovery, reverse-reference Impact Analysis, Change Sets, Verification Plans, and Trust Verdicts.
+- Added the read-only Knowledge Web for navigating project assets, references, symbols, Memory, and verification evidence.
+- Completed required Project Memory capabilities through deterministic L0 capture, L1 distillation, FTS5 plus optional Vector/RRF hybrid recall, and persisted L2/L3 context injection.
+- Added opt-in P4 support for status/mapping/locks/revisions, exact-file checkout, strict safe sync, pending changelist preparation, exact-file reopen, bounded text resolve, and durable audit receipts.
+- Preserved the source-control safety boundary: Agent-side P4 Submit, Revert, and P4-managed Delete remain unavailable; `.uasset/.umap` are not automatically content-resolved.
+- Sanitized public P4 capability evidence and normalized Windows launcher line endings so a fresh clone no longer depends on private environment metadata or local Git attributes.
+- Removed internal planning/handoff material from the public release tree and refocused README/status/roadmap/release documentation on product users.
 
 ## 0.7.0 — realtime editor and layered memory foundation
 

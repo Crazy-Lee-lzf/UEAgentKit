@@ -240,7 +240,7 @@ Preview 只在固定 WorkRoot 下生成短路径、独立导出的 candidate，�
 
 Apply 不循环调用单资产 `ue_refresh_asset_index`。它只 clone 当前 Revision Export 一次、复制 SQLite 一次，然后把所有 candidate 合入同一个 staging generation；所有 Revision 与数据库完整性检查通过后才一次性切换 active pointer。任一资产失败都不会产生半刷新的 active snapshot。
 
-正式 XinYueHu UE5.6 Smoke 只执行到 Index Refresh Preview，确认 Package / SQLite SHA 均不变；没有对正式样本执行 active pointer Apply。多资产 Apply 的原子 paired-generation 行为由真实临时 SQLite + Revision Export Fixture 验证：同一 generation 同时更新 A、加入 B、保留无关旧资产与导出文件，并在 pointer 中记录完整 `refreshedAssets`。
+发布验证在受控 UE5.6 fixture 上执行到 Index Refresh Preview，并确认 Package / SQLite SHA 均不变；不会对用户项目样本执行未经授权的 active pointer Apply。多资产 Apply 的原子 paired-generation 行为由真实临时 SQLite + Revision Export Fixture 验证：同一 generation 同时更新 A、加入 B、保留无关旧资产与导出文件，并在 pointer 中记录完整 `refreshedAssets`。
 
 ### 撤销修改：Persisted Rollback
 

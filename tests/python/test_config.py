@@ -120,32 +120,34 @@ class RepoProjectPoliciesTests(unittest.TestCase):
             (PROJECT_POLICY_MANIFEST.parent / filename).read_text(encoding="utf-8-sig")
         )
 
-    def test_real_manifest_resolves_my_project_default(self) -> None:
-        resolved = resolve_project_policy(Path("E:/WorkSpace/我的项目/我的项目.uproject"))
+    def test_real_manifest_resolves_example_project_default_read(self) -> None:
+        resolved = resolve_project_policy(Path("E:/Projects/ExampleProject/ExampleProject.uproject"))
         self.assertIsNotNone(resolved)
         assert resolved is not None
-        self.assertEqual(resolved.name, "my-project-write.json")
+        self.assertEqual(resolved.name, "example-read.json")
 
-    def test_real_manifest_resolves_model_preview_default_read(self) -> None:
-        resolved = resolve_project_policy(Path("E:/WorkSpace/ModelPreview/ModelPreview.uproject"))
-        self.assertIsNotNone(resolved)
-        assert resolved is not None
-        self.assertEqual(resolved.name, "model-preview-read.json")
-
-    def test_real_manifest_resolves_model_preview_animation_write_profile(self) -> None:
+    def test_real_manifest_resolves_example_project_explicit_read(self) -> None:
         resolved = resolve_project_policy(
-            Path("E:/WorkSpace/ModelPreview/ModelPreview.uproject"),
+            Path("E:/Projects/ExampleProject/ExampleProject.uproject"), profile="read"
+        )
+        self.assertIsNotNone(resolved)
+        assert resolved is not None
+        self.assertEqual(resolved.name, "example-read.json")
+
+    def test_real_manifest_resolves_example_project_animation_write_profile(self) -> None:
+        resolved = resolve_project_policy(
+            Path("E:/Projects/ExampleProject/ExampleProject.uproject"),
             profile="animation-write",
         )
         self.assertIsNotNone(resolved)
         assert resolved is not None
-        self.assertEqual(resolved.name, "model-preview-animation-write.json")
+        self.assertEqual(resolved.name, "example-animation-write.json")
 
     def test_real_project_policies_pass_validate_policy(self) -> None:
         for filename in (
-            "my-project-write.json",
-            "model-preview-read.json",
-            "model-preview-animation-write.json",
+            "example-read.json",
+            "example-write.json",
+            "example-animation-write.json",
         ):
             with self.subTest(filename=filename):
                 errors: list[dict[str, str]] = []

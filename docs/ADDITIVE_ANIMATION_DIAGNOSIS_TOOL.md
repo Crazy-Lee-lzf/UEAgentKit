@@ -1,6 +1,5 @@
 # 只读 Additive / Base Pose 诊断工具
 
-> 分支：`feature/live-editor-realtime-io`
 > 适用引擎：UE 5.6
 > 状态：P4 第一片已完成（只读诊断），并通过真实 UE5.6 Editor Smoke
 
@@ -112,9 +111,9 @@ load-failed
 ```text
 /Game/Characters/Mannequins/Anims/Pistol/Jump/MM_Pistol_Jump_RecoveryAdditive
 /Game/Characters/Mannequins/Anims/Rifle/Jump/MM_Rifle_Jump_RecoveryAdditive
-/Game/Characters/XinYueHu/Animations/Retargeted/MM_Pistol_Jump_RecoveryAdditive_XinYueHu
-/Game/Characters/XinYueHu/Animations/Retargeted/MM_Rifle_Jump_RecoveryAdditive_XinYueHu
-/Game/Characters/XinYueHu/Animations/Retargeted/MM_Idle_XinYueHu（非 Additive 对照）
+/Game/Characters/ExampleCharacter/Animations/Retargeted/MM_Pistol_Jump_RecoveryAdditive_ExampleCharacter
+/Game/Characters/ExampleCharacter/Animations/Retargeted/MM_Rifle_Jump_RecoveryAdditive_ExampleCharacter
+/Game/Characters/ExampleCharacter/Animations/Retargeted/MM_Idle_ExampleCharacter（非 Additive 对照）
 ```
 
 真实结果：
@@ -122,7 +121,7 @@ load-failed
 ```text
 4 个 Additive 样本          = LocalSpaceBase + AnimationFrame
 RefPoseSeq                 = 指向动画自身
-Base Pose Skeleton         = 与动画 Skeleton 兼容（源=Manny，重定向=心月狐）
+Base Pose Skeleton         = 与动画 Skeleton 兼容（源=Manny，重定向=示例角色）
 RefFrame                    = 超出序列帧范围 → additive-base-pose-ref-frame-invalid
 非 Additive 对照           = non-additive
 Smoke exit                 = 0（零残留，UnrealEditor 已关闭）

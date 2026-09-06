@@ -74,6 +74,25 @@ def validate_version_sources(expected_version: str | None = None, *, require_rel
     for relative, needle in exact_text_sources.items():
         _expect_text(issues, ROOT / relative, needle, relative)
 
+    _expect_text(
+        issues,
+        ROOT / "src/ue_agent_kit/workflow_common.py",
+        f'PUBLISHED_VERSION = "{version}"',
+        "workflow published version",
+    )
+    _expect_text(
+        issues,
+        ROOT / "src/ue_agent_kit/workflow_common.py",
+        f'DEVELOPMENT_LINE = "{version}"',
+        "workflow development line",
+    )
+    _expect_text(
+        issues,
+        ROOT / "src/ue_agent_kit/knowledge_view.py",
+        f'UEAgentKitKnowledgeView/{version}',
+        "knowledge view server version",
+    )
+
     field_sources = {
         "Plugin/UEAgentKit/Source/UEAgentKitEditor/Private/AssetPatchCommandlet.cpp": "executorVersion",
         "Plugin/UEAgentKit/Source/UEAgentKitEditor/Private/BlueprintPatchCommandlet.cpp": "executorVersion",

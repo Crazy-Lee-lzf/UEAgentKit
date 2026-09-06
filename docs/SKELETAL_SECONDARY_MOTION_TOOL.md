@@ -1,6 +1,5 @@
 # 骨骼次级运动（Skeletal Secondary Motion）读取工具
 
-> 分支：`feature/live-editor-realtime-io`
 > 适用引擎：UE 5.6
 > 状态：只读读取，已实现
 
@@ -119,9 +118,9 @@ cloth-binding-incomplete   Cloth 存在但未覆盖所有 LOD
 测试资产：
 
 ```text
-Mesh:       /Game/Characters/XinYueHu/Mesh/SK_XinYueHu
-Animation:  /Game/Characters/XinYueHu/Animations/Retargeted/MM_Idle_XinYueHu
-AnimBP:     /Game/Characters/XinYueHu/Animations/ABP_XinYueHu
+Mesh:       /Game/Characters/ExampleCharacter/Mesh/SK_ExampleCharacter
+Animation:  /Game/Characters/ExampleCharacter/Animations/Retargeted/MM_Idle_ExampleCharacter
+AnimBP:     /Game/Characters/ExampleCharacter/Animations/ABP_ExampleCharacter
 ```
 
 Smoke 验证：

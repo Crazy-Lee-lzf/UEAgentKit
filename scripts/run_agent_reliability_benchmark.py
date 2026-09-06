@@ -229,7 +229,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--reforge-policy",
         type=Path,
-        default=TOOL_ROOT / "config" / "projects" / "reforge-read.json",
+        default=TOOL_ROOT / "config" / "projects" / "example-read.json",
     )
     parser.add_argument("--editor-startup-timeout-seconds", type=int, default=180)
     parser.add_argument("--process-timeout-seconds", type=int, default=1800)

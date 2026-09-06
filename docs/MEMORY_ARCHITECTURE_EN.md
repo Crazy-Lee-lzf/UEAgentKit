@@ -2,7 +2,7 @@
 
 Updated: 2026-08-03
 
-> Version 0.7.0 formally integrates the single-user, local, fixed-project Schema v3 layer: Knowledge Trees, Active Work, levels 0–4 progressive disclosure, on-demand Evidence, and five high-level MCP tools. The long-lived Memory branch remains available; unified task binding, performance baselines, the shared knowledge service, team permissions, and optimistic concurrency remain future work.
+> Version 0.8.0 provides fixed-project Project Memory with Knowledge Trees, Active Work, progressive context disclosure, deterministic L0/L1 processing, optional hybrid recall, persisted L2/L3 context, and on-demand evidence. A shared team Knowledge Service remains a future direction.
 
 ## 1. Goals
 
@@ -150,7 +150,7 @@ Do not split ordinary reading, writing, maintenance, and TODO behavior into seve
 
 ## 5. Implemented high-level MCP tools
 
-These tools are formally registered in 0.7.0:
+These tools are available in 0.8.0:
 
 ```text
 ue_memory_get_context
@@ -225,7 +225,7 @@ Shared node updates use optimistic concurrency with `nodeId`, `expectedRevision`
 
 ## 9. Schema v3 implementation status
 
-`feature/memory-context` adds these local tables and bindings on top of Schema v2:
+The current Project Memory implementation adds these local tables and bindings on top of the base schema:
 
 ```text
 knowledge_nodes

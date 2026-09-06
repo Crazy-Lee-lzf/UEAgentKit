@@ -1,6 +1,5 @@
 # Additive / Base Pose 修复写入工具
 
-> 分支：`feature/live-editor-realtime-io`
 > 适用引擎：UE 5.6
 > 状态：P4 第四片已完成（执行写入，单资产 live-write；真实 Editor 写入 Smoke 待跑）
 

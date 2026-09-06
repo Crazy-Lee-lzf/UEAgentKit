@@ -28,7 +28,6 @@ UE Agent Kit 0.7.0 targets Unreal Engine 5.6 and formally releases the Realtime 
 
 ### Large-project performance plan
 
-- Added the Chinese internal development document `docs/PERFORMANCE_TEST_PLAN.md`.
 - The physical fixture targets 160–180 GB with a 200 GB hard limit on SSD storage.
 - The same benchmarks run as `NativeSSD` and `SimulatedHDD50`; the simulated profile uses a 50 MB/s sequential cap, 8/10/15 ms file-open seek profiles, and queue depth 1.
 - Slow first-time indexing is acceptable; daily search, variable edits, small Blueprint edits, Compile, Undo, and one-asset Save are the primary interaction gates.

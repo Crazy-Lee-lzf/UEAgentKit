@@ -1,6 +1,5 @@
 # 动画比例修复工具
 
-> 分支：`feature/live-editor-realtime-io`
 > 适用引擎：UE 5.6
 > 状态：已实现并通过真实 Editor 内存修改、最终姿势验证和 Undo 回归
 
@@ -18,7 +17,7 @@ Animation Raw / Compressed Root Track
 UE 最终 Component Space Pose
 ```
 
-不能仅凭 Root Track Scale 判断动画是否正确。当前心月狐样本中，正常和异常动画的 Root Track 都可能为 `1`，但最终求值结果分别为 `100` 和 `1`。
+不能仅凭 Root Track Scale 判断动画是否正确。当前示例角色样本中，正常和异常动画的 Root Track 都可能为 `1`，但最终求值结果分别为 `100` 和 `1`。
 
 ---
 
@@ -112,7 +111,7 @@ runtimeVerification      Reference Scale、最终求值状态和最终 Root Scal
 
 ### 3.1 第一选择：仅修 Root Lock
 
-当前心月狐 Idle 已真实验证：
+当前示例角色 Idle 已真实验证：
 
 ```text
 修改前：
@@ -131,7 +130,7 @@ Root Track Scale = 1（未修改）
 
 ```json
 {
-  "asset_path": "/Game/Characters/XinYueHu/Animations/Retargeted/MM_Idle_XinYueHu.MM_Idle_XinYueHu",
+  "asset_path": "/Game/Characters/ExampleCharacter/Animations/Retargeted/MM_Idle_ExampleCharacter.MM_Idle_ExampleCharacter",
   "root_bone": "Root",
   "expected_final_scale": 100.0,
   "force_root_lock": true,
@@ -153,7 +152,7 @@ Root Track Scale = 1（未修改）
 
 ```json
 {
-  "asset_path": "/Game/Characters/XinYueHu/Animations/Retargeted/MM_Idle_XinYueHu.MM_Idle_XinYueHu",
+  "asset_path": "/Game/Characters/ExampleCharacter/Animations/Retargeted/MM_Idle_ExampleCharacter.MM_Idle_ExampleCharacter",
   "root_bone": "Root",
   "expected_final_scale": 100.0,
   "root_track_scale_mode": "ReferenceLocal",
@@ -230,8 +229,8 @@ Additive 动画不能脱离 Base Pose 独立判断最终姿势。
 测试资产：
 
 ```text
-/Game/Characters/XinYueHu/Animations/Retargeted/
-MM_Idle_XinYueHu.MM_Idle_XinYueHu
+/Game/Characters/ExampleCharacter/Animations/Retargeted/
+MM_Idle_ExampleCharacter.MM_Idle_ExampleCharacter
 ```
 
 ### Root Lock 路径

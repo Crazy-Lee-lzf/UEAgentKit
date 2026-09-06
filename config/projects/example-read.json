@@ -3,10 +3,10 @@
   "validationEnabled": true,
   "commitEnabled": false,
   "allowedProjectNames": [
-    "ModelPreview"
+    "ExampleProject"
   ],
   "allowedAssetRoots": [
-    "/Game/Characters"
+    "/Game/UEAgentKitExamples"
   ],
   "allowedReferenceRoots": [],
   "allowedOperations": [
@@ -22,7 +22,7 @@
     "retarget.inspect"
   ],
   "requireRevision": true,
-  "rejectDirtyPackages": false,
+  "rejectDirtyPackages": true,
   "maxAssetsPerPatch": 1,
   "maxOperationsPerAsset": 1,
   "maxValueBytes": 4096

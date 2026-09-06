@@ -3,7 +3,6 @@ Output/
 Backups/
 AutoSDK/
 %SystemDrive%/
-dev_docs/
 
 .vs/
 .idea/
@@ -30,3 +29,9 @@ __pycache__/
 
 # Local VS Code workspace
 /UEAgentKit.code-workspace
+
+# Local/internal development material (not part of the public product tree)
+/dev_docs/
+/docs/Plans/
+/docs/Handoffs/
+/prompts/

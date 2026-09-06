@@ -1,6 +1,5 @@
 # 只读 Additive / Base Pose 组合求值工具
 
-> 分支：`feature/live-editor-realtime-io`
 > 适用引擎：UE 5.6
 > 状态：P4 第二片已完成（只读组合求值），并通过真实 UE5.6 Editor Smoke
 
@@ -95,9 +94,9 @@ suggestedNextStep
 ```text
 /Game/Characters/Mannequins/Anims/Pistol/Jump/MM_Pistol_Jump_RecoveryAdditive
 /Game/Characters/Mannequins/Anims/Rifle/Jump/MM_Rifle_Jump_RecoveryAdditive
-/Game/Characters/XinYueHu/Animations/Retargeted/MM_Pistol_Jump_RecoveryAdditive_XinYueHu
-/Game/Characters/XinYueHu/Animations/Retargeted/MM_Rifle_Jump_RecoveryAdditive_XinYueHu
-/Game/Characters/XinYueHu/Animations/Retargeted/MM_Idle_XinYueHu（非 Additive 对照）
+/Game/Characters/ExampleCharacter/Animations/Retargeted/MM_Pistol_Jump_RecoveryAdditive_ExampleCharacter
+/Game/Characters/ExampleCharacter/Animations/Retargeted/MM_Rifle_Jump_RecoveryAdditive_ExampleCharacter
+/Game/Characters/ExampleCharacter/Animations/Retargeted/MM_Idle_ExampleCharacter（非 Additive 对照）
 ```
 
 真实结果（`boneNames=["root", "pelvis", "Root", "Bip001Pelvis"]`，`fraction=0.0`）：
@@ -108,7 +107,7 @@ suggestedNextStep
   additiveDeltaLocalScale ≈ 0
   combinedComponentScale ≈ (1, 1, 1)
 
-重定向心月狐 Additive
+重定向示例角色 Additive
   baseComponentScale    ≈ (99, 98.999994, 98.999994)
   additiveDeltaLocalScale ≈ (-0.01, -0.01, -0.01)
   combinedComponentScale ≈ (99, 98.999994, 98.999994)
@@ -117,7 +116,7 @@ suggestedNextStep
 Smoke exit                = 0（零残留，UnrealEditor 已关闭）
 ```
 
-关键结论：Additive Delta 的 Scale 近似 0（`LocalSpaceBase` 的 Scale 是加性 Delta），最终 ≈99 的比例**完全来自 Base Pose**——而当前 Base Pose 是自引用 + 越界 RefFrame 被引擎钳制后的最后一帧，携带了重定向缩放。这正是 P4 修复片要处理的对象：把 `RefPoseSeq` 指向正确的心月狐 Base Pose，并修正 `RefFrameIndex`，最终组合 Scale 才可信。
+关键结论：Additive Delta 的 Scale 近似 0（`LocalSpaceBase` 的 Scale 是加性 Delta），最终 ≈99 的比例**完全来自 Base Pose**——而当前 Base Pose 是自引用 + 越界 RefFrame 被引擎钳制后的最后一帧，携带了重定向缩放。这正是 P4 修复片要处理的对象：把 `RefPoseSeq` 指向正确的示例角色 Base Pose，并修正 `RefFrameIndex`，最终组合 Scale 才可信。
 
 ---
 

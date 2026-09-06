@@ -164,7 +164,7 @@ async def run_workflow(args: argparse.Namespace) -> dict[str, object]:
                             "property_path": "BoolValue",
                             "value": True,
                             "mode": "DryRun",
-                            "description": "UE Agent Kit 0.7.0 high-level MCP workflow smoke test.",
+                            "description": "UE Agent Kit 0.8.0 high-level MCP workflow smoke test.",
                         },
                     ),
                     "ue_set_asset_property DryRun",

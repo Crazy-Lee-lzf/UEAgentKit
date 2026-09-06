@@ -14,7 +14,7 @@ SPEC.loader.exec_module(MODULE)
 
 class ReleaseValidationTests(unittest.TestCase):
     def test_current_version_sources_are_consistent(self) -> None:
-        self.assertEqual(MODULE.project_version(), "0.7.0")
+        self.assertEqual(MODULE.project_version(), "0.8.0")
         self.assertEqual(MODULE.validate_version_sources(require_release_docs=True), [])
 
     def test_schemas_and_examples_are_release_ready(self) -> None:

@@ -1,6 +1,5 @@
 # 只读 Additive / Base Pose 修复计划工具
 
-> 分支：`feature/live-editor-realtime-io`
 > 适用引擎：UE 5.6
 > 状态：P4 第三片已完成（只读修复计划，纯 Python，无写入面）
 
@@ -12,7 +11,7 @@
 
 `ue_plan_additive_base_pose_fix` 是只读修复计划工具：对每个 Additive AnimSequence，复用 `ue_diagnose_additive_animation` 的元数据与分类，推导出逐字段修复计划，并区分「可自动推导」与「需人工选择」。
 
-它不修改、不保存任何资产，不替换 Base Pose 引用，不重建 AimOffset/BlendSpace/Montage，不触碰正式 XinYueHu baseline。
+它不修改、不保存任何资产，不替换 Base Pose 引用，不重建 AimOffset/BlendSpace/Montage，不触碰正式 ExampleCharacter baseline。
 
 ---
 

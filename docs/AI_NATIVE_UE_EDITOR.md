@@ -122,8 +122,8 @@ Undo 前必须确认事务仍匹配、目标没有被用户后续修改、Packag
 
 ## 9. 分支职责
 
-- `feature/live-editor-realtime-io`：Live Editor Context、实时 CRUD、批量任务、运行时诊断、Change Set 与 Transaction。
-- `feature/memory-context`：Knowledge Tree、Active Work、Context Pack、Evidence 和长期项目认知。
+- **Live Editor / Writer**：Editor Context、受控实时写入、批量任务、运行时诊断、Change Set 与 Transaction。
+- **Project Memory**：Knowledge Tree、Active Work、Context Pack、Evidence 和长期项目认知。
 - `main`：已验证公共协议和功能的稳定集成基线。
 
 两条功能线通过 Task Context、Change Set、Evidence、Asset Identity 和 Revision 等公共协议连接。公共协议应先合入 `main`，功能分支再同步，不允许长期各自定义不兼容格式。
