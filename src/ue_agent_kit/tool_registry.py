@@ -185,6 +185,10 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_get_change_set", "workflow", "read"),
     ToolDefinition("ue_source_control_status", "source-control", "read"),
     ToolDefinition("ue_source_control_prepare_write", "source-control", "planning"),
+    ToolDefinition("ue_source_control_changelists", "source-control", "read"),
+    ToolDefinition("ue_source_control_prepare_changelist", "source-control", "planning"),
+    ToolDefinition("ue_source_control_resolve_status", "source-control", "read"),
+    ToolDefinition("ue_source_control_resolve_text", "source-control", "planning"),
 )
 
 TOOL_DEFINITIONS_BY_NAME = {definition.name: definition for definition in TOOL_REGISTRY}

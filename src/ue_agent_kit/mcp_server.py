@@ -144,6 +144,10 @@ STRICT_VERIFICATION_TRUST_ARGUMENT_TOOL_NAMES = (
 STRICT_SOURCE_CONTROL_ARGUMENT_TOOL_NAMES = (
     "ue_source_control_status",
     "ue_source_control_prepare_write",
+    "ue_source_control_changelists",
+    "ue_source_control_prepare_changelist",
+    "ue_source_control_resolve_status",
+    "ue_source_control_resolve_text",
 )
 
 
@@ -332,6 +336,9 @@ def _capabilities_response(
             "arbitraryCommandExecution": False,
             "shellPassthrough": False,
             "providerUnavailableDegradesToAdvisory": True,
+            "pendingChangelistPreparation": source_control_enabled,
+            "boundedTextResolve": source_control_enabled,
+            "binaryAutomaticResolve": False,
         },
         "liveEditor": {
             "configured": live_editor_enabled,
@@ -1553,7 +1560,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         source_control_service: P4SourceControlService | None = None
         if args.enable_source_control:
-            source_control_service = P4SourceControlService(project_root=args.project_path)
+            source_control_service = P4SourceControlService(
+                project_root=args.project_path,
+                audit_report_root=args.work_root,
+            )
         if args.check:
             payload: dict[str, Any] = {
                 "schemaVersion": "1.0",

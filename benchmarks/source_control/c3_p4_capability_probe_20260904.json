@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "1.0",
+  "probe": "c3-p4-capability-read-only-20260904",
+  "occurredAtUtc": "2026-09-04T13:54:02+00:00",
+  "provider": {
+    "available": true,
+    "serverVersion": "P4D/NTX64/2025.1/2810567 (2025/08/05)",
+    "serverAddress": "localhost.sangfor.com.cn:1666",
+    "clientName": "lzf_DESKTOP-8HD8KUO_8637",
+    "userName": "lzf",
+    "executable": "E:\\Program Files\\p4.EXE"
+  },
+  "realMutations": "none",
+  "readOnlySmoke": {
+    "statusFixture": "E:/WorkSpace/Blender/XinYueHu/Blender_AutoLink_XinYueHu_Textures_Relative.py",
+    "status": {
+      "mapped": true,
+      "haveRev": "1",
+      "headRev": "1",
+      "openedByCurrentClient": true,
+      "action": "edit",
+      "change": "default",
+      "submitReady": true
+    },
+    "changelists": {
+      "ok": true,
+      "readOnly": true,
+      "pendingCount": 0
+    },
+    "resolvePreview": {
+      "needsResolve": false,
+      "resolveStateUnknown": false,
+      "mergeableText": false,
+      "binaryPackage": false
+    }
+  }
+}
