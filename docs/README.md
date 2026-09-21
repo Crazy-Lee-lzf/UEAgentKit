@@ -26,6 +26,7 @@
 - [Memory Architecture](MEMORY_ARCHITECTURE.md) / [English](MEMORY_ARCHITECTURE_EN.md)
 - [AI-native UE Editor](AI_NATIVE_UE_EDITOR.md) / [English](AI_NATIVE_UE_EDITOR_EN.md)
 - [Reference Policy](REFERENCE_POLICY.md)
+- [C++ Code Knowledge](CODE_KNOWLEDGE.md)
 - [与 ue-llm-toolkit 的能力比较](COMPARISON_UE_LLM_TOOLKIT.md) / [English](COMPARISON_UE_LLM_TOOLKIT_EN.md)
 
 核心协议与机器契约位于 [`spec/`](../spec/)：

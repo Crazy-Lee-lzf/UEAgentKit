@@ -7,6 +7,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
+from .code_index import CODE_PROFILE
+
 from .database import get_metadata, get_schema_version, set_metadata, utc_now_iso
 
 
@@ -466,8 +468,13 @@ def _prune_assets(
 ) -> list[str]:
     normalized_prefix = prefix.rstrip("/")
     rows = connection.execute(
-        "SELECT id, asset_path FROM assets WHERE asset_path = ? OR asset_path LIKE ? ESCAPE '\\'",
-        (normalized_prefix, normalized_prefix + "/%"),
+        """
+        SELECT id, asset_path
+        FROM assets
+        WHERE profile <> ?
+          AND (asset_path = ? OR asset_path LIKE ? ESCAPE '\\')
+        """,
+        (CODE_PROFILE, normalized_prefix, normalized_prefix + "/%"),
     ).fetchall()
 
     deleted: list[str] = []

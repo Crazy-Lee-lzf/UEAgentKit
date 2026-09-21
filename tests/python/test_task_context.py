@@ -21,6 +21,7 @@ from test_indexer_queries import make_asset, write_export  # noqa: E402
 from ue_agent_kit.active_work import WorkItemDraft  # noqa: E402
 from ue_agent_kit.agent_api import IndexQueryService  # noqa: E402
 from ue_agent_kit.agent_workflow import WorkflowError  # noqa: E402
+from ue_agent_kit.code_index import build_code_index  # noqa: E402
 from ue_agent_kit.database import open_database  # noqa: E402
 from ue_agent_kit.editor_bridge import LiveEditorError  # noqa: E402
 from ue_agent_kit.freshness import IndexFreshnessTracker  # noqa: E402
@@ -187,6 +188,47 @@ class TaskContextTests(unittest.TestCase):
         }
         defaults.update(kwargs)
         return TaskContextService(**defaults)
+
+    def make_code_service(self) -> tuple[TaskContextService, str]:
+        root = Path(self.temporary.name)
+        project_root = root / "CodeProject"
+        source_root = project_root / "Source" / "CodeProject"
+        public_root = source_root / "Public"
+        private_root = source_root / "Private"
+        public_root.mkdir(parents=True, exist_ok=True)
+        private_root.mkdir(parents=True, exist_ok=True)
+        project_path = project_root / "CodeProject.uproject"
+        project_path.write_text("{}", encoding="utf-8")
+        header = public_root / "DamageComponent.h"
+        source = private_root / "DamageComponent.cpp"
+        header.write_text(
+            "class FDamageComponent {\n"
+            "};\n",
+            encoding="utf-8",
+        )
+        source.write_text('#include "DamageComponent.h"\n', encoding="utf-8")
+        database_path = root / "code-task-context.sqlite3"
+        with open_database(database_path) as connection:
+            result = build_code_index(
+                connection,
+                project_root,
+                database_path,
+                project_key="CodeProject",
+            )
+            self.assertEqual(result.failed, 0)
+        index_service = IndexQueryService(database_path)
+        freshness = IndexFreshnessTracker(
+            index_service,
+            project_path,
+            root / "CodeRevisionExport",
+        )
+        return (
+            TaskContextService(
+                index_service=index_service,
+                freshness_tracker=freshness,
+            ),
+            "Source/CodeProject/Public/DamageComponent.h",
+        )
 
     def make_change_set(
         self,
@@ -552,6 +594,76 @@ class TaskContextTests(unittest.TestCase):
         candidate_paths = [candidate["assetPath"] for candidate in context["relevantAssets"]]
         self.assertNotIn(target, candidate_paths)
         self.assertEqual(context["targetAssets"][0]["assetPath"], target)
+
+    def test_code_query_discovers_source_candidate_and_code_symbol_impact_hint(self) -> None:
+        service, header_path = self.make_code_service()
+        context = service.get_task_context(query="FDamageComponent")
+
+        self.assertTrue(context["ok"])
+        self.assertGreaterEqual(len(context["relevantAssets"]), 1)
+        candidate = context["relevantAssets"][0]
+        self.assertEqual(candidate["assetPath"], header_path)
+        self.assertEqual(candidate["assetClass"], "CppSourceFile")
+        self.assertEqual(candidate["matchedSymbol"]["stableId"], "cpp:type:FDamageComponent")
+        self.assertEqual(candidate["matchedSymbol"]["kind"], "class")
+
+        impacts = [
+            item
+            for item in context["nextExpansions"]
+            if item["tool"] == "ue_analyze_change_impact"
+        ]
+        self.assertEqual(len(impacts), 1)
+        self.assertEqual(impacts[0]["reason"], "code-symbol-impact-relevant-hint")
+        self.assertEqual(
+            impacts[0]["arguments"],
+            {
+                "target_asset_paths": [header_path],
+                "subject_kind": "code-symbol",
+                "subject": "cpp:type:FDamageComponent",
+                "max_depth": 2,
+            },
+        )
+
+    def test_explicit_code_target_uses_code_safe_expansions_and_freshness(self) -> None:
+        service, header_path = self.make_code_service()
+        context = service.get_task_context(
+            query="inspect damage component",
+            asset_paths=[header_path],
+        )
+
+        self.assertEqual(context["request"]["assetPaths"], [header_path])
+        relevant_paths = [
+            item["assetPath"]
+            for item in context["relevantAssets"]
+        ]
+        self.assertNotIn(header_path, relevant_paths)
+        self.assertIn(
+            "Source/CodeProject/Private/DamageComponent.cpp",
+            relevant_paths,
+        )
+        target = context["targetAssets"][0]
+        self.assertTrue(target["found"])
+        self.assertEqual(target["identity"]["asset_class"], "CppSourceFile")
+        self.assertEqual(context["revisionState"]["assets"][header_path]["state"], "fresh")
+
+        expansions = context["nextExpansions"]
+        self.assertIn("ue_get_asset", [item["tool"] for item in expansions])
+        self.assertIn("ue_find_references", [item["tool"] for item in expansions])
+        resolution = [
+            item
+            for item in expansions
+            if item["reason"] == "resolve-code-symbols-for-impact"
+        ]
+        self.assertEqual(len(resolution), 1)
+        self.assertEqual(resolution[0]["arguments"]["profile"], "code")
+        self.assertEqual(resolution[0]["arguments"]["asset_path"], header_path)
+        self.assertFalse(
+            any(
+                item["tool"] == "ue_analyze_change_impact"
+                and "subject_kind" not in item["arguments"]
+                for item in expansions
+            )
+        )
 
     def test_r2_3_no_search_results_is_empty_not_error(self) -> None:
         service = self.make_service(memory_service=None, freshness_tracker=None)
@@ -1111,8 +1223,13 @@ class TaskContextTests(unittest.TestCase):
             )
         with self.assertRaisesRegex(ValueError, "duplicates"):
             service.get_task_context(query="检查", asset_paths=[ASSET_A, ASSET_A])
-        with self.assertRaisesRegex(ValueError, "must be an exact /Game Object Path"):
-            service.get_task_context(query="检查", asset_paths=["Relative/Path.Asset"])
+        relative_missing = service.get_task_context(
+            query="检查",
+            asset_paths=["Relative/Path.Asset"],
+        )
+        self.assertFalse(relative_missing["targetAssets"][0]["found"])
+        with self.assertRaisesRegex(ValueError, "safe project-relative indexed path"):
+            service.get_task_context(query="检查", asset_paths=["../Relative/Path.Asset"])
         with self.assertRaisesRegex(ValueError, "must be boolean"):
             service.get_task_context(query="检查", include_memory=1)  # type: ignore[arg-type]
         with self.assertRaisesRegex(ValueError, "max_output_tokens"):

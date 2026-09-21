@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .code_index import CODE_PROFILE, CPP_SOURCE_ASSET_CLASS
+
 
 FRESHNESS_SCHEMA_VERSION = "1.0"
 MAX_FRESHNESS_SAMPLES = 20
@@ -54,6 +56,29 @@ def _package_candidates(project_path: Path, record: dict[str, Any]) -> tuple[lis
     if any(not _safe_relative(candidate, content_root) for candidate in candidates):
         return [], "invalid-package-name"
     return candidates, ""
+
+
+def _source_file_candidate(project_path: Path, record: dict[str, Any]) -> tuple[Path | None, str]:
+    if str(record.get("profile", "")) != CODE_PROFILE:
+        return None, "unsupported-profile"
+    if str(record.get("asset_class", "")) != CPP_SOURCE_ASSET_CLASS:
+        return None, "unsupported-code-asset-class"
+    asset_path = str(record.get("asset_path", "")).strip()
+    if not asset_path or asset_path.startswith("/") or "\\" in asset_path:
+        return None, "invalid-source-path"
+    parts = tuple(part for part in asset_path.split("/") if part)
+    if not parts or any(part in {".", ".."} for part in parts):
+        return None, "invalid-source-path"
+    project_root = project_path.parent.resolve()
+    candidate = project_root.joinpath(*parts).resolve()
+    if not _safe_relative(candidate, project_root):
+        return None, "invalid-source-path"
+    return candidate, ""
+
+
+def _file_modified_utc(path: Path) -> str:
+    modified = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
+    return modified.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def _resolve_canonical_path(export_root: Path, record: dict[str, Any]) -> Path | None:
@@ -159,7 +184,76 @@ class IndexFreshnessTracker:
                 }
             return self._inspect_record(record)
 
+    def _inspect_code_record(self, record: dict[str, Any]) -> dict[str, Any]:
+        asset_path = str(record.get("asset_path", ""))
+        index_revision = str(record.get("revision_value", ""))
+        index_size = int(record.get("file_size", 0) or 0)
+        index_modified = str(record.get("modified_utc", ""))
+        reasons: list[str] = []
+        disk_revision = ""
+        disk_size: int | None = None
+        disk_modified = ""
+
+        if not _is_sha256_revision(index_revision):
+            reasons.append("index-revision-unavailable")
+
+        source_path, candidate_error = _source_file_candidate(self.project_path, record)
+        if candidate_error:
+            reasons.append(candidate_error)
+        elif source_path is None or not source_path.is_file():
+            reasons.append("source-file-missing")
+        else:
+            try:
+                stat = source_path.stat()
+                disk_size = int(stat.st_size)
+                disk_modified = _file_modified_utc(source_path)
+                disk_revision = self._cached_file_revision(source_path)
+            except OSError:
+                reasons.append("source-file-unreadable")
+
+        comparable = _is_sha256_revision(index_revision) and _is_sha256_revision(disk_revision)
+        if not comparable:
+            state = "unavailable"
+        else:
+            if index_revision != disk_revision:
+                reasons.append("index-disk-mismatch")
+                state = "stale"
+            else:
+                state = "fresh"
+
+        session = self._session_stale.get(asset_path)
+        if session is not None:
+            state = "stale"
+            reasons.append("session-commit-stale")
+
+        result = {
+            "schemaVersion": FRESHNESS_SCHEMA_VERSION,
+            "assetPath": asset_path,
+            "profile": CODE_PROFILE,
+            "state": state,
+            "reason": ",".join(dict.fromkeys(reasons)),
+            "indexFresh": state == "fresh" if state != "unavailable" else None,
+            "indexStale": state == "stale" if state != "unavailable" else None,
+            "indexRevision": index_revision,
+            "revisionExportRevision": "",
+            "diskRevision": disk_revision,
+            "comparisons": {
+                "indexMatchesRevisionExport": None,
+                "indexMatchesDisk": index_revision == disk_revision if disk_revision else None,
+                "revisionExportMatchesDisk": None,
+                "indexMatchesSourceSize": index_size == disk_size if disk_size is not None else None,
+                "indexMatchesSourceMtime": index_modified == disk_modified if disk_modified else None,
+            },
+            "comparedAtUtc": _utc_now_iso(),
+        }
+        if session is not None:
+            result["sessionTransition"] = dict(session)
+        return result
+
     def _inspect_record(self, record: dict[str, Any]) -> dict[str, Any]:
+        if str(record.get("profile", "")) == CODE_PROFILE:
+            return self._inspect_code_record(record)
+
         asset_path = str(record.get("asset_path", ""))
         index_revision = str(record.get("revision_value", ""))
         reasons: list[str] = []
@@ -261,9 +355,9 @@ class IndexFreshnessTracker:
                 state = "fresh"
             reason = ""
             if stale:
-                reason = "One or more indexed package Revisions differ from Revision Export or disk."
+                reason = "One or more indexed revisions differ from current package or source content."
             elif unavailable:
-                reason = "Some indexed packages could not be compared across all three Revision sources."
+                reason = "Some indexed items could not be compared with their current package or source content."
             return {
                 "schemaVersion": FRESHNESS_SCHEMA_VERSION,
                 "state": state,
@@ -271,6 +365,10 @@ class IndexFreshnessTracker:
                 "indexStale": bool(stale),
                 "reason": reason,
                 "comparisonMode": "sqlite-revision-export-disk-sha256",
+                "comparisonModes": {
+                    "asset": "sqlite-revision-export-disk-sha256",
+                    "code": "sqlite-source-sha256-mtime-size",
+                },
                 "comparedAssetCount": len(results),
                 "freshAssetCount": len(fresh),
                 "staleAssetCount": len(stale),

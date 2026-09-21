@@ -13,6 +13,7 @@ from .backups import (
     rollback_backup,
     verify_rollback_export,
 )
+from .code_index import DEFAULT_SOURCE_ROOTS, build_code_index
 from .config import DEFAULT_DATABASE, DEFAULT_MEMORY_DATABASE
 from .database import assert_fts5_available, get_schema_version, open_database
 from .fixtures import validate_fixture_plan, verify_fixture_export
@@ -41,6 +42,7 @@ from .project_memory import (
 )
 from .patches import PATCH_SCHEMA_VERSION, get_operation_registry, validate_patch
 from .queries import find_references, get_asset, get_stats, search_assets, search_symbols
+from .reflection_index import index_reflection_export
 from .schema import CURRENT_SCHEMA_VERSION
 from .source_control import P4SourceControlService
 
@@ -115,6 +117,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="Explicit Unreal asset path prefix to prune, for example /Game. No prune occurs when omitted.",
     )
 
+    index_code = index_subparsers.add_parser(
+        "code",
+        help="Index C/C++ source files into the existing SQLite knowledge index.",
+    )
+    _add_database_argument(index_code)
+    index_code.add_argument("project_root", type=Path)
+    index_code.add_argument("--source-root", action="append", dest="source_roots")
+    index_code.add_argument("--force", action="store_true")
+    index_code.add_argument("--no-prune", action="store_true")
+    index_code.add_argument("--project-key", default=os.environ.get("UEAK_PROJECT_KEY", ""))
+    index_code.add_argument(
+        "--include-files",
+        action="store_true",
+        help="Include per-source-file results in JSON output.",
+    )
+
+    index_reflection = index_subparsers.add_parser(
+        "reflection",
+        help="Merge an Unreal reflection export into the existing code index.",
+    )
+    _add_database_argument(index_reflection)
+    index_reflection.add_argument("reflection_export", type=Path)
+    index_reflection.add_argument("--project-key", default=os.environ.get("UEAK_PROJECT_KEY", ""))
+
     index_stats = index_subparsers.add_parser("stats", help="Show index statistics.")
     _add_database_argument(index_stats)
 
@@ -125,6 +151,11 @@ def build_parser() -> argparse.ArgumentParser:
     _add_database_argument(search_assets_parser)
     search_assets_parser.add_argument("query", nargs="?", default="")
     search_assets_parser.add_argument("--class", dest="asset_class", default="")
+    search_assets_parser.add_argument(
+        "--profile",
+        default="",
+        help="Exact asset profile. Default excludes the code profile.",
+    )
     _add_pagination_arguments(search_assets_parser, default_limit=50)
 
     search_symbols_parser = search_subparsers.add_parser("symbols", help="Search indexed symbols.")
@@ -132,6 +163,11 @@ def build_parser() -> argparse.ArgumentParser:
     search_symbols_parser.add_argument("query", nargs="?", default="")
     search_symbols_parser.add_argument("--kind", default="")
     search_symbols_parser.add_argument("--asset", default="")
+    search_symbols_parser.add_argument(
+        "--profile",
+        default="",
+        help="Exact symbol-owner asset profile. Default excludes the code profile.",
+    )
     search_symbols_parser.add_argument("--include-details", action="store_true")
     _add_pagination_arguments(search_symbols_parser, default_limit=50)
 
@@ -682,6 +718,28 @@ def run(args: argparse.Namespace) -> tuple[Any, int]:
             )
         return result.to_dict(include_assets=args.include_assets), 0 if result.failed == 0 and not result.errors else 1
 
+    if args.command == "index" and args.index_command == "code":
+        with open_database(args.database) as connection:
+            result = build_code_index(
+                connection,
+                args.project_root,
+                args.database,
+                source_roots=args.source_roots or DEFAULT_SOURCE_ROOTS,
+                force=args.force,
+                prune=not args.no_prune,
+                project_key=args.project_key,
+            )
+        return result.to_dict(include_files=args.include_files), 0 if result.failed == 0 and not result.errors else 1
+
+    if args.command == "index" and args.index_command == "reflection":
+        with open_database(args.database) as connection:
+            result = index_reflection_export(
+                connection,
+                args.reflection_export,
+                project_key=args.project_key,
+            )
+        return result.to_dict(), 0 if not result.errors else 1
+
     context, connection = _open_query_database(args.database)
     try:
         if args.command == "index" and args.index_command == "stats":
@@ -690,12 +748,14 @@ def run(args: argparse.Namespace) -> tuple[Any, int]:
             return {
                 "query": args.query,
                 "assetClass": args.asset_class,
+                "profile": args.profile,
                 "limit": args.limit,
                 "offset": args.offset,
                 "results": search_assets(
                     connection,
                     args.query,
                     asset_class=args.asset_class,
+                    profile=args.profile,
                     limit=args.limit,
                     offset=args.offset,
                 ),
@@ -705,6 +765,7 @@ def run(args: argparse.Namespace) -> tuple[Any, int]:
                 "query": args.query,
                 "kind": args.kind,
                 "asset": args.asset,
+                "profile": args.profile,
                 "limit": args.limit,
                 "offset": args.offset,
                 "results": search_symbols(
@@ -712,6 +773,7 @@ def run(args: argparse.Namespace) -> tuple[Any, int]:
                     args.query,
                     kind=args.kind,
                     asset_path=args.asset,
+                    profile=args.profile,
                     limit=args.limit,
                     offset=args.offset,
                     include_details=args.include_details,

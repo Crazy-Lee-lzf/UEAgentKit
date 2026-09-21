@@ -182,9 +182,11 @@ def _server_instructions(
         "Revision, Memory, and Live Editor facts plus deterministic risks in one request; its correlation "
         "section deterministically joins Active Work, an explicitly requested Change Set, the Live Editor "
         "session, and Memory Evidence without model inference or persistence. "
-        "Use ue_analyze_change_impact with exact /Game target paths for a deterministic bounded "
-        "reverse-reference impact analysis (direct and indirect consumers, validation targets, and "
-        "deterministic risks); static references never prove runtime breakage. "
+        "Use ue_analyze_change_impact with exact /Game target paths for asset-level analysis, or "
+        "with a safe project-relative indexed source owner plus subject_kind=code-symbol and an exact "
+        "cpp:type stable ID for Code Knowledge analysis. The bounded reverse-reference result includes "
+        "direct and indirect consumers, validation targets, and deterministic risks; static references "
+        "never prove runtime breakage. "
         "Use ue_analyze_semantic_diff only with an explicit change_set_id to align Plan intent with "
         "live, persisted, or independently verified evidence; it is read-only, never discovers private "
         "Change Sets, and does not issue an R3 trust verdict. "
@@ -325,6 +327,22 @@ def _capabilities_response(
         "operations": {
             "available": write_tools_enabled,
             "items": get_operation_registry() if write_tools_enabled else [],
+        },
+        "codeKnowledge": {
+            "supported": True,
+            "sourceProfile": "code",
+            "sourceAssetClass": "CppSourceFile",
+            "sourceSemanticKinds": ["class", "struct", "enum"],
+            "sourceReferenceKinds": ["inherits", "include"],
+            "reflectionSupported": True,
+            "reflectionKinds": ["class", "struct", "enum", "function", "property"],
+            "reflectionReferenceKinds": ["inherits", "implements"],
+            "impactSubjectKind": "code-symbol",
+            "impactTrustedReferenceKinds": ["inherits", "include", "implements"],
+            "queryTools": ["ue_search", "ue_get_asset", "ue_find_references", "ue_analyze_change_impact"],
+            "workflowScript": "scripts/RunCodeKnowledge.ps1",
+            "fullCppParser": False,
+            "callGraph": False,
         },
         "sourceControl": {
             "configured": source_control_enabled,
@@ -677,6 +695,12 @@ def _capabilities_response(
                 "maxAssets": MAX_TASK_CONTEXT_CANDIDATES,
                 "maxSearchTerms": MAX_CANDIDATE_SEARCH_TERMS,
                 "symbolSupplement": True,
+                "codeProfileSupplement": True,
+                "profiles": ["default-non-code", "code"],
+                "targetPathKinds": [
+                    "game-object-path",
+                    "project-relative-indexed-path",
+                ],
                 "modelInference": False,
             },
             "crossSourceCorrelation": {
@@ -953,6 +977,29 @@ def _project_status_response(
             "profile": index_metadata.get("profile", ""),
             "stats": index_status.get("stats", {}),
         },
+        "codeKnowledge": index_status.get(
+            "codeKnowledge",
+            {
+                "available": False,
+                "profile": "code",
+                "assetClass": "CppSourceFile",
+                "assets": 0,
+                "types": 0,
+                "functions": 0,
+                "properties": 0,
+                "references": {"include": 0, "inherits": 0, "implements": 0},
+                "lastCodeIndexedAtUtc": "",
+                "reflection": {
+                    "imported": False,
+                    "lastIndexedAtUtc": "",
+                    "project": "",
+                    "schemaVersion": "",
+                    "exporterVersion": "",
+                    "matchedTypes": 0,
+                    "unmatchedTypes": 0,
+                },
+            },
+        ),
         "projectMemory": {
             "configured": memory_status is not None,
             "state": "available" if memory_status is not None else "unavailable",
@@ -992,6 +1039,11 @@ def _project_status_response(
             "relevantAssets": {
                 "maxAssets": MAX_TASK_CONTEXT_CANDIDATES,
                 "deterministic": True,
+                "codeProfileSupplement": True,
+                "targetPathKinds": [
+                    "game-object-path",
+                    "project-relative-indexed-path",
+                ],
             },
             "crossSourceCorrelation": {
                 "available": True,
@@ -1124,9 +1176,10 @@ def _suggested_action(code: str) -> str:
         "snapshot-refresh-revision-mismatch": "Save or revert the asset, then retry after its disk Package Revision is stable.",
         "snapshot-refresh-disk-space": "Free disk space under the fixed workflow root before retrying snapshot refresh.",
         "live-editor-asset-dirty": "Save or revert the target asset in Unreal Editor before refreshing its disk-backed index record.",
-        "unsupported-impact-subject": "Use subject_kind asset-level or blueprint-symbol, or repeat the analysis without a structured subject.",
+        "unsupported-impact-subject": "Use subject_kind asset-level, blueprint-symbol, or code-symbol, or repeat the analysis without a structured subject.",
         "impact-subject-not-found": "Pass the exact symbol stable ID as reported by ue_search or ue_get_asset symbols.",
-        "impact-subject-asset-mismatch": "Use the exact /Game asset path that owns the blueprint-symbol subject.",
+        "impact-subject-asset-mismatch": "Use the exact indexed asset/source path that owns the structured subject.",
+        "impact-subject-kind-mismatch": "Use a symbol stable ID whose owner profile matches the requested subject_kind.",
         "insufficient-evidence": "Use an explicit Change Set with bound operations and retain its fixed Workflow evidence artifacts.",
         "semantic-diff-stage-unavailable": "Request one of the availableStages reported in details, or complete save and independent verify first.",
         "semantic-diff-evidence-stale": "Refresh or independently verify the exact affected assets before re-running Semantic Diff.",

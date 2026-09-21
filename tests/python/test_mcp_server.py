@@ -792,8 +792,10 @@ class McpServerTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "canonical GUID"):
             self.service.get_asset(ASSET_A, graph_guid="not-a-guid")
-        with self.assertRaisesRegex(ValueError, "beginning with /"):
-            self.service.get_asset("Game/BP_Invalid.BP_Invalid")
+        relative_missing = self.service.get_asset("Game/BP_Invalid.BP_Invalid")
+        self.assertFalse(relative_missing["found"])
+        with self.assertRaisesRegex(ValueError, "safe project-relative indexed path"):
+            self.service.get_asset("../Game/BP_Invalid.BP_Invalid")
 
     def test_service_requires_bounded_and_filtered_queries(self) -> None:
         with self.assertRaisesRegex(ValueError, "must not exceed"):
@@ -949,6 +951,26 @@ class McpServerTests(unittest.TestCase):
         self.assertFalse(capabilities["operations"]["available"])
         self.assertFalse(capabilities["freshness"]["available"])
         self.assertFalse(capabilities["freshness"]["planRequiresFreshIndex"])
+        task_context_contract = capabilities["taskContext"]
+        relevant_contract = task_context_contract["relevantAssets"]
+        self.assertTrue(relevant_contract["codeProfileSupplement"])
+        self.assertEqual(
+            relevant_contract["profiles"],
+            ["default-non-code", "code"],
+        )
+        self.assertEqual(
+            relevant_contract["targetPathKinds"],
+            ["game-object-path", "project-relative-indexed-path"],
+        )
+        code_contract = capabilities["codeKnowledge"]
+        self.assertTrue(code_contract["supported"])
+        self.assertEqual(code_contract["sourceProfile"], "code")
+        self.assertEqual(code_contract["sourceAssetClass"], "CppSourceFile")
+        self.assertTrue(code_contract["reflectionSupported"])
+        self.assertEqual(code_contract["impactSubjectKind"], "code-symbol")
+        self.assertIn("implements", code_contract["impactTrustedReferenceKinds"])
+        self.assertFalse(code_contract["fullCppParser"])
+        self.assertFalse(code_contract["callGraph"])
         semantic_contract = capabilities["semanticDiff"]
         self.assertTrue(semantic_contract["available"])
         self.assertFalse(semantic_contract["workflowEvidenceAvailable"])
@@ -1001,6 +1023,15 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(project_status["engine"]["state"], "unavailable")
         self.assertEqual(project_status["freshness"]["state"], "unknown")
         self.assertEqual(project_status["liveEditor"]["state"], "unavailable")
+        self.assertFalse(project_status["codeKnowledge"]["available"])
+        self.assertEqual(project_status["codeKnowledge"]["assets"], 0)
+        self.assertFalse(project_status["codeKnowledge"]["reflection"]["imported"])
+        project_relevant = project_status["taskContext"]["relevantAssets"]
+        self.assertTrue(project_relevant["codeProfileSupplement"])
+        self.assertEqual(
+            project_relevant["targetPathKinds"],
+            ["game-object-path", "project-relative-indexed-path"],
+        )
         self.assertTrue(project_status["semanticDiff"]["available"])
         self.assertFalse(project_status["semanticDiff"]["workflowEvidenceAvailable"])
         self.assertTrue(project_status["verificationTrust"]["available"])

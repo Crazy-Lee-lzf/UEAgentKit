@@ -7,6 +7,8 @@ from .database import get_metadata
 from collections.abc import Iterable
 from typing import Any
 
+from .code_index import CODE_PROFILE
+
 
 MAX_QUERY_LIMIT = 10000
 
@@ -65,6 +67,7 @@ def search_assets(
     *,
     asset_class: str = "",
     path_prefix: str = "",
+    profile: str = "",
     limit: int = 50,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
@@ -72,6 +75,7 @@ def search_assets(
     query = query.strip()
     asset_class = asset_class.strip()
     path_prefix = path_prefix.strip()
+    profile = profile.strip()
     class_like = f"%{asset_class}%"
     path_like = path_prefix + "%"
     fetch_limit = limit + offset + 200
@@ -79,6 +83,12 @@ def search_assets(
     if not query:
         clauses: list[str] = []
         parameters: list[Any] = []
+        if profile:
+            clauses.append("profile = ?")
+            parameters.append(profile)
+        else:
+            clauses.append("profile <> ?")
+            parameters.append(CODE_PROFILE)
         if asset_class:
             clauses.append("asset_class LIKE ?")
             parameters.append(class_like)
@@ -103,6 +113,12 @@ def search_assets(
         ranked: list[tuple[float, sqlite3.Row]] = []
         filter_clauses: list[str] = []
         filter_parameters: list[Any] = []
+        if profile:
+            filter_clauses.append("a.profile = ?")
+            filter_parameters.append(profile)
+        else:
+            filter_clauses.append("a.profile <> ?")
+            filter_parameters.append(CODE_PROFILE)
         if asset_class:
             filter_clauses.append("a.asset_class LIKE ?")
             filter_parameters.append(class_like)
@@ -187,6 +203,7 @@ def search_symbols(
     kind: str = "",
     asset_path: str = "",
     path_prefix: str = "",
+    profile: str = "",
     limit: int = 50,
     offset: int = 0,
     include_details: bool = False,
@@ -194,9 +211,16 @@ def search_symbols(
     limit, offset = normalize_pagination(limit, offset)
     query = query.strip()
     path_prefix = path_prefix.strip()
+    profile = profile.strip()
     fetch_limit = limit + offset + 200
     filters: list[str] = []
     parameters: list[Any] = []
+    if profile:
+        filters.append("a.profile = ?")
+        parameters.append(profile)
+    else:
+        filters.append("a.profile <> ?")
+        parameters.append(CODE_PROFILE)
     if kind:
         filters.append("s.kind = ?")
         parameters.append(kind)
@@ -603,6 +627,7 @@ def get_asset(
             connection,
             "",
             asset_path=asset_path,
+            profile=CODE_PROFILE if str(row["profile"]) == CODE_PROFILE else "",
             limit=symbol_limit,
             offset=symbol_offset,
             include_details=include_details,

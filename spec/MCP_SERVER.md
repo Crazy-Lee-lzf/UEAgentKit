@@ -166,11 +166,11 @@ Batch Task 只扫描当前已加载 World。Level 使用弱引用，Actor 不跨
 
 ### `ue_get_capabilities`
 
-返回当前 Server 版本、模式、实际注册的 Tool、可用 Operation、查询上限、响应契约和安全边界。只读模式不会把写入 Operation 标记为可用。
+返回当前 Server 版本、模式、实际注册的 Tool、可用 Operation、查询上限、响应契约和安全边界。只读模式不会把写入 Operation 标记为可用。`codeKnowledge` 同时声明 C1 Source Index、C2 UE Reflection、`code-symbol` Impact 的能力边界，并明确 `fullCppParser=false / callGraph=false`。
 
 ### `ue_get_project_status`
 
-返回 Project Key、固定项目状态、Engine 版本、SQLite Schema、索引时间、Exporter 版本、统计信息、Workflow 模式、索引新鲜度状态和 Live Editor 可用性。
+返回 Project Key、固定项目状态、Engine 版本、SQLite Schema、索引时间、Exporter 版本、统计信息、Workflow 模式、索引新鲜度状态和 Live Editor 可用性。`codeKnowledge` 返回当前 DB 的 code asset/type/function/property 数量、`include/inherits/implements` 计数、最近 Code Index 时间以及 Reflection import 状态。
 
 固定项目模式会比较会话冻结的 SQLite Revision、配对 Revision Export Canonical Revision 和磁盘 Package SHA-256，返回 `fresh`、`stale`、`partial` 或 `unavailable`。默认只读模式没有固定 Project 与 Revision Export，必须明确返回 `state=unknown`，不能把未知状态报告为 fresh。刷新 Apply 后旧会话仍可查询旧索引，但 `workflow.indexLifecycle.restartRequired=true`，所有新工作流动作返回 `snapshot-refresh-restart-required`。详细契约见 `spec/INDEX_FRESHNESS.md`。
 
@@ -186,7 +186,7 @@ Batch Task 只扫描当前已加载 World。Level 使用弱引用，Actor 不跨
 
 ### `ue_get_asset`
 
-按完整 Object Path 读取一个资产，支持以下 section：
+按精确 indexed path 读取一个资产。传统 Unreal Asset 使用完整 `/Game/...` Object Path；Code Index pseudo-asset 允许安全的项目相对路径（例如 `Source/Game/Public/MyActor.h`）。支持以下 section：
 
 ```text
 identity
@@ -206,7 +206,8 @@ nodes
 
 - `direction=outgoing|incoming|both`。
 - `depth` 为 1 至 3；大于 1 时必须提供锚点 `asset_path`。
-- `project_only=true` 只返回目标资产也存在于当前 SQLite 索引中的边。
+- `project_only=true` 只返回目标资产也存在于当前 SQLite 索引中的边；对 Code Index 同样适用，因为源码 pseudo-asset 也存放在 `assets`。
+- `asset_path` / `target_asset_path` 同时接受传统 `/Game/...` 路径与安全的项目相对 indexed path；相对路径禁止盘符、反斜杠、`.`/`..` 逃逸。
 - 深层遍历不接受源/目标 Symbol 与目标资产端点组合，避免产生含义不稳定的跨层过滤。
 
 ### `ue_get_task_context`
@@ -215,7 +216,7 @@ nodes
 
 ```text
 query                 必填，任务的自然语言描述
-asset_paths           可选，精确 /Game Object Path，最多 10 个
+asset_paths           可选，精确 /Game Object Path 或安全的项目相对 indexed path，最多 10 个
 work_item_id          可选，Active Work Item ID
 change_set_id         可选，Change Set ID
 include_live_context  默认 true
@@ -227,21 +228,25 @@ max_output_tokens     默认 4096，范围 256–32768
 
 - `risks` 只包含确定性事实：`target-dirty-in-editor`、`asset-stale`、`asset-revision-unavailable`、`target-not-indexed`、`memory-stale-records`、`memory-conflicted-records`、`change-set-not-found`、`change-set-terminal`、`work-item-not-found`、`relevant-assets-search-failed` 等；不包含模型推断，禁止把猜测混成事实。
 - 某一来源不可用时只降级对应 section（例如 Offline 模式 `revisionState.available=false, reason=revision-export-not-configured`，Live Editor 未启用时 `liveEditor.reason=live-editor-disabled`），不会让整个请求失败；降级明细在 `degradedSources` 中显式列出。
-- `relevantAssets` 是 R0.2 的确定性相关资产候选集：只复用 immutable SQLite Index 的 Asset Search（query 分词，最多 8 个 term）加少量 Symbol Search 补充，按精确 `assetPath` 去重并与显式 `asset_paths` 互斥，固定排序（命中 term 数降序 → 首个命中 term 在 query 中的位置 → `assetPath` 字典序），上限 8 条。每条至少含 `assetPath / assetClass（可证明时）/ source / whyIncluded / matchKind`，可附 `matchedTerms / matchCount / matchedSymbol`；不产出 score/confidence，不遍历引用、不调用模型。搜索子源异常时按既有错误模型降级（`degradedSources.section=relevantAssets`；全部失败时 `relevantAssets=[]` 并追加 `relevant-assets-search-failed` info 风险），不伪造结果。
+- `relevantAssets` 是 R0.2 的确定性相关资产候选集：复用 immutable SQLite Index 的 Asset/Symbol Search（query 分词，最多 8 个 term），并对每个 term 额外执行 `profile=code` 补充检索；按精确 `assetPath` 去重并与显式 `asset_paths` 互斥，固定排序（命中 term 数降序 → 首个命中 term 在 query 中的位置 → `assetPath` 字典序），上限 8 条。每条至少含 `assetPath / assetClass（可证明时）/ source / whyIncluded / matchKind`，可附 `matchedTerms / matchCount / matchedSymbol`；不产出 score/confidence，不遍历引用、不调用模型。搜索子源异常时按既有错误模型降级（`degradedSources.section=relevantAssets`；全部失败时 `relevantAssets=[]` 并追加 `relevant-assets-search-failed` info 风险），不伪造结果。
 - `correlation` 是 R0.3 的确定性 Cross-source Correlation：只读、每请求现算、零持久化、零模型推断。仅用精确键做联接——Change Set 的 `editorSessionId` 与 Live Editor `sessionId`（相等即 `matches`，不等产生 `change-set-editor-session-mismatch` medium 风险）、资产路径集合交集（Change Set `affectedAssets` / Active Work `assetPaths` ↔ Editor dirty/open、相互之间）、Change Set ID 字面量在工作项文本字段中的出现、资产 scope 的 Memory Evidence（复用 scoped `search_records`，全部状态，每条附 `recordId/status/recordType/title`）。Change Set 只在显式 `change_set_id` 且 `found` 时参与，**绝不自动发现**，也不扫描 workflow 私有 `_change_sets`；`include_memory=false` / `include_live_context=false` / 来源降级时对应联接整体缺席，绝不伪造。链接种类固定（`change-set-editor-session / change-set-asset-in-editor / change-set-asset-memory-evidence / work-change-set-asset-overlap / work-references-change-set / work-asset-in-editor / work-asset-memory-evidence`），固定排序、上限 16 条；`summary` 如实报告 workItemsConsidered/Total、affectedAssetsSampled/Total、evidenceLookups、linksTruncated 等边界计数。无任何可关联来源时 `available=false, reason=insufficient-correlatable-sources`。Evidence 检索基于资产名 token 的 FTS 匹配，未命中只代表「本次确定性检索未命中」，不代表「不存在记录」。
 - 输出受 `max_output_tokens` 强制约束：超预算时按固定优先级阶梯裁剪可展开内容（Change Set operations → Live Editor summary → Memory records/nodes → Active Work items → Relevant Assets 候选 metadata → 候选数量 → Correlation links → Correlation summary → 目标资产 metadata/summary → Revision comparisons → project stats → nextExpansions → risk details → 深层标识字段），并在 `outputBudget.truncated/truncationReason` 中显式报告；裁剪的展开路径进入 `nextExpansions`。候选与 Correlation 永不优先于 target identity、high risk 与 revision summary 等更高优先级信息。
 - Memory 的 stale 检测复用现有 FTS 检索（按 asset scope + `stale` 状态过滤）；Memory FTS 对纯中文短语的匹配能力受上游 `unicode61` tokenizer 限制，检测不到只代表“本次检索未命中”，不代表“不存在 stale 记录”。
 
 ### `ue_analyze_change_impact`（R1）
 
-对 1..8 个精确 `/Game` Object Path 目标做确定性的有界逆向引用影响分析。方向契约固定为 **consumer → target**（`references_table` 行归 consumer 资产所有，`target_asset_path` 是被引用目标），因此 `Target T ← Direct Consumer A ← Consumer C of A` 中 A/B 为 depth=1、C 为 depth=2。
+对已索引目标做确定性的有界逆向引用影响分析：`asset-level` / `blueprint-symbol` 使用精确 `/Game` Object Path；`code-symbol` 使用其唯一 owner 的精确项目相对源码路径（例如 `Source/Foo/Public/Bar.h`）。方向契约固定为 **consumer → target**（`references_table` 行归 consumer 资产所有，`target_asset_path` 是被引用目标），因此 `Target T ← Direct Consumer A ← Consumer C of A` 中 A/B 为 depth=1、C 为 depth=2。
 
 ```text
-target_asset_paths  必填，1..8 个精确 /Game Object Path，不可重复
-subject_kind        默认 asset-level；结构化 subject 枚举共 8 种，仅
-                     asset-level 与 blueprint-symbol（subject=精确 symbol
-                     stable_id，且必须属于唯一目标资产）被现有 Index 证据
-                     机械支持；其余 6 种（data-table-row / searchable-name /
+target_asset_paths  必填，1..8 个精确目标且不可重复；asset-level /
+                     blueprint-symbol 必须是 /Game Object Path；code-symbol
+                     必须是项目相对 indexed source path，且结构化 subject
+                     仍要求唯一目标
+subject_kind        默认 asset-level；当前机械支持 asset-level、
+                     blueprint-symbol、code-symbol。code-symbol 的 subject
+                     为精确 C++ type stable_id，owner 必须是 profile=code；
+                     其影响遍历只接受 code-profile 的 inherits/include，以及带 `ue-reflection` 证据的 implements。
+                     其余 6 种（data-table-row / searchable-name /
                      data-asset-object / material-instance-parent /
                      material-instance-parameter / blueprint-member）显式
                      返回 unsupported-impact-subject，不猜测
@@ -256,9 +261,10 @@ max_output_tokens   默认 4096，范围 256–32768
 返回结构按 `request / direction / summary / targets / directConsumers / indirectConsumers / runtimeSensitiveConsumers / analysisGaps / validationTargets / risks / riskSummary / nextActions / outputBudget` 组织：
 
 - 遍历是纯精确键的 BFS：每层只查询 `target_asset_path IN (frontier)`（按 500 一批分块），全局 visited 防环、BFS 保证每个 consumer 对每个 target 的 shortestDepth 稳定；同一 consumer 的多条引用边合并为一条记录（`impactedTargets[]` + `referenceKinds[]` + `evidence[]` + `paths[]`）。自引用（consumer == target）不作为 consumer 收录。
-- `referenceKinds` 每项含 `rawReferenceKind / normalizedReferenceKind / source / edgeCount`；归一化类别固定为 `asset-reference / soft-reference / class-reference / blueprint-symbol-reference / searchable-name-reference / parent-reference / unknown-reference`，映射只基于 exporter 写入的 kind 事实（`inherits→parent-reference`、`depends-hard-package→asset-reference`、`casts/implements→class-reference`、`calls/macro-calls/interface-calls/reads/writes/returns/delegate-*→blueprint-symbol-reference`），未覆盖的 kind 原样保留并归一化为 `unknown-reference`，绝不根据资产名猜测。
+- `referenceKinds` 每项含 `rawReferenceKind / normalizedReferenceKind / source / edgeCount`；归一化类别固定为 `asset-reference / soft-reference / class-reference / blueprint-symbol-reference / searchable-name-reference / parent-reference / code-include-reference / unknown-reference`。`inherits→parent-reference`、`include→code-include-reference`；其余映射保持既有确定性规则，未覆盖 kind 归一化为 `unknown-reference`。
+- `code-symbol` 只遍历 code-profile 的 `inherits/include/implements`，其中 `implements` 还必须满足 `details_json.evidence=ue-reflection`。depth=1 的 `inherits` 与可信 `implements` 是类型级证据；quoted `#include` 是 owner 文件级证据，可能保守过报。depth>=2 仍遵守相同 trust filter；include 派生结果会显式附 `code-include-file-granularity` analysis gap。
 - `runtimeSensitiveConsumers` 永远只含能被 Index 显式证明运行时消费语义的对象；当前 Index 无 runtime/editor 分类证据，固定返回 `classificationState=not-proven-with-current-evidence`、`items=[]`，不凭资产类型启发式猜测（运行时执行链属 R5）。
-- `analysisGaps` 区分“没有找到 Consumer”（`no-consumer-evidence-in-index`，仅当该目标确无任何 incoming 引用行时出现）与“当前证据无法证明”（`unknown-reference-kind`、`runtime-sensitivity-not-proven`、`frontier-truncated`）；不索引的目标在 `targets[].found=false, reason=target-not-indexed` 显式表达。
+- `analysisGaps` 区分“没有找到 Consumer”与“当前证据无法证明”；`code-symbol` 使用 include 证据时额外返回 `code-include-file-granularity`，明确它是文件级保守范围而非类型级使用证明。不索引的目标仍以 `targets[].found=false, reason=target-not-indexed` 显式表达。
 - `validationTargets` 是确定性的建议验证范围：Tier 0 目标自身、Tier 1 Direct Consumers、Tier 2 有界 Indirect Consumers，按 tier → depth → assetPath 固定排序并给 `priorityOrder`；这是引用图的整理结果，不构成“已验证通过”的声明（Verification Plan 属 R3）。
 - `risks` 只含确定性事实：`high-fanout-target`（直连消费者 ≥15）、`impact-analysis-truncated`、`impact-target-not-indexed`、`unknown-reference-kind`；风险等级只描述分析/修改范围风险，禁止 likely-to-break / confidence / modelScore。
 - `summary` 如实报告 `targetCount / visitedAssetCount / visitedEdgeCount / directConsumerCount / indirectConsumerCount / maxDepthRequested / maxDepthReached / consumerLimit / edgeLimit / pathLimit / truncated / truncationReasons[] / frontierOmittedCount / omittedEdgeCount / omittedPathCount / pathCount / unknownReferenceKindCount`；任何超限部分不静默消失。

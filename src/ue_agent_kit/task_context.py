@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Sequence
 
 from .agent_api import IDENTITY_FIELDS, IndexQueryService
+from .code_index import CODE_PROFILE
 from .memory_service import ProjectMemoryService, ProjectMemoryServiceError
 from .query_protocol import (
     DEFAULT_OUTPUT_TOKEN_BUDGET,
@@ -147,7 +148,19 @@ def _validate_asset_paths(value: Sequence[str] | None) -> tuple[str, ...]:
     for index, item in enumerate(value):
         cleaned = _clean_text(item, name=f"asset_paths[{index}]", maximum=MAX_ASSET_PATH_CHARS)
         if not cleaned.startswith("/Game/"):
-            raise ValueError(f"asset_paths[{index}] must be an exact /Game Object Path.")
+            parts = cleaned.split("/")
+            if (
+                not cleaned
+                or cleaned.startswith("/")
+                or "\\" in cleaned
+                or not parts
+                or any(not part or part in {".", ".."} for part in parts)
+                or ":" in parts[0]
+            ):
+                raise ValueError(
+                    f"asset_paths[{index}] must be an exact /Game Object Path "
+                    "or a safe project-relative indexed path."
+                )
         if cleaned in seen:
             raise ValueError("asset_paths must not contain duplicates.")
         seen.add(cleaned)
@@ -402,79 +415,86 @@ class TaskContextService:
         failures: list[str] = []
         merged: dict[str, dict[str, Any]] = {}
         for term_index, term in enumerate(terms):
-            try:
-                asset_response = self.index_service.search(
-                    query=term,
-                    scope="assets",
-                    limit=MAX_CANDIDATES_PER_TERM,
-                )
-            except (OSError, ValueError, RuntimeError, TypeError, sqlite3.Error):
-                asset_response = None
-                failures.append("asset-search-failed")
-            for hit in self._search_hits(asset_response):
-                asset_path = str(hit.get("asset_path", "")).strip()
-                if not asset_path or asset_path in excluded_paths:
-                    continue
-                existing = merged.get(asset_path)
-                match_kind = _asset_match_kind(term, hit)
-                if existing is None:
-                    merged[asset_path] = {
-                        "assetPath": asset_path,
-                        "assetClass": str(hit.get("asset_class", "")),
-                        "source": "immutable-sqlite-index",
-                        "whyIncluded": "asset-search-query-term",
-                        "matchKind": match_kind,
-                        "matchedTerms": [term],
-                        "matchCount": 1,
-                        "firstTermIndex": term_index,
-                    }
-                    continue
-                existing["whyIncluded"] = "asset-search-query-term"
-                existing["matchKind"] = _better_match_kind(existing["matchKind"], match_kind)
-                if term not in existing["matchedTerms"]:
-                    existing["matchedTerms"].append(term)
-                existing["matchCount"] = len(existing["matchedTerms"])
-                existing["firstTermIndex"] = min(int(existing["firstTermIndex"]), term_index)
+            for profile in ("", CODE_PROFILE):
+                try:
+                    asset_response = self.index_service.search(
+                        query=term,
+                        scope="assets",
+                        profile=profile,
+                        limit=MAX_CANDIDATES_PER_TERM,
+                    )
+                except (OSError, ValueError, RuntimeError, TypeError, sqlite3.Error):
+                    asset_response = None
+                    if "asset-search-failed" not in failures:
+                        failures.append("asset-search-failed")
+                for hit in self._search_hits(asset_response):
+                    asset_path = str(hit.get("asset_path", "")).strip()
+                    if not asset_path or asset_path in excluded_paths:
+                        continue
+                    existing = merged.get(asset_path)
+                    match_kind = _asset_match_kind(term, hit)
+                    if existing is None:
+                        merged[asset_path] = {
+                            "assetPath": asset_path,
+                            "assetClass": str(hit.get("asset_class", "")),
+                            "source": "immutable-sqlite-index",
+                            "whyIncluded": "asset-search-query-term",
+                            "matchKind": match_kind,
+                            "matchedTerms": [term],
+                            "matchCount": 1,
+                            "firstTermIndex": term_index,
+                        }
+                        continue
+                    existing["whyIncluded"] = "asset-search-query-term"
+                    existing["matchKind"] = _better_match_kind(existing["matchKind"], match_kind)
+                    if term not in existing["matchedTerms"]:
+                        existing["matchedTerms"].append(term)
+                    existing["matchCount"] = len(existing["matchedTerms"])
+                    existing["firstTermIndex"] = min(int(existing["firstTermIndex"]), term_index)
 
-            try:
-                symbol_response = self.index_service.search(
-                    query=term,
-                    scope="symbols",
-                    limit=MAX_CANDIDATES_PER_TERM,
-                )
-            except (OSError, ValueError, RuntimeError, TypeError, sqlite3.Error):
-                symbol_response = None
-                failures.append("symbol-search-failed")
-            for hit in self._search_hits(symbol_response):
-                asset_path = str(hit.get("asset_path", "")).strip()
-                if not asset_path or asset_path in excluded_paths:
-                    continue
-                existing = merged.get(asset_path)
-                match_kind = _symbol_match_kind(term, hit)
-                matched_symbol = {
-                    "name": str(hit.get("name", "")),
-                    "kind": str(hit.get("kind", "")),
-                }
-                if existing is None:
-                    merged[asset_path] = {
-                        "assetPath": asset_path,
-                        "assetClass": "",
-                        "source": "immutable-sqlite-index",
-                        "whyIncluded": "symbol-search-query-term",
-                        "matchKind": match_kind,
-                        "matchedTerms": [term],
-                        "matchCount": 1,
-                        "firstTermIndex": term_index,
-                        "matchedSymbol": matched_symbol,
+            for profile in ("", CODE_PROFILE):
+                try:
+                    symbol_response = self.index_service.search(
+                        query=term,
+                        scope="symbols",
+                        profile=profile,
+                        limit=MAX_CANDIDATES_PER_TERM,
+                    )
+                except (OSError, ValueError, RuntimeError, TypeError, sqlite3.Error):
+                    symbol_response = None
+                    if "symbol-search-failed" not in failures:
+                        failures.append("symbol-search-failed")
+                for hit in self._search_hits(symbol_response):
+                    asset_path = str(hit.get("asset_path", "")).strip()
+                    if not asset_path or asset_path in excluded_paths:
+                        continue
+                    existing = merged.get(asset_path)
+                    match_kind = _symbol_match_kind(term, hit)
+                    matched_symbol = {
+                        "stableId": str(hit.get("stable_id", "")),
+                        "name": str(hit.get("name", "")),
+                        "kind": str(hit.get("kind", "")),
                     }
-                    continue
-                existing["matchKind"] = _better_match_kind(existing["matchKind"], match_kind)
-                if term not in existing["matchedTerms"]:
-                    existing["matchedTerms"].append(term)
-                existing["matchCount"] = len(existing["matchedTerms"])
-                existing["firstTermIndex"] = min(int(existing["firstTermIndex"]), term_index)
-                if "matchedSymbol" not in existing:
-                    existing["matchedSymbol"] = matched_symbol
+                    if existing is None:
+                        merged[asset_path] = {
+                            "assetPath": asset_path,
+                            "assetClass": "",
+                            "source": "immutable-sqlite-index",
+                            "whyIncluded": "symbol-search-query-term",
+                            "matchKind": match_kind,
+                            "matchedTerms": [term],
+                            "matchCount": 1,
+                            "firstTermIndex": term_index,
+                            "matchedSymbol": matched_symbol,
+                        }
+                        continue
+                    existing["matchKind"] = _better_match_kind(existing["matchKind"], match_kind)
+                    if term not in existing["matchedTerms"]:
+                        existing["matchedTerms"].append(term)
+                    existing["matchCount"] = len(existing["matchedTerms"])
+                    existing["firstTermIndex"] = min(int(existing["firstTermIndex"]), term_index)
+                    if "matchedSymbol" not in existing:
+                        existing["matchedSymbol"] = matched_symbol
 
         for candidate in merged.values():
             if not candidate.get("assetClass"):
@@ -1466,28 +1486,83 @@ class TaskContextService:
                 }
             )
         if asset_paths:
-            expansions.append(
-                {
-                    "tool": "ue_analyze_change_impact",
-                    "reason": "impact-analysis-explicit-targets",
-                    "arguments": {
-                        "target_asset_paths": list(asset_paths[:2]),
-                        "max_depth": 2,
-                    },
-                }
-            )
+            game_paths = [path for path in asset_paths[:2] if path.startswith("/Game/")]
+            code_paths = [path for path in asset_paths[:2] if not path.startswith("/Game/")]
+            if game_paths:
+                expansions.append(
+                    {
+                        "tool": "ue_analyze_change_impact",
+                        "reason": "impact-analysis-explicit-targets",
+                        "arguments": {
+                            "target_asset_paths": game_paths,
+                            "max_depth": 2,
+                        },
+                    }
+                )
+            for code_path in code_paths:
+                expansions.append(
+                    {
+                        "tool": "ue_search",
+                        "reason": "resolve-code-symbols-for-impact",
+                        "arguments": {
+                            "query": "",
+                            "scope": "symbols",
+                            "profile": CODE_PROFILE,
+                            "asset_path": code_path,
+                            "limit": 20,
+                            "include_details": True,
+                        },
+                    }
+                )
         elif relevant_assets:
             first = relevant_assets[0]
-            expansions.append(
-                {
-                    "tool": "ue_analyze_change_impact",
-                    "reason": "impact-analysis-relevant-asset-hint",
-                    "arguments": {
-                        "target_asset_paths": [str(first.get("assetPath", ""))],
-                        "max_depth": 2,
-                    },
-                }
-            )
+            first_path = str(first.get("assetPath", ""))
+            if first_path.startswith("/Game/"):
+                expansions.append(
+                    {
+                        "tool": "ue_analyze_change_impact",
+                        "reason": "impact-analysis-relevant-asset-hint",
+                        "arguments": {
+                            "target_asset_paths": [first_path],
+                            "max_depth": 2,
+                        },
+                    }
+                )
+            else:
+                matched_symbol = first.get("matchedSymbol")
+                stable_id = (
+                    str(matched_symbol.get("stableId", ""))
+                    if isinstance(matched_symbol, dict)
+                    else ""
+                )
+                if stable_id.startswith("cpp:type:"):
+                    expansions.append(
+                        {
+                            "tool": "ue_analyze_change_impact",
+                            "reason": "code-symbol-impact-relevant-hint",
+                            "arguments": {
+                                "target_asset_paths": [first_path],
+                                "subject_kind": "code-symbol",
+                                "subject": stable_id,
+                                "max_depth": 2,
+                            },
+                        }
+                    )
+                else:
+                    expansions.append(
+                        {
+                            "tool": "ue_search",
+                            "reason": "resolve-code-symbols-for-impact",
+                            "arguments": {
+                                "query": "",
+                                "scope": "symbols",
+                                "profile": CODE_PROFILE,
+                                "asset_path": first_path,
+                                "limit": 20,
+                                "include_details": True,
+                            },
+                        }
+                    )
         if memory_section.get("included"):
             summary = memory_section.get("summary", {})
             if isinstance(summary, dict) and summary.get("injectionText"):

@@ -17,6 +17,7 @@ for root in (SRC_ROOT, TESTS_ROOT):
 
 from test_indexer_queries import make_asset, write_export  # noqa: E402
 from ue_agent_kit.agent_api import IndexQueryService  # noqa: E402
+from ue_agent_kit.code_index import build_code_index  # noqa: E402
 from ue_agent_kit.database import open_database, set_metadata  # noqa: E402
 from ue_agent_kit.impact_analysis import (  # noqa: E402
     MAX_IMPACT_DEPTH,
@@ -118,6 +119,129 @@ def make_database(
             )
         connection.commit()
     return path
+
+
+def make_code_impact_database(root: Path, database_path: Path) -> tuple[Path, str, str]:
+    project_root = root / "CodeProject"
+    source_root = project_root / "Source" / "TestProject"
+    public_root = source_root / "Public"
+    private_root = source_root / "Private"
+    public_root.mkdir(parents=True)
+    private_root.mkdir(parents=True)
+    (project_root / "CodeProject.uproject").write_text("{}", encoding="utf-8")
+
+    base_path = public_root / "Base.h"
+    derived_path = public_root / "Derived.h"
+    consumer_path = private_root / "Consumer.cpp"
+    use_path = private_root / "UseBase.cpp"
+
+    base_path.write_text(
+        "namespace Code {\n"
+        "class FBase {\n"
+        "};\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    derived_path.write_text(
+        "namespace Code {\n"
+        "class FDerived : public FBase {\n"
+        "};\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    consumer_path.write_text('#include "Derived.h"\n', encoding="utf-8")
+    use_path.write_text('#include "Base.h"\n', encoding="utf-8")
+
+    with open_database(database_path) as connection:
+        result = build_code_index(
+            connection,
+            project_root,
+            database_path,
+            project_key="CodeProject",
+        )
+        if result.failed:
+            raise AssertionError(result.errors)
+
+        # Deliberately inject untrusted evidence:
+        # 1) a Blueprint-style kind owned by a code asset;
+        # 2) trusted-looking inherits/include kinds owned by a non-code asset.
+        # code-symbol impact must traverse only trusted kinds owned by code assets.
+        connection.execute(
+            """
+            INSERT INTO references_table(
+                asset_id, stable_id, kind, source_symbol_id, target_symbol_id,
+                target_kind, target_name, target_asset_path, target_path,
+                graph_guid, graph_name, node_guid, node_class, node_title,
+                details_json
+            )
+            SELECT id, 'test-untrusted-code-read', 'reads', '', '', 'variable',
+                   'FakeValue', 'Source/TestProject/Public/Base.h', '', '', '',
+                   '', '', '', '{}'
+            FROM assets
+            WHERE asset_path = 'Source/TestProject/Private/Consumer.cpp'
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO assets(
+                asset_path, package_name, asset_name, asset_class, blueprint_type,
+                parent_class, generated_class, skeleton_generated_class, status,
+                revision_value, package_guid, file_size, modified_utc, content_sha256,
+                package_dirty, schema_version, exporter_version, profile,
+                canonical_sha256, canonical_relpath, bpctx_relpath, summary_json,
+                indexed_at_utc
+            ) VALUES (
+                '/Game/Fake.BP_Fake', '/Game/Fake', 'BP_Fake',
+                '/Script/Engine.Blueprint', 'normal', '', '', '', 0, '', '', 0,
+                '', '', 0, '1.1', 'test', 'logic', 'fake-canonical', '', '',
+                '{}', '2026-09-21T00:00:00.000Z'
+            )
+            """
+        )
+        fake_asset_id = int(
+            connection.execute(
+                "SELECT id FROM assets WHERE asset_path = '/Game/Fake.BP_Fake'"
+            ).fetchone()["id"]
+        )
+        connection.executemany(
+            """
+            INSERT INTO references_table(
+                asset_id, stable_id, kind, source_symbol_id, target_symbol_id,
+                target_kind, target_name, target_asset_path, target_path,
+                graph_guid, graph_name, node_guid, node_class, node_title,
+                details_json
+            ) VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, '', '', '', '', '', '{}')
+            """,
+            [
+                (
+                    fake_asset_id,
+                    "test-non-code-inherits",
+                    "inherits",
+                    "cpp:type:Code::FBase",
+                    "class",
+                    "FBase",
+                    "Source/TestProject/Public/Base.h",
+                    "Code::FBase",
+                ),
+                (
+                    fake_asset_id,
+                    "test-non-code-include",
+                    "include",
+                    "",
+                    "CppSourceFile",
+                    "Base.h",
+                    "Source/TestProject/Public/Base.h",
+                    "Base.h",
+                ),
+            ],
+        )
+        connection.commit()
+
+    return (
+        project_root,
+        "Source/TestProject/Public/Base.h",
+        "cpp:type:Code::FBase",
+    )
 
 
 class ImpactAnalysisTests(unittest.TestCase):
@@ -688,6 +812,167 @@ class ImpactAnalysisTests(unittest.TestCase):
         self.assertEqual(categories["casts"], "class-reference")
         self.assertEqual(categories["implements"], "class-reference")
 
+    def test_code_symbol_impact_uses_only_trusted_inherits_and_include_edges(self) -> None:
+        _, target_path, stable_id = make_code_impact_database(self.root, self.db_path)
+        response = self.analyze(
+            target_asset_paths=[target_path],
+            subject_kind="code-symbol",
+            subject=stable_id,
+            max_depth=2,
+        )
+
+        self.assertTrue(response["ok"])
+        self.assertEqual(response["request"]["subjectKind"], "code-symbol")
+        self.assertEqual(response["targets"][0]["subject"]["stableId"], stable_id)
+        self.assertEqual(response["targets"][0]["subject"]["profile"], "code")
+
+        direct_by_path = {item["assetPath"]: item for item in response["directConsumers"]}
+        self.assertEqual(
+            set(direct_by_path),
+            {
+                "Source/TestProject/Public/Derived.h",
+                "Source/TestProject/Private/UseBase.cpp",
+            },
+        )
+        self.assertEqual(
+            [item["rawReferenceKind"] for item in direct_by_path["Source/TestProject/Public/Derived.h"]["referenceKinds"]],
+            ["inherits"],
+        )
+        self.assertEqual(
+            [item["rawReferenceKind"] for item in direct_by_path["Source/TestProject/Private/UseBase.cpp"]["referenceKinds"]],
+            ["include"],
+        )
+        self.assertEqual(
+            direct_by_path["Source/TestProject/Public/Derived.h"]["whyIncluded"],
+            "inheritance-edge-to-subject-symbol",
+        )
+        self.assertEqual(
+            direct_by_path["Source/TestProject/Private/UseBase.cpp"]["whyIncluded"],
+            "file-include-edge-to-subject-owner",
+        )
+        self.assertNotIn("/Game/Fake.BP_Fake", direct_by_path)
+        self.assertIn(
+            "code-include-file-granularity",
+            {gap["kind"] for gap in response["analysisGaps"]},
+        )
+
+        indirect_by_path = {item["assetPath"]: item for item in response["indirectConsumers"]}
+        self.assertIn("Source/TestProject/Private/Consumer.cpp", indirect_by_path)
+        consumer = indirect_by_path["Source/TestProject/Private/Consumer.cpp"]
+        self.assertEqual(
+            [item["rawReferenceKind"] for item in consumer["referenceKinds"]],
+            ["include"],
+        )
+        self.assertNotIn(
+            "reads",
+            {
+                item["rawReferenceKind"]
+                for record in [*response["directConsumers"], *response["indirectConsumers"]]
+                for item in record["referenceKinds"]
+            },
+        )
+
+    def test_code_symbol_impact_accepts_only_reflection_backed_implements(self) -> None:
+        _, target_path, stable_id = make_code_impact_database(self.root, self.db_path)
+        with open_database(self.db_path) as connection:
+            derived_asset_id = int(
+                connection.execute(
+                    """
+                    SELECT id FROM assets
+                    WHERE asset_path = 'Source/TestProject/Public/Derived.h'
+                    """
+                ).fetchone()["id"]
+            )
+            connection.execute(
+                """
+                DELETE FROM references_table
+                WHERE kind = 'inherits'
+                  AND source_symbol_id = 'cpp:type:Code::FDerived'
+                  AND target_symbol_id = ?
+                """,
+                (stable_id,),
+            )
+            connection.executemany(
+                """
+                INSERT INTO references_table(
+                    asset_id, stable_id, kind, source_symbol_id, target_symbol_id,
+                    target_kind, target_name, target_asset_path, target_path,
+                    details_json
+                ) VALUES (?, ?, 'implements', ?, ?, 'class', 'FBase', ?, ?, ?)
+                """,
+                [
+                    (
+                        derived_asset_id,
+                        "test-reflection-implements",
+                        "cpp:type:Code::FDerived",
+                        stable_id,
+                        target_path,
+                        "Code::FBase",
+                        '{"evidence":"ue-reflection"}',
+                    ),
+                    (
+                        derived_asset_id,
+                        "test-untrusted-implements",
+                        "cpp:type:Code::FDerived",
+                        stable_id,
+                        target_path,
+                        "Code::FBase",
+                        "{}",
+                    ),
+                ],
+            )
+            connection.commit()
+
+        response = self.analyze(
+            target_asset_paths=[target_path],
+            subject_kind="code-symbol",
+            subject=stable_id,
+            max_depth=1,
+        )
+        by_path = {item["assetPath"]: item for item in response["directConsumers"]}
+        derived = by_path["Source/TestProject/Public/Derived.h"]
+        self.assertEqual(
+            derived["whyIncluded"],
+            "reflection-interface-edge-to-subject-symbol",
+        )
+        self.assertEqual(
+            [
+                (item["rawReferenceKind"], item["normalizedReferenceKind"], item["edgeCount"])
+                for item in derived["referenceKinds"]
+            ],
+            [("implements", "class-reference", 1)],
+        )
+
+    def test_code_symbol_impact_validates_relative_owner_path_and_subject_profile(self) -> None:
+        _, target_path, stable_id = make_code_impact_database(self.root, self.db_path)
+
+        response = self.analyze(
+            target_asset_paths=[target_path],
+            subject_kind="code-symbol",
+            subject=stable_id,
+        )
+        self.assertTrue(response["ok"])
+
+        with self.assertRaisesRegex(ValueError, "relative indexed source path"):
+            self.analyze(
+                target_asset_paths=["/Game/Fake.Fake"],
+                subject_kind="code-symbol",
+                subject=stable_id,
+            )
+        with self.assertRaisesRegex(ValueError, "relative indexed source path"):
+            self.analyze(
+                target_asset_paths=["C:/Project/Source/Base.h"],
+                subject_kind="code-symbol",
+                subject=stable_id,
+            )
+        with self.assertRaises(ImpactAnalysisError) as mismatch:
+            self.analyze(
+                target_asset_paths=["/Game/Fake.Fake"],
+                subject_kind="blueprint-symbol",
+                subject=stable_id,
+            )
+        self.assertEqual(mismatch.exception.code, "impact-subject-kind-mismatch")
+
     # Argument validation
     def test_impact_argument_validation(self) -> None:
         make_database(self.db_path, assets=[(T1, "")])
@@ -759,7 +1044,10 @@ class ImpactMcpTests(unittest.TestCase):
         self.assertTrue(contract["supportsIndirect"])
         self.assertTrue(contract["supportsValidationTargets"])
         self.assertFalse(contract["supportsRuntimeSensitivityClassification"])
-        self.assertEqual(contract["subjectKinds"], ["asset-level", "blueprint-symbol"])
+        self.assertEqual(
+            contract["subjectKinds"],
+            ["asset-level", "blueprint-symbol", "code-symbol"],
+        )
         self.assertEqual(capabilities["limits"]["impactDepth"], MAX_IMPACT_DEPTH)
 
         _, project_status = asyncio.run(server.call_tool("ue_get_project_status", {}))

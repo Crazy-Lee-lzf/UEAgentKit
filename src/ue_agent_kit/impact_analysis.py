@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Sequence
 from typing import Any
 
+from .code_index import CODE_PROFILE
 from .query_protocol import estimate_json_tokens
 
 """Deterministic reverse-reference impact analysis (R1).
@@ -41,8 +43,9 @@ MAX_IMPACT_PATH_SWEEPS = 64
 
 IMPACT_METHOD = "reverse-reference-bfs-exact-key"
 IMPACT_SOURCE = "immutable-sqlite-index"
+CODE_IMPACT_REFERENCE_KINDS = ("inherits", "include", "implements")
 
-SUPPORTED_SUBJECT_KINDS = ("asset-level", "blueprint-symbol")
+SUPPORTED_SUBJECT_KINDS = ("asset-level", "blueprint-symbol", "code-symbol")
 UNSUPPORTED_SUBJECT_KINDS = (
     "data-table-row",
     "searchable-name",
@@ -58,6 +61,7 @@ ALL_SUBJECT_KINDS = SUPPORTED_SUBJECT_KINDS + UNSUPPORTED_SUBJECT_KINDS
 # kinds are preserved verbatim and normalized to `unknown-reference`.
 REFERENCE_KIND_CATEGORIES = {
     "inherits": "parent-reference",
+    "include": "code-include-reference",
     "depends-hard-package": "asset-reference",
     "implements": "class-reference",
     "casts": "class-reference",
@@ -79,6 +83,7 @@ NORMALIZED_REFERENCE_CATEGORIES = (
     "blueprint-symbol-reference",
     "searchable-name-reference",
     "parent-reference",
+    "code-include-reference",
     "unknown-reference",
 )
 
@@ -112,7 +117,11 @@ def _clean_text(value: Any, *, name: str, maximum: int) -> str:
     return cleaned
 
 
-def validate_target_paths(value: Any) -> tuple[str, ...]:
+def validate_target_paths(
+    value: Any,
+    *,
+    subject_kind: str = "asset-level",
+) -> tuple[str, ...]:
     if not isinstance(value, (list, tuple)):
         raise ValueError("target_asset_paths must be an array of strings.")
     if not value:
@@ -127,7 +136,21 @@ def validate_target_paths(value: Any) -> tuple[str, ...]:
             name=f"target_asset_paths[{index}]",
             maximum=MAX_IMPACT_ASSET_PATH_CHARS,
         )
-        if not cleaned.startswith("/Game/"):
+        if subject_kind == "code-symbol":
+            parts = tuple(part for part in cleaned.split("/") if part)
+            if (
+                not cleaned
+                or cleaned.startswith("/")
+                or "\\" in cleaned
+                or not parts
+                or cleaned != "/".join(parts)
+                or ":" in parts[0]
+                or any(part in {".", ".."} for part in parts)
+            ):
+                raise ValueError(
+                    f"target_asset_paths[{index}] must be an exact relative indexed source path."
+                )
+        elif not cleaned.startswith("/Game/"):
             raise ValueError(f"target_asset_paths[{index}] must be an exact /Game Object Path.")
         if cleaned in seen:
             raise ValueError("target_asset_paths must not contain duplicates.")
@@ -170,12 +193,25 @@ def _row_dict(row: sqlite3.Row) -> dict[str, Any]:
 def _incoming_rows(
     connection: sqlite3.Connection,
     asset_paths: Sequence[str],
+    *,
+    allowed_kinds: Sequence[str] = (),
+    required_profile: str = "",
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     ordered = sorted(set(asset_paths))
     for start in range(0, len(ordered), FRONTIER_QUERY_CHUNK):
         chunk = ordered[start : start + FRONTIER_QUERY_CHUNK]
         placeholders = ",".join("?" for _ in chunk)
+        kind_clause = ""
+        parameters: list[Any] = list(chunk)
+        if allowed_kinds:
+            kind_placeholders = ",".join("?" for _ in allowed_kinds)
+            kind_clause = f" AND r.kind IN ({kind_placeholders})"
+            parameters.extend(allowed_kinds)
+        profile_clause = ""
+        if required_profile:
+            profile_clause = " AND a.profile = ?"
+            parameters.append(required_profile)
         rows.extend(
             _row_dict(row)
             for row in connection.execute(
@@ -183,12 +219,12 @@ def _incoming_rows(
                 SELECT r.stable_id, r.kind, a.asset_path,
                        r.source_symbol_id, r.target_symbol_id, r.target_kind,
                        r.target_name, r.target_asset_path, r.target_path,
-                       r.node_class, r.node_title, r.graph_name
+                       r.node_class, r.node_title, r.graph_name, r.details_json
                 FROM references_table AS r
                 JOIN assets AS a ON a.id = r.asset_id
-                WHERE r.target_asset_path IN ({placeholders})
+                WHERE r.target_asset_path IN ({placeholders}){kind_clause}{profile_clause}
                 """,
-                chunk,
+                parameters,
             )
         )
     rows.sort(
@@ -202,20 +238,36 @@ def _incoming_rows(
     return rows
 
 
-def _symbol_rows(connection: sqlite3.Connection, stable_id: str) -> list[dict[str, Any]]:
+def _symbol_rows(
+    connection: sqlite3.Connection,
+    stable_id: str,
+    *,
+    allowed_kinds: Sequence[str] = (),
+    required_profile: str = "",
+) -> list[dict[str, Any]]:
+    kind_clause = ""
+    parameters: list[Any] = [stable_id]
+    if allowed_kinds:
+        placeholders = ",".join("?" for _ in allowed_kinds)
+        kind_clause = f" AND r.kind IN ({placeholders})"
+        parameters.extend(allowed_kinds)
+    profile_clause = ""
+    if required_profile:
+        profile_clause = " AND a.profile = ?"
+        parameters.append(required_profile)
     rows = [
         _row_dict(row)
         for row in connection.execute(
-            """
+            f"""
             SELECT r.stable_id, r.kind, a.asset_path,
                    r.source_symbol_id, r.target_symbol_id, r.target_kind,
                    r.target_name, r.target_asset_path, r.target_path,
-                   r.node_class, r.node_title, r.graph_name
+                   r.node_class, r.node_title, r.graph_name, r.details_json
             FROM references_table AS r
             JOIN assets AS a ON a.id = r.asset_id
-            WHERE r.target_symbol_id = ?
+            WHERE r.target_symbol_id = ?{kind_clause}{profile_clause}
             """,
-            (stable_id,),
+            parameters,
         )
     ]
     rows.sort(
@@ -227,6 +279,21 @@ def _symbol_rows(connection: sqlite3.Connection, stable_id: str) -> list[dict[st
         )
     )
     return rows
+
+
+def _trusted_code_rows(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    trusted: list[dict[str, Any]] = []
+    for row in rows:
+        if str(row.get("kind", "")) != "implements":
+            trusted.append(row)
+            continue
+        try:
+            details = json.loads(str(row.get("details_json", "") or "{}"))
+        except json.JSONDecodeError:
+            details = {}
+        if isinstance(details, dict) and details.get("evidence") == "ue-reflection":
+            trusted.append(row)
+    return trusted
 
 
 def _asset_identity(
@@ -257,9 +324,10 @@ def _resolve_symbol(
 ) -> dict[str, Any] | None:
     row = connection.execute(
         """
-        SELECT stable_id, kind, name, symbol_asset_path
-        FROM symbols
-        WHERE stable_id = ?
+        SELECT s.stable_id, s.kind, s.name, s.symbol_asset_path, a.profile
+        FROM symbols AS s
+        JOIN assets AS a ON a.id = s.asset_id
+        WHERE s.stable_id = ?
         """,
         (stable_id,),
     ).fetchone()
@@ -271,6 +339,7 @@ def _resolve_symbol(
         "kind": str(payload["kind"]),
         "name": str(payload["name"]),
         "assetPath": str(payload["symbol_asset_path"]),
+        "profile": str(payload["profile"]),
     }
 
 
@@ -308,12 +377,22 @@ def analyze_impact_graph(
             targets.append({"assetPath": path, "found": True, "identity": info})
             found_paths.append(path)
 
-    if subject_kind == "blueprint-symbol":
+    if subject_kind in ("blueprint-symbol", "code-symbol"):
         symbol = _resolve_symbol(connection, subject)
         if symbol is None:
             raise ImpactAnalysisError(
                 "impact-subject-not-found",
-                "The blueprint-symbol subject stable ID was not found in the immutable index.",
+                f"The {subject_kind} subject stable ID was not found in the immutable index.",
+            )
+        if subject_kind == "code-symbol" and str(symbol["profile"]) != CODE_PROFILE:
+            raise ImpactAnalysisError(
+                "impact-subject-kind-mismatch",
+                "The requested code-symbol subject is not owned by a code-profile source asset.",
+            )
+        if subject_kind == "blueprint-symbol" and str(symbol["profile"]) == CODE_PROFILE:
+            raise ImpactAnalysisError(
+                "impact-subject-kind-mismatch",
+                "The requested blueprint-symbol subject is owned by a code-profile source asset.",
             )
         owner = str(symbol["assetPath"])
         if len(target_paths) != 1:
@@ -321,7 +400,7 @@ def analyze_impact_graph(
         if owner != target_paths[0]:
             raise ImpactAnalysisError(
                 "impact-subject-asset-mismatch",
-                "The blueprint-symbol subject does not belong to the requested target asset.",
+                f"The {subject_kind} subject does not belong to the requested target asset.",
             )
         for target in targets:
             if target["found"]:
@@ -360,24 +439,59 @@ def analyze_impact_graph(
             max_paths=max_paths,
         )
 
-    depth1_rows = (
-        _incoming_rows(connection, found_paths)
-        if subject_kind == "asset-level"
-        else _symbol_rows(connection, subject)
-    )
+    if subject_kind == "asset-level":
+        depth1_rows = _incoming_rows(connection, found_paths)
+        traversal_kinds: Sequence[str] = ()
+    elif subject_kind == "code-symbol":
+        trusted_rows = _trusted_code_rows(
+            [
+                *_symbol_rows(
+                    connection,
+                    subject,
+                    allowed_kinds=("inherits", "implements"),
+                    required_profile=CODE_PROFILE,
+                ),
+                *_incoming_rows(
+                    connection,
+                    depth1_targets,
+                    allowed_kinds=("include",),
+                    required_profile=CODE_PROFILE,
+                ),
+            ]
+        )
+        depth1_rows = list({str(row["stable_id"]): row for row in trusted_rows}.values())
+        depth1_rows.sort(
+            key=lambda item: (
+                str(item["asset_path"]),
+                str(item["kind"]),
+                str(item["target_name"]),
+                str(item["stable_id"]),
+            )
+        )
+        traversal_kinds = CODE_IMPACT_REFERENCE_KINDS
+    else:
+        depth1_rows = _symbol_rows(connection, subject)
+        traversal_kinds = ()
     frontier = set(found_paths)
 
     for depth in range(1, max_depth + 1):
         rows = (
             depth1_rows
             if depth == 1
-            else _incoming_rows(connection, sorted(frontier))
+            else _incoming_rows(
+                connection,
+                sorted(frontier),
+                allowed_kinds=traversal_kinds,
+                required_profile=CODE_PROFILE if subject_kind == "code-symbol" else "",
+            )
         )
+        if subject_kind == "code-symbol":
+            rows = _trusted_code_rows(rows)
         visited_edge_count += len(rows)
         discovered: set[str] = set()
         for row in rows:
             consumer = str(row["asset_path"])
-            if depth == 1 and subject_kind == "blueprint-symbol":
+            if depth == 1 and subject_kind in ("blueprint-symbol", "code-symbol"):
                 target = depth1_targets[0] if depth1_targets else ""
             else:
                 target = str(row["target_asset_path"])
@@ -435,7 +549,7 @@ def analyze_impact_graph(
             changed = False
             for row in rows:
                 consumer = str(row["asset_path"])
-                if depth == 1 and subject_kind == "blueprint-symbol":
+                if depth == 1 and subject_kind in ("blueprint-symbol", "code-symbol"):
                     target = depth1_targets[0] if depth1_targets else ""
                 else:
                     target = str(row["target_asset_path"])
@@ -502,11 +616,20 @@ def analyze_impact_graph(
             for (raw_kind, category), count in sorted(record["referenceKinds"].items(), key=lambda item: item[0][0].casefold())
         ]
         record["depth"] = min((entry["depth"] for entry in record["paths"]), default=0)
-        record["whyIncluded"] = (
-            "reference-edge-to-subject-symbol"
-            if subject_kind == "blueprint-symbol"
-            else "reference-edge-to-target"
-        )
+        if subject_kind == "blueprint-symbol":
+            record["whyIncluded"] = "reference-edge-to-subject-symbol"
+        elif subject_kind == "code-symbol":
+            raw_kinds = {item["rawReferenceKind"] for item in record["referenceKinds"]}
+            if raw_kinds == {"inherits"}:
+                record["whyIncluded"] = "inheritance-edge-to-subject-symbol"
+            elif raw_kinds == {"implements"}:
+                record["whyIncluded"] = "reflection-interface-edge-to-subject-symbol"
+            elif raw_kinds == {"include"}:
+                record["whyIncluded"] = "file-include-edge-to-subject-owner"
+            else:
+                record["whyIncluded"] = "trusted-code-edges-to-subject"
+        else:
+            record["whyIncluded"] = "reference-edge-to-target"
         if record["depth"] == 1:
             direct_consumers.append(record)
         elif record["depth"] > 1:
@@ -591,6 +714,7 @@ def analyze_impact_graph(
             indirect_consumers=indirect_consumers,
             unknown_kinds=unknown_kinds,
             truncated_reasons=truncated_reasons,
+            subject_kind=subject_kind,
         ),
         "validationTargets": _validation_targets(
             targets=targets,
@@ -703,6 +827,7 @@ def _analysis_gaps(
     indirect_consumers: list[dict[str, Any]],
     unknown_kinds: list[str],
     truncated_reasons: list[str],
+    subject_kind: str = "asset-level",
 ) -> list[dict[str, Any]]:
     gaps: list[dict[str, Any]] = []
     impacted_targets = {
@@ -725,6 +850,21 @@ def _analysis_gaps(
                     ),
                 }
             )
+    if subject_kind == "code-symbol" and any(
+        item.get("rawReferenceKind") == "include"
+        for record in [*direct_consumers, *indirect_consumers]
+        for item in record.get("referenceKinds", [])
+    ):
+        gaps.append(
+            {
+                "kind": "code-include-file-granularity",
+                "message": (
+                    "C++ include evidence is file-level: including the source file that owns the "
+                    "subject does not prove a type-specific semantic dependency. Include-derived "
+                    "consumers are intentionally conservative and may over-report impact."
+                ),
+            }
+        )
     if unknown_kinds:
         gaps.append(
             {

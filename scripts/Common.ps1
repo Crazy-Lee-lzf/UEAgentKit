@@ -596,6 +596,6 @@ function Remove-UeakJunction
         throw "Refusing to remove a non-junction path: $LinkPath"
     }
 
-    Remove-Item -LiteralPath $LinkPath -Force
+    [System.IO.Directory]::Delete($LinkPath, $false)
     return $true
 }

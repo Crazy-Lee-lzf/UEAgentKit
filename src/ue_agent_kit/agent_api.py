@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Literal, Sequence
 
+from .code_index import CODE_PROFILE
 from .database import assert_fts5_available, get_metadata, get_schema_version, open_database
 from .impact_analysis import (
     DEFAULT_IMPACT_DEPTH,
@@ -92,6 +93,33 @@ def _asset_path(value: str, *, name: str = "asset_path", required: bool = False)
         raise ValueError(f"{name} is required")
     if cleaned and not cleaned.startswith("/"):
         raise ValueError(f"{name} must be an Unreal object or package path beginning with /")
+    return cleaned
+
+
+def _indexed_asset_path(
+    value: str,
+    *,
+    name: str = "asset_path",
+    required: bool = False,
+) -> str:
+    cleaned = _clean_text(value, name=name, maximum=2048)
+    if required and not cleaned:
+        raise ValueError(f"{name} is required")
+    if not cleaned:
+        return ""
+    if cleaned.startswith("/"):
+        return cleaned
+    if "\\" in cleaned:
+        raise ValueError(f"{name} must use forward slashes")
+    parts = cleaned.split("/")
+    if (
+        not parts
+        or any(not part or part in {".", ".."} for part in parts)
+        or ":" in parts[0]
+    ):
+        raise ValueError(
+            f"{name} must be an Unreal path beginning with / or a safe project-relative indexed path"
+        )
     return cleaned
 
 
@@ -197,6 +225,110 @@ class IndexQueryService:
                 "quiescent": True,
             }
             response["stats"] = get_stats(connection)
+            code_counts = connection.execute(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM assets WHERE profile = ?) AS assets,
+                    (
+                        SELECT COUNT(*)
+                        FROM symbols AS s
+                        JOIN assets AS a ON a.id = s.asset_id
+                        WHERE a.profile = ? AND s.stable_id LIKE 'cpp:type:%'
+                    ) AS types,
+                    (
+                        SELECT COUNT(*)
+                        FROM symbols AS s
+                        JOIN assets AS a ON a.id = s.asset_id
+                        WHERE a.profile = ? AND s.kind = 'function'
+                    ) AS functions,
+                    (
+                        SELECT COUNT(*)
+                        FROM symbols AS s
+                        JOIN assets AS a ON a.id = s.asset_id
+                        WHERE a.profile = ? AND s.kind = 'property'
+                    ) AS properties,
+                    (
+                        SELECT COUNT(*)
+                        FROM references_table AS r
+                        JOIN assets AS a ON a.id = r.asset_id
+                        WHERE a.profile = ? AND r.kind = 'include'
+                    ) AS includes,
+                    (
+                        SELECT COUNT(*)
+                        FROM references_table AS r
+                        JOIN assets AS a ON a.id = r.asset_id
+                        WHERE a.profile = ? AND r.kind = 'inherits'
+                    ) AS inherits,
+                    (
+                        SELECT COUNT(*)
+                        FROM references_table AS r
+                        JOIN assets AS a ON a.id = r.asset_id
+                        WHERE a.profile = ? AND r.kind = 'implements'
+                    ) AS implements
+                """,
+                (CODE_PROFILE,) * 7,
+            ).fetchone()
+            code_knowledge = {
+                "available": bool(code_counts and int(code_counts["assets"]) > 0),
+                "profile": CODE_PROFILE,
+                "assetClass": "CppSourceFile",
+                "assets": int(code_counts["assets"]) if code_counts else 0,
+                "types": int(code_counts["types"]) if code_counts else 0,
+                "functions": int(code_counts["functions"]) if code_counts else 0,
+                "properties": int(code_counts["properties"]) if code_counts else 0,
+                "references": {
+                    "include": int(code_counts["includes"]) if code_counts else 0,
+                    "inherits": int(code_counts["inherits"]) if code_counts else 0,
+                    "implements": int(code_counts["implements"]) if code_counts else 0,
+                },
+                "lastCodeIndexedAtUtc": get_metadata(
+                    connection,
+                    "last_code_indexed_at_utc",
+                    "",
+                ),
+                "reflection": {
+                    "imported": bool(
+                        get_metadata(connection, "last_reflection_indexed_at_utc", "")
+                    ),
+                    "lastIndexedAtUtc": get_metadata(
+                        connection,
+                        "last_reflection_indexed_at_utc",
+                        "",
+                    ),
+                    "project": get_metadata(
+                        connection,
+                        "last_reflection_project",
+                        "",
+                    ),
+                    "schemaVersion": get_metadata(
+                        connection,
+                        "last_reflection_schema",
+                        "",
+                    ),
+                    "exporterVersion": get_metadata(
+                        connection,
+                        "last_reflection_exporter",
+                        "",
+                    ),
+                    "matchedTypes": int(
+                        get_metadata(
+                            connection,
+                            "last_reflection_matched_types",
+                            "0",
+                        )
+                        or 0
+                    ),
+                    "unmatchedTypes": int(
+                        get_metadata(
+                            connection,
+                            "last_reflection_unmatched_types",
+                            "0",
+                        )
+                        or 0
+                    ),
+                },
+            }
+            response["codeKnowledge"] = code_knowledge
             return response
 
     def list_asset_paths(
@@ -239,7 +371,7 @@ class IndexQueryService:
         with self._open() as connection:
             rows = connection.execute(
                 """
-                SELECT asset_path, package_name, asset_class, revision_value,
+                SELECT asset_path, package_name, asset_class, profile, revision_value,
                        file_size, modified_utc, content_sha256, package_dirty,
                        canonical_relpath
                 FROM assets
@@ -249,12 +381,14 @@ class IndexQueryService:
             return [{key: row[key] for key in row.keys()} for row in rows]
 
     def get_revision_record(self, asset_path: str) -> dict[str, Any] | None:
-        """Return immutable Revision metadata for one exact Unreal object path."""
-        asset_path = _asset_path(asset_path, required=True)
+        """Return immutable Revision metadata for one exact indexed asset path."""
+        asset_path = _clean_text(asset_path, name="asset_path", maximum=2048)
+        if not asset_path:
+            raise ValueError("asset_path is required")
         with self._open() as connection:
             row = connection.execute(
                 """
-                SELECT asset_path, package_name, asset_class, revision_value,
+                SELECT asset_path, package_name, asset_class, profile, revision_value,
                        file_size, modified_utc, content_sha256, package_dirty,
                        canonical_relpath
                 FROM assets
@@ -403,6 +537,7 @@ class IndexQueryService:
         *,
         scope: SearchScope = "assets",
         asset_class: str = "",
+        profile: str = "",
         kind: str = "",
         asset_path: str = "",
         path_prefix: str = "",
@@ -424,6 +559,7 @@ class IndexQueryService:
                 query = str(state["query"])
                 scope = state["scope"]
                 asset_class = str(state["assetClass"])
+                profile = str(state["profile"])
                 kind = str(state["kind"])
                 asset_path = str(state["assetPath"])
                 path_prefix = str(state["pathPrefix"])
@@ -435,9 +571,14 @@ class IndexQueryService:
             else:
                 query = _clean_text(query, name="query", maximum=2048)
                 asset_class = _clean_text(asset_class, name="asset_class", maximum=512)
+                profile = _clean_text(profile, name="profile", maximum=128)
                 kind = _clean_text(kind, name="kind", maximum=256)
-                asset_path = _asset_path(asset_path)
-                path_prefix = _asset_path(path_prefix, name="path_prefix")
+                if profile == CODE_PROFILE:
+                    asset_path = _clean_text(asset_path, name="asset_path", maximum=2048)
+                    path_prefix = _clean_text(path_prefix, name="path_prefix", maximum=2048)
+                else:
+                    asset_path = _asset_path(asset_path)
+                    path_prefix = _asset_path(path_prefix, name="path_prefix")
                 limit = _bounded_limit(limit, maximum=MAX_MCP_SEARCH_LIMIT, name="limit")
                 offset = _bounded_offset(offset)
                 max_output_tokens = normalize_output_token_budget(max_output_tokens)
@@ -454,6 +595,7 @@ class IndexQueryService:
                     query,
                     asset_class=asset_class,
                     path_prefix=path_prefix,
+                    profile=profile,
                     limit=limit + 1,
                     offset=offset,
                 )
@@ -464,6 +606,7 @@ class IndexQueryService:
                     kind=kind,
                     asset_path=asset_path,
                     path_prefix=path_prefix,
+                    profile=profile,
                     limit=limit + 1,
                     offset=offset,
                     include_details=include_details,
@@ -475,6 +618,7 @@ class IndexQueryService:
                     "query": query,
                     "filters": {
                         "assetClass": asset_class,
+                        "profile": profile,
                         "kind": kind,
                         "assetPath": asset_path,
                         "pathPrefix": path_prefix,
@@ -486,6 +630,7 @@ class IndexQueryService:
                 "query": query,
                 "scope": scope,
                 "assetClass": asset_class,
+                "profile": profile,
                 "kind": kind,
                 "assetPath": asset_path,
                 "pathPrefix": path_prefix,
@@ -545,7 +690,7 @@ class IndexQueryService:
                 max_output_tokens = int(state["maxOutputTokens"])
                 source = "continuation-token"
             else:
-                asset_path = _asset_path(asset_path, required=True)
+                asset_path = _indexed_asset_path(asset_path, required=True)
                 sections = _normalize_sections(sections)
                 symbol_limit = _bounded_limit(symbol_limit, maximum=MAX_MCP_SYMBOL_LIMIT, name="symbol_limit")
                 reference_limit = _bounded_limit(
@@ -755,10 +900,13 @@ class IndexQueryService:
             else:
                 query = _clean_text(query, name="query", maximum=2048)
                 kind = _clean_text(kind, name="kind", maximum=256)
-                asset_path = _asset_path(asset_path)
+                asset_path = _indexed_asset_path(asset_path)
                 source_symbol_id = _stable_id(source_symbol_id, name="source_symbol_id")
                 target_symbol_id = _stable_id(target_symbol_id, name="target_symbol_id")
-                target_asset_path = _asset_path(target_asset_path, name="target_asset_path")
+                target_asset_path = _indexed_asset_path(
+                    target_asset_path,
+                    name="target_asset_path",
+                )
                 if direction not in ("outgoing", "incoming", "both"):
                     raise ValueError("direction must be outgoing, incoming, or both")
                 if depth < 1 or depth > 3:
@@ -836,8 +984,11 @@ class IndexQueryService:
         max_output_tokens: int = DEFAULT_OUTPUT_TOKEN_BUDGET,
     ) -> dict[str, Any]:
         """Run the deterministic bounded reverse-reference impact analysis over the immutable index."""
-        normalized_targets = validate_target_paths(target_asset_paths)
         normalized_subject_kind = validate_subject_kind(subject_kind)
+        normalized_targets = validate_target_paths(
+            target_asset_paths,
+            subject_kind=normalized_subject_kind,
+        )
         normalized_subject = normalize_subject(normalized_subject_kind, subject)
         if isinstance(max_depth, bool) or not isinstance(max_depth, int):
             raise ValueError("max_depth must be an integer")

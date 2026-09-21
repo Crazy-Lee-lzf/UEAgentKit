@@ -45,6 +45,7 @@ def register_query_tools(
         query: str = "",
         scope: Literal["assets", "symbols"] = "assets",
         asset_class: str = "",
+        profile: str = "",
         kind: str = "",
         asset_path: str = "",
         path_prefix: str = "",
@@ -60,6 +61,7 @@ def register_query_tools(
                 query,
                 scope=scope,
                 asset_class=asset_class,
+                profile=profile,
                 kind=kind,
                 asset_path=asset_path,
                 path_prefix=path_prefix,
@@ -148,6 +150,7 @@ def register_query_tools(
         subject_kind: Literal[
             "asset-level",
             "blueprint-symbol",
+            "code-symbol",
             "data-table-row",
             "searchable-name",
             "data-asset-object",
@@ -162,7 +165,7 @@ def register_query_tools(
         max_paths: int = DEFAULT_IMPACT_PATHS,
         max_output_tokens: int = DEFAULT_OUTPUT_TOKEN_BUDGET,
     ) -> dict[str, Any]:
-        """Analyze deterministic bounded reverse-reference impact for one or more exact /Game targets."""
+        """Analyze deterministic bounded reverse-reference impact for indexed asset or source targets."""
         try:
             return index_service.analyze_change_impact(
                 target_asset_paths,
