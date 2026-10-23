@@ -330,7 +330,7 @@ Evidence (ignored by git, under `Build/layout-broker/Evidence/`):
 |---|---|
 | `m1-offline-probe.json` | 13 checks (all true), 3 exact-parity records with planId/layoutHash, environment, limitations |
 | `full-python-suite.log` | repository full-suite output for this change set |
-| `git-status.txt` | `git status --porcelain=v1` at evidence time (only new M1 paths) |
+| `git-status.txt` | post-commit clean tree with branch/commit ids |
 | `descriptor-acl.txt` | `icacls` view of a hardened sample descriptor + internal verification state (sample deleted after capture) |
 
 Runstate is in `spec/native-tools/M1_LAYOUT_BROKER_RUN_STATE_20261024.md` with commands, results, evidence

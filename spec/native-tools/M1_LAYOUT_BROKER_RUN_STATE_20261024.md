@@ -58,7 +58,7 @@ verifiable model identifier is exposed to the agent; see report §0.
 | `m1-offline-probe.json` | `809ad07169ce0f4918f01c9dc171afc2705de6d4ed89f282a9f295d5dee035df` |
 | `full-python-suite.log` | `12fbd268b282463b1f1d6aeaef726964b01724f1d3c2ef8bcccd4a15221c5089` |
 | `descriptor-acl.txt` | `0c797a5f8201eba17201287965430938f9cbed1a46f5bbf2fbf69bddce1b8999` |
-| `git-status.txt` | `24e5662abe65f793cdf4aa1fe13b525268265d31265909c1bec04f45c2223d11` (pre-commit snapshot) |
+| `git-status.txt` | post-commit clean tree with branch/commit ids (regenerated after the final commit) |
 
 The probe JSON contains: environment, broker identity, 13 checks, exact parity records, and explicit
 limitations. The full-suite log contains the complete repository run output.
@@ -89,5 +89,6 @@ build/host, and must preserve the legacy preview until parity + P10/P11 regressi
 
 ## 8. Git state
 
-Scoped local commit only (no push), containing the new broker package, CLI/probe tools, tests, fixture,
-report, and this runstate. Existing files under `Plugin/`, `src/` (non-broker), and `tests/` were not edited.
+Scoped local commit(s) on `feature/layout-broker-m1` (no push; see `git log -1`), containing the new broker
+package, CLI/probe tools, tests, fixture, report, and this runstate. Existing files under `Plugin/`, `src/`
+(non-broker), and `tests/` were not edited; the post-commit working tree is clean.
