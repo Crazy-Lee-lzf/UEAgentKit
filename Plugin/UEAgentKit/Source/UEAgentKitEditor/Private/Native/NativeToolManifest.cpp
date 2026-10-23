@@ -54,7 +54,8 @@ namespace
 	bool IsKnownHandler(const FString& ToolId)
 	{
 		return ToolId == TEXT("graph.nodeRegistry.catalog")
-			|| ToolId == TEXT("graph.nodeRegistry.fingerprint");
+			|| ToolId == TEXT("graph.nodeRegistry.fingerprint")
+			|| ToolId == TEXT("graph.nodeRegistry.filterContext");
 	}
 
 	bool ReadRequiredString(

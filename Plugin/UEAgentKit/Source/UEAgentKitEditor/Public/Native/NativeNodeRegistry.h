@@ -26,6 +26,10 @@ enum class ENativeRegistryMode : uint8
 };
 
 class UBlueprintNodeSpawner;
+class UBlueprint;
+class UEdGraph;
+class UEdGraphNode;
+class UEdGraphPin;
 
 enum class ENativeRegistryState : uint8
 {
@@ -145,6 +149,75 @@ struct FNativeManifestSummary
 	TArray<FString> ToolVersions;
 };
 
+/** R1.3 context request.  Asset/graph/node/pin must already be loaded; nothing is loaded. */
+struct FNativeContextRequest
+{
+	FString AssetPath;
+	FString GraphGuid;
+	FString NodeGuid;
+	FString PinName;
+	int32 MaxItems = 128;
+	double MaxFilterMs = 5000.0;
+};
+
+struct FNativeContextActionRecord
+{
+	FString ActionId;
+	FString DescriptorDigest;
+	FString NodeClass;
+	FString SpawnerClass;
+	FString Title;
+	FString MenuName;
+	FString Category;
+	TArray<FString> GraphKindsHint;
+	TSharedPtr<FJsonObject> DiscoveryKey;
+};
+
+/**
+ * R1.3 context-filter result.  The action set is authoritative for the exact
+ * graph/node/pin context (engine FBlueprintActionFilter); the catalog remains a
+ * broader, non-contextual description channel.
+ */
+struct FNativeContextResult
+{
+	bool bOk = false;
+	FString ErrorCode;
+	FString ErrorMessage;
+
+	FString ContextKind;
+	FString AssetPath;
+	FString GraphGuid;
+	FString GraphName;
+	FString GraphSchemaPath;
+	FString GraphKind;
+	FString NodeGuid;
+	FString PinName;
+	FString PinDirection;
+	FString PinCategory;
+
+	TArray<FNativeContextActionRecord> Actions;
+
+	int32 TotalSpawners = 0;
+	int32 DescribedActions = 0;
+	int32 NotDescribedActions = 0;
+	int32 EvaluatedActions = 0;
+	int32 RejectedActions = 0;
+	int32 MatchedActions = 0;
+	int32 TotalAvailable = 0;
+	int32 MaxItems = 128;
+
+	bool bTruncated = false;
+	bool bComplete = false;
+	bool bPackageDirty = false;
+	FString ActionSetFingerprint;
+	FString ActionDatabaseFingerprint;
+	double DurationMs = 0.0;
+
+	FNativeCatalogIdentity Identity;
+
+	TSharedRef<FJsonObject> MakeJson() const;
+};
+
 /** Abstract read-only registry surface (lifecycle + query). */
 class UEAGENTKITEDITOR_API INativeNodeRegistry
 {
@@ -195,6 +268,30 @@ public:
 	/** Builds the full bounded catalog.  Requires Ready state and the game thread. */
 	FNativeCatalogResult BuildCatalog(const FNativeCatalogOptions& Options) const;
 
+	/**
+	 * R1.3: context-sensitive, read-only action set for an already-loaded
+	 * Blueprint graph/node/pin.  Fail-closed for unknown asset/graph/node/pin and
+	 * non-K2 graphs.  Uses the engine FBlueprintActionFilter over the already
+	 * described (official) spawner set only; it never loads an asset and never
+	 * touches a project/third-party spawner template.
+	 */
+	FNativeContextResult FilterContext(const FNativeContextRequest& Request) const;
+
+	/** Test-only object-based seam (requires the automation test context). */
+	bool FilterContextForAutomation(
+		UBlueprint* Blueprint,
+		UEdGraph* Graph,
+		UEdGraphNode* Node,
+		UEdGraphPin* Pin,
+		int32 MaxItems,
+		FNativeContextResult& OutResult) const;
+
+	/** Test-only T10 seam: describe one spawner with an explicit trust treatment. */
+	bool DescribeSpawnerForAutomation(
+		UBlueprintNodeSpawner* Spawner,
+		bool bTreatAsUntrusted,
+		FString& OutCode) const;
+
 	/** Stable database fingerprint from an already sorted action id array. */
 	static FString ComputeActionDatabaseFingerprint(const TArray<FString>& SortedActionIds, FString& OutErrorCode);
 
@@ -237,4 +334,20 @@ private:
 	 */
 	mutable TMap<const UBlueprintNodeSpawner*, FString> DeferredSpawnerReasons;
 	mutable int32 SessionTemplateCreations = 0;
+
+	/** Described actions from the session catalog; used by R1.3 context filtering. */
+	mutable TMap<FString, TWeakObjectPtr<UBlueprintNodeSpawner>> DescribedSpawners;
+	mutable TMap<FString, TWeakObjectPtr<UObject>> DescribedOwners;
+	mutable TMap<FString, TSharedPtr<FJsonObject>> DescribedDescriptors;
+	mutable FString DescribedDatabaseFingerprint;
+	mutable int32 DescribedTotalSpawners = 0;
+
+	FNativeContextResult FilterContextInternal(
+		UBlueprint* Blueprint,
+		UEdGraph* Graph,
+		UEdGraphNode* Node,
+		UEdGraphPin* Pin,
+		const FString& ContextKind,
+		int32 MaxItems,
+		double MaxFilterMs) const;
 };

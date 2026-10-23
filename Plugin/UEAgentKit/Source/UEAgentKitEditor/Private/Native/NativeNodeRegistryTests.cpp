@@ -3,24 +3,37 @@
 #include "Native/NativeNodeRegistry.h"
 
 #include "Native/NativeCanonicalJson.h"
+#include "BlueprintContextSha256.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
+#include "EdGraph/EdGraph.h"
+#include "EdGraph/EdGraphNode.h"
+#include "EdGraph/EdGraphPin.h"
+#include "EdGraph/EdGraphSchema.h"
+#include "EdGraphSchema_K2.h"
 #include "Editor.h"
 #include "Editor/Transactor.h"
+#include "Engine/Blueprint.h"
 #include "HAL/FileManager.h"
 #include "Internationalization/Regex.h"
 #include "Interfaces/IPluginManager.h"
+#include "K2Node_CallFunction.h"
+#include "BlueprintNodeSpawner.h"
+#include "Kismet/KismetSystemLibrary.h"
+#include "Kismet2/KismetEditorUtilities.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/DateTime.h"
 #include "Misc/FileHelper.h"
+#include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "UObject/Package.h"
+#include "UObject/SavePackage.h"
 #include "UObject/UObjectIterator.h"
 
 namespace UEAgentKitNativeRegistryTestPrivate
@@ -525,6 +538,284 @@ namespace UEAgentKitNativeRegistryTestPrivate
 		Registry.GetAssetsByPath(FName(TEXT("/Game")), Assets, true);
 		return Assets.Num();
 	}
+
+	const TCHAR* const FixturePackageName = TEXT("/Game/R1Native/BP_R1ContextFixture");
+	const TCHAR* const FixtureObjectPath = TEXT("/Game/R1Native/BP_R1ContextFixture.BP_R1ContextFixture");
+
+	FString FixtureFilename(UBlueprint* Blueprint)
+	{
+		FString Filename;
+		if (Blueprint == nullptr || Blueprint->GetOutermost() == nullptr)
+		{
+			return FString();
+		}
+		if (!FPackageName::TryConvertLongPackageNameToFilename(
+				Blueprint->GetOutermost()->GetName(),
+				Filename,
+				FPackageName::GetAssetPackageExtension()))
+		{
+			return FString();
+		}
+		return Filename;
+	}
+
+	FString FileRevision(const FString& Filename)
+	{
+		FString Hex;
+		if (Filename.IsEmpty() || !FPaths::FileExists(Filename) || !FBlueprintContextSha256::HashFile(Filename, Hex))
+		{
+			return FString();
+		}
+		return FString(TEXT("sha256:")) + Hex.ToLower();
+	}
+
+	FString ComputeFixtureGraphFingerprint(UEdGraph* Graph)
+	{
+		if (Graph == nullptr)
+		{
+			return FString();
+		}
+		TArray<FString> Lines;
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (Node == nullptr)
+			{
+				continue;
+			}
+			const FString NodeGuid = Node->NodeGuid.ToString(EGuidFormats::Digits);
+			Lines.Add(FString::Printf(
+				TEXT("node|%s|%s|%d|%d|%s"),
+				*NodeGuid,
+				*Node->GetClass()->GetPathName(),
+				Node->NodePosX,
+				Node->NodePosY,
+				*Node->GetNodeTitle(ENodeTitleType::ListView).ToString()));
+			for (UEdGraphPin* Pin : Node->Pins)
+			{
+				if (Pin == nullptr)
+				{
+					continue;
+				}
+				Lines.Add(FString::Printf(
+					TEXT("pin|%s|%s|%s|%s|%d"),
+					*NodeGuid,
+					*Pin->PinName.ToString(),
+					Pin->Direction == EGPD_Input ? TEXT("in") : TEXT("out"),
+					*Pin->PinType.PinCategory.ToString(),
+					Pin->LinkedTo.Num()));
+				for (UEdGraphPin* Linked : Pin->LinkedTo)
+				{
+					if (Linked != nullptr && Linked->GetOwningNode() != nullptr)
+					{
+						Lines.Add(FString::Printf(
+							TEXT("link|%s|%s|%s|%s"),
+							*NodeGuid,
+							*Pin->PinName.ToString(),
+							*Linked->GetOwningNode()->NodeGuid.ToString(EGuidFormats::Digits),
+							*Linked->PinName.ToString()));
+					}
+				}
+			}
+		}
+		Lines.Sort();
+		FString Hex;
+		if (!FBlueprintContextSha256::HashText(FString::Join(Lines, TEXT("\n")), Hex))
+		{
+			return FString();
+		}
+		return FString(TEXT("sha256:")) + Hex.ToLower();
+	}
+
+	bool SaveFixture(FAutomationTestBase& Test, UBlueprint* Blueprint, const bool bNotifyCreated)
+	{
+		if (Blueprint == nullptr || Blueprint->GetOutermost() == nullptr)
+		{
+			Test.AddError(TEXT("Fixture Blueprint is missing its package."));
+			return false;
+		}
+		const FString Filename = FixtureFilename(Blueprint);
+		if (Filename.IsEmpty())
+		{
+			Test.AddError(TEXT("Fixture package filename could not be resolved."));
+			return false;
+		}
+		IFileManager::Get().MakeDirectory(*FPaths::GetPath(Filename), true);
+		FSavePackageArgs Args;
+		Args.TopLevelFlags = RF_Public | RF_Standalone;
+		Args.SaveFlags = SAVE_NoError;
+		const bool bSaved = UPackage::SavePackage(Blueprint->GetOutermost(), Blueprint, *Filename, Args);
+		if (bSaved && bNotifyCreated)
+		{
+			FAssetRegistryModule::AssetCreated(Blueprint);
+		}
+		if (!bSaved)
+		{
+			Test.AddError(FString::Printf(TEXT("Fixture save failed: %s"), *Filename));
+			return false;
+		}
+		return !Blueprint->GetOutermost()->IsDirty();
+	}
+
+	/**
+	 * Creates (or reuses) a disposable /Game fixture in the disposable host.
+	 * All writes happen here, before the read-only measurement.
+	 */
+	bool EnsureContextFixture(
+		FAutomationTestBase& Test,
+		UBlueprint*& OutBlueprint,
+		UEdGraph*& OutGraph,
+		UK2Node_CallFunction*& OutNode,
+		UEdGraphPin*& OutExecPin,
+		UEdGraphPin*& OutDataPin)
+	{
+		UBlueprint* Blueprint = FindObject<UBlueprint>(nullptr, FixtureObjectPath);
+		bool bCreated = false;
+		if (Blueprint == nullptr)
+		{
+			Blueprint = LoadObject<UBlueprint>(nullptr, FixtureObjectPath);
+		}
+		if (Blueprint == nullptr)
+		{
+			UPackage* Package = CreatePackage(FixturePackageName);
+			if (Package == nullptr)
+			{
+				Test.AddError(TEXT("Fixture package could not be created."));
+				return false;
+			}
+			Blueprint = FKismetEditorUtilities::CreateBlueprint(
+				AActor::StaticClass(),
+				Package,
+				TEXT("BP_R1ContextFixture"),
+				BPTYPE_Normal,
+				UBlueprint::StaticClass(),
+				UBlueprintGeneratedClass::StaticClass());
+			bCreated = true;
+		}
+		if (Blueprint == nullptr)
+		{
+			Test.AddError(TEXT("Fixture Blueprint could not be created or loaded."));
+			return false;
+		}
+
+		UEdGraph* Graph = Blueprint->UbergraphPages.Num() > 0 ? Blueprint->UbergraphPages[0].Get() : nullptr;
+		if (Graph == nullptr)
+		{
+			Test.AddError(TEXT("Fixture Blueprint has no event graph."));
+			return false;
+		}
+
+		UK2Node_CallFunction* CallNode = nullptr;
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			UK2Node_CallFunction* Candidate = Cast<UK2Node_CallFunction>(Node);
+			if (Candidate != nullptr && Candidate->GetFunctionName() == FName(TEXT("PrintString")))
+			{
+				CallNode = Candidate;
+				break;
+			}
+		}
+
+		bool bModified = false;
+		if (CallNode == nullptr)
+		{
+			CallNode = NewObject<UK2Node_CallFunction>(Graph);
+			CallNode->FunctionReference.SetExternalMember(
+				GET_FUNCTION_NAME_CHECKED(UKismetSystemLibrary, PrintString),
+				UKismetSystemLibrary::StaticClass());
+			CallNode->NodePosX = 0;
+			CallNode->NodePosY = 0;
+			CallNode->AllocateDefaultPins();
+			Graph->AddNode(CallNode, true, false);
+			bModified = true;
+		}
+
+		if (bModified)
+		{
+			FKismetEditorUtilities::CompileBlueprint(Blueprint);
+		}
+		if (bCreated || bModified || Blueprint->GetOutermost()->IsDirty())
+		{
+			if (!SaveFixture(Test, Blueprint, bCreated))
+			{
+				return false;
+			}
+		}
+
+		UEdGraphPin* ExecPin = nullptr;
+		UEdGraphPin* DataPin = nullptr;
+		for (UEdGraphPin* Pin : CallNode->Pins)
+		{
+			if (Pin == nullptr)
+			{
+				continue;
+			}
+			if (Pin->PinName == FName(TEXT("then")) && Pin->Direction == EGPD_Output)
+			{
+				ExecPin = Pin;
+			}
+			else if (Pin->PinName == FName(TEXT("InString")) && Pin->Direction == EGPD_Input)
+			{
+				DataPin = Pin;
+			}
+		}
+		if (!Test.TestNotNull(TEXT("fixture PrintString node"), CallNode)
+			|| !Test.TestNotNull(TEXT("fixture exec pin"), ExecPin)
+			|| !Test.TestNotNull(TEXT("fixture data pin"), DataPin))
+		{
+			return false;
+		}
+
+		OutBlueprint = Blueprint;
+		OutGraph = Graph;
+		OutNode = CallNode;
+		OutExecPin = ExecPin;
+		OutDataPin = DataPin;
+		return true;
+	}
+
+	FString GuidString(const FGuid& Guid)
+	{
+		return Guid.ToString(EGuidFormats::Digits);
+	}
+
+	bool WriteContextExport(
+		FAutomationTestBase& Test,
+		const FNativeContextResult& Palette,
+		const FNativeContextResult& Node,
+		const FNativeContextResult& ExecPin,
+		const FNativeContextResult& DataPin,
+		const FString& NonK2Code)
+	{
+		const TSharedRef<FJsonObject> Document = MakeShared<FJsonObject>();
+		Document->SetStringField(TEXT("schemaVersion"), TEXT("ueak.native.context-export/1.0"));
+		Document->SetStringField(TEXT("generatedAtUtc"), FDateTime::UtcNow().ToIso8601());
+		Document->SetObjectField(TEXT("palette"), Palette.MakeJson());
+		Document->SetObjectField(TEXT("node"), Node.MakeJson());
+		Document->SetObjectField(TEXT("execPin"), ExecPin.MakeJson());
+		Document->SetObjectField(TEXT("dataPin"), DataPin.MakeJson());
+		Document->SetStringField(TEXT("nonK2ErrorCode"), NonK2Code);
+
+		FString Text;
+		const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Text);
+		if (!FJsonSerializer::Serialize(Document, Writer))
+		{
+			Test.AddError(TEXT("The context export could not be serialized."));
+			return false;
+		}
+		const FString Path = FPaths::Combine(
+			FPaths::ProjectSavedDir(),
+			TEXT("UEAgentKit"),
+			TEXT("R1Native"),
+			TEXT("context-export.json"));
+		IFileManager::Get().MakeDirectory(*FPaths::GetPath(Path), true);
+		if (!FFileHelper::SaveStringToFile(Text, *Path, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+		{
+			Test.AddError(FString::Printf(TEXT("The context export could not be written to %s."), *Path));
+			return false;
+		}
+		Test.AddInfo(FString::Printf(TEXT("Wrote context export: %s"), *Path));
+		return true;
+	}
 }
 
 #if WITH_EDITOR && WITH_DEV_AUTOMATION_TESTS
@@ -559,10 +850,11 @@ bool FUEAgentKitNativeRegistryLifecycleTest::RunTest(const FString& Parameters)
 	}
 	TestTrue(TEXT("shadow registry is ready"), Registry.IsAvailable());
 	TestEqual(TEXT("shadow mode is active"), static_cast<int32>(Registry.GetMode()), static_cast<int32>(ENativeRegistryMode::Shadow));
-	TestEqual(TEXT("manifest loads two tools"), Registry.GetManifestSummary().ToolCount, 2);
+	TestEqual(TEXT("manifest loads three tools"), Registry.GetManifestSummary().ToolCount, 3);
 	TestTrue(TEXT("manifest hash exists"), !Registry.GetManifestSummary().Hash.IsEmpty());
 	TestTrue(TEXT("catalog tool is declared"), Registry.HasTool(TEXT("graph.nodeRegistry.catalog")));
 	TestTrue(TEXT("fingerprint tool is declared"), Registry.HasTool(TEXT("graph.nodeRegistry.fingerprint")));
+	TestTrue(TEXT("context filter tool is declared"), Registry.HasTool(TEXT("graph.nodeRegistry.filterContext")));
 	TestFalse(TEXT("write tools are not declared"), Registry.HasTool(TEXT("graph.layout.applyTestOnly")));
 
 	Registry.Initialize(ENativeRegistryMode::Shadow);
@@ -841,6 +1133,26 @@ bool FUEAgentKitNativeRegistryReadOnlyTest::RunTest(const FString& Parameters)
 	}
 	FNativeNodeRegistry& Registry = FNativeNodeRegistry::Get();
 
+	// Fixture setup is allowed to write; measurement starts only after this.
+	UBlueprint* FixtureBlueprint = nullptr;
+	UEdGraph* FixtureGraph = nullptr;
+	UK2Node_CallFunction* FixtureNode = nullptr;
+	UEdGraphPin* FixtureExecPin = nullptr;
+	UEdGraphPin* FixtureDataPin = nullptr;
+	if (!EnsureContextFixture(*this, FixtureBlueprint, FixtureGraph, FixtureNode, FixtureExecPin, FixtureDataPin))
+	{
+		return false;
+	}
+	if (!TestFalse(TEXT("fixture package is clean before measurement"), FixtureBlueprint->GetOutermost()->IsDirty()))
+	{
+		return false;
+	}
+	const FString FixtureFilenameBefore = FixtureFilename(FixtureBlueprint);
+	const FString FixtureRevisionBefore = FileRevision(FixtureFilenameBefore);
+	const FString FixtureGraphFingerprintBefore = ComputeFixtureGraphFingerprint(FixtureGraph);
+	TestTrue(TEXT("fixture disk revision exists"), !FixtureRevisionBefore.IsEmpty());
+	TestTrue(TEXT("fixture graph fingerprint exists"), !FixtureGraphFingerprintBefore.IsEmpty());
+
 	const int32 DirtyBefore = CountDirtyGamePackages();
 	const int32 PackagesBefore = CountGamePackages();
 	const int32 AssetsBefore = CountRegisteredGameAssets();
@@ -852,6 +1164,36 @@ bool FUEAgentKitNativeRegistryReadOnlyTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
+
+	FNativeContextResult PaletteContext = Registry.FilterContext([&]() {
+		FNativeContextRequest Request;
+		Request.AssetPath = FixtureObjectPath;
+		Request.GraphGuid = GuidString(FixtureGraph->GraphGuid);
+		Request.MaxItems = 32;
+		return Request;
+	}());
+	TestTrue(TEXT("read-only palette context executes"), PaletteContext.bOk);
+
+	FNativeContextResult NodeContext = Registry.FilterContext([&]() {
+		FNativeContextRequest Request;
+		Request.AssetPath = FixtureObjectPath;
+		Request.GraphGuid = GuidString(FixtureGraph->GraphGuid);
+		Request.NodeGuid = GuidString(FixtureNode->NodeGuid);
+		Request.MaxItems = 32;
+		return Request;
+	}());
+	TestTrue(TEXT("read-only node context executes"), NodeContext.bOk);
+
+	FNativeContextResult PinContext = Registry.FilterContext([&]() {
+		FNativeContextRequest Request;
+		Request.AssetPath = FixtureObjectPath;
+		Request.GraphGuid = GuidString(FixtureGraph->GraphGuid);
+		Request.NodeGuid = GuidString(FixtureNode->NodeGuid);
+		Request.PinName = FixtureExecPin->PinName.ToString();
+		Request.MaxItems = 32;
+		return Request;
+	}());
+	TestTrue(TEXT("read-only pin context executes"), PinContext.bOk);
 
 	TSharedPtr<FJsonObject> Result;
 	FString ErrorCode;
@@ -870,6 +1212,8 @@ bool FUEAgentKitNativeRegistryReadOnlyTest::RunTest(const FString& Parameters)
 	const int32 AssetsAfter = CountRegisteredGameAssets();
 	const int32 UndoQueueAfter = (GEditor != nullptr && GEditor->Trans != nullptr) ? GEditor->Trans->GetQueueLength() : -1;
 	const int32 UndoCountAfter = (GEditor != nullptr && GEditor->Trans != nullptr) ? GEditor->Trans->GetUndoCount() : -1;
+	const FString FixtureRevisionAfter = FileRevision(FixtureFilenameBefore);
+	const FString FixtureGraphFingerprintAfter = ComputeFixtureGraphFingerprint(FixtureGraph);
 
 	TestEqual(TEXT("dirty /Game package count is unchanged"), DirtyAfter, DirtyBefore);
 	TestEqual(TEXT("/Game package count is unchanged"), PackagesAfter, PackagesBefore);
@@ -877,10 +1221,13 @@ bool FUEAgentKitNativeRegistryReadOnlyTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("undo queue length is unchanged"), UndoQueueAfter, UndoQueueBefore);
 	TestEqual(TEXT("undo count is unchanged"), UndoCountAfter, UndoCountBefore);
 	TestEqual(TEXT("no transaction was opened"), UndoQueueAfter, 0);
+	TestEqual(TEXT("fixture disk revision is unchanged"), FixtureRevisionAfter, FixtureRevisionBefore);
+	TestEqual(TEXT("fixture graph fingerprint is unchanged"), FixtureGraphFingerprintAfter, FixtureGraphFingerprintBefore);
+	TestFalse(TEXT("fixture package is still clean"), FixtureBlueprint->GetOutermost()->IsDirty());
 	TestTrue(TEXT("catalog reported read-only"), Catalog.MakeSummaryJson()->GetBoolField(TEXT("readOnly")));
 	TestFalse(TEXT("catalog reported no save"), Catalog.MakeSummaryJson()->GetBoolField(TEXT("saved")));
 	AddInfo(FString::Printf(
-		TEXT("readOnlyEvidence dirtyBefore=%d dirtyAfter=%d gamePackagesBefore=%d gamePackagesAfter=%d assetsBefore=%d assetsAfter=%d undoQueueBefore=%d undoQueueAfter=%d undoCountBefore=%d undoCountAfter=%d"),
+		TEXT("readOnlyEvidence dirtyBefore=%d dirtyAfter=%d gamePackagesBefore=%d gamePackagesAfter=%d assetsBefore=%d assetsAfter=%d undoQueueBefore=%d undoQueueAfter=%d undoCountBefore=%d undoCountAfter=%d fixtureDirty=%d revisionBefore=%s revisionAfter=%s graphFingerprintBefore=%s graphFingerprintAfter=%s"),
 		DirtyBefore,
 		DirtyAfter,
 		PackagesBefore,
@@ -890,7 +1237,12 @@ bool FUEAgentKitNativeRegistryReadOnlyTest::RunTest(const FString& Parameters)
 		UndoQueueBefore,
 		UndoQueueAfter,
 		UndoCountBefore,
-		UndoCountAfter));
+		UndoCountAfter,
+		FixtureBlueprint->GetOutermost()->IsDirty() ? 1 : 0,
+		*FixtureRevisionBefore,
+		*FixtureRevisionAfter,
+		*FixtureGraphFingerprintBefore,
+		*FixtureGraphFingerprintAfter));
 
 	return true;
 }
@@ -978,6 +1330,223 @@ bool FUEAgentKitNativeRegistryShadowToolsTest::RunTest(const FString& Parameters
 		Registry.TryInvokeShadowTool(TEXT("graph.nodeRegistry.catalog"), TEXT("1.0.0"), OutOfRange, Result, ErrorCode, ErrorMessage));
 	TestEqual(TEXT("range code"), ErrorCode, FString(TEXT("native-schema-invalid-arguments")));
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUEAgentKitNativeContextFilterTest,
+	"UEAgentKit.Native.R1ContextFilter",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUEAgentKitNativeContextFilterTest::RunTest(const FString& Parameters)
+{
+	if (!EnsureRegistry(*this))
+	{
+		return false;
+	}
+	FNativeNodeRegistry& Registry = FNativeNodeRegistry::Get();
+
+	UBlueprint* Blueprint = nullptr;
+	UEdGraph* Graph = nullptr;
+	UK2Node_CallFunction* Node = nullptr;
+	UEdGraphPin* ExecPin = nullptr;
+	UEdGraphPin* DataPin = nullptr;
+	if (!EnsureContextFixture(*this, Blueprint, Graph, Node, ExecPin, DataPin))
+	{
+		return false;
+	}
+
+	auto RunContext = [&](const bool bNode, UEdGraphPin* InPin, const int32 MaxItems) {
+		FNativeContextRequest Request;
+		Request.AssetPath = FixtureObjectPath;
+		Request.GraphGuid = GuidString(Graph->GraphGuid);
+		if (bNode)
+		{
+			Request.NodeGuid = GuidString(Node->NodeGuid);
+		}
+		if (InPin != nullptr)
+		{
+			Request.PinName = InPin->PinName.ToString();
+		}
+		Request.MaxItems = MaxItems;
+		return Registry.FilterContext(Request);
+	};
+
+	const FNativeContextResult Palette = RunContext(false, nullptr, 128);
+	const FNativeContextResult NodeContext = RunContext(true, nullptr, 128);
+	const FNativeContextResult ExecContext = RunContext(true, ExecPin, 128);
+	const FNativeContextResult DataContext = RunContext(true, DataPin, 128);
+	if (!TestTrue(TEXT("palette context succeeds"), Palette.bOk)
+		|| !TestTrue(TEXT("node context succeeds"), NodeContext.bOk)
+		|| !TestTrue(TEXT("exec pin context succeeds"), ExecContext.bOk)
+		|| !TestTrue(TEXT("data pin context succeeds"), DataContext.bOk))
+	{
+		AddError(FString::Printf(
+			TEXT("Context errors: palette=%s node=%s exec=%s data=%s"),
+			*Palette.ErrorCode,
+			*NodeContext.ErrorCode,
+			*ExecContext.ErrorCode,
+			*DataContext.ErrorCode));
+		return false;
+	}
+
+	TestEqual(TEXT("palette context kind"), Palette.ContextKind, FString(TEXT("palette")));
+	TestEqual(TEXT("node context kind"), NodeContext.ContextKind, FString(TEXT("node")));
+	TestEqual(TEXT("pin context kind"), ExecContext.ContextKind, FString(TEXT("pin")));
+	TestEqual(TEXT("fixture graph kind is the event graph"), ExecContext.GraphKind, FString(TEXT("event")));
+	TestEqual(TEXT("fixture graph schema is K2"), ExecContext.GraphSchemaPath, FString(TEXT("/Script/BlueprintGraph.EdGraphSchema_K2")));
+	TestTrue(TEXT("palette has actions"), Palette.Actions.Num() > 0);
+	TestTrue(TEXT("node context has actions"), NodeContext.Actions.Num() > 0);
+	TestTrue(TEXT("exec pin context has actions"), ExecContext.Actions.Num() > 0);
+	TestTrue(TEXT("data pin context has actions"), DataContext.Actions.Num() > 0);
+	TestTrue(TEXT("context fingerprint has contract shape"), MatchesRegex(TEXT("^sha256:[0-9a-f]{16}$"), ExecContext.ActionSetFingerprint));
+
+	// Determinism: identical request twice yields identical sorted ids + fingerprint.
+	const FNativeContextResult ExecAgain = RunContext(true, ExecPin, 128);
+	TestEqual(TEXT("context fingerprint is stable"), ExecAgain.ActionSetFingerprint, ExecContext.ActionSetFingerprint);
+	TArray<FString> ExecIds;
+	TArray<FString> ExecAgainIds;
+	for (const FNativeContextActionRecord& Record : ExecContext.Actions) { ExecIds.Add(Record.ActionId); }
+	for (const FNativeContextActionRecord& Record : ExecAgain.Actions) { ExecAgainIds.Add(Record.ActionId); }
+	TestTrue(TEXT("context action id list is stable"), ExecIds == ExecAgainIds);
+
+	// Catalog vs context: every context action id must exist in the catalog with
+	// the same descriptor digest (same action identity in both channels).
+	const FNativeCatalogResult Catalog = Registry.BuildCatalog(CatalogOptions());
+	TestTrue(TEXT("catalog builds for identity cross-check"), Catalog.bOk);
+	TMap<FString, FString> CatalogDigests;
+	for (const FNativeNodeDescriptorRecord& Record : Catalog.Descriptors)
+	{
+		CatalogDigests.Add(Record.ActionId, Record.DescriptorDigest);
+	}
+	for (const FNativeContextActionRecord& Record : ExecContext.Actions)
+	{
+		const FString* CatalogDigest = CatalogDigests.Find(Record.ActionId);
+		TestTrue(TEXT("context action id is in the catalog"), CatalogDigest != nullptr);
+		if (CatalogDigest != nullptr)
+		{
+			TestEqual(TEXT("context descriptor digest matches catalog"), Record.DescriptorDigest, *CatalogDigest);
+		}
+	}
+
+	// The descriptor's graphKinds is only a template hint: at least one action
+	// described as "function" is valid in the fixture's event graph.
+	bool bFoundFunctionHint = false;
+	for (const FNativeContextActionRecord& Record : ExecContext.Actions)
+	{
+		if (Record.GraphKindsHint.Contains(TEXT("function")))
+		{
+			bFoundFunctionHint = true;
+			break;
+		}
+	}
+	TestTrue(TEXT("a function-hint action is context-valid in the event graph"), bFoundFunctionHint);
+
+	// Context sensitivity: palette/node/pin must not be the same set.
+	TestTrue(TEXT("node context differs from palette"), NodeContext.ActionSetFingerprint != Palette.ActionSetFingerprint);
+	TestTrue(TEXT("exec pin context differs from palette"), ExecContext.ActionSetFingerprint != Palette.ActionSetFingerprint);
+	TestTrue(TEXT("exec pin context differs from data pin context"), ExecContext.ActionSetFingerprint != DataContext.ActionSetFingerprint);
+
+	// Negative: an action valid for the palette is not valid for the string pin.
+	TSet<FString> DataIds;
+	for (const FNativeContextActionRecord& Record : DataContext.Actions) { DataIds.Add(Record.ActionId); }
+	FString PaletteOnlyAction;
+	for (const FNativeContextActionRecord& Record : Palette.Actions)
+	{
+		if (!DataIds.Contains(Record.ActionId))
+		{
+			PaletteOnlyAction = Record.ActionId;
+			break;
+		}
+	}
+	TestTrue(TEXT("a palette action is incompatible with the data pin"), !PaletteOnlyAction.IsEmpty());
+
+	// Fail-closed negatives.
+	FNativeContextRequest UnknownGraph;
+	UnknownGraph.AssetPath = FixtureObjectPath;
+	UnknownGraph.GraphGuid = TEXT("00000000000000000000000000000000");
+	const FNativeContextResult UnknownGraphResult = Registry.FilterContext(UnknownGraph);
+	TestFalse(TEXT("unknown graph is rejected"), UnknownGraphResult.bOk);
+	TestEqual(TEXT("unknown graph code"), UnknownGraphResult.ErrorCode, FString(TEXT("graphpatch-graph-not-found")));
+
+	FNativeContextRequest UnknownPin;
+	UnknownPin.AssetPath = FixtureObjectPath;
+	UnknownPin.GraphGuid = GuidString(Graph->GraphGuid);
+	UnknownPin.NodeGuid = GuidString(Node->NodeGuid);
+	UnknownPin.PinName = TEXT("R1NotARealPin");
+	const FNativeContextResult UnknownPinResult = Registry.FilterContext(UnknownPin);
+	TestFalse(TEXT("unknown pin is rejected"), UnknownPinResult.bOk);
+	TestEqual(TEXT("unknown pin code"), UnknownPinResult.ErrorCode, FString(TEXT("graph-pin-not-found")));
+
+	FNativeContextRequest UnknownAsset;
+	UnknownAsset.AssetPath = TEXT("/Game/R1Native/BP_R1DoesNotExist.BP_R1DoesNotExist");
+	UnknownAsset.GraphGuid = GuidString(Graph->GraphGuid);
+	const FNativeContextResult UnknownAssetResult = Registry.FilterContext(UnknownAsset);
+	TestFalse(TEXT("unloaded asset is rejected"), UnknownAssetResult.bOk);
+	TestEqual(TEXT("unloaded asset code"), UnknownAssetResult.ErrorCode, FString(TEXT("graphpatch-asset-not-loaded")));
+
+	// Non-K2 graph fails closed through the object seam (transient, never saved).
+	UBlueprint* TransientBlueprint = NewObject<UBlueprint>(GetTransientPackage());
+	UEdGraph* TransientGraph = NewObject<UEdGraph>(TransientBlueprint);
+	TransientGraph->Schema = UEdGraphSchema::StaticClass();
+	TransientBlueprint->FunctionGraphs.Add(TransientGraph);
+	FNativeContextResult NonK2Result;
+	TestFalse(
+		TEXT("non-K2 graph is rejected"),
+		Registry.FilterContextForAutomation(TransientBlueprint, TransientGraph, nullptr, nullptr, 8, NonK2Result));
+	TestEqual(TEXT("non-K2 code"), NonK2Result.ErrorCode, FString(TEXT("graphpatch-context-mismatch")));
+
+	if (!WriteContextExport(*this, Palette, NodeContext, ExecContext, DataContext, NonK2Result.ErrorCode))
+	{
+		return false;
+	}
+
+	AddInfo(FString::Printf(
+		TEXT("contextEvidence graphKind=%s graphSchema=%s palette=%d node=%d execPin=%d dataPin=%d described=%d notDescribed=%d evaluated=%d rejected=%d execFingerprint=%s"),
+		*ExecContext.GraphKind,
+		*ExecContext.GraphSchemaPath,
+		Palette.Actions.Num(),
+		NodeContext.Actions.Num(),
+		ExecContext.Actions.Num(),
+		DataContext.Actions.Num(),
+		ExecContext.DescribedActions,
+		ExecContext.NotDescribedActions,
+		ExecContext.EvaluatedActions,
+		ExecContext.RejectedActions,
+		*ExecContext.ActionSetFingerprint));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUEAgentKitNativeUntrustedSpawnerTest,
+	"UEAgentKit.Native.R1UntrustedSpawner",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUEAgentKitNativeUntrustedSpawnerTest::RunTest(const FString& Parameters)
+{
+	if (!EnsureRegistry(*this))
+	{
+		return false;
+	}
+	FNativeNodeRegistry& Registry = FNativeNodeRegistry::Get();
+
+	UBlueprintNodeSpawner* Spawner = NewObject<UBlueprintNodeSpawner>(GetTransientPackage());
+	Spawner->NodeClass = UEdGraphNode::StaticClass();
+
+	FString Code;
+	TestFalse(
+		TEXT("untrusted spawner is rejected"),
+		Registry.DescribeSpawnerForAutomation(Spawner, true, Code));
+	TestEqual(TEXT("untrusted reason"), Code, FString(TEXT("untrusted-spawner-excluded")));
+	TestNull(TEXT("untrusted spawner did not create a template"), Spawner->GetCachedTemplateNode());
+
+	TestFalse(
+		TEXT("unknown plain spawner is rejected"),
+		Registry.DescribeSpawnerForAutomation(Spawner, false, Code));
+	TestEqual(TEXT("unknown spawner reason"), Code, FString(TEXT("unknown-spawner")));
+	TestNull(TEXT("unknown spawner did not create a template"), Spawner->GetCachedTemplateNode());
+
+	AddInfo(FString::Printf(TEXT("untrustedSpawnerEvidence code=%s templateCached=%s"), *Code, Spawner->GetCachedTemplateNode() != nullptr ? TEXT("yes") : TEXT("no")));
 	return true;
 }
 

@@ -170,6 +170,93 @@
       },
       "minHostVersion": "0.8.0",
       "deprecated": false
+    },
+    {
+      "name": "graph.nodeRegistry.filterContext",
+      "version": "1.0.0",
+      "domain": "graph",
+      "titleKey": "ueak.tool.graph.nodeRegistry.filterContext.title",
+      "readOnly": true,
+      "risk": "R1",
+      "implementation": "core",
+      "capabilities": [
+        "graph-node-registry-filter-context"
+      ],
+      "requires": {
+        "editor": true,
+        "transaction": false,
+        "compile": false,
+        "save": false,
+        "policyKeys": [],
+        "revisionScope": "none"
+      },
+      "exposure": {
+        "bridge": {
+          "method": "native.invoke",
+          "aliases": []
+        },
+        "mcp": null,
+        "toolMenu": null,
+        "cli": null
+      },
+      "gating": {
+        "defaultDecision": "deny",
+        "maturity": "experimental",
+        "gateProfile": null,
+        "requiresPIEStopped": false,
+        "requiresPackageClean": false,
+        "requiresAssetLoaded": true,
+        "mayLoadAsset": false,
+        "requiresConfirmation": false,
+        "assetAllowlist": []
+      },
+      "threading": {
+        "execution": "game",
+        "blocking": false,
+        "maxBlockMs": 0
+      },
+      "dto": {
+        "paramsSchemaId": "ueak.native.graph.nodeRegistry.filterContext.params/1.0",
+        "resultSchemaId": "ueak.native.graph.nodeRegistry.filterContext.result/1.0",
+        "maxRequestBytes": 8192,
+        "maxResponseBytes": 1048576,
+        "maxItems": 512,
+        "truncation": "explicit-flags"
+      },
+      "transaction": {
+        "kind": "none",
+        "snapshot": "io",
+        "rollback": "none"
+      },
+      "limits": {
+        "maxOperationsPerInvocation": 1,
+        "maxAffectedNodes": 0,
+        "timeoutMs": 5000
+      },
+      "errorCodes": [
+        "native-registry-unavailable",
+        "native-registry-invalid-manifest",
+        "native-tool-unknown",
+        "native-tool-version-unsupported",
+        "native-schema-invalid-arguments",
+        "native-limit-response-too-large",
+        "native-internal-error",
+        "graphpatch-asset-not-loaded",
+        "graphpatch-graph-not-found",
+        "graph-node-not-found",
+        "graph-pin-not-found",
+        "graphpatch-context-mismatch"
+      ],
+      "evidence": {
+        "required": [],
+        "optional": []
+      },
+      "audit": {
+        "persist": false,
+        "includeResultDigest": true
+      },
+      "minHostVersion": "0.8.0",
+      "deprecated": false
     }
   ]
 }

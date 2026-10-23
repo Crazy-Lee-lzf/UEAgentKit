@@ -7,6 +7,7 @@
 #include "BlueprintContextSha256.h"
 
 #include "BlueprintActionDatabase.h"
+#include "BlueprintActionFilter.h"
 #include "BlueprintAssetNodeSpawner.h"
 #include "BlueprintBoundEventNodeSpawner.h"
 #include "BlueprintComponentNodeSpawner.h"
@@ -20,6 +21,7 @@
 #include "EdGraph/EdGraphPin.h"
 #include "EdGraph/EdGraphSchema.h"
 #include "EdGraphSchema_K2.h"
+#include "Engine/Blueprint.h"
 #include "K2Node.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_DynamicCast.h"
@@ -46,6 +48,7 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "UObject/Package.h"
+#include "UObject/SoftObjectPath.h"
 #include "UObject/UnrealType.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogUEAgentKitNativeRegistry, Log, All);
@@ -946,6 +949,11 @@ void FNativeNodeRegistry::Shutdown()
 	EditorSessionId.Reset();
 	DeferredSpawnerReasons.Reset();
 	SessionTemplateCreations = 0;
+	DescribedSpawners.Reset();
+	DescribedOwners.Reset();
+	DescribedDescriptors.Reset();
+	DescribedDatabaseFingerprint.Reset();
+	DescribedTotalSpawners = 0;
 }
 
 bool FNativeNodeRegistry::IsInitialized() const
@@ -1136,6 +1144,13 @@ FNativeCatalogResult FNativeNodeRegistry::BuildCatalog(const FNativeCatalogOptio
 	TMap<FString, FNativeNodeDescriptorRecord> UniqueRecords;
 	TSet<FString> CollisionIds;
 
+	struct FDescribedSource
+	{
+		TWeakObjectPtr<UBlueprintNodeSpawner> Spawner;
+		TWeakObjectPtr<UObject> Owner;
+	};
+	TMap<FString, FDescribedSource> DescribedSources;
+
 	for (const TPair<FObjectKey, FBlueprintActionDatabase::FActionList>& OwnerEntry : Registry)
 	{
 		const UObject* Owner = OwnerEntry.Key.ResolveObjectPtr();
@@ -1191,7 +1206,12 @@ FNativeCatalogResult FNativeNodeRegistry::BuildCatalog(const FNativeCatalogOptio
 				}
 				continue;
 			}
-			UniqueRecords.Add(Action.Record.ActionId, MoveTemp(Action.Record));
+			const FString DescribedActionId = Action.Record.ActionId;
+			UniqueRecords.Add(DescribedActionId, MoveTemp(Action.Record));
+			FDescribedSource Source;
+			Source.Spawner = Spawner;
+			Source.Owner = const_cast<UObject*>(Owner);
+			DescribedSources.Add(DescribedActionId, MoveTemp(Source));
 		}
 	}
 
@@ -1256,6 +1276,26 @@ FNativeCatalogResult FNativeNodeRegistry::BuildCatalog(const FNativeCatalogOptio
 		Result.Descriptors.SetNum(Effective.MaxItems);
 		Result.bTruncated = true;
 	}
+
+	// Freeze the described set for R1.3 context filtering.  Context only ever
+	// evaluates these official, already-described spawners, so a context query
+	// can never trigger a project/third-party template.
+	DescribedSpawners.Reset();
+	DescribedOwners.Reset();
+	DescribedDescriptors.Reset();
+	for (const FNativeNodeDescriptorRecord& Record : Result.Descriptors)
+	{
+		const FDescribedSource* Source = DescribedSources.Find(Record.ActionId);
+		if (Source == nullptr || !Source->Spawner.IsValid())
+		{
+			continue;
+		}
+		DescribedSpawners.Add(Record.ActionId, Source->Spawner);
+		DescribedOwners.Add(Record.ActionId, Source->Owner);
+		DescribedDescriptors.Add(Record.ActionId, Record.Descriptor);
+	}
+	DescribedDatabaseFingerprint = Result.ActionDatabaseFingerprint;
+	DescribedTotalSpawners = Result.TotalSpawners;
 
 	Result.bComplete = Result.TotalUnsupported == 0;
 	Result.TemplateNodesCached = Context.TemplateNodesCached;
@@ -1323,6 +1363,119 @@ bool FNativeNodeRegistry::TryInvokeShadowTool(
 
 	const TSharedPtr<FJsonObject> SafeArguments = Arguments.IsValid() ? Arguments : MakeShared<FJsonObject>();
 	const bool bIsCatalog = ToolId == TEXT("graph.nodeRegistry.catalog");
+	const bool bIsFilterContext = ToolId == TEXT("graph.nodeRegistry.filterContext");
+
+	if (bIsFilterContext)
+	{
+		FString AssetPath;
+		FString GraphGuidText;
+		FString NodeGuidText;
+		FString PinName;
+		int32 ContextMaxItems = 128;
+		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : SafeArguments->Values)
+		{
+			const bool bStringField = Pair.Key == TEXT("assetPath") || Pair.Key == TEXT("graphGuid")
+				|| Pair.Key == TEXT("nodeGuid") || Pair.Key == TEXT("pinName");
+			if (bStringField)
+			{
+				if (!Pair.Value.IsValid() || Pair.Value->Type != EJson::String)
+				{
+					OutErrorCode = TEXT("native-schema-invalid-arguments");
+					OutErrorMessage = FString::Printf(TEXT("%s must be a string."), *Pair.Key);
+					return false;
+				}
+				const FString Value = Pair.Value->AsString();
+				if (Value.Len() > 512)
+				{
+					OutErrorCode = TEXT("native-schema-invalid-arguments");
+					OutErrorMessage = TEXT("A context argument is too long.");
+					return false;
+				}
+				if (Pair.Key == TEXT("assetPath")) { AssetPath = Value; }
+				else if (Pair.Key == TEXT("graphGuid")) { GraphGuidText = Value; }
+				else if (Pair.Key == TEXT("nodeGuid")) { NodeGuidText = Value; }
+				else { PinName = Value; }
+			}
+			else if (Pair.Key == TEXT("maxItems"))
+			{
+				if (!Pair.Value.IsValid() || Pair.Value->Type != EJson::Number)
+				{
+					OutErrorCode = TEXT("native-schema-invalid-arguments");
+					OutErrorMessage = TEXT("maxItems must be an integer.");
+					return false;
+				}
+				const double Number = Pair.Value->AsNumber();
+				if (Number < 1.0 || Number > MaxCatalogItems || Number != FMath::RoundToDouble(Number))
+				{
+					OutErrorCode = TEXT("native-schema-invalid-arguments");
+					OutErrorMessage = TEXT("maxItems is out of range.");
+					return false;
+				}
+				ContextMaxItems = static_cast<int32>(Number);
+			}
+			else
+			{
+				OutErrorCode = TEXT("native-schema-invalid-arguments");
+				OutErrorMessage = TEXT("Unknown native tool argument.");
+				return false;
+			}
+		}
+		if (AssetPath.IsEmpty() || GraphGuidText.IsEmpty())
+		{
+			OutErrorCode = TEXT("native-schema-invalid-arguments");
+			OutErrorMessage = TEXT("assetPath and graphGuid are required.");
+			return false;
+		}
+		if (!PinName.IsEmpty() && NodeGuidText.IsEmpty())
+		{
+			OutErrorCode = TEXT("native-schema-invalid-arguments");
+			OutErrorMessage = TEXT("pinName requires nodeGuid.");
+			return false;
+		}
+
+		FNativeContextRequest ContextRequest;
+		ContextRequest.AssetPath = AssetPath;
+		ContextRequest.GraphGuid = GraphGuidText;
+		ContextRequest.NodeGuid = NodeGuidText;
+		ContextRequest.PinName = PinName;
+		ContextRequest.MaxItems = ContextMaxItems;
+		const FNativeContextResult ContextResult = FilterContext(ContextRequest);
+		if (!ContextResult.bOk)
+		{
+			OutErrorCode = ContextResult.ErrorCode;
+			OutErrorMessage = ContextResult.ErrorMessage;
+			return false;
+		}
+
+		const TSharedRef<FJsonObject> ContextEnvelope = MakeShared<FJsonObject>();
+		ContextEnvelope->SetStringField(TEXT("toolId"), ToolId);
+		ContextEnvelope->SetStringField(TEXT("toolVersion"), Entry->Version);
+		ContextEnvelope->SetStringField(TEXT("access"), TEXT("read"));
+		ContextEnvelope->SetStringField(TEXT("editorSessionId"), EditorSessionId);
+		ContextEnvelope->SetStringField(TEXT("registryVersion"), Manifest.RegistryVersion);
+		ContextEnvelope->SetBoolField(TEXT("readOnly"), true);
+		ContextEnvelope->SetObjectField(TEXT("data"), ContextResult.MakeJson());
+
+		FString ContextSerialized;
+		const TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> ContextWriter =
+			TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&ContextSerialized);
+		if (!FJsonSerializer::Serialize(ContextEnvelope, ContextWriter))
+		{
+			OutErrorCode = TEXT("native-internal-error");
+			OutErrorMessage = TEXT("The native tool result could not be serialized.");
+			return false;
+		}
+		FTCHARToUTF8 ContextUtf8(*ContextSerialized);
+		if (ContextUtf8.Length() > MaxResponseBytes)
+		{
+			OutErrorCode = TEXT("native-limit-response-too-large");
+			OutErrorMessage = TEXT("The native tool result exceeds the response limit.");
+			return false;
+		}
+		OutResult = ContextEnvelope;
+		return true;
+	}
+
 	int32 MaxItems = 64;
 	bool bIncludeDescriptors = bIsCatalog;
 	bool bIncludeUnsupported = true;
@@ -1426,4 +1579,524 @@ bool FNativeNodeRegistry::TryInvokeShadowTool(
 
 	OutResult = Result;
 	return true;
+}
+
+namespace
+{
+	const TCHAR* const ContextFingerprintDomain = TEXT("ueak.node-action/1.context");
+
+	FNativeCatalogIdentity MakeRegistryIdentity(const FString& EditorSessionId)
+	{
+		FNativeCatalogIdentity Identity;
+		Identity.EditorSessionId = EditorSessionId;
+		Identity.EngineVersion = FString::Printf(
+			TEXT("%d.%d.%d"),
+			FEngineVersion::Current().GetMajor(),
+			FEngineVersion::Current().GetMinor(),
+			FEngineVersion::Current().GetPatch());
+		Identity.EngineChangelist = static_cast<int32>(FEngineVersion::Current().GetChangelist());
+		Identity.BuildConfiguration = FString(LexToString(FApp::GetBuildConfiguration()));
+		Identity.ProjectName = FApp::GetProjectName();
+		if (const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("UEAgentKit")))
+		{
+			Identity.PluginVersion = Plugin->GetDescriptor().VersionName;
+		}
+		Identity.PluginBuildHash = CurrentPluginBuildHash();
+		FString PluginSetError;
+		Identity.PluginSetHash = FNativeNodeRegistry::ComputePluginSetHash(PluginSetError);
+		return Identity;
+	}
+
+	FString ContextKindForType(const EGraphType GraphType)
+	{
+		switch (GraphType)
+		{
+		case GT_Ubergraph:
+			return TEXT("event");
+		case GT_Function:
+			return TEXT("function");
+		case GT_Macro:
+			return TEXT("macro");
+		default:
+			return TEXT("other");
+		}
+	}
+}
+
+TSharedRef<FJsonObject> FNativeContextResult::MakeJson() const
+{
+	const TSharedRef<FJsonObject> Object = MakeShared<FJsonObject>();
+	Object->SetStringField(TEXT("schemaVersion"), TEXT("ueak.native.context-result/1.0"));
+	Object->SetBoolField(TEXT("ok"), bOk);
+	Object->SetBoolField(TEXT("readOnly"), true);
+	Object->SetBoolField(TEXT("saved"), false);
+	Object->SetBoolField(TEXT("compiled"), false);
+	Object->SetBoolField(TEXT("packageDirty"), bPackageDirty);
+	Object->SetStringField(TEXT("contextKind"), ContextKind);
+	Object->SetStringField(TEXT("assetPath"), AssetPath);
+	Object->SetStringField(TEXT("graphGuid"), GraphGuid);
+	Object->SetStringField(TEXT("graphName"), GraphName);
+	Object->SetStringField(TEXT("graphSchema"), GraphSchemaPath);
+	Object->SetStringField(TEXT("graphKind"), GraphKind);
+	Object->SetStringField(TEXT("nodeGuid"), NodeGuid);
+	Object->SetStringField(TEXT("pinName"), PinName);
+	Object->SetStringField(TEXT("pinDirection"), PinDirection);
+	Object->SetStringField(TEXT("pinCategory"), PinCategory);
+	Object->SetStringField(TEXT("actionDatabaseFingerprint"), ActionDatabaseFingerprint);
+	Object->SetStringField(TEXT("actionSetFingerprint"), ActionSetFingerprint);
+	Object->SetBoolField(TEXT("truncated"), bTruncated);
+	Object->SetBoolField(TEXT("complete"), bComplete);
+	Object->SetStringField(TEXT("completeScope"), TEXT("described-actions"));
+	Object->SetNumberField(TEXT("totalSpawners"), TotalSpawners);
+	Object->SetNumberField(TEXT("describedActions"), DescribedActions);
+	Object->SetNumberField(TEXT("notDescribedActions"), NotDescribedActions);
+	Object->SetNumberField(TEXT("evaluatedActions"), EvaluatedActions);
+	Object->SetNumberField(TEXT("rejectedActions"), RejectedActions);
+	Object->SetNumberField(TEXT("matchedActions"), MatchedActions);
+	Object->SetNumberField(TEXT("totalAvailable"), TotalAvailable);
+	Object->SetNumberField(TEXT("maxItems"), MaxItems);
+	Object->SetNumberField(TEXT("durationMs"), DurationMs);
+
+	const TSharedRef<FJsonObject> Semantics = MakeShared<FJsonObject>();
+	Semantics->SetStringField(TEXT("catalogGraphKinds"), TEXT("template-context-hint"));
+	Semantics->SetStringField(TEXT("contextAuthority"), TEXT("FBlueprintActionFilter"));
+	Semantics->SetStringField(
+		TEXT("note"),
+		TEXT("descriptor.graphKinds describes the transient template graph only; this action set is the authoritative validity for the requested graph/node/pin."));
+	Object->SetObjectField(TEXT("semantics"), Semantics);
+
+	const TSharedRef<FJsonObject> IdentityJson = MakeShared<FJsonObject>();
+	IdentityJson->SetStringField(TEXT("engineVersion"), Identity.EngineVersion);
+	IdentityJson->SetNumberField(TEXT("engineChangelist"), Identity.EngineChangelist);
+	IdentityJson->SetStringField(TEXT("pluginVersion"), Identity.PluginVersion);
+	IdentityJson->SetStringField(TEXT("pluginBuildHash"), Identity.PluginBuildHash);
+	IdentityJson->SetStringField(TEXT("pluginSetHash"), Identity.PluginSetHash);
+	IdentityJson->SetStringField(TEXT("editorSessionId"), Identity.EditorSessionId);
+	IdentityJson->SetStringField(TEXT("projectName"), Identity.ProjectName);
+	Object->SetObjectField(TEXT("identity"), IdentityJson);
+
+	TArray<TSharedPtr<FJsonValue>> ActionValues;
+	ActionValues.Reserve(Actions.Num());
+	for (const FNativeContextActionRecord& Action : Actions)
+	{
+		const TSharedRef<FJsonObject> Item = MakeShared<FJsonObject>();
+		Item->SetStringField(TEXT("actionId"), Action.ActionId);
+		Item->SetStringField(TEXT("descriptorDigest"), Action.DescriptorDigest);
+		Item->SetStringField(TEXT("nodeClass"), Action.NodeClass);
+		Item->SetStringField(TEXT("spawnerClass"), Action.SpawnerClass);
+		Item->SetStringField(TEXT("title"), Action.Title);
+		Item->SetStringField(TEXT("menuName"), Action.MenuName);
+		Item->SetStringField(TEXT("category"), Action.Category);
+		TArray<TSharedPtr<FJsonValue>> KindValues;
+		for (const FString& Kind : Action.GraphKindsHint)
+		{
+			KindValues.Add(MakeShared<FJsonValueString>(Kind));
+		}
+		Item->SetArrayField(TEXT("graphKindsHint"), KindValues);
+		if (Action.DiscoveryKey.IsValid())
+		{
+			Item->SetObjectField(TEXT("discoveryKey"), Action.DiscoveryKey);
+		}
+		ActionValues.Add(MakeShared<FJsonValueObject>(Item));
+	}
+	Object->SetArrayField(TEXT("actions"), ActionValues);
+	return Object;
+}
+
+FNativeContextResult FNativeNodeRegistry::FilterContext(const FNativeContextRequest& Request) const
+{
+	FNativeContextResult Result;
+	Result.Identity = MakeRegistryIdentity(EditorSessionId);
+	const double StartSeconds = FPlatformTime::Seconds();
+	if (State != ENativeRegistryState::Ready)
+	{
+		Result.ErrorCode = State == ENativeRegistryState::Unavailable && !UnavailableCode.IsEmpty()
+			? UnavailableCode
+			: TEXT("native-registry-unavailable");
+		Result.ErrorMessage = TEXT("The native node registry is not enabled.");
+		return Result;
+	}
+	check(IsInGameThread());
+
+	if (Request.AssetPath.IsEmpty() || Request.GraphGuid.IsEmpty())
+	{
+		Result.ErrorCode = TEXT("native-schema-invalid-arguments");
+		Result.ErrorMessage = TEXT("assetPath and graphGuid are required.");
+		return Result;
+	}
+
+	UObject* ResolvedObject = FSoftObjectPath(Request.AssetPath).ResolveObject();
+	UBlueprint* Blueprint = Cast<UBlueprint>(ResolvedObject);
+	if (Blueprint == nullptr)
+	{
+		Result.ErrorCode = TEXT("graphpatch-asset-not-loaded");
+		Result.ErrorMessage = TEXT("The requested Blueprint is not loaded; R1 never loads assets.");
+		return Result;
+	}
+
+	FGuid GraphGuidValue;
+	if (!FGuid::Parse(Request.GraphGuid, GraphGuidValue))
+	{
+		Result.ErrorCode = TEXT("native-schema-invalid-arguments");
+		Result.ErrorMessage = TEXT("graphGuid is not a valid GUID.");
+		return Result;
+	}
+	TArray<UEdGraph*> Graphs;
+	Blueprint->GetAllGraphs(Graphs);
+	UEdGraph* Graph = nullptr;
+	for (UEdGraph* Candidate : Graphs)
+	{
+		if (Candidate != nullptr && Candidate->GraphGuid == GraphGuidValue)
+		{
+			Graph = Candidate;
+			break;
+		}
+	}
+	if (Graph == nullptr)
+	{
+		Result.ErrorCode = TEXT("graphpatch-graph-not-found");
+		Result.ErrorMessage = TEXT("The requested graph does not exist in the Blueprint.");
+		return Result;
+	}
+
+	const UEdGraphSchema_K2* K2Schema = Cast<UEdGraphSchema_K2>(Graph->GetSchema());
+	if (K2Schema == nullptr)
+	{
+		Result.ErrorCode = TEXT("graphpatch-context-mismatch");
+		Result.ErrorMessage = TEXT("The requested graph is not a K2 Blueprint graph.");
+		return Result;
+	}
+
+	UEdGraphNode* Node = nullptr;
+	if (!Request.NodeGuid.IsEmpty())
+	{
+		FGuid NodeGuidValue;
+		if (!FGuid::Parse(Request.NodeGuid, NodeGuidValue))
+		{
+			Result.ErrorCode = TEXT("native-schema-invalid-arguments");
+			Result.ErrorMessage = TEXT("nodeGuid is not a valid GUID.");
+			return Result;
+		}
+		for (UEdGraphNode* Candidate : Graph->Nodes)
+		{
+			if (Candidate != nullptr && Candidate->NodeGuid == NodeGuidValue)
+			{
+				Node = Candidate;
+				break;
+			}
+		}
+		if (Node == nullptr)
+		{
+			Result.ErrorCode = TEXT("graph-node-not-found");
+			Result.ErrorMessage = TEXT("The requested node does not exist in the graph.");
+			return Result;
+		}
+	}
+
+	UEdGraphPin* Pin = nullptr;
+	if (!Request.PinName.IsEmpty())
+	{
+		if (Node == nullptr)
+		{
+			Result.ErrorCode = TEXT("native-schema-invalid-arguments");
+			Result.ErrorMessage = TEXT("pinName requires nodeGuid.");
+			return Result;
+		}
+		for (UEdGraphPin* Candidate : Node->Pins)
+		{
+			if (Candidate != nullptr && Candidate->PinName.ToString() == Request.PinName)
+			{
+				Pin = Candidate;
+				break;
+			}
+		}
+		if (Pin == nullptr)
+		{
+			Result.ErrorCode = TEXT("graph-pin-not-found");
+			Result.ErrorMessage = TEXT("The requested pin does not exist on the node.");
+			return Result;
+		}
+	}
+
+	Result.AssetPath = Blueprint->GetPathName();
+	Result.GraphGuid = Graph->GraphGuid.ToString(EGuidFormats::Digits);
+	Result.GraphName = Graph->GetName();
+	Result.GraphSchemaPath = Graph->GetSchema()->GetClass()->GetPathName();
+	Result.GraphKind = ContextKindForType(Graph->GetSchema()->GetGraphType(Graph));
+	Result.NodeGuid = Node != nullptr ? Node->NodeGuid.ToString(EGuidFormats::Digits) : FString();
+	Result.PinName = Pin != nullptr ? Pin->PinName.ToString() : FString();
+	Result.PinDirection = Pin != nullptr ? (Pin->Direction == EGPD_Input ? TEXT("input") : TEXT("output")) : FString();
+	Result.PinCategory = Pin != nullptr ? Pin->PinType.PinCategory.ToString() : FString();
+	Result.ContextKind = Pin != nullptr ? TEXT("pin") : (Node != nullptr ? TEXT("node") : TEXT("palette"));
+	Result.MaxItems = FMath::Clamp(Request.MaxItems, 1, MaxCatalogItems);
+
+	Result = FilterContextInternal(
+		Blueprint,
+		Graph,
+		Node,
+		Pin,
+		Result.ContextKind,
+		Result.MaxItems,
+		Request.MaxFilterMs);
+	Result.DurationMs = (FPlatformTime::Seconds() - StartSeconds) * 1000.0;
+	return Result;
+}
+
+FNativeContextResult FNativeNodeRegistry::FilterContextInternal(
+	UBlueprint* Blueprint,
+	UEdGraph* Graph,
+	UEdGraphNode* Node,
+	UEdGraphPin* Pin,
+	const FString& ContextKind,
+	const int32 MaxItems,
+	const double MaxFilterMs) const
+{
+	FNativeContextResult Result;
+	Result.Identity = MakeRegistryIdentity(EditorSessionId);
+	Result.ContextKind = ContextKind;
+	Result.MaxItems = FMath::Clamp(MaxItems, 1, MaxCatalogItems);
+	Result.AssetPath = Blueprint != nullptr ? Blueprint->GetPathName() : FString();
+	Result.GraphGuid = Graph != nullptr ? Graph->GraphGuid.ToString(EGuidFormats::Digits) : FString();
+	Result.GraphName = Graph != nullptr ? Graph->GetName() : FString();
+	if (Graph != nullptr && Graph->GetSchema() != nullptr)
+	{
+		Result.GraphSchemaPath = Graph->GetSchema()->GetClass()->GetPathName();
+		Result.GraphKind = ContextKindForType(Graph->GetSchema()->GetGraphType(Graph));
+	}
+	Result.NodeGuid = Node != nullptr ? Node->NodeGuid.ToString(EGuidFormats::Digits) : FString();
+	Result.PinName = Pin != nullptr ? Pin->PinName.ToString() : FString();
+	Result.PinDirection = Pin != nullptr ? (Pin->Direction == EGPD_Input ? TEXT("input") : TEXT("output")) : FString();
+	Result.PinCategory = Pin != nullptr ? Pin->PinType.PinCategory.ToString() : FString();
+	Result.bPackageDirty = Blueprint != nullptr && Blueprint->GetOutermost() != nullptr
+		? Blueprint->GetOutermost()->IsDirty()
+		: false;
+
+	if (State != ENativeRegistryState::Ready)
+	{
+		Result.ErrorCode = TEXT("native-registry-unavailable");
+		Result.ErrorMessage = TEXT("The native node registry is not enabled.");
+		return Result;
+	}
+	if (Blueprint == nullptr || Graph == nullptr)
+	{
+		Result.ErrorCode = TEXT("native-schema-invalid-arguments");
+		Result.ErrorMessage = TEXT("Blueprint and graph are required.");
+		return Result;
+	}
+	if (Cast<UEdGraphSchema_K2>(Graph->GetSchema()) == nullptr)
+	{
+		Result.ErrorCode = TEXT("graphpatch-context-mismatch");
+		Result.ErrorMessage = TEXT("The requested graph is not a K2 Blueprint graph.");
+		return Result;
+	}
+	if (Node != nullptr && Node->GetGraph() != Graph)
+	{
+		Result.ErrorCode = TEXT("graph-node-not-found");
+		Result.ErrorMessage = TEXT("The requested node does not belong to the requested graph.");
+		return Result;
+	}
+	if (Pin != nullptr && (Node == nullptr || !Node->Pins.Contains(Pin)))
+	{
+		Result.ErrorCode = TEXT("graph-pin-not-found");
+		Result.ErrorMessage = TEXT("The requested pin does not belong to the requested node.");
+		return Result;
+	}
+
+	// Context only evaluates the session's described, official actions.  This is
+	// the key trust bound: no menu builder enumeration and no untrusted template.
+	if (DescribedSpawners.Num() == 0)
+	{
+		const FNativeCatalogResult Catalog = BuildCatalog(FNativeCatalogOptions());
+		if (!Catalog.bOk)
+		{
+			Result.ErrorCode = Catalog.ErrorCode;
+			Result.ErrorMessage = Catalog.ErrorMessage;
+			return Result;
+		}
+	}
+
+	FBlueprintActionFilter::EFlags Flags = FBlueprintActionFilter::BPFILTER_NoFlags;
+	if (ContextKind == TEXT("palette"))
+	{
+		// Mirrors FBlueprintActionMenuUtils::MakePaletteMenu(Context, nullptr, ...).
+	}
+	else
+	{
+		// Mirrors the context-sensitive flags used by MakeContextMenu.
+		Flags |= FBlueprintActionFilter::BPFILTER_RejectGlobalFields;
+		Flags |= FBlueprintActionFilter::BPFILTER_RejectNonImportedFields;
+		Flags |= FBlueprintActionFilter::BPFILTER_RejectIncompatibleThreadSafety;
+	}
+	FBlueprintActionFilter Filter(Flags);
+	Filter.Context.Blueprints.Add(Blueprint);
+	Filter.Context.Graphs.Add(Graph);
+	if (Pin != nullptr)
+	{
+		Filter.Context.Pins.Add(Pin);
+		if (ContextKind != TEXT("palette"))
+		{
+			// Pin context menus are implicitly targeting the pin's node class.
+			if (UClass* PinObjectClass = Cast<UClass>(Pin->PinType.PinSubCategoryObject.Get()))
+			{
+				FBlueprintActionFilter::Add(Filter.TargetClasses, PinObjectClass);
+			}
+		}
+	}
+	if (ContextKind == TEXT("palette"))
+	{
+		Filter.RejectedNodeTypes.Add(UK2Node_VariableGet::StaticClass());
+		Filter.RejectedNodeTypes.Add(UK2Node_VariableSet::StaticClass());
+	}
+
+	const double Deadline = FPlatformTime::Seconds() + FMath::Clamp(MaxFilterMs, 100.0, 30000.0) / 1000.0;
+	TArray<FNativeContextActionRecord> Matched;
+	Result.TotalSpawners = DescribedTotalSpawners;
+	Result.DescribedActions = DescribedSpawners.Num();
+	Result.NotDescribedActions = FMath::Max(0, Result.TotalSpawners - Result.DescribedActions);
+	for (const TPair<FString, TWeakObjectPtr<UBlueprintNodeSpawner>>& Pair : DescribedSpawners)
+	{
+		if ((Result.EvaluatedActions & 0x3f) == 0 && FPlatformTime::Seconds() > Deadline)
+		{
+			Result.bTruncated = true;
+			break;
+		}
+		UBlueprintNodeSpawner* Spawner = Pair.Value.Get();
+		const TWeakObjectPtr<UObject>* OwnerPtr = DescribedOwners.Find(Pair.Key);
+		UObject* Owner = OwnerPtr != nullptr ? OwnerPtr->Get() : nullptr;
+		const TSharedPtr<FJsonObject>* DescriptorPtr = DescribedDescriptors.Find(Pair.Key);
+		if (Spawner == nullptr || Owner == nullptr || DescriptorPtr == nullptr || !DescriptorPtr->IsValid())
+		{
+			continue;
+		}
+		++Result.EvaluatedActions;
+		FBlueprintActionInfo ActionInfo(Owner, Spawner);
+		if (Filter.IsFiltered(ActionInfo))
+		{
+			++Result.RejectedActions;
+			continue;
+		}
+
+		const TSharedPtr<FJsonObject> Descriptor = *DescriptorPtr;
+		FNativeContextActionRecord Record;
+		Record.ActionId = Pair.Key;
+		Descriptor->TryGetStringField(TEXT("descriptorDigest"), Record.DescriptorDigest);
+		Descriptor->TryGetStringField(TEXT("title"), Record.Title);
+		Descriptor->TryGetStringField(TEXT("menuName"), Record.MenuName);
+		Descriptor->TryGetStringField(TEXT("category"), Record.Category);
+		const TSharedPtr<FJsonObject>* DiscoveryKey = nullptr;
+		if (Descriptor->TryGetObjectField(TEXT("discoveryKey"), DiscoveryKey) && DiscoveryKey != nullptr)
+		{
+			Record.DiscoveryKey = *DiscoveryKey;
+			(*DiscoveryKey)->TryGetStringField(TEXT("nodeClass"), Record.NodeClass);
+			(*DiscoveryKey)->TryGetStringField(TEXT("spawnerClass"), Record.SpawnerClass);
+		}
+		const TArray<TSharedPtr<FJsonValue>>* GraphKinds = nullptr;
+		if (Descriptor->TryGetArrayField(TEXT("graphKinds"), GraphKinds) && GraphKinds != nullptr)
+		{
+			for (const TSharedPtr<FJsonValue>& Kind : *GraphKinds)
+			{
+				if (Kind.IsValid())
+				{
+					Record.GraphKindsHint.Add(Kind->AsString());
+				}
+			}
+		}
+		Matched.Add(MoveTemp(Record));
+	}
+
+	Matched.Sort([](const FNativeContextActionRecord& Left, const FNativeContextActionRecord& Right) {
+		return UEAgentKitCanonical::CompareUtf8(Left.ActionId, Right.ActionId) < 0;
+	});
+	Result.MatchedActions = Matched.Num();
+	Result.TotalAvailable = Matched.Num();
+	Result.ActionDatabaseFingerprint = DescribedDatabaseFingerprint;
+
+	TArray<FString> AllIds;
+	AllIds.Reserve(Matched.Num());
+	for (const FNativeContextActionRecord& Record : Matched)
+	{
+		AllIds.Add(Record.ActionId);
+	}
+	const FNativeCanonicalValueRef IdArray = FNativeCanonicalValue::MakeArray();
+	for (const FString& ActionId : AllIds)
+	{
+		IdArray->AddArrayValue(FNativeCanonicalValue::MakeString(ActionId));
+	}
+	FString FingerprintValue;
+	FString FingerprintError;
+	if (!UEAgentKitCanonical::Fingerprint(IdArray, ContextFingerprintDomain, 16, FingerprintValue, FingerprintError))
+	{
+		Result.ErrorCode = TEXT("native-internal-error");
+		Result.ErrorMessage = FingerprintError.IsEmpty() ? TEXT("The context fingerprint failed.") : FingerprintError;
+		return Result;
+	}
+	Result.ActionSetFingerprint = FingerprintValue;
+
+	if (Matched.Num() > Result.MaxItems)
+	{
+		Matched.SetNum(Result.MaxItems);
+		Result.bTruncated = true;
+	}
+	Result.Actions = MoveTemp(Matched);
+	Result.bComplete = !Result.bTruncated;
+	Result.bOk = true;
+	return Result;
+}
+
+bool FNativeNodeRegistry::FilterContextForAutomation(
+	UBlueprint* Blueprint,
+	UEdGraph* Graph,
+	UEdGraphNode* Node,
+	UEdGraphPin* Pin,
+	const int32 MaxItems,
+	FNativeContextResult& OutResult) const
+{
+	const bool bTestContext = GIsAutomationTesting
+		|| FAutomationTestFramework::Get().GetCurrentTest() != nullptr;
+	if (!bTestContext)
+	{
+		OutResult = FNativeContextResult();
+		OutResult.ErrorCode = TEXT("native-internal-error");
+		OutResult.ErrorMessage = TEXT("The automation seam is only available while a test is running.");
+		return false;
+	}
+	check(IsInGameThread());
+	const FString ContextKind = Pin != nullptr ? TEXT("pin") : (Node != nullptr ? TEXT("node") : TEXT("palette"));
+	OutResult = FilterContextInternal(Blueprint, Graph, Node, Pin, ContextKind, MaxItems, 5000.0);
+	return OutResult.bOk;
+}
+
+bool FNativeNodeRegistry::DescribeSpawnerForAutomation(
+	UBlueprintNodeSpawner* Spawner,
+	const bool bTreatAsUntrusted,
+	FString& OutCode) const
+{
+	const bool bTestContext = GIsAutomationTesting
+		|| FAutomationTestFramework::Get().GetCurrentTest() != nullptr;
+	if (!bTestContext || Spawner == nullptr)
+	{
+		OutCode = TEXT("native-internal-error");
+		return false;
+	}
+	check(IsInGameThread());
+	FBuildContext Context;
+	Context.EngineVersion = FString::Printf(
+		TEXT("%d.%d.%d"),
+		FEngineVersion::Current().GetMajor(),
+		FEngineVersion::Current().GetMinor(),
+		FEngineVersion::Current().GetPatch());
+	Context.ActionDatabaseFingerprint = TEXT("sha256:0000000000000000");
+	Context.PluginBuildHash = CurrentPluginBuildHash();
+	Context.bAllowTemplateSpawn = true;
+	Context.bAllowPinAllocation = false;
+	Context.MaxTemplateSpawns = 0;
+	Context.DeadlineSeconds = FPlatformTime::Seconds() + 1.0;
+	FActionResult Action;
+	const bool bOk = BuildDescriptorForSpawner(
+		Spawner,
+		bTreatAsUntrusted ? ENativeTrust::ThirdParty : ENativeTrust::Official,
+		Context,
+		Action);
+	OutCode = bOk ? TEXT("ok") : Action.Reason;
+	return bOk;
 }
