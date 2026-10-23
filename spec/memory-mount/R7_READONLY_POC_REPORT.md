@@ -398,7 +398,7 @@ py -3.12 -m ue_agent_kit.memory_mount query Build\r7-isolated\Evidence\demo-pack
 - 隔离 microbench（5000 records）：`loadVerifyMs≈181`、`mountFirstMs≈349`、
   `mountReuseMs≈246`、trigram median≈8.4ms、短查询 fallback median≈6.1ms。
   仅记录观测值，不设通过阈值。
-- 本轮 code+docs commit：`__R7_READINESS_COMMIT__`（最终交付消息同时给出后续 docs commit）。
+- 本轮 code+docs commit：`232e11004d867afc1a5e692f4175d4d5b1fab89a`（最终交付消息同时给出后续 docs commit）。
 
 详细威胁模型、接口和待人工裁决项见
 [R7_READONLY_INTEGRATION_READINESS.md](R7_READONLY_INTEGRATION_READINESS.md)。

@@ -328,7 +328,7 @@ py -3.12 -m unittest discover -s tests/python -p "test_memory_mount*.py" -v
 py -3.12 tests/python/r7_mount_microbench.py
 ```
 
-Local commit: `__R7_READINESS_COMMIT__` (code + readiness docs; no push).
+Local commit: `232e11004d867afc1a5e692f4175d4d5b1fab89a` (code + readiness docs; no push).
 
 ## 10. Explicit non-claims
 

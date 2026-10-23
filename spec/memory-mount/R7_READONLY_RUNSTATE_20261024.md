@@ -92,7 +92,7 @@ spec/memory-mount/R7_READONLY_POC_REPORT.md
 
 ## 5. Commit / next gate
 
-- Local code+docs commit: `__R7_READINESS_COMMIT__`
+- Local code+docs commit: `232e11004d867afc1a5e692f4175d4d5b1fab89a`
 - No push, merge, reset, or clean.
 - Next gate is human decision on identity issuer, receipt signatures/trusted authors,
   promotion/write path, PII/retention, and production MCP exposure. R7 remains unimported by
