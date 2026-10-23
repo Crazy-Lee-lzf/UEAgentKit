@@ -58,6 +58,8 @@ EXPECTED_ALL_TOOLS = [
     "ue_get_compile_errors",
     "ue_inspect_asset_live",
     "ue_get_blueprint_graph_selection",
+    "ue_get_blueprint_graph_layout_preflight",
+    "ue_preview_blueprint_graph_layout",
     "ue_analyze_animation_retarget",
     "ue_diagnose_animation_scale",
     "ue_diagnose_additive_animation",
@@ -148,7 +150,7 @@ class ToolRegistryTests(unittest.TestCase):
             EXPECTED_ALL_TOOLS,
         )
         self.assertEqual(len(tool_names_for_mode()), 10)
-        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 43)
+        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 45)
         self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 67)
         self.assertEqual(
             tool_names_for_mode(memory_enabled=True),
@@ -157,7 +159,7 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 24)
         self.assertEqual(
             len(tool_names_for_mode(live_editor_enabled=True, memory_enabled=True)),
-            57,
+            59,
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
@@ -171,7 +173,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-            114,
+            116,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:
@@ -194,6 +196,7 @@ class ToolRegistryTests(unittest.TestCase):
             "BuildOutputLogResult": "EditorBridgeDiagnosticHandlers.cpp",
             "BuildInspectAssetLiveResult": "EditorBridgeAssetHandlers.cpp",
             "BuildBlueprintGraphSelectionResult": "EditorBridgeGraphHandlers.cpp",
+            "BuildBlueprintGraphLayoutPreflightResult": "EditorBridgeGraphHandlers.cpp",
             "BuildEditorContextResult": "EditorBridgeContextHandlers.cpp",
             "TryStartBatchTask": "EditorBridgeBatchTaskHandlers.cpp",
             "BuildBatchTaskStatusResult": "EditorBridgeBatchTaskHandlers.cpp",
@@ -240,6 +243,7 @@ class ToolRegistryTests(unittest.TestCase):
                     "ue_get_animation_scale_audit",
                     "ue_cancel_animation_scale_audit",
                     "ue_export_animation_scale_audit_report",
+                    "ue_preview_blueprint_graph_layout",
                 }
             ],
         )
@@ -307,9 +311,15 @@ class ToolRegistryTests(unittest.TestCase):
                     "ue_start_batch_task",
                     "ue_get_batch_task",
                     "ue_cancel_batch_task",
+                    "ue_preview_blueprint_graph_layout",
                 }
             ],
-            [definition.name for definition in TOOL_REGISTRY if definition.group in {"live-read", "live-action"}],
+            [
+                definition.name
+                for definition in TOOL_REGISTRY
+                if definition.group in {"live-read", "live-action"}
+                and definition.name != "ue_preview_blueprint_graph_layout"
+            ],
         )
         descriptors = tool_descriptors_for_mode(
             live_editor_enabled=True,

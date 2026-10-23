@@ -52,6 +52,15 @@ from .impact_analysis import (
 )
 from .mcp_live_action_tools import register_live_action_tools
 from .mcp_live_tools import register_live_read_tools
+from .mcp_graph_layout_test_only import register_graph_layout_test_only_tool
+from .mcp_graph_layout_p8_test_only import register_graph_layout_p8_test_only_tool
+from .p7_test_only import APPLY_TOOL_NAME, FIXED_ASSET_PATH, FIXED_PROJECT_PATH, is_fixed_project
+from .p8_test_only import (
+    APPLY_TOOL_NAME as P8_APPLY_TOOL_NAME,
+    FIXED_ASSET_PATH as P8_FIXED_ASSET_PATH,
+    FIXED_PROJECT_PATH as P8_FIXED_PROJECT_PATH,
+    is_fixed_project as is_fixed_p8_project,
+)
 from .mcp_memory_tools import register_memory_tools
 from .mcp_query_tools import register_query_tools
 from .mcp_realtime_tools import register_realtime_tools
@@ -287,6 +296,9 @@ def _capabilities_response(
     live_editor_service: LiveEditorBridgeService | None,
     memory_service: ProjectMemoryService | None,
     source_control_service: P4SourceControlService | None = None,
+    *,
+    p7_test_only_graph_layout_apply: bool = False,
+    p8_test_only_graph_layout_apply: bool = False,
 ) -> dict[str, Any]:
     write_tools_enabled = workflow_service is not None
     commit_enabled = bool(workflow_service and workflow_service.config.commit_enabled)
@@ -318,11 +330,24 @@ def _capabilities_response(
             "transport": "stdio",
             "mode": _server_mode(write_tools_enabled, commit_enabled, memory_enabled),
         },
-        "tools": tool_descriptors_for_mode(
-            live_editor_enabled=live_editor_enabled,
-            workflow_enabled=write_tools_enabled,
-            memory_enabled=memory_enabled,
-            source_control_enabled=source_control_enabled,
+        "tools": (
+            tool_descriptors_for_mode(
+                live_editor_enabled=live_editor_enabled,
+                workflow_enabled=write_tools_enabled,
+                memory_enabled=memory_enabled,
+                source_control_enabled=source_control_enabled,
+            )
+            + (
+                [
+                    {
+                        "name": APPLY_TOOL_NAME,
+                        "readOnly": False,
+                        "destructive": True,
+                    }
+                ]
+                if live_editor_enabled and p7_test_only_graph_layout_apply
+                else []
+            )
         ),
         "operations": {
             "available": write_tools_enabled,
@@ -425,6 +450,91 @@ def _capabilities_response(
                 "controlRigEditorSupported": False,
                 "editingSupported": False,
                 "maxSelectedNodes": 100,
+            },
+            "graphLayoutPreflight": {
+                "available": live_editor_enabled,
+                "tool": "ue_get_blueprint_graph_layout_preflight" if live_editor_enabled else "",
+                "bridgeMethod": "editor.getBlueprintGraphLayoutPreflight" if live_editor_enabled else "",
+                "readOnly": True,
+                "selectionPolicy": "most-recently-active-blueprint-editor",
+                "scope": "focused-graph-tab",
+                "opensOrFocusesAssets": False,
+                "writesBlueprint": False,
+                "savesPackages": False,
+                "maxReturnedNodes": 512,
+                "truncationReported": True,
+                "writeToolRegistered": False,
+                "storage": "live-editor-memory",
+            },
+            "graphLayoutPreview": {
+                "available": live_editor_enabled,
+                "tool": "ue_preview_blueprint_graph_layout" if live_editor_enabled else "",
+                "bridgeMethods": [
+                    "editor.getBlueprintGraphLayoutPreflight",
+                    "editor.getFocusedBlueprintGraphContext",
+                ]
+                if live_editor_enabled
+                else [],
+                "readOnly": True,
+                "selectionPolicy": "most-recently-active-blueprint-editor",
+                "scope": "focused-graph-tab",
+                "modes": ["full", "selection", "incremental"],
+                "canonicalAlgorithm": "python-p0-layout",
+                "opensOrFocusesAssets": False,
+                "writesBlueprint": False,
+                "savesPackages": False,
+                "requiresCleanPackage": True,
+                "requiresPieStopped": True,
+                "completeGraphOnly": True,
+                "maxContextBytes": 716800,
+                "sameProcessEvidenceOnly": True,
+                "acceptanceEligible": False,
+            },
+            "p7TestOnlyGraphLayoutApply": {
+                "available": bool(live_editor_enabled and p7_test_only_graph_layout_apply),
+                "registered": bool(live_editor_enabled and p7_test_only_graph_layout_apply),
+                "tool": APPLY_TOOL_NAME if live_editor_enabled and p7_test_only_graph_layout_apply else "",
+                "bridgeMethod": "editor.applyBlueprintGraphLayoutTestOnly"
+                if live_editor_enabled and p7_test_only_graph_layout_apply
+                else "",
+                "readOnly": False,
+                "destructive": True,
+                "testOnly": True,
+                "fixedProject": str(FIXED_PROJECT_PATH),
+                "fixedAsset": FIXED_ASSET_PATH,
+                "publicGeneralWrite": False,
+                "acceptsProjectParameter": False,
+                "acceptsAssetPathParameter": False,
+                "acceptsSaveParameter": False,
+                "acceptsCompileParameter": False,
+                "explicitConfirmation": True,
+                "undoRedoVerifiedInCall": True,
+                "autoSave": False,
+                "requiresExplicitSeparateSave": True,
+            },
+            "p8TestOnlyGraphLayoutApply": {
+                "available": bool(live_editor_enabled and p8_test_only_graph_layout_apply),
+                "registered": bool(live_editor_enabled and p8_test_only_graph_layout_apply),
+                "tool": P8_APPLY_TOOL_NAME
+                if live_editor_enabled and p8_test_only_graph_layout_apply
+                else "",
+                "bridgeMethod": "editor.applyBlueprintGraphLayoutP8TestOnly"
+                if live_editor_enabled and p8_test_only_graph_layout_apply
+                else "",
+                "readOnly": False,
+                "destructive": True,
+                "testOnly": True,
+                "fixedProject": str(P8_FIXED_PROJECT_PATH),
+                "fixedAsset": P8_FIXED_ASSET_PATH,
+                "publicGeneralWrite": False,
+                "acceptsProjectParameter": False,
+                "acceptsAssetPathParameter": False,
+                "acceptsSaveParameter": False,
+                "acceptsCompileParameter": False,
+                "explicitConfirmation": True,
+                "undoRedoVerifiedInCall": True,
+                "autoSave": False,
+                "requiresExplicitSeparateSave": True,
             },
             "editorContext": {
                 "available": live_editor_enabled,
@@ -1261,6 +1371,8 @@ def create_mcp_server(
     memory_service: ProjectMemoryService | None = None,
     source_control_service: P4SourceControlService | None = None,
     audit_report_root: Path | None = None,
+    p7_test_only_graph_layout_apply: bool = False,
+    p8_test_only_graph_layout_apply: bool = False,
 ):
     if FastMCP is None or ToolAnnotations is None:
         raise RuntimeError(
@@ -1315,6 +1427,20 @@ def create_mcp_server(
     commit_enabled = bool(workflow_service and workflow_service.config.commit_enabled)
     live_editor_enabled = live_editor_service is not None
     memory_enabled = memory_service is not None
+    if p7_test_only_graph_layout_apply:
+        if live_editor_service is None:
+            raise ValueError("--enable-p7-test-only-graph-layout-apply requires --enable-live-editor")
+        if not is_fixed_project(live_editor_service.config.project_path):
+            raise ValueError(
+                "P7 test-only graph layout is restricted to the exact disposable P7AutomationHost project"
+            )
+    if p8_test_only_graph_layout_apply:
+        if live_editor_service is None:
+            raise ValueError("--enable-p8-test-only-graph-layout-apply requires --enable-live-editor")
+        if not is_fixed_p8_project(live_editor_service.config.project_path):
+            raise ValueError(
+                "P8 test-only graph layout is restricted to the exact disposable P8AutomationHost project"
+            )
     server = FastMCP(
         MCP_SERVER_NAME,
         instructions=_server_instructions(
@@ -1345,6 +1471,8 @@ def create_mcp_server(
             live,
             memory_service,
             source_control_service,
+            p7_test_only_graph_layout_apply=p7_test_only_graph_layout_apply,
+            p8_test_only_graph_layout_apply=p8_test_only_graph_layout_apply,
         ),
         project_status_response=lambda index, workflow, live: _project_status_response(
             index,
@@ -1424,6 +1552,20 @@ def create_mcp_server(
             tool_annotations_type=ToolAnnotations,
             error_response=_error_response,
         )
+        if p7_test_only_graph_layout_apply:
+            register_graph_layout_test_only_tool(
+                server=server,
+                live_editor_service=live_editor_service,
+                tool_annotations_type=ToolAnnotations,
+                error_response=_error_response,
+            )
+        if p8_test_only_graph_layout_apply:
+            register_graph_layout_p8_test_only_tool(
+                server=server,
+                live_editor_service=live_editor_service,
+                tool_annotations_type=ToolAnnotations,
+                error_response=_error_response,
+            )
     if workflow_service is not None:
         register_workflow_tools(
             server=server,
@@ -1464,6 +1606,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enable-write-tools", action="store_true")
     parser.add_argument("--enable-commit-tools", action="store_true")
     parser.add_argument("--enable-live-editor", action="store_true")
+    parser.add_argument(
+        "--enable-p7-test-only-graph-layout-apply",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--enable-p8-test-only-graph-layout-apply",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument("--enable-source-control", action="store_true")
     parser.add_argument("--engine-root", type=Path)
     parser.add_argument("--project", dest="project_path", type=Path)
@@ -1528,6 +1680,16 @@ def _build_live_editor_service(args: argparse.Namespace) -> LiveEditorBridgeServ
         return None
     if args.project_path is None:
         raise ValueError("--enable-live-editor requires --project")
+    if getattr(args, "enable_p7_test_only_graph_layout_apply", False):
+        if not is_fixed_project(args.project_path):
+            raise ValueError(
+                "P7 test-only graph layout is restricted to the exact disposable P7AutomationHost project"
+            )
+    if getattr(args, "enable_p8_test_only_graph_layout_apply", False):
+        if not is_fixed_p8_project(args.project_path):
+            raise ValueError(
+                "P8 test-only graph layout is restricted to the exact disposable P8AutomationHost project"
+            )
     return LiveEditorBridgeService(
         LiveEditorBridgeConfig(
             project_path=args.project_path,
@@ -1658,6 +1820,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             memory_service=memory_service,
             source_control_service=source_control_service,
             audit_report_root=args.work_root,
+            p7_test_only_graph_layout_apply=bool(
+                getattr(args, "enable_p7_test_only_graph_layout_apply", False)
+            ),
+            p8_test_only_graph_layout_apply=bool(
+                getattr(args, "enable_p8_test_only_graph_layout_apply", False)
+            ),
         )
         server.run(transport="stdio")
         return 0

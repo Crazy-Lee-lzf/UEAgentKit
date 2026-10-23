@@ -1,0 +1,382 @@
+{
+  "schemaVersion": "ueak.typedgraph/1.0",
+  "graphId": "g:00000107-0000-4000-8000-000000000107",
+  "asset": {
+    "path": "/Game/UEAgentKitTests/BP_GraphPatch_Target.BP_GraphPatch_Target",
+    "class": "/Script/Engine.Blueprint",
+    "revision": "sha256:3950c0334d39d67080605e3621e3d6b687981efb1f99ac7e58fa92f52adf5502",
+    "revisionPolicy": "index-snapshot",
+    "dirty": false
+  },
+  "graph": {
+    "name": "EventGraph",
+    "guid": "00000107-0000-4000-8000-000000000107",
+    "kind": "event",
+    "schema": "/Script/BlueprintGraph.EdGraphSchema_K2",
+    "editable": true
+  },
+  "source": {
+    "kind": "test-fixture",
+    "sessionId": "editor-session-test",
+    "exporterSchemaVersion": "ueak.typedgraph-export/1",
+    "pluginBuildHash": "0123456789abcdef",
+    "engineVersion": "5.6.1",
+    "exportedAtUtc": "2026-10-22T00:00:00.000Z"
+  },
+  "limits": {
+    "maxNodes": 5000,
+    "maxPins": 50000,
+    "includedNodeCount": 4,
+    "omittedNodeCount": 0,
+    "selection": "nodeId-ascending",
+    "truncated": false
+  },
+  "nodes": [
+    {
+      "nodeId": "n:00000001-0000-4000-8000-000000000001",
+      "nodeGuid": "00000001-0000-4000-8000-000000000001",
+      "objectPath": "/Game/UEAgentKitTests/BP_GraphPatch_Target.BP_GraphPatch_Target:EventGraph.K2Node_Event_1",
+      "classPath": "/Script/BlueprintGraph.K2Node_Event",
+      "title": "Event BeginPlay",
+      "kind": "event",
+      "nodeIdSource": "guid",
+      "flags": {
+        "enabled": true,
+        "pure": false,
+        "reroute": false,
+        "comment": false,
+        "latent": false
+      },
+      "position": {
+        "x": 40,
+        "y": 40
+      },
+      "size": {
+        "width": 208,
+        "height": 120,
+        "source": "stored"
+      },
+      "pins": [
+        "p:00000005-0000-4000-8000-000000000005"
+      ],
+      "semanticHash": "sha256:d063528595452c48c97c9e79fbafb7e1dfd40bb9e527ba9c668dc4f7b3412fad"
+    },
+    {
+      "nodeId": "n:00000002-0000-4000-8000-000000000002",
+      "nodeGuid": "00000002-0000-4000-8000-000000000002",
+      "objectPath": "/Game/UEAgentKitTests/BP_GraphPatch_Target.BP_GraphPatch_Target:EventGraph.K2Node_Knot_2",
+      "classPath": "/Script/BlueprintGraph.K2Node_Knot",
+      "title": "Reroute",
+      "kind": "reroute",
+      "nodeIdSource": "guid",
+      "flags": {
+        "enabled": true,
+        "pure": false,
+        "reroute": true,
+        "comment": false,
+        "latent": false
+      },
+      "position": {
+        "x": 320,
+        "y": 40
+      },
+      "size": {
+        "width": 208,
+        "height": 120,
+        "source": "stored"
+      },
+      "pins": [
+        "p:00000006-0000-4000-8000-000000000006",
+        "p:00000007-0000-4000-8000-000000000007"
+      ],
+      "semanticHash": "sha256:4e71d80379d764f964789fd32e4620ef5b9d971d86ae5adb156d82f07016911b"
+    },
+    {
+      "nodeId": "n:00000003-0000-4000-8000-000000000003",
+      "nodeGuid": "00000003-0000-4000-8000-000000000003",
+      "objectPath": "/Game/UEAgentKitTests/BP_GraphPatch_Target.BP_GraphPatch_Target:EventGraph.K2Node_CallFunction_3",
+      "classPath": "/Script/BlueprintGraph.K2Node_CallFunction",
+      "title": "Print String",
+      "kind": "call",
+      "nodeIdSource": "guid",
+      "flags": {
+        "enabled": true,
+        "pure": false,
+        "reroute": false,
+        "comment": false,
+        "latent": false
+      },
+      "position": {
+        "x": 560,
+        "y": 40
+      },
+      "size": {
+        "width": 208,
+        "height": 120,
+        "source": "stored"
+      },
+      "pins": [
+        "p:00000008-0000-4000-8000-000000000008",
+        "p:00000009-0000-4000-8000-000000000009"
+      ],
+      "semanticHash": "sha256:9e6ab5a36cbb982d2dcf58fd5e5cea2b5597d865dbcb3dcdc590da0e03e2b3fc"
+    },
+    {
+      "nodeId": "n:00000004-0000-4000-8000-000000000004",
+      "nodeGuid": "00000004-0000-4000-8000-000000000004",
+      "objectPath": "/Game/UEAgentKitTests/BP_GraphPatch_Target.BP_GraphPatch_Target:EventGraph.EdGraphNode_Comment_4",
+      "classPath": "/Script/UnrealEd.EdGraphNode_Comment",
+      "title": "",
+      "kind": "comment",
+      "nodeIdSource": "guid",
+      "flags": {
+        "enabled": true,
+        "pure": false,
+        "reroute": false,
+        "comment": true,
+        "latent": false
+      },
+      "position": {
+        "x": -40,
+        "y": -40
+      },
+      "size": {
+        "width": 840,
+        "height": 280,
+        "source": "stored"
+      },
+      "pins": [],
+      "semanticHash": "sha256:d9f119a66ea946f21824e1d6bfc4c09482112468ce064781a2a72a35a77d3f32"
+    }
+  ],
+  "pins": [
+    {
+      "pinId": "p:00000005-0000-4000-8000-000000000005",
+      "nodeId": "n:00000001-0000-4000-8000-000000000001",
+      "name": "then",
+      "friendlyName": "",
+      "direction": "output",
+      "kind": "exec",
+      "type": {
+        "category": "exec",
+        "subCategory": "",
+        "subCategoryObject": "",
+        "container": "none",
+        "isReference": false,
+        "isConst": false,
+        "isWeakPointer": false
+      },
+      "index": 0,
+      "defaults": {
+        "value": "",
+        "object": "",
+        "text": ""
+      },
+      "flags": {
+        "hidden": false,
+        "advanced": false,
+        "connectable": true,
+        "orphaned": false,
+        "defaultReadOnly": false,
+        "defaultIgnored": false
+      },
+      "links": [
+        "p:00000006-0000-4000-8000-000000000006"
+      ],
+      "pinIdSource": "native",
+      "pinGuidTransient": false
+    },
+    {
+      "pinId": "p:00000006-0000-4000-8000-000000000006",
+      "nodeId": "n:00000002-0000-4000-8000-000000000002",
+      "name": "in",
+      "friendlyName": "",
+      "direction": "input",
+      "kind": "exec",
+      "type": {
+        "category": "exec",
+        "subCategory": "",
+        "subCategoryObject": "",
+        "container": "none",
+        "isReference": false,
+        "isConst": false,
+        "isWeakPointer": false
+      },
+      "index": 0,
+      "defaults": {
+        "value": "",
+        "object": "",
+        "text": ""
+      },
+      "flags": {
+        "hidden": false,
+        "advanced": false,
+        "connectable": true,
+        "orphaned": false,
+        "defaultReadOnly": false,
+        "defaultIgnored": false
+      },
+      "links": [
+        "p:00000005-0000-4000-8000-000000000005"
+      ],
+      "pinIdSource": "native",
+      "pinGuidTransient": false
+    },
+    {
+      "pinId": "p:00000007-0000-4000-8000-000000000007",
+      "nodeId": "n:00000002-0000-4000-8000-000000000002",
+      "name": "out",
+      "friendlyName": "",
+      "direction": "output",
+      "kind": "exec",
+      "type": {
+        "category": "exec",
+        "subCategory": "",
+        "subCategoryObject": "",
+        "container": "none",
+        "isReference": false,
+        "isConst": false,
+        "isWeakPointer": false
+      },
+      "index": 1,
+      "defaults": {
+        "value": "",
+        "object": "",
+        "text": ""
+      },
+      "flags": {
+        "hidden": false,
+        "advanced": false,
+        "connectable": true,
+        "orphaned": false,
+        "defaultReadOnly": false,
+        "defaultIgnored": false
+      },
+      "links": [
+        "p:00000008-0000-4000-8000-000000000008"
+      ],
+      "pinIdSource": "native",
+      "pinGuidTransient": false
+    },
+    {
+      "pinId": "p:00000008-0000-4000-8000-000000000008",
+      "nodeId": "n:00000003-0000-4000-8000-000000000003",
+      "name": "execute",
+      "friendlyName": "",
+      "direction": "input",
+      "kind": "exec",
+      "type": {
+        "category": "exec",
+        "subCategory": "",
+        "subCategoryObject": "",
+        "container": "none",
+        "isReference": false,
+        "isConst": false,
+        "isWeakPointer": false
+      },
+      "index": 0,
+      "defaults": {
+        "value": "",
+        "object": "",
+        "text": ""
+      },
+      "flags": {
+        "hidden": false,
+        "advanced": false,
+        "connectable": true,
+        "orphaned": false,
+        "defaultReadOnly": false,
+        "defaultIgnored": false
+      },
+      "links": [
+        "p:00000007-0000-4000-8000-000000000007"
+      ],
+      "pinIdSource": "native",
+      "pinGuidTransient": false
+    },
+    {
+      "pinId": "p:00000009-0000-4000-8000-000000000009",
+      "nodeId": "n:00000003-0000-4000-8000-000000000003",
+      "name": "then",
+      "friendlyName": "",
+      "direction": "output",
+      "kind": "exec",
+      "type": {
+        "category": "exec",
+        "subCategory": "",
+        "subCategoryObject": "",
+        "container": "none",
+        "isReference": false,
+        "isConst": false,
+        "isWeakPointer": false
+      },
+      "index": 1,
+      "defaults": {
+        "value": "",
+        "object": "",
+        "text": ""
+      },
+      "flags": {
+        "hidden": false,
+        "advanced": false,
+        "connectable": true,
+        "orphaned": false,
+        "defaultReadOnly": false,
+        "defaultIgnored": false
+      },
+      "links": [],
+      "pinIdSource": "native",
+      "pinGuidTransient": false
+    }
+  ],
+  "edges": [
+    {
+      "edgeId": "e:p:00000005-0000-4000-8000-000000000005--p:00000006-0000-4000-8000-000000000006",
+      "from": {
+        "nodeId": "n:00000001-0000-4000-8000-000000000001",
+        "pinId": "p:00000005-0000-4000-8000-000000000005"
+      },
+      "to": {
+        "nodeId": "n:00000002-0000-4000-8000-000000000002",
+        "pinId": "p:00000006-0000-4000-8000-000000000006"
+      },
+      "kind": "exec",
+      "origin": "pin-link",
+      "status": "resolved"
+    },
+    {
+      "edgeId": "e:p:00000007-0000-4000-8000-000000000007--p:00000008-0000-4000-8000-000000000008",
+      "from": {
+        "nodeId": "n:00000002-0000-4000-8000-000000000002",
+        "pinId": "p:00000007-0000-4000-8000-000000000007"
+      },
+      "to": {
+        "nodeId": "n:00000003-0000-4000-8000-000000000003",
+        "pinId": "p:00000008-0000-4000-8000-000000000008"
+      },
+      "kind": "exec",
+      "origin": "pin-link",
+      "status": "resolved"
+    }
+  ],
+  "comments": [
+    {
+      "nodeId": "n:00000004-0000-4000-8000-000000000004",
+      "text": "执行流：事件到打印",
+      "bounds": {
+        "x": -40,
+        "y": -40,
+        "width": 840,
+        "height": 280
+      },
+      "containedNodeIds": [
+        "n:00000001-0000-4000-8000-000000000001",
+        "n:00000002-0000-4000-8000-000000000002",
+        "n:00000003-0000-4000-8000-000000000003"
+      ]
+    }
+  ],
+  "diagnostics": [],
+  "semanticHash": "sha256:0aae877e89fe73740c570a9de9fce764e8b14e738d73ba13254a6d90215d6399",
+  "layoutHash": "sha256:151e69898114518431f3dda3f58063988423af342c58ae57875a850c3756a148"
+}

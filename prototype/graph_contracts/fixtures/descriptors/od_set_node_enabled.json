@@ -1,0 +1,122 @@
+{
+  "schemaVersion": "ueak.operation/1.0",
+  "name": "graph.setNodeEnabled",
+  "version": "1.0.0",
+  "domain": "graph",
+  "targetKind": "blueprint-graph",
+  "parametersSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "actionId"
+    ],
+    "properties": {
+      "actionId": {
+        "type": "string",
+        "pattern": "^action:[0-9a-f]{32}$"
+      },
+      "position": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "x",
+          "y"
+        ],
+        "properties": {
+          "x": {
+            "type": "integer"
+          },
+          "y": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  },
+  "outputsSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "nodeId"
+    ],
+    "properties": {
+      "nodeId": {
+        "type": "string",
+        "pattern": "^n:"
+      }
+    }
+  },
+  "capabilities": [
+    "blueprint.graph.read",
+    "blueprint.graph.write",
+    "node.spawn"
+  ],
+  "readOnly": false,
+  "risk": "R2",
+  "requires": {
+    "editor": true,
+    "transaction": true,
+    "compile": true,
+    "save": false,
+    "policyKeys": [
+      "allowedOperations",
+      "allowedGraphs",
+      "allowedNodeClasses"
+    ],
+    "revisionScope": "asset+graph"
+  },
+  "preconditions": [
+    "asset-loaded",
+    "asset-open",
+    "package-clean",
+    "pie-stopped",
+    "base-revision-match",
+    "base-graph-hash-match",
+    "graph-schema-supported",
+    "editor-session-match",
+    "recovery-marker-absent",
+    "policy-allows-operation",
+    "descriptor-resolved"
+  ],
+  "postconditions": [
+    "node-guid-valid",
+    "pin-map-complete",
+    "graph-dirty",
+    "transaction-recorded",
+    "no-dangling-edge"
+  ],
+  "rollback": "reverse-ops",
+  "idempotency": "required",
+  "errorCodes": [
+    "graphpatch-confirmation-required",
+    "graphpatch-node-not-found",
+    "graphpatch-base-graph-hash-stale"
+  ],
+  "implementation": "core",
+  "evidence": {
+    "required": [
+      "plan",
+      "apply-report",
+      "typedgraph-before",
+      "typedgraph-after",
+      "receipt"
+    ],
+    "optional": [
+      "verify-report",
+      "backup-manifest"
+    ]
+  },
+  "transaction": {
+    "kind": "structure",
+    "snapshot": "graph",
+    "rollback": "reverse-ops"
+  },
+  "limits": {
+    "maxOperationsPerInvocation": 200,
+    "maxAffectedNodes": 100,
+    "timeoutMs": 120000
+  },
+  "minHostVersion": "0.9.0",
+  "deprecated": false,
+  "requiresExplicitConfirmation": true
+}

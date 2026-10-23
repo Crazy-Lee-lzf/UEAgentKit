@@ -1,0 +1,102 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^ueak\\.graphlayoutapply/1\\.[0-9]+$"
+    },
+    "assetPath": {
+      "type": "string",
+      "pattern": "^/Game/[A-Za-z0-9_./-]{1,240}$"
+    },
+    "graphGuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "expectedPackageRevision": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "expectedGraphFingerprint": {
+      "type": "string",
+      "pattern": "^sha1:[0-9a-f]{40}$"
+    },
+    "plan": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "pattern": "^ueak\\.layoutplan/1\\.[0-9]+$"
+        },
+        "status": {
+          "enum": [
+            "ok"
+          ]
+        },
+        "positions": {
+          "type": "array"
+        },
+        "movedNodeIds": {
+          "type": "array"
+        },
+        "scopeNodeIds": {
+          "type": "array"
+        },
+        "fixedNodeIds": {
+          "type": "array"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "status",
+        "positions",
+        "movedNodeIds",
+        "scopeNodeIds",
+        "fixedNodeIds"
+      ]
+    },
+    "requestedMode": {
+      "enum": [
+        "position-only"
+      ]
+    },
+    "allowSave": {
+      "type": "boolean",
+      "enum": [
+        false
+      ]
+    },
+    "allowCompile": {
+      "type": "boolean",
+      "enum": [
+        false
+      ]
+    },
+    "acceptanceEligible": {
+      "type": "boolean",
+      "enum": [
+        false
+      ]
+    },
+    "requiredAcceptanceEvidence": {
+      "enum": [
+        "independent-reload"
+      ]
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "assetPath",
+    "graphGuid",
+    "expectedPackageRevision",
+    "expectedGraphFingerprint",
+    "plan",
+    "requestedMode",
+    "allowSave",
+    "allowCompile",
+    "acceptanceEligible",
+    "requiredAcceptanceEvidence"
+  ]
+}

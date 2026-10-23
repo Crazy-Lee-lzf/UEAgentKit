@@ -69,6 +69,17 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
         "editor.getBlueprintGraphSelection",
     ),
     ToolDefinition(
+        "ue_get_blueprint_graph_layout_preflight",
+        "live-read",
+        "read",
+        "editor.getBlueprintGraphLayoutPreflight",
+    ),
+    ToolDefinition(
+        "ue_preview_blueprint_graph_layout",
+        "live-read",
+        "read",
+    ),
+    ToolDefinition(
         "ue_analyze_animation_retarget",
         "live-read",
         "read",

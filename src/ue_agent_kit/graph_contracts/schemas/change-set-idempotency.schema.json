@@ -1,0 +1,82 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "ueak.change-set-idempotency/1.0"
+    },
+    "changeSetSchemaVersion": {
+      "const": "2.1"
+    },
+    "scopeKey": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "projectName": {
+      "type": "string"
+    },
+    "assetPath": {
+      "type": "string",
+      "pattern": "^/Game/[A-Za-z0-9_./-]{1,240}$"
+    },
+    "graphId": {
+      "type": "string",
+      "pattern": "^g:[0-9a-f-]{36}$"
+    },
+    "idempotencyKey": {
+      "type": "string"
+    },
+    "patchId": {
+      "type": "string"
+    },
+    "payloadHash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "state": {
+      "enum": [
+        "reserved",
+        "applied",
+        "failed",
+        "indeterminate"
+      ]
+    },
+    "reservedAtUtc": {
+      "type": "string"
+    },
+    "updatedAtUtc": {
+      "type": "string"
+    },
+    "transactionId": {
+      "type": "string"
+    },
+    "actualGraphHash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "applyReceipt": {
+      "type": "string"
+    },
+    "failureCode": {
+      "type": "string"
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "changeSetSchemaVersion",
+    "scopeKey",
+    "projectName",
+    "assetPath",
+    "graphId",
+    "idempotencyKey",
+    "patchId",
+    "payloadHash",
+    "state",
+    "reservedAtUtc",
+    "updatedAtUtc"
+  ]
+}

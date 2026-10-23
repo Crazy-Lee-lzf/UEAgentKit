@@ -39,3 +39,6 @@ warn_unused_configs = true
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"ue_agent_kit.graph_contracts" = ["schemas/*.json"]

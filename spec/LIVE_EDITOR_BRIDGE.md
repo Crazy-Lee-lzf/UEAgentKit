@@ -34,7 +34,7 @@ PowerShell 入口对应：
 -ProjectPath <fixed .uproject>
 ```
 
-Tool 参数不能覆盖固定项目或选择其他 Editor 端点。未启用时，离线 5 Tool 与固定项目 Workflow 模式 26 Tool 保持可用；启用后 Live 模式为 23 Tool，Combined 模式为 44 Tool。
+Tool 参数不能覆盖固定项目或选择其他 Editor 端点。启用后 Live 模式为 44 Tool，Live + Workflow 组合模式为 101 Tool；离线模式仍保持原有查询 Tool。
 
 ## 端点描述符
 
@@ -107,6 +107,7 @@ ue_get_output_log
 ue_get_compile_errors
 ue_inspect_asset_live
 ue_get_blueprint_graph_selection
+ue_get_blueprint_graph_layout_preflight
 ue_open_asset
 ue_focus_asset
 ue_sync_content_browser
@@ -121,12 +122,14 @@ ue_get_batch_task
 ue_cancel_batch_task
 ```
 
+P7 实验室宿主还会条件注册 `ue_apply_blueprint_graph_layout_test_only`（Bridge Method `editor.applyBlueprintGraphLayoutTestOnly`）与显式 harness Save Method `editor.saveBlueprintGraphLayoutTestOnly`。它们只在该 exact `P7AutomationHost.uproject`（路径 + 文件 SHA-256）、exact `BP_LayoutP7` 资产和显式确认下可见/可用；其他项目中 Bridge Capability 与 MCP Tool 均不出现。它们不是通用 auto-arrange，也不在正常 Live Read/Action 分组中。
+
 所有 Tool 均返回 `source=live-editor-memory`，不生成磁盘 Revision，也不声称数据来自 SQLite。
 
 Live Read：
 
-- 10 个 Tool，`readOnlyHint=true`、`destructiveHint=false`。
-- 状态、选择、打开资产、Dirty 资产、关卡、PIE 和 Blueprint Graph 选择无参数；日志、编译诊断和实时资产检查只接受有界过滤或精确资产路径。
+- 11 个 Tool，`readOnlyHint=true`、`destructiveHint=false`。
+- 状态、选择、打开资产、Dirty 资产、关卡、PIE、Blueprint Graph 选择和 Graph Layout Preflight 无参数；日志、编译诊断和实时资产检查只接受有界过滤或精确资产路径。
 
 Live Action：
 
@@ -229,6 +232,74 @@ Bridge 注册为 `FOutputDevice`，保留最多 4096 条当前会话日志，并
 ### ue_get_blueprint_graph_selection
 
 无参数，只检查最近激活且 Editor Name 精确为 `BlueprintEditor` 的普通 Blueprint Editor。成功时返回 Blueprint Object Path、Focused Graph Path/Name/GUID/Class/Schema、可编辑状态，以及最多 100 个当前 Graph 中选中的 Node；每个 Node 仅返回 Path、Name、GUID、Class、Title 和二维位置。无普通 Blueprint Editor 或无 Focused Graph 时返回 `available=false` 与稳定 `reasonCode`。该 Tool 不扫描或强转 Material、Niagara、Control Rig 等其他编辑器，不加载资产，也不提供 Graph 编辑。
+
+### ue_get_blueprint_graph_layout_preflight
+
+无参数，Bridge Method 为 `editor.getBlueprintGraphLayoutPreflight`。它只委托内部 `BuildFocusedEditorPreflight`，读取最近激活的普通 `BlueprintEditor` 及其当前 Focused Graph：
+
+```text
+assetPath / graphGuid / graphClassPath / schemaClassPath
+packageRevision / packageDirty / graphFingerprint
+nodeCount / nodes[]（nodeId、guid、kind、x、y、width、height、pin/link 计数）
+editorName / lastActivationTime / editable
+selectionPolicy=most-recently-active-blueprint-editor
+focusScope=toolkit-graph-tab
+sessionId / pluginVersion / pluginBuildHash / pieState
+```
+
+`v1` 最多返回 512 个 Node，并明确返回 `totalNodeCount/nodesReturned/nodesTruncated/complete`；截断时不得用于生成完整 LayoutPlan。非 `EdGraphSchema_K2` 的 Focused Graph 返回 `available=false` 和 `reasonCode=graph-layout-graph-not-k2`。无普通 Blueprint Editor、无 Focused Graph、Package 非法或内部 Preflight 失败时返回稳定错误或 `available=false`。Dirty 与 PIE 状态如实返回，不伪造 clean。该 Method 不打开、聚焦、加载、编译、保存或写入任何资产，也不注册写入口。
+
+### editor.getFocusedBlueprintGraphContext
+
+P8 新增的无参数只读 Bridge Method。它先复用 P6 的 Focused Graph Preflight，再调用 `FBlueprintContextExporter::BuildContextObject` 构造与 commandlet 完全相同的 canonical full-context 对象；不写磁盘、不打开或聚焦资产、不编译、不保存、不修改 Package。
+
+```text
+assetPath / graphGuid / graphName
+packageRevision / packageDirty / graphFingerprint
+nodeCount / pinCount / linkCount / graphCount
+exportedAtUtc / sessionId / pluginVersion / pluginBuildHash
+context（canonical BlueprintContextExporter JSON）
+```
+
+只有 `complete=true` 且 compact context 不超过 700 KiB 才返回；截断图或超大图返回 `graph-layout-context-too-large`。该 Method 不返回 apply request，也不是验收证据。
+
+### editor.applyBlueprintGraphLayoutTestOnly（P7 lab only）
+
+这是 P7 固定实验宿主的条件写入口，不是生产 API。Bridge 在注册 Capability 前、每次调用前和事务前都 fail-closed 校验：
+
+```text
+canonical project absolute path == .../Build/P7AutomationHost/P7AutomationHost.uproject
+project name == P7AutomationHost
+.uproject SHA-256 == hardcoded 20f86465...64211c2
+P7TestOnlyBuild.json pluginBuildHash == currently loaded UEAgentKitEditor.dll SHA-256
+assetPath == /Game/UEAgentKitP7/BP_LayoutP7.BP_LayoutP7
+focused Graph GUID == request graphGuid
+preflight packageDirty == false / editable == true / PIE stopped
+request schema == ueak.graphlayoutapply/1.x, position-only, allowSave=false, allowCompile=false
+explicit confirmation == APPLY P7 TEST-ONLY <planId>
+```
+
+通过后只调用内部 `TryApply`，仅修改 `NodePosX/Y`，要求一个 `FScopedTransaction`；随后在同一个调用内执行 Undo -> 验证原始位置/topology -> Redo -> 验证目标位置/topology，再返回证据。它不打开、不聚焦、不加载、不保存、不编译任何资产；`saved=false`、`autoSave=false`。Dirty 时第二次调用在 Preflight 阶段拒绝。任意其他项目、资产、GraphGuid、stale Revision/Fingerprint、错误 layoutHash、active transaction、PIE 或错误 confirmation 都不会产生位置变更。
+
+### editor.saveBlueprintGraphLayoutTestOnly（P7 lab only）
+
+P7 明确 Save 的独立 harness 入口，要求 exact 同一项目/资产、`SAVE P7 TEST-ONLY BP_LayoutP7` confirmation、package dirty、PIE stopped。它只调用 disposable host 内的 `UPackage::SavePackage`，返回磁盘 SHA-256 和 `saved=true`；不是用户 Save UI、源码控制或生产保存授权。MCP Apply Tool 不会调用它。
+
+### editor.applyBlueprintGraphLayoutP8TestOnly / editor.saveBlueprintGraphLayoutP8TestOnly（P8 lab only）
+
+P8 的 disposable 写入口沿用 P7 的 fail-closed 顺序，但绑定全新宿主：
+
+```text
+canonical project path == .../Build/P8AutomationHost/P8AutomationHost.uproject
+project name == P8AutomationHost
+.uproject SHA-256 == hardcoded 3c9ea038...dace1624
+P8TestOnlyBuild.json pluginBuildHash == currently loaded DLL SHA-256
+assetPath == /Game/UEAgentKitP8/BP_LayoutP8.BP_LayoutP8
+confirmation == APPLY P8 TEST-ONLY <planId>
+Save confirmation == SAVE P8 TEST-ONLY BP_LayoutP8
+```
+
+它们只修改 exact `BP_LayoutP8` EventGraph 的 `NodePosX/Y`，单事务，Apply 内验证 Undo/Redo 与 topology 不变；不 Save、不 Compile。Save 必须由 harness 单独调用。其他项目、资产、GraphGuid、stale Revision/Fingerprint、错误 layoutHash、dirty、PIE 或错误 confirmation 都不会产生位置变更。Capability 仅在 exact P8 宿主与 marker 同时匹配时出现。
 
 ### ue_open_asset / ue_focus_asset / ue_sync_content_browser
 
@@ -342,6 +413,24 @@ live-editor-blueprint-required
 live-editor-data-validation-unavailable
 live-editor-folder-empty
 live-editor-asset-limit-exceeded
+graph-layout-editor-unavailable
+graph-layout-editor-not-open
+graph-layout-asset-not-loaded
+graph-layout-graph-not-focused
+graph-layout-graph-not-found
+graph-layout-graph-mismatch
+graph-layout-graph-not-editable
+graph-layout-graph-not-k2
+graph-layout-package-invalid
+graph-layout-graph-unavailable
+graph-layout-invalid-live-node
+graph-layout-duplicate-live-node
+graph-layout-test-only-disabled
+graph-layout-test-only-project-rejected
+graph-layout-test-only-build-rejected
+graph-layout-test-only-asset-rejected
+graph-layout-test-only-preflight-rejected
+graph-layout-test-only-confirmation-required
 live-editor-write-asset-not-loaded
 live-editor-write-asset-not-open
 live-editor-write-blueprint-unsupported

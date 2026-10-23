@@ -1,0 +1,167 @@
+{
+  "schemaVersion": "ueak.typedgraph/1.0",
+  "graphId": "g:00000109-0000-4000-8000-000000000109",
+  "asset": {
+    "path": "/Game/UEAgentKitTests/BP_GraphPatch_Target.BP_GraphPatch_Target",
+    "class": "/Script/Engine.Blueprint",
+    "revision": "sha256:315c1c9f0fe74bbaa98c4497c30ac83b84f431c9fb979b82d22946a7935a8d57",
+    "revisionPolicy": "index-snapshot",
+    "dirty": false
+  },
+  "graph": {
+    "name": "EventGraph",
+    "guid": "00000109-0000-4000-8000-000000000109",
+    "kind": "event",
+    "schema": "/Script/BlueprintGraph.EdGraphSchema_K2",
+    "editable": true
+  },
+  "source": {
+    "kind": "test-fixture",
+    "sessionId": "editor-session-test",
+    "exporterSchemaVersion": "ueak.typedgraph-export/1",
+    "pluginBuildHash": "0123456789abcdef",
+    "engineVersion": "5.6.1",
+    "exportedAtUtc": "2026-10-22T00:00:00.000Z"
+  },
+  "limits": {
+    "maxNodes": 5000,
+    "maxPins": 50000,
+    "includedNodeCount": 2,
+    "omittedNodeCount": 0,
+    "selection": "nodeId-ascending",
+    "truncated": false
+  },
+  "nodes": [
+    {
+      "nodeId": "n:00000001-0000-4000-8000-000000000001",
+      "nodeGuid": "00000001-0000-4000-8000-000000000001",
+      "objectPath": "/Game/UEAgentKitTests/BP_GraphPatch_Target.BP_GraphPatch_Target:EventGraph.K2Node_CallFunction_1",
+      "classPath": "/Script/BlueprintGraph.K2Node_CallFunction",
+      "title": "First",
+      "kind": "call",
+      "nodeIdSource": "guid",
+      "flags": {
+        "enabled": true,
+        "pure": false,
+        "reroute": false,
+        "comment": false,
+        "latent": false
+      },
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "size": {
+        "width": 208,
+        "height": 120,
+        "source": "stored"
+      },
+      "pins": [
+        "p:00000003-0000-4000-8000-000000000003"
+      ]
+    },
+    {
+      "nodeId": "n:00000002-0000-4000-8000-000000000002",
+      "nodeGuid": "00000002-0000-4000-8000-000000000002",
+      "objectPath": "/Game/UEAgentKitTests/BP_GraphPatch_Target.BP_GraphPatch_Target:EventGraph.K2Node_CallFunction_2",
+      "classPath": "/Script/BlueprintGraph.K2Node_CallFunction",
+      "title": "Second",
+      "kind": "call",
+      "nodeIdSource": "guid",
+      "flags": {
+        "enabled": true,
+        "pure": false,
+        "reroute": false,
+        "comment": false,
+        "latent": false
+      },
+      "position": {
+        "x": 320,
+        "y": 0
+      },
+      "size": {
+        "width": 208,
+        "height": 120,
+        "source": "stored"
+      },
+      "pins": [
+        "p:00000003-0000-4000-8000-000000000003"
+      ]
+    }
+  ],
+  "pins": [
+    {
+      "pinId": "p:00000003-0000-4000-8000-000000000003",
+      "nodeId": "n:00000001-0000-4000-8000-000000000001",
+      "name": "then",
+      "friendlyName": "",
+      "direction": "output",
+      "kind": "exec",
+      "type": {
+        "category": "exec",
+        "subCategory": "",
+        "subCategoryObject": "",
+        "container": "none",
+        "isReference": false,
+        "isConst": false,
+        "isWeakPointer": false
+      },
+      "index": 0,
+      "defaults": {
+        "value": "",
+        "object": "",
+        "text": ""
+      },
+      "flags": {
+        "hidden": false,
+        "advanced": false,
+        "connectable": true,
+        "orphaned": false,
+        "defaultReadOnly": false,
+        "defaultIgnored": false
+      },
+      "links": [],
+      "pinIdSource": "native",
+      "pinGuidTransient": false
+    },
+    {
+      "pinId": "p:00000003-0000-4000-8000-000000000003",
+      "nodeId": "n:00000002-0000-4000-8000-000000000002",
+      "name": "then",
+      "friendlyName": "",
+      "direction": "output",
+      "kind": "exec",
+      "type": {
+        "category": "exec",
+        "subCategory": "",
+        "subCategoryObject": "",
+        "container": "none",
+        "isReference": false,
+        "isConst": false,
+        "isWeakPointer": false
+      },
+      "index": 0,
+      "defaults": {
+        "value": "",
+        "object": "",
+        "text": ""
+      },
+      "flags": {
+        "hidden": false,
+        "advanced": false,
+        "connectable": true,
+        "orphaned": false,
+        "defaultReadOnly": false,
+        "defaultIgnored": false
+      },
+      "links": [],
+      "pinIdSource": "native",
+      "pinGuidTransient": false
+    }
+  ],
+  "edges": [],
+  "comments": [],
+  "diagnostics": [],
+  "semanticHash": "",
+  "layoutHash": ""
+}

@@ -2,6 +2,9 @@
 #include "EditorBridgeBatchTaskManager.h"
 #include "EditorBridgeHandlerUtils.h"
 #include "EditorBridgeLogCapture.h"
+#include "BlueprintGraphLayoutP7TestOnly.h"
+#include "BlueprintGraphLayoutP8TestOnly.h"
+#include "BlueprintGraphLayoutP9TestOnly.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Components/ActorComponent.h"
@@ -54,6 +57,8 @@ namespace UEAgentKitEditorBridgePrivate
 		TEXT("editor.getCompileErrors"),
 		TEXT("editor.inspectAssetLive"),
 		TEXT("editor.getBlueprintGraphSelection"),
+		TEXT("editor.getBlueprintGraphLayoutPreflight"),
+		TEXT("editor.getFocusedBlueprintGraphContext"),
 		TEXT("editor.getEditorContext"),
 		TEXT("editor.batchTask.start"),
 		TEXT("editor.batchTask.status"),
@@ -819,6 +824,216 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 	else if (Method == TEXT("editor.getBlueprintGraphSelection"))
 	{
 		SendResult(Client.Socket, RequestId, BuildBlueprintGraphSelectionResult());
+	}
+	else if (Method == TEXT("editor.getBlueprintGraphLayoutPreflight"))
+	{
+		if (Params->Values.Num() > 0)
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("live-editor-invalid-parameters"),
+				TEXT("editor.getBlueprintGraphLayoutPreflight does not accept parameters."));
+		}
+		else
+		{
+			const TSharedRef<FJsonObject> Preflight = BuildBlueprintGraphLayoutPreflightResult();
+			if (!Preflight->GetBoolField(TEXT("available")))
+			{
+				SendError(
+					Client.Socket,
+					RequestId,
+					Preflight->GetStringField(TEXT("reasonCode")),
+					Preflight->GetStringField(TEXT("reason")));
+			}
+			else
+			{
+				SendResult(Client.Socket, RequestId, Preflight);
+			}
+		}
+	}
+	else if (Method == TEXT("editor.getFocusedBlueprintGraphContext"))
+	{
+		if (Params->Values.Num() > 0)
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("live-editor-invalid-parameters"),
+				TEXT("editor.getFocusedBlueprintGraphContext does not accept parameters."));
+		}
+		else
+		{
+			const TSharedRef<FJsonObject> Context = BuildFocusedBlueprintGraphContextResult();
+			if (!Context->GetBoolField(TEXT("available")))
+			{
+				SendError(
+					Client.Socket,
+					RequestId,
+					Context->GetStringField(TEXT("reasonCode")),
+					Context->GetStringField(TEXT("reason")));
+			}
+			else
+			{
+				SendResult(Client.Socket, RequestId, Context);
+			}
+		}
+	}
+	else if (Method == TEXT("editor.applyBlueprintGraphLayoutTestOnly"))
+	{
+		if (!UEAgentKitBlueprintGraphLayoutP7::IsTestOnlyWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-layout-test-only-disabled"),
+				TEXT("P7 test-only graph layout is disabled outside the exact hardcoded disposable P7 host."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				TryBuildBlueprintGraphLayoutApplyTestOnlyResult(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.saveBlueprintGraphLayoutTestOnly"))
+	{
+		if (!UEAgentKitBlueprintGraphLayoutP7::IsTestOnlyWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-layout-test-only-disabled"),
+				TEXT("P7 test-only Save is disabled outside the exact hardcoded disposable P7 host."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				TryBuildBlueprintGraphLayoutSaveTestOnlyResult(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.applyBlueprintGraphLayoutP8TestOnly"))
+	{
+		if (!UEAgentKitBlueprintGraphLayoutP8::IsTestOnlyWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-layout-test-only-disabled"),
+				TEXT("P8 test-only graph layout is disabled outside the exact hardcoded disposable P8 host."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintGraphLayoutP8::TryApplyTestOnly(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.saveBlueprintGraphLayoutP8TestOnly"))
+	{
+		if (!UEAgentKitBlueprintGraphLayoutP8::IsTestOnlyWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-layout-test-only-disabled"),
+				TEXT("P8 test-only Save is disabled outside the exact hardcoded disposable P8 host."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintGraphLayoutP8::TrySaveTestOnly(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.applyBlueprintGraphLayoutP9TestOnly"))
+	{
+		if (!UEAgentKitBlueprintGraphLayoutP9::IsTestOnlyWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-layout-test-only-disabled"),
+				TEXT("P9 test-only graph layout is disabled outside the exact hardcoded disposable P9 host."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintGraphLayoutP9::TryApplyTestOnly(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.saveBlueprintGraphLayoutP9TestOnly"))
+	{
+		if (!UEAgentKitBlueprintGraphLayoutP9::IsTestOnlyWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-layout-test-only-disabled"),
+				TEXT("P9 test-only Save is disabled outside the exact hardcoded disposable P9 host."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintGraphLayoutP9::TrySaveTestOnly(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
 	}
 	else if (Method == TEXT("editor.getEditorContext"))
 	{
@@ -1632,6 +1847,21 @@ TArray<TSharedPtr<FJsonValue>> FUEAgentKitEditorBridge::BuildCapabilityValues() 
 	for (const TCHAR* Capability : UEAgentKitEditorBridgePrivate::Capabilities)
 	{
 		Values.Add(MakeShared<FJsonValueString>(Capability));
+	}
+	if (UEAgentKitBlueprintGraphLayoutP7::IsTestOnlyWriteAvailable())
+	{
+		Values.Add(MakeShared<FJsonValueString>(UEAgentKitBlueprintGraphLayoutP7::ApplyMethod));
+		Values.Add(MakeShared<FJsonValueString>(UEAgentKitBlueprintGraphLayoutP7::SaveMethod));
+	}
+	if (UEAgentKitBlueprintGraphLayoutP8::IsTestOnlyWriteAvailable())
+	{
+		Values.Add(MakeShared<FJsonValueString>(UEAgentKitBlueprintGraphLayoutP8::ApplyMethod));
+		Values.Add(MakeShared<FJsonValueString>(UEAgentKitBlueprintGraphLayoutP8::SaveMethod));
+	}
+	if (UEAgentKitBlueprintGraphLayoutP9::IsTestOnlyWriteAvailable())
+	{
+		Values.Add(MakeShared<FJsonValueString>(UEAgentKitBlueprintGraphLayoutP9::ApplyMethod));
+		Values.Add(MakeShared<FJsonValueString>(UEAgentKitBlueprintGraphLayoutP9::SaveMethod));
 	}
 	return Values;
 }

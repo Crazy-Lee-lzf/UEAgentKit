@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "ueak.typedgraph/1.0",
+  "graphId": "g:00000101-0000-4000-8000-000000000101",
+  "asset": {
+    "path": "/Game/UEAgentKitTests/BP_GraphPatch_Target.BP_GraphPatch_Target",
+    "class": "/Script/Engine.Blueprint",
+    "revision": "sha256:33a10d0b9f17ec3f5ff855883951c07ad531d9bebc11859eea33ac5f740eb590",
+    "revisionPolicy": "index-snapshot",
+    "dirty": false
+  },
+  "graph": {
+    "name": "EventGraph",
+    "guid": "00000101-0000-4000-8000-000000000101",
+    "kind": "event",
+    "schema": "/Script/BlueprintGraph.EdGraphSchema_K2",
+    "editable": true
+  },
+  "source": {
+    "kind": "test-fixture",
+    "sessionId": "editor-session-test",
+    "exporterSchemaVersion": "ueak.typedgraph-export/1",
+    "pluginBuildHash": "0123456789abcdef",
+    "engineVersion": "5.6.1",
+    "exportedAtUtc": "2026-10-22T00:00:00.000Z"
+  },
+  "limits": {
+    "maxNodes": 5000,
+    "maxPins": 50000,
+    "includedNodeCount": 0,
+    "omittedNodeCount": 0,
+    "selection": "nodeId-ascending",
+    "truncated": false
+  },
+  "nodes": [],
+  "pins": [],
+  "edges": [],
+  "comments": [],
+  "diagnostics": [],
+  "semanticHash": "sha256:d80ad22de5ba9f73f6a7f84c4e791ea3d96b3dde23f1952b84f53be2861fac8e",
+  "layoutHash": "sha256:ad3feeade0812c7062546715bc7f8ca3989c04e4bc2e24595730a4fa81b1db4e"
+}

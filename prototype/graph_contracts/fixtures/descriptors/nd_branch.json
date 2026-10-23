@@ -1,0 +1,111 @@
+{
+  "schemaVersion": "ueak.node-descriptor/1.0",
+  "actionId": "action:b4d79f5f9912831b1e083e59c97595f8",
+  "discoveryKey": {
+    "nodeClass": "/Script/BlueprintGraph.K2Node_IfThenElse",
+    "spawnerClass": "/Script/BlueprintGraph.BlueprintNodeSpawner",
+    "graphSchema": "/Script/BlueprintGraph.EdGraphSchema_K2",
+    "actionKind": "special",
+    "payload": {
+      "specialKind": "branch"
+    }
+  },
+  "title": "Branch",
+  "menuName": "Branch",
+  "category": "Flow Control",
+  "keywords": [
+    "branch",
+    "if",
+    "condition"
+  ],
+  "searchTokens": [
+    "Branch",
+    "IfThenElse"
+  ],
+  "graphKinds": [
+    "event",
+    "function",
+    "macro"
+  ],
+  "graphSchemas": [
+    "/Script/BlueprintGraph.EdGraphSchema_K2"
+  ],
+  "pins": [
+    {
+      "name": "execute",
+      "direction": "input",
+      "kind": "exec",
+      "type": {
+        "category": "exec",
+        "subCategory": "",
+        "subCategoryObject": "",
+        "container": "none",
+        "isReference": false,
+        "isConst": false,
+        "isWeakPointer": false
+      }
+    },
+    {
+      "name": "then",
+      "direction": "output",
+      "kind": "exec",
+      "type": {
+        "category": "exec",
+        "subCategory": "",
+        "subCategoryObject": "",
+        "container": "none",
+        "isReference": false,
+        "isConst": false,
+        "isWeakPointer": false
+      }
+    },
+    {
+      "name": "else",
+      "direction": "output",
+      "kind": "exec",
+      "type": {
+        "category": "exec",
+        "subCategory": "",
+        "subCategoryObject": "",
+        "container": "none",
+        "isReference": false,
+        "isConst": false,
+        "isWeakPointer": false
+      }
+    },
+    {
+      "name": "Condition",
+      "direction": "input",
+      "kind": "data",
+      "type": {
+        "category": "bool",
+        "subCategory": "",
+        "subCategoryObject": "",
+        "container": "none",
+        "isReference": false,
+        "isConst": false,
+        "isWeakPointer": false
+      }
+    }
+  ],
+  "constraints": {
+    "requiresBlueprintContext": true,
+    "requiresTarget": false,
+    "requiresWorldContext": false,
+    "pure": false,
+    "latent": false,
+    "variadic": false,
+    "hiddenByDefault": []
+  },
+  "source": {
+    "kind": "FBlueprintActionDatabase",
+    "engineVersion": "5.6.1",
+    "actionDatabaseFingerprint": "sha256:a3985ee72b500727",
+    "pluginBuildHash": "0123456789abcdef",
+    "discoveredAtUtc": "2026-10-22T00:00:00.000Z"
+  },
+  "risk": "R1",
+  "capability": "core",
+  "trustLevel": "official",
+  "descriptorDigest": "sha256:4f4ca3007ed52124"
+}

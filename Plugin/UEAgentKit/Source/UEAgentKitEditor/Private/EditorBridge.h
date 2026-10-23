@@ -26,6 +26,20 @@ public:
 	void Stop();
 	bool IsRunning() const;
 
+	/** Exact, read-only inputs for the P8 disposable Editor-menu preview worker. */
+	bool BuildP8MenuPreviewInputs(
+		TSharedPtr<FJsonObject>& OutPreflight,
+		TSharedPtr<FJsonObject>& OutEnvelope,
+		FString& OutErrorCode,
+		FString& OutErrorMessage) const;
+
+	/** Exact, read-only inputs for the P9 disposable Editor-menu preview worker. */
+	bool BuildP9MenuPreviewInputs(
+		TSharedPtr<FJsonObject>& OutPreflight,
+		TSharedPtr<FJsonObject>& OutEnvelope,
+		FString& OutErrorCode,
+		FString& OutErrorMessage) const;
+
 private:
 	struct FClientConnection
 	{
@@ -74,6 +88,18 @@ private:
 	TSharedRef<FJsonObject> BuildCompileErrorsResult(const TSharedPtr<FJsonObject>& Params) const;
 	TSharedRef<FJsonObject> BuildInspectAssetLiveResult(const FString& AssetPath) const;
 	TSharedRef<FJsonObject> BuildBlueprintGraphSelectionResult() const;
+	TSharedRef<FJsonObject> BuildBlueprintGraphLayoutPreflightResult() const;
+	TSharedRef<FJsonObject> BuildFocusedBlueprintGraphContextResult() const;
+	bool TryBuildBlueprintGraphLayoutApplyTestOnlyResult(
+		const TSharedPtr<FJsonObject>& Params,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage) const;
+	bool TryBuildBlueprintGraphLayoutSaveTestOnlyResult(
+		const TSharedPtr<FJsonObject>& Params,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage) const;
 	TSharedRef<FJsonObject> BuildEditorContextResult() const;
 	bool TryStartBatchTask(
 		const FString& Operation,

@@ -36,6 +36,8 @@ ue_get_output_log
 ue_get_compile_errors
 ue_inspect_asset_live
 ue_get_blueprint_graph_selection
+ue_get_blueprint_graph_layout_preflight
+ue_preview_blueprint_graph_layout
 ue_open_asset
 ue_focus_asset
 ue_sync_content_browser
@@ -46,6 +48,12 @@ ue_validate_folder
 ```
 
 该模式不要求启用写入。MCP Server 从固定项目 `Saved/UEAgentKit/EditorBridge.json` 读取 localhost 临时端点，并校验随机认证令牌、规范化项目路径摘要、Plugin/Server 版本和注册 Capability。地址、端口、令牌、Descriptor 和任意本机路径不会成为 Tool 参数或响应字段。Editor 未运行时 `ue_editor_status` 稳定报告 `state=unavailable`，其余 Live Tool 返回可重试错误，离线 SQLite Tool 保持可用。详细协议见 `spec/LIVE_EDITOR_BRIDGE.md`。
+
+P8 在普通 Live Editor 模式新增只读 `ue_preview_blueprint_graph_layout`。它只接受 bounded 的 mode/scope/spacing/packing/seed 参数，不接受 project、asset、save、compile 或命令；内部通过 `editor.getBlueprintGraphLayoutPreflight` 和 `editor.getFocusedBlueprintGraphContext` 取得 exact focused graph，再用 P0 Python 算法生成 canonical LayoutPlan。Dirty、PIE、截断、Revision/Fingerprint/GraphGuid 不一致或非 K2 均 fail-closed；预览不写 Blueprint、不 Save。
+
+P7 实验室模式额外要求显式隐藏启动参数 `--enable-p7-test-only-graph-layout-apply`，并且 `--project` 必须精确等于本 worktree 的 `Build/P7AutomationHost/P7AutomationHost.uproject`（同时校验 `.uproject` SHA-256）。C++ 入口还要求同目录 `P7TestOnlyBuild.json` 中的 `pluginBuildHash` 精确等于当前加载的 `UnrealEditor-UEAgentKitEditor.dll` SHA-256。只有此时才注册 `ue_apply_blueprint_graph_layout_test_only`，标记 `readOnlyHint=false`、`destructiveHint=true`。不带该参数时 Tool 与 Capability 均为 absent；带参数但项目不匹配时 Server 启动失败。该 Tool 不接受 project、assetPath、endpoint、save、compile 或任意命令参数，只接受 canonical position-only apply request 和精确 confirmation。
+
+P8 实验室模式使用独立隐藏参数 `--enable-p8-test-only-graph-layout-apply`，只接受 exact `Build/P8AutomationHost/P8AutomationHost.uproject` 和 `P8TestOnlyBuild.json`；此时额外注册 `ue_apply_blueprint_graph_layout_p8_test_only`。它与 P7 工具互不复用 allowlist，也不改变普通 Live 模式的 45 个 Tool。
 
 ### 固定项目完整模式
 
@@ -131,7 +139,7 @@ Database、Engine、Project、Policy、Revision Export、Work Root、Backup Root
 
 Live Editor 能力分为三组，成功结果均标记 `source=live-editor-memory`，都不读取或改写 SQLite、不生成磁盘 Revision，也不改变索引 freshness：
 
-- Live Read：10 个 Tool，`readOnlyHint=true`、`destructiveHint=false`。
+- Live Read：11 个 Tool，`readOnlyHint=true`、`destructiveHint=false`。
 - Live Action：8 个 Tool，`readOnlyHint=false`、`destructiveHint=false`；允许改变 Editor 选择、窗口、已加载状态或内存编译状态，但不保存 Package。
 - Realtime Foundation：4 个 Tool，包括一个有界 Context 聚合读取和一个支持 Start/Status/Cancel 的分帧 Batch Task；只读取当前 Editor 内存与已加载 World。
 
@@ -145,6 +153,10 @@ Live Editor 能力分为三组，成功结果均标记 `source=live-editor-memor
 - `ue_get_compile_errors`：读取 Bridge 当前会话捕获到的编译相关 Warning/Error，并补充最多 100 个已加载 Blueprint 的 `Status` 与截断信息；返回 `historyComplete=false`，不冒充完整 Message Log 历史。
 - `ue_inspect_asset_live`：只接受精确 `/Game/...Asset.Asset`，返回 Asset Registry 和已加载对象状态；使用 `StaticFindObject`，不触发加载，并明确返回 `loadedByBridge=false`。
 - `ue_get_blueprint_graph_selection`：无参数，只读取最近激活的普通 Blueprint Editor，返回 Focused Graph GUID 和最多 100 个当前 Graph 选中 Node GUID；不支持其他 Graph Editor，也不提供编辑。
+- `ue_get_blueprint_graph_layout_preflight`：无参数、只读。委托 `editor.getBlueprintGraphLayoutPreflight`，返回最近激活普通 Blueprint Editor 当前 Focused Graph 的 exact Asset Path、Graph GUID、Package Revision、Dirty、Graph Fingerprint、最多 512 个 Node GUID/二维位置和可编辑状态；同时返回 `selectionPolicy=most-recently-active-blueprint-editor`、`focusScope=toolkit-graph-tab`、`sessionId`、`pluginBuildHash` 和 PIE 状态。无 Editor、无 Focused Graph、Dirty、非 K2 或 Preflight 失败时稳定 fail-closed；不自动打开/聚焦/加载/编译/保存任何资产，不写 Blueprint。
+- `ue_preview_blueprint_graph_layout`：普通 Live Editor 可用的只读预览。参数只有 `mode=full|selection|incremental`、可选 `scope_node_ids`、`spacing_x/spacing_y`、`target_width`、`seed`；通过真实 focused graph preflight + canonical full context + P0 Python 算法返回 planId、layoutHash、前后位置、moved count、metrics、warnings 和完整 LayoutPlan。拒绝 Dirty、PIE、截断、identity/revision/fingerprint 不一致；不写、不 Save、不 Compile。
+- `ue_apply_blueprint_graph_layout_test_only`：仅 P7 固定宿主条件注册的 lab-only destructive Tool。委托 `editor.applyBlueprintGraphLayoutTestOnly`，只接受 canonical `ueak.graphlayoutapply/1.x` request 和 `APPLY P7 TEST-ONLY <planId>` confirmation；只修改 exact `BP_LayoutP7` EventGraph 的 `NodePosX/Y`，单事务，内部验证 Undo/Redo 和 topology 不变，返回精确前后位置、Revision/Fingerprint、Dirty 状态。不 Save、不 Compile，不暴露为通用 auto-arrange。
+- `ue_apply_blueprint_graph_layout_p8_test_only`：仅 P8 固定宿主条件注册的独立 lab-only destructive Tool。委托 `editor.applyBlueprintGraphLayoutP8TestOnly`，只修改 exact `BP_LayoutP8`，确认短语为 `APPLY P8 TEST-ONLY <planId>`；不 Save、不 Compile、不接受项目/资产参数。
 - `ue_open_asset`：加载一个 Asset Registry 中存在的精确资产并使用注册 Asset Editor 打开；返回加载、打开和 Dirty 前后状态，不保存。
 - `ue_focus_asset`：只聚焦已经打开的精确资产；不加载未打开资产。
 - `ue_sync_content_browser`：使用 `FAssetData` 在 Content Browser 定位精确资产，不加载目标。
@@ -160,7 +172,7 @@ Live Editor 能力分为三组，成功结果均标记 `source=live-editor-memor
 
 Batch Task 只扫描当前已加载 World。Level 使用弱引用，Actor 不跨帧保存裸指针；每 Tick 同时受最多 256 个 Actor Slot 和约 2 ms 时间预算约束。World/Session 变化、PIE/SIE、超时或取消均返回明确终态。分页详情用于保证最坏响应仍低于 1 MiB Bridge 上限。
 
-稳定错误包括通用连接/协议错误，以及 `live-editor-pie-active`、`live-editor-asset-not-found`、`live-editor-asset-load-failed`、`live-editor-asset-editor-unavailable`、`live-editor-asset-not-open`、`live-editor-world-unavailable`、`live-editor-actor-not-found`、`live-editor-actor-guid-ambiguous`、`live-editor-actor-not-selectable`、`live-editor-blueprint-required`、`live-editor-data-validation-unavailable`、`live-editor-folder-empty`、`live-editor-asset-limit-exceeded`、`live-editor-batch-task-busy`、`live-editor-batch-task-not-found`、`live-editor-batch-task-world-invalidated`、`live-editor-batch-task-timeout` 和 `live-editor-batch-task-failed`。
+稳定错误包括通用连接/协议错误，以及 `live-editor-pie-active`、`live-editor-asset-not-found`、`live-editor-asset-load-failed`、`live-editor-asset-editor-unavailable`、`live-editor-asset-not-open`、`live-editor-world-unavailable`、`live-editor-actor-not-found`、`live-editor-actor-guid-ambiguous`、`live-editor-actor-not-selectable`、`live-editor-blueprint-required`、`live-editor-data-validation-unavailable`、`live-editor-folder-empty`、`live-editor-asset-limit-exceeded`、`live-editor-batch-task-busy`、`live-editor-batch-task-not-found`、`live-editor-batch-task-world-invalidated`、`live-editor-batch-task-timeout` 和 `live-editor-batch-task-failed`。Graph Layout Preflight 另外使用 `graph-layout-editor-unavailable`、`graph-layout-editor-not-open`、`graph-layout-graph-not-focused`、`graph-layout-graph-not-k2`、`graph-layout-graph-unavailable`、`graph-layout-package-invalid`、`graph-layout-invalid-live-node` 和 `graph-layout-duplicate-live-node`。P7 lab-only write 另外使用 `graph-layout-test-only-disabled`、`graph-layout-test-only-project-rejected`、`graph-layout-test-only-asset-rejected`、`graph-layout-test-only-preflight-rejected`、`graph-layout-test-only-confirmation-required`，并复用 `graph-layout-revision-conflict`、`graph-layout-fingerprint-conflict`、`graph-layout-layout-hash-mismatch`、`graph-layout-package-dirty`、`graph-layout-pie-active` 和 transaction 错误。
 
 ## 查询 Tool
 

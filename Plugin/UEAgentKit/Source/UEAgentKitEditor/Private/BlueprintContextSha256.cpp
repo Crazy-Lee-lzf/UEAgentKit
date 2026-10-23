@@ -213,3 +213,20 @@ bool FBlueprintContextSha256::HashFile(const FString& Filename, FString& OutHexD
 	OutHexDigest = DigestToHex(Digest);
 	return true;
 }
+
+bool FBlueprintContextSha256::HashText(const FString& Text, FString& OutHexDigest)
+{
+	using namespace BlueprintContextSha256Private;
+
+	OutHexDigest.Reset();
+	FTCHARToUTF8 Utf8(*Text);
+	FSha256Hasher Hasher;
+	Hasher.Update(
+		reinterpret_cast<const uint8*>(Utf8.Get()),
+		static_cast<int64>(Utf8.Length()));
+
+	uint8 Digest[32];
+	Hasher.Final(Digest);
+	OutHexDigest = DigestToHex(Digest);
+	return true;
+}

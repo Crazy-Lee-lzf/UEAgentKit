@@ -1,0 +1,11 @@
+{
+  "graphFixture": "../typedgraph/tg_exec_vs_data.json",
+  "request": {
+    "mode": "full",
+    "options": {
+      "spacingX": 80,
+      "spacingY": 40,
+      "seed": 123
+    }
+  }
+}

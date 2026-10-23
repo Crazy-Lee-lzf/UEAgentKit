@@ -1,0 +1,343 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^ueak\\.layoutplan/1\\.[0-9]+$"
+    },
+    "planId": {
+      "type": "string"
+    },
+    "baseGraphHash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "mode": {
+      "enum": [
+        "incremental",
+        "selection",
+        "full"
+      ]
+    },
+    "seed": {
+      "type": "integer"
+    },
+    "scopeNodeIds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^n:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|obj:[A-Za-z_][A-Za-z0-9_]{0,127})$"
+      }
+    },
+    "fixedNodeIds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^n:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|obj:[A-Za-z_][A-Za-z0-9_]{0,127})$"
+      }
+    },
+    "positions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "nodeId": {
+            "type": "string",
+            "pattern": "^n:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|obj:[A-Za-z_][A-Za-z0-9_]{0,127})$"
+          },
+          "x": {
+            "type": "integer"
+          },
+          "y": {
+            "type": "integer"
+          },
+          "size": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "width": {
+                "type": "integer"
+              },
+              "height": {
+                "type": "integer"
+              },
+              "source": {
+                "enum": [
+                  "measured",
+                  "stored",
+                  "estimated",
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "width",
+              "height",
+              "source"
+            ]
+          }
+        },
+        "required": [
+          "nodeId",
+          "x",
+          "y",
+          "size"
+        ]
+      }
+    },
+    "movedNodeIds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^n:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|obj:[A-Za-z_][A-Za-z0-9_]{0,127})$"
+      }
+    },
+    "islands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "islandId": {
+            "type": "string"
+          },
+          "nodeIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "bbox": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "x": {
+                "type": "integer"
+              },
+              "y": {
+                "type": "integer"
+              },
+              "width": {
+                "type": "integer"
+              },
+              "height": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "x",
+              "y",
+              "width",
+              "height"
+            ]
+          }
+        },
+        "required": [
+          "islandId",
+          "nodeIds",
+          "bbox"
+        ]
+      }
+    },
+    "sccs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "sccId": {
+            "type": "string"
+          },
+          "islandId": {
+            "type": "string"
+          },
+          "nodeIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "backEdges": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "sccId",
+          "islandId",
+          "nodeIds",
+          "backEdges"
+        ]
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "info",
+              "warning",
+              "error"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "context": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "code",
+          "severity",
+          "message",
+          "path"
+        ]
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "crossings": {
+          "type": "integer"
+        },
+        "edgeLength": {
+          "type": "integer"
+        },
+        "overlapCount": {
+          "type": "integer"
+        },
+        "area": {
+          "type": "integer"
+        },
+        "aspectRatio": {
+          "type": "number"
+        },
+        "bbox": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "width": {
+              "type": "integer"
+            },
+            "height": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "width",
+            "height"
+          ]
+        }
+      },
+      "required": [
+        "crossings",
+        "edgeLength",
+        "overlapCount",
+        "area",
+        "aspectRatio",
+        "bbox"
+      ]
+    },
+    "packing": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "targetWidth": {
+          "type": "integer"
+        },
+        "spacing": {
+          "type": "integer"
+        },
+        "algorithm": {
+          "enum": [
+            "skyline-v1"
+          ]
+        }
+      },
+      "required": [
+        "targetWidth",
+        "spacing",
+        "algorithm"
+      ]
+    },
+    "layoutHash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "sizeBeforeHash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "sizeAfterHash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "rejected"
+      ]
+    },
+    "errorCode": {
+      "type": "string"
+    },
+    "evidenceLevel": {
+      "enum": [
+        "same-process",
+        "independent-reload"
+      ]
+    },
+    "acceptanceEligible": {
+      "type": "boolean"
+    },
+    "requiredAcceptanceEvidence": {
+      "enum": [
+        "independent-reload"
+      ]
+    },
+    "timingMs": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "planId",
+    "baseGraphHash",
+    "mode",
+    "seed",
+    "scopeNodeIds",
+    "fixedNodeIds",
+    "positions",
+    "movedNodeIds",
+    "islands",
+    "sccs",
+    "warnings",
+    "metrics",
+    "packing",
+    "layoutHash",
+    "sizeBeforeHash",
+    "sizeAfterHash",
+    "status",
+    "errorCode",
+    "evidenceLevel",
+    "acceptanceEligible",
+    "requiredAcceptanceEvidence",
+    "timingMs"
+  ]
+}

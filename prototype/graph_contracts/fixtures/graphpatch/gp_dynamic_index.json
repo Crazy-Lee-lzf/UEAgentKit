@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "ueak.graphpatch/1.0",
+  "patchId": "gp-dynamic-index-001",
+  "idempotencyKey": "lyra/dynamic/index/01",
+  "projectName": "FixtureProject",
+  "target": {
+    "assetPath": "/Game/UEAgentKitTests/BP_GraphPatch_Target.BP_GraphPatch_Target",
+    "graphId": "g:00000104-0000-4000-8000-000000000104",
+    "graphGuid": "00000104-0000-4000-8000-000000000104",
+    "graphName": "EventGraph",
+    "graphKind": "event",
+    "baseRevision": "sha256:3dcc4da87ace041acdf0e0720499097b857bb9590900657572650664f5cfddaa",
+    "baseGraphHash": "sha256:366d4c4b5ea88c68b7b82231ae7c159672769bbd51dc29a8d2a3aacee30adeba",
+    "revisionPolicy": "index-snapshot",
+    "editorSessionId": "editor-session-test",
+    "graphpatchProfile": "structure-default"
+  },
+  "conflictPolicy": "reject-if-changed",
+  "externalDependencies": [],
+  "operations": [
+    {
+      "operationId": "op-1",
+      "type": "connectPins",
+      "from": {
+        "node": "n:00000001-0000-4000-8000-000000000001",
+        "pin": "then",
+        "direction": "output",
+        "pinIndex": 1
+      },
+      "to": {
+        "node": "n:00000004-0000-4000-8000-000000000004",
+        "pin": "execute",
+        "direction": "input"
+      },
+      "connectionPolicy": "reject-replacement"
+    }
+  ],
+  "metadata": {
+    "description": "fixture gp-dynamic-index-001",
+    "createdBy": "contract_candidate/tools/build_fixtures.py",
+    "createdAtUtc": "2026-10-22T00:00:00.000Z"
+  }
+}

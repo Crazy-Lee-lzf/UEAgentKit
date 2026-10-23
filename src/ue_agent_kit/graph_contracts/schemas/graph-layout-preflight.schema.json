@@ -1,0 +1,189 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^ueak\\.graphlayoutpreflight/1\\.[0-9]+$"
+    },
+    "assetPath": {
+      "type": "string",
+      "pattern": "^/Game/[A-Za-z0-9_./-]{1,240}$"
+    },
+    "graphGuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "graphClassPath": {
+      "type": "string"
+    },
+    "schemaClassPath": {
+      "type": "string"
+    },
+    "packageRevision": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "packageDirty": {
+      "type": "boolean",
+      "enum": [
+        false
+      ]
+    },
+    "graphFingerprint": {
+      "type": "string",
+      "pattern": "^sha1:[0-9a-f]{40}$"
+    },
+    "graphFingerprintAlgorithm": {
+      "type": "string"
+    },
+    "nodeCount": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "commentCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "rerouteCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "nodeId": {
+            "type": "string",
+            "pattern": "^n:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "guid": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "classPath": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "node",
+              "comment",
+              "reroute"
+            ]
+          },
+          "x": {
+            "type": "integer"
+          },
+          "y": {
+            "type": "integer"
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "inputPinCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "outputPinCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "inputLinkCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "outputLinkCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "knot": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "inputType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "outputType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "inputSources": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                }
+              },
+              "outputSinks": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                }
+              }
+            },
+            "required": [
+              "inputType",
+              "outputType",
+              "inputSources",
+              "outputSinks"
+            ]
+          }
+        },
+        "required": [
+          "nodeId",
+          "guid",
+          "classPath",
+          "kind",
+          "x",
+          "y",
+          "width",
+          "height",
+          "inputPinCount",
+          "outputPinCount",
+          "inputLinkCount",
+          "outputLinkCount"
+        ]
+      }
+    },
+    "evidenceLevel": {
+      "enum": [
+        "same-process"
+      ]
+    },
+    "acceptanceEligible": {
+      "type": "boolean",
+      "enum": [
+        false
+      ]
+    },
+    "requiredAcceptanceEvidence": {
+      "enum": [
+        "independent-reload"
+      ]
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "assetPath",
+    "graphGuid",
+    "packageRevision",
+    "packageDirty",
+    "graphFingerprint",
+    "nodeCount",
+    "nodes",
+    "evidenceLevel",
+    "acceptanceEligible",
+    "requiredAcceptanceEvidence"
+  ]
+}

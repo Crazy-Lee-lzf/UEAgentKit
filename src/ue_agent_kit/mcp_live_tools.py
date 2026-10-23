@@ -144,6 +144,23 @@ def register_live_read_tools(
         except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
             return error_response("ue_get_blueprint_graph_selection", exc, read_only=True)
 
+    @server.tool(annotations=read_annotations)
+    def ue_get_blueprint_graph_layout_preflight() -> dict[str, Any]:
+        """Read the exact focused Blueprint graph revision, fingerprint, node IDs, and positions for layout planning only."""
+        try:
+            return live_editor_service.call_tool("ue_get_blueprint_graph_layout_preflight")
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_get_blueprint_graph_layout_preflight", exc, read_only=True)
+
+    from .mcp_graph_layout_preview import register_graph_layout_preview_tool
+
+    register_graph_layout_preview_tool(
+        server=server,
+        live_editor_service=live_editor_service,
+        read_annotations=read_annotations,
+        error_response=error_response,
+    )
+
     # Retarget read-only tools keep the live-read group order matching the
     # Tool Registry while living in their own module.
     from .mcp_retarget_tools import register_retarget_tools

@@ -383,6 +383,7 @@ class FakeLiveEditorService:
                 "editor.getCompileErrors",
                 "editor.inspectAssetLive",
                 "editor.getBlueprintGraphSelection",
+                "editor.getBlueprintGraphLayoutPreflight",
                 "editor.getEditorContext",
                 "editor.batchTask.start",
                 "editor.batchTask.status",
@@ -452,6 +453,29 @@ class FakeLiveEditorService:
                     {
                         "nodeGuid": "22222222-2222-2222-2222-222222222222",
                         "title": "BeginPlay",
+                    }
+                ],
+            },
+            "ue_get_blueprint_graph_layout_preflight": {
+                "schemaVersion": "ueak.graphlayoutpreflight/1.0",
+                "available": True,
+                "readOnly": True,
+                "source": "focused-blueprint-editor",
+                "selectionPolicy": "most-recently-active-blueprint-editor",
+                "focusScope": "toolkit-graph-tab",
+                "assetPath": "/Game/Test/BP_Test.BP_Test",
+                "graphGuid": "11111111-1111-1111-1111-111111111111",
+                "packageRevision": "sha256:" + "a" * 64,
+                "packageDirty": False,
+                "graphFingerprint": "sha1:" + "b" * 40,
+                "nodeCount": 1,
+                "complete": True,
+                "nodes": [
+                    {
+                        "nodeId": "n:22222222-2222-2222-2222-222222222222",
+                        "guid": "22222222-2222-2222-2222-222222222222",
+                        "x": 0,
+                        "y": 0,
                     }
                 ],
             },
@@ -1629,6 +1653,19 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(graph_contract["maxSelectedNodes"], 100)
         self.assertFalse(graph_contract["materialEditorSupported"])
         self.assertFalse(graph_contract["editingSupported"])
+        layout_contract = capabilities["liveEditor"]["graphLayoutPreflight"]
+        self.assertTrue(layout_contract["available"])
+        self.assertEqual(layout_contract["tool"], "ue_get_blueprint_graph_layout_preflight")
+        self.assertEqual(layout_contract["bridgeMethod"], "editor.getBlueprintGraphLayoutPreflight")
+        self.assertTrue(layout_contract["readOnly"])
+        self.assertEqual(layout_contract["selectionPolicy"], "most-recently-active-blueprint-editor")
+        self.assertEqual(layout_contract["scope"], "focused-graph-tab")
+        self.assertFalse(layout_contract["opensOrFocusesAssets"])
+        self.assertFalse(layout_contract["writesBlueprint"])
+        self.assertFalse(layout_contract["savesPackages"])
+        self.assertEqual(layout_contract["maxReturnedNodes"], 512)
+        self.assertTrue(layout_contract["truncationReported"])
+        self.assertFalse(layout_contract["writeToolRegistered"])
         context_contract = capabilities["liveEditor"]["editorContext"]
         self.assertTrue(context_contract["available"])
         self.assertEqual(context_contract["tool"], "ue_get_editor_context")
@@ -1799,6 +1836,26 @@ class McpServerTests(unittest.TestCase):
             graph_selection["result"]["selectedNodes"][0]["nodeGuid"],
             "22222222-2222-2222-2222-222222222222",
         )
+
+        layout_tool = next(tool for tool in tools if tool.name == "ue_get_blueprint_graph_layout_preflight")
+        self.assertEqual(layout_tool.inputSchema.get("properties", {}), {})
+        self.assertTrue(layout_tool.annotations.readOnlyHint)
+        _, layout_preflight = asyncio.run(
+            server.call_tool("ue_get_blueprint_graph_layout_preflight", {})
+        )
+        self.assertTrue(layout_preflight["ok"])
+        self.assertTrue(layout_preflight["readOnly"])
+        self.assertEqual(layout_preflight["tool"], "ue_get_blueprint_graph_layout_preflight")
+        self.assertEqual(
+            layout_preflight["result"]["graphGuid"],
+            "11111111-1111-1111-1111-111111111111",
+        )
+        self.assertEqual(
+            layout_preflight["result"]["selectionPolicy"],
+            "most-recently-active-blueprint-editor",
+        )
+        self.assertEqual(live_service.calls[-1][0], "ue_get_blueprint_graph_layout_preflight")
+        self.assertEqual(live_service.calls[-1][1], {})
 
         _, batch_started = asyncio.run(
             server.call_tool(
@@ -2015,7 +2072,7 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         expected_names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 100)
+        self.assertEqual(len(tools), 102)
         for tool in tools:
             definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
             self.assertEqual(bool(tool.annotations.readOnlyHint), definition.read_only, tool.name)

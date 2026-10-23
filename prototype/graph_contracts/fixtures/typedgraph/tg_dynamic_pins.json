@@ -1,0 +1,668 @@
+{
+  "schemaVersion": "ueak.typedgraph/1.0",
+  "graphId": "g:00000104-0000-4000-8000-000000000104",
+  "asset": {
+    "path": "/Game/UEAgentKitTests/BP_GraphPatch_Target.BP_GraphPatch_Target",
+    "class": "/Script/Engine.Blueprint",
+    "revision": "sha256:3dcc4da87ace041acdf0e0720499097b857bb9590900657572650664f5cfddaa",
+    "revisionPolicy": "index-snapshot",
+    "dirty": false
+  },
+  "graph": {
+    "name": "EventGraph",
+    "guid": "00000104-0000-4000-8000-000000000104",
+    "kind": "event",
+    "schema": "/Script/BlueprintGraph.EdGraphSchema_K2",
+    "editable": true
+  },
+  "source": {
+    "kind": "test-fixture",
+    "sessionId": "editor-session-test",
+    "exporterSchemaVersion": "ueak.typedgraph-export/1",
+    "pluginBuildHash": "0123456789abcdef",
+    "engineVersion": "5.6.1",
+    "exportedAtUtc": "2026-10-22T00:00:00.000Z"
+  },
+  "limits": {
+    "maxNodes": 5000,
+    "maxPins": 50000,
+    "includedNodeCount": 5,
+    "omittedNodeCount": 0,
+    "selection": "nodeId-ascending",
+    "truncated": false
+  },
+  "nodes": [
+    {
+      "nodeId": "n:00000001-0000-4000-8000-000000000001",
+      "nodeGuid": "00000001-0000-4000-8000-000000000001",
+      "objectPath": "/Game/UEAgentKitTests/BP_GraphPatch_Target.BP_GraphPatch_Target:EventGraph.K2Node_ExecutionSequence_1",
+      "classPath": "/Script/BlueprintGraph.K2Node_ExecutionSequence",
+      "title": "Sequence",
+      "kind": "other",
+      "nodeIdSource": "guid",
+      "flags": {
+        "enabled": true,
+        "pure": false,
+        "reroute": false,
+        "comment": false,
+        "latent": false
+      },
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "size": {
+        "width": 208,
+        "height": 120,
+        "source": "stored"
+      },
+      "pins": [
+        "p:00000006-0000-4000-8000-000000000006",
+        "p:00000007-0000-4000-8000-000000000007",
+        "p:00000008-0000-4000-8000-000000000008",
+        "p:00000009-0000-4000-8000-000000000009"
+      ],
+      "semanticHash": "sha256:6a32b358508002979352c4d6c63ab84b71c55fd0e2e11f6f5219edbe61b2fdfa"
+    },
+    {
+      "nodeId": "n:00000002-0000-4000-8000-000000000002",
+      "nodeGuid": "00000002-0000-4000-8000-000000000002",
+      "objectPath": "/Game/UEAgentKitTests/BP_GraphPatch_Target.BP_GraphPatch_Target:EventGraph.K2Node_VariableGet_2",
+      "classPath": "/Script/BlueprintGraph.K2Node_VariableGet",
+      "title": "Get SharedValue",
+      "kind": "variable-get",
+      "nodeIdSource": "guid",
+      "flags": {
+        "enabled": true,
+        "pure": true,
+        "reroute": false,
+        "comment": false,
+        "latent": false
+      },
+      "position": {
+        "x": 0,
+        "y": 320
+      },
+      "size": {
+        "width": 208,
+        "height": 120,
+        "source": "stored"
+      },
+      "pins": [
+        "p:0000000a-0000-4000-8000-00000000000a"
+      ],
+      "semanticHash": "sha256:b062cb935c60f571bbebdbf29341886b8a20409b4070a40a3a2e879983c7d03d"
+    },
+    {
+      "nodeId": "n:00000003-0000-4000-8000-000000000003",
+      "nodeGuid": "00000003-0000-4000-8000-000000000003",
+      "objectPath": "/Game/UEAgentKitTests/BP_GraphPatch_Target.BP_GraphPatch_Target:EventGraph.K2Node_CallFunction_3",
+      "classPath": "/Script/BlueprintGraph.K2Node_CallFunction",
+      "title": "Print String",
+      "kind": "call",
+      "nodeIdSource": "guid",
+      "flags": {
+        "enabled": true,
+        "pure": false,
+        "reroute": false,
+        "comment": false,
+        "latent": false
+      },
+      "position": {
+        "x": 480,
+        "y": 0
+      },
+      "size": {
+        "width": 208,
+        "height": 120,
+        "source": "stored"
+      },
+      "pins": [
+        "p:0000000b-0000-4000-8000-00000000000b",
+        "p:0000000c-0000-4000-8000-00000000000c",
+        "p:0000000d-0000-4000-8000-00000000000d"
+      ],
+      "semanticHash": "sha256:d8113138016561f837aea96ff943eda4bbef188861d6b3b64be66edb8bef62e2"
+    },
+    {
+      "nodeId": "n:00000004-0000-4000-8000-000000000004",
+      "nodeGuid": "00000004-0000-4000-8000-000000000004",
+      "objectPath": "/Game/UEAgentKitTests/BP_GraphPatch_Target.BP_GraphPatch_Target:EventGraph.K2Node_CallFunction_4",
+      "classPath": "/Script/BlueprintGraph.K2Node_CallFunction",
+      "title": "Print String 2",
+      "kind": "call",
+      "nodeIdSource": "guid",
+      "flags": {
+        "enabled": true,
+        "pure": false,
+        "reroute": false,
+        "comment": false,
+        "latent": false
+      },
+      "position": {
+        "x": 480,
+        "y": 220
+      },
+      "size": {
+        "width": 208,
+        "height": 120,
+        "source": "stored"
+      },
+      "pins": [
+        "p:0000000e-0000-4000-8000-00000000000e",
+        "p:0000000f-0000-4000-8000-00000000000f",
+        "p:00000010-0000-4000-8000-000000000010"
+      ],
+      "semanticHash": "sha256:608e6b633a5fb1e0ae5a5eb7ba45b2f7ab14a869a5a4551ae5e602db9606cfe9"
+    },
+    {
+      "nodeId": "n:00000005-0000-4000-8000-000000000005",
+      "nodeGuid": "00000005-0000-4000-8000-000000000005",
+      "objectPath": "/Game/UEAgentKitTests/BP_GraphPatch_Target.BP_GraphPatch_Target:EventGraph.K2Node_PromotableOperator_5",
+      "classPath": "/Script/BlueprintGraph.K2Node_PromotableOperator",
+      "title": "Promotable Operator",
+      "kind": "other",
+      "nodeIdSource": "guid",
+      "flags": {
+        "enabled": true,
+        "pure": false,
+        "reroute": false,
+        "comment": false,
+        "latent": false
+      },
+      "position": {
+        "x": 0,
+        "y": 640
+      },
+      "size": {
+        "width": 208,
+        "height": 120,
+        "source": "stored"
+      },
+      "pins": [
+        "p:00000011-0000-4000-8000-000000000011",
+        "p:00000012-0000-4000-8000-000000000012"
+      ],
+      "semanticHash": "sha256:0f5a94b3ff70a9943990b74e0351eb9df3b96dd4eec78d6198667a3b1c34b3b2"
+    }
+  ],
+  "pins": [
+    {
+      "pinId": "p:00000006-0000-4000-8000-000000000006",
+      "nodeId": "n:00000001-0000-4000-8000-000000000001",
+      "name": "execute",
+      "friendlyName": "",
+      "direction": "input",
+      "kind": "exec",
+      "type": {
+        "category": "exec",
+        "subCategory": "",
+        "subCategoryObject": "",
+        "container": "none",
+        "isReference": false,
+        "isConst": false,
+        "isWeakPointer": false
+      },
+      "index": 0,
+      "defaults": {
+        "value": "",
+        "object": "",
+        "text": ""
+      },
+      "flags": {
+        "hidden": false,
+        "advanced": false,
+        "connectable": true,
+        "orphaned": false,
+        "defaultReadOnly": false,
+        "defaultIgnored": false
+      },
+      "links": [],
+      "pinIdSource": "native",
+      "pinGuidTransient": false
+    },
+    {
+      "pinId": "p:00000007-0000-4000-8000-000000000007",
+      "nodeId": "n:00000001-0000-4000-8000-000000000001",
+      "name": "then",
+      "friendlyName": "",
+      "direction": "output",
+      "kind": "exec",
+      "type": {
+        "category": "exec",
+        "subCategory": "",
+        "subCategoryObject": "",
+        "container": "none",
+        "isReference": false,
+        "isConst": false,
+        "isWeakPointer": false
+      },
+      "index": 1,
+      "defaults": {
+        "value": "",
+        "object": "",
+        "text": ""
+      },
+      "flags": {
+        "hidden": false,
+        "advanced": false,
+        "connectable": true,
+        "orphaned": false,
+        "defaultReadOnly": false,
+        "defaultIgnored": false
+      },
+      "links": [
+        "p:0000000b-0000-4000-8000-00000000000b"
+      ],
+      "pinIdSource": "native",
+      "pinGuidTransient": false
+    },
+    {
+      "pinId": "p:00000008-0000-4000-8000-000000000008",
+      "nodeId": "n:00000001-0000-4000-8000-000000000001",
+      "name": "then",
+      "friendlyName": "",
+      "direction": "output",
+      "kind": "exec",
+      "type": {
+        "category": "exec",
+        "subCategory": "",
+        "subCategoryObject": "",
+        "container": "none",
+        "isReference": false,
+        "isConst": false,
+        "isWeakPointer": false
+      },
+      "index": 2,
+      "defaults": {
+        "value": "",
+        "object": "",
+        "text": ""
+      },
+      "flags": {
+        "hidden": false,
+        "advanced": false,
+        "connectable": true,
+        "orphaned": false,
+        "defaultReadOnly": false,
+        "defaultIgnored": false
+      },
+      "links": [],
+      "pinIdSource": "native",
+      "pinGuidTransient": false
+    },
+    {
+      "pinId": "p:00000009-0000-4000-8000-000000000009",
+      "nodeId": "n:00000001-0000-4000-8000-000000000001",
+      "name": "then",
+      "friendlyName": "",
+      "direction": "output",
+      "kind": "exec",
+      "type": {
+        "category": "exec",
+        "subCategory": "",
+        "subCategoryObject": "",
+        "container": "none",
+        "isReference": false,
+        "isConst": false,
+        "isWeakPointer": false
+      },
+      "index": 3,
+      "defaults": {
+        "value": "",
+        "object": "",
+        "text": ""
+      },
+      "flags": {
+        "hidden": false,
+        "advanced": false,
+        "connectable": true,
+        "orphaned": false,
+        "defaultReadOnly": false,
+        "defaultIgnored": false
+      },
+      "links": [],
+      "pinIdSource": "native",
+      "pinGuidTransient": false
+    },
+    {
+      "pinId": "p:0000000a-0000-4000-8000-00000000000a",
+      "nodeId": "n:00000002-0000-4000-8000-000000000002",
+      "name": "Value",
+      "friendlyName": "",
+      "direction": "output",
+      "kind": "data",
+      "type": {
+        "category": "string",
+        "subCategory": "",
+        "subCategoryObject": "",
+        "container": "none",
+        "isReference": false,
+        "isConst": false,
+        "isWeakPointer": false
+      },
+      "index": 0,
+      "defaults": {
+        "value": "",
+        "object": "",
+        "text": ""
+      },
+      "flags": {
+        "hidden": false,
+        "advanced": false,
+        "connectable": true,
+        "orphaned": false,
+        "defaultReadOnly": false,
+        "defaultIgnored": false
+      },
+      "links": [],
+      "pinIdSource": "native",
+      "pinGuidTransient": false
+    },
+    {
+      "pinId": "p:0000000b-0000-4000-8000-00000000000b",
+      "nodeId": "n:00000003-0000-4000-8000-000000000003",
+      "name": "execute",
+      "friendlyName": "",
+      "direction": "input",
+      "kind": "exec",
+      "type": {
+        "category": "exec",
+        "subCategory": "",
+        "subCategoryObject": "",
+        "container": "none",
+        "isReference": false,
+        "isConst": false,
+        "isWeakPointer": false
+      },
+      "index": 0,
+      "defaults": {
+        "value": "",
+        "object": "",
+        "text": ""
+      },
+      "flags": {
+        "hidden": false,
+        "advanced": false,
+        "connectable": true,
+        "orphaned": false,
+        "defaultReadOnly": false,
+        "defaultIgnored": false
+      },
+      "links": [
+        "p:00000007-0000-4000-8000-000000000007"
+      ],
+      "pinIdSource": "native",
+      "pinGuidTransient": false
+    },
+    {
+      "pinId": "p:0000000c-0000-4000-8000-00000000000c",
+      "nodeId": "n:00000003-0000-4000-8000-000000000003",
+      "name": "then",
+      "friendlyName": "",
+      "direction": "output",
+      "kind": "exec",
+      "type": {
+        "category": "exec",
+        "subCategory": "",
+        "subCategoryObject": "",
+        "container": "none",
+        "isReference": false,
+        "isConst": false,
+        "isWeakPointer": false
+      },
+      "index": 1,
+      "defaults": {
+        "value": "",
+        "object": "",
+        "text": ""
+      },
+      "flags": {
+        "hidden": false,
+        "advanced": false,
+        "connectable": true,
+        "orphaned": false,
+        "defaultReadOnly": false,
+        "defaultIgnored": false
+      },
+      "links": [],
+      "pinIdSource": "native",
+      "pinGuidTransient": false
+    },
+    {
+      "pinId": "p:0000000d-0000-4000-8000-00000000000d",
+      "nodeId": "n:00000003-0000-4000-8000-000000000003",
+      "name": "InString",
+      "friendlyName": "",
+      "direction": "input",
+      "kind": "data",
+      "type": {
+        "category": "string",
+        "subCategory": "",
+        "subCategoryObject": "",
+        "container": "none",
+        "isReference": false,
+        "isConst": false,
+        "isWeakPointer": false
+      },
+      "index": 2,
+      "defaults": {
+        "value": "",
+        "object": "",
+        "text": ""
+      },
+      "flags": {
+        "hidden": false,
+        "advanced": false,
+        "connectable": true,
+        "orphaned": false,
+        "defaultReadOnly": false,
+        "defaultIgnored": false
+      },
+      "links": [],
+      "pinIdSource": "native",
+      "pinGuidTransient": false
+    },
+    {
+      "pinId": "p:0000000e-0000-4000-8000-00000000000e",
+      "nodeId": "n:00000004-0000-4000-8000-000000000004",
+      "name": "execute",
+      "friendlyName": "",
+      "direction": "input",
+      "kind": "exec",
+      "type": {
+        "category": "exec",
+        "subCategory": "",
+        "subCategoryObject": "",
+        "container": "none",
+        "isReference": false,
+        "isConst": false,
+        "isWeakPointer": false
+      },
+      "index": 0,
+      "defaults": {
+        "value": "",
+        "object": "",
+        "text": ""
+      },
+      "flags": {
+        "hidden": false,
+        "advanced": false,
+        "connectable": true,
+        "orphaned": false,
+        "defaultReadOnly": false,
+        "defaultIgnored": false
+      },
+      "links": [],
+      "pinIdSource": "native",
+      "pinGuidTransient": false
+    },
+    {
+      "pinId": "p:0000000f-0000-4000-8000-00000000000f",
+      "nodeId": "n:00000004-0000-4000-8000-000000000004",
+      "name": "then",
+      "friendlyName": "",
+      "direction": "output",
+      "kind": "exec",
+      "type": {
+        "category": "exec",
+        "subCategory": "",
+        "subCategoryObject": "",
+        "container": "none",
+        "isReference": false,
+        "isConst": false,
+        "isWeakPointer": false
+      },
+      "index": 1,
+      "defaults": {
+        "value": "",
+        "object": "",
+        "text": ""
+      },
+      "flags": {
+        "hidden": false,
+        "advanced": false,
+        "connectable": true,
+        "orphaned": false,
+        "defaultReadOnly": false,
+        "defaultIgnored": false
+      },
+      "links": [],
+      "pinIdSource": "native",
+      "pinGuidTransient": false
+    },
+    {
+      "pinId": "p:00000010-0000-4000-8000-000000000010",
+      "nodeId": "n:00000004-0000-4000-8000-000000000004",
+      "name": "InString",
+      "friendlyName": "",
+      "direction": "input",
+      "kind": "data",
+      "type": {
+        "category": "string",
+        "subCategory": "",
+        "subCategoryObject": "",
+        "container": "none",
+        "isReference": false,
+        "isConst": false,
+        "isWeakPointer": false
+      },
+      "index": 2,
+      "defaults": {
+        "value": "",
+        "object": "",
+        "text": ""
+      },
+      "flags": {
+        "hidden": false,
+        "advanced": false,
+        "connectable": true,
+        "orphaned": false,
+        "defaultReadOnly": false,
+        "defaultIgnored": false
+      },
+      "links": [],
+      "pinIdSource": "native",
+      "pinGuidTransient": false
+    },
+    {
+      "pinId": "p:00000011-0000-4000-8000-000000000011",
+      "nodeId": "n:00000005-0000-4000-8000-000000000005",
+      "name": "ErrorTolerance",
+      "friendlyName": "",
+      "direction": "input",
+      "kind": "data",
+      "type": {
+        "category": "",
+        "subCategory": "",
+        "subCategoryObject": "",
+        "container": "none",
+        "isReference": false,
+        "isConst": false,
+        "isWeakPointer": false
+      },
+      "index": 0,
+      "defaults": {
+        "value": "",
+        "object": "",
+        "text": ""
+      },
+      "flags": {
+        "hidden": true,
+        "advanced": false,
+        "connectable": true,
+        "orphaned": false,
+        "defaultReadOnly": true,
+        "defaultIgnored": false
+      },
+      "links": [],
+      "pinIdSource": "derived",
+      "pinGuidTransient": true
+    },
+    {
+      "pinId": "p:00000012-0000-4000-8000-000000000012",
+      "nodeId": "n:00000005-0000-4000-8000-000000000005",
+      "name": "Result",
+      "friendlyName": "",
+      "direction": "output",
+      "kind": "data",
+      "type": {
+        "category": "string",
+        "subCategory": "",
+        "subCategoryObject": "",
+        "container": "none",
+        "isReference": false,
+        "isConst": false,
+        "isWeakPointer": false
+      },
+      "index": 1,
+      "defaults": {
+        "value": "",
+        "object": "",
+        "text": ""
+      },
+      "flags": {
+        "hidden": false,
+        "advanced": false,
+        "connectable": true,
+        "orphaned": false,
+        "defaultReadOnly": false,
+        "defaultIgnored": false
+      },
+      "links": [],
+      "pinIdSource": "native",
+      "pinGuidTransient": false
+    }
+  ],
+  "edges": [
+    {
+      "edgeId": "e:p:00000007-0000-4000-8000-000000000007--p:0000000b-0000-4000-8000-00000000000b",
+      "from": {
+        "nodeId": "n:00000001-0000-4000-8000-000000000001",
+        "pinId": "p:00000007-0000-4000-8000-000000000007"
+      },
+      "to": {
+        "nodeId": "n:00000003-0000-4000-8000-000000000003",
+        "pinId": "p:0000000b-0000-4000-8000-00000000000b"
+      },
+      "kind": "exec",
+      "origin": "pin-link",
+      "status": "resolved"
+    }
+  ],
+  "comments": [],
+  "diagnostics": [
+    {
+      "code": "graph-pin-guid-derived",
+      "severity": "info",
+      "message": "ErrorTolerance uses MD5(nodeGuid|direction|pinName|transient-promotable-pin); not a native PinId",
+      "path": "$.pins",
+      "context": {
+        "pinId": "p:00000011-0000-4000-8000-000000000011",
+        "pinIdSource": "derived"
+      }
+    }
+  ],
+  "semanticHash": "sha256:366d4c4b5ea88c68b7b82231ae7c159672769bbd51dc29a8d2a3aacee30adeba",
+  "layoutHash": "sha256:baf7d10ed47a50eae877d641503ec55ad3fe4dfa1e25ae13aa09a8f5c3b3eebf"
+}

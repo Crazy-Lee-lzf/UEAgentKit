@@ -683,6 +683,20 @@ void FBlueprintContextExporter::ApplyProfileDefaults(FBlueprintContextExportOpti
 	}
 }
 
+TSharedRef<FJsonObject> FBlueprintContextExporter::BuildContextObject(
+	UBlueprint* Blueprint,
+	const FBlueprintContextExportOptions& Options,
+	FBlueprintContextExportResult& InOutResult)
+{
+	if (Blueprint == nullptr)
+	{
+		InOutResult.Error = TEXT("Blueprint is null.");
+		return MakeShared<FJsonObject>();
+	}
+	InOutResult.AssetPath = Blueprint->GetPathName();
+	return BuildCanonicalJson(Blueprint, Options, InOutResult);
+}
+
 bool FBlueprintContextExporter::ExportBlueprint(
 	UBlueprint* Blueprint,
 	const FBlueprintContextExportOptions& Options,

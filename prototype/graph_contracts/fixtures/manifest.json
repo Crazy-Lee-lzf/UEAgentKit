@@ -1,0 +1,680 @@
+{
+  "schemaVersion": "ueak.fixture-manifest/1.0",
+  "generatedBy": "contract_candidate/tools/build_fixtures.py",
+  "hashAlgorithm": "sha256 over 'domain\\n' + canonical JSON (UTF-8, sorted keys, ensure_ascii=False)",
+  "requiresEditor": false,
+  "fixtures": [
+    {
+      "fixtureId": "tg-empty",
+      "kind": "typedgraph",
+      "file": "typedgraph/tg_empty.json",
+      "requiresEditor": false,
+      "expected": {
+        "status": "valid",
+        "semanticHash": "sha256:d80ad22de5ba9f73f6a7f84c4e791ea3d96b3dde23f1952b84f53be2861fac8e",
+        "layoutHash": "sha256:ad3feeade0812c7062546715bc7f8ca3989c04e4bc2e24595730a4fa81b1db4e",
+        "nodeCount": 0,
+        "edgeCount": 0,
+        "pinCount": 0,
+        "applyReady": true
+      }
+    },
+    {
+      "fixtureId": "tg-single-chinese",
+      "kind": "typedgraph",
+      "file": "typedgraph/tg_single_chinese.json",
+      "requiresEditor": false,
+      "expected": {
+        "status": "valid",
+        "semanticHash": "sha256:3340a7145dbec5f4f44412861b297d072458668eb8e4619a7b51386831cf6e4f",
+        "layoutHash": "sha256:c284675fb7f713efee728c6652e5f15bd0cf7e61061c8f1efe782a40b8deb367",
+        "nodeCount": 1,
+        "edgeCount": 0,
+        "pinCount": 3,
+        "applyReady": true
+      }
+    },
+    {
+      "fixtureId": "tg-linear-exec",
+      "kind": "typedgraph",
+      "file": "typedgraph/tg_linear_exec.json",
+      "requiresEditor": false,
+      "expected": {
+        "status": "valid",
+        "semanticHash": "sha256:f748fa40ba649d7109b0cc6275829eebcac56b9c6033195549a2ce863e3d5a4f",
+        "layoutHash": "sha256:01dfc98dfd3e2eef571f89f19300c42d663ac0b5b81c1ab10c209519a8373604",
+        "nodeCount": 3,
+        "edgeCount": 3,
+        "pinCount": 8,
+        "applyReady": true
+      }
+    },
+    {
+      "fixtureId": "tg-dynamic-pins",
+      "kind": "typedgraph",
+      "file": "typedgraph/tg_dynamic_pins.json",
+      "requiresEditor": false,
+      "expected": {
+        "status": "valid",
+        "semanticHash": "sha256:366d4c4b5ea88c68b7b82231ae7c159672769bbd51dc29a8d2a3aacee30adeba",
+        "layoutHash": "sha256:baf7d10ed47a50eae877d641503ec55ad3fe4dfa1e25ae13aa09a8f5c3b3eebf",
+        "nodeCount": 5,
+        "edgeCount": 1,
+        "pinCount": 13,
+        "applyReady": true
+      }
+    },
+    {
+      "fixtureId": "tg-exec-vs-data",
+      "kind": "typedgraph",
+      "file": "typedgraph/tg_exec_vs_data.json",
+      "requiresEditor": false,
+      "expected": {
+        "status": "valid",
+        "semanticHash": "sha256:69e91858ac71dff223199f2c7113c8cc06ac96c64916074777b072582ed5c6e4",
+        "layoutHash": "sha256:4c3d6e103e714fea070d423198b7320e0b9278d45a76c4f0e28c5a2422a29632",
+        "nodeCount": 5,
+        "edgeCount": 4,
+        "pinCount": 7,
+        "applyReady": true
+      }
+    },
+    {
+      "fixtureId": "tg-exec-cycle",
+      "kind": "typedgraph",
+      "file": "typedgraph/tg_exec_cycle.json",
+      "requiresEditor": false,
+      "expected": {
+        "status": "valid",
+        "semanticHash": "sha256:5313bc89eb2aefd5d8250d6d804f0a78313952b677ef6704c023985e07356a8a",
+        "layoutHash": "sha256:797d59a7171c874b8e2a706dc96fd869319dbace90e5af87bdfc94da5b8a64c9",
+        "nodeCount": 3,
+        "edgeCount": 3,
+        "pinCount": 5,
+        "applyReady": true
+      }
+    },
+    {
+      "fixtureId": "tg-comment-reroute",
+      "kind": "typedgraph",
+      "file": "typedgraph/tg_comment_reroute.json",
+      "requiresEditor": false,
+      "expected": {
+        "status": "valid",
+        "semanticHash": "sha256:0aae877e89fe73740c570a9de9fce764e8b14e738d73ba13254a6d90215d6399",
+        "layoutHash": "sha256:151e69898114518431f3dda3f58063988423af342c58ae57875a850c3756a148",
+        "nodeCount": 4,
+        "edgeCount": 2,
+        "pinCount": 5,
+        "applyReady": true
+      }
+    },
+    {
+      "fixtureId": "tg-large-100",
+      "kind": "typedgraph",
+      "file": "typedgraph/tg_large_100.json",
+      "requiresEditor": false,
+      "expected": {
+        "status": "valid",
+        "semanticHash": "sha256:e8002605f1f996c79b102bb255dac7aafee1d149e4c68f845e23b2f5fe24e650",
+        "layoutHash": "sha256:ba38970a5ece68177d655ab7736b1a2ee2e5ef625680bc047267f7536b61b275",
+        "nodeCount": 100,
+        "edgeCount": 90,
+        "pinCount": 280,
+        "applyReady": true
+      }
+    },
+    {
+      "fixtureId": "tg-duplicate-pin-raw",
+      "kind": "typedgraph-raw",
+      "file": "typedgraph/tg_duplicate_pin_raw.json",
+      "requiresEditor": false,
+      "expected": {
+        "status": "built-with-warning",
+        "builderErrorCode": "graph-pin-guid-duplicate",
+        "nodeCount": 2,
+        "applyReady": false
+      }
+    },
+    {
+      "fixtureId": "gp-create-branch",
+      "kind": "graphpatch",
+      "file": "graphpatch/gp_create_branch.json",
+      "graphFixture": "typedgraph/tg_empty.json",
+      "descriptorFixtures": [
+        "descriptors/nd_print.json",
+        "descriptors/nd_branch.json"
+      ],
+      "requiresEditor": false,
+      "environment": {
+        "actualRevision": "sha256:33a10d0b9f17ec3f5ff855883951c07ad531d9bebc11859eea33ac5f740eb590",
+        "dirty": false,
+        "pieActive": false,
+        "editorSessionId": "editor-session-test",
+        "recoveryPending": false,
+        "sidecarFiles": [],
+        "compileResult": {
+          "result": "success",
+          "succeeded": true,
+          "diagnostics": []
+        }
+      },
+      "expected": {
+        "previewStatus": "previewed",
+        "previewErrorCode": "",
+        "applyStatus": "applied",
+        "applyErrorCode": "",
+        "verifyStatus": "verified",
+        "nodeCountDelta": 2,
+        "edgeCountDelta": 1,
+        "pinDefaultDelta": 2
+      }
+    },
+    {
+      "fixtureId": "gp-replace-connection",
+      "kind": "graphpatch",
+      "file": "graphpatch/gp_replace_connection.json",
+      "graphFixture": "typedgraph/tg_linear_exec.json",
+      "descriptorFixtures": [],
+      "requiresEditor": false,
+      "environment": {
+        "actualRevision": "sha256:c64c001095191feba1ce3a9adf8f9c9bc48c43ef3f48c2908ca3ce5b9d16eac1",
+        "dirty": false,
+        "pieActive": false,
+        "editorSessionId": "editor-session-test",
+        "recoveryPending": false,
+        "sidecarFiles": [],
+        "compileResult": {
+          "result": "success",
+          "succeeded": true,
+          "diagnostics": []
+        }
+      },
+      "expected": {
+        "previewStatus": "rejected",
+        "previewErrorCode": "graphpatch-connection-replaced",
+        "applyStatus": "",
+        "applyErrorCode": "",
+        "verifyStatus": "",
+        "nodeCountDelta": 0,
+        "edgeCountDelta": 0,
+        "pinDefaultDelta": 0
+      }
+    },
+    {
+      "fixtureId": "gp-stale-revision",
+      "kind": "graphpatch",
+      "file": "graphpatch/gp_stale_revision.json",
+      "graphFixture": "typedgraph/tg_linear_exec.json",
+      "descriptorFixtures": [],
+      "requiresEditor": false,
+      "environment": {
+        "actualRevision": "sha256:c64c001095191feba1ce3a9adf8f9c9bc48c43ef3f48c2908ca3ce5b9d16eac1",
+        "dirty": false,
+        "pieActive": false,
+        "editorSessionId": "editor-session-test",
+        "recoveryPending": false,
+        "sidecarFiles": [],
+        "compileResult": {
+          "result": "success",
+          "succeeded": true,
+          "diagnostics": []
+        }
+      },
+      "expected": {
+        "previewStatus": "rejected",
+        "previewErrorCode": "graphpatch-base-revision-stale",
+        "applyStatus": "",
+        "applyErrorCode": "",
+        "verifyStatus": "",
+        "nodeCountDelta": null,
+        "edgeCountDelta": null,
+        "pinDefaultDelta": null
+      }
+    },
+    {
+      "fixtureId": "gp-stale-graph-hash",
+      "kind": "graphpatch",
+      "file": "graphpatch/gp_stale_graph_hash.json",
+      "graphFixture": "typedgraph/tg_linear_exec.json",
+      "descriptorFixtures": [],
+      "requiresEditor": false,
+      "environment": {
+        "actualRevision": "sha256:c64c001095191feba1ce3a9adf8f9c9bc48c43ef3f48c2908ca3ce5b9d16eac1",
+        "dirty": false,
+        "pieActive": false,
+        "editorSessionId": "editor-session-test",
+        "recoveryPending": false,
+        "sidecarFiles": [],
+        "compileResult": {
+          "result": "success",
+          "succeeded": true,
+          "diagnostics": []
+        }
+      },
+      "expected": {
+        "previewStatus": "rejected",
+        "previewErrorCode": "graphpatch-base-graph-hash-stale",
+        "applyStatus": "",
+        "applyErrorCode": "",
+        "verifyStatus": "",
+        "nodeCountDelta": null,
+        "edgeCountDelta": null,
+        "pinDefaultDelta": null
+      }
+    },
+    {
+      "fixtureId": "gp-recovery-marker",
+      "kind": "graphpatch",
+      "file": "graphpatch/gp_recovery_marker.json",
+      "graphFixture": "typedgraph/tg_linear_exec.json",
+      "descriptorFixtures": [],
+      "requiresEditor": false,
+      "environment": {
+        "actualRevision": "sha256:c64c001095191feba1ce3a9adf8f9c9bc48c43ef3f48c2908ca3ce5b9d16eac1",
+        "dirty": false,
+        "pieActive": false,
+        "editorSessionId": "editor-session-test",
+        "recoveryPending": true,
+        "sidecarFiles": [],
+        "compileResult": {
+          "result": "success",
+          "succeeded": true,
+          "diagnostics": []
+        }
+      },
+      "expected": {
+        "previewStatus": "rejected",
+        "previewErrorCode": "graphpatch-recovery-required",
+        "applyStatus": "",
+        "applyErrorCode": "",
+        "verifyStatus": "",
+        "nodeCountDelta": null,
+        "edgeCountDelta": null,
+        "pinDefaultDelta": null
+      }
+    },
+    {
+      "fixtureId": "gp-order-conflict",
+      "kind": "graphpatch",
+      "file": "graphpatch/gp_order_conflict.json",
+      "graphFixture": "typedgraph/tg_empty.json",
+      "descriptorFixtures": [
+        "descriptors/nd_print.json",
+        "descriptors/nd_source.json"
+      ],
+      "requiresEditor": false,
+      "environment": {
+        "actualRevision": "sha256:33a10d0b9f17ec3f5ff855883951c07ad531d9bebc11859eea33ac5f740eb590",
+        "dirty": false,
+        "pieActive": false,
+        "editorSessionId": "editor-session-test",
+        "recoveryPending": false,
+        "sidecarFiles": [],
+        "compileResult": {
+          "result": "success",
+          "succeeded": true,
+          "diagnostics": []
+        }
+      },
+      "expected": {
+        "previewStatus": "rejected",
+        "previewErrorCode": "graphpatch-operation-order-conflict",
+        "applyStatus": "",
+        "applyErrorCode": "",
+        "verifyStatus": "",
+        "nodeCountDelta": 2,
+        "edgeCountDelta": 1,
+        "pinDefaultDelta": 0
+      }
+    },
+    {
+      "fixtureId": "gp-derived-pin",
+      "kind": "graphpatch",
+      "file": "graphpatch/gp_derived_pin.json",
+      "graphFixture": "typedgraph/tg_dynamic_pins.json",
+      "descriptorFixtures": [],
+      "requiresEditor": false,
+      "environment": {
+        "actualRevision": "sha256:3dcc4da87ace041acdf0e0720499097b857bb9590900657572650664f5cfddaa",
+        "dirty": false,
+        "pieActive": false,
+        "editorSessionId": "editor-session-test",
+        "recoveryPending": false,
+        "sidecarFiles": [],
+        "compileResult": {
+          "result": "success",
+          "succeeded": true,
+          "diagnostics": []
+        }
+      },
+      "expected": {
+        "previewStatus": "rejected",
+        "previewErrorCode": "graphpatch-pin-identity-unstable",
+        "applyStatus": "",
+        "applyErrorCode": "",
+        "verifyStatus": "",
+        "nodeCountDelta": 0,
+        "edgeCountDelta": 1,
+        "pinDefaultDelta": 0
+      }
+    },
+    {
+      "fixtureId": "gp-exec-vs-data",
+      "kind": "graphpatch",
+      "file": "graphpatch/gp_exec_vs_data.json",
+      "graphFixture": "typedgraph/tg_linear_exec.json",
+      "descriptorFixtures": [],
+      "requiresEditor": false,
+      "environment": {
+        "actualRevision": "sha256:c64c001095191feba1ce3a9adf8f9c9bc48c43ef3f48c2908ca3ce5b9d16eac1",
+        "dirty": false,
+        "pieActive": false,
+        "editorSessionId": "editor-session-test",
+        "recoveryPending": false,
+        "sidecarFiles": [],
+        "compileResult": {
+          "result": "success",
+          "succeeded": true,
+          "diagnostics": []
+        }
+      },
+      "expected": {
+        "previewStatus": "rejected",
+        "previewErrorCode": "graphpatch-pin-type-incompatible",
+        "applyStatus": "",
+        "applyErrorCode": "",
+        "verifyStatus": "",
+        "nodeCountDelta": 0,
+        "edgeCountDelta": 0,
+        "pinDefaultDelta": 0
+      }
+    },
+    {
+      "fixtureId": "gp-empty-operations",
+      "kind": "graphpatch",
+      "file": "graphpatch/gp_empty_operations.json",
+      "graphFixture": "typedgraph/tg_linear_exec.json",
+      "descriptorFixtures": [],
+      "requiresEditor": false,
+      "environment": {
+        "actualRevision": "sha256:c64c001095191feba1ce3a9adf8f9c9bc48c43ef3f48c2908ca3ce5b9d16eac1",
+        "dirty": false,
+        "pieActive": false,
+        "editorSessionId": "editor-session-test",
+        "recoveryPending": false,
+        "sidecarFiles": [],
+        "compileResult": {
+          "result": "success",
+          "succeeded": true,
+          "diagnostics": []
+        }
+      },
+      "expected": {
+        "previewStatus": "rejected",
+        "previewErrorCode": "graphpatch-patch-empty",
+        "applyStatus": "",
+        "applyErrorCode": "",
+        "verifyStatus": "",
+        "nodeCountDelta": null,
+        "edgeCountDelta": null,
+        "pinDefaultDelta": null
+      }
+    },
+    {
+      "fixtureId": "gp-schema-version",
+      "kind": "graphpatch",
+      "file": "graphpatch/gp_schema_version.json",
+      "graphFixture": "typedgraph/tg_linear_exec.json",
+      "descriptorFixtures": [],
+      "requiresEditor": false,
+      "environment": {
+        "actualRevision": "sha256:c64c001095191feba1ce3a9adf8f9c9bc48c43ef3f48c2908ca3ce5b9d16eac1",
+        "dirty": false,
+        "pieActive": false,
+        "editorSessionId": "editor-session-test",
+        "recoveryPending": false,
+        "sidecarFiles": [],
+        "compileResult": {
+          "result": "success",
+          "succeeded": true,
+          "diagnostics": []
+        }
+      },
+      "expected": {
+        "previewStatus": "rejected",
+        "previewErrorCode": "graphpatch-schema-version-unsupported",
+        "applyStatus": "",
+        "applyErrorCode": "",
+        "verifyStatus": "",
+        "nodeCountDelta": null,
+        "edgeCountDelta": null,
+        "pinDefaultDelta": null
+      }
+    },
+    {
+      "fixtureId": "gp-dynamic-index",
+      "kind": "graphpatch",
+      "file": "graphpatch/gp_dynamic_index.json",
+      "graphFixture": "typedgraph/tg_dynamic_pins.json",
+      "descriptorFixtures": [],
+      "requiresEditor": false,
+      "environment": {
+        "actualRevision": "sha256:3dcc4da87ace041acdf0e0720499097b857bb9590900657572650664f5cfddaa",
+        "dirty": false,
+        "pieActive": false,
+        "editorSessionId": "editor-session-test",
+        "recoveryPending": false,
+        "sidecarFiles": [],
+        "compileResult": {
+          "result": "success",
+          "succeeded": true,
+          "diagnostics": []
+        }
+      },
+      "expected": {
+        "previewStatus": "previewed",
+        "previewErrorCode": "",
+        "applyStatus": "",
+        "applyErrorCode": "",
+        "verifyStatus": "",
+        "nodeCountDelta": 0,
+        "edgeCountDelta": 1,
+        "pinDefaultDelta": 0
+      }
+    },
+    {
+      "fixtureId": "gp-compile-failure",
+      "kind": "graphpatch",
+      "file": "graphpatch/gp_compile_failure.json",
+      "graphFixture": "typedgraph/tg_empty.json",
+      "descriptorFixtures": [
+        "descriptors/nd_print.json",
+        "descriptors/nd_branch.json"
+      ],
+      "requiresEditor": false,
+      "environment": {
+        "actualRevision": "sha256:33a10d0b9f17ec3f5ff855883951c07ad531d9bebc11859eea33ac5f740eb590",
+        "dirty": false,
+        "pieActive": false,
+        "editorSessionId": "editor-session-test",
+        "recoveryPending": false,
+        "sidecarFiles": [],
+        "compileResult": {
+          "result": "error",
+          "succeeded": false,
+          "diagnostics": [
+            {
+              "severity": "error",
+              "message": "Simulated compile error: missing required pin",
+              "code": "compile-error"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "previewStatus": "previewed",
+        "previewErrorCode": "",
+        "applyStatus": "rolled-back",
+        "applyErrorCode": "graphpatch-compile-failed",
+        "verifyStatus": "",
+        "nodeCountDelta": 2,
+        "edgeCountDelta": 1,
+        "pinDefaultDelta": 2
+      }
+    },
+    {
+      "fixtureId": "gp-compile-warning",
+      "kind": "graphpatch",
+      "file": "graphpatch/gp_compile_warning.json",
+      "graphFixture": "typedgraph/tg_empty.json",
+      "descriptorFixtures": [
+        "descriptors/nd_print.json",
+        "descriptors/nd_branch.json"
+      ],
+      "requiresEditor": false,
+      "environment": {
+        "actualRevision": "sha256:33a10d0b9f17ec3f5ff855883951c07ad531d9bebc11859eea33ac5f740eb590",
+        "dirty": false,
+        "pieActive": false,
+        "editorSessionId": "editor-session-test",
+        "recoveryPending": false,
+        "sidecarFiles": [],
+        "compileResult": {
+          "result": "success-with-warnings",
+          "succeeded": true,
+          "diagnostics": [
+            {
+              "severity": "warning",
+              "message": "Simulated compiler warning",
+              "code": "compile-warning"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "previewStatus": "previewed",
+        "previewErrorCode": "",
+        "applyStatus": "applied",
+        "applyErrorCode": "",
+        "verifyStatus": "verified",
+        "nodeCountDelta": 2,
+        "edgeCountDelta": 1,
+        "pinDefaultDelta": 2
+      }
+    },
+    {
+      "fixtureId": "layout-empty",
+      "kind": "layout",
+      "file": "layout/layout_empty.json",
+      "graphFixture": "typedgraph/tg_empty.json",
+      "requiresEditor": false,
+      "expected": {
+        "status": "ok",
+        "islandCount": 0,
+        "overlapCount": 0,
+        "layoutHash": "sha256:ad3feeade0812c7062546715bc7f8ca3989c04e4bc2e24595730a4fa81b1db4e",
+        "semanticHash": "sha256:d80ad22de5ba9f73f6a7f84c4e791ea3d96b3dde23f1952b84f53be2861fac8e",
+        "warningCodes": []
+      }
+    },
+    {
+      "fixtureId": "layout-linear",
+      "kind": "layout",
+      "file": "layout/layout_linear.json",
+      "graphFixture": "typedgraph/tg_linear_exec.json",
+      "requiresEditor": false,
+      "expected": {
+        "status": "ok",
+        "islandCount": 1,
+        "overlapCount": 0,
+        "layoutHash": "sha256:c1e30d177c96d610381e7511b6418f32504b6f8c2e7d8059d9ab5966a1db94db",
+        "semanticHash": "sha256:f748fa40ba649d7109b0cc6275829eebcac56b9c6033195549a2ce863e3d5a4f",
+        "warningCodes": []
+      }
+    },
+    {
+      "fixtureId": "layout-islands-shared",
+      "kind": "layout",
+      "file": "layout/layout_islands_shared.json",
+      "graphFixture": "typedgraph/tg_exec_vs_data.json",
+      "requiresEditor": false,
+      "expected": {
+        "status": "ok",
+        "islandCount": 2,
+        "overlapCount": 0,
+        "layoutHash": "sha256:d820c57158c3a6254c693a1268a96c076f5f6bf407a6876e9fb0a0d74ec37cce",
+        "semanticHash": "sha256:69e91858ac71dff223199f2c7113c8cc06ac96c64916074777b072582ed5c6e4",
+        "warningCodes": [
+          "layout-cross-island-data-edge",
+          "layout-shared-pure-node"
+        ]
+      }
+    },
+    {
+      "fixtureId": "layout-cycle",
+      "kind": "layout",
+      "file": "layout/layout_cycle.json",
+      "graphFixture": "typedgraph/tg_exec_cycle.json",
+      "requiresEditor": false,
+      "expected": {
+        "status": "ok",
+        "islandCount": 1,
+        "overlapCount": 0,
+        "layoutHash": "sha256:22006717a4c5a88dfddddc5f191b63abcc83eea8458384ccc4490b22d106c7a7",
+        "semanticHash": "sha256:5313bc89eb2aefd5d8250d6d804f0a78313952b677ef6704c023985e07356a8a",
+        "warningCodes": []
+      }
+    },
+    {
+      "fixtureId": "nd-print",
+      "kind": "node-descriptor",
+      "file": "descriptors/nd_print.json",
+      "requiresEditor": false,
+      "expected": {
+        "status": "valid",
+        "actionId": "action:bbe50d5d9e6764e0818ebd1c455cb385"
+      }
+    },
+    {
+      "fixtureId": "nd-branch",
+      "kind": "node-descriptor",
+      "file": "descriptors/nd_branch.json",
+      "requiresEditor": false,
+      "expected": {
+        "status": "valid",
+        "actionId": "action:b4d79f5f9912831b1e083e59c97595f8"
+      }
+    },
+    {
+      "fixtureId": "nd-source",
+      "kind": "node-descriptor",
+      "file": "descriptors/nd_source.json",
+      "requiresEditor": false,
+      "expected": {
+        "status": "valid",
+        "actionId": "action:dbd032b003f2def94d12916de6170b10"
+      }
+    },
+    {
+      "fixtureId": "od-create-node",
+      "kind": "operation-descriptor",
+      "file": "descriptors/od_create_node.json",
+      "requiresEditor": false,
+      "expected": {
+        "status": "valid",
+        "name": "graph.createNode"
+      }
+    },
+    {
+      "fixtureId": "od-set-node-enabled",
+      "kind": "operation-descriptor",
+      "file": "descriptors/od_set_node_enabled.json",
+      "requiresEditor": false,
+      "expected": {
+        "status": "valid",
+        "name": "graph.setNodeEnabled"
+      }
+    }
+  ]
+}

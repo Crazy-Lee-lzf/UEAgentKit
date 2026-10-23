@@ -57,6 +57,17 @@ public:
 		const FBlueprintContextExportOptions& Options,
 		FBlueprintContextExportResult& OutResult);
 
+	/**
+	 * Build the same canonical full-context object as ExportBlueprint without
+	 * touching the filesystem.  P8 uses this for a read-only Bridge response;
+	 * callers are responsible for bounding response size and for never treating
+	 * the object as apply evidence.
+	 */
+	static TSharedRef<FJsonObject> BuildContextObject(
+		UBlueprint* Blueprint,
+		const FBlueprintContextExportOptions& Options,
+		FBlueprintContextExportResult& InOutResult);
+
 private:
 	static TSharedRef<FJsonObject> BuildCanonicalJson(
 		UBlueprint* Blueprint,

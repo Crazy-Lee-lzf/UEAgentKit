@@ -1,0 +1,356 @@
+{
+  "schemaVersion": "ueak.typedgraph/1.0",
+  "graphId": "g:00000106-0000-4000-8000-000000000106",
+  "asset": {
+    "path": "/Game/UEAgentKitTests/BP_GraphPatch_Target.BP_GraphPatch_Target",
+    "class": "/Script/Engine.Blueprint",
+    "revision": "sha256:c9743266696884dea603ab519254bd0007d3d2c1fb708f1f62487ed640157ecc",
+    "revisionPolicy": "index-snapshot",
+    "dirty": false
+  },
+  "graph": {
+    "name": "EventGraph",
+    "guid": "00000106-0000-4000-8000-000000000106",
+    "kind": "event",
+    "schema": "/Script/BlueprintGraph.EdGraphSchema_K2",
+    "editable": true
+  },
+  "source": {
+    "kind": "test-fixture",
+    "sessionId": "editor-session-test",
+    "exporterSchemaVersion": "ueak.typedgraph-export/1",
+    "pluginBuildHash": "0123456789abcdef",
+    "engineVersion": "5.6.1",
+    "exportedAtUtc": "2026-10-22T00:00:00.000Z"
+  },
+  "limits": {
+    "maxNodes": 5000,
+    "maxPins": 50000,
+    "includedNodeCount": 3,
+    "omittedNodeCount": 0,
+    "selection": "nodeId-ascending",
+    "truncated": false
+  },
+  "nodes": [
+    {
+      "nodeId": "n:00000001-0000-4000-8000-000000000001",
+      "nodeGuid": "00000001-0000-4000-8000-000000000001",
+      "objectPath": "/Game/UEAgentKitTests/BP_GraphPatch_Target.BP_GraphPatch_Target:EventGraph.K2Node_Event_1",
+      "classPath": "/Script/BlueprintGraph.K2Node_Event",
+      "title": "Event BeginPlay",
+      "kind": "event",
+      "nodeIdSource": "guid",
+      "flags": {
+        "enabled": true,
+        "pure": false,
+        "reroute": false,
+        "comment": false,
+        "latent": false
+      },
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "size": {
+        "width": 208,
+        "height": 120,
+        "source": "stored"
+      },
+      "pins": [
+        "p:00000004-0000-4000-8000-000000000004"
+      ],
+      "semanticHash": "sha256:9d596f5868f955bcb5881431bed53e59c0fa9739ba03633893e7dd8c23bbbe6c"
+    },
+    {
+      "nodeId": "n:00000002-0000-4000-8000-000000000002",
+      "nodeGuid": "00000002-0000-4000-8000-000000000002",
+      "objectPath": "/Game/UEAgentKitTests/BP_GraphPatch_Target.BP_GraphPatch_Target:EventGraph.K2Node_CallFunction_2",
+      "classPath": "/Script/BlueprintGraph.K2Node_CallFunction",
+      "title": "A",
+      "kind": "call",
+      "nodeIdSource": "guid",
+      "flags": {
+        "enabled": true,
+        "pure": false,
+        "reroute": false,
+        "comment": false,
+        "latent": false
+      },
+      "position": {
+        "x": 320,
+        "y": 0
+      },
+      "size": {
+        "width": 208,
+        "height": 120,
+        "source": "stored"
+      },
+      "pins": [
+        "p:00000005-0000-4000-8000-000000000005",
+        "p:00000006-0000-4000-8000-000000000006"
+      ],
+      "semanticHash": "sha256:532ff03d6fa8447783a8e614e6a4ec05ebbf4af1d742f14a3c2e4d57843e294d"
+    },
+    {
+      "nodeId": "n:00000003-0000-4000-8000-000000000003",
+      "nodeGuid": "00000003-0000-4000-8000-000000000003",
+      "objectPath": "/Game/UEAgentKitTests/BP_GraphPatch_Target.BP_GraphPatch_Target:EventGraph.K2Node_CallFunction_3",
+      "classPath": "/Script/BlueprintGraph.K2Node_CallFunction",
+      "title": "B",
+      "kind": "call",
+      "nodeIdSource": "guid",
+      "flags": {
+        "enabled": true,
+        "pure": false,
+        "reroute": false,
+        "comment": false,
+        "latent": false
+      },
+      "position": {
+        "x": 640,
+        "y": 0
+      },
+      "size": {
+        "width": 208,
+        "height": 120,
+        "source": "stored"
+      },
+      "pins": [
+        "p:00000007-0000-4000-8000-000000000007",
+        "p:00000008-0000-4000-8000-000000000008"
+      ],
+      "semanticHash": "sha256:b2c8f78802268f28de1d8c21214e364ae00a74ecf7bd332f3cfe0b04553496a5"
+    }
+  ],
+  "pins": [
+    {
+      "pinId": "p:00000004-0000-4000-8000-000000000004",
+      "nodeId": "n:00000001-0000-4000-8000-000000000001",
+      "name": "then",
+      "friendlyName": "",
+      "direction": "output",
+      "kind": "exec",
+      "type": {
+        "category": "exec",
+        "subCategory": "",
+        "subCategoryObject": "",
+        "container": "none",
+        "isReference": false,
+        "isConst": false,
+        "isWeakPointer": false
+      },
+      "index": 0,
+      "defaults": {
+        "value": "",
+        "object": "",
+        "text": ""
+      },
+      "flags": {
+        "hidden": false,
+        "advanced": false,
+        "connectable": true,
+        "orphaned": false,
+        "defaultReadOnly": false,
+        "defaultIgnored": false
+      },
+      "links": [
+        "p:00000005-0000-4000-8000-000000000005"
+      ],
+      "pinIdSource": "native",
+      "pinGuidTransient": false
+    },
+    {
+      "pinId": "p:00000005-0000-4000-8000-000000000005",
+      "nodeId": "n:00000002-0000-4000-8000-000000000002",
+      "name": "execute",
+      "friendlyName": "",
+      "direction": "input",
+      "kind": "exec",
+      "type": {
+        "category": "exec",
+        "subCategory": "",
+        "subCategoryObject": "",
+        "container": "none",
+        "isReference": false,
+        "isConst": false,
+        "isWeakPointer": false
+      },
+      "index": 0,
+      "defaults": {
+        "value": "",
+        "object": "",
+        "text": ""
+      },
+      "flags": {
+        "hidden": false,
+        "advanced": false,
+        "connectable": true,
+        "orphaned": false,
+        "defaultReadOnly": false,
+        "defaultIgnored": false
+      },
+      "links": [
+        "p:00000004-0000-4000-8000-000000000004",
+        "p:00000008-0000-4000-8000-000000000008"
+      ],
+      "pinIdSource": "native",
+      "pinGuidTransient": false
+    },
+    {
+      "pinId": "p:00000006-0000-4000-8000-000000000006",
+      "nodeId": "n:00000002-0000-4000-8000-000000000002",
+      "name": "then",
+      "friendlyName": "",
+      "direction": "output",
+      "kind": "exec",
+      "type": {
+        "category": "exec",
+        "subCategory": "",
+        "subCategoryObject": "",
+        "container": "none",
+        "isReference": false,
+        "isConst": false,
+        "isWeakPointer": false
+      },
+      "index": 1,
+      "defaults": {
+        "value": "",
+        "object": "",
+        "text": ""
+      },
+      "flags": {
+        "hidden": false,
+        "advanced": false,
+        "connectable": true,
+        "orphaned": false,
+        "defaultReadOnly": false,
+        "defaultIgnored": false
+      },
+      "links": [
+        "p:00000007-0000-4000-8000-000000000007"
+      ],
+      "pinIdSource": "native",
+      "pinGuidTransient": false
+    },
+    {
+      "pinId": "p:00000007-0000-4000-8000-000000000007",
+      "nodeId": "n:00000003-0000-4000-8000-000000000003",
+      "name": "execute",
+      "friendlyName": "",
+      "direction": "input",
+      "kind": "exec",
+      "type": {
+        "category": "exec",
+        "subCategory": "",
+        "subCategoryObject": "",
+        "container": "none",
+        "isReference": false,
+        "isConst": false,
+        "isWeakPointer": false
+      },
+      "index": 0,
+      "defaults": {
+        "value": "",
+        "object": "",
+        "text": ""
+      },
+      "flags": {
+        "hidden": false,
+        "advanced": false,
+        "connectable": true,
+        "orphaned": false,
+        "defaultReadOnly": false,
+        "defaultIgnored": false
+      },
+      "links": [
+        "p:00000006-0000-4000-8000-000000000006"
+      ],
+      "pinIdSource": "native",
+      "pinGuidTransient": false
+    },
+    {
+      "pinId": "p:00000008-0000-4000-8000-000000000008",
+      "nodeId": "n:00000003-0000-4000-8000-000000000003",
+      "name": "then",
+      "friendlyName": "",
+      "direction": "output",
+      "kind": "exec",
+      "type": {
+        "category": "exec",
+        "subCategory": "",
+        "subCategoryObject": "",
+        "container": "none",
+        "isReference": false,
+        "isConst": false,
+        "isWeakPointer": false
+      },
+      "index": 1,
+      "defaults": {
+        "value": "",
+        "object": "",
+        "text": ""
+      },
+      "flags": {
+        "hidden": false,
+        "advanced": false,
+        "connectable": true,
+        "orphaned": false,
+        "defaultReadOnly": false,
+        "defaultIgnored": false
+      },
+      "links": [
+        "p:00000005-0000-4000-8000-000000000005"
+      ],
+      "pinIdSource": "native",
+      "pinGuidTransient": false
+    }
+  ],
+  "edges": [
+    {
+      "edgeId": "e:p:00000004-0000-4000-8000-000000000004--p:00000005-0000-4000-8000-000000000005",
+      "from": {
+        "nodeId": "n:00000001-0000-4000-8000-000000000001",
+        "pinId": "p:00000004-0000-4000-8000-000000000004"
+      },
+      "to": {
+        "nodeId": "n:00000002-0000-4000-8000-000000000002",
+        "pinId": "p:00000005-0000-4000-8000-000000000005"
+      },
+      "kind": "exec",
+      "origin": "pin-link",
+      "status": "resolved"
+    },
+    {
+      "edgeId": "e:p:00000006-0000-4000-8000-000000000006--p:00000007-0000-4000-8000-000000000007",
+      "from": {
+        "nodeId": "n:00000002-0000-4000-8000-000000000002",
+        "pinId": "p:00000006-0000-4000-8000-000000000006"
+      },
+      "to": {
+        "nodeId": "n:00000003-0000-4000-8000-000000000003",
+        "pinId": "p:00000007-0000-4000-8000-000000000007"
+      },
+      "kind": "exec",
+      "origin": "pin-link",
+      "status": "resolved"
+    },
+    {
+      "edgeId": "e:p:00000008-0000-4000-8000-000000000008--p:00000005-0000-4000-8000-000000000005",
+      "from": {
+        "nodeId": "n:00000003-0000-4000-8000-000000000003",
+        "pinId": "p:00000008-0000-4000-8000-000000000008"
+      },
+      "to": {
+        "nodeId": "n:00000002-0000-4000-8000-000000000002",
+        "pinId": "p:00000005-0000-4000-8000-000000000005"
+      },
+      "kind": "exec",
+      "origin": "pin-link",
+      "status": "resolved"
+    }
+  ],
+  "comments": [],
+  "diagnostics": [],
+  "semanticHash": "sha256:5313bc89eb2aefd5d8250d6d804f0a78313952b677ef6704c023985e07356a8a",
+  "layoutHash": "sha256:797d59a7171c874b8e2a706dc96fd869319dbace90e5af87bdfc94da5b8a64c9"
+}

@@ -21,6 +21,7 @@ public class UEAgentKitEditor : ModuleRules
 				"AssetTools",
 				"BlueprintGraph",
 				"DataValidation",
+				"GraphEditor",
 				"IKRig",
 				"IKRigEditor",
 				"Json",
@@ -30,10 +31,12 @@ public class UEAgentKitEditor : ModuleRules
 				"Networking",
 				"Niagara",
 				"Projects",
+				"PythonScriptPlugin",
 				"Slate",
 				"SlateCore",
 				"SlateRHIRenderer",
 				"Sockets",
+				"ToolMenus",
 				"UnrealEd"
 			});
 	}
