@@ -322,7 +322,7 @@ They do **not** cover UE automation, Editor sockets, C++ serialization, ticket/l
 - [ ] Copy `sessionId`/`pluginBuildHash` into preflight exactly as P9 does; reject if `pluginBuildHash` is empty
       (Python `build_preview` requires it).
 - [ ] Require `available`, `complete`, `nodesTruncated=false`, `packageDirty=false`, `pieState=stopped`,
-      `schemaClassPath` contains `EdSchema_K2`, `editable` as needed; resolve the exact focused graph once.
+      `schemaClassPath` contains `EdGraphSchema_K2`, `editable` as needed; resolve the exact focused graph once.
 - [ ] Record snapshot identity: assetPath, graphGuid, graphName, packageRevision, graphFingerprint, nodeCount,
       context `schemaVersion`, sessionId, pluginBuildHash. No file writes, no transaction, no save, no compile.
 - [ ] Encode request to compact UTF-8; verify exact byte length ≤1 MiB before spawning/worker send; reject with
