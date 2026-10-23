@@ -4,6 +4,7 @@
 #include "BlueprintGraphLayoutP9Menu.h"
 #include "BlueprintGraphLayoutP11Menu.h"
 #include "BlueprintGraphLayoutP9TestOnly.h"
+#include "Native/NativeNodeRegistry.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "Modules/ModuleManager.h"
@@ -16,6 +17,11 @@ public:
 		const bool bAutomationChild = FParse::Param(FCommandLine::Get(), TEXT("UEAgentKitAutomationChild"));
 		if (GIsEditor && !IsRunningCommandlet() && !bAutomationChild)
 		{
+			// Read-only native registry.  Off by default; a missing/invalid
+			// manifest only disables the native surface (legacy P12 is untouched).
+			FNativeNodeRegistry& NativeRegistry = FNativeNodeRegistry::Get();
+			NativeRegistry.Initialize(FNativeNodeRegistry::ParseMode(FNativeNodeRegistry::ReadConfiguredModeText()));
+
 			EditorBridge = MakeUnique<FUEAgentKitEditorBridge>();
 			EditorBridge->Start();
 			if (UEAgentKitBlueprintGraphLayoutP8::IsTestOnlyWriteAvailable())
@@ -58,6 +64,7 @@ public:
 			EditorBridge->Stop();
 			EditorBridge.Reset();
 		}
+		FNativeNodeRegistry::Get().Shutdown();
 	}
 
 private:

@@ -230,3 +230,22 @@ bool FBlueprintContextSha256::HashText(const FString& Text, FString& OutHexDiges
 	OutHexDigest = DigestToHex(Digest);
 	return true;
 }
+
+bool FBlueprintContextSha256::HashUtf8Bytes(const uint8* Data, const int64 Length, FString& OutHexDigest)
+{
+	using namespace BlueprintContextSha256Private;
+
+	OutHexDigest.Reset();
+	if (Length < 0 || (Data == nullptr && Length > 0))
+	{
+		return false;
+	}
+
+	FSha256Hasher Hasher;
+	Hasher.Update(Data, Length);
+
+	uint8 Digest[32];
+	Hasher.Final(Digest);
+	OutHexDigest = DigestToHex(Digest);
+	return true;
+}
