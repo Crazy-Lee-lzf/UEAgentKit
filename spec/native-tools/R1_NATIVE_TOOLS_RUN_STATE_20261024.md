@@ -24,14 +24,14 @@
 | descriptor | 512（available 762，`truncated=true`，`complete=false`） |
 | unsupported | 37547；`template-budget-exceeded=25823`、`unknown-spawner=11638`、`untrusted-spawner-excluded=80`、`action-id-collision=6` |
 | 模板 / 引脚 | created 768、cached 0、pinsAllocated 768；首次枚举 831–979 ms |
-| 指纹 | `sha256:b09fb1387e188e02`（4 个独立 Editor 进程一致） |
+| 指纹 | `sha256:b09fb1387e188e02`（5 个独立 Editor 进程一致） |
 | pluginSetHash | `sha256:1d034d339ee271ad` |
 | DLL | `sha256:74dedb8f40023b3d7448dd0d32df8998882b37cabfd106596eca5637819db522` |
 | 只读证据 | dirty 0→0、`/Game` packages 0→0、assets 0→0、undo queue 0→0、undo count 0→0（空宿主，dirty 断言平凡成立） |
 | 离线测试 | 13/13 OK；512 条导出 descriptor 全部通过 `validate_node_descriptor` + JSON Schema |
 | 金值 | 200 条；sha256 `97942712580b08a109cda2d716de46d4fa29a237bf3a64bb8e308e5e649f4269` |
 
-证据目录：`Build/r1-native/Evidence/`（`evidence-summary.json`、`catalog-export.json`、构建/自动化日志、`AutomationReport-20261024-013748/index.json`、`environment-*.json`）。
+证据目录：`Build/r1-native/Evidence/`（`evidence-summary.json`、`catalog-export.json`、构建/自动化日志、`AutomationReport-20261024-014308/index.json`、`environment-*.json`）。
 
 ## 未完成 / 明确缺口
 

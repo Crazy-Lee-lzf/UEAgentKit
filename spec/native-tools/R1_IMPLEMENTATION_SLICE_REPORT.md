@@ -91,7 +91,7 @@
 | 目标 | `R1AutomationHostEditor Win64 Development` |
 | 宿主 | `Build/r1-native/R1AutomationHost/R1AutomationHost.uproject`（disposable，插件以 junction 引用本 worktree） |
 | 结果 | **Succeeded**；仅有 “非首选编译器版本” 与既有 `IKRig` 插件依赖警告 |
-| DLL | `UnrealEditor-UEAgentKitEditor.dll`，`sha256:74dedb8f40023b3d7448dd0d32df8998882b37cabfd106596eca5637819db522` |
+| DLL | `UnrealEditor-UEAgentKitEditor.dll`，`sha256:15480cb8b2bf5edc1363e9d1ad208ead0241d94160f01e07e038b6f9d6fcfa05` |
 
 构建/运行严格串行（同机同一时间只有一个 UE 重型任务）；未使用 GUI、截图或 Computer Use。
 
@@ -107,7 +107,7 @@
 | `UEAgentKit.Native.R1ReadOnly` | **Success** | dirty 0→0、`/Game` packages 0→0、AssetRegistry assets 0→0、undo queue 0→0、undo count 0→0 |
 | `UEAgentKit.Native.R1ShadowTools` | **Success** | fingerprint/catalog 影子调用；未知 tool / 版本 2.0.0 / 未知参数 / maxItems 513 均稳定拒绝 |
 
-报告：`Build/r1-native/Evidence/AutomationReport-20261024-013748/index.json`（`succeeded=5, failed=0, notRun=0, totalDuration=3.83 s`）。原始日志：`Build/r1-native/Evidence/automation-r1-native-20261024-013748.log`。
+报告：`Build/r1-native/Evidence/AutomationReport-20261024-014308/index.json`（`succeeded=5, failed=0, notRun=0, totalDuration=3.76 s`）。原始日志：`Build/r1-native/Evidence/automation-r1-native-20261024-014308.log`。
 
 只读证据原文：
 
@@ -121,10 +121,10 @@ assetsBefore=0 assetsAfter=0 undoQueueBefore=0 undoQueueAfter=0 undoCountBefore=
 ## 5. Python 离线金值与对拍
 
 - 命令：`py -3.12 -m unittest discover -s tests/native_tools -p "test_*.py"` → **13/13 OK**。
-- 金值：200 条，`160 ue-catalog + 40 synthetic-parity`；sha256 `97942712580b08a109cda2d716de46d4fa29a237bf3a64bb8e308e5e649f4269`。
+- 金值：200 条，`160 ue-catalog + 40 synthetic-parity`；仓库 blob（LF）sha256 `97942712580b08a109cda2d716de46d4fa29a237bf3a64bb8e308e5e649f4269`（工作区按 `.gitattributes` 为 CRLF，故文件系统哈希不同，JSON 语义一致）。
 - 对 512 条 **UE 实际导出** descriptor 执行 `validate_node_descriptor` + `jsonschema`（仓库 `node-descriptor.schema.json`）全部通过；`actionId`/`descriptorDigest` 独立重算全部相等。
 - 导出分布：`callFunction 345 / cast 95 / variableSet 35 / variableGet 29 / delegate 5 / event 3`；11 个节点类、2411 个 pin。
-- 跨进程稳定性（T4 部分证据）：4 次独立 `UnrealEditor-Cmd` 进程（013023 / 013317 / 013456 / 013748）得到**完全相同**的 `actionDatabaseFingerprint = sha256:b09fb1387e188e02`；且金值来自 013553 进程、在 013748 进程验证通过（actionId/digest 不含时间，跨进程一致）。
+- 跨进程稳定性（T4 部分证据）：5 次独立 `UnrealEditor-Cmd` 进程（013023 / 013317 / 013456 / 013748 / 014308）得到**完全相同**的 `actionDatabaseFingerprint = sha256:b09fb1387e188e02`；且金值来自 013553 进程、在 014308 进程验证通过（actionId/digest 不含时间，跨进程一致）。
 - 金值负例：`title` 混入 `discoveryKey` 被 Python 校验器与 JSON Schema 同时拒绝；额外顶层字段被 `additionalProperties:false` 拒绝；未知 `actionKind` 被拒绝。
 
 ## 6. 证据清单（本地 ignored）
@@ -132,12 +132,12 @@ assetsBefore=0 assetsAfter=0 undoQueueBefore=0 undoQueueAfter=0 undoCountBefore=
 | 证据 | 路径 / 值 |
 |---|---|
 | 构建日志 | `Build/r1-native/Evidence/build-r1-native*.log`（最终 Succeeded） |
-| 自动化日志 | `Build/r1-native/Evidence/automation-r1-native-20261024-013748.log` |
-| 自动化报告 | `Build/r1-native/Evidence/AutomationReport-20261024-013748/index.json` |
-| catalog 导出 | `Build/r1-native/Evidence/catalog-export.json`（sha256 `6d6d81aa1c880cf9213391e643b601029c0f612a5699c58c498b4c2eb35c1eba`） |
+| 自动化日志 | `Build/r1-native/Evidence/automation-r1-native-20261024-014308.log` |
+| 自动化报告 | `Build/r1-native/Evidence/AutomationReport-20261024-014308/index.json` |
+| catalog 导出 | `Build/r1-native/Evidence/catalog-export.json`（sha256 `b4de27923e8d7dbf51bff787ddbbba2e8369ed944fdd1cb780d50a66ea208d45`） |
 | 机器可读汇总 | `Build/r1-native/Evidence/evidence-summary.json` |
-| 环境 | `Build/r1-native/Evidence/environment-20261024-013748.json` |
-| 插件 DLL 哈希 | `sha256:74dedb8f40023b3d7448dd0d32df8998882b37cabfd106596eca5637819db522` |
+| 环境 | `Build/r1-native/Evidence/environment-20261024-014308.json` |
+| 插件 DLL 哈希 | `sha256:15480cb8b2bf5edc1363e9d1ad208ead0241d94160f01e07e038b6f9d6fcfa05` |
 | `actionDatabaseFingerprint` | `sha256:b09fb1387e188e02` |
 | `pluginSetHash` | `sha256:1d034d339ee271ad` |
 | 清单哈希 | 由加载器计算并记录在 shadow ready 日志（`hash=sha256:b3234bffa219ad21`，随清单内容） |
@@ -149,7 +149,7 @@ assetsBefore=0 assetsAfter=0 undoQueueBefore=0 undoQueueAfter=0 undoCountBefore=
 | T1 目录 | **PASS（子集）** | 非空、两次调用指纹一致、unsupported ≤64 且直方图自洽、complete 互补、pluginSetHash 存在 |
 | T2 descriptor/schema | **PASS** | 200 金值逐字节对拍；200 条目录形状；512 条导出离线 schema 校验；负例 |
 | T3 上下文过滤 | 未实现 | R1.3 |
-| T4 跨进程身份 | **部分 PASS** | 4 进程 fingerprint 相同 + 金值跨进程复验；无专门双进程 harness |
+| T4 跨进程身份 | **部分 PASS** | 5 进程 fingerprint 相同 + 金值跨进程复验；无专门双进程 harness |
 | T5 只读 | **PASS（宿主无资产）** | 无事务/Undo/AssetRegistry 变化；dirty 断言平凡成立，需有资产宿主补测 |
 | T6 分页/边界 | 部分 | 只有 `maxItems + truncated + totalAvailable`；无 cursor |
 | T7 菜单绑定 | 未实现 | 未接 ToolMenus |
