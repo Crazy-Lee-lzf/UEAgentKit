@@ -2,6 +2,7 @@ param(
     [string]$EngineRoot = "E:\EPICGAME\UE_5.6",
     [switch]$SkipBuild,
     [string]$Filter = "UEAgentKit.Native.R1",
+    [string]$Label = "",
     [int]$TimeoutSeconds = 900
 )
 
@@ -69,6 +70,14 @@ if (Test-Path -LiteralPath $ExportPath -PathType Leaf) {
     Write-Warning "No catalog export was produced at $ExportPath"
 }
 
+$ContextExportPath = Join-Path $HostDir "Saved\UEAgentKit\R1Native\context-export.json"
+if (Test-Path -LiteralPath $ContextExportPath -PathType Leaf) {
+    Copy-Item -LiteralPath $ContextExportPath -Destination (Join-Path $EvidenceDir "context-export.json") -Force
+    Write-Host "Captured context export: $(Join-Path $EvidenceDir 'context-export.json')"
+} else {
+    Write-Warning "No context export was produced at $ContextExportPath"
+}
+
 $PluginDll = Join-Path $HostDir "Plugins\UEAgentKit\Binaries\Win64\UnrealEditor-UEAgentKitEditor.dll"
 $DllHash = ""
 if (Test-Path -LiteralPath $PluginDll -PathType Leaf) {
@@ -88,6 +97,26 @@ $Environment = [ordered]@{
     pluginBuildHash = if ($DllHash) { "sha256:$DllHash" } else { "" }
 }
 $Environment | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $EvidenceDir "environment-$Stamp.json") -Encoding utf8NoBOM
+
+if (-not [string]::IsNullOrWhiteSpace($Label)) {
+    $LabelDir = Join-Path $EvidenceDir (Join-Path "t4" $Label)
+    New-Item -ItemType Directory -Force -Path $LabelDir | Out-Null
+    foreach ($File in @(
+        (Join-Path $EvidenceDir "catalog-export.json"),
+        (Join-Path $EvidenceDir "context-export.json"),
+        (Join-Path $EvidenceDir "environment-$Stamp.json"),
+        $LogPath
+    )) {
+        if (Test-Path -LiteralPath $File -PathType Leaf) {
+            Copy-Item -LiteralPath $File -Destination $LabelDir -Force
+        }
+    }
+    $IndexPath = Join-Path $ReportDir "index.json"
+    if (Test-Path -LiteralPath $IndexPath -PathType Leaf) {
+        Copy-Item -LiteralPath $IndexPath -Destination (Join-Path $LabelDir "automation-index.json") -Force
+    }
+    Write-Host "Captured labeled evidence: $LabelDir"
+}
 
 if ($ExitCode -ne 0) {
     throw "Automation run failed with exit code $ExitCode (see $LogPath)"
