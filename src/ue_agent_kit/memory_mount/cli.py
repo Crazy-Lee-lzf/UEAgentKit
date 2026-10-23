@@ -48,15 +48,23 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    verify = subparsers.add_parser("verify", help="Verify manifest, hash, and records.")
+    verify = subparsers.add_parser("verify", help="Verify manifest, hash, records, receipt.")
     verify.add_argument("pack")
     verify.add_argument("--pretty", action="store_true")
 
     query = subparsers.add_parser("query", help="Mount one pack and run one query.")
     query.add_argument("pack")
     query.add_argument("--query", required=True)
-    query.add_argument("--principal", default="local-user")
-    query.add_argument("--project-key", default="")
+    query.add_argument(
+        "--principal",
+        default="local-user",
+        help="UNTRUSTED demo label; NOT authentication.",
+    )
+    query.add_argument(
+        "--project-key",
+        default="",
+        help="UNTRUSTED demo project label; NOT an authenticated claim.",
+    )
     query.add_argument("--cache-dir", default="")
     query.add_argument("--record-type", action="append", default=[])
     query.add_argument("--scope-type", default="")
@@ -76,7 +84,9 @@ def _verify(args: argparse.Namespace) -> int:
     payload = {
         "ok": True,
         "verified": True,
+        "identity": {"trustMode": "offline-verifier", "verified": False},
         "pack": content.manifest.to_payload(),
+        "integrity": content.integrity.to_payload(),
         "recordCount": content.record_count,
         "countsByType": dict(sorted(counts.items())),
     }
@@ -93,10 +103,15 @@ def _query(args: argparse.Namespace) -> int:
         cache_dir = Path(cache_context.name)
     registry: MemoryMountRegistry | None = None
     try:
-        registry = MemoryMountRegistry(
+        registry = MemoryMountRegistry.for_demo(
             principal=args.principal,
             project_key=args.project_key,
             cache_dir=cache_dir,
+        )
+        print(
+            "warning: r7-untrusted-demo-identity "
+            "(--principal/--project-key are not authentication)",
+            file=sys.stderr,
         )
         mount_info = registry.mount(args.pack)
         result = registry.query(
@@ -111,6 +126,11 @@ def _query(args: argparse.Namespace) -> int:
         )
         payload = {
             "ok": True,
+            "identity": {
+                "trustMode": "untrusted-demo",
+                "verified": False,
+                "warning": "r7-untrusted-demo-identity",
+            },
             "mount": mount_info.to_payload(),
             "result": result.to_payload(),
         }

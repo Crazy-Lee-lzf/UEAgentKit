@@ -27,6 +27,16 @@ class ErrorCode(StrEnum):
     MOUNT_LIMIT = "r7-mount-limit"
     PERMISSION_DENIED = "r7-permission-denied"
     PROJECT_MISMATCH = "r7-project-mismatch"
+    IDENTITY_REQUIRED = "r7-identity-required"
+    IDENTITY_INVALID = "r7-identity-claims-invalid"
+    IDENTITY_SIGNATURE_INVALID = "r7-identity-signature-invalid"
+    IDENTITY_EXPIRED = "r7-identity-expired"
+    IDENTITY_ISSUER_MISMATCH = "r7-identity-issuer-mismatch"
+    IDENTITY_AUDIENCE_MISMATCH = "r7-identity-audience-mismatch"
+    IDENTITY_PROJECT_MISMATCH = "r7-identity-project-mismatch"
+    INTEGRITY_RECEIPT_INVALID = "r7-integrity-receipt-invalid"
+    INTEGRITY_RECEIPT_MISMATCH = "r7-integrity-receipt-mismatch"
+    INTEGRITY_RECEIPT_REQUIRED = "r7-integrity-receipt-required"
     QUERY_INVALID = "r7-query-invalid"
     QUERY_TOO_BROAD = "r7-query-too-broad"
     QUERY_TIMEOUT = "r7-query-timeout"
@@ -54,6 +64,16 @@ EXIT_CODES: dict[ErrorCode, int] = {
     ErrorCode.MOUNT_LIMIT: 6,
     ErrorCode.PERMISSION_DENIED: 4,
     ErrorCode.PROJECT_MISMATCH: 4,
+    ErrorCode.IDENTITY_REQUIRED: 4,
+    ErrorCode.IDENTITY_INVALID: 4,
+    ErrorCode.IDENTITY_SIGNATURE_INVALID: 4,
+    ErrorCode.IDENTITY_EXPIRED: 4,
+    ErrorCode.IDENTITY_ISSUER_MISMATCH: 4,
+    ErrorCode.IDENTITY_AUDIENCE_MISMATCH: 4,
+    ErrorCode.IDENTITY_PROJECT_MISMATCH: 4,
+    ErrorCode.INTEGRITY_RECEIPT_INVALID: 7,
+    ErrorCode.INTEGRITY_RECEIPT_MISMATCH: 7,
+    ErrorCode.INTEGRITY_RECEIPT_REQUIRED: 6,
     ErrorCode.QUERY_INVALID: 2,
     ErrorCode.QUERY_TOO_BROAD: 6,
     ErrorCode.QUERY_TIMEOUT: 6,

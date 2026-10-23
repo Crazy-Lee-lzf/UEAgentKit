@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ueagentkit.local/schemas/r7-pack-integrity-v1.schema.json",
+  "title": "R7 Pack Integrity Receipt v1",
+  "description": "Optional v1-compatible sidecar (pack.integrity.json). Digest-only; it does not establish a trusted author.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "receiptVersion",
+    "packId",
+    "contentHash",
+    "revision",
+    "priority",
+    "recordCount",
+    "manifestDigest",
+    "scopeDigest",
+    "provenanceDigest"
+  ],
+  "properties": {
+    "receiptVersion": {
+      "const": 1
+    },
+    "packId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{2,63}$"
+    },
+    "contentHash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "revision": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+    },
+    "priority": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "recordCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 5000
+    },
+    "manifestDigest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "scopeDigest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "provenanceDigest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "createdAtUtc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "signature": {
+      "type": "null",
+      "description": "Reserved. Non-null signatures are unsupported in v1; no trusted-author claim."
+    }
+  }
+}

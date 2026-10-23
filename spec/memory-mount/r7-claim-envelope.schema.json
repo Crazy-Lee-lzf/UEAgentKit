@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ueagentkit.local/schemas/r7-claim-envelope-v1.schema.json",
+  "title": "R7 HMAC Test Claim Envelope v1",
+  "description": "Local, test-only claim envelope used to exercise the verified-caller injection boundary. This is not a DSH or production token format.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["payload", "signature"],
+  "properties": {
+    "signature": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "audience",
+        "claimId",
+        "exp",
+        "iat",
+        "issuer",
+        "principal",
+        "projectKey",
+        "sessionId"
+      ],
+      "properties": {
+        "audience": {"type": "string", "minLength": 1, "maxLength": 128},
+        "claimId": {"type": "string", "minLength": 1, "maxLength": 128},
+        "exp": {"type": "number"},
+        "iat": {"type": "number"},
+        "issuer": {"type": "string", "minLength": 1, "maxLength": 128},
+        "principal": {"type": "string", "minLength": 1, "maxLength": 128},
+        "projectKey": {"type": "string", "minLength": 1, "maxLength": 128},
+        "sessionId": {"type": "string", "minLength": 1, "maxLength": 128}
+      }
+    }
+  }
+}

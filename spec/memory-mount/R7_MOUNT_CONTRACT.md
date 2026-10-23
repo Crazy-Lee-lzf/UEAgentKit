@@ -75,6 +75,25 @@ Rules:
 - A pack is immutable. The reader opens source files read-only and never writes to the pack.
 - `pack.json` size MUST be ≤ 256 KiB; `records.jsonl` size MUST be ≤ 16 MiB.
 
+### 2.1 Optional integrity receipt (v1-compatible)
+
+A v1 pack MAY include `pack.integrity.json`, a sidecar that covers manifest fields
+`contentHash` does not protect. Unknown files were already ignored by v1, so the sidecar is a
+compatible extension; a pack without it remains a valid legacy v1 pack.
+
+The receipt contains `receiptVersion=1`, `packId`, `contentHash`, `revision`, `priority`,
+`recordCount`, `manifestDigest`, `scopeDigest`, and `provenanceDigest` (all SHA-256 over
+canonical JSON). A present receipt MUST match every listed invariant; mismatch fails
+`r7-integrity-receipt-mismatch`. A non-null `signature` fails
+`r7-signature-unsupported`: R7 v1 does not claim a trusted author.
+
+- No receipt: mount MAY proceed, but the result MUST report
+  `integrityMode=records-only-unverified-manifest` and warn
+  `r7-manifest-integrity-unverified`.
+- Matching digest receipt: `integrityMode=manifest-digest-verified`; this detects
+  accidental/local manifest tamper, not a malicious replacement of both manifest and receipt.
+- `authorAuthenticity` remains `not-established` in both cases.
+
 ## 3. Manifest
 
 ### 3.1 Required fields
@@ -357,6 +376,8 @@ shared between processes, or exposed to another principal.
 - Authorization is checked at mount time, and the mount is re-checked against the current
   registry binding before every query (belt-and-suspenders against future refactors).
 - An empty principal is invalid at registry construction.
+- Production entry points MUST use a verified caller context injected by the host. Raw CLI
+  strings are an explicit `untrusted-demo` context; the read-only adapter rejects it.
 - A pack cannot elevate visibility by `record.scopes`, `priority`, or provenance.
 - No session whitelist, ACL file, or global config is read or modified.
 
@@ -508,6 +529,16 @@ All errors are structured:
 | `r7-manifest-unsupported-schema` | 2 | `schemaVersion` not `1`. |
 | `r7-manifest-incompatible` | 2 | Reader compatibility or required feature failure. |
 | `r7-signature-unsupported` | 2 | Non-null signature in v1. |
+| `r7-identity-required` | 4 | Production entry point received an unverified/demo caller. |
+| `r7-identity-claims-invalid` | 4 | Claim envelope/payload shape or time fields invalid. |
+| `r7-identity-signature-invalid` | 4 | Claim HMAC/signature check failed. |
+| `r7-identity-expired` | 4 | Verified claims expired. |
+| `r7-identity-issuer-mismatch` | 4 | Claim issuer is not trusted. |
+| `r7-identity-audience-mismatch` | 4 | Claim audience is not accepted. |
+| `r7-identity-project-mismatch` | 4 | Claim project does not match the request. |
+| `r7-integrity-receipt-required` | 6 | Adapter policy requires a manifest receipt. |
+| `r7-integrity-receipt-invalid` | 7 | Receipt shape/type/encoding invalid. |
+| `r7-integrity-receipt-mismatch` | 7 | Receipt invariant does not match the manifest. |
 | `r7-pack-path-invalid` | 2 | Non-directory, traversal, or symlink path. |
 | `r7-pack-not-found` | 3 | Pack files absent/unreadable. |
 | `r7-pack-not-mounted` | 3 | Unmount/query references an unknown mount. |

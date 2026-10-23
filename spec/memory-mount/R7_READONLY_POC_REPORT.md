@@ -7,6 +7,9 @@
 - 基线：`main` `c5ce3419c6962da49e874586f4e5dbd1457a4d0d`（开工时工作树 clean）
 - 结论：**R7 第一段只读合同与隔离 PoC 完成**。49/49 新增测试通过，90/90 既有 Memory 回归通过；
   未接入生产服务、未写真实 Memory、未改 schema v6、未 push。R7 写入/隐私边界仍待用户决定。
+- 2026-10-24 追加：只读 integration readiness / trust hardening（身份注入、manifest receipt、
+  adapter、负例）见 [R7_READONLY_INTEGRATION_READINESS.md](R7_READONLY_INTEGRATION_READINESS.md)；
+  追加 27 tests，合计 76 个 R7 测试 + 90 回归。
 
 > 本报告不声称生产可用。PoC 仅用于验证合同、权限、只读索引和中文检索边界；
 > 自动维护、联网同步、跨人共享写入、生产 Memory 写入均未实现。
@@ -57,6 +60,12 @@
 | 文件 | Bytes | SHA-256 |
 | --- | ---: | --- |
 | `tests/python/test_memory_mount.py` | 34,198 | `4F880B2E012E276D4C919D63348856A284409FF58FB0F8B12B55FBDB892419F8` |
+
+> 注：以上为 2026-10-23 第一段提交时的哈希。2026-10-24 readiness 修改了
+> `service.py`、`records.py`、`cli.py`、`errors.py`、`__init__.py`、合同和
+> `test_memory_mount.py`，最新文件
+> 清单与新增文件见 [R7_READONLY_INTEGRATION_READINESS.md](R7_READONLY_INTEGRATION_READINESS.md)
+> §9；以 Git commit 内容为准。
 
 隔离证据（`Build/` 被 `.gitignore` 忽略，不进入提交）：
 
@@ -271,8 +280,10 @@ py -3.12 -m ue_agent_kit.memory_mount query Build\r7-isolated\Evidence\demo-pack
   --cache-dir Build\r7-isolated\Evidence\cli-cache
 ```
 
-实测退出码均为 0；`verify-project.json` 报 `verified=true`、`recordCount=2`；
-`query-shared.json` 命中 1 条中文记录，`retrievalMode=fts5-trigram`，无 stderr。
+实测退出码均为 0；`verify-project.json` 报 `verified=true`、`recordCount=2`，并包含
+`integrity.receiptVerified=true`；`query-shared.json` 命中 1 条中文记录，
+`retrievalMode=fts5-trigram`。stderr 现在**显式**包含
+`warning: r7-untrusted-demo-identity`，说明 CLI 的 `--principal` 不是鉴权。
 
 ### 6.3 生产 Memory 库证据
 
@@ -366,6 +377,31 @@ py -3.12 -m ue_agent_kit.memory_mount query Build\r7-isolated\Evidence\demo-pack
 
 测试日志：`Build/r7-isolated/Evidence/unittest-memory-mount.log`、
 `Build/r7-isolated/Evidence/unittest-memory-regression.log`。
+
+## 11. 2026-10-24 readiness follow-up
+
+本轮只做独立、只读、可测试的准备，**没有**接入 `mcp_server.py` / `memory_service.py`，
+也没有连接 DSH token 或修改 whitelist：
+
+- 新增 `claims.py`：`VerifiedCallerContext` 只能由 `ClaimVerifier` 注入；
+  `DemoCallerContext` 显式 `untrusted-demo`；`HmacClaimVerifier` / `TestClaimIssuer`
+  是本地 test-only 注入示例，不是生产身份。
+- 新增 `integrity.py`：可选 `pack.integrity.json` sidecar，覆盖 manifest canonical digest /
+  scope / provenance / revision / priority / recordCount；无 receipt 明确标为 legacy
+  unverified；有 receipt 仅算 digest-verified，不声称可信作者；非空 signature 仍拒绝。
+- 新增 `adapter.py`：`ReadOnlyMountAdapter` 只接受 `VerifiedCallerContext`，包名按不可信输入
+  做根目录 confinement，并可要求 receipt。
+- 新增 27 条 readiness tests：identity 负例、receipt 篡改、adapter 权限/路径/cache 污染/
+  短中文/多 pack 冲突。实测 **27/27 PASS**；原有 49/49 仍 PASS；合计 **76/76**。
+- 90 条既有 Memory 回归仍 **90/90 PASS**；本轮真实测试总计 **166 项通过**
+  （76 + 90），无 skip。
+- 隔离 microbench（5000 records）：`loadVerifyMs≈181`、`mountFirstMs≈349`、
+  `mountReuseMs≈246`、trigram median≈8.4ms、短查询 fallback median≈6.1ms。
+  仅记录观测值，不设通过阈值。
+- 本轮 code+docs commit：`__R7_READINESS_COMMIT__`（最终交付消息同时给出后续 docs commit）。
+
+详细威胁模型、接口和待人工裁决项见
+[R7_READONLY_INTEGRATION_READINESS.md](R7_READONLY_INTEGRATION_READINESS.md)。
 
 ## 附：测试类计数核对
 

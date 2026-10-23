@@ -158,7 +158,7 @@ class MemoryMountTestBase(unittest.TestCase):
         limits: MountLimits = MountLimits(),
         clock: Any = None,
     ) -> MemoryMountRegistry:
-        registry = MemoryMountRegistry(
+        registry = MemoryMountRegistry.for_demo(
             principal=principal,
             project_key=project_key,
             cache_dir=self.root / "cache",
@@ -432,7 +432,7 @@ class MountPermissionTests(MemoryMountTestBase):
     def test_empty_principal_rejected(self) -> None:
         self.assert_error(
             ErrorCode.PERMISSION_DENIED,
-            lambda: MemoryMountRegistry(
+            lambda: MemoryMountRegistry.for_demo(
                 principal=" ",
                 project_key="UEAgentKit",
                 cache_dir=self.root / "cache",
@@ -480,7 +480,7 @@ class MountPermissionTests(MemoryMountTestBase):
 
     def test_cache_directory_inside_pack_is_rejected(self) -> None:
         pack = write_pack(self.root / "pack", [make_record()])
-        registry = MemoryMountRegistry(
+        registry = MemoryMountRegistry.for_demo(
             principal="alice",
             project_key="UEAgentKit",
             cache_dir=pack / "cache",

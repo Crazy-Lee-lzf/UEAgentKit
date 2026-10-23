@@ -9,6 +9,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from .claims import DemoCallerContext, VerifiedCallerContext
 from .errors import ErrorCode, MemoryMountError
 from .index import INDEX_FORMAT_VERSION, IndexHit, PackIndex
 from .jsonutil import canonical_json_bytes
@@ -60,6 +61,7 @@ class MountInfo:
     index_format_version: int
     index_reused: bool
     already_mounted: bool
+    integrity: dict[str, Any]
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -72,6 +74,7 @@ class MountInfo:
             "indexFormatVersion": self.index_format_version,
             "indexReused": self.index_reused,
             "alreadyMounted": self.already_mounted,
+            "integrity": dict(self.integrity),
         }
 
 
@@ -115,29 +118,111 @@ class _Candidate:
 
 
 class MemoryMountRegistry:
-    """One principal/project session. Mount state is never persisted."""
+    """One caller/project session. Mount state is never persisted.
+
+    The registry accepts only a ``VerifiedCallerContext`` or an explicit
+    ``DemoCallerContext``. Raw CLI strings never become a verified identity.
+    """
 
     def __init__(
         self,
         *,
-        principal: str,
-        project_key: str,
+        caller: VerifiedCallerContext | DemoCallerContext,
         cache_dir: str | Path,
         limits: MountLimits = MountLimits(),
         clock: Callable[[], float] | None = None,
+        identity_clock: Callable[[], float] | None = None,
     ) -> None:
-        if not isinstance(principal, str) or not principal.strip():
-            _fail(ErrorCode.PERMISSION_DENIED, "A non-empty session principal is required.")
-        if not isinstance(project_key, str):
-            _fail(ErrorCode.QUERY_INVALID, "project_key must be a string.")
-        self.principal = principal.strip()
-        self.project_key = project_key.strip()
+        if isinstance(caller, VerifiedCallerContext):
+            self._caller = caller
+            self._identity_clock = identity_clock or time.time
+            caller.assert_valid(now=self._identity_clock())
+            self.principal = caller.principal
+            self.project_key = caller.project_key
+            self.trust_mode = "verified-claims"
+        elif isinstance(caller, DemoCallerContext):
+            if not isinstance(caller.principal, str) or not caller.principal.strip():
+                _fail(ErrorCode.PERMISSION_DENIED, "A non-empty demo principal is required.")
+            if not isinstance(caller.project_key, str):
+                _fail(ErrorCode.QUERY_INVALID, "project_key must be a string.")
+            self._caller = caller
+            self._identity_clock = identity_clock or time.time
+            self.principal = caller.principal.strip()
+            self.project_key = caller.project_key.strip()
+            self.trust_mode = "untrusted-demo"
+        else:
+            raise TypeError(
+                "caller must be VerifiedCallerContext or DemoCallerContext; "
+                "raw principal strings are not accepted."
+            )
         self.cache_dir = Path(cache_dir).expanduser().resolve()
         self.limits = limits.validated()
         self._clock = clock or time.monotonic
         self._mounts: dict[str, _MountedPack] = {}
 
+    @property
+    def is_verified(self) -> bool:
+        return isinstance(self._caller, VerifiedCallerContext)
+
+    @classmethod
+    def for_demo(
+        cls,
+        *,
+        principal: str,
+        project_key: str,
+        cache_dir: str | Path,
+        session_id: str = "demo-session",
+        limits: MountLimits = MountLimits(),
+        clock: Callable[[], float] | None = None,
+        identity_clock: Callable[[], float] | None = None,
+    ) -> MemoryMountRegistry:
+        """Explicit untrusted demo constructor; never use for production auth."""
+
+        if not isinstance(principal, str) or not principal.strip():
+            _fail(ErrorCode.PERMISSION_DENIED, "A non-empty demo principal is required.")
+        if not isinstance(project_key, str):
+            _fail(ErrorCode.QUERY_INVALID, "project_key must be a string.")
+        return cls(
+            caller=DemoCallerContext(
+                principal=principal.strip(),
+                project_key=project_key.strip(),
+                session_id=session_id,
+            ),
+            cache_dir=cache_dir,
+            limits=limits,
+            clock=clock,
+            identity_clock=identity_clock,
+        )
+
+    @classmethod
+    def from_verified(
+        cls,
+        *,
+        caller: VerifiedCallerContext,
+        cache_dir: str | Path,
+        limits: MountLimits = MountLimits(),
+        clock: Callable[[], float] | None = None,
+        identity_clock: Callable[[], float] | None = None,
+    ) -> MemoryMountRegistry:
+        if not isinstance(caller, VerifiedCallerContext):
+            _fail(
+                ErrorCode.IDENTITY_REQUIRED,
+                "A VerifiedCallerContext is required for this entry point.",
+            )
+        return cls(
+            caller=caller,
+            cache_dir=cache_dir,
+            limits=limits,
+            clock=clock,
+            identity_clock=identity_clock,
+        )
+
+    def _assert_caller(self) -> None:
+        if isinstance(self._caller, VerifiedCallerContext):
+            self._caller.assert_valid(now=self._identity_clock())
+
     def mount(self, pack_path: str | Path) -> MountInfo:
+        self._assert_caller()
         content = load_pack(pack_path, limits=self.limits, authorize=self._authorize)
         manifest = content.manifest
         if self.cache_dir == content.root or self.cache_dir.is_relative_to(content.root):
@@ -191,6 +276,7 @@ class MemoryMountRegistry:
             index_format_version=INDEX_FORMAT_VERSION,
             index_reused=index.reused,
             already_mounted=False,
+            integrity=content.integrity.to_payload(),
         )
         self._mounts[manifest.pack_id] = _MountedPack(
             content=content,
@@ -235,6 +321,7 @@ class MemoryMountRegistry:
         body_preview_chars: int | None = None,
         timeout_ms: int | None = None,
     ) -> QueryResult:
+        self._assert_caller()
         normalized_query = self._normalize_query(query)
         normalized_types = self._normalize_record_types(record_types)
         normalized_scope_type, normalized_scope_key = self._normalize_scope(

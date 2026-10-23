@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .errors import ErrorCode, MemoryMountError
+from .integrity import IntegrityReport, verify_integrity_receipt
 from .jsonutil import canonical_json_bytes, parse_utc, strict_json_loads
 from .limits import MountLimits
 from .manifest import PackManifest
@@ -392,6 +393,7 @@ class PackContent:
     manifest: PackManifest
     records: tuple[PackRecord, ...]
     records_bytes: bytes
+    integrity: IntegrityReport
 
     @property
     def record_count(self) -> int:
@@ -433,6 +435,12 @@ def load_pack(
     manifest = PackManifest.from_dict(manifest_data, limits=limits)
     if authorize is not None:
         authorize(manifest)
+    integrity = verify_integrity_receipt(
+        root,
+        manifest_payload=manifest_data,
+        manifest=manifest,
+        limits=limits,
+    )
 
     records_raw = _read_limited(
         records_path,
@@ -521,4 +529,5 @@ def load_pack(
         manifest=manifest,
         records=tuple(records),
         records_bytes=records_raw,
+        integrity=integrity,
     )
