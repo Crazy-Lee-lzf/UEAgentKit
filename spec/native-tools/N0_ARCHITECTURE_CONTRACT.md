@@ -1,7 +1,8 @@
 # N0 — Native Tool Architecture Contract (freeze candidate)
 
-- 状态：**CANDIDATE — 未实现、未编码、未在 UE 中运行**。本文只冻结“合同”，不是 R1/R2 实现授权，也不开放通用 Apply。
-- 日期：2026-10-23
+- 状态：**CANDIDATE v2（review round 2 修订）— 未实现、未编码、未在 UE 中运行**。本文只冻结“合同”，不是 R1/R2 实现授权，也不开放通用 Apply。
+- 修订：2026-10-24。Q1 的“Editor 菜单仅导出 Context”方案已被否决并替换为 **broker 保留实时 Preview**，详见 `N0_REVIEW_DECISIONS_AND_PREVIEW_MIGRATION.md`（本轮新增，含协议/时序/迁移 gates）。
+- 日期：2026-10-23（初版）/ 2026-10-24（v2）
 - 工作树：`E:\WorkSpace\UEAgentKit-WT\native-tools-r1`，分支 `feature/native-tools-contract-r1`
 - 基线：已发布 `main` `c5ce3419c6962da49e874586f4e5dbd1457a4d0d`（P12）。P0–P12 已完成，本轮不重跑、不改其运行代码。
 - 上游依据：`handoffs/UEAGENTKIT_NEXT_CHAT_HANDOFF_20261023.md`、`handoffs/UEAGENTKIT_NATIVE_PARALLEL_REVIEW_20261023.md`、`goals/UEAGENTKIT_MAIN.md`（2026-10-23 节）、`spec/graph-contracts/D01_D13_USER_DECISIONS.md`。
@@ -18,6 +19,13 @@
 5. 错误码、审计、兼容性与弃用规则。
 6. Python worker / CLI 的保留与退场边界及其可度量退出条件。
 7. UE Public API 可行性（含本机 5.6.1 头文件核验等级）与风险。
+
+**v2 修订要点（review round 2）**：
+
+- Q1 替换：Editor 菜单 Preview **不降级**，通过进程外 broker 保留实时 LayoutPlan（新增 N0-D16）。
+- N0-D01 改为 **opt-in / 非致命**：registry 缺失或损坏时，legacy P12 功能必须照常工作；不允许“为了新架构让旧功能起不来”。
+- 新增 Preview broker 的错误码、异步不变量、feature flag、cutover/rollback 与退役 gates。
+- Q2–Q8 给出草拟批准建议；新增 Q9–Q12 待裁决。
 
 不回答（明确排除）：
 
@@ -54,6 +62,8 @@
 8. **契约资产已存在**（候选，未在 C++ 实现）：`ueak.node-descriptor/1.0`、`ueak.operation/1.0`、`ueak.graphpatch/1.0`、`ueak.typedgraph`、canonical 域分离哈希（`graph_contracts/canonical.py:24-38`）、`schemas/*.schema.json`、error-codes 表。
 9. **UI 事实**：`UToolMenus::ExtendMenu("GraphEditor.GraphContextMenu.Common")` + `AddDynamicSection` 已在 P11 实机通过（P11 报告与 `P11Menu.cpp:132-195`）；`UGraphNodeContextMenuContext` 是引擎公开类（`Runtime/Engine/Classes/EdGraph/EdGraphNode.h:214`）。
 10. **外部进程调用并非都该删除**：`EditorBridgeAutomationHandlers.cpp:160` 启动 `UnrealEditor-Cmd.exe` 跑隔离 Automation，属进程编排，不是架构缺陷。
+11. **Bridge 是严格单向的**：插件只 `CreateSocket/Bind/Listen/Accept`（`EditorBridge.cpp:463,476,587`），处理一行请求后即关闭连接（`:689`）；Python 侧只 `socket.create_connection`（`editor_bridge.py:672-677`），全 `src` 无 `listen/bind/accept`。**插件没有反向请求或本地服务发现能力**；因此任何“Editor 主动向 MCP 要结果”的假设都不成立。
+12. **P11 菜单的 Preview 是同步契约**：action 内部同步执行 Python 并同步读回 `preview.json`（`P11Menu.cpp:302-366`）；P11 自动化在 `TryExecuteToolUIAction` 返回后立即断言 receipt（`BlueprintGraphLayoutP11Test.cpp:818-848`）。异步化会改变该测试形态，必须显式迁移而不是静默弱化。
 
 ### 2.2 缺陷清单（N0 要消除的结构性问题）
 
@@ -69,14 +79,24 @@
 | N0-F08 | revision/fingerprint 只在 layout 路径使用，非通用门禁 | R2 结构写入会各自实现 | D-07 |
 | N0-F09 | 错误码按功能前缀散落（`live-editor-*`、`graph-layout-*`），无类别/可重试/终态语义 | 客户端无法统一处理 | D-10 |
 | N0-F10 | 接口无版本协商，`toolVersion` 概念不存在 | 无法做兼容演进 | D-02, D-13 |
+| N0-F11 | 唯一的 Editor 菜单 Preview 依赖编辑器内 Python，且**无进程外等价通道** | 一旦退役 Python，菜单 Preview 就会消失（Q1 原方案的错误就在于此） | D-12, D-16 |
+| N0-F12 | 新架构的 registry 若做成“必需依赖”，清单缺失会拖垮已发布的 legacy 功能 | 升级即回归，违反零降级 | D-01 |
 
-## 3. 决定（N0-D01 … N0-D15）
+## 3. 决定（N0-D01 … N0-D16）
 
 > 每条决定的“后果”是实施时必须遵守的约束，不是建议。
 
-**N0-D01 单一来源：一份运行时加载的 registry 清单。**
-权威来源是随插件发布的 `Plugin/UEAgentKit/Resources/NativeTools/native-tools.v1.json`（`ueak.native-registry/1.0`；该目录当前不存在，由 N1 创建，N0 只冻结路径与加载规则）。C++ 在模块启动时加载并**校验**：清单 schema、每个 `name` 必须有已注册 handler、每个 handler 必须出现在清单、DTO schemaId 必须存在、`version` 为 semver。任何一项失败 → registry 不可用（`native-registry-invalid-manifest`），所有 native 工具 fail-closed。
-后果：安全关键常量（test-only 工程路径/SHA、build marker 规则、确认短语模板）**不进清单**，编译进 DLL（见 D-06）；清单只引用 `gateProfile` 名字。
+**N0-D01 单一来源：一份运行时加载的 registry 清单（opt-in、非致命）。**
+权威来源是随插件发布的 `Plugin/UEAgentKit/Resources/NativeTools/native-tools.v1.json`（`ueak.native-registry/1.0`；该目录当前不存在，由 N1 创建，N0 只冻结路径与加载规则）。C++ 在模块启动时按 `[UEAgentKit] NativeToolRegistry=off|shadow|active` 决定行为：
+
+| 模式 | 清单缺失/损坏 | 清单有效 | 用途 |
+|---|---|---|---|
+| `off`（默认） | 正常启动，legacy 全可用，不注册任何 native 工具 | 仍不注册（只记日志） | P12 兼容基线 |
+| `shadow` | 正常启动，legacy 全可用 | 加载并校验，工具仅内部可调、不进菜单、不改变 legacy | 对拍/灰度 |
+| `active` | 正常启动，legacy 全可用；native 工具返回 `native-registry-unavailable` | 注册并暴露 native 工具 | 迁移完成态 |
+
+校验内容（`shadow`/`active` 才执行）：清单 schema、每个 `name` 必须有已注册 handler、每个 handler 必须出现在清单、DTO schemaId 必须存在、`version` 为 semver。任一失败只影响 native 工具，**不得**影响 Editor 启动、legacy bridge 方法、P7–P11 菜单与写路径。
+后果：①安全关键常量（test-only 工程路径/SHA、build marker 规则、确认短语模板）**不进清单**，编译进 DLL（见 D-06）；清单只引用 `gateProfile` 名字；②`RegistryMode` 只从配置/编译期读取，MCP 工具参数永远不能设置（见 §12）。
 
 **N0-D02 命名与版本。**
 `name`（即 toolId）= `^[a-z][a-z0-9]*(\.[a-z][a-zA-Z0-9]*){2,4}$`，如 `graph.layout.preflight`、`graph.nodeRegistry.filterContext`、`asset.inspect`。`version` 为 `MAJOR.MINOR.PATCH` 的**合同版本**，与插件版本无关。registry 级另有 `registryVersion`。
@@ -106,8 +126,8 @@
 一次写调用 = 最多一个 `FScopedTransaction`，命名 `UEAgentKit Native <toolId> <planId|requestId>`；事务内失败必须恢复快照、恢复 `bDirtyBefore`、`Cancel()`，不得留下 Dirty 或空事务。成功返回 `transactionId`（事务 GUID）。**Save 永远是独立工具**且需独立确认短语；Apply 工具禁止调用 Save/Compile。Undo/Discard 只能作用于精确 `transactionId + editorSessionId + assetPath`；**不提供通用 Redo 工具**（栈顶身份无法跨调用证明）；test-only 的 undo→verify→redo→verify 只允许作为单个探针工具的一次调用内部序列。
 
 **N0-D09 线程与阻塞。**
-所有 handler 在 game thread 执行（`check(IsInGameThread())`）；bridge 的 `FTSTicker` 与现有 `GEditor` 访问已在 game thread（`EditorBridge.cpp:565-576` 直接调用 `GEditor`）。默认 `blocking=false`；声明 `blocking=true` 的工具必须有 `limits.timeoutMs ≤ 2000`，且禁止 Slate 模态（`FMessageDialog` 只允许出现在非 registry 的 UI 呈现层，且 test-only 必须可抑制，参照 P11 `SetTestDialogSuppression`）。
-后果：N0 不允许新增 off-thread 执行模型；未来异步必须新增 `invokeAsync` 合同版本，不得偷偷在 handler 里起线程。
+所有 **registry handler** 在 game thread 执行（`check(IsInGameThread())`）；bridge 的 `FTSTicker` 与现有 `GEditor` 访问已在 game thread（`EditorBridge.cpp:565-576` 直接调用 `GEditor`）。默认 `blocking=false`；声明 `blocking=true` 的工具必须有 `limits.timeoutMs ≤ 2000`，且禁止 Slate 模态（`FMessageDialog` 只允许出现在非 registry 的 UI 呈现层，且 test-only 必须可抑制，参照 P11 `SetTestDialogSuppression`）。
+后果：registry 内不得起线程；**唯一的 off-thread 例外**是 D-16 的 `FUEAgentKitLayoutBrokerClient`（独立 worker 线程，只做 socket I/O，不持有任何 UObject，game thread 只轮询原子状态）。未来其它异步必须新增 `invokeAsync` 合同版本，不得在 handler 里起线程。
 
 **N0-D10 错误分类学。**
 新增 `native-*` 错误类别（registry/auth/gate/schema/limit/transaction/internal），每条错误含 `code/category/retryable/terminal/details/suggestedAction`；legacy 方法继续返回**原错误码不变**（兼容），但同一 handler 在 `native.invoke` 下返回 native 类别码。映射表见 §11.3。
@@ -116,9 +136,10 @@
 每次 invoke（含拒绝）产生一条 `ueak.native.audit/1.0` 记录：`auditId/toolId/toolVersion/access/decision/gateFailed/sessionId/editorSessionId/projectName/projectPathHash/requestDigest(session-scoped HMAC)/durationMs/revisionBefore/revisionAfter/transactionId/resultDigest/errorCode`。内存环形缓冲 256 条；只读工具不落盘；写工具与 test-only 调用额外写 `Saved/UEAgentKit/native-audit/<sessionId>.jsonl`（best-effort，写失败只置 `auditPersisted=false`，不得把已成功的写入报成失败）。`native.audit.tail` 只读工具最多返回 100 条。
 后果：审计不得包含绝对路径、令牌、端口、SQLite 路径；`requestDigest` 使用会话密钥 HMAC-SHA256，避免把参数原文写盘。
 
-**N0-D12 Python 边界：算法与协议留在 Python，编辑器内不再执行 Python。**
-目标态：**UE 进程内没有 Python 执行**。布局算法继续在 Python（`graph_contracts/layout.py`、`_layout_layered.py`），但它只在 **MCP/离线进程**运行；UE 只提供原生只读数据（preflight/context）与（未来）原生布局实现。P11 的“编辑器内跑 worker”不是被替换成“编辑器内跑另一个 Python”，而是被**结构性移除**。
-后果：N1 完成后 `IPythonScriptPlugin` 引用数必须为 0、`Build.cs` 中 `PythonScriptPlugin` 依赖必须移除、插件源码中 `py.exe` 必须为 0（grep 门禁，见 §13）。
+**N0-D12 Python 边界：算法与协议留在 Python，编辑器内不执行 Python；Preview 通过进程外 broker 保留。**
+目标态：**UE 进程内没有 Python 执行**。布局算法继续在 Python（`graph_contracts/layout.py`、`_layout_layered.py`），在 **MCP 进程或独立 broker 进程**运行；UE 只提供原生只读数据（preflight/context）与（未来）原生布局实现。
+**P11 菜单的实时 Preview 不得因此消失**：由 `FUEAgentKitNativePreviewService` + `FUEAgentKitLayoutBrokerClient` 把快照发给进程外 broker（`build_preview` 同一函数），异步取回 LayoutPlan 并展示。协议、时序、安全与迁移 gates 见 `N0_REVIEW_DECISIONS_AND_PREVIEW_MIGRATION.md` §3–§9。
+后果：`IPythonScriptPlugin` / `py.exe` 的退役**必须晚于** broker 路径的 parity 与 P10/P11 regression（§13、§9.4 of 迁移文件），不得先删后补。
 
 **N0-D13 兼容性规则。**
 ①`native.invoke` 的 wire `schemaVersion` 仍是 `"1.0"`（帧格式不变，native 信封版本在参数内）；②registry 清单哈希随 `hello`/`editor.status` 以新增字段 `nativeRegistry{registryVersion,hash,toolCount}` 发布（老客户端忽略未知字段）；③未知参数一律拒绝（沿用 `LiveEditorBridgeService._reject_unknown_params` 的严格风格）；④结果只允许新增字段；⑤alias 至少保留一个 minor 版本，移除需 `removalVersion` + 测试断言 `native-alias-retired`。
@@ -128,6 +149,16 @@
 
 **N0-D15 文档与代码同源。**
 registry 清单是契约；`spec/native-tools/` 的示例必须能被机器校验（本轮已用 JSON 解析探针校验全部 ```json 块）。任何示例与清单不一致视为文档缺陷。
+
+**N0-D16 Preview 零降级：Editor 菜单保留实时 LayoutPlan，算法在进程外 broker。**
+Editor 侧新增一个**只读**的 Preview 服务：game thread 构建原生快照（preflight + context envelope，复用既有只读构建），交给独立 worker 线程，通过 **loopback broker**（Editor 作为客户端 `FSocket::Connect`）把快照发给进程外 Python daemon；daemon 调用与 MCP/旧 worker **完全相同**的 `build_preview`，返回 plan；Editor 重算 `layoutHash`、校验 node 集与 revision/fingerprint 后再展示。
+约束：
+1. **不**在 Editor 内执行 Python；**不**由菜单 `CreateProc`；**不**依赖 Computer Use。
+2. **不**假设现有 Bridge 支持反向请求（事实见 §2.1 第 11 条）；只新增最小通道（descriptor + outbound client + broker daemon），不改既有 bridge 协议。
+3. 异步、非阻塞：单一 in-flight、5 s deadline、可取消、请求/响应各 ≤1 MiB、终态必写 receipt。
+4. broker 不可用时行为明确（稳定错误码 + receipt）；legacy 回退由 feature flag 控制，不静默。
+5. **迁移期间旧 P11 路径原样保留**；退役必须满足 `N0_REVIEW_DECISIONS_AND_PREVIEW_MIGRATION.md` §9.4 的 gates（parity + P10/P11 regression + 回滚演练 + 用户批准）。
+6. Preview 结果**永不自动 Apply**；通用 Apply 继续 fail-closed。
 
 ## 4. Registry 清单模型
 
@@ -523,7 +554,7 @@ registry 清单是契约；`spec/native-tools/` 的示例必须能被机器校�
 | 绑定时机 | `StartupModule` 内、EditorBridge 启动后、registry 加载成功后；仅 `GIsEditor && !IsRunningCommandlet && !bAutomationChild`（沿用 `UEAgentKitEditorModule.cpp:16-36`） |
 | 扩展点 | 只允许 `UToolMenus::ExtendMenu` + `AddDynamicSection`（P11 阶段 UE 实机证据，见 `C_LAYOUT_P11_EDITOR_SCOPE_ACCEPTANCE_REPORT_20261023.md`；本轮未复验）；禁止使用旧 `GraphEditorGraphContextMenu` 扩展点（P11 头注释记录其在 5.6 已不存在） |
 | 动态可见性 | section 回调里按 `UGraphNodeContextMenuContext` 判定 node/pin/graph 上下文；无上下文则不添加条目 |
-| 文本 | 清单只存 `titleKey`；C++ 用 `LOCTEXT` 映射，菜单文本不进入任何哈希（沿用 ND-LOCALIZED-BAN） |
+| 文本 | 清单只存 `titleKey`；C++ 用 `LOCTEXT` 映射，菜单文本不进入 `actionId`/`discoveryKey`（ND-LOCALIZED-BAN）；`descriptorDigest` 的既有包含关系见 `N0_R1_READINESS_AND_GATE.md` §5.6 |
 | 执行 | `ExecuteAction` 只做：从 context 提取 `assetPath/graphGuid/nodeGuid/pinName` → `Invoke(toolId, ...)` → 呈现结果；**不得**直接调用业务函数 |
 | 模态 | 禁止无条件 `FMessageDialog`；测试可抑制；长时间操作返回 receipt 而非阻塞弹窗 |
 | 卸载 | `ShutdownModule` 先 `RemoveSection`，再注销 registry；顺序反了会留悬空委托 |
@@ -538,6 +569,8 @@ registry 清单是契约；`spec/native-tools/` 的示例必须能被机器校�
 3. 漂移检测：启用 Live Editor 时，MCP 调用只读工具 `native.registry.describe`（新增，`readOnly=true`）拿到 `{registryVersion, hash, toolCount, tools:[{name,version,readOnly}]}`，与本地路由表比较：toolId 集合差、MAJOR 不等、hash 在会话内变化 → 拒绝该工具并返回 `native-registry-version-mismatch`（映射为 MCP 侧 `live-editor-version-mismatch` 同级错误）。**不做静默降级**。
 4. 路由：`ToolDefinition.live_method` 继续作为 legacy 方法；`nativeToolId` 非空时优先 `native.invoke`。两者必须指向同一 handler（由 C++ 单测/代码审查保证）。
 5. 离线模式不依赖 registry：无 Live Editor 时不注册 native 工具，`ue_get_capabilities` 不宣称它们存在。
+6. **Preview 不改变 MCP 契约**：`ue_preview_blueprint_graph_layout` 当前就在 MCP 进程内调用 `build_preview`（`mcp_graph_layout_preview.py:87-107`），本来就是“算法在编辑器外”。本轮只是给 **Editor 菜单**补上等价的进程外通道；MCP 工具名、参数、计数、错误码均不变。
+7. **模式感知**：`NativeToolRegistry=off` 时 `native.registry.describe` 返回 `state=disabled`（不是错误），MCP 不注册 native 路由；`shadow` 时返回工具集但标 `shadow=true`，MCP 不优先路由；`active` 才允许优先路由。
 
 ## 8. 授权、readonly、test-only、Apply 的 fail-closed 判定
 
@@ -581,6 +614,25 @@ registry 清单是契约；`spec/native-tools/` 的示例必须能被机器校�
 - 写入必须同时满足：`revisionScope=asset+graph`、期望值匹配、单事务、同事务读回、Dirty 确认、显式确认短语、`maturity=test-only`。
 - Apply 永不 Save、永不 Compile、永不自动重试。重试必须由调用方在重新 preflight 后发起（`retryable=false` 的写入错误不给自动重试建议）。
 
+### 8.4 Preview（只读，D-16）
+
+Preview 不走写门禁，但有独立的放行与失败清单：
+
+| 序 | 检查 | 失败码 |
+|---|---|---|
+| 1 | `NativeLayoutPreview=on`（否则不提供菜单条目/工具） | `native-preview-disabled` |
+| 2 | 存在节点/引脚/焦点图上下文，且图为 K2 | `graph-layout-graph-not-focused` / `-not-k2` |
+| 3 | `packageDirty == false`、PIE stopped、preflight `complete` | `graph-layout-package-dirty` / `-pie-active` / `-context-incomplete` |
+| 4 | broker descriptor 存在、合法、未过期 | `native-preview-broker-descriptor-missing` / `-invalid` |
+| 5 | 快照自身一致（asset/graph/revision/fingerprint） | `native-preview-identity-mismatch` / `-stale-snapshot` |
+| 6 | 单一 in-flight | `native-preview-busy` |
+| 7 | 5 s 内收到 ≤1 MiB 合法响应 | `native-preview-timeout` / `-response-too-large` / `-response-invalid` |
+| 8 | 返回 plan 形状/哈希/node 集与快照一致 | `native-preview-plan-invalid` / `-plan-hash-mismatch` |
+| 9 | 结果时 revision/fingerprint 未变 | `native-preview-revision-conflict` / `-fingerprint-conflict` |
+
+Preview 任一步失败都不得修改资产、不得进入 Apply；终态必须写 receipt（`previewPath` 标明 `native-broker` 或 `legacy-python-in-process`）。
+opt-in 阶段（M3/M4）允许在失败后按 `LegacyLayoutPreviewFallback` 回退旧路径，但必须在**同一调用**里只产出一条结果、receipt 只记一次 `previewPath`；不得把 broker 的失败结果与 legacy 的成功结果混在一起展示，也不得把回退伪装成“broker 成功”。
+
 ## 9. Game thread 与 Editor 生命周期
 
 ### 9.1 不变式
@@ -595,15 +647,17 @@ registry 清单是契约；`spec/native-tools/` 的示例必须能被机器校�
 | I6 | 卸载顺序：菜单 unbind → registry 注销 → bridge stop；不得遗留未提交事务 |
 | I7 | 不允许 handler 打开 Slate 模态（除 test-only 且可抑制的提示） |
 | I8 | 所有工具结果必须带 `editorSessionId`；跨 session 使用旧结果必须被拒绝（沿用 undo/discard 的 session 校验风格） |
+| I9 | Preview 的 socket I/O 只能发生在 broker worker 线程；该线程不得持有/解引用 UObject，game thread 不得等待它 |
+| I10 | Preview 终态（成功/失败/超时/取消）必须恰好写一次 receipt；不得存在“无 receipt 的静默失败” |
 
 ### 9.2 生命周期序
 
 | 阶段 | 动作 | 失败处理 |
 |---|---|---|
-| `StartupModule` | 加载清单 → 校验 → 注册 handler → 绑定菜单 → 启动 bridge | 清单失败：registry 不可用但 bridge 仍起（便于诊断），所有 native 工具拒；菜单不绑定 |
-| 首帧后 | `FTSTicker` 处理 socket/批任务 | 既有行为不变 |
-| PIE 开始/结束 | 置 `pieState`，写工具改判 | 进行中的 batch task 标 `invalidated` |
-| `ShutdownModule` | 取消 pending automation/batch → 菜单 unbind → registry 注销 → bridge stop | 未提交事务：记录 `audit` 并 `Cancel()` |
+| `StartupModule` | 读 `NativeToolRegistry` 模式 →（`shadow`/`active`）加载并校验清单 → 读 `NativeLayoutPreview`/`LegacyLayoutPreviewFallback` → 注册 handler → 绑定菜单 → 启动 bridge | 清单失败：仅 native 不可用，legacy 照常；`off` 模式不加载清单、不报错、不影响启动 |
+| 首帧后 | `FTSTicker` 处理 socket/批任务 + Preview 状态机 `Tick()` | 既有行为不变 |
+| PIE 开始/结束 | 置 `pieState`，写工具改判；取消进行中的 Preview | 进行中的 batch task 标 `invalidated`；Preview 终态 `cancelled` |
+| `ShutdownModule` | 取消 pending automation/batch → **取消 Preview 并等 worker 收尾** → 菜单 unbind → registry 注销 → bridge stop | 未提交事务：记录 `audit` 并 `Cancel()`；Preview 必须写终态 receipt |
 
 ## 10. Asset revision / transaction / save / undo
 
@@ -686,7 +740,29 @@ native-write-forbidden-for-read-tool
 native-alias-retired
 native-audit-unavailable
 native-internal-error
+native-preview-disabled
+native-preview-broker-descriptor-missing
+native-preview-broker-descriptor-invalid
+native-preview-broker-unavailable
+native-preview-broker-rejected
+native-preview-busy
+native-preview-timeout
+native-preview-cancelled
+native-preview-token-rejected
+native-preview-version-unsupported
+native-preview-request-too-large
+native-preview-response-too-large
+native-preview-response-invalid
+native-preview-identity-mismatch
+native-preview-stale-snapshot
+native-preview-revision-conflict
+native-preview-fingerprint-conflict
+native-preview-plan-invalid
+native-preview-plan-hash-mismatch
+native-preview-worker-failed
 ```
+
+说明：`native-preview-*` 全部属于 `gate`/`limit`/`internal` 类别；`native-preview-timeout` 与 `-broker-unavailable` 为**可重试**（重试仍须重新快照），其余不可重试。
 
 ### 11.3 legacy 映射（legacy 方法仍返回原码，native.invoke 下用新码）
 
@@ -741,28 +817,34 @@ native-internal-error
 5. **未知参数拒绝、未知结果字段忽略**（严格入、宽松出）。
 6. **计数冻结**：MCP 模式计数与 `test_tool_registry.py` 同步；任何计数变化必须同 commit 改测试与文档。
 7. **清单哈希**：`registry.hash` = 对清单规范 JSON 做域分离哈希（`ueak.native.registry/1`），会话内必须稳定；变化即 `native-registry-version-mismatch`。
+8. **legacy 非回归（硬性）**：`NativeToolRegistry=off`（默认）时，P12 的 bridge 方法、菜单、test-only 写路径必须与当前完全一致；清单缺失/损坏不得导致启动失败或功能缺失。该条是 Q2 的例外，也是任何迁移阶段的前提。
+9. **feature flag 只读性**：`NativeToolRegistry`、`NativeLayoutPreview`、`LegacyLayoutPreviewFallback` 仅从 `GConfig`/编译默认读取，运行期不可改；MCP 工具参数、菜单参数、`native.invoke` 参数都不得覆盖（防 Agent 自授权）。
+10. **Preview parity**：新路径与旧路径在同一 fixture/图/选项下 `planId`、`layoutHash`、`movedNodeIds` 必须逐字相等；不等即视为回归，不得 cutover。
+11. **回退优于猜测**：broker 不可用/超时/版本不符时，opt-in 阶段回退 legacy 并在 receipt 标 `previewPath`；M5 之后明确失败，不静默成功、不伪造 plan。
 
 ## 13. Python worker / CLI 的保留与退场边界
 
-| 领域 | 现状 | N0 判定 | 退出/保留条件 |
+| 领域 | 现状 | N0 v2 判定 | 退出/保留条件 |
 |---|---|---|---|
-| 布局算法（`graph_contracts/layout.py`、`_layout_layered.py`） | Python，P0–P12 验收基线 | **保留**；只在 MCP/离线进程运行 | C++ 实现只有在同输入 parity、布局哈希/拓扑一致、安全负例与性能均通过后才可替换（N4） |
+| 布局算法（`graph_contracts/layout.py`、`_layout_layered.py`） | Python，P0–P12 验收基线 | **保留**；在 MCP 或独立 broker 进程运行 | C++ 实现只有在同输入 parity、布局哈希/拓扑一致、安全负例与性能均通过后才可替换（N4） |
 | MCP 协议与工具注册（`mcp_server.py`、`mcp_*_tools.py`、`tool_registry.py`） | Python | **保留** | 长期；它是 Agent 侧唯一白名单 |
-| 编辑器内 Python（P11 `IPythonScriptPlugin`） | 存在 | **退场**（N1 第一步） | 插件源码 `IPythonScriptPlugin` = 0；`Build.cs` 移除 `PythonScriptPlugin`；预览改由 MCP 侧算法 + 原生只读工具 |
-| 菜单外启 `py.exe`（P8/P9） | 存在，实际不可达 | **退场** | 插件源码 `py.exe` = 0；P8/P9 菜单类删除或改为 registry 菜单条目 |
+| 布局 preview 算法入口（`graph_layout_preview.build_preview`） | Python 纯函数 | **保留并复用**：MCP、旧 worker、新 broker 共用同一函数 | 任何行为变化必须同时通过三条消费方的 parity |
+| 新 broker daemon（loopback，`ueak.layoutbroker/1.0`） | 不存在（新增） | **新增**（N1），用户/CLI 启动 | 协议/安全测试通过；无写资产能力 |
+| 编辑器内 Python（P11 `IPythonScriptPlugin`） | 存在 | **保留至退役 gates 全满足**，之后退场 | 必须先完成 broker parity + P10/P11 regression + 回滚演练 + 用户批准（迁移文件 §9.4） |
+| 菜单外启 `py.exe`（P8/P9） | 存在，实际不可达 | **保留至同一退役时点** | 插件源码 `py.exe` = 0 仅作为退役**结果**，不是先行条件 |
 | 外部进程跑隔离 Automation（`UnrealEditor-Cmd`） | 存在 | **保留**（进程编排） | 不得用于“测试当前同一 Editor 实例”；证据目录隔离 |
 | 构建/CI/发布脚本（PowerShell/Python） | 存在 | **保留** | 不嵌入 UE C++ |
 | 离线语料/基准/索引 | Python | **保留** | 与运行时解耦 |
 
-可度量退出条件（N1 完成时全部满足才算退场）：
+可度量退出条件（仅在退役 gates 全部满足后才允许执行）：
 
 ```text
-grep -R "IPythonScriptPlugin" Plugin/            == 0
-grep -R "py.exe" Plugin/                        == 0
+grep -R "IPythonScriptPlugin" Plugin/             == 0
+grep -R "py.exe" Plugin/                         == 0
 grep -R "PythonScriptPlugin" Plugin/**/*.Build.cs == 0
 ```
 
-并且：`ue_preview_blueprint_graph_layout` 行为不变（同一算法、同一 fail-closed 条件），P11 菜单替代路径有自动化证据。
+并且：`ue_preview_blueprint_graph_layout` 行为不变（同一算法、同一 fail-closed 条件），Editor 菜单 Preview 由 broker 路径提供且与旧路径 parity 证据齐全。
 
 ## 14. UE Public API 可行性及风险
 
@@ -782,35 +864,51 @@ grep -R "PythonScriptPlugin" Plugin/**/*.Build.cs == 0
 | Spawner 身份/模板 | `UBlueprintNodeSpawner::GetSpawnerSignature/GetTemplateNode/GetCachedTemplateNode/IsTemplateNodeFilteredOut` | `HEADER-VERIFIED`（`BlueprintNodeSpawner.h:186,221,233,245`） | 模板节点在 transient outer 创建、跳过 `Modify/AddNode`（`BlueprintNodeSpawner.cpp:339-351`）；仍会分配 UObject，需 GC/性能实测 |
 | 图类型 | `EGraphType`（`GT_Function/GT_Ubergraph/GT_Macro/...`） | `HEADER-VERIFIED`（`EdGraphSchema.h:25-33`） | 与 D-01 对齐 |
 | 图编辑器扩展 | `FGraphEditorModule::GetAllGraphEditorContextMenuExtender` | `HEADER-VERIFIED`（`GraphEditorModule.h:36`） | **不使用**：UE5.6 上下文菜单已 ToolMenus 化 |
+| 出站连接（broker 客户端） | `FSocket::Connect`（`Sockets.h:109`）、`ISocketSubsystem::CreateSocket`（现网已用） | `HEADER-VERIFIED` | 插件**当前没有任何出站连接**；属新增能力，需 loopback/防火墙 Runtime 验证（U3） |
+| 异步 worker | `FRunnable`/`FRunnableThread`（`HAL/Runnable.h`、`HAL/RunnableThread.h`） | `HEADER-VERIFIED`（文件存在） | 只用标准线程；不得从 worker 触 UObject |
+| 非模态通知 | `FSlateNotificationManager::Get/AddNotification`（`NotificationManager.h:76,84,96`） | `HEADER-VERIFIED` | headless 下可能不可用，需 test seam（U2） |
+| 启动配置 | `GConfig`（`Misc/ConfigCacheIni.h`） | `HEADER-VERIFIED`（文件存在） | 只在启动读一次；不可被 Agent 参数覆盖 |
 
 原则：不 include 引擎 `Private/`，不复制引擎内部结构体布局，不依赖 `FNodeTemplateCache` 私有实现（只用其公开访问器）。跨 5.7 的破坏性变更以编译 + 自动化回归为准，不以“现在能编”当作保证。
 
-## 15. 待人工裁决
+## 15. 评审结论与待人工裁决
+
+### 15.1 已有结论（review round 2）
+
+| 编号 | 结论 | 说明 |
+|---|---|---|
+| Q1 | **原建议作废** | 原“接受菜单只导出 Context”不可接受（零降级失败）；替代方案 = broker 保留实时 Preview，见 `N0_REVIEW_DECISIONS_AND_PREVIEW_MIGRATION.md` |
+| Q2 | **建议批准，含例外** | runtime manifest + compiled immutable safety；但 registry 必须 `off` 默认、非致命，缺清单时 legacy P12 功能照常（N0-D01 v2） |
+| Q3 | **建议批准** | single `native.invoke` + aliases；不长期保留第二套实现 |
+| Q4 | **建议批准** | 审计写 `Saved/`、仅 write/test-only 持久化、无敏感字段、环形缓冲 + 滚动 |
+| Q5 | **建议批准** | Content Browser（asset）上下文条目推迟 |
+| Q6 | **建议批准，单独提交** | 101→102 属既有文档漂移，用 doc-only commit 修正，不与合同/代码混提 |
+| Q7 | **建议批准** | `editor`/`workflow` 为 native 清单私有 domain，不改 `ueak.operation/1.0` |
+| Q8 | **建议批准** | 1 MiB + 显式分页（`nextCursor`/`truncated`/`totalAvailable`），禁止静默丢弃 |
+
+### 15.2 新增待裁决
 
 | 编号 | 问题 | 建议 |
 |---|---|---|
-| Q1 | 是否接受 N1 的“编辑器内彻底无 Python”（代价：C++ 布局完成前，编辑器菜单没有实时 Plan 预览） | 接受；菜单改为只读“导出布局上下文”，Agent 侧预览能力不变 |
-| Q2 | registry 清单是运行时加载 JSON（本文方案），还是编译期生成表 | 运行时 JSON + 编译期安全常量；可审计、可 diff |
-| Q3 | 统一 `native.invoke` 是否与既有 48 个 legacy 方法长期并存 | 并存一个 minor，然后按 alias 规则移除 |
-| Q4 | 审计是否允许写 `Saved/`（写工具） | 允许，best-effort、不含敏感字段 |
-| Q5 | 菜单是否需要 Content Browser（asset）上下文条目 | 本轮不做（无已验证扩展点） |
-| Q6 | 是否把 MCP 文档里 “Live + Workflow = 101” 更正为实测 102 | 需单独文档变更；N0 不改外部文档，仅记录差异（证据 `05-contract-counts.txt`） |
-| Q7 | 是否将 `domain` 新增 `editor/workflow` 视为 native 清单私有值 | 是；不改 `ueak.operation/1.0` |
-| Q8 | read 工具结果 1 MiB 上限是否足够大图 | 保持 1 MiB + 显式截断标志；大图走分页/裁剪 |
+| Q9 | broker 由谁启动/授权 | 用户手动 `scripts\RunLayoutBroker.ps1`（最小信任面）；不建议 Editor 或 MCP 静默拉起 |
+| Q10 | 原生 Preview 先限于 disposable host + opt-in，还是所有工程可见 | 先 disposable + opt-in，稳定后再放开 |
+| Q11 | 失败时默认是否回退 legacy | M3–M4 默认回退；M5 起明确失败（不伪造成功） |
+| Q12 | 首版结果展示用非模态通知 + receipt，还是必须面板 | 先通知 + receipt；面板单独立项 |
 
 ## 16. N0 验收清单
 
-- [x] 单一 registry 模型、字段约束、加载校验规则明确（§4）
+- [x] 单一 registry 模型、字段约束、加载校验规则明确（§4），且为 opt-in/非致命（§3 D-01）
 - [x] 统一入口 `native.invoke` + request/result/error/context/revision 示例（§5）
 - [x] ToolMenus 绑定与“同一 handler”约束（§6）
 - [x] MCP 投影、计数冻结、漂移检测（§7）
 - [x] 授权梯、readonly 强制、test-only 四要素、Apply fail-closed（§8）
-- [x] game-thread 与生命周期不变式（§9）
+- [x] Preview 放行/失败清单与 broker 错误码（§8.4、§11.2）
+- [x] game-thread 与生命周期不变式，含 Preview 异步例外（§9）
 - [x] revision / transaction / save / undo 语义与写序列（§10）
 - [x] 错误分类、新增码集合、legacy 映射、审计模型（§11）
-- [x] 兼容性与弃用规则（§12）
-- [x] Python/CLI 边界与可度量退出条件（§13）
+- [x] 兼容性与弃用规则、feature flag 只读性、legacy 非回归（§12）
+- [x] Python/CLI 边界与“先 parity 后退役”门槛（§13）
 - [x] UE Public API 核验等级与风险（§14）
 - [x] 明确未做：未编译、未启动 UE、未改 P0–P12 运行代码、未开放 Apply
-- [ ] 人类评审 Q1–Q8 并批准本文件为 N0 frozen（待批准）
+- [ ] 人类评审 Q1（修订）/Q9–Q12 并批准本文件为 N0 frozen（待批准）
 - [ ] R1 代码启动（**未获新指令前不做**）
