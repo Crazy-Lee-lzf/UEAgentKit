@@ -240,7 +240,7 @@ is 3.9, so all commands used `py -3.12`):
 | `test_layout_broker_client.py` | 13 passed |
 | `test_layout_broker_cli.py` | 1 passed (real subprocess, descriptor publish + request + auto-exit cleanup) |
 | M1 total | **97 passed**, 0 failed (~10.1 s) |
-| Repository full suite | see `Build/layout-broker/Evidence/full-python-suite.log`; **1338 tests, OK (17 skipped), 129.8 s** |
+| Repository full suite | see `Build/layout-broker/Evidence/full-python-suite.log`; **1338 tests, OK (17 skipped), 122.5 s** |
 
 The 35 server tests cover: 3 parity fixtures; descriptor/loopback/ACL; log token absence; bad token/version/
 project/hash/session/algorithm; duplicate id; unknown/command fields; invalid options; malformed/empty/truncated
@@ -331,6 +331,7 @@ Evidence (ignored by git, under `Build/layout-broker/Evidence/`):
 | `m1-offline-probe.json` | 13 checks (all true), 3 exact-parity records with planId/layoutHash, environment, limitations |
 | `full-python-suite.log` | repository full-suite output for this change set |
 | `git-status.txt` | post-commit clean tree with branch/commit ids |
+| `SHA256SUMS.txt` | SHA-256 digest of each evidence file for this run |
 | `descriptor-acl.txt` | `icacls` view of a hardened sample descriptor + internal verification state (sample deleted after capture) |
 
 Runstate is in `spec/native-tools/M1_LAYOUT_BROKER_RUN_STATE_20261024.md` with commands, results, evidence

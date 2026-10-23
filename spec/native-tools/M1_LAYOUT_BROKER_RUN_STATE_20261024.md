@@ -47,18 +47,19 @@ verifiable model identifier is exposed to the agent; see report §0.
 |---|---|
 | `py -3.12 -m unittest discover -s tests\python -p "test_layout_broker_*.py"` | **97 passed**, 0 failed (~10.1 s) |
 | `py -3.12 tools\layout_broker_offline_probe.py` | `ok: true`, 13/13 checks, 3/3 exact parity |
-| `py -3.12 scripts\RunPythonTests.py full --quiet` | **1338 tests, OK (skipped=17), 129.8 s**, see evidence log |
+| `py -3.12 scripts\RunPythonTests.py full --quiet` | **1338 tests, OK (skipped=17), 122.5 s**, see evidence log |
 | `py -3.12 -m compileall -q src\ue_agent_kit\layout_broker tools ...` | exit 0 |
 | ACL probe (sample descriptor) | `PROVEN / windows-dacl / protected-dacl-current-user-only`; `icacls` shows only `DESKTOP-8HD8KUO\Administrator:(F)` with no inherited allow ACE |
 
 ## 4. Evidence (ignored `Build/layout-broker/Evidence/`)
 
-| File | SHA-256 |
+| File | Content |
 |---|---|
-| `m1-offline-probe.json` | `809ad07169ce0f4918f01c9dc171afc2705de6d4ed89f282a9f295d5dee035df` |
-| `full-python-suite.log` | `12fbd268b282463b1f1d6aeaef726964b01724f1d3c2ef8bcccd4a15221c5089` |
-| `descriptor-acl.txt` | `0c797a5f8201eba17201287965430938f9cbed1a46f5bbf2fbf69bddce1b8999` |
-| `git-status.txt` | post-commit clean tree with branch/commit ids (regenerated after the final commit) |
+| `m1-offline-probe.json` | 13/13 checks true, 3/3 exact parity, environment and limitations |
+| `full-python-suite.log` | regenerated on each verification run; ends with `Ran 1338 tests … OK (skipped=17)` |
+| `descriptor-acl.txt` | internal PROVEN state + `icacls` view of a hardened sample descriptor |
+| `git-status.txt` | post-commit clean tree with branch/commit ids |
+| `SHA256SUMS.txt` | SHA-256 of the four files above (regenerate after any run) |
 
 The probe JSON contains: environment, broker identity, 13 checks, exact parity records, and explicit
 limitations. The full-suite log contains the complete repository run output.
