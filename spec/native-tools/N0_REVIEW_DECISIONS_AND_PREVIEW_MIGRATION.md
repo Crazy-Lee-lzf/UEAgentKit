@@ -197,7 +197,7 @@ Editor 校验（任一失败 → `native-preview-broker-rejected`，不连接）
     "schemaVersion": "ueak.graphlayoutpreview/1.0",
     "planId": "layout:1a2b3c4d",
     "layoutHash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
-    "baseGraphHash": "sha1:9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b",
+    "baseGraphHash": "sha256:9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b",
     "assetPath": "/Game/UEAgentKitP11/BP_LayoutP11.BP_LayoutP11",
     "graphGuid": "01234567-89ab-cdef-0123-456789abcdef",
     "nodeCount": 11,
@@ -223,6 +223,10 @@ Editor 校验（任一失败 → `native-preview-broker-rejected`，不连接）
 ```
 
 `result` 的字段集合必须与 `build_preview` 返回值一致（`graph_layout_preview.py:295-334`）；Editor 只接受其中用于展示/校验的子集，并**重新计算** `layoutHash`。
+
+> **Correction 2026-10-24（M2.0 offline audit）**：实际 `build_preview` 返回的 `baseGraphHash` 是
+> `sha256:<64 lowercase hex>`（`graph_contracts` 的 graph `semanticHash`），不是上面旧示例的 `sha1:`。
+> 示例已更正；Editor 必须按实际格式校验并重算，不得硬编码旧示例。M1/M2 的 wire 校验均使用 `sha256`。
 
 ### 4.4 稳定错误码（preview/broker）
 
