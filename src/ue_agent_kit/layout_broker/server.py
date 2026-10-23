@@ -409,8 +409,17 @@ class LayoutBrokerServer:
 
         duration_ms = int(round((time.monotonic() - started) * 1000))
         try:
-            protocol.validate_preview_result(result, request.preflight, token=self._token)
-            response = protocol.success_response(request.request_id, result, duration_ms)
+            accepted = protocol.validate_preview_result(
+                result, request.preflight, token=self._token
+            )
+            protocol.validate_plan_id(
+                accepted,
+                spacing_x=request.spacing_x,
+                spacing_y=request.spacing_y,
+                target_width=request.target_width,
+                seed=request.seed,
+            )
+            response = protocol.success_response(request.request_id, accepted, duration_ms)
             encoded = protocol.encode_message(response)
         except protocol.BrokerProtocolError as exc:
             self._last_error_code = exc.code

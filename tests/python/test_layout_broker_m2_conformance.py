@@ -104,6 +104,7 @@ class SchemaAndGoldenTests(M2ConformanceCase):
                         result,
                         spacing_x=golden["options"]["spacingX"],
                         spacing_y=golden["options"]["spacingY"],
+                        target_width=golden["options"]["targetWidth"],
                         seed=golden["options"]["seed"],
                     ),
                 )
@@ -287,18 +288,20 @@ class InvalidResponseSchemaTests(M2ConformanceCase):
                 errors = conformance.schema_errors(value, conformance.RESPONSE_SCHEMA)
                 self.assertTrue(errors, f"{name} unexpectedly passed the schema")
 
-    def test_forged_plan_id_passes_m1_but_fails_m2_conformance(self) -> None:
+    def test_forged_plan_id_is_rejected_by_actual_client_and_conformance(self) -> None:
         forged = copy.deepcopy(self.payload)
         forged["result"]["planId"] = "layout:" + "0" * 16
-        # M1's response validator does not recompute planId; it accepts the shape.
-        accepted = protocol.validate_response(
-            forged, self.validated, token=self.server.token
-        )
-        self.assertEqual(accepted["planId"], "layout:" + "0" * 16)
-        with self.assertRaises(conformance.ConformanceError):
+        # M2.1: the M1 response validator now recomputes planId as well.
+        with self.assertRaises(protocol.BrokerProtocolError) as caught:
+            protocol.validate_response(forged, self.validated, token=self.server.token)
+        self.assertEqual(caught.exception.code, protocol.ERROR_PLAN_ID_MISMATCH)
+        with self.assertRaises(protocol.BrokerProtocolError) as conformance_caught:
             conformance.validate_response_conformance(
                 forged, self.validated, token=self.server.token
             )
+        self.assertEqual(
+            conformance_caught.exception.code, protocol.ERROR_PLAN_ID_MISMATCH
+        )
 
     def test_forged_layout_hash_is_rejected_by_both_layers(self) -> None:
         forged = copy.deepcopy(self.payload)

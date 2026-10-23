@@ -16,9 +16,9 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from ..graph_contracts.canonical import DOMAIN_LAYOUT_PLAN, short_digest
 from ..graph_contracts.layout import recompute_layout_hash
 from . import protocol
+from .planid import PlanIdError, plan_id_from_result
 
 SCHEMA_DIR = Path(__file__).resolve().parents[3] / "spec" / "native-tools" / "m2"
 REQUEST_SCHEMA = "layoutbroker-request-1.0.schema.json"
@@ -96,36 +96,21 @@ def recompute_plan_id(
     *,
     spacing_x: int,
     spacing_y: int,
+    target_width: int,
     seed: int,
 ) -> str:
-    """Recompute ``planId`` exactly as ``graph_contracts.layout`` does.
+    """Delegate to the shared canonical helper (no second implementation)."""
 
-    The projection includes request options (including ``spacingY``) that are
-    not fully present in the result, so the caller must supply the values it
-    sent.  This is why an Editor client must retain the request options until
-    the response is validated.
-    """
-
-    plan = result.get("plan")
-    if not isinstance(plan, dict):
-        raise ConformanceError("result.plan is missing")
-    positions = plan.get("positions")
-    if not isinstance(positions, list):
-        raise ConformanceError("result.plan.positions is missing")
-    packing = plan.get("packing")
-    if not isinstance(packing, dict):
-        raise ConformanceError("result.plan.packing is missing")
-    projection = {
-        "baseGraphHash": result.get("baseGraphHash", ""),
-        "mode": plan.get("mode"),
-        "positions": [
-            {"nodeId": item["nodeId"], "x": item["x"], "y": item["y"]}
-            for item in positions
-        ],
-        "options": {"spacingX": spacing_x, "spacingY": spacing_y, "seed": seed},
-        "packing": packing,
-    }
-    return "layout:" + short_digest(projection, DOMAIN_LAYOUT_PLAN, 16)
+    try:
+        return plan_id_from_result(
+            result,
+            spacing_x=spacing_x,
+            spacing_y=spacing_y,
+            target_width=target_width,
+            seed=seed,
+        )
+    except PlanIdError as exc:
+        raise ConformanceError(str(exc)) from exc
 
 
 def validate_preview_result_conformance(
@@ -144,6 +129,7 @@ def validate_preview_result_conformance(
         accepted,
         spacing_x=request.spacing_x,
         spacing_y=request.spacing_y,
+        target_width=request.target_width,
         seed=request.seed,
     )
     if accepted["planId"] != expected_plan_id:

@@ -26,6 +26,7 @@ from datetime import datetime
 from typing import Any
 
 from ..graph_contracts.layout import recompute_layout_hash
+from .planid import PlanIdError, plan_id_from_result
 
 PROTOCOL_SCHEMA_VERSION = "ueak.layoutbroker/1.0"
 DESCRIPTOR_SCHEMA_VERSION = "ueak.layoutbroker-descriptor/1.0"
@@ -70,6 +71,7 @@ ERROR_WORKER_FAILED = "native-preview-worker-failed"
 ERROR_IDENTITY_MISMATCH = "native-preview-identity-mismatch"
 ERROR_RESPONSE_TOO_LARGE = "native-preview-response-too-large"
 ERROR_RESPONSE_INVALID = "native-preview-response-invalid"
+ERROR_PLAN_ID_MISMATCH = "native-preview-plan-id-mismatch"
 ERROR_PLAN_HASH_MISMATCH = "native-preview-plan-hash-mismatch"
 ERROR_PLAN_INVALID = "native-preview-plan-invalid"
 ERROR_DISABLED = "native-preview-disabled"
@@ -99,6 +101,7 @@ CLIENT_ERROR_CODES = BROKER_ERROR_CODES | frozenset(
         ERROR_DESCRIPTOR_INVALID,
         ERROR_BROKER_UNAVAILABLE,
         ERROR_RESPONSE_INVALID,
+        ERROR_PLAN_ID_MISMATCH,
         ERROR_PLAN_HASH_MISMATCH,
         ERROR_PLAN_INVALID,
     }
@@ -740,6 +743,45 @@ def validate_preview_result(
     return dict(result)
 
 
+def validate_plan_id(
+    result: Mapping[str, Any],
+    *,
+    spacing_x: int,
+    spacing_y: int,
+    target_width: int,
+    seed: int,
+) -> str:
+    """Reject a forged ``planId`` even when the rest of the plan is canonical.
+
+    ``layoutHash`` covers positions only; ``planId`` additionally commits to the
+    request options and packing.  M1 originally validated only ``layoutHash``,
+    so a well-formed forged ``planId`` could pass.  Both the broker self-check
+    and the client call this function with the original request options.
+    """
+
+    if not isinstance(result, Mapping):
+        _fail(ERROR_PLAN_INVALID, "The preview result is not a JSON object.")
+    try:
+        expected = plan_id_from_result(
+            result,
+            spacing_x=spacing_x,
+            spacing_y=spacing_y,
+            target_width=target_width,
+            seed=seed,
+        )
+    except PlanIdError as exc:
+        raise BrokerProtocolError(
+            ERROR_PLAN_INVALID, "The layout planId could not be recomputed."
+        ) from exc
+    actual = result.get("planId")
+    if actual != expected:
+        _fail(
+            ERROR_PLAN_ID_MISMATCH,
+            "The layout planId is not canonical for the request options.",
+        )
+    return expected
+
+
 def validate_response(
     payload: Any,
     request: BrokerRequest,
@@ -790,7 +832,15 @@ def validate_response(
         _fail(ERROR_RESPONSE_INVALID, "The broker durationMs is invalid.")
     if token and token in json.dumps(payload, ensure_ascii=False):
         _fail(ERROR_RESPONSE_INVALID, "The broker response contains the session token.")
-    return validate_preview_result(payload.get("result"), request.preflight, token=token)
+    accepted = validate_preview_result(payload.get("result"), request.preflight, token=token)
+    validate_plan_id(
+        accepted,
+        spacing_x=request.spacing_x,
+        spacing_y=request.spacing_y,
+        target_width=request.target_width,
+        seed=request.seed,
+    )
+    return accepted
 
 
 def build_project_path_hash(project_path: str) -> str:
@@ -832,6 +882,7 @@ __all__ = [
     "ERROR_DUPLICATE_REQUEST",
     "ERROR_IDENTITY_MISMATCH",
     "ERROR_PLAN_HASH_MISMATCH",
+    "ERROR_PLAN_ID_MISMATCH",
     "ERROR_PLAN_INVALID",
     "ERROR_PROJECT_MISMATCH",
     "ERROR_RATE_LIMITED",
@@ -863,6 +914,7 @@ __all__ = [
     "sanitize_message",
     "success_response",
     "validate_preview_result",
+    "validate_plan_id",
     "validate_request",
     "validate_response",
 ]

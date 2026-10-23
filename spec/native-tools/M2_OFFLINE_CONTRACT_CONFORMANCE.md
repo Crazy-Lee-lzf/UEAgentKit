@@ -185,7 +185,8 @@ Consequences:
 1. Bound the read to 1 MiB + one line; reject truncated/multi-line input.
 2. Parse numbers as numbers; require zero fractional part for integer fields before casting.
 3. Validate exact field sets, identity, session, node set, `layoutHash`, and `planId`.
-4. `planId` **must be recomputed** by the C++ client (M1 Python does not; see §6). Projection:
+4. `planId` **must be recomputed** by the C++ client using the request options; M2.1 added the same
+   check to the Python broker/client. Projection:
    `{baseGraphHash, mode, positions[{nodeId,x,y}], options{spacingX,spacingY,seed}, packing}` using the
    canonical JSON/hash rules already required by N0 §11.1.
 5. `durationMs`/`timingMs` are telemetry only; never use them in hashes or as plan evidence.
@@ -210,7 +211,8 @@ token equality, project identity, total byte size, or canonical hashes; the conf
 - `schema_errors(document, schema_name)` using `jsonschema` (optional dev dependency; import of the module is safe
   without it);
 - `encoded_size` / `check_message_size` (1 MiB NDJSON);
-- `recompute_plan_id(result, spacing_x, spacing_y, seed)` — exact `layout.py:658-665` projection;
+- `recompute_plan_id(result, spacing_x, spacing_y, target_width, seed)` — delegates to the shared
+  `planid.py` helper using the exact `layout.py:658-665` projection;
 - `validate_request_conformance`, `validate_response_conformance`, `validate_preview_result_conformance`;
 - `validate_descriptor_conformance`.
 
@@ -263,13 +265,13 @@ and an opt-in implementation (ideally `enable_scope_extension=False` by default)
 Legacy P11 fallback belongs only to the later opt-in migration (M3 `LegacyFallback=true`); M5+ may remove it.
 No production cutover is implied or performed.
 
-## 6. Known M1 gap found by the audit
+## 6. planId gap found by this audit — fixed in M2.1
 
-M1's response validator recomputes `layoutHash` but **does not recompute `planId`**. A forged response with a
-validly formatted but wrong `planId` passes M1's `protocol.validate_response`. The M2 conformance validator
-rejects it (`test_forged_plan_id_passes_m1_but_fails_m2_conformance`). The future C++ client MUST recompute
-`planId` with the request options (including `spacingY`, which is not present in the result). This is recorded
-as a hardening requirement, not as an M1 behavior change.
+M2.0 found that M1's response validator recomputed `layoutHash` but **did not recompute `planId`**. A forged
+response with a validly formatted but wrong `planId` passed `protocol.validate_response`. M2.1 adds the shared
+canonical helper and enforces it in both the actual broker self-check and the actual Python client; see
+`M2_1_PLAN_ID_HARDENING_REPORT.md`. The C++ client must implement the same projection with the request options
+(including `spacingY`, `targetWidth` and `packing`, which are not fully present in the result).
 
 ## 7. Test and probe evidence (offline only)
 
@@ -277,7 +279,8 @@ as a hardening requirement, not as an M1 behavior change.
 |---|---|
 | M1 tests (unchanged) | 97 passed |
 | M2 conformance tests | 21 passed |
-| Broker tests combined | 118 passed (~11.7 s) |
+| M2.1 planId hardening tests | 22 passed (actual server + actual client rejection) |
+| Broker tests combined | 140 passed (~12.4 s) |
 | M2 offline probe | 10/10 checks, 3/3 exact golden |
 | Full repository suite | **1359 tests, OK (17 skipped), 121.4 s** (see `full-python-suite-m2.log`) |
 
@@ -406,7 +409,7 @@ They do **not** cover UE automation, Editor sockets, C++ serialization, ticket/l
 
 | File | Content |
 |---|---|
-| `m2-conformance-probe.json` | 10/10 checks, three golden cases with byte sizes/planIds, known M1 planId gap, R1/offline limitations |
+| `m2-conformance-probe.json` | 10/10 checks, three golden cases with byte sizes/planIds, offline/R1 limitations |
 | `m1-offline-probe.json` | unchanged M1 probe (97-test baseline) |
 | `full-python-suite-m2.log` | final repository run after M2 additions (1359 tests) |
 | `git-status.txt` / `SHA256SUMS.txt` | post-commit state and digests |
