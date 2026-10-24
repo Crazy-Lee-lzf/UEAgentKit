@@ -203,6 +203,22 @@ class TelemetryTests(unittest.TestCase):
             self.assertIn("fallback-rate>5%", summary.thresholds_breached)
             self.assertIn("any-unexpected-write", summary.thresholds_breached)
 
+    def test_token_named_keys_with_prefixes_are_detected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            receipt = self._receipt()
+            receipt["authToken"] = "must-not-appear"
+            receipt["brokerToken"] = "must-not-appear"
+            (root / "z2-expanded-matrix.json").write_text(
+                json.dumps({"results": [{"graph": "event", "scenario": "happy", "receipt": receipt}]}),
+                encoding="utf-8",
+            )
+            summary = evaluate_evidence(root)
+            payload = json.dumps(summary.as_dict())
+            self.assertEqual(summary.token_fields, 2)
+            self.assertIn("token-field-observed", summary.thresholds_breached)
+            self.assertNotIn("must-not-appear", payload)
+
     def test_real_m33_evidence_read_only(self) -> None:
         summary = evaluate_evidence(ROOT / "Build" / "m2-native" / "Evidence" / "M33")
         self.assertGreater(summary.attempts, 0)

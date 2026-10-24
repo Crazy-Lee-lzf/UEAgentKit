@@ -33,7 +33,7 @@ _SECURITY_CODES = frozenset(
         "native-preview-response-too-large",
     }
 )
-_TOKEN_KEY_RE = re.compile(r"(?i)token")
+_TOKEN_KEY_RE = re.compile(r"(?i).*token.*")
 _UUID_OR_PATH_RE = re.compile(r"(?:[A-Za-z]:[\\/]|/Game/|sha256:|sha1:)")
 
 
