@@ -450,6 +450,25 @@ conflict? {groupId, state, alternativeCount, alternativePackIds, resolution}
 - Query timeout aborts the whole query (`r7-query-timeout`); partial results are never
   returned as success.
 
+### 7.6 Agent context projection (R7.1, additive)
+
+R7.1 adds a separate, versioned read-only DTO (`schemaVersion=1`,
+`kind=r7-agent-context-projection`) on top of `ReadOnlyMountAdapter`. It is not a query
+replacement and does not change the v1 result shape.
+
+- The projector requires a verified adapter/caller; demo or raw identity is rejected.
+- It returns bounded `excerpt` text (never full `body` or `details`), pack metadata, stable
+  order, and `conflicts` only when `includeConflicts=true`.
+- Every item and the top-level `trust` block label pack text as
+  `untrusted-source-content` with `instructionPolicy=never-execute`.
+- `budgets` expose record/pack/excerpt counts, serialized byte count, and a documented
+  character/4 approximate-token count. Exceeding a budget truncates from the tail; a single
+  item that cannot fit fails `r7-context-output-too-large`.
+- Local absolute `provenance.sourceRef` values are redacted; local cache paths, claims,
+  session ids, token contents, `details`, and full records are not emitted.
+- The dependency direction is `context -> adapter -> service`; no production service imports
+  `memory_mount`, and no MCP tool is added.
+
 ## 8. Pack index
 
 The pack index is a **derived, disposable, read-only** SQLite database. It is not Project
@@ -539,6 +558,10 @@ All errors are structured:
 | `r7-integrity-receipt-required` | 6 | Adapter policy requires a manifest receipt. |
 | `r7-integrity-receipt-invalid` | 7 | Receipt shape/type/encoding invalid. |
 | `r7-integrity-receipt-mismatch` | 7 | Receipt invariant does not match the manifest. |
+| `r7-context-request-invalid` | 2 | Context budget/query/filter invalid. |
+| `r7-context-pack-limit` | 6 | Mounted packs exceed the context pack budget. |
+| `r7-context-output-too-large` | 6 | One item cannot fit the context output/token budget. |
+| `r7-context-invalid-record` | 7 | Adapter returned a malformed record projection. |
 | `r7-pack-path-invalid` | 2 | Non-directory, traversal, or symlink path. |
 | `r7-pack-not-found` | 3 | Pack files absent/unreadable. |
 | `r7-pack-not-mounted` | 3 | Unmount/query references an unknown mount. |

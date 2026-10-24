@@ -15,6 +15,12 @@ from .claims import (
     TestClaimIssuer,
     VerifiedCallerContext,
 )
+from .context import (
+    AgentContextProjection,
+    AgentContextProjector,
+    AgentContextRequest,
+    ContextLimits,
+)
 from .errors import ErrorCode, MemoryMountError
 from .integrity import (
     AUTHOR_AUTHENTICITY_NOT_ESTABLISHED,
@@ -27,7 +33,11 @@ from .service import MemoryMountRegistry, MountInfo, QueryResult
 
 __all__ = [
     "AUTHOR_AUTHENTICITY_NOT_ESTABLISHED",
+    "AgentContextProjection",
+    "AgentContextProjector",
+    "AgentContextRequest",
     "ClaimVerifier",
+    "ContextLimits",
     "DemoCallerContext",
     "ErrorCode",
     "HmacClaimVerifier",

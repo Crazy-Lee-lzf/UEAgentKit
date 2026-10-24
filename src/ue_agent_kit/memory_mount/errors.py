@@ -37,6 +37,10 @@ class ErrorCode(StrEnum):
     INTEGRITY_RECEIPT_INVALID = "r7-integrity-receipt-invalid"
     INTEGRITY_RECEIPT_MISMATCH = "r7-integrity-receipt-mismatch"
     INTEGRITY_RECEIPT_REQUIRED = "r7-integrity-receipt-required"
+    CONTEXT_REQUEST_INVALID = "r7-context-request-invalid"
+    CONTEXT_PACK_LIMIT = "r7-context-pack-limit"
+    CONTEXT_OUTPUT_TOO_LARGE = "r7-context-output-too-large"
+    CONTEXT_INVALID_RECORD = "r7-context-invalid-record"
     QUERY_INVALID = "r7-query-invalid"
     QUERY_TOO_BROAD = "r7-query-too-broad"
     QUERY_TIMEOUT = "r7-query-timeout"
@@ -74,6 +78,10 @@ EXIT_CODES: dict[ErrorCode, int] = {
     ErrorCode.INTEGRITY_RECEIPT_INVALID: 7,
     ErrorCode.INTEGRITY_RECEIPT_MISMATCH: 7,
     ErrorCode.INTEGRITY_RECEIPT_REQUIRED: 6,
+    ErrorCode.CONTEXT_REQUEST_INVALID: 2,
+    ErrorCode.CONTEXT_PACK_LIMIT: 6,
+    ErrorCode.CONTEXT_OUTPUT_TOO_LARGE: 6,
+    ErrorCode.CONTEXT_INVALID_RECORD: 7,
     ErrorCode.QUERY_INVALID: 2,
     ErrorCode.QUERY_TOO_BROAD: 6,
     ErrorCode.QUERY_TIMEOUT: 6,
