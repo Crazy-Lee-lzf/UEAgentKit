@@ -45,10 +45,11 @@ No token was copied, no real identity was minted, no signature key was created, 
 request was made, and no production process was started/restarted.
 
 At R7.4 close the coordination DB was observed as
-`BF544ECA04401588355E89D8727555F993E1129758CDCDA1A73B90AB7A86581E`
-(1,187,840 bytes, mtime `2026-10-24T18:44:06Z`). This differs from the prior R7.3 observation
-(`B606A1…`); the mtime predates this R7.4 start (`19:00Z`), so it is an external change.
-R7.4 did not open/query/write the DB; no sidecars existed at the close observation.
+`2F5DB0FBB49E5ED886DFA792EC860E30151D41457828DC98E3906269D4869CCE`
+(1,204,224 bytes, mtime `2026-10-24T19:10:40Z`). This differs from the prior R7.3 observation
+(`B606A1…`); the mtime is after this R7.4 start (`19:00Z`), so an external writer changed it
+during the audit. R7.4 did not open/query/write the DB; no sidecars existed at the close
+observation.
 
 ## 3. Baseline verification
 

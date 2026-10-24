@@ -64,15 +64,16 @@ coordination DB was not opened/queried/checkpointed/written; no sidecars were mo
 
 ```text
 coordination_memory.sqlite3 observed at close:
-  BF544ECA04401588355E89D8727555F993E1129758CDCDA1A73B90AB7A86581E
-  1,187,840 bytes
-  mtime 2026-10-24T18:44:06Z
+  2F5DB0FBB49E5ED886DFA792EC860E30151D41457828DC98E3906269D4869CCE
+  1,204,224 bytes
+  mtime 2026-10-24T19:10:40Z
   sidecars: none observed
 ```
 
-This differs from the R7.3 close observation (`B606A1…`, 1,175,552 bytes) and predates this
-R7.4 turn (`19:00Z`). It is an external change. R7.4 does not claim the DB was unchanged; it
-only claims R7.4 did not access it and did not modify/delete sidecars.
+This differs from the R7.3 close observation (`B606A1…`, 1,175,552 bytes); the mtime is after
+this R7.4 turn start (`19:00Z`), so an external writer changed it during the audit. R7.4 does
+not claim the DB was unchanged; it only claims R7.4 did not access it and did not modify/delete
+sidecars.
 
 ## 5. Files
 
@@ -87,7 +88,7 @@ No source, test, schema, config, token, whitelist, or production data file chang
 
 ## 6. Commit / next gate
 
-- Local R7.4 docs commit: `__R74_COMMIT__`
+- Local R7.4 docs commit: `2d7945e29765b7e1f78b399cd4f1d7496597d5b7`
 - No push, merge, rebase, reset, clean, or cross-branch cherry-pick.
 - Next gate is a **human decision** on real issuer/principal/session/project binding,
   replay/revocation/TTL, signed packs/trusted authors, PII/retention/shared visibility,
