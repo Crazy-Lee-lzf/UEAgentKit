@@ -41,14 +41,14 @@ class Client:
         self.project_path_hash = descriptor["projectPathHash"]
         self.timeout = timeout
         self.request_samples: list[dict[str, Any]] = []
+        self.last_response_bytes = 0
 
     def _open(self) -> socket.socket:
         sock = socket.create_connection((self.address, self.port), timeout=self.timeout)
         sock.settimeout(self.timeout)
         return sock
 
-    @staticmethod
-    def _read_line(sock: socket.socket, max_bytes: int = 2 * 1024 * 1024) -> str:
+    def _read_line(self, sock: socket.socket, max_bytes: int = 2 * 1024 * 1024) -> str:
         buffer = b""
         deadline = time.monotonic() + 15.0
         while b"\n" not in buffer:
@@ -63,6 +63,7 @@ class Client:
                 raise BridgeError("client-disconnected", "editor closed the socket")
             buffer += chunk
         line, _ = buffer.split(b"\n", 1)
+        self.last_response_bytes = len(line) + 1
         return line.decode("utf-8")
 
     @staticmethod
@@ -132,6 +133,9 @@ class Client:
             sock.close()
         if len(self.request_samples) < 6 and method != "hello":
             sample = json.loads(json.dumps(payload))
+            arguments = (sample.get("params") or {}).get("arguments") or {}
+            if isinstance(arguments.get("cursor"), str):
+                arguments["cursor"] = "<redacted-cursor>"
             self.request_samples.append({"request": sample, "response": redact_response(response)})
         if response.get("ok") != expect_ok:
             error = response.get("error") or {}
@@ -154,6 +158,15 @@ def redact_response(response: dict[str, Any]) -> dict[str, Any]:
     error = clone.get("error")
     if isinstance(error, dict):
         error.pop("details", None)
+    result = clone.get("result")
+    if isinstance(result, dict):
+        data = result.get("data")
+        if isinstance(data, dict):
+            data.pop("descriptors", None)
+            data.pop("actions", None)
+            pagination = data.get("pagination")
+            if isinstance(pagination, dict) and "nextCursor" in pagination:
+                pagination["nextCursor"] = "<redacted-cursor>"
     return clone
 
 
@@ -284,6 +297,9 @@ class Harness:
         self.check("catalog availability is bounded",
                    512 <= int(catalog_pagination.get("catalogAvailable", 0)) < 38325)
         self.check("catalog total never implies 38k", catalog_pagination.get("total") != 38325)
+        self.check("no untrusted spawner descriptor in catalog",
+                   not any("untrusted" in json.dumps(item).lower() for item in catalog_items))
+        self.check_response_boundary()
 
         catalog_ids = sorted(item["actionId"] for item in catalog_items)
         catalog_digests = {item["actionId"]: item["descriptorDigest"] for item in catalog_items}
@@ -536,14 +552,136 @@ class Harness:
         finally:
             oversize.close()
 
+    def check_response_boundary(self) -> int:
+        """Prove the valid DTO boundary cannot reach the bridge's 1 MiB guard."""
+        self.client.invoke(CATALOG_TOOL, {"pageSize": 256})
+        max_page_bytes = self.client.last_response_bytes
+        self.check(
+            "max page (256) response is below the 1 MiB response guard",
+            max_page_bytes < 1048576,
+            {"responseBytes": max_page_bytes, "guardBytes": 1048576},
+        )
+        self.expect_invoke_error(CATALOG_TOOL, {"pageSize": 257},
+                                 "native-schema-invalid-arguments")
+        return max_page_bytes
+
+    def run_capture(self) -> None:
+        hello = self.client.hello()
+        self.check("native.invoke advertised in capture", "native.invoke" in (hello.get("capabilities") or []))
+        result = self.client.invoke(CATALOG_TOOL, {"pageSize": 64})
+        pagination = (result.get("data") or {}).get("pagination") or {}
+        cursor = pagination.get("nextCursor", "")
+        self.check("capture produced a cursor", bool(cursor))
+        out = Path(self.args.cursor_out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(cursor, encoding="utf-8")
+        max_page_bytes = self.check_response_boundary()
+        self.evidence = {
+            "mode": "capture",
+            "cursorBytes": len(cursor),
+            "ttlSeconds": pagination.get("ttlSeconds"),
+            "responseBytesAt256": max_page_bytes,
+            "requestSamples": self.client.request_samples[:4],
+        }
+
+    def run_stale(self) -> None:
+        hello = self.client.hello()
+        self.check("native.invoke advertised in stale probe", "native.invoke" in (hello.get("capabilities") or []))
+        cursor = Path(self.args.cursor_in).read_text(encoding="utf-8").strip()
+        response = self.client.request(
+            "native.invoke",
+            {"toolId": CATALOG_TOOL, "toolVersion": TOOL_VERSION,
+             "arguments": {"pageSize": 64, "cursor": cursor}},
+            expect_ok=False,
+        )
+        code = (response.get("error") or {}).get("code")
+        self.check("cross-editor epoch cursor is stale", code == "native-gate-revision-conflict",
+                   {"actual": code})
+        self.evidence = {
+            "mode": "stale",
+            "errorCode": code,
+            "requestSamples": self.client.request_samples[:4],
+        }
+
+    def run_expiry(self) -> None:
+        hello = self.client.hello()
+        self.check("native.invoke advertised in expiry probe", "native.invoke" in (hello.get("capabilities") or []))
+        result = self.client.invoke(CATALOG_TOOL, {"pageSize": 64})
+        pagination = (result.get("data") or {}).get("pagination") or {}
+        cursor = pagination.get("nextCursor", "")
+        ttl = int(pagination.get("ttlSeconds", 0))
+        self.check("short test TTL observed", 1 <= ttl <= 5, {"ttlSeconds": ttl})
+        time.sleep(max(1.0, float(self.args.expiry_wait)))
+        response = self.client.request(
+            "native.invoke",
+            {"toolId": CATALOG_TOOL, "toolVersion": TOOL_VERSION,
+             "arguments": {"pageSize": 64, "cursor": cursor}},
+            expect_ok=False,
+        )
+        code = (response.get("error") or {}).get("code")
+        message = ((response.get("error") or {}).get("message") or "").lower()
+        self.check("expired cursor is rejected", code == "native-schema-invalid-arguments",
+                   {"actual": code, "message": message[:120]})
+        self.check("expiry message is explicit", "expire" in message, {"message": message[:120]})
+        self.evidence = {
+            "mode": "expiry",
+            "ttlSeconds": ttl,
+            "waitedSeconds": self.args.expiry_wait,
+            "errorCode": code,
+            "errorMessageRedacted": message[:120],
+            "requestSamples": self.client.request_samples[:4],
+        }
+
+    def run_shutdown(self) -> None:
+        sock = self.client._open()
+        try:
+            sock.sendall(self.client._wire(self.client._hello_payload()))
+            hello = json.loads(self.client._read_line(sock))
+            self.check("shutdown client authenticated", bool(hello.get("ok")))
+            Path(self.args.shutdown_ready).write_text("ready\n", encoding="utf-8")
+            started = time.monotonic()
+            closed = False
+            error = ""
+            try:
+                sock.settimeout(20.0)
+                while True:
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        closed = True
+                        break
+            except (ConnectionResetError, ConnectionAbortedError, OSError) as exc:
+                closed = True
+                error = type(exc).__name__
+            elapsed = time.monotonic() - started
+            self.check("editor shutdown closes the held socket deterministically", closed,
+                       {"elapsedSeconds": round(elapsed, 3), "error": error})
+            self.evidence = {
+                "mode": "shutdown",
+                "closed": closed,
+                "elapsedSeconds": round(elapsed, 3),
+                "error": error,
+            }
+        finally:
+            sock.close()
+
     def run(self) -> int:
         if self.args.mode == "shadow":
             self.run_shadow()
             self.run_negatives()
         elif self.args.mode == "off":
             self.run_off()
-        else:
+        elif self.args.mode == "manifest":
             self.run_manifest()
+        elif self.args.mode == "capture":
+            self.run_capture()
+        elif self.args.mode == "stale":
+            self.run_stale()
+        elif self.args.mode == "expiry":
+            self.run_expiry()
+        elif self.args.mode == "shutdown":
+            self.run_shutdown()
+        else:
+            raise BridgeError("bad-mode", f"unknown mode {self.args.mode}")
         self.evidence["checks"] = self.results
         self.evidence["failures"] = self.failures
         self.evidence["ok"] = not self.failures
@@ -559,7 +697,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--descriptor", required=True)
     parser.add_argument("--pid", type=int, required=True)
-    parser.add_argument("--mode", choices=("shadow", "off", "manifest"), required=True)
+    parser.add_argument("--mode", choices=("shadow", "off", "manifest", "capture", "stale", "expiry", "shutdown"), required=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--project-dir", required=True)
     parser.add_argument("--asset-path", default="/Game/R1Native/BP_R1ContextFixture.BP_R1ContextFixture")
@@ -568,6 +706,10 @@ def main() -> int:
     parser.add_argument("--r14-catalog", default="Build/r1-native/Evidence/R14/full-j/catalog-export.json")
     parser.add_argument("--r14-context", default="Build/r1-native/Evidence/R14/full-j/context-export.json")
     parser.add_argument("--descriptor-timeout", type=float, default=180.0)
+    parser.add_argument("--cursor-out", default="")
+    parser.add_argument("--cursor-in", default="")
+    parser.add_argument("--expiry-wait", type=float, default=3.0)
+    parser.add_argument("--shutdown-ready", default="")
     args = parser.parse_args()
 
     descriptor = wait_for_descriptor(Path(args.descriptor), args.pid, args.descriptor_timeout)

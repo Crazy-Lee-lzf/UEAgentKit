@@ -18,6 +18,22 @@ class HarnessUnitTests(unittest.TestCase):
         self.assertEqual(redacted["error"]["code"], "x")
         self.assertNotIn("details", redacted["error"])
 
+    def test_redact_response_drops_bulk_descriptors_and_cursor(self) -> None:
+        response = {
+            "ok": True,
+            "result": {"data": {
+                "descriptors": [{"actionId": "action:1"}],
+                "actions": [{"actionId": "action:2"}],
+                "pagination": {"nextCursor": "v1.secret", "total": 512},
+            }},
+        }
+        redacted = harness.redact_response(response)
+        data = redacted["result"]["data"]
+        self.assertNotIn("descriptors", data)
+        self.assertNotIn("actions", data)
+        self.assertEqual(data["pagination"]["nextCursor"], "<redacted-cursor>")
+        self.assertEqual(data["pagination"]["total"], 512)
+
     def test_wait_for_descriptor_matches_pid(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "EditorBridge.json"

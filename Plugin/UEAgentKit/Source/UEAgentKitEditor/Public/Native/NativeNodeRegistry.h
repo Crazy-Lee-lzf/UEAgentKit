@@ -370,6 +370,9 @@ private:
 	/** Per-session HMAC key for opaque pagination cursors. */
 	TArray<uint8> CursorKey;
 
+	/** Effective cursor TTL; 900 in production, overridable only by the gated test seam. */
+	int32 CursorTtlSeconds = 900;
+
 	FString ComputeCursorEpoch(const FString& Kind, const FString& SetFingerprint) const;
 
 	/**
