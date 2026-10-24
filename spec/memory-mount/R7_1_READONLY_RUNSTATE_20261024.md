@@ -106,7 +106,7 @@ spec/memory-mount/R7_MOUNT_CONTRACT.md
 
 ## 6. Commit / next gate
 
-- Local R7.1 code+docs commit: `__R71_COMMIT__`
+- Local R7.1 code+docs commit: `a6f39a9651e65ddb862324a413ec0ae71d392275`
 - No push, merge, rebase, reset, clean, or cross-branch cherry-pick.
 - Next gate is human decision on real issuer, signed receipts, PII/retention, precedence,
   promotion/write, MCP exposure, and multi-tenant policy. R7.1 remains an isolated offline
