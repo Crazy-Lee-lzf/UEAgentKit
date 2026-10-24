@@ -19,6 +19,8 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+from ue_launch import popen_minimized
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -92,7 +94,7 @@ def main() -> int:
     ]
     started = utc_now()
     with editor_log_path.open("wb") as editor_log:
-        process = subprocess.Popen(
+        process = popen_minimized(
             command,
             cwd=str(HOST_ROOT),
             stdout=editor_log,

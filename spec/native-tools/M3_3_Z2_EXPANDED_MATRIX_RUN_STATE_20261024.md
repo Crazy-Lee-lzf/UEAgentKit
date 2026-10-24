@@ -66,3 +66,10 @@ DLL `sha256:662104af…`.
 - Macro fixture absent/not claimed.
 - Z4 approval NOT GRANTED; Z5/Z6 production qualifications remain design-only.
 - No push/merge; scoped local commit only.
+
+## 8. Test Editor window UX
+
+Test Editors now launch minimized via `tools/ue_launch.py` (`SW_SHOWMINIMIZED` plus a bounded
+PID-scoped `EnumWindows` monitor), never hidden. Validation: real UE 5.6.1 P11MenuContract exit 0,
+window found/minimized; patched multi-graph harness exit 0. Details in
+`spec/native-tools/UE_TEST_WINDOW_LAUNCH_UX.md`.

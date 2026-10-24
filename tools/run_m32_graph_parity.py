@@ -10,6 +10,8 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+from ue_launch import popen_minimized
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -91,7 +93,7 @@ def main() -> int:
         log = EVIDENCE / f"Graph-{gid}.log"
         try:
             with log.open("wb") as handle:
-                process = subprocess.Popen(
+                process = popen_minimized(
                     command, cwd=str(HOST), stdout=handle, stderr=subprocess.STDOUT
                 )
                 exit_code = process.wait(timeout=180)

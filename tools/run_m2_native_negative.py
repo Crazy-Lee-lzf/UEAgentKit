@@ -17,6 +17,8 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+from ue_launch import popen_minimized
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -184,7 +186,7 @@ def main() -> int:
             f"-ReportExportPath={report_dir}",
         ]
         with log_path.open("wb") as log:
-            process = subprocess.Popen(
+            process = popen_minimized(
                 command, cwd=str(HOST_ROOT), stdout=log, stderr=subprocess.STDOUT
             )
             try:
