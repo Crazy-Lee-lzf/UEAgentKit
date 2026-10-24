@@ -2,6 +2,7 @@
 #include "EditorBridgeBatchTaskManager.h"
 #include "EditorBridgeHandlerUtils.h"
 #include "EditorBridgeLogCapture.h"
+#include "Native/NativeNodeRegistry.h"
 #include "BlueprintGraphLayoutP7TestOnly.h"
 #include "BlueprintGraphLayoutP8TestOnly.h"
 #include "BlueprintGraphLayoutP9TestOnly.h"
@@ -1669,6 +1670,64 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 			ErrorCode,
 			ErrorMessage);
 	}
+	else if (Method == TEXT("native.invoke"))
+	{
+		// R1.5 shadow surface: read-only native tools only, gated by the registry
+		// mode.  With NativeToolRegistry=off this branch is unreachable from a
+		// capability-aware client (the capability is not advertised) and returns
+		// native-registry-unavailable.
+		FString ToolId;
+		FString ToolVersion;
+		Params->TryGetStringField(TEXT("toolId"), ToolId);
+		Params->TryGetStringField(TEXT("toolVersion"), ToolVersion);
+
+		TSharedPtr<FJsonObject> Arguments = MakeShared<FJsonObject>();
+		const TSharedPtr<FJsonObject>* ArgumentsField = nullptr;
+		if (Params->TryGetObjectField(TEXT("arguments"), ArgumentsField) && ArgumentsField != nullptr && ArgumentsField->IsValid())
+		{
+			Arguments = *ArgumentsField;
+		}
+
+		bool bInvalidParameters = false;
+		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Params->Values)
+		{
+			if (Pair.Key != TEXT("toolId") && Pair.Key != TEXT("toolVersion")
+				&& Pair.Key != TEXT("arguments") && Pair.Key != TEXT("context"))
+			{
+				bInvalidParameters = true;
+				break;
+			}
+		}
+		const TSharedPtr<FJsonObject>* Context = nullptr;
+		if (!bInvalidParameters && Params->TryGetObjectField(TEXT("context"), Context) && Context != nullptr && Context->IsValid())
+		{
+			for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*Context)->Values)
+			{
+				if (Pair.Key != TEXT("surface") && Pair.Key != TEXT("assetPath") && Pair.Key != TEXT("graphGuid")
+					&& Pair.Key != TEXT("nodeGuid") && Pair.Key != TEXT("pinName"))
+				{
+					bInvalidParameters = true;
+					break;
+				}
+			}
+		}
+		if (bInvalidParameters)
+		{
+			SendActionResult(false, nullptr, TEXT("native-schema-invalid-arguments"), TEXT("Unknown native.invoke parameter."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> NativeResult;
+			FString NativeErrorCode;
+			FString NativeErrorMessage;
+			const bool bNativeOk = FNativeNodeRegistry::Get().TryInvokeShadowTool(
+				ToolId, ToolVersion, Arguments, NativeResult, NativeErrorCode, NativeErrorMessage);
+			const FString FinalMessage = NativeErrorMessage.IsEmpty()
+				? FString(TEXT("The native tool failed."))
+				: NativeErrorMessage;
+			SendActionResult(bNativeOk, NativeResult, NativeErrorCode, FinalMessage);
+		}
+	}
 	else
 	{
 		SendError(Client.Socket, RequestId, TEXT("live-editor-capability-unavailable"), TEXT("The requested Editor Bridge capability is not registered."));
@@ -1862,6 +1921,10 @@ TArray<TSharedPtr<FJsonValue>> FUEAgentKitEditorBridge::BuildCapabilityValues() 
 	{
 		Values.Add(MakeShared<FJsonValueString>(UEAgentKitBlueprintGraphLayoutP9::ApplyMethod));
 		Values.Add(MakeShared<FJsonValueString>(UEAgentKitBlueprintGraphLayoutP9::SaveMethod));
+	}
+	if (FNativeNodeRegistry::Get().IsAvailable())
+	{
+		Values.Add(MakeShared<FJsonValueString>(TEXT("native.invoke")));
 	}
 	return Values;
 }
