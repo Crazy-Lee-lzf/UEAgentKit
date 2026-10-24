@@ -1,0 +1,262 @@
+{
+  "schemaVersion": "ueak.native-registry/1.0",
+  "registryVersion": "1.0.0",
+  "host": {
+    "pluginVersion": "0.8.0",
+    "minEngineVersion": "5.6.1",
+    "engineVersionTested": "5.6.1"
+  },
+  "tools": [
+    {
+      "name": "graph.nodeRegistry.catalog",
+      "version": "1.0.0",
+      "domain": "graph",
+      "titleKey": "ueak.tool.graph.nodeRegistry.catalog.title",
+      "readOnly": true,
+      "risk": "R1",
+      "implementation": "core",
+      "capabilities": [
+        "graph-node-registry-catalog"
+      ],
+      "requires": {
+        "editor": true,
+        "transaction": false,
+        "compile": false,
+        "save": false,
+        "policyKeys": [],
+        "revisionScope": "none"
+      },
+      "exposure": {
+        "bridge": {
+          "method": "native.invoke",
+          "aliases": []
+        },
+        "mcp": null,
+        "toolMenu": null,
+        "cli": null
+      },
+      "gating": {
+        "defaultDecision": "deny",
+        "maturity": "experimental",
+        "gateProfile": null,
+        "requiresPIEStopped": false,
+        "requiresPackageClean": false,
+        "requiresAssetLoaded": false,
+        "mayLoadAsset": false,
+        "requiresConfirmation": false,
+        "assetAllowlist": []
+      },
+      "threading": {
+        "execution": "game",
+        "blocking": false,
+        "maxBlockMs": 0
+      },
+      "dto": {
+        "paramsSchemaId": "ueak.native.graph.nodeRegistry.catalog.params/1.0",
+        "resultSchemaId": "ueak.native.graph.nodeRegistry.catalog.result/1.0",
+        "maxRequestBytes": 4096,
+        "maxResponseBytes": 1048576,
+        "maxItems": 512,
+        "truncation": "explicit-flags"
+      },
+      "transaction": {
+        "kind": "none",
+        "snapshot": "io",
+        "rollback": "none"
+      },
+      "limits": {
+        "maxOperationsPerInvocation": 1,
+        "maxAffectedNodes": 0,
+        "timeoutMs": 2000
+      },
+      "errorCodes": [
+        "native-registry-unavailable",
+        "native-registry-invalid-manifest",
+        "native-tool-unknown",
+        "native-tool-version-unsupported",
+        "native-schema-invalid-arguments",
+        "native-limit-response-too-large",
+        "native-internal-error"
+      ],
+      "evidence": {
+        "required": [],
+        "optional": []
+      },
+      "audit": {
+        "persist": false,
+        "includeResultDigest": true
+      },
+      "minHostVersion": "0.8.0",
+      "deprecated": false
+    },
+    {
+      "name": "graph.nodeRegistry.fingerprint",
+      "version": "1.0.0",
+      "domain": "graph",
+      "titleKey": "ueak.tool.graph.nodeRegistry.fingerprint.title",
+      "readOnly": true,
+      "risk": "R1",
+      "implementation": "core",
+      "capabilities": [
+        "graph-node-registry-fingerprint"
+      ],
+      "requires": {
+        "editor": true,
+        "transaction": false,
+        "compile": false,
+        "save": false,
+        "policyKeys": [],
+        "revisionScope": "none"
+      },
+      "exposure": {
+        "bridge": {
+          "method": "native.invoke",
+          "aliases": []
+        },
+        "mcp": null,
+        "toolMenu": null,
+        "cli": null
+      },
+      "gating": {
+        "defaultDecision": "deny",
+        "maturity": "experimental",
+        "gateProfile": null,
+        "requiresPIEStopped": false,
+        "requiresPackageClean": false,
+        "requiresAssetLoaded": false,
+        "mayLoadAsset": false,
+        "requiresConfirmation": false,
+        "assetAllowlist": []
+      },
+      "threading": {
+        "execution": "game",
+        "blocking": false,
+        "maxBlockMs": 0
+      },
+      "dto": {
+        "paramsSchemaId": "ueak.native.graph.nodeRegistry.fingerprint.params/1.0",
+        "resultSchemaId": "ueak.native.graph.nodeRegistry.fingerprint.result/1.0",
+        "maxRequestBytes": 1024,
+        "maxResponseBytes": 65536,
+        "maxItems": 1,
+        "truncation": "explicit-flags"
+      },
+      "transaction": {
+        "kind": "none",
+        "snapshot": "io",
+        "rollback": "none"
+      },
+      "limits": {
+        "maxOperationsPerInvocation": 1,
+        "maxAffectedNodes": 0,
+        "timeoutMs": 2000
+      },
+      "errorCodes": [
+        "native-registry-unavailable",
+        "native-registry-invalid-manifest",
+        "native-tool-unknown",
+        "native-tool-version-unsupported",
+        "native-schema-invalid-arguments",
+        "native-limit-response-too-large",
+        "native-internal-error"
+      ],
+      "evidence": {
+        "required": [],
+        "optional": []
+      },
+      "audit": {
+        "persist": false,
+        "includeResultDigest": true
+      },
+      "minHostVersion": "0.8.0",
+      "deprecated": false
+    },
+    {
+      "name": "graph.nodeRegistry.filterContext",
+      "version": "1.0.0",
+      "domain": "graph",
+      "titleKey": "ueak.tool.graph.nodeRegistry.filterContext.title",
+      "readOnly": true,
+      "risk": "R1",
+      "implementation": "core",
+      "capabilities": [
+        "graph-node-registry-filter-context"
+      ],
+      "requires": {
+        "editor": true,
+        "transaction": false,
+        "compile": false,
+        "save": false,
+        "policyKeys": [],
+        "revisionScope": "none"
+      },
+      "exposure": {
+        "bridge": {
+          "method": "native.invoke",
+          "aliases": []
+        },
+        "mcp": null,
+        "toolMenu": null,
+        "cli": null
+      },
+      "gating": {
+        "defaultDecision": "deny",
+        "maturity": "experimental",
+        "gateProfile": null,
+        "requiresPIEStopped": false,
+        "requiresPackageClean": false,
+        "requiresAssetLoaded": true,
+        "mayLoadAsset": false,
+        "requiresConfirmation": false,
+        "assetAllowlist": []
+      },
+      "threading": {
+        "execution": "game",
+        "blocking": false,
+        "maxBlockMs": 0
+      },
+      "dto": {
+        "paramsSchemaId": "ueak.native.graph.nodeRegistry.filterContext.params/1.0",
+        "resultSchemaId": "ueak.native.graph.nodeRegistry.filterContext.result/1.0",
+        "maxRequestBytes": 8192,
+        "maxResponseBytes": 1048576,
+        "maxItems": 512,
+        "truncation": "explicit-flags"
+      },
+      "transaction": {
+        "kind": "none",
+        "snapshot": "io",
+        "rollback": "none"
+      },
+      "limits": {
+        "maxOperationsPerInvocation": 1,
+        "maxAffectedNodes": 0,
+        "timeoutMs": 5000
+      },
+      "errorCodes": [
+        "native-registry-unavailable",
+        "native-registry-invalid-manifest",
+        "native-tool-unknown",
+        "native-tool-version-unsupported",
+        "native-schema-invalid-arguments",
+        "native-limit-response-too-large",
+        "native-internal-error",
+        "graphpatch-asset-not-loaded",
+        "graphpatch-graph-not-found",
+        "graph-node-not-found",
+        "graph-pin-not-found",
+        "graphpatch-context-mismatch"
+      ],
+      "evidence": {
+        "required": [],
+        "optional": []
+      },
+      "audit": {
+        "persist": false,
+        "includeResultDigest": true
+      },
+      "minHostVersion": "0.8.0",
+      "deprecated": false
+    }
+  ]
+}

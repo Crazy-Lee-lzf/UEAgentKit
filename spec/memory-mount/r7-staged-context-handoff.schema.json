@@ -1,0 +1,227 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ueagentkit.local/schemas/r7-staged-context-handoff-v1.schema.json",
+  "title": "R7.2 Staged Context Handoff v1",
+  "description": "Default-off, verified read-only handoff of local authoritative context plus mounted untrusted knowledge.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "kind",
+    "feature",
+    "policy",
+    "sections",
+    "pins",
+    "unmountedPins",
+    "dedupe",
+    "budget",
+    "warnings"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "kind": {"const": "r7-staged-context-handoff"},
+    "feature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "enabled", "defaultOff", "mode", "activation"],
+      "properties": {
+        "name": {"const": "r7.staged_context"},
+        "enabled": {"const": true},
+        "defaultOff": {"const": true},
+        "mode": {"const": "verified-read-only"},
+        "activation": {"const": "explicit-host-opt-in"}
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "localAuthority",
+        "mountedKnowledge",
+        "mountedInstructionPolicy",
+        "precedence",
+        "note"
+      ],
+      "properties": {
+        "localAuthority": {"const": "local-authoritative"},
+        "mountedKnowledge": {"const": "untrusted-source-content"},
+        "mountedInstructionPolicy": {"const": "never-execute"},
+        "precedence": {"const": "local-authority-first"},
+        "note": {"type": "string"}
+      }
+    },
+    "sections": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "prefixItems": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["sectionId", "authority", "textTrust", "content"],
+          "properties": {
+            "sectionId": {"const": "local-authority"},
+            "authority": {"const": "local-project"},
+            "textTrust": {"const": "local-authoritative"},
+            "content": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["projectKey", "taskContext", "memoryInjection"],
+              "properties": {
+                "projectKey": {"type": "string"},
+                "taskContext": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["schemaVersion", "tool", "query"],
+                  "properties": {
+                    "schemaVersion": {"type": "string"},
+                    "tool": {"type": "string"},
+                    "query": {"type": "string"}
+                  }
+                },
+                "memoryInjection": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "available",
+                    "stale",
+                    "reason",
+                    "snapshotId",
+                    "injectionHash",
+                    "text",
+                    "l3Count",
+                    "l2Count",
+                    "contentChars",
+                    "estimatedTokens"
+                  ],
+                  "properties": {
+                    "available": {"type": "boolean"},
+                    "stale": {"type": "boolean"},
+                    "reason": {"type": "string"},
+                    "snapshotId": {"type": "string"},
+                    "injectionHash": {"type": "string"},
+                    "text": {"type": "string"},
+                    "l3Count": {"type": "integer", "minimum": 0},
+                    "l2Count": {"type": "integer", "minimum": 0},
+                    "contentChars": {"type": "integer", "minimum": 0},
+                    "estimatedTokens": {"type": "integer", "minimum": 0}
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sectionId",
+            "authority",
+            "textTrust",
+            "instructionPolicy",
+            "content"
+          ],
+          "properties": {
+            "sectionId": {"const": "mounted-knowledge"},
+            "authority": {"const": "untrusted-mounted-pack"},
+            "textTrust": {"const": "untrusted-source-content"},
+            "instructionPolicy": {"const": "never-execute"},
+            "content": {"$ref": "r7-agent-context-projection.schema.json"}
+          }
+        }
+      ]
+    },
+    "pins": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["packId", "revision", "contentHash", "manifestDigest"],
+        "properties": {
+          "packId": {"type": "string"},
+          "revision": {"type": "string"},
+          "contentHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+          "manifestDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+        }
+      }
+    },
+    "unmountedPins": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["packId", "revision", "contentHash", "manifestDigest"],
+        "properties": {
+          "packId": {"type": "string"},
+          "revision": {"type": "string"},
+          "contentHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+          "manifestDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+        }
+      }
+    },
+    "dedupe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "precedence",
+        "localAuthoritySubjectKeys",
+        "shadowedMountedItems",
+        "shadowedSubjectKeys"
+      ],
+      "properties": {
+        "precedence": {"const": "local-authority-first"},
+        "localAuthoritySubjectKeys": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "shadowedMountedItems": {"type": "integer", "minimum": 0},
+        "shadowedSubjectKeys": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxOutputBytes",
+        "maxApproxTokens",
+        "maxLocalBytes",
+        "maxMountItems",
+        "maxPacks",
+        "maxExcerptChars",
+        "timeoutMs",
+        "localAuthorityBytes",
+        "usedOutputBytes",
+        "usedApproxTokens",
+        "mountedItems",
+        "mountedPacks",
+        "truncated",
+        "tokenApproxMethod"
+      ],
+      "properties": {
+        "maxOutputBytes": {"type": "integer"},
+        "maxApproxTokens": {"type": "integer"},
+        "maxLocalBytes": {"type": "integer"},
+        "maxMountItems": {"type": "integer"},
+        "maxPacks": {"type": "integer"},
+        "maxExcerptChars": {"type": "integer"},
+        "timeoutMs": {"type": "integer"},
+        "localAuthorityBytes": {"type": "integer"},
+        "usedOutputBytes": {"type": "integer"},
+        "usedApproxTokens": {"type": "integer"},
+        "mountedItems": {"type": "integer"},
+        "mountedPacks": {"type": "integer"},
+        "truncated": {"type": "boolean"},
+        "tokenApproxMethod": {"const": "chars-div-4"}
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  }
+}

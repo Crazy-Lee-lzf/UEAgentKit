@@ -230,3 +230,77 @@ bool FBlueprintContextSha256::HashText(const FString& Text, FString& OutHexDiges
 	OutHexDigest = DigestToHex(Digest);
 	return true;
 }
+
+bool FBlueprintContextSha256::HashUtf8Bytes(const uint8* Data, const int64 Length, FString& OutHexDigest)
+{
+	using namespace BlueprintContextSha256Private;
+
+	OutHexDigest.Reset();
+	if (Length < 0 || (Data == nullptr && Length > 0))
+	{
+		return false;
+	}
+
+	FSha256Hasher Hasher;
+	Hasher.Update(Data, Length);
+
+	uint8 Digest[32];
+	Hasher.Final(Digest);
+	OutHexDigest = DigestToHex(Digest);
+	return true;
+}
+
+bool FBlueprintContextSha256::HmacSha256(
+	const uint8* Key,
+	const int64 KeyLength,
+	const uint8* Data,
+	const int64 DataLength,
+	uint8 OutDigest[32])
+{
+	using namespace BlueprintContextSha256Private;
+
+	if (KeyLength < 0 || DataLength < 0
+		|| (Key == nullptr && KeyLength > 0)
+		|| (Data == nullptr && DataLength > 0)
+		|| OutDigest == nullptr)
+	{
+		return false;
+	}
+
+	constexpr int32 BlockSize = 64;
+	uint8 NormalizedKey[BlockSize]{};
+	int32 NormalizedKeyLength = 0;
+	if (KeyLength > BlockSize)
+	{
+		FSha256Hasher KeyHasher;
+		KeyHasher.Update(Key, KeyLength);
+		KeyHasher.Final(NormalizedKey);
+		NormalizedKeyLength = 32;
+	}
+	else if (KeyLength > 0)
+	{
+		FMemory::Memcpy(NormalizedKey, Key, KeyLength);
+		NormalizedKeyLength = static_cast<int32>(KeyLength);
+	}
+
+	uint8 InnerPad[BlockSize];
+	uint8 OuterPad[BlockSize];
+	for (int32 Index = 0; Index < BlockSize; ++Index)
+	{
+		const uint8 KeyByte = Index < NormalizedKeyLength ? NormalizedKey[Index] : 0;
+		InnerPad[Index] = static_cast<uint8>(KeyByte ^ 0x36);
+		OuterPad[Index] = static_cast<uint8>(KeyByte ^ 0x5c);
+	}
+
+	uint8 InnerDigest[32];
+	FSha256Hasher InnerHasher;
+	InnerHasher.Update(InnerPad, BlockSize);
+	InnerHasher.Update(Data, DataLength);
+	InnerHasher.Final(InnerDigest);
+
+	FSha256Hasher OuterHasher;
+	OuterHasher.Update(OuterPad, BlockSize);
+	OuterHasher.Update(InnerDigest, 32);
+	OuterHasher.Final(OutDigest);
+	return true;
+}
