@@ -127,7 +127,7 @@
 | 证据 | 路径 |
 |---|---|
 | 构建日志 | `Build/r1-native/Evidence/R14/build-final-2.log` |
-| 完整 run-g / run-h | `Evidence/R14/full-i/`、`Evidence/R14/full-j/`（automation-index、log、catalog/context export、environment、DLL hash） |
+| 完整 run-i / run-j | `Evidence/R14/full-i/`、`Evidence/R14/full-j/`（automation-index、log、catalog/context export、environment、DLL hash） |
 | 单测 cursor / pagination | `Evidence/R14/cursor-vectors-2/`、`Evidence/R14/pagination-2/` |
 | 机器汇总 | `Evidence/R14/r14-summary.json` |
 | 安全巡检 | `Evidence/R14/safety-inspection.txt` |
