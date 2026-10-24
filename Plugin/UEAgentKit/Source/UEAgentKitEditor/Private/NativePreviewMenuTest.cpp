@@ -10,21 +10,25 @@
 #include "Editor.h"
 #include "Engine/Blueprint.h"
 #include "HAL/FileManager.h"
+#include "K2Node_CallFunction.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/CommandLine.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
+#include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "NativePreviewMenuSettings.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "Subsystems/AssetEditorSubsystem.h"
+#include "Tests/AutomationEditorCommon.h"
 #include "ToolMenu.h"
 #include "ToolMenuContext.h"
 #include "ToolMenuEntry.h"
 #include "ToolMenus.h"
+#include "UObject/SavePackage.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -110,6 +114,28 @@ namespace UEAgentKitNativeM3Test
 		FToolMenuSection* Section = Menu->FindSection(P11SectionName);
 		return Section != nullptr ? Section->FindEntry(P11EntryName) : nullptr;
 	}
+
+	bool SaveFixture(UBlueprint* Blueprint, FString& OutError)
+	{
+		UPackage* Package = Blueprint != nullptr ? Blueprint->GetOutermost() : nullptr;
+		if (Package == nullptr)
+		{
+			OutError = TEXT("The M3 fixture package is unavailable.");
+			return false;
+		}
+		Package->MarkPackageDirty();
+		const FString Filename = FPackageName::LongPackageNameToFilename(
+			Package->GetName(), FPackageName::GetAssetPackageExtension());
+		FSavePackageArgs SaveArgs;
+		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+		SaveArgs.SaveFlags = SAVE_NoError;
+		if (!UPackage::SavePackage(Package, Blueprint, *Filename, SaveArgs))
+		{
+			OutError = TEXT("Could not save the M3 fixture.");
+			return false;
+		}
+		return true;
+	}
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -183,6 +209,10 @@ bool FUEAgentKitNativeM3MenuTest::RunTest(const FString& Parameters)
 		return false;
 	}
 	FUEAgentKitGraphLayoutP11Menu::SetTestDialogSuppression(true);
+	if (Scenario == TEXT("dirty"))
+	{
+		Blueprint->GetOutermost()->SetDirtyFlag(true);
+	}
 	const double InvokedAt = FPlatformTime::Seconds();
 	const bool bInvoked = Entry->TryExecuteToolUIAction(MenuContext);
 	const double InvokeSeconds = FPlatformTime::Seconds() - InvokedAt;
@@ -193,6 +223,41 @@ bool FUEAgentKitNativeM3MenuTest::RunTest(const FString& Parameters)
 	if (!TestNotNull(TEXT("M3 active menu runtime exists"), Active))
 	{
 		return false;
+	}
+	if (Scenario == TEXT("revision") || Scenario == TEXT("fingerprint"))
+	{
+		if (!TestTrue(
+				TEXT("M3 stale scenario waits for broker response before mutation"),
+				Active->WaitForNativeWorkerResponseForTest(8.0)))
+		{
+			return false;
+		}
+		UK2Node_CallFunction* Print = nullptr;
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			Print = Cast<UK2Node_CallFunction>(Node);
+			if (Print != nullptr)
+			{
+				break;
+			}
+		}
+		if (!TestNotNull(TEXT("M3 stale mutation node exists"), Print))
+		{
+			return false;
+		}
+		Print->NodePosX += 40;
+		if (Scenario == TEXT("revision"))
+		{
+			if (!TestTrue(TEXT("M3 revision mutation saves"), UEAgentKitNativeM3Test::SaveFixture(Blueprint, Error)))
+			{
+				AddError(Error);
+				return false;
+			}
+		}
+		else
+		{
+			Blueprint->GetOutermost()->SetDirtyFlag(false);
+		}
 	}
 	if (Scenario == TEXT("busy"))
 	{
@@ -246,11 +311,47 @@ bool FUEAgentKitNativeM3MenuTest::RunTest(const FString& Parameters)
 			ErrorCode,
 			FString(TEXT("native-preview-broker-descriptor-missing")));
 	}
-	else if (Scenario == TEXT("token") || Scenario == TEXT("dacl"))
+	else if (Scenario == TEXT("token") || Scenario == TEXT("dacl") || Scenario == TEXT("forged")
+		|| Scenario == TEXT("dirty") || Scenario == TEXT("revision") || Scenario == TEXT("fingerprint"))
 	{
 		TestFalse(TEXT("M3 security failure produces no plan"), bOk || Receipt->GetBoolField(TEXT("planProduced")));
 		TestFalse(TEXT("M3 security failure does not fall back"), bFallback);
 		TestTrue(TEXT("M3 security code present"), !ErrorCode.IsEmpty());
+		if (Scenario == TEXT("dirty"))
+		{
+			TestEqual(TEXT("M3 dirty code"), ErrorCode, FString(TEXT("native-preview-package-dirty")));
+		}
+		else if (Scenario == TEXT("revision"))
+		{
+			TestEqual(TEXT("M3 revision code"), ErrorCode, FString(TEXT("native-preview-revision-conflict")));
+		}
+		else if (Scenario == TEXT("fingerprint"))
+		{
+			TestEqual(TEXT("M3 fingerprint code"), ErrorCode, FString(TEXT("native-preview-fingerprint-conflict")));
+		}
+		else if (Scenario == TEXT("forged"))
+		{
+			TestEqual(TEXT("M3 forged plan code"), ErrorCode, FString(TEXT("native-preview-plan-id-mismatch")));
+		}
+	}
+	else if (Scenario == TEXT("timeout"))
+	{
+		TestTrue(TEXT("M3 timeout fallback produces a legacy plan"), bOk && Receipt->GetBoolField(TEXT("planProduced")));
+		TestTrue(TEXT("M3 timeout fallback indicator"), bFallback);
+		TestEqual(
+			TEXT("M3 timeout native code"),
+			Receipt->GetStringField(TEXT("nativeErrorCode")),
+			FString(TEXT("native-preview-timeout")));
+	}
+	else if (Scenario == TEXT("timeout-strict"))
+	{
+		TestFalse(TEXT("M3 timeout strict produces no plan"), bOk || Receipt->GetBoolField(TEXT("planProduced")));
+		TestFalse(TEXT("M3 timeout strict does not fall back"), bFallback);
+		TestEqual(TEXT("M3 timeout strict code"), ErrorCode, FString(TEXT("native-preview-timeout")));
+	}
+	if (Scenario == TEXT("dirty"))
+	{
+		Blueprint->GetOutermost()->SetDirtyFlag(false);
 	}
 	TestFalse(TEXT("M3 preview does not dirty the package"), Blueprint->GetOutermost()->IsDirty());
 
@@ -265,6 +366,165 @@ bool FUEAgentKitNativeM3MenuTest::RunTest(const FString& Parameters)
 	TestTrue(
 		TEXT("M3 evidence writes"),
 		UEAgentKitNativeM3Test::WriteJson(UEAgentKitNativeM3Test::EvidencePath(Scenario), Evidence, Error));
+	return true;
+}
+
+
+namespace UEAgentKitNativeM3Pie
+{
+	struct FState
+	{
+		FAutomationTestBase* Test = nullptr;
+		UEdGraph* Graph = nullptr;
+		UEdGraphNode* Node = nullptr;
+		UEdGraphPin* Pin = nullptr;
+		bool bCompleted = false;
+	};
+
+	class FInvokeMenuDuringPie final : public IAutomationLatentCommand
+	{
+	public:
+		explicit FInvokeMenuDuringPie(TSharedRef<FState> InState)
+			: State(InState)
+		{
+		}
+
+		virtual bool Update() override
+		{
+			if (State->bCompleted)
+			{
+				return true;
+			}
+			if (GEditor == nullptr || !GEditor->IsPlaySessionInProgress() || GEditor->PlayWorld == nullptr)
+			{
+				return false;
+			}
+			FToolMenuContext Context;
+			UToolMenu* Menu = UEAgentKitNativeM3Test::GenerateMenu(
+				State->Graph, State->Node, State->Pin, Context);
+			FToolMenuEntry* Entry = UEAgentKitNativeM3Test::FindEntry(Menu);
+			State->Test->TestNotNull(TEXT("M3 PIE menu entry exists"), Entry);
+			if (Entry == nullptr)
+			{
+				State->bCompleted = true;
+				return true;
+			}
+			State->Test->TestTrue(
+				TEXT("M3 PIE menu action returns without waiting"),
+				Entry->TryExecuteToolUIAction(Context));
+			FUEAgentKitGraphLayoutP11Menu* Active = FUEAgentKitGraphLayoutP11Menu::GetActiveForTest();
+			State->Test->TestNotNull(TEXT("M3 PIE active runtime exists"), Active);
+			if (Active == nullptr)
+			{
+				State->bCompleted = true;
+				return true;
+			}
+			State->Test->TestTrue(
+				TEXT("M3 PIE preview reaches terminal"),
+				Active->WaitForNativePreviewForTest(15.0));
+			TSharedPtr<FJsonObject> Receipt = Active->GetLastReceiptForTest();
+			State->Test->TestTrue(TEXT("M3 PIE receipt exists"), Receipt.IsValid());
+			if (Receipt.IsValid())
+			{
+				const FString Code = Receipt->GetStringField(TEXT("errorCode"));
+				State->Test->TestEqual(
+					TEXT("M3 PIE fail-closed code"), Code, FString(TEXT("native-preview-pie-active")));
+				State->Test->TestFalse(
+					TEXT("M3 PIE does not fall back"), Receipt->GetBoolField(TEXT("fallback")));
+				State->Test->TestFalse(
+					TEXT("M3 PIE produces no plan"), Receipt->GetBoolField(TEXT("planProduced")));
+				FString Error;
+				TSharedPtr<FJsonObject> Evidence = MakeShared<FJsonObject>();
+				Evidence->SetStringField(TEXT("schemaVersion"), TEXT("ueak.m3.pie-evidence/1.0"));
+				Evidence->SetStringField(TEXT("scenario"), TEXT("pie"));
+				Evidence->SetObjectField(TEXT("receipt"), Receipt);
+				Evidence->SetBoolField(TEXT("packageDirtyAfter"), false);
+				State->Test->TestTrue(
+					TEXT("M3 PIE evidence writes"),
+					UEAgentKitNativeM3Test::WriteJson(
+						UEAgentKitNativeM3Test::EvidencePath(TEXT("pie")), Evidence, Error));
+			}
+			State->bCompleted = true;
+			return true;
+		}
+
+	private:
+		TSharedRef<FState> State;
+	};
+
+	class FWaitForPieStop final : public IAutomationLatentCommand
+	{
+	public:
+		virtual bool Update() override
+		{
+			return GEditor == nullptr
+				|| (!GEditor->IsPlaySessionInProgress() && GEditor->PlayWorld == nullptr);
+		}
+	};
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUEAgentKitNativeM3PieTest,
+	"UEAgentKit.Native.M3MenuPIE",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUEAgentKitNativeM3PieTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	if (!TestTrue(TEXT("M3 PIE native flag is on"), FUEAgentKitNativePreviewSettings::Get().bNativeLayoutPreview))
+	{
+		return false;
+	}
+	UBlueprint* Blueprint = LoadObject<UBlueprint>(nullptr, UEAgentKitNativeM3Test::FixturePath);
+	UEdGraph* Graph = UEAgentKitNativeM3Test::PrimaryGraph(Blueprint);
+	if (!TestNotNull(TEXT("M3 PIE fixture loads"), Blueprint)
+		|| !TestNotNull(TEXT("M3 PIE graph loads"), Graph))
+	{
+		return false;
+	}
+	UEdGraphNode* ContextNode = nullptr;
+	UEdGraphPin* ContextPin = nullptr;
+	for (UEdGraphNode* Node : Graph->Nodes)
+	{
+		if (Node == nullptr)
+		{
+			continue;
+		}
+		for (UEdGraphPin* Pin : Node->Pins)
+		{
+			if (Pin != nullptr && Pin->Direction == EGPD_Input && Pin->PinName == FName(TEXT("InString")))
+			{
+				ContextNode = Node;
+				ContextPin = Pin;
+				break;
+			}
+		}
+		if (ContextNode != nullptr)
+		{
+			break;
+		}
+	}
+	if (!TestNotNull(TEXT("M3 PIE context node exists"), ContextNode)
+		|| !TestNotNull(TEXT("M3 PIE context pin exists"), ContextPin))
+	{
+		return false;
+	}
+	FString Error;
+	if (!TestNotNull(TEXT("M3 PIE editor opens"), UEAgentKitNativeM3Test::OpenAndFocus(Blueprint, Graph, Error)))
+	{
+		AddError(Error);
+		return false;
+	}
+	FUEAgentKitGraphLayoutP11Menu::SetTestDialogSuppression(true);
+	TSharedRef<UEAgentKitNativeM3Pie::FState> State = MakeShared<UEAgentKitNativeM3Pie::FState>();
+	State->Test = this;
+	State->Graph = Graph;
+	State->Node = ContextNode;
+	State->Pin = ContextPin;
+	ADD_LATENT_AUTOMATION_COMMAND(FStartPIECommand(false));
+	ADD_LATENT_AUTOMATION_COMMAND(UEAgentKitNativeM3Pie::FInvokeMenuDuringPie(State));
+	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
+	ADD_LATENT_AUTOMATION_COMMAND(UEAgentKitNativeM3Pie::FWaitForPieStop());
 	return true;
 }
 

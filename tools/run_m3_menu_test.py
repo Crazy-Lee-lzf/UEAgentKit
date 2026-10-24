@@ -4,10 +4,15 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import shutil
+import socket
 import subprocess
 import sys
+import threading
+import time
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -37,6 +42,64 @@ TEST_NAME = "UEAgentKit.Native.M3Menu"
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+class FakeBroker:
+    """One-shot loopback broker for stale/forged/timeout menu scenarios."""
+
+    def __init__(self, scenario: str) -> None:
+        self.scenario = scenario
+        self.listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.listener.bind(("127.0.0.1", 0))
+        self.listener.listen(1)
+        self.listener.settimeout(60.0)
+        self.port = int(self.listener.getsockname()[1])
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _run(self) -> None:
+        try:
+            connection, _ = self.listener.accept()
+            with connection:
+                connection.settimeout(20.0)
+                buffer = bytearray()
+                while b"\n" not in buffer:
+                    chunk = connection.recv(65536)
+                    if not chunk:
+                        return
+                    buffer.extend(chunk)
+                request = json.loads(bytes(buffer.split(b"\n", 1)[0]))
+                if self.scenario in ("timeout", "timeout-strict"):
+                    time.sleep(7.0)
+                    return
+                if self.scenario in ("revision", "fingerprint"):
+                    time.sleep(0.5)
+                snapshot = request["snapshot"]
+                options = request["options"]
+                result = build_preview(
+                    snapshot["preflight"],
+                    snapshot["contextEnvelope"],
+                    mode="full",
+                    spacing_x=int(options["spacingX"]),
+                    spacing_y=int(options["spacingY"]),
+                    target_width=int(options["targetWidth"]),
+                    seed=int(options["seed"]),
+                )
+                if self.scenario == "forged":
+                    result = copy.deepcopy(result)
+                    result["planId"] = "layout:" + "0" * 16
+                connection.sendall(
+                    protocol.encode_message(
+                        protocol.success_response(request["requestId"], result, 1)
+                    )
+                )
+        except Exception:
+            traceback.print_exc()
+
+    def close(self) -> None:
+        try:
+            self.listener.close()
+        except Exception:
+            traceback.print_exc()
 
 
 def write_config(native: bool, fallback: bool) -> None:
@@ -76,15 +139,31 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "scenario",
-        choices=["happy", "fallback", "strict", "token", "dacl", "busy"],
+        choices=[
+            "happy",
+            "busy",
+            "fallback",
+            "strict",
+            "token",
+            "dacl",
+            "dirty",
+            "revision",
+            "fingerprint",
+            "forged",
+            "timeout",
+            "timeout-strict",
+            "unavailable",
+        ],
     )
     args = parser.parse_args()
     EVIDENCE.mkdir(parents=True, exist_ok=True)
-    write_config(True, args.scenario != "strict")
+    fallback = args.scenario not in ("strict", "timeout-strict")
+    write_config(True, fallback)
     if DESCRIPTOR.exists():
         DESCRIPTOR.unlink()
 
     server: LayoutBrokerServer | None = None
+    fake: FakeBroker | None = None
     broker_token = "8f2a6c4e9d1b7035" * 4
     try:
         if args.scenario in ("happy", "busy", "token"):
@@ -100,6 +179,11 @@ def main() -> int:
                 write_descriptor(server.port, "0" * 64)
         elif args.scenario == "dacl":
             write_descriptor(50000, broker_token, harden=False)
+        elif args.scenario == "unavailable":
+            write_descriptor(50001, broker_token)
+        elif args.scenario in ("revision", "fingerprint", "forged", "timeout", "timeout-strict"):
+            fake = FakeBroker(args.scenario)
+            write_descriptor(fake.port, broker_token)
 
         report = EVIDENCE / f"M3Menu-{args.scenario}"
         report.mkdir(parents=True, exist_ok=True)
@@ -124,6 +208,8 @@ def main() -> int:
     finally:
         if server is not None:
             server.stop()
+        if fake is not None:
+            fake.close()
         if DESCRIPTOR.exists():
             DESCRIPTOR.unlink()
 
@@ -213,6 +299,78 @@ def main() -> int:
                 and receipt.get("fallback") is False
                 and receipt.get("errorCode") == "native-preview-broker-descriptor-invalid",
                 "detail": receipt.get("errorCode", ""),
+            }
+        )
+    elif args.scenario == "dirty":
+        checks.append(
+            {
+                "name": "dirty-fail-closed",
+                "ok": receipt.get("ok") is False
+                and receipt.get("fallback") is False
+                and receipt.get("errorCode") == "native-preview-package-dirty",
+                "detail": receipt.get("errorCode", ""),
+            }
+        )
+    elif args.scenario == "revision":
+        checks.append(
+            {
+                "name": "revision-fail-closed",
+                "ok": receipt.get("ok") is False
+                and receipt.get("fallback") is False
+                and receipt.get("errorCode") == "native-preview-revision-conflict",
+                "detail": receipt.get("errorCode", ""),
+            }
+        )
+    elif args.scenario == "fingerprint":
+        checks.append(
+            {
+                "name": "fingerprint-fail-closed",
+                "ok": receipt.get("ok") is False
+                and receipt.get("fallback") is False
+                and receipt.get("errorCode") == "native-preview-fingerprint-conflict",
+                "detail": receipt.get("errorCode", ""),
+            }
+        )
+    elif args.scenario == "forged":
+        checks.append(
+            {
+                "name": "forged-plan-fail-closed",
+                "ok": receipt.get("ok") is False
+                and receipt.get("fallback") is False
+                and receipt.get("errorCode") == "native-preview-plan-id-mismatch",
+                "detail": receipt.get("errorCode", ""),
+            }
+        )
+    elif args.scenario == "timeout":
+        checks.append(
+            {
+                "name": "timeout-fallback",
+                "ok": receipt.get("ok") is True
+                and receipt.get("fallback") is True
+                and receipt.get("previewPath") == "legacy-fallback"
+                and receipt.get("nativeErrorCode") == "native-preview-timeout",
+                "detail": receipt.get("planId", ""),
+            }
+        )
+    elif args.scenario == "timeout-strict":
+        checks.append(
+            {
+                "name": "timeout-strict",
+                "ok": receipt.get("ok") is False
+                and receipt.get("fallback") is False
+                and receipt.get("errorCode") == "native-preview-timeout",
+                "detail": receipt.get("errorCode", ""),
+            }
+        )
+    elif args.scenario == "unavailable":
+        checks.append(
+            {
+                "name": "unavailable-fallback",
+                "ok": receipt.get("ok") is True
+                and receipt.get("fallback") is True
+                and receipt.get("previewPath") == "legacy-fallback"
+                and receipt.get("nativeErrorCode") == "native-preview-broker-unavailable",
+                "detail": receipt.get("planId", ""),
             }
         )
     if args.scenario == "busy":

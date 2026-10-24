@@ -235,6 +235,19 @@ bool FUEAgentKitNativeLayoutPreviewService::BeginFromSnapshot(
 		Fail(TEXT("native-preview-worker-failed"), TEXT("The snapshot is unavailable or incomplete."));
 		return false;
 	}
+	bool bSnapshotDirty = false;
+	if (Preflight->TryGetBoolField(TEXT("packageDirty"), bSnapshotDirty) && bSnapshotDirty)
+	{
+		Fail(TEXT("native-preview-package-dirty"), TEXT("The package is dirty; native preview is fail-closed."));
+		return false;
+	}
+	FString SnapshotPieState;
+	if (Preflight->TryGetStringField(TEXT("pieState"), SnapshotPieState)
+		&& !SnapshotPieState.Equals(TEXT("stopped"), ESearchCase::CaseSensitive))
+	{
+		Fail(TEXT("native-preview-pie-active"), TEXT("PIE/SIE is active; native preview is fail-closed."));
+		return false;
+	}
 	if (!Preflight->TryGetStringField(TEXT("assetPath"), AssetPath)
 		|| !Preflight->TryGetStringField(TEXT("graphGuid"), GraphGuid)
 		|| !Preflight->TryGetStringField(TEXT("sessionId"), SessionId)

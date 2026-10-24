@@ -137,6 +137,17 @@ int32 FUEAgentKitGraphLayoutP11Menu::GetBusyRejectCountForTest() const
 	return BusyRejectCount;
 }
 
+bool FUEAgentKitGraphLayoutP11Menu::WaitForNativeWorkerResponseForTest(double TimeoutSeconds)
+{
+	const double Deadline = FPlatformTime::Seconds() + TimeoutSeconds;
+	while (bNativeInFlight && NativeService.IsValid() && !NativeService->HasWorkerResponseForTest()
+		&& FPlatformTime::Seconds() < Deadline)
+	{
+		FPlatformProcess::Sleep(0.02f);
+	}
+	return !bNativeInFlight || (NativeService.IsValid() && NativeService->HasWorkerResponseForTest());
+}
+
 bool FUEAgentKitGraphLayoutP11Menu::WaitForNativePreviewForTest(double TimeoutSeconds)
 {
 	const double Deadline = FPlatformTime::Seconds() + TimeoutSeconds;

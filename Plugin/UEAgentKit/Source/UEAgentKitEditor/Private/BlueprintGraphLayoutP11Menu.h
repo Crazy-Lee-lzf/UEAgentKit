@@ -34,6 +34,7 @@ public:
 	/** Test seams for the isolated M3 automation. */
 	static FUEAgentKitGraphLayoutP11Menu* GetActiveForTest();
 	bool WaitForNativePreviewForTest(double TimeoutSeconds);
+	bool WaitForNativeWorkerResponseForTest(double TimeoutSeconds);
 	TSharedPtr<FJsonObject> GetLastReceiptForTest() const;
 	bool IsNativePreviewInFlightForTest() const;
 	int32 GetBusyRejectCountForTest() const;
