@@ -108,6 +108,12 @@ class HappyPathAndParityTests(BrokerServerCase):
     def test_bad_client_does_not_stop_the_broker(self) -> None:
         harness.raw_exchange(self.server.port, b"garbage\n")
         harness.client_for(self.server).preview(self.preflight, self.envelope)
+        # The response is sent before the completed counter is published; under
+        # full-suite load the server thread can lag briefly.  Poll with a bound
+        # instead of asserting an instantaneous value.
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and self.server.status()["completed"] < 1:
+            time.sleep(0.01)
         self.assertEqual(self.server.status()["completed"], 1)
 
 
