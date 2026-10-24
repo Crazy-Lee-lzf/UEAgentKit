@@ -107,7 +107,7 @@ outputs matched the host seam.
 
 ## 6. Commit / stage gate
 
-- Local R7.3 code+docs commit: `__R73_COMMIT__`
+- Local R7.3 code+docs commit: `f3d10490644629dfef576687ed5e82f1f3ccc3b9`
 - No push, merge, rebase, reset, clean, or cross-branch cherry-pick.
 - Stage gate: R7.3 actual-service compatibility PASS is still **not** production MCP/DSH
   integration. Real issuer/session/replay/revocation, signed receipts, PII/retention,
