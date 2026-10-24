@@ -33,7 +33,7 @@
 | 项 | 值 |
 |---|---|
 | 构建 | **Succeeded**（VS 2022 14.44.35228；仅既有的非首选 MSVC / IKRig 警告） |
-| 最终 DLL（R1.4） | `sha256:bf2fac73316f810eca798d3949ca121a83c988a0f7512d9c4ccf505fdb82c9c8`（R1.3 为 `56d01e7d…`） |
+| 最终 DLL（R1.4） | `sha256:201357b9130bed44dbdc0c795df894e6b665b83c1a32c2a8651b98df171df0ee`（R1.3 为 `56d01e7d…`） |
 | 先前 DLL（R1.2 实测） | `sha256:15480cb8b2bf5edc1363e9d1ad208ead0241d94160f01e07e038b6f9d6fcfa05`（更早的 `74ded…` 作废） |
 | UE 自动化 | run A/B 各 **7/7 Success，0 failed，0 not run** |
 | spawner / owner | 38325 / 3071 |
@@ -75,7 +75,7 @@
 - **fail-closed**：tampered/malformed/expired → `native-schema-invalid-arguments`；query kind/身份变化 → `native-schema-invalid-arguments`；set/epoch/total 变化 → `native-gate-revision-conflict`；pageSize 不匹配/offset 越界 → invalid。重放同游标幂等（只读），不宣称防重放。
 - **兼容**：未传 `pageSize/cursor` 时旧 `maxItems` 结果完全不变，无 `pagination` 字段；descriptor/schema/actionId/digest/200 金值未改。
 - **离线测试**：**47/47 OK**（新增 21：5 个 token 金值、512 真实导出 ID 无重无漏、空/1/末页、越界、查询/stale/epoch/过期/篡改/重放、无 IO/eval 与常量守卫）。
-- **UE 验证**：`Build.bat ... Succeeded`（exit 0，最终 DLL `sha256:bf2fac73…`）；`R1CursorVectors` 5/5 token 逐字相等；`R1Pagination` catalog 8 页/512 无重无漏、context 10 页/318；完整 R1 套件在两个独立进程均 **9 Success / 0 failed / 0 notRun / 0 warnings**。
+- **UE 验证**：`Build.bat ... Succeeded`（exit 0，最终 DLL `sha256:201357b9…`）；`R1CursorVectors` 5/5 token 逐字相等；`R1Pagination` catalog 8 页/512 无重无漏、context 10 页/318；完整 R1 套件在两个独立进程均 **9 Success / 0 failed / 0 notRun / 0 warnings**。
 - **覆盖**：仍为 512 described / 762 available（fresh catalog）/ 38,325 discovered；分页 `total=512`，`catalogTruncated=true`；后续同一会话 engine priming 可使 `catalogAvailable` 增至 1503，但绝不等同 38k，测试断言 `>=512 且 <38325`。未提高 768 模板预算，未触碰 trust/template 边界。
 
 ## UE 重型槽位

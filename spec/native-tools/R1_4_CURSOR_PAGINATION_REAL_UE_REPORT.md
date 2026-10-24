@@ -11,7 +11,7 @@
 
 ## 0. 结论
 
-1. C++ 真实编译通过：`R1AutomationHostEditor Win64 Development`，`Build.bat -WaitMutex -NoHotReload` exit 0；最终 DLL `sha256:bf2fac73316f810eca798d3949ca121a83c988a0f7512d9c4ccf505fdb82c9c8`。
+1. C++ 真实编译通过：`R1AutomationHostEditor Win64 Development`，`Build.bat -WaitMutex -NoHotReload` exit 0；最终 DLL `sha256:201357b9130bed44dbdc0c795df894e6b665b83c1a32c2a8651b98df171df0ee`。
 2. `R1CursorVectors` 通过：C++ 生成的 5 个 token 与 Python 金值逐字相等（HMAC + base64url + canonical JSON）。
 3. `R1Pagination` 通过：catalog 512 条 described official descriptor 以 8 页无重无漏翻完；context 318 条 10 页翻完；篡改/过期/stale epoch/fingerprint/pageSize/query/重放/legacy 全部按预期。
 4. 完整 R1 套件两个独立进程均 **9 Success / 0 failed / 0 notRun / 0 warnings**，Editor exit 0，Automation index 9 条全 Success。
@@ -25,8 +25,8 @@
 | 命令 | `E:\EPICGAME\UE_5.6\Engine\Build\BatchFiles\Build.bat R1AutomationHostEditor Win64 Development -Project=... -WaitMutex -NoHotReload` |
 | 结果 | **Succeeded**，exit 0 |
 | 工具链 | VS 2022 14.44.35228 / MSVC 14.44.35207 / Win SDK 10.0.22621.0 |
-| 最终 DLL | `sha256:bf2fac73316f810eca798d3949ca121a83c988a0f7512d9c4ccf505fdb82c9c8` |
-| 日志 | `Build/r1-native/Evidence/R14/build-final.log`（及 build-1..8） |
+| 最终 DLL | `sha256:201357b9130bed44dbdc0c795df894e6b665b83c1a32c2a8651b98df171df0ee` |
+| 日志 | `Build/r1-native/Evidence/R14/build-final-2.log`（及 build-1..8） |
 
 编译只修了 R1.4 范围内的错误：首次编译即通过；验收过程中为修正行为又重建 7 次（见 §4），未改 Build.cs、模块/Bridge/P11/M3。
 
@@ -74,8 +74,8 @@
 
 | 进程 | 结果 | 证据 |
 |---|---|---|
-| full-g | 9 Success / 0 succeededWithWarnings / 0 failed / 0 notRun；exit 0 | `R14/full-g/automation-index.json` |
-| full-h | 9 Success / 0 succeededWithWarnings / 0 failed / 0 notRun；exit 0；12.63 s | `R14/full-h/automation-index.json` |
+| full-i | 9 Success / 0 succeededWithWarnings / 0 failed / 0 notRun；exit 0 | `R14/full-i/automation-index.json` |
+| full-j | 9 Success / 0 succeededWithWarnings / 0 failed / 0 notRun；exit 0；13.41 s | `R14/full-j/automation-index.json` |
 
 9 个测试：`R1Catalog`、`R1ContextFilter`、`R1CursorVectors`、`R1DescriptorParity`、`R1Lifecycle`、`R1Pagination`、`R1ReadOnly`、`R1ShadowTools`、`R1UntrustedSpawner`。
 
@@ -85,12 +85,12 @@
 - `R1ReadOnly`：dirty 0→0、`/Game` packages 1→1、assets 1→1、undo 0→0、revision `sha256:a524005f…` 前后相同、图指纹 `sha256:5f7400a9…` 前后相同。
 - `R1UntrustedSpawner`：`templateCached=no`。
 
-双进程对拍（full-g vs full-h）：512 actionId 集合、每个 descriptorDigest、`actionDatabaseFingerprint`、`pluginSetHash`、unsupported 直方图、四个 context `actionSetFingerprint` **全部相等**。
+双进程对拍（full-i vs full-j）：512 actionId 集合、每个 descriptorDigest、`actionDatabaseFingerprint`、`pluginSetHash`、unsupported 直方图、四个 context `actionSetFingerprint` **全部相等**。
 
 ## 6. Python / 金值
 
 - `py -3.12 -m unittest discover -s tests/native_tools -p "test_*.py"` → **47/47 OK**。
-- `test_r1_cross_process` 6/6 OK（使用 full-g/full-h 导出）。
+- `test_r1_cross_process` 6/6 OK（使用 full-i/full-j 导出）。
 - 512 条导出 descriptor 通过 `validate_node_descriptor` + `node-descriptor.schema.json`；200 金值保持。
 - `R1CursorVectors` 同时证明 C++ 与 Python token 逐字一致（此前最大风险已消除）。
 
@@ -108,7 +108,7 @@
 | IO/eval | `NativeCursorCodec.cpp` 中 `FPaths/IFileManager/LoadObject/CreateProcess/system/eval` 命中 0 |
 | 额外 UObject | 分页只切片已描述数组；模板预算仍为既有 768/session，无新增 |
 | 分页范围 | 仅 described official action；`total=512`/context match；`catalogTruncated=true` |
-| token 泄漏 | full-h 日志中 `v1.` 命中 0 |
+| token 泄漏 | full-j 日志中 `v1.` 命中 0 |
 | 进程 | Editor minimized（非 hidden），PID-scoped minimize；无 GUI/合成输入 |
 
 细节：`Evidence/R14/safety-inspection.txt`。
@@ -126,12 +126,12 @@
 
 | 证据 | 路径 |
 |---|---|
-| 构建日志 | `Build/r1-native/Evidence/R14/build-final.log` |
-| 完整 run-g / run-h | `Evidence/R14/full-g/`、`Evidence/R14/full-h/`（automation-index、log、catalog/context export、environment、DLL hash） |
+| 构建日志 | `Build/r1-native/Evidence/R14/build-final-2.log` |
+| 完整 run-g / run-h | `Evidence/R14/full-i/`、`Evidence/R14/full-j/`（automation-index、log、catalog/context export、environment、DLL hash） |
 | 单测 cursor / pagination | `Evidence/R14/cursor-vectors-2/`、`Evidence/R14/pagination-2/` |
 | 机器汇总 | `Evidence/R14/r14-summary.json` |
 | 安全巡检 | `Evidence/R14/safety-inspection.txt` |
-| 最终 DLL | `sha256:bf2fac73316f810eca798d3949ca121a83c988a0f7512d9c4ccf505fdb82c9c8` |
+| 最终 DLL | `sha256:201357b9130bed44dbdc0c795df894e6b665b83c1a32c2a8651b98df171df0ee` |
 | fingerprint / pluginSetHash | `sha256:b09fb1387e188e02` / `sha256:1d034d339ee271ad` |
 
 ## 10. 结论
