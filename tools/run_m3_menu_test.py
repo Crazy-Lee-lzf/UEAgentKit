@@ -71,6 +71,9 @@ class FakeBroker:
                 if self.scenario in ("timeout", "timeout-strict"):
                     time.sleep(7.0)
                     return
+                if self.scenario == "oversize-response":
+                    connection.sendall(b'{"x":"' + b"a" * 1100000 + b'"}\n')
+                    return
                 if self.scenario in ("revision", "fingerprint"):
                     time.sleep(0.5)
                 snapshot = request["snapshot"]

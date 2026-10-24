@@ -122,8 +122,14 @@ namespace UEAgentKitM32Fixtures
 
 	UBlueprint* CreateEventFixture(FString& OutError)
 	{
+		UBlueprint* Existing = LoadObject<UBlueprint>(
+			nullptr, TEXT("/Game/M32/BP_M32_EventV5.BP_M32_EventV5"));
+		if (Existing != nullptr)
+		{
+			return Existing;
+		}
 		UBlueprint* Blueprint = CreateBase(
-			TEXT("/Game/M32/BP_M32_EventV2"), TEXT("BP_M32_EventV2"), OutError);
+			TEXT("/Game/M32/BP_M32_EventV5"), TEXT("BP_M32_EventV5"), OutError);
 		UEdGraph* Graph = PrimaryGraph(Blueprint);
 		if (Blueprint == nullptr || Graph == nullptr)
 		{
@@ -152,7 +158,17 @@ namespace UEAgentKitM32Fixtures
 			BeginPlay->NodePosX = 0;
 			BeginPlay->NodePosY = 0;
 		}
-		MakeCall(Graph, FindFunction(UKismetSystemLibrary::StaticClass(), TEXT("PrintString")), 420, 80);
+		UK2Node_CallFunction* PrintNode = MakeCall(
+			Graph, FindFunction(UKismetSystemLibrary::StaticClass(), TEXT("PrintString")), 420, 80);
+		if (BeginPlay != nullptr && PrintNode != nullptr)
+		{
+			UEdGraphPin* From = BeginPlay->FindPin(TEXT("then"));
+			UEdGraphPin* To = PrintNode->FindPin(TEXT("execute"));
+			if (From != nullptr && To != nullptr)
+			{
+				From->MakeLinkTo(To);
+			}
+		}
 		FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 		FKismetEditorUtilities::CompileBlueprint(Blueprint, EBlueprintCompileOptions::SkipGarbageCollection);
 		return Blueprint;
@@ -160,6 +176,12 @@ namespace UEAgentKitM32Fixtures
 
 	UBlueprint* CreateFunctionFixture(FString& OutError)
 	{
+		UBlueprint* Existing = LoadObject<UBlueprint>(
+			nullptr, TEXT("/Game/M32/BP_M32_FunctionV2.BP_M32_FunctionV2"));
+		if (Existing != nullptr)
+		{
+			return Existing;
+		}
 		UBlueprint* Blueprint = CreateBase(
 			TEXT("/Game/M32/BP_M32_FunctionV2"), TEXT("BP_M32_FunctionV2"), OutError);
 		UEdGraph* EventGraph = PrimaryGraph(Blueprint);
@@ -186,6 +208,12 @@ namespace UEAgentKitM32Fixtures
 
 	UBlueprint* CreateComplexFixture(FString& OutError)
 	{
+		UBlueprint* Existing = LoadObject<UBlueprint>(
+			nullptr, TEXT("/Game/M32/BP_M32_ComplexV2.BP_M32_ComplexV2"));
+		if (Existing != nullptr)
+		{
+			return Existing;
+		}
 		UBlueprint* Blueprint = CreateBase(
 			TEXT("/Game/M32/BP_M32_ComplexV2"), TEXT("BP_M32_ComplexV2"), OutError);
 		UEdGraph* Graph = PrimaryGraph(Blueprint);
@@ -251,7 +279,7 @@ namespace UEAgentKitM32Fixtures
 		if (BeginPlay != nullptr && Sequence != nullptr && Knot != nullptr && PrintNode != nullptr)
 		{
 			const UEdGraphSchema_K2* Schema = Cast<UEdGraphSchema_K2>(Graph->GetSchema());
-			UEdGraphPin* BeginThen = BeginPlay->FindPin(TEXT("Then"));
+			UEdGraphPin* BeginThen = BeginPlay->FindPin(TEXT("then"));
 			UEdGraphPin* SeqExec = Sequence->FindPin(TEXT("execute"));
 			UEdGraphPin* SeqThen0 = Sequence->FindPin(TEXT("then_0"));
 			UEdGraphPin* PrintExec = PrintNode->FindPin(TEXT("execute"));
@@ -311,7 +339,8 @@ bool FUEAgentKitM32FixturesTest::RunTest(const FString& Parameters)
 	}
 	for (UBlueprint* Blueprint : {EventBlueprint, FunctionBlueprint, ComplexBlueprint})
 	{
-		if (!TestTrue(TEXT("M32 fixture saves"), UEAgentKitM32Fixtures::SaveBlueprint(Blueprint, Error)))
+		if (Blueprint->GetOutermost()->IsDirty()
+			&& !TestTrue(TEXT("M32 fixture saves"), UEAgentKitM32Fixtures::SaveBlueprint(Blueprint, Error)))
 		{
 			AddError(Error);
 			return false;
@@ -326,6 +355,21 @@ bool FUEAgentKitM32FixturesTest::RunTest(const FString& Parameters)
 		Item->SetStringField(TEXT("graphName"), Graph->GetName());
 		Item->SetStringField(TEXT("graphGuid"), Graph->GraphGuid.ToString(EGuidFormats::DigitsWithHyphensLower));
 		Item->SetNumberField(TEXT("nodeCount"), Graph->Nodes.Num());
+		int32 LinkedPins = 0;
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (Node != nullptr)
+			{
+				for (UEdGraphPin* Pin : Node->Pins)
+				{
+					if (Pin != nullptr && Pin->LinkedTo.Num() > 0)
+					{
+						++LinkedPins;
+					}
+				}
+			}
+		}
+		Item->SetNumberField(TEXT("linkedPins"), LinkedPins);
 		Graphs.Add(MakeShared<FJsonValueObject>(Item));
 	};
 	AddGraph(TEXT("event"), EventBlueprint, EventGraph);

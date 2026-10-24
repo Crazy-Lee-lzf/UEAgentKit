@@ -415,6 +415,24 @@ bool FUEAgentKitNativeM3MenuTest::RunTest(const FString& Parameters)
 			TestEqual(TEXT("M3 forged plan code"), ErrorCode, FString(TEXT("native-preview-plan-id-mismatch")));
 		}
 	}
+	else if (Scenario == TEXT("unavailable"))
+	{
+		TestTrue(TEXT("M3 unavailable fallback produces a legacy plan"), bOk && Receipt->GetBoolField(TEXT("planProduced")));
+		TestTrue(TEXT("M3 unavailable fallback indicator"), bFallback);
+		TestEqual(
+			TEXT("M3 unavailable native code"),
+			Receipt->GetStringField(TEXT("nativeErrorCode")),
+			FString(TEXT("native-preview-broker-unavailable")));
+	}
+	else if (Scenario == TEXT("oversize-response"))
+	{
+		TestFalse(TEXT("M3 oversized response produces no plan"), bOk || Receipt->GetBoolField(TEXT("planProduced")));
+		TestFalse(TEXT("M3 oversized response does not fall back"), bFallback);
+		TestEqual(
+			TEXT("M3 oversized response code"),
+			ErrorCode,
+			FString(TEXT("native-preview-response-too-large")));
+	}
 	else if (Scenario == TEXT("timeout"))
 	{
 		TestTrue(TEXT("M3 timeout fallback produces a legacy plan"), bOk && Receipt->GetBoolField(TEXT("planProduced")));
@@ -466,6 +484,7 @@ namespace UEAgentKitNativeM3Pie
 		UEdGraph* Graph = nullptr;
 		UEdGraphNode* Node = nullptr;
 		UEdGraphPin* Pin = nullptr;
+		FString GraphId;
 		bool bCompleted = false;
 	};
 
@@ -530,7 +549,12 @@ namespace UEAgentKitNativeM3Pie
 				State->Test->TestTrue(
 					TEXT("M3 PIE evidence writes"),
 					UEAgentKitNativeM3Test::WriteJson(
-						UEAgentKitNativeM3Test::EvidencePath(TEXT("pie")), Evidence, Error));
+						UEAgentKitNativeM3Test::EvidencePath(
+						State->GraphId.IsEmpty()
+							? TEXT("pie")
+							: *FString::Printf(TEXT("pie-%s"), *State->GraphId)),
+					Evidence,
+					Error));
 			}
 			State->bCompleted = true;
 			return true;
@@ -563,8 +587,25 @@ bool FUEAgentKitNativeM3PieTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
-	UBlueprint* Blueprint = LoadObject<UBlueprint>(nullptr, UEAgentKitNativeM3Test::FixturePath);
-	UEdGraph* Graph = UEAgentKitNativeM3Test::PrimaryGraph(Blueprint);
+	FString AssetOverride;
+	FString GraphOverride;
+	FString GraphId;
+	const bool bM32Graph = FParse::Value(FCommandLine::Get(), TEXT("UEAgentKitM3Asset="), AssetOverride)
+		&& !AssetOverride.IsEmpty();
+	UBlueprint* Blueprint = bM32Graph
+		? LoadObject<UBlueprint>(nullptr, *AssetOverride)
+		: LoadObject<UBlueprint>(nullptr, UEAgentKitNativeM3Test::FixturePath);
+	UEdGraph* Graph = nullptr;
+	if (bM32Graph)
+	{
+		FParse::Value(FCommandLine::Get(), TEXT("UEAgentKitM3GraphName="), GraphOverride);
+		FParse::Value(FCommandLine::Get(), TEXT("UEAgentKitM32GraphId="), GraphId);
+		Graph = UEAgentKitNativeM3Test::FindGraph(Blueprint, GraphOverride);
+	}
+	else
+	{
+		Graph = UEAgentKitNativeM3Test::PrimaryGraph(Blueprint);
+	}
 	if (!TestNotNull(TEXT("M3 PIE fixture loads"), Blueprint)
 		|| !TestNotNull(TEXT("M3 PIE graph loads"), Graph))
 	{
@@ -609,6 +650,7 @@ bool FUEAgentKitNativeM3PieTest::RunTest(const FString& Parameters)
 	State->Graph = Graph;
 	State->Node = ContextNode;
 	State->Pin = ContextPin;
+	State->GraphId = GraphId;
 	ADD_LATENT_AUTOMATION_COMMAND(FStartPIECommand(false));
 	ADD_LATENT_AUTOMATION_COMMAND(UEAgentKitNativeM3Pie::FInvokeMenuDuringPie(State));
 	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
