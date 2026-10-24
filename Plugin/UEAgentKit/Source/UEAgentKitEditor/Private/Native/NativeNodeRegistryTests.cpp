@@ -3,6 +3,7 @@
 #include "Native/NativeNodeRegistry.h"
 
 #include "Native/NativeCanonicalJson.h"
+#include "Native/NativeCursorCodec.h"
 #include "BlueprintContextSha256.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -778,6 +779,96 @@ namespace UEAgentKitNativeRegistryTestPrivate
 		return Guid.ToString(EGuidFormats::Digits);
 	}
 
+	FString CursorVectorsPath()
+	{
+		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("UEAgentKit"));
+		return Plugin.IsValid()
+			? FPaths::Combine(Plugin->GetBaseDir(), TEXT("Resources/NativeTools/Golden/r1-cursor-vectors.json"))
+			: FString();
+	}
+
+	bool HexToBytes(const FString& Hex, TArray<uint8>& OutBytes)
+	{
+		OutBytes.Reset();
+		if (Hex.Len() % 2 != 0)
+		{
+			return false;
+		}
+		auto Nibble = [](const TCHAR Character) -> int32 {
+			if (Character >= TEXT('0') && Character <= TEXT('9')) { return Character - TEXT('0'); }
+			if (Character >= TEXT('a') && Character <= TEXT('f')) { return Character - TEXT('a') + 10; }
+			if (Character >= TEXT('A') && Character <= TEXT('F')) { return Character - TEXT('A') + 10; }
+			return INDEX_NONE;
+		};
+		for (int32 Index = 0; Index < Hex.Len(); Index += 2)
+		{
+			const int32 High = Nibble(Hex[Index]);
+			const int32 Low = Nibble(Hex[Index + 1]);
+			if (High == INDEX_NONE || Low == INDEX_NONE)
+			{
+				return false;
+			}
+			OutBytes.Add(static_cast<uint8>((High << 4) | Low));
+		}
+		return true;
+	}
+
+	TSharedPtr<FJsonObject> InvokeToolData(
+		FAutomationTestBase& Test,
+		FNativeNodeRegistry& Registry,
+		const FString& ToolId,
+		const TSharedPtr<FJsonObject>& Arguments,
+		FString& OutErrorCode,
+		const bool bReportFailure = true)
+	{
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorMessage;
+		if (!Registry.TryInvokeShadowTool(ToolId, TEXT("1.0.0"), Arguments, Result, OutErrorCode, ErrorMessage))
+		{
+			if (bReportFailure)
+			{
+				Test.AddError(FString::Printf(TEXT("%s failed: %s (%s)"), *ToolId, *OutErrorCode, *ErrorMessage));
+			}
+			return nullptr;
+		}
+		const TSharedPtr<FJsonObject>* Data = nullptr;
+		if (!Result.IsValid() || !Result->TryGetObjectField(TEXT("data"), Data) || Data == nullptr)
+		{
+			Test.AddError(FString::Printf(TEXT("%s returned no data."), *ToolId));
+			return nullptr;
+		}
+		return *Data;
+	}
+
+	TArray<FString> DescriptorIds(const TSharedPtr<FJsonObject>& Data)
+	{
+		TArray<FString> Ids;
+		const TArray<TSharedPtr<FJsonValue>>* Descriptors = nullptr;
+		if (Data.IsValid() && Data->TryGetArrayField(TEXT("descriptors"), Descriptors) && Descriptors != nullptr)
+		{
+			for (const TSharedPtr<FJsonValue>& Value : *Descriptors)
+			{
+				const TSharedPtr<FJsonObject> Item = Value.IsValid() ? Value->AsObject() : nullptr;
+				FString ActionId;
+				if (Item.IsValid() && Item->TryGetStringField(TEXT("actionId"), ActionId))
+				{
+					Ids.Add(ActionId);
+				}
+			}
+		}
+		return Ids;
+	}
+
+	int32 UniqueIdCount(const TArray<FString>& Ids)
+	{
+		TSet<FString> Unique;
+		for (const FString& Id : Ids)
+		{
+			Unique.Add(Id);
+		}
+		return Unique.Num();
+	}
+
 	bool WriteContextExport(
 		FAutomationTestBase& Test,
 		const FNativeContextResult& Palette,
@@ -1547,6 +1638,327 @@ bool FUEAgentKitNativeUntrustedSpawnerTest::RunTest(const FString& Parameters)
 	TestNull(TEXT("unknown spawner did not create a template"), Spawner->GetCachedTemplateNode());
 
 	AddInfo(FString::Printf(TEXT("untrustedSpawnerEvidence code=%s templateCached=%s"), *Code, Spawner->GetCachedTemplateNode() != nullptr ? TEXT("yes") : TEXT("no")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUEAgentKitNativeCursorVectorsTest,
+	"UEAgentKit.Native.R1CursorVectors",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUEAgentKitNativeCursorVectorsTest::RunTest(const FString& Parameters)
+{
+	const FString Path = CursorVectorsPath();
+	FString Text;
+	if (!TestTrue(TEXT("cursor vector fixture exists"), !Path.IsEmpty() && FFileHelper::LoadFileToString(Text, *Path)))
+	{
+		return false;
+	}
+	TSharedPtr<FJsonObject> Fixture;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Text);
+	if (!TestTrue(TEXT("cursor vector fixture parses"), FJsonSerializer::Deserialize(Reader, Fixture) && Fixture.IsValid()))
+	{
+		return false;
+	}
+
+	FString KeyHex;
+	Fixture->TryGetStringField(TEXT("keyHex"), KeyHex);
+	TArray<uint8> Key;
+	if (!TestTrue(TEXT("cursor vector key parses"), HexToBytes(KeyHex, Key) && Key.Num() == 32))
+	{
+		return false;
+	}
+	const int64 Now = static_cast<int64>(Fixture->GetNumberField(TEXT("nowUnix")));
+	const TArray<TSharedPtr<FJsonValue>>* Vectors = nullptr;
+	if (!TestTrue(TEXT("cursor vectors exist"), Fixture->TryGetArrayField(TEXT("vectors"), Vectors) && Vectors != nullptr))
+	{
+		return false;
+	}
+
+	for (const TSharedPtr<FJsonValue>& VectorValue : *Vectors)
+	{
+		const TSharedPtr<FJsonObject> Vector = VectorValue.IsValid() ? VectorValue->AsObject() : nullptr;
+		if (!TestTrue(TEXT("cursor vector is an object"), Vector.IsValid()))
+		{
+			return false;
+		}
+		const TSharedPtr<FJsonObject> PayloadObject = Vector->GetObjectField(TEXT("payload"));
+		FNativeCursorPayload Payload;
+		Payload.Kind = PayloadObject->GetStringField(TEXT("k"));
+		Payload.QueryHash = PayloadObject->GetStringField(TEXT("q"));
+		Payload.SetFingerprint = PayloadObject->GetStringField(TEXT("s"));
+		Payload.Epoch = PayloadObject->GetStringField(TEXT("e"));
+		Payload.Offset = static_cast<int32>(PayloadObject->GetNumberField(TEXT("o")));
+		Payload.Total = static_cast<int32>(PayloadObject->GetNumberField(TEXT("n")));
+		Payload.PageSize = static_cast<int32>(PayloadObject->GetNumberField(TEXT("p")));
+		Payload.IssuedAt = static_cast<int64>(PayloadObject->GetNumberField(TEXT("iat")));
+		Payload.ExpiresAt = static_cast<int64>(PayloadObject->GetNumberField(TEXT("exp")));
+
+		FString Token;
+		FString ErrorCode;
+		if (!TestTrue(
+				TEXT("cursor vector encodes"),
+				UEAgentKitNativeCursor::Encode(Payload, Key, Token, ErrorCode)))
+		{
+			return false;
+		}
+		TestEqual(TEXT("cursor vector token matches Python"), Token, Vector->GetStringField(TEXT("token")));
+
+		FNativeCursorPayload Decoded;
+		FString DecodeError;
+		FString DecodeMessage;
+		if (!TestTrue(
+				TEXT("cursor vector decodes"),
+				UEAgentKitNativeCursor::Decode(Token, Key, Now, Decoded, DecodeError, DecodeMessage)))
+		{
+			return false;
+		}
+		TestEqual(TEXT("decoded kind"), Decoded.Kind, Payload.Kind);
+		TestEqual(TEXT("decoded query hash"), Decoded.QueryHash, Payload.QueryHash);
+		TestEqual(TEXT("decoded set fingerprint"), Decoded.SetFingerprint, Payload.SetFingerprint);
+		TestEqual(TEXT("decoded epoch"), Decoded.Epoch, Payload.Epoch);
+		TestEqual(TEXT("decoded offset"), Decoded.Offset, Payload.Offset);
+		TestEqual(TEXT("decoded total"), Decoded.Total, Payload.Total);
+		TestEqual(TEXT("decoded page size"), Decoded.PageSize, Payload.PageSize);
+		TestEqual(TEXT("decoded issued at"), Decoded.IssuedAt, Payload.IssuedAt);
+		TestEqual(TEXT("decoded expires at"), Decoded.ExpiresAt, Payload.ExpiresAt);
+
+		FString Tampered = Token;
+		Tampered[Tampered.Len() - 1] = Tampered[Tampered.Len() - 1] == TEXT('A') ? TEXT('B') : TEXT('A');
+		FNativeCursorPayload TamperedPayload;
+		TestFalse(
+			TEXT("tampered cursor is rejected"),
+			UEAgentKitNativeCursor::Decode(Tampered, Key, Now, TamperedPayload, DecodeError, DecodeMessage));
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUEAgentKitNativePaginationTest,
+	"UEAgentKit.Native.R1Pagination",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUEAgentKitNativePaginationTest::RunTest(const FString& Parameters)
+{
+	if (!EnsureRegistry(*this))
+	{
+		return false;
+	}
+	FNativeNodeRegistry& Registry = FNativeNodeRegistry::Get();
+
+	UBlueprint* Blueprint = nullptr;
+	UEdGraph* Graph = nullptr;
+	UK2Node_CallFunction* Node = nullptr;
+	UEdGraphPin* ExecPin = nullptr;
+	UEdGraphPin* DataPin = nullptr;
+	if (!EnsureContextFixture(*this, Blueprint, Graph, Node, ExecPin, DataPin))
+	{
+		return false;
+	}
+
+	auto CatalogPage = [&](const int32 PageSize, const FString& Cursor, FString& OutErrorCode, const bool bReportFailure = true) {
+		const TSharedPtr<FJsonObject> Arguments = MakeShared<FJsonObject>();
+		Arguments->SetNumberField(TEXT("pageSize"), PageSize);
+		if (!Cursor.IsEmpty())
+		{
+			Arguments->SetStringField(TEXT("cursor"), Cursor);
+		}
+		return InvokeToolData(*this, Registry, TEXT("graph.nodeRegistry.catalog"), Arguments, OutErrorCode, bReportFailure);
+	};
+
+	FString ErrorCode;
+	const TSharedPtr<FJsonObject> FirstData = CatalogPage(64, FString(), ErrorCode);
+	if (!TestNotNull(TEXT("catalog first page data"), FirstData.Get()))
+	{
+		return false;
+	}
+	const TSharedPtr<FJsonObject> FirstPagination = FirstData->GetObjectField(TEXT("pagination"));
+	if (!TestTrue(TEXT("catalog first page has pagination"), FirstPagination.IsValid()))
+	{
+		return false;
+	}
+	TestEqual(TEXT("catalog page size"), static_cast<int32>(FirstPagination->GetNumberField(TEXT("pageSize"))), 64);
+	TestEqual(TEXT("catalog page offset"), static_cast<int32>(FirstPagination->GetNumberField(TEXT("offset"))), 0);
+	TestEqual(TEXT("catalog page returned"), static_cast<int32>(FirstPagination->GetNumberField(TEXT("returned"))), 64);
+	TestEqual(TEXT("catalog page total"), static_cast<int32>(FirstPagination->GetNumberField(TEXT("total"))), 512);
+	TestTrue(TEXT("catalog pagination has more"), FirstPagination->GetBoolField(TEXT("hasMore")));
+	TestFalse(TEXT("catalog pagination is not exhausted on page 1"), FirstPagination->GetBoolField(TEXT("exhausted")));
+	TestTrue(TEXT("catalog truncation is distinguished"), FirstPagination->GetBoolField(TEXT("catalogTruncated")));
+	TestEqual(TEXT("catalog available remains 762"), static_cast<int32>(FirstPagination->GetNumberField(TEXT("catalogAvailable"))), 762);
+
+	TArray<FString> Collected;
+	FString FirstNextCursor;
+	int32 Pages = 0;
+	FString PageCursor;
+	while (Pages < 32)
+	{
+		const TSharedPtr<FJsonObject> PageData = CatalogPage(64, PageCursor, ErrorCode);
+		if (!TestNotNull(TEXT("catalog page data"), PageData.Get()))
+		{
+			return false;
+		}
+		const TArray<FString> PageIds = DescriptorIds(PageData);
+		Collected.Append(PageIds);
+		const TSharedPtr<FJsonObject> PagePagination = PageData->GetObjectField(TEXT("pagination"));
+		if (Pages == 0)
+		{
+			PagePagination->TryGetStringField(TEXT("nextCursor"), FirstNextCursor);
+		}
+		FString NextCursor;
+		if (!PagePagination->TryGetStringField(TEXT("nextCursor"), NextCursor) || !PagePagination->GetBoolField(TEXT("hasMore")))
+		{
+			break;
+		}
+		PageCursor = NextCursor;
+		++Pages;
+	}
+
+	TestEqual(TEXT("catalog paging covers exactly 512"), Collected.Num(), 512);
+	TestEqual(TEXT("catalog paging has no duplicates"), UniqueIdCount(Collected), 512);
+	TArray<FString> SortedCollected = Collected;
+	SortedCollected.Sort([](const FString& Left, const FString& Right) {
+		return UEAgentKitCanonical::CompareUtf8(Left, Right) < 0;
+	});
+	TestTrue(TEXT("catalog paging is sorted"), Collected == SortedCollected);
+
+	// Replayed cursor is idempotent.
+	if (!FirstNextCursor.IsEmpty())
+	{
+		const TSharedPtr<FJsonObject> ReplayA = CatalogPage(64, FirstNextCursor, ErrorCode);
+		const TSharedPtr<FJsonObject> ReplayB = CatalogPage(64, FirstNextCursor, ErrorCode);
+		TestTrue(TEXT("replayed cursor returns the same page"), DescriptorIds(ReplayA) == DescriptorIds(ReplayB));
+
+		FString Tampered = FirstNextCursor;
+		Tampered[Tampered.Len() - 1] = Tampered[Tampered.Len() - 1] == TEXT('A') ? TEXT('B') : TEXT('A');
+		const TSharedPtr<FJsonObject> TamperedData = CatalogPage(64, Tampered, ErrorCode, false);
+		TestNull(TEXT("tampered cursor is rejected"), TamperedData.Get());
+		TestEqual(TEXT("tampered cursor code"), ErrorCode, FString(TEXT("native-schema-invalid-arguments")));
+	}
+
+	// Context paging (exec pin).
+	auto ContextPage = [&](const int32 PageSize, const FString& Cursor, FString& OutErrorCode, const bool bReportFailure = true) {
+		const TSharedPtr<FJsonObject> Arguments = MakeShared<FJsonObject>();
+		Arguments->SetStringField(TEXT("assetPath"), FixtureObjectPath);
+		Arguments->SetStringField(TEXT("graphGuid"), GuidString(Graph->GraphGuid));
+		Arguments->SetStringField(TEXT("nodeGuid"), GuidString(Node->NodeGuid));
+		Arguments->SetStringField(TEXT("pinName"), ExecPin->PinName.ToString());
+		Arguments->SetNumberField(TEXT("pageSize"), PageSize);
+		if (!Cursor.IsEmpty())
+		{
+			Arguments->SetStringField(TEXT("cursor"), Cursor);
+		}
+		return InvokeToolData(*this, Registry, TEXT("graph.nodeRegistry.filterContext"), Arguments, OutErrorCode, bReportFailure);
+	};
+
+	FString ContextError;
+	const TSharedPtr<FJsonObject> ContextFirst = ContextPage(32, FString(), ContextError);
+	if (!TestNotNull(TEXT("context first page data"), ContextFirst.Get()))
+	{
+		return false;
+	}
+	const TSharedPtr<FJsonObject> ContextPagination = ContextFirst->GetObjectField(TEXT("pagination"));
+	const int32 ContextTotal = static_cast<int32>(ContextPagination->GetNumberField(TEXT("total")));
+	TestTrue(TEXT("context pages exist"), ContextTotal > 0);
+	TArray<FString> ContextCollected;
+	FString ContextCursor;
+	int32 ContextPages = 0;
+	while (ContextPages < 64)
+	{
+		const TSharedPtr<FJsonObject> PageData = ContextPage(32, ContextCursor, ContextError);
+		if (!TestNotNull(TEXT("context page data"), PageData.Get()))
+		{
+			return false;
+		}
+		const TArray<TSharedPtr<FJsonValue>>* Actions = nullptr;
+		if (PageData->TryGetArrayField(TEXT("actions"), Actions) && Actions != nullptr)
+		{
+			for (const TSharedPtr<FJsonValue>& Value : *Actions)
+			{
+				const TSharedPtr<FJsonObject> Item = Value.IsValid() ? Value->AsObject() : nullptr;
+				FString ActionId;
+				if (Item.IsValid() && Item->TryGetStringField(TEXT("actionId"), ActionId))
+				{
+					ContextCollected.Add(ActionId);
+				}
+			}
+		}
+		const TSharedPtr<FJsonObject> PagePagination = PageData->GetObjectField(TEXT("pagination"));
+		FString NextCursor;
+		if (!PagePagination->TryGetStringField(TEXT("nextCursor"), NextCursor))
+		{
+			break;
+		}
+		ContextCursor = NextCursor;
+		++ContextPages;
+	}
+	TestEqual(TEXT("context paging covers the whole match set"), ContextCollected.Num(), ContextTotal);
+	TestEqual(TEXT("context paging has no duplicates"), UniqueIdCount(ContextCollected), ContextTotal);
+
+	// Query shape mismatch: catalog cursor used for a context request.
+	if (!FirstNextCursor.IsEmpty())
+	{
+		const TSharedPtr<FJsonObject> Mismatch = ContextPage(64, FirstNextCursor, ErrorCode, false);
+		TestNull(TEXT("cursor query mismatch is rejected"), Mismatch.Get());
+		TestEqual(TEXT("cursor query mismatch code"), ErrorCode, FString(TEXT("native-schema-invalid-arguments")));
+	}
+
+	// Stale and expired cursors, minted with the session key.
+	if (FirstPagination.IsValid())
+	{
+		const FString QueryHash = FirstPagination->GetStringField(TEXT("queryHash"));
+		const FString SetFingerprint = FirstPagination->GetStringField(TEXT("setFingerprint"));
+		const FString Epoch = FirstPagination->GetStringField(TEXT("epoch"));
+		const int64 Now = FDateTime::UtcNow().ToUnixTimestamp();
+		FString Minted;
+		FString MintCode;
+		TestTrue(
+			TEXT("stale cursor can be minted for the negative test"),
+			Registry.EncodeCursorForAutomation(
+				TEXT("catalog"), QueryHash, TEXT("sha256:0000000000000000"), Epoch,
+				64, 512, 64, Now, Now + 900, Minted, MintCode));
+		const TSharedPtr<FJsonObject> StaleData = CatalogPage(64, Minted, ErrorCode, false);
+		TestNull(TEXT("stale cursor is rejected"), StaleData.Get());
+		TestEqual(TEXT("stale cursor code"), ErrorCode, FString(TEXT("native-gate-revision-conflict")));
+
+		TestTrue(
+			TEXT("expired cursor can be minted for the negative test"),
+			Registry.EncodeCursorForAutomation(
+				TEXT("catalog"), QueryHash, SetFingerprint, Epoch,
+				64, 512, 64, Now - 1000, Now - 1, Minted, MintCode));
+		const TSharedPtr<FJsonObject> ExpiredData = CatalogPage(64, Minted, ErrorCode, false);
+		TestNull(TEXT("expired cursor is rejected"), ExpiredData.Get());
+		TestEqual(TEXT("expired cursor code"), ErrorCode, FString(TEXT("native-schema-invalid-arguments")));
+	}
+
+	// Bounds and legacy compatibility.
+	const TSharedPtr<FJsonObject> TooLargeArgs = MakeShared<FJsonObject>();
+	TooLargeArgs->SetNumberField(TEXT("pageSize"), 257);
+	const TSharedPtr<FJsonObject> TooLarge = InvokeToolData(*this, Registry, TEXT("graph.nodeRegistry.catalog"), TooLargeArgs, ErrorCode, false);
+	TestNull(TEXT("pageSize above bound is rejected"), TooLarge.Get());
+
+	const TSharedPtr<FJsonObject> MixedArgs = MakeShared<FJsonObject>();
+	MixedArgs->SetNumberField(TEXT("pageSize"), 32);
+	MixedArgs->SetNumberField(TEXT("maxItems"), 32);
+	const TSharedPtr<FJsonObject> Mixed = InvokeToolData(*this, Registry, TEXT("graph.nodeRegistry.catalog"), MixedArgs, ErrorCode, false);
+	TestNull(TEXT("maxItems plus pageSize is rejected"), Mixed.Get());
+
+	const TSharedPtr<FJsonObject> LegacyArgs = MakeShared<FJsonObject>();
+	LegacyArgs->SetNumberField(TEXT("maxItems"), 8);
+	FString LegacyError;
+	const TSharedPtr<FJsonObject> Legacy = InvokeToolData(*this, Registry, TEXT("graph.nodeRegistry.catalog"), LegacyArgs, LegacyError);
+	if (TestNotNull(TEXT("legacy catalog call still works"), Legacy.Get()))
+	{
+		TestEqual(TEXT("legacy maxItems still caps at 8"), DescriptorIds(Legacy).Num(), 8);
+		TestFalse(TEXT("legacy call has no pagination envelope"), Legacy->HasField(TEXT("pagination")));
+	}
+
+	AddInfo(FString::Printf(
+		TEXT("paginationEvidence catalogPages=%d catalogItems=%d contextPages=%d contextItems=%d"),
+		Pages + 1,
+		Collected.Num(),
+		ContextPages + 1,
+		ContextCollected.Num()));
 	return true;
 }
 

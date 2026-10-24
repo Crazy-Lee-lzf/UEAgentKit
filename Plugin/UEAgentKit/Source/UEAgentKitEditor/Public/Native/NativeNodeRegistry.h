@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Dom/JsonObject.h"
+#include "Dom/JsonValue.h"
 
 /**
  * R1.0 read-only Blueprint node registry (N0 contract, 2026-10-24).
@@ -292,6 +293,21 @@ public:
 		bool bTreatAsUntrusted,
 		FString& OutCode) const;
 
+	/** R1.4 test seams: replace the session cursor key / mint a cursor for negatives. */
+	bool SetCursorKeyForAutomation(const TArray<uint8>& Key);
+	bool EncodeCursorForAutomation(
+		const FString& Kind,
+		const FString& QueryHash,
+		const FString& SetFingerprint,
+		const FString& Epoch,
+		int32 Offset,
+		int32 Total,
+		int32 PageSize,
+		int64 IssuedAt,
+		int64 ExpiresAt,
+		FString& OutToken,
+		FString& OutCode) const;
+
 	/** Stable database fingerprint from an already sorted action id array. */
 	static FString ComputeActionDatabaseFingerprint(const TArray<FString>& SortedActionIds, FString& OutErrorCode);
 
@@ -350,4 +366,27 @@ private:
 		const FString& ContextKind,
 		int32 MaxItems,
 		double MaxFilterMs) const;
+
+	/** Per-session HMAC key for opaque pagination cursors. */
+	TArray<uint8> CursorKey;
+
+	FString ComputeCursorEpoch(const FString& Kind, const FString& SetFingerprint) const;
+
+	/**
+	 * R1.4: replaces ItemsField in Data with one deterministic page and adds the
+	 * pagination envelope.  Only called for opt-in pageSize/cursor requests.
+	 */
+	bool ApplyPagination(
+		const FString& Kind,
+		const FString& QueryHash,
+		const FString& SetFingerprint,
+		const TArray<TSharedPtr<FJsonValue>>& AllItems,
+		const FString& ItemsField,
+		int32 RequestedPageSize,
+		const FString& Cursor,
+		bool bCatalogTruncated,
+		int32 CatalogAvailable,
+		const TSharedPtr<FJsonObject>& InOutData,
+		FString& OutErrorCode,
+		FString& OutErrorMessage) const;
 };

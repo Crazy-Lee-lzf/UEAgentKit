@@ -3,6 +3,7 @@
 #include "Native/NativeNodeRegistry.h"
 
 #include "Native/NativeCanonicalJson.h"
+#include "Native/NativeCursorCodec.h"
 #include "Native/NativeToolManifest.h"
 #include "BlueprintContextSha256.h"
 
@@ -64,6 +65,8 @@ namespace
 	constexpr int32 MaxCatalogItems = 512;
 	constexpr int32 MaxResponseBytes = 1048576;
 	constexpr int32 MaxSessionTemplateCreations = 768;
+
+	FString ComputeCursorQueryHash(const FString& Kind, const TArray<TPair<FString, FString>>& Fields);
 
 	enum class ENativeTrust : uint8
 	{
@@ -895,6 +898,14 @@ void FNativeNodeRegistry::Initialize(const ENativeRegistryMode InMode)
 	UnavailableCode.Reset();
 	UnavailableMessage.Reset();
 
+	// Session-scoped cursor key.  Two 128-bit GUIDs provide 64 ASCII hex bytes;
+	// the first 32 bytes are used so cursors cannot be forged across sessions.
+	const FString CursorSeed = FGuid::NewGuid().ToString(EGuidFormats::Digits)
+		+ FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	FTCHARToUTF8 CursorSeedUtf8(*CursorSeed);
+	CursorKey.SetNumUninitialized(32);
+	FMemory::Memcpy(CursorKey.GetData(), CursorSeedUtf8.Get(), 32);
+
 	if (Mode == ENativeRegistryMode::Off)
 	{
 		State = ENativeRegistryState::Off;
@@ -954,6 +965,7 @@ void FNativeNodeRegistry::Shutdown()
 	DescribedDescriptors.Reset();
 	DescribedDatabaseFingerprint.Reset();
 	DescribedTotalSpawners = 0;
+	CursorKey.Reset();
 }
 
 bool FNativeNodeRegistry::IsInitialized() const
@@ -1372,10 +1384,13 @@ bool FNativeNodeRegistry::TryInvokeShadowTool(
 		FString NodeGuidText;
 		FString PinName;
 		int32 ContextMaxItems = 128;
+		int32 ContextPageSize = 0;
+		FString ContextCursor;
+		bool bHasMaxItems = false;
 		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : SafeArguments->Values)
 		{
 			const bool bStringField = Pair.Key == TEXT("assetPath") || Pair.Key == TEXT("graphGuid")
-				|| Pair.Key == TEXT("nodeGuid") || Pair.Key == TEXT("pinName");
+				|| Pair.Key == TEXT("nodeGuid") || Pair.Key == TEXT("pinName") || Pair.Key == TEXT("cursor");
 			if (bStringField)
 			{
 				if (!Pair.Value.IsValid() || Pair.Value->Type != EJson::String)
@@ -1385,7 +1400,8 @@ bool FNativeNodeRegistry::TryInvokeShadowTool(
 					return false;
 				}
 				const FString Value = Pair.Value->AsString();
-				if (Value.Len() > 512)
+				const int32 MaxLength = Pair.Key == TEXT("cursor") ? 4096 : 512;
+				if (Value.Len() > MaxLength)
 				{
 					OutErrorCode = TEXT("native-schema-invalid-arguments");
 					OutErrorMessage = TEXT("A context argument is too long.");
@@ -1394,6 +1410,7 @@ bool FNativeNodeRegistry::TryInvokeShadowTool(
 				if (Pair.Key == TEXT("assetPath")) { AssetPath = Value; }
 				else if (Pair.Key == TEXT("graphGuid")) { GraphGuidText = Value; }
 				else if (Pair.Key == TEXT("nodeGuid")) { NodeGuidText = Value; }
+				else if (Pair.Key == TEXT("cursor")) { ContextCursor = Value; }
 				else { PinName = Value; }
 			}
 			else if (Pair.Key == TEXT("maxItems"))
@@ -1412,6 +1429,24 @@ bool FNativeNodeRegistry::TryInvokeShadowTool(
 					return false;
 				}
 				ContextMaxItems = static_cast<int32>(Number);
+				bHasMaxItems = true;
+			}
+			else if (Pair.Key == TEXT("pageSize"))
+			{
+				if (!Pair.Value.IsValid() || Pair.Value->Type != EJson::Number)
+				{
+					OutErrorCode = TEXT("native-schema-invalid-arguments");
+					OutErrorMessage = TEXT("pageSize must be an integer.");
+					return false;
+				}
+				const double Number = Pair.Value->AsNumber();
+				if (Number < 1.0 || Number > 256.0 || Number != FMath::RoundToDouble(Number))
+				{
+					OutErrorCode = TEXT("native-schema-invalid-arguments");
+					OutErrorMessage = TEXT("pageSize is out of range.");
+					return false;
+				}
+				ContextPageSize = static_cast<int32>(Number);
 			}
 			else
 			{
@@ -1419,6 +1454,13 @@ bool FNativeNodeRegistry::TryInvokeShadowTool(
 				OutErrorMessage = TEXT("Unknown native tool argument.");
 				return false;
 			}
+		}
+		const bool bContextPaging = ContextPageSize > 0 || !ContextCursor.IsEmpty();
+		if (bContextPaging && bHasMaxItems)
+		{
+			OutErrorCode = TEXT("native-schema-invalid-arguments");
+			OutErrorMessage = TEXT("maxItems cannot be combined with pageSize/cursor.");
+			return false;
 		}
 		if (AssetPath.IsEmpty() || GraphGuidText.IsEmpty())
 		{
@@ -1438,13 +1480,61 @@ bool FNativeNodeRegistry::TryInvokeShadowTool(
 		ContextRequest.GraphGuid = GraphGuidText;
 		ContextRequest.NodeGuid = NodeGuidText;
 		ContextRequest.PinName = PinName;
-		ContextRequest.MaxItems = ContextMaxItems;
+		ContextRequest.MaxItems = bContextPaging ? MaxCatalogItems : ContextMaxItems;
 		const FNativeContextResult ContextResult = FilterContext(ContextRequest);
 		if (!ContextResult.bOk)
 		{
 			OutErrorCode = ContextResult.ErrorCode;
 			OutErrorMessage = ContextResult.ErrorMessage;
 			return false;
+		}
+
+		TSharedPtr<FJsonObject> ContextData = ContextResult.MakeJson();
+		if (bContextPaging)
+		{
+			if (ContextResult.bTruncated)
+			{
+				OutErrorCode = TEXT("native-limit-response-too-large");
+				OutErrorMessage = TEXT("The context match set exceeds the paging bound; refine the context.");
+				return false;
+			}
+			const TArray<TSharedPtr<FJsonValue>>* AllActions = nullptr;
+			if (!ContextData->TryGetArrayField(TEXT("actions"), AllActions) || AllActions == nullptr)
+			{
+				OutErrorCode = TEXT("native-internal-error");
+				OutErrorMessage = TEXT("The context action list is unavailable for pagination.");
+				return false;
+			}
+			TArray<TPair<FString, FString>> QueryFields;
+			QueryFields.Add(TPair<FString, FString>(FString(TEXT("assetPath")), FString(AssetPath)));
+			QueryFields.Add(TPair<FString, FString>(FString(TEXT("graphGuid")), FString(GraphGuidText)));
+			QueryFields.Add(TPair<FString, FString>(FString(TEXT("nodeGuid")), FString(NodeGuidText)));
+			QueryFields.Add(TPair<FString, FString>(FString(TEXT("pinName")), FString(PinName)));
+			QueryFields.Add(TPair<FString, FString>(FString(TEXT("contextKind")), FString(ContextResult.ContextKind)));
+			const FString QueryHash = ComputeCursorQueryHash(TEXT("context"), QueryFields);
+			if (QueryHash.IsEmpty())
+			{
+				OutErrorCode = TEXT("native-internal-error");
+				OutErrorMessage = TEXT("The context query identity could not be computed.");
+				return false;
+			}
+			TArray<TSharedPtr<FJsonValue>> AllItems = *AllActions;
+			if (!ApplyPagination(
+					TEXT("context"),
+					QueryHash,
+					ContextResult.ActionSetFingerprint,
+					AllItems,
+					TEXT("actions"),
+					ContextPageSize,
+					ContextCursor,
+					false,
+					0,
+					ContextData,
+					OutErrorCode,
+					OutErrorMessage))
+			{
+				return false;
+			}
 		}
 
 		const TSharedRef<FJsonObject> ContextEnvelope = MakeShared<FJsonObject>();
@@ -1454,7 +1544,7 @@ bool FNativeNodeRegistry::TryInvokeShadowTool(
 		ContextEnvelope->SetStringField(TEXT("editorSessionId"), EditorSessionId);
 		ContextEnvelope->SetStringField(TEXT("registryVersion"), Manifest.RegistryVersion);
 		ContextEnvelope->SetBoolField(TEXT("readOnly"), true);
-		ContextEnvelope->SetObjectField(TEXT("data"), ContextResult.MakeJson());
+		ContextEnvelope->SetObjectField(TEXT("data"), ContextData);
 
 		FString ContextSerialized;
 		const TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> ContextWriter =
@@ -1477,6 +1567,9 @@ bool FNativeNodeRegistry::TryInvokeShadowTool(
 	}
 
 	int32 MaxItems = 64;
+	int32 PageSize = 0;
+	FString Cursor;
+	bool bHasMaxItems = false;
 	bool bIncludeDescriptors = bIsCatalog;
 	bool bIncludeUnsupported = true;
 	for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : SafeArguments->Values)
@@ -1497,6 +1590,34 @@ bool FNativeNodeRegistry::TryInvokeShadowTool(
 				return false;
 			}
 			MaxItems = static_cast<int32>(Number);
+			bHasMaxItems = true;
+		}
+		else if (bIsCatalog && Pair.Key == TEXT("pageSize"))
+		{
+			if (!Pair.Value.IsValid() || Pair.Value->Type != EJson::Number)
+			{
+				OutErrorCode = TEXT("native-schema-invalid-arguments");
+				OutErrorMessage = TEXT("pageSize must be an integer.");
+				return false;
+			}
+			const double Number = Pair.Value->AsNumber();
+			if (Number < 1.0 || Number > 256.0 || Number != FMath::RoundToDouble(Number))
+			{
+				OutErrorCode = TEXT("native-schema-invalid-arguments");
+				OutErrorMessage = TEXT("pageSize is out of range.");
+				return false;
+			}
+			PageSize = static_cast<int32>(Number);
+		}
+		else if (bIsCatalog && Pair.Key == TEXT("cursor"))
+		{
+			if (!Pair.Value.IsValid() || Pair.Value->Type != EJson::String || Pair.Value->AsString().Len() > 4096)
+			{
+				OutErrorCode = TEXT("native-schema-invalid-arguments");
+				OutErrorMessage = TEXT("cursor must be a bounded string.");
+				return false;
+			}
+			Cursor = Pair.Value->AsString();
 		}
 		else if (bIsCatalog && (Pair.Key == TEXT("includeDescriptors") || Pair.Key == TEXT("includeUnsupported")))
 		{
@@ -1523,8 +1644,25 @@ bool FNativeNodeRegistry::TryInvokeShadowTool(
 		}
 	}
 
+	const bool bCatalogPaging = PageSize > 0 || !Cursor.IsEmpty();
+	if (bCatalogPaging)
+	{
+		if (bHasMaxItems)
+		{
+			OutErrorCode = TEXT("native-schema-invalid-arguments");
+			OutErrorMessage = TEXT("maxItems cannot be combined with pageSize/cursor.");
+			return false;
+		}
+		if (!bIncludeDescriptors)
+		{
+			OutErrorCode = TEXT("native-schema-invalid-arguments");
+			OutErrorMessage = TEXT("includeDescriptors=false cannot be combined with pageSize/cursor.");
+			return false;
+		}
+	}
+
 	FNativeCatalogOptions Options;
-	Options.MaxItems = MaxItems;
+	Options.MaxItems = bCatalogPaging ? MaxCatalogItems : MaxItems;
 	const FNativeCatalogResult Catalog = BuildCatalog(Options);
 	if (!Catalog.bOk)
 	{
@@ -1545,17 +1683,44 @@ bool FNativeNodeRegistry::TryInvokeShadowTool(
 	{
 		Data->RemoveField(TEXT("unsupported"));
 	}
-	if (bIncludeDescriptors)
+
+	TArray<TSharedPtr<FJsonValue>> DescriptorValues;
+	DescriptorValues.Reserve(Catalog.Descriptors.Num());
+	for (const FNativeNodeDescriptorRecord& Record : Catalog.Descriptors)
 	{
-		TArray<TSharedPtr<FJsonValue>> DescriptorValues;
-		DescriptorValues.Reserve(Catalog.Descriptors.Num());
-		for (const FNativeNodeDescriptorRecord& Record : Catalog.Descriptors)
+		if (Record.Descriptor.IsValid())
 		{
-			if (Record.Descriptor.IsValid())
-			{
-				DescriptorValues.Add(MakeShared<FJsonValueObject>(Record.Descriptor));
-			}
+			DescriptorValues.Add(MakeShared<FJsonValueObject>(Record.Descriptor));
 		}
+	}
+	if (bCatalogPaging)
+	{
+		const FString QueryHash = ComputeCursorQueryHash(TEXT("catalog"), TArray<TPair<FString, FString>>());
+		if (QueryHash.IsEmpty())
+		{
+			OutErrorCode = TEXT("native-internal-error");
+			OutErrorMessage = TEXT("The catalog query identity could not be computed.");
+			return false;
+		}
+		if (!ApplyPagination(
+				TEXT("catalog"),
+				QueryHash,
+				Catalog.ActionDatabaseFingerprint,
+				DescriptorValues,
+				TEXT("descriptors"),
+				PageSize,
+				Cursor,
+				Catalog.bTruncated,
+				Catalog.TotalDescriptorsAvailable,
+				Data,
+				OutErrorCode,
+				OutErrorMessage))
+		{
+			return false;
+		}
+	}
+	else if (bIncludeDescriptors)
+	{
 		Data->SetArrayField(TEXT("descriptors"), DescriptorValues);
 	}
 	Result->SetObjectField(TEXT("data"), Data);
@@ -1620,6 +1785,26 @@ namespace
 		default:
 			return TEXT("other");
 		}
+	}
+
+	FString ComputeCursorQueryHash(
+		const FString& Kind,
+		const TArray<TPair<FString, FString>>& Fields)
+	{
+		using namespace UEAgentKitCanonical;
+		const FNativeCanonicalValueRef Object = FNativeCanonicalValue::MakeObject();
+		Object->SetObjectValue(TEXT("kind"), FNativeCanonicalValue::MakeString(Kind));
+		for (const TPair<FString, FString>& Field : Fields)
+		{
+			Object->SetObjectValue(Field.Key, FNativeCanonicalValue::MakeString(Field.Value));
+		}
+		FString Hash;
+		FString Error;
+		if (!Fingerprint(Object, TEXT("ueak.native.cursor.query/1"), 16, Hash, Error))
+		{
+			return FString();
+		}
+		return Hash;
 	}
 }
 
@@ -2099,4 +2284,199 @@ bool FNativeNodeRegistry::DescribeSpawnerForAutomation(
 		Action);
 	OutCode = bOk ? TEXT("ok") : Action.Reason;
 	return bOk;
+}
+
+FString FNativeNodeRegistry::ComputeCursorEpoch(const FString& Kind, const FString& SetFingerprint) const
+{
+	using namespace UEAgentKitCanonical;
+	const FNativeCanonicalValueRef Object = FNativeCanonicalValue::MakeObject();
+	Object->SetObjectValue(TEXT("session"), FNativeCanonicalValue::MakeString(EditorSessionId));
+	Object->SetObjectValue(TEXT("manifest"), FNativeCanonicalValue::MakeString(Manifest.Hash));
+	Object->SetObjectValue(TEXT("kind"), FNativeCanonicalValue::MakeString(Kind));
+	Object->SetObjectValue(TEXT("set"), FNativeCanonicalValue::MakeString(SetFingerprint));
+	FString Epoch;
+	FString Error;
+	if (!Fingerprint(Object, TEXT("ueak.native.cursor.epoch/1"), 16, Epoch, Error))
+	{
+		return FString();
+	}
+	return Epoch;
+}
+
+bool FNativeNodeRegistry::SetCursorKeyForAutomation(const TArray<uint8>& Key)
+{
+	const bool bTestContext = GIsAutomationTesting
+		|| FAutomationTestFramework::Get().GetCurrentTest() != nullptr;
+	if (!bTestContext || Key.Num() < 32)
+	{
+		return false;
+	}
+	CursorKey = Key;
+	return true;
+}
+
+bool FNativeNodeRegistry::EncodeCursorForAutomation(
+	const FString& Kind,
+	const FString& QueryHash,
+	const FString& SetFingerprint,
+	const FString& Epoch,
+	const int32 Offset,
+	const int32 Total,
+	const int32 PageSize,
+	const int64 IssuedAt,
+	const int64 ExpiresAt,
+	FString& OutToken,
+	FString& OutCode) const
+{
+	const bool bTestContext = GIsAutomationTesting
+		|| FAutomationTestFramework::Get().GetCurrentTest() != nullptr;
+	if (!bTestContext)
+	{
+		OutCode = TEXT("native-internal-error");
+		return false;
+	}
+	FNativeCursorPayload Payload;
+	Payload.Kind = Kind;
+	Payload.QueryHash = QueryHash;
+	Payload.SetFingerprint = SetFingerprint;
+	Payload.Epoch = Epoch;
+	Payload.Offset = Offset;
+	Payload.Total = Total;
+	Payload.PageSize = PageSize;
+	Payload.IssuedAt = IssuedAt;
+	Payload.ExpiresAt = ExpiresAt;
+	return UEAgentKitNativeCursor::Encode(Payload, CursorKey, OutToken, OutCode);
+}
+
+bool FNativeNodeRegistry::ApplyPagination(
+	const FString& Kind,
+	const FString& QueryHash,
+	const FString& SetFingerprint,
+	const TArray<TSharedPtr<FJsonValue>>& AllItems,
+	const FString& ItemsField,
+	const int32 RequestedPageSize,
+	const FString& Cursor,
+	const bool bCatalogTruncated,
+	const int32 CatalogAvailable,
+	const TSharedPtr<FJsonObject>& InOutData,
+	FString& OutErrorCode,
+	FString& OutErrorMessage) const
+{
+	using namespace UEAgentKitCanonical;
+	const int64 NowUnix = FDateTime::UtcNow().ToUnixTimestamp();
+	const FString Epoch = ComputeCursorEpoch(Kind, SetFingerprint);
+	if (Epoch.IsEmpty() || CursorKey.Num() < 32)
+	{
+		OutErrorCode = TEXT("native-internal-error");
+		OutErrorMessage = TEXT("The pagination cursor key is unavailable.");
+		return false;
+	}
+
+	int32 PageSize = RequestedPageSize > 0 ? RequestedPageSize : 64;
+	if (PageSize < 1 || PageSize > UEAgentKitNativeCursor::MaxPageSize)
+	{
+		OutErrorCode = TEXT("native-schema-invalid-arguments");
+		OutErrorMessage = TEXT("pageSize is out of range.");
+		return false;
+	}
+	int32 Offset = 0;
+	int64 IssuedAt = NowUnix;
+	int64 ExpiresAt = NowUnix + UEAgentKitNativeCursor::CursorTtlSeconds;
+
+	if (!Cursor.IsEmpty())
+	{
+		FNativeCursorPayload Payload;
+		FString DecodeCode;
+		FString DecodeMessage;
+		if (!UEAgentKitNativeCursor::Decode(Cursor, CursorKey, NowUnix, Payload, DecodeCode, DecodeMessage))
+		{
+			OutErrorCode = DecodeCode.IsEmpty() ? TEXT("native-schema-invalid-arguments") : DecodeCode;
+			OutErrorMessage = DecodeMessage.IsEmpty() ? TEXT("The cursor is invalid.") : DecodeMessage;
+			return false;
+		}
+		if (Payload.Kind != Kind || Payload.QueryHash != QueryHash)
+		{
+			OutErrorCode = TEXT("native-schema-invalid-arguments");
+			OutErrorMessage = TEXT("The cursor does not match this query.");
+			return false;
+		}
+		if (Payload.SetFingerprint != SetFingerprint || Payload.Epoch != Epoch
+			|| Payload.Total != AllItems.Num())
+		{
+			OutErrorCode = TEXT("native-gate-revision-conflict");
+			OutErrorMessage = TEXT("The cursor is stale for the current action set.");
+			return false;
+		}
+		if (RequestedPageSize > 0 && Payload.PageSize != RequestedPageSize)
+		{
+			OutErrorCode = TEXT("native-schema-invalid-arguments");
+			OutErrorMessage = TEXT("pageSize does not match the cursor.");
+			return false;
+		}
+		if (Payload.Offset < 0 || Payload.Offset > AllItems.Num())
+		{
+			OutErrorCode = TEXT("native-schema-invalid-arguments");
+			OutErrorMessage = TEXT("The cursor offset is out of range.");
+			return false;
+		}
+		PageSize = Payload.PageSize;
+		Offset = Payload.Offset;
+		IssuedAt = Payload.IssuedAt;
+		ExpiresAt = Payload.ExpiresAt;
+	}
+
+	const int32 Total = AllItems.Num();
+	const int32 Returned = FMath::Clamp(Total - Offset, 0, PageSize);
+	const int32 NextOffset = Offset + Returned;
+	const bool bHasMore = NextOffset < Total;
+
+	TArray<TSharedPtr<FJsonValue>> PageItems;
+	PageItems.Reserve(Returned);
+	for (int32 Index = 0; Index < Returned; ++Index)
+	{
+		PageItems.Add(AllItems[Offset + Index]);
+	}
+	InOutData->SetArrayField(ItemsField, PageItems);
+
+	const TSharedRef<FJsonObject> Pagination = MakeShared<FJsonObject>();
+	Pagination->SetStringField(TEXT("kind"), Kind);
+	Pagination->SetNumberField(TEXT("pageSize"), PageSize);
+	Pagination->SetNumberField(TEXT("offset"), Offset);
+	Pagination->SetNumberField(TEXT("returned"), Returned);
+	Pagination->SetNumberField(TEXT("total"), Total);
+	Pagination->SetBoolField(TEXT("hasMore"), bHasMore);
+	Pagination->SetBoolField(TEXT("exhausted"), !bHasMore);
+	Pagination->SetBoolField(TEXT("catalogTruncated"), bCatalogTruncated);
+	Pagination->SetNumberField(TEXT("catalogAvailable"), CatalogAvailable);
+	Pagination->SetStringField(TEXT("queryHash"), QueryHash);
+	Pagination->SetStringField(TEXT("epoch"), Epoch);
+	Pagination->SetStringField(TEXT("setFingerprint"), SetFingerprint);
+	Pagination->SetNumberField(TEXT("issuedAtUnix"), static_cast<double>(IssuedAt));
+	Pagination->SetNumberField(TEXT("expiresAtUnix"), static_cast<double>(ExpiresAt));
+	Pagination->SetNumberField(TEXT("ttlSeconds"), UEAgentKitNativeCursor::CursorTtlSeconds);
+
+	if (bHasMore)
+	{
+		FNativeCursorPayload NextPayload;
+		NextPayload.Kind = Kind;
+		NextPayload.QueryHash = QueryHash;
+		NextPayload.SetFingerprint = SetFingerprint;
+		NextPayload.Epoch = Epoch;
+		NextPayload.Offset = NextOffset;
+		NextPayload.Total = Total;
+		NextPayload.PageSize = PageSize;
+		NextPayload.IssuedAt = IssuedAt;
+		NextPayload.ExpiresAt = ExpiresAt;
+		FString NextCursor;
+		FString EncodeCode;
+		if (!UEAgentKitNativeCursor::Encode(NextPayload, CursorKey, NextCursor, EncodeCode))
+		{
+			OutErrorCode = TEXT("native-internal-error");
+			OutErrorMessage = TEXT("The next cursor could not be encoded.");
+			return false;
+		}
+		Pagination->SetStringField(TEXT("nextCursor"), NextCursor);
+	}
+	InOutData->SetObjectField(TEXT("pagination"), Pagination);
+	return true;
 }
