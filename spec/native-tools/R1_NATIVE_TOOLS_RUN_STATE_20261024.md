@@ -1,6 +1,6 @@
 # RunState — R1 原生节点注册表（2026-10-24，R1.4 离线更新）
 
-- 当前轮次：**R1.4 / T6 游标分页（代码 + 离线契约完成；UE 编译/运行时 PENDING）**。R1.3 已 RUNTIME-VERIFIED；R1.5 影子工具仍为部分。**停止于 R1.4 离线，未进入 R2 / T7 / T8 / T9 / 通用 Apply。**
+- 当前轮次：**R1.4 / T6 游标分页（UE 5.6.1 编译 + 运行时 9/9 x 2 PASS）**。R1.3 保持 RUNTIME-VERIFIED；R1.5 影子工具仍为部分。**停止于 R1.4 运行时，未进入 R2 / T7 / T8 / T9 / 通用 Apply。**
 - 工作树：`E:\WorkSpace\UEAgentKit-WT\r1-node-registry`
 - 分支 / 起点：`feature/r1-node-registry`，R1.4 从 `bcd3d45` 继续；本地提交未 push。
 - 模型（已核验）：`cline-pass/deepseek-v4.1-flash-1017`，`reasoningEffort=max`，非 Fast；同一 DSH session `session-8df1c508-…`，未切换 Provider/模型。
@@ -33,7 +33,7 @@
 | 项 | 值 |
 |---|---|
 | 构建 | **Succeeded**（VS 2022 14.44.35228；仅既有的非首选 MSVC / IKRig 警告） |
-| 最终 DLL | `sha256:56d01e7d0103e9ec27eb81cf339f5eeead73888aa6c70f86a99a146cd49200ff` |
+| 最终 DLL（R1.4） | `sha256:bf2fac73316f810eca798d3949ca121a83c988a0f7512d9c4ccf505fdb82c9c8`（R1.3 为 `56d01e7d…`） |
 | 先前 DLL（R1.2 实测） | `sha256:15480cb8b2bf5edc1363e9d1ad208ead0241d94160f01e07e038b6f9d6fcfa05`（更早的 `74ded…` 作废） |
 | UE 自动化 | run A/B 各 **7/7 Success，0 failed，0 not run** |
 | spawner / owner | 38325 / 3071 |
@@ -68,19 +68,19 @@
 
 未 push / merge / rebase / reset / `git clean` / 删除既有文件；未改 `main` 或其他 worktree；未触碰 Reforge / Lyra 原始 / UETest；未使用 Computer Use / SendInput / 前台窗口 / 截图；未改 P11 Preview；未移除 `IPythonScriptPlugin` / P8 / P9；未开放通用 Apply；未实现 R2；MCP 工具计数未变。
 
-## R1.4 / T6（离线完成，UE PENDING）
+## R1.4 / T6（UE 5.6.1 编译 + 运行时 PASS）
 
 - **实现**：`pageSize`（1–256）+ 不透明 `v1.<payload>.<hmac>` 游标；payload 绑定 kind/queryHash/setFingerprint/epoch/offset/total/pageSize/iat/exp；HMAC-SHA256（per-session key，128-bit 熵，仅内存）；TTL 900 s；token ≤4096。
 - **分页**：catalog 512 已描述 descriptor；context match set（实测 palette 443 / node 431 / exec 297 / data 12）；按 actionId 排序，逐页无重无漏；最后一页 `exhausted=true`；`catalogTruncated=true / catalogAvailable=762` 与分页耗尽分开。
 - **fail-closed**：tampered/malformed/expired → `native-schema-invalid-arguments`；query kind/身份变化 → `native-schema-invalid-arguments`；set/epoch/total 变化 → `native-gate-revision-conflict`；pageSize 不匹配/offset 越界 → invalid。重放同游标幂等（只读），不宣称防重放。
 - **兼容**：未传 `pageSize/cursor` 时旧 `maxItems` 结果完全不变，无 `pagination` 字段；descriptor/schema/actionId/digest/200 金值未改。
 - **离线测试**：**47/47 OK**（新增 21：5 个 token 金值、512 真实导出 ID 无重无漏、空/1/末页、越界、查询/stale/epoch/过期/篡改/重放、无 IO/eval 与常量守卫）。
-- **未验证**：C++ 未编译、未在 UE 运行；`R1CursorVectors` / `R1Pagination` 已写但 **PENDING**。DLL 仍为 R1.3 的 `sha256:56d01e7d0103e9ec27eb81cf339f5eeead73888aa6c70f86a99a146cd49200ff`（本轮无构建）。
-- **覆盖**：仍为 512 described / 762 available / 38,325 discovered；未提高 768 模板预算，未触碰 trust/template 边界。
+- **UE 验证**：`Build.bat ... Succeeded`（exit 0，最终 DLL `sha256:bf2fac73…`）；`R1CursorVectors` 5/5 token 逐字相等；`R1Pagination` catalog 8 页/512 无重无漏、context 10 页/318；完整 R1 套件在两个独立进程均 **9 Success / 0 failed / 0 notRun / 0 warnings**。
+- **覆盖**：仍为 512 described / 762 available（fresh catalog）/ 38,325 discovered；分页 `total=512`，`catalogTruncated=true`；后续同一会话 engine priming 可使 `catalogAvailable` 增至 1503，但绝不等同 38k，测试断言 `>=512 且 <38325`。未提高 768 模板预算，未触碰 trust/template 边界。
 
 ## UE 重型槽位
 
-本 lane 本轮未启动 UE；**未占用重型槽位**，由 M3.4 lane 使用。R1.4 的 UE 验证必须等用户/协调者释放槽位后执行，命令见 R1.4 报告 §7。
+本 lane 独占重型槽位完成 R1.4 编译/运行；启动前确认无 M3/UBT/UBA 进程，所有 Editor 以 `-WindowStyle Minimized` + PID-scoped `ShowWindow(SW_MINIMIZE)` 启动，未使用 GUI/合成输入。运行后已无本 lane UE 进程。
 
 ## 下一步（需新指令）
 
