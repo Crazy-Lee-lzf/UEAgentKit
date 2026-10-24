@@ -80,6 +80,10 @@ class ReadOnlyMountAdapter:
     def is_verified(self) -> bool:
         return True
 
+    @property
+    def project_key(self) -> str:
+        return self._registry.project_key
+
     def mount(self, pack_name: str) -> MountInfo:
         if not isinstance(pack_name, str) or not _PACK_NAME_PATTERN.fullmatch(pack_name):
             _fail(

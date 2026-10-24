@@ -30,6 +30,13 @@ from .integrity import (
 from .limits import MountLimits
 from .manifest import PackManifest
 from .service import MemoryMountRegistry, MountInfo, QueryResult
+from .staging import (
+    HandoffLimits,
+    HandoffResult,
+    LocalAuthoritySnapshot,
+    PackPin,
+    StagedContextHandoff,
+)
 
 __all__ = [
     "AUTHOR_AUTHENTICITY_NOT_ESTABLISHED",
@@ -40,15 +47,20 @@ __all__ = [
     "ContextLimits",
     "DemoCallerContext",
     "ErrorCode",
+    "HandoffLimits",
+    "HandoffResult",
     "HmacClaimVerifier",
     "IntegrityReport",
+    "LocalAuthoritySnapshot",
     "MemoryMountError",
     "MemoryMountRegistry",
     "MountInfo",
     "MountLimits",
     "PackManifest",
+    "PackPin",
     "QueryResult",
     "ReadOnlyMountAdapter",
+    "StagedContextHandoff",
     "TestClaimIssuer",
     "VerifiedCallerContext",
     "build_integrity_receipt",

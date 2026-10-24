@@ -469,6 +469,18 @@ replacement and does not change the v1 result shape.
 - The dependency direction is `context -> adapter -> service`; no production service imports
   `memory_mount`, and no MCP tool is added.
 
+### 7.7 Staged context handoff (R7.2, additive)
+
+R7.2 adds an explicit opt-in, default-off `StagedContextHandoff` with its own
+`schemaVersion=1`, `kind=r7-staged-context-handoff`. The host injects a verified adapter,
+provides a frozen `PackPin` list (packId, revision, contentHash, manifestDigest), and passes its
+existing serialized task-context bytes. If the feature flag, verified adapter, pins, mounted
+packs, or query is absent, the legacy bytes are returned unchanged. When active, the envelope
+has separate `local-authority` and `mounted-knowledge` sections; mounted text is
+`untrusted-source-content` with `never-execute`; local authority subject keys shadow mounted
+items; and one combined byte/token/record/pack budget is enforced across the whole envelope.
+It is a host seam, not a production MCP tool; real authentication remains pending.
+
 ## 8. Pack index
 
 The pack index is a **derived, disposable, read-only** SQLite database. It is not Project
@@ -562,6 +574,12 @@ All errors are structured:
 | `r7-context-pack-limit` | 6 | Mounted packs exceed the context pack budget. |
 | `r7-context-output-too-large` | 6 | One item cannot fit the context output/token budget. |
 | `r7-context-invalid-record` | 7 | Adapter returned a malformed record projection. |
+| `r7-handoff-invalid` | 2 | Staged handoff configuration/argument invalid. |
+| `r7-handoff-local-context-invalid` | 2 | Local task-context/memory snapshot shape invalid. |
+| `r7-handoff-local-too-large` | 6 | Local authority section exceeds its byte budget. |
+| `r7-handoff-output-too-large` | 6 | Combined local + mounted envelope exceeds its budget. |
+| `r7-handoff-pin-mismatch` | 4 | Mounted pack is unpinned or revision/hash/manifest differs. |
+| `r7-handoff-project-mismatch` | 4 | Local context project differs from verified adapter project. |
 | `r7-pack-path-invalid` | 2 | Non-directory, traversal, or symlink path. |
 | `r7-pack-not-found` | 3 | Pack files absent/unreadable. |
 | `r7-pack-not-mounted` | 3 | Unmount/query references an unknown mount. |

@@ -41,6 +41,12 @@ class ErrorCode(StrEnum):
     CONTEXT_PACK_LIMIT = "r7-context-pack-limit"
     CONTEXT_OUTPUT_TOO_LARGE = "r7-context-output-too-large"
     CONTEXT_INVALID_RECORD = "r7-context-invalid-record"
+    HANDOFF_INVALID = "r7-handoff-invalid"
+    HANDOFF_LOCAL_CONTEXT_INVALID = "r7-handoff-local-context-invalid"
+    HANDOFF_LOCAL_TOO_LARGE = "r7-handoff-local-too-large"
+    HANDOFF_OUTPUT_TOO_LARGE = "r7-handoff-output-too-large"
+    HANDOFF_PIN_MISMATCH = "r7-handoff-pin-mismatch"
+    HANDOFF_PROJECT_MISMATCH = "r7-handoff-project-mismatch"
     QUERY_INVALID = "r7-query-invalid"
     QUERY_TOO_BROAD = "r7-query-too-broad"
     QUERY_TIMEOUT = "r7-query-timeout"
@@ -82,6 +88,12 @@ EXIT_CODES: dict[ErrorCode, int] = {
     ErrorCode.CONTEXT_PACK_LIMIT: 6,
     ErrorCode.CONTEXT_OUTPUT_TOO_LARGE: 6,
     ErrorCode.CONTEXT_INVALID_RECORD: 7,
+    ErrorCode.HANDOFF_INVALID: 2,
+    ErrorCode.HANDOFF_LOCAL_CONTEXT_INVALID: 2,
+    ErrorCode.HANDOFF_LOCAL_TOO_LARGE: 6,
+    ErrorCode.HANDOFF_OUTPUT_TOO_LARGE: 6,
+    ErrorCode.HANDOFF_PIN_MISMATCH: 4,
+    ErrorCode.HANDOFF_PROJECT_MISMATCH: 4,
     ErrorCode.QUERY_INVALID: 2,
     ErrorCode.QUERY_TOO_BROAD: 6,
     ErrorCode.QUERY_TIMEOUT: 6,
