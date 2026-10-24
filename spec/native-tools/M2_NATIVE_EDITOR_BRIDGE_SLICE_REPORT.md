@@ -81,7 +81,7 @@ Command (harness, outside the Editor):
 ```text
 UnrealEditor-Cmd.exe Build/m2-native/M2NativeHost.uproject
   -unattended -nop4 -nosplash -nullrhi -nopause -UEAgentKitAutomationChild
-  -ExecCmds=Automation RunTests UEAgentKit.Native.M2LayoutBroker;Quit
+  -ExecCmds=Automation RunTests UEAgentKit.Native.M2LayoutBrokerPositive;Quit
   -TestExit=Automation Test Queue Empty
   -ReportExportPath=Build/m2-native/Evidence/Automation
 ```
@@ -116,9 +116,10 @@ This is the genuine runtime slice. It is **not** M3: the menu still calls the le
 | >1 MiB response | fake broker | `native-preview-response-too-large` | **PASS** (Editor exit 0) |
 | broker error token | fake broker error | `native-preview-token-rejected` | **PASS** (Editor exit 0) |
 | wrong token | **real M1 broker**, descriptor token overwritten | `native-preview-token-rejected` | **PASS** (Editor exit 0) |
-| response timeout | fake broker sleeps | `native-preview-timeout`, no plan | **ASSERTIONS PASS, PROCESS EXIT 3** — the test sees timeout/no plan, then UE 5.6 NullRHI exits with an engine `GetRestoredDimensions` fatal after the test; not accepted as a clean runtime pass |
-| revision/fingerprint drift | — | conflict codes | **NOT RUN** in UE; recheck implemented, offline/unit path only |
-| 1 MiB request | — | local request-too-large | **NOT RUN** in UE (response >1 MiB tested) |
+| response timeout | fake broker sleeps 7 s; normal renderer (no `-nullrhi`) | `native-preview-timeout`, no plan | **PASS** (Editor exit 0, automation success) |
+| stale package revision | real UE fixture modified + saved after snapshot | `native-preview-revision-conflict`, no plan, no save/transaction | **PASS** (Editor exit 0; undo 0→0, receipt saved=false) |
+| stale graph fingerprint | real UE fixture moved in memory, dirty cleared | `native-preview-fingerprint-conflict`, no plan, no save/transaction | **PASS** (Editor exit 0; undo 0→0, receipt saved=false) |
+| >1 MiB **request** | real snapshot padded before request build | local `native-preview-request-too-large` | **PASS** (positive automation assertion; no socket send) |
 
 Evidence: `Evidence/m2-native-negative-*.json`, `Evidence/Negative-*/index.json`.
 
@@ -127,11 +128,15 @@ Evidence: `Evidence/m2-native-negative-*.json`, `Evidence/Negative-*/index.json`
 - No P11/P8/P9 menu, Build.cs, EditorBridge, or existing preview source was edited.
 - `UEAgentKit.GraphLayout.P10FixtureContract` **passed** in the isolated host (exit 0, test state Success,
   4 log warnings only).
-- `UEAgentKit.GraphLayout.P11FixtureContract` was attempted in the isolated host. It **failed at the existing
-  host gate** `P11Menu::IsAvailable()` (the bare host has no P11 menu marker/project), not in M2 code; it also
-  emitted 4 warnings. This is recorded as **not a regression result** — the P11 menu test suite requires the
-  P11 automation host/marker and was not rerun here.
-- P10/P11 source diffs are unchanged; P10 fixture contract is green, P11 menu/scope/reload remain unverified.
+- A valid disposable P11 host was created under `Build/m2-native/P11AutomationHost` with project name
+  `P11AutomationHost` and `P11TestOnlyBuild.json`; `Build/tools` is a junction to the repo `tools` directory so
+  the existing P11 worker path resolves. P11 source was not edited.
+- `UEAgentKit.GraphLayout.P11FixtureContract` **passed** (exit 0, test state Success, no errors).
+- `tests/python/p11_build_scope_probe.py` generated real selection/incremental requests from that fixture.
+- `UEAgentKit.GraphLayout.P11MenuContract` **passed** (exit 0, test state Success, no errors).
+- `UEAgentKit.GraphLayout.P11ScopeContract` **passed** (exit 0, test state Success, no errors).
+- `P11ReloadContract` requires a second-process reload and was **skipped** in this slice.
+- P10/P11 source diffs are unchanged; P10 fixture, P11 fixture/menu/scope are green; P11 reload remains skipped.
 - R1.3 warning context requested by the user: the R1 `CallFunction NodeGuid` warning (6 clean tests + 1 warning
   per Editor process) was **not modified** (R1 worktree untouched). This M2 host initially had an **own**
   comment-node NodeGuid warning; the fixture was changed to a minimal GUID-clean Blueprint, and the final run
@@ -158,19 +163,20 @@ Evidence: `Evidence/m2-native-negative-*.json`, `Evidence/Negative-*/index.json`
 | T3 C++ planId/layoutHash/node-set/identity validation | PASS (positive + forged planId spoof) |
 | T4 descriptor loopback/DACL/identity/freshness | PASS positive + inherited/missing negative |
 | T5 default-off / no menu / no CreateProc | PASS in source and config-off assertion |
-| T6 oversize/error/timeout/wrong-token | oversize/error/wrong-token PASS; timeout assertions pass but process exit 3 |
-| T7 revision/fingerprint dirty/PIE recheck | implemented; **runtime unverified** |
-| T8 P10/P11 regression | P10 fixture **PASS**; P11 menu/scope/reload **NOT VERIFIED** (host gate) |
+| T6 oversize/error/timeout/wrong-token | **PASS**: response >1 MiB, request >1 MiB local, broker error, real wrong token, timeout (Editor exit 0) |
+| T7 revision/fingerprint dirty/PIE recheck | **PASS** for real UE revision and fingerprint drift; no plan/write/undo; PIE path implemented but not separately driven |
+| T8 P10/P11 regression | P10 fixture **PASS**; P11 fixture/menu/scope **PASS**; P11 reload **SKIPPED** |
 | T9 no Apply/Save/transaction/token leak | PASS in runtime receipt/dirty assertions |
 | M3 menu/cutover | NOT STARTED |
 
 ## 10. Limitations / next steps
 
-- Timeout scenario’s post-test engine fatal must be investigated before a clean T6 timeout pass; it is not
-  masked.
-- Revision/fingerprint drift and cross-process fingerprint behavior need dedicated automation (modify/save a
-  fixture between snapshot and completion; two processes).
-- 1 MiB **request** rejection is not yet runtime-driven (response >1 MiB is).
+- The NullRHI `GetRestoredDimensions` fatal was avoided for the timeout case by running that one test with a
+  normal renderer (still `UnrealEditor-Cmd`, no UI input); it now exits 0. This is a test-host workaround, not
+  an engine fix.
+- Revision/fingerprint checks are same-process live rechecks; **cross-process** fingerprint drift relative to
+  R1 was not reproduced or fixed.
+- P11 reload was skipped; P11 menu/scope were run in the new valid P11 host.
 - Production snapshot wiring, feature-flag lifecycle, and menu/fallback are M3 work and not authorized.
 - The Python harness starts the broker; there is deliberately no Editor-side process creation.
 
@@ -178,7 +184,8 @@ Evidence: `Evidence/m2-native-negative-*.json`, `Evidence/Negative-*/index.json`
 
 `Build/m2-native/Evidence/` (git-ignored): `ue-editor.log`, `broker.log`, `build.log`,
 `build-console.log`, `snapshot-preflight.json`, `snapshot-context.json`, `native-result.json`,
-`m2-native-evidence.json`, `m2-native-negative-*.json`, `Automation/`, `Negative-*/`, `P11Regression/`,
+`m2-native-evidence.json`, `m2-native-negative-*.json`, `native-stale-result.json`, `Automation/`,
+`Negative-*/`, `P10Regression/`, `P11Regression/`, `P11HostFixture/`, `P11HostMenu2/`, `P11HostScope/`,
 `SHA256SUMS.txt`.
 
 No push/merge/reset/clean/delete; only this worktree and its disposable host were used.

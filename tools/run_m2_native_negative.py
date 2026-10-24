@@ -38,6 +38,7 @@ EVIDENCE = HOST_ROOT / "Evidence"
 ENGINE = Path("E:/EPICGAME/UE_5.6")
 EDITOR = ENGINE / "Engine" / "Binaries" / "Win64" / "UnrealEditor-Cmd.exe"
 TEST_NAME = "UEAgentKit.Native.M2LayoutBrokerNegative"
+STALE_TEST_NAME = "UEAgentKit.Native.M2LayoutBrokerStale"
 DESCRIPTOR = HOST_ROOT / "Saved" / "UEAgentKit" / "LayoutBroker.json"
 
 
@@ -115,7 +116,11 @@ def utc_now() -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("scenario", choices=["spoof", "oversize", "timeout", "token-error", "wrong-token"])
+    parser.add_argument(
+        "scenario",
+        choices=["spoof", "oversize", "timeout", "token-error", "wrong-token", "revision", "fingerprint"],
+    )
+    parser.add_argument("--no-nullrhi", action="store_true")
     args = parser.parse_args()
     EVIDENCE.mkdir(parents=True, exist_ok=True)
     DESCRIPTOR.parent.mkdir(parents=True, exist_ok=True)
@@ -160,17 +165,21 @@ def main() -> int:
             )
         log_path = EVIDENCE / f"negative-{args.scenario}-editor.log"
         report_dir = EVIDENCE / f"Negative-{args.scenario}"
+        test_name = STALE_TEST_NAME if args.scenario in ("revision", "fingerprint") else TEST_NAME
         command = [
             str(EDITOR),
             str(HOST_PROJECT),
             "-unattended",
             "-nop4",
             "-nosplash",
-            "-nullrhi",
+        ]
+        if not args.no_nullrhi and args.scenario != "timeout":
+            command.append("-nullrhi")
+        command += [
             "-nopause",
             "-UEAgentKitAutomationChild",
             f"-UEAgentKitM2Scenario={args.scenario}",
-            f"-ExecCmds=Automation RunTests {TEST_NAME};Quit",
+            f"-ExecCmds=Automation RunTests {test_name};Quit",
             "-TestExit=Automation Test Queue Empty",
             f"-ReportExportPath={report_dir}",
         ]
@@ -193,8 +202,9 @@ def main() -> int:
         except OSError:
             pass
 
-    result_path = EVIDENCE / "native-negative-result.json"
-    result = json.loads(result_path.read_text(encoding="utf-8")) if result_path.is_file() else {}
+    result_name = "native-stale-result.json" if args.scenario in ("revision", "fingerprint") else "native-negative-result.json"
+    result_path = EVIDENCE / result_name
+    result = json.loads(result_path.read_text(encoding="utf-8-sig")) if result_path.is_file() else {}
     index_path = report_dir / "index.json"
     automation = json.loads(index_path.read_text(encoding="utf-8-sig")) if index_path.is_file() else {}
     expected = {
@@ -203,6 +213,8 @@ def main() -> int:
         "timeout": "native-preview-timeout",
         "token-error": "native-preview-token-rejected",
         "wrong-token": "native-preview-token-rejected",
+        "revision": "native-preview-revision-conflict",
+        "fingerprint": "native-preview-fingerprint-conflict",
     }[args.scenario]
     ok = (
         exit_code == 0

@@ -10,6 +10,7 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraphNode_Comment.h"
 #include "Editor.h"
+#include "Editor/Transactor.h"
 #include "EditorBridge.h"
 #include "Engine/Blueprint.h"
 #include "GameFramework/Actor.h"
@@ -189,7 +190,7 @@ namespace UEAgentKitNativeM2Test
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FUEAgentKitNativeM2LayoutBrokerTest,
-	"UEAgentKit.Native.M2LayoutBroker",
+	"UEAgentKit.Native.M2LayoutBrokerPositive",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FUEAgentKitNativeM2LayoutBrokerTest::RunTest(const FString& Parameters)
@@ -378,6 +379,26 @@ bool FUEAgentKitNativeM2LayoutBrokerTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("M2 layoutHash is sha256"), LayoutHash.StartsWith(TEXT("sha256:")) && LayoutHash.Len() == 71);
 	}
 
+	{
+		const TSharedPtr<FJsonObject>* Context = nullptr;
+		if (Envelope->TryGetObjectField(TEXT("context"), Context) && Context != nullptr && Context->IsValid())
+		{
+			(*Context)->SetStringField(
+				TEXT("M2OversizePadding"), FString::ChrN(1100000, TEXT('x')));
+			FUEAgentKitNativeLayoutPreviewService OversizeService(&Bridge);
+			TestFalse(
+				TEXT("M2 oversized request is rejected locally"),
+				OversizeService.StartPreviewWithSnapshot(Preflight, Envelope, true));
+			TestEqual(
+				TEXT("M2 oversized request code"),
+				OversizeService.GetOutcome().Code,
+				FString(TEXT("native-preview-request-too-large")));
+			TestFalse(
+				TEXT("M2 oversized request never accepts a plan"),
+				OversizeService.GetOutcome().Plan.IsValid());
+		}
+	}
+
 	TSharedPtr<FJsonObject> EvidenceResult = MakeShared<FJsonObject>();
 	EvidenceResult->SetStringField(TEXT("schemaVersion"), TEXT("ueak.m2.native-result/1.0"));
 	EvidenceResult->SetBoolField(TEXT("ok"), Outcome.bOk);
@@ -507,6 +528,147 @@ bool FUEAgentKitNativeM2LayoutBrokerNegativeTest::RunTest(const FString& Paramet
 		TEXT("M2 negative evidence writes"),
 		UEAgentKitNativeM2Test::WriteJson(
 			FPaths::Combine(UEAgentKitNativeM2Test::EvidenceDir(), TEXT("native-negative-result.json")),
+			EvidenceResult,
+			Error));
+	Bridge.Stop();
+	return Outcome.Code == Expected && !Outcome.Plan.IsValid();
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUEAgentKitNativeM2LayoutBrokerStaleTest,
+	"UEAgentKit.Native.M2LayoutBrokerStale",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUEAgentKitNativeM2LayoutBrokerStaleTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	FString Scenario;
+	FParse::Value(FCommandLine::Get(), TEXT("UEAgentKitM2Scenario="), Scenario);
+	if (!TestTrue(TEXT("M2 stale scenario is revision or fingerprint"),
+		Scenario == TEXT("revision") || Scenario == TEXT("fingerprint")))
+	{
+		return false;
+	}
+	FString Error;
+	UBlueprint* Blueprint = UEAgentKitNativeM2Test::LoadOrCreateFixture(Error);
+	if (!TestNotNull(TEXT("M2 stale fixture loads"), Blueprint))
+	{
+		AddError(Error);
+		return false;
+	}
+	UEdGraph* Graph = Blueprint->UbergraphPages[0];
+	if (!TestNotNull(TEXT("M2 stale graph exists"), Graph))
+	{
+		return false;
+	}
+	if (!TestNotNull(TEXT("M2 stale Editor opens"), UEAgentKitNativeM2Test::OpenAndFocus(Blueprint, Graph, Error)))
+	{
+		AddError(Error);
+		return false;
+	}
+	FUEAgentKitEditorBridge Bridge;
+	if (!TestTrue(TEXT("M2 stale bridge starts"), Bridge.Start()))
+	{
+		return false;
+	}
+	TSharedPtr<FJsonObject> Preflight;
+	TSharedPtr<FJsonObject> Envelope;
+	FString ErrorCode;
+	FString ErrorMessage;
+	if (!TestTrue(
+			TEXT("M2 stale snapshot builds"),
+			Bridge.BuildP9MenuPreviewInputs(Preflight, Envelope, ErrorCode, ErrorMessage)))
+	{
+		AddError(FString::Printf(TEXT("%s: %s"), *ErrorCode, *ErrorMessage));
+		Bridge.Stop();
+		return false;
+	}
+	FUEAgentKitNativeLayoutPreviewService Service(&Bridge);
+	if (!TestTrue(
+			TEXT("M2 stale preview starts"),
+			Service.StartPreviewWithSnapshot(Preflight, Envelope, true)))
+	{
+		const FUEAgentKitNativeLayoutPreviewOutcome Failed = Service.GetOutcome();
+		AddError(FString::Printf(TEXT("%s: %s"), *Failed.Code, *Failed.Message));
+		Bridge.Stop();
+		return false;
+	}
+	const double WaitStarted = FPlatformTime::Seconds();
+	while (!Service.HasWorkerResponseForTest() && FPlatformTime::Seconds() - WaitStarted < 8.0)
+	{
+		FPlatformProcess::Sleep(0.02f);
+	}
+	if (!TestTrue(TEXT("M2 stale broker response is ready"), Service.HasWorkerResponseForTest()))
+	{
+		Bridge.Stop();
+		return false;
+	}
+
+	UK2Node_CallFunction* Print = nullptr;
+	for (UEdGraphNode* Node : Graph->Nodes)
+	{
+		Print = Cast<UK2Node_CallFunction>(Node);
+		if (Print != nullptr)
+		{
+			break;
+		}
+	}
+	if (!TestNotNull(TEXT("M2 stale fixture has a call node"), Print))
+	{
+		Bridge.Stop();
+		return false;
+	}
+	Print->NodePosX += 40;
+	if (Scenario == TEXT("revision"))
+	{
+		if (!TestTrue(TEXT("M2 stale mutation saves the package"), UEAgentKitNativeM2Test::SaveFixture(Blueprint, Error)))
+		{
+			AddError(Error);
+			Bridge.Stop();
+			return false;
+		}
+	}
+	else
+	{
+		Blueprint->GetOutermost()->SetDirtyFlag(false);
+	}
+	const int32 UndoBefore = GEditor != nullptr && GEditor->Trans != nullptr ? GEditor->Trans->GetUndoCount() : 0;
+	Service.Tick();
+	const FUEAgentKitNativeLayoutPreviewOutcome Outcome = Service.GetOutcome();
+	const int32 UndoAfter = GEditor != nullptr && GEditor->Trans != nullptr ? GEditor->Trans->GetUndoCount() : 0;
+	const FString Expected = Scenario == TEXT("revision")
+		? TEXT("native-preview-revision-conflict")
+		: TEXT("native-preview-fingerprint-conflict");
+	TestTrue(TEXT("M2 stale preview is terminal"), Service.IsTerminal());
+	TestEqual(TEXT("M2 stale code"), Outcome.Code, Expected);
+	TestFalse(TEXT("M2 stale preview accepts no plan"), Outcome.Plan.IsValid());
+	TestEqual(TEXT("M2 stale preview writes no transaction"), UndoAfter, UndoBefore);
+	TestFalse(TEXT("M2 stale preview does not dirty the package"), Blueprint->GetOutermost()->IsDirty());
+	if (Outcome.Receipt.IsValid())
+	{
+		TestFalse(TEXT("M2 stale receipt did not save"), Outcome.Receipt->GetBoolField(TEXT("saved")));
+		TestFalse(TEXT("M2 stale receipt did not compile"), Outcome.Receipt->GetBoolField(TEXT("compiled")));
+	}
+
+	TSharedPtr<FJsonObject> EvidenceResult = MakeShared<FJsonObject>();
+	EvidenceResult->SetStringField(TEXT("schemaVersion"), TEXT("ueak.m2.native-stale/1.0"));
+	EvidenceResult->SetStringField(TEXT("scenario"), Scenario);
+	EvidenceResult->SetStringField(TEXT("code"), Outcome.Code);
+	EvidenceResult->SetStringField(TEXT("expectedCode"), Expected);
+	EvidenceResult->SetBoolField(TEXT("ok"), Outcome.Code == Expected && !Outcome.Plan.IsValid());
+	EvidenceResult->SetBoolField(TEXT("planAccepted"), Outcome.Plan.IsValid());
+	EvidenceResult->SetNumberField(TEXT("undoBefore"), UndoBefore);
+	EvidenceResult->SetNumberField(TEXT("undoAfter"), UndoAfter);
+	EvidenceResult->SetBoolField(TEXT("packageDirtyAfter"), Blueprint->GetOutermost()->IsDirty());
+	if (Outcome.Receipt.IsValid())
+	{
+		EvidenceResult->SetObjectField(TEXT("receipt"), Outcome.Receipt);
+	}
+	TestTrue(
+		TEXT("M2 stale evidence writes"),
+		UEAgentKitNativeM2Test::WriteJson(
+			FPaths::Combine(UEAgentKitNativeM2Test::EvidenceDir(), TEXT("native-stale-result.json")),
 			EvidenceResult,
 			Error));
 	Bridge.Stop();

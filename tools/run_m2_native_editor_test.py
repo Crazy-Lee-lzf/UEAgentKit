@@ -37,7 +37,7 @@ HOST_PROJECT = HOST_ROOT / "M2NativeHost.uproject"
 EVIDENCE = HOST_ROOT / "Evidence"
 ENGINE = Path("E:/EPICGAME/UE_5.6")
 EDITOR = ENGINE / "Engine" / "Binaries" / "Win64" / "UnrealEditor-Cmd.exe"
-TEST_NAME = "UEAgentKit.Native.M2LayoutBroker"
+TEST_NAME = "UEAgentKit.Native.M2LayoutBrokerPositive"
 
 
 def utc_now() -> str:

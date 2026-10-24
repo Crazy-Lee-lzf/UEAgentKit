@@ -51,6 +51,7 @@ public:
 	void Tick();
 	void Cancel();
 	bool IsTerminal() const;
+	bool HasWorkerResponseForTest() const;
 	FUEAgentKitNativeLayoutPreviewOutcome GetOutcome() const;
 
 private:

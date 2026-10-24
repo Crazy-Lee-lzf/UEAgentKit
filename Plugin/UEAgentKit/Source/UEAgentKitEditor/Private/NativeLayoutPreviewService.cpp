@@ -352,6 +352,11 @@ bool FUEAgentKitNativeLayoutPreviewService::IsTerminal() const
 	return bTerminal;
 }
 
+bool FUEAgentKitNativeLayoutPreviewService::HasWorkerResponseForTest() const
+{
+	return Client.IsValid() && Client->IsDone();
+}
+
 FUEAgentKitNativeLayoutPreviewOutcome FUEAgentKitNativeLayoutPreviewService::GetOutcome() const
 {
 	return Outcome;
