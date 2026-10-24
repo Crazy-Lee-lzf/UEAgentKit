@@ -67,6 +67,10 @@ Machine-readable: `Evidence/M24/p11-reload-pair.json`; raw reports:
 
 P10 was rerun with the final DLL: `UEAgentKit.GraphLayout.P10FixtureContract` **Success**, exit 0, 0 errors.
 
+An earlier reload attempt against a scope receipt produced by a previous DLL build failed
+`dllVerified=false`; it is retained as an intermediate negative, not a pass. The final sequence above used the
+same current DLL for scope and reload and passed.
+
 ## 3. Gate B — cross-process graphFingerprint stability
 
 ### 3.1 Method
