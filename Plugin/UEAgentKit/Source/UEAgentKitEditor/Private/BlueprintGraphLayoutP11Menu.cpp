@@ -142,6 +142,16 @@ int32 FUEAgentKitGraphLayoutP11Menu::GetBusyRejectCountForTest() const
 	return BusyRejectCount;
 }
 
+double FUEAgentKitGraphLayoutP11Menu::GetLastWaitSecondsForTest() const
+{
+	return LastWaitSeconds;
+}
+
+double FUEAgentKitGraphLayoutP11Menu::GetLastFallbackSecondsForTest() const
+{
+	return LastFallbackSeconds;
+}
+
 bool FUEAgentKitGraphLayoutP11Menu::WaitForNativeWorkerResponseForTest(double TimeoutSeconds)
 {
 	const double Deadline = FPlatformTime::Seconds() + TimeoutSeconds;
@@ -155,7 +165,8 @@ bool FUEAgentKitGraphLayoutP11Menu::WaitForNativeWorkerResponseForTest(double Ti
 
 bool FUEAgentKitGraphLayoutP11Menu::WaitForNativePreviewForTest(double TimeoutSeconds)
 {
-	const double Deadline = FPlatformTime::Seconds() + TimeoutSeconds;
+	const double WaitStarted = FPlatformTime::Seconds();
+	const double Deadline = WaitStarted + TimeoutSeconds;
 	while (bNativeInFlight && FPlatformTime::Seconds() < Deadline)
 	{
 		if (NativeService.IsValid())
@@ -174,6 +185,7 @@ bool FUEAgentKitGraphLayoutP11Menu::WaitForNativePreviewForTest(double TimeoutSe
 		}
 		FPlatformProcess::Sleep(0.02f);
 	}
+	LastWaitSeconds = FPlatformTime::Seconds() - WaitStarted;
 	return !bNativeInFlight;
 }
 
@@ -245,6 +257,7 @@ bool FUEAgentKitGraphLayoutP11Menu::StartNativePreview(
 	bPackageDirtyBefore = GraphObject != nullptr && GraphObject->GetOutermost() != nullptr
 		&& GraphObject->GetOutermost()->IsDirty();
 	bNativeInFlight = true;
+	LastFallbackSeconds = 0.0;
 	NativeService = MakeUnique<FUEAgentKitNativeLayoutPreviewService>(Bridge);
 	NativeService->StartPreviewForMenu();
 	NativeTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
@@ -291,7 +304,9 @@ void FUEAgentKitGraphLayoutP11Menu::CompleteNativePreview()
 	TSharedPtr<FJsonObject> LegacyReceipt;
 	if (bFallback)
 	{
+		const double FallbackStarted = FPlatformTime::Seconds();
 		ExecuteLegacyPreview(PendingGraph, PendingContextNodeGuid, PendingContextPinName, bPendingFromPin, false);
+		LastFallbackSeconds = FPlatformTime::Seconds() - FallbackStarted;
 		FString ReadError;
 		LegacyReceipt = ReadJsonObject(
 			FPaths::Combine(PreviewDirectory(), TEXT("menu-invocation.json")), ReadError);

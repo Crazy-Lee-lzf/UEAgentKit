@@ -460,6 +460,10 @@ bool FUEAgentKitNativeM3MenuTest::RunTest(const FString& Parameters)
 	Evidence->SetNumberField(TEXT("invokeSeconds"), InvokeSeconds);
 	Evidence->SetBoolField(TEXT("nonBlockingReturn"), InvokeSeconds < 0.5);
 	Evidence->SetNumberField(TEXT("busyRejects"), Active->GetBusyRejectCountForTest());
+	Evidence->SetNumberField(TEXT("waitSeconds"), Active->GetLastWaitSecondsForTest());
+	Evidence->SetNumberField(TEXT("fallbackSeconds"), Active->GetLastFallbackSecondsForTest());
+	Evidence->SetStringField(TEXT("nativeErrorCode"), Receipt->GetStringField(TEXT("nativeErrorCode")));
+	Evidence->SetStringField(TEXT("previewPath"), PreviewPath);
 	Evidence->SetObjectField(TEXT("receipt"), Receipt);
 	Evidence->SetBoolField(TEXT("packageDirtyAfter"), Blueprint->GetOutermost()->IsDirty());
 	FString EvidenceName = FString::Printf(TEXT("m3-menu-%s.json"), *Scenario);

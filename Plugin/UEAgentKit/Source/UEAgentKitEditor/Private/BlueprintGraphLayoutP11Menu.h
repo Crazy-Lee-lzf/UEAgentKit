@@ -39,6 +39,8 @@ public:
 	TSharedPtr<FJsonObject> GetLastReceiptForTest() const;
 	bool IsNativePreviewInFlightForTest() const;
 	int32 GetBusyRejectCountForTest() const;
+	double GetLastWaitSecondsForTest() const;
+	double GetLastFallbackSecondsForTest() const;
 
 private:
 	void AddContextMenuSection(UToolMenu* Menu);
@@ -83,4 +85,6 @@ private:
 	FString PendingInvokedAtUtc;
 	TSharedPtr<FJsonObject> LastReceipt;
 	int32 BusyRejectCount = 0;
+	double LastWaitSeconds = 0.0;
+	double LastFallbackSeconds = 0.0;
 };
