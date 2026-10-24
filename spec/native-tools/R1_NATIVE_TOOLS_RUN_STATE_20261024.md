@@ -1,10 +1,10 @@
-# RunState — R1 原生节点注册表（2026-10-24，R1.3 更新）
+# RunState — R1 原生节点注册表（2026-10-24，R1.4 离线更新）
 
-- 当前轮次：**R1.3 Blueprint 上下文过滤 + 真实资产只读门禁**；R1.0–R1.2 已完成并保持兼容；R1.5 影子工具仍为部分。**停止于 R1.3，未进入结构 R2 / 通用 Apply。**
+- 当前轮次：**R1.4 / T6 游标分页（代码 + 离线契约完成；UE 编译/运行时 PENDING）**。R1.3 已 RUNTIME-VERIFIED；R1.5 影子工具仍为部分。**停止于 R1.4 离线，未进入 R2 / T7 / T8 / T9 / 通用 Apply。**
 - 工作树：`E:\WorkSpace\UEAgentKit-WT\r1-node-registry`
-- 分支 / 起点：`feature/r1-node-registry`，R1.3 从 `6a0c162` 继续；本地提交未 push。
+- 分支 / 起点：`feature/r1-node-registry`，R1.4 从 `bcd3d45` 继续；本地提交未 push。
 - 模型（已核验）：`cline-pass/deepseek-v4.1-flash-1017`，`reasoningEffort=max`，非 Fast；同一 DSH session `session-8df1c508-…`，未切换 Provider/模型。
-- 上轮 DSH 以 `model stopped:error` 结束：**未把该轮记为成功**；本轮复核 HEAD/工作树后重新构建并重跑全部 UE/Python 测试。
+- 并行 lane：`layout-broker-m1`（M3.4）独立 worktree；本 lane **未运行任何 UE 构建/Editor/UBT/UBA**，重型槽位未占用。
 - UE：`5.6.1`（CL `44394996`）；宿 `Build/r1-native/R1AutomationHost`（gitignored）。
 
 ## 当前状态
@@ -68,13 +68,24 @@
 
 未 push / merge / rebase / reset / `git clean` / 删除既有文件；未改 `main` 或其他 worktree；未触碰 Reforge / Lyra 原始 / UETest；未使用 Computer Use / SendInput / 前台窗口 / 截图；未改 P11 Preview；未移除 `IPythonScriptPlugin` / P8 / P9；未开放通用 Apply；未实现 R2；MCP 工具计数未变。
 
+## R1.4 / T6（离线完成，UE PENDING）
+
+- **实现**：`pageSize`（1–256）+ 不透明 `v1.<payload>.<hmac>` 游标；payload 绑定 kind/queryHash/setFingerprint/epoch/offset/total/pageSize/iat/exp；HMAC-SHA256（per-session key，128-bit 熵，仅内存）；TTL 900 s；token ≤4096。
+- **分页**：catalog 512 已描述 descriptor；context match set（实测 palette 443 / node 431 / exec 297 / data 12）；按 actionId 排序，逐页无重无漏；最后一页 `exhausted=true`；`catalogTruncated=true / catalogAvailable=762` 与分页耗尽分开。
+- **fail-closed**：tampered/malformed/expired → `native-schema-invalid-arguments`；query kind/身份变化 → `native-schema-invalid-arguments`；set/epoch/total 变化 → `native-gate-revision-conflict`；pageSize 不匹配/offset 越界 → invalid。重放同游标幂等（只读），不宣称防重放。
+- **兼容**：未传 `pageSize/cursor` 时旧 `maxItems` 结果完全不变，无 `pagination` 字段；descriptor/schema/actionId/digest/200 金值未改。
+- **离线测试**：**47/47 OK**（新增 21：5 个 token 金值、512 真实导出 ID 无重无漏、空/1/末页、越界、查询/stale/epoch/过期/篡改/重放、无 IO/eval 与常量守卫）。
+- **未验证**：C++ 未编译、未在 UE 运行；`R1CursorVectors` / `R1Pagination` 已写但 **PENDING**。DLL 仍为 R1.3 的 `sha256:56d01e7d0103e9ec27eb81cf339f5eeead73888aa6c70f86a99a146cd49200ff`（本轮无构建）。
+- **覆盖**：仍为 512 described / 762 available / 38,325 discovered；未提高 768 模板预算，未触碰 trust/template 边界。
+
 ## UE 重型槽位
 
-最终 A/B 两个 Editor 进程均已退出；**当前没有 UnrealEditor/UBT/UBA 进程占用，重型 UE 槽位已释放**。
+本 lane 本轮未启动 UE；**未占用重型槽位**，由 M3.4 lane 使用。R1.4 的 UE 验证必须等用户/协调者释放槽位后执行，命令见 R1.4 报告 §7。
 
 ## 下一步（需新指令）
 
-1. T6 cursor 分页 / T7 菜单绑定 / T8 socket 驱动 / T9 内存测量。
-2. T4 recompile 场景；T10 异常注入。
-3. 评审 palette 镜像过滤与 `graphKinds` 语义是否接受。
-4. 人工评审 N0 Q1/Q9–Q12 与本报告偏差后再谈后续阶段；不进入 R2。
+1. **先做 R1.4 UE 编译 + `R1CursorVectors`/`R1Pagination`**（需重型槽位），编译失败即 BLOCKED；通过后更新报告为 RUNTIME-VERIFIED 并记录新 DLL hash。
+2. T7 菜单绑定 / T8 socket 驱动 / T9 内存测量。
+3. T4 recompile 场景；T10 异常注入。
+4. 评审 palette 镜像过滤、`graphKinds` 语义、cursor 错误码是否需要独立表项。
+5. 人工评审 N0 Q1/Q9–Q12 与本报告偏差后再谈后续阶段；不进入 R2。
