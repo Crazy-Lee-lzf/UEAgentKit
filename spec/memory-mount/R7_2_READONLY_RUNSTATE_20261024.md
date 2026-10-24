@@ -105,7 +105,7 @@ spec/memory-mount/R7_MOUNT_CONTRACT.md
 
 ## 6. Commit / stage gate
 
-- Local R7.2 code+docs commit: `__R72_COMMIT__`
+- Local R7.2 code+docs commit: `e22ae9e6ba5c01562284420cdab01e6e22522166`
 - No push, merge, rebase, reset, clean, or cross-branch cherry-pick.
 - Stage gate: **R7.2 isolated host-adapter/read-only handoff PASS is NOT production MCP or DSH
   integration.** `HOST_AUTH_PENDING` remains for real issuer/replay/revocation; signed receipts,
