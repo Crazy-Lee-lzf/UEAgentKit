@@ -220,7 +220,15 @@ class TelemetryTests(unittest.TestCase):
             self.assertNotIn("must-not-appear", payload)
 
     def test_real_m33_evidence_read_only(self) -> None:
-        summary = evaluate_evidence(ROOT / "Build" / "m2-native" / "Evidence" / "M33")
+        evidence_root = ROOT / "Build" / "m2-native" / "Evidence" / "M33"
+        evidence_files = (
+            "z1-multigraph-parity.json",
+            "z2-expanded-matrix.json",
+            "z3-rollback.json",
+        )
+        if not any((evidence_root / name).is_file() for name in evidence_files):
+            self.skipTest("M3.3 UE runtime evidence is optional and excluded from Git")
+        summary = evaluate_evidence(evidence_root)
         self.assertGreater(summary.attempts, 0)
         self.assertEqual(summary.unexpected_writes, 0)
         self.assertEqual(summary.token_fields, 0)
