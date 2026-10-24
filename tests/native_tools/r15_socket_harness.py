@@ -158,7 +158,7 @@ def redact_response(response: dict[str, Any]) -> dict[str, Any]:
 
 
 def wait_for_descriptor(path: Path, process_id: int, timeout: float = 180.0) -> dict[str, Any]:
-    
+
     deadline = time.monotonic() + timeout
     last_error = ""
     while time.monotonic() < deadline:
