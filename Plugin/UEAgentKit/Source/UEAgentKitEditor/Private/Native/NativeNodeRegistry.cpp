@@ -905,6 +905,57 @@ void FNativeNodeRegistry::Initialize(const ENativeRegistryMode InMode)
 	FTCHARToUTF8 CursorSeedUtf8(*CursorSeed);
 	CursorKey.SetNumUninitialized(32);
 	FMemory::Memcpy(CursorKey.GetData(), CursorSeedUtf8.Get(), 32);
+	CursorTtlSeconds = UEAgentKitNativeCursor::CursorTtlSeconds;
+
+	// R1.6 bounded socket negatives need a short TTL and a shared test key
+	// across two disposable editors.  This seam requires the explicit local
+	// command-line flag AND -unattended; secrets arrive via environment, never
+	// argv, and production defaults are unchanged.
+	if (FApp::IsUnattended() && FParse::Param(FCommandLine::Get(), TEXT("UEAgentKitSocketTest")))
+	{
+		const FString TtlText = FPlatformMisc::GetEnvironmentVariable(TEXT("UEAK_TEST_CURSOR_TTL"));
+		if (!TtlText.IsEmpty())
+		{
+			CursorTtlSeconds = FMath::Clamp(FCString::Atoi(*TtlText), 1, 3600);
+		}
+		const FString KeyHex = FPlatformMisc::GetEnvironmentVariable(TEXT("UEAK_TEST_CURSOR_KEY"));
+		bool bKeyOverride = false;
+		if (KeyHex.Len() == 64)
+		{
+			auto HexNibble = [](TCHAR Character) -> int32
+			{
+				if (Character >= TEXT('0') && Character <= TEXT('9')) return Character - TEXT('0');
+				if (Character >= TEXT('a') && Character <= TEXT('f')) return Character - TEXT('a') + 10;
+				if (Character >= TEXT('A') && Character <= TEXT('F')) return Character - TEXT('A') + 10;
+				return INDEX_NONE;
+			};
+			TArray<uint8> ParsedKey;
+			ParsedKey.SetNumUninitialized(32);
+			bool bValid = true;
+			for (int32 Index = 0; Index < 32; ++Index)
+			{
+				const int32 High = HexNibble(KeyHex[Index * 2]);
+				const int32 Low = HexNibble(KeyHex[Index * 2 + 1]);
+				if (High == INDEX_NONE || Low == INDEX_NONE)
+				{
+					bValid = false;
+					break;
+				}
+				ParsedKey[Index] = static_cast<uint8>((High << 4) | Low);
+			}
+			if (bValid)
+			{
+				CursorKey = MoveTemp(ParsedKey);
+				bKeyOverride = true;
+			}
+		}
+		UE_LOG(
+			LogUEAgentKitNativeRegistry,
+			Warning,
+			TEXT("R1.6 test-only cursor seam enabled: ttl=%d keyOverride=%s"),
+			CursorTtlSeconds,
+			bKeyOverride ? TEXT("yes") : TEXT("no"));
+	}
 
 	if (Mode == ENativeRegistryMode::Off)
 	{
@@ -966,6 +1017,7 @@ void FNativeNodeRegistry::Shutdown()
 	DescribedDatabaseFingerprint.Reset();
 	DescribedTotalSpawners = 0;
 	CursorKey.Reset();
+	CursorTtlSeconds = UEAgentKitNativeCursor::CursorTtlSeconds;
 }
 
 bool FNativeNodeRegistry::IsInitialized() const
@@ -2385,7 +2437,7 @@ bool FNativeNodeRegistry::ApplyPagination(
 	}
 	int32 Offset = 0;
 	int64 IssuedAt = NowUnix;
-	int64 ExpiresAt = NowUnix + UEAgentKitNativeCursor::CursorTtlSeconds;
+	int64 ExpiresAt = NowUnix + CursorTtlSeconds;
 
 	if (!Cursor.IsEmpty())
 	{
@@ -2457,7 +2509,7 @@ bool FNativeNodeRegistry::ApplyPagination(
 	Pagination->SetStringField(TEXT("setFingerprint"), SetFingerprint);
 	Pagination->SetNumberField(TEXT("issuedAtUnix"), static_cast<double>(IssuedAt));
 	Pagination->SetNumberField(TEXT("expiresAtUnix"), static_cast<double>(ExpiresAt));
-	Pagination->SetNumberField(TEXT("ttlSeconds"), UEAgentKitNativeCursor::CursorTtlSeconds);
+	Pagination->SetNumberField(TEXT("ttlSeconds"), CursorTtlSeconds);
 
 	if (bHasMore)
 	{

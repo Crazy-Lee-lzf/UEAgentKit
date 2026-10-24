@@ -1972,4 +1972,54 @@ bool FUEAgentKitNativePaginationTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUEAgentKitSocketWarmupTest,
+	"UEAgentKit.Native.SocketWarmup",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUEAgentKitSocketWarmupTest::RunTest(const FString& Parameters)
+{
+	UBlueprint* Blueprint = nullptr;
+	UEdGraph* Graph = nullptr;
+	UK2Node_CallFunction* Node = nullptr;
+	UEdGraphPin* ExecPin = nullptr;
+	UEdGraphPin* DataPin = nullptr;
+	if (!EnsureContextFixture(*this, Blueprint, Graph, Node, ExecPin, DataPin))
+	{
+		return false;
+	}
+	// Keep the fixture loaded for the external socket harness after this test.
+	Blueprint->AddToRoot();
+
+	const TSharedRef<FJsonObject> Fixture = MakeShared<FJsonObject>();
+	Fixture->SetStringField(TEXT("schemaVersion"), TEXT("ueak.native.socket-fixture/1.0"));
+	Fixture->SetStringField(TEXT("assetPath"), FixtureObjectPath);
+	Fixture->SetStringField(TEXT("graphGuid"), GuidString(Graph->GraphGuid));
+	Fixture->SetStringField(TEXT("nodeGuid"), GuidString(Node->NodeGuid));
+	Fixture->SetStringField(TEXT("execPin"), ExecPin->PinName.ToString());
+	Fixture->SetStringField(TEXT("dataPin"), DataPin->PinName.ToString());
+	Fixture->SetStringField(TEXT("graphFingerprint"), ComputeFixtureGraphFingerprint(Graph));
+	Fixture->SetStringField(TEXT("assetRevision"), FileRevision(FixtureFilename(Blueprint)));
+	Fixture->SetBoolField(TEXT("packageDirty"), Blueprint->GetOutermost()->IsDirty());
+	Fixture->SetStringField(TEXT("writtenAtUtc"), FDateTime::UtcNow().ToIso8601());
+
+	FString Text;
+	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Text);
+	if (!FJsonSerializer::Serialize(Fixture, Writer))
+	{
+		AddError(TEXT("The socket fixture metadata could not be serialized."));
+		return false;
+	}
+	const FString Path = FPaths::Combine(
+		FPaths::ProjectSavedDir(), TEXT("UEAgentKit"), TEXT("R1Native"), TEXT("socket-fixture.json"));
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(Path), true);
+	if (!FFileHelper::SaveStringToFile(Text, *Path, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+	{
+		AddError(FString::Printf(TEXT("The socket fixture metadata could not be written to %s."), *Path));
+		return false;
+	}
+	AddInfo(FString::Printf(TEXT("Socket warmup wrote %s; fixture rooted"), *Path));
+	return true;
+}
+
 #endif // WITH_EDITOR && WITH_DEV_AUTOMATION_TESTS
