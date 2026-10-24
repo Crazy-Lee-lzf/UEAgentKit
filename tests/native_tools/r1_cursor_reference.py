@@ -40,9 +40,13 @@ def _b64url_decode(text: str) -> bytes:
         raise CursorError("native-schema-invalid-arguments", "cursor encoding is invalid")
     padding = "=" * (-len(text) % 4)
     try:
-        return base64.urlsafe_b64decode(text + padding)
+        decoded = base64.urlsafe_b64decode(text + padding)
     except Exception as exc:  # noqa: BLE001 - mirrored as a contract error
         raise CursorError("native-schema-invalid-arguments", "cursor encoding is invalid") from exc
+    # Reject non-canonical trailing padding bits (token malleability).
+    if _b64url_encode(decoded) != text:
+        raise CursorError("native-schema-invalid-arguments", "cursor encoding is invalid")
+    return decoded
 
 
 def canonical_payload(payload: dict[str, Any]) -> bytes:

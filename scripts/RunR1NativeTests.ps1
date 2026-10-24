@@ -3,6 +3,7 @@ param(
     [switch]$SkipBuild,
     [string]$Filter = "UEAgentKit.Native.R1",
     [string]$Label = "",
+    [string]$EvidenceGroup = "t4",
     [int]$TimeoutSeconds = 900
 )
 
@@ -34,6 +35,37 @@ if (-not $SkipBuild) {
 }
 
 $EditorCmd = Join-Path $EngineRoot "Engine\Binaries\Win64\UnrealEditor-Cmd.exe"
+# The editor test host must be minimized, not hidden, and only our own PID may
+# be touched.  No GUI interaction / synthetic input is performed.
+if (-not ("UEAgentKitWindowMinimizer" -as [type])) {
+    Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class UEAgentKitWindowMinimizer
+{
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+    [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+    [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int command);
+    public static int Minimize(uint processId)
+    {
+        int count = 0;
+        EnumWindows((hWnd, lParam) =>
+        {
+            uint owner;
+            GetWindowThreadProcessId(hWnd, out owner);
+            if (owner == processId && ShowWindow(hWnd, 6))
+            {
+                count++;
+            }
+            return true;
+        }, IntPtr.Zero);
+        return count;
+    }
+}
+"@
+}
+
 # One pre-quoted command line: UE only parses -ExecCmds / -TestExit correctly when
 # the value (which contains spaces) reaches the process quoted.
 $ArgumentLine = @(
@@ -51,8 +83,11 @@ $ArgumentLine = @(
     "-FullStdOutLogOutput"
 ) -join " "
 
-$Process = Start-Process -FilePath $EditorCmd -ArgumentList $ArgumentLine -NoNewWindow -PassThru `
+$Process = Start-Process -FilePath $EditorCmd -ArgumentList $ArgumentLine -WindowStyle Minimized -PassThru `
     -RedirectStandardOutput $LogPath -RedirectStandardError "$LogPath.err"
+Start-Sleep -Milliseconds 400
+$MinimizedWindows = [UEAgentKitWindowMinimizer]::Minimize([uint32]$Process.Id)
+Write-Host "Launched minimized editor PID=$($Process.Id), minimized windows=$MinimizedWindows"
 $Finished = $Process.WaitForExit($TimeoutSeconds * 1000)
 if (-not $Finished) {
     $Process.Kill()
@@ -99,7 +134,7 @@ $Environment = [ordered]@{
 $Environment | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $EvidenceDir "environment-$Stamp.json") -Encoding utf8NoBOM
 
 if (-not [string]::IsNullOrWhiteSpace($Label)) {
-    $LabelDir = Join-Path $EvidenceDir (Join-Path "t4" $Label)
+    $LabelDir = Join-Path $EvidenceDir (Join-Path $EvidenceGroup $Label)
     New-Item -ItemType Directory -Force -Path $LabelDir | Out-Null
     foreach ($File in @(
         (Join-Path $EvidenceDir "catalog-export.json"),

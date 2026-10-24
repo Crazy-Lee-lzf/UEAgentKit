@@ -1663,6 +1663,10 @@ bool FNativeNodeRegistry::TryInvokeShadowTool(
 
 	FNativeCatalogOptions Options;
 	Options.MaxItems = bCatalogPaging ? MaxCatalogItems : MaxItems;
+	// Use the existing 768-template session cap so the shadow catalog and the
+	// paged catalog describe the same official set.  This is not a budget
+	// increase: BuildCatalog already enforces MaxSessionTemplateCreations.
+	Options.MaxTemplateSpawns = MaxSessionTemplateCreations;
 	const FNativeCatalogResult Catalog = BuildCatalog(Options);
 	if (!Catalog.bOk)
 	{

@@ -154,6 +154,13 @@ bool UEAgentKitNativeCursor::Base64UrlDecode(const FString& Text, TArray<uint8>&
 			return false;
 		}
 	}
+	// Reject non-canonical encodings: different trailing padding bits could
+	// otherwise decode to the same bytes and produce an apparently valid MAC.
+	if (Base64UrlEncode(OutBytes.GetData(), OutBytes.Num()) != Text)
+	{
+		OutErrorCode = CursorErrorCode;
+		return false;
+	}
 	return true;
 }
 
