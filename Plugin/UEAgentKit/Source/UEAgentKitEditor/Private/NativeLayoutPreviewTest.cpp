@@ -10,6 +10,7 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraphNode_Comment.h"
 #include "Editor.h"
+#include "BlueprintContextSha256.h"
 #include "Editor/Transactor.h"
 #include "EditorBridge.h"
 #include "Engine/Blueprint.h"
@@ -673,6 +674,125 @@ bool FUEAgentKitNativeM2LayoutBrokerStaleTest::RunTest(const FString& Parameters
 			Error));
 	Bridge.Stop();
 	return Outcome.Code == Expected && !Outcome.Plan.IsValid();
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUEAgentKitNativeM2FingerprintCaptureTest,
+	"UEAgentKit.Native.M2FingerprintCapture",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUEAgentKitNativeM2FingerprintCaptureTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	FString CapturePath;
+	if (!TestTrue(
+			TEXT("M2 fingerprint capture path is provided"),
+			FParse::Value(FCommandLine::Get(), TEXT("UEAgentKitM2Capture="), CapturePath)
+			&& !CapturePath.IsEmpty()))
+	{
+		return false;
+	}
+	FString Error;
+	UBlueprint* Blueprint = UEAgentKitNativeM2Test::LoadOrCreateFixture(Error);
+	if (!TestNotNull(TEXT("M2 fingerprint fixture loads"), Blueprint))
+	{
+		AddError(Error);
+		return false;
+	}
+	UEdGraph* Graph = Blueprint->UbergraphPages[0];
+	if (!TestNotNull(TEXT("M2 fingerprint graph exists"), Graph))
+	{
+		return false;
+	}
+	if (!TestNotNull(TEXT("M2 fingerprint Editor opens"), UEAgentKitNativeM2Test::OpenAndFocus(Blueprint, Graph, Error)))
+	{
+		AddError(Error);
+		return false;
+	}
+	FUEAgentKitEditorBridge Bridge;
+	if (!TestTrue(TEXT("M2 fingerprint bridge starts"), Bridge.Start()))
+	{
+		return false;
+	}
+	TSharedPtr<FJsonObject> Preflight;
+	TSharedPtr<FJsonObject> Envelope;
+	FString ErrorCode;
+	FString ErrorMessage;
+	if (!TestTrue(
+			TEXT("M2 fingerprint P9 snapshot builds"),
+			Bridge.BuildP9MenuPreviewInputs(Preflight, Envelope, ErrorCode, ErrorMessage)))
+	{
+		AddError(FString::Printf(TEXT("%s: %s"), *ErrorCode, *ErrorMessage));
+		Bridge.Stop();
+		return false;
+	}
+
+	TSharedPtr<FJsonObject> Capture = MakeShared<FJsonObject>();
+	Capture->SetStringField(TEXT("schemaVersion"), TEXT("ueak.m2.fingerprint-capture/1.0"));
+	Capture->SetStringField(TEXT("project"), FApp::GetProjectName());
+	Capture->SetStringField(TEXT("engineVersion"), FEngineVersion::Current().ToString());
+	Capture->SetStringField(TEXT("assetPath"), Preflight->GetStringField(TEXT("assetPath")));
+	Capture->SetStringField(TEXT("graphGuid"), Preflight->GetStringField(TEXT("graphGuid")));
+	Capture->SetStringField(TEXT("packageRevision"), Preflight->GetStringField(TEXT("packageRevision")));
+	Capture->SetStringField(TEXT("graphFingerprint"), Preflight->GetStringField(TEXT("graphFingerprint")));
+	Capture->SetNumberField(TEXT("nodeCount"), Preflight->GetNumberField(TEXT("nodeCount")));
+	Capture->SetBoolField(TEXT("packageDirty"), Preflight->GetBoolField(TEXT("packageDirty")));
+	Capture->SetBoolField(TEXT("blueprintDirty"), Blueprint->GetOutermost()->IsDirty());
+	const TArray<TSharedPtr<FJsonValue>>* PreflightNodes = nullptr;
+	if (Preflight->TryGetArrayField(TEXT("nodes"), PreflightNodes) && PreflightNodes != nullptr)
+	{
+		Capture->SetArrayField(TEXT("preflightNodes"), *PreflightNodes);
+	}
+	TArray<TSharedPtr<FJsonValue>> LiveNodes;
+	for (const UEdGraphNode* Node : Graph->Nodes)
+	{
+		if (Node == nullptr)
+		{
+			continue;
+		}
+		TSharedPtr<FJsonObject> Item = MakeShared<FJsonObject>();
+		Item->SetStringField(TEXT("guid"), Node->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower));
+		Item->SetStringField(TEXT("name"), Node->GetName());
+		Item->SetStringField(TEXT("class"), Node->GetClass() != nullptr ? Node->GetClass()->GetPathName() : FString());
+		Item->SetNumberField(TEXT("x"), Node->NodePosX);
+		Item->SetNumberField(TEXT("y"), Node->NodePosY);
+		Item->SetNumberField(TEXT("width"), Node->NodeWidth);
+		Item->SetNumberField(TEXT("height"), Node->NodeHeight);
+		Item->SetNumberField(TEXT("pinCount"), Node->Pins.Num());
+		LiveNodes.Add(MakeShared<FJsonValueObject>(Item));
+	}
+	Capture->SetArrayField(TEXT("liveNodeOrder"), LiveNodes);
+	const TSharedPtr<FJsonObject>* Context = nullptr;
+	if (Envelope->TryGetObjectField(TEXT("context"), Context) && Context != nullptr && Context->IsValid())
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Graphs = nullptr;
+		if ((*Context)->TryGetArrayField(TEXT("graphs"), Graphs) && Graphs != nullptr && Graphs->Num() > 0)
+		{
+			const TSharedPtr<FJsonObject> GraphObject = (*Graphs)[0]->AsObject();
+			const TArray<TSharedPtr<FJsonValue>>* ContextNodes = nullptr;
+			if (GraphObject.IsValid() && GraphObject->TryGetArrayField(TEXT("nodes"), ContextNodes) && ContextNodes != nullptr)
+			{
+				Capture->SetArrayField(TEXT("contextNodeOrder"), *ContextNodes);
+			}
+		}
+	}
+	const FString PackageFilename = FPackageName::LongPackageNameToFilename(
+		Blueprint->GetOutermost()->GetName(), FPackageName::GetAssetPackageExtension());
+	FString PackageSha;
+	if (FBlueprintContextSha256::HashFile(PackageFilename, PackageSha))
+	{
+		Capture->SetStringField(TEXT("packageFileSha256"), FString(TEXT("sha256:")) + PackageSha.ToLower());
+	}
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(CapturePath), true);
+	const bool bWritten = UEAgentKitNativeM2Test::WriteJson(CapturePath, Capture, Error);
+	TestTrue(TEXT("M2 fingerprint capture writes"), bWritten);
+	if (!bWritten)
+	{
+		AddError(Error);
+	}
+	Bridge.Stop();
+	return bWritten;
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS
