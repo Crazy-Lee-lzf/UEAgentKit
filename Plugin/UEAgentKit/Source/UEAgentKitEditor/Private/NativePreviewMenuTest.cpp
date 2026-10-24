@@ -7,6 +7,7 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
+#include "EditorBridge.h"
 #include "Editor.h"
 #include "Engine/Blueprint.h"
 #include "HAL/FileManager.h"
@@ -66,6 +67,29 @@ namespace UEAgentKitNativeM3Test
 	UEdGraph* PrimaryGraph(UBlueprint* Blueprint)
 	{
 		return Blueprint != nullptr && Blueprint->UbergraphPages.Num() > 0 ? Blueprint->UbergraphPages[0] : nullptr;
+	}
+
+	UEdGraph* FindGraph(UBlueprint* Blueprint, const FString& Name)
+	{
+		if (Blueprint == nullptr)
+		{
+			return nullptr;
+		}
+		for (UEdGraph* Graph : Blueprint->UbergraphPages)
+		{
+			if (Graph != nullptr && Graph->GetName() == Name)
+			{
+				return Graph;
+			}
+		}
+		for (UEdGraph* Graph : Blueprint->FunctionGraphs)
+		{
+			if (Graph != nullptr && Graph->GetName() == Name)
+			{
+				return Graph;
+			}
+		}
+		return nullptr;
 	}
 
 	FBlueprintEditor* OpenAndFocus(UBlueprint* Blueprint, UEdGraph* Graph, FString& OutError)
@@ -158,10 +182,29 @@ bool FUEAgentKitNativeM3MenuTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
-	UBlueprint* Blueprint = LoadObject<UBlueprint>(nullptr, UEAgentKitNativeM3Test::FixturePath);
-	UEdGraph* Graph = UEAgentKitNativeM3Test::PrimaryGraph(Blueprint);
-	if (!TestNotNull(TEXT("M3 P11 fixture loads"), Blueprint)
-		|| !TestNotNull(TEXT("M3 P11 graph loads"), Graph))
+	FString AssetOverride;
+	FString GraphOverride;
+	FString GraphId;
+	FString CapturePath;
+	const bool bM32Graph = FParse::Value(FCommandLine::Get(), TEXT("UEAgentKitM3Asset="), AssetOverride)
+		&& !AssetOverride.IsEmpty();
+	UBlueprint* Blueprint = bM32Graph
+		? LoadObject<UBlueprint>(nullptr, *AssetOverride)
+		: LoadObject<UBlueprint>(nullptr, UEAgentKitNativeM3Test::FixturePath);
+	UEdGraph* Graph = nullptr;
+	if (bM32Graph)
+	{
+		FParse::Value(FCommandLine::Get(), TEXT("UEAgentKitM3GraphName="), GraphOverride);
+		FParse::Value(FCommandLine::Get(), TEXT("UEAgentKitM32GraphId="), GraphId);
+		FParse::Value(FCommandLine::Get(), TEXT("UEAgentKitM32Capture="), CapturePath);
+		Graph = UEAgentKitNativeM3Test::FindGraph(Blueprint, GraphOverride);
+	}
+	else
+	{
+		Graph = UEAgentKitNativeM3Test::PrimaryGraph(Blueprint);
+	}
+	if (!TestNotNull(TEXT("M3 graph fixture loads"), Blueprint)
+		|| !TestNotNull(TEXT("M3 graph loads"), Graph))
 	{
 		return false;
 	}
@@ -192,6 +235,44 @@ bool FUEAgentKitNativeM3MenuTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
+	if (bM32Graph && !CapturePath.IsEmpty())
+	{
+		FString CaptureOpenError;
+		TestNotNull(
+			TEXT("M3 capture editor opens"),
+			UEAgentKitNativeM3Test::OpenAndFocus(Blueprint, Graph, CaptureOpenError));
+		FUEAgentKitGraphLayoutP11Menu* ActiveMenu = FUEAgentKitGraphLayoutP11Menu::GetActiveForTest();
+		FUEAgentKitEditorBridge* CaptureBridge = ActiveMenu != nullptr ? ActiveMenu->GetBridgeForTest() : nullptr;
+		TSharedPtr<FJsonObject> CapturedPreflight;
+		TSharedPtr<FJsonObject> CapturedEnvelope;
+		FString CaptureErrorCode;
+		FString CaptureErrorMessage;
+		if (TestNotNull(TEXT("M3 capture bridge exists"), CaptureBridge)
+			&& TestTrue(
+				TEXT("M3 capture preflight builds"),
+				CaptureBridge->BuildP9MenuPreviewInputs(
+					CapturedPreflight, CapturedEnvelope, CaptureErrorCode, CaptureErrorMessage)))
+		{
+			TSharedPtr<FJsonObject> Capture = MakeShared<FJsonObject>();
+			Capture->SetStringField(TEXT("schemaVersion"), TEXT("ueak.m32.graph-capture/1.0"));
+			Capture->SetStringField(TEXT("id"), GraphId);
+			Capture->SetStringField(TEXT("assetPath"), AssetOverride);
+			Capture->SetStringField(TEXT("graphName"), Graph->GetName());
+			Capture->SetStringField(
+				TEXT("graphGuid"), Graph->GraphGuid.ToString(EGuidFormats::DigitsWithHyphensLower));
+			Capture->SetObjectField(TEXT("preflight"), CapturedPreflight);
+			Capture->SetObjectField(TEXT("envelope"), CapturedEnvelope);
+			FString CaptureWriteError;
+			TestTrue(
+				TEXT("M3 graph capture writes"),
+				UEAgentKitNativeM3Test::WriteJson(CapturePath, Capture, CaptureWriteError));
+		}
+		else
+		{
+			AddError(FString::Printf(TEXT("%s: %s"), *CaptureErrorCode, *CaptureErrorMessage));
+		}
+	}
+
 	FString Error;
 	FBlueprintEditor* Editor = UEAgentKitNativeM3Test::OpenAndFocus(Blueprint, Graph, Error);
 	if (!TestNotNull(TEXT("M3 editor opens"), Editor))
@@ -363,9 +444,16 @@ bool FUEAgentKitNativeM3MenuTest::RunTest(const FString& Parameters)
 	Evidence->SetNumberField(TEXT("busyRejects"), Active->GetBusyRejectCountForTest());
 	Evidence->SetObjectField(TEXT("receipt"), Receipt);
 	Evidence->SetBoolField(TEXT("packageDirtyAfter"), Blueprint->GetOutermost()->IsDirty());
+	FString EvidenceName = FString::Printf(TEXT("m3-menu-%s.json"), *Scenario);
+	if (bM32Graph && !GraphId.IsEmpty())
+	{
+		EvidenceName = FString::Printf(TEXT("m32-menu-%s.json"), *GraphId);
+	}
+	const FString EvidencePath = FPaths::Combine(
+		FPaths::ProjectDir(), TEXT("Evidence"), EvidenceName);
 	TestTrue(
 		TEXT("M3 evidence writes"),
-		UEAgentKitNativeM3Test::WriteJson(UEAgentKitNativeM3Test::EvidencePath(Scenario), Evidence, Error));
+		UEAgentKitNativeM3Test::WriteJson(EvidencePath, Evidence, Error));
 	return true;
 }
 
@@ -465,7 +553,7 @@ namespace UEAgentKitNativeM3Pie
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FUEAgentKitNativeM3PieTest,
-	"UEAgentKit.Native.M3MenuPIE",
+	"UEAgentKit.Native.M3PieMenu",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FUEAgentKitNativeM3PieTest::RunTest(const FString& Parameters)

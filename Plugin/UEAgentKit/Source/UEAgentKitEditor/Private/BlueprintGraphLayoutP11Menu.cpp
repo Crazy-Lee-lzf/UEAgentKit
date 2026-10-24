@@ -122,6 +122,11 @@ FUEAgentKitGraphLayoutP11Menu* FUEAgentKitGraphLayoutP11Menu::GetActiveForTest()
 	return GActiveMenu;
 }
 
+FUEAgentKitEditorBridge* FUEAgentKitGraphLayoutP11Menu::GetBridgeForTest() const
+{
+	return Bridge;
+}
+
 TSharedPtr<FJsonObject> FUEAgentKitGraphLayoutP11Menu::GetLastReceiptForTest() const
 {
 	return LastReceipt;
@@ -364,6 +369,11 @@ void FUEAgentKitGraphLayoutP11Menu::SaveNativeReceipt(
 		{
 			Receipt->SetNumberField(TEXT("movedCount"), MovedCount);
 		}
+		const TArray<TSharedPtr<FJsonValue>>* LegacyMoved = nullptr;
+		if (LegacyReceipt->TryGetArrayField(TEXT("movedNodeIds"), LegacyMoved) && LegacyMoved != nullptr)
+		{
+			Receipt->SetArrayField(TEXT("movedNodeIds"), *LegacyMoved);
+		}
 	}
 	else if (bOk && Outcome.Plan.IsValid())
 	{
@@ -384,6 +394,7 @@ void FUEAgentKitGraphLayoutP11Menu::SaveNativeReceipt(
 			if ((*Plan)->TryGetArrayField(TEXT("movedNodeIds"), Moved) && Moved != nullptr)
 			{
 				Receipt->SetNumberField(TEXT("movedCount"), Moved->Num());
+				Receipt->SetArrayField(TEXT("movedNodeIds"), *Moved);
 			}
 		}
 		FString AssetPath;
