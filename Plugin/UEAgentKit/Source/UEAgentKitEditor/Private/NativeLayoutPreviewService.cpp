@@ -181,6 +181,25 @@ bool FUEAgentKitNativeLayoutPreviewService::StartPreview()
 	return BeginFromSnapshot(Preflight, Envelope);
 }
 
+bool FUEAgentKitNativeLayoutPreviewService::StartPreviewForMenu()
+{
+	if (Bridge == nullptr)
+	{
+		Fail(TEXT("native-preview-worker-failed"), TEXT("The Editor Bridge snapshot provider is unavailable."));
+		return false;
+	}
+	TSharedPtr<FJsonObject> Preflight;
+	TSharedPtr<FJsonObject> Envelope;
+	FString ErrorCode;
+	FString ErrorMessage;
+	if (!Bridge->BuildP9MenuPreviewInputs(Preflight, Envelope, ErrorCode, ErrorMessage))
+	{
+		Fail(ErrorCode.IsEmpty() ? TEXT("native-preview-worker-failed") : ErrorCode, ErrorMessage);
+		return false;
+	}
+	return BeginFromSnapshot(Preflight, Envelope);
+}
+
 bool FUEAgentKitNativeLayoutPreviewService::StartPreviewWithSnapshot(
 	const TSharedPtr<FJsonObject>& Preflight,
 	const TSharedPtr<FJsonObject>& Envelope,

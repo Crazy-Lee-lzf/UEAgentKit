@@ -1,6 +1,10 @@
 #include "BlueprintGraphLayoutP11Menu.h"
 
 #include "EditorBridge.h"
+#include "Framework/Notifications/NotificationManager.h"
+#include "NativeLayoutPreviewService.h"
+#include "NativePreviewMenuSettings.h"
+#include "Widgets/Notifications/SNotificationList.h"
 
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
@@ -78,6 +82,7 @@ namespace
 	}
 
 	bool bSuppressTestDialogs = false;
+	FUEAgentKitGraphLayoutP11Menu* GActiveMenu = nullptr;
 
 	void ShowMessage(const FString& Text)
 	{
@@ -96,6 +101,337 @@ namespace
 FUEAgentKitGraphLayoutP11Menu::FUEAgentKitGraphLayoutP11Menu(FUEAgentKitEditorBridge* InBridge)
 	: Bridge(InBridge)
 {
+}
+
+FUEAgentKitGraphLayoutP11Menu::~FUEAgentKitGraphLayoutP11Menu()
+{
+	if (NativeTickerHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(NativeTickerHandle);
+		NativeTickerHandle.Reset();
+	}
+	NativeService.Reset();
+	if (GActiveMenu == this)
+	{
+		GActiveMenu = nullptr;
+	}
+}
+
+FUEAgentKitGraphLayoutP11Menu* FUEAgentKitGraphLayoutP11Menu::GetActiveForTest()
+{
+	return GActiveMenu;
+}
+
+TSharedPtr<FJsonObject> FUEAgentKitGraphLayoutP11Menu::GetLastReceiptForTest() const
+{
+	return LastReceipt;
+}
+
+bool FUEAgentKitGraphLayoutP11Menu::IsNativePreviewInFlightForTest() const
+{
+	return bNativeInFlight;
+}
+
+int32 FUEAgentKitGraphLayoutP11Menu::GetBusyRejectCountForTest() const
+{
+	return BusyRejectCount;
+}
+
+bool FUEAgentKitGraphLayoutP11Menu::WaitForNativePreviewForTest(double TimeoutSeconds)
+{
+	const double Deadline = FPlatformTime::Seconds() + TimeoutSeconds;
+	while (bNativeInFlight && FPlatformTime::Seconds() < Deadline)
+	{
+		if (NativeService.IsValid())
+		{
+			NativeService->Tick();
+		}
+		if (NativeService.IsValid() && NativeService->IsTerminal())
+		{
+			if (NativeTickerHandle.IsValid())
+			{
+				FTSTicker::GetCoreTicker().RemoveTicker(NativeTickerHandle);
+				NativeTickerHandle.Reset();
+			}
+			CompleteNativePreview();
+			break;
+		}
+		FPlatformProcess::Sleep(0.02f);
+	}
+	return !bNativeInFlight;
+}
+
+TSharedPtr<FJsonObject> FUEAgentKitGraphLayoutP11Menu::MakeBaseReceipt() const
+{
+	TSharedPtr<FJsonObject> Receipt = MakeShared<FJsonObject>();
+	Receipt->SetStringField(TEXT("schemaVersion"), TEXT("ueak.p11.menu-invocation/1.0"));
+	Receipt->SetStringField(TEXT("m3SchemaVersion"), TEXT("ueak.m3.menu-preview/1.0"));
+	Receipt->SetStringField(TEXT("project"), FApp::GetProjectName());
+	Receipt->SetBoolField(TEXT("readOnly"), true);
+	Receipt->SetBoolField(TEXT("saved"), false);
+	Receipt->SetBoolField(TEXT("compiled"), false);
+	Receipt->SetBoolField(TEXT("fallback"), false);
+	Receipt->SetBoolField(TEXT("packageDirtyBefore"), bPackageDirtyBefore);
+	Receipt->SetStringField(TEXT("invokedAtUtc"), PendingInvokedAtUtc);
+	UEdGraph* Graph = PendingGraph.Get();
+	if (Graph != nullptr)
+	{
+		Receipt->SetStringField(TEXT("graphGuid"), Graph->GraphGuid.ToString(EGuidFormats::DigitsWithHyphensLower));
+		Receipt->SetStringField(TEXT("graphName"), Graph->GetName());
+	}
+	Receipt->SetStringField(
+		TEXT("contextKind"), bPendingFromPin ? TEXT("pin") : TEXT("node"));
+	Receipt->SetStringField(
+		TEXT("contextNodeGuid"), PendingContextNodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower));
+	Receipt->SetStringField(TEXT("contextPinName"), PendingContextPinName);
+	return Receipt;
+}
+
+bool FUEAgentKitGraphLayoutP11Menu::StartNativePreview(
+	TWeakObjectPtr<UEdGraph> Graph,
+	FGuid ContextNodeGuid,
+	FString ContextPinName,
+	bool bFromPin)
+{
+	if (!FUEAgentKitNativePreviewSettings::Get().bNativeLayoutPreview)
+	{
+		return false;
+	}
+	if (bNativeInFlight)
+	{
+		++BusyRejectCount;
+		TSharedPtr<FJsonObject> Busy = LastReceipt.IsValid() ? LastReceipt : MakeShared<FJsonObject>();
+		Busy->SetStringField(TEXT("schemaVersion"), TEXT("ueak.p11.menu-invocation/1.0"));
+		Busy->SetStringField(TEXT("m3SchemaVersion"), TEXT("ueak.m3.menu-preview/1.0"));
+		Busy->SetBoolField(TEXT("ok"), false);
+		Busy->SetBoolField(TEXT("planProduced"), false);
+		Busy->SetBoolField(TEXT("readOnly"), true);
+		Busy->SetBoolField(TEXT("saved"), false);
+		Busy->SetBoolField(TEXT("compiled"), false);
+		Busy->SetBoolField(TEXT("fallback"), false);
+		Busy->SetStringField(TEXT("previewPath"), TEXT("native-broker-busy"));
+		Busy->SetStringField(TEXT("errorCode"), TEXT("native-preview-busy"));
+		Busy->SetStringField(TEXT("errorMessage"), TEXT("A native preview is already in flight."));
+		Busy->SetStringField(TEXT("completedAtUtc"), FDateTime::UtcNow().ToIso8601());
+		LastReceipt = Busy;
+		return true;
+	}
+	if (!IsAvailable() || Bridge == nullptr || !Graph.IsValid())
+	{
+		return false;
+	}
+	PendingGraph = Graph;
+	PendingContextNodeGuid = ContextNodeGuid;
+	PendingContextPinName = ContextPinName;
+	bPendingFromPin = bFromPin;
+	PendingInvokedAtUtc = FDateTime::UtcNow().ToIso8601();
+	UEdGraph* GraphObject = Graph.Get();
+	bPackageDirtyBefore = GraphObject != nullptr && GraphObject->GetOutermost() != nullptr
+		&& GraphObject->GetOutermost()->IsDirty();
+	bNativeInFlight = true;
+	NativeService = MakeUnique<FUEAgentKitNativeLayoutPreviewService>(Bridge);
+	NativeService->StartPreviewForMenu();
+	NativeTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateRaw(this, &FUEAgentKitGraphLayoutP11Menu::TickNativePreview),
+		0.05f);
+	return true;
+}
+
+bool FUEAgentKitGraphLayoutP11Menu::TickNativePreview(float DeltaTime)
+{
+	(void)DeltaTime;
+	if (!bNativeInFlight || !NativeService.IsValid())
+	{
+		return false;
+	}
+	NativeService->Tick();
+	if (!NativeService->IsTerminal())
+	{
+		return true;
+	}
+	if (NativeTickerHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(NativeTickerHandle);
+		NativeTickerHandle.Reset();
+	}
+	CompleteNativePreview();
+	return false;
+}
+
+void FUEAgentKitGraphLayoutP11Menu::CompleteNativePreview()
+{
+	if (!bNativeInFlight || !NativeService.IsValid())
+	{
+		return;
+	}
+	const FUEAgentKitNativeLayoutPreviewOutcome Outcome = NativeService->GetOutcome();
+	const FUEAgentKitNativePreviewSettings& Settings = FUEAgentKitNativePreviewSettings::Get();
+	const bool bFallbackCode =
+		Outcome.Code == TEXT("native-preview-broker-descriptor-missing")
+		|| Outcome.Code == TEXT("native-preview-broker-unavailable")
+		|| Outcome.Code == TEXT("native-preview-timeout");
+	const bool bFallback = !Outcome.bOk && Settings.bLegacyLayoutPreviewFallback && bFallbackCode
+		&& IsAvailable() && Bridge != nullptr && PendingGraph.IsValid();
+	TSharedPtr<FJsonObject> LegacyReceipt;
+	if (bFallback)
+	{
+		ExecuteLegacyPreview(PendingGraph, PendingContextNodeGuid, PendingContextPinName, bPendingFromPin, false);
+		FString ReadError;
+		LegacyReceipt = ReadJsonObject(
+			FPaths::Combine(PreviewDirectory(), TEXT("menu-invocation.json")), ReadError);
+	}
+	SaveNativeReceipt(Outcome.bOk && !bFallback, bFallback, Outcome.Code, LegacyReceipt);
+	bNativeInFlight = false;
+	NativeService.Reset();
+}
+
+void FUEAgentKitGraphLayoutP11Menu::SaveNativeReceipt(
+	bool bOk,
+	bool bFallback,
+	const FString& NativeCode,
+	const TSharedPtr<FJsonObject>& LegacyReceipt)
+{
+	const FUEAgentKitNativeLayoutPreviewOutcome Outcome =
+		NativeService.IsValid() ? NativeService->GetOutcome() : FUEAgentKitNativeLayoutPreviewOutcome();
+	TSharedPtr<FJsonObject> Receipt = MakeBaseReceipt();
+	Receipt->SetStringField(TEXT("previewPath"), bFallback ? TEXT("legacy-fallback") : TEXT("native-broker"));
+	Receipt->SetBoolField(TEXT("fallback"), bFallback);
+	Receipt->SetStringField(TEXT("workerMode"), bFallback ? TEXT("legacy-python") : TEXT("layout-broker"));
+	Receipt->SetBoolField(TEXT("ok"), bOk);
+	Receipt->SetBoolField(TEXT("planProduced"), bOk);
+	if (!bOk)
+	{
+		Receipt->SetStringField(TEXT("errorCode"), NativeCode);
+		Receipt->SetStringField(TEXT("errorMessage"), Outcome.Message);
+		if (bFallback)
+		{
+			Receipt->SetStringField(TEXT("nativeErrorCode"), NativeCode);
+			Receipt->SetStringField(TEXT("nativeErrorMessage"), Outcome.Message);
+			Receipt->SetStringField(TEXT("nativePreviewPath"), TEXT("native-broker"));
+		}
+	}
+	if (Outcome.Receipt.IsValid())
+	{
+		for (const TCHAR* Field : {TEXT("requestId"), TEXT("brokerVersion"), TEXT("algorithm")})
+		{
+			FString Value;
+			if (Outcome.Receipt->TryGetStringField(Field, Value))
+			{
+				Receipt->SetStringField(Field, Value);
+			}
+		}
+	}
+	if (bFallback && LegacyReceipt.IsValid())
+	{
+		const bool bLegacyOk = LegacyReceipt->GetBoolField(TEXT("ok"));
+		Receipt->SetBoolField(TEXT("fallback"), true);
+		Receipt->SetStringField(TEXT("previewPath"), TEXT("legacy-fallback"));
+		Receipt->SetStringField(TEXT("nativePreviewPath"), TEXT("native-broker"));
+		Receipt->SetStringField(TEXT("nativeErrorCode"), NativeCode);
+		Receipt->SetStringField(TEXT("nativeErrorMessage"), Outcome.Message);
+		Receipt->SetBoolField(TEXT("ok"), bLegacyOk);
+		Receipt->SetBoolField(TEXT("planProduced"), bLegacyOk);
+		if (!bLegacyOk)
+		{
+			FString LegacyCode;
+			FString LegacyMessage;
+			LegacyReceipt->TryGetStringField(TEXT("errorCode"), LegacyCode);
+			LegacyReceipt->TryGetStringField(TEXT("errorMessage"), LegacyMessage);
+			Receipt->SetStringField(TEXT("errorCode"), LegacyCode);
+			Receipt->SetStringField(TEXT("errorMessage"), LegacyMessage);
+		}
+		for (const TCHAR* Field : {TEXT("planId"), TEXT("layoutHash"), TEXT("planStatus"), TEXT("workerMode")})
+		{
+			FString Value;
+			if (LegacyReceipt->TryGetStringField(Field, Value))
+			{
+				Receipt->SetStringField(Field, Value);
+			}
+		}
+		double MovedCount = 0.0;
+		if (LegacyReceipt->TryGetNumberField(TEXT("movedCount"), MovedCount))
+		{
+			Receipt->SetNumberField(TEXT("movedCount"), MovedCount);
+		}
+	}
+	else if (bOk && Outcome.Plan.IsValid())
+	{
+		const TSharedPtr<FJsonObject>* Plan = nullptr;
+		if (Outcome.Plan->TryGetObjectField(TEXT("plan"), Plan) && Plan != nullptr && Plan->IsValid())
+		{
+			FString PlanId;
+			FString LayoutHash;
+			if ((*Plan)->TryGetStringField(TEXT("planId"), PlanId))
+			{
+				Receipt->SetStringField(TEXT("planId"), PlanId);
+			}
+			if ((*Plan)->TryGetStringField(TEXT("layoutHash"), LayoutHash))
+			{
+				Receipt->SetStringField(TEXT("layoutHash"), LayoutHash);
+			}
+			const TArray<TSharedPtr<FJsonValue>>* Moved = nullptr;
+			if ((*Plan)->TryGetArrayField(TEXT("movedNodeIds"), Moved) && Moved != nullptr)
+			{
+				Receipt->SetNumberField(TEXT("movedCount"), Moved->Num());
+			}
+		}
+		FString AssetPath;
+		FString PackageRevision;
+		FString GraphFingerprint;
+		double NodeCount = 0.0;
+		if (Outcome.Plan->TryGetStringField(TEXT("assetPath"), AssetPath))
+		{
+			Receipt->SetStringField(TEXT("assetPath"), AssetPath);
+		}
+		if (Outcome.Plan->TryGetStringField(TEXT("packageRevision"), PackageRevision))
+		{
+			Receipt->SetStringField(TEXT("packageRevision"), PackageRevision);
+		}
+		if (Outcome.Plan->TryGetStringField(TEXT("graphFingerprint"), GraphFingerprint))
+		{
+			Receipt->SetStringField(TEXT("graphFingerprint"), GraphFingerprint);
+		}
+		if (Outcome.Plan->TryGetNumberField(TEXT("nodeCount"), NodeCount))
+		{
+			Receipt->SetNumberField(TEXT("nodeCount"), NodeCount);
+		}
+	}
+	UEdGraph* Graph = PendingGraph.Get();
+	Receipt->SetBoolField(
+		TEXT("packageDirtyAfter"),
+		Graph != nullptr && Graph->GetOutermost() != nullptr && Graph->GetOutermost()->IsDirty());
+	Receipt->SetStringField(TEXT("completedAtUtc"), FDateTime::UtcNow().ToIso8601());
+	LastReceipt = Receipt;
+	FString Error;
+	SaveJsonObject(FPaths::Combine(PreviewDirectory(), TEXT("menu-invocation.json")), Receipt, Error);
+	const bool bPlanProduced = Receipt->GetBoolField(TEXT("planProduced"));
+	if (bPlanProduced)
+	{
+		Notify(FString::Printf(
+			TEXT("Read-only preview ready (%s). Plan: %s"),
+			bFallback ? TEXT("legacy fallback") : TEXT("native broker"),
+			*Receipt->GetStringField(TEXT("planId"))));
+	}
+	else
+	{
+		Notify(FString::Printf(
+			TEXT("Preview did not produce a plan (%s): %s"),
+			bFallback ? TEXT("legacy fallback") : TEXT("native broker"),
+			*Receipt->GetStringField(TEXT("errorCode"))));
+	}
+}
+
+void FUEAgentKitGraphLayoutP11Menu::Notify(const FString& Text) const
+{
+	if (bSuppressTestDialogs)
+	{
+		UE_LOG(LogTemp, Display, TEXT("UEAgentKit M3 menu notification (suppressed): %s"), *Text);
+		return;
+	}
+	FNotificationInfo Info(FText::FromString(Text));
+	Info.ExpireDuration = 6.0f;
+	Info.bUseSuccessFailIcons = false;
+	FSlateNotificationManager::Get().AddNotification(Info);
 }
 
 bool FUEAgentKitGraphLayoutP11Menu::IsAvailable()
@@ -135,6 +471,7 @@ void FUEAgentKitGraphLayoutP11Menu::Startup()
 	{
 		return;
 	}
+	GActiveMenu = this;
 	UToolMenus* ToolMenus = UToolMenus::Get();
 	if (ToolMenus == nullptr)
 	{
@@ -156,6 +493,18 @@ void FUEAgentKitGraphLayoutP11Menu::Startup()
 
 void FUEAgentKitGraphLayoutP11Menu::Shutdown()
 {
+	if (NativeTickerHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(NativeTickerHandle);
+		NativeTickerHandle.Reset();
+	}
+	NativeService.Reset();
+	bNativeInFlight = false;
+	if (GActiveMenu == this)
+	{
+		GActiveMenu = nullptr;
+	}
+
 	if (!bRegistered)
 	{
 		return;
@@ -220,9 +569,26 @@ void FUEAgentKitGraphLayoutP11Menu::ExecutePreview(
 	FString ContextPinName,
 	bool bFromPin)
 {
+	if (StartNativePreview(Graph, ContextNodeGuid, ContextPinName, bFromPin))
+	{
+		return;
+	}
+	ExecuteLegacyPreview(Graph, ContextNodeGuid, ContextPinName, bFromPin, true);
+}
+
+void FUEAgentKitGraphLayoutP11Menu::ExecuteLegacyPreview(
+	TWeakObjectPtr<UEdGraph> Graph,
+	FGuid ContextNodeGuid,
+	FString ContextPinName,
+	bool bFromPin,
+	bool bShowMessage)
+{
 	if (!IsAvailable() || Bridge == nullptr || !Graph.IsValid())
 	{
-		ShowMessage(TEXT("The P11 disposable graph-layout preview gate is closed."));
+		if (bShowMessage)
+		{
+			ShowMessage(TEXT("The P11 disposable graph-layout preview gate is closed."));
+		}
 		return;
 	}
 	UEdGraph* GraphObject = Graph.Get();
@@ -259,7 +625,10 @@ void FUEAgentKitGraphLayoutP11Menu::ExecutePreview(
 		Receipt->SetStringField(TEXT("errorMessage"), ErrorMessage);
 		Receipt->SetBoolField(TEXT("packageDirtyAfter"), Package != nullptr && Package->IsDirty());
 		SaveJsonObject(ReceiptPath, Receipt, Error);
-		ShowMessage(FString::Printf(TEXT("Preview preflight failed.\n\n%s\n%s"), *ErrorCode, *ErrorMessage));
+		if (bShowMessage)
+		{
+			ShowMessage(FString::Printf(TEXT("Preview preflight failed.\n\n%s\n%s"), *ErrorCode, *ErrorMessage));
+		}
 		return;
 	}
 
@@ -277,7 +646,10 @@ void FUEAgentKitGraphLayoutP11Menu::ExecutePreview(
 		Receipt->SetStringField(TEXT("errorCode"), TEXT("p11-menu-evidence-write-failed"));
 		Receipt->SetStringField(TEXT("errorMessage"), Error);
 		SaveJsonObject(ReceiptPath, Receipt, Error);
-		ShowMessage(Error);
+		if (bShowMessage)
+		{
+			ShowMessage(Error);
+		}
 		return;
 	}
 	IFileManager::Get().Delete(*PreviewPath, false, true, true);
@@ -291,7 +663,10 @@ void FUEAgentKitGraphLayoutP11Menu::ExecutePreview(
 		Receipt->SetStringField(TEXT("errorCode"), TEXT("p11-menu-worker-missing"));
 		Receipt->SetStringField(TEXT("errorMessage"), WorkerPath);
 		SaveJsonObject(ReceiptPath, Receipt, Error);
-		ShowMessage(FString::Printf(TEXT("Preview worker is missing:\n%s"), *WorkerPath));
+		if (bShowMessage)
+		{
+			ShowMessage(FString::Printf(TEXT("Preview worker is missing:\n%s"), *WorkerPath));
+		}
 		return;
 	}
 
@@ -325,7 +700,10 @@ void FUEAgentKitGraphLayoutP11Menu::ExecutePreview(
 		Receipt->SetStringField(TEXT("errorCode"), TEXT("p11-menu-python-unavailable"));
 		Receipt->SetStringField(TEXT("errorMessage"), TEXT("The Editor Python plugin is unavailable; no graph was modified."));
 		SaveJsonObject(ReceiptPath, Receipt, Error);
-		ShowMessage(TEXT("The Editor Python plugin is unavailable. No graph was modified."));
+		if (bShowMessage)
+		{
+			ShowMessage(TEXT("The Editor Python plugin is unavailable. No graph was modified."));
+		}
 		return;
 	}
 
@@ -365,17 +743,20 @@ void FUEAgentKitGraphLayoutP11Menu::ExecutePreview(
 	Receipt->SetStringField(TEXT("completedAtUtc"), FDateTime::UtcNow().ToIso8601());
 	SaveJsonObject(ReceiptPath, Receipt, Error);
 
-	if (bPlanProduced)
+	if (bShowMessage)
 	{
-		ShowMessage(FString::Printf(
-			TEXT("Read-only preview ready.\nPlan: %s\nReadOnly: true | Saved: false | Compiled: false"),
-			*Receipt->GetStringField(TEXT("planId"))));
-	}
-	else
-	{
-		ShowMessage(FString::Printf(
-			TEXT("Preview did not produce a plan.\n%s\nNo graph was modified."),
-			*Receipt->GetStringField(TEXT("errorMessage"))));
+		if (bPlanProduced)
+		{
+			ShowMessage(FString::Printf(
+				TEXT("Read-only preview ready.\nPlan: %s\nReadOnly: true | Saved: false | Compiled: false"),
+				*Receipt->GetStringField(TEXT("planId"))));
+		}
+		else
+		{
+			ShowMessage(FString::Printf(
+				TEXT("Preview did not produce a plan.\n%s\nNo graph was modified."),
+				*Receipt->GetStringField(TEXT("errorMessage"))));
+		}
 	}
 }
 

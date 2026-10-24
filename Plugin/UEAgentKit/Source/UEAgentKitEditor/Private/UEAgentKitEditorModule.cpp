@@ -4,6 +4,7 @@
 #include "BlueprintGraphLayoutP9Menu.h"
 #include "BlueprintGraphLayoutP11Menu.h"
 #include "BlueprintGraphLayoutP9TestOnly.h"
+#include "NativePreviewMenuSettings.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "Modules/ModuleManager.h"
@@ -14,6 +15,7 @@ public:
 	virtual void StartupModule() override
 	{
 		const bool bAutomationChild = FParse::Param(FCommandLine::Get(), TEXT("UEAgentKitAutomationChild"));
+		FUEAgentKitNativePreviewSettings::InitializeFromStartup(bAutomationChild);
 		if (GIsEditor && !IsRunningCommandlet() && !bAutomationChild)
 		{
 			EditorBridge = MakeUnique<FUEAgentKitEditorBridge>();

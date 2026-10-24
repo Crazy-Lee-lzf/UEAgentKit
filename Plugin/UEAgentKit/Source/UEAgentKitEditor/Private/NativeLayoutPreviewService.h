@@ -39,6 +39,9 @@ public:
 	/** Production-ish entry: requires the NativeLayoutPreview flag. */
 	bool StartPreview();
 
+	/** M3 menu entry: feature gating already decided by startup settings. */
+	bool StartPreviewForMenu();
+
 	/**
 	 * Test seam: inject the exact P9 preflight/envelope captured on the game
 	 * thread.  No UObject is retained; only JSON and identity strings are kept.
