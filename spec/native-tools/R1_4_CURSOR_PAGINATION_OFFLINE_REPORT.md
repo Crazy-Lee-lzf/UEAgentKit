@@ -157,11 +157,12 @@ E:\EPICGAME\UE_5.6\Engine\Build\BatchFiles\Build.bat R1AutomationHostEditor Win6
   -Project="E:\WorkSpace\UEAgentKit-WT\r1-node-registry\Build\r1-native\R1AutomationHost\R1AutomationHost.uproject" `
   -WaitMutex -NoHotReload
 
-# 2) 新增测试（先跑，确认 C++ token 与 Python 金值一致）
-powershell -File scripts\RunR1NativeTests.ps1 -SkipBuild -Filter "UEAgentKit.Native.R1CursorVectors|UEAgentKit.Native.R1Pagination"
-
-# 3) 全量回归（7 + 2 测试）
+# 2) 全量回归（7 + 2 测试；R1CursorVectors / R1Pagination 先于其他用例执行）
 powershell -File scripts\RunR1NativeTests.ps1 -SkipBuild -Filter "UEAgentKit.Native.R1"
+
+# 3) 如需单独重跑两个新测试（Automation 过滤器不支持 "|"）
+powershell -File scripts\RunR1NativeTests.ps1 -SkipBuild -Filter "UEAgentKit.Native.R1CursorVectors"
+powershell -File scripts\RunR1NativeTests.ps1 -SkipBuild -Filter "UEAgentKit.Native.R1Pagination"
 
 # 4) 离线（含真实导出分页）
 py -3.12 -m unittest discover -s tests\native_tools -p "test_*.py"
