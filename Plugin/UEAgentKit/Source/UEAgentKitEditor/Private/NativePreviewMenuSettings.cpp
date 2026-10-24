@@ -30,8 +30,10 @@ void FUEAgentKitNativePreviewSettings::InitializeFromStartup(bool bAutomationChi
 		TEXT("LegacyLayoutPreviewFallback"),
 		GSettings.bLegacyLayoutPreviewFallback,
 		GEngineIni);
-	GConfig->GetBool(
-		TEXT("UEAgentKit"), TEXT("NativeToolRegistry"), GSettings.bNativeToolRegistry, GEngineIni);
+	// NativeToolRegistry is owned by R1's FNativeNodeRegistry and read from
+	// DefaultUEAgentKit.ini (GGameIni).  Keep this M3 compatibility field
+	// fail-closed; do not create a second config source here.
+	GSettings.bNativeToolRegistry = false;
 
 	if (bAutomationChild && IsDisposableP11Host())
 	{
