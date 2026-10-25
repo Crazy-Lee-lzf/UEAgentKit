@@ -41,4 +41,6 @@
 
 ## 专用工具文档
 
+- [AI Agent 专用 Tool 索引与安全调用规则](TOOL_CATALOG.md)
+
 本目录中 `*_TOOL.md` 文档描述可公开使用的动画诊断、修复、重定向和二次运动等专用 Tool。具体可用性以当前版本的 MCP capabilities 和对应 Tool 文档为准。
