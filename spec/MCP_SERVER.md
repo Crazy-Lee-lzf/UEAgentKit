@@ -324,13 +324,14 @@ expected no-op 使用独立 `noop_*` Change Set Operation：没有 LiveApply rec
 
 
 ```powershell
+# 开发回归示例：需自行准备隔离测试工程（非公开项目的通用安装步骤）
 scripts/TestMcpLiveClosedLoop.ps1 `
-  -EngineRoot E:\EPICGAME\UE_5.6 `
-  -ProjectPath E:\WorkSpace\UEAgentKit\Build\DirectHost\HostProject.uproject
+  -EngineRoot "<UE_5.6>" `
+  -ProjectPath "<TEST_HOST_PROJECT>.uproject"
 
 scripts/TestMcpBlueprintSemanticDiff.ps1 `
-  -EngineRoot E:\EPICGAME\UE_5.6 `
-  -ProjectPath E:\WorkSpace\UEAgentKit\Build\DirectHost\HostProject.uproject
+  -EngineRoot "<UE_5.6>" `
+  -ProjectPath "<TEST_HOST_PROJECT>.uproject"
 ```
 
 ClosedLoop 覆盖 Data Asset、Material Instance、DataTable cell 与 rename 的 live/persisted/verified，共 12 个结果；全部 expected=actual=matched=1、unexpected=missing=0、`truncated=false`。恢复采用独立 Canonical fixture verification，5/5 通过；UE Reset 会重写语义等价的 package bytes，因此不把精确 hash 恢复作为该组测试的必要条件，冻结 Revision Export 与 SQLite 必须保持不变。

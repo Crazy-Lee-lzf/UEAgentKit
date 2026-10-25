@@ -4,6 +4,8 @@
 
 ## 快速开始
 
+- [AI Agent 快速接入（推荐）](AGENT_QUICKSTART.md) / [English](AGENT_QUICKSTART_EN.md)
+
 - [README](../README.md) / [English README](../README_EN.md)
 - [构建与运行](BUILD_AND_RUN.md)
 - [AI 使用说明](AI_USAGE.md)

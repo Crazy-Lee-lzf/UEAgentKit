@@ -1,6 +1,6 @@
 # UE Agent Kit 0.8.0 Capability Status
 
-Latest published release: **0.8.0**
+Latest published release: **0.8.0** (this page describes the `v0.8.0` tag, not later local-only experimental changes)
 Target environment: **Unreal Engine 5.6 / Windows / Python 3.11–3.12**
 
 

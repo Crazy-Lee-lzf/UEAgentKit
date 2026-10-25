@@ -219,6 +219,7 @@ Read-only audit
 
 ## 文档
 
+- [AI Agent 快速接入](docs/AGENT_QUICKSTART.md)
 - [文档索引](docs/README.md)
 - [项目能力状态](docs/PROJECT_STATUS.md)
 - [公开 Roadmap](docs/ROADMAP.md)

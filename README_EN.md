@@ -211,6 +211,7 @@ These restrictions are part of the product safety model and are not intended to 
 
 ## Documentation
 
+- [AI Agent Quick Start](docs/AGENT_QUICKSTART_EN.md)
 - [Documentation index](docs/README.md)
 - [Current capability status](docs/PROJECT_STATUS_EN.md)
 - [Public roadmap](docs/ROADMAP_EN.md)
