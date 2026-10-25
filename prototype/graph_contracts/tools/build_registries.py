@@ -135,6 +135,12 @@ CODES = [
     ("graphpatch-graph-not-found", "graphpatch", "error", False, "B", "Target graph does not exist", "GP-TARGET", ""),
     ("graphpatch-min-executor-version", "graphpatch", "error", False, "B", "Executor is older than the Patch minimum version", "EC-VERSION", ""),
     ("graphpatch-target-not-loaded", "graphpatch", "error", False, "B", "Legacy alias for asset-not-loaded", "TX-PREFLIGHT", "graphpatch-asset-not-loaded"),
+    # ---- GraphPatch preview transport (bounded, read-only MCP adapter) ------
+    # ue_preview_graph_patch reuses graphpatch-limit-exceeded / contract-schema-invalid
+    # / graphpatch-operation-unknown for every condition that already has a code.
+    # Only these two preview-only failures have no contract equivalent.
+    ("graphpatch-preview-not-json", "graphpatch", "error", False, "B", "The in-memory preview result is not a JSON value", "TX-PREVIEW-ZERO-WRITE", ""),
+    ("graphpatch-preview-failed", "graphpatch", "error", False, "B", "The in-memory preview failed safely; no write was attempted", "TX-PREVIEW-ZERO-WRITE", ""),
     # ---- Layout ------------------------------------------------------------
     ("layout-invalid-graph", "layout", "error", False, "C", "Layout input is not a valid TypedGraph", "LP-VALIDATION", ""),
     ("layout-shared-pure-node", "layout", "warning", False, "C", "Shared pure node assigned to one island; never duplicated", "LP-PURE-NODES", ""),

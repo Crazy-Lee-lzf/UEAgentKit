@@ -1036,6 +1036,24 @@
       "legacyAliasOf": "graphpatch-asset-not-loaded"
     },
     {
+      "code": "graphpatch-preview-not-json",
+      "domain": "graphpatch",
+      "severity": "error",
+      "retryable": false,
+      "ownerWorkLine": "B",
+      "summary": "The in-memory preview result is not a JSON value",
+      "contractRef": "TX-PREVIEW-ZERO-WRITE"
+    },
+    {
+      "code": "graphpatch-preview-failed",
+      "domain": "graphpatch",
+      "severity": "error",
+      "retryable": false,
+      "ownerWorkLine": "B",
+      "summary": "The in-memory preview failed safely; no write was attempted",
+      "contractRef": "TX-PREVIEW-ZERO-WRITE"
+    },
+    {
       "code": "layout-invalid-graph",
       "domain": "layout",
       "severity": "error",

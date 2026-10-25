@@ -20,6 +20,7 @@ for entry in (str(TOOLS), str(CANDIDATE)):
 from ue_agent_kit.mcp_graph_patch_tools import (  # noqa: E402
     GRAPH_PATCH_PREVIEW_TOOL_NAME,
     MAX_DEPTH,
+    MAX_ENVIRONMENT_BYTES,
     MAX_GRAPH_BYTES,
     MAX_PATCH_BYTES,
     preview_graph_patch_document,
@@ -95,7 +96,10 @@ class GraphPatchPreviewTests(unittest.TestCase):
         ]
         payload = preview_graph_patch_document(invalid, graph, environment, descriptors)
         self.assertFalse(payload["ok"])
-        self.assertEqual(payload["errorCode"], "graphpatch-delete-node-unsupported")
+        # Transport refusals reuse the registered contract code for the same
+        # condition; the precise cause is in details.
+        self.assertEqual(payload["errorCode"], "graphpatch-operation-unknown")
+        self.assertEqual(payload["details"]["operation"], "deleteNode")
         self.assertFalse(payload["writeAuthorized"])
 
     def test_schema_invalid_patch_returns_diagnostics(self) -> None:
@@ -104,21 +108,26 @@ class GraphPatchPreviewTests(unittest.TestCase):
         invalid["unknownExtension"] = "not allowed"
         payload = preview_graph_patch_document(invalid, graph, environment, descriptors)
         self.assertFalse(payload["ok"])
-        self.assertEqual(payload["errorCode"], "graphpatch-schema-invalid")
+        self.assertEqual(payload["errorCode"], "contract-schema-invalid")
+        self.assertEqual(payload["details"], {"document": "graphpatch", "reason": "schema-invalid"})
         self.assertGreaterEqual(len(payload["diagnostics"]), 1)
 
     def test_oversize_inputs_fail_closed(self) -> None:
         patch, graph, environment, descriptors = _fixture("gp-create-branch")
         cases = [
-            ({"operations": [], "padding": "x" * (MAX_PATCH_BYTES + 1)}, graph, environment, descriptors, "graphpatch-patch-too-large"),
-            (patch, {"padding": "x" * (MAX_GRAPH_BYTES + 1)}, environment, descriptors, "graphpatch-graph-too-large"),
-            (patch, graph, {"padding": "x" * (70 * 1024)}, descriptors, "graphpatch-environment-too-large"),
+            ({"operations": [], "padding": "x" * (MAX_PATCH_BYTES + 1)}, graph, environment, descriptors, "patch", MAX_PATCH_BYTES),
+            (patch, {"padding": "x" * (MAX_GRAPH_BYTES + 1)}, environment, descriptors, "graph", MAX_GRAPH_BYTES),
+            (patch, graph, {"padding": "x" * (70 * 1024)}, descriptors, "environment", MAX_ENVIRONMENT_BYTES),
         ]
-        for bad_patch, bad_graph, bad_env, bad_desc, expected in cases:
-            with self.subTest(code=expected):
+        for bad_patch, bad_graph, bad_env, bad_desc, argument, limit in cases:
+            with self.subTest(argument=argument):
                 payload = preview_graph_patch_document(bad_patch, bad_graph, bad_env, bad_desc)
                 self.assertFalse(payload["ok"])
-                self.assertEqual(payload["errorCode"], expected)
+                self.assertEqual(payload["errorCode"], "graphpatch-limit-exceeded")
+                self.assertEqual(payload["details"]["argument"], argument)
+                self.assertEqual(payload["details"]["limitName"], "maxBytes")
+                self.assertEqual(payload["details"]["limit"], limit)
+                self.assertGreater(payload["details"]["actualBytes"], limit)
 
     def test_depth_and_operation_limits(self) -> None:
         patch, graph, environment, descriptors = _fixture("gp-create-branch")
@@ -128,12 +137,16 @@ class GraphPatchPreviewTests(unittest.TestCase):
             cursor["nested"] = {}
             cursor = cursor["nested"]
         payload = preview_graph_patch_document(deep, graph, environment, descriptors)
-        self.assertEqual(payload["errorCode"], "graphpatch-patch-too-deep")
+        self.assertEqual(payload["errorCode"], "graphpatch-limit-exceeded")
+        self.assertEqual(payload["details"]["limitName"], "maxDepth")
 
         too_many = copy.deepcopy(patch)
         too_many["operations"] = [{"operationId": str(index)} for index in range(301)]
         payload = preview_graph_patch_document(too_many, graph, environment, descriptors)
-        self.assertEqual(payload["errorCode"], "graphpatch-too-many-operations")
+        self.assertEqual(payload["errorCode"], "graphpatch-limit-exceeded")
+        self.assertEqual(payload["details"]["limitName"], "maxOperations")
+        self.assertEqual(payload["details"]["limit"], 300)
+        self.assertEqual(payload["details"]["actual"], 301)
 
     def test_no_filesystem_activity_in_temp_cwd(self) -> None:
         patch, graph, environment, descriptors = _fixture("gp-create-branch")
