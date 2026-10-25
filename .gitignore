@@ -90,3 +90,13 @@ __pycache__/
 /spec/native-tools/RC0_RUN_STATE_20261025.md
 /spec/native-tools/RC0_UNIFIED_RELEASE_GATE_REVIEW_20261025.md
 /spec/native-tools/RC1_CLEAN_CHECKOUT_TEST_REPRODUCIBILITY_20261025.md
+
+# Additional internal graph/native/test evidence retained in UEAgentKit-Development
+/spec/SCALAR_PATCH_REGRESSION.md
+/spec/graph-contracts/C_LAYOUT_P11_EDITOR_SCOPE_ACCEPTANCE_REPORT_20261023.md
+/spec/graph-contracts/D01_D13_USER_DECISIONS.md
+/spec/graph-contracts/G0_3_APPROVED_DELTA.md
+/spec/graph-contracts/G0_4_RUNTIME_ADAPTER.md
+/spec/native-tools/N0_R1_READINESS_AND_GATE.md
+/spec/native-tools/N0_REVIEW_DECISIONS_AND_PREVIEW_MIGRATION.md
+/spec/native-tools/UE_TEST_WINDOW_LAUNCH_UX.md
