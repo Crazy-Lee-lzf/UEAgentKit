@@ -55,6 +55,11 @@ from .mcp_live_tools import GRAPH_CONTEXT_TOOL_NAME, register_live_read_tools
 from .mcp_graph_layout_test_only import register_graph_layout_test_only_tool
 from .mcp_graph_layout_p8_test_only import register_graph_layout_p8_test_only_tool
 from .mcp_graph_layout_experimental import register_graph_layout_experimental_tools
+from .mcp_graph_edit_experimental import register_graph_edit_experimental_tools
+from .experimental_graph_edit import (
+    APPLY_TOOL_NAME as EXPERIMENTAL_GRAPH_EDIT_APPLY_TOOL_NAME,
+    PREVIEW_TOOL_NAME as EXPERIMENTAL_GRAPH_EDIT_PREVIEW_TOOL_NAME,
+)
 from .experimental_graph_layout import (
     APPLY_TOOL_NAME as EXPERIMENTAL_APPLY_TOOL_NAME,
     SAVE_TOOL_NAME as EXPERIMENTAL_SAVE_TOOL_NAME,
@@ -310,6 +315,7 @@ def _capabilities_response(
     p7_test_only_graph_layout_apply: bool = False,
     p8_test_only_graph_layout_apply: bool = False,
     experimental_graph_layout_apply: bool = False,
+    experimental_graphpatch_edit: bool = False,
     live_editor_status: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     write_tools_enabled = workflow_service is not None
@@ -328,6 +334,12 @@ def _capabilities_response(
         isinstance(observed_capabilities, list)
         and "editor.applyBlueprintGraphLayoutExperimental" in observed_capabilities
         and "editor.saveBlueprintGraphLayoutExperimental" in observed_capabilities
+    )
+    graph_edit_registered = bool(live_editor_enabled and experimental_graphpatch_edit)
+    graph_edit_plugin_opt_in = bool(
+        isinstance(observed_capabilities, list)
+        and "editor.previewBlueprintGraphEditExperimental" in observed_capabilities
+        and "editor.applyBlueprintGraphEditExperimental" in observed_capabilities
     )
     memory_status = memory_service.status() if memory_service is not None else None
     verification_evidence_status = (
@@ -388,6 +400,24 @@ def _capabilities_response(
                     },
                 ]
                 if live_editor_enabled and experimental_graph_layout_apply
+                else []
+            )
+            + (
+                [
+                    {
+                        "name": EXPERIMENTAL_GRAPH_EDIT_PREVIEW_TOOL_NAME,
+                        "readOnly": True,
+                        "destructive": False,
+                        "experimental": True,
+                    },
+                    {
+                        "name": EXPERIMENTAL_GRAPH_EDIT_APPLY_TOOL_NAME,
+                        "readOnly": False,
+                        "destructive": True,
+                        "experimental": True,
+                    },
+                ]
+                if live_editor_enabled and experimental_graphpatch_edit
                 else []
             )
         ),
@@ -626,6 +656,54 @@ def _capabilities_response(
                 "requiresExplicitSeparateSave": True,
                 "saveReadback": "asset-sha256+live-layout-hash+package-revision",
                 "independentReloadVerified": False,
+                "maxRequestBytes": 61440,
+            },
+            "experimentalGraphPatchEdit": {
+                "available": bool(graph_edit_registered and graph_edit_plugin_opt_in),
+                "registered": graph_edit_registered,
+                "pluginCapabilityObserved": graph_edit_plugin_opt_in,
+                "previewTool": EXPERIMENTAL_GRAPH_EDIT_PREVIEW_TOOL_NAME
+                if graph_edit_registered
+                else "",
+                "applyTool": EXPERIMENTAL_GRAPH_EDIT_APPLY_TOOL_NAME
+                if graph_edit_registered
+                else "",
+                "bridgeMethods": [
+                    "editor.previewBlueprintGraphEditExperimental",
+                    "editor.applyBlueprintGraphEditExperimental",
+                ]
+                if graph_edit_registered
+                else [],
+                "readOnlyPreview": True,
+                "destructiveApply": True,
+                "experimental": True,
+                "productionDefault": False,
+                "productionEnabled": False,
+                "productionApprovalRequired": False,
+                "authorizationModel": (
+                    "project-level experimental opt-in plus exact per-call confirmation; "
+                    "this is not a general GraphPatch executor"
+                ),
+                "explicitOptIn": {
+                    "serverFlag": "--enable-experimental-graphpatch-edit",
+                    "projectConfig": "[UEAgentKit] ExperimentalGraphPatchEdit=True",
+                    "requiresRunningEditorCapability": True,
+                },
+                "requiresCompletePreviewResult": True,
+                "acceptsCallerBuiltRequest": False,
+                "supportedNodeTypes": ["branch", "sequence"],
+                "supportedConnections": "exec-only",
+                "exactFocusedGraphOnly": True,
+                "requiresCleanPackage": True,
+                "requiresPieStopped": True,
+                "requiresCurrentRevisionAndFingerprint": True,
+                "explicitApplyConfirmation": "CREATE EXPERIMENTAL GRAPH NODES <planId>",
+                "undoRedoVerifiedInCall": True,
+                "singleTransaction": True,
+                "autoSave": False,
+                "requiresExplicitSeparateSave": True,
+                "maxNodes": 8,
+                "maxConnections": 12,
                 "maxRequestBytes": 61440,
             },
             "editorContext": {
@@ -1497,6 +1575,7 @@ def create_mcp_server(
     p7_test_only_graph_layout_apply: bool = False,
     p8_test_only_graph_layout_apply: bool = False,
     experimental_graph_layout_apply: bool = False,
+    experimental_graphpatch_edit: bool = False,
 ):
     if FastMCP is None or ToolAnnotations is None:
         raise RuntimeError(
@@ -1567,6 +1646,8 @@ def create_mcp_server(
             )
     if experimental_graph_layout_apply and live_editor_service is None:
         raise ValueError("--enable-experimental-graph-layout-apply requires --enable-live-editor")
+    if experimental_graphpatch_edit and live_editor_service is None:
+        raise ValueError("--enable-experimental-graphpatch-edit requires --enable-live-editor")
     server = FastMCP(
         MCP_SERVER_NAME,
         instructions=_server_instructions(
@@ -1600,9 +1681,11 @@ def create_mcp_server(
             p7_test_only_graph_layout_apply=p7_test_only_graph_layout_apply,
             p8_test_only_graph_layout_apply=p8_test_only_graph_layout_apply,
             experimental_graph_layout_apply=experimental_graph_layout_apply,
+            experimental_graphpatch_edit=experimental_graphpatch_edit,
             live_editor_status=(
                 live.status()
-                if experimental_graph_layout_apply and live is not None
+                if (experimental_graph_layout_apply or experimental_graphpatch_edit)
+                and live is not None
                 else None
             ),
         ),
@@ -1712,6 +1795,20 @@ def create_mcp_server(
                 server,
                 (EXPERIMENTAL_APPLY_TOOL_NAME, EXPERIMENTAL_SAVE_TOOL_NAME),
             )
+        if experimental_graphpatch_edit:
+            register_graph_edit_experimental_tools(
+                server=server,
+                live_editor_service=live_editor_service,
+                tool_annotations_type=ToolAnnotations,
+                error_response=_error_response,
+            )
+            _enforce_strict_tool_arguments(
+                server,
+                (
+                    EXPERIMENTAL_GRAPH_EDIT_PREVIEW_TOOL_NAME,
+                    EXPERIMENTAL_GRAPH_EDIT_APPLY_TOOL_NAME,
+                ),
+            )
     if workflow_service is not None:
         register_workflow_tools(
             server=server,
@@ -1769,6 +1866,15 @@ def build_parser() -> argparse.ArgumentParser:
             "Opt in to the general experimental Blueprint graph-layout Apply/Save tools. "
             "The running Editor project must also set "
             "[UEAgentKit] ExperimentalGraphLayoutApply=True."
+        ),
+    )
+    parser.add_argument(
+        "--enable-experimental-graphpatch-edit",
+        action="store_true",
+        help=(
+            "Opt in to the bounded experimental Blueprint createNode/connectPins tools. "
+            "The running Editor project must also set "
+            "[UEAgentKit] ExperimentalGraphPatchEdit=True."
         ),
     )
     parser.add_argument("--enable-source-control", action="store_true")
@@ -1983,6 +2089,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
             experimental_graph_layout_apply=bool(
                 getattr(args, "enable_experimental_graph_layout_apply", False)
+            ),
+            experimental_graphpatch_edit=bool(
+                getattr(args, "enable_experimental_graphpatch_edit", False)
             ),
         )
         server.run(transport="stdio")
