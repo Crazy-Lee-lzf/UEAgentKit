@@ -151,6 +151,32 @@ def _normalize_sections(sections: Sequence[str] | None) -> tuple[str, ...]:
     return tuple(normalized)
 
 
+def _output_budget(
+    *,
+    max_output_tokens: int,
+    estimated_tokens: int,
+    withheld: bool,
+    reasons: Sequence[str] = (),
+) -> dict[str, Any]:
+    """Describe output budgeting without conflating withholding with overflow.
+
+    ``truncated`` means "content exists that this response did not return", which is
+    exactly when a continuation token is offered.  A response that returns every
+    requested item but is still larger than the caller's ``max_output_tokens``
+    (an unavoidable single item, or a forced first item) sets ``budgetExceeded``
+    instead and keeps ``truncated`` false.
+    """
+    budget_exceeded = estimated_tokens > max_output_tokens
+    return {
+        "maxTokens": max_output_tokens,
+        "estimatedTokens": estimated_tokens,
+        "truncated": withheld,
+        "truncationReason": (",".join(reason for reason in reasons if reason) if withheld else ""),
+        "budgetExceeded": budget_exceeded,
+        "budgetExceededReason": "single-result-exceeds-token-budget" if budget_exceeded else "",
+    }
+
+
 class IndexQueryService:
     """Stable read-only query contract shared by MCP and future agent adapters."""
 
@@ -519,16 +545,14 @@ class IndexQueryService:
             reason = "token-budget"
         elif query_has_more:
             reason = "page-limit"
-        elif estimated_tokens > max_output_tokens:
-            reason = "single-result-exceeds-token-budget"
         else:
             reason = ""
-        response["outputBudget"] = {
-            "maxTokens": max_output_tokens,
-            "estimatedTokens": estimate_json_tokens(response),
-            "truncated": has_more or estimated_tokens > max_output_tokens,
-            "truncationReason": reason,
-        }
+        response["outputBudget"] = _output_budget(
+            max_output_tokens=max_output_tokens,
+            estimated_tokens=estimated_tokens,
+            withheld=has_more,
+            reasons=(reason,),
+        )
         return response
 
     def search(
@@ -749,12 +773,11 @@ class IndexQueryService:
                 }
             )
             if asset is None:
-                response["outputBudget"] = {
-                    "maxTokens": max_output_tokens,
-                    "estimatedTokens": estimate_json_tokens(response),
-                    "truncated": False,
-                    "truncationReason": "",
-                }
+                response["outputBudget"] = _output_budget(
+                    max_output_tokens=max_output_tokens,
+                    estimated_tokens=estimate_json_tokens(response),
+                    withheld=False,
+                )
                 return response
 
             payload: dict[str, Any] = {}
@@ -823,8 +846,6 @@ class IndexQueryService:
                     reason = "token-budget"
                 elif query_has_more:
                     reason = "section-limit"
-                elif estimate_json_tokens(response) > max_output_tokens:
-                    reason = "single-result-exceeds-token-budget"
                 else:
                     reason = ""
                 if reason and reason not in truncation_reasons:
@@ -841,19 +862,15 @@ class IndexQueryService:
                 }
 
             response["asset"] = payload
-            estimated_tokens = estimate_json_tokens(response)
-            truncated = any(
-                bool(section_info["hasMore"])
-                for section_info in response["sectionPagination"].values()
-            ) or estimated_tokens > max_output_tokens
-            if estimated_tokens > max_output_tokens and "single-result-exceeds-token-budget" not in truncation_reasons:
-                truncation_reasons.append("single-result-exceeds-token-budget")
-            response["outputBudget"] = {
-                "maxTokens": max_output_tokens,
-                "estimatedTokens": estimate_json_tokens(response),
-                "truncated": truncated,
-                "truncationReason": ",".join(truncation_reasons),
-            }
+            response["outputBudget"] = _output_budget(
+                max_output_tokens=max_output_tokens,
+                estimated_tokens=estimate_json_tokens(response),
+                withheld=any(
+                    bool(section_info["hasMore"])
+                    for section_info in response["sectionPagination"].values()
+                ),
+                reasons=tuple(truncation_reasons),
+            )
             return response
 
     def find_references(
