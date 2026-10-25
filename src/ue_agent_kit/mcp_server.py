@@ -107,6 +107,7 @@ from .tool_registry import (
     LIVE_EDITOR_TOOL_NAMES,
     MEMORY_TOOL_NAMES,
     SOURCE_CONTROL_TOOL_NAMES,
+    TOOL_DEFINITIONS_BY_NAME,
     tool_descriptors_for_mode,
 )
 from .snapshot_lifecycle import (
@@ -1244,6 +1245,29 @@ _RETRYABLE_ERROR_CODES = {
     "live-editor-batch-task-failed",
 }
 
+# Transport failures that can happen *after* a mutating request was written to the
+# Editor Bridge socket.  For a destructive Tool the Editor may already have applied
+# the change, so the outcome is indeterminate and an automatic retry can duplicate
+# or mask a write.  Read-only and non-destructive Tools keep the plain retryable
+# behaviour: repeating ue_open_asset / ue_validate_asset is harmless.
+_INDETERMINATE_WRITE_ERROR_CODES = frozenset(
+    {
+        "live-editor-timeout",
+        "live-editor-connection-closed",
+    }
+)
+
+_INDETERMINATE_WRITE_SUGGESTION = (
+    "Do not repeat this write. The Editor may have applied it before the transport failed: "
+    "read the current asset state (ue_get_dirty_assets, ue_get_asset_state, "
+    "ue_verify_live_write_fast) and undo or discard the transaction before retrying."
+)
+
+
+def _is_destructive_tool(tool: str) -> bool:
+    definition = TOOL_DEFINITIONS_BY_NAME.get(tool)
+    return bool(definition is not None and definition.destructive)
+
 
 def _suggested_action(code: str) -> str:
     exact = {
@@ -1349,6 +1373,14 @@ def _error_response(tool: str, error: Exception, *, read_only: bool) -> dict[str
         code = "database-error"
     else:
         code = "ue-agent-kit-error"
+    indeterminate = _is_destructive_tool(tool) and code in _INDETERMINATE_WRITE_ERROR_CODES
+    if indeterminate:
+        details = dict(details) if isinstance(details, dict) else {}
+        details.setdefault("indeterminate", True)
+        details.setdefault("dispatchState", "unknown")
+        suggested_action = _INDETERMINATE_WRITE_SUGGESTION
+    else:
+        suggested_action = _suggested_action(code)
     response: dict[str, Any] = {
         "schemaVersion": "1.0",
         "tool": tool,
@@ -1358,9 +1390,9 @@ def _error_response(tool: str, error: Exception, *, read_only: bool) -> dict[str
             "code": code,
             "type": type(error).__name__,
             "message": message,
-            "retryable": code in _RETRYABLE_ERROR_CODES,
+            "retryable": code in _RETRYABLE_ERROR_CODES and not indeterminate,
             "details": details,
-            "suggestedAction": _suggested_action(code),
+            "suggestedAction": suggested_action,
         },
     }
     return response
