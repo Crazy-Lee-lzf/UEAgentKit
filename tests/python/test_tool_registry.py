@@ -47,6 +47,7 @@ EXPECTED_ALL_TOOLS = [
     "ue_analyze_semantic_diff",
     "ue_build_verification_plan",
     "ue_evaluate_trust_verdict",
+    "ue_preview_graph_patch",
     "ue_get_task_context",
     "ue_editor_status",
     "ue_get_selection",
@@ -149,21 +150,21 @@ class ToolRegistryTests(unittest.TestCase):
             tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True),
             EXPECTED_ALL_TOOLS,
         )
-        self.assertEqual(len(tool_names_for_mode()), 10)
-        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 45)
-        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 67)
+        self.assertEqual(len(tool_names_for_mode()), 11)
+        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 46)
+        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 68)
         self.assertEqual(
             tool_names_for_mode(memory_enabled=True),
             QUERY_TOOL_NAMES + EXPECTED_MEMORY_TOOLS,
         )
-        self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 24)
+        self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 25)
         self.assertEqual(
             len(tool_names_for_mode(live_editor_enabled=True, memory_enabled=True)),
-            59,
+            60,
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
-            81,
+            82,
         )
         self.assertEqual(
             len(
@@ -173,7 +174,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-            116,
+            117,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:

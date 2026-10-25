@@ -62,6 +62,10 @@ from .p8_test_only import (
     is_fixed_project as is_fixed_p8_project,
 )
 from .mcp_memory_tools import register_memory_tools
+from .mcp_graph_patch_tools import (
+    GRAPH_PATCH_PREVIEW_TOOL_NAME,
+    register_graph_patch_tools,
+)
 from .mcp_query_tools import register_query_tools
 from .mcp_realtime_tools import register_realtime_tools
 from .mcp_source_control_tools import register_source_control_tools
@@ -1481,6 +1485,8 @@ def create_mcp_server(
             memory_service,
         ),
     )
+    register_graph_patch_tools(server=server, read_annotations=read_annotations)
+    _enforce_strict_tool_arguments(server, (GRAPH_PATCH_PREVIEW_TOOL_NAME,))
     _enforce_strict_tool_arguments(server, STRICT_IMPACT_ARGUMENT_TOOL_NAMES)
     _enforce_strict_tool_arguments(server, STRICT_SEMANTIC_DIFF_ARGUMENT_TOOL_NAMES)
     _enforce_strict_tool_arguments(server, STRICT_VERIFICATION_TRUST_ARGUMENT_TOOL_NAMES)

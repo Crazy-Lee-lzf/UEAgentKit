@@ -38,6 +38,7 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_analyze_semantic_diff", "query", "read"),
     ToolDefinition("ue_build_verification_plan", "query", "read"),
     ToolDefinition("ue_evaluate_trust_verdict", "query", "read"),
+    ToolDefinition("ue_preview_graph_patch", "query", "read"),
     ToolDefinition("ue_get_task_context", "query", "read"),
     ToolDefinition("ue_memory_search", "memory", "read"),
     ToolDefinition("ue_memory_get", "memory", "read"),

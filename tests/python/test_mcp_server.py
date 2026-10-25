@@ -930,6 +930,7 @@ class McpServerTests(unittest.TestCase):
                 "ue_analyze_semantic_diff",
                 "ue_build_verification_plan",
                 "ue_evaluate_trust_verdict",
+                "ue_preview_graph_patch",
                 "ue_get_task_context",
             ],
         )
@@ -1122,7 +1123,7 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         expected_names = tool_names_for_mode(memory_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 24)
+        self.assertEqual(len(tools), 25)
         forbidden = {
             "database",
             "database_path",
@@ -1998,7 +1999,7 @@ class McpServerTests(unittest.TestCase):
             [tool.name for tool in tools],
             tool_names_for_mode(workflow_enabled=True, memory_enabled=True),
         )
-        self.assertEqual(len(tools), 81)
+        self.assertEqual(len(tools), 82)
 
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
         memory_contract = capabilities["projectMemory"]
@@ -2072,7 +2073,7 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         expected_names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 102)
+        self.assertEqual(len(tools), 103)
         for tool in tools:
             definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
             self.assertEqual(bool(tool.annotations.readOnlyHint), definition.read_only, tool.name)
