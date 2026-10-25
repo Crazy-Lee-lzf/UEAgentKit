@@ -20,7 +20,7 @@ from .project_memory import (
     MemoryScopeType,
     MemoryStatus,
     get_memory_record,
-    search_memory_records,
+    search_memory_records_bounded,
 )
 
 
@@ -451,16 +451,18 @@ def _query_record_ids(
     if not query or limit <= 0:
         return ()
     try:
-        hits = search_memory_records(
+        outcome = search_memory_records_bounded(
             connection,
             project_key=project_key,
             query=query,
             statuses=DEFAULT_CONTEXT_STATUSES,
             limit=min(limit, 100),
+            scan_limit=1_000,
+            deadline_ms=100,
         )
     except ValueError:
         return ()
-    return tuple(hit.record.record_id for hit in hits)
+    return tuple(hit.record.record_id for hit in outcome.hits)
 
 
 def _ordered_unique(values: Sequence[str]) -> tuple[str, ...]:

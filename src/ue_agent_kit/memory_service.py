@@ -76,7 +76,7 @@ from .project_memory import (
     list_memory_records,
     mark_memory_record_superseded,
     open_project_memory_database,
-    search_memory_records,
+    search_memory_records_bounded,
 )
 
 
@@ -124,6 +124,11 @@ class MemorySearchResult:
     vector_available: bool
     vector_fallback: str
     query_embedding_count: int
+    substring_fallback: bool = False
+    scan_limited: bool = False
+    timed_out: bool = False
+    scanned_records: int = 0
+    query_clipped: bool = False
 
     def __iter__(self):
         return iter(self.hits)
@@ -135,6 +140,11 @@ class MemorySearchResult:
             "vectorFallback": self.vector_fallback,
             "queryEmbeddingCount": self.query_embedding_count,
             "corpusEmbeddingCount": 0,
+            "substringFallback": self.substring_fallback,
+            "scanLimited": self.scan_limited,
+            "timedOut": self.timed_out,
+            "scannedRecords": self.scanned_records,
+            "queryClipped": self.query_clipped,
         }
 
 
@@ -340,7 +350,7 @@ class ProjectMemoryService:
         with open_project_memory_database(self.database_path) as connection:
             provider, fallback_reason = get_shared_provider()
             if provider is None:
-                hits = search_memory_records(
+                outcome = search_memory_records_bounded(
                     connection,
                     project_key=self.project_key,
                     query=query,
@@ -351,11 +361,16 @@ class ProjectMemoryService:
                     limit=limit,
                 )
                 return MemorySearchResult(
-                    hits=hits,
-                    retrieval_mode="fts",
+                    hits=outcome.hits,
+                    retrieval_mode=outcome.mode,
                     vector_available=False,
                     vector_fallback=fallback_reason,
                     query_embedding_count=0,
+                    substring_fallback=outcome.mode == "cjk-substring",
+                    scan_limited=outcome.truncated,
+                    timed_out=outcome.timed_out,
+                    scanned_records=outcome.scanned,
+                    query_clipped=outcome.query_clipped,
                 )
             outcome = hybrid_search_memory_records(
                 connection,
@@ -638,14 +653,16 @@ class ProjectMemoryService:
         scope_key: str = "",
         limit: int = 20,
     ) -> MemorySearchResult:
-        """Model-free FTS-only record search for internal request paths.
+        """Model-free bounded record search for internal request paths.
 
-        Task Context risk/correlation metadata uses this method so automatic
-        Task Context can never load the optional vector model. Explicit Memory
-        Search keeps using :meth:`search_records` (hybrid when available).
+        Uses FTS5 plus the bounded CJK literal-substring fallback; it never
+        loads the optional vector model. Task Context risk/correlation metadata
+        uses this method so automatic Task Context stays model-free, while
+        Explicit Memory Search keeps using :meth:`search_records` (hybrid when
+        available).
         """
         with open_project_memory_database(self.database_path) as connection:
-            hits = search_memory_records(
+            outcome = search_memory_records_bounded(
                 connection,
                 project_key=self.project_key,
                 query=query,
@@ -656,11 +673,16 @@ class ProjectMemoryService:
                 limit=limit,
             )
         return MemorySearchResult(
-            hits=hits,
-            retrieval_mode="fts",
+            hits=outcome.hits,
+            retrieval_mode=outcome.mode,
             vector_available=False,
             vector_fallback="fts-only-internal-request-path",
             query_embedding_count=0,
+            substring_fallback=outcome.mode == "cjk-substring",
+            scan_limited=outcome.truncated,
+            timed_out=outcome.timed_out,
+            scanned_records=outcome.scanned,
+            query_clipped=outcome.query_clipped,
         )
 
     def get_injection_context(

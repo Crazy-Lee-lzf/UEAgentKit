@@ -5,6 +5,7 @@ import json
 import math
 import re
 import sqlite3
+import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -18,6 +19,17 @@ from .memory_schema import CURRENT_MEMORY_SCHEMA_VERSION, MEMORY_MIGRATIONS
 
 
 _MEMORY_ID_PATTERN = re.compile(r"^mem_[0-9a-f]{32}$")
+# FTS5 unicode61 treats a whole run of CJK ideographs as ONE token, so a
+# Chinese phrase/substring query can never match a longer run with MATCH.
+# A bounded literal substring fallback is used only when FTS returns no hits.
+_CJK_PATTERN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+_SUBSTRING_TERM_SPLIT = re.compile(r"[\s,，。;；:：!！?？、]+")
+MAX_SUBSTRING_TERMS = 8
+MAX_SUBSTRING_QUERY_CHARS = 200
+MAX_SUBSTRING_SCAN_RECORDS = 2_000
+MAX_SUBSTRING_SCAN_CEILING = 10_000
+MAX_SUBSTRING_CHUNK_RECORDS = 250
+DEFAULT_SUBSTRING_DEADLINE_MS = 120
 _CONFLICT_DETECTABLE_TYPES = {
     "projectFact",
     "projectRule",
@@ -153,6 +165,24 @@ class RevisionInvalidationResult:
 class MemorySearchHit:
     record: MemoryRecord
     rank: float
+
+
+@dataclass(frozen=True)
+class MemoryBoundedSearchOutcome:
+    """Result of a bounded search: FTS first, CJK literal substring fallback.
+
+    ``mode`` is ``fts`` or ``cjk-substring``. The fallback is intentionally
+    explicit so callers can report provenance instead of pretending the FTS
+    index matched.
+    """
+
+    hits: tuple[MemorySearchHit, ...]
+    mode: str
+    scanned: int = 0
+    scan_limit: int = 0
+    truncated: bool = False
+    timed_out: bool = False
+    query_clipped: bool = False
 
 
 _ALLOWED_STATUS_TRANSITIONS = {
@@ -1105,6 +1135,201 @@ def search_memory_records(
     ).fetchall()
     return tuple(
         MemorySearchHit(get_memory_record(connection, str(row[0])), float(row[1])) for row in rows
+    )
+
+
+def _contains_cjk(value: str) -> bool:
+    return bool(_CJK_PATTERN.search(value))
+
+
+def _substring_search_scan(
+    connection: sqlite3.Connection,
+    *,
+    project_key: str,
+    needles: Sequence[str],
+    record_types: Sequence[MemoryRecordType | str],
+    statuses: Sequence[MemoryStatus | str],
+    scope_type: MemoryScopeType | str | None,
+    scope_key: str,
+    limit: int,
+    scan_limit: int,
+    deadline_ms: int,
+) -> tuple[list[str], int, bool, bool]:
+    """Literal substring scan over a bounded window of the newest records.
+
+    The query never reaches SQL as a pattern: rows are fetched with keyset
+    pagination and matched in Python, so ``%``/``_`` have no wildcard meaning
+    and no user text is interpolated into SQL. Every term must appear (AND),
+    which keeps mixed Chinese/ASCII queries such as ``DT_ItemRarity 背包``
+    usable. ``scan_limit`` and ``deadline_ms`` are hard bounds checked between
+    chunks.
+    """
+    clauses = ["r.project_key = ?"]
+    parameters: list[Any] = [project_key]
+    if record_types:
+        normalized_types = [
+            _enum_value(value, MemoryRecordType, "record_types").value for value in record_types
+        ]
+        clauses.append("r.record_type IN (" + ",".join("?" for _ in normalized_types) + ")")
+        parameters.extend(normalized_types)
+    if statuses:
+        normalized_statuses = [
+            _enum_value(value, MemoryStatus, "statuses").value for value in statuses
+        ]
+        clauses.append("r.status IN (" + ",".join("?" for _ in normalized_statuses) + ")")
+        parameters.extend(normalized_statuses)
+    if scope_type is not None:
+        normalized_scope = _enum_value(scope_type, MemoryScopeType, "scope_type").value
+        scope_clause = (
+            "EXISTS (SELECT 1 FROM memory_scopes AS s "
+            "WHERE s.record_id = r.record_id AND s.scope_type = ?"
+        )
+        parameters.append(normalized_scope)
+        if scope_key:
+            scope_clause += " AND s.scope_key = ?"
+            parameters.append(_require_text(scope_key, "scope_key"))
+        scope_clause += ")"
+        clauses.append(scope_clause)
+    elif scope_key:
+        raise ValueError("scope_key requires scope_type.")
+    base_where = " AND ".join(clauses)
+
+    deadline = time.monotonic() + max(0, deadline_ms) / 1000.0
+    immediate_timeout = deadline_ms <= 0
+    matched: list[str] = []
+    scanned = 0
+    timed_out = False
+    truncated = False
+    cursor: tuple[str, str] | None = None
+    while not immediate_timeout and scanned < scan_limit and len(matched) < limit:
+        if time.monotonic() > deadline:
+            timed_out = True
+            break
+        chunk = min(MAX_SUBSTRING_CHUNK_RECORDS, scan_limit - scanned)
+        sql = (
+            "SELECT r.record_id, r.subject_key, r.title, r.body, r.updated_at_utc "
+            "FROM memory_records AS r WHERE " + base_where
+        )
+        chunk_parameters = list(parameters)
+        if cursor is not None:
+            sql += (
+                " AND (r.updated_at_utc < ? "
+                "OR (r.updated_at_utc = ? AND r.record_id < ?))"
+            )
+            chunk_parameters.extend([cursor[0], cursor[0], cursor[1]])
+        sql += " ORDER BY r.updated_at_utc DESC, r.record_id DESC LIMIT ?"
+        chunk_parameters.append(chunk)
+        rows = connection.execute(sql, chunk_parameters).fetchall()
+        if not rows:
+            break
+        for row in rows:
+            scanned += 1
+            haystack = f"{row[1]}\n{row[2]}\n{row[3]}".casefold()
+            if all(term in haystack for term in needles):
+                matched.append(str(row[0]))
+                if len(matched) >= limit:
+                    break
+        cursor = (str(rows[-1][4]), str(rows[-1][0]))
+        if len(matched) >= limit:
+            break
+        if len(rows) < chunk:
+            break
+    if immediate_timeout:
+        timed_out = True
+    if scanned >= scan_limit and len(matched) < limit:
+        truncated = True
+    return matched, scanned, truncated, timed_out
+
+
+def search_memory_records_bounded(
+    connection: sqlite3.Connection,
+    *,
+    project_key: str,
+    query: str,
+    record_types: Sequence[MemoryRecordType | str] = (),
+    statuses: Sequence[MemoryStatus | str] = (
+        MemoryStatus.VALID,
+        MemoryStatus.UNVERIFIED,
+        MemoryStatus.CONFLICTED,
+    ),
+    scope_type: MemoryScopeType | str | None = None,
+    scope_key: str = "",
+    limit: int = 20,
+    scan_limit: int = MAX_SUBSTRING_SCAN_RECORDS,
+    deadline_ms: int = DEFAULT_SUBSTRING_DEADLINE_MS,
+) -> MemoryBoundedSearchOutcome:
+    """FTS5 search with a bounded CJK literal-substring fallback.
+
+    FTS5's ``unicode61`` tokenizer stores a whole CJK run as a single token, so
+    Chinese phrases such as ``背包格子颜色`` cannot match a longer body run.
+    When (and only when) FTS returns no hit for a query containing CJK text, a
+    literal substring scan over the newest ``scan_limit`` records is used.
+
+    Safety boundaries:
+    * the FTS5 index must exist and match the schema, otherwise the call is
+      rejected instead of silently scanning the table;
+    * only records already filtered by project/type/status/scope are scanned;
+    * the scan is capped by record count and wall-clock deadline
+      (``deadline_ms=0`` disables the scan and reports ``timed_out``);
+    * the query is a literal (never a SQL LIKE pattern) and is length-capped;
+    * superseded/stale records stay excluded through the default statuses.
+    """
+    assert_memory_fts_available(connection)
+    if isinstance(scan_limit, bool) or not isinstance(scan_limit, int):
+        raise ValueError("scan_limit must be an integer.")
+    if scan_limit < 1 or scan_limit > MAX_SUBSTRING_SCAN_CEILING:
+        raise ValueError(f"scan_limit must be between 1 and {MAX_SUBSTRING_SCAN_CEILING}.")
+    if isinstance(deadline_ms, bool) or not isinstance(deadline_ms, int):
+        raise ValueError("deadline_ms must be an integer.")
+    if deadline_ms < 0:
+        raise ValueError("deadline_ms must not be negative.")
+    fts_hits = search_memory_records(
+        connection,
+        project_key=project_key,
+        query=query,
+        record_types=record_types,
+        statuses=statuses,
+        scope_type=scope_type,
+        scope_key=scope_key,
+        limit=limit,
+    )
+    if fts_hits:
+        return MemoryBoundedSearchOutcome(
+            hits=fts_hits,
+            mode="fts",
+            scan_limit=scan_limit,
+        )
+    normalized = _require_text(query, "query").strip()
+    if not _contains_cjk(normalized):
+        return MemoryBoundedSearchOutcome(hits=(), mode="fts", scan_limit=scan_limit)
+    clipped = len(normalized) > MAX_SUBSTRING_QUERY_CHARS
+    bounded_query = normalized[:MAX_SUBSTRING_QUERY_CHARS] if clipped else normalized
+    terms = [term for term in _SUBSTRING_TERM_SPLIT.split(bounded_query) if term]
+    needles = tuple(term.casefold() for term in (terms or [bounded_query])[:MAX_SUBSTRING_TERMS])
+    matched_ids, scanned, truncated, timed_out = _substring_search_scan(
+        connection,
+        project_key=project_key,
+        needles=needles,
+        record_types=record_types,
+        statuses=statuses,
+        scope_type=scope_type,
+        scope_key=scope_key,
+        limit=limit,
+        scan_limit=scan_limit,
+        deadline_ms=deadline_ms,
+    )
+    hits = tuple(
+        MemorySearchHit(get_memory_record(connection, record_id), 0.0)
+        for record_id in matched_ids
+    )
+    return MemoryBoundedSearchOutcome(
+        hits=hits,
+        mode="cjk-substring",
+        scanned=scanned,
+        scan_limit=scan_limit,
+        truncated=truncated,
+        timed_out=timed_out,
+        query_clipped=clipped,
     )
 
 
