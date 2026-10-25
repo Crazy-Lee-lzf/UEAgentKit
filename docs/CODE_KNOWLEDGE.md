@@ -8,9 +8,9 @@ Use the integrated workflow after the UEAgentKit Editor plugin is available to t
 
 ```powershell
 scripts\RunCodeKnowledge.ps1 `
-  -EngineRoot E:\EPICGAME\UE_5.6 `
-  -ProjectPath E:\Path\Project.uproject `
-  -Database E:\Path\ue_agent_kit.sqlite3
+  -EngineRoot "<UE_5.6>" `
+  -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject" `
+  -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
 ```
 
 The workflow performs, in order:
