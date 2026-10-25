@@ -1,54 +1,24 @@
 # Graph Layout Stage Preview — 2026-10-23
 
-This is a **Graph Layout stage checkpoint**, not UEAgentKit 0.9/1.0 and not a general
-production feature release.
+> This is a **development-stage preview record**, not a UE Agent Kit v0.9/1.0 release and not a production write authorization. The public v0.8.0 capability boundary remains documented in [Capability Status](../../docs/PROJECT_STATUS_EN.md).
 
-## Included
+## Scope of the experimental stage
 
-- Blueprint graph context/preflight contracts and a deterministic Python layout engine
-  (layered SCC ordering, comment framing, reroute handling, canonical LayoutPlan 1.0).
-- UE5.6.1 editor plugin (`UEAgentKitEditor`) with:
-  - read-only graph preflight/context export,
-  - a ToolMenus node/pin context entry **Auto Arrange (Preview)** in the disposable test host,
-  - an internal position-only Apply handler used by tests,
-  - selection and incremental scoped layout plans.
-- Python MCP graph-layout preview tooling and the contract/regression suites.
-- Disposable-host automation tests for menu generation, selection/incremental apply,
-  Undo/Redo, Save and independent reload.
+- Read-only Blueprint graph context and preflight export.
+- A deterministic Python layout-plan algorithm, including graph connectivity, reroute handling and bounded layout selection.
+- Test-only Editor menu Preview and position-only Apply validation using disposable UE5.6.1 projects.
+- An experimental MCP preview interface where explicitly registered.
 
-## Verified in this stage (headless)
+The above refers to a specific local development stage. It **does not** guarantee that these functions are present in the public release or enabled by default.
 
-- UE5.6.1 BuildPlugin succeeded; DLL
-  `sha256:7EB2DB917A355DD53BC8F95C7987507C824F4837929F1BB051DFDC8186CB8E6A`.
-- Real `UToolMenus::GenerateMenu` with real node and pin contexts contains the P11 entry; the
-  generated entry's action produces a read-only plan and a receipt with no save/compile/dirty.
-- Selection: scope 5 / moved 2, outside scope unchanged.
-- Incremental: scope 5 / moved 2, fixed nodes unchanged.
-- Undo/Redo/Save in both cases; strict no-op stays clean; a second process reload verifies
-  positions, topology and DLL.
-- Python suite in the release tree: see `C_LAYOUT_P11_EDITOR_SCOPE_ACCEPTANCE_REPORT_20261023.md`
-  and the P12 release record.
+## Safety boundaries
 
-## Safety gates (unchanged)
+General Blueprint Graph editing, rewiring, Save All and unrestricted position Apply remain unavailable. Test-only Apply requires exact project and asset identity, current Revision/fingerprint, a valid test build marker, and explicit confirmation; the preview itself must not save or change the asset.
 
-- Graph apply is **test-only**, gated by exact disposable project identity/marker and exact
-  asset/graph/revision; no production general Apply endpoint is exposed.
-- Reroute (knot) moves require exact pin type/link evidence; dangling/cyclic/mismatched knots
-  fail closed.
-- Comment frame movement remains fail-closed outside the disposable fixture proof.
-- No PIE/SIE/active-transaction/dirty/stale asset write is allowed.
-- No user Lyra/Reforge/production assets were modified in this stage.
+Dirty package, PIE/SIE, unsupported graph state, stale Revision and malformed reroute links must be rejected rather than guessed around.
 
-## Known limitations
+## Verification and limitations
 
-- The menu was verified through the UE ToolMenus API and a real generated action, **not** by a
-  human-visible click; a one-time manual GUI smoke test is still recommended before claiming
-  editor UX availability.
-- No Slate screenshot or minimized-window capture is claimed.
-- Layout quality/performance has rough edges: Full mode may move most nodes and is slower;
-  selection/incremental currently have one positive fixture example per mode.
-- Corpus coverage: 238 Blueprint assets scanned, 973 parseable graphs, 246 holdout,
-  969/973 production-layout valid; **0 graphs with >=100 content nodes**, so large-graph
-  behavior is not yet demonstrated on real samples.
-- The layout engine is Python; C++ native tool architecture is a future discussion, not part of
-  this stage.
+The original acceptance record describes headless UE5.6.1 automation of generated ToolMenus, selection/incremental layout, Undo/Redo and independent reload. Those results applied to **disposable test hosts**, not arbitrary user projects. They did not establish a manual end-user UI test or large-graph performance guarantee.
+
+See [Graph Layout Contracts](README.md) and the [MCP Server contract](../MCP_SERVER.md) for safe discovery of the current interface. Detailed internal test logs and approval records are retained outside the public release tree.

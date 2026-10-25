@@ -4,8 +4,8 @@ This module is the single source of truth for the request/response contract used
 by the offline broker, its client fixture, and the tests.  It intentionally does
 no I/O: validation is a pure transformation of JSON-compatible values.
 
-Design constraints carried from
-``spec/native-tools/N0_REVIEW_DECISIONS_AND_PREVIEW_MIGRATION.md``:
+The implementation enforces these bounded protocol constraints. The related
+experimental request schemas live under ``spec/native-tools/m2/``:
 
 * schema ``ueak.layoutbroker/1.0``, one JSON object per line, max 1 MiB;
 * the request carries identity (project, session, algorithm) and an inline

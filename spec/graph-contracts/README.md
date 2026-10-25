@@ -1,39 +1,30 @@
-# Graph contracts v1 — Graph Layout stage preview
+# Graph Layout Contracts — Experimental Preview
 
-Status: **stage checkpoint**, not a production write contract. It contains the accepted Graph
-Layout design decisions, the Python layout engine, the UE5.6 editor plugin, the read-only MCP
-preview tool, and the disposable-host automation evidence. General production Apply is not
-exposed.
+> **Status:** local development and test-only. Not part of the published UE Agent Kit v0.8.0 write surface. **No general production Blueprint Graph Apply endpoint is authorized.**
 
-## Documents
+## Purpose and available surfaces
 
-1. `D01_D13_USER_DECISIONS.md` — approved design decisions and explicit no-go boundaries.
-2. `G0_3_APPROVED_DELTA.md` — normative deltas relative to the candidate baseline.
-3. `G0_4_RUNTIME_ADAPTER.md` — runtime adapter notes.
-4. `C_LAYOUT_P11_EDITOR_SCOPE_ACCEPTANCE_REPORT_20261023.md` — final editor menu / selection /
-   incremental acceptance evidence, with the exact verification levels.
-5. `C_LAYOUT_P12_RELEASE_NOTES_20261023.md` — this stage's capabilities and limitations.
-6. `../LIVE_EDITOR_BRIDGE.md`, `../MCP_SERVER.md` — bridge and MCP surface documentation.
-7. `../../prototype/graph_contracts/` — offline candidate reference implementation, schemas and
-   fixtures. It is kept because the runtime regression tests import it for parity checks.
+Graph Layout uses a canonical plan to describe bounded, deterministic Blueprint node positions. The current experimental development tree includes read-only graph context/preflight and layout-plan preview paths. Their actual availability depends on the installed plugin, MCP tool registration, project identity and feature flags.
 
-## Tests
+For end users and AI agents, start with:
 
-Run from the repository root:
+- [AI Agent Quick Start](../../docs/AGENT_QUICKSTART_EN.md)
+- [MCP Server contract](../MCP_SERVER.md)
+- [Live Editor Bridge](../LIVE_EDITOR_BRIDGE.md)
 
-```powershell
-py -3.12 scripts\RunPythonTests.py full
-```
+Before calling a preview tool, query `ue_get_capabilities`. Do not infer that a method is available because its code or schema exists in the checkout.
 
-UE-side evidence was produced with `UnrealEditor-Cmd` automation on disposable projects
-(`Build/P7AutomationHost`, `P8AutomationHost`, `P9AutomationHost`, `P11AutomationHost`), which are
-not part of this repository.
+## Contracts and experimental reference implementation
 
-## Safety
+The experimental reference implementation and schema/fixtures are under [`prototype/graph_contracts/`](../../prototype/graph_contracts/). These files remain in the repository because tests import the reference implementation. They do **not** authorize arbitrary writes.
 
-- Graph layout apply is a test-only, exact-project/asset gated surface; do not treat the
-  disposable-host acceptance as general production permission.
-- Reroute (knot) moves require exact pin type/link evidence; dangling/cyclic/mismatched knots fail
-  closed. Comment frame movement remains fail-closed outside the disposable proof.
-- No production general Apply endpoint, no one-click auto-arrange for user projects.
-- The Python engine is authoritative for this stage; a C++ native tool architecture is future work.
+The read-only preview describes a proposed `LayoutPlan`; it does not save or apply graph positions. A disposable-project test-only Apply, where enabled, requires exact project, asset, revision/fingerprint and confirmation checks. Dirty/PIE/stale/cross-project requests fail closed. Reroute nodes and comment frames also have additional safety restrictions.
+
+## Compatibility and limitations
+
+- The public v0.8.0 release does not provide one-click auto-arrange or general Graph Node CRUD.
+- A local-only/default-off implementation must not be described as a broadly enabled feature.
+- The authoritative interface is the runtime capability list and matching Tool Schema, not historical milestone reports.
+- Internal design approvals, task handoffs and real-UE acceptance logs are maintained separately from public documentation.
+
+For offline regression testing without starting Unreal, use the repository Python test runner from a clean checkout. This is not a substitute for real Editor compatibility verification.
