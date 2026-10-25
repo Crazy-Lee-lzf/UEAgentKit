@@ -35,3 +35,10 @@ __pycache__/
 /docs/Plans/
 /docs/Handoffs/
 /prompts/
+
+# Internal R7 acceptance/run-state reports are preserved in UEAgentKit-Development.
+# Keep R7 protocol schemas and R7_MOUNT_CONTRACT.md tracked.
+/spec/memory-mount/R7_*_REPORT.md
+/spec/memory-mount/R7_*_RUNSTATE_*.md
+/spec/memory-mount/R7_*_READINESS.md
+/spec/memory-mount/R7_*_GATE_REVIEW.md
