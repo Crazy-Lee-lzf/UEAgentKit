@@ -14,6 +14,10 @@ For end users and AI agents, start with:
 
 Before calling a preview tool, query `ue_get_capabilities`. Do not infer that a method is available because its code or schema exists in the checkout.
 
+The default-off, explicitly opted-in MCP Apply/Save loop is documented in
+[Experimental MCP Apply](EXPERIMENTAL_MCP_APPLY.md). It is experimental and
+requires both a server flag and an Editor project config opt-in.
+
 ## Contracts and experimental reference implementation
 
 The experimental reference implementation and schema/fixtures are under [`prototype/graph_contracts/`](../../prototype/graph_contracts/). These files remain in the repository because tests import the reference implementation. They do **not** authorize arbitrary writes.

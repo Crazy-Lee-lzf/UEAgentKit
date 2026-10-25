@@ -54,6 +54,11 @@ from .mcp_live_action_tools import register_live_action_tools
 from .mcp_live_tools import GRAPH_CONTEXT_TOOL_NAME, register_live_read_tools
 from .mcp_graph_layout_test_only import register_graph_layout_test_only_tool
 from .mcp_graph_layout_p8_test_only import register_graph_layout_p8_test_only_tool
+from .mcp_graph_layout_experimental import register_graph_layout_experimental_tools
+from .experimental_graph_layout import (
+    APPLY_TOOL_NAME as EXPERIMENTAL_APPLY_TOOL_NAME,
+    SAVE_TOOL_NAME as EXPERIMENTAL_SAVE_TOOL_NAME,
+)
 from .p7_test_only import APPLY_TOOL_NAME, FIXED_ASSET_PATH, FIXED_PROJECT_PATH, is_fixed_project
 from .p8_test_only import (
     APPLY_TOOL_NAME as P8_APPLY_TOOL_NAME,
@@ -304,12 +309,26 @@ def _capabilities_response(
     *,
     p7_test_only_graph_layout_apply: bool = False,
     p8_test_only_graph_layout_apply: bool = False,
+    experimental_graph_layout_apply: bool = False,
+    live_editor_status: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     write_tools_enabled = workflow_service is not None
     commit_enabled = bool(workflow_service and workflow_service.config.commit_enabled)
     live_editor_enabled = live_editor_service is not None
     memory_enabled = memory_service is not None
     source_control_enabled = source_control_service is not None
+    experimental_registered = bool(live_editor_enabled and experimental_graph_layout_apply)
+    observed_capabilities = (
+        live_editor_status.get("capabilities")
+        if isinstance(live_editor_status, dict)
+        and live_editor_status.get("state") == "available"
+        else []
+    )
+    experimental_plugin_opt_in = bool(
+        isinstance(observed_capabilities, list)
+        and "editor.applyBlueprintGraphLayoutExperimental" in observed_capabilities
+        and "editor.saveBlueprintGraphLayoutExperimental" in observed_capabilities
+    )
     memory_status = memory_service.status() if memory_service is not None else None
     verification_evidence_status = (
         workflow_service.verification_evidence_store.status()
@@ -351,6 +370,24 @@ def _capabilities_response(
                     }
                 ]
                 if live_editor_enabled and p7_test_only_graph_layout_apply
+                else []
+            )
+            + (
+                [
+                    {
+                        "name": EXPERIMENTAL_APPLY_TOOL_NAME,
+                        "readOnly": False,
+                        "destructive": True,
+                        "experimental": True,
+                    },
+                    {
+                        "name": EXPERIMENTAL_SAVE_TOOL_NAME,
+                        "readOnly": False,
+                        "destructive": True,
+                        "experimental": True,
+                    },
+                ]
+                if live_editor_enabled and experimental_graph_layout_apply
                 else []
             )
         ),
@@ -540,6 +577,56 @@ def _capabilities_response(
                 "undoRedoVerifiedInCall": True,
                 "autoSave": False,
                 "requiresExplicitSeparateSave": True,
+            },
+            "experimentalGraphLayoutApply": {
+                "available": bool(experimental_registered and experimental_plugin_opt_in),
+                "registered": experimental_registered,
+                "pluginCapabilityObserved": experimental_plugin_opt_in,
+                "applyTool": EXPERIMENTAL_APPLY_TOOL_NAME
+                if experimental_registered
+                else "",
+                "saveTool": EXPERIMENTAL_SAVE_TOOL_NAME
+                if experimental_registered
+                else "",
+                "bridgeMethods": [
+                    "editor.applyBlueprintGraphLayoutExperimental",
+                    "editor.saveBlueprintGraphLayoutExperimental",
+                ]
+                if experimental_registered
+                else [],
+                "readOnly": False,
+                "destructive": True,
+                "experimental": True,
+                "productionDefault": False,
+                "productionEnabled": False,
+                "productionApprovalRequired": False,
+                "authorizationModel": (
+                    "project-level experimental opt-in plus exact per-call confirmation; "
+                    "this does not claim OwnerTrust/T10 production enablement"
+                ),
+                "explicitOptIn": {
+                    "serverFlag": "--enable-experimental-graph-layout-apply",
+                    "projectConfig": "[UEAgentKit] ExperimentalGraphLayoutApply=True",
+                    "requiresRunningEditorCapability": True,
+                },
+                "sourcePreviewTool": "ue_preview_blueprint_graph_layout",
+                "requiresCompletePreviewResult": True,
+                "acceptsCallerBuiltRequest": False,
+                "modes": ["full", "selection", "incremental"],
+                "exactFocusedGraphOnly": True,
+                "requiresCleanPackage": True,
+                "requiresPieStopped": True,
+                "requiresCurrentRevisionAndFingerprint": True,
+                "saveRequiresPostApplyGraphFingerprint": True,
+                "explicitApplyConfirmation": "APPLY EXPERIMENTAL LAYOUT <planId>",
+                "explicitSaveConfirmation": "SAVE EXPERIMENTAL LAYOUT <layoutHash>",
+                "undoRedoVerifiedInCall": True,
+                "singleTransaction": True,
+                "autoSave": False,
+                "requiresExplicitSeparateSave": True,
+                "saveReadback": "asset-sha256+live-layout-hash+package-revision",
+                "independentReloadVerified": False,
+                "maxRequestBytes": 61440,
             },
             "editorContext": {
                 "available": live_editor_enabled,
@@ -1409,6 +1496,7 @@ def create_mcp_server(
     audit_report_root: Path | None = None,
     p7_test_only_graph_layout_apply: bool = False,
     p8_test_only_graph_layout_apply: bool = False,
+    experimental_graph_layout_apply: bool = False,
 ):
     if FastMCP is None or ToolAnnotations is None:
         raise RuntimeError(
@@ -1477,6 +1565,8 @@ def create_mcp_server(
             raise ValueError(
                 "P8 test-only graph layout is restricted to the exact disposable P8AutomationHost project"
             )
+    if experimental_graph_layout_apply and live_editor_service is None:
+        raise ValueError("--enable-experimental-graph-layout-apply requires --enable-live-editor")
     server = FastMCP(
         MCP_SERVER_NAME,
         instructions=_server_instructions(
@@ -1509,6 +1599,12 @@ def create_mcp_server(
             source_control_service,
             p7_test_only_graph_layout_apply=p7_test_only_graph_layout_apply,
             p8_test_only_graph_layout_apply=p8_test_only_graph_layout_apply,
+            experimental_graph_layout_apply=experimental_graph_layout_apply,
+            live_editor_status=(
+                live.status()
+                if experimental_graph_layout_apply and live is not None
+                else None
+            ),
         ),
         project_status_response=lambda index, workflow, live: _project_status_response(
             index,
@@ -1605,6 +1701,17 @@ def create_mcp_server(
                 tool_annotations_type=ToolAnnotations,
                 error_response=_error_response,
             )
+        if experimental_graph_layout_apply:
+            register_graph_layout_experimental_tools(
+                server=server,
+                live_editor_service=live_editor_service,
+                tool_annotations_type=ToolAnnotations,
+                error_response=_error_response,
+            )
+            _enforce_strict_tool_arguments(
+                server,
+                (EXPERIMENTAL_APPLY_TOOL_NAME, EXPERIMENTAL_SAVE_TOOL_NAME),
+            )
     if workflow_service is not None:
         register_workflow_tools(
             server=server,
@@ -1654,6 +1761,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--enable-p8-test-only-graph-layout-apply",
         action="store_true",
         help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--enable-experimental-graph-layout-apply",
+        action="store_true",
+        help=(
+            "Opt in to the general experimental Blueprint graph-layout Apply/Save tools. "
+            "The running Editor project must also set "
+            "[UEAgentKit] ExperimentalGraphLayoutApply=True."
+        ),
     )
     parser.add_argument("--enable-source-control", action="store_true")
     parser.add_argument("--engine-root", type=Path)
@@ -1864,6 +1980,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
             p8_test_only_graph_layout_apply=bool(
                 getattr(args, "enable_p8_test_only_graph_layout_apply", False)
+            ),
+            experimental_graph_layout_apply=bool(
+                getattr(args, "enable_experimental_graph_layout_apply", False)
             ),
         )
         server.run(transport="stdio")

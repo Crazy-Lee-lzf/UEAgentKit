@@ -6,6 +6,7 @@
 #include "BlueprintGraphLayoutP7TestOnly.h"
 #include "BlueprintGraphLayoutP8TestOnly.h"
 #include "BlueprintGraphLayoutP9TestOnly.h"
+#include "BlueprintGraphLayoutExperimental.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Components/ActorComponent.h"
@@ -1036,6 +1037,58 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 				ErrorMessage);
 		}
 	}
+	else if (Method == TEXT("editor.applyBlueprintGraphLayoutExperimental"))
+	{
+		if (!UEAgentKitBlueprintGraphLayoutExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-layout-experimental-disabled"),
+				TEXT("Experimental graph layout apply is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintGraphLayoutExperimental::TryApplyExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.saveBlueprintGraphLayoutExperimental"))
+	{
+		if (!UEAgentKitBlueprintGraphLayoutExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-layout-experimental-disabled"),
+				TEXT("Experimental graph layout save is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintGraphLayoutExperimental::TrySaveExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
 	else if (Method == TEXT("editor.getEditorContext"))
 	{
 		SendResult(Client.Socket, RequestId, BuildEditorContextResult());
@@ -1921,6 +1974,13 @@ TArray<TSharedPtr<FJsonValue>> FUEAgentKitEditorBridge::BuildCapabilityValues() 
 	{
 		Values.Add(MakeShared<FJsonValueString>(UEAgentKitBlueprintGraphLayoutP9::ApplyMethod));
 		Values.Add(MakeShared<FJsonValueString>(UEAgentKitBlueprintGraphLayoutP9::SaveMethod));
+	}
+	if (UEAgentKitBlueprintGraphLayoutExperimental::IsExperimentalWriteAvailable())
+	{
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintGraphLayoutExperimental::ApplyMethod));
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintGraphLayoutExperimental::SaveMethod));
 	}
 	if (FNativeNodeRegistry::Get().IsAvailable())
 	{
