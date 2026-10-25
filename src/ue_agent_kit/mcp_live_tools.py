@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Literal
 
 from .editor_bridge import LiveEditorBridgeService, LiveEditorError
+
+MAX_GRAPH_CONTEXT_BYTES = 700 * 1024
+GRAPH_CONTEXT_TOOL_NAME = "ue_get_focused_blueprint_graph_context"
 
 
 def register_live_read_tools(
@@ -151,6 +155,44 @@ def register_live_read_tools(
             return live_editor_service.call_tool("ue_get_blueprint_graph_layout_preflight")
         except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
             return error_response("ue_get_blueprint_graph_layout_preflight", exc, read_only=True)
+
+    @server.tool(annotations=read_annotations)
+    def ue_get_focused_blueprint_graph_context() -> dict[str, Any]:
+        """Return the exact focused ordinary Blueprint graph canonical context, read-only, without opening or focusing assets."""
+        try:
+            payload = live_editor_service.call_tool(GRAPH_CONTEXT_TOOL_NAME)
+            result = payload.get("result")
+            if not isinstance(result, dict):
+                raise LiveEditorError(
+                    "live-editor-invalid-response",
+                    "The Editor Bridge returned an invalid graph context object.",
+                )
+            if result.get("available") is not True:
+                raise LiveEditorError(
+                    str(result.get("reasonCode") or "blueprint-graph-context-unavailable"),
+                    str(result.get("reason") or "No focused ordinary Blueprint graph is available."),
+                )
+            if result.get("readOnly") is not True:
+                raise LiveEditorError(
+                    "blueprint-graph-context-not-readonly",
+                    "The Editor Bridge did not mark the graph context as read-only.",
+                )
+            encoded = json.dumps(result, ensure_ascii=False, allow_nan=False).encode("utf-8")
+            if len(encoded) > MAX_GRAPH_CONTEXT_BYTES:
+                raise LiveEditorError(
+                    "blueprint-graph-context-too-large",
+                    "The focused graph context exceeds the 700 KiB read-only boundary.",
+                )
+            payload["writeAuthorized"] = False
+            payload["editorVerified"] = False
+            payload["contextOnly"] = True
+            return payload
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            response = error_response(GRAPH_CONTEXT_TOOL_NAME, exc, read_only=True)
+            response["writeAuthorized"] = False
+            response["editorVerified"] = False
+            response["contextOnly"] = True
+            return response
 
     from .mcp_graph_layout_preview import register_graph_layout_preview_tool
 

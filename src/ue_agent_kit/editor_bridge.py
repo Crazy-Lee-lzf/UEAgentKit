@@ -30,6 +30,7 @@ LIVE_LOG_VERBOSITIES = {
 
 _CAPABILITY_GATED_TOOLS = {
     "ue_get_editor_context": "editor.getEditorContext",
+    "ue_get_focused_blueprint_graph_context": "editor.getFocusedBlueprintGraphContext",
     "ue_start_batch_task": "editor.batchTask.start",
     "ue_get_batch_task": "editor.batchTask.status",
     "ue_cancel_batch_task": "editor.batchTask.cancel",

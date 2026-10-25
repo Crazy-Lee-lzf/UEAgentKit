@@ -51,7 +51,7 @@ from .impact_analysis import (
     UNSUPPORTED_SUBJECT_KINDS,
 )
 from .mcp_live_action_tools import register_live_action_tools
-from .mcp_live_tools import register_live_read_tools
+from .mcp_live_tools import GRAPH_CONTEXT_TOOL_NAME, register_live_read_tools
 from .mcp_graph_layout_test_only import register_graph_layout_test_only_tool
 from .mcp_graph_layout_p8_test_only import register_graph_layout_p8_test_only_tool
 from .p7_test_only import APPLY_TOOL_NAME, FIXED_ASSET_PATH, FIXED_PROJECT_PATH, is_fixed_project
@@ -1534,6 +1534,7 @@ def create_mcp_server(
             tool_annotations_type=ToolAnnotations,
             error_response=_error_response,
         )
+        _enforce_strict_tool_arguments(server, (GRAPH_CONTEXT_TOOL_NAME,))
         register_live_action_tools(
             server=server,
             live_editor_service=live_editor_service,
