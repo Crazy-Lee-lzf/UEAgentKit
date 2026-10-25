@@ -22,7 +22,9 @@
 #include "Internationalization/Regex.h"
 #include "Interfaces/IPluginManager.h"
 #include "K2Node_CallFunction.h"
+#include "BlueprintFunctionNodeSpawner.h"
 #include "BlueprintNodeSpawner.h"
+#include "Kismet/KismetMathLibrary.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Misc/AutomationTest.h"
@@ -1645,7 +1647,74 @@ bool FUEAgentKitNativeUntrustedSpawnerTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("unknown spawner reason"), Code, FString(TEXT("unknown-spawner")));
 	TestNull(TEXT("unknown spawner did not create a template"), Spawner->GetCachedTemplateNode());
 
-	AddInfo(FString::Printf(TEXT("untrustedSpawnerEvidence code=%s templateCached=%s"), *Code, Spawner->GetCachedTemplateNode() != nullptr ? TEXT("yes") : TEXT("no")));
+	// T10 negative: a real, valid spawner can be marked untrusted after its
+	// template is already cached.  The trust check must still run before any
+	// template API, so the cache entry is neither mutated nor replaced.
+	UFunction* AddIntInt = UKismetMathLibrary::StaticClass()->FindFunctionByName(TEXT("Add_IntInt"));
+	if (!TestNotNull(TEXT("T10 function exists"), AddIntInt))
+	{
+		return false;
+	}
+	UBlueprintFunctionNodeSpawner* CachedSpawner =
+		UBlueprintFunctionNodeSpawner::Create(AddIntInt, GetTransientPackage());
+	if (!TestNotNull(TEXT("T10 cached spawner exists"), CachedSpawner))
+	{
+		return false;
+	}
+	UEdGraphNode* CachedBefore = CachedSpawner->GetTemplateNode();
+	if (!TestNotNull(TEXT("T10 cached template exists"), CachedBefore))
+	{
+		return false;
+	}
+	const int32 DirtyBeforeCached = CountDirtyGamePackages();
+	FString CachedCode;
+	TestFalse(
+		TEXT("cached untrusted spawner is still rejected"),
+		Registry.DescribeSpawnerForAutomation(CachedSpawner, true, CachedCode));
+	TestEqual(TEXT("cached untrusted reason"), CachedCode, FString(TEXT("untrusted-spawner-excluded")));
+	const bool bCachedUnchanged = CachedSpawner->GetCachedTemplateNode() == CachedBefore;
+	TestTrue(
+		TEXT("cached untrusted template pointer is unchanged"),
+		bCachedUnchanged);
+	TestEqual(
+		TEXT("cached untrusted spawner does not dirty packages"),
+		CountDirtyGamePackages(),
+		DirtyBeforeCached);
+
+	// T10 budget negative: a valid official spawner with zero remaining
+	// template budget must fail closed and must not fall through to Invoke().
+	UBlueprintFunctionNodeSpawner* BudgetSpawner =
+		UBlueprintFunctionNodeSpawner::Create(AddIntInt, GetTransientPackage());
+	if (!TestNotNull(TEXT("T10 budget spawner exists"), BudgetSpawner))
+	{
+		return false;
+	}
+	// The function-spawner factory may have primed a cache entry; this negative
+	// needs a genuinely uncached spawner so the zero budget is exercised first.
+	BudgetSpawner->ClearCachedTemplateNode();
+	TestNull(TEXT("T10 budget spawner starts uncached"), BudgetSpawner->GetCachedTemplateNode());
+	const int32 DirtyBeforeBudget = CountDirtyGamePackages();
+	FString BudgetCode;
+	TestFalse(
+		TEXT("budget-exhausted official spawner is rejected"),
+		Registry.DescribeSpawnerForAutomation(BudgetSpawner, false, BudgetCode));
+	TestEqual(TEXT("budget-exhausted reason"), BudgetCode, FString(TEXT("template-budget-exceeded")));
+	TestNull(TEXT("budget-exhausted spawner did not create a template"), BudgetSpawner->GetCachedTemplateNode());
+	TestEqual(
+		TEXT("budget-exhausted spawner does not dirty packages"),
+		CountDirtyGamePackages(),
+		DirtyBeforeBudget);
+
+	AddInfo(FString::Printf(
+		TEXT("untrustedSpawnerEvidence code=%s templateCached=%s cachedUntrustedReason=%s cachedUnchanged=%s budgetReason=%s budgetTemplateCached=%s dirtyBefore=%d dirtyAfter=%d"),
+		*Code,
+		Spawner->GetCachedTemplateNode() != nullptr ? TEXT("yes") : TEXT("no"),
+		*CachedCode,
+		bCachedUnchanged ? TEXT("yes") : TEXT("no"),
+		*BudgetCode,
+		BudgetSpawner->GetCachedTemplateNode() != nullptr ? TEXT("yes") : TEXT("no"),
+		DirtyBeforeCached,
+		CountDirtyGamePackages()));
 	return true;
 }
 

@@ -5,6 +5,7 @@
 #include "BlueprintGraphLayoutP11Menu.h"
 #include "BlueprintGraphLayoutP9TestOnly.h"
 #include "NativePreviewMenuSettings.h"
+#include "Native/NativeGraphMenuBinding.h"
 #include "Native/NativeNodeRegistry.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
@@ -41,6 +42,14 @@ public:
 				GraphLayoutP11Menu = MakeShared<FUEAgentKitGraphLayoutP11Menu>(EditorBridge.Get());
 				GraphLayoutP11Menu->Startup();
 			}
+			// T7 is opt-in only in active mode.  Shadow deliberately has no UI;
+			// its read-only registry remains available through native.invoke.
+			if (FUEAgentKitNativeGraphMenu::IsModeEligible(NativeRegistry.GetMode())
+				&& NativeRegistry.IsAvailable())
+			{
+				NativeGraphMenu = MakeShared<FUEAgentKitNativeGraphMenu>();
+				NativeGraphMenu->Startup();
+			}
 		}
 	}
 
@@ -50,6 +59,11 @@ public:
 		{
 			GraphLayoutP11Menu->Shutdown();
 			GraphLayoutP11Menu.Reset();
+		}
+		if (NativeGraphMenu.IsValid())
+		{
+			NativeGraphMenu->Shutdown();
+			NativeGraphMenu.Reset();
 		}
 		if (GraphLayoutP9Menu.IsValid())
 		{
@@ -74,6 +88,7 @@ private:
 	TSharedPtr<FUEAgentKitGraphLayoutP8Menu> GraphLayoutP8Menu;
 	TSharedPtr<FUEAgentKitGraphLayoutP9Menu> GraphLayoutP9Menu;
 	TSharedPtr<FUEAgentKitGraphLayoutP11Menu> GraphLayoutP11Menu;
+	TSharedPtr<FUEAgentKitNativeGraphMenu> NativeGraphMenu;
 };
 
 IMPLEMENT_MODULE(FUEAgentKitEditorModule, UEAgentKitEditor)
