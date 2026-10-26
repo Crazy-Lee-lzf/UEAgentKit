@@ -8,6 +8,7 @@
 #include "BlueprintGraphLayoutP9TestOnly.h"
 #include "BlueprintGraphLayoutExperimental.h"
 #include "BlueprintGraphEditExperimental.h"
+#include "BlueprintPinDefaultEditExperimental.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Components/ActorComponent.h"
@@ -1184,6 +1185,84 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 				ErrorMessage);
 		}
 	}
+	else if (Method == TEXT("editor.previewBlueprintPinDefaultsExperimental"))
+	{
+		if (!UEAgentKitBlueprintPinDefaultExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-pin-default-experimental-disabled"),
+				TEXT("Experimental Blueprint pin default preview is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintPinDefaultExperimental::TryPreviewExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.applyBlueprintPinDefaultsExperimental"))
+	{
+		if (!UEAgentKitBlueprintPinDefaultExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-pin-default-experimental-disabled"),
+				TEXT("Experimental Blueprint pin default edit is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintPinDefaultExperimental::TryApplyExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.saveBlueprintPinDefaultsExperimental"))
+	{
+		if (!UEAgentKitBlueprintPinDefaultExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-pin-default-experimental-disabled"),
+				TEXT("Experimental Blueprint pin default Save is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintPinDefaultExperimental::TrySaveExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
 	else if (Method == TEXT("editor.getEditorContext"))
 	{
 		SendResult(Client.Socket, RequestId, BuildEditorContextResult());
@@ -2085,6 +2164,15 @@ TArray<TSharedPtr<FJsonValue>> FUEAgentKitEditorBridge::BuildCapabilityValues() 
 			UEAgentKitBlueprintGraphEditExperimental::ApplyMethod));
 		Values.Add(MakeShared<FJsonValueString>(
 			UEAgentKitBlueprintGraphEditExperimental::SaveMethod));
+	}
+	if (UEAgentKitBlueprintPinDefaultExperimental::IsExperimentalWriteAvailable())
+	{
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintPinDefaultExperimental::PreviewMethod));
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintPinDefaultExperimental::ApplyMethod));
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintPinDefaultExperimental::SaveMethod));
 	}
 	if (FNativeNodeRegistry::Get().IsAvailable())
 	{
