@@ -1396,10 +1396,10 @@ class IndexQueryService:
                 offset = 0
                 max_output_tokens = normalize_output_token_budget(max_output_tokens)
 
-            status = world_index_v2.world_status(connection, world=world, limit=limit)
+            status = world_index_v2.world_status(connection, world=world, limit=limit, offset=offset)
             rows = status["worlds"]
-            page = rows[offset : offset + limit]
-            has_more = (offset + len(page)) < len(rows) or status["worldsTruncated"]
+            page = rows  # World status already applied SQL pagination.
+            has_more = status["worldsTruncated"]
             continuation = ""
             if has_more:
                 continuation = self._continuations.issue(
@@ -1419,6 +1419,7 @@ class IndexQueryService:
                     "worldIndexAvailable": status["schemaAvailable"],
                     "world": world,
                     "coverage": status["coverage"],
+                    "coverageScope": status["coverageScope"],
                     "complete": status["complete"],
                     "targetFound": status["targetFound"],
                     "indexBuild": status["indexBuild"],
@@ -1427,7 +1428,7 @@ class IndexQueryService:
                         "limit": limit,
                         "offset": offset,
                         "resultCount": len(page),
-                        "total": len(rows),
+                        "total": status["totalWorlds"],
                         "hasMore": has_more,
                         "mayHaveMore": has_more,
                         "continuationToken": continuation,

@@ -1969,6 +1969,7 @@ def world_status(
     *,
     world: str = "",
     limit: int = MAX_WORLD_STATUS_ENTRIES,
+    offset: int = 0,
 ) -> dict[str, Any]:
     """Freshness/coverage for one map filter or for the whole world index.
 
@@ -1979,6 +1980,7 @@ def world_status(
 
     filter_text = str(world or "").strip()
     limit = max(1, min(int(limit), MAX_WORLD_STATUS_ENTRIES))
+    offset = max(0, int(offset))
     build = index_build_status(connection)
 
     if not world_schema_present(connection):
@@ -2000,6 +2002,8 @@ def world_status(
             "complete": False,
             "worlds": [],
             "worldsTruncated": False,
+            "totalWorlds": 0,
+            "coverageScope": "page",
             "indexBuild": build,
             "warnings": unavailable_warnings,
         }
@@ -2027,20 +2031,27 @@ def world_status(
                 "complete": False,
                 "worlds": [],
                 "worldsTruncated": False,
+                "totalWorlds": 0,
+                "coverageScope": "page",
                 "indexBuild": build,
                 "warnings": [
                     f"No indexed asset or world matches {filter_text!r}; the map is not in this "
                     "index, so an empty actor list is not evidence that the map is empty."
                 ],
             }
-        truncated = False
+        total_worlds = len(candidates)
+        candidates = candidates[offset : offset + limit]
+        truncated = offset + len(candidates) < total_worlds
     else:
+        total_worlds = int(connection.execute(
+            "SELECT COUNT(*) FROM world_v2_worlds"
+        ).fetchone()[0])
         rows = connection.execute(
-            "SELECT asset_path FROM world_v2_worlds ORDER BY asset_path LIMIT ?", (limit + 1,)
+            "SELECT asset_path FROM world_v2_worlds ORDER BY asset_path LIMIT ? OFFSET ?",
+            (limit, offset),
         ).fetchall()
         candidates = [str(row[0]) for row in rows]
-        truncated = len(candidates) > limit
-        candidates = candidates[:limit]
+        truncated = offset + len(candidates) < total_worlds
 
     entries: list[dict[str, Any]] = []
     for asset_path in candidates:
@@ -2070,11 +2081,13 @@ def world_status(
     return {
         "schemaAvailable": True,
         "assetPathFilter": filter_text,
-        "targetFound": bool(entries),
+        "targetFound": total_worlds > 0,
+        "coverageScope": "page" if offset or truncated else "all-returned",
         "coverage": coverage,
         "complete": bool(entries) and all(entry["complete"] for entry in entries),
         "worlds": entries,
         "worldsTruncated": truncated,
+        "totalWorlds": total_worlds,
         "indexBuild": build,
         "warnings": warnings[:32],
     }

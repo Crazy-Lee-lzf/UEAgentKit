@@ -724,6 +724,51 @@ class WorldMcpToolTests(WorldMcpIntegrationTestCase):
         self.assertTrue(any("not a World Partition map" in x for x in result["warnings"]))
         self.assertIs(result["worldStatus"]["worlds"][0]["worldPartitionAvailable"], False)
 
+    def test_world_summary_paginates_75_worlds_without_empty_token_loop(self) -> None:
+        documents = []
+        for index in range(75):
+            document = json.loads(json.dumps(self.world))
+            if index:
+                package = f"/Game/UEAgentKitTests/Maps/L_Page_{index:03d}"
+                name = f"L_Page_{index:03d}"
+                document["packageName"] = package
+                document["assetName"] = name
+                document["assetPath"] = f"{package}.{name}"
+                # The copied fixture retains its actor graph shape; unique asset
+                # identity is all this World-summary pagination test needs.
+                document["symbols"] = []
+                document["references"] = []
+            documents.append(document)
+        result = self.build(documents=documents)
+        self.assertEqual(result.failed, 0)
+        self.server = create_mcp_server(self.db)
+
+        expected = {document["assetPath"] for document in documents}
+        seen = set()
+        token = ""
+        for page_index in range(20):
+            arguments = {"limit": 7} if not token else {"continuation_token": token}
+            payload = self.call("ue_get_world_summary", arguments)
+            self.assertTrue(payload["ok"], payload)
+            pagination = payload["pagination"]
+            self.assertEqual(pagination["total"], 75)
+            self.assertEqual(pagination["offset"], len(seen))
+            self.assertEqual(payload["coverageScope"], "page")
+            page = payload["results"]
+            self.assertTrue(page, "a hasMore page must never be empty")
+            self.assertLessEqual(len(page), 7)
+            for entry in page:
+                self.assertNotIn(entry["assetPath"], seen)
+                seen.add(entry["assetPath"])
+            token = pagination["continuationToken"]
+            if not pagination["hasMore"]:
+                self.assertFalse(token)
+                break
+            self.assertTrue(token)
+        else:
+            self.fail("World summary continuation failed to terminate")
+        self.assertEqual(seen, expected)
+
     def test_partition_and_summary_tools(self) -> None:
         partitions = self.call(
             "ue_find_world_partition_actors", {"world": WORLD_ASSET, "tag": "Lighting"}

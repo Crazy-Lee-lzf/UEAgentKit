@@ -258,6 +258,8 @@ nodes
 
 ### `ue_get_world_summary`
 
+规模化地图分页：pagination.total 为实际匹配的地图总数；offset 与 continuationToken 基于数据库分页前进，禁止空页无限循环。未指定精确地图时，coverageScope=page 表示 coverage/complete 仅反映当前页，不能据此推断整个工程的世界索引全部完整。
+
 返回地图级覆盖摘要（不返回 Actor 明细）：每张地图的 `coverage`、`assetRevision`/`worldRevision`、`assetIndexedAtUtc`/`worldIngestedAtUtc`、`partial`、截断计数、`actorRows`/`actorDescRows`、`warnings`，以及全局 `indexBuild`。`world` 为空时列出所有已索引地图（`limit` 1..64，可用 `continuation_token` 翻页）；`world` 指向未索引地图时返回 `coverage=unknown-map`、`targetFound=false`，而不是空成功。
 
 ### `ue_get_task_context`
