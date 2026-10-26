@@ -33,7 +33,10 @@ Legend:
 | Existing unlinked K2 input-pin default edit, bool/int/double/string only | **Experimental** | Exact node GUID + pin name + pin GUID; strict canonical encodings; one transaction with in-call Undo/Redo verification | P1 complete |
 | Plan-bound pin-default Save | **Experimental** | Separate gate bound to the Apply receipt, post-Apply graph and pin-default-state fingerprints, exact node/link counts, dirty package, disk SHA-256 readback | P1 complete |
 | Cross-process reload of edited pin defaults | **Supported (read verification)** | Fresh-process commandlet verifies the four typed defaults, pin GUIDs, exact node set, exact link set and saved asset SHA-256 | P1 complete |
-| Create variables / change pin types / rewire existing pins | **Unsupported** | Pin defaults on existing unlinked inputs are the only pin-level mutation; no variable or link write path | P1 |
+| Create top-level member variables, bool/int/double/string only | **Experimental** | Exact focused, already-saved Blueprint; strict ASCII name rules; duplicate and inherited-name rejection; engine-standard variable description and flags; one transaction with in-call Undo/Redo readback | P2 complete |
+| Plan-bound variable-creation Save | **Experimental** | Separate gate bound to the variable Apply receipt, post-Apply variable-state fingerprint, on-disk revision and exact variable count; pending default strings written to disk | P2 complete |
+| Cross-process reload of created variables | **Supported (read verification)** | Fresh-process commandlet verifies variable GUIDs, declared types, pending or generated-class-CDO default values, exact variable/node/link sets and saved asset SHA-256 | P2 complete |
+| Change pin types / rewire existing pins / rename or delete variables | **Unsupported** | Variable creation only appends new top-level variables; nothing is renamed, retyped or removed | P2 |
 | Delete nodes / disconnect links | **Unsupported** | Deliberately excluded from this slice | P1 |
 | Arbitrary GraphPatch live apply | **Unsupported** | `ue_preview_graph_patch` is **Offline-only**; no Editor transaction/save | P1 |
 | Nested-subgraph live edit | **Unsupported** | Read/discovery only; exact focused graph write currently top-level graph path | P1 |
@@ -58,21 +61,52 @@ Legend:
   post-Apply fingerprint/counts; it cannot save an unrelated dirty package edit.
 - Python and native code both reject unknown parameters, node types, pins, types,
   duplicate target pins, and over-limit plans.
-- No deletion, disconnection, variable mutation, pin creation, or default
-  mutation outside the bounded four-type input-pin path, arbitrary GraphPatch,
+- Variable creation appends only top-level member variables to the exact focused,
+  already-saved Blueprint: strict ASCII names, 1-8 variables per plan, four
+  primitive types, no containers, by-ref, const, weak or composite types.
+- Variable Plan ID binds asset path, focused graph GUID, on-disk package
+  SHA-256, graph fingerprint, the before variable-state fingerprint (GUID, name,
+  type, default, flags) and the canonical target list.
+- Variable Apply is one `FScopedTransaction` on `UBlueprint::NewVariables`; it
+  sets the engine-standard flags (`CPF_Edit | CPF_BlueprintVisible |
+  CPF_DisableEditOnInstance`), friendly name, category, replication condition
+  and string `MultiLine` metadata, and proves exact before/after Undo/Redo state.
+- Variable Apply intentionally does not call
+  `FBlueprintEditorUtils::AddMemberVariable`: that engine API synchronously
+  regenerates the edited Blueprint's skeleton class and can rewrite child
+  Blueprint variables. This slice never compiles, never regenerates a skeleton,
+  and never saves another asset.
+- Variable Save requires the per-process Apply receipt, the post-Apply variable
+  fingerprint, the same on-disk package revision and the exact variable count; it
+  never compiles.
+- UE 5.6 stores `FBPVariableDescription::DefaultValue` as a compile-time transfer
+  field: the first compile copies it onto the generated-class CDO property and
+  clears the string. This slice saves the pending string without compiling; the
+  independent reload proves the effective persisted defaults through the
+  generated-class CDO after the engine's own load-time compile, and reports
+  which source proved each value.
+- No deletion, disconnection, pin creation, variable rename/retype/removal, or
+  default mutation outside the bounded four-type paths, arbitrary GraphPatch,
   auto-save, or compile in this slice.
 
 ## Known limits / handoff
 
 - Save receipts are per-Editor-process; after an Editor restart, Save must follow
   a new Apply in that process.
-- Pin-default Save receipts are also per-Editor-process and are consumed by the
-  exact Save plan.
+- Pin-default and variable-creation Save receipts are both per-Editor-process
+  and are consumed by the exact Save plan.
 - The pin-default slice edits defaults only; it cannot add variables, add or
   remove nodes, change pin types, or rewire links.
+- The variable slice appends top-level member variables only. It cannot create
+  function-local variables, rename, retype or delete existing variables, add
+  variable nodes, change pin types, or rewire links.
+- Creating a variable leaves the generated class intentionally stale until an
+  explicit later compile; this slice never compiles, and the Blueprint is saved
+  in a pending-compile state that UE materializes on the next editor compile.
 - Save readback cannot compensate a failure that happens after `SavePackage`
   has already replaced the file; such failures are reported, not hidden.
-- The independent reload verifies structure GUIDs/edges and saved bytes; it is
-  not a second write capability.
-- Nested-subgraph writes, variable edits, pin creation/retyping,
-  delete/disconnect, and live GraphPatch apply remain follow-up work.
+- The independent reload verifies structure GUIDs/edges, variable identity,
+  defaults and saved bytes; it is not a second write capability.
+- Nested-subgraph writes, variable rename/retype/removal, pin
+  creation/retyping, delete/disconnect, and live GraphPatch apply remain
+  follow-up work.
