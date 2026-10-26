@@ -60,10 +60,16 @@ from .mcp_graph_edit_experimental import register_graph_edit_experimental_tools
 from .mcp_pin_default_edit_experimental import register_pin_default_edit_experimental_tools
 from .mcp_variable_write_experimental import register_variable_write_experimental_tools
 from .mcp_rewire_write_experimental import register_rewire_write_experimental_tools
+from .mcp_node_remove_write_experimental import register_node_remove_write_experimental_tools
 from .experimental_rewire_write import (
     APPLY_TOOL_NAME as EXPERIMENTAL_REWIRE_APPLY_TOOL_NAME,
     PREVIEW_TOOL_NAME as EXPERIMENTAL_REWIRE_PREVIEW_TOOL_NAME,
     SAVE_TOOL_NAME as EXPERIMENTAL_REWIRE_SAVE_TOOL_NAME,
+)
+from .experimental_node_remove_write import (
+    APPLY_TOOL_NAME as EXPERIMENTAL_NODE_REMOVE_APPLY_TOOL_NAME,
+    PREVIEW_TOOL_NAME as EXPERIMENTAL_NODE_REMOVE_PREVIEW_TOOL_NAME,
+    SAVE_TOOL_NAME as EXPERIMENTAL_NODE_REMOVE_SAVE_TOOL_NAME,
 )
 from .experimental_variable_write import (
     APPLY_TOOL_NAME as EXPERIMENTAL_VARIABLE_APPLY_TOOL_NAME,
@@ -384,6 +390,13 @@ def _capabilities_response(
         and "editor.applyBlueprintRewireExperimental" in observed_capabilities
         and "editor.saveBlueprintRewireExperimental" in observed_capabilities
     )
+    node_remove_write_registered = bool(live_editor_enabled and experimental_graphpatch_edit)
+    node_remove_write_plugin_opt_in = bool(
+        isinstance(observed_capabilities, list)
+        and "editor.previewBlueprintNodeRemoveExperimental" in observed_capabilities
+        and "editor.applyBlueprintNodeRemoveExperimental" in observed_capabilities
+        and "editor.saveBlueprintNodeRemoveExperimental" in observed_capabilities
+    )
     memory_status = memory_service.status() if memory_service is not None else None
     verification_evidence_status = (
         workflow_service.verification_evidence_store.status()
@@ -533,6 +546,30 @@ def _capabilities_response(
                     },
                     {
                         "name": EXPERIMENTAL_REWIRE_SAVE_TOOL_NAME,
+                        "readOnly": False,
+                        "destructive": False,
+                        "experimental": True,
+                    },
+                ]
+                if live_editor_enabled and experimental_graphpatch_edit
+                else []
+            )
+            + (
+                [
+                    {
+                        "name": EXPERIMENTAL_NODE_REMOVE_PREVIEW_TOOL_NAME,
+                        "readOnly": True,
+                        "destructive": False,
+                        "experimental": True,
+                    },
+                    {
+                        "name": EXPERIMENTAL_NODE_REMOVE_APPLY_TOOL_NAME,
+                        "readOnly": False,
+                        "destructive": True,
+                        "experimental": True,
+                    },
+                    {
+                        "name": EXPERIMENTAL_NODE_REMOVE_SAVE_TOOL_NAME,
                         "readOnly": False,
                         "destructive": False,
                         "experimental": True,
@@ -1047,6 +1084,107 @@ def _capabilities_response(
                 "explicitSaveConfirmation": "SAVE EXPERIMENTAL BLUEPRINT REWIRE <planId>",
                 "saveRequiresPostApplyEdgeHashRevisionAndCounts": True,
                 "undoRedoVerifiedInCall": True,
+                "singleTransaction": True,
+                "autoSave": False,
+                "compiled": False,
+                "skeletonRegenerated": False,
+                "requiresExplicitSeparateSave": True,
+                "maxRequestBytes": 61440,
+            },
+            "experimentalBlueprintNodeRemove": {
+                "available": bool(
+                    node_remove_write_registered and node_remove_write_plugin_opt_in
+                ),
+                "registered": node_remove_write_registered,
+                "pluginCapabilityObserved": node_remove_write_plugin_opt_in,
+                "previewTool": EXPERIMENTAL_NODE_REMOVE_PREVIEW_TOOL_NAME
+                if node_remove_write_registered
+                else "",
+                "applyTool": EXPERIMENTAL_NODE_REMOVE_APPLY_TOOL_NAME
+                if node_remove_write_registered
+                else "",
+                "saveTool": EXPERIMENTAL_NODE_REMOVE_SAVE_TOOL_NAME
+                if node_remove_write_registered
+                else "",
+                "bridgeMethods": [
+                    "editor.previewBlueprintNodeRemoveExperimental",
+                    "editor.applyBlueprintNodeRemoveExperimental",
+                    "editor.saveBlueprintNodeRemoveExperimental",
+                ]
+                if node_remove_write_registered
+                else [],
+                "readOnlyPreview": True,
+                "destructiveApply": True,
+                "experimental": True,
+                "productionDefault": False,
+                "productionEnabled": False,
+                "productionApprovalRequired": False,
+                "authorizationModel": (
+                    "project-level experimental opt-in plus exact per-call confirmation; "
+                    "this deletes exactly one allowlisted deterministic node from one "
+                    "exact focused top-level K2 event graph"
+                ),
+                "explicitOptIn": {
+                    "serverFlag": "--enable-experimental-graphpatch-edit",
+                    "projectConfig": "[UEAgentKit] ExperimentalGraphPatchEdit=True",
+                    "requiresRunningEditorCapability": True,
+                },
+                "requiresCompletePreviewResult": True,
+                "acceptsCallerBuiltRequest": False,
+                "maxNodesPerPlan": 1,
+                "maxIncidentEdges": 1,
+                "removableNodeClasses": [
+                    "/Script/BlueprintGraph.K2Node_CallFunction",
+                    "/Script/BlueprintGraph.K2Node_IfThenElse",
+                ],
+                "removableFunctions": [
+                    "Add_IntInt",
+                    "BooleanAND",
+                    "BooleanOR",
+                    "EqualEqual_BoolBool",
+                    "Greater_IntInt",
+                    "Not_PreBool",
+                ],
+                "rejectedNodeClasses": [
+                    "EdGraphNode_Comment",
+                    "K2Node_Event",
+                    "K2Node_CustomEvent",
+                    "K2Node_Timeline",
+                    "K2Node_Knot",
+                    "K2Node_Tunnel",
+                    "K2Node_MacroInstance",
+                    "K2Node_VariableGet",
+                    "K2Node_VariableSet",
+                    "K2Node_ExecutionSequence",
+                    "unknown custom classes",
+                ],
+                "supportedPinKinds": ["exec", "bool", "int", "double", "string"],
+                "rejectedPinTraits": [
+                    "wildcard",
+                    "delegate",
+                    "container",
+                    "by-reference",
+                    "const",
+                    "weak-pointer",
+                    "struct-or-object",
+                    "hidden",
+                    "orphaned",
+                    "split",
+                ],
+                "singleNodeOnly": True,
+                "explicitRemovedEdgesRequired": True,
+                "bindsExactNodeClass": True,
+                "bindsExactNodeAndPinGuids": True,
+                "bindsExactEdgeSetHash": True,
+                "bindsNodePinIdentityHashes": True,
+                "untouchedEdgesPreserved": True,
+                "neverBreakAllPinLinks": True,
+                "refusesUnplannedLinks": True,
+                "explicitApplyConfirmation": "REMOVE EXPERIMENTAL BLUEPRINT NODE <planId>",
+                "explicitSaveConfirmation": "SAVE EXPERIMENTAL BLUEPRINT NODE REMOVE <planId>",
+                "saveRequiresPostApplyHashesRevisionAndCounts": True,
+                "undoRedoVerifiedInCall": True,
+                "undoRestoresNodeAndLinks": True,
                 "singleTransaction": True,
                 "autoSave": False,
                 "compiled": False,
@@ -2238,6 +2376,20 @@ def create_mcp_server(
                     EXPERIMENTAL_REWIRE_PREVIEW_TOOL_NAME,
                     EXPERIMENTAL_REWIRE_APPLY_TOOL_NAME,
                     EXPERIMENTAL_REWIRE_SAVE_TOOL_NAME,
+                ),
+            )
+            register_node_remove_write_experimental_tools(
+                server=server,
+                live_editor_service=live_editor_service,
+                tool_annotations_type=ToolAnnotations,
+                error_response=_error_response,
+            )
+            _enforce_strict_tool_arguments(
+                server,
+                (
+                    EXPERIMENTAL_NODE_REMOVE_PREVIEW_TOOL_NAME,
+                    EXPERIMENTAL_NODE_REMOVE_APPLY_TOOL_NAME,
+                    EXPERIMENTAL_NODE_REMOVE_SAVE_TOOL_NAME,
                 ),
             )
     if workflow_service is not None:
