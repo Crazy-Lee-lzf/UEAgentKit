@@ -2,6 +2,7 @@
 
 #include "BlueprintContextExporter.h"
 #include "BlueprintContextSha256.h"
+#include "BlueprintGraphDiscovery.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
 #include "Dom/JsonObject.h"
@@ -38,11 +39,7 @@
 
 namespace BlueprintContextAnalysisPrivate
 {
-	struct FGraphEntry
-	{
-		UEdGraph* Graph = nullptr;
-		FString Kind;
-	};
+	using FGraphEntry = FBlueprintContextGraphEntry;
 
 	FString GuidToString(const FGuid& Guid)
 	{
@@ -241,34 +238,7 @@ namespace BlueprintContextAnalysisPrivate
 		const FString& GraphFilter,
 		TArray<FGraphEntry>& OutGraphs)
 	{
-		if (!Blueprint)
-		{
-			return;
-		}
-
-		TSet<UEdGraph*> AddedGraphs;
-		auto AddGraphs = [&](const TArray<TObjectPtr<UEdGraph>>& SourceGraphs, const FString& Kind)
-		{
-			for (UEdGraph* Graph : SourceGraphs)
-			{
-				if (!Graph || AddedGraphs.Contains(Graph))
-				{
-					continue;
-				}
-				if (!GraphFilter.IsEmpty() && !Graph->GetName().Equals(GraphFilter, ESearchCase::IgnoreCase))
-				{
-					continue;
-				}
-
-				AddedGraphs.Add(Graph);
-				OutGraphs.Add({ Graph, Kind });
-			}
-		};
-
-		AddGraphs(Blueprint->UbergraphPages, TEXT("uber"));
-		AddGraphs(Blueprint->FunctionGraphs, TEXT("function"));
-		AddGraphs(Blueprint->MacroGraphs, TEXT("macro"));
-		AddGraphs(Blueprint->DelegateSignatureGraphs, TEXT("delegate-signature"));
+		UEAgentKitGraphDiscovery::CollectBlueprintGraphs(Blueprint, GraphFilter, OutGraphs);
 	}
 
 	TSharedRef<FJsonObject> MakeSymbol(
@@ -932,6 +902,11 @@ void FBlueprintContextAnalysis::BuildSymbolsAndReferences(
 			TSharedRef<FJsonObject> Symbol = MakeSymbol(Id, TEXT("graph"), Name, AssetPath);
 			Symbol->SetStringField(TEXT("guid"), GuidToString(Graph->GraphGuid));
 			Symbol->SetStringField(TEXT("graphKind"), Entry.Kind);
+			Symbol->SetStringField(TEXT("graphPath"), Graph->GetPathName());
+			if (!Entry.ParentGraphName.IsEmpty())
+			{
+				Symbol->SetStringField(TEXT("parentGraphName"), Entry.ParentGraphName);
+			}
 			const FString DelegateOwnerSymbolId = Entry.Kind == TEXT("delegate-signature")
 				? DelegateIdByName.FindRef(Graph->GetFName())
 				: FString();
