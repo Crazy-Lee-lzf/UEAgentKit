@@ -78,8 +78,15 @@ if (!$SkipEditorProcessCheck)
 
 $AssetFile = $null
 $ContentRoot = Join-Path (Split-Path -Parent $ProjectPath) "Content"
-$AssetLeaf = ($Asset -split "/")[-1]
-$PackagePath = $Asset -replace "^/", "" -replace "\.", "/"
+# -Asset is normally a package path (/Game/Folder/Asset), and callers may also
+# pass the object path (/Game/Folder/Asset.Asset). UE's /Game mount maps to
+# <Project>/Content, so strip the mount point before resolving the .uasset.
+$PackagePath = ($Asset -split "\.")[0].TrimStart("/")
+if ($PackagePath -match "^Game/")
+{
+    $PackagePath = $PackagePath.Substring("Game/".Length)
+}
+$AssetLeaf = ($PackagePath -split "/")[-1]
 $PackagePath = ($PackagePath -split "/")[0..(($PackagePath -split "/").Length - 2)] -join "/"
 $AssetFile = Join-Path (Join-Path $ContentRoot $PackagePath) ($AssetLeaf + ".uasset")
 Assert-UeakPath -Path $AssetFile -Description "saved .uasset" -PathType File
