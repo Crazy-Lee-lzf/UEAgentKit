@@ -57,11 +57,17 @@ from .mcp_graph_layout_test_only import register_graph_layout_test_only_tool
 from .mcp_graph_layout_p8_test_only import register_graph_layout_p8_test_only_tool
 from .mcp_graph_layout_experimental import register_graph_layout_experimental_tools
 from .mcp_graph_edit_experimental import register_graph_edit_experimental_tools
+from .mcp_pin_default_edit_experimental import register_pin_default_edit_experimental_tools
 from .experimental_graph_edit import (
     APPLY_TOOL_NAME as EXPERIMENTAL_GRAPH_EDIT_APPLY_TOOL_NAME,
     PREVIEW_TOOL_NAME as EXPERIMENTAL_GRAPH_EDIT_PREVIEW_TOOL_NAME,
     SAVE_TOOL_NAME as EXPERIMENTAL_GRAPH_EDIT_SAVE_TOOL_NAME,
     GraphEditError,
+)
+from .experimental_pin_default_edit import (
+    APPLY_TOOL_NAME as EXPERIMENTAL_PIN_DEFAULT_APPLY_TOOL_NAME,
+    PREVIEW_TOOL_NAME as EXPERIMENTAL_PIN_DEFAULT_PREVIEW_TOOL_NAME,
+    SAVE_TOOL_NAME as EXPERIMENTAL_PIN_DEFAULT_SAVE_TOOL_NAME,
 )
 from .experimental_graph_layout import (
     APPLY_TOOL_NAME as EXPERIMENTAL_APPLY_TOOL_NAME,
@@ -345,6 +351,13 @@ def _capabilities_response(
         and "editor.applyBlueprintGraphEditExperimental" in observed_capabilities
         and "editor.saveBlueprintGraphEditExperimental" in observed_capabilities
     )
+    pin_default_registered = bool(live_editor_enabled and experimental_graphpatch_edit)
+    pin_default_plugin_opt_in = bool(
+        isinstance(observed_capabilities, list)
+        and "editor.previewBlueprintPinDefaultsExperimental" in observed_capabilities
+        and "editor.applyBlueprintPinDefaultsExperimental" in observed_capabilities
+        and "editor.saveBlueprintPinDefaultsExperimental" in observed_capabilities
+    )
     memory_status = memory_service.status() if memory_service is not None else None
     verification_evidence_status = (
         workflow_service.verification_evidence_store.status()
@@ -422,6 +435,30 @@ def _capabilities_response(
                     },
                     {
                         "name": EXPERIMENTAL_GRAPH_EDIT_SAVE_TOOL_NAME,
+                        "readOnly": False,
+                        "destructive": False,
+                        "experimental": True,
+                    },
+                ]
+                if live_editor_enabled and experimental_graphpatch_edit
+                else []
+            )
+            + (
+                [
+                    {
+                        "name": EXPERIMENTAL_PIN_DEFAULT_PREVIEW_TOOL_NAME,
+                        "readOnly": True,
+                        "destructive": False,
+                        "experimental": True,
+                    },
+                    {
+                        "name": EXPERIMENTAL_PIN_DEFAULT_APPLY_TOOL_NAME,
+                        "readOnly": False,
+                        "destructive": True,
+                        "experimental": True,
+                    },
+                    {
+                        "name": EXPERIMENTAL_PIN_DEFAULT_SAVE_TOOL_NAME,
                         "readOnly": False,
                         "destructive": False,
                         "experimental": True,
@@ -739,6 +776,71 @@ def _capabilities_response(
                 "maxNodes": 16,
                 "maxConnections": 24,
                 "maxConnectionsPerNode": 8,
+                "maxRequestBytes": 61440,
+            },
+            "experimentalPinDefaultEdit": {
+                "available": bool(pin_default_registered and pin_default_plugin_opt_in),
+                "registered": pin_default_registered,
+                "pluginCapabilityObserved": pin_default_plugin_opt_in,
+                "previewTool": EXPERIMENTAL_PIN_DEFAULT_PREVIEW_TOOL_NAME
+                if pin_default_registered
+                else "",
+                "applyTool": EXPERIMENTAL_PIN_DEFAULT_APPLY_TOOL_NAME
+                if pin_default_registered
+                else "",
+                "saveTool": EXPERIMENTAL_PIN_DEFAULT_SAVE_TOOL_NAME
+                if pin_default_registered
+                else "",
+                "bridgeMethods": [
+                    "editor.previewBlueprintPinDefaultsExperimental",
+                    "editor.applyBlueprintPinDefaultsExperimental",
+                    "editor.saveBlueprintPinDefaultsExperimental",
+                ]
+                if pin_default_registered
+                else [],
+                "readOnlyPreview": True,
+                "destructiveApply": True,
+                "experimental": True,
+                "productionDefault": False,
+                "productionEnabled": False,
+                "productionApprovalRequired": False,
+                "authorizationModel": (
+                    "project-level experimental opt-in plus exact per-call confirmation; "
+                    "this edits only existing unlinked input pin defaults"
+                ),
+                "explicitOptIn": {
+                    "serverFlag": "--enable-experimental-graphpatch-edit",
+                    "projectConfig": "[UEAgentKit] ExperimentalGraphPatchEdit=True",
+                    "requiresRunningEditorCapability": True,
+                },
+                "requiresCompletePreviewResult": True,
+                "acceptsCallerBuiltRequest": False,
+                "supportedPinTypes": ["bool", "int", "double", "string"],
+                "strictDefaultEncoding": {
+                    "bool": "true|false",
+                    "int": "canonical signed 32-bit decimal",
+                    "double": "canonical finite decimal without exponent",
+                    "string": "at most 1024 non-control characters; empty allowed",
+                },
+                "existingInputPinsOnly": True,
+                "requiresUnlinkedPin": True,
+                "rejectsHiddenReadOnlyIgnoredContainerByRef": True,
+                "requiresExactNodePinAndPinGuidIdentity": True,
+                "exactFocusedGraphOnly": True,
+                "requiresCleanPackage": True,
+                "requiresPieStopped": True,
+                "requiresCurrentRevisionAndFingerprint": True,
+                "requiresPinDefaultStateFingerprint": True,
+                "explicitApplyConfirmation": "SET EXPERIMENTAL BLUEPRINT PIN DEFAULTS <planId>",
+                "explicitSaveConfirmation": "SAVE EXPERIMENTAL BLUEPRINT PIN DEFAULTS <planId>",
+                "saveRequiresPostApplyGraphAndDefaultFingerprints": True,
+                "saveRequiresExactNodeAndLinkCounts": True,
+                "undoRedoVerifiedInCall": True,
+                "singleTransaction": True,
+                "autoSave": False,
+                "requiresExplicitSeparateSave": True,
+                "maxDefaults": 16,
+                "maxStringLength": 1024,
                 "maxRequestBytes": 61440,
             },
             "editorContext": {
@@ -1883,6 +1985,20 @@ def create_mcp_server(
                     EXPERIMENTAL_GRAPH_EDIT_PREVIEW_TOOL_NAME,
                     EXPERIMENTAL_GRAPH_EDIT_APPLY_TOOL_NAME,
                     EXPERIMENTAL_GRAPH_EDIT_SAVE_TOOL_NAME,
+                ),
+            )
+            register_pin_default_edit_experimental_tools(
+                server=server,
+                live_editor_service=live_editor_service,
+                tool_annotations_type=ToolAnnotations,
+                error_response=_error_response,
+            )
+            _enforce_strict_tool_arguments(
+                server,
+                (
+                    EXPERIMENTAL_PIN_DEFAULT_PREVIEW_TOOL_NAME,
+                    EXPERIMENTAL_PIN_DEFAULT_APPLY_TOOL_NAME,
+                    EXPERIMENTAL_PIN_DEFAULT_SAVE_TOOL_NAME,
                 ),
             )
     if workflow_service is not None:
