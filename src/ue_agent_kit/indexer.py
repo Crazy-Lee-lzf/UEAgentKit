@@ -533,6 +533,28 @@ def build_index(
     successful_entries = [entry for entry in manifest_assets if entry.get("success")]
     if int(manifest.get("successCount", 0)) != len(successful_entries):
         result.errors.append("Manifest successCount does not match successful asset entries.")
+    declared_failures = int(manifest.get("failureCount", 0) or 0)
+    actual_failures = len(manifest_assets) - len(successful_entries)
+    if declared_failures != actual_failures:
+        result.errors.append(
+            "Manifest failureCount does not match failed asset entries "
+            f"({declared_failures} != {actual_failures})."
+        )
+    if actual_failures:
+        result.errors.append(
+            f"Export contains {actual_failures} failed asset(s); the index is incomplete for this export."
+        )
+    declared_reader_failures = int(manifest.get("readerFailureCount", 0) or 0)
+    failed_reader_entries = [
+        entry
+        for entry in manifest_assets
+        if str(entry.get("assetReaderStatus", "")).strip().lower() == "failed"
+    ]
+    if declared_reader_failures != len(failed_reader_entries):
+        result.errors.append(
+            "Manifest readerFailureCount does not match entries with a failed reader "
+            f"({declared_reader_failures} != {len(failed_reader_entries)})."
+        )
 
     for entry in successful_entries:
         asset_path = str(entry.get("assetPath", ""))
@@ -554,6 +576,21 @@ def build_index(
             if effective_project_key and canonical_project_key and canonical_project_key != effective_project_key:
                 raise ValueError(
                     f"Canonical projectName '{canonical_project_key}' does not match project key '{effective_project_key}'."
+                )
+            canonical_reader_status = str(canonical.get("assetReaderStatus", "")).strip().lower()
+            manifest_reader_status = str(entry.get("assetReaderStatus", "")).strip().lower()
+            if canonical_reader_status == "failed" or manifest_reader_status == "failed":
+                reader_name = str(canonical.get("assetReader", "") or entry.get("assetReader", ""))
+                reader_error = str(canonical.get("assetReaderError", "") or entry.get("assetReaderError", ""))
+                raise ValueError(
+                    "Specialized reader failed; refusing to index incomplete details "
+                    f"(reader={reader_name or '<unknown>'} error={reader_error or '<empty>'})"
+                )
+            if canonical_reader_status == "success" and not canonical.get("assetDetails"):
+                reader_name = str(canonical.get("assetReader", "") or entry.get("assetReader", ""))
+                raise ValueError(
+                    "Specialized reader reported success but assetDetails is empty; refusing to index "
+                    f"registry-only data as complete (reader={reader_name or '<unknown>'})"
                 )
             bpctx_path = _find_bpctx_path(export_root, entry, canonical_path)
             canonical_sha256 = _sha256(canonical_path)

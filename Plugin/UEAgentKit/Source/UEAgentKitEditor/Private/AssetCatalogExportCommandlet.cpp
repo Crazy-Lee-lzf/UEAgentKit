@@ -460,13 +460,22 @@ namespace AssetCatalogExportPrivate
 			return false;
 		}
 
-		OutResult.bSuccess = true;
+		OutResult.bSuccess = ReaderStatus != EAssetReaderStatus::Failed;
 		OutResult.TagCount = TagCount;
 		OutResult.ReferenceCount = References.Num();
 		OutResult.ReaderName = ReaderName;
 		OutResult.ReaderStatus = FAssetReaderRegistry::StatusToString(ReaderStatus);
 		OutResult.ReaderError = ReaderError;
-		return true;
+		if (!OutResult.bSuccess)
+		{
+			// The Canonical JSON is still written for diagnosis, but a failed
+			// specialized reader must never be advertised as a successful asset:
+			// downstream import would otherwise index registry-only data as complete.
+			OutResult.Error = ReaderError.IsEmpty()
+				? TEXT("Specialized asset reader failed; asset details are incomplete.")
+				: FString::Printf(TEXT("Specialized asset reader failed: %s"), *ReaderError);
+		}
+		return OutResult.bSuccess;
 	}
 
 	bool SaveManifest(
