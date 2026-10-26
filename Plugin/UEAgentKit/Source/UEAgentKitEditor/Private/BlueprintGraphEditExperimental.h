@@ -7,25 +7,30 @@ class FJsonObject;
 /**
  * Explicitly opted-in, bounded Blueprint graph structure edit.
  *
- * This is the first vertical create/connect slice.  It is not enabled by
- * default, is not a general GraphPatch executor, and has no Python, console or
- * arbitrary command fallback.  The exact Editor project must opt in with:
+ * This is a create/connect slice with deterministic node/schema contracts.  It
+ * is not enabled by default, is not a general GraphPatch executor, and has no
+ * Python, console or arbitrary command fallback.  The exact Editor project must
+ * opt in with:
  *
  *     [UEAgentKit]
  *     ExperimentalGraphPatchEdit=True
  *
- * The only supported nodes are Branch (K2Node_IfThenElse) and Sequence
- * (K2Node_ExecutionSequence), and the only supported connections are exec
- * connections from a supported output pin to a supported node's execute input.
+ * Supported nodes are Branch, Sequence, Boolean NOT/OR, integer add/equal,
+ * double add and string concat.  Supported connections are exact exec or exact
+ * bool/int/double/string data links; one output may fan out to distinct inputs.
  * Every call still requires the exact focused Blueprint graph, clean package,
  * stopped PIE/SIE, current revision and graph fingerprint, one
- * FScopedTransaction, exact readback, and Undo/Redo verification.
+ * FScopedTransaction, exact readback, and Undo/Redo verification.  Save is a
+ * separate explicit gate bound to the Apply plan, post-Apply fingerprint and
+ * exact node/link counts.
  */
 namespace UEAgentKitBlueprintGraphEditExperimental
 {
 	const TCHAR* const PreviewMethod = TEXT("editor.previewBlueprintGraphEditExperimental");
 	const TCHAR* const ApplyMethod = TEXT("editor.applyBlueprintGraphEditExperimental");
+	const TCHAR* const SaveMethod = TEXT("editor.saveBlueprintGraphEditExperimental");
 	const TCHAR* const ApplyConfirmationPrefix = TEXT("CREATE EXPERIMENTAL GRAPH NODES ");
+	const TCHAR* const SaveConfirmationPrefix = TEXT("SAVE EXPERIMENTAL GRAPH NODES ");
 
 	/** True only when the current project set the experimental opt-in flag. */
 	bool IsExperimentalWriteAvailable();
@@ -39,6 +44,13 @@ namespace UEAgentKitBlueprintGraphEditExperimental
 
 	/** Apply the exact previewed plan to the exact focused graph. */
 	bool TryApplyExperimental(
+		const TSharedPtr<FJsonObject>& Params,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage);
+
+	/** Explicit Save of the exact package produced by the preceding Apply. */
+	bool TrySaveExperimental(
 		const TSharedPtr<FJsonObject>& Params,
 		TSharedPtr<FJsonObject>& OutResult,
 		FString& OutErrorCode,

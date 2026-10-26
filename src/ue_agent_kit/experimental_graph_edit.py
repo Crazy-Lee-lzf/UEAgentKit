@@ -13,17 +13,21 @@ from typing import Any
 
 PREVIEW_TOOL_NAME = "ue_preview_blueprint_graph_edit_experimental"
 APPLY_TOOL_NAME = "ue_apply_blueprint_graph_edit_experimental"
+SAVE_TOOL_NAME = "ue_save_blueprint_graph_edit_experimental"
 PREVIEW_CAPABILITY = "editor.previewBlueprintGraphEditExperimental"
 APPLY_CAPABILITY = "editor.applyBlueprintGraphEditExperimental"
+SAVE_CAPABILITY = "editor.saveBlueprintGraphEditExperimental"
 PREVIEW_METHOD = "editor.previewBlueprintGraphEditExperimental"
 APPLY_METHOD = "editor.applyBlueprintGraphEditExperimental"
+SAVE_METHOD = "editor.saveBlueprintGraphEditExperimental"
 APPLY_CONFIRMATION_PREFIX = "CREATE EXPERIMENTAL GRAPH NODES "
+SAVE_CONFIRMATION_PREFIX = "SAVE EXPERIMENTAL GRAPH NODES "
 
 PREVIEW_SCHEMA_VERSION = "ueak.graphpatch-edit-preview/1.0"
 MAX_REQUEST_BYTES = 60 * 1024
-MAX_NODES = 8
-MAX_CONNECTIONS = 12
-MAX_CONNECTIONS_PER_NODE = 6
+MAX_NODES = 16
+MAX_CONNECTIONS = 24
+MAX_CONNECTIONS_PER_NODE = 8
 MAX_COORDINATE = 100_000
 
 NODE_TYPES = {
@@ -49,10 +53,52 @@ NODE_TYPES = {
         "inputPinTypes": {"A": "bool"},
         "outputPinTypes": {"ReturnValue": "bool"},
     },
+    "bool_or": {
+        "nodeClass": "/Script/BlueprintGraph.K2Node_CallFunction",
+        "function": "KismetMathLibrary.BooleanOR",
+        "inputPins": ("A", "B"),
+        "outputPins": ("ReturnValue",),
+        "inputPinTypes": {"A": "bool", "B": "bool"},
+        "outputPinTypes": {"ReturnValue": "bool"},
+    },
+    "int_add": {
+        "nodeClass": "/Script/BlueprintGraph.K2Node_CallFunction",
+        "function": "KismetMathLibrary.Add_IntInt",
+        "inputPins": ("A", "B"),
+        "outputPins": ("ReturnValue",),
+        "inputPinTypes": {"A": "int", "B": "int"},
+        "outputPinTypes": {"ReturnValue": "int"},
+    },
+    "int_equal": {
+        "nodeClass": "/Script/BlueprintGraph.K2Node_CallFunction",
+        "function": "KismetMathLibrary.EqualEqual_IntInt",
+        "inputPins": ("A", "B"),
+        "outputPins": ("ReturnValue",),
+        "inputPinTypes": {"A": "int", "B": "int"},
+        "outputPinTypes": {"ReturnValue": "bool"},
+    },
+    "double_add": {
+        "nodeClass": "/Script/BlueprintGraph.K2Node_CallFunction",
+        "function": "KismetMathLibrary.Add_DoubleDouble",
+        "inputPins": ("A", "B"),
+        "outputPins": ("ReturnValue",),
+        "inputPinTypes": {"A": "double", "B": "double"},
+        "outputPinTypes": {"ReturnValue": "double"},
+    },
+    "string_concat": {
+        "nodeClass": "/Script/BlueprintGraph.K2Node_CallFunction",
+        "function": "KismetStringLibrary.Concat_StrStr",
+        "inputPins": ("A", "B"),
+        "outputPins": ("ReturnValue",),
+        "inputPinTypes": {"A": "string", "B": "string"},
+        "outputPinTypes": {"ReturnValue": "string"},
+    },
 }
+
 
 _TEMP_ID = re.compile(r"^tmp:[A-Za-z0-9_-]{1,36}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
+_SHA1 = re.compile(r"^sha1:[0-9a-f]{40}$")
 
 
 class GraphEditError(Exception):
@@ -159,7 +205,6 @@ def validate_preview_parameters(
 
     by_id = {node["tempId"]: node for node in normalized_nodes}
     normalized_connections: list[dict[str, str]] = []
-    seen_sources: set[tuple[str, str]] = set()
     seen_targets: set[tuple[str, str]] = set()
     connection_counts: dict[str, int] = {}
     for index, raw in enumerate(connections):
@@ -211,19 +256,12 @@ def validate_preview_parameters(
                 f"Cannot connect {source}.{source_pin} ({source_type}) to "
                 f"{target}.{target_pin} ({target_type}); data kinds must match exactly.",
             )
-        source_key = (source, source_pin)
-        if source_key in seen_sources:
-            raise GraphEditError(
-                "graph-edit-connection-duplicate",
-                f"Output pin already has a connection in this plan: {source}.{source_pin}.",
-            )
         target_key = (target, target_pin)
         if target_key in seen_targets:
             raise GraphEditError(
                 "graph-edit-connection-duplicate",
                 f"Input pin already has a connection in this plan: {target}.{target_pin}.",
             )
-        seen_sources.add(source_key)
         seen_targets.add(target_key)
         for temp_id in (source, target):
             connection_counts[temp_id] = connection_counts.get(temp_id, 0) + 1
@@ -420,3 +458,83 @@ def build_apply_parameters(preview: Any, confirmation: Any) -> dict[str, Any]:
         "planId": normalized["planId"],
         "confirmation": confirmation,
     }
+
+
+def save_confirmation_for_plan(plan_id: str) -> str:
+    return SAVE_CONFIRMATION_PREFIX + plan_id
+
+
+def validate_save_parameters(
+    *,
+    asset_path: Any,
+    graph_guid: Any,
+    plan_id: Any,
+    expected_graph_fingerprint: Any,
+    expected_node_count: Any,
+    expected_link_count: Any,
+    confirmation: Any,
+) -> dict[str, Any]:
+    """Validate the exact post-Apply Save tuple before calling the Editor."""
+
+    normalized_asset = _string(asset_path, "assetPath", maximum=512)
+    normalized_graph = _string(graph_guid, "graphGuid", maximum=64)
+    normalized_plan = _string(plan_id, "planId", maximum=80)
+    if _SHA256.fullmatch(normalized_plan) is None:
+        raise GraphEditError(
+            "graph-edit-invalid-parameters",
+            "planId must be one canonical sha256 plan hash.",
+        )
+    normalized_fingerprint = _string(
+        expected_graph_fingerprint,
+        "expectedGraphFingerprint",
+        maximum=45,
+    )
+    if _SHA1.fullmatch(normalized_fingerprint) is None:
+        raise GraphEditError(
+            "graph-edit-invalid-parameters",
+            "expectedGraphFingerprint must be one canonical sha1 graph fingerprint.",
+        )
+    for value, label in (
+        (expected_node_count, "expectedNodeCount"),
+        (expected_link_count, "expectedLinkCount"),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise GraphEditError(
+                "graph-edit-invalid-parameters",
+                f"{label} must be a non-negative integer.",
+            )
+    expected_confirmation = save_confirmation_for_plan(normalized_plan)
+    if not isinstance(confirmation, str) or confirmation != expected_confirmation:
+        raise GraphEditError(
+            "graph-edit-confirmation-required",
+            f"Explicit Save confirmation must be exactly {expected_confirmation}.",
+        )
+    return {
+        "assetPath": normalized_asset,
+        "graphGuid": normalized_graph,
+        "planId": normalized_plan,
+        "expectedGraphFingerprint": normalized_fingerprint,
+        "expectedNodeCount": expected_node_count,
+        "expectedLinkCount": expected_link_count,
+        "confirmation": confirmation,
+    }
+
+
+def build_save_parameters(apply_result: Any, confirmation: Any) -> dict[str, Any]:
+    """Derive the exact Save tuple only from a successful Apply result."""
+
+    item = _object(apply_result, "applyResult")
+    if item.get("applied") is not True or item.get("saved") is True:
+        raise GraphEditError(
+            "graph-edit-save-requires-apply",
+            "Save requires the exact successful Apply result before it.",
+        )
+    return validate_save_parameters(
+        asset_path=item.get("assetPath"),
+        graph_guid=item.get("graphGuid"),
+        plan_id=item.get("planId"),
+        expected_graph_fingerprint=item.get("graphFingerprintAfter"),
+        expected_node_count=item.get("nodeCountAfter"),
+        expected_link_count=item.get("linkCountAfter"),
+        confirmation=confirmation,
+    )

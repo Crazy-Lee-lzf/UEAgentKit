@@ -16,7 +16,11 @@
 #include "K2Node_ExecutionSequence.h"
 #include "K2Node_IfThenElse.h"
 #include "Kismet/KismetMathLibrary.h"
+#include "Kismet/KismetStringLibrary.h"
 #include "ScopedTransaction.h"
+#include "HAL/FileManager.h"
+#include "Misc/PackageName.h"
+#include "UObject/SavePackage.h"
 
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -28,9 +32,9 @@ DEFINE_LOG_CATEGORY_STATIC(LogUEAgentKitGraphEditExperimental, Log, All);
 
 namespace
 {
-	constexpr int32 MaxNodes = 8;
-	constexpr int32 MaxConnections = 12;
-	constexpr int32 MaxConnectionsPerNode = 6;
+	constexpr int32 MaxNodes = 16;
+	constexpr int32 MaxConnections = 24;
+	constexpr int32 MaxConnectionsPerNode = 8;
 	constexpr int32 MaxCoordinate = 100000;
 	const TCHAR* const PreviewSchemaVersion = TEXT("ueak.graphpatch-edit-preview/1.0");
 	const TCHAR* const BranchClassPath = TEXT("/Script/BlueprintGraph.K2Node_IfThenElse");
@@ -76,6 +80,19 @@ namespace
 		TArray<FConnectionSpec> Connections;
 		TSharedPtr<FJsonObject> Preview;
 	};
+
+	struct FApplyReceipt
+	{
+		FString AssetPath;
+		FString GraphGuid;
+		FString GraphFingerprint;
+		int32 NodeCount = 0;
+		int32 LinkCount = 0;
+	};
+
+	// Save is only valid for an Apply completed in this same Editor session.
+	// The receipt is the authority for plan -> post-Apply graph binding.
+	TMap<FString, FApplyReceipt> RecentApplies;
 
 	bool Fail(
 		FString& OutErrorCode,
@@ -198,6 +215,22 @@ namespace
 		return true;
 	}
 
+	bool IsSha1(const FString& Value)
+	{
+		if (!Value.StartsWith(TEXT("sha1:"), ESearchCase::CaseSensitive) || Value.Len() != 45)
+		{
+			return false;
+		}
+		for (int32 Index = 5; Index < Value.Len(); ++Index)
+		{
+			if (!FChar::IsHexDigit(Value[Index]))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
 	bool ConfigureNodeType(
 		const FString& NodeType,
 		FNodeSpec& OutNode,
@@ -235,11 +268,66 @@ namespace
 			OutNode.OutputPinTypes.Add(TEXT("ReturnValue"), TEXT("bool"));
 			return true;
 		}
+		if (NodeType == TEXT("bool_or"))
+		{
+			OutNode.NodeClassPath = CallFunctionClassPath;
+			OutNode.FunctionName = TEXT("BooleanOR");
+			OutNode.InputPins = { TEXT("A"), TEXT("B") };
+			OutNode.OutputPins = { TEXT("ReturnValue") };
+			OutNode.InputPinTypes.Add(TEXT("A"), TEXT("bool"));
+			OutNode.InputPinTypes.Add(TEXT("B"), TEXT("bool"));
+			OutNode.OutputPinTypes.Add(TEXT("ReturnValue"), TEXT("bool"));
+			return true;
+		}
+		if (NodeType == TEXT("int_add"))
+		{
+			OutNode.NodeClassPath = CallFunctionClassPath;
+			OutNode.FunctionName = TEXT("Add_IntInt");
+			OutNode.InputPins = { TEXT("A"), TEXT("B") };
+			OutNode.OutputPins = { TEXT("ReturnValue") };
+			OutNode.InputPinTypes.Add(TEXT("A"), TEXT("int"));
+			OutNode.InputPinTypes.Add(TEXT("B"), TEXT("int"));
+			OutNode.OutputPinTypes.Add(TEXT("ReturnValue"), TEXT("int"));
+			return true;
+		}
+		if (NodeType == TEXT("int_equal"))
+		{
+			OutNode.NodeClassPath = CallFunctionClassPath;
+			OutNode.FunctionName = TEXT("EqualEqual_IntInt");
+			OutNode.InputPins = { TEXT("A"), TEXT("B") };
+			OutNode.OutputPins = { TEXT("ReturnValue") };
+			OutNode.InputPinTypes.Add(TEXT("A"), TEXT("int"));
+			OutNode.InputPinTypes.Add(TEXT("B"), TEXT("int"));
+			OutNode.OutputPinTypes.Add(TEXT("ReturnValue"), TEXT("bool"));
+			return true;
+		}
+		if (NodeType == TEXT("double_add"))
+		{
+			OutNode.NodeClassPath = CallFunctionClassPath;
+			OutNode.FunctionName = TEXT("Add_DoubleDouble");
+			OutNode.InputPins = { TEXT("A"), TEXT("B") };
+			OutNode.OutputPins = { TEXT("ReturnValue") };
+			OutNode.InputPinTypes.Add(TEXT("A"), TEXT("double"));
+			OutNode.InputPinTypes.Add(TEXT("B"), TEXT("double"));
+			OutNode.OutputPinTypes.Add(TEXT("ReturnValue"), TEXT("double"));
+			return true;
+		}
+		if (NodeType == TEXT("string_concat"))
+		{
+			OutNode.NodeClassPath = CallFunctionClassPath;
+			OutNode.FunctionName = TEXT("Concat_StrStr");
+			OutNode.InputPins = { TEXT("A"), TEXT("B") };
+			OutNode.OutputPins = { TEXT("ReturnValue") };
+			OutNode.InputPinTypes.Add(TEXT("A"), TEXT("string"));
+			OutNode.InputPinTypes.Add(TEXT("B"), TEXT("string"));
+			OutNode.OutputPinTypes.Add(TEXT("ReturnValue"), TEXT("string"));
+			return true;
+		}
 		return Fail(
 			OutErrorCode,
 			OutErrorMessage,
 			TEXT("graph-edit-node-type-not-allowed"),
-			TEXT("Only nodeType 'branch', 'sequence' and 'not_bool' are supported by this experimental slice."));
+			TEXT("Supported nodeTypes: branch, sequence, not_bool, bool_or, int_add, int_equal, double_add, string_concat."));
 	}
 
 	const FNodeSpec* FindNode(const TArray<FNodeSpec>& Nodes, const FString& TempId)
@@ -348,7 +436,6 @@ namespace
 				FString::Printf(TEXT("connections may contain at most %d entries."), MaxConnections));
 		}
 
-		TSet<FString> SeenSources;
 		TSet<FString> SeenTargets;
 		TMap<FString, int32> ConnectionCounts;
 		for (const TSharedPtr<FJsonValue>& Value : *Values)
@@ -440,15 +527,6 @@ namespace
 						*Connection.ToPin,
 						**ToType));
 			}
-			const FString SourceKey = Connection.From + TEXT("|") + Connection.FromPin;
-			if (SeenSources.Contains(SourceKey))
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("graph-edit-connection-duplicate"),
-					FString::Printf(TEXT("Output pin already has a connection in this plan: %s"), *SourceKey));
-			}
 			const FString TargetKey = Connection.To + TEXT("|") + Connection.ToPin;
 			if (SeenTargets.Contains(TargetKey))
 			{
@@ -458,7 +536,6 @@ namespace
 					TEXT("graph-edit-connection-duplicate"),
 					FString::Printf(TEXT("Input pin already has a connection in this plan: %s"), *TargetKey));
 			}
-			SeenSources.Add(SourceKey);
 			SeenTargets.Add(TargetKey);
 			for (const FString& TempId : { Connection.From, Connection.To })
 			{
@@ -768,7 +845,30 @@ namespace
 		{
 			return Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Boolean;
 		}
+		if (ExpectedType.Equals(TEXT("int"), ESearchCase::CaseSensitive))
+		{
+			return Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Int;
+		}
+		if (ExpectedType.Equals(TEXT("double"), ESearchCase::CaseSensitive))
+		{
+			return (Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Real
+					&& Pin->PinType.PinSubCategory == UEdGraphSchema_K2::PC_Double)
+				|| Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Double;
+		}
+		if (ExpectedType.Equals(TEXT("string"), ESearchCase::CaseSensitive))
+		{
+			return Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_String;
+		}
 		return false;
+	}
+
+	UClass* FunctionOwnerForNodeType(const FString& NodeType)
+	{
+		if (NodeType == TEXT("string_concat"))
+		{
+			return UKismetStringLibrary::StaticClass();
+		}
+		return UKismetMathLibrary::StaticClass();
 	}
 
 	UClass* NodeClassForType(const FString& NodeType)
@@ -781,7 +881,12 @@ namespace
 		{
 			return UK2Node_ExecutionSequence::StaticClass();
 		}
-		if (NodeType == TEXT("not_bool"))
+		if (NodeType == TEXT("not_bool")
+			|| NodeType == TEXT("bool_or")
+			|| NodeType == TEXT("int_add")
+			|| NodeType == TEXT("int_equal")
+			|| NodeType == TEXT("double_add")
+			|| NodeType == TEXT("string_concat"))
 		{
 			return UK2Node_CallFunction::StaticClass();
 		}
@@ -902,7 +1007,13 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 			OutErrorCode,
 			OutErrorMessage,
 			TEXT("graph-edit-plan-stale"),
-			TEXT("The graph or request changed after Preview; request a fresh preview before Apply."));
+			FString::Printf(
+				TEXT("The graph or request changed after Preview; request a fresh preview before Apply. "
+					 "requested=%s current=%s packageRevision=%s graphFingerprint=%s"),
+				*RequestedPlanId,
+				*Plan.PlanId,
+				*Plan.PackageRevision,
+				*Plan.GraphFingerprint));
 	}
 	const FString ExpectedConfirmation =
 		FString(ApplyConfirmationPrefix) + Plan.PlanId;
@@ -951,22 +1062,22 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 		for (const FNodeSpec& Spec : Plan.Nodes)
 		{
 			UEdGraphNode* Node = nullptr;
-			if (Spec.NodeType == TEXT("not_bool"))
+			if (!Spec.FunctionName.IsEmpty())
 			{
-				UFunction* Function = UKismetMathLibrary::StaticClass()->FindFunctionByName(
+				UFunction* Function = FunctionOwnerForNodeType(Spec.NodeType)->FindFunctionByName(
 					FName(*Spec.FunctionName));
 				if (Function == nullptr)
 				{
 					return Abort(
 						TEXT("graph-edit-node-spawn-failed"),
-						FString::Printf(TEXT("The bool function %s is unavailable."), *Spec.FunctionName));
+						FString::Printf(TEXT("The function %s is unavailable."), *Spec.FunctionName));
 				}
 				UK2Node_CallFunction* CallNode = NewObject<UK2Node_CallFunction>(Graph);
 				if (CallNode == nullptr)
 				{
 					return Abort(
 						TEXT("graph-edit-node-spawn-failed"),
-						TEXT("Could not allocate the bool CallFunction node."));
+						TEXT("Could not allocate the CallFunction node."));
 				}
 				CallNode->Modify();
 				Graph->AddNode(CallNode, true, false);
@@ -1073,27 +1184,47 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 		Blueprint->GetOutermost()->MarkPackageDirty();
 	}
 
+	auto FailCommitted = [&](const TCHAR* Code, const FString& Message) -> bool
+	{
+		bool bHasAppliedState = Graph->Nodes.Num() != NodeCountBefore;
+		for (const FGuid& Guid : CreatedGuids)
+		{
+			bHasAppliedState = bHasAppliedState || HasNodeGuid(Graph, Guid);
+		}
+		if (bHasAppliedState && GEditor != nullptr && GEditor->Trans != nullptr)
+		{
+			GEditor->UndoTransaction();
+		}
+		const bool bRestored = Graph->Nodes.Num() == NodeCountBefore
+			&& CountLinks(Graph) == LinkCountBefore;
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			Code,
+			Message + (bRestored
+				? TEXT(" The applied changes were rolled back.")
+				: TEXT(" WARNING: automatic rollback did not restore the original graph.")));
+	};
+
 	TSharedPtr<FJsonObject> PostPreflight;
 	if (!UEAgentKitBlueprintGraphLayout::BuildFocusedEditorPreflight(
 		PostPreflight,
 		OutErrorCode,
 		OutErrorMessage))
 	{
-		return false;
+		return FailCommitted(
+			TEXT("graph-edit-readback-failed"),
+			TEXT("Post-Apply preflight failed: ") + OutErrorCode + TEXT(" ") + OutErrorMessage);
 	}
 	if (!PostPreflight->GetBoolField(TEXT("packageDirty")))
 	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
+		return FailCommitted(
 			TEXT("graph-edit-readback-failed"),
 			TEXT("The package did not become dirty after Apply."));
 	}
 	if (PostPreflight->GetNumberField(TEXT("nodeCount")) != NodeCountBefore + Plan.Nodes.Num())
 	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
+		return FailCommitted(
 			TEXT("graph-edit-readback-failed"),
 			TEXT("The graph node count does not match the previewed node count after Apply."));
 	}
@@ -1104,9 +1235,7 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 	{
 		if (!HasNodeGuid(Graph, Guid))
 		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
+			return FailCommitted(
 				TEXT("graph-edit-readback-failed"),
 				TEXT("At least one previewed node is missing from the live graph after Apply."));
 		}
@@ -1133,9 +1262,7 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 	const bool bRedoVerified = bRedoCalled && bRedoNodes && bRedoLinks && bRedoGuids;
 	if (!bUndoVerified || !bRedoVerified)
 	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
+		return FailCommitted(
 			TEXT("graph-edit-undo-redo-failed"),
 			FString::Printf(
 				TEXT("Undo/Redo verification failed: undo=%s nodes=%s links=%s guids=%s redo=%s."),
@@ -1152,13 +1279,13 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 		OutErrorCode,
 		OutErrorMessage))
 	{
-		return false;
+		return FailCommitted(
+			TEXT("graph-edit-readback-failed"),
+			TEXT("Final preflight failed: ") + OutErrorCode + TEXT(" ") + OutErrorMessage);
 	}
 	if (!FinalPreflight->GetBoolField(TEXT("packageDirty")))
 	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
+		return FailCommitted(
 			TEXT("graph-edit-readback-failed"),
 			TEXT("The package is not dirty after Redo."));
 	}
@@ -1197,6 +1324,18 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 		ConnectionValues.Add(MakeShared<FJsonValueObject>(Item));
 	}
 
+	if (RecentApplies.Num() > 16)
+	{
+		RecentApplies.Reset();
+	}
+	FApplyReceipt Receipt;
+	Receipt.AssetPath = Plan.AssetPath;
+	Receipt.GraphGuid = Plan.GraphGuid;
+	Receipt.GraphFingerprint = FinalPreflight->GetStringField(TEXT("graphFingerprint"));
+	Receipt.NodeCount = NodeCountAfter;
+	Receipt.LinkCount = LinkCountAfter;
+	RecentApplies.Add(Plan.PlanId, Receipt);
+
 	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetStringField(TEXT("schemaVersion"), TEXT("ueak.graphpatch-edit-apply/1.0"));
 	Result->SetBoolField(TEXT("experimental"), true);
@@ -1222,6 +1361,310 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 	Result->SetStringField(TEXT("graphFingerprintAfter"), FinalPreflight->GetStringField(TEXT("graphFingerprint")));
 	Result->SetArrayField(TEXT("createdNodes"), CreatedNodeValues);
 	Result->SetArrayField(TEXT("createdConnections"), ConnectionValues);
+	OutResult = Result;
+	return true;
+}
+
+bool UEAgentKitBlueprintGraphEditExperimental::TrySaveExperimental(
+	const TSharedPtr<FJsonObject>& Params,
+	TSharedPtr<FJsonObject>& OutResult,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	if (!RejectUnknownParams(
+		Params,
+		{
+			TEXT("assetPath"),
+			TEXT("graphGuid"),
+			TEXT("planId"),
+			TEXT("expectedGraphFingerprint"),
+			TEXT("expectedNodeCount"),
+			TEXT("expectedLinkCount"),
+			TEXT("confirmation"),
+		},
+		OutErrorCode,
+		OutErrorMessage))
+	{
+		return false;
+	}
+	if (!IsExperimentalWriteAvailable())
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-experimental-disabled"),
+			TEXT("Experimental graph structure edit is not opted in for this project. "
+				 "Set [UEAgentKit] ExperimentalGraphPatchEdit=True in the project config."));
+	}
+	if (GEditor == nullptr || (GEditor->IsPlaySessionInProgress() || GEditor->PlayWorld != nullptr))
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-pie-active"),
+			TEXT("Experimental graph edit Save is unavailable while PIE or SIE is active."));
+	}
+
+	FString AssetPath;
+	FString GraphGuid;
+	FString PlanId;
+	FString ExpectedFingerprint;
+	FString Confirmation;
+	if (!ReadString(Params, TEXT("assetPath"), AssetPath, OutErrorCode, OutErrorMessage)
+		|| !ReadString(Params, TEXT("graphGuid"), GraphGuid, OutErrorCode, OutErrorMessage)
+		|| !ReadString(Params, TEXT("planId"), PlanId, OutErrorCode, OutErrorMessage)
+		|| !ReadString(
+			Params,
+			TEXT("expectedGraphFingerprint"),
+			ExpectedFingerprint,
+			OutErrorCode,
+			OutErrorMessage)
+		|| !ReadString(Params, TEXT("confirmation"), Confirmation, OutErrorCode, OutErrorMessage))
+	{
+		return false;
+	}
+	if (!IsSha256(PlanId) || !IsSha1(ExpectedFingerprint))
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-invalid-parameters"),
+			TEXT("Save requires a canonical sha256 planId and sha1 expectedGraphFingerprint."));
+	}
+
+	double NodeCountNumber = 0.0;
+	double LinkCountNumber = 0.0;
+	if (!Params->TryGetNumberField(TEXT("expectedNodeCount"), NodeCountNumber)
+		|| !Params->TryGetNumberField(TEXT("expectedLinkCount"), LinkCountNumber)
+		|| FMath::Abs(NodeCountNumber - FMath::RoundToDouble(NodeCountNumber)) > 0.0001
+		|| FMath::Abs(LinkCountNumber - FMath::RoundToDouble(LinkCountNumber)) > 0.0001
+		|| NodeCountNumber < 0.0
+		|| LinkCountNumber < 0.0)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-invalid-parameters"),
+			TEXT("Save requires non-negative expectedNodeCount and expectedLinkCount integers."));
+	}
+	const int32 ExpectedNodeCount = static_cast<int32>(NodeCountNumber);
+	const int32 ExpectedLinkCount = static_cast<int32>(LinkCountNumber);
+	const FString ExpectedConfirmation =
+		FString(SaveConfirmationPrefix) + PlanId;
+	if (!Confirmation.Equals(ExpectedConfirmation, ESearchCase::CaseSensitive))
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-confirmation-required"),
+			FString::Printf(TEXT("Explicit Save confirmation must be exactly %s."), *ExpectedConfirmation));
+	}
+
+	const FApplyReceipt* Receipt = RecentApplies.Find(PlanId);
+	if (Receipt == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-save-requires-apply"),
+			TEXT("Save requires a successful Apply of the exact plan in this Editor session."));
+	}
+	if (!Receipt->AssetPath.Equals(AssetPath, ESearchCase::CaseSensitive)
+		|| !Receipt->GraphGuid.Equals(GraphGuid, ESearchCase::CaseSensitive)
+		|| !Receipt->GraphFingerprint.Equals(ExpectedFingerprint, ESearchCase::CaseSensitive)
+		|| Receipt->NodeCount != ExpectedNodeCount
+		|| Receipt->LinkCount != ExpectedLinkCount)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-save-plan-mismatch"),
+			TEXT("Save parameters do not match the receipt recorded by the preceding Apply."));
+	}
+
+	TSharedPtr<FJsonObject> Preflight;
+	if (!UEAgentKitBlueprintGraphLayout::BuildFocusedEditorPreflight(
+		Preflight,
+		OutErrorCode,
+		OutErrorMessage))
+	{
+		return false;
+	}
+	if (!Preflight->GetStringField(TEXT("assetPath")).Equals(AssetPath, ESearchCase::CaseSensitive)
+		|| !Preflight->GetStringField(TEXT("graphGuid")).Equals(GraphGuid, ESearchCase::CaseSensitive))
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-focused-graph-mismatch"),
+			TEXT("The focused Blueprint editor is not showing the exact saved asset/graph."));
+	}
+	if (!Preflight->GetBoolField(TEXT("packageDirty")))
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-save-not-dirty"),
+			TEXT("Experimental graph edit Save requires the exact package to be dirty."));
+	}
+	if (!Preflight->GetStringField(TEXT("graphFingerprint")).Equals(
+		ExpectedFingerprint,
+		ESearchCase::CaseSensitive))
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-fingerprint-conflict"),
+			TEXT("The focused graph changed after the graph edit Apply; refusing to save unrelated edits."));
+	}
+
+	UBlueprint* Blueprint = nullptr;
+	UEdGraph* Graph = nullptr;
+	if (!UEAgentKitBlueprintGraphLayout::ResolveExactTarget(
+		AssetPath,
+		GraphGuid,
+		Blueprint,
+		Graph,
+		OutErrorCode,
+		OutErrorMessage))
+	{
+		return false;
+	}
+	if (Blueprint == nullptr || Graph == nullptr
+		|| Graph->Nodes.Num() != ExpectedNodeCount
+		|| CountLinks(Graph) != ExpectedLinkCount)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-save-plan-mismatch"),
+			TEXT("The live graph node/link counts no longer match the Apply receipt."));
+	}
+
+	UPackage* Package = Blueprint->GetOutermost();
+	if (Package == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-save-package-invalid"),
+			TEXT("The Blueprint package is unavailable."));
+	}
+	const FString Filename = FPackageName::LongPackageNameToFilename(
+		Package->GetName(),
+		FPackageName::GetAssetPackageExtension());
+	if (Filename.IsEmpty() || !IFileManager::Get().FileExists(*Filename))
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-save-package-file-missing"),
+			TEXT("The exact Blueprint package file does not exist on disk."));
+	}
+	const int64 FileSizeBefore = IFileManager::Get().FileSize(*Filename);
+
+	FSavePackageArgs SaveArgs;
+	SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+	SaveArgs.SaveFlags = SAVE_NoError;
+	SaveArgs.Error = GError;
+	if (!UPackage::SavePackage(Package, Blueprint, *Filename, SaveArgs)
+		|| Package->IsDirty())
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-save-failed"),
+			TEXT("SavePackage did not confirm a clean saved package."));
+	}
+
+	FString AssetDigest;
+	if (!FBlueprintContextSha256::HashFile(Filename, AssetDigest))
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-save-hash-failed"),
+			TEXT("Could not hash the saved Blueprint package."));
+	}
+	AssetDigest = AssetDigest.ToLower();
+
+	TSharedPtr<FJsonObject> PostSavePreflight;
+	FString PostCode;
+	FString PostMessage;
+	if (!UEAgentKitBlueprintGraphLayout::BuildFocusedEditorPreflight(
+		PostSavePreflight,
+		PostCode,
+		PostMessage))
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-save-readback-failed"),
+			TEXT("Post-save preflight failed: ") + PostCode + TEXT(" ") + PostMessage);
+	}
+	if (PostSavePreflight->GetBoolField(TEXT("packageDirty"))
+		|| !PostSavePreflight->GetStringField(TEXT("graphFingerprint")).Equals(
+			ExpectedFingerprint,
+			ESearchCase::CaseSensitive)
+		|| PostSavePreflight->GetNumberField(TEXT("nodeCount")) != ExpectedNodeCount)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-save-readback-failed"),
+			TEXT("The saved graph fingerprint/node count does not match the Apply receipt."));
+	}
+
+	const int64 FileSizeAfter = IFileManager::Get().FileSize(*Filename);
+	if (FileSizeAfter < 0)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-save-readback-failed"),
+			TEXT("The saved package file could not be read back."));
+	}
+
+	TSharedRef<FJsonObject> Readback = MakeShared<FJsonObject>();
+	Readback->SetStringField(TEXT("assetPath"), AssetPath);
+	Readback->SetStringField(TEXT("graphGuid"), GraphGuid);
+	Readback->SetStringField(TEXT("assetSha256"), FString(TEXT("sha256:")) + AssetDigest);
+	Readback->SetStringField(
+		TEXT("packageRevision"),
+		PostSavePreflight->GetStringField(TEXT("packageRevision")));
+	Readback->SetStringField(
+		TEXT("graphFingerprint"),
+		PostSavePreflight->GetStringField(TEXT("graphFingerprint")));
+	Readback->SetBoolField(TEXT("packageDirty"), false);
+	Readback->SetNumberField(TEXT("nodeCount"), ExpectedNodeCount);
+	Readback->SetNumberField(TEXT("linkCount"), ExpectedLinkCount);
+	Readback->SetBoolField(TEXT("independentReloadVerified"), false);
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetStringField(TEXT("action"), TEXT("save-experimental-graph-edit"));
+	Result->SetBoolField(TEXT("experimental"), true);
+	Result->SetStringField(TEXT("assetPath"), AssetPath);
+	Result->SetStringField(TEXT("graphGuid"), GraphGuid);
+	Result->SetStringField(TEXT("planId"), PlanId);
+	Result->SetStringField(TEXT("confirmation"), Confirmation);
+	Result->SetStringField(TEXT("assetSha256"), FString(TEXT("sha256:")) + AssetDigest);
+	Result->SetStringField(
+		TEXT("packageRevision"),
+		PostSavePreflight->GetStringField(TEXT("packageRevision")));
+	Result->SetStringField(
+		TEXT("graphFingerprint"),
+		PostSavePreflight->GetStringField(TEXT("graphFingerprint")));
+	Result->SetBoolField(TEXT("saved"), true);
+	Result->SetBoolField(TEXT("packageDirty"), false);
+	Result->SetBoolField(TEXT("readbackVerified"), true);
+	Result->SetBoolField(TEXT("independentReloadVerified"), false);
+	Result->SetStringField(TEXT("requiredAcceptanceEvidence"), TEXT("independent-reload"));
+	Result->SetNumberField(TEXT("fileSizeBefore"), static_cast<double>(FileSizeBefore));
+	Result->SetNumberField(TEXT("fileSizeAfter"), static_cast<double>(FileSizeAfter));
+	Result->SetBoolField(TEXT("autoSave"), false);
+	Result->SetBoolField(TEXT("compiled"), false);
+	Result->SetObjectField(TEXT("readback"), Readback);
+	RecentApplies.Remove(PlanId);
 	OutResult = Result;
 	return true;
 }

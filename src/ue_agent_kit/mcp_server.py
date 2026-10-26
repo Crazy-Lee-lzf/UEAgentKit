@@ -60,6 +60,7 @@ from .mcp_graph_edit_experimental import register_graph_edit_experimental_tools
 from .experimental_graph_edit import (
     APPLY_TOOL_NAME as EXPERIMENTAL_GRAPH_EDIT_APPLY_TOOL_NAME,
     PREVIEW_TOOL_NAME as EXPERIMENTAL_GRAPH_EDIT_PREVIEW_TOOL_NAME,
+    SAVE_TOOL_NAME as EXPERIMENTAL_GRAPH_EDIT_SAVE_TOOL_NAME,
     GraphEditError,
 )
 from .experimental_graph_layout import (
@@ -342,6 +343,7 @@ def _capabilities_response(
         isinstance(observed_capabilities, list)
         and "editor.previewBlueprintGraphEditExperimental" in observed_capabilities
         and "editor.applyBlueprintGraphEditExperimental" in observed_capabilities
+        and "editor.saveBlueprintGraphEditExperimental" in observed_capabilities
     )
     memory_status = memory_service.status() if memory_service is not None else None
     verification_evidence_status = (
@@ -416,6 +418,12 @@ def _capabilities_response(
                         "name": EXPERIMENTAL_GRAPH_EDIT_APPLY_TOOL_NAME,
                         "readOnly": False,
                         "destructive": True,
+                        "experimental": True,
+                    },
+                    {
+                        "name": EXPERIMENTAL_GRAPH_EDIT_SAVE_TOOL_NAME,
+                        "readOnly": False,
+                        "destructive": False,
                         "experimental": True,
                     },
                 ]
@@ -670,9 +678,13 @@ def _capabilities_response(
                 "applyTool": EXPERIMENTAL_GRAPH_EDIT_APPLY_TOOL_NAME
                 if graph_edit_registered
                 else "",
+                "saveTool": EXPERIMENTAL_GRAPH_EDIT_SAVE_TOOL_NAME
+                if graph_edit_registered
+                else "",
                 "bridgeMethods": [
                     "editor.previewBlueprintGraphEditExperimental",
                     "editor.applyBlueprintGraphEditExperimental",
+                    "editor.saveBlueprintGraphEditExperimental",
                 ]
                 if graph_edit_registered
                 else [],
@@ -693,12 +705,28 @@ def _capabilities_response(
                 },
                 "requiresCompletePreviewResult": True,
                 "acceptsCallerBuiltRequest": False,
-                "supportedNodeTypes": ["branch", "sequence", "not_bool"],
+                "supportedNodeTypes": [
+                    "branch",
+                    "sequence",
+                    "not_bool",
+                    "bool_or",
+                    "int_add",
+                    "int_equal",
+                    "double_add",
+                    "string_concat",
+                ],
                 "supportedConnections": [
                     "exec: then/else/then_0/then_1 -> execute",
-                    "bool: not_bool.ReturnValue -> branch.Condition",
+                    "bool: bool-producing ReturnValue/condition -> bool input",
+                    "int: int-producing ReturnValue -> int input",
+                    "double: double-producing ReturnValue -> double input",
+                    "string: string-producing ReturnValue -> string input",
+                    "one output pin may fan out to distinct input pins",
                 ],
                 "strictPinTypeCheck": True,
+                "saveRequiresPostApplyGraphFingerprint": True,
+                "explicitSaveConfirmation": "SAVE EXPERIMENTAL GRAPH NODES <planId>",
+                "saveRequiresExactNodeAndLinkCounts": True,
                 "exactFocusedGraphOnly": True,
                 "requiresCleanPackage": True,
                 "requiresPieStopped": True,
@@ -708,9 +736,9 @@ def _capabilities_response(
                 "singleTransaction": True,
                 "autoSave": False,
                 "requiresExplicitSeparateSave": True,
-                "maxNodes": 8,
-                "maxConnections": 12,
-                "maxConnectionsPerNode": 6,
+                "maxNodes": 16,
+                "maxConnections": 24,
+                "maxConnectionsPerNode": 8,
                 "maxRequestBytes": 61440,
             },
             "editorContext": {
@@ -1854,6 +1882,7 @@ def create_mcp_server(
                 (
                     EXPERIMENTAL_GRAPH_EDIT_PREVIEW_TOOL_NAME,
                     EXPERIMENTAL_GRAPH_EDIT_APPLY_TOOL_NAME,
+                    EXPERIMENTAL_GRAPH_EDIT_SAVE_TOOL_NAME,
                 ),
             )
     if workflow_service is not None:

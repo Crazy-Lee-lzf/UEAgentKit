@@ -18,9 +18,14 @@ from ue_agent_kit.experimental_graph_edit import (  # noqa: E402
     APPLY_TOOL_NAME,
     PREVIEW_CAPABILITY,
     PREVIEW_TOOL_NAME,
+    SAVE_CAPABILITY,
+    SAVE_CONFIRMATION_PREFIX,
+    SAVE_TOOL_NAME,
     GraphEditError,
     build_apply_parameters,
+    build_save_parameters,
     confirmation_for_plan,
+    save_confirmation_for_plan,
     validate_preview_parameters,
 )
 from ue_agent_kit.mcp_graph_edit_experimental import (  # noqa: E402
@@ -50,6 +55,7 @@ class _FakeLiveEditor:
         self.capabilities = capabilities if capabilities is not None else [
             PREVIEW_CAPABILITY,
             APPLY_CAPABILITY,
+            SAVE_CAPABILITY,
         ]
         self.calls: list[tuple[str, dict[str, Any], float | None]] = []
         self.result: dict[str, Any] = {"applied": True, "singleTransaction": True}
@@ -405,6 +411,7 @@ class GraphEditContractTests(unittest.TestCase):
     def test_experimental_tools_are_not_in_the_public_registry(self) -> None:
         self.assertNotIn(PREVIEW_TOOL_NAME, TOOL_DEFINITIONS_BY_NAME)
         self.assertNotIn(APPLY_TOOL_NAME, TOOL_DEFINITIONS_BY_NAME)
+        self.assertNotIn(SAVE_TOOL_NAME, TOOL_DEFINITIONS_BY_NAME)
 
     def test_mcp_preview_is_read_only_and_apply_uses_exact_params(self) -> None:
         live = _FakeLiveEditor()
@@ -431,7 +438,18 @@ class GraphEditContractTests(unittest.TestCase):
         self.assertEqual(live.calls[0][0], "editor.previewBlueprintGraphEditExperimental")
         self.assertEqual(live.calls[0][2], 30.0)
 
-        live.result = {"applied": True, "singleTransaction": True, "undoVerified": True}
+        live.result = {
+            "applied": True,
+            "saved": False,
+            "singleTransaction": True,
+            "undoVerified": True,
+            "assetPath": ASSET,
+            "graphGuid": GRAPH,
+            "planId": PLAN_ID,
+            "graphFingerprintAfter": "sha1:" + "d" * 40,
+            "nodeCountAfter": 5,
+            "linkCountAfter": 1,
+        }
         applied = server.tools[APPLY_TOOL_NAME](
             preview_result,
             APPLY_CONFIRMATION_PREFIX + PLAN_ID,
@@ -440,6 +458,22 @@ class GraphEditContractTests(unittest.TestCase):
         self.assertFalse(applied["readOnly"])
         self.assertEqual(live.calls[1][0], "editor.applyBlueprintGraphEditExperimental")
         self.assertEqual(live.calls[1][1]["planId"], PLAN_ID)
+
+        live.result = {"saved": True, "readbackVerified": True}
+        saved = server.tools[SAVE_TOOL_NAME](
+            live.calls[1][1] | {
+                "applied": True,
+                "saved": False,
+                "graphFingerprintAfter": "sha1:" + "d" * 40,
+                "nodeCountAfter": 5,
+                "linkCountAfter": 1,
+            },
+            save_confirmation_for_plan(PLAN_ID),
+        )
+        self.assertTrue(saved["ok"])
+        self.assertEqual(live.calls[2][0], "editor.saveBlueprintGraphEditExperimental")
+        self.assertEqual(live.calls[2][1]["expectedNodeCount"], 5)
+        self.assertEqual(live.calls[2][1]["expectedLinkCount"], 1)
 
     def test_mcp_rejects_missing_editor_opt_in(self) -> None:
         live = _FakeLiveEditor(capabilities=[])
@@ -486,6 +520,84 @@ class GraphEditContractTests(unittest.TestCase):
         self.assertEqual(result["error"]["code"], "graph-edit-temp-id-invalid")
         self.assertEqual(live.calls, [])
 
+    def test_typed_data_fanout_is_allowed(self) -> None:
+        nodes = [
+            {"tempId": "tmp:add", "nodeType": "int_add", "x": 0, "y": 0},
+            {"tempId": "tmp:eq1", "nodeType": "int_equal", "x": 300, "y": 0},
+            {"tempId": "tmp:eq2", "nodeType": "int_equal", "x": 300, "y": 200},
+            {"tempId": "tmp:or", "nodeType": "bool_or", "x": 600, "y": 0},
+        ]
+        connections = [
+            {"from": "tmp:add", "fromPin": "ReturnValue", "to": "tmp:eq1", "toPin": "A"},
+            {"from": "tmp:add", "fromPin": "ReturnValue", "to": "tmp:eq2", "toPin": "A"},
+            {"from": "tmp:eq1", "fromPin": "ReturnValue", "to": "tmp:or", "toPin": "A"},
+            {"from": "tmp:eq2", "fromPin": "ReturnValue", "to": "tmp:or", "toPin": "B"},
+        ]
+        request = validate_preview_parameters(
+            asset_path=ASSET,
+            graph_guid=GRAPH,
+            nodes=nodes,
+            connections=connections,
+        )
+        self.assertEqual(len(request["connections"]), 4)
+        self.assertEqual(
+            sum(1 for item in request["connections"] if item["from"] == "tmp:add"),
+            2,
+        )
+
+        mismatch = [
+            {"tempId": "tmp:add", "nodeType": "int_add", "x": 0, "y": 0},
+            {"tempId": "tmp:double", "nodeType": "double_add", "x": 300, "y": 0},
+        ]
+        with self.assertRaises(GraphEditError) as raised:
+            validate_preview_parameters(
+                asset_path=ASSET,
+                graph_guid=GRAPH,
+                nodes=mismatch,
+                connections=[
+                    {
+                        "from": "tmp:add",
+                        "fromPin": "ReturnValue",
+                        "to": "tmp:double",
+                        "toPin": "A",
+                    }
+                ],
+            )
+        self.assertEqual(raised.exception.code, "graph-edit-pin-type-mismatch")
+
+    def test_save_is_bound_to_apply_receipt_and_post_apply_fingerprint(self) -> None:
+        applied = {
+            "applied": True,
+            "saved": False,
+            "assetPath": ASSET,
+            "graphGuid": GRAPH,
+            "planId": PLAN_ID,
+            "graphFingerprintAfter": "sha1:" + "d" * 40,
+            "nodeCountAfter": 5,
+            "linkCountAfter": 2,
+        }
+        params = build_save_parameters(applied, save_confirmation_for_plan(PLAN_ID))
+        self.assertEqual(params["planId"], PLAN_ID)
+        self.assertEqual(params["expectedNodeCount"], 5)
+        self.assertEqual(params["expectedLinkCount"], 2)
+        self.assertEqual(params["expectedGraphFingerprint"], "sha1:" + "d" * 40)
+
+        with self.assertRaises(GraphEditError) as raised:
+            build_save_parameters(applied, SAVE_CONFIRMATION_PREFIX + "sha256:" + "0" * 64)
+        self.assertEqual(raised.exception.code, "graph-edit-confirmation-required")
+
+        tampered = copy.deepcopy(applied)
+        tampered["applied"] = False
+        with self.assertRaises(GraphEditError) as raised:
+            build_save_parameters(tampered, save_confirmation_for_plan(PLAN_ID))
+        self.assertEqual(raised.exception.code, "graph-edit-save-requires-apply")
+
+        tampered = copy.deepcopy(applied)
+        tampered["graphFingerprintAfter"] = "sha1:not-a-fingerprint"
+        with self.assertRaises(GraphEditError) as raised:
+            build_save_parameters(tampered, save_confirmation_for_plan(PLAN_ID))
+        self.assertEqual(raised.exception.code, "graph-edit-invalid-parameters")
+
     def test_capabilities_require_live_editor_opt_in(self) -> None:
         from ue_agent_kit.mcp_server import _capabilities_response
 
@@ -496,7 +608,7 @@ class GraphEditContractTests(unittest.TestCase):
             experimental_graphpatch_edit=True,
             live_editor_status={
                 "state": "available",
-                "capabilities": [PREVIEW_CAPABILITY, APPLY_CAPABILITY],
+                "capabilities": [PREVIEW_CAPABILITY, APPLY_CAPABILITY, SAVE_CAPABILITY],
             },
         )
         block = response["liveEditor"]["experimentalGraphPatchEdit"]
@@ -505,8 +617,12 @@ class GraphEditContractTests(unittest.TestCase):
         self.assertTrue(block["pluginCapabilityObserved"])
         self.assertFalse(block["productionDefault"])
         self.assertIn("not_bool", block["supportedNodeTypes"])
+        self.assertIn("int_add", block["supportedNodeTypes"])
+        self.assertIn("double_add", block["supportedNodeTypes"])
+        self.assertIn("string_concat", block["supportedNodeTypes"])
         self.assertTrue(block["strictPinTypeCheck"])
-        self.assertEqual(block["maxConnectionsPerNode"], 6)
+        self.assertEqual(block["maxConnectionsPerNode"], 8)
+        self.assertEqual(block["saveTool"], SAVE_TOOL_NAME)
 
         unobserved = _capabilities_response(
             None,
@@ -533,12 +649,18 @@ class GraphEditContractTests(unittest.TestCase):
         self.assertIn("register_graph_edit_experimental_tools(", server_source)
         self.assertIn("editor.previewBlueprintGraphEditExperimental", bridge_source)
         self.assertIn("editor.applyBlueprintGraphEditExperimental", bridge_source)
+        self.assertIn("editor.saveBlueprintGraphEditExperimental", bridge_source)
         self.assertIn("ExperimentalGraphPatchEdit", edit_source)
         self.assertIn("not_bool", edit_source)
+        self.assertIn("int_add", edit_source)
+        self.assertIn("double_add", edit_source)
+        self.assertIn("string_concat", edit_source)
         self.assertIn("UKismetMathLibrary", edit_source)
+        self.assertIn("UKismetStringLibrary", edit_source)
         self.assertIn("graph-edit-pin-type-mismatch", edit_source)
         self.assertIn("graph-edit-pie-active", edit_source)
         self.assertIn("graph-edit-package-dirty", edit_source)
+        self.assertIn("RecentApplies", edit_source)
 
 
 if __name__ == "__main__":
