@@ -61,6 +61,7 @@ from .mcp_pin_default_edit_experimental import register_pin_default_edit_experim
 from .mcp_variable_write_experimental import register_variable_write_experimental_tools
 from .mcp_rewire_write_experimental import register_rewire_write_experimental_tools
 from .mcp_node_remove_write_experimental import register_node_remove_write_experimental_tools
+from .mcp_focus_blueprint_graph_experimental import register_focus_blueprint_graph_tool
 from .experimental_rewire_write import (
     APPLY_TOOL_NAME as EXPERIMENTAL_REWIRE_APPLY_TOOL_NAME,
     PREVIEW_TOOL_NAME as EXPERIMENTAL_REWIRE_PREVIEW_TOOL_NAME,
@@ -2322,6 +2323,13 @@ def create_mcp_server(
                 (EXPERIMENTAL_APPLY_TOOL_NAME, EXPERIMENTAL_SAVE_TOOL_NAME),
             )
         if experimental_graphpatch_edit:
+            register_focus_blueprint_graph_tool(
+                server=server,
+                live_editor_service=live_editor_service,
+                tool_annotations_type=ToolAnnotations,
+                error_response=_error_response,
+            )
+            _enforce_strict_tool_arguments(server, ("ue_focus_blueprint_graph",))
             register_graph_edit_experimental_tools(
                 server=server,
                 live_editor_service=live_editor_service,
