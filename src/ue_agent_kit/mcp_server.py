@@ -50,6 +50,7 @@ from .impact_analysis import (
     SUPPORTED_SUBJECT_KINDS,
     UNSUPPORTED_SUBJECT_KINDS,
 )
+from .index_snapshot import apply_editor_freshness
 from .mcp_live_action_tools import register_live_action_tools
 from .mcp_live_tools import GRAPH_CONTEXT_TOOL_NAME, register_live_read_tools
 from .mcp_graph_layout_test_only import register_graph_layout_test_only_tool
@@ -1160,6 +1161,15 @@ def _capabilities_response(
             "available": write_tools_enabled,
             "sources": ["sqlite", "revision-export", "disk-package"] if write_tools_enabled else ["sqlite"],
             "states": ["fresh", "stale", "partial", "unavailable", "unknown"],
+            "indexSnapshotStates": ["fresh", "stale", "unknown"],
+            "indexSnapshotFields": [
+                "indexSnapshotState",
+                "exportSnapshotState",
+                "indexSnapshotReasons",
+                "lastExportUtc",
+                "databasePath",
+                "manifestMatches",
+            ],
             "planRequiresFreshIndex": write_tools_enabled,
             "commitMarksFixedSnapshotsStale": write_tools_enabled,
             "rollbackMayRestoreFreshState": write_tools_enabled,
@@ -1211,6 +1221,25 @@ def _project_status_response(
         "indexStale": None,
         "reason": "Revision Export and disk Package comparison is unavailable in this server mode.",
     }
+    snapshot = apply_editor_freshness(
+        dict(index_status.get("indexSnapshot", {})),
+        freshness_status,
+    )
+    index_status["indexSnapshot"] = snapshot
+    index_metadata = dict(index_metadata)
+    index_metadata.update(
+        {
+            "indexSnapshotState": snapshot.get("state", "unknown"),
+            "indexSnapshotReasons": snapshot.get("reasons", []),
+            "exportSnapshotState": snapshot.get("exportSnapshotState", "unknown"),
+            "editorStateCompared": snapshot.get("editorStateCompared", False),
+            "lastExportUtc": snapshot.get("lastExportUtc", ""),
+            "databasePath": snapshot.get("databasePath", ""),
+            "lastDatabasePath": snapshot.get("lastDatabasePath", ""),
+            "databasePathMatches": snapshot.get("databasePathMatches"),
+            "manifestMatches": snapshot.get("manifestMatches"),
+        }
+    )
     live_editor_status = (
         live_editor_service.status()
         if live_editor_service is not None
@@ -1251,6 +1280,7 @@ def _project_status_response(
             ),
         },
         "engine": _read_engine_status(workflow_service),
+        "indexSnapshot": snapshot,
         "database": {
             "configured": True,
             "state": "available",
@@ -1258,6 +1288,15 @@ def _project_status_response(
             "immutable": bool(index_metadata.get("immutable")),
             "quiescent": bool(index_metadata.get("quiescent")),
             "lastIndexedAtUtc": index_metadata.get("lastIndexedAtUtc", ""),
+            "lastExportUtc": index_metadata.get("lastExportUtc", ""),
+            "databasePath": index_metadata.get("databasePath", ""),
+            "lastDatabasePath": index_metadata.get("lastDatabasePath", ""),
+            "databasePathMatches": index_metadata.get("databasePathMatches"),
+            "indexSnapshotState": index_metadata.get("indexSnapshotState", "unknown"),
+            "indexSnapshotReasons": index_metadata.get("indexSnapshotReasons", []),
+            "exportSnapshotState": index_metadata.get("exportSnapshotState", "unknown"),
+            "editorStateCompared": index_metadata.get("editorStateCompared", False),
+            "manifestMatches": index_metadata.get("manifestMatches"),
             "manifestSchemaVersion": index_metadata.get("manifestSchemaVersion", ""),
             "exporterVersion": index_metadata.get("exporterVersion", ""),
             "profile": index_metadata.get("profile", ""),

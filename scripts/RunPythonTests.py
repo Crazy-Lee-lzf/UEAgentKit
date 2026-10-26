@@ -54,6 +54,8 @@ DOMAIN_MODULES: dict[str, tuple[str, ...]] = {
     "index": (
         "test_database",
         "test_freshness",
+        "test_index_incremental",
+        "test_index_snapshot",
         "test_indexer_queries",
         "test_reader_architecture",
         "test_snapshot_lifecycle",

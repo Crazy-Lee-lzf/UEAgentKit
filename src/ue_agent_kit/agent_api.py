@@ -24,6 +24,7 @@ from .impact_analysis import (
     validate_subject_kind,
     validate_target_paths,
 )
+from .index_snapshot import compute_index_snapshot
 from .queries import find_references, get_asset as query_get_asset, get_stats, search_assets, search_symbols
 from . import world_index_v2
 from .query_protocol import (
@@ -243,15 +244,30 @@ class IndexQueryService:
     def check(self) -> dict[str, Any]:
         with self._open() as connection:
             response = self._base_response(connection, "ue_index_status")
+            snapshot = compute_index_snapshot(connection, self.database_path)
             response["indexMetadata"] = {
                 "lastIndexedAtUtc": get_metadata(connection, "last_indexed_at_utc", ""),
+                "lastExportUtc": get_metadata(connection, "last_export_utc", ""),
                 "manifestSchemaVersion": get_metadata(connection, "last_manifest_schema", ""),
                 "exporterVersion": get_metadata(connection, "last_exporter_version", ""),
                 "profile": get_metadata(connection, "last_profile", ""),
                 "snapshotId": self._snapshot_id(connection),
+                "databasePath": snapshot["databasePath"],
+                "lastDatabasePath": snapshot["lastDatabasePath"],
+                "databasePathMatches": snapshot["databasePathMatches"],
+                "manifestSha256": snapshot["manifestSha256"],
+                "recordedManifestSha256": snapshot["recordedManifestSha256"],
+                "manifestMatches": snapshot["manifestMatches"],
+                "indexSnapshotState": snapshot["state"],
+                "indexSnapshotReasons": snapshot["reasons"],
+                "exportSnapshotState": snapshot["exportSnapshotState"],
+                "editorStateCompared": snapshot["editorStateCompared"],
+                "lastIndexChangeMode": snapshot["lastIndexChangeMode"],
+                "lastIndexFastPathSkips": snapshot["lastIndexFastPathSkips"],
                 "immutable": True,
                 "quiescent": True,
             }
+            response["indexSnapshot"] = snapshot
             response["stats"] = get_stats(connection)
             code_counts = connection.execute(
                 """
@@ -400,7 +416,7 @@ class IndexQueryService:
             rows = connection.execute(
                 """
                 SELECT asset_path, package_name, asset_class, profile, revision_value,
-                       file_size, modified_utc, content_sha256, package_dirty,
+                       file_size, modified_utc, content_sha256, canonical_sha256, package_dirty,
                        canonical_relpath
                 FROM assets
                 ORDER BY asset_path
@@ -417,7 +433,7 @@ class IndexQueryService:
             row = connection.execute(
                 """
                 SELECT asset_path, package_name, asset_class, profile, revision_value,
-                       file_size, modified_utc, content_sha256, package_dirty,
+                       file_size, modified_utc, content_sha256, canonical_sha256, package_dirty,
                        canonical_relpath
                 FROM assets
                 WHERE asset_path = ?

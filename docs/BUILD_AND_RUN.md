@@ -135,6 +135,28 @@ scripts\ue-agent.cmd index build Output\Blueprints
 scripts\ue-agent.cmd index stats
 ```
 
+索引构建默认是严格模式：逐个读取 Canonical、重新计算 SHA-256，并校验 revision/schema/exporter/profile。`--batch-size N`（默认 100）只改变 SQLite 提交批次，不减少逐资产校验；每个资产仍有独立 savepoint，失败资产会回滚，不会留下半条资产或 World V2 行。
+
+当 exporter manifest 的资产条目带有 `canonicalSha256`（也接受 `canonical_sha256`）时，Python 索引器可将其作为候选快速过滤：只有 manifest、schema/exporter 身份和 DB 中 canonical SHA 都一致才跳过 Canonical 读取/哈希。旧 manifest 没有该字段时自动走严格全量校验。外部变更集是更显式的快速路径，必须提供 manifest 指纹和 exportRoot：
+
+```json
+{
+  "schemaVersion": "1.0",
+  "manifestSha256": "<manifest.json 的 sha256，可带 sha256: 前缀>",
+  "exportRoot": "<本次导出的绝对路径>",
+  "changedAssetPaths": ["/Game/Characters/BP_Player.BP_Player"],
+  "source": "CI changed-file list"
+}
+```
+
+```bat
+scripts\ue-agent.cmd index build Output\AssetCatalog --changed-path-file changed.json
+```
+
+该文件是显式信任输入：未列出的非 World 资产会被视为未变化；World 资产仍会读取 Canonical 并事务性校验/修复 World V2。指纹不匹配时构建直接失败，不会静默降级。若不能保证变更集完整，不要传该参数，使用默认严格模式（或 `--no-manifest-digest` 明确关闭 manifest 摘要快速路径）。
+
+`index build` 完成后会记录 manifest SHA-256、export UTC、数据库路径和构建模式。`ue_get_project_status` / `ue_get_index_status` 返回 `indexSnapshotState`（`fresh|stale|unknown`）、`exportSnapshotState`、`indexSnapshotReasons`、`lastExportUtc` 和 `databasePath`。冷 SQLite 只能证明“索引与记录的导出快照一致”，看不到 Editor 当前 PackageRevision，因此默认 `indexSnapshotState=unknown` 并带 `editor-state-not-compared`；只有结合 live/Revision freshness 才会报告 `fresh`。manifest 被重建、数据库被复制到另一路径或构建不完整时会报告 `stale`，不会伪造 `fresh`。
+
 查询示例：
 
 ```bat
