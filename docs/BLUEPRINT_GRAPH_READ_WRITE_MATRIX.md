@@ -1,8 +1,8 @@
 # Blueprint Graph Read/Write Capability Matrix
 
-Branch: `feature/blueprint-read-write-expansion-20261026`  
-Base: `main@908bc70`  
-Date: 2026-10-26  
+Branch: `feature/blueprint-read-write-expansion-20261026`
+Base: `main@908bc70`
+Date: 2026-10-26
 Scope: UE 5.6.1, Editor bridge/plugin plus Python MCP/index readers.
 
 This matrix describes the product contract on this branch. It deliberately does
