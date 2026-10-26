@@ -23,18 +23,31 @@ PREVIEW_SCHEMA_VERSION = "ueak.graphpatch-edit-preview/1.0"
 MAX_REQUEST_BYTES = 60 * 1024
 MAX_NODES = 8
 MAX_CONNECTIONS = 12
+MAX_CONNECTIONS_PER_NODE = 6
 MAX_COORDINATE = 100_000
 
 NODE_TYPES = {
     "branch": {
         "nodeClass": "/Script/BlueprintGraph.K2Node_IfThenElse",
-        "inputPins": ("execute",),
+        "inputPins": ("execute", "Condition"),
         "outputPins": ("then", "else"),
+        "inputPinTypes": {"execute": "exec", "Condition": "bool"},
+        "outputPinTypes": {"then": "exec", "else": "exec"},
     },
     "sequence": {
         "nodeClass": "/Script/BlueprintGraph.K2Node_ExecutionSequence",
         "inputPins": ("execute",),
         "outputPins": ("then_0", "then_1"),
+        "inputPinTypes": {"execute": "exec"},
+        "outputPinTypes": {"then_0": "exec", "then_1": "exec"},
+    },
+    "not_bool": {
+        "nodeClass": "/Script/BlueprintGraph.K2Node_CallFunction",
+        "function": "KismetMathLibrary.Not_PreBool",
+        "inputPins": ("A",),
+        "outputPins": ("ReturnValue",),
+        "inputPinTypes": {"A": "bool"},
+        "outputPinTypes": {"ReturnValue": "bool"},
     },
 }
 
@@ -133,7 +146,7 @@ def validate_preview_parameters(
         if node_type not in NODE_TYPES:
             raise GraphEditError(
                 "graph-edit-node-type-not-allowed",
-                "Only nodeType 'branch' and 'sequence' are supported by this experimental slice.",
+                "Supported nodeTypes: " + ", ".join(sorted(NODE_TYPES)) + ".",
             )
         normalized_nodes.append(
             {
@@ -147,6 +160,8 @@ def validate_preview_parameters(
     by_id = {node["tempId"]: node for node in normalized_nodes}
     normalized_connections: list[dict[str, str]] = []
     seen_sources: set[tuple[str, str]] = set()
+    seen_targets: set[tuple[str, str]] = set()
+    connection_counts: dict[str, int] = {}
     for index, raw in enumerate(connections):
         item = _object(raw, f"connections[{index}]")
         _reject_unknown(
@@ -176,23 +191,47 @@ def validate_preview_parameters(
                 "graph-edit-self-connection",
                 "A node cannot connect to itself in this experimental slice.",
             )
-        if source_pin not in NODE_TYPES[by_id[source]["nodeType"]]["outputPins"]:
+        source_contract = NODE_TYPES[by_id[source]["nodeType"]]
+        target_contract = NODE_TYPES[by_id[target]["nodeType"]]
+        source_type = source_contract["outputPinTypes"].get(source_pin)
+        target_type = target_contract["inputPinTypes"].get(target_pin)
+        if source_type is None:
             raise GraphEditError(
                 "graph-edit-pin-not-allowed",
                 f"{source_pin} is not a supported output pin of {by_id[source]['nodeType']}.",
             )
-        if target_pin not in NODE_TYPES[by_id[target]["nodeType"]]["inputPins"]:
+        if target_type is None:
             raise GraphEditError(
                 "graph-edit-pin-not-allowed",
                 f"{target_pin} is not a supported input pin of {by_id[target]['nodeType']}.",
             )
-        key = (source, source_pin)
-        if key in seen_sources:
+        if source_type != target_type:
+            raise GraphEditError(
+                "graph-edit-pin-type-mismatch",
+                f"Cannot connect {source}.{source_pin} ({source_type}) to "
+                f"{target}.{target_pin} ({target_type}); data kinds must match exactly.",
+            )
+        source_key = (source, source_pin)
+        if source_key in seen_sources:
             raise GraphEditError(
                 "graph-edit-connection-duplicate",
                 f"Output pin already has a connection in this plan: {source}.{source_pin}.",
             )
-        seen_sources.add(key)
+        target_key = (target, target_pin)
+        if target_key in seen_targets:
+            raise GraphEditError(
+                "graph-edit-connection-duplicate",
+                f"Input pin already has a connection in this plan: {target}.{target_pin}.",
+            )
+        seen_sources.add(source_key)
+        seen_targets.add(target_key)
+        for temp_id in (source, target):
+            connection_counts[temp_id] = connection_counts.get(temp_id, 0) + 1
+            if connection_counts[temp_id] > MAX_CONNECTIONS_PER_NODE:
+                raise GraphEditError(
+                    "graph-edit-connection-limit",
+                    f"{temp_id} would exceed the {MAX_CONNECTIONS_PER_NODE}-connection per-node limit.",
+                )
         normalized_connections.append(
             {
                 "from": source,
@@ -267,14 +306,44 @@ def validate_preview_result(preview: Any) -> dict[str, Any]:
             "graph-edit-preview-invalid",
             "preview.nodes and preview.connections must be arrays.",
         )
+    node_count_before = item.get("nodeCountBefore")
+    node_count_after = item.get("nodeCountAfter")
+    if (
+        isinstance(node_count_before, bool)
+        or isinstance(node_count_after, bool)
+        or not isinstance(node_count_before, int)
+        or not isinstance(node_count_after, int)
+        or node_count_after != node_count_before + len(nodes)
+        or item.get("connectionCount") != len(connections)
+    ):
+        raise GraphEditError(
+            "graph-edit-preview-invalid",
+            "preview node/connection counts do not match the previewed plan.",
+        )
     normalized = []
     for index, raw in enumerate(nodes):
         node = _object(raw, f"preview.nodes[{index}]")
         position = _object(node.get("position"), f"preview.nodes[{index}].position")
+        node_type = node.get("nodeType")
+        contract = NODE_TYPES.get(node_type) if isinstance(node_type, str) else None
+        if contract is not None:
+            for field in ("inputPins", "outputPins"):
+                declared = node.get(field)
+                if not isinstance(declared, list) or tuple(declared) != contract[field]:
+                    raise GraphEditError(
+                        "graph-edit-preview-invalid",
+                        f"preview.nodes[{index}].{field} does not match nodeType {node_type}.",
+                    )
+            for field in ("inputPinTypes", "outputPinTypes"):
+                if node.get(field) != contract[field]:
+                    raise GraphEditError(
+                        "graph-edit-preview-invalid",
+                        f"preview.nodes[{index}].{field} does not match nodeType {node_type}.",
+                    )
         normalized.append(
             {
                 "tempId": node.get("tempId"),
-                "nodeType": node.get("nodeType"),
+                "nodeType": node_type,
                 "x": position.get("x"),
                 "y": position.get("y"),
             }
@@ -282,6 +351,36 @@ def validate_preview_result(preview: Any) -> dict[str, Any]:
     normalized_connections = []
     for index, raw in enumerate(connections):
         connection = _object(raw, f"preview.connections[{index}]")
+        source_node = next(
+            (node for node in nodes if node.get("tempId") == connection.get("from")),
+            None,
+        )
+        target_node = next(
+            (node for node in nodes if node.get("tempId") == connection.get("to")),
+            None,
+        )
+        source_contract = (
+            NODE_TYPES.get(source_node.get("nodeType"), {})
+            if isinstance(source_node, dict)
+            else {}
+        )
+        target_contract = (
+            NODE_TYPES.get(target_node.get("nodeType"), {})
+            if isinstance(target_node, dict)
+            else {}
+        )
+        expected_from_type = source_contract.get("outputPinTypes", {}).get(connection.get("fromPin"))
+        expected_to_type = target_contract.get("inputPinTypes", {}).get(connection.get("toPin"))
+        if (
+            expected_from_type is None
+            or expected_to_type is None
+            or connection.get("fromType") != expected_from_type
+            or connection.get("toType") != expected_to_type
+        ):
+            raise GraphEditError(
+                "graph-edit-preview-invalid",
+                f"preview.connections[{index}] does not declare the exact pin types.",
+            )
         normalized_connections.append(
             {
                 "from": connection.get("from"),

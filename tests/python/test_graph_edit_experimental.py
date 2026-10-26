@@ -118,8 +118,10 @@ def _preview() -> dict[str, Any]:
                 "nodeType": "branch",
                 "nodeClass": "/Script/BlueprintGraph.K2Node_IfThenElse",
                 "position": {"x": 100, "y": 0},
-                "inputPins": ["execute"],
+                "inputPins": ["execute", "Condition"],
                 "outputPins": ["then", "else"],
+                "inputPinTypes": {"execute": "exec", "Condition": "bool"},
+                "outputPinTypes": {"then": "exec", "else": "exec"},
             },
             {
                 "tempId": "tmp:sequence",
@@ -128,10 +130,74 @@ def _preview() -> dict[str, Any]:
                 "position": {"x": 400, "y": 0},
                 "inputPins": ["execute"],
                 "outputPins": ["then_0", "then_1"],
+                "inputPinTypes": {"execute": "exec"},
+                "outputPinTypes": {"then_0": "exec", "then_1": "exec"},
             },
         ],
-        "connections": _connections(),
+        "connections": [
+            {
+                **_connections()[0],
+                "fromType": "exec",
+                "toType": "exec",
+            }
+        ],
     }
+
+
+def _bool_nodes() -> list[dict[str, Any]]:
+    return [
+        {"tempId": "tmp:not", "nodeType": "not_bool", "x": 100, "y": 0},
+        {"tempId": "tmp:branch", "nodeType": "branch", "x": 400, "y": 0},
+    ]
+
+
+def _bool_connections() -> list[dict[str, Any]]:
+    return [
+        {
+            "from": "tmp:not",
+            "fromPin": "ReturnValue",
+            "to": "tmp:branch",
+            "toPin": "Condition",
+        }
+    ]
+
+
+def _bool_preview() -> dict[str, Any]:
+    preview = _preview()
+    preview["nodeCountBefore"] = 3
+    preview["nodeCountAfter"] = 5
+    preview["connectionCount"] = 1
+    preview["nodes"] = [
+        {
+            "tempId": "tmp:not",
+            "nodeType": "not_bool",
+            "nodeClass": "/Script/BlueprintGraph.K2Node_CallFunction",
+            "function": "Not_PreBool",
+            "position": {"x": 100, "y": 0},
+            "inputPins": ["A"],
+            "outputPins": ["ReturnValue"],
+            "inputPinTypes": {"A": "bool"},
+            "outputPinTypes": {"ReturnValue": "bool"},
+        },
+        {
+            "tempId": "tmp:branch",
+            "nodeType": "branch",
+            "nodeClass": "/Script/BlueprintGraph.K2Node_IfThenElse",
+            "position": {"x": 400, "y": 0},
+            "inputPins": ["execute", "Condition"],
+            "outputPins": ["then", "else"],
+            "inputPinTypes": {"execute": "exec", "Condition": "bool"},
+            "outputPinTypes": {"then": "exec", "else": "exec"},
+        },
+    ]
+    preview["connections"] = [
+        {
+            **_bool_connections()[0],
+            "fromType": "bool",
+            "toType": "bool",
+        }
+    ]
+    return preview
 
 
 class GraphEditContractTests(unittest.TestCase):
@@ -156,6 +222,101 @@ class GraphEditContractTests(unittest.TestCase):
                 connections=_connections(),
             )
         self.assertEqual(raised.exception.code, "graph-edit-node-type-not-allowed")
+
+    def test_bool_data_connection_is_allowed(self) -> None:
+        request = validate_preview_parameters(
+            asset_path=ASSET,
+            graph_guid=GRAPH,
+            nodes=_bool_nodes(),
+            connections=_bool_connections(),
+        )
+        self.assertEqual(
+            request["connections"],
+            [
+                {
+                    "from": "tmp:not",
+                    "fromPin": "ReturnValue",
+                    "to": "tmp:branch",
+                    "toPin": "Condition",
+                }
+            ],
+        )
+        self.assertEqual(request["nodes"][0]["nodeType"], "not_bool")
+
+    def test_bool_type_mismatch_and_wrong_direction_fail_closed(self) -> None:
+        cases = [
+            (
+                [
+                    {"from": "tmp:not", "fromPin": "ReturnValue", "to": "tmp:branch", "toPin": "execute"},
+                ],
+                "graph-edit-pin-type-mismatch",
+            ),
+            (
+                [
+                    {"from": "tmp:branch", "fromPin": "then", "to": "tmp:not", "toPin": "A"},
+                ],
+                "graph-edit-pin-type-mismatch",
+            ),
+            (
+                [
+                    {"from": "tmp:branch", "fromPin": "Condition", "to": "tmp:not", "toPin": "A"},
+                ],
+                "graph-edit-pin-not-allowed",
+            ),
+            (
+                [
+                    {"from": "tmp:not", "fromPin": "ReturnValue", "to": "tmp:not", "toPin": "A"},
+                ],
+                "graph-edit-self-connection",
+            ),
+        ]
+        for connections, code in cases:
+            with self.subTest(code=code, connections=connections):
+                with self.assertRaises(GraphEditError) as raised:
+                    validate_preview_parameters(
+                        asset_path=ASSET,
+                        graph_guid=GRAPH,
+                        nodes=_bool_nodes(),
+                        connections=connections,
+                    )
+                self.assertEqual(raised.exception.code, code)
+
+    def test_duplicate_bool_target_is_rejected(self) -> None:
+        nodes = _bool_nodes() + [{"tempId": "tmp:not2", "nodeType": "not_bool", "x": 100, "y": 200}]
+        connections = _bool_connections() + [
+            {
+                "from": "tmp:not2",
+                "fromPin": "ReturnValue",
+                "to": "tmp:branch",
+                "toPin": "Condition",
+            }
+        ]
+        with self.assertRaises(GraphEditError) as raised:
+            validate_preview_parameters(
+                asset_path=ASSET,
+                graph_guid=GRAPH,
+                nodes=nodes,
+                connections=connections,
+            )
+        self.assertEqual(raised.exception.code, "graph-edit-connection-duplicate")
+
+    def test_bool_preview_declared_types_must_match_contract(self) -> None:
+        preview = _bool_preview()
+        params = build_apply_parameters(preview, APPLY_CONFIRMATION_PREFIX + PLAN_ID)
+        self.assertEqual(params["nodes"][0]["nodeType"], "not_bool")
+        self.assertEqual(params["connections"][0]["toPin"], "Condition")
+
+        tampered = copy.deepcopy(preview)
+        tampered["nodes"][0]["outputPinTypes"]["ReturnValue"] = "float"
+        with self.assertRaises(GraphEditError) as raised:
+            build_apply_parameters(tampered, APPLY_CONFIRMATION_PREFIX + PLAN_ID)
+        self.assertEqual(raised.exception.code, "graph-edit-preview-invalid")
+
+        missing_type = copy.deepcopy(preview)
+        del missing_type["connections"][0]["fromType"]
+        with self.assertRaises(GraphEditError) as raised:
+            build_apply_parameters(missing_type, APPLY_CONFIRMATION_PREFIX + PLAN_ID)
+        self.assertEqual(raised.exception.code, "graph-edit-preview-invalid")
 
     def test_data_pin_and_self_connection_are_rejected(self) -> None:
         nodes = _nodes()
@@ -294,6 +455,18 @@ class GraphEditContractTests(unittest.TestCase):
         self.assertEqual(result["error"]["code"], "graph-edit-experimental-disabled")
         self.assertEqual(live.calls, [])
 
+    def test_server_preserves_graph_edit_error_code(self) -> None:
+        from ue_agent_kit.mcp_server import _error_response
+
+        response = _error_response(
+            PREVIEW_TOOL_NAME,
+            GraphEditError("graph-edit-pin-type-mismatch", "bool != exec"),
+            read_only=True,
+        )
+        self.assertEqual(response["error"]["code"], "graph-edit-pin-type-mismatch")
+        self.assertEqual(response["error"]["type"], "GraphEditError")
+        self.assertFalse(response["error"]["retryable"])
+
     def test_mcp_returns_structured_validation_error(self) -> None:
         live = _FakeLiveEditor()
         server = _FakeServer()
@@ -331,6 +504,9 @@ class GraphEditContractTests(unittest.TestCase):
         self.assertTrue(block["available"])
         self.assertTrue(block["pluginCapabilityObserved"])
         self.assertFalse(block["productionDefault"])
+        self.assertIn("not_bool", block["supportedNodeTypes"])
+        self.assertTrue(block["strictPinTypeCheck"])
+        self.assertEqual(block["maxConnectionsPerNode"], 6)
 
         unobserved = _capabilities_response(
             None,
@@ -358,6 +534,11 @@ class GraphEditContractTests(unittest.TestCase):
         self.assertIn("editor.previewBlueprintGraphEditExperimental", bridge_source)
         self.assertIn("editor.applyBlueprintGraphEditExperimental", bridge_source)
         self.assertIn("ExperimentalGraphPatchEdit", edit_source)
+        self.assertIn("not_bool", edit_source)
+        self.assertIn("UKismetMathLibrary", edit_source)
+        self.assertIn("graph-edit-pin-type-mismatch", edit_source)
+        self.assertIn("graph-edit-pie-active", edit_source)
+        self.assertIn("graph-edit-package-dirty", edit_source)
 
 
 if __name__ == "__main__":

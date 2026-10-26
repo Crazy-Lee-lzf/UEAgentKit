@@ -72,10 +72,12 @@ def register_graph_edit_experimental_tools(
     ) -> dict[str, Any]:
         """Opt-in, read-only: validate a bounded createNode/connectPins plan against the live graph.
 
-        Supported nodes are Branch and Sequence. Supported connections are exec
-        connections from then/else/then_0/then_1 to execute. The result is
-        read-only and returns the exact planId and requiredConfirmation needed
-        by Apply. It never opens a transaction, dirties, compiles, or saves.
+        Supported nodes are Branch, Sequence and the pure NOT Boolean function
+        (not_bool). Supported connections are exec links from then/else/then_0/
+        then_1 to execute, plus the exact bool link not_bool.ReturnValue ->
+        branch.Condition. The result is read-only and returns the exact planId
+        and requiredConfirmation needed by Apply. It never opens a transaction,
+        dirties, compiles, or saves.
         """
         try:
             _capabilities(live_editor_service, PREVIEW_CAPABILITY)
@@ -121,9 +123,9 @@ def register_graph_edit_experimental_tools(
         ue_preview_blueprint_graph_edit_experimental and the exact
         'CREATE EXPERIMENTAL GRAPH NODES <planId>' confirmation. The Editor
         rechecks the exact focused graph, clean package, stopped PIE, current
-        revision/fingerprint, creates only Branch/Sequence nodes, connects only
-        the previewed exec pins, verifies readback and Undo/Redo, and never
-        saves or compiles.
+        revision/fingerprint, creates only Branch/Sequence/not_bool nodes,
+        connects only the previewed exec or exact bool pins, verifies readback
+        and Undo/Redo, and never saves or compiles.
         """
         try:
             _capabilities(live_editor_service, APPLY_CAPABILITY)

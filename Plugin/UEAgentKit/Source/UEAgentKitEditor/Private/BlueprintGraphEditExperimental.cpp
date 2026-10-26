@@ -12,8 +12,10 @@
 #include "EdGraphSchema_K2.h"
 #include "Editor.h"
 #include "Engine/Blueprint.h"
+#include "K2Node_CallFunction.h"
 #include "K2Node_ExecutionSequence.h"
 #include "K2Node_IfThenElse.h"
+#include "Kismet/KismetMathLibrary.h"
 #include "ScopedTransaction.h"
 
 #include "Dom/JsonObject.h"
@@ -28,10 +30,13 @@ namespace
 {
 	constexpr int32 MaxNodes = 8;
 	constexpr int32 MaxConnections = 12;
+	constexpr int32 MaxConnectionsPerNode = 6;
 	constexpr int32 MaxCoordinate = 100000;
 	const TCHAR* const PreviewSchemaVersion = TEXT("ueak.graphpatch-edit-preview/1.0");
 	const TCHAR* const BranchClassPath = TEXT("/Script/BlueprintGraph.K2Node_IfThenElse");
 	const TCHAR* const SequenceClassPath = TEXT("/Script/BlueprintGraph.K2Node_ExecutionSequence");
+	const TCHAR* const CallFunctionClassPath = TEXT("/Script/BlueprintGraph.K2Node_CallFunction");
+	const TCHAR* const NotBoolFunctionName = TEXT("Not_PreBool");
 
 	bool bTestOverrideSet = false;
 	bool bTestOverrideEnabled = false;
@@ -41,18 +46,23 @@ namespace
 		FString TempId;
 		FString NodeType;
 		FString NodeClassPath;
+		FString FunctionName;
 		int32 X = 0;
 		int32 Y = 0;
 		TArray<FString> InputPins;
 		TArray<FString> OutputPins;
+		TMap<FString, FString> InputPinTypes;
+		TMap<FString, FString> OutputPinTypes;
 	};
 
 	struct FConnectionSpec
 	{
 		FString From;
 		FString FromPin;
+		FString FromType;
 		FString To;
 		FString ToPin;
+		FString ToType;
 	};
 
 	struct FEditPlan
@@ -197,8 +207,12 @@ namespace
 		if (NodeType == TEXT("branch"))
 		{
 			OutNode.NodeClassPath = BranchClassPath;
-			OutNode.InputPins = { TEXT("execute") };
+			OutNode.InputPins = { TEXT("execute"), TEXT("Condition") };
 			OutNode.OutputPins = { TEXT("then"), TEXT("else") };
+			OutNode.InputPinTypes.Add(TEXT("execute"), TEXT("exec"));
+			OutNode.InputPinTypes.Add(TEXT("Condition"), TEXT("bool"));
+			OutNode.OutputPinTypes.Add(TEXT("then"), TEXT("exec"));
+			OutNode.OutputPinTypes.Add(TEXT("else"), TEXT("exec"));
 			return true;
 		}
 		if (NodeType == TEXT("sequence"))
@@ -206,13 +220,26 @@ namespace
 			OutNode.NodeClassPath = SequenceClassPath;
 			OutNode.InputPins = { TEXT("execute") };
 			OutNode.OutputPins = { TEXT("then_0"), TEXT("then_1") };
+			OutNode.InputPinTypes.Add(TEXT("execute"), TEXT("exec"));
+			OutNode.OutputPinTypes.Add(TEXT("then_0"), TEXT("exec"));
+			OutNode.OutputPinTypes.Add(TEXT("then_1"), TEXT("exec"));
+			return true;
+		}
+		if (NodeType == TEXT("not_bool"))
+		{
+			OutNode.NodeClassPath = CallFunctionClassPath;
+			OutNode.FunctionName = NotBoolFunctionName;
+			OutNode.InputPins = { TEXT("A") };
+			OutNode.OutputPins = { TEXT("ReturnValue") };
+			OutNode.InputPinTypes.Add(TEXT("A"), TEXT("bool"));
+			OutNode.OutputPinTypes.Add(TEXT("ReturnValue"), TEXT("bool"));
 			return true;
 		}
 		return Fail(
 			OutErrorCode,
 			OutErrorMessage,
 			TEXT("graph-edit-node-type-not-allowed"),
-			TEXT("Only nodeType 'branch' and 'sequence' are supported by this experimental slice."));
+			TEXT("Only nodeType 'branch', 'sequence' and 'not_bool' are supported by this experimental slice."));
 	}
 
 	const FNodeSpec* FindNode(const TArray<FNodeSpec>& Nodes, const FString& TempId)
@@ -322,6 +349,8 @@ namespace
 		}
 
 		TSet<FString> SeenSources;
+		TSet<FString> SeenTargets;
+		TMap<FString, int32> ConnectionCounts;
 		for (const TSharedPtr<FJsonValue>& Value : *Values)
 		{
 			const TSharedPtr<FJsonObject>* Object = nullptr;
@@ -370,7 +399,8 @@ namespace
 					TEXT("graph-edit-self-connection"),
 					TEXT("A node cannot connect to itself in this experimental slice."));
 			}
-			if (!From->OutputPins.Contains(Connection.FromPin))
+			const FString* FromType = From->OutputPinTypes.Find(Connection.FromPin);
+			if (FromType == nullptr)
 			{
 				return Fail(
 					OutErrorCode,
@@ -382,7 +412,8 @@ namespace
 						*From->NodeType,
 						*FString::Join(From->OutputPins, TEXT(", "))));
 			}
-			if (!To->InputPins.Contains(Connection.ToPin))
+			const FString* ToType = To->InputPinTypes.Find(Connection.ToPin);
+			if (ToType == nullptr)
 			{
 				return Fail(
 					OutErrorCode,
@@ -394,6 +425,21 @@ namespace
 						*To->NodeType,
 						*FString::Join(To->InputPins, TEXT(", "))));
 			}
+			if (!FromType->Equals(*ToType, ESearchCase::CaseSensitive))
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-pin-type-mismatch"),
+					FString::Printf(
+						TEXT("Cannot connect %s.%s (%s) to %s.%s (%s); data kinds must match exactly."),
+						*Connection.From,
+						*Connection.FromPin,
+						**FromType,
+						*Connection.To,
+						*Connection.ToPin,
+						**ToType));
+			}
 			const FString SourceKey = Connection.From + TEXT("|") + Connection.FromPin;
 			if (SeenSources.Contains(SourceKey))
 			{
@@ -403,7 +449,35 @@ namespace
 					TEXT("graph-edit-connection-duplicate"),
 					FString::Printf(TEXT("Output pin already has a connection in this plan: %s"), *SourceKey));
 			}
+			const FString TargetKey = Connection.To + TEXT("|") + Connection.ToPin;
+			if (SeenTargets.Contains(TargetKey))
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-connection-duplicate"),
+					FString::Printf(TEXT("Input pin already has a connection in this plan: %s"), *TargetKey));
+			}
 			SeenSources.Add(SourceKey);
+			SeenTargets.Add(TargetKey);
+			for (const FString& TempId : { Connection.From, Connection.To })
+			{
+				int32& Count = ConnectionCounts.FindOrAdd(TempId);
+				++Count;
+				if (Count > MaxConnectionsPerNode)
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-edit-connection-limit"),
+						FString::Printf(
+							TEXT("%s would exceed the %d-connection per-node limit."),
+							*TempId,
+							MaxConnectionsPerNode));
+				}
+			}
+			Connection.FromType = *FromType;
+			Connection.ToType = *ToType;
 			OutConnections.Add(MoveTemp(Connection));
 		}
 		return true;
@@ -576,6 +650,10 @@ namespace
 			Item->SetStringField(TEXT("tempId"), Node.TempId);
 			Item->SetStringField(TEXT("nodeType"), Node.NodeType);
 			Item->SetStringField(TEXT("nodeClass"), Node.NodeClassPath);
+			if (!Node.FunctionName.IsEmpty())
+			{
+				Item->SetStringField(TEXT("function"), Node.FunctionName);
+			}
 			TSharedRef<FJsonObject> Position = MakeShared<FJsonObject>();
 			Position->SetNumberField(TEXT("x"), Node.X);
 			Position->SetNumberField(TEXT("y"), Node.Y);
@@ -592,6 +670,18 @@ namespace
 			}
 			Item->SetArrayField(TEXT("inputPins"), Inputs);
 			Item->SetArrayField(TEXT("outputPins"), Outputs);
+			TSharedRef<FJsonObject> InputTypes = MakeShared<FJsonObject>();
+			for (const TPair<FString, FString>& Pair : Node.InputPinTypes)
+			{
+				InputTypes->SetStringField(Pair.Key, Pair.Value);
+			}
+			TSharedRef<FJsonObject> OutputTypes = MakeShared<FJsonObject>();
+			for (const TPair<FString, FString>& Pair : Node.OutputPinTypes)
+			{
+				OutputTypes->SetStringField(Pair.Key, Pair.Value);
+			}
+			Item->SetObjectField(TEXT("inputPinTypes"), InputTypes);
+			Item->SetObjectField(TEXT("outputPinTypes"), OutputTypes);
 			NodeValues.Add(MakeShared<FJsonValueObject>(Item));
 		}
 		Preview->SetArrayField(TEXT("nodes"), NodeValues);
@@ -602,8 +692,10 @@ namespace
 			TSharedRef<FJsonObject> Item = MakeShared<FJsonObject>();
 			Item->SetStringField(TEXT("from"), Connection.From);
 			Item->SetStringField(TEXT("fromPin"), Connection.FromPin);
+			Item->SetStringField(TEXT("fromType"), Connection.FromType);
 			Item->SetStringField(TEXT("to"), Connection.To);
 			Item->SetStringField(TEXT("toPin"), Connection.ToPin);
+			Item->SetStringField(TEXT("toType"), Connection.ToType);
 			ConnectionValues.Add(MakeShared<FJsonValueObject>(Item));
 		}
 		Preview->SetArrayField(TEXT("connections"), ConnectionValues);
@@ -662,6 +754,23 @@ namespace
 			&& Input->LinkedTo.Contains(Output);
 	}
 
+	bool PinMatchesType(const UEdGraphPin* Pin, const FString& ExpectedType)
+	{
+		if (Pin == nullptr)
+		{
+			return false;
+		}
+		if (ExpectedType.Equals(TEXT("exec"), ESearchCase::CaseSensitive))
+		{
+			return Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Exec;
+		}
+		if (ExpectedType.Equals(TEXT("bool"), ESearchCase::CaseSensitive))
+		{
+			return Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Boolean;
+		}
+		return false;
+	}
+
 	UClass* NodeClassForType(const FString& NodeType)
 	{
 		if (NodeType == TEXT("branch"))
@@ -671,6 +780,10 @@ namespace
 		if (NodeType == TEXT("sequence"))
 		{
 			return UK2Node_ExecutionSequence::StaticClass();
+		}
+		if (NodeType == TEXT("not_bool"))
+		{
+			return UK2Node_CallFunction::StaticClass();
 		}
 		return nullptr;
 	}
@@ -837,24 +950,54 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 
 		for (const FNodeSpec& Spec : Plan.Nodes)
 		{
-			UClass* NodeClass = NodeClassForType(Spec.NodeType);
-			if (NodeClass == nullptr)
+			UEdGraphNode* Node = nullptr;
+			if (Spec.NodeType == TEXT("not_bool"))
 			{
-				return Abort(
-					TEXT("graph-edit-node-type-not-allowed"),
-					FString::Printf(TEXT("Unsupported nodeType: %s"), *Spec.NodeType));
+				UFunction* Function = UKismetMathLibrary::StaticClass()->FindFunctionByName(
+					FName(*Spec.FunctionName));
+				if (Function == nullptr)
+				{
+					return Abort(
+						TEXT("graph-edit-node-spawn-failed"),
+						FString::Printf(TEXT("The bool function %s is unavailable."), *Spec.FunctionName));
+				}
+				UK2Node_CallFunction* CallNode = NewObject<UK2Node_CallFunction>(Graph);
+				if (CallNode == nullptr)
+				{
+					return Abort(
+						TEXT("graph-edit-node-spawn-failed"),
+						TEXT("Could not allocate the bool CallFunction node."));
+				}
+				CallNode->Modify();
+				Graph->AddNode(CallNode, true, false);
+				CallNode->SetFromFunction(Function);
+				if (CallNode->Pins.Num() == 0)
+				{
+					CallNode->AllocateDefaultPins();
+				}
+				Node = CallNode;
 			}
-			UBlueprintNodeSpawner* Spawner = UBlueprintNodeSpawner::Create(NodeClass, GetTransientPackage());
-			if (Spawner == nullptr)
+			else
 			{
-				return Abort(
-					TEXT("graph-edit-node-spawn-failed"),
-					FString::Printf(TEXT("Could not create a node spawner for %s."), *Spec.NodeType));
+				UClass* NodeClass = NodeClassForType(Spec.NodeType);
+				if (NodeClass == nullptr)
+				{
+					return Abort(
+						TEXT("graph-edit-node-type-not-allowed"),
+						FString::Printf(TEXT("Unsupported nodeType: %s"), *Spec.NodeType));
+				}
+				UBlueprintNodeSpawner* Spawner = UBlueprintNodeSpawner::Create(NodeClass, GetTransientPackage());
+				if (Spawner == nullptr)
+				{
+					return Abort(
+						TEXT("graph-edit-node-spawn-failed"),
+						FString::Printf(TEXT("Could not create a node spawner for %s."), *Spec.NodeType));
+				}
+				Node = Spawner->Invoke(
+					Graph,
+					IBlueprintNodeBinder::FBindingSet(),
+					FVector2D(Spec.X, Spec.Y));
 			}
-			UEdGraphNode* Node = Spawner->Invoke(
-				Graph,
-				IBlueprintNodeBinder::FBindingSet(),
-				FVector2D(Spec.X, Spec.Y));
 			if (Node == nullptr)
 			{
 				return Abort(
@@ -902,6 +1045,16 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 						TEXT("The spawned nodes do not expose %s -> %s."),
 						*Connection.FromPin,
 						*Connection.ToPin));
+			}
+			if (!PinMatchesType(FromPin, Connection.FromType)
+				|| !PinMatchesType(ToPin, Connection.ToType))
+			{
+				return Abort(
+					TEXT("graph-edit-pin-type-mismatch"),
+					FString::Printf(
+						TEXT("The spawned pins do not match the declared types %s -> %s."),
+						*Connection.FromType,
+						*Connection.ToType));
 			}
 			if (!Graph->GetSchema()->TryCreateConnection(FromPin, ToPin)
 				|| !ArePinsConnected(*FromNode, Connection.FromPin, *ToNode, Connection.ToPin))
@@ -1022,6 +1175,10 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 		Item->SetStringField(TEXT("tempId"), Spec.TempId);
 		Item->SetStringField(TEXT("nodeId"), FString(TEXT("n:")) + NodeGuid->ToString(EGuidFormats::DigitsWithHyphensLower));
 		Item->SetStringField(TEXT("nodeClass"), Spec.NodeClassPath);
+		if (!Spec.FunctionName.IsEmpty())
+		{
+			Item->SetStringField(TEXT("function"), Spec.FunctionName);
+		}
 		Item->SetNumberField(TEXT("x"), Spec.X);
 		Item->SetNumberField(TEXT("y"), Spec.Y);
 		CreatedNodeValues.Add(MakeShared<FJsonValueObject>(Item));
@@ -1033,8 +1190,10 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 		TSharedRef<FJsonObject> Item = MakeShared<FJsonObject>();
 		Item->SetStringField(TEXT("from"), Connection.From);
 		Item->SetStringField(TEXT("fromPin"), Connection.FromPin);
+		Item->SetStringField(TEXT("fromType"), Connection.FromType);
 		Item->SetStringField(TEXT("to"), Connection.To);
 		Item->SetStringField(TEXT("toPin"), Connection.ToPin);
+		Item->SetStringField(TEXT("toType"), Connection.ToType);
 		ConnectionValues.Add(MakeShared<FJsonValueObject>(Item));
 	}
 

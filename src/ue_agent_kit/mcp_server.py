@@ -59,6 +59,7 @@ from .mcp_graph_edit_experimental import register_graph_edit_experimental_tools
 from .experimental_graph_edit import (
     APPLY_TOOL_NAME as EXPERIMENTAL_GRAPH_EDIT_APPLY_TOOL_NAME,
     PREVIEW_TOOL_NAME as EXPERIMENTAL_GRAPH_EDIT_PREVIEW_TOOL_NAME,
+    GraphEditError,
 )
 from .experimental_graph_layout import (
     APPLY_TOOL_NAME as EXPERIMENTAL_APPLY_TOOL_NAME,
@@ -691,8 +692,12 @@ def _capabilities_response(
                 },
                 "requiresCompletePreviewResult": True,
                 "acceptsCallerBuiltRequest": False,
-                "supportedNodeTypes": ["branch", "sequence"],
-                "supportedConnections": "exec-only",
+                "supportedNodeTypes": ["branch", "sequence", "not_bool"],
+                "supportedConnections": [
+                    "exec: then/else/then_0/then_1 -> execute",
+                    "bool: not_bool.ReturnValue -> branch.Condition",
+                ],
+                "strictPinTypeCheck": True,
                 "exactFocusedGraphOnly": True,
                 "requiresCleanPackage": True,
                 "requiresPieStopped": True,
@@ -704,6 +709,7 @@ def _capabilities_response(
                 "requiresExplicitSeparateSave": True,
                 "maxNodes": 8,
                 "maxConnections": 12,
+                "maxConnectionsPerNode": 6,
                 "maxRequestBytes": 61440,
             },
             "editorContext": {
@@ -1531,6 +1537,8 @@ def _error_response(tool: str, error: Exception, *, read_only: bool) -> dict[str
         code = error.code
         details = error.details
     elif isinstance(error, VerificationTrustError):
+        code = error.code
+    elif isinstance(error, GraphEditError):
         code = error.code
     elif isinstance(error, ValueError):
         code = "invalid-arguments"

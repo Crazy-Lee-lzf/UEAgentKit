@@ -18,9 +18,10 @@ The default-off, explicitly opted-in MCP Apply/Save loop is documented in
 [Experimental MCP Apply](EXPERIMENTAL_MCP_APPLY.md). It is experimental and
 requires both a server flag and an Editor project config opt-in.
 
-The first default-off live createNode/connectPins slice (Branch/Sequence only)
-is documented in [Experimental MCP Graph Edit](EXPERIMENTAL_MCP_GRAPH_EDIT.md).
-It is not a general GraphPatch executor.
+The default-off live createNode/connectPins slice (Branch/Sequence plus a
+type-checked Bool data link) is documented in
+[Experimental MCP Graph Edit](EXPERIMENTAL_MCP_GRAPH_EDIT.md). It is not a
+general GraphPatch executor.
 
 ## Contracts and experimental reference implementation
 
