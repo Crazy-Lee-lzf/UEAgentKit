@@ -1302,11 +1302,31 @@ class IndexQueryService:
             else:
                 page = {"actors": [], "total": 0, "hasMore": False, "worlds": []}
             status = world_index_v2.world_status(connection, world=world, limit=8)
+            # World export coverage is distinct from WP descriptor coverage.
+            selected = status["worlds"][0] if world and len(status["worlds"]) == 1 else None
+            wp_available = selected.get("worldPartitionAvailable") if selected else None
+            wp_metadata = selected.get("actorDescMetadataAvailable") if selected else None
+            wp_warnings = list(status["warnings"])
+            if wp_available is False:
+                wp_coverage = "not-applicable"
+                wp_warnings.append(
+                    "This map is not a World Partition map. Empty descriptors "
+                    "do not verify World Partition coverage."
+                )
+            elif wp_available is True and wp_metadata is False:
+                wp_coverage = "metadata-unavailable"
+            elif wp_available is True:
+                wp_coverage = status["coverage"]
+            else:
+                wp_coverage = "unknown"
 
             response = self._base_response(connection, "ue_find_world_partition_actors")
             response.update(
                 {
                     "worldIndexAvailable": world_available,
+                    "worldPartitionAvailable": wp_available,
+                    "actorDescMetadataAvailable": wp_metadata,
+                    "worldPartitionCoverage": wp_coverage,
                     "world": world,
                     "filters": {
                         "world": world,
@@ -1319,7 +1339,7 @@ class IndexQueryService:
                     "coverage": status["coverage"],
                     "complete": status["complete"],
                     "worldStatus": status,
-                    "warnings": status["warnings"],
+                    "warnings": wp_warnings,
                 }
             )
             return self._world_paged_response(

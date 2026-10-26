@@ -703,11 +703,34 @@ class WorldMcpToolTests(WorldMcpIntegrationTestCase):
         self.assertEqual(unknown_map["coverage"], "unknown-map")
         self.assertFalse(unknown_map["complete"])
 
+    def test_non_partition_map_reports_wp_not_applicable(self) -> None:
+        self.world["assetDetails"]["worldPartition"] = {
+            "available": False,
+            "actorDescMetadataAvailable": False,
+            "actorDescCount": 0,
+            "exportedActorDescCount": 0,
+            "actorDescListTruncated": False,
+            "actorDescs": [],
+        }
+        write_world_export(self.export, [self.world])
+        self.build()
+        result = self.call("ue_find_world_partition_actors", {"world": WORLD_ASSET})
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["coverage"], "complete")
+        self.assertEqual(result["worldPartitionCoverage"], "not-applicable")
+        self.assertIs(result["worldPartitionAvailable"], False)
+        self.assertIs(result["actorDescMetadataAvailable"], False)
+        self.assertEqual(result["pagination"]["total"], 0)
+        self.assertTrue(any("not a World Partition map" in x for x in result["warnings"]))
+        self.assertIs(result["worldStatus"]["worlds"][0]["worldPartitionAvailable"], False)
+
     def test_partition_and_summary_tools(self) -> None:
         partitions = self.call(
             "ue_find_world_partition_actors", {"world": WORLD_ASSET, "tag": "Lighting"}
         )
         self.assertTrue(partitions["ok"])
+        self.assertIs(partitions["worldPartitionAvailable"], True)
+        self.assertEqual(partitions["worldPartitionCoverage"], "complete")
         self.assertEqual(partitions["pagination"]["total"], 2)
         self.assertTrue(all("editorBounds" in item for item in partitions["results"]))
 

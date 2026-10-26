@@ -1854,6 +1854,8 @@ def _coverage_entry(
         "exportedActorDescCount": 0,
         "actorRows": 0,
         "actorDescRows": 0,
+        "worldPartitionAvailable": None,
+        "actorDescMetadataAvailable": None,
         "warnings": [],
     }
     warnings: list[str] = []
@@ -1870,6 +1872,12 @@ def _coverage_entry(
 
     entry["packageName"] = entry["packageName"] or str(world_row["package_name"])
     entry["worldIngestedAtUtc"] = str(world_row["ingested_at_utc"])
+    # WP coverage is distinct from completeness of the World asset export.
+    # A non-WorldPartition map may be complete but has no WP descriptors by design.
+    partition_info = _json_object(world_row["world_partition_json"])
+    wp_available = partition_info.get("available")
+    entry["worldPartitionAvailable"] = wp_available if isinstance(wp_available, bool) else None
+    entry["actorDescMetadataAvailable"] = bool(world_row["actor_desc_metadata_available"])
     entry["partial"] = bool(world_row["partial"])
     entry["partialReasons"] = [str(item) for item in _json_list(world_row["partial_reasons_json"])]
     entry["actorListTruncated"] = bool(world_row["actor_list_truncated"])

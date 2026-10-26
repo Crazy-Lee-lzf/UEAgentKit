@@ -252,6 +252,8 @@ nodes
 
 ### `ue_find_world_partition_actors`
 
+单地图 World Partition 查询会额外返回 worldPartitionAvailable（true/false/null）、actorDescMetadataAvailable 和 worldPartitionCoverage。非 WP 地图显式报告 not-applicable 并附警告；World 的 coverage=complete 只表示地图 Actor 索引完整，不表示 WP Actor Descriptor 覆盖已验收。未指定唯一地图时 WP 可用性为 null、覆盖状态 unknown。
+
 查询 World Partition 的 Actor Descriptor（未加载 Actor 的元数据与 `editorBounds`）。过滤条件：`base_class_path`、`class_contains`、`tag`、`data_layer`、`folder_prefix`；分页、Token 预算、`coverage`/`worldStatus` 契约与 `ue_find_world_actors` 一致，并在每条结果中附带 `actor_desc_list_truncated`、`actor_desc_metadata_available`、`exported_actor_desc_count`、`actor_desc_count`。
 
 ### `ue_get_world_summary`
