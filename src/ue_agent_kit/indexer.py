@@ -530,6 +530,7 @@ def _fast_manifest_identity(existing: Any, manifest: dict[str, Any]) -> bool:
         and exporter_version
         and str(existing["schema_version"]) == schema_version
         and str(existing["exporter_version"]) == exporter_version
+        and str(existing["profile"]) == str(manifest.get("profile", ""))
     )
 
 

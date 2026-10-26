@@ -222,6 +222,27 @@ class IncrementalBatchTests(unittest.TestCase):
         self.assertEqual(len(reads), 2)
         self.assertTrue(digest)
 
+    def test_manifest_profile_change_disables_fast_skip(self) -> None:
+        asset = _asset("/Game/Batch/BP_Profile.BP_Profile")
+        write_export(self.export_root, [asset])
+        with open_database(self.database_path) as connection:
+            initial = build_index(connection, self.export_root, self.database_path)
+            self.assertEqual(initial.added, 1)
+            _rewrite_manifest(
+                self.export_root,
+                lambda payload: (
+                    payload.__setitem__("profile", "different-export-profile"),
+                    payload["assets"][0].__setitem__(
+                        "canonicalSha256",
+                        hashlib.sha256(Path(payload["assets"][0]["jsonPath"]).read_bytes()).hexdigest(),
+                    ),
+                ),
+            )
+            second = build_index(connection, self.export_root, self.database_path)
+        self.assertEqual(second.fast_path_skips, 0)
+        self.assertEqual(second.strict_full_checks, 1)
+        self.assertEqual(second.skipped, 1)
+
     def test_read_changed_path_attestation_requires_provenance(self) -> None:
         attestation = self.root / "changed.json"
         attestation.write_text(json.dumps({"changedAssetPaths": [ASSET_A]}), encoding="utf-8")
