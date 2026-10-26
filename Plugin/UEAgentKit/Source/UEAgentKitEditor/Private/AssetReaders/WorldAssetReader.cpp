@@ -1,6 +1,10 @@
 #include "AssetReaders/AssetReaderCommon.h"
 #include "AssetReaders/AssetReaderImplementations.h"
 
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistry/IAssetRegistry.h"
+#include "Modules/ModuleManager.h"
+
 namespace AssetReaderRegistryPrivate
 {
 	TSharedRef<FJsonObject> WorldActorToJson(
@@ -323,15 +327,24 @@ namespace AssetReaderRegistryPrivate
 		bool bActorDescMetadataAvailable = false;
 		FString ActorDescInitialization = TEXT("not-performed");
 		const bool bWorldPackageDirtyBefore = World->GetPackage() != nullptr && World->GetPackage()->IsDirty();
+		const UActorDescContainerInstance* ActorDescContainer = nullptr;
+		FString ExternalActorPathForCoverage;
+		TArray<FString> UnmatchedExternalActorPackages;
+		int32 ExternalActorPackageCount = 0;
+		int32 ExternalActorDescriptorPackageCount = 0;
+		bool bUnmatchedExternalActorPackagesTruncated = false;
+		FString ExternalActorPackageCoverage = TEXT("not-applicable");
+		constexpr int32 MaxLoggedUnmatchedExternalActorPackages = 64;
 #if WITH_EDITOR
 		if (WorldPartition != nullptr)
 		{
 			FScopedWorldPartitionDescriptorInitialization InitializationScope;
 			const bool bTemporaryInitialization = InitializationScope.Initialize(World, WorldPartition);
-			const UActorDescContainerInstance* ActorDescContainer = WorldPartition->GetActorDescContainerInstance();
+			ActorDescContainer = WorldPartition->GetActorDescContainerInstance();
 			bActorDescMetadataAvailable = ActorDescContainer != nullptr;
 			if (bActorDescMetadataAvailable)
 			{
+				ExternalActorPathForCoverage = ActorDescContainer->GetExternalActorPath();
 				ActorDescInitialization = bTemporaryInitialization ? TEXT("commandlet-temporary") : TEXT("reused");
 				FWorldPartitionHelpers::ForEachActorDescInstance<AActor>(WorldPartition, [&ActorDescs, &ActorDescClassCounts](const FWorldPartitionActorDescInstance* ActorDesc)
 				{
@@ -365,6 +378,77 @@ namespace AssetReaderRegistryPrivate
 			{
 				ActorDescValues.Add(MakeShared<FJsonValueObject>(WorldPartitionActorDescToJson(ActorDescs[ActorDescIndex])));
 			}
+
+#if WITH_EDITOR
+			// A descriptor list is not a proof that every external actor package
+			// was represented.  Use the native AssetRegistry inventory for the
+			// exact World Partition external-actor folder as a diagnostic;
+			// unmatched packages can be unresolved classes or genuinely stale
+			// packages, so they are recorded for fail-closed coverage rather
+			// than synthesized.  This runs before the scoped initialization is
+			// released, because ActorDescs is owned by the container.
+			if (PersistentLevel != nullptr && PersistentLevel->IsUsingExternalActors()
+				&& !ExternalActorPathForCoverage.IsEmpty())
+			{
+				ExternalActorPackageCoverage = TEXT("unknown");
+				const FString& ExternalActorPath = ExternalActorPathForCoverage;
+				if (!ExternalActorPath.IsEmpty())
+				{
+					if (FAssetRegistryModule* AssetRegistryModule = FModuleManager::GetModulePtr<FAssetRegistryModule>(TEXT("AssetRegistry")))
+					{
+						IAssetRegistry& AssetRegistry = AssetRegistryModule->Get();
+						TArray<FAssetData> ExternalAssets;
+						const bool bInventoryAvailable = AssetRegistry.GetAssetsByPath(
+							FName(*ExternalActorPath), ExternalAssets, true, true);
+						if (bInventoryAvailable)
+						{
+							FString ExternalActorPrefix = ExternalActorPath;
+							if (!ExternalActorPrefix.EndsWith(TEXT("/")))
+							{
+								ExternalActorPrefix += TEXT("/");
+							}
+
+							TSet<FName> ExternalPackages;
+							for (const FAssetData& ExternalAsset : ExternalAssets)
+							{
+								ExternalPackages.Add(ExternalAsset.PackageName);
+							}
+							TSet<FName> DescriptorExternalPackages;
+							for (const FWorldPartitionActorDescInstance* ActorDesc : ActorDescs)
+							{
+								if (ActorDesc != nullptr
+									&& ActorDesc->GetActorPackage().ToString().StartsWith(ExternalActorPrefix))
+								{
+									DescriptorExternalPackages.Add(ActorDesc->GetActorPackage());
+								}
+							}
+
+							ExternalActorPackageCount = ExternalPackages.Num();
+							ExternalActorDescriptorPackageCount = DescriptorExternalPackages.Num();
+							for (const FName& ExternalPackage : ExternalPackages)
+							{
+								if (!DescriptorExternalPackages.Contains(ExternalPackage))
+								{
+									UnmatchedExternalActorPackages.Add(ExternalPackage.ToString());
+								}
+							}
+							UnmatchedExternalActorPackages.Sort();
+							bUnmatchedExternalActorPackagesTruncated =
+								UnmatchedExternalActorPackages.Num() > MaxLoggedUnmatchedExternalActorPackages;
+							ExternalActorPackageCoverage =
+								UnmatchedExternalActorPackages.Num() == 0 ? TEXT("complete") : TEXT("unmatched");
+							if (ExternalActorPackageCount == 0 && ExternalActorDescriptorPackageCount > 0)
+							{
+								// An empty inventory cannot prove that external
+								// descriptors are complete; keep the fail-closed
+								// unknown state.
+								ExternalActorPackageCoverage = TEXT("unknown");
+							}
+						}
+					}
+				}
+			}
+#endif
 		}
 		else
 		{
@@ -378,6 +462,21 @@ namespace AssetReaderRegistryPrivate
 		WorldPartitionJson->SetNumberField(TEXT("actorDescCount"), ActorDescs.Num());
 		WorldPartitionJson->SetNumberField(TEXT("exportedActorDescCount"), ActorDescValues.Num());
 		WorldPartitionJson->SetBoolField(TEXT("actorDescListTruncated"), ActorDescValues.Num() < ActorDescs.Num());
+		WorldPartitionJson->SetNumberField(TEXT("externalActorPackageCount"), ExternalActorPackageCount);
+		WorldPartitionJson->SetNumberField(TEXT("externalActorDescriptorPackageCount"), ExternalActorDescriptorPackageCount);
+		WorldPartitionJson->SetNumberField(TEXT("unmatchedExternalActorPackageCount"), UnmatchedExternalActorPackages.Num());
+		WorldPartitionJson->SetBoolField(TEXT("unmatchedExternalActorPackagesTruncated"), bUnmatchedExternalActorPackagesTruncated);
+		TArray<TSharedPtr<FJsonValue>> UnmatchedExternalActorPackageValues;
+		const int32 ExportedUnmatchedExternalActorPackageCount = FMath::Min(
+			UnmatchedExternalActorPackages.Num(), MaxLoggedUnmatchedExternalActorPackages);
+		UnmatchedExternalActorPackageValues.Reserve(ExportedUnmatchedExternalActorPackageCount);
+		for (int32 ExternalPackageIndex = 0; ExternalPackageIndex < ExportedUnmatchedExternalActorPackageCount; ++ExternalPackageIndex)
+		{
+			UnmatchedExternalActorPackageValues.Add(
+				MakeShared<FJsonValueString>(UnmatchedExternalActorPackages[ExternalPackageIndex]));
+		}
+		WorldPartitionJson->SetArrayField(TEXT("unmatchedExternalActorPackages"), UnmatchedExternalActorPackageValues);
+		WorldPartitionJson->SetStringField(TEXT("externalActorPackageCoverage"), ExternalActorPackageCoverage);
 		WorldPartitionJson->SetArrayField(TEXT("actorDescClassCounts"), StringCountsToJson(ActorDescClassCounts));
 		WorldPartitionJson->SetArrayField(TEXT("actorDescs"), ActorDescValues);
 		OutDetails->SetObjectField(TEXT("worldPartition"), WorldPartitionJson);

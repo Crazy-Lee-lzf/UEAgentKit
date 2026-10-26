@@ -472,6 +472,47 @@ class IngestTests(WorldIndexV2TestCase):
         # partial data is still queryable; the flag just says it is incomplete
         self.assertEqual(find_world_actors(connection, world=WORLD_ASSET)["total"], 5)
 
+    def test_unmatched_external_package_inventory_is_flagged_partial(self) -> None:
+        connection = self.connect()
+        document = load_world_document()
+        details = document["assetDetails"]
+        details["usingExternalActors"] = True
+        world_partition = details["worldPartition"]
+        world_partition.update(
+            {
+                "externalActorPackageCount": 2,
+                "externalActorDescriptorPackageCount": 1,
+                "externalActorPackageCoverage": "unmatched",
+                "unmatchedExternalActorPackageCount": 1,
+                "unmatchedExternalActorPackages": [
+                    "/Game/__ExternalActors__/UEAgentKitTests/Maps/L_Smoke/0/AA/DUPLICATE"
+                ],
+            }
+        )
+
+        result = ingest_world(connection, document)
+        self.assertTrue(result["partial"])
+        self.assertIn("actor-desc-external-packages-unmatched", result["partial_reasons"])
+        world = get_world(connection, WORLD_ASSET)
+        assert world is not None
+        self.assertEqual(world["partial"], 1)
+        self.assertIn("actor-desc-external-packages-unmatched", world["partial_reasons"])
+        # The package list is diagnostic only.  The canonical actor rows remain
+        # exactly the rows the native descriptor enumerator returned.
+        self.assertEqual(world["counts"]["descriptors"], 3)
+
+    def test_unknown_external_package_inventory_is_flagged_partial(self) -> None:
+        document = load_world_document()
+        details = document["assetDetails"]
+        details["usingExternalActors"] = True
+        details["worldPartition"]["externalActorPackageCoverage"] = "unknown"
+        result = parse_world_canonical(document)
+        self.assertTrue(result.flags["partial"])
+        self.assertIn(
+            "actor-desc-external-package-inventory-unavailable",
+            result.flags["partial_reasons"],
+        )
+
     def test_reader_failure_status_is_flagged_partial(self) -> None:
         connection = self.connect()
         document = load_world_document()

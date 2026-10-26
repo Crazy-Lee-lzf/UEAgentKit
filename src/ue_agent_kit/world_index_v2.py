@@ -981,6 +981,18 @@ def parse_world_canonical(canonical: Mapping[str, Any], *, source_path: str = ""
         # actors, because those actors must have descriptors.  Do not infer an
         # expected count from package counts; fail closed instead.
         partial_reasons.append("actor-desc-empty-with-external-actors")
+    external_actor_package_coverage = _text(
+        world_partition.get("externalActorPackageCoverage")
+    )
+    if world_partition_available == 1 and _bool_or_none(details.get("usingExternalActors")) == 1:
+        if external_actor_package_coverage == "unmatched":
+            # AssetRegistry knows packages that the official descriptor
+            # enumerator did not represent.  They may be unresolved classes or
+            # stale/orphan packages; either way the export must not be labelled
+            # complete until a native probe explains them.
+            partial_reasons.append("actor-desc-external-packages-unmatched")
+        elif external_actor_package_coverage == "unknown":
+            partial_reasons.append("actor-desc-external-package-inventory-unavailable")
     if not actors and loaded_actor_count:
         partial_reasons.append("no-actors-exported")
     if not details:
