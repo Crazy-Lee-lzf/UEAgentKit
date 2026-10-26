@@ -230,6 +230,7 @@ Read-only audit
 - [项目能力状态](docs/PROJECT_STATUS.md)
 - [公开 Roadmap](docs/ROADMAP.md)
 - [0.8.0 Release Notes](docs/RELEASE_0.8.0.md)
+- [RC1 internal experimental preview](docs/RELEASE_RC1.md) / [English](docs/RELEASE_RC1_EN.md)（不是 GitHub Release；版本仍为 0.8.0）
 - [Memory Architecture](docs/MEMORY_ARCHITECTURE.md)
 - [Build and Run](docs/BUILD_AND_RUN.md)
 

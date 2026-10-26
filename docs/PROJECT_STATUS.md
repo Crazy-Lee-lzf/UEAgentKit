@@ -120,7 +120,7 @@ Source Control 默认关闭。0.8.0 当前组合模式为：
 
 Tool 数量只是接口规模，不代表每个 Tool 都会修改资产；大量 Tool 是只读查询、规划、验证和状态读取。
 
-**本地 RC1 候选补充（不属于 v0.8.0 Tag）**：当前静态 registry 计数已随后续提交变为 Offline 14/28/20/34、Live 50/64/56/70、Workflow-only 71/85/77/91、Live + Workflow 107/121/113/127。另有默认关闭、按 flag 动态注册的实验工具（Blueprint 结构编辑、rewire、node-remove 等），不计入上表；以运行时 `ue_get_capabilities` 为准。
+**本地 RC1 候选补充（不属于 v0.8.0 Tag）**：当前静态 registry 计数已随后续提交变为 Offline 14/28/20/34、Live 50/64/56/70、Workflow-only 71/85/77/91、Live + Workflow 107/121/113/127。另有默认关闭、按 flag 动态注册的实验工具（Blueprint 结构编辑、rewire、node-remove 等），不计入上表；以运行时 `ue_get_capabilities` 为准；RC1 范围与限制见 [RC1 release notes](RELEASE_RC1.md)。
 
 ## 明确不支持的通用能力
 

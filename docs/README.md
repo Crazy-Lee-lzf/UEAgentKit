@@ -15,6 +15,7 @@
 
 ## Release Notes
 
+- **RC1 internal experimental preview**（非 GitHub Release，版本仍为 0.8.0）：[中文](RELEASE_RC1.md) / [English](RELEASE_RC1_EN.md)，发布检查见 [RC1 checklist](RC1_RELEASE_CHECKLIST.md)
 - [0.8.0](RELEASE_0.8.0.md) / [English](RELEASE_0.8.0_EN.md)
 - [0.7.0](RELEASE_0.7.0.md) / [English](RELEASE_0.7.0_EN.md)
 - [0.6.0](RELEASE_0.6.0.md) / [English](RELEASE_0.6.0_EN.md)

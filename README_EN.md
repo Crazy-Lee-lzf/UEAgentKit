@@ -222,6 +222,7 @@ These restrictions are part of the product safety model and are not intended to 
 - [Current capability status](docs/PROJECT_STATUS_EN.md)
 - [Public roadmap](docs/ROADMAP_EN.md)
 - [0.8.0 Release Notes](docs/RELEASE_0.8.0_EN.md)
+- [RC1 internal experimental preview](docs/RELEASE_RC1.md) / [English](docs/RELEASE_RC1_EN.md) (not a GitHub Release; package version remains 0.8.0)
 - [Memory Architecture](docs/MEMORY_ARCHITECTURE_EN.md)
 - [Build and Run](docs/BUILD_AND_RUN.md)
 
