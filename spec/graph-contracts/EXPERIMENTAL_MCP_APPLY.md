@@ -84,3 +84,51 @@ The Apply request is built by the server from the exact preview result; callers
 cannot supply a hand-written request, project path, endpoint, save flag, or
 compile flag. Requests larger than 60 KiB are rejected; use selection or
 incremental mode for those graphs.
+
+## Independent reload evidence
+
+Step 8 leaves `independentReloadVerified` false on purpose. To close that gap you
+need evidence from a *different, later* process that read the saved bytes from
+disk. `scripts/VerifyLayoutIndependentReload.ps1` produces and verifies exactly
+that, without saving, recompiling, running automation tests, or opening an Editor
+GUI:
+
+```
+.\scripts\VerifyLayoutIndependentReload.ps1 `
+    -Asset /Game/UEAgentKitP11/BP_LayoutP11 `
+    -ApplyEvidence Output\p11\apply.json `
+    -SaveEvidence Output\p11\save.json `
+    -EditorPid <pid of the Editor that saved> `
+    -EditorStartedUtc <its start time, ISO-8601 UTC> `
+    -EditorTerminatedUtc <its shutdown time, ISO-8601 UTC>
+```
+
+It refuses to run while an `UnrealEditor`/`UnrealEditor-Cmd` process is alive,
+then starts **one** `UnrealEditor-Cmd.exe -run=BlueprintContextExport
+-IncludeLayout -NullRHI -unattended` commandlet, records that process's real PID
+and start time from the OS, converts the export into a probe
+(`ueak.layout.independent-reload-probe/1.0`) and asks the offline harness
+(`tools/layout_independent_reload_harness.py`) for a verdict
+(`ueak.layout.independent-reload-evidence/1.0`). Exit code `0` means verified;
+`2` means fail closed.
+
+The verdict is `true` only when all of this holds, and every item is recomputed
+locally rather than trusted from the JSON:
+
+- the probe ran in a different process than the Save (different PID *and*
+  different process start time) and started after the saving Editor terminated;
+- the probe was read-only (no save, no compile, no package write);
+- the file on disk is the saved file: SHA256 equals `save.assetSha256`,
+  `readback.assetSha256` and the probe's `assetSha256`, and the derived
+  `package-sha256-v1` revision equals `readback.packageRevision`;
+- same `assetPath`, same `graphGuid`, identical node GUID set, and *exactly*
+  equal int32 positions for every node;
+- the layout hash recomputed from the reloaded positions equals the probe's,
+  the Save's and the Apply's `layoutHash`, and the reloaded
+  `graphFingerprint` equals the post-save one.
+
+Anything else keeps `independentReloadVerified` false and lists the
+`failClosedCodes`. A same-process readback, however consistent, can never be
+upgraded to acceptance evidence. Probe provenance is recorded as
+`attestation: self-reported` together with the exact command line, so the claim
+stays auditable.
