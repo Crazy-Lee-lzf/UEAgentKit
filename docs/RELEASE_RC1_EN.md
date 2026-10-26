@@ -23,7 +23,7 @@ The following results come from controller-local internal acceptance records. **
 |---|---|
 | Full Python suite | **1840 tests / 18 skipped / 0 failed** |
 | Native actions | **57 actions, BUILD SUCCEEDED** |
-| Real performance / index / World Partition checks | **132 checks** (controller-local) |
+| World Partition / OFPA verification | **132/132 external Actor packages matched official Actor Descriptors** (disposable UE fixture; not 132 performance tests) |
 | Five Blueprint MCP write families | Real MCP E2E on an isolated UE 5.6.1 disposable host: Preview → Apply → Undo/Redo verification → explicit Save → fresh-process reload |
 | Stable reads / index / Memory | The published 0.8.0 asset/Blueprint reads, SQLite/FTS5 index, Project Memory, and Knowledge Web capabilities |
 

@@ -23,7 +23,7 @@ RC1 是在 0.8.0 稳定只读与受控写入能力之上，加入一组**默认�
 |---|---|
 | Full Python suite | **1840 tests / 18 skipped / 0 failed** |
 | Native actions | **57 actions，BUILD SUCCEEDED** |
-| 性能 / 索引 / World Partition 真实检查 | **132 checks**（controller-local） |
+| World Partition / OFPA 真实读取 | **132/132 个外部 Actor 包与官方 Actor Descriptor 对应**（独立 UE 测试地图；不是 132 项性能测试） |
 | Blueprint MCP 五类写 | 独立 UE 5.6.1 disposable host 上的真实 MCP E2E：Preview → Apply → Undo/Redo 验证 → 显式 Save → 新进程 Reload |
 | 稳定读取 / 索引 / Memory | 0.8.0 已公开的资产/Blueprint 读取、SQLite/FTS5 索引、Project Memory 与 Knowledge Web 能力 |
 

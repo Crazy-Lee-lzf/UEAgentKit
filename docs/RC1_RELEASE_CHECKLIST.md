@@ -21,7 +21,7 @@ These are internal acceptance records, not logs stored in the public tree and no
 |---|---|---|
 | `CTRL-FULL` | Full Python suite | 1840 tests / 18 skipped / 0 failed |
 | `CTRL-NATIVE` | Native actions | 57 actions, BUILD SUCCEEDED |
-| `CTRL-PERF-IDX-WP` | Real performance / index / World Partition checks | 132 checks |
+| `CTRL-WP-132` | World Partition / OFPA fixture coverage | 132/132 external Actor packages matched official descriptors; not a performance-test count |
 | `RC1-BP-E2E` | Five Blueprint MCP write families | Real MCP E2E on an isolated UE 5.6.1 disposable host: Preview → Apply → Undo/Redo → explicit Save → fresh-process reload |
 | `RC1-STATIC` | Release validation and targeted Python tests | `ValidateRelease` plus release/tool/MCP tests pass locally |
 
