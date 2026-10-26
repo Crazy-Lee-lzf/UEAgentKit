@@ -1,6 +1,6 @@
 # UE Agent Kit RC1 — Internal Experimental Technology Preview
 
-**Status: internal experimental technology preview. This is not the 0.8.0 stable release and not a published GitHub Release.**  
+**Status: internal experimental technology preview. This is not the 0.8.0 stable release and not a published GitHub Release.**
 **The package version remains 0.8.0.** No version bump, tag, or GitHub Release was created. The public distribution channel and publication form remain undecided.
 
 ## 1. What this RC1 is

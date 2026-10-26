@@ -1,6 +1,6 @@
 # UE Agent Kit RC1 — 内部实验型技术预览
 
-**状态：内部 experimental technology preview，不是 0.8.0 稳定发布，也不是已经发布的 GitHub Release。**  
+**状态：内部 experimental technology preview，不是 0.8.0 稳定发布，也不是已经发布的 GitHub Release。**
 **包版本仍为 0.8.0。** 本次没有版本号提升、没有 tag、没有 GitHub Release；公开渠道是否发布以及采用哪种发布形态仍待决定。
 
 ## 1. 这个 RC1 是什么

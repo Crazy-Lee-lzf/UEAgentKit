@@ -1,6 +1,6 @@
 # UE Agent Kit RC1 Release Checklist
 
-Status: **internal experimental technology preview; public publication is not approved.**  
+Status: **internal experimental technology preview; public publication is not approved.**
 Package version: **0.8.0**. Do not bump versions, create a tag, or create a GitHub Release from this checklist automatically.
 
 ## 1. Candidate identity
