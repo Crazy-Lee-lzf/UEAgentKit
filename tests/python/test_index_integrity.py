@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import sys
 import tempfile
@@ -478,11 +479,23 @@ class ExportSourceGuardTests(unittest.TestCase):
 
 
 class RealExportSmokeTests(unittest.TestCase):
-    REAL_EXPORT = Path(r"E:\WorkSpace\UEAgentKit\Output\McpLiveUndoDiscardSmoke\Revision")
+    """Optional smoke test against a developer-provided real AssetCatalog export.
 
-    @unittest.skipUnless(REAL_EXPORT.is_dir(), "real AssetCatalog export is not present on this machine")
+    The export location is machine-specific, so it is supplied through
+    ``UEAK_REAL_EXPORT_DIR`` and the test is skipped when it is unset or absent.
+    """
+
+    REAL_EXPORT_ENV = "UEAK_REAL_EXPORT_DIR"
+    _CONFIGURED_EXPORT = os.environ.get(REAL_EXPORT_ENV, "").strip()
+    REAL_EXPORT = Path(_CONFIGURED_EXPORT) if _CONFIGURED_EXPORT else None
+
+    @unittest.skipUnless(
+        REAL_EXPORT is not None and REAL_EXPORT.is_dir(),
+        f"real AssetCatalog export not configured (set {REAL_EXPORT_ENV})",
+    )
     def test_real_asset_catalog_export_is_not_failed_and_reports_not_handled(self) -> None:
-        report = audit_export_integrity(self.REAL_EXPORT)
+        assert REAL_EXPORT is not None
+        report = audit_export_integrity(REAL_EXPORT)
         self.assertNotEqual(report.status, STATUS_FAIL, report.render_text())
         self.assertEqual(report.counts["assetCount"], 426)
         self.assertEqual(report.counts["successCount"], 426)

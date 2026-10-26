@@ -33,7 +33,7 @@
     "model_files_total_bytes": 30922193,
     "model_safetensors_bytes": 30236760,
     "model_safetensors_sha256": "f65d0f325faadc1e121c319e2faa41170d3fa07d8c89abd48ca5358d9a223de2",
-    "local_dir": "C:/Users/Administrator/.cache/ueagentkit/model2vec/potion-base-8M",
+    "local_dir": "model2vec-cache:potion-base-8M",
     "cpu_only": true,
     "no_torch_required": true,
     "cold_load_ms": 1399.164,

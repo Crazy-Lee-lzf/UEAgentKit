@@ -36,6 +36,12 @@ def _default_output() -> Path:
     return TOOL_ROOT / "Output" / "AgentReliabilityBenchmark" / f"r4-real-{stamp}"
 
 
+def _environment_path(name: str) -> Path | None:
+    """Return an explicitly configured path from the environment, if any."""
+    value = os.environ.get(name, "").strip()
+    return Path(value) if value else None
+
+
 def _codex_executable(value: str) -> str:
     if value:
         return value
@@ -204,7 +210,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--engine-root",
         type=Path,
-        default=Path(os.environ.get("UEAK_ENGINE_ROOT", r"E:\EPICGAME\UE_5.6")),
+        default=_environment_path("UEAK_ENGINE_ROOT"),
     )
     parser.add_argument(
         "--directhost-project",
@@ -214,7 +220,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--reforge-project",
         type=Path,
-        default=Path(os.environ.get("UEAK_REFORGE_PROJECT", r"E:\WorkSpace\Reforge\Reforge.uproject")),
+        default=_environment_path("UEAK_REFORGE_PROJECT"),
     )
     parser.add_argument(
         "--reforge-database",
@@ -238,6 +244,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _build_parser().parse_args()
+    if args.engine_root is None:
+        raise ValueError("--engine-root or UEAK_ENGINE_ROOT is required")
+    if args.reforge_project is None:
+        raise ValueError("--reforge-project or UEAK_REFORGE_PROJECT is required")
     cases = _selected_cases(args)
     visible_tools = _visible_tools()
     fixture = RealFixtureAdapter(_fixture_config(args))

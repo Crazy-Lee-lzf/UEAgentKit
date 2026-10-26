@@ -1,6 +1,6 @@
 param(
-    [string]$EngineRoot = "E:\EPICGAME\UE_5.6",
-    [string]$ProjectPath = "E:\WorkSpace\我的项目\我的项目.uproject",
+    [string]$EngineRoot = "",
+    [string]$ProjectPath = "",
     [ValidateSet("Normal", "Minimized")]
     [string]$WindowStyle = "Minimized",
     [ValidateRange(30, 600)]
@@ -9,6 +9,11 @@ param(
 
 # Launches the Unreal Editor with the UE Agent Kit plugin and leaves it running
 # so the Live Editor Bridge stays available for the retarget workflow.
+#
+# EngineRoot and ProjectPath are intentionally not machine-specific defaults:
+# pass them explicitly, or set UEAK_ENGINE_ROOT / UEAK_PROJECT_PATH.  When
+# ProjectPath is omitted the shared resolver also accepts a single .uproject in
+# the current directory, otherwise it fails closed with instructions.
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "Common.ps1")

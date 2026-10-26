@@ -14,6 +14,7 @@ from ue_agent_kit.p7_test_only import (  # noqa: E402
     APPLY_TOOL_NAME,
     FIXED_ASSET_PATH,
     FIXED_PROJECT_FILE_SHA256,
+    FIXED_PROJECT_PATH,
     confirmation_for_plan,
     is_fixed_project,
 )
@@ -42,23 +43,22 @@ class GraphLayoutP7ContractTest(unittest.TestCase):
         )
 
     def test_p7_project_gate_rejects_other_projects(self) -> None:
+        # The gate must only accept the checkout-relative disposable host; any
+        # other synthetic path, including a differently named sibling project,
+        # is rejected without needing a machine-specific absolute path.
+        fake_root = Path("tests/fixtures/graph_layout_fake")
         self.assertFalse(
             is_fixed_project(
-                Path(
-                    "E:/WorkSpace/UEAgentKit-WT/graph-contracts/Build/P6AutomationHost/"
-                    "P6AutomationHost.uproject"
-                )
+                fake_root / "P6AutomationHost" / "P6AutomationHost.uproject"
             )
         )
         self.assertFalse(
-            is_fixed_project(
-                Path("E:/WorkSpace/UEAgentKit-WT/graph-contracts/Build/P7AutomationHost/NotP7.uproject")
-            )
+            is_fixed_project(fake_root / "P7AutomationHost" / "NotP7.uproject")
         )
-        self.assertFalse(
-            is_fixed_project(
-                Path("E:/WorkSpace/UEAgentKit-WT/graph-contracts/does-not-exist.uproject")
-            )
+        self.assertFalse(is_fixed_project(fake_root / "does-not-exist.uproject"))
+        self.assertEqual(
+            FIXED_PROJECT_PATH,
+            (ROOT / "Build" / "P7AutomationHost" / "P7AutomationHost.uproject").resolve(),
         )
 
     def test_p7_register_function_is_conditional_explicit(self) -> None:

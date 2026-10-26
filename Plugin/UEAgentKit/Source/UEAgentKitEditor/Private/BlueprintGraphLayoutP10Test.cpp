@@ -4,8 +4,8 @@
 // from the real P10 exporter/preflight output, so the applied request is the
 // canonical ApplyRequest, not a hand-written fixture.
 //
-// This test never touches Lyra, Reforge or any production asset, and it never
-// registers a new MCP/TS write surface.
+// This test never touches any external or production project asset, and it
+// never registers a new MCP/TS write surface.
 
 #include "BlueprintContextExporter.h"
 #include "BlueprintContextSha256.h"

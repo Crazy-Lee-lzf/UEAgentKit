@@ -108,8 +108,8 @@ class GraphLayoutP4SourceContractTests(unittest.TestCase):
         self.assertIn('TEXT("/Game/UEAgentKitP4/BP_LayoutP4")', self.test)
         self.assertIn("UEAgentKitP4Fixture", self.test)
         self.assertNotIn("/Game/UEAgentKitP3/", self.test)
-        self.assertNotIn("Lyra", self.test)
-        self.assertNotIn("Reforge", self.test)
+        # Guard against local absolute paths in the disposable fixture source.
+        self.assertNotRegex(self.test, r"[A-Za-z]:[\\/]")
 
     def test_p4_export_is_the_real_canonical_exporter(self) -> None:
         self.assertIn("FBlueprintContextExporter::ExportBlueprint", self.test)

@@ -1,6 +1,6 @@
 {
   "schemaVersion": "ueak.g02-verification/1.0",
-  "candidateRoot": "E:\\WorkSpace\\UEAgentKit-Development\\contract_candidate",
+  "candidateRoot": "prototype/graph_contracts",
   "mainHead": "23bdbd6f2167033cd555a815c4afaa0c34565b5b",
   "currentLimits": {
     "constants": {
@@ -143,7 +143,7 @@
       "has100Node150Link": true
     },
     "changeSetReuse": {
-      "file": "E:/WorkSpace/UEAgentKit/src/ue_agent_kit/change_sets.py",
+      "file": "src/ue_agent_kit/change_sets.py",
       "hasIdempotencyKeyField": false,
       "operationFields": [
         "receipt",

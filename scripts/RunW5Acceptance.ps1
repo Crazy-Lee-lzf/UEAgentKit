@@ -145,9 +145,15 @@ elseif ($Action -eq "GeneratePerfProject")
 {
     if ([string]::IsNullOrWhiteSpace($PerfProjectPath))
     {
-        $PerfProjectPath = "E:\WorkSpace\UEAgentKitPerfProject"
+        $PerfProjectPath = $env:UEAK_PERF_PROJECT
     }
-    $PerfUproject = Join-Path $PerfProjectPath "UEAgentKitPerfProject.uproject"
+    if ([string]::IsNullOrWhiteSpace($PerfProjectPath))
+    {
+        throw "Performance fixture project was not provided. Pass -PerfProjectPath or set UEAK_PERF_PROJECT."
+    }
+    $PerfProjectPath = [System.IO.Path]::GetFullPath($PerfProjectPath).TrimEnd('\', '/')
+    $PerfProjectName = Split-Path -Leaf $PerfProjectPath
+    $PerfUproject = Join-Path $PerfProjectPath "$PerfProjectName.uproject"
     if (!(Test-Path -LiteralPath $PerfUproject))
     {
         throw "Perf project does not exist yet: $PerfUproject"

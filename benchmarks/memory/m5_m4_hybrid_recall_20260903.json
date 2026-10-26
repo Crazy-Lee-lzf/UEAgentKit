@@ -1,7 +1,7 @@
 {
   "stage": "M4 hybrid recall quality benchmark (frozen 20-query corpus)",
-  "corpusPath": "E:\\WorkSpace\\UEAgentKit-Integration\\benchmarks\\memory\\m4_frozen_relevance_corpus_20260902.json",
-  "modelDir": "C:\\Users\\Administrator\\.cache\\ueagentkit\\model2vec\\potion-base-8M",
+  "corpusPath": "benchmarks/memory/m4_frozen_relevance_corpus_20260902.json",
+  "modelDir": "model2vec-cache:potion-base-8M",
   "modelId": "model2vec:potion-base-8M:sha256:f65d0f325faadc1e121c319e2faa41170d3fa07d8c89abd48ca5358d9a223de2",
   "corpus": {
     "projectKey": "M4Benchmark",

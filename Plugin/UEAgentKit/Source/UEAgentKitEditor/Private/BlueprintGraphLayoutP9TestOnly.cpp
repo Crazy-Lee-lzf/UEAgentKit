@@ -246,7 +246,7 @@ namespace
 	bool ValidateBuildMarker(FString& OutErrorCode, FString& OutErrorMessage)
 	{
 		const FString MarkerPath = FPaths::Combine(
-			FPaths::GetPath(UEAgentKitBlueprintGraphLayoutP9::FixedProjectPath),
+			FPaths::GetPath(UEAgentKitBlueprintGraphLayoutP9::GetFixedProjectPath()),
 			TEXT("P9TestOnlyBuild.json"));
 		FString MarkerText;
 		if (!FFileHelper::LoadFileToString(MarkerText, *MarkerPath))
@@ -298,6 +298,29 @@ namespace
 
 namespace UEAgentKitBlueprintGraphLayoutP9
 {
+	FString GetFixedProjectPath()
+	{
+		const FString ProjectFilePath = FPaths::GetProjectFilePath();
+		if (ProjectFilePath.IsEmpty())
+		{
+			return FString();
+		}
+
+		FString FullPath = FPaths::ConvertRelativePathToFull(ProjectFilePath);
+		FPaths::NormalizeFilename(FullPath);
+		FPaths::CollapseRelativeDirectories(FullPath);
+
+		const FString ProjectDir = FPaths::GetPath(FullPath);
+		const FString ProjectDirName = FPaths::GetCleanFilename(ProjectDir);
+		const FString ParentDirName = FPaths::GetCleanFilename(FPaths::GetPath(ProjectDir));
+		if (!ProjectDirName.Equals(FixedProjectName, ESearchCase::CaseSensitive)
+			|| !ParentDirName.Equals(TEXT("Build"), ESearchCase::CaseSensitive))
+		{
+			return FString();
+		}
+		return FullPath;
+	}
+
 	bool IsFixedProjectIdentityForTest(
 		const FString& ProjectFilePath,
 		const FString& ProjectName,
@@ -310,7 +333,7 @@ namespace UEAgentKitBlueprintGraphLayoutP9
 		FPaths::CollapseRelativeDirectories(FullPath);
 		FString ComparablePath = FullPath;
 		ComparablePath.ToLowerInline();
-		FString ExpectedPath = FixedProjectPath;
+		FString ExpectedPath = GetFixedProjectPath();
 		ExpectedPath.ToLowerInline();
 		if (!ComparablePath.Equals(ExpectedPath, ESearchCase::CaseSensitive))
 		{
@@ -633,7 +656,7 @@ namespace UEAgentKitBlueprintGraphLayoutP9
 		}
 
 		Applied->SetBoolField(TEXT("testOnly"), true);
-		Applied->SetStringField(TEXT("testOnlyProject"), FixedProjectPath);
+		Applied->SetStringField(TEXT("testOnlyProject"), GetFixedProjectPath());
 		Applied->SetStringField(TEXT("testOnlyAsset"), FixedAssetPath);
 		Applied->SetStringField(TEXT("confirmation"), Confirmation);
 		Applied->SetBoolField(TEXT("structuralInvariant"), bStructuralInvariant);

@@ -8,15 +8,25 @@ class FJsonObject;
  * P9 lab-only position apply/save surface.
  *
  * This is deliberately not a general Blueprint graph-layout write API.  Every
- * entry point checks one canonical disposable project path, the SHA-256 of its
- * exact .uproject file, the exact P9 asset, the exact focused graph, the live
- * preflight, and an explicit confirmation phrase before calling the existing
- * P5 TryApply transaction.
+ * entry point checks one canonical disposable project layout (a running
+ * P9AutomationHost project located directly under a Build/ directory), the
+ * SHA-256 of its exact .uproject file, the exact P9 asset, the exact focused
+ * graph, the live preflight, and an explicit confirmation phrase before calling
+ * the existing P5 TryApply transaction.
  */
 namespace UEAgentKitBlueprintGraphLayoutP9
 {
-	const TCHAR* const FixedProjectPath =
-		TEXT("E:/WorkSpace/UEAgentKit-WT/graph-contracts/Build/P9AutomationHost/P9AutomationHost.uproject");
+	/**
+	 * Canonical disposable host path for the currently running project.
+	 *
+	 * Returns the normalized absolute path only when the loaded project is named
+	 * P9AutomationHost and lives in a Build/P9AutomationHost directory.  This keeps
+	 * the gate portable across checkouts without embedding a machine-specific
+	 * absolute path; the exact .uproject SHA-256 below remains the identity anchor.
+	 * Returns an empty string (fail-closed) for every other project layout.
+	 */
+	FString GetFixedProjectPath();
+
 	const TCHAR* const FixedProjectName = TEXT("P9AutomationHost");
 	const TCHAR* const FixedProjectFileSha256 =
 		TEXT("6b094c65b66b795ed056ce10b5e4ded576ffb1f7b1bab9c78c588d87a4fbbbec");

@@ -7,8 +7,8 @@ produces deterministic stage-level timing evidence under `Output/W5Acceptance`.
 
 - **DirectHost** (`Build/DirectHost/HostProject.uproject`) is the only project
   used for controlled write-path acceptance and timing.
-- **Reforge** is strictly read-only and is measured separately (project size,
-  asset counts, read-only export/index/query behavior).
+- **External read-only project** is measured separately (project size, asset
+  counts, read-only export/index/query behavior).
 - The 20-logical-operation scenario is always split into multiple legal W4
   bounded workflows (max 4 assets, max 8 ops/asset, max 16 ops/batch).
 

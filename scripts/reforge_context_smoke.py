@@ -1,21 +1,23 @@
-"""Real Reforge read-only Context Smoke for ue_get_task_context (R0-S).
+"""Read-only Context Smoke for ue_get_task_context (R0-S).
 
-Runs the UE Agent Kit MCP server against the fixed Reforge index and Revision
-Export, calls ue_get_task_context for the three R0-S cases (S1 explicit target,
-S2 query-only, S3 low budget), collects raw evidence searches, and writes the
-full results as JSON artifacts plus a compact summary.
+Runs the UE Agent Kit MCP server against an externally supplied asset index and
+Revision Export, calls ue_get_task_context for the three R0-S cases (S1 explicit
+target, S2 query-only, S3 low budget), collects raw evidence searches, and writes
+the full results as JSON artifacts plus a compact summary.
 
 Usage:
     .venv\\Scripts\\python.exe scripts\\reforge_context_smoke.py ^
-        --database .data\\reforge-context-smoke.sqlite3 ^
-        --engine-root E:\\EPICGAME\\UE_5.6 ^
-        --project E:\\WorkSpace\\Reforge\\Reforge.uproject ^
-        --policy config\\projects\\reforge-read.json ^
-        --revision-export Output\\ReforgeContextSmoke\\Export ^
-        --memory-database .data\\reforge-context-smoke-memory.sqlite3 ^
-        --output-dir Output\\ReforgeContextSmoke
+        --database .data\\context-smoke.sqlite3 ^
+        --engine-root <UE_5.6_ROOT> ^
+        --project <EXTERNAL_PROJECT_DIR>\\<PROJECT>.uproject ^
+        --policy config\\projects\\example-read.json ^
+        --revision-export Output\\ContextSmoke\\Export ^
+        --memory-database .data\\context-smoke-memory.sqlite3 ^
+        --output-dir Output\\ContextSmoke
 
-All calls are read-only. No Reforge asset is modified.
+The index, project and policy are caller-supplied; no machine-specific path or
+private project is embedded in this script.  All calls are read-only. No
+external project asset is modified.
 """
 
 from __future__ import annotations
@@ -189,10 +191,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--project", type=Path, required=True)
     parser.add_argument("--policy", type=Path, required=True)
     parser.add_argument("--revision-export", type=Path, required=True)
-    parser.add_argument("--work-root", type=Path, default=TOOL_ROOT / "Output" / "ReforgeContextSmoke" / "Work")
-    parser.add_argument("--backup-root", type=Path, default=TOOL_ROOT / "Backups" / "ReforgeContextSmoke")
+    parser.add_argument("--work-root", type=Path, default=TOOL_ROOT / "Output" / "ContextSmoke" / "Work")
+    parser.add_argument("--backup-root", type=Path, default=TOOL_ROOT / "Backups" / "ContextSmoke")
     parser.add_argument("--memory-database", type=Path, default=None)
-    parser.add_argument("--output-dir", type=Path, default=TOOL_ROOT / "Output" / "ReforgeContextSmoke")
+    parser.add_argument("--output-dir", type=Path, default=TOOL_ROOT / "Output" / "ContextSmoke")
     return parser
 
 

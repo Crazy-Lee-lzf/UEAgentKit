@@ -37,8 +37,8 @@ class GraphLayoutP5SourceContractTests(unittest.TestCase):
         self.assertIn("UEAgentKitP5Fixture", self.test)
         self.assertNotIn("/Game/UEAgentKitP4/", self.test)
         self.assertNotIn("/Game/UEAgentKitP3/", self.test)
-        self.assertNotIn("Lyra", self.test)
-        self.assertNotIn("Reforge", self.test)
+        # Guard against local absolute paths in the disposable fixture source.
+        self.assertNotRegex(self.test, r"[A-Za-z]:[\\/]")
 
     def test_p5_opens_and_focuses_a_real_blueprint_editor(self) -> None:
         self.assertIn("OpenEditorForAsset", self.test)

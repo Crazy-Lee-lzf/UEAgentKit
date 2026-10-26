@@ -53,14 +53,14 @@ __pycache__/
 /docs/Handoffs/
 /prompts/
 
-# Internal R7 acceptance/run-state reports are preserved in UEAgentKit-Development.
+# Internal R7 acceptance/run-state reports are preserved outside the public tree.
 # Keep R7 protocol schemas and R7_MOUNT_CONTRACT.md tracked.
 /spec/memory-mount/R7_*_REPORT.md
 /spec/memory-mount/R7_*_RUNSTATE_*.md
 /spec/memory-mount/R7_*_READINESS.md
 /spec/memory-mount/R7_*_GATE_REVIEW.md
 
-# Internal native-tools development reports preserved in UEAgentKit-Development
+# Internal native-tools development reports preserved outside the public tree
 /spec/native-tools/M1_LAYOUT_BROKER_OFFLINE_REPORT.md
 /spec/native-tools/M1_LAYOUT_BROKER_RUN_STATE_20261024.md
 /spec/native-tools/M2_1_PLAN_ID_HARDENING_REPORT.md
@@ -108,7 +108,7 @@ __pycache__/
 /spec/native-tools/RC0_UNIFIED_RELEASE_GATE_REVIEW_20261025.md
 /spec/native-tools/RC1_CLEAN_CHECKOUT_TEST_REPRODUCIBILITY_20261025.md
 
-# Additional internal graph/native/test evidence retained in UEAgentKit-Development
+# Additional internal graph/native/test evidence retained outside the public tree
 /spec/SCALAR_PATCH_REGRESSION.md
 /spec/graph-contracts/C_LAYOUT_P11_EDITOR_SCOPE_ACCEPTANCE_REPORT_20261023.md
 /spec/graph-contracts/D01_D13_USER_DECISIONS.md

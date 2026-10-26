@@ -15,7 +15,7 @@ imports a third-party runtime package.
 ## Run
 
 ```powershell
-cd E:\WorkSpace\UEAgentKit-Development\contract_candidate
+cd prototype\graph_contracts
 py -3.12 run_tests.py
 ```
 
@@ -79,7 +79,7 @@ run_tests.py        offline runner (exit code 0 = pass)
 
 ## Provenance
 
-- Baseline: `E:\WorkSpace\UEAgentKit`, `main`, HEAD `23bdbd6`.
-- This directory lives outside the Git repository; the main worktree was not
-  modified.
+- Baseline: `main`, HEAD `23bdbd6`.
+- This directory is a standalone prototype subtree; it does not require a
+  machine-specific checkout path.
 - Full traceability: `../G0_3_APPROVED_CONTRACT_IMPLEMENTATION_20261022.md`.

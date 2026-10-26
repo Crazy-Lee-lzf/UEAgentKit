@@ -8,15 +8,25 @@ class FJsonObject;
  * P8 lab-only position apply/save surface.
  *
  * This is deliberately not a general Blueprint graph-layout write API.  Every
- * entry point checks one canonical disposable project path, the SHA-256 of its
- * exact .uproject file, the exact P8 asset, the exact focused graph, the live
- * preflight, and an explicit confirmation phrase before calling the existing
- * P5 TryApply transaction.
+ * entry point checks one canonical disposable project layout (a running
+ * P8AutomationHost project located directly under a Build/ directory), the
+ * SHA-256 of its exact .uproject file, the exact P8 asset, the exact focused
+ * graph, the live preflight, and an explicit confirmation phrase before calling
+ * the existing P5 TryApply transaction.
  */
 namespace UEAgentKitBlueprintGraphLayoutP8
 {
-	const TCHAR* const FixedProjectPath =
-		TEXT("E:/WorkSpace/UEAgentKit-WT/graph-contracts/Build/P8AutomationHost/P8AutomationHost.uproject");
+	/**
+	 * Canonical disposable host path for the currently running project.
+	 *
+	 * Returns the normalized absolute path only when the loaded project is named
+	 * P8AutomationHost and lives in a Build/P8AutomationHost directory.  This keeps
+	 * the gate portable across checkouts without embedding a machine-specific
+	 * absolute path; the exact .uproject SHA-256 below remains the identity anchor.
+	 * Returns an empty string (fail-closed) for every other project layout.
+	 */
+	FString GetFixedProjectPath();
+
 	const TCHAR* const FixedProjectName = TEXT("P8AutomationHost");
 	const TCHAR* const FixedProjectFileSha256 =
 		TEXT("3c9ea038dd3cb184ef4b6c1f76cf4c2de8c1c08e34536a43b7618493dace1624");

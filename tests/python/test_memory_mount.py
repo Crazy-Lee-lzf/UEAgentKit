@@ -857,7 +857,9 @@ class IndexIsolationTests(MemoryMountTestBase):
         for path in sorted((SRC_ROOT / "ue_agent_kit" / "memory_mount").glob("*.py")):
             text = path.read_text(encoding="utf-8")
             self.assertNotIn("coordination_memory", text, path.name)
-            self.assertNotIn("UEAgentKit-Development", text, path.name)
+            # The shipped package must not embed a workstation-specific path or
+            # a private development worktree name.
+            self.assertNotRegex(text, r"(?i)[A-Za-z]:[\\/]")
 
 
 class CliTests(MemoryMountTestBase):
