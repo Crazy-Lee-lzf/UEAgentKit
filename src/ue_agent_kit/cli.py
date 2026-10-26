@@ -17,7 +17,7 @@ from .code_index import DEFAULT_SOURCE_ROOTS, build_code_index
 from .config import DEFAULT_DATABASE, DEFAULT_MEMORY_DATABASE
 from .database import assert_fts5_available, get_schema_version, open_database
 from .fixtures import validate_fixture_plan, verify_fixture_export
-from .indexer import build_index
+from .indexer import build_index, read_changed_path_attestation
 from .knowledge_view import KnowledgeViewConfig, serve as serve_knowledge_view
 from .memory_reports import (
     MAX_AUDIT_NODES,
@@ -111,6 +111,22 @@ def build_parser() -> argparse.ArgumentParser:
     index_build.add_argument("--force", action="store_true")
     index_build.add_argument("--project-key", default=os.environ.get("UEAK_PROJECT_KEY", ""))
     index_build.add_argument("--include-assets", action="store_true", help="Include per-asset results in JSON output.")
+    index_build.add_argument(
+        "--batch-size",
+        type=int,
+        default=100,
+        help="Maximum assets per SQLite transaction batch (default: 100).",
+    )
+    index_build.add_argument(
+        "--changed-path-file",
+        type=Path,
+        help="Explicit trusted changed-path attestation (manifestSha256 + changedAssetPaths).",
+    )
+    index_build.add_argument(
+        "--no-manifest-digest",
+        action="store_true",
+        help="Disable manifest canonicalSha256 fast-path skipping and force strict Canonical reads.",
+    )
     index_build.add_argument(
         "--prune-prefix",
         default="",
@@ -707,6 +723,14 @@ def run(args: argparse.Namespace) -> tuple[Any, int]:
         return service.status(args.paths).to_payload(), 0
 
     if args.command == "index" and args.index_command == "build":
+        changed_asset_paths = None
+        expected_manifest_sha256 = ""
+        changed_path_source = ""
+        if args.changed_path_file is not None:
+            changed_asset_paths, expected_manifest_sha256, changed_path_source = read_changed_path_attestation(
+                args.changed_path_file,
+                export_root=args.export_root,
+            )
         with open_database(args.database) as connection:
             result = build_index(
                 connection,
@@ -715,6 +739,11 @@ def run(args: argparse.Namespace) -> tuple[Any, int]:
                 force=args.force,
                 prune_prefix=args.prune_prefix,
                 project_key=args.project_key,
+                batch_size=args.batch_size,
+                changed_asset_paths=changed_asset_paths,
+                expected_manifest_sha256=expected_manifest_sha256,
+                changed_path_source=changed_path_source,
+                use_manifest_digest=not args.no_manifest_digest,
             )
         return result.to_dict(include_assets=args.include_assets), 0 if result.failed == 0 and not result.errors else 1
 
