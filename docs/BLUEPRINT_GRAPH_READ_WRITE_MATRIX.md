@@ -2,15 +2,14 @@
 
 Verified scope: UE 5.6.1, Editor Bridge and Python MCP.
 Updated: 2026-10-26.
-Scope: UE 5.6.1, Editor bridge/plugin plus Python MCP/index readers.
 
-This matrix describes the product contract on this branch. It deliberately does
+This matrix describes the implemented Blueprint graph read/write contract. It deliberately does
 not treat fixture-only helpers or the earlier position-only layout acceptance as
 Blueprint structure write support.
 
 Legend:
 
-- **Supported** — implemented and covered by tests in this branch.
+- **Supported** — implemented and covered by the cited tests.
 - **Experimental** — implemented behind an explicit project opt-in and exact
   per-call confirmation; not a production default.
 - **Offline-only** — validates or previews data without touching the live
