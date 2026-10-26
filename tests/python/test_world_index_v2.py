@@ -765,10 +765,14 @@ class CoexistenceTests(WorldIndexV2TestCase):
 
         result = build_index(connection, export_root, self.database_path)
         self.assertEqual((result.added, result.failed), (1, 0))
+        # the indexer now maintains the world tables in the same transaction
+        self.assertEqual((result.worlds, result.world_actors), (1, 5))
 
+        # ...so a second, manual ingest of the same document is a no-op
         ingested = ingest_world_file(connection, canonical_path)
-        self.assertEqual(ingested["status"], "added")
-        self.assertEqual(ingested["actors"], 5)
+        self.assertEqual(ingested["status"], "unchanged")
+        self.assertEqual(ingested["actors"], 0)
+        self.assertEqual(ingested["documentActors"], 5)
 
         # the pre-existing index surface is untouched
         self.assertEqual([item["asset_path"] for item in search_assets(connection, "L_Smoke")], [WORLD_ASSET])

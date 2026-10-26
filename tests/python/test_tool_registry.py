@@ -43,6 +43,9 @@ EXPECTED_ALL_TOOLS = [
     "ue_search",
     "ue_get_asset",
     "ue_find_references",
+    "ue_find_world_actors",
+    "ue_find_world_partition_actors",
+    "ue_get_world_summary",
     "ue_analyze_change_impact",
     "ue_analyze_semantic_diff",
     "ue_build_verification_plan",
@@ -151,21 +154,21 @@ class ToolRegistryTests(unittest.TestCase):
             tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True),
             EXPECTED_ALL_TOOLS,
         )
-        self.assertEqual(len(tool_names_for_mode()), 11)
-        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 47)
-        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 68)
+        self.assertEqual(len(tool_names_for_mode()), 14)
+        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 50)
+        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 71)
         self.assertEqual(
             tool_names_for_mode(memory_enabled=True),
             QUERY_TOOL_NAMES + EXPECTED_MEMORY_TOOLS,
         )
-        self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 25)
+        self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 28)
         self.assertEqual(
             len(tool_names_for_mode(live_editor_enabled=True, memory_enabled=True)),
-            61,
+            64,
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
-            82,
+            85,
         )
         self.assertEqual(
             len(
@@ -175,7 +178,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-            118,
+            121,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:

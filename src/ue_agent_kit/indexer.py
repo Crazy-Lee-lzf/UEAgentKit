@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
+from . import world_index_v2
 from .code_index import CODE_PROFILE
 
 from .database import get_metadata, get_schema_version, set_metadata, utc_now_iso
@@ -32,6 +33,7 @@ class AssetIndexResult:
     references: int = 0
     graphs: int = 0
     nodes: int = 0
+    world_actors: int = 0
 
 
 @dataclass
@@ -44,6 +46,9 @@ class IndexBuildResult:
     skipped: int = 0
     deleted: int = 0
     failed: int = 0
+    worlds: int = 0
+    world_actors: int = 0
+    world_repairs: int = 0
     assets: list[AssetIndexResult] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -484,6 +489,11 @@ def _prune_assets(
             continue
         _delete_asset(connection, int(row["id"]))
         deleted.append(asset_path)
+    if deleted:
+        # World V2 rows are keyed by map assetPath, not assets.id, so the asset
+        # cascade does not reach them.  Delete them in the same transaction as
+        # the assets they belong to (a failed prune rolls back both).
+        world_index_v2.prune_worlds(connection, deleted)
     return deleted
 
 
@@ -596,9 +606,29 @@ def build_index(
             canonical_sha256 = _sha256(canonical_path)
             existing = _existing_asset(connection, asset_path)
 
+            world_actors = 0
             if existing is not None:
                 should_skip, reason = _should_skip(existing, canonical, canonical_sha256, force=force)
                 if should_skip:
+                    # The asset is unchanged, but its World V2 rows may be missing
+                    # (an index built before World V2 existed).  Repair just that
+                    # gap so an upgrade does not require a forced rebuild.
+                    if world_index_v2.is_world_canonical(canonical) and not world_index_v2.world_row_exists(
+                        connection, asset_path
+                    ):
+                        with connection:
+                            if not world_index_v2.world_schema_present(connection):
+                                world_index_v2.ensure_schema(connection)
+                            repaired = world_index_v2.ingest_world_in_transaction(
+                                connection,
+                                canonical,
+                                source_path=canonical_path.as_posix(),
+                            )
+                        world_actors = int(repaired.get("actors", 0))
+                        result.worlds += 1
+                        result.world_actors += world_actors
+                        result.world_repairs += 1
+                        reason = f"{reason};world-index-repaired"
                     result.skipped += 1
                     result.assets.append(
                         AssetIndexResult(
@@ -609,6 +639,7 @@ def build_index(
                             references=int(entry.get("references", 0)),
                             graphs=int(entry.get("graphs", 0)),
                             nodes=int(entry.get("nodes", 0)),
+                            world_actors=world_actors,
                         )
                     )
                     continue
@@ -627,6 +658,18 @@ def build_index(
                 symbol_count = _insert_symbols(connection, asset_id, canonical)
                 graph_count, node_count = _insert_graphs_and_nodes(connection, asset_id, canonical)
                 reference_count = _insert_references(connection, asset_id, canonical)
+                # World V2 maintenance shares this transaction: if the world rows
+                # cannot be written, the asset import fails and rolls back instead
+                # of leaving a map whose actors silently describe an older export.
+                if world_index_v2.is_world_canonical(canonical):
+                    if not world_index_v2.world_schema_present(connection):
+                        world_index_v2.ensure_schema(connection)
+                    world_summary = world_index_v2.ingest_world_in_transaction(
+                        connection,
+                        canonical,
+                        source_path=canonical_path.as_posix(),
+                    )
+                    world_actors = int(world_summary.get("actors", 0))
 
             if existing is None:
                 result.added += 1
@@ -634,6 +677,9 @@ def build_index(
             else:
                 result.updated += 1
                 status = "updated"
+            if world_actors:
+                result.worlds += 1
+                result.world_actors += world_actors
             result.assets.append(
                 AssetIndexResult(
                     asset_path=asset_path,
@@ -642,6 +688,7 @@ def build_index(
                     references=reference_count,
                     graphs=graph_count,
                     nodes=node_count,
+                    world_actors=world_actors,
                 )
             )
         except Exception as exc:
@@ -664,6 +711,26 @@ def build_index(
 
     with connection:
         set_metadata(connection, "database_schema_version", str(get_schema_version(connection)))
+        # Record world coverage so query tools can warn about an incomplete
+        # import instead of inferring freshness from an existing asset row.
+        world_related = (
+            result.worlds > 0
+            or result.failed > 0
+            or bool(result.errors)
+            or world_index_v2.world_schema_present(connection)
+        )
+        if world_related:
+            set_metadata(connection, "world_index_last_build_utc", utc_now_iso())
+            set_metadata(
+                connection,
+                "world_index_last_build_complete",
+                "1" if not result.errors and result.failed == 0 else "0",
+            )
+            set_metadata(
+                connection,
+                "world_index_last_build_incomplete_reasons",
+                _json_dumps(result.errors[:16]),
+            )
         if effective_project_key:
             set_metadata(connection, "project_key", effective_project_key)
         set_metadata(connection, "last_export_root", str(export_root))

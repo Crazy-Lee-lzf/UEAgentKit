@@ -11,10 +11,23 @@ this map are ``PointLight`` in data layer ``DL_Night``?" without parsing JSON by
 hand.
 
 This module adds relationally queryable side tables that are *derived* from the
-World canonical JSON.  It is additive: it does not touch ``schema.py``,
-``indexer.py``, ``queries.py`` or ``mcp_server.py``, it creates its own
-``world_v2_*`` tables on demand, and it never fabricates data the exporter did
-not provide.
+World canonical JSON.  It is additive: it does not touch ``schema.py`` or
+``queries.py``, it creates its own ``world_v2_*`` tables, and it never
+fabricates data the exporter did not provide.
+
+Integration (who calls what)
+----------------------------
+* ``indexer.build_index`` detects a World canonical, calls ``ensure_schema`` when
+  the tables are absent, and then ``ingest_world_in_transaction`` **inside the
+  same transaction** that writes the ``assets`` row.  A map and its actors are
+  therefore committed or rolled back together; prune deletes world rows in the
+  same transaction via ``prune_worlds``.
+* ``agent_api.IndexQueryService`` serves ``ue_find_world_actors`` /
+  ``ue_find_world_partition_actors`` / ``ue_get_world_summary`` through
+  ``find_world_actors`` / ``find_world_partition_actors`` / ``world_status``.
+* Query paths are strictly read-only: they call ``world_schema_present`` and
+  never run DDL, because the MCP server opens the database
+  ``readonly=True, immutable=True``.
 
 Design rules
 ------------
@@ -37,9 +50,15 @@ Design rules
 
 Public API
 ----------
-``ensure_schema``, ``ingest_world``, ``ingest_world_file``, ``delete_world``,
-``get_world``, ``list_worlds``, ``find_world_actors``,
-``find_world_partition_actors``, ``world_index_status``.
+Write/maintenance: ``ensure_schema``, ``world_schema_present``,
+``is_world_canonical``, ``world_row_exists``, ``ingest_world``,
+``ingest_world_in_transaction``, ``ingest_world_file``, ``delete_world``,
+``prune_worlds``.
+
+Read-only: ``get_world``, ``list_worlds``, ``find_world_actors``,
+``find_world_partition_actors``, ``world_index_status``,
+``orphan_worlds``, ``world_status`` (freshness/coverage),
+``index_build_status``.
 """
 
 from __future__ import annotations
@@ -51,7 +70,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from .database import utc_now_iso
+from .database import get_metadata, utc_now_iso
 from .queries import normalize_pagination
 
 WORLD_INDEX_V2_SCHEMA_VERSION = 1
@@ -59,6 +78,43 @@ WORLD_INDEX_V2_SCHEMA_VERSION = 1
 WORLD_DETAILS_TYPE = "world"
 DEFAULT_LIMIT = 50
 MAX_TAGS_PER_ACTOR = 4096
+MAX_WORLD_STATUS_ENTRIES = 64
+
+# Coverage states reported to agents.  ``complete`` is the only state that means
+# "the rows you are reading describe the asset revision the index currently
+# holds, and the export was not truncated".
+COVERAGE_COMPLETE = "complete"
+COVERAGE_TRUNCATED = "truncated"
+COVERAGE_PARTIAL = "partial"
+COVERAGE_STALE = "stale"
+COVERAGE_WORLD_INDEX_MISSING = "world-index-missing"
+COVERAGE_ORPHAN = "orphan"
+COVERAGE_UNKNOWN_MAP = "unknown-map"
+COVERAGE_INDEX_UNAVAILABLE = "world-index-unavailable"
+
+_COVERAGE_SEVERITY = (
+    COVERAGE_INDEX_UNAVAILABLE,
+    COVERAGE_UNKNOWN_MAP,
+    COVERAGE_ORPHAN,
+    COVERAGE_STALE,
+    COVERAGE_WORLD_INDEX_MISSING,
+    COVERAGE_TRUNCATED,
+    COVERAGE_PARTIAL,
+    COVERAGE_COMPLETE,
+)
+
+WORLD_SCHEMA_TABLES: tuple[str, ...] = (
+    "world_v2_meta",
+    "world_v2_worlds",
+    "world_v2_actors",
+    "world_v2_actor_tags",
+    "world_v2_actor_data_layers",
+    "world_v2_actor_component_classes",
+    "world_v2_class_counts",
+    "world_v2_world_partition_actors",
+    "world_v2_world_partition_actor_tags",
+    "world_v2_world_partition_actor_data_layers",
+)
 
 
 class WorldIndexError(RuntimeError):
@@ -302,6 +358,51 @@ def ensure_schema(connection: sqlite3.Connection) -> int:
         ("world-canonical-json/v1",),
     )
     return WORLD_INDEX_V2_SCHEMA_VERSION
+
+
+def world_schema_present(connection: sqlite3.Connection) -> bool:
+    """Read-only check: are the World V2 tables in this database?
+
+    Query paths must never create tables (the MCP server opens the database
+    read-only), so they call this instead of :func:`ensure_schema`.
+    """
+
+    placeholders = ", ".join("?" for _ in WORLD_SCHEMA_TABLES)
+    try:
+        rows = connection.execute(
+            f"SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ({placeholders})",
+            WORLD_SCHEMA_TABLES,
+        ).fetchall()
+    except sqlite3.Error:
+        return False
+    return len(rows) == len(WORLD_SCHEMA_TABLES)
+
+
+def world_row_exists(connection: sqlite3.Connection, asset_path: str) -> bool:
+    """Read-only check for one map's world row (used to repair old indexes)."""
+
+    if not world_schema_present(connection):
+        return False
+    return (
+        connection.execute(
+            "SELECT 1 FROM world_v2_worlds WHERE asset_path = ? LIMIT 1", (asset_path,)
+        ).fetchone()
+        is not None
+    )
+
+
+def is_world_canonical(canonical: Mapping[str, Any]) -> bool:
+    """True when this canonical document carries World reader details.
+
+    Used by the indexer to decide whether World V2 maintenance applies.  Never
+    raises: a document without world details is simply not ours.
+    """
+
+    try:
+        details, _ = _resolve_world_details(_mapping(canonical))
+    except WorldIndexError:
+        return False
+    return _text(details.get("type")) == WORLD_DETAILS_TYPE
 
 
 # --------------------------------------------------------------------------- #
@@ -1128,6 +1229,47 @@ def ingest_world(
     when the document cannot be stored faithfully.
     """
 
+    return _ingest_world(
+        connection,
+        canonical,
+        source_path=source_path,
+        force=force,
+        manage_transaction=True,
+    )
+
+
+def ingest_world_in_transaction(
+    connection: sqlite3.Connection,
+    canonical: Mapping[str, Any],
+    *,
+    source_path: str = "",
+    force: bool = False,
+) -> dict[str, Any]:
+    """Same as :func:`ingest_world`, but the caller owns the transaction.
+
+    ``indexer.build_index`` writes one asset and its World V2 rows inside a
+    single ``with connection:`` block; committing from inside would break that
+    atomicity, so the indexer calls this variant.  Any exception propagates and
+    the caller's transaction rolls back both the asset and the world rows.
+    """
+
+    return _ingest_world(
+        connection,
+        canonical,
+        source_path=source_path,
+        force=force,
+        manage_transaction=False,
+    )
+
+
+def _ingest_world(
+    connection: sqlite3.Connection,
+    canonical: Mapping[str, Any],
+    *,
+    source_path: str,
+    force: bool,
+    manage_transaction: bool,
+) -> dict[str, Any]:
     payload = _mapping(canonical)
     parsed = parse_world_canonical(payload, source_path=source_path)
     asset_path = _world_asset_path(payload, parsed)
@@ -1147,15 +1289,23 @@ def ingest_world(
                 "world_id": int(existing["world_id"]),
                 "revision_value": str(parsed.world["revision_value"]),
                 "revision_changed": False,
+                # ``actors``/``descriptors`` are rows written by *this* call.
                 "actors": 0,
                 "actor_tags": 0,
                 "component_class_rows": 0,
                 "descriptors": 0,
                 "class_count_rows": 0,
+                # ...and these are what the document contains, for callers that
+                # need to report map size without a second query.
+                "documentActors": len(parsed.actors),
+                "documentDescriptors": len(parsed.descriptors),
                 **parsed.flags,
             }
 
-    with connection:
+    if manage_transaction:
+        with connection:
+            counts = _ingest_parsed(connection, parsed, asset_path=asset_path)
+    else:
         counts = _ingest_parsed(connection, parsed, asset_path=asset_path)
 
     return {
@@ -1199,7 +1349,8 @@ def _world_asset_path(canonical: Mapping[str, Any], parsed: ParsedWorld) -> str:
 def delete_world(connection: sqlite3.Connection, asset_path: str) -> dict[str, Any]:
     """Remove one world and its dependent rows.  Returns counts of removed rows."""
 
-    ensure_schema(connection)
+    if not world_schema_present(connection):
+        return {"asset_path": asset_path, "deleted": False, "world_id": 0}
     row = connection.execute(
         "SELECT world_id FROM world_v2_worlds WHERE asset_path = ?", (asset_path,)
     ).fetchone()
@@ -1209,6 +1360,53 @@ def delete_world(connection: sqlite3.Connection, asset_path: str) -> dict[str, A
     with connection:
         _delete_world_rows(connection, world_id)
     return {"asset_path": asset_path, "deleted": True, "world_id": world_id}
+
+
+def prune_worlds(connection: sqlite3.Connection, asset_paths: Sequence[str]) -> int:
+    """Delete World V2 rows for maps that are gone from the index.
+
+    The caller owns the transaction (``indexer._prune_assets`` runs inside one),
+    so a prune that fails rolls back together with the asset deletions instead of
+    leaving world rows pointing at a vanished asset.
+    """
+
+    if not asset_paths or not world_schema_present(connection):
+        return 0
+    deleted = 0
+    for asset_path in asset_paths:
+        row = connection.execute(
+            "SELECT world_id FROM world_v2_worlds WHERE asset_path = ?", (str(asset_path),)
+        ).fetchone()
+        if row is None:
+            continue
+        _delete_world_rows(connection, int(row["world_id"]))
+        deleted += 1
+    return deleted
+
+
+def orphan_worlds(connection: sqlite3.Connection, *, limit: int = MAX_WORLD_STATUS_ENTRIES) -> list[str]:
+    """World rows whose map asset is no longer in the asset index.
+
+    Happens when an index was pruned before this integration existed, or when a
+    database is hand-edited.  The MCP layer surfaces these as ``orphan`` rather
+    than serving actors for a map the index no longer contains.
+    """
+
+    if not world_schema_present(connection):
+        return []
+    limit = max(1, min(int(limit), MAX_WORLD_STATUS_ENTRIES))
+    rows = connection.execute(
+        """
+        SELECT w.asset_path
+        FROM world_v2_worlds w
+        LEFT JOIN assets a ON a.asset_path = w.asset_path
+        WHERE a.id IS NULL
+        ORDER BY w.asset_path
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    return [str(row[0]) for row in rows]
 
 
 # --------------------------------------------------------------------------- #
@@ -1320,7 +1518,17 @@ def find_world_actors(
     """
 
     limit, offset = normalize_pagination(limit, offset)
-    ensure_schema(connection)
+    if not world_schema_present(connection):
+        return {
+            "world": world.strip() or None,
+            "actors": [],
+            "total": 0,
+            "limit": limit,
+            "offset": offset,
+            "hasMore": False,
+            "worlds": [],
+            "worldIndexAvailable": False,
+        }
 
     where_sql, parameters = _actor_where(
         world=world,
@@ -1374,7 +1582,17 @@ def find_world_partition_actors(
     """Query World Partition actor descriptors (before-load metadata + bounds)."""
 
     limit, offset = normalize_pagination(limit, offset)
-    ensure_schema(connection)
+    if not world_schema_present(connection):
+        return {
+            "world": world.strip() or None,
+            "actors": [],
+            "total": 0,
+            "limit": limit,
+            "offset": offset,
+            "hasMore": False,
+            "worlds": [],
+            "worldIndexAvailable": False,
+        }
 
     clauses = ["1 = 1"]
     parameters: list[Any] = []
@@ -1444,9 +1662,13 @@ def find_world_partition_actors(
 
 
 def get_world(connection: sqlite3.Connection, asset_path: str) -> dict[str, Any] | None:
-    """Return one world with its stored details and row counts, or ``None``."""
+    """Return one world with its stored details and row counts, or ``None``.
 
-    ensure_schema(connection)
+    Read-only: a database without World V2 tables simply has no world to return.
+    """
+
+    if not world_schema_present(connection):
+        return None
     row = connection.execute(
         "SELECT * FROM world_v2_worlds WHERE asset_path = ?", (asset_path.strip(),)
     ).fetchone()
@@ -1499,7 +1721,8 @@ def get_world(connection: sqlite3.Connection, asset_path: str) -> dict[str, Any]
 def list_worlds(connection: sqlite3.Connection) -> list[dict[str, Any]]:
     """List ingested worlds with actor/descriptor counts and truncation flags."""
 
-    ensure_schema(connection)
+    if not world_schema_present(connection):
+        return []
     rows = connection.execute(
         """
         SELECT w.asset_path, w.package_name, w.asset_name, w.world_type, w.revision_value,
@@ -1519,7 +1742,15 @@ def list_worlds(connection: sqlite3.Connection) -> list[dict[str, Any]]:
 def world_index_status(connection: sqlite3.Connection) -> dict[str, Any]:
     """Row counts and schema version for diagnostics/verification."""
 
-    ensure_schema(connection)
+    if not world_schema_present(connection):
+        return {
+            "schemaVersion": WORLD_INDEX_V2_SCHEMA_VERSION,
+            "schemaAvailable": False,
+            "tables": {},
+            "worlds": 0,
+            "actors": 0,
+            "partialWorlds": [],
+        }
     tables = (
         "world_v2_worlds",
         "world_v2_actors",
@@ -1543,8 +1774,299 @@ def world_index_status(connection: sqlite3.Connection) -> dict[str, Any]:
     ]
     return {
         "schemaVersion": WORLD_INDEX_V2_SCHEMA_VERSION,
+        "schemaAvailable": True,
         "tables": counts,
         "worlds": counts["world_v2_worlds"],
         "actors": counts["world_v2_actors"],
         "partialWorlds": partial_worlds,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Freshness / coverage
+# --------------------------------------------------------------------------- #
+
+
+def index_build_status(connection: sqlite3.Connection) -> dict[str, Any]:
+    """What the last index build said about world coverage.
+
+    ``build_index`` records this so a query can warn "the last import was
+    incomplete" instead of trusting that every map is current just because an
+    ``assets`` row exists.
+    """
+
+    complete_value = get_metadata(connection, "world_index_last_build_complete", "")
+    reasons_raw = get_metadata(connection, "world_index_last_build_incomplete_reasons", "")
+    reasons: list[str] = []
+    if reasons_raw:
+        try:
+            parsed = json.loads(reasons_raw)
+        except json.JSONDecodeError:
+            parsed = []
+        if isinstance(parsed, list):
+            reasons = [str(item) for item in parsed][:16]
+    return {
+        "declared": bool(complete_value),
+        "lastBuildUtc": get_metadata(connection, "world_index_last_build_utc", ""),
+        "complete": complete_value == "1",
+        "incompleteReasons": reasons,
+    }
+
+
+def _asset_row(connection: sqlite3.Connection, asset_path: str) -> sqlite3.Row | None:
+    return connection.execute(
+        """
+        SELECT asset_path, package_name, asset_class, revision_value, indexed_at_utc, profile
+        FROM assets
+        WHERE asset_path = ?
+        """,
+        (asset_path,),
+    ).fetchone()
+
+
+def _coverage_entry(
+    connection: sqlite3.Connection,
+    *,
+    asset_path: str,
+    world_row: sqlite3.Row | None,
+    asset_row: sqlite3.Row | None,
+) -> dict[str, Any]:
+    entry: dict[str, Any] = {
+        "assetPath": asset_path,
+        "packageName": str(asset_row["package_name"]) if asset_row is not None else "",
+        "assetClass": str(asset_row["asset_class"]) if asset_row is not None else "",
+        "coverage": COVERAGE_COMPLETE,
+        "complete": False,
+        "assetIndexed": asset_row is not None,
+        "worldIndexed": world_row is not None,
+        "assetRevision": str(asset_row["revision_value"]) if asset_row is not None else "",
+        "worldRevision": str(world_row["revision_value"]) if world_row is not None else "",
+        "revisionConsistent": False,
+        "assetIndexedAtUtc": str(asset_row["indexed_at_utc"]) if asset_row is not None else "",
+        "worldIngestedAtUtc": "",
+        "partial": False,
+        "partialReasons": [],
+        "actorListTruncated": False,
+        "actorDescListTruncated": False,
+        "loadedActorCount": 0,
+        "exportedActorCount": 0,
+        "actorDescCount": 0,
+        "exportedActorDescCount": 0,
+        "actorRows": 0,
+        "actorDescRows": 0,
+        "warnings": [],
+    }
+    warnings: list[str] = []
+
+    if world_row is None:
+        entry["coverage"] = COVERAGE_WORLD_INDEX_MISSING
+        warnings.append(
+            f"{asset_path} is indexed but has no World V2 rows; the map actor tables were not "
+            "built for this asset (older index or index built before World V2 existed). Rebuild "
+            "the index (build_index force / ue_refresh_asset_index) to populate map actors."
+        )
+        entry["warnings"] = warnings
+        return entry
+
+    entry["packageName"] = entry["packageName"] or str(world_row["package_name"])
+    entry["worldIngestedAtUtc"] = str(world_row["ingested_at_utc"])
+    entry["partial"] = bool(world_row["partial"])
+    entry["partialReasons"] = [str(item) for item in _json_list(world_row["partial_reasons_json"])]
+    entry["actorListTruncated"] = bool(world_row["actor_list_truncated"])
+    entry["actorDescListTruncated"] = bool(world_row["actor_desc_list_truncated"])
+    entry["loadedActorCount"] = int(world_row["loaded_actor_count"])
+    entry["exportedActorCount"] = int(world_row["exported_actor_count"])
+    entry["actorDescCount"] = int(world_row["actor_desc_count"])
+    entry["exportedActorDescCount"] = int(world_row["exported_actor_desc_count"])
+    counts = connection.execute(
+        """
+        SELECT
+            (SELECT COUNT(*) FROM world_v2_actors WHERE world_id = ?) AS actors,
+            (SELECT COUNT(*) FROM world_v2_world_partition_actors WHERE world_id = ?) AS descriptors
+        """,
+        (int(world_row["world_id"]), int(world_row["world_id"])),
+    ).fetchone()
+    entry["actorRows"] = int(counts["actors"])
+    entry["actorDescRows"] = int(counts["descriptors"])
+
+    if asset_row is None:
+        entry["coverage"] = COVERAGE_ORPHAN
+        warnings.append(
+            f"{asset_path} has World V2 rows but no row in the asset index; the map was pruned or "
+            "removed from the export. These actors are orphaned and must not be treated as current."
+        )
+        entry["warnings"] = warnings
+        return entry
+
+    if not entry["assetRevision"] or not entry["worldRevision"]:
+        # No revision metadata means freshness cannot be established at all, so
+        # the rows must not be advertised as complete.
+        entry["coverage"] = COVERAGE_PARTIAL
+        entry["partial"] = True
+        entry["partialReasons"] = [*entry["partialReasons"], "revision-unavailable"]
+        warnings.append(
+            f"{asset_path}: no revision metadata for the asset or the world rows; freshness "
+            "cannot be verified, so the actors are not reported as complete."
+        )
+        entry["warnings"] = warnings
+        return entry
+
+    entry["revisionConsistent"] = entry["assetRevision"] == entry["worldRevision"]
+    if not entry["revisionConsistent"]:
+        entry["coverage"] = COVERAGE_STALE
+        warnings.append(
+            f"{asset_path}: world rows were built from revision "
+            f"{entry['worldRevision'] or '<none>'} but the asset index holds "
+            f"{entry['assetRevision'] or '<none>'}; re-import the map to refresh actor rows."
+        )
+        entry["warnings"] = warnings
+        return entry
+
+    if entry["actorListTruncated"] or entry["actorDescListTruncated"]:
+        entry["coverage"] = COVERAGE_TRUNCATED
+        warnings.append(
+            f"{asset_path}: the export was truncated "
+            f"(actors {entry['exportedActorCount']}/{entry['loadedActorCount']}, "
+            f"descriptors {entry['exportedActorDescCount']}/{entry['actorDescCount']}); "
+            "actor lists are incomplete, so absence of an actor proves nothing."
+        )
+        entry["warnings"] = warnings
+        return entry
+
+    if entry["partial"]:
+        entry["coverage"] = COVERAGE_PARTIAL
+        reasons = ", ".join(entry["partialReasons"]) or "unspecified"
+        warnings.append(f"{asset_path}: the world export is partial ({reasons}).")
+        entry["warnings"] = warnings
+        return entry
+
+    entry["coverage"] = COVERAGE_COMPLETE
+    entry["complete"] = True
+    entry["warnings"] = warnings
+    return entry
+
+
+def _aggregate_coverage(entries: Sequence[Mapping[str, Any]]) -> str:
+    if not entries:
+        return COVERAGE_COMPLETE
+    seen = {str(entry.get("coverage", "")) for entry in entries}
+    for candidate in _COVERAGE_SEVERITY:
+        if candidate in seen:
+            return candidate
+    return COVERAGE_COMPLETE
+
+
+def world_status(
+    connection: sqlite3.Connection,
+    *,
+    world: str = "",
+    limit: int = MAX_WORLD_STATUS_ENTRIES,
+) -> dict[str, Any]:
+    """Freshness/coverage for one map filter or for the whole world index.
+
+    This is the honesty surface behind the MCP tools: an agent must be able to
+    tell "this map has no actors" from "this map was never given world tables",
+    "these rows describe an older revision", and "the export was truncated".
+    """
+
+    filter_text = str(world or "").strip()
+    limit = max(1, min(int(limit), MAX_WORLD_STATUS_ENTRIES))
+    build = index_build_status(connection)
+
+    if not world_schema_present(connection):
+        unavailable_warnings = [
+            "This database has no World Index V2 tables; no map actor data has been imported. "
+            "Import a World export (ueak index) to populate them."
+        ]
+        if build["declared"] and not build["complete"]:
+            unavailable_warnings.append(
+                "The last index build was incomplete ("
+                + (", ".join(build["incompleteReasons"]) or "unspecified")
+                + "); world rows may be missing or out of date."
+            )
+        return {
+            "schemaAvailable": False,
+            "assetPathFilter": filter_text,
+            "targetFound": False,
+            "coverage": COVERAGE_INDEX_UNAVAILABLE,
+            "complete": False,
+            "worlds": [],
+            "worldsTruncated": False,
+            "indexBuild": build,
+            "warnings": unavailable_warnings,
+        }
+
+    candidates: list[str] = []
+    if filter_text:
+        rows = connection.execute(
+            "SELECT asset_path FROM assets WHERE asset_path = ? OR package_name = ? ORDER BY asset_path",
+            (filter_text, filter_text),
+        ).fetchall()
+        candidates.extend(str(row[0]) for row in rows)
+        rows = connection.execute(
+            "SELECT asset_path FROM world_v2_worlds WHERE asset_path = ? OR package_name = ? "
+            "ORDER BY asset_path",
+            (filter_text, filter_text),
+        ).fetchall()
+        candidates.extend(str(row[0]) for row in rows)
+        candidates = sorted(dict.fromkeys(candidates))
+        if not candidates:
+            return {
+                "schemaAvailable": True,
+                "assetPathFilter": filter_text,
+                "targetFound": False,
+                "coverage": COVERAGE_UNKNOWN_MAP,
+                "complete": False,
+                "worlds": [],
+                "worldsTruncated": False,
+                "indexBuild": build,
+                "warnings": [
+                    f"No indexed asset or world matches {filter_text!r}; the map is not in this "
+                    "index, so an empty actor list is not evidence that the map is empty."
+                ],
+            }
+        truncated = False
+    else:
+        rows = connection.execute(
+            "SELECT asset_path FROM world_v2_worlds ORDER BY asset_path LIMIT ?", (limit + 1,)
+        ).fetchall()
+        candidates = [str(row[0]) for row in rows]
+        truncated = len(candidates) > limit
+        candidates = candidates[:limit]
+
+    entries: list[dict[str, Any]] = []
+    for asset_path in candidates:
+        world_row = connection.execute(
+            "SELECT * FROM world_v2_worlds WHERE asset_path = ?", (asset_path,)
+        ).fetchone()
+        entries.append(
+            _coverage_entry(
+                connection,
+                asset_path=asset_path,
+                world_row=world_row,
+                asset_row=_asset_row(connection, asset_path),
+            )
+        )
+
+    coverage = _aggregate_coverage(entries)
+    warnings: list[str] = []
+    for entry in entries:
+        warnings.extend(str(item) for item in entry["warnings"])
+    if build["declared"] and not build["complete"]:
+        warnings.insert(
+            0,
+            "The last index build was incomplete ("
+            + (", ".join(build["incompleteReasons"]) or "unspecified")
+            + "); world rows may not reflect the current export.",
+        )
+    return {
+        "schemaAvailable": True,
+        "assetPathFilter": filter_text,
+        "targetFound": bool(entries),
+        "coverage": coverage,
+        "complete": bool(entries) and all(entry["complete"] for entry in entries),
+        "worlds": entries,
+        "worldsTruncated": truncated,
+        "indexBuild": build,
+        "warnings": warnings[:32],
     }

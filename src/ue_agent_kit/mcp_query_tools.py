@@ -145,6 +145,86 @@ def register_query_tools(
             return error_response("ue_find_references", exc, read_only=True)
 
     @server.tool(annotations=read_annotations)
+    def ue_find_world_actors(
+        world: str = "",
+        class_path: str = "",
+        class_contains: str = "",
+        tag: str = "",
+        data_layer: str = "",
+        label_contains: str = "",
+        include_component_classes: bool = False,
+        limit: int = 50,
+        offset: int = 0,
+        continuation_token: str = "",
+        max_output_tokens: int = DEFAULT_OUTPUT_TOKEN_BUDGET,
+    ) -> dict[str, Any]:
+        """Find map actors by world/class/tag/data-layer with coverage flags and bounded pagination."""
+        try:
+            return index_service.find_world_actors(
+                world=world,
+                class_path=class_path,
+                class_contains=class_contains,
+                tag=tag,
+                data_layer=data_layer,
+                label_contains=label_contains,
+                include_component_classes=include_component_classes,
+                limit=limit,
+                offset=offset,
+                continuation_token=continuation_token,
+                max_output_tokens=max_output_tokens,
+            )
+        except (FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_find_world_actors", exc, read_only=True)
+
+    @server.tool(annotations=read_annotations)
+    def ue_find_world_partition_actors(
+        world: str = "",
+        base_class_path: str = "",
+        class_contains: str = "",
+        tag: str = "",
+        data_layer: str = "",
+        folder_prefix: str = "",
+        limit: int = 50,
+        offset: int = 0,
+        continuation_token: str = "",
+        max_output_tokens: int = DEFAULT_OUTPUT_TOKEN_BUDGET,
+    ) -> dict[str, Any]:
+        """Find World Partition actor descriptors (unloaded metadata and bounds) with coverage flags."""
+        try:
+            return index_service.find_world_partition_actors(
+                world=world,
+                base_class_path=base_class_path,
+                class_contains=class_contains,
+                tag=tag,
+                data_layer=data_layer,
+                folder_prefix=folder_prefix,
+                limit=limit,
+                offset=offset,
+                continuation_token=continuation_token,
+                max_output_tokens=max_output_tokens,
+            )
+        except (FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_find_world_partition_actors", exc, read_only=True)
+
+    @server.tool(annotations=read_annotations)
+    def ue_get_world_summary(
+        world: str = "",
+        limit: int = 50,
+        continuation_token: str = "",
+        max_output_tokens: int = DEFAULT_OUTPUT_TOKEN_BUDGET,
+    ) -> dict[str, Any]:
+        """Report map world coverage: indexed revisions, ingestion timestamps, truncation and staleness."""
+        try:
+            return index_service.get_world_summary(
+                world=world,
+                limit=limit,
+                continuation_token=continuation_token,
+                max_output_tokens=max_output_tokens,
+            )
+        except (FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_get_world_summary", exc, read_only=True)
+
+    @server.tool(annotations=read_annotations)
     def ue_analyze_change_impact(
         target_asset_paths: list[str],
         subject_kind: Literal[
