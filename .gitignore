@@ -4,6 +4,23 @@ Backups/
 AutoSDK/
 %SystemDrive%/
 
+# Local Editor/project runtime state. The bridge descriptor contains a per-session
+# authToken and must never be committed.
+/Saved/
+**/Saved/UEAgentKit/EditorBridge.json
+
+# Local secrets and databases. Keep intentional test fixtures working.
+.env
+.env.*
+!.env.example
+!.env.template
+*.sqlite3
+*.sqlite
+*.db
+!tests/fixtures/**/*.sqlite3
+!tests/fixtures/**/*.sqlite
+!tests/fixtures/**/*.db
+
 .vs/
 .idea/
 .vscode/
