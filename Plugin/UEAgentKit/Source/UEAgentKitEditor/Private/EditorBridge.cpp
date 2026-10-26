@@ -10,6 +10,7 @@
 #include "BlueprintGraphEditExperimental.h"
 #include "BlueprintPinDefaultEditExperimental.h"
 #include "BlueprintRewireExperimental.h"
+#include "BlueprintNodeRemoveExperimental.h"
 #include "BlueprintVariableWriteExperimental.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -1421,6 +1422,84 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 				ErrorMessage);
 		}
 	}
+	else if (Method == TEXT("editor.previewBlueprintNodeRemoveExperimental"))
+	{
+		if (!UEAgentKitBlueprintNodeRemoveExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-remove-experimental-disabled"),
+				TEXT("Experimental Blueprint node removal is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintNodeRemoveExperimental::TryPreviewExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.applyBlueprintNodeRemoveExperimental"))
+	{
+		if (!UEAgentKitBlueprintNodeRemoveExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-remove-experimental-disabled"),
+				TEXT("Experimental Blueprint node removal is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintNodeRemoveExperimental::TryApplyExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.saveBlueprintNodeRemoveExperimental"))
+	{
+		if (!UEAgentKitBlueprintNodeRemoveExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-remove-experimental-disabled"),
+				TEXT("Experimental Blueprint node removal is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintNodeRemoveExperimental::TrySaveExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
 	else if (Method == TEXT("editor.getEditorContext"))
 	{
 		SendResult(Client.Socket, RequestId, BuildEditorContextResult());
@@ -2349,6 +2428,15 @@ TArray<TSharedPtr<FJsonValue>> FUEAgentKitEditorBridge::BuildCapabilityValues() 
 			UEAgentKitBlueprintRewireExperimental::ApplyMethod));
 		Values.Add(MakeShared<FJsonValueString>(
 			UEAgentKitBlueprintRewireExperimental::SaveMethod));
+	}
+	if (UEAgentKitBlueprintNodeRemoveExperimental::IsExperimentalWriteAvailable())
+	{
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintNodeRemoveExperimental::PreviewMethod));
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintNodeRemoveExperimental::ApplyMethod));
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintNodeRemoveExperimental::SaveMethod));
 	}
 	if (FNativeNodeRegistry::Get().IsAvailable())
 	{
