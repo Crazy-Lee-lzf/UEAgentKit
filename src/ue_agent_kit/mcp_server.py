@@ -59,6 +59,12 @@ from .mcp_graph_layout_experimental import register_graph_layout_experimental_to
 from .mcp_graph_edit_experimental import register_graph_edit_experimental_tools
 from .mcp_pin_default_edit_experimental import register_pin_default_edit_experimental_tools
 from .mcp_variable_write_experimental import register_variable_write_experimental_tools
+from .mcp_rewire_write_experimental import register_rewire_write_experimental_tools
+from .experimental_rewire_write import (
+    APPLY_TOOL_NAME as EXPERIMENTAL_REWIRE_APPLY_TOOL_NAME,
+    PREVIEW_TOOL_NAME as EXPERIMENTAL_REWIRE_PREVIEW_TOOL_NAME,
+    SAVE_TOOL_NAME as EXPERIMENTAL_REWIRE_SAVE_TOOL_NAME,
+)
 from .experimental_variable_write import (
     APPLY_TOOL_NAME as EXPERIMENTAL_VARIABLE_APPLY_TOOL_NAME,
     PREVIEW_TOOL_NAME as EXPERIMENTAL_VARIABLE_PREVIEW_TOOL_NAME,
@@ -371,6 +377,13 @@ def _capabilities_response(
         and "editor.applyBlueprintVariableCreateExperimental" in observed_capabilities
         and "editor.saveBlueprintVariableCreateExperimental" in observed_capabilities
     )
+    rewire_write_registered = bool(live_editor_enabled and experimental_graphpatch_edit)
+    rewire_write_plugin_opt_in = bool(
+        isinstance(observed_capabilities, list)
+        and "editor.previewBlueprintRewireExperimental" in observed_capabilities
+        and "editor.applyBlueprintRewireExperimental" in observed_capabilities
+        and "editor.saveBlueprintRewireExperimental" in observed_capabilities
+    )
     memory_status = memory_service.status() if memory_service is not None else None
     verification_evidence_status = (
         workflow_service.verification_evidence_store.status()
@@ -496,6 +509,30 @@ def _capabilities_response(
                     },
                     {
                         "name": EXPERIMENTAL_VARIABLE_SAVE_TOOL_NAME,
+                        "readOnly": False,
+                        "destructive": False,
+                        "experimental": True,
+                    },
+                ]
+                if live_editor_enabled and experimental_graphpatch_edit
+                else []
+            )
+            + (
+                [
+                    {
+                        "name": EXPERIMENTAL_REWIRE_PREVIEW_TOOL_NAME,
+                        "readOnly": True,
+                        "destructive": False,
+                        "experimental": True,
+                    },
+                    {
+                        "name": EXPERIMENTAL_REWIRE_APPLY_TOOL_NAME,
+                        "readOnly": False,
+                        "destructive": True,
+                        "experimental": True,
+                    },
+                    {
+                        "name": EXPERIMENTAL_REWIRE_SAVE_TOOL_NAME,
                         "readOnly": False,
                         "destructive": False,
                         "experimental": True,
@@ -944,6 +981,77 @@ def _capabilities_response(
                 "maxVariables": 8,
                 "maxVariableNameLength": 64,
                 "maxStringLength": 1024,
+                "maxRequestBytes": 61440,
+            },
+            "experimentalBlueprintRewire": {
+                "available": bool(rewire_write_registered and rewire_write_plugin_opt_in),
+                "registered": rewire_write_registered,
+                "pluginCapabilityObserved": rewire_write_plugin_opt_in,
+                "previewTool": EXPERIMENTAL_REWIRE_PREVIEW_TOOL_NAME
+                if rewire_write_registered
+                else "",
+                "applyTool": EXPERIMENTAL_REWIRE_APPLY_TOOL_NAME
+                if rewire_write_registered
+                else "",
+                "saveTool": EXPERIMENTAL_REWIRE_SAVE_TOOL_NAME
+                if rewire_write_registered
+                else "",
+                "bridgeMethods": [
+                    "editor.previewBlueprintRewireExperimental",
+                    "editor.applyBlueprintRewireExperimental",
+                    "editor.saveBlueprintRewireExperimental",
+                ]
+                if rewire_write_registered
+                else [],
+                "readOnlyPreview": True,
+                "destructiveApply": True,
+                "experimental": True,
+                "productionDefault": False,
+                "productionEnabled": False,
+                "productionApprovalRequired": False,
+                "authorizationModel": (
+                    "project-level experimental opt-in plus exact per-call confirmation; "
+                    "this replaces or removes exactly one existing edge in one exact "
+                    "focused top-level K2 event graph"
+                ),
+                "explicitOptIn": {
+                    "serverFlag": "--enable-experimental-graphpatch-edit",
+                    "projectConfig": "[UEAgentKit] ExperimentalGraphPatchEdit=True",
+                    "requiresRunningEditorCapability": True,
+                },
+                "requiresCompletePreviewResult": True,
+                "acceptsCallerBuiltRequest": False,
+                "operations": ["rewire", "disconnect"],
+                "supportedPinKinds": ["exec", "bool", "int", "double", "string"],
+                "rejectedPinTraits": [
+                    "wildcard",
+                    "delegate",
+                    "container",
+                    "by-reference",
+                    "const",
+                    "weak-pointer",
+                    "struct-or-object",
+                    "hidden",
+                    "orphaned",
+                    "split",
+                ],
+                "singleEdgeOnly": True,
+                "bindsExactEdgeSetHash": True,
+                "bindsExactNodeAndPinGuids": True,
+                "bindsExactOldSourcePin": True,
+                "untouchedEdgesPreserved": True,
+                "neverBreakAllPinLinks": True,
+                "rejectsSchemaBreakOtherLinks": True,
+                "rejectsSchemaConversions": True,
+                "explicitApplyConfirmation": "REWIRE EXPERIMENTAL BLUEPRINT PIN <planId>",
+                "explicitSaveConfirmation": "SAVE EXPERIMENTAL BLUEPRINT REWIRE <planId>",
+                "saveRequiresPostApplyEdgeHashRevisionAndCounts": True,
+                "undoRedoVerifiedInCall": True,
+                "singleTransaction": True,
+                "autoSave": False,
+                "compiled": False,
+                "skeletonRegenerated": False,
+                "requiresExplicitSeparateSave": True,
                 "maxRequestBytes": 61440,
             },
             "editorContext": {
@@ -2116,6 +2224,20 @@ def create_mcp_server(
                     EXPERIMENTAL_VARIABLE_PREVIEW_TOOL_NAME,
                     EXPERIMENTAL_VARIABLE_APPLY_TOOL_NAME,
                     EXPERIMENTAL_VARIABLE_SAVE_TOOL_NAME,
+                ),
+            )
+            register_rewire_write_experimental_tools(
+                server=server,
+                live_editor_service=live_editor_service,
+                tool_annotations_type=ToolAnnotations,
+                error_response=_error_response,
+            )
+            _enforce_strict_tool_arguments(
+                server,
+                (
+                    EXPERIMENTAL_REWIRE_PREVIEW_TOOL_NAME,
+                    EXPERIMENTAL_REWIRE_APPLY_TOOL_NAME,
+                    EXPERIMENTAL_REWIRE_SAVE_TOOL_NAME,
                 ),
             )
     if workflow_service is not None:
