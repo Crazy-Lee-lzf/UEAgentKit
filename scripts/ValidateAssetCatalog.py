@@ -66,6 +66,15 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def normalize_sha256(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if text.startswith("sha256:"):
+        text = text[7:]
+    if len(text) != 64 or any(character not in "0123456789abcdef" for character in text):
+        return ""
+    return text
+
+
 def validate_asset(
     path: Path,
     *,
@@ -302,6 +311,45 @@ def main() -> int:
         errors.extend(f"{path.relative_to(output_root)}: {message}" for message in asset_errors)
         assets.append(result)
 
+    canonical_sha_present = 0
+    canonical_sha_verified = 0
+    canonical_sha_missing = 0
+    for entry in manifest.get("assets", []):
+        if not isinstance(entry, dict):
+            errors.append("manifest asset entry is not an object")
+            continue
+        asset_path = str(entry.get("assetPath", ""))
+        entry_success = bool(entry.get("success"))
+        raw_hash = entry.get("canonicalSha256")
+        if not entry_success:
+            if str(raw_hash or "").strip():
+                errors.append(f"failed manifest entry advertises canonicalSha256: {asset_path}")
+            continue
+        if not str(raw_hash or "").strip():
+            canonical_sha_missing += 1
+            continue
+        canonical_sha_present += 1
+        expected_hash = normalize_sha256(raw_hash)
+        if not expected_hash:
+            errors.append(f"canonicalSha256 is not 64 hex characters: {asset_path}")
+            continue
+        canonical_path = Path(str(entry.get("jsonPath", ""))).expanduser()
+        try:
+            canonical_path.resolve().relative_to(output_root)
+        except (OSError, ValueError):
+            errors.append(f"canonicalSha256 path is outside output root: {asset_path}")
+            continue
+        if not canonical_path.is_file():
+            errors.append(f"canonicalSha256 file is missing: {asset_path}")
+            continue
+        actual_hash = sha256(canonical_path)
+        if actual_hash != expected_hash:
+            errors.append(
+                f"canonicalSha256 mismatch for {asset_path}: {expected_hash} != {actual_hash}"
+            )
+            continue
+        canonical_sha_verified += 1
+
     reader_success_count = sum(item["readerStatus"] == "success" for item in assets)
     reader_failure_count = sum(item["readerStatus"] == "failed" for item in assets)
     if reader_success_count != manifest_reader_success:
@@ -346,6 +394,9 @@ def main() -> int:
         "totalTags": sum(int(item["tags"]) for item in assets),
         "totalReferences": sum(int(item["references"]) for item in assets),
         "revisionsAvailable": sum(int(bool(item["revisionAvailable"])) for item in assets),
+        "canonicalShaPresent": canonical_sha_present,
+        "canonicalShaVerified": canonical_sha_verified,
+        "canonicalShaMissing": canonical_sha_missing,
         "assetFile": asset_file_result,
         "errors": errors,
         "valid": not errors,

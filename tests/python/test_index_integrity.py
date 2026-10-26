@@ -461,11 +461,20 @@ class ExportSourceGuardTests(unittest.TestCase):
     )
 
     @unittest.skipUnless(COMMANDLET.is_file(), "AssetCatalogExportCommandlet.cpp is not present")
-    def test_failed_reader_is_not_advertised_as_success(self) -> None:
+    def test_failed_reader_and_hash_failure_are_not_advertised_as_success(self) -> None:
         source = self.COMMANDLET.read_text(encoding="utf-8")
-        self.assertIn("OutResult.bSuccess = ReaderStatus != EAssetReaderStatus::Failed", source)
+        self.assertIn("if (ReaderStatus == EAssetReaderStatus::Failed)", source)
         self.assertIn("Specialized asset reader failed", source)
-        self.assertNotIn("OutResult.bSuccess = true;", source)
+        self.assertIn("if (!FBlueprintContextSha256::HashFile", source)
+        self.assertIn("Failed to hash written Canonical JSON bytes.", source)
+        self.assertIn('SetStringField(TEXT("canonicalSha256"), Result.CanonicalSha256)', source)
+        reader_guard = source.index("if (ReaderStatus == EAssetReaderStatus::Failed)")
+        hash_guard = source.index("if (!FBlueprintContextSha256::HashFile")
+        success_assignment = source.index("OutResult.bSuccess = true;")
+        self.assertLess(reader_guard, hash_guard)
+        self.assertLess(hash_guard, success_assignment)
+        self.assertIn("return false;", source[reader_guard:hash_guard])
+        self.assertIn("return false;", source[hash_guard:success_assignment])
 
 
 class RealExportSmokeTests(unittest.TestCase):

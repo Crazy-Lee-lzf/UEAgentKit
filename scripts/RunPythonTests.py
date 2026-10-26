@@ -52,6 +52,7 @@ DOMAIN_MODULES: dict[str, tuple[str, ...]] = {
         "test_tool_registry",
     ),
     "index": (
+        "test_asset_catalog_manifest",
         "test_database",
         "test_freshness",
         "test_index_incremental",

@@ -137,7 +137,7 @@ scripts\ue-agent.cmd index stats
 
 索引构建默认是严格模式：逐个读取 Canonical、重新计算 SHA-256，并校验 revision/schema/exporter/profile。`--batch-size N`（默认 100）只改变 SQLite 提交批次，不减少逐资产校验；每个资产仍有独立 savepoint，失败资产会回滚，不会留下半条资产或 World V2 行。
 
-当 exporter manifest 的资产条目带有 `canonicalSha256`（也接受 `canonical_sha256`）时，Python 索引器可将其作为候选快速过滤：只有 manifest、schema/exporter 身份和 DB 中 canonical SHA 都一致才跳过 Canonical 读取/哈希。旧 manifest 没有该字段时自动走严格全量校验。外部变更集是更显式的快速路径，必须提供 manifest 指纹和 exportRoot：
+当 exporter manifest 的资产条目带有 `canonicalSha256`（也接受 `canonical_sha256`）时，Python 索引器可将其作为候选快速过滤：只有 manifest、schema/exporter 身份和 DB 中 canonical SHA 都一致才跳过 Canonical 读取/哈希。旧 manifest 没有该字段时自动走严格全量校验。真实 `AssetCatalogExport` 0.8.0 现在只为成功且已完整写盘的 Canonical 文件写入该字段，值是该文件原始 bytes 的 SHA-256；ReaderFailed、写盘失败或哈希失败不会写可信 hash。外部变更集是更显式的快速路径，必须提供 manifest 指纹和 exportRoot：
 
 ```json
 {
