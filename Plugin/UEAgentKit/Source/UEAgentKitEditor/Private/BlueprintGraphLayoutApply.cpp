@@ -1,5 +1,8 @@
 #include "BlueprintGraphLayoutApply.h"
 
+#include "BlueprintNodeRemoveExperimental.h"
+#include "BlueprintRewireExperimental.h"
+
 #include "BlueprintContextAnalysis.h"
 #include "BlueprintEditor.h"
 #include "EditorBridgeHandlerUtils.h"
@@ -28,6 +31,22 @@
 
 namespace UEAgentKitBlueprintGraphLayout
 {
+	namespace
+	{
+		/**
+		 * The graph one explicit focus request selected.  It is only a fallback
+		 * for the read-only preflight when the toolkit has no live Slate focus,
+		 * and the preflight still verifies that the graph belongs to the exact
+		 * Blueprint owned by the selected editor.
+		 */
+		TWeakObjectPtr<UEdGraph> GExplicitFocusedGraph;
+	}
+
+	void SetExplicitFocusedGraph(UEdGraph* Graph)
+	{
+		GExplicitFocusedGraph = Graph;
+	}
+
 	namespace
 	{
 		constexpr int32 MaxMovedPositions = 1000;
@@ -1633,6 +1652,16 @@ namespace UEAgentKitBlueprintGraphLayout
 				TEXT("The active Blueprint Editor does not own a loaded Blueprint."));
 		}
 		UEdGraph* Graph = BlueprintEditor->GetFocusedGraph();
+		bool bUsedExplicitFocus = false;
+		if (Graph == nullptr && GExplicitFocusedGraph.IsValid())
+		{
+			UEdGraph* Candidate = GExplicitFocusedGraph.Get();
+			if (Candidate != nullptr && Candidate->GetTypedOuter<UBlueprint>() == Blueprint)
+			{
+				Graph = Candidate;
+				bUsedExplicitFocus = true;
+			}
+		}
 		if (Graph == nullptr)
 		{
 			return Fail(
@@ -1652,6 +1681,26 @@ namespace UEAgentKitBlueprintGraphLayout
 		OutPreflight->SetStringField(TEXT("blueprintPath"), Blueprint->GetPathName());
 		OutPreflight->SetStringField(TEXT("graphName"), Graph->GetName());
 		OutPreflight->SetBoolField(TEXT("editable"), BlueprintEditor->IsEditable(Graph));
+		OutPreflight->SetStringField(
+			TEXT("focusSource"),
+			bUsedExplicitFocus ? TEXT("explicit-focus-request") : TEXT("live-slate-focus"));
+		// P5: expose the exact live edge-set hashes that the rewire and
+		// node-removal plan contracts require, so an Agent can bind a valid
+		// request from read-only discovery instead of only from native tests.
+		FString RewireEdgeSetHash;
+		if (UEAgentKitBlueprintRewireExperimental::TryComputeLiveEdgeSetHash(
+				Graph,
+				RewireEdgeSetHash))
+		{
+			OutPreflight->SetStringField(TEXT("rewireEdgeSetHash"), RewireEdgeSetHash);
+		}
+		FString NodeRemoveEdgeSetHash;
+		if (UEAgentKitBlueprintNodeRemoveExperimental::TryComputeLiveEdgeSetHash(
+				Graph,
+				NodeRemoveEdgeSetHash))
+		{
+			OutPreflight->SetStringField(TEXT("nodeRemoveEdgeSetHash"), NodeRemoveEdgeSetHash);
+		}
 		OutPreflight->SetNumberField(TEXT("lastActivationTime"), LatestActivation);
 		return true;
 	}

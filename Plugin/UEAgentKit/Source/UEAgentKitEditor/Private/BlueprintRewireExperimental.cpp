@@ -1260,6 +1260,19 @@ namespace
 	}
 }
 
+bool UEAgentKitBlueprintRewireExperimental::TryComputeLiveEdgeSetHash(
+	UEdGraph* Graph,
+	FString& OutHash)
+{
+	if (Graph == nullptr)
+	{
+		return false;
+	}
+	TArray<FString> Keys;
+	BuildEdgeKeys(Graph, Keys);
+	return HashEdgeKeys(Keys, OutHash);
+}
+
 bool UEAgentKitBlueprintRewireExperimental::IsExperimentalWriteAvailable()
 {
 	if (bTestOverrideSet)
@@ -1902,8 +1915,6 @@ bool UEAgentKitBlueprintRewireExperimental::TrySaveExperimental(
 			TEXT("The post-Save preflight did not report the same clean graph."));
 	}
 
-	RecentRewireApplies.Remove(PlanId);
-
 	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetStringField(TEXT("schemaVersion"), SaveSchemaVersion);
 	Result->SetBoolField(TEXT("experimental"), true);
@@ -1956,5 +1967,9 @@ bool UEAgentKitBlueprintRewireExperimental::TrySaveExperimental(
 	Result->SetArrayField(TEXT("addedEdges"), AddedValues);
 
 	OutResult = Result;
+	// Receipt points into the TMap, so keep it alive until every result
+	// field copied its data; removing it before this point is a
+	// use-after-free that silently corrupts the returned hashes.
+	RecentRewireApplies.Remove(PlanId);
 	return true;
 }

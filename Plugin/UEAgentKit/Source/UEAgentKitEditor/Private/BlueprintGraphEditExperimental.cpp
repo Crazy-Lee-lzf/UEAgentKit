@@ -1109,12 +1109,17 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 					IBlueprintNodeBinder::FBindingSet(),
 					FVector2D(Spec.X, Spec.Y));
 			}
+			// Keep every node created by this tool transactional.  Undo/Redo
+			// verification recreates nodes, and later bounded tools (pin defaults,
+			// rewire, node removal) must be able to record an undoable change on
+			// them in the same Editor session.
 			if (Node == nullptr)
 			{
 				return Abort(
 					TEXT("graph-edit-node-spawn-failed"),
 					FString::Printf(TEXT("The Editor failed to spawn %s."), *Spec.NodeType));
 			}
+			Node->SetFlags(RF_Transactional);
 			if (!Node->NodeGuid.IsValid())
 			{
 				Node->CreateNewGuid();
@@ -1350,6 +1355,9 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 	Result->SetStringField(TEXT("assetPath"), Plan.AssetPath);
 	Result->SetStringField(TEXT("graphGuid"), Plan.GraphGuid);
 	Result->SetStringField(TEXT("confirmation"), Confirmation);
+	Result->SetStringField(
+		TEXT("requiredSaveConfirmation"),
+		FString(SaveConfirmationPrefix) + Plan.PlanId);
 	Result->SetNumberField(TEXT("nodeCountBefore"), NodeCountBefore);
 	Result->SetNumberField(TEXT("nodeCountAfter"), NodeCountAfter);
 	Result->SetNumberField(TEXT("createdNodeCount"), Plan.Nodes.Num());

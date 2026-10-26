@@ -1072,13 +1072,11 @@ bool UEAgentKitBlueprintPinDefaultExperimental::TryApplyExperimental(
 	}
 	const int32 NodeCountBefore = Graph != nullptr ? Graph->Nodes.Num() : 0;
 	const int32 LinkCountBefore = Graph != nullptr ? CountLinks(Graph) : 0;
-
 	{
 		FScopedTransaction Transaction(
 			FText::FromString(TEXT("UEAgentKit Set Blueprint Pin Defaults")));
 		Blueprint->Modify();
 		Graph->Modify();
-
 		const UEdGraphSchema_K2* Schema = Cast<UEdGraphSchema_K2>(Graph->GetSchema());
 		TArray<TPair<UEdGraphPin*, FString>> AppliedDefaults;
 		// Cancelling the transaction discards the undo record but not the live pin
@@ -1120,6 +1118,13 @@ bool UEAgentKitBlueprintPinDefaultExperimental::TryApplyExperimental(
 				Transaction.Cancel();
 				return false;
 			}
+			// Nodes created or recreated outside the Editor's node factory do not
+			// necessarily carry RF_Transactional.  Without it UObject::Modify() is a
+			// no-op, the transaction serializes no changed node, and the whole pin
+			// default edit is discarded as empty.  Mark the exact target node so its
+			// pin default change is a real undoable transaction.
+			Node->SetFlags(RF_Transactional);
+			Node->Modify();
 			Pin->Modify();
 			Schema->TrySetDefaultValue(*Pin, Target.Value, true);
 			if (!Pin->DefaultValue.Equals(Target.Value, ESearchCase::CaseSensitive))
@@ -1238,6 +1243,9 @@ bool UEAgentKitBlueprintPinDefaultExperimental::TryApplyExperimental(
 	Result->SetStringField(TEXT("assetPath"), Plan.AssetPath);
 	Result->SetStringField(TEXT("graphGuid"), Plan.GraphGuid);
 	Result->SetStringField(TEXT("confirmation"), Confirmation);
+	Result->SetStringField(
+		TEXT("requiredSaveConfirmation"),
+		FString(SaveConfirmationPrefix) + Plan.PlanId);
 	Result->SetStringField(TEXT("graphFingerprintAfter"), Plan.GraphFingerprint);
 	Result->SetStringField(TEXT("defaultsFingerprintAfter"), DefaultsFingerprintAfter);
 	Result->SetNumberField(TEXT("nodeCountBefore"), NodeCountBefore);

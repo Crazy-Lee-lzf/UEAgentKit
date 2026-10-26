@@ -125,6 +125,10 @@ int32 UBlueprintWriteFixtureCommandlet::Main(const FString& Params)
 		{TEXT("BFL_PatchTarget"), UBlueprintFunctionLibrary::StaticClass(), BPTYPE_FunctionLibrary},
 		{TEXT("BML_PatchTarget"), AActor::StaticClass(), BPTYPE_MacroLibrary},
 		{TEXT("BPI_PatchTarget"), UInterface::StaticClass(), BPTYPE_Interface},
+		// P5 Agent end-to-end: a normal Actor Blueprint with the default
+		// BeginPlay event graph, so live focused-graph writes have a real
+		// top-level K2 event graph to target.
+		{TEXT("BP_AgentE2E"), AActor::StaticClass(), BPTYPE_Normal},
 	};
 
 	for (const FFixtureDefinition& Fixture : Fixtures)

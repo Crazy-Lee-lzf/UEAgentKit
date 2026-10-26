@@ -108,6 +108,15 @@ namespace UEAgentKitBlueprintGraphLayout
 		FString& OutErrorMessage);
 
 	/**
+	 * Record the graph an explicit focus request selected for one exact
+	 * Blueprint.  Read-only preflight/context normally use the toolkit's live
+	 * Slate focus; when a background or automation Editor loses keyboard focus
+	 * between RPCs this explicit record is the fail-closed fallback, and it is
+	 * only accepted for the Blueprint that owns the graph.
+	 */
+	void SetExplicitFocusedGraph(UEdGraph* Graph);
+
+	/**
 	 * Apply a LayoutPlan request to an already-resolved graph.  The caller must
 	 * still pass the exact request identity; this function re-checks revision and
 	 * live graph fingerprint immediately before the transaction.

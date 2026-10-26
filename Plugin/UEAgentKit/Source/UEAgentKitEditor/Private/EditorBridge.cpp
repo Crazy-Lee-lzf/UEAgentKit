@@ -71,6 +71,7 @@ namespace UEAgentKitEditorBridgePrivate
 		TEXT("editor.batchTask.start"),
 		TEXT("editor.batchTask.status"),
 		TEXT("editor.batchTask.cancel"),
+		TEXT("editor.focusBlueprintGraph"),
 		TEXT("editor.openAsset"),
 		TEXT("editor.prepareAssetForDiskRollback"),
 		TEXT("editor.focusAsset"),
@@ -1565,6 +1566,21 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 		FString ErrorMessage;
 		SendActionResult(
 			BuildBatchTaskCancelResult(TaskId, Result, ErrorCode, ErrorMessage),
+			Result,
+			ErrorCode,
+			ErrorMessage);
+	}
+	else if (Method == TEXT("editor.focusBlueprintGraph"))
+	{
+		FString AssetPath;
+		Params->TryGetStringField(TEXT("assetPath"), AssetPath);
+		FString GraphGuidText;
+		Params->TryGetStringField(TEXT("graphGuid"), GraphGuidText);
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode;
+		FString ErrorMessage;
+		SendActionResult(
+			TryFocusBlueprintGraphResult(AssetPath, GraphGuidText, Result, ErrorCode, ErrorMessage),
 			Result,
 			ErrorCode,
 			ErrorMessage);

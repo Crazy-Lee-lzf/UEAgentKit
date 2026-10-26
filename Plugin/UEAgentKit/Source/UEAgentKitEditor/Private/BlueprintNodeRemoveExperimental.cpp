@@ -1424,6 +1424,19 @@ namespace
 	}
 }
 
+bool UEAgentKitBlueprintNodeRemoveExperimental::TryComputeLiveEdgeSetHash(
+	UEdGraph* Graph,
+	FString& OutHash)
+{
+	if (Graph == nullptr)
+	{
+		return false;
+	}
+	TArray<FString> Keys;
+	BuildEdgeKeys(Graph, Keys);
+	return HashKeys(EdgeSetVersion, Keys, OutHash);
+}
+
 bool UEAgentKitBlueprintNodeRemoveExperimental::IsExperimentalWriteAvailable()
 {
 	if (bTestOverrideSet)
@@ -2114,8 +2127,6 @@ bool UEAgentKitBlueprintNodeRemoveExperimental::TrySaveExperimental(
 				*PostMessage));
 	}
 
-	RecentRemoves.Remove(PlanId);
-
 	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetStringField(TEXT("schemaVersion"), SaveSchemaVersion);
 	Result->SetBoolField(TEXT("experimental"), true);
@@ -2153,5 +2164,9 @@ bool UEAgentKitBlueprintNodeRemoveExperimental::TrySaveExperimental(
 	Result->SetArrayField(TEXT("removedEdges"), RemovedEdges);
 
 	OutResult = Result;
+	// Receipt points into the TMap, so keep it alive until every result
+	// field copied its data; removing it before this point is a
+	// use-after-free that silently corrupts the returned hashes.
+	RecentRemoves.Remove(PlanId);
 	return true;
 }

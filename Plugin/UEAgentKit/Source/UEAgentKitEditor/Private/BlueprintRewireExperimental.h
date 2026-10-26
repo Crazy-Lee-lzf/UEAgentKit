@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 
 class FJsonObject;
+class UEdGraph;
 
 /**
  * Explicitly opted-in, bounded Blueprint rewire.
@@ -36,6 +37,9 @@ namespace UEAgentKitBlueprintRewireExperimental
 
 	/** True only when the current project set the experimental opt-in flag. */
 	bool IsExperimentalWriteAvailable();
+
+	/** Live canonical edge-set hash used by the rewire plan contract. */
+	bool TryComputeLiveEdgeSetHash(UEdGraph* Graph, FString& OutHash);
 
 	/** Read-only plan: exact edge difference, no mutation. */
 	bool TryPreviewExperimental(
