@@ -913,19 +913,16 @@ def parse_world_canonical(canonical: Mapping[str, Any], *, source_path: str = ""
             if descriptor.get("runtimeBounds") is not None
             else "{}",
             "tags_json": _dumps(list(_names(descriptor.get("tags")))),
-            "data_layers_json": _dumps(
-                list(_names(descriptor.get("dataLayers") if descriptor.get("dataLayersResolved") is not False else []))
-            ),
+            # Unresolved descriptors carry raw data-layer references.  Keep them
+            # queryable instead of dropping them just because the commandlet did
+            # not have a UDataLayerManager to resolve display names.
+            "data_layers_json": _dumps(list(_names(descriptor.get("dataLayers")))),
         }
         descriptors.append(
             ParsedDescriptor(
                 row=row,
                 sorted_tags=_names_sorted(descriptor.get("tags")),
-                sorted_data_layers=_names_sorted(
-                    descriptor.get("dataLayers")
-                    if descriptor.get("dataLayersResolved") is not False
-                    else []
-                ),
+                sorted_data_layers=_names_sorted(descriptor.get("dataLayers")),
             )
         )
 
@@ -968,8 +965,22 @@ def parse_world_canonical(canonical: Mapping[str, Any], *, source_path: str = ""
     if actor_desc_list_truncated:
         partial_reasons.append("actor-descs-truncated")
     world_partition_available = _bool_or_none(world_partition.get("available"))
-    if world_partition_available == 1 and _bool_or_none(world_partition.get("actorDescMetadataAvailable")) == 0:
+    actor_desc_metadata_available = _bool_or_none(
+        world_partition.get("actorDescMetadataAvailable")
+    )
+    if world_partition_available == 1 and actor_desc_metadata_available != 1:
         partial_reasons.append("actor-desc-metadata-unavailable")
+    if (
+        world_partition_available == 1
+        and actor_desc_metadata_available == 1
+        and actor_desc_count == 0
+        and _bool_or_none(details.get("usingExternalActors")) == 1
+    ):
+        # An empty descriptor list is valid for a genuinely empty map.  It is
+        # suspicious when the persistent level itself says it uses external
+        # actors, because those actors must have descriptors.  Do not infer an
+        # expected count from package counts; fail closed instead.
+        partial_reasons.append("actor-desc-empty-with-external-actors")
     if not actors and loaded_actor_count:
         partial_reasons.append("no-actors-exported")
     if not details:

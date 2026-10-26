@@ -531,6 +531,108 @@ class WorldCoverageStateTests(WorldMcpIntegrationTestCase):
         self.assertFalse(payload["complete"])
         self.assertIn("actor-desc-metadata-unavailable", payload["worldStatus"]["worlds"][0]["partialReasons"])
 
+    def test_missing_actor_desc_metadata_flag_is_not_complete(self) -> None:
+        missing = json.loads(json.dumps(self.world))
+        missing["assetDetails"]["worldPartition"].pop("actorDescMetadataAvailable", None)
+        shutil.rmtree(self.export, ignore_errors=True)
+        write_world_export(self.export, [missing])
+        self.build()
+
+        payload = self.service().find_world_actors(world=WORLD_ASSET)
+        self.assertEqual(payload["coverage"], "partial")
+        self.assertFalse(payload["complete"])
+        self.assertIn(
+            "actor-desc-metadata-unavailable",
+            payload["worldStatus"]["worlds"][0]["partialReasons"],
+        )
+
+    def test_empty_world_partition_is_complete(self) -> None:
+        empty = json.loads(json.dumps(self.world))
+        details = empty["assetDetails"]
+        details["usingExternalActors"] = False
+        details["worldPartition"].update(
+            {
+                "actorDescMetadataAvailable": True,
+                "actorDescCount": 0,
+                "exportedActorDescCount": 0,
+                "actorDescListTruncated": False,
+                "actorDescs": [],
+            }
+        )
+        shutil.rmtree(self.export, ignore_errors=True)
+        write_world_export(self.export, [empty])
+        self.build()
+
+        payload = self.service().find_world_actors(world=WORLD_ASSET)
+        self.assertEqual(payload["coverage"], "complete")
+        self.assertTrue(payload["complete"])
+        self.assertEqual(payload["worldStatus"]["worlds"][0]["actorDescCount"], 0)
+
+    def test_empty_external_actor_world_partition_is_not_complete(self) -> None:
+        empty = json.loads(json.dumps(self.world))
+        details = empty["assetDetails"]
+        details["usingExternalActors"] = True
+        details["worldPartition"].update(
+            {
+                "actorDescMetadataAvailable": True,
+                "actorDescCount": 0,
+                "exportedActorDescCount": 0,
+                "actorDescListTruncated": False,
+                "actorDescs": [],
+            }
+        )
+        shutil.rmtree(self.export, ignore_errors=True)
+        write_world_export(self.export, [empty])
+        self.build()
+
+        payload = self.service().find_world_actors(world=WORLD_ASSET)
+        self.assertEqual(payload["coverage"], "partial")
+        self.assertFalse(payload["complete"])
+        self.assertIn(
+            "actor-desc-empty-with-external-actors",
+            payload["worldStatus"]["worlds"][0]["partialReasons"],
+        )
+
+    def test_non_world_partition_is_not_applicable(self) -> None:
+        non_wp = json.loads(json.dumps(self.world))
+        details = non_wp["assetDetails"]
+        details["usingExternalActors"] = False
+        details["worldPartition"].update(
+            {
+                "available": False,
+                "actorDescMetadataAvailable": False,
+                "actorDescCount": 0,
+                "exportedActorDescCount": 0,
+                "actorDescListTruncated": False,
+                "actorDescs": [],
+            }
+        )
+        shutil.rmtree(self.export, ignore_errors=True)
+        write_world_export(self.export, [non_wp])
+        self.build()
+
+        payload = self.service().find_world_partition_actors(world=WORLD_ASSET)
+        self.assertEqual(payload["worldPartitionCoverage"], "not-applicable")
+        self.assertFalse(payload["actorDescMetadataAvailable"])
+        self.assertTrue(any("not a World Partition map" in warning for warning in payload["warnings"]))
+
+    def test_unresolved_descriptor_data_layers_remain_queryable(self) -> None:
+        unresolved = json.loads(json.dumps(self.world))
+        descriptor = unresolved["assetDetails"]["worldPartition"]["actorDescs"][0]
+        descriptor["dataLayersResolved"] = False
+        descriptor["dataLayers"] = ["DL_Raw"]
+        shutil.rmtree(self.export, ignore_errors=True)
+        write_world_export(self.export, [unresolved])
+        self.build()
+
+        payload = self.service().find_world_partition_actors(
+            world=WORLD_ASSET, data_layer="DL_Raw"
+        )
+        self.assertEqual(payload["pagination"]["total"], 1)
+        result = payload["results"][0]
+        self.assertEqual(result["dataLayers"], ["DL_Raw"])
+        self.assertEqual(result["data_layers_resolved"], 0)
+
     def test_missing_revision_metadata_is_never_complete(self) -> None:
         revisionless = json.loads(json.dumps(self.world))
         revisionless.pop("revision", None)

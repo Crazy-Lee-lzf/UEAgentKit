@@ -68,8 +68,17 @@ namespace AssetReaderRegistryPrivate
 		Json->SetStringField(TEXT("actorPackage"), ActorDesc->GetActorPackage().ToString());
 		Json->SetStringField(TEXT("name"), ActorDesc->GetActorName().ToString());
 		Json->SetStringField(TEXT("label"), ActorDesc->GetActorLabel().ToString());
-		Json->SetStringField(TEXT("baseClassPath"), ActorDesc->GetBaseClass().ToString());
-		Json->SetStringField(TEXT("nativeClassPath"), ActorDesc->GetNativeClass().ToString());
+		const FString NativeClassPath = ActorDesc->GetNativeClass().ToString();
+		FString BaseClassPath = ActorDesc->GetBaseClass().ToString();
+		if (BaseClassPath.IsEmpty())
+		{
+			// Native actor descriptors do not always carry a resolved base class
+			// asset path.  Fall back to the native class instead of returning an
+			// unusable empty class for filtering and diagnostics.
+			BaseClassPath = NativeClassPath;
+		}
+		Json->SetStringField(TEXT("baseClassPath"), BaseClassPath);
+		Json->SetStringField(TEXT("nativeClassPath"), NativeClassPath);
 		Json->SetStringField(TEXT("folderPath"), ActorDesc->GetFolderPath().ToString());
 		Json->SetObjectField(TEXT("transform"), TransformToJson(ActorDesc->GetActorTransform()));
 		Json->SetObjectField(TEXT("editorBounds"), BoxToJson(ActorDesc->GetEditorBounds()));
@@ -82,15 +91,88 @@ namespace AssetReaderRegistryPrivate
 		Json->SetBoolField(TEXT("editorRelevant"), ActorDesc->IsEditorRelevant());
 		Json->SetBoolField(TEXT("loaded"), ActorDesc->IsLoaded(false));
 		Json->SetArrayField(TEXT("tags"), NamesToJson(ActorDesc->GetTags()));
-		Json->SetBoolField(TEXT("dataLayersResolved"), ActorDesc->HasResolvedDataLayerInstanceNames());
+		const bool bDataLayersResolved = ActorDesc->HasResolvedDataLayerInstanceNames();
+		Json->SetBoolField(TEXT("dataLayersResolved"), bDataLayersResolved);
 		TArray<FName> DataLayers;
-		if (ActorDesc->HasResolvedDataLayerInstanceNames())
+		if (bDataLayersResolved)
 		{
 			DataLayers = ActorDesc->GetDataLayerInstanceNames().ToArray();
 		}
+		else if (const FWorldPartitionActorDesc* RawActorDesc = ActorDesc->GetActorDesc())
+		{
+			// Resolved names need a UDataLayerManager.  When one is not available,
+			// expose the descriptor's own data-layer references instead of
+			// silently dropping them.
+			DataLayers = RawActorDesc->GetDataLayers();
+		}
 		Json->SetArrayField(TEXT("dataLayers"), NamesToJson(DataLayers));
+		Json->SetStringField(TEXT("dataLayersSource"), bDataLayersResolved ? TEXT("resolved") : TEXT("descriptor"));
 		return Json;
 	}
+
+#if WITH_EDITOR
+	/**
+	 * A commandlet can load a UWorld as a plain asset, leaving its World
+	 * Partition uninitialized (WorldType == Inactive).  In that one controlled
+	 * context, initialize the partition just long enough to read the official
+	 * actor-descriptor container, then uninitialize it and restore the package
+	 * dirty flag.  Normal editor/game worlds and already-initialized partitions
+	 * are never initialized here.
+	 */
+	class FScopedWorldPartitionDescriptorInitialization
+	{
+	public:
+		bool Initialize(UWorld* World, UWorldPartition* WorldPartition)
+		{
+			if (World == nullptr || WorldPartition == nullptr || WorldPartition->IsInitialized())
+			{
+				return false;
+			}
+			if (!IsRunningCommandlet() || World->WorldType != EWorldType::Inactive)
+			{
+				return false;
+			}
+			if (!WorldPartition->CanInitialize(World))
+			{
+				return false;
+			}
+
+			WorldPackage = World->GetPackage();
+			bPackageWasDirty = WorldPackage != nullptr && WorldPackage->IsDirty();
+			WorldPartition->Initialize(World, FTransform::Identity);
+			if (!WorldPartition->IsInitialized())
+			{
+				// Initialization can dirty the package before failing.  Restore
+				// the pre-initialization flag even on this failure path.
+				if (WorldPackage != nullptr && !bPackageWasDirty)
+				{
+					WorldPackage->SetDirtyFlag(false);
+				}
+				return false;
+			}
+
+			WorldPartitionToUninitialize = WorldPartition;
+			return true;
+		}
+
+		~FScopedWorldPartitionDescriptorInitialization()
+		{
+			if (WorldPartitionToUninitialize != nullptr && WorldPartitionToUninitialize->IsInitialized())
+			{
+				WorldPartitionToUninitialize->Uninitialize();
+				if (WorldPackage != nullptr && !bPackageWasDirty)
+				{
+					WorldPackage->SetDirtyFlag(false);
+				}
+			}
+		}
+
+	private:
+		UWorldPartition* WorldPartitionToUninitialize = nullptr;
+		UPackage* WorldPackage = nullptr;
+		bool bPackageWasDirty = false;
+	};
+#endif
 
 	EAssetReaderStatus ReadWorld(
 		const FAssetData& AssetData,
@@ -237,39 +319,65 @@ namespace AssetReaderRegistryPrivate
 
 		TArray<const FWorldPartitionActorDescInstance*> ActorDescs;
 		TMap<FString, int32> ActorDescClassCounts;
+		TArray<TSharedPtr<FJsonValue>> ActorDescValues;
 		bool bActorDescMetadataAvailable = false;
+		FString ActorDescInitialization = TEXT("not-performed");
+		const bool bWorldPackageDirtyBefore = World->GetPackage() != nullptr && World->GetPackage()->IsDirty();
 #if WITH_EDITOR
-		bActorDescMetadataAvailable = WorldPartition != nullptr && WorldPartition->GetActorDescContainerInstance() != nullptr;
-		if (bActorDescMetadataAvailable)
+		if (WorldPartition != nullptr)
 		{
-			FWorldPartitionHelpers::ForEachActorDescInstance<AActor>(WorldPartition, [&ActorDescs, &ActorDescClassCounts](const FWorldPartitionActorDescInstance* ActorDesc)
+			FScopedWorldPartitionDescriptorInitialization InitializationScope;
+			const bool bTemporaryInitialization = InitializationScope.Initialize(World, WorldPartition);
+			const UActorDescContainerInstance* ActorDescContainer = WorldPartition->GetActorDescContainerInstance();
+			bActorDescMetadataAvailable = ActorDescContainer != nullptr;
+			if (bActorDescMetadataAvailable)
 			{
-				if (ActorDesc != nullptr)
+				ActorDescInitialization = bTemporaryInitialization ? TEXT("commandlet-temporary") : TEXT("reused");
+				FWorldPartitionHelpers::ForEachActorDescInstance<AActor>(WorldPartition, [&ActorDescs, &ActorDescClassCounts](const FWorldPartitionActorDescInstance* ActorDesc)
 				{
-					ActorDescs.Add(ActorDesc);
-					++ActorDescClassCounts.FindOrAdd(ActorDesc->GetBaseClass().ToString());
-				}
-				return true;
+					if (ActorDesc != nullptr)
+					{
+						ActorDescs.Add(ActorDesc);
+						FString ClassPath = ActorDesc->GetBaseClass().ToString();
+						if (ClassPath.IsEmpty())
+						{
+							ClassPath = ActorDesc->GetNativeClass().ToString();
+						}
+						++ActorDescClassCounts.FindOrAdd(ClassPath);
+					}
+					return true;
+				});
+			}
+			else
+			{
+				ActorDescInitialization = bTemporaryInitialization ? TEXT("commandlet-temporary") : TEXT("not-performed");
+			}
+
+			ActorDescs.Sort([](const FWorldPartitionActorDescInstance& Left, const FWorldPartitionActorDescInstance& Right)
+			{
+				const FString LeftKey = Left.GetActorSoftPath().ToString() + TEXT("|") + Left.GetGuid().ToString();
+				const FString RightKey = Right.GetActorSoftPath().ToString() + TEXT("|") + Right.GetGuid().ToString();
+				return LeftKey < RightKey;
 			});
+			const int32 ExportedActorDescCount = FMath::Min(ActorDescs.Num(), MaxExportedActorDescs);
+			ActorDescValues.Reserve(ExportedActorDescCount);
+			for (int32 ActorDescIndex = 0; ActorDescIndex < ExportedActorDescCount; ++ActorDescIndex)
+			{
+				ActorDescValues.Add(MakeShared<FJsonValueObject>(WorldPartitionActorDescToJson(ActorDescs[ActorDescIndex])));
+			}
+		}
+		else
+		{
+			ActorDescInitialization = TEXT("not-performed");
 		}
 #endif
-		ActorDescs.Sort([](const FWorldPartitionActorDescInstance& Left, const FWorldPartitionActorDescInstance& Right)
-		{
-			const FString LeftKey = Left.GetActorSoftPath().ToString() + TEXT("|") + Left.GetGuid().ToString();
-			const FString RightKey = Right.GetActorSoftPath().ToString() + TEXT("|") + Right.GetGuid().ToString();
-			return LeftKey < RightKey;
-		});
-		const int32 ExportedActorDescCount = FMath::Min(ActorDescs.Num(), MaxExportedActorDescs);
-		TArray<TSharedPtr<FJsonValue>> ActorDescValues;
-		ActorDescValues.Reserve(ExportedActorDescCount);
-		for (int32 ActorDescIndex = 0; ActorDescIndex < ExportedActorDescCount; ++ActorDescIndex)
-		{
-			ActorDescValues.Add(MakeShared<FJsonValueObject>(WorldPartitionActorDescToJson(ActorDescs[ActorDescIndex])));
-		}
 		WorldPartitionJson->SetBoolField(TEXT("actorDescMetadataAvailable"), bActorDescMetadataAvailable);
+		WorldPartitionJson->SetStringField(TEXT("actorDescInitialization"), ActorDescInitialization);
+		WorldPartitionJson->SetBoolField(TEXT("worldPackageDirtyBefore"), bWorldPackageDirtyBefore);
+		WorldPartitionJson->SetBoolField(TEXT("worldPackageDirtyAfter"), World->GetPackage() != nullptr && World->GetPackage()->IsDirty());
 		WorldPartitionJson->SetNumberField(TEXT("actorDescCount"), ActorDescs.Num());
-		WorldPartitionJson->SetNumberField(TEXT("exportedActorDescCount"), ExportedActorDescCount);
-		WorldPartitionJson->SetBoolField(TEXT("actorDescListTruncated"), ExportedActorDescCount < ActorDescs.Num());
+		WorldPartitionJson->SetNumberField(TEXT("exportedActorDescCount"), ActorDescValues.Num());
+		WorldPartitionJson->SetBoolField(TEXT("actorDescListTruncated"), ActorDescValues.Num() < ActorDescs.Num());
 		WorldPartitionJson->SetArrayField(TEXT("actorDescClassCounts"), StringCountsToJson(ActorDescClassCounts));
 		WorldPartitionJson->SetArrayField(TEXT("actorDescs"), ActorDescValues);
 		OutDetails->SetObjectField(TEXT("worldPartition"), WorldPartitionJson);
