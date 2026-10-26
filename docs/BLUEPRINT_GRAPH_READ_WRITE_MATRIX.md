@@ -40,7 +40,13 @@ Legend:
 | Planned no-op / stale topology rejection | **Experimental** | Rejects rewire to the current source, unlinked or multi-link targets, an old source that is not the target's only link, and any edge set that changed after Preview | P3 complete |
 | Plan-bound rewire/disconnect Save | **Experimental** | Separate gate bound to the Apply receipt, post-Apply edge-set hash, pin-identity hash, package revision and exact node/link counts; never compiles | P3 complete |
 | Cross-process reload of a rewired/disconnected edge set | **Supported (read verification)** | Fresh-process commandlet verifies the final edge set exactly, the two removed edges are absent, the new and untouched edges are present, every node GUID/class and pin name/GUID/direction/category is unchanged, and the saved asset SHA-256 matches | P3 complete |
-| Change pin types / rename or delete variables / create or delete nodes or pins | **Unsupported** | Rewire reuses existing pins on both ends; nothing is retyped, renamed, created or deleted | P3 |
+| Remove one isolated allowlisted deterministic node | **Experimental** | Exact focused top-level K2 event graph; only an allowlisted pure Kismet math call or a branch; node GUID + class, revision, graph fingerprint and before edge-set hash bound in the plan; zero incident edges; one transaction with Undo/Redo node-restore proof | P4 complete |
+| Remove one allowlisted node with exactly one enumerated incident edge | **Experimental** | The request must list that single edge by both node GUID + pin name + pin GUID; Apply breaks only that enumerated edge, refuses any unplanned link, then removes the node and proves every other edge and pin identity survived | P4 complete |
+| Plan-bound node-removal Save | **Experimental** | Separate gate bound to the Apply receipt, post-Apply edge-set/pin-identity/node-identity hashes, package revision and exact node/link counts; never compiles | P4 complete |
+| Cross-process reload after node removal | **Supported (read verification)** | Fresh-process commandlet verifies both deleted GUIDs are absent, every remaining node GUID/class and pin inventory is unchanged, the exact final edge set is present, the removed edge is absent, untouched fan-out/exec edges survive and the asset SHA-256 matches | P4 complete |
+| Change pin types / rename or delete variables / create nodes or pins / delete nodes outside the P4 allowlist | **Unsupported** | Node removal deletes exactly one allowlisted existing node; nothing is retyped, renamed, created or rewired | P4 |
+| Remove comment groups, event entries, timelines, knots, tunnels, macros, variable accessors, sequences or unknown custom nodes | **Unsupported** | Only `K2Node_CallFunction` with an allowlisted pure `UKismetMathLibrary` function and `K2Node_IfThenElse` are removable; every other class fails closed | P4 |
+| Remove a node with more than one incident edge / bulk node deletion | **Unsupported** | A plan removes exactly one node and at most one enumerated incident edge; larger deletions need a separate capability and are not silently approximated | P4 |
 | Broad `BreakAllPinLinks` / bulk edge rewiring | **Unsupported** | Rewire breaks exactly the one target link that the plan names; output fan-out on every other pin is preserved | P3 |
 | Arbitrary GraphPatch live apply | **Unsupported** | `ue_preview_graph_patch` is **Offline-only**; no Editor transaction/save | P1 |
 | Nested-subgraph live edit | **Unsupported** | Read/discovery only; exact focused graph write currently top-level graph path | P1 |
@@ -115,8 +121,30 @@ Legend:
   `string` primitive pins. Wildcard, delegate, container, by-reference, const,
   weak, struct/object/enum, hidden, orphaned and split pins are rejected, as are
   exec/data mismatches and any type mismatch.
+- Node removal is one exact existing node on one exact focused top-level K2
+  event graph. The class must be `K2Node_CallFunction` on an allowlisted pure
+  `UKismetMathLibrary` function, or `K2Node_IfThenElse`; the plan binds the node
+  GUID, exact class path, on-disk package revision, graph fingerprint, before
+  edge-set hash, the exact incident-edge list and the pre/post pin and node
+  identity hashes.
+- A plan removes exactly one node with at most one incident edge. Every
+  incident edge must be enumerated on both ends by node GUID + pin name + pin
+  GUID; any unplanned link, a linked hidden pin, a wildcard/container/by-ref/
+  const/weak/delegate/struct pin, a comment group, event entry, timeline, knot,
+  tunnel, macro, variable accessor, sequence or unknown class fails closed
+  before mutation.
+- Node-removal Apply breaks only the enumerated edge(s), refuses to delete a
+  node that still has any link, removes only that node inside one
+  `FScopedTransaction`, and proves the exact after node/pin/edge sets. It then
+  verifies Undo restores the node and its links and Redo removes them again; a
+  post-commit mismatch tries one Undo restore and reports failure if the before
+  topology cannot be proven.
+- Node-removal Save requires the per-process Apply receipt, the post-Apply
+  edge-set/pin-identity/node-identity hashes, the caller-echoed package revision
+  and exact node/link counts, and the live disk revision; it never compiles and
+  never saves another asset.
 - No deletion, disconnection, pin creation, variable rename/retype/removal, or
-  default mutation outside the bounded four-type paths, arbitrary GraphPatch,
+  default mutation outside the bounded five-type paths, arbitrary GraphPatch,
   auto-save, or compile in this slice.
 
 ## Known limits / handoff
@@ -144,8 +172,21 @@ Legend:
   Preview/Apply/Save plan.
 - The rewire slice reuses existing pins only; it cannot repair a Blueprint whose
   pins or generated class were already stale, and it never compiles.
-- The independent reload verifies structure GUIDs/edges, variable identity,
-  defaults and saved bytes; it is not a second write capability.
+- Node-removal Save receipts are per-Editor-process as well; the
+  `independentReloadVerified` flag stays `false` until the separate
+  `BlueprintNodeRemoveReload` commandlet proves the saved bytes in a new
+  process.
+- The node-removal slice deletes one node at a time, only in top-level K2 event
+  graphs, only for the allowlisted pure-function/branch classes and only with at
+  most one enumerated incident edge. It cannot create nodes or pins, re-route
+  the surviving links, delete comment groups or event/tunnel/macro nodes, or
+  handle bulk deletions; each additional node needs its own
+  Preview/Apply/Save plan.
+- The node-removal slice never compiles; it cannot repair a Blueprint whose pins
+  or generated class were already stale.
+- The independent reload verifies structure GUIDs/edges, node/pin identity,
+  variable identity, defaults and saved bytes; it is not a second write
+  capability.
 - Nested-subgraph writes, variable rename/retype/removal, pin
-  creation/retyping, node deletion, and live GraphPatch apply remain follow-up
-  work.
+  creation/retyping, unbounded node deletion, and live GraphPatch apply remain
+  follow-up work.
