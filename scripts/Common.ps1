@@ -599,3 +599,32 @@ function Remove-UeakJunction
     [System.IO.Directory]::Delete($LinkPath, $false)
     return $true
 }
+# Non-fatal diagnostics: export scripts must work even when Python/index is missing.
+function Show-UeakIndexUpdateStatus
+{
+    param([Parameter(Mandatory = $true)][string]$Database)
+
+    $Helper = Join-Path (Get-UeakToolRoot) "tools\index_update_status.py"
+    if (!(Test-Path -LiteralPath $Helper -PathType Leaf))
+    {
+        Write-Warning "Index timestamp helper is missing: $Helper"
+        return
+    }
+
+    try
+    {
+        $PythonExecutable = Resolve-UeakPythonExecutable
+    }
+    catch
+    {
+        Write-Warning "Cannot inspect SQLite index: $($_.Exception.Message)"
+        Write-Host "Index database : $Database"
+        return
+    }
+
+    & $PythonExecutable $Helper --database $Database
+    if ($LASTEXITCODE -ne 0)
+    {
+        Write-Warning "Index timestamp inspection failed (export result is unaffected)."
+    }
+}

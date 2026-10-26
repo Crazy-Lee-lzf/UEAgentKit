@@ -120,6 +120,13 @@ scripts\RunExport.cmd ^
   -Format both
 ```
 
+**查看当前索引更新时间：** 两个导出脚本现在都会在结束时输出索引数据库路径、项目标识、最近索引构建时间（last_indexed_at_utc）和最近资产记录更新时间（MAX(assets.indexed_at_utc)）。如果 MCP 使用了自定义数据库，导出时必须传入相同的 -Database：
+
+    scripts\RunExport.cmd -ProjectPath "<PROJECT>.uproject" -Asset "/Game/BP_Player" -Database "<INDEX>.sqlite3"
+    scripts\RunAssetCatalog.cmd -ProjectPath "<PROJECT>.uproject" -Root "/Game" -Database "<INDEX>.sqlite3"
+
+未指定时默认读取 <TOOL_ROOT>\.data\ue_agent_kit.sqlite3，与 RunMcp.cmd 默认值一致。数据库不存在或不可读会明确显示不可用，且不会创建数据库。**导出文件不会自动刷新 SQLite 索引**，后续仍需执行 scripts\ue-agent.cmd index build <EXPORT_DIRECTORY>；时间戳本身不能证明单个 Blueprint 节点已经同步。使用固定快照的 MCP 还需按既有快照生命周期重新加载新一代索引。
+
 ## 6. 建立 SQLite 索引
 
 ```bat
