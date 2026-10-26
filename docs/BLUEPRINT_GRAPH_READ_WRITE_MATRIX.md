@@ -22,7 +22,10 @@ Legend:
 |---|---|---|---|
 | Canonical BPCTX read of Blueprint graphs, nodes, pins, links, comments | **Supported** | `BlueprintContextExporter`; graph GUID + kind + revision | — |
 | Nested `UEdGraph::SubGraphs` discovery | **Supported (read)** | `CollectBlueprintGraphs` classifies nested graphs as `subgraph`; parent names exported | — |
-| Focused graph identity, asset path, graph GUID, revision, fingerprint preflight | **Supported** | Shared layout preflight; fail closed on mismatch/dirty/PIE | — |
+| Focused graph identity, asset path, graph GUID, revision, fingerprint preflight | **Supported** | Shared layout preflight; fail closed on mismatch/dirty/PIE; reports `focusSource` (`live-slate-focus` or verified `explicit-focus-request`) | — |
+| Open and focus one exact Blueprint graph from MCP | **Supported (opt-in)** | `editor.focusBlueprintGraph` + `ue_focus_blueprint_graph`, registered only with `--enable-experimental-graphpatch-edit`; explicit focus fallback is accepted only for the same owning Blueprint | P5 complete |
+| Read-only edge-set hashes for rewire/node-remove plans | **Supported** | Layout preflight exposes `rewireEdgeSetHash` and `nodeRemoveEdgeSetHash` computed by the same native helpers used by Apply | P5 complete |
+| Five-family MCP → Socket → Apply → Save → fresh-process Reload acceptance | **Supported (experimental)** | `tests/python/p5_agent_e2e_probe.py` + `scripts/VerifyBlueprintAgentEndToEnd.ps1`; run18 proved GraphEdit, pin defaults, variables, rewire and isolated node removal end to end | P5 complete |
 | Live GraphEdit `createNode` + `connectPins` preview/apply | **Experimental** | One transaction; allowlisted deterministic nodes; exact exec/bool/int/double/string pins; output fan-out; readback + Undo/Redo | P0 complete |
 | Allowlisted nodes: `branch`, `sequence`, `not_bool`, `bool_or`, `int_add`, `int_equal`, `double_add`, `string_concat` | **Experimental** | Python + C++ duplicate contracts agree on class/function and pin names/types | P0 complete |
 | Exact typed data links and output fan-out to distinct inputs | **Experimental** | One output may feed several distinct input pins; an input pin still accepts one plan link | P0 complete |
@@ -56,9 +59,15 @@ Legend:
 ## Safety invariants
 
 - Exact focused Blueprint graph only; no asset-path-only or arbitrary graph write.
+- `ue_focus_blueprint_graph` opens/focuses one exact asset + optional graph GUID and
+  records an explicit-focus request. Preflight prefers live Slate focus and uses the
+  recorded request only when Slate reports no focused graph and the graph is still
+  owned by the same Blueprint; it never relaxes the asset/graph identity checks.
 - Clean package before Apply; stopped PIE/SIE; K2 schema only.
 - One `FScopedTransaction`; exact readback of node GUIDs, pin connections, counts,
-  package dirtiness, Undo and Redo.
+  package dirtiness, Undo and Redo. GraphEdit marks created nodes
+  `RF_Transactional`; PinDefault marks each target node before writing a pin so a
+  transaction cannot be discarded as an empty diff after GraphEdit Undo/Redo.
 - Plan ID binds asset path, graph GUID, package revision, graph fingerprint, and
   canonical node/link request.
 - Pin-default Plan ID additionally binds the before pin-default-state
@@ -184,9 +193,22 @@ Legend:
   Preview/Apply/Save plan.
 - The node-removal slice never compiles; it cannot repair a Blueprint whose pins
   or generated class were already stale.
+- Save receipts are removed from their per-process TMap only after every result
+  field has been copied. Removing them earlier is a use-after-free that can
+  silently corrupt returned hashes (fixed for rewire and node removal in P5).
 - The independent reload verifies structure GUIDs/edges, node/pin identity,
   variable identity, defaults and saved bytes; it is not a second write
   capability.
+- The explicit-focus fallback is process-global for the most recent focus request;
+  a stale weak pointer is ignored and live Slate focus always wins. Concurrent
+  Blueprint editors are not a supported scenario.
+- The live-only MCP server still requires a usable index database at startup even
+  when no indexed query is used; P5 uses a disposable empty schema database and
+  records this as an open product gap.
+- MCP acceptance run18 covers one Actor Blueprint and one ordered
+  GraphEdit → pin-default → variable → rewire → isolated-node-remove sequence. It
+  does not prove concurrent assets, PIE/dirty-package recovery, disconnect, or
+  removal with one incident edge.
 - Nested-subgraph writes, variable rename/retype/removal, pin
   creation/retyping, unbounded node deletion, and live GraphPatch apply remain
   follow-up work.
