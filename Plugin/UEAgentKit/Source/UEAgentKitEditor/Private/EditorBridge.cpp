@@ -9,6 +9,7 @@
 #include "BlueprintGraphLayoutExperimental.h"
 #include "BlueprintGraphEditExperimental.h"
 #include "BlueprintPinDefaultEditExperimental.h"
+#include "BlueprintVariableWriteExperimental.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Components/ActorComponent.h"
@@ -1263,6 +1264,84 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 				ErrorMessage);
 		}
 	}
+	else if (Method == TEXT("editor.previewBlueprintVariableCreateExperimental"))
+	{
+		if (!UEAgentKitBlueprintVariableExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("blueprint-variable-experimental-disabled"),
+				TEXT("Experimental Blueprint variable preview is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintVariableExperimental::TryPreviewExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.applyBlueprintVariableCreateExperimental"))
+	{
+		if (!UEAgentKitBlueprintVariableExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("blueprint-variable-experimental-disabled"),
+				TEXT("Experimental Blueprint variable creation is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintVariableExperimental::TryApplyExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.saveBlueprintVariableCreateExperimental"))
+	{
+		if (!UEAgentKitBlueprintVariableExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("blueprint-variable-experimental-disabled"),
+				TEXT("Experimental Blueprint variable Save is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintVariableExperimental::TrySaveExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
 	else if (Method == TEXT("editor.getEditorContext"))
 	{
 		SendResult(Client.Socket, RequestId, BuildEditorContextResult());
@@ -2173,6 +2252,15 @@ TArray<TSharedPtr<FJsonValue>> FUEAgentKitEditorBridge::BuildCapabilityValues() 
 			UEAgentKitBlueprintPinDefaultExperimental::ApplyMethod));
 		Values.Add(MakeShared<FJsonValueString>(
 			UEAgentKitBlueprintPinDefaultExperimental::SaveMethod));
+	}
+	if (UEAgentKitBlueprintVariableExperimental::IsExperimentalWriteAvailable())
+	{
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintVariableExperimental::PreviewMethod));
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintVariableExperimental::ApplyMethod));
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintVariableExperimental::SaveMethod));
 	}
 	if (FNativeNodeRegistry::Get().IsAvailable())
 	{
