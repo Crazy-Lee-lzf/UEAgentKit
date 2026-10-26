@@ -90,6 +90,11 @@ private:
 	TSharedRef<FJsonObject> BuildBlueprintGraphSelectionResult() const;
 	TSharedRef<FJsonObject> BuildBlueprintGraphLayoutPreflightResult() const;
 	TSharedRef<FJsonObject> BuildFocusedBlueprintGraphContextResult() const;
+	bool TryBuildBlueprintGraphLayoutProjectionResult(
+		const TSharedPtr<FJsonObject>& Params,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage) const;
 	bool TryBuildBlueprintGraphLayoutApplyTestOnlyResult(
 		const TSharedPtr<FJsonObject>& Params,
 		TSharedPtr<FJsonObject>& OutResult,

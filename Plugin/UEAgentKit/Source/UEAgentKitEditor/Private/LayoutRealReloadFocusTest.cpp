@@ -178,4 +178,81 @@ bool FUEAgentKitLayoutRealReloadFocusTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUEAgentKitLayoutLargeProjectionFocusTest,
+	"UEAgentKit.LayoutLargeProjection.Focus",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUEAgentKitLayoutLargeProjectionFocusTest::RunTest(const FString& Parameters)
+{
+	using namespace UEAgentKitLayoutRealReloadFocus;
+
+	UBlueprint* Blueprint = LoadObject<UBlueprint>(nullptr, AssetPath);
+	if (!TestNotNull(TEXT("large projection fixture Blueprint loads"), Blueprint))
+	{
+		return false;
+	}
+	if (!TestFalse(TEXT("large projection fixture package is clean"), Blueprint->GetOutermost()->IsDirty()))
+	{
+		return false;
+	}
+
+	UEdGraph* Graph = nullptr;
+	for (UEdGraph* Candidate : Blueprint->UbergraphPages)
+	{
+		if (Candidate != nullptr && Candidate->GetName() == TEXT("EventGraph"))
+		{
+			Graph = Candidate;
+			break;
+		}
+	}
+	if (!TestNotNull(TEXT("large projection EventGraph loads"), Graph))
+	{
+		return false;
+	}
+	if (!TestEqual(TEXT("large projection fixture has exactly 134 nodes"), Graph->Nodes.Num(), 134))
+	{
+		return false;
+	}
+
+	FString Error;
+	FBlueprintEditor* Editor = OpenAndFocus(Blueprint, Graph, Error);
+	if (!TestNotNull(TEXT("large projection Blueprint Editor opens"), Editor))
+	{
+		AddError(Error);
+		return false;
+	}
+
+	TSharedPtr<FJsonObject> Preflight;
+	FString Code;
+	FString Message;
+	if (!TestTrue(
+		TEXT("large projection preflight is available"),
+		UEAgentKitBlueprintGraphLayout::BuildPreflight(Blueprint, Graph, Preflight, Code, Message)))
+	{
+		AddError(Code + TEXT(": ") + Message);
+		return false;
+	}
+
+	TSharedRef<FJsonObject> Focus = MakeShared<FJsonObject>();
+	Focus->SetStringField(TEXT("schemaVersion"), TEXT("ueak.layout-large-projection.focus/1.0"));
+	Focus->SetNumberField(TEXT("processId"), static_cast<double>(FPlatformProcess::GetCurrentProcessId()));
+	Focus->SetStringField(TEXT("writtenAtUtc"), FDateTime::UtcNow().ToIso8601());
+	Focus->SetStringField(TEXT("assetPath"), Blueprint->GetPathName());
+	Focus->SetStringField(TEXT("graphGuid"), GuidLower(Graph->GraphGuid));
+	Focus->SetStringField(TEXT("graphName"), Graph->GetName());
+	Focus->SetStringField(TEXT("packageRevision"), Preflight->GetStringField(TEXT("packageRevision")));
+	Focus->SetStringField(TEXT("graphFingerprint"), Preflight->GetStringField(TEXT("graphFingerprint")));
+	Focus->SetNumberField(TEXT("nodeCount"), Preflight->GetNumberField(TEXT("nodeCount")));
+	Focus->SetBoolField(TEXT("focused"), true);
+
+	const FString FocusPath = FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("LargeProjection"),
+		TEXT("focus.json"));
+	return TestTrue(
+		TEXT("large projection focus evidence is written"),
+		WriteJson(FocusPath, Focus));
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

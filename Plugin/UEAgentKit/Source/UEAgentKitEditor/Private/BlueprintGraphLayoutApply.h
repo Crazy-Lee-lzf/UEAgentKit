@@ -47,6 +47,28 @@ namespace UEAgentKitBlueprintGraphLayout
 		FString& OutErrorMessage);
 
 	/**
+	 * Build one bounded page of the layout-only projection of an exact graph.
+	 *
+	 * This is deliberately separate from the unbounded canonical context: the
+	 * projection carries only the identity, node geometry, pin/link topology and
+	 * comment bounds required by the layout planner.  It never carries reflected
+	 * defaults, titles, pin blobs or unrelated Blueprint defaults.  Callers page
+	 * by offset/limit; the response carries canonical node/pin/edge set hashes
+	 * computed over the whole graph so a client can prove that the concatenated
+	 * pages are complete and unchanged.
+	 */
+	bool BuildLayoutProjection(
+		UBlueprint* Blueprint,
+		UEdGraph* Graph,
+		int32 Offset,
+		int32 Limit,
+		const FString& ExpectedPackageRevision,
+		const FString& ExpectedGraphFingerprint,
+		TSharedPtr<FJsonObject>& OutProjection,
+		FString& OutErrorCode,
+		FString& OutErrorMessage);
+
+	/**
 	 * Shape-only validation shared by the Editor apply and the offline test.
 	 * It does not resolve a graph, so missing/unknown nodes remain a graph-level
 	 * check performed by TryApply...().

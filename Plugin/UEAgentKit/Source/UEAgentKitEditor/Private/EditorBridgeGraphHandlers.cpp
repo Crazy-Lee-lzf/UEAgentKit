@@ -372,6 +372,169 @@ TSharedRef<FJsonObject> FUEAgentKitEditorBridge::BuildFocusedBlueprintGraphConte
 	return Result;
 }
 
+bool FUEAgentKitEditorBridge::TryBuildBlueprintGraphLayoutProjectionResult(
+	const TSharedPtr<FJsonObject>& Params,
+	TSharedPtr<FJsonObject>& OutResult,
+	FString& OutErrorCode,
+	FString& OutErrorMessage) const
+{
+	constexpr int32 MaxProjectionPageBytes = 512 * 1024;
+	constexpr int32 MaxProjectionNodes = 256;
+	if (!Params.IsValid())
+	{
+		OutErrorCode = TEXT("live-editor-invalid-parameters");
+		OutErrorMessage = TEXT("The layout projection requires one JSON parameter object.");
+		return false;
+	}
+	for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Params->Values)
+	{
+		if (Pair.Key != TEXT("offset")
+			&& Pair.Key != TEXT("limit")
+			&& Pair.Key != TEXT("expectedPackageRevision")
+			&& Pair.Key != TEXT("expectedGraphFingerprint"))
+		{
+			OutErrorCode = TEXT("live-editor-invalid-parameters");
+			OutErrorMessage = FString::Printf(
+				TEXT("Unsupported layout projection parameter: %s."),
+				*Pair.Key);
+			return false;
+		}
+	}
+
+	auto ReadInt = [&OutErrorCode, &OutErrorMessage](
+		const TSharedPtr<FJsonObject>& Object,
+		const TCHAR* Name,
+		int32 DefaultValue,
+		int32 MinValue,
+		int32 MaxValue,
+		int32& OutValue) -> bool
+	{
+		const TSharedPtr<FJsonValue>* Field = Object->Values.Find(Name);
+		if (Field == nullptr)
+		{
+			OutValue = DefaultValue;
+			return true;
+		}
+		double Number = 0.0;
+		if (!(*Field).IsValid() || !(*Field)->TryGetNumber(Number)
+			|| !FMath::IsFinite(Number)
+			|| Number != FMath::FloorToDouble(Number)
+			|| Number < MinValue
+			|| Number > MaxValue)
+		{
+			OutErrorCode = TEXT("graph-layout-projection-page-invalid");
+			OutErrorMessage = FString::Printf(
+				TEXT("%s must be an integer from %d through %d."),
+				Name,
+				MinValue,
+				MaxValue);
+			return false;
+		}
+		OutValue = static_cast<int32>(Number);
+		return true;
+	};
+
+	int32 Offset = 0;
+	int32 Limit = 64;
+	if (!ReadInt(Params, TEXT("offset"), 0, 0, MAX_int32, Offset)
+		|| !ReadInt(Params, TEXT("limit"), 64, 1, MaxProjectionNodes, Limit))
+	{
+		return false;
+	}
+
+	FString ExpectedRevision;
+	FString ExpectedFingerprint;
+	for (const TCHAR* Name : { TEXT("expectedPackageRevision"), TEXT("expectedGraphFingerprint") })
+	{
+		const TSharedPtr<FJsonValue>* Field = Params->Values.Find(Name);
+		if (Field == nullptr)
+		{
+			continue;
+		}
+		FString Value;
+		if (!(*Field).IsValid() || !(*Field)->TryGetString(Value))
+		{
+			OutErrorCode = TEXT("live-editor-invalid-parameters");
+			OutErrorMessage = FString::Printf(TEXT("%s must be a string."), Name);
+			return false;
+		}
+		if (FString(Name) == TEXT("expectedPackageRevision"))
+		{
+			ExpectedRevision = Value;
+		}
+		else
+		{
+			ExpectedFingerprint = Value;
+		}
+	}
+
+	TSharedPtr<FJsonObject> Preflight;
+	if (!UEAgentKitBlueprintGraphLayout::BuildFocusedEditorPreflight(
+		Preflight,
+		OutErrorCode,
+		OutErrorMessage))
+	{
+		return false;
+	}
+	FString AssetPath;
+	FString GraphGuid;
+	if (!Preflight->TryGetStringField(TEXT("assetPath"), AssetPath)
+		|| !Preflight->TryGetStringField(TEXT("graphGuid"), GraphGuid))
+	{
+		OutErrorCode = TEXT("graph-layout-context-unavailable");
+		OutErrorMessage = TEXT("The focused graph preflight has no exact identity.");
+		return false;
+	}
+
+	UBlueprint* Blueprint = nullptr;
+	UEdGraph* Graph = nullptr;
+	if (!UEAgentKitBlueprintGraphLayout::ResolveExactTarget(
+		AssetPath,
+		GraphGuid,
+		Blueprint,
+		Graph,
+		OutErrorCode,
+		OutErrorMessage))
+	{
+		return false;
+	}
+
+	TSharedPtr<FJsonObject> Projection;
+	if (!UEAgentKitBlueprintGraphLayout::BuildLayoutProjection(
+		Blueprint,
+		Graph,
+		Offset,
+		Limit,
+		ExpectedRevision,
+		ExpectedFingerprint,
+		Projection,
+		OutErrorCode,
+		OutErrorMessage))
+	{
+		return false;
+	}
+
+	FString Serialized;
+	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Serialized);
+	if (!FJsonSerializer::Serialize(Projection.ToSharedRef(), Writer))
+	{
+		OutErrorCode = TEXT("graph-layout-projection-serialize-failed");
+		OutErrorMessage = TEXT("The layout projection page could not be serialized.");
+		return false;
+	}
+	FTCHARToUTF8 Utf8(*Serialized);
+	if (Utf8.Length() > MaxProjectionPageBytes)
+	{
+		OutErrorCode = TEXT("graph-layout-projection-page-too-large");
+		OutErrorMessage = FString::Printf(
+			TEXT("The layout projection page exceeds the %d byte page budget; retry with a smaller limit."),
+			MaxProjectionPageBytes);
+		return false;
+	}
+	OutResult = Projection;
+	return true;
+}
+
 bool FUEAgentKitEditorBridge::BuildP8MenuPreviewInputs(
 	TSharedPtr<FJsonObject>& OutPreflight,
 	TSharedPtr<FJsonObject>& OutEnvelope,
