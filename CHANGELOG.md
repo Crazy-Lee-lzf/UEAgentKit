@@ -2,9 +2,13 @@
 
 All notable changes to UE Agent Kit are documented here.
 
-## Unreleased
+## Unreleased — RC1 internal preview candidate
 
-- No unreleased changes.
+This section describes a local candidate, not a published release. It does not change the v0.8.0 stable surface.
+
+- Added default-off, double-opt-in bounded Blueprint structure tools: GraphEdit with eight allowlisted node types, typed unlinked pin defaults, top-level user-variable creation, single-edge rewire, and isolated allowlisted node removal. Each family uses Preview → exact plan/confirmation → Apply → explicit Save, never auto-saves or compiles, and remains outside the project Write Policy allowlist.
+- Added the corresponding Agent-facing focus/preflight helpers, read-only fresh-process reload verification, and end-to-end MCP evidence. These are internal-preview capabilities, not a production default.
+- Clarified public documentation so the stable v0.8.0 Write Policy boundary is not presented as covering the experimental tools.
 
 ## 0.8.0 — agent workflow, memory, knowledge web, and P4 collaboration
 

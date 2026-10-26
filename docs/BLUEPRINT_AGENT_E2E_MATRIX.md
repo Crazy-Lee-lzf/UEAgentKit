@@ -1,12 +1,11 @@
 # Blueprint Agent 端到端真实 UE 5.6 读写验收矩阵（P5）
 
-状态：**P5 A 级验收完成**（2026-10-26，run21）。五类写能力已通过真实
+状态：**P5 A 级验收完成**（隔离测试环境）。五类写能力已通过真实
 MCP stdio → EditorBridge Socket RPC → UE Editor 原生 Apply → 显式 Save →
 新进程 Reload 的完整链路验证；门禁 OFF 负例、跨工程拒绝负例同时通过。
 
-基线：`main@e991752`；工作树 `blueprint-agent-e2e-p5`；分支
-`verify/blueprint-agent-end-to-end-p5-20261026`。本文只描述本分支的实测结果，
-不代表生产默认启用，也不替代 controller 的正式 GO/NO-GO。
+验证环境：UE 5.6.1 + disposable HostProject。本文只描述该隔离测试环境中的
+一次真实 MCP 运行，不代表生产默认启用，也不构成发布 GO/NO-GO。
 
 ## 0. 结论摘要
 
@@ -62,9 +61,9 @@ MCP client (stdio JSON-RPC)
 P1-P4 原有 native 证据为 B；P5 在独立的 disposable HostProject 中把它们提升为 A。
 P6-P8 layout 有真实 Socket 探针，但不是本轮五类结构写的 MCP 编排证据。
 
-## 3. A 级实测结果（run21）
+## 3. A 级实测结果（本次验收）
 
-测试工程：`Build/DirectHost/HostProject.uproject`（UE 5.6.1，独立 disposable）。
+测试工程：一个独立的 disposable HostProject（UE 5.6.1）。
 测试资产：`/Game/UEAgentKitAgentE2E/BP_AgentE2E.BP_AgentE2E`（普通 Actor
 Blueprint，初始 3 个默认节点、0 条边）。所有写步骤都由
 `tests/python/p5_agent_e2e_probe.py` 通过 MCP stdio 发起，经真实 Socket 到达
@@ -83,7 +82,7 @@ Editor；每步严格 Preview→Apply→Save，Save 紧随 Apply。
 每一步 Apply 均为 `applied=true, undoVerified=true, redoVerified=true,
 saved=false, compiled=false`；Save 为 `saved=true, packageDirty=false,
 compiled=false`。完整 planId、每步 SHA、节点 GUID/class、变量 GUID/类型/默认值
-见 `Output/p5/run21/full/probe-report.json`（gitignored 的运行产物）。
+完整明细保留在内部运行归档中（不进入公开仓库）。
 
 ### 3.2 最终 resident 状态
 
@@ -157,7 +156,7 @@ compiled=false`。完整 planId、每步 SHA、节点 GUID/class、变量 GUID/�
 | 能力 | MCP 工具 | Bridge 方法 | 参数契约 | P5 证据 |
 |---|---|---|---|---|
 | Editor 状态/capabilities | `ue_editor_status`、`ue_get_capabilities` | `editor.status` | 无 | A（探针启动时读取 66 个工具） |
-| 打开并聚焦指定图 | `ue_focus_blueprint_graph` | `editor.focusBlueprintGraph` | `asset_path`、可选 `graph_guid` | A（run21 每步前调用） |
+| 打开并聚焦指定图 | `ue_focus_blueprint_graph` | `editor.focusBlueprintGraph` | `asset_path`、可选 `graph_guid` | A（每步前调用） |
 | 结构 preflight | `ue_get_blueprint_graph_layout_preflight` | `editor.getBlueprintGraphLayoutPreflight` | 空对象；返回 focused asset/graph、revision、fingerprint、`focusSource`、两个 edge-set hash | A |
 | 聚焦图 full canonical context | `ue_get_focused_blueprint_graph_context` | `editor.getFocusedBlueprintGraphContext` | 空对象；nodes/pins/links/defaults/variables | A |
 | Graph summary/layout projection | `ue_get_blueprint_graph_selection` 等 | `editor.getBlueprintGraphSelection` | — | C/D（非本轮重点） |
@@ -202,7 +201,7 @@ disconnect 分支与“1 条 incident edge 的 node remove”本轮没有跑真�
 | 4 | Save receipt 仅进程内 | **OPEN（by design）** | Apply 后必须同进程 Save；跨进程只能只读 Reload |
 | 5 | nested/非顶层图写 | **OPEN** | focused 顶层 K2 Event Graph 是硬前提；`GetAllGraphs` 只用于定位，不授予写权限 |
 | 6 | 无 Editor 崩溃/超时恢复 | **OPEN** | E2E 脚本按阶段重启 Editor；真实产品需进程监控与 receipt 失效处理 |
-| 7 | 单序列覆盖 | **OPEN** | run21 只覆盖一个 Actor BP、8+4+4+1+1 个对象；未覆盖多资产并发、PIE、Dirty 包、undo 栈很深的场景 |
+| 7 | 单序列覆盖 | **OPEN** | 本次验收只覆盖一个 Actor BP、8+4+4+1+1 个对象；未覆盖多资产并发、PIE、Dirty 包、undo 栈很深的场景 |
 
 已在本轮关闭/降级的缺口：
 
@@ -217,27 +216,18 @@ disconnect 分支与“1 条 incident edge 的 node remove”本轮没有跑真�
 ```powershell
 # 完整构建 + 隔离工程 + 门禁负例 + 五类写 + 跨工程负例 + 新进程 Reload
 pwsh scripts/VerifyBlueprintAgentEndToEnd.ps1 `
-  -EngineRoot E:\EPICGAME\UE_5.6 `
-  -Output Output\p5\run-local
+  -EngineRoot <UE_5.6> `
+  -Output <AUDIT_OUTPUT>
 
 # 复用已构建插件，只重跑验收
 pwsh scripts/VerifyBlueprintAgentEndToEnd.ps1 `
-  -EngineRoot E:\EPICGAME\UE_5.6 -SkipBuild `
-  -Output Output\p5\run-local
+  -EngineRoot <UE_5.6> -SkipBuild `
+  -Output <AUDIT_OUTPUT>
 ```
 
-脚本只操作 `Build/DirectHost`（disposable HostProject）与 `Output/p5/...`；
-不会写 Lyra/Cropout/Reforge 资产、生产索引或用户工程。脚本在 `finally` 中移除
-项目 ini 的实验开关并停止 Editor。
-
-关键证据文件（运行产物，gitignored）：
-
-- `Output/p5/run21/acceptance-summary.json`：总判定与四阶段结果。
-- `Output/p5/run21/full/probe-report.json`：五步 planId、Undo/Redo、SHA。
-- `Output/p5/run21/gate-off/probe-report.json`：门禁 OFF 负例。
-- `Output/p5/run21/cross-project/probe-report.json`：跨工程负例。
-- `Build/DirectHost/Saved/UEAgentKitAgentE2E/expected.json` / `reload.json`：
-  新进程 Reload 的期望值与实测值。
+脚本只操作隔离的 `Build/DirectHost` 与输出目录；不会写用户工程或生产资产/索引。
+脚本在 `finally` 中移除项目 ini 的实验开关并停止 Editor。原始运行产物按内部流程
+归档，不进入公开仓库；公开仓库只保留可复现脚本和脱敏后的结果说明。
 
 ## 8. 通过与阻塞判定
 
@@ -246,5 +236,5 @@ pwsh scripts/VerifyBlueprintAgentEndToEnd.ps1 `
 - 门禁默认保持 OFF；只有 disposable HostProject 在脚本运行期间临时开启。
 - 本文不声称生产 Ready、不声称 OwnerTrust、不声称 P1-P4 的所有分支（disconnect、
   1 条 incident edge 删除）已有 A 级证据。
-- 合并到 `main`、GitHub push/tag/release、正式 GO/NO-GO 由 controller 决定；
-  本分支只提供可复现证据和最小修复。
+- 本文只提供隔离测试环境中的工程证据，不构成 GitHub push/tag/release 或正式
+  GO/NO-GO 授权。

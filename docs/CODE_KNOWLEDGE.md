@@ -89,7 +89,7 @@ Code freshness uses source SHA-256 as the content authority. File size and mtime
 
 - Python full-suite count is recorded from the latest frozen checkpoint; rerun `scripts/RunPythonTests.py full --quiet` before release.
 - UE 5.6 plugin build: passed.
-- Reforge small project: 14 source files; C1 indexed 6 types and UE Reflection matched 6/6 reflected types.
+- Small internal sample project: 14 source files; C1 indexed 6 types and UE Reflection matched 6/6 reflected types.
 - UE 5.6 reflection fixture: real UHT/Editor validation for UCLASS, USTRUCT, UENUM, UINTERFACE, UFUNCTION, and UPROPERTY; export produced 4 types, 2 functions, and 3 properties with 0 UE warnings/errors.
 - Synthetic scale check: 1,949 files / 411,239 LOC completed without indexing failures. This is performance/scale evidence only, not a substitute for acceptance on the original large production project.
 

@@ -39,6 +39,13 @@
 - [`PATCH_SCHEMA.md`](../spec/PATCH_SCHEMA.md)
 - [`BACKUP_AND_ROLLBACK.md`](../spec/BACKUP_AND_ROLLBACK.md)
 
+## RC1 实验性 Blueprint 文档
+
+以下文档描述默认关闭、需要显式双门禁的内部实验能力，不属于 v0.8.0 稳定面，也不代表生产授权：
+
+- [Blueprint Agent 端到端实验用法](BLUEPRINT_AGENT_E2E_USAGE.md)
+- [Blueprint Graph 读写能力矩阵](BLUEPRINT_GRAPH_READ_WRITE_MATRIX.md)
+
 ## 专用工具文档
 
 - [AI Agent 专用 Tool 索引与安全调用规则](TOOL_CATALOG.md)

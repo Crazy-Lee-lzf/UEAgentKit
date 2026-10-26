@@ -58,7 +58,13 @@ The current write surface includes:
 - DataTable cell, row-field, add/remove/rename operations.
 - Narrow AnimSequence realtime fixes and retarget-assistance workflows.
 
-Writes are not arbitrary scripting. They remain gated by **Write Policy, Revision, target identity, dirty-package state, transactions, explicit persistence, and independent verification**.
+Writes are not arbitrary scripting. Stable write domains remain gated by **Write Policy, Revision, target identity, dirty-package state, transactions, explicit persistence, and independent verification**.
+
+### RC1 experimental Blueprint structure writes (default off, not part of v0.8.0)
+
+The local RC1 candidate also contains a default-off internal experiment: bounded GraphEdit (eight node types and connections), pin defaults, user-variable creation, single-edge rewire, and isolated-node removal. Both the MCP flag `--enable-experimental-graphpatch-edit` and the Editor project setting `[UEAgentKit] ExperimentalGraphPatchEdit=True` are required, and every Apply/Save needs its exact planId/confirmation.
+
+These experimental tools do **not** go through the project Write Policy allowlist. They require an exact asset/graph identity, a clean package, stopped PIE, revision/fingerprint checks, and bounded operations; see the [Blueprint graph matrix](docs/BLUEPRINT_GRAPH_READ_WRITE_MATRIX.md) and [experimental usage](docs/BLUEPRINT_AGENT_E2E_USAGE.md). They are not a production default and must not be enabled on a production project. The Write Policy description above applies to stable writes, not to this experiment.
 
 ## P4 / Perforce integration
 

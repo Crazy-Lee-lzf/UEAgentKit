@@ -180,7 +180,7 @@ Run a fresh Editor commandlet (the P5 script does this automatically):
 
 ```powershell
 pwsh scripts/VerifyBlueprintAgentEndToEnd.ps1 `
-  -EngineRoot E:\EPICGAME\UE_5.6 -SkipBuild -Output Output\p5\run-local
+  -EngineRoot <UE_5.6> -SkipBuild -Output <AUDIT_OUTPUT>
 ```
 
 A passing run checks the disk SHA-256, graph GUID, exact node/edge sets, all four

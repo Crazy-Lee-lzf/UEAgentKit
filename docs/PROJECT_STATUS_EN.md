@@ -120,6 +120,8 @@ Source Control is disabled by default.
 
 Tool counts represent interface surface, not mutation breadth; many tools are read-only queries, planning, verification, or status operations.
 
+**Local RC1 candidate addendum (not the v0.8.0 tag):** the current static registry counts are Offline 14/28/20/34, Live 50/64/56/70, Workflow-only 71/85/77/91, and Live + Workflow 107/121/113/127. Additional default-off experimental tools (Blueprint structure edit, rewire, node removal, and related tools) are registered dynamically and are not included in this table; use `ue_get_capabilities` at runtime as the source of truth.
+
 ## Explicit non-goals in 0.8.0
 
 - Arbitrary Blueprint Graph node CRUD / rewiring.

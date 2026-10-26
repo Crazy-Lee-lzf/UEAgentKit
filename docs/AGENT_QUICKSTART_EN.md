@@ -5,7 +5,8 @@
 ## Version and safety boundary
 
 - The public `v0.8.0` release is documented in [Capability Status](PROJECT_STATUS_EN.md) and [Release Notes](RELEASE_0.8.0_EN.md). Features available only in a local development branch are not necessarily shipped.
-- Start read-only. Writing requires an explicitly enabled server mode, a fixed Unreal project, a scoped Write Policy, and a valid revision/confirmation flow.
+- Start read-only. Stable writes require an explicitly enabled server mode, a fixed Unreal project, a scoped Write Policy, and a valid revision/confirmation flow.
+- Exception: the default-off `--enable-experimental-graphpatch-edit` Blueprint structure tools do not use Write Policy. They are bounded by the experimental flag, the project ini, exact plan/confirmation, asset/graph identity, and clean/PIE checks, and must not be used on a production project.
 - Generic Blueprint Graph node CRUD, arbitrary Actor/asset mutations, arbitrary shell/Python, and Save All are not open interfaces in v0.8.0. Later native tools and Memory Mount staging remain experimental or disabled until explicitly enabled and verified.
 
 ## 1. Prepare the environment

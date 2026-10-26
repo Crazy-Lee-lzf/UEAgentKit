@@ -60,7 +60,13 @@ Plan → Policy → Revision → Apply → Save → Verify → Diff / Trust
 - DataTable：Cell、Row Fields、Add / Remove / Rename Row。
 - AnimSequence 的有限实时修复与重定向辅助流程。
 
-写入不是任意脚本执行。所有写入都受 **Write Policy、Revision、目标身份、Dirty Package、Transaction、显式保存和独立验证** 约束。
+写入不是任意脚本执行。稳定写入域受 **Write Policy、Revision、目标身份、Dirty Package、Transaction、显式保存和独立验证** 约束。
+
+### RC1 实验性 Blueprint 结构写入（默认关闭，不属于 v0.8.0 稳定面）
+
+RC1 本地候选还包含一组**默认关闭的内部实验能力**：有界 GraphEdit（8 类节点/连线）、Pin 默认值、用户变量创建、单边 rewire 和孤立节点删除。它们需要 MCP `--enable-experimental-graphpatch-edit` 与 Editor 工程 `[UEAgentKit] ExperimentalGraphPatchEdit=True` 同时开启，并且每次 Apply/Save 都要回传精确的 planId/confirmation。
+
+这些实验工具**不经过项目 Write Policy 白名单**，只接受精确资产/图身份、干净包、非 PIE、版本/指纹校验和有界操作；完整限制见 [Blueprint Graph 读写矩阵](docs/BLUEPRINT_GRAPH_READ_WRITE_MATRIX.md) 与 [实验用法](docs/BLUEPRINT_AGENT_E2E_USAGE.md)。它们不是生产默认，不应在正式项目中开启。稳定写入与实验写入是两套边界，不能把本文的 Write Policy 描述套到实验工具上。
 
 ## P4 / Perforce 集成
 
