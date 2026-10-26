@@ -9,6 +9,7 @@
 #include "BlueprintGraphLayoutExperimental.h"
 #include "BlueprintGraphEditExperimental.h"
 #include "BlueprintPinDefaultEditExperimental.h"
+#include "BlueprintRewireExperimental.h"
 #include "BlueprintVariableWriteExperimental.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -1342,6 +1343,84 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 				ErrorMessage);
 		}
 	}
+	else if (Method == TEXT("editor.previewBlueprintRewireExperimental"))
+	{
+		if (!UEAgentKitBlueprintRewireExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-rewire-experimental-disabled"),
+				TEXT("Experimental Blueprint rewire is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintRewireExperimental::TryPreviewExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.applyBlueprintRewireExperimental"))
+	{
+		if (!UEAgentKitBlueprintRewireExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-rewire-experimental-disabled"),
+				TEXT("Experimental Blueprint rewire is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintRewireExperimental::TryApplyExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.saveBlueprintRewireExperimental"))
+	{
+		if (!UEAgentKitBlueprintRewireExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-rewire-experimental-disabled"),
+				TEXT("Experimental Blueprint rewire is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintRewireExperimental::TrySaveExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
 	else if (Method == TEXT("editor.getEditorContext"))
 	{
 		SendResult(Client.Socket, RequestId, BuildEditorContextResult());
@@ -2261,6 +2340,15 @@ TArray<TSharedPtr<FJsonValue>> FUEAgentKitEditorBridge::BuildCapabilityValues() 
 			UEAgentKitBlueprintVariableExperimental::ApplyMethod));
 		Values.Add(MakeShared<FJsonValueString>(
 			UEAgentKitBlueprintVariableExperimental::SaveMethod));
+	}
+	if (UEAgentKitBlueprintRewireExperimental::IsExperimentalWriteAvailable())
+	{
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintRewireExperimental::PreviewMethod));
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintRewireExperimental::ApplyMethod));
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintRewireExperimental::SaveMethod));
 	}
 	if (FNativeNodeRegistry::Get().IsAvailable())
 	{
