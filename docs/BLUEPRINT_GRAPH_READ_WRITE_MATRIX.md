@@ -1,8 +1,7 @@
 # Blueprint Graph Read/Write Capability Matrix
 
-Branch: `feature/blueprint-typed-property-p1-20261026`
-Base: `main@446b535`
-Date: 2026-10-26
+Verified scope: UE 5.6.1, Editor Bridge and Python MCP.
+Updated: 2026-10-26.
 Scope: UE 5.6.1, Editor bridge/plugin plus Python MCP/index readers.
 
 This matrix describes the product contract on this branch. It deliberately does
