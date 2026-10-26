@@ -248,4 +248,3 @@ pwsh scripts/VerifyBlueprintAgentEndToEnd.ps1 `
   1 条 incident edge 删除）已有 A 级证据。
 - 合并到 `main`、GitHub push/tag/release、正式 GO/NO-GO 由 controller 决定；
   本分支只提供可复现证据和最小修复。
-

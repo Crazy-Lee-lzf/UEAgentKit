@@ -1,7 +1,7 @@
 # Blueprint Agent end-to-end usage (real UE 5.6 / 真实 UE 5.6 用法)
 
 This page shows the shortest real Agent path for the bounded Blueprint write tools.
-It is an opt-in experimental workflow, not a production default.  
+It is an opt-in experimental workflow, not a production default.
 本页给出 Blueprint 有界写工具最短的真实 Agent 调用路径；它是显式 opt-in 的实验
 工作流，不是生产默认能力。
 
