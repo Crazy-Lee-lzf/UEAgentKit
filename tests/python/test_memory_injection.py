@@ -290,6 +290,51 @@ class MemoryInjectionTests(unittest.TestCase):
         text = self.injection(query="unrelated")["text"]
         self.assertIn("Convention: Blueprint assets use BP_ prefix", text)
 
+    def test_duplicate_identical_rule_text_is_deduped_not_fatal(self) -> None:
+        record_ids: list[str] = []
+        for subject in ("duplicate-rule-a", "duplicate-rule-b"):
+            record = self.service.add_record(
+                MemoryRecordDraft(
+                    project_key=PROJECT,
+                    record_type="projectRule",
+                    subject_key=subject,
+                    title="Shared rule title",
+                    body="Shared rule body.",
+                    source_kind=MemorySourceKind.USER_CONFIRMED,
+                )
+            )
+            record_ids.append(record.record_id)
+
+        # Two records with different Subject Keys can project byte-identical
+        # L3 text. The build must merge them instead of violating the
+        # memory_context_entries (projectKey, layer, contextKey) uniqueness.
+        payload = self.build()
+        self.assertEqual(payload["l3Entries"], 2)  # one deduped rule + one convention
+        rebuilt = self.build()
+        self.assertTrue(rebuilt["reused"])
+        self.assertEqual(rebuilt["snapshotId"], payload["snapshotId"])
+
+        injection = self.injection(query="anything")
+        rule_line = "L3: Rule: Shared rule title. Shared rule body."
+        self.assertEqual(injection["text"].count(rule_line), 1)
+
+        with open_project_memory_database(self.memory_path) as connection:
+            record_count = connection.execute(
+                "SELECT COUNT(*) FROM memory_records WHERE record_type = 'projectRule'"
+            ).fetchone()[0]
+            entry = connection.execute(
+                """
+                SELECT source_bindings_json
+                FROM memory_context_entries
+                WHERE layer = 'L3' AND body = ?
+                """,
+                ("Rule: Shared rule title. Shared rule body.",),
+            ).fetchone()
+            self.assertEqual(record_count, 2)
+            self.assertIsNotNone(entry)
+            bindings = json.loads(str(entry[0]))
+        self.assertEqual({str(binding["recordId"]) for binding in bindings}, set(record_ids))
+
     # --------------------------------------------------------------- L2 recipes
 
     def test_l2_recipe_requires_three_verified_successes(self) -> None:

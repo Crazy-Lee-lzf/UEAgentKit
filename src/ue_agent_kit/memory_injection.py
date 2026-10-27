@@ -893,38 +893,63 @@ def build_memory_context_snapshot(
                 l3_ordered.pop()
 
             all_entries: list[dict[str, Any]] = []
-            for index, item in enumerate(l3_ordered):
-                body = item["body"]
-                context_key = _canonical_context_key(project_key, "L3", item["title"], body, {})
-                all_entries.append(
-                    {
-                        "layer": "L3",
-                        "context_key": context_key,
-                        "ordinal": index,
-                        "title": item["title"],
-                        "body": body,
-                        "match": {},
-                        "bindings": item.get("bindings", []),
-                    }
+            entry_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+            layer_ordinals = {"L3": 0, "L2": 0}
+
+            def append_entry(
+                *,
+                layer: str,
+                title: str,
+                body: str,
+                match: dict[str, Any],
+                bindings: Sequence[dict[str, Any]],
+            ) -> None:
+                """Append one unique context entry, merging duplicate provenance.
+
+                Two source records can project byte-identical injection text (for
+                example, the same rule recorded under two Subject Keys). The
+                ``memory_context_entries`` table is unique on
+                ``(project_key, layer, context_key)``, so the second occurrence
+                must merge its bindings into the first instead of aborting the
+                whole offline build. The duplicate is only collapsed at the
+                projection layer; the Memory records themselves are untouched.
+                """
+                context_key = _canonical_context_key(project_key, layer, title, body, match)
+                key = (layer, context_key)
+                existing = entry_by_key.get(key)
+                if existing is not None:
+                    for binding in bindings:
+                        if binding not in existing["bindings"]:
+                            existing["bindings"].append(binding)
+                    return
+                entry = {
+                    "layer": layer,
+                    "context_key": context_key,
+                    "ordinal": layer_ordinals[layer],
+                    "title": title,
+                    "body": body,
+                    "match": dict(match),
+                    "bindings": list(bindings),
+                }
+                layer_ordinals[layer] += 1
+                all_entries.append(entry)
+                entry_by_key[key] = entry
+
+            for item in l3_ordered:
+                append_entry(
+                    layer="L3",
+                    title=item["title"],
+                    body=item["body"],
+                    match={},
+                    bindings=item.get("bindings", []),
                 )
-            for index, recipe in enumerate(l2_recipes):
-                context_key = _canonical_context_key(
-                    project_key,
-                    "L2",
-                    recipe["title"],
-                    recipe["body"],
-                    recipe["match"],
-                )
-                all_entries.append(
-                    {
-                        "layer": "L2",
-                        "context_key": context_key,
-                        "ordinal": index,
-                        "title": recipe["title"],
-                        "body": recipe["body"],
-                        "match": recipe["match"],
-                        "bindings": recipe.get("bindings", []),
-                    }
+            for recipe in l2_recipes:
+                append_entry(
+                    layer="L2",
+                    title=recipe["title"],
+                    body=recipe["body"],
+                    match=recipe["match"],
+                    bindings=recipe.get("bindings", []),
                 )
             l3_entries = [entry for entry in all_entries if entry["layer"] == "L3"]
             l2_entries = [entry for entry in all_entries if entry["layer"] == "L2"]
