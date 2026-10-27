@@ -27,6 +27,8 @@
 ## 架构与安全
 
 - [Memory Architecture](MEMORY_ARCHITECTURE.md) / [English](MEMORY_ARCHITECTURE_EN.md)
+- [Asset Index Schema v2 与 CJK 迁移](INDEX_SCHEMA_V2_MIGRATION.md)
+- [查询模式现状：Offline / Live / Auto 差距评估](QUERY_MODES_OFFLINE_LIVE_AUTO.md)
 - [AI-native UE Editor](AI_NATIVE_UE_EDITOR.md) / [English](AI_NATIVE_UE_EDITOR_EN.md)
 - [Reference Policy](REFERENCE_POLICY.md)
 - [C++ Code Knowledge](CODE_KNOWLEDGE.md)

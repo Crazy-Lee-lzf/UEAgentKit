@@ -9,7 +9,13 @@ from pathlib import Path
 from typing import Any, Iterator, Literal, Sequence
 
 from .code_index import CODE_PROFILE
-from .database import assert_fts5_available, get_metadata, get_schema_version, open_database
+from .database import (
+    assert_fts5_available,
+    assert_index_schema_current,
+    get_metadata,
+    get_schema_version,
+    open_database,
+)
 from .impact_analysis import (
     DEFAULT_IMPACT_DEPTH,
     DEFAULT_IMPACT_EDGES,
@@ -213,6 +219,7 @@ class IndexQueryService:
                     f"Database schema is {version}; UE Agent Kit requires schema {CURRENT_SCHEMA_VERSION}."
                 )
             assert_fts5_available(connection)
+            assert_index_schema_current(connection)
             try:
                 yield connection
             finally:

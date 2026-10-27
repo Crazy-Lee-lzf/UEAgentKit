@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+from .text_search import symbol_search_text
+
 
 HEADER_EXTENSIONS = frozenset({".h", ".hh", ".hpp", ".hxx"})
 _INCLUDE_RE = re.compile(r'^\s*#\s*include\s+"([^"\r\n]+)"')
@@ -720,8 +722,9 @@ def rebuild_code_semantics(
                 name,
                 symbol_asset_path,
                 class_path,
-                details_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                details_json,
+                search_text
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 asset_id,
@@ -731,6 +734,14 @@ def rebuild_code_semantics(
                 asset_path,
                 symbol.qualified_name,
                 details_json,
+                symbol_search_text(
+                    stable_id=stable_id,
+                    name=symbol.name,
+                    kind=symbol.kind,
+                    symbol_asset_path=asset_path,
+                    class_path=symbol.qualified_name,
+                    details_json=details_json,
+                ),
             ),
         )
         symbols_by_qualified_name[symbol.qualified_name] = (stable_id, symbol.kind, asset_path)

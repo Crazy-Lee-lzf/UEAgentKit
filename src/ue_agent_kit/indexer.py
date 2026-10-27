@@ -11,6 +11,7 @@ from . import world_index_v2
 from .code_index import CODE_PROFILE
 
 from .database import get_metadata, get_schema_version, set_metadata, utc_now_iso
+from .text_search import node_search_text, symbol_search_text
 
 
 PROFILE_RANK = {
@@ -342,6 +343,12 @@ def _insert_symbols(connection: sqlite3.Connection, asset_id: int, canonical: di
     maps = _definition_maps(canonical)
     symbols = canonical.get("symbols", [])
     for symbol in symbols:
+        stable_id = str(symbol.get("id", ""))
+        kind = str(symbol.get("kind", ""))
+        name = str(symbol.get("name", ""))
+        symbol_asset_path = str(symbol.get("assetPath", ""))
+        class_path = str(symbol.get("class", ""))
+        details_json = _json_dumps(_symbol_details(symbol, maps))
         connection.execute(
             """
             INSERT INTO symbols(
@@ -355,21 +362,30 @@ def _insert_symbols(connection: sqlite3.Connection, asset_id: int, canonical: di
                 parent_symbol_id,
                 class_path,
                 graph_guid,
-                details_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                details_json,
+                search_text
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 asset_id,
-                str(symbol.get("id", "")),
-                str(symbol.get("kind", "")),
-                str(symbol.get("name", "")),
-                str(symbol.get("assetPath", "")),
+                stable_id,
+                kind,
+                name,
+                symbol_asset_path,
                 str(symbol.get("guid", "")),
                 str(symbol.get("ownerSymbolId", "")),
                 str(symbol.get("parentSymbolId", "")),
-                str(symbol.get("class", "")),
+                class_path,
                 str(symbol.get("graphGuid", "")),
-                _json_dumps(_symbol_details(symbol, maps)),
+                details_json,
+                symbol_search_text(
+                    stable_id=stable_id,
+                    name=name,
+                    kind=kind,
+                    symbol_asset_path=symbol_asset_path,
+                    class_path=class_path,
+                    details_json=details_json,
+                ),
             ),
         )
     return len(symbols)
@@ -400,6 +416,12 @@ def _insert_graphs_and_nodes(connection: sqlite3.Connection, asset_id: int, cano
         graph_count += 1
 
         for node in nodes:
+            node_guid = str(node.get("guid", ""))
+            object_name = str(node.get("name", ""))
+            node_class = str(node.get("class", ""))
+            title = str(node.get("title", ""))
+            comment = str(node.get("comment", ""))
+            node_details_json = _json_dumps(node)
             connection.execute(
                 """
                 INSERT INTO nodes(
@@ -411,19 +433,28 @@ def _insert_graphs_and_nodes(connection: sqlite3.Connection, asset_id: int, cano
                     node_class,
                     title,
                     comment,
-                    details_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    details_json,
+                    search_text
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     asset_id,
                     graph_id,
                     str(graph.get("guid", "")),
-                    str(node.get("guid", "")),
-                    str(node.get("name", "")),
-                    str(node.get("class", "")),
-                    str(node.get("title", "")),
-                    str(node.get("comment", "")),
-                    _json_dumps(node),
+                    node_guid,
+                    object_name,
+                    node_class,
+                    title,
+                    comment,
+                    node_details_json,
+                    node_search_text(
+                        guid=node_guid,
+                        title=title,
+                        object_name=object_name,
+                        node_class=node_class,
+                        comment=comment,
+                        details_json=node_details_json,
+                    ),
                 ),
             )
             node_count += 1

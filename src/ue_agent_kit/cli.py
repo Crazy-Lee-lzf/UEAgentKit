@@ -15,7 +15,13 @@ from .backups import (
 )
 from .code_index import DEFAULT_SOURCE_ROOTS, build_code_index
 from .config import DEFAULT_DATABASE, DEFAULT_MEMORY_DATABASE
-from .database import assert_fts5_available, get_schema_version, open_database
+from .database import (
+    assert_fts5_available,
+    assert_index_schema_current,
+    get_schema_version,
+    open_database,
+    rebuild_index_atomically,
+)
 from .fixtures import validate_fixture_plan, verify_fixture_export
 from .indexer import build_index, read_changed_path_attestation
 from .knowledge_view import KnowledgeViewConfig, serve as serve_knowledge_view
@@ -131,6 +137,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--prune-prefix",
         default="",
         help="Explicit Unreal asset path prefix to prune, for example /Game. No prune occurs when omitted.",
+    )
+    index_build.add_argument(
+        "--rebuild",
+        action="store_true",
+        help=(
+            "Build a brand-new schema-v2 database beside --database, validate quick_check and "
+            "search, then atomically replace the target. Required to move a pre-v2 index; "
+            "in-place FTS migration is never performed."
+        ),
     )
 
     index_code = index_subparsers.add_parser(
@@ -486,6 +501,7 @@ def _open_query_database(path: Path):
                 f"Database schema is {version}; this CLI requires schema {CURRENT_SCHEMA_VERSION}."
             )
         assert_fts5_available(connection)
+        assert_index_schema_current(connection)
     except Exception:
         context.__exit__(*sys.exc_info())
         raise
@@ -731,8 +747,9 @@ def run(args: argparse.Namespace) -> tuple[Any, int]:
                 args.changed_path_file,
                 export_root=args.export_root,
             )
-        with open_database(args.database) as connection:
-            result = build_index(
+
+        def _build(connection: "sqlite3.Connection") -> "IndexBuildResult":
+            return build_index(
                 connection,
                 args.export_root,
                 args.database,
@@ -745,6 +762,15 @@ def run(args: argparse.Namespace) -> tuple[Any, int]:
                 changed_path_source=changed_path_source,
                 use_manifest_digest=not args.no_manifest_digest,
             )
+
+        if args.rebuild:
+            # A pre-v2 target is intentionally never opened writable. The new
+            # database is built beside it and swapped only after quick_check,
+            # FTS integrity, and a real search probe succeed.
+            result = rebuild_index_atomically(args.database, _build)
+        else:
+            with open_database(args.database) as connection:
+                result = _build(connection)
         return result.to_dict(include_assets=args.include_assets), 0 if result.failed == 0 and not result.errors else 1
 
     if args.command == "index" and args.index_command == "code":

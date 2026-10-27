@@ -60,6 +60,15 @@ _CJK_RANGES: tuple[tuple[int, int], ...] = (
 # starting with ``护``. The boundary token keeps fields independent.
 _CJK_FIELD_BOUNDARY = "ueakfieldboundary"
 
+# Asset Index schema v2 uses a much smaller projection than Project Memory v7
+# (duplicating ASCII on a multi-gigabyte index is the cost v2 exists to avoid).
+# It still has to stop FTS5 phrase adjacency from splicing two CJK runs across
+# the punctuation/JSON structure that was dropped. U+3164 HANGUL FILLER is a
+# single invisible Hangul letter: unicode61 indexes it as its own token, so it
+# breaks a phrase, and it is itself a Han/Kana/Hangul character, so
+# ``search_text`` stays "only CJK characters separated by spaces" as specified.
+_CJK_RUN_BOUNDARY = "\u3164"
+
 
 def _is_combining_or_format(character: str) -> bool:
     category = unicodedata.category(character)
@@ -197,6 +206,107 @@ def expand_query_term(term: str) -> str:
     return " AND ".join(fragments)
 
 
+def project_cjk_only(text: str) -> str:
+    """Return only the expanded Han/Kana/Hangul characters of ``text``.
+
+    The Asset Index schema v2 stores a much smaller projection than Project
+    Memory v7: duplicating ASCII on a multi-gigabyte asset index costs hundreds
+    of megabytes, so ``symbols.search_text`` and ``nodes.search_text`` contain
+    only CJK characters, each separated by one ASCII space. Everything else
+    (ASCII tokens, punctuation, JSON structure) is dropped; the original
+    columns still carry the full text and are searched as before.
+
+    ``"AK47护甲升级链"`` becomes ``"护 甲 升 级 链"``. Two CJK runs separated by
+    punctuation or JSON structure are joined with an invisible Hangul filler
+    token (``护甲，升级`` -> ``护 甲 <U+3164> 升 级``) so FTS5 phrase adjacency
+    cannot splice a false substring across the dropped separator. Combining
+    marks and format characters are dropped because they are not independently
+    searchable; NFKC normalization in :func:`project_cjk` has already folded
+    compatibility variants onto one code point.
+    """
+    if not isinstance(text, str):
+        raise TypeError("text must be a string.")
+    projected = project_cjk(text)
+    characters: list[str] = []
+    seen_cjk = False
+    pending_boundary = False
+    for character in projected:
+        if _is_combining_or_format(character):
+            continue
+        if is_cjk_character(character):
+            if seen_cjk and pending_boundary:
+                characters.append(_CJK_RUN_BOUNDARY)
+            characters.append(character)
+            seen_cjk = True
+            pending_boundary = False
+        elif seen_cjk:
+            pending_boundary = True
+    return " ".join(characters)
+
+
+def build_cjk_search_text(*fields: str) -> str:
+    """Build a persisted CJK-only projection for one Asset Index row.
+
+    Each source field is reduced with :func:`project_cjk_only`. Non-empty
+    fields are joined with the same CJK-safe run-boundary token so a phrase
+    cannot splice the end of one source field onto the start of the next inside
+    the single ``search_text`` column. The boundary is omitted when only one
+    field contains CJK, keeping the common row's projection a plain sequence of
+    CJK characters and spaces.
+
+    The projection never duplicates ASCII source text; that is the storage
+    contract that keeps schema v2 affordable on an existing multi-gigabyte
+    index.
+    """
+    for value in fields:
+        if not isinstance(value, str):
+            raise TypeError("search text fields must be strings.")
+    projected = [value for value in (project_cjk_only(field) for field in fields) if value]
+    if not projected:
+        return ""
+    return f" {_CJK_RUN_BOUNDARY} ".join(projected)
+
+
+def symbol_search_text(
+    *,
+    stable_id: str = "",
+    name: str = "",
+    kind: str = "",
+    symbol_asset_path: str = "",
+    class_path: str = "",
+    details_json: str = "",
+) -> str:
+    """CJK-only projection for one ``symbols`` row (all FTS-indexed fields)."""
+    return build_cjk_search_text(
+        stable_id,
+        name,
+        kind,
+        symbol_asset_path,
+        class_path,
+        details_json,
+    )
+
+
+def node_search_text(
+    *,
+    guid: str = "",
+    title: str = "",
+    object_name: str = "",
+    node_class: str = "",
+    comment: str = "",
+    details_json: str = "",
+) -> str:
+    """CJK-only projection for one ``nodes`` row (all FTS-indexed fields)."""
+    return build_cjk_search_text(
+        guid,
+        title,
+        object_name,
+        node_class,
+        comment,
+        details_json,
+    )
+
+
 def build_search_text(
     subject_key: str = "",
     title: str = "",
@@ -221,10 +331,14 @@ def build_search_text(
 
 
 __all__ = [
+    "build_cjk_search_text",
     "build_search_text",
     "expand_cjk",
     "expand_query_term",
     "has_cjk",
     "is_cjk_character",
+    "node_search_text",
     "project_cjk",
+    "project_cjk_only",
+    "symbol_search_text",
 ]
