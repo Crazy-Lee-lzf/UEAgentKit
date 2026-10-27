@@ -340,10 +340,11 @@ def _metadata_upsert_sql(key: str, value: str) -> str:
 def apply_migrations(connection: sqlite3.Connection) -> int:
     """Apply the current schema to a new database and stamp its version tag.
 
-    A fresh database applies only the latest complete schema (the final
-    ``MIGRATIONS`` entry). Historical entries are never executed against an
-    existing file, which is what guarantees schema v2 can never be produced by
-    altering a v1 FTS table in place.
+    A fresh database starts at the rebuild baseline
+    (``INDEX_REBUILD_REQUIRED_FROM``, a complete schema) and then applies later
+    delta migrations normally. Historical entries below the baseline are never
+    executed against any file, which is what guarantees schema v2 can never be
+    produced by altering a v1 FTS table in place.
     """
     current_version = get_schema_version(connection)
     if current_version > CURRENT_SCHEMA_VERSION:
@@ -359,9 +360,10 @@ def apply_migrations(connection: sqlite3.Connection) -> int:
     for migration in MIGRATIONS:
         if migration.version <= current_version:
             continue
-        if is_fresh and migration.version < CURRENT_SCHEMA_VERSION:
-            # Historical schema step: a fresh file always starts at the latest
-            # complete schema so no intermediate FTS table is ever created.
+        if is_fresh and migration.version < INDEX_REBUILD_REQUIRED_FROM:
+            # Historical schema steps before the current rebuild baseline are
+            # never executed. A fresh file starts at the first complete schema
+            # (v2) and then applies any later delta migrations normally.
             continue
 
         description = _quote_sql_literal(migration.description)

@@ -609,11 +609,12 @@ END;
 """
 
 
-# MIGRATIONS is ordered history. The final entry is the complete schema for
-# CURRENT_SCHEMA_VERSION; earlier entries are retained for historical reference
-# and for tests that must construct a genuine older database. A fresh database
-# applies only the final entry (see database.apply_migrations), so the v2 FTS
-# definition is never produced by altering a v1 index in place.
+# MIGRATIONS is ordered history. The entry at INDEX_REBUILD_REQUIRED_FROM (v2)
+# is a complete baseline schema; later entries may be ordinary deltas. Entries
+# below the baseline are retained for historical reference and for tests that
+# must construct a genuine older database. A fresh database applies the
+# baseline and any later delta, never the historical v1 FTS definition, so v2
+# is never produced by altering a v1 index in place.
 MIGRATIONS = (
     Migration(
         version=LEGACY_SCHEMA_VERSION,
