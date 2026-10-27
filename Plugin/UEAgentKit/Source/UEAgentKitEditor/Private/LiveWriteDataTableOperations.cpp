@@ -196,6 +196,13 @@ namespace
 				RowStruct->CopyScriptStruct(Row->GetStructMemory(), RowData);
 				Snapshot.Rows.Add(Name, MoveTemp(Row));
 			}
+			FString Error;
+			if (!ExportTableCanonical(PreWriteTableJson, Error))
+			{
+				Snapshot.Rows.Reset();
+				return false;
+			}
+			PostWriteTableJson.Reset();
 			bSnapshotValid = true;
 			return true;
 		}
@@ -234,15 +241,6 @@ namespace
 			FString& OutErrorCode,
 			FString& OutErrorMessage) override
 		{
-			TSharedRef<FJsonObject> Table = MakeShared<FJsonObject>();
-			if (!ExportLiveFullDataTableAsJson(DataTable, RowStruct, Table))
-			{
-				OutErrorCode = TEXT("live-editor-write-data-table-apply-failed");
-				OutErrorMessage = TEXT("The DataTable could not be exported before the write.");
-				return false;
-			}
-			FullTableBeforeJson = UEAgentKit::StructuredPropertyJson::CanonicalJson(
-				MakeShared<FJsonValueObject>(Table));
 			if (Kind == ELiveDataTableOperationKind::AddRow)
 			{
 				OutValue = MakeShared<FJsonValueNull>();
@@ -379,6 +377,13 @@ namespace
 			FString& OutErrorCode,
 			FString& OutErrorMessage) override
 		{
+			FString TableError;
+			if (!ExportTableCanonical(PostWriteTableJson, TableError))
+			{
+				OutErrorCode = TEXT("live-editor-write-data-table-apply-failed");
+				OutErrorMessage = TEXT("The DataTable could not be exported after the write: ") + TableError;
+				return false;
+			}
 			if (Kind == ELiveDataTableOperationKind::Cell)
 			{
 				const uint8* RowData = DataTable->FindRowUnchecked(RowName);
@@ -475,16 +480,114 @@ namespace
 			return true;
 		}
 
-		bool SemanticEqual(const TSharedPtr<FJsonValue>& Left, const TSharedPtr<FJsonValue>& Right) override
+		bool SemanticEqual(const TSharedPtr<FJsonValue>& /*Left*/, const TSharedPtr<FJsonValue>& /*Right*/) override
 		{
-			TSharedRef<FJsonObject> Table = MakeShared<FJsonObject>();
-			if (!ExportLiveFullDataTableAsJson(DataTable, RowStruct, Table))
+			// The DataTable apply/no-op contract is an exact comparison of the
+			// whole table against the immutable pre-write snapshot.  Comparing
+			// two row JSON values would miss structural add/remove/rename and
+			// would make unchanged checks depend on which row happens to exist.
+			FString Current;
+			FString ExportError;
+			if (!ExportTableCanonical(Current, ExportError) || PreWriteTableJson.IsEmpty())
 			{
 				return false;
 			}
-			const FString FullTableAfterJson = UEAgentKit::StructuredPropertyJson::CanonicalJson(
-				MakeShared<FJsonValueObject>(Table));
-			return FullTableBeforeJson == FullTableAfterJson;
+			return Current == PreWriteTableJson;
+		}
+
+		bool ReadWrittenValueForRevert(
+			TSharedPtr<FJsonValue>& OutValue,
+			FString& OutErrorCode,
+			FString& OutErrorMessage) override
+		{
+			if (Kind == ELiveDataTableOperationKind::RemoveRow)
+			{
+				// The written state intentionally has no source row.
+				return ReadExpectedRowState(RowName, false, OutValue, OutErrorCode, OutErrorMessage);
+			}
+			if (Kind == ELiveDataTableOperationKind::RenameRow)
+			{
+				return ReadExpectedRowState(NewRowName, true, OutValue, OutErrorCode, OutErrorMessage);
+			}
+			return ReadExpectedRowState(RowName, true, OutValue, OutErrorCode, OutErrorMessage);
+		}
+
+		bool ReadRestoredValueForRevert(
+			TSharedPtr<FJsonValue>& OutValue,
+			FString& OutErrorCode,
+			FString& OutErrorMessage) override
+		{
+			if (Kind == ELiveDataTableOperationKind::AddRow)
+			{
+				// Undo of AddRow intentionally has no row left to report.
+				return ReadExpectedRowState(RowName, false, OutValue, OutErrorCode, OutErrorMessage);
+			}
+			return ReadExpectedRowState(RowName, true, OutValue, OutErrorCode, OutErrorMessage);
+		}
+
+		bool VerifyUnchangedSinceWrite(
+			const TSharedPtr<FJsonValue>& /*ExpectedAfter*/,
+			FString& OutErrorCode,
+			FString& OutErrorMessage) override
+		{
+			if (PostWriteTableJson.IsEmpty())
+			{
+				OutErrorCode = TEXT("live-editor-write-undo-target-changed");
+				OutErrorMessage = TEXT("The confirmed post-write DataTable snapshot is unavailable.");
+				return false;
+			}
+			FString Current;
+			FString ExportError;
+			if (!ExportTableCanonical(Current, ExportError))
+			{
+				OutErrorCode = TEXT("live-editor-write-undo-target-changed");
+				OutErrorMessage = TEXT("The current DataTable state could not be exported before reverting: ") + ExportError;
+				return false;
+			}
+			if (Current != PostWriteTableJson)
+			{
+				OutErrorCode = TEXT("live-editor-write-undo-target-changed");
+				OutErrorMessage = TEXT("The DataTable changed after the confirmed write; re-plan instead of overwriting the newer values.");
+				return false;
+			}
+			return true;
+		}
+
+		bool VerifyRestoredToBefore(
+			const TSharedPtr<FJsonValue>& /*ExpectedBefore*/,
+			FString& OutErrorCode,
+			FString& OutErrorMessage) override
+		{
+			if (PreWriteTableJson.IsEmpty())
+			{
+				OutErrorCode = TEXT("live-editor-write-undo-verify-failed");
+				OutErrorMessage = TEXT("The pre-write DataTable snapshot is unavailable.");
+				return false;
+			}
+			FString Current;
+			FString ExportError;
+			if (!ExportTableCanonical(Current, ExportError))
+			{
+				OutErrorCode = TEXT("live-editor-write-undo-verify-failed");
+				OutErrorMessage = TEXT("The restored DataTable state could not be exported: ") + ExportError;
+				return false;
+			}
+			if (Current != PreWriteTableJson)
+			{
+				OutErrorCode = TEXT("live-editor-write-undo-verify-failed");
+				OutErrorMessage = TEXT("The Undo did not restore the exact pre-write DataTable snapshot.");
+				return false;
+			}
+			return true;
+		}
+
+		bool RevertChanged(
+			const TSharedPtr<FJsonValue>& /*Before*/,
+			const TSharedPtr<FJsonValue>& /*After*/) override
+		{
+			return !PreWriteTableJson.IsEmpty()
+				&& !PostWriteTableJson.IsEmpty()
+				&& PreWriteTableJson != PostWriteTableJson;
 		}
 
 		void NotifyChanged() override
@@ -504,6 +607,72 @@ namespace
 		TMap<FString, FProperty*> FieldProperties;
 
 	private:
+		bool ExportTableCanonical(FString& OutJson, FString& OutError) const
+		{
+			TSharedRef<FJsonObject> Table = MakeShared<FJsonObject>();
+			if (!ExportLiveFullDataTableAsJson(DataTable, RowStruct, Table))
+			{
+				OutError = TEXT("The DataTable could not be exported.");
+				return false;
+			}
+			OutJson = UEAgentKit::StructuredPropertyJson::CanonicalJson(
+				MakeShared<FJsonValueObject>(Table));
+			return true;
+		}
+
+		bool ReadRowJson(
+			const FName InRowName,
+			TSharedPtr<FJsonValue>& OutValue,
+			FString& OutErrorCode,
+			FString& OutErrorMessage) const
+		{
+			const uint8* RowData = DataTable->FindRowUnchecked(InRowName);
+			if (!RowData)
+			{
+				OutErrorCode = TEXT("live-editor-write-undo-verify-failed");
+				OutErrorMessage = FString::Printf(
+					TEXT("The expected DataTable row is missing: %s"),
+					*InRowName.ToString());
+				return false;
+			}
+			TSharedRef<FJsonObject> Row = MakeShared<FJsonObject>();
+			if (!ExportLiveDataTableRowAsJson(RowStruct, RowData, Row))
+			{
+				OutErrorCode = TEXT("live-editor-write-undo-verify-failed");
+				OutErrorMessage = FString::Printf(
+					TEXT("The DataTable row could not be exported: %s"),
+					*InRowName.ToString());
+				return false;
+			}
+			OutValue = MakeShared<FJsonValueObject>(Row);
+			return true;
+		}
+
+		bool ReadExpectedRowState(
+			const FName InRowName,
+			const bool bExpectedPresent,
+			TSharedPtr<FJsonValue>& OutValue,
+			FString& OutErrorCode,
+			FString& OutErrorMessage) const
+		{
+			const bool bPresent = DataTable->FindRowUnchecked(InRowName) != nullptr;
+			if (bPresent != bExpectedPresent)
+			{
+				OutErrorCode = TEXT("live-editor-write-undo-verify-failed");
+				OutErrorMessage = FString::Printf(
+					TEXT("The DataTable row state is inconsistent: %s expected %s."),
+					*InRowName.ToString(),
+					bExpectedPresent ? TEXT("present") : TEXT("absent"));
+				return false;
+			}
+			if (!bExpectedPresent)
+			{
+				OutValue = MakeShared<FJsonValueNull>();
+				return true;
+			}
+			return ReadRowJson(InRowName, OutValue, OutErrorCode, OutErrorMessage);
+		}
+
 		bool RequestedRowFieldsMatch(const TSharedPtr<FJsonValue>& Requested, const uint8* RowData) const
 		{
 			if (!Requested.IsValid() || Requested->Type != EJson::Object || RowData == nullptr)
@@ -556,7 +725,8 @@ namespace
 		FName RowName;
 		FName NewRowName;
 		FLiveDataTableRowSnapshot Snapshot;
-		FString FullTableBeforeJson;
+		FString PreWriteTableJson;
+		FString PostWriteTableJson;
 		bool bSnapshotValid = false;
 	};
 

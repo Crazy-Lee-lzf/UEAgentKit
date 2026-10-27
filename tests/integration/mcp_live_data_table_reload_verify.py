@@ -27,9 +27,8 @@ FIXTURE_ASSETS = {
     "scalar": f"{DATA_TABLES_ROOT}/DA_ScalarNonTable.DA_ScalarNonTable",
 }
 
-# Only the cell write is authorized-saved.  The other four DataTables were
-# applied in Editor memory but never saved, so a fresh process must still see
-# their original rows on disk.  This is the untouched-row/untouched-asset proof.
+# These three writes are authorized-saved.  fields and add stay in Editor memory
+# only, so a fresh process must still see their original rows on disk.
 EXPECTED_DISK_ROWS: dict[str, list[dict[str, Any]]] = {
     "cell": [
         {"Name": "RowAlpha", "Count": 42, "Label": "Alpha", "bEnabled": True},
@@ -42,14 +41,12 @@ EXPECTED_DISK_ROWS: dict[str, list[dict[str, Any]]] = {
         {"Name": "RowGamma", "Count": 3, "Label": "Gamma", "bEnabled": True},
     ],
     "rename": [
-        {"Name": "RowGamma", "Count": 3, "Label": "Gamma", "bEnabled": True},
+        {"Name": "RowGammaRenamed", "Count": 3, "Label": "Gamma", "bEnabled": True},
     ],
-    "remove": [
-        {"Name": "RowBeta", "Count": 2, "Label": "Beta", "bEnabled": False},
-    ],
+    "remove": [],
 }
 
-SAVED_ASSET = "cell"
+SAVED_ASSETS = ("cell", "remove", "rename")
 
 
 def load_canonical(reload_root: Path) -> dict[str, dict[str, Any]]:
@@ -119,10 +116,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         initial_revision = str(entry.get("revision", ""))
         if not str(revision_value).startswith("sha256:"):
             errors.append(f"{name}: reload Revision is not SHA-256")
-        if name == SAVED_ASSET:
+        if name in SAVED_ASSETS:
             if revision_value == initial_revision:
                 errors.append(f"{name}: saved asset Revision did not change")
-            expected_after = str(client_report.get("save", {}).get("afterRevision", ""))
+            expected_after = str(
+                client_report.get("saves", {}).get(name, {}).get("afterRevision", "")
+            )
             if expected_after and revision_value != expected_after:
                 errors.append(
                     f"{name}: reload Revision {revision_value} != saved Revision {expected_after}"
@@ -159,7 +158,11 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "reloadRoot": str(args.reload_root),
         "checkedAssets": checked,
         "revisions": revisions,
-        "savedAsset": FIXTURE_ASSETS[SAVED_ASSET],
+        "savedAssets": {name: FIXTURE_ASSETS[name] for name in SAVED_ASSETS},
+        "untouchedAssets": {
+            name: FIXTURE_ASSETS[name]
+            for name in ("fields", "add", "scalar")
+        },
         "expectedDiskRows": EXPECTED_DISK_ROWS,
         "errors": errors,
     }

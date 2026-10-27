@@ -103,6 +103,53 @@ namespace UEAgentKitLiveWrite
 
 		virtual bool SemanticEqual(const TSharedPtr<FJsonValue>& Left, const TSharedPtr<FJsonValue>& Right) = 0;
 
+		// Revert support.  The default implementation keeps the historical
+		// value-level contract.  Structural IO (DataTable) overrides these to
+		// compare exact full-target snapshots, because a removed/renamed row
+		// cannot be read back through its old row name.
+		virtual bool ReadWrittenValueForRevert(
+			TSharedPtr<FJsonValue>& OutValue,
+			FString& OutErrorCode,
+			FString& OutErrorMessage)
+		{
+			return ReadBefore(OutValue, OutErrorCode, OutErrorMessage);
+		}
+
+		virtual bool ReadRestoredValueForRevert(
+			TSharedPtr<FJsonValue>& OutValue,
+			FString& OutErrorCode,
+			FString& OutErrorMessage)
+		{
+			return ReadBefore(OutValue, OutErrorCode, OutErrorMessage);
+		}
+
+		virtual bool VerifyUnchangedSinceWrite(
+			const TSharedPtr<FJsonValue>& ExpectedAfter,
+			FString& OutErrorCode,
+			FString& OutErrorMessage)
+		{
+			TSharedPtr<FJsonValue> Current;
+			return ReadBefore(Current, OutErrorCode, OutErrorMessage)
+				&& SemanticEqual(Current, ExpectedAfter);
+		}
+
+		virtual bool VerifyRestoredToBefore(
+			const TSharedPtr<FJsonValue>& ExpectedBefore,
+			FString& OutErrorCode,
+			FString& OutErrorMessage)
+		{
+			TSharedPtr<FJsonValue> Current;
+			return ReadBefore(Current, OutErrorCode, OutErrorMessage)
+				&& SemanticEqual(Current, ExpectedBefore);
+		}
+
+		virtual bool RevertChanged(
+			const TSharedPtr<FJsonValue>& Before,
+			const TSharedPtr<FJsonValue>& After)
+		{
+			return !SemanticEqual(Before, After);
+		}
+
 		// Notifies the target after a confirmed successful write (change policy).
 		virtual void NotifyChanged() = 0;
 		// Notifies the target after restoring the pre-write snapshot on failure.

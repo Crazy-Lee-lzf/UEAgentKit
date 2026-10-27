@@ -59,7 +59,11 @@ $DescriptorPath = Join-Path $ProjectDirectory "Saved\UEAgentKit\EditorBridge.jso
 $DataTableClass = "/Script/Engine.DataTable"
 $DataTableRowStruct = "/Script/UEAgentKitEditor.UEAgentKitDataTableFixtureRow"
 $DataTablesRoot = "/Game/UEAgentKitWriteTests/DataTables"
-$SavedFixtureId = "data-table-cell-asset"
+$SavedFixtureIds = @(
+    "data-table-cell-asset",
+    "data-table-remove-asset",
+    "data-table-rename-asset"
+)
 $EditorProcess = $null
 $FixtureHashes = @{}
 $DatabaseHashBefore = ""
@@ -372,9 +376,11 @@ foreach ($FixtureEntry in $Fixture.fixtures)
         $ChangedIds += $Id
     }
 }
-if ($ChangedIds.Count -ne 1 -or $ChangedIds[0] -ne $SavedFixtureId)
+$UnexpectedChanged = @($ChangedIds | Where-Object { $_ -notin $SavedFixtureIds })
+$MissingChanged = @($SavedFixtureIds | Where-Object { $_ -notin $ChangedIds })
+if ($UnexpectedChanged.Count -gt 0 -or $MissingChanged.Count -gt 0)
 {
-    throw "Expected only $SavedFixtureId to change on disk; changed: $($ChangedIds -join ', ')"
+    throw "Expected exactly $($SavedFixtureIds -join ', ') to change on disk; changed: $($ChangedIds -join ', ')"
 }
 if ((Get-FileHash -LiteralPath $Database -Algorithm SHA256).Hash.ToLowerInvariant() -ne $DatabaseHashBefore)
 {
@@ -399,25 +405,27 @@ Write-Utf8Json -Path $Summary -Value ([ordered]@{
     reloadReport = $ReloadReport
     successCases = [int]$ClientValue.successCases
     undoVerified = [int]$ClientValue.undoVerified
-    undoBlocked = @($ClientValue.undoBlocked | ForEach-Object { [string]$_.operation })
-    undoChangedAllFalse = [bool]$ClientValue.undoChangedAllFalse
+    undoChangedAllTrue = [bool]$ClientValue.undoChangedAllTrue
+    noOpVerified = [bool]$ClientValue.noOpVerified
+    rejectedUndoIdentities = @($ClientValue.rejectedUndoIdentities)
+    chainedWritesVerified = [bool]$ClientValue.chainedWritesVerified
+    chainedUndoOrdered = [bool]$ClientValue.chainedUndoOrdered
     dryRunGatesVerified = [bool]$ClientValue.dryRunGatesVerified
-    savedAsset = [string]$ClientValue.save.asset
-    savedAfterRevision = [string]$ClientValue.save.afterRevision
+    saves = $ClientValue.saves
     staleRevisionRejected = [bool]$ClientValue.staleRevisionRejected
     reloadVerified = [bool]$ReloadValue.verified
     changedPackages = @($ChangedIds)
-    untouchedPackages = @($Fixture.fixtures | Where-Object { [string]$_.id -ne $SavedFixtureId } | ForEach-Object { [string]$_.id })
+    untouchedPackages = @($Fixture.fixtures | Where-Object { [string]$_.id -notin $SavedFixtureIds } | ForEach-Object { [string]$_.id })
     diskHashesBefore = $FixtureHashes
     databaseHashBefore = $DatabaseHashBefore
     databaseHashAfter = (Get-FileHash -LiteralPath $Database -Algorithm SHA256).Hash.ToLowerInvariant()
     revisionExportHashBefore = $RevisionExportHashBefore
     revisionExportHashAfter = (Get-RevisionExportHash -Root $RevisionExport)
     notes = @(
-        "Only $SavedFixtureId was authorized-saved; the other four live writes were never saved.",
-        "Undo restored and re-applied cell/row-fields/add; rename/remove Undo is refused by the product (see undoBlocked).",
+        "Authorized-saved packages: $($SavedFixtureIds -join ', '); fields and add stayed unsaved.",
+        "Undo restored and re-applied all five families, including structural remove/rename.",
         "The reload export and replay verification ran in a separate UnrealEditor-Cmd process after the main Editor exited.",
-        "Redo is not exposed by any MCP Tool; see client-report.json knownDefects."
+        "Redo is still not exposed by any MCP Tool; see client-report.json knownDefects."
     )
 })
 

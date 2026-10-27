@@ -182,12 +182,13 @@ bool FUEAgentKitEditorBridge::TryApplyAssetPropertyLiveResult(
 			OutErrorMessage = TEXT("The previous live-write target could not be re-resolved before continuing: ") + RefreshError;
 			return false;
 		}
-		TSharedPtr<FJsonValue> CurrentPreviousValue;
 		FString ReadErrorCode;
 		FString ReadErrorMessage;
-		if (!PreviousRecord->IO->ReadBefore(CurrentPreviousValue, ReadErrorCode, ReadErrorMessage)
-			|| !PreviousRecord->AfterValue.IsValid()
-			|| !PreviousRecord->IO->SemanticEqual(CurrentPreviousValue, PreviousRecord->AfterValue))
+		if (!PreviousRecord->AfterValue.IsValid()
+			|| !PreviousRecord->IO->VerifyUnchangedSinceWrite(
+				PreviousRecord->AfterValue,
+				ReadErrorCode,
+				ReadErrorMessage))
 		{
 			OutErrorCode = TEXT("live-editor-write-chain-mismatch");
 			OutErrorMessage = TEXT("The previous live-write target changed after confirmation; the dirty package cannot be continued safely.");
@@ -532,13 +533,14 @@ bool FUEAgentKitEditorBridge::RevertLiveWriteTransaction(
 	}
 
 	TSharedPtr<FJsonValue> WrittenValue;
-	if (!Record->IO->ReadBefore(WrittenValue, OutErrorCode, OutErrorMessage))
+	if (!Record->IO->ReadWrittenValueForRevert(WrittenValue, OutErrorCode, OutErrorMessage))
 	{
 		OutErrorCode = TEXT("live-editor-write-undo-verify-failed");
-		OutErrorMessage = TEXT("The written value could not be read back before reverting.");
+		OutErrorMessage = TEXT("The written target state could not be read back before reverting.");
 		return false;
 	}
-	if (!Record->AfterValue.IsValid() || !Record->IO->SemanticEqual(WrittenValue, Record->AfterValue))
+	if (!Record->AfterValue.IsValid()
+		|| !Record->IO->VerifyUnchangedSinceWrite(Record->AfterValue, OutErrorCode, OutErrorMessage))
 	{
 		OutErrorCode = TEXT("live-editor-write-undo-target-changed");
 		OutErrorMessage = TEXT("The live write target changed after the confirmed write; re-plan instead of overwriting the newer value.");
@@ -562,8 +564,9 @@ bool FUEAgentKitEditorBridge::RevertLiveWriteTransaction(
 	}
 
 	TSharedPtr<FJsonValue> RestoredValue;
-	bool bRestored = Record->IO->ReadBefore(RestoredValue, OutErrorCode, OutErrorMessage)
-		&& Record->IO->SemanticEqual(RestoredValue, Record->BeforeValue);
+	bool bRestored = Record->BeforeValue.IsValid()
+		&& Record->IO->ReadRestoredValueForRevert(RestoredValue, OutErrorCode, OutErrorMessage)
+		&& Record->IO->VerifyRestoredToBefore(Record->BeforeValue, OutErrorCode, OutErrorMessage);
 	if (!bRestored)
 	{
 		RefreshError.Reset();
@@ -583,13 +586,14 @@ bool FUEAgentKitEditorBridge::RevertLiveWriteTransaction(
 		}
 		Record->IO->NotifyRestored();
 		Package->SetDirtyFlag(Record->bDirtyBefore);
-		bRestored = Record->IO->ReadBefore(RestoredValue, OutErrorCode, OutErrorMessage)
-			&& Record->IO->SemanticEqual(RestoredValue, Record->BeforeValue);
+		bRestored = Record->BeforeValue.IsValid()
+			&& Record->IO->ReadRestoredValueForRevert(RestoredValue, OutErrorCode, OutErrorMessage)
+			&& Record->IO->VerifyRestoredToBefore(Record->BeforeValue, OutErrorCode, OutErrorMessage);
 	}
 	if (!bRestored)
 	{
 		OutErrorCode = TEXT("live-editor-write-undo-verify-failed");
-		OutErrorMessage = TEXT("The Editor could not verify the restored live write target value.");
+		OutErrorMessage = TEXT("The Editor could not verify the restored live write target state.");
 		return false;
 	}
 	const TSharedPtr<UEAgentKitLiveWrite::FLiveWriteTransactionRecord> RetainedRecord = Record;
@@ -603,7 +607,9 @@ bool FUEAgentKitEditorBridge::RevertLiveWriteTransaction(
 		}
 	}
 
-	const bool bChanged = !RetainedRecord->IO->SemanticEqual(WrittenValue, RestoredValue);
+	const bool bChanged = RetainedRecord->IO->RevertChanged(
+		RetainedRecord->BeforeValue,
+		RetainedRecord->AfterValue);
 	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetStringField(TEXT("action"), Action);
 	Result->SetStringField(TEXT("operation"), RetainedRecord->Operation);
