@@ -8,6 +8,7 @@ This section describes a local candidate, not a published release. It does not c
 
 - Added default-off, double-opt-in bounded Blueprint structure tools: GraphEdit with eight allowlisted node types, typed unlinked pin defaults, top-level user-variable creation, single-edge rewire, and isolated allowlisted node removal. Each family uses Preview → exact plan/confirmation → Apply → explicit Save, never auto-saves or compiles, and remains outside the project Write Policy allowlist.
 - Added the corresponding Agent-facing focus/preflight helpers, read-only fresh-process reload verification, and end-to-end MCP evidence. These are internal-preview capabilities, not a production default.
+- Added Project Memory schema v7 with a CJK-expanded `search_text` projection and external-content FTS5 rebuild, so Han/Kana/Hangul substrings such as `护甲` inside `护甲升级链` are recalled without changing the ASCII search API or ranked order. The v6→v7 migration is transactional, verifies with `quick_check`, fails closed on partial/newer schemas, and preserves v6 backups, embeddings, context snapshots, and linked data.
 - Clarified public documentation so the stable v0.8.0 Write Policy boundary is not presented as covering the experimental tools.
 
 ## 0.8.0 — agent workflow, memory, knowledge web, and P4 collaboration

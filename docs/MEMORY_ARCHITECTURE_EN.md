@@ -244,6 +244,16 @@ Migration rules:
 4. Enforce normalized absolute paths, same-project parents, cycle prevention, and the `/project` root for Knowledge Nodes.
 5. Store Active Work node and asset links in normalized association tables rather than query-hostile JSON only.
 
+### 9.1 CJK search compatibility (Schema v7)
+
+SQLite FTS5's `unicode61` tokenizer stores a contiguous run of Han, Kana, or Hangul characters as one token, so `护甲` cannot match a longer `护甲升级链` through `MATCH`. Schema v7 adds a real `memory_records.search_text` column containing the NFKC-projected and character-expanded text of `subject_key`/`title`/`body`/`source_ref`/`details_json` (for example `护 甲 升 级 链`), and includes it in the same external-content FTS5 table and `ai`/`ad`/`au` triggers.
+
+- The v6→v7 migration runs in one transaction: drop the old triggers and FTS table, add the column, recreate FTS and explicitly `rebuild`; then populate every row, `rebuild` again, recreate the three triggers, and run `quick_check`.
+- Search stays FTS5-first. A bounded literal substring fallback runs only when FTS returns nothing and the query contains CJK. `护甲` matches inside `护甲升级链`, the reversed `甲护` does not, and the mixed `AK47护甲` matches.
+- ASCII queries, status/Scope filters, RRF vector hybrid recall, and the public API are unchanged; `search_text` has bm25 weight 0 so the duplicate projection does not dominate historical ranking.
+- An incomplete v6 schema or a database newer than v7 fails closed instead of being repaired; a failed migration rolls back completely and leaves v6 backups intact.
+- Read-only opens still use `mode=ro`. A WAL database that was not cleanly checkpointed may require a writable directory for its `-shm`/`-wal` sidecars; use `immutable=True` only for a frozen file with no writers.
+
 ## 10. Single-user MVP status
 
 Implemented:

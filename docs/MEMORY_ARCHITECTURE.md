@@ -341,6 +341,16 @@ active_work_todos
 4. Knowledge Node 使用规范化绝对 Path、同项目 Parent 和无环约束；根节点固定为 `/project`。
 5. Active Work 使用正规化 Node/Asset 关联表，不把可查询关系只存入 JSON。
 
+### 9.1 CJK 检索兼容（Schema v7）
+
+SQLite FTS5 的 `unicode61` 分词器把一整段连续汉字、假名或谚文当作单个 token，因此 `护甲` 无法通过 `MATCH` 命中更长的 `护甲升级链`。Schema v7 在 `memory_records` 增加真实列 `search_text`，保存 `subject_key`/`title`/`body`/`source_ref`/`details_json` 的 NFKC 规范化与逐字展开投影（例如 `护 甲 升 级 链`），并纳入同一外部内容 FTS5 表和 `ai`/`ad`/`au` 触发器。
+
+- v6→v7 迁移在单一事务内完成：先删除旧触发器与旧 FTS，加列并重建 FTS，显式执行 `rebuild`；再写入每行 `search_text`、再次 `rebuild`，最后重建三个触发器并执行 `quick_check`。
+- 检索保持 FTS5 优先；仅当 FTS 无结果且查询含 CJK 时使用有界字面子串回退。`护甲` 命中 `护甲升级链`，反向 `甲护` 不命中，混合 `AK47护甲` 可命中。
+- ASCII 查询、状态/Scope 过滤、RRF 向量混合检索和公开 API 不变；`search_text` 的 bm25 权重为 0，避免重复投影主导原有排序。
+- v6 结构不完整或数据库版本高于 v7 时 fail closed，不自动修复；迁移失败会整体回滚，旧 v6 备份保持不变。
+- 只读连接仍使用 `mode=ro`。WAL 数据库在未干净检查点时可能需要在可写目录创建 `-shm`/`-wal`；仅在完全冻结、无写入者的文件上使用 `immutable=True`。
+
 ## 10. 单人版 MVP 状态
 
 已实现：

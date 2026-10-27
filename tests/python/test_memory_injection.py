@@ -166,9 +166,9 @@ class MemoryInjectionTests(unittest.TestCase):
 
     # ------------------------------------------------------------------ schema
 
-    def test_fresh_database_reaches_v6_with_context_tables_and_triggers(self) -> None:
+    def test_fresh_database_reaches_v7_with_context_tables_and_triggers(self) -> None:
         with open_project_memory_database(self.memory_path) as connection:
-            self.assertEqual(CURRENT_MEMORY_SCHEMA_VERSION, 6)
+            self.assertEqual(CURRENT_MEMORY_SCHEMA_VERSION, 7)
             tables = {
                 str(row[0])
                 for row in connection.execute(
@@ -217,7 +217,10 @@ class MemoryInjectionTests(unittest.TestCase):
             connection.close()
         service = ProjectMemoryService(database_path=legacy, project_key=PROJECT)
         with open_project_memory_database(legacy) as migrated:
-            self.assertEqual(int(migrated.execute("PRAGMA user_version").fetchone()[0]), 6)
+            self.assertEqual(
+                int(migrated.execute("PRAGMA user_version").fetchone()[0]),
+                CURRENT_MEMORY_SCHEMA_VERSION,
+            )
             self.assertEqual(
                 int(migrated.execute("SELECT COUNT(*) FROM memory_records").fetchone()[0]),
                 1,

@@ -776,9 +776,9 @@ class IndexIsolationTests(MemoryMountTestBase):
             1,
         )
 
-    def test_index_is_independent_of_memory_schema_v6(self) -> None:
-        self.assertEqual(CURRENT_MEMORY_SCHEMA_VERSION, 6)
-        self.assertEqual([migration.version for migration in MEMORY_MIGRATIONS], [1, 2, 3, 4, 5, 6])
+    def test_index_is_independent_of_memory_schema(self) -> None:
+        self.assertEqual(CURRENT_MEMORY_SCHEMA_VERSION, 7)
+        self.assertEqual([migration.version for migration in MEMORY_MIGRATIONS], [1, 2, 3, 4, 5, 6, 7])
         pack = write_pack(self.root / "pack", [make_record()])
         registry = self.registry()
         info = registry.mount(pack)

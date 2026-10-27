@@ -199,12 +199,15 @@ class _ChineseRecallFixture(unittest.TestCase):
 
 
 class ChineseSearchTests(_ChineseRecallFixture):
-    def test_chinese_rule_phrase_is_recalled(self) -> None:
+    def test_chinese_rule_phrase_is_recalled_by_fts(self) -> None:
         result = self._hits("背包格子颜色", limit=10)
         returned = [hit.record.record_id for hit in result.hits]
         self.assertIn(self.ids["inventory_rule"], returned)
-        self.assertEqual(result.retrieval_mode, "cjk-substring")
-        self.assertGreaterEqual(result.scanned_records, 1)
+        # Schema v7 indexes the CJK-expanded projection, so a normal FTS hit
+        # replaces the former substring fallback for this query.
+        self.assertEqual(result.retrieval_mode, "fts")
+        self.assertFalse(result.substring_fallback)
+        self.assertEqual(result.scanned_records, 0)
 
     def test_chinese_cpp_symbol_phrase_is_recalled(self) -> None:
         result = self._hits("GetSlotColor", limit=10)
@@ -243,9 +246,19 @@ class ChineseSearchTests(_ChineseRecallFixture):
         self.assertNotIn("DSH session", " ".join(hit.record.body for hit in result.hits))
 
     def test_like_wildcards_are_literal_not_scan_everything(self) -> None:
-        for query in ("背包格子颜色%", "背包格子颜色_", "背包\\格子颜色"):
+        baseline = {hit.record.record_id for hit in self._hits("背包格子颜色", limit=10).hits}
+        self.assertTrue(baseline)
+        for query in ("背包格子颜色%", "背包格子颜色_"):
             result = self._hits(query, limit=10)
-            self.assertEqual(result.hits, (), query)
+            self.assertEqual(
+                {hit.record.record_id for hit in result.hits},
+                baseline,
+                query,
+            )
+        # Backslash is a token separator for the FTS query builder, never a
+        # SQL LIKE escape; both literal CJK terms must still be present.
+        slash = self._hits("背包\\格子颜色", limit=10)
+        self.assertEqual({hit.record.record_id for hit in slash.hits}, baseline)
 
 
 class ContextRecallTests(_ChineseRecallFixture):
@@ -298,6 +311,10 @@ class FallbackBoundaryTests(_ChineseRecallFixture):
         from ue_agent_kit.project_memory import search_memory_records_bounded
 
         with open_project_memory_database(self.memory_path) as connection:
+            # Simulate a legacy/partial v7 row set whose expanded projection was
+            # never populated, forcing the bounded literal fallback branch.
+            connection.execute("UPDATE memory_records SET search_text = ''")
+            connection.commit()
             outcome = search_memory_records_bounded(
                 connection,
                 project_key=PROJECT,
@@ -321,9 +338,13 @@ class FallbackBoundaryTests(_ChineseRecallFixture):
             self.assertEqual(timed_out.hits, ())
 
     def test_result_limit_caps_fallback_hits(self) -> None:
+        with open_project_memory_database(self.memory_path) as connection:
+            connection.execute("UPDATE memory_records SET search_text = ''")
+            connection.commit()
         result = self._hits("背包", limit=1)
         self.assertEqual(len(result.hits), 1)
         self.assertEqual(result.retrieval_mode, "cjk-substring")
+        self.assertTrue(result.substring_fallback)
 
     def test_overlong_query_is_clipped_and_reported(self) -> None:
         from ue_agent_kit.project_memory import (
@@ -379,7 +400,8 @@ class McpChineseRecallTests(_ChineseRecallFixture):
         )
         self.assertTrue(payload["ok"], payload)
         self.assertGreaterEqual(payload["resultCount"], 1)
-        self.assertEqual(payload["retrieval"]["retrievalMode"], "cjk-substring")
+        self.assertEqual(payload["retrieval"]["retrievalMode"], "fts")
+        self.assertFalse(payload["retrieval"]["substringFallback"])
         record_ids = [item["record"]["recordId"] for item in payload["items"]]
         self.assertIn(self.ids["inventory_rule"], record_ids)
         self.assertNotIn("DSH session", str(payload))
