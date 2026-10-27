@@ -58,6 +58,8 @@ EXPECTED_ALL_TOOLS = [
     "ue_get_dirty_assets",
     "ue_get_current_level",
     "ue_get_pie_state",
+    "ue_get_pie_world_contexts",
+    "ue_inspect_pie_actor",
     "ue_get_output_log",
     "ue_get_compile_errors",
     "ue_inspect_asset_live",
@@ -155,7 +157,7 @@ class ToolRegistryTests(unittest.TestCase):
             EXPECTED_ALL_TOOLS,
         )
         self.assertEqual(len(tool_names_for_mode()), 14)
-        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 50)
+        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 52)
         self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 71)
         self.assertEqual(
             tool_names_for_mode(memory_enabled=True),
@@ -164,7 +166,7 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 28)
         self.assertEqual(
             len(tool_names_for_mode(live_editor_enabled=True, memory_enabled=True)),
-            64,
+            66,
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
@@ -178,7 +180,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-            121,
+            123,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:

@@ -72,6 +72,48 @@ def register_live_read_tools(
             return error_response("ue_get_pie_state", exc, read_only=True)
 
     @server.tool(annotations=read_annotations)
+    def ue_get_pie_world_contexts(max_contexts: int = 16) -> dict[str, Any]:
+        """List bounded live PIE worlds with unique PIE instance ids and Server/Client identification."""
+        try:
+            return live_editor_service.call_tool(
+                "ue_get_pie_world_contexts",
+                {"maxContexts": max_contexts},
+            )
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_get_pie_world_contexts", exc, read_only=True)
+
+    @server.tool(annotations=read_annotations)
+    def ue_inspect_pie_actor(
+        pie_instance_id: int,
+        actor_path: str = "",
+        actor_guid: str = "",
+        actor_name: str = "",
+        actor_label: str = "",
+        actor_class_path: str = "",
+        world_path: str = "",
+        max_components: int = 64,
+        max_assets_per_component: int = 8,
+    ) -> dict[str, Any]:
+        """Inspect one exact-world PIE Actor (path, class, transform, NetRole) plus bounded component class/path/assets."""
+        try:
+            return live_editor_service.call_tool(
+                "ue_inspect_pie_actor",
+                {
+                    "pieInstanceId": pie_instance_id,
+                    "actorPath": actor_path,
+                    "actorGuid": actor_guid,
+                    "actorName": actor_name,
+                    "actorLabel": actor_label,
+                    "actorClassPath": actor_class_path,
+                    "worldPath": world_path,
+                    "maxComponents": max_components,
+                    "maxAssetsPerComponent": max_assets_per_component,
+                },
+            )
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_inspect_pie_actor", exc, read_only=True)
+
+    @server.tool(annotations=read_annotations)
     def ue_get_output_log(
         category: str = "",
         minimum_verbosity: Literal[

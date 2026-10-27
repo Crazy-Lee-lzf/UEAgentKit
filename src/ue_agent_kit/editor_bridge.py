@@ -31,6 +31,8 @@ LIVE_LOG_VERBOSITIES = {
 _CAPABILITY_GATED_TOOLS = {
     "ue_get_editor_context": "editor.getEditorContext",
     "ue_get_focused_blueprint_graph_context": "editor.getFocusedBlueprintGraphContext",
+    "ue_get_pie_world_contexts": "editor.getPieWorldContexts",
+    "ue_inspect_pie_actor": "editor.inspectPieActor",
     "ue_start_batch_task": "editor.batchTask.start",
     "ue_get_batch_task": "editor.batchTask.status",
     "ue_cancel_batch_task": "editor.batchTask.cancel",
@@ -519,6 +521,67 @@ class LiveEditorBridgeService:
                     "ue_get_editor_context does not accept parameters.",
                 )
             return {}
+        if tool_name == "ue_get_pie_world_contexts":
+            allowed = {"maxContexts"}
+            LiveEditorBridgeService._reject_unknown_params(params, allowed)
+            return {
+                "maxContexts": LiveEditorBridgeService._bounded_integer(
+                    params.get("maxContexts", 16), "maxContexts", 1, 32),
+            }
+        if tool_name == "ue_inspect_pie_actor":
+            allowed = {
+                "pieInstanceId",
+                "actorPath",
+                "actorGuid",
+                "actorName",
+                "actorLabel",
+                "actorClassPath",
+                "worldPath",
+                "maxComponents",
+                "maxAssetsPerComponent",
+            }
+            LiveEditorBridgeService._reject_unknown_params(params, allowed)
+            normalized: dict[str, Any] = {
+                "pieInstanceId": LiveEditorBridgeService._bounded_integer(
+                    params.get("pieInstanceId", -1), "pieInstanceId", 0),
+                "maxComponents": LiveEditorBridgeService._bounded_integer(
+                    params.get("maxComponents", 64), "maxComponents", 1, 128),
+                "maxAssetsPerComponent": LiveEditorBridgeService._bounded_integer(
+                    params.get("maxAssetsPerComponent", 8), "maxAssetsPerComponent", 1, 32),
+            }
+            identities: list[str] = []
+            for field, maximum in (
+                ("actorPath", 512),
+                ("actorGuid", 64),
+                ("actorName", 256),
+                ("actorLabel", 256),
+            ):
+                raw_value = params.get(field, "")
+                if raw_value in ("", None):
+                    continue
+                text = LiveEditorBridgeService._bounded_string(raw_value, field, maximum)
+                if not text:
+                    continue
+                identities.append(field)
+                normalized[field] = text
+            if len(identities) != 1:
+                raise LiveEditorError(
+                    "live-editor-invalid-parameters",
+                    "Provide exactly one Actor identity: actorPath, actorGuid, actorName, or actorLabel.",
+                )
+            if "actorPath" in normalized:
+                LiveEditorBridgeService._validate_live_object_path(normalized["actorPath"], "actorPath")
+            if "actorGuid" in normalized:
+                LiveEditorBridgeService._validate_guid(normalized["actorGuid"], "actorGuid")
+                normalized["actorGuid"] = normalized["actorGuid"].lower()
+            for field in ("actorClassPath", "worldPath"):
+                raw_value = params.get(field, "")
+                if not raw_value:
+                    continue
+                text = LiveEditorBridgeService._bounded_string(raw_value, field, 512)
+                LiveEditorBridgeService._validate_live_object_path(text, field)
+                normalized[field] = text
+            return normalized
         if tool_name == "ue_start_batch_task":
             allowed = {"operation", "maxActors", "maxComponentsPerActor", "timeoutSeconds"}
             LiveEditorBridgeService._reject_unknown_params(params, allowed)
@@ -640,6 +703,30 @@ class LiveEditorBridgeService:
             raise LiveEditorError(
                 "live-editor-invalid-parameters",
                 "packagePath must be a non-root /Game package path without an object name.",
+            )
+
+    @staticmethod
+    def _validate_live_object_path(value: str, name: str) -> None:
+        """Validate a live PIE world/Actor/class Object Path shape (never a /Game asset requirement)."""
+        if (
+            not value
+            or not value.startswith("/")
+            or "." not in value
+            or "\\" in value
+            or "//" in value
+            or ".." in value
+            or value.endswith(".")
+            or any(ord(character) < 32 for character in value)
+        ):
+            raise LiveEditorError(
+                "live-editor-invalid-parameters",
+                f"{name} must be an exact live Object Path.",
+            )
+        package_part, _, object_part = value.partition(".")
+        if ":" in package_part or not object_part:
+            raise LiveEditorError(
+                "live-editor-invalid-parameters",
+                f"{name} must be an exact live Object Path.",
             )
 
     @staticmethod

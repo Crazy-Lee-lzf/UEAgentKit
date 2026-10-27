@@ -84,6 +84,12 @@ private:
 	TSharedRef<FJsonObject> BuildDirtyAssetsResult() const;
 	TSharedRef<FJsonObject> BuildCurrentLevelResult() const;
 	TSharedRef<FJsonObject> BuildPieStateResult() const;
+	TSharedRef<FJsonObject> BuildPieWorldContextsResult(const TSharedPtr<FJsonObject>& Params) const;
+	bool TryInspectPieActorResult(
+		const TSharedPtr<FJsonObject>& Params,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage) const;
 	TSharedRef<FJsonObject> BuildOutputLogResult(const TSharedPtr<FJsonObject>& Params) const;
 	TSharedRef<FJsonObject> BuildCompileErrorsResult(const TSharedPtr<FJsonObject>& Params) const;
 	TSharedRef<FJsonObject> BuildInspectAssetLiveResult(const FString& AssetPath) const;
