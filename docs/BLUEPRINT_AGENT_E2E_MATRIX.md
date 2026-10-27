@@ -177,6 +177,11 @@ Canonical JSON 当 UE 写入依据。
 | 受控 node delete | `ue_preview/apply/save_blueprint_node_remove_experimental` | `editor.*BlueprintNodeRemoveExperimental` | node GUID+class、edge-set hash、`removedEdges`（≤1） | 白名单纯函数/Branch；删除前必须零链接；Undo 恢复节点+连线 | **A（0 边孤立节点）** |
 | Graph layout apply | `ue_preview_blueprint_graph_layout` + `ue_apply/save`（若开启） | `editor.*BlueprintGraphLayoutApply*` | 位置计划 hash | 只改位置 | P6-P8 Socket 探针（部分 A/B），非本轮回归 |
 
+> 后验补充（不改变 P5 结论）：`variable_get` / `variable_set` 成员变量访问器节点已在
+> 同一 GraphEdit Preview/Apply/Save 合同中实现，但本分支只有 Python 合同与源码形状
+> 测试，**没有真实 UE Apply/Undo/Redo/Save/Reload 证据**；记为 `PENDING_UE_LEASE`，
+> 不得计入上表 P5 的 8 类节点 A 级证据。
+
 disconnect 分支与“1 条 incident edge 的 node remove”本轮没有跑真实 MCP 序列，
 保留 P3/P4 的 B 级 native 证据；不要把这三种未跑分支写成 A。
 
@@ -202,6 +207,7 @@ disconnect 分支与“1 条 incident edge 的 node remove”本轮没有跑真�
 | 5 | nested/非顶层图写 | **OPEN** | focused 顶层 K2 Event Graph 是硬前提；`GetAllGraphs` 只用于定位，不授予写权限 |
 | 6 | 无 Editor 崩溃/超时恢复 | **OPEN** | E2E 脚本按阶段重启 Editor；真实产品需进程监控与 receipt 失效处理 |
 | 7 | 单序列覆盖 | **OPEN** | 本次验收只覆盖一个 Actor BP、8+4+4+1+1 个对象；未覆盖多资产并发、PIE、Dirty 包、undo 栈很深的场景 |
+| 8 | 变量 Get/Set 访问器节点 | **PENDING_UE_LEASE** | 已实现于 GraphEdit 合同（现有变量、4 类型、event/function/macro 顶层图），但只有 Python/静态测试；需在唯一 UE lease 释放后做真实 Apply→Save→Reload |
 
 已在本轮关闭/降级的缺口：
 

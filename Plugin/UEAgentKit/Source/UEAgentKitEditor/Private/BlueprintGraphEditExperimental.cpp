@@ -5,6 +5,7 @@
 
 #include "BlueprintNodeBinder.h"
 #include "BlueprintNodeSpawner.h"
+#include "BlueprintVariableNodeSpawner.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
@@ -15,6 +16,9 @@
 #include "K2Node_CallFunction.h"
 #include "K2Node_ExecutionSequence.h"
 #include "K2Node_IfThenElse.h"
+#include "K2Node_Variable.h"
+#include "K2Node_VariableGet.h"
+#include "K2Node_VariableSet.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "Kismet/KismetStringLibrary.h"
 #include "ScopedTransaction.h"
@@ -27,6 +31,7 @@
 #include "Misc/ConfigCacheIni.h"
 #include "Misc/Guid.h"
 #include "UObject/Package.h"
+#include "UObject/UnrealType.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogUEAgentKitGraphEditExperimental, Log, All);
 
@@ -40,6 +45,8 @@ namespace
 	const TCHAR* const BranchClassPath = TEXT("/Script/BlueprintGraph.K2Node_IfThenElse");
 	const TCHAR* const SequenceClassPath = TEXT("/Script/BlueprintGraph.K2Node_ExecutionSequence");
 	const TCHAR* const CallFunctionClassPath = TEXT("/Script/BlueprintGraph.K2Node_CallFunction");
+	const TCHAR* const VariableGetClassPath = TEXT("/Script/BlueprintGraph.K2Node_VariableGet");
+	const TCHAR* const VariableSetClassPath = TEXT("/Script/BlueprintGraph.K2Node_VariableSet");
 	const TCHAR* const NotBoolFunctionName = TEXT("Not_PreBool");
 
 	bool bTestOverrideSet = false;
@@ -57,6 +64,14 @@ namespace
 		TArray<FString> OutputPins;
 		TMap<FString, FString> InputPinTypes;
 		TMap<FString, FString> OutputPinTypes;
+		// Bounded member-variable accessor (variable_get / variable_set).  The
+		// node is bound to one existing top-level member variable by GUID, name
+		// and one of the four primitive types the rest of this slice supports.
+		bool bVariableAccessor = false;
+		FString VariableName;
+		FString VariableGuid;
+		FString VariableType;
+		FString VariableAccess;
 	};
 
 	struct FConnectionSpec
@@ -86,6 +101,7 @@ namespace
 		FString AssetPath;
 		FString GraphGuid;
 		FString GraphFingerprint;
+		FString VariableBindingHash;
 		int32 NodeCount = 0;
 		int32 LinkCount = 0;
 	};
@@ -231,6 +247,376 @@ namespace
 		return true;
 	}
 
+	/**
+	 * Canonical lowercase 8-4-4-4-12 GUID, the same shape the Blueprint
+	 * canonical context emits for FBPVariableDescription::VarGuid and
+	 * FMemberReference::MemberGuid.  The Editor plan binds the variable by this
+	 * GUID as well as its name so a rename/recreate cannot silently retarget the
+	 * accessor between Preview and Apply.
+	 */
+	bool IsCanonicalVariableGuid(const FString& Value)
+	{
+		if (Value.Len() != 36)
+		{
+			return false;
+		}
+		for (int32 Index = 0; Index < Value.Len(); ++Index)
+		{
+			const TCHAR Character = Value[Index];
+			if (Index == 8 || Index == 13 || Index == 18 || Index == 23)
+			{
+				if (Character != TEXT('-'))
+				{
+					return false;
+				}
+				continue;
+			}
+			if (!((Character >= TEXT('0') && Character <= TEXT('9'))
+				|| (Character >= TEXT('a') && Character <= TEXT('f'))))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	bool IsSupportedVariableTypeToken(const FString& Value)
+	{
+		return Value.Equals(TEXT("bool"), ESearchCase::CaseSensitive)
+			|| Value.Equals(TEXT("int"), ESearchCase::CaseSensitive)
+			|| Value.Equals(TEXT("double"), ESearchCase::CaseSensitive)
+			|| Value.Equals(TEXT("string"), ESearchCase::CaseSensitive);
+	}
+
+	/**
+	 * FName-safe transport spelling.  The actual variable must already exist in
+	 * Blueprint->NewVariables, so this only prevents control characters and the
+	 * plan canonical delimiters from entering the plan text.  It intentionally
+	 * does not invent a stricter naming policy than the engine.
+	 */
+	bool IsSafeVariableName(const FString& Value)
+	{
+		if (Value.IsEmpty() || Value.Len() > 128)
+		{
+			return false;
+		}
+		// These names are already used by the variable accessor exec/value pins;
+		// a variable with one of them would create an ambiguous pin inventory.
+		if (Value.Equals(TEXT("execute"), ESearchCase::CaseSensitive)
+			|| Value.Equals(TEXT("then"), ESearchCase::CaseSensitive)
+			|| Value.Equals(TEXT("Output_Get"), ESearchCase::CaseSensitive))
+		{
+			return false;
+		}
+		for (const TCHAR Character : Value)
+		{
+			if (Character == TEXT('|')
+				|| Character == TEXT('\n')
+				|| Character == TEXT('\r')
+				|| Character < 0x20
+				|| Character == 0x7f)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/** Map only the four primitive variable kinds supported by this slice. */
+	bool VariableTypeToken(const FEdGraphPinType& Type, FString& OutType)
+	{
+		if (Type.ContainerType != EPinContainerType::None
+			|| Type.bIsReference
+			|| Type.bIsWeakPointer
+			|| Type.bIsConst)
+		{
+			return false;
+		}
+		if (Type.PinCategory == UEdGraphSchema_K2::PC_Boolean)
+		{
+			OutType = TEXT("bool");
+			return true;
+		}
+		if (Type.PinCategory == UEdGraphSchema_K2::PC_Int)
+		{
+			OutType = TEXT("int");
+			return true;
+		}
+		if ((Type.PinCategory == UEdGraphSchema_K2::PC_Real
+				&& Type.PinSubCategory == UEdGraphSchema_K2::PC_Double)
+			|| Type.PinCategory == UEdGraphSchema_K2::PC_Double)
+		{
+			OutType = TEXT("double");
+			return true;
+		}
+		if (Type.PinCategory == UEdGraphSchema_K2::PC_String)
+		{
+			OutType = TEXT("string");
+			return true;
+		}
+		return false;
+	}
+
+	FProperty* FindMemberVariableProperty(UBlueprint* Blueprint, const FName Name)
+	{
+		if (Blueprint == nullptr)
+		{
+			return nullptr;
+		}
+		// Favor the skeleton property, matching UK2Node_Variable::GetPropertyForVariable.
+		if (Blueprint->SkeletonGeneratedClass != nullptr)
+		{
+			if (FProperty* Property = FindFProperty<FProperty>(Blueprint->SkeletonGeneratedClass, Name))
+			{
+				return Property;
+			}
+		}
+		if (Blueprint->GeneratedClass != nullptr)
+		{
+			return FindFProperty<FProperty>(Blueprint->GeneratedClass, Name);
+		}
+		return nullptr;
+	}
+
+	/**
+	 * Variable accessors are limited to the Blueprint's own top-level event,
+	 * function and macro graphs.  Interface/extension graphs and nested
+	 * UEdGraph::SubGraphs stay read-only in this slice.
+	 */
+	bool IsSupportedVariableAccessorGraph(UBlueprint* Blueprint, UEdGraph* Graph)
+	{
+		return Blueprint != nullptr
+			&& Graph != nullptr
+			&& (Blueprint->UbergraphPages.Contains(Graph)
+				|| Blueprint->FunctionGraphs.Contains(Graph)
+				|| Blueprint->MacroGraphs.Contains(Graph));
+	}
+
+	/**
+	 * Resolve one existing member variable and fill the exact engine pin
+	 * contract.  Nothing here mutates the Blueprint or the graph.
+	 */
+	bool ResolveVariableNode(
+		FNodeSpec& Node,
+		UBlueprint* Blueprint,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
+	{
+		if (!Node.bVariableAccessor)
+		{
+			return true;
+		}
+		if (!IsSafeVariableName(Node.VariableName))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-variable-name-invalid"),
+				TEXT("variableName must be 1-128 characters without control characters or '|'."));
+		}
+		if (!IsCanonicalVariableGuid(Node.VariableGuid))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-variable-guid-invalid"),
+				TEXT("variableGuid must be one canonical lowercase GUID."));
+		}
+		if (!IsSupportedVariableTypeToken(Node.VariableType))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-variable-type-invalid"),
+				TEXT("variableType must be bool, int, double or string."));
+		}
+
+		FGuid Guid;
+		if (!FGuid::ParseExact(Node.VariableGuid, EGuidFormats::DigitsWithHyphensLower, Guid))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-variable-guid-invalid"),
+				TEXT("variableGuid could not be parsed as a canonical GUID."));
+		}
+
+		const FBPVariableDescription* Found = nullptr;
+		bool bNameSeenWithOtherGuid = false;
+		for (const FBPVariableDescription& Variable : Blueprint->NewVariables)
+		{
+			if (Variable.VarGuid == Guid)
+			{
+				if (!Variable.VarName.ToString().Equals(Node.VariableName, ESearchCase::CaseSensitive))
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-edit-variable-identity-mismatch"),
+						FString::Printf(
+							TEXT("variableGuid %s is bound to name %s, not %s."),
+							*Node.VariableGuid,
+							*Variable.VarName.ToString(),
+							*Node.VariableName));
+				}
+				Found = &Variable;
+				break;
+			}
+			if (Variable.VarName.ToString().Equals(Node.VariableName, ESearchCase::CaseSensitive))
+			{
+				bNameSeenWithOtherGuid = true;
+			}
+		}
+		if (Found == nullptr)
+		{
+			if (bNameSeenWithOtherGuid)
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-variable-identity-mismatch"),
+					FString::Printf(
+						TEXT("variableName %s exists with a different GUID than %s."),
+						*Node.VariableName,
+						*Node.VariableGuid));
+			}
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-variable-not-found"),
+				FString::Printf(
+					TEXT("No top-level member variable %s (%s) exists on the exact Blueprint."),
+					*Node.VariableName,
+					*Node.VariableGuid));
+		}
+
+		FString ActualType;
+		if (!VariableTypeToken(Found->VarType, ActualType))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-variable-type-not-supported"),
+				FString::Printf(
+					TEXT("Variable %s is not a plain bool/int/double/string member variable."),
+					*Node.VariableName));
+		}
+		if (!ActualType.Equals(Node.VariableType, ESearchCase::CaseSensitive))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-variable-type-mismatch"),
+				FString::Printf(
+					TEXT("Variable %s is %s, not the declared %s."),
+					*Node.VariableName,
+					*ActualType,
+					*Node.VariableType));
+		}
+
+		FProperty* Property = FindMemberVariableProperty(Blueprint, Found->VarName);
+		if (Property == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-variable-property-unavailable"),
+				FString::Printf(
+					TEXT("Variable %s has no generated/skeleton property; compile the Blueprint before adding an accessor."),
+					*Node.VariableName));
+		}
+		FEdGraphPinType PropertyType;
+		if (!GetDefault<UEdGraphSchema_K2>()->ConvertPropertyToPinType(Property, PropertyType))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-variable-property-unavailable"),
+				FString::Printf(
+					TEXT("The generated property for %s has no K2 pin type."),
+					*Node.VariableName));
+		}
+		FString PropertyTypeToken;
+		if (!VariableTypeToken(PropertyType, PropertyTypeToken)
+			|| !PropertyTypeToken.Equals(Node.VariableType, ESearchCase::CaseSensitive))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-variable-type-mismatch"),
+				FString::Printf(
+					TEXT("The generated property for %s does not match the declared %s type (stale skeleton?)."),
+					*Node.VariableName,
+					*Node.VariableType));
+		}
+
+		Node.InputPins.Reset();
+		Node.OutputPins.Reset();
+		Node.InputPinTypes.Reset();
+		Node.OutputPinTypes.Reset();
+		if (Node.NodeType.Equals(TEXT("variable_get"), ESearchCase::CaseSensitive))
+		{
+			Node.NodeClassPath = VariableGetClassPath;
+			Node.VariableAccess = TEXT("read");
+			Node.OutputPins.Add(Node.VariableName);
+			Node.OutputPinTypes.Add(Node.VariableName, ActualType);
+			return true;
+		}
+		if (Node.NodeType.Equals(TEXT("variable_set"), ESearchCase::CaseSensitive))
+		{
+			Node.NodeClassPath = VariableSetClassPath;
+			Node.VariableAccess = TEXT("write");
+			Node.InputPins.Add(TEXT("execute"));
+			Node.InputPins.Add(Node.VariableName);
+			Node.OutputPins.Add(TEXT("then"));
+			Node.OutputPins.Add(TEXT("Output_Get"));
+			Node.InputPinTypes.Add(TEXT("execute"), TEXT("exec"));
+			Node.InputPinTypes.Add(Node.VariableName, ActualType);
+			Node.OutputPinTypes.Add(TEXT("then"), TEXT("exec"));
+			Node.OutputPinTypes.Add(TEXT("Output_Get"), ActualType);
+			return true;
+		}
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-node-type-not-allowed"),
+			FString::Printf(TEXT("Unsupported variable accessor nodeType: %s"), *Node.NodeType));
+	}
+
+	bool ResolveVariableNodes(
+		TArray<FNodeSpec>& Nodes,
+		UBlueprint* Blueprint,
+		UEdGraph* Graph,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
+	{
+		bool bHasVariableAccessor = false;
+		for (const FNodeSpec& Node : Nodes)
+		{
+			bHasVariableAccessor = bHasVariableAccessor || Node.bVariableAccessor;
+		}
+		if (!bHasVariableAccessor)
+		{
+			return true;
+		}
+		if (!IsSupportedVariableAccessorGraph(Blueprint, Graph))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-variable-graph-not-supported"),
+				TEXT("Variable accessor creation is limited to top-level event, function and macro graphs."));
+		}
+		for (FNodeSpec& Node : Nodes)
+		{
+			if (!ResolveVariableNode(Node, Blueprint, OutErrorCode, OutErrorMessage))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
 	bool ConfigureNodeType(
 		const FString& NodeType,
 		FNodeSpec& OutNode,
@@ -323,11 +709,22 @@ namespace
 			OutNode.OutputPinTypes.Add(TEXT("ReturnValue"), TEXT("string"));
 			return true;
 		}
+		if (NodeType == TEXT("variable_get") || NodeType == TEXT("variable_set"))
+		{
+			// Pins and exact types depend on the existing member variable and
+			// are filled by ResolveVariableNode after the exact Blueprint is
+			// resolved.  No graph or Blueprint object is touched here.
+			OutNode.bVariableAccessor = true;
+			OutNode.NodeClassPath = NodeType == TEXT("variable_get")
+				? VariableGetClassPath
+				: VariableSetClassPath;
+			return true;
+		}
 		return Fail(
 			OutErrorCode,
 			OutErrorMessage,
 			TEXT("graph-edit-node-type-not-allowed"),
-			TEXT("Supported nodeTypes: branch, sequence, not_bool, bool_or, int_add, int_equal, double_add, string_concat."));
+			TEXT("Supported nodeTypes: branch, sequence, not_bool, bool_or, int_add, int_equal, double_add, string_concat, variable_get, variable_set."));
 	}
 
 	const FNodeSpec* FindNode(const TArray<FNodeSpec>& Nodes, const FString& TempId)
@@ -371,7 +768,15 @@ namespace
 			}
 			if (!RejectUnknownParams(
 				*Object,
-				{ TEXT("tempId"), TEXT("nodeType"), TEXT("x"), TEXT("y") },
+				{
+					TEXT("tempId"),
+					TEXT("nodeType"),
+					TEXT("x"),
+					TEXT("y"),
+					TEXT("variableName"),
+					TEXT("variableGuid"),
+					TEXT("variableType"),
+				},
 				OutErrorCode,
 				OutErrorMessage))
 			{
@@ -405,6 +810,28 @@ namespace
 			if (!ConfigureNodeType(Node.NodeType, Node, OutErrorCode, OutErrorMessage))
 			{
 				return false;
+			}
+			const bool bHasVariableFields = (*Object)->HasField(TEXT("variableName"))
+				|| (*Object)->HasField(TEXT("variableGuid"))
+				|| (*Object)->HasField(TEXT("variableType"));
+			if (Node.bVariableAccessor)
+			{
+				if (!ReadString(*Object, TEXT("variableName"), Node.VariableName, OutErrorCode, OutErrorMessage)
+					|| !ReadString(*Object, TEXT("variableGuid"), Node.VariableGuid, OutErrorCode, OutErrorMessage)
+					|| !ReadString(*Object, TEXT("variableType"), Node.VariableType, OutErrorCode, OutErrorMessage))
+				{
+					return false;
+				}
+			}
+			else if (bHasVariableFields)
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-variable-field-not-allowed"),
+					FString::Printf(
+						TEXT("nodeType %s does not accept variableName/variableGuid/variableType."),
+						*Node.NodeType));
 			}
 			OutNodes.Add(MoveTemp(Node));
 		}
@@ -568,8 +995,26 @@ namespace
 	{
 		if (!ReadString(Params, TEXT("assetPath"), OutPlan.AssetPath, OutErrorCode, OutErrorMessage)
 			|| !ReadString(Params, TEXT("graphGuid"), OutPlan.GraphGuid, OutErrorCode, OutErrorMessage)
-			|| !ParseNodes(Params, OutPlan.Nodes, OutErrorCode, OutErrorMessage)
-			|| !ParseConnections(Params, OutPlan.Nodes, OutPlan.Connections, OutErrorCode, OutErrorMessage))
+			|| !ParseNodes(Params, OutPlan.Nodes, OutErrorCode, OutErrorMessage))
+		{
+			return false;
+		}
+		// Static plans keep the historical validation order: connections are
+		// fully checked before any Editor/focus lookup.  Variable accessors only
+		// learn their pins after the exact Blueprint is resolved, so their
+		// connections are checked in the second pass below.
+		bool bHasVariableAccessor = false;
+		for (const FNodeSpec& Node : OutPlan.Nodes)
+		{
+			bHasVariableAccessor = bHasVariableAccessor || Node.bVariableAccessor;
+		}
+		if (!bHasVariableAccessor
+			&& !ParseConnections(
+				Params,
+				OutPlan.Nodes,
+				OutPlan.Connections,
+				OutErrorCode,
+				OutErrorMessage))
 		{
 			return false;
 		}
@@ -639,6 +1084,29 @@ namespace
 				TEXT("Experimental graph edit supports only K2 Blueprint graphs."));
 		}
 
+		// Variable accessor pins depend on the exact existing member variable,
+		// so resolve them against the exact Blueprint before validating any
+		// connection that names those pins.
+		if (!ResolveVariableNodes(
+			OutPlan.Nodes,
+			Blueprint,
+			Graph,
+			OutErrorCode,
+			OutErrorMessage))
+		{
+			return false;
+		}
+		if (bHasVariableAccessor
+			&& !ParseConnections(
+				Params,
+				OutPlan.Nodes,
+				OutPlan.Connections,
+				OutErrorCode,
+				OutErrorMessage))
+		{
+			return false;
+		}
+
 		OutPlan.PackageRevision = Preflight->GetStringField(TEXT("packageRevision"));
 		OutPlan.GraphFingerprint = Preflight->GetStringField(TEXT("graphFingerprint"));
 
@@ -663,6 +1131,20 @@ namespace
 				*Node.NodeType,
 				Node.X,
 				Node.Y);
+			if (Node.bVariableAccessor)
+			{
+				// The accessor is bound to one exact existing member variable:
+				// GUID + name + primitive type + read/write direction.  The name
+				// is length-prefixed so it cannot inject a canonical delimiter.
+				Canonical += FString::Printf(
+					TEXT("V|%s|%s|%s|%s|%d:%s\n"),
+					*Node.TempId,
+					*Node.VariableGuid,
+					*Node.VariableType,
+					*Node.VariableAccess,
+					Node.VariableName.Len(),
+					*Node.VariableName);
+			}
 		}
 		TArray<FConnectionSpec> SortedConnections = OutPlan.Connections;
 		SortedConnections.Sort([](const FConnectionSpec& Left, const FConnectionSpec& Right)
@@ -730,6 +1212,13 @@ namespace
 			if (!Node.FunctionName.IsEmpty())
 			{
 				Item->SetStringField(TEXT("function"), Node.FunctionName);
+			}
+			if (Node.bVariableAccessor)
+			{
+				Item->SetStringField(TEXT("variableName"), Node.VariableName);
+				Item->SetStringField(TEXT("variableGuid"), Node.VariableGuid);
+				Item->SetStringField(TEXT("variableType"), Node.VariableType);
+				Item->SetStringField(TEXT("variableAccess"), Node.VariableAccess);
 			}
 			TSharedRef<FJsonObject> Position = MakeShared<FJsonObject>();
 			Position->SetNumberField(TEXT("x"), Node.X);
@@ -813,6 +1302,102 @@ namespace
 		return false;
 	}
 
+	/**
+	 * Canonical hash of every UK2Node_Variable binding and accessor pin in the
+	 * graph.  The shared layout fingerprint covers node/pin identity but not
+	 * FMemberReference, so Save uses this receipt-side hash to refuse a same-type
+	 * variable retarget that happened after Apply.
+	 */
+	FString ComputeVariableBindingHash(const UEdGraph* Graph)
+	{
+		if (Graph == nullptr)
+		{
+			return FString();
+		}
+		auto AppendField = [](FString& Base, const FString& Value)
+		{
+			Base += FString::Printf(TEXT("%d:%s|"), Value.Len(), *Value);
+		};
+
+		TArray<UEdGraphNode*> SortedNodes;
+		SortedNodes.Reserve(Graph->Nodes.Num());
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (Node != nullptr)
+			{
+				SortedNodes.Add(Node);
+			}
+		}
+		SortedNodes.Sort([](const UEdGraphNode& Left, const UEdGraphNode& Right)
+		{
+			return Left.NodeGuid.ToString(EGuidFormats::Digits)
+				< Right.NodeGuid.ToString(EGuidFormats::Digits);
+		});
+
+		FString Builder;
+		AppendField(Builder, TEXT("ueak.graph-edit-variable-binding/1"));
+		AppendField(Builder, Graph->GraphGuid.ToString(EGuidFormats::DigitsWithHyphensLower));
+		int32 VariableNodeCount = 0;
+		for (const UEdGraphNode* Node : SortedNodes)
+		{
+			const UK2Node_Variable* VariableNode = Cast<UK2Node_Variable>(Node);
+			if (VariableNode == nullptr)
+			{
+				continue;
+			}
+			++VariableNodeCount;
+			AppendField(Builder, Node->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower));
+			AppendField(Builder, Node->GetClass()->GetPathName());
+			AppendField(Builder, VariableNode->VariableReference.IsSelfContext()
+				? TEXT("self")
+				: TEXT("external"));
+			AppendField(Builder, VariableNode->GetVarName().ToString());
+			AppendField(
+				Builder,
+				VariableNode->VariableReference.GetMemberGuid().ToString(
+					EGuidFormats::DigitsWithHyphensLower));
+			AppendField(
+				Builder,
+				Node->GetClass()->IsChildOf(UK2Node_VariableSet::StaticClass())
+					? TEXT("write")
+					: TEXT("read"));
+
+			TArray<UEdGraphPin*> Pins;
+			Pins.Reserve(Node->Pins.Num());
+			for (UEdGraphPin* Pin : Node->Pins)
+			{
+				if (Pin != nullptr)
+				{
+					Pins.Add(Pin);
+				}
+			}
+			Pins.Sort([](const UEdGraphPin& Left, const UEdGraphPin& Right)
+			{
+				if (Left.PinName != Right.PinName)
+				{
+					return Left.PinName.LexicalLess(Right.PinName);
+				}
+				return Left.Direction < Right.Direction;
+			});
+			AppendField(Builder, FString::FromInt(Pins.Num()));
+			for (const UEdGraphPin* Pin : Pins)
+			{
+				AppendField(Builder, Pin->PinName.ToString());
+				AppendField(Builder, Pin->Direction == EGPD_Input ? TEXT("input") : TEXT("output"));
+				AppendField(Builder, Pin->PinType.PinCategory.ToString());
+				AppendField(Builder, Pin->PinType.PinSubCategory.ToString());
+			}
+		}
+		AppendField(Builder, FString::FromInt(VariableNodeCount));
+
+		FString Digest;
+		if (!FBlueprintContextSha256::HashText(Builder, Digest))
+		{
+			return FString();
+		}
+		return TEXT("sha256:") + Digest;
+	}
+
 	bool ArePinsConnected(
 		const UEdGraphNode* FromNode,
 		const FString& FromPin,
@@ -860,6 +1445,91 @@ namespace
 			return Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_String;
 		}
 		return false;
+	}
+
+	/**
+	 * Prove one spawned variable accessor is the exact planned node: class,
+	 * self-context member identity (GUID + name) and the engine pin inventory
+	 * this slice declares.  Used both immediately after spawn and after Redo.
+	 */
+	bool VariableNodeMatchesSpec(
+		const UEdGraphNode* Node,
+		const FNodeSpec& Spec,
+		FString& OutReason)
+	{
+		if (Node == nullptr)
+		{
+			OutReason = TEXT("The variable accessor node is missing.");
+			return false;
+		}
+		if (!Node->GetClass()->GetPathName().Equals(Spec.NodeClassPath, ESearchCase::CaseSensitive))
+		{
+			OutReason = FString::Printf(
+				TEXT("The variable accessor class is %s, not %s."),
+				*Node->GetClass()->GetPathName(),
+				*Spec.NodeClassPath);
+			return false;
+		}
+		const UK2Node_Variable* VariableNode = Cast<UK2Node_Variable>(Node);
+		if (VariableNode == nullptr)
+		{
+			OutReason = TEXT("The spawned node is not a UK2Node_Variable.");
+			return false;
+		}
+		if (!VariableNode->VariableReference.IsSelfContext())
+		{
+			OutReason = TEXT("The variable accessor is not a self-context member reference.");
+			return false;
+		}
+		if (!VariableNode->GetVarName().ToString().Equals(Spec.VariableName, ESearchCase::CaseSensitive))
+		{
+			OutReason = FString::Printf(
+				TEXT("The variable accessor names %s, not %s."),
+				*VariableNode->GetVarName().ToString(),
+				*Spec.VariableName);
+			return false;
+		}
+		FGuid Guid;
+		if (!FGuid::ParseExact(Spec.VariableGuid, EGuidFormats::DigitsWithHyphensLower, Guid)
+			|| VariableNode->VariableReference.GetMemberGuid() != Guid)
+		{
+			OutReason = TEXT("The variable accessor member GUID does not match the plan.");
+			return false;
+		}
+
+		auto RequirePin = [Node, &OutReason](
+			const FString& Name,
+			const EEdGraphPinDirection Direction,
+			const FString& Type) -> bool
+		{
+			const UEdGraphPin* Pin = Node->FindPin(FName(*Name), Direction);
+			if (Pin == nullptr)
+			{
+				OutReason = FString::Printf(
+					TEXT("The variable accessor has no %s pin %s."),
+					Direction == EGPD_Input ? TEXT("input") : TEXT("output"),
+					*Name);
+				return false;
+			}
+			if (!PinMatchesType(Pin, Type))
+			{
+				OutReason = FString::Printf(
+					TEXT("Pin %s does not have the declared %s type."),
+					*Name,
+					*Type);
+				return false;
+			}
+			return true;
+		};
+
+		if (Spec.NodeType.Equals(TEXT("variable_get"), ESearchCase::CaseSensitive))
+		{
+			return RequirePin(Spec.VariableName, EGPD_Output, Spec.VariableType);
+		}
+		return RequirePin(TEXT("execute"), EGPD_Input, TEXT("exec"))
+			&& RequirePin(TEXT("then"), EGPD_Output, TEXT("exec"))
+			&& RequirePin(Spec.VariableName, EGPD_Input, Spec.VariableType)
+			&& RequirePin(TEXT("Output_Get"), EGPD_Output, Spec.VariableType);
 	}
 
 	UClass* FunctionOwnerForNodeType(const FString& NodeType)
@@ -1062,7 +1732,51 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 		for (const FNodeSpec& Spec : Plan.Nodes)
 		{
 			UEdGraphNode* Node = nullptr;
-			if (!Spec.FunctionName.IsEmpty())
+			if (Spec.bVariableAccessor)
+			{
+				FProperty* Property = FindMemberVariableProperty(Blueprint, FName(*Spec.VariableName));
+				if (Property == nullptr)
+				{
+					return Abort(
+						TEXT("graph-edit-variable-property-unavailable"),
+						FString::Printf(
+							TEXT("Variable %s no longer has a generated/skeleton property."),
+							*Spec.VariableName));
+				}
+				FEdGraphPinType PropertyType;
+				FString ActualType;
+				if (!GetDefault<UEdGraphSchema_K2>()->ConvertPropertyToPinType(Property, PropertyType)
+					|| !VariableTypeToken(PropertyType, ActualType)
+					|| !ActualType.Equals(Spec.VariableType, ESearchCase::CaseSensitive))
+				{
+					return Abort(
+						TEXT("graph-edit-variable-type-mismatch"),
+						FString::Printf(
+							TEXT("Variable %s changed type after Preview."),
+							*Spec.VariableName));
+				}
+				TSubclassOf<UK2Node_Variable> VariableNodeClass =
+					Spec.NodeType.Equals(TEXT("variable_get"), ESearchCase::CaseSensitive)
+						? UK2Node_VariableGet::StaticClass()
+						: UK2Node_VariableSet::StaticClass();
+				UBlueprintVariableNodeSpawner* VariableSpawner =
+					UBlueprintVariableNodeSpawner::CreateFromMemberOrParam(
+						VariableNodeClass,
+						Property);
+				if (VariableSpawner == nullptr)
+				{
+					return Abort(
+						TEXT("graph-edit-node-spawn-failed"),
+						FString::Printf(
+							TEXT("Could not create a variable spawner for %s."),
+							*Spec.VariableName));
+				}
+				Node = VariableSpawner->Invoke(
+					Graph,
+					IBlueprintNodeBinder::FBindingSet(),
+					FVector2D(Spec.X, Spec.Y));
+			}
+			else if (!Spec.FunctionName.IsEmpty())
 			{
 				UFunction* Function = FunctionOwnerForNodeType(Spec.NodeType)->FindFunctionByName(
 					FName(*Spec.FunctionName));
@@ -1135,6 +1849,16 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 				return Abort(
 					TEXT("graph-edit-node-spawn-failed"),
 					FString::Printf(TEXT("Spawned %s has no pins or no valid NodeGuid."), *Spec.NodeType));
+			}
+			if (Spec.bVariableAccessor)
+			{
+				FString ContractReason;
+				if (!VariableNodeMatchesSpec(Node, Spec, ContractReason))
+				{
+					return Abort(
+						TEXT("graph-edit-variable-pin-contract-failed"),
+						ContractReason);
+				}
 			}
 			CreatedNodes.Add(Spec.TempId, Node);
 			CreatedGuidByTempId.Add(Spec.TempId, Node->NodeGuid);
@@ -1264,18 +1988,54 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 	{
 		bRedoGuids = bRedoGuids && HasNodeGuid(Graph, Guid);
 	}
-	const bool bRedoVerified = bRedoCalled && bRedoNodes && bRedoLinks && bRedoGuids;
+	// Redo must restore not only the GUID but the exact member-variable binding
+	// and engine pin contract, otherwise a renamed/retyped variable would look
+	// like a successful accessor creation.
+	bool bRedoVariableContracts = true;
+	FString RedoVariableReason;
+	for (const FNodeSpec& Spec : Plan.Nodes)
+	{
+		if (!Spec.bVariableAccessor)
+		{
+			continue;
+		}
+		const FGuid* CreatedGuid = CreatedGuidByTempId.Find(Spec.TempId);
+		const UEdGraphNode* RestoredNode = nullptr;
+		if (CreatedGuid != nullptr)
+		{
+			for (const UEdGraphNode* Candidate : Graph->Nodes)
+			{
+				if (Candidate != nullptr && Candidate->NodeGuid == *CreatedGuid)
+				{
+					RestoredNode = Candidate;
+					break;
+				}
+			}
+		}
+		if (!VariableNodeMatchesSpec(RestoredNode, Spec, RedoVariableReason))
+		{
+			bRedoVariableContracts = false;
+			break;
+		}
+	}
+	const bool bRedoVerified = bRedoCalled
+		&& bRedoNodes
+		&& bRedoLinks
+		&& bRedoGuids
+		&& bRedoVariableContracts;
 	if (!bUndoVerified || !bRedoVerified)
 	{
 		return FailCommitted(
 			TEXT("graph-edit-undo-redo-failed"),
 			FString::Printf(
-				TEXT("Undo/Redo verification failed: undo=%s nodes=%s links=%s guids=%s redo=%s."),
+				TEXT("Undo/Redo verification failed: undo=%s nodes=%s links=%s guids=%s redo=%s variables=%s %s"),
 				bUndoCalled ? TEXT("true") : TEXT("false"),
 				bUndoNodes ? TEXT("true") : TEXT("false"),
 				bUndoLinks ? TEXT("true") : TEXT("false"),
 				bUndoGuids ? TEXT("true") : TEXT("false"),
-				bRedoVerified ? TEXT("true") : TEXT("false")));
+				bRedoVerified ? TEXT("true") : TEXT("false"),
+				bRedoVariableContracts ? TEXT("true") : TEXT("false"),
+				*RedoVariableReason));
 	}
 
 	TSharedPtr<FJsonObject> FinalPreflight;
@@ -1311,6 +2071,13 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 		{
 			Item->SetStringField(TEXT("function"), Spec.FunctionName);
 		}
+		if (Spec.bVariableAccessor)
+		{
+			Item->SetStringField(TEXT("variableName"), Spec.VariableName);
+			Item->SetStringField(TEXT("variableGuid"), Spec.VariableGuid);
+			Item->SetStringField(TEXT("variableType"), Spec.VariableType);
+			Item->SetStringField(TEXT("variableAccess"), Spec.VariableAccess);
+		}
 		Item->SetNumberField(TEXT("x"), Spec.X);
 		Item->SetNumberField(TEXT("y"), Spec.Y);
 		CreatedNodeValues.Add(MakeShared<FJsonValueObject>(Item));
@@ -1339,6 +2106,13 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 	Receipt.GraphFingerprint = FinalPreflight->GetStringField(TEXT("graphFingerprint"));
 	Receipt.NodeCount = NodeCountAfter;
 	Receipt.LinkCount = LinkCountAfter;
+	Receipt.VariableBindingHash = ComputeVariableBindingHash(Graph);
+	if (Receipt.VariableBindingHash.IsEmpty())
+	{
+		return FailCommitted(
+			TEXT("graph-edit-readback-failed"),
+			TEXT("Could not compute the variable binding hash after Apply."));
+	}
 	RecentApplies.Add(Plan.PlanId, Receipt);
 
 	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
@@ -1367,6 +2141,7 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 	Result->SetBoolField(TEXT("packageDirtyAfter"), true);
 	Result->SetStringField(TEXT("packageRevision"), FinalPreflight->GetStringField(TEXT("packageRevision")));
 	Result->SetStringField(TEXT("graphFingerprintAfter"), FinalPreflight->GetStringField(TEXT("graphFingerprint")));
+	Result->SetStringField(TEXT("variableBindingHash"), Receipt.VariableBindingHash);
 	Result->SetArrayField(TEXT("createdNodes"), CreatedNodeValues);
 	Result->SetArrayField(TEXT("createdConnections"), ConnectionValues);
 	OutResult = Result;
@@ -1548,6 +2323,16 @@ bool UEAgentKitBlueprintGraphEditExperimental::TrySaveExperimental(
 			TEXT("graph-edit-save-plan-mismatch"),
 			TEXT("The live graph node/link counts no longer match the Apply receipt."));
 	}
+	const FString LiveVariableBindingHash = ComputeVariableBindingHash(Graph);
+	if (LiveVariableBindingHash.IsEmpty()
+		|| !LiveVariableBindingHash.Equals(Receipt->VariableBindingHash, ESearchCase::CaseSensitive))
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-save-variable-binding-mismatch"),
+			TEXT("A variable accessor binding changed after Apply; refusing to save it under this plan."));
+	}
 
 	UPackage* Package = Blueprint->GetOutermost();
 	if (Package == nullptr)
@@ -1662,6 +2447,7 @@ bool UEAgentKitBlueprintGraphEditExperimental::TrySaveExperimental(
 	Result->SetStringField(
 		TEXT("graphFingerprint"),
 		PostSavePreflight->GetStringField(TEXT("graphFingerprint")));
+	Result->SetStringField(TEXT("variableBindingHash"), Receipt->VariableBindingHash);
 	Result->SetBoolField(TEXT("saved"), true);
 	Result->SetBoolField(TEXT("packageDirty"), false);
 	Result->SetBoolField(TEXT("readbackVerified"), true);
