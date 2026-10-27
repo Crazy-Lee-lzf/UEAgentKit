@@ -278,17 +278,17 @@ def read_database_schema_version(path: Path) -> int | None:
     """Read ``PRAGMA user_version`` without creating or modifying the file.
 
     ``None`` means the path does not exist (or is a zero-byte placeholder).
-    The connection is read-only and uses ``immutable=1`` only when no WAL
-    sidecar exists, so a preflight check cannot checkpoint or write a journal.
+    The connection is read-only and immutable, so a preflight check cannot
+    checkpoint, create a ``-shm`` file, or write a journal. An actively written
+    database must be closed before a rebuild; ``_prepare_rebuild_target``
+    refuses a non-empty WAL sidecar.
     """
     database_path = path.expanduser().resolve()
     if not database_path.is_file() or database_path.stat().st_size == 0:
         return None
-    wal_path = Path(str(database_path) + "-wal")
-    immutable_query = "&immutable=1" if not wal_path.exists() else ""
     try:
         connection = sqlite3.connect(
-            f"file:{database_path.as_posix()}?mode=ro{immutable_query}",
+            f"file:{database_path.as_posix()}?mode=ro&immutable=1",
             uri=True,
             timeout=30.0,
         )
@@ -308,11 +308,9 @@ def _preflight_existing_database(path: Path) -> None:
     version = read_database_schema_version(database_path)
     if version is None:
         return
-    wal_path = Path(str(database_path) + "-wal")
-    immutable_query = "&immutable=1" if not wal_path.exists() else ""
     try:
         connection = sqlite3.connect(
-            f"file:{database_path.as_posix()}?mode=ro{immutable_query}",
+            f"file:{database_path.as_posix()}?mode=ro&immutable=1",
             uri=True,
             timeout=30.0,
         )
