@@ -295,6 +295,60 @@ namespace UEAgentKitConnectExistingSafety
 		return true;
 	}
 
+	TSharedPtr<FJsonObject> MakeCallFunctionPreviewParams(
+		UBlueprint* Blueprint,
+		UEdGraph* Graph,
+		const UEdGraphNode* TargetNode,
+		const UEdGraphPin* TargetInput)
+	{
+		TSharedRef<FJsonObject> CallFunction = MakeShared<FJsonObject>();
+		CallFunction->SetStringField(
+			TEXT("ownerClassPath"),
+			TEXT("/Script/Engine.KismetMathLibrary"));
+		CallFunction->SetStringField(TEXT("functionName"), TEXT("Greater_IntInt"));
+		CallFunction->SetStringField(
+			TEXT("signatureDigest"),
+			TEXT("sha256:0f41d587fab8cfbbc431b8dcf4b6d150b0f3dff6438ae3e5e731a932ad26ea09"));
+		TArray<TSharedPtr<FJsonValue>> Pins;
+		auto AddPin = [&Pins](const TCHAR* Name, const TCHAR* Direction, const TCHAR* Type)
+		{
+			TSharedRef<FJsonObject> Pin = MakeShared<FJsonObject>();
+			Pin->SetStringField(TEXT("name"), Name);
+			Pin->SetStringField(TEXT("direction"), Direction);
+			Pin->SetStringField(TEXT("type"), Type);
+			Pins.Add(MakeShared<FJsonValueObject>(Pin));
+		};
+		AddPin(TEXT("A"), TEXT("input"), TEXT("int"));
+		AddPin(TEXT("B"), TEXT("input"), TEXT("int"));
+		AddPin(TEXT("ReturnValue"), TEXT("output"), TEXT("bool"));
+		CallFunction->SetArrayField(TEXT("pins"), Pins);
+
+		TSharedRef<FJsonObject> Node = MakeShared<FJsonObject>();
+		Node->SetStringField(TEXT("tempId"), TEXT("tmp:greater"));
+		Node->SetStringField(TEXT("nodeType"), TEXT("call_function"));
+		Node->SetNumberField(TEXT("x"), 300);
+		Node->SetNumberField(TEXT("y"), 600);
+		Node->SetObjectField(TEXT("callFunction"), CallFunction);
+
+		TSharedRef<FJsonObject> Connection = MakeShared<FJsonObject>();
+		Connection->SetStringField(TEXT("from"), TEXT("tmp:greater"));
+		Connection->SetStringField(TEXT("fromPin"), TEXT("ReturnValue"));
+		Connection->SetObjectField(
+			TEXT("toExisting"),
+			MakeExistingPin(TargetNode, TargetInput));
+
+		TSharedRef<FJsonObject> Params = MakeShared<FJsonObject>();
+		Params->SetStringField(TEXT("assetPath"), Blueprint->GetPathName());
+		Params->SetStringField(TEXT("graphGuid"), GuidLower(Graph->GraphGuid));
+		TArray<TSharedPtr<FJsonValue>> Nodes;
+		Nodes.Add(MakeShared<FJsonValueObject>(Node));
+		Params->SetArrayField(TEXT("nodes"), Nodes);
+		TArray<TSharedPtr<FJsonValue>> Connections;
+		Connections.Add(MakeShared<FJsonValueObject>(Connection));
+		Params->SetArrayField(TEXT("connections"), Connections);
+		return Params;
+	}
+
 	bool SetupPreview(
 		FAutomationTestBase* Test,
 		UBlueprint*& OutBlueprint,
@@ -625,6 +679,101 @@ bool FUEAgentKitExactDisconnectStaleTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUEAgentKitCallFunctionStaleTest,
+	"UEAgentKit.Blueprint.CallFunctionAStaleGate",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUEAgentKitCallFunctionStaleTest::RunTest(const FString& Parameters)
+{
+	using namespace UEAgentKitConnectExistingSafety;
+	UEAgentKitBlueprintGraphEditExperimental::SetExperimentalWriteEnabledForTest(true);
+
+	FString Error;
+	UBlueprint* Blueprint = LoadFixture(Error);
+	if (Blueprint == nullptr)
+	{
+		AddError(Error);
+		UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
+		return false;
+	}
+	UEdGraph* Graph = Blueprint->UbergraphPages.Num() > 0 ? Blueprint->UbergraphPages[0] : nullptr;
+	if (Graph == nullptr || OpenAndFocus(Blueprint, Graph, Error) == nullptr)
+	{
+		AddError(Error);
+		UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
+		return false;
+	}
+	UK2Node_IfThenElse* Branch = FindBranch(Graph);
+	UEdGraphPin* Condition = Branch != nullptr
+		? Branch->FindPin(TEXT("Condition"), EGPD_Input)
+		: nullptr;
+	if (!TestNotNull(TEXT("branch condition exists"), Condition))
+	{
+		UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
+		return false;
+	}
+	const TSharedPtr<FJsonObject> PreviewParams = MakeCallFunctionPreviewParams(
+		Blueprint,
+		Graph,
+		Branch,
+		Condition);
+	TSharedPtr<FJsonObject> Preview;
+	FString PreviewCode;
+	FString PreviewMessage;
+	if (!TestTrue(
+			TEXT("CallFunction preview succeeds"),
+			UEAgentKitBlueprintGraphEditExperimental::TryPreviewExperimental(
+				PreviewParams,
+				Preview,
+				PreviewCode,
+				PreviewMessage)))
+	{
+		AddError(PreviewCode + TEXT(": ") + PreviewMessage);
+		UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
+		return false;
+	}
+	const int32 OldX = Branch->NodePosX;
+	Branch->Modify();
+	Branch->NodePosX = OldX + 9;
+	Blueprint->GetOutermost()->SetDirtyFlag(false);
+
+	TSharedPtr<FJsonObject> ApplyParams = MakeShared<FJsonObject>();
+	ApplyParams->SetStringField(TEXT("assetPath"), PreviewParams->GetStringField(TEXT("assetPath")));
+	ApplyParams->SetStringField(TEXT("graphGuid"), PreviewParams->GetStringField(TEXT("graphGuid")));
+	ApplyParams->SetArrayField(TEXT("nodes"), PreviewParams->GetArrayField(TEXT("nodes")));
+	ApplyParams->SetArrayField(TEXT("connections"), PreviewParams->GetArrayField(TEXT("connections")));
+	ApplyParams->SetStringField(TEXT("planId"), Preview->GetStringField(TEXT("planId")));
+	ApplyParams->SetStringField(
+		TEXT("confirmation"),
+		Preview->GetStringField(TEXT("requiredConfirmation")));
+
+	TSharedPtr<FJsonObject> Applied;
+	FString ApplyCode;
+	FString ApplyMessage;
+	const bool bApplied = UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
+		ApplyParams,
+		Applied,
+		ApplyCode,
+		ApplyMessage);
+	TestFalse(TEXT("stale CallFunction plan is rejected"), bApplied);
+	TestTrue(
+		TEXT("stale CallFunction uses a stale code"),
+		ApplyCode == TEXT("graph-edit-plan-stale")
+			|| ApplyCode == TEXT("graph-edit-edge-set-stale"));
+	if (!bApplied
+		&& ApplyCode != TEXT("graph-edit-plan-stale")
+		&& ApplyCode != TEXT("graph-edit-edge-set-stale"))
+	{
+		AddError(FString::Printf(TEXT("Unexpected CallFunction stale code: %s %s"), *ApplyCode, *ApplyMessage));
+	}
+
+	Branch->NodePosX = OldX;
+	Blueprint->GetOutermost()->SetDirtyFlag(false);
+	UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
+	return true;
+}
+
 namespace UEAgentKitConnectExistingSafety
 {
 	struct FPieState
@@ -703,6 +852,57 @@ namespace UEAgentKitConnectExistingSafety
 	private:
 		TSharedRef<FPieState> State;
 	};
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUEAgentKitCallFunctionPieTest,
+	"UEAgentKit.Blueprint.CallFunctionZPieGate",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUEAgentKitCallFunctionPieTest::RunTest(const FString& Parameters)
+{
+	using namespace UEAgentKitConnectExistingSafety;
+	UEAgentKitBlueprintGraphEditExperimental::SetExperimentalWriteEnabledForTest(true);
+
+	FString Error;
+	UBlueprint* Blueprint = LoadFixture(Error);
+	if (Blueprint == nullptr)
+	{
+		AddError(Error);
+		UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
+		return false;
+	}
+	UEdGraph* Graph = Blueprint->UbergraphPages.Num() > 0 ? Blueprint->UbergraphPages[0] : nullptr;
+	if (Graph == nullptr || OpenAndFocus(Blueprint, Graph, Error) == nullptr)
+	{
+		AddError(Error);
+		UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
+		return false;
+	}
+	UK2Node_IfThenElse* Branch = FindBranch(Graph);
+	UEdGraphPin* Condition = Branch != nullptr
+		? Branch->FindPin(TEXT("Condition"), EGPD_Input)
+		: nullptr;
+	if (!TestNotNull(TEXT("branch condition exists"), Condition))
+	{
+		UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
+		return false;
+	}
+	const TSharedPtr<FJsonObject> PreviewParams = MakeCallFunctionPreviewParams(
+		Blueprint,
+		Graph,
+		Branch,
+		Condition);
+	TSharedRef<FPieState> State = MakeShared<FPieState>();
+	State->Test = this;
+	State->Blueprint = Blueprint;
+	State->Graph = Graph;
+	State->PreviewParams = PreviewParams;
+	ADD_LATENT_AUTOMATION_COMMAND(FStartPIECommand(false));
+	ADD_LATENT_AUTOMATION_COMMAND(FWaitForPieAndRejectConnect(State));
+	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
+	ADD_LATENT_AUTOMATION_COMMAND(FWaitForPieStop(State));
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(

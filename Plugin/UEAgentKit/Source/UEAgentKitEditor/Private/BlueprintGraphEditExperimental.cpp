@@ -3044,22 +3044,60 @@ namespace
 			return false;
 		}
 		if (Function->HasAnyFunctionFlags(FUNC_Net)
-			|| Function->HasAnyFunctionFlags(FUNC_Latent)
 			|| Function->HasAnyFunctionFlags(FUNC_BlueprintAuthorityOnly)
 			|| Function->HasAnyFunctionFlags(FUNC_BlueprintEvent)
-			|| Function->HasAnyFunctionFlags(FUNC_Exec))
+			|| Function->HasAnyFunctionFlags(FUNC_Exec)
+			|| Function->HasMetaData(TEXT("Latent")))
 		{
 			OutReason = TEXT("The function has network/latent/authority/event/exec flags.");
 			return false;
 		}
 
 		const int32 ExpectedPinCount = Spec.InputPins.Num() + Spec.OutputPins.Num();
-		if (Node->Pins.Num() != ExpectedPinCount)
+		int32 VisiblePinCount = 0;
+		int32 HiddenSelfCount = 0;
+		TArray<FString> PinInventory;
+		for (const UEdGraphPin* Pin : Node->Pins)
+		{
+			if (Pin == nullptr)
+			{
+				continue;
+			}
+			const bool bIsHiddenSelf =
+				Pin->bHidden
+				&& Pin->Direction == EGPD_Input
+				&& Pin->PinName == UEdGraphSchema_K2::PN_Self;
+			if (bIsHiddenSelf)
+			{
+				++HiddenSelfCount;
+				if (Pin->LinkedTo.Num() != 0)
+				{
+					OutReason = TEXT("The hidden CallFunction self pin unexpectedly has links.");
+					return false;
+				}
+				continue;
+			}
+			if (Pin->bHidden)
+			{
+				OutReason = FString::Printf(
+					TEXT("The CallFunction node has an unexpected hidden pin %s."),
+					*Pin->PinName.ToString());
+				return false;
+			}
+			++VisiblePinCount;
+			PinInventory.Add(FString::Printf(
+				TEXT("%s:%s"),
+				*Pin->PinName.ToString(),
+				Pin->Direction == EGPD_Input ? TEXT("in") : TEXT("out")));
+		}
+		if (VisiblePinCount != ExpectedPinCount || HiddenSelfCount > 1)
 		{
 			OutReason = FString::Printf(
-				TEXT("The CallFunction node has %d pins, expected %d."),
-				Node->Pins.Num(),
-				ExpectedPinCount);
+				TEXT("The CallFunction node has %d visible pins (hidden self=%d), expected %d: %s"),
+				VisiblePinCount,
+				HiddenSelfCount,
+				ExpectedPinCount,
+				*FString::Join(PinInventory, TEXT(",")));
 			return false;
 		}
 		for (const FString& PinName : Spec.InputPins)
