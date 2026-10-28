@@ -1,7 +1,7 @@
 # Blueprint Graph Read/Write Capability Matrix
 
 Verified scope: UE 5.6.1, Editor Bridge and Python MCP.
-Updated: 2026-10-26.
+Updated: 2026-10-28.
 
 This matrix describes the implemented Blueprint graph read/write contract. It deliberately does
 not treat fixture-only helpers or the earlier position-only layout acceptance as
@@ -12,9 +12,6 @@ Legend:
 - **Supported** — implemented and covered by the cited tests.
 - **Experimental** — implemented behind an explicit project opt-in and exact
   per-call confirmation; not a production default.
-- **Experimental (pending UE)** — implemented behind the same opt-in and covered
-  by static/Python contract tests, but **not yet verified in a real Editor** in
-  this slice. It must not be described as an accepted Writer capability.
 - **Offline-only** — validates or previews data without touching the live
   Editor.
 - **Unsupported** — no live product path; fail closed.
@@ -31,8 +28,10 @@ Legend:
 | Five-family MCP → Socket → Apply → Save → fresh-process Reload acceptance | **Supported (experimental)** | `tests/python/p5_agent_e2e_probe.py` + `scripts/VerifyBlueprintAgentEndToEnd.ps1`; the accepted end-to-end run proved GraphEdit, pin defaults, variables, rewire and isolated node removal end to end | P5 complete |
 | Live GraphEdit `createNode` + `connectPins` preview/apply | **Experimental** | One transaction; allowlisted deterministic nodes; exact exec/bool/int/double/string pins; output fan-out; readback + Undo/Redo | P0 complete |
 | Allowlisted nodes: `branch`, `sequence`, `not_bool`, `bool_or`, `int_add`, `int_equal`, `double_add`, `string_concat` | **Experimental** | Python + C++ duplicate contracts agree on class/function and pin names/types | P0 complete |
-| Create `variable_get` / `variable_set` nodes for an existing top-level member variable (bool/int/double/string) | **Experimental (pending UE)** | Same GraphEdit Preview/Apply/Save contract; variable bound by GUID + name + exact type; `UBlueprintVariableNodeSpawner` creates the engine-standard pins; post-spawn and post-Redo checks prove class, self-context member identity and exact pins. Only Python contract tests ran in this slice; no native UE Apply/Undo/Reload | next slice |
-| Variable accessor connection targets within the same plan (getter output, setter `execute`/`Output_Get`) | **Experimental (pending UE)** | Exact exec or exact primitive data links between the declared accessor pins, using the same fan-out and type rules as the static nodes | next slice |
+| Create `variable_get` / `variable_set` nodes for an existing top-level member variable (bool/int/double/string) | **Experimental** | Same GraphEdit Preview/Apply/Save contract; variable bound by GUID + name + exact type; `UBlueprintVariableNodeSpawner` creates the engine-standard pins; post-spawn and post-Redo checks prove class, self-context member identity and exact pins. **A-level** real MCP → Socket → Editor Preview/Apply/Save for four types in the event graph and one int accessor pair in a function graph; fresh-process canonical export Reload verified all 10 accessors, bindings, pins and asset SHA | 2026-10-28 |
+| Variable accessor connection targets within the same plan (getter output, setter `execute`/`Output_Get`) | **Experimental** | Exact exec or exact primitive data links between the declared accessor pins, using the same fan-out and type rules as the static nodes. The A-level run connected all four getters to their setters and drove the int setter from a `sequence` exec pin | 2026-10-28 |
+| Same-type variable retarget between accessor Apply and Save | **Experimental (native B)** | Receipt-side `variableBindingHash` covers every `UK2Node_Variable` binding/pin. Native automation `UEAgentKit.Blueprint.AccessorRetargetSaveGate` retargets `AccessInt` to `AccessInt2` after Apply and proves Save fails with `graph-edit-save-variable-binding-mismatch`; cleanup Undo restores the graph | 2026-10-28 |
+| Accessor Preview/Apply while PIE is active | **Experimental (native B)** | Native automation `UEAgentKit.Blueprint.AccessorPieGate` starts real PIE and proves Preview fails with `graph-edit-pie-active`; no mutation occurs | 2026-10-28 |
 | Exact typed data links and output fan-out to distinct inputs | **Experimental** | One output may feed several distinct input pins; an input pin still accepts one plan link | P0 complete |
 | Plan-bound explicit Save | **Experimental** | Separate tool/gate; requires Apply receipt, post-Apply fingerprint, exact node/link counts, dirty package, clean readback, disk SHA-256 | P0 complete |
 | Post-commit failure rollback | **Experimental** | `FailCommitted` Undo + original count/link readback; explicit warning if rollback fails | P0 complete |
@@ -180,6 +179,15 @@ Legend:
   `<VariableName>`; `variable_set`: input `execute`, input `<VariableName>`,
   output `then`, output `Output_Get`). A mismatch aborts the transaction with
   `graph-edit-variable-pin-contract-failed`.
+- A variable-accessor Apply opens one `FScopedTransaction`; the native A-path
+  run returns `undoVerified=true` and `redoVerified=true`, leaves the package
+  dirty, and requires a separate explicit Save. The Save receipt additionally
+  binds `variableBindingHash` over every live `UK2Node_Variable` in the graph.
+- Accessor Preview/Apply is rejected while PIE/SIE is active
+  (`graph-edit-pie-active`); the native PIE automation test proves no mutation.
+- A same-type retarget after Apply is rejected by Save
+  (`graph-edit-save-variable-binding-mismatch`); the native retarget test then
+  Undo-restores the original graph.
 - No deletion, disconnection, pin creation, variable rename/retype/removal, or
   default mutation outside the bounded five-type paths, arbitrary GraphPatch,
   auto-save, or compile in this slice.
@@ -240,13 +248,13 @@ Legend:
 - Nested-subgraph writes, variable rename/retype/removal, pin
   creation/retyping, unbounded node deletion, and live GraphPatch apply remain
   follow-up work.
-- Variable accessor creation is a new, **UE-unverified** slice. Its Python
-  contract, source-shape and negative tests pass, but no native Editor Apply,
-  Undo/Redo, Save or fresh-process Reload was run in this slice because the
-  single native UE lease was held by the PIE branch. Treat it as
-  `Experimental (pending UE)` until a native run reproduces: create get/set for
-  an existing int variable, connect to an `int_add`, Apply, Save, and reload the
-  saved asset in a new process.
+- Variable accessor creation is now accepted at **A level** on the real
+  MCP → Socket → Editor → Save → fresh-process Reload path for four primitive
+  types in an event graph and for an int getter/setter pair in a function graph
+  (10 accessors; `undoVerified=true`, `redoVerified=true`; reload
+  `verified=true`, `mismatches=[]`). PIE rejection and same-type-retarget Save
+  rejection are **native B** automation evidence. Macro graphs are accepted by
+  the same code path but were not exercised in this native run.
 - The variable accessor slice only wires nodes created in the same plan. It
   cannot connect a new accessor to pre-existing event nodes; that needs a
   separate bounded "connect existing pin" capability.
