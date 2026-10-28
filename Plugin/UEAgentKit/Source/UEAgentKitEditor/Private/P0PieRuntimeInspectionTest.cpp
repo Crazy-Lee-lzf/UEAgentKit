@@ -1072,6 +1072,9 @@ bool FUEAgentKitP0PieRuntimeTest::RunTest(const FString& Parameters)
 	ADD_LATENT_AUTOMATION_COMMAND(FDwellBeforeEndingPie(4.0));
 	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
 	ADD_LATENT_AUTOMATION_COMMAND(FVerifyAfterPieStop(State));
+	// Keep the Editor alive briefly after PIE stopped so an external read-only
+	// probe can also observe the stopped/stale state over the live bridge.
+	ADD_LATENT_AUTOMATION_COMMAND(FDwellBeforeEndingPie(4.0));
 	return true;
 }
 
