@@ -34,7 +34,8 @@ Legend:
 | Accessor Preview/Apply while PIE is active | **Experimental (native B)** | Native automation `UEAgentKit.Blueprint.AccessorPieGate` starts real PIE and proves Preview fails with `graph-edit-pie-active`; no mutation occurs | 2026-10-28 |
 | Connect one new allowlisted node/pin to one exact existing K2 pin | **Experimental** | Request uses `fromExisting`/`toExisting` with nodeGuid + pinGuid + pinName + direction + category/subCategory. The other endpoint must be a node created in the same plan. Existing input must be unlinked; existing output fan-out is preserved. **A-level** real MCP → Socket → Editor Preview/Apply/Save: new int getter/setter plus bool getter connected to an existing Branch `execute`/`Condition` and an existing event `then`; 4 edges, Undo/Redo true, fresh-process Reload verified exact links and asset SHA | 2026-10-28 |
 | Connect one existing output to one existing unlinked input with `nodes=[]` | **Experimental** | Exactly one existing→existing edge per plan; both endpoints exact `UK2Node`/pin GUID/name/direction/category/subCategory in the same graph, different nodes. Target input must be unlinked; source output fan-out is preserved. **A-level** real MCP → Socket → Editor Preview/Apply/Save: one existing Event `then` → existing Branch `execute`, 4 nodes/1 edge (unchanged node count), Undo/Redo true, fresh-process Reload verified the exact edge and asset SHA | 2026-10-28 |
-| Reject unsafe existing-pin connections | **Experimental** | Existing→existing beyond the one zero-node edge, linked existing input, unknown node/pin GUID, category/subCategory mismatch, hidden/orphan/split/non-connectable pin, type mismatch, `BREAK_OTHERS_*`, conversion/promotion all fail closed. Native automation also proves zero-node Preview after graph mutation is stale (`graph-edit-plan-stale`/`graph-edit-edge-set-stale`) and PIE rejects the path | 2026-10-28 |
+| Remove one exact existing K2 edge with `operation=disconnect`, `nodes=[]` | **Experimental** | Exactly one existing output→input edge per plan; both endpoints exact node/pin GUID/name/direction/category/subCategory in the same graph, different nodes, target input currently has exactly that one link. Apply breaks only that pair, proves edge-set delta = −1, preserves all other edges/nodes, Undo/Redo hashes and Save receipt. **A-level** real MCP → Socket → Editor Preview/Apply/Save: one of two Event→Branch edges removed, the other preserved, 7 nodes/1 edge, fresh-process Reload verified; disconnect-after-Preview stale/PIE are native B | 2026-10-28 |
+| Reject unsafe existing-pin connections | **Experimental** | Disconnect of a non-existent/ambiguous/already-removed edge, disconnect with nodes or a non-existing endpoint, existing→existing beyond the one zero-node edge, linked existing input for connect, unknown node/pin GUID, category/subCategory mismatch, hidden/orphan/split/non-connectable pin, type mismatch, `BREAK_OTHERS_*`, conversion/promotion all fail closed. Native automation also proves zero-node disconnect after graph mutation is stale (`graph-edit-plan-stale`/`graph-edit-edge-set-stale`) and PIE rejects the path | 2026-10-28 |
 | Exact typed data links and output fan-out to distinct inputs | **Experimental** | One output may feed several distinct input pins; an input pin still accepts one plan link | P0 complete |
 | Plan-bound explicit Save | **Experimental** | Separate tool/gate; requires Apply receipt, post-Apply fingerprint, exact node/link counts, dirty package, clean readback, disk SHA-256 | P0 complete |
 | Post-commit failure rollback | **Experimental** | `FailCommitted` Undo + original count/link readback; explicit warning if rollback fails | P0 complete |
@@ -198,6 +199,11 @@ Legend:
   `UK2Node`s in the same focused graph with exact canonical node GUID + pin GUID
   + name + direction + category/subCategory; the existing input must have zero
   links.
+- Disconnect is a separate `operation=disconnect` mode: `nodes=[]`, exactly one
+  existing→existing connection, and the target input must currently have exactly
+  one link from the declared output. Apply removes only that exact pair with
+  `BreakLinkTo`; it must not call `CanCreateConnection`, must not touch other
+  edges, and must prove edge-set removed=1/added=0 plus unchanged node count.
 - The existing pin's actual type must be exactly exec/bool/int/double/string
   with no wildcard, container, by-ref, const, weak, delegate, struct/object/enum
   or split/orphan/hidden flag. The declared request metadata must equal the live
@@ -294,10 +300,17 @@ Legend:
   `execute` (node count unchanged at 4, edge count 1, Undo/Redo true, reload
   `verified=true`, `mismatches=[]`). Zero-node stale-plan and PIE rejection are
   **native B** automation evidence.
-- The connect-existing slice still cannot rewire or disconnect an existing edge,
-  change an existing pin type, connect multiple existing→existing edges, or mix
-  a pure existing→existing edge with new nodes. Each pure existing plan has
-  exactly one edge, zero new nodes, and an unlinked target input.
+- Exact disconnect is accepted at **A level** on the same path: one of two
+  pre-existing Event→Branch edges was removed with `operation=disconnect`,
+  `nodes=[]` (7 nodes/2 edges → 7 nodes/1 edge), the other edge and all nodes
+  survived, Undo/Redo true, Save receipt/edge hash, reload `verified=true`,
+  `mismatches=[]`. Disconnect-after-Preview stale and PIE rejection are
+  **native B**.
+- The slice still cannot rewire/replace/disconnect multiple edges, change an
+  existing pin type, connect multiple existing→existing edges, or mix a pure
+  existing plan with new nodes. A pure existing plan has exactly one edge, zero
+  new nodes; connect requires an unlinked target input, disconnect requires the
+  exact existing link.
 - Connect-existing only accepts the four primitive data kinds plus exec. It
   rejects object/struct/enum/delegate/array/set/map/by-ref/const/weak/wildcard,
   hidden/orphan/split/non-connectable pins, inherited/non-K2 nodes and any

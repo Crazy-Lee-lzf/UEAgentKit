@@ -58,6 +58,37 @@ def _find_node(manifest: Mapping[str, Any], class_suffix: str) -> dict[str, Any]
     raise p5.ProbeError(f"manifest has no {class_suffix} node", code="fixture-shape")
 
 
+def _find_branch_with_unlinked_execute(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    for node in manifest.get("nodes") or []:
+        if not isinstance(node, Mapping) or not str(node.get("class", "")).endswith(
+            "K2Node_IfThenElse"
+        ):
+            continue
+        execute = None
+        condition = None
+        for pin in node.get("pins") or []:
+            if (
+                isinstance(pin, Mapping)
+                and pin.get("pinName") == "execute"
+                and pin.get("direction") == "input"
+                and int(pin.get("linkCount", -1)) == 0
+            ):
+                execute = pin
+            if (
+                isinstance(pin, Mapping)
+                and pin.get("pinName") == "Condition"
+                and pin.get("direction") == "input"
+                and int(pin.get("linkCount", -1)) == 0
+            ):
+                condition = pin
+        if execute is not None and condition is not None:
+            return dict(node)
+    raise p5.ProbeError(
+        "manifest has no Branch with unlinked execute and Condition",
+        code="fixture-shape",
+    )
+
+
 def _find_event_with_unlinked_then(manifest: Mapping[str, Any]) -> dict[str, Any]:
     for node in manifest.get("nodes") or []:
         if not isinstance(node, Mapping) or not str(node.get("class", "")).endswith("K2Node_Event"):
@@ -141,7 +172,7 @@ def _build_plan(
     manifest: Mapping[str, Any],
     context: Mapping[str, Any],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
-    branch = _find_node(manifest, "K2Node_IfThenElse")
+    branch = _find_branch_with_unlinked_execute(manifest)
     event = _find_event_with_unlinked_then(manifest)
     branch_execute = _pin(branch, "execute", "input")
     branch_condition = _pin(branch, "Condition", "input")
@@ -328,7 +359,7 @@ async def _run(args: argparse.Namespace) -> int:
                     code="fixture-not-clean",
                 )
                 manifest = _load_manifest(project_root)
-                branch = _find_node(manifest, "K2Node_IfThenElse")
+                branch = _find_branch_with_unlinked_execute(manifest)
                 event = _find_event_with_unlinked_then(manifest)
                 branch_execute = _pin(branch, "execute", "input")
                 branch_condition = _pin(branch, "Condition", "input")

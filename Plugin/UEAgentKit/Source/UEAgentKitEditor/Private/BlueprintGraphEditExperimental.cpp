@@ -112,6 +112,8 @@ namespace
 		FString GraphFingerprint;
 		FString BeforeEdgeSetHash;
 		FString PlanId;
+		FString Operation;
+		bool bDisconnect = false;
 		bool bHasExistingPin = false;
 		TArray<FNodeSpec> Nodes;
 		TArray<FConnectionSpec> Connections;
@@ -815,7 +817,8 @@ namespace
 		FExistingPinSpec& Spec,
 		UEdGraphPin*& OutPin,
 		FString& OutErrorCode,
-		FString& OutErrorMessage)
+		FString& OutErrorMessage,
+		const bool bAllowLinkedInput = false)
 	{
 		OutPin = nullptr;
 		if (Graph == nullptr)
@@ -976,7 +979,7 @@ namespace
 				TEXT("graph-edit-existing-pin-split"),
 				TEXT("Split/sub pins cannot be endpoints in this slice."));
 		}
-		if (OutPin->Direction == EGPD_Input && OutPin->LinkedTo.Num() != 0)
+		if (OutPin->Direction == EGPD_Input && OutPin->LinkedTo.Num() != 0 && !bAllowLinkedInput)
 		{
 			return Fail(
 				OutErrorCode,
@@ -1234,6 +1237,7 @@ namespace
 		const TSharedPtr<FJsonObject>& Params,
 		const TArray<FNodeSpec>& Nodes,
 		UEdGraph* Graph,
+		const bool bDisconnect,
 		TArray<FConnectionSpec>& OutConnections,
 		FString& OutErrorCode,
 		FString& OutErrorMessage)
@@ -1254,6 +1258,14 @@ namespace
 				OutErrorMessage,
 				TEXT("graph-edit-invalid-connections"),
 				FString::Printf(TEXT("connections may contain at most %d entries."), MaxConnections));
+		}
+		if (bDisconnect && (!Nodes.IsEmpty() || Values->Num() != 1))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-disconnect-invalid-plan"),
+				TEXT("A disconnect plan requires exactly one connection and nodes=[]."));
 		}
 
 		TSet<FString> SeenTargets;
@@ -1287,6 +1299,14 @@ namespace
 
 			const bool bHasFromExistingField = (*Object)->HasField(TEXT("fromExisting"));
 			const bool bHasToExistingField = (*Object)->HasField(TEXT("toExisting"));
+			if (bDisconnect && !(bHasFromExistingField && bHasToExistingField))
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-disconnect-endpoints"),
+					TEXT("A disconnect connection requires both fromExisting and toExisting."));
+			}
 			if (bHasFromExistingField && bHasToExistingField)
 			{
 				if ((*Object)->HasField(TEXT("from"))
@@ -1352,7 +1372,8 @@ namespace
 						ExistingConnection.ToExisting,
 						ExistingConnection.ToExistingPin,
 						OutErrorCode,
-						OutErrorMessage))
+						OutErrorMessage,
+						bDisconnect))
 				{
 					return false;
 				}
@@ -1386,7 +1407,29 @@ namespace
 						FString::Printf(TEXT("Input pin already has a connection in this plan: %s"), *TargetKey));
 				}
 				SeenTargets.Add(TargetKey);
-				if (!ValidateSchemaConnection(
+				if (bDisconnect)
+				{
+					if (!ExistingConnection.FromExistingPin->LinkedTo.Contains(
+							ExistingConnection.ToExistingPin)
+						|| !ExistingConnection.ToExistingPin->LinkedTo.Contains(
+							ExistingConnection.FromExistingPin))
+					{
+						return Fail(
+							OutErrorCode,
+							OutErrorMessage,
+							TEXT("graph-edit-disconnect-edge-not-found"),
+							TEXT("The exact existing edge does not exist between the two declared pins."));
+					}
+					if (ExistingConnection.ToExistingPin->LinkedTo.Num() != 1)
+					{
+						return Fail(
+							OutErrorCode,
+							OutErrorMessage,
+							TEXT("graph-edit-disconnect-ambiguous"),
+							TEXT("The declared existing input has more than one link; refusing an ambiguous disconnect."));
+					}
+				}
+				else if (!ValidateSchemaConnection(
 					Graph,
 					ExistingConnection.FromExistingPin,
 					ExistingConnection.ToExistingPin,
@@ -1697,6 +1740,22 @@ namespace
 		FString& OutErrorCode,
 		FString& OutErrorMessage)
 	{
+		OutPlan.Operation = TEXT("connect");
+		if (Params->HasField(TEXT("operation")))
+		{
+			FString OperationValue;
+			if (!Params->TryGetStringField(TEXT("operation"), OperationValue)
+				|| (OperationValue != TEXT("connect") && OperationValue != TEXT("disconnect")))
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-invalid-operation"),
+					TEXT("operation must be connect or disconnect."));
+			}
+			OutPlan.Operation = OperationValue;
+		}
+		OutPlan.bDisconnect = OutPlan.Operation == TEXT("disconnect");
 		if (!ReadString(Params, TEXT("assetPath"), OutPlan.AssetPath, OutErrorCode, OutErrorMessage)
 			|| !ReadString(Params, TEXT("graphGuid"), OutPlan.GraphGuid, OutErrorCode, OutErrorMessage)
 			|| !ParseNodes(Params, OutPlan.Nodes, OutErrorCode, OutErrorMessage))
@@ -1720,6 +1779,7 @@ namespace
 				Params,
 				OutPlan.Nodes,
 				nullptr,
+				false,
 				OutPlan.Connections,
 				OutErrorCode,
 				OutErrorMessage))
@@ -1811,6 +1871,7 @@ namespace
 				Params,
 				OutPlan.Nodes,
 				Graph,
+				OutPlan.bDisconnect,
 				OutPlan.Connections,
 				OutErrorCode,
 				OutErrorMessage))
@@ -1835,30 +1896,46 @@ namespace
 				TEXT("graph-edit-existing-to-existing-limit"),
 				TEXT("A plan may add at most one existing-to-existing connection."));
 		}
-		if (PureExistingConnectionCount == 1
-			&& (!OutPlan.Nodes.IsEmpty() || OutPlan.Connections.Num() != 1))
+		if (OutPlan.bDisconnect)
 		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-existing-to-existing-plan"),
-				TEXT("A pure existing-to-existing connection must be the only connection and requires nodes=[]."));
+			if (!OutPlan.Nodes.IsEmpty()
+				|| OutPlan.Connections.Num() != 1
+				|| PureExistingConnectionCount != 1)
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-disconnect-invalid-plan"),
+					TEXT("A disconnect plan requires nodes=[] and exactly one existing-to-existing edge."));
+			}
 		}
-		if (OutPlan.Nodes.IsEmpty() && OutPlan.Connections.IsEmpty())
+		else
 		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-empty-plan"),
-				TEXT("A graph edit plan must create at least one node or connect at least one existing edge."));
-		}
-		if (OutPlan.Nodes.IsEmpty() && PureExistingConnectionCount == 0)
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-nodes-required"),
-				TEXT("nodes may be empty only for one pure existing-to-existing connection."));
+			if (PureExistingConnectionCount == 1
+				&& (!OutPlan.Nodes.IsEmpty() || OutPlan.Connections.Num() != 1))
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-existing-to-existing-plan"),
+					TEXT("A pure existing-to-existing connection must be the only connection and requires nodes=[]."));
+			}
+			if (OutPlan.Nodes.IsEmpty() && OutPlan.Connections.IsEmpty())
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-empty-plan"),
+					TEXT("A graph edit plan must create at least one node or connect at least one existing edge."));
+			}
+			if (OutPlan.Nodes.IsEmpty() && PureExistingConnectionCount == 0)
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-nodes-required"),
+					TEXT("nodes may be empty only for one pure existing-to-existing connection."));
+			}
 		}
 
 		OutPlan.PackageRevision = Preflight->GetStringField(TEXT("packageRevision"));
@@ -1889,6 +1966,16 @@ namespace
 			Canonical += FString::Printf(
 				TEXT("E|%s\n"),
 				*OutPlan.BeforeEdgeSetHash);
+		}
+		if (OutPlan.bDisconnect && OutPlan.Connections.Num() == 1)
+		{
+			const FConnectionSpec& Disconnect = OutPlan.Connections[0];
+			Canonical += FString::Printf(
+				TEXT("D|%s|%s|%s|%s\n"),
+				*Disconnect.FromExisting.NodeGuid,
+				*Disconnect.FromExisting.PinGuid,
+				*Disconnect.ToExisting.NodeGuid,
+				*Disconnect.ToExisting.PinGuid);
 		}
 
 		TArray<FNodeSpec> SortedNodes = OutPlan.Nodes;
@@ -2006,9 +2093,14 @@ namespace
 		Preview->SetStringField(TEXT("graphGuid"), OutPlan.GraphGuid);
 		Preview->SetStringField(TEXT("packageRevision"), OutPlan.PackageRevision);
 		Preview->SetStringField(TEXT("graphFingerprint"), OutPlan.GraphFingerprint);
+		Preview->SetStringField(TEXT("operation"), OutPlan.Operation);
 		if (bHasExistingPin)
 		{
 			Preview->SetStringField(TEXT("beforeEdgeSetHash"), OutPlan.BeforeEdgeSetHash);
+		}
+		if (OutPlan.bDisconnect)
+		{
+			Preview->SetNumberField(TEXT("disconnectCount"), 1);
 		}
 		Preview->SetNumberField(TEXT("nodeCountBefore"), Preflight->GetNumberField(TEXT("nodeCount")));
 		Preview->SetNumberField(TEXT("nodeCountAfter"), Preflight->GetNumberField(TEXT("nodeCount")) + OutPlan.Nodes.Num());
@@ -2248,6 +2340,52 @@ namespace
 			&& ToPin != nullptr
 			&& FromPin->LinkedTo.Contains(ToPin)
 			&& ToPin->LinkedTo.Contains(FromPin);
+	}
+
+	FString MakeEdgeKey(const UEdGraphPin* FromPin, const UEdGraphPin* ToPin)
+	{
+		if (FromPin == nullptr || ToPin == nullptr
+			|| FromPin->GetOwningNode() == nullptr || ToPin->GetOwningNode() == nullptr)
+		{
+			return FString();
+		}
+		return FString::Printf(
+			TEXT("%s|%s>%s|%s"),
+			*FromPin->GetOwningNode()->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower),
+			*FromPin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower),
+			*ToPin->GetOwningNode()->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower),
+			*ToPin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower));
+	}
+
+	void CollectEdgeKeys(const UEdGraph* Graph, TSet<FString>& OutKeys)
+	{
+		OutKeys.Reset();
+		if (Graph == nullptr)
+		{
+			return;
+		}
+		for (const UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (Node == nullptr)
+			{
+				continue;
+			}
+			for (const UEdGraphPin* Pin : Node->Pins)
+			{
+				if (Pin == nullptr || Pin->Direction != EGPD_Output)
+				{
+					continue;
+				}
+				for (const UEdGraphPin* Linked : Pin->LinkedTo)
+				{
+					const FString Key = MakeEdgeKey(Pin, Linked);
+					if (!Key.IsEmpty())
+					{
+						OutKeys.Add(Key);
+					}
+				}
+			}
+		}
 	}
 
 	bool ValidateSchemaConnection(
@@ -2493,7 +2631,7 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryPreviewExperimental(
 {
 	if (!RejectUnknownParams(
 		Params,
-		{ TEXT("assetPath"), TEXT("graphGuid"), TEXT("nodes"), TEXT("connections") },
+		{ TEXT("assetPath"), TEXT("graphGuid"), TEXT("nodes"), TEXT("connections"), TEXT("operation") },
 		OutErrorCode,
 		OutErrorMessage))
 	{
@@ -2525,7 +2663,7 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 {
 	if (!RejectUnknownParams(
 		Params,
-		{ TEXT("assetPath"), TEXT("graphGuid"), TEXT("nodes"), TEXT("connections"), TEXT("planId"), TEXT("confirmation") },
+		{ TEXT("assetPath"), TEXT("graphGuid"), TEXT("nodes"), TEXT("connections"), TEXT("planId"), TEXT("confirmation"), TEXT("operation") },
 		OutErrorCode,
 		OutErrorMessage))
 	{
@@ -2601,6 +2739,12 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 
 	const int32 NodeCountBefore = Graph->Nodes.Num();
 	const int32 LinkCountBefore = CountLinks(Graph);
+	TSet<FString> BeforeEdges;
+	TSet<FString> AfterEdges;
+	if (Plan.bDisconnect)
+	{
+		CollectEdgeKeys(Graph, BeforeEdges);
+	}
 	if (Plan.bHasExistingPin)
 	{
 		FString CurrentEdgeSetHash;
@@ -2775,6 +2919,44 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 		{
 			UEdGraphPin* FromPin = nullptr;
 			UEdGraphPin* ToPin = nullptr;
+			if (Plan.bDisconnect)
+			{
+				FExistingPinSpec ResolvedFrom = Connection.FromExisting;
+				FExistingPinSpec ResolvedTo = Connection.ToExisting;
+				if (!ResolveExistingPin(
+						Graph,
+						ResolvedFrom,
+						FromPin,
+						OutErrorCode,
+						OutErrorMessage,
+						true)
+					|| !ResolveExistingPin(
+						Graph,
+						ResolvedTo,
+						ToPin,
+						OutErrorCode,
+						OutErrorMessage,
+						true))
+				{
+					return Abort(*OutErrorCode, OutErrorMessage);
+				}
+				if (!FromPin->LinkedTo.Contains(ToPin)
+					|| ToPin->LinkedTo.Num() != 1
+					|| !ToPin->LinkedTo.Contains(FromPin))
+				{
+					return Abort(
+						TEXT("graph-edit-disconnect-edge-not-found"),
+						TEXT("The exact edge is no longer present or the input has become ambiguous."));
+				}
+				FromPin->BreakLinkTo(ToPin);
+				if (FromPin->LinkedTo.Contains(ToPin) || ToPin->LinkedTo.Contains(FromPin))
+				{
+					return Abort(
+						TEXT("graph-edit-disconnect-failed"),
+						TEXT("The Editor did not remove the exact edge."));
+				}
+				continue;
+			}
 			if (Connection.bFromExisting && Connection.bToExisting)
 			{
 				FExistingPinSpec ResolvedFrom = Connection.FromExisting;
@@ -2967,11 +3149,44 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 
 	const int32 NodeCountAfter = Graph->Nodes.Num();
 	const int32 LinkCountAfter = CountLinks(Graph);
-	if (LinkCountAfter != LinkCountBefore + Plan.Connections.Num())
+	const int32 ExpectedLinkDelta = Plan.bDisconnect
+		? -Plan.Connections.Num()
+		: Plan.Connections.Num();
+	if (LinkCountAfter != LinkCountBefore + ExpectedLinkDelta)
 	{
 		return FailCommitted(
 			TEXT("graph-edit-readback-failed"),
-			TEXT("The graph link count does not match the previewed connection count after Apply."));
+			TEXT("The graph link count does not match the previewed edge delta after Apply."));
+	}
+	if (Plan.bDisconnect)
+	{
+		CollectEdgeKeys(Graph, AfterEdges);
+		int32 RemovedEdges = 0;
+		int32 AddedEdges = 0;
+		for (const FString& Edge : BeforeEdges)
+		{
+			RemovedEdges += AfterEdges.Contains(Edge) ? 0 : 1;
+		}
+		for (const FString& Edge : AfterEdges)
+		{
+			AddedEdges += BeforeEdges.Contains(Edge) ? 0 : 1;
+		}
+		const FConnectionSpec& Disconnect = Plan.Connections[0];
+		const FString RemovedKey = FString::Printf(
+			TEXT("%s|%s>%s|%s"),
+			*Disconnect.FromExisting.NodeGuid,
+			*Disconnect.FromExisting.PinGuid,
+			*Disconnect.ToExisting.NodeGuid,
+			*Disconnect.ToExisting.PinGuid);
+		if (RemovedEdges != 1
+			|| AddedEdges != 0
+			|| !BeforeEdges.Contains(RemovedKey)
+			|| AfterEdges.Contains(RemovedKey))
+		{
+			return FailCommitted(
+				TEXT("graph-edit-disconnect-delta-failed"),
+				TEXT("Disconnect did not remove exactly the declared edge while preserving all others."));
+		}
 	}
 	if (Plan.bHasExistingPin)
 	{
@@ -3220,8 +3435,14 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 		FString(SaveConfirmationPrefix) + Plan.PlanId);
 	Result->SetNumberField(TEXT("nodeCountBefore"), NodeCountBefore);
 	Result->SetNumberField(TEXT("nodeCountAfter"), NodeCountAfter);
+	Result->SetStringField(TEXT("operation"), Plan.Operation);
 	Result->SetNumberField(TEXT("createdNodeCount"), Plan.Nodes.Num());
-	Result->SetNumberField(TEXT("createdConnectionCount"), Plan.Connections.Num());
+	Result->SetNumberField(
+		TEXT("createdConnectionCount"),
+		Plan.bDisconnect ? 0 : Plan.Connections.Num());
+	Result->SetNumberField(
+		TEXT("removedConnectionCount"),
+		Plan.bDisconnect ? Plan.Connections.Num() : 0);
 	Result->SetNumberField(TEXT("linkCountBefore"), LinkCountBefore);
 	Result->SetNumberField(TEXT("linkCountAfter"), LinkCountAfter);
 	Result->SetBoolField(TEXT("packageDirtyAfter"), true);
@@ -3235,7 +3456,14 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 		Result->SetStringField(TEXT("edgeSetHash"), AfterEdgeSetHash);
 	}
 	Result->SetArrayField(TEXT("createdNodes"), CreatedNodeValues);
-	Result->SetArrayField(TEXT("createdConnections"), ConnectionValues);
+	if (Plan.bDisconnect)
+	{
+		Result->SetArrayField(TEXT("removedConnections"), ConnectionValues);
+	}
+	else
+	{
+		Result->SetArrayField(TEXT("createdConnections"), ConnectionValues);
+	}
 	OutResult = Result;
 	return true;
 }

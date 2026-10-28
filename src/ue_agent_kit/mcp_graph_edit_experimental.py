@@ -79,6 +79,7 @@ def register_graph_edit_experimental_tools(
         graphGuid: str,
         nodes: list[dict[str, Any]],
         connections: list[dict[str, Any]],
+        operation: str = "connect",
     ) -> dict[str, Any]:
         """Opt-in, read-only: validate a bounded createNode/connectPins plan against the live graph.
 
@@ -92,9 +93,10 @@ def register_graph_edit_experimental_tools(
         fromExisting/toExisting (nodeGuid + pinGuid + name + direction +
         category); an existing input must be unlinked and the schema must return
         MAKE (no BreakOthers/conversion/promotion). A plan with nodes=[] may add
-        exactly one existing output -> existing unlinked input edge. The result
-        is read-only and returns the exact planId and requiredConfirmation needed
-        by Apply. It never opens a transaction, dirties, compiles, or saves.
+        exactly one existing output -> existing unlinked input edge, or with
+        operation="disconnect" remove exactly one existing edge. The result is
+        read-only and returns the exact planId and requiredConfirmation needed by
+        Apply. It never opens a transaction, dirties, compiles, or saves.
         """
         try:
             _capabilities(live_editor_service, PREVIEW_CAPABILITY)
@@ -103,6 +105,7 @@ def register_graph_edit_experimental_tools(
                 graph_guid=graphGuid,
                 nodes=nodes,
                 connections=connections,
+                operation=operation,
             )
             encoded = json.dumps(params, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
             if len(encoded) > MAX_REQUEST_BYTES:

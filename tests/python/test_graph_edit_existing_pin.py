@@ -426,5 +426,157 @@ class ExistingPinContractTests(unittest.TestCase):
         )
 
 
+    def test_disconnect_requires_zero_nodes_and_one_existing_edge(self) -> None:
+        request = validate_preview_parameters(
+            asset_path=ASSET,
+            graph_guid=GRAPH,
+            nodes=[],
+            connections=[
+                {
+                    "fromExisting": _existing(direction="output", category="exec"),
+                    "toExisting": _existing(
+                        direction="input",
+                        category="exec",
+                        node=SECOND_NODE,
+                        pin=SECOND_PIN,
+                    ),
+                }
+            ],
+            operation="disconnect",
+        )
+        self.assertEqual(request["operation"], "disconnect")
+        self.assertEqual(request["nodes"], [])
+
+        with self.assertRaises(GraphEditError) as raised:
+            validate_preview_parameters(
+                asset_path=ASSET,
+                graph_guid=GRAPH,
+                nodes=[_get_node()],
+                connections=[
+                    {
+                        "fromExisting": _existing(direction="output", category="exec"),
+                        "toExisting": _existing(
+                            direction="input",
+                            category="exec",
+                            node=SECOND_NODE,
+                            pin=SECOND_PIN,
+                        ),
+                    }
+                ],
+                operation="disconnect",
+            )
+        self.assertEqual(raised.exception.code, "graph-edit-disconnect-invalid-plan")
+
+    def test_disconnect_rejects_non_existing_endpoint(self) -> None:
+        with self.assertRaises(GraphEditError) as raised:
+            validate_preview_parameters(
+                asset_path=ASSET,
+                graph_guid=GRAPH,
+                nodes=[],
+                connections=[
+                    {
+                        "fromExisting": _existing(direction="output", category="exec"),
+                        "to": "tmp:get",
+                        "toPin": "AgentCount",
+                    }
+                ],
+                operation="disconnect",
+            )
+        self.assertEqual(raised.exception.code, "graph-edit-disconnect-invalid-plan")
+
+    def test_invalid_operation_is_rejected(self) -> None:
+        with self.assertRaises(GraphEditError) as raised:
+            validate_preview_parameters(
+                asset_path=ASSET,
+                graph_guid=GRAPH,
+                nodes=[],
+                connections=[],
+                operation="rewire",
+            )
+        self.assertEqual(raised.exception.code, "graph-edit-invalid-operation")
+
+    def test_preview_disconnect_round_trips_into_apply(self) -> None:
+        preview = {
+            "schemaVersion": "ueak.graphpatch-edit-preview/1.0",
+            "experimental": True,
+            "readOnly": True,
+            "wroteBlueprint": False,
+            "savedPackage": False,
+            "compiled": False,
+            "planId": PLAN_ID,
+            "assetPath": ASSET,
+            "graphGuid": GRAPH,
+            "operation": "disconnect",
+            "disconnectCount": 1,
+            "packageRevision": "sha256:" + "b" * 64,
+            "graphFingerprint": "sha1:" + "c" * 40,
+            "beforeEdgeSetHash": BEFORE_EDGE_HASH,
+            "nodeCountBefore": 4,
+            "nodeCountAfter": 4,
+            "connectionCount": 1,
+            "requiredConfirmation": APPLY_CONFIRMATION_PREFIX + PLAN_ID,
+            "nodes": [],
+            "connections": [
+                {
+                    "fromExisting": _existing(direction="output", category="exec"),
+                    "fromType": "exec",
+                    "toExisting": _existing(
+                        direction="input",
+                        category="exec",
+                        node=SECOND_NODE,
+                        pin=SECOND_PIN,
+                    ),
+                    "toType": "exec",
+                }
+            ],
+        }
+        normalized = validate_preview_result(preview)
+        self.assertEqual(normalized["operation"], "disconnect")
+        applied = build_apply_parameters(
+            preview,
+            confirmation_for_plan(preview["planId"]),
+        )
+        self.assertEqual(applied["operation"], "disconnect")
+        self.assertEqual(applied["nodes"], [])
+
+    def test_preview_disconnect_requires_disconnect_count(self) -> None:
+        preview = {
+            "schemaVersion": "ueak.graphpatch-edit-preview/1.0",
+            "experimental": True,
+            "readOnly": True,
+            "wroteBlueprint": False,
+            "savedPackage": False,
+            "compiled": False,
+            "planId": PLAN_ID,
+            "assetPath": ASSET,
+            "graphGuid": GRAPH,
+            "operation": "disconnect",
+            "packageRevision": "sha256:" + "b" * 64,
+            "graphFingerprint": "sha1:" + "c" * 40,
+            "beforeEdgeSetHash": BEFORE_EDGE_HASH,
+            "nodeCountBefore": 4,
+            "nodeCountAfter": 4,
+            "connectionCount": 1,
+            "requiredConfirmation": APPLY_CONFIRMATION_PREFIX + PLAN_ID,
+            "nodes": [],
+            "connections": [
+                {
+                    "fromExisting": _existing(direction="output", category="exec"),
+                    "fromType": "exec",
+                    "toExisting": _existing(
+                        direction="input",
+                        category="exec",
+                        node=SECOND_NODE,
+                        pin=SECOND_PIN,
+                    ),
+                    "toType": "exec",
+                }
+            ],
+        }
+        with self.assertRaises(GraphEditError) as raised:
+            validate_preview_result(preview)
+        self.assertEqual(raised.exception.code, "graph-edit-preview-invalid")
+
+
 if __name__ == "__main__":
     unittest.main()

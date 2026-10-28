@@ -85,6 +85,24 @@ namespace UEAgentKitConnectExistingSafety
 		return nullptr;
 	}
 
+	UK2Node_IfThenElse* FindBranchWithUnlinkedExecute(UEdGraph* Graph)
+	{
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			UK2Node_IfThenElse* Branch = Cast<UK2Node_IfThenElse>(Node);
+			if (Branch == nullptr)
+			{
+				continue;
+			}
+			const UEdGraphPin* Execute = Branch->FindPin(TEXT("execute"), EGPD_Input);
+			if (Execute != nullptr && Execute->LinkedTo.Num() == 0)
+			{
+				return Branch;
+			}
+		}
+		return nullptr;
+	}
+
 	UK2Node_Event* FindEventWithUnlinkedThen(UEdGraph* Graph)
 	{
 		for (UEdGraphNode* Node : Graph->Nodes)
@@ -169,7 +187,8 @@ namespace UEAgentKitConnectExistingSafety
 		const UEdGraphNode* SourceNode,
 		const UEdGraphPin* SourceOutput,
 		const UEdGraphNode* TargetNode,
-		const UEdGraphPin* TargetInput)
+		const UEdGraphPin* TargetInput,
+		const TCHAR* Operation = TEXT("connect"))
 	{
 		TSharedRef<FJsonObject> Connection = MakeShared<FJsonObject>();
 		Connection->SetObjectField(TEXT("fromExisting"), MakeExistingPin(SourceNode, SourceOutput));
@@ -177,11 +196,103 @@ namespace UEAgentKitConnectExistingSafety
 		TSharedRef<FJsonObject> Params = MakeShared<FJsonObject>();
 		Params->SetStringField(TEXT("assetPath"), Blueprint->GetPathName());
 		Params->SetStringField(TEXT("graphGuid"), GuidLower(Graph->GraphGuid));
+		Params->SetStringField(TEXT("operation"), Operation);
 		Params->SetArrayField(TEXT("nodes"), TArray<TSharedPtr<FJsonValue>>());
 		TArray<TSharedPtr<FJsonValue>> Connections;
 		Connections.Add(MakeShared<FJsonValueObject>(Connection));
 		Params->SetArrayField(TEXT("connections"), Connections);
 		return Params;
+	}
+
+	struct FExistingEdge
+	{
+		UEdGraphPin* From = nullptr;
+		UEdGraphPin* To = nullptr;
+	};
+
+	void CollectExistingEdges(UEdGraph* Graph, TArray<FExistingEdge>& OutEdges)
+	{
+		OutEdges.Reset();
+		if (Graph == nullptr)
+		{
+			return;
+		}
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (Node == nullptr)
+			{
+				continue;
+			}
+			for (UEdGraphPin* Pin : Node->Pins)
+			{
+				if (Pin == nullptr || Pin->Direction != EGPD_Output)
+				{
+					continue;
+				}
+				for (UEdGraphPin* Linked : Pin->LinkedTo)
+				{
+					if (Linked != nullptr)
+					{
+						OutEdges.Add({ Pin, Linked });
+					}
+				}
+			}
+		}
+	}
+
+	bool SetupDisconnectPreview(
+		FAutomationTestBase* Test,
+		UBlueprint*& OutBlueprint,
+		UEdGraph*& OutGraph,
+		TSharedPtr<FJsonObject>& OutPreviewParams,
+		TSharedPtr<FJsonObject>& OutPreview,
+		FExistingEdge& OutTarget,
+		FExistingEdge& OutProtected,
+		FString& OutError)
+	{
+		OutBlueprint = LoadFixture(OutError);
+		if (OutBlueprint == nullptr)
+		{
+			Test->AddError(OutError);
+			return false;
+		}
+		OutGraph = OutBlueprint->UbergraphPages.Num() > 0
+			? OutBlueprint->UbergraphPages[0]
+			: nullptr;
+		if (OutGraph == nullptr || OpenAndFocus(OutBlueprint, OutGraph, OutError) == nullptr)
+		{
+			Test->AddError(OutError);
+			return false;
+		}
+		TArray<FExistingEdge> Edges;
+		CollectExistingEdges(OutGraph, Edges);
+		if (Edges.Num() < 2)
+		{
+			Test->AddError(TEXT("The fixture must contain at least two existing edges."));
+			return false;
+		}
+		OutTarget = Edges[0];
+		OutProtected = Edges[1];
+		OutPreviewParams = MakePureExistingPreviewParams(
+			OutBlueprint,
+			OutGraph,
+			OutTarget.From->GetOwningNode(),
+			OutTarget.From,
+			OutTarget.To->GetOwningNode(),
+			OutTarget.To,
+			TEXT("disconnect"));
+		FString ErrorCode;
+		FString ErrorMessage;
+		if (!UEAgentKitBlueprintGraphEditExperimental::TryPreviewExperimental(
+			OutPreviewParams,
+			OutPreview,
+			ErrorCode,
+			ErrorMessage))
+		{
+			Test->AddError(FString::Printf(TEXT("Disconnect Preview failed: %s %s"), *ErrorCode, *ErrorMessage));
+			return false;
+		}
+		return true;
 	}
 
 	bool SetupPreview(
@@ -257,25 +368,19 @@ bool FUEAgentKitConnectExistingStalePlanTest::RunTest(const FString& Parameters)
 		UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
 		return false;
 	}
-	UK2Node_Event* Event = FindEventWithUnlinkedThen(Graph);
 	UK2Node_IfThenElse* Branch = FindBranch(Graph);
-	UEdGraphPin* EventThen = Event != nullptr ? Event->FindPin(TEXT("then"), EGPD_Output) : nullptr;
-	UEdGraphPin* BranchExecute = Branch != nullptr ? Branch->FindPin(TEXT("execute"), EGPD_Input) : nullptr;
-	if (!TestNotNull(TEXT("event then pin exists"), EventThen)
-		|| !TestNotNull(TEXT("branch execute pin exists"), BranchExecute))
+	if (!TestNotNull(TEXT("branch exists"), Branch))
 	{
 		UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
 		return false;
 	}
 
-	// Mutate an existing edge after Preview; the plan must not silently apply.
-	const bool bCreatedUnplannedLink =
-		Graph->GetSchema()->TryCreateConnection(EventThen, BranchExecute)
-		&& EventThen->LinkedTo.Contains(BranchExecute);
-	TestTrue(TEXT("test created an unplanned existing edge"), bCreatedUnplannedLink);
+	// Mutate the graph after Preview; the plan must not silently apply.
+	const int32 OldX = Branch->NodePosX;
+	Branch->Modify();
+	Branch->NodePosX = OldX + 5;
 	// Keep the package "clean" so the test reaches the plan/fingerprint/edge-set
-	// gate instead of stopping at graph-edit-package-dirty.  This is a test-only
-	// manipulation; cleanup restores both the edge and the dirty flag.
+	// gate instead of stopping at graph-edit-package-dirty.
 	Blueprint->GetOutermost()->SetDirtyFlag(false);
 
 	TSharedPtr<FJsonObject> ApplyParams = MakeShared<FJsonObject>();
@@ -315,9 +420,8 @@ bool FUEAgentKitConnectExistingStalePlanTest::RunTest(const FString& Parameters)
 		AddError(TEXT("Stale plan unexpectedly applied."));
 	}
 
-	// Cleanup the test-only edge and dirty state.
-	EventThen->BreakLinkTo(BranchExecute);
-	TestFalse(TEXT("cleanup removed the test-only link"), EventThen->LinkedTo.Contains(BranchExecute));
+	// Cleanup the test-only position change and dirty state.
+	Branch->NodePosX = OldX;
 	Blueprint->GetOutermost()->SetDirtyFlag(false);
 	UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
 	return true;
@@ -349,7 +453,7 @@ bool FUEAgentKitConnectExistingExistingStaleTest::RunTest(const FString& Paramet
 		return false;
 	}
 	UK2Node_Event* Event = FindEventWithUnlinkedThen(Graph);
-	UK2Node_IfThenElse* Branch = FindBranch(Graph);
+	UK2Node_IfThenElse* Branch = FindBranchWithUnlinkedExecute(Graph);
 	UEdGraphPin* EventThen = Event != nullptr ? Event->FindPin(TEXT("then"), EGPD_Output) : nullptr;
 	UEdGraphPin* BranchExecute = Branch != nullptr ? Branch->FindPin(TEXT("execute"), EGPD_Input) : nullptr;
 	if (!TestNotNull(TEXT("event then pin exists"), EventThen)
@@ -428,6 +532,94 @@ bool FUEAgentKitConnectExistingExistingStaleTest::RunTest(const FString& Paramet
 	}
 
 	Branch->NodePosX = OldX;
+	Blueprint->GetOutermost()->SetDirtyFlag(false);
+	UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUEAgentKitExactDisconnectStaleTest,
+	"UEAgentKit.Blueprint.ConnectExistingCExactDisconnectStaleGate",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUEAgentKitExactDisconnectStaleTest::RunTest(const FString& Parameters)
+{
+	using namespace UEAgentKitConnectExistingSafety;
+	UEAgentKitBlueprintGraphEditExperimental::SetExperimentalWriteEnabledForTest(true);
+
+	UBlueprint* Blueprint = nullptr;
+	UEdGraph* Graph = nullptr;
+	TSharedPtr<FJsonObject> PreviewParams;
+	TSharedPtr<FJsonObject> Preview;
+	FExistingEdge Target;
+	FExistingEdge Protected;
+	FString Error;
+	if (!SetupDisconnectPreview(
+		this,
+		Blueprint,
+		Graph,
+		PreviewParams,
+		Preview,
+		Target,
+		Protected,
+		Error))
+	{
+		UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
+		return false;
+	}
+	TestEqual(
+		TEXT("disconnect preview reports one removed edge"),
+		Preview->GetNumberField(TEXT("disconnectCount")),
+		1.0);
+
+	// Change the protected edge after Preview; the plan must become stale and
+	// must never remove the target while silently accepting the new graph.
+	Protected.From->BreakLinkTo(Protected.To);
+	Blueprint->GetOutermost()->SetDirtyFlag(false);
+
+	TSharedPtr<FJsonObject> ApplyParams = MakeShared<FJsonObject>();
+	ApplyParams->SetStringField(TEXT("assetPath"), PreviewParams->GetStringField(TEXT("assetPath")));
+	ApplyParams->SetStringField(TEXT("graphGuid"), PreviewParams->GetStringField(TEXT("graphGuid")));
+	ApplyParams->SetStringField(TEXT("operation"), TEXT("disconnect"));
+	ApplyParams->SetArrayField(TEXT("nodes"), PreviewParams->GetArrayField(TEXT("nodes")));
+	ApplyParams->SetArrayField(TEXT("connections"), PreviewParams->GetArrayField(TEXT("connections")));
+	ApplyParams->SetStringField(TEXT("planId"), Preview->GetStringField(TEXT("planId")));
+	ApplyParams->SetStringField(
+		TEXT("confirmation"),
+		Preview->GetStringField(TEXT("requiredConfirmation")));
+
+	TSharedPtr<FJsonObject> Applied;
+	FString ApplyCode;
+	FString ApplyMessage;
+	const bool bApplied = UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
+		ApplyParams,
+		Applied,
+		ApplyCode,
+		ApplyMessage);
+	TestFalse(TEXT("stale disconnect plan is rejected"), bApplied);
+	TestTrue(
+		TEXT("stale disconnect uses a stale/edge-set code"),
+		ApplyCode == TEXT("graph-edit-plan-stale")
+			|| ApplyCode == TEXT("graph-edit-edge-set-stale")
+			|| ApplyCode == TEXT("graph-edit-disconnect-edge-not-found"));
+	if (!bApplied
+		&& ApplyCode != TEXT("graph-edit-plan-stale")
+		&& ApplyCode != TEXT("graph-edit-edge-set-stale")
+		&& ApplyCode != TEXT("graph-edit-disconnect-edge-not-found"))
+	{
+		AddError(FString::Printf(TEXT("Unexpected disconnect stale code: %s %s"), *ApplyCode, *ApplyMessage));
+	}
+
+	// Restore the fixture: protected edge back, and target edge if it was
+	// unexpectedly removed by a failing implementation.
+	if (!Protected.From->LinkedTo.Contains(Protected.To))
+	{
+		Protected.From->MakeLinkTo(Protected.To);
+	}
+	if (!Target.From->LinkedTo.Contains(Target.To))
+	{
+		Target.From->MakeLinkTo(Target.To);
+	}
 	Blueprint->GetOutermost()->SetDirtyFlag(false);
 	UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
 	return true;
@@ -527,8 +719,18 @@ bool FUEAgentKitConnectExistingPieTest::RunTest(const FString& Parameters)
 	UEdGraph* Graph = nullptr;
 	TSharedPtr<FJsonObject> PreviewParams;
 	TSharedPtr<FJsonObject> Preview;
+	FExistingEdge Target;
+	FExistingEdge Protected;
 	FString Error;
-	if (!SetupPreview(this, Blueprint, Graph, PreviewParams, Preview, Error))
+	if (!SetupDisconnectPreview(
+		this,
+		Blueprint,
+		Graph,
+		PreviewParams,
+		Preview,
+		Target,
+		Protected,
+		Error))
 	{
 		UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
 		return false;

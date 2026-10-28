@@ -11,6 +11,7 @@
 #include "HAL/FileManager.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "K2Node.h"
+#include "K2Node_Event.h"
 #include "K2Node_IfThenElse.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
@@ -192,31 +193,51 @@ namespace BlueprintWriteFixtureCommandletPrivate
 				TEXT("3"));
 		}
 
-		// One existing Branch with unconnected exec/bool inputs, used by the
-		// connect-existing-pin acceptance.  It is part of the disposable
-		// fixture, never created by the write plan.
+		// Two existing Branch nodes and two pre-existing Event->Branch edges.
+		// Disconnect acceptance removes exactly one of these edges while the
+		// other must survive unchanged.
 		if (Blueprint->UbergraphPages.Num() > 0)
 		{
 			UEdGraph* EventGraph = Blueprint->UbergraphPages[0];
-			bool bHasBranch = false;
+			TArray<UK2Node_IfThenElse*> Branches;
+			TArray<UEdGraphPin*> EventThenPins;
 			for (UEdGraphNode* Node : EventGraph->Nodes)
 			{
-				if (Cast<UK2Node_IfThenElse>(Node) != nullptr)
+				if (UK2Node_IfThenElse* Branch = Cast<UK2Node_IfThenElse>(Node))
 				{
-					bHasBranch = true;
-					break;
+					Branches.Add(Branch);
+					continue;
+				}
+				if (UK2Node_Event* Event = Cast<UK2Node_Event>(Node))
+				{
+					UEdGraphPin* ThenPin = Event->FindPin(TEXT("then"), EGPD_Output);
+					if (ThenPin != nullptr && ThenPin->LinkedTo.Num() == 0)
+					{
+						EventThenPins.Add(ThenPin);
+					}
 				}
 			}
-			if (!bHasBranch)
+			while (Branches.Num() < 4)
 			{
 				FGraphNodeCreator<UK2Node_IfThenElse> Creator(*EventGraph);
 				UK2Node_IfThenElse* Branch = Creator.CreateNode();
 				Branch->NodePosX = -600;
-				Branch->NodePosY = 300;
+				Branch->NodePosY = 300 + 220 * Branches.Num();
 				Creator.Finalize();
 				if (!Branch->NodeGuid.IsValid())
 				{
 					Branch->CreateNewGuid();
+				}
+				Branches.Add(Branch);
+			}
+			for (int32 Index = 0; Index < 2 && Index < EventThenPins.Num() && Index < Branches.Num(); ++Index)
+			{
+				UEdGraphPin* ExecutePin = Branches[Index]->FindPin(TEXT("execute"), EGPD_Input);
+				if (ExecutePin != nullptr
+					&& EventThenPins[Index]->LinkedTo.Num() == 0
+					&& ExecutePin->LinkedTo.Num() == 0)
+				{
+					EventThenPins[Index]->MakeLinkTo(ExecutePin);
 				}
 			}
 		}

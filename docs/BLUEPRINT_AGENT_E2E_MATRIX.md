@@ -178,6 +178,7 @@ Canonical JSON 当 UE 写入依据。
 | 变量 Get/Set 访问器（bool/int/double/string + FunctionGraph） | `ue_preview/apply/save_blueprint_graph_edit_experimental`（扩展节点类型） | `editor.*BlueprintGraphEditExperimental` | `variableName/variableGuid/variableType`；同一 plan 内精确连线 | 现有顶层成员变量；GUID+name+type 绑定；精确 pin；Undo/Redo；Save variableBindingHash | **A（正向 MCP）**；PIE/同类型 retarget 为 **B（native automation）** |
 | 新节点连接到已存在精确 Pin | `ue_preview/apply/save_blueprint_graph_edit_experimental`（扩展 connection 端点） | `editor.*BlueprintGraphEditExperimental` | `fromExisting`/`toExisting`：nodeGuid+pinGuid+pinName+direction+category/subCategory；另一端点为本 plan 新节点 | 仅一个 existing 端点；existing input 未连线；existing output fan-out 保留；拒绝 BreakOthers/转换/提升；before/after edge-set hash | **A（正向 MCP + Reload）**；PIE/Preview 后 stale 为 **B（native automation）** |
 | 已有节点 → 已有未连线输入（`nodes=[]` 单边） | `ue_preview/apply/save_blueprint_graph_edit_experimental`（纯 existing connection） | `editor.*BlueprintGraphEditExperimental` | `fromExisting`+`toExisting` 两端 exact GUID/name/direction/type；`nodes=[]`；仅一条连接 | 同图不同节点；target input 未连线；source fan-out 保留；节点数不变；before/after edge-set hash；拒绝已有边替换 | **A（正向 MCP + Reload）**；zero-node stale/PIE 为 **B（native automation）** |
+| 精确断开一条已有边（`operation=disconnect`，`nodes=[]`） | `ue_preview/apply/save_blueprint_graph_edit_experimental`（disconnect 模式） | `editor.*BlueprintGraphEditExperimental` | 两端 exact GUID/name/direction/type；目标 input 当前恰好只有这一条 link；仅一条连接、零新节点 | 只 `BreakLinkTo` 这一对；edge-set 删除=1/新增=0；其它边与节点保留；before/after hash；Undo/Redo/Save receipt；拒绝不存在/歧义边 | **A（正向 MCP + Reload）**；disconnect 后 stale/PIE 为 **B（native automation）** |
 | Graph layout apply | `ue_preview_blueprint_graph_layout` + `ue_apply/save`（若开启） | `editor.*BlueprintGraphLayoutApply*` | 位置计划 hash | 只改位置 | P6-P8 Socket 探针（部分 A/B），非本轮回归 |
 
 > 后验补充（不改变 P5 原始五类结论）：2026-10-28 已完成 `variable_get` /
@@ -224,7 +225,8 @@ disconnect 分支与“1 条 incident edge 的 node remove”本轮没有跑真�
 | 7 | 单序列覆盖 | **OPEN（部分收窄）** | 原 P5 只覆盖一个 Actor BP；2026-10-28 accessor 验收新增独立 BP（4 类型 + EventGraph + FunctionGraph）与 native PIE/retarget，但仍未覆盖多资产并发、崩溃恢复、undo 栈很深 |
 | 8 | 变量 Get/Set 访问器节点 | **A 正向 / B 安全门** | 真实 MCP 正向已通过（10 accessors、Undo/Redo、Save、fresh-process Reload）；PIE 与同类型 retarget 为 native B。macro 图路径未实测 |
 | 9 | 新节点连接已存在 Pin | **A 正向 / B 安全门** | 真实 MCP 正向已通过（4 条 existing-pin 连接、edge-set before/after、Undo/Redo、Save、fresh-process Reload）；PIE 与 Preview 后 stale 为 native B。批量、改类型、rewire 仍不支持 |
-| 10 | 已有 output → 已有 unlinked input（`nodes=[]`） | **A 正向 / B 安全门** | 真实 MCP 正向已通过（1 条边、节点数不变、Undo/Redo、Save、Reload）；zero-node stale/PIE 为 native B。仅一条边，不支持 rewire/delete/批量/与新节点混用 |
+| 10 | 已有 output → 已有 unlinked input（`nodes=[]`） | **A 正向 / B 安全门** | 真实 MCP 正向已通过（1 条边、节点数不变、Undo/Redo、Save、Reload）；zero-node stale/PIE 为 native B。仅一条边，不支持 rewire/批量/与新节点混用 |
+| 11 | 精确断开一条已有 edge（`operation=disconnect`） | **A 正向 / B 安全门** | 真实 MCP 从两条已有 Event→Branch 边中精确删除 1 条，另一个边/全部节点保留；Undo/Redo、Save receipt、Reload 通过。disconnect 后 stale/PIE 为 native B。仅一条边，不支持批量/rewire |
 
 已在本轮关闭/降级的缺口：
 

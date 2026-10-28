@@ -284,11 +284,18 @@ def validate_preview_parameters(
     graph_guid: Any,
     nodes: Any,
     connections: Any,
+    operation: Any = "connect",
 ) -> dict[str, Any]:
     """Validate and normalize one bounded preview request."""
 
     normalized_asset = _string(asset_path, "assetPath", maximum=512)
     normalized_graph = _string(graph_guid, "graphGuid", maximum=64)
+    normalized_operation = _string(operation, "operation", maximum=16)
+    if normalized_operation not in ("connect", "disconnect"):
+        raise GraphEditError(
+            "graph-edit-invalid-operation",
+            "operation must be connect or disconnect.",
+        )
     if not isinstance(nodes, list) or len(nodes) > MAX_NODES:
         raise GraphEditError(
             "graph-edit-invalid-nodes",
@@ -299,6 +306,18 @@ def validate_preview_parameters(
             "graph-edit-invalid-connections",
             f"connections must contain at most {MAX_CONNECTIONS} objects.",
         )
+    if normalized_operation == "disconnect":
+        if len(nodes) != 0 or len(connections) != 1:
+            raise GraphEditError(
+                "graph-edit-disconnect-invalid-plan",
+                "A disconnect plan requires nodes=[] and exactly one existing-to-existing edge.",
+            )
+        first_connection = _object(connections[0], "connections[0]")
+        if "fromExisting" not in first_connection or "toExisting" not in first_connection:
+            raise GraphEditError(
+                "graph-edit-disconnect-invalid-plan",
+                "A disconnect connection requires both fromExisting and toExisting.",
+            )
 
     normalized_nodes: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
@@ -637,32 +656,44 @@ def validate_preview_parameters(
         for connection in normalized_connections
         if "fromExisting" in connection and "toExisting" in connection
     )
-    if pure_existing_count > 1:
-        raise GraphEditError(
-            "graph-edit-existing-to-existing-limit",
-            "A plan may add at most one existing-to-existing connection.",
-        )
-    if pure_existing_count == 1 and (
-        normalized_nodes or len(normalized_connections) != 1
-    ):
-        raise GraphEditError(
-            "graph-edit-existing-to-existing-plan",
-            "A pure existing-to-existing connection must be the only connection and requires nodes=[].",
-        )
     if not normalized_nodes and not normalized_connections:
         raise GraphEditError(
             "graph-edit-empty-plan",
             "A graph edit plan must create at least one node or connect at least one existing edge.",
         )
-    if not normalized_nodes and pure_existing_count == 0:
-        raise GraphEditError(
-            "graph-edit-nodes-required",
-            "nodes may be empty only for one pure existing-to-existing connection.",
-        )
+    if normalized_operation == "disconnect":
+        if (
+            pure_existing_count != 1
+            or normalized_nodes
+            or len(normalized_connections) != 1
+        ):
+            raise GraphEditError(
+                "graph-edit-disconnect-invalid-plan",
+                "A disconnect plan requires nodes=[] and exactly one existing-to-existing edge.",
+            )
+    else:
+        if pure_existing_count > 1:
+            raise GraphEditError(
+                "graph-edit-existing-to-existing-limit",
+                "A plan may add at most one existing-to-existing connection.",
+            )
+        if pure_existing_count == 1 and (
+            normalized_nodes or len(normalized_connections) != 1
+        ):
+            raise GraphEditError(
+                "graph-edit-existing-to-existing-plan",
+                "A pure existing-to-existing connection must be the only connection and requires nodes=[].",
+            )
+        if not normalized_nodes and pure_existing_count == 0:
+            raise GraphEditError(
+                "graph-edit-nodes-required",
+                "nodes may be empty only for one pure existing-to-existing connection.",
+            )
 
     request = {
         "assetPath": normalized_asset,
         "graphGuid": normalized_graph,
+        "operation": normalized_operation,
         "nodes": normalized_nodes,
         "connections": normalized_connections,
     }
@@ -717,6 +748,17 @@ def validate_preview_result(preview: Any) -> dict[str, Any]:
         raise GraphEditError(
             "graph-edit-preview-invalid",
             "preview.assetPath and preview.graphGuid must be strings.",
+        )
+    operation = item.get("operation", "connect")
+    if operation not in ("connect", "disconnect"):
+        raise GraphEditError(
+            "graph-edit-preview-invalid",
+            "preview.operation must be connect or disconnect.",
+        )
+    if operation == "disconnect" and item.get("disconnectCount") != 1:
+        raise GraphEditError(
+            "graph-edit-preview-invalid",
+            "preview.disconnectCount must be 1 for a disconnect preview.",
         )
     before_edge_set_hash = item.get("beforeEdgeSetHash")
     if before_edge_set_hash is not None and (
@@ -927,6 +969,7 @@ def validate_preview_result(preview: Any) -> dict[str, Any]:
         graph_guid=graph_guid,
         nodes=normalized,
         connections=normalized_connections,
+        operation=operation,
     ) | {
         "planId": plan_id,
         "confirmation": expected_confirmation,
@@ -948,6 +991,7 @@ def build_apply_parameters(preview: Any, confirmation: Any) -> dict[str, Any]:
     return {
         "assetPath": normalized["assetPath"],
         "graphGuid": normalized["graphGuid"],
+        "operation": normalized["operation"],
         "nodes": normalized["nodes"],
         "connections": normalized["connections"],
         "planId": normalized["planId"],

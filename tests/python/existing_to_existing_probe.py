@@ -31,6 +31,21 @@ from mcp.client.stdio import StdioServerParameters, stdio_client  # noqa: E402
 ASSET_PATH = cp.ASSET_PATH
 
 
+def _find_branch_with_unlinked_execute(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    for node in manifest.get("nodes") or []:
+        if not isinstance(node, Mapping) or not str(node.get("class", "")).endswith("K2Node_IfThenElse"):
+            continue
+        for pin in node.get("pins") or []:
+            if (
+                isinstance(pin, Mapping)
+                and pin.get("pinName") == "execute"
+                and pin.get("direction") == "input"
+                and int(pin.get("linkCount", -1)) == 0
+            ):
+                return dict(node)
+    raise p5.ProbeError("fixture has no Branch with unlinked execute", code="fixture-shape")
+
+
 def _build_connection(
     event: Mapping[str, Any],
     branch: Mapping[str, Any],
@@ -149,7 +164,7 @@ async def _run(args: argparse.Namespace) -> int:
                 )
                 manifest = cp._load_manifest(project_root)
                 event = cp._find_event_with_unlinked_then(manifest)
-                branch = cp._find_node(manifest, "K2Node_IfThenElse")
+                branch = _find_branch_with_unlinked_execute(manifest)
                 connection, pins = _build_connection(event, branch)
                 report["eventGraphGuid"] = graph_guid
                 report["initialNodeCount"] = len(event_graph.get("nodes") or [])
