@@ -190,6 +190,58 @@ class ProjectMemoryCliTests(unittest.TestCase):
         self.assertEqual(second["reason"], "snapshot-current")
         self.assertEqual(second["snapshotId"], stale["snapshotId"])
 
+    def test_memory_preflight_requires_explicit_opt_in(self) -> None:
+        self.build_index("sha256:" + REVISION_A)
+        args = self.parse(
+            "memory",
+            "preflight-context",
+            *self.memory_arguments(),
+            "--index-database",
+            str(self.index_path),
+        )
+        result, code = run(args)
+        self.assertEqual(code, 0)
+        self.assertEqual(result["tool"], "ue_memory_session_preflight")
+        self.assertFalse(result["enabled"])
+        self.assertEqual(result["state"], "disabled")
+        self.assertFalse(result["available"])
+        self.assertEqual(result["text"], "")
+        self.assertTrue(result["textOmitted"])
+
+    def test_memory_preflight_omits_text_unless_requested(self) -> None:
+        self.build_index("sha256:" + REVISION_A)
+        args = self.parse(
+            "memory",
+            "preflight-context",
+            *self.memory_arguments(),
+            "--index-database",
+            str(self.index_path),
+            "--enable-session-preflight",
+        )
+        metadata, metadata_code = run(args)
+        self.assertEqual(metadata_code, 0)
+        self.assertEqual(metadata["state"], "fresh")
+        self.assertTrue(metadata["available"])
+        self.assertEqual(metadata["text"], "")
+        self.assertTrue(metadata["textOmitted"])
+        self.assertGreaterEqual(metadata["l3Entries"], 1)
+
+        with_text_args = self.parse(
+            "memory",
+            "preflight-context",
+            *self.memory_arguments(),
+            "--index-database",
+            str(self.index_path),
+            "--enable-session-preflight",
+            "--include-text",
+        )
+        with_text, with_text_code = run(with_text_args)
+        self.assertEqual(with_text_code, 0)
+        self.assertEqual(with_text["state"], "fresh")
+        self.assertIn("Text format", with_text["text"])
+        self.assertFalse(with_text["textOmitted"])
+        self.assertEqual(with_text["snapshotId"], metadata["snapshotId"])
+
     def test_memory_distill_reports_validation_and_chain_verdicts(self) -> None:
         artifact_root = self.root / "workflow"
         artifact_root.mkdir(parents=True, exist_ok=True)

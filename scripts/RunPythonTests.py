@@ -73,6 +73,7 @@ DOMAIN_MODULES: dict[str, tuple[str, ...]] = {
         "test_memory_l0",
         "test_memory_overhead",
         "test_memory_distill",
+        "test_memory_preflight",
         "test_memory_schema_v7",
         "test_memory_service",
         "test_memory_tasks",
