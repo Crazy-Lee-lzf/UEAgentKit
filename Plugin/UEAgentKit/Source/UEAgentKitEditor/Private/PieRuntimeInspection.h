@@ -36,6 +36,12 @@ namespace UEAgentKitPieRuntime
 	inline constexpr int32 DefaultActorComponents = 64;
 	inline constexpr int32 DefaultComponentAssets = 8;
 	inline constexpr int32 RetiredPieInstanceHistory = 64;
+	/** Scalar snapshot caps: one exact Actor/Component, named immediate fields. */
+	inline constexpr int32 MaxScalarProperties = 8;
+	inline constexpr int32 MaxScalarPropertyNameChars = 64;
+	inline constexpr int32 MinScalarStringChars = 64;
+	inline constexpr int32 DefaultScalarStringChars = 256;
+	inline constexpr int32 MaxScalarStringChars = 512;
 
 	/** Instance lookup class. Codes stay distinct on the wire. */
 	enum class ELookupStatus : uint8
@@ -59,6 +65,9 @@ namespace UEAgentKitPieRuntime
 		ActorNotFound,
 		ActorAmbiguous,
 		ActorStale,
+		ComponentNotFound,
+		ComponentAmbiguous,
+		ComponentStale,
 		ContextScanTruncated,
 		ScanTruncated,
 	};
@@ -148,6 +157,48 @@ namespace UEAgentKitPieRuntime
 	 */
 	bool TryDescribePieActor(
 		const FActorInspectionRequest& Request,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage);
+
+	/** Resolved exact world + Actor pair; the snapshot is owned by value. */
+	struct FResolvedPieActor
+	{
+		FWorldContextSnapshot Snapshot;
+		AActor* Actor = nullptr;
+	};
+
+	/**
+	 * Shared exact-identity resolver used by Actor description and scalar reads.
+	 * Validates the instance id, duplicate live contexts, optional world path,
+	 * exactly one Actor identity, ambiguity, destruction and optional class path.
+	 */
+	EFailure ResolvePieActorExact(
+		const FActorInspectionRequest& Request,
+		FResolvedPieActor& OutResolved,
+		FString& OutErrorMessage);
+
+	/** One bounded read of explicitly named immediate scalar FProperties. */
+	struct FScalarInspectionRequest
+	{
+		FActorInspectionRequest Actor;
+		/** Optional owned Component identity: at most one of path or name. */
+		FString ComponentPath;
+		FString ComponentName;
+		/** Optional expected Component class path; a mismatch is stale. */
+		FString ComponentClassPath;
+		/** Explicit property names only (no dotted paths, no collections). */
+		TArray<FString> PropertyNames;
+		int32 MaxStringChars = DefaultScalarStringChars;
+	};
+
+	/**
+	 * Bounded, read-only scalar read for one exact PIE Actor (or one exact owned
+	 * Component).  Missing / non-exposed / unsupported properties are reported
+	 * per property; nothing is fabricated and no UObject graph is traversed.
+	 */
+	bool TryReadPieScalars(
+		const FScalarInspectionRequest& Request,
 		TSharedPtr<FJsonObject>& OutResult,
 		FString& OutErrorCode,
 		FString& OutErrorMessage);

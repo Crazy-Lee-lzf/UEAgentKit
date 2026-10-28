@@ -115,6 +115,41 @@ def register_live_read_tools(
             return error_response("ue_inspect_pie_actor", exc, read_only=True)
 
     @server.tool(annotations=read_annotations)
+    def ue_get_pie_scalars(
+        pie_instance_id: int,
+        property_names: list[str],
+        actor_path: str = "",
+        actor_guid: str = "",
+        actor_name: str = "",
+        actor_label: str = "",
+        component_path: str = "",
+        component_name: str = "",
+        component_class_path: str = "",
+        world_path: str = "",
+        max_string_chars: int = 256,
+    ) -> dict[str, Any]:
+        """Read up to 8 named immediate scalar fields from one exact PIE Actor or owned Component (read-only)."""
+        try:
+            return live_editor_service.call_tool(
+                "ue_get_pie_scalars",
+                {
+                    "pieInstanceId": pie_instance_id,
+                    "actorPath": actor_path,
+                    "actorGuid": actor_guid,
+                    "actorName": actor_name,
+                    "actorLabel": actor_label,
+                    "componentPath": component_path,
+                    "componentName": component_name,
+                    "componentClassPath": component_class_path,
+                    "worldPath": world_path,
+                    "propertyNames": property_names,
+                    "maxStringChars": max_string_chars,
+                },
+            )
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_get_pie_scalars", exc, read_only=True)
+
+    @server.tool(annotations=read_annotations)
     def ue_get_output_log(
         category: str = "",
         minimum_verbosity: Literal[

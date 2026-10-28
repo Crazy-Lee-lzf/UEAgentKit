@@ -62,6 +62,7 @@ namespace UEAgentKitEditorBridgePrivate
 		TEXT("editor.getPieState"),
 		TEXT("editor.getPieWorldContexts"),
 		TEXT("editor.inspectPieActor"),
+		TEXT("editor.getPieScalars"),
 		TEXT("editor.getOutputLog"),
 		TEXT("editor.getCompileErrors"),
 		TEXT("editor.inspectAssetLive"),
@@ -822,6 +823,17 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 		FString ErrorMessage;
 		SendActionResult(
 			TryInspectPieActorResult(Params, Result, ErrorCode, ErrorMessage),
+			Result,
+			ErrorCode,
+			ErrorMessage);
+	}
+	else if (Method == TEXT("editor.getPieScalars"))
+	{
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode;
+		FString ErrorMessage;
+		SendActionResult(
+			TryReadPieScalarsResult(Params, Result, ErrorCode, ErrorMessage),
 			Result,
 			ErrorCode,
 			ErrorMessage);

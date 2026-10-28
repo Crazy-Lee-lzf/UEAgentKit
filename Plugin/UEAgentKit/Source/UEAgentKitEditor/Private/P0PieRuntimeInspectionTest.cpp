@@ -7,6 +7,7 @@
 // disposable PIE world only.
 
 #include "PieRuntimeInspection.h"
+#include "P0PieScalarFixture.h"
 
 #include "Components/StaticMeshComponent.h"
 #include "Editor.h"
@@ -141,6 +142,8 @@ namespace UEAgentKitP0PieRuntime
 		FString SpawnedActorName;
 		FString SpawnedActorLabel;
 		FString CubeAssetPath;
+		FString ScalarActorName;
+		FString ScalarComponentName;
 
 		bool bLabelAmbiguityVerified = false;
 		bool bClientWorldVerified = false;
@@ -148,9 +151,16 @@ namespace UEAgentKitP0PieRuntime
 		bool bComponentAssetVerified = false;
 		bool bBoundsVerified = false;
 		bool bContextListingRecorded = false;
+		bool bScalarActorVerified = false;
+		bool bScalarComponentVerified = false;
+		bool bScalarRejectionsVerified = false;
+		bool bScalarTruncationVerified = false;
+		bool bScalarIsolationVerified = false;
+		bool bScalarOutputBounded = false;
 
 		TSharedPtr<FJsonObject> ContextListing;
 		TSharedPtr<FJsonObject> ActorInspection;
+		TSharedPtr<FJsonObject> ScalarInspection;
 		TSharedPtr<FJsonObject> CodeEvidence;
 		TSharedPtr<FJsonObject> BoundsEvidence;
 
@@ -206,6 +216,14 @@ namespace UEAgentKitP0PieRuntime
 		Evidence->SetBoolField(TEXT("transformVerified"), State->bTransformVerified);
 		Evidence->SetBoolField(TEXT("componentAssetVerified"), State->bComponentAssetVerified);
 		Evidence->SetBoolField(TEXT("boundsVerified"), State->bBoundsVerified);
+		Evidence->SetBoolField(TEXT("scalarActorVerified"), State->bScalarActorVerified);
+		Evidence->SetBoolField(TEXT("scalarComponentVerified"), State->bScalarComponentVerified);
+		Evidence->SetBoolField(TEXT("scalarRejectionsVerified"), State->bScalarRejectionsVerified);
+		Evidence->SetBoolField(TEXT("scalarTruncationVerified"), State->bScalarTruncationVerified);
+		Evidence->SetBoolField(TEXT("scalarIsolationVerified"), State->bScalarIsolationVerified);
+		Evidence->SetBoolField(TEXT("scalarOutputBounded"), State->bScalarOutputBounded);
+		Evidence->SetStringField(TEXT("scalarActorName"), State->ScalarActorName);
+		Evidence->SetStringField(TEXT("scalarComponentName"), State->ScalarComponentName);
 		if (State->ContextListing.IsValid())
 		{
 			Evidence->SetObjectField(TEXT("worldContexts"), State->ContextListing.ToSharedRef());
@@ -213,6 +231,10 @@ namespace UEAgentKitP0PieRuntime
 		if (State->ActorInspection.IsValid())
 		{
 			Evidence->SetObjectField(TEXT("actorInspection"), State->ActorInspection.ToSharedRef());
+		}
+		if (State->ScalarInspection.IsValid())
+		{
+			Evidence->SetObjectField(TEXT("scalarInspection"), State->ScalarInspection.ToSharedRef());
 		}
 		if (State->CodeEvidence.IsValid())
 		{
@@ -734,6 +756,9 @@ namespace UEAgentKitP0PieRuntime
 					State->bClientWorldVerified);
 			}
 
+			// Bounded scalar snapshot: one exact Actor/Component, explicit names.
+			RunScalarChecks(ServerWorld);
+
 			// Stable code table for evidence.
 			TSharedRef<FJsonObject> Codes = MakeShared<FJsonObject>();
 			Codes->SetStringField(
@@ -758,6 +783,15 @@ namespace UEAgentKitP0PieRuntime
 				TEXT("actorStale"),
 				UEAgentKitPieRuntime::FailureCode(UEAgentKitPieRuntime::EFailure::ActorStale));
 			Codes->SetStringField(
+				TEXT("componentNotFound"),
+				UEAgentKitPieRuntime::FailureCode(UEAgentKitPieRuntime::EFailure::ComponentNotFound));
+			Codes->SetStringField(
+				TEXT("componentAmbiguous"),
+				UEAgentKitPieRuntime::FailureCode(UEAgentKitPieRuntime::EFailure::ComponentAmbiguous));
+			Codes->SetStringField(
+				TEXT("componentStale"),
+				UEAgentKitPieRuntime::FailureCode(UEAgentKitPieRuntime::EFailure::ComponentStale));
+			Codes->SetStringField(
 				TEXT("worldStale"),
 				UEAgentKitPieRuntime::FailureCode(UEAgentKitPieRuntime::EFailure::WorldStale));
 			Codes->SetStringField(
@@ -776,6 +810,393 @@ namespace UEAgentKitP0PieRuntime
 			// Write the live-phase evidence before PIE is torn down so the run
 			// always leaves proof even if the stop phase is interrupted.
 			WriteRuntimeEvidence(State, TEXT("p0pie-native-upstream-evidence.json"), MakeShared<FJsonObject>());
+		}
+
+		void RunScalarChecks(UWorld* ServerWorld)
+		{
+			using namespace UEAgentKitPieRuntime;
+			FAutomationTestBase* Test = State->Test;
+
+			FActorSpawnParameters SpawnParameters;
+			SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			SpawnParameters.Name = FName(TEXT("P0PieScalarActor"));
+			AP0PieScalarFixtureActor* Fixture = ServerWorld != nullptr
+				? ServerWorld->SpawnActor<AP0PieScalarFixtureActor>(
+					AP0PieScalarFixtureActor::StaticClass(),
+					FVector(1000.0f, 200.0f, 50.0f),
+					FRotator::ZeroRotator,
+					SpawnParameters)
+				: nullptr;
+			if (!Test->TestNotNull(TEXT("P0Pie scalar fixture Actor spawns"), Fixture))
+			{
+				return;
+			}
+			State->ScalarActorName = Fixture->GetName();
+			Fixture->Description = FString::ChrN(2000, TEXT('x'));
+			const FString FixtureActorPath = Fixture->GetPathName();
+			State->ScalarComponentName = Fixture->ScalarComponent != nullptr
+				? Fixture->ScalarComponent->GetName()
+				: FString();
+
+			auto FindItem = [](const TSharedPtr<FJsonObject>& Result, const FString& Name) -> TSharedPtr<FJsonObject>
+			{
+				const TArray<TSharedPtr<FJsonValue>>* Items = nullptr;
+				if (!Result.IsValid() || !Result->TryGetArrayField(TEXT("properties"), Items) || Items == nullptr)
+				{
+					return nullptr;
+				}
+				for (const TSharedPtr<FJsonValue>& Value : *Items)
+				{
+					TSharedPtr<FJsonObject> Item;
+					if (Value.IsValid())
+					{
+						Item = Value->AsObject();
+					}
+					FString ItemName;
+					if (Item.IsValid() && Item->TryGetStringField(TEXT("name"), ItemName) && ItemName == Name)
+					{
+						return Item;
+					}
+				}
+				return nullptr;
+			};
+			auto ItemString = [](const TSharedPtr<FJsonObject>& Item, const TCHAR* Field)
+			{
+				FString Value;
+				return Item.IsValid() && Item->TryGetStringField(Field, Value) ? Value : FString();
+			};
+			auto ItemNumber = [](const TSharedPtr<FJsonObject>& Item, const TCHAR* Field)
+			{
+				double Value = 0.0;
+				return Item.IsValid() && Item->TryGetNumberField(Field, Value) ? Value : 0.0;
+			};
+			auto ItemBool = [](const TSharedPtr<FJsonObject>& Item, const TCHAR* Field)
+			{
+				bool Value = false;
+				return Item.IsValid() && Item->TryGetBoolField(Field, Value) ? Value : false;
+			};
+
+			FScalarInspectionRequest ScalarRequest;
+			ScalarRequest.Actor.PieInstanceId = State->ServerInstanceId;
+			ScalarRequest.Actor.ActorName = State->ScalarActorName;
+			ScalarRequest.PropertyNames = {
+				TEXT("Health"),
+				TEXT("Ammo"),
+				TEXT("Precision"),
+				TEXT("Score"),
+				TEXT("bIsDead"),
+				TEXT("StateName"),
+				TEXT("Mode"),
+				TEXT("NotExposed") };
+
+			TSharedPtr<FJsonObject> ScalarResult;
+			FString Code;
+			FString Message;
+			if (Test->TestTrue(
+				TEXT("P0Pie scalar read of the fixture Actor succeeds"),
+				TryReadPieScalars(ScalarRequest, ScalarResult, Code, Message)))
+			{
+				State->ScalarInspection = ScalarResult;
+				Test->TestEqual(
+					TEXT("P0Pie scalar source is pie-live"),
+					ScalarResult->GetStringField(TEXT("source")),
+					FString(TEXT("pie-live")));
+				Test->TestTrue(TEXT("P0Pie scalar read is read-only"), ScalarResult->GetBoolField(TEXT("readOnly")));
+				Test->TestFalse(
+					TEXT("P0Pie scalar read does not need the database"),
+					ScalarResult->GetBoolField(TEXT("requiresDatabase")));
+				Test->TestEqual(
+					TEXT("P0Pie scalar read reports the exact instance"),
+					static_cast<int32>(ScalarResult->GetNumberField(TEXT("pieInstanceId"))),
+					State->ServerInstanceId);
+				Test->TestEqual(
+					TEXT("P0Pie scalar read reports the exact Actor"),
+					ScalarResult->GetStringField(TEXT("actorPath")),
+					FixtureActorPath);
+				Test->TestEqual(
+					TEXT("P0Pie scalar read targets the Actor"),
+					ScalarResult->GetStringField(TEXT("targetKind")),
+					FString(TEXT("actor")));
+				Test->TestTrue(
+					TEXT("P0Pie scalar read reports a sample time"),
+					!ScalarResult->GetStringField(TEXT("sampledAtUtc")).IsEmpty());
+				Test->TestEqual(
+					TEXT("P0Pie scalar read counts the requested names"),
+					static_cast<int32>(ScalarResult->GetNumberField(TEXT("requestedCount"))),
+					8);
+
+				const TSharedPtr<FJsonObject> Health = FindItem(ScalarResult, TEXT("Health"));
+				Test->TestEqual(TEXT("P0Pie Health type"), ItemString(Health, TEXT("type")), FString(TEXT("float32")));
+				Test->TestEqual(TEXT("P0Pie Health value"), ItemNumber(Health, TEXT("value")), 87.5);
+				const TSharedPtr<FJsonObject> Ammo = FindItem(ScalarResult, TEXT("Ammo"));
+				Test->TestEqual(TEXT("P0Pie Ammo type"), ItemString(Ammo, TEXT("type")), FString(TEXT("int32")));
+				Test->TestEqual(TEXT("P0Pie Ammo value"), ItemNumber(Ammo, TEXT("value")), 30.0);
+				const TSharedPtr<FJsonObject> Precision = FindItem(ScalarResult, TEXT("Precision"));
+				Test->TestEqual(
+					TEXT("P0Pie Precision type"),
+					ItemString(Precision, TEXT("type")),
+					FString(TEXT("float64")));
+				Test->TestEqual(TEXT("P0Pie Precision value"), ItemNumber(Precision, TEXT("value")), 1.25);
+				const TSharedPtr<FJsonObject> Score = FindItem(ScalarResult, TEXT("Score"));
+				Test->TestEqual(TEXT("P0Pie Score type"), ItemString(Score, TEXT("type")), FString(TEXT("int64")));
+				Test->TestTrue(
+					TEXT("P0Pie int64 above 2^53 is returned as exact text"),
+					ItemBool(Score, TEXT("valueAsString")));
+				Test->TestEqual(
+					TEXT("P0Pie int64 text is exact"),
+					ItemString(Score, TEXT("value")),
+					FString(TEXT("9007199254740993")));
+				const TSharedPtr<FJsonObject> Dead = FindItem(ScalarResult, TEXT("bIsDead"));
+				Test->TestEqual(TEXT("P0Pie bool type"), ItemString(Dead, TEXT("type")), FString(TEXT("bool")));
+				Test->TestFalse(TEXT("P0Pie bool value"), ItemBool(Dead, TEXT("value")));
+				const TSharedPtr<FJsonObject> NameItem = FindItem(ScalarResult, TEXT("StateName"));
+				Test->TestEqual(TEXT("P0Pie name type"), ItemString(NameItem, TEXT("type")), FString(TEXT("name")));
+				Test->TestEqual(TEXT("P0Pie name value"), ItemString(NameItem, TEXT("value")), FString(TEXT("Idle")));
+				const TSharedPtr<FJsonObject> ModeItem = FindItem(ScalarResult, TEXT("Mode"));
+				Test->TestEqual(TEXT("P0Pie enum type"), ItemString(ModeItem, TEXT("type")), FString(TEXT("enum")));
+				Test->TestEqual(TEXT("P0Pie enum value"), ItemString(ModeItem, TEXT("value")), FString(TEXT("Idle")));
+				Test->TestEqual(
+					TEXT("P0Pie enum name"),
+					ItemString(ModeItem, TEXT("enumName")),
+					FString(TEXT("EP0PieScalarMode")));
+				const TSharedPtr<FJsonObject> NotExposedItem = FindItem(ScalarResult, TEXT("NotExposed"));
+				Test->TestEqual(
+					TEXT("P0Pie unexposed property is not returned"),
+					ItemString(NotExposedItem, TEXT("status")),
+					FString(TEXT("not-exposed")));
+				State->bScalarActorVerified =
+					Health.IsValid() && Ammo.IsValid() && Score.IsValid() && ModeItem.IsValid();
+
+				FString Serialized;
+				const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Serialized);
+				FJsonSerializer::Serialize(ScalarResult.ToSharedRef(), Writer);
+				State->bScalarOutputBounded = Serialized.Len() <= 16 * 1024;
+				Test->TestTrue(TEXT("P0Pie scalar response stays within 16 KiB"), State->bScalarOutputBounded);
+			}
+			else
+			{
+				Test->AddError(Code + TEXT(": ") + Message);
+			}
+
+			// B. Non-scalar shapes are rejected per property, never traversed.
+			FScalarInspectionRequest UnsupportedRequest = ScalarRequest;
+			UnsupportedRequest.PropertyNames = {
+				TEXT("UnsupportedArray"),
+				TEXT("UnsupportedMap"),
+				TEXT("UnsupportedSet"),
+				TEXT("UnsupportedStruct"),
+				TEXT("UnsupportedText"),
+				TEXT("UnsupportedObject") };
+			TSharedPtr<FJsonObject> UnsupportedResult;
+			if (Test->TestTrue(
+				TEXT("P0Pie unsupported-shape request is served per property"),
+				TryReadPieScalars(UnsupportedRequest, UnsupportedResult, Code, Message)))
+			{
+				int32 UnsupportedCount = 0;
+				for (const TCHAR* Name : {
+					TEXT("UnsupportedArray"),
+					TEXT("UnsupportedMap"),
+					TEXT("UnsupportedSet"),
+					TEXT("UnsupportedStruct"),
+					TEXT("UnsupportedText"),
+					TEXT("UnsupportedObject") })
+				{
+					const TSharedPtr<FJsonObject> Item = FindItem(UnsupportedResult, Name);
+					if (ItemString(Item, TEXT("status")) == TEXT("unsupported-type")
+						&& !ItemBool(Item, TEXT("valueReturned")))
+					{
+						++UnsupportedCount;
+					}
+				}
+				Test->TestEqual(
+					TEXT("P0Pie every unsupported shape is rejected per property"),
+					UnsupportedCount,
+					6);
+				State->bScalarRejectionsVerified = UnsupportedCount == 6;
+			}
+
+			// C. Native-private and missing fields never fabricate values.
+			FScalarInspectionRequest PrivateRequest = ScalarRequest;
+			PrivateRequest.PropertyNames = { TEXT("PrivateEditable") };
+			TSharedPtr<FJsonObject> PrivateResult;
+			if (Test->TestTrue(
+				TEXT("P0Pie native-private property request is served"),
+				TryReadPieScalars(PrivateRequest, PrivateResult, Code, Message)))
+			{
+				Test->TestEqual(
+					TEXT("P0Pie native-private property is not exposed"),
+					ItemString(FindItem(PrivateResult, TEXT("PrivateEditable")), TEXT("status")),
+					FString(TEXT("not-exposed")));
+			}
+
+			FScalarInspectionRequest MissingRequest = ScalarRequest;
+			MissingRequest.PropertyNames = { TEXT("Nope") };
+			TSharedPtr<FJsonObject> MissingResult;
+			if (Test->TestTrue(
+				TEXT("P0Pie unknown property request is served"),
+				TryReadPieScalars(MissingRequest, MissingResult, Code, Message)))
+			{
+				const TSharedPtr<FJsonObject> MissingItem = FindItem(MissingResult, TEXT("Nope"));
+				Test->TestEqual(
+					TEXT("P0Pie unknown property is reported as unknown"),
+					ItemString(MissingItem, TEXT("status")),
+					FString(TEXT("unknown")));
+				Test->TestEqual(
+					TEXT("P0Pie unknown property has no value"),
+					ItemBool(MissingItem, TEXT("valueReturned")),
+					false);
+			}
+
+			// D. Invalid names are rejected before any reflection lookup.
+			FScalarInspectionRequest DottedRequest = ScalarRequest;
+			DottedRequest.PropertyNames = { TEXT("Health.Sub") };
+			TSharedPtr<FJsonObject> DottedResult;
+			Test->TestFalse(
+				TEXT("P0Pie dotted property path is rejected"),
+				TryReadPieScalars(DottedRequest, DottedResult, Code, Message));
+			Test->TestEqual(
+				TEXT("P0Pie dotted property returns invalid-parameters"),
+				Code,
+				FString(FailureCode(EFailure::InvalidRequest)));
+
+			FScalarInspectionRequest TooManyRequest = ScalarRequest;
+			TooManyRequest.PropertyNames = {
+				TEXT("Health"), TEXT("Ammo"), TEXT("Precision"), TEXT("Score"),
+				TEXT("bIsDead"), TEXT("StateName"), TEXT("Mode"), TEXT("Description"),
+				TEXT("NotExposed") };
+			TSharedPtr<FJsonObject> TooManyResult;
+			Test->TestFalse(
+				TEXT("P0Pie nine property names are rejected"),
+				TryReadPieScalars(TooManyRequest, TooManyResult, Code, Message));
+			Test->TestEqual(
+				TEXT("P0Pie nine properties return invalid-parameters"),
+				Code,
+				FString(FailureCode(EFailure::InvalidRequest)));
+
+			FScalarInspectionRequest DuplicateRequest = ScalarRequest;
+			DuplicateRequest.PropertyNames = { TEXT("Health"), TEXT("Health") };
+			TSharedPtr<FJsonObject> DuplicateResult;
+			Test->TestFalse(
+				TEXT("P0Pie duplicate property names are rejected"),
+				TryReadPieScalars(DuplicateRequest, DuplicateResult, Code, Message));
+			Test->TestEqual(
+				TEXT("P0Pie duplicate names return invalid-parameters"),
+				Code,
+				FString(FailureCode(EFailure::InvalidRequest)));
+
+			// E. Owned Component scalars, addressed by exact name/path.
+			FScalarInspectionRequest ComponentRequest = ScalarRequest;
+			ComponentRequest.ComponentName = State->ScalarComponentName;
+			ComponentRequest.PropertyNames = { TEXT("Speed"), TEXT("Charge"), TEXT("Samples") };
+			TSharedPtr<FJsonObject> ComponentResult;
+			if (Test->TestTrue(
+				TEXT("P0Pie component scalar read succeeds"),
+				TryReadPieScalars(ComponentRequest, ComponentResult, Code, Message)))
+			{
+				Test->TestEqual(
+					TEXT("P0Pie component target kind"),
+					ComponentResult->GetStringField(TEXT("targetKind")),
+					FString(TEXT("component")));
+				Test->TestEqual(
+					TEXT("P0Pie component reports its owning Actor"),
+					ComponentResult->GetStringField(TEXT("componentOwnerPath")),
+					FixtureActorPath);
+				Test->TestEqual(
+					TEXT("P0Pie component Speed value"),
+					ItemNumber(FindItem(ComponentResult, TEXT("Speed")), TEXT("value")),
+					12.5);
+				Test->TestEqual(
+					TEXT("P0Pie component Charge value"),
+					ItemNumber(FindItem(ComponentResult, TEXT("Charge")), TEXT("value")),
+					7.0);
+				Test->TestEqual(
+					TEXT("P0Pie component unsupported shape is rejected"),
+					ItemString(FindItem(ComponentResult, TEXT("Samples")), TEXT("status")),
+					FString(TEXT("unsupported-type")));
+				State->bScalarComponentVerified = true;
+			}
+
+			FScalarInspectionRequest ComponentStale = ComponentRequest;
+			ComponentStale.ComponentClassPath = TEXT("/Script/Engine.SceneComponent");
+			TSharedPtr<FJsonObject> ComponentStaleResult;
+			Test->TestFalse(
+				TEXT("P0Pie component class mismatch is rejected"),
+				TryReadPieScalars(ComponentStale, ComponentStaleResult, Code, Message));
+			Test->TestEqual(
+				TEXT("P0Pie component class mismatch returns stale"),
+				Code,
+				FString(FailureCode(EFailure::ComponentStale)));
+
+			FScalarInspectionRequest ComponentMissing = ComponentRequest;
+			ComponentMissing.ComponentName = TEXT("NoSuchComponent");
+			TSharedPtr<FJsonObject> ComponentMissingResult;
+			Test->TestFalse(
+				TEXT("P0Pie unknown component is rejected"),
+				TryReadPieScalars(ComponentMissing, ComponentMissingResult, Code, Message));
+			Test->TestEqual(
+				TEXT("P0Pie unknown component returns component-not-found"),
+				Code,
+				FString(FailureCode(EFailure::ComponentNotFound)));
+
+			FScalarInspectionRequest ComponentByPath = ComponentRequest;
+			ComponentByPath.ComponentName.Reset();
+			ComponentByPath.ComponentPath = Fixture->ScalarComponent != nullptr
+				? Fixture->ScalarComponent->GetPathName()
+				: FString();
+			TSharedPtr<FJsonObject> ComponentPathResult;
+			Test->TestTrue(
+				TEXT("P0Pie component can be addressed by exact path"),
+				!ComponentByPath.ComponentPath.IsEmpty()
+				&& TryReadPieScalars(ComponentByPath, ComponentPathResult, Code, Message));
+
+			// F. Bounded FString truncation.
+			FScalarInspectionRequest LongRequest = ScalarRequest;
+			LongRequest.PropertyNames = { TEXT("Description") };
+			LongRequest.MaxStringChars = 64;
+			TSharedPtr<FJsonObject> LongResult;
+			if (Test->TestTrue(
+				TEXT("P0Pie long-string request succeeds"),
+				TryReadPieScalars(LongRequest, LongResult, Code, Message)))
+			{
+				const TSharedPtr<FJsonObject> DescriptionItem = FindItem(LongResult, TEXT("Description"));
+				Test->TestEqual(
+					TEXT("P0Pie long string type"),
+					ItemString(DescriptionItem, TEXT("type")),
+					FString(TEXT("string")));
+				Test->TestTrue(
+					TEXT("P0Pie long string is truncated"),
+					ItemBool(DescriptionItem, TEXT("truncated")));
+				Test->TestEqual(
+					TEXT("P0Pie truncated string keeps the requested length"),
+					ItemString(DescriptionItem, TEXT("value")).Len(),
+					64);
+				Test->TestEqual(
+					TEXT("P0Pie truncated string reports the original length"),
+					static_cast<int32>(ItemNumber(DescriptionItem, TEXT("originalLength"))),
+					2000);
+				State->bScalarTruncationVerified = true;
+			}
+
+			// G. No cross-world resolution: the server Actor is invisible to the client world.
+			if (State->ClientInstanceId >= 0)
+			{
+				FScalarInspectionRequest CrossWorld = ScalarRequest;
+				CrossWorld.Actor.ActorName.Reset();
+				CrossWorld.Actor.ActorPath = FixtureActorPath;
+				CrossWorld.Actor.PieInstanceId = State->ClientInstanceId;
+				TSharedPtr<FJsonObject> CrossWorldResult;
+				Test->TestFalse(
+					TEXT("P0Pie scalar read does not cross PIE worlds"),
+					TryReadPieScalars(CrossWorld, CrossWorldResult, Code, Message));
+				Test->TestEqual(
+					TEXT("P0Pie cross-world scalar read returns actor-not-found"),
+					Code,
+					FString(FailureCode(EFailure::ActorNotFound)));
+				State->bScalarIsolationVerified = Message.Contains(State->ClientWorldPath);
+				Test->TestTrue(
+					TEXT("P0Pie cross-world scalar read names the client world"),
+					State->bScalarIsolationVerified);
+			}
 		}
 
 		static TArray<UEAgentKitPieRuntime::FWorldContextSnapshot> ContextsFor(int32 InstanceId)
@@ -879,6 +1300,26 @@ namespace UEAgentKitP0PieRuntime
 					FString(UEAgentKitPieRuntime::FailureCode(UEAgentKitPieRuntime::EFailure::InstanceStale)));
 			}
 
+			// Scalar reads must fail closed on the ended instance too.
+			if (State->ServerInstanceId >= 0 && !State->ScalarActorName.IsEmpty())
+			{
+				UEAgentKitPieRuntime::FScalarInspectionRequest StaleScalars;
+				StaleScalars.Actor.PieInstanceId = State->ServerInstanceId;
+				StaleScalars.Actor.ActorName = State->ScalarActorName;
+				StaleScalars.PropertyNames = { TEXT("Health") };
+				TSharedPtr<FJsonObject> StaleScalarResult;
+				const bool bScalarOk = UEAgentKitPieRuntime::TryReadPieScalars(
+					StaleScalars,
+					StaleScalarResult,
+					Code,
+					Message);
+				Test->TestFalse(TEXT("P0Pie stopped scalar read is rejected"), bScalarOk);
+				Test->TestEqual(
+					TEXT("P0Pie stopped scalar read returns pie-instance-stale"),
+					Code,
+					FString(UEAgentKitPieRuntime::FailureCode(UEAgentKitPieRuntime::EFailure::InstanceStale)));
+			}
+
 			// Distinct NOT_RUNNING for an instance that was never observed.
 			FActorInspectionRequest NeverObserved;
 			NeverObserved.PieInstanceId = 9001;
@@ -902,6 +1343,7 @@ namespace UEAgentKitP0PieRuntime
 				TEXT("staleInstanceVerified"),
 				State->ServerInstanceId >= 0 && !State->SpawnedActorPath.IsEmpty());
 			Extra->SetBoolField(TEXT("notRunningVerified"), true);
+			Extra->SetBoolField(TEXT("scalarStaleVerified"), State->ServerInstanceId >= 0 && !State->ScalarActorName.IsEmpty());
 			UEAgentKitP0PieRuntime::WriteRuntimeEvidence(
 				State,
 				TEXT("p0pie-native-stopped-evidence.json"),
