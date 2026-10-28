@@ -19,9 +19,11 @@ class FJsonObject;
  * double add, string concat, and self-context member-variable Get/Set accessors
  * for existing plain bool/int/double/string variables.  Supported connections
  * are exact exec or exact bool/int/double/string data links; one output may fan
- * out to distinct inputs.  Every call still requires the exact focused
- * Blueprint graph, clean package, stopped PIE/SIE, current revision and graph
- * fingerprint, one FScopedTransaction, exact readback, and Undo/Redo
+ * out to distinct inputs.  One endpoint may be an exact existing K2 pin
+ * (nodeGuid + pinGuid + name + direction + category); an existing input must be
+ * unlinked and the schema must return MAKE.  Every call still requires the exact
+ * focused Blueprint graph, clean package, stopped PIE/SIE, current revision and
+ * graph fingerprint, one FScopedTransaction, exact readback, and Undo/Redo
  * verification.  Save is a separate explicit gate bound to the Apply plan,
  * post-Apply fingerprint and exact node/link counts.
  */

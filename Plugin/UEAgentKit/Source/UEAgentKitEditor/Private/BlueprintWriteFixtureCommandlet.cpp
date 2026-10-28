@@ -3,11 +3,15 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Dom/JsonObject.h"
 #include "EdGraph/EdGraph.h"
+#include "EdGraph/EdGraphNode.h"
+#include "EdGraph/EdGraphPin.h"
 #include "EdGraphSchema_K2.h"
 #include "Engine/Blueprint.h"
 #include "GameFramework/Actor.h"
 #include "HAL/FileManager.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
+#include "K2Node.h"
+#include "K2Node_IfThenElse.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Misc/FileHelper.h"
@@ -188,6 +192,35 @@ namespace BlueprintWriteFixtureCommandletPrivate
 				TEXT("3"));
 		}
 
+		// One existing Branch with unconnected exec/bool inputs, used by the
+		// connect-existing-pin acceptance.  It is part of the disposable
+		// fixture, never created by the write plan.
+		if (Blueprint->UbergraphPages.Num() > 0)
+		{
+			UEdGraph* EventGraph = Blueprint->UbergraphPages[0];
+			bool bHasBranch = false;
+			for (UEdGraphNode* Node : EventGraph->Nodes)
+			{
+				if (Cast<UK2Node_IfThenElse>(Node) != nullptr)
+				{
+					bHasBranch = true;
+					break;
+				}
+			}
+			if (!bHasBranch)
+			{
+				FGraphNodeCreator<UK2Node_IfThenElse> Creator(*EventGraph);
+				UK2Node_IfThenElse* Branch = Creator.CreateNode();
+				Branch->NodePosX = -600;
+				Branch->NodePosY = 300;
+				Creator.Finalize();
+				if (!Branch->NodeGuid.IsValid())
+				{
+					Branch->CreateNewGuid();
+				}
+			}
+		}
+
 		Blueprint->Modify();
 		Blueprint->GetOutermost()->MarkPackageDirty();
 		return SaveBlueprint(Blueprint, OutError);
@@ -238,6 +271,51 @@ namespace BlueprintWriteFixtureCommandletPrivate
 			AddGraph(Graph, TEXT("macro"));
 		}
 		RootObject->SetArrayField(TEXT("graphs"), Graphs);
+
+		TArray<TSharedPtr<FJsonValue>> Nodes;
+		for (UEdGraph* Graph : Blueprint->UbergraphPages)
+		{
+			if (Graph == nullptr)
+			{
+				continue;
+			}
+			for (UEdGraphNode* Node : Graph->Nodes)
+			{
+				if (Node == nullptr)
+				{
+					continue;
+				}
+				TSharedRef<FJsonObject> NodeObject = MakeShared<FJsonObject>();
+				NodeObject->SetStringField(
+					TEXT("guid"),
+					Node->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower));
+				NodeObject->SetStringField(TEXT("class"), Node->GetClass()->GetPathName());
+				NodeObject->SetStringField(TEXT("name"), Node->GetName());
+				TArray<TSharedPtr<FJsonValue>> Pins;
+				for (UEdGraphPin* Pin : Node->Pins)
+				{
+					if (Pin == nullptr)
+					{
+						continue;
+					}
+					TSharedRef<FJsonObject> PinObject = MakeShared<FJsonObject>();
+					PinObject->SetStringField(
+						TEXT("pinGuid"),
+						Pin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower));
+					PinObject->SetStringField(TEXT("pinName"), Pin->PinName.ToString());
+					PinObject->SetStringField(
+						TEXT("direction"),
+						Pin->Direction == EGPD_Input ? TEXT("input") : TEXT("output"));
+					PinObject->SetStringField(TEXT("category"), Pin->PinType.PinCategory.ToString());
+					PinObject->SetStringField(TEXT("subCategory"), Pin->PinType.PinSubCategory.ToString());
+					PinObject->SetNumberField(TEXT("linkCount"), Pin->LinkedTo.Num());
+					Pins.Add(MakeShared<FJsonValueObject>(PinObject));
+				}
+				NodeObject->SetArrayField(TEXT("pins"), Pins);
+				Nodes.Add(MakeShared<FJsonValueObject>(NodeObject));
+			}
+		}
+		RootObject->SetArrayField(TEXT("nodes"), Nodes);
 
 		FString JsonText;
 		const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonText);

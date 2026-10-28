@@ -88,9 +88,12 @@ def register_graph_edit_experimental_tools(
         GUID + name; nothing is created, renamed or retyped). Supported
         connections are exact exec or exact bool/int/double/string data links
         between the declared pins; one output may fan out to several distinct
-        input pins. The result is read-only and returns the exact planId and
-        requiredConfirmation needed by Apply. It never opens a transaction,
-        dirties, compiles, or saves.
+        input pins. One endpoint may be an exact existing K2 pin supplied as
+        fromExisting/toExisting (nodeGuid + pinGuid + name + direction +
+        category); an existing input must be unlinked and the schema must return
+        MAKE (no BreakOthers/conversion/promotion). The result is read-only and
+        returns the exact planId and requiredConfirmation needed by Apply. It
+        never opens a transaction, dirties, compiles, or saves.
         """
         try:
             _capabilities(live_editor_service, PREVIEW_CAPABILITY)

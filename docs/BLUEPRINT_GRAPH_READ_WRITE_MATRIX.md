@@ -32,6 +32,8 @@ Legend:
 | Variable accessor connection targets within the same plan (getter output, setter `execute`/`Output_Get`) | **Experimental** | Exact exec or exact primitive data links between the declared accessor pins, using the same fan-out and type rules as the static nodes. The A-level run connected all four getters to their setters and drove the int setter from a `sequence` exec pin | 2026-10-28 |
 | Same-type variable retarget between accessor Apply and Save | **Experimental (native B)** | Receipt-side `variableBindingHash` covers every `UK2Node_Variable` binding/pin. Native automation `UEAgentKit.Blueprint.AccessorRetargetSaveGate` retargets `AccessInt` to `AccessInt2` after Apply and proves Save fails with `graph-edit-save-variable-binding-mismatch`; cleanup Undo restores the graph | 2026-10-28 |
 | Accessor Preview/Apply while PIE is active | **Experimental (native B)** | Native automation `UEAgentKit.Blueprint.AccessorPieGate` starts real PIE and proves Preview fails with `graph-edit-pie-active`; no mutation occurs | 2026-10-28 |
+| Connect one new allowlisted node/pin to one exact existing K2 pin | **Experimental** | Request uses `fromExisting`/`toExisting` with nodeGuid + pinGuid + pinName + direction + category/subCategory. The other endpoint must be a node created in the same plan. Existing input must be unlinked; existing output fan-out is preserved. **A-level** real MCP → Socket → Editor Preview/Apply/Save: new int getter/setter plus bool getter connected to an existing Branch `execute`/`Condition` and an existing event `then`; 4 edges, Undo/Redo true, fresh-process Reload verified exact links and asset SHA | 2026-10-28 |
+| Reject unsafe existing-pin connections | **Experimental** | Existing→existing, linked existing input, unknown node/pin GUID, category/subCategory mismatch, hidden/orphan/split/non-connectable pin, type mismatch, `BREAK_OTHERS_*`, conversion/promotion all fail closed. Native automation also proves a graph mutation after Preview makes Apply stale (`graph-edit-plan-stale`/`graph-edit-edge-set-stale`) and PIE rejects the path | 2026-10-28 |
 | Exact typed data links and output fan-out to distinct inputs | **Experimental** | One output may feed several distinct input pins; an input pin still accepts one plan link | P0 complete |
 | Plan-bound explicit Save | **Experimental** | Separate tool/gate; requires Apply receipt, post-Apply fingerprint, exact node/link counts, dirty package, clean readback, disk SHA-256 | P0 complete |
 | Post-commit failure rollback | **Experimental** | `FailCommitted` Undo + original count/link readback; explicit warning if rollback fails | P0 complete |
@@ -188,6 +190,27 @@ Legend:
 - A same-type retarget after Apply is rejected by Save
   (`graph-edit-save-variable-binding-mismatch`); the native retarget test then
   Undo-restores the original graph.
+- Connect-existing permits at most one existing endpoint per connection and
+  never an existing→existing edge. The existing endpoint must be a `UK2Node` in
+  the same focused graph with an exact canonical node GUID + pin GUID + name +
+  direction + category/subCategory; an existing input must have zero links.
+- The existing pin's actual type must be exactly exec/bool/int/double/string
+  with no wildcard, container, by-ref, const, weak, delegate, struct/object/enum
+  or split/orphan/hidden flag. The declared request metadata must equal the live
+  pin metadata.
+- Apply re-resolves the existing pin and revalidates its link count, then calls
+  `CanCreateConnection` immediately before mutation. Only
+  `CONNECT_RESPONSE_MAKE` is accepted; `BREAK_OTHERS_A/B/AB`,
+  `MAKE_WITH_CONVERSION_NODE` and `MAKE_WITH_PROMOTION` are rejected before any
+  mutation. Existing output fan-out is never broken.
+- Connect-existing Plan ID binds the graph fingerprint, package revision,
+  before edge-set hash and the exact existing node/pin identity/type/link state.
+  Apply recomputes the before edge-set hash and refuses a stale plan. It records
+  before/after edge-set hashes, proves Undo restores the before hash and Redo
+  restores the after hash, and stores the after hash in the Save receipt.
+- Save additionally compares the receipt edge-set hash for connect-existing
+  plans (`graph-edit-save-edge-set-mismatch`) and still requires the explicit
+  Apply receipt and post-Apply fingerprint/counts.
 - No deletion, disconnection, pin creation, variable rename/retype/removal, or
   default mutation outside the bounded five-type paths, arbitrary GraphPatch,
   auto-save, or compile in this slice.
@@ -255,9 +278,21 @@ Legend:
   `verified=true`, `mismatches=[]`). PIE rejection and same-type-retarget Save
   rejection are **native B** automation evidence. Macro graphs are accepted by
   the same code path but were not exercised in this native run.
-- The variable accessor slice only wires nodes created in the same plan. It
-  cannot connect a new accessor to pre-existing event nodes; that needs a
-  separate bounded "connect existing pin" capability.
+- Connect-existing is accepted at **A level** on the real MCP → Socket →
+  Editor → Save → fresh-process Reload path: an existing unconnected Branch
+  `execute`/`Condition` and an existing event `then` were connected to newly
+  created getter/setter nodes (4 connections, Undo/Redo true, 8 nodes / 4 edges,
+  reload `verified=true`, `mismatches=[]`). PIE and stale-plan rejection are
+  **native B** automation evidence.
+- The connect-existing slice still cannot connect two existing pins, change an
+  existing pin type, or rewire an existing edge. Each connection has exactly one
+  new endpoint and one existing endpoint; an existing input must be unlinked.
+- Connect-existing only accepts the four primitive data kinds plus exec. It
+  rejects object/struct/enum/delegate/array/set/map/by-ref/const/weak/wildcard,
+  hidden/orphan/split/non-connectable pins, inherited/non-K2 nodes and any
+  cross-graph node GUID.
+- Save receipts remain per-Editor-process; the connect-existing receipt binds
+  the after edge-set hash but cannot survive a process restart.
 - The Save-side variable binding hash covers every variable accessor in the
   edited graph, not only the newly created ones. It is intentionally stricter
   than the layout fingerprint (which does not include `FMemberReference`); a

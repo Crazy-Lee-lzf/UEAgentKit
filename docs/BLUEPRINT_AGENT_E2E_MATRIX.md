@@ -176,6 +176,7 @@ Canonical JSON 当 UE 写入依据。
 | 精确 rewire/disconnect | `ue_preview/apply/save_blueprint_rewire_experimental` | `editor.*BlueprintRewireExperimental` | 目标 node/pin/GUID + old source node/pin/GUID + edge-set hash（rewire 还要 new source） | 仅一条边；拒绝 BreakOthers/转换；Undo/Redo | **A（rewire）** |
 | 受控 node delete | `ue_preview/apply/save_blueprint_node_remove_experimental` | `editor.*BlueprintNodeRemoveExperimental` | node GUID+class、edge-set hash、`removedEdges`（≤1） | 白名单纯函数/Branch；删除前必须零链接；Undo 恢复节点+连线 | **A（0 边孤立节点）** |
 | 变量 Get/Set 访问器（bool/int/double/string + FunctionGraph） | `ue_preview/apply/save_blueprint_graph_edit_experimental`（扩展节点类型） | `editor.*BlueprintGraphEditExperimental` | `variableName/variableGuid/variableType`；同一 plan 内精确连线 | 现有顶层成员变量；GUID+name+type 绑定；精确 pin；Undo/Redo；Save variableBindingHash | **A（正向 MCP）**；PIE/同类型 retarget 为 **B（native automation）** |
+| 新节点连接到已存在精确 Pin | `ue_preview/apply/save_blueprint_graph_edit_experimental`（扩展 connection 端点） | `editor.*BlueprintGraphEditExperimental` | `fromExisting`/`toExisting`：nodeGuid+pinGuid+pinName+direction+category/subCategory；另一端点为本 plan 新节点 | 仅一个 existing 端点；existing input 未连线；existing output fan-out 保留；拒绝 BreakOthers/转换/提升；before/after edge-set hash | **A（正向 MCP + Reload）**；PIE/Preview 后 stale 为 **B（native automation）** |
 | Graph layout apply | `ue_preview_blueprint_graph_layout` + `ue_apply/save`（若开启） | `editor.*BlueprintGraphLayoutApply*` | 位置计划 hash | 只改位置 | P6-P8 Socket 探针（部分 A/B），非本轮回归 |
 
 > 后验补充（不改变 P5 原始五类结论）：2026-10-28 已完成 `variable_get` /
@@ -184,6 +185,12 @@ Canonical JSON 当 UE 写入依据。
 > `undoVerified=true`、`redoVerified=true`、`verified=true`）。PIE 拒绝与
 > 同类型 retarget Save 拒绝由 native automation 取得 B 级证据。该补充不计入
 > P5 原表的 8 类节点计数，但可以作为独立 A/B 证据引用。
+>
+> 2026-10-28 追加：新节点连接已存在精确 Pin 已取得 A 级真实 MCP 证据（现有
+> Branch `execute`/`Condition` + 现有 event `then`，4 条边，Undo/Redo、
+> Save、fresh-process Reload、`mismatches=[]`）。PIE 与 Preview 后 stale
+> 为 native B。该能力仍只允许“新节点 ↔ 单个 existing pin”，不支持
+> existing→existing。
 
 disconnect 分支与“1 条 incident edge 的 node remove”本轮没有跑真实 MCP 序列，
 保留 P3/P4 的 B 级 native 证据；不要把这三种未跑分支写成 A。
@@ -211,6 +218,7 @@ disconnect 分支与“1 条 incident edge 的 node remove”本轮没有跑真�
 | 6 | 无 Editor 崩溃/超时恢复 | **OPEN** | E2E 脚本按阶段重启 Editor；真实产品需进程监控与 receipt 失效处理 |
 | 7 | 单序列覆盖 | **OPEN（部分收窄）** | 原 P5 只覆盖一个 Actor BP；2026-10-28 accessor 验收新增独立 BP（4 类型 + EventGraph + FunctionGraph）与 native PIE/retarget，但仍未覆盖多资产并发、崩溃恢复、undo 栈很深 |
 | 8 | 变量 Get/Set 访问器节点 | **A 正向 / B 安全门** | 真实 MCP 正向已通过（10 accessors、Undo/Redo、Save、fresh-process Reload）；PIE 与同类型 retarget 为 native B。macro 图路径未实测 |
+| 9 | 新节点连接已存在 Pin | **A 正向 / B 安全门** | 真实 MCP 正向已通过（4 条 existing-pin 连接、edge-set before/after、Undo/Redo、Save、fresh-process Reload）；PIE 与 Preview 后 stale 为 native B。existing→existing、批量和改类型仍不支持 |
 
 已在本轮关闭/降级的缺口：
 
