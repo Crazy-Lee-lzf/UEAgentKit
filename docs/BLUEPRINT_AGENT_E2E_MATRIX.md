@@ -227,6 +227,7 @@ disconnect 分支与“1 条 incident edge 的 node remove”本轮没有跑真�
 | 9 | 新节点连接已存在 Pin | **A 正向 / B 安全门** | 真实 MCP 正向已通过（4 条 existing-pin 连接、edge-set before/after、Undo/Redo、Save、fresh-process Reload）；PIE 与 Preview 后 stale 为 native B。批量、改类型、rewire 仍不支持 |
 | 10 | 已有 output → 已有 unlinked input（`nodes=[]`） | **A 正向 / B 安全门** | 真实 MCP 正向已通过（1 条边、节点数不变、Undo/Redo、Save、Reload）；zero-node stale/PIE 为 native B。仅一条边，不支持 rewire/批量/与新节点混用 |
 | 11 | 精确断开一条已有 edge（`operation=disconnect`） | **A 正向 / B 安全门** | 真实 MCP 从两条已有 Event→Branch 边中精确删除 1 条，另一个边/全部节点保留；Undo/Redo、Save receipt、Reload 通过。disconnect 后 stale/PIE 为 native B。仅一条边，不支持批量/rewire |
+| 12 | 白名单 engine pure static `call_function` | **STATIC ONLY / NATIVE PENDING** | Python/C++ 合同：固定 `/Script/Engine.KismetMathLibrary` owner + function + signatureDigest + exact pin schema；仅 `Greater_IntInt`、`Less_IntInt`、`Clamp`、`Abs_Int`；任意路径/world/latent/network/receiver/ref/const/container 拒绝。**尚未在 UE5.6.1 构建或执行 A 级** |
 
 已在本轮关闭/降级的缺口：
 
