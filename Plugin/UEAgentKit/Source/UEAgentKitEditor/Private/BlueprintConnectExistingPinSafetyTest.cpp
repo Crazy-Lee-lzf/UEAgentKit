@@ -163,6 +163,27 @@ namespace UEAgentKitConnectExistingSafety
 		return Params;
 	}
 
+	TSharedPtr<FJsonObject> MakePureExistingPreviewParams(
+		UBlueprint* Blueprint,
+		UEdGraph* Graph,
+		const UEdGraphNode* SourceNode,
+		const UEdGraphPin* SourceOutput,
+		const UEdGraphNode* TargetNode,
+		const UEdGraphPin* TargetInput)
+	{
+		TSharedRef<FJsonObject> Connection = MakeShared<FJsonObject>();
+		Connection->SetObjectField(TEXT("fromExisting"), MakeExistingPin(SourceNode, SourceOutput));
+		Connection->SetObjectField(TEXT("toExisting"), MakeExistingPin(TargetNode, TargetInput));
+		TSharedRef<FJsonObject> Params = MakeShared<FJsonObject>();
+		Params->SetStringField(TEXT("assetPath"), Blueprint->GetPathName());
+		Params->SetStringField(TEXT("graphGuid"), GuidLower(Graph->GraphGuid));
+		Params->SetArrayField(TEXT("nodes"), TArray<TSharedPtr<FJsonValue>>());
+		TArray<TSharedPtr<FJsonValue>> Connections;
+		Connections.Add(MakeShared<FJsonValueObject>(Connection));
+		Params->SetArrayField(TEXT("connections"), Connections);
+		return Params;
+	}
+
 	bool SetupPreview(
 		FAutomationTestBase* Test,
 		UBlueprint*& OutBlueprint,
@@ -297,6 +318,116 @@ bool FUEAgentKitConnectExistingStalePlanTest::RunTest(const FString& Parameters)
 	// Cleanup the test-only edge and dirty state.
 	EventThen->BreakLinkTo(BranchExecute);
 	TestFalse(TEXT("cleanup removed the test-only link"), EventThen->LinkedTo.Contains(BranchExecute));
+	Blueprint->GetOutermost()->SetDirtyFlag(false);
+	UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUEAgentKitConnectExistingExistingStaleTest,
+	"UEAgentKit.Blueprint.ConnectExistingBExistingStaleGate",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUEAgentKitConnectExistingExistingStaleTest::RunTest(const FString& Parameters)
+{
+	using namespace UEAgentKitConnectExistingSafety;
+	UEAgentKitBlueprintGraphEditExperimental::SetExperimentalWriteEnabledForTest(true);
+
+	FString Error;
+	UBlueprint* Blueprint = LoadFixture(Error);
+	if (Blueprint == nullptr)
+	{
+		AddError(Error);
+		UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
+		return false;
+	}
+	UEdGraph* Graph = Blueprint->UbergraphPages.Num() > 0 ? Blueprint->UbergraphPages[0] : nullptr;
+	if (Graph == nullptr || OpenAndFocus(Blueprint, Graph, Error) == nullptr)
+	{
+		AddError(Error);
+		UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
+		return false;
+	}
+	UK2Node_Event* Event = FindEventWithUnlinkedThen(Graph);
+	UK2Node_IfThenElse* Branch = FindBranch(Graph);
+	UEdGraphPin* EventThen = Event != nullptr ? Event->FindPin(TEXT("then"), EGPD_Output) : nullptr;
+	UEdGraphPin* BranchExecute = Branch != nullptr ? Branch->FindPin(TEXT("execute"), EGPD_Input) : nullptr;
+	if (!TestNotNull(TEXT("event then pin exists"), EventThen)
+		|| !TestNotNull(TEXT("branch execute pin exists"), BranchExecute))
+	{
+		UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
+		return false;
+	}
+
+	const TSharedPtr<FJsonObject> PreviewParams = MakePureExistingPreviewParams(
+		Blueprint,
+		Graph,
+		Event,
+		EventThen,
+		Branch,
+		BranchExecute);
+	TSharedPtr<FJsonObject> Preview;
+	FString PreviewCode;
+	FString PreviewMessage;
+	if (!TestTrue(
+			TEXT("pure existing preview succeeds"),
+			UEAgentKitBlueprintGraphEditExperimental::TryPreviewExperimental(
+				PreviewParams,
+				Preview,
+				PreviewCode,
+				PreviewMessage)))
+	{
+		AddError(PreviewCode + TEXT(": ") + PreviewMessage);
+		UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
+		return false;
+	}
+	if (!TestEqual(
+			TEXT("pure existing preview creates no nodes"),
+			Preview->GetNumberField(TEXT("nodeCountAfter")),
+			Preview->GetNumberField(TEXT("nodeCountBefore"))))
+	{
+		UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
+		return false;
+	}
+
+	// Mutate the graph after Preview (position changes fingerprint, not the edge
+	// set) and keep it test-clean so Apply reaches the stale-plan gate.
+	const int32 OldX = Branch->NodePosX;
+	Branch->Modify();
+	Branch->NodePosX = OldX + 7;
+	Blueprint->GetOutermost()->SetDirtyFlag(false);
+
+	TSharedPtr<FJsonObject> ApplyParams = MakeShared<FJsonObject>();
+	ApplyParams->SetStringField(TEXT("assetPath"), PreviewParams->GetStringField(TEXT("assetPath")));
+	ApplyParams->SetStringField(TEXT("graphGuid"), PreviewParams->GetStringField(TEXT("graphGuid")));
+	ApplyParams->SetArrayField(TEXT("nodes"), PreviewParams->GetArrayField(TEXT("nodes")));
+	ApplyParams->SetArrayField(TEXT("connections"), PreviewParams->GetArrayField(TEXT("connections")));
+	ApplyParams->SetStringField(TEXT("planId"), Preview->GetStringField(TEXT("planId")));
+	ApplyParams->SetStringField(
+		TEXT("confirmation"),
+		Preview->GetStringField(TEXT("requiredConfirmation")));
+
+	TSharedPtr<FJsonObject> Applied;
+	FString ApplyCode;
+	FString ApplyMessage;
+	const bool bApplied = UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
+		ApplyParams,
+		Applied,
+		ApplyCode,
+		ApplyMessage);
+	TestFalse(TEXT("stale pure existing plan is rejected"), bApplied);
+	TestTrue(
+		TEXT("stale pure existing plan uses a stale code"),
+		ApplyCode == TEXT("graph-edit-plan-stale")
+			|| ApplyCode == TEXT("graph-edit-edge-set-stale"));
+	if (!bApplied
+		&& ApplyCode != TEXT("graph-edit-plan-stale")
+		&& ApplyCode != TEXT("graph-edit-edge-set-stale"))
+	{
+		AddError(FString::Printf(TEXT("Unexpected pure stale code: %s %s"), *ApplyCode, *ApplyMessage));
+	}
+
+	Branch->NodePosX = OldX;
 	Blueprint->GetOutermost()->SetDirtyFlag(false);
 	UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
 	return true;

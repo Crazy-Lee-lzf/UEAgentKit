@@ -33,7 +33,8 @@ Legend:
 | Same-type variable retarget between accessor Apply and Save | **Experimental (native B)** | Receipt-side `variableBindingHash` covers every `UK2Node_Variable` binding/pin. Native automation `UEAgentKit.Blueprint.AccessorRetargetSaveGate` retargets `AccessInt` to `AccessInt2` after Apply and proves Save fails with `graph-edit-save-variable-binding-mismatch`; cleanup Undo restores the graph | 2026-10-28 |
 | Accessor Preview/Apply while PIE is active | **Experimental (native B)** | Native automation `UEAgentKit.Blueprint.AccessorPieGate` starts real PIE and proves Preview fails with `graph-edit-pie-active`; no mutation occurs | 2026-10-28 |
 | Connect one new allowlisted node/pin to one exact existing K2 pin | **Experimental** | Request uses `fromExisting`/`toExisting` with nodeGuid + pinGuid + pinName + direction + category/subCategory. The other endpoint must be a node created in the same plan. Existing input must be unlinked; existing output fan-out is preserved. **A-level** real MCP → Socket → Editor Preview/Apply/Save: new int getter/setter plus bool getter connected to an existing Branch `execute`/`Condition` and an existing event `then`; 4 edges, Undo/Redo true, fresh-process Reload verified exact links and asset SHA | 2026-10-28 |
-| Reject unsafe existing-pin connections | **Experimental** | Existing→existing, linked existing input, unknown node/pin GUID, category/subCategory mismatch, hidden/orphan/split/non-connectable pin, type mismatch, `BREAK_OTHERS_*`, conversion/promotion all fail closed. Native automation also proves a graph mutation after Preview makes Apply stale (`graph-edit-plan-stale`/`graph-edit-edge-set-stale`) and PIE rejects the path | 2026-10-28 |
+| Connect one existing output to one existing unlinked input with `nodes=[]` | **Experimental** | Exactly one existing→existing edge per plan; both endpoints exact `UK2Node`/pin GUID/name/direction/category/subCategory in the same graph, different nodes. Target input must be unlinked; source output fan-out is preserved. **A-level** real MCP → Socket → Editor Preview/Apply/Save: one existing Event `then` → existing Branch `execute`, 4 nodes/1 edge (unchanged node count), Undo/Redo true, fresh-process Reload verified the exact edge and asset SHA | 2026-10-28 |
+| Reject unsafe existing-pin connections | **Experimental** | Existing→existing beyond the one zero-node edge, linked existing input, unknown node/pin GUID, category/subCategory mismatch, hidden/orphan/split/non-connectable pin, type mismatch, `BREAK_OTHERS_*`, conversion/promotion all fail closed. Native automation also proves zero-node Preview after graph mutation is stale (`graph-edit-plan-stale`/`graph-edit-edge-set-stale`) and PIE rejects the path | 2026-10-28 |
 | Exact typed data links and output fan-out to distinct inputs | **Experimental** | One output may feed several distinct input pins; an input pin still accepts one plan link | P0 complete |
 | Plan-bound explicit Save | **Experimental** | Separate tool/gate; requires Apply receipt, post-Apply fingerprint, exact node/link counts, dirty package, clean readback, disk SHA-256 | P0 complete |
 | Post-commit failure rollback | **Experimental** | `FailCommitted` Undo + original count/link readback; explicit warning if rollback fails | P0 complete |
@@ -190,10 +191,13 @@ Legend:
 - A same-type retarget after Apply is rejected by Save
   (`graph-edit-save-variable-binding-mismatch`); the native retarget test then
   Undo-restores the original graph.
-- Connect-existing permits at most one existing endpoint per connection and
-  never an existing→existing edge. The existing endpoint must be a `UK2Node` in
-  the same focused graph with an exact canonical node GUID + pin GUID + name +
-  direction + category/subCategory; an existing input must have zero links.
+- Connect-existing permits either one existing endpoint plus one new endpoint,
+  or exactly one existing→existing edge with `nodes=[]`. A plan may contain at
+  most one pure existing→existing connection, and that plan must contain exactly
+  one connection and zero new nodes. The two endpoints must be different
+  `UK2Node`s in the same focused graph with exact canonical node GUID + pin GUID
+  + name + direction + category/subCategory; the existing input must have zero
+  links.
 - The existing pin's actual type must be exactly exec/bool/int/double/string
   with no wildcard, container, by-ref, const, weak, delegate, struct/object/enum
   or split/orphan/hidden flag. The declared request metadata must equal the live
@@ -284,9 +288,16 @@ Legend:
   created getter/setter nodes (4 connections, Undo/Redo true, 8 nodes / 4 edges,
   reload `verified=true`, `mismatches=[]`). PIE and stale-plan rejection are
   **native B** automation evidence.
-- The connect-existing slice still cannot connect two existing pins, change an
-  existing pin type, or rewire an existing edge. Each connection has exactly one
-  new endpoint and one existing endpoint; an existing input must be unlinked.
+- Existing→existing is accepted at **A level** on the real MCP → Socket →
+  Editor → Save → fresh-process Reload path for exactly one edge with
+  `nodes=[]`: an existing Event `then` was connected to an existing Branch
+  `execute` (node count unchanged at 4, edge count 1, Undo/Redo true, reload
+  `verified=true`, `mismatches=[]`). Zero-node stale-plan and PIE rejection are
+  **native B** automation evidence.
+- The connect-existing slice still cannot rewire or disconnect an existing edge,
+  change an existing pin type, connect multiple existing→existing edges, or mix
+  a pure existing→existing edge with new nodes. Each pure existing plan has
+  exactly one edge, zero new nodes, and an unlinked target input.
 - Connect-existing only accepts the four primitive data kinds plus exec. It
   rejects object/struct/enum/delegate/array/set/map/by-ref/const/weak/wildcard,
   hidden/orphan/split/non-connectable pins, inherited/non-K2 nodes and any

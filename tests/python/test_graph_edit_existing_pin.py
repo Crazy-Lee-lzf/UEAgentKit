@@ -26,12 +26,22 @@ BEFORE_EDGE_HASH = "sha256:" + "e" * 64
 VARIABLE_GUID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 EXISTING_NODE = "12345678-1234-4234-8234-123456789abc"
 EXISTING_PIN = "87654321-4321-4321-8321-cba987654321"
+SECOND_NODE = "22345678-2234-4234-8234-223456789abc"
+SECOND_PIN = "97654321-4321-4321-8321-dba987654321"
 
 
-def _existing(*, direction: str, category: str, subcategory: str = "", name: str = "Target") -> dict:
+def _existing(
+    *,
+    direction: str,
+    category: str,
+    subcategory: str = "",
+    name: str = "Target",
+    node: str = EXISTING_NODE,
+    pin: str = EXISTING_PIN,
+) -> dict:
     return {
-        "nodeGuid": EXISTING_NODE,
-        "pinGuid": EXISTING_PIN,
+        "nodeGuid": node,
+        "pinGuid": pin,
         "pinName": name,
         "direction": direction,
         "category": category,
@@ -138,7 +148,36 @@ class ExistingPinContractTests(unittest.TestCase):
         self.assertEqual(connection["fromExisting"]["category"], "int")
         self.assertEqual(connection["to"], "tmp:add")
 
-    def test_existing_to_existing_is_rejected(self) -> None:
+    def test_existing_to_existing_single_edge_allows_zero_nodes(self) -> None:
+        request = validate_preview_parameters(
+            asset_path=ASSET,
+            graph_guid=GRAPH,
+            nodes=[],
+            connections=[
+                {
+                    "fromExisting": _existing(
+                        direction="output",
+                        category="int",
+                        node=EXISTING_NODE,
+                        pin=EXISTING_PIN,
+                    ),
+                    "toExisting": _existing(
+                        direction="input",
+                        category="int",
+                        node=SECOND_NODE,
+                        pin=SECOND_PIN,
+                    ),
+                }
+            ],
+        )
+        self.assertEqual(request["nodes"], [])
+        self.assertEqual(len(request["connections"]), 1)
+        self.assertEqual(
+            request["connections"][0]["toExisting"]["nodeGuid"],
+            SECOND_NODE,
+        )
+
+    def test_existing_to_existing_requires_zero_nodes_and_one_edge(self) -> None:
         with self.assertRaises(GraphEditError) as raised:
             validate_preview_parameters(
                 asset_path=ASSET,
@@ -147,11 +186,78 @@ class ExistingPinContractTests(unittest.TestCase):
                 connections=[
                     {
                         "fromExisting": _existing(direction="output", category="int"),
+                        "toExisting": _existing(
+                            direction="input",
+                            category="int",
+                            node=SECOND_NODE,
+                            pin=SECOND_PIN,
+                        ),
+                    }
+                ],
+            )
+        self.assertEqual(raised.exception.code, "graph-edit-existing-to-existing-plan")
+
+    def test_existing_to_existing_limit_is_one(self) -> None:
+        pair = {
+            "fromExisting": _existing(direction="output", category="int"),
+            "toExisting": _existing(
+                direction="input",
+                category="int",
+                node=SECOND_NODE,
+                pin=SECOND_PIN,
+            ),
+        }
+        with self.assertRaises(GraphEditError) as raised:
+            validate_preview_parameters(
+                asset_path=ASSET,
+                graph_guid=GRAPH,
+                nodes=[],
+                connections=[pair, pair],
+            )
+        self.assertIn(
+            raised.exception.code,
+            ("graph-edit-existing-to-existing-limit", "graph-edit-connection-duplicate"),
+        )
+
+    def test_empty_plan_and_zero_nodes_without_existing_edge_fail_closed(self) -> None:
+        with self.assertRaises(GraphEditError) as raised:
+            validate_preview_parameters(
+                asset_path=ASSET,
+                graph_guid=GRAPH,
+                nodes=[],
+                connections=[],
+            )
+        self.assertEqual(raised.exception.code, "graph-edit-empty-plan")
+
+        with self.assertRaises(GraphEditError) as raised:
+            validate_preview_parameters(
+                asset_path=ASSET,
+                graph_guid=GRAPH,
+                nodes=[],
+                connections=[
+                    {
+                        "from": "tmp:get",
+                        "fromPin": "AgentCount",
                         "toExisting": _existing(direction="input", category="int"),
                     }
                 ],
             )
-        self.assertEqual(raised.exception.code, "graph-edit-existing-to-existing")
+        self.assertEqual(raised.exception.code, "graph-edit-node-reference-unknown")
+
+    def test_existing_to_existing_self_connection_is_rejected(self) -> None:
+        with self.assertRaises(GraphEditError) as raised:
+            validate_preview_parameters(
+                asset_path=ASSET,
+                graph_guid=GRAPH,
+                nodes=[],
+                connections=[
+                    {
+                        "fromExisting": _existing(direction="output", category="int"),
+                        "toExisting": _existing(direction="input", category="int"),
+                    }
+                ],
+            )
+        self.assertEqual(raised.exception.code, "graph-edit-self-connection")
 
     def test_existing_endpoint_direction_must_match_side(self) -> None:
         with self.assertRaises(GraphEditError) as raised:
@@ -271,6 +377,53 @@ class ExistingPinContractTests(unittest.TestCase):
         with self.assertRaises(GraphEditError) as raised:
             validate_preview_result(preview)
         self.assertEqual(raised.exception.code, "graph-edit-preview-invalid")
+
+
+    def test_preview_existing_to_existing_round_trips_zero_nodes(self) -> None:
+        preview = {
+            "schemaVersion": "ueak.graphpatch-edit-preview/1.0",
+            "experimental": True,
+            "readOnly": True,
+            "wroteBlueprint": False,
+            "savedPackage": False,
+            "compiled": False,
+            "planId": PLAN_ID,
+            "assetPath": ASSET,
+            "graphGuid": GRAPH,
+            "packageRevision": "sha256:" + "b" * 64,
+            "graphFingerprint": "sha1:" + "c" * 40,
+            "beforeEdgeSetHash": BEFORE_EDGE_HASH,
+            "nodeCountBefore": 2,
+            "nodeCountAfter": 2,
+            "connectionCount": 1,
+            "requiredConfirmation": APPLY_CONFIRMATION_PREFIX + PLAN_ID,
+            "nodes": [],
+            "connections": [
+                {
+                    "fromExisting": _existing(direction="output", category="int"),
+                    "fromType": "int",
+                    "toExisting": _existing(
+                        direction="input",
+                        category="int",
+                        node=SECOND_NODE,
+                        pin=SECOND_PIN,
+                    ),
+                    "toType": "int",
+                }
+            ],
+        }
+        normalized = validate_preview_result(preview)
+        self.assertEqual(normalized["nodes"], [])
+        self.assertEqual(len(normalized["connections"]), 1)
+        applied = build_apply_parameters(
+            preview,
+            confirmation_for_plan(preview["planId"]),
+        )
+        self.assertEqual(applied["nodes"], [])
+        self.assertEqual(
+            applied["connections"][0]["fromExisting"]["nodeGuid"],
+            EXISTING_NODE,
+        )
 
 
 if __name__ == "__main__":

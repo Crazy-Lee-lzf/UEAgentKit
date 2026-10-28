@@ -130,6 +130,13 @@ namespace
 		int32 LinkCount = 0;
 	};
 
+	bool ValidateSchemaConnection(
+		UEdGraph* Graph,
+		UEdGraphPin* FromPin,
+		UEdGraphPin* ToPin,
+		FString& OutErrorCode,
+		FString& OutErrorMessage);
+
 	// Save is only valid for an Apply completed in this same Editor session.
 	// The receipt is the authority for plan -> post-Apply graph binding.
 	TMap<FString, FApplyReceipt> RecentApplies;
@@ -1130,14 +1137,13 @@ namespace
 		const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
 		if (!Params->TryGetArrayField(TEXT("nodes"), Values)
 			|| Values == nullptr
-			|| Values->IsEmpty()
 			|| Values->Num() > MaxNodes)
 		{
 			return Fail(
 				OutErrorCode,
 				OutErrorMessage,
 				TEXT("graph-edit-invalid-nodes"),
-				FString::Printf(TEXT("nodes must contain between 1 and %d node objects."), MaxNodes));
+				FString::Printf(TEXT("nodes must contain between 0 and %d node objects."), MaxNodes));
 		}
 
 		TSet<FString> SeenTempIds;
@@ -1283,11 +1289,114 @@ namespace
 			const bool bHasToExistingField = (*Object)->HasField(TEXT("toExisting"));
 			if (bHasFromExistingField && bHasToExistingField)
 			{
-				return Fail(
+				if ((*Object)->HasField(TEXT("from"))
+					|| (*Object)->HasField(TEXT("fromPin"))
+					|| (*Object)->HasField(TEXT("to"))
+					|| (*Object)->HasField(TEXT("toPin")))
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-edit-existing-endpoint-conflict"),
+						TEXT("A pure existing-to-existing connection cannot carry temp-id endpoints."));
+				}
+				FConnectionSpec ExistingConnection;
+				const TSharedPtr<FJsonObject>* FromObject = nullptr;
+				const TSharedPtr<FJsonObject>* ToObject = nullptr;
+				if (!(*Object)->TryGetObjectField(TEXT("fromExisting"), FromObject)
+					|| FromObject == nullptr
+					|| !(*Object)->TryGetObjectField(TEXT("toExisting"), ToObject)
+					|| ToObject == nullptr
+					|| !ReadExistingPinSpec(
+						*FromObject,
+						ExistingConnection.FromExisting,
+						OutErrorCode,
+						OutErrorMessage)
+					|| !ReadExistingPinSpec(
+						*ToObject,
+						ExistingConnection.ToExisting,
+						OutErrorCode,
+						OutErrorMessage))
+				{
+					return false;
+				}
+				if (!ExistingConnection.FromExisting.Direction.Equals(TEXT("output"), ESearchCase::CaseSensitive)
+					|| !ExistingConnection.ToExisting.Direction.Equals(TEXT("input"), ESearchCase::CaseSensitive))
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-edit-existing-pin-direction"),
+						TEXT("Pure existing connections require fromExisting=output and toExisting=input."));
+				}
+				if (ExistingConnection.FromExisting.NodeGuid.Equals(
+					ExistingConnection.ToExisting.NodeGuid,
+					ESearchCase::CaseSensitive))
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-edit-self-connection"),
+						TEXT("The two existing endpoints must belong to different nodes."));
+				}
+				ExistingConnection.bFromExisting = true;
+				ExistingConnection.bToExisting = true;
+				if (!ResolveExistingPin(
+					Graph,
+					ExistingConnection.FromExisting,
+					ExistingConnection.FromExistingPin,
 					OutErrorCode,
-					OutErrorMessage,
-					TEXT("graph-edit-existing-to-existing"),
-					TEXT("This slice allows at most one existing pin per connection."));
+					OutErrorMessage)
+					|| !ResolveExistingPin(
+						Graph,
+						ExistingConnection.ToExisting,
+						ExistingConnection.ToExistingPin,
+						OutErrorCode,
+						OutErrorMessage))
+				{
+					return false;
+				}
+				ExistingConnection.FromType = ExistingConnection.FromExisting.TypeToken;
+				ExistingConnection.ToType = ExistingConnection.ToExisting.TypeToken;
+				if (!ExistingConnection.FromType.Equals(
+					ExistingConnection.ToType,
+					ESearchCase::CaseSensitive))
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-edit-pin-type-mismatch"),
+						FString::Printf(
+							TEXT("Cannot connect existing %s (%s) to existing %s (%s)."),
+							*ExistingConnection.FromExisting.PinName,
+							*ExistingConnection.FromType,
+							*ExistingConnection.ToExisting.PinName,
+							*ExistingConnection.ToType));
+				}
+				const FString TargetKey = FString::Printf(
+					TEXT("existing:%s|%s"),
+					*ExistingConnection.ToExisting.NodeGuid,
+					*ExistingConnection.ToExisting.PinGuid);
+				if (SeenTargets.Contains(TargetKey))
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-edit-connection-duplicate"),
+						FString::Printf(TEXT("Input pin already has a connection in this plan: %s"), *TargetKey));
+				}
+				SeenTargets.Add(TargetKey);
+				if (!ValidateSchemaConnection(
+					Graph,
+					ExistingConnection.FromExistingPin,
+					ExistingConnection.ToExistingPin,
+					OutErrorCode,
+					OutErrorMessage))
+				{
+					return false;
+				}
+				OutConnections.Add(MoveTemp(ExistingConnection));
+				continue;
 			}
 
 			FConnectionSpec Connection;
@@ -1710,6 +1819,48 @@ namespace
 			}
 		}
 
+		int32 PureExistingConnectionCount = 0;
+		for (const FConnectionSpec& Connection : OutPlan.Connections)
+		{
+			if (Connection.bFromExisting && Connection.bToExisting)
+			{
+				++PureExistingConnectionCount;
+			}
+		}
+		if (PureExistingConnectionCount > 1)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-existing-to-existing-limit"),
+				TEXT("A plan may add at most one existing-to-existing connection."));
+		}
+		if (PureExistingConnectionCount == 1
+			&& (!OutPlan.Nodes.IsEmpty() || OutPlan.Connections.Num() != 1))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-existing-to-existing-plan"),
+				TEXT("A pure existing-to-existing connection must be the only connection and requires nodes=[]."));
+		}
+		if (OutPlan.Nodes.IsEmpty() && OutPlan.Connections.IsEmpty())
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-empty-plan"),
+				TEXT("A graph edit plan must create at least one node or connect at least one existing edge."));
+		}
+		if (OutPlan.Nodes.IsEmpty() && PureExistingConnectionCount == 0)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-nodes-required"),
+				TEXT("nodes may be empty only for one pure existing-to-existing connection."));
+		}
+
 		OutPlan.PackageRevision = Preflight->GetStringField(TEXT("packageRevision"));
 		OutPlan.GraphFingerprint = Preflight->GetStringField(TEXT("graphFingerprint"));
 		if (bHasExistingPin)
@@ -2097,6 +2248,62 @@ namespace
 			&& ToPin != nullptr
 			&& FromPin->LinkedTo.Contains(ToPin)
 			&& ToPin->LinkedTo.Contains(FromPin);
+	}
+
+	bool ValidateSchemaConnection(
+		UEdGraph* Graph,
+		UEdGraphPin* FromPin,
+		UEdGraphPin* ToPin,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
+	{
+		if (Graph == nullptr || Graph->GetSchema() == nullptr || FromPin == nullptr || ToPin == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-connection-invalid"),
+				TEXT("The graph or pins are unavailable for connection validation."));
+		}
+		const FPinConnectionResponse Response =
+			Graph->GetSchema()->CanCreateConnection(FromPin, ToPin);
+		if (Response.Response == CONNECT_RESPONSE_BREAK_OTHERS_A
+			|| Response.Response == CONNECT_RESPONSE_BREAK_OTHERS_B
+			|| Response.Response == CONNECT_RESPONSE_BREAK_OTHERS_AB)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-break-others-rejected"),
+				TEXT("The schema would break an existing link; this slice never does that."));
+		}
+		if (Response.Response == CONNECT_RESPONSE_MAKE_WITH_CONVERSION_NODE)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-conversion-rejected"),
+				TEXT("The schema would insert a conversion node; this slice requires exact types."));
+		}
+		if (Response.Response == CONNECT_RESPONSE_MAKE_WITH_PROMOTION)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-promotion-rejected"),
+				TEXT("The schema would promote a pin type; this slice requires exact types."));
+		}
+		if (Response.Response != CONNECT_RESPONSE_MAKE)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-existing-pin-connection-rejected"),
+				FString::Printf(
+					TEXT("CanCreateConnection did not return MAKE: %s"),
+					*Response.Message.ToString()));
+		}
+		return true;
 	}
 
 	bool PinMatchesType(const UEdGraphPin* Pin, const FString& ExpectedType)
@@ -2568,7 +2775,45 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 		{
 			UEdGraphPin* FromPin = nullptr;
 			UEdGraphPin* ToPin = nullptr;
-			if (Connection.bFromExisting)
+			if (Connection.bFromExisting && Connection.bToExisting)
+			{
+				FExistingPinSpec ResolvedFrom = Connection.FromExisting;
+				FExistingPinSpec ResolvedTo = Connection.ToExisting;
+				if (!ResolveExistingPin(
+						Graph,
+						ResolvedFrom,
+						FromPin,
+						OutErrorCode,
+						OutErrorMessage)
+					|| !ResolveExistingPin(
+						Graph,
+						ResolvedTo,
+						ToPin,
+						OutErrorCode,
+						OutErrorMessage))
+				{
+					return Abort(*OutErrorCode, OutErrorMessage);
+				}
+				if (FromPin->LinkedTo.Num() != Connection.FromExisting.LinkCount)
+				{
+					return Abort(
+						TEXT("graph-edit-edge-set-stale"),
+						TEXT("The existing output pin fan-out changed after Preview."));
+				}
+				if (ToPin->LinkedTo.Num() != 0)
+				{
+					return Abort(
+						TEXT("graph-edit-existing-pin-already-linked"),
+						TEXT("The existing input pin became connected after Preview."));
+				}
+				if (FromPin->GetOwningNode() == ToPin->GetOwningNode())
+				{
+					return Abort(
+						TEXT("graph-edit-self-connection"),
+						TEXT("The two existing endpoints must belong to different nodes."));
+				}
+			}
+			else if (Connection.bFromExisting)
 			{
 				FExistingPinSpec Resolved = Connection.FromExisting;
 				if (!ResolveExistingPin(
@@ -2653,35 +2898,14 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 			}
 			if (Connection.bFromExisting || Connection.bToExisting)
 			{
-				const FPinConnectionResponse Response =
-					Graph->GetSchema()->CanCreateConnection(FromPin, ToPin);
-				if (Response.Response == CONNECT_RESPONSE_BREAK_OTHERS_A
-					|| Response.Response == CONNECT_RESPONSE_BREAK_OTHERS_B
-					|| Response.Response == CONNECT_RESPONSE_BREAK_OTHERS_AB)
+				if (!ValidateSchemaConnection(
+					Graph,
+					FromPin,
+					ToPin,
+					OutErrorCode,
+					OutErrorMessage))
 				{
-					return Abort(
-						TEXT("graph-edit-break-others-rejected"),
-						TEXT("The schema would break an existing link; this slice never does that."));
-				}
-				if (Response.Response == CONNECT_RESPONSE_MAKE_WITH_CONVERSION_NODE)
-				{
-					return Abort(
-						TEXT("graph-edit-conversion-rejected"),
-						TEXT("The schema would insert a conversion node; this slice requires exact types."));
-				}
-				if (Response.Response == CONNECT_RESPONSE_MAKE_WITH_PROMOTION)
-				{
-					return Abort(
-						TEXT("graph-edit-promotion-rejected"),
-						TEXT("The schema would promote a pin type; this slice requires exact types."));
-				}
-				if (Response.Response != CONNECT_RESPONSE_MAKE)
-				{
-					return Abort(
-						TEXT("graph-edit-existing-pin-connection-rejected"),
-						FString::Printf(
-							TEXT("CanCreateConnection did not return MAKE: %s"),
-							*Response.Message.ToString()));
+					return Abort(*OutErrorCode, OutErrorMessage);
 				}
 			}
 			if (!Graph->GetSchema()->TryCreateConnection(FromPin, ToPin)

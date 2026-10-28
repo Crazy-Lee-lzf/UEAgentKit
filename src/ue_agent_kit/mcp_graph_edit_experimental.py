@@ -91,9 +91,10 @@ def register_graph_edit_experimental_tools(
         input pins. One endpoint may be an exact existing K2 pin supplied as
         fromExisting/toExisting (nodeGuid + pinGuid + name + direction +
         category); an existing input must be unlinked and the schema must return
-        MAKE (no BreakOthers/conversion/promotion). The result is read-only and
-        returns the exact planId and requiredConfirmation needed by Apply. It
-        never opens a transaction, dirties, compiles, or saves.
+        MAKE (no BreakOthers/conversion/promotion). A plan with nodes=[] may add
+        exactly one existing output -> existing unlinked input edge. The result
+        is read-only and returns the exact planId and requiredConfirmation needed
+        by Apply. It never opens a transaction, dirties, compiles, or saves.
         """
         try:
             _capabilities(live_editor_service, PREVIEW_CAPABILITY)

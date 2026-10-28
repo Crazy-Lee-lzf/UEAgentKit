@@ -8,6 +8,11 @@ Besides the deterministic function/branch nodes, the contract accepts
 ``variable_get`` / ``variable_set`` nodes that reference one already-existing
 top-level bool/int/double/string member variable by concrete GUID + name.  The
 variable itself is never created, renamed, retyped or defaulted here.
+
+A connection may bind one exact existing K2 pin via ``fromExisting`` /
+``toExisting``.  With ``nodes=[]`` a single existing output may be connected to
+one existing unlinked input; existing->existing plans are limited to exactly
+that one edge and never break or replace an existing link.
 """
 
 from __future__ import annotations
@@ -284,10 +289,10 @@ def validate_preview_parameters(
 
     normalized_asset = _string(asset_path, "assetPath", maximum=512)
     normalized_graph = _string(graph_guid, "graphGuid", maximum=64)
-    if not isinstance(nodes, list) or not 1 <= len(nodes) <= MAX_NODES:
+    if not isinstance(nodes, list) or len(nodes) > MAX_NODES:
         raise GraphEditError(
             "graph-edit-invalid-nodes",
-            f"nodes must contain between 1 and {MAX_NODES} objects.",
+            f"nodes must contain between 0 and {MAX_NODES} objects.",
         )
     if not isinstance(connections, list) or len(connections) > MAX_CONNECTIONS:
         raise GraphEditError(
@@ -393,11 +398,6 @@ def validate_preview_parameters(
         )
         has_from_existing = "fromExisting" in item
         has_to_existing = "toExisting" in item
-        if has_from_existing and has_to_existing:
-            raise GraphEditError(
-                "graph-edit-existing-to-existing",
-                "This slice allows at most one existing pin per connection.",
-            )
 
         from_existing: dict[str, str] | None = None
         to_existing: dict[str, str] | None = None
@@ -405,6 +405,56 @@ def validate_preview_parameters(
         source_pin: str | None = None
         target: str | None = None
         target_pin: str | None = None
+
+        if has_from_existing and has_to_existing:
+            if any(key in item for key in ("from", "fromPin", "to", "toPin")):
+                raise GraphEditError(
+                    "graph-edit-existing-endpoint-conflict",
+                    "A pure existing-to-existing connection cannot carry temp-id endpoints.",
+                )
+            from_existing = _existing_pin(
+                item.get("fromExisting"),
+                f"connections[{index}].fromExisting",
+            )
+            to_existing = _existing_pin(
+                item.get("toExisting"),
+                f"connections[{index}].toExisting",
+            )
+            if from_existing["direction"] != "output" or to_existing["direction"] != "input":
+                raise GraphEditError(
+                    "graph-edit-existing-pin-direction",
+                    "Pure existing connections require fromExisting=output and toExisting=input.",
+                )
+            if from_existing["nodeGuid"] == to_existing["nodeGuid"]:
+                raise GraphEditError(
+                    "graph-edit-self-connection",
+                    "The two existing endpoints must belong to different nodes.",
+                )
+            source_type = _existing_pin_type_token(
+                from_existing["category"],
+                from_existing["subCategory"],
+            )
+            target_type = _existing_pin_type_token(
+                to_existing["category"],
+                to_existing["subCategory"],
+            )
+            if source_type != target_type:
+                raise GraphEditError(
+                    "graph-edit-pin-type-mismatch",
+                    f"Cannot connect existing {from_existing['pinName']} ({source_type}) to "
+                    f"existing {to_existing['pinName']} ({target_type}).",
+                )
+            target_key = f"existing:{to_existing['nodeGuid']}|{to_existing['pinGuid']}"
+            if target_key in seen_targets:
+                raise GraphEditError(
+                    "graph-edit-connection-duplicate",
+                    f"Input pin already has a connection in this plan: {target_key}.",
+                )
+            seen_targets.add(target_key)
+            normalized_connections.append(
+                {"fromExisting": from_existing, "toExisting": to_existing}
+            )
+            continue
 
         if has_from_existing:
             if "from" in item or "fromPin" in item:
@@ -582,6 +632,34 @@ def validate_preview_parameters(
             normalized_connection["toPin"] = target_pin
         normalized_connections.append(normalized_connection)
 
+    pure_existing_count = sum(
+        1
+        for connection in normalized_connections
+        if "fromExisting" in connection and "toExisting" in connection
+    )
+    if pure_existing_count > 1:
+        raise GraphEditError(
+            "graph-edit-existing-to-existing-limit",
+            "A plan may add at most one existing-to-existing connection.",
+        )
+    if pure_existing_count == 1 and (
+        normalized_nodes or len(normalized_connections) != 1
+    ):
+        raise GraphEditError(
+            "graph-edit-existing-to-existing-plan",
+            "A pure existing-to-existing connection must be the only connection and requires nodes=[].",
+        )
+    if not normalized_nodes and not normalized_connections:
+        raise GraphEditError(
+            "graph-edit-empty-plan",
+            "A graph edit plan must create at least one node or connect at least one existing edge.",
+        )
+    if not normalized_nodes and pure_existing_count == 0:
+        raise GraphEditError(
+            "graph-edit-nodes-required",
+            "nodes may be empty only for one pure existing-to-existing connection.",
+        )
+
     request = {
         "assetPath": normalized_asset,
         "graphGuid": normalized_graph,
@@ -741,11 +819,6 @@ def validate_preview_result(preview: Any) -> dict[str, Any]:
         )
         has_from_existing = "fromExisting" in connection
         has_to_existing = "toExisting" in connection
-        if has_from_existing and has_to_existing:
-            raise GraphEditError(
-                "graph-edit-preview-invalid",
-                f"preview.connections[{index}] has two existing endpoints.",
-            )
         from_existing = (
             _existing_pin(
                 connection.get("fromExisting"),
@@ -762,6 +835,15 @@ def validate_preview_result(preview: Any) -> dict[str, Any]:
             if has_to_existing
             else None
         )
+        if (
+            from_existing is not None
+            and to_existing is not None
+            and from_existing["nodeGuid"] == to_existing["nodeGuid"]
+        ):
+            raise GraphEditError(
+                "graph-edit-preview-invalid",
+                f"preview.connections[{index}] has two endpoints on one node.",
+            )
         if from_existing is not None and from_existing["direction"] != "output":
             raise GraphEditError(
                 "graph-edit-preview-invalid",
