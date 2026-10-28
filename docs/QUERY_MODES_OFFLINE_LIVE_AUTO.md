@@ -22,6 +22,7 @@
 | C++ 代码符号/引用 | ✅ `build_code_index` + `search_symbols(profile="code")` | ❌ | ❌ |
 | Editor 选区/打开资产/脏资产/PIE/日志/编译错误 | ❌ | ✅ `ue_get_selection`、`ue_get_open_assets`、`ue_get_dirty_assets`、`ue_get_pie_state`、`ue_get_output_log`、`ue_get_compile_errors` | ❌ |
 | Blueprint 图选区/上下文 | ❌（仅索引中的图节点） | ✅ `ue_get_blueprint_graph_selection`、`ue_get_focused_blueprint_graph_context` | ❌ |
+| PIE 运行时只读（World/Actor/Component） | ❌ | ✅ `ue_get_pie_world_contexts`、`ue_inspect_pie_actor`（PIE instance + Server/Client/NetMode；有界；stopped fail-closed；只读） | ❌ |
 | 快照元数据 | ✅ `IndexQueryService` 返回 snapshot id、数据库 schema 版本等 | ⚠️ 仅 bridge/编辑器状态，不是资产快照 | ❌ 无统一快照语义 |
 | 写入 | ❌ 仅允许生成计划 | ✅ 经 Editor 插件的 live write / patch 工具 | ❌ |
 
@@ -49,6 +50,7 @@
 
 - `ue_agent_kit.editor_bridge`：与 Editor 插件的请求/响应通道；
 - `mcp_live_tools.register_live_read_tools`：`ue_editor_status`、`ue_get_selection`、`ue_get_open_assets`、`ue_get_dirty_assets`、`ue_get_current_level`、`ue_get_pie_state`、`ue_get_output_log`、`ue_get_compile_errors`、`ue_inspect_asset_live`、Blueprint 图选区/上下文等；
+- PIE 只读事实：`ue_get_pie_world_contexts`（PIE WorldContext 列表：唯一 `pieInstanceId` + Server/Client/NetMode）与 `ue_inspect_pie_actor`（精确 world 内 Actor 的 path/class/transform/NetRole + 有界组件 class/path/assets）；两者只读，不做 PIE 启停，不做 Gameplay/Animation/GAS 属性，不做跨 world 猜测；
 - 写入侧：live write / structured write / material / data table / retarget 等工具，均经过 Editor 插件与验证流程。
 
 特征：
@@ -56,6 +58,7 @@
 - Live 查询是**按工具、按资产路径**的细粒度读取，不是全项目搜索；
 - Live 能力依赖 Editor 在线、插件启用、bridge 可达；
 - Live 读取不使用 SQLite 快照，也不返回索引快照 id；
+- 上述 PIE 只读工具本身不访问索引/数据库，但**不改变**“没有统一 `mode=offline|live|auto` 入口”的现状，也**不代表** MCP 进程可在完全无索引的情况下启动（见 §5 第 7 条）；
 - 写入已有 Online-only 约束，但这是分散在各工具中的实现，不是一个统一的查询/写入模式框架。
 
 ## 5. 明确差距（未实现）

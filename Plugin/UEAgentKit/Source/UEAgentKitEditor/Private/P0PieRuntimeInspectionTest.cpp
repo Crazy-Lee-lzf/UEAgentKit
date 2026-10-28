@@ -746,6 +746,9 @@ namespace UEAgentKitP0PieRuntime
 				TEXT("stale"),
 				UEAgentKitPieRuntime::FailureCode(UEAgentKitPieRuntime::EFailure::InstanceStale));
 			Codes->SetStringField(
+				TEXT("ambiguousInstance"),
+				UEAgentKitPieRuntime::FailureCode(UEAgentKitPieRuntime::EFailure::InstanceAmbiguous));
+			Codes->SetStringField(
 				TEXT("actorNotFound"),
 				UEAgentKitPieRuntime::FailureCode(UEAgentKitPieRuntime::EFailure::ActorNotFound));
 			Codes->SetStringField(
@@ -952,12 +955,25 @@ bool FUEAgentKitP0PieContractTest::RunTest(const FString& Parameters)
 	const FString NotRunningCode(LookupStatusCode(ELookupStatus::NotRunning));
 	const FString NotFoundCode(FailureCode(EFailure::InstanceNotFound));
 	const FString StaleCode(FailureCode(EFailure::InstanceStale));
+	const FString AmbiguousInstanceCode(FailureCode(EFailure::InstanceAmbiguous));
 	TestEqual(TEXT("P0Pie not-running wire code"), NotRunningCode, FString(TEXT("pie-not-running")));
 	TestEqual(TEXT("P0Pie not-found wire code"), NotFoundCode, FString(TEXT("pie-instance-not-found")));
 	TestEqual(TEXT("P0Pie stale wire code"), StaleCode, FString(TEXT("pie-instance-stale")));
+	TestEqual(
+		TEXT("P0Pie ambiguous-instance wire code"),
+		AmbiguousInstanceCode,
+		FString(TEXT("pie-instance-ambiguous")));
 	TestTrue(
 		TEXT("P0Pie NOT_RUNNING, NOT_FOUND and STALE codes are distinct"),
 		NotRunningCode != NotFoundCode && NotFoundCode != StaleCode && NotRunningCode != StaleCode);
+	TestTrue(
+		TEXT("P0Pie ambiguous-instance code is distinct from every lookup code"),
+		AmbiguousInstanceCode != NotRunningCode
+		&& AmbiguousInstanceCode != NotFoundCode
+		&& AmbiguousInstanceCode != StaleCode);
+	TestFalse(
+		TEXT("P0Pie ambiguous-instance is not classified as STALE"),
+		IsStaleFailure(EFailure::InstanceAmbiguous));
 	TestTrue(TEXT("P0Pie world-stale belongs to the STALE family"), IsStaleFailure(EFailure::WorldStale));
 	TestTrue(TEXT("P0Pie actor-stale belongs to the STALE family"), IsStaleFailure(EFailure::ActorStale));
 	TestFalse(TEXT("P0Pie not-found is not STALE"), IsStaleFailure(EFailure::InstanceNotFound));
