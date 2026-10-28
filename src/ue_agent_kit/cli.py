@@ -410,6 +410,45 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    memory_preflight_context = memory_subparsers.add_parser(
+        "preflight-context",
+        help=(
+            "Explicit Session/Goal handoff preflight: maintain the snapshot when "
+            "stale, then emit a bounded fresh/stale L2/L3 result."
+        ),
+    )
+    _add_memory_arguments(memory_preflight_context)
+    memory_preflight_context.add_argument(
+        "--index-database",
+        type=Path,
+        default=DEFAULT_DATABASE,
+        help=f"Immutable fixed index used for asset-class facts. Default: {DEFAULT_DATABASE}",
+    )
+    memory_preflight_context.add_argument(
+        "--enable-session-preflight",
+        action="store_true",
+        help=(
+            "Required explicit opt-in. Without it, preflight reports disabled and "
+            "performs no reads or writes."
+        ),
+    )
+    memory_preflight_context.add_argument(
+        "--include-text",
+        action="store_true",
+        help=(
+            "Include the bounded L2/L3 text. Default omits it so normal "
+            "diagnostics/logs never contain sensitive context."
+        ),
+    )
+    memory_preflight_context.add_argument(
+        "--query",
+        default="",
+        help=(
+            "Optional host-supplied Goal/task text for persisted L2 recipe "
+            "matching only; never used for auth, project, or path selection."
+        ),
+    )
+
     patch_parser = subparsers.add_parser("patch", help="Inspect or validate declarative Blueprint patches.")
     patch_subparsers = patch_parser.add_subparsers(dest="patch_command", required=True)
 
@@ -720,6 +759,14 @@ def run(args: argparse.Namespace) -> tuple[Any, int]:
                 enabled=args.enable_context_maintenance,
             )
             return result.to_payload(), 0 if result.state in {"current", "disabled"} else 1
+        if args.memory_command == "preflight-context":
+            result = memory_service.preflight_context(
+                index_database=args.index_database,
+                enabled=args.enable_session_preflight,
+                include_text=args.include_text,
+                query=args.query,
+            )
+            return result.to_payload(), 0 if result.state in {"fresh", "disabled"} else 1
         raise RuntimeError("Unsupported Project Memory command.")
 
     if args.command == "patch" and args.patch_command == "operations":

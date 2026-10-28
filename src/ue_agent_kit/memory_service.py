@@ -47,6 +47,7 @@ from .memory_injection import (
     get_injection_context,
     maintain_memory_context_snapshot,
 )
+from .memory_preflight import MemoryPreflightResult, preflight_memory_context
 from .memory_vector import (
     get_shared_provider,
     hybrid_search_memory_records,
@@ -746,6 +747,31 @@ class ProjectMemoryService:
             max_l2_groups=max_l2_groups,
             max_l3_entries=max_l3_entries,
             enabled=enabled,
+        )
+
+    def preflight_context(
+        self,
+        *,
+        index_database: Path,
+        enabled: bool = False,
+        include_text: bool = False,
+        query: str = "",
+    ) -> MemoryPreflightResult:
+        """Explicit Session/Goal preflight: maintain, then bounded read-only L2/L3.
+
+        The host must pass fixed Memory/Index paths and projectKey from its own
+        configuration. ``include_text`` defaults to False so diagnostics do not
+        carry sensitive L2/L3 text; a host that injects context must opt in and
+        keep that text out of logs. ``query`` is optional Goal/task text for
+        persisted L2 recipe matching only. No request path calls this method.
+        """
+        return preflight_memory_context(
+            memory_database=self.database_path,
+            index_database=index_database,
+            project_key=self.project_key,
+            enabled=enabled,
+            include_text=include_text,
+            query=query,
         )
 
     def expand_node(
