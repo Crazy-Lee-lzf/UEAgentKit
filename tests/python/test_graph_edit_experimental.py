@@ -22,11 +22,13 @@ from ue_agent_kit.experimental_graph_edit import (  # noqa: E402
     SAVE_CONFIRMATION_PREFIX,
     SAVE_TOOL_NAME,
     GraphEditError,
+    _node_contract,
     build_apply_parameters,
     build_save_parameters,
     confirmation_for_plan,
     save_confirmation_for_plan,
     validate_preview_parameters,
+    validate_preview_result,
 )
 from ue_agent_kit.mcp_graph_edit_experimental import (  # noqa: E402
     register_graph_edit_experimental_tools,
@@ -36,6 +38,7 @@ from ue_agent_kit.tool_registry import TOOL_DEFINITIONS_BY_NAME  # noqa: E402
 PLAN_ID = "sha256:" + "a" * 64
 ASSET = "/Game/UEAgentKitTests/BP_GraphEdit_Target.BP_GraphEdit_Target"
 GRAPH = "11111111-2222-4333-8444-555555555555"
+VARIABLE_GUID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 
 
 class _FakeServer:
@@ -202,6 +205,91 @@ def _bool_preview() -> dict[str, Any]:
             "fromType": "bool",
             "toType": "bool",
         }
+    ]
+    return preview
+
+
+def _variable_preview() -> dict[str, Any]:
+    preview = _preview()
+    preview["nodeCountBefore"] = 2
+    preview["nodeCountAfter"] = 6
+    preview["connectionCount"] = 3
+    preview["nodes"] = [
+        {
+            "tempId": "tmp:branch",
+            "nodeType": "branch",
+            "nodeClass": "/Script/BlueprintGraph.K2Node_IfThenElse",
+            "position": {"x": 0, "y": 0},
+            "inputPins": ["execute", "Condition"],
+            "outputPins": ["then", "else"],
+            "inputPinTypes": {"execute": "exec", "Condition": "bool"},
+            "outputPinTypes": {"then": "exec", "else": "exec"},
+        },
+        {
+            "tempId": "tmp:get",
+            "nodeType": "variable_get",
+            "nodeClass": "/Script/BlueprintGraph.K2Node_VariableGet",
+            "position": {"x": 300, "y": 0},
+            "variableName": "AgentCount",
+            "variableGuid": VARIABLE_GUID,
+            "variableType": "int",
+            "variableAccess": "read",
+            "inputPins": [],
+            "outputPins": ["AgentCount"],
+            "inputPinTypes": {},
+            "outputPinTypes": {"AgentCount": "int"},
+        },
+        {
+            "tempId": "tmp:add",
+            "nodeType": "int_add",
+            "nodeClass": "/Script/BlueprintGraph.K2Node_CallFunction",
+            "function": "Add_IntInt",
+            "position": {"x": 600, "y": 0},
+            "inputPins": ["A", "B"],
+            "outputPins": ["ReturnValue"],
+            "inputPinTypes": {"A": "int", "B": "int"},
+            "outputPinTypes": {"ReturnValue": "int"},
+        },
+        {
+            "tempId": "tmp:set",
+            "nodeType": "variable_set",
+            "nodeClass": "/Script/BlueprintGraph.K2Node_VariableSet",
+            "position": {"x": 900, "y": 0},
+            "variableName": "AgentCount",
+            "variableGuid": VARIABLE_GUID,
+            "variableType": "int",
+            "variableAccess": "write",
+            "inputPins": ["execute", "AgentCount"],
+            "outputPins": ["then", "Output_Get"],
+            "inputPinTypes": {"execute": "exec", "AgentCount": "int"},
+            "outputPinTypes": {"then": "exec", "Output_Get": "int"},
+        },
+    ]
+    preview["connections"] = [
+        {
+            "from": "tmp:branch",
+            "fromPin": "then",
+            "to": "tmp:set",
+            "toPin": "execute",
+            "fromType": "exec",
+            "toType": "exec",
+        },
+        {
+            "from": "tmp:get",
+            "fromPin": "AgentCount",
+            "to": "tmp:add",
+            "toPin": "A",
+            "fromType": "int",
+            "toType": "int",
+        },
+        {
+            "from": "tmp:add",
+            "fromPin": "ReturnValue",
+            "to": "tmp:set",
+            "toPin": "AgentCount",
+            "fromType": "int",
+            "toType": "int",
+        },
     ]
     return preview
 
@@ -620,6 +708,14 @@ class GraphEditContractTests(unittest.TestCase):
         self.assertIn("int_add", block["supportedNodeTypes"])
         self.assertIn("double_add", block["supportedNodeTypes"])
         self.assertIn("string_concat", block["supportedNodeTypes"])
+        self.assertIn("variable_get", block["supportedNodeTypes"])
+        self.assertIn("variable_set", block["supportedNodeTypes"])
+        self.assertEqual(
+            block["variableAccessorNodes"]["scope"],
+            "existing top-level member variables only, bool/int/double/string, bound by GUID + name",
+        )
+        self.assertFalse(block["variableAccessorNodes"]["createsVariables"])
+        self.assertFalse(block["variableAccessorNodes"]["renamesOrRetypesVariables"])
         self.assertTrue(block["strictPinTypeCheck"])
         self.assertEqual(block["maxConnectionsPerNode"], 8)
         self.assertEqual(block["saveTool"], SAVE_TOOL_NAME)
@@ -634,6 +730,219 @@ class GraphEditContractTests(unittest.TestCase):
         block = unobserved["liveEditor"]["experimentalGraphPatchEdit"]
         self.assertTrue(block["registered"])
         self.assertFalse(block["available"])
+
+    def test_variable_accessors_normalize_with_exact_engine_pins(self) -> None:
+        nodes = [
+            {"tempId": "tmp:branch", "nodeType": "branch", "x": 0, "y": 0},
+            {
+                "tempId": "tmp:get",
+                "nodeType": "variable_get",
+                "x": 300,
+                "y": 0,
+                "variableName": "AgentCount",
+                "variableGuid": VARIABLE_GUID,
+                "variableType": "int",
+            },
+            {"tempId": "tmp:add", "nodeType": "int_add", "x": 600, "y": 0},
+            {
+                "tempId": "tmp:set",
+                "nodeType": "variable_set",
+                "x": 900,
+                "y": 0,
+                "variableName": "AgentCount",
+                "variableGuid": VARIABLE_GUID,
+                "variableType": "int",
+            },
+        ]
+        connections = [
+            {
+                "from": "tmp:branch",
+                "fromPin": "then",
+                "to": "tmp:set",
+                "toPin": "execute",
+            },
+            {
+                "from": "tmp:get",
+                "fromPin": "AgentCount",
+                "to": "tmp:add",
+                "toPin": "A",
+            },
+            {
+                "from": "tmp:add",
+                "fromPin": "ReturnValue",
+                "to": "tmp:set",
+                "toPin": "AgentCount",
+            },
+        ]
+        request = validate_preview_parameters(
+            asset_path=ASSET,
+            graph_guid=GRAPH,
+            nodes=nodes,
+            connections=connections,
+        )
+        self.assertEqual(request["nodes"][1]["variableName"], "AgentCount")
+        self.assertEqual(request["nodes"][1]["variableGuid"], VARIABLE_GUID)
+        self.assertEqual(request["nodes"][1]["variableType"], "int")
+        self.assertEqual(request["nodes"][3]["variableType"], "int")
+        self.assertEqual(len(request["connections"]), 3)
+
+        get_contract = _node_contract(request["nodes"][1])
+        set_contract = _node_contract(request["nodes"][3])
+        self.assertEqual(get_contract["outputPins"], ("AgentCount",))
+        self.assertEqual(get_contract["outputPinTypes"], {"AgentCount": "int"})
+        self.assertEqual(set_contract["inputPins"], ("execute", "AgentCount"))
+        self.assertEqual(set_contract["outputPins"], ("then", "Output_Get"))
+        self.assertEqual(
+            set_contract["inputPinTypes"],
+            {"execute": "exec", "AgentCount": "int"},
+        )
+        self.assertEqual(
+            set_contract["outputPinTypes"],
+            {"then": "exec", "Output_Get": "int"},
+        )
+
+    def test_variable_preview_round_trips_identity_into_apply(self) -> None:
+        preview = _variable_preview()
+        normalized = validate_preview_result(preview)
+        self.assertEqual(normalized["nodes"][1]["variableName"], "AgentCount")
+        self.assertEqual(normalized["nodes"][1]["variableGuid"], VARIABLE_GUID)
+        self.assertEqual(normalized["nodes"][3]["variableType"], "int")
+        applied = build_apply_parameters(
+            preview,
+            confirmation_for_plan(preview["planId"]),
+        )
+        self.assertEqual(applied["nodes"][1]["variableName"], "AgentCount")
+        self.assertEqual(applied["nodes"][1]["variableGuid"], VARIABLE_GUID)
+        self.assertEqual(applied["nodes"][3]["nodeType"], "variable_set")
+
+    def test_variable_preview_pins_must_match_the_accessor_contract(self) -> None:
+        preview = _variable_preview()
+        preview["nodes"][1]["outputPins"] = ["Value"]
+        preview["nodes"][1]["outputPinTypes"] = {"Value": "int"}
+        with self.assertRaises(GraphEditError) as raised:
+            validate_preview_result(preview)
+        self.assertEqual(raised.exception.code, "graph-edit-preview-invalid")
+
+        preview = _variable_preview()
+        preview["nodes"][3]["variableAccess"] = "read"
+        with self.assertRaises(GraphEditError) as raised:
+            validate_preview_result(preview)
+        self.assertEqual(raised.exception.code, "graph-edit-preview-invalid")
+
+    def test_variable_fields_are_rejected_on_non_variable_nodes(self) -> None:
+        nodes = [
+            {
+                "tempId": "tmp:branch",
+                "nodeType": "branch",
+                "x": 0,
+                "y": 0,
+                "variableName": "AgentCount",
+            }
+        ]
+        with self.assertRaises(GraphEditError) as raised:
+            validate_preview_parameters(
+                asset_path=ASSET,
+                graph_guid=GRAPH,
+                nodes=nodes,
+                connections=[],
+            )
+        self.assertEqual(raised.exception.code, "graph-edit-variable-field-not-allowed")
+
+    def test_variable_identity_and_type_are_fail_closed(self) -> None:
+        def get_node(**overrides: Any) -> dict[str, Any]:
+            node = {
+                "tempId": "tmp:get",
+                "nodeType": "variable_get",
+                "x": 0,
+                "y": 0,
+                "variableName": "AgentCount",
+                "variableGuid": VARIABLE_GUID,
+                "variableType": "int",
+            }
+            node.update(overrides)
+            return node
+
+        cases = [
+            ({"variableGuid": "NOT-A-GUID"}, "graph-edit-variable-guid-invalid"),
+            ({"variableType": "float"}, "graph-edit-variable-type-invalid"),
+            ({"variableName": "Agent Count"}, "graph-edit-variable-name-invalid"),
+            ({"variableName": ""}, "graph-edit-variable-name-invalid"),
+        ]
+        for overrides, code in cases:
+            with self.assertRaises(GraphEditError) as raised:
+                validate_preview_parameters(
+                    asset_path=ASSET,
+                    graph_guid=GRAPH,
+                    nodes=[get_node(**overrides)],
+                    connections=[],
+                )
+            self.assertEqual(raised.exception.code, code)
+
+    def test_variable_connection_type_mismatch_is_rejected(self) -> None:
+        nodes = [
+            {
+                "tempId": "tmp:get",
+                "nodeType": "variable_get",
+                "x": 0,
+                "y": 0,
+                "variableName": "AgentCount",
+                "variableGuid": VARIABLE_GUID,
+                "variableType": "int",
+            },
+            {"tempId": "tmp:string", "nodeType": "string_concat", "x": 300, "y": 0},
+        ]
+        with self.assertRaises(GraphEditError) as raised:
+            validate_preview_parameters(
+                asset_path=ASSET,
+                graph_guid=GRAPH,
+                nodes=nodes,
+                connections=[
+                    {
+                        "from": "tmp:get",
+                        "fromPin": "AgentCount",
+                        "to": "tmp:string",
+                        "toPin": "A",
+                    }
+                ],
+            )
+        self.assertEqual(raised.exception.code, "graph-edit-pin-type-mismatch")
+
+    def test_variable_getter_output_cannot_feed_setter_execute(self) -> None:
+        nodes = [
+            {
+                "tempId": "tmp:get",
+                "nodeType": "variable_get",
+                "x": 0,
+                "y": 0,
+                "variableName": "AgentCount",
+                "variableGuid": VARIABLE_GUID,
+                "variableType": "int",
+            },
+            {
+                "tempId": "tmp:set",
+                "nodeType": "variable_set",
+                "x": 300,
+                "y": 0,
+                "variableName": "AgentCount",
+                "variableGuid": VARIABLE_GUID,
+                "variableType": "int",
+            },
+        ]
+        with self.assertRaises(GraphEditError) as raised:
+            validate_preview_parameters(
+                asset_path=ASSET,
+                graph_guid=GRAPH,
+                nodes=nodes,
+                connections=[
+                    {
+                        "from": "tmp:get",
+                        "fromPin": "AgentCount",
+                        "to": "tmp:set",
+                        "toPin": "execute",
+                    }
+                ],
+            )
+        self.assertEqual(raised.exception.code, "graph-edit-pin-type-mismatch")
 
     def test_server_and_bridge_source_contract(self) -> None:
         server_source = (ROOT / "src/ue_agent_kit/mcp_server.py").read_text(encoding="utf-8")
@@ -657,6 +966,18 @@ class GraphEditContractTests(unittest.TestCase):
         self.assertIn("string_concat", edit_source)
         self.assertIn("UKismetMathLibrary", edit_source)
         self.assertIn("UKismetStringLibrary", edit_source)
+        self.assertIn("variable_get", edit_source)
+        self.assertIn("variable_set", edit_source)
+        self.assertIn("K2Node_VariableGet", edit_source)
+        self.assertIn("K2Node_VariableSet", edit_source)
+        self.assertIn("UBlueprintVariableNodeSpawner", edit_source)
+        self.assertIn("CreateFromMemberOrParam", edit_source)
+        self.assertIn("Output_Get", edit_source)
+        self.assertIn("graph-edit-variable-pin-contract-failed", edit_source)
+        self.assertIn("graph-edit-variable-graph-not-supported", edit_source)
+        self.assertIn("ComputeVariableBindingHash", edit_source)
+        self.assertIn("graph-edit-save-variable-binding-mismatch", edit_source)
+        self.assertIn("IsSupportedVariableAccessorGraph", edit_source)
         self.assertIn("graph-edit-pin-type-mismatch", edit_source)
         self.assertIn("graph-edit-pie-active", edit_source)
         self.assertIn("graph-edit-package-dirty", edit_source)

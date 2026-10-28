@@ -3,6 +3,11 @@
 This module does not touch Unreal.  It validates the small request/result
 envelope used by the live preview/apply tools and binds Apply to the complete
 preview result plus the exact confirmation phrase.
+
+Besides the deterministic function/branch nodes, the contract accepts
+``variable_get`` / ``variable_set`` nodes that reference one already-existing
+top-level bool/int/double/string member variable by concrete GUID + name.  The
+variable itself is never created, renamed, retyped or defaulted here.
 """
 
 from __future__ import annotations
@@ -95,8 +100,58 @@ NODE_TYPES = {
     },
 }
 
+# Bounded self-context member-variable accessor nodes.  They reference an
+# already-existing top-level bool/int/double/string variable by GUID + name and
+# never create, rename or retype a variable.  The engine pin contract is:
+#   variable_get: output <VariableName>
+#   variable_set: input execute, input <VariableName>,
+#                 output then, output Output_Get
+VARIABLE_NODE_TYPES = {
+    "variable_get": {
+        "nodeClass": "/Script/BlueprintGraph.K2Node_VariableGet",
+        "access": "read",
+    },
+    "variable_set": {
+        "nodeClass": "/Script/BlueprintGraph.K2Node_VariableSet",
+        "access": "write",
+    },
+}
+VARIABLE_TYPES = ("bool", "int", "double", "string")
+VARIABLE_PIN_RESERVED = ("execute", "then", "Output_Get")
+
+
+def _node_contract(node: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the exact declared node/pin contract for one normalized node."""
+
+    node_type = node.get("nodeType")
+    if node_type in VARIABLE_NODE_TYPES:
+        variable_name = node.get("variableName")
+        variable_type = node.get("variableType")
+        if not isinstance(variable_name, str) or variable_type not in VARIABLE_TYPES:
+            return None
+        access = VARIABLE_NODE_TYPES[node_type]
+        if node_type == "variable_get":
+            return {
+                "nodeClass": access["nodeClass"],
+                "inputPins": (),
+                "outputPins": (variable_name,),
+                "inputPinTypes": {},
+                "outputPinTypes": {variable_name: variable_type},
+            }
+        return {
+            "nodeClass": access["nodeClass"],
+            "inputPins": ("execute", variable_name),
+            "outputPins": ("then", "Output_Get"),
+            "inputPinTypes": {"execute": "exec", variable_name: variable_type},
+            "outputPinTypes": {"then": "exec", "Output_Get": variable_type},
+        }
+    return NODE_TYPES.get(node_type) if isinstance(node_type, str) else None
+
 
 _TEMP_ID = re.compile(r"^tmp:[A-Za-z0-9_-]{1,36}$")
+_VARIABLE_GUID = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SHA1 = re.compile(r"^sha1:[0-9a-f]{40}$")
 
@@ -175,7 +230,19 @@ def validate_preview_parameters(
     seen_ids: set[str] = set()
     for index, raw in enumerate(nodes):
         item = _object(raw, f"nodes[{index}]")
-        _reject_unknown(item, {"tempId", "nodeType", "x", "y"}, f"nodes[{index}]")
+        _reject_unknown(
+            item,
+            {
+                "tempId",
+                "nodeType",
+                "x",
+                "y",
+                "variableName",
+                "variableGuid",
+                "variableType",
+            },
+            f"nodes[{index}]",
+        )
         temp_id = _string(item.get("tempId"), f"nodes[{index}].tempId", maximum=40)
         node_type = _string(item.get("nodeType"), f"nodes[{index}].nodeType", maximum=16)
         if not _TEMP_ID.fullmatch(temp_id):
@@ -189,19 +256,60 @@ def validate_preview_parameters(
                 f"Duplicate tempId: {temp_id}.",
             )
         seen_ids.add(temp_id)
-        if node_type not in NODE_TYPES:
+        if node_type not in NODE_TYPES and node_type not in VARIABLE_NODE_TYPES:
             raise GraphEditError(
                 "graph-edit-node-type-not-allowed",
-                "Supported nodeTypes: " + ", ".join(sorted(NODE_TYPES)) + ".",
+                "Supported nodeTypes: "
+                + ", ".join(sorted((*NODE_TYPES, *VARIABLE_NODE_TYPES)))
+                + ".",
             )
-        normalized_nodes.append(
-            {
-                "tempId": temp_id,
-                "nodeType": node_type,
-                "x": _integer(item.get("x"), f"nodes[{index}].x"),
-                "y": _integer(item.get("y"), f"nodes[{index}].y"),
-            }
-        )
+        normalized_node: dict[str, Any] = {
+            "tempId": temp_id,
+            "nodeType": node_type,
+            "x": _integer(item.get("x"), f"nodes[{index}].x"),
+            "y": _integer(item.get("y"), f"nodes[{index}].y"),
+        }
+        if node_type in VARIABLE_NODE_TYPES:
+            variable_name = item.get("variableName")
+            variable_guid = item.get("variableGuid")
+            variable_type = item.get("variableType")
+            if (
+                not isinstance(variable_name, str)
+                or not variable_name
+                or len(variable_name) > 128
+                or not variable_name.isidentifier()
+                or variable_name in VARIABLE_PIN_RESERVED
+            ):
+                raise GraphEditError(
+                    "graph-edit-variable-name-invalid",
+                    f"nodes[{index}].variableName must be a 1-128 character identifier "
+                    f"other than {', '.join(VARIABLE_PIN_RESERVED)}.",
+                )
+            if not isinstance(variable_guid, str) or not _VARIABLE_GUID.fullmatch(variable_guid):
+                raise GraphEditError(
+                    "graph-edit-variable-guid-invalid",
+                    f"nodes[{index}].variableGuid must be one canonical lowercase GUID.",
+                )
+            if variable_type not in VARIABLE_TYPES:
+                raise GraphEditError(
+                    "graph-edit-variable-type-invalid",
+                    f"nodes[{index}].variableType must be bool, int, double or string.",
+                )
+            normalized_node.update(
+                {
+                    "variableName": variable_name,
+                    "variableGuid": variable_guid,
+                    "variableType": variable_type,
+                }
+            )
+        elif any(
+            key in item for key in ("variableName", "variableGuid", "variableType")
+        ):
+            raise GraphEditError(
+                "graph-edit-variable-field-not-allowed",
+                f"nodes[{index}] nodeType {node_type} does not accept variable fields.",
+            )
+        normalized_nodes.append(normalized_node)
 
     by_id = {node["tempId"]: node for node in normalized_nodes}
     normalized_connections: list[dict[str, str]] = []
@@ -236,8 +344,13 @@ def validate_preview_parameters(
                 "graph-edit-self-connection",
                 "A node cannot connect to itself in this experimental slice.",
             )
-        source_contract = NODE_TYPES[by_id[source]["nodeType"]]
-        target_contract = NODE_TYPES[by_id[target]["nodeType"]]
+        source_contract = _node_contract(by_id[source])
+        target_contract = _node_contract(by_id[target])
+        if source_contract is None or target_contract is None:
+            raise GraphEditError(
+                "graph-edit-node-type-not-allowed",
+                "A connection references a node without a declared pin contract.",
+            )
         source_type = source_contract["outputPinTypes"].get(source_pin)
         target_type = target_contract["inputPinTypes"].get(target_pin)
         if source_type is None:
@@ -363,7 +476,38 @@ def validate_preview_result(preview: Any) -> dict[str, Any]:
         node = _object(raw, f"preview.nodes[{index}]")
         position = _object(node.get("position"), f"preview.nodes[{index}].position")
         node_type = node.get("nodeType")
-        contract = NODE_TYPES.get(node_type) if isinstance(node_type, str) else None
+        contract = _node_contract(node) if isinstance(node_type, str) else None
+        normalized_node: dict[str, Any] = {
+            "tempId": node.get("tempId"),
+            "nodeType": node_type,
+            "x": position.get("x"),
+            "y": position.get("y"),
+        }
+        if node_type in VARIABLE_NODE_TYPES:
+            if contract is None:
+                raise GraphEditError(
+                    "graph-edit-preview-invalid",
+                    f"preview.nodes[{index}] has an invalid variable accessor declaration.",
+                )
+            if node.get("variableAccess") != VARIABLE_NODE_TYPES[node_type]["access"]:
+                raise GraphEditError(
+                    "graph-edit-preview-invalid",
+                    f"preview.nodes[{index}].variableAccess does not match nodeType {node_type}.",
+                )
+            normalized_node.update(
+                {
+                    "variableName": node.get("variableName"),
+                    "variableGuid": node.get("variableGuid"),
+                    "variableType": node.get("variableType"),
+                }
+            )
+        elif any(
+            key in node for key in ("variableName", "variableGuid", "variableType")
+        ):
+            raise GraphEditError(
+                "graph-edit-preview-invalid",
+                f"preview.nodes[{index}] nodeType {node_type} must not declare variable fields.",
+            )
         if contract is not None:
             for field in ("inputPins", "outputPins"):
                 declared = node.get(field)
@@ -378,14 +522,7 @@ def validate_preview_result(preview: Any) -> dict[str, Any]:
                         "graph-edit-preview-invalid",
                         f"preview.nodes[{index}].{field} does not match nodeType {node_type}.",
                     )
-        normalized.append(
-            {
-                "tempId": node.get("tempId"),
-                "nodeType": node_type,
-                "x": position.get("x"),
-                "y": position.get("y"),
-            }
-        )
+        normalized.append(normalized_node)
     normalized_connections = []
     for index, raw in enumerate(connections):
         connection = _object(raw, f"preview.connections[{index}]")
@@ -398,17 +535,21 @@ def validate_preview_result(preview: Any) -> dict[str, Any]:
             None,
         )
         source_contract = (
-            NODE_TYPES.get(source_node.get("nodeType"), {})
-            if isinstance(source_node, dict)
-            else {}
+            _node_contract(source_node) if isinstance(source_node, dict) else None
         )
         target_contract = (
-            NODE_TYPES.get(target_node.get("nodeType"), {})
-            if isinstance(target_node, dict)
-            else {}
+            _node_contract(target_node) if isinstance(target_node, dict) else None
         )
-        expected_from_type = source_contract.get("outputPinTypes", {}).get(connection.get("fromPin"))
-        expected_to_type = target_contract.get("inputPinTypes", {}).get(connection.get("toPin"))
+        expected_from_type = (
+            source_contract.get("outputPinTypes", {}).get(connection.get("fromPin"))
+            if source_contract is not None
+            else None
+        )
+        expected_to_type = (
+            target_contract.get("inputPinTypes", {}).get(connection.get("toPin"))
+            if target_contract is not None
+            else None
+        )
         if (
             expected_from_type is None
             or expected_to_type is None

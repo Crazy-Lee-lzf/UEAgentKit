@@ -83,11 +83,14 @@ def register_graph_edit_experimental_tools(
         """Opt-in, read-only: validate a bounded createNode/connectPins plan against the live graph.
 
         Supported nodes are Branch, Sequence, Boolean NOT/OR, integer add/equal,
-        double add, and string concat. Supported connections are exact exec or
-        exact bool/int/double/string data links between the declared pins; one
-        output may fan out to several distinct input pins. The result is
-        read-only and returns the exact planId and requiredConfirmation needed
-        by Apply. It never opens a transaction, dirties, compiles, or saves.
+        double add, string concat, and self-context member-variable Get/Set
+        accessors for an existing plain bool/int/double/string variable (bound by
+        GUID + name; nothing is created, renamed or retyped). Supported
+        connections are exact exec or exact bool/int/double/string data links
+        between the declared pins; one output may fan out to several distinct
+        input pins. The result is read-only and returns the exact planId and
+        requiredConfirmation needed by Apply. It never opens a transaction,
+        dirties, compiles, or saves.
         """
         try:
             _capabilities(live_editor_service, PREVIEW_CAPABILITY)
@@ -133,7 +136,8 @@ def register_graph_edit_experimental_tools(
         ue_preview_blueprint_graph_edit_experimental and the exact
         'CREATE EXPERIMENTAL GRAPH NODES <planId>' confirmation. The Editor
         rechecks the exact focused graph, clean package, stopped PIE, current
-        revision/fingerprint, creates only the allowlisted deterministic nodes,
+        revision/fingerprint, creates only the allowlisted deterministic nodes
+        (including the exact existing member-variable Get/Set accessors),
         connects only the previewed exact-typed pins (including output fan-out),
         verifies readback and Undo/Redo, and never saves or compiles.
         """

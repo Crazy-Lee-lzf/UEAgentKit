@@ -1,7 +1,7 @@
 # Blueprint Graph Read/Write Capability Matrix
 
 Verified scope: UE 5.6.1, Editor Bridge and Python MCP.
-Updated: 2026-10-26.
+Updated: 2026-10-28.
 
 This matrix describes the implemented Blueprint graph read/write contract. It deliberately does
 not treat fixture-only helpers or the earlier position-only layout acceptance as
@@ -28,6 +28,10 @@ Legend:
 | Five-family MCP → Socket → Apply → Save → fresh-process Reload acceptance | **Supported (experimental)** | `tests/python/p5_agent_e2e_probe.py` + `scripts/VerifyBlueprintAgentEndToEnd.ps1`; the accepted end-to-end run proved GraphEdit, pin defaults, variables, rewire and isolated node removal end to end | P5 complete |
 | Live GraphEdit `createNode` + `connectPins` preview/apply | **Experimental** | One transaction; allowlisted deterministic nodes; exact exec/bool/int/double/string pins; output fan-out; readback + Undo/Redo | P0 complete |
 | Allowlisted nodes: `branch`, `sequence`, `not_bool`, `bool_or`, `int_add`, `int_equal`, `double_add`, `string_concat` | **Experimental** | Python + C++ duplicate contracts agree on class/function and pin names/types | P0 complete |
+| Create `variable_get` / `variable_set` nodes for an existing top-level member variable (bool/int/double/string) | **Experimental** | Same GraphEdit Preview/Apply/Save contract; variable bound by GUID + name + exact type; `UBlueprintVariableNodeSpawner` creates the engine-standard pins; post-spawn and post-Redo checks prove class, self-context member identity and exact pins. **A-level** real MCP → Socket → Editor Preview/Apply/Save for four types in the event graph and one int accessor pair in a function graph; fresh-process canonical export Reload verified all 10 accessors, bindings, pins and asset SHA | 2026-10-28 |
+| Variable accessor connection targets within the same plan (getter output, setter `execute`/`Output_Get`) | **Experimental** | Exact exec or exact primitive data links between the declared accessor pins, using the same fan-out and type rules as the static nodes. The A-level run connected all four getters to their setters and drove the int setter from a `sequence` exec pin | 2026-10-28 |
+| Same-type variable retarget between accessor Apply and Save | **Experimental (native B)** | Receipt-side `variableBindingHash` covers every `UK2Node_Variable` binding/pin. Native automation `UEAgentKit.Blueprint.AccessorRetargetSaveGate` retargets `AccessInt` to `AccessInt2` after Apply and proves Save fails with `graph-edit-save-variable-binding-mismatch`; cleanup Undo restores the graph | 2026-10-28 |
+| Accessor Preview/Apply while PIE is active | **Experimental (native B)** | Native automation `UEAgentKit.Blueprint.AccessorPieGate` starts real PIE and proves Preview fails with `graph-edit-pie-active`; no mutation occurs | 2026-10-28 |
 | Exact typed data links and output fan-out to distinct inputs | **Experimental** | One output may feed several distinct input pins; an input pin still accepts one plan link | P0 complete |
 | Plan-bound explicit Save | **Experimental** | Separate tool/gate; requires Apply receipt, post-Apply fingerprint, exact node/link counts, dirty package, clean readback, disk SHA-256 | P0 complete |
 | Post-commit failure rollback | **Experimental** | `FailCommitted` Undo + original count/link readback; explicit warning if rollback fails | P0 complete |
@@ -47,7 +51,7 @@ Legend:
 | Remove one allowlisted node with exactly one enumerated incident edge | **Experimental** | The request must list that single edge by both node GUID + pin name + pin GUID; Apply breaks only that enumerated edge, refuses any unplanned link, then removes the node and proves every other edge and pin identity survived | P4 complete |
 | Plan-bound node-removal Save | **Experimental** | Separate gate bound to the Apply receipt, post-Apply edge-set/pin-identity/node-identity hashes, package revision and exact node/link counts; never compiles | P4 complete |
 | Cross-process reload after node removal | **Supported (read verification)** | Fresh-process commandlet verifies both deleted GUIDs are absent, every remaining node GUID/class and pin inventory is unchanged, the exact final edge set is present, the removed edge is absent, untouched fan-out/exec edges survive and the asset SHA-256 matches | P4 complete |
-| Change pin types / rename or delete variables / create nodes or pins / delete nodes outside the P4 allowlist | **Unsupported** | Node removal deletes exactly one allowlisted existing node; nothing is retyped, renamed, created or rewired | P4 |
+| Change pin types / rename, retype or delete variables / create variable accessors outside the bounded slice / create pins / delete nodes outside the P4 allowlist | **Unsupported** | Node removal deletes exactly one allowlisted existing node; nothing is retyped, renamed, created or rewired outside the explicit GraphEdit allowlist | P4 |
 | Remove comment groups, event entries, timelines, knots, tunnels, macros, variable accessors, sequences or unknown custom nodes | **Unsupported** | Only `K2Node_CallFunction` with an allowlisted pure `UKismetMathLibrary` function and `K2Node_IfThenElse` are removable; every other class fails closed | P4 |
 | Remove a node with more than one incident edge / bulk node deletion | **Unsupported** | A plan removes exactly one node and at most one enumerated incident edge; larger deletions need a separate capability and are not silently approximated | P4 |
 | Broad `BreakAllPinLinks` / bulk edge rewiring | **Unsupported** | Rewire breaks exactly the one target link that the plan names; output fan-out on every other pin is preserved | P3 |
@@ -78,6 +82,10 @@ Legend:
   nothing, and it never compiles.
 - Save is a second explicit gate bound to the successful Apply receipt and
   post-Apply fingerprint/counts; it cannot save an unrelated dirty package edit.
+  It also compares a receipt-side hash of every `UK2Node_Variable` binding
+  (GUID, name, self-context, read/write and accessor pins), so a same-type
+  variable retarget between Apply and Save fails closed with
+  `graph-edit-save-variable-binding-mismatch`.
 - Python and native code both reject unknown parameters, node types, pins, types,
   duplicate target pins, and over-limit plans.
 - Variable creation appends only top-level member variables to the exact focused,
@@ -152,6 +160,34 @@ Legend:
   edge-set/pin-identity/node-identity hashes, the caller-echoed package revision
   and exact node/link counts, and the live disk revision; it never compiles and
   never saves another asset.
+- Variable accessors are `variable_get` / `variable_set` nodes bound to one
+  existing top-level member variable by canonical GUID, exact name and one of
+  bool/int/double/string. The plan additionally binds the read/write direction.
+  Apply re-resolves the generated/skeleton property, requires the same primitive
+  type, and uses `UBlueprintVariableNodeSpawner::CreateFromMemberOrParam` so the
+  engine itself builds the self-context `K2Node_VariableGet/Set` and its pins.
+- Variable accessor creation is limited to the Blueprint's top-level event,
+  function and macro graphs. Interface/extension graphs and nested
+  `UEdGraph::SubGraphs` fail closed with
+  `graph-edit-variable-graph-not-supported`.
+- A variable accessor plan never creates, renames, retypes or deletes a
+  variable, never edits a variable default, and never compiles. If the variable
+  has no generated/skeleton property (pending compile or stale class), Preview
+  fails closed with `graph-edit-variable-property-unavailable`.
+- Post-spawn and post-Redo verification prove the node class, self-context
+  member GUID + name and the exact engine pins (`variable_get`: output
+  `<VariableName>`; `variable_set`: input `execute`, input `<VariableName>`,
+  output `then`, output `Output_Get`). A mismatch aborts the transaction with
+  `graph-edit-variable-pin-contract-failed`.
+- A variable-accessor Apply opens one `FScopedTransaction`; the native A-path
+  run returns `undoVerified=true` and `redoVerified=true`, leaves the package
+  dirty, and requires a separate explicit Save. The Save receipt additionally
+  binds `variableBindingHash` over every live `UK2Node_Variable` in the graph.
+- Accessor Preview/Apply is rejected while PIE/SIE is active
+  (`graph-edit-pie-active`); the native PIE automation test proves no mutation.
+- A same-type retarget after Apply is rejected by Save
+  (`graph-edit-save-variable-binding-mismatch`); the native retarget test then
+  Undo-restores the original graph.
 - No deletion, disconnection, pin creation, variable rename/retype/removal, or
   default mutation outside the bounded five-type paths, arbitrary GraphPatch,
   auto-save, or compile in this slice.
@@ -212,3 +248,20 @@ Legend:
 - Nested-subgraph writes, variable rename/retype/removal, pin
   creation/retyping, unbounded node deletion, and live GraphPatch apply remain
   follow-up work.
+- Variable accessor creation is now accepted at **A level** on the real
+  MCP → Socket → Editor → Save → fresh-process Reload path for four primitive
+  types in an event graph and for an int getter/setter pair in a function graph
+  (10 accessors; `undoVerified=true`, `redoVerified=true`; reload
+  `verified=true`, `mismatches=[]`). PIE rejection and same-type-retarget Save
+  rejection are **native B** automation evidence. Macro graphs are accepted by
+  the same code path but were not exercised in this native run.
+- The variable accessor slice only wires nodes created in the same plan. It
+  cannot connect a new accessor to pre-existing event nodes; that needs a
+  separate bounded "connect existing pin" capability.
+- The Save-side variable binding hash covers every variable accessor in the
+  edited graph, not only the newly created ones. It is intentionally stricter
+  than the layout fingerprint (which does not include `FMemberReference`); a
+  same-type retarget after Apply is rejected rather than saved.
+- Function-local variables, component member variables represented only as SCS
+  template properties, and variables whose generated property is missing are
+  rejected; they are not silently approximated.

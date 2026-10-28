@@ -16,13 +16,14 @@ class FJsonObject;
  *     ExperimentalGraphPatchEdit=True
  *
  * Supported nodes are Branch, Sequence, Boolean NOT/OR, integer add/equal,
- * double add and string concat.  Supported connections are exact exec or exact
- * bool/int/double/string data links; one output may fan out to distinct inputs.
- * Every call still requires the exact focused Blueprint graph, clean package,
- * stopped PIE/SIE, current revision and graph fingerprint, one
- * FScopedTransaction, exact readback, and Undo/Redo verification.  Save is a
- * separate explicit gate bound to the Apply plan, post-Apply fingerprint and
- * exact node/link counts.
+ * double add, string concat, and self-context member-variable Get/Set accessors
+ * for existing plain bool/int/double/string variables.  Supported connections
+ * are exact exec or exact bool/int/double/string data links; one output may fan
+ * out to distinct inputs.  Every call still requires the exact focused
+ * Blueprint graph, clean package, stopped PIE/SIE, current revision and graph
+ * fingerprint, one FScopedTransaction, exact readback, and Undo/Redo
+ * verification.  Save is a separate explicit gate bound to the Apply plan,
+ * post-Apply fingerprint and exact node/link counts.
  */
 namespace UEAgentKitBlueprintGraphEditExperimental
 {

@@ -175,7 +175,15 @@ Canonical JSON 当 UE 写入依据。
 | 用户变量创建（4 类） | `ue_preview/apply/save_blueprint_variable_create_experimental` | `editor.*BlueprintVariableCreateExperimental` | `variables[{name,type,defaultValue}]`、≤8 | 顶层成员变量；不编译；默认值以 pending 字符串落盘 | **A** |
 | 精确 rewire/disconnect | `ue_preview/apply/save_blueprint_rewire_experimental` | `editor.*BlueprintRewireExperimental` | 目标 node/pin/GUID + old source node/pin/GUID + edge-set hash（rewire 还要 new source） | 仅一条边；拒绝 BreakOthers/转换；Undo/Redo | **A（rewire）** |
 | 受控 node delete | `ue_preview/apply/save_blueprint_node_remove_experimental` | `editor.*BlueprintNodeRemoveExperimental` | node GUID+class、edge-set hash、`removedEdges`（≤1） | 白名单纯函数/Branch；删除前必须零链接；Undo 恢复节点+连线 | **A（0 边孤立节点）** |
+| 变量 Get/Set 访问器（bool/int/double/string + FunctionGraph） | `ue_preview/apply/save_blueprint_graph_edit_experimental`（扩展节点类型） | `editor.*BlueprintGraphEditExperimental` | `variableName/variableGuid/variableType`；同一 plan 内精确连线 | 现有顶层成员变量；GUID+name+type 绑定；精确 pin；Undo/Redo；Save variableBindingHash | **A（正向 MCP）**；PIE/同类型 retarget 为 **B（native automation）** |
 | Graph layout apply | `ue_preview_blueprint_graph_layout` + `ue_apply/save`（若开启） | `editor.*BlueprintGraphLayoutApply*` | 位置计划 hash | 只改位置 | P6-P8 Socket 探针（部分 A/B），非本轮回归 |
+
+> 后验补充（不改变 P5 原始五类结论）：2026-10-28 已完成 `variable_get` /
+> `variable_set` 的真实 MCP → Socket → Editor Preview/Apply/Save → 新进程
+> canonical export Reload 验收（4 类型 + FunctionGraph，10 个 accessor，
+> `undoVerified=true`、`redoVerified=true`、`verified=true`）。PIE 拒绝与
+> 同类型 retarget Save 拒绝由 native automation 取得 B 级证据。该补充不计入
+> P5 原表的 8 类节点计数，但可以作为独立 A/B 证据引用。
 
 disconnect 分支与“1 条 incident edge 的 node remove”本轮没有跑真实 MCP 序列，
 保留 P3/P4 的 B 级 native 证据；不要把这三种未跑分支写成 A。
@@ -201,7 +209,8 @@ disconnect 分支与“1 条 incident edge 的 node remove”本轮没有跑真�
 | 4 | Save receipt 仅进程内 | **OPEN（by design）** | Apply 后必须同进程 Save；跨进程只能只读 Reload |
 | 5 | nested/非顶层图写 | **OPEN** | focused 顶层 K2 Event Graph 是硬前提；`GetAllGraphs` 只用于定位，不授予写权限 |
 | 6 | 无 Editor 崩溃/超时恢复 | **OPEN** | E2E 脚本按阶段重启 Editor；真实产品需进程监控与 receipt 失效处理 |
-| 7 | 单序列覆盖 | **OPEN** | 本次验收只覆盖一个 Actor BP、8+4+4+1+1 个对象；未覆盖多资产并发、PIE、Dirty 包、undo 栈很深的场景 |
+| 7 | 单序列覆盖 | **OPEN（部分收窄）** | 原 P5 只覆盖一个 Actor BP；2026-10-28 accessor 验收新增独立 BP（4 类型 + EventGraph + FunctionGraph）与 native PIE/retarget，但仍未覆盖多资产并发、崩溃恢复、undo 栈很深 |
+| 8 | 变量 Get/Set 访问器节点 | **A 正向 / B 安全门** | 真实 MCP 正向已通过（10 accessors、Undo/Redo、Save、fresh-process Reload）；PIE 与同类型 retarget 为 native B。macro 图路径未实测 |
 
 已在本轮关闭/降级的缺口：
 
