@@ -77,6 +77,8 @@ class CodeSemanticIndexResult:
     functions: int = 0
     calls: int = 0
     unknown_calls: int = 0
+    virtual_calls: int = 0
+    unknown_dispatch_calls: int = 0
 
 
 def code_symbol_stable_id(qualified_name: str) -> str:
@@ -1069,11 +1071,24 @@ def rebuild_code_semantics(
             details = {}
         anchor = details.get("anchor") if isinstance(details, dict) else None
         anchor_line = int(anchor.get("line", 0)) if isinstance(anchor, dict) else 0
+        evidence = str(details.get("evidence", "")) if isinstance(details, dict) else ""
+        if isinstance(details, dict) and "isVirtual" in details:
+            is_virtual: bool | None = bool(details.get("isVirtual"))
+        elif evidence == "ue-reflection":
+            # Reflected rows carry UFunction flags, not a C++ virtual qualifier.
+            is_virtual = None
+        else:
+            is_virtual = False
+        is_reflected = bool(
+            isinstance(details, dict) and details.get("isReflected")
+        ) or evidence == "ue-reflection"
         function_targets[stable_id] = {
             "name": str(row["name"]),
             "owner": owner,
             "asset_path": str(row["asset_path"]),
             "anchor_line": anchor_line,
+            "is_virtual": is_virtual,
+            "is_reflected": is_reflected,
         }
 
     type_index = {
@@ -1098,6 +1113,8 @@ def rebuild_code_semantics(
 
     call_count = 0
     unknown_calls = 0
+    virtual_calls = 0
+    unknown_dispatch_calls = 0
     unknown_by_reason: dict[str, int] = {}
     warned_by_reason: dict[str, int] = {}
     call_ordinals: dict[tuple[str, str, str, int], int] = {}
@@ -1150,13 +1167,26 @@ def rebuild_code_semantics(
             target = function_targets[target_id]
             target_asset_path = str(target["asset_path"])
             target_anchor = int(target["anchor_line"])
+            target_virtual = target.get("is_virtual")
+            if target_virtual is True:
+                dispatch = "virtual"
+                virtual_calls += 1
+            elif target_virtual is None:
+                dispatch = "unknown"
+                unknown_dispatch_calls += 1
+            else:
+                dispatch = "static"
+            certainty = "definitive" if dispatch == "static" else "static-target-only"
             details = {
                 "language": "cpp",
                 "evidence": "cpp-source",
                 "resolution": evidence,
+                "dispatch": dispatch,
+                "certainty": certainty,
                 "callee": site.callee,
                 "scope": site.scope,
                 "receiver": site.receiver,
+                "targetReflected": bool(target.get("is_reflected")),
                 "callSite": {
                     "assetPath": path,
                     "line": site.line,
@@ -1296,6 +1326,8 @@ def rebuild_code_semantics(
         functions=len(inserted_functions),
         calls=call_count,
         unknown_calls=unknown_calls,
+        virtual_calls=virtual_calls,
+        unknown_dispatch_calls=unknown_dispatch_calls,
     )
 
 
@@ -1393,4 +1425,3 @@ def _resolve_call_target(
     if len(candidates) > 1:
         return "", "", "ambiguous-name"
     return "", "", "external"
-

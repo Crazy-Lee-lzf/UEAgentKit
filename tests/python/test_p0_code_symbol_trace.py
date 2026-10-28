@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -786,6 +787,364 @@ class CallReferenceTests(CppSymbolTraceTestBase):
         self.assertIn("calls", kinds)
         self.assertIn("include", kinds)
         self.assertIn("inherits", kinds)
+
+
+CHAIN_HEADER = (
+    "#pragma once\n"
+    "\n"
+    '#include "CoreMinimal.h"\n'
+    "\n"
+    "UCLASS()\n"
+    "class AChain : public AActor\n"
+    "{\n"
+    "    GENERATED_BODY()\n"
+    "\n"
+    "public:\n"
+    "    UFUNCTION(BlueprintCallable)\n"
+    "    int32 ApplyDamage(float Amount);\n"
+    "\n"
+    "    virtual void Tick(float DeltaSeconds);\n"
+    "\n"
+    "    void Run();\n"
+    "\n"
+    "    void Fire(int32 Value);\n"
+    "    void Fire(float Value);\n"
+    "};\n"
+    "\n"
+    "namespace ChainUtil\n"
+    "{\n"
+    "int32 Finish(int32 Value);\n"
+    "}\n"
+)
+
+CHAIN_SOURCE = (
+    '#include "Chain.h"\n'
+    "\n"
+    "namespace ChainUtil\n"
+    "{\n"
+    "    int32 Finish(int32 Value)\n"
+    "    {\n"
+    "        return Value + 1;\n"
+    "    }\n"
+    "}\n"
+    "\n"
+    "int32 AChain::ApplyDamage(float Amount)\n"
+    "{\n"
+    "    return ChainUtil::Finish(static_cast<int32>(Amount));\n"
+    "}\n"
+    "\n"
+    "void AChain::Tick(float DeltaSeconds)\n"
+    "{\n"
+    "}\n"
+    "\n"
+    "void AChain::Run()\n"
+    "{\n"
+    "    this->Tick(0.016f);\n"
+    "    Tick(0.016f);\n"
+    "    Fire(1);\n"
+    "    ApplyDamage(2.0f);\n"
+    "    Ptr->Run();\n"
+    "    Delegate.Execute();\n"
+    "    const auto Method = &AChain::Tick;\n"
+    "}\n"
+    "\n"
+    "void AChain::Fire(int32 Value)\n"
+    "{\n"
+    "}\n"
+    "\n"
+    "void AChain::Fire(float Value)\n"
+    "{\n"
+    "}\n"
+)
+
+
+class FakeQueryServer:
+    def __init__(self) -> None:
+        self.tools: dict[str, object] = {}
+
+    def tool(self, *, annotations: object) -> object:
+        del annotations
+
+        def decorate(function: object) -> object:
+            self.tools[getattr(function, "__name__")] = function
+            return function
+
+        return decorate
+
+
+class CallChainContractTests(CppSymbolTraceTestBase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.write_header("Chain.h", CHAIN_HEADER)
+        self.write_source("Chain.cpp", CHAIN_SOURCE)
+        self.result = self.build()
+        self.assertEqual(self.result.failed, 0, self.result.errors)
+
+    def _edge_details(self) -> list[dict[str, object]]:
+        return [json.loads(row["details_json"]) for row in self.call_rows()]
+
+    def test_helper_call_chain_has_line_provenance_and_no_flattening(self) -> None:
+        rows = self.call_rows()
+        targets = {
+            (row["source_symbol_id"], row["target_symbol_id"]): row for row in rows
+        }
+        finish_id = code_function_stable_id("ChainUtil::Finish")
+        run_id = code_function_stable_id("AChain::Run")
+        apply_id = code_function_stable_id("AChain::ApplyDamage")
+        tick_id = code_function_stable_id("AChain::Tick")
+
+        self.assertIn((apply_id, finish_id), targets)
+        self.assertIn((run_id, apply_id), targets)
+        self.assertIn((run_id, tick_id), targets)
+        self.assertNotIn((run_id, finish_id), targets)
+
+        apply_details = json.loads(targets[(apply_id, finish_id)]["details_json"])
+        self.assertEqual(
+            apply_details["callSite"]["line"],
+            line_of(CHAIN_SOURCE, "ChainUtil::Finish(static_cast"),
+        )
+        self.assertEqual(apply_details["resolution"], "qualified")
+        self.assertEqual(apply_details["certainty"], "definitive")
+
+        run_details = json.loads(targets[(run_id, apply_id)]["details_json"])
+        self.assertEqual(
+            run_details["callSite"]["line"],
+            line_of(CHAIN_SOURCE, "ApplyDamage(2.0f)"),
+        )
+        self.assertEqual(run_details["resolution"], "member")
+
+        # Provenance: every call site line must still contain the callee token.
+        source_lines = CHAIN_SOURCE.splitlines()
+        for row in rows:
+            details = json.loads(row["details_json"])
+            line = source_lines[int(details["callSite"]["line"]) - 1]
+            callee = str(details["callee"])
+            self.assertIsNotNone(
+                re.search(rf"\b{re.escape(callee)}\s*\(", line),
+                f"{row['stable_id']}: {line!r}",
+            )
+            self.assertEqual(row["target_kind"], "function")
+            self.assertEqual(str(details["evidence"]), "cpp-source")
+
+    def test_virtual_target_is_static_target_only_never_definitive(self) -> None:
+        tick_id = code_function_stable_id("AChain::Tick")
+        tick_edges = [row for row in self.call_rows() if row["target_symbol_id"] == tick_id]
+        self.assertEqual(len(tick_edges), 2)
+        for row in tick_edges:
+            details = json.loads(row["details_json"])
+            self.assertEqual(details["dispatch"], "virtual")
+            self.assertEqual(details["certainty"], "static-target-only")
+            self.assertEqual(details["resolution"], "member")
+            self.assertTrue(details["resolved"])
+        self.assertEqual(self.result.virtual_calls, 2)
+        self.assertEqual(self.result.unknown_dispatch_calls, 0)
+
+        symbol = next(
+            row for row in self.symbol_rows() if row["stable_id"] == tick_id
+        )
+        self.assertTrue(json.loads(symbol["details_json"])["isVirtual"])
+
+    def test_ufunction_target_is_reflected_but_statically_resolved(self) -> None:
+        apply_id = code_function_stable_id("AChain::ApplyDamage")
+        run_id = code_function_stable_id("AChain::Run")
+        edge = next(
+            row
+            for row in self.call_rows()
+            if row["source_symbol_id"] == run_id and row["target_symbol_id"] == apply_id
+        )
+        details = json.loads(edge["details_json"])
+        self.assertEqual(details["dispatch"], "static")
+        self.assertEqual(details["certainty"], "definitive")
+        self.assertTrue(details["targetReflected"])
+
+        symbol = next(
+            row for row in self.symbol_rows() if row["stable_id"] == apply_id
+        )
+        symbol_details = json.loads(symbol["details_json"])
+        self.assertTrue(symbol_details["isReflected"])
+        anchors = {
+            (anchor["assetPath"], anchor["line"]): anchor
+            for anchor in symbol_details["anchors"]
+        }
+        declaration_anchor = anchors[
+            ("Source/Game/Public/Chain.h", line_of(CHAIN_HEADER, "int32 ApplyDamage(float Amount);"))
+        ]
+        definition_anchor = anchors[
+            ("Source/Game/Private/Chain.cpp", line_of(CHAIN_SOURCE, "int32 AChain::ApplyDamage"))
+        ]
+        self.assertTrue(declaration_anchor["isDeclaration"])
+        self.assertTrue(definition_anchor["isDefinition"])
+        self.assertEqual(
+            definition_anchor["definitionLine"],
+            line_of(CHAIN_SOURCE, "int32 AChain::ApplyDamage"),
+        )
+
+    def test_reflection_owned_target_reports_unknown_dispatch(self) -> None:
+        apply_id = code_function_stable_id("AChain::ApplyDamage")
+        with open_database(self.database_path) as connection:
+            row = connection.execute(
+                "SELECT id FROM symbols WHERE stable_id = ?",
+                (apply_id,),
+            ).fetchone()
+            connection.execute(
+                "UPDATE symbols SET details_json = ? WHERE id = ?",
+                (
+                    json.dumps(
+                        {
+                            "evidence": "ue-reflection",
+                            "language": "cpp",
+                            "reflection": {"stableId": apply_id},
+                        }
+                    ),
+                    int(row["id"]),
+                ),
+            )
+            connection.commit()
+
+        rebuilt = self.build(force=True)
+        self.assertEqual(rebuilt.failed, 0, rebuilt.errors)
+        edges = [
+            row for row in self.call_rows() if row["target_symbol_id"] == apply_id
+        ]
+        self.assertEqual(len(edges), 1)
+        details = json.loads(edges[0]["details_json"])
+        self.assertEqual(details["dispatch"], "unknown")
+        self.assertEqual(details["certainty"], "static-target-only")
+        self.assertTrue(details["targetReflected"])
+        self.assertEqual(rebuilt.unknown_dispatch_calls, 1)
+
+    def test_overloads_dynamic_receivers_and_delegates_never_link(self) -> None:
+        details = self._edge_details()
+        self.assertFalse(any(item["callee"] == "Fire" for item in details))
+        self.assertFalse(any(item["callee"] == "Execute" for item in details))
+        self.assertFalse(any(item["receiver"] == "Ptr" for item in details))
+        self.assertNotIn(
+            code_function_stable_id("AChain::Fire"),
+            {row["stable_id"] for row in self.symbol_rows()},
+        )
+        self.assertTrue(
+            any(
+                warning.startswith("ambiguous-overload:cpp:function:AChain::Fire:")
+                for warning in self.result.semantic_warnings
+            ),
+            self.result.semantic_warnings,
+        )
+        self.assertGreaterEqual(self.result.unknown_calls, 1)
+        self.assertTrue(
+            any(":Run:unknown-receiver" in warning for warning in self.result.semantic_warnings),
+            self.result.semantic_warnings,
+        )
+
+    def test_product_read_only_query_surface_exposes_functions_and_callers(self) -> None:
+        from ue_agent_kit.agent_api import IndexQueryService
+        from ue_agent_kit.mcp_query_tools import register_query_tools
+
+        apply_id = code_function_stable_id("AChain::ApplyDamage")
+        run_id = code_function_stable_id("AChain::Run")
+        service = IndexQueryService(self.database_path)
+
+        symbols = service.search(
+            "ApplyDamage",
+            scope="symbols",
+            profile="code",
+            kind="function",
+            limit=50,
+        )
+        self.assertEqual(
+            [row["stable_id"] for row in symbols["results"]],
+            [apply_id],
+        )
+        self.assertEqual(symbols["results"][0]["asset_path"], "Source/Game/Public/Chain.h")
+
+        callers = service.find_references(
+            target_symbol_id=apply_id,
+            direction="outgoing",
+            include_details=True,
+        )
+        self.assertEqual(
+            [(row["kind"], row["source_symbol_id"]) for row in callers["results"]],
+            [("calls", run_id)],
+        )
+        self.assertEqual(
+            callers["results"][0]["details"]["callSite"]["line"],
+            line_of(CHAIN_SOURCE, "ApplyDamage(2.0f)"),
+        )
+
+        incoming = service.find_references(
+            asset_path="Source/Game/Public/Chain.h",
+            target_symbol_id=apply_id,
+            direction="incoming",
+            include_details=True,
+        )
+        self.assertEqual(
+            [row["source_symbol_id"] for row in incoming["results"]],
+            [run_id],
+        )
+
+        callees = service.find_references(
+            source_symbol_id=run_id,
+            direction="outgoing",
+            include_details=True,
+        )
+        self.assertEqual(
+            {(row["target_symbol_id"], row["details"]["callSite"]["line"]) for row in callees["results"]},
+            {
+                (code_function_stable_id("AChain::Tick"), line_of(CHAIN_SOURCE, "this->Tick")),
+                (code_function_stable_id("AChain::Tick"), line_of(CHAIN_SOURCE, "    Tick(0.016f)")),
+                (apply_id, line_of(CHAIN_SOURCE, "ApplyDamage(2.0f)")),
+            },
+        )
+
+        asset = service.get_asset(
+            "Source/Game/Public/Chain.h",
+            sections=("identity", "symbols"),
+        )
+        self.assertTrue(asset["found"])
+        self.assertIn(run_id, {row["stable_id"] for row in asset["asset"]["symbols"]})
+
+        implementation = service.get_asset(
+            "Source/Game/Private/Chain.cpp",
+            sections=("identity", "references"),
+        )
+        self.assertIn(
+            "calls",
+            {row["kind"] for row in implementation["asset"]["references"]},
+        )
+
+        server = FakeQueryServer()
+        register_query_tools(
+            server=server,
+            index_service=service,
+            workflow_service=None,
+            live_editor_service=None,
+            read_annotations=object(),
+            error_response=lambda tool, exc, read_only: {
+                "tool": tool,
+                "error": str(exc),
+                "readOnly": read_only,
+            },
+            capabilities_response=lambda workflow, live: {},
+            project_status_response=lambda index, workflow, live: {},
+        )
+        mcp_refs = server.tools["ue_find_references"](
+            target_symbol_id=apply_id,
+            kind="calls",
+            include_details=True,
+        )
+        self.assertEqual(
+            [row["source_symbol_id"] for row in mcp_refs["results"]],
+            [run_id],
+        )
+        mcp_search = server.tools["ue_search"](
+            query="ApplyDamage",
+            scope="symbols",
+            profile="code",
+            kind="function",
+        )
+        self.assertEqual(
+            [row["stable_id"] for row in mcp_search["results"]],
+            [apply_id],
+        )
 
 
 if __name__ == "__main__":

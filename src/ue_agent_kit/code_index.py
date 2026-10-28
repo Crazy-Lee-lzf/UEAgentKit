@@ -42,6 +42,8 @@ class CodeIndexResult:
     functions: int = 0
     calls: int = 0
     unknown_calls: int = 0
+    virtual_calls: int = 0
+    unknown_dispatch_calls: int = 0
     files: list[CodeFileIndexResult] = field(default_factory=list)
     semantic_warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
@@ -385,6 +387,8 @@ def build_code_index(
                 result.functions = semantic_result.functions
                 result.calls = semantic_result.calls
                 result.unknown_calls = semantic_result.unknown_calls
+                result.virtual_calls = semantic_result.virtual_calls
+                result.unknown_dispatch_calls = semantic_result.unknown_dispatch_calls
                 result.semantic_warnings.extend(semantic_result.warnings)
 
             if project_key.strip():
