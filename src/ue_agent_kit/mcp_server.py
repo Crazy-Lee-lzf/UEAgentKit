@@ -53,6 +53,10 @@ from .impact_analysis import (
 from .index_snapshot import apply_editor_freshness
 from .mcp_live_action_tools import register_live_action_tools
 from .mcp_live_tools import GRAPH_CONTEXT_TOOL_NAME, register_live_read_tools
+from .mcp_pure_live_tools import (
+    PURE_LIVE_READ_TOOL_NAMES,
+    register_pure_live_meta_tools,
+)
 from .mcp_graph_layout_test_only import register_graph_layout_test_only_tool
 from .mcp_graph_layout_p8_test_only import register_graph_layout_p8_test_only_tool
 from .mcp_graph_layout_experimental import register_graph_layout_experimental_tools
@@ -2170,8 +2174,84 @@ def _error_response(tool: str, error: Exception, *, read_only: bool) -> dict[str
     return response
 
 
+def _pure_live_server_instructions() -> str:
+    return (
+        "Pure-live mode: this server has no SQLite index and exposes only bounded, read-only "
+        "Live Editor tools. Use ue_get_capabilities for the exact exposed tool list. Offline "
+        "search/reference, Project Memory, workflow, write, source-control, and graph-edit tools "
+        "are intentionally absent. Every fact comes from the fixed local Unreal Editor Bridge; "
+        "when the Editor is unavailable the read tools return a clear error instead of cached or "
+        "offline data."
+    )
+
+
+def _create_pure_live_mcp_server(
+    *,
+    database_path: Path | None,
+    workflow_config: PatchWorkflowConfig | None,
+    workflow_service: PatchWorkflowService | None,
+    live_editor_service: LiveEditorBridgeService | None,
+    memory_service: ProjectMemoryService | None,
+    source_control_service: P4SourceControlService | None,
+    p7_test_only_graph_layout_apply: bool,
+    p8_test_only_graph_layout_apply: bool,
+    experimental_graph_layout_apply: bool,
+    experimental_graphpatch_edit: bool,
+):
+    """Bounded, explicitly opt-in pure-live server (no index, no SQLite)."""
+    if database_path is not None:
+        raise ValueError("--pure-live does not accept --database; no index is opened in this mode.")
+    if live_editor_service is None:
+        raise ValueError("--pure-live requires --enable-live-editor and a fixed --project.")
+    if workflow_config is not None or workflow_service is not None:
+        raise ValueError("--pure-live does not support write/workflow tools.")
+    if memory_service is not None:
+        raise ValueError("--pure-live does not support Project Memory.")
+    if source_control_service is not None:
+        raise ValueError("--pure-live does not support source-control tools.")
+    if (
+        p7_test_only_graph_layout_apply
+        or p8_test_only_graph_layout_apply
+        or experimental_graph_layout_apply
+        or experimental_graphpatch_edit
+    ):
+        raise ValueError("--pure-live does not support experimental graph tools.")
+
+    server = FastMCP(
+        MCP_SERVER_NAME,
+        instructions=_pure_live_server_instructions(),
+        json_response=True,
+    )
+    read_annotations = ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False,
+    )
+    register_pure_live_meta_tools(
+        server=server,
+        live_editor_service=live_editor_service,
+        server_name=MCP_SERVER_NAME,
+        server_version=__version__,
+        read_annotations=read_annotations,
+        exposed_tools=PURE_LIVE_READ_TOOL_NAMES,
+    )
+    register_live_read_tools(
+        server=server,
+        live_editor_service=live_editor_service,
+        index_service=None,
+        audit_report_root=None,
+        read_annotations=read_annotations,
+        tool_annotations_type=ToolAnnotations,
+        error_response=_error_response,
+        pure_live=True,
+    )
+    _enforce_strict_tool_arguments(server, (GRAPH_CONTEXT_TOOL_NAME,))
+    return server
+
+
 def create_mcp_server(
-    database_path: Path,
+    database_path: Path | None,
     *,
     workflow_config: PatchWorkflowConfig | None = None,
     workflow_service: PatchWorkflowService | None = None,
@@ -2183,12 +2263,29 @@ def create_mcp_server(
     p8_test_only_graph_layout_apply: bool = False,
     experimental_graph_layout_apply: bool = False,
     experimental_graphpatch_edit: bool = False,
+    pure_live: bool = False,
 ):
     if FastMCP is None or ToolAnnotations is None:
         raise RuntimeError(
             "MCP support is not installed. Run scripts\\setup_python.cmd -WithMcp "
             "or install the mcp optional dependency."
         ) from _MCP_IMPORT_ERROR
+
+    if pure_live:
+        return _create_pure_live_mcp_server(
+            database_path=database_path,
+            workflow_config=workflow_config,
+            workflow_service=workflow_service,
+            live_editor_service=live_editor_service,
+            memory_service=memory_service,
+            source_control_service=source_control_service,
+            p7_test_only_graph_layout_apply=p7_test_only_graph_layout_apply,
+            p8_test_only_graph_layout_apply=p8_test_only_graph_layout_apply,
+            experimental_graph_layout_apply=experimental_graph_layout_apply,
+            experimental_graphpatch_edit=experimental_graphpatch_edit,
+        )
+    if database_path is None:
+        raise ValueError("A fixed index database path is required unless --pure-live is set.")
 
     index_service = IndexQueryService(database_path)
     index_status = index_service.check()
@@ -2507,8 +2604,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--database",
         type=Path,
-        default=DEFAULT_DATABASE,
-        help=f"Immutable read-only SQLite index path. Default: {DEFAULT_DATABASE}",
+        default=None,
+        help=(
+            "Immutable read-only SQLite index path. Required unless --pure-live is set. "
+            f"Default in index mode: {DEFAULT_DATABASE}"
+        ),
+    )
+    parser.add_argument(
+        "--pure-live",
+        action="store_true",
+        help=(
+            "Explicit opt-in pure-live mode: no SQLite index is opened or created and only a "
+            "bounded read-only Live Editor tool set is registered. Requires --enable-live-editor "
+            "and --project."
+        ),
     )
     parser.add_argument("--enable-project-memory", action="store_true")
     parser.add_argument(
@@ -2647,18 +2756,108 @@ def _resolve_policy_argument(args: argparse.Namespace) -> None:
     args.policy_path = resolve_project_policy(args.project_path, profile=args.policy_profile)
 
 
+def _validate_pure_live_arguments(args: argparse.Namespace) -> None:
+    """Reject every option that would need an index, workflow, memory, or writes."""
+    if args.database is not None:
+        raise ValueError("--pure-live does not accept --database; no index is opened in this mode.")
+    if not args.enable_live_editor:
+        raise ValueError("--pure-live requires --enable-live-editor.")
+    if args.project_path is None:
+        raise ValueError("--pure-live requires --project with an exact .uproject path.")
+    rejected = {
+        "--enable-write-tools": args.enable_write_tools,
+        "--enable-commit-tools": args.enable_commit_tools,
+        "--enable-project-memory": args.enable_project_memory,
+        "--enable-source-control": args.enable_source_control,
+        "--enable-p7-test-only-graph-layout-apply": getattr(
+            args, "enable_p7_test_only_graph_layout_apply", False
+        ),
+        "--enable-p8-test-only-graph-layout-apply": getattr(
+            args, "enable_p8_test_only_graph_layout_apply", False
+        ),
+        "--enable-experimental-graph-layout-apply": getattr(
+            args, "enable_experimental_graph_layout_apply", False
+        ),
+        "--enable-experimental-graphpatch-edit": getattr(
+            args, "enable_experimental_graphpatch_edit", False
+        ),
+    }
+    enabled = [name for name, value in rejected.items() if value]
+    if enabled:
+        raise ValueError(
+            "--pure-live does not support " + ", ".join(enabled) + "."
+        )
+    paths = {
+        "--engine-root": args.engine_root,
+        "--policy": args.policy_path,
+        "--policy-profile": args.policy_profile,
+        "--revision-export": args.revision_export,
+        "--memory-database": args.memory_database,
+    }
+    configured = [name for name, value in paths.items() if value]
+    if configured:
+        raise ValueError(
+            "--pure-live does not support " + ", ".join(configured) + "."
+        )
+
+
+def _run_pure_live(args: argparse.Namespace) -> int:
+    """Explicit opt-in pure-live startup: no index, no SQLite, bounded read-only tools."""
+    try:
+        _validate_pure_live_arguments(args)
+        live_editor_service = _build_live_editor_service(args)
+        if live_editor_service is None:
+            raise ValueError("--pure-live requires --enable-live-editor.")
+        if args.check:
+            payload: dict[str, Any] = {
+                "schemaVersion": "1.0",
+                "tool": "ue_agent_kit_mcp_status",
+                "ok": True,
+                "mode": "pure-live",
+                "index": {
+                    "configured": False,
+                    "required": False,
+                    "opened": False,
+                    "state": "not-opened",
+                },
+                "writeToolsEnabled": False,
+                "commitToolsEnabled": False,
+                "liveEditorEnabled": True,
+                "projectMemoryEnabled": False,
+                "sourceControlEnabled": False,
+                "liveEditor": live_editor_service.status(),
+            }
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            return 0
+        server = create_mcp_server(
+            None,
+            live_editor_service=live_editor_service,
+            pure_live=True,
+        )
+        server.run(transport="stdio")
+        return 0
+    except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+        print(
+            json.dumps(_error_response("ue_agent_kit_mcp", exc, read_only=False), ensure_ascii=False),
+            file=sys.stderr,
+        )
+        return 2 if isinstance(exc, FileNotFoundError) else 1
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if getattr(args, "pure_live", False):
+        return _run_pure_live(args)
     frozen_snapshot: FrozenSessionSnapshot | None = None
     try:
         _resolve_policy_argument(args)
         base_workflow_config = _build_workflow_config(args)
         live_editor_service = _build_live_editor_service(args)
         workflow_config: PatchWorkflowConfig | None = None
-        database_path = args.database
+        database_path = args.database if args.database is not None else DEFAULT_DATABASE
         if base_workflow_config is not None:
             active_snapshot = resolve_active_snapshot(
-                args.database,
+                database_path,
                 base_workflow_config.revision_export,
                 base_workflow_config.work_root,
                 base_workflow_config.project_path.stem,

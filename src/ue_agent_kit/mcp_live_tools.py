@@ -18,6 +18,7 @@ def register_live_read_tools(
     read_annotations: Any,
     tool_annotations_type: Any,
     error_response: Any,
+    pure_live: bool = False,
 ) -> None:
     @server.tool(annotations=read_annotations)
     def ue_editor_status() -> dict[str, Any]:
@@ -235,6 +236,11 @@ def register_live_read_tools(
             response["editorVerified"] = False
             response["contextOnly"] = True
             return response
+
+    # Pure-live mode exposes only the bounded read set above: graph-layout
+    # preview and the retarget readers are deliberately not registered.
+    if pure_live:
+        return
 
     from .mcp_graph_layout_preview import register_graph_layout_preview_tool
 
