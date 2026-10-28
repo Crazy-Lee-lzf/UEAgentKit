@@ -94,9 +94,12 @@ def register_graph_edit_experimental_tools(
         category); an existing input must be unlinked and the schema must return
         MAKE (no BreakOthers/conversion/promotion). A plan with nodes=[] may add
         exactly one existing output -> existing unlinked input edge, or with
-        operation="disconnect" remove exactly one existing edge. The result is
-        read-only and returns the exact planId and requiredConfirmation needed by
-        Apply. It never opens a transaction, dirties, compiles, or saves.
+        operation="disconnect" remove exactly one existing edge. call_function
+        accepts only the fixed allowlist of static BlueprintPure engine functions
+        with an exact owner/function/signatureDigest/pin schema; arbitrary paths,
+        world/latent/network/receiver/ref/const/container calls are rejected. The
+        result is read-only and returns the exact planId and requiredConfirmation
+        needed by Apply. It never opens a transaction, dirties, compiles, or saves.
         """
         try:
             _capabilities(live_editor_service, PREVIEW_CAPABILITY)

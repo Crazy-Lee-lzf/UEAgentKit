@@ -17,6 +17,7 @@ that one edge and never break or replace an existing link.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from typing import Any
@@ -124,11 +125,111 @@ VARIABLE_NODE_TYPES = {
 VARIABLE_TYPES = ("bool", "int", "double", "string")
 VARIABLE_PIN_RESERVED = ("execute", "then", "Output_Get")
 
+# Strict per-function allowlist for K2 CallFunction nodes.  Only engine pure
+# static functions with exact primitive exec/bool/int/double/string pins are
+# admitted.  The digest binds owner + function + the exact pin schema; a caller
+# cannot supply a free-form path or an ad-hoc signature.
+CALL_FUNCTION_NODE_TYPE = "call_function"
+CALL_FUNCTION_CLASS_PATH = "/Script/BlueprintGraph.K2Node_CallFunction"
+CALL_FUNCTION_OWNER = "/Script/Engine.KismetMathLibrary"
+CALL_FUNCTION_PIN_TYPES = ("exec", "bool", "int", "double", "string")
+CALL_FUNCTION_ALLOWLIST: dict[str, dict[str, Any]] = {
+    "Greater_IntInt": {
+        "ownerClassPath": CALL_FUNCTION_OWNER,
+        "pins": [
+            {"name": "A", "direction": "input", "type": "int"},
+            {"name": "B", "direction": "input", "type": "int"},
+            {"name": "ReturnValue", "direction": "output", "type": "bool"},
+        ],
+    },
+    "Less_IntInt": {
+        "ownerClassPath": CALL_FUNCTION_OWNER,
+        "pins": [
+            {"name": "A", "direction": "input", "type": "int"},
+            {"name": "B", "direction": "input", "type": "int"},
+            {"name": "ReturnValue", "direction": "output", "type": "bool"},
+        ],
+    },
+    "Clamp": {
+        "ownerClassPath": CALL_FUNCTION_OWNER,
+        "pins": [
+            {"name": "Value", "direction": "input", "type": "int"},
+            {"name": "Min", "direction": "input", "type": "int"},
+            {"name": "Max", "direction": "input", "type": "int"},
+            {"name": "ReturnValue", "direction": "output", "type": "int"},
+        ],
+    },
+    "Abs_Int": {
+        "ownerClassPath": CALL_FUNCTION_OWNER,
+        "pins": [
+            {"name": "A", "direction": "input", "type": "int"},
+            {"name": "ReturnValue", "direction": "output", "type": "int"},
+        ],
+    },
+}
+
+
+def call_function_signature_digest(
+    owner_class_path: str,
+    function_name: str,
+    pins: list[dict[str, str]],
+) -> str:
+    canonical = (
+        owner_class_path
+        + "|"
+        + function_name
+        + "|"
+        + "|".join(
+            f"{pin['name']}:{pin['direction']}:{pin['type']}"
+            for pin in sorted(pins, key=lambda item: item["name"])
+        )
+    )
+    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+for _function_name, _entry in CALL_FUNCTION_ALLOWLIST.items():
+    _entry["signatureDigest"] = call_function_signature_digest(
+        _entry["ownerClassPath"],
+        _function_name,
+        _entry["pins"],
+    )
+
+
 
 def _node_contract(node: dict[str, Any]) -> dict[str, Any] | None:
     """Return the exact declared node/pin contract for one normalized node."""
 
     node_type = node.get("nodeType")
+    if node_type == CALL_FUNCTION_NODE_TYPE:
+        call_function = node.get("callFunction")
+        if not isinstance(call_function, dict):
+            return None
+        pins = call_function.get("pins")
+        if not isinstance(pins, list):
+            return None
+        input_types: dict[str, str] = {}
+        output_types: dict[str, str] = {}
+        for pin in pins:
+            if not isinstance(pin, dict):
+                return None
+            name = pin.get("name")
+            direction = pin.get("direction")
+            pin_type = pin.get("type")
+            if not isinstance(name, str) or direction not in ("input", "output"):
+                return None
+            if pin_type not in CALL_FUNCTION_PIN_TYPES:
+                return None
+            target = input_types if direction == "input" else output_types
+            if name in target:
+                return None
+            target[name] = pin_type
+        return {
+            "nodeClass": CALL_FUNCTION_CLASS_PATH,
+            "inputPins": tuple(input_types),
+            "outputPins": tuple(output_types),
+            "inputPinTypes": input_types,
+            "outputPinTypes": output_types,
+        }
     if node_type in VARIABLE_NODE_TYPES:
         variable_name = node.get("variableName")
         variable_type = node.get("variableType")
@@ -278,6 +379,83 @@ def _existing_pin(value: Any, label: str) -> dict[str, str]:
     }
 
 
+def _normalize_call_function(value: Any, label: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise GraphEditError(
+            "graph-edit-call-function-invalid",
+            f"{label} must be an exact callFunction object.",
+        )
+    call_function = _object(value, label)
+    _reject_unknown(
+        call_function,
+        {"ownerClassPath", "functionName", "signatureDigest", "pins"},
+        label,
+    )
+    owner = _string(call_function.get("ownerClassPath"), f"{label}.ownerClassPath", maximum=256)
+    function_name = _string(
+        call_function.get("functionName"),
+        f"{label}.functionName",
+        maximum=128,
+    )
+    entry = CALL_FUNCTION_ALLOWLIST.get(function_name)
+    if entry is None or owner != entry["ownerClassPath"]:
+        raise GraphEditError(
+            "graph-edit-call-function-not-allowlisted",
+            f"{label} is not one of the fixed engine pure static allowlist entries.",
+        )
+    raw_pins = call_function.get("pins")
+    if not isinstance(raw_pins, list) or not 1 <= len(raw_pins) <= 16:
+        raise GraphEditError(
+            "graph-edit-call-function-pin-mismatch",
+            f"{label}.pins must contain the exact reflected pin schema.",
+        )
+    pins: list[dict[str, str]] = []
+    for index, raw_pin in enumerate(raw_pins):
+        pin = _object(raw_pin, f"{label}.pins[{index}]")
+        _reject_unknown(
+            pin,
+            {"name", "direction", "type"},
+            f"{label}.pins[{index}]",
+        )
+        name = _string(pin.get("name"), f"{label}.pins[{index}].name", maximum=64)
+        direction = pin.get("direction")
+        pin_type = pin.get("type")
+        if direction not in ("input", "output") or pin_type not in CALL_FUNCTION_PIN_TYPES:
+            raise GraphEditError(
+                "graph-edit-call-function-pin-mismatch",
+                f"{label}.pins[{index}] must be an exact input/output primitive pin.",
+            )
+        pins.append({"name": name, "direction": direction, "type": pin_type})
+    expected_pins = sorted(
+        entry["pins"],
+        key=lambda item: (item["name"], item["direction"]),
+    )
+    actual_pins = sorted(pins, key=lambda item: (item["name"], item["direction"]))
+    if actual_pins != expected_pins:
+        raise GraphEditError(
+            "graph-edit-call-function-pin-mismatch",
+            f"{label}.pins does not match the reflected allowlist pins.",
+        )
+    digest = call_function_signature_digest(owner, function_name, pins)
+    declared_digest = call_function.get("signatureDigest")
+    if (
+        not isinstance(declared_digest, str)
+        or not _SHA256.fullmatch(declared_digest)
+        or declared_digest != entry["signatureDigest"]
+        or digest != entry["signatureDigest"]
+    ):
+        raise GraphEditError(
+            "graph-edit-call-function-signature-mismatch",
+            f"{label}.signatureDigest does not match the reflected allowlist signature.",
+        )
+    return {
+        "ownerClassPath": owner,
+        "functionName": function_name,
+        "signatureDigest": digest,
+        "pins": pins,
+    }
+
+
 def validate_preview_parameters(
     *,
     asset_path: Any,
@@ -333,6 +511,7 @@ def validate_preview_parameters(
                 "variableName",
                 "variableGuid",
                 "variableType",
+                "callFunction",
             },
             f"nodes[{index}]",
         )
@@ -349,11 +528,15 @@ def validate_preview_parameters(
                 f"Duplicate tempId: {temp_id}.",
             )
         seen_ids.add(temp_id)
-        if node_type not in NODE_TYPES and node_type not in VARIABLE_NODE_TYPES:
+        if (
+            node_type not in NODE_TYPES
+            and node_type not in VARIABLE_NODE_TYPES
+            and node_type != CALL_FUNCTION_NODE_TYPE
+        ):
             raise GraphEditError(
                 "graph-edit-node-type-not-allowed",
                 "Supported nodeTypes: "
-                + ", ".join(sorted((*NODE_TYPES, *VARIABLE_NODE_TYPES)))
+                + ", ".join(sorted((*NODE_TYPES, *VARIABLE_NODE_TYPES, CALL_FUNCTION_NODE_TYPE)))
                 + ".",
             )
         normalized_node: dict[str, Any] = {
@@ -395,12 +578,29 @@ def validate_preview_parameters(
                     "variableType": variable_type,
                 }
             )
+        elif node_type == CALL_FUNCTION_NODE_TYPE:
+            if any(
+                key in item for key in ("variableName", "variableGuid", "variableType")
+            ):
+                raise GraphEditError(
+                    "graph-edit-variable-field-not-allowed",
+                    f"nodes[{index}] call_function does not accept variable fields.",
+                )
+            normalized_node["callFunction"] = _normalize_call_function(
+                item.get("callFunction"),
+                f"nodes[{index}].callFunction",
+            )
         elif any(
             key in item for key in ("variableName", "variableGuid", "variableType")
         ):
             raise GraphEditError(
                 "graph-edit-variable-field-not-allowed",
                 f"nodes[{index}] nodeType {node_type} does not accept variable fields.",
+            )
+        elif "callFunction" in item:
+            raise GraphEditError(
+                "graph-edit-call-function-field-not-allowed",
+                f"nodes[{index}] nodeType {node_type} does not accept callFunction.",
             )
         normalized_nodes.append(normalized_node)
 
@@ -802,7 +1002,24 @@ def validate_preview_result(preview: Any) -> dict[str, Any]:
             "x": position.get("x"),
             "y": position.get("y"),
         }
-        if node_type in VARIABLE_NODE_TYPES:
+        if node_type == CALL_FUNCTION_NODE_TYPE:
+            if contract is None:
+                raise GraphEditError(
+                    "graph-edit-preview-invalid",
+                    f"preview.nodes[{index}] has an invalid call function declaration.",
+                )
+            if any(
+                key in node for key in ("variableName", "variableGuid", "variableType")
+            ):
+                raise GraphEditError(
+                    "graph-edit-preview-invalid",
+                    f"preview.nodes[{index}] call_function must not declare variable fields.",
+                )
+            normalized_node["callFunction"] = _normalize_call_function(
+                node.get("callFunction"),
+                f"preview.nodes[{index}].callFunction",
+            )
+        elif node_type in VARIABLE_NODE_TYPES:
             if contract is None:
                 raise GraphEditError(
                     "graph-edit-preview-invalid",

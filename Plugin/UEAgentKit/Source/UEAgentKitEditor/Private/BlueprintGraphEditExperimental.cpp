@@ -74,7 +74,135 @@ namespace
 		FString VariableGuid;
 		FString VariableType;
 		FString VariableAccess;
+		// Bounded real UFUNCTION CallFunction node.  The owner/function/digest
+		// must match the fixed allowlist below; no free-form path is accepted.
+		bool bCallFunction = false;
+		FString CallFunctionOwnerPath;
+		FString CallFunctionSignatureDigest;
 	};
+
+	struct FCallFunctionPinDef
+	{
+		FString Name;
+		FString Direction;
+		FString Type;
+	};
+
+	struct FCallFunctionAllowlistEntry
+	{
+		FString OwnerClassPath;
+		FString FunctionName;
+		FString SignatureDigest;
+		TArray<FCallFunctionPinDef> Pins;
+	};
+
+	const TCHAR* const CallFunctionOwnerPath = TEXT("/Script/Engine.KismetMathLibrary");
+
+	FString CanonicalCallFunctionSignature(
+		const FString& OwnerClassPath,
+		const FString& FunctionName,
+		const TArray<FCallFunctionPinDef>& Pins)
+	{
+		TArray<FCallFunctionPinDef> SortedPins = Pins;
+		SortedPins.Sort([](const FCallFunctionPinDef& Left, const FCallFunctionPinDef& Right)
+		{
+			return Left.Name < Right.Name;
+		});
+		FString Canonical = OwnerClassPath + TEXT("|") + FunctionName + TEXT("|");
+		for (int32 Index = 0; Index < SortedPins.Num(); ++Index)
+		{
+			if (Index > 0)
+			{
+				Canonical += TEXT("|");
+			}
+			Canonical += SortedPins[Index].Name
+				+ TEXT(":")
+				+ SortedPins[Index].Direction
+				+ TEXT(":")
+				+ SortedPins[Index].Type;
+		}
+		return Canonical;
+	}
+
+	bool ComputeCallFunctionSignatureDigest(
+		const FString& OwnerClassPath,
+		const FString& FunctionName,
+		const TArray<FCallFunctionPinDef>& Pins,
+		FString& OutDigest)
+	{
+		FString HexDigest;
+		if (!FBlueprintContextSha256::HashText(
+			CanonicalCallFunctionSignature(OwnerClassPath, FunctionName, Pins),
+			HexDigest))
+		{
+			return false;
+		}
+		OutDigest = TEXT("sha256:") + HexDigest;
+		return true;
+	}
+
+	TArray<FCallFunctionAllowlistEntry> GetCallFunctionAllowlist()
+	{
+		TArray<FCallFunctionAllowlistEntry> Entries;
+		auto AddEntry = [&Entries](
+			const TCHAR* FunctionName,
+			const TCHAR* SignatureDigest,
+			TArray<FCallFunctionPinDef> Pins)
+		{
+			FCallFunctionAllowlistEntry Entry;
+			Entry.OwnerClassPath = CallFunctionOwnerPath;
+			Entry.FunctionName = FunctionName;
+			Entry.SignatureDigest = SignatureDigest;
+			Entry.Pins = MoveTemp(Pins);
+			Entries.Add(MoveTemp(Entry));
+		};
+		AddEntry(
+			TEXT("Greater_IntInt"),
+			TEXT("sha256:0f41d587fab8cfbbc431b8dcf4b6d150b0f3dff6438ae3e5e731a932ad26ea09"),
+			{
+				{ TEXT("A"), TEXT("input"), TEXT("int") },
+				{ TEXT("B"), TEXT("input"), TEXT("int") },
+				{ TEXT("ReturnValue"), TEXT("output"), TEXT("bool") },
+			});
+		AddEntry(
+			TEXT("Less_IntInt"),
+			TEXT("sha256:2537b266443bce7147ae6d77e0704479c65c69e4672034fea911909be2aab8ae"),
+			{
+				{ TEXT("A"), TEXT("input"), TEXT("int") },
+				{ TEXT("B"), TEXT("input"), TEXT("int") },
+				{ TEXT("ReturnValue"), TEXT("output"), TEXT("bool") },
+			});
+		AddEntry(
+			TEXT("Clamp"),
+			TEXT("sha256:ec7c282e64b63ce136c49c3e364661da32930b121b1b6a08e74df4fdeebcfb9d"),
+			{
+				{ TEXT("Value"), TEXT("input"), TEXT("int") },
+				{ TEXT("Min"), TEXT("input"), TEXT("int") },
+				{ TEXT("Max"), TEXT("input"), TEXT("int") },
+				{ TEXT("ReturnValue"), TEXT("output"), TEXT("int") },
+			});
+		AddEntry(
+			TEXT("Abs_Int"),
+			TEXT("sha256:ea421dabd229f8c16d774b90a49746d56eb3358b4172e4c3796ef7f5de8a9fa7"),
+			{
+				{ TEXT("A"), TEXT("input"), TEXT("int") },
+				{ TEXT("ReturnValue"), TEXT("output"), TEXT("int") },
+			});
+		return Entries;
+	}
+
+	const FCallFunctionAllowlistEntry* FindCallFunctionAllowlistEntry(
+		const FString& OwnerClassPath,
+		const FString& FunctionName)
+	{
+		static const TArray<FCallFunctionAllowlistEntry> Entries = GetCallFunctionAllowlist();
+		return Entries.FindByPredicate([&OwnerClassPath, &FunctionName](
+			const FCallFunctionAllowlistEntry& Entry)
+		{
+			return Entry.OwnerClassPath.Equals(OwnerClassPath, ESearchCase::CaseSensitive)
+				&& Entry.FunctionName.Equals(FunctionName, ESearchCase::CaseSensitive);
+		});
+	}
 
 	struct FExistingPinSpec
 	{
@@ -1105,6 +1233,12 @@ namespace
 			OutNode.OutputPinTypes.Add(TEXT("ReturnValue"), TEXT("string"));
 			return true;
 		}
+		if (NodeType == TEXT("call_function"))
+		{
+			OutNode.bCallFunction = true;
+			OutNode.NodeClassPath = CallFunctionClassPath;
+			return true;
+		}
 		if (NodeType == TEXT("variable_get") || NodeType == TEXT("variable_set"))
 		{
 			// Pins and exact types depend on the existing member variable and
@@ -1120,7 +1254,7 @@ namespace
 			OutErrorCode,
 			OutErrorMessage,
 			TEXT("graph-edit-node-type-not-allowed"),
-			TEXT("Supported nodeTypes: branch, sequence, not_bool, bool_or, int_add, int_equal, double_add, string_concat, variable_get, variable_set."));
+			TEXT("Supported nodeTypes: branch, sequence, not_bool, bool_or, int_add, int_equal, double_add, string_concat, call_function, variable_get, variable_set."));
 	}
 
 	const FNodeSpec* FindNode(const TArray<FNodeSpec>& Nodes, const FString& TempId)
@@ -1129,6 +1263,216 @@ namespace
 		{
 			return Node.TempId.Equals(TempId, ESearchCase::CaseSensitive);
 		});
+	}
+
+	bool ParseCallFunction(
+		const TSharedPtr<FJsonObject>& Object,
+		FNodeSpec& OutNode,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
+	{
+		const TSharedPtr<FJsonObject>* CallFunctionObject = nullptr;
+		if (!Object->TryGetObjectField(TEXT("callFunction"), CallFunctionObject)
+			|| CallFunctionObject == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-call-function-invalid"),
+				TEXT("call_function requires one exact callFunction object."));
+		}
+		if (!RejectUnknownParams(
+			*CallFunctionObject,
+			{
+				TEXT("ownerClassPath"),
+				TEXT("functionName"),
+				TEXT("signatureDigest"),
+				TEXT("pins"),
+			},
+			OutErrorCode,
+			OutErrorMessage))
+		{
+			return false;
+		}
+		FString OwnerClassPath;
+		FString FunctionName;
+		FString SignatureDigest;
+		if (!ReadString(
+				*CallFunctionObject,
+				TEXT("ownerClassPath"),
+				OwnerClassPath,
+				OutErrorCode,
+				OutErrorMessage)
+			|| !ReadString(
+				*CallFunctionObject,
+				TEXT("functionName"),
+				FunctionName,
+				OutErrorCode,
+				OutErrorMessage)
+			|| !ReadString(
+				*CallFunctionObject,
+				TEXT("signatureDigest"),
+				SignatureDigest,
+				OutErrorCode,
+				OutErrorMessage))
+		{
+			return false;
+		}
+		const FCallFunctionAllowlistEntry* Entry = FindCallFunctionAllowlistEntry(
+			OwnerClassPath,
+			FunctionName);
+		if (Entry == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-call-function-not-allowlisted"),
+				TEXT("The owner/function is not in the fixed engine pure static allowlist."));
+		}
+		if (!IsSha256(SignatureDigest)
+			|| !SignatureDigest.Equals(Entry->SignatureDigest, ESearchCase::CaseSensitive))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-call-function-signature-mismatch"),
+				TEXT("signatureDigest does not match the allowlisted reflected signature."));
+		}
+
+		const TArray<TSharedPtr<FJsonValue>>* PinValues = nullptr;
+		if (!(*CallFunctionObject)->TryGetArrayField(TEXT("pins"), PinValues)
+			|| PinValues == nullptr
+			|| PinValues->IsEmpty()
+			|| PinValues->Num() > 16)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-call-function-pin-mismatch"),
+				TEXT("pins must contain the exact reflected input/output pin schema."));
+		}
+		TArray<FCallFunctionPinDef> Pins;
+		for (const TSharedPtr<FJsonValue>& PinValue : *PinValues)
+		{
+			const TSharedPtr<FJsonObject>* PinObject = nullptr;
+			if (!PinValue.IsValid()
+				|| !PinValue->TryGetObject(PinObject)
+				|| PinObject == nullptr)
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-call-function-pin-mismatch"),
+					TEXT("Each callFunction pin must be an object."));
+			}
+			if (!RejectUnknownParams(
+				*PinObject,
+				{ TEXT("name"), TEXT("direction"), TEXT("type") },
+				OutErrorCode,
+				OutErrorMessage))
+			{
+				return false;
+			}
+			FCallFunctionPinDef Pin;
+			if (!ReadString(*PinObject, TEXT("name"), Pin.Name, OutErrorCode, OutErrorMessage)
+				|| !ReadString(
+					*PinObject,
+					TEXT("direction"),
+					Pin.Direction,
+					OutErrorCode,
+					OutErrorMessage)
+				|| !ReadString(*PinObject, TEXT("type"), Pin.Type, OutErrorCode, OutErrorMessage))
+			{
+				return false;
+			}
+			if (!IsSafePinTransportName(Pin.Name)
+				|| (Pin.Direction != TEXT("input") && Pin.Direction != TEXT("output"))
+				|| (Pin.Type != TEXT("exec")
+					&& Pin.Type != TEXT("bool")
+					&& Pin.Type != TEXT("int")
+					&& Pin.Type != TEXT("double")
+					&& Pin.Type != TEXT("string")))
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-call-function-pin-mismatch"),
+					TEXT("callFunction pins must be exact named primitive input/output pins."));
+			}
+			Pins.Add(MoveTemp(Pin));
+		}
+		auto SortPins = [](const TArray<FCallFunctionPinDef>& Source)
+		{
+			TArray<FCallFunctionPinDef> Sorted = Source;
+			Sorted.Sort([](const FCallFunctionPinDef& Left, const FCallFunctionPinDef& Right)
+			{
+				if (Left.Name != Right.Name)
+				{
+					return Left.Name < Right.Name;
+				}
+				return Left.Direction < Right.Direction;
+			});
+			return Sorted;
+		};
+		const TArray<FCallFunctionPinDef> ActualPins = SortPins(Pins);
+		const TArray<FCallFunctionPinDef> ExpectedPins = SortPins(Entry->Pins);
+		bool bPinsMatch = ActualPins.Num() == ExpectedPins.Num();
+		if (bPinsMatch)
+		{
+			for (int32 Index = 0; Index < ActualPins.Num(); ++Index)
+			{
+				bPinsMatch = bPinsMatch
+					&& ActualPins[Index].Name.Equals(ExpectedPins[Index].Name, ESearchCase::CaseSensitive)
+					&& ActualPins[Index].Direction.Equals(ExpectedPins[Index].Direction, ESearchCase::CaseSensitive)
+					&& ActualPins[Index].Type.Equals(ExpectedPins[Index].Type, ESearchCase::CaseSensitive);
+			}
+		}
+		if (!bPinsMatch)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-call-function-pin-mismatch"),
+				TEXT("The declared pins do not match the allowlisted reflected pin schema."));
+		}
+		FString ComputedDigest;
+		if (!ComputeCallFunctionSignatureDigest(
+				OwnerClassPath,
+				FunctionName,
+				Pins,
+				ComputedDigest)
+			|| !ComputedDigest.Equals(Entry->SignatureDigest, ESearchCase::CaseSensitive))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-call-function-signature-mismatch"),
+				TEXT("The declared pins do not hash to the allowlisted signature."));
+		}
+
+		OutNode.bCallFunction = true;
+		OutNode.NodeClassPath = CallFunctionClassPath;
+		OutNode.CallFunctionOwnerPath = OwnerClassPath;
+		OutNode.FunctionName = FunctionName;
+		OutNode.CallFunctionSignatureDigest = SignatureDigest;
+		OutNode.InputPins.Reset();
+		OutNode.OutputPins.Reset();
+		OutNode.InputPinTypes.Reset();
+		OutNode.OutputPinTypes.Reset();
+		for (const FCallFunctionPinDef& Pin : Pins)
+		{
+			if (Pin.Direction == TEXT("input"))
+			{
+				OutNode.InputPins.Add(Pin.Name);
+				OutNode.InputPinTypes.Add(Pin.Name, Pin.Type);
+			}
+			else
+			{
+				OutNode.OutputPins.Add(Pin.Name);
+				OutNode.OutputPinTypes.Add(Pin.Name, Pin.Type);
+			}
+		}
+		return true;
 	}
 
 	bool ParseNodes(
@@ -1171,6 +1515,7 @@ namespace
 					TEXT("variableName"),
 					TEXT("variableGuid"),
 					TEXT("variableType"),
+					TEXT("callFunction"),
 				},
 				OutErrorCode,
 				OutErrorMessage))
@@ -1209,8 +1554,36 @@ namespace
 			const bool bHasVariableFields = (*Object)->HasField(TEXT("variableName"))
 				|| (*Object)->HasField(TEXT("variableGuid"))
 				|| (*Object)->HasField(TEXT("variableType"));
-			if (Node.bVariableAccessor)
+			const bool bHasCallFunctionField = (*Object)->HasField(TEXT("callFunction"));
+			if (Node.bCallFunction)
 			{
+				if (bHasVariableFields)
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-edit-variable-field-not-allowed"),
+						TEXT("call_function does not accept variableName/variableGuid/variableType."));
+				}
+				if (!ParseCallFunction(
+					*Object,
+					Node,
+					OutErrorCode,
+					OutErrorMessage))
+				{
+					return false;
+				}
+			}
+			else if (Node.bVariableAccessor)
+			{
+				if (bHasCallFunctionField)
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-edit-call-function-field-not-allowed"),
+						TEXT("variable accessor nodeTypes do not accept callFunction."));
+				}
 				if (!ReadString(*Object, TEXT("variableName"), Node.VariableName, OutErrorCode, OutErrorMessage)
 					|| !ReadString(*Object, TEXT("variableGuid"), Node.VariableGuid, OutErrorCode, OutErrorMessage)
 					|| !ReadString(*Object, TEXT("variableType"), Node.VariableType, OutErrorCode, OutErrorMessage))
@@ -1218,14 +1591,16 @@ namespace
 					return false;
 				}
 			}
-			else if (bHasVariableFields)
+			else if (bHasVariableFields || bHasCallFunctionField)
 			{
 				return Fail(
 					OutErrorCode,
 					OutErrorMessage,
-					TEXT("graph-edit-variable-field-not-allowed"),
+					bHasCallFunctionField
+						? TEXT("graph-edit-call-function-field-not-allowed")
+						: TEXT("graph-edit-variable-field-not-allowed"),
 					FString::Printf(
-						TEXT("nodeType %s does not accept variableName/variableGuid/variableType."),
+						TEXT("nodeType %s does not accept variable or callFunction fields."),
 						*Node.NodeType));
 			}
 			OutNodes.Add(MoveTemp(Node));
@@ -2005,6 +2380,41 @@ namespace
 					Node.VariableName.Len(),
 					*Node.VariableName);
 			}
+			if (Node.bCallFunction)
+			{
+				Canonical += FString::Printf(
+					TEXT("CF|%s|%s|%s|%s\n"),
+					*Node.TempId,
+					*Node.CallFunctionOwnerPath,
+					*Node.FunctionName,
+					*Node.CallFunctionSignatureDigest);
+				TArray<FCallFunctionPinDef> Pins;
+				for (const FString& PinName : Node.InputPins)
+				{
+					Pins.Add({ PinName, TEXT("input"), Node.InputPinTypes.FindRef(PinName) });
+				}
+				for (const FString& PinName : Node.OutputPins)
+				{
+					Pins.Add({ PinName, TEXT("output"), Node.OutputPinTypes.FindRef(PinName) });
+				}
+				Pins.Sort([](const FCallFunctionPinDef& Left, const FCallFunctionPinDef& Right)
+				{
+					if (Left.Name != Right.Name)
+					{
+						return Left.Name < Right.Name;
+					}
+					return Left.Direction < Right.Direction;
+				});
+				for (const FCallFunctionPinDef& Pin : Pins)
+				{
+					Canonical += FString::Printf(
+						TEXT("CP|%s|%s|%s|%s\n"),
+						*Node.TempId,
+						*Pin.Name,
+						*Pin.Direction,
+						*Pin.Type);
+				}
+			}
 		}
 		TArray<FConnectionSpec> SortedConnections = OutPlan.Connections;
 		SortedConnections.Sort([](const FConnectionSpec& Left, const FConnectionSpec& Right)
@@ -2126,6 +2536,34 @@ namespace
 				Item->SetStringField(TEXT("variableGuid"), Node.VariableGuid);
 				Item->SetStringField(TEXT("variableType"), Node.VariableType);
 				Item->SetStringField(TEXT("variableAccess"), Node.VariableAccess);
+			}
+			if (Node.bCallFunction)
+			{
+				TSharedRef<FJsonObject> CallFunction = MakeShared<FJsonObject>();
+				CallFunction->SetStringField(TEXT("ownerClassPath"), Node.CallFunctionOwnerPath);
+				CallFunction->SetStringField(TEXT("functionName"), Node.FunctionName);
+				CallFunction->SetStringField(
+					TEXT("signatureDigest"),
+					Node.CallFunctionSignatureDigest);
+				TArray<TSharedPtr<FJsonValue>> CallPins;
+				for (const FString& PinName : Node.InputPins)
+				{
+					TSharedRef<FJsonObject> Pin = MakeShared<FJsonObject>();
+					Pin->SetStringField(TEXT("name"), PinName);
+					Pin->SetStringField(TEXT("direction"), TEXT("input"));
+					Pin->SetStringField(TEXT("type"), Node.InputPinTypes.FindRef(PinName));
+					CallPins.Add(MakeShared<FJsonValueObject>(Pin));
+				}
+				for (const FString& PinName : Node.OutputPins)
+				{
+					TSharedRef<FJsonObject> Pin = MakeShared<FJsonObject>();
+					Pin->SetStringField(TEXT("name"), PinName);
+					Pin->SetStringField(TEXT("direction"), TEXT("output"));
+					Pin->SetStringField(TEXT("type"), Node.OutputPinTypes.FindRef(PinName));
+					CallPins.Add(MakeShared<FJsonValueObject>(Pin));
+				}
+				CallFunction->SetArrayField(TEXT("pins"), CallPins);
+				Item->SetObjectField(TEXT("callFunction"), CallFunction);
 			}
 			TSharedRef<FJsonObject> Position = MakeShared<FJsonObject>();
 			Position->SetNumberField(TEXT("x"), Node.X);
@@ -2569,6 +3007,124 @@ namespace
 		return UKismetMathLibrary::StaticClass();
 	}
 
+	bool ValidateCallFunctionNode(
+		UK2Node_CallFunction* Node,
+		const FNodeSpec& Spec,
+		FString& OutReason)
+	{
+		if (Node == nullptr)
+		{
+			OutReason = TEXT("The spawned CallFunction node is null.");
+			return false;
+		}
+		UFunction* Function = Node->GetTargetFunction();
+		if (Function == nullptr)
+		{
+			OutReason = TEXT("The CallFunction node has no resolved reflected function.");
+			return false;
+		}
+		if (!Function->GetName().Equals(Spec.FunctionName, ESearchCase::CaseSensitive))
+		{
+			OutReason = TEXT("The resolved function name does not match the plan.");
+			return false;
+		}
+		UClass* OwnerClass = Function->GetOuterUClass();
+		if (OwnerClass == nullptr
+			|| !OwnerClass->GetPathName().Equals(
+				Spec.CallFunctionOwnerPath,
+				ESearchCase::CaseSensitive))
+		{
+			OutReason = TEXT("The resolved function owner class does not match the plan.");
+			return false;
+		}
+		if (!Function->HasAnyFunctionFlags(FUNC_Static)
+			|| !Function->HasAnyFunctionFlags(FUNC_BlueprintPure))
+		{
+			OutReason = TEXT("The function is not a static BlueprintPure function.");
+			return false;
+		}
+		if (Function->HasAnyFunctionFlags(FUNC_Net)
+			|| Function->HasAnyFunctionFlags(FUNC_BlueprintAuthorityOnly)
+			|| Function->HasAnyFunctionFlags(FUNC_BlueprintEvent)
+			|| Function->HasAnyFunctionFlags(FUNC_Exec)
+			|| Function->HasMetaData(TEXT("Latent")))
+		{
+			OutReason = TEXT("The function has network/latent/authority/event/exec flags.");
+			return false;
+		}
+
+		const int32 ExpectedPinCount = Spec.InputPins.Num() + Spec.OutputPins.Num();
+		int32 VisiblePinCount = 0;
+		int32 HiddenSelfCount = 0;
+		TArray<FString> PinInventory;
+		for (const UEdGraphPin* Pin : Node->Pins)
+		{
+			if (Pin == nullptr)
+			{
+				continue;
+			}
+			const bool bIsHiddenSelf =
+				Pin->bHidden
+				&& Pin->Direction == EGPD_Input
+				&& Pin->PinName == UEdGraphSchema_K2::PN_Self;
+			if (bIsHiddenSelf)
+			{
+				++HiddenSelfCount;
+				if (Pin->LinkedTo.Num() != 0)
+				{
+					OutReason = TEXT("The hidden CallFunction self pin unexpectedly has links.");
+					return false;
+				}
+				continue;
+			}
+			if (Pin->bHidden)
+			{
+				OutReason = FString::Printf(
+					TEXT("The CallFunction node has an unexpected hidden pin %s."),
+					*Pin->PinName.ToString());
+				return false;
+			}
+			++VisiblePinCount;
+			PinInventory.Add(FString::Printf(
+				TEXT("%s:%s"),
+				*Pin->PinName.ToString(),
+				Pin->Direction == EGPD_Input ? TEXT("in") : TEXT("out")));
+		}
+		if (VisiblePinCount != ExpectedPinCount || HiddenSelfCount > 1)
+		{
+			OutReason = FString::Printf(
+				TEXT("The CallFunction node has %d visible pins (hidden self=%d), expected %d: %s"),
+				VisiblePinCount,
+				HiddenSelfCount,
+				ExpectedPinCount,
+				*FString::Join(PinInventory, TEXT(",")));
+			return false;
+		}
+		for (const FString& PinName : Spec.InputPins)
+		{
+			const UEdGraphPin* Pin = Node->FindPin(FName(*PinName), EGPD_Input);
+			if (Pin == nullptr || !PinMatchesType(Pin, Spec.InputPinTypes.FindRef(PinName)))
+			{
+				OutReason = FString::Printf(
+					TEXT("The CallFunction input pin %s is missing or has the wrong type."),
+					*PinName);
+				return false;
+			}
+		}
+		for (const FString& PinName : Spec.OutputPins)
+		{
+			const UEdGraphPin* Pin = Node->FindPin(FName(*PinName), EGPD_Output);
+			if (Pin == nullptr || !PinMatchesType(Pin, Spec.OutputPinTypes.FindRef(PinName)))
+			{
+				OutReason = FString::Printf(
+					TEXT("The CallFunction output pin %s is missing or has the wrong type."),
+					*PinName);
+				return false;
+			}
+		}
+		return true;
+	}
+
 	UClass* NodeClassForType(const FString& NodeType)
 	{
 		if (NodeType == TEXT("branch"))
@@ -2828,13 +3384,37 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 			}
 			else if (!Spec.FunctionName.IsEmpty())
 			{
-				UFunction* Function = FunctionOwnerForNodeType(Spec.NodeType)->FindFunctionByName(
+				UClass* FunctionOwner = Spec.bCallFunction
+					? LoadObject<UClass>(nullptr, *Spec.CallFunctionOwnerPath)
+					: FunctionOwnerForNodeType(Spec.NodeType);
+				if (FunctionOwner == nullptr)
+				{
+					return Abort(
+						TEXT("graph-edit-node-spawn-failed"),
+						TEXT("The function owner class is unavailable."));
+				}
+				UFunction* Function = FunctionOwner->FindFunctionByName(
 					FName(*Spec.FunctionName));
 				if (Function == nullptr)
 				{
 					return Abort(
 						TEXT("graph-edit-node-spawn-failed"),
 						FString::Printf(TEXT("The function %s is unavailable."), *Spec.FunctionName));
+				}
+				if (Spec.bCallFunction)
+				{
+					const FCallFunctionAllowlistEntry* Entry = FindCallFunctionAllowlistEntry(
+						Spec.CallFunctionOwnerPath,
+						Spec.FunctionName);
+					if (Entry == nullptr
+						|| !Entry->SignatureDigest.Equals(
+							Spec.CallFunctionSignatureDigest,
+							ESearchCase::CaseSensitive))
+					{
+						return Abort(
+							TEXT("graph-edit-call-function-not-allowlisted"),
+							TEXT("The CallFunction plan is no longer in the fixed allowlist."));
+					}
 				}
 				UK2Node_CallFunction* CallNode = NewObject<UK2Node_CallFunction>(Graph);
 				if (CallNode == nullptr)
@@ -2849,6 +3429,16 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 				if (CallNode->Pins.Num() == 0)
 				{
 					CallNode->AllocateDefaultPins();
+				}
+				if (Spec.bCallFunction)
+				{
+					FString PinReason;
+					if (!ValidateCallFunctionNode(CallNode, Spec, PinReason))
+					{
+						return Abort(
+							TEXT("graph-edit-call-function-pin-mismatch"),
+							PinReason);
+					}
 				}
 				Node = CallNode;
 			}
