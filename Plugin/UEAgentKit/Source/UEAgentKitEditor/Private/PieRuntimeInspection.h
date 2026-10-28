@@ -54,6 +54,7 @@ namespace UEAgentKitPieRuntime
 		InstanceNotRunning,
 		InstanceNotFound,
 		InstanceStale,
+		InstanceAmbiguous,
 		WorldStale,
 		ActorNotFound,
 		ActorAmbiguous,

@@ -660,6 +660,7 @@ def _capabilities_response(
                 "available": live_editor_enabled,
                 "readOnly": True,
                 "requiresDatabase": False,
+                "serverStartupRequiresIndexDatabase": True,
                 "requiresPieStopped": False,
                 "pieControlSupported": False,
                 "tools": [
@@ -681,6 +682,7 @@ def _capabilities_response(
                     "pie-not-running",
                     "pie-instance-not-found",
                     "pie-instance-stale",
+                    "pie-instance-ambiguous",
                     "pie-world-stale",
                     "pie-actor-not-found",
                     "pie-actor-ambiguous",

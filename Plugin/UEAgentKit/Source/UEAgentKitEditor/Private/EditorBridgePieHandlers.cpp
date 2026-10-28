@@ -165,6 +165,8 @@ namespace UEAgentKitPieRuntime
 			return TEXT("pie-instance-not-found");
 		case EFailure::InstanceStale:
 			return TEXT("pie-instance-stale");
+		case EFailure::InstanceAmbiguous:
+			return TEXT("pie-instance-ambiguous");
 		case EFailure::WorldStale:
 			return TEXT("pie-world-stale");
 		case EFailure::ActorNotFound:
@@ -652,11 +654,45 @@ namespace UEAgentKitPieRuntime
 					Request.PieInstanceId));
 		}
 
-		const FWorldContextSnapshot* Snapshot = Contexts.FindByPredicate(
-			[&Request](const FWorldContextSnapshot& Candidate)
+		// A PIE instance id must identify exactly one live world.  If the engine
+		// ever exposes the same id for two contexts (transient play/stop states),
+		// fail closed instead of silently inspecting the first world.
+		const FWorldContextSnapshot* Snapshot = nullptr;
+		int32 MatchingContextCount = 0;
+		FString MatchingContextSummary;
+		for (const FWorldContextSnapshot& Candidate : Contexts)
+		{
+			if (Candidate.PieInstanceId != Request.PieInstanceId)
 			{
-				return Candidate.PieInstanceId == Request.PieInstanceId;
-			});
+				continue;
+			}
+			++MatchingContextCount;
+			if (Snapshot == nullptr)
+			{
+				Snapshot = &Candidate;
+			}
+			if (MatchingContextSummary.Len() < 512)
+			{
+				if (!MatchingContextSummary.IsEmpty())
+				{
+					MatchingContextSummary += TEXT(", ");
+				}
+				MatchingContextSummary += FString::Printf(
+					TEXT("%s (%s)"),
+					*Candidate.WorldPath,
+					*Candidate.NetModeName);
+			}
+		}
+		if (MatchingContextCount > 1)
+		{
+			return Fail(
+				EFailure::InstanceAmbiguous,
+				FString::Printf(
+					TEXT("PIE instance %d matches %d live world contexts (%s); the exact world is ambiguous, so nothing was inspected. Use the contextId from editor.getPieWorldContexts."),
+					Request.PieInstanceId,
+					MatchingContextCount,
+					*MatchingContextSummary));
+		}
 		if (Snapshot == nullptr || Snapshot->World == nullptr)
 		{
 			return Fail(

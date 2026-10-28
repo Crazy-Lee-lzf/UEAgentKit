@@ -44,6 +44,7 @@ NEW_CAPABILITIES = (WORLD_CONTEXT_METHOD, INSPECT_ACTOR_METHOD)
 NOT_RUNNING_CODE = "pie-not-running"
 NOT_FOUND_CODE = "pie-instance-not-found"
 STALE_CODE = "pie-instance-stale"
+AMBIGUOUS_INSTANCE_CODE = "pie-instance-ambiguous"
 ACTOR_CODES = {
     "pie-actor-not-found",
     "pie-actor-ambiguous",
@@ -580,6 +581,9 @@ class PieCapabilityDescriptorTests(unittest.TestCase):
         self.assertTrue(block["available"])
         self.assertTrue(block["readOnly"])
         self.assertFalse(block["requiresDatabase"])
+        # The tools are DB-free, but the current MCP process still checks an
+        # existing index at startup; the contract states this explicitly.
+        self.assertTrue(block["serverStartupRequiresIndexDatabase"])
         self.assertFalse(block["requiresPieStopped"])
         self.assertFalse(block["pieControlSupported"])
         self.assertTrue(block["serverClientIdentification"])
@@ -595,7 +599,7 @@ class PieCapabilityDescriptorTests(unittest.TestCase):
         )
         codes = block["errorCodes"]
         self.assertEqual(len(codes), len(set(codes)))
-        for code in (NOT_RUNNING_CODE, NOT_FOUND_CODE, STALE_CODE):
+        for code in (NOT_RUNNING_CODE, NOT_FOUND_CODE, STALE_CODE, AMBIGUOUS_INSTANCE_CODE):
             self.assertIn(code, codes)
 
     def test_pie_state_remains_the_only_pie_control_flag(self) -> None:
@@ -672,12 +676,25 @@ class PiePluginSourceContractTests(unittest.TestCase):
             'TEXT("pie-not-running")',
             'TEXT("pie-instance-not-found")',
             'TEXT("pie-instance-stale")',
+            'TEXT("pie-instance-ambiguous")',
             'TEXT("pie-world-stale")',
             'TEXT("pie-actor-not-found")',
             'TEXT("pie-actor-ambiguous")',
             'TEXT("pie-actor-stale")',
         ):
             self.assertIn(token, self.handler + self.header)
+
+    def test_duplicate_live_instance_ids_fail_closed(self) -> None:
+        # One PIE instance id must never silently resolve to the first of two
+        # live worlds: the handler counts context matches and refuses.
+        for token in (
+            "MatchingContextCount",
+            "MatchingContextCount > 1",
+            "EFailure::InstanceAmbiguous",
+            "the exact world is ambiguous",
+        ):
+            self.assertIn(token, self.handler)
+        self.assertIn("InstanceAmbiguous", self.header)
 
     def test_actor_resolution_is_exact_and_bounded(self) -> None:
         for token in (
