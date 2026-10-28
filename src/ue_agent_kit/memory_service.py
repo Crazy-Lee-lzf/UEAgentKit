@@ -42,8 +42,10 @@ from .memory_l0 import (
 from .memory_tasks import TaskOutcomeDraft, build_task_outcome_record
 from .memory_injection import (
     MemoryContextBuildResult,
+    MemoryContextMaintenanceResult,
     build_memory_context_snapshot,
     get_injection_context,
+    maintain_memory_context_snapshot,
 )
 from .memory_vector import (
     get_shared_provider,
@@ -720,6 +722,30 @@ class ProjectMemoryService:
             index_database=index_database,
             max_l2_groups=max_l2_groups,
             max_l3_entries=max_l3_entries,
+        )
+
+    def maintain_context(
+        self,
+        *,
+        index_database: Path,
+        max_l2_groups: int = 8,
+        max_l3_entries: int = 48,
+        enabled: bool = False,
+    ) -> MemoryContextMaintenanceResult:
+        """Explicit, opt-in offline maintenance of the persisted context snapshot.
+
+        This is not called by any request path. The caller must pass
+        ``enabled=True`` (the CLI requires ``--enable-context-maintenance``).
+        It only rebuilds when the stored source generation or index snapshot is
+        stale, and leaves the previous snapshot intact on any failure.
+        """
+        return maintain_memory_context_snapshot(
+            memory_database=self.database_path,
+            project_key=self.project_key,
+            index_database=index_database,
+            max_l2_groups=max_l2_groups,
+            max_l3_entries=max_l3_entries,
+            enabled=enabled,
         )
 
     def expand_node(
