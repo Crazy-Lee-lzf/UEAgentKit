@@ -42,9 +42,12 @@ from .memory_l0 import (
 from .memory_tasks import TaskOutcomeDraft, build_task_outcome_record
 from .memory_injection import (
     MemoryContextBuildResult,
+    MemoryContextMaintenanceResult,
     build_memory_context_snapshot,
     get_injection_context,
+    maintain_memory_context_snapshot,
 )
+from .memory_preflight import MemoryPreflightResult, preflight_memory_context
 from .memory_vector import (
     get_shared_provider,
     hybrid_search_memory_records,
@@ -720,6 +723,55 @@ class ProjectMemoryService:
             index_database=index_database,
             max_l2_groups=max_l2_groups,
             max_l3_entries=max_l3_entries,
+        )
+
+    def maintain_context(
+        self,
+        *,
+        index_database: Path,
+        max_l2_groups: int = 8,
+        max_l3_entries: int = 48,
+        enabled: bool = False,
+    ) -> MemoryContextMaintenanceResult:
+        """Explicit, opt-in offline maintenance of the persisted context snapshot.
+
+        This is not called by any request path. The caller must pass
+        ``enabled=True`` (the CLI requires ``--enable-context-maintenance``).
+        It only rebuilds when the stored source generation or index snapshot is
+        stale, and leaves the previous snapshot intact on any failure.
+        """
+        return maintain_memory_context_snapshot(
+            memory_database=self.database_path,
+            project_key=self.project_key,
+            index_database=index_database,
+            max_l2_groups=max_l2_groups,
+            max_l3_entries=max_l3_entries,
+            enabled=enabled,
+        )
+
+    def preflight_context(
+        self,
+        *,
+        index_database: Path,
+        enabled: bool = False,
+        include_text: bool = False,
+        query: str = "",
+    ) -> MemoryPreflightResult:
+        """Explicit Session/Goal preflight: maintain, then bounded read-only L2/L3.
+
+        The host must pass fixed Memory/Index paths and projectKey from its own
+        configuration. ``include_text`` defaults to False so diagnostics do not
+        carry sensitive L2/L3 text; a host that injects context must opt in and
+        keep that text out of logs. ``query`` is optional Goal/task text for
+        persisted L2 recipe matching only. No request path calls this method.
+        """
+        return preflight_memory_context(
+            memory_database=self.database_path,
+            index_database=index_database,
+            project_key=self.project_key,
+            enabled=enabled,
+            include_text=include_text,
+            query=query,
         )
 
     def expand_node(

@@ -105,6 +105,64 @@ class MemoryContextBuildResult:
         }
 
 
+@dataclass(frozen=True)
+class MemoryContextMaintenanceResult:
+    """Result of one explicit, offline snapshot-maintenance attempt.
+
+    ``state`` describes the persisted snapshot after the attempt:
+
+    * ``current`` — the persisted snapshot matches the observed generation/index.
+    * ``stale`` — an older snapshot exists but no longer matches; it is still
+      stored unchanged so a later maintenance run can replace it.
+    * ``missing`` — no usable snapshot exists.
+    * ``disabled`` — maintenance was not enabled; nothing was read or written.
+    * ``unavailable`` — the Memory or Index database could not be used.
+
+    ``action`` is ``none``, ``rebuild``, ``reuse``, or ``refuse``. A failed
+    attempt always reports ``refuse`` and leaves ``before``/``after`` equal.
+    """
+
+    project_key: str
+    enabled: bool
+    state: str
+    action: str
+    reason: str
+    before: dict[str, Any] | None = None
+    after: dict[str, Any] | None = None
+    build: MemoryContextBuildResult | None = None
+    error_code: str = ""
+    error: str = ""
+
+    def to_payload(self) -> dict[str, Any]:
+        build = self.build
+        after = self.after or {}
+        return {
+            "schemaVersion": "1.0",
+            "tool": "ue_memory_maintain_context",
+            "projectKey": self.project_key,
+            "enabled": self.enabled,
+            "state": self.state,
+            "action": self.action,
+            "reason": self.reason,
+            "stale": self.state in {"stale", "missing"},
+            "sourceGeneration": int(after.get("sourceGeneration", -1)),
+            "builtGeneration": int(after.get("builtGeneration", -1)),
+            "snapshotId": str(after.get("snapshotId", "")),
+            "indexSnapshotId": str(after.get("indexSnapshotId", "")),
+            "l2Entries": build.l2_entries if build is not None else 0,
+            "l3Entries": build.l3_entries if build is not None else 0,
+            "contentChars": build.content_chars if build is not None else 0,
+            "estimatedTokens": build.estimated_tokens if build is not None else 0,
+            "rebuilt": bool(build is not None and not build.reused),
+            "reused": bool(build is not None and build.reused),
+            "elapsedMs": round(build.elapsed_ms, 3) if build is not None else 0.0,
+            "before": self.before,
+            "after": self.after,
+            "errorCode": self.error_code,
+            "error": self.error,
+        }
+
+
 # ---------------------------------------------------------------------------
 # Canonical serialization / digest helpers
 # ---------------------------------------------------------------------------
@@ -597,6 +655,27 @@ def _state_row(connection: sqlite3.Connection, project_key: str) -> dict[str, An
     }
 
 
+def _state_payload(state: dict[str, Any] | None) -> dict[str, Any] | None:
+    if state is None:
+        return None
+    return {
+        "sourceGeneration": int(state["source_generation"]),
+        "builtGeneration": int(state["built_generation"]),
+        "snapshotId": str(state["snapshot_id"]),
+        "indexSnapshotId": str(state["index_snapshot_id"]),
+    }
+
+
+def _maintenance_trigger(snapshot_reason: str) -> str:
+    if snapshot_reason == _SNAPSHOT_REASON_MISSING:
+        return "snapshot-missing"
+    if snapshot_reason == _SNAPSHOT_REASON_STALE:
+        return "source-generation-changed"
+    if snapshot_reason == _SNAPSHOT_REASON_INDEX_MISMATCH:
+        return "index-snapshot-changed"
+    return "snapshot-refresh-required"
+
+
 def snapshot_freshness(
     connection: sqlite3.Connection,
     *,
@@ -893,38 +972,63 @@ def build_memory_context_snapshot(
                 l3_ordered.pop()
 
             all_entries: list[dict[str, Any]] = []
-            for index, item in enumerate(l3_ordered):
-                body = item["body"]
-                context_key = _canonical_context_key(project_key, "L3", item["title"], body, {})
-                all_entries.append(
-                    {
-                        "layer": "L3",
-                        "context_key": context_key,
-                        "ordinal": index,
-                        "title": item["title"],
-                        "body": body,
-                        "match": {},
-                        "bindings": item.get("bindings", []),
-                    }
+            entry_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+            layer_ordinals = {"L3": 0, "L2": 0}
+
+            def append_entry(
+                *,
+                layer: str,
+                title: str,
+                body: str,
+                match: dict[str, Any],
+                bindings: Sequence[dict[str, Any]],
+            ) -> None:
+                """Append one unique context entry, merging duplicate provenance.
+
+                Two source records can project byte-identical injection text (for
+                example, the same rule recorded under two Subject Keys). The
+                ``memory_context_entries`` table is unique on
+                ``(project_key, layer, context_key)``, so the second occurrence
+                must merge its bindings into the first instead of aborting the
+                whole offline build. The duplicate is only collapsed at the
+                projection layer; the Memory records themselves are untouched.
+                """
+                context_key = _canonical_context_key(project_key, layer, title, body, match)
+                key = (layer, context_key)
+                existing = entry_by_key.get(key)
+                if existing is not None:
+                    for binding in bindings:
+                        if binding not in existing["bindings"]:
+                            existing["bindings"].append(binding)
+                    return
+                entry = {
+                    "layer": layer,
+                    "context_key": context_key,
+                    "ordinal": layer_ordinals[layer],
+                    "title": title,
+                    "body": body,
+                    "match": dict(match),
+                    "bindings": list(bindings),
+                }
+                layer_ordinals[layer] += 1
+                all_entries.append(entry)
+                entry_by_key[key] = entry
+
+            for item in l3_ordered:
+                append_entry(
+                    layer="L3",
+                    title=item["title"],
+                    body=item["body"],
+                    match={},
+                    bindings=item.get("bindings", []),
                 )
-            for index, recipe in enumerate(l2_recipes):
-                context_key = _canonical_context_key(
-                    project_key,
-                    "L2",
-                    recipe["title"],
-                    recipe["body"],
-                    recipe["match"],
-                )
-                all_entries.append(
-                    {
-                        "layer": "L2",
-                        "context_key": context_key,
-                        "ordinal": index,
-                        "title": recipe["title"],
-                        "body": recipe["body"],
-                        "match": recipe["match"],
-                        "bindings": recipe.get("bindings", []),
-                    }
+            for recipe in l2_recipes:
+                append_entry(
+                    layer="L2",
+                    title=recipe["title"],
+                    body=recipe["body"],
+                    match=recipe["match"],
+                    bindings=recipe.get("bindings", []),
                 )
             l3_entries = [entry for entry in all_entries if entry["layer"] == "L3"]
             l2_entries = [entry for entry in all_entries if entry["layer"] == "L2"]
@@ -1044,4 +1148,170 @@ def build_memory_context_snapshot(
         estimated_tokens=estimate_tokens(preview_chars) if preview_chars else 0,
         reused=reused,
         elapsed_ms=(time.perf_counter() - started) * 1000.0,
+    )
+
+
+def maintain_memory_context_snapshot(
+    *,
+    memory_database: Path,
+    project_key: str,
+    index_database: Path,
+    max_l2_groups: int = MAX_L2_GROUPS,
+    max_l3_entries: int = MAX_L3_ENTRIES,
+    enabled: bool = False,
+) -> MemoryContextMaintenanceResult:
+    """Explicitly maintain one project's L2/L3 snapshot when it is out of date.
+
+    This is an offline/idle maintenance entry point, not a request-path
+    fallback. It never runs implicitly: ``enabled`` must be true, and the CLI
+    requires its own explicit opt-in flag. It reuses
+    :func:`build_memory_context_snapshot`; no second index, background daemon,
+    LLM, or vector model is introduced.
+
+    Guarantees:
+
+    * no Memory database is created when the file is absent;
+    * a current snapshot is a no-op (``action="none"``);
+    * a stale/missing snapshot triggers one bounded rebuild;
+    * any build failure leaves the previous state/entries in place and reports
+      ``state="stale"`` (or ``"missing"``) with ``action="refuse"``;
+    * concurrent callers serialize on the existing ``BEGIN IMMEDIATE`` build
+      transaction and reuse the winner's snapshot rather than duplicating rows.
+    """
+
+    if not isinstance(enabled, bool):
+        raise ValueError("enabled must be boolean.")
+    if isinstance(max_l2_groups, bool) or not isinstance(max_l2_groups, int) or max_l2_groups < 0:
+        raise ValueError("max_l2_groups must be a non-negative integer.")
+    if isinstance(max_l3_entries, bool) or not isinstance(max_l3_entries, int) or max_l3_entries < 0:
+        raise ValueError("max_l3_entries must be a non-negative integer.")
+    normalized_project = project_key.strip() if isinstance(project_key, str) else ""
+    if not normalized_project:
+        raise ValueError("project_key must be a non-empty string.")
+    if not enabled:
+        return MemoryContextMaintenanceResult(
+            project_key=normalized_project,
+            enabled=False,
+            state="disabled",
+            action="none",
+            reason="maintenance-disabled",
+        )
+
+    resolved_memory = memory_database.expanduser().resolve()
+    resolved_index = index_database.expanduser().resolve()
+    if not resolved_memory.is_file():
+        return MemoryContextMaintenanceResult(
+            project_key=normalized_project,
+            enabled=True,
+            state="unavailable",
+            action="none",
+            reason="memory-database-missing",
+        )
+    if not resolved_index.is_file():
+        return MemoryContextMaintenanceResult(
+            project_key=normalized_project,
+            enabled=True,
+            state="unavailable",
+            action="none",
+            reason="index-database-missing",
+        )
+
+    try:
+        index_id = index_snapshot_id_from_database(resolved_index)
+        with open_project_memory_database(resolved_memory, readonly=True) as connection:
+            state = _state_row(connection, normalized_project)
+            usable, freshness_reason, state = snapshot_freshness(
+                connection,
+                project_key=normalized_project,
+                index_snapshot_id=index_id,
+            )
+    except (OSError, RuntimeError, ValueError, sqlite3.Error) as exc:
+        return MemoryContextMaintenanceResult(
+            project_key=normalized_project,
+            enabled=True,
+            state="unavailable",
+            action="none",
+            reason="maintenance-state-unavailable",
+            error_code="maintenance-state-unavailable",
+            error=str(exc),
+        )
+
+    before = _state_payload(state)
+    if usable:
+        return MemoryContextMaintenanceResult(
+            project_key=normalized_project,
+            enabled=True,
+            state="current",
+            action="none",
+            reason="snapshot-current",
+            before=before,
+            after=before,
+        )
+
+    trigger = _maintenance_trigger(freshness_reason)
+    stale_state = "stale" if before and before.get("snapshotId") else "missing"
+    try:
+        build = build_memory_context_snapshot(
+            memory_database=resolved_memory,
+            project_key=normalized_project,
+            index_database=resolved_index,
+            max_l2_groups=max_l2_groups,
+            max_l3_entries=max_l3_entries,
+        )
+    except Exception as exc:
+        # build_memory_context_snapshot is atomic; a failure has already rolled
+        # back to the previous state/entries. Keep reporting that older snapshot
+        # as stale instead of pretending maintenance succeeded.
+        return MemoryContextMaintenanceResult(
+            project_key=normalized_project,
+            enabled=True,
+            state=stale_state,
+            action="refuse",
+            reason="maintenance-failed",
+            before=before,
+            after=before,
+            error_code="maintenance-build-failed",
+            error=str(exc),
+        )
+
+    # Re-read after the atomic build and validate against the index that exists
+    # now. If the index changed again during the build, the snapshot is stale.
+    post_error = ""
+    try:
+        current_index_id = index_snapshot_id_from_database(resolved_index)
+        with open_project_memory_database(resolved_memory, readonly=True) as connection:
+            after_state = _state_row(connection, normalized_project)
+            usable_after, _, after_state = snapshot_freshness(
+                connection,
+                project_key=normalized_project,
+                index_snapshot_id=current_index_id,
+            )
+    except (OSError, RuntimeError, ValueError, sqlite3.Error) as exc:
+        usable_after = False
+        after_state = None
+        post_error = str(exc)
+
+    after = _state_payload(after_state)
+    if not usable_after:
+        return MemoryContextMaintenanceResult(
+            project_key=normalized_project,
+            enabled=True,
+            state="stale",
+            action="refuse",
+            reason="post-build-validation-failed",
+            before=before,
+            after=after,
+            build=build,
+            error_code="maintenance-post-build-stale",
+            error=post_error,
+        )
+    return MemoryContextMaintenanceResult(
+        project_key=normalized_project,
+        enabled=True,
+        state="current",
+        action="reuse" if build.reused else "rebuild",
+        reason=trigger,
+        before=before,
+        after=after,
+        build=build,
     )

@@ -3,6 +3,16 @@
 This module does not touch Unreal.  It validates the small request/result
 envelope used by the live preview/apply tools and binds Apply to the complete
 preview result plus the exact confirmation phrase.
+
+Besides the deterministic function/branch nodes, the contract accepts
+``variable_get`` / ``variable_set`` nodes that reference one already-existing
+top-level bool/int/double/string member variable by concrete GUID + name.  The
+variable itself is never created, renamed, retyped or defaulted here.
+
+A connection may bind one exact existing K2 pin via ``fromExisting`` /
+``toExisting``.  With ``nodes=[]`` a single existing output may be connected to
+one existing unlinked input; existing->existing plans are limited to exactly
+that one edge and never break or replace an existing link.
 """
 
 from __future__ import annotations
@@ -95,8 +105,58 @@ NODE_TYPES = {
     },
 }
 
+# Bounded self-context member-variable accessor nodes.  They reference an
+# already-existing top-level bool/int/double/string variable by GUID + name and
+# never create, rename or retype a variable.  The engine pin contract is:
+#   variable_get: output <VariableName>
+#   variable_set: input execute, input <VariableName>,
+#                 output then, output Output_Get
+VARIABLE_NODE_TYPES = {
+    "variable_get": {
+        "nodeClass": "/Script/BlueprintGraph.K2Node_VariableGet",
+        "access": "read",
+    },
+    "variable_set": {
+        "nodeClass": "/Script/BlueprintGraph.K2Node_VariableSet",
+        "access": "write",
+    },
+}
+VARIABLE_TYPES = ("bool", "int", "double", "string")
+VARIABLE_PIN_RESERVED = ("execute", "then", "Output_Get")
+
+
+def _node_contract(node: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the exact declared node/pin contract for one normalized node."""
+
+    node_type = node.get("nodeType")
+    if node_type in VARIABLE_NODE_TYPES:
+        variable_name = node.get("variableName")
+        variable_type = node.get("variableType")
+        if not isinstance(variable_name, str) or variable_type not in VARIABLE_TYPES:
+            return None
+        access = VARIABLE_NODE_TYPES[node_type]
+        if node_type == "variable_get":
+            return {
+                "nodeClass": access["nodeClass"],
+                "inputPins": (),
+                "outputPins": (variable_name,),
+                "inputPinTypes": {},
+                "outputPinTypes": {variable_name: variable_type},
+            }
+        return {
+            "nodeClass": access["nodeClass"],
+            "inputPins": ("execute", variable_name),
+            "outputPins": ("then", "Output_Get"),
+            "inputPinTypes": {"execute": "exec", variable_name: variable_type},
+            "outputPinTypes": {"then": "exec", "Output_Get": variable_type},
+        }
+    return NODE_TYPES.get(node_type) if isinstance(node_type, str) else None
+
 
 _TEMP_ID = re.compile(r"^tmp:[A-Za-z0-9_-]{1,36}$")
+_VARIABLE_GUID = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SHA1 = re.compile(r"^sha1:[0-9a-f]{40}$")
 
@@ -149,33 +209,133 @@ def _reject_unknown(value: dict[str, Any], allowed: set[str], label: str) -> Non
         )
 
 
+EXISTING_PIN_FIELDS = {
+    "nodeGuid",
+    "pinGuid",
+    "pinName",
+    "direction",
+    "category",
+    "subCategory",
+}
+
+
+def _existing_pin_type_token(category: str, subcategory: str) -> str:
+    if category == "exec":
+        return "exec"
+    if category == "bool":
+        return "bool"
+    if category == "int":
+        return "int"
+    if category == "string":
+        return "string"
+    if category == "real" and subcategory == "double":
+        return "double"
+    if category == "double":
+        return "double"
+    raise GraphEditError(
+        "graph-edit-existing-pin-type-not-supported",
+        "Existing pins must be exec/bool/int/double/string without containers, refs, const or weak pointers.",
+    )
+
+
+def _existing_pin(value: Any, label: str) -> dict[str, str]:
+    item = _object(value, label)
+    _reject_unknown(item, EXISTING_PIN_FIELDS, label)
+    node_guid = _string(item.get("nodeGuid"), f"{label}.nodeGuid", maximum=36)
+    pin_guid = _string(item.get("pinGuid"), f"{label}.pinGuid", maximum=36)
+    if not _VARIABLE_GUID.fullmatch(node_guid) or not _VARIABLE_GUID.fullmatch(pin_guid):
+        raise GraphEditError(
+            "graph-edit-existing-pin-guid-invalid",
+            f"{label}.nodeGuid/pinGuid must be canonical lowercase GUIDs.",
+        )
+    pin_name = _string(item.get("pinName"), f"{label}.pinName", maximum=128)
+    if any(character in "|\r\n" or ord(character) < 0x20 or ord(character) == 0x7F for character in pin_name):
+        raise GraphEditError(
+            "graph-edit-existing-pin-name-invalid",
+            f"{label}.pinName contains unsupported characters.",
+        )
+    direction = _string(item.get("direction"), f"{label}.direction", maximum=16)
+    if direction not in ("input", "output"):
+        raise GraphEditError(
+            "graph-edit-existing-pin-direction-invalid",
+            f"{label}.direction must be input or output.",
+        )
+    category = _string(item.get("category"), f"{label}.category", maximum=32)
+    subcategory = item.get("subCategory")
+    if not isinstance(subcategory, str) or len(subcategory) > 32:
+        raise GraphEditError(
+            "graph-edit-existing-pin-type-not-supported",
+            f"{label}.subCategory must be a string of at most 32 characters (may be empty).",
+        )
+    _existing_pin_type_token(category, subcategory)
+    return {
+        "nodeGuid": node_guid,
+        "pinGuid": pin_guid,
+        "pinName": pin_name,
+        "direction": direction,
+        "category": category,
+        "subCategory": subcategory,
+    }
+
+
 def validate_preview_parameters(
     *,
     asset_path: Any,
     graph_guid: Any,
     nodes: Any,
     connections: Any,
+    operation: Any = "connect",
 ) -> dict[str, Any]:
     """Validate and normalize one bounded preview request."""
 
     normalized_asset = _string(asset_path, "assetPath", maximum=512)
     normalized_graph = _string(graph_guid, "graphGuid", maximum=64)
-    if not isinstance(nodes, list) or not 1 <= len(nodes) <= MAX_NODES:
+    normalized_operation = _string(operation, "operation", maximum=16)
+    if normalized_operation not in ("connect", "disconnect"):
+        raise GraphEditError(
+            "graph-edit-invalid-operation",
+            "operation must be connect or disconnect.",
+        )
+    if not isinstance(nodes, list) or len(nodes) > MAX_NODES:
         raise GraphEditError(
             "graph-edit-invalid-nodes",
-            f"nodes must contain between 1 and {MAX_NODES} objects.",
+            f"nodes must contain between 0 and {MAX_NODES} objects.",
         )
     if not isinstance(connections, list) or len(connections) > MAX_CONNECTIONS:
         raise GraphEditError(
             "graph-edit-invalid-connections",
             f"connections must contain at most {MAX_CONNECTIONS} objects.",
         )
+    if normalized_operation == "disconnect":
+        if len(nodes) != 0 or len(connections) != 1:
+            raise GraphEditError(
+                "graph-edit-disconnect-invalid-plan",
+                "A disconnect plan requires nodes=[] and exactly one existing-to-existing edge.",
+            )
+        first_connection = _object(connections[0], "connections[0]")
+        if "fromExisting" not in first_connection or "toExisting" not in first_connection:
+            raise GraphEditError(
+                "graph-edit-disconnect-invalid-plan",
+                "A disconnect connection requires both fromExisting and toExisting.",
+            )
 
     normalized_nodes: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
     for index, raw in enumerate(nodes):
         item = _object(raw, f"nodes[{index}]")
-        _reject_unknown(item, {"tempId", "nodeType", "x", "y"}, f"nodes[{index}]")
+        _reject_unknown(
+            item,
+            {
+                "tempId",
+                "nodeType",
+                "x",
+                "y",
+                "variableName",
+                "variableGuid",
+                "variableType",
+            },
+            f"nodes[{index}]",
+        )
         temp_id = _string(item.get("tempId"), f"nodes[{index}].tempId", maximum=40)
         node_type = _string(item.get("nodeType"), f"nodes[{index}].nodeType", maximum=16)
         if not _TEMP_ID.fullmatch(temp_id):
@@ -189,99 +349,351 @@ def validate_preview_parameters(
                 f"Duplicate tempId: {temp_id}.",
             )
         seen_ids.add(temp_id)
-        if node_type not in NODE_TYPES:
+        if node_type not in NODE_TYPES and node_type not in VARIABLE_NODE_TYPES:
             raise GraphEditError(
                 "graph-edit-node-type-not-allowed",
-                "Supported nodeTypes: " + ", ".join(sorted(NODE_TYPES)) + ".",
+                "Supported nodeTypes: "
+                + ", ".join(sorted((*NODE_TYPES, *VARIABLE_NODE_TYPES)))
+                + ".",
             )
-        normalized_nodes.append(
-            {
-                "tempId": temp_id,
-                "nodeType": node_type,
-                "x": _integer(item.get("x"), f"nodes[{index}].x"),
-                "y": _integer(item.get("y"), f"nodes[{index}].y"),
-            }
-        )
+        normalized_node: dict[str, Any] = {
+            "tempId": temp_id,
+            "nodeType": node_type,
+            "x": _integer(item.get("x"), f"nodes[{index}].x"),
+            "y": _integer(item.get("y"), f"nodes[{index}].y"),
+        }
+        if node_type in VARIABLE_NODE_TYPES:
+            variable_name = item.get("variableName")
+            variable_guid = item.get("variableGuid")
+            variable_type = item.get("variableType")
+            if (
+                not isinstance(variable_name, str)
+                or not variable_name
+                or len(variable_name) > 128
+                or not variable_name.isidentifier()
+                or variable_name in VARIABLE_PIN_RESERVED
+            ):
+                raise GraphEditError(
+                    "graph-edit-variable-name-invalid",
+                    f"nodes[{index}].variableName must be a 1-128 character identifier "
+                    f"other than {', '.join(VARIABLE_PIN_RESERVED)}.",
+                )
+            if not isinstance(variable_guid, str) or not _VARIABLE_GUID.fullmatch(variable_guid):
+                raise GraphEditError(
+                    "graph-edit-variable-guid-invalid",
+                    f"nodes[{index}].variableGuid must be one canonical lowercase GUID.",
+                )
+            if variable_type not in VARIABLE_TYPES:
+                raise GraphEditError(
+                    "graph-edit-variable-type-invalid",
+                    f"nodes[{index}].variableType must be bool, int, double or string.",
+                )
+            normalized_node.update(
+                {
+                    "variableName": variable_name,
+                    "variableGuid": variable_guid,
+                    "variableType": variable_type,
+                }
+            )
+        elif any(
+            key in item for key in ("variableName", "variableGuid", "variableType")
+        ):
+            raise GraphEditError(
+                "graph-edit-variable-field-not-allowed",
+                f"nodes[{index}] nodeType {node_type} does not accept variable fields.",
+            )
+        normalized_nodes.append(normalized_node)
 
     by_id = {node["tempId"]: node for node in normalized_nodes}
-    normalized_connections: list[dict[str, str]] = []
-    seen_targets: set[tuple[str, str]] = set()
+    normalized_connections: list[dict[str, Any]] = []
+    seen_targets: set[str] = set()
     connection_counts: dict[str, int] = {}
     for index, raw in enumerate(connections):
         item = _object(raw, f"connections[{index}]")
         _reject_unknown(
             item,
-            {"from", "fromPin", "to", "toPin"},
+            {"from", "fromPin", "to", "toPin", "fromExisting", "toExisting"},
             f"connections[{index}]",
         )
-        source = _string(item.get("from"), f"connections[{index}].from", maximum=40)
-        source_pin = _string(
-            item.get("fromPin"),
-            f"connections[{index}].fromPin",
-            maximum=32,
-        )
-        target = _string(item.get("to"), f"connections[{index}].to", maximum=40)
-        target_pin = _string(
-            item.get("toPin"),
-            f"connections[{index}].toPin",
-            maximum=32,
-        )
-        if source not in by_id or target not in by_id:
-            raise GraphEditError(
-                "graph-edit-node-reference-unknown",
-                f"Connection references an unknown tempId: {source} -> {target}.",
+        has_from_existing = "fromExisting" in item
+        has_to_existing = "toExisting" in item
+
+        from_existing: dict[str, str] | None = None
+        to_existing: dict[str, str] | None = None
+        source: str | None = None
+        source_pin: str | None = None
+        target: str | None = None
+        target_pin: str | None = None
+
+        if has_from_existing and has_to_existing:
+            if any(key in item for key in ("from", "fromPin", "to", "toPin")):
+                raise GraphEditError(
+                    "graph-edit-existing-endpoint-conflict",
+                    "A pure existing-to-existing connection cannot carry temp-id endpoints.",
+                )
+            from_existing = _existing_pin(
+                item.get("fromExisting"),
+                f"connections[{index}].fromExisting",
             )
-        if source == target:
-            raise GraphEditError(
-                "graph-edit-self-connection",
-                "A node cannot connect to itself in this experimental slice.",
+            to_existing = _existing_pin(
+                item.get("toExisting"),
+                f"connections[{index}].toExisting",
             )
-        source_contract = NODE_TYPES[by_id[source]["nodeType"]]
-        target_contract = NODE_TYPES[by_id[target]["nodeType"]]
-        source_type = source_contract["outputPinTypes"].get(source_pin)
-        target_type = target_contract["inputPinTypes"].get(target_pin)
-        if source_type is None:
-            raise GraphEditError(
-                "graph-edit-pin-not-allowed",
-                f"{source_pin} is not a supported output pin of {by_id[source]['nodeType']}.",
+            if from_existing["direction"] != "output" or to_existing["direction"] != "input":
+                raise GraphEditError(
+                    "graph-edit-existing-pin-direction",
+                    "Pure existing connections require fromExisting=output and toExisting=input.",
+                )
+            if from_existing["nodeGuid"] == to_existing["nodeGuid"]:
+                raise GraphEditError(
+                    "graph-edit-self-connection",
+                    "The two existing endpoints must belong to different nodes.",
+                )
+            source_type = _existing_pin_type_token(
+                from_existing["category"],
+                from_existing["subCategory"],
             )
-        if target_type is None:
-            raise GraphEditError(
-                "graph-edit-pin-not-allowed",
-                f"{target_pin} is not a supported input pin of {by_id[target]['nodeType']}.",
+            target_type = _existing_pin_type_token(
+                to_existing["category"],
+                to_existing["subCategory"],
             )
+            if source_type != target_type:
+                raise GraphEditError(
+                    "graph-edit-pin-type-mismatch",
+                    f"Cannot connect existing {from_existing['pinName']} ({source_type}) to "
+                    f"existing {to_existing['pinName']} ({target_type}).",
+                )
+            target_key = f"existing:{to_existing['nodeGuid']}|{to_existing['pinGuid']}"
+            if target_key in seen_targets:
+                raise GraphEditError(
+                    "graph-edit-connection-duplicate",
+                    f"Input pin already has a connection in this plan: {target_key}.",
+                )
+            seen_targets.add(target_key)
+            normalized_connections.append(
+                {"fromExisting": from_existing, "toExisting": to_existing}
+            )
+            continue
+
+        if has_from_existing:
+            if "from" in item or "fromPin" in item:
+                raise GraphEditError(
+                    "graph-edit-existing-endpoint-conflict",
+                    "fromExisting cannot be combined with from/fromPin.",
+                )
+            from_existing = _existing_pin(
+                item.get("fromExisting"),
+                f"connections[{index}].fromExisting",
+            )
+            if from_existing["direction"] != "output":
+                raise GraphEditError(
+                    "graph-edit-existing-pin-direction",
+                    "fromExisting must be an output pin.",
+                )
+            target = _string(item.get("to"), f"connections[{index}].to", maximum=40)
+            target_pin = _string(
+                item.get("toPin"),
+                f"connections[{index}].toPin",
+                maximum=32,
+            )
+            if target not in by_id:
+                raise GraphEditError(
+                    "graph-edit-node-reference-unknown",
+                    f"Connection references an unknown tempId: {target}.",
+                )
+            target_contract = _node_contract(by_id[target])
+            if target_contract is None:
+                raise GraphEditError(
+                    "graph-edit-node-type-not-allowed",
+                    "A connection references a node without a declared pin contract.",
+                )
+            source_type = _existing_pin_type_token(
+                from_existing["category"],
+                from_existing["subCategory"],
+            )
+            target_type = target_contract["inputPinTypes"].get(target_pin)
+            if target_type is None:
+                raise GraphEditError(
+                    "graph-edit-pin-not-allowed",
+                    f"{target_pin} is not a supported input pin of {by_id[target]['nodeType']}.",
+                )
+        elif has_to_existing:
+            if "to" in item or "toPin" in item:
+                raise GraphEditError(
+                    "graph-edit-existing-endpoint-conflict",
+                    "toExisting cannot be combined with to/toPin.",
+                )
+            to_existing = _existing_pin(
+                item.get("toExisting"),
+                f"connections[{index}].toExisting",
+            )
+            if to_existing["direction"] != "input":
+                raise GraphEditError(
+                    "graph-edit-existing-pin-direction",
+                    "toExisting must be an input pin.",
+                )
+            source = _string(item.get("from"), f"connections[{index}].from", maximum=40)
+            source_pin = _string(
+                item.get("fromPin"),
+                f"connections[{index}].fromPin",
+                maximum=32,
+            )
+            if source not in by_id:
+                raise GraphEditError(
+                    "graph-edit-node-reference-unknown",
+                    f"Connection references an unknown tempId: {source}.",
+                )
+            source_contract = _node_contract(by_id[source])
+            if source_contract is None:
+                raise GraphEditError(
+                    "graph-edit-node-type-not-allowed",
+                    "A connection references a node without a declared pin contract.",
+                )
+            source_type = source_contract["outputPinTypes"].get(source_pin)
+            if source_type is None:
+                raise GraphEditError(
+                    "graph-edit-pin-not-allowed",
+                    f"{source_pin} is not a supported output pin of {by_id[source]['nodeType']}.",
+                )
+            target_type = _existing_pin_type_token(
+                to_existing["category"],
+                to_existing["subCategory"],
+            )
+        else:
+            source = _string(item.get("from"), f"connections[{index}].from", maximum=40)
+            source_pin = _string(
+                item.get("fromPin"),
+                f"connections[{index}].fromPin",
+                maximum=32,
+            )
+            target = _string(item.get("to"), f"connections[{index}].to", maximum=40)
+            target_pin = _string(
+                item.get("toPin"),
+                f"connections[{index}].toPin",
+                maximum=32,
+            )
+            if source not in by_id or target not in by_id:
+                raise GraphEditError(
+                    "graph-edit-node-reference-unknown",
+                    f"Connection references an unknown tempId: {source} -> {target}.",
+                )
+            if source == target:
+                raise GraphEditError(
+                    "graph-edit-self-connection",
+                    "A node cannot connect to itself in this experimental slice.",
+                )
+            source_contract = _node_contract(by_id[source])
+            target_contract = _node_contract(by_id[target])
+            if source_contract is None or target_contract is None:
+                raise GraphEditError(
+                    "graph-edit-node-type-not-allowed",
+                    "A connection references a node without a declared pin contract.",
+                )
+            source_type = source_contract["outputPinTypes"].get(source_pin)
+            target_type = target_contract["inputPinTypes"].get(target_pin)
+            if source_type is None:
+                raise GraphEditError(
+                    "graph-edit-pin-not-allowed",
+                    f"{source_pin} is not a supported output pin of {by_id[source]['nodeType']}.",
+                )
+            if target_type is None:
+                raise GraphEditError(
+                    "graph-edit-pin-not-allowed",
+                    f"{target_pin} is not a supported input pin of {by_id[target]['nodeType']}.",
+                )
+
         if source_type != target_type:
+            source_label = (
+                f"existing:{from_existing['nodeGuid']}/{from_existing['pinName']}"
+                if from_existing
+                else f"{source}.{source_pin}"
+            )
+            target_label = (
+                f"existing:{to_existing['nodeGuid']}/{to_existing['pinName']}"
+                if to_existing
+                else f"{target}.{target_pin}"
+            )
             raise GraphEditError(
                 "graph-edit-pin-type-mismatch",
-                f"Cannot connect {source}.{source_pin} ({source_type}) to "
-                f"{target}.{target_pin} ({target_type}); data kinds must match exactly.",
+                f"Cannot connect {source_label} ({source_type}) to "
+                f"{target_label} ({target_type}); data kinds must match exactly.",
             )
-        target_key = (target, target_pin)
+
+        if to_existing:
+            target_key = f"existing:{to_existing['nodeGuid']}|{to_existing['pinGuid']}"
+        else:
+            target_key = f"{target}|{target_pin}"
         if target_key in seen_targets:
             raise GraphEditError(
                 "graph-edit-connection-duplicate",
-                f"Input pin already has a connection in this plan: {target}.{target_pin}.",
+                f"Input pin already has a connection in this plan: {target_key}.",
             )
         seen_targets.add(target_key)
         for temp_id in (source, target):
+            if temp_id is None:
+                continue
             connection_counts[temp_id] = connection_counts.get(temp_id, 0) + 1
             if connection_counts[temp_id] > MAX_CONNECTIONS_PER_NODE:
                 raise GraphEditError(
                     "graph-edit-connection-limit",
                     f"{temp_id} would exceed the {MAX_CONNECTIONS_PER_NODE}-connection per-node limit.",
                 )
-        normalized_connections.append(
-            {
-                "from": source,
-                "fromPin": source_pin,
-                "to": target,
-                "toPin": target_pin,
-            }
+        normalized_connection: dict[str, Any] = {}
+        if from_existing is not None:
+            normalized_connection["fromExisting"] = from_existing
+        else:
+            normalized_connection["from"] = source
+            normalized_connection["fromPin"] = source_pin
+        if to_existing is not None:
+            normalized_connection["toExisting"] = to_existing
+        else:
+            normalized_connection["to"] = target
+            normalized_connection["toPin"] = target_pin
+        normalized_connections.append(normalized_connection)
+
+    pure_existing_count = sum(
+        1
+        for connection in normalized_connections
+        if "fromExisting" in connection and "toExisting" in connection
+    )
+    if not normalized_nodes and not normalized_connections:
+        raise GraphEditError(
+            "graph-edit-empty-plan",
+            "A graph edit plan must create at least one node or connect at least one existing edge.",
         )
+    if normalized_operation == "disconnect":
+        if (
+            pure_existing_count != 1
+            or normalized_nodes
+            or len(normalized_connections) != 1
+        ):
+            raise GraphEditError(
+                "graph-edit-disconnect-invalid-plan",
+                "A disconnect plan requires nodes=[] and exactly one existing-to-existing edge.",
+            )
+    else:
+        if pure_existing_count > 1:
+            raise GraphEditError(
+                "graph-edit-existing-to-existing-limit",
+                "A plan may add at most one existing-to-existing connection.",
+            )
+        if pure_existing_count == 1 and (
+            normalized_nodes or len(normalized_connections) != 1
+        ):
+            raise GraphEditError(
+                "graph-edit-existing-to-existing-plan",
+                "A pure existing-to-existing connection must be the only connection and requires nodes=[].",
+            )
+        if not normalized_nodes and pure_existing_count == 0:
+            raise GraphEditError(
+                "graph-edit-nodes-required",
+                "nodes may be empty only for one pure existing-to-existing connection.",
+            )
 
     request = {
         "assetPath": normalized_asset,
         "graphGuid": normalized_graph,
+        "operation": normalized_operation,
         "nodes": normalized_nodes,
         "connections": normalized_connections,
     }
@@ -337,6 +749,26 @@ def validate_preview_result(preview: Any) -> dict[str, Any]:
             "graph-edit-preview-invalid",
             "preview.assetPath and preview.graphGuid must be strings.",
         )
+    operation = item.get("operation", "connect")
+    if operation not in ("connect", "disconnect"):
+        raise GraphEditError(
+            "graph-edit-preview-invalid",
+            "preview.operation must be connect or disconnect.",
+        )
+    if operation == "disconnect" and item.get("disconnectCount") != 1:
+        raise GraphEditError(
+            "graph-edit-preview-invalid",
+            "preview.disconnectCount must be 1 for a disconnect preview.",
+        )
+    before_edge_set_hash = item.get("beforeEdgeSetHash")
+    if before_edge_set_hash is not None and (
+        not isinstance(before_edge_set_hash, str)
+        or not _SHA256.fullmatch(before_edge_set_hash)
+    ):
+        raise GraphEditError(
+            "graph-edit-preview-invalid",
+            "preview.beforeEdgeSetHash must be a sha256 hash when present.",
+        )
     nodes = item.get("nodes")
     connections = item.get("connections")
     if not isinstance(nodes, list) or not isinstance(connections, list):
@@ -363,7 +795,38 @@ def validate_preview_result(preview: Any) -> dict[str, Any]:
         node = _object(raw, f"preview.nodes[{index}]")
         position = _object(node.get("position"), f"preview.nodes[{index}].position")
         node_type = node.get("nodeType")
-        contract = NODE_TYPES.get(node_type) if isinstance(node_type, str) else None
+        contract = _node_contract(node) if isinstance(node_type, str) else None
+        normalized_node: dict[str, Any] = {
+            "tempId": node.get("tempId"),
+            "nodeType": node_type,
+            "x": position.get("x"),
+            "y": position.get("y"),
+        }
+        if node_type in VARIABLE_NODE_TYPES:
+            if contract is None:
+                raise GraphEditError(
+                    "graph-edit-preview-invalid",
+                    f"preview.nodes[{index}] has an invalid variable accessor declaration.",
+                )
+            if node.get("variableAccess") != VARIABLE_NODE_TYPES[node_type]["access"]:
+                raise GraphEditError(
+                    "graph-edit-preview-invalid",
+                    f"preview.nodes[{index}].variableAccess does not match nodeType {node_type}.",
+                )
+            normalized_node.update(
+                {
+                    "variableName": node.get("variableName"),
+                    "variableGuid": node.get("variableGuid"),
+                    "variableType": node.get("variableType"),
+                }
+            )
+        elif any(
+            key in node for key in ("variableName", "variableGuid", "variableType")
+        ):
+            raise GraphEditError(
+                "graph-edit-preview-invalid",
+                f"preview.nodes[{index}] nodeType {node_type} must not declare variable fields.",
+            )
         if contract is not None:
             for field in ("inputPins", "outputPins"):
                 declared = node.get(field)
@@ -378,37 +841,107 @@ def validate_preview_result(preview: Any) -> dict[str, Any]:
                         "graph-edit-preview-invalid",
                         f"preview.nodes[{index}].{field} does not match nodeType {node_type}.",
                     )
-        normalized.append(
-            {
-                "tempId": node.get("tempId"),
-                "nodeType": node_type,
-                "x": position.get("x"),
-                "y": position.get("y"),
-            }
-        )
+        normalized.append(normalized_node)
     normalized_connections = []
     for index, raw in enumerate(connections):
         connection = _object(raw, f"preview.connections[{index}]")
-        source_node = next(
-            (node for node in nodes if node.get("tempId") == connection.get("from")),
-            None,
+        _reject_unknown(
+            connection,
+            {
+                "from",
+                "fromPin",
+                "to",
+                "toPin",
+                "fromExisting",
+                "toExisting",
+                "fromType",
+                "toType",
+            },
+            f"preview.connections[{index}]",
         )
-        target_node = next(
-            (node for node in nodes if node.get("tempId") == connection.get("to")),
-            None,
+        has_from_existing = "fromExisting" in connection
+        has_to_existing = "toExisting" in connection
+        from_existing = (
+            _existing_pin(
+                connection.get("fromExisting"),
+                f"preview.connections[{index}].fromExisting",
+            )
+            if has_from_existing
+            else None
+        )
+        to_existing = (
+            _existing_pin(
+                connection.get("toExisting"),
+                f"preview.connections[{index}].toExisting",
+            )
+            if has_to_existing
+            else None
+        )
+        if (
+            from_existing is not None
+            and to_existing is not None
+            and from_existing["nodeGuid"] == to_existing["nodeGuid"]
+        ):
+            raise GraphEditError(
+                "graph-edit-preview-invalid",
+                f"preview.connections[{index}] has two endpoints on one node.",
+            )
+        if from_existing is not None and from_existing["direction"] != "output":
+            raise GraphEditError(
+                "graph-edit-preview-invalid",
+                f"preview.connections[{index}].fromExisting must be an output pin.",
+            )
+        if to_existing is not None and to_existing["direction"] != "input":
+            raise GraphEditError(
+                "graph-edit-preview-invalid",
+                f"preview.connections[{index}].toExisting must be an input pin.",
+            )
+        source_node = (
+            None
+            if from_existing is not None
+            else next(
+                (node for node in nodes if node.get("tempId") == connection.get("from")),
+                None,
+            )
+        )
+        target_node = (
+            None
+            if to_existing is not None
+            else next(
+                (node for node in nodes if node.get("tempId") == connection.get("to")),
+                None,
+            )
         )
         source_contract = (
-            NODE_TYPES.get(source_node.get("nodeType"), {})
-            if isinstance(source_node, dict)
-            else {}
+            _node_contract(source_node) if isinstance(source_node, dict) else None
         )
         target_contract = (
-            NODE_TYPES.get(target_node.get("nodeType"), {})
-            if isinstance(target_node, dict)
-            else {}
+            _node_contract(target_node) if isinstance(target_node, dict) else None
         )
-        expected_from_type = source_contract.get("outputPinTypes", {}).get(connection.get("fromPin"))
-        expected_to_type = target_contract.get("inputPinTypes", {}).get(connection.get("toPin"))
+        expected_from_type = (
+            _existing_pin_type_token(
+                from_existing["category"],
+                from_existing["subCategory"],
+            )
+            if from_existing is not None
+            else (
+                source_contract.get("outputPinTypes", {}).get(connection.get("fromPin"))
+                if source_contract is not None
+                else None
+            )
+        )
+        expected_to_type = (
+            _existing_pin_type_token(
+                to_existing["category"],
+                to_existing["subCategory"],
+            )
+            if to_existing is not None
+            else (
+                target_contract.get("inputPinTypes", {}).get(connection.get("toPin"))
+                if target_contract is not None
+                else None
+            )
+        )
         if (
             expected_from_type is None
             or expected_to_type is None
@@ -419,19 +952,24 @@ def validate_preview_result(preview: Any) -> dict[str, Any]:
                 "graph-edit-preview-invalid",
                 f"preview.connections[{index}] does not declare the exact pin types.",
             )
-        normalized_connections.append(
-            {
-                "from": connection.get("from"),
-                "fromPin": connection.get("fromPin"),
-                "to": connection.get("to"),
-                "toPin": connection.get("toPin"),
-            }
-        )
+        normalized_connection: dict[str, Any] = {}
+        if from_existing is not None:
+            normalized_connection["fromExisting"] = from_existing
+        else:
+            normalized_connection["from"] = connection.get("from")
+            normalized_connection["fromPin"] = connection.get("fromPin")
+        if to_existing is not None:
+            normalized_connection["toExisting"] = to_existing
+        else:
+            normalized_connection["to"] = connection.get("to")
+            normalized_connection["toPin"] = connection.get("toPin")
+        normalized_connections.append(normalized_connection)
     return validate_preview_parameters(
         asset_path=asset_path,
         graph_guid=graph_guid,
         nodes=normalized,
         connections=normalized_connections,
+        operation=operation,
     ) | {
         "planId": plan_id,
         "confirmation": expected_confirmation,
@@ -453,6 +991,7 @@ def build_apply_parameters(preview: Any, confirmation: Any) -> dict[str, Any]:
     return {
         "assetPath": normalized["assetPath"],
         "graphGuid": normalized["graphGuid"],
+        "operation": normalized["operation"],
         "nodes": normalized["nodes"],
         "connections": normalized["connections"],
         "planId": normalized["planId"],
