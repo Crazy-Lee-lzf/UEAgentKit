@@ -63,6 +63,8 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_get_dirty_assets", "live-read", "read", "editor.getDirtyAssets"),
     ToolDefinition("ue_get_current_level", "live-read", "read", "editor.getCurrentLevel"),
     ToolDefinition("ue_get_pie_state", "live-read", "read", "editor.getPieState"),
+    ToolDefinition("ue_get_pie_world_contexts", "live-read", "read", "editor.getPieWorldContexts"),
+    ToolDefinition("ue_inspect_pie_actor", "live-read", "read", "editor.inspectPieActor"),
     ToolDefinition("ue_get_output_log", "live-read", "read", "editor.getOutputLog"),
     ToolDefinition("ue_get_compile_errors", "live-read", "read", "editor.getCompileErrors"),
     ToolDefinition("ue_inspect_asset_live", "live-read", "read", "editor.inspectAssetLive"),
