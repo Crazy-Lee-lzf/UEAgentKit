@@ -24,7 +24,6 @@ Unreal or writes an asset.
 from __future__ import annotations
 
 import copy
-import hashlib
 from typing import Any, Mapping
 
 from . import ids, typed_graph

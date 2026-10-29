@@ -84,12 +84,28 @@ private:
 	TSharedRef<FJsonObject> BuildDirtyAssetsResult() const;
 	TSharedRef<FJsonObject> BuildCurrentLevelResult() const;
 	TSharedRef<FJsonObject> BuildPieStateResult() const;
+	TSharedRef<FJsonObject> BuildPieWorldContextsResult(const TSharedPtr<FJsonObject>& Params) const;
+	bool TryInspectPieActorResult(
+		const TSharedPtr<FJsonObject>& Params,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage) const;
+	bool TryReadPieScalarsResult(
+		const TSharedPtr<FJsonObject>& Params,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage) const;
 	TSharedRef<FJsonObject> BuildOutputLogResult(const TSharedPtr<FJsonObject>& Params) const;
 	TSharedRef<FJsonObject> BuildCompileErrorsResult(const TSharedPtr<FJsonObject>& Params) const;
 	TSharedRef<FJsonObject> BuildInspectAssetLiveResult(const FString& AssetPath) const;
 	TSharedRef<FJsonObject> BuildBlueprintGraphSelectionResult() const;
 	TSharedRef<FJsonObject> BuildBlueprintGraphLayoutPreflightResult() const;
 	TSharedRef<FJsonObject> BuildFocusedBlueprintGraphContextResult() const;
+	bool TryBuildBlueprintGraphLayoutProjectionResult(
+		const TSharedPtr<FJsonObject>& Params,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage) const;
 	bool TryBuildBlueprintGraphLayoutApplyTestOnlyResult(
 		const TSharedPtr<FJsonObject>& Params,
 		TSharedPtr<FJsonObject>& OutResult,
@@ -126,6 +142,17 @@ private:
 	bool TryOpenAssetResult(const FString& AssetPath, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
 	bool TryPrepareAssetForDiskRollbackResult(const FString& AssetPath, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
 	bool TryFocusAssetResult(const FString& AssetPath, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
+	/**
+	 * Open (if needed) and focus one exact Blueprint graph so the bounded live
+	 * write tools get the focused Blueprint Editor + focused graph they require.
+	 * An empty GraphGuid selects the Blueprint's first top-level event graph.
+	 */
+	bool TryFocusBlueprintGraphResult(
+		const FString& AssetPath,
+		const FString& GraphGuidText,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage) const;
 	bool TrySyncContentBrowserResult(const FString& AssetPath, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
 	bool TryFocusActorResult(const FString& ActorGuid, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;
 	bool TryCompileBlueprintResult(const FString& AssetPath, TSharedPtr<FJsonObject>& OutResult, FString& OutErrorCode, FString& OutErrorMessage) const;

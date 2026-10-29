@@ -12,14 +12,15 @@ from typing import Iterable
 from jsonschema import Draft202012Validator
 
 ROOT = Path(__file__).resolve().parents[1]
-SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
+SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(?:\.(?:dev|a|b|rc)\d+)?$")
+PUBLISHED_VERSION = "0.8.0"
 
 
 def project_version() -> str:
     data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     version = data.get("project", {}).get("version")
     if not isinstance(version, str) or SEMVER_RE.fullmatch(version) is None:
-        raise ValueError("pyproject.toml project.version must be semantic x.y.z form")
+        raise ValueError("pyproject.toml project.version must be a PEP 440 version")
     return version
 
 
@@ -37,7 +38,7 @@ def _expect_text(issues: list[str], path: Path, needle: str, label: str) -> None
 def _version_fields(path: Path, field_name: str) -> list[str]:
     text = path.read_text(encoding="utf-8")
     pattern = re.compile(
-        rf'SetStringField\(TEXT\("{re.escape(field_name)}"\),\s*(?:TEXT\()?"([0-9]+\.[0-9]+\.[0-9]+)"\)?\)'
+        rf'SetStringField\(TEXT\("{re.escape(field_name)}"\),\s*(?:TEXT\()?"([0-9]+\.[0-9]+\.[0-9]+(?:\.(?:dev|a|b|rc)[0-9]+)?)"\)?\)'
     )
     return pattern.findall(text)
 
@@ -77,7 +78,7 @@ def validate_version_sources(expected_version: str | None = None, *, require_rel
     _expect_text(
         issues,
         ROOT / "src/ue_agent_kit/workflow_common.py",
-        f'PUBLISHED_VERSION = "{version}"',
+        f'PUBLISHED_VERSION = "{PUBLISHED_VERSION}"',
         "workflow published version",
     )
     _expect_text(
@@ -105,26 +106,27 @@ def validate_version_sources(expected_version: str | None = None, *, require_rel
         elif any(value != version for value in values):
             issues.append(f"{relative}: inconsistent {field_name} values {values!r}, expected {version}")
 
-    _expect_text(issues, ROOT / "README.md", f"当前已发布版本为 **{version}**", "README published version")
+    _expect_text(issues, ROOT / "README.md", f"当前已发布版本为 **{PUBLISHED_VERSION}**", "README published version")
     _expect_text(
         issues,
         ROOT / "README_EN.md",
-        f"The latest published release is **{version}**",
+        f"The latest published release is **{PUBLISHED_VERSION}**",
         "README_EN published version",
     )
-    _expect_text(issues, ROOT / "docs/ROADMAP.md", f"当前已发布版本为 **{version}**", "roadmap version")
+    _expect_text(issues, ROOT / "docs/ROADMAP.md", f"当前已发布版本为 **{PUBLISHED_VERSION}**", "roadmap version")
     _expect_text(
         issues,
         ROOT / "docs/ROADMAP_EN.md",
-        f"The latest published release is **{version}**",
+        f"The latest published release is **{PUBLISHED_VERSION}**",
         "roadmap EN version",
     )
     _expect_text(issues, ROOT / "CHANGELOG.md", f"## {version} ", "changelog release heading")
 
     if require_release_docs:
+        release_stem = f"RELEASE_{version.split('.dev')[0]}_PREVIEW" if ".dev" in version else f"RELEASE_{version}"
         release_files = [
-            ROOT / "docs" / f"RELEASE_{version}.md",
-            ROOT / "docs" / f"RELEASE_{version}_EN.md",
+            ROOT / "docs" / f"{release_stem}.md",
+            ROOT / "docs" / f"{release_stem}_EN.md",
         ]
         for path in release_files:
             if not path.is_file():
@@ -132,13 +134,13 @@ def validate_version_sources(expected_version: str | None = None, *, require_rel
         _expect_text(
             issues,
             ROOT / "docs/README.md",
-            f"RELEASE_{version}.md",
+            f"{release_stem}.md",
             "documentation index release link",
         )
         _expect_text(
             issues,
             ROOT / "docs/README.md",
-            f"RELEASE_{version}_EN.md",
+            f"{release_stem}_EN.md",
             "documentation index English release link",
         )
     return issues

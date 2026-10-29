@@ -1,0 +1,450 @@
+{
+  "schemaVersion": "1.1",
+  "exporterVersion": "0.8.0",
+  "engineVersion": "5.6.1",
+  "projectName": "UEAgentKitTests",
+  "profile": "asset-index",
+  "assetPath": "/Game/UEAgentKitTests/Maps/L_Smoke.L_Smoke",
+  "packageName": "/Game/UEAgentKitTests/Maps/L_Smoke",
+  "assetName": "L_Smoke",
+  "assetClass": "/Script/Engine.World",
+  "blueprintType": "",
+  "parentClass": "",
+  "generatedClass": "",
+  "skeletonGeneratedClass": "",
+  "status": 0,
+  "revision": {
+    "strategy": "package-sha256-v1",
+    "value": "sha256:9f2c1d7b4e5a60718c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d",
+    "packageGuid": "3f1a9c62-77b4-4d21-9a10-5c8e4b7f2d33",
+    "fileSize": 48213,
+    "modifiedUtc": "2026-10-24T08:31:07.412Z",
+    "contentSha256": "9f2c1d7b4e5a60718c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d",
+    "packageDirty": false
+  },
+  "assetRegistry": {
+    "assetName": "L_Smoke",
+    "packageName": "/Game/UEAgentKitTests/Maps/L_Smoke",
+    "packagePath": "/Game/UEAgentKitTests/Maps",
+    "assetClassPath": "/Script/Engine.World",
+    "packageFlags": 0,
+    "redirector": false,
+    "chunkIds": [],
+    "tags": {}
+  },
+  "assetReader": "world-v1",
+  "assetReaderStatus": "success",
+  "assetReaderError": "",
+  "assetDetails": {
+    "type": "world",
+    "readerVersion": 1,
+    "worldType": "Map",
+    "persistentLevelPath": "/Game/UEAgentKitTests/Maps/L_Smoke.L_Smoke:PersistentLevel",
+    "persistentLevelPackage": "/Game/UEAgentKitTests/Maps/L_Smoke",
+    "usingExternalActors": true,
+    "loadedActorCount": 5,
+    "exportedActorCount": 5,
+    "actorListTruncated": false,
+    "componentCount": 7,
+    "actorClassCounts": [
+      { "classPath": "/Game/UEAgentKitTests/BP_Torch.BP_Torch_C", "count": 1 },
+      { "classPath": "/Script/Engine.PlayerStart", "count": 1 },
+      { "classPath": "/Script/Engine.PointLight", "count": 1 },
+      { "classPath": "/Script/Engine.StaticMeshActor", "count": 1 },
+      { "classPath": "/Script/Engine.WorldSettings", "count": 1 }
+    ],
+    "componentClassCounts": [
+      { "classPath": "/Script/Engine.BillboardComponent", "count": 1 },
+      { "classPath": "/Script/Engine.CapsuleComponent", "count": 1 },
+      { "classPath": "/Script/Engine.PointLightComponent", "count": 2 },
+      { "classPath": "/Script/Engine.SphereComponent", "count": 1 },
+      { "classPath": "/Script/Engine.StaticMeshComponent", "count": 2 }
+    ],
+    "actors": [
+      {
+        "objectPath": "/Game/UEAgentKitTests/Maps/L_Smoke.L_Smoke:PersistentLevel.StaticMeshActor_1",
+        "name": "StaticMeshActor_1",
+        "label": "SM_Rock",
+        "guid": "a1000000-0000-4000-8000-000000000001",
+        "instanceGuid": "b1000000-0000-4000-8000-000000000001",
+        "folderPath": "Environment/Rocks",
+        "dataLayers": ["DL_World"],
+        "classPath": "/Script/Engine.StaticMeshActor",
+        "transform": {
+          "translation": { "x": 1200.5, "y": -300.25, "z": 88.0 },
+          "rotation": { "x": 0.0, "y": 0.0, "z": 0.3826834, "w": 0.9238795 },
+          "scale": { "x": 1.5, "y": 1.5, "z": 1.5 }
+        },
+        "tags": ["Environment", "Rock"],
+        "runtimeGrid": "",
+        "spatiallyLoaded": true,
+        "editorOnly": false,
+        "replicated": false,
+        "hidden": false,
+        "collisionEnabled": true,
+        "attachParentPath": "",
+        "rootComponentPath": "/Game/UEAgentKitTests/Maps/L_Smoke.L_Smoke:PersistentLevel.StaticMeshActor_1.StaticMeshComponent0",
+        "rootComponentClassPath": "/Script/Engine.StaticMeshComponent",
+        "rootMobility": "Static",
+        "rootMobilityValue": 0,
+        "componentCount": 2,
+        "componentClasses": [
+          { "classPath": "/Script/Engine.BillboardComponent", "count": 1 },
+          { "classPath": "/Script/Engine.StaticMeshComponent", "count": 1 }
+        ]
+      },
+      {
+        "objectPath": "/Game/UEAgentKitTests/Maps/L_Smoke.L_Smoke:PersistentLevel.PointLight_2",
+        "name": "PointLight_2",
+        "label": "PointLight_Night",
+        "guid": "a1000000-0000-4000-8000-000000000002",
+        "instanceGuid": "b1000000-0000-4000-8000-000000000002",
+        "folderPath": "Lighting",
+        "dataLayers": ["DL_Night"],
+        "classPath": "/Script/Engine.PointLight",
+        "transform": {
+          "translation": { "x": 0.0, "y": 0.0, "z": 420.0 },
+          "rotation": { "x": 0.0, "y": -0.7071068, "z": 0.0, "w": 0.7071068 },
+          "scale": { "x": 1.0, "y": 1.0, "z": 1.0 }
+        },
+        "tags": ["Lighting"],
+        "runtimeGrid": "",
+        "spatiallyLoaded": true,
+        "editorOnly": false,
+        "replicated": false,
+        "hidden": false,
+        "collisionEnabled": false,
+        "attachParentPath": "",
+        "rootComponentPath": "/Game/UEAgentKitTests/Maps/L_Smoke.L_Smoke:PersistentLevel.PointLight_2.LightComponent0",
+        "rootComponentClassPath": "/Script/Engine.PointLightComponent",
+        "rootMobility": "Stationary",
+        "rootMobilityValue": 1,
+        "componentCount": 1,
+        "componentClasses": [
+          { "classPath": "/Script/Engine.PointLightComponent", "count": 1 }
+        ]
+      },
+      {
+        "objectPath": "/Game/UEAgentKitTests/Maps/L_Smoke.L_Smoke:PersistentLevel.WorldSettings",
+        "name": "WorldSettings",
+        "label": "WorldSettings",
+        "guid": "a1000000-0000-4000-8000-000000000003",
+        "instanceGuid": "b1000000-0000-4000-8000-000000000003",
+        "folderPath": "",
+        "dataLayers": [],
+        "classPath": "/Script/Engine.WorldSettings",
+        "transform": {
+          "translation": { "x": 0.0, "y": 0.0, "z": 0.0 },
+          "rotation": { "x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0 },
+          "scale": { "x": 1.0, "y": 1.0, "z": 1.0 }
+        },
+        "tags": [],
+        "runtimeGrid": "",
+        "spatiallyLoaded": false,
+        "editorOnly": false,
+        "replicated": false,
+        "hidden": true,
+        "collisionEnabled": false,
+        "attachParentPath": "",
+        "rootComponentPath": "",
+        "rootComponentClassPath": "",
+        "rootMobility": "",
+        "rootMobilityValue": -1,
+        "componentCount": 0,
+        "componentClasses": []
+      },
+      {
+        "objectPath": "/Game/UEAgentKitTests/Maps/L_Smoke.L_Smoke:PersistentLevel.BP_Torch_C_4",
+        "name": "BP_Torch_C_4",
+        "label": "BP_Torch_Hallway",
+        "guid": "a1000000-0000-4000-8000-000000000004",
+        "instanceGuid": "b1000000-0000-4000-8000-000000000004",
+        "folderPath": "Lighting/Torches",
+        "dataLayers": ["DL_Night", "DL_World"],
+        "classPath": "/Game/UEAgentKitTests/BP_Torch.BP_Torch_C",
+        "transform": {
+          "translation": { "x": -640.0, "y": 256.75, "z": 210.0 },
+          "rotation": { "x": 0.0, "y": 0.0, "z": 0.7071068, "w": 0.7071068 },
+          "scale": { "x": 1.0, "y": 1.0, "z": 1.0 }
+        },
+        "tags": ["Gameplay", "Lighting"],
+        "runtimeGrid": "",
+        "spatiallyLoaded": true,
+        "editorOnly": false,
+        "replicated": true,
+        "hidden": false,
+        "collisionEnabled": true,
+        "attachParentPath": "",
+        "rootComponentPath": "/Game/UEAgentKitTests/Maps/L_Smoke.L_Smoke:PersistentLevel.BP_Torch_C_4.Sphere",
+        "rootComponentClassPath": "/Script/Engine.SphereComponent",
+        "rootMobility": "Movable",
+        "rootMobilityValue": 2,
+        "componentCount": 3,
+        "componentClasses": [
+          { "classPath": "/Script/Engine.PointLightComponent", "count": 1 },
+          { "classPath": "/Script/Engine.SphereComponent", "count": 1 },
+          { "classPath": "/Script/Engine.StaticMeshComponent", "count": 1 }
+        ]
+      },
+      {
+        "objectPath": "/Game/UEAgentKitTests/Maps/L_Smoke.L_Smoke:PersistentLevel.PlayerStart_5",
+        "name": "PlayerStart_5",
+        "label": "PlayerStart",
+        "guid": "a1000000-0000-4000-8000-000000000005",
+        "instanceGuid": "b1000000-0000-4000-8000-000000000005",
+        "folderPath": "Gameplay",
+        "dataLayers": [],
+        "classPath": "/Script/Engine.PlayerStart",
+        "transform": {
+          "translation": { "x": 64.0, "y": 0.0, "z": 96.0 },
+          "rotation": { "x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0 },
+          "scale": { "x": 1.0, "y": 1.0, "z": 1.0 }
+        },
+        "tags": ["Gameplay"],
+        "runtimeGrid": "",
+        "spatiallyLoaded": false,
+        "editorOnly": false,
+        "replicated": false,
+        "hidden": false,
+        "collisionEnabled": true,
+        "attachParentPath": "",
+        "rootComponentPath": "/Game/UEAgentKitTests/Maps/L_Smoke.L_Smoke:PersistentLevel.PlayerStart_5.CapsuleComponent",
+        "rootComponentClassPath": "/Script/Engine.CapsuleComponent",
+        "rootMobility": "Static",
+        "rootMobilityValue": 0,
+        "componentCount": 1,
+        "componentClasses": [
+          { "classPath": "/Script/Engine.CapsuleComponent", "count": 1 }
+        ]
+      }
+    ],
+    "streamingLevelCount": 1,
+    "streamingLevels": [
+      {
+        "objectPath": "/Game/UEAgentKitTests/Maps/L_Smoke.L_Smoke:PersistentLevel.LevelStreamingSublevel_0",
+        "classPath": "/Script/Engine.LevelStreamingDynamic",
+        "worldAssetPackage": "/Game/UEAgentKitTests/Maps/L_Smoke_Sub",
+        "levelTransform": {
+          "translation": { "x": 0.0, "y": 0.0, "z": 0.0 },
+          "rotation": { "x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0 },
+          "scale": { "x": 1.0, "y": 1.0, "z": 1.0 }
+        },
+        "shouldBeLoaded": true,
+        "shouldBeVisible": true,
+        "visibleInEditor": true,
+        "alwaysLoaded": false,
+        "loaded": true,
+        "visible": true,
+        "loadedLevelPath": "/Game/UEAgentKitTests/Maps/L_Smoke.L_Smoke:PersistentLevel.LevelStreamingSublevel_0",
+        "lodIndex": 0
+      }
+    ],
+    "worldSettings": {
+      "available": true,
+      "objectPath": "/Game/UEAgentKitTests/Maps/L_Smoke.L_Smoke:PersistentLevel.WorldSettings",
+      "classPath": "/Script/Engine.WorldSettings",
+      "defaultGameModeClassPath": "/Script/UEAgentKitTests.SmokeGameMode",
+      "killZ": -1048576.0,
+      "killZDamageTypeClassPath": "",
+      "gravityZ": -980.0,
+      "worldToMeters": 100.0,
+      "worldBoundsChecks": true,
+      "navigationSystemEnabled": true,
+      "aiSystemEnabled": true
+    },
+    "worldPartition": {
+      "available": true,
+      "objectPath": "/Game/UEAgentKitTests/Maps/L_Smoke.L_Smoke:PersistentLevel.WorldPartition",
+      "classPath": "/Script/Engine.WorldPartition",
+      "supportsStreaming": true,
+      "streamingEnabled": true,
+      "canStream": true,
+      "runtimeHashClassPath": "/Script/Engine.WorldPartitionRuntimeHashSet",
+      "worldDataLayersPath": "/Game/UEAgentKitTests/Maps/L_Smoke.L_Smoke:PersistentLevel.WorldDataLayers",
+      "actorDescMetadataAvailable": true,
+      "actorDescCount": 3,
+      "exportedActorDescCount": 3,
+      "actorDescListTruncated": false,
+      "actorDescClassCounts": [
+        { "classPath": "/Game/UEAgentKitTests/BP_Torch.BP_Torch_C", "count": 1 },
+        { "classPath": "/Script/Engine.PointLight", "count": 1 },
+        { "classPath": "/Script/Engine.StaticMeshActor", "count": 1 }
+      ],
+      "actorDescs": [
+        {
+          "guid": "c1000000-0000-4000-8000-000000000001",
+          "actorPath": "/Game/UEAgentKitTests/Maps/L_Smoke.L_Smoke:PersistentLevel.StaticMeshActor_1",
+          "actorPackage": "/Game/UEAgentKitTests/Maps/L_Smoke",
+          "name": "StaticMeshActor_1",
+          "label": "SM_Rock",
+          "baseClassPath": "/Script/Engine.StaticMeshActor",
+          "nativeClassPath": "/Script/Engine.StaticMeshActor",
+          "folderPath": "Environment/Rocks",
+          "transform": {
+            "translation": { "x": 1200.5, "y": -300.25, "z": 88.0 },
+            "rotation": { "x": 0.0, "y": 0.0, "z": 0.3826834, "w": 0.9238795 },
+            "scale": { "x": 1.5, "y": 1.5, "z": 1.5 }
+          },
+          "editorBounds": {
+            "valid": true,
+            "min": { "x": 1050.0, "y": -450.5, "z": 0.0 },
+            "max": { "x": 1350.0, "y": -150.0, "z": 176.0 },
+            "center": { "x": 1200.0, "y": -300.25, "z": 88.0 },
+            "size": { "x": 300.0, "y": 300.5, "z": 176.0 }
+          },
+          "runtimeBounds": {
+            "valid": true,
+            "min": { "x": 1050.0, "y": -450.5, "z": 0.0 },
+            "max": { "x": 1350.0, "y": -150.0, "z": 176.0 },
+            "center": { "x": 1200.0, "y": -300.25, "z": 88.0 },
+            "size": { "x": 300.0, "y": 300.5, "z": 176.0 }
+          },
+          "runtimeGrid": "",
+          "spatiallyLoaded": true,
+          "editorOnly": false,
+          "runtimeOnly": false,
+          "runtimeRelevant": true,
+          "editorRelevant": true,
+          "loaded": true,
+          "tags": ["Environment"],
+          "dataLayersResolved": true,
+          "dataLayers": ["DL_World"]
+        },
+        {
+          "guid": "c1000000-0000-4000-8000-000000000002",
+          "actorPath": "/Game/UEAgentKitTests/Maps/L_Smoke.L_Smoke:PersistentLevel.PointLight_2",
+          "actorPackage": "/Game/UEAgentKitTests/Maps/L_Smoke",
+          "name": "PointLight_2",
+          "label": "PointLight_Night",
+          "baseClassPath": "/Script/Engine.PointLight",
+          "nativeClassPath": "/Script/Engine.PointLight",
+          "folderPath": "Lighting",
+          "transform": {
+            "translation": { "x": 0.0, "y": 0.0, "z": 420.0 },
+            "rotation": { "x": 0.0, "y": -0.7071068, "z": 0.0, "w": 0.7071068 },
+            "scale": { "x": 1.0, "y": 1.0, "z": 1.0 }
+          },
+          "editorBounds": {
+            "valid": true,
+            "min": { "x": -64.0, "y": -64.0, "z": 356.0 },
+            "max": { "x": 64.0, "y": 64.0, "z": 484.0 },
+            "center": { "x": 0.0, "y": 0.0, "z": 420.0 },
+            "size": { "x": 128.0, "y": 128.0, "z": 128.0 }
+          },
+          "runtimeBounds": {
+            "valid": true,
+            "min": { "x": -64.0, "y": -64.0, "z": 356.0 },
+            "max": { "x": 64.0, "y": 64.0, "z": 484.0 },
+            "center": { "x": 0.0, "y": 0.0, "z": 420.0 },
+            "size": { "x": 128.0, "y": 128.0, "z": 128.0 }
+          },
+          "runtimeGrid": "",
+          "spatiallyLoaded": true,
+          "editorOnly": false,
+          "runtimeOnly": false,
+          "runtimeRelevant": true,
+          "editorRelevant": true,
+          "loaded": false,
+          "tags": ["Lighting"],
+          "dataLayersResolved": true,
+          "dataLayers": ["DL_Night"]
+        },
+        {
+          "guid": "c1000000-0000-4000-8000-000000000004",
+          "actorPath": "/Game/UEAgentKitTests/Maps/L_Smoke.L_Smoke:PersistentLevel.BP_Torch_C_4",
+          "actorPackage": "/Game/UEAgentKitTests/Maps/L_Smoke",
+          "name": "BP_Torch_C_4",
+          "label": "BP_Torch_Hallway",
+          "baseClassPath": "/Game/UEAgentKitTests/BP_Torch.BP_Torch_C",
+          "nativeClassPath": "/Script/Engine.Actor",
+          "folderPath": "Lighting/Torches",
+          "transform": {
+            "translation": { "x": -640.0, "y": 256.75, "z": 210.0 },
+            "rotation": { "x": 0.0, "y": 0.0, "z": 0.7071068, "w": 0.7071068 },
+            "scale": { "x": 1.0, "y": 1.0, "z": 1.0 }
+          },
+          "editorBounds": {
+            "valid": true,
+            "min": { "x": -688.0, "y": 208.75, "z": 162.0 },
+            "max": { "x": -592.0, "y": 304.75, "z": 258.0 },
+            "center": { "x": -640.0, "y": 256.75, "z": 210.0 },
+            "size": { "x": 96.0, "y": 96.0, "z": 96.0 }
+          },
+          "runtimeBounds": {
+            "valid": true,
+            "min": { "x": -688.0, "y": 208.75, "z": 162.0 },
+            "max": { "x": -592.0, "y": 304.75, "z": 258.0 },
+            "center": { "x": -640.0, "y": 256.75, "z": 210.0 },
+            "size": { "x": 96.0, "y": 96.0, "z": 96.0 }
+          },
+          "runtimeGrid": "",
+          "spatiallyLoaded": true,
+          "editorOnly": false,
+          "runtimeOnly": false,
+          "runtimeRelevant": true,
+          "editorRelevant": true,
+          "loaded": true,
+          "tags": ["Gameplay", "Lighting"],
+          "dataLayersResolved": true,
+          "dataLayers": ["DL_Night", "DL_World"]
+        }
+      ]
+    }
+  },
+  "symbols": [
+    {
+      "id": "asset|/Game/UEAgentKitTests/Maps/L_Smoke.L_Smoke",
+      "kind": "asset",
+      "name": "L_Smoke",
+      "assetPath": "/Game/UEAgentKitTests/Maps/L_Smoke.L_Smoke",
+      "path": "/Game/UEAgentKitTests/Maps/L_Smoke.L_Smoke",
+      "class": "/Script/Engine.World",
+      "assetReader": "world-v1",
+      "assetReaderStatus": "success",
+      "assetDetails": {
+        "type": "world",
+        "readerVersion": 1,
+        "worldType": "Map",
+        "persistentLevelPath": "/Game/UEAgentKitTests/Maps/L_Smoke.L_Smoke:PersistentLevel",
+        "persistentLevelPackage": "/Game/UEAgentKitTests/Maps/L_Smoke",
+        "usingExternalActors": true,
+        "loadedActorCount": 5,
+        "exportedActorCount": 5,
+        "actorListTruncated": false,
+        "componentCount": 7,
+        "actorClassCounts": [
+          { "classPath": "/Game/UEAgentKitTests/BP_Torch.BP_Torch_C", "count": 1 },
+          { "classPath": "/Script/Engine.PlayerStart", "count": 1 },
+          { "classPath": "/Script/Engine.PointLight", "count": 1 },
+          { "classPath": "/Script/Engine.StaticMeshActor", "count": 1 },
+          { "classPath": "/Script/Engine.WorldSettings", "count": 1 }
+        ],
+        "componentClassCounts": [
+          { "classPath": "/Script/Engine.BillboardComponent", "count": 1 },
+          { "classPath": "/Script/Engine.CapsuleComponent", "count": 1 },
+          { "classPath": "/Script/Engine.PointLightComponent", "count": 2 },
+          { "classPath": "/Script/Engine.SphereComponent", "count": 1 },
+          { "classPath": "/Script/Engine.StaticMeshComponent", "count": 2 }
+        ]
+      }
+    }
+  ],
+  "interfaces": [],
+  "variables": [],
+  "components": [],
+  "functions": [],
+  "graphs": [],
+  "references": [],
+  "summary": {
+    "variables": 0,
+    "components": 0,
+    "graphs": 0,
+    "nodes": 0,
+    "pins": 0,
+    "links": 0,
+    "symbols": 1,
+    "references": 0,
+    "registryTags": 0,
+    "specializedDetails": 1
+  }
+}

@@ -1,0 +1,653 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ueagentkit.local/schemas/layoutbroker-response-1.0.schema.json",
+  "title": "UEAgentKit layout broker response v1.0",
+  "description": "Strict broker-to-editor response; token must never appear in either variant.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/success"
+    },
+    {
+      "$ref": "#/$defs/failure"
+    }
+  ],
+  "$defs": {
+    "success": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "ok",
+        "readOnly",
+        "algorithm",
+        "durationMs",
+        "result"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "ueak.layoutbroker/1.0"
+        },
+        "requestId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "ok": {
+          "const": true
+        },
+        "readOnly": {
+          "const": true
+        },
+        "algorithm": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "version"
+          ],
+          "properties": {
+            "id": {
+              "const": "p0-layered"
+            },
+            "version": {
+              "const": "1.0.0"
+            }
+          }
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6000
+        },
+        "result": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schemaVersion",
+            "readOnly",
+            "source",
+            "selectionPolicy",
+            "focusScope",
+            "assetPath",
+            "graphGuid",
+            "graphName",
+            "packageRevision",
+            "packageDirty",
+            "graphFingerprint",
+            "sessionId",
+            "pluginBuildHash",
+            "editable",
+            "mode",
+            "scopeNodeIds",
+            "planId",
+            "layoutHash",
+            "baseGraphHash",
+            "nodeCount",
+            "pinCount",
+            "edgeCount",
+            "commentCount",
+            "movedCount",
+            "movedNodeIds",
+            "positions",
+            "metrics",
+            "warnings",
+            "islands",
+            "sccs",
+            "plan",
+            "applyEligible",
+            "evidenceLevel",
+            "acceptanceEligible",
+            "requiredAcceptanceEvidence",
+            "openAssets",
+            "wroteBlueprint",
+            "savedPackage"
+          ],
+          "properties": {
+            "schemaVersion": {
+              "const": "ueak.graphlayoutpreview/1.0"
+            },
+            "readOnly": {
+              "const": true
+            },
+            "source": {
+              "const": "focused-blueprint-editor"
+            },
+            "selectionPolicy": {
+              "const": "most-recently-active-blueprint-editor"
+            },
+            "focusScope": {
+              "const": "toolkit-graph-tab"
+            },
+            "assetPath": {
+              "type": "string",
+              "pattern": "^/[^\\u0000-\\u001f\\u007f]*$"
+            },
+            "graphGuid": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            },
+            "graphName": {
+              "type": "string",
+              "minLength": 1
+            },
+            "packageRevision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "packageDirty": {
+              "const": false
+            },
+            "graphFingerprint": {
+              "type": "string",
+              "pattern": "^sha1:[0-9a-f]{40}$"
+            },
+            "sessionId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "pluginBuildHash": {
+              "type": "string",
+              "pattern": "^(?:[0-9a-f]{16}|sha256:[0-9a-f]{64})$"
+            },
+            "editable": {
+              "type": "boolean"
+            },
+            "mode": {
+              "const": "full"
+            },
+            "scopeNodeIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "planId": {
+              "type": "string",
+              "pattern": "^layout:[0-9a-f]{16}$"
+            },
+            "layoutHash": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "baseGraphHash": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "nodeCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "pinCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "edgeCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "commentCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "movedCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "movedNodeIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "positions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "nodeId",
+                  "nodeGuid",
+                  "kind",
+                  "beforeX",
+                  "beforeY",
+                  "afterX",
+                  "afterY",
+                  "deltaX",
+                  "deltaY",
+                  "width",
+                  "height"
+                ],
+                "properties": {
+                  "nodeId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "nodeGuid": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "beforeX": {
+                    "type": "integer"
+                  },
+                  "beforeY": {
+                    "type": "integer"
+                  },
+                  "afterX": {
+                    "type": "integer"
+                  },
+                  "afterY": {
+                    "type": "integer"
+                  },
+                  "deltaX": {
+                    "type": "integer"
+                  },
+                  "deltaY": {
+                    "type": "integer"
+                  },
+                  "width": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "height": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            },
+            "metrics": {
+              "type": "object",
+              "additionalProperties": true,
+              "required": [
+                "crossings",
+                "edgeLength",
+                "overlapCount",
+                "area",
+                "aspectRatio",
+                "bbox"
+              ],
+              "properties": {
+                "crossings": {
+                  "type": "integer"
+                },
+                "edgeLength": {
+                  "type": "integer"
+                },
+                "overlapCount": {
+                  "type": "integer"
+                },
+                "area": {
+                  "type": "integer"
+                },
+                "aspectRatio": {
+                  "type": "number"
+                },
+                "bbox": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "width",
+                    "height"
+                  ],
+                  "properties": {
+                    "width": {
+                      "type": "integer"
+                    },
+                    "height": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            },
+            "warnings": {
+              "type": "array"
+            },
+            "islands": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "sccs": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "plan": {
+              "type": "object",
+              "additionalProperties": true,
+              "required": [
+                "schemaVersion",
+                "planId",
+                "baseGraphHash",
+                "mode",
+                "seed",
+                "scopeNodeIds",
+                "fixedNodeIds",
+                "packing",
+                "positions",
+                "movedNodeIds",
+                "layoutHash",
+                "sizeBeforeHash",
+                "sizeAfterHash",
+                "status",
+                "errorCode",
+                "metrics",
+                "warnings",
+                "islands",
+                "sccs",
+                "timingMs",
+                "evidenceLevel",
+                "acceptanceEligible",
+                "requiredAcceptanceEvidence"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "ueak.layoutplan/1.0"
+                },
+                "planId": {
+                  "type": "string",
+                  "pattern": "^layout:[0-9a-f]{16}$"
+                },
+                "baseGraphHash": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                },
+                "mode": {
+                  "const": "full"
+                },
+                "seed": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "scopeNodeIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "fixedNodeIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "packing": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "targetWidth",
+                    "spacing",
+                    "algorithm"
+                  ],
+                  "properties": {
+                    "targetWidth": {
+                      "type": "integer",
+                      "minimum": 256
+                    },
+                    "spacing": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "algorithm": {
+                      "const": "skyline-v1"
+                    }
+                  }
+                },
+                "positions": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "nodeId",
+                      "x",
+                      "y"
+                    ],
+                    "properties": {
+                      "nodeId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "x": {
+                        "type": "integer"
+                      },
+                      "y": {
+                        "type": "integer"
+                      },
+                      "size": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "width",
+                          "height",
+                          "source"
+                        ],
+                        "properties": {
+                          "width": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "height": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "source": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "movedNodeIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "layoutHash": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                },
+                "sizeBeforeHash": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                },
+                "sizeAfterHash": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                },
+                "status": {
+                  "const": "ok"
+                },
+                "errorCode": {
+                  "const": ""
+                },
+                "metrics": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "crossings",
+                    "edgeLength",
+                    "overlapCount",
+                    "area",
+                    "aspectRatio",
+                    "bbox"
+                  ],
+                  "properties": {
+                    "crossings": {
+                      "type": "integer"
+                    },
+                    "edgeLength": {
+                      "type": "integer"
+                    },
+                    "overlapCount": {
+                      "type": "integer"
+                    },
+                    "area": {
+                      "type": "integer"
+                    },
+                    "aspectRatio": {
+                      "type": "number"
+                    },
+                    "bbox": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "width",
+                        "height"
+                      ],
+                      "properties": {
+                        "width": {
+                          "type": "integer"
+                        },
+                        "height": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                },
+                "warnings": {
+                  "type": "array"
+                },
+                "islands": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                },
+                "sccs": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "timingMs": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "evidenceLevel": {
+                  "const": "same-process"
+                },
+                "acceptanceEligible": {
+                  "const": false
+                },
+                "requiredAcceptanceEvidence": {
+                  "const": "independent-reload"
+                }
+              }
+            },
+            "applyEligible": {
+              "type": "boolean"
+            },
+            "evidenceLevel": {
+              "const": "same-process"
+            },
+            "acceptanceEligible": {
+              "const": false
+            },
+            "requiredAcceptanceEvidence": {
+              "const": "independent-reload"
+            },
+            "openAssets": {
+              "const": false
+            },
+            "wroteBlueprint": {
+              "const": false
+            },
+            "savedPackage": {
+              "const": false
+            }
+          }
+        }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "ok",
+        "error"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "ueak.layoutbroker/1.0"
+        },
+        "requestId": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ok": {
+          "const": false
+        },
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "message",
+            "retryable"
+          ],
+          "properties": {
+            "code": {
+              "enum": [
+                "native-preview-request-too-large",
+                "native-preview-request-invalid",
+                "native-preview-unsupported-field",
+                "native-preview-token-rejected",
+                "native-preview-project-mismatch",
+                "native-preview-version-unsupported",
+                "native-preview-identity-mismatch",
+                "native-preview-duplicate-request",
+                "native-preview-busy",
+                "native-preview-rate-limited",
+                "native-preview-timeout",
+                "native-preview-worker-failed",
+                "native-preview-response-too-large"
+              ]
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 400
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    }
+  }
+}

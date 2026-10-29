@@ -1,0 +1,100 @@
+{
+  "schemaVersion": "ueak.r1.cursor-vectors/1.0",
+  "keyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "nowUnix": 1760000100,
+  "tokenFormat": "v1.<base64url(canonical-json)>.<base64url(hmac-sha256[:16])>",
+  "payloadKeys": [
+    "v",
+    "k",
+    "q",
+    "s",
+    "e",
+    "o",
+    "n",
+    "p",
+    "iat",
+    "exp"
+  ],
+  "vectors": [
+    {
+      "id": "catalog-first",
+      "payload": {
+        "v": 1,
+        "k": "catalog",
+        "q": "sha256:1111111111111111",
+        "s": "sha256:2222222222222222",
+        "e": "sha256:3333333333333333",
+        "o": 0,
+        "n": 512,
+        "p": 64,
+        "iat": 1760000000,
+        "exp": 1760000900
+      },
+      "token": "v1.eyJlIjoic2hhMjU2OjMzMzMzMzMzMzMzMzMzMzMiLCJleHAiOjE3NjAwMDA5MDAsImlhdCI6MTc2MDAwMDAwMCwiayI6ImNhdGFsb2ciLCJuIjo1MTIsIm8iOjAsInAiOjY0LCJxIjoic2hhMjU2OjExMTExMTExMTExMTExMTEiLCJzIjoic2hhMjU2OjIyMjIyMjIyMjIyMjIyMjIiLCJ2IjoxfQ.MbCObQoYHZ85Cr6OOZCJDw"
+    },
+    {
+      "id": "catalog-last",
+      "payload": {
+        "v": 1,
+        "k": "catalog",
+        "q": "sha256:1111111111111111",
+        "s": "sha256:2222222222222222",
+        "e": "sha256:3333333333333333",
+        "o": 480,
+        "n": 512,
+        "p": 64,
+        "iat": 1760000000,
+        "exp": 1760000900
+      },
+      "token": "v1.eyJlIjoic2hhMjU2OjMzMzMzMzMzMzMzMzMzMzMiLCJleHAiOjE3NjAwMDA5MDAsImlhdCI6MTc2MDAwMDAwMCwiayI6ImNhdGFsb2ciLCJuIjo1MTIsIm8iOjQ4MCwicCI6NjQsInEiOiJzaGEyNTY6MTExMTExMTExMTExMTExMSIsInMiOiJzaGEyNTY6MjIyMjIyMjIyMjIyMjIyMiIsInYiOjF9.N41NraSIP_N4u0-Vupu-nA"
+    },
+    {
+      "id": "context-page",
+      "payload": {
+        "v": 1,
+        "k": "context",
+        "q": "sha256:4444444444444444",
+        "s": "sha256:2222222222222222",
+        "e": "sha256:3333333333333333",
+        "o": 64,
+        "n": 443,
+        "p": 32,
+        "iat": 1760000000,
+        "exp": 1760000900
+      },
+      "token": "v1.eyJlIjoic2hhMjU2OjMzMzMzMzMzMzMzMzMzMzMiLCJleHAiOjE3NjAwMDA5MDAsImlhdCI6MTc2MDAwMDAwMCwiayI6ImNvbnRleHQiLCJuIjo0NDMsIm8iOjY0LCJwIjozMiwicSI6InNoYTI1Njo0NDQ0NDQ0NDQ0NDQ0NDQ0IiwicyI6InNoYTI1NjoyMjIyMjIyMjIyMjIyMjIyIiwidiI6MX0.Zl-Ew2iCYTn7WMWybaVoDA"
+    },
+    {
+      "id": "empty",
+      "payload": {
+        "v": 1,
+        "k": "catalog",
+        "q": "sha256:1111111111111111",
+        "s": "sha256:2222222222222222",
+        "e": "sha256:3333333333333333",
+        "o": 0,
+        "n": 0,
+        "p": 32,
+        "iat": 1760000000,
+        "exp": 1760000900
+      },
+      "token": "v1.eyJlIjoic2hhMjU2OjMzMzMzMzMzMzMzMzMzMzMiLCJleHAiOjE3NjAwMDA5MDAsImlhdCI6MTc2MDAwMDAwMCwiayI6ImNhdGFsb2ciLCJuIjowLCJvIjowLCJwIjozMiwicSI6InNoYTI1NjoxMTExMTExMTExMTExMTExIiwicyI6InNoYTI1NjoyMjIyMjIyMjIyMjIyMjIyIiwidiI6MX0.v9W5rZT9QQXqAx9OklVDuA"
+    },
+    {
+      "id": "one",
+      "payload": {
+        "v": 1,
+        "k": "catalog",
+        "q": "sha256:1111111111111111",
+        "s": "sha256:2222222222222222",
+        "e": "sha256:3333333333333333",
+        "o": 0,
+        "n": 1,
+        "p": 1,
+        "iat": 1760000000,
+        "exp": 1760000900
+      },
+      "token": "v1.eyJlIjoic2hhMjU2OjMzMzMzMzMzMzMzMzMzMzMiLCJleHAiOjE3NjAwMDA5MDAsImlhdCI6MTc2MDAwMDAwMCwiayI6ImNhdGFsb2ciLCJuIjoxLCJvIjowLCJwIjoxLCJxIjoic2hhMjU2OjExMTExMTExMTExMTExMTEiLCJzIjoic2hhMjU2OjIyMjIyMjIyMjIyMjIyMjIiLCJ2IjoxfQ.dDiCztOobKIgZCeX1uJ5_g"
+    }
+  ]
+}

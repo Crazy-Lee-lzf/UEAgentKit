@@ -11,9 +11,14 @@ $ToolRoot = Get-UeakToolRoot
 $EngineRoot = Resolve-UeakEngineRoot -EngineRoot $EngineRoot
 $PythonExecutable = Resolve-UeakPythonExecutable -PythonExecutable $PythonExecutable
 $Version = (& $PythonExecutable -c "import tomllib; print(tomllib.load(open(r'$ToolRoot\pyproject.toml','rb'))['project']['version'])").Trim()
-if ($LASTEXITCODE -ne 0 -or $Version -notmatch '^\d+\.\d+\.\d+$')
+if ($LASTEXITCODE -ne 0 -or $Version -notmatch '^\d+\.\d+\.\d+(?:\.(?:dev|a|b|rc)\d+)?$')
 {
-    throw "Could not resolve a semantic project version."
+    throw "Could not resolve a PEP 440 project version."
+}
+$ReleaseDocStem = if ($Version -match '\.dev\d+$') {
+    "RELEASE_" + ($Version -replace '\.dev\d+$', '') + "_PREVIEW"
+} else {
+    "RELEASE_$Version"
 }
 
 $GitStatus = @(& git -C $ToolRoot status --porcelain)
@@ -39,7 +44,7 @@ if (!$OutputDirectory.StartsWith($AllowedPrefix, [StringComparison]::OrdinalIgno
 }
 if (Test-Path -LiteralPath $OutputDirectory)
 {
-    Remove-Item -LiteralPath $OutputDirectory -Recurse -Force
+    Remove-UeakSafeDirectory -Path $OutputDirectory -AllowedRoot $AllowedRoot
 }
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 
@@ -69,6 +74,8 @@ $BuildPlugin = Join-Path $ToolRoot "scripts\BuildPlugin.ps1"
     -PackageDirectory $PluginPackage `
     -TargetPlatforms Win64
 if ($LASTEXITCODE -ne 0) { throw "UE5.6 UAT plugin packaging failed." }
+# Check the entire generated package before inspecting or removing any item.
+Assert-UeakPlainTree -Path $PluginPackage
 
 $TransientPluginDirectories = @("Intermediate", "Saved", "DerivedDataCache", "HostProject")
 foreach ($DirectoryName in $TransientPluginDirectories)
@@ -76,7 +83,7 @@ foreach ($DirectoryName in $TransientPluginDirectories)
     $TransientPath = Join-Path $PluginPackage $DirectoryName
     if (Test-Path -LiteralPath $TransientPath)
     {
-        Remove-Item -LiteralPath $TransientPath -Recurse -Force
+        Remove-UeakSafeDirectory -Path $TransientPath -AllowedRoot $StagingRoot
     }
 }
 
@@ -86,7 +93,7 @@ $DebugSymbolFiles = @(
 )
 foreach ($DebugSymbolFile in $DebugSymbolFiles)
 {
-    Remove-Item -LiteralPath $DebugSymbolFile.FullName -Force
+    Remove-UeakSafeFile -Path $DebugSymbolFile.FullName -AllowedRoot $StagingRoot
 }
 if (@(Get-ChildItem -LiteralPath $PluginPackage -Recurse -File | Where-Object { $_.Extension -ieq ".pdb" }).Count -ne 0)
 {
@@ -94,8 +101,8 @@ if (@(Get-ChildItem -LiteralPath $PluginPackage -Recurse -File | Where-Object { 
 }
 
 Copy-Item -LiteralPath (Join-Path $ToolRoot "LICENSE") -Destination (Join-Path $PluginPackage "LICENSE") -Force
-Copy-Item -LiteralPath (Join-Path $ToolRoot "docs\RELEASE_$Version.md") -Destination (Join-Path $PluginPackage "RELEASE_NOTES.md") -Force
-Copy-Item -LiteralPath (Join-Path $ToolRoot "docs\RELEASE_${Version}_EN.md") -Destination (Join-Path $PluginPackage "RELEASE_NOTES_EN.md") -Force
+Copy-Item -LiteralPath (Join-Path $ToolRoot "docs\$ReleaseDocStem.md") -Destination (Join-Path $PluginPackage "RELEASE_NOTES.md") -Force
+Copy-Item -LiteralPath (Join-Path $ToolRoot "docs\${ReleaseDocStem}_EN.md") -Destination (Join-Path $PluginPackage "RELEASE_NOTES_EN.md") -Force
 
 foreach ($DirectoryName in $TransientPluginDirectories)
 {
@@ -139,6 +146,7 @@ if ($UnexpectedTopLevel.Count -ne 0)
     throw "Unexpected top-level plugin package entries: $($UnexpectedTopLevel -join ', ')"
 }
 
+Assert-UeakPlainTree -Path $PluginPackage
 $PluginZip = Join-Path $OutputDirectory "UEAgentKit-$Version-UE5.6-Win64.zip"
 Compress-Archive -LiteralPath $PluginPackage -DestinationPath $PluginZip -CompressionLevel Optimal
 
@@ -194,7 +202,7 @@ $Manifest = [ordered]@{
     (Join-Path $OutputDirectory "release-manifest.json"),
     (($Manifest | ConvertTo-Json -Depth 10) + "`r`n"),
     [Text.UTF8Encoding]::new($false))
-Remove-Item -LiteralPath $StagingRoot -Recurse -Force
+Remove-UeakSafeDirectory -Path $StagingRoot -AllowedRoot $AllowedRoot
 
 Write-Host "RELEASE BUILD SUCCEEDED"
 Write-Host "Version : $Version"

@@ -25,13 +25,14 @@ DEFINE_LOG_CATEGORY_STATIC(LogAssetCatalogExport, Log, All);
 namespace AssetCatalogExportPrivate
 {
 	constexpr const TCHAR* SchemaVersion = TEXT("1.1");
-	constexpr const TCHAR* ExporterVersion = TEXT("0.8.0");
+	constexpr const TCHAR* ExporterVersion = TEXT("0.9.0.dev1");
 	constexpr const TCHAR* ProfileName = TEXT("asset-index");
 
 	struct FAssetCatalogExportResult
 	{
 		FString AssetPath;
 		FString JsonPath;
+		FString CanonicalSha256;
 		FString Error;
 		bool bSuccess = false;
 		int32 TagCount = 0;
@@ -460,12 +461,40 @@ namespace AssetCatalogExportPrivate
 			return false;
 		}
 
-		OutResult.bSuccess = true;
 		OutResult.TagCount = TagCount;
 		OutResult.ReferenceCount = References.Num();
 		OutResult.ReaderName = ReaderName;
 		OutResult.ReaderStatus = FAssetReaderRegistry::StatusToString(ReaderStatus);
 		OutResult.ReaderError = ReaderError;
+		if (ReaderStatus == EAssetReaderStatus::Failed)
+		{
+			// The Canonical JSON is still written for diagnosis, but a failed
+			// specialized reader must never be advertised as a successful asset:
+			// downstream import would otherwise index registry-only data as complete.
+			OutResult.Error = ReaderError.IsEmpty()
+				? TEXT("Specialized asset reader failed; asset details are incomplete.")
+				: FString::Printf(TEXT("Specialized asset reader failed: %s"), *ReaderError);
+			return false;
+		}
+
+		// Hash the bytes that were actually written and closed above.  A failed
+		// hash must fail the asset: the manifest must not advertise a success
+		// whose content cannot be verified by the importer.
+		if (!FBlueprintContextSha256::HashFile(OutResult.JsonPath, OutResult.CanonicalSha256)
+			|| OutResult.CanonicalSha256.Len() != 64)
+		{
+			OutResult.CanonicalSha256.Reset();
+			OutResult.Error = TEXT("Failed to hash written Canonical JSON bytes.");
+			UE_LOG(
+				LogAssetCatalogExport,
+				Error,
+				TEXT("Canonical SHA-256 failed for %s (%s)."),
+				*OutResult.AssetPath,
+				*OutResult.JsonPath);
+			return false;
+		}
+
+		OutResult.bSuccess = true;
 		return true;
 	}
 
@@ -507,6 +536,10 @@ namespace AssetCatalogExportPrivate
 			AssetObject->SetStringField(TEXT("assetPath"), Result.AssetPath);
 			AssetObject->SetBoolField(TEXT("success"), Result.bSuccess);
 			AssetObject->SetStringField(TEXT("jsonPath"), Result.JsonPath);
+			if (Result.bSuccess && !Result.CanonicalSha256.IsEmpty())
+			{
+				AssetObject->SetStringField(TEXT("canonicalSha256"), Result.CanonicalSha256);
+			}
 			AssetObject->SetStringField(TEXT("bpctxPath"), FString());
 			AssetObject->SetStringField(TEXT("error"), Result.Error);
 			AssetObject->SetNumberField(TEXT("variables"), 0);

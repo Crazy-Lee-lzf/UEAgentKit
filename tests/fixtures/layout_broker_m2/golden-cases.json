@@ -1,0 +1,67 @@
+{
+  "schemaVersion": "ueak.layoutbroker-m2-golden/1.0",
+  "description": "Offline golden cases derived from the repository's canonical exporter fixtures (two original, one explicitly derived) and the actual graph_layout_preview.build_preview output. Values are deterministic for these fixtures; timingMs/durationMs are intentionally not recorded.",
+  "options": {
+    "mode": "full",
+    "spacingX": 96,
+    "spacingY": 64,
+    "targetWidth": 1800,
+    "seed": 0
+  },
+  "cases": [
+    {
+      "id": "linear",
+      "origin": "original-exporter-fixture",
+      "contextFile": "tests/fixtures/graph_contracts/bpctx_export_linear.json",
+      "documentProjectName": "UEAgentKitLayoutFixture",
+      "assetPath": "/Game/UEAgentKitTests/BP_Layout.BP_Layout",
+      "graphGuid": "10000000-0000-4000-8000-000000000001",
+      "expected": {
+        "planId": "layout:da31355db0366b21",
+        "layoutHash": "sha256:e40d1dfdd3d915507003f08b454c5931926392f9772b4b1d93975efac0de321c",
+        "baseGraphHash": "sha256:1a73dd4b461016d752a67844cbf33e0f309c3ded319367db0a44a786f4603d86",
+        "nodeCount": 4,
+        "movedCount": 3,
+        "pinCount": 8,
+        "edgeCount": 3,
+        "commentCount": 1
+      }
+    },
+    {
+      "id": "p4_branch",
+      "origin": "original-exporter-fixture",
+      "contextFile": "tests/fixtures/graph_contracts/bpctx_export_p4_branch.json",
+      "documentProjectName": "P4AutomationHost",
+      "assetPath": "/Game/UEAgentKitP4/BP_LayoutP4.BP_LayoutP4",
+      "graphGuid": "2312e258-4ff6-d157-534a-768a85783b1a",
+      "expected": {
+        "planId": "layout:e893ed235881a163",
+        "layoutHash": "sha256:6002739f1afedd45d2ac974eb0ffe1177898008dc1e6337405888ed276a42813",
+        "baseGraphHash": "sha256:f9d3cf376e8669783a03d088446b3834223af1b84bd40df57768873ae5cba91a",
+        "nodeCount": 10,
+        "movedCount": 10,
+        "pinCount": 25,
+        "edgeCount": 6,
+        "commentCount": 1
+      }
+    },
+    {
+      "id": "m1_fork",
+      "origin": "derived-from-linear",
+      "contextFile": "tests/fixtures/graph_contracts/bpctx_export_m1_fork.json",
+      "documentProjectName": "UEAgentKitLayoutFixture",
+      "assetPath": "/Game/UEAgentKitTests/BP_Layout.BP_Layout",
+      "graphGuid": "10000000-0000-4000-8000-000000000001",
+      "expected": {
+        "planId": "layout:9c2b2a3b5bbc9b55",
+        "layoutHash": "sha256:91b399fdf5f7ea0279aec154f7935fc89e811dfd3d1beb36debe1dfae296feb2",
+        "baseGraphHash": "sha256:4577f003b6d3b98f37fea0bc0460eb7c7748b89edc4190dc0920ef4c557db1bb",
+        "nodeCount": 5,
+        "movedCount": 5,
+        "pinCount": 12,
+        "edgeCount": 4,
+        "commentCount": 1
+      }
+    }
+  ]
+}

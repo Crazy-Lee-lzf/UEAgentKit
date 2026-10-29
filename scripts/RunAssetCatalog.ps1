@@ -4,6 +4,7 @@ param(
     [string]$Asset = "",
     [string]$Root = "",
     [string]$Output = "",
+    [string]$Database = "",
     [switch]$IncludeBlueprints,
     [switch]$IncludeGenerated,
     [switch]$NoTags,
@@ -17,6 +18,12 @@ $ToolRoot = Get-UeakToolRoot
 $EngineRoot = Resolve-UeakEngineRoot -EngineRoot $EngineRoot
 $ProjectPath = Resolve-UeakProjectPath -ProjectPath $ProjectPath
 $EditorCmd = Join-Path $EngineRoot "Engine\Binaries\Win64\UnrealEditor-Cmd.exe"
+if ([string]::IsNullOrWhiteSpace($Database))
+{
+    $Database = Join-Path $ToolRoot ".data\ue_agent_kit.sqlite3"
+}
+$Database = [System.IO.Path]::GetFullPath($Database)
+
 
 Assert-UeakPath -Path $EditorCmd -Description "UnrealEditor-Cmd.exe" -PathType File
 
@@ -79,9 +86,12 @@ Write-Host "Project : $ProjectPath"
 Write-Host "Output  : $Output"
 
 & $EditorCmd @Arguments
-if ($LASTEXITCODE -ne 0)
+$ExportExitCode = $LASTEXITCODE
+Write-Host "Index update status (export does not update SQLite):"
+Show-UeakIndexUpdateStatus -Database $Database
+if ($ExportExitCode -ne 0)
 {
-    throw "AssetCatalogExport failed with exit code $LASTEXITCODE"
+    throw "AssetCatalogExport failed with exit code $ExportExitCode"
 }
 
 Write-Host "Asset catalog export completed: $Output"

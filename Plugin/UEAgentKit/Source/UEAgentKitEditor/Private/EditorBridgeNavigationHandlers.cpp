@@ -2,8 +2,12 @@
 #include "EditorBridgeHandlerUtils.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "BlueprintEditor.h"
 #include "Dom/JsonObject.h"
+#include "EdGraph/EdGraph.h"
 #include "Editor.h"
+#include "BlueprintGraphLayoutApply.h"
+#include "Engine/Blueprint.h"
 #include "EngineUtils.h"
 #include "GameFramework/Actor.h"
 #include "Modules/ModuleManager.h"
@@ -125,6 +129,120 @@ bool FUEAgentKitEditorBridge::TryOpenAssetResult(
 	Result->SetBoolField(TEXT("openedNewEditor"), !bOpenBefore);
 	Result->SetBoolField(TEXT("packageDirtyBefore"), bDirtyBefore);
 	Result->SetBoolField(TEXT("packageDirtyAfter"), Package != nullptr && Package->IsDirty());
+	OutResult = Result;
+	return true;
+}
+
+bool FUEAgentKitEditorBridge::TryFocusBlueprintGraphResult(
+	const FString& AssetPath,
+	const FString& GraphGuidText,
+	TSharedPtr<FJsonObject>& OutResult,
+	FString& OutErrorCode,
+	FString& OutErrorMessage) const
+{
+	if (!RequireStoppedEditor(OutErrorCode, OutErrorMessage))
+	{
+		return false;
+	}
+	FAssetData AssetData;
+	if (!ResolveAssetData(AssetPath, AssetData, OutErrorCode, OutErrorMessage))
+	{
+		return false;
+	}
+	UObject* Asset = AssetData.GetAsset();
+	UBlueprint* Blueprint = Cast<UBlueprint>(Asset);
+	if (Blueprint == nullptr || !Blueprint->GetPathName().Equals(AssetPath, ESearchCase::CaseSensitive))
+	{
+		OutErrorCode = TEXT("live-editor-asset-not-blueprint");
+		OutErrorMessage = TEXT("assetPath must be one exact loaded Blueprint asset.");
+		return false;
+	}
+
+	UAssetEditorSubsystem* AssetEditorSubsystem = GEditor != nullptr
+		? GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()
+		: nullptr;
+	if (AssetEditorSubsystem == nullptr)
+	{
+		OutErrorCode = TEXT("live-editor-asset-editor-unavailable");
+		OutErrorMessage = TEXT("The Asset Editor Subsystem is unavailable.");
+		return false;
+	}
+	IAssetEditorInstance* Instance = AssetEditorSubsystem->FindEditorForAsset(Blueprint, false);
+	const bool bOpenedEditor = Instance == nullptr;
+	if (bOpenedEditor)
+	{
+		AssetEditorSubsystem->OpenEditorForAsset(Blueprint);
+		for (int32 Attempt = 0; Attempt < 60 && Instance == nullptr; ++Attempt)
+		{
+			Instance = AssetEditorSubsystem->FindEditorForAsset(Blueprint, false);
+			if (Instance == nullptr)
+			{
+				FPlatformProcess::Sleep(0.05f);
+			}
+		}
+	}
+	if (Instance == nullptr || Instance->GetEditorName() != FName(TEXT("BlueprintEditor")))
+	{
+		OutErrorCode = TEXT("live-editor-asset-editor-unavailable");
+		OutErrorMessage = TEXT("Unreal Editor did not open an ordinary Blueprint Editor for the asset.");
+		return false;
+	}
+	FBlueprintEditor* BlueprintEditor = static_cast<FBlueprintEditor*>(Instance);
+
+	UEdGraph* Graph = nullptr;
+	if (GraphGuidText.IsEmpty())
+	{
+		Graph = Blueprint->UbergraphPages.Num() > 0 ? Blueprint->UbergraphPages[0] : nullptr;
+	}
+	else
+	{
+		FGuid GraphGuid;
+		if (!FGuid::Parse(GraphGuidText, GraphGuid))
+		{
+			OutErrorCode = TEXT("live-editor-invalid-parameters");
+			OutErrorMessage = TEXT("graphGuid must be a canonical GUID when supplied.");
+			return false;
+		}
+		TArray<UEdGraph*> Graphs;
+		Blueprint->GetAllGraphs(Graphs);
+		for (UEdGraph* Candidate : Graphs)
+		{
+			if (Candidate != nullptr && Candidate->GraphGuid == GraphGuid)
+			{
+				Graph = Candidate;
+				break;
+			}
+		}
+	}
+	if (Graph == nullptr)
+	{
+		OutErrorCode = TEXT("live-editor-graph-not-found");
+		OutErrorMessage = TEXT("The Blueprint has no matching top-level graph to focus.");
+		return false;
+	}
+	if (!BlueprintEditor->OpenGraphAndBringToFront(Graph, false).IsValid())
+	{
+		OutErrorCode = TEXT("live-editor-graph-focus-failed");
+		OutErrorMessage = TEXT("The Blueprint Editor did not open the exact requested graph.");
+		return false;
+	}
+	// Record the explicit focus request.  The toolkit's Slate focus can be lost
+	// between RPCs when the Editor window is backgrounded or driven headlessly,
+	// so read-only preflight/context use this exact request as a verified
+	// fallback for the same owning Blueprint instead of failing spuriously.
+	UEAgentKitBlueprintGraphLayout::SetExplicitFocusedGraph(Graph);
+	const bool bSlateFocused = BlueprintEditor->GetFocusedGraph() == Graph;
+	TSharedRef<FJsonObject> Result = MakeActionBase(TEXT("focus-blueprint-graph"), SessionId, GetPieStateName());
+	Result->SetStringField(TEXT("assetPath"), Blueprint->GetPathName());
+	Result->SetStringField(
+		TEXT("graphGuid"),
+		Graph->GraphGuid.ToString(EGuidFormats::DigitsWithHyphensLower));
+	Result->SetStringField(TEXT("graphName"), Graph->GetName());
+	Result->SetStringField(TEXT("graphPath"), Graph->GetPathName());
+	Result->SetBoolField(TEXT("focused"), true);
+	Result->SetBoolField(TEXT("slateFocused"), bSlateFocused);
+	Result->SetBoolField(TEXT("openedEditor"), bOpenedEditor);
+	Result->SetBoolField(TEXT("readOnly"), true);
 	OutResult = Result;
 	return true;
 }

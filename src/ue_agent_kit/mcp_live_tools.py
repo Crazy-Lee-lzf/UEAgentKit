@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Literal
 
 from .editor_bridge import LiveEditorBridgeService, LiveEditorError
+
+MAX_GRAPH_CONTEXT_BYTES = 700 * 1024
+GRAPH_CONTEXT_TOOL_NAME = "ue_get_focused_blueprint_graph_context"
 
 
 def register_live_read_tools(
@@ -14,6 +18,7 @@ def register_live_read_tools(
     read_annotations: Any,
     tool_annotations_type: Any,
     error_response: Any,
+    pure_live: bool = False,
 ) -> None:
     @server.tool(annotations=read_annotations)
     def ue_editor_status() -> dict[str, Any]:
@@ -66,6 +71,83 @@ def register_live_read_tools(
             return live_editor_service.call_tool("ue_get_pie_state")
         except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
             return error_response("ue_get_pie_state", exc, read_only=True)
+
+    @server.tool(annotations=read_annotations)
+    def ue_get_pie_world_contexts(max_contexts: int = 16) -> dict[str, Any]:
+        """List bounded live PIE worlds with unique PIE instance ids and Server/Client identification."""
+        try:
+            return live_editor_service.call_tool(
+                "ue_get_pie_world_contexts",
+                {"maxContexts": max_contexts},
+            )
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_get_pie_world_contexts", exc, read_only=True)
+
+    @server.tool(annotations=read_annotations)
+    def ue_inspect_pie_actor(
+        pie_instance_id: int,
+        actor_path: str = "",
+        actor_guid: str = "",
+        actor_name: str = "",
+        actor_label: str = "",
+        actor_class_path: str = "",
+        world_path: str = "",
+        max_components: int = 64,
+        max_assets_per_component: int = 8,
+    ) -> dict[str, Any]:
+        """Inspect one exact-world PIE Actor (path, class, transform, NetRole) plus bounded component class/path/assets."""
+        try:
+            return live_editor_service.call_tool(
+                "ue_inspect_pie_actor",
+                {
+                    "pieInstanceId": pie_instance_id,
+                    "actorPath": actor_path,
+                    "actorGuid": actor_guid,
+                    "actorName": actor_name,
+                    "actorLabel": actor_label,
+                    "actorClassPath": actor_class_path,
+                    "worldPath": world_path,
+                    "maxComponents": max_components,
+                    "maxAssetsPerComponent": max_assets_per_component,
+                },
+            )
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_inspect_pie_actor", exc, read_only=True)
+
+    @server.tool(annotations=read_annotations)
+    def ue_get_pie_scalars(
+        pie_instance_id: int,
+        property_names: list[str],
+        actor_path: str = "",
+        actor_guid: str = "",
+        actor_name: str = "",
+        actor_label: str = "",
+        component_path: str = "",
+        component_name: str = "",
+        component_class_path: str = "",
+        world_path: str = "",
+        max_string_chars: int = 256,
+    ) -> dict[str, Any]:
+        """Read up to 8 named immediate scalar fields from one exact PIE Actor or owned Component (read-only)."""
+        try:
+            return live_editor_service.call_tool(
+                "ue_get_pie_scalars",
+                {
+                    "pieInstanceId": pie_instance_id,
+                    "actorPath": actor_path,
+                    "actorGuid": actor_guid,
+                    "actorName": actor_name,
+                    "actorLabel": actor_label,
+                    "componentPath": component_path,
+                    "componentName": component_name,
+                    "componentClassPath": component_class_path,
+                    "worldPath": world_path,
+                    "propertyNames": property_names,
+                    "maxStringChars": max_string_chars,
+                },
+            )
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_get_pie_scalars", exc, read_only=True)
 
     @server.tool(annotations=read_annotations)
     def ue_get_output_log(
@@ -151,6 +233,49 @@ def register_live_read_tools(
             return live_editor_service.call_tool("ue_get_blueprint_graph_layout_preflight")
         except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
             return error_response("ue_get_blueprint_graph_layout_preflight", exc, read_only=True)
+
+    @server.tool(annotations=read_annotations)
+    def ue_get_focused_blueprint_graph_context() -> dict[str, Any]:
+        """Return the exact focused ordinary Blueprint graph canonical context, read-only, without opening or focusing assets."""
+        try:
+            payload = live_editor_service.call_tool(GRAPH_CONTEXT_TOOL_NAME)
+            result = payload.get("result")
+            if not isinstance(result, dict):
+                raise LiveEditorError(
+                    "live-editor-invalid-response",
+                    "The Editor Bridge returned an invalid graph context object.",
+                )
+            if result.get("available") is not True:
+                raise LiveEditorError(
+                    str(result.get("reasonCode") or "blueprint-graph-context-unavailable"),
+                    str(result.get("reason") or "No focused ordinary Blueprint graph is available."),
+                )
+            if result.get("readOnly") is not True:
+                raise LiveEditorError(
+                    "blueprint-graph-context-not-readonly",
+                    "The Editor Bridge did not mark the graph context as read-only.",
+                )
+            encoded = json.dumps(result, ensure_ascii=False, allow_nan=False).encode("utf-8")
+            if len(encoded) > MAX_GRAPH_CONTEXT_BYTES:
+                raise LiveEditorError(
+                    "blueprint-graph-context-too-large",
+                    "The focused graph context exceeds the 700 KiB read-only boundary.",
+                )
+            payload["writeAuthorized"] = False
+            payload["editorVerified"] = False
+            payload["contextOnly"] = True
+            return payload
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            response = error_response(GRAPH_CONTEXT_TOOL_NAME, exc, read_only=True)
+            response["writeAuthorized"] = False
+            response["editorVerified"] = False
+            response["contextOnly"] = True
+            return response
+
+    # Pure-live mode exposes only the bounded read set above: graph-layout
+    # preview and the retarget readers are deliberately not registered.
+    if pure_live:
+        return
 
     from .mcp_graph_layout_preview import register_graph_layout_preview_tool
 

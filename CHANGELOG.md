@@ -2,9 +2,15 @@
 
 All notable changes to UE Agent Kit are documented here.
 
-## Unreleased
+## 0.9.0.dev1 — Developer Preview 1 (local candidate)
 
-- No unreleased changes.
+This section describes candidate development changes, not a published release. Stable v0.8.0 remains unchanged. See the [candidate release notes](docs/RELEASE_0.9.0_PREVIEW_EN.md).
+
+- Added default-off, double-opt-in bounded Blueprint structure tools: GraphEdit with eight allowlisted node types, typed unlinked pin defaults, top-level user-variable creation, single-edge rewire, and isolated allowlisted node removal. Each family uses Preview → exact plan/confirmation → Apply → explicit Save, never auto-saves or compiles, and remains outside the project Write Policy allowlist.
+- Added the corresponding Agent-facing focus/preflight helpers, read-only fresh-process reload verification, and end-to-end MCP evidence. These are internal-preview capabilities, not a production default.
+- Added Project Memory schema v7 with a CJK-expanded `search_text` projection and external-content FTS5 rebuild, so Han/Kana/Hangul substrings such as `护甲` inside `护甲升级链` are recalled without changing the ASCII search API or ranked order. The v6→v7 migration is transactional, verifies with `quick_check`, fails closed on partial/newer schemas, and preserves v6 backups, embeddings, context snapshots, and linked data.
+- Validated the local UE 5.6.1 integrated candidate: constrained CallFunction, same-Blueprint Pure Function calls with native-tested int literals, indexless pure-Live MCP, and PIE scalar inspection with native declaring-class provenance. Candidate only; not yet published.
+- Clarified public documentation so the stable v0.8.0 Write Policy boundary is not presented as covering the experimental tools.
 
 ## 0.8.0 — agent workflow, memory, knowledge web, and P4 collaboration
 
@@ -27,7 +33,6 @@ All notable changes to UE Agent Kit are documented here.
 - Documented the adopted layered Project Memory architecture: arbitrary-depth Knowledge Tree, separate Active Work/TODO, five-level progressive disclosure, server-enforced token budgets, MCP-primary/thin-Skill usage, and one-local-MCP-per-developer plus shared knowledge-service collaboration.
 
 - Added current project-status and roadmap documents covering implemented reads/writes, explicit gaps, Live Editor Write priorities, Context/Analysis, and collaboration direction.
-- Added a dated architecture and capability comparison with `ColtonWilley/ue-llm-toolkit`, separating editor-control breadth from UE Agent Kit's Policy/Revision/backup/verification/rollback model.
 
 - Added the first Policy/Revision-gated Live Editor Write path: `ue_apply_asset_property_live` applies one existing `setAssetProperty` Plan to an already open, clean non-Blueprint asset inside the running Editor, records an Undo transaction, marks the package Dirty, and never saves automatically.
 - Added a real UE5.6 live-write regression that keeps ordinary `UnrealEditor.exe` running, rejects an invalid confirmation, changes the in-memory scalar value, reports Dirty/Undo evidence, and proves both the `.uasset` SHA-256 and immutable SQLite index remain unchanged.

@@ -3,7 +3,8 @@
 This is deliberately separate from the conditional P8 lab-only write surface.
 It is registered for every fixed-project Live Editor server, accepts only
 bounded layout options, and never accepts a project, asset, save, or command
-parameter.
+parameter. Large graphs use the bounded paginated layout projection when the
+Editor exposes it; the legacy full-context path remains for older Bridges.
 """
 
 from __future__ import annotations
@@ -12,6 +13,11 @@ from typing import Any, Literal
 
 from .editor_bridge import LiveEditorBridgeService, LiveEditorError
 from .graph_layout_preview import build_preview
+from .graph_layout_projection import (
+    PROJECTION_METHOD,
+    build_preview_from_projection,
+    fetch_layout_projection,
+)
 
 PREVIEW_TOOL_NAME = "ue_preview_blueprint_graph_layout"
 PREFLIGHT_METHOD = "editor.getBlueprintGraphLayoutPreflight"
@@ -78,14 +84,16 @@ def register_graph_layout_preview_tool(
                     str(status.get("reason") or "The fixed Live Editor is unavailable."),
                 )
             capabilities = status.get("capabilities")
-            if not isinstance(capabilities, list) or CONTEXT_METHOD not in capabilities:
+            if not isinstance(capabilities, list) or (
+                CONTEXT_METHOD not in capabilities and PROJECTION_METHOD not in capabilities
+            ):
                 raise LiveEditorError(
                     "live-editor-capability-unavailable",
-                    f"The registered Editor Bridge does not expose {CONTEXT_METHOD}.",
+                    "The registered Editor Bridge exposes neither the focused graph context "
+                    "nor the bounded layout projection.",
                 )
 
             preflight = live_editor_service.call_method(PREFLIGHT_METHOD, {})
-            context = live_editor_service.call_method(CONTEXT_METHOD, {})
             selection: dict[str, Any] | None = None
             if mode != "full" and scope_node_ids is None:
                 selection_payload = live_editor_service.call_tool(
@@ -94,17 +102,33 @@ def register_graph_layout_preview_tool(
                 selected = selection_payload.get("result")
                 if isinstance(selected, dict):
                     selection = selected
-            result = build_preview(
-                preflight,
-                context,
-                mode=mode,
-                scope_node_ids=scope_node_ids,
-                selection_payload=selection,
-                spacing_x=spacing_x,
-                spacing_y=spacing_y,
-                target_width=target_width,
-                seed=seed,
-            )
+
+            if PROJECTION_METHOD in capabilities:
+                projection = fetch_layout_projection(live_editor_service, preflight)
+                result = build_preview_from_projection(
+                    preflight,
+                    projection,
+                    mode=mode,
+                    scope_node_ids=scope_node_ids,
+                    selection_payload=selection,
+                    spacing_x=spacing_x,
+                    spacing_y=spacing_y,
+                    target_width=target_width,
+                    seed=seed,
+                )
+            else:
+                context = live_editor_service.call_method(CONTEXT_METHOD, {})
+                result = build_preview(
+                    preflight,
+                    context,
+                    mode=mode,
+                    scope_node_ids=scope_node_ids,
+                    selection_payload=selection,
+                    spacing_x=spacing_x,
+                    spacing_y=spacing_y,
+                    target_width=target_width,
+                    seed=seed,
+                )
             return {
                 "schemaVersion": "1.0",
                 "tool": PREVIEW_TOOL_NAME,

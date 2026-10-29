@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-from .canonical import DOMAIN_ARTIFACT, is_sha256, short_digest
+from .canonical import DOMAIN_ARTIFACT, short_digest
 from .errors import ContractError, make_diagnostic
 from .schema import check_schema, validate_document
 

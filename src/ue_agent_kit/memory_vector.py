@@ -34,7 +34,9 @@ from .project_memory import (
     MemoryStatus,
     get_memory_record,
     search_memory_records,
+    search_memory_records_bounded,
 )
+from .text_search import has_cjk
 
 EMBEDDING_TEXT_BOUND_CHARS = 4096
 RRF_K = 60
@@ -455,7 +457,10 @@ def hybrid_search_memory_records(
 
     Exactly one query embedding is generated; stored record embeddings are never
     recomputed and missing embeddings never trigger backfill. Any vector-layer
-    failure degrades to the FTS primitive with a stable reason code.
+    failure degrades to the FTS primitive with a stable reason code. When the
+    FTS branch is empty for a CJK query, the same bounded literal fallback used
+    by ``search_memory_records_bounded`` feeds the branch before RRF; this keeps
+    legacy/partial v7 projections readable without changing the fusion formula.
     """
     fts_hits = search_memory_records(
         connection,
@@ -467,6 +472,17 @@ def hybrid_search_memory_records(
         scope_key=scope_key,
         limit=limit,
     )
+    if not fts_hits and has_cjk(query):
+        fts_hits = search_memory_records_bounded(
+            connection,
+            project_key=project_key,
+            query=query,
+            record_types=record_types,
+            statuses=statuses,
+            scope_type=scope_type,
+            scope_key=scope_key,
+            limit=limit,
+        ).hits
     if not load_sqlite_vec(connection):
         return HybridSearchOutcome(
             hits=fts_hits,

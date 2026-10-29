@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass
+from typing import Callable
+
+from .text_search import build_search_text
 
 
-CURRENT_MEMORY_SCHEMA_VERSION = 6
+CURRENT_MEMORY_SCHEMA_VERSION = 7
 
 
 @dataclass(frozen=True)
@@ -11,6 +15,164 @@ class MemoryMigration:
     version: int
     description: str
     sql: str
+    # Optional Python step executed inside the same transaction as ``sql`` and
+    # before the migration is committed. Schema v7 needs it because the
+    # expanded CJK search projection cannot be computed in SQL.
+    apply: Callable[[sqlite3.Connection], None] | None = None
+
+
+# The v7 FTS5 triggers are created only after the expanded projection has been
+# populated and the index rebuilt. They carry ``search_text`` in both the insert
+# and the external-content ``delete`` payload; a missing/incorrect old value in
+# the delete payload is what can make FTS5 report a malformed database.
+_MEMORY_V7_FTS_TRIGGERS = (
+    r"""
+CREATE TRIGGER memory_records_ai AFTER INSERT ON memory_records BEGIN
+    INSERT INTO memory_records_fts(
+        rowid,
+        subject_key,
+        title,
+        body,
+        source_ref,
+        details_json,
+        search_text
+    ) VALUES (
+        new.rowid,
+        new.subject_key,
+        new.title,
+        new.body,
+        new.source_ref,
+        new.details_json,
+        new.search_text
+    );
+END;
+""",
+    r"""
+CREATE TRIGGER memory_records_ad AFTER DELETE ON memory_records BEGIN
+    INSERT INTO memory_records_fts(
+        memory_records_fts,
+        rowid,
+        subject_key,
+        title,
+        body,
+        source_ref,
+        details_json,
+        search_text
+    ) VALUES (
+        'delete',
+        old.rowid,
+        old.subject_key,
+        old.title,
+        old.body,
+        old.source_ref,
+        old.details_json,
+        old.search_text
+    );
+END;
+""",
+    r"""
+CREATE TRIGGER memory_records_au AFTER UPDATE ON memory_records BEGIN
+    INSERT INTO memory_records_fts(
+        memory_records_fts,
+        rowid,
+        subject_key,
+        title,
+        body,
+        source_ref,
+        details_json,
+        search_text
+    ) VALUES (
+        'delete',
+        old.rowid,
+        old.subject_key,
+        old.title,
+        old.body,
+        old.source_ref,
+        old.details_json,
+        old.search_text
+    );
+    INSERT INTO memory_records_fts(
+        rowid,
+        subject_key,
+        title,
+        body,
+        source_ref,
+        details_json,
+        search_text
+    ) VALUES (
+        new.rowid,
+        new.subject_key,
+        new.title,
+        new.body,
+        new.source_ref,
+        new.details_json,
+        new.search_text
+    );
+END;
+""",
+)
+
+
+def _apply_memory_v7(connection: sqlite3.Connection) -> None:
+    """Populate the expanded projection and finish the v7 index transaction.
+
+    Ordering is part of the contract:
+
+    1. the v6 triggers are already dropped and the external-content FTS table
+       was rebuilt with the empty ``search_text`` default (in the migration
+       SQL), so no UPDATE can feed a stale delete payload to FTS5;
+    2. every base row receives its expanded projection here, with no FTS
+       trigger attached yet;
+    3. the index is rebuilt again so the populated projection is searchable;
+    4. only then are the insert/delete/update triggers recreated;
+    5. ``quick_check`` verifies the final on-disk state before COMMIT.
+
+    The bulk UPDATE would otherwise fire the v6 context-generation triggers once
+    per row and falsely invalidate cached L2/L3 snapshots. Their previous
+    generations are restored because this migration does not change semantic
+    record content.
+    """
+    context_rows = connection.execute(
+        "SELECT project_key, source_generation FROM memory_context_state"
+    ).fetchall()
+    rows = connection.execute(
+        """
+        SELECT rowid, subject_key, title, body, source_ref, details_json
+        FROM memory_records
+        ORDER BY rowid
+        """
+    ).fetchall()
+    updates = [
+        (
+            build_search_text(
+                subject_key=str(row[1]),
+                title=str(row[2]),
+                body=str(row[3]),
+                source_ref=str(row[4]),
+                details_json=str(row[5]),
+            ),
+            int(row[0]),
+        )
+        for row in rows
+    ]
+    if updates:
+        connection.executemany(
+            "UPDATE memory_records SET search_text = ? WHERE rowid = ?",
+            updates,
+        )
+    if context_rows:
+        connection.executemany(
+            "UPDATE memory_context_state SET source_generation = ? WHERE project_key = ?",
+            [(int(row[1]), str(row[0])) for row in context_rows],
+        )
+    # Second rebuild: the first one in the migration SQL ran before the
+    # projection existed. This one makes the persisted text searchable.
+    connection.execute("INSERT INTO memory_records_fts(memory_records_fts) VALUES('rebuild')")
+    for statement in _MEMORY_V7_FTS_TRIGGERS:
+        connection.execute(statement)
+    check_rows = connection.execute("PRAGMA quick_check").fetchall()
+    if [str(row[0]) for row in check_rows] != ["ok"]:
+        raise RuntimeError("Project Memory v7 migration failed PRAGMA quick_check.")
 
 
 MEMORY_MIGRATIONS = (
@@ -420,5 +582,43 @@ CREATE TRIGGER memory_records_ctx_gen_au AFTER UPDATE ON memory_records BEGIN
     WHERE project_key = NEW.project_key AND NEW.project_key <> OLD.project_key;
 END;
 """,
+    ),
+    MemoryMigration(
+        version=7,
+        description=(
+            "Add CJK-aware expanded search projection with an external-content "
+            "FTS5 index over memory_records.search_text"
+        ),
+        sql=r"""
+-- Dropping the v6 triggers first is mandatory: an external-content FTS5
+-- delete that supplies OLD values which no longer exist in the index can
+-- raise 'database disk image is malformed'.
+DROP TRIGGER IF EXISTS memory_records_ai;
+DROP TRIGGER IF EXISTS memory_records_ad;
+DROP TRIGGER IF EXISTS memory_records_au;
+
+DROP TABLE IF EXISTS memory_records_fts;
+
+ALTER TABLE memory_records
+    ADD COLUMN search_text TEXT NOT NULL DEFAULT '';
+
+CREATE VIRTUAL TABLE memory_records_fts USING fts5(
+    subject_key,
+    title,
+    body,
+    source_ref,
+    details_json,
+    search_text,
+    content='memory_records',
+    content_rowid='rowid',
+    tokenize='unicode61 remove_diacritics 2'
+);
+
+-- Rebuild the new external-content index BEFORE touching any base row. The
+-- rebuild reads the empty search_text default, which is harmless; its purpose
+-- is to establish a consistent index/content pair before the projection UPDATE.
+INSERT INTO memory_records_fts(memory_records_fts) VALUES('rebuild');
+""",
+        apply=_apply_memory_v7,
     ),
 )

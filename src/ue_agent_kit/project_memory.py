@@ -5,6 +5,7 @@ import json
 import math
 import re
 import sqlite3
+import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -15,9 +16,80 @@ from typing import Any, Iterator, Mapping, Sequence
 
 from .database import connect_database, get_schema_version, utc_now_iso
 from .memory_schema import CURRENT_MEMORY_SCHEMA_VERSION, MEMORY_MIGRATIONS
+from .text_search import build_search_text, expand_query_term, has_cjk, project_cjk
 
 
 _MEMORY_ID_PATTERN = re.compile(r"^mem_[0-9a-f]{32}$")
+_SUBSTRING_TERM_SPLIT = re.compile(r"[\s,，。;；:：!！?？、]+")
+MAX_SUBSTRING_TERMS = 8
+MAX_SUBSTRING_QUERY_CHARS = 200
+MAX_SUBSTRING_SCAN_RECORDS = 2_000
+MAX_SUBSTRING_SCAN_CEILING = 10_000
+MAX_SUBSTRING_CHUNK_RECORDS = 250
+DEFAULT_SUBSTRING_DEADLINE_MS = 120
+# ``search_text`` is a duplicate, CJK-expanded projection of the five original
+# indexed columns. Weighting it zero in bm25 prevents the duplicate text from
+# dominating ASCII relevance while preserving the historical ranked order
+# (asserted by the v6-vs-v7 tests; absolute BM25 magnitudes drift slightly
+# because the FTS table gained a column). CJK-only substring matches rank 0.0
+# and fall back to the existing recency / record-id tie-break; mixed ASCII+CJK
+# terms still rank by their ASCII part.
+_MEMORY_FTS_BM25_WEIGHTS = "1.0, 1.0, 1.0, 1.0, 1.0, 0.0"
+_V6_REQUIRED_TABLES = frozenset(
+    {
+        "memory_schema_migrations",
+        "memory_records",
+        "memory_scopes",
+        "memory_revisions",
+        "memory_artifacts",
+        "memory_relations",
+        "memory_status_events",
+        "memory_records_fts",
+        "knowledge_nodes",
+        "active_work_items",
+        "active_work_node_links",
+        "active_work_asset_links",
+        "active_work_todos",
+        "memory_evidence_chains",
+        "memory_l0_events",
+        "memory_embeddings",
+        "memory_context_state",
+        "memory_context_entries",
+    }
+)
+_V6_REQUIRED_RECORD_COLUMNS = frozenset(
+    {
+        "record_id",
+        "project_key",
+        "record_type",
+        "subject_key",
+        "title",
+        "body",
+        "source_kind",
+        "source_ref",
+        "confidence",
+        "status",
+        "content_sha256",
+        "evidence_sha256",
+        "created_at_utc",
+        "observed_at_utc",
+        "updated_at_utc",
+        "superseded_by_record_id",
+        "details_json",
+        "node_id",
+    }
+)
+_V6_REQUIRED_FTS_TRIGGERS = frozenset(
+    {"memory_records_ai", "memory_records_ad", "memory_records_au"}
+)
+_MEMORY_FTS_COLUMNS = (
+    "subject_key",
+    "title",
+    "body",
+    "source_ref",
+    "details_json",
+    "search_text",
+)
 _CONFLICT_DETECTABLE_TYPES = {
     "projectFact",
     "projectRule",
@@ -155,6 +227,24 @@ class MemorySearchHit:
     rank: float
 
 
+@dataclass(frozen=True)
+class MemoryBoundedSearchOutcome:
+    """Result of a bounded search: FTS first, CJK literal substring fallback.
+
+    ``mode`` is ``fts`` or ``cjk-substring``. The fallback is intentionally
+    explicit so callers can report provenance instead of pretending the FTS
+    index matched.
+    """
+
+    hits: tuple[MemorySearchHit, ...]
+    mode: str
+    scanned: int = 0
+    scan_limit: int = 0
+    truncated: bool = False
+    timed_out: bool = False
+    query_clipped: bool = False
+
+
 _ALLOWED_STATUS_TRANSITIONS = {
     MemoryStatus.VALID: {
         MemoryStatus.STALE,
@@ -184,6 +274,95 @@ def _quote_sql_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
+def _sqlite_object_names(connection: sqlite3.Connection, object_type: str) -> set[str]:
+    return {
+        str(row[0])
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = ?", (object_type,)
+        )
+    }
+
+
+def _table_columns(connection: sqlite3.Connection, table_name: str) -> tuple[str, ...]:
+    return tuple(str(row[1]) for row in connection.execute(f"PRAGMA table_info({table_name})"))
+
+
+def _assert_migration_start_state(connection: sqlite3.Connection, current_version: int) -> None:
+    """Fail closed before touching a partial or inconsistent Memory database.
+
+    A database with ``user_version = 0`` but Memory tables already present is
+    not a fresh database and cannot be safely initialized by v1. A database at
+    v6 must have every v6 table/column/trigger; a partially deleted v6 file is
+    rejected instead of being silently repaired, and the caller is told to
+    restore a v6 backup.
+    """
+    tables = _sqlite_object_names(connection, "table")
+    if current_version == 0 and tables & _V6_REQUIRED_TABLES:
+        raise RuntimeError(
+            "Project Memory database has tables but no schema version; refusing to initialize "
+            "over a partial database. Restore a backup instead."
+        )
+    if current_version != 6:
+        return
+    missing_tables = sorted(_V6_REQUIRED_TABLES - tables)
+    record_columns = set(_table_columns(connection, "memory_records"))
+    missing_columns = sorted(_V6_REQUIRED_RECORD_COLUMNS - record_columns)
+    triggers = _sqlite_object_names(connection, "trigger")
+    missing_triggers = sorted(_V6_REQUIRED_FTS_TRIGGERS - triggers)
+    applied_versions = {
+        int(row[0])
+        for row in connection.execute("SELECT version FROM memory_schema_migrations")
+    }
+    missing_versions = sorted(set(range(1, 7)) - applied_versions)
+    if "search_text" in record_columns:
+        missing_columns.append("unexpected-column:search_text")
+    missing = [
+        *(f"table:{name}" for name in missing_tables),
+        *(f"column:{name}" for name in missing_columns),
+        *(f"trigger:{name}" for name in missing_triggers),
+        *(f"migration:{version}" for version in missing_versions),
+    ]
+    if missing:
+        raise RuntimeError(
+            "Project Memory schema 6 is incomplete; refusing to migrate. "
+            "Missing or inconsistent objects: "
+            + ", ".join(missing)
+            + ". Restore the v6 backup and re-run the migration."
+        )
+
+
+def assert_memory_schema_current(connection: sqlite3.Connection) -> None:
+    """Validate the v7 physical shape used by the CJK-aware search paths."""
+    version = get_schema_version(connection)
+    if version != CURRENT_MEMORY_SCHEMA_VERSION:
+        raise RuntimeError(
+            f"Project Memory schema {version} does not match supported "
+            f"schema {CURRENT_MEMORY_SCHEMA_VERSION}."
+        )
+    record_columns = set(_table_columns(connection, "memory_records"))
+    if "search_text" not in record_columns:
+        raise RuntimeError("Project Memory FTS5 schema is incomplete: search_text column is missing.")
+    fts_columns = set(_table_columns(connection, "memory_records_fts"))
+    missing_fts_columns = [name for name in _MEMORY_FTS_COLUMNS if name not in fts_columns]
+    if missing_fts_columns:
+        raise RuntimeError(
+            "Project Memory FTS5 schema is incomplete. Missing columns: "
+            + ", ".join(missing_fts_columns)
+        )
+    trigger_rows = connection.execute(
+        "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND name IN "
+        "('memory_records_ai', 'memory_records_ad', 'memory_records_au')"
+    ).fetchall()
+    trigger_sql = {str(row[0]): str(row[1] or "") for row in trigger_rows}
+    for name in sorted(_V6_REQUIRED_FTS_TRIGGERS):
+        if name not in trigger_sql:
+            raise RuntimeError(f"Project Memory FTS5 schema is incomplete: trigger {name} is missing.")
+        if "search_text" not in trigger_sql[name].lower():
+            raise RuntimeError(
+                f"Project Memory FTS5 trigger {name} does not include search_text; schema is stale."
+            )
+
+
 def apply_memory_migrations(connection: sqlite3.Connection) -> int:
     current_version = get_schema_version(connection)
     if current_version > CURRENT_MEMORY_SCHEMA_VERSION:
@@ -191,12 +370,17 @@ def apply_memory_migrations(connection: sqlite3.Connection) -> int:
             "Project Memory schema "
             f"{current_version} is newer than supported schema {CURRENT_MEMORY_SCHEMA_VERSION}."
         )
+    _assert_migration_start_state(connection, current_version)
 
     for migration in MEMORY_MIGRATIONS:
         if migration.version <= current_version:
             continue
         description = _quote_sql_literal(migration.description)
         applied_at = _quote_sql_literal(utc_now_iso())
+        # No COMMIT here: the optional Python hook must run in the same
+        # transaction as the schema statements. A crash or hook error rolls
+        # back the schema, data projection, migration row, and user_version
+        # together, leaving the previous (v6) database intact.
         script = (
             "BEGIN IMMEDIATE;\n"
             + migration.sql
@@ -204,10 +388,12 @@ def apply_memory_migrations(connection: sqlite3.Connection) -> int:
             + "INSERT INTO memory_schema_migrations(version, description, applied_at_utc) "
             + f"VALUES ({migration.version}, {description}, {applied_at});\n"
             + f"PRAGMA user_version = {migration.version};\n"
-            + "COMMIT;\n"
         )
         try:
             connection.executescript(script)
+            if migration.apply is not None:
+                migration.apply(connection)
+            connection.commit()
         except Exception:
             if connection.in_transaction:
                 connection.rollback()
@@ -219,6 +405,7 @@ def apply_memory_migrations(connection: sqlite3.Connection) -> int:
             "Project Memory migration stopped at schema "
             f"{current_version}; expected {CURRENT_MEMORY_SCHEMA_VERSION}."
         )
+    assert_memory_schema_current(connection)
     if current_version >= 2:
         _backfill_evidence_sha256(connection)
     return current_version
@@ -230,6 +417,7 @@ def assert_memory_fts_available(connection: sqlite3.Connection) -> None:
     ).fetchone()
     if row is None:
         raise RuntimeError("Project Memory FTS5 schema is incomplete.")
+    assert_memory_schema_current(connection)
 
 
 @contextmanager
@@ -237,8 +425,19 @@ def open_project_memory_database(
     path: Path,
     *,
     readonly: bool = False,
+    immutable: bool = False,
 ) -> Iterator[sqlite3.Connection]:
-    connection = connect_database(path, readonly=readonly)
+    """Open a Project Memory database, migrating writable opens to schema v7.
+
+    ``readonly=True`` uses SQLite ``mode=ro``. Project Memory databases are
+    created in WAL mode, and a read-only connection may still need to create or
+    write the ``-shm``/``-wal`` sidecars (and therefore needs a writable
+    containing directory) when the database was not cleanly checkpointed. Pass
+    ``immutable=True`` only for a frozen file with no concurrent writers (for
+    example a backup on read-only media); it disables WAL sidecar access.
+    ``immutable`` is rejected without ``readonly``.
+    """
+    connection = connect_database(path, readonly=readonly, immutable=immutable)
     try:
         if readonly:
             version = get_schema_version(connection)
@@ -247,9 +446,10 @@ def open_project_memory_database(
                     f"Project Memory schema {version} does not match supported schema "
                     f"{CURRENT_MEMORY_SCHEMA_VERSION}."
                 )
+            assert_memory_schema_current(connection)
         else:
             apply_memory_migrations(connection)
-        assert_memory_fts_available(connection)
+            assert_memory_fts_available(connection)
         yield connection
     finally:
         connection.close()
@@ -686,6 +886,13 @@ def create_memory_record(
         revisions=revisions,
         artifacts=artifacts,
     )
+    search_text = build_search_text(
+        subject_key=subject_key,
+        title=title,
+        body=body,
+        source_ref=source_ref,
+        details_json=details_json,
+    )
 
     with connection:
         connection.execute(
@@ -707,8 +914,9 @@ def create_memory_record(
                 observed_at_utc,
                 updated_at_utc,
                 details_json,
-                node_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                node_id,
+                search_text
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record_id,
@@ -728,6 +936,7 @@ def create_memory_record(
                 timestamp,
                 details_json,
                 node_id or None,
+                search_text,
             ),
         )
         for ordinal, scope in enumerate(scopes):
@@ -1040,11 +1249,22 @@ def list_memory_records(
 
 
 def _fts_match_query(query: str) -> str:
+    """Build the FTS5 expression for a user query.
+
+    ASCII terms keep the historical quoted-token form. CJK runs are expanded to
+    a character-spaced phrase (``护甲`` -> ``"护 甲"``) so a substring matches a
+    longer source run; the reversed ``"甲 护"`` remains a different phrase and
+    does not match. Mixed terms are split into independent ASCII/CJK fragments
+    joined with ``AND``.
+    """
     normalized = _require_text(query, "query")
     terms = re.findall(r"[\w./:-]+", normalized, flags=re.UNICODE)
     if not terms:
         raise ValueError("query must contain at least one searchable token.")
-    return " AND ".join('\"' + term.replace('\"', '\"\"') + '\"' for term in terms)
+    fragments = [fragment for fragment in map(expand_query_term, terms) if fragment]
+    if not fragments:
+        raise ValueError("query must contain at least one searchable token.")
+    return " AND ".join(fragments)
 
 
 def search_memory_records(
@@ -1095,7 +1315,9 @@ def search_memory_records(
         raise ValueError("scope_key requires scope_type.")
     parameters.append(limit)
     rows = connection.execute(
-        "SELECT r.record_id, bm25(memory_records_fts) AS rank "
+        "SELECT r.record_id, bm25(memory_records_fts, "
+        + _MEMORY_FTS_BM25_WEIGHTS
+        + ") AS rank "
         "FROM memory_records_fts "
         "JOIN memory_records AS r ON r.rowid = memory_records_fts.rowid "
         "WHERE memory_records_fts MATCH ? AND "
@@ -1105,6 +1327,207 @@ def search_memory_records(
     ).fetchall()
     return tuple(
         MemorySearchHit(get_memory_record(connection, str(row[0])), float(row[1])) for row in rows
+    )
+
+
+def _contains_cjk(value: str) -> bool:
+    return has_cjk(value)
+
+
+def _substring_search_scan(
+    connection: sqlite3.Connection,
+    *,
+    project_key: str,
+    needles: Sequence[str],
+    record_types: Sequence[MemoryRecordType | str],
+    statuses: Sequence[MemoryStatus | str],
+    scope_type: MemoryScopeType | str | None,
+    scope_key: str,
+    limit: int,
+    scan_limit: int,
+    deadline_ms: int,
+) -> tuple[list[str], int, bool, bool]:
+    """Literal substring scan over a bounded window of the newest records.
+
+    The query never reaches SQL as a pattern: rows are fetched with keyset
+    pagination and matched in Python, so ``%``/``_`` have no wildcard meaning
+    and no user text is interpolated into SQL. Every term must appear (AND),
+    which keeps mixed Chinese/ASCII queries such as ``DT_ItemRarity 背包``
+    usable. ``scan_limit`` and ``deadline_ms`` are hard bounds checked between
+    chunks.
+    """
+    clauses = ["r.project_key = ?"]
+    parameters: list[Any] = [project_key]
+    if record_types:
+        normalized_types = [
+            _enum_value(value, MemoryRecordType, "record_types").value for value in record_types
+        ]
+        clauses.append("r.record_type IN (" + ",".join("?" for _ in normalized_types) + ")")
+        parameters.extend(normalized_types)
+    if statuses:
+        normalized_statuses = [
+            _enum_value(value, MemoryStatus, "statuses").value for value in statuses
+        ]
+        clauses.append("r.status IN (" + ",".join("?" for _ in normalized_statuses) + ")")
+        parameters.extend(normalized_statuses)
+    if scope_type is not None:
+        normalized_scope = _enum_value(scope_type, MemoryScopeType, "scope_type").value
+        scope_clause = (
+            "EXISTS (SELECT 1 FROM memory_scopes AS s "
+            "WHERE s.record_id = r.record_id AND s.scope_type = ?"
+        )
+        parameters.append(normalized_scope)
+        if scope_key:
+            scope_clause += " AND s.scope_key = ?"
+            parameters.append(_require_text(scope_key, "scope_key"))
+        scope_clause += ")"
+        clauses.append(scope_clause)
+    elif scope_key:
+        raise ValueError("scope_key requires scope_type.")
+    base_where = " AND ".join(clauses)
+
+    deadline = time.monotonic() + max(0, deadline_ms) / 1000.0
+    immediate_timeout = deadline_ms <= 0
+    matched: list[str] = []
+    scanned = 0
+    timed_out = False
+    truncated = False
+    cursor: tuple[str, str] | None = None
+    while not immediate_timeout and scanned < scan_limit and len(matched) < limit:
+        if time.monotonic() > deadline:
+            timed_out = True
+            break
+        chunk = min(MAX_SUBSTRING_CHUNK_RECORDS, scan_limit - scanned)
+        sql = (
+            "SELECT r.record_id, r.subject_key, r.title, r.body, r.updated_at_utc "
+            "FROM memory_records AS r WHERE " + base_where
+        )
+        chunk_parameters = list(parameters)
+        if cursor is not None:
+            sql += (
+                " AND (r.updated_at_utc < ? "
+                "OR (r.updated_at_utc = ? AND r.record_id < ?))"
+            )
+            chunk_parameters.extend([cursor[0], cursor[0], cursor[1]])
+        sql += " ORDER BY r.updated_at_utc DESC, r.record_id DESC LIMIT ?"
+        chunk_parameters.append(chunk)
+        rows = connection.execute(sql, chunk_parameters).fetchall()
+        if not rows:
+            break
+        for row in rows:
+            scanned += 1
+            # Use the same NFKC projection as the indexed search_text so
+            # full-width/half-width variants do not behave differently in the
+            # fallback path. The scan stays a literal Python substring test.
+            haystack = project_cjk(f"{row[1]}\n{row[2]}\n{row[3]}").casefold()
+            if all(term in haystack for term in needles):
+                matched.append(str(row[0]))
+                if len(matched) >= limit:
+                    break
+        cursor = (str(rows[-1][4]), str(rows[-1][0]))
+        if len(matched) >= limit:
+            break
+        if len(rows) < chunk:
+            break
+    if immediate_timeout:
+        timed_out = True
+    if scanned >= scan_limit and len(matched) < limit:
+        truncated = True
+    return matched, scanned, truncated, timed_out
+
+
+def search_memory_records_bounded(
+    connection: sqlite3.Connection,
+    *,
+    project_key: str,
+    query: str,
+    record_types: Sequence[MemoryRecordType | str] = (),
+    statuses: Sequence[MemoryStatus | str] = (
+        MemoryStatus.VALID,
+        MemoryStatus.UNVERIFIED,
+        MemoryStatus.CONFLICTED,
+    ),
+    scope_type: MemoryScopeType | str | None = None,
+    scope_key: str = "",
+    limit: int = 20,
+    scan_limit: int = MAX_SUBSTRING_SCAN_RECORDS,
+    deadline_ms: int = DEFAULT_SUBSTRING_DEADLINE_MS,
+) -> MemoryBoundedSearchOutcome:
+    """FTS5 search with a bounded CJK literal-substring fallback.
+
+    FTS5's ``unicode61`` tokenizer stores a whole CJK run as a single token, so
+    Chinese phrases such as ``背包格子颜色`` cannot match a longer body run.
+    When (and only when) FTS returns no hit for a query containing CJK text, a
+    literal substring scan over the newest ``scan_limit`` records is used.
+
+    Safety boundaries:
+    * the FTS5 index must exist and match the schema, otherwise the call is
+      rejected instead of silently scanning the table;
+    * only records already filtered by project/type/status/scope are scanned;
+    * the scan is capped by record count and wall-clock deadline
+      (``deadline_ms=0`` disables the scan and reports ``timed_out``);
+    * the query is a literal (never a SQL LIKE pattern) and is length-capped;
+    * superseded/stale records stay excluded through the default statuses.
+    """
+    assert_memory_fts_available(connection)
+    if isinstance(scan_limit, bool) or not isinstance(scan_limit, int):
+        raise ValueError("scan_limit must be an integer.")
+    if scan_limit < 1 or scan_limit > MAX_SUBSTRING_SCAN_CEILING:
+        raise ValueError(f"scan_limit must be between 1 and {MAX_SUBSTRING_SCAN_CEILING}.")
+    if isinstance(deadline_ms, bool) or not isinstance(deadline_ms, int):
+        raise ValueError("deadline_ms must be an integer.")
+    if deadline_ms < 0:
+        raise ValueError("deadline_ms must not be negative.")
+    fts_hits = search_memory_records(
+        connection,
+        project_key=project_key,
+        query=query,
+        record_types=record_types,
+        statuses=statuses,
+        scope_type=scope_type,
+        scope_key=scope_key,
+        limit=limit,
+    )
+    if fts_hits:
+        return MemoryBoundedSearchOutcome(
+            hits=fts_hits,
+            mode="fts",
+            scan_limit=scan_limit,
+        )
+    normalized = _require_text(query, "query").strip()
+    if not _contains_cjk(normalized):
+        return MemoryBoundedSearchOutcome(hits=(), mode="fts", scan_limit=scan_limit)
+    clipped = len(normalized) > MAX_SUBSTRING_QUERY_CHARS
+    bounded_query = normalized[:MAX_SUBSTRING_QUERY_CHARS] if clipped else normalized
+    terms = [term for term in _SUBSTRING_TERM_SPLIT.split(bounded_query) if term]
+    needles = tuple(
+        project_cjk(term).casefold() for term in (terms or [bounded_query])[:MAX_SUBSTRING_TERMS]
+    )
+    needles = tuple(needle for needle in needles if needle)
+    matched_ids, scanned, truncated, timed_out = _substring_search_scan(
+        connection,
+        project_key=project_key,
+        needles=needles,
+        record_types=record_types,
+        statuses=statuses,
+        scope_type=scope_type,
+        scope_key=scope_key,
+        limit=limit,
+        scan_limit=scan_limit,
+        deadline_ms=deadline_ms,
+    )
+    hits = tuple(
+        MemorySearchHit(get_memory_record(connection, record_id), 0.0)
+        for record_id in matched_ids
+    )
+    return MemoryBoundedSearchOutcome(
+        hits=hits,
+        mode="cjk-substring",
+        scanned=scanned,
+        scan_limit=scan_limit,
+        truncated=truncated,
+        timed_out=timed_out,
+        query_clipped=clipped,
     )
 
 

@@ -4,6 +4,23 @@ Backups/
 AutoSDK/
 %SystemDrive%/
 
+# Local Editor/project runtime state. The bridge descriptor contains a per-session
+# authToken and must never be committed.
+/Saved/
+**/Saved/UEAgentKit/EditorBridge.json
+
+# Local secrets and databases. Keep intentional test fixtures working.
+.env
+.env.*
+!.env.example
+!.env.template
+*.sqlite3
+*.sqlite
+*.db
+!tests/fixtures/**/*.sqlite3
+!tests/fixtures/**/*.sqlite
+!tests/fixtures/**/*.db
+
 .vs/
 .idea/
 .vscode/
@@ -35,3 +52,76 @@ __pycache__/
 /docs/Plans/
 /docs/Handoffs/
 /prompts/
+
+# Internal R7 acceptance/run-state reports are preserved outside the public tree.
+# Keep R7 protocol schemas and R7_MOUNT_CONTRACT.md tracked.
+/spec/memory-mount/R7_*_REPORT.md
+/spec/memory-mount/R7_*_RUNSTATE_*.md
+/spec/memory-mount/R7_*_READINESS.md
+/spec/memory-mount/R7_*_GATE_REVIEW.md
+
+# Internal native-tools development reports preserved outside the public tree
+/spec/native-tools/M1_LAYOUT_BROKER_OFFLINE_REPORT.md
+/spec/native-tools/M1_LAYOUT_BROKER_RUN_STATE_20261024.md
+/spec/native-tools/M2_1_PLAN_ID_HARDENING_REPORT.md
+/spec/native-tools/M2_1_PLAN_ID_HARDENING_RUN_STATE_20261024.md
+/spec/native-tools/M2_3_RUNTIME_ACCEPTANCE_REPORT.md
+/spec/native-tools/M2_3_RUNTIME_ACCEPTANCE_RUN_STATE_20261024.md
+/spec/native-tools/M2_4_PRE_M3_RELOAD_FINGERPRINT_REPORT.md
+/spec/native-tools/M2_4_PRE_M3_RUN_STATE_20261024.md
+/spec/native-tools/M2_NATIVE_EDITOR_BRIDGE_SLICE_REPORT.md
+/spec/native-tools/M2_NATIVE_EDITOR_BRIDGE_SLICE_RUN_STATE_20261024.md
+/spec/native-tools/M2_OFFLINE_CONTRACT_CONFORMANCE.md
+/spec/native-tools/M2_OFFLINE_RUN_STATE_20261024.md
+/spec/native-tools/M3_10_RUN_STATE_20261025.md
+/spec/native-tools/M3_10_UNIFIED_DEFAULT_OFF_INTEGRATION_REPORT.md
+/spec/native-tools/M3_1_MENU_SECURITY_ACCEPTANCE_REPORT.md
+/spec/native-tools/M3_1_MENU_SECURITY_ACCEPTANCE_RUN_STATE_20261024.md
+/spec/native-tools/M3_2_MULTIGRAPH_ROLLBACK_READINESS_REPORT.md
+/spec/native-tools/M3_2_MULTIGRAPH_ROLLBACK_READINESS_RUN_STATE_20261024.md
+/spec/native-tools/M3_3_Z2_EXPANDED_MATRIX_REPORT.md
+/spec/native-tools/M3_3_Z2_EXPANDED_MATRIX_RUN_STATE_20261024.md
+/spec/native-tools/M3_4_CANARY_READINESS_REPORT.md
+/spec/native-tools/M3_4_CANARY_READINESS_RUN_STATE_20261024.md
+/spec/native-tools/M3_4_CANARY_RUNBOOK.md
+/spec/native-tools/M3_5_STRESS_FALLBACK_RESPONSIVENESS_REPORT.md
+/spec/native-tools/M3_5_STRESS_FALLBACK_RESPONSIVENESS_RUN_STATE_20261024.md
+/spec/native-tools/M3_6_R1_INTEGRATION_PREVIEW_REPORT.md
+/spec/native-tools/M3_6_R1_INTEGRATION_PREVIEW_RUN_STATE_20261024.md
+/spec/native-tools/M3_7_COMBINED_INTEGRATION_REPORT.md
+/spec/native-tools/M3_7_COMBINED_INTEGRATION_RUN_STATE_20261024.md
+/spec/native-tools/M3_8_R1_6_INTEGRATION_REPORT.md
+/spec/native-tools/M3_9_RUN_STATE_20261025.md
+/spec/native-tools/M3_9_Z5_Z6_COMBINED_READINESS_REPORT.md
+/spec/native-tools/M3_OPT_IN_PREVIEW_MENU_REPORT.md
+/spec/native-tools/M3_OPT_IN_PREVIEW_MENU_RUN_STATE_20261024.md
+/spec/native-tools/N0_NATIVE_TOOLS_RUN_STATE_20261023.md
+/spec/native-tools/R1_4_CURSOR_PAGINATION_OFFLINE_REPORT.md
+/spec/native-tools/R1_4_CURSOR_PAGINATION_REAL_UE_REPORT.md
+/spec/native-tools/R1_5_SHADOW_SOCKET_REAL_UE_REPORT.md
+/spec/native-tools/R1_6_READONLY_RUNSTATE_20261024.md
+/spec/native-tools/R1_6_SOCKET_BOUNDARY_PERFORMANCE_REPORT.md
+/spec/native-tools/R1_CONTEXT_FILTER_ACCEPTANCE_REPORT.md
+/spec/native-tools/R1_IMPLEMENTATION_SLICE_REPORT.md
+/spec/native-tools/R1_NATIVE_TOOLS_RUN_STATE_20261024.md
+/spec/native-tools/RC0_RUN_STATE_20261025.md
+/spec/native-tools/RC0_UNIFIED_RELEASE_GATE_REVIEW_20261025.md
+/spec/native-tools/RC1_CLEAN_CHECKOUT_TEST_REPRODUCIBILITY_20261025.md
+
+# Additional internal graph/native/test evidence retained outside the public tree
+/spec/SCALAR_PATCH_REGRESSION.md
+/spec/graph-contracts/C_LAYOUT_P11_EDITOR_SCOPE_ACCEPTANCE_REPORT_20261023.md
+/spec/graph-contracts/D01_D13_USER_DECISIONS.md
+/spec/graph-contracts/G0_3_APPROVED_DELTA.md
+/spec/graph-contracts/G0_4_RUNTIME_ADAPTER.md
+/spec/native-tools/N0_R1_READINESS_AND_GATE.md
+/spec/native-tools/N0_REVIEW_DECISIONS_AND_PREVIEW_MIGRATION.md
+/spec/native-tools/UE_TEST_WINDOW_LAUNCH_UX.md
+
+# Local-only development artifacts (not part of this release tree)
+/docs/RC1_RELEASE_CHECKLIST.md
+/docs/RELEASE_RC1.md
+/docs/RELEASE_RC1_EN.md
+/docs/BLUEPRINT_AGENT_E2E_MATRIX.md
+/docs/BLUEPRINT_GRAPH_READ_WRITE_MATRIX.md
+/docs/QUERY_MODES_OFFLINE_LIVE_AUTO.md

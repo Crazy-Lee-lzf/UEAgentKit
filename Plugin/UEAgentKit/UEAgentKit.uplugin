@@ -1,7 +1,7 @@
 {
   "FileVersion": 3,
-  "Version": 28,
-  "VersionName": "0.8.0",
+  "Version": 29,
+  "VersionName": "0.9.0.dev1",
   "FriendlyName": "UE Agent Kit",
   "Description": "Unreal Engine asset analysis, policy-gated patching, rollback, fixtures, regression testing, and fixed-project MCP workflow toolkit.",
   "Category": "Developer Tools",
@@ -23,6 +23,10 @@
     },
     {
       "Name": "DataValidation",
+      "Enabled": true
+    },
+    {
+      "Name": "IKRig",
       "Enabled": true
     }
   ]

@@ -2,9 +2,16 @@
 #include "EditorBridgeBatchTaskManager.h"
 #include "EditorBridgeHandlerUtils.h"
 #include "EditorBridgeLogCapture.h"
+#include "Native/NativeNodeRegistry.h"
 #include "BlueprintGraphLayoutP7TestOnly.h"
 #include "BlueprintGraphLayoutP8TestOnly.h"
 #include "BlueprintGraphLayoutP9TestOnly.h"
+#include "BlueprintGraphLayoutExperimental.h"
+#include "BlueprintGraphEditExperimental.h"
+#include "BlueprintPinDefaultEditExperimental.h"
+#include "BlueprintRewireExperimental.h"
+#include "BlueprintNodeRemoveExperimental.h"
+#include "BlueprintVariableWriteExperimental.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Components/ActorComponent.h"
@@ -41,8 +48,8 @@ DEFINE_LOG_CATEGORY_STATIC(LogUEAgentKitEditorBridge, Log, All);
 namespace UEAgentKitEditorBridgePrivate
 {
 	constexpr const TCHAR* ProtocolSchemaVersion = TEXT("1.0");
-	const TCHAR* const PluginVersion = TEXT("0.8.0");
-	const TCHAR* const DevelopmentLine = TEXT("0.8.0");
+	const TCHAR* const PluginVersion = TEXT("0.9.0.dev1");
+	const TCHAR* const DevelopmentLine = TEXT("0.9.0.dev1");
 	constexpr int32 MaxClients = 8;
 	constexpr int32 MaxRequestBytes = 64 * 1024;
 
@@ -53,16 +60,21 @@ namespace UEAgentKitEditorBridgePrivate
 		TEXT("editor.getDirtyAssets"),
 		TEXT("editor.getCurrentLevel"),
 		TEXT("editor.getPieState"),
+		TEXT("editor.getPieWorldContexts"),
+		TEXT("editor.inspectPieActor"),
+		TEXT("editor.getPieScalars"),
 		TEXT("editor.getOutputLog"),
 		TEXT("editor.getCompileErrors"),
 		TEXT("editor.inspectAssetLive"),
 		TEXT("editor.getBlueprintGraphSelection"),
 		TEXT("editor.getBlueprintGraphLayoutPreflight"),
 		TEXT("editor.getFocusedBlueprintGraphContext"),
+		TEXT("editor.getFocusedBlueprintGraphLayoutProjection"),
 		TEXT("editor.getEditorContext"),
 		TEXT("editor.batchTask.start"),
 		TEXT("editor.batchTask.status"),
 		TEXT("editor.batchTask.cancel"),
+		TEXT("editor.focusBlueprintGraph"),
 		TEXT("editor.openAsset"),
 		TEXT("editor.prepareAssetForDiskRollback"),
 		TEXT("editor.focusAsset"),
@@ -800,6 +812,32 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 	{
 		SendResult(Client.Socket, RequestId, BuildPieStateResult());
 	}
+	else if (Method == TEXT("editor.getPieWorldContexts"))
+	{
+		SendResult(Client.Socket, RequestId, BuildPieWorldContextsResult(Params));
+	}
+	else if (Method == TEXT("editor.inspectPieActor"))
+	{
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode;
+		FString ErrorMessage;
+		SendActionResult(
+			TryInspectPieActorResult(Params, Result, ErrorCode, ErrorMessage),
+			Result,
+			ErrorCode,
+			ErrorMessage);
+	}
+	else if (Method == TEXT("editor.getPieScalars"))
+	{
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode;
+		FString ErrorMessage;
+		SendActionResult(
+			TryReadPieScalarsResult(Params, Result, ErrorCode, ErrorMessage),
+			Result,
+			ErrorCode,
+			ErrorMessage);
+	}
 	else if (Method == TEXT("editor.getOutputLog"))
 	{
 		SendResult(Client.Socket, RequestId, BuildOutputLogResult(Params));
@@ -878,6 +916,21 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 				SendResult(Client.Socket, RequestId, Context);
 			}
 		}
+	}
+	else if (Method == TEXT("editor.getFocusedBlueprintGraphLayoutProjection"))
+	{
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode;
+		FString ErrorMessage;
+		SendActionResult(
+			TryBuildBlueprintGraphLayoutProjectionResult(
+				Params,
+				Result,
+				ErrorCode,
+				ErrorMessage),
+			Result,
+			ErrorCode,
+			ErrorMessage);
 	}
 	else if (Method == TEXT("editor.applyBlueprintGraphLayoutTestOnly"))
 	{
@@ -1035,6 +1088,448 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 				ErrorMessage);
 		}
 	}
+	else if (Method == TEXT("editor.applyBlueprintGraphLayoutExperimental"))
+	{
+		if (!UEAgentKitBlueprintGraphLayoutExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-layout-experimental-disabled"),
+				TEXT("Experimental graph layout apply is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintGraphLayoutExperimental::TryApplyExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.saveBlueprintGraphLayoutExperimental"))
+	{
+		if (!UEAgentKitBlueprintGraphLayoutExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-layout-experimental-disabled"),
+				TEXT("Experimental graph layout save is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintGraphLayoutExperimental::TrySaveExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.previewBlueprintGraphEditExperimental"))
+	{
+		if (!UEAgentKitBlueprintGraphEditExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-edit-experimental-disabled"),
+				TEXT("Experimental graph structure preview is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintGraphEditExperimental::TryPreviewExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.applyBlueprintGraphEditExperimental"))
+	{
+		if (!UEAgentKitBlueprintGraphEditExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-edit-experimental-disabled"),
+				TEXT("Experimental graph structure edit is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.saveBlueprintGraphEditExperimental"))
+	{
+		if (!UEAgentKitBlueprintGraphEditExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-edit-experimental-disabled"),
+				TEXT("Experimental graph structure Save is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintGraphEditExperimental::TrySaveExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.previewBlueprintPinDefaultsExperimental"))
+	{
+		if (!UEAgentKitBlueprintPinDefaultExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-pin-default-experimental-disabled"),
+				TEXT("Experimental Blueprint pin default preview is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintPinDefaultExperimental::TryPreviewExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.applyBlueprintPinDefaultsExperimental"))
+	{
+		if (!UEAgentKitBlueprintPinDefaultExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-pin-default-experimental-disabled"),
+				TEXT("Experimental Blueprint pin default edit is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintPinDefaultExperimental::TryApplyExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.saveBlueprintPinDefaultsExperimental"))
+	{
+		if (!UEAgentKitBlueprintPinDefaultExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-pin-default-experimental-disabled"),
+				TEXT("Experimental Blueprint pin default Save is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintPinDefaultExperimental::TrySaveExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.previewBlueprintVariableCreateExperimental"))
+	{
+		if (!UEAgentKitBlueprintVariableExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("blueprint-variable-experimental-disabled"),
+				TEXT("Experimental Blueprint variable preview is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintVariableExperimental::TryPreviewExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.applyBlueprintVariableCreateExperimental"))
+	{
+		if (!UEAgentKitBlueprintVariableExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("blueprint-variable-experimental-disabled"),
+				TEXT("Experimental Blueprint variable creation is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintVariableExperimental::TryApplyExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.saveBlueprintVariableCreateExperimental"))
+	{
+		if (!UEAgentKitBlueprintVariableExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("blueprint-variable-experimental-disabled"),
+				TEXT("Experimental Blueprint variable Save is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintVariableExperimental::TrySaveExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.previewBlueprintRewireExperimental"))
+	{
+		if (!UEAgentKitBlueprintRewireExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-rewire-experimental-disabled"),
+				TEXT("Experimental Blueprint rewire is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintRewireExperimental::TryPreviewExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.applyBlueprintRewireExperimental"))
+	{
+		if (!UEAgentKitBlueprintRewireExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-rewire-experimental-disabled"),
+				TEXT("Experimental Blueprint rewire is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintRewireExperimental::TryApplyExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.saveBlueprintRewireExperimental"))
+	{
+		if (!UEAgentKitBlueprintRewireExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-rewire-experimental-disabled"),
+				TEXT("Experimental Blueprint rewire is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintRewireExperimental::TrySaveExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.previewBlueprintNodeRemoveExperimental"))
+	{
+		if (!UEAgentKitBlueprintNodeRemoveExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-remove-experimental-disabled"),
+				TEXT("Experimental Blueprint node removal is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintNodeRemoveExperimental::TryPreviewExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.applyBlueprintNodeRemoveExperimental"))
+	{
+		if (!UEAgentKitBlueprintNodeRemoveExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-remove-experimental-disabled"),
+				TEXT("Experimental Blueprint node removal is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintNodeRemoveExperimental::TryApplyExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
+	else if (Method == TEXT("editor.saveBlueprintNodeRemoveExperimental"))
+	{
+		if (!UEAgentKitBlueprintNodeRemoveExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-remove-experimental-disabled"),
+				TEXT("Experimental Blueprint node removal is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintNodeRemoveExperimental::TrySaveExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
 	else if (Method == TEXT("editor.getEditorContext"))
 	{
 		SendResult(Client.Socket, RequestId, BuildEditorContextResult());
@@ -1100,6 +1595,21 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 		FString ErrorMessage;
 		SendActionResult(
 			BuildBatchTaskCancelResult(TaskId, Result, ErrorCode, ErrorMessage),
+			Result,
+			ErrorCode,
+			ErrorMessage);
+	}
+	else if (Method == TEXT("editor.focusBlueprintGraph"))
+	{
+		FString AssetPath;
+		Params->TryGetStringField(TEXT("assetPath"), AssetPath);
+		FString GraphGuidText;
+		Params->TryGetStringField(TEXT("graphGuid"), GraphGuidText);
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode;
+		FString ErrorMessage;
+		SendActionResult(
+			TryFocusBlueprintGraphResult(AssetPath, GraphGuidText, Result, ErrorCode, ErrorMessage),
 			Result,
 			ErrorCode,
 			ErrorMessage);
@@ -1669,6 +2179,64 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 			ErrorCode,
 			ErrorMessage);
 	}
+	else if (Method == TEXT("native.invoke"))
+	{
+		// R1.5 shadow surface: read-only native tools only, gated by the registry
+		// mode.  With NativeToolRegistry=off this branch is unreachable from a
+		// capability-aware client (the capability is not advertised) and returns
+		// native-registry-unavailable.
+		FString ToolId;
+		FString ToolVersion;
+		Params->TryGetStringField(TEXT("toolId"), ToolId);
+		Params->TryGetStringField(TEXT("toolVersion"), ToolVersion);
+
+		TSharedPtr<FJsonObject> Arguments = MakeShared<FJsonObject>();
+		const TSharedPtr<FJsonObject>* ArgumentsField = nullptr;
+		if (Params->TryGetObjectField(TEXT("arguments"), ArgumentsField) && ArgumentsField != nullptr && ArgumentsField->IsValid())
+		{
+			Arguments = *ArgumentsField;
+		}
+
+		bool bInvalidParameters = false;
+		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Params->Values)
+		{
+			if (Pair.Key != TEXT("toolId") && Pair.Key != TEXT("toolVersion")
+				&& Pair.Key != TEXT("arguments") && Pair.Key != TEXT("context"))
+			{
+				bInvalidParameters = true;
+				break;
+			}
+		}
+		const TSharedPtr<FJsonObject>* Context = nullptr;
+		if (!bInvalidParameters && Params->TryGetObjectField(TEXT("context"), Context) && Context != nullptr && Context->IsValid())
+		{
+			for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*Context)->Values)
+			{
+				if (Pair.Key != TEXT("surface") && Pair.Key != TEXT("assetPath") && Pair.Key != TEXT("graphGuid")
+					&& Pair.Key != TEXT("nodeGuid") && Pair.Key != TEXT("pinName"))
+				{
+					bInvalidParameters = true;
+					break;
+				}
+			}
+		}
+		if (bInvalidParameters)
+		{
+			SendActionResult(false, nullptr, TEXT("native-schema-invalid-arguments"), TEXT("Unknown native.invoke parameter."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> NativeResult;
+			FString NativeErrorCode;
+			FString NativeErrorMessage;
+			const bool bNativeOk = FNativeNodeRegistry::Get().TryInvokeShadowTool(
+				ToolId, ToolVersion, Arguments, NativeResult, NativeErrorCode, NativeErrorMessage);
+			const FString FinalMessage = NativeErrorMessage.IsEmpty()
+				? FString(TEXT("The native tool failed."))
+				: NativeErrorMessage;
+			SendActionResult(bNativeOk, NativeResult, NativeErrorCode, FinalMessage);
+		}
+	}
 	else
 	{
 		SendError(Client.Socket, RequestId, TEXT("live-editor-capability-unavailable"), TEXT("The requested Editor Bridge capability is not registered."));
@@ -1862,6 +2430,62 @@ TArray<TSharedPtr<FJsonValue>> FUEAgentKitEditorBridge::BuildCapabilityValues() 
 	{
 		Values.Add(MakeShared<FJsonValueString>(UEAgentKitBlueprintGraphLayoutP9::ApplyMethod));
 		Values.Add(MakeShared<FJsonValueString>(UEAgentKitBlueprintGraphLayoutP9::SaveMethod));
+	}
+	if (UEAgentKitBlueprintGraphLayoutExperimental::IsExperimentalWriteAvailable())
+	{
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintGraphLayoutExperimental::ApplyMethod));
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintGraphLayoutExperimental::SaveMethod));
+	}
+	if (UEAgentKitBlueprintGraphEditExperimental::IsExperimentalWriteAvailable())
+	{
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintGraphEditExperimental::PreviewMethod));
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintGraphEditExperimental::ApplyMethod));
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintGraphEditExperimental::SaveMethod));
+	}
+	if (UEAgentKitBlueprintPinDefaultExperimental::IsExperimentalWriteAvailable())
+	{
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintPinDefaultExperimental::PreviewMethod));
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintPinDefaultExperimental::ApplyMethod));
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintPinDefaultExperimental::SaveMethod));
+	}
+	if (UEAgentKitBlueprintVariableExperimental::IsExperimentalWriteAvailable())
+	{
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintVariableExperimental::PreviewMethod));
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintVariableExperimental::ApplyMethod));
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintVariableExperimental::SaveMethod));
+	}
+	if (UEAgentKitBlueprintRewireExperimental::IsExperimentalWriteAvailable())
+	{
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintRewireExperimental::PreviewMethod));
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintRewireExperimental::ApplyMethod));
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintRewireExperimental::SaveMethod));
+	}
+	if (UEAgentKitBlueprintNodeRemoveExperimental::IsExperimentalWriteAvailable())
+	{
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintNodeRemoveExperimental::PreviewMethod));
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintNodeRemoveExperimental::ApplyMethod));
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintNodeRemoveExperimental::SaveMethod));
+	}
+	if (FNativeNodeRegistry::Get().IsAvailable())
+	{
+		Values.Add(MakeShared<FJsonValueString>(TEXT("native.invoke")));
 	}
 	return Values;
 }

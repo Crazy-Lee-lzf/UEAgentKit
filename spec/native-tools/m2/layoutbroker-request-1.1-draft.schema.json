@@ -1,0 +1,275 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ueagentkit.local/schemas/layoutbroker-request-1.1-draft.schema.json",
+  "title": "UEAgentKit layout broker request v1.1 (DRAFT, not accepted by M1)",
+  "description": "DRAFT ONLY. The M1 broker accepts ueak.layoutbroker/1.0 exclusively. This documents the proposed backward-compatible scope extension for review; no runtime code accepts it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "requestId",
+    "sessionId",
+    "projectName",
+    "projectPathHash",
+    "token",
+    "sentAtUtc",
+    "deadlineMs",
+    "algorithm",
+    "options",
+    "snapshot"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "ueak.layoutbroker/1.1"
+    },
+    "requestId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "projectName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+    },
+    "projectPathHash": {
+      "type": "string",
+      "pattern": "^sha1:[0-9a-f]{40}$"
+    },
+    "token": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32,128}$"
+    },
+    "sentAtUtc": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})$"
+    },
+    "deadlineMs": {
+      "type": "integer",
+      "minimum": 100,
+      "maximum": 5000
+    },
+    "algorithm": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "version"
+      ],
+      "properties": {
+        "id": {
+          "const": "p0-layered"
+        },
+        "version": {
+          "const": "1.0.0"
+        }
+      }
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "spacingX",
+        "spacingY",
+        "targetWidth",
+        "seed"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "full",
+            "selection",
+            "incremental"
+          ]
+        },
+        "scopeNodeIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4096,
+          "items": {
+            "type": "string",
+            "pattern": "^n:[0-9a-f-]{36}$"
+          }
+        },
+        "spacingX": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "spacingY": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "targetWidth": {
+          "type": "integer",
+          "minimum": 256,
+          "maximum": 16384
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "full"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "scopeNodeIds"
+              ]
+            }
+          },
+          "else": {
+            "required": [
+              "scopeNodeIds"
+            ]
+          }
+        }
+      ]
+    },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "preflight",
+        "contextEnvelope"
+      ],
+      "properties": {
+        "preflight": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": [
+            "schemaVersion",
+            "available",
+            "assetPath",
+            "graphGuid",
+            "packageRevision",
+            "packageDirty",
+            "graphFingerprint",
+            "nodeCount",
+            "sessionId",
+            "pluginBuildHash"
+          ],
+          "properties": {
+            "schemaVersion": {
+              "const": "ueak.graphlayoutpreflight/1.0"
+            },
+            "available": {
+              "const": true
+            },
+            "assetPath": {
+              "type": "string",
+              "pattern": "^/[^\\u0000-\\u001f\\u007f]*$"
+            },
+            "graphGuid": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            },
+            "packageRevision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "packageDirty": {
+              "const": false
+            },
+            "graphFingerprint": {
+              "type": "string",
+              "pattern": "^sha1:[0-9a-f]{40}$"
+            },
+            "nodeCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "sessionId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "pluginBuildHash": {
+              "type": "string",
+              "pattern": "^(?:[0-9a-f]{16}|sha256:[0-9a-f]{64})$"
+            },
+            "nodes": {
+              "type": "array",
+              "maxItems": 512
+            },
+            "complete": {
+              "const": true
+            },
+            "nodesTruncated": {
+              "const": false
+            }
+          }
+        },
+        "contextEnvelope": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": [
+            "schemaVersion",
+            "available",
+            "readOnly",
+            "assetPath",
+            "graphGuid",
+            "packageRevision",
+            "packageDirty",
+            "graphFingerprint",
+            "exportedAtUtc",
+            "context"
+          ],
+          "properties": {
+            "schemaVersion": {
+              "const": "ueak.graphlayoutcontext/1.0"
+            },
+            "available": {
+              "const": true
+            },
+            "readOnly": {
+              "const": true
+            },
+            "assetPath": {
+              "type": "string",
+              "pattern": "^/[^\\u0000-\\u001f\\u007f]*$"
+            },
+            "graphGuid": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            },
+            "packageRevision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "packageDirty": {
+              "const": false
+            },
+            "graphFingerprint": {
+              "type": "string",
+              "pattern": "^sha1:[0-9a-f]{40}$"
+            },
+            "exportedAtUtc": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})$"
+            },
+            "context": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    }
+  }
+}

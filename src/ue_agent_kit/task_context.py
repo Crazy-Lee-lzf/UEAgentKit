@@ -330,6 +330,10 @@ class TaskContextService:
             "index": {
                 "snapshotId": metadata.get("snapshotId", ""),
                 "lastIndexedAtUtc": metadata.get("lastIndexedAtUtc", ""),
+                "lastExportUtc": metadata.get("lastExportUtc", ""),
+                "indexSnapshotState": metadata.get("indexSnapshotState", "unknown"),
+                "indexSnapshotReasons": metadata.get("indexSnapshotReasons", []),
+                "exportSnapshotState": metadata.get("exportSnapshotState", "unknown"),
                 "databaseSchemaVersion": status.get("databaseSchemaVersion"),
                 "immutable": bool(metadata.get("immutable")),
                 "quiescent": bool(metadata.get("quiescent")),

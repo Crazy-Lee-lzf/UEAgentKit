@@ -1,7 +1,7 @@
 # UE Agent Kit 0.8.0 Capability Status
 
-Latest published release: **0.8.0**
-Target environment: **Unreal Engine 5.6 / Windows / Python 3.11–3.12**
+Latest published release: **0.8.0** (this page describes the `v0.8.0` tag, not later local-only experimental changes)
+Published 0.8.0: **Python 3.11–3.12**; 0.9.0 Developer Preview 1 candidate (0.9.0.dev1): **Unreal Engine 5.6 / Windows / Python 3.11–3.14**
 
 
 ## Product position
@@ -119,6 +119,8 @@ Source Control is disabled by default.
 | Live + Workflow | 100 | 114 | 106 | 120 |
 
 Tool counts represent interface surface, not mutation breadth; many tools are read-only queries, planning, verification, or status operations.
+
+This page describes the released `v0.8.0` tag only. See the [candidate preview](RELEASE_0.9.0_PREVIEW_EN.md) for proposed changes and always query `ue_get_capabilities` for active tools.
 
 ## Explicit non-goals in 0.8.0
 

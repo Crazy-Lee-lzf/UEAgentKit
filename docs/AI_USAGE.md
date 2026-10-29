@@ -2,7 +2,9 @@
 
 ## 1. 使用目标
 
-UE Agent Kit 为 AI 提供可验证、可定位、按需加载的 UE5 项目上下文，以及受 Policy、Revision、Plan、确认、备份和验证保护的有限写入能力。当前 `main` 既支持离线索引和 Live Editor 读取，也包含持久化 Patch 工作流与首个不自动保存的 Live Editor Write；具体公开边界以仓库根目录 `README.md` 和 [`PROJECT_STATUS.md`](PROJECT_STATUS.md) 为准。
+首次接入的用户或 AI Agent 应先阅读 [AI Agent 快速接入](AGENT_QUICKSTART.md)，按安装、能力发现、只读查询、授权写入和验证回退的顺序操作。
+
+UE Agent Kit 为 AI 提供可验证、可定位、按需加载的 UE5 项目上下文，以及受 Policy、Revision、Plan、确认、备份和验证保护的有限写入能力。正式 `v0.8.0` 支持离线索引和 Live Editor 读取，也包含持久化 Patch 工作流与首个不自动保存的 Live Editor Write；具体公开边界以仓库根目录 `README.md` 和 [`PROJECT_STATUS.md`](PROJECT_STATUS.md) 为准。
 
 当前项目数据包括：
 
@@ -132,7 +134,7 @@ AI 输出应明确区分：
 
 ## MCP 工作流
 
-当前 `main` 的 MCP 模式为 Offline 5、Live 23、Workflow 26、Combined 44；启用固定 Project Memory 后分别为 12、30、33、51。Tool 数量不等同于 Unreal Operation 数量。Agent 仍不能在 Tool 参数中切换项目、引擎、Policy、数据库、Editor Endpoint 或任意文件路径。
+**正式 `v0.8.0` Tag** 的 MCP 静态 Tool 注册数（Source Control 默认关闭）为 Offline 10、Live 43、Workflow 67、Combined 100；加上 Project Memory 后依次为 24、57、81、114。后续本地开发代码的注册数可能不同，且静态注册并不等于当前 MCP 会话实际启用。Agent 应先调用 `ue_get_capabilities`，以返回的能力和运行时 Tool Schema 为准，不凭固定数字猜测。Tool 数量不等于 Unreal Operation 数量。Agent 仍不能在 Tool 参数中切换项目、引擎、Policy、数据库、Editor Endpoint 或任意文件路径。
 
 推荐调用顺序：
 

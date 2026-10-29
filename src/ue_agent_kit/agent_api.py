@@ -9,7 +9,13 @@ from pathlib import Path
 from typing import Any, Iterator, Literal, Sequence
 
 from .code_index import CODE_PROFILE
-from .database import assert_fts5_available, get_metadata, get_schema_version, open_database
+from .database import (
+    assert_fts5_available,
+    assert_index_schema_current,
+    get_metadata,
+    get_schema_version,
+    open_database,
+)
 from .impact_analysis import (
     DEFAULT_IMPACT_DEPTH,
     DEFAULT_IMPACT_EDGES,
@@ -24,7 +30,9 @@ from .impact_analysis import (
     validate_subject_kind,
     validate_target_paths,
 )
+from .index_snapshot import compute_index_snapshot
 from .queries import find_references, get_asset as query_get_asset, get_stats, search_assets, search_symbols
+from . import world_index_v2
 from .query_protocol import (
     DEFAULT_OUTPUT_TOKEN_BUDGET,
     ContinuationTokenStore,
@@ -37,6 +45,7 @@ from .schema import CURRENT_SCHEMA_VERSION
 
 AGENT_API_SCHEMA_VERSION = "1.0"
 MAX_MCP_SEARCH_LIMIT = 100
+MAX_MCP_WORLD_ACTOR_LIMIT = 500
 MAX_MCP_SYMBOL_LIMIT = 500
 MAX_MCP_REFERENCE_LIMIT = 1000
 MAX_MCP_GRAPH_LIMIT = 500
@@ -151,6 +160,32 @@ def _normalize_sections(sections: Sequence[str] | None) -> tuple[str, ...]:
     return tuple(normalized)
 
 
+def _output_budget(
+    *,
+    max_output_tokens: int,
+    estimated_tokens: int,
+    withheld: bool,
+    reasons: Sequence[str] = (),
+) -> dict[str, Any]:
+    """Describe output budgeting without conflating withholding with overflow.
+
+    ``truncated`` means "content exists that this response did not return", which is
+    exactly when a continuation token is offered.  A response that returns every
+    requested item but is still larger than the caller's ``max_output_tokens``
+    (an unavoidable single item, or a forced first item) sets ``budgetExceeded``
+    instead and keeps ``truncated`` false.
+    """
+    budget_exceeded = estimated_tokens > max_output_tokens
+    return {
+        "maxTokens": max_output_tokens,
+        "estimatedTokens": estimated_tokens,
+        "truncated": withheld,
+        "truncationReason": (",".join(reason for reason in reasons if reason) if withheld else ""),
+        "budgetExceeded": budget_exceeded,
+        "budgetExceededReason": "single-result-exceeds-token-budget" if budget_exceeded else "",
+    }
+
+
 class IndexQueryService:
     """Stable read-only query contract shared by MCP and future agent adapters."""
 
@@ -184,6 +219,7 @@ class IndexQueryService:
                     f"Database schema is {version}; UE Agent Kit requires schema {CURRENT_SCHEMA_VERSION}."
                 )
             assert_fts5_available(connection)
+            assert_index_schema_current(connection)
             try:
                 yield connection
             finally:
@@ -215,15 +251,30 @@ class IndexQueryService:
     def check(self) -> dict[str, Any]:
         with self._open() as connection:
             response = self._base_response(connection, "ue_index_status")
+            snapshot = compute_index_snapshot(connection, self.database_path)
             response["indexMetadata"] = {
                 "lastIndexedAtUtc": get_metadata(connection, "last_indexed_at_utc", ""),
+                "lastExportUtc": get_metadata(connection, "last_export_utc", ""),
                 "manifestSchemaVersion": get_metadata(connection, "last_manifest_schema", ""),
                 "exporterVersion": get_metadata(connection, "last_exporter_version", ""),
                 "profile": get_metadata(connection, "last_profile", ""),
                 "snapshotId": self._snapshot_id(connection),
+                "databasePath": snapshot["databasePath"],
+                "lastDatabasePath": snapshot["lastDatabasePath"],
+                "databasePathMatches": snapshot["databasePathMatches"],
+                "manifestSha256": snapshot["manifestSha256"],
+                "recordedManifestSha256": snapshot["recordedManifestSha256"],
+                "manifestMatches": snapshot["manifestMatches"],
+                "indexSnapshotState": snapshot["state"],
+                "indexSnapshotReasons": snapshot["reasons"],
+                "exportSnapshotState": snapshot["exportSnapshotState"],
+                "editorStateCompared": snapshot["editorStateCompared"],
+                "lastIndexChangeMode": snapshot["lastIndexChangeMode"],
+                "lastIndexFastPathSkips": snapshot["lastIndexFastPathSkips"],
                 "immutable": True,
                 "quiescent": True,
             }
+            response["indexSnapshot"] = snapshot
             response["stats"] = get_stats(connection)
             code_counts = connection.execute(
                 """
@@ -372,7 +423,7 @@ class IndexQueryService:
             rows = connection.execute(
                 """
                 SELECT asset_path, package_name, asset_class, profile, revision_value,
-                       file_size, modified_utc, content_sha256, package_dirty,
+                       file_size, modified_utc, content_sha256, canonical_sha256, package_dirty,
                        canonical_relpath
                 FROM assets
                 ORDER BY asset_path
@@ -389,7 +440,7 @@ class IndexQueryService:
             row = connection.execute(
                 """
                 SELECT asset_path, package_name, asset_class, profile, revision_value,
-                       file_size, modified_utc, content_sha256, package_dirty,
+                       file_size, modified_utc, content_sha256, canonical_sha256, package_dirty,
                        canonical_relpath
                 FROM assets
                 WHERE asset_path = ?
@@ -519,16 +570,14 @@ class IndexQueryService:
             reason = "token-budget"
         elif query_has_more:
             reason = "page-limit"
-        elif estimated_tokens > max_output_tokens:
-            reason = "single-result-exceeds-token-budget"
         else:
             reason = ""
-        response["outputBudget"] = {
-            "maxTokens": max_output_tokens,
-            "estimatedTokens": estimate_json_tokens(response),
-            "truncated": has_more or estimated_tokens > max_output_tokens,
-            "truncationReason": reason,
-        }
+        response["outputBudget"] = _output_budget(
+            max_output_tokens=max_output_tokens,
+            estimated_tokens=estimated_tokens,
+            withheld=has_more,
+            reasons=(reason,),
+        )
         return response
 
     def search(
@@ -749,12 +798,11 @@ class IndexQueryService:
                 }
             )
             if asset is None:
-                response["outputBudget"] = {
-                    "maxTokens": max_output_tokens,
-                    "estimatedTokens": estimate_json_tokens(response),
-                    "truncated": False,
-                    "truncationReason": "",
-                }
+                response["outputBudget"] = _output_budget(
+                    max_output_tokens=max_output_tokens,
+                    estimated_tokens=estimate_json_tokens(response),
+                    withheld=False,
+                )
                 return response
 
             payload: dict[str, Any] = {}
@@ -823,8 +871,6 @@ class IndexQueryService:
                     reason = "token-budget"
                 elif query_has_more:
                     reason = "section-limit"
-                elif estimate_json_tokens(response) > max_output_tokens:
-                    reason = "single-result-exceeds-token-budget"
                 else:
                     reason = ""
                 if reason and reason not in truncation_reasons:
@@ -841,19 +887,15 @@ class IndexQueryService:
                 }
 
             response["asset"] = payload
-            estimated_tokens = estimate_json_tokens(response)
-            truncated = any(
-                bool(section_info["hasMore"])
-                for section_info in response["sectionPagination"].values()
-            ) or estimated_tokens > max_output_tokens
-            if estimated_tokens > max_output_tokens and "single-result-exceeds-token-budget" not in truncation_reasons:
-                truncation_reasons.append("single-result-exceeds-token-budget")
-            response["outputBudget"] = {
-                "maxTokens": max_output_tokens,
-                "estimatedTokens": estimate_json_tokens(response),
-                "truncated": truncated,
-                "truncationReason": ",".join(truncation_reasons),
-            }
+            response["outputBudget"] = _output_budget(
+                max_output_tokens=max_output_tokens,
+                estimated_tokens=estimate_json_tokens(response),
+                withheld=any(
+                    bool(section_info["hasMore"])
+                    for section_info in response["sectionPagination"].values()
+                ),
+                reasons=tuple(truncation_reasons),
+            )
             return response
 
     def find_references(
@@ -1027,3 +1069,401 @@ class IndexQueryService:
                 )
             )
             return trim_impact_response(response, max_output_tokens)
+
+    # ------------------------------------------------------------------ #
+    # World Index V2 (map actors)
+    # ------------------------------------------------------------------ #
+
+    def _world_paged_response(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        tool: str,
+        base: dict[str, Any],
+        results: list[dict[str, Any]],
+        total: int,
+        limit: int,
+        offset: int,
+        max_output_tokens: int,
+        token_state: dict[str, Any],
+        source: str,
+    ) -> dict[str, Any]:
+        """World-actor paging: caller already fetched one bounded page."""
+
+        def build_payload(selected: list[dict[str, Any]]) -> dict[str, Any]:
+            candidate = dict(base)
+            candidate["results"] = selected
+            candidate["pagination"] = {
+                "limit": limit,
+                "offset": offset,
+                "resultCount": len(selected),
+                "total": total,
+                "hasMore": len(selected) < len(results) or (offset + len(selected)) < total,
+                "mayHaveMore": len(selected) < len(results) or (offset + len(selected)) < total,
+                "continuationToken": "ct_placeholder________________________",
+                "source": source,
+            }
+            return candidate
+
+        selected, _ = fit_sequence_to_budget(
+            results,
+            max_output_tokens=max_output_tokens,
+            build_payload=build_payload,
+            force_one=True,
+        )
+        # "more exists" covers both cases: the page was cut by the token budget
+        # and/or the SQL page ended before the total row count.
+        has_more = len(selected) < len(results) or (offset + len(selected)) < total
+        continuation_token = ""
+        if has_more:
+            continuation_token = self._continuations.issue(
+                tool=tool,
+                snapshot_id=self._snapshot_id(connection),
+                state={**token_state, "offset": offset + len(selected)},
+            )
+        response = dict(base)
+        response["pagination"] = {
+            "limit": limit,
+            "offset": offset,
+            "resultCount": len(selected),
+            "total": total,
+            "hasMore": has_more,
+            "mayHaveMore": has_more,
+            "continuationToken": continuation_token,
+            "source": source,
+        }
+        response["results"] = selected
+        reason = ""
+        if len(selected) < len(results):
+            reason = "token-budget"
+        elif (offset + len(selected)) < total:
+            reason = "page-limit"
+        response["outputBudget"] = _output_budget(
+            max_output_tokens=max_output_tokens,
+            estimated_tokens=estimate_json_tokens(response),
+            withheld=has_more,
+            reasons=(reason,),
+        )
+        return response
+
+    def find_world_actors(
+        self,
+        *,
+        world: str = "",
+        class_path: str = "",
+        class_contains: str = "",
+        tag: str = "",
+        data_layer: str = "",
+        label_contains: str = "",
+        include_component_classes: bool = False,
+        limit: int = 50,
+        offset: int = 0,
+        continuation_token: str = "",
+        max_output_tokens: int = DEFAULT_OUTPUT_TOKEN_BUDGET,
+    ) -> dict[str, Any]:
+        """Read-only map actor query over the World V2 side tables."""
+
+        with self._open() as connection:
+            snapshot_id = self._snapshot_id(connection)
+            source = "parameters"
+            if continuation_token:
+                state = self._continuations.resolve(
+                    continuation_token,
+                    tool="ue_find_world_actors",
+                    snapshot_id=snapshot_id,
+                )
+                world = str(state["world"])
+                class_path = str(state["classPath"])
+                class_contains = str(state["classContains"])
+                tag = str(state["tag"])
+                data_layer = str(state["dataLayer"])
+                label_contains = str(state["labelContains"])
+                include_component_classes = bool(state["includeComponentClasses"])
+                limit = int(state["limit"])
+                offset = int(state["offset"])
+                max_output_tokens = int(state["maxOutputTokens"])
+                source = "continuation-token"
+            else:
+                world = _indexed_asset_path(world, name="world")
+                class_path = _clean_text(class_path, name="class_path", maximum=1024)
+                class_contains = _clean_text(class_contains, name="class_contains", maximum=512)
+                tag = _clean_text(tag, name="tag", maximum=256)
+                data_layer = _clean_text(data_layer, name="data_layer", maximum=256)
+                label_contains = _clean_text(label_contains, name="label_contains", maximum=512)
+                limit = _bounded_limit(limit, maximum=MAX_MCP_WORLD_ACTOR_LIMIT, name="limit")
+                offset = _bounded_offset(offset)
+                max_output_tokens = normalize_output_token_budget(max_output_tokens)
+
+            world_available = world_index_v2.world_schema_present(connection)
+            if world_available:
+                page = world_index_v2.find_world_actors(
+                    connection,
+                    world=world,
+                    class_path=class_path,
+                    class_contains=class_contains,
+                    tag=tag,
+                    data_layer=data_layer,
+                    label_contains=label_contains,
+                    include_component_classes=include_component_classes,
+                    limit=limit,
+                    offset=offset,
+                )
+            else:
+                page = {
+                    "actors": [],
+                    "total": 0,
+                    "hasMore": False,
+                    "worlds": [],
+                }
+            # only the maps relevant to this call; the full listing is the
+            # summary tool's job, and an unbounded status block would blow the
+            # output budget before any actor is returned
+            status = world_index_v2.world_status(connection, world=world, limit=8)
+
+            response = self._base_response(connection, "ue_find_world_actors")
+            response.update(
+                {
+                    "worldIndexAvailable": world_available,
+                    "world": world,
+                    "filters": {
+                        "world": world,
+                        "classPath": class_path,
+                        "classContains": class_contains,
+                        "tag": tag,
+                        "dataLayer": data_layer,
+                        "labelContains": label_contains,
+                        "includeComponentClasses": include_component_classes,
+                    },
+                    "coverage": status["coverage"],
+                    "complete": status["complete"],
+                    "worldStatus": status,
+                    "warnings": status["warnings"],
+                }
+            )
+            return self._world_paged_response(
+                connection=connection,
+                tool="ue_find_world_actors",
+                base=response,
+                results=page["actors"],
+                total=int(page["total"]),
+                limit=limit,
+                offset=offset,
+                max_output_tokens=max_output_tokens,
+                token_state={
+                    "world": world,
+                    "classPath": class_path,
+                    "classContains": class_contains,
+                    "tag": tag,
+                    "dataLayer": data_layer,
+                    "labelContains": label_contains,
+                    "includeComponentClasses": include_component_classes,
+                    "limit": limit,
+                    "maxOutputTokens": max_output_tokens,
+                },
+                source=source,
+            )
+
+    def find_world_partition_actors(
+        self,
+        *,
+        world: str = "",
+        base_class_path: str = "",
+        class_contains: str = "",
+        tag: str = "",
+        data_layer: str = "",
+        folder_prefix: str = "",
+        limit: int = 50,
+        offset: int = 0,
+        continuation_token: str = "",
+        max_output_tokens: int = DEFAULT_OUTPUT_TOKEN_BUDGET,
+    ) -> dict[str, Any]:
+        """Read-only World Partition descriptor query (before-load metadata + bounds)."""
+
+        with self._open() as connection:
+            snapshot_id = self._snapshot_id(connection)
+            source = "parameters"
+            if continuation_token:
+                state = self._continuations.resolve(
+                    continuation_token,
+                    tool="ue_find_world_partition_actors",
+                    snapshot_id=snapshot_id,
+                )
+                world = str(state["world"])
+                base_class_path = str(state["baseClassPath"])
+                class_contains = str(state["classContains"])
+                tag = str(state["tag"])
+                data_layer = str(state["dataLayer"])
+                folder_prefix = str(state["folderPrefix"])
+                limit = int(state["limit"])
+                offset = int(state["offset"])
+                max_output_tokens = int(state["maxOutputTokens"])
+                source = "continuation-token"
+            else:
+                world = _indexed_asset_path(world, name="world")
+                base_class_path = _clean_text(base_class_path, name="base_class_path", maximum=1024)
+                class_contains = _clean_text(class_contains, name="class_contains", maximum=512)
+                tag = _clean_text(tag, name="tag", maximum=256)
+                data_layer = _clean_text(data_layer, name="data_layer", maximum=256)
+                folder_prefix = _clean_text(folder_prefix, name="folder_prefix", maximum=512)
+                limit = _bounded_limit(limit, maximum=MAX_MCP_WORLD_ACTOR_LIMIT, name="limit")
+                offset = _bounded_offset(offset)
+                max_output_tokens = normalize_output_token_budget(max_output_tokens)
+
+            world_available = world_index_v2.world_schema_present(connection)
+            if world_available:
+                page = world_index_v2.find_world_partition_actors(
+                    connection,
+                    world=world,
+                    base_class_path=base_class_path,
+                    class_contains=class_contains,
+                    tag=tag,
+                    data_layer=data_layer,
+                    folder_prefix=folder_prefix,
+                    limit=limit,
+                    offset=offset,
+                )
+            else:
+                page = {"actors": [], "total": 0, "hasMore": False, "worlds": []}
+            status = world_index_v2.world_status(connection, world=world, limit=8)
+            # World export coverage is distinct from WP descriptor coverage.
+            selected = status["worlds"][0] if world and len(status["worlds"]) == 1 else None
+            wp_available = selected.get("worldPartitionAvailable") if selected else None
+            wp_metadata = selected.get("actorDescMetadataAvailable") if selected else None
+            wp_warnings = list(status["warnings"])
+            if wp_available is False:
+                wp_coverage = "not-applicable"
+                wp_warnings.append(
+                    "This map is not a World Partition map. Empty descriptors "
+                    "do not verify World Partition coverage."
+                )
+            elif wp_available is True and wp_metadata is False:
+                wp_coverage = "metadata-unavailable"
+            elif wp_available is True:
+                wp_coverage = status["coverage"]
+            else:
+                wp_coverage = "unknown"
+
+            response = self._base_response(connection, "ue_find_world_partition_actors")
+            response.update(
+                {
+                    "worldIndexAvailable": world_available,
+                    "worldPartitionAvailable": wp_available,
+                    "actorDescMetadataAvailable": wp_metadata,
+                    "worldPartitionCoverage": wp_coverage,
+                    "world": world,
+                    "filters": {
+                        "world": world,
+                        "baseClassPath": base_class_path,
+                        "classContains": class_contains,
+                        "tag": tag,
+                        "dataLayer": data_layer,
+                        "folderPrefix": folder_prefix,
+                    },
+                    "coverage": status["coverage"],
+                    "complete": status["complete"],
+                    "worldStatus": status,
+                    "warnings": wp_warnings,
+                }
+            )
+            return self._world_paged_response(
+                connection=connection,
+                tool="ue_find_world_partition_actors",
+                base=response,
+                results=page["actors"],
+                total=int(page["total"]),
+                limit=limit,
+                offset=offset,
+                max_output_tokens=max_output_tokens,
+                token_state={
+                    "world": world,
+                    "baseClassPath": base_class_path,
+                    "classContains": class_contains,
+                    "tag": tag,
+                    "dataLayer": data_layer,
+                    "folderPrefix": folder_prefix,
+                    "limit": limit,
+                    "maxOutputTokens": max_output_tokens,
+                },
+                source=source,
+            )
+
+    def get_world_summary(
+        self,
+        *,
+        world: str = "",
+        limit: int = 50,
+        continuation_token: str = "",
+        max_output_tokens: int = DEFAULT_OUTPUT_TOKEN_BUDGET,
+    ) -> dict[str, Any]:
+        """Coverage/freshness summary for one map or for every indexed map."""
+
+        with self._open() as connection:
+            snapshot_id = self._snapshot_id(connection)
+            source = "parameters"
+            if continuation_token:
+                state = self._continuations.resolve(
+                    continuation_token,
+                    tool="ue_get_world_summary",
+                    snapshot_id=snapshot_id,
+                )
+                world = str(state["world"])
+                limit = int(state["limit"])
+                offset = int(state["offset"])
+                max_output_tokens = int(state["maxOutputTokens"])
+                source = "continuation-token"
+            else:
+                world = _indexed_asset_path(world, name="world")
+                limit = _bounded_limit(
+                    limit, maximum=world_index_v2.MAX_WORLD_STATUS_ENTRIES, name="limit"
+                )
+                offset = 0
+                max_output_tokens = normalize_output_token_budget(max_output_tokens)
+
+            status = world_index_v2.world_status(connection, world=world, limit=limit, offset=offset)
+            rows = status["worlds"]
+            page = rows  # World status already applied SQL pagination.
+            has_more = status["worldsTruncated"]
+            continuation = ""
+            if has_more:
+                continuation = self._continuations.issue(
+                    tool="ue_get_world_summary",
+                    snapshot_id=snapshot_id,
+                    state={
+                        "world": world,
+                        "limit": limit,
+                        "offset": offset + len(page),
+                        "maxOutputTokens": max_output_tokens,
+                    },
+                )
+
+            response = self._base_response(connection, "ue_get_world_summary")
+            response.update(
+                {
+                    "worldIndexAvailable": status["schemaAvailable"],
+                    "world": world,
+                    "coverage": status["coverage"],
+                    "coverageScope": status["coverageScope"],
+                    "complete": status["complete"],
+                    "targetFound": status["targetFound"],
+                    "indexBuild": status["indexBuild"],
+                    "warnings": status["warnings"],
+                    "pagination": {
+                        "limit": limit,
+                        "offset": offset,
+                        "resultCount": len(page),
+                        "total": status["totalWorlds"],
+                        "hasMore": has_more,
+                        "mayHaveMore": has_more,
+                        "continuationToken": continuation,
+                        "source": source,
+                    },
+                    "results": page,
+                }
+            )
+            response["outputBudget"] = _output_budget(
+                max_output_tokens=max_output_tokens,
+                estimated_tokens=estimate_json_tokens(response),
+                withheld=has_more,
+                reasons=("page-limit",) if has_more else (),
+            )
+            return response

@@ -1415,7 +1415,9 @@ class AgentWorkflowTests(unittest.TestCase):
 
     def test_live_write_tool_count_and_names_include_verification_trust(self) -> None:
         names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
-        self.assertEqual(len(names), 102)
+        self.assertEqual(len(names), 110)
+        self.assertIn("ue_get_pie_world_contexts", names)
+        self.assertIn("ue_inspect_pie_actor", names)
         self.assertIn("ue_analyze_change_impact", names)
         self.assertIn("ue_analyze_semantic_diff", names)
         self.assertIn("ue_build_verification_plan", names)
@@ -3002,7 +3004,7 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertIn(applied["liveApplyReceipt"], service._live_applies)
         status = service.status()
         self.assertEqual(status["publishedVersion"], "0.8.0")
-        self.assertEqual(status["developmentLine"], "0.8.0")
+        self.assertEqual(status["developmentLine"], "0.9.0.dev1")
         self.assertEqual(status["liveWriteJournal"]["journalErrorCount"], 1)
 
     def test_live_write_journal_recovers_and_closes_exact_receipt(self) -> None:

@@ -731,7 +731,7 @@ namespace UEAgentKitGraphLayoutP6
 		Metadata->SetStringField(TEXT("engineVersion"), FEngineVersion::Current().ToString());
 		Metadata->SetStringField(TEXT("projectName"), FApp::GetProjectName());
 		Metadata->SetStringField(TEXT("exporterSchemaVersion"), TEXT("1.1"));
-		Metadata->SetStringField(TEXT("exporterVersion"), TEXT("0.8.0"));
+		Metadata->SetStringField(TEXT("exporterVersion"), TEXT("0.9.0.dev1"));
 		Metadata->SetStringField(TEXT("profile"), TEXT("full"));
 		Metadata->SetNumberField(TEXT("nodeCount"), Graph->Nodes.Num());
 		Metadata->SetStringField(

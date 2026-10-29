@@ -133,6 +133,115 @@ class ProjectMemoryCliTests(unittest.TestCase):
         self.assertFalse(first["reused"])
         self.assertTrue(second["reused"])
 
+    def test_memory_maintain_context_requires_explicit_opt_in(self) -> None:
+        self.build_index("sha256:" + REVISION_A)
+        args = self.parse(
+            "memory",
+            "maintain-context",
+            *self.memory_arguments(),
+            "--index-database",
+            str(self.index_path),
+        )
+        result, code = run(args)
+        self.assertEqual(code, 0)
+        self.assertEqual(result["tool"], "ue_memory_maintain_context")
+        self.assertFalse(result["enabled"])
+        self.assertEqual(result["state"], "disabled")
+        self.assertEqual(result["action"], "none")
+        self.assertEqual(result["reason"], "maintenance-disabled")
+
+    def test_memory_maintain_context_rebuilds_then_noops(self) -> None:
+        self.build_index("sha256:" + REVISION_A)
+        args = self.parse(
+            "memory",
+            "maintain-context",
+            *self.memory_arguments(),
+            "--index-database",
+            str(self.index_path),
+            "--enable-context-maintenance",
+        )
+        first, first_code = run(args)
+        self.assertEqual(first_code, 0)
+        self.assertEqual(first["state"], "current")
+        self.assertEqual(first["action"], "rebuild")
+        self.assertTrue(first["rebuilt"])
+        snapshot_id = first["snapshotId"]
+
+        self.service.add_record(
+            MemoryRecordDraft(
+                project_key=PROJECT,
+                record_type=MemoryRecordType.PROJECT_RULE,
+                subject_key="maintenance-cli-rule",
+                title="Maintenance CLI rule",
+                body="A new rule requires a snapshot rebuild.",
+                source_kind=MemorySourceKind.USER_CONFIRMED,
+            )
+        )
+        stale, stale_code = run(args)
+        self.assertEqual(stale_code, 0)
+        self.assertEqual(stale["action"], "rebuild")
+        self.assertEqual(stale["reason"], "source-generation-changed")
+        self.assertTrue(stale["rebuilt"])
+        self.assertNotEqual(stale["snapshotId"], snapshot_id)
+
+        second, second_code = run(args)
+        self.assertEqual(second_code, 0)
+        self.assertEqual(second["action"], "none")
+        self.assertEqual(second["reason"], "snapshot-current")
+        self.assertEqual(second["snapshotId"], stale["snapshotId"])
+
+    def test_memory_preflight_requires_explicit_opt_in(self) -> None:
+        self.build_index("sha256:" + REVISION_A)
+        args = self.parse(
+            "memory",
+            "preflight-context",
+            *self.memory_arguments(),
+            "--index-database",
+            str(self.index_path),
+        )
+        result, code = run(args)
+        self.assertEqual(code, 0)
+        self.assertEqual(result["tool"], "ue_memory_session_preflight")
+        self.assertFalse(result["enabled"])
+        self.assertEqual(result["state"], "disabled")
+        self.assertFalse(result["available"])
+        self.assertEqual(result["text"], "")
+        self.assertTrue(result["textOmitted"])
+
+    def test_memory_preflight_omits_text_unless_requested(self) -> None:
+        self.build_index("sha256:" + REVISION_A)
+        args = self.parse(
+            "memory",
+            "preflight-context",
+            *self.memory_arguments(),
+            "--index-database",
+            str(self.index_path),
+            "--enable-session-preflight",
+        )
+        metadata, metadata_code = run(args)
+        self.assertEqual(metadata_code, 0)
+        self.assertEqual(metadata["state"], "fresh")
+        self.assertTrue(metadata["available"])
+        self.assertEqual(metadata["text"], "")
+        self.assertTrue(metadata["textOmitted"])
+        self.assertGreaterEqual(metadata["l3Entries"], 1)
+
+        with_text_args = self.parse(
+            "memory",
+            "preflight-context",
+            *self.memory_arguments(),
+            "--index-database",
+            str(self.index_path),
+            "--enable-session-preflight",
+            "--include-text",
+        )
+        with_text, with_text_code = run(with_text_args)
+        self.assertEqual(with_text_code, 0)
+        self.assertEqual(with_text["state"], "fresh")
+        self.assertIn("Text format", with_text["text"])
+        self.assertFalse(with_text["textOmitted"])
+        self.assertEqual(with_text["snapshotId"], metadata["snapshotId"])
+
     def test_memory_distill_reports_validation_and_chain_verdicts(self) -> None:
         artifact_root = self.root / "workflow"
         artifact_root.mkdir(parents=True, exist_ok=True)
