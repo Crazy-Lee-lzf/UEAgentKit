@@ -6,10 +6,10 @@
 
 ## 版本与权限边界
 
-- 已发布 `v0.8.0` 的能力及限制见 [0.8.0 状态](PROJECT_STATUS.md) 和 [Release Notes](RELEASE_0.8.0.md)。本地开发分支可能包含额外的实验性功能，不代表 GitHub 用户已获得该能力。
+- 当前已发布预览版为 [`v0.9.0-dev1`](RELEASE_0.9.0_PREVIEW.md)，上一个稳定版为 [`v0.8.0`](RELEASE_0.8.0.md)。请先阅读 [当前能力状态](PROJECT_STATUS.md)；仅出现在本地开发分支的功能不应当视为已随 DP1 发布。
 - 普通查询优先只读；稳定写入 Tool 必须由服务端启动模式、固定工程及 Write Policy 授权。调用方**不能**在 Tool 参数中变更工程、引擎、数据库、Policy 或 Editor Endpoint。
 - 例外：默认关闭的 `--enable-experimental-graphpatch-edit` Blueprint 结构写入不经过 Write Policy，只受实验 flag、工程 ini、精确 plan/confirmation、资产/图身份和 Clean/PIE 校验约束；不得用于生产项目。
-- 蓝图通用 Graph Node CRUD、任意资产/Actor 编辑、任意 Shell/Python 执行、自动 Save All 均不是 v0.8.0 的开放能力。Native Registry / Native Layout Preview 和 R7 Staged Context Handoff 等后续研发功能不能因源码存在就视为默认可用。
+- 0.9.0 DP1 **没有**开放任意 Graph Node CRUD、任意资产/Actor 编辑、任意 Shell/Python 执行或自动 Save All。部分 Native 工具及 Memory Mount 能力可能存在但仍受开关和运行时能力发现约束，不能因源码存在就假定默认可用。
 
 ## 1. 用户完成一次性环境接入
 

@@ -1,6 +1,6 @@
 # UE Agent Kit Roadmap
 
-The latest published release is **0.8.0**. These are product directions, not shipping commitments or dates.
+The latest published prerelease is **0.9.0 Developer Preview 1 (v0.9.0-dev1)**; the previous stable release remains **v0.8.0**. These are future product directions, not shipping commitments or dates.
 
 ## P0: Blueprint core workflows and PIE diagnosis
 

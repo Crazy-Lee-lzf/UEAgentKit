@@ -1,7 +1,8 @@
-# UE Agent Kit 0.8.0 Capability Status
+# UE Agent Kit Current Capability Status (0.9.0 Developer Preview 1)
 
-Latest published release: **0.8.0** (this page describes the `v0.8.0` tag, not later local-only experimental changes)
-Published 0.8.0: **Python 3.11–3.12**; 0.9.0 Developer Preview 1 candidate (0.9.0.dev1): **Unreal Engine 5.6 / Windows / Python 3.11–3.14**
+Latest published prerelease: **v0.9.0-dev1 / 0.9.0.dev1**, for **Unreal Engine 5.6 / Windows x64 / Python 3.11–3.14**. The previous stable release is **v0.8.0** (Python 3.11–3.12).
+
+The core capabilities below carry forward from 0.8.0; see [0.9.0 release notes](RELEASE_0.9.0_PREVIEW_EN.md) for default-off preview features and their acceptance limitations.
 
 
 ## Product position
@@ -109,7 +110,7 @@ Explicitly unavailable:
 
 ## MCP tool surface
 
-Source Control is disabled by default.
+Source Control is disabled by default. The following table is the **historical v0.8.0 tool registration baseline**, not a live count for 0.9.0 DP1.
 
 | Mode | Base | + Memory | + Source Control | + Memory + Source Control |
 |---|---:|---:|---:|---:|
@@ -120,9 +121,9 @@ Source Control is disabled by default.
 
 Tool counts represent interface surface, not mutation breadth; many tools are read-only queries, planning, verification, or status operations.
 
-This page describes the released `v0.8.0` tag only. See the [candidate preview](RELEASE_0.9.0_PREVIEW_EN.md) for proposed changes and always query `ue_get_capabilities` for active tools.
+The latest public prerelease is [v0.9.0-dev1](RELEASE_0.9.0_PREVIEW_EN.md). Always query `ue_get_capabilities` for the deployed server's actual tools, enabled modes and limits.
 
-## Explicit non-goals in 0.8.0
+## General interfaces still not provided in 0.9.0 DP1
 
 - Arbitrary Blueprint Graph node CRUD / rewiring.
 - Arbitrary Level Actor spawn/delete/transform/property editing.

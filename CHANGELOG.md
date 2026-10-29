@@ -2,15 +2,15 @@
 
 All notable changes to UE Agent Kit are documented here.
 
-## 0.9.0.dev1 — Developer Preview 1 (local candidate)
+## 0.9.0.dev1 — Developer Preview 1 (published prerelease)
 
-This section describes candidate development changes, not a published release. Stable v0.8.0 remains unchanged. See the [candidate release notes](docs/RELEASE_0.9.0_PREVIEW_EN.md).
+The [v0.9.0-dev1 prerelease](https://github.com/Crazy-Lee-lzf/UEAgentKit/releases/tag/v0.9.0-dev1) is published and its curated sources are merged into public main. v0.8.0 remains the previous stable release. See the [DP1 release notes](docs/RELEASE_0.9.0_PREVIEW_EN.md).
 
 - Added default-off, double-opt-in bounded Blueprint structure tools: GraphEdit with eight allowlisted node types, typed unlinked pin defaults, top-level user-variable creation, single-edge rewire, and isolated allowlisted node removal. Each family uses Preview → exact plan/confirmation → Apply → explicit Save, never auto-saves or compiles, and remains outside the project Write Policy allowlist.
-- Added the corresponding Agent-facing focus/preflight helpers, read-only fresh-process reload verification, and end-to-end MCP evidence. These are internal-preview capabilities, not a production default.
+- Added the corresponding Agent-facing focus/preflight helpers, read-only fresh-process reload verification, and end-to-end MCP evidence. These are opt-in developer-preview capabilities, not a production default.
 - Added Project Memory schema v7 with a CJK-expanded `search_text` projection and external-content FTS5 rebuild, so Han/Kana/Hangul substrings such as `护甲` inside `护甲升级链` are recalled without changing the ASCII search API or ranked order. The v6→v7 migration is transactional, verifies with `quick_check`, fails closed on partial/newer schemas, and preserves v6 backups, embeddings, context snapshots, and linked data.
-- Validated the local UE 5.6.1 integrated candidate: constrained CallFunction, same-Blueprint Pure Function calls with native-tested int literals, indexless pure-Live MCP, and PIE scalar inspection with native declaring-class provenance. Candidate only; not yet published.
-- Clarified public documentation so the stable v0.8.0 Write Policy boundary is not presented as covering the experimental tools.
+- Validated the local UE 5.6.1 integrated candidate: constrained CallFunction, same-Blueprint Pure Function calls with native-tested int literals, indexless pure-Live MCP, and PIE scalar inspection with native declaring-class provenance. The integrated-candidate evidence does not imply all operations were separately native-tested against the final distributed ZIP.
+- Clarified that experimental tools are outside the stable Write Policy allowlist; the preview remains default-off.
 
 ## 0.8.0 — agent workflow, memory, knowledge web, and P4 collaboration
 

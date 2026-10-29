@@ -2,7 +2,7 @@
 
 [English](DEVELOPER_WORKFLOWS_EN.md)
 
-**先调用 `ue_get_capabilities`。** 当前公开稳定版本为 0.8.0；下面的 Live/实验工具只在已部署服务器实际注册时可用。
+**先调用 `ue_get_capabilities`。** 最新公开预发布为 0.9.0 DP1（旧稳定版为 0.8.0）；下面的 Live/实验工具只在已部署服务器实际注册并启用时可用。
 
 ## Blueprint 与 C++ 查询
 
@@ -14,7 +14,7 @@
 
 ## PIE Server/Client 只读排障
 
-固定项目的 MCP 必须启用 Live Editor、Editor 正在 PIE。有索引 Live 与**无索引 Pure Live** 两种路径已通过本地候选验收；实际可用性仍以部署服务器的 ue_get_capabilities 和已注册工具为准。当前公开 0.8.0 的能力不因此改变。
+固定项目的 MCP 必须启用 Live Editor、Editor 正在 PIE。有索引 Live 与**无索引 Pure Live** 路径有候选验收证据；实际可用性仍以服务器的 `ue_get_capabilities` 与已注册 Tool 为准，不将候选证据等同于对全部发布用例的保证。
 
 ```text
 ue_get_pie_state()

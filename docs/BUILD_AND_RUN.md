@@ -2,7 +2,7 @@
 
 本文面向从 GitHub 获取 UE Agent Kit 并接入 Unreal Engine 5.6 项目的用户。
 
-当前版本：**0.8.0**；本地 0.9.0 Developer Preview 1 候选为 **0.9.0.dev1**。
+当前最新公开预发布：**v0.9.0-dev1**（Python **0.9.0.dev1**，UE5.6/Win64）；上一个稳定版是 **v0.8.0**。请使用 [GitHub 0.9.0 DP1 Release](https://github.com/Crazy-Lee-lzf/UEAgentKit/releases/tag/v0.9.0-dev1) 安装包。
 
 ## 1. 环境要求
 
@@ -11,7 +11,7 @@ Windows 10 / 11
 Unreal Engine 5.6
 Visual Studio 2022 C++ Toolchain
 PowerShell 5.1+
-Python 3.11–3.14（0.8.0 已发布版为 3.11–3.12）
+Python 3.11–3.14（0.9.0 DP1；旧稳定版 0.8.0 为 3.11–3.12）
 P4 CLI（仅启用 Source Control 时需要）
 ```
 
@@ -141,7 +141,7 @@ scripts\ue-agent.cmd index stats
 
 索引构建默认是严格模式：逐个读取 Canonical、重新计算 SHA-256，并校验 revision/schema/exporter/profile。`--batch-size N`（默认 100）只改变 SQLite 提交批次，不减少逐资产校验；每个资产仍有独立 savepoint，失败资产会回滚，不会留下半条资产或 World V2 行。
 
-当 exporter manifest 的资产条目带有 `canonicalSha256`（也接受 `canonical_sha256`）时，Python 索引器可将其作为候选快速过滤：只有 manifest、schema/exporter 身份和 DB 中 canonical SHA 都一致才跳过 Canonical 读取/哈希。旧 manifest 没有该字段时自动走严格全量校验。真实 `AssetCatalogExport` 0.8.0 现在只为成功且已完整写盘的 Canonical 文件写入该字段，值是该文件原始 bytes 的 SHA-256；ReaderFailed、写盘失败或哈希失败不会写可信 hash。外部变更集是更显式的快速路径，必须提供 manifest 指纹和 exportRoot：
+当 exporter manifest 的资产条目带有 `canonicalSha256`（也接受 `canonical_sha256`）时，Python 索引器可将其作为候选快速过滤：只有 manifest、schema/exporter 身份和 DB 中 canonical SHA 都一致才跳过 Canonical 读取/哈希。旧 manifest 没有该字段时自动走严格全量校验。0.8.0 起的 `AssetCatalogExport` 仅为成功且已完整写盘的 Canonical 文件写入该字段，值是该文件原始 bytes 的 SHA-256；ReaderFailed、写盘失败或哈希失败不会写可信 hash。外部变更集是更显式的快速路径，必须提供 manifest 指纹和 exportRoot：
 
 ```json
 {
@@ -175,7 +175,7 @@ scripts\ue-agent.cmd references --target-asset /Game/Characters/BP_Player.BP_Pla
 ```bat
 python scripts\ValidateAssetCatalog.py ^
   --output Output\AssetCatalog ^
-  --expect-exporter 0.8.0
+  --expect-exporter 0.9.0.dev1
 ```
 
 ## 8. 启动 MCP
@@ -318,7 +318,7 @@ P4-managed Delete  人工执行
 python scripts\ValidateRelease.py --require-release-docs
 ```
 
-该检查覆盖版本一致性、Ruff、Python 测试、Schema 和示例 Patch。GitHub Actions 对 0.9.0 开发候选在 Python 3.11–3.14 上运行同类验证；已发布 0.8.0 验证为 3.11–3.12。
+该检查覆盖版本一致性、Ruff、Python 测试、Schema 和示例 Patch。已发布的 0.9.0 DP1 已由 GitHub Actions 在 Python 3.11–3.14 上完成四版本验证；旧稳定版 0.8.0 的发布矩阵为 3.11–3.12。
 
 正式 Windows Release 打包：
 
