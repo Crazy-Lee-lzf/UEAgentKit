@@ -66,6 +66,20 @@ class ReleaseValidationTests(unittest.TestCase):
         self.assertNotIn("Remove-Item -LiteralPath $StagingRoot -Recurse", script)
         self.assertIn("Assert-UeakPlainTree -Path $PluginPackage", script)
 
+    def test_editor_module_plugin_dependencies_are_declared(self) -> None:
+        import json
+
+        descriptor = json.loads(
+            (ROOT / "Plugin" / "UEAgentKit" / "UEAgentKit.uplugin").read_text(
+                encoding="utf-8"
+            )
+        )
+        enabled = {
+            item["Name"] for item in descriptor.get("Plugins", [])
+            if item.get("Enabled") is True
+        }
+        self.assertTrue({"IKRig", "Niagara", "DataValidation"}.issubset(enabled))
+
     def test_release_builder_requires_clean_tree_and_emits_hashed_artifacts(self) -> None:
         script = (ROOT / "scripts" / "BuildRelease.ps1").read_text(encoding="utf-8")
         self.assertIn("status --porcelain", script)

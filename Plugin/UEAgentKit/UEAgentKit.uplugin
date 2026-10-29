@@ -24,6 +24,10 @@
     {
       "Name": "DataValidation",
       "Enabled": true
+    },
+    {
+      "Name": "IKRig",
+      "Enabled": true
     }
   ]
 }
