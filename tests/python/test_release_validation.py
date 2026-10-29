@@ -66,6 +66,24 @@ class ReleaseValidationTests(unittest.TestCase):
         self.assertNotIn("Remove-Item -LiteralPath $StagingRoot -Recurse", script)
         self.assertIn("Assert-UeakPlainTree -Path $PluginPackage", script)
 
+    def test_native_project_sources_do_not_claim_epic_copyright(self) -> None:
+        # UEAgentKit's project-authored Native R1 files accidentally inherited
+        # a file header from the UE plugin template. Root LICENSE covers them.
+        native_root = ROOT / "Plugin" / "UEAgentKit" / "Source" / "UEAgentKitEditor"
+        protected = "Copyright Epic Games, Inc. All Rights Reserved."
+        sources = [
+            path
+            for path in native_root.rglob("*")
+            if path.is_file() and path.suffix in {".cpp", ".h", ".hpp"}
+        ]
+        self.assertTrue(sources)
+        for path in sources:
+            with self.subTest(path=path.relative_to(ROOT).as_posix()):
+                self.assertNotIn(
+                    protected, path.read_text(encoding="utf-8-sig")[:300]
+                )
+        self.assertTrue((ROOT / "LICENSE").read_text(encoding="utf-8").startswith("MIT License"))
+
     def test_editor_module_plugin_dependencies_are_declared(self) -> None:
         import json
 

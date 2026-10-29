@@ -1,5 +1,3 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
-
 #include "Native/NativeToolManifest.h"
 
 #include "Native/NativeCanonicalJson.h"
