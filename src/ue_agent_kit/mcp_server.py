@@ -50,10 +50,52 @@ from .impact_analysis import (
     SUPPORTED_SUBJECT_KINDS,
     UNSUPPORTED_SUBJECT_KINDS,
 )
+from .index_snapshot import apply_editor_freshness
 from .mcp_live_action_tools import register_live_action_tools
-from .mcp_live_tools import register_live_read_tools
+from .mcp_live_tools import GRAPH_CONTEXT_TOOL_NAME, register_live_read_tools
+from .mcp_pure_live_tools import (
+    PURE_LIVE_READ_TOOL_NAMES,
+    register_pure_live_meta_tools,
+)
 from .mcp_graph_layout_test_only import register_graph_layout_test_only_tool
 from .mcp_graph_layout_p8_test_only import register_graph_layout_p8_test_only_tool
+from .mcp_graph_layout_experimental import register_graph_layout_experimental_tools
+from .mcp_graph_edit_experimental import register_graph_edit_experimental_tools
+from .mcp_pin_default_edit_experimental import register_pin_default_edit_experimental_tools
+from .mcp_variable_write_experimental import register_variable_write_experimental_tools
+from .mcp_rewire_write_experimental import register_rewire_write_experimental_tools
+from .mcp_node_remove_write_experimental import register_node_remove_write_experimental_tools
+from .mcp_focus_blueprint_graph_experimental import register_focus_blueprint_graph_tool
+from .experimental_rewire_write import (
+    APPLY_TOOL_NAME as EXPERIMENTAL_REWIRE_APPLY_TOOL_NAME,
+    PREVIEW_TOOL_NAME as EXPERIMENTAL_REWIRE_PREVIEW_TOOL_NAME,
+    SAVE_TOOL_NAME as EXPERIMENTAL_REWIRE_SAVE_TOOL_NAME,
+)
+from .experimental_node_remove_write import (
+    APPLY_TOOL_NAME as EXPERIMENTAL_NODE_REMOVE_APPLY_TOOL_NAME,
+    PREVIEW_TOOL_NAME as EXPERIMENTAL_NODE_REMOVE_PREVIEW_TOOL_NAME,
+    SAVE_TOOL_NAME as EXPERIMENTAL_NODE_REMOVE_SAVE_TOOL_NAME,
+)
+from .experimental_variable_write import (
+    APPLY_TOOL_NAME as EXPERIMENTAL_VARIABLE_APPLY_TOOL_NAME,
+    PREVIEW_TOOL_NAME as EXPERIMENTAL_VARIABLE_PREVIEW_TOOL_NAME,
+    SAVE_TOOL_NAME as EXPERIMENTAL_VARIABLE_SAVE_TOOL_NAME,
+)
+from .experimental_graph_edit import (
+    APPLY_TOOL_NAME as EXPERIMENTAL_GRAPH_EDIT_APPLY_TOOL_NAME,
+    PREVIEW_TOOL_NAME as EXPERIMENTAL_GRAPH_EDIT_PREVIEW_TOOL_NAME,
+    SAVE_TOOL_NAME as EXPERIMENTAL_GRAPH_EDIT_SAVE_TOOL_NAME,
+    GraphEditError,
+)
+from .experimental_pin_default_edit import (
+    APPLY_TOOL_NAME as EXPERIMENTAL_PIN_DEFAULT_APPLY_TOOL_NAME,
+    PREVIEW_TOOL_NAME as EXPERIMENTAL_PIN_DEFAULT_PREVIEW_TOOL_NAME,
+    SAVE_TOOL_NAME as EXPERIMENTAL_PIN_DEFAULT_SAVE_TOOL_NAME,
+)
+from .experimental_graph_layout import (
+    APPLY_TOOL_NAME as EXPERIMENTAL_APPLY_TOOL_NAME,
+    SAVE_TOOL_NAME as EXPERIMENTAL_SAVE_TOOL_NAME,
+)
 from .p7_test_only import APPLY_TOOL_NAME, FIXED_ASSET_PATH, FIXED_PROJECT_PATH, is_fixed_project
 from .p8_test_only import (
     APPLY_TOOL_NAME as P8_APPLY_TOOL_NAME,
@@ -62,6 +104,10 @@ from .p8_test_only import (
     is_fixed_project as is_fixed_p8_project,
 )
 from .mcp_memory_tools import register_memory_tools
+from .mcp_graph_patch_tools import (
+    GRAPH_PATCH_PREVIEW_TOOL_NAME,
+    register_graph_patch_tools,
+)
 from .mcp_query_tools import register_query_tools
 from .mcp_realtime_tools import register_realtime_tools
 from .mcp_source_control_tools import register_source_control_tools
@@ -103,6 +149,7 @@ from .tool_registry import (
     LIVE_EDITOR_TOOL_NAMES,
     MEMORY_TOOL_NAMES,
     SOURCE_CONTROL_TOOL_NAMES,
+    TOOL_DEFINITIONS_BY_NAME,
     tool_descriptors_for_mode,
 )
 from .snapshot_lifecycle import (
@@ -299,12 +346,62 @@ def _capabilities_response(
     *,
     p7_test_only_graph_layout_apply: bool = False,
     p8_test_only_graph_layout_apply: bool = False,
+    experimental_graph_layout_apply: bool = False,
+    experimental_graphpatch_edit: bool = False,
+    live_editor_status: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     write_tools_enabled = workflow_service is not None
     commit_enabled = bool(workflow_service and workflow_service.config.commit_enabled)
     live_editor_enabled = live_editor_service is not None
     memory_enabled = memory_service is not None
     source_control_enabled = source_control_service is not None
+    experimental_registered = bool(live_editor_enabled and experimental_graph_layout_apply)
+    observed_capabilities = (
+        live_editor_status.get("capabilities")
+        if isinstance(live_editor_status, dict)
+        and live_editor_status.get("state") == "available"
+        else []
+    )
+    experimental_plugin_opt_in = bool(
+        isinstance(observed_capabilities, list)
+        and "editor.applyBlueprintGraphLayoutExperimental" in observed_capabilities
+        and "editor.saveBlueprintGraphLayoutExperimental" in observed_capabilities
+    )
+    graph_edit_registered = bool(live_editor_enabled and experimental_graphpatch_edit)
+    graph_edit_plugin_opt_in = bool(
+        isinstance(observed_capabilities, list)
+        and "editor.previewBlueprintGraphEditExperimental" in observed_capabilities
+        and "editor.applyBlueprintGraphEditExperimental" in observed_capabilities
+        and "editor.saveBlueprintGraphEditExperimental" in observed_capabilities
+    )
+    pin_default_registered = bool(live_editor_enabled and experimental_graphpatch_edit)
+    pin_default_plugin_opt_in = bool(
+        isinstance(observed_capabilities, list)
+        and "editor.previewBlueprintPinDefaultsExperimental" in observed_capabilities
+        and "editor.applyBlueprintPinDefaultsExperimental" in observed_capabilities
+        and "editor.saveBlueprintPinDefaultsExperimental" in observed_capabilities
+    )
+    variable_write_registered = bool(live_editor_enabled and experimental_graphpatch_edit)
+    variable_write_plugin_opt_in = bool(
+        isinstance(observed_capabilities, list)
+        and "editor.previewBlueprintVariableCreateExperimental" in observed_capabilities
+        and "editor.applyBlueprintVariableCreateExperimental" in observed_capabilities
+        and "editor.saveBlueprintVariableCreateExperimental" in observed_capabilities
+    )
+    rewire_write_registered = bool(live_editor_enabled and experimental_graphpatch_edit)
+    rewire_write_plugin_opt_in = bool(
+        isinstance(observed_capabilities, list)
+        and "editor.previewBlueprintRewireExperimental" in observed_capabilities
+        and "editor.applyBlueprintRewireExperimental" in observed_capabilities
+        and "editor.saveBlueprintRewireExperimental" in observed_capabilities
+    )
+    node_remove_write_registered = bool(live_editor_enabled and experimental_graphpatch_edit)
+    node_remove_write_plugin_opt_in = bool(
+        isinstance(observed_capabilities, list)
+        and "editor.previewBlueprintNodeRemoveExperimental" in observed_capabilities
+        and "editor.applyBlueprintNodeRemoveExperimental" in observed_capabilities
+        and "editor.saveBlueprintNodeRemoveExperimental" in observed_capabilities
+    )
     memory_status = memory_service.status() if memory_service is not None else None
     verification_evidence_status = (
         workflow_service.verification_evidence_store.status()
@@ -346,6 +443,144 @@ def _capabilities_response(
                     }
                 ]
                 if live_editor_enabled and p7_test_only_graph_layout_apply
+                else []
+            )
+            + (
+                [
+                    {
+                        "name": EXPERIMENTAL_APPLY_TOOL_NAME,
+                        "readOnly": False,
+                        "destructive": True,
+                        "experimental": True,
+                    },
+                    {
+                        "name": EXPERIMENTAL_SAVE_TOOL_NAME,
+                        "readOnly": False,
+                        "destructive": True,
+                        "experimental": True,
+                    },
+                ]
+                if live_editor_enabled and experimental_graph_layout_apply
+                else []
+            )
+            + (
+                [
+                    {
+                        "name": EXPERIMENTAL_GRAPH_EDIT_PREVIEW_TOOL_NAME,
+                        "readOnly": True,
+                        "destructive": False,
+                        "experimental": True,
+                    },
+                    {
+                        "name": EXPERIMENTAL_GRAPH_EDIT_APPLY_TOOL_NAME,
+                        "readOnly": False,
+                        "destructive": True,
+                        "experimental": True,
+                    },
+                    {
+                        "name": EXPERIMENTAL_GRAPH_EDIT_SAVE_TOOL_NAME,
+                        "readOnly": False,
+                        "destructive": False,
+                        "experimental": True,
+                    },
+                ]
+                if live_editor_enabled and experimental_graphpatch_edit
+                else []
+            )
+            + (
+                [
+                    {
+                        "name": EXPERIMENTAL_PIN_DEFAULT_PREVIEW_TOOL_NAME,
+                        "readOnly": True,
+                        "destructive": False,
+                        "experimental": True,
+                    },
+                    {
+                        "name": EXPERIMENTAL_PIN_DEFAULT_APPLY_TOOL_NAME,
+                        "readOnly": False,
+                        "destructive": True,
+                        "experimental": True,
+                    },
+                    {
+                        "name": EXPERIMENTAL_PIN_DEFAULT_SAVE_TOOL_NAME,
+                        "readOnly": False,
+                        "destructive": False,
+                        "experimental": True,
+                    },
+                ]
+                if live_editor_enabled and experimental_graphpatch_edit
+                else []
+            )
+            + (
+                [
+                    {
+                        "name": EXPERIMENTAL_VARIABLE_PREVIEW_TOOL_NAME,
+                        "readOnly": True,
+                        "destructive": False,
+                        "experimental": True,
+                    },
+                    {
+                        "name": EXPERIMENTAL_VARIABLE_APPLY_TOOL_NAME,
+                        "readOnly": False,
+                        "destructive": True,
+                        "experimental": True,
+                    },
+                    {
+                        "name": EXPERIMENTAL_VARIABLE_SAVE_TOOL_NAME,
+                        "readOnly": False,
+                        "destructive": False,
+                        "experimental": True,
+                    },
+                ]
+                if live_editor_enabled and experimental_graphpatch_edit
+                else []
+            )
+            + (
+                [
+                    {
+                        "name": EXPERIMENTAL_REWIRE_PREVIEW_TOOL_NAME,
+                        "readOnly": True,
+                        "destructive": False,
+                        "experimental": True,
+                    },
+                    {
+                        "name": EXPERIMENTAL_REWIRE_APPLY_TOOL_NAME,
+                        "readOnly": False,
+                        "destructive": True,
+                        "experimental": True,
+                    },
+                    {
+                        "name": EXPERIMENTAL_REWIRE_SAVE_TOOL_NAME,
+                        "readOnly": False,
+                        "destructive": False,
+                        "experimental": True,
+                    },
+                ]
+                if live_editor_enabled and experimental_graphpatch_edit
+                else []
+            )
+            + (
+                [
+                    {
+                        "name": EXPERIMENTAL_NODE_REMOVE_PREVIEW_TOOL_NAME,
+                        "readOnly": True,
+                        "destructive": False,
+                        "experimental": True,
+                    },
+                    {
+                        "name": EXPERIMENTAL_NODE_REMOVE_APPLY_TOOL_NAME,
+                        "readOnly": False,
+                        "destructive": True,
+                        "experimental": True,
+                    },
+                    {
+                        "name": EXPERIMENTAL_NODE_REMOVE_SAVE_TOOL_NAME,
+                        "readOnly": False,
+                        "destructive": False,
+                        "experimental": True,
+                    },
+                ]
+                if live_editor_enabled and experimental_graphpatch_edit
                 else []
             )
         ),
@@ -424,6 +659,106 @@ def _capabilities_response(
                 "validationEvidenceProjectBound": True,
                 "validationEvidenceRevisionSetBound": True,
                 "automationRevisionCoverage": "not-applicable",
+            },
+            "pieRuntimeInspection": {
+                "available": live_editor_enabled,
+                "readOnly": True,
+                "requiresDatabase": False,
+                "serverStartupRequiresIndexDatabase": True,
+                "requiresPieStopped": False,
+                "pieControlSupported": False,
+                "tools": [
+                    "ue_get_pie_world_contexts",
+                    "ue_inspect_pie_actor",
+                ] if live_editor_enabled else [],
+                "bridgeMethods": [
+                    "editor.getPieWorldContexts",
+                    "editor.inspectPieActor",
+                ] if live_editor_enabled else [],
+                "maxWorldContexts": 32,
+                "maxActorComponents": 128,
+                "maxComponentAssets": 32,
+                "maxAmbiguousCandidates": 8,
+                "actorIdentityFields": ["actorPath", "actorGuid", "actorName", "actorLabel"],
+                "actorIdentityPolicy": "exactly-one-field-and-reject-ambiguous-names",
+                "serverClientIdentification": True,
+                "errorCodes": [
+                    "pie-not-running",
+                    "pie-instance-not-found",
+                    "pie-instance-stale",
+                    "pie-instance-ambiguous",
+                    "pie-world-stale",
+                    "pie-actor-not-found",
+                    "pie-actor-ambiguous",
+                    "pie-actor-stale",
+                    "pie-actor-scan-truncated",
+                    "pie-context-scan-truncated",
+                    "pie-invalid-parameters",
+                ],
+            },
+            "pieScalarInspection": {
+                "available": live_editor_enabled,
+                "tool": "ue_get_pie_scalars" if live_editor_enabled else "",
+                "bridgeMethod": "editor.getPieScalars" if live_editor_enabled else "",
+                "readOnly": True,
+                "requiresDatabase": False,
+                "source": "pie-live",
+                "maxProperties": 8,
+                "maxPropertyNameChars": 64,
+                "defaultStringChars": 256,
+                "maxStringChars": 512,
+                "supportedTypes": [
+                    "bool",
+                    "int32",
+                    "int64",
+                    "uint32",
+                    "uint8",
+                    "float32",
+                    "float64",
+                    "name",
+                    "string",
+                    "enum",
+                ],
+                "rejects": [
+                    "dotted-paths",
+                    "arrays",
+                    "maps",
+                    "sets",
+                    "structs",
+                    "text",
+                    "object-references",
+                    "methods",
+                    "native-private",
+                    "deprecated",
+                    "not-edit-or-blueprint-visible",
+                ],
+                "identityPolicy": "exact-pie-instance-and-single-actor-identity",
+                "componentPolicy": "at-most-one-owned-component-path-or-name-with-optional-class-check",
+                "perPropertyStatus": ["ok", "unknown", "not-exposed", "unsupported-type"],
+                "propertyProvenance": {
+                    "onlyForResolvedProperties": True,
+                    "fields": [
+                        "declaringClassPath",
+                        "declaringClassName",
+                        "declaringClassKind",
+                        "declaringClassPathTruncated",
+                        "declaringBlueprintPath",
+                        "declaringBlueprintPathTruncated",
+                    ],
+                    "kinds": ["native", "blueprint", "unknown"],
+                    "source": "UE reflection: FProperty::GetOwnerClass()",
+                    "policy": (
+                        "reflected declaring owner class only; no filesystem path, no source-file "
+                        "guessing, no raw object address; blueprint asset path only when "
+                        "UClass::ClassGeneratedBy is a UBlueprint"
+                    ),
+                    "maxClassPathChars": 512,
+                },
+                "errorCodes": [
+                    "pie-component-not-found",
+                    "pie-component-ambiguous",
+                    "pie-component-stale",
+                ],
             },
             "authorizedSave": {
                 "available": bool(live_editor_enabled and write_tools_enabled),
@@ -535,6 +870,489 @@ def _capabilities_response(
                 "undoRedoVerifiedInCall": True,
                 "autoSave": False,
                 "requiresExplicitSeparateSave": True,
+            },
+            "experimentalGraphLayoutApply": {
+                "available": bool(experimental_registered and experimental_plugin_opt_in),
+                "registered": experimental_registered,
+                "pluginCapabilityObserved": experimental_plugin_opt_in,
+                "applyTool": EXPERIMENTAL_APPLY_TOOL_NAME
+                if experimental_registered
+                else "",
+                "saveTool": EXPERIMENTAL_SAVE_TOOL_NAME
+                if experimental_registered
+                else "",
+                "bridgeMethods": [
+                    "editor.applyBlueprintGraphLayoutExperimental",
+                    "editor.saveBlueprintGraphLayoutExperimental",
+                ]
+                if experimental_registered
+                else [],
+                "readOnly": False,
+                "destructive": True,
+                "experimental": True,
+                "productionDefault": False,
+                "productionEnabled": False,
+                "productionApprovalRequired": False,
+                "authorizationModel": (
+                    "project-level experimental opt-in plus exact per-call confirmation; "
+                    "this does not claim OwnerTrust/T10 production enablement"
+                ),
+                "explicitOptIn": {
+                    "serverFlag": "--enable-experimental-graph-layout-apply",
+                    "projectConfig": "[UEAgentKit] ExperimentalGraphLayoutApply=True",
+                    "requiresRunningEditorCapability": True,
+                },
+                "sourcePreviewTool": "ue_preview_blueprint_graph_layout",
+                "requiresCompletePreviewResult": True,
+                "acceptsCallerBuiltRequest": False,
+                "modes": ["full", "selection", "incremental"],
+                "exactFocusedGraphOnly": True,
+                "requiresCleanPackage": True,
+                "requiresPieStopped": True,
+                "requiresCurrentRevisionAndFingerprint": True,
+                "saveRequiresPostApplyGraphFingerprint": True,
+                "explicitApplyConfirmation": "APPLY EXPERIMENTAL LAYOUT <planId>",
+                "explicitSaveConfirmation": "SAVE EXPERIMENTAL LAYOUT <layoutHash>",
+                "undoRedoVerifiedInCall": True,
+                "singleTransaction": True,
+                "autoSave": False,
+                "requiresExplicitSeparateSave": True,
+                "saveReadback": "asset-sha256+live-layout-hash+package-revision",
+                "independentReloadVerified": False,
+                "maxRequestBytes": 61440,
+            },
+            "experimentalGraphPatchEdit": {
+                "available": bool(graph_edit_registered and graph_edit_plugin_opt_in),
+                "registered": graph_edit_registered,
+                "pluginCapabilityObserved": graph_edit_plugin_opt_in,
+                "previewTool": EXPERIMENTAL_GRAPH_EDIT_PREVIEW_TOOL_NAME
+                if graph_edit_registered
+                else "",
+                "applyTool": EXPERIMENTAL_GRAPH_EDIT_APPLY_TOOL_NAME
+                if graph_edit_registered
+                else "",
+                "saveTool": EXPERIMENTAL_GRAPH_EDIT_SAVE_TOOL_NAME
+                if graph_edit_registered
+                else "",
+                "bridgeMethods": [
+                    "editor.previewBlueprintGraphEditExperimental",
+                    "editor.applyBlueprintGraphEditExperimental",
+                    "editor.saveBlueprintGraphEditExperimental",
+                ]
+                if graph_edit_registered
+                else [],
+                "readOnlyPreview": True,
+                "destructiveApply": True,
+                "experimental": True,
+                "productionDefault": False,
+                "productionEnabled": False,
+                "productionApprovalRequired": False,
+                "authorizationModel": (
+                    "project-level experimental opt-in plus exact per-call confirmation; "
+                    "this is not a general GraphPatch executor"
+                ),
+                "explicitOptIn": {
+                    "serverFlag": "--enable-experimental-graphpatch-edit",
+                    "projectConfig": "[UEAgentKit] ExperimentalGraphPatchEdit=True",
+                    "requiresRunningEditorCapability": True,
+                },
+                "requiresCompletePreviewResult": True,
+                "acceptsCallerBuiltRequest": False,
+                "supportedNodeTypes": [
+                    "branch",
+                    "sequence",
+                    "not_bool",
+                    "bool_or",
+                    "int_add",
+                    "int_equal",
+                    "double_add",
+                    "string_concat",
+                    "variable_get",
+                    "variable_set",
+                ],
+                "supportedConnections": [
+                    "exec: then/else/then_0/then_1 -> execute",
+                    "bool: bool-producing ReturnValue/condition -> bool input",
+                    "int: int-producing ReturnValue -> int input",
+                    "double: double-producing ReturnValue -> double input",
+                    "string: string-producing ReturnValue -> string input",
+                    "variable_get: <VariableName> -> bool/int/double/string input",
+                    "variable_set: then/Output_Get -> bool/int/double/string input; execute accepts one exec source",
+                    "new output -> existing unlinked exact input (nodeGuid + pinGuid + name/direction/category)",
+                    "existing exact output -> new input (fan-out preserved; no existing edge is broken)",
+                    "one existing output -> one existing unlinked input (nodes=[], exact single edge)",
+                    "operation=disconnect: remove one exact existing edge (nodes=[], exact endpoints)",
+                    "one output pin may fan out to distinct input pins",
+                ],
+                "existingPinConnections": {
+                    "operations": ["connect", "disconnect"],
+                    "maxExistingEndpointsPerConnection": 2,
+                    "maxPureExistingToExistingPerPlan": 1,
+                    "maxDisconnectPerPlan": 1,
+                    "pureExistingRequiresZeroNodes": True,
+                    "pureExistingRequiresExactlyOneConnection": True,
+                    "disconnectRequiresZeroNodes": True,
+                    "disconnectRequiresExistingExactEdge": True,
+                    "disconnectPreservesOtherEdgesAndNodes": True,
+                    "newToNewConnectionsRemainSupported": True,
+                    "existingInputMustBeUnlinked": True,
+                    "existingOutputFanOutPreserved": True,
+                    "requiresMakeResponse": True,
+                    "rejectsBreakOthers": True,
+                    "rejectsConversionAndPromotion": True,
+                    "bindings": [
+                        "graphFingerprint",
+                        "packageRevision",
+                        "beforeEdgeSetHash",
+                        "nodeGuid",
+                        "pinGuid",
+                        "pinName",
+                        "direction",
+                        "category",
+                        "subCategory",
+                    ],
+                },
+                "variableAccessorNodes": {
+                    "nodeTypes": ["variable_get", "variable_set"],
+                    "scope": "existing top-level member variables only, bool/int/double/string, bound by GUID + name",
+                    "graphs": ["event (uber)", "function", "macro"],
+                    "createsVariables": False,
+                    "renamesOrRetypesVariables": False,
+                    "compiles": False,
+                },
+                "callFunctionNodes": {
+                    "nodeType": "call_function",
+                    "ownerClassPath": "/Script/Engine.KismetMathLibrary",
+                    "allowlist": ["Greater_IntInt", "Less_IntInt", "Clamp", "Abs_Int"],
+                    "requiresOwnerFunctionAndSignatureDigest": True,
+                    "requiresExactPinSchema": True,
+                    "staticPureOnly": True,
+                    "rejectsWorldLatentNetRpcRefOutConstContainers": True,
+                    "rejectsArbitraryFunctionPath": True,
+                    "staticContractOnly": True,
+                    "nativePending": True,
+                    "compiles": False,
+                },
+                "strictPinTypeCheck": True,
+                "saveRequiresPostApplyGraphFingerprint": True,
+                "explicitSaveConfirmation": "SAVE EXPERIMENTAL GRAPH NODES <planId>",
+                "saveRequiresExactNodeAndLinkCounts": True,
+                "exactFocusedGraphOnly": True,
+                "requiresCleanPackage": True,
+                "requiresPieStopped": True,
+                "requiresCurrentRevisionAndFingerprint": True,
+                "explicitApplyConfirmation": "CREATE EXPERIMENTAL GRAPH NODES <planId>",
+                "undoRedoVerifiedInCall": True,
+                "singleTransaction": True,
+                "autoSave": False,
+                "requiresExplicitSeparateSave": True,
+                "maxNodes": 16,
+                "maxConnections": 24,
+                "maxConnectionsPerNode": 8,
+                "maxRequestBytes": 61440,
+            },
+            "experimentalPinDefaultEdit": {
+                "available": bool(pin_default_registered and pin_default_plugin_opt_in),
+                "registered": pin_default_registered,
+                "pluginCapabilityObserved": pin_default_plugin_opt_in,
+                "previewTool": EXPERIMENTAL_PIN_DEFAULT_PREVIEW_TOOL_NAME
+                if pin_default_registered
+                else "",
+                "applyTool": EXPERIMENTAL_PIN_DEFAULT_APPLY_TOOL_NAME
+                if pin_default_registered
+                else "",
+                "saveTool": EXPERIMENTAL_PIN_DEFAULT_SAVE_TOOL_NAME
+                if pin_default_registered
+                else "",
+                "bridgeMethods": [
+                    "editor.previewBlueprintPinDefaultsExperimental",
+                    "editor.applyBlueprintPinDefaultsExperimental",
+                    "editor.saveBlueprintPinDefaultsExperimental",
+                ]
+                if pin_default_registered
+                else [],
+                "readOnlyPreview": True,
+                "destructiveApply": True,
+                "experimental": True,
+                "productionDefault": False,
+                "productionEnabled": False,
+                "productionApprovalRequired": False,
+                "authorizationModel": (
+                    "project-level experimental opt-in plus exact per-call confirmation; "
+                    "this edits only existing unlinked input pin defaults"
+                ),
+                "explicitOptIn": {
+                    "serverFlag": "--enable-experimental-graphpatch-edit",
+                    "projectConfig": "[UEAgentKit] ExperimentalGraphPatchEdit=True",
+                    "requiresRunningEditorCapability": True,
+                },
+                "requiresCompletePreviewResult": True,
+                "acceptsCallerBuiltRequest": False,
+                "supportedPinTypes": ["bool", "int", "double", "string"],
+                "strictDefaultEncoding": {
+                    "bool": "true|false",
+                    "int": "canonical signed 32-bit decimal",
+                    "double": "canonical finite decimal without exponent",
+                    "string": "at most 1024 non-control characters; empty allowed",
+                },
+                "existingInputPinsOnly": True,
+                "requiresUnlinkedPin": True,
+                "rejectsHiddenReadOnlyIgnoredContainerByRef": True,
+                "requiresExactNodePinAndPinGuidIdentity": True,
+                "exactFocusedGraphOnly": True,
+                "requiresCleanPackage": True,
+                "requiresPieStopped": True,
+                "requiresCurrentRevisionAndFingerprint": True,
+                "requiresPinDefaultStateFingerprint": True,
+                "explicitApplyConfirmation": "SET EXPERIMENTAL BLUEPRINT PIN DEFAULTS <planId>",
+                "explicitSaveConfirmation": "SAVE EXPERIMENTAL BLUEPRINT PIN DEFAULTS <planId>",
+                "saveRequiresPostApplyGraphAndDefaultFingerprints": True,
+                "saveRequiresExactNodeAndLinkCounts": True,
+                "undoRedoVerifiedInCall": True,
+                "singleTransaction": True,
+                "autoSave": False,
+                "requiresExplicitSeparateSave": True,
+                "maxDefaults": 16,
+                "maxStringLength": 1024,
+                "maxRequestBytes": 61440,
+            },
+            "experimentalVariableWrite": {
+                "available": bool(variable_write_registered and variable_write_plugin_opt_in),
+                "registered": variable_write_registered,
+                "pluginCapabilityObserved": variable_write_plugin_opt_in,
+                "previewTool": EXPERIMENTAL_VARIABLE_PREVIEW_TOOL_NAME
+                if variable_write_registered
+                else "",
+                "applyTool": EXPERIMENTAL_VARIABLE_APPLY_TOOL_NAME
+                if variable_write_registered
+                else "",
+                "saveTool": EXPERIMENTAL_VARIABLE_SAVE_TOOL_NAME
+                if variable_write_registered
+                else "",
+                "bridgeMethods": [
+                    "editor.previewBlueprintVariableCreateExperimental",
+                    "editor.applyBlueprintVariableCreateExperimental",
+                    "editor.saveBlueprintVariableCreateExperimental",
+                ]
+                if variable_write_registered
+                else [],
+                "readOnlyPreview": True,
+                "destructiveApply": True,
+                "experimental": True,
+                "productionDefault": False,
+                "productionEnabled": False,
+                "productionApprovalRequired": False,
+                "authorizationModel": (
+                    "project-level experimental opt-in plus exact per-call confirmation; "
+                    "this appends new member variables to one exact saved Blueprint"
+                ),
+                "explicitOptIn": {
+                    "serverFlag": "--enable-experimental-graphpatch-edit",
+                    "projectConfig": "[UEAgentKit] ExperimentalGraphPatchEdit=True",
+                    "requiresRunningEditorCapability": True,
+                },
+                "requiresCompletePreviewResult": True,
+                "acceptsCallerBuiltRequest": False,
+                "supportedVariableTypes": ["bool", "int", "double", "string"],
+                "strictDefaultEncoding": {
+                    "bool": "true|false",
+                    "int": "canonical signed 32-bit decimal",
+                    "double": "canonical finite decimal without exponent or negative zero",
+                    "string": "at most 1024 non-control characters; empty allowed",
+                },
+                "strictAsciiVariableName": True,
+                "rejectsDuplicateAndInheritedNames": True,
+                "rejectsContainersByRefAndCompositeTypes": True,
+                "exactFocusedBlueprintOnly": True,
+                "requiresCleanPackage": True,
+                "requiresPieStopped": True,
+                "requiresCurrentRevisionAndVariableFingerprint": True,
+                "explicitApplyConfirmation": "CREATE EXPERIMENTAL BLUEPRINT VARIABLES <planId>",
+                "explicitSaveConfirmation": "SAVE EXPERIMENTAL BLUEPRINT VARIABLES <planId>",
+                "saveRequiresPostApplyFingerprintRevisionAndCount": True,
+                "undoRedoVerifiedInCall": True,
+                "singleTransaction": True,
+                "autoSave": False,
+                "compiled": False,
+                "skeletonRegenerated": False,
+                "requiresExplicitCompileAfterApply": True,
+                "requiresExplicitSeparateSave": True,
+                "maxVariables": 8,
+                "maxVariableNameLength": 64,
+                "maxStringLength": 1024,
+                "maxRequestBytes": 61440,
+            },
+            "experimentalBlueprintRewire": {
+                "available": bool(rewire_write_registered and rewire_write_plugin_opt_in),
+                "registered": rewire_write_registered,
+                "pluginCapabilityObserved": rewire_write_plugin_opt_in,
+                "previewTool": EXPERIMENTAL_REWIRE_PREVIEW_TOOL_NAME
+                if rewire_write_registered
+                else "",
+                "applyTool": EXPERIMENTAL_REWIRE_APPLY_TOOL_NAME
+                if rewire_write_registered
+                else "",
+                "saveTool": EXPERIMENTAL_REWIRE_SAVE_TOOL_NAME
+                if rewire_write_registered
+                else "",
+                "bridgeMethods": [
+                    "editor.previewBlueprintRewireExperimental",
+                    "editor.applyBlueprintRewireExperimental",
+                    "editor.saveBlueprintRewireExperimental",
+                ]
+                if rewire_write_registered
+                else [],
+                "readOnlyPreview": True,
+                "destructiveApply": True,
+                "experimental": True,
+                "productionDefault": False,
+                "productionEnabled": False,
+                "productionApprovalRequired": False,
+                "authorizationModel": (
+                    "project-level experimental opt-in plus exact per-call confirmation; "
+                    "this replaces or removes exactly one existing edge in one exact "
+                    "focused top-level K2 event graph"
+                ),
+                "explicitOptIn": {
+                    "serverFlag": "--enable-experimental-graphpatch-edit",
+                    "projectConfig": "[UEAgentKit] ExperimentalGraphPatchEdit=True",
+                    "requiresRunningEditorCapability": True,
+                },
+                "requiresCompletePreviewResult": True,
+                "acceptsCallerBuiltRequest": False,
+                "operations": ["rewire", "disconnect"],
+                "supportedPinKinds": ["exec", "bool", "int", "double", "string"],
+                "rejectedPinTraits": [
+                    "wildcard",
+                    "delegate",
+                    "container",
+                    "by-reference",
+                    "const",
+                    "weak-pointer",
+                    "struct-or-object",
+                    "hidden",
+                    "orphaned",
+                    "split",
+                ],
+                "singleEdgeOnly": True,
+                "bindsExactEdgeSetHash": True,
+                "bindsExactNodeAndPinGuids": True,
+                "bindsExactOldSourcePin": True,
+                "untouchedEdgesPreserved": True,
+                "neverBreakAllPinLinks": True,
+                "rejectsSchemaBreakOtherLinks": True,
+                "rejectsSchemaConversions": True,
+                "explicitApplyConfirmation": "REWIRE EXPERIMENTAL BLUEPRINT PIN <planId>",
+                "explicitSaveConfirmation": "SAVE EXPERIMENTAL BLUEPRINT REWIRE <planId>",
+                "saveRequiresPostApplyEdgeHashRevisionAndCounts": True,
+                "undoRedoVerifiedInCall": True,
+                "singleTransaction": True,
+                "autoSave": False,
+                "compiled": False,
+                "skeletonRegenerated": False,
+                "requiresExplicitSeparateSave": True,
+                "maxRequestBytes": 61440,
+            },
+            "experimentalBlueprintNodeRemove": {
+                "available": bool(
+                    node_remove_write_registered and node_remove_write_plugin_opt_in
+                ),
+                "registered": node_remove_write_registered,
+                "pluginCapabilityObserved": node_remove_write_plugin_opt_in,
+                "previewTool": EXPERIMENTAL_NODE_REMOVE_PREVIEW_TOOL_NAME
+                if node_remove_write_registered
+                else "",
+                "applyTool": EXPERIMENTAL_NODE_REMOVE_APPLY_TOOL_NAME
+                if node_remove_write_registered
+                else "",
+                "saveTool": EXPERIMENTAL_NODE_REMOVE_SAVE_TOOL_NAME
+                if node_remove_write_registered
+                else "",
+                "bridgeMethods": [
+                    "editor.previewBlueprintNodeRemoveExperimental",
+                    "editor.applyBlueprintNodeRemoveExperimental",
+                    "editor.saveBlueprintNodeRemoveExperimental",
+                ]
+                if node_remove_write_registered
+                else [],
+                "readOnlyPreview": True,
+                "destructiveApply": True,
+                "experimental": True,
+                "productionDefault": False,
+                "productionEnabled": False,
+                "productionApprovalRequired": False,
+                "authorizationModel": (
+                    "project-level experimental opt-in plus exact per-call confirmation; "
+                    "this deletes exactly one allowlisted deterministic node from one "
+                    "exact focused top-level K2 event graph"
+                ),
+                "explicitOptIn": {
+                    "serverFlag": "--enable-experimental-graphpatch-edit",
+                    "projectConfig": "[UEAgentKit] ExperimentalGraphPatchEdit=True",
+                    "requiresRunningEditorCapability": True,
+                },
+                "requiresCompletePreviewResult": True,
+                "acceptsCallerBuiltRequest": False,
+                "maxNodesPerPlan": 1,
+                "maxIncidentEdges": 1,
+                "removableNodeClasses": [
+                    "/Script/BlueprintGraph.K2Node_CallFunction",
+                    "/Script/BlueprintGraph.K2Node_IfThenElse",
+                ],
+                "removableFunctions": [
+                    "Add_IntInt",
+                    "BooleanAND",
+                    "BooleanOR",
+                    "EqualEqual_BoolBool",
+                    "Greater_IntInt",
+                    "Not_PreBool",
+                ],
+                "rejectedNodeClasses": [
+                    "EdGraphNode_Comment",
+                    "K2Node_Event",
+                    "K2Node_CustomEvent",
+                    "K2Node_Timeline",
+                    "K2Node_Knot",
+                    "K2Node_Tunnel",
+                    "K2Node_MacroInstance",
+                    "K2Node_VariableGet",
+                    "K2Node_VariableSet",
+                    "K2Node_ExecutionSequence",
+                    "unknown custom classes",
+                ],
+                "supportedPinKinds": ["exec", "bool", "int", "double", "string"],
+                "rejectedPinTraits": [
+                    "wildcard",
+                    "delegate",
+                    "container",
+                    "by-reference",
+                    "const",
+                    "weak-pointer",
+                    "struct-or-object",
+                    "hidden",
+                    "orphaned",
+                    "split",
+                ],
+                "singleNodeOnly": True,
+                "explicitRemovedEdgesRequired": True,
+                "bindsExactNodeClass": True,
+                "bindsExactNodeAndPinGuids": True,
+                "bindsExactEdgeSetHash": True,
+                "bindsNodePinIdentityHashes": True,
+                "untouchedEdgesPreserved": True,
+                "neverBreakAllPinLinks": True,
+                "refusesUnplannedLinks": True,
+                "explicitApplyConfirmation": "REMOVE EXPERIMENTAL BLUEPRINT NODE <planId>",
+                "explicitSaveConfirmation": "SAVE EXPERIMENTAL BLUEPRINT NODE REMOVE <planId>",
+                "saveRequiresPostApplyHashesRevisionAndCounts": True,
+                "undoRedoVerifiedInCall": True,
+                "undoRestoresNodeAndLinks": True,
+                "singleTransaction": True,
+                "autoSave": False,
+                "compiled": False,
+                "skeletonRegenerated": False,
+                "requiresExplicitSeparateSave": True,
+                "maxRequestBytes": 61440,
             },
             "editorContext": {
                 "available": live_editor_enabled,
@@ -984,6 +1802,15 @@ def _capabilities_response(
             "available": write_tools_enabled,
             "sources": ["sqlite", "revision-export", "disk-package"] if write_tools_enabled else ["sqlite"],
             "states": ["fresh", "stale", "partial", "unavailable", "unknown"],
+            "indexSnapshotStates": ["fresh", "stale", "unknown"],
+            "indexSnapshotFields": [
+                "indexSnapshotState",
+                "exportSnapshotState",
+                "indexSnapshotReasons",
+                "lastExportUtc",
+                "databasePath",
+                "manifestMatches",
+            ],
             "planRequiresFreshIndex": write_tools_enabled,
             "commitMarksFixedSnapshotsStale": write_tools_enabled,
             "rollbackMayRestoreFreshState": write_tools_enabled,
@@ -1035,6 +1862,25 @@ def _project_status_response(
         "indexStale": None,
         "reason": "Revision Export and disk Package comparison is unavailable in this server mode.",
     }
+    snapshot = apply_editor_freshness(
+        dict(index_status.get("indexSnapshot", {})),
+        freshness_status,
+    )
+    index_status["indexSnapshot"] = snapshot
+    index_metadata = dict(index_metadata)
+    index_metadata.update(
+        {
+            "indexSnapshotState": snapshot.get("state", "unknown"),
+            "indexSnapshotReasons": snapshot.get("reasons", []),
+            "exportSnapshotState": snapshot.get("exportSnapshotState", "unknown"),
+            "editorStateCompared": snapshot.get("editorStateCompared", False),
+            "lastExportUtc": snapshot.get("lastExportUtc", ""),
+            "databasePath": snapshot.get("databasePath", ""),
+            "lastDatabasePath": snapshot.get("lastDatabasePath", ""),
+            "databasePathMatches": snapshot.get("databasePathMatches"),
+            "manifestMatches": snapshot.get("manifestMatches"),
+        }
+    )
     live_editor_status = (
         live_editor_service.status()
         if live_editor_service is not None
@@ -1075,6 +1921,7 @@ def _project_status_response(
             ),
         },
         "engine": _read_engine_status(workflow_service),
+        "indexSnapshot": snapshot,
         "database": {
             "configured": True,
             "state": "available",
@@ -1082,6 +1929,15 @@ def _project_status_response(
             "immutable": bool(index_metadata.get("immutable")),
             "quiescent": bool(index_metadata.get("quiescent")),
             "lastIndexedAtUtc": index_metadata.get("lastIndexedAtUtc", ""),
+            "lastExportUtc": index_metadata.get("lastExportUtc", ""),
+            "databasePath": index_metadata.get("databasePath", ""),
+            "lastDatabasePath": index_metadata.get("lastDatabasePath", ""),
+            "databasePathMatches": index_metadata.get("databasePathMatches"),
+            "indexSnapshotState": index_metadata.get("indexSnapshotState", "unknown"),
+            "indexSnapshotReasons": index_metadata.get("indexSnapshotReasons", []),
+            "exportSnapshotState": index_metadata.get("exportSnapshotState", "unknown"),
+            "editorStateCompared": index_metadata.get("editorStateCompared", False),
+            "manifestMatches": index_metadata.get("manifestMatches"),
             "manifestSchemaVersion": index_metadata.get("manifestSchemaVersion", ""),
             "exporterVersion": index_metadata.get("exporterVersion", ""),
             "profile": index_metadata.get("profile", ""),
@@ -1240,6 +2096,29 @@ _RETRYABLE_ERROR_CODES = {
     "live-editor-batch-task-failed",
 }
 
+# Transport failures that can happen *after* a mutating request was written to the
+# Editor Bridge socket.  For a destructive Tool the Editor may already have applied
+# the change, so the outcome is indeterminate and an automatic retry can duplicate
+# or mask a write.  Read-only and non-destructive Tools keep the plain retryable
+# behaviour: repeating ue_open_asset / ue_validate_asset is harmless.
+_INDETERMINATE_WRITE_ERROR_CODES = frozenset(
+    {
+        "live-editor-timeout",
+        "live-editor-connection-closed",
+    }
+)
+
+_INDETERMINATE_WRITE_SUGGESTION = (
+    "Do not repeat this write. The Editor may have applied it before the transport failed: "
+    "read the current asset state (ue_get_dirty_assets, ue_get_asset_state, "
+    "ue_verify_live_write_fast) and undo or discard the transaction before retrying."
+)
+
+
+def _is_destructive_tool(tool: str) -> bool:
+    definition = TOOL_DEFINITIONS_BY_NAME.get(tool)
+    return bool(definition is not None and definition.destructive)
+
 
 def _suggested_action(code: str) -> str:
     exact = {
@@ -1339,12 +2218,22 @@ def _error_response(tool: str, error: Exception, *, read_only: bool) -> dict[str
         details = error.details
     elif isinstance(error, VerificationTrustError):
         code = error.code
+    elif isinstance(error, GraphEditError):
+        code = error.code
     elif isinstance(error, ValueError):
         code = "invalid-arguments"
     elif isinstance(error, sqlite3.Error):
         code = "database-error"
     else:
         code = "ue-agent-kit-error"
+    indeterminate = _is_destructive_tool(tool) and code in _INDETERMINATE_WRITE_ERROR_CODES
+    if indeterminate:
+        details = dict(details) if isinstance(details, dict) else {}
+        details.setdefault("indeterminate", True)
+        details.setdefault("dispatchState", "unknown")
+        suggested_action = _INDETERMINATE_WRITE_SUGGESTION
+    else:
+        suggested_action = _suggested_action(code)
     response: dict[str, Any] = {
         "schemaVersion": "1.0",
         "tool": tool,
@@ -1354,16 +2243,92 @@ def _error_response(tool: str, error: Exception, *, read_only: bool) -> dict[str
             "code": code,
             "type": type(error).__name__,
             "message": message,
-            "retryable": code in _RETRYABLE_ERROR_CODES,
+            "retryable": code in _RETRYABLE_ERROR_CODES and not indeterminate,
             "details": details,
-            "suggestedAction": _suggested_action(code),
+            "suggestedAction": suggested_action,
         },
     }
     return response
 
 
+def _pure_live_server_instructions() -> str:
+    return (
+        "Pure-live mode: this server has no SQLite index and exposes only bounded, read-only "
+        "Live Editor tools. Use ue_get_capabilities for the exact exposed tool list. Offline "
+        "search/reference, Project Memory, workflow, write, source-control, and graph-edit tools "
+        "are intentionally absent. Every fact comes from the fixed local Unreal Editor Bridge; "
+        "when the Editor is unavailable the read tools return a clear error instead of cached or "
+        "offline data."
+    )
+
+
+def _create_pure_live_mcp_server(
+    *,
+    database_path: Path | None,
+    workflow_config: PatchWorkflowConfig | None,
+    workflow_service: PatchWorkflowService | None,
+    live_editor_service: LiveEditorBridgeService | None,
+    memory_service: ProjectMemoryService | None,
+    source_control_service: P4SourceControlService | None,
+    p7_test_only_graph_layout_apply: bool,
+    p8_test_only_graph_layout_apply: bool,
+    experimental_graph_layout_apply: bool,
+    experimental_graphpatch_edit: bool,
+):
+    """Bounded, explicitly opt-in pure-live server (no index, no SQLite)."""
+    if database_path is not None:
+        raise ValueError("--pure-live does not accept --database; no index is opened in this mode.")
+    if live_editor_service is None:
+        raise ValueError("--pure-live requires --enable-live-editor and a fixed --project.")
+    if workflow_config is not None or workflow_service is not None:
+        raise ValueError("--pure-live does not support write/workflow tools.")
+    if memory_service is not None:
+        raise ValueError("--pure-live does not support Project Memory.")
+    if source_control_service is not None:
+        raise ValueError("--pure-live does not support source-control tools.")
+    if (
+        p7_test_only_graph_layout_apply
+        or p8_test_only_graph_layout_apply
+        or experimental_graph_layout_apply
+        or experimental_graphpatch_edit
+    ):
+        raise ValueError("--pure-live does not support experimental graph tools.")
+
+    server = FastMCP(
+        MCP_SERVER_NAME,
+        instructions=_pure_live_server_instructions(),
+        json_response=True,
+    )
+    read_annotations = ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False,
+    )
+    register_pure_live_meta_tools(
+        server=server,
+        live_editor_service=live_editor_service,
+        server_name=MCP_SERVER_NAME,
+        server_version=__version__,
+        read_annotations=read_annotations,
+        exposed_tools=PURE_LIVE_READ_TOOL_NAMES,
+    )
+    register_live_read_tools(
+        server=server,
+        live_editor_service=live_editor_service,
+        index_service=None,
+        audit_report_root=None,
+        read_annotations=read_annotations,
+        tool_annotations_type=ToolAnnotations,
+        error_response=_error_response,
+        pure_live=True,
+    )
+    _enforce_strict_tool_arguments(server, (GRAPH_CONTEXT_TOOL_NAME,))
+    return server
+
+
 def create_mcp_server(
-    database_path: Path,
+    database_path: Path | None,
     *,
     workflow_config: PatchWorkflowConfig | None = None,
     workflow_service: PatchWorkflowService | None = None,
@@ -1373,12 +2338,31 @@ def create_mcp_server(
     audit_report_root: Path | None = None,
     p7_test_only_graph_layout_apply: bool = False,
     p8_test_only_graph_layout_apply: bool = False,
+    experimental_graph_layout_apply: bool = False,
+    experimental_graphpatch_edit: bool = False,
+    pure_live: bool = False,
 ):
     if FastMCP is None or ToolAnnotations is None:
         raise RuntimeError(
             "MCP support is not installed. Run scripts\\setup_python.cmd -WithMcp "
             "or install the mcp optional dependency."
         ) from _MCP_IMPORT_ERROR
+
+    if pure_live:
+        return _create_pure_live_mcp_server(
+            database_path=database_path,
+            workflow_config=workflow_config,
+            workflow_service=workflow_service,
+            live_editor_service=live_editor_service,
+            memory_service=memory_service,
+            source_control_service=source_control_service,
+            p7_test_only_graph_layout_apply=p7_test_only_graph_layout_apply,
+            p8_test_only_graph_layout_apply=p8_test_only_graph_layout_apply,
+            experimental_graph_layout_apply=experimental_graph_layout_apply,
+            experimental_graphpatch_edit=experimental_graphpatch_edit,
+        )
+    if database_path is None:
+        raise ValueError("A fixed index database path is required unless --pure-live is set.")
 
     index_service = IndexQueryService(database_path)
     index_status = index_service.check()
@@ -1441,6 +2425,10 @@ def create_mcp_server(
             raise ValueError(
                 "P8 test-only graph layout is restricted to the exact disposable P8AutomationHost project"
             )
+    if experimental_graph_layout_apply and live_editor_service is None:
+        raise ValueError("--enable-experimental-graph-layout-apply requires --enable-live-editor")
+    if experimental_graphpatch_edit and live_editor_service is None:
+        raise ValueError("--enable-experimental-graphpatch-edit requires --enable-live-editor")
     server = FastMCP(
         MCP_SERVER_NAME,
         instructions=_server_instructions(
@@ -1473,6 +2461,14 @@ def create_mcp_server(
             source_control_service,
             p7_test_only_graph_layout_apply=p7_test_only_graph_layout_apply,
             p8_test_only_graph_layout_apply=p8_test_only_graph_layout_apply,
+            experimental_graph_layout_apply=experimental_graph_layout_apply,
+            experimental_graphpatch_edit=experimental_graphpatch_edit,
+            live_editor_status=(
+                live.status()
+                if (experimental_graph_layout_apply or experimental_graphpatch_edit)
+                and live is not None
+                else None
+            ),
         ),
         project_status_response=lambda index, workflow, live: _project_status_response(
             index,
@@ -1481,6 +2477,8 @@ def create_mcp_server(
             memory_service,
         ),
     )
+    register_graph_patch_tools(server=server, read_annotations=read_annotations)
+    _enforce_strict_tool_arguments(server, (GRAPH_PATCH_PREVIEW_TOOL_NAME,))
     _enforce_strict_tool_arguments(server, STRICT_IMPACT_ARGUMENT_TOOL_NAMES)
     _enforce_strict_tool_arguments(server, STRICT_SEMANTIC_DIFF_ARGUMENT_TOOL_NAMES)
     _enforce_strict_tool_arguments(server, STRICT_VERIFICATION_TRUST_ARGUMENT_TOOL_NAMES)
@@ -1528,6 +2526,7 @@ def create_mcp_server(
             tool_annotations_type=ToolAnnotations,
             error_response=_error_response,
         )
+        _enforce_strict_tool_arguments(server, (GRAPH_CONTEXT_TOOL_NAME,))
         register_live_action_tools(
             server=server,
             live_editor_service=live_editor_service,
@@ -1566,6 +2565,95 @@ def create_mcp_server(
                 tool_annotations_type=ToolAnnotations,
                 error_response=_error_response,
             )
+        if experimental_graph_layout_apply:
+            register_graph_layout_experimental_tools(
+                server=server,
+                live_editor_service=live_editor_service,
+                tool_annotations_type=ToolAnnotations,
+                error_response=_error_response,
+            )
+            _enforce_strict_tool_arguments(
+                server,
+                (EXPERIMENTAL_APPLY_TOOL_NAME, EXPERIMENTAL_SAVE_TOOL_NAME),
+            )
+        if experimental_graphpatch_edit:
+            register_focus_blueprint_graph_tool(
+                server=server,
+                live_editor_service=live_editor_service,
+                tool_annotations_type=ToolAnnotations,
+                error_response=_error_response,
+            )
+            _enforce_strict_tool_arguments(server, ("ue_focus_blueprint_graph",))
+            register_graph_edit_experimental_tools(
+                server=server,
+                live_editor_service=live_editor_service,
+                tool_annotations_type=ToolAnnotations,
+                error_response=_error_response,
+            )
+            _enforce_strict_tool_arguments(
+                server,
+                (
+                    EXPERIMENTAL_GRAPH_EDIT_PREVIEW_TOOL_NAME,
+                    EXPERIMENTAL_GRAPH_EDIT_APPLY_TOOL_NAME,
+                    EXPERIMENTAL_GRAPH_EDIT_SAVE_TOOL_NAME,
+                ),
+            )
+            register_pin_default_edit_experimental_tools(
+                server=server,
+                live_editor_service=live_editor_service,
+                tool_annotations_type=ToolAnnotations,
+                error_response=_error_response,
+            )
+            _enforce_strict_tool_arguments(
+                server,
+                (
+                    EXPERIMENTAL_PIN_DEFAULT_PREVIEW_TOOL_NAME,
+                    EXPERIMENTAL_PIN_DEFAULT_APPLY_TOOL_NAME,
+                    EXPERIMENTAL_PIN_DEFAULT_SAVE_TOOL_NAME,
+                ),
+            )
+            register_variable_write_experimental_tools(
+                server=server,
+                live_editor_service=live_editor_service,
+                tool_annotations_type=ToolAnnotations,
+                error_response=_error_response,
+            )
+            _enforce_strict_tool_arguments(
+                server,
+                (
+                    EXPERIMENTAL_VARIABLE_PREVIEW_TOOL_NAME,
+                    EXPERIMENTAL_VARIABLE_APPLY_TOOL_NAME,
+                    EXPERIMENTAL_VARIABLE_SAVE_TOOL_NAME,
+                ),
+            )
+            register_rewire_write_experimental_tools(
+                server=server,
+                live_editor_service=live_editor_service,
+                tool_annotations_type=ToolAnnotations,
+                error_response=_error_response,
+            )
+            _enforce_strict_tool_arguments(
+                server,
+                (
+                    EXPERIMENTAL_REWIRE_PREVIEW_TOOL_NAME,
+                    EXPERIMENTAL_REWIRE_APPLY_TOOL_NAME,
+                    EXPERIMENTAL_REWIRE_SAVE_TOOL_NAME,
+                ),
+            )
+            register_node_remove_write_experimental_tools(
+                server=server,
+                live_editor_service=live_editor_service,
+                tool_annotations_type=ToolAnnotations,
+                error_response=_error_response,
+            )
+            _enforce_strict_tool_arguments(
+                server,
+                (
+                    EXPERIMENTAL_NODE_REMOVE_PREVIEW_TOOL_NAME,
+                    EXPERIMENTAL_NODE_REMOVE_APPLY_TOOL_NAME,
+                    EXPERIMENTAL_NODE_REMOVE_SAVE_TOOL_NAME,
+                ),
+            )
     if workflow_service is not None:
         register_workflow_tools(
             server=server,
@@ -1593,8 +2681,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--database",
         type=Path,
-        default=DEFAULT_DATABASE,
-        help=f"Immutable read-only SQLite index path. Default: {DEFAULT_DATABASE}",
+        default=None,
+        help=(
+            "Immutable read-only SQLite index path. Required unless --pure-live is set. "
+            f"Default in index mode: {DEFAULT_DATABASE}"
+        ),
+    )
+    parser.add_argument(
+        "--pure-live",
+        action="store_true",
+        help=(
+            "Explicit opt-in pure-live mode: no SQLite index is opened or created and only a "
+            "bounded read-only Live Editor tool set is registered. Requires --enable-live-editor "
+            "and --project."
+        ),
     )
     parser.add_argument("--enable-project-memory", action="store_true")
     parser.add_argument(
@@ -1615,6 +2715,24 @@ def build_parser() -> argparse.ArgumentParser:
         "--enable-p8-test-only-graph-layout-apply",
         action="store_true",
         help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--enable-experimental-graph-layout-apply",
+        action="store_true",
+        help=(
+            "Opt in to the general experimental Blueprint graph-layout Apply/Save tools. "
+            "The running Editor project must also set "
+            "[UEAgentKit] ExperimentalGraphLayoutApply=True."
+        ),
+    )
+    parser.add_argument(
+        "--enable-experimental-graphpatch-edit",
+        action="store_true",
+        help=(
+            "Opt in to the bounded experimental Blueprint createNode/connectPins tools. "
+            "The running Editor project must also set "
+            "[UEAgentKit] ExperimentalGraphPatchEdit=True."
+        ),
     )
     parser.add_argument("--enable-source-control", action="store_true")
     parser.add_argument("--engine-root", type=Path)
@@ -1715,18 +2833,108 @@ def _resolve_policy_argument(args: argparse.Namespace) -> None:
     args.policy_path = resolve_project_policy(args.project_path, profile=args.policy_profile)
 
 
+def _validate_pure_live_arguments(args: argparse.Namespace) -> None:
+    """Reject every option that would need an index, workflow, memory, or writes."""
+    if args.database is not None:
+        raise ValueError("--pure-live does not accept --database; no index is opened in this mode.")
+    if not args.enable_live_editor:
+        raise ValueError("--pure-live requires --enable-live-editor.")
+    if args.project_path is None:
+        raise ValueError("--pure-live requires --project with an exact .uproject path.")
+    rejected = {
+        "--enable-write-tools": args.enable_write_tools,
+        "--enable-commit-tools": args.enable_commit_tools,
+        "--enable-project-memory": args.enable_project_memory,
+        "--enable-source-control": args.enable_source_control,
+        "--enable-p7-test-only-graph-layout-apply": getattr(
+            args, "enable_p7_test_only_graph_layout_apply", False
+        ),
+        "--enable-p8-test-only-graph-layout-apply": getattr(
+            args, "enable_p8_test_only_graph_layout_apply", False
+        ),
+        "--enable-experimental-graph-layout-apply": getattr(
+            args, "enable_experimental_graph_layout_apply", False
+        ),
+        "--enable-experimental-graphpatch-edit": getattr(
+            args, "enable_experimental_graphpatch_edit", False
+        ),
+    }
+    enabled = [name for name, value in rejected.items() if value]
+    if enabled:
+        raise ValueError(
+            "--pure-live does not support " + ", ".join(enabled) + "."
+        )
+    paths = {
+        "--engine-root": args.engine_root,
+        "--policy": args.policy_path,
+        "--policy-profile": args.policy_profile,
+        "--revision-export": args.revision_export,
+        "--memory-database": args.memory_database,
+    }
+    configured = [name for name, value in paths.items() if value]
+    if configured:
+        raise ValueError(
+            "--pure-live does not support " + ", ".join(configured) + "."
+        )
+
+
+def _run_pure_live(args: argparse.Namespace) -> int:
+    """Explicit opt-in pure-live startup: no index, no SQLite, bounded read-only tools."""
+    try:
+        _validate_pure_live_arguments(args)
+        live_editor_service = _build_live_editor_service(args)
+        if live_editor_service is None:
+            raise ValueError("--pure-live requires --enable-live-editor.")
+        if args.check:
+            payload: dict[str, Any] = {
+                "schemaVersion": "1.0",
+                "tool": "ue_agent_kit_mcp_status",
+                "ok": True,
+                "mode": "pure-live",
+                "index": {
+                    "configured": False,
+                    "required": False,
+                    "opened": False,
+                    "state": "not-opened",
+                },
+                "writeToolsEnabled": False,
+                "commitToolsEnabled": False,
+                "liveEditorEnabled": True,
+                "projectMemoryEnabled": False,
+                "sourceControlEnabled": False,
+                "liveEditor": live_editor_service.status(),
+            }
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            return 0
+        server = create_mcp_server(
+            None,
+            live_editor_service=live_editor_service,
+            pure_live=True,
+        )
+        server.run(transport="stdio")
+        return 0
+    except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+        print(
+            json.dumps(_error_response("ue_agent_kit_mcp", exc, read_only=False), ensure_ascii=False),
+            file=sys.stderr,
+        )
+        return 2 if isinstance(exc, FileNotFoundError) else 1
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if getattr(args, "pure_live", False):
+        return _run_pure_live(args)
     frozen_snapshot: FrozenSessionSnapshot | None = None
     try:
         _resolve_policy_argument(args)
         base_workflow_config = _build_workflow_config(args)
         live_editor_service = _build_live_editor_service(args)
         workflow_config: PatchWorkflowConfig | None = None
-        database_path = args.database
+        database_path = args.database if args.database is not None else DEFAULT_DATABASE
         if base_workflow_config is not None:
             active_snapshot = resolve_active_snapshot(
-                args.database,
+                database_path,
                 base_workflow_config.revision_export,
                 base_workflow_config.work_root,
                 base_workflow_config.project_path.stem,
@@ -1825,6 +3033,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
             p8_test_only_graph_layout_apply=bool(
                 getattr(args, "enable_p8_test_only_graph_layout_apply", False)
+            ),
+            experimental_graph_layout_apply=bool(
+                getattr(args, "enable_experimental_graph_layout_apply", False)
+            ),
+            experimental_graphpatch_edit=bool(
+                getattr(args, "enable_experimental_graphpatch_edit", False)
             ),
         )
         server.run(transport="stdio")

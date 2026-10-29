@@ -14,6 +14,9 @@ ue_get_project_status
 ue_search
 ue_get_asset
 ue_find_references
+ue_find_world_actors
+ue_find_world_partition_actors
+ue_get_world_summary
 ue_get_task_context
 ue_analyze_change_impact
 ue_analyze_semantic_diff
@@ -23,7 +26,7 @@ ue_evaluate_trust_verdict
 
 ### 固定项目 Live Editor 模式
 
-使用 `-EnableLiveEditor -ProjectPath <固定 .uproject>` 后，在八个离线查询 Tool 之外注册：
+使用 `-EnableLiveEditor -ProjectPath <固定 .uproject>` 后，在默认离线查询 Tool 之外注册：
 
 ```text
 ue_editor_status
@@ -222,6 +225,43 @@ nodes
 - `asset_path` / `target_asset_path` 同时接受传统 `/Game/...` 路径与安全的项目相对 indexed path；相对路径禁止盘符、反斜杠、`.`/`..` 逃逸。
 - 深层遍历不接受源/目标 Symbol 与目标资产端点组合，避免产生含义不稳定的跨层过滤。
 
+### `ue_find_world_actors`
+
+在地图（World）索引中查询已导出的 Actor。数据来自 `WorldAssetReader` 的 canonical `assetDetails`；`ueak index` 在导入资产时用**同一个 SQLite 事务**写入 `world_v2_*` 辅助表，因此资产行与地图 Actor 行要么一起成功、要么一起回滚。
+
+- `world` 接受完整资产路径（`/Game/Maps/L_Main.L_Main`）或包路径（`/Game/Maps/L_Main`）；留空则跨地图查询，每条结果仍带 `world_asset_path`。
+- 过滤：`class_path`（精确类路径）、`class_contains`（子串）、`tag`、`data_layer`（精确）、`label_contains`（子串）。
+- `include_component_classes=true` 时结果携带 `componentClasses[{classPath,count}]`；默认省略以控制 Token。
+- 分页：`limit`（1..500）/`offset`，或继续传 `continuation_token`；`max_output_tokens` 控制输出预算，超预算会截断并返回 continuation token（`outputBudget.truncated=true`）。
+- 结果字段：`actor_key`、`actor_guid`、`instance_guid`、`name`、`label`、`object_path`、`class_path`、`folder_path`、`location_*/rotation_*/scale_*`、`tags`、`dataLayers`、`component_count`、`root_component_*`、`root_mobility`、`world_asset_path`。
+
+**新鲜度与覆盖契约**：响应顶层始终带 `worldIndexAvailable`、`coverage`、`complete`、`warnings` 与 `worldStatus`；`worldStatus.worlds[]` 给出 `assetRevision`、`worldRevision`、`assetIndexedAtUtc`、`worldIngestedAtUtc`、`partial`、`partialReasons`、`actorListTruncated`、`actorDescListTruncated`、`loadedActorCount`、`exportedActorCount`、`actorRows`、`actorDescRows`，`worldStatus.indexBuild` 给出最后一次索引构建的 `lastBuildUtc`/`complete`/`incompleteReasons`。
+
+| `coverage` | 含义 |
+| --- | --- |
+| `complete` | 行对应当前资产 revision，且导出未截断、非 partial |
+| `stale` | 世界行来自旧 revision（`assetRevision` 与 `worldRevision` 不同） |
+| `truncated` | 导出被截断（如 `exportedActorCount < loadedActorCount`）；缺席的 Actor 不能当作不存在 |
+| `partial` | Reader 报告部分数据（如 `actorDescMetadataAvailable=false`） |
+| `world-index-missing` | 资产已索引但没有世界行（旧索引）；重建索引即可修复 |
+| `orphan` | 有世界行但对应资产行已不存在 |
+| `unknown-map` | 该地图不在当前索引中（空结果不等于"地图为空"） |
+| `world-index-unavailable` | 该库没有 `world_v2_*` 表，从未导入过 World |
+
+只有 `coverage=complete` 才表示"已最新且完整"；禁止仅凭 `assetPath` 或存在资产行推断新鲜度。`worldStatus.indexBuild.complete=false` 表示上一次索引导入不完整（失败资产、Reader 失败或 manifest 不一致），此时任何地图都必须按"可能过期"处理。
+
+### `ue_find_world_partition_actors`
+
+单地图 World Partition 查询会额外返回 worldPartitionAvailable（true/false/null）、actorDescMetadataAvailable 和 worldPartitionCoverage。非 WP 地图显式报告 not-applicable 并附警告；World 的 coverage=complete 只表示地图 Actor 索引完整，不表示 WP Actor Descriptor 覆盖已验收。未指定唯一地图时 WP 可用性为 null、覆盖状态 unknown。
+
+查询 World Partition 的 Actor Descriptor（未加载 Actor 的元数据与 `editorBounds`）。过滤条件：`base_class_path`、`class_contains`、`tag`、`data_layer`、`folder_prefix`；分页、Token 预算、`coverage`/`worldStatus` 契约与 `ue_find_world_actors` 一致，并在每条结果中附带 `actor_desc_list_truncated`、`actor_desc_metadata_available`、`exported_actor_desc_count`、`actor_desc_count`。
+
+### `ue_get_world_summary`
+
+规模化地图分页：pagination.total 为实际匹配的地图总数；offset 与 continuationToken 基于数据库分页前进，禁止空页无限循环。未指定精确地图时，coverageScope=page 表示 coverage/complete 仅反映当前页，不能据此推断整个工程的世界索引全部完整。
+
+返回地图级覆盖摘要（不返回 Actor 明细）：每张地图的 `coverage`、`assetRevision`/`worldRevision`、`assetIndexedAtUtc`/`worldIngestedAtUtc`、`partial`、截断计数、`actorRows`/`actorDescRows`、`warnings`，以及全局 `indexBuild`。`world` 为空时列出所有已索引地图（`limit` 1..64，可用 `continuation_token` 翻页）；`world` 指向未索引地图时返回 `coverage=unknown-map`、`targetFound=false`，而不是空成功。
+
 ### `ue_get_task_context`
 
 一次只读请求把任务相关的确定性事实源聚合为有界 Task Context：
@@ -324,13 +364,14 @@ expected no-op 使用独立 `noop_*` Change Set Operation：没有 LiveApply rec
 
 
 ```powershell
+# 开发回归示例：需自行准备隔离测试工程（非公开项目的通用安装步骤）
 scripts/TestMcpLiveClosedLoop.ps1 `
-  -EngineRoot E:\EPICGAME\UE_5.6 `
-  -ProjectPath E:\WorkSpace\UEAgentKit\Build\DirectHost\HostProject.uproject
+  -EngineRoot "<UE_5.6>" `
+  -ProjectPath "<TEST_HOST_PROJECT>.uproject"
 
 scripts/TestMcpBlueprintSemanticDiff.ps1 `
-  -EngineRoot E:\EPICGAME\UE_5.6 `
-  -ProjectPath E:\WorkSpace\UEAgentKit\Build\DirectHost\HostProject.uproject
+  -EngineRoot "<UE_5.6>" `
+  -ProjectPath "<TEST_HOST_PROJECT>.uproject"
 ```
 
 ClosedLoop 覆盖 Data Asset、Material Instance、DataTable cell 与 rename 的 live/persisted/verified，共 12 个结果；全部 expected=actual=matched=1、unexpected=missing=0、`truncated=false`。恢复采用独立 Canonical fixture verification，5/5 通过；UE Reset 会重写语义等价的 package bytes，因此不把精确 hash 恢复作为该组测试的必要条件，冻结 Revision Export 与 SQLite 必须保持不变。

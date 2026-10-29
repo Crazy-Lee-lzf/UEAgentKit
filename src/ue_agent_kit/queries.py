@@ -8,6 +8,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from .code_index import CODE_PROFILE
+from .text_search import expand_query_term, has_cjk, project_cjk
 
 
 MAX_QUERY_LIMIT = 10000
@@ -36,8 +37,45 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     return {key: row[key] for key in row.keys()}
 
 
-def _fts_phrase(query: str) -> str:
+def _fts_literal_phrase(query: str) -> str:
+    """Quote one literal query as a single FTS5 phrase (legacy behavior).
+
+    Used by ``assets_fts``, whose columns are not part of the schema v2 CJK
+    projection. Asset search behavior is intentionally unchanged.
+    """
     return '"' + query.replace('"', '""') + '"'
+
+
+def _query_runs(query: str) -> tuple[str, ...]:
+    """Split a query into project-normalized literal runs.
+
+    NFKC folding maps full-width ASCII to ASCII and one CJK compatibility form
+    onto another. Splitting on Unicode whitespace keeps multi-word queries as
+    independent AND terms while a run such as ``AK47护甲`` stays intact so the
+    ASCII prefix and the CJK run can be matched across different FTS columns.
+    """
+    projected = project_cjk(query)
+    return tuple(run for run in projected.split(" ") if run)
+
+
+def _fts_phrase(query: str) -> str:
+    """Build the CJK-aware FTS5 expression used by symbol and node search.
+
+    Pure ASCII queries keep the historical quoted phrase so their behavior is
+    unchanged. A query containing CJK is split into runs; each CJK run becomes
+    a character-spaced phrase (``护甲`` -> ``"护 甲"``) that matches inside a
+    longer projected run, while a mixed run becomes ``"AK47" AND "护 甲"``.
+    The query path is symmetric with the persisted projection built by
+    :func:`ue_agent_kit.text_search.symbol_search_text` / ``node_search_text``.
+    """
+    if not has_cjk(query):
+        return _fts_literal_phrase(query)
+    expressions = [
+        expression
+        for expression in (expand_query_term(run) for run in _query_runs(query))
+        if expression
+    ]
+    return " AND ".join(expressions) if expressions else _fts_literal_phrase(query)
 
 
 def _merge_ranked_rows(
@@ -139,7 +177,7 @@ def search_assets(
                 ORDER BY search_rank, a.asset_path
                 LIMIT ?
                 """,
-                [_fts_phrase(query), *filter_parameters, fetch_limit],
+                [_fts_literal_phrase(query), *filter_parameters, fetch_limit],
             ).fetchall()
             ranked.extend((float(row["search_rank"]), row) for row in fts_rows)
         except sqlite3.OperationalError:
@@ -305,6 +343,129 @@ def search_symbols(
             JOIN assets AS a ON a.id = s.asset_id
             WHERE 1 = 1{filter_sql}
             ORDER BY a.asset_path, s.kind, s.name
+            LIMIT ? OFFSET ?
+            """,
+            [*parameters, limit, offset],
+        ).fetchall()
+        results = [_row_to_dict(row) for row in rows]
+
+    for result in results:
+        result.pop("search_rank", None)
+        result.pop("id", None)
+        details_json = str(result.pop("details_json", ""))
+        if include_details:
+            result["details"] = _parse_json(details_json, {})
+    return results
+
+
+def search_nodes(
+    connection: sqlite3.Connection,
+    query: str,
+    *,
+    graph_guid: str = "",
+    asset_path: str = "",
+    path_prefix: str = "",
+    limit: int = 50,
+    offset: int = 0,
+    include_details: bool = False,
+) -> list[dict[str, Any]]:
+    """Search indexed Blueprint graph nodes, including CJK substrings.
+
+    Node FTS mirrors symbol FTS: the original columns keep full-text behavior
+    and ``nodes.search_text`` holds the CJK-only projection. The query builder
+    is the same :func:`_fts_phrase`, so ``护甲`` matches inside ``护甲升级链``
+    while ``甲护`` does not, and mixed terms such as ``AK47护甲`` require both
+    the ASCII token in an original column and the CJK phrase in ``search_text``.
+    """
+    limit, offset = normalize_pagination(limit, offset)
+    query = query.strip()
+    graph_guid = graph_guid.strip()
+    asset_path = asset_path.strip()
+    path_prefix = path_prefix.strip()
+    fetch_limit = limit + offset + 200
+    filters: list[str] = []
+    parameters: list[Any] = []
+    if graph_guid:
+        filters.append("n.graph_guid = ?")
+        parameters.append(graph_guid)
+    if asset_path:
+        filters.append("a.asset_path = ?")
+        parameters.append(asset_path)
+    if path_prefix:
+        filters.append("a.asset_path LIKE ?")
+        parameters.append(path_prefix + "%")
+    filter_sql = " AND " + " AND ".join(filters) if filters else ""
+
+    ranked: list[tuple[float, sqlite3.Row]] = []
+    if query:
+        try:
+            fts_rows = connection.execute(
+                f"""
+                SELECT n.id, n.graph_guid, n.guid, n.object_name, n.node_class,
+                       n.title, n.comment, n.details_json, a.asset_path,
+                       bm25(nodes_fts) AS search_rank
+                FROM nodes_fts
+                JOIN nodes AS n ON n.id = nodes_fts.rowid
+                JOIN assets AS a ON a.id = n.asset_id
+                WHERE nodes_fts MATCH ?{filter_sql}
+                ORDER BY search_rank, a.asset_path, n.graph_guid, n.title, n.guid
+                LIMIT ?
+                """,
+                [_fts_phrase(query), *parameters, fetch_limit],
+            ).fetchall()
+            ranked.extend((float(row["search_rank"]), row) for row in fts_rows)
+        except sqlite3.OperationalError:
+            pass
+
+        like_value = f"%{query}%"
+        like_rows = connection.execute(
+            f"""
+            SELECT n.id, n.graph_guid, n.guid, n.object_name, n.node_class,
+                   n.title, n.comment, n.details_json, a.asset_path
+            FROM nodes AS n
+            JOIN assets AS a ON a.id = n.asset_id
+            WHERE (n.guid LIKE ? OR n.object_name LIKE ? OR n.node_class LIKE ?
+                   OR n.title LIKE ? OR n.comment LIKE ?){filter_sql}
+            ORDER BY
+                CASE
+                    WHEN n.title = ? THEN 0
+                    WHEN n.title LIKE ? THEN 1
+                    ELSE 2
+                END,
+                a.asset_path, n.graph_guid, n.title, n.guid
+            LIMIT ?
+            """,
+            [
+                like_value,
+                like_value,
+                like_value,
+                like_value,
+                like_value,
+                *parameters,
+                query,
+                query + "%",
+                fetch_limit,
+            ],
+        ).fetchall()
+        for row in like_rows:
+            if row["title"] == query:
+                rank = -100.0
+            elif str(row["title"]).startswith(query):
+                rank = -50.0
+            else:
+                rank = 50.0
+            ranked.append((rank, row))
+
+        results = _merge_ranked_rows(ranked, key_column="id", limit=limit, offset=offset)
+    else:
+        rows = connection.execute(
+            f"""
+            SELECT n.id, n.graph_guid, n.guid, n.object_name, n.node_class,
+                   n.title, n.comment, n.details_json, a.asset_path
+            FROM nodes AS n
+            JOIN assets AS a ON a.id = n.asset_id
+            WHERE 1 = 1{filter_sql}
+            ORDER BY a.asset_path, n.graph_guid, n.title, n.guid
             LIMIT ? OFFSET ?
             """,
             [*parameters, limit, offset],

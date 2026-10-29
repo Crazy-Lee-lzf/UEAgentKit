@@ -4,6 +4,9 @@
 #include "BlueprintGraphLayoutP9Menu.h"
 #include "BlueprintGraphLayoutP11Menu.h"
 #include "BlueprintGraphLayoutP9TestOnly.h"
+#include "NativePreviewMenuSettings.h"
+#include "Native/NativeGraphMenuBinding.h"
+#include "Native/NativeNodeRegistry.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "Modules/ModuleManager.h"
@@ -14,8 +17,14 @@ public:
 	virtual void StartupModule() override
 	{
 		const bool bAutomationChild = FParse::Param(FCommandLine::Get(), TEXT("UEAgentKitAutomationChild"));
+		FUEAgentKitNativePreviewSettings::InitializeFromStartup(bAutomationChild);
 		if (GIsEditor && !IsRunningCommandlet() && !bAutomationChild)
 		{
+			// Read-only native registry.  Off by default; a missing/invalid
+			// manifest only disables the native surface (legacy P12 is untouched).
+			FNativeNodeRegistry& NativeRegistry = FNativeNodeRegistry::Get();
+			NativeRegistry.Initialize(FNativeNodeRegistry::ParseMode(FNativeNodeRegistry::ReadConfiguredModeText()));
+
 			EditorBridge = MakeUnique<FUEAgentKitEditorBridge>();
 			EditorBridge->Start();
 			if (UEAgentKitBlueprintGraphLayoutP8::IsTestOnlyWriteAvailable())
@@ -33,6 +42,14 @@ public:
 				GraphLayoutP11Menu = MakeShared<FUEAgentKitGraphLayoutP11Menu>(EditorBridge.Get());
 				GraphLayoutP11Menu->Startup();
 			}
+			// T7 is opt-in only in active mode.  Shadow deliberately has no UI;
+			// its read-only registry remains available through native.invoke.
+			if (FUEAgentKitNativeGraphMenu::IsModeEligible(NativeRegistry.GetMode())
+				&& NativeRegistry.IsAvailable())
+			{
+				NativeGraphMenu = MakeShared<FUEAgentKitNativeGraphMenu>();
+				NativeGraphMenu->Startup();
+			}
 		}
 	}
 
@@ -42,6 +59,11 @@ public:
 		{
 			GraphLayoutP11Menu->Shutdown();
 			GraphLayoutP11Menu.Reset();
+		}
+		if (NativeGraphMenu.IsValid())
+		{
+			NativeGraphMenu->Shutdown();
+			NativeGraphMenu.Reset();
 		}
 		if (GraphLayoutP9Menu.IsValid())
 		{
@@ -58,6 +80,7 @@ public:
 			EditorBridge->Stop();
 			EditorBridge.Reset();
 		}
+		FNativeNodeRegistry::Get().Shutdown();
 	}
 
 private:
@@ -65,6 +88,7 @@ private:
 	TSharedPtr<FUEAgentKitGraphLayoutP8Menu> GraphLayoutP8Menu;
 	TSharedPtr<FUEAgentKitGraphLayoutP9Menu> GraphLayoutP9Menu;
 	TSharedPtr<FUEAgentKitGraphLayoutP11Menu> GraphLayoutP11Menu;
+	TSharedPtr<FUEAgentKitNativeGraphMenu> NativeGraphMenu;
 };
 
 IMPLEMENT_MODULE(FUEAgentKitEditorModule, UEAgentKitEditor)

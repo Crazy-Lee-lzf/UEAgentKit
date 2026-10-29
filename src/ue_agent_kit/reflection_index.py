@@ -9,6 +9,7 @@ from typing import Any
 
 from .code_index import CODE_PROFILE
 from .database import get_metadata, set_metadata, utc_now_iso
+from .text_search import symbol_search_text
 
 
 REFLECTION_SCHEMA_VERSION = "reflection-1.0"
@@ -194,6 +195,7 @@ def _insert_child_symbol(
         "evidence": "ue-reflection",
         "reflection": record,
     }
+    details_json = _json_dumps(details)
     connection.execute(
         """
         INSERT INTO symbols(
@@ -204,8 +206,9 @@ def _insert_child_symbol(
             symbol_asset_path,
             owner_symbol_id,
             class_path,
-            details_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            details_json,
+            search_text
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             asset_id,
@@ -215,7 +218,15 @@ def _insert_child_symbol(
             asset_path,
             owner_stable_id,
             cpp_type,
-            _json_dumps(details),
+            details_json,
+            symbol_search_text(
+                stable_id=stable_id,
+                name=name,
+                kind=kind,
+                symbol_asset_path=asset_path,
+                class_path=cpp_type,
+                details_json=details_json,
+            ),
         ),
     )
 

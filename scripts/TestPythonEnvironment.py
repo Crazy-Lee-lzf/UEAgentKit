@@ -12,7 +12,7 @@ def main() -> int:
     tool_root = Path(__file__).resolve().parents[1]
     pyproject_path = tool_root / "pyproject.toml"
 
-    if not ((3, 11) <= sys.version_info[:2] < (3, 13)):
+    if not ((3, 11) <= sys.version_info[:2] < (3, 15)):
         raise RuntimeError(f"Unsupported Python version: {sys.version}")
 
     if sys.prefix == sys.base_prefix:
@@ -22,7 +22,7 @@ def main() -> int:
         pyproject = tomllib.load(stream)
 
     requires_python = pyproject["project"]["requires-python"]
-    if requires_python != ">=3.11,<3.13":
+    if requires_python != ">=3.11,<3.15":
         raise RuntimeError(f"Unexpected requires-python value: {requires_python}")
 
     with tempfile.TemporaryDirectory(prefix="ueak_") as temporary_root:

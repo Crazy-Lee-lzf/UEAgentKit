@@ -1,5 +1,8 @@
 #include "BlueprintGraphLayoutApply.h"
 
+#include "BlueprintNodeRemoveExperimental.h"
+#include "BlueprintRewireExperimental.h"
+
 #include "BlueprintContextAnalysis.h"
 #include "BlueprintEditor.h"
 #include "EditorBridgeHandlerUtils.h"
@@ -8,6 +11,7 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
+#include "EdGraphNode_Comment.h"
 #include "EdGraphSchema_K2.h"
 #include "Editor.h"
 #include "Editor/Transactor.h"
@@ -27,6 +31,22 @@
 
 namespace UEAgentKitBlueprintGraphLayout
 {
+	namespace
+	{
+		/**
+		 * The graph one explicit focus request selected.  It is only a fallback
+		 * for the read-only preflight when the toolkit has no live Slate focus,
+		 * and the preflight still verifies that the graph belongs to the exact
+		 * Blueprint owned by the selected editor.
+		 */
+		TWeakObjectPtr<UEdGraph> GExplicitFocusedGraph;
+	}
+
+	void SetExplicitFocusedGraph(UEdGraph* Graph)
+	{
+		GExplicitFocusedGraph = Graph;
+	}
+
 	namespace
 	{
 		constexpr int32 MaxMovedPositions = 1000;
@@ -1192,6 +1212,386 @@ namespace UEAgentKitBlueprintGraphLayout
 		return true;
 	}
 
+	bool BuildLayoutProjection(
+		UBlueprint* Blueprint,
+		UEdGraph* Graph,
+		int32 Offset,
+		int32 Limit,
+		const FString& ExpectedPackageRevision,
+		const FString& ExpectedGraphFingerprint,
+		TSharedPtr<FJsonObject>& OutProjection,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
+	{
+		OutProjection.Reset();
+		if (Blueprint == nullptr || Graph == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-layout-graph-unavailable"),
+				TEXT("The exact Blueprint and graph must both be loaded."));
+		}
+		if (Offset < 0 || Limit < 1 || Limit > 256)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-layout-projection-page-invalid"),
+				TEXT("Projection offset must be >= 0 and limit must be 1..256."));
+		}
+
+		FString Revision;
+		bool bPackageDirty = false;
+		if (!ReadRevision(Blueprint, Revision, bPackageDirty, OutErrorCode, OutErrorMessage))
+		{
+			return false;
+		}
+		const FString Fingerprint = ComputeGraphFingerprint(Graph);
+		if (!ExpectedPackageRevision.IsEmpty() && ExpectedPackageRevision != Revision)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-layout-revision-conflict"),
+				TEXT("The graph layout projection package revision changed while paging."));
+		}
+		if (!ExpectedGraphFingerprint.IsEmpty() && ExpectedGraphFingerprint != Fingerprint)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-layout-fingerprint-conflict"),
+				TEXT("The graph layout projection fingerprint changed while paging."));
+		}
+
+		TArray<UEdGraphNode*> SortedNodes;
+		SortedNodes.Reserve(Graph->Nodes.Num());
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (Node != nullptr)
+			{
+				SortedNodes.Add(Node);
+			}
+		}
+		SortedNodes.Sort([](const UEdGraphNode& Left, const UEdGraphNode& Right)
+		{
+			return Left.NodeGuid.ToString(EGuidFormats::Digits) < Right.NodeGuid.ToString(EGuidFormats::Digits);
+		});
+
+		const int32 NodeCount = SortedNodes.Num();
+		if (Offset > NodeCount)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-layout-projection-page-invalid"),
+				TEXT("Projection offset is beyond the exact graph node count."));
+		}
+		const int32 End = FMath::Min(NodeCount, Offset + Limit);
+
+		TArray<FString> NodeHashLines;
+		TArray<FString> PinHashLines;
+		TArray<FString> EdgeHashLines;
+		NodeHashLines.Reserve(NodeCount);
+		TSet<FString> SeenPinIds;
+		TSet<FString> SeenEdges;
+		int32 PinCount = 0;
+		int32 EdgeCount = 0;
+		int32 CommentCount = 0;
+
+		TArray<TSharedPtr<FJsonValue>> PageNodes;
+		TArray<TSharedPtr<FJsonValue>> PagePins;
+		TArray<TSharedPtr<FJsonValue>> PageEdges;
+		TArray<TSharedPtr<FJsonValue>> PageComments;
+
+		for (int32 NodeIndex = 0; NodeIndex < NodeCount; ++NodeIndex)
+		{
+			const UEdGraphNode* Node = SortedNodes[NodeIndex];
+			if (Node == nullptr || !Node->NodeGuid.IsValid())
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-layout-invalid-live-node"),
+					TEXT("The live graph contains a node without a valid NodeGuid."));
+			}
+			const FString NodeGuid = Node->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower);
+			const FString NodeId = FString(TEXT("n:")) + NodeGuid;
+			const FString ClassPath = Node->GetClass() != nullptr
+				? Node->GetClass()->GetPathName()
+				: FString();
+			const bool bComment = IsCommentClass(Node);
+			const bool bReroute = IsRerouteClass(Node);
+			const FString Kind = bComment ? TEXT("comment") : (bReroute ? TEXT("reroute") : TEXT("node"));
+			const bool bPage = NodeIndex >= Offset && NodeIndex < End;
+
+			NodeHashLines.Add(FString::Printf(
+				TEXT("N\t%s\t%s\t%s\t%d\t%d\t%d\t%d"),
+				*NodeGuid,
+				*ClassPath,
+				*Kind,
+				Node->NodePosX,
+				Node->NodePosY,
+				Node->NodeWidth,
+				Node->NodeHeight));
+			if (bComment)
+			{
+				++CommentCount;
+			}
+
+			TArray<const UEdGraphPin*> Pins;
+			Pins.Reserve(Node->Pins.Num());
+			for (const UEdGraphPin* Pin : Node->Pins)
+			{
+				if (Pin != nullptr)
+				{
+					Pins.Add(Pin);
+				}
+			}
+			Pins.Sort([](const UEdGraphPin& Left, const UEdGraphPin& Right)
+			{
+				return Left.PinId.ToString(EGuidFormats::Digits) < Right.PinId.ToString(EGuidFormats::Digits);
+			});
+
+			TSharedPtr<FJsonObject> NodeObject;
+			if (bPage)
+			{
+				NodeObject = MakeShared<FJsonObject>();
+				NodeObject->SetStringField(TEXT("nodeId"), NodeId);
+				NodeObject->SetStringField(TEXT("guid"), NodeGuid);
+				NodeObject->SetStringField(TEXT("classPath"), ClassPath);
+				NodeObject->SetStringField(TEXT("kind"), Kind);
+				NodeObject->SetNumberField(TEXT("x"), Node->NodePosX);
+				NodeObject->SetNumberField(TEXT("y"), Node->NodePosY);
+				NodeObject->SetNumberField(TEXT("width"), Node->NodeWidth);
+				NodeObject->SetNumberField(TEXT("height"), Node->NodeHeight);
+			}
+
+			for (const UEdGraphPin* Pin : Pins)
+			{
+				if (Pin == nullptr || !Pin->PinId.IsValid())
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-layout-invalid-live-pin"),
+						TEXT("The live graph contains a pin without a valid PinId."));
+				}
+				const FString PinId = Pin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower);
+				if (SeenPinIds.Contains(PinId))
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-layout-invalid-live-pin"),
+						TEXT("The live graph contains duplicate PinId values."));
+				}
+				SeenPinIds.Add(PinId);
+				++PinCount;
+
+				const bool bOutput = Pin->Direction == EGPD_Output;
+				const bool bExec = Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Exec;
+				const FString Direction = bOutput ? TEXT("output") : TEXT("input");
+				const FString PinKind = bExec ? TEXT("exec") : TEXT("data");
+				const FString TypeCategory = Pin->PinType.PinCategory.ToString();
+				const FString TypeKey = PinTypeKey(Pin);
+				const bool bHidden = Pin->bHidden;
+				const bool bAdvanced = Pin->bAdvancedView;
+
+				PinHashLines.Add(FString::Printf(
+					TEXT("P\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%d"),
+					*PinId,
+					*NodeGuid,
+					*Direction,
+					*PinKind,
+					*TypeCategory,
+					*TypeKey,
+					bHidden ? 1 : 0,
+					bAdvanced ? 1 : 0));
+
+				if (bPage)
+				{
+					TSharedRef<FJsonObject> PinObject = MakeShared<FJsonObject>();
+					PinObject->SetStringField(TEXT("pinId"), PinId);
+					PinObject->SetStringField(TEXT("nodeId"), NodeId);
+					PinObject->SetStringField(TEXT("nodeGuid"), NodeGuid);
+					PinObject->SetStringField(TEXT("direction"), Direction);
+					PinObject->SetStringField(TEXT("kind"), PinKind);
+					PinObject->SetStringField(TEXT("typeCategory"), TypeCategory);
+					PinObject->SetStringField(TEXT("typeKey"), TypeKey);
+					PinObject->SetBoolField(TEXT("hidden"), bHidden);
+					PinObject->SetBoolField(TEXT("advanced"), bAdvanced);
+					PagePins.Add(MakeShared<FJsonValueObject>(PinObject));
+				}
+
+				if (!bOutput)
+				{
+					continue;
+				}
+				for (const UEdGraphPin* TargetPin : Pin->LinkedTo)
+				{
+					const UEdGraphNode* TargetNode = TargetPin != nullptr
+						? TargetPin->GetOwningNodeUnchecked()
+						: nullptr;
+					if (TargetPin == nullptr || TargetNode == nullptr || !TargetPin->PinId.IsValid())
+					{
+						return Fail(
+							OutErrorCode,
+							OutErrorMessage,
+							TEXT("graph-layout-invalid-live-link"),
+							TEXT("The live graph contains a link without a valid target pin."));
+					}
+					if (TargetNode->GetGraph() != Graph)
+					{
+						return Fail(
+							OutErrorCode,
+							OutErrorMessage,
+							TEXT("graph-layout-invalid-live-link"),
+							TEXT("The live graph contains a link to another graph."));
+					}
+					const FString TargetPinId = TargetPin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower);
+					const FString TargetNodeGuid = TargetNode->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower);
+					const FString EdgeKey = PinId + TEXT("|") + TargetPinId;
+					if (SeenEdges.Contains(EdgeKey))
+					{
+						continue;
+					}
+					SeenEdges.Add(EdgeKey);
+					++EdgeCount;
+
+					EdgeHashLines.Add(FString::Printf(
+						TEXT("E\t%s\t%s\t%s"),
+						*PinId,
+						*TargetPinId,
+						*PinKind));
+
+					if (bPage)
+					{
+						TSharedRef<FJsonObject> EdgeObject = MakeShared<FJsonObject>();
+						EdgeObject->SetStringField(TEXT("sourcePinId"), PinId);
+						EdgeObject->SetStringField(TEXT("sourceNodeId"), NodeId);
+						EdgeObject->SetStringField(TEXT("targetPinId"), TargetPinId);
+						EdgeObject->SetStringField(TEXT("targetNodeId"), FString(TEXT("n:")) + TargetNodeGuid);
+						EdgeObject->SetStringField(TEXT("kind"), PinKind);
+						PageEdges.Add(MakeShared<FJsonValueObject>(EdgeObject));
+					}
+				}
+			}
+
+			if (bPage)
+			{
+				PageNodes.Add(MakeShared<FJsonValueObject>(NodeObject.ToSharedRef()));
+				if (bComment)
+				{
+					const UEdGraphNode_Comment* Comment = Cast<UEdGraphNode_Comment>(Node);
+					TSharedRef<FJsonObject> CommentObject = MakeShared<FJsonObject>();
+					CommentObject->SetStringField(TEXT("nodeId"), NodeId);
+					CommentObject->SetStringField(
+						TEXT("text"),
+						Comment != nullptr ? Comment->NodeComment : FString());
+					TSharedRef<FJsonObject> Bounds = MakeShared<FJsonObject>();
+					Bounds->SetNumberField(TEXT("x"), Node->NodePosX);
+					Bounds->SetNumberField(TEXT("y"), Node->NodePosY);
+					Bounds->SetNumberField(TEXT("width"), Node->NodeWidth);
+					Bounds->SetNumberField(TEXT("height"), Node->NodeHeight);
+					CommentObject->SetObjectField(TEXT("bounds"), Bounds);
+					PageComments.Add(MakeShared<FJsonValueObject>(CommentObject));
+				}
+			}
+		}
+
+		auto HashLines = [](const TCHAR* Domain, TArray<FString>& Lines, FString& OutHash)
+		{
+			Lines.Sort();
+			FString Payload = FString(Domain) + TEXT("\n");
+			for (const FString& Line : Lines)
+			{
+				Payload += Line;
+				Payload += TEXT("\n");
+			}
+			FTCHARToUTF8 Utf8(*Payload);
+			OutHash = FString(TEXT("sha256:")) + Sha256Hex(
+				reinterpret_cast<const uint8*>(Utf8.Get()),
+				Utf8.Length()).ToLower();
+		};
+
+		FString NodeSetHash;
+		FString PinSetHash;
+		FString EdgeSetHash;
+		HashLines(TEXT("ueak.layout-projection.nodes/1"), NodeHashLines, NodeSetHash);
+		HashLines(TEXT("ueak.layout-projection.pins/1"), PinHashLines, PinSetHash);
+		HashLines(TEXT("ueak.layout-projection.edges/1"), EdgeHashLines, EdgeSetHash);
+
+		FString ProjectionPayload = TEXT("ueak.layout-projection/1\n");
+		ProjectionPayload += NodeSetHash + TEXT("\n") + PinSetHash + TEXT("\n") + EdgeSetHash;
+		FTCHARToUTF8 ProjectionUtf8(*ProjectionPayload);
+		const FString ProjectionHash = FString(TEXT("sha256:")) + Sha256Hex(
+			reinterpret_cast<const uint8*>(ProjectionUtf8.Get()),
+			ProjectionUtf8.Length()).ToLower();
+
+		FString GraphKind = TEXT("function");
+		if (Blueprint->UbergraphPages.Contains(Graph))
+		{
+			GraphKind = TEXT("uber");
+		}
+		else if (Blueprint->MacroGraphs.Contains(Graph))
+		{
+			GraphKind = TEXT("macro");
+		}
+		else if (Blueprint->DelegateSignatureGraphs.Contains(Graph))
+		{
+			GraphKind = TEXT("delegate-signature");
+		}
+
+		TSharedRef<FJsonObject> Projection = MakeShared<FJsonObject>();
+		Projection->SetStringField(TEXT("schemaVersion"), TEXT("ueak.graphlayoutprojection/1.0"));
+		Projection->SetNumberField(TEXT("projectionVersion"), 1);
+		Projection->SetBoolField(TEXT("available"), true);
+		Projection->SetBoolField(TEXT("readOnly"), true);
+		Projection->SetStringField(TEXT("source"), TEXT("focused-blueprint-editor"));
+		Projection->SetStringField(TEXT("selectionPolicy"), TEXT("most-recently-active-blueprint-editor"));
+		Projection->SetStringField(TEXT("focusScope"), TEXT("toolkit-graph-tab"));
+		Projection->SetStringField(TEXT("assetPath"), Blueprint->GetPathName());
+		Projection->SetStringField(
+			TEXT("assetClass"),
+			Blueprint->GetClass() != nullptr ? Blueprint->GetClass()->GetPathName() : FString());
+		Projection->SetStringField(TEXT("graphGuid"), Graph->GraphGuid.ToString(EGuidFormats::DigitsWithHyphensLower));
+		Projection->SetStringField(TEXT("graphName"), Graph->GetName());
+		Projection->SetStringField(TEXT("graphKind"), GraphKind);
+		Projection->SetStringField(
+			TEXT("graphClassPath"),
+			Graph->GetClass() != nullptr ? Graph->GetClass()->GetPathName() : FString());
+		Projection->SetStringField(
+			TEXT("schemaClassPath"),
+			Graph->GetSchema() != nullptr ? Graph->GetSchema()->GetClass()->GetPathName() : FString());
+		Projection->SetStringField(TEXT("packageRevision"), Revision);
+		Projection->SetBoolField(TEXT("packageDirty"), bPackageDirty);
+		Projection->SetStringField(TEXT("graphFingerprint"), Fingerprint);
+		Projection->SetNumberField(TEXT("nodeCount"), NodeCount);
+		Projection->SetNumberField(TEXT("pinCount"), PinCount);
+		Projection->SetNumberField(TEXT("edgeCount"), EdgeCount);
+		Projection->SetNumberField(TEXT("commentCount"), CommentCount);
+		Projection->SetStringField(TEXT("nodeSetHash"), NodeSetHash);
+		Projection->SetStringField(TEXT("pinSetHash"), PinSetHash);
+		Projection->SetStringField(TEXT("edgeSetHash"), EdgeSetHash);
+		Projection->SetStringField(TEXT("projectionHash"), ProjectionHash);
+		Projection->SetNumberField(TEXT("offset"), Offset);
+		Projection->SetNumberField(TEXT("limit"), Limit);
+		Projection->SetNumberField(TEXT("returnedNodeCount"), PageNodes.Num());
+		Projection->SetBoolField(TEXT("hasMore"), End < NodeCount);
+		Projection->SetNumberField(TEXT("nextOffset"), End);
+		Projection->SetArrayField(TEXT("nodes"), PageNodes);
+		Projection->SetArrayField(TEXT("pins"), PagePins);
+		Projection->SetArrayField(TEXT("edges"), PageEdges);
+		Projection->SetArrayField(TEXT("comments"), PageComments);
+		OutProjection = Projection;
+		OutErrorCode.Reset();
+		OutErrorMessage.Reset();
+		return true;
+	}
+
+
 	bool BuildFocusedEditorPreflight(
 		TSharedPtr<FJsonObject>& OutPreflight,
 		FString& OutErrorCode,
@@ -1252,6 +1652,16 @@ namespace UEAgentKitBlueprintGraphLayout
 				TEXT("The active Blueprint Editor does not own a loaded Blueprint."));
 		}
 		UEdGraph* Graph = BlueprintEditor->GetFocusedGraph();
+		bool bUsedExplicitFocus = false;
+		if (Graph == nullptr && GExplicitFocusedGraph.IsValid())
+		{
+			UEdGraph* Candidate = GExplicitFocusedGraph.Get();
+			if (Candidate != nullptr && Candidate->GetTypedOuter<UBlueprint>() == Blueprint)
+			{
+				Graph = Candidate;
+				bUsedExplicitFocus = true;
+			}
+		}
 		if (Graph == nullptr)
 		{
 			return Fail(
@@ -1271,6 +1681,26 @@ namespace UEAgentKitBlueprintGraphLayout
 		OutPreflight->SetStringField(TEXT("blueprintPath"), Blueprint->GetPathName());
 		OutPreflight->SetStringField(TEXT("graphName"), Graph->GetName());
 		OutPreflight->SetBoolField(TEXT("editable"), BlueprintEditor->IsEditable(Graph));
+		OutPreflight->SetStringField(
+			TEXT("focusSource"),
+			bUsedExplicitFocus ? TEXT("explicit-focus-request") : TEXT("live-slate-focus"));
+		// P5: expose the exact live edge-set hashes that the rewire and
+		// node-removal plan contracts require, so an Agent can bind a valid
+		// request from read-only discovery instead of only from native tests.
+		FString RewireEdgeSetHash;
+		if (UEAgentKitBlueprintRewireExperimental::TryComputeLiveEdgeSetHash(
+				Graph,
+				RewireEdgeSetHash))
+		{
+			OutPreflight->SetStringField(TEXT("rewireEdgeSetHash"), RewireEdgeSetHash);
+		}
+		FString NodeRemoveEdgeSetHash;
+		if (UEAgentKitBlueprintNodeRemoveExperimental::TryComputeLiveEdgeSetHash(
+				Graph,
+				NodeRemoveEdgeSetHash))
+		{
+			OutPreflight->SetStringField(TEXT("nodeRemoveEdgeSetHash"), NodeRemoveEdgeSetHash);
+		}
 		OutPreflight->SetNumberField(TEXT("lastActivationTime"), LatestActivation);
 		return true;
 	}

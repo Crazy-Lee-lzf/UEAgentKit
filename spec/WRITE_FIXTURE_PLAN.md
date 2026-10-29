@@ -1,5 +1,7 @@
 # UEAgentKit Write Fixture Plan 1.0
 
+> This is a narrowly scoped developer/test fixture workflow for an explicitly authorized disposable Unreal project. It is **not** a general asset creation or production write endpoint.
+
 Write Fixture Plan 用于在明确授权的测试工程中创建或重置隔离写入测试资产。它不是通用资产生成器，也不会扫描并删除整个目录。
 
 ## 执行模型

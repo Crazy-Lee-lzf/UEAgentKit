@@ -11,9 +11,14 @@ $ToolRoot = Get-UeakToolRoot
 $EngineRoot = Resolve-UeakEngineRoot -EngineRoot $EngineRoot
 $PythonExecutable = Resolve-UeakPythonExecutable -PythonExecutable $PythonExecutable
 $Version = (& $PythonExecutable -c "import tomllib; print(tomllib.load(open(r'$ToolRoot\pyproject.toml','rb'))['project']['version'])").Trim()
-if ($LASTEXITCODE -ne 0 -or $Version -notmatch '^\d+\.\d+\.\d+$')
+if ($LASTEXITCODE -ne 0 -or $Version -notmatch '^\d+\.\d+\.\d+(?:\.(?:dev|a|b|rc)\d+)?$')
 {
-    throw "Could not resolve a semantic project version."
+    throw "Could not resolve a PEP 440 project version."
+}
+$ReleaseDocStem = if ($Version -match '\.dev\d+$') {
+    "RELEASE_" + ($Version -replace '\.dev\d+$', '') + "_PREVIEW"
+} else {
+    "RELEASE_$Version"
 }
 
 $GitStatus = @(& git -C $ToolRoot status --porcelain)
@@ -94,8 +99,8 @@ if (@(Get-ChildItem -LiteralPath $PluginPackage -Recurse -File | Where-Object { 
 }
 
 Copy-Item -LiteralPath (Join-Path $ToolRoot "LICENSE") -Destination (Join-Path $PluginPackage "LICENSE") -Force
-Copy-Item -LiteralPath (Join-Path $ToolRoot "docs\RELEASE_$Version.md") -Destination (Join-Path $PluginPackage "RELEASE_NOTES.md") -Force
-Copy-Item -LiteralPath (Join-Path $ToolRoot "docs\RELEASE_${Version}_EN.md") -Destination (Join-Path $PluginPackage "RELEASE_NOTES_EN.md") -Force
+Copy-Item -LiteralPath (Join-Path $ToolRoot "docs\$ReleaseDocStem.md") -Destination (Join-Path $PluginPackage "RELEASE_NOTES.md") -Force
+Copy-Item -LiteralPath (Join-Path $ToolRoot "docs\${ReleaseDocStem}_EN.md") -Destination (Join-Path $PluginPackage "RELEASE_NOTES_EN.md") -Force
 
 foreach ($DirectoryName in $TransientPluginDirectories)
 {

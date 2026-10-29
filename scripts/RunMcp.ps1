@@ -16,6 +16,7 @@ param(
     [int]$ProcessTimeoutSeconds = 1800,
     [ValidateRange(0.1, 600.0)]
     [double]$LiveEditorTimeoutSeconds = 2.0,
+    [switch]$PureLive,
     [switch]$Check
 )
 
@@ -25,6 +26,62 @@ $ErrorActionPreference = "Stop"
 $ToolRoot = Get-UeakToolRoot
 $VenvPython = Join-Path $ToolRoot ".venv\Scripts\python.exe"
 $EntryPoint = Join-Path $PSScriptRoot "ue-agent-mcp.py"
+
+if ($PureLive)
+{
+    # Explicit opt-in: bounded read-only Live Editor tools, no index, no SQLite.
+    if (!$EnableLiveEditor)
+    {
+        throw "PureLive requires EnableLiveEditor."
+    }
+    if ($EnableWriteTools -or $EnableCommitTools -or $EnableProjectMemory)
+    {
+        throw "PureLive supports read-only live tools only."
+    }
+    if (
+        ![string]::IsNullOrWhiteSpace($Database) -or
+        ![string]::IsNullOrWhiteSpace($MemoryDatabase) -or
+        ![string]::IsNullOrWhiteSpace($EngineRoot) -or
+        ![string]::IsNullOrWhiteSpace($Policy) -or
+        ![string]::IsNullOrWhiteSpace($PolicyProfile) -or
+        ![string]::IsNullOrWhiteSpace($RevisionExport) -or
+        ![string]::IsNullOrWhiteSpace($WorkRoot) -or
+        ![string]::IsNullOrWhiteSpace($BackupRoot)
+    )
+    {
+        throw "PureLive does not accept Database, MemoryDatabase, Engine, Policy, PolicyProfile, RevisionExport, WorkRoot, or BackupRoot."
+    }
+    if ([string]::IsNullOrWhiteSpace($ProjectPath))
+    {
+        throw "PureLive requires ProjectPath."
+    }
+
+    Assert-UeakPath -Path $VenvPython -Description "project Python environment" -PathType File
+    Assert-UeakPath -Path $EntryPoint -Description "MCP entry point" -PathType File
+    $ProjectPath = Resolve-UeakProjectPath -ProjectPath $ProjectPath
+    $Arguments = @(
+        $EntryPoint,
+        "--pure-live",
+        "--enable-live-editor",
+        "--project", $ProjectPath,
+        "--live-editor-timeout-seconds", [string]$LiveEditorTimeoutSeconds
+    )
+    if ($Check)
+    {
+        $Arguments += "--check"
+    }
+
+    & $VenvPython -c "import mcp"
+    if ($LASTEXITCODE -ne 0)
+    {
+        throw "MCP dependency is not installed. Run scripts\setup_python.cmd -WithMcp."
+    }
+
+    # Do not write informational text to stdout: stdio is the MCP protocol transport.
+    & $VenvPython @Arguments
+    exit $LASTEXITCODE
+}
+
 if ([string]::IsNullOrWhiteSpace($Database))
 {
     $Database = Join-Path $ToolRoot ".data\ue_agent_kit.sqlite3"

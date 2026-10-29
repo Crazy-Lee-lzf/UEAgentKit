@@ -14,7 +14,7 @@ SPEC.loader.exec_module(MODULE)
 
 class ReleaseValidationTests(unittest.TestCase):
     def test_current_version_sources_are_consistent(self) -> None:
-        self.assertEqual(MODULE.project_version(), "0.8.0")
+        self.assertEqual(MODULE.project_version(), "0.9.0.dev1")
         self.assertEqual(MODULE.validate_version_sources(require_release_docs=True), [])
 
     def test_schemas_and_examples_are_release_ready(self) -> None:
@@ -29,6 +29,10 @@ class ReleaseValidationTests(unittest.TestCase):
         self.assertIn('actions/upload-artifact@v7', workflow)
         self.assertIn('- "3.11"', workflow)
         self.assertIn('- "3.12"', workflow)
+        self.assertIn('- "3.13"', workflow)
+        self.assertIn('- "3.14"', workflow)
+        self.assertNotIn('- "3.10"', workflow)
+        self.assertNotIn('- "3.15"', workflow)
         self.assertIn('python scripts/ValidateRelease.py --require-release-docs', workflow)
         self.assertIn('python -m build --outdir dist', workflow)
 

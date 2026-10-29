@@ -117,10 +117,10 @@ class MemoryVectorSchemaTests(unittest.TestCase):
 
     def test_fresh_database_reaches_latest_schema_with_ordinary_embeddings_table(self) -> None:
         with open_project_memory_database(self.database_path) as connection:
-            self.assertEqual(CURRENT_MEMORY_SCHEMA_VERSION, 6)
+            self.assertEqual(CURRENT_MEMORY_SCHEMA_VERSION, 7)
             self.assertEqual(
                 int(connection.execute("PRAGMA user_version").fetchone()[0]),
-                6,
+                CURRENT_MEMORY_SCHEMA_VERSION,
             )
             self.assertTrue(memory_embeddings_table_exists(connection))
             tables = {
@@ -189,7 +189,7 @@ class MemoryVectorSchemaTests(unittest.TestCase):
         with open_project_memory_database(self.database_path) as migrated:
             self.assertEqual(
                 int(migrated.execute("PRAGMA user_version").fetchone()[0]),
-                6,
+                CURRENT_MEMORY_SCHEMA_VERSION,
             )
             self.assertTrue(memory_embeddings_table_exists(migrated))
             remaining = migrated.execute(
@@ -207,10 +207,11 @@ class MemoryVectorSchemaTests(unittest.TestCase):
         with open_project_memory_database(self.database_path) as connection:
             self.assertEqual(
                 int(connection.execute("PRAGMA user_version").fetchone()[0]),
-                6,
+                CURRENT_MEMORY_SCHEMA_VERSION,
             )
             migration_rows = connection.execute(
-                "SELECT COUNT(*) FROM memory_schema_migrations WHERE version = 6"
+                "SELECT COUNT(*) FROM memory_schema_migrations WHERE version = ?",
+                (CURRENT_MEMORY_SCHEMA_VERSION,),
             ).fetchone()[0]
             self.assertEqual(int(migration_rows), 1)
 
@@ -220,7 +221,7 @@ class MemoryVectorSchemaTests(unittest.TestCase):
         with open_project_memory_database(self.database_path, readonly=True) as connection:
             self.assertEqual(
                 int(connection.execute("PRAGMA user_version").fetchone()[0]),
-                6,
+                CURRENT_MEMORY_SCHEMA_VERSION,
             )
 
     def test_record_delete_cascades_embedding_row(self) -> None:

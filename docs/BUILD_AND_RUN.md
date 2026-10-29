@@ -2,7 +2,7 @@
 
 本文面向从 GitHub 获取 UE Agent Kit 并接入 Unreal Engine 5.6 项目的用户。
 
-当前版本：**0.8.0**。
+当前版本：**0.8.0**；本地 0.9.0 Developer Preview 1 候选为 **0.9.0.dev1**。
 
 ## 1. 环境要求
 
@@ -11,7 +11,7 @@ Windows 10 / 11
 Unreal Engine 5.6
 Visual Studio 2022 C++ Toolchain
 PowerShell 5.1+
-Python 3.11 或 3.12
+Python 3.11–3.14（0.8.0 已发布版为 3.11–3.12）
 P4 CLI（仅启用 Source Control 时需要）
 ```
 
@@ -120,6 +120,13 @@ scripts\RunExport.cmd ^
   -Format both
 ```
 
+**查看当前索引更新时间：** 两个导出脚本现在都会在结束时输出索引数据库路径、项目标识、最近索引构建时间（last_indexed_at_utc）和最近资产记录更新时间（MAX(assets.indexed_at_utc)）。如果 MCP 使用了自定义数据库，导出时必须传入相同的 -Database：
+
+    scripts\RunExport.cmd -ProjectPath "<PROJECT>.uproject" -Asset "/Game/BP_Player" -Database "<INDEX>.sqlite3"
+    scripts\RunAssetCatalog.cmd -ProjectPath "<PROJECT>.uproject" -Root "/Game" -Database "<INDEX>.sqlite3"
+
+未指定时默认读取 <TOOL_ROOT>\.data\ue_agent_kit.sqlite3，与 RunMcp.cmd 默认值一致。数据库不存在或不可读会明确显示不可用，且不会创建数据库。**导出文件不会自动刷新 SQLite 索引**，后续仍需执行 scripts\ue-agent.cmd index build <EXPORT_DIRECTORY>；时间戳本身不能证明单个 Blueprint 节点已经同步。使用固定快照的 MCP 还需按既有快照生命周期重新加载新一代索引。
+
 ## 6. 建立 SQLite 索引
 
 ```bat
@@ -127,6 +134,28 @@ scripts\ue-agent.cmd index build Output\AssetCatalog
 scripts\ue-agent.cmd index build Output\Blueprints
 scripts\ue-agent.cmd index stats
 ```
+
+索引构建默认是严格模式：逐个读取 Canonical、重新计算 SHA-256，并校验 revision/schema/exporter/profile。`--batch-size N`（默认 100）只改变 SQLite 提交批次，不减少逐资产校验；每个资产仍有独立 savepoint，失败资产会回滚，不会留下半条资产或 World V2 行。
+
+当 exporter manifest 的资产条目带有 `canonicalSha256`（也接受 `canonical_sha256`）时，Python 索引器可将其作为候选快速过滤：只有 manifest、schema/exporter 身份和 DB 中 canonical SHA 都一致才跳过 Canonical 读取/哈希。旧 manifest 没有该字段时自动走严格全量校验。真实 `AssetCatalogExport` 0.8.0 现在只为成功且已完整写盘的 Canonical 文件写入该字段，值是该文件原始 bytes 的 SHA-256；ReaderFailed、写盘失败或哈希失败不会写可信 hash。外部变更集是更显式的快速路径，必须提供 manifest 指纹和 exportRoot：
+
+```json
+{
+  "schemaVersion": "1.0",
+  "manifestSha256": "<manifest.json 的 sha256，可带 sha256: 前缀>",
+  "exportRoot": "<本次导出的绝对路径>",
+  "changedAssetPaths": ["/Game/Characters/BP_Player.BP_Player"],
+  "source": "CI changed-file list"
+}
+```
+
+```bat
+scripts\ue-agent.cmd index build Output\AssetCatalog --changed-path-file changed.json
+```
+
+该文件是显式信任输入：未列出的非 World 资产会被视为未变化；World 资产仍会读取 Canonical 并事务性校验/修复 World V2。指纹不匹配时构建直接失败，不会静默降级。若不能保证变更集完整，不要传该参数，使用默认严格模式（或 `--no-manifest-digest` 明确关闭 manifest 摘要快速路径）。
+
+`index build` 完成后会记录 manifest SHA-256、export UTC、数据库路径和构建模式。`ue_get_project_status` / `ue_get_index_status` 返回 `indexSnapshotState`（`fresh|stale|unknown`）、`exportSnapshotState`、`indexSnapshotReasons`、`lastExportUtc` 和 `databasePath`。冷 SQLite 只能证明“索引与记录的导出快照一致”，看不到 Editor 当前 PackageRevision，因此默认 `indexSnapshotState=unknown` 并带 `editor-state-not-compared`；只有结合 live/Revision freshness 才会报告 `fresh`。manifest 被重建、数据库被复制到另一路径或构建不完整时会报告 `stale`，不会伪造 `fresh`。
 
 查询示例：
 
@@ -285,7 +314,7 @@ P4-managed Delete  人工执行
 python scripts\ValidateRelease.py --require-release-docs
 ```
 
-该检查覆盖版本一致性、Ruff、Python 测试、Schema 和示例 Patch。GitHub Actions 在 Python 3.11 / 3.12 上运行同类验证。
+该检查覆盖版本一致性、Ruff、Python 测试、Schema 和示例 Patch。GitHub Actions 对 0.9.0 开发候选在 Python 3.11–3.14 上运行同类验证；已发布 0.8.0 验证为 3.11–3.12。
 
 正式 Windows Release 打包：
 

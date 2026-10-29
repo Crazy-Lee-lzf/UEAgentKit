@@ -4,7 +4,7 @@
 
 UE Agent Kit is an open-source **Unreal Engine 5.6** project-analysis and controlled-mutation toolkit for AI agents and developers. It turns Unreal assets, Blueprint semantics, references, and live Editor state into searchable project knowledge, then exposes narrowly scoped write workflows with explicit safety gates.
 
-The latest published release is **0.8.0**, targeting **Unreal Engine 5.6 / Windows / Python 3.11–3.12**.
+The latest published release is **0.8.0** (Python 3.11–3.12); the local 0.9.0 Developer Preview 1 candidate is **0.9.0.dev1** and supports **Unreal Engine 5.6 / Windows / Python 3.11–3.14**.
 
 ## What it is for
 
@@ -58,7 +58,13 @@ The current write surface includes:
 - DataTable cell, row-field, add/remove/rename operations.
 - Narrow AnimSequence realtime fixes and retarget-assistance workflows.
 
-Writes are not arbitrary scripting. They remain gated by **Write Policy, Revision, target identity, dirty-package state, transactions, explicit persistence, and independent verification**.
+Writes are not arbitrary scripting. Stable write domains remain gated by **Write Policy, Revision, target identity, dirty-package state, transactions, explicit persistence, and independent verification**.
+
+### Experimental Blueprint structure writes (default off, not stable)
+
+The developer-preview candidate contains a default-off experiment: bounded GraphEdit (eight foundational node types and connections plus constrained CallFunction), same-Blueprint-owned Pure Function calls and input literals, pin defaults, user-variable creation, single-edge rewire, and isolated-node removal. Both the MCP flag `--enable-experimental-graphpatch-edit` and the Editor project setting `[UEAgentKit] ExperimentalGraphPatchEdit=True` are required, and every Apply/Save needs its exact planId/confirmation.
+
+These experimental tools do **not** go through the project Write Policy allowlist. They require an exact asset/graph identity, a clean package, stopped PIE, revision/fingerprint checks, and bounded operations; see the [experimental usage](docs/BLUEPRINT_AGENT_E2E_USAGE.md). They are not a production default and must not be enabled on a production project. The Write Policy description above applies to stable writes, not to this experiment.
 
 ## P4 / Perforce integration
 
@@ -88,7 +94,7 @@ Windows 10 / 11
 Unreal Engine 5.6
 Visual Studio 2022 C++ Toolchain
 PowerShell 5.1+
-Python 3.11 or 3.12
+Python 3.11–3.14 (published 0.8.0: 3.11–3.12)
 P4 CLI (only when Source Control support is enabled)
 ```
 
@@ -211,10 +217,13 @@ These restrictions are part of the product safety model and are not intended to 
 
 ## Documentation
 
+- [AI Agent Quick Start](docs/AGENT_QUICKSTART_EN.md)
+- [Developer Workflows](docs/DEVELOPER_WORKFLOWS_EN.md)
 - [Documentation index](docs/README.md)
 - [Current capability status](docs/PROJECT_STATUS_EN.md)
 - [Public roadmap](docs/ROADMAP_EN.md)
 - [0.8.0 Release Notes](docs/RELEASE_0.8.0_EN.md)
+- [0.9.0 Developer Preview 1 candidate](docs/RELEASE_0.9.0_PREVIEW.md) / [English](docs/RELEASE_0.9.0_PREVIEW_EN.md) (not released)
 - [Memory Architecture](docs/MEMORY_ARCHITECTURE_EN.md)
 - [Build and Run](docs/BUILD_AND_RUN.md)
 

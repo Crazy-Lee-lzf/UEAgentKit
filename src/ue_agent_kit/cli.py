@@ -15,9 +15,15 @@ from .backups import (
 )
 from .code_index import DEFAULT_SOURCE_ROOTS, build_code_index
 from .config import DEFAULT_DATABASE, DEFAULT_MEMORY_DATABASE
-from .database import assert_fts5_available, get_schema_version, open_database
+from .database import (
+    assert_fts5_available,
+    assert_index_schema_current,
+    get_schema_version,
+    open_database,
+    rebuild_index_atomically,
+)
 from .fixtures import validate_fixture_plan, verify_fixture_export
-from .indexer import build_index
+from .indexer import IndexBuildResult, build_index, read_changed_path_attestation
 from .knowledge_view import KnowledgeViewConfig, serve as serve_knowledge_view
 from .memory_reports import (
     MAX_AUDIT_NODES,
@@ -112,9 +118,34 @@ def build_parser() -> argparse.ArgumentParser:
     index_build.add_argument("--project-key", default=os.environ.get("UEAK_PROJECT_KEY", ""))
     index_build.add_argument("--include-assets", action="store_true", help="Include per-asset results in JSON output.")
     index_build.add_argument(
+        "--batch-size",
+        type=int,
+        default=100,
+        help="Maximum assets per SQLite transaction batch (default: 100).",
+    )
+    index_build.add_argument(
+        "--changed-path-file",
+        type=Path,
+        help="Explicit trusted changed-path attestation (manifestSha256 + changedAssetPaths).",
+    )
+    index_build.add_argument(
+        "--no-manifest-digest",
+        action="store_true",
+        help="Disable manifest canonicalSha256 fast-path skipping and force strict Canonical reads.",
+    )
+    index_build.add_argument(
         "--prune-prefix",
         default="",
         help="Explicit Unreal asset path prefix to prune, for example /Game. No prune occurs when omitted.",
+    )
+    index_build.add_argument(
+        "--rebuild",
+        action="store_true",
+        help=(
+            "Build a brand-new schema-v2 database beside --database, validate quick_check and "
+            "search, then atomically replace the target. Required to move a pre-v2 index; "
+            "in-place FTS migration is never performed."
+        ),
     )
 
     index_code = index_subparsers.add_parser(
@@ -344,6 +375,80 @@ def build_parser() -> argparse.ArgumentParser:
         help="Bounded deterministic L3 entries. Default: 48, hard max: 48.",
     )
 
+    memory_maintain_context = memory_subparsers.add_parser(
+        "maintain-context",
+        help=(
+            "Explicitly rebuild the persisted L2/L3 snapshot only when its "
+            "source generation or index snapshot is stale (offline maintenance)."
+        ),
+    )
+    _add_memory_arguments(memory_maintain_context)
+    memory_maintain_context.add_argument(
+        "--index-database",
+        type=Path,
+        default=DEFAULT_DATABASE,
+        help=f"Immutable fixed index used for asset-class facts. Default: {DEFAULT_DATABASE}",
+    )
+    memory_maintain_context.add_argument(
+        "--max-l2-groups",
+        type=int,
+        default=8,
+        help="Bounded deterministic L2 recipe groups. Default: 8, hard max: 8.",
+    )
+    memory_maintain_context.add_argument(
+        "--max-l3-entries",
+        type=int,
+        default=48,
+        help="Bounded deterministic L3 entries. Default: 48, hard max: 48.",
+    )
+    memory_maintain_context.add_argument(
+        "--enable-context-maintenance",
+        action="store_true",
+        help=(
+            "Required explicit opt-in. Without it, maintenance reports disabled "
+            "and performs no reads or writes."
+        ),
+    )
+
+    memory_preflight_context = memory_subparsers.add_parser(
+        "preflight-context",
+        help=(
+            "Explicit Session/Goal handoff preflight: maintain the snapshot when "
+            "stale, then emit a bounded fresh/stale L2/L3 result."
+        ),
+    )
+    _add_memory_arguments(memory_preflight_context)
+    memory_preflight_context.add_argument(
+        "--index-database",
+        type=Path,
+        default=DEFAULT_DATABASE,
+        help=f"Immutable fixed index used for asset-class facts. Default: {DEFAULT_DATABASE}",
+    )
+    memory_preflight_context.add_argument(
+        "--enable-session-preflight",
+        action="store_true",
+        help=(
+            "Required explicit opt-in. Without it, preflight reports disabled and "
+            "performs no reads or writes."
+        ),
+    )
+    memory_preflight_context.add_argument(
+        "--include-text",
+        action="store_true",
+        help=(
+            "Include the bounded L2/L3 text. Default omits it so normal "
+            "diagnostics/logs never contain sensitive context."
+        ),
+    )
+    memory_preflight_context.add_argument(
+        "--query",
+        default="",
+        help=(
+            "Optional host-supplied Goal/task text for persisted L2 recipe "
+            "matching only; never used for auth, project, or path selection."
+        ),
+    )
+
     patch_parser = subparsers.add_parser("patch", help="Inspect or validate declarative Blueprint patches.")
     patch_subparsers = patch_parser.add_subparsers(dest="patch_command", required=True)
 
@@ -470,6 +575,7 @@ def _open_query_database(path: Path):
                 f"Database schema is {version}; this CLI requires schema {CURRENT_SCHEMA_VERSION}."
             )
         assert_fts5_available(connection)
+        assert_index_schema_current(connection)
     except Exception:
         context.__exit__(*sys.exc_info())
         raise
@@ -645,6 +751,22 @@ def run(args: argparse.Namespace) -> tuple[Any, int]:
                 max_l3_entries=args.max_l3_entries,
             )
             return result.to_payload(), 0
+        if args.memory_command == "maintain-context":
+            result = memory_service.maintain_context(
+                index_database=args.index_database,
+                max_l2_groups=args.max_l2_groups,
+                max_l3_entries=args.max_l3_entries,
+                enabled=args.enable_context_maintenance,
+            )
+            return result.to_payload(), 0 if result.state in {"current", "disabled"} else 1
+        if args.memory_command == "preflight-context":
+            result = memory_service.preflight_context(
+                index_database=args.index_database,
+                enabled=args.enable_session_preflight,
+                include_text=args.include_text,
+                query=args.query,
+            )
+            return result.to_payload(), 0 if result.state in {"fresh", "disabled"} else 1
         raise RuntimeError("Unsupported Project Memory command.")
 
     if args.command == "patch" and args.patch_command == "operations":
@@ -707,15 +829,38 @@ def run(args: argparse.Namespace) -> tuple[Any, int]:
         return service.status(args.paths).to_payload(), 0
 
     if args.command == "index" and args.index_command == "build":
-        with open_database(args.database) as connection:
-            result = build_index(
+        changed_asset_paths = None
+        expected_manifest_sha256 = ""
+        changed_path_source = ""
+        if args.changed_path_file is not None:
+            changed_asset_paths, expected_manifest_sha256, changed_path_source = read_changed_path_attestation(
+                args.changed_path_file,
+                export_root=args.export_root,
+            )
+
+        def _build(connection: "sqlite3.Connection") -> "IndexBuildResult":
+            return build_index(
                 connection,
                 args.export_root,
                 args.database,
                 force=args.force,
                 prune_prefix=args.prune_prefix,
                 project_key=args.project_key,
+                batch_size=args.batch_size,
+                changed_asset_paths=changed_asset_paths,
+                expected_manifest_sha256=expected_manifest_sha256,
+                changed_path_source=changed_path_source,
+                use_manifest_digest=not args.no_manifest_digest,
             )
+
+        if args.rebuild:
+            # A pre-v2 target is intentionally never opened writable. The new
+            # database is built beside it and swapped only after quick_check,
+            # FTS integrity, and a real search probe succeed.
+            result = rebuild_index_atomically(args.database, _build)
+        else:
+            with open_database(args.database) as connection:
+                result = _build(connection)
         return result.to_dict(include_assets=args.include_assets), 0 if result.failed == 0 and not result.errors else 1
 
     if args.command == "index" and args.index_command == "code":

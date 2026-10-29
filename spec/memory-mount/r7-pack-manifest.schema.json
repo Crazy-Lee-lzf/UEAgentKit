@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ueagentkit.local/schemas/r7-pack-manifest-v1.schema.json",
+  "title": "R7 Knowledge Pack Manifest v1",
+  "description": "Read-only manifest for an R7 knowledge pack. See spec/memory-mount/R7_MOUNT_CONTRACT.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "packId",
+    "contentHash",
+    "revision",
+    "provenance",
+    "priority",
+    "scope",
+    "compatibility",
+    "recordCount"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "packId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{2,63}$"
+    },
+    "contentHash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "revision": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "producer", "sourceRef", "createdAtUtc"],
+      "properties": {
+        "kind": {
+          "enum": ["authored", "exported", "derived", "imported"]
+        },
+        "producer": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "sourceRef": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "createdAtUtc": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "signature": {
+          "type": "null",
+          "description": "Reserved. Non-null signatures are unsupported in v1."
+        }
+      }
+    },
+    "priority": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "enum": ["personal", "project", "shared"]
+        },
+        "projectKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "visibility": {
+          "enum": ["personal", "project", "shared"]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"kind": {"const": "project"}},
+            "required": ["kind"]
+          },
+          "then": {
+            "required": ["projectKey"],
+            "not": {"required": ["owner"]}
+          }
+        },
+        {
+          "if": {
+            "properties": {"kind": {"const": "personal"}},
+            "required": ["kind"]
+          },
+          "then": {
+            "required": ["owner"],
+            "not": {"required": ["projectKey"]}
+          }
+        },
+        {
+          "if": {
+            "properties": {"kind": {"const": "shared"}},
+            "required": ["kind"]
+          },
+          "then": {
+            "not": {"anyOf": [{"required": ["owner"]}, {"required": ["projectKey"]}]}
+          }
+        }
+      ]
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "minReaderVersion",
+        "maxReaderVersion",
+        "tokenizer",
+        "requiredFeatures"
+      ],
+      "properties": {
+        "minReaderVersion": {
+          "const": 1
+        },
+        "maxReaderVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "memorySchema": {
+          "const": 6
+        },
+        "tokenizer": {
+          "const": "trigram"
+        },
+        "requiredFeatures": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["fts5-trigram", "cjk-substring-fallback"]
+          }
+        }
+      }
+    },
+    "recordCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 5000
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 2000
+    }
+  }
+}

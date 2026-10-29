@@ -43,10 +43,14 @@ EXPECTED_ALL_TOOLS = [
     "ue_search",
     "ue_get_asset",
     "ue_find_references",
+    "ue_find_world_actors",
+    "ue_find_world_partition_actors",
+    "ue_get_world_summary",
     "ue_analyze_change_impact",
     "ue_analyze_semantic_diff",
     "ue_build_verification_plan",
     "ue_evaluate_trust_verdict",
+    "ue_preview_graph_patch",
     "ue_get_task_context",
     "ue_editor_status",
     "ue_get_selection",
@@ -54,11 +58,15 @@ EXPECTED_ALL_TOOLS = [
     "ue_get_dirty_assets",
     "ue_get_current_level",
     "ue_get_pie_state",
+    "ue_get_pie_world_contexts",
+    "ue_inspect_pie_actor",
+    "ue_get_pie_scalars",
     "ue_get_output_log",
     "ue_get_compile_errors",
     "ue_inspect_asset_live",
     "ue_get_blueprint_graph_selection",
     "ue_get_blueprint_graph_layout_preflight",
+    "ue_get_focused_blueprint_graph_context",
     "ue_preview_blueprint_graph_layout",
     "ue_analyze_animation_retarget",
     "ue_diagnose_animation_scale",
@@ -149,21 +157,21 @@ class ToolRegistryTests(unittest.TestCase):
             tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True),
             EXPECTED_ALL_TOOLS,
         )
-        self.assertEqual(len(tool_names_for_mode()), 10)
-        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 45)
-        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 67)
+        self.assertEqual(len(tool_names_for_mode()), 14)
+        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 53)
+        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 71)
         self.assertEqual(
             tool_names_for_mode(memory_enabled=True),
             QUERY_TOOL_NAMES + EXPECTED_MEMORY_TOOLS,
         )
-        self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 24)
+        self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 28)
         self.assertEqual(
             len(tool_names_for_mode(live_editor_enabled=True, memory_enabled=True)),
-            59,
+            67,
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
-            81,
+            85,
         )
         self.assertEqual(
             len(
@@ -173,7 +181,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-            116,
+            124,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:

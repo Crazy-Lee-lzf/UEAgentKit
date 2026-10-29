@@ -384,6 +384,7 @@ class FakeLiveEditorService:
                 "editor.inspectAssetLive",
                 "editor.getBlueprintGraphSelection",
                 "editor.getBlueprintGraphLayoutPreflight",
+                "editor.getFocusedBlueprintGraphContext",
                 "editor.getEditorContext",
                 "editor.batchTask.start",
                 "editor.batchTask.status",
@@ -478,6 +479,27 @@ class FakeLiveEditorService:
                         "y": 0,
                     }
                 ],
+            },
+            "ue_get_focused_blueprint_graph_context": {
+                "schemaVersion": "ueak.graphlayoutcontext/1.0",
+                "available": True,
+                "readOnly": True,
+                "source": "focused-blueprint-editor",
+                "selectionPolicy": "most-recently-active-blueprint-editor",
+                "focusScope": "toolkit-graph-tab",
+                "assetPath": "/Game/Test/BP_Test.BP_Test",
+                "graphGuid": "11111111-1111-1111-1111-111111111111",
+                "graphName": "EventGraph",
+                "packageRevision": "sha256:" + "a" * 64,
+                "packageDirty": False,
+                "graphFingerprint": "sha1:" + "b" * 40,
+                "nodeCount": 1,
+                "pinCount": 1,
+                "linkCount": 0,
+                "context": {
+                    "schemaVersion": "ueak.blueprintcontext/1.0",
+                    "nodes": [{"nodeGuid": "22222222-2222-2222-2222-222222222222"}],
+                },
             },
             "ue_get_editor_context": {
                 "source": "live-editor-memory",
@@ -926,10 +948,14 @@ class McpServerTests(unittest.TestCase):
                 "ue_search",
                 "ue_get_asset",
                 "ue_find_references",
+                "ue_find_world_actors",
+                "ue_find_world_partition_actors",
+                "ue_get_world_summary",
                 "ue_analyze_change_impact",
                 "ue_analyze_semantic_diff",
                 "ue_build_verification_plan",
                 "ue_evaluate_trust_verdict",
+                "ue_preview_graph_patch",
                 "ue_get_task_context",
             ],
         )
@@ -1122,7 +1148,7 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         expected_names = tool_names_for_mode(memory_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 24)
+        self.assertEqual(len(tools), 28)
         forbidden = {
             "database",
             "database_path",
@@ -1983,6 +2009,37 @@ class McpServerTests(unittest.TestCase):
         self.assertTrue(offline_selection["error"]["retryable"])
 
     @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
+    def test_fastmcp_focused_blueprint_graph_context_is_read_only(self) -> None:
+        server = create_mcp_server(self.database_path, live_editor_service=FakeLiveEditorService())
+        tools = asyncio.run(server.list_tools())
+        tool = next(
+            item for item in tools if item.name == "ue_get_focused_blueprint_graph_context"
+        )
+        self.assertEqual(tool.inputSchema.get("properties", {}), {})
+        self.assertTrue(tool.annotations.readOnlyHint)
+        self.assertFalse(tool.annotations.destructiveHint)
+        _, payload = asyncio.run(
+            server.call_tool("ue_get_focused_blueprint_graph_context", {})
+        )
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["readOnly"])
+        self.assertEqual(payload["source"], "live-editor-memory")
+        self.assertFalse(payload["writeAuthorized"])
+        self.assertFalse(payload["editorVerified"])
+        self.assertTrue(payload["contextOnly"])
+        self.assertEqual(
+            payload["result"]["graphGuid"], "11111111-1111-1111-1111-111111111111"
+        )
+        self.assertIn("context", payload["result"])
+        with self.assertRaises(Exception):
+            asyncio.run(
+                server.call_tool(
+                    "ue_get_focused_blueprint_graph_context",
+                    {"asset_path": "/Game/No/Write"},
+                )
+            )
+
+    @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
     def test_fastmcp_workflow_memory_mode_hands_off_verified_evidence(self) -> None:
         memory_service = ProjectMemoryService(
             database_path=self.temp_root / "workflow-memory.sqlite3",
@@ -1998,7 +2055,7 @@ class McpServerTests(unittest.TestCase):
             [tool.name for tool in tools],
             tool_names_for_mode(workflow_enabled=True, memory_enabled=True),
         )
-        self.assertEqual(len(tools), 81)
+        self.assertEqual(len(tools), 85)
 
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
         memory_contract = capabilities["projectMemory"]
@@ -2072,7 +2129,7 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         expected_names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 102)
+        self.assertEqual(len(tools), 110)
         for tool in tools:
             definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
             self.assertEqual(bool(tool.annotations.readOnlyHint), definition.read_only, tool.name)

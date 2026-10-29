@@ -219,7 +219,12 @@ def register_memory_tools(
         scope_key: str = "",
         limit: int = 20,
     ) -> dict[str, Any]:
-        """Search persistent memory for the fixed project; stale and superseded records are excluded by default."""
+        """Search persistent memory for the fixed project; stale and superseded records are excluded by default.
+
+        Chinese phrases that the FTS5 tokenizer cannot match use a bounded literal
+        substring fallback; ``retrieval.retrievalMode`` reports ``cjk-substring``
+        with scan/timed-out provenance instead of claiming an index match.
+        """
         try:
             kwargs: dict[str, Any] = {
                 "query": query,

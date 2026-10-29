@@ -1,6 +1,7 @@
 #include "BlueprintContextExporter.h"
 
 #include "BlueprintContextAnalysis.h"
+#include "BlueprintGraphDiscovery.h"
 
 #include "Dom/JsonObject.h"
 #include "EdGraph/EdGraph.h"
@@ -25,7 +26,7 @@
 namespace BlueprintContextExporterPrivate
 {
 	static constexpr const TCHAR* SchemaVersion = TEXT("1.1");
-	static constexpr const TCHAR* ExporterVersion = TEXT("0.8.0");
+	static constexpr const TCHAR* ExporterVersion = TEXT("0.9.0.dev1");
 
 	FString GuidToString(const FGuid& Guid)
 	{
@@ -561,6 +562,7 @@ namespace BlueprintContextExporterPrivate
 		GraphObject->SetStringField(TEXT("guid"), GuidToString(Graph->GraphGuid));
 		GraphObject->SetStringField(TEXT("name"), Graph->GetName());
 		GraphObject->SetStringField(TEXT("kind"), Kind);
+		GraphObject->SetStringField(TEXT("path"), Graph->GetPathName());
 		GraphObject->SetStringField(TEXT("schema"), Graph->GetSchema() ? Graph->GetSchema()->GetClass()->GetPathName() : FString());
 
 		if (ProfileIncludesGraphNodes(Options.Profile))
@@ -585,10 +587,15 @@ namespace BlueprintContextExporterPrivate
 				Nodes.Add(MakeShared<FJsonValueObject>(ExportNode(Node, Options, Result)));
 			}
 			GraphObject->SetArrayField(TEXT("nodes"), Nodes);
+			GraphObject->SetNumberField(TEXT("nodeCount"), SortedNodes.Num());
+			GraphObject->SetBoolField(TEXT("nodesIncluded"), true);
+			GraphObject->SetStringField(TEXT("nodeCoverage"), TEXT("full"));
 		}
 		else
 		{
 			GraphObject->SetNumberField(TEXT("nodeCount"), Graph->Nodes.Num());
+			GraphObject->SetBoolField(TEXT("nodesIncluded"), false);
+			GraphObject->SetStringField(TEXT("nodeCoverage"), TEXT("count-only"));
 		}
 
 		return GraphObject;
@@ -836,31 +843,17 @@ TSharedRef<FJsonObject> FBlueprintContextExporter::BuildCanonicalJson(
 	if (Options.Profile != EBlueprintContextProfile::Defaults)
 	{
 		TArray<TSharedPtr<FJsonValue>> Graphs;
-		TSet<UEdGraph*> AddedGraphs;
-
-		auto AddGraphs = [&](const TArray<TObjectPtr<UEdGraph>>& SourceGraphs, const FString& Kind)
+		TArray<FBlueprintContextGraphEntry> GraphEntries;
+		UEAgentKitGraphDiscovery::CollectBlueprintGraphs(Blueprint, Options.GraphFilter, GraphEntries);
+		for (const FBlueprintContextGraphEntry& Entry : GraphEntries)
 		{
-			for (UEdGraph* Graph : SourceGraphs)
+			TSharedRef<FJsonObject> GraphObject = ExportGraph(Entry.Graph, Entry.Kind, Options, InOutResult);
+			if (!Entry.ParentGraphName.IsEmpty())
 			{
-				if (!Graph || AddedGraphs.Contains(Graph))
-				{
-					continue;
-				}
-				if (!Options.GraphFilter.IsEmpty()
-					&& !Graph->GetName().Equals(Options.GraphFilter, ESearchCase::IgnoreCase))
-				{
-					continue;
-				}
-
-				AddedGraphs.Add(Graph);
-				Graphs.Add(MakeShared<FJsonValueObject>(ExportGraph(Graph, Kind, Options, InOutResult)));
+				GraphObject->SetStringField(TEXT("parentGraphName"), Entry.ParentGraphName);
 			}
-		};
-
-		AddGraphs(Blueprint->UbergraphPages, TEXT("uber"));
-		AddGraphs(Blueprint->FunctionGraphs, TEXT("function"));
-		AddGraphs(Blueprint->MacroGraphs, TEXT("macro"));
-		AddGraphs(Blueprint->DelegateSignatureGraphs, TEXT("delegate-signature"));
+			Graphs.Add(MakeShared<FJsonValueObject>(GraphObject));
+		}
 		RootObject->SetArrayField(TEXT("graphs"), Graphs);
 	}
 
@@ -885,6 +878,13 @@ TSharedRef<FJsonObject> FBlueprintContextExporter::BuildCanonicalJson(
 	SummaryObject->SetNumberField(TEXT("links"), InOutResult.LinkCount);
 	SummaryObject->SetNumberField(TEXT("symbols"), InOutResult.SymbolCount);
 	SummaryObject->SetNumberField(TEXT("references"), InOutResult.ReferenceCount);
+	const bool bGraphNodesIncluded = ProfileIncludesGraphNodes(Options.Profile);
+	SummaryObject->SetBoolField(TEXT("graphNodesIncluded"), bGraphNodesIncluded);
+	SummaryObject->SetStringField(
+		TEXT("graphNodeCoverage"),
+		bGraphNodesIncluded
+			? TEXT("full")
+			: (Options.Profile == EBlueprintContextProfile::Defaults ? TEXT("not-exported") : TEXT("count-only")));
 	RootObject->SetObjectField(TEXT("summary"), SummaryObject);
 	return RootObject;
 }

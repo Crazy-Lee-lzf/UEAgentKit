@@ -528,7 +528,7 @@ namespace UEAgentKitGraphLayoutP8Test
 		TestFalse(
 			TEXT("P8 gate rejects a different project path"),
 			UEAgentKitBlueprintGraphLayoutP8::IsFixedProjectIdentityForTest(
-				TEXT("E:/WorkSpace/UEAgentKit-WT/graph-contracts/Build/P6AutomationHost/P6AutomationHost.uproject"),
+				FPaths::Combine(FPaths::ProjectDir(), TEXT("P6AutomationHost/P6AutomationHost.uproject")),
 				TEXT("P6AutomationHost"),
 				TEXT("3c9ea038dd3cb184ef4b6c1f76cf4c2de8c1c08e34536a43b7618493dace1624"),
 				GateCode,
@@ -537,7 +537,7 @@ namespace UEAgentKitGraphLayoutP8Test
 		TestFalse(
 			TEXT("P8 gate rejects the P8 path with a different .uproject hash"),
 			UEAgentKitBlueprintGraphLayoutP8::IsFixedProjectIdentityForTest(
-				UEAgentKitBlueprintGraphLayoutP8::FixedProjectPath,
+				UEAgentKitBlueprintGraphLayoutP8::GetFixedProjectPath(),
 				TEXT("P8AutomationHost"),
 				TEXT("0000000000000000000000000000000000000000000000000000000000000000"),
 				GateCode,
@@ -600,7 +600,7 @@ namespace UEAgentKitGraphLayoutP8Test
 		Metadata->SetStringField(TEXT("engineVersion"), FEngineVersion::Current().ToString());
 		Metadata->SetStringField(TEXT("projectName"), FApp::GetProjectName());
 		Metadata->SetStringField(TEXT("exporterSchemaVersion"), TEXT("1.1"));
-		Metadata->SetStringField(TEXT("exporterVersion"), TEXT("0.8.0"));
+		Metadata->SetStringField(TEXT("exporterVersion"), TEXT("0.9.0.dev1"));
 		Metadata->SetStringField(TEXT("profile"), TEXT("full"));
 		Metadata->SetNumberField(TEXT("nodeCount"), Graph->Nodes.Num());
 		Metadata->SetStringField(TEXT("packageRevision"), PreRevision);

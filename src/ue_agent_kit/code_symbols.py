@@ -7,8 +7,24 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+from .code_symbol_trace import (
+    STRING_LITERAL_SENTINEL,
+    CppCallSiteFact,
+    CppFunctionFact,
+    access_for_specifier,
+    gather_declaration,
+    is_access_specifier,
+    is_structural_line,
+    parse_function_declaration,
+    strip_decorations,
+)
+from .text_search import symbol_search_text
+
 
 HEADER_EXTENSIONS = frozenset({".h", ".hh", ".hpp", ".hxx"})
+LEADING_MACRO_RE = re.compile(r"^[A-Za-z_]\w*\s*\(")
+MAX_UNKNOWN_CALL_WARNINGS = 200
+MAX_UNKNOWN_RECEIVER_WARNINGS = 25
 _INCLUDE_RE = re.compile(r'^\s*#\s*include\s+"([^"\r\n]+)"')
 _NAMESPACE_RE = re.compile(
     r"^\s*(?:inline\s+)?namespace\s+([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\s*\{"
@@ -50,6 +66,7 @@ class CodeFileFacts:
     includes: tuple[str, ...]
     symbols: tuple[CodeSymbolFact, ...]
     warnings: tuple[str, ...] = ()
+    functions: tuple[CppFunctionFact, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -57,10 +74,19 @@ class CodeSemanticIndexResult:
     symbols: int
     references: int
     warnings: tuple[str, ...] = ()
+    functions: int = 0
+    calls: int = 0
+    unknown_calls: int = 0
+    virtual_calls: int = 0
+    unknown_dispatch_calls: int = 0
 
 
 def code_symbol_stable_id(qualified_name: str) -> str:
     return f"cpp:type:{qualified_name}"
+
+
+def code_function_stable_id(qualified_name: str) -> str:
+    return f"cpp:function:{qualified_name}"
 
 
 def _mask_cpp_line(line: str, in_block_comment: bool) -> tuple[str, bool]:
@@ -90,12 +116,12 @@ def _mask_cpp_line(line: str, in_block_comment: bool) -> tuple[str, bool]:
         char = line[index]
         if char in {'"', "'"}:
             quote = char
-            output.append(" ")
+            output.append(STRING_LITERAL_SENTINEL)
             index += 1
             escaped = False
             while index < length:
                 current = line[index]
-                output.append(" ")
+                output.append(STRING_LITERAL_SENTINEL)
                 index += 1
                 if escaped:
                     escaped = False
@@ -212,12 +238,9 @@ def extract_code_file_facts(source_path: Path, asset_path: str) -> CodeFileFacts
     decode_replacement = "\ufffd" in text
     if decode_replacement:
         warnings.append("decode-replacement")
-
-    if source_path.suffix.casefold() not in HEADER_EXTENSIONS:
         return CodeFileFacts(asset_path=asset_path, includes=includes, symbols=(), warnings=tuple(warnings))
 
-    if decode_replacement:
-        return CodeFileFacts(asset_path=asset_path, includes=includes, symbols=(), warnings=tuple(warnings))
+    is_header = source_path.suffix.casefold() in HEADER_EXTENSIONS
 
     raw_masked_text, raw_warnings = _mask_raw_strings(text)
     warnings.extend(raw_warnings)
@@ -230,9 +253,12 @@ def extract_code_file_facts(source_path: Path, asset_path: str) -> CodeFileFacts
         return CodeFileFacts(asset_path=asset_path, includes=includes, symbols=(), warnings=tuple(warnings))
 
     symbols: list[CodeSymbolFact] = []
+    functions: list[CppFunctionFact] = []
     namespace_frames: list[tuple[int, tuple[str, ...] | None]] = []
+    class_frames: list[list[object]] = []
     brace_depth = 0
     pending_namespace: tuple[tuple[str, ...] | None, int] | None = None
+    parsed_upto = -1
 
     for line_index, line in enumerate(masked_lines):
         stripped_line = line.strip()
@@ -252,42 +278,135 @@ def extract_code_file_facts(source_path: Path, asset_path: str) -> CodeFileFacts
         namespace_parts = _namespace_name(namespace_frames)
         namespace_depth = namespace_frames[-1][0] if namespace_frames else 0
         at_namespace_scope = brace_depth == namespace_depth and namespace_parts is not None
+        class_depth = int(class_frames[-1][0]) if class_frames else -1
+        in_class = bool(class_frames) and bool(class_frames[-1][4]) and brace_depth == class_depth
+        class_parts = tuple(class_frames[-1][1]) if in_class and class_frames[-1][1] is not None else ()
+        class_kind = str(class_frames[-1][2]) if in_class else ""
+        current_access = str(class_frames[-1][3]) if in_class else ""
+        member_scope = in_class and class_kind in {"class", "struct"}
 
-        if at_namespace_scope and (_CLASS_START_RE.match(line) or _ENUM_START_RE.match(line)):
-            declaration = _gather_declaration(masked_lines, line_index)
-            brace_pos = declaration.find("{")
-            semicolon_pos = declaration.find(";")
-            if brace_pos >= 0 and (semicolon_pos < 0 or brace_pos < semicolon_pos):
-                header = declaration[:brace_pos].strip()
-                class_match = _CLASS_DECL_RE.fullmatch(header)
-                enum_match = _ENUM_DECL_RE.fullmatch(header)
-                if class_match:
-                    kind = class_match.group(1)
-                    name = class_match.group(2)
-                    bases, base_warnings = _parse_bases(class_match.group(3) or "")
-                    warnings.extend(
-                        f"{asset_path}:{line_index + 1}:{warning}"
-                        for warning in base_warnings
-                    )
-                    qualified = "::".join((*namespace_parts, name)) if namespace_parts else name
-                    symbols.append(
-                        CodeSymbolFact(
-                            kind=kind,
-                            name=name,
-                            qualified_name=qualified,
-                            bases=bases,
+        detected_class: tuple[tuple[str, ...], str] | None = None
+        if (
+            is_header
+            and at_namespace_scope
+            and line_index > parsed_upto
+            and stripped_line
+            and not stripped_line.startswith("#")
+        ):
+            if _CLASS_START_RE.match(line) or _ENUM_START_RE.match(line):
+                declaration = _gather_declaration(masked_lines, line_index)
+                brace_pos = declaration.find("{")
+                semicolon_pos = declaration.find(";")
+                if brace_pos >= 0 and (semicolon_pos < 0 or brace_pos < semicolon_pos):
+                    header = declaration[:brace_pos].strip()
+                    class_match = _CLASS_DECL_RE.fullmatch(header)
+                    enum_match = _ENUM_DECL_RE.fullmatch(header)
+                    if class_match:
+                        kind = class_match.group(1)
+                        name = class_match.group(2)
+                        bases, base_warnings = _parse_bases(class_match.group(3) or "")
+                        warnings.extend(
+                            f"{asset_path}:{line_index + 1}:{warning}"
+                            for warning in base_warnings
                         )
-                    )
-                elif enum_match:
-                    name = enum_match.group(1)
-                    qualified = "::".join((*namespace_parts, name)) if namespace_parts else name
-                    symbols.append(
-                        CodeSymbolFact(
-                            kind="enum",
-                            name=name,
-                            qualified_name=qualified,
+                        qualified_parts = (*namespace_parts, name) if namespace_parts else (name,)
+                        symbols.append(
+                            CodeSymbolFact(
+                                kind=kind,
+                                name=name,
+                                qualified_name="::".join(qualified_parts),
+                                bases=bases,
+                            )
                         )
-                    )
+                        detected_class = (tuple(qualified_parts), kind)
+                    elif enum_match:
+                        name = enum_match.group(1)
+                        qualified_parts = (*namespace_parts, name) if namespace_parts else (name,)
+                        symbols.append(
+                            CodeSymbolFact(
+                                kind="enum",
+                                name=name,
+                                qualified_name="::".join(qualified_parts),
+                            )
+                        )
+                    elif _CLASS_START_RE.match(header):
+                        # Unsupported class shape: keep members fail-closed instead
+                        # of attributing them to the enclosing namespace.
+                        detected_class = ((), "unknown")
+            elif LEADING_MACRO_RE.match(stripped_line):
+                gathered_type = gather_declaration(masked_lines, line_index)
+                probe = strip_decorations(gathered_type.text).text.strip()
+                brace_pos = probe.find("{")
+                semicolon_pos = probe.find(";")
+                if brace_pos >= 0 and (semicolon_pos < 0 or brace_pos < semicolon_pos):
+                    header = probe[:brace_pos].strip()
+                    class_match = _CLASS_DECL_RE.fullmatch(header)
+                    enum_match = _ENUM_DECL_RE.fullmatch(header)
+                    if class_match:
+                        kind = class_match.group(1)
+                        name = class_match.group(2)
+                        bases, base_warnings = _parse_bases(class_match.group(3) or "")
+                        warnings.extend(
+                            f"{asset_path}:{line_index + 1}:{warning}"
+                            for warning in base_warnings
+                        )
+                        qualified_parts = (*namespace_parts, name) if namespace_parts else (name,)
+                        symbols.append(
+                            CodeSymbolFact(
+                                kind=kind,
+                                name=name,
+                                qualified_name="::".join(qualified_parts),
+                                bases=bases,
+                            )
+                        )
+                        detected_class = (tuple(qualified_parts), kind)
+                        parsed_upto = max(parsed_upto, gathered_type.end_index)
+                    elif enum_match:
+                        name = enum_match.group(1)
+                        qualified_parts = (*namespace_parts, name) if namespace_parts else (name,)
+                        symbols.append(
+                            CodeSymbolFact(
+                                kind="enum",
+                                name=name,
+                                qualified_name="::".join(qualified_parts),
+                            )
+                        )
+                        parsed_upto = max(parsed_upto, gathered_type.end_index)
+                    elif _CLASS_START_RE.match(header):
+                        detected_class = ((), "unknown")
+                        parsed_upto = max(parsed_upto, gathered_type.end_index)
+
+        if detected_class is not None:
+            default_access = "public" if detected_class[1] == "struct" else "private"
+            class_frames.append(
+                [brace_depth + 1, detected_class[0], detected_class[1], default_access, False]
+            )
+        elif (
+            line_index > parsed_upto
+            and stripped_line
+            and not stripped_line.startswith("#")
+            and (member_scope or (not class_frames and brace_depth == namespace_depth))
+        ):
+            if member_scope and is_access_specifier(stripped_line):
+                class_frames[-1][3] = access_for_specifier(stripped_line)
+                parsed_upto = max(parsed_upto, line_index)
+            elif not is_structural_line(stripped_line):
+                fact, declaration_end, parse_warnings = parse_function_declaration(
+                    masked_lines,
+                    line_index,
+                    namespace_parts=namespace_parts,
+                    owner_parts=class_parts if member_scope else None,
+                    owner_kind=class_kind if member_scope else ("namespace" if namespace_parts else "global"),
+                    access=current_access,
+                )
+                warnings.extend(
+                    f"{asset_path}:{line_index + 1}:{warning}"
+                    for warning in parse_warnings
+                )
+                if fact is not None:
+                    functions.append(fact)
+                if declaration_end > line_index:
+                    parsed_upto = max(parsed_upto, declaration_end)
 
         opens = line.count("{")
         closes = line.count("}")
@@ -317,6 +436,11 @@ def extract_code_file_facts(source_path: Path, asset_path: str) -> CodeFileFacts
 
         while namespace_frames and brace_depth < namespace_frames[-1][0]:
             namespace_frames.pop()
+        for class_frame in class_frames:
+            if brace_depth >= int(class_frame[0]):
+                class_frame[4] = True
+        while class_frames and bool(class_frames[-1][4]) and brace_depth < int(class_frames[-1][0]):
+            class_frames.pop()
 
     if pending_namespace is not None:
         warnings.append(f"{asset_path}:{pending_namespace[1]}:namespace-missing-brace")
@@ -329,6 +453,7 @@ def extract_code_file_facts(source_path: Path, asset_path: str) -> CodeFileFacts
         includes=includes,
         symbols=tuple(symbols),
         warnings=tuple(warnings),
+        functions=tuple(functions),
     )
 
 
@@ -495,6 +620,25 @@ def rebuild_code_semantics(
     existing_inheritance_details: dict[str, str] = {}
     placeholders = ",".join("?" for _ in scanned_asset_ids)
     if scanned_asset_ids:
+        # Source-derived call edges and function symbols are rebuilt from scratch
+        # for every scanned file. Reflection-owned rows are never touched here.
+        connection.execute(
+            f"""
+            DELETE FROM references_table
+            WHERE asset_id IN ({placeholders})
+              AND kind = 'calls'
+            """,
+            scanned_asset_ids,
+        )
+        connection.execute(
+            f"""
+            DELETE FROM symbols
+            WHERE asset_id IN ({placeholders})
+              AND stable_id LIKE 'cpp:function:%'
+              AND details_json LIKE '%"evidence":"cpp-source"%'
+            """,
+            scanned_asset_ids,
+        )
         for row in connection.execute(
             f"""
             SELECT stable_id, details_json
@@ -528,6 +672,7 @@ def rebuild_code_semantics(
             FROM symbols
             WHERE asset_id IN ({placeholders})
               AND kind IN ('function', 'property')
+              AND owner_symbol_id <> ''
               AND (
                     stable_id LIKE 'cpp:function:%'
                  OR stable_id LIKE 'cpp:property:%'
@@ -720,8 +865,9 @@ def rebuild_code_semantics(
                 name,
                 symbol_asset_path,
                 class_path,
-                details_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                details_json,
+                search_text
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 asset_id,
@@ -731,10 +877,354 @@ def rebuild_code_semantics(
                 asset_path,
                 symbol.qualified_name,
                 details_json,
+                symbol_search_text(
+                    stable_id=stable_id,
+                    name=symbol.name,
+                    kind=symbol.kind,
+                    symbol_asset_path=asset_path,
+                    class_path=symbol.qualified_name,
+                    details_json=details_json,
+                ),
             ),
         )
         symbols_by_qualified_name[symbol.qualified_name] = (stable_id, symbol.kind, asset_path)
         inserted_symbol_facts.append((asset_path, symbol, stable_id))
+
+    function_groups: dict[str, list[tuple[str, CppFunctionFact]]] = {}
+    for file_facts in fact_list:
+        if file_facts.asset_path not in asset_ids:
+            continue
+        for function in file_facts.functions:
+            function_groups.setdefault(
+                code_function_stable_id(function.qualified_name), []
+            ).append((file_facts.asset_path, function))
+
+    function_conflicts: set[str] = set()
+    for stable_id, function_items in sorted(function_groups.items()):
+        definition_paths = {
+            path for path, function in function_items if function.is_definition
+        }
+        if len({function.signature_key for _, function in function_items}) > 1:
+            function_conflicts.add(stable_id)
+            locations = ",".join(
+                f"{path}:{function.line}"
+                for path, function in sorted(function_items, key=lambda item: (item[0], item[1].line))
+            )
+            warnings.append(f"ambiguous-overload:{stable_id}:{locations}")
+        elif len(definition_paths) > 1:
+            # Two files define the same unqualified signature: these are distinct
+            # translation-unit-local entities (or an ODR violation). Merging them
+            # would fabricate a symbol, so they stay unknown.
+            function_conflicts.add(stable_id)
+            warnings.append(
+                f"ambiguous-definition:{stable_id}:{','.join(sorted(definition_paths))}"
+            )
+        elif stable_id in reserved_ids:
+            function_conflicts.add(stable_id)
+            warnings.append(f"ambiguous-duplicate:{stable_id}:{reserved_ids[stable_id]}")
+
+    existing_function_rows = {
+        str(row["stable_id"]): row
+        for row in connection.execute(
+            """
+            SELECT s.stable_id, s.details_json, a.asset_path
+            FROM symbols AS s
+            JOIN assets AS a ON a.id = s.asset_id
+            WHERE s.stable_id LIKE 'cpp:function:%'
+            """
+        )
+    }
+
+    inserted_functions: list[str] = []
+    for stable_id, function_items in sorted(function_groups.items()):
+        if stable_id in function_conflicts:
+            continue
+        existing = existing_function_rows.get(stable_id)
+        if existing is not None:
+            try:
+                existing_details = json.loads(str(existing["details_json"]) or "{}")
+            except json.JSONDecodeError:
+                existing_details = {}
+            if isinstance(existing_details, dict) and existing_details.get("evidence") in {
+                "ue-reflection",
+                "cpp-source",
+            }:
+                # UE Reflection is authoritative for reflected functions; a
+                # cpp-source row owned by an unscanned asset belongs to an
+                # earlier partial code scan.
+                continue
+            warnings.append(f"symbol-id-owned:{stable_id}:{existing['asset_path']}")
+            continue
+        ordered = sorted(
+            function_items,
+            key=lambda item: (
+                0 if Path(item[0]).suffix.casefold() in HEADER_EXTENSIONS else 1,
+                0 if item[1].is_declaration else 1,
+                item[0],
+                item[1].line,
+            ),
+        )
+        primary_path, primary = ordered[0]
+        owner_name = primary.qualified_name.rpartition("::")[0]
+        owner_stable_id = ""
+        if owner_name and code_symbol_stable_id(owner_name) in current_type_targets:
+            owner_stable_id = code_symbol_stable_id(owner_name)
+        anchors = [
+            {
+                "assetPath": path,
+                "line": function.line,
+                "endLine": function.end_line,
+                "isDeclaration": function.is_declaration,
+                "isDefinition": function.is_definition,
+                "definitionLine": function.definition_line,
+                "definitionEndLine": function.definition_end_line,
+                "signature": function.signature,
+            }
+            for path, function in ordered
+        ]
+        source_details = {
+            "language": "cpp",
+            "evidence": "cpp-source",
+            "qualifiedName": primary.qualified_name,
+            "ownerQualifiedName": owner_name,
+            "ownerKind": primary.owner_kind,
+            "signature": primary.signature,
+            "parameters": list(primary.parameters),
+            "signatureKey": primary.signature_key,
+            "isDeclaration": any(function.is_declaration for _, function in ordered),
+            "isDefinition": any(function.is_definition for _, function in ordered),
+            "isVirtual": any(function.is_virtual for _, function in ordered),
+            "isStatic": any(function.is_static for _, function in ordered),
+            "isConst": any(function.is_const for _, function in ordered),
+            "isAbstract": any(function.is_abstract for _, function in ordered),
+            "isTemplate": any(function.is_template for _, function in ordered),
+            "isReflected": any(function.is_reflected for _, function in ordered),
+            "isOperator": any(function.is_operator for _, function in ordered),
+            "access": primary.access,
+            "anchor": {
+                "assetPath": primary_path,
+                "line": primary.line,
+                "endLine": primary.end_line,
+            },
+            "anchors": anchors,
+        }
+        details_json = json.dumps(
+            source_details,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        connection.execute(
+            """
+            INSERT INTO symbols(
+                asset_id,
+                stable_id,
+                kind,
+                name,
+                symbol_asset_path,
+                owner_symbol_id,
+                class_path,
+                details_json,
+                search_text
+            ) VALUES (?, ?, 'function', ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                asset_ids[primary_path],
+                stable_id,
+                primary.name,
+                primary_path,
+                owner_stable_id,
+                owner_name,
+                details_json,
+                symbol_search_text(
+                    stable_id=stable_id,
+                    name=primary.name,
+                    kind="function",
+                    symbol_asset_path=primary_path,
+                    class_path=owner_name,
+                    details_json=details_json,
+                ),
+            ),
+        )
+        inserted_functions.append(stable_id)
+        existing_function_rows[stable_id] = {
+            "stable_id": stable_id,
+            "details_json": details_json,
+            "asset_path": primary_path,
+        }
+
+    function_targets: dict[str, dict[str, object]] = {}
+    for row in connection.execute(
+        """
+        SELECT s.stable_id, s.name, a.asset_path, s.details_json
+        FROM symbols AS s
+        JOIN assets AS a ON a.id = s.asset_id
+        WHERE s.stable_id LIKE 'cpp:function:%'
+        """
+    ):
+        stable_id = str(row["stable_id"])
+        qualified_name = stable_id.removeprefix("cpp:function:")
+        owner = qualified_name.rpartition("::")[0]
+        try:
+            details = json.loads(str(row["details_json"]) or "{}")
+        except json.JSONDecodeError:
+            details = {}
+        anchor = details.get("anchor") if isinstance(details, dict) else None
+        anchor_line = int(anchor.get("line", 0)) if isinstance(anchor, dict) else 0
+        evidence = str(details.get("evidence", "")) if isinstance(details, dict) else ""
+        if isinstance(details, dict) and "isVirtual" in details:
+            is_virtual: bool | None = bool(details.get("isVirtual"))
+        elif evidence == "ue-reflection":
+            # Reflected rows carry UFunction flags, not a C++ virtual qualifier.
+            is_virtual = None
+        else:
+            is_virtual = False
+        is_reflected = bool(
+            isinstance(details, dict) and details.get("isReflected")
+        ) or evidence == "ue-reflection"
+        function_targets[stable_id] = {
+            "name": str(row["name"]),
+            "owner": owner,
+            "asset_path": str(row["asset_path"]),
+            "anchor_line": anchor_line,
+            "is_virtual": is_virtual,
+            "is_reflected": is_reflected,
+        }
+
+    type_index = {
+        str(row["stable_id"]).removeprefix("cpp:type:"): str(row["asset_path"])
+        for row in connection.execute(
+            """
+            SELECT s.stable_id, a.asset_path
+            FROM symbols AS s
+            JOIN assets AS a ON a.id = s.asset_id
+            WHERE s.stable_id LIKE 'cpp:type:%'
+            """
+        )
+    }
+    type_bases: dict[str, tuple[str, ...]] = {}
+    for file_facts in fact_list:
+        for symbol in file_facts.symbols:
+            if symbol.bases:
+                type_bases[symbol.qualified_name] = symbol.bases
+    functions_by_name: dict[str, list[str]] = {}
+    for stable_id, target in function_targets.items():
+        functions_by_name.setdefault(str(target["name"]), []).append(stable_id)
+
+    call_count = 0
+    unknown_calls = 0
+    virtual_calls = 0
+    unknown_dispatch_calls = 0
+    unknown_by_reason: dict[str, int] = {}
+    warned_by_reason: dict[str, int] = {}
+    call_ordinals: dict[tuple[str, str, str, int], int] = {}
+    for stable_id, function_items in sorted(function_groups.items()):
+        if stable_id in function_conflicts or stable_id not in function_targets:
+            continue
+        caller_owner = ""
+        caller_qualified = ""
+        call_sites: list[tuple[str, CppCallSiteFact]] = []
+        for path, function in function_items:
+            if function.call_sites:
+                caller_qualified = function.qualified_name
+                caller_owner = caller_qualified.rpartition("::")[0]
+                call_sites.extend((path, site) for site in function.call_sites)
+        caller_scopes = _caller_scopes(caller_qualified, caller_owner, type_index)
+        for path, site in sorted(
+            call_sites,
+            key=lambda item: (item[0], item[1].line, item[1].column, item[1].callee),
+        ):
+            target_id, evidence, reason = _resolve_call_target(
+                callee_name=site.callee,
+                scope=site.scope,
+                receiver=site.receiver,
+                caller_owner=caller_owner,
+                caller_scopes=caller_scopes,
+                targets=function_targets,
+                by_name=functions_by_name,
+                type_index=type_index,
+                type_bases=type_bases,
+            )
+            if not target_id:
+                if reason in _UNKNOWN_CALL_REASONS:
+                    unknown_calls += 1
+                    unknown_by_reason[reason] = unknown_by_reason.get(reason, 0) + 1
+                    limit = (
+                        MAX_UNKNOWN_RECEIVER_WARNINGS
+                        if reason == "unknown-receiver"
+                        else MAX_UNKNOWN_CALL_WARNINGS
+                    )
+                    if warned_by_reason.get(reason, 0) < limit:
+                        warnings.append(
+                            f"unknown-call-target:{path}:{site.line}:{site.callee}:{reason}"
+                        )
+                        warned_by_reason[reason] = warned_by_reason.get(reason, 0) + 1
+                continue
+            key = (stable_id, target_id, path, site.line)
+            ordinal = call_ordinals.get(key, 0) + 1
+            call_ordinals[key] = ordinal
+            edge_id = f"cpp:calls:{stable_id}->{target_id}@{path}:{site.line}:{ordinal}"
+            target = function_targets[target_id]
+            target_asset_path = str(target["asset_path"])
+            target_anchor = int(target["anchor_line"])
+            target_virtual = target.get("is_virtual")
+            if target_virtual is True:
+                dispatch = "virtual"
+                virtual_calls += 1
+            elif target_virtual is None:
+                dispatch = "unknown"
+                unknown_dispatch_calls += 1
+            else:
+                dispatch = "static"
+            certainty = "definitive" if dispatch == "static" else "static-target-only"
+            details = {
+                "language": "cpp",
+                "evidence": "cpp-source",
+                "resolution": evidence,
+                "dispatch": dispatch,
+                "certainty": certainty,
+                "callee": site.callee,
+                "scope": site.scope,
+                "receiver": site.receiver,
+                "targetReflected": bool(target.get("is_reflected")),
+                "callSite": {
+                    "assetPath": path,
+                    "line": site.line,
+                    "column": site.column,
+                },
+                "resolved": True,
+            }
+            connection.execute(
+                """
+                INSERT INTO references_table(
+                    asset_id,
+                    stable_id,
+                    kind,
+                    source_symbol_id,
+                    target_symbol_id,
+                    target_kind,
+                    target_name,
+                    target_asset_path,
+                    target_path,
+                    details_json
+                ) VALUES (?, ?, 'calls', ?, ?, 'function', ?, ?, ?, ?)
+                """,
+                (
+                    asset_ids[path],
+                    edge_id,
+                    stable_id,
+                    target_id,
+                    site.callee,
+                    target_asset_path,
+                    f"{target_asset_path}:{target_anchor}" if target_anchor else target_asset_path,
+                    json.dumps(details, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+                ),
+            )
+            call_count += 1
+    for reason in sorted(unknown_by_reason):
+        missing = unknown_by_reason[reason] - warned_by_reason.get(reason, 0)
+        if missing > 0:
+            warnings.append(f"unknown-call-targets-suppressed:{reason}:{missing}")
 
     include_key_map: dict[str, set[str]] = {}
     for asset_path in asset_ids:
@@ -830,7 +1320,108 @@ def rebuild_code_semantics(
             reference_count += 1
 
     return CodeSemanticIndexResult(
-        symbols=len(inserted_symbol_facts),
-        references=reference_count,
+        symbols=len(inserted_symbol_facts) + len(inserted_functions),
+        references=reference_count + call_count,
         warnings=tuple(warnings),
+        functions=len(inserted_functions),
+        calls=call_count,
+        unknown_calls=unknown_calls,
+        virtual_calls=virtual_calls,
+        unknown_dispatch_calls=unknown_dispatch_calls,
     )
+
+
+_UNKNOWN_CALL_REASONS = frozenset(
+    {
+        "unknown-scope",
+        "unknown-super",
+        "unknown-this-member",
+        "unknown-receiver",
+        "ambiguous-name",
+    }
+)
+
+
+def _caller_scopes(
+    qualified_name: str,
+    owner: str,
+    type_index: dict[str, str],
+) -> tuple[str, ...]:
+    """Return the enclosing scopes an unqualified call may legally see."""
+    if not owner:
+        return ("",)
+    owner_parts = tuple(owner.split("::"))
+    if owner in type_index:
+        base = owner_parts[:-1]
+    else:
+        base = owner_parts
+    return tuple(
+        "::".join(base[:end]) for end in range(len(base), -1, -1)
+    )
+
+
+def _resolve_call_target(
+    *,
+    callee_name: str,
+    scope: str,
+    receiver: str,
+    caller_owner: str,
+    caller_scopes: tuple[str, ...],
+    targets: dict[str, dict[str, object]],
+    by_name: dict[str, list[str]],
+    type_index: dict[str, str],
+    type_bases: dict[str, tuple[str, ...]],
+) -> tuple[str, str, str]:
+    """Resolve one call site to an indexed function, or report why it is unknown."""
+    if receiver and receiver != "this":
+        if callee_name in by_name:
+            return "", "", "unknown-receiver"
+        return "", "", "external"
+
+    if scope:
+        if scope in {"Super", "super"}:
+            return "", "", "unknown-super"
+        candidate = code_function_stable_id(f"{scope}::{callee_name}")
+        if candidate in targets:
+            return candidate, "qualified", ""
+        if caller_owner and (
+            scope == caller_owner
+            or scope == caller_owner.rpartition("::")[2]
+            or caller_owner.endswith("::" + scope)
+        ):
+            candidate = code_function_stable_id(f"{caller_owner}::{callee_name}")
+            if candidate in targets:
+                return candidate, "member", ""
+        if scope in type_index:
+            return "", "", "unknown-scope"
+        return "", "", "external"
+
+    if caller_owner:
+        candidate = code_function_stable_id(f"{caller_owner}::{callee_name}")
+        if candidate in targets:
+            evidence = "member" if caller_owner in type_index else "same-scope"
+            return candidate, evidence, ""
+        for base in type_bases.get(caller_owner, ()):
+            for enclosing in caller_scopes:
+                base_name = f"{enclosing}::{base}" if enclosing else base
+                base_candidate = code_function_stable_id(f"{base_name}::{callee_name}")
+                if base_candidate in targets:
+                    return base_candidate, "base-member", ""
+    if receiver == "this":
+        if callee_name in by_name:
+            return "", "", "unknown-this-member"
+        return "", "", "external"
+
+    candidates = by_name.get(callee_name, [])
+    if len(candidates) == 1:
+        target = targets[candidates[0]]
+        owner = str(target.get("owner", ""))
+        if owner and owner in type_index:
+            # A member of another class is not reachable through unqualified lookup.
+            return "", "", "external"
+        if owner and owner not in caller_scopes:
+            return "", "", "external"
+        return candidates[0], "unique-free-function", ""
+    if len(candidates) > 1:
+        return "", "", "ambiguous-name"
+    return "", "", "external"

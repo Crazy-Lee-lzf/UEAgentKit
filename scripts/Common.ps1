@@ -449,7 +449,7 @@ function Test-UeakPythonVersion
 
     try
     {
-        & $PythonExecutable -c "import sys; raise SystemExit(0 if (3, 11) <= sys.version_info[:2] < (3, 13) else 1)"
+        & $PythonExecutable -c "import sys; raise SystemExit(0 if (3, 11) <= sys.version_info[:2] < (3, 15) else 1)"
         return $LASTEXITCODE -eq 0
     }
     catch
@@ -476,7 +476,7 @@ function Resolve-UeakPythonExecutable
             return $Candidate
         }
 
-        throw "Configured Python must be CPython 3.11 or 3.12: $Candidate"
+        throw "Configured Python must be CPython 3.11 through 3.14: $Candidate"
     }
 
     $PythonCommand = Get-Command python.exe -ErrorAction SilentlyContinue
@@ -488,7 +488,7 @@ function Resolve-UeakPythonExecutable
     $PyLauncher = Get-Command py.exe -ErrorAction SilentlyContinue
     if ($PyLauncher)
     {
-        foreach ($Version in @("3.12", "3.11"))
+        foreach ($Version in @("3.14", "3.13", "3.12", "3.11"))
         {
             try
             {
@@ -508,7 +508,7 @@ function Resolve-UeakPythonExecutable
         }
     }
 
-    throw "CPython 3.11 or 3.12 was not found. Pass -PythonExecutable or set UEAK_PYTHON."
+    throw "CPython 3.11 through 3.14 was not found. Pass -PythonExecutable or set UEAK_PYTHON."
 }
 
 function Test-UeakRequirementFileHasPackages
@@ -598,4 +598,33 @@ function Remove-UeakJunction
 
     [System.IO.Directory]::Delete($LinkPath, $false)
     return $true
+}
+# Non-fatal diagnostics: export scripts must work even when Python/index is missing.
+function Show-UeakIndexUpdateStatus
+{
+    param([Parameter(Mandatory = $true)][string]$Database)
+
+    $Helper = Join-Path (Get-UeakToolRoot) "tools\index_update_status.py"
+    if (!(Test-Path -LiteralPath $Helper -PathType Leaf))
+    {
+        Write-Warning "Index timestamp helper is missing: $Helper"
+        return
+    }
+
+    try
+    {
+        $PythonExecutable = Resolve-UeakPythonExecutable
+    }
+    catch
+    {
+        Write-Warning "Cannot inspect SQLite index: $($_.Exception.Message)"
+        Write-Host "Index database : $Database"
+        return
+    }
+
+    & $PythonExecutable $Helper --database $Database
+    if ($LASTEXITCODE -ne 0)
+    {
+        Write-Warning "Index timestamp inspection failed (export result is unaffected)."
+    }
 }

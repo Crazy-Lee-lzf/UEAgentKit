@@ -30,9 +30,9 @@ from .canonical import (
     is_sha256,
     short_digest,
 )
-from .errors import ContractError, load_registry, make_diagnostic
-from .idempotency import GraphPatchIdempotencyStore, IdempotencyOutcome
-from .recovery import RecoveryStore, authorize_apply, make_marker
+from .errors import ContractError, make_diagnostic
+from .idempotency import GraphPatchIdempotencyStore
+from .recovery import RecoveryStore, make_marker
 from .schema import SchemaError, negotiate_version
 
 GRAPH_PATCH_VERSION = "ueak.graphpatch/1.0"
@@ -911,7 +911,6 @@ def _validate_operations(
     descriptors: dict[str, dict[str, Any]],
     report: PatchReport,
 ) -> tuple[list[dict[str, Any]], _WorkingGraph, dict[str, Any]]:
-    operations = [op for op in patch.get("operations", []) if isinstance(op, dict)]
     validate_profile_limits(patch, patch_profile(patch), report)
 
     ordered = _topological_sort(patch.get("operations", []), report)
@@ -1382,7 +1381,7 @@ def _apply_operations(
                         old_bounds = copy.deepcopy(comment.get("bounds", {}))
                         comment["bounds"] = dict(operation["bounds"])
                 inverses.append(_Inverse("restoreCommentBounds", {"nodeId": node_id_value, "bounds": old_bounds}))
-        except Exception as exc:  # pragma: no cover - defensive
+        except Exception:  # pragma: no cover - defensive
             return working, results, inverses, "graphpatch-node-spawn-failed", before_hash
         after_hash = typed_graph.semantic_hash(working.graph)
         results.append(
