@@ -283,10 +283,16 @@ class TimeoutBusyAndCancelTests(BrokerServerCase):
         while time.monotonic() < deadline and server.status()["accepted"] < 1:
             time.sleep(0.01)
         self.assertEqual(server.status()["accepted"], 1)
-        connection.setsockopt(
-            socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("hh", 1, 0)
-        )
-        connection.close()
+        # Winsock uses two 16-bit fields; POSIX struct linger uses two ints.
+        linger_format = "hh" if os.name == "nt" else "ii"
+        try:
+            connection.setsockopt(
+                socket.SOL_SOCKET,
+                socket.SO_LINGER,
+                struct.pack(linger_format, 1, 0),
+            )
+        finally:
+            connection.close()
         time.sleep(0.15)
         gate.set()
         deadline = time.monotonic() + 2.0

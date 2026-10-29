@@ -42,10 +42,12 @@ class CuratedReleaseSafetyTests(unittest.TestCase):
             root = Path(tmp)
             (root / "linked").mkdir()
             candidate = root / "linked" / "child"
-            original = Path.is_junction
+            original = getattr(Path, "is_junction", lambda self: False)
+
             def simulated(self: Path) -> bool:
                 return self.name == "linked" or original(self)
-            with patch.object(Path, "is_junction", simulated):
+
+            with patch.object(Path, "is_junction", simulated, create=True):
                 with self.assertRaises(curate.UnsafeReleasePath):
                     curate.reject_reparse(candidate)
 
@@ -54,7 +56,7 @@ class CuratedReleaseSafetyTests(unittest.TestCase):
         # Never read, enumerate or remove target contents.
         sdk = ROOT / "AutoSDK"
         for child in sdk.glob("HostWin64/Win64/VS2022/*"):
-            if child.is_junction() or child.is_symlink():
+            if getattr(child, "is_junction", lambda: False)() or child.is_symlink():
                 with self.assertRaises(curate.UnsafeReleasePath):
                     curate.reject_reparse(child / "bin" / "Hostx64" / "x64" / "cl.exe")
                 return

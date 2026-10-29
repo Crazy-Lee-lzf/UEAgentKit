@@ -48,7 +48,9 @@ def reject_reparse(path: Path) -> None:
         if (
             stat.S_ISLNK(attrs.st_mode)
             or bool(getattr(attrs, "st_file_attributes", 0) & 0x400)
-            or candidate.is_junction()
+            # pathlib.Path.is_junction is unavailable on older Python/POSIX.
+            # Windows reparse attributes above remain authoritative.
+            or getattr(candidate, "is_junction", lambda: False)()
         ):
             raise UnsafeReleasePath(f"Reparse point is prohibited: {candidate}")
 
