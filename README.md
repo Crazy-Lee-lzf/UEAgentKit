@@ -4,7 +4,7 @@
 
 UE Agent Kit 是一套面向 **Unreal Engine 5.6** 的开源项目分析与受控修改工具，主要用于让 AI Agent 和开发者能够可靠地理解 Unreal 资产、Blueprint 语义、引用关系和编辑器状态，并在明确的安全边界内执行修改。
 
-当前已发布版本为 **0.8.0**（Python 3.11–3.12）；本地 0.9.0 Developer Preview 1 候选版本为 **0.9.0.dev1**，支持 **Unreal Engine 5.6 / Windows / Python 3.11–3.14**。
+当前最新公开预发布版本为 **0.9.0 Developer Preview 1（v0.9.0-dev1 / Python 0.9.0.dev1）**，支持 **Unreal Engine 5.6 / Windows x64 / Python 3.11–3.14**；上一个稳定版为 **v0.8.0**（Python 3.11–3.12）。[下载 0.9.0 DP1](https://github.com/Crazy-Lee-lzf/UEAgentKit/releases/tag/v0.9.0-dev1)。
 
 ## 适合解决什么问题
 
@@ -70,7 +70,7 @@ Plan → Policy → Revision → Apply → Save → Verify → Diff / Trust
 
 ## P4 / Perforce 集成
 
-Source Control 功能默认关闭，需要显式启用。0.8.0 可以：
+Source Control 功能默认关闭，需要显式启用。已发布预览版沿用以下有界能力：
 
 - 查询 mapping、opened、owner/client、lock、have/head 和 pending changelist。
 - 对精确文件执行 `p4 edit`。
@@ -96,7 +96,7 @@ Windows 10 / 11
 Unreal Engine 5.6
 Visual Studio 2022 C++ Toolchain
 PowerShell 5.1+
-Python 3.11–3.14（0.8.0 已发布版为 3.11–3.12）
+Python 3.11–3.14（0.9.0 DP1；历史稳定版 0.8.0 为 3.11–3.12）
 P4 CLI（仅在启用 Source Control 时需要）
 ```
 
@@ -212,7 +212,7 @@ Read-only audit
 
 ## 当前限制
 
-0.8.0 不提供：
+0.9.0 DP1 不提供以下**不受限的通用能力**（有限 Blueprint 实验性写入需单独开启）：
 
 - 任意 Blueprint Graph 节点 CRUD / 自动连线。
 - 任意 Level Actor Spawn/Delete/Transform 编辑。
@@ -231,7 +231,7 @@ Read-only audit
 - [项目能力状态](docs/PROJECT_STATUS.md)
 - [公开 Roadmap](docs/ROADMAP.md)
 - [0.8.0 Release Notes](docs/RELEASE_0.8.0.md)
-- [0.9.0 Developer Preview 1 candidate](docs/RELEASE_0.9.0_PREVIEW.md) / [English](docs/RELEASE_0.9.0_PREVIEW_EN.md) (not released)
+- [0.9.0 Developer Preview 1（已发布）](docs/RELEASE_0.9.0_PREVIEW.md) / [English](docs/RELEASE_0.9.0_PREVIEW_EN.md)
 - [Memory Architecture](docs/MEMORY_ARCHITECTURE.md)
 - [Build and Run](docs/BUILD_AND_RUN.md)
 

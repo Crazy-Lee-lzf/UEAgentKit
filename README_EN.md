@@ -4,7 +4,7 @@
 
 UE Agent Kit is an open-source **Unreal Engine 5.6** project-analysis and controlled-mutation toolkit for AI agents and developers. It turns Unreal assets, Blueprint semantics, references, and live Editor state into searchable project knowledge, then exposes narrowly scoped write workflows with explicit safety gates.
 
-The latest published release is **0.8.0** (Python 3.11–3.12); the local 0.9.0 Developer Preview 1 candidate is **0.9.0.dev1** and supports **Unreal Engine 5.6 / Windows / Python 3.11–3.14**.
+The latest published prerelease is **0.9.0 Developer Preview 1 (v0.9.0-dev1 / Python 0.9.0.dev1)** for **Unreal Engine 5.6 / Windows x64 / Python 3.11–3.14**. The previous stable release remains **v0.8.0** (Python 3.11–3.12). [Download DP1](https://github.com/Crazy-Lee-lzf/UEAgentKit/releases/tag/v0.9.0-dev1).
 
 ## What it is for
 
@@ -68,7 +68,7 @@ These experimental tools do **not** go through the project Write Policy allowlis
 
 ## P4 / Perforce integration
 
-Source Control support is opt-in. 0.8.0 can:
+Source Control support is opt-in. The published preview retains these bounded capabilities:
 
 - Inspect mapping, opened files, owner/client, locks, have/head revisions, and pending changelists.
 - Run exact-file `p4 edit`.
@@ -94,7 +94,7 @@ Windows 10 / 11
 Unreal Engine 5.6
 Visual Studio 2022 C++ Toolchain
 PowerShell 5.1+
-Python 3.11–3.14 (published 0.8.0: 3.11–3.12)
+Python 3.11–3.14 (0.9.0 DP1; historical stable 0.8.0: 3.11–3.12)
 P4 CLI (only when Source Control support is enabled)
 ```
 
@@ -204,7 +204,7 @@ Read-only audit
 
 ## Current limitations
 
-0.8.0 does not expose:
+0.9.0 DP1 does not expose the following **unrestricted general interfaces** (bounded experimental Blueprint edits require explicit opt-in):
 
 - Arbitrary Blueprint Graph node CRUD or automatic rewiring.
 - Arbitrary Level Actor spawn/delete/transform editing.
@@ -223,7 +223,7 @@ These restrictions are part of the product safety model and are not intended to 
 - [Current capability status](docs/PROJECT_STATUS_EN.md)
 - [Public roadmap](docs/ROADMAP_EN.md)
 - [0.8.0 Release Notes](docs/RELEASE_0.8.0_EN.md)
-- [0.9.0 Developer Preview 1 candidate](docs/RELEASE_0.9.0_PREVIEW.md) / [English](docs/RELEASE_0.9.0_PREVIEW_EN.md) (not released)
+- [0.9.0 Developer Preview 1 (released)](docs/RELEASE_0.9.0_PREVIEW.md) / [English](docs/RELEASE_0.9.0_PREVIEW_EN.md)
 - [Memory Architecture](docs/MEMORY_ARCHITECTURE_EN.md)
 - [Build and Run](docs/BUILD_AND_RUN.md)
 

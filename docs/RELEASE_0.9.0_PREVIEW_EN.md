@@ -1,23 +1,39 @@
-# UE Agent Kit 0.9.0 Developer Preview 1 (local candidate 0.9.0.dev1)
+# UE Agent Kit 0.9.0 Developer Preview 1 (Released)
 
-**Not released.** The current public version is **v0.8.0**. This is neither an upgrade notice nor permission for production writes.
+**Latest published prerelease: `v0.9.0-dev1` (Python package version `0.9.0.dev1`).** The curated source has also been merged into the public `main`. The earlier `v0.8.0` remains the previous stable release; DP1 is an experimental preview, not production-stable.
 
-## Proposed capabilities
+- [GitHub Release and downloads](https://github.com/Crazy-Lee-lzf/UEAgentKit/releases/tag/v0.9.0-dev1)
+- [Tagged source](https://github.com/Crazy-Lee-lzf/UEAgentKit/tree/v0.9.0-dev1)
+- [GitHub Python 3.11–3.14 CI: 4/4 passing](https://github.com/Crazy-Lee-lzf/UEAgentKit/actions/runs/40908281817)
 
-- **Blueprint reads:** Graphs, Nodes, Pins, variables and references; distinguish saved index snapshots from live Editor state.
-- **Experimental Blueprint edits:** bounded allowlisted nodes, exact link/unlink, and controlled variable operations; Preview, confirmation, explicit Save and Verify are separate.
-- **Read-only PIE diagnosis:** select Server/Client Worlds and inspect exact Actor identity, Transform, NetRole, Components, and explicitly requested scalar properties, including reflected declaring classes.
-- **C++ investigation:** search symbols, static call sites and provenance without claiming runtime dispatch.
-- **Existing tools:** limited DataTable/DataAsset/Material Instance updates, Project Memory and opt-in safe P4 operations.
+## Included capabilities
 
-## Safety and limits
+- **Blueprint reads:** Graphs, Nodes, Pins, variables, and references; distinguish indexed snapshots from live Editor state.
+- **Experimental Blueprint edits:** restricted allowlisted nodes, controlled connections and variables, with separate Preview, exact confirmation, Apply, explicit Save and Verify.
+- **Read-only PIE inspection:** server/client Worlds, selected Actors, transforms, net roles, Components and explicitly requested scalar properties, including reflected declaring-class provenance.
+- **Static C++ investigation:** symbols, call sites and source evidence, without claiming live execution trace.
+- **Existing workflows:** bounded DataTable/DataAsset/Material Instance operations, Project Memory and optional safe P4 tooling.
 
-Experimental GraphEdit is **off by default and outside the stable Write Policy allowlist**. Both an MCP flag and a project configuration switch are required, and only disposable test projects may use it. It is not arbitrary Graph CRUD and does not auto-compile or Save All.
+## Verification
 
-The local integrated candidate passed UE 5.6.1 native acceptance for constrained Kismet CallFunction, same-Blueprint-owned Pure Function calls with unlinked input literals (native-tested with int), indexless pure-Live MCP startup, and ue_get_pie_scalars with reflected declaring-class provenance. **Candidate code acceptance is not a public release.** Native evidence does not yet cover bool/double/string input literals, Blueprint-declared property provenance, or PIE client scalar values. PIE does not provide executed pin traces or complete GAS state. General Level, AnimGraph, MaterialGraph, and NiagaraGraph writes remain unavailable.
+- GitHub Actions: Python **3.11, 3.12, 3.13 and 3.14 all passed**.
+- Windows Python release validation: **1,885 tests, 19 skipped, 0 failures**; Ruff passed.
+- UE 5.6 / Win64 native UAT build: **120/120 actions succeeded** without an AutoSDK Junction.
+- DLL extracted from the final release ZIP: native `UEAgentKit.P0Pie` automation **2/2 passed, zero errors/warnings**.
+- Release ZIP, wheel, SHA256SUMS and manifest were re-downloaded from GitHub and their SHA-256 digests matched.
 
-## Compatibility and usage
+## Safety and limitations
 
-Target: **UE 5.6 / Win64, Python 3.11–3.14** (published 0.8.0: 3.11–3.12). [Build and Run](BUILD_AND_RUN.md) · [Agent Quick Start](AGENT_QUICKSTART_EN.md) · [Developer Workflows](DEVELOPER_WORKFLOWS_EN.md).
+Experimental GraphEdit is **off by default**, requires both an MCP flag and project configuration, and is for disposable test projects only. It is not arbitrary Graph CRUD and does not auto-compile or Save All; no unrestricted script execution is provided.
 
-The frozen build's `ue_get_capabilities` is authoritative. Publication requires real UE/MCP acceptance, privacy and copyright review, and explicit user approval. No GitHub tag or Release exists for this candidate.
+Prior integrated-candidate native tests included bounded Kismet CallFunction, same-Blueprint Pure Function integer literals, indexless pure-Live MCP and PIE scalar-property provenance. **This does not imply that every Blueprint MCP write path was independently end-to-end tested using the final distributable ZIP.** Do not claim generalized bool/double/string literal coverage, full GAS inspection, runtime Pin execution tracing, or generic Level/AnimGraph/MaterialGraph/NiagaraGraph writes.
+
+## Compatibility and installation
+
+**Unreal Engine 5.6 / Windows x64; Python 3.11–3.14.**
+
+Download `UEAgentKit-0.9.0.dev1-UE5.6-Win64.zip` and copy the `UEAgentKit` directory into the project's `Plugins/` directory. Python users can install the `ue_agent_kit-0.9.0.dev1-py3-none-any.whl` artifact.
+
+[Build and Run](BUILD_AND_RUN.md) · [Agent Quick Start](AGENT_QUICKSTART_EN.md) · [Developer Workflows](DEVELOPER_WORKFLOWS_EN.md)
+
+Consult the deployed server's `ue_get_capabilities` for the actual enabled tools; do not apply legacy v0.8.0 tool counts to this preview.

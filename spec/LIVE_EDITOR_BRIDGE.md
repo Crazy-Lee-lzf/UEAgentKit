@@ -334,7 +334,7 @@ Save confirmation == SAVE P8 TEST-ONLY BP_LayoutP8
 
 `editor.applyAssetPropertyLive` 是首个受控内存写入 Capability，由 Workflow Tool `ue_apply_asset_property_live` 间接调用。该 Tool 虽属于 Workflow 注册表，但执行时必须同时启用 Live Editor、Write Tools 和 Commit Tools；MCP Client 不能直接选择 Bridge Method，也不能绕过固定 Plan、Policy、Revision 或精确确认短语。
 
-当前 0.8.0 发布边界：
+从 0.8.0 稳定写入模型延续至 0.9.0 DP1 的安全边界：
 
 - 仅接受已加载且已打开、当前不 Dirty 的非 Blueprint、非地图 `/Game` 单文件资产。
 - 当前注册表只开放十二个显式 Operation：`setAssetProperty`、`setAssetReferenceProperty`、`setAssetStructuredProperty`、四个 Material Instance 参数 Operation，以及五个 DataTable Operation。Bridge 的规范请求为 `operation + assetPath + target + value`；`target` 是最多 32 个字段的 JSON Object，由 Operation Descriptor 声明必需字段并由具体资产域执行器继续验证。旧的顶层 `propertyPath`/`parameterName`/`rowName`/`newRowName`/`fieldName` 仅作为兼容输入合并进 `target`，新增 Operation 不再要求修改中央函数签名。
@@ -366,7 +366,7 @@ Save confirmation == SAVE P8 TEST-ONLY BP_LayoutP8
 
 - MCP Workflow 将每个成功且有变更的 Live Apply 原子写入固定 Work Root 下的 `live-write-journal/live_*.json`；Authorized Save 更新同一记录，成功 Undo/Discard 或成功 Verify 删除记录。MCP Server 重启后只恢复通过 Project、Schema、Operation、Target、Transaction 和生命周期校验的记录；损坏或身份不匹配记录只计入状态，不会获得写入权限。
 - `ue_verify_live_write` 可携带精确 `liveApplyReceipt`，为空时兼容地选择该资产最新待处理记录。同一资产的多个已保存待验证记录不会互相覆盖。Journal 写盘失败会返回 `journalPersisted=false`，但不会把已经成功的 Editor 修改或授权保存伪报成失败。
-- 已发布 0.8.0 的对外协议、正式包与 Bridge 状态为 `0.8.0`；本地 0.9.0 Developer Preview 1 候选为 `0.9.0.dev1`，`publishedVersion` 保持 `0.8.0`，`developmentLine` 报告 `0.9.0.dev1`。
+- 公开最新预发布版本为 `0.9.0.dev1`（GitHub Tag `v0.9.0-dev1`）；从本次主分支文档修正后构建的 Workflow 状态中，`publishedVersion` 与 `developmentLine` 均报告 `0.9.0.dev1`。原发行 Tag 不被改写；旧 `v0.8.0` 的协议示例继续保留历史意义。
 
 ## 状态与 Revision 语义
 

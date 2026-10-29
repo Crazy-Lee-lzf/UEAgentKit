@@ -16,7 +16,7 @@
 
 ## Release Notes
 
-- **0.9.0 Developer Preview 1（候选，尚未发布）**：[中文](RELEASE_0.9.0_PREVIEW.md) / [English](RELEASE_0.9.0_PREVIEW_EN.md)
+- **0.9.0 Developer Preview 1（已发布的预览版）**：[中文](RELEASE_0.9.0_PREVIEW.md) / [English](RELEASE_0.9.0_PREVIEW_EN.md)
 
 - [0.8.0](RELEASE_0.8.0.md) / [English](RELEASE_0.8.0_EN.md)
 - [0.7.0](RELEASE_0.7.0.md) / [English](RELEASE_0.7.0_EN.md)

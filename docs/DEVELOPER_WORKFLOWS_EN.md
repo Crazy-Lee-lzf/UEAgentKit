@@ -2,7 +2,7 @@
 
 [中文](DEVELOPER_WORKFLOWS.md)
 
-**Call `ue_get_capabilities` first.** The current public stable version is v0.8.0. Live and experimental tools below must be registered on the deployed server.
+**Call `ue_get_capabilities` first.** The latest public prerelease is v0.9.0-dev1; v0.8.0 remains the previous stable release. Live and experimental tools below must be registered on the deployed server.
 
 ## Find Blueprint and C++ code
 
@@ -14,7 +14,7 @@ An offline index is a saved snapshot; Live Editor describes in-memory state. C++
 
 ## Read-only PIE Server/Client inspection
 
-The MCP server must be pinned to the project with Live Editor enabled and PIE running. Both indexed Live and **indexless pure-Live** startup passed local candidate acceptance. Actual availability depends on the deployed server's ue_get_capabilities and registered tools; this does not change public v0.8.0.
+The MCP server must be pinned to the project with Live Editor enabled and PIE running. Indexed Live and **indexless pure-Live** startup have candidate acceptance evidence. Actual availability depends on the deployed server's `ue_get_capabilities` and registered tools; candidate testing does not guarantee every final-package workflow.
 
 ```text
 ue_get_pie_state()

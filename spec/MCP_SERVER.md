@@ -1,6 +1,6 @@
 # UE Agent Kit MCP Server
 
-UE Agent Kit 0.8.0 通过本地 MCP `stdio` 提供稳定的高层查询、分层 Memory Context、实时 Editor Context/Batch/Change Set、Knowledge/Verification 和受控资产工作流。MCP 层不会开放任意 SQL、Shell、文件系统路径、Commandlet 参数或 UObject 调用。
+UE Agent Kit 0.9.0 Developer Preview 1 延续始于 0.8.0 的本地 MCP `stdio` 提供稳定的高层查询、分层 Memory Context、实时 Editor Context/Batch/Change Set、Knowledge/Verification 和受控资产工作流。MCP 层不会开放任意 SQL、Shell、文件系统路径、Commandlet 参数或 UObject 调用。
 
 ## 模式
 

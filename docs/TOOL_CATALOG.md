@@ -29,7 +29,7 @@
 | 角色接地与二次运动 | [Ground Contact](CHARACTER_GROUND_CONTACT_TOOL.md)、[Secondary Motion](SKELETAL_SECONDARY_MOTION_TOOL.md) |
 | 重定向后处理 | [Retarget Postprocess](RETARGET_POSTPROCESS_TOOL.md) |
 
-这些链接是**产品文档导航**，不保证所有 Tool 均随 v0.8.0 以同一模式默认开放。只读能力通常不意味着可写；计划生成不等于 Apply；在 Editor 内完成操作也不等于资产已保存或独立验证。
+这些链接是**产品文档导航**，不保证所有 Tool 均随 v0.9.0-dev1 以同一模式默认开放。只读能力通常不意味着可写；计划生成不等于 Apply；在 Editor 内完成操作也不等于资产已保存或独立验证。
 
 ## 为新增 Tool 编写公开说明
 

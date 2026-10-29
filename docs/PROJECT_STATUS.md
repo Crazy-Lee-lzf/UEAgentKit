@@ -1,7 +1,8 @@
-# UE Agent Kit 0.8.0 能力状态
+# UE Agent Kit 当前能力状态（0.9.0 Developer Preview 1）
 
-当前已发布版本：**0.8.0**（此页按 `v0.8.0` Tag 的功能范围编写，不把后续本地分支的实验性功能计入正式发布）
-已发布 0.8.0：**Python 3.11–3.12**；0.9.0 Developer Preview 1 候选（0.9.0.dev1）：**Unreal Engine 5.6 / Windows / Python 3.11–3.14**
+当前最新公开预发布版本：**v0.9.0-dev1 / 0.9.0.dev1**，**Unreal Engine 5.6 / Windows x64 / Python 3.11–3.14**。上一个稳定版为 **v0.8.0**（Python 3.11–3.12）。
+
+**本页先列出延续的核心能力；默认关闭的 DP1 实验性能力与验收边界见 [0.9.0 发布说明](RELEASE_0.9.0_PREVIEW.md)。**
 
 
 ## 产品定位
@@ -109,7 +110,7 @@ Source Control 为 opt-in 功能。
 
 ## MCP Tool 规模
 
-Source Control 默认关闭。0.8.0 当前组合模式为：
+Source Control 默认关闭。以下为 **v0.8.0 历史注册数量基线**，不是 0.9.0 DP1 的实时 Tool 数：
 
 | 模式 | 基础 | + Memory | + Source Control | + Memory + Source Control |
 |---|---:|---:|---:|---:|
@@ -120,7 +121,7 @@ Source Control 默认关闭。0.8.0 当前组合模式为：
 
 Tool 数量只是接口规模，不代表每个 Tool 都会修改资产；大量 Tool 是只读查询、规划、验证和状态读取。
 
-本页仅描述正式 `v0.8.0` 版本。开发预览候选功能请查看 [候选说明](RELEASE_0.9.0_PREVIEW.md)，实际 Tool 以运行时 `ue_get_capabilities` 为准。
+当前最新公开预发布为 [v0.9.0-dev1](RELEASE_0.9.0_PREVIEW.md)；实际 Tool 列表、启用状态及操作边界以部署实例的 `ue_get_capabilities` 为准。
 
 ## 明确不支持的通用能力
 

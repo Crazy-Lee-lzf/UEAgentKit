@@ -2,7 +2,7 @@
 
 更新时间：2026-08-03
 
-> 0.8.0 已集成本地固定项目 Memory：Knowledge Tree、Active Work、渐进式 Context、按需 Evidence、确定性 L0/L1、可选 Hybrid Recall 和持久化 L2/L3。Shared Knowledge Service 与更广的团队协作能力仍属于后续方向。
+> 0.9.0 DP1 已公开发布；以下固定项目 Memory 能力从 0.8.0 起已提供：Knowledge Tree、Active Work、渐进式 Context、按需 Evidence、确定性 L0/L1、可选 Hybrid Recall 和持久化 L2/L3。Shared Knowledge Service 与更广的团队协作能力仍属于后续方向。
 
 ## 1. 设计目标
 
