@@ -44,7 +44,7 @@ if (!$OutputDirectory.StartsWith($AllowedPrefix, [StringComparison]::OrdinalIgno
 }
 if (Test-Path -LiteralPath $OutputDirectory)
 {
-    Remove-Item -LiteralPath $OutputDirectory -Recurse -Force
+    Remove-UeakSafeDirectory -Path $OutputDirectory -AllowedRoot $AllowedRoot
 }
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 
@@ -74,6 +74,8 @@ $BuildPlugin = Join-Path $ToolRoot "scripts\BuildPlugin.ps1"
     -PackageDirectory $PluginPackage `
     -TargetPlatforms Win64
 if ($LASTEXITCODE -ne 0) { throw "UE5.6 UAT plugin packaging failed." }
+# Check the entire generated package before inspecting or removing any item.
+Assert-UeakPlainTree -Path $PluginPackage
 
 $TransientPluginDirectories = @("Intermediate", "Saved", "DerivedDataCache", "HostProject")
 foreach ($DirectoryName in $TransientPluginDirectories)
@@ -81,7 +83,7 @@ foreach ($DirectoryName in $TransientPluginDirectories)
     $TransientPath = Join-Path $PluginPackage $DirectoryName
     if (Test-Path -LiteralPath $TransientPath)
     {
-        Remove-Item -LiteralPath $TransientPath -Recurse -Force
+        Remove-UeakSafeDirectory -Path $TransientPath -AllowedRoot $StagingRoot
     }
 }
 
@@ -91,7 +93,7 @@ $DebugSymbolFiles = @(
 )
 foreach ($DebugSymbolFile in $DebugSymbolFiles)
 {
-    Remove-Item -LiteralPath $DebugSymbolFile.FullName -Force
+    Remove-UeakSafeFile -Path $DebugSymbolFile.FullName -AllowedRoot $StagingRoot
 }
 if (@(Get-ChildItem -LiteralPath $PluginPackage -Recurse -File | Where-Object { $_.Extension -ieq ".pdb" }).Count -ne 0)
 {
@@ -144,6 +146,7 @@ if ($UnexpectedTopLevel.Count -ne 0)
     throw "Unexpected top-level plugin package entries: $($UnexpectedTopLevel -join ', ')"
 }
 
+Assert-UeakPlainTree -Path $PluginPackage
 $PluginZip = Join-Path $OutputDirectory "UEAgentKit-$Version-UE5.6-Win64.zip"
 Compress-Archive -LiteralPath $PluginPackage -DestinationPath $PluginZip -CompressionLevel Optimal
 
@@ -199,7 +202,7 @@ $Manifest = [ordered]@{
     (Join-Path $OutputDirectory "release-manifest.json"),
     (($Manifest | ConvertTo-Json -Depth 10) + "`r`n"),
     [Text.UTF8Encoding]::new($false))
-Remove-Item -LiteralPath $StagingRoot -Recurse -Force
+Remove-UeakSafeDirectory -Path $StagingRoot -AllowedRoot $AllowedRoot
 
 Write-Host "RELEASE BUILD SUCCEEDED"
 Write-Host "Version : $Version"

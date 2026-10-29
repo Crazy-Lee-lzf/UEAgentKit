@@ -40,6 +40,8 @@ scripts\setup_python.cmd -WithMcp
 
 ## 3. 构建 UE5.6 Plugin
 
+该入口使用 UAT 编译和打包，不再依赖目录链接。
+
 ```bat
 scripts\BuildPluginDirect.cmd -EngineRoot "<UE_5.6>"
 ```
@@ -61,7 +63,7 @@ Build\Compiled\UEAgentKit\Binaries\Win64\UnrealEditor-UEAgentKitEditor.dll
 
 ### 使用源码 Plugin
 
-适合开发和调试：
+适合首次接入和调试。此模式是**一次性复制**，不会与源码目录自动同步；源码更新后需先移除之前由脚本安装的副本，再重新安装。
 
 ```bat
 scripts\InstallProjectPlugin.cmd ^
@@ -77,7 +79,9 @@ scripts\InstallProjectPlugin.cmd ^
   -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject"
 ```
 
-安装脚本建立本地 Junction。Junction 本身不应提交到 Git 或 P4。
+安装脚本现在**复制插件文件**，不再创建目录链接。目标目录已存在时会拒绝覆盖；移除操作仅删除带有管理标记的安装副本，旧版链接不会被自动清理。
+
+构建直接使用 Visual Studio 已安装的 MSVC 工具链，不创建编译器目录映射，也不清理 VS 安装目录。
 
 ## 5. 导出资产
 

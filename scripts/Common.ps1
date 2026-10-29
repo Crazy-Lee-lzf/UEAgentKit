@@ -535,70 +535,126 @@ function Test-UeakRequirementFileHasPackages
     return $false
 }
 
-function Ensure-UeakJunction
+function Assert-UeakNoReparsePath
 {
     param(
         [Parameter(Mandatory = $true)]
-        [string]$LinkPath,
-
-        [Parameter(Mandatory = $true)]
-        [string]$TargetPath,
-
-        [switch]$ReplaceDifferentJunction
+        [string]$Path
     )
-
-    $LinkPath = [System.IO.Path]::GetFullPath($LinkPath)
-    $TargetPath = [System.IO.Path]::GetFullPath($TargetPath)
-    Assert-UeakPath -Path $TargetPath -Description "Junction target" -PathType Directory
-
-    if (Test-Path -LiteralPath $LinkPath)
+    # Path.GetFullPath does not follow links; inspect every existing component.
+    $Cursor = [System.IO.Path]::GetFullPath($Path)
+    while (![string]::IsNullOrEmpty($Cursor))
     {
-        $Item = Get-Item -LiteralPath $LinkPath -Force
-        $ExistingTargets = @($Item.Target | ForEach-Object { [System.IO.Path]::GetFullPath($_) })
-        if ($Item.LinkType -eq "Junction" -and $ExistingTargets -contains $TargetPath)
+        # Get-Item detects links even when their targets are unavailable.
+        $Item = $null
+        try
         {
-            return $Item
+            $Item = Get-Item -LiteralPath $Cursor -Force -ErrorAction Stop
         }
-
-        if ($Item.LinkType -ne "Junction")
+        catch [System.Management.Automation.ItemNotFoundException]
         {
-            throw "Refusing to replace a non-junction path: $LinkPath"
         }
-
-        if (!$ReplaceDifferentJunction)
+        if ($null -ne $Item -and
+            (($Item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0))
         {
-            throw "Junction points to a different target: $LinkPath"
+            throw "Refusing a reparse-point path: $Cursor"
         }
-
-        Remove-Item -LiteralPath $LinkPath -Force
+        $Parent = [System.IO.Path]::GetDirectoryName($Cursor)
+        if ([string]::IsNullOrEmpty($Parent) -or $Parent -eq $Cursor)
+        {
+            break
+        }
+        $Cursor = $Parent
     }
-
-    $Parent = Split-Path -Parent $LinkPath
-    New-Item -ItemType Directory -Path $Parent -Force | Out-Null
-    return New-Item -ItemType Junction -Path $LinkPath -Target $TargetPath
 }
 
-function Remove-UeakJunction
+function Assert-UeakPlainTree
 {
     param(
         [Parameter(Mandatory = $true)]
-        [string]$LinkPath
+        [string]$Path
     )
-
-    if (!(Test-Path -LiteralPath $LinkPath))
+    Assert-UeakNoReparsePath -Path $Path
+    if (!(Test-Path -LiteralPath $Path))
     {
-        return $false
+        return
     }
-
-    $Item = Get-Item -LiteralPath $LinkPath -Force
-    if ($Item.LinkType -ne "Junction")
+    # Inspect immediate entries before descending; never enumerate a link target.
+    $Pending = New-Object System.Collections.Stack
+    $Pending.Push([System.IO.Path]::GetFullPath($Path))
+    while ($Pending.Count -gt 0)
     {
-        throw "Refusing to remove a non-junction path: $LinkPath"
+        $Current = [string]$Pending.Pop()
+        $Item = Get-Item -LiteralPath $Current -Force -ErrorAction Stop
+        if (($Item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)
+        {
+            throw "Refusing to traverse reparse point: $Current"
+        }
+        if ($Item.PSIsContainer)
+        {
+            foreach ($Child in Get-ChildItem -LiteralPath $Current -Force -ErrorAction Stop)
+            {
+                if (($Child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)
+                {
+                    throw "Refusing a tree containing reparse point: $($Child.FullName)"
+                }
+                $Pending.Push($Child.FullName)
+            }
+        }
     }
-
-    [System.IO.Directory]::Delete($LinkPath, $false)
-    return $true
 }
+
+function Assert-UeakUnderDirectory
+{
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [string]$AllowedRoot
+    )
+    $Root = [System.IO.Path]::GetFullPath($AllowedRoot).TrimEnd([char]'\', [char]'/')
+    $Full = [System.IO.Path]::GetFullPath($Path)
+    $Prefix = $Root + [System.IO.Path]::DirectorySeparatorChar
+    if (!$Full.StartsWith($Prefix, [System.StringComparison]::OrdinalIgnoreCase))
+    {
+        throw "Refusing operation outside permitted directory: $Full"
+    }
+    Assert-UeakNoReparsePath -Path $Root
+    Assert-UeakNoReparsePath -Path $Full
+}
+
+function Remove-UeakSafeDirectory
+{
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [string]$AllowedRoot
+    )
+    Assert-UeakUnderDirectory -Path $Path -AllowedRoot $AllowedRoot
+    if (Test-Path -LiteralPath $Path)
+    {
+        Assert-UeakPlainTree -Path $Path
+        Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+    }
+}
+
+function Remove-UeakSafeFile
+{
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [string]$AllowedRoot
+    )
+    Assert-UeakUnderDirectory -Path $Path -AllowedRoot $AllowedRoot
+    if (Test-Path -LiteralPath $Path)
+    {
+        Assert-UeakPlainTree -Path $Path
+        Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
+    }
+}
+
 # Non-fatal diagnostics: export scripts must work even when Python/index is missing.
 function Show-UeakIndexUpdateStatus
 {
