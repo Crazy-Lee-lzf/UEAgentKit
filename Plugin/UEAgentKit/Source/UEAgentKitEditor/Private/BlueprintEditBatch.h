@@ -54,7 +54,24 @@ namespace UEAgentKitBlueprintEdit
 		bool bChanged = false;
 	};
 
+	/** True only for exactly 64 lowercase hexadecimal characters. */
 	bool IsNodeCoordinateInRange(const int64 Value);
+
+	/**
+	 * Package Dirty precondition for one move batch.
+	 *
+	 * RequireClean is the only mode reachable from a request without an edit
+	 * session token: it refuses an already-dirty package, so only the first
+	 * clean -> dirty batch is possible.  AllowSessionOwnedDirty is reserved for
+	 * FBlueprintEditSessionManager after it validated a live token, the bound
+	 * target and the expected content fingerprint; no socket parameter selects
+	 * it directly.
+	 */
+	enum class EPackageDirtyGate : uint8
+	{
+		RequireClean,
+		AllowSessionOwnedDirty,
+	};
 
 	/**
 	 * Validate every request against the live graph and then apply all
@@ -72,5 +89,6 @@ namespace UEAgentKitBlueprintEdit
 		TArray<FNodeMoveResult>& OutResults,
 		bool& bOutChanged,
 		FString& OutErrorCode,
-		FString& OutErrorMessage);
+		FString& OutErrorMessage,
+		EPackageDirtyGate DirtyGate = EPackageDirtyGate::RequireClean);
 }

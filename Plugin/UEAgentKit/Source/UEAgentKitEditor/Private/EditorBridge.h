@@ -15,6 +15,10 @@ namespace UEAgentKitLiveWrite
 {
 	struct FLiveWriteTransactionRecord;
 }
+namespace UEAgentKitBlueprintEdit
+{
+	class FBlueprintEditSessionManager;
+}
 
 class FUEAgentKitEditorBridge final
 {
@@ -105,6 +109,22 @@ private:
 		FString& OutErrorCode,
 		FString& OutErrorMessage);
 	bool TryMoveBlueprintNodesResult(
+		const TSharedPtr<FJsonObject>& Params,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage);
+	/**
+	 * Bind one clean, loaded, focused Blueprint graph to an Agent edit session
+	 * token.  This is not a UI lock: it authorizes continuous Agent batches with
+	 * content-fingerprint validation only.  Rollback is not implemented.
+	 */
+	bool TryBeginBlueprintEditSessionResult(
+		const TSharedPtr<FJsonObject>& Params,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage);
+	/** End a session with mode=keep (release ownership only).  mode=rollback is unsupported in this slice. */
+	bool TryEndBlueprintEditSessionResult(
 		const TSharedPtr<FJsonObject>& Params,
 		TSharedPtr<FJsonObject>& OutResult,
 		FString& OutErrorCode,
@@ -334,4 +354,6 @@ private:
 	FPendingAutomationRun PendingAutomation;
 	// Confirmed live write transactions per exact asset path; cleared on bridge start.
 	mutable TMap<FString, TMap<FGuid, TSharedPtr<UEAgentKitLiveWrite::FLiveWriteTransactionRecord>>> LiveWriteTransactionRecords;
+	// One Blueprint edit session at a time; cleared on bridge start/stop.
+	TUniquePtr<UEAgentKitBlueprintEdit::FBlueprintEditSessionManager> BlueprintEditSessionManager;
 };

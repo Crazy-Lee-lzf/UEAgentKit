@@ -38,7 +38,8 @@ namespace UEAgentKitBlueprintEdit
 		TArray<FNodeMoveResult>& OutResults,
 		bool& bOutChanged,
 		FString& OutErrorCode,
-		FString& OutErrorMessage)
+		FString& OutErrorMessage,
+		const EPackageDirtyGate DirtyGate)
 	{
 		OutResults.Reset();
 		bOutChanged = false;
@@ -274,11 +275,14 @@ namespace UEAgentKitBlueprintEdit
 				TEXT("node-move-batch-package-unavailable"),
 				TEXT("The exact Blueprint has no package."));
 		}
-		if (Package->IsDirty())
+		if (Package->IsDirty() && DirtyGate == EPackageDirtyGate::RequireClean)
 		{
 			// No ownership inference: a dirty package may contain user edits, a
 			// prior Agent batch, or another plugin's changes.  Only the first
-			// clean -> dirty batch is supported.
+			// clean -> dirty batch is supported without a validated edit
+			// session token.  AllowSessionOwnedDirty is never set from a request
+			// parameter; only the session manager grants it after proving the
+			// bound target and its expected content fingerprint.
 			return Fail(
 				OutErrorCode,
 				OutErrorMessage,

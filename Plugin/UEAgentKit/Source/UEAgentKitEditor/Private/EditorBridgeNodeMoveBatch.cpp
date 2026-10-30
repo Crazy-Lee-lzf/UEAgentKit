@@ -1,6 +1,7 @@
 #include "EditorBridge.h"
 #include "EditorBridgeHandlerUtils.h"
 #include "BlueprintEditBatch.h"
+#include "BlueprintEditSession.h"
 #include "BlueprintGraphLayoutApply.h"
 
 #include "BlueprintEditor.h"
@@ -80,20 +81,23 @@ bool FUEAgentKitEditorBridge::TryMoveBlueprintNodesResult(
 	FString& OutErrorCode,
 	FString& OutErrorMessage)
 {
-	// Exact three-field contract: assetPath, graphGuid, nodes.
-	if (!Params.IsValid() || Params->Values.Num() != 3)
+	// Exact contract: assetPath, graphGuid, nodes and an optional
+	// editSessionToken that only a live edit-session token can supply.
+	if (!Params.IsValid()
+		|| (Params->Values.Num() != 3 && Params->Values.Num() != 4))
 	{
 		return FailBatchMove(
 			OutErrorCode,
 			OutErrorMessage,
 			TEXT("node-move-batch-invalid-parameters"),
-			TEXT("Required: assetPath, graphGuid, nodes."));
+			TEXT("Required: assetPath, graphGuid, nodes with optional editSessionToken."));
 	}
 	for (const TPair<FString, TSharedPtr<FJsonValue>>& Entry : Params->Values)
 	{
 		if (Entry.Key != TEXT("assetPath")
 			&& Entry.Key != TEXT("graphGuid")
-			&& Entry.Key != TEXT("nodes"))
+			&& Entry.Key != TEXT("nodes")
+			&& Entry.Key != TEXT("editSessionToken"))
 		{
 			return FailBatchMove(
 				OutErrorCode,
@@ -117,6 +121,19 @@ bool FUEAgentKitEditorBridge::TryMoveBlueprintNodesResult(
 			TEXT("node-move-batch-invalid-parameters"),
 			TEXT("assetPath must be one exact /Game Object Path and graphGuid must be a canonical lowercase GUID."));
 	}
+
+	FString EditSessionToken;
+	if (Params->HasField(TEXT("editSessionToken"))
+		&& (!Params->TryGetStringField(TEXT("editSessionToken"), EditSessionToken)
+			|| !UEAgentKitBlueprintEdit::IsCanonicalEditSessionToken(EditSessionToken)))
+	{
+		return FailBatchMove(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("node-move-batch-invalid-parameters"),
+			TEXT("editSessionToken must be the exact 64-character lowercase hex token returned by editor.beginBlueprintEditSession."));
+	}
+	const bool bEditSessionBatch = !EditSessionToken.IsEmpty();
 
 	const TArray<TSharedPtr<FJsonValue>>* Nodes = nullptr;
 	if (!Params->TryGetArrayField(TEXT("nodes"), Nodes) || Nodes == nullptr)
@@ -323,6 +340,50 @@ bool FUEAgentKitEditorBridge::TryMoveBlueprintNodesResult(
 
 	TArray<UEAgentKitBlueprintEdit::FNodeMoveResult> Results;
 	bool bChanged = false;
+	UPackage* Package = Blueprint->GetOutermost();
+	const bool bPackageDirtyBefore = Package != nullptr && Package->IsDirty();
+
+	if (bEditSessionBatch)
+	{
+		// A token batch is authorized only by the live session manager, which
+		// proves the bound target, the expected content fingerprint, every node
+		// position and the package Dirty state before any write.  There is no
+		// request parameter that selects the dirty gate directly.
+		if (!BlueprintEditSessionManager.IsValid())
+		{
+			return FailBatchMove(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("blueprint-edit-session-token-invalid"),
+				TEXT("The Blueprint edit session manager is unavailable; the token cannot be validated."));
+		}
+		if (!BlueprintEditSessionManager->ValidateBatch(
+			Blueprint,
+			Graph,
+			AssetPath,
+			GraphGuid,
+			SessionId,
+			EditSessionToken,
+			Requests,
+			OutErrorCode,
+			OutErrorMessage))
+		{
+			return false;
+		}
+	}
+	else if (BlueprintEditSessionManager.IsValid()
+		&& BlueprintEditSessionManager->HasActiveSessionFor(AssetPath, GraphGuid))
+	{
+		// An active session for this exact target must own every further batch,
+		// otherwise a token-less clean->dirty batch could silently invalidate
+		// the session's expected content fingerprint.
+		return FailBatchMove(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("blueprint-edit-session-active-token-required"),
+			TEXT("An Agent edit session is active for this exact Blueprint graph; every further batch must pass its editSessionToken."));
+	}
+
 	if (!UEAgentKitBlueprintEdit::ApplyNodeMoveBatch(
 		Blueprint,
 		Graph,
@@ -330,12 +391,25 @@ bool FUEAgentKitEditorBridge::TryMoveBlueprintNodesResult(
 		Results,
 		bChanged,
 		OutErrorCode,
-		OutErrorMessage))
+		OutErrorMessage,
+		bEditSessionBatch
+			? UEAgentKitBlueprintEdit::EPackageDirtyGate::AllowSessionOwnedDirty
+			: UEAgentKitBlueprintEdit::EPackageDirtyGate::RequireClean))
 	{
 		return false;
 	}
-
-	UPackage* Package = Blueprint->GetOutermost();
+	if (bEditSessionBatch)
+	{
+		if (!BlueprintEditSessionManager->CommitBatch(
+			Blueprint,
+			Graph,
+			bChanged,
+			OutErrorCode,
+			OutErrorMessage))
+		{
+			return false;
+		}
+	}
 	TArray<TSharedPtr<FJsonValue>> NodeValues;
 	NodeValues.Reserve(Results.Num());
 	int32 ChangedCount = 0;
@@ -368,11 +442,16 @@ bool FUEAgentKitEditorBridge::TryMoveBlueprintNodesResult(
 	Result->SetNumberField(TEXT("changedNodeCount"), ChangedCount);
 	Result->SetArrayField(TEXT("nodes"), NodeValues);
 	Result->SetBoolField(TEXT("changed"), bChanged);
-	Result->SetBoolField(TEXT("packageDirtyBefore"), false);
+	Result->SetBoolField(TEXT("packageDirtyBefore"), bPackageDirtyBefore);
 	Result->SetBoolField(
 		TEXT("packageDirtyAfter"),
 		Package != nullptr && Package->IsDirty());
 	Result->SetBoolField(TEXT("singleTransaction"), bChanged);
+	Result->SetBoolField(TEXT("editSessionUsed"), bEditSessionBatch);
+	// No UI lock exists: a session authorizes Agent batches by content
+	// fingerprint only, it does not block a person from editing the graph.
+	Result->SetBoolField(TEXT("exclusiveUI"), false);
+	Result->SetBoolField(TEXT("humanEditingBlocked"), false);
 	Result->SetStringField(
 		TEXT("transactionTitle"),
 		TEXT("UE Agent Kit: Move Blueprint Nodes"));

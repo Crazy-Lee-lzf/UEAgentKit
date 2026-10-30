@@ -98,6 +98,17 @@ namespace UEAgentKitBlueprintGraphLayout
 		FString& OutErrorCode,
 		FString& OutErrorMessage);
 
+	/**
+	 * Read-only strong content fingerprint of one exact graph.
+	 *
+	 * Covers sorted NodeGuid, node class, NodePosX/NodePosY, stored node
+	 * width/height, comment text, object name, and every Pin's name, direction,
+	 * type and sorted linked (node GUID, pin name) pairs.  It is the same hash
+	 * the layout projection already uses, so an edit session can bind a batch
+	 * to content rather than to an asset path plus a Dirty bool.
+	 */
+	FString ComputeGraphContentFingerprint(UEdGraph* Graph);
+
 	/** Resolve exact loaded Blueprint + exact graph by GUID; no mutation. */
 	bool ResolveExactTarget(
 		const FString& AssetPath,

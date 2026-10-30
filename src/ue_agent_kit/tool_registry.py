@@ -203,6 +203,8 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_verify_live_write_checkpoint", "workflow", "read"),
     ToolDefinition("ue_get_asset_state", "workflow", "read"),
     ToolDefinition("ue_refresh_asset_index", "workflow", "planning"),
+    ToolDefinition("ue_begin_blueprint_edit_session", "workflow", "destructive"),
+    ToolDefinition("ue_end_blueprint_edit_session", "workflow", "destructive"),
     ToolDefinition("ue_move_blueprint_node", "workflow", "destructive"),
     ToolDefinition("ue_move_blueprint_nodes", "workflow", "destructive"),
     ToolDefinition("ue_save_authorized_asset", "workflow", "destructive"),

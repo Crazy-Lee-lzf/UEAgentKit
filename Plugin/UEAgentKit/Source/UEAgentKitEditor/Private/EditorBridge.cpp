@@ -2,6 +2,7 @@
 #include "EditorBridgeBatchTaskManager.h"
 #include "EditorBridgeHandlerUtils.h"
 #include "EditorBridgeLogCapture.h"
+#include "BlueprintEditSession.h"
 #include "Native/NativeNodeRegistry.h"
 #include "BlueprintGraphLayoutP7TestOnly.h"
 #include "BlueprintGraphLayoutP8TestOnly.h"
@@ -69,6 +70,8 @@ namespace UEAgentKitEditorBridgePrivate
 		TEXT("editor.getBlueprintGraphSelection"),
 		TEXT("editor.moveBlueprintNode"),
 		TEXT("editor.moveBlueprintNodes"),
+		TEXT("editor.beginBlueprintEditSession"),
+		TEXT("editor.endBlueprintEditSession"),
 		TEXT("editor.getBlueprintGraphLayoutPreflight"),
 		TEXT("editor.getFocusedBlueprintGraphContext"),
 		TEXT("editor.getFocusedBlueprintGraphLayoutProjection"),
@@ -507,6 +510,8 @@ bool FUEAgentKitEditorBridge::Start()
 	SessionId = FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphensLower);
 	LiveWriteTransactionRecords.Reset();
 	BatchTaskManager = MakeUnique<UEAgentKitBatchTaskPrivate::FBatchTaskManager>();
+	BlueprintEditSessionManager =
+		MakeUnique<UEAgentKitBlueprintEdit::FBlueprintEditSessionManager>();
 	ProjectPathHash = ComputeProjectPathHash();
 	LogCapture = MakeUnique<FUEAgentKitEditorBridgeLogCapture>();
 	LogCapture->Start();
@@ -564,6 +569,7 @@ void FUEAgentKitEditorBridge::Stop()
 		LogCapture.Reset();
 	}
 	BatchTaskManager.Reset();
+	BlueprintEditSessionManager.Reset();
 	RemoveDescriptor();
 	ListenPort = 0;
 	AuthToken.Reset();
@@ -879,6 +885,22 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 		FString ErrorCode, ErrorMessage;
 		SendActionResult(
 			TryMoveBlueprintNodesResult(Params, Result, ErrorCode, ErrorMessage),
+			Result, ErrorCode, ErrorMessage);
+	}
+	else if (Method == TEXT("editor.beginBlueprintEditSession"))
+	{
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode, ErrorMessage;
+		SendActionResult(
+			TryBeginBlueprintEditSessionResult(Params, Result, ErrorCode, ErrorMessage),
+			Result, ErrorCode, ErrorMessage);
+	}
+	else if (Method == TEXT("editor.endBlueprintEditSession"))
+	{
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode, ErrorMessage;
+		SendActionResult(
+			TryEndBlueprintEditSessionResult(Params, Result, ErrorCode, ErrorMessage),
 			Result, ErrorCode, ErrorMessage);
 	}
 	else if (Method == TEXT("editor.getBlueprintGraphLayoutPreflight"))

@@ -144,6 +144,8 @@ EXPECTED_ALL_TOOLS = [
     "ue_verify_live_write_checkpoint",
     "ue_get_asset_state",
     "ue_refresh_asset_index",
+    "ue_begin_blueprint_edit_session",
+    "ue_end_blueprint_edit_session",
     "ue_move_blueprint_node",
     "ue_move_blueprint_nodes",
     "ue_save_authorized_asset",
@@ -161,7 +163,7 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertEqual(len(tool_names_for_mode()), 14)
         self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 53)
-        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 73)
+        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 75)
         self.assertEqual(
             tool_names_for_mode(memory_enabled=True),
             QUERY_TOOL_NAMES + EXPECTED_MEMORY_TOOLS,
@@ -173,7 +175,7 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
-            87,
+            89,
         )
         self.assertEqual(
             len(
@@ -183,7 +185,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-            126,
+            128,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:

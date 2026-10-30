@@ -16,6 +16,9 @@ _NODE_MOVE_ENTRY_FIELDS = frozenset({"nodeGuid", "expectedX", "expectedY", "x", 
 _CANONICAL_GUID = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 )
+# Two concatenated lowercase hex GUIDs; the Bridge owns the value and this
+# wrapper only proves its shape before forwarding it.
+_CANONICAL_EDIT_SESSION_TOKEN = re.compile(r"[0-9a-f]{64}")
 
 
 def _is_exact_game_object_path(value: object) -> bool:
@@ -1035,6 +1038,136 @@ def register_workflow_tools(
             return error_response("ue_refresh_asset_index", exc, read_only=False)
 
     @server.tool(annotations=destructive_annotations)
+    def ue_begin_blueprint_edit_session(
+        asset_path: str,
+        graph_guid: str,
+        experimental: bool,
+    ) -> dict[str, Any]:
+        """Begin an experimental continuous Agent edit session on one clean, focused Blueprint graph; never saves, compiles, or blocks human editing."""
+        try:
+            if not workflow_service.config.commit_enabled:
+                raise WorkflowError(
+                    "blueprint-edit-session-disabled",
+                    "Blueprint edit sessions require explicit startup authorization "
+                    "of Commit tools.",
+                )
+            if workflow_service.live_editor_service is None:
+                raise WorkflowError(
+                    "live-editor-required",
+                    "Blueprint edit sessions require the connected, running Editor Bridge.",
+                )
+            if not _is_exact_game_object_path(asset_path):
+                raise WorkflowError(
+                    "blueprint-edit-session-invalid-parameters",
+                    "asset_path must be one exact /Game Package.Object Object Path.",
+                )
+            if (
+                not isinstance(graph_guid, str)
+                or _CANONICAL_GUID.fullmatch(graph_guid) is None
+            ):
+                raise WorkflowError(
+                    "blueprint-edit-session-invalid-parameters",
+                    "graph_guid must be one canonical lowercase hyphenated GUID.",
+                )
+            if type(experimental) is not bool:
+                raise WorkflowError(
+                    "blueprint-edit-session-invalid-parameters",
+                    "experimental must be a boolean.",
+                )
+            if not experimental:
+                # Continuous editing has no UI lock and no rollback in this
+                # slice, so it must be an explicit per-task opt-in.
+                raise WorkflowError(
+                    "blueprint-edit-session-experimental-opt-in-required",
+                    "Continuous Blueprint editing is experimental, has no human/UI "
+                    "edit lock and no session rollback; pass experimental=True and "
+                    "do not edit the graph until the session is ended.",
+                )
+            result = workflow_service.live_editor_service.call_method(
+                "editor.beginBlueprintEditSession",
+                {
+                    "assetPath": asset_path,
+                    "graphGuid": graph_guid,
+                    "experimentalContinuous": True,
+                },
+            )
+            return {
+                "schemaVersion": "1.0",
+                "tool": "ue_begin_blueprint_edit_session",
+                "ok": True,
+                "mode": "ResidentEditor",
+                "readOnly": False,
+                "childUnrealProcessCount": 0,
+                "saved": False,
+                "compiled": False,
+                "exclusiveUI": False,
+                "humanEditingBlocked": False,
+                "result": result,
+            }
+        except (WorkflowError, ValueError, RuntimeError, OSError) as exc:
+            return error_response(
+                "ue_begin_blueprint_edit_session", exc, read_only=False
+            )
+
+    @server.tool(annotations=destructive_annotations)
+    def ue_end_blueprint_edit_session(
+        edit_session_token: str,
+        mode: Literal["keep", "rollback"] = "keep",
+    ) -> dict[str, Any]:
+        """Release an Agent edit session without saving; mode=rollback is unsupported in this slice."""
+        try:
+            if not workflow_service.config.commit_enabled:
+                raise WorkflowError(
+                    "blueprint-edit-session-disabled",
+                    "Blueprint edit sessions require explicit startup authorization "
+                    "of Commit tools.",
+                )
+            if workflow_service.live_editor_service is None:
+                raise WorkflowError(
+                    "live-editor-required",
+                    "Blueprint edit sessions require the connected, running Editor Bridge.",
+                )
+            if (
+                not isinstance(edit_session_token, str)
+                or _CANONICAL_EDIT_SESSION_TOKEN.fullmatch(edit_session_token)
+                is None
+            ):
+                raise WorkflowError(
+                    "blueprint-edit-session-token-invalid",
+                    "edit_session_token must be the exact 64-character lowercase "
+                    "hex token returned by begin.",
+                )
+            if mode not in ("keep", "rollback"):
+                raise WorkflowError(
+                    "blueprint-edit-session-invalid-parameters",
+                    "mode must be keep or rollback.",
+                )
+            result = workflow_service.live_editor_service.call_method(
+                "editor.endBlueprintEditSession",
+                {
+                    "editSessionToken": edit_session_token,
+                    "mode": mode,
+                },
+            )
+            return {
+                "schemaVersion": "1.0",
+                "tool": "ue_end_blueprint_edit_session",
+                "ok": True,
+                "mode": "ResidentEditor",
+                "readOnly": False,
+                "childUnrealProcessCount": 0,
+                "saved": False,
+                "compiled": False,
+                "exclusiveUI": False,
+                "humanEditingBlocked": False,
+                "result": result,
+            }
+        except (WorkflowError, ValueError, RuntimeError, OSError) as exc:
+            return error_response(
+                "ue_end_blueprint_edit_session", exc, read_only=False
+            )
+
+    @server.tool(annotations=destructive_annotations)
     def ue_move_blueprint_node(
         asset_path: str,
         graph_guid: str,
@@ -1127,8 +1260,9 @@ def register_workflow_tools(
         asset_path: str,
         graph_guid: str,
         nodes: list[dict[str, Any]],
+        edit_session_token: str = "",
     ) -> dict[str, Any]:
-        """Atomically move up to 128 nodes in one open, clean Blueprint graph; never save, compile, or launch Unreal."""
+        """Atomically move up to 128 nodes in one open Blueprint graph; a valid edit-session token allows repeated batches on one Dirty graph. Never saves, compiles, or launches Unreal."""
         try:
             if not workflow_service.config.commit_enabled:
                 raise WorkflowError(
@@ -1153,14 +1287,28 @@ def register_workflow_tools(
                     "node-move-batch-invalid-parameters",
                     "graph_guid must be one canonical lowercase hyphenated GUID.",
                 )
+            if edit_session_token:
+                if (
+                    not isinstance(edit_session_token, str)
+                    or _CANONICAL_EDIT_SESSION_TOKEN.fullmatch(edit_session_token)
+                    is None
+                ):
+                    raise WorkflowError(
+                        "blueprint-edit-session-token-invalid",
+                        "edit_session_token must be the exact 64-character "
+                        "lowercase hex token returned by begin.",
+                    )
             normalized = _normalize_node_move_batch(nodes)
+            params: dict[str, Any] = {
+                "assetPath": asset_path,
+                "graphGuid": graph_guid,
+                "nodes": normalized,
+            }
+            if edit_session_token:
+                params["editSessionToken"] = edit_session_token
             result = workflow_service.live_editor_service.call_method(
                 "editor.moveBlueprintNodes",
-                {
-                    "assetPath": asset_path,
-                    "graphGuid": graph_guid,
-                    "nodes": normalized,
-                },
+                params,
             )
             return {
                 "schemaVersion": "1.0",
