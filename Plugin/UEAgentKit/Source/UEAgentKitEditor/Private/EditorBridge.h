@@ -99,6 +99,11 @@ private:
 	TSharedRef<FJsonObject> BuildCompileErrorsResult(const TSharedPtr<FJsonObject>& Params) const;
 	TSharedRef<FJsonObject> BuildInspectAssetLiveResult(const FString& AssetPath) const;
 	TSharedRef<FJsonObject> BuildBlueprintGraphSelectionResult() const;
+	bool TryMoveBlueprintNodeResult(
+		const TSharedPtr<FJsonObject>& Params,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage);
 	TSharedRef<FJsonObject> BuildBlueprintGraphLayoutPreflightResult() const;
 	TSharedRef<FJsonObject> BuildFocusedBlueprintGraphContextResult() const;
 	bool TryBuildBlueprintGraphLayoutProjectionResult(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sqlite3
 from typing import Any, Literal
 
@@ -8,6 +9,28 @@ from .animation_scale_fix_batch import AnimationScaleFixBatchService
 from .batch_recovery import BatchRecoveryService
 from .bounded_batch import BoundedBatchService
 from .checkpoint_sets import CheckpointSetService
+
+_MAX_NODE_MOVE_COORDINATE = 1_000_000
+_CANONICAL_GUID = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+)
+
+
+def _is_exact_game_object_path(value: object) -> bool:
+    """True only for one exact /Game Package.Object Object Path."""
+    if not isinstance(value, str) or not value.startswith("/Game/"):
+        return False
+    if len(value) > 512 or "\\" in value or ":" in value or ".." in value:
+        return False
+    if any(ord(character) < 32 for character in value):
+        return False
+    package_path, separator, object_name = value.rpartition(".")
+    if not separator or not object_name or "/" in object_name:
+        return False
+    if "." in package_path:
+        # A second dot means an Object Path sub-path, not one exact asset.
+        return False
+    return package_path.startswith("/Game/") and not package_path.endswith("/")
 
 
 def register_workflow_tools(
@@ -941,6 +964,94 @@ def register_workflow_tools(
             return workflow_service.refresh_asset_index(asset_path, mode=mode)
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_refresh_asset_index", exc, read_only=False)
+
+    @server.tool(annotations=destructive_annotations)
+    def ue_move_blueprint_node(
+        asset_path: str,
+        graph_guid: str,
+        node_guid: str,
+        x: int,
+        y: int,
+        expected_x: int,
+        expected_y: int,
+        expected_dirty: bool,
+    ) -> dict[str, Any]:
+        """Move one already-open, clean Blueprint node by GUID; never save, compile, or launch Unreal."""
+        try:
+            if not workflow_service.config.commit_enabled:
+                raise WorkflowError(
+                    "node-move-disabled",
+                    "Node movement requires explicit startup authorization of Commit tools.",
+                )
+            if workflow_service.live_editor_service is None:
+                raise WorkflowError(
+                    "live-editor-required",
+                    "Node movement requires the connected, running Editor Bridge.",
+                )
+            if type(expected_dirty) is not bool:
+                raise WorkflowError(
+                    "node-move-invalid-parameters",
+                    "expected_dirty must be a boolean.",
+                )
+            if expected_dirty:
+                raise WorkflowError(
+                    "node-move-dirty-ownership-unproven",
+                    "Only the first clean-to-dirty move is supported; the Bridge cannot prove "
+                    "that this session owns an already-dirty package. Save or revert the "
+                    "Blueprint, then move from a clean package.",
+                )
+            if not _is_exact_game_object_path(asset_path):
+                raise WorkflowError(
+                    "node-move-invalid-parameters",
+                    "asset_path must be one exact /Game Package.Object Object Path.",
+                )
+            for label, value in (("graph_guid", graph_guid), ("node_guid", node_guid)):
+                if not isinstance(value, str) or _CANONICAL_GUID.fullmatch(value) is None:
+                    raise WorkflowError(
+                        "node-move-invalid-parameters",
+                        f"{label} must be one canonical lowercase hyphenated GUID.",
+                    )
+            for label, value in (
+                ("x", x),
+                ("y", y),
+                ("expected_x", expected_x),
+                ("expected_y", expected_y),
+            ):
+                if (
+                    type(value) is not int
+                    or abs(value) > _MAX_NODE_MOVE_COORDINATE
+                ):
+                    raise WorkflowError(
+                        "node-move-coordinate-invalid",
+                        f"{label} must be an integer in "
+                        f"[-{_MAX_NODE_MOVE_COORDINATE}, {_MAX_NODE_MOVE_COORDINATE}].",
+                    )
+            result = workflow_service.live_editor_service.call_method(
+                "editor.moveBlueprintNode",
+                {
+                    "assetPath": asset_path,
+                    "graphGuid": graph_guid,
+                    "nodeGuid": node_guid,
+                    "x": x,
+                    "y": y,
+                    "expectedX": expected_x,
+                    "expectedY": expected_y,
+                    "expectedDirty": expected_dirty,
+                },
+            )
+            return {
+                "schemaVersion": "1.0",
+                "tool": "ue_move_blueprint_node",
+                "ok": True,
+                "mode": "ResidentEditor",
+                "readOnly": False,
+                "childUnrealProcessCount": 0,
+                "saved": False,
+                "compiled": False,
+                "result": result,
+            }
+        except (WorkflowError, ValueError, RuntimeError, OSError) as exc:
+            return error_response("ue_move_blueprint_node", exc, read_only=False)
 
     @server.tool(annotations=destructive_annotations)
     def ue_save_authorized_asset(
