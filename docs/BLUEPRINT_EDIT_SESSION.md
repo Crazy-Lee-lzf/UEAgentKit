@@ -213,7 +213,9 @@ This slice **does not** prevent a person, another Editor, or another C++ plugin
 from editing the same graph. `exclusiveUI` and `humanEditingBlocked` are
 `false`, and `requiresUserNotEdit` is `true`: the user must be asked, in the
 Agent's own words, not to edit the graph until the session is ended. Nothing in
-the code, outputs or tests claims otherwise.
+the code, outputs or tests claims otherwise. See
+[BLUEPRINT_UI_EDIT_GATE_PLAN.md](BLUEPRINT_UI_EDIT_GATE_PLAN.md) for the API
+assessment and the native acceptance plan; nothing in that plan is implemented.
 
 A structural (content) fingerprint is **not** ownership. Specifically:
 
