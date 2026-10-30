@@ -104,6 +104,11 @@ private:
 		TSharedPtr<FJsonObject>& OutResult,
 		FString& OutErrorCode,
 		FString& OutErrorMessage);
+	bool TryMoveBlueprintNodesResult(
+		const TSharedPtr<FJsonObject>& Params,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage);
 	TSharedRef<FJsonObject> BuildBlueprintGraphLayoutPreflightResult() const;
 	TSharedRef<FJsonObject> BuildFocusedBlueprintGraphContextResult() const;
 	bool TryBuildBlueprintGraphLayoutProjectionResult(

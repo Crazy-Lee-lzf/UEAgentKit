@@ -11,6 +11,8 @@ from .bounded_batch import BoundedBatchService
 from .checkpoint_sets import CheckpointSetService
 
 _MAX_NODE_MOVE_COORDINATE = 1_000_000
+_MAX_NODE_MOVE_BATCH = 128
+_NODE_MOVE_ENTRY_FIELDS = frozenset({"nodeGuid", "expectedX", "expectedY", "x", "y"})
 _CANONICAL_GUID = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 )
@@ -31,6 +33,73 @@ def _is_exact_game_object_path(value: object) -> bool:
         # A second dot means an Object Path sub-path, not one exact asset.
         return False
     return package_path.startswith("/Game/") and not package_path.endswith("/")
+
+
+def _normalize_node_move_batch(nodes: object) -> list[dict[str, Any]]:
+    """Validate one exact node-move batch without touching the Editor."""
+    if not isinstance(nodes, list):
+        raise WorkflowError(
+            "node-move-batch-invalid-parameters",
+            "nodes must be a list of node move entries.",
+        )
+    if not nodes:
+        raise WorkflowError(
+            "node-move-batch-invalid-parameters",
+            "nodes must contain at least one entry.",
+        )
+    if len(nodes) > _MAX_NODE_MOVE_BATCH:
+        raise WorkflowError(
+            "node-move-batch-limit-exceeded",
+            f"nodes must contain at most {_MAX_NODE_MOVE_BATCH} entries.",
+        )
+    normalized: list[dict[str, Any]] = []
+    seen_guids: set[str] = set()
+    for index, entry in enumerate(nodes):
+        if not isinstance(entry, dict) or set(entry) != _NODE_MOVE_ENTRY_FIELDS:
+            raise WorkflowError(
+                "node-move-batch-invalid-parameters",
+                f"nodes[{index}] must contain exactly nodeGuid, expectedX, "
+                "expectedY, x, y.",
+            )
+        node_guid = entry["nodeGuid"]
+        if (
+            not isinstance(node_guid, str)
+            or _CANONICAL_GUID.fullmatch(node_guid) is None
+        ):
+            raise WorkflowError(
+                "node-move-batch-invalid-parameters",
+                f"nodes[{index}].nodeGuid must be one canonical lowercase "
+                "hyphenated GUID.",
+            )
+        if node_guid in seen_guids:
+            raise WorkflowError(
+                "node-move-batch-duplicate-node",
+                f"nodes[{index}] repeats nodeGuid {node_guid}.",
+            )
+        seen_guids.add(node_guid)
+        for key in ("expectedX", "expectedY", "x", "y"):
+            value = entry[key]
+            if (
+                type(value) is not int
+                or abs(value) > _MAX_NODE_MOVE_COORDINATE
+            ):
+                raise WorkflowError(
+                    "node-move-batch-coordinate-invalid",
+                    f"nodes[{index}].{key} must be an integer in "
+                    f"[-{_MAX_NODE_MOVE_COORDINATE}, {_MAX_NODE_MOVE_COORDINATE}].",
+                )
+        # Overlapping node positions are legal in a UE graph, so two entries may
+        # legitimately share one destination; only duplicate GUIDs are invalid.
+        normalized.append(
+            {
+                "nodeGuid": node_guid,
+                "expectedX": entry["expectedX"],
+                "expectedY": entry["expectedY"],
+                "x": entry["x"],
+                "y": entry["y"],
+            }
+        )
+    return normalized
 
 
 def register_workflow_tools(
@@ -1052,6 +1121,60 @@ def register_workflow_tools(
             }
         except (WorkflowError, ValueError, RuntimeError, OSError) as exc:
             return error_response("ue_move_blueprint_node", exc, read_only=False)
+
+    @server.tool(annotations=destructive_annotations)
+    def ue_move_blueprint_nodes(
+        asset_path: str,
+        graph_guid: str,
+        nodes: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Atomically move up to 128 nodes in one open, clean Blueprint graph; never save, compile, or launch Unreal."""
+        try:
+            if not workflow_service.config.commit_enabled:
+                raise WorkflowError(
+                    "node-move-disabled",
+                    "Node movement requires explicit startup authorization of Commit tools.",
+                )
+            if workflow_service.live_editor_service is None:
+                raise WorkflowError(
+                    "live-editor-required",
+                    "Node movement requires the connected, running Editor Bridge.",
+                )
+            if not _is_exact_game_object_path(asset_path):
+                raise WorkflowError(
+                    "node-move-batch-invalid-parameters",
+                    "asset_path must be one exact /Game Package.Object Object Path.",
+                )
+            if (
+                not isinstance(graph_guid, str)
+                or _CANONICAL_GUID.fullmatch(graph_guid) is None
+            ):
+                raise WorkflowError(
+                    "node-move-batch-invalid-parameters",
+                    "graph_guid must be one canonical lowercase hyphenated GUID.",
+                )
+            normalized = _normalize_node_move_batch(nodes)
+            result = workflow_service.live_editor_service.call_method(
+                "editor.moveBlueprintNodes",
+                {
+                    "assetPath": asset_path,
+                    "graphGuid": graph_guid,
+                    "nodes": normalized,
+                },
+            )
+            return {
+                "schemaVersion": "1.0",
+                "tool": "ue_move_blueprint_nodes",
+                "ok": True,
+                "mode": "ResidentEditor",
+                "readOnly": False,
+                "childUnrealProcessCount": 0,
+                "saved": False,
+                "compiled": False,
+                "result": result,
+            }
+        except (WorkflowError, ValueError, RuntimeError, OSError) as exc:
+            return error_response("ue_move_blueprint_nodes", exc, read_only=False)
 
     @server.tool(annotations=destructive_annotations)
     def ue_save_authorized_asset(

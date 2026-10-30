@@ -204,6 +204,7 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_get_asset_state", "workflow", "read"),
     ToolDefinition("ue_refresh_asset_index", "workflow", "planning"),
     ToolDefinition("ue_move_blueprint_node", "workflow", "destructive"),
+    ToolDefinition("ue_move_blueprint_nodes", "workflow", "destructive"),
     ToolDefinition("ue_save_authorized_asset", "workflow", "destructive"),
     ToolDefinition("ue_rollback_patch", "workflow", "destructive"),
     ToolDefinition("ue_create_change_set", "workflow", "planning"),

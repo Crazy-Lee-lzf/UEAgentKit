@@ -68,6 +68,7 @@ namespace UEAgentKitEditorBridgePrivate
 		TEXT("editor.inspectAssetLive"),
 		TEXT("editor.getBlueprintGraphSelection"),
 		TEXT("editor.moveBlueprintNode"),
+		TEXT("editor.moveBlueprintNodes"),
 		TEXT("editor.getBlueprintGraphLayoutPreflight"),
 		TEXT("editor.getFocusedBlueprintGraphContext"),
 		TEXT("editor.getFocusedBlueprintGraphLayoutProjection"),
@@ -870,6 +871,14 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 		FString ErrorCode, ErrorMessage;
 		SendActionResult(
 			TryMoveBlueprintNodeResult(Params, Result, ErrorCode, ErrorMessage),
+			Result, ErrorCode, ErrorMessage);
+	}
+	else if (Method == TEXT("editor.moveBlueprintNodes"))
+	{
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode, ErrorMessage;
+		SendActionResult(
+			TryMoveBlueprintNodesResult(Params, Result, ErrorCode, ErrorMessage),
 			Result, ErrorCode, ErrorMessage);
 	}
 	else if (Method == TEXT("editor.getBlueprintGraphLayoutPreflight"))
