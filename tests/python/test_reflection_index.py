@@ -501,6 +501,26 @@ class ReflectionIndexTests(unittest.TestCase):
                 0,
             )
 
+    def test_duplicate_child_stable_id_is_reported_and_rolled_back(self) -> None:
+        # DEF-12: a repeated reflected function/property must not rely on the
+        # raw SQLite UNIQUE failure (or a silent overwrite) for detection.
+        record = self._type_record()
+        duplicate = dict(record["functions"][0])
+        record["functions"] = [dict(record["functions"][0]), duplicate]
+        self._write_export(types=[record])
+
+        with open_database(self.database_path) as connection:
+            result = index_reflection_export(connection, self.export_path)
+            self.assertEqual(len(result.errors), 1)
+            self.assertIn("Duplicate reflected function stableId", result.errors[0])
+            self.assertEqual(result.matched_types, 0)
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) FROM symbols WHERE owner_symbol_id = 'cpp:type:AHero'"
+                ).fetchone()[0],
+                0,
+            )
+
     def test_project_identity_mismatch_is_rejected(self) -> None:
         self._write_export(project_name="OtherProject")
         with open_database(self.database_path) as connection:

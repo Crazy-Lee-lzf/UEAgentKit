@@ -1,0 +1,135 @@
+# P1 defect status (2026-10-31 slice)
+
+Branch: `feature/p1-node-move-defect-fix-20261030`. Scope: existing P1 write /
+save / index defects only; no new asset write domains, no UI-lock claim, no
+Editor launch. Status is per item: **fixed**, **limited**, or **not done**, with
+the evidence that exists in this worktree.
+
+## DEF-01 — ordinary Resident write/save must not cold-start; continuous editing must not need an MCP restart
+
+Status: **limited / not fixed** (root cause located; the fix is a product-policy
+change plus native evidence).
+
+Evidence found:
+
+- A normal authorized save (`save_authorized_asset`, both the immediate and
+  checkpoint Commit branches, `src/ue_agent_kit/workflow_verify.py`) performs
+  "independent verification" by calling `_export_refresh_candidate`
+  (`src/ue_agent_kit/workflow_batch.py:44`), which runs `RunExport.ps1` /
+  `RunAssetCatalog.ps1` through `_run_script`
+  (`src/ue_agent_kit/workflow_common.py:1242`). Those scripts drive an offline
+  Unreal export, i.e. a commandlet process, inside the save path. The engine
+  binary is also required by `_validate_config`
+  (`workflow_common.py:1087`).
+- The only hard "restart this MCP session" gate is
+  `_assert_session_current` (`workflow_common.py:1234`), raised after
+  `ue_refresh_asset_index` switched the snapshot generation
+  (`_refresh_applied`). Plain live writes and saves do not set it.
+
+Why it is not changed here:
+
+- Removing the automatic export from Save silently downgrades the existing
+  `verified=true` contract that other flows (change sets, rollback manifests,
+  trust verdicts) consume; the plan forbids "misreporting strong verification"
+  in either direction. The correct change is to split resident evidence
+  (`verified=false`, `verificationKind=resident-save`) from an explicit offline
+  verification action, which changes public response semantics and needs review
+  plus a native run.
+- The restart gate after an index refresh is intentional generation consistency,
+  not an ordinary-editing blocker; loosening it would allow mixing snapshot
+  generations.
+
+Proposed next slice: make Save emit resident-only evidence and require an
+explicit `ue_verify_live_write` (offline) for `verified=true`, then test that a
+plain apply+save never launches a commandlet and that ten consecutive batches
+need no MCP restart. Until then, callers must expect the save verification step
+to run an offline export.
+
+## DEF-05 — Material / DataTable writers lack Fast Verify
+
+Status: **limited / not fixed** (precise gap; the fix requires new C++ read APIs
+and a native build).
+
+Evidence:
+
+- `TryVerifyAssetPropertyLiveFastResult`
+  (`Plugin/UEAgentKit/Source/UEAgentKitEditor/Private/EditorBridgeWriteHandlers.cpp`)
+  supports only `setAssetProperty`, `setVariableDefault`,
+  `setComponentProperty`, `setPinDefault`; every other registered operation
+  returns `live-fast-verify-operation-unsupported`.
+- Material and DataTable operations are registered and writable
+  (`LiveWriteMaterialOperations.cpp`, `LiveWriteDataTableOperations.cpp`), but
+  their target resolution/read helpers are file-local; there is no stateless
+  read entry point the fast-verify handler can reuse.
+
+Not done because: adding those read entry points touches three native files and
+cannot be compiled or exercised in this environment (no UE 5.6 install, no
+Editor allowed). Shipping uncompiled C++ that claims Fast Verify for these ops
+would be worse than the current fail-closed error.
+
+Interim behaviour is honest: Fast Verify on a Material/DataTable operation fails
+with a stable unsupported error; it is never reported as verified. Use the full
+`ue_verify_live_write` path for those operations.
+
+Next slice: expose `ReadLiveMaterialParameterValue` / `ReadLiveDataTableValue`
+(next to the existing writers), branch on them in fast verify, and add native
+tests for Scalar/Vector/Texture/StaticSwitch plus cell/row-field reads.
+
+## DEF-10 — Save returns a stale Revision
+
+Status: **fixed**.
+
+- Both authorized-save Commit branches now return the canonical post-save
+  Revision: `revision` (= `afterRevision`), `revisionSource`
+  (`post-save-disk-sha256`), `revisionCapturedAtUtc`, alongside the existing
+  `beforeRevision` / `afterRevision` / `revisionChanged`. Callers no longer have
+  to guess between the pre-save Preview revision, the frozen index revision, and
+  the post-save file hash.
+- Test: `tests/python/test_agent_workflow.py` asserts `revision` equals the
+  post-save hash, differs from the pre-save hash, and carries the source/timestamp.
+
+## DEF-12 — duplicate stable_id / duplicate CLI args / index silent ignore
+
+Status: **partially fixed** (duplicate reflection identity fixed; the other two
+recorded as limited/not done).
+
+### 12a Duplicate reflection stable_id — fixed
+
+- `reflection_index.py` already rejected duplicate type ids and duplicate
+  parameter ids, but a repeated function/property in one export fell through to
+  the raw SQLite `UNIQUE(stable_id)` error (or, after a future schema change,
+  could overwrite). `_insert_child_symbol` now checks a per-type seen-set and
+  raises `Duplicate reflected <kind> stableId: ...`; the existing savepoint then
+  rolls the whole type back and records the error in `result.errors`.
+- Test: `tests/python/test_reflection_index.py`
+  `test_duplicate_child_stable_id_is_reported_and_rolled_back` (no partial rows,
+  `matched_types == 0`).
+
+### 12b Duplicate CLI parameters — not done
+
+- `argparse` defaults to last-wins for repeated `store` options
+  (`src/ue_agent_kit/cli.py`); a duplicated `--database`, `--project-key` or
+  similar silently takes the final value. Rejecting duplicates requires a shared
+  custom `Action` applied across every subcommand, plus CLI error-message tests;
+  this was not attempted in this slice to avoid a broad parser refactor.
+
+### 12c Index silent ignore — limited
+
+- Candidate silent paths: the fallback asset-path map skips unreadable/invalid
+  JSON (`indexer.py:155`), and schema checks skip migration statements whose
+  SQLite error text is "unrecognized"/"syntax" (`database.py:151`). No path was
+  found that silently drops committed index rows or duplicates a stable id, so
+  no code was changed; the next step is to count and report those skips instead
+  of only `continue`.
+
+## Test evidence for this slice
+
+Python 3.12, `unittest` in `tests/python`, no Editor launched:
+
+- `test_blueprint_edit_session_mcp` 16, `test_move_blueprint_nodes_mcp` 14,
+  `test_node_move_mcp` 10, `test_tool_registry` 4, `test_mcp_server` 20,
+  `test_agent_workflow` 74, `test_editor_bridge` 27, `test_reflection_index` 12
+  — **177 passed**.
+
+Not verified: UE C++ compilation, the real save/verify commandlet path, and any
+native behaviour behind DEF-01/DEF-05.

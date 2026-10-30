@@ -2912,6 +2912,13 @@ class AgentWorkflowTests(unittest.TestCase):
         )
         self.assertEqual(saved["beforeRevision"], fresh_revision)
         self.assertEqual(saved["afterRevision"], saved_revision)
+        # DEF-10: the save response must expose the post-save Revision as the
+        # canonical `revision`, not a Preview/index Revision from before the save.
+        self.assertEqual(saved["revision"], saved_revision)
+        self.assertNotEqual(saved["revision"], fresh_revision)
+        self.assertEqual(saved["revisionSource"], "post-save-disk-sha256")
+        self.assertTrue(saved["revisionCapturedAtUtc"])
+        self.assertTrue(saved["revisionChanged"])
 
         promoted = service.create_authorized_save_rollback_manifest(
             preview["saveReceipt"],

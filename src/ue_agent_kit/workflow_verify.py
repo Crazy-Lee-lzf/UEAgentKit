@@ -512,6 +512,7 @@ class WorkflowVerifyMixin:
             raise WorkflowError("authorized-save-report-invalid", "The Editor did not confirm the exact saved asset.")
 
         after_revision = "sha256:" + sha256_file(package_file)
+        revision_captured_at = utc_now_iso()
         checkpoint.after_disk_revision = after_revision
         checkpoint.saved_at_utc = utc_now_iso()
         checkpoint.save_receipt = save_receipt
@@ -579,6 +580,10 @@ class WorkflowVerifyMixin:
             "changeSetId": change_set_id,
             "beforeRevision": before_revision,
             "afterRevision": after_revision,
+            # Canonical post-save Revision for the checkpoint save as well.
+            "revision": after_revision,
+            "revisionSource": "post-save-disk-sha256",
+            "revisionCapturedAtUtc": revision_captured_at,
             "revisionChanged": before_revision != after_revision,
             "backupManifestId": manifest_path.name,
             "editorSessionId": editor_session_id,
@@ -892,6 +897,7 @@ class WorkflowVerifyMixin:
                 raise WorkflowError("authorized-save-report-invalid", "The Editor did not confirm the exact saved asset.")
 
             after_revision = "sha256:" + sha256_file(package_file)
+            revision_captured_at = utc_now_iso()
             verification_root = self._safe_work_path("authorized-save", save_receipt, "verify")
             candidate = self._export_refresh_candidate(
                 asset_path,
@@ -946,6 +952,11 @@ class WorkflowVerifyMixin:
                 "verified": True,
                 "beforeRevision": before_revision,
                 "afterRevision": after_revision,
+                # Canonical post-save Revision: callers must read `revision`
+                # instead of a Preview/index Revision that predates the save.
+                "revision": after_revision,
+                "revisionSource": "post-save-disk-sha256",
+                "revisionCapturedAtUtc": revision_captured_at,
                 "revisionChanged": before_revision != after_revision,
                 "backupManifestId": manifest_path.name,
                 "editorSessionId": editor_session_id,
