@@ -34,11 +34,14 @@ class UEdGraph;
  *    active session only authorizes Agent batches, it does not block a person.
  *    The caller must ask the user not to edit while a session is open and must
  *    check `exclusiveUI=false` / `humanEditingBlocked=false`.
- *  - Rollback is NOT implemented in this slice.  Ending with mode=Rollback is
- *    refused (fail closed, session untouched) with
- *    `blueprint-edit-session-rollback-unsupported`; the only supported end mode
- *    is `keep`, which releases ownership without writing, saving or compiling.
- *    Per-batch Undo remains the recovery mechanism.
+ *  - Rollback is implemented for this session only: it restores every node
+ *    position captured at begin, while the package is still unsaved, the same
+ *    graph/Blueprint objects are alive, and the live content fingerprint still
+ *    equals the session's expected state.  It uses one C++
+ *    `FScopedTransaction` (`ApplyNodeMoveBatch`) with a full read-back, and it
+ *    refuses before writing when any proof fails, so it never overwrites a
+ *    user edit.  It is not a cross-save-point, crash-resilient, or asset-level
+ *    revert, and it is not Native-verified in this slice.
  */
 namespace UEAgentKitBlueprintEdit
 {
@@ -66,10 +69,12 @@ namespace UEAgentKitBlueprintEdit
 	struct FEditSessionEndInfo
 	{
 		FString Mode;
-		/** Always false in this slice: rollback is refused, never performed. */
+		/** True only when every node position equals the position captured at begin. */
 		bool bRolledBack = false;
-		/** Always 0 in this slice: no position is restored. */
+		/** Nodes whose position was actually written back by the rollback transaction. */
 		int32 RestoredNodeCount = 0;
+		/** True when rollback opened the one C++ transaction; false for a no-op rollback. */
+		bool bRestoreTransactionOpened = false;
 		bool bPackageDirtyAfter = false;
 		bool bFingerprintMatchedExpected = false;
 		int32 BatchCount = 0;
@@ -138,11 +143,18 @@ namespace UEAgentKitBlueprintEdit
 			FString& OutErrorMessage);
 
 		/**
-		 * End the session.  `keep` releases ownership only: it never writes the
-		 * asset, saves or compiles.  `rollback` is not implemented in this slice
-		 * and fails closed with `blueprint-edit-session-rollback-unsupported`
-		 * while leaving the session active, so the caller must either Undo each
-		 * batch explicitly or end with `keep`.
+		 * End the session.
+		 *
+		 * `keep` releases ownership only: it never writes the asset, saves or
+		 * compiles.  `rollback` first proves the token, Bridge session/process,
+		 * bound objects, asset path/GUID, package Dirty state, node set,
+		 * positions and content fingerprint, then restores every node position
+		 * captured at begin inside one `FScopedTransaction` (via
+		 * `ApplyNodeMoveBatch`, which reads every position back and restores the
+		 * pre-write state on any failure).  A validation failure refuses before
+		 * any write and leaves the session active; a fully no-op rollback opens
+		 * no transaction.  Rollback is limited to position-only edits made by
+		 * this session in the same unsaved package.
 		 */
 		bool End(
 			const FString& Token,

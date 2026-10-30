@@ -1,5 +1,6 @@
 #include "BlueprintEditSession.h"
 
+#include "BlueprintEditBatch.h"
 #include "BlueprintGraphLayoutApply.h"
 
 #include "EdGraph/EdGraph.h"
@@ -543,43 +544,168 @@ namespace UEAgentKitBlueprintEdit
 				TEXT("blueprint-edit-session-token-invalid"),
 				TEXT("The edit session token does not match the active session."));
 		}
-		if (!BridgeSessionId.Equals(Impl->BridgeSessionId, ESearchCase::CaseSensitive))
+		if (!BridgeSessionId.Equals(Impl->BridgeSessionId, ESearchCase::CaseSensitive)
+			|| Impl->ProcessId != FPlatformProcess::GetCurrentProcessId())
 		{
 			return Fail(
 				OutErrorCode,
 				OutErrorMessage,
 				TEXT("blueprint-edit-session-editor-session-mismatch"),
-				TEXT("The Editor Bridge session no longer matches the one that began this edit session."));
+				TEXT("The Editor Bridge session or process no longer matches the one that began this edit session."));
 		}
 
 		OutInfo.BatchCount = Impl->BatchCount;
 		OutInfo.MovedBatchCount = Impl->MovedBatchCount;
 
+		UBlueprint* BoundBlueprint = Impl->Blueprint.Get();
+		UEdGraph* BoundGraph = Impl->Graph.Get();
+		const bool bTargetStillBound =
+			BoundBlueprint != nullptr
+			&& BoundGraph != nullptr
+			&& IsGraphOwnedByBlueprint(BoundBlueprint, BoundGraph)
+			&& BoundGraph->GraphGuid == Impl->GraphGuid;
+
 		if (Mode == EEditSessionEndMode::Rollback)
 		{
-			// Position restore is deliberately not implemented in this slice.
-			// A truthful rollback needs its own strong pre-write proof, one
-			// restore transaction and a read-back of every node; without a
-			// Native test it must not perform a partial restore.  Per-batch
-			// Undo remains the supported recovery mechanism.  The session stays
-			// active so the caller can still Undo explicitly or end with keep.
-			OutInfo.bRolledBack = false;
-			OutInfo.RestoredNodeCount = 0;
-			return Fail(
+			// Every proof below must hold before the first write; a failure keeps
+			// the session active and leaves every node untouched.  The restore
+			// itself reuses ApplyNodeMoveBatch, which opens exactly one
+			// FScopedTransaction, reads every position back and restores the
+			// pre-write state (positions, Blueprint status, Dirty bit) on any
+			// mismatch instead of leaving a half-applied rollback.
+			if (!bTargetStillBound)
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("blueprint-edit-session-rollback-target-changed"),
+					TEXT("The bound Blueprint or graph was replaced, closed or reloaded; rollback refuses to guess a target."));
+			}
+			if (!PackageDirtyMatches(
+				BoundBlueprint,
+				Impl->bExpectedPackageDirty,
+				OutErrorCode,
+				OutErrorMessage))
+			{
+				OutErrorCode = TEXT("blueprint-edit-session-rollback-") + OutErrorCode.Mid(
+					FString(TEXT("blueprint-edit-session-")).Len());
+				return false;
+			}
+
+			TMap<FGuid, FIntPoint> LivePositions;
+			if (!ReadNodePositions(BoundGraph, LivePositions, OutErrorCode, OutErrorMessage))
+			{
+				return false;
+			}
+			if (LivePositions.Num() != Impl->ExpectedPositions.Num())
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("blueprint-edit-session-rollback-node-set-changed"),
+					TEXT("The live graph node set changed outside this edit session; rollback refuses to restore a different graph."));
+			}
+			for (const TPair<FGuid, FIntPoint>& Expected : Impl->ExpectedPositions)
+			{
+				const FIntPoint* Live = LivePositions.Find(Expected.Key);
+				if (Live == nullptr || *Live != Expected.Value)
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("blueprint-edit-session-rollback-node-position-conflict"),
+						FString::Printf(
+							TEXT("Node %s is not at the position this edit session last recorded; a manual edit, Undo/Redo or another writer changed the graph."),
+							*Expected.Key.ToString(EGuidFormats::DigitsWithHyphensLower)));
+				}
+			}
+			const FString LiveFingerprint =
+				UEAgentKitBlueprintGraphLayout::ComputeGraphContentFingerprint(BoundGraph);
+			if (LiveFingerprint.IsEmpty()
+				|| !LiveFingerprint.Equals(Impl->ExpectedFingerprint, ESearchCase::CaseSensitive))
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("blueprint-edit-session-rollback-fingerprint-conflict"),
+					TEXT("The live graph content no longer matches this edit session's expected state; rollback refuses to overwrite it."));
+			}
+			OutInfo.bFingerprintMatchedExpected = true;
+
+			TArray<FNodeMoveRequest> RestoreRequests;
+			RestoreRequests.Reserve(Impl->ExpectedPositions.Num());
+			for (const TPair<FGuid, FIntPoint>& Expected : Impl->ExpectedPositions)
+			{
+				const FIntPoint* Initial = Impl->InitialPositions.Find(Expected.Key);
+				if (Initial == nullptr)
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("blueprint-edit-session-rollback-state-incomplete"),
+						TEXT("The edit session lost the initial position record; rollback cannot restore exactly."));
+				}
+				FNodeMoveRequest Request;
+				Request.NodeGuid = Expected.Key;
+				Request.ExpectedX = Expected.Value.X;
+				Request.ExpectedY = Expected.Value.Y;
+				Request.ToX = Initial->X;
+				Request.ToY = Initial->Y;
+				RestoreRequests.Add(Request);
+			}
+
+			TArray<FNodeMoveResult> RestoreResults;
+			bool bRestoreChanged = false;
+			if (!ApplyNodeMoveBatch(
+				BoundBlueprint,
+				BoundGraph,
+				RestoreRequests,
+				RestoreResults,
+				bRestoreChanged,
 				OutErrorCode,
 				OutErrorMessage,
-				TEXT("blueprint-edit-session-rollback-unsupported"),
-				TEXT("Session rollback is not implemented in this slice; use the per-batch Undo transaction or end with mode=keep."));
+				EPackageDirtyGate::AllowSessionOwnedDirty))
+			{
+				const FString Prefix(TEXT("node-move-batch-"));
+				if (OutErrorCode.StartsWith(Prefix, ESearchCase::CaseSensitive))
+				{
+					OutErrorCode =
+						FString(TEXT("blueprint-edit-session-rollback-"))
+						+ OutErrorCode.Mid(Prefix.Len());
+				}
+				else if (OutErrorCode.IsEmpty())
+				{
+					OutErrorCode = TEXT("blueprint-edit-session-rollback-failed");
+				}
+				return false;
+			}
+
+			int32 ChangedCount = 0;
+			for (const FNodeMoveResult& Result : RestoreResults)
+			{
+				if (Result.bChanged)
+				{
+					++ChangedCount;
+				}
+			}
+			// A no-op restore (net-zero session) opens no transaction and reports
+			// zero restored nodes; the positions already equal the initial ones.
+			OutInfo.bRolledBack = true;
+			OutInfo.RestoredNodeCount = ChangedCount;
+			OutInfo.bRestoreTransactionOpened = bRestoreChanged;
 		}
 
 		// Keep only releases ownership.  It never writes, saves or compiles.
-		if (UEdGraph* BoundGraph = Impl->Graph.Get())
+		if (bTargetStillBound)
 		{
 			const FString LiveFingerprint =
 				UEAgentKitBlueprintGraphLayout::ComputeGraphContentFingerprint(BoundGraph);
-			OutInfo.bFingerprintMatchedExpected =
-				!LiveFingerprint.IsEmpty()
-				&& LiveFingerprint.Equals(Impl->ExpectedFingerprint, ESearchCase::CaseSensitive);
+			if (Mode == EEditSessionEndMode::Keep)
+			{
+				OutInfo.bFingerprintMatchedExpected =
+					!LiveFingerprint.IsEmpty()
+					&& LiveFingerprint.Equals(Impl->ExpectedFingerprint, ESearchCase::CaseSensitive);
+			}
 		}
 		UPackage* Package = Impl->Blueprint.IsValid()
 			? Impl->Blueprint->GetOutermost()

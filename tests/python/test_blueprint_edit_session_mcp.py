@@ -71,7 +71,10 @@ class _FakeLiveEditorService:
                 "humanEditingBlocked": False,
                 "requiresUserNotEdit": True,
                 "experimental": True,
-                "rollbackSupported": False,
+                "singleTransactionPerBatch": True,
+                "rollbackSupported": True,
+                "rollbackStatus": "supported-position-only-unsaved-same-graph",
+                "rollbackScope": "positions-captured-at-begin-while-unsaved",
                 "saved": False,
                 "compiled": False,
                 "evidenceLevel": "same-process",
@@ -82,8 +85,9 @@ class _FakeLiveEditorService:
                 "action": "end-blueprint-edit-session",
                 "mode": params.get("mode", "keep"),
                 "ended": True,
-                "rolledBack": False,
-                "restoredNodeCount": 0,
+                "rolledBack": params.get("mode") == "rollback",
+                "restoredNodeCount": 4 if params.get("mode") == "rollback" else 0,
+                "restoreTransactionOpened": params.get("mode") == "rollback",
                 "batchCount": 2,
                 "movedBatchCount": 2,
                 "packageDirtyAfter": True,
@@ -228,7 +232,12 @@ class BeginEditSessionTests(unittest.TestCase):
             ],
         )
         self.assertFalse(payload["result"]["exclusiveUI"])
-        self.assertFalse(payload["result"]["rollbackSupported"])
+        self.assertTrue(payload["result"]["requiresUserNotEdit"])
+        self.assertTrue(payload["result"]["rollbackSupported"])
+        self.assertEqual(
+            payload["result"]["rollbackScope"],
+            "positions-captured-at-begin-while-unsaved",
+        )
 
     def test_begin_requires_explicit_experimental_opt_in(self) -> None:
         live = _FakeLiveEditorService()
@@ -367,11 +376,30 @@ class EndEditSessionTests(unittest.TestCase):
             )
         self.assertEqual(live.calls, [])
 
-    def test_rollback_mode_is_forwarded_and_unsupported_error_propagates(self) -> None:
+    def test_rollback_mode_is_forwarded_and_reports_restore(self) -> None:
+        live = _FakeLiveEditorService()
+        server, _ = _register(live_editor_service=live)
+        payload = _call(
+            server, END_TOOL, edit_session_token=TOKEN, mode="rollback"
+        )
+        self.assertTrue(payload["ok"])
+        self.assertFalse(payload["saved"])
+        self.assertFalse(payload["compiled"])
+        self.assertFalse(payload["exclusiveUI"])
+        self.assertEqual(len(live.calls), 1)
+        self.assertEqual(live.calls[0][0], END_METHOD)
+        self.assertEqual(
+            live.calls[0][1], {"editSessionToken": TOKEN, "mode": "rollback"}
+        )
+        self.assertTrue(payload["result"]["rolledBack"])
+        self.assertEqual(payload["result"]["restoredNodeCount"], 4)
+        self.assertTrue(payload["result"]["restoreTransactionOpened"])
+
+    def test_rollback_refusal_error_propagates(self) -> None:
         live = _FakeLiveEditorService(
             error=LiveEditorError(
-                "blueprint-edit-session-rollback-unsupported",
-                "Session rollback is not implemented in this slice.",
+                "blueprint-edit-session-rollback-fingerprint-conflict",
+                "The live graph content no longer matches this edit session's expected state.",
             )
         )
         server, _ = _register(live_editor_service=live)
@@ -381,7 +409,7 @@ class EndEditSessionTests(unittest.TestCase):
         self.assertFalse(payload["ok"])
         self.assertEqual(
             payload["error"]["code"],
-            "blueprint-edit-session-rollback-unsupported",
+            "blueprint-edit-session-rollback-fingerprint-conflict",
         )
         self.assertNotIn("result", payload)
         self.assertEqual(len(live.calls), 1)
@@ -516,7 +544,8 @@ class EditSessionSourceContractTests(unittest.TestCase):
             "IsCanonicalEditSessionToken",
             "EditSessionTokenLength = 64",
             "EEditSessionEndMode",
-            "rollback-unsupported",
+            "bRestoreTransactionOpened",
+            "blueprint-edit-session-rollback-fingerprint-conflict",
         ):
             self.assertIn(required, header + cpp)
         self.assertIn(
@@ -527,9 +556,14 @@ class EditSessionSourceContractTests(unittest.TestCase):
         self.assertIn('TEXT("editor.beginBlueprintEditSession")', bridge)
         self.assertIn('TEXT("editor.endBlueprintEditSession")', bridge)
         self.assertIn("ComputeGraphContentFingerprint", cpp)
-        # Rollback must not silently exist: the manager contains no transaction
-        # write path in this slice, and the per-batch helper owns the only one.
-        self.assertNotIn("FScopedTransaction", cpp)
+        # Rollback reuses the per-batch helper: the helper owns the only
+        # transaction construction, so the manager cannot leave a half-applied
+        # restore or invent a second transaction path.
+        self.assertNotIn("FScopedTransaction Transaction(", cpp)
+        self.assertIn("ApplyNodeMoveBatch(", cpp)
+        self.assertIn(
+            "EPackageDirtyGate::AllowSessionOwnedDirty", cpp
+        )
         self.assertIn("FScopedTransaction", batch_cpp)
         self.assertIn("AllowSessionOwnedDirty", batch_header)
         self.assertIn("EPackageDirtyGate", batch_cpp)
@@ -546,6 +580,8 @@ class EditSessionSourceContractTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn('TEXT("exclusiveUI"), false', session_handler)
         self.assertIn('TEXT("humanEditingBlocked"), false', session_handler)
+        self.assertIn('TEXT("rollbackSupported"), true', session_handler)
+        self.assertIn('TEXT("restoreTransactionOpened")', session_handler)
         self.assertNotIn("RegisterInputPreProcessor", session_handler)
         self.assertNotIn("RegisterInputPreProcessor", cpp)
 

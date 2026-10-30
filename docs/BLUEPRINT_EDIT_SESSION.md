@@ -1,12 +1,16 @@
 # Blueprint edit sessions and batched node moves
 
 Status: **experimental**. This branch ships one atomic, position-only node move
-batch, plus an opt-in **continuous edit session** that lets an Agent apply
-several batches to the same already-dirty Blueprint without a Save between
-them. It still ships **no human/UI exclusivity lock** and **no session
-rollback**. Every session response says so explicitly:
-`exclusiveUI=false`, `humanEditingBlocked=false`,
-`requiresUserNotEdit=true`, `rollbackSupported=false`.
+batch, an opt-in **continuous edit session** that lets an Agent apply several
+batches to the same already-dirty Blueprint without a Save between them, and a
+**position-only session rollback** that restores the node positions captured at
+`begin` inside one transaction while the package is still unsaved. It still
+ships **no human/UI exclusivity lock**. Every session response says so
+explicitly: `exclusiveUI=false`, `humanEditingBlocked=false`,
+`requiresUserNotEdit=true`. Rollback is advertised as
+`rollbackSupported=true` with
+`rollbackStatus=supported-position-only-unsaved-same-graph`, and every claim
+below is limited to that scope.
 
 ## Shipped contract
 
@@ -79,9 +83,11 @@ following hold; otherwise nothing is bound and nothing is written:
 - `packageDirtyBefore=false`, `packageDirtyAfter=false`;
 - honesty fields: `exclusiveUI=false`, `humanEditingBlocked=false`,
   `requiresUserNotEdit=true`, `experimental=true`,
-  `singleTransactionPerBatch=true`, `rollbackSupported=false`,
-  `rollbackStatus=unsupported-in-this-slice`, `saved=false`, `compiled=false`,
-  `evidenceLevel=same-process`, `acceptanceEligible=false`.
+  `singleTransactionPerBatch=true`, `rollbackSupported=true`,
+  `rollbackStatus=supported-position-only-unsaved-same-graph`,
+  `rollbackScope=positions-captured-at-begin-while-unsaved`,
+  `saved=false`, `compiled=false`, `evidenceLevel=same-process`,
+  `acceptanceEligible=false`.
 
 The token is bound to this Bridge session id and this process id, plus the
 exact `assetPath`, `graphGuid`, Blueprint object, graph object and the content
@@ -132,27 +138,74 @@ Consequences:
 - `ue_end_blueprint_edit_session` with `mode=keep` releases ownership. It does
   not Save, Compile, or rewrite anything. Ending also reports `saved=false`,
   `compiled=false`, `exclusiveUI=false`, `humanEditingBlocked=false`,
-  `rollbackSupported=false`, the batch counters
+  `rollbackSupported=true`, the batch counters
   (`batchCount`/`movedBatchCount`), `fingerprintMatchedExpected` (computed from
-  the still-bound weak references at release time) and `packageDirtyAfter`.
+  the still-bound weak references at release time), `packageDirtyAfter` and, for
+  rollback, `restoreTransactionOpened`/`restoredNodeCount`.
 - Bridge `Stop` resets the manager, so a new Editor session always starts with
   no session and a fresh token.
 
-## Rollback: unavailable in this slice
+## Session rollback (position-only, same unsaved session)
 
-`mode=rollback` is intentionally **not implemented**. The handler forwards it,
-the manager refuses it before any write with
-`blueprint-edit-session-rollback-unsupported`, leaves the session active, and
-returns `rolledBack=false`, `restoredNodeCount=0`. There is no restore
-transaction, no cross-save-point history and no crash-resilient recovery. A
-truthful rollback needs its own strong pre-write proof, one restore transaction
-and a full read-back; without a Native test this slice must not attempt a
-partial restore. Recovery is the per-batch Undo transaction the user already
-owns, or `mode=keep` to release the session without touching the asset.
+`mode=rollback` restores the node positions captured at `begin` and then ends
+the session. It is deliberately narrow:
 
-Callers must not describe `begin`/`end` as providing rollback, and must not
-infer rollback from the presence of `EEditSessionEndMode`/`rollback` in the wire
-contract: those names exist so the refusal is explicit and machine-readable.
+- **Scope**: only `NodePosX`/`NodePosY` of nodes that existed at `begin` in the
+  same Blueprint + graph + Bridge process; no save, no compile, no asset-level
+  revert, no cross-save-point history, no crash resilience.
+- **Proof before the first write** (any failure refuses, writes nothing, keeps
+  the session active, returns a specific
+  `blueprint-edit-session-rollback-*` code): canonical token, Bridge session id,
+  Editor process id, live Blueprint/graph identity and ownership,
+  `UEdGraph::GraphGuid`, package Dirty bit equal to the session's expected bit,
+  node-set equality, every node at the position the last batch recorded, and the
+  live content fingerprint equal to the expected fingerprint.
+- **Restore**: reuses `ApplyNodeMoveBatch` with
+  `EPackageDirtyGate::AllowSessionOwnedDirty`, so exactly one
+  `FScopedTransaction` owns the whole restore, every position is read back, and
+  any read-back/Dirty confirmation failure restores the pre-rollback positions,
+  Blueprint status/dependency cache and Dirty flag and cancels the transaction.
+  A partially applied rollback cannot be reported as success.
+- **No-op**: a session whose net effect is zero (or that moved nothing) opens
+  no transaction and reports `rolledBack=true`, `restoreTransactionOpened=false`,
+  `restoredNodeCount=0` — the positions already equal the initial ones.
+- **Refusal is not recovery**: a refused rollback never calls `Cancel()` to
+  "undo" already applied UObject writes; the only writes happen inside the
+  helper, which restores them on failure. Per-batch Undo still exists for the
+  user independently.
+
+Because there is no eager invalidation hook, an outside edit is caught by these
+proofs at rollback time, not before. ABA (same content written back) remains
+undetectable, and a rollback that matches the expected fingerprint will proceed
+even if a human merely clicked in the graph without changing content.
+
+## Session invalidation rules (what is proven, when)
+
+There is **no eager callback** in this slice: the manager does not subscribe to
+`PostSaveAsset`, Undo/Redo, PIE or editor-close. Invalidation is proven
+lazily on the next token batch, on `end`, or on rollback, plus eagerly on
+Bridge `Stop`/restart (manager reset). This is intentional: an unverified
+delegate binding could fire at unsafe times, leak, or miss module shutdown.
+
+| Event | Detected by | Effect |
+| --- | --- | --- |
+| Manual node drag / pin or comment edit | node positions + content fingerprint + Dirty bit | batch refused (`*-node-position-conflict`, `*-fingerprint-conflict`) |
+| Undo / Redo (any batch or user action) | positions/fingerprint (and Dirty bit) | batch refused; rollback refused |
+| Save (user or other tool) | Dirty bit false vs expected true | batch refused (`*-package-dirty-changed`) |
+| Revert / reload of the package | weak object identity, node set, fingerprint, Dirty bit | batch/rollback refused (`*-target-changed`, `*-node-set-changed`) |
+| Blueprint compile rebuilding nodes/graphs | object identity / fingerprint / `GraphGuid` | refused (`*-target-changed`, `*-asset-mismatch`) |
+| Graph tab closed (object still loaded) | no focus requirement for token batches; object identity unchanged | session stays valid; a later batch still needs the handler's open/focused target checks |
+| PIE/SIE started | `GEditor->IsPlaySessionInProgress()` / `PlayWorld` in the write helper | batch/rollback refused (`*-pie-active`) |
+| Bridge `Stop` / Editor session end | `BlueprintEditSessionManager.Reset()` | session and token dropped |
+| Another plugin writing the graph | content fingerprint / positions / Dirty bit | refused if content differs; ABA remains undetectable |
+| Another Editor process / different Bridge session | process id + Bridge session id binding | refused (`*-editor-session-mismatch`) |
+
+The "graph closed" row is a known gap: closing the Blueprint editor tab does not
+by itself invalidate the session because the loaded objects still match. The
+handler still requires an open, focused target to *begin* a session and to move
+nodes, but the manager alone does not observe tab close. A later slice can bind
+`FAssetEditorSubsystem` close notifications once the cleanup path is
+Native-tested.
 
 ## Missing UI exclusivity lock (explicit)
 
@@ -230,10 +283,11 @@ Remaining design work for a later slice (not implemented, not verified):
    exit path (tab close, PIE, asset reload, module shutdown). Acceptance
    requires Native tests for focus loss, console input, crash cleanup and
    Undo/Redo interplay before any lock claim.
-3. **True rollback.** Per-session pre-write snapshots plus one restore
-   transaction and a full read-back, with a Native test for multi-batch undo.
-   Full undo across several save points is not achievable through the
-   transaction buffer alone (history is process-local and a reload discards it).
+3. **True cross-save rollback.** Per-session snapshots that survive Save and
+   reload, with a Native test for undoing across save points. Full undo across
+   several save points is not achievable through the transaction buffer alone
+   (history is process-local and a reload discards it). The current
+   position-only, same-unsaved-session rollback is the bounded version of this.
 4. **Shared batch model for other writes.** Route node create/remove, pin
    connect/disconnect and variable writes through the same
    `ApplyNodeMoveBatch`-style gate: validate all identities first, then one
@@ -248,7 +302,7 @@ cannot be ruled out; acceptance would need a documented multi-writer policy.
 Verified locally (Python 3.12, no Editor launched; `unittest` in
 `tests/python`):
 
-- `test_blueprint_edit_session_mcp.py` 15/15
+- `test_blueprint_edit_session_mcp.py` 16/16
 - `test_move_blueprint_nodes_mcp.py` 14/14
 - `test_node_move_mcp.py` 10/10
 - `test_tool_registry.py` 4/4 (registry order and all mode counts)
@@ -259,11 +313,19 @@ Verified locally (Python 3.12, no Editor launched; `unittest` in
 These cover MCP input validation, forwarding, error propagation, the strict
 `TOOL_REGISTRY` order/count agreement (14/28/53/75/89/114/128 depending on
 mode), and static source contracts: token shape, bridge ownership/reset,
-`RequireClean` vs `AllowSessionOwnedDirty`, no `FScopedTransaction` in the
-session manager, no UI-lock primitives, no process spawning in the wrapper.
+`RequireClean` vs `AllowSessionOwnedDirty`, rollback reusing the single
+transaction helper (no transaction construction in the manager), no UI-lock
+primitives, no process spawning in the wrapper.
 
 Not verified: UE C++ compilation, real `FScopedTransaction` Undo/Redo across
-several batches, save/reload persistence, PIE behavior, multi-window focus
-changes, and any UI lock. This slice is statically audited only; it has **no**
-Native build or Editor evidence, so that remains a required follow-up before
-any acceptance claim.
+several batches, the real rollback transaction and its read-back, save/reload
+persistence, PIE behavior, multi-window focus changes, and any UI lock. This
+slice is statically audited only; it has **no** Native build or Editor evidence,
+so that remains a required follow-up before any acceptance claim.
+
+Required Native acceptance (not executed here; needs an isolated UE 5.6 copy,
+not a cold start of the production Editor): Begin -> 10 consecutive position
+batches -> per-batch Undo/Redo -> `end(mode=rollback)` -> Save/Reload; then
+cross-graph and outside-edit interference, focus changes, PIE, and Bridge Stop
+invalidation, asserting the process PID never changes and no `UnrealEditor-Cmd`
+child appears.

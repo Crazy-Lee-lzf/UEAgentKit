@@ -284,11 +284,15 @@ bool FUEAgentKitEditorBridge::TryBeginBlueprintEditSessionResult(
 	Result->SetBoolField(TEXT("requiresUserNotEdit"), true);
 	Result->SetBoolField(TEXT("experimental"), true);
 	Result->SetBoolField(TEXT("singleTransactionPerBatch"), true);
-	Result->SetBoolField(TEXT("rollbackSupported"), false);
+	Result->SetBoolField(TEXT("rollbackSupported"), true);
 	Result->SetStringField(
 		TEXT("rollbackStatus"),
-		TEXT("unsupported-in-this-slice"));
-	// Keep is the only supported end mode; it only releases ownership.
+		TEXT("supported-position-only-unsaved-same-graph"));
+	Result->SetStringField(
+		TEXT("rollbackScope"),
+		TEXT("positions-captured-at-begin-while-unsaved"));
+	// Keep is the only supported non-destructive end mode; it only releases
+	// ownership.
 	Result->SetBoolField(TEXT("saved"), false);
 	Result->SetBoolField(TEXT("compiled"), false);
 	Result->SetStringField(TEXT("evidenceLevel"), TEXT("same-process"));
@@ -388,6 +392,9 @@ bool FUEAgentKitEditorBridge::TryEndBlueprintEditSessionResult(
 	Result->SetBoolField(TEXT("ended"), true);
 	Result->SetBoolField(TEXT("rolledBack"), Info.bRolledBack);
 	Result->SetNumberField(TEXT("restoredNodeCount"), Info.RestoredNodeCount);
+	Result->SetBoolField(
+		TEXT("restoreTransactionOpened"),
+		Info.bRestoreTransactionOpened);
 	Result->SetNumberField(TEXT("batchCount"), Info.BatchCount);
 	Result->SetNumberField(TEXT("movedBatchCount"), Info.MovedBatchCount);
 	Result->SetBoolField(
@@ -399,10 +406,10 @@ bool FUEAgentKitEditorBridge::TryEndBlueprintEditSessionResult(
 	Result->SetBoolField(TEXT("compiled"), false);
 	Result->SetBoolField(TEXT("exclusiveUI"), false);
 	Result->SetBoolField(TEXT("humanEditingBlocked"), false);
-	Result->SetBoolField(TEXT("rollbackSupported"), false);
+	Result->SetBoolField(TEXT("rollbackSupported"), true);
 	Result->SetStringField(
 		TEXT("rollbackStatus"),
-		TEXT("unsupported-in-this-slice"));
+		TEXT("supported-position-only-unsaved-same-graph"));
 	Result->SetStringField(TEXT("evidenceLevel"), TEXT("same-process"));
 	Result->SetBoolField(TEXT("acceptanceEligible"), false);
 	Result->SetStringField(TEXT("editorSessionId"), SessionId);

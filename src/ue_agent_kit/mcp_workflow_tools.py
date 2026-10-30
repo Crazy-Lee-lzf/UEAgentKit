@@ -1043,7 +1043,7 @@ def register_workflow_tools(
         graph_guid: str,
         experimental: bool,
     ) -> dict[str, Any]:
-        """Begin an experimental continuous Agent edit session on one clean, focused Blueprint graph; never saves, compiles, or blocks human editing."""
+        """Begin an experimental continuous Agent edit session on one clean, focused Blueprint graph; supports repeated token batches and position-only rollback, never saves, compiles, or blocks human editing."""
         try:
             if not workflow_service.config.commit_enabled:
                 raise WorkflowError(
@@ -1075,13 +1075,15 @@ def register_workflow_tools(
                     "experimental must be a boolean.",
                 )
             if not experimental:
-                # Continuous editing has no UI lock and no rollback in this
-                # slice, so it must be an explicit per-task opt-in.
+                # Continuous editing still has no UI lock, so it must be an
+                # explicit per-task opt-in even though position-only rollback
+                # exists for the same unsaved session.
                 raise WorkflowError(
                     "blueprint-edit-session-experimental-opt-in-required",
-                    "Continuous Blueprint editing is experimental, has no human/UI "
-                    "edit lock and no session rollback; pass experimental=True and "
-                    "do not edit the graph until the session is ended.",
+                    "Continuous Blueprint editing is experimental and has no "
+                    "human/UI edit lock; pass experimental=True and do not edit "
+                    "the graph until the session is ended. Rollback is limited to "
+                    "node positions this session moved while the package is unsaved.",
                 )
             result = workflow_service.live_editor_service.call_method(
                 "editor.beginBlueprintEditSession",
@@ -1114,7 +1116,7 @@ def register_workflow_tools(
         edit_session_token: str,
         mode: Literal["keep", "rollback"] = "keep",
     ) -> dict[str, Any]:
-        """Release an Agent edit session without saving; mode=rollback is unsupported in this slice."""
+        """End an Agent edit session without saving: mode=keep only releases ownership, mode=rollback restores this session's node positions in one transaction when every safety proof still holds."""
         try:
             if not workflow_service.config.commit_enabled:
                 raise WorkflowError(
