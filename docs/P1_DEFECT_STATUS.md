@@ -129,7 +129,8 @@ Python 3.12, `unittest` in `tests/python`, no Editor launched:
 - `test_blueprint_edit_session_mcp` 16, `test_move_blueprint_nodes_mcp` 14,
   `test_node_move_mcp` 10, `test_tool_registry` 4, `test_mcp_server` 20,
   `test_agent_workflow` 74, `test_editor_bridge` 27, `test_reflection_index` 12
-  — **177 passed**.
+  — **177 passed**. Full `unittest discover` over `tests/python`:
+  **1926 passed, 20 skipped**, no Editor or commandlet launched.
 
 Not verified: UE C++ compilation, the real save/verify commandlet path, and any
 native behaviour behind DEF-01/DEF-05.

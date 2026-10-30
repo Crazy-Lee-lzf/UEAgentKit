@@ -311,6 +311,8 @@ Verified locally (Python 3.12, no Editor launched; `unittest` in
 - `test_mcp_server.py` 20/20
 - `test_agent_workflow.py` 74/74
 - `test_editor_bridge.py` 27/27
+- `test_reflection_index.py` 12/12
+- full `unittest discover` over `tests/python`: **1926 passed, 20 skipped**
 
 These cover MCP input validation, forwarding, error propagation, the strict
 `TOOL_REGISTRY` order/count agreement (14/28/53/75/89/114/128 depending on
