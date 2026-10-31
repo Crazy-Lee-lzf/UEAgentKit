@@ -773,7 +773,11 @@ def _capabilities_response(
                 "oneTimeReceiptRequired": True,
                 "exactConfirmationRequired": True,
                 "backupBeforeSave": True,
+                "verificationModes": ["resident", "checkpoint", "immediate"],
+                "defaultVerificationMode": "resident",
+                "residentSaveStartsUnrealProcess": False,
                 "independentVerification": True,
+                "independentVerificationRequiresExplicitMode": True,
                 "saveAllSupported": False,
             },
             "graphSelection": {

@@ -154,10 +154,12 @@ class FakeFreshnessTracker:
     def __init__(self) -> None:
         self.state = "fresh"
         self.transitions: dict[str, dict[str, Any]] = {}
+        self.disk_revision = AFTER_REVISION
+        self.overlays: dict[str, dict[str, Any]] = {}
 
     def inspect_asset(self, asset_path: str) -> dict[str, Any]:
-        disk_revision = BEFORE_REVISION if self.state == "fresh" else AFTER_REVISION
-        return {
+        disk_revision = BEFORE_REVISION if self.state == "fresh" else self.disk_revision
+        result = {
             "assetPath": asset_path,
             "state": self.state,
             "reason": "" if self.state == "fresh" else "index-disk-mismatch,revision-export-disk-mismatch",
@@ -172,6 +174,15 @@ class FakeFreshnessTracker:
                 "revisionExportMatchesDisk": disk_revision == BEFORE_REVISION,
             },
         }
+        overlay = self.overlays.get(asset_path)
+        if (
+            self.state == "stale"
+            and overlay is not None
+            and overlay.get("revision") == disk_revision
+        ):
+            result["sessionRevisionOverlay"] = dict(overlay)
+            result["writeGate"] = "session-owned-save-overlay"
+        return result
 
     def project_status(self) -> dict[str, Any]:
         return {
@@ -184,8 +195,16 @@ class FakeFreshnessTracker:
     def session_stale_assets(self) -> list[dict[str, Any]]:
         return [dict(value) for value in self.transitions.values()]
 
-    def mark_commit(self, asset_path: str, before_revision: str, after_revision: str) -> dict[str, Any]:
+    def mark_commit(
+        self,
+        asset_path: str,
+        before_revision: str,
+        after_revision: str,
+        *,
+        editor_session_id: str = "",
+    ) -> dict[str, Any]:
         self.state = "stale"
+        self.disk_revision = after_revision
         transition = {
             "assetPath": asset_path,
             "state": "stale",
@@ -194,7 +213,18 @@ class FakeFreshnessTracker:
             "afterRevision": after_revision,
         }
         self.transitions[asset_path] = transition
+        if editor_session_id:
+            self.overlays[asset_path] = {
+                "source": "authorized-resident-save",
+                "assetPath": asset_path,
+                "revision": after_revision,
+                "beforeRevision": before_revision,
+                "editorSessionId": editor_session_id,
+            }
         return dict(transition)
+
+    def clear_session_overlays(self) -> None:
+        self.overlays.clear()
 
     def mark_rollback(self, asset_path: str, restored_revision: str) -> dict[str, Any]:
         self.state = "fresh"
@@ -2524,6 +2554,7 @@ class AgentWorkflowTests(unittest.TestCase):
         def call_method(self, method: str, params: dict[str, Any], **_: Any) -> dict[str, Any]:
             self.calls.append((method, params))
             if method == "editor.applyAssetPropertyLive":
+                self.dirty = True
                 return {
                     "action": "apply-asset-property-live",
                     "operation": "setAssetProperty",
@@ -2608,6 +2639,7 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertTrue(applied["changed"])
         self.assertTrue(applied["liveApplyReceipt"].startswith("live_"))
         self.assertEqual(bridge.calls[0][0], "editor.applyAssetPropertyLive")
+        self.assertEqual(applied["nextActions"][0]["arguments"]["verification_mode"], "resident")
         return applied
 
     def test_live_write_verify_reports_unsaved_state_with_undo_available(self) -> None:
@@ -2656,6 +2688,175 @@ class AgentWorkflowTests(unittest.TestCase):
         with self.assertRaises(WorkflowError) as missing:
             service.verify_live_write(ASSET_PATH)
         self.assertEqual(missing.exception.code, "live-write-verify-not-found")
+
+    def test_resident_save_does_not_spawn_unreal_or_claim_strong_verification(self) -> None:
+        fresh_bytes = b"resident-before" * 8
+        saved_bytes = b"resident-after" * 8
+        fresh_revision = "sha256:" + hashlib.sha256(fresh_bytes).hexdigest()
+        saved_revision = "sha256:" + hashlib.sha256(saved_bytes).hexdigest()
+
+        class ResidentTracker(FakeFreshnessTracker):
+            def inspect_asset(self, asset_path: str) -> dict[str, Any]:
+                result = super().inspect_asset(asset_path)
+                result["diskRevision"] = saved_revision if self.state == "stale" else fresh_revision
+                return result
+
+        class ResidentBridge(AgentWorkflowTests.ClosedLoopLiveService):
+            def call_method(self, method: str, params: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+                if method == "editor.verifyAssetPropertyLiveFast":
+                    self.calls.append((method, params))
+                    return {
+                        "targetResolved": True,
+                        "editorSessionId": "session-1",
+                        "value": True,
+                        "packageDirty": self.dirty,
+                        "compileRequired": False,
+                    }
+                return super().call_method(method, params, **kwargs)
+
+        package_file = (
+            self.project_path.parent / "Content" / "UEAgentKitWriteTests"
+            / "ScalarRegression" / "DA_ScalarPatchTarget.uasset"
+        )
+        package_file.parent.mkdir(parents=True, exist_ok=True)
+        package_file.write_bytes(fresh_bytes)
+        bridge = ResidentBridge(dirty=True, on_save=lambda: package_file.write_bytes(saved_bytes))
+        def forbidden_runner(arguments: list[str], cwd: Path, timeout_seconds: int) -> ProcessResult:
+            raise AssertionError("resident save unexpectedly launched an Unreal child process")
+
+        service = PatchWorkflowService(
+            FakeIndexService(), self.config, process_runner=forbidden_runner,
+            freshness_tracker=ResidentTracker(), live_editor_service=bridge,
+        )
+        applied = self._apply_scalar_live_write(service, bridge)
+        preview = service.save_authorized_asset(ASSET_PATH, verification_mode="resident")
+        self.assertEqual(preview["verificationMode"], "resident")
+        with self.assertRaises(WorkflowError) as changed_mode:
+            service.save_authorized_asset(
+                ASSET_PATH, mode="Commit",
+                save_receipt=preview["saveReceipt"],
+                confirmation=f"SAVE {preview['saveReceipt']}",
+                verification_mode="immediate",
+            )
+        self.assertEqual(changed_mode.exception.code, "save-receipt-stale")
+        saved = service.save_authorized_asset(
+            ASSET_PATH, mode="Commit", save_receipt=preview["saveReceipt"],
+            confirmation=f"SAVE {preview['saveReceipt']}", verification_mode="resident",
+        )
+        self.assertTrue(saved["saved"])
+        self.assertFalse(saved["verified"])
+        self.assertEqual(saved["verificationKind"], "resident-fast+disk-revision")
+        self.assertEqual(saved["childUnrealProcessCount"], 0)
+        self.assertEqual(saved["afterRevision"], saved_revision)
+        self.assertEqual(saved["liveApplyReceipt"], applied["liveApplyReceipt"])
+        self.assertEqual(saved["nextActions"][0]["tool"], "ue_verify_live_write_fast")
+        self.assertEqual(package_file.read_bytes(), saved_bytes)
+
+    def test_resident_save_allows_continuous_edit_without_refresh_or_restart(self) -> None:
+        fresh_bytes = b"continuous-before" * 8
+        saved_payloads = [b"continuous-after-1" * 8, b"continuous-after-2" * 8]
+        saved_revisions = [
+            "sha256:" + hashlib.sha256(payload).hexdigest()
+            for payload in saved_payloads
+        ]
+
+        class ContinuousBridge(AgentWorkflowTests.ClosedLoopLiveService):
+            def call_method(self, method: str, params: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+                if method == "editor.verifyAssetPropertyLiveFast":
+                    self.calls.append((method, params))
+                    return {
+                        "targetResolved": True,
+                        "editorSessionId": "session-1",
+                        "value": True,
+                        "packageDirty": self.dirty,
+                        "compileRequired": False,
+                    }
+                return super().call_method(method, params, **kwargs)
+
+        package_file = (
+            self.project_path.parent / "Content" / "UEAgentKitWriteTests"
+            / "ScalarRegression" / "DA_ScalarPatchTarget.uasset"
+        )
+        package_file.parent.mkdir(parents=True, exist_ok=True)
+        package_file.write_bytes(fresh_bytes)
+
+        def on_save() -> None:
+            package_file.write_bytes(saved_payloads.pop(0))
+
+        bridge = ContinuousBridge(dirty=True, on_save=on_save)
+
+        def forbidden_runner(arguments: list[str], cwd: Path, timeout_seconds: int) -> ProcessResult:
+            raise AssertionError(
+                "continuous resident edit/save unexpectedly launched an Unreal child process"
+            )
+
+        tracker = FakeFreshnessTracker()
+        fresh_revision = "sha256:" + hashlib.sha256(fresh_bytes).hexdigest()
+
+        class ContinuousTracker(FakeFreshnessTracker):
+            def inspect_asset(self, asset_path: str) -> dict[str, Any]:
+                result = super().inspect_asset(asset_path)
+                if result["state"] == "fresh":
+                    result["diskRevision"] = fresh_revision
+                return result
+
+        tracker = ContinuousTracker()
+        service = PatchWorkflowService(
+            FakeIndexService(), self.config, process_runner=forbidden_runner,
+            freshness_tracker=tracker, live_editor_service=bridge,
+        )
+
+        self._apply_scalar_live_write(service, bridge)
+        first_preview = service.save_authorized_asset(ASSET_PATH, verification_mode="resident")
+        first_saved = service.save_authorized_asset(
+            ASSET_PATH, mode="Commit",
+            save_receipt=first_preview["saveReceipt"],
+            confirmation=f"SAVE {first_preview['saveReceipt']}",
+            verification_mode="resident",
+        )
+        self.assertEqual(first_saved["revision"], saved_revisions[0])
+        self.assertFalse(first_saved["verified"])
+        self.assertEqual(tracker.state, "stale")
+        self.assertFalse(tracker.inspect_asset(ASSET_PATH)["indexFresh"])
+        self.assertEqual(
+            tracker.inspect_asset(ASSET_PATH)["sessionRevisionOverlay"]["revision"],
+            saved_revisions[0],
+        )
+
+        # Second edit and save in the same MCP session: the frozen index is stale,
+        # but the session-owned revision overlay authorizes the exact disk revision.
+        self._apply_scalar_live_write(service, bridge)
+        second_preview = service.save_authorized_asset(ASSET_PATH, verification_mode="resident")
+        self.assertEqual(second_preview["expectedDiskRevision"], saved_revisions[0])
+        second_saved = service.save_authorized_asset(
+            ASSET_PATH, mode="Commit",
+            save_receipt=second_preview["saveReceipt"],
+            confirmation=f"SAVE {second_preview['saveReceipt']}",
+            verification_mode="resident",
+        )
+        self.assertTrue(second_saved["saved"])
+        self.assertEqual(second_saved["revision"], saved_revisions[1])
+        self.assertEqual(
+            tracker.inspect_asset(ASSET_PATH)["sessionRevisionOverlay"]["revision"],
+            saved_revisions[1],
+        )
+
+        # An external write changes the disk revision: the overlay must stop
+        # authorizing and the next save is refused as index-stale.
+        tracker.overlays[ASSET_PATH]["revision"] = "sha256:" + "0" * 64
+        with self.assertRaises(WorkflowError) as external:
+            service.save_authorized_asset(ASSET_PATH)
+        self.assertEqual(external.exception.code, "index-stale")
+
+    def test_resident_save_rejects_manual_dirty_without_live_receipt(self) -> None:
+        bridge = AgentWorkflowTests.ClosedLoopLiveService(dirty=True)
+        service = PatchWorkflowService(
+            FakeIndexService(), self.config, process_runner=self.runner,
+            freshness_tracker=self.freshness, live_editor_service=bridge,
+        )
+        with self.assertRaises(WorkflowError) as missing:
+            service.save_authorized_asset(ASSET_PATH, verification_mode="resident")
+        self.assertEqual(missing.exception.code, "resident-save-receipt-required")
 
     def test_live_write_verify_closes_loop_after_authorized_save(self) -> None:
         fresh_bytes = b"x" * 64
@@ -2741,6 +2942,7 @@ class AgentWorkflowTests(unittest.TestCase):
             change_set_id=change_set_id,
         )
         self.assertEqual(applied["nextActions"][0]["tool"], "ue_save_authorized_asset")
+        self.assertEqual(applied["nextActions"][0]["arguments"]["verification_mode"], "checkpoint")
         preview = service.save_authorized_asset(ASSET_PATH, change_set_id=change_set_id)
         saved = service.save_authorized_asset(
             ASSET_PATH,

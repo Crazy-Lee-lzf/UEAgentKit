@@ -120,6 +120,10 @@ class IndexFreshnessTracker:
         self._canonical_revision_cache: dict[Path, tuple[int, int, str, bool]] = {}
         self._canonical_asset_cache: dict[str, Path | None] = {}
         self._session_stale: dict[str, dict[str, Any]] = {}
+        # Revision overlay for packages this MCP session saved itself.  It never
+        # turns the frozen index fresh; it only proves that a stale index is
+        # stale because of our own authorized save at the exact disk revision.
+        self._session_owned_revisions: dict[str, dict[str, Any]] = {}
 
     def _records(self) -> list[dict[str, Any]]:
         records = self.index_service.get_revision_records()
@@ -248,6 +252,18 @@ class IndexFreshnessTracker:
         }
         if session is not None:
             result["sessionTransition"] = dict(session)
+        return self._attach_session_overlay(result)
+
+    def _attach_session_overlay(self, result: dict[str, Any]) -> dict[str, Any]:
+        overlay = self._session_owned_revisions.get(str(result.get("assetPath", "")))
+        if (
+            overlay is not None
+            and result.get("state") == "stale"
+            and result.get("diskRevision")
+            and overlay.get("revision") == result.get("diskRevision")
+        ):
+            result["sessionRevisionOverlay"] = dict(overlay)
+            result["writeGate"] = "session-owned-save-overlay"
         return result
 
     def _inspect_record(self, record: dict[str, Any]) -> dict[str, Any]:
@@ -334,7 +350,7 @@ class IndexFreshnessTracker:
         }
         if session is not None:
             result["sessionTransition"] = dict(session)
-        return result
+        return self._attach_session_overlay(result)
 
     def project_status(self) -> dict[str, Any]:
         with self._lock:
@@ -391,7 +407,14 @@ class IndexFreshnessTracker:
             "diskRevision": result.get("diskRevision", ""),
         }
 
-    def mark_commit(self, asset_path: str, before_revision: str, after_revision: str) -> dict[str, Any]:
+    def mark_commit(
+        self,
+        asset_path: str,
+        before_revision: str,
+        after_revision: str,
+        *,
+        editor_session_id: str = "",
+    ) -> dict[str, Any]:
         with self._lock:
             transition = {
                 "assetPath": asset_path,
@@ -402,12 +425,26 @@ class IndexFreshnessTracker:
                 "changedAtUtc": _utc_now_iso(),
             }
             self._session_stale[asset_path] = transition
+            # Only this MCP session's own resident authorized save creates an
+            # overlay, and only for the exact revision it wrote.  Any later
+            # external write changes diskRevision, so the overlay stops applying.
+            # Offline/commandlet applies pass no editor session and get none.
+            if editor_session_id:
+                self._session_owned_revisions[asset_path] = {
+                    "source": "authorized-resident-save",
+                    "assetPath": asset_path,
+                    "revision": after_revision,
+                    "beforeRevision": before_revision,
+                    "editorSessionId": editor_session_id,
+                    "recordedAtUtc": _utc_now_iso(),
+                }
             self._file_revision_cache.clear()
             return self.inspect_asset(asset_path)
 
     def mark_rollback(self, asset_path: str, restored_revision: str) -> dict[str, Any]:
         with self._lock:
             self._file_revision_cache.clear()
+            self._session_owned_revisions.pop(asset_path, None)
             previous = self._session_stale.pop(asset_path, None)
             result = self.inspect_asset(asset_path)
             if result.get("state") == "fresh" and result.get("diskRevision") == restored_revision:
@@ -432,3 +469,12 @@ class IndexFreshnessTracker:
     def session_stale_assets(self) -> list[dict[str, Any]]:
         with self._lock:
             return [dict(value) for value in self._session_stale.values()]
+
+    def clear_session_overlays(self) -> None:
+        """Drop overlay evidence when the snapshot generation changes.
+
+        A refresh switches the trusted baseline, so a revision this session
+        saved under the old baseline must not keep authorizing writes.
+        """
+        with self._lock:
+            self._session_owned_revisions.clear()

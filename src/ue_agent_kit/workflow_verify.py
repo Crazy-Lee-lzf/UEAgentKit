@@ -560,7 +560,12 @@ class WorkflowVerifyMixin:
             self._remove_live_apply(receipt)
 
         freshness_after = (
-            self.freshness.mark_commit(asset_path, before_revision, after_revision)
+            self.freshness.mark_commit(
+                asset_path,
+                before_revision,
+                after_revision,
+                editor_session_id=editor_session_id,
+            )
             if after_revision != before_revision
             else self.freshness.inspect_asset(asset_path)
         )
@@ -722,15 +727,15 @@ class WorkflowVerifyMixin:
         save_receipt: str = "",
         confirmation: str = "",
         change_set_id: str = "",
-        verification_mode: Literal["immediate", "checkpoint"] = "immediate",
+        verification_mode: Literal["immediate", "checkpoint", "resident"] = "immediate",
     ) -> dict[str, Any]:
         with self._lock:
             self._assert_session_current()
             asset_path = self._validate_refresh_asset_path(asset_path)
             if mode not in {"Preview", "Commit"}:
                 raise WorkflowError("authorized-save-invalid-mode", "mode must be Preview or Commit.")
-            if verification_mode not in {"immediate", "checkpoint"}:
-                raise WorkflowError("authorized-save-invalid-mode", "verification_mode must be immediate or checkpoint.")
+            if verification_mode not in {"immediate", "checkpoint", "resident"}:
+                raise WorkflowError("authorized-save-invalid-mode", "verification_mode must be immediate, checkpoint or resident.")
             if change_set_id:
                 change_set = self._resolve_change_set(change_set_id)
                 member_assets = {
@@ -790,6 +795,30 @@ class WorkflowVerifyMixin:
             if memory.get("packageDirty") is not True:
                 raise WorkflowError("live-editor-save-not-dirty", "The exact loaded package is not Dirty.")
 
+            # Resident mode avoids launching a second Unreal Editor process.
+            # It is only valid for one exact, unsaved, journaled live write.
+            resident_record = None
+            if verification_mode == "resident":
+                if change_set_id:
+                    raise WorkflowError(
+                        "resident-save-change-set-unsupported",
+                        "Use verification_mode=checkpoint for a multi-operation Change Set.",
+                    )
+                candidates = [
+                    record for record in self._live_applies.values()
+                    if record.asset_path == asset_path
+                    and not record.saved
+                    and record.editor_session_id == editor_session_id
+                ]
+                if len(candidates) != 1:
+                    raise WorkflowError(
+                        "resident-save-receipt-required",
+                        "Resident save requires exactly one active live write. "
+                        "Use checkpoint mode for a Change Set or immediate mode for a manual Dirty asset.",
+                    )
+                resident_record = candidates[0]
+                self._fast_verify_live_record(resident_record)
+
             if verification_mode == "checkpoint":
                 return self._checkpoint_authorized_save(
                     asset_path,
@@ -814,6 +843,10 @@ class WorkflowVerifyMixin:
                     expected_revision,
                     editor_session_id,
                     editor_process_id,
+                    verification_mode=verification_mode,
+                    included_receipts=(
+                        (resident_record.receipt,) if resident_record is not None else ()
+                    ),
                 )
                 self._prune_records()
                 preview_response = {
@@ -821,6 +854,7 @@ class WorkflowVerifyMixin:
                     "tool": "ue_save_authorized_asset",
                     "ok": True,
                     "mode": "Preview",
+                    "verificationMode": verification_mode,
                     "assetPath": asset_path,
                     "assetClass": asset_class,
                     "expectedDiskRevision": expected_revision,
@@ -831,7 +865,10 @@ class WorkflowVerifyMixin:
                     "saveReceipt": receipt,
                     "saved": False,
                     "commitToolsEnabled": self.config.commit_enabled,
-                    "nextStep": f"To save exactly this asset, call ue_save_authorized_asset with mode=Commit and confirmation 'SAVE {receipt}'.",
+                    "nextStep": (
+                        f"To save exactly this asset, call ue_save_authorized_asset with mode=Commit, "
+                        f"verification_mode={verification_mode}, and confirmation 'SAVE {receipt}'."
+                    ),
                 }
                 if change_set_id:
                     preview_response["changeSetId"] = change_set_id
@@ -847,7 +884,12 @@ class WorkflowVerifyMixin:
             if confirmation != f"SAVE {save_receipt}":
                 raise WorkflowError("save-confirmation-required", "Save confirmation did not exactly match the required receipt phrase.")
             if (
-                authorization.asset_class != asset_class
+                authorization.verification_mode != verification_mode
+                or (
+                    verification_mode == "resident"
+                    and (resident_record is None or authorization.included_receipts != (resident_record.receipt,))
+                )
+                or authorization.asset_class != asset_class
                 or authorization.package_name != package_name
                 or authorization.expected_disk_revision != expected_revision
                 or authorization.editor_session_id != editor_session_id
@@ -898,21 +940,30 @@ class WorkflowVerifyMixin:
 
             after_revision = "sha256:" + sha256_file(package_file)
             revision_captured_at = utc_now_iso()
-            verification_root = self._safe_work_path("authorized-save", save_receipt, "verify")
-            candidate = self._export_refresh_candidate(
-                asset_path,
-                verification_root,
-                include_blueprint=("Blueprint" in asset_class),
-            )
-            if candidate.get("revision") != after_revision:
-                raise WorkflowError(
-                    "authorized-save-verification-failed",
-                    "Independent Unreal export did not match the saved disk Revision.",
-                    details={"beforeRevision": before_revision, "afterRevision": after_revision},
+            if verification_mode == "immediate":
+                verification_root = self._safe_work_path("authorized-save", save_receipt, "verify")
+                candidate = self._export_refresh_candidate(
+                    asset_path,
+                    verification_root,
+                    include_blueprint=("Blueprint" in asset_class),
                 )
+                if candidate.get("revision") != after_revision:
+                    raise WorkflowError(
+                        "authorized-save-verification-failed",
+                        "Independent Unreal export did not match the saved disk Revision.",
+                        details={"beforeRevision": before_revision, "afterRevision": after_revision},
+                    )
+            # In resident mode, persistence is attested by the same-process
+            # authorized save and on-disk SHA, not an independent reload.
+            # No strong-verified verdict may be inferred from this response.
             authorization.consumed = True
             freshness_after = (
-                self.freshness.mark_commit(asset_path, before_revision, after_revision)
+                self.freshness.mark_commit(
+                    asset_path,
+                    before_revision,
+                    after_revision,
+                    editor_session_id=editor_session_id,
+                )
                 if after_revision != before_revision
                 else self.freshness.inspect_asset(asset_path)
             )
@@ -945,11 +996,17 @@ class WorkflowVerifyMixin:
                 "tool": "ue_save_authorized_asset",
                 "ok": True,
                 "mode": "Commit",
+                "verificationMode": verification_mode,
+                "verificationKind": (
+                    "resident-fast+disk-revision" if verification_mode == "resident"
+                    else "independent-reload"
+                ),
+                "childUnrealProcessCount": 0 if verification_mode == "resident" else 1,
                 "assetPath": asset_path,
                 "assetClass": asset_class,
                 "saveReceipt": save_receipt,
                 "saved": True,
-                "verified": True,
+                "verified": verification_mode == "immediate",
                 "beforeRevision": before_revision,
                 "afterRevision": after_revision,
                 # Canonical post-save Revision: callers must read `revision`
@@ -967,19 +1024,25 @@ class WorkflowVerifyMixin:
                 "bridge": _safe_report(bridge_result, configured_paths=self.configured_paths),
                 "indexFreshness": freshness_after,
                 "nextStep": (
-                    "Call ue_verify_live_write for this exact asset to close the loop with an "
+                    "Continue editing in the resident Editor; this save has Fast Resident "
+                    "Verify and a disk SHA but is not independently reloaded. Use "
+                    "ue_verify_live_write later at a milestone when a strong reload is required."
+                    if verification_mode == "resident"
+                    else "Call ue_verify_live_write for this exact asset to close the loop with an "
                     "independent reload and Revision. Do not refresh the frozen index before the scoped Trust verdict."
                 ),
-                "nextActions": [
-                    {
-                        "tool": "ue_verify_live_write",
-                        "arguments": {
-                            "asset_path": asset_path,
-                            **({"change_set_id": change_set_id} if change_set_id else {}),
-                        },
-                        "reason": "Independently reload and verify the exact saved live write.",
-                    }
-                ],
+                "nextActions": (
+                    [{"tool": "ue_verify_live_write_fast",
+                      "arguments": {"asset_path": asset_path, "live_apply_receipt": live_receipt},
+                      "reason": "Recheck the exact value in the resident Editor without starting Unreal."}]
+                    if verification_mode == "resident"
+                    else [{"tool": "ue_verify_live_write",
+                           "arguments": {
+                               "asset_path": asset_path,
+                               **({"change_set_id": change_set_id} if change_set_id else {}),
+                           },
+                           "reason": "Independently reload and verify the exact saved live write."}]
+                ),
             }
             if change_set_id:
                 response["changeSetId"] = change_set_id

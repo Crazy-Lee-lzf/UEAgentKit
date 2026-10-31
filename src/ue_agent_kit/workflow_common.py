@@ -1217,6 +1217,22 @@ class WorkflowCommonBase:
     def _assert_asset_fresh(self, asset_path: str) -> dict[str, Any]:
         freshness = self.freshness.inspect_asset(asset_path)
         if freshness.get("state") == "stale":
+            # A stale frozen index is acceptable only when this MCP session saved
+            # the exact disk revision itself (authorized resident save).  The
+            # overlay carries the revision this session wrote; an external write
+            # changes diskRevision and the overlay no longer matches.
+            overlay = freshness.get("sessionRevisionOverlay")
+            if (
+                isinstance(overlay, dict)
+                and overlay.get("source") == "authorized-resident-save"
+                and overlay.get("revision")
+                and overlay.get("revision") == freshness.get("diskRevision")
+            ):
+                accepted = dict(freshness)
+                accepted["writeGate"] = "session-owned-save-overlay"
+                accepted["indexFresh"] = False
+                accepted["indexStaleForWrite"] = False
+                return accepted
             raise WorkflowError(
                 "index-stale",
                 "The requested asset differs from the fixed SQLite index or Revision Export.",

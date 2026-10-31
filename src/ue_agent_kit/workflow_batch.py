@@ -500,6 +500,7 @@ class WorkflowBatchMixin:
             self._applies.clear()
             self._rollback_dry_runs.clear()
             self._refresh_applied = True
+            self.freshness.clear_session_overlays()
             return {
                 "applied": True,
                 "activeSnapshotChanged": True,
@@ -701,6 +702,7 @@ class WorkflowBatchMixin:
                 self._applies.clear()
                 self._rollback_dry_runs.clear()
                 self._refresh_applied = True
+                self.freshness.clear_session_overlays()
                 base.update(
                     {
                         "applied": True,

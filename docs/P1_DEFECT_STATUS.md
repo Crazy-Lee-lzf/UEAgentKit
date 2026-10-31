@@ -34,43 +34,42 @@ Native-unverified (cases listed in `docs/BLUEPRINT_EDIT_SESSION.md`).
 
 ## DEF-01 — ordinary Resident write/save must not cold-start; continuous editing must not need an MCP restart
 
-Status: **limited / not fixed** (root cause located; the fix is a product-policy
-change plus native evidence).
+Status: **fixed (Python/MCP level); Native E2E still unverified**.
 
-Evidence found:
+What changed (round 2, reusing `feature/resident-save-no-cold-20261030`
+`e88e9eb`):
 
-- A normal authorized save (`save_authorized_asset`, both the immediate and
-  checkpoint Commit branches, `src/ue_agent_kit/workflow_verify.py`) performs
-  "independent verification" by calling `_export_refresh_candidate`
-  (`src/ue_agent_kit/workflow_batch.py:44`), which runs `RunExport.ps1` /
-  `RunAssetCatalog.ps1` through `_run_script`
-  (`src/ue_agent_kit/workflow_common.py:1242`). Those scripts drive an offline
-  Unreal export, i.e. a commandlet process, inside the save path. The engine
-  binary is also required by `_validate_config`
-  (`workflow_common.py:1087`).
-- The only hard "restart this MCP session" gate is
-  `_assert_session_current` (`workflow_common.py:1234`), raised after
-  `ue_refresh_asset_index` switched the snapshot generation
-  (`_refresh_applied`). Plain live writes and saves do not set it.
+- MCP `ue_save_authorized_asset` now defaults to `verification_mode=resident`:
+  it saves through the connected Editor Bridge, requires exactly one pending
+  journaled live apply in the same Editor session, runs
+  `editor.verifyAssetPropertyLiveFast` before the save, and reads the on-disk
+  SHA after it. It never calls `_export_refresh_candidate`, so routine saves no
+  longer launch `RunExport.ps1` / `RunAssetCatalog.ps1` / an Unreal commandlet.
+- The response states `saved=true`, `verified=false`,
+  `verificationKind=resident-fast+disk-revision`,
+  `childUnrealProcessCount=0` and points at `ue_verify_live_write_fast`; strong
+  `verified=true` now requires the explicit `verification_mode=immediate`
+  (or a checkpoint flow). Manual Dirty assets with no bound live write fail
+  closed with `resident-save-receipt-required` instead of silently falling back
+  to a commandlet.
+- Continuous editing: `IndexFreshnessTracker.mark_commit` records a
+  session-scoped revision overlay for the exact revision this MCP session saved
+  (`authorized-resident-save`, with the Editor session id).
+  `_assert_asset_fresh` accepts a stale frozen index only when that overlay
+  revision equals the current disk revision, and the response gate is marked
+  `session-owned-save-overlay`. Any external write changes the disk revision,
+  the overlay stops applying, and the next action fails `index-stale`. A
+  snapshot refresh calls `clear_session_overlays()`; nothing is persisted, so an
+  MCP restart starts clean. This does **not** mark the index fresh
+  (`indexFresh=false`) and is not a strong verification.
+- The `_refresh_applied` generation gate is untouched: after an explicit
+  snapshot refresh the session still requires a restart, by design.
 
-Why it is not changed here:
-
-- Removing the automatic export from Save silently downgrades the existing
-  `verified=true` contract that other flows (change sets, rollback manifests,
-  trust verdicts) consume; the plan forbids "misreporting strong verification"
-  in either direction. The correct change is to split resident evidence
-  (`verified=false`, `verificationKind=resident-save`) from an explicit offline
-  verification action, which changes public response semantics and needs review
-  plus a native run.
-- The restart gate after an index refresh is intentional generation consistency,
-  not an ordinary-editing blocker; loosening it would allow mixing snapshot
-  generations.
-
-Proposed next slice: make Save emit resident-only evidence and require an
-explicit `ue_verify_live_write` (offline) for `verified=true`, then test that a
-plain apply+save never launches a commandlet and that ten consecutive batches
-need no MCP restart. Until then, callers must expect the save verification step
-to run an offline export.
+Tests: `test_agent_workflow` resident/no-cold tests (no process runner, no
+`verified=true`), a two-save continuous edit on one asset through the overlay
+with an external-change negative case, plus freshness overlay regressions.
+Native E2E (real Editor child-process count and successive write/save timings)
+remains unverified.
 
 ## DEF-05 — Material / DataTable writers lack Fast Verify
 

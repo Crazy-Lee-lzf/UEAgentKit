@@ -388,6 +388,7 @@ class WorkflowLiveMixin:
                             "arguments": {
                                 "asset_path": asset_path,
                                 "mode": "Preview",
+                                "verification_mode": "checkpoint" if change_set_id else "resident",
                                 **({"change_set_id": change_set_id} if change_set_id else {}),
                             },
                             "reason": "Authorize persistence for the exact live-written asset.",
@@ -1116,6 +1117,7 @@ class WorkflowLiveMixin:
                             "arguments": {
                                 "asset_path": asset_path,
                                 "mode": "Preview",
+                                "verification_mode": "checkpoint" if change_set_id else "resident",
                                 **({"change_set_id": change_set_id} if change_set_id else {}),
                             },
                             "reason": "Persist the exact pending live write before independent verification.",

@@ -1333,9 +1333,9 @@ def register_workflow_tools(
         save_receipt: str = "",
         confirmation: str = "",
         change_set_id: str = "",
-        verification_mode: Literal["immediate", "checkpoint"] = "immediate",
+        verification_mode: Literal["immediate", "checkpoint", "resident"] = "resident",
     ) -> dict[str, Any]:
-        """Preview or explicitly save one policy-authorized loaded Dirty asset with backup and verification."""
+        """Save via the resident Editor by default; independent reload requires explicit immediate mode."""
         try:
             return workflow_service.save_authorized_asset(
                 asset_path,
