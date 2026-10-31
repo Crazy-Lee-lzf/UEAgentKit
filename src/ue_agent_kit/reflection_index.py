@@ -144,13 +144,16 @@ def _remove_reflection_children(
     child_ids = [str(row["stable_id"]) for row in rows]
     if child_ids:
         placeholders = ",".join("?" for _ in child_ids)
+        # Reimport owns only outgoing references of its own reflected
+        # children. Incoming references are evidence owned by their callers,
+        # potentially in other assets, and must survive this operation.
         connection.execute(
             f"""
             DELETE FROM references_table
-            WHERE source_symbol_id IN ({placeholders})
-               OR target_symbol_id IN ({placeholders})
+            WHERE asset_id = ?
+              AND source_symbol_id IN ({placeholders})
             """,
-            [*child_ids, *child_ids],
+            [asset_id, *child_ids],
         )
     connection.execute(
         """
