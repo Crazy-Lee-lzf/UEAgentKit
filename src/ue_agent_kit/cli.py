@@ -53,6 +53,49 @@ from .schema import CURRENT_SCHEMA_VERSION
 from .source_control import P4SourceControlService
 
 
+class StrictArgumentParser(argparse.ArgumentParser):
+    """Reject a repeated scalar option instead of silently taking the last value.
+
+    ``argparse`` is last-wins for ``_StoreAction`` options, so ``--database a
+    --database b`` used to run against ``b`` with no warning.  Only plain store
+    actions are checked; ``append`` (for example ``--source-root``) and boolean
+    flags keep their documented repeatable behaviour.  Subparsers use this class
+    because ``add_subparsers`` defaults ``parser_class`` to ``type(self)``.
+    """
+
+    def parse_known_args(
+        self,
+        args: Sequence[str] | None = None,
+        namespace: argparse.Namespace | None = None,
+    ) -> tuple[argparse.Namespace, list[str]]:
+        raw_arguments = list(sys.argv[1:] if args is None else args)
+        scalar_options: dict[str, argparse.Action] = {}
+        for action in self._actions:
+            # type(...) is intentional: append/store-const subclass the plain
+            # store action and must stay repeatable.
+            if type(action) is not argparse._StoreAction:
+                continue
+            for option_string in action.option_strings:
+                scalar_options[option_string] = action
+        seen_destinations: dict[str, str] = {}
+        for token in raw_arguments:
+            if not token.startswith("--"):
+                continue
+            option, _, _ = token.partition("=")
+            action = scalar_options.get(option)
+            if action is None:
+                continue
+            previous = seen_destinations.get(action.dest)
+            if previous is not None:
+                also = "" if previous == option else f" (also {previous})"
+                self.error(
+                    f"argument {option}: supplied more than once{also}; "
+                    "pass it exactly once"
+                )
+            seen_destinations[action.dest] = option
+        return super().parse_known_args(args, namespace)
+
+
 def _add_database_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--database",
@@ -101,7 +144,7 @@ def _write_json_file(path: Path, value: Any) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = StrictArgumentParser(
         prog="ue-agent",
         description="UEAgentKit project index and query CLI.",
     )

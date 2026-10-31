@@ -130,32 +130,47 @@ recorded as limited/not done).
   `test_duplicate_child_stable_id_is_reported_and_rolled_back` (no partial rows,
   `matched_types == 0`).
 
-### 12b Duplicate CLI parameters — not done
+### 12b Duplicate CLI parameters — fixed
 
-- `argparse` defaults to last-wins for repeated `store` options
-  (`src/ue_agent_kit/cli.py`); a duplicated `--database`, `--project-key` or
-  similar silently takes the final value. Rejecting duplicates requires a shared
-  custom `Action` applied across every subcommand, plus CLI error-message tests;
-  this was not attempted in this slice to avoid a broad parser refactor.
+- `build_parser()` now uses `StrictArgumentParser`, which rejects a repeated
+  plain store option before argparse's last-wins behaviour can hide a mistake.
+  The check is generic (every subparser inherits it through `parser_class`) and
+  only applies to plain store actions; `append` (e.g. `--source-root`) and
+  boolean flags keep their documented repeatable behaviour.
+- Tests: `test_cli_duplicate_args.py` covers duplicate `--database` and
+  `--project-key`, single values, repeated `--source-root`, and repeated
+  `--compact`.
 
-### 12c Index silent ignore — limited
+### 12c Index silent ignore — partially fixed
 
-- Candidate silent paths: the fallback asset-path map skips unreadable/invalid
-  JSON (`indexer.py:155`), and schema checks skip migration statements whose
-  SQLite error text is "unrecognized"/"syntax" (`database.py:151`). No path was
-  found that silently drops committed index rows or duplicates a stable id, so
-  no code was changed; the next step is to count and report those skips instead
-  of only `continue`.
+- The canonical fallback scan in `indexer.py` used to `continue` on an
+  unreadable/invalid JSON file, which could make an asset look "not found"
+  rather than "evidence was skipped". It now records each skipped file
+  (`_CanonicalPathResolver.skipped_canonical_files`), appends
+  `canonical-fallback-skip:*` warnings plus an explanatory warning to
+  `IndexBuildResult.warnings` (new field, included in `to_dict`), and stores
+  `last_index_skipped_canonical_files` metadata.
+- Test: `test_index_skip_observability.py` verifies the valid file still
+  resolves while the invalid one is reported.
+- `database.py` still treats FTS5 `integrity-check` statements with an
+  "unrecognized/syntax" error as unavailable on older SQLite; this is an
+  intentional compatibility fallback (the schema version and `quick_check`
+  checks still run), so it was kept and documented rather than removed.
 
 ## Test evidence for this slice
 
 Python 3.12, `unittest` in `tests/python`, no Editor launched:
 
-- `test_blueprint_edit_session_mcp` 16, `test_move_blueprint_nodes_mcp` 14,
-  `test_node_move_mcp` 10, `test_tool_registry` 4, `test_mcp_server` 20,
-  `test_agent_workflow` 74, `test_editor_bridge` 27, `test_reflection_index` 12
-  — **177 passed**. Full `unittest discover` over `tests/python`:
-  **1926 passed, 20 skipped**, no Editor or commandlet launched.
+- Round-2 focused modules: `test_blueprint_edit_session_mcp` 16,
+  `test_move_blueprint_nodes_mcp` 14, `test_node_move_mcp` 10,
+  `test_tool_registry` 4, `test_mcp_server` 20, `test_agent_workflow` 77,
+  `test_editor_bridge` 27, `test_reflection_index` 13, `test_freshness` 7,
+  `test_live_fast_verify_contract` 3, `test_cli_duplicate_args` 3,
+  `test_index_skip_observability` 1.
+- Full `unittest discover` over `tests/python` is recorded in the final report
+  for this round; no Editor or commandlet was launched.
 
-Not verified: UE C++ compilation, the real save/verify commandlet path, and any
-native behaviour behind DEF-01/DEF-05.
+Not verified: UE C++ compilation, real transaction/rollback/finalize
+behaviour, the resident-save child-process count in a real Editor, Material /
+DataTable fast-verify read-back, and any native behaviour behind
+DEF-01/DEF-05.
