@@ -1762,8 +1762,10 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 	{
 		FString Operation;
 		FString AssetPath;
+		FString TransactionId;
 		Params->TryGetStringField(TEXT("operation"), Operation);
 		Params->TryGetStringField(TEXT("assetPath"), AssetPath);
+		Params->TryGetStringField(TEXT("transactionId"), TransactionId);
 		TSharedRef<FJsonObject> Target = MakeShared<FJsonObject>();
 		if (const TSharedPtr<FJsonValue> TargetValue = Params->TryGetField(TEXT("target"));
 			TargetValue.IsValid() && TargetValue->Type == EJson::Object)
@@ -1782,7 +1784,7 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 		FString ErrorCode;
 		FString ErrorMessage;
 		SendActionResult(
-			TryVerifyAssetPropertyLiveFastResult(Operation, AssetPath, Target, Result, ErrorCode, ErrorMessage),
+			TryVerifyAssetPropertyLiveFastResult(Operation, AssetPath, Target, TransactionId, Result, ErrorCode, ErrorMessage),
 			Result,
 			ErrorCode,
 			ErrorMessage);

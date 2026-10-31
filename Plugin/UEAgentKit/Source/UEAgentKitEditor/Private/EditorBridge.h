@@ -293,6 +293,7 @@ private:
 		const FString& Operation,
 		const FString& AssetPath,
 		const TSharedPtr<FJsonObject>& Target,
+		const FString& TransactionId,
 		TSharedPtr<FJsonObject>& OutResult,
 		FString& OutErrorCode,
 		FString& OutErrorMessage) const;

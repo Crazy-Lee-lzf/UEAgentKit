@@ -73,33 +73,32 @@ remains unverified.
 
 ## DEF-05 — Material / DataTable writers lack Fast Verify
 
-Status: **limited / not fixed** (precise gap; the fix requires new C++ read APIs
-and a native build).
+Status: **fixed for retained live-write transactions; Native unverified.**
 
-Evidence:
+What changed (round 2):
 
-- `TryVerifyAssetPropertyLiveFastResult`
-  (`Plugin/UEAgentKit/Source/UEAgentKitEditor/Private/EditorBridgeWriteHandlers.cpp`)
-  supports only `setAssetProperty`, `setVariableDefault`,
-  `setComponentProperty`, `setPinDefault`; every other registered operation
-  returns `live-fast-verify-operation-unsupported`.
-- Material and DataTable operations are registered and writable
-  (`LiveWriteMaterialOperations.cpp`, `LiveWriteDataTableOperations.cpp`), but
-  their target resolution/read helpers are file-local; there is no stateless
-  read entry point the fast-verify handler can reuse.
+- The fast-verify request now accepts the exact `transactionId` of the retained
+  live write. `TryVerifyAssetPropertyLiveFastResult` looks that record up in
+  `LiveWriteTransactionRecords`, proves it belongs to this Editor session, the
+  same operation and the same loaded asset/class, then re-resolves the target
+  and reads the current value through `Record->IO->ReadWrittenValueForRevert`.
+  That is the same IO path `ue_undo_asset_property_live` /
+  `ue_discard_asset_property_live` already trust for Material and DataTable
+  writes, so no new per-asset write domain or duplicate read logic was added.
+- The result reports `targetKind=materialParameter|dataTableRow|property`,
+  `targetResolved=true` and the `transactionId`. Missing/foreign/remapped
+  records fail closed with `live-fast-verify-transaction-not-found` /
+  `-target-changed`; a stateless request without a retained record for an
+  unsupported operation still returns
+  `live-fast-verify-operation-unsupported` instead of pretending success.
+- Python sends `transactionId` on both fast-verify paths
+  (`_fast_verify_live_record`, `verify_live_write_fast`).
 
-Not done because: adding those read entry points touches three native files and
-cannot be compiled or exercised in this environment (no UE 5.6 install, no
-Editor allowed). Shipping uncompiled C++ that claims Fast Verify for these ops
-would be worse than the current fail-closed error.
-
-Interim behaviour is honest: Fast Verify on a Material/DataTable operation fails
-with a stable unsupported error; it is never reported as verified. Use the full
-`ue_verify_live_write` path for those operations.
-
-Next slice: expose `ReadLiveMaterialParameterValue` / `ReadLiveDataTableValue`
-(next to the existing writers), branch on them in fast verify, and add native
-tests for Scalar/Vector/Texture/StaticSwitch plus cell/row-field reads.
+Limit: verification is only available while the bridge still retains that
+transaction (same unsaved Editor session). After a save/reload or a new write
+that replaces the record, callers must use the full `ue_verify_live_write`
+path. Native compile, the actual Material/DataTable read-back and the
+structural DataTable undo shapes remain unverified; no UE build was run.
 
 ## DEF-10 — Save returns a stale Revision
 

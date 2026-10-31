@@ -2488,6 +2488,9 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertFalse(verified["validationSucceeded"])
         self.assertEqual(verified["nextAction"], "authorized-save-at-checkpoint")
         self.assertEqual(bridge.calls[-1][0], "editor.verifyAssetPropertyLiveFast")
+        # DEF-05: Material/DataTable ops are verified through the retained
+        # live-write transaction record, so the exact transactionId is sent.
+        self.assertEqual(bridge.calls[-1][1]["transactionId"], TRANSACTION_ID)
 
     def test_fast_resident_verify_wrong_session_rejected(self) -> None:
         class WrongSessionFastVerifyBridge(AgentWorkflowTests.ClosedLoopLiveService):

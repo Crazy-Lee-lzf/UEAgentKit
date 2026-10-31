@@ -573,6 +573,7 @@ class WorkflowLiveMixin:
             "operation": record.operation,
             "assetPath": record.asset_path,
             "target": record.target,
+            "transactionId": record.transaction_id,
         }
         try:
             inspection = self.live_editor_service.call_method(
@@ -629,6 +630,7 @@ class WorkflowLiveMixin:
                 "operation": record.operation,
                 "assetPath": asset_path,
                 "target": record.target,
+                "transactionId": record.transaction_id,
             }
             try:
                 inspection = self.live_editor_service.call_method(
