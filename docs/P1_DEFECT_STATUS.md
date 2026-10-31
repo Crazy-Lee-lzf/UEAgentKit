@@ -85,6 +85,10 @@ What changed (round 2):
   That is the same IO path `ue_undo_asset_property_live` /
   `ue_discard_asset_property_live` already trust for Material and DataTable
   writes, so no new per-asset write domain or duplicate read logic was added.
+- The record read lives in `EditorBridgeRetainedLiveWrite.{h,cpp}` as a
+  read-only helper (no transaction, `Modify`, save or package mutation), keeping
+  `EditorBridgeWriteHandlers.cpp` within its bounded-size guard while allowing
+  the new `transactionId` plumbing.
 - The result reports `targetKind=materialParameter|dataTableRow|property`,
   `targetResolved=true` and the `transactionId`. Missing/foreign/remapped
   records fail closed with `live-fast-verify-transaction-not-found` /

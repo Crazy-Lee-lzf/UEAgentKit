@@ -468,8 +468,12 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertNotIn("const FString& PropertyPath", apply_declaration)
         self.assertNotIn("const FString& ParameterName", apply_declaration)
         self.assertNotIn("const FString& RowName", apply_declaration)
-        # Keep the live-write handler bounded while allowing the exact transaction-chain safety guards.
-        self.assertLess(len(live_write), 24500)
+        # Keep the live-write handler bounded while allowing the exact
+        # transaction-chain safety guards and the transactionId plumbing for
+        # retained Material/DataTable fast verify.  The per-asset read logic
+        # itself lives in EditorBridgeRetainedLiveWrite.cpp (asserted read-only
+        # by test_live_fast_verify_contract), so only the dispatch grows here.
+        self.assertLess(len(live_write), 24700)
 
         # Explicit Undo/Discard must reuse the committed Editor transaction and the
         # retained pre-write snapshot; it must never save the package.

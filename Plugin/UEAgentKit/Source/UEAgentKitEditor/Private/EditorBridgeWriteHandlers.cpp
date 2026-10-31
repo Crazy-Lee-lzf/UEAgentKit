@@ -1,5 +1,6 @@
 #include "EditorBridge.h"
 #include "EditorBridgeHandlerUtils.h"
+#include "EditorBridgeRetainedLiveWrite.h"
 #include "LiveWriteOperationRegistry.h"
 #include "LiveWriteTransaction.h"
 #include "BlueprintWriteCommon.h"
@@ -377,92 +378,16 @@ bool FUEAgentKitEditorBridge::TryVerifyAssetPropertyLiveFastResult(
 		Result->SetStringField(TEXT("targetKind"), TEXT("property"));
 		Result->SetBoolField(TEXT("targetResolved"), true);
 	}
-	else if (!TransactionId.IsEmpty())
+	else if (!TransactionId.IsEmpty()
+		&& !ReadRetainedLiveWriteFastValue(SessionId, Operation, AssetPath, TransactionId,
+			Asset, LiveWriteTransactionRecords, Result, Value, OutErrorCode, OutErrorMessage))
 	{
-		// Material and DataTable writes keep their exact target state in the
-		// retained live-write transaction record.  Reading through that record's
-		// IO re-resolves the target and reads the current value with the same
-		// code path Undo/Discard already trust, instead of duplicating per-asset
-		// read logic here.
-		FGuid RequestedTransactionId;
-		if (!FGuid::Parse(TransactionId, RequestedTransactionId) || !RequestedTransactionId.IsValid())
-		{
-			OutErrorCode = TEXT("live-fast-verify-target-invalid");
-			OutErrorMessage = TEXT("Fast Resident Verify requires one canonical transactionId.");
-			return false;
-		}
-		const TMap<FGuid, TSharedPtr<UEAgentKitLiveWrite::FLiveWriteTransactionRecord>>* AssetRecords =
-			LiveWriteTransactionRecords.Find(AssetPath);
-		const TSharedPtr<UEAgentKitLiveWrite::FLiveWriteTransactionRecord>* Found =
-			AssetRecords != nullptr ? AssetRecords->Find(RequestedTransactionId) : nullptr;
-		if (Found == nullptr || !Found->IsValid())
-		{
-			OutErrorCode = TEXT("live-fast-verify-transaction-not-found");
-			OutErrorMessage = TEXT("No retained live-write transaction matches this exact asset and transactionId.");
-			return false;
-		}
-		const TSharedPtr<UEAgentKitLiveWrite::FLiveWriteTransactionRecord>& Record = *Found;
-		if (Record->SessionId != SessionId
-			|| Record->Operation != Operation
-			|| !Record->Asset.IsValid()
-			|| Record->Asset.Get() != Asset
-			|| Record->ClassPath != Asset->GetClass()->GetPathName())
-		{
-			OutErrorCode = TEXT("live-fast-verify-target-changed");
-			OutErrorMessage = TEXT("The retained live-write transaction does not match this Editor session, operation or asset.");
-			return false;
-		}
-		if (Record->IO == nullptr)
-		{
-			OutErrorCode = TEXT("live-fast-verify-target-not-found");
-			OutErrorMessage = TEXT("The retained live-write transaction has no target IO to read.");
-			return false;
-		}
-		FString RefreshError;
-		if (!Record->IO->RefreshTarget(RefreshError))
-		{
-			OutErrorCode = TEXT("live-fast-verify-target-not-found");
-			OutErrorMessage = TEXT("The retained live-write target could not be re-resolved: ") + RefreshError;
-			return false;
-		}
-		FString ReadErrorCode;
-		FString ReadErrorMessage;
-		if (!Record->IO->ReadWrittenValueForRevert(Value, ReadErrorCode, ReadErrorMessage))
-		{
-			OutErrorCode = ReadErrorCode.IsEmpty()
-				? TEXT("live-fast-verify-read-failed")
-				: *ReadErrorCode;
-			OutErrorMessage = ReadErrorMessage.IsEmpty()
-				? FString(TEXT("The retained live-write target could not be read back."))
-				: ReadErrorMessage;
-			return false;
-		}
-		const FLiveWriteOperationDescriptor* Descriptor =
-			FLiveWriteOperationRegistry::Get().Find(Operation);
-		FString TargetKind(TEXT("retained-live-write"));
-		if (Descriptor != nullptr)
-		{
-			switch (Descriptor->TargetKind)
-			{
-			case ELiveWriteTargetKind::Property:
-				TargetKind = TEXT("property");
-				break;
-			case ELiveWriteTargetKind::MaterialParameter:
-				TargetKind = TEXT("materialParameter");
-				break;
-			case ELiveWriteTargetKind::DataTableRow:
-				TargetKind = TEXT("dataTableRow");
-				break;
-			}
-		}
-		Result->SetStringField(TEXT("targetKind"), TargetKind);
-		Result->SetBoolField(TEXT("targetResolved"), true);
-		Result->SetStringField(TEXT("transactionId"), TransactionId);
+		return false;
 	}
 	else
 	{
 		OutErrorCode = TEXT("live-fast-verify-operation-unsupported");
-		OutErrorMessage = TEXT("Fast Resident Verify supports setAssetProperty, setVariableDefault, setComponentProperty, setPinDefault, and any retained Material/DataTable live-write transactionId.");
+		OutErrorMessage = TEXT("Fast Resident Verify currently supports setAssetProperty, setVariableDefault, setComponentProperty, and setPinDefault.");
 		return false;
 	}
 
