@@ -320,17 +320,23 @@ Verified locally (Python 3.12, no Editor launched; `unittest` in
 - `test_node_move_mcp.py` 10/10
 - `test_tool_registry.py` 4/4 (registry order and all mode counts)
 - `test_mcp_server.py` 20/20
-- `test_agent_workflow.py` 74/74
+- `test_agent_workflow.py` 77/77
 - `test_editor_bridge.py` 27/27
-- `test_reflection_index.py` 12/12
-- full `unittest discover` over `tests/python`: **1926 passed, 20 skipped**
+- `test_reflection_index.py` 13/13
+- `test_freshness.py` 7/7
+- `test_live_fast_verify_contract.py` 4/4
+- `test_cli_duplicate_args.py` 3/3
+- `test_index_skip_observability.py` 1/1
+- full `unittest discover` over `tests/python`: **1940 passed, 20 skipped**
 
 These cover MCP input validation, forwarding, error propagation, the strict
 `TOOL_REGISTRY` order/count agreement (14/28/53/75/89/114/128 depending on
 mode), and static source contracts: token shape, bridge ownership/reset,
 `RequireClean` vs `AllowSessionOwnedDirty`, rollback reusing the single
-transaction helper (no transaction construction in the manager), no UI-lock
-primitives, no process spawning in the wrapper.
+transaction helper with an unlimited internal request cap, the in-transaction
+session finalizer (`writeOccurred`/`sessionFinalized`), no UI-lock primitives,
+no process spawning in the wrapper, and the read-only retained-live-write
+fast-verify helper.
 
 Not verified: UE C++ compilation, real `FScopedTransaction` Undo/Redo across
 several batches, the real rollback transaction and its read-back, save/reload
