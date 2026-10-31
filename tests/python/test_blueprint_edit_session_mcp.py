@@ -567,12 +567,41 @@ class EditSessionSourceContractTests(unittest.TestCase):
         self.assertIn("FScopedTransaction", batch_cpp)
         self.assertIn("AllowSessionOwnedDirty", batch_header)
         self.assertIn("EPackageDirtyGate", batch_cpp)
+        # Internal rollback must not inherit the 128-request transport cap: a
+        # graph with more nodes than one caller batch still rolls back atomically.
+        self.assertIn("NodeMoveRequestLimitUnlimited", batch_header)
+        self.assertIn("NodeMoveRequestLimitUnlimited", cpp)
+        self.assertIn("MaxNodeMovesPerBatch", batch_header)
+        self.assertNotIn("Requests.Num() > MaxNodeMovesPerBatch", batch_cpp)
+        # The session's post-apply finalize runs inside the same transaction, so
+        # a finalizer failure restores the batch instead of reporting failure
+        # with the edit left behind.
+        self.assertIn("FNodeMoveFinalizeFunction", batch_header)
+        self.assertIn("FinalizeBeforeSuccess", batch_cpp)
+        self.assertIn("bOutWriteCommitted", batch_header)
+        finalize_index = batch_cpp.index("if (FinalizeBeforeSuccess)")
+        cancel_index = batch_cpp.index("RestoreAllAndCancel();", finalize_index)
+        finalize_fail_index = batch_cpp.index("return FailBatch(", cancel_index)
+        self.assertGreater(cancel_index, finalize_index)
+        self.assertLess(cancel_index, finalize_fail_index)
+        self.assertIn(
+            "*bOutWriteCommitted = false;",
+            batch_cpp[finalize_index:finalize_fail_index],
+        )
         # The no-token request must not be able to select the dirty gate.
         node_batch = (self.private_root / "EditorBridgeNodeMoveBatch.cpp").read_text(
             encoding="utf-8"
         )
         self.assertIn("EPackageDirtyGate::RequireClean", node_batch)
         self.assertIn("EPackageDirtyGate::AllowSessionOwnedDirty", node_batch)
+        # The handler must hand CommitBatch to the helper, not call it after the
+        # helper already committed.
+        self.assertIn("FinalizeSession", node_batch)
+        self.assertIn("&bWriteCommitted", node_batch)
+        self.assertIn("writeOccurred", node_batch)
+        commit_call = node_batch.index("CommitBatch(")
+        apply_call = node_batch.index("ApplyNodeMoveBatch(")
+        self.assertLess(commit_call, apply_call)
         self.assertIn("blueprint-edit-session-active-token-required", node_batch)
         # No UI lock claim in either handler or docs.
         session_handler = (

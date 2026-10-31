@@ -5,6 +5,33 @@ save / index defects only; no new asset write domains, no UI-lock claim, no
 Editor launch. Status is per item: **fixed**, **limited**, or **not done**, with
 the evidence that exists in this worktree.
 
+## Round 2 (2026-10-31, second long task)
+
+### R2-1 Rollback rejected graphs with more than 128 nodes — fixed
+
+`End(mode=rollback)` built one restore request per bound node and passed them to
+`ApplyNodeMoveBatch`, which capped requests at `MaxNodeMovesPerBatch = 128`, so
+a 129+ node graph could not roll back even if a single node moved. The helper
+now takes an explicit `MaxRequestCount` (default 128) plus
+`NodeMoveRequestLimitUnlimited` for the session restore path; the rollback still
+runs in exactly one `FScopedTransaction` with full validation and read-back.
+Transport batches remain capped at 128.
+
+### R2-2 "failed" after the edit was already applied — fixed by in-transaction finalize
+
+The handler used to call `ApplyNodeMoveBatch` (which commits) and only then
+`CommitBatch`. A post-apply session failure would return an error while the
+nodes stayed moved. `ApplyNodeMoveBatch` now accepts a finalizer that runs
+**inside** the open transaction after the read-back and Dirty confirmation;
+`CommitBatch` is passed as that finalizer. A finalizer failure restores every
+position, Blueprint status/cache and Dirty flag, cancels the transaction, and
+returns the session error with `writeOccurred=false`. Successful responses carry
+`writeOccurred=true` and `sessionFinalized=true`.
+
+Static contract tests pin both behaviours; the real transaction, 129/256-node
+graphs, >128-distinct-node cross-batch rollback and fault injection remain
+Native-unverified (cases listed in `docs/BLUEPRINT_EDIT_SESSION.md`).
+
 ## DEF-01 — ordinary Resident write/save must not cold-start; continuous editing must not need an MCP restart
 
 Status: **limited / not fixed** (root cause located; the fix is a product-policy

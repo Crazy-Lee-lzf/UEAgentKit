@@ -116,9 +116,15 @@ on the game thread before any write:
 Only then is `ApplyNodeMoveBatch` called with
 `EPackageDirtyGate::AllowSessionOwnedDirty`. That gate is **not** reachable from
 a request parameter: it is chosen solely by the handler after the manager
-validated a live token. On success, `CommitBatch` re-reads the graph, advances
-the expected fingerprint/positions/Dirty bit, and returns
-`editSessionUsed=true`, `exclusiveUI=false`, `humanEditingBlocked=false`.
+validated a live token. `CommitBatch` now runs **inside the batch's open
+transaction** as the helper's finalizer, before the batch is reported committed:
+it re-reads the graph and advances the expected fingerprint/positions/Dirty bit.
+If it fails, the helper restores every position, the Blueprint status/cache and
+the pre-write Dirty flag, cancels the transaction, and returns the finalizer's
+error code with `writeOccurred=false`, so an error can no longer describe a
+batch that stayed applied. A successful token batch returns
+`editSessionUsed=true`, `writeOccurred=true`, `sessionFinalized=true`,
+`exclusiveUI=false`, `humanEditingBlocked=false`.
 
 Consequences:
 
@@ -161,11 +167,16 @@ the session. It is deliberately narrow:
   node-set equality, every node at the position the last batch recorded, and the
   live content fingerprint equal to the expected fingerprint.
 - **Restore**: reuses `ApplyNodeMoveBatch` with
-  `EPackageDirtyGate::AllowSessionOwnedDirty`, so exactly one
-  `FScopedTransaction` owns the whole restore, every position is read back, and
-  any read-back/Dirty confirmation failure restores the pre-rollback positions,
-  Blueprint status/dependency cache and Dirty flag and cancels the transaction.
-  A partially applied rollback cannot be reported as success.
+  `EPackageDirtyGate::AllowSessionOwnedDirty` and
+  `NodeMoveRequestLimitUnlimited`, so exactly one `FScopedTransaction` owns the
+  whole restore, every position is read back, and any read-back/Dirty
+  confirmation failure restores the pre-rollback positions, Blueprint
+  status/dependency cache and Dirty flag and cancels the transaction. A
+  partially applied rollback cannot be reported as success. The 128-request cap
+  is a **caller transport limit only**: a rollback may need to restore more
+  nodes than one batch can carry (129/256-node graphs, or many batches touching
+  more than 128 distinct nodes) and still uses one transaction. Every restored
+  request is still fully validated; only the transport cap is lifted.
 - **No-op**: a session whose net effect is zero (or that moved nothing) opens
   no transaction and reports `rolledBack=true`, `restoreTransactionOpened=false`,
   `restoredNodeCount=0` — the positions already equal the initial ones.
@@ -333,3 +344,24 @@ batches -> per-batch Undo/Redo -> `end(mode=rollback)` -> Save/Reload; then
 cross-graph and outside-edit interference, focus changes, PIE, and Bridge Stop
 invalidation, asserting the process PID never changes and no `UnrealEditor-Cmd`
 child appears.
+
+Additional Native cases for the 2026-10-31 fixes (all currently **unverified**):
+
+1. **129-node and 256-node graph, one node moved**: `begin`, move exactly one
+   node with a token batch, `end(mode=rollback)`. Expected: rollback succeeds
+   (no `node-move-batch-limit-exceeded`), exactly one transaction in the Undo
+   history, every other node untouched, `restoredNodeCount=1`.
+2. **Cross-batch rollback over more than 128 distinct nodes**: on a large graph,
+   apply several ≤128-node batches that together move >128 distinct nodes, then
+   roll back. Expected: one transaction, all touched nodes restored to their
+   `begin` positions, `restoredNodeCount` equals the number of moved nodes, no
+   intermediate transaction visible.
+3. **Finalize fault injection**: force `CommitBatch` to fail after the positions
+   have been written (e.g. by invalidating the session's expected fingerprint
+   immediately before finalize in a test build). Expected: the call returns the
+   session error with the batch fully restored, `writeOccurred=false`, the
+   session still active with its pre-batch expected state, and the package
+   Dirty flag back to its pre-batch value. No visible node stays moved.
+4. **Finalize success**: normal token batch returns `writeOccurred=true`,
+   `sessionFinalized=true`, and one Undo step.
+5. **No-op batch**: `writeOccurred=false`, no transaction, no Dirty change.

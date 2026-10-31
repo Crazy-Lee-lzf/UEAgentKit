@@ -39,10 +39,17 @@ namespace UEAgentKitBlueprintEdit
 		bool& bOutChanged,
 		FString& OutErrorCode,
 		FString& OutErrorMessage,
-		const EPackageDirtyGate DirtyGate)
+		const EPackageDirtyGate DirtyGate,
+		const int32 MaxRequestCount,
+		const FNodeMoveFinalizeFunction& FinalizeBeforeSuccess,
+		bool* bOutWriteCommitted)
 	{
 		OutResults.Reset();
 		bOutChanged = false;
+		if (bOutWriteCommitted != nullptr)
+		{
+			*bOutWriteCommitted = false;
+		}
 
 		// Every failure leaves no partial result list behind, so a caller can
 		// never mistake a half-validated batch for a validated one.
@@ -73,7 +80,7 @@ namespace UEAgentKitBlueprintEdit
 				TEXT("node-move-batch-invalid-parameters"),
 				TEXT("A node move batch must contain at least one node."));
 		}
-		if (Requests.Num() > MaxNodeMovesPerBatch)
+		if (MaxRequestCount >= 0 && Requests.Num() > MaxRequestCount)
 		{
 			return Fail(
 				OutErrorCode,
@@ -81,7 +88,7 @@ namespace UEAgentKitBlueprintEdit
 				TEXT("node-move-batch-limit-exceeded"),
 				FString::Printf(
 					TEXT("A node move batch accepts at most %d nodes."),
-					MaxNodeMovesPerBatch));
+					MaxRequestCount));
 		}
 
 		// Index the live graph first.  A duplicate or invalid live GUID makes
@@ -360,7 +367,40 @@ namespace UEAgentKitBlueprintEdit
 				TEXT("The Editor did not confirm the Blueprint package became dirty; the whole batch was restored and its transaction cancelled."));
 		}
 
+		if (FinalizeBeforeSuccess)
+		{
+			// The finalizer runs before the transaction is reported as committed,
+			// so a session post-apply failure cannot leave a visible edit behind
+			// an error response.  Its error code is preserved verbatim.
+			FString FinalizeErrorCode;
+			FString FinalizeErrorMessage;
+			if (!FinalizeBeforeSuccess(true, FinalizeErrorCode, FinalizeErrorMessage))
+			{
+				RestoreAllAndCancel();
+				OutResults.Reset();
+				bOutChanged = false;
+				if (bOutWriteCommitted != nullptr)
+				{
+					*bOutWriteCommitted = false;
+				}
+				const FString FinalMessage = FinalizeErrorMessage.IsEmpty()
+					? FString(TEXT("The post-apply finalizer failed; the whole batch was restored and its transaction cancelled."))
+					: FinalizeErrorMessage + TEXT(" The whole batch was restored and its transaction cancelled.");
+				return FailBatch(
+					OutErrorCode,
+					OutErrorMessage,
+					FinalizeErrorCode.IsEmpty()
+						? TEXT("node-move-batch-finalize-failed")
+						: *FinalizeErrorCode,
+					FinalMessage);
+			}
+		}
+
 		bOutChanged = true;
+		if (bOutWriteCommitted != nullptr)
+		{
+			*bOutWriteCommitted = true;
+		}
 		OutErrorCode.Reset();
 		OutErrorMessage.Reset();
 		return true;

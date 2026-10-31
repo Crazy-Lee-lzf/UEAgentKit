@@ -664,7 +664,10 @@ namespace UEAgentKitBlueprintEdit
 				bRestoreChanged,
 				OutErrorCode,
 				OutErrorMessage,
-				EPackageDirtyGate::AllowSessionOwnedDirty))
+				EPackageDirtyGate::AllowSessionOwnedDirty,
+				// One rollback must restore every node the session bound, not
+				// only the 128-request transport cap of a single caller batch.
+				NodeMoveRequestLimitUnlimited))
 			{
 				const FString Prefix(TEXT("node-move-batch-"));
 				if (OutErrorCode.StartsWith(Prefix, ESearchCase::CaseSensitive))

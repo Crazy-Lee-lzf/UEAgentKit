@@ -384,6 +384,35 @@ bool FUEAgentKitEditorBridge::TryMoveBlueprintNodesResult(
 			TEXT("An Agent edit session is active for this exact Blueprint graph; every further batch must pass its editSessionToken."));
 	}
 
+	// The session's post-apply state update runs inside the same transaction as
+	// the write.  If CommitBatch cannot prove the new state, the helper restores
+	// every position and cancels the transaction, so an error response can never
+	// describe a batch that stayed applied.
+	UEAgentKitBlueprintEdit::FNodeMoveFinalizeFunction FinalizeSession =
+		UEAgentKitBlueprintEdit::FNodeMoveFinalizeFunction();
+	if (bEditSessionBatch)
+	{
+		FinalizeSession = [this, Blueprint, Graph](
+			const bool bBatchChanged,
+			FString& FinalizeCode,
+			FString& FinalizeMessage) -> bool
+		{
+			if (!BlueprintEditSessionManager.IsValid())
+			{
+				FinalizeCode = TEXT("blueprint-edit-session-editor-unavailable");
+				FinalizeMessage = TEXT("The Blueprint edit session manager is unavailable; the batch was restored.");
+				return false;
+			}
+			return BlueprintEditSessionManager->CommitBatch(
+				Blueprint,
+				Graph,
+				bBatchChanged,
+				FinalizeCode,
+				FinalizeMessage);
+		};
+	}
+
+	bool bWriteCommitted = false;
 	if (!UEAgentKitBlueprintEdit::ApplyNodeMoveBatch(
 		Blueprint,
 		Graph,
@@ -394,21 +423,12 @@ bool FUEAgentKitEditorBridge::TryMoveBlueprintNodesResult(
 		OutErrorMessage,
 		bEditSessionBatch
 			? UEAgentKitBlueprintEdit::EPackageDirtyGate::AllowSessionOwnedDirty
-			: UEAgentKitBlueprintEdit::EPackageDirtyGate::RequireClean))
+			: UEAgentKitBlueprintEdit::EPackageDirtyGate::RequireClean,
+		UEAgentKitBlueprintEdit::MaxNodeMovesPerBatch,
+		FinalizeSession,
+		&bWriteCommitted))
 	{
 		return false;
-	}
-	if (bEditSessionBatch)
-	{
-		if (!BlueprintEditSessionManager->CommitBatch(
-			Blueprint,
-			Graph,
-			bChanged,
-			OutErrorCode,
-			OutErrorMessage))
-		{
-			return false;
-		}
 	}
 	TArray<TSharedPtr<FJsonValue>> NodeValues;
 	NodeValues.Reserve(Results.Num());
@@ -448,6 +468,12 @@ bool FUEAgentKitEditorBridge::TryMoveBlueprintNodesResult(
 		Package != nullptr && Package->IsDirty());
 	Result->SetBoolField(TEXT("singleTransaction"), bChanged);
 	Result->SetBoolField(TEXT("editSessionUsed"), bEditSessionBatch);
+	// Success implies the one transaction committed and any session finalizer
+	// already succeeded inside that same transaction.
+	Result->SetBoolField(TEXT("writeOccurred"), bWriteCommitted);
+	Result->SetBoolField(
+		TEXT("sessionFinalized"),
+		bEditSessionBatch && bWriteCommitted);
 	// No UI lock exists: a session authorizes Agent batches by content
 	// fingerprint only, it does not block a person from editing the graph.
 	Result->SetBoolField(TEXT("exclusiveUI"), false);

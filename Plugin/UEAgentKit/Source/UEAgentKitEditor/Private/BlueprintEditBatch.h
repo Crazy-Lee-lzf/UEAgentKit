@@ -34,6 +34,14 @@ namespace UEAgentKitBlueprintEdit
 {
 	constexpr int32 MaxNodeMovesPerBatch = 128;
 	constexpr int32 MaxNodeCoordinate = 1000000;
+	/**
+	 * Internal-only request limit for a session-wide restore.  A caller-supplied
+	 * batch stays capped at MaxNodeMovesPerBatch (transport contract), but one
+	 * rollback must be able to restore every node the session bound, otherwise a
+	 * graph with more than 128 nodes could never roll back.  Every request is
+	 * still fully validated; only the transport cap is lifted.
+	 */
+	constexpr int32 NodeMoveRequestLimitUnlimited = INDEX_NONE;
 
 	struct FNodeMoveRequest
 	{
@@ -74,13 +82,38 @@ namespace UEAgentKitBlueprintEdit
 	};
 
 	/**
+	 * Called after every position was written and read back, still inside the
+	 * one open transaction, before the batch is reported as successful.  A false
+	 * return must leave OutErrorCode/OutErrorMessage set; the helper then
+	 * restores every position, the Blueprint status/cache and the pre-write Dirty
+	 * flag, cancels the transaction, and reports failure with no committed write.
+	 */
+	using FNodeMoveFinalizeFunction = TFunction<bool(
+		bool bChanged,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)>;
+
+	/**
 	 * Validate every request against the live graph and then apply all
 	 * position changes inside one transaction.
 	 *
 	 * On success OutResults holds one entry per request in request order and
 	 * bOutChanged reports whether the batch actually moved anything.  On
 	 * failure no node position is left changed, the package Dirty flag is
-	 * restored, and OutErrorCode is one of the stable node-move-batch-* codes.
+	 * restored, and OutErrorCode is one of the stable node-move-batch-* codes
+	 * (or the finalizer's own code).
+	 *
+	 * MaxRequestCount caps caller-supplied transport requests
+	 * (MaxNodeMovesPerBatch); pass NodeMoveRequestLimitUnlimited only from the
+	 * session restore path, where one atomic undo must cover the whole bound
+	 * graph.
+	 *
+	 * FinalizeBeforeSuccess runs inside the open transaction after the read-back
+	 * and Dirty confirmation.  This is what keeps a session's post-apply state
+	 * update in the same rollback boundary as the write: a finalizer failure
+	 * restores the graph, so the caller never sees "failed" after a visible
+	 * edit.  bOutWriteCommitted is set true only when the transaction committed
+	 * and all writes survived.
 	 */
 	bool ApplyNodeMoveBatch(
 		UBlueprint* Blueprint,
@@ -90,5 +123,8 @@ namespace UEAgentKitBlueprintEdit
 		bool& bOutChanged,
 		FString& OutErrorCode,
 		FString& OutErrorMessage,
-		EPackageDirtyGate DirtyGate = EPackageDirtyGate::RequireClean);
+		EPackageDirtyGate DirtyGate = EPackageDirtyGate::RequireClean,
+		const int32 MaxRequestCount = MaxNodeMovesPerBatch,
+		const FNodeMoveFinalizeFunction& FinalizeBeforeSuccess = FNodeMoveFinalizeFunction(),
+		bool* bOutWriteCommitted = nullptr);
 }
