@@ -32,6 +32,60 @@ Static contract tests pin both behaviours; the real transaction, 129/256-node
 graphs, >128-distinct-node cross-batch rollback and fault injection remain
 Native-unverified (cases listed in `docs/BLUEPRINT_EDIT_SESSION.md`).
 
+## Round 3 (2026-11-01, UE5.6.1 header review + N1 alignment)
+
+### R3-1 Native header review — done, no build run
+
+All P1 API usages were checked against the installed
+`E:\EPICGAME\UE_5.6` (5.6.1, CL 44394996) headers: `FScopedTransaction`,
+`UTransactor`, `UEditorEngine::Trans/CanTransact/IsPlaySessionInProgress`,
+`FBlueprintEditor::GetFocusedGraph/IsEditable/GetBlueprintObj`,
+`UAssetEditorSubsystem::FindEditorForAsset`, `UPackage::SetDirtyFlag`,
+`UEdGraph` fields, `FBlueprintEditorUtils::MarkBlueprintAsModified`,
+`UBlueprint` arrays/status, `FGuid::Parse`, `FDateTime::ToIso8601`,
+`TFunction`, `FJsonObject`, `FAutoConsoleCommand`. Full matrix:
+[P1_NATIVE_READINESS_REVIEW.md](P1_NATIVE_READINESS_REVIEW.md).
+
+One compile-blocking mismatch was found and fixed: the retained fast-verify
+helper took `TSharedPtr<FJsonObject>&` while the handler owns
+`TSharedRef<FJsonObject>` (a `TSharedRef` cannot bind to that reference). It is
+now `const TSharedRef<FJsonObject>&` with a static contract test. This is still
+**not** a successful build.
+
+Residual (documented, not claimed atomic): the manager advances its expected
+state after the finalizer but before the transaction's destructor commits; UE
+offers no commit-failure signal there. If that ever happened, the next
+`ValidateBatch` would fail closed on the live fingerprint/positions. No code can
+currently prove otherwise without Native instrumentation.
+
+### R3-2 Test-only finalizer fault seam for N1-R4.1 — added
+
+`BlueprintEditSession` now exposes, only under
+`#if WITH_DEV_AUTOMATION_TESTS` (UBT sets it 0 for Shipping), a one-shot seam:
+the console command `UEAgentKit.BlueprintEditSession.FailNextFinalize` arms a
+failure of the next `CommitBatch` with
+`blueprint-edit-session-finalize-fault-injected`, before any manager mutation.
+There is no MCP/socket parameter, environment variable or bridge method for it;
+contract tests assert it is absent from `mcp_workflow_tools.py` and
+`EditorBridge.cpp`, and that the fault check precedes the manager mutation.
+N1 must add its `test-seam:finalizer-fault` premise and audit this commit before
+R4.1 can become ready; N1 was not modified.
+
+### R3-3 N1 fast-verify error contract — fixed
+
+`_fast_verify_live_record` and `verify_live_write_fast` used to collapse every
+bridge refusal into `live-fast-verify-failed`. They now preserve a
+`live-fast-verify-*` bridge code (for example
+`live-fast-verify-transaction-not-found` after a save/reload), which is what
+N1-R6.2 expects. Other failures still report `live-fast-verify-failed`.
+
+`_MAX_NODE_MOVE_BATCH = 128` and `node-move-batch-limit-exceeded` already match
+N1-R3.0/R3.4 and were not changed.
+
+N1 pending sync items (N1 branch untouched): add the `test-seam:finalizer-fault`
+premise, audit and whitelist the new P1 commits in `p1AcceptedRevisions`, and
+re-run N1 `selfcheck`/`preflight`; R4.1 stays blocked until a Native run.
+
 ## DEF-01 — ordinary Resident write/save must not cold-start; continuous editing must not need an MCP restart
 
 Status: **fixed (Python/MCP level); Native E2E still unverified**.

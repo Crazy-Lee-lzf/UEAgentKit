@@ -362,12 +362,18 @@ Additional Native cases for the 2026-10-31 fixes (all currently **unverified**):
    roll back. Expected: one transaction, all touched nodes restored to their
    `begin` positions, `restoredNodeCount` equals the number of moved nodes, no
    intermediate transaction visible.
-3. **Finalize fault injection**: force `CommitBatch` to fail after the positions
-   have been written (e.g. by invalidating the session's expected fingerprint
-   immediately before finalize in a test build). Expected: the call returns the
-   session error with the batch fully restored, `writeOccurred=false`, the
-   session still active with its pre-batch expected state, and the package
-   Dirty flag back to its pre-batch value. No visible node stays moved.
+3. **Finalize fault injection**: in a dev-automation build, run the console
+   command `UEAgentKit.BlueprintEditSession.FailNextFinalize` (test-only,
+   `WITH_DEV_AUTOMATION_TESTS` guard, no MCP/env trigger), then send one token
+   batch. Expected: the call returns
+   `blueprint-edit-session-finalize-fault-injected`, the batch is fully restored,
+   `writeOccurred=false`, the session still has its pre-batch expected state, and
+   the Dirty flag is back to its pre-batch value. No visible node stays moved.
+   This seam is source-reviewed only; it has never been compiled or run.
 4. **Finalize success**: normal token batch returns `writeOccurred=true`,
    `sessionFinalized=true`, and one Undo step.
 5. **No-op batch**: `writeOccurred=false`, no transaction, no Dirty change.
+
+Round-3 header review and N1 contract alignment are recorded in
+[P1_NATIVE_READINESS_REVIEW.md](P1_NATIVE_READINESS_REVIEW.md); nothing there is
+Native evidence.

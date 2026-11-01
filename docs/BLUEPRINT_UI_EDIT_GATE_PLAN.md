@@ -9,10 +9,12 @@ criteria for a later slice. It is a plan, not evidence.
 
 ## Why nothing was implemented in this slice
 
-- The development environment has **no UE 5.6 engine source or isolated Editor**
-  available (no `Engine/` tree, no `UnrealEditor.exe` install). API signatures
-  below are therefore marked *unverified* and must be confirmed against the
-  target engine version before any code is written.
+- Correcting an earlier statement: this machine **does** have a UE 5.6.1
+  installation with headers (`E:\EPICGAME\UE_5.6`, CL 44394996). What it does not
+  have is an isolated Editor instance plus authorization to compile or launch
+  one, so no input-gate behaviour can be verified. The API rows below were
+  re-checked against those headers where applicable; the Slate/widget rows that
+  matter for a lock remain *unverified* until an isolated Editor run.
 - The task explicitly forbids registering global Slate input hooks that cannot
   be proven to clean up, and forbids launching or restarting an Editor for
   validation. Without an isolated Editor there is no way to prove release on
