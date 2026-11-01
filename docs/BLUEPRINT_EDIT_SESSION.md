@@ -315,19 +315,19 @@ cannot be ruled out; acceptance would need a documented multi-writer policy.
 Verified locally (Python 3.12, no Editor launched; `unittest` in
 `tests/python`):
 
-- `test_blueprint_edit_session_mcp.py` 16/16
+- `test_blueprint_edit_session_mcp.py` 17/17
 - `test_move_blueprint_nodes_mcp.py` 14/14
 - `test_node_move_mcp.py` 10/10
 - `test_tool_registry.py` 4/4 (registry order and all mode counts)
 - `test_mcp_server.py` 20/20
-- `test_agent_workflow.py` 77/77
+- `test_agent_workflow.py` 78/78
 - `test_editor_bridge.py` 27/27
 - `test_reflection_index.py` 13/13
 - `test_freshness.py` 7/7
-- `test_live_fast_verify_contract.py` 4/4
+- `test_live_fast_verify_contract.py` 5/5
 - `test_cli_duplicate_args.py` 3/3
 - `test_index_skip_observability.py` 1/1
-- full `unittest discover` over `tests/python`: **1940 passed, 20 skipped**
+- full `unittest discover` over `tests/python`: **1943 passed, 20 skipped**
 
 These cover MCP input validation, forwarding, error propagation, the strict
 `TOOL_REGISTRY` order/count agreement (14/28/53/75/89/114/128 depending on

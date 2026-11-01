@@ -225,7 +225,7 @@ Python 3.12, `unittest` in `tests/python`, no Editor launched:
   `test_editor_bridge` 27, `test_reflection_index` 13, `test_freshness` 7,
   `test_live_fast_verify_contract` 3, `test_cli_duplicate_args` 3,
   `test_index_skip_observability` 1.
-- Full `unittest discover` over `tests/python`: **1940 passed, 20 skipped**,
+- Full `unittest discover` over `tests/python`: **1943 passed, 20 skipped**,
   no Editor or commandlet launched.
 
 Not verified: UE C++ compilation, real transaction/rollback/finalize
