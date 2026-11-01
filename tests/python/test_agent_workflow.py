@@ -2492,6 +2492,27 @@ class AgentWorkflowTests(unittest.TestCase):
         # live-write transaction record, so the exact transactionId is sent.
         self.assertEqual(bridge.calls[-1][1]["transactionId"], TRANSACTION_ID)
 
+    def test_fast_verify_preserves_bridge_fail_closed_code(self) -> None:
+        # N1-R6.2 expects a post-reload/retired transaction to surface the exact
+        # bridge reason, not a generic wrapper code.
+        class RetiredTransactionBridge(AgentWorkflowTests.ClosedLoopLiveService):
+            def call_method(self, method: str, params: dict[str, Any], **_: Any) -> dict[str, Any]:
+                if method == "editor.verifyAssetPropertyLiveFast":
+                    raise LiveEditorError(
+                        "live-fast-verify-transaction-not-found",
+                        "No retained live-write transaction matches this exact asset and transactionId.",
+                    )
+                return super().call_method(method, params, **_)
+
+        bridge = RetiredTransactionBridge(dirty=True)
+        service = self._fast_verify_service(bridge)
+        applied = self._apply_scalar_live_write(service, bridge)
+        with self.assertRaises(WorkflowError) as exc:
+            service.verify_live_write_fast(ASSET_PATH, applied["liveApplyReceipt"])
+        self.assertEqual(
+            exc.exception.code, "live-fast-verify-transaction-not-found"
+        )
+
     def test_fast_resident_verify_wrong_session_rejected(self) -> None:
         class WrongSessionFastVerifyBridge(AgentWorkflowTests.ClosedLoopLiveService):
             def call_method(self, method: str, params: dict[str, Any], **_: Any) -> dict[str, Any]:

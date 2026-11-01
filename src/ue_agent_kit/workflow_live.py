@@ -581,6 +581,18 @@ class WorkflowLiveMixin:
                 bridge_parameters,
             )
         except Exception as exc:
+            # Keep the bridge's specific fail-closed reason (for example
+            # live-fast-verify-transaction-not-found after reload) instead of
+            # collapsing every refusal into one generic code.
+            bridge_code = getattr(exc, "code", None)
+            if isinstance(bridge_code, str) and bridge_code.startswith(
+                "live-fast-verify-"
+            ):
+                raise WorkflowError(
+                    bridge_code,
+                    str(exc),
+                    details=getattr(exc, "details", {}),
+                ) from exc
             raise WorkflowError(
                 "live-fast-verify-failed",
                 "The Editor could not complete Fast Resident Verify.",
@@ -638,6 +650,15 @@ class WorkflowLiveMixin:
                     bridge_parameters,
                 )
             except Exception as exc:
+                bridge_code = getattr(exc, "code", None)
+                if isinstance(bridge_code, str) and bridge_code.startswith(
+                    "live-fast-verify-"
+                ):
+                    raise WorkflowError(
+                        bridge_code,
+                        str(exc),
+                        details=getattr(exc, "details", {}),
+                    ) from exc
                 raise WorkflowError(
                     "live-fast-verify-failed",
                     "The Editor could not complete Fast Resident Verify.",
