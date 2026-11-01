@@ -51,6 +51,20 @@ class LiveFastVerifyContractTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, helper)
 
+    def test_helper_result_parameter_accepts_shared_ref(self) -> None:
+        # The handler owns FJsonObject as TSharedRef; a TSharedPtr<FJsonObject>&
+        # parameter would not bind and would fail to compile (found by the
+        # static native header review; no build has been run).
+        header = (PRIVATE / "EditorBridgeRetainedLiveWrite.h").read_text(
+            encoding="utf-8"
+        )
+        helper = (PRIVATE / "EditorBridgeRetainedLiveWrite.cpp").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("const TSharedRef<FJsonObject>& OutResult", header)
+        self.assertIn("const TSharedRef<FJsonObject>& OutResult", helper)
+        self.assertNotIn("TSharedPtr<FJsonObject>& OutResult", header + helper)
+
     def test_handler_dispatches_to_helper_before_rejecting(self) -> None:
         handler = (PRIVATE / "EditorBridgeWriteHandlers.cpp").read_text(
             encoding="utf-8"

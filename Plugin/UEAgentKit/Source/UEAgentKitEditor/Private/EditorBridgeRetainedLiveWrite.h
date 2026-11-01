@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "LiveWriteOperationRegistry.h"
 #include "LiveWriteTransaction.h"
@@ -25,7 +26,7 @@ namespace UEAgentKitEditorBridgePrivate
 		const FString& TransactionId,
 		UObject* Asset,
 		const TMap<FString, TMap<FGuid, TSharedPtr<UEAgentKitLiveWrite::FLiveWriteTransactionRecord>>>& Records,
-		TSharedPtr<FJsonObject>& OutResult,
+		const TSharedRef<FJsonObject>& OutResult,
 		TSharedPtr<FJsonValue>& OutValue,
 		FString& OutErrorCode,
 		FString& OutErrorMessage);
