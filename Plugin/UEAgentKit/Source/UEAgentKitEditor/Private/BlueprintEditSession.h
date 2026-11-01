@@ -84,6 +84,17 @@ namespace UEAgentKitBlueprintEdit
 	/** True only for exactly 64 lowercase hexadecimal characters. */
 	bool IsCanonicalEditSessionToken(const FString& Token);
 
+#if WITH_DEV_AUTOMATION_TESTS
+	/**
+	 * Test-only fault seam (N1-R4.1).  The next CommitBatch call fails right
+	 * before it mutates manager state, so the in-transaction finalizer path can
+	 * be proven to restore the batch.  Compiled only into builds that enable dev
+	 * automation tests; it is not reachable from MCP/socket parameters, the
+	 * environment, or Shipping builds.  The armed flag is consumed once.
+	 */
+	void SetNextCommitBatchFinalizeFaultForTesting(bool bEnabled);
+#endif
+
 	class FBlueprintEditSessionManager final
 	{
 	public:

@@ -9,11 +9,25 @@
 #include "HAL/PlatformProcess.h"
 #include "Misc/DateTime.h"
 #include "UObject/Package.h"
+#if WITH_DEV_AUTOMATION_TESTS
+#include "HAL/IConsoleManager.h"
+#endif
 
 namespace UEAgentKitBlueprintEdit
 {
 	namespace
 	{
+#if WITH_DEV_AUTOMATION_TESTS
+		bool bNextCommitBatchFinalizeFault = false;
+
+		bool ConsumeCommitBatchFinalizeFaultForTesting()
+		{
+			const bool bArmed = bNextCommitBatchFinalizeFault;
+			bNextCommitBatchFinalizeFault = false;
+			return bArmed;
+		}
+#endif
+
 		bool Fail(
 			FString& OutErrorCode,
 			FString& OutErrorMessage,
@@ -503,6 +517,19 @@ namespace UEAgentKitBlueprintEdit
 				TEXT("blueprint-edit-session-package-unavailable"),
 				TEXT("The exact Blueprint has no package."));
 		}
+#if WITH_DEV_AUTOMATION_TESTS
+		if (ConsumeCommitBatchFinalizeFaultForTesting())
+		{
+			// Deliberately fail before any manager mutation, exactly where the
+			// real post-apply proof lives.  The caller (ApplyNodeMoveBatch) must
+			// restore positions/status/Dirty and cancel the transaction.
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("blueprint-edit-session-finalize-fault-injected"),
+				TEXT("Test-only finalizer fault: the batch must be restored and no write committed."));
+		}
+#endif
 		Impl->ExpectedPositions = LivePositions;
 		Impl->ExpectedFingerprint = LiveFingerprint;
 		Impl->bExpectedPackageDirty = Package->IsDirty();
@@ -736,3 +763,28 @@ namespace UEAgentKitBlueprintEdit
 		return true;
 	}
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+namespace UEAgentKitBlueprintEdit
+{
+	namespace
+	{
+		void ArmCommitBatchFinalizeFaultForTesting()
+		{
+			bNextCommitBatchFinalizeFault = true;
+		}
+	}
+
+	void SetNextCommitBatchFinalizeFaultForTesting(const bool bEnabled)
+	{
+		bNextCommitBatchFinalizeFault = bEnabled;
+	}
+
+	// Test-build-only console seam for N1-R4.1.  Shipping and non-automation
+	// builds do not compile this command at all.
+	FAutoConsoleCommand GFailNextBlueprintEditSessionFinalize(
+		TEXT("UEAgentKit.BlueprintEditSession.FailNextFinalize"),
+		TEXT("Test-only: fail the next Blueprint edit-session batch finalizer (dev automation builds only)."),
+		FConsoleCommandDelegate::CreateStatic(&ArmCommitBatchFinalizeFaultForTesting));
+}
+#endif

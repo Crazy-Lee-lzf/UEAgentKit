@@ -522,6 +522,36 @@ class EditSessionSourceContractTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, source)
 
+    def test_finalizer_fault_seam_is_test_only_and_bounded(self) -> None:
+        # N1-R4.1 needs an operator-triggerable, test-build-only seam; it must
+        # never be reachable from MCP/socket parameters or Shipping builds.
+        header = (self.private_root / "BlueprintEditSession.h").read_text(
+            encoding="utf-8"
+        )
+        cpp = (self.private_root / "BlueprintEditSession.cpp").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("#if WITH_DEV_AUTOMATION_TESTS", header)
+        self.assertIn("SetNextCommitBatchFinalizeFaultForTesting", header)
+        self.assertIn("#if WITH_DEV_AUTOMATION_TESTS", cpp)
+        self.assertIn("blueprint-edit-session-finalize-fault-injected", cpp)
+        self.assertIn("UEAgentKit.BlueprintEditSession.FailNextFinalize", cpp)
+        fault_use = cpp.index("if (ConsumeCommitBatchFinalizeFaultForTesting())")
+        mutation = cpp.index("Impl->ExpectedPositions = LivePositions;")
+        self.assertLess(fault_use, mutation)
+        command = cpp.index("FAutoConsoleCommand")
+        self.assertLess(cpp.index("#if WITH_DEV_AUTOMATION_TESTS"), command)
+
+        workflow = (SRC_ROOT / "ue_agent_kit" / "mcp_workflow_tools.py").read_text(
+            encoding="utf-8"
+        )
+        bridge = (self.private_root / "EditorBridge.cpp").read_text(encoding="utf-8")
+        for remote_surface in (workflow, bridge):
+            self.assertNotIn("FailNextFinalize", remote_surface)
+            self.assertNotIn(
+                "SetNextCommitBatchFinalizeFaultForTesting", remote_surface
+            )
+
     def test_cpp_session_manager_is_bridge_owned_and_fingerprint_bound(self) -> None:
         header = (self.private_root / "BlueprintEditSession.h").read_text(
             encoding="utf-8"
