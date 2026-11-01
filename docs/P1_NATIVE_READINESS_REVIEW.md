@@ -124,7 +124,34 @@ not modified).
 - The `WITH_DEV_AUTOMATION_TESTS` command itself has never been compiled; its
   registration and the one-shot behaviour are source-reviewed only.
 
-## 6. Recommendation
+## 6. Resident save / retained fast-verify downstream review
+
+- A resident authorized save reports `saved=true`, `verified=false`,
+  `verificationKind=resident-fast+disk-revision`,
+  `childUnrealProcessCount=0`, and never calls `_export_refresh_candidate`; only
+  `verification_mode=immediate`/`checkpoint` can produce `verified=true`.
+- No downstream path consumes the save response's `verified` flag as a strong
+  verdict. `checkpoint_sets.py` sets a child `verified=true` only from
+  `verify_live_write_checkpoint` (strong, independent export);
+  `verification_trust.py` requires a `verified` semantic stage built from
+  independent canonical/commit evidence; `create_authorized_save_rollback_manifest`
+  uses the backup manifest, revisions and receipt, not `verified`.
+  Therefore a resident save cannot masquerade as Strong Verify.
+- Retained fast verify fails closed on every mismatch: missing/foreign
+  `transactionId` → `live-fast-verify-transaction-not-found`; session,
+  operation, asset or class change → `live-fast-verify-target-changed`;
+  re-resolution failure → `live-fast-verify-target-not-found`; read failure →
+  the IO's own error. Python now preserves these `live-fast-verify-*` codes
+  (`a9aa101`) instead of collapsing them, and the value/session checks remain in
+  `workflow_live.py`.
+- `RefreshTarget` is called only on the retained record's IO, after identity
+  checks; it is not a new write path. No new asset domain or parallel writer was
+  introduced.
+- CLI duplicate rejection and canonical-skip observability were re-read and left
+  unchanged; their tests are in `test_cli_duplicate_args.py` and
+  `test_index_skip_observability.py`.
+
+## 7. Recommendation
 
 1. When Native execution is authorized: build the plugin from this branch, record
    the DLL SHA, then run R1.0 (offline), R1.1, R1.2, R3.1/R3.2/R3.3, R4.0/R4.1/
