@@ -86,6 +86,43 @@ N1 pending sync items (N1 branch untouched): add the `test-seam:finalizer-fault`
 premise, audit and whitelist the new P1 commits in `p1AcceptedRevisions`, and
 re-run N1 `selfcheck`/`preflight`; R4.1 stays blocked until a Native run.
 
+## Round 4 (2026-11-02, N1 native blockers)
+
+Two blockers were found by N1 running the P1 plugin in a real UE 5.6.1 Editor
+(Editor PID 19432, plugin built from P1 `c53b959`). Both were reproduced
+natively, fixed here, and are now covered by Python static/mock regression. Full
+record: [P1_N1_NATIVE_BLOCKERS_FIX_20261102.md](P1_N1_NATIVE_BLOCKERS_FIX_20261102.md).
+
+### R4-1 / N1-DEF-01 Edit-session token was uppercase — fixed
+
+`Begin` generated the 64-hex token with `EGuidFormats::Digits` (`%08X`,
+uppercase) while `IsCanonicalEditSessionToken`, the case-sensitive `End()`
+comparison and the Python `[0-9a-f]{64}` wrapper all require exact lowercase.
+The native effect was `node-move-batch-invalid-parameters` for the token that
+`begin` itself had just returned; a caller could begin and end a session but
+never apply a batch. Fixed in `16f9319` by generating both GUID halves with
+`EGuidFormats::DigitsLower` and asserting the result is canonical. No validator
+was relaxed: uppercase, truncated, non-hex and foreign tokens still fail closed.
+Randomness, session/process/asset/graph binding and the Dirty gate are unchanged.
+
+### R4-2 / N1-DEF-02 Retained fast verify success reported unsupported — fixed
+
+The handler tested the retained read inside a negated compound condition, so a
+**successful** read made the `else if` false and control reached the final
+`else` that returns `live-fast-verify-operation-unsupported`. Material and
+DataTable fast verify could therefore never report `verified=true`. Fixed in
+`7cd0820` by splitting the branch: a non-empty `transactionId` enters the
+retained path, a failed read returns the helper's own precise code, and a
+successful read falls through to the shared value comparison. The
+no-transaction case still returns `operation-unsupported`, the four stateless
+operations are unchanged, and the helper keeps its
+`const TSharedRef<FJsonObject>&` signature. Fail-closed codes
+(`-transaction-not-found`, `-target-changed`, `-target-not-found`,
+`-read-failed`) are unchanged.
+
+Both fixes are **Python-verified only**; no UE build or Editor was started in
+this round, so the native re-verification (N1 R2/R3/R4/R6) is still outstanding.
+
 ## DEF-01 — ordinary Resident write/save must not cold-start; continuous editing must not need an MCP restart
 
 Status: **fixed (Python/MCP level); Native E2E still unverified**.
@@ -219,16 +256,23 @@ recorded as limited/not done).
 
 Python 3.12, `unittest` in `tests/python`, no Editor launched:
 
+- Round-4 focused modules: `test_blueprint_edit_session_mcp` 23 (16 + 3 token
+  source contracts + 3 round-trip/negative cases), `test_live_fast_verify_contract`
+  7 (3 + 3 control-flow/fail-closed + 1 preserved), `test_tool_registry` 4
+  (bounded-handler guard, file 24 637 < 24 700) — all pass.
 - Round-2 focused modules: `test_blueprint_edit_session_mcp` 16,
   `test_move_blueprint_nodes_mcp` 14, `test_node_move_mcp` 10,
   `test_tool_registry` 4, `test_mcp_server` 20, `test_agent_workflow` 77,
   `test_editor_bridge` 27, `test_reflection_index` 13, `test_freshness` 7,
   `test_live_fast_verify_contract` 3, `test_cli_duplicate_args` 3,
   `test_index_skip_observability` 1.
-- Full `unittest discover` over `tests/python`: **1943 passed, 20 skipped**,
+- Full `unittest discover` over `tests/python`: **1951 passed, 20 skipped**
+  (round-4 baseline 1943 passed, 20 skipped; the 8 added tests are round 4),
   no Editor or commandlet launched.
 
 Not verified: UE C++ compilation, real transaction/rollback/finalize
 behaviour, the resident-save child-process count in a real Editor, Material /
 DataTable fast-verify read-back, and any native behaviour behind
-DEF-01/DEF-05.
+DEF-01/DEF-05. Round 4 adds the same limit for R4-1/R4-2: the token round trip
+and the retained `verified=true` path are proven only by Python contract/mock
+tests, and the native re-run remains N1's R2/R3/R4/R6 gate.

@@ -77,7 +77,11 @@ following hold; otherwise nothing is bound and nothing is written:
 
 `begin` returns:
 
-- `editSessionToken`: 64 lowercase hex characters (two concatenated GUIDs);
+- `editSessionToken`: 64 lowercase hex characters (two concatenated GUIDs,
+  generated with `EGuidFormats::DigitsLower`). The lowercase-only shape is
+  enforced by the canonical validator, by the case-sensitive `end` comparison
+  and by the Python wrapper; an uppercase, truncated or otherwise non-canonical
+  token is always rejected (`blueprint-edit-session-token-invalid`);
 - `expectedGraphFingerprint`: the strong content fingerprint described below;
 - `nodeCount`, `createdAtUtc`, `editorSessionId`, `editorProcessId`;
 - `packageDirtyBefore=false`, `packageDirtyAfter=false`;
