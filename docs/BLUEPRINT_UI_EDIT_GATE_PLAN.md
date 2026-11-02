@@ -115,3 +115,123 @@ objects still match). Detection is lazy on the next batch/rollback/`end`; the
 PID/session binding and fingerprint proofs remain the only protection. Eager
 `PostSaveAsset`/Undo/Redo/PIE/editor-close hooks are a separate follow-up and
 must be native-tested for cleanup before shipping.
+
+---
+
+# R7 read-only API verification (2026-11-03)
+
+Status unchanged: **not implemented, no input lock exists, gate not passed.**
+`exclusiveUI` and `humanEditingBlocked` remain `false` everywhere. This section
+only records what the installed UE 5.6.1 headers actually expose, so a later
+slice does not have to guess. No engine source, private header or production
+project was modified.
+
+Installation checked: `E:\EPICGAME\UE_5.6` (5.6.1). All rows below were read
+from headers in that tree.
+
+## Verified API facts
+
+| Fact | Location |
+| --- | --- |
+| `class SGraphEditor : public SCompoundWidget` is declared in a **public** UnrealEd header (no private header needed) | `Editor/UnrealEd/Public/GraphEditor.h:101` |
+| `UEdGraph* GetCurrentGraph() const` is a public inline accessor — exact-graph identity can be proven on the widget | `Editor/UnrealEd/Public/GraphEditor.h` (`GetCurrentGraph`) |
+| `void SetEnabled(TAttribute<bool>)` and `bool IsEnabled() const` exist on every widget | `Runtime/SlateCore/Public/Widgets/SWidget.h:925`, `:931` |
+| `TSlateAttributeRef<bool> GetEnabledStateAttribute() const` gives a public reference to the enabled attribute, so a *previous* state can be snapshotted and restored without touching protected members | `Runtime/SlateCore/Public/Widgets/SWidget.h:1690` |
+| `TSharedPtr<SGraphEditor> OpenGraphAndBringToFront(UEdGraph*, bool bSetFocus = true)` is public and is the only public graph → widget lookup found | `Editor/Kismet/Public/BlueprintEditor.h:282` |
+| `UEdGraph* GetFocusedGraph() const` is public | `Editor/Kismet/Public/BlueprintEditor.h:281` |
+| `IAssetEditorInstance::GetAssociatedTabManager()` is public/pure virtual | `Editor/UnrealEd/Public/Subsystems/AssetEditorSubsystem.h:88` |
+| `FAssetEditorToolkit::GetTabManager()` is public; `virtual void OnClose()` exists | `Editor/UnrealEd/Public/Toolkits/AssetEditorToolkit.h:224`, `:426` |
+| PIE hooks exist: `FEditorDelegates::PreBeginPIE`, `BeginPIE`, `EndPIE`, `OnSwitchBeginPIEAndSIE` | `Editor/UnrealEd/Public/Editor.h:239–259` |
+| There is **no** `FEditorDelegates::PostSaveAsset`; only `PostSaveWorldWithContext` and `PostSaveExternalActors` exist | `Editor/UnrealEd/Public/Editor.h:271`, `:275` |
+| Global input preprocessor registration/unregistration and `GetUserFocusedWidget(uint32)` exist (still rejected) | `Runtime/Slate/Public/Framework/Application/SlateApplication.h:1502–1532`, `:1640` |
+
+P1 already uses the supported editor-resolution pattern:
+`UAssetEditorSubsystem::FindEditorForAsset` → `GetEditorName() ==
+FName("BlueprintEditor")` → `static_cast<FBlueprintEditor*>` →
+`GetBlueprintObj()` identity check (`BlueprintGraphLayoutApply.cpp:2486–2497`).
+Any R7 code should reuse it rather than inventing a cast.
+
+## Narrowest viable mechanism (design only)
+
+Scope: one `SGraphEditor` widget hosting one exact `UEdGraph`, disabled while the
+session holds ownership.
+
+1. **Resolve** the `FBlueprintEditor` for the session's `UBlueprint` with the
+   existing pattern above; if `GetBlueprintObj()` is not the bound Blueprint,
+   report the gate unavailable.
+2. **Acquire** `TSharedPtr<SGraphEditor> Widget =
+   Editor->OpenGraphAndBringToFront(Graph, /*bSetFocus=*/false)`. This is the
+   documented minimum because there is no public "find existing widget for
+   graph" API (`FDocumentTracker` has no public graph lookup in this tree).
+   Verify `Widget.IsValid() && Widget->GetCurrentGraph() == Graph`; otherwise the
+   gate is unavailable and the session must not claim isolation.
+3. **Snapshot** `TSlateAttributeRef<bool> Previous = Widget->GetEnabledStateAttribute()`
+   and store a `TWeakPtr<SGraphEditor>` plus the previous attribute reference.
+4. **Disable** with `Widget->SetEnabled(false)`.
+5. **Re-verify on every batch and on `end`**: weak pointer still valid,
+   `GetCurrentGraph()` still the bound graph, `IsEnabled() == false`. Any
+   mismatch drops the claim instead of assuming it survived.
+6. **Release** by restoring the snapshot (`SetEnabled(Previous.Get())` when the
+   attribute is static; if it is dynamic, re-`Assign` the saved attribute where
+   the API allows, else re-enable only if the pre-state was enabled and record
+   that the original dynamic source could not be restored). Then clear the weak
+   pointer.
+
+An RAII holder (`FTargetGraphGate`) with a destructor that releases on the game
+thread is required, plus an explicit `Release()` on every path below.
+
+### Release paths that must all be proven natively
+
+`end(mode=keep)`; `end(mode=rollback)`; tab close; asset reload/close; Blueprint
+compile or editor reconstruct (widget may be destroyed — the weak pointer going
+invalid must invalidate the claim, never leave a stale "disabled" belief);
+`FEditorDelegates::BeginPIE` / `EndPIE`; Bridge `Stop` (existing
+`BlueprintEditSessionManager.Reset()`); module `ShutdownModule`; an exception
+between acquire and release; Editor crash (process death releases the widget,
+so the next process starts clean).
+
+### Escape hatch
+
+A console command, for example
+`UEAgentKit.BlueprintEditSession.ForceReleaseUIGate`, that restores the enabled
+state and ends the session, compiled in all configurations (unlike the existing
+`WITH_DEV_AUTOMATION_TESTS` finalizer seam) because it is the emergency exit.
+It must be advertised in the docs and covered by a native test.
+
+### Honest reporting
+
+Until R7.1–R7.3 pass natively, keep `exclusiveUI=false` and
+`humanEditingBlocked=false`. A future slice should add a separate field (for
+example `uiGate=unavailable|armed|released`) instead of overloading the existing
+booleans, and must never report `armed` from a stale widget handle.
+
+## Why this is still blocked
+
+- Acquisition has a visible side effect: the only public lookup opens and
+  brings the graph tab to the front, even with `bSetFocus=false`. Whether that
+  is acceptable UX, and whether it disturbs a human mid-edit, needs native
+  observation.
+- Widget recreation on compile/reconstruct can silently drop the gate and
+  re-enable input while the session still believes it is isolated. That
+  fail-open mode must be measured before any `humanEditingBlocked=true`.
+- Restoring a dynamic enabled attribute is not proven; mistakenly freezing it to
+  a bool could permanently disable a graph after release.
+- No public tab → graph-widget mapping exists, so a non-focused open tab cannot
+  be reached without the side effect above.
+
+Alternatives re-evaluated and still rejected: global `IInputProcessor`
+(process-wide; a missed unregister locks the whole Editor), `bEditable` /
+`FBlueprintEditor::IsEditable` (a validation state, not an input gate, and it
+would also block the Agent's own handler), transaction guards (nested-transaction
+protection only), and asset-editor interfaces (no per-asset exclusive-edit lock).
+
+## R7.1–R7.3 test strategy (not executed)
+
+| Case | Setup | Expected |
+| --- | --- | --- |
+| R7.1 direct human drag blocked | begin on graph G; human drags a node | no position change, no transaction, Agent batch still succeeds, fingerprint unchanged across the drag attempt |
+| R7.2 scope isolation | second Blueprint tab and console while G is gated | both remain fully usable; only G is disabled; `IsEnabled()` on G is false and true on the other graph editor |
+| R7.3 release cleanliness | `end(keep)`, `end(rollback)`, tab close, compile, PIE start/stop, Bridge stop, forced exception | G is editable again after every path; a second begin starts from a clean state; no graph remains disabled; escape command restores input even with a broken session |
+
+Only after all three pass may the booleans change. This round implements none of
+it.

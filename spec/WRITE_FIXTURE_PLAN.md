@@ -24,6 +24,22 @@ scripts\RunWriteFixturePlan.cmd ^
   -Mode Reset
 ```
 
+## 并发安全（DEF-07）
+
+- 启动任何 UE Commandlet 之前，脚本只读检查本机是否已有 `UnrealEditor*.exe`
+  进程持有**同一个** `.uproject`。检查点有三个：入口、真正启动
+  `UnrealEditor-Cmd.exe` 之前、清理验证输出 / 独立重导出之前。
+- 同一工程已被打开 → `fixture-project-in-use`，脚本直接失败：不写资产、
+  不清理验证目录。
+- 命令行为空、工程路径为相对路径、工程参数无法判定、8.3 短名、
+  UNC 与盘符混用等无法可靠证明归属的情况 → `fixture-project-lock-unverifiable`，
+  同样阻断。
+- 其他工程的 Editor 不会被阻断。脚本**不会**终止、关闭或向任何既有进程发信号。
+- 判定写入报告目录下的 `concurrency-guard-write.json` /
+  `concurrency-guard-export.json` 供审计；审计写入失败不会改变判定结果。
+- `-Mode` 默认值已改为 `Create`（非破坏性，已存在的目标会被拒绝）。
+  `Reset` 必须显式传入；仓库内既有调用方都显式传 `-Mode`，行为不变。
+
 ## Plan 格式
 
 ```json
