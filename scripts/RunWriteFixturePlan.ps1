@@ -4,7 +4,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$Plan,
     [ValidateSet("Create", "Reset")]
-    [string]$Mode = "Reset",
+    # Create is non-destructive: it refuses targets that already exist.  Reset
+    # deletes and recreates fixtures, so it must always be requested explicitly.
+    [string]$Mode = "Create",
     [string]$Report = "",
     [string]$ValidationReport = "",
     [string]$VerificationOutput = "",
@@ -13,10 +15,16 @@ param(
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "Common.ps1")
+. (Join-Path $PSScriptRoot "FixtureConcurrencyGuard.ps1")
 
 $ToolRoot = Get-UeakToolRoot
 $EngineRoot = Resolve-UeakEngineRoot -EngineRoot $EngineRoot
 $ProjectPath = Resolve-UeakProjectPath -ProjectPath $ProjectPath
+
+# DEF-07 entry gate: prove no Editor holds this exact project before this
+# script creates report directories or touches anything else.
+Assert-UeakFixtureProjectIdle -ProjectPath $ProjectPath -Stage "entry" | Out-Null
+
 $EditorCmd = Join-Path $EngineRoot "Engine\Binaries\Win64\UnrealEditor-Cmd.exe"
 $AgentCmd = Join-Path $PSScriptRoot "ue-agent.cmd"
 $CatalogScript = Join-Path $PSScriptRoot "RunAssetCatalog.ps1"
@@ -155,6 +163,10 @@ Write-Host "Project   : $ProjectPath"
 Write-Host "Mode      : $Mode"
 Write-Host "Plan      : $Plan"
 Write-Host "Report    : $Report"
+# DEF-07 TOCTOU gate: re-prove exclusivity immediately before the commandlet
+# process can open the project.  Nothing has been written or cleared yet.
+Assert-UeakFixtureProjectIdle -ProjectPath $ProjectPath -Stage "write" `
+    -GuardReportPath (Join-Path ([System.IO.Path]::GetDirectoryName($Report)) "concurrency-guard-write.json") | Out-Null
 & $EditorCmd @Arguments
 if ($LASTEXITCODE -ne 0)
 {
@@ -167,6 +179,10 @@ if (!$FixtureReport.valid -or $FixtureReport.status -ne "completed")
     throw "WriteFixturePlan report did not describe a completed plan."
 }
 
+# DEF-07 export gate: the independent re-export also opens this project, so
+# re-prove exclusivity before clearing the previous verification output.
+Assert-UeakFixtureProjectIdle -ProjectPath $ProjectPath -Stage "export" `
+    -GuardReportPath (Join-Path ([System.IO.Path]::GetDirectoryName($Report)) "concurrency-guard-export.json") | Out-Null
 if (Test-Path -LiteralPath $VerificationOutput)
 {
     Remove-Item -LiteralPath $VerificationOutput -Recurse -Force
