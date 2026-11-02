@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -552,6 +553,61 @@ class EditSessionSourceContractTests(unittest.TestCase):
                 "SetNextCommitBatchFinalizeFaultForTesting", remote_surface
             )
 
+    def test_token_generation_is_strict_lowercase_hex(self) -> None:
+        # N1-DEF-01: EGuidFormats::Digits formats with %08X, so the manager
+        # generated an uppercase token that its own lowercase-only validator
+        # (and the Python wrapper) rejected.  The generator must ask for
+        # lowercase instead of relaxing any consumer.
+        cpp = (self.private_root / "BlueprintEditSession.cpp").read_text(
+            encoding="utf-8"
+        )
+        start = cpp.index("Impl->Token =")
+        assignment = cpp[start : cpp.index(";", start)]
+        self.assertIn("EGuidFormats::DigitsLower", assignment)
+        self.assertIsNone(
+            re.search(r"EGuidFormats::Digits(?![A-Za-z])", assignment),
+            "the session token must not be generated with the uppercase "
+            "EGuidFormats::Digits format",
+        )
+        # Two independent GUIDs keep the token random and never reused.
+        self.assertEqual(assignment.count("FGuid::NewGuid()"), 2)
+
+    def test_token_consumers_stay_strict_lowercase_and_case_sensitive(self) -> None:
+        cpp = (self.private_root / "BlueprintEditSession.cpp").read_text(
+            encoding="utf-8"
+        )
+        # The validator must keep accepting only ASCII lowercase hex.
+        validator = cpp[
+            cpp.index("bool IsCanonicalEditSessionToken") : cpp.index(
+                "bool FBlueprintEditSessionManager::Begin"
+            )
+        ]
+        self.assertIn("EditSessionTokenLength", validator)
+        self.assertIn("TEXT('f')", validator)
+        self.assertNotIn("TEXT('A')", validator)
+        self.assertNotIn("TEXT('F')", validator)
+        self.assertNotIn("ToLower", validator)
+        self.assertNotIn("CaseInsensitive", validator)
+        # Match and End compare case-sensitively, so a caller cannot mask a
+        # generation bug by lowercasing the value itself.
+        self.assertEqual(
+            cpp.count("Token.Equals(Impl->Token, ESearchCase::CaseSensitive)"), 2
+        )
+
+    def test_python_wrapper_token_regex_stays_anchored_lowercase(self) -> None:
+        workflow = (
+            SRC_ROOT / "ue_agent_kit" / "mcp_workflow_tools.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            '_CANONICAL_EDIT_SESSION_TOKEN = re.compile(r"[0-9a-f]{64}")', workflow
+        )
+        # fullmatch, not match/search: the whole 64 characters must be hex.
+        self.assertEqual(
+            workflow.count("_CANONICAL_EDIT_SESSION_TOKEN.fullmatch("), 2
+        )
+        self.assertNotIn("_CANONICAL_EDIT_SESSION_TOKEN.match(", workflow)
+        self.assertNotIn("_CANONICAL_EDIT_SESSION_TOKEN.search(", workflow)
+
     def test_cpp_session_manager_is_bridge_owned_and_fingerprint_bound(self) -> None:
         header = (self.private_root / "BlueprintEditSession.h").read_text(
             encoding="utf-8"
@@ -643,6 +699,101 @@ class EditSessionSourceContractTests(unittest.TestCase):
         self.assertIn('TEXT("restoreTransactionOpened")', session_handler)
         self.assertNotIn("RegisterInputPreProcessor", session_handler)
         self.assertNotIn("RegisterInputPreProcessor", cpp)
+
+
+class TokenProtocolRoundTripTests(unittest.TestCase):
+    """N1-DEF-01 regression at the wrapper boundary.
+
+    The token produced by begin must travel unchanged through move and end,
+    and only canonical lowercase 64-hex may ever enter the protocol.
+    """
+
+    def test_begin_token_is_forwarded_verbatim_to_move_and_end(self) -> None:
+        live = _FakeLiveEditorService()
+        server, _ = _register(live_editor_service=live)
+        begin = _call(
+            server,
+            BEGIN_TOOL,
+            asset_path=ASSET,
+            graph_guid=GRAPH,
+            experimental=True,
+        )
+        self.assertTrue(begin["ok"])
+        token = begin["result"]["editSessionToken"]
+        self.assertRegex(token, r"\A[0-9a-f]{64}\Z")
+
+        moved = _call(
+            server,
+            MOVE_TOOL,
+            asset_path=ASSET,
+            graph_guid=GRAPH,
+            nodes=[_entry()],
+            edit_session_token=token,
+        )
+        self.assertTrue(moved["ok"])
+        ended = _call(server, END_TOOL, edit_session_token=token)
+        self.assertTrue(ended["ok"])
+
+        self.assertEqual(
+            [call[0] for call in live.calls],
+            [BEGIN_METHOD, MOVE_METHOD, END_METHOD],
+        )
+        self.assertEqual(live.calls[1][1]["editSessionToken"], token)
+        self.assertEqual(live.calls[2][1]["editSessionToken"], token)
+
+    def test_non_canonical_token_variants_never_reach_the_bridge(self) -> None:
+        live = _FakeLiveEditorService()
+        server, _ = _register(live_editor_service=live)
+        for variant in (
+            TOKEN.upper(),
+            TOKEN.replace("a", "A").replace("b", "B"),
+            TOKEN[:-1],
+            TOKEN + "0",
+            TOKEN[:-1] + "g",
+        ):
+            payload = _call(
+                server,
+                MOVE_TOOL,
+                asset_path=ASSET,
+                graph_guid=GRAPH,
+                nodes=[_entry()],
+                edit_session_token=variant,
+            )
+            self.assertFalse(payload["ok"], variant)
+            self.assertEqual(
+                payload["error"]["code"],
+                "blueprint-edit-session-token-invalid",
+                variant,
+            )
+        self.assertEqual(live.calls, [])
+
+    def test_foreign_well_shaped_token_is_left_to_the_editor_to_reject(self) -> None:
+        # A different 64-lowercase token is shape-valid but belongs to no
+        # session.  The wrapper must forward it and surface the Editor's
+        # fail-closed code unchanged rather than guessing.
+        other = "f" * 64
+        live = _FakeLiveEditorService(
+            error=LiveEditorError(
+                "blueprint-edit-session-token-invalid",
+                "The edit session token does not match the active session.",
+            )
+        )
+        server, _ = _register(live_editor_service=live)
+        payload = _call(
+            server,
+            MOVE_TOOL,
+            asset_path=ASSET,
+            graph_guid=GRAPH,
+            nodes=[_entry()],
+            edit_session_token=other,
+        )
+        self.assertFalse(payload["ok"])
+        self.assertEqual(
+            payload["error"]["code"], "blueprint-edit-session-token-invalid"
+        )
+        self.assertNotIn("result", payload)
+        self.assertEqual(len(live.calls), 1)
+        self.assertEqual(live.calls[0][1]["editSessionToken"], other)
 
 
 if __name__ == "__main__":

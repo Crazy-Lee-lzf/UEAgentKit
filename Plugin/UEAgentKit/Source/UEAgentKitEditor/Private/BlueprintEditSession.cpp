@@ -294,8 +294,18 @@ namespace UEAgentKitBlueprintEdit
 		}
 
 		Impl->bActive = true;
-		Impl->Token = FGuid::NewGuid().ToString(EGuidFormats::Digits)
-			+ FGuid::NewGuid().ToString(EGuidFormats::Digits);
+		// The token protocol is strict 64-character lowercase hex: every
+		// consumer (IsCanonicalEditSessionToken, the case-sensitive End()
+		// comparison and the Python wrapper) accepts only ASCII lowercase.
+		// EGuidFormats::Digits formats with %08X (uppercase) and therefore
+		// produced a token this plugin's own validator rejects, so the
+		// generator must request the lowercase format explicitly.
+		Impl->Token = FGuid::NewGuid().ToString(EGuidFormats::DigitsLower)
+			+ FGuid::NewGuid().ToString(EGuidFormats::DigitsLower);
+		checkf(
+			IsCanonicalEditSessionToken(Impl->Token),
+			TEXT("A generated Blueprint edit session token must be exactly %d lowercase hex characters."),
+			EditSessionTokenLength);
 		Impl->AssetPath = AssetPath;
 		Impl->GraphGuid = Graph->GraphGuid;
 		Impl->BridgeSessionId = BridgeSessionId;
