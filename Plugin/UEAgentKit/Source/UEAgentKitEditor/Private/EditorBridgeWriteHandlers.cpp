@@ -378,11 +378,14 @@ bool FUEAgentKitEditorBridge::TryVerifyAssetPropertyLiveFastResult(
 		Result->SetStringField(TEXT("targetKind"), TEXT("property"));
 		Result->SetBoolField(TEXT("targetResolved"), true);
 	}
-	else if (!TransactionId.IsEmpty()
-		&& !ReadRetainedLiveWriteFastValue(SessionId, Operation, AssetPath, TransactionId,
-			Asset, LiveWriteTransactionRecords, Result, Value, OutErrorCode, OutErrorMessage))
+	else if (!TransactionId.IsEmpty())
 	{
-		return false;
+		// Failure keeps the helper's exact fail-closed code; success compares below.
+		if (!ReadRetainedLiveWriteFastValue(SessionId, Operation, AssetPath, TransactionId,
+			Asset, LiveWriteTransactionRecords, Result, Value, OutErrorCode, OutErrorMessage))
+		{
+			return false;
+		}
 	}
 	else
 	{
