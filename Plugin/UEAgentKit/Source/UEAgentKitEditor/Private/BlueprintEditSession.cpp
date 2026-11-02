@@ -11,6 +11,7 @@
 #include "UObject/Package.h"
 #if WITH_DEV_AUTOMATION_TESTS
 #include "HAL/IConsoleManager.h"
+#include "BlueprintEditSessionUIGate.h"
 #endif
 
 namespace UEAgentKitBlueprintEdit
@@ -174,6 +175,10 @@ namespace UEAgentKitBlueprintEdit
 
 	void FBlueprintEditSessionManager::Reset()
 	{
+#if WITH_DEV_AUTOMATION_TESTS
+		// Restores the widget before the session state disappears.
+		FBlueprintEditSessionUIGate::Get().ClearSessionTarget();
+#endif
 		Impl->bActive = false;
 		Impl->Token.Reset();
 		Impl->AssetPath.Reset();
@@ -330,6 +335,11 @@ namespace UEAgentKitBlueprintEdit
 		OutInfo.ProcessId = Impl->ProcessId;
 		OutInfo.NodeCount = Positions.Num();
 		OutInfo.CreatedAtUtc = Impl->CreatedAtUtc;
+#if WITH_DEV_AUTOMATION_TESTS
+		// Records the target only.  The test-only UI gate stays disarmed until
+		// an explicit console command arms it; production never acquires it.
+		FBlueprintEditSessionUIGate::Get().SetSessionTarget(Blueprint, Graph);
+#endif
 		OutErrorCode.Reset();
 		OutErrorMessage.Reset();
 		return true;
@@ -378,6 +388,11 @@ namespace UEAgentKitBlueprintEdit
 				TEXT("blueprint-edit-session-editor-session-mismatch"),
 				TEXT("The Editor process no longer matches the one that began this edit session."));
 		}
+#if WITH_DEV_AUTOMATION_TESTS
+		// Observe only: a lost/rebuild widget is recorded instead of silently
+		// claiming the graph is still gated.  This never gates the write itself.
+		FBlueprintEditSessionUIGate::Get().Query();
+#endif
 		if (Blueprint == nullptr || Graph == nullptr
 			|| Impl->Blueprint.Get() != Blueprint
 			|| Impl->Graph.Get() != Graph)
@@ -752,6 +767,11 @@ namespace UEAgentKitBlueprintEdit
 			: nullptr;
 		OutInfo.bPackageDirtyAfter = Package != nullptr && Package->IsDirty();
 
+#if WITH_DEV_AUTOMATION_TESTS
+		// Release the test-only widget gate on both keep and rollback before
+		// the session stops being observable.
+		FBlueprintEditSessionUIGate::Get().ClearSessionTarget();
+#endif
 		Impl->bActive = false;
 		Impl->Token.Reset();
 		Impl->AssetPath.Reset();
