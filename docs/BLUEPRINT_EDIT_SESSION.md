@@ -338,15 +338,19 @@ These cover MCP input validation, forwarding, error propagation, the strict
 mode), and static source contracts: token shape, bridge ownership/reset,
 `RequireClean` vs `AllowSessionOwnedDirty`, rollback reusing the single
 transaction helper with an unlimited internal request cap, the in-transaction
-session finalizer (`writeOccurred`/`sessionFinalized`), no UI-lock primitives,
+session finalizer (`writeOccurred`/`sessionFinalized`), no **production** UI-lock
+primitive (a test-only, `WITH_DEV_AUTOMATION_TESTS`-guarded prototype exists and
+is never armed by a request path — see
+[R7_SCOPED_UI_GATE_PROTOTYPE_20261103.md](R7_SCOPED_UI_GATE_PROTOTYPE_20261103.md)),
 no process spawning in the wrapper, and the read-only retained-live-write
 fast-verify helper.
 
 Not verified: UE C++ compilation, real `FScopedTransaction` Undo/Redo across
 several batches, the real rollback transaction and its read-back, save/reload
-persistence, PIE behavior, multi-window focus changes, and any UI lock. This
-slice is statically audited only; it has **no** Native build or Editor evidence,
-so that remains a required follow-up before any acceptance claim.
+persistence, PIE behavior, multi-window focus changes, and any UI-lock behaviour
+(the test-only prototype has never been compiled or run). This slice is
+statically audited only; it has **no** Native build or Editor evidence, so that
+remains a required follow-up before any acceptance claim.
 
 Required Native acceptance (not executed here; needs an isolated UE 5.6 copy,
 not a cold start of the production Editor): Begin -> 10 consecutive position

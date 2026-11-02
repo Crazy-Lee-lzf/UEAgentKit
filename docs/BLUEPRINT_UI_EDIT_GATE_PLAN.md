@@ -1,13 +1,17 @@
 # Blueprint edit session: human/UI edit isolation plan
 
-Status: **not implemented; gate not passed**. The shipped session keeps
-`exclusiveUI=false`, `humanEditingBlocked=false` and `requiresUserNotEdit=true`.
-No UI lock is claimed anywhere in code, responses, tests or docs.
+Status: **not enabled, natively unverified, gate not passed**. A test-only,
+compile-guarded prototype now exists (`BlueprintEditSessionUIGate`; see
+[R7_SCOPED_UI_GATE_PROTOTYPE_20261103.md](R7_SCOPED_UI_GATE_PROTOTYPE_20261103.md)),
+but no production path ever arms it: arming requires an explicit host console
+command in a `WITH_DEV_AUTOMATION_TESTS` build. The shipped session keeps
+`exclusiveUI=false`, `humanEditingBlocked=false` and `requiresUserNotEdit=true`,
+and no UI lock is claimed in any response, test or user-facing document.
 
 This document records the API assessment and the exact native acceptance
-criteria for a later slice. It is a plan, not evidence.
+criteria. The prototype is a measurement vehicle, not evidence.
 
-## Why nothing was implemented in this slice
+## Why the earlier slice implemented nothing
 
 - Correcting an earlier statement: this machine **does** have a UE 5.6.1
   installation with headers (`E:\EPICGAME\UE_5.6`, CL 44394996). What it does not
