@@ -2,10 +2,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
-#include "BlueprintEditor.h"
-#include "Editor.h"
 #include "HAL/IConsoleManager.h"
-#include "Subsystems/AssetEditorSubsystem.h"
 
 namespace UEAgentKitBlueprintEdit
 {
@@ -30,8 +27,7 @@ namespace UEAgentKitBlueprintEdit
 
 	void FBlueprintEditSessionUIGate::SetSessionTarget(UBlueprint* InBlueprint, UEdGraph* InGraph)
 	{
-		// A new target always starts disarmed: a previous widget must never leak
-		// a disabled state into the next session.
+		// Records weak pointers only.  No Slate access, no widget mutation.
 		Release();
 		Blueprint = InBlueprint;
 		Graph = InGraph;
@@ -51,133 +47,34 @@ namespace UEAgentKitBlueprintEdit
 	bool FBlueprintEditSessionUIGate::Arm(FString& OutError)
 	{
 		OutError.Reset();
-		if (State == EUIGateState::Armed)
-		{
-			return true;
-		}
 
-		UBlueprint* BoundBlueprint = Blueprint.Get();
-		UEdGraph* BoundGraph = Graph.Get();
-		if (BoundBlueprint == nullptr || BoundGraph == nullptr)
-		{
-			OutError = TEXT("no-active-session-target");
-			State = EUIGateState::Unavailable;
-			Reason = OutError;
-			LogUIGateRefused(OutError);
-			return false;
-		}
-
-		UAssetEditorSubsystem* AssetEditorSubsystem =
-			GEditor != nullptr ? GEditor->GetEditorSubsystem<UAssetEditorSubsystem>() : nullptr;
-		if (AssetEditorSubsystem == nullptr)
-		{
-			OutError = TEXT("asset-editor-subsystem-unavailable");
-			State = EUIGateState::Unavailable;
-			Reason = OutError;
-			LogUIGateRefused(OutError);
-			return false;
-		}
-
-		IAssetEditorInstance* Instance = AssetEditorSubsystem->FindEditorForAsset(BoundBlueprint, false);
-		if (Instance == nullptr || Instance->GetEditorName() != FName(TEXT("BlueprintEditor")))
-		{
-			OutError = TEXT("blueprint-editor-not-open");
-			State = EUIGateState::Unavailable;
-			Reason = OutError;
-			LogUIGateRefused(OutError);
-			return false;
-		}
-
-		FBlueprintEditor* BlueprintEditor = static_cast<FBlueprintEditor*>(Instance);
-		if (BlueprintEditor->GetBlueprintObj() != BoundBlueprint)
-		{
-			OutError = TEXT("blueprint-editor-mismatch");
-			State = EUIGateState::Unavailable;
-			Reason = OutError;
-			LogUIGateRefused(OutError);
-			return false;
-		}
-
-		// Side-effect guard: only arm the graph that is already focused, so the
-		// single public widget lookup cannot create or reorder a tab.
-		if (BlueprintEditor->GetFocusedGraph() != BoundGraph)
-		{
-			OutError = TEXT("graph-not-focused");
-			State = EUIGateState::Unavailable;
-			Reason = OutError;
-			LogUIGateRefused(OutError);
-			return false;
-		}
-
-		TSharedPtr<SGraphEditor> GraphWidget = BlueprintEditor->OpenGraphAndBringToFront(BoundGraph, false);
-		if (!GraphWidget.IsValid() || GraphWidget->GetCurrentGraph() != BoundGraph)
-		{
-			OutError = TEXT("graph-widget-unavailable");
-			State = EUIGateState::Unavailable;
-			Reason = OutError;
-			LogUIGateRefused(OutError);
-			return false;
-		}
-
-		if (!GraphWidget->IsEnabled())
-		{
-			// Already non-interactive for another reason; taking ownership would
-			// make release ambiguous, so refuse instead.
-			OutError = TEXT("graph-widget-already-disabled");
-			State = EUIGateState::Unavailable;
-			Reason = OutError;
-			LogUIGateRefused(OutError);
-			return false;
-		}
-
-		const auto EnabledState = GraphWidget->GetEnabledStateAttribute();
-		SavedEnabledState = EnabledState.ToAttribute();
-		bSavedStateWasBound = EnabledState.IsBound();
-		bSavedWasEnabled = GraphWidget->IsEnabled();
-
-		GraphWidget->SetEnabled(false);
-		if (GraphWidget->IsEnabled())
-		{
-			// SetEnabled assigns the cached value synchronously, so a still
-			// enabled widget means the disable was not applied.
-			GraphWidget->SetEnabled(SavedEnabledState);
-			OutError = TEXT("graph-widget-disable-unverified");
-			State = EUIGateState::Unavailable;
-			Reason = OutError;
-			LogUIGateRefused(OutError);
-			return false;
-		}
-
-		Widget = GraphWidget;
-		++Generation;
-		State = EUIGateState::Armed;
-		Reason.Reset();
-		LogUIGate(FString::Printf(
-			TEXT("armed generation=%d bound=%d"),
-			Generation,
-			bSavedStateWasBound ? 1 : 0));
-		return true;
+		// FAIL CLOSED (R7, 2026-11-04).
+		//
+		// A reversible arm needs the original TAttribute<bool> so that a bound
+		// getter can be restored on release.  UE 5.6.1 keeps that accessor
+		// protected: SWidget::GetEnabledStateAttribute() lives in the
+		// `protected:` block starting at SWidget.h:1678, which N1's native
+		// build reproduced as error C2248.  SWidget::SetEnabled() replaces the
+		// attribute, so a release could only guess `true`, permanently
+		// flattening any dynamic binding.
+		//
+		// Therefore this prototype must not disable anything.  The previous
+		// acquisition sequence (focus check -> OpenGraphAndBringToFront ->
+		// identity check -> SetEnabled(false)) was removed rather than kept
+		// behind a flag; it remains in git history at 5c92e0c for review.
+		OutError = TEXT("enabled-attribute-not-restorable");
+		State = EUIGateState::Unavailable;
+		Reason = OutError;
+		LogUIGateRefused(OutError);
+		return false;
 	}
 
 	void FBlueprintEditSessionUIGate::Release()
 	{
-		TSharedPtr<SGraphEditor> Pinned = Widget.Pin();
-		if (Pinned.IsValid())
-		{
-			// Restores the exact attribute captured at arm time; a bound getter
-			// is re-bound rather than frozen to a bool.
-			Pinned->SetEnabled(SavedEnabledState);
-			if (!bSavedStateWasBound && Pinned->IsEnabled() != bSavedWasEnabled)
-			{
-				LogUIGate(TEXT("release did not restore the previous enabled state"));
-			}
-			LogUIGate(FString::Printf(TEXT("released generation=%d"), Generation));
-		}
-
+		// Nothing is disabled in this revision, so there is nothing to restore.
+		// The weak handle stays part of the surface so a future reversible
+		// implementation has exactly one place to release from.
 		Widget.Reset();
-		SavedEnabledState = TAttribute<bool>();
-		bSavedStateWasBound = false;
-		bSavedWasEnabled = false;
 		if (State == EUIGateState::Armed)
 		{
 			State = EUIGateState::Idle;
@@ -189,7 +86,6 @@ namespace UEAgentKitBlueprintEdit
 		FUIGateSnapshot Snapshot;
 		Snapshot.State = State;
 		Snapshot.Reason = Reason;
-		Snapshot.bSavedStateWasBound = bSavedStateWasBound;
 		Snapshot.Generation = Generation;
 
 		if (State != EUIGateState::Armed)
@@ -197,13 +93,12 @@ namespace UEAgentKitBlueprintEdit
 			return Snapshot;
 		}
 
+		// Dormant in this revision (Arm never succeeds), kept so a future
+		// reversible implementation cannot silently claim a stale handle.
 		TSharedPtr<SGraphEditor> Pinned = Widget.Pin();
 		Snapshot.bWidgetValid = Pinned.IsValid();
 		if (!Pinned.IsValid())
 		{
-			// Compile/reconstruct or tab teardown destroyed the widget; the new
-			// widget is enabled by construction, so the gate is gone and must
-			// never be reported as still isolated.
 			State = EUIGateState::Lost;
 			Reason = TEXT("widget-destroyed");
 		}
@@ -251,13 +146,12 @@ namespace UEAgentKitBlueprintEdit
 		{
 			const FUIGateSnapshot Snapshot = FBlueprintEditSessionUIGate::Get().Query();
 			LogUIGate(FString::Printf(
-				TEXT("state=%d reason=%s valid=%d graphMatches=%d enabled=%d bound=%d generation=%d"),
+				TEXT("state=%d reason=%s valid=%d graphMatches=%d enabled=%d generation=%d"),
 				static_cast<int32>(Snapshot.State),
 				*Snapshot.Reason,
 				Snapshot.bWidgetValid ? 1 : 0,
 				Snapshot.bGraphMatches ? 1 : 0,
 				Snapshot.bWidgetEnabled ? 1 : 0,
-				Snapshot.bSavedStateWasBound ? 1 : 0,
 				Snapshot.Generation));
 		}
 
@@ -265,17 +159,17 @@ namespace UEAgentKitBlueprintEdit
 		// parameters; it exists so a person can always restore input.
 		FAutoConsoleCommand GArmUIGate(
 			TEXT("UEAgentKit.BlueprintEditSession.ArmUIGate"),
-			TEXT("Test-only: disable the exact focused graph widget of the active Blueprint edit session (dev automation builds only)."),
+			TEXT("Test-only: arm the scoped graph gate. Always fails closed with enabled-attribute-not-restorable in this build (dev automation builds only)."),
 			FConsoleCommandWithArgsDelegate::CreateStatic(&ArmUIGateCommand));
 
 		FAutoConsoleCommand GReleaseUIGate(
 			TEXT("UEAgentKit.BlueprintEditSession.ReleaseUIGate"),
-			TEXT("Test-only: restore the graph widget enabled state and drop the UI gate (dev automation builds only)."),
+			TEXT("Test-only: drop the UI gate bookkeeping (dev automation builds only)."),
 			FConsoleCommandWithArgsDelegate::CreateStatic(&ReleaseUIGateCommand));
 
 		FAutoConsoleCommand GUIGateStatus(
 			TEXT("UEAgentKit.BlueprintEditSession.UIGateStatus"),
-			TEXT("Test-only: print the UI gate state and revalidate widget liveness (dev automation builds only)."),
+			TEXT("Test-only: print the UI gate state (dev automation builds only)."),
 			FConsoleCommandWithArgsDelegate::CreateStatic(&UIGateStatusCommand));
 	}
 }

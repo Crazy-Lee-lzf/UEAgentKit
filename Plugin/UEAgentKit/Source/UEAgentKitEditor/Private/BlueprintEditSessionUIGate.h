@@ -11,22 +11,28 @@
 /**
  * Test-only scoped input gate for one exact Blueprint graph widget.
  *
- * This is deliberately NOT wired into any production request path.  Production
- * responses keep `exclusiveUI=false` and `humanEditingBlocked=false`; nothing
- * here may change that until a Native UI acceptance run proves every release
- * path.
+ * CURRENT STATE: DISABLED / FAIL-CLOSED.  Arm() always refuses with
+ * `enabled-attribute-not-restorable`, so this build never disables any widget.
  *
- * Safety properties this prototype is built on (all public UE 5.6.1 API):
- *  - it disables exactly one SGraphEditor widget, never the Editor window,
- *    never another tab, never the console and never a global input hook;
- *  - it only arms when the bound graph is already the focused graph, so the
- *    only public widget lookup (OpenGraphAndBringToFront) cannot create or
- *    reorder a tab;
- *  - it snapshots the exact previous enabled attribute via
- *    SWidget::GetEnabledStateAttribute().ToAttribute(), which preserves a bound
- *    getter, and restores that attribute on release;
- *  - it holds the widget by TWeakPtr and reports Lost instead of claiming
- *    isolation when the widget is destroyed, re-enabled or re-pointed.
+ * Why: UE 5.6.1 exposes no public way to read the current EnabledState
+ * attribute.  `SWidget::SetEnabled(TAttribute<bool>)` and `SWidget::IsEnabled()`
+ * are public, but the only accessor that returns the attribute itself,
+ * `SWidget::GetEnabledStateAttribute()`, is declared in the `protected:` block
+ * that starts at SWidget.h:1678 (verified against the installed engine and by
+ * N1's native compile: error C2248).  Without that accessor the original
+ * TAttribute<bool> -- including a bound getter -- cannot be snapshotted, so any
+ * SetEnabled(false) would be irreversible: restoring `true` would permanently
+ * flatten a dynamic binding.
+ *
+ * The previous revision of this file claimed the accessor was public and that
+ * "exact restore" was proven.  That claim was wrong and is corrected here; see
+ * docs/R7_ENABLED_BINDING_SAFETY_REVIEW_20261104.md.
+ *
+ * What remains is the inert state machine (target registration, status query,
+ * release bookkeeping) and the host-only console commands, kept so a future
+ * public-API-safe mechanism can be reviewed against the same surface.  No
+ * production path arms it, no request path references it, and
+ * `exclusiveUI` / `humanEditingBlocked` stay false.
  */
 namespace UEAgentKitBlueprintEdit
 {
@@ -45,7 +51,6 @@ namespace UEAgentKitBlueprintEdit
 		bool bWidgetValid = false;
 		bool bGraphMatches = false;
 		bool bWidgetEnabled = true;
-		bool bSavedStateWasBound = false;
 		int32 Generation = 0;
 	};
 
@@ -57,16 +62,19 @@ namespace UEAgentKitBlueprintEdit
 		/** Records the session target with weak object pointers only; no Slate access. */
 		void SetSessionTarget(UBlueprint* InBlueprint, UEdGraph* InGraph);
 
-		/** Releases an armed widget and forgets the target. */
+		/** Releases bookkeeping and forgets the target. */
 		void ClearSessionTarget();
 
-		/** Explicit arm; returns false and fills OutError when safety cannot be proven. */
+		/**
+		 * Always fails closed in this revision: `enabled-attribute-not-restorable`.
+		 * It must not call SWidget::SetEnabled until a reversible capture exists.
+		 */
 		bool Arm(FString& OutError);
 
-		/** Restores the exact previous enabled attribute when the widget is alive. */
+		/** Clears any armed bookkeeping; never mutates a widget in this revision. */
 		void Release();
 
-		/** Revalidates liveness and may move Armed -> Lost. */
+		/** Revalidates liveness; may move Armed -> Lost. */
 		FUIGateSnapshot Query();
 
 		bool IsArmed() const
@@ -80,9 +88,6 @@ namespace UEAgentKitBlueprintEdit
 		TWeakObjectPtr<UBlueprint> Blueprint;
 		TWeakObjectPtr<UEdGraph> Graph;
 		TWeakPtr<SGraphEditor> Widget;
-		TAttribute<bool> SavedEnabledState;
-		bool bSavedStateWasBound = false;
-		bool bSavedWasEnabled = false;
 		int32 Generation = 0;
 	};
 }

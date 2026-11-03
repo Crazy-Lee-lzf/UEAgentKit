@@ -1,21 +1,25 @@
-"""R7 scoped Blueprint UI gate prototype — static contract tests.
+"""R7 gate prototype contract — corrected after N1's native build.
 
-The prototype is test-only C++ and has never been compiled or run natively, so
-these tests pin exactly the properties that must hold *before* anyone enables
-it, and they must never claim a native PASS:
+N1 compiled the previous prototype against real UE 5.6.1 and got
+`error C2248: SWidget::GetEnabledStateAttribute: cannot access protected
+member`.  The earlier version of this test file asserted that accessor was
+public and that "exact restore" was proven; both statements were wrong.
 
-* the whole gate is compiled only under ``WITH_DEV_AUTOMATION_TESTS``;
-* it disables exactly one graph widget, never the Editor, never another tab and
-  never a global Slate input hook;
-* it holds the widget weakly, restores the exact previous enabled attribute,
-  and reports ``Lost`` instead of claiming isolation after a rebuild;
-* arming happens only from a test-only console command, never from a request
-  path, and it refuses when the target graph is not already focused;
-* the user-visible ``exclusiveUI`` / ``humanEditingBlocked`` stay false and
-  ``requiresUserNotEdit`` stays true;
-* the existing token/fingerprint/transaction protections are untouched.
+This file now pins the fail-closed truth:
 
-The prototype changing anything above must fail here.
+* the gate must not reference the protected accessor, ``ToAttribute()`` or
+  ``IsBound()``;
+* it must not call ``SWidget::SetEnabled`` at all, so it can never disable a
+  widget or flatten a bound enabled attribute to a constant;
+* ``Arm`` must refuse with ``enabled-attribute-not-restorable`` before touching
+  any Editor or widget;
+* the rejected variants are pinned as forbidden text: P1's protected accessor
+  read and N1's ``SetEnabled(true)`` / constant restore;
+* everything else (test-only compilation, no global hook, no request-path
+  arming, honest booleans, unchanged session protections) still holds.
+
+None of this is a native PASS: the prototype is not compiled here and cannot be
+armed.
 """
 
 from __future__ import annotations
@@ -35,6 +39,11 @@ MODULE_CPP = PRIVATE / "UEAgentKitEditorModule.cpp"
 BRIDGE_CPP = PRIVATE / "EditorBridge.cpp"
 SESSION_HANDLER = PRIVATE / "EditorBridgeBlueprintEditSession.cpp"
 WORKFLOW = SRC / "mcp_workflow_tools.py"
+
+# Rejected implementations, kept as literal negative fixtures.
+REJECTED_P1_PROTECTED_READ = "GraphWidget->GetEnabledStateAttribute()"
+REJECTED_N1_CONSTANT_RESTORE = "SavedEnabledState = TAttribute<bool>(bSavedWasEnabled);"
+REJECTED_N1_SET_ENABLED_TRUE = "SetEnabled(true)"
 
 
 def _strip_cpp(source: str) -> str:
@@ -83,7 +92,6 @@ class UIGateGuardPlacementTests(unittest.TestCase):
         guard = header.index("#if WITH_DEV_AUTOMATION_TESTS")
         class_start = header.index("class FBlueprintEditSessionUIGate")
         self.assertLess(guard, class_start)
-        # The guard must close at the very end of the header.
         self.assertTrue(header.rstrip().endswith("#endif // WITH_DEV_AUTOMATION_TESTS"))
         self.assertEqual(header.count("#if WITH_DEV_AUTOMATION_TESTS"), 1)
 
@@ -105,71 +113,73 @@ class UIGateGuardPlacementTests(unittest.TestCase):
                 self.assertGreater(last_if, last_endif, path.name)
 
 
-class UIGateScopeTests(unittest.TestCase):
+class UIGateEnabledBindingSafetyTests(unittest.TestCase):
+    """The core correction: no protected access, no irreversible disable."""
+
     def setUp(self) -> None:
         self.header = GATE_H.read_text(encoding="utf-8")
         self.gate = GATE_CPP.read_text(encoding="utf-8")
-        self.session = SESSION_CPP.read_text(encoding="utf-8")
+        self.code = _strip_cpp(self.header + "\n" + self.gate)
 
-    def test_no_global_input_hook_anywhere(self) -> None:
-        for path in PRIVATE.rglob("*.cpp"):
-            text = path.read_text(encoding="utf-8", errors="ignore")
-            for forbidden in (
-                "RegisterInputPreProcessor",
-                "UnregisterInputPreProcessor",
-                "IInputProcessor",
-            ):
-                if forbidden in text:
-                    self.fail(f"{forbidden} must not be registered ({path.name})")
+    def test_no_protected_attribute_access(self) -> None:
+        # SWidget::GetEnabledStateAttribute() is protected in UE 5.6.1
+        # (SWidget.h:1678 protected block); N1 reproduced it as C2248.
+        for forbidden in (
+            "GetEnabledStateAttribute",
+            "GetVisibilityAttribute",
+            "GetHoveredAttribute",
+            "ToAttribute()",
+            "IsBound()",
+        ):
+            if forbidden in self.code:
+                self.fail(f"the gate must not use the protected API {forbidden}")
 
-    def test_only_one_widget_is_disabled(self) -> None:
-        # Exactly one disable call, and it targets the resolved graph widget.
-        disabled = re.findall(r"SetEnabled\(\s*false\s*\)", self.gate)
-        self.assertEqual(len(disabled), 1)
-        self.assertIn("GraphWidget->SetEnabled(false);", self.gate)
-        # No other plugin source may toggle enabled state at all: that is what
-        # would turn a scoped gate into an Editor-wide lock.
+    def test_gate_never_mutates_enabled_state(self) -> None:
+        # No SetEnabled at all: no disable, and no constant restore.  Comments
+        # may discuss the rejected variants, so strip them first.
+        self.assertNotIn("SetEnabled(", self.code)
         users = [
             path.name
             for path in PRIVATE.rglob("*.cpp")
-            if "SetEnabled(" in path.read_text(encoding="utf-8", errors="ignore")
+            if "SetEnabled(" in _strip_cpp(path.read_text(encoding="utf-8", errors="ignore"))
         ]
-        self.assertEqual(users, ["BlueprintEditSessionUIGate.cpp"])
+        self.assertEqual(users, [], "no plugin source may toggle widget enabled state")
 
-    def test_widget_is_held_weakly(self) -> None:
-        self.assertIn("TWeakPtr<SGraphEditor> Widget;", self.header)
-        self.assertIn("TWeakObjectPtr<UBlueprint> Blueprint;", self.header)
-        self.assertIn("TWeakObjectPtr<UEdGraph> Graph;", self.header)
-        # No raw owning pointer member for the widget.
-        self.assertNotIn("SGraphEditor* Widget", self.header)
-        self.assertNotIn("SGraphEditor* GraphWidget;", self.header)
+    def test_rejected_variants_are_forbidden(self) -> None:
+        # P1 5c92e0c: read the protected accessor.
+        self.assertNotIn(REJECTED_P1_PROTECTED_READ, self.code)
+        # N1 compatibility patch: flatten the attribute to a constant.
+        self.assertNotIn(REJECTED_N1_CONSTANT_RESTORE, self.code)
+        self.assertNotIn(REJECTED_N1_SET_ENABLED_TRUE, self.code)
+        self.assertNotIn("SavedEnabledState", self.code)
 
-    def test_exact_enabled_state_is_captured_and_restored(self) -> None:
-        self.assertIn("GetEnabledStateAttribute()", self.gate)
-        self.assertIn("ToAttribute()", self.gate)
-        self.assertIn("Pinned->SetEnabled(SavedEnabledState);", self.gate)
-        # A bound getter must not be frozen into a bool.
-        self.assertIn("IsBound()", self.gate)
-
-    def test_arm_refuses_without_proof(self) -> None:
-        for reason in (
-            "no-active-session-target",
-            "blueprint-editor-not-open",
-            "blueprint-editor-mismatch",
-            "graph-not-focused",
-            "graph-widget-unavailable",
-            "graph-widget-already-disabled",
-            "graph-widget-disable-unverified",
+    def test_arm_fails_closed_with_precise_reason(self) -> None:
+        self.assertIn("enabled-attribute-not-restorable", self.gate)
+        stripped = _strip_cpp(self.gate)
+        arm_start = stripped.index("bool FBlueprintEditSessionUIGate::Arm(")
+        arm_end = stripped.index("void FBlueprintEditSessionUIGate::Release()", arm_start)
+        arm = stripped[arm_start:arm_end]
+        # Refuse before touching the Editor, the widget or Slate.
+        for forbidden in (
+            "OpenGraphAndBringToFront",
+            "FindEditorForAsset",
+            "SetEnabled",
+            "GEditor",
         ):
-            self.assertIn(reason, self.gate)
+            self.assertNotIn(forbidden, arm)
+        # The refusal must be the value actually returned on the failure path.
+        raw_arm_start = self.gate.index("bool FBlueprintEditSessionUIGate::Arm(")
+        raw_arm_end = self.gate.index("void FBlueprintEditSessionUIGate::Release()", raw_arm_start)
+        raw_arm = self.gate[raw_arm_start:raw_arm_end]
+        self.assertIn('OutError = TEXT("enabled-attribute-not-restorable");', raw_arm)
+        self.assertIn("return false;", arm)
+        self.assertNotIn("return true;", arm)
 
-    def test_loss_is_reported_not_hidden(self) -> None:
+    def test_loss_reporting_retained_for_future_arm(self) -> None:
         for reason in ("widget-destroyed", "graph-changed", "widget-reenabled"):
             self.assertIn(reason, self.gate)
         self.assertIn("EUIGateState::Lost", self.gate)
-        # Query must re-validate rather than trust the cached arm state.
         self.assertIn("Pinned.IsValid()", self.gate)
-        self.assertIn("GetCurrentGraph() == Graph.Get()", self.gate)
 
     def test_no_transaction_or_package_mutation_in_the_gate(self) -> None:
         for forbidden in (
@@ -183,6 +193,29 @@ class UIGateScopeTests(unittest.TestCase):
             self.assertNotIn(forbidden, self.header)
 
 
+class UIGateScopeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.header = GATE_H.read_text(encoding="utf-8")
+        self.gate = GATE_CPP.read_text(encoding="utf-8")
+
+    def test_no_global_input_hook_anywhere(self) -> None:
+        for path in PRIVATE.rglob("*.cpp"):
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            for forbidden in (
+                "RegisterInputPreProcessor",
+                "UnregisterInputPreProcessor",
+                "IInputProcessor",
+            ):
+                if forbidden in text:
+                    self.fail(f"{forbidden} must not be registered ({path.name})")
+
+    def test_widget_is_held_weakly(self) -> None:
+        self.assertIn("TWeakPtr<SGraphEditor> Widget;", self.header)
+        self.assertIn("TWeakObjectPtr<UBlueprint> Blueprint;", self.header)
+        self.assertIn("TWeakObjectPtr<UEdGraph> Graph;", self.header)
+        self.assertNotIn("SGraphEditor* Widget", self.header)
+
+
 class UIGateLifecycleTests(unittest.TestCase):
     def setUp(self) -> None:
         self.session = SESSION_CPP.read_text(encoding="utf-8")
@@ -190,7 +223,6 @@ class UIGateLifecycleTests(unittest.TestCase):
         self.gate = GATE_CPP.read_text(encoding="utf-8")
 
     def test_release_paths_are_traceable(self) -> None:
-        # begin records the target, batch observes, end/reset/shutdown release.
         begin = self.session.index("SetSessionTarget(Blueprint, Graph)")
         self.assertGreater(begin, self.session.index("bool FBlueprintEditSessionManager::Begin"))
         self.assertLess(begin, self.session.index("bool FBlueprintEditSessionManager::ValidateBatch"))
@@ -205,13 +237,15 @@ class UIGateLifecycleTests(unittest.TestCase):
 
         shutdown = self.module.index("ShutdownModule()")
         shutdown_release = self.module.index("ClearSessionTarget()", shutdown)
-        self.assertLess(shutdown_release, self.module.index("if (GraphLayoutP11Menu.IsValid())", shutdown))
+        self.assertLess(
+            shutdown_release,
+            self.module.index("if (GraphLayoutP11Menu.IsValid())", shutdown),
+        )
 
     def test_batch_only_observes_never_gates(self) -> None:
         batch = self.session.index("bool FBlueprintEditSessionManager::ValidateBatch(")
         region = self.session[batch:]
         self.assertIn("FBlueprintEditSessionUIGate::Get().Query();", region)
-        # The gate must not be able to refuse or mutate a batch.
         observe = region.index("FBlueprintEditSessionUIGate::Get().Query();")
         self.assertNotIn("FBlueprintEditSessionUIGate::Get().Arm(", region)
         self.assertLess(observe, region.index("Impl->Blueprint.Get() != Blueprint"))
@@ -221,13 +255,11 @@ class UIGateLifecycleTests(unittest.TestCase):
             text = path.read_text(encoding="utf-8")
             self.assertNotIn("ArmUIGate", text, path.name)
             self.assertNotIn("FBlueprintEditSessionUIGate", text, path.name)
-        # Arm is only reachable from the console command wrapper.
         self.assertEqual(self.gate.count(".Arm("), 1)
 
     def test_console_commands_are_test_only(self) -> None:
         for name in ("ArmUIGate", "ReleaseUIGate", "UIGateStatus"):
             self.assertIn(f'"UEAgentKit.BlueprintEditSession.{name}"', self.gate)
-        # They live inside the same WITH_DEV_AUTOMATION_TESTS translation unit.
         self.assertIn("#if WITH_DEV_AUTOMATION_TESTS", self.gate)
 
 
@@ -240,8 +272,6 @@ class UIGateHonestyTests(unittest.TestCase):
         self.assertIn('TEXT("rollbackSupported"), true', handler)
 
     def test_gate_never_touches_response_booleans(self) -> None:
-        # Comments may explain the honest fields; only code must stay free of
-        # them, so strip comments and literals first.
         gate = _strip_cpp(GATE_CPP.read_text(encoding="utf-8")) + _strip_cpp(
             GATE_H.read_text(encoding="utf-8")
         )
@@ -251,13 +281,20 @@ class UIGateHonestyTests(unittest.TestCase):
 
     def test_existing_session_protections_unchanged(self) -> None:
         session = SESSION_CPP.read_text(encoding="utf-8")
-        # Token protocol, fingerprint proof and case-sensitive binding must keep
-        # working exactly as in the natively accepted rounds.
         self.assertIn("IsCanonicalEditSessionToken(Impl->Token)", session)
         self.assertIn("ComputeGraphContentFingerprint", session)
         self.assertIn("Token.Equals(Impl->Token, ESearchCase::CaseSensitive)", session)
         self.assertIn("blueprint-edit-session-package-dirty", session)
         self.assertIn("AllowSessionOwnedDirty", session)
+
+    def test_write_handlers_still_require_editability(self) -> None:
+        # Evidence for rejecting the bEditable alternative: P1's own batch and
+        # move handlers refuse when the graph is not editable, so toggling it
+        # would block the Agent as well as the human.
+        for name in ("EditorBridgeNodeMoveBatch.cpp", "EditorBridgeNodeMove.cpp"):
+            text = (PRIVATE / name).read_text(encoding="utf-8")
+            self.assertIn("IsEditable(Graph)", text)
+            self.assertIn("bEditable", text)
 
 
 class UIGateSyntaxSanityTests(unittest.TestCase):
