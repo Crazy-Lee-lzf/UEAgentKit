@@ -339,9 +339,10 @@ mode), and static source contracts: token shape, bridge ownership/reset,
 `RequireClean` vs `AllowSessionOwnedDirty`, rollback reusing the single
 transaction helper with an unlimited internal request cap, the in-transaction
 session finalizer (`writeOccurred`/`sessionFinalized`), no **production** UI-lock
-primitive (a test-only, `WITH_DEV_AUTOMATION_TESTS`-guarded prototype exists and
-is never armed by a request path — see
-[R7_SCOPED_UI_GATE_PROTOTYPE_20261103.md](R7_SCOPED_UI_GATE_PROTOTYPE_20261103.md)),
+primitive (a test-only, `WITH_DEV_AUTOMATION_TESTS`-guarded prototype exists,
+is never armed by a request path and currently cannot arm at all — it fails
+closed with `enabled-attribute-not-restorable`; see
+[R7_ENABLED_BINDING_SAFETY_REVIEW_20261104.md](R7_ENABLED_BINDING_SAFETY_REVIEW_20261104.md)),
 no process spawning in the wrapper, and the read-only retained-live-write
 fast-verify helper.
 

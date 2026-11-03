@@ -1,9 +1,22 @@
 # R7 — scoped Blueprint graph input gate prototype (2026-11-03)
 
-Status: **test-only prototype committed; not enabled; not compiled; not native
-verified.** No production path arms it. `exclusiveUI`, `humanEditingBlocked` and
-`requiresUserNotEdit` are untouched (`false` / `false` / `true`), and nothing in
-this round may be reported as a UI lock.
+> **Correction (2026-11-04, supersedes the claims below).** N1 compiled this
+> prototype against real UE 5.6.1 and it failed with
+> `error C2248: SWidget::GetEnabledStateAttribute: cannot access protected
+> member`. The accessor is **protected**, not public (it sits in the block that
+> starts at `SWidget.h:1678`), so the "exact restore" this document describes
+> was never valid and the code never compiled. The prototype is now
+> **fail-closed**: `Arm()` returns `enabled-attribute-not-restorable` and never
+> calls `SetEnabled`, so it cannot disable any widget. Every statement below
+> about a public accessor, a proven exact restore, or `SetEnabled(false)` is
+> superseded. Authoritative record:
+> [R7_ENABLED_BINDING_SAFETY_REVIEW_20261104.md](R7_ENABLED_BINDING_SAFETY_REVIEW_20261104.md).
+
+Status: **test-only prototype committed; DISABLED (fail-closed); not enabled;
+not recompiled after the correction.** No production path arms it, and arming
+always refuses. `exclusiveUI`, `humanEditingBlocked` and `requiresUserNotEdit`
+are untouched (`false` / `false` / `true`), and nothing here may be reported as
+a UI lock.
 
 | Item | Value |
 | --- | --- |
@@ -20,10 +33,13 @@ The previous round established which public UE 5.6.1 APIs exist but could not
 prove that a gate could be *released* safely. This round reduces that uncertainty
 to a small, test-only measurement vehicle:
 
-- the exact enabled-state restore is now **proven from headers** rather than
-  assumed (see below);
+- ~~the exact enabled-state restore is now **proven from headers**~~ — **wrong**:
+  the accessor needed for that snapshot is protected, so no exact restore was
+  ever proven (corrected 2026-11-04);
 - the widget is reached only through the single public lookup and only when the
-  target graph is already focused, so no tab is created or reordered;
+  target graph is already focused, so no tab is created or reordered (this part
+  of the design survives, but it is currently unreachable because `Arm` refuses
+  before any lookup);
 - everything is compiled only under `WITH_DEV_AUTOMATION_TESTS` and armed only
   by an explicit host console command, so Shipping and normal development builds
   contain none of it;
@@ -40,8 +56,8 @@ answered by N1's native run. Until then the gate stays disarmed.
 | `SGraphEditor` is public in an UnrealEd header | `Editor/UnrealEd/Public/GraphEditor.h:101` |
 | `UEdGraph* GetCurrentGraph() const` public | same header |
 | `void SetEnabled(TAttribute<bool>)` / `bool IsEnabled() const` | `Runtime/SlateCore/Public/Widgets/SWidget.h:925`, `:931` |
-| `GetEnabledStateAttribute()` returns a public `TSlateAttributeRef<bool>` | `SWidget.h:1690` |
-| `TSlateMemberAttributeRef::ToAttribute()` re-creates a **bound** `TAttribute` when the attribute is bound, otherwise the current value | `Runtime/SlateCore/Public/Types/Attributes/SlateAttributeMember.inl:187`, `SlateAttributeBase.inl:466` |
+| ~~`GetEnabledStateAttribute()` returns a public `TSlateAttributeRef<bool>`~~ **WRONG: protected** (block at `SWidget.h:1678`); N1 reproduced `C2248` | `SWidget.h:1678–1690` |
+| `TSlateMemberAttributeRef::ToAttribute()` re-creates a **bound** `TAttribute` when the attribute is bound, otherwise the current value — the API exists, but the ref is unreachable from outside | `Runtime/SlateCore/Public/Types/Attributes/SlateAttributeMember.inl:187`, `SlateAttributeBase.inl:466` |
 | `Assign()` sets an unbound value synchronously (so verify-after-disable is valid) | `SlateAttributeBase.inl:257`, `:350` |
 | `FBlueprintEditor::OpenGraphAndBringToFront(UEdGraph*, bool)` is the only public graph → widget lookup | `Editor/Kismet/Public/BlueprintEditor.h:282` |
 | `GetFocusedGraph()`, `GetBlueprintObj()`, `IsEditable()` | same header |
@@ -60,24 +76,23 @@ walking the focus path: it would require an unsound cast.
 1. `SetSessionTarget(Blueprint, Graph)` — called at the end of a successful
    `Begin`. Stores **weak** object pointers only. It never touches Slate and
    never arms.
-2. `Arm(OutError)` — explicit, console-only:
-   - refuses without an active session target;
-   - resolves `FBlueprintEditor` through `UAssetEditorSubsystem` using the same
-     `GetEditorName() == "BlueprintEditor"` + `static_cast` pattern P1 already
-     compiles, and re-proves `GetBlueprintObj()`;
-   - **refuses unless `GetFocusedGraph() == Graph`** — this is the side-effect
-     guard that stops `OpenGraphAndBringToFront` from opening or reordering a
-     tab;
-   - verifies the returned widget and `GetCurrentGraph() == Graph`;
-   - refuses if the widget is already disabled (ownership would be ambiguous);
-   - snapshots `GetEnabledStateAttribute().ToAttribute()` and `IsBound()`;
-   - calls `SetEnabled(false)` and synchronously re-reads `IsEnabled()`; a still
-     enabled widget is restored and reported as a refusal.
+2. `Arm(OutError)` — **now fail-closed**. It returns
+   `enabled-attribute-not-restorable` before resolving an editor, looking up a
+   widget or touching Slate. The sequence below is the *superseded 2026-11-03
+   design*, kept only as the review record; it never compiled:
+   - ~~refuses without an active session target~~;
+   - ~~resolves `FBlueprintEditor` through `UAssetEditorSubsystem` …~~;
+   - ~~**refuses unless `GetFocusedGraph() == Graph`** …~~;
+   - ~~verifies the returned widget and `GetCurrentGraph() == Graph`~~;
+   - ~~refuses if the widget is already disabled~~;
+   - ~~snapshots `GetEnabledStateAttribute().ToAttribute()` and `IsBound()`~~ —
+     **impossible**: that accessor is protected;
+   - ~~calls `SetEnabled(false)` and synchronously re-reads `IsEnabled()`~~.
 3. `Query()` — revalidates every time. Armed → `Lost` when the widget is
    destroyed, re-pointed at another graph, or re-enabled. `Lost` is never
-   reported as isolation.
-4. `Release()` — restores the exact saved attribute (`SetEnabled(Saved)`), so a
-   bound getter is re-bound rather than frozen to a bool, then clears state.
+   reported as isolation. Dormant while `Arm` refuses.
+4. `Release()` — clears bookkeeping only; it never restores an attribute because
+   nothing is ever disabled.
 
 ## Fail-closed refusal matrix
 
@@ -142,22 +157,29 @@ absent from `EditorBridge.cpp`, the session handler and `mcp_workflow_tools.py`.
 - The gate stores no `UObject*`. It holds `TWeakObjectPtr` for the Blueprint and
   graph and `TWeakPtr<SGraphEditor>` for the widget.
 
-## Known unverified risks (must be measured next)
+## Known unverified risks (all still open; plus the blocking one)
 
+0. **BLOCKING (found by N1's native build): the enabled attribute cannot be
+   captured**, so `SetEnabled(false)` cannot be reversed safely. Until a public
+   reversible mechanism exists, `Arm` refuses and none of the items below can
+   even be measured. `bEditable` is not an alternative: P1's own
+   `EditorBridgeNodeMoveBatch.cpp` / `EditorBridgeNodeMove.cpp` refuse when the
+   graph is not editable, so toggling it would block the Agent too.
 1. **Disable actually blocks all human editing of that graph** — mouse drag,
    marquee, context menu, keyboard shortcuts, pin drag, comment resize. The
    static code only proves the widget is disabled.
 2. **Other tabs, other Blueprints, the console and PIE stay fully usable.**
 3. **`OpenGraphAndBringToFront` on an already-focused graph** is assumed to
    return the existing widget without visible change; unproven.
-4. **Release restores the original attribute exactly**, including a bound
-   getter. `ToAttribute()` preserves the delegate by header inspection, but the
-   `AssignBinding` timing (immediate vs next tick) is unproven.
+4. ~~**Release restores the original attribute exactly**, including a bound
+   getter.~~ **Not achievable**: the accessor is protected; N1's
+   `SetEnabled(true)` fallback would flatten a bound getter to a constant.
 5. **Compile/reconstruct** must produce `Lost`, never a silently still-disabled
    graph.
 6. **Selection/focus side effects** of disabling the widget mid-edit.
-7. The prototype has **never been compiled**. A build error is possible; it must
-   be fixed and rebuilt before any enablement.
+7. The **2026-11-03 revision did not compile** (N1: `C2248`). The corrected
+   fail-closed revision has never been rebuilt; N1's next build must confirm the
+   error is gone before anything else.
 
 ## N1 native acceptance contract for R7.1–R7.3
 
@@ -183,12 +205,13 @@ gate **disarmed**, or record explicitly that the gate was armed.
 
 ## Test evidence
 
-- `tests/python/test_r7_ui_gate_prototype.py`: **20 tests** — automation-only
-  compilation, single-widget scope, no global hook, weak handles, exact restore,
-  refusal reasons, loss reporting, release-path traceability, batch
-  observe-only, no request-path arming, test-only console commands, unchanged
-  response booleans, unchanged token/fingerprint protections, and
-  brace/paren/`#if` balance sanity.
+- `tests/python/test_r7_ui_gate_prototype.py`: **22 tests** after the
+  2026-11-04 correction — automation-only compilation, no protected-attribute
+  access, no `SetEnabled` anywhere, fail-closed `Arm`, both rejected variants
+  forbidden, loss reporting retained for a future arm, weak handles,
+  release-path traceability, batch observe-only, no request-path arming,
+  test-only console commands, unchanged response booleans and unchanged
+  token/fingerprint protections, plus brace/paren/`#if` balance sanity.
 - Full `py -3.12 -B -m unittest discover -s tests/python`: **1982 passed,
   20 skipped** (previous 1962/20; the 20 added tests are new).
 - `git diff --check` clean.

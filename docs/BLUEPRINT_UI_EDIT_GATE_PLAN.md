@@ -140,7 +140,7 @@ from headers in that tree.
 | `class SGraphEditor : public SCompoundWidget` is declared in a **public** UnrealEd header (no private header needed) | `Editor/UnrealEd/Public/GraphEditor.h:101` |
 | `UEdGraph* GetCurrentGraph() const` is a public inline accessor — exact-graph identity can be proven on the widget | `Editor/UnrealEd/Public/GraphEditor.h` (`GetCurrentGraph`) |
 | `void SetEnabled(TAttribute<bool>)` and `bool IsEnabled() const` exist on every widget | `Runtime/SlateCore/Public/Widgets/SWidget.h:925`, `:931` |
-| `TSlateAttributeRef<bool> GetEnabledStateAttribute() const` gives a public reference to the enabled attribute, so a *previous* state can be snapshotted and restored without touching protected members | `Runtime/SlateCore/Public/Widgets/SWidget.h:1690` |
+| ~~`GetEnabledStateAttribute()` gives a public reference so a previous state can be snapshotted~~ **WRONG: it is `protected`** (block starting at `SWidget.h:1678`); N1's native build failed with `C2248`. Only `SetEnabled` / `IsEnabled` are public, and `SetEnabled` **replaces** the attribute, so the original binding cannot be captured | `Runtime/SlateCore/Public/Widgets/SWidget.h:1678–1690`, `:925`, `:931` |
 | `TSharedPtr<SGraphEditor> OpenGraphAndBringToFront(UEdGraph*, bool bSetFocus = true)` is public and is the only public graph → widget lookup found | `Editor/Kismet/Public/BlueprintEditor.h:282` |
 | `UEdGraph* GetFocusedGraph() const` is public | `Editor/Kismet/Public/BlueprintEditor.h:281` |
 | `IAssetEditorInstance::GetAssociatedTabManager()` is public/pure virtual | `Editor/UnrealEd/Public/Subsystems/AssetEditorSubsystem.h:88` |
@@ -160,6 +160,15 @@ Any R7 code should reuse it rather than inventing a cast.
 Scope: one `SGraphEditor` widget hosting one exact `UEdGraph`, disabled while the
 session holds ownership.
 
+### Status of this design (2026-11-04)
+
+Steps 3, 4 and 6 are **not implementable** with public UE 5.6.1 API. The design
+below is kept as the target shape, but the prototype is currently fail-closed
+(`Arm` → `enabled-attribute-not-restorable`, no `SetEnabled` call). See
+[R7_ENABLED_BINDING_SAFETY_REVIEW_20261104.md](R7_ENABLED_BINDING_SAFETY_REVIEW_20261104.md).
+A future mechanism must either find a public way to capture/restore the exact
+`TAttribute<bool>`, or block input without replacing that attribute.
+
 1. **Resolve** the `FBlueprintEditor` for the session's `UBlueprint` with the
    existing pattern above; if `GetBlueprintObj()` is not the bound Blueprint,
    report the gate unavailable.
@@ -169,17 +178,15 @@ session holds ownership.
    graph" API (`FDocumentTracker` has no public graph lookup in this tree).
    Verify `Widget.IsValid() && Widget->GetCurrentGraph() == Graph`; otherwise the
    gate is unavailable and the session must not claim isolation.
-3. **Snapshot** `TSlateAttributeRef<bool> Previous = Widget->GetEnabledStateAttribute()`
-   and store a `TWeakPtr<SGraphEditor>` plus the previous attribute reference.
-4. **Disable** with `Widget->SetEnabled(false)`.
+3. ~~**Snapshot** the enabled attribute and store the previous attribute
+   reference.~~ **Impossible via public API**: the only accessor is protected.
+4. ~~**Disable** with `Widget->SetEnabled(false)`.~~ **Blocked**: without step 3
+   this is irreversible, so it must not be done.
 5. **Re-verify on every batch and on `end`**: weak pointer still valid,
    `GetCurrentGraph()` still the bound graph, `IsEnabled() == false`. Any
    mismatch drops the claim instead of assuming it survived.
-6. **Release** by restoring the snapshot (`SetEnabled(Previous.Get())` when the
-   attribute is static; if it is dynamic, re-`Assign` the saved attribute where
-   the API allows, else re-enable only if the pre-state was enabled and record
-   that the original dynamic source could not be restored). Then clear the weak
-   pointer.
+6. ~~**Release** by restoring the snapshot.~~ **Blocked for the same reason**;
+   restoring a constant `true` would flatten a bound getter and is rejected.
 
 An RAII holder (`FTargetGraphGate`) with a destructor that releases on the game
 thread is required, plus an explicit `Release()` on every path below.
