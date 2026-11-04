@@ -11,37 +11,42 @@ class UEdGraph;
  *
  * One session binds exactly one loaded Blueprint + one exact graph + this
  * Editor Bridge session + this process.  It exists so an Agent-authorized task
- * can apply several position-only move batches to one Dirty Blueprint without
- * a Save, approval or Editor restart between batches.
+ * can apply several position-only move batches to one graph without a Save,
+ * approval or Editor restart between batches.
  *
- * Safety model (all checks fail closed):
- *  - Only a clean package (no unsaved Dirty state) may be bound.
- *  - The manager records a strong content fingerprint of the graph (sorted
- *    NodeGuid + class + position + size + comment + name + every Pin's
- *    identity/type/links) and every node position at begin.
- *  - Before every batch the live fingerprint, every expected node position,
- *    package Dirty state, graph ownership and object identity must still match.
- *  - Undo/Redo, a manual node drag, a Save, a reload, a graph structural change
- *    or another plugin's mutation changes the fingerprint (or the Dirty state)
- *    and is refused.
+ * Contract: BOTH SIDES MAY EDIT (user decision, 2026-11-05).
+ *
+ *  - A session may begin on an already-Dirty package.  Unsaved user edits are
+ *    no longer treated as unprovable ownership.
+ *  - Conflict detection is per request, not per graph.  Before a batch, every
+ *    node it names must still be at the exact old position the request
+ *    declares; changes anywhere else in the graph (positions, node set, pins,
+ *    comments, another user save) do not block the batch.
+ *  - The package Dirty bit is not a condition.  A user save in the middle of a
+ *    session does not invalidate it.
+ *  - Rollback is selective: it restores only nodes the Agent moved whose live
+ *    position still equals the position the Agent last wrote.  Nodes the user
+ *    changed afterwards are skipped and reported, never overwritten, and never
+ *    cause the whole rollback to be refused.
+ *
+ * Safety model (fail closed where it still matters):
+ *  - The exact Blueprint/graph objects, asset path, graph GUID, Bridge session
+ *    id, process id and token are re-proved before every batch.
+ *  - Every write is one `FScopedTransaction` (`ApplyNodeMoveBatch`) with a full
+ *    read-back; a finalizer failure restores the whole batch.
+ *  - The Agent never saves, compiles or opens an asset here.
  *
  * Explicit limits:
- *  - A mutation that writes the exact same content back (ABA) cannot be
- *    detected: the fingerprint is content-bound, not history-bound.
- *  - No engine modification hook is bound; this slice does not claim to know
- *    who changed the graph, only that its current content changed.
- *  - There is NO UI/human edit lock (see docs/BLUEPRINT_EDIT_SESSION.md); an
- *    active session only authorizes Agent batches, it does not block a person.
- *    The caller must ask the user not to edit while a session is open and must
- *    check `exclusiveUI=false` / `humanEditingBlocked=false`.
- *  - Rollback is implemented for this session only: it restores every node
- *    position captured at begin, while the package is still unsaved, the same
- *    graph/Blueprint objects are alive, and the live content fingerprint still
- *    equals the session's expected state.  It uses one C++
- *    `FScopedTransaction` (`ApplyNodeMoveBatch`) with a full read-back, and it
- *    refuses before writing when any proof fails, so it never overwrites a
- *    user edit.  It is not a cross-save-point, crash-resilient, or asset-level
- *    revert, and it is not Native-verified in this slice.
+ *  - Rollback is per-node position-only and in-process.  It is not a
+ *    cross-save-point, crash-resilient or asset-level revert.
+ *  - Nodes deleted by the user are skipped; a node re-created with the same GUID
+ *    cannot be distinguished from the original.
+ *  - There is NO UI/human edit lock and none is claimed: `exclusiveUI=false`,
+ *    `humanEditingBlocked=false`, `requiresUserNotEdit=false`.  The user may
+ *    edit the same graph while a session is open; the per-node proof above is
+ *    what keeps the Agent from overwriting their work.
+ *  - The R7 scoped UI gate is retired by user decision and stays inert; it is
+ *    never armed and never calls SetEnabled.
  */
 namespace UEAgentKitBlueprintEdit
 {
@@ -59,23 +64,30 @@ namespace UEAgentKitBlueprintEdit
 		FString Token;
 		FString AssetPath;
 		FGuid GraphGuid;
+		/** Informational snapshot only; no longer a batch precondition. */
 		FString ExpectedFingerprint;
 		FString BridgeSessionId;
 		uint32 ProcessId = 0;
 		int32 NodeCount = 0;
+		bool bPackageDirtyBefore = false;
+		bool bPackageDirtyAfter = false;
 		FString CreatedAtUtc;
 	};
 
 	struct FEditSessionEndInfo
 	{
 		FString Mode;
-		/** True only when every node position equals the position captured at begin. */
+		/** True when the rollback pass completed (it may have skipped nodes). */
 		bool bRolledBack = false;
 		/** Nodes whose position was actually written back by the rollback transaction. */
 		int32 RestoredNodeCount = 0;
 		/** True when rollback opened the one C++ transaction; false for a no-op rollback. */
 		bool bRestoreTransactionOpened = false;
+		/** Nodes the user changed after the Agent wrote them; skipped, never overwritten. */
+		int32 SkippedNodeCount = 0;
+		TArray<FString> SkippedNodeGuids;
 		bool bPackageDirtyAfter = false;
+		/** Informational only: false is normal when either side edited the graph. */
 		bool bFingerprintMatchedExpected = false;
 		int32 BatchCount = 0;
 		int32 MovedBatchCount = 0;
@@ -113,7 +125,8 @@ namespace UEAgentKitBlueprintEdit
 		/**
 		 * Bind the exact loaded target.  The caller has already validated the
 		 * Editor, open Blueprint Editor, focus, editability and K2 schema.
-		 * The package must be clean; every node needs a unique valid NodeGuid.
+		 * A Dirty package is allowed; the graph may contain unsaved user edits.
+		 * Every node needs a unique valid NodeGuid.
 		 */
 		bool Begin(
 			UBlueprint* Blueprint,
@@ -125,10 +138,9 @@ namespace UEAgentKitBlueprintEdit
 			FString& OutErrorMessage);
 
 		/**
-		 * Prove the exact bound target, content fingerprint, node positions,
-		 * package Dirty state and token are all still valid, and that every
-		 * request uses the expected position this session recorded.
-		 * No mutation.
+		 * Prove the bound target and token, then check every request against the
+		 * live position it declares.  Only the nodes named by this batch are
+		 * checked; the rest of the graph may have changed.  No mutation.
 		 */
 		bool ValidateBatch(
 			UBlueprint* Blueprint,
@@ -142,13 +154,15 @@ namespace UEAgentKitBlueprintEdit
 			FString& OutErrorMessage);
 
 		/**
-		 * Called only after ApplyNodeMoveBatch succeeded.  Re-reads the live
-		 * graph and advances the expected fingerprint/positions.  It never
+		 * Called inside the batch transaction after the read-back.  Records, per
+		 * written node, the pre-write position (rollback baseline) and the
+		 * position the Agent just wrote (later user-edit detection).  It never
 		 * opens a transaction itself.
 		 */
 		bool CommitBatch(
 			UBlueprint* Blueprint,
 			UEdGraph* Graph,
+			const TArray<FNodeMoveRequest>& Requests,
 			bool bChanged,
 			FString& OutErrorCode,
 			FString& OutErrorMessage);
@@ -157,15 +171,14 @@ namespace UEAgentKitBlueprintEdit
 		 * End the session.
 		 *
 		 * `keep` releases ownership only: it never writes the asset, saves or
-		 * compiles.  `rollback` first proves the token, Bridge session/process,
-		 * bound objects, asset path/GUID, package Dirty state, node set,
-		 * positions and content fingerprint, then restores every node position
-		 * captured at begin inside one `FScopedTransaction` (via
-		 * `ApplyNodeMoveBatch`, which reads every position back and restores the
-		 * pre-write state on any failure).  A validation failure refuses before
-		 * any write and leaves the session active; a fully no-op rollback opens
-		 * no transaction.  Rollback is limited to position-only edits made by
-		 * this session in the same unsaved package.
+		 * compiles.  `rollback` restores only nodes the Agent moved whose live
+		 * position still equals the Agent's last write; nodes the user changed
+		 * afterwards are skipped and reported (`skippedNodeCount` /
+		 * `skippedNodeGuids`) instead of being overwritten.  The restore uses one
+		 * `FScopedTransaction` through `ApplyNodeMoveBatch`, which reads every
+		 * position back and restores the pre-write state on any failure.  A fully
+		 * no-op rollback opens no transaction.  The package Dirty bit and graph
+		 * content fingerprint are not preconditions.
 		 */
 		bool End(
 			const FString& Token,

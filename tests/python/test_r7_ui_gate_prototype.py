@@ -268,7 +268,7 @@ class UIGateHonestyTests(unittest.TestCase):
         handler = SESSION_HANDLER.read_text(encoding="utf-8")
         self.assertIn('TEXT("exclusiveUI"), false', handler)
         self.assertIn('TEXT("humanEditingBlocked"), false', handler)
-        self.assertIn('TEXT("requiresUserNotEdit"), true', handler)
+        self.assertIn('TEXT("requiresUserNotEdit"), false', handler)
         self.assertIn('TEXT("rollbackSupported"), true', handler)
 
     def test_gate_never_touches_response_booleans(self) -> None:
@@ -284,8 +284,10 @@ class UIGateHonestyTests(unittest.TestCase):
         self.assertIn("IsCanonicalEditSessionToken(Impl->Token)", session)
         self.assertIn("ComputeGraphContentFingerprint", session)
         self.assertIn("Token.Equals(Impl->Token, ESearchCase::CaseSensitive)", session)
-        self.assertIn("blueprint-edit-session-package-dirty", session)
         self.assertIn("AllowSessionOwnedDirty", session)
+        # The 2026-11-05 both-editable contract deliberately removed the global
+        # dirty/fingerprint gates; the per-node conflict check replaced them.
+        self.assertIn("but this batch expected", session)
 
     def test_write_handlers_still_require_editability(self) -> None:
         # Evidence for rejecting the bEditable alternative: P1's own batch and

@@ -277,20 +277,20 @@ bool FUEAgentKitEditorBridge::TryBeginBlueprintEditSessionResult(
 	Result->SetStringField(TEXT("expectedGraphFingerprint"), Info.ExpectedFingerprint);
 	Result->SetNumberField(TEXT("nodeCount"), Info.NodeCount);
 	Result->SetStringField(TEXT("createdAtUtc"), Info.CreatedAtUtc);
-	Result->SetBoolField(TEXT("packageDirtyBefore"), false);
-	Result->SetBoolField(TEXT("packageDirtyAfter"), false);
+	Result->SetBoolField(TEXT("packageDirtyBefore"), Info.bPackageDirtyBefore);
+	Result->SetBoolField(TEXT("packageDirtyAfter"), Info.bPackageDirtyAfter);
 	Result->SetBoolField(TEXT("exclusiveUI"), false);
 	Result->SetBoolField(TEXT("humanEditingBlocked"), false);
-	Result->SetBoolField(TEXT("requiresUserNotEdit"), true);
+	Result->SetBoolField(TEXT("requiresUserNotEdit"), false);
 	Result->SetBoolField(TEXT("experimental"), true);
 	Result->SetBoolField(TEXT("singleTransactionPerBatch"), true);
 	Result->SetBoolField(TEXT("rollbackSupported"), true);
 	Result->SetStringField(
 		TEXT("rollbackStatus"),
-		TEXT("supported-position-only-unsaved-same-graph"));
+		TEXT("supported-position-only-agent-owned-nodes"));
 	Result->SetStringField(
 		TEXT("rollbackScope"),
-		TEXT("positions-captured-at-begin-while-unsaved"));
+		TEXT("agent-moved-nodes-not-changed-since"));
 	// Keep is the only supported non-destructive end mode; it only releases
 	// ownership.
 	Result->SetBoolField(TEXT("saved"), false);
@@ -392,6 +392,14 @@ bool FUEAgentKitEditorBridge::TryEndBlueprintEditSessionResult(
 	Result->SetBoolField(TEXT("ended"), true);
 	Result->SetBoolField(TEXT("rolledBack"), Info.bRolledBack);
 	Result->SetNumberField(TEXT("restoredNodeCount"), Info.RestoredNodeCount);
+	Result->SetNumberField(TEXT("skippedNodeCount"), Info.SkippedNodeCount);
+	TArray<TSharedPtr<FJsonValue>> SkippedGuids;
+	SkippedGuids.Reserve(Info.SkippedNodeGuids.Num());
+	for (const FString& SkippedGuid : Info.SkippedNodeGuids)
+	{
+		SkippedGuids.Add(MakeShared<FJsonValueString>(SkippedGuid));
+	}
+	Result->SetArrayField(TEXT("skippedNodeGuids"), SkippedGuids);
 	Result->SetBoolField(
 		TEXT("restoreTransactionOpened"),
 		Info.bRestoreTransactionOpened);
@@ -409,7 +417,7 @@ bool FUEAgentKitEditorBridge::TryEndBlueprintEditSessionResult(
 	Result->SetBoolField(TEXT("rollbackSupported"), true);
 	Result->SetStringField(
 		TEXT("rollbackStatus"),
-		TEXT("supported-position-only-unsaved-same-graph"));
+		TEXT("supported-position-only-agent-owned-nodes"));
 	Result->SetStringField(TEXT("evidenceLevel"), TEXT("same-process"));
 	Result->SetBoolField(TEXT("acceptanceEligible"), false);
 	Result->SetStringField(TEXT("editorSessionId"), SessionId);

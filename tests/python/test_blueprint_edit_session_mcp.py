@@ -70,7 +70,7 @@ class _FakeLiveEditorService:
                 "packageDirtyAfter": False,
                 "exclusiveUI": False,
                 "humanEditingBlocked": False,
-                "requiresUserNotEdit": True,
+                "requiresUserNotEdit": False,
                 "experimental": True,
                 "singleTransactionPerBatch": True,
                 "rollbackSupported": True,
@@ -88,6 +88,10 @@ class _FakeLiveEditorService:
                 "ended": True,
                 "rolledBack": params.get("mode") == "rollback",
                 "restoredNodeCount": 4 if params.get("mode") == "rollback" else 0,
+                "skippedNodeCount": 1 if params.get("mode") == "rollback" else 0,
+                "skippedNodeGuids": (
+                    [NODE_A] if params.get("mode") == "rollback" else []
+                ),
                 "restoreTransactionOpened": params.get("mode") == "rollback",
                 "batchCount": 2,
                 "movedBatchCount": 2,
@@ -233,7 +237,7 @@ class BeginEditSessionTests(unittest.TestCase):
             ],
         )
         self.assertFalse(payload["result"]["exclusiveUI"])
-        self.assertTrue(payload["result"]["requiresUserNotEdit"])
+        self.assertFalse(payload["result"]["requiresUserNotEdit"])
         self.assertTrue(payload["result"]["rollbackSupported"])
         self.assertEqual(
             payload["result"]["rollbackScope"],
@@ -324,8 +328,8 @@ class BeginEditSessionTests(unittest.TestCase):
     def test_begin_bridge_error_is_propagated(self) -> None:
         live = _FakeLiveEditorService(
             error=LiveEditorError(
-                "blueprint-edit-session-package-dirty",
-                "The exact Blueprint package is already dirty.",
+                "blueprint-edit-session-graph-not-focused",
+                "Open and focus the exact target GraphGuid.",
             )
         )
         server, _ = _register(live_editor_service=live)
@@ -338,7 +342,7 @@ class BeginEditSessionTests(unittest.TestCase):
         )
         self.assertFalse(payload["ok"])
         self.assertEqual(
-            payload["error"]["code"], "blueprint-edit-session-package-dirty"
+            payload["error"]["code"], "blueprint-edit-session-graph-not-focused"
         )
         self.assertNotIn("result", payload)
         self.assertNotIn("mode", payload)
@@ -394,12 +398,14 @@ class EndEditSessionTests(unittest.TestCase):
         )
         self.assertTrue(payload["result"]["rolledBack"])
         self.assertEqual(payload["result"]["restoredNodeCount"], 4)
+        self.assertEqual(payload["result"]["skippedNodeCount"], 1)
+        self.assertEqual(payload["result"]["skippedNodeGuids"], [NODE_A])
         self.assertTrue(payload["result"]["restoreTransactionOpened"])
 
     def test_rollback_refusal_error_propagates(self) -> None:
         live = _FakeLiveEditorService(
             error=LiveEditorError(
-                "blueprint-edit-session-rollback-fingerprint-conflict",
+                "blueprint-edit-session-rollback-target-changed",
                 "The live graph content no longer matches this edit session's expected state.",
             )
         )
@@ -410,7 +416,7 @@ class EndEditSessionTests(unittest.TestCase):
         self.assertFalse(payload["ok"])
         self.assertEqual(
             payload["error"]["code"],
-            "blueprint-edit-session-rollback-fingerprint-conflict",
+            "blueprint-edit-session-rollback-target-changed",
         )
         self.assertNotIn("result", payload)
         self.assertEqual(len(live.calls), 1)
@@ -476,7 +482,7 @@ class SessionBatchMoveTests(unittest.TestCase):
     def test_dirty_repeat_bridge_error_is_propagated(self) -> None:
         live = _FakeLiveEditorService(
             error=LiveEditorError(
-                "blueprint-edit-session-fingerprint-conflict",
+                "blueprint-edit-session-node-position-conflict",
                 "The live graph content fingerprint no longer matches.",
             )
         )
@@ -492,7 +498,7 @@ class SessionBatchMoveTests(unittest.TestCase):
         self.assertFalse(payload["ok"])
         self.assertEqual(
             payload["error"]["code"],
-            "blueprint-edit-session-fingerprint-conflict",
+            "blueprint-edit-session-node-position-conflict",
         )
         self.assertNotIn("result", payload)
         self.assertEqual(len(live.calls), 1)
@@ -537,8 +543,9 @@ class EditSessionSourceContractTests(unittest.TestCase):
         self.assertIn("#if WITH_DEV_AUTOMATION_TESTS", cpp)
         self.assertIn("blueprint-edit-session-finalize-fault-injected", cpp)
         self.assertIn("UEAgentKit.BlueprintEditSession.FailNextFinalize", cpp)
-        fault_use = cpp.index("if (ConsumeCommitBatchFinalizeFaultForTesting())")
-        mutation = cpp.index("Impl->ExpectedPositions = LivePositions;")
+        commit = cpp.index("bool FBlueprintEditSessionManager::CommitBatch")
+        fault_use = cpp.index("if (ConsumeCommitBatchFinalizeFaultForTesting())", commit)
+        mutation = cpp.index("Impl->AgentExpectedPositions.Add(", commit)
         self.assertLess(fault_use, mutation)
         command = cpp.index("FAutoConsoleCommand")
         self.assertLess(cpp.index("#if WITH_DEV_AUTOMATION_TESTS"), command)
@@ -631,9 +638,25 @@ class EditSessionSourceContractTests(unittest.TestCase):
             "EditSessionTokenLength = 64",
             "EEditSessionEndMode",
             "bRestoreTransactionOpened",
-            "blueprint-edit-session-rollback-fingerprint-conflict",
+            "blueprint-edit-session-rollback-target-changed",
+            "AgentBaselinePositions",
+            "AgentExpectedPositions",
+            "SkippedNodeGuids",
         ):
             self.assertIn(required, header + cpp)
+        # Both-sides-may-edit contract (2026-11-05): the global gates are gone.
+        # Only the nodes named by a batch may conflict, and a user save or a
+        # change elsewhere in the graph must not invalidate the session.
+        for removed in (
+            "blueprint-edit-session-package-dirty",
+            "blueprint-edit-session-node-set-changed",
+            "blueprint-edit-session-fingerprint-conflict",
+            "blueprint-edit-session-rollback-fingerprint-conflict",
+            "PackageDirtyMatches",
+        ):
+            self.assertNotIn(removed, header + cpp)
+        self.assertIn("but this batch expected", cpp)
+        self.assertIn("never overwritten", cpp)
         self.assertIn(
             "TUniquePtr<UEAgentKitBlueprintEdit::FBlueprintEditSessionManager>",
             bridge_header,

@@ -392,7 +392,7 @@ bool FUEAgentKitEditorBridge::TryMoveBlueprintNodesResult(
 		UEAgentKitBlueprintEdit::FNodeMoveFinalizeFunction();
 	if (bEditSessionBatch)
 	{
-		FinalizeSession = [this, Blueprint, Graph](
+		FinalizeSession = [this, Blueprint, Graph, &Requests](
 			const bool bBatchChanged,
 			FString& FinalizeCode,
 			FString& FinalizeMessage) -> bool
@@ -406,6 +406,7 @@ bool FUEAgentKitEditorBridge::TryMoveBlueprintNodesResult(
 			return BlueprintEditSessionManager->CommitBatch(
 				Blueprint,
 				Graph,
+				Requests,
 				bBatchChanged,
 				FinalizeCode,
 				FinalizeMessage);

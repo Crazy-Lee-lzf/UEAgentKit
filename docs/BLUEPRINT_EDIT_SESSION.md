@@ -2,15 +2,19 @@
 
 Status: **experimental**. This branch ships one atomic, position-only node move
 batch, an opt-in **continuous edit session** that lets an Agent apply several
-batches to the same already-dirty Blueprint without a Save between them, and a
-**position-only session rollback** that restores the node positions captured at
-`begin` inside one transaction while the package is still unsaved. It still
-ships **no human/UI exclusivity lock**. Every session response says so
-explicitly: `exclusiveUI=false`, `humanEditingBlocked=false`,
-`requiresUserNotEdit=true`. Rollback is advertised as
-`rollbackSupported=true` with
-`rollbackStatus=supported-position-only-unsaved-same-graph`, and every claim
-below is limited to that scope.
+batches to the same Blueprint without a Save between them, and a **position-only
+session rollback** that restores only the nodes the Agent moved and the user has
+not touched since.
+
+Contract since 2026-11-05: **both sides may edit the same graph**. A session may
+begin on a Dirty package, a user save mid-session does not invalidate it, and
+conflict detection is limited to the exact nodes a batch names. The session
+ships **no human/UI exclusivity lock** and none is claimed:
+`exclusiveUI=false`, `humanEditingBlocked=false`, **`requiresUserNotEdit=false`**.
+Rollback is advertised as `rollbackSupported=true` with
+`rollbackStatus=supported-position-only-agent-owned-nodes`; user-modified nodes
+are skipped and reported, never overwritten. Every claim below is limited to
+that scope.
 
 ## Shipped contract
 
@@ -70,10 +74,11 @@ following hold; otherwise nothing is bound and nothing is written:
   `FBlueprintEditor` that owns it, the exact `graphGuid` is the focused graph,
   and that graph is editable K2;
 - no PIE/SIE session and an idle Editor transaction history;
-- the Blueprint package is **clean** (not Dirty) — a Dirty package may already
-  contain user edits or another writer's changes, so ownership cannot be
-  proven;
 - no other edit session is active (one session per Bridge process).
+
+The package may be **Dirty**. Unsaved user edits are expected and are no longer
+treated as unprovable ownership; the Agent proves ownership per node at write
+time instead (see below).
 
 `begin` returns:
 
@@ -82,20 +87,22 @@ following hold; otherwise nothing is bound and nothing is written:
   enforced by the canonical validator, by the case-sensitive `end` comparison
   and by the Python wrapper; an uppercase, truncated or otherwise non-canonical
   token is always rejected (`blueprint-edit-session-token-invalid`);
-- `expectedGraphFingerprint`: the strong content fingerprint described below;
+- `expectedGraphFingerprint`: the content fingerprint snapshot taken at `begin`.
+  **Informational only** — it is no longer a batch precondition, and it will
+  differ after either side edits the graph;
 - `nodeCount`, `createdAtUtc`, `editorSessionId`, `editorProcessId`;
-- `packageDirtyBefore=false`, `packageDirtyAfter=false`;
+- `packageDirtyBefore` / `packageDirtyAfter`: the real package Dirty state at
+  `begin` (both equal, since `begin` writes nothing);
 - honesty fields: `exclusiveUI=false`, `humanEditingBlocked=false`,
-  `requiresUserNotEdit=true`, `experimental=true`,
+  `requiresUserNotEdit=false`, `experimental=true`,
   `singleTransactionPerBatch=true`, `rollbackSupported=true`,
-  `rollbackStatus=supported-position-only-unsaved-same-graph`,
-  `rollbackScope=positions-captured-at-begin-while-unsaved`,
+  `rollbackStatus=supported-position-only-agent-owned-nodes`,
+  `rollbackScope=agent-moved-nodes-not-changed-since`,
   `saved=false`, `compiled=false`, `evidenceLevel=same-process`,
   `acceptanceEligible=false`.
 
 The token is bound to this Bridge session id and this process id, plus the
-exact `assetPath`, `graphGuid`, Blueprint object, graph object and the content
-fingerprint/positions captured at `begin`.
+exact `assetPath`, `graphGuid`, Blueprint object and graph object.
 
 ## Multi-batch editing (what changed in this slice)
 
@@ -109,67 +116,75 @@ on the game thread before any write:
    graph is still owned by that Blueprint;
 4. the request `assetPath`/`graphGuid` equal the bound ones and the live
    `UEdGraph::GraphGuid` still equals them;
-5. the package Dirty bit equals the session's expected Dirty bit (after the
-   first successful batch: Dirty=true; a Save/revert outside the session makes
-   it unequal and the batch is refused);
-6. the live node set, every node position and the full graph content
-   fingerprint still equal the session's expected state;
-7. every request's `expectedX/expectedY` equals the position the session
-   recorded (not merely the live position).
+5. **only the nodes this batch names** still exist and sit at the exact
+   `expectedX`/`expectedY` the request declares. A mismatch is
+   `blueprint-edit-session-node-position-conflict` and names the node, the live
+   position and the expected position.
+
+Nothing else is checked. A user drag elsewhere in the graph, a node added or
+removed, a pin or comment edit, another plugin's change, or a Save between
+batches no longer blocks the batch, and the package Dirty bit is not a
+condition at all. The per-node check is the conflict gate: it is what prevents
+the Agent from overwriting a node the user moved.
 
 Only then is `ApplyNodeMoveBatch` called with
 `EPackageDirtyGate::AllowSessionOwnedDirty`. That gate is **not** reachable from
 a request parameter: it is chosen solely by the handler after the manager
-validated a live token. `CommitBatch` now runs **inside the batch's open
+validated a live token. `CommitBatch` runs **inside the batch's open
 transaction** as the helper's finalizer, before the batch is reported committed:
-it re-reads the graph and advances the expected fingerprint/positions/Dirty bit.
-If it fails, the helper restores every position, the Blueprint status/cache and
-the pre-write Dirty flag, cancels the transaction, and returns the finalizer's
-error code with `writeOccurred=false`, so an error can no longer describe a
-batch that stayed applied. A successful token batch returns
-`editSessionUsed=true`, `writeOccurred=true`, `sessionFinalized=true`,
-`exclusiveUI=false`, `humanEditingBlocked=false`.
+for every node the batch wrote it records the pre-write position (the rollback
+baseline, taken on the Agent's first touch of that node) and the position just
+written (later user-edit detection). If it fails, the helper restores every
+position, the Blueprint status/cache and the pre-write Dirty flag, cancels the
+transaction, and returns the finalizer's error code with `writeOccurred=false`,
+so an error can no longer describe a batch that stayed applied. A successful
+token batch returns `editSessionUsed=true`, `writeOccurred=true`,
+`sessionFinalized=true`, `exclusiveUI=false`, `humanEditingBlocked=false`.
 
 Consequences:
 
-- The first batch of a session still runs against a clean package; later
-  batches run while the package is Dirty and each remains its own
+- A session may start on a Dirty package, and later batches run while the
+  package is Dirty or after the user saved it. Each batch remains its own
   `FScopedTransaction` (one Undo step per batch).
 - A batch **without** a token remains clean-only
   (`EPackageDirtyGate::RequireClean`), exactly as before.
 - While a session is active for the exact `(assetPath, graphGuid)`, a
   token-less batch is refused with
-  `blueprint-edit-session-active-token-required`. Otherwise it could dirty the
-  graph behind the session's back and silently invalidate it.
-- Any outside change to the graph — manual drag, Undo/Redo, node/pin/comment
-  edit, another plugin, Save/revert, reload, graph structural change, or a
-  different Editor session — changes the Dirty bit, the fingerprints, the node
-  set or the object identity, so the next token batch fails closed.
+  `blueprint-edit-session-active-token-required`, so it cannot dirty the graph
+  behind the session's back.
+- An outside change to a node **this batch names** is refused
+  (`*-node-position-conflict`). Changes to any other node do not affect the
+  batch. Object identity/reload, `GraphGuid`, process and Bridge session are
+  still hard requirements.
 - `ue_end_blueprint_edit_session` with `mode=keep` releases ownership. It does
   not Save, Compile, or rewrite anything. Ending also reports `saved=false`,
   `compiled=false`, `exclusiveUI=false`, `humanEditingBlocked=false`,
   `rollbackSupported=true`, the batch counters
-  (`batchCount`/`movedBatchCount`), `fingerprintMatchedExpected` (computed from
-  the still-bound weak references at release time), `packageDirtyAfter` and, for
-  rollback, `restoreTransactionOpened`/`restoredNodeCount`.
+  (`batchCount`/`movedBatchCount`), `fingerprintMatchedExpected` (informational
+  only — false is normal once either side edited), `packageDirtyAfter` and, for
+  rollback, `restoreTransactionOpened`/`restoredNodeCount`/`skippedNodeCount`.
 - Bridge `Stop` resets the manager, so a new Editor session always starts with
   no session and a fresh token.
 
-## Session rollback (position-only, same unsaved session)
+## Session rollback (position-only, Agent-owned nodes)
 
-`mode=rollback` restores the node positions captured at `begin` and then ends
-the session. It is deliberately narrow:
+`mode=rollback` restores only the Agent's own moves and then ends the session:
 
-- **Scope**: only `NodePosX`/`NodePosY` of nodes that existed at `begin` in the
-  same Blueprint + graph + Bridge process; no save, no compile, no asset-level
+- **Scope**: only `NodePosX`/`NodePosY` of nodes this session moved, in the same
+  Blueprint + graph + Bridge process; no save, no compile, no asset-level
   revert, no cross-save-point history, no crash resilience.
-- **Proof before the first write** (any failure refuses, writes nothing, keeps
-  the session active, returns a specific
-  `blueprint-edit-session-rollback-*` code): canonical token, Bridge session id,
-  Editor process id, live Blueprint/graph identity and ownership,
-  `UEdGraph::GraphGuid`, package Dirty bit equal to the session's expected bit,
-  node-set equality, every node at the position the last batch recorded, and the
-  live content fingerprint equal to the expected fingerprint.
+- **Eligibility is per node**: a node is restored only when its live position
+  still equals the position the Agent last wrote for it. The restore target is
+  the position that node had immediately before the Agent's **first** move of
+  that node in this session — not the position at `begin` — so a user move that
+  happened before the Agent touched the node is preserved.
+- **User-modified nodes are skipped**, listed in `skippedNodeGuids`, counted in
+  `skippedNodeCount`, and the rest of the rollback still proceeds. Rollback
+  never overwrites a user move and never refuses wholesale because of one.
+- **Proof before the first write**: canonical token, Bridge session id, Editor
+  process id, live Blueprint/graph identity and ownership, and
+  `UEdGraph::GraphGuid`. Package Dirty state, the graph node set and the
+  content fingerprint are **not** preconditions.
 - **Restore**: reuses `ApplyNodeMoveBatch` with
   `EPackageDirtyGate::AllowSessionOwnedDirty` and
   `NodeMoveRequestLimitUnlimited`, so exactly one `FScopedTransaction` owns the
@@ -178,21 +193,23 @@ the session. It is deliberately narrow:
   status/dependency cache and Dirty flag and cancels the transaction. A
   partially applied rollback cannot be reported as success. The 128-request cap
   is a **caller transport limit only**: a rollback may need to restore more
-  nodes than one batch can carry (129/256-node graphs, or many batches touching
-  more than 128 distinct nodes) and still uses one transaction. Every restored
+  nodes than one batch can carry and still uses one transaction. Every restored
   request is still fully validated; only the transport cap is lifted.
-- **No-op**: a session whose net effect is zero (or that moved nothing) opens
-  no transaction and reports `rolledBack=true`, `restoreTransactionOpened=false`,
-  `restoredNodeCount=0` — the positions already equal the initial ones.
+- **Race**: if the user moves an eligible node between the eligibility read and
+  the helper's own validation, the transaction refuses with a
+  `blueprint-edit-session-rollback-node-position-conflict` code and nothing is
+  overwritten. Calling `end(mode=rollback)` again re-evaluates eligibility.
+- **No-op**: a session whose Agent moves are already back at baseline (or that
+  moved nothing) opens no transaction and reports `rolledBack=true`,
+  `restoreTransactionOpened=false`, `restoredNodeCount=0`.
 - **Refusal is not recovery**: a refused rollback never calls `Cancel()` to
   "undo" already applied UObject writes; the only writes happen inside the
   helper, which restores them on failure. Per-batch Undo still exists for the
   user independently.
 
-Because there is no eager invalidation hook, an outside edit is caught by these
-proofs at rollback time, not before. ABA (same content written back) remains
-undetectable, and a rollback that matches the expected fingerprint will proceed
-even if a human merely clicked in the graph without changing content.
+ABA (same position written back) remains undetectable: a node restored to the
+exact position the Agent last wrote is indistinguishable from one the user moved
+away and back. Nodes deleted after the Agent moved them are skipped.
 
 ## Session invalidation rules (what is proven, when)
 
@@ -204,15 +221,16 @@ delegate binding could fire at unsafe times, leak, or miss module shutdown.
 
 | Event | Detected by | Effect |
 | --- | --- | --- |
-| Manual node drag / pin or comment edit | node positions + content fingerprint + Dirty bit | batch refused (`*-node-position-conflict`, `*-fingerprint-conflict`) |
-| Undo / Redo (any batch or user action) | positions/fingerprint (and Dirty bit) | batch refused; rollback refused |
-| Save (user or other tool) | Dirty bit false vs expected true | batch refused (`*-package-dirty-changed`) |
-| Revert / reload of the package | weak object identity, node set, fingerprint, Dirty bit | batch/rollback refused (`*-target-changed`, `*-node-set-changed`) |
-| Blueprint compile rebuilding nodes/graphs | object identity / fingerprint / `GraphGuid` | refused (`*-target-changed`, `*-asset-mismatch`) |
+| User drags a node **named by the batch** | per-node live position vs the request's `expectedX/expectedY` | batch refused (`*-node-position-conflict`) |
+| User drags any **other** node | nothing, by design | batch proceeds; that node is untouched |
+| Undo / Redo affecting a batch-named node | per-node live position | batch refused |
+| Save by the user or another tool | not checked (Dirty is no longer a condition) | batch proceeds |
+| Revert / reload of the package | weak object identity, `GraphGuid` | batch/rollback refused (`*-target-changed`, `*-asset-mismatch`) |
+| Blueprint compile rebuilding nodes/graphs | object identity / `GraphGuid` | refused (`*-target-changed`, `*-asset-mismatch`) |
 | Graph tab closed (object still loaded) | no focus requirement for token batches; object identity unchanged | session stays valid; a later batch still needs the handler's open/focused target checks |
 | PIE/SIE started | `GEditor->IsPlaySessionInProgress()` / `PlayWorld` in the write helper | batch/rollback refused (`*-pie-active`) |
 | Bridge `Stop` / Editor session end | `BlueprintEditSessionManager.Reset()` | session and token dropped |
-| Another plugin writing the graph | content fingerprint / positions / Dirty bit | refused if content differs; ABA remains undetectable |
+| Another plugin writing a batch-named node | per-node live position | refused if that node moved; ABA remains undetectable |
 | Another Editor process / different Bridge session | process id + Bridge session id binding | refused (`*-editor-session-mismatch`) |
 
 The "graph closed" row is a known gap: closing the Blueprint editor tab does not

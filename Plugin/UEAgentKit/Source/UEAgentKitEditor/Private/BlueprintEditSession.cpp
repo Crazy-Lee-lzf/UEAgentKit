@@ -116,34 +116,6 @@ namespace UEAgentKitBlueprintEdit
 			}
 			return true;
 		}
-
-		bool PackageDirtyMatches(
-			UBlueprint* Blueprint,
-			const bool bExpectedDirty,
-			FString& OutErrorCode,
-			FString& OutErrorMessage)
-		{
-			UPackage* Package = Blueprint != nullptr ? Blueprint->GetOutermost() : nullptr;
-			if (Package == nullptr)
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("blueprint-edit-session-package-unavailable"),
-					TEXT("The exact Blueprint has no package."));
-			}
-			if (Package->IsDirty() != bExpectedDirty)
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("blueprint-edit-session-package-dirty-changed"),
-					bExpectedDirty
-						? TEXT("The Blueprint package is no longer Dirty; it was saved or reverted outside this edit session.")
-						: TEXT("The Blueprint package became Dirty outside this edit session; the session cannot prove ownership."));
-			}
-			return true;
-		}
 	}
 
 	struct FBlueprintEditSessionManager::FImpl
@@ -157,11 +129,9 @@ namespace UEAgentKitBlueprintEdit
 		FString CreatedAtUtc;
 		TWeakObjectPtr<UBlueprint> Blueprint;
 		TWeakObjectPtr<UEdGraph> Graph;
-		FString InitialFingerprint;
-		FString ExpectedFingerprint;
-		TMap<FGuid, FIntPoint> InitialPositions;
-		TMap<FGuid, FIntPoint> ExpectedPositions;
-		bool bExpectedPackageDirty = false;
+		FString BeginFingerprint;
+		TMap<FGuid, FIntPoint> AgentBaselinePositions;
+		TMap<FGuid, FIntPoint> AgentExpectedPositions;
 		int32 BatchCount = 0;
 		int32 MovedBatchCount = 0;
 	};
@@ -188,11 +158,9 @@ namespace UEAgentKitBlueprintEdit
 		Impl->CreatedAtUtc.Reset();
 		Impl->Blueprint.Reset();
 		Impl->Graph.Reset();
-		Impl->InitialFingerprint.Reset();
-		Impl->ExpectedFingerprint.Reset();
-		Impl->InitialPositions.Reset();
-		Impl->ExpectedPositions.Reset();
-		Impl->bExpectedPackageDirty = false;
+		Impl->BeginFingerprint.Reset();
+		Impl->AgentBaselinePositions.Reset();
+		Impl->AgentExpectedPositions.Reset();
 		Impl->BatchCount = 0;
 		Impl->MovedBatchCount = 0;
 	}
@@ -271,32 +239,19 @@ namespace UEAgentKitBlueprintEdit
 				TEXT("blueprint-edit-session-package-unavailable"),
 				TEXT("The exact Blueprint has no package."));
 		}
-		if (Package->IsDirty())
-		{
-			// A dirty package may already contain user edits, another plugin's
-			// changes or an earlier unsaved batch.  Ownership cannot be proven.
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("blueprint-edit-session-package-dirty"),
-				TEXT("The exact Blueprint package is already dirty; save or revert it before beginning an Agent edit session."));
-		}
+		// A Dirty package is explicitly allowed: the user may have unsaved edits
+		// in this same graph.  Ownership is proven per node at write time instead
+		// of by a global clean-package assumption.
 
 		TMap<FGuid, FIntPoint> Positions;
 		if (!ReadNodePositions(Graph, Positions, OutErrorCode, OutErrorMessage))
 		{
 			return false;
 		}
+		// Informational only.  The fingerprint no longer gates any batch, so an
+		// unavailable fingerprint must not block the session.
 		const FString Fingerprint =
 			UEAgentKitBlueprintGraphLayout::ComputeGraphContentFingerprint(Graph);
-		if (Fingerprint.IsEmpty())
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("blueprint-edit-session-fingerprint-unavailable"),
-				TEXT("The exact graph content fingerprint could not be computed."));
-		}
 
 		Impl->bActive = true;
 		// The token protocol is strict 64-character lowercase hex: every
@@ -318,11 +273,9 @@ namespace UEAgentKitBlueprintEdit
 		Impl->CreatedAtUtc = FDateTime::UtcNow().ToIso8601();
 		Impl->Blueprint = Blueprint;
 		Impl->Graph = Graph;
-		Impl->InitialFingerprint = Fingerprint;
-		Impl->ExpectedFingerprint = Fingerprint;
-		Impl->InitialPositions = Positions;
-		Impl->ExpectedPositions = Positions;
-		Impl->bExpectedPackageDirty = false;
+		Impl->BeginFingerprint = Fingerprint;
+		Impl->AgentBaselinePositions.Reset();
+		Impl->AgentExpectedPositions.Reset();
 		Impl->BatchCount = 0;
 		Impl->MovedBatchCount = 0;
 
@@ -330,10 +283,12 @@ namespace UEAgentKitBlueprintEdit
 		OutInfo.Token = Impl->Token;
 		OutInfo.AssetPath = Impl->AssetPath;
 		OutInfo.GraphGuid = Impl->GraphGuid;
-		OutInfo.ExpectedFingerprint = Impl->ExpectedFingerprint;
+		OutInfo.ExpectedFingerprint = Impl->BeginFingerprint;
 		OutInfo.BridgeSessionId = Impl->BridgeSessionId;
 		OutInfo.ProcessId = Impl->ProcessId;
 		OutInfo.NodeCount = Positions.Num();
+		OutInfo.bPackageDirtyBefore = Package->IsDirty();
+		OutInfo.bPackageDirtyAfter = Package->IsDirty();
 		OutInfo.CreatedAtUtc = Impl->CreatedAtUtc;
 #if WITH_DEV_AUTOMATION_TESTS
 		// Records the target only.  The test-only UI gate stays disarmed until
@@ -421,76 +376,42 @@ namespace UEAgentKitBlueprintEdit
 				TEXT("blueprint-edit-session-graph-mismatch"),
 				TEXT("The bound graph is no longer owned by the bound Blueprint."));
 		}
-		if (!PackageDirtyMatches(Blueprint, Impl->bExpectedPackageDirty, OutErrorCode, OutErrorMessage))
-		{
-			return false;
-		}
-
 		TMap<FGuid, FIntPoint> LivePositions;
 		if (!ReadNodePositions(Graph, LivePositions, OutErrorCode, OutErrorMessage))
 		{
 			return false;
 		}
-		if (LivePositions.Num() != Impl->ExpectedPositions.Num())
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("blueprint-edit-session-node-set-changed"),
-				TEXT("The live graph node set changed outside this edit session."));
-		}
-		for (const TPair<FGuid, FIntPoint>& Expected : Impl->ExpectedPositions)
-		{
-			const FIntPoint* Live = LivePositions.Find(Expected.Key);
-			if (Live == nullptr || *Live != Expected.Value)
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("blueprint-edit-session-node-position-conflict"),
-					FString::Printf(
-						TEXT("Node %s is not at the position this edit session recorded; a manual edit, Undo/Redo or another writer changed the graph."),
-						*Expected.Key.ToString(EGuidFormats::DigitsWithHyphensLower)));
-			}
-		}
-		const FString LiveFingerprint =
-			UEAgentKitBlueprintGraphLayout::ComputeGraphContentFingerprint(Graph);
-		if (LiveFingerprint.IsEmpty()
-			|| !LiveFingerprint.Equals(Impl->ExpectedFingerprint, ESearchCase::CaseSensitive))
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("blueprint-edit-session-fingerprint-conflict"),
-				TEXT("The live graph content fingerprint no longer matches this edit session's expected state."));
-		}
 
+		// Per-request conflict detection only.  Changes anywhere else in the
+		// graph (user drags, node add/remove, pin or comment edits, another
+		// save) must not block this batch; only the exact nodes this batch
+		// names have to still be where the caller says they are.
 		for (const FNodeMoveRequest& Request : Requests)
 		{
-			const FIntPoint* Expected = Impl->ExpectedPositions.Find(Request.NodeGuid);
-			if (Expected == nullptr)
+			const FIntPoint* Live = LivePositions.Find(Request.NodeGuid);
+			if (Live == nullptr)
 			{
 				return Fail(
 					OutErrorCode,
 					OutErrorMessage,
 					TEXT("blueprint-edit-session-node-not-found"),
 					FString::Printf(
-						TEXT("Node %s is not part of this edit session's bound graph state."),
+						TEXT("Node %s is not present in the bound graph."),
 						*Request.NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower)));
 			}
-			if (Expected->X != Request.ExpectedX || Expected->Y != Request.ExpectedY)
+			if (Live->X != Request.ExpectedX || Live->Y != Request.ExpectedY)
 			{
 				return Fail(
 					OutErrorCode,
 					OutErrorMessage,
 					TEXT("blueprint-edit-session-node-position-conflict"),
 					FString::Printf(
-						TEXT("Node %s expected (%d, %d), but this edit session recorded (%d, %d)."),
+						TEXT("Node %s is at (%d, %d), but this batch expected (%d, %d); a manual edit, Undo/Redo or another writer changed that exact node."),
 						*Request.NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower),
+						Live->X,
+						Live->Y,
 						Request.ExpectedX,
-						Request.ExpectedY,
-						Expected->X,
-						Expected->Y));
+						Request.ExpectedY));
 			}
 		}
 
@@ -502,6 +423,7 @@ namespace UEAgentKitBlueprintEdit
 	bool FBlueprintEditSessionManager::CommitBatch(
 		UBlueprint* Blueprint,
 		UEdGraph* Graph,
+		const TArray<FNodeMoveRequest>& Requests,
 		const bool bChanged,
 		FString& OutErrorCode,
 		FString& OutErrorMessage)
@@ -522,26 +444,6 @@ namespace UEAgentKitBlueprintEdit
 		{
 			return false;
 		}
-		const FString LiveFingerprint =
-			UEAgentKitBlueprintGraphLayout::ComputeGraphContentFingerprint(Graph);
-		if (LiveFingerprint.IsEmpty())
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("blueprint-edit-session-fingerprint-unavailable"),
-				TEXT("The exact graph content fingerprint could not be recomputed after the batch."));
-		}
-
-		UPackage* Package = Blueprint->GetOutermost();
-		if (Package == nullptr)
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("blueprint-edit-session-package-unavailable"),
-				TEXT("The exact Blueprint has no package."));
-		}
 #if WITH_DEV_AUTOMATION_TESTS
 		if (ConsumeCommitBatchFinalizeFaultForTesting())
 		{
@@ -555,9 +457,47 @@ namespace UEAgentKitBlueprintEdit
 				TEXT("Test-only finalizer fault: the batch must be restored and no write committed."));
 		}
 #endif
-		Impl->ExpectedPositions = LivePositions;
-		Impl->ExpectedFingerprint = LiveFingerprint;
-		Impl->bExpectedPackageDirty = Package->IsDirty();
+		// Record per-node Agent ownership.  The baseline is the pre-write
+		// position the request declared (ValidateBatch proved it equals the live
+		// position before the transaction); the expected position is what the
+		// Agent just wrote.  If the user later moves that same node, the live
+		// position stops matching and rollback skips it instead of overwriting
+		// the user's move.
+		for (const FNodeMoveRequest& Request : Requests)
+		{
+			const FIntPoint* Live = LivePositions.Find(Request.NodeGuid);
+			if (Live == nullptr)
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("blueprint-edit-session-node-not-found"),
+					FString::Printf(
+						TEXT("Node %s disappeared while the batch was being finalized."),
+						*Request.NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower)));
+			}
+			if (Live->X != Request.ToX || Live->Y != Request.ToY)
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("blueprint-edit-session-batch-readback-mismatch"),
+					FString::Printf(
+						TEXT("Node %s was written to (%d, %d) but reads back at (%d, %d)."),
+						*Request.NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower),
+						Request.ToX,
+						Request.ToY,
+						Live->X,
+						Live->Y));
+			}
+			if (!Impl->AgentBaselinePositions.Contains(Request.NodeGuid))
+			{
+				Impl->AgentBaselinePositions.Add(
+					Request.NodeGuid,
+					FIntPoint(Request.ExpectedX, Request.ExpectedY));
+			}
+			Impl->AgentExpectedPositions.Add(Request.NodeGuid, *Live);
+		}
 		++Impl->BatchCount;
 		if (bChanged)
 		{
@@ -619,12 +559,11 @@ namespace UEAgentKitBlueprintEdit
 
 		if (Mode == EEditSessionEndMode::Rollback)
 		{
-			// Every proof below must hold before the first write; a failure keeps
-			// the session active and leaves every node untouched.  The restore
-			// itself reuses ApplyNodeMoveBatch, which opens exactly one
-			// FScopedTransaction, reads every position back and restores the
-			// pre-write state (positions, Blueprint status, Dirty bit) on any
-			// mismatch instead of leaving a half-applied rollback.
+			// Selective rollback: restore only nodes the Agent moved whose live
+			// position still equals the position the Agent last wrote.  A node the
+			// user moved afterwards is skipped and reported, never overwritten,
+			// and the rest of the rollback still proceeds.  The package Dirty bit
+			// and the graph content fingerprint are deliberately not preconditions.
 			if (!bTargetStillBound)
 			{
 				return Fail(
@@ -633,106 +572,81 @@ namespace UEAgentKitBlueprintEdit
 					TEXT("blueprint-edit-session-rollback-target-changed"),
 					TEXT("The bound Blueprint or graph was replaced, closed or reloaded; rollback refuses to guess a target."));
 			}
-			if (!PackageDirtyMatches(
-				BoundBlueprint,
-				Impl->bExpectedPackageDirty,
-				OutErrorCode,
-				OutErrorMessage))
-			{
-				OutErrorCode = TEXT("blueprint-edit-session-rollback-") + OutErrorCode.Mid(
-					FString(TEXT("blueprint-edit-session-")).Len());
-				return false;
-			}
 
 			TMap<FGuid, FIntPoint> LivePositions;
 			if (!ReadNodePositions(BoundGraph, LivePositions, OutErrorCode, OutErrorMessage))
 			{
 				return false;
 			}
-			if (LivePositions.Num() != Impl->ExpectedPositions.Num())
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("blueprint-edit-session-rollback-node-set-changed"),
-					TEXT("The live graph node set changed outside this edit session; rollback refuses to restore a different graph."));
-			}
-			for (const TPair<FGuid, FIntPoint>& Expected : Impl->ExpectedPositions)
-			{
-				const FIntPoint* Live = LivePositions.Find(Expected.Key);
-				if (Live == nullptr || *Live != Expected.Value)
-				{
-					return Fail(
-						OutErrorCode,
-						OutErrorMessage,
-						TEXT("blueprint-edit-session-rollback-node-position-conflict"),
-						FString::Printf(
-							TEXT("Node %s is not at the position this edit session last recorded; a manual edit, Undo/Redo or another writer changed the graph."),
-							*Expected.Key.ToString(EGuidFormats::DigitsWithHyphensLower)));
-				}
-			}
-			const FString LiveFingerprint =
-				UEAgentKitBlueprintGraphLayout::ComputeGraphContentFingerprint(BoundGraph);
-			if (LiveFingerprint.IsEmpty()
-				|| !LiveFingerprint.Equals(Impl->ExpectedFingerprint, ESearchCase::CaseSensitive))
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("blueprint-edit-session-rollback-fingerprint-conflict"),
-					TEXT("The live graph content no longer matches this edit session's expected state; rollback refuses to overwrite it."));
-			}
-			OutInfo.bFingerprintMatchedExpected = true;
 
 			TArray<FNodeMoveRequest> RestoreRequests;
-			RestoreRequests.Reserve(Impl->ExpectedPositions.Num());
-			for (const TPair<FGuid, FIntPoint>& Expected : Impl->ExpectedPositions)
+			RestoreRequests.Reserve(Impl->AgentExpectedPositions.Num());
+			for (const TPair<FGuid, FIntPoint>& AgentExpected : Impl->AgentExpectedPositions)
 			{
-				const FIntPoint* Initial = Impl->InitialPositions.Find(Expected.Key);
-				if (Initial == nullptr)
+				const FIntPoint* Baseline = Impl->AgentBaselinePositions.Find(AgentExpected.Key);
+				const FIntPoint* Live = LivePositions.Find(AgentExpected.Key);
+
+				// Node deleted, or the session lost its pre-write baseline.
+				if (Baseline == nullptr || Live == nullptr)
 				{
-					return Fail(
-						OutErrorCode,
-						OutErrorMessage,
-						TEXT("blueprint-edit-session-rollback-state-incomplete"),
-						TEXT("The edit session lost the initial position record; rollback cannot restore exactly."));
+					OutInfo.SkippedNodeGuids.Add(
+						AgentExpected.Key.ToString(EGuidFormats::DigitsWithHyphensLower));
+					continue;
 				}
+				// The user moved this node after the Agent wrote it: never
+				// overwrite that move.
+				if (*Live != AgentExpected.Value)
+				{
+					OutInfo.SkippedNodeGuids.Add(
+						AgentExpected.Key.ToString(EGuidFormats::DigitsWithHyphensLower));
+					continue;
+				}
+				// Already back at its pre-Agent position: nothing to write.
+				if (*Live == *Baseline)
+				{
+					continue;
+				}
+
 				FNodeMoveRequest Request;
-				Request.NodeGuid = Expected.Key;
-				Request.ExpectedX = Expected.Value.X;
-				Request.ExpectedY = Expected.Value.Y;
-				Request.ToX = Initial->X;
-				Request.ToY = Initial->Y;
+				Request.NodeGuid = AgentExpected.Key;
+				Request.ExpectedX = Live->X;
+				Request.ExpectedY = Live->Y;
+				Request.ToX = Baseline->X;
+				Request.ToY = Baseline->Y;
 				RestoreRequests.Add(Request);
 			}
+			OutInfo.SkippedNodeCount = OutInfo.SkippedNodeGuids.Num();
 
 			TArray<FNodeMoveResult> RestoreResults;
 			bool bRestoreChanged = false;
-			if (!ApplyNodeMoveBatch(
-				BoundBlueprint,
-				BoundGraph,
-				RestoreRequests,
-				RestoreResults,
-				bRestoreChanged,
-				OutErrorCode,
-				OutErrorMessage,
-				EPackageDirtyGate::AllowSessionOwnedDirty,
-				// One rollback must restore every node the session bound, not
-				// only the 128-request transport cap of a single caller batch.
-				NodeMoveRequestLimitUnlimited))
+			if (RestoreRequests.Num() > 0)
 			{
-				const FString Prefix(TEXT("node-move-batch-"));
-				if (OutErrorCode.StartsWith(Prefix, ESearchCase::CaseSensitive))
+				if (!ApplyNodeMoveBatch(
+					BoundBlueprint,
+					BoundGraph,
+					RestoreRequests,
+					RestoreResults,
+					bRestoreChanged,
+					OutErrorCode,
+					OutErrorMessage,
+					EPackageDirtyGate::AllowSessionOwnedDirty,
+					// One rollback must restore every Agent-owned node, not only
+					// the 128-request transport cap of a single caller batch.
+					NodeMoveRequestLimitUnlimited))
 				{
-					OutErrorCode =
-						FString(TEXT("blueprint-edit-session-rollback-"))
-						+ OutErrorCode.Mid(Prefix.Len());
+					const FString Prefix(TEXT("node-move-batch-"));
+					if (OutErrorCode.StartsWith(Prefix, ESearchCase::CaseSensitive))
+					{
+						OutErrorCode =
+							FString(TEXT("blueprint-edit-session-rollback-"))
+							+ OutErrorCode.Mid(Prefix.Len());
+					}
+					else if (OutErrorCode.IsEmpty())
+					{
+						OutErrorCode = TEXT("blueprint-edit-session-rollback-failed");
+					}
+					return false;
 				}
-				else if (OutErrorCode.IsEmpty())
-				{
-					OutErrorCode = TEXT("blueprint-edit-session-rollback-failed");
-				}
-				return false;
 			}
 
 			int32 ChangedCount = 0;
@@ -743,8 +657,9 @@ namespace UEAgentKitBlueprintEdit
 					++ChangedCount;
 				}
 			}
-			// A no-op restore (net-zero session) opens no transaction and reports
-			// zero restored nodes; the positions already equal the initial ones.
+			// `bRolledBack` means the rollback pass completed; the restored and
+			// skipped counts describe what it actually did.  No eligible node
+			// opens no transaction.
 			OutInfo.bRolledBack = true;
 			OutInfo.RestoredNodeCount = ChangedCount;
 			OutInfo.bRestoreTransactionOpened = bRestoreChanged;
@@ -753,14 +668,14 @@ namespace UEAgentKitBlueprintEdit
 		// Keep only releases ownership.  It never writes, saves or compiles.
 		if (bTargetStillBound)
 		{
+			// Informational only: false is normal once either side edited the
+			// graph during the session.
 			const FString LiveFingerprint =
 				UEAgentKitBlueprintGraphLayout::ComputeGraphContentFingerprint(BoundGraph);
-			if (Mode == EEditSessionEndMode::Keep)
-			{
-				OutInfo.bFingerprintMatchedExpected =
-					!LiveFingerprint.IsEmpty()
-					&& LiveFingerprint.Equals(Impl->ExpectedFingerprint, ESearchCase::CaseSensitive);
-			}
+			OutInfo.bFingerprintMatchedExpected =
+				!LiveFingerprint.IsEmpty()
+				&& !Impl->BeginFingerprint.IsEmpty()
+				&& LiveFingerprint.Equals(Impl->BeginFingerprint, ESearchCase::CaseSensitive);
 		}
 		UPackage* Package = Impl->Blueprint.IsValid()
 			? Impl->Blueprint->GetOutermost()
@@ -781,11 +696,10 @@ namespace UEAgentKitBlueprintEdit
 		Impl->CreatedAtUtc.Reset();
 		Impl->Blueprint.Reset();
 		Impl->Graph.Reset();
-		Impl->InitialPositions.Reset();
-		Impl->ExpectedPositions.Reset();
-		Impl->InitialFingerprint.Reset();
-		Impl->ExpectedFingerprint.Reset();
-		Impl->bExpectedPackageDirty = false;
+		Impl->BeginFingerprint.Reset();
+		Impl->AgentBaselinePositions.Reset();
+		Impl->AgentExpectedPositions.Reset();
+		Impl->BeginFingerprint.Reset();
 		Impl->BatchCount = 0;
 		Impl->MovedBatchCount = 0;
 		OutErrorCode.Reset();
