@@ -130,7 +130,7 @@ class PureLiveServerTests(unittest.TestCase):
             mcp_server.IndexQueryService = original  # type: ignore[assignment]
         names = _tool_names(server)
         self.assertEqual(names, sorted(PURE_LIVE_READ_TOOL_NAMES))
-        self.assertEqual(len(names), 17)
+        self.assertEqual(len(names), 18)
 
     def test_only_bounded_read_tools_are_registered(self) -> None:
         names = set(_tool_names(self._server()))

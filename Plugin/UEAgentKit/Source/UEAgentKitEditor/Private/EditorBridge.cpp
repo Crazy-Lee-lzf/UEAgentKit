@@ -74,6 +74,7 @@ namespace UEAgentKitEditorBridgePrivate
 		TEXT("editor.endBlueprintEditSession"),
 		TEXT("editor.getBlueprintGraphLayoutPreflight"),
 		TEXT("editor.getFocusedBlueprintGraphContext"),
+		TEXT("editor.getBlueprintGraphContext"),
 		TEXT("editor.getFocusedBlueprintGraphLayoutProjection"),
 		TEXT("editor.getEditorContext"),
 		TEXT("editor.batchTask.start"),
@@ -956,6 +957,17 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 				SendResult(Client.Socket, RequestId, Context);
 			}
 		}
+	}
+	else if (Method == TEXT("editor.getBlueprintGraphContext"))
+	{
+		TSharedPtr<FJsonObject> Result;
+		FString ErrorCode;
+		FString ErrorMessage;
+		SendActionResult(
+			TryBuildBlueprintGraphContextResult(Params, Result, ErrorCode, ErrorMessage),
+			Result,
+			ErrorCode,
+			ErrorMessage);
 	}
 	else if (Method == TEXT("editor.getFocusedBlueprintGraphLayoutProjection"))
 	{

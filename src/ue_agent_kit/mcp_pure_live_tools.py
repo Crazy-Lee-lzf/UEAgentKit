@@ -40,6 +40,7 @@ PURE_LIVE_READ_TOOL_NAMES: tuple[str, ...] = (
     "ue_get_blueprint_graph_selection",
     "ue_get_blueprint_graph_layout_preflight",
     "ue_get_focused_blueprint_graph_context",
+    "ue_get_blueprint_graph_context",
 )
 
 PURE_LIVE_PIE_TOOL_NAMES: tuple[str, ...] = (

@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Literal
 
 from .editor_bridge import LiveEditorBridgeService, LiveEditorError
 
 MAX_GRAPH_CONTEXT_BYTES = 700 * 1024
 GRAPH_CONTEXT_TOOL_NAME = "ue_get_focused_blueprint_graph_context"
+_GUID_PATTERN = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+)
+_MAX_CONTEXT_OFFSET = 1000000
+_MAX_CONTEXT_LIMIT = 500
 
 
 def register_live_read_tools(
@@ -272,10 +278,93 @@ def register_live_read_tools(
             response["contextOnly"] = True
             return response
 
+    @server.tool(annotations=read_annotations)
+    def ue_get_blueprint_graph_context(
+        asset_path: str,
+        graph_guid: str = "",
+        offset: int = 0,
+        limit: int = 200,
+    ) -> dict[str, Any]:
+        """Read any Blueprint's canonical graph context by asset path (optional graph, paginated nodes) without opening or focusing it."""
+        try:
+            if (
+                not isinstance(asset_path, str)
+                or not asset_path.startswith("/Game/")
+                or "." not in asset_path
+                or "\\" in asset_path
+                or ".." in asset_path
+                or ":" in asset_path
+                or any(ord(character) < 32 for character in asset_path)
+            ):
+                raise LiveEditorError(
+                    "live-editor-invalid-parameters",
+                    "asset_path must be one exact /Game Object Path.",
+                )
+            if graph_guid:
+                if (
+                    not isinstance(graph_guid, str)
+                    or _GUID_PATTERN.fullmatch(graph_guid) is None
+                ):
+                    raise LiveEditorError(
+                        "live-editor-invalid-parameters",
+                        "graph_guid must be one canonical lowercase hyphenated GUID.",
+                    )
+            if type(offset) is not int or not 0 <= offset <= _MAX_CONTEXT_OFFSET:
+                raise LiveEditorError(
+                    "live-editor-invalid-parameters",
+                    f"offset must be an integer in [0, {_MAX_CONTEXT_OFFSET}].",
+                )
+            if type(limit) is not int or not 1 <= limit <= _MAX_CONTEXT_LIMIT:
+                raise LiveEditorError(
+                    "live-editor-invalid-parameters",
+                    f"limit must be an integer in [1, {_MAX_CONTEXT_LIMIT}].",
+                )
+            request: dict[str, Any] = {
+                "assetPath": asset_path,
+                "offset": offset,
+                "limit": limit,
+            }
+            if graph_guid:
+                request["graphGuid"] = graph_guid
+            payload = live_editor_service.call_method(
+                "editor.getBlueprintGraphContext", request
+            )
+            result = payload.get("result")
+            if not isinstance(result, dict):
+                raise LiveEditorError(
+                    "live-editor-invalid-response",
+                    "The Editor Bridge returned an invalid graph context object.",
+                )
+            if result.get("available") is not True:
+                raise LiveEditorError(
+                    str(result.get("reasonCode") or "blueprint-graph-context-unavailable"),
+                    str(result.get("reason") or "The graph context is unavailable."),
+                )
+            if result.get("readOnly") is not True:
+                raise LiveEditorError(
+                    "blueprint-graph-context-not-readonly",
+                    "The Editor Bridge did not mark the graph context as read-only.",
+                )
+            encoded = json.dumps(result, ensure_ascii=False, allow_nan=False).encode("utf-8")
+            if len(encoded) > MAX_GRAPH_CONTEXT_BYTES:
+                raise LiveEditorError(
+                    "blueprint-graph-context-too-large",
+                    "The graph context exceeds the 700 KiB read-only boundary.",
+                )
+            payload["writeAuthorized"] = False
+            payload["editorVerified"] = False
+            payload["contextOnly"] = True
+            return payload
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            response = error_response("ue_get_blueprint_graph_context", exc, read_only=True)
+            response["writeAuthorized"] = False
+            response["editorVerified"] = False
+            response["contextOnly"] = True
+            return response
+
     # Pure-live mode exposes only the bounded read set above: graph-layout
     # preview and the retarget readers are deliberately not registered.
-    if pure_live:
-        return
+    if pure_live:        return
 
     from .mcp_graph_layout_preview import register_graph_layout_preview_tool
 

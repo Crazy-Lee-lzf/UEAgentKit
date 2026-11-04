@@ -88,6 +88,12 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
         "editor.getFocusedBlueprintGraphContext",
     ),
     ToolDefinition(
+        "ue_get_blueprint_graph_context",
+        "live-read",
+        "read",
+        "editor.getBlueprintGraphContext",
+    ),
+    ToolDefinition(
         "ue_preview_blueprint_graph_layout",
         "live-read",
         "read",

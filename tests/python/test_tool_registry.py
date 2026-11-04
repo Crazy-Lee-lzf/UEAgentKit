@@ -67,6 +67,7 @@ EXPECTED_ALL_TOOLS = [
     "ue_get_blueprint_graph_selection",
     "ue_get_blueprint_graph_layout_preflight",
     "ue_get_focused_blueprint_graph_context",
+    "ue_get_blueprint_graph_context",
     "ue_preview_blueprint_graph_layout",
     "ue_analyze_animation_retarget",
     "ue_diagnose_animation_scale",
@@ -162,7 +163,7 @@ class ToolRegistryTests(unittest.TestCase):
             EXPECTED_ALL_TOOLS,
         )
         self.assertEqual(len(tool_names_for_mode()), 14)
-        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 53)
+        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 54)
         self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 75)
         self.assertEqual(
             tool_names_for_mode(memory_enabled=True),
@@ -171,7 +172,7 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 28)
         self.assertEqual(
             len(tool_names_for_mode(live_editor_enabled=True, memory_enabled=True)),
-            67,
+            68,
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
@@ -185,7 +186,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-            128,
+            129,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:

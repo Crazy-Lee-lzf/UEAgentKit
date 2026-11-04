@@ -131,6 +131,17 @@ private:
 		FString& OutErrorMessage);
 	TSharedRef<FJsonObject> BuildBlueprintGraphLayoutPreflightResult() const;
 	TSharedRef<FJsonObject> BuildFocusedBlueprintGraphContextResult() const;
+	/**
+	 * Read any loaded-or-loadable Blueprint's canonical graph context by asset
+	 * path, optionally filtered to one GraphGuid and paginated by node offset /
+	 * limit.  Read-only: it may load the asset but never dirties, saves, opens a
+	 * tab or focuses a graph.
+	 */
+	bool TryBuildBlueprintGraphContextResult(
+		const TSharedPtr<FJsonObject>& Params,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage) const;
 	bool TryBuildBlueprintGraphLayoutProjectionResult(
 		const TSharedPtr<FJsonObject>& Params,
 		TSharedPtr<FJsonObject>& OutResult,
