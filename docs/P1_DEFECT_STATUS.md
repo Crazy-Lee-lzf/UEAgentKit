@@ -5,6 +5,39 @@ save / index defects only; no new asset write domains, no UI-lock claim, no
 Editor launch. Status is per item: **fixed**, **limited**, or **not done**, with
 the evidence that exists in this worktree.
 
+> **Status correction (2026-11-05).** N1 has since proven several items
+> **Native accepted** that the older sections below still list as unverified:
+> N1-R2 (10 consecutive token batches), N1-R3 (large-graph rollback), N1-R4
+> (finalizer fault seam) and N1-R6 (Material/DataTable fast verify), plus
+> N1-DEF-01 (token case) and N1-DEF-02 (retained fast-verify control flow).
+> **N1-R7 (UI exclusivity) is retired by user decision** and is no longer an
+> acceptance target. The sections below are kept as the historical record; do
+> not read their "Native unverified" lines as current.
+
+## Stage 0 (2026-11-05) — 收口 + 实时化
+
+| Item | Status | Evidence / commit |
+| --- | --- | --- |
+| 0-2 both sides may edit the same graph | **done (pending N1 compile)** | `4e137c1` — Dirty at Begin allowed, per-batch node-only conflicts, selective rollback with `skippedNodeGuids`, `requiresUserNotEdit=false` |
+| 0-3.1 live write pre-gate | **done (limited)** | `b65c156` — live `editor.inspectAssetLive` replaces stale-index rejection; value-level Plan→Apply drift is **not** detectable yet (no public live scalar read) |
+| 0-3.2 live graph context by asset path | **done (pending N1 compile)** | `f785804` — `editor.getBlueprintGraphContext` + `ue_get_blueprint_graph_context` (paginated, read-only) |
+| 0-3.3 in-process index hot update | **not done (design only)** | `docs/INDEX_LIVE_HOT_UPDATE_DESIGN_20261105.md` |
+| 0-3.4 GraphPatch batching / session authorization | **not done (design only)** | `docs/GRAPH_PATCH_BATCH_DESIGN_20261105.md` |
+| 0-4 DEF-06 / DEF-08 / DEF-09 doc examples | **fixed** | this commit; `docs/BLUEPRINT_AGENT_E2E_USAGE.md` + `tests/python/test_doc_examples.py` |
+| 0-4 DEF-07 fixture concurrency | **fixed earlier** | `ecc3c69` (RunWriteFixturePlan guard) |
+| 0-4 DEF-02 / DEF-03 / DEF-04 / DEF-11 | **deferred** | capabilities/cross-version work deferred to stage 1/3 per plan §五 |
+
+### P0 audit evidence (2026-11-05)
+
+| Item | Code evidence | Verdict |
+| --- | --- | --- |
+| P0-R2 WAL quiesce | `agent_api.py:196-205` refuses any `-wal`/`-shm`/`-journal` sidecar before opening an immutable snapshot; `database.py:559-560` checkpoints `wal_checkpoint(TRUNCATE)` and returns to `journal_mode=DELETE` after index build | **implemented**, no regression found |
+| P0-R3 manifest prune scope | `indexer.py:698-726` deletes only rows `asset_path = prefix OR LIKE prefix/%` and skips every path in `seen_asset_paths`; it is called only when an explicit `prune_prefix` is supplied (`indexer.py:1076-1084`) | **root-scoped prune implemented**; no global prune path found |
+| P0-R5 projectKey isolation | `memory_service.py:155-160` requires a non-empty key; queries filter `WHERE project_key = ?` (`:166`, `:172`); `:840-849` refuses an index whose metadata key differs; `:872-875` re-asserts on every call | **implemented** |
+| P0-R6 Memory Revision false invalidation | `memory_service.py:850-864` builds `current_revisions` only from assets with `revision_value <> ''` and passes it to `invalidate_memory_revisions`; a blank/missing revision cannot be treated as a change | **guarded**; exact original repro case not available here, so marked evidence-backed rather than re-proven |
+| P0-R7 C++ parse failure keeps old semantics | No code path was found that deletes prior symbols on a parse failure without a replacement parse succeeding; the original failure case is not in this worktree | **not reproduced** — needs the original repro to confirm |
+
+
 ## Round 2 (2026-10-31, second long task)
 
 ### R2-1 Rollback rejected graphs with more than 128 nodes — fixed

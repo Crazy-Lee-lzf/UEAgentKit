@@ -8,23 +8,34 @@ It is an opt-in experimental workflow, not a production default.
 ## 1. Preconditions / 前置条件
 
 - UE 5.6.1 Editor is running the `UEAgentKitEditor` plugin, PIE/SIE stopped.
-- The **Editor project** opted in in `Config/DefaultEditor.ini` (or the running
-  project config):
+- The **Editor project** opted in in `Config/DefaultEngine.ini` (the plugin reads
+  this switch through `GEngineIni`, i.e. the Engine config layer of the running
+  project — **not** `DefaultEditor.ini`):
 
   ```ini
   [UEAgentKit]
   ExperimentalGraphPatchEdit=True
   ```
 
-- The MCP server is started with **both** flags:
+- The MCP server is started with **both flags** and the three fixed write paths
+  (`--engine-root`, `--policy`, `--revision-export` are required whenever
+  `--enable-write-tools`/`--enable-commit-tools` are used; omitting them fails
+  the startup check with a precise error):
 
   ```powershell
   py -3.12 -m ue_agent_kit.mcp_server `
     --enable-live-editor `
     --enable-experimental-graphpatch-edit `
     --project E:\Path\To\HostProject\HostProject.uproject `
-    --database E:\Path\To\Disposable\ueak-index.sqlite3
+    --database E:\Path\To\Disposable\ueak-index.sqlite3 `
+    --engine-root E:\EPICGAME\UE_5.6 `
+    --policy E:\Path\To\HostProject\Config\UEAgentKit\policy.json `
+    --revision-export E:\Path\To\HostProject\Saved\UEAgentKit\Revision
   ```
+
+  If the Revision Export directory does not exist yet, generate it once with
+  `scripts\RunExport.ps1` (or `ue-agent index build`) before starting a write
+  session; the MCP refuses writes that need a Revision without it.
 
 - Use a disposable test project/asset. Do not enable the project switch on a
   production project. 使用 disposable 测试工程/资产，不要在生产工程打开项目开关。
@@ -65,17 +76,24 @@ live Slate focus or the explicit focus request selected the graph.
    "assetPath": "/Game/UEAgentKitAgentE2E/BP_AgentE2E.BP_AgentE2E",
    "graphGuid": "<graphGuid from preflight>",
    "nodes": [
-     {"tempId": "not", "nodeType": "not_bool", "x": -600, "y": 0},
-     {"tempId": "or", "nodeType": "bool_or", "x": -400, "y": 120},
-     {"tempId": "branch", "nodeType": "branch", "x": -200, "y": 0},
-     {"tempId": "seq", "nodeType": "sequence", "x": 100, "y": 0}
+     {"tempId": "tmp:not", "nodeType": "not_bool", "x": -600, "y": 0},
+     {"tempId": "tmp:or", "nodeType": "bool_or", "x": -400, "y": 120},
+     {"tempId": "tmp:branch", "nodeType": "branch", "x": -200, "y": 0},
+     {"tempId": "tmp:seq", "nodeType": "sequence", "x": 100, "y": 0}
    ],
    "connections": [
-     {"from": "not", "fromPin": "ReturnValue", "to": "branch", "toPin": "Condition"},
-     {"from": "branch", "fromPin": "then", "to": "seq", "toPin": "execute"}
+     {"from": "tmp:not", "fromPin": "ReturnValue", "to": "tmp:branch", "toPin": "Condition"},
+     {"from": "tmp:branch", "fromPin": "then", "to": "tmp:seq", "toPin": "execute"}
    ]
  }}
 ```
+
+Every `tempId` must match `^tmp:[A-Za-z0-9_-]{1,36}$` (the `tmp:` prefix is
+required and connections reference the same `tempId`). `nodeType` must be one of
+the exact supported names (`not_bool`, `bool_or`, `branch`, `sequence`,
+`int_add`, `double_add`, `int_equal`, `string_concat`, `variable_get`,
+`variable_set`, `call_function`, `call_owned_pure_function`) — `nodeClass` is
+derived by the plugin and is not a request field.
 
 Apply and Save with the **returned** confirmation strings; never invent them:
 
