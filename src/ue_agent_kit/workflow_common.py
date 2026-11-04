@@ -160,6 +160,10 @@ class PlanRecord:
     patch_path: Path
     validation: dict[str, Any]
     consumed: bool = False
+    # In-Editor identity captured at Plan time (class/package).  Compared again
+    # at Apply when a live Editor is connected; None means the plan was made
+    # offline and the offline gate stays in force.
+    live_baseline: dict[str, Any] | None = None
 
 
 @dataclass
@@ -1214,7 +1218,106 @@ class WorkflowCommonBase:
         return path
 
 
+    def _live_asset_baseline(self, asset_path: str) -> dict[str, Any] | None:
+        """Read the target asset's in-Editor identity/state.
+
+        Returns ``None`` when there is no usable live probe (no Editor
+        connected, or the connected bridge does not answer
+        ``editor.inspectAssetLive``), in which case the caller keeps the
+        previous offline gate unchanged.  A live Editor that knows the asset but
+        reports it missing is a precise refusal, not a fallback.
+        """
+        service = getattr(self, "live_editor_service", None)
+        if service is None or not getattr(
+            service, "supports_live_asset_inspect", False
+        ):
+            # No Editor, or a service that does not advertise the live asset
+            # read: keep the previous offline gate rather than guessing.
+            return None
+        try:
+            live = service.call_method(
+                "editor.inspectAssetLive", {"assetPath": asset_path}
+            )
+        except Exception:
+            # Older bridge / test double without this method: stay offline-safe.
+            return None
+        if not isinstance(live, dict):
+            return None
+        registry = live.get("assetRegistry")
+        memory = live.get("memory")
+        if not isinstance(registry, dict) or not isinstance(memory, dict):
+            return None
+        if not registry.get("found"):
+            raise WorkflowError(
+                "live-editor-asset-not-found",
+                "The connected Editor does not know the requested asset.",
+                details=self._sanitize_details({"assetPath": asset_path}),
+            )
+        return {
+            "assetPath": asset_path,
+            "classPath": str(registry.get("classPath") or ""),
+            "packageName": str(registry.get("packageName") or ""),
+            "state": str(memory.get("state") or ""),
+            "packageDirty": bool(memory.get("packageDirty")),
+            "loaded": bool(memory.get("loaded")),
+        }
+
+    def _assert_live_baseline_unchanged(
+        self,
+        planned: dict[str, Any] | None,
+        current: dict[str, Any],
+        asset_path: str,
+    ) -> None:
+        """Reject a Plan->Apply change of the target's live identity.
+
+        Only identity fields are compared: the asset's class/package must still
+        be the one the plan was made against.  A user save, a Dirty bit change or
+        the asset becoming loaded is normal and must not reject the apply.
+        """
+        if not planned or current.get("state") != "live-editor":
+            return
+        live = current.get("live") or {}
+        for field in ("classPath", "packageName"):
+            if planned.get(field) != live.get(field):
+                raise WorkflowError(
+                    "live-baseline-changed",
+                    "The target asset changed in the Editor between Plan and Apply.",
+                    details=self._sanitize_details(
+                        {
+                            "assetPath": asset_path,
+                            "field": field,
+                            "planned": planned.get(field),
+                            "current": live.get(field),
+                        }
+                    ),
+                )
+
     def _assert_asset_fresh(self, asset_path: str) -> dict[str, Any]:
+        # Live-first: while an Editor is connected, the in-Editor object is the
+        # write gate.  A stale offline index must not block a Plan/Apply; it is
+        # reported as a warning instead.  With no live probe the previous
+        # offline behaviour is unchanged.
+        baseline = self._live_asset_baseline(asset_path)
+        if baseline is not None:
+            offline = self.freshness.inspect_asset(asset_path)
+            warnings: list[str] = []
+            if offline.get("state") == "stale":
+                warnings.append("offline-index-stale-ignored-under-live-editor")
+            elif offline.get("state") != "fresh":
+                warnings.append("offline-index-unavailable-ignored-under-live-editor")
+            accepted = dict(offline)
+            accepted.update(
+                {
+                    "state": "live-editor",
+                    "writeGate": "live-editor-memory",
+                    "indexFresh": False,
+                    "indexStaleForWrite": False,
+                    "warnings": warnings,
+                    "live": baseline,
+                }
+            )
+            return accepted
+
         freshness = self.freshness.inspect_asset(asset_path)
         if freshness.get("state") == "stale":
             # A stale frozen index is acceptable only when this MCP session saved

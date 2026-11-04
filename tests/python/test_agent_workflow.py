@@ -4283,5 +4283,171 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertIn(applied["liveApplyReceipt"], service._live_applies)
 
 
+class LiveInspectBridge:
+    """Minimal bridge double for editor.inspectAssetLive."""
+
+    supports_live_asset_inspect = True
+
+    def __init__(
+        self,
+        *,
+        found: bool = True,
+        class_path: str = ASSET_CLASS,
+        package_name: str = "/Game/UEAgentKitWriteTests/ScalarRegression/DA_ScalarPatchTarget",
+        package_dirty: bool = True,
+    ) -> None:
+        self.found = found
+        self.class_path = class_path
+        self.package_name = package_name
+        self.package_dirty = package_dirty
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    def call_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append((method, dict(params)))
+        if method != "editor.inspectAssetLive":
+            raise AssertionError(f"unexpected live method: {method}")
+        return {
+            "assetPath": params["assetPath"],
+            "assetRegistry": {
+                "found": self.found,
+                "classPath": self.class_path,
+                "packageName": self.package_name,
+            },
+            "memory": {
+                "loaded": True,
+                "packageDirty": self.package_dirty,
+                "state": "loaded-unsaved" if self.package_dirty else "loaded-saved",
+                "objectPath": params["assetPath"],
+            },
+        }
+
+
+class LivePreWriteGateTests(unittest.TestCase):
+    """0-3.1: the write pre-gate uses the live Editor, not a stale index."""
+
+    def setUp(self) -> None:
+        # Reuse the large workflow fixture without re-running its tests.
+        self.harness = AgentWorkflowTests(methodName="runTest")
+        self.harness.setUp()
+        self.addCleanup(self.harness.tearDown)
+        self.config = self.harness.config
+        self.runner = self.harness.runner
+        self.work_root = self.harness.work_root
+
+    def _service(self, tracker: FakeFreshnessTracker, bridge: Any) -> PatchWorkflowService:
+        return PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=tracker,
+            live_editor_service=bridge,
+        )
+
+    def test_stale_index_is_a_warning_when_a_live_editor_answers(self) -> None:
+        tracker = FakeFreshnessTracker()
+        tracker.state = "stale"
+        tracker.disk_revision = AFTER_REVISION
+        bridge = LiveInspectBridge()
+        service = self._service(tracker, bridge)
+
+        freshness = service._assert_asset_fresh(ASSET_PATH)
+
+        self.assertEqual(freshness["state"], "live-editor")
+        self.assertEqual(freshness["writeGate"], "live-editor-memory")
+        self.assertFalse(freshness["indexFresh"])
+        self.assertFalse(freshness["indexStaleForWrite"])
+        self.assertIn(
+            "offline-index-stale-ignored-under-live-editor", freshness["warnings"]
+        )
+        self.assertTrue(freshness["live"]["packageDirty"])
+        self.assertEqual(bridge.calls[0][0], "editor.inspectAssetLive")
+
+    def test_without_a_live_editor_a_stale_index_still_blocks(self) -> None:
+        tracker = FakeFreshnessTracker()
+        tracker.state = "stale"
+        tracker.disk_revision = AFTER_REVISION
+        service = PatchWorkflowService(
+            FakeIndexService(),
+            self.config,
+            process_runner=self.runner,
+            freshness_tracker=tracker,
+            live_editor_service=None,
+        )
+        with self.assertRaises(WorkflowError) as stale:
+            service._assert_asset_fresh(ASSET_PATH)
+        self.assertEqual(stale.exception.code, "index-stale")
+
+    def test_a_bridge_without_the_method_falls_back_to_the_offline_gate(self) -> None:
+        tracker = FakeFreshnessTracker()
+        tracker.state = "stale"
+        tracker.disk_revision = AFTER_REVISION
+
+        class LegacyBridge:
+            supports_live_asset_inspect = True
+
+            def call_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+                raise LiveEditorError("unknown-method", f"unsupported: {method}")
+
+        service = self._service(tracker, LegacyBridge())
+        with self.assertRaises(WorkflowError) as stale:
+            service._assert_asset_fresh(ASSET_PATH)
+        self.assertEqual(stale.exception.code, "index-stale")
+
+    def test_a_service_without_the_capability_is_not_probed(self) -> None:
+        tracker = FakeFreshnessTracker()
+        tracker.state = "stale"
+        tracker.disk_revision = AFTER_REVISION
+
+        class NoCapabilityBridge:
+            def call_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+                raise AssertionError("must not probe without the capability")
+
+        service = self._service(tracker, NoCapabilityBridge())
+        with self.assertRaises(WorkflowError) as stale:
+            service._assert_asset_fresh(ASSET_PATH)
+        self.assertEqual(stale.exception.code, "index-stale")
+
+    def test_live_editor_that_does_not_know_the_asset_refuses_precisely(self) -> None:
+        service = self._service(FakeFreshnessTracker(), LiveInspectBridge(found=False))
+        with self.assertRaises(WorkflowError) as missing:
+            service._assert_asset_fresh(ASSET_PATH)
+        self.assertEqual(missing.exception.code, "live-editor-asset-not-found")
+
+    def test_plan_and_apply_succeed_while_the_package_is_dirty(self) -> None:
+        bridge = LiveInspectBridge(package_dirty=True)
+        service = self._service(FakeFreshnessTracker(), bridge)
+
+        plan = service.plan_patch(
+            asset_path=ASSET_PATH,
+            operation="setAssetProperty",
+            target={"propertyPath": "BoolValue"},
+            value=True,
+        )
+
+        self.assertTrue(plan["ok"])
+        record = service._plans[plan["planId"]]
+        self.assertEqual(record.live_baseline["classPath"], ASSET_CLASS)
+        # Apply re-validates against the same live identity and succeeds.
+        service._validate_plan_file(record)
+
+    def test_target_identity_change_between_plan_and_apply_is_refused(self) -> None:
+        bridge = LiveInspectBridge()
+        service = self._service(FakeFreshnessTracker(), bridge)
+        plan = service.plan_patch(
+            asset_path=ASSET_PATH,
+            operation="setAssetProperty",
+            target={"propertyPath": "BoolValue"},
+            value=True,
+        )
+        record = service._plans[plan["planId"]]
+
+        bridge.class_path = "/Script/Engine.Texture2D"
+
+        with self.assertRaises(WorkflowError) as changed:
+            service._validate_plan_file(record)
+        self.assertEqual(changed.exception.code, "live-baseline-changed")
+        self.assertEqual(changed.exception.details["field"], "classPath")
+
+
 if __name__ == "__main__":
     unittest.main()
