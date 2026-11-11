@@ -144,7 +144,7 @@ class PatchWorkflowConfig:
     engine_root: Path
     project_path: Path
     policy_path: Path
-    revision_export: Path
+    revision_export: Path | None
     work_root: Path
     backup_root: Path
     commit_enabled: bool = False
@@ -838,7 +838,11 @@ class WorkflowCommonBase:
             engine_root=config.engine_root.expanduser().resolve(),
             project_path=config.project_path.expanduser().resolve(),
             policy_path=config.policy_path.expanduser().resolve(),
-            revision_export=config.revision_export.expanduser().resolve(),
+            revision_export=(
+                config.revision_export.expanduser().resolve()
+                if config.revision_export is not None
+                else None
+            ),
             work_root=config.work_root.expanduser().resolve(),
             backup_root=config.backup_root.expanduser().resolve(),
             commit_enabled=config.commit_enabled,
@@ -1096,7 +1100,7 @@ class WorkflowCommonBase:
         for path in required_files:
             if not path.is_file():
                 raise WorkflowError("workflow-config-invalid", "A configured workflow file does not exist.")
-        if not self.config.revision_export.is_dir():
+        if self.config.revision_export is not None and not self.config.revision_export.is_dir():
             raise WorkflowError("workflow-config-invalid", "The configured Revision Export directory does not exist.")
         output_root = (self.config.tool_root / "Output").resolve()
         backups_root = (self.config.tool_root / "Backups").resolve()
@@ -1120,18 +1124,25 @@ class WorkflowCommonBase:
                 raise WorkflowError("workflow-config-invalid", "The active snapshot pointer does not use the fixed MCP work root.")
             if not self.active_snapshot.database.is_file() or not self.active_snapshot.revision_export.is_dir():
                 raise WorkflowError("workflow-config-invalid", "The active snapshot pair is incomplete.")
-        manifest = _read_json(self.config.revision_export / "manifest.json")
-        project_name = manifest.get("projectName")
-        if not isinstance(project_name, str) or not project_name:
-            raise WorkflowError("workflow-config-invalid", "Revision Export has no valid projectName.")
-        actual_project_name = self.config.project_path.stem
-        if project_name != actual_project_name:
-            raise WorkflowError("workflow-config-invalid", "Revision Export projectName does not match the fixed project file.")
-        index_status = self.index_service.check()
-        index_project_key = str(index_status.get("projectKey", ""))
-        if index_project_key != project_name:
-            raise WorkflowError("workflow-config-invalid", "SQLite projectKey does not match the fixed project and Revision Export.")
-        self.project_name = project_name
+        if self.config.revision_export is None:
+            # 0-3.6 live-only write: no Revision Export and possibly no index.
+            # The write gate is the live Editor, so the fixed project file is the
+            # only identity available here.  Patch writes still refuse at use
+            # time through _revision_export_required().
+            self.project_name = self.config.project_path.stem
+        else:
+            manifest = _read_json(self.config.revision_export / "manifest.json")
+            project_name = manifest.get("projectName")
+            if not isinstance(project_name, str) or not project_name:
+                raise WorkflowError("workflow-config-invalid", "Revision Export has no valid projectName.")
+            actual_project_name = self.config.project_path.stem
+            if project_name != actual_project_name:
+                raise WorkflowError("workflow-config-invalid", "Revision Export projectName does not match the fixed project file.")
+            index_status = self.index_service.check()
+            index_project_key = str(index_status.get("projectKey", ""))
+            if index_project_key != project_name:
+                raise WorkflowError("workflow-config-invalid", "SQLite projectKey does not match the fixed project and Revision Export.")
+            self.project_name = project_name
         self.policy_digest = _sha256_bytes(self.config.policy_path.read_bytes())
 
 
@@ -1292,6 +1303,17 @@ class WorkflowCommonBase:
                     ),
                 )
 
+    def _revision_export_required(self) -> Path:
+        """0-3.6: patch validation cannot run without offline revision evidence."""
+        if self.config.revision_export is None:
+            raise WorkflowError(
+                "revision-export-required",
+                "Patch-based writes require --revision-export. Only live "
+                "bridge-native writes (node move, material, DataTable, save) can "
+                "run without it.",
+            )
+        return self.config.revision_export
+
     def _assert_asset_fresh(self, asset_path: str) -> dict[str, Any]:
         # Live-first: while an Editor is connected, the in-Editor object is the
         # write gate.  A stale offline index must not block a Plan/Apply; it is
@@ -1299,8 +1321,24 @@ class WorkflowCommonBase:
         # offline behaviour is unchanged.
         baseline = self._live_asset_baseline(asset_path)
         if baseline is not None:
-            offline = self.freshness.inspect_asset(asset_path)
             warnings: list[str] = []
+            if self.config.revision_export is None:
+                # 0-3.6 live-only write: no offline revision evidence exists at
+                # all, so there is nothing to compare against.  Editor memory is
+                # the only gate and says so explicitly.
+                return {
+                    "schemaVersion": "1.0",
+                    "assetPath": asset_path,
+                    "state": "live-editor",
+                    "writeGate": "live-editor-memory",
+                    "indexFresh": False,
+                    "indexStaleForWrite": False,
+                    "warnings": [
+                        "offline-index-and-revision-export-absent-under-live-editor"
+                    ],
+                    "live": baseline,
+                }
+            offline = self.freshness.inspect_asset(asset_path)
             if offline.get("state") == "stale":
                 warnings.append("offline-index-stale-ignored-under-live-editor")
             elif offline.get("state") != "fresh":
@@ -1318,6 +1356,12 @@ class WorkflowCommonBase:
             )
             return accepted
 
+        if self.config.revision_export is None:
+            raise WorkflowError(
+                "live-editor-required",
+                "No live Editor is connected and this server started without "
+                "--revision-export, so the write gate has no evidence to compare.",
+            )
         freshness = self.freshness.inspect_asset(asset_path)
         if freshness.get("state") == "stale":
             # A stale frozen index is acceptable only when this MCP session saved

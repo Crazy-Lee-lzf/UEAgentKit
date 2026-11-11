@@ -2369,7 +2369,15 @@ def create_mcp_server(
         raise ValueError("A fixed index database path is required unless --pure-live is set.")
 
     index_service = IndexQueryService(database_path)
-    index_status = index_service.check()
+    # 0-3.6: a missing index must not block startup when only bridge-native
+    # writes are needed.  Project Memory genuinely requires the index, so that
+    # path still fails closed.
+    try:
+        index_status = index_service.check()
+    except FileNotFoundError:  # 0-3.6: absent index degrades; corrupt still fails
+        if memory_service is not None:
+            raise
+        index_status = {"state": "unavailable", "reason": "index-unavailable"}
     if memory_service is not None and memory_service.project_key != str(index_status.get("projectKey", "")):
         raise ValueError("Project Memory and index services must use the same fixed project")
     if workflow_service is not None and workflow_config is not None:
@@ -2777,8 +2785,14 @@ def _build_workflow_config(args: argparse.Namespace) -> PatchWorkflowConfig | No
         "--engine-root": args.engine_root,
         "--project": args.project_path,
         "--policy": args.policy_path,
-        "--revision-export": args.revision_export,
     }
+    # 0-3.6 live-only write: with a live Editor the in-Editor object is the gate
+    # for bridge-native writes, so the offline Revision Export is optional.
+    # Patch-based writes still require it and refuse at use time with
+    # revision-export-required instead of blocking startup.  --policy stays
+    # mandatory: it is the write-scope boundary, not a convenience input.
+    if not args.enable_live_editor:
+        required["--revision-export"] = args.revision_export
     missing = [name for name, value in required.items() if value is None]
     if missing:
         raise ValueError("Missing fixed workflow arguments: " + ", ".join(missing))
@@ -2937,33 +2951,53 @@ def main(argv: Sequence[str] | None = None) -> int:
         workflow_config: PatchWorkflowConfig | None = None
         database_path = args.database if args.database is not None else DEFAULT_DATABASE
         if base_workflow_config is not None:
-            active_snapshot = resolve_active_snapshot(
-                database_path,
-                base_workflow_config.revision_export,
-                base_workflow_config.work_root,
-                base_workflow_config.project_path.stem,
-            )
-            validation_index = IndexQueryService(active_snapshot.database)
-            validation_config = replace(
-                base_workflow_config,
-                revision_export=active_snapshot.revision_export,
-                active_snapshot=active_snapshot,
-            )
-            PatchWorkflowService(
-                validation_index,
-                validation_config,
-                live_editor_service=live_editor_service,
-            )
-            frozen_snapshot = freeze_active_snapshot(active_snapshot)
-            database_path = frozen_snapshot.database
-            workflow_config = replace(
-                base_workflow_config,
-                revision_export=frozen_snapshot.revision_export,
-                active_snapshot=active_snapshot,
-            )
+            if base_workflow_config.revision_export is None:
+                # 0-3.6 live-only write: without a Revision Export there is no
+                # offline snapshot generation to resolve, validate or freeze.
+                # Bridge-native writes run against the live Editor; patch-based
+                # writes refuse at use time with revision-export-required.
+                workflow_config = base_workflow_config
+            else:
+                active_snapshot = resolve_active_snapshot(
+                    database_path,
+                    base_workflow_config.revision_export,
+                    base_workflow_config.work_root,
+                    base_workflow_config.project_path.stem,
+                )
+                validation_index = IndexQueryService(active_snapshot.database)
+                validation_config = replace(
+                    base_workflow_config,
+                    revision_export=active_snapshot.revision_export,
+                    active_snapshot=active_snapshot,
+                )
+                PatchWorkflowService(
+                    validation_index,
+                    validation_config,
+                    live_editor_service=live_editor_service,
+                )
+                frozen_snapshot = freeze_active_snapshot(active_snapshot)
+                database_path = frozen_snapshot.database
+                workflow_config = replace(
+                    base_workflow_config,
+                    revision_export=frozen_snapshot.revision_export,
+                    active_snapshot=active_snapshot,
+                )
 
         index_service = IndexQueryService(database_path)
-        index_status = index_service.check()
+        # 0-3.6: a machine without an index must still start.  Offline queries
+        # report index-unavailable instead of killing the server; Project Memory
+        # genuinely needs the index, so that path still fails closed.
+        try:
+            index_status = index_service.check()
+        except FileNotFoundError as exc:  # 0-3.6: absent index only
+            if args.enable_project_memory:
+                raise
+            index_status = {
+                "state": "unavailable",
+                "reason": "index-unavailable",
+                "detail": str(exc)[:200],
+                "database": str(database_path),
+            }
         memory_service: ProjectMemoryService | None = None
         if args.enable_project_memory:
             project_key = str(index_status.get("projectKey", "")).strip()

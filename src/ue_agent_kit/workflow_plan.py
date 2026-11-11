@@ -73,7 +73,11 @@ class WorkflowPlanMixin:
         asset_path = str(assets[0].get("assetPath", ""))
         freshness = self._assert_asset_fresh(asset_path)
         self._assert_live_baseline_unchanged(record.live_baseline, freshness, asset_path)
-        validation = validate_patch(record.patch_path, self.config.policy_path, self.config.revision_export)
+        validation = validate_patch(
+            record.patch_path,
+            self.config.policy_path,
+            self._revision_export_required(),
+        )
         if not validation.get("valid"):
             raise _validation_error(
                 validation,
@@ -137,7 +141,11 @@ class WorkflowPlanMixin:
             directory = self._plan_directory(plan_id)
             patch_path = directory / "patch.json"
             _write_json_atomic(patch_path, patch)
-            validation = validate_patch(patch_path, self.config.policy_path, self.config.revision_export)
+            validation = validate_patch(
+                patch_path,
+                self.config.policy_path,
+                self._revision_export_required(),
+            )
             if not validation.get("valid"):
                 raise _validation_error(
                     validation,

@@ -111,10 +111,22 @@ def _read_canonical_revision(path: Path) -> tuple[str, bool]:
 class IndexFreshnessTracker:
     """Compare immutable SQLite revisions with Revision Export and fixed-project package files."""
 
-    def __init__(self, index_service: Any, project_path: Path, revision_export: Path) -> None:
+    def __init__(
+        self,
+        index_service: Any,
+        project_path: Path,
+        revision_export: Path | None,
+    ) -> None:
         self.index_service = index_service
         self.project_path = project_path.expanduser().resolve()
-        self.revision_export = revision_export.expanduser().resolve()
+        # 0-3.6 live-only write: a session may start without any Revision Export.
+        # None means "no offline revision evidence"; every offline comparison must
+        # refuse explicitly instead of silently comparing against nothing.
+        self.revision_export = (
+            revision_export.expanduser().resolve()
+            if revision_export is not None
+            else None
+        )
         self._lock = threading.RLock()
         self._file_revision_cache: dict[Path, tuple[int, int, str]] = {}
         self._canonical_revision_cache: dict[Path, tuple[int, int, str, bool]] = {}

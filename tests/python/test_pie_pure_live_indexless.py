@@ -301,12 +301,17 @@ class PureLiveValidationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     mcp_server.create_mcp_server(None, live_editor_service=fake, pure_live=True, **kwargs)
 
-    def test_ordinary_mode_still_requires_a_valid_index(self) -> None:
+    def test_absent_index_degrades_but_corrupt_index_fails_closed(self) -> None:
         fake = _FakeLive(self.project)
         with self.assertRaises(ValueError):
             mcp_server.create_mcp_server(None, live_editor_service=fake)
-        with self.assertRaises(FileNotFoundError):
-            mcp_server.create_mcp_server(self.root / "missing.sqlite3", live_editor_service=fake)
+        # 0-3.6 live-only write: an ABSENT index must not stop the server (a fresh
+        # machine has none); offline queries degrade to a precise error instead.
+        # A corrupt or incompatible index still fails closed in the cases below.
+        server = mcp_server.create_mcp_server(
+            self.root / "missing.sqlite3", live_editor_service=fake
+        )
+        self.assertIsNotNone(server)
         zero = self.root / "zero.sqlite3"
         zero.write_bytes(b"")
         with self.assertRaises(RuntimeError):
