@@ -773,13 +773,17 @@ bool FUEAgentKitEditorBridge::TryBuildBlueprintGraphContextResult(
 	FBlueprintContextExportResult ExportResult;
 	const TSharedRef<FJsonObject> Context =
 		FBlueprintContextExporter::BuildContextObject(Blueprint, Options, ExportResult);
-	if (!ExportResult.bSuccess)
+	// The exporter signals failure with a non-empty Error; bSuccess is only set on the
+	// file-export path (ExportBlueprint). Gate on Error, matching the layout handler above.
+	if (!ExportResult.Error.IsEmpty())
 	{
-		return Reject(
-			TEXT("blueprint-graph-context-export-failed"),
-			ExportResult.Error.IsEmpty()
-				? FString(TEXT("The canonical graph context could not be built."))
-				: ExportResult.Error);
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("UEAgentKit getBlueprintGraphContext failed for '%s': %s"),
+			*AssetPath,
+			*ExportResult.Error);
+		return Reject(TEXT("blueprint-graph-context-export-failed"), ExportResult.Error);
 	}
 
 	// Per-graph node pagination.  The object is the same canonical context the
