@@ -74,3 +74,44 @@ Ship only the Blueprint half: `ue_refresh_asset_index_live(asset_path)` backed b
 `editor.getBlueprintGraphContext` + disk SHA, overlay used by the Blueprint
 graph-reading tools. Mark `limited` until Material/DataTable canonical readers
 exist.
+
+---
+
+# 实施进度（2026-11-12 更新）
+
+状态从「仅设计」改为 **切片 1 已落地，读路径尚未接线**。
+
+## 切片 1 — 已交付：`1956fe3`
+
+`src/ue_agent_kit/live_asset_overlay.py` + `tests/python/test_live_asset_overlay.py`（17 个单元测试）。
+
+| 交付物 | 内容 |
+|---|---|
+| `package_file_for_object_path()` | 精确 `/Game` Package.Object → `Content/*.uasset`；拒绝 `..`、空段、分隔符、盘符；World Partition 多文件包**拒绝而非猜测** |
+| `build_overlay_record()` | 只有同时满足「Bridge 报 available + readOnly + `packageDirty=false`」「资产类与索引一致」「Bridge revision 等于 MCP 自己算的磁盘 SHA-256」才建记录，否则精确报 `live-index-refresh-*` |
+| `LiveAssetOverlay` | 有界 FIFO 会话存储；读写均深拷贝；`drop_session()` 丢弃上一个 Editor 会话的记录 |
+| 记录语义 | `indexFresh=false`、`overlayUpdated=true`、**`restartRequired=false`** |
+
+**这一刀刻意不改变任何查询结果**：切片 1 只回答「桥刚报的这份数据够不够格当作比冻结索引更新」。
+
+### 为什么证据校验是核心
+
+没有它，overlay 就成了**第二个真相源**，且可能与磁盘静默不一致——那比索引过期更糟，因为下游无法察觉。
+所以「桥的 revision 与磁盘 SHA 不符就拒绝」是这条设计的支点，不是可选项。
+
+## 剩余切片（按依赖顺序）
+
+| 切片 | 内容 | 前置 |
+|---|---|---|
+| 2 | 接一个读路径：`ue_get_asset` 在命中 overlay 时返回 overlay 数据并标注 `source=overlay` | 需审计该工具所有字段的取数处 |
+| 3 | 显式工具 `ue_refresh_asset_index_live(asset_path)`（纯 Blueprint，复用 0-3.2 的 `editor.getBlueprintGraphContext`） | 会改动 MCP 工具计数，需同步 registry 与所有计数断言 |
+| 4 | 用户保存检测：`editor.getDirtyAssets` + 磁盘 SHA 轮询，或桥侧保存钩子 | 单独风险项，需真实 Editor 验证 |
+| 5 | 非蓝图 canonical reader（Material / DataTable）与共享 schema | 需新的桥方法与导出器约定 |
+
+**验收口径不变**：切片 3 完成后，刷新单个资产必须返回 `indexFresh=false`、`overlayUpdated=true`，
+且**不得**再产生 `snapshot-refresh-restart-required`。
+
+## 明确不做
+
+- 不把 overlay 写进 SQLite（破坏 immutable/无 sidecar 契约）。
+- 不让 overlay 覆盖 bridge-native 写入决策：写入门禁仍然只看 Editor 内存（0-3.1）。
