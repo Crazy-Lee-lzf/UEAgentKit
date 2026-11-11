@@ -66,7 +66,7 @@ class _FakeLiveService:
         self.calls.append((method, dict(params)))
         if self.error is not None:
             raise self.error
-        return {"result": dict(self.result)}
+        return dict(self.result)
 
 
 def _error_response(tool: str, exc: Exception, *, read_only: bool) -> dict[str, Any]:
@@ -114,7 +114,7 @@ class LiveGraphContextToolTests(unittest.TestCase):
         self.assertFalse(payload["writeAuthorized"])
         self.assertFalse(payload["editorVerified"])
         self.assertTrue(payload["contextOnly"])
-        self.assertEqual(payload["result"]["returnedNodeCount"], 200)
+        self.assertEqual(payload["returnedNodeCount"], 200)
 
     def test_graph_guid_is_optional(self) -> None:
         service = _FakeLiveService()
