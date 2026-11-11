@@ -329,7 +329,10 @@ def register_live_read_tools(
             payload = live_editor_service.call_method(
                 "editor.getBlueprintGraphContext", request
             )
-            result = payload.get("result")
+            # call_method returns the bridge's result object directly; only call_tool
+            # wraps it under a "result" key. Reading payload["result"] here always
+            # yielded None and surfaced live-editor-invalid-response for every asset.
+            result = payload
             if not isinstance(result, dict):
                 raise LiveEditorError(
                     "live-editor-invalid-response",
