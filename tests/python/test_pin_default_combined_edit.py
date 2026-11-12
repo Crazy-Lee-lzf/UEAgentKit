@@ -23,6 +23,8 @@ from ue_agent_kit.experimental_pin_default_edit import (  # noqa: E402
     SAVE_CAPABILITY,
     SAVE_METHOD,
     PinDefaultError,
+    build_apply_parameters,
+    build_apply_parameters_from_fields,
     confirmation_for_plan,
 )
 from ue_agent_kit.mcp_pin_default_edit_experimental import (  # noqa: E402
@@ -176,6 +178,89 @@ class CombinedEditToolTests(unittest.TestCase):
             error_response=_error_response,
         )
         self.assertIn(TOOL, server.tools)
+
+
+
+class ApplyFromFieldsTests(unittest.TestCase):
+    """0-3.4: the plan fields alone must build the identical request."""
+
+    def test_matches_the_preview_path_exactly(self) -> None:
+        from_preview = build_apply_parameters(_preview())
+        from_fields = build_apply_parameters_from_fields(
+            plan_id=PLAN_ID,
+            asset_path=ASSET,
+            graph_guid=GRAPH,
+            defaults=[_default()],
+        )
+        self.assertEqual(from_fields, from_preview)
+
+    def test_rejects_a_malformed_plan_id(self) -> None:
+        for bad in ("", "sha256:short", "abc", "sha256:" + "A" * 64):
+            with self.subTest(plan_id=bad):
+                with self.assertRaises(PinDefaultError) as raised:
+                    build_apply_parameters_from_fields(
+                        plan_id=bad,
+                        asset_path=ASSET,
+                        graph_guid=GRAPH,
+                        defaults=[_default()],
+                    )
+                self.assertEqual(
+                    raised.exception.code, "graph-pin-default-invalid-parameters"
+                )
+
+    def test_explicit_wrong_confirmation_is_still_refused(self) -> None:
+        with self.assertRaises(PinDefaultError) as raised:
+            build_apply_parameters_from_fields(
+                plan_id=PLAN_ID,
+                asset_path=ASSET,
+                graph_guid=GRAPH,
+                defaults=[_default()],
+                confirmation="SET EXPERIMENTAL BLUEPRINT PIN DEFAULTS wrong",
+            )
+        self.assertEqual(
+            raised.exception.code, "graph-pin-default-confirmation-required"
+        )
+
+    def test_tool_accepts_the_plan_fields(self) -> None:
+        service = _StagedLive()
+        server = _FakeServer()
+        register_pin_default_edit_experimental_tools(
+            server=server,
+            live_editor_service=service,
+            tool_annotations_type=_annotations,
+            error_response=_error_response,
+        )
+        out = server.tools["ue_apply_blueprint_pin_defaults_experimental"](
+            plan_id=PLAN_ID,
+            asset_path=ASSET,
+            graph_guid=GRAPH,
+            defaults=[_default()],
+        )
+        self.assertTrue(out["ok"])
+        self.assertEqual(service.methods(), [APPLY_METHOD])
+        self.assertEqual(service.calls[0][1]["planId"], PLAN_ID)
+
+    def test_tool_refuses_when_neither_form_is_complete(self) -> None:
+        service = _StagedLive()
+        server = _FakeServer()
+        register_pin_default_edit_experimental_tools(
+            server=server,
+            live_editor_service=service,
+            tool_annotations_type=_annotations,
+            error_response=_error_response,
+        )
+        out = server.tools["ue_apply_blueprint_pin_defaults_experimental"](
+            plan_id=PLAN_ID,
+        )
+        self.assertFalse(out["ok"])
+        self.assertEqual(
+            out["error"]["code"], "graph-pin-default-invalid-parameters"
+        )
+        self.assertEqual(service.methods(), [])
+
+
+def _register_stub(*_args: Any, **_kwargs: Any) -> None:
+    return None
 
 
 if __name__ == "__main__":

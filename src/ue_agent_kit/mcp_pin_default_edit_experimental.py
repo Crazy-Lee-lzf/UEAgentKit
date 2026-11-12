@@ -25,6 +25,7 @@ from .experimental_pin_default_edit import (
     SAVE_TOOL_NAME,
     PinDefaultError,
     build_apply_parameters,
+    build_apply_parameters_from_fields,
     build_save_parameters,
     validate_preview_parameters,
 )
@@ -152,13 +153,38 @@ def register_pin_default_edit_experimental_tools(
 
     @server.tool(annotations=apply_annotations)
     def ue_apply_blueprint_pin_defaults_experimental(
-        preview_result: dict[str, Any],
+        preview_result: dict[str, Any] | None = None,
         confirmation: str = "",
+        plan_id: str = "",
+        asset_path: str = "",
+        graph_guid: str = "",
+        defaults: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        """Apply the exact previewed defaults in one transaction, never saving."""
+        """Apply the previewed defaults in one transaction, never saving.
+
+        Pass either the complete preview result, or the plan fields
+        (plan_id + asset_path + graph_guid + defaults). The plan fields are all
+        the request actually carries, so the second form skips a round-trip
+        without skipping any check: planId still has to match the live graph.
+        """
         try:
             _capabilities(live_editor_service, APPLY_CAPABILITY)
-            params = build_apply_parameters(preview_result, confirmation)
+            if preview_result is not None:
+                params = build_apply_parameters(preview_result, confirmation)
+            elif plan_id and asset_path and graph_guid and defaults:
+                params = build_apply_parameters_from_fields(
+                    plan_id=plan_id,
+                    asset_path=asset_path,
+                    graph_guid=graph_guid,
+                    defaults=defaults,
+                    confirmation=confirmation,
+                )
+            else:
+                raise PinDefaultError(
+                    "graph-pin-default-invalid-parameters",
+                    "Apply needs either the complete preview result, or "
+                    "plan_id + asset_path + graph_guid + defaults.",
+                )
             encoded = json.dumps(params, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
             if len(encoded) > MAX_REQUEST_BYTES:
                 raise LiveEditorError(

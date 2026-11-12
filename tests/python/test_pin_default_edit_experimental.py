@@ -308,8 +308,15 @@ class PinDefaultMcpTests(unittest.TestCase):
     def test_apply_and_save_do_not_accept_caller_built_requests(self) -> None:
         service = _FakeLiveEditor()
         server = self._register(service)
-        with self.assertRaises(TypeError):
-            server.tools[APPLY_TOOL_NAME](asset_path=ASSET)  # type: ignore[call-arg]
+        # 0-3.4: Apply now also accepts the plan fields, so an incomplete call is
+        # refused with a precise code instead of a TypeError. It still never
+        # reaches the bridge: no preview and no plan fields means no request.
+        refused = server.tools[APPLY_TOOL_NAME](plan_id=PLAN_ID, asset_path=ASSET)
+        self.assertFalse(refused["ok"])
+        self.assertEqual(
+            refused["error"]["code"], "graph-pin-default-invalid-parameters"
+        )
+        self.assertEqual(service.calls, [])
         with self.assertRaises(TypeError):
             server.tools[SAVE_TOOL_NAME](plan_id=PLAN_ID)  # type: ignore[call-arg]
 

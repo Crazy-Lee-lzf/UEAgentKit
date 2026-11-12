@@ -336,6 +336,49 @@ def build_apply_parameters(preview: Any, confirmation: Any = "") -> dict[str, An
     }
 
 
+def build_apply_parameters_from_fields(
+    *,
+    plan_id: Any,
+    asset_path: Any,
+    graph_guid: Any,
+    defaults: Any,
+    confirmation: Any = "",
+) -> dict[str, Any]:
+    """Build the Apply request from the plan fields alone.
+
+    0-3.4: the preview object round-trip exists only to carry a planId and the
+    default list.  planId is a sha256 over the live before-values, so the Editor
+    still proves both "you previewed" and "the graph has not changed"; handing
+    the whole preview back added no check on top of that.
+    """
+
+    normalized = validate_preview_parameters(
+        asset_path=asset_path,
+        graph_guid=graph_guid,
+        defaults=defaults,
+    )
+    if not isinstance(plan_id, str) or _SHA256.fullmatch(plan_id) is None:
+        raise PinDefaultError(
+            "graph-pin-default-invalid-parameters",
+            "planId must be the sha256:<64 lowercase hex> value returned by Preview.",
+        )
+    expected = confirmation_for_plan(plan_id)
+    if confirmation in (None, ""):
+        confirmation = expected
+    if not isinstance(confirmation, str) or confirmation != expected:
+        raise PinDefaultError(
+            "graph-pin-default-confirmation-required",
+            f"Explicit Apply confirmation must be exactly {expected}.",
+        )
+    return {
+        "assetPath": normalized["assetPath"],
+        "graphGuid": normalized["graphGuid"],
+        "defaults": normalized["defaults"],
+        "planId": plan_id,
+        "confirmation": confirmation,
+    }
+
+
 def save_confirmation_for_plan(plan_id: str) -> str:
     return SAVE_CONFIRMATION_PREFIX + plan_id
 
