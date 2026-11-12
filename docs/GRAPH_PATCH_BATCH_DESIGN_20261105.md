@@ -84,3 +84,50 @@ part of N1's accepted evidence. Doing half of it would create a mixed
 authorization model with no native proof. The design above is the prerequisite
 for the next P1 slice, where each writer migration is compiled by N1
 incrementally.
+
+---
+
+# 实施进度（2026-11-12 更新）
+
+状态从「仅设计」改为 **切片 1–2 已交付（授权摩擦），原子性尚未开始**。
+
+## 已交付
+
+| 切片 | 提交 | 内容 |
+|---|---|---|
+| 1 | `38715b8` | 五个 writer 的 **Apply** 确认短语可省略，自动由 planId 派生 |
+| 2 | `51b99c7` | 五个 writer 的 **Save** 确认短语同上 |
+
+### 为什么这不是放宽安全边界
+
+短语的语义是 `前缀 + planId`，而 `build_apply_parameters` / `validate_save_parameters`
+**本来就会自己算出这个值再比对**。也就是说，调用方传的值必须等于函数自己算的值——
+它没有引入任何额外校验，只制造了一次「读预览 → 抠出短语 → 带着整个预览再传回来」的往返。
+
+放宽后仍然成立：
+
+- 调用方**必须**传入完整的 preview / apply 结果，盲写仍然不可能；
+- 显式传错短语仍按原错误码拒绝（`*-confirmation-required`）；
+- planId 过期检查、graph fingerprint、package revision、Policy、事务边界全部未动；
+- Save 仍要求上一步 `applied=true` 且 `saved!=true`。
+
+## 尚未开始
+
+| 切片 | 内容 | 说明 |
+|---|---|---|
+| 3 | **会话级授权**：`begin` 返回的 token 绑定 asset+graph+fingerprint，一次授权覆盖该任务的多个 apply/save，把 3 次调用压成 1 次 | 这是剩余摩擦的主体 |
+| 4 | **跨 writer 原子事务**：一次提交内建节点+连线+默认值，任一失败整体回滚，返回逐条结果 | C++ 重构，风险最高，需真实 Editor 反复验证 |
+
+## 切片 3 的一个已确认障碍
+
+`FBlueprintEditSessionManager` 是 **桥实例持有的成员**（`EditorBridge.cpp:515` `MakeUnique`），
+不是进程级单例。五个 writer 都是自由函数，拿不到它。
+
+所以切片 3 有两条路：
+
+1. 在**派发层**（`EditorBridge.cpp`）用 manager 校验 token，通过后把派生的 confirmation
+   注入 Params 再调用 writer —— 改动局部，但授权逻辑出现在派发层；
+2. 把 manager 引用穿到 writer 签名里 —— 更干净，但要改 5 个 writer 的签名与全部调用点。
+
+按设计文档「一个提交一个 writer」的节奏，切片 3 应从 **pin 默认值** 单独开始，
+并在真实 Editor 上验证：无 token 时仍需短语、有 token 时短语可省、token 绑定错误时拒绝。
