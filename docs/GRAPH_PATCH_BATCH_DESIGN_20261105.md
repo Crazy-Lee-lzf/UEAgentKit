@@ -131,3 +131,43 @@ incrementally.
 
 按设计文档「一个提交一个 writer」的节奏，切片 3 应从 **pin 默认值** 单独开始，
 并在真实 Editor 上验证：无 token 时仍需短语、有 token 时短语可省、token 绑定错误时拒绝。
+## 切片 3 — 已交付：`91bdc1e`（合并调用，仅单元测试）
+
+新增工具（experimental，不进 `TOOL_REGISTRY`）：
+
+```text
+ue_edit_blueprint_pin_defaults(asset_path, graph_guid, defaults, save=False)
+  → 内部 preview → apply（save=True 时再 save）
+  → 返回 {saved, stages:{preview, apply, save?}}
+```
+
+### 设计取舍
+
+| 决定 | 理由 |
+|---|---|
+| `save` 默认 `False` | Save 永远是调用方的显式请求，绝不隐含；传 `True` 才是"我要存" |
+| 每段用上一段的**裸桥载荷**构建 | 派生短语与指纹全部来自服务端自身输出，调用方仍无法拼装桥请求 |
+| 失败返回 `ok=false` + `completedStages`/`stages` | 部分执行必须报告走到了哪一步，不能只回一个失败 |
+| 每段仍受 60 KiB 边界限制 | 与三个独立工具一致 |
+
+### 尚未验证的部分（必须说明）
+
+**目前只有单元测试，没有真实 Editor 证据。**
+
+运行验证需要三件事，本次未做：
+
+1. 在 Host 工程的 ini 里设 `[UEAgentKit] ExperimentalGraphPatchEdit=True`（当前关闭）；
+2. 以 `--enable-experimental-graphpatch-edit` 启动 MCP；
+3. 接受 apply 会让包变脏——收尾时必须显式选择不保存，或改用与现值相同的 no-op 默认值。
+
+在拿到这条真实证据之前，不得把该工具写成"已验证可用"。
+
+## 仍待处理（后续"过度防御"清理项，本次只记录了证据）
+
+| 项 | 证据 | 判断 |
+|---|---|---|
+| apply 要求回传整个预览对象 | `build_apply_parameters` 实际只取 6 个字段；`planId` 已由 C++ 用实时 `beforeValue` 绑定内容 | 可砍，改为直接收 `plan_id + defaults` |
+| 校验服务端自己输出的信封 | `experimental/readOnly/wroteBlueprint/savedPackage/compiled` 恒真 | 可砍 |
+| 三层重复校验 | Python → C++ `BuildPlan` → C++ 读回 | 部分冗余，需逐项确认 |
+| 预览工具包了一层 `{"result":...}`，而 `validate_preview_result` 要裸载荷 | 调用方必须自己解包 | 契约不一致，应统一 |
+| 单一 writer 的 `raise` 28 处 / C++ `Fail` 64 处 | `experimental_pin_default_edit.py` / `BlueprintPinDefaultEditExperimental.cpp` | 密度过高，逐条分辨"真不变量 vs 仪式" |
