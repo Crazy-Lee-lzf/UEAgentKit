@@ -437,6 +437,11 @@ def validate_save_parameters(
     revision = _sha256(expected_package_revision, "expectedPackageRevision")
     count = _count(expected_variable_count, "expectedVariableCount")
     expected_confirmation = save_confirmation_for_plan(normalized_plan)
+    if confirmation in (None, ""):
+        # 0-3.4: same rule as Apply -- the Save phrase is derived from the
+        # planId carried by the Apply result, so echoing it added a step
+        # without a check.  An explicit wrong value is still refused.
+        confirmation = expected_confirmation
     if not isinstance(confirmation, str) or confirmation != expected_confirmation:
         raise VariableWriteError(
             "blueprint-variable-confirmation-required",
@@ -452,7 +457,7 @@ def validate_save_parameters(
     }
 
 
-def build_save_parameters(apply_result: Any, confirmation: Any) -> dict[str, Any]:
+def build_save_parameters(apply_result: Any, confirmation: Any = "") -> dict[str, Any]:
     normalized = validate_apply_result(apply_result)
     return validate_save_parameters(
         asset_path=normalized["assetPath"],

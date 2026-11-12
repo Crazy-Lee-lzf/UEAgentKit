@@ -184,7 +184,7 @@ def register_graph_edit_experimental_tools(
     @server.tool(annotations=save_annotations)
     def ue_save_blueprint_graph_edit_experimental(
         apply_result: dict[str, Any],
-        confirmation: str,
+        confirmation: str = "",
     ) -> dict[str, Any]:
         """Opt-in: save the exact package produced by the preceding graph edit Apply.
 

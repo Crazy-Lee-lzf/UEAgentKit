@@ -611,12 +611,17 @@ def validate_apply_result(
         ) from exc
 
 
-def build_save_parameters(apply_result: Any, confirmation: Any) -> dict[str, Any]:
+def build_save_parameters(apply_result: Any, confirmation: Any = "") -> dict[str, Any]:
     """Build the exact Save request from the complete Apply result."""
 
     apply = _object(apply_result, "apply result")
     plan_id = _sha256(apply.get("planId"), "planId")
     expected = SAVE_CONFIRMATION_PREFIX + plan_id
+    if confirmation in (None, ""):
+        # 0-3.4: same rule as Apply -- the Save phrase is derived from the
+        # planId carried by the Apply result, so echoing it added a step
+        # without a check.  An explicit wrong value is still refused.
+        confirmation = expected
     if not isinstance(confirmation, str) or confirmation != expected:
         raise NodeRemoveWriteError(
             "blueprint-node-remove-confirmation-required",

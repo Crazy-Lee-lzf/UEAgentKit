@@ -168,7 +168,7 @@ def register_pin_default_edit_experimental_tools(
     @server.tool(annotations=save_annotations)
     def ue_save_blueprint_pin_defaults_experimental(
         apply_result: dict[str, Any],
-        confirmation: str,
+        confirmation: str = "",
     ) -> dict[str, Any]:
         """Save the exact package produced by the preceding pin-default Apply."""
         try:
