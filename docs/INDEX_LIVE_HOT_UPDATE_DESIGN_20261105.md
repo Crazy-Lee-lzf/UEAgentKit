@@ -174,3 +174,36 @@ Editor PID 5632，**无索引库、无 `--revision-export`**（正好叠加验�
 | 收尾 | Editor 无提示退出，0 个 UE 进程 |
 
 这条验收同时证明了 0-3.6：整条链路在**没有索引、没有 Revision Export** 的机器上成立。
+## 切片 2 — 已交付：`4040d87`（真实 Editor 端到端验收）
+
+`ue_get_asset` 现在会报告已证明的 overlay，且**绝不把它混进索引字段**。
+
+### 真实 Editor 验收（2026-11-12 20:05）
+
+环境：Host `N1_BlueprintNative_20261031`，Editor PID 3276，DLL `712BD75E…`，
+**无索引库、无 `--revision-export`**。四步都在同一个 MCP 会话内完成：
+
+| 步骤 | 调用 | 结果 |
+|---|---|---|
+| A | `ue_get_asset`（无 overlay，无索引） | `ok=false`，`database-not-found` —— 行为与改动前一致 |
+| B | `ue_refresh_asset_index_live` | `ok=true`，`overlayEntryCount=1`，`restartRequired=false` |
+| C | `ue_get_asset(sections=["overlay"])` | `ok=true`、`source=overlay`、`indexFresh=false`、`revision=sha256:5252e1103c851d93…`、含 canonical |
+| D | `ue_get_asset`（无 sections，无索引但有 overlay） | `ok=true`、`source=overlay`、`degradedReason=index-unavailable: FileNotFoundError` |
+
+结论：**在完全没有索引的机器上，用一次刷新就能让 `ue_get_asset` 返回可证明的最新数据**，
+且来源在响应里写明（`source` / `indexFresh` / `degradedReason`），调用方不会误判。
+
+验收后磁盘 SHA 未变，Editor 无提示退出，0 个 UE 进程。
+
+### 读取契约
+
+```text
+无 overlay 记录              → 响应与改动前逐字节一致（不新增键）
+有 overlay，sections=None    → source=index+overlay，附 overlay 元数据（不含 canonical）
+sections=["overlay"]         → 只读 overlay，不调用索引
+sections=["overlay","symbols"] → 索引按 ["symbols"] 查询，附带 canonical
+索引不可用 + 有 overlay      → 仅 overlay 应答，带 degradedReason
+索引不可用 + 无 overlay      → 原错误不变
+```
+
+canonical 只在显式请求 overlay 段时附带，默认响应不会因整份图导出而膨胀，输出预算不受影响。
