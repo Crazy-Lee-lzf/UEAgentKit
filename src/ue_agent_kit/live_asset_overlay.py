@@ -201,3 +201,16 @@ class LiveAssetOverlay:
             "editorSessionIds": sessions,
             "assetPaths": list(self._order),
         }
+
+_SESSION_OVERLAY = LiveAssetOverlay()
+
+
+def get_session_overlay() -> LiveAssetOverlay:
+    """The MCP process's overlay: one process serves one fixed project."""
+    return _SESSION_OVERLAY
+
+
+def reset_session_overlay() -> LiveAssetOverlay:
+    """Test-only: drop every record and hand back the fresh store."""
+    _SESSION_OVERLAY.clear()
+    return _SESSION_OVERLAY

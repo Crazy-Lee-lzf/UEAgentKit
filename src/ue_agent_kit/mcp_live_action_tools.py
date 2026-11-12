@@ -7,25 +7,19 @@ from typing import Any
 from .editor_bridge import LiveEditorBridgeService, LiveEditorError
 from .live_asset_overlay import (
     BLUEPRINT_CLASS,
-    LiveAssetOverlay,
     LiveOverlayError,
     build_overlay_record,
+    get_session_overlay,
     package_file_for_object_path,
+    reset_session_overlay,
     sha256_file,
 )
 
-_SESSION_OVERLAY = LiveAssetOverlay()
-
-
-def get_session_overlay() -> LiveAssetOverlay:
-    """The MCP process's overlay: one process serves one fixed project."""
-    return _SESSION_OVERLAY
-
-
-def reset_session_overlay() -> LiveAssetOverlay:
-    """Test-only: drop every record and hand back the fresh store."""
-    _SESSION_OVERLAY.clear()
-    return _SESSION_OVERLAY
+__all__ = [
+    "get_session_overlay",
+    "register_live_action_tools",
+    "reset_session_overlay",
+]
 
 
 def _utc_now_iso() -> str:
