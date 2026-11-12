@@ -203,3 +203,32 @@ ue_edit_blueprint_pin_defaults(asset_path, graph_guid, defaults, save=False)
 单看 pin 默认值这一条路径：Python `raise` **28 处**、C++ `Fail()` **64 处**、错误码 10 种。
 清理后行为未变，但调用方要穿过的"仪式"减少了：3 次往返 → 1 次，2 次短语回传 → 0 次，
 1 次多 KB 对象回传 → 0 次。
+### 真实 Editor 验收（2026-11-12 21:17）
+
+环境：Host `N1_BlueprintNative_20261031`，插件 `0.9.0.dev1`，DLL `712BD75E…`，
+临时开启 `[UEAgentKit] ExperimentalGraphPatchEdit=True`（验收后已还原并删除备份），
+MCP 以 `--database <不存在>` + `--enable-experimental-graphpatch-edit` 启动。
+
+| 检查 | 目标 | 结果 |
+|---|---|---|
+| experimental 工具注册 | — | 15 个 `*_experimental` + `ue_edit_blueprint_pin_defaults` |
+| preview | BP_N1EditSession | `ok=true`，返回 `planId`，`beforeValue="0"` |
+| **apply 传整个预览响应**（信封容错） | BP_N1EditSession | `ok=true`，`applied=true` |
+| **apply 传 `plan_id + 四个字段`**（字段式） | BP_N1EditSession129 | `ok=true`，`applied=true` |
+| **一键工具 `save=False`** | BP_N1EditSession | `ok=true`，`saved=false`，`stages=[preview, apply]` |
+| 脏包拒绝 | 同上 | `graph-pin-default-package-dirty`，`stages=[]`、无 `completedStages` |
+| 磁盘 | 全部 5 个资产 | **SHA 全部未变**（apply 只改内存） |
+| 收尾 | — | 0 个 UE 进程；配置已还原；备份已删除 |
+
+### 过程中确认的两条前置条件（写工具调用方必须知道）
+
+1. **包必须是干净的**：脏包时 preview 直接拒绝 `graph-pin-default-package-dirty`。
+2. **蓝图编辑器必须已打开**：否则 `graph-layout-editor-not-open`。光 `openAsset` 不够，
+   需要编辑器窗口存在。
+
+### 一条操作经验（记录以免重犯）
+
+脏包关闭 Editor 会弹 UE 原生「保存内容」对话框，该对话框 **UIA 读不到**
+（`get_window_state` 超时报 `UnrealWindow`），且截图里可能不在可见画面。
+此时**不要**盲按 Enter（默认是"保存"）。安全做法是直接终止进程丢弃内存状态，
+并在终止前后各取一次资产 SHA 证明磁盘未变——本次即按此流程，五个资产 SHA 全一致。
