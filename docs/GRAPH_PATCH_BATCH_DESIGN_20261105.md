@@ -171,3 +171,35 @@ ue_edit_blueprint_pin_defaults(asset_path, graph_guid, defaults, save=False)
 | 三层重复校验 | Python → C++ `BuildPlan` → C++ 读回 | 部分冗余，需逐项确认 |
 | 预览工具包了一层 `{"result":...}`，而 `validate_preview_result` 要裸载荷 | 调用方必须自己解包 | 契约不一致，应统一 |
 | 单一 writer 的 `raise` 28 处 / C++ `Fail` 64 处 | `experimental_pin_default_edit.py` / `BlueprintPinDefaultEditExperimental.cpp` | 密度过高，逐条分辨"真不变量 vs 仪式" |
+## 切片 3–6 — 已交付（"过度防御"清理）
+
+| 切片 | 提交 | 内容 |
+|---|---|---|
+| 3 | `91bdc1e` | 一键 `ue_edit_blueprint_pin_defaults`：preview→apply（可选 save） |
+| 4 | `9304315` | apply 直接收 `plan_id + asset_path + graph_guid + defaults`，不再回传整个预览 |
+| 5 | `e63d5c7` | 信封与裸载荷都接受（pin 默认值） |
+| 6 | `e518676` | 共享 `unwrap_tool_result`，五个 writer 统一 |
+
+### 为什么这些都不降低安全性
+
+| 改动 | 依据 |
+|---|---|
+| 不回传整个预览 | `planId` 是 Editor 用**实时 `beforeValue`** 算的 sha256，既证明"预览过"也证明"图没变"；预览对象里其余字段（beforeValue、两个指纹、packageRevision、五个信封标志）校验完就被丢弃 |
+| 一键三步 | 每一步的校验、planId 过期检查、事务边界、读回校验全部保留，只是不再分三次往返 |
+| 信封容错 | 换取的是调用方不必知道"该传 `preview["result"]` 还是整个返回体"；无法识别的载荷仍按原样失败 |
+| 短语可省略 | 短语由 planId 派生，传值必须等于函数自己算的值，本来就没有额外校验 |
+
+### 剩余清理项（尚未做）
+
+| 项 | 说明 |
+|---|---|
+| 信封自检恒真断言 | `experimental/readOnly/wroteBlueprint/savedPackage/compiled` 是对服务端自身输出的自检 |
+| 三层重复校验 | Python → C++ `BuildPlan` → C++ 读回，需逐项分辨真冗余 |
+| 一键工具推广 | 目前只有 pin 默认值有；其余四个 writer 仍是三步 |
+| 运行时证据 | 一键工具**仍只有单元测试**，未在真实 Editor 上跑过 |
+
+## 审计基线（2026-11-12）
+
+单看 pin 默认值这一条路径：Python `raise` **28 处**、C++ `Fail()` **64 处**、错误码 10 种。
+清理后行为未变，但调用方要穿过的"仪式"减少了：3 次往返 → 1 次，2 次短语回传 → 0 次，
+1 次多 KB 对象回传 → 0 次。
