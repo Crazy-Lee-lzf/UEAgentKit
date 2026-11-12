@@ -13,6 +13,7 @@ from __future__ import annotations
 import math
 import re
 from typing import Any
+from .experimental_envelope import unwrap_tool_result
 
 PREVIEW_TOOL_NAME = "ue_preview_blueprint_variable_create_experimental"
 APPLY_TOOL_NAME = "ue_apply_blueprint_variable_create_experimental"
@@ -256,6 +257,7 @@ def _validate_variable_entry(
 
 def validate_preview_result(payload: Any) -> dict[str, Any]:
     """Validate the exact Preview envelope returned by the live Editor."""
+    payload = unwrap_tool_result(payload, "planId")
 
     item = _object(payload, "previewResult")
     if item.get("schemaVersion") != PREVIEW_SCHEMA_VERSION:
@@ -342,7 +344,7 @@ def build_apply_parameters(preview: Any, confirmation: Any = "") -> dict[str, An
 def validate_apply_result(payload: Any) -> dict[str, Any]:
     """Validate the exact Apply envelope returned by the live Editor."""
 
-    item = _object(payload, "applyResult")
+    item = _object(unwrap_tool_result(payload, "applied"), "applyResult")
     if item.get("schemaVersion") != APPLY_SCHEMA_VERSION:
         raise VariableWriteError(
             "blueprint-variable-apply-invalid",

@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 import re
 from typing import Any
+from .experimental_envelope import unwrap_tool_result as _unwrap_tool_result
 
 PREVIEW_TOOL_NAME = "ue_preview_blueprint_pin_defaults_experimental"
 APPLY_TOOL_NAME = "ue_apply_blueprint_pin_defaults_experimental"
@@ -215,26 +216,6 @@ def validate_preview_parameters(
         "graphGuid": normalized_graph,
         "defaults": normalized_defaults,
     }
-
-
-def _unwrap_tool_result(value: Any, marker: str) -> Any:
-    """Accept either the raw bridge payload or the MCP tool response wrapping it.
-
-    0-3.4: the MCP tools return ``{"schemaVersion": "1.0", ..., "result": payload}``
-    while this module validates and reads the payload itself. Requiring callers to
-    know which of the two to pass was a contract trap with no safety value, so both
-    are accepted. A dict that carries the marker wins; otherwise the wrapper's
-    ``result`` is used when it carries the marker.
-    """
-
-    if not isinstance(value, dict):
-        return value
-    if marker in value:
-        return value
-    inner = value.get("result")
-    if isinstance(inner, dict) and marker in inner:
-        return inner
-    return value
 
 
 def validate_preview_result(preview: Any) -> dict[str, Any]:

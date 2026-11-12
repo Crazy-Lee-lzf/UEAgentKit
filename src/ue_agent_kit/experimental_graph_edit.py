@@ -22,6 +22,7 @@ import json
 import math
 import re
 from typing import Any
+from .experimental_envelope import unwrap_tool_result
 
 PREVIEW_TOOL_NAME = "ue_preview_blueprint_graph_edit_experimental"
 APPLY_TOOL_NAME = "ue_apply_blueprint_graph_edit_experimental"
@@ -1288,6 +1289,7 @@ def validate_preview_parameters(
 
 def validate_preview_result(preview: Any) -> dict[str, Any]:
     """Validate the complete live preview result used to authorize Apply."""
+    preview = unwrap_tool_result(preview, "planId")
 
     item = _object(preview, "preview")
     if item.get("schemaVersion") != PREVIEW_SCHEMA_VERSION:
@@ -1722,7 +1724,7 @@ def validate_save_parameters(
 def build_save_parameters(apply_result: Any, confirmation: Any = "") -> dict[str, Any]:
     """Derive the exact Save tuple only from a successful Apply result."""
 
-    item = _object(apply_result, "applyResult")
+    item = _object(unwrap_tool_result(apply_result, "applied"), "applyResult")
     if item.get("applied") is not True or item.get("saved") is True:
         raise GraphEditError(
             "graph-edit-save-requires-apply",

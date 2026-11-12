@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import re
 from typing import Any
+from .experimental_envelope import unwrap_tool_result
 
 PREVIEW_TOOL_NAME = "ue_preview_blueprint_node_remove_experimental"
 APPLY_TOOL_NAME = "ue_apply_blueprint_node_remove_experimental"
@@ -248,6 +249,7 @@ def validate_preview_parameters(
 
 def validate_preview_result(result: Any) -> dict[str, Any]:
     """Validate the exact read-only Preview result and return a normalized copy."""
+    result = unwrap_tool_result(result, "planId")
 
     item = _object(result, "preview result")
     try:
@@ -614,7 +616,7 @@ def validate_apply_result(
 def build_save_parameters(apply_result: Any, confirmation: Any = "") -> dict[str, Any]:
     """Build the exact Save request from the complete Apply result."""
 
-    apply = _object(apply_result, "apply result")
+    apply = _object(unwrap_tool_result(apply_result, "applied"), "apply result")
     plan_id = _sha256(apply.get("planId"), "planId")
     expected = SAVE_CONFIRMATION_PREFIX + plan_id
     if confirmation in (None, ""):
@@ -648,7 +650,7 @@ def build_save_parameters(apply_result: Any, confirmation: Any = "") -> dict[str
 def validate_save_result(result: Any, apply_result: Any) -> dict[str, Any]:
     """Validate the exact Save result against the Apply that produced it."""
 
-    apply = _object(apply_result, "apply result")
+    apply = _object(unwrap_tool_result(apply_result, "applied"), "apply result")
     plan_id = _sha256(apply.get("planId"), "planId")
     item = _object(result, "save result")
     try:
