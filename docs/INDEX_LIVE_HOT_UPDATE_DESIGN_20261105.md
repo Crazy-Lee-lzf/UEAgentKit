@@ -115,3 +115,44 @@ exist.
 
 - 不把 overlay 写进 SQLite（破坏 immutable/无 sidecar 契约）。
 - 不让 overlay 覆盖 bridge-native 写入决策：写入门禁仍然只看 Editor 内存（0-3.1）。
+## 切片 3 — 已交付：`bcef415`（先于切片 2）
+
+顺序说明：原计划切片 2（接读路径）在前，但读路径没有数据可读就没有意义，
+所以先交付切片 3 让 overlay 能被填充，再做切片 2。
+
+新增工具 **`ue_refresh_asset_index_live(asset_path)`**（`live-action` / `planning` 注解）。
+
+```text
+exact /Game Package.Object
+  → Content/*.uasset 存在性
+  → editor.getBlueprintGraphContext（只取 canonical，不改资产）
+  → 本进程计算该 .uasset 的 SHA-256
+  → build_overlay_record 证据校验（切片 1）
+  → 安装到会话 overlay
+```
+
+返回语义固定：
+
+| 字段 | 值 | 含义 |
+|---|---|---|
+| `indexFresh` | `false` | immutable 索引**未被改动** |
+| `overlayUpdated` | `true` | 仅安装了一条会话内记录 |
+| `restartRequired` | `false` | 刷新单个资产**永不**要求重启 |
+
+只有 Blueprint 支持（复用 0-3.2 的 `editor.getBlueprintGraphContext`）；
+非蓝图资产会被 `live-index-refresh-identity-drift` 拒绝，而不是降级放行。
+
+overlay 是**进程级单例**（一个 MCP 进程服务一个固定工程），
+`reset_session_overlay()` 仅供测试使用。
+
+工具计数影响（已同步到测试）：live 54→55、live+memory 68→69、
+live+workflow+memory 129→130、live+workflow 115→116。
+公开文档 `docs/PROJECT_STATUS.md` 的计数表属于 **v0.8.0 已发布版本**，
+不随之修改；该页已注明以运行时 `ue_get_capabilities` 为准。
+
+## 下一步：切片 2
+
+读路径仍完全忽略 overlay。要接的第一个读路径是 `ue_get_asset`：
+命中 overlay 时返回 overlay 的 canonical 并标注 `source=overlay`，
+未命中继续走冻结索引。接之前必须先审计该工具每个字段的取数处，
+避免出现「同一响应里一半来自 overlay、一半来自索引」的混合态。
