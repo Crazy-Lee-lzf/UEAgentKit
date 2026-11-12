@@ -83,6 +83,26 @@ def register_pin_default_edit_experimental_tools(
         openWorldHint=False,
     )
 
+
+    def _call_bounded(
+        method: str,
+        params: dict[str, Any],
+        *,
+        timeout_seconds: float,
+        stage: str,
+    ) -> dict[str, Any]:
+        encoded = json.dumps(params, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        if len(encoded) > MAX_REQUEST_BYTES:
+            raise LiveEditorError(
+                "graph-pin-default-request-too-large",
+                f"The pin default {stage} request exceeds the 60 KiB bridge boundary.",
+            )
+        return live_editor_service.call_method(
+            method,
+            params,
+            timeout_seconds=timeout_seconds,
+        )
+
     @server.tool(annotations=preview_annotations)
     def ue_preview_blueprint_pin_defaults_experimental(
         asset_path: str,
@@ -200,5 +220,70 @@ def register_pin_default_edit_experimental_tools(
             "result": payload,
         }
 
+
+    @server.tool(annotations=apply_annotations)
+    def ue_edit_blueprint_pin_defaults(
+        asset_path: str,
+        graph_guid: str,
+        defaults: list[dict[str, Any]],
+        save: bool = False,
+    ) -> dict[str, Any]:
+        """Preview, apply and optionally save typed pin defaults in one call.
+
+        The same three stages run in the same order with the same checks; each
+        stage's bridge result is returned so the caller can audit what happened.
+        save=False (the default) leaves the package dirty exactly like Apply
+        alone: saving stays an explicit request and is never implied.
+        """
+        stages: dict[str, Any] = {}
+        try:
+            _capabilities(live_editor_service, PREVIEW_CAPABILITY)
+            stages["preview"] = _call_bounded(
+                PREVIEW_METHOD,
+                validate_preview_parameters(
+                    asset_path=asset_path,
+                    graph_guid=graph_guid,
+                    defaults=defaults,
+                ),
+                timeout_seconds=30.0,
+                stage="preview",
+            )
+
+            _capabilities(live_editor_service, APPLY_CAPABILITY)
+            stages["apply"] = _call_bounded(
+                APPLY_METHOD,
+                build_apply_parameters(stages["preview"]),
+                timeout_seconds=60.0,
+                stage="apply",
+            )
+
+            if save:
+                _capabilities(live_editor_service, SAVE_CAPABILITY)
+                stages["save"] = _call_bounded(
+                    SAVE_METHOD,
+                    build_save_parameters(stages["apply"]),
+                    timeout_seconds=60.0,
+                    stage="save",
+                )
+        except (LiveEditorError, PinDefaultError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            response = error_response("ue_edit_blueprint_pin_defaults", exc, read_only=False)
+            if stages:
+                # A partial run must say exactly how far it got, never just "ok".
+                response["completedStages"] = list(stages)
+                response["stages"] = stages
+            return response
+        return {
+            "schemaVersion": "1.0",
+            "tool": "ue_edit_blueprint_pin_defaults",
+            "ok": True,
+            "readOnly": False,
+            "destructive": True,
+            "experimental": True,
+            "explicitOptInRequired": True,
+            "productionDefault": False,
+            "source": "live-editor-memory",
+            "saved": bool(save),
+            "stages": stages,
+        }
 
 __all__ = ["register_pin_default_edit_experimental_tools"]

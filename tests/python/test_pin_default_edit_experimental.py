@@ -286,7 +286,14 @@ class PinDefaultMcpTests(unittest.TestCase):
         server = self._register(service)
         self.assertEqual(
             set(server.tools),
-            {PREVIEW_TOOL_NAME, APPLY_TOOL_NAME, SAVE_TOOL_NAME},
+            {
+                PREVIEW_TOOL_NAME,
+                APPLY_TOOL_NAME,
+                SAVE_TOOL_NAME,
+                # 0-3.4: one call runs preview -> apply (-> save) with the same
+                # checks, so the three stages no longer need three round-trips.
+                "ue_edit_blueprint_pin_defaults",
+            },
         )
         result = server.tools[PREVIEW_TOOL_NAME](
             asset_path=ASSET,
