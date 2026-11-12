@@ -22,8 +22,11 @@ from ue_agent_kit.experimental_pin_default_edit import (  # noqa: E402
     PREVIEW_METHOD,
     SAVE_CAPABILITY,
     SAVE_METHOD,
+    APPLY_TOOL_NAME,
+    PREVIEW_TOOL_NAME,
     PinDefaultError,
     build_apply_parameters,
+    build_save_parameters,
     build_apply_parameters_from_fields,
     confirmation_for_plan,
 )
@@ -261,6 +264,39 @@ class ApplyFromFieldsTests(unittest.TestCase):
 
 def _register_stub(*_args: Any, **_kwargs: Any) -> None:
     return None
+
+
+
+class EnvelopeToleranceTests(unittest.TestCase):
+    """0-3.4: passing the tool response itself must work, not just the payload."""
+
+    def test_apply_accepts_the_tool_envelope(self) -> None:
+        wrapped = {
+            "schemaVersion": "1.0",
+            "tool": PREVIEW_TOOL_NAME,
+            "ok": True,
+            "result": _preview(),
+        }
+        self.assertEqual(
+            build_apply_parameters(wrapped), build_apply_parameters(_preview())
+        )
+
+    def test_save_accepts_the_tool_envelope(self) -> None:
+        wrapped = {
+            "schemaVersion": "1.0",
+            "tool": APPLY_TOOL_NAME,
+            "ok": True,
+            "result": _apply_payload(),
+        }
+        self.assertEqual(
+            build_save_parameters(wrapped), build_save_parameters(_apply_payload())
+        )
+
+    def test_a_wrapper_without_the_marker_is_still_refused(self) -> None:
+        with self.assertRaises(PinDefaultError):
+            build_apply_parameters(
+                {"schemaVersion": "1.0", "result": {"nonsense": True}}
+            )
 
 
 if __name__ == "__main__":

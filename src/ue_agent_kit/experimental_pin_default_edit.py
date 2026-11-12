@@ -217,8 +217,28 @@ def validate_preview_parameters(
     }
 
 
+def _unwrap_tool_result(value: Any, marker: str) -> Any:
+    """Accept either the raw bridge payload or the MCP tool response wrapping it.
+
+    0-3.4: the MCP tools return ``{"schemaVersion": "1.0", ..., "result": payload}``
+    while this module validates and reads the payload itself. Requiring callers to
+    know which of the two to pass was a contract trap with no safety value, so both
+    are accepted. A dict that carries the marker wins; otherwise the wrapper's
+    ``result`` is used when it carries the marker.
+    """
+
+    if not isinstance(value, dict):
+        return value
+    if marker in value:
+        return value
+    inner = value.get("result")
+    if isinstance(inner, dict) and marker in inner:
+        return inner
+    return value
+
+
 def validate_preview_result(preview: Any) -> dict[str, Any]:
-    item = _object(preview, "preview")
+    item = _object(_unwrap_tool_result(preview, "planId"), "preview")
     if (
         item.get("schemaVersion") != PREVIEW_SCHEMA_VERSION
         or item.get("experimental") is not True
@@ -455,7 +475,7 @@ def validate_save_parameters(
 
 
 def build_save_parameters(apply_result: Any, confirmation: Any = "") -> dict[str, Any]:
-    item = _object(apply_result, "applyResult")
+    item = _object(_unwrap_tool_result(apply_result, "applied"), "applyResult")
     if item.get("applied") is not True or item.get("saved") is True:
         raise PinDefaultError(
             "graph-pin-default-save-requires-apply",
