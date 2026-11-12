@@ -417,7 +417,11 @@ class RewireContractTests(unittest.TestCase):
         )
         self.assertNotIn("newSourceNodeGuid", disconnect)
 
-        for confirmation in ("", expected + " ", expected.lower(), "REWIRE"):
+        # 0-3.4: an omitted confirmation is derived from the planId the caller
+        # already holds; an explicit but wrong value is still refused below.
+        self.assertEqual(build_apply_parameters(_preview(), "")["confirmation"], expected)
+
+        for confirmation in (expected + " ", expected.lower(), "REWIRE"):
             with self.subTest(confirmation=confirmation):
                 with self.assertRaises(RewireWriteError) as raised:
                     build_apply_parameters(_preview(), confirmation)

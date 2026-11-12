@@ -138,7 +138,7 @@ def register_graph_edit_experimental_tools(
     @server.tool(annotations=apply_annotations)
     def ue_apply_blueprint_graph_edit_experimental(
         preview: dict[str, Any],
-        confirmation: str,
+        confirmation: str = "",
     ) -> dict[str, Any]:
         """Opt-in: apply the exact previewed createNode/connectPins plan in one transaction.
 

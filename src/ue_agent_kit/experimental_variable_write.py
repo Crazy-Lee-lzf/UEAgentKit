@@ -311,9 +311,14 @@ def validate_preview_result(payload: Any) -> dict[str, Any]:
     }
 
 
-def build_apply_parameters(preview: Any, confirmation: Any) -> dict[str, Any]:
+def build_apply_parameters(preview: Any, confirmation: Any = "") -> dict[str, Any]:
     normalized = validate_preview_result(preview)
     expected = confirmation_for_plan(normalized["planId"])
+    if confirmation in (None, ""):
+        # 0-3.4: the phrase is derived from the planId the caller already holds,
+        # so requiring it as a separate argument was friction without an extra
+        # check.  An explicit value is still validated exactly as before.
+        confirmation = expected
     if not isinstance(confirmation, str) or confirmation != expected:
         raise VariableWriteError(
             "blueprint-variable-confirmation-required",

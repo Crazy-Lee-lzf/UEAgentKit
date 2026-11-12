@@ -318,7 +318,11 @@ class VariableWriteContractTests(unittest.TestCase):
         )
         self.assertEqual(params["confirmation"], expected)
 
-        for confirmation in ("", expected + " ", expected.lower(), "CREATE"):
+        # 0-3.4: an omitted confirmation is derived from the planId the caller
+        # already holds; an explicit but wrong value is still refused below.
+        self.assertEqual(build_apply_parameters(_preview(), "")["confirmation"], expected)
+
+        for confirmation in (expected + " ", expected.lower(), "CREATE"):
             with self.subTest(confirmation=confirmation):
                 with self.assertRaises(VariableWriteError) as raised:
                     build_apply_parameters(_preview(), confirmation)

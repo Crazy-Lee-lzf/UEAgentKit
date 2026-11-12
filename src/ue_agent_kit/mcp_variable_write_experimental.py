@@ -129,7 +129,7 @@ def register_variable_write_experimental_tools(
     @server.tool(annotations=apply_annotations)
     def ue_apply_blueprint_variable_create_experimental(
         preview_result: dict[str, Any],
-        confirmation: str,
+        confirmation: str = "",
     ) -> dict[str, Any]:
         """Create the exact previewed variables in one transaction, never saving or compiling."""
         try:

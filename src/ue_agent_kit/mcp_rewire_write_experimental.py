@@ -163,7 +163,7 @@ def register_rewire_write_experimental_tools(
     @server.tool(annotations=apply_annotations)
     def ue_apply_blueprint_rewire_experimental(
         preview_result: dict[str, Any],
-        confirmation: str,
+        confirmation: str = "",
     ) -> dict[str, Any]:
         """Replace the one previewed edge in one transaction, never saving or compiling."""
         try:

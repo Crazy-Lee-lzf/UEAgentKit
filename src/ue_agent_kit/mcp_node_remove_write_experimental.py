@@ -149,7 +149,7 @@ def register_node_remove_write_experimental_tools(
     @server.tool(annotations=apply_annotations)
     def ue_apply_blueprint_node_remove_experimental(
         preview_result: dict[str, Any],
-        confirmation: str,
+        confirmation: str = "",
     ) -> dict[str, Any]:
         """Remove the one previewed node in one transaction, never saving or compiling."""
         try:

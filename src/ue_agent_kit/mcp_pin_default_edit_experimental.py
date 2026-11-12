@@ -133,7 +133,7 @@ def register_pin_default_edit_experimental_tools(
     @server.tool(annotations=apply_annotations)
     def ue_apply_blueprint_pin_defaults_experimental(
         preview_result: dict[str, Any],
-        confirmation: str,
+        confirmation: str = "",
     ) -> dict[str, Any]:
         """Apply the exact previewed defaults in one transaction, never saving."""
         try:

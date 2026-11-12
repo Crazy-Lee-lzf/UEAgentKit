@@ -429,11 +429,16 @@ def save_confirmation_for_plan(plan_id: str) -> str:
     return SAVE_CONFIRMATION_PREFIX + plan_id
 
 
-def build_apply_parameters(preview_result: Any, confirmation: Any) -> dict[str, Any]:
+def build_apply_parameters(preview_result: Any, confirmation: Any = "") -> dict[str, Any]:
     """Build the exact Apply request from the complete Preview result."""
 
     preview = validate_preview_result(preview_result)
     expected = APPLY_CONFIRMATION_PREFIX + preview["planId"]
+    if confirmation in (None, ""):
+        # 0-3.4: the phrase is derived from the planId the caller already holds,
+        # so requiring it as a separate argument was friction without an extra
+        # check.  An explicit value is still validated exactly as before.
+        confirmation = expected
     if not isinstance(confirmation, str) or confirmation != expected:
         raise NodeRemoveWriteError(
             "blueprint-node-remove-confirmation-required",
