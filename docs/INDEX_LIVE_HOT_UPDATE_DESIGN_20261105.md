@@ -156,3 +156,21 @@ live+workflow+memory 129→130、live+workflow 115→116。
 命中 overlay 时返回 overlay 的 canonical 并标注 `source=overlay`，
 未命中继续走冻结索引。接之前必须先审计该工具每个字段的取数处，
 避免出现「同一响应里一半来自 overlay、一半来自索引」的混合态。
+### 切片 3 真实 Editor 验收（2026-11-12 19:58）
+
+环境：Host `N1_BlueprintNative_20261031`，插件 `0.9.0.dev1`，DLL `712BD75E…`，
+Editor PID 5632，**无索引库、无 `--revision-export`**（正好叠加验证 0-3.6）。
+
+| 检查 | 结果 |
+|---|---|
+| 工具已注册 | `ue_refresh_asset_index_live` 在列，工具总数 116 |
+| 磁盘 SHA（独立计算） | `5252e1103c851d93…` |
+| 返回 `revision` | `sha256:5252e1103c851d93…` **与磁盘一致** |
+| `indexFresh` | `false` |
+| `overlayUpdated` | `true` |
+| `restartRequired` | `false` |
+| `overlayEntryCount` | `1` |
+| 验收后磁盘 SHA | `5252E1103C851D93…` **未变**（刷新是纯只读） |
+| 收尾 | Editor 无提示退出，0 个 UE 进程 |
+
+这条验收同时证明了 0-3.6：整条链路在**没有索引、没有 Revision Export** 的机器上成立。
