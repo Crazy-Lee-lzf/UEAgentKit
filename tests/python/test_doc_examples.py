@@ -19,9 +19,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from ue_agent_kit.experimental_graph_edit import (  # noqa: E402
-    CALL_FUNCTION_NODE_TYPE,
     NODE_TYPES,
-    OWNED_CALL_NODE_TYPE,
     VARIABLE_NODE_TYPES,
     _TEMP_ID,
 )
@@ -44,7 +42,6 @@ class GraphEditDocExampleTests(unittest.TestCase):
         allowed_types = (
             set(NODE_TYPES)
             | set(VARIABLE_NODE_TYPES)
-            | {CALL_FUNCTION_NODE_TYPE, OWNED_CALL_NODE_TYPE}
         )
         for block in blocks:
             try:
