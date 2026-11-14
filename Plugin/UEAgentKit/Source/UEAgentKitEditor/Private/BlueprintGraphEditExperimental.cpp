@@ -3807,16 +3807,24 @@ namespace
 			}
 			Pins.Sort([](const UEdGraphPin& Left, const UEdGraphPin& Right)
 			{
-				if (Left.PinName != Right.PinName)
+				// Order by the case-insensitive FName comparison, not by the
+				// interned spelling: a rebuilt wildcard pin can flip "Index" to
+				// "index", which would reorder the list and change the hash even
+				// though nothing in the graph changed.
+				const int32 NameOrder = Left.PinName.Compare(Right.PinName);
+				if (NameOrder != 0)
 				{
-					return Left.PinName.LexicalLess(Right.PinName);
+					return NameOrder < 0;
 				}
 				return Left.Direction < Right.Direction;
 			});
 			AppendField(Builder, FString::FromInt(Pins.Num()));
 			for (const UEdGraphPin* Pin : Pins)
 			{
-				AppendField(Builder, Pin->PinName.ToString());
+				// Same FName case instability as the pin type below: the pin can
+				// print "Index" before an Undo/Redo and "index" after a wildcard
+				// node rebuilt its pins, so hash the canonical spelling.
+				AppendField(Builder, Pin->PinName.ToString().ToLower());
 				AppendField(Builder, Pin->Direction == EGPD_Input ? TEXT("input") : TEXT("output"));
 				// FNames are case-insensitive and the name table keeps whichever
 				// spelling was interned first, so the SAME pin type can print as
@@ -4275,9 +4283,14 @@ namespace
 			}
 			Pins.Sort([](const UEdGraphPin& Left, const UEdGraphPin& Right)
 			{
-				if (Left.PinName != Right.PinName)
+				// Order by the case-insensitive FName comparison, not by the
+				// interned spelling: a rebuilt wildcard pin can flip "Index" to
+				// "index", which would reorder the list and change the hash even
+				// though nothing in the graph changed.
+				const int32 NameOrder = Left.PinName.Compare(Right.PinName);
+				if (NameOrder != 0)
 				{
-					return Left.PinName.LexicalLess(Right.PinName);
+					return NameOrder < 0;
 				}
 				return Left.Direction < Right.Direction;
 			});
