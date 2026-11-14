@@ -232,3 +232,35 @@ MCP 以 `--database <不存在>` + `--enable-experimental-graphpatch-edit` 启�
 （`get_window_state` 超时报 `UnrealWindow`），且截图里可能不在可见画面。
 此时**不要**盲按 Enter（默认是"保存"）。安全做法是直接终止进程丢弃内存状态，
 并在终止前后各取一次资产 SHA 证明磁盘未变——本次即按此流程，五个资产 SHA 全一致。
+## 切片 7 — 已交付并运行时验证：`dc12cc2`
+
+四个 writer 各加一个一键工具，**复用**原有三步工具而不是复制校验：
+
+```text
+ue_edit_blueprint_graph(assetPath, graphGuid, nodes, connections, operation, save=False)
+ue_remove_blueprint_node(asset_path, graph_guid, node_guid, ..., save=False)
+ue_rewire_blueprint_pin(asset_path, graph_guid, operation, ..., save=False)
+ue_create_blueprint_variables(asset_path, variables, save=False)
+```
+
+### 为什么用"复用"而不是"重写一遍校验"
+
+组合工具依次调用本模块自己的 preview / apply / save 函数，
+所以检查逻辑**不可能与已通过测试和原生验收的路径产生漂移**；
+新增代码只有编排和错误上报。
+
+### 运行时验证（2026-11-14 11:45）
+
+`ue_create_blueprint_variables` 在 `BP_N1EditSession129` 上真实跑通：
+
+| 检查 | 结果 |
+|---|---|
+| `ok` | `true` |
+| `saved` | `false`（未保存，符合默认） |
+| `stages` | `[apply, preview]` |
+| `apply.applied` | `true` |
+| 磁盘 | 五个资产 SHA **均未变** |
+| 收尾 | 0 个 UE 进程；ini 已还原；备份已删除 |
+
+另外三条（graph edit / node remove / rewire）只有单元测试，
+未逐条跑真实 Editor——它们共用同一套编排代码，但**这不等于已验证**。
