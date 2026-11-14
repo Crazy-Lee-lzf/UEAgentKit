@@ -10,10 +10,11 @@ This module never talks to Unreal.  It produces and checks the exact payloads th
 live module (``BlueprintPatchExperimental.cpp``) consumes, so a caller cannot
 build a bridge request of its own.
 
-Writer migration is incremental, one writer per commit.  A patch may contain only
-migrated kinds; ``setPinDefault``, ``createVariable``, ``createNode``,
-``connect``, ``disconnect`` and ``rewirePin`` are migrated (``removeNode`` and the
-graph-edit owned literals are not).
+Writer migration is complete for this seam: ``setPinDefault``, ``createVariable``,
+``createNode``, ``connect``, ``disconnect``, ``rewirePin`` and ``removeNode`` are
+all migrated, so a request that names any other kind is refused before anything is
+written.  The graph-edit owned literals, the variable accessors and the
+``call_function`` family are outside this seam and stay single-writer only.
 
 A Blueprint variable is asset-level, not graph-level.  The request still carries a
 ``graphGuid`` and it still has to name a graph that belongs to that Blueprint and
@@ -41,6 +42,14 @@ carries the rewire writer's own nine fields (target / oldSource / newSource node
 GUID, pin name and pin GUID).  Both kinds keep ``edgesFingerprint`` meaningful:
 they change which pins are connected without necessarily changing how many links
 a pin has.
+
+A ``removeNode`` operation deletes one node together with the single incident edge
+it is allowed to carry.  It takes the node-removal writer's own three fields
+(``nodeGuid``, ``expectedNodeClass``, ``removedEdges``) but not its
+``expectedEdgeSetHash``: ``edgesFingerprint`` already binds that same edge set into
+the plan, so a per-operation copy would add no proof.  ``removedEdges`` has to
+match the live edges one for one, and a rollback puts the same node object back
+with its NodeGuid and pin GUIDs intact, then re-creates every edge it took.
 """
 
 from __future__ import annotations
@@ -117,8 +126,7 @@ REMOVED_EDGE_FIELDS = (
     "toPinName",
     "toPinGuid",
 )
-# The writer removes at most one node with at most one incident edge per call.
-MAX_REMOVED_NODES_PER_PATCH = 16
+# The writer breaks at most one incident edge per node removal.
 MAX_REMOVED_EDGES_PER_NODE = 1
 # The rewire writer's own nine field names, so one request object can move
 # between the single-writer rewire tool and a patch operation.

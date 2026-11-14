@@ -129,9 +129,11 @@ def register_patch_experimental_tools(
         migrates setPinDefault (nodeGuid, pinName, pinGuid, type, value),
         createVariable (name, type, defaultValue), createNode (nodeType, x, y,
         optional tempId), connect (from, fromPin, to, toPin), disconnect (the same
-        four endpoint fields, for an edge that already exists) and rewirePin
-        (target/oldSource/newSource nodeGuid + pinName + pinGuid), so a request
-        that names any other kind is refused before it reaches the Editor. A
+        four endpoint fields, for an edge that already exists), rewirePin
+        (target/oldSource/newSource nodeGuid + pinName + pinGuid) and removeNode
+        (nodeGuid, expectedNodeClass, removedEdges -- at most one incident edge),
+        so a request that names any other kind is refused before it reaches the
+        Editor. A
         createVariable operation targets the Blueprint, not the graph: the
         graphGuid only has to be a graph of that Blueprint (and the one the focused
         editor shows). A connect endpoint is a node GUID or a tempId declared by an
