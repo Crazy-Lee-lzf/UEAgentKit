@@ -4,6 +4,7 @@
 #include "BlueprintGraphEditExperimental.h"
 #include "BlueprintGraphLayoutApply.h"
 #include "BlueprintPinDefaultEditExperimental.h"
+#include "BlueprintRewireExperimental.h"
 #include "BlueprintVariableWriteExperimental.h"
 
 #include "Dom/JsonObject.h"
@@ -35,9 +36,11 @@ namespace
 	const TCHAR* const KindCreateVariable = TEXT("createVariable");
 	const TCHAR* const KindCreateNode = TEXT("createNode");
 	const TCHAR* const KindConnect = TEXT("connect");
+	const TCHAR* const KindDisconnect = TEXT("disconnect");
+	const TCHAR* const KindRewirePin = TEXT("rewirePin");
 	/** Exhaustive list of migrated kinds, in the order they were migrated. */
 	const TCHAR* const MigratedKindList =
-		TEXT("setPinDefault, createVariable, createNode, connect");
+		TEXT("setPinDefault, createVariable, createNode, connect, disconnect, rewirePin");
 	const TCHAR* const StatusValidated = TEXT("validated");
 	const TCHAR* const StatusApplied = TEXT("applied");
 	const TCHAR* const StatusFailed = TEXT("failed");
@@ -49,8 +52,6 @@ namespace
 	 * caller cannot mistake a typo for a future feature.
 	 */
 	const TCHAR* const ReservedKinds[] = {
-		TEXT("disconnect"),
-		TEXT("rewirePin"),
 		TEXT("removeNode"),
 	};
 
@@ -85,6 +86,7 @@ namespace
 		UEAgentKitBlueprintVariableExperimental::FAtomicVariableOperation Variable;
 		UEAgentKitBlueprintGraphEditExperimental::FAtomicNodeOperation Node;
 		UEAgentKitBlueprintGraphEditExperimental::FAtomicEdgeOperation Edge;
+		UEAgentKitBlueprintRewireExperimental::FAtomicRewireOperation Rewire;
 		/** opId/kind/resolved fields; reused verbatim for the results array. */
 		TSharedPtr<FJsonObject> Detail;
 	};
@@ -401,7 +403,9 @@ namespace
 		return Kind.Equals(KindSetPinDefault, ESearchCase::CaseSensitive)
 			|| Kind.Equals(KindCreateVariable, ESearchCase::CaseSensitive)
 			|| Kind.Equals(KindCreateNode, ESearchCase::CaseSensitive)
-			|| Kind.Equals(KindConnect, ESearchCase::CaseSensitive);
+			|| Kind.Equals(KindConnect, ESearchCase::CaseSensitive)
+			|| Kind.Equals(KindDisconnect, ESearchCase::CaseSensitive)
+			|| Kind.Equals(KindRewirePin, ESearchCase::CaseSensitive);
 	}
 
 	bool IsReservedKind(const FString& Kind)
@@ -828,9 +832,13 @@ namespace
 				Operation.Node.X = X;
 				Operation.Node.Y = Y;
 			}
-			else if (Operation.Kind.Equals(KindConnect, ESearchCase::CaseSensitive))
+			else if (Operation.Kind.Equals(KindConnect, ESearchCase::CaseSensitive)
+				|| Operation.Kind.Equals(KindDisconnect, ESearchCase::CaseSensitive))
 			{
-				// connect carries exactly the endpoint fields: from/fromPin/to/toPin.
+				// connect and disconnect carry exactly the same endpoint fields;
+				// the kind alone decides which direction the edge moves.
+				const bool bDisconnect =
+					Operation.Kind.Equals(KindDisconnect, ESearchCase::CaseSensitive);
 				if (!RejectUnknownParams(
 					*Object,
 					{
@@ -871,7 +879,8 @@ namespace
 				{
 					return false;
 				}
-				// One patch may not outgrow the single writer's own connection bound.
+				// One patch may not outgrow the single writer's own edge bound; a
+				// disconnect counts against the same bound because it moves one edge.
 				++ConnectOperationCount;
 				if (ConnectOperationCount > MaxConnectOperations)
 				{
@@ -880,7 +889,7 @@ namespace
 						OutErrorMessage,
 						TEXT("graph-patch-connect-limit"),
 						FString::Printf(
-							TEXT("A patch may create at most %d connections, the same bound as the single-writer graph edit tool."),
+							TEXT("A patch may change at most %d connections, the same bound as the single-writer graph edit tool."),
 							MaxConnectOperations));
 				}
 				// The writer's per-node fan-out bound, counted over this patch only.
@@ -908,6 +917,7 @@ namespace
 				Operation.Edge.ToNodeGuid = ToNodeGuid;
 				Operation.Edge.ToTempId = ToTempId;
 				Operation.Edge.ToPin = ToPin;
+				Operation.Edge.bDisconnect = bDisconnect;
 				// Two operations writing one input would make the read-back of the
 				// first one fail by construction; refuse the ambiguity up front.
 				const FString TargetKey =
@@ -923,6 +933,58 @@ namespace
 							*TargetKey));
 				}
 				SeenEdgeTargets.Add(TargetKey);
+			}
+			else if (Operation.Kind.Equals(KindRewirePin, ESearchCase::CaseSensitive))
+			{
+				// The rewire writer's own field names, so a caller can move one
+				// request object between the single-writer tool and a patch op.
+				if (!RejectUnknownParams(
+					*Object,
+					{
+						TEXT("opId"),
+						TEXT("kind"),
+						TEXT("targetNodeGuid"),
+						TEXT("targetPinName"),
+						TEXT("targetPinGuid"),
+						TEXT("oldSourceNodeGuid"),
+						TEXT("oldSourcePinName"),
+						TEXT("oldSourcePinGuid"),
+						TEXT("newSourceNodeGuid"),
+						TEXT("newSourcePinName"),
+						TEXT("newSourcePinGuid"),
+					},
+					OutErrorCode,
+					OutErrorMessage))
+				{
+					return false;
+				}
+				UEAgentKitBlueprintRewireExperimental::FAtomicRewireOperation& Rewire =
+					Operation.Rewire;
+				if (!ReadString(*Object, TEXT("targetNodeGuid"), Rewire.TargetNodeGuid, OutErrorCode, OutErrorMessage)
+					|| !ReadString(*Object, TEXT("targetPinName"), Rewire.TargetPinName, OutErrorCode, OutErrorMessage)
+					|| !ReadString(*Object, TEXT("targetPinGuid"), Rewire.TargetPinGuid, OutErrorCode, OutErrorMessage)
+					|| !ReadString(*Object, TEXT("oldSourceNodeGuid"), Rewire.OldSourceNodeGuid, OutErrorCode, OutErrorMessage)
+					|| !ReadString(*Object, TEXT("oldSourcePinName"), Rewire.OldSourcePinName, OutErrorCode, OutErrorMessage)
+					|| !ReadString(*Object, TEXT("oldSourcePinGuid"), Rewire.OldSourcePinGuid, OutErrorCode, OutErrorMessage)
+					|| !ReadString(*Object, TEXT("newSourceNodeGuid"), Rewire.NewSourceNodeGuid, OutErrorCode, OutErrorMessage)
+					|| !ReadString(*Object, TEXT("newSourcePinName"), Rewire.NewSourcePinName, OutErrorCode, OutErrorMessage)
+					|| !ReadString(*Object, TEXT("newSourcePinGuid"), Rewire.NewSourcePinGuid, OutErrorCode, OutErrorMessage))
+				{
+					return false;
+				}
+				// Every rewire moves one edge out and one edge in, so it counts
+				// against the same per-patch edge bound as connect/disconnect.
+				++ConnectOperationCount;
+				if (ConnectOperationCount > MaxConnectOperations)
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-patch-connect-limit"),
+						FString::Printf(
+							TEXT("A patch may change at most %d connections, the same bound as the single-writer graph edit tool."),
+							MaxConnectOperations));
+				}
 			}
 			else
 			{
@@ -1039,7 +1101,8 @@ namespace
 			}
 			return true;
 		}
-		if (Operation.Kind.Equals(KindConnect, ESearchCase::CaseSensitive))
+		if (Operation.Kind.Equals(KindConnect, ESearchCase::CaseSensitive)
+			|| Operation.Kind.Equals(KindDisconnect, ESearchCase::CaseSensitive))
 		{
 			if (!UEAgentKitBlueprintGraphEditExperimental::TryResolveAtomicEdgeOperation(
 				Graph,
@@ -1074,6 +1137,28 @@ namespace
 			Operation.Detail->SetStringField(TEXT("fromType"), Operation.Edge.FromType);
 			Operation.Detail->SetStringField(TEXT("toPin"), Operation.Edge.ToPin);
 			Operation.Detail->SetStringField(TEXT("toType"), Operation.Edge.ToType);
+			return true;
+		}
+		if (Operation.Kind.Equals(KindRewirePin, ESearchCase::CaseSensitive))
+		{
+			if (!UEAgentKitBlueprintRewireExperimental::TryResolveAtomicRewireOperation(
+				Graph,
+				Operation.Rewire,
+				OutErrorCode,
+				OutErrorMessage))
+			{
+				return false;
+			}
+			Operation.Detail->SetStringField(TEXT("targetNodeGuid"), Operation.Rewire.TargetNodeGuid);
+			Operation.Detail->SetStringField(TEXT("targetPinName"), Operation.Rewire.TargetPinName);
+			Operation.Detail->SetStringField(TEXT("targetPinGuid"), Operation.Rewire.TargetPinGuid);
+			Operation.Detail->SetStringField(TEXT("oldSourceNodeGuid"), Operation.Rewire.OldSourceNodeGuid);
+			Operation.Detail->SetStringField(TEXT("oldSourcePinName"), Operation.Rewire.OldSourcePinName);
+			Operation.Detail->SetStringField(TEXT("oldSourcePinGuid"), Operation.Rewire.OldSourcePinGuid);
+			Operation.Detail->SetStringField(TEXT("newSourceNodeGuid"), Operation.Rewire.NewSourceNodeGuid);
+			Operation.Detail->SetStringField(TEXT("newSourcePinName"), Operation.Rewire.NewSourcePinName);
+			Operation.Detail->SetStringField(TEXT("newSourcePinGuid"), Operation.Rewire.NewSourcePinGuid);
+			Operation.Detail->SetStringField(TEXT("pinKind"), Operation.Rewire.PinKind);
 			return true;
 		}
 		return Fail(
@@ -1160,7 +1245,8 @@ namespace
 			}
 			return true;
 		}
-		if (Operation.Kind.Equals(KindConnect, ESearchCase::CaseSensitive))
+		if (Operation.Kind.Equals(KindConnect, ESearchCase::CaseSensitive)
+			|| Operation.Kind.Equals(KindDisconnect, ESearchCase::CaseSensitive))
 		{
 			UEAgentKitBlueprintGraphEditExperimental::FAtomicEdgeOperation Edge = Operation.Edge;
 			// The patch is the only layer that knows what a tempId means; the seam
@@ -1221,6 +1307,15 @@ namespace
 			Operation.Detail->SetStringField(TEXT("toType"), Single[0].ToType);
 			return true;
 		}
+		if (Operation.Kind.Equals(KindRewirePin, ESearchCase::CaseSensitive))
+		{
+			return UEAgentKitBlueprintRewireExperimental::TryApplyAtomicRewireOperation(
+				Blueprint,
+				Graph,
+				Operation.Rewire,
+				OutErrorCode,
+				OutErrorMessage);
+		}
 		return Fail(
 			OutErrorCode,
 			OutErrorMessage,
@@ -1272,13 +1367,23 @@ namespace
 				OutErrorCode,
 				OutErrorMessage);
 		}
-		if (Operation.Kind.Equals(KindConnect, ESearchCase::CaseSensitive))
+		if (Operation.Kind.Equals(KindConnect, ESearchCase::CaseSensitive)
+			|| Operation.Kind.Equals(KindDisconnect, ESearchCase::CaseSensitive))
 		{
 			TArray<UEAgentKitBlueprintGraphEditExperimental::FAtomicEdgeOperation> Single;
 			Single.Add(Operation.Edge);
 			return UEAgentKitBlueprintGraphEditExperimental::TryCheckAtomicEdgeOperations(
 				Graph,
 				Single,
+				bExpectAfter,
+				OutErrorCode,
+				OutErrorMessage);
+		}
+		if (Operation.Kind.Equals(KindRewirePin, ESearchCase::CaseSensitive))
+		{
+			return UEAgentKitBlueprintRewireExperimental::TryCheckAtomicRewireOperation(
+				Graph,
+				Operation.Rewire,
 				bExpectAfter,
 				OutErrorCode,
 				OutErrorMessage);
@@ -1328,7 +1433,8 @@ namespace
 				OutErrorCode,
 				OutErrorMessage);
 		}
-		if (Operation.Kind.Equals(KindConnect, ESearchCase::CaseSensitive))
+		if (Operation.Kind.Equals(KindConnect, ESearchCase::CaseSensitive)
+			|| Operation.Kind.Equals(KindDisconnect, ESearchCase::CaseSensitive))
 		{
 			TArray<UEAgentKitBlueprintGraphEditExperimental::FAtomicEdgeOperation> Single;
 			Single.Add(Operation.Edge);
@@ -1337,6 +1443,15 @@ namespace
 				Graph,
 				Single,
 				1,
+				OutErrorCode,
+				OutErrorMessage);
+		}
+		if (Operation.Kind.Equals(KindRewirePin, ESearchCase::CaseSensitive))
+		{
+			return UEAgentKitBlueprintRewireExperimental::TryRestoreAtomicRewireOperation(
+				Blueprint,
+				Graph,
+				Operation.Rewire,
 				OutErrorCode,
 				OutErrorMessage);
 		}
@@ -1429,10 +1544,28 @@ namespace
 			Canonical = AppendField(Canonical, FString::FromInt(Operation.Node.X));
 			Canonical = AppendField(Canonical, FString::FromInt(Operation.Node.Y));
 		}
-		else if (Operation.Kind.Equals(KindConnect, ESearchCase::CaseSensitive))
+		else if (Operation.Kind.Equals(KindConnect, ESearchCase::CaseSensitive)
+			|| Operation.Kind.Equals(KindDisconnect, ESearchCase::CaseSensitive))
 		{
+			// connect and disconnect bind the same endpoint fields; the kind
+			// itself is already in the hash, so the direction is covered too.
 			Canonical += EndpointCanonical(Operation, /*bFrom=*/true, AllOperations);
 			Canonical += EndpointCanonical(Operation, /*bFrom=*/false, AllOperations);
+		}
+		else if (Operation.Kind.Equals(KindRewirePin, ESearchCase::CaseSensitive))
+		{
+			// All three triples: the plan binds which edge goes away and which one
+			// takes its place, not just that "one rewire happens here".
+			Canonical = AppendField(Canonical, Operation.Rewire.TargetNodeGuid);
+			Canonical = AppendField(Canonical, Operation.Rewire.TargetPinName);
+			Canonical = AppendField(Canonical, Operation.Rewire.TargetPinGuid);
+			Canonical = AppendField(Canonical, Operation.Rewire.OldSourceNodeGuid);
+			Canonical = AppendField(Canonical, Operation.Rewire.OldSourcePinName);
+			Canonical = AppendField(Canonical, Operation.Rewire.OldSourcePinGuid);
+			Canonical = AppendField(Canonical, Operation.Rewire.NewSourceNodeGuid);
+			Canonical = AppendField(Canonical, Operation.Rewire.NewSourcePinName);
+			Canonical = AppendField(Canonical, Operation.Rewire.NewSourcePinGuid);
+			Canonical = AppendField(Canonical, Operation.Rewire.PinKind);
 		}
 		return Canonical;
 	}
@@ -1798,6 +1931,8 @@ namespace
 				MakeShared<FJsonValueString>(KindCreateVariable),
 				MakeShared<FJsonValueString>(KindCreateNode),
 				MakeShared<FJsonValueString>(KindConnect),
+				MakeShared<FJsonValueString>(KindDisconnect),
+				MakeShared<FJsonValueString>(KindRewirePin),
 			});
 		Result->SetArrayField(TEXT("operations"), BuildValidatedResults(Plan));
 		return Result;
@@ -2275,6 +2410,7 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 	const int32 LinkCountAfter = CountLinks(Graph);
 	int32 CreatedNodeCount = 0;
 	int32 CreatedEdgeCount = 0;
+	int32 RemovedEdgeCount = 0;
 	for (const FPatchOperation& Operation : Plan.Operations)
 	{
 		if (Operation.Kind.Equals(KindCreateNode, ESearchCase::CaseSensitive))
@@ -2285,12 +2421,17 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 		{
 			++CreatedEdgeCount;
 		}
+		else if (Operation.Kind.Equals(KindDisconnect, ESearchCase::CaseSensitive))
+		{
+			++RemovedEdgeCount;
+		}
 	}
-	// createNode changes nodes and connect changes edges; neither may do the
-	// other's job, so both deltas are exact.  This is also the "no extra edge was
-	// created" proof: the link count is before + exactly the planned connections.
+	// createNode changes nodes; connect/disconnect move one edge each and a
+	// rewire swaps one edge for another, so net edge change is exactly
+	// created - removed and a rewire must leave the count alone.  This is also the
+	// "no extra edge was created or lost" proof.
 	if (NodeCountAfter != Plan.NodeCountBefore + CreatedNodeCount
-		|| LinkCountAfter != Plan.LinkCountBefore + CreatedEdgeCount)
+		|| LinkCountAfter != Plan.LinkCountBefore + CreatedEdgeCount - RemovedEdgeCount)
 	{
 		if (GEditor->Trans != nullptr)
 		{
@@ -2448,6 +2589,7 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 	Result->SetNumberField(TEXT("nodeCountAfter"), NodeCountAfter);
 	Result->SetNumberField(TEXT("createdNodeCount"), CreatedNodeCount);
 	Result->SetNumberField(TEXT("createdEdgeCount"), CreatedEdgeCount);
+	Result->SetNumberField(TEXT("removedEdgeCount"), RemovedEdgeCount);
 	Result->SetNumberField(TEXT("linkCountBefore"), Plan.LinkCountBefore);
 	Result->SetNumberField(TEXT("linkCountAfter"), LinkCountAfter);
 	Result->SetNumberField(TEXT("operationCount"), Plan.Operations.Num());

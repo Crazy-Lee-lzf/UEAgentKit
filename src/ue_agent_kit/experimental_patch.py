@@ -11,9 +11,9 @@ live module (``BlueprintPatchExperimental.cpp``) consumes, so a caller cannot
 build a bridge request of its own.
 
 Writer migration is incremental, one writer per commit.  A patch may contain only
-migrated kinds; ``setPinDefault``, ``createVariable``, ``createNode`` and
-``connect`` are migrated (``connect`` does not include ``disconnect`` or owned
-literals).
+migrated kinds; ``setPinDefault``, ``createVariable``, ``createNode``,
+``connect``, ``disconnect`` and ``rewirePin`` are migrated (``removeNode`` and the
+graph-edit owned literals are not).
 
 A Blueprint variable is asset-level, not graph-level.  The request still carries a
 ``graphGuid`` and it still has to name a graph that belongs to that Blueprint and
@@ -31,6 +31,16 @@ of the same request declared: the tempId is a patch-local label that the Editor
 resolves to the node it just created, so one request can create a node and wire
 it in the same transaction.  Forward references, unknown labels and duplicate
 labels are refused before anything is written.
+
+A ``disconnect`` operation removes one edge and carries exactly the ``connect``
+fields; the Editor additionally requires that edge to be the only link on its
+target input, so its endpoints must be existing nodes.
+
+A ``rewirePin`` operation moves one input from its current source to a new one and
+carries the rewire writer's own nine fields (target / oldSource / newSource node
+GUID, pin name and pin GUID).  Both kinds keep ``edgesFingerprint`` meaningful:
+they change which pins are connected without necessarily changing how many links
+a pin has.
 """
 
 from __future__ import annotations
@@ -80,19 +90,40 @@ MAX_ASSET_PATH = 512
 # Only these kinds are implemented by the live atomic patch.  A patch that mixes
 # a migrated and an unmigrated kind is refused before any write, so one patch
 # never carries two authorization contracts.
-MIGRATED_KINDS = ("setPinDefault", "createVariable", "createNode", "connect")
-RESERVED_KINDS = ("disconnect", "rewirePin", "removeNode")
+MIGRATED_KINDS = (
+    "setPinDefault",
+    "createVariable",
+    "createNode",
+    "connect",
+    "disconnect",
+    "rewirePin",
+)
+RESERVED_KINDS = ("removeNode",)
 
 PIN_DEFAULT_FIELDS = ("nodeGuid", "pinName", "pinGuid", "type", "value")
 CREATE_VARIABLE_FIELDS = ("name", "type", "defaultValue")
 CREATE_NODE_FIELDS = ("nodeType", "x", "y")
 CONNECT_FIELDS = ("from", "fromPin", "to", "toPin")
+# disconnect is the same four endpoint fields read the other way round.
+DISCONNECT_FIELDS = CONNECT_FIELDS
+# The rewire writer's own nine field names, so one request object can move
+# between the single-writer rewire tool and a patch operation.
+REWIRE_FIELDS = (
+    "targetNodeGuid",
+    "targetPinName",
+    "targetPinGuid",
+    "oldSourceNodeGuid",
+    "oldSourcePinName",
+    "oldSourcePinGuid",
+    "newSourceNodeGuid",
+    "newSourcePinName",
+    "newSourcePinGuid",
+)
+REWIRE_PIN_FIELDS = ("targetPinName", "oldSourcePinName", "newSourcePinName")
 MAX_TEMP_ID_LENGTH = 64
 PATCH_PIN_TYPES = ("exec", "bool", "int", "double", "string")
 
-_GUID = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
-)
+_GUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _SHA1 = re.compile(r"^sha1:[0-9a-f]{40}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 
@@ -192,8 +223,7 @@ def _temp_id(value: Any, label: str) -> str:
     ):
         raise PatchError(
             "graph-edit-temp-id-invalid",
-            f"{label} must be 'tmp:' followed by 1-{MAX_TEMP_ID_LENGTH} printable ASCII "
-            "characters.",
+            f"{label} must be 'tmp:' followed by 1-{MAX_TEMP_ID_LENGTH} printable ASCII characters.",
         )
     return value
 
@@ -218,7 +248,6 @@ def _endpoint_ref(value: Any, label: str) -> tuple[str | None, str | None]:
 
 def _node_contract(node_type: Any, label: str, *, error_code: str) -> dict[str, Any]:
     """Resolve one primitive nodeType against the graph-edit writer's table."""
-
 
     if not isinstance(node_type, str) or node_type not in NODE_TYPES:
         raise PatchError(
@@ -323,7 +352,9 @@ def validate_preview_parameters(
     connection_counts: dict[str, int] = {}
     create_variable_count = 0
     create_node_count = 0
-    connect_count = 0
+    # connect, disconnect and rewirePin all move one edge, so they share the
+    # single-writer edge bounds instead of each claiming its own.
+    edge_operation_count = 0
     # Labels are collected up front so an edge that names a LATER createNode is
     # reported as a forward reference rather than as an unknown label (the
     # Editor makes the same distinction).
@@ -448,15 +479,15 @@ def validate_preview_parameters(
                 normalized_node["tempId"] = temp_id
             normalized_operations.append(normalized_node)
             continue
-        if kind == "connect":
+        if kind in ("connect", "disconnect"):
+            # Same four endpoint fields; the kind alone decides which way the edge
+            # moves, so the shape and tempId rules are shared verbatim.
             _reject_unknown(
                 item,
                 {"opId", "kind", *CONNECT_FIELDS},
                 f"operations[{index}]",
             )
-            from_guid, from_temp = _endpoint_ref(
-                item.get("from"), f"operations[{index}].from"
-            )
+            from_guid, from_temp = _endpoint_ref(item.get("from"), f"operations[{index}].from")
             to_guid, to_temp = _endpoint_ref(item.get("to"), f"operations[{index}].to")
             for temp_id, label in (
                 (from_temp, f"operations[{index}].from"),
@@ -467,16 +498,14 @@ def validate_preview_parameters(
                 if temp_id not in declared_temp_ids:
                     raise PatchError(
                         "graph-patch-unknown-temp-id",
-                        f"{label} references tempId '{temp_id}', which no createNode "
-                        "operation in this patch declares.",
+                        f"{label} references tempId '{temp_id}', which no createNode operation in this patch declares.",
                     )
                 if declared_temp_ids[temp_id] > index:
                     # A label declared later in the same request is a forward
                     # reference: the node would not exist when the edge is applied.
                     raise PatchError(
                         "graph-patch-forward-temp-id",
-                        f"{label} references tempId '{temp_id}' before the createNode "
-                        "operation that declares it.",
+                        f"{label} references tempId '{temp_id}' before the createNode operation that declares it.",
                     )
             from_pin = _string(
                 item.get("fromPin"),
@@ -488,13 +517,13 @@ def validate_preview_parameters(
                 f"operations[{index}].toPin",
                 maximum=128,
             )
-            connect_count += 1
-            if connect_count > MAX_CONNECTIONS:
+            edge_operation_count += 1
+            if edge_operation_count > MAX_CONNECTIONS:
                 # Unreachable while the patch is capped at 16 operations; kept so
                 # the bound is explicit rather than implied by another limit.
                 raise PatchError(
                     "graph-patch-connect-limit",
-                    f"A patch may create at most {MAX_CONNECTIONS} connections, the same "
+                    f"A patch may change at most {MAX_CONNECTIONS} connections, the same "
                     "bound as the single-writer graph edit tool.",
                 )
             for node_ref in (
@@ -506,8 +535,7 @@ def validate_preview_parameters(
                 if connection_counts[node_ref] > MAX_CONNECTIONS_PER_NODE:
                     raise PatchError(
                         "graph-edit-connection-limit",
-                        f"{node_ref} would exceed the {MAX_CONNECTIONS_PER_NODE}"
-                        "-connection per-node limit.",
+                        f"{node_ref} would exceed the {MAX_CONNECTIONS_PER_NODE}-connection per-node limit.",
                     )
             target_key = f"{to_guid if to_guid is not None else to_temp}|{to_pin}"
             if target_key in seen_edge_targets:
@@ -531,6 +559,37 @@ def validate_preview_parameters(
             else:
                 normalized_edge["to"] = to_guid
             normalized_operations.append(normalized_edge)
+            continue
+        if kind == "rewirePin":
+            _reject_unknown(
+                item,
+                {"opId", "kind", *REWIRE_FIELDS},
+                f"operations[{index}]",
+            )
+            normalized_rewire: dict[str, Any] = {"opId": op_id, "kind": kind}
+            for field in REWIRE_FIELDS:
+                if field in REWIRE_PIN_FIELDS:
+                    normalized_rewire[field] = _string(
+                        item.get(field),
+                        f"operations[{index}].{field}",
+                        maximum=128,
+                    )
+                else:
+                    normalized_rewire[field] = _guid_with_code(
+                        item.get(field),
+                        f"operations[{index}].{field}",
+                        error_code="graph-rewire-invalid-identifier",
+                    )
+            # One rewire moves one edge out and one in, so it counts against the
+            # same per-patch edge bound as connect/disconnect.
+            edge_operation_count += 1
+            if edge_operation_count > MAX_CONNECTIONS:
+                raise PatchError(
+                    "graph-patch-connect-limit",
+                    f"A patch may change at most {MAX_CONNECTIONS} connections, the same "
+                    "bound as the single-writer graph edit tool.",
+                )
+            normalized_operations.append(normalized_rewire)
             continue
         _reject_unknown(
             item,
@@ -567,8 +626,7 @@ def validate_preview_parameters(
             # one fail by construction; refuse instead of leaving that to chance.
             raise PatchError(
                 "graph-patch-duplicate-target",
-                f"Duplicate pin default target: {target_key[0]}.{target_key[1]} "
-                f"({target_key[2]}).",
+                f"Duplicate pin default target: {target_key[0]}.{target_key[1]} ({target_key[2]}).",
             )
         seen_targets.add(target_key)
         normalized_operations.append(
@@ -742,6 +800,38 @@ def _canonical_edge_apply_fields(entry: dict[str, Any], label: str) -> dict[str,
     }
 
 
+def _canonical_rewire_fields(
+    entry: dict[str, Any],
+    label: str,
+    *,
+    error_code: str,
+) -> dict[str, Any]:
+    """Validate one rewirePin entry; preview and apply carry the same shape."""
+
+    normalized: dict[str, Any] = {}
+    for field in REWIRE_FIELDS:
+        if field in REWIRE_PIN_FIELDS:
+            normalized[field] = _string(
+                entry.get(field),
+                f"{label}.{field}",
+                maximum=128,
+            )
+        else:
+            normalized[field] = _guid_with_code(
+                entry.get(field),
+                f"{label}.{field}",
+                error_code=error_code,
+            )
+    pin_kind = _string(entry.get("pinKind"), f"{label}.pinKind", maximum=16)
+    if pin_kind not in PATCH_PIN_TYPES:
+        raise PatchError(
+            error_code,
+            f"{label}.pinKind is outside {', '.join(PATCH_PIN_TYPES)}.",
+        )
+    normalized["pinKind"] = pin_kind
+    return normalized
+
+
 def validate_preview_result(preview: Any) -> dict[str, Any]:
     item = _object(_unwrap_tool_result(preview, "planId"), "preview")
     operations = item.get("operations")
@@ -832,9 +922,7 @@ def validate_preview_result(preview: Any) -> dict[str, Any]:
                 expect_node_guid=False,
             )
             if "tempId" in entry:
-                temp_id = _temp_id(
-                    entry.get("tempId"), f"preview.operations[{index}].tempId"
-                )
+                temp_id = _temp_id(entry.get("tempId"), f"preview.operations[{index}].tempId")
                 if temp_id in declared_temp_ids:
                     raise PatchError(
                         "graph-patch-preview-invalid",
@@ -844,12 +932,23 @@ def validate_preview_result(preview: Any) -> dict[str, Any]:
                 normalized["tempId"] = temp_id
             normalized_operations.append({"opId": op_id, "kind": kind, **normalized})
             continue
-        if kind == "connect":
+        if kind in ("connect", "disconnect"):
             try:
                 normalized = _canonical_edge_preview_fields(
                     entry,
                     f"preview.operations[{index}]",
                     declared_temp_ids,
+                )
+            except PatchError as exc:
+                raise PatchError("graph-patch-preview-invalid", exc.message) from exc
+            normalized_operations.append({"opId": op_id, "kind": kind, **normalized})
+            continue
+        if kind == "rewirePin":
+            try:
+                normalized = _canonical_rewire_fields(
+                    entry,
+                    f"preview.operations[{index}]",
+                    error_code="graph-patch-preview-invalid",
                 )
             except PatchError as exc:
                 raise PatchError("graph-patch-preview-invalid", exc.message) from exc
@@ -995,6 +1094,7 @@ def validate_apply_result(apply_result: Any) -> dict[str, Any]:
     created_variables = 0
     created_nodes = 0
     created_edges = 0
+    removed_edges = 0
     for index, raw in enumerate(results):
         entry = _object(raw, f"applyResult.results[{index}]")
         if entry.get("status") != "applied" or entry.get("rolledBack") is not False:
@@ -1021,9 +1121,7 @@ def validate_apply_result(apply_result: Any) -> dict[str, Any]:
                 error_code="graph-patch-apply-invalid",
             )
             created_variables += 1
-            normalized_results.append(
-                {"opId": op_id, "kind": kind, **normalized, "guid": guid}
-            )
+            normalized_results.append({"opId": op_id, "kind": kind, **normalized, "guid": guid})
             continue
         if kind == "createNode":
             normalized = _canonical_node_fields(
@@ -1035,7 +1133,7 @@ def validate_apply_result(apply_result: Any) -> dict[str, Any]:
             created_nodes += 1
             normalized_results.append({"opId": op_id, "kind": kind, **normalized})
             continue
-        if kind == "connect":
+        if kind in ("connect", "disconnect"):
             try:
                 normalized = _canonical_edge_apply_fields(
                     entry,
@@ -1043,7 +1141,21 @@ def validate_apply_result(apply_result: Any) -> dict[str, Any]:
                 )
             except PatchError as exc:
                 raise PatchError("graph-patch-apply-invalid", exc.message) from exc
-            created_edges += 1
+            if kind == "connect":
+                created_edges += 1
+            else:
+                removed_edges += 1
+            normalized_results.append({"opId": op_id, "kind": kind, **normalized})
+            continue
+        if kind == "rewirePin":
+            try:
+                normalized = _canonical_rewire_fields(
+                    entry,
+                    f"applyResult.results[{index}]",
+                    error_code="graph-patch-apply-invalid",
+                )
+            except PatchError as exc:
+                raise PatchError("graph-patch-apply-invalid", exc.message) from exc
             normalized_results.append({"opId": op_id, "kind": kind, **normalized})
             continue
         normalized_results.append(
@@ -1085,11 +1197,15 @@ def validate_apply_result(apply_result: Any) -> dict[str, Any]:
         isinstance(item.get("createdEdgeCount"), bool)
         or not isinstance(item.get("createdEdgeCount"), int)
         or item.get("createdEdgeCount") != created_edges
-        or item.get("linkCountAfter") != item.get("linkCountBefore") + created_edges
+        or isinstance(item.get("removedEdgeCount"), bool)
+        or not isinstance(item.get("removedEdgeCount"), int)
+        or item.get("removedEdgeCount") != removed_edges
+        or item.get("linkCountAfter") != item.get("linkCountBefore") + created_edges - removed_edges
     ):
         raise PatchError(
             "graph-patch-apply-invalid",
-            "Apply link counts must match the number of connect results.",
+            "Apply link counts must match the connect/disconnect results; a "
+            "rewirePin keeps the count and is checked by the edge fingerprint.",
         )
     normalized = dict(item)
     normalized["assetPath"] = normalized_asset
@@ -1162,6 +1278,7 @@ __all__ = [
     "CONNECT_FIELDS",
     "CREATE_NODE_FIELDS",
     "CREATE_VARIABLE_FIELDS",
+    "DISCONNECT_FIELDS",
     "MIGRATED_KINDS",
     "MAX_OPERATIONS",
     "MAX_REQUEST_BYTES",
@@ -1171,6 +1288,7 @@ __all__ = [
     "PREVIEW_TOOL_NAME",
     "PatchError",
     "RESERVED_KINDS",
+    "REWIRE_FIELDS",
     "SAVE_CAPABILITY",
     "SAVE_CONFIRMATION_PREFIX",
     "SAVE_METHOD",

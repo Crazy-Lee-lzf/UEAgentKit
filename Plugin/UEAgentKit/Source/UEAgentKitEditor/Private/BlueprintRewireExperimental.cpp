@@ -596,6 +596,87 @@ namespace
 		return false;
 	}
 
+	/**
+	 * Break OldSource -> Target and make NewSource -> Target, in that order.
+	 *
+	 * This is the one break+connect sequence of this writer: the single writer's
+	 * Apply and the atomic seam's `rewirePin` both call it, so "exactly one old
+	 * edge", the post-break schema response and the "target ends with exactly the
+	 * new source" read-back cannot drift between the two paths.  The caller owns
+	 * the transaction and the Modify() calls; on failure the graph is left with
+	 * the old edge missing and nothing new, which is what the caller's rollback /
+	 * Undo is for.
+	 */
+	bool ReplaceSingleEdge(
+		UEdGraph* Graph,
+		const UEdGraphSchema_K2* Schema,
+		const FPinRef& OldSource,
+		const FPinRef& Target,
+		const FPinRef& NewSource,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
+	{
+		if (Graph == nullptr || Schema == nullptr || Target.Pin == nullptr || OldSource.Pin == nullptr
+			|| NewSource.Pin == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-rewire-old-edge-mismatch"),
+				TEXT("The planned edge endpoints are no longer available."));
+		}
+		if (Target.Pin->LinkedTo.Num() != 1 || Target.Pin->LinkedTo[0] != OldSource.Pin)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-rewire-old-edge-mismatch"),
+				TEXT("The planned old edge changed before the transaction could replace it."));
+		}
+
+		OldSource.Pin->BreakLinkTo(Target.Pin);
+		OldSource.Node->PinConnectionListChanged(OldSource.Pin);
+		Target.Node->PinConnectionListChanged(Target.Pin);
+		if (Target.Pin->LinkedTo.Num() != 0 || OldSource.Pin->LinkedTo.Contains(Target.Pin))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-rewire-break-failed"),
+				TEXT("The single planned edge was not removed cleanly."));
+		}
+
+		const FPinConnectionResponse Response =
+			Schema->CanCreateConnection(NewSource.Pin, Target.Pin);
+		if (Response.Response.GetValue() != CONNECT_RESPONSE_MAKE)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-rewire-schema-rejected"),
+				FString::Printf(
+					TEXT("The K2 schema does not allow a plain connection after the planned break: %s"),
+					*Response.Message.ToString()));
+		}
+		if (!Schema->TryCreateConnection(NewSource.Pin, Target.Pin))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-rewire-connect-failed"),
+				TEXT("The K2 schema refused the planned connection."));
+		}
+		if (Target.Pin->LinkedTo.Num() != 1 || Target.Pin->LinkedTo[0] != NewSource.Pin)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-rewire-connect-failed"),
+				TEXT("The target pin is not connected to exactly the new source pin."));
+		}
+		return true;
+	}
+
 	bool BuildPlan(
 		const TSharedPtr<FJsonObject>& Params,
 		FRewirePlan& OutPlan,
@@ -1273,6 +1354,372 @@ bool UEAgentKitBlueprintRewireExperimental::TryComputeLiveEdgeSetHash(
 	return HashEdgeKeys(Keys, OutHash);
 }
 
+bool UEAgentKitBlueprintRewireExperimental::TryResolveAtomicRewireOperation(
+	UEdGraph* Graph,
+	FAtomicRewireOperation& InOutOperation,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	if (Graph == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-rewire-invalid-parameters"),
+			TEXT("The exact graph is unavailable."));
+	}
+	const UEdGraphSchema_K2* Schema = Cast<UEdGraphSchema_K2>(Graph->GetSchema());
+	if (Schema == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-rewire-schema-not-supported"),
+			TEXT("Experimental Blueprint rewire supports only K2 Blueprint graphs."));
+	}
+
+	FPinRef OldSource;
+	FPinRef Target;
+	FPinRef NewSource;
+	if (!ResolvePinRef(
+			Graph,
+			InOutOperation.OldSourceNodeGuid,
+			InOutOperation.OldSourcePinName,
+			InOutOperation.OldSourcePinGuid,
+			EGPD_Output,
+			TEXT("old source"),
+			OldSource,
+			OutErrorCode,
+			OutErrorMessage)
+		|| !ResolvePinRef(
+			Graph,
+			InOutOperation.TargetNodeGuid,
+			InOutOperation.TargetPinName,
+			InOutOperation.TargetPinGuid,
+			EGPD_Input,
+			TEXT("target"),
+			Target,
+			OutErrorCode,
+			OutErrorMessage)
+		|| !ResolvePinRef(
+			Graph,
+			InOutOperation.NewSourceNodeGuid,
+			InOutOperation.NewSourcePinName,
+			InOutOperation.NewSourcePinGuid,
+			EGPD_Output,
+			TEXT("new source"),
+			NewSource,
+			OutErrorCode,
+			OutErrorMessage))
+	{
+		return false;
+	}
+
+	if (Target.Kind != OldSource.Kind || NewSource.Kind != Target.Kind)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-rewire-pin-kind-mismatch"),
+			FString::Printf(
+				TEXT("The old source, target and new source pins must share one kind (%s/%s/%s)."),
+				PinKindLabel(OldSource.Kind),
+				PinKindLabel(Target.Kind),
+				PinKindLabel(NewSource.Kind)));
+	}
+	if (Target.Pin->LinkedTo.Num() == 0)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-rewire-target-unlinked"),
+			TEXT("The target input pin has no existing connection; rewire requires exactly one."));
+	}
+	if (Target.Pin->LinkedTo.Num() != 1)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-rewire-target-multiple-links"),
+			TEXT("The target input pin has more than one connection; this slice requires exactly one."));
+	}
+	if (Target.Pin->LinkedTo[0] != OldSource.Pin || !OldSource.Pin->LinkedTo.Contains(Target.Pin))
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-rewire-old-edge-mismatch"),
+			TEXT("The target pin is not connected to the declared old source pin."));
+	}
+	if (OldSource.Pin == NewSource.Pin)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-rewire-no-op"),
+			TEXT("The new source pin is the current source pin."));
+	}
+	if (NewSource.Pin->LinkedTo.Contains(Target.Pin))
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-rewire-already-linked"),
+			TEXT("The new source pin is already connected to the target pin."));
+	}
+	// Judged before the break, exactly like Preview: the old edge is still there,
+	// so BREAK_OTHERS_B is this plan's own edge and is allowed, while a response
+	// touching the new source's links is not.
+	const FPinConnectionResponse Response =
+		Schema->CanCreateConnection(NewSource.Pin, Target.Pin);
+	switch (Response.Response.GetValue())
+	{
+	case CONNECT_RESPONSE_MAKE:
+	case CONNECT_RESPONSE_BREAK_OTHERS_B:
+		break;
+	case CONNECT_RESPONSE_BREAK_OTHERS_A:
+	case CONNECT_RESPONSE_BREAK_OTHERS_AB:
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-rewire-schema-would-break-other-links"),
+			TEXT("The K2 schema would break connections on the new source pin, which is outside this plan."));
+	case CONNECT_RESPONSE_MAKE_WITH_CONVERSION_NODE:
+	case CONNECT_RESPONSE_MAKE_WITH_PROMOTION:
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-rewire-conversion-not-allowed"),
+			TEXT("The K2 schema would insert a conversion or promotion node, which is outside this plan."));
+	case CONNECT_RESPONSE_DISALLOW:
+	default:
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-rewire-schema-rejected"),
+			FString::Printf(
+				TEXT("The K2 schema rejected the new connection: %s"),
+				*Response.Message.ToString()));
+	}
+
+	InOutOperation.PinKind = PinKindLabel(Target.Kind);
+	return true;
+}
+
+bool UEAgentKitBlueprintRewireExperimental::TryApplyAtomicRewireOperation(
+	UBlueprint* Blueprint,
+	UEdGraph* Graph,
+	const FAtomicRewireOperation& Operation,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	if (Blueprint == nullptr || Graph == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-rewire-invalid-parameters"),
+			TEXT("The exact Blueprint graph is unavailable."));
+	}
+	const UEdGraphSchema_K2* Schema = Cast<UEdGraphSchema_K2>(Graph->GetSchema());
+	if (Schema == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-rewire-schema-not-supported"),
+			TEXT("Experimental Blueprint rewire supports only K2 Blueprint graphs."));
+	}
+	FPinRef OldSource;
+	FPinRef Target;
+	FPinRef NewSource;
+	if (!ResolvePinRef(
+			Graph,
+			Operation.OldSourceNodeGuid,
+			Operation.OldSourcePinName,
+			Operation.OldSourcePinGuid,
+			EGPD_Output,
+			TEXT("old source"),
+			OldSource,
+			OutErrorCode,
+			OutErrorMessage)
+		|| !ResolvePinRef(
+			Graph,
+			Operation.TargetNodeGuid,
+			Operation.TargetPinName,
+			Operation.TargetPinGuid,
+			EGPD_Input,
+			TEXT("target"),
+			Target,
+			OutErrorCode,
+			OutErrorMessage)
+		|| !ResolvePinRef(
+			Graph,
+			Operation.NewSourceNodeGuid,
+			Operation.NewSourcePinName,
+			Operation.NewSourcePinGuid,
+			EGPD_Output,
+			TEXT("new source"),
+			NewSource,
+			OutErrorCode,
+			OutErrorMessage))
+	{
+		return false;
+	}
+	OldSource.Node->Modify();
+	Target.Node->Modify();
+	NewSource.Node->Modify();
+	if (!ReplaceSingleEdge(
+			Graph,
+			Schema,
+			OldSource,
+			Target,
+			NewSource,
+			OutErrorCode,
+			OutErrorMessage))
+	{
+		// Best-effort put-back so a single failed operation leaves the graph as it
+		// found it; the caller's transaction Undo is the authoritative rollback.
+		Target.Pin->BreakLinkTo(NewSource.Pin);
+		if (!Target.Pin->LinkedTo.Contains(OldSource.Pin))
+		{
+			OldSource.Pin->MakeLinkTo(Target.Pin);
+		}
+		OldSource.Node->PinConnectionListChanged(OldSource.Pin);
+		Target.Node->PinConnectionListChanged(Target.Pin);
+		return false;
+	}
+	return true;
+}
+
+bool UEAgentKitBlueprintRewireExperimental::TryCheckAtomicRewireOperation(
+	UEdGraph* Graph,
+	const FAtomicRewireOperation& Operation,
+	bool bExpectAfter,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	FPinRef OldSource;
+	FPinRef Target;
+	FPinRef NewSource;
+	if (!ResolvePinRef(
+			Graph,
+			Operation.OldSourceNodeGuid,
+			Operation.OldSourcePinName,
+			Operation.OldSourcePinGuid,
+			EGPD_Output,
+			TEXT("old source"),
+			OldSource,
+			OutErrorCode,
+			OutErrorMessage)
+		|| !ResolvePinRef(
+			Graph,
+			Operation.TargetNodeGuid,
+			Operation.TargetPinName,
+			Operation.TargetPinGuid,
+			EGPD_Input,
+			TEXT("target"),
+			Target,
+			OutErrorCode,
+			OutErrorMessage)
+		|| !ResolvePinRef(
+			Graph,
+			Operation.NewSourceNodeGuid,
+			Operation.NewSourcePinName,
+			Operation.NewSourcePinGuid,
+			EGPD_Output,
+			TEXT("new source"),
+			NewSource,
+			OutErrorCode,
+			OutErrorMessage))
+	{
+		return false;
+	}
+	const FPinRef& Want = bExpectAfter ? NewSource : OldSource;
+	const FPinRef& Gone = bExpectAfter ? OldSource : NewSource;
+	if (Target.Pin->LinkedTo.Num() != 1 || Target.Pin->LinkedTo[0] != Want.Pin
+		|| Gone.Pin->LinkedTo.Contains(Target.Pin))
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-rewire-post-commit-mismatch"),
+			FString::Printf(
+				TEXT("The target pin is not linked to exactly the %s source pin."),
+				bExpectAfter ? TEXT("new") : TEXT("old")));
+	}
+	return true;
+}
+
+bool UEAgentKitBlueprintRewireExperimental::TryRestoreAtomicRewireOperation(
+	UBlueprint* Blueprint,
+	UEdGraph* Graph,
+	const FAtomicRewireOperation& Operation,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	if (Blueprint == nullptr || Graph == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-rewire-invalid-parameters"),
+			TEXT("The exact Blueprint graph is unavailable."));
+	}
+	FPinRef OldSource;
+	FPinRef Target;
+	FPinRef NewSource;
+	if (!ResolvePinRef(
+			Graph,
+			Operation.OldSourceNodeGuid,
+			Operation.OldSourcePinName,
+			Operation.OldSourcePinGuid,
+			EGPD_Output,
+			TEXT("old source"),
+			OldSource,
+			OutErrorCode,
+			OutErrorMessage)
+		|| !ResolvePinRef(
+			Graph,
+			Operation.TargetNodeGuid,
+			Operation.TargetPinName,
+			Operation.TargetPinGuid,
+			EGPD_Input,
+			TEXT("target"),
+			Target,
+			OutErrorCode,
+			OutErrorMessage)
+		|| !ResolvePinRef(
+			Graph,
+			Operation.NewSourceNodeGuid,
+			Operation.NewSourcePinName,
+			Operation.NewSourcePinGuid,
+			EGPD_Output,
+			TEXT("new source"),
+			NewSource,
+			OutErrorCode,
+			OutErrorMessage))
+	{
+		return false;
+	}
+	Target.Pin->BreakLinkTo(NewSource.Pin);
+	if (!Target.Pin->LinkedTo.Contains(OldSource.Pin))
+	{
+		OldSource.Pin->MakeLinkTo(Target.Pin);
+	}
+	OldSource.Node->PinConnectionListChanged(OldSource.Pin);
+	Target.Node->PinConnectionListChanged(Target.Pin);
+	if (!Target.Pin->LinkedTo.Contains(OldSource.Pin) || NewSource.Pin->LinkedTo.Contains(Target.Pin))
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-rewire-post-commit-mismatch"),
+			TEXT("The planned old edge was not restored."));
+	}
+	return true;
+}
+
 bool UEAgentKitBlueprintRewireExperimental::IsExperimentalWriteAvailable()
 {
 	if (bTestOverrideSet)
@@ -1424,49 +1871,40 @@ bool UEAgentKitBlueprintRewireExperimental::TryApplyExperimental(
 			return Fail(OutErrorCode, OutErrorMessage, Code, Message);
 		};
 
-		if (Plan.Target.Pin->LinkedTo.Num() != 1
-			|| Plan.Target.Pin->LinkedTo[0] != Plan.OldSource.Pin)
-		{
-			return Abort(
-				TEXT("graph-rewire-old-edge-mismatch"),
-				TEXT("The planned old edge changed before the transaction could replace it."));
-		}
-
-		Plan.OldSource.Pin->BreakLinkTo(Plan.Target.Pin);
-		Plan.OldSource.Node->PinConnectionListChanged(Plan.OldSource.Pin);
-		Plan.Target.Node->PinConnectionListChanged(Plan.Target.Pin);
-		if (Plan.Target.Pin->LinkedTo.Num() != 0
-			|| Plan.OldSource.Pin->LinkedTo.Contains(Plan.Target.Pin))
-		{
-			return Abort(
-				TEXT("graph-rewire-break-failed"),
-				TEXT("The single planned edge was not removed cleanly."));
-		}
-
 		if (Plan.Operation.Equals(OperationRewire, ESearchCase::CaseSensitive))
 		{
-			const FPinConnectionResponse Response =
-				Schema->CanCreateConnection(Plan.NewSource.Pin, Plan.Target.Pin);
-			if (Response.Response.GetValue() != CONNECT_RESPONSE_MAKE)
+			if (!ReplaceSingleEdge(
+					Graph,
+					Schema,
+					Plan.OldSource,
+					Plan.Target,
+					Plan.NewSource,
+					OutErrorCode,
+					OutErrorMessage))
 			{
-				return Abort(
-					TEXT("graph-rewire-schema-rejected"),
-					FString::Printf(
-						TEXT("The K2 schema does not allow a plain connection after the planned break: %s"),
-						*Response.Message.ToString()));
+				Transaction.Cancel();
+				return false;
 			}
-			if (!Schema->TryCreateConnection(Plan.NewSource.Pin, Plan.Target.Pin))
-			{
-				return Abort(
-					TEXT("graph-rewire-connect-failed"),
-					TEXT("The K2 schema refused the planned connection."));
-			}
+		}
+		else
+		{
+			// A disconnect plan only removes the planned edge.
 			if (Plan.Target.Pin->LinkedTo.Num() != 1
-				|| Plan.Target.Pin->LinkedTo[0] != Plan.NewSource.Pin)
+				|| Plan.Target.Pin->LinkedTo[0] != Plan.OldSource.Pin)
 			{
 				return Abort(
-					TEXT("graph-rewire-connect-failed"),
-					TEXT("The target pin is not connected to exactly the new source pin."));
+					TEXT("graph-rewire-old-edge-mismatch"),
+					TEXT("The planned old edge changed before the transaction could replace it."));
+			}
+			Plan.OldSource.Pin->BreakLinkTo(Plan.Target.Pin);
+			Plan.OldSource.Node->PinConnectionListChanged(Plan.OldSource.Pin);
+			Plan.Target.Node->PinConnectionListChanged(Plan.Target.Pin);
+			if (Plan.Target.Pin->LinkedTo.Num() != 0
+				|| Plan.OldSource.Pin->LinkedTo.Contains(Plan.Target.Pin))
+			{
+				return Abort(
+					TEXT("graph-rewire-break-failed"),
+					TEXT("The single planned edge was not removed cleanly."));
 			}
 		}
 

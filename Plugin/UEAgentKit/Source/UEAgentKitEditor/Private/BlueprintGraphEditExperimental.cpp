@@ -4728,8 +4728,10 @@ namespace
 					TEXT("Pin %s carries a type this slice cannot connect (only exec/bool/int/double/string are supported)."),
 					*PinName));
 		}
-		if (!bFrom)
+		if (!bFrom && !InOutOperation.bDisconnect)
 		{
+			// A connect needs a free target input; a disconnect needs exactly the
+			// opposite, so the "not already linked" rule belongs to connect only.
 			if (Pin->LinkedTo.Num() != 0)
 			{
 				return Fail(
@@ -4823,6 +4825,46 @@ namespace
 				OutErrorMessage,
 				TEXT("graph-edit-disconnect-failed"),
 				TEXT("The Editor did not remove the exact edge."));
+		}
+		return true;
+	}
+
+	/**
+	 * Re-create one exact edge and verify both pins point at each other.
+	 *
+	 * This is the inverse of BreakEdge and is only used to put an edge back after
+	 * a failed Apply (rollback) or to undo a planned disconnect; the forward path
+	 * always goes through the K2 schema instead.
+	 */
+	bool RelinkEdge(
+		UEdGraphPin* FromPin,
+		UEdGraphPin* ToPin,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
+	{
+		if (FromPin == nullptr || ToPin == nullptr)
+		{
+			return true;
+		}
+		if (!FromPin->LinkedTo.Contains(ToPin))
+		{
+			FromPin->MakeLinkTo(ToPin);
+		}
+		if (FromPin->GetOwningNode() != nullptr)
+		{
+			FromPin->GetOwningNode()->PinConnectionListChanged(FromPin);
+		}
+		if (ToPin->GetOwningNode() != nullptr)
+		{
+			ToPin->GetOwningNode()->PinConnectionListChanged(ToPin);
+		}
+		if (!FromPin->LinkedTo.Contains(ToPin) || !ToPin->LinkedTo.Contains(FromPin))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-disconnect-failed"),
+				TEXT("The Editor did not restore the exact edge."));
 		}
 		return true;
 	}
@@ -5320,6 +5362,45 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryResolveAtomicEdgeOperation(
 				*InOutOperation.ToType));
 	}
 
+	// A disconnect removes an edge that must already be there, so it never
+	// consults the create-connection response: it proves the exact edge instead.
+	if (InOutOperation.bDisconnect)
+	{
+		if (bFromDeclared || bToDeclared)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-disconnect-edge-not-found"),
+				TEXT("A disconnect endpoint must be an existing node; a node this patch creates has no edge to remove."));
+		}
+		UEdGraphPin* FromPin = nullptr;
+		UEdGraphPin* ToPin = nullptr;
+		FindEdgePins(Graph, InOutOperation, FromPin, ToPin);
+		if (FromPin == nullptr || ToPin == nullptr || !FromPin->LinkedTo.Contains(ToPin))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-disconnect-edge-not-found"),
+				FString::Printf(
+					TEXT("The edge %s.%s -> %s.%s is not in the graph."),
+					*InOutOperation.FromNodeGuid,
+					*InOutOperation.FromPin,
+					*InOutOperation.ToNodeGuid,
+					*InOutOperation.ToPin));
+		}
+		if (ToPin->LinkedTo.Num() != 1)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-disconnect-ambiguous"),
+				TEXT("The declared existing input has more than one link; refusing an ambiguous disconnect."));
+		}
+		return true;
+	}
+
 	// The K2 schema is only consulted when both endpoints exist live.  A tempId
 	// endpoint mirrors the single writer's new-node path, which also relies on the
 	// exact type match above plus TryCreateConnection.
@@ -5362,9 +5443,20 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyAtomicEdgeOperations(
 				MaxConnections));
 	}
 
+	// Edges this call changed, so a failure inside the same call can put them
+	// back: created edges are broken again, removed (disconnected) edges are
+	// re-created.  Both lists undo in reverse order.
 	TArray<TPair<UEdGraphPin*, UEdGraphPin*>> CreatedEdges;
-	auto RollbackCreatedEdges = [&]()
+	TArray<TPair<UEdGraphPin*, UEdGraphPin*>> RemovedEdges;
+	auto RollbackChangedEdges = [&]()
 	{
+		for (int32 Index = RemovedEdges.Num() - 1; Index >= 0; --Index)
+		{
+			FString IgnoredCode;
+			FString IgnoredMessage;
+			RelinkEdge(RemovedEdges[Index].Key, RemovedEdges[Index].Value, IgnoredCode, IgnoredMessage);
+		}
+		RemovedEdges.Reset();
 		for (int32 Index = CreatedEdges.Num() - 1; Index >= 0; --Index)
 		{
 			FString IgnoredCode;
@@ -5380,7 +5472,7 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyAtomicEdgeOperations(
 		// the patch tried to write an edge to a node that does not exist.
 		if (Operation.FromTempId.IsEmpty() == false || Operation.ToTempId.IsEmpty() == false)
 		{
-			RollbackCreatedEdges();
+			RollbackChangedEdges();
 			return Fail(
 				OutErrorCode,
 				OutErrorMessage,
@@ -5392,7 +5484,7 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyAtomicEdgeOperations(
 		if (!FGuid::Parse(Operation.FromNodeGuid, FromGuid)
 			|| !FGuid::Parse(Operation.ToNodeGuid, ToGuid))
 		{
-			RollbackCreatedEdges();
+			RollbackChangedEdges();
 			return Fail(
 				OutErrorCode,
 				OutErrorMessage,
@@ -5403,7 +5495,7 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyAtomicEdgeOperations(
 		UEdGraphNode* ToNode = FindNodeByGuid(Graph, ToGuid);
 		if (FromNode == nullptr || ToNode == nullptr)
 		{
-			RollbackCreatedEdges();
+			RollbackChangedEdges();
 			return Fail(
 				OutErrorCode,
 				OutErrorMessage,
@@ -5412,7 +5504,7 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyAtomicEdgeOperations(
 		}
 		if (Cast<UK2Node>(FromNode) == nullptr || Cast<UK2Node>(ToNode) == nullptr)
 		{
-			RollbackCreatedEdges();
+			RollbackChangedEdges();
 			return Fail(
 				OutErrorCode,
 				OutErrorMessage,
@@ -5421,7 +5513,7 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyAtomicEdgeOperations(
 		}
 		if (FromNode == ToNode)
 		{
-			RollbackCreatedEdges();
+			RollbackChangedEdges();
 			return Fail(
 				OutErrorCode,
 				OutErrorMessage,
@@ -5437,7 +5529,7 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyAtomicEdgeOperations(
 			OutErrorMessage);
 		if (FromPin == nullptr)
 		{
-			RollbackCreatedEdges();
+			RollbackChangedEdges();
 			return false;
 		}
 		UEdGraphPin* ToPin = FindUniquePin(
@@ -5449,7 +5541,7 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyAtomicEdgeOperations(
 			OutErrorMessage);
 		if (ToPin == nullptr)
 		{
-			RollbackCreatedEdges();
+			RollbackChangedEdges();
 			return false;
 		}
 		FString FromType;
@@ -5457,7 +5549,7 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyAtomicEdgeOperations(
 		if (!ExistingPinTypeToken(FromPin->PinType, FromType)
 			|| !ExistingPinTypeToken(ToPin->PinType, ToType))
 		{
-			RollbackCreatedEdges();
+			RollbackChangedEdges();
 			return Fail(
 				OutErrorCode,
 				OutErrorMessage,
@@ -5466,7 +5558,7 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyAtomicEdgeOperations(
 		}
 		if (!FromType.Equals(ToType, ESearchCase::CaseSensitive))
 		{
-			RollbackCreatedEdges();
+			RollbackChangedEdges();
 			return Fail(
 				OutErrorCode,
 				OutErrorMessage,
@@ -5478,9 +5570,47 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyAtomicEdgeOperations(
 					*Operation.ToPin,
 					*ToType));
 		}
+		// A disconnect is the same two pins read the other way round: the edge
+		// must be the only link on its target, and removing it is the whole write.
+		if (Operation.bDisconnect)
+		{
+			if (!FromPin->LinkedTo.Contains(ToPin))
+			{
+				RollbackChangedEdges();
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-disconnect-edge-not-found"),
+					TEXT("The edge to remove disappeared before the transaction could break it."));
+			}
+			if (ToPin->LinkedTo.Num() != 1)
+			{
+				RollbackChangedEdges();
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-disconnect-ambiguous"),
+					TEXT("The target input has more than one link; refusing an ambiguous disconnect."));
+			}
+			if (!BreakEdge(FromPin, ToPin, OutErrorCode, OutErrorMessage))
+			{
+				RollbackChangedEdges();
+				return false;
+			}
+			Operation.FromNodeGuid =
+				FromNode->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower);
+			Operation.ToNodeGuid =
+				ToNode->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower);
+			Operation.FromPinId = FromPin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower);
+			Operation.ToPinId = ToPin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower);
+			Operation.FromType = FromType;
+			Operation.ToType = ToType;
+			RemovedEdges.Add(TPair<UEdGraphPin*, UEdGraphPin*>(FromPin, ToPin));
+			continue;
+		}
 		if (ToPin->LinkedTo.Num() != 0)
 		{
-			RollbackCreatedEdges();
+			RollbackChangedEdges();
 			return Fail(
 				OutErrorCode,
 				OutErrorMessage,
@@ -5489,7 +5619,7 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyAtomicEdgeOperations(
 		}
 		if (FromPin->LinkedTo.Contains(ToPin))
 		{
-			RollbackCreatedEdges();
+			RollbackChangedEdges();
 			return Fail(
 				OutErrorCode,
 				OutErrorMessage,
@@ -5503,14 +5633,14 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyAtomicEdgeOperations(
 		{
 			if (!ValidateSchemaConnection(Graph, FromPin, ToPin, OutErrorCode, OutErrorMessage))
 			{
-				RollbackCreatedEdges();
+				RollbackChangedEdges();
 				return false;
 			}
 		}
 		if (!Graph->GetSchema()->TryCreateConnection(FromPin, ToPin)
 			|| !FromPin->LinkedTo.Contains(ToPin))
 		{
-			RollbackCreatedEdges();
+			RollbackChangedEdges();
 			return Fail(
 				OutErrorCode,
 				OutErrorMessage,
@@ -5519,7 +5649,7 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyAtomicEdgeOperations(
 		}
 		if (ToPin->LinkedTo.Num() != 1 || !ToPin->LinkedTo.Contains(FromPin))
 		{
-			RollbackCreatedEdges();
+			RollbackChangedEdges();
 			return Fail(
 				OutErrorCode,
 				OutErrorMessage,
@@ -5557,6 +5687,44 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryCheckAtomicEdgeOperations(
 		UEdGraphPin* FromPin = nullptr;
 		UEdGraphPin* ToPin = nullptr;
 		FindEdgePins(Graph, Operation, FromPin, ToPin);
+		if (Operation.bDisconnect)
+		{
+			// A disconnect expects the opposite of a connect: gone after Apply,
+			// back after Undo.  Both nodes always pre-exist for this operation, so
+			// a missing endpoint is a real read-back failure either way.
+			const bool bWantLinked = !bExpectAfter;
+			const bool bLinked = FromPin != nullptr && ToPin != nullptr
+				&& (FromPin->LinkedTo.Contains(ToPin) || ToPin->LinkedTo.Contains(FromPin));
+			if (bWantLinked
+				&& (!bLinked || ToPin->LinkedTo.Num() != 1
+					|| !ToPin->LinkedTo.Contains(FromPin)))
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-readback-failed"),
+					FString::Printf(
+						TEXT("Edge %s.%s -> %s.%s is not restored as the only link on its target input."),
+						*Operation.FromNodeGuid,
+						*Operation.FromPin,
+						*Operation.ToNodeGuid,
+						*Operation.ToPin));
+			}
+			if (!bWantLinked && bLinked)
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-readback-failed"),
+					FString::Printf(
+						TEXT("Edge %s.%s -> %s.%s is still present after the disconnect."),
+						*Operation.FromNodeGuid,
+						*Operation.FromPin,
+						*Operation.ToNodeGuid,
+						*Operation.ToPin));
+			}
+			continue;
+		}
 		if (!bExpectAfter)
 		{
 			// Undo of a patch that also created the nodes removes the nodes, so a
@@ -5662,6 +5830,19 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryRestoreAtomicEdgeOperations(
 		FindEdgePins(Graph, Operations[Index], FromPin, ToPin);
 		if (FromPin == nullptr || ToPin == nullptr)
 		{
+			continue;
+		}
+		if (Operations[Index].bDisconnect)
+		{
+			// Restoring a disconnect means putting the removed edge back.
+			if (FromPin->LinkedTo.Contains(ToPin))
+			{
+				continue;
+			}
+			if (!RelinkEdge(FromPin, ToPin, OutErrorCode, OutErrorMessage))
+			{
+				return false;
+			}
 			continue;
 		}
 		if (!FromPin->LinkedTo.Contains(ToPin) && !ToPin->LinkedTo.Contains(FromPin))

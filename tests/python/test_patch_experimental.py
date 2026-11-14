@@ -53,6 +53,8 @@ AFTER_STATE_FINGERPRINT = "sha256:" + "c" * 64
 GRAPH_FINGERPRINT = "sha1:" + "d" * 40
 PACKAGE_REVISION = "sha256:" + "e" * 64
 VARIABLE_GUID = "eeeeeeee-ffff-4aaa-8bbb-cccccccccccc"
+NODE_C = "ffffffff-0000-4111-8222-333333333333"
+PIN_C = "99999999-8888-4777-8666-555555555555"
 
 
 def _operation(**overrides: Any) -> dict[str, Any]:
@@ -224,6 +226,44 @@ def _connect_apply_entry(**overrides: Any) -> dict[str, Any]:
     return item
 
 
+def _rewire(**overrides: Any) -> dict[str, Any]:
+    item = {
+        "opId": "r1",
+        "kind": "rewirePin",
+        "targetNodeGuid": NODE_A,
+        "targetPinName": "Condition",
+        "targetPinGuid": PIN_A,
+        "oldSourceNodeGuid": NODE_B,
+        "oldSourcePinName": "ReturnValue",
+        "oldSourcePinGuid": PIN_B,
+        "newSourceNodeGuid": NODE_C,
+        "newSourcePinName": "ReturnValue",
+        "newSourcePinGuid": PIN_C,
+    }
+    item.update(overrides)
+    return item
+
+
+def _rewire_entry(**overrides: Any) -> dict[str, Any]:
+    item = {
+        "opId": "r1",
+        "kind": "rewirePin",
+        "status": "validated",
+        "targetNodeGuid": NODE_A,
+        "targetPinName": "Condition",
+        "targetPinGuid": PIN_A,
+        "oldSourceNodeGuid": NODE_B,
+        "oldSourcePinName": "ReturnValue",
+        "oldSourcePinGuid": PIN_B,
+        "newSourceNodeGuid": NODE_C,
+        "newSourcePinName": "ReturnValue",
+        "newSourcePinGuid": PIN_C,
+        "pinKind": "bool",
+    }
+    item.update(overrides)
+    return item
+
+
 def _preview(**overrides: Any) -> dict[str, Any]:
     result: dict[str, Any] = {
         "schemaVersion": PREVIEW_SCHEMA_VERSION,
@@ -246,7 +286,14 @@ def _preview(**overrides: Any) -> dict[str, Any]:
         "nodeCount": 4,
         "linkCount": 3,
         "requiredConfirmation": APPLY_CONFIRMATION_PREFIX + PLAN_ID,
-        "migratedKinds": ["setPinDefault", "createVariable", "createNode", "connect"],
+        "migratedKinds": [
+            "setPinDefault",
+            "createVariable",
+            "createNode",
+            "connect",
+            "disconnect",
+            "rewirePin",
+        ],
         "operations": [
             {
                 "opId": "p1",
@@ -297,6 +344,7 @@ def _apply(**overrides: Any) -> dict[str, Any]:
         "nodeCountAfter": 4,
         "createdNodeCount": 0,
         "createdEdgeCount": 0,
+        "removedEdgeCount": 0,
         "linkCountBefore": 3,
         "linkCountAfter": 3,
         "operationCount": 1,
@@ -349,11 +397,15 @@ class _FakeServer:
 
 class _FakeLiveEditor:
     def __init__(self, capabilities: list[str] | None = None) -> None:
-        self.capabilities = capabilities if capabilities is not None else [
-            PREVIEW_CAPABILITY,
-            APPLY_CAPABILITY,
-            SAVE_CAPABILITY,
-        ]
+        self.capabilities = (
+            capabilities
+            if capabilities is not None
+            else [
+                PREVIEW_CAPABILITY,
+                APPLY_CAPABILITY,
+                SAVE_CAPABILITY,
+            ]
+        )
         self.calls: list[tuple[str, dict[str, Any], float | None]] = []
         self.results: dict[str, Any] = {
             PREVIEW_METHOD: _preview(),
@@ -433,9 +485,9 @@ class PatchContractTests(unittest.TestCase):
         self.assertEqual(request["operations"][1]["value"], "true")
 
     def test_unmigrated_and_unknown_kinds_are_refused(self) -> None:
+        # Only removeNode is still designed-but-unmigrated; connect (slice 11) and
+        # disconnect/rewirePin (slice 12) are migrated and have their own tests.
         for kind, code in (
-            ("disconnect", "graph-patch-kind-not-migrated"),
-            ("rewirePin", "graph-patch-kind-not-migrated"),
             ("removeNode", "graph-patch-kind-not-migrated"),
             ("moveNode", "graph-patch-kind-not-allowed"),
             ("setDefault", "graph-patch-kind-not-allowed"),
@@ -454,7 +506,7 @@ class PatchContractTests(unittest.TestCase):
             validate_preview_parameters(
                 asset_path=ASSET,
                 graph_guid=GRAPH,
-                operations=[_operation(), _operation(opId="p2", kind="disconnect")],
+                operations=[_operation(), _operation(opId="p2", kind="removeNode")],
             )
         self.assertEqual(raised.exception.code, "graph-patch-kind-not-migrated")
 
@@ -596,9 +648,7 @@ class PatchContractTests(unittest.TestCase):
             validate_preview_parameters(
                 asset_path=ASSET,
                 graph_guid=GRAPH,
-                operations=[
-                    _variable(opId=f"v{index}", name=f"Var{index}") for index in range(9)
-                ],
+                operations=[_variable(opId=f"v{index}", name=f"Var{index}") for index in range(9)],
             )
         self.assertEqual(raised.exception.code, "graph-patch-create-variable-limit")
 
@@ -606,9 +656,7 @@ class PatchContractTests(unittest.TestCase):
         request = validate_preview_parameters(
             asset_path=ASSET,
             graph_guid=GRAPH,
-            operations=[
-                _variable(opId=f"v{index}", name=f"Var{index}") for index in range(8)
-            ],
+            operations=[_variable(opId=f"v{index}", name=f"Var{index}") for index in range(8)],
         )
         self.assertEqual(len(request["operations"]), 8)
 
@@ -694,9 +742,7 @@ class PatchContractTests(unittest.TestCase):
                         graph_guid=GRAPH,
                         operations=[_node(x=coordinate)],
                     )
-                self.assertEqual(
-                    raised.exception.code, "graph-edit-invalid-parameters"
-                )
+                self.assertEqual(raised.exception.code, "graph-edit-invalid-parameters")
 
         request = validate_preview_parameters(
             asset_path=ASSET,
@@ -924,6 +970,182 @@ class PatchContractTests(unittest.TestCase):
                     validate_apply_result(apply | mutation)
                 self.assertEqual(raised.exception.code, "graph-patch-apply-invalid")
 
+    def test_disconnect_operation_is_normalized(self) -> None:
+        request = validate_preview_parameters(
+            asset_path=ASSET,
+            graph_guid=GRAPH,
+            operations=[
+                {
+                    "opId": "d1",
+                    "kind": "disconnect",
+                    "from": NODE_B,
+                    "fromPin": "ReturnValue",
+                    "to": NODE_A,
+                    "toPin": "Condition",
+                }
+            ],
+        )
+        self.assertEqual(
+            request["operations"],
+            [
+                {
+                    "opId": "d1",
+                    "kind": "disconnect",
+                    "from": NODE_B,
+                    "fromPin": "ReturnValue",
+                    "to": NODE_A,
+                    "toPin": "Condition",
+                }
+            ],
+        )
+        # The endpoint shape is the connect shape, so a bad GUID and an unknown
+        # field are refused with the same codes.
+        for operations, code in (
+            (
+                [
+                    {
+                        "opId": "d1",
+                        "kind": "disconnect",
+                        "from": "not-a-guid",
+                        "fromPin": "ReturnValue",
+                        "to": NODE_A,
+                        "toPin": "Condition",
+                    }
+                ],
+                "graph-patch-invalid-identifier",
+            ),
+            (
+                [
+                    {
+                        "opId": "d1",
+                        "kind": "disconnect",
+                        "from": NODE_B,
+                        "fromPin": "ReturnValue",
+                        "to": NODE_A,
+                        "toPin": "Condition",
+                        "value": "true",
+                    }
+                ],
+                "graph-patch-unknown-parameter",
+            ),
+        ):
+            with self.subTest(code=code):
+                with self.assertRaises(PatchError) as raised:
+                    validate_preview_parameters(
+                        asset_path=ASSET,
+                        graph_guid=GRAPH,
+                        operations=operations,
+                    )
+                self.assertEqual(raised.exception.code, code)
+
+    def test_rewire_operation_is_normalized(self) -> None:
+        request = validate_preview_parameters(
+            asset_path=ASSET,
+            graph_guid=GRAPH,
+            operations=[_rewire()],
+        )
+        self.assertEqual(request["operations"][0], _rewire())
+
+        for mutation, code in (
+            ({"newSourcePinGuid": "not-a-guid"}, "graph-rewire-invalid-identifier"),
+            ({"targetPinName": ""}, "graph-patch-invalid-parameters"),
+            ({"pinKind": "bool"}, "graph-patch-unknown-parameter"),
+        ):
+            with self.subTest(mutation=mutation):
+                with self.assertRaises(PatchError) as raised:
+                    validate_preview_parameters(
+                        asset_path=ASSET,
+                        graph_guid=GRAPH,
+                        operations=[_rewire(**mutation)],
+                    )
+                self.assertEqual(raised.exception.code, code)
+
+    def test_rewire_result_entries_are_validated(self) -> None:
+        preview = _preview(operations=[_rewire_entry()])
+        normalized = validate_preview_result(preview)
+        self.assertEqual(normalized["operations"][0]["pinKind"], "bool")
+        self.assertEqual(normalized["operations"][0]["targetPinGuid"], PIN_A)
+
+        for mutation in (
+            {"pinKind": "object"},
+            {"oldSourcePinGuid": "not-a-guid"},
+            {"newSourceNodeGuid": None},
+        ):
+            with self.subTest(mutation=mutation):
+                with self.assertRaises(PatchError) as raised:
+                    validate_preview_result(_preview(operations=[_rewire_entry(**mutation)]))
+                self.assertEqual(raised.exception.code, "graph-patch-preview-invalid")
+
+        # A rewire keeps the link count, so a changed count is refused.
+        apply = _apply(
+            linkCountBefore=3,
+            linkCountAfter=3,
+            results=[
+                _rewire_entry(status="applied", rolledBack=False),
+            ],
+        )
+        normalized_apply = validate_apply_result(apply)
+        self.assertEqual(normalized_apply["results"][0]["pinKind"], "bool")
+
+        with self.assertRaises(PatchError) as raised:
+            validate_apply_result(apply | {"linkCountAfter": 4})
+        self.assertEqual(raised.exception.code, "graph-patch-apply-invalid")
+
+        apply = _apply(
+            linkCountBefore=3,
+            linkCountAfter=2,
+            results=[
+                {
+                    **_connect_apply_entry(),
+                    "kind": "disconnect",
+                }
+            ],
+            removedEdgeCount=1,
+        )
+        normalized_apply = validate_apply_result(apply)
+        self.assertEqual(normalized_apply["results"][0]["kind"], "disconnect")
+
+        for mutation in (
+            {"removedEdgeCount": 0},
+            {"linkCountAfter": 3},
+        ):
+            with self.subTest(mutation=mutation):
+                with self.assertRaises(PatchError) as raised:
+                    validate_apply_result(apply | mutation)
+                self.assertEqual(raised.exception.code, "graph-patch-apply-invalid")
+
+    def test_six_kind_patch_is_accepted_together(self) -> None:
+        request = validate_preview_parameters(
+            asset_path=ASSET,
+            graph_guid=GRAPH,
+            operations=[
+                _operation(),
+                _variable(opId="v1"),
+                _node(opId="n1", tempId="tmp:br"),
+                _connect(from_ref="tmp:br", from_pin="then", to_ref=NODE_A, to_pin="execute"),
+                {
+                    "opId": "d1",
+                    "kind": "disconnect",
+                    "from": NODE_B,
+                    "fromPin": "ReturnValue",
+                    "to": NODE_A,
+                    "toPin": "Condition",
+                },
+                _rewire(opId="r1"),
+            ],
+        )
+        self.assertEqual(
+            [item["kind"] for item in request["operations"]],
+            [
+                "setPinDefault",
+                "createVariable",
+                "createNode",
+                "connect",
+                "disconnect",
+                "rewirePin",
+            ],
+        )
+
     def test_node_result_entries_are_validated(self) -> None:
         preview = _preview(
             operations=[_node_preview_entry()],
@@ -937,13 +1159,7 @@ class PatchContractTests(unittest.TestCase):
         # A preview cannot know the created node GUID yet.
         with self.assertRaises(PatchError) as raised:
             validate_preview_result(
-                _preview(
-                    operations=[
-                        _node_preview_entry(
-                            nodeGuid="ffffffff-0000-4111-8222-333333333333"
-                        )
-                    ]
-                )
+                _preview(operations=[_node_preview_entry(nodeGuid="ffffffff-0000-4111-8222-333333333333")])
             )
         self.assertEqual(raised.exception.code, "graph-patch-preview-invalid")
 
@@ -957,9 +1173,7 @@ class PatchContractTests(unittest.TestCase):
         ):
             with self.subTest(mutation=mutation):
                 with self.assertRaises(PatchError) as raised:
-                    validate_preview_result(
-                        _preview(operations=[_node_preview_entry(**mutation)])
-                    )
+                    validate_preview_result(_preview(operations=[_node_preview_entry(**mutation)]))
                 self.assertEqual(raised.exception.code, "graph-patch-preview-invalid")
 
         apply = _apply(
@@ -998,9 +1212,7 @@ class PatchContractTests(unittest.TestCase):
 
         # A preview cannot know the created GUID yet.
         with self.assertRaises(PatchError) as raised:
-            validate_preview_result(
-                _preview(operations=[_variable_preview_entry(guid=VARIABLE_GUID)])
-            )
+            validate_preview_result(_preview(operations=[_variable_preview_entry(guid=VARIABLE_GUID)]))
         self.assertEqual(raised.exception.code, "graph-patch-preview-invalid")
 
         apply = _apply(

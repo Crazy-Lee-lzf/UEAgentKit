@@ -743,7 +743,12 @@ plan 就可以被拿去连一条方向相反的边。用下标既保留了“两
 
 | 项 | 内容 |
 |---|---|
-| 已迁移 kind | `setPinDefault` + `createVariable` + `createNode` + `connect` |
+| 已迁移 kind | `setPinDefault` + `createVariable` + `createNode` + `connect`（切片 11）+ `disconnect` + `rewirePin`（切片 12） |
+| disconnect 字段（切片 12） | 与 `connect` **完全相同**（`from`/`fromPin`/`to`/`toPin`）；端点必须是已存在节点，tempId → `graph-edit-disconnect-edge-not-found` |
+| disconnect 解析/写入/读回（切片 12） | 事务外：这条边必须存在、且是目标输入上的唯一连接（`graph-edit-disconnect-edge-not-found` / `-ambiguous`）；事务内 `BreakLinkTo` + 两侧 `PinConnectionListChanged`；读回期望“边已消失”，Undo 后期望“边回来且仍是唯一连接” |
+| rewirePin 字段（切片 12） | rewire writer 自己的九个字段：`target{NodeGuid,PinName,PinGuid}` / `oldSource*` / `newSource*`（可直接搬 writer 的请求对象） |
+| rewirePin 解析/写入/读回（切片 12） | 三个三元组按 GUID+名字+方向解析；old 边必须存在且唯一；no-op、已连、会打断新源其它连接、需要转换节点、schema 拒绝一律沿用 `graph-rewire-*`；写入=断开 old → 连 new（与单 writer 共用一个 `ReplaceSingleEdge`）；读回=target 只连 new（Apply 后）/只连 old（Undo 后） |
+| 回滚（切片 12） | disconnect 回滚 = **把边连回去**；rewirePin 回滚 = 断开 new → 连回 old；两者都在 `Transaction.Cancel()` 之前完成 |
 | connect 字段 | `opId`/`kind` 之外只接受 `from`/`fromPin`/`to`/`toPin`；其他字段 → `graph-patch-unknown-parameter` |
 | createNode 字段 | 新增可选 `tempId`（形状/唯一性见上） |
 | 端点 | 规范小写 GUID（已有节点）或 `tempId`；既不是 GUID 也无 `tmp:` 前缀 → `graph-patch-invalid-identifier` |
@@ -772,16 +777,16 @@ plan 就可以被拿去连一条方向相反的边。用下标既保留了“两
 | pin 默认值 | 已迁移（切片 8） |
 | 变量创建 | 已迁移（切片 9） |
 | graph edit 的 `createNode`（8 种原始节点） | 已迁移（切片 10） |
-| graph edit 的 `connect`（GUID / tempId 端点） | 已迁移（本切片） |
-| graph edit 的 `disconnect` | **未迁移** |
+| graph edit 的 `connect`（GUID / tempId 端点） | 已迁移（切片 11） |
+| graph edit 的 `disconnect` | 已迁移（切片 12） |
 | graph edit 的 `call_function` / `call_owned_pure_function` / owned literals / variable accessor | **未迁移** |
-| rewire | 未迁移 |
+| rewire | 已迁移（切片 12，`rewirePin`） |
 | node remove | 未迁移 |
 
 ### 已知限制
 
 - 一次 patch 只能落在一个图、一个包上。
-- `connect` 只建边，不删边、不改已有边；`rewirePin`/`disconnect` 没有入口。
+- `connect`/`disconnect`/`rewirePin` 各改一条边；`removeNode` 仍没有入口。
 - 不支持 owned literals（会同时建节点并改边集）。
 - `tempId` 是 patch 内标签，不能跨 patch 复用；下一条 patch 只能用 Apply 返回的 `nodeGuid`。
 - patch 的 `tempId` 形状（1–64 可打印 ASCII）比单 writer 的 `IsTempId`（1–36 字母数字/`_`/`-`）宽，
@@ -863,3 +868,23 @@ UE 5.6.1；隔离 `UnrealEditor-Cmd -unattended -NullRHI`。自动化测试用
   端到端 socket 调用记录。
 - `graph-patch-connect-limit`（24 条）实际不可达：patch 总 op 上限 16 < 24，保留该分支是为了把上限
   写成显式的，而不是隐含在另一个限制里；没有测试声称它可达。
+
+**决策日志（切片 12：`disconnect` + `rewirePin`，薄包）**
+
+1. `disconnect` 与 `connect` **同形同函数**：一个 `bDisconnect` 走同一套 resolve/apply/check/restore，
+   不写第二套边实现；端点必须是已存在节点。
+2. `rewirePin` 走 rewire writer 自己的 seam；`ReplaceSingleEdge` 从单 writer 的 Apply 里**提取**出来
+   两边共用（`UEAgentKit.Rewire.{Expansion,PieGate}` 重跑仍绿）。
+3. 不新增 per-op `expectedEdgeSetHash`：patch 的 `edgesFingerprint` 就是 writer 的
+   `TryComputeLiveEdgeSetHash` 且已进 planId；实测删掉一条无关边后同一请求的 planId 变了。
+4. 计数改成有符号：`linkCountAfter == before + created - removed`；`rewirePin` 必须净 0，所以它既
+   不算 created 也不算 removed（新增结果字段 `removedEdgeCount`）。
+5. 拒绝码只复用：`disconnect` 用 graph-edit 的（`-disconnect-edge-not-found` / `-ambiguous` /
+   `-failed`），`rewirePin` 用 `graph-rewire-*`；没有新错误码家族，也没有新指纹。
+6. 既有测试的契约更新（更强，非放宽）：`migratedKinds` 4→6（两处，顺序钉死），未迁移拒绝循环只剩
+   `removeNode`；`disconnect` 不再出现在“未迁移”断言里。
+7. 本片自动化测试 5 条（新增 `AtomicPatch.EdgeOps`，加进既有的边操作测试文件，**没有新建测试文件**）。
+8. 证据分界：真实证据是隔离 Host 上的 `UnrealEditor-Cmd` 自动化（5/5）；只有单测的是 Python 契约层
+   与 MCP 信封；**本片没有重跑 MCP socket 级真实调用**，端到端 socket 记录仍缺。
+9. 一处刻意的差异：`rewirePin` 不重复单 writer 的“仅顶层事件图”限制——patch 本身已经绑定
+   assetPath+graphGuid+焦点编辑器，那条限制在单 writer（请求自己没有绑定图）里才必要。

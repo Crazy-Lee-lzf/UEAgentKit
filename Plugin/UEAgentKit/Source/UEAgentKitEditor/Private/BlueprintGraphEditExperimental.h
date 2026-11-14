@@ -185,13 +185,17 @@ namespace UEAgentKitBlueprintGraphEditExperimental
 	FString ComputeAtomicNodeStateFingerprint(UEdGraph* Graph);
 
 	/**
-	 * One edge creation operation resolved against the live graph.
+	 * One edge operation (create, or remove when `bDisconnect`) resolved against
+	 * the live graph.
 	 *
 	 * 0-3.4 slice 11 seam: the cross-writer atomic patch connects pins through
 	 * these functions.  An endpoint is either one existing node GUID or one
 	 * tempId that an earlier `createNode` operation of the same patch declared;
 	 * the patch resolves tempIds to GUIDs before Apply, so this seam only ever
 	 * writes edges between real nodes inside the caller's transaction.
+	 *
+	 * 0-3.4 slice 12 extends the same four functions to `bDisconnect` instead of
+	 * adding a second edge implementation.
 	 *
 	 * The single writer's own connect path is not moved onto this seam: it also
 	 * carries owned literals, `fromExisting`/`toExisting` pin identities and
@@ -215,6 +219,18 @@ namespace UEAgentKitBlueprintGraphEditExperimental
 		FString ToPinId;
 		FString FromType;
 		FString ToType;
+		/**
+		 * 0-3.4 slice 12: `true` makes this operation remove the edge instead of
+		 * creating it.
+		 *
+		 * The four fields above keep exactly the same meaning, so one struct and
+		 * one set of functions cover both directions: resolve proves the edge IS
+		 * there, apply breaks it, the read-back expects it to be gone after Apply
+		 * and present after Undo, and the restore re-creates it.  A disconnect
+		 * endpoint must be an existing node -- a node this patch creates has no
+		 * edge to remove, so a tempId endpoint is refused.
+		 */
+		bool bDisconnect = false;
 	};
 
 	/**
@@ -239,6 +255,10 @@ namespace UEAgentKitBlueprintGraphEditExperimental
 	 * self-connection rule, an already-linked input, and the K2 schema response.
 	 * For a tempId endpoint the pin contract comes from the declaring createNode
 	 * operation, because the node does not exist yet.
+	 *
+	 * With `bDisconnect` it instead proves the exact edge exists and is the only
+	 * link on its target input; the K2 create-connection response is irrelevant
+	 * when nothing is created.
 	 */
 	bool TryResolveAtomicEdgeOperation(
 		UEdGraph* Graph,
@@ -248,13 +268,15 @@ namespace UEAgentKitBlueprintGraphEditExperimental
 		FString& OutErrorMessage);
 
 	/**
-	 * Create resolved edges inside the CALLER's transaction.
+	 * Create (or, with `bDisconnect`, remove) resolved edges inside the CALLER's
+	 * transaction.
 	 *
 	 * Endpoints must already carry resolved node GUIDs (the patch translates
 	 * tempIds first).  Fills the resolved pin GUIDs and type tokens back into the
 	 * operations, verifies each new link, and on any failure removes every edge
-	 * this call already created before returning false.  No transaction is opened
-	 * here and the package Dirty bit is not touched here.
+	 * this call already created (and re-creates every edge it already removed)
+	 * before returning false.  No transaction is opened here and the package Dirty
+	 * bit is not touched here.
 	 */
 	bool TryApplyAtomicEdgeOperations(
 		UBlueprint* Blueprint,
@@ -267,7 +289,8 @@ namespace UEAgentKitBlueprintGraphEditExperimental
 	 * Read every operation's edge back; bExpectAfter selects "exactly this edge
 	 * exists and it is the only link on the target input" or "the edge is gone".
 	 * A missing node/pin counts as "gone" so an Undo that also removed the nodes
-	 * a patch created still verifies.
+	 * a patch created still verifies.  A `bDisconnect` operation expects the
+	 * opposite: gone after Apply, present after Undo.
 	 */
 	bool TryCheckAtomicEdgeOperations(
 		UEdGraph* Graph,
@@ -277,10 +300,12 @@ namespace UEAgentKitBlueprintGraphEditExperimental
 		FString& OutErrorMessage);
 
 	/**
-	 * Remove the first AppliedCount operations' edges, in reverse order.
+	 * Remove the first AppliedCount operations' edges, in reverse order, or
+	 * re-create them for a `bDisconnect` operation.
 	 *
-	 * Used by the atomic patch rollback.  An edge that is already gone counts as
-	 * restored.  Returns false when an edge survives its own removal.
+	 * Used by the atomic patch rollback.  An edge that is already gone (or, for a
+	 * disconnect, already back) counts as restored.  Returns false when an edge
+	 * survives its own removal or fails to come back.
 	 */
 	bool TryRestoreAtomicEdgeOperations(
 		UBlueprint* Blueprint,

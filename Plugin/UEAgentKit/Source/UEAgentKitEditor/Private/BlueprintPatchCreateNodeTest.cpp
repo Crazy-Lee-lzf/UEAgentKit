@@ -654,25 +654,26 @@ bool FUEAgentKitPatchCreateNodeTest::RunTest(const FString& Parameters)
 				return Fail();
 			}
 		}
-		// `disconnect` is still unmigrated and must be refused before any write.
+		// `removeNode` is still unmigrated and must be refused before any write.
 		// (`connect` became migrated in 0-3.4 slice 11 and has its own automation
-		// test, UEAgentKit.AtomicPatch.Connect.)
+		// test, UEAgentKit.AtomicPatch.Connect; `disconnect` and `rewirePin` became
+		// migrated in slice 12, UEAgentKit.AtomicPatch.EdgeOps.)
 		{
 			TSharedRef<FJsonObject> Connect = MakeShared<FJsonObject>();
-			Connect->SetStringField(TEXT("opId"), TEXT("c1"));
-			Connect->SetStringField(TEXT("kind"), TEXT("disconnect"));
+			Connect->SetStringField(TEXT("opId"), TEXT("r1"));
+			Connect->SetStringField(TEXT("kind"), TEXT("removeNode"));
 			TSharedPtr<FJsonObject> RefusedResult;
 			FString RefusedCode;
 			FString RefusedMessage;
 			if (!TestFalse(
-					TEXT("disconnect is still refused as unmigrated"),
+					TEXT("removeNode is still refused as unmigrated"),
 					UEAgentKitBlueprintPatchExperimental::TryPreviewExperimental(
 						BuildPatchParams(Blueprint, Graph, { Connect }),
 						RefusedResult,
 						RefusedCode,
 						RefusedMessage))
 				|| !TestEqual(
-					TEXT("disconnect refusal code"),
+					TEXT("removeNode refusal code"),
 					RefusedCode,
 					FString(TEXT("graph-patch-kind-not-migrated"))))
 			{
@@ -888,9 +889,9 @@ bool FUEAgentKitPatchCreateNodeTest::RunTest(const FString& Parameters)
 		const TArray<TSharedPtr<FJsonValue>>& MigratedKinds =
 			Preview->GetArrayField(TEXT("migratedKinds"));
 		if (!TestEqual(
-				TEXT("the preview advertises the four migrated kinds"),
+				TEXT("the preview advertises the six migrated kinds"),
 				JoinStrings(MigratedKinds),
-				FString(TEXT("setPinDefault,createVariable,createNode,connect")))
+				FString(TEXT("setPinDefault,createVariable,createNode,connect,disconnect,rewirePin")))
 			|| !TestEqual(
 				TEXT("the preview binds the live node fingerprint"),
 				Preview->GetStringField(TEXT("nodesFingerprint")),

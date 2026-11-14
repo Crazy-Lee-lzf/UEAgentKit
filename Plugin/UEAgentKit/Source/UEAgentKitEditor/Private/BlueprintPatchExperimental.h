@@ -22,9 +22,9 @@ class UEdGraph;
  *   slice 2  createVariable  -- migrated (0-3.4 slice 9)
  *   slice 3  createNode      -- migrated (0-3.4 slice 10)
  *   slice 4  connect         -- migrated (0-3.4 slice 11)
- *   slice 5  disconnect      -- NOT migrated yet
- *   slice 6  rewirePin
- *   slice 7  removeNode
+ *   slice 5  disconnect      -- migrated (0-3.4 slice 12)
+ *   slice 6  rewirePin       -- migrated (0-3.4 slice 12)
+ *   slice 7  removeNode      -- NOT migrated yet
  *
  * Four state hashes are reported side by side, each owned by the writer that
  * already defines it: `stateFingerprint` (pin defaults and per-pin link counts),
@@ -67,7 +67,22 @@ class UEdGraph;
  * at most 60 KiB request payload at the MCP boundary, one target graph and one
  * loaded package per patch.  `createVariable` keeps the single writer's own bound
  * of at most 8 variables per patch, `createNode` the writer's 16-node bound, and
- * `connect` the writer's 8-connection per-node fan-out bound.
+ * `connect`/`disconnect`/`rewirePin` the writer's 8-connection per-node fan-out
+ * bound and 24-edge per-patch bound.
+ *
+ * `disconnect` and `rewirePin` (0-3.4 slice 12) are the two kinds that CHANGE an
+ * existing edge instead of adding one.  `disconnect` carries exactly the
+ * `connect` fields but requires the named edge to already be the only link on
+ * its target input, so its endpoints must be existing nodes -- a node this patch
+ * creates has no edge to remove.  `rewirePin` carries the rewire writer's own
+ * nine fields (target / oldSource / newSource node GUID + pin name + pin GUID)
+ * and moves exactly one input from its current source to a new one.  Both go
+ * through the owning writer's atomic seam, so the old-edge proof, the pin
+ * resolution, the schema response judgement and the undo/rollback come from the
+ * same code the single-writer tools use.  Both also rely on `edgesFingerprint`:
+ * a disconnect leaves the per-pin link COUNTS of every other pin untouched and a
+ * rewire leaves the total count unchanged, so the pin-default hash alone could
+ * not prove either one.
  *
  * The project must opt in with:
  *

@@ -1184,7 +1184,7 @@ bool FUEAgentKitPatchVariableTest::RunTest(const FString& Parameters)
 		Preview->GetStringField(TEXT("variablesFingerprint"));
 	const FString RequiredConfirmation = Preview->GetStringField(TEXT("requiredConfirmation"));
 	const TArray<TSharedPtr<FJsonValue>> MigratedKinds = Preview->GetArrayField(TEXT("migratedKinds"));
-	if (!TestEqual(TEXT("every migrated kind is advertised"), MigratedKinds.Num(), 4)
+	if (!TestEqual(TEXT("every migrated kind is advertised"), MigratedKinds.Num(), 6)
 		|| !TestEqual(
 			TEXT("first migrated kind is setPinDefault"),
 			MigratedKinds[0]->AsString(),
@@ -1200,7 +1200,15 @@ bool FUEAgentKitPatchVariableTest::RunTest(const FString& Parameters)
 		|| !TestEqual(
 			TEXT("fourth migrated kind is connect"),
 			MigratedKinds[3]->AsString(),
-			FString(TEXT("connect"))))
+			FString(TEXT("connect")))
+		|| !TestEqual(
+			TEXT("fifth migrated kind is disconnect"),
+			MigratedKinds[4]->AsString(),
+			FString(TEXT("disconnect")))
+		|| !TestEqual(
+			TEXT("sixth migrated kind is rewirePin"),
+			MigratedKinds[5]->AsString(),
+			FString(TEXT("rewirePin"))))
 	{
 		return Fail();
 	}
@@ -1326,11 +1334,10 @@ bool FUEAgentKitPatchVariableTest::RunTest(const FString& Parameters)
 			TEXT("blueprint-variable-duplicate-name")
 		});
 		Refusals.Add({ TEXT("a ninth variable is refused"), TooMany, TEXT("graph-patch-create-variable-limit") });
-		// `connect` also became a migrated kind in 0-3.4 slice 11, so only the three
-		// kinds that are still designed-but-unmigrated are asserted here; the
-		// createNode/connect contracts have their own automation tests
-		// (UEAgentKit.AtomicPatch.{CreateNode,Connect}).
-		for (const TCHAR* Kind : { TEXT("disconnect"), TEXT("rewirePin"), TEXT("removeNode") })
+		// Only `removeNode` is still designed-but-unmigrated; connect (slice 11) and
+		// disconnect/rewirePin (slice 12) have their own automation tests
+		// (UEAgentKit.AtomicPatch.{Connect,EdgeOps}).
+		for (const TCHAR* Kind : { TEXT("removeNode") })
 		{
 			TSharedPtr<FJsonObject> Unmigrated = UEAgentKitPatchExpansion::MakeOperation(
 				TEXT("p1"),
