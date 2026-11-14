@@ -361,7 +361,7 @@ patch 在事务打开**之前**就把每条 op 对着实时图校验完了，因
 | writer | 状态 |
 |---|---|
 | pin 默认值 | 已迁移（单 writer 与 patch 共用写入函数） |
-| 变量创建 | 未迁移，保留原确认契约；patch 收到该 kind 直接拒绝 |
+| 变量创建 | 已在切片 9 迁移（见下节） |
 | graph edit（建节点/连线） | 未迁移 |
 | rewire | 未迁移 |
 | node remove | 未迁移 |
@@ -374,3 +374,135 @@ patch 在事务打开**之前**就把每条 op 对着实时图校验完了，因
   前置条件，不能在共享事务里第二次调用）。
 - 后续 kind 一旦会改节点/连线，Undo/Redo 与读回必须按 kind 分派；当前读回与
   Undo/Redo 校验只实现了 pin 默认值的分支。
+
+## 切片 9 — 跨 writer 原子事务：变量创建已迁移（2026-11-14）
+
+0-3.4 的第二个切片。把 `createVariable` 作为第二个 kind 迁进**已有的** patch 契约，
+与 `setPinDefault` 共用同一个 `FScopedTransaction`、同一套逐条结果与整体回滚；没有新建
+第二套 patch 契约，也没有改动五个 writer 各自的 Preview/Apply/Save 语义。
+
+### 先定的契约问题：变量是资产级的，patch 却要求 graphGuid
+
+**决定：请求形状不变**（`assetPath` + `graphGuid` + `operations[]`）。变量 op 的解析与
+写入**只对 Blueprint 生效**，`graphGuid` 在这条路径上只是“这个包/这个 Blueprint”的身份与
+授权锚点，不是作用域约束：
+
+- `ResolveExactTarget(assetPath, graphGuid)` 本来就同时解析出 Blueprint 与 Graph，并证明
+  该图属于该 Blueprint；变量路径只用其中的 Blueprint，不用图。
+- 仍然要求 focused editor 显示的正是请求里的 assetPath/graphGuid（同一套 preflight），
+  所以“变量 op 与图无关”不等于可以脱离编辑器上下文；PIE/clean-package/可编辑等前置
+  条件一条都没有放宽。
+- 因此一个纯 `createVariable` patch 仍然只能落在一个包上，`graphGuid` 是**身份**
+  （provenance/authorization）而不是作用域。
+
+为什么不改成“资产级 patch（去掉 graphGuid）”：那会引入第二套请求契约与第二套授权
+（现有授权检查建立在“用户在看的正是这张图”之上），与本切片“不新建第二套契约”的要求
+直接冲突。代价是一个纯变量 patch 也必须先聚焦该 Blueprint 的某个图——这个代价在切片 8
+的 preflight 里已经付过了。
+
+### 契约增量
+
+| 项 | 内容 |
+|---|---|
+| 已迁移 kind | `setPinDefault` + `createVariable` |
+| createVariable 字段 | `opId`/`kind` 之外只接受 `name`/`type`/`defaultValue`；出现别的字段 → `graph-patch-unknown-parameter`（沿用 setPinDefault 的做法） |
+| 校验 | 与变量 writer **同一套**：标识符规则、bool/int/double/string 白名单、默认值规范化 |
+| 数量上限 | 一个 patch 最多 8 条 `createVariable`（变量 writer 的同一上限），超出 → `graph-patch-create-variable-limit`；总 op 上限仍是 16 |
+| patch 内重名 | 按 FName 语义（忽略大小写）判重 → `graph-patch-duplicate-target` |
+| 与已有变量重名 | 含父类变量 → `blueprint-variable-duplicate-name`（沿用 writer 的码） |
+| 解析 | **事务外**只对 Blueprint 解析：名字合法性 + 类型白名单 + 默认值 + 重名，并记录 `existedBefore=false` |
+| 写入 | **事务内**只写已解析结果，走 `TryApplyAtomicVariableOperations`；字段与变量 writer 逐字段一致（VarGuid/FriendlyName/PropertyFlags/Category/MultiLine/DefaultValue） |
+| 回滚 | 逆序删除已创建的变量 → 恢复 `Status`/`bCachedDependenciesUpToDate`/package Dirty → `Transaction.Cancel()`；随后比较 blueprint 级指纹是否回到 before |
+| 指纹 | `stateFingerprint` 仍是**图级** pin 默认值指纹（含义不变，切片 8 的等价关系因此仍然成立）；新增 blueprint 级 `variablesFingerprint`（before/after），与变量 writer 的 `variablesFingerprint` 是**同一个函数** |
+| 读回 | 每条 op 用所属 writer 的读回函数；Undo/Redo 后同时校验图级与 blueprint 级指纹 |
+| 包前置条件 | 含 `createVariable` 的 patch 额外要求 packageRevision 是 sha256（与未迁移路径一致：资产必须先落盘） |
+
+### 为什么这不是放宽安全边界
+
+- 变量写入走变量 writer 自己抽出的写入函数（`TryApplyAtomicVariableOperations`），单 writer
+  与 patch 共用同一份字段构造与同一份读回，不存在两份实现；
+- 变量数量上限沿用 writer 的 8，没有因为“一个 patch 能装 16 条 op”而被放大；
+- 仍然只接受 exact focused graph、clean package、可编辑 K2 图、PIE 停止、`CanTransact`
+  且无活动事务；仍然不保存、不编译；
+- 未新增任何通用 Graph CRUD，也没有让 patch 接受 `createVariable` 之外的变量操作
+  （改名/删除/改类型仍然没有入口）。
+
+### 仍是单 writer 路径的
+
+| writer | 状态 |
+|---|---|
+| pin 默认值 | 已迁移（切片 8） |
+| 变量创建 | 已迁移（本切片） |
+| graph edit（建节点/连线） | 未迁移 |
+| rewire | 未迁移 |
+| node remove | 未迁移 |
+
+### 已知限制（含一条必须知道的指纹性质）
+
+- 一次 patch 只能落在一个包上；变量 op 仍然要求 focused editor 正看着该 Blueprint 的某张图。
+- 一个 patch 最多 8 条 `createVariable`（变量 writer 的同一上限），总 op 上限仍是 16。
+- **`variablesFingerprint` 不是“磁盘资产的身份”**：它把 `FBPVariableDescription.DefaultValue`
+  也哈希进去，而引擎在存盘往返时会把 double 默认值规范化（请求 `2.5`，重新加载后读回
+  `2.500000`）。所以它同一次会话内稳定（patch 与单 writer 逐字段相等，见证据），但
+  **跨 save/reload 会变**。这不影响任何契约：planId 与确认短语都在一次会话内，Save 还额外
+  绑定 `packageRevision`（= 磁盘 SHA），reload 之后必须重新 preview。该性质来自 writer 既有的
+  同一个指纹函数，不是本切片引入的。
+- 变量创建仍然不编译：`requiresExplicitCompile` 由变量 writer 自身报告，patch 结果不与
+  “已编译”混为一谈（patch 的 `compiled=false`）。
+
+### 真实 Editor 证据（2026-11-14）
+
+环境：一次性 Host `N1_BlueprintNative_20261031`，插件 `0.9.0.dev1`，UE 5.6.1；临时开启
+`[UEAgentKit] ExperimentalGraphPatchEdit=True`（验收后已还原成 515 字节原文件并删除备份）。
+
+**A. 自动化测试（隔离 `UnrealEditor-Cmd`，`-unattended -NullRHI`，`index.json`：succeeded=2 /
+failed=0，exit 0）**
+
+| 检查 | 结果 |
+|---|---|
+| `UEAgentKit.AtomicPatch.Expansion`（切片 8 的 pin 路径） | Success（迁移没有回归） |
+| `UEAgentKit.AtomicPatch.CreateVariable` | Success |
+| 未 opt-in 时 gate-off | `graph-patch-experimental-disabled` |
+| preview 与变量 writer 逐字段一致 | `variablesFingerprint` / `graphFingerprint` / `packageRevision` / `variableCount` 全等；op 报 name/type/defaultValue 与 `existedBefore=false`，且不预造 guid |
+| 拒绝项（任何写入前） | 外来字段 `graph-patch-unknown-parameter`；patch 内重名 `graph-patch-duplicate-target`；父类已有属性 `blueprint-variable-duplicate-name`；第 9 个变量 `graph-patch-create-variable-limit`；`createNode`/`connect`/`rewirePin`/`removeNode` 全部 `graph-patch-kind-not-migrated` |
+| 拒绝后没有留下东西 | 变量数、bool pin、package Dirty、磁盘资产 SHA 全部未变 |
+| **注入第 2 条失败 → 整体回滚** | `writeOccurred=false`、`transactionOpened=true`、`rolledBack=true`；`results` 三条齐全（`applied`+`rolledBack=true` / `failed`+`graph-patch-apply-fault-injected` / `notAttempted`） |
+| 回滚后没有留下东西 | 第 1 条创建的变量**已删除**、另两条从未创建、变量数回到原值、package `IsDirty()=false`、`variablesFingerprint` 回到 preview 前值、**磁盘资产 SHA 未变**、同一 plan 再次 preview 得到同一 planId |
+| 混合 kind | `[setPinDefault, createVariable]` 两条都 `applied`；bool pin 变成 `true`、double 变量默认 `1.5`；node/link 计数不变；`undoVerified=true` / `redoVerified=true`；`saved=false` |
+| Save 后的跨模块校验 | 保存后单变量 writer 的 preview 报出的 `variablesFingerprint` == patch 的 `variablesFingerprintAfter`，其 `variableCountBefore` == 2 |
+| 显式 Save | `saved=true`、`packageDirty=false`、`assetSha256` == 磁盘 SHA；这是本次唯一一次磁盘写入 |
+
+第一次运行该自动化测试时有 1 条失败，原因是测试自己**在 Save 之后又 preview 了同一个变量名**，
+被 `blueprint-variable-duplicate-name` 正确地拒绝——这反而说明该断言有效；改成 preview 一个新
+变量名后第二次运行全绿（本表引用的就是第二次）。
+
+**B. MCP 侧真实调用（同一个 Host，真实 GUI Editor + `--enable-experimental-graphpatch-edit` 双门禁）**
+
+| 检查 | 结果 |
+|---|---|
+| `ue_focus_blueprint_graph` + preflight | `graphGuid=01f99ee3…`、`packageRevision=sha256:81f5763a…`、`packageDirty=false`、`editable=true`、PIE stopped |
+| preview（1 条 `createVariable` int 7） | `planId=sha256:62588480…`、`variablesFingerprint=sha256:e58a09c3…`、`variableCount=1`、`migratedKinds=[setPinDefault, createVariable]`，op 为 `validated` |
+| 与已有变量重名 | `blueprint-variable-duplicate-name`，`error.details.results` 里一条 `failed` |
+| 未迁移 kind | `graph-patch-kind-not-migrated`（客户端拒绝，编辑器没有收到请求） |
+| 9 条 `createVariable` | `graph-patch-create-variable-limit` |
+| apply | `applied=true`、`transactionCount=1`、`undoVerified/redoVerified=true`、`saved=false`；`variableCount` 1→2；新变量 `guid=8624c137…`；`variablesFingerprintAfter=sha256:1425ea22…`；**磁盘 SHA 未变**（Save 前的 `fileSizeBefore=18974`，preflight revision 仍是 `81f5763a…`） |
+| apply 之后再 preview | `graph-patch-package-dirty` |
+| 显式 save | `saved=true`、`packageDirty=false`、`assetSha256=sha256:d8cbeaf9…` == 磁盘 SHA，`fileSize` 18974→20007，`variablesFingerprint` 仍是 `1425ea22…` |
+| 关闭 Editor（终止进程，不触碰任何保存弹窗） | 前后磁盘 SHA 都是 `d8cbeaf9…`；0 个 UE 进程 |
+| 独立 reload（重启 Editor 后的新会话） | `packageRevision=d8cbeaf9…` == 磁盘 SHA；`variableCount=2`；`LiveCounter` 读回 `guid=8624c137…`、`type=int`、`default=7`、`flags=0x10005`；图级 `stateFingerprint` 仍是 `ccd556b4…`（变量不影响图级指纹） |
+| double 探针（印证上面那条指纹性质） | 请求 `2.5` → 存盘往返后 context 读回 `2.500000`，`variablesFingerprint` 由 `02c4904e…` 变成 `d0735ab5…` |
+
+**C. 磁盘与收尾**
+
+- 两个一次性 fixture 包（`BP_PatchExpansion` / `BP_PatchVariables`）在验收后删除；除显式 Save 外
+  没有资产 SHA 变化（每次 kill 前后都取了 SHA）。
+- 收尾：0 个 UE 进程；`DefaultEngine.ini` 已还原（515 字节，无 `[UEAgentKit]` 段），备份已删除。
+
+### 只被单测覆盖的
+
+- Python 契约层：`createVariable` 的字段校验、与变量 writer 共享的规范化、patch 内重名、8 条上限、
+  preview/apply 结果里 variable 条目与 `variablesFingerprint` 的校验。
+- `graph-patch-create-variable-limit` 与“patch 内变量重名”的 native 分支由上面的自动化测试覆盖；
+  MCP 侧只经真实调用观察，没有单独单测。
+- `mcp_server._error_response` 的 `PatchError` 分支有单测，同时也在上面的真实调用里出现过
+  （`graph-patch-kind-not-migrated`、`graph-patch-create-variable-limit`）。

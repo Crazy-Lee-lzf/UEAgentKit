@@ -23,7 +23,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogUEAgentKitBlueprintVariableExperimental, Log, All)
 
 namespace
 {
-	constexpr int32 MaxVariables = 8;
+	constexpr int32 MaxVariables = UEAgentKitBlueprintVariableExperimental::MaxVariablesPerApply;
 	constexpr int32 MaxVariableName = 64;
 	constexpr int32 MaxStringDefault = 1024;
 	const TCHAR* const PreviewSchemaVersion = TEXT("ueak.blueprint-variable-preview/1.0");
@@ -986,6 +986,36 @@ namespace
 			&& Left.PropertyFlags == Right.PropertyFlags
 			&& DescribePinType(Left.VarType) == DescribePinType(Right.VarType);
 	}
+
+	/**
+	 * Build the exact FBPVariableDescription one resolved operation produces.
+	 *
+	 * 0-3.4: single-writer Apply and the atomic patch both call this, so the two
+	 * paths cannot disagree about FriendlyName, PropertyFlags, Category or the
+	 * string MultiLine metadata.
+	 */
+	FBPVariableDescription MakeVariableDescription(
+		const UEAgentKitBlueprintVariableExperimental::FAtomicVariableOperation& Operation)
+	{
+		FBPVariableDescription Variable;
+		Variable.VarName = FName(*Operation.Name);
+		Variable.VarGuid = FGuid::NewGuid();
+		FEdGraphPinType PinType;
+		MakePinType(Operation.Type, PinType);
+		Variable.VarType = PinType;
+		Variable.FriendlyName = FName::NameToDisplayString(
+			Operation.Name,
+			IsTypeToken(Operation.Type, TEXT("bool")));
+		Variable.PropertyFlags = CPF_Edit | CPF_BlueprintVisible | CPF_DisableEditOnInstance;
+		Variable.ReplicationCondition = COND_None;
+		Variable.Category = UEdGraphSchema_K2::VR_DefaultCategory;
+		Variable.DefaultValue = Operation.DefaultValue;
+		if (IsTypeToken(Operation.Type, TEXT("string")))
+		{
+			Variable.SetMetaData(TEXT("MultiLine"), TEXT("true"));
+		}
+		return Variable;
+	}
 }
 
 bool UEAgentKitBlueprintVariableExperimental::IsExperimentalWriteAvailable()
@@ -1017,6 +1047,281 @@ void UEAgentKitBlueprintVariableExperimental::ResetExperimentalWriteForTest()
 {
 	bTestOverrideSet = false;
 	bTestOverrideEnabled = false;
+}
+
+bool UEAgentKitBlueprintVariableExperimental::TryResolveAtomicVariableOperation(
+	UBlueprint* Blueprint,
+	FAtomicVariableOperation& InOutOperation,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	if (Blueprint == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("blueprint-variable-asset-not-loaded"),
+			TEXT("The exact Blueprint must be loaded before a variable can be resolved."));
+	}
+	if (!IsCanonicalVariableName(InOutOperation.Name))
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("blueprint-variable-name-invalid"),
+			FString::Printf(
+				TEXT("name must be 1-%d ASCII letters, digits or '_' and start with a letter or '_'."),
+				MaxVariableName));
+	}
+	FEdGraphPinType PinType;
+	if (!MakePinType(InOutOperation.Type, PinType))
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("blueprint-variable-type-not-allowed"),
+			TEXT("Supported variable types: bool, int, double, string."));
+	}
+	if (!CanonicalizeDefaultValue(
+			InOutOperation.Type,
+			InOutOperation.DefaultValue,
+			OutErrorCode,
+			OutErrorMessage))
+	{
+		return false;
+	}
+	// Same duplicate rule as the single writer's BuildPlan: own variables, class
+	// variables, parent Blueprint variables and parent-class properties.
+	TSet<FName> ExistingNames;
+	CollectExistingVariableNames(Blueprint, ExistingNames);
+	const FName NameValue(*InOutOperation.Name);
+	InOutOperation.bExistedBefore =
+		ExistingNames.Contains(NameValue) || FindVariableIndex(Blueprint, NameValue) != INDEX_NONE;
+	if (InOutOperation.bExistedBefore)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("blueprint-variable-duplicate-name"),
+			FString::Printf(
+				TEXT("The Blueprint already declares a variable named %s (including parent classes)."),
+				*InOutOperation.Name));
+	}
+	return true;
+}
+
+bool UEAgentKitBlueprintVariableExperimental::TryApplyAtomicVariableOperations(
+	UBlueprint* Blueprint,
+	const TArray<FAtomicVariableOperation>& Operations,
+	TArray<FGuid>& OutCreatedGuids,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	OutCreatedGuids.Reset();
+	if (Blueprint == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("blueprint-variable-asset-not-loaded"),
+			TEXT("The exact Blueprint must be loaded before a variable can be created."));
+	}
+	TArray<FName> AddedNames;
+	auto RestoreApplied = [Blueprint, &AddedNames, &OutCreatedGuids]()
+	{
+		for (int32 Index = Blueprint->NewVariables.Num() - 1; Index >= 0; --Index)
+		{
+			if (AddedNames.Contains(Blueprint->NewVariables[Index].VarName))
+			{
+				Blueprint->NewVariables.RemoveAt(Index);
+			}
+		}
+		AddedNames.Reset();
+		// The seam restored everything it wrote itself, so the caller was left
+		// with nothing applied.
+		OutCreatedGuids.Reset();
+	};
+
+	for (const FAtomicVariableOperation& Operation : Operations)
+	{
+		const FName NameValue(*Operation.Name);
+		if (FindVariableIndex(Blueprint, NameValue) != INDEX_NONE)
+		{
+			RestoreApplied();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("blueprint-variable-duplicate-name"),
+				FString::Printf(
+					TEXT("The Blueprint already declares a variable named %s."),
+					*Operation.Name));
+		}
+		FEdGraphPinType PinType;
+		if (!MakePinType(Operation.Type, PinType))
+		{
+			RestoreApplied();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("blueprint-variable-type-not-allowed"),
+				TEXT("Supported variable types: bool, int, double, string."));
+		}
+		const FBPVariableDescription Variable = MakeVariableDescription(Operation);
+		Blueprint->NewVariables.Add(Variable);
+		AddedNames.Add(NameValue);
+		const FBPVariableDescription& Added = Blueprint->NewVariables.Last();
+		if (Added.VarName != NameValue
+			|| Added.VarGuid != Variable.VarGuid
+			|| !MatchesDeclaredType(Added.VarType, Operation.Type)
+			|| !Added.DefaultValue.Equals(Operation.DefaultValue, ESearchCase::CaseSensitive))
+		{
+			RestoreApplied();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("blueprint-variable-apply-rejected"),
+				FString::Printf(
+					TEXT("The Blueprint did not store the requested variable %s."),
+					*Operation.Name));
+		}
+		OutCreatedGuids.Add(Variable.VarGuid);
+	}
+	FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+	return true;
+}
+
+bool UEAgentKitBlueprintVariableExperimental::TryCheckAtomicVariableOperations(
+	UBlueprint* Blueprint,
+	const TArray<FAtomicVariableOperation>& Operations,
+	bool bExpectAfter,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	if (Blueprint == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("blueprint-variable-asset-not-loaded"),
+			TEXT("The exact Blueprint must be loaded before a variable can be read back."));
+	}
+	for (const FAtomicVariableOperation& Operation : Operations)
+	{
+		const int32 Index = FindVariableIndex(Blueprint, FName(*Operation.Name));
+		if (!bExpectAfter)
+		{
+			if (Operation.bExistedBefore)
+			{
+				// The variable belongs to the Blueprint and predates this operation;
+				// nothing about it is this layer's to check.
+				continue;
+			}
+			if (Index != INDEX_NONE)
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("blueprint-variable-readback-failed"),
+					FString::Printf(
+						TEXT("Variable %s still exists, but it did not exist before."),
+						*Operation.Name));
+			}
+			continue;
+		}
+		if (Index == INDEX_NONE)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("blueprint-variable-readback-failed"),
+				FString::Printf(
+					TEXT("Variable %s does not exist after the write."),
+					*Operation.Name));
+		}
+		const FBPVariableDescription& Variable = Blueprint->NewVariables[Index];
+		if (!MatchesDeclaredType(Variable.VarType, Operation.Type))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("blueprint-variable-readback-failed"),
+				FString::Printf(
+					TEXT("Variable %s reads back as %s; expected %s."),
+					*Operation.Name,
+					*DescribePinType(Variable.VarType),
+					*Operation.Type));
+		}
+		if (!Variable.DefaultValue.Equals(Operation.DefaultValue, ESearchCase::CaseSensitive))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("blueprint-variable-readback-failed"),
+				FString::Printf(
+					TEXT("Variable %s reads back with default '%s'; expected '%s'."),
+					*Operation.Name,
+					*Variable.DefaultValue,
+					*Operation.DefaultValue));
+		}
+		if (IsTypeToken(Operation.Type, TEXT("string"))
+			&& Variable.FindMetaDataEntryIndexForKey(TEXT("MultiLine")) == INDEX_NONE)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("blueprint-variable-readback-failed"),
+				FString::Printf(
+					TEXT("String variable %s lost its MultiLine metadata."),
+					*Operation.Name));
+		}
+	}
+	return true;
+}
+
+bool UEAgentKitBlueprintVariableExperimental::TryRestoreAtomicVariableOperations(
+	UBlueprint* Blueprint,
+	const TArray<FAtomicVariableOperation>& Operations,
+	int32 AppliedCount,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	const int32 Count = FMath::Clamp(AppliedCount, 0, Operations.Num());
+	if (Blueprint == nullptr || Count == 0)
+	{
+		return true;
+	}
+	for (int32 Index = Count - 1; Index >= 0; --Index)
+	{
+		const FAtomicVariableOperation& Operation = Operations[Index];
+		if (Operation.bExistedBefore)
+		{
+			// Never delete a variable this operation did not create.
+			continue;
+		}
+		const FName NameValue(*Operation.Name);
+		const int32 VariableIndex = FindVariableIndex(Blueprint, NameValue);
+		if (VariableIndex == INDEX_NONE)
+		{
+			// Already gone: there is nothing left to delete for this operation.
+			continue;
+		}
+		Blueprint->NewVariables.RemoveAt(VariableIndex);
+		if (FindVariableIndex(Blueprint, NameValue) != INDEX_NONE)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("blueprint-variable-restore-failed"),
+				FString::Printf(TEXT("Variable %s could not be removed."), *Operation.Name));
+		}
+	}
+	return true;
+}
+
+FString UEAgentKitBlueprintVariableExperimental::ComputeAtomicVariableStateFingerprint(
+	UBlueprint* Blueprint)
+{
+	return ComputeVariablesFingerprint(Blueprint);
 }
 
 bool UEAgentKitBlueprintVariableExperimental::TryPreviewExperimental(
@@ -1196,60 +1501,38 @@ bool UEAgentKitBlueprintVariableExperimental::TryApplyExperimental(
 	const FString FingerprintBefore = ComputeVariablesFingerprint(Blueprint);
 	const int32 NodeCountBefore = Graph->Nodes.Num();
 	const int32 LinkCountBefore = CountLinks(Graph);
-	TArray<FGuid> CreatedGuids;
-	CreatedGuids.Reserve(Plan.Targets.Num());
 
+	TArray<FAtomicVariableOperation> Operations;
+	Operations.Reserve(Plan.Targets.Num());
+	for (const FVariableTarget& Target : Plan.Targets)
+	{
+		FAtomicVariableOperation Operation;
+		Operation.Name = Target.Name;
+		Operation.Type = Target.Type;
+		Operation.DefaultValue = Target.DefaultValue;
+		Operation.bExistedBefore = false;
+		Operations.Add(MoveTemp(Operation));
+	}
+
+	TArray<FGuid> CreatedGuids;
 	{
 		FScopedTransaction Transaction(
 			FText::FromString(TEXT("UEAgentKit Create Blueprint Variables")));
 		Blueprint->Modify();
-		TArray<FName> AddedNames;
-		auto Rollback = [Blueprint, &AddedNames]()
+		// 0-3.4: the write loop lives in TryApplyAtomicVariableOperations, so the
+		// cross-writer atomic patch and this single writer share one implementation
+		// of the duplicate check, the FBPVariableDescription build and the inline
+		// read-back.
+		if (!TryApplyAtomicVariableOperations(
+				Blueprint,
+				Operations,
+				CreatedGuids,
+				OutErrorCode,
+				OutErrorMessage))
 		{
-			for (int32 Index = Blueprint->NewVariables.Num() - 1; Index >= 0; --Index)
-			{
-				if (AddedNames.Contains(Blueprint->NewVariables[Index].VarName))
-				{
-					Blueprint->NewVariables.RemoveAt(Index);
-				}
-			}
-			AddedNames.Reset();
-		};
-
-		for (const FVariableTarget& Target : Plan.Targets)
-		{
-			if (FindVariableIndex(Blueprint, Target.NameValue) != INDEX_NONE)
-			{
-				Rollback();
-				Transaction.Cancel();
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("blueprint-variable-duplicate-name"),
-					FString::Printf(
-						TEXT("The Blueprint already declares a variable named %s."),
-						*Target.Name));
-			}
-			FBPVariableDescription Variable;
-			Variable.VarName = Target.NameValue;
-			Variable.VarGuid = FGuid::NewGuid();
-			Variable.VarType = Target.PinType;
-			Variable.FriendlyName = FName::NameToDisplayString(
-				Target.Name,
-				IsTypeToken(Target.Type, TEXT("bool")));
-			Variable.PropertyFlags = CPF_Edit | CPF_BlueprintVisible | CPF_DisableEditOnInstance;
-			Variable.ReplicationCondition = COND_None;
-			Variable.Category = UEdGraphSchema_K2::VR_DefaultCategory;
-			Variable.DefaultValue = Target.DefaultValue;
-			if (IsTypeToken(Target.Type, TEXT("string")))
-			{
-				Variable.SetMetaData(TEXT("MultiLine"), TEXT("true"));
-			}
-			Blueprint->NewVariables.Add(Variable);
-			AddedNames.Add(Target.NameValue);
-			CreatedGuids.Add(Variable.VarGuid);
+			Transaction.Cancel();
+			return false;
 		}
-		FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
 	}
 
 	const FString FingerprintAfter = ComputeVariablesFingerprint(Blueprint);

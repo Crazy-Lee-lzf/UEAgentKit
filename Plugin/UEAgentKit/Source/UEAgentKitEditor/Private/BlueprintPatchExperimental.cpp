@@ -3,6 +3,7 @@
 #include "BlueprintContextSha256.h"
 #include "BlueprintGraphLayoutApply.h"
 #include "BlueprintPinDefaultEditExperimental.h"
+#include "BlueprintVariableWriteExperimental.h"
 
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -30,6 +31,9 @@ namespace
 	const TCHAR* const PreviewSchemaVersion = TEXT("ueak.blueprint-patch-preview/1.0");
 	const TCHAR* const ApplySchemaVersion = TEXT("ueak.blueprint-patch-apply/1.0");
 	const TCHAR* const KindSetPinDefault = TEXT("setPinDefault");
+	const TCHAR* const KindCreateVariable = TEXT("createVariable");
+	/** Exhaustive list of migrated kinds, in the order they were migrated. */
+	const TCHAR* const MigratedKindList = TEXT("setPinDefault, createVariable");
 	const TCHAR* const StatusValidated = TEXT("validated");
 	const TCHAR* const StatusApplied = TEXT("applied");
 	const TCHAR* const StatusFailed = TEXT("failed");
@@ -41,12 +45,15 @@ namespace
 	 * caller cannot mistake a typo for a future feature.
 	 */
 	const TCHAR* const ReservedKinds[] = {
-		TEXT("createVariable"),
 		TEXT("createNode"),
 		TEXT("connect"),
 		TEXT("rewirePin"),
 		TEXT("removeNode"),
 	};
+
+	/** One patch may not outgrow the single variable writer's own Apply bound. */
+	constexpr int32 MaxCreateVariableOperations =
+		UEAgentKitBlueprintVariableExperimental::MaxVariablesPerApply;
 
 	bool bTestOverrideSet = false;
 	bool bTestOverrideEnabled = false;
@@ -60,8 +67,9 @@ namespace
 	{
 		FString OpId;
 		FString Kind;
-		/** Kind-specific resolved operation; only set for migrated kinds. */
+		/** Kind-specific resolved operation; only one of them is ever set. */
 		UEAgentKitBlueprintPinDefaultExperimental::FAtomicOperation PinDefault;
+		UEAgentKitBlueprintVariableExperimental::FAtomicVariableOperation Variable;
 		/** opId/kind/resolved fields; reused verbatim for the results array. */
 		TSharedPtr<FJsonObject> Detail;
 	};
@@ -72,12 +80,18 @@ namespace
 		FString GraphGuid;
 		FString PackageRevision;
 		FString GraphFingerprint;
+		/** Graph-level (pin default) state, the slice 8 fingerprint. */
 		FString StateFingerprintBefore;
 		FString StateFingerprintAfter;
+		/** Blueprint-level variable state, the variable writer's own fingerprint. */
+		FString VariablesFingerprintBefore;
+		FString VariablesFingerprintAfter;
 		FString PlanId;
 		TArray<FPatchOperation> Operations;
 		int32 NodeCountBefore = 0;
 		int32 LinkCountBefore = 0;
+		int32 VariableCountBefore = 0;
+		int32 VariableCountAfter = 0;
 		/** First operation that failed during the build, or INDEX_NONE. */
 		int32 FailedIndex = INDEX_NONE;
 	};
@@ -88,8 +102,10 @@ namespace
 		FString GraphGuid;
 		FString GraphFingerprint;
 		FString StateFingerprint;
+		FString VariablesFingerprint;
 		int32 NodeCount = 0;
 		int32 LinkCount = 0;
+		int32 VariableCount = 0;
 		int32 OperationCount = 0;
 	};
 
@@ -231,7 +247,8 @@ namespace
 
 	bool IsMigratedKind(const FString& Kind)
 	{
-		return Kind.Equals(KindSetPinDefault, ESearchCase::CaseSensitive);
+		return Kind.Equals(KindSetPinDefault, ESearchCase::CaseSensitive)
+			|| Kind.Equals(KindCreateVariable, ESearchCase::CaseSensitive);
 	}
 
 	bool IsReservedKind(const FString& Kind)
@@ -357,6 +374,8 @@ namespace
 
 		TSet<FString> SeenOpIds;
 		TSet<FString> SeenTargets;
+		TSet<FString> SeenVariableNames;
+		int32 VariableOperationCount = 0;
 		for (int32 Index = 0; Index < Values->Num(); ++Index)
 		{
 			OutOperations.Add(FPatchOperation());
@@ -435,7 +454,7 @@ namespace
 						FString::Printf(
 							TEXT("Operation kind '%s' is designed but not migrated to the atomic patch yet; this build accepts: %s."),
 							*Operation.Kind,
-							KindSetPinDefault));
+							MigratedKindList));
 				}
 				return Fail(
 					OutErrorCode,
@@ -446,85 +465,162 @@ namespace
 						*Operation.Kind));
 			}
 
-			// setPinDefault carries exactly the pin-default fields; anything else
-			// is a typo that must not be silently ignored.
-			if (!RejectUnknownParams(
-				*Object,
+			if (Operation.Kind.Equals(KindSetPinDefault, ESearchCase::CaseSensitive))
+			{
+				// setPinDefault carries exactly the pin-default fields; anything else
+				// is a typo that must not be silently ignored.
+				if (!RejectUnknownParams(
+					*Object,
+					{
+						TEXT("opId"),
+						TEXT("kind"),
+						TEXT("nodeGuid"),
+						TEXT("pinName"),
+						TEXT("pinGuid"),
+						TEXT("type"),
+						TEXT("value"),
+					},
+					OutErrorCode,
+					OutErrorMessage))
 				{
-					TEXT("opId"),
-					TEXT("kind"),
-					TEXT("nodeGuid"),
-					TEXT("pinName"),
-					TEXT("pinGuid"),
-					TEXT("type"),
-					TEXT("value"),
-				},
-				OutErrorCode,
-				OutErrorMessage))
-			{
-				return false;
+					return false;
+				}
+				FString NodeGuid;
+				FString PinName;
+				FString PinGuid;
+				FString Type;
+				FString Value;
+				FGuid NodeGuidValue;
+				FGuid PinGuidValue;
+				if (!ReadString(*Object, TEXT("nodeGuid"), NodeGuid, OutErrorCode, OutErrorMessage)
+					|| !ReadString(*Object, TEXT("pinName"), PinName, OutErrorCode, OutErrorMessage)
+					|| !ReadString(*Object, TEXT("pinGuid"), PinGuid, OutErrorCode, OutErrorMessage)
+					|| !ReadString(*Object, TEXT("type"), Type, OutErrorCode, OutErrorMessage))
+				{
+					return false;
+				}
+				if (!Object->Get()->TryGetStringField(TEXT("value"), Value))
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-patch-invalid-parameters"),
+						TEXT("value must be a string, including an empty string for string defaults."));
+				}
+				if (!IsCanonicalGuid(NodeGuid, NodeGuidValue)
+					|| !IsCanonicalGuid(PinGuid, PinGuidValue))
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-pin-default-invalid-identifier"),
+						TEXT("nodeGuid and pinGuid must be canonical lower-case GUIDs."));
+				}
+				Operation.PinDefault.NodeGuid = NodeGuid;
+				Operation.PinDefault.PinName = PinName;
+				Operation.PinDefault.PinGuid = PinGuid;
+				Operation.PinDefault.Type = Type;
+				Operation.PinDefault.Value = Value;
+				// Two operations writing one pin would make the read-back of the first
+				// one fail by construction, so the ambiguity is refused up front.
+				const FString TargetKey = NodeGuid + TEXT("|") + PinName + TEXT("|") + PinGuid;
+				if (SeenTargets.Contains(TargetKey))
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-patch-duplicate-target"),
+						FString::Printf(TEXT("Duplicate pin default target: %s"), *TargetKey));
+				}
+				SeenTargets.Add(TargetKey);
 			}
-			FString NodeGuid;
-			FString PinName;
-			FString PinGuid;
-			FString Type;
-			FString Value;
-			FGuid NodeGuidValue;
-			FGuid PinGuidValue;
-			if (!ReadString(*Object, TEXT("nodeGuid"), NodeGuid, OutErrorCode, OutErrorMessage)
-				|| !ReadString(*Object, TEXT("pinName"), PinName, OutErrorCode, OutErrorMessage)
-				|| !ReadString(*Object, TEXT("pinGuid"), PinGuid, OutErrorCode, OutErrorMessage)
-				|| !ReadString(*Object, TEXT("type"), Type, OutErrorCode, OutErrorMessage))
+			else if (Operation.Kind.Equals(KindCreateVariable, ESearchCase::CaseSensitive))
 			{
-				return false;
+				// createVariable carries exactly the variable fields: the same three
+				// the single writer accepts, and nothing else.
+				if (!RejectUnknownParams(
+					*Object,
+					{
+						TEXT("opId"),
+						TEXT("kind"),
+						TEXT("name"),
+						TEXT("type"),
+						TEXT("defaultValue"),
+					},
+					OutErrorCode,
+					OutErrorMessage))
+				{
+					return false;
+				}
+				FString Name;
+				FString Type;
+				FString DefaultValue;
+				if (!ReadString(*Object, TEXT("name"), Name, OutErrorCode, OutErrorMessage)
+					|| !ReadString(*Object, TEXT("type"), Type, OutErrorCode, OutErrorMessage)
+					|| !ReadString(
+						*Object,
+						TEXT("defaultValue"),
+						DefaultValue,
+						OutErrorCode,
+						OutErrorMessage,
+						/*bAllowEmpty=*/true))
+				{
+					return false;
+				}
+				// A patch may not create more variables than the single writer may.
+				++VariableOperationCount;
+				if (VariableOperationCount > MaxCreateVariableOperations)
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-patch-create-variable-limit"),
+						FString::Printf(
+							TEXT("A patch may create at most %d variables, the same bound as the single-writer variable tool."),
+							MaxCreateVariableOperations));
+				}
+				Operation.Variable.Name = Name;
+				Operation.Variable.Type = Type;
+				Operation.Variable.DefaultValue = DefaultValue;
+				// FName semantics: variable names are unique case-insensitively, so two
+				// operations that only differ in case would collide at write time.
+				const FString NameKey = Name.ToLower();
+				if (SeenVariableNames.Contains(NameKey))
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-patch-duplicate-target"),
+						FString::Printf(TEXT("Duplicate variable name: %s"), *Name));
+				}
+				SeenVariableNames.Add(NameKey);
 			}
-			if (!Object->Get()->TryGetStringField(TEXT("value"), Value))
+			else
 			{
+				// Unreachable while IsMigratedKind and these branches agree; kept so a
+				// future kind cannot silently fall into the variable field parser.
 				return Fail(
 					OutErrorCode,
 					OutErrorMessage,
-					TEXT("graph-patch-invalid-parameters"),
-					TEXT("value must be a string, including an empty string for string defaults."));
+					TEXT("graph-patch-kind-not-migrated"),
+					FString::Printf(
+						TEXT("Operation kind '%s' has no atomic field parser."),
+						*Operation.Kind));
 			}
-			if (!IsCanonicalGuid(NodeGuid, NodeGuidValue)
-				|| !IsCanonicalGuid(PinGuid, PinGuidValue))
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("graph-pin-default-invalid-identifier"),
-					TEXT("nodeGuid and pinGuid must be canonical lower-case GUIDs."));
-			}
-			Operation.PinDefault.NodeGuid = NodeGuid;
-			Operation.PinDefault.PinName = PinName;
-			Operation.PinDefault.PinGuid = PinGuid;
-			Operation.PinDefault.Type = Type;
-			Operation.PinDefault.Value = Value;
-			// Two operations writing one pin would make the read-back of the first
-			// one fail by construction, so the ambiguity is refused up front.
-			const FString TargetKey = NodeGuid + TEXT("|") + PinName + TEXT("|") + PinGuid;
-			if (SeenTargets.Contains(TargetKey))
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("graph-patch-duplicate-target"),
-					FString::Printf(TEXT("Duplicate pin default target: %s"), *TargetKey));
-			}
-			SeenTargets.Add(TargetKey);
 		}
 		OutFailedIndex = INDEX_NONE;
 		return true;
 	}
 
-	/** Resolve one parsed operation against the live graph.  Read-only. */
+	/** Resolve one parsed operation against the live Blueprint.  Read-only. */
 	bool ResolveOperation(
+		UBlueprint* Blueprint,
 		UEdGraph* Graph,
 		FPatchOperation& Operation,
 		FString& OutErrorCode,
 		FString& OutErrorMessage)
 	{
-		if (IsMigratedKind(Operation.Kind))
+		if (Operation.Kind.Equals(KindSetPinDefault, ESearchCase::CaseSensitive))
 		{
 			if (!UEAgentKitBlueprintPinDefaultExperimental::TryResolveAtomicOperation(
 				Graph,
@@ -542,6 +638,28 @@ namespace
 			Operation.Detail->SetStringField(TEXT("afterValue"), Operation.PinDefault.Value);
 			return true;
 		}
+		if (Operation.Kind.Equals(KindCreateVariable, ESearchCase::CaseSensitive))
+		{
+			// A variable lives on the Blueprint, not in a graph, so this resolution
+			// deliberately receives the Blueprint only.
+			if (!UEAgentKitBlueprintVariableExperimental::TryResolveAtomicVariableOperation(
+				Blueprint,
+				Operation.Variable,
+				OutErrorCode,
+				OutErrorMessage))
+			{
+				return false;
+			}
+			Operation.Detail->SetStringField(TEXT("name"), Operation.Variable.Name);
+			Operation.Detail->SetStringField(TEXT("type"), Operation.Variable.Type);
+			Operation.Detail->SetStringField(
+				TEXT("defaultValue"),
+				Operation.Variable.DefaultValue);
+			Operation.Detail->SetBoolField(
+				TEXT("existedBefore"),
+				Operation.Variable.bExistedBefore);
+			return true;
+		}
 		return Fail(
 			OutErrorCode,
 			OutErrorMessage,
@@ -553,12 +671,13 @@ namespace
 
 	/** Apply one resolved operation inside the caller's transaction. */
 	bool ApplyOperation(
+		UBlueprint* Blueprint,
 		UEdGraph* Graph,
 		FPatchOperation& Operation,
 		FString& OutErrorCode,
 		FString& OutErrorMessage)
 	{
-		if (IsMigratedKind(Operation.Kind))
+		if (Operation.Kind.Equals(KindSetPinDefault, ESearchCase::CaseSensitive))
 		{
 			TArray<UEAgentKitBlueprintPinDefaultExperimental::FAtomicOperation> Single;
 			Single.Add(Operation.PinDefault);
@@ -570,6 +689,28 @@ namespace
 				OutErrorCode,
 				OutErrorMessage);
 		}
+		if (Operation.Kind.Equals(KindCreateVariable, ESearchCase::CaseSensitive))
+		{
+			TArray<UEAgentKitBlueprintVariableExperimental::FAtomicVariableOperation> Single;
+			Single.Add(Operation.Variable);
+			TArray<FGuid> CreatedGuids;
+			if (!UEAgentKitBlueprintVariableExperimental::TryApplyAtomicVariableOperations(
+				Blueprint,
+				Single,
+				CreatedGuids,
+				OutErrorCode,
+				OutErrorMessage))
+			{
+				return false;
+			}
+			if (CreatedGuids.Num() == 1)
+			{
+				Operation.Detail->SetStringField(
+					TEXT("guid"),
+					CreatedGuids[0].ToString(EGuidFormats::DigitsWithHyphensLower));
+			}
+			return true;
+		}
 		return Fail(
 			OutErrorCode,
 			OutErrorMessage,
@@ -579,40 +720,65 @@ namespace
 				*Operation.Kind));
 	}
 
-	/** Read one applied operation back. */
+	/** Read one applied operation back; bExpectAfter selects the expected state. */
 	bool CheckOperation(
+		UBlueprint* Blueprint,
 		UEdGraph* Graph,
 		const FPatchOperation& Operation,
+		bool bExpectAfter,
 		FString& OutErrorCode,
 		FString& OutErrorMessage)
 	{
-		if (IsMigratedKind(Operation.Kind))
+		if (Operation.Kind.Equals(KindSetPinDefault, ESearchCase::CaseSensitive))
 		{
 			TArray<UEAgentKitBlueprintPinDefaultExperimental::FAtomicOperation> Single;
 			Single.Add(Operation.PinDefault);
 			return UEAgentKitBlueprintPinDefaultExperimental::TryCheckAtomicOperations(
 				Graph,
 				Single,
-				/*bExpectAfter=*/true,
+				bExpectAfter,
+				OutErrorCode,
+				OutErrorMessage);
+		}
+		if (Operation.Kind.Equals(KindCreateVariable, ESearchCase::CaseSensitive))
+		{
+			TArray<UEAgentKitBlueprintVariableExperimental::FAtomicVariableOperation> Single;
+			Single.Add(Operation.Variable);
+			return UEAgentKitBlueprintVariableExperimental::TryCheckAtomicVariableOperations(
+				Blueprint,
+				Single,
+				bExpectAfter,
 				OutErrorCode,
 				OutErrorMessage);
 		}
 		return true;
 	}
 
-	/** Put one applied operation back to its pre-patch value. */
+	/** Put one applied operation back to its pre-patch state. */
 	bool RestoreOperation(
+		UBlueprint* Blueprint,
 		UEdGraph* Graph,
 		const FPatchOperation& Operation,
 		FString& OutErrorCode,
 		FString& OutErrorMessage)
 	{
-		if (IsMigratedKind(Operation.Kind))
+		if (Operation.Kind.Equals(KindSetPinDefault, ESearchCase::CaseSensitive))
 		{
 			TArray<UEAgentKitBlueprintPinDefaultExperimental::FAtomicOperation> Single;
 			Single.Add(Operation.PinDefault);
 			return UEAgentKitBlueprintPinDefaultExperimental::TryRestoreAtomicOperations(
 				Graph,
+				Single,
+				1,
+				OutErrorCode,
+				OutErrorMessage);
+		}
+		if (Operation.Kind.Equals(KindCreateVariable, ESearchCase::CaseSensitive))
+		{
+			TArray<UEAgentKitBlueprintVariableExperimental::FAtomicVariableOperation> Single;
+			Single.Add(Operation.Variable);
+			return UEAgentKitBlueprintVariableExperimental::TryRestoreAtomicVariableOperations(
+				Blueprint,
 				Single,
 				1,
 				OutErrorCode,
@@ -626,7 +792,7 @@ namespace
 		FString Canonical;
 		Canonical = AppendField(Canonical, Operation.OpId);
 		Canonical = AppendField(Canonical, Operation.Kind);
-		if (IsMigratedKind(Operation.Kind))
+		if (Operation.Kind.Equals(KindSetPinDefault, ESearchCase::CaseSensitive))
 		{
 			Canonical = AppendField(Canonical, Operation.PinDefault.NodeGuid);
 			Canonical = AppendField(Canonical, Operation.PinDefault.PinName);
@@ -635,7 +801,40 @@ namespace
 			Canonical = AppendField(Canonical, Operation.PinDefault.BeforeValue);
 			Canonical = AppendField(Canonical, Operation.PinDefault.Value);
 		}
+		else if (Operation.Kind.Equals(KindCreateVariable, ESearchCase::CaseSensitive))
+		{
+			// The created GUID is deliberately absent: it is assigned inside the
+			// transaction, so it cannot be part of a plan the caller previewed.
+			Canonical = AppendField(Canonical, Operation.Variable.Name);
+			Canonical = AppendField(Canonical, Operation.Variable.Type);
+			Canonical = AppendField(Canonical, Operation.Variable.DefaultValue);
+		}
 		return Canonical;
+	}
+
+	/** Read every operation of one plan back; used after Apply, Undo and Redo. */
+	bool CheckAllOperations(
+		UBlueprint* Blueprint,
+		UEdGraph* Graph,
+		const FPatchPlan& Plan,
+		bool bExpectAfter,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
+	{
+		for (const FPatchOperation& Operation : Plan.Operations)
+		{
+			if (!CheckOperation(
+				Blueprint,
+				Graph,
+				Operation,
+				bExpectAfter,
+				OutErrorCode,
+				OutErrorMessage))
+			{
+				return false;
+			}
+		}
+		return true;
 	}
 
 	/**
@@ -756,6 +955,27 @@ namespace
 
 		OutPlan.PackageRevision = Preflight->GetStringField(TEXT("packageRevision"));
 		OutPlan.GraphFingerprint = Preflight->GetStringField(TEXT("graphFingerprint"));
+		// A variable is asset-level: creating one on a Blueprint that has never been
+		// saved would have no on-disk revision to bind, which is exactly what the
+		// single-writer variable tool refuses too.  Only patches that create
+		// variables pay this precondition.
+		bool bCreatesVariables = false;
+		for (const FPatchOperation& Operation : OutPlan.Operations)
+		{
+			if (Operation.Kind.Equals(KindCreateVariable, ESearchCase::CaseSensitive))
+			{
+				bCreatesVariables = true;
+				break;
+			}
+		}
+		if (bCreatesVariables && !IsSha256(OutPlan.PackageRevision))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("blueprint-variable-revision-unavailable"),
+				TEXT("The exact Blueprint package needs a sha256 disk revision; save it to disk first."));
+		}
 		OutPlan.StateFingerprintBefore =
 			UEAgentKitBlueprintPinDefaultExperimental::ComputeAtomicStateFingerprint(Graph);
 		if (OutPlan.StateFingerprintBefore.IsEmpty())
@@ -766,12 +986,24 @@ namespace
 				TEXT("graph-patch-fingerprint-failed"),
 				TEXT("Could not fingerprint the current graph state."));
 		}
+		OutPlan.VariablesFingerprintBefore =
+			UEAgentKitBlueprintVariableExperimental::ComputeAtomicVariableStateFingerprint(Blueprint);
+		if (OutPlan.VariablesFingerprintBefore.IsEmpty())
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-patch-fingerprint-failed"),
+				TEXT("Could not fingerprint the current Blueprint variable state."));
+		}
 		OutPlan.NodeCountBefore = Graph->Nodes.Num();
 		OutPlan.LinkCountBefore = CountLinks(Graph);
+		OutPlan.VariableCountBefore = Blueprint->NewVariables.Num();
 
 		for (int32 Index = 0; Index < OutPlan.Operations.Num(); ++Index)
 		{
 			if (!ResolveOperation(
+				Blueprint,
 				Graph,
 				OutPlan.Operations[Index],
 				OutErrorCode,
@@ -789,6 +1021,7 @@ namespace
 		Canonical = AppendField(Canonical, OutPlan.PackageRevision);
 		Canonical = AppendField(Canonical, OutPlan.GraphFingerprint);
 		Canonical = AppendField(Canonical, OutPlan.StateFingerprintBefore);
+		Canonical = AppendField(Canonical, OutPlan.VariablesFingerprintBefore);
 		for (const FPatchOperation& Operation : OutPlan.Operations)
 		{
 			Canonical += ComputeOperationCanonical(Operation);
@@ -834,13 +1067,20 @@ namespace
 		Result->SetStringField(TEXT("packageRevision"), Plan.PackageRevision);
 		Result->SetStringField(TEXT("graphFingerprint"), Plan.GraphFingerprint);
 		Result->SetStringField(TEXT("stateFingerprint"), Plan.StateFingerprintBefore);
+		Result->SetStringField(TEXT("variablesFingerprint"), Plan.VariablesFingerprintBefore);
 		Result->SetNumberField(TEXT("operationCount"), Plan.Operations.Num());
 		Result->SetNumberField(TEXT("nodeCount"), Plan.NodeCountBefore);
 		Result->SetNumberField(TEXT("linkCount"), Plan.LinkCountBefore);
+		Result->SetNumberField(TEXT("variableCount"), Plan.VariableCountBefore);
 		Result->SetStringField(
 			TEXT("requiredConfirmation"),
 			FString(UEAgentKitBlueprintPatchExperimental::ApplyConfirmationPrefix) + Plan.PlanId);
-		Result->SetArrayField(TEXT("migratedKinds"), { MakeShared<FJsonValueString>(KindSetPinDefault) });
+		Result->SetArrayField(
+			TEXT("migratedKinds"),
+			{
+				MakeShared<FJsonValueString>(KindSetPinDefault),
+				MakeShared<FJsonValueString>(KindCreateVariable),
+			});
 		Result->SetArrayField(TEXT("operations"), BuildValidatedResults(Plan));
 		return Result;
 	}
@@ -1085,10 +1325,16 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 			{
 				FString RestoreCode;
 				FString RestoreMessage;
-				if (!RestoreOperation(Graph, Plan.Operations[Index], RestoreCode, RestoreMessage))
+				if (!RestoreOperation(
+						Blueprint,
+						Graph,
+						Plan.Operations[Index],
+						RestoreCode,
+						RestoreMessage))
 				{
-					// A pin that can no longer be resolved cannot be restored by
-					// this layer; report it instead of claiming a clean rollback.
+					// A pin that can no longer be resolved, or a variable that
+					// survived its own removal, cannot be restored by this layer;
+					// report it instead of claiming a clean rollback.
 					OutErrorCode = RestoreCode;
 					OutErrorMessage = FString::Printf(
 						TEXT("%s The patch also failed to restore operation %s."),
@@ -1124,6 +1370,7 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 			}
 #endif
 			if (!ApplyOperation(
+				Blueprint,
 				Graph,
 				Plan.Operations[Index],
 				OutErrorCode,
@@ -1161,7 +1408,13 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 		// transaction is allowed to commit.
 		for (int32 Index = 0; Index < Plan.Operations.Num(); ++Index)
 		{
-			if (!CheckOperation(Graph, Plan.Operations[Index], OutErrorCode, OutErrorMessage))
+			if (!CheckOperation(
+				Blueprint,
+				Graph,
+				Plan.Operations[Index],
+				/*bExpectAfter=*/true,
+				OutErrorCode,
+				OutErrorMessage))
 			{
 				RestoreAllAndCancel();
 				OutResult = BuildInactiveResult(
@@ -1207,6 +1460,9 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 		}
 		Plan.StateFingerprintAfter =
 			UEAgentKitBlueprintPinDefaultExperimental::ComputeAtomicStateFingerprint(Graph);
+		Plan.VariablesFingerprintAfter =
+			UEAgentKitBlueprintVariableExperimental::ComputeAtomicVariableStateFingerprint(Blueprint);
+		Plan.VariableCountAfter = Blueprint->NewVariables.Num();
 		AppliedResults = BuildOperationResults(
 			Plan.Operations,
 			INDEX_NONE,
@@ -1226,41 +1482,40 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 		bool bBeforeStateVerified = false;
 		if (GEditor->UndoTransaction())
 		{
-			TArray<UEAgentKitBlueprintPinDefaultExperimental::FAtomicOperation> UndoOperations;
-			for (const FPatchOperation& Operation : Plan.Operations)
-			{
-				UndoOperations.Add(Operation.PinDefault);
-			}
-			// Undo must put every kind back to its before value; for pin defaults
-			// that is the same readback the single writer performs.
+			// Undo must put every kind back to its before state; each kind is read
+			// back through its own writer, and both the graph-level and the
+			// Blueprint-level fingerprint must return to the previewed values.
 			bBeforeStateVerified =
-				UEAgentKitBlueprintPinDefaultExperimental::TryCheckAtomicOperations(
+				CheckAllOperations(
+					Blueprint,
 					Graph,
-					UndoOperations,
+					Plan,
 					/*bExpectAfter=*/false,
 					OutErrorCode,
 					OutErrorMessage)
 				&& UEAgentKitBlueprintPinDefaultExperimental::ComputeAtomicStateFingerprint(Graph)
-					.Equals(Plan.StateFingerprintBefore, ESearchCase::CaseSensitive);
+					.Equals(Plan.StateFingerprintBefore, ESearchCase::CaseSensitive)
+				&& UEAgentKitBlueprintVariableExperimental::ComputeAtomicVariableStateFingerprint(
+					Blueprint)
+					.Equals(Plan.VariablesFingerprintBefore, ESearchCase::CaseSensitive);
 		}
 		bUndoVerified = bBeforeStateVerified;
 		bool bAfterStateVerified = false;
 		if (bUndoVerified && GEditor->RedoTransaction())
 		{
-			TArray<UEAgentKitBlueprintPinDefaultExperimental::FAtomicOperation> RedoOperations;
-			for (const FPatchOperation& Operation : Plan.Operations)
-			{
-				RedoOperations.Add(Operation.PinDefault);
-			}
 			bAfterStateVerified =
-				UEAgentKitBlueprintPinDefaultExperimental::TryCheckAtomicOperations(
+				CheckAllOperations(
+					Blueprint,
 					Graph,
-					RedoOperations,
+					Plan,
 					/*bExpectAfter=*/true,
 					OutErrorCode,
 					OutErrorMessage)
 				&& UEAgentKitBlueprintPinDefaultExperimental::ComputeAtomicStateFingerprint(Graph)
-					.Equals(Plan.StateFingerprintAfter, ESearchCase::CaseSensitive);
+					.Equals(Plan.StateFingerprintAfter, ESearchCase::CaseSensitive)
+				&& UEAgentKitBlueprintVariableExperimental::ComputeAtomicVariableStateFingerprint(
+					Blueprint)
+					.Equals(Plan.VariablesFingerprintAfter, ESearchCase::CaseSensitive);
 		}
 		bRedoVerified = bAfterStateVerified;
 	}
@@ -1301,8 +1556,10 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 	Receipt.GraphGuid = Plan.GraphGuid;
 	Receipt.GraphFingerprint = Plan.GraphFingerprint;
 	Receipt.StateFingerprint = Plan.StateFingerprintAfter;
+	Receipt.VariablesFingerprint = Plan.VariablesFingerprintAfter;
 	Receipt.NodeCount = NodeCountAfter;
 	Receipt.LinkCount = LinkCountAfter;
+	Receipt.VariableCount = Plan.VariableCountAfter;
 	Receipt.OperationCount = Plan.Operations.Num();
 	RecentPatchApplies.Add(Plan.PlanId, Receipt);
 
@@ -1327,6 +1584,10 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 		FString(UEAgentKitBlueprintPatchExperimental::SaveConfirmationPrefix) + Plan.PlanId);
 	Result->SetStringField(TEXT("graphFingerprintAfter"), Plan.GraphFingerprint);
 	Result->SetStringField(TEXT("stateFingerprintAfter"), Plan.StateFingerprintAfter);
+	Result->SetStringField(TEXT("variablesFingerprintBefore"), Plan.VariablesFingerprintBefore);
+	Result->SetStringField(TEXT("variablesFingerprintAfter"), Plan.VariablesFingerprintAfter);
+	Result->SetNumberField(TEXT("variableCountBefore"), Plan.VariableCountBefore);
+	Result->SetNumberField(TEXT("variableCountAfter"), Plan.VariableCountAfter);
 	Result->SetNumberField(TEXT("nodeCountBefore"), Plan.NodeCountBefore);
 	Result->SetNumberField(TEXT("nodeCountAfter"), NodeCountAfter);
 	Result->SetNumberField(TEXT("linkCountBefore"), Plan.LinkCountBefore);
@@ -1507,6 +1768,18 @@ bool UEAgentKitBlueprintPatchExperimental::TrySaveExperimental(
 			TEXT("graph-patch-save-plan-mismatch"),
 			TEXT("The live graph state no longer matches the Apply receipt."));
 	}
+	// The graph fingerprint does not cover variables, so the Blueprint-level state
+	// is proven separately against the receipt with the same shared function.
+	if (!UEAgentKitBlueprintVariableExperimental::ComputeAtomicVariableStateFingerprint(Blueprint)
+			.Equals(Receipt->VariablesFingerprint, ESearchCase::CaseSensitive)
+		|| Blueprint->NewVariables.Num() != Receipt->VariableCount)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-patch-save-plan-mismatch"),
+			TEXT("The live Blueprint variable state no longer matches the Apply receipt."));
+	}
 
 	UPackage* Package = Blueprint->GetOutermost();
 	if (Package == nullptr)
@@ -1564,7 +1837,9 @@ bool UEAgentKitBlueprintPatchExperimental::TrySaveExperimental(
 			ESearchCase::CaseSensitive)
 		|| PostSavePreflight->GetNumberField(TEXT("nodeCount")) != ExpectedNodeCount
 		|| !UEAgentKitBlueprintPinDefaultExperimental::ComputeAtomicStateFingerprint(Graph)
-			.Equals(ExpectedStateFingerprint, ESearchCase::CaseSensitive))
+			.Equals(ExpectedStateFingerprint, ESearchCase::CaseSensitive)
+		|| !UEAgentKitBlueprintVariableExperimental::ComputeAtomicVariableStateFingerprint(Blueprint)
+			.Equals(Receipt->VariablesFingerprint, ESearchCase::CaseSensitive))
 	{
 		return Fail(
 			OutErrorCode,
@@ -1591,6 +1866,8 @@ bool UEAgentKitBlueprintPatchExperimental::TrySaveExperimental(
 		PostSavePreflight->GetStringField(TEXT("packageRevision")));
 	Readback->SetStringField(TEXT("graphFingerprint"), ExpectedGraphFingerprint);
 	Readback->SetStringField(TEXT("stateFingerprint"), ExpectedStateFingerprint);
+	Readback->SetStringField(TEXT("variablesFingerprint"), Receipt->VariablesFingerprint);
+	Readback->SetNumberField(TEXT("variableCount"), Receipt->VariableCount);
 	Readback->SetBoolField(TEXT("packageDirty"), false);
 	Readback->SetNumberField(TEXT("nodeCount"), ExpectedNodeCount);
 	Readback->SetNumberField(TEXT("linkCount"), ExpectedLinkCount);
@@ -1609,6 +1886,8 @@ bool UEAgentKitBlueprintPatchExperimental::TrySaveExperimental(
 		PostSavePreflight->GetStringField(TEXT("packageRevision")));
 	Result->SetStringField(TEXT("graphFingerprint"), ExpectedGraphFingerprint);
 	Result->SetStringField(TEXT("stateFingerprint"), ExpectedStateFingerprint);
+	Result->SetStringField(TEXT("variablesFingerprint"), Receipt->VariablesFingerprint);
+	Result->SetNumberField(TEXT("variableCount"), Receipt->VariableCount);
 	Result->SetBoolField(TEXT("saved"), true);
 	Result->SetBoolField(TEXT("packageDirty"), false);
 	Result->SetBoolField(TEXT("readbackVerified"), true);

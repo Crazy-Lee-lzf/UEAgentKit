@@ -126,9 +126,12 @@ def register_patch_experimental_tools(
         """Read-only preview of one atomic Blueprint patch.
 
         Each operation carries an opId plus its kind-specific fields. This build
-        migrates only setPinDefault (nodeGuid, pinName, pinGuid, type, value), so
-        a request that names any other kind is refused before it reaches the
-        Editor. The result binds the exact before values, the graph and state
+        migrates setPinDefault (nodeGuid, pinName, pinGuid, type, value) and
+        createVariable (name, type, defaultValue), so a request that names any
+        other kind is refused before it reaches the Editor. A createVariable
+        operation targets the Blueprint, not the graph: the graphGuid only has to
+        be a graph of that Blueprint (and the one the focused editor shows). The
+        result binds the exact before values, the graph/state/variable
         fingerprints and the required Apply confirmation, and it lists one
         validated entry per operation.
         """

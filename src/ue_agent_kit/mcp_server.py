@@ -71,6 +71,7 @@ from .experimental_patch import (
     APPLY_TOOL_NAME as EXPERIMENTAL_PATCH_APPLY_TOOL_NAME,
     PREVIEW_TOOL_NAME as EXPERIMENTAL_PATCH_PREVIEW_TOOL_NAME,
     SAVE_TOOL_NAME as EXPERIMENTAL_PATCH_SAVE_TOOL_NAME,
+    PatchError,
 )
 from .experimental_rewire_write import (
     APPLY_TOOL_NAME as EXPERIMENTAL_REWIRE_APPLY_TOOL_NAME,
@@ -2328,6 +2329,10 @@ def _error_response(tool: str, error: Exception, *, read_only: bool) -> dict[str
     elif isinstance(error, VerificationTrustError):
         code = error.code
     elif isinstance(error, GraphEditError):
+        code = error.code
+    elif isinstance(error, PatchError):
+        # 0-3.4: a client-side refusal of the atomic patch keeps its exact code
+        # instead of collapsing to the generic envelope code.
         code = error.code
     elif isinstance(error, ValueError):
         code = "invalid-arguments"

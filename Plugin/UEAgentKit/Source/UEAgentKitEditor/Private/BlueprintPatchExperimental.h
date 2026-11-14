@@ -18,8 +18,8 @@ class UEdGraph;
  *
  * Writer migration is incremental (one writer per commit):
  *
- *   slice 1  setPinDefault   -- migrated here
- *   slice 2  createVariable  -- reserved, rejected until migrated
+ *   slice 1  setPinDefault   -- migrated (0-3.4 slice 8)
+ *   slice 2  createVariable  -- migrated (0-3.4 slice 9)
  *   slice 3  createNode/connect
  *   slice 4  rewirePin
  *   slice 5  removeNode
@@ -29,9 +29,17 @@ class UEdGraph;
  * `graph-patch-kind-not-migrated`; that keeps one authorization contract per
  * patch instead of a hybrid.
  *
+ * A Blueprint variable is asset-level, not graph-level: `createVariable` is
+ * resolved and written against the Blueprint only.  The request still carries a
+ * `graphGuid`, and it still has to name a graph that belongs to that Blueprint
+ * and is the one the focused editor shows -- that GUID is the authorization and
+ * provenance anchor, never a constraint on where the variable lands.  One patch
+ * therefore still lands on exactly one graph and one package.
+ *
  * Explicit limits (never widened by this seam): at most 16 operations per patch,
  * at most 60 KiB request payload at the MCP boundary, one target graph and one
- * loaded package per patch.
+ * loaded package per patch.  `createVariable` keeps the single writer's own bound
+ * of at most 8 variables per patch.
  *
  * The project must opt in with:
  *

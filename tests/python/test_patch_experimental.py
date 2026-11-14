@@ -52,6 +52,7 @@ STATE_FINGERPRINT = "sha256:" + "b" * 64
 AFTER_STATE_FINGERPRINT = "sha256:" + "c" * 64
 GRAPH_FINGERPRINT = "sha1:" + "d" * 40
 PACKAGE_REVISION = "sha256:" + "e" * 64
+VARIABLE_GUID = "eeeeeeee-ffff-4aaa-8bbb-cccccccccccc"
 
 
 def _operation(**overrides: Any) -> dict[str, Any]:
@@ -80,6 +81,48 @@ def _second_operation() -> dict[str, Any]:
     }
 
 
+def _variable(**overrides: Any) -> dict[str, Any]:
+    item = {
+        "opId": "v1",
+        "kind": "createVariable",
+        "name": "AgentCount",
+        "type": "int",
+        "defaultValue": "7",
+    }
+    item.update(overrides)
+    return item
+
+
+def _variable_preview_entry(**overrides: Any) -> dict[str, Any]:
+    item = {
+        "opId": "v1",
+        "kind": "createVariable",
+        "name": "AgentCount",
+        "type": "int",
+        "defaultValue": "7",
+        "existedBefore": False,
+        "status": "validated",
+    }
+    item.update(overrides)
+    return item
+
+
+def _variable_apply_entry(**overrides: Any) -> dict[str, Any]:
+    item = {
+        "opId": "v1",
+        "kind": "createVariable",
+        "name": "AgentCount",
+        "type": "int",
+        "defaultValue": "7",
+        "existedBefore": False,
+        "guid": VARIABLE_GUID,
+        "status": "applied",
+        "rolledBack": False,
+    }
+    item.update(overrides)
+    return item
+
+
 def _preview(**overrides: Any) -> dict[str, Any]:
     result: dict[str, Any] = {
         "schemaVersion": PREVIEW_SCHEMA_VERSION,
@@ -94,11 +137,13 @@ def _preview(**overrides: Any) -> dict[str, Any]:
         "packageRevision": PACKAGE_REVISION,
         "graphFingerprint": GRAPH_FINGERPRINT,
         "stateFingerprint": STATE_FINGERPRINT,
+        "variablesFingerprint": STATE_FINGERPRINT,
+        "variableCount": 2,
         "operationCount": 1,
         "nodeCount": 4,
         "linkCount": 3,
         "requiredConfirmation": APPLY_CONFIRMATION_PREFIX + PLAN_ID,
-        "migratedKinds": ["setPinDefault"],
+        "migratedKinds": ["setPinDefault", "createVariable"],
         "operations": [
             {
                 "opId": "p1",
@@ -137,6 +182,10 @@ def _apply(**overrides: Any) -> dict[str, Any]:
         "requiredSaveConfirmation": save_confirmation_for_plan(PLAN_ID),
         "graphFingerprintAfter": GRAPH_FINGERPRINT,
         "stateFingerprintAfter": AFTER_STATE_FINGERPRINT,
+        "variablesFingerprintBefore": STATE_FINGERPRINT,
+        "variablesFingerprintAfter": AFTER_STATE_FINGERPRINT,
+        "variableCountBefore": 2,
+        "variableCountAfter": 2,
         "nodeCountBefore": 4,
         "nodeCountAfter": 4,
         "linkCountBefore": 3,
@@ -276,7 +325,6 @@ class PatchContractTests(unittest.TestCase):
 
     def test_unmigrated_and_unknown_kinds_are_refused(self) -> None:
         for kind, code in (
-            ("createVariable", "graph-patch-kind-not-migrated"),
             ("createNode", "graph-patch-kind-not-migrated"),
             ("connect", "graph-patch-kind-not-migrated"),
             ("rewirePin", "graph-patch-kind-not-migrated"),
@@ -374,13 +422,158 @@ class PatchContractTests(unittest.TestCase):
             )
         self.assertEqual(raised.exception.code, "graph-pin-default-type-not-allowed")
 
+    def test_create_variable_operation_is_normalized_like_the_variable_writer(self) -> None:
+        request = validate_preview_parameters(
+            asset_path=ASSET,
+            graph_guid=GRAPH,
+            operations=[_variable()],
+        )
+        self.assertEqual(
+            request["operations"],
+            [
+                {
+                    "opId": "v1",
+                    "kind": "createVariable",
+                    "name": "AgentCount",
+                    "type": "int",
+                    "defaultValue": "7",
+                }
+            ],
+        )
+        # The variable writer stays the single source of truth for the default
+        # encoding, so anything it refuses is refused here with its own code.
+        for variable_type, value in (
+            ("bool", "TRUE"),
+            ("int", "+1"),
+            ("double", "1e3"),
+            ("double", "-0.0"),
+            ("string", "line\nbreak"),
+        ):
+            with self.subTest(variable_type=variable_type, value=value):
+                with self.assertRaises(PatchError) as raised:
+                    validate_preview_parameters(
+                        asset_path=ASSET,
+                        graph_guid=GRAPH,
+                        operations=[_variable(type=variable_type, defaultValue=value)],
+                    )
+                self.assertEqual(raised.exception.code, "blueprint-variable-value-invalid")
+        with self.assertRaises(PatchError) as raised:
+            validate_preview_parameters(
+                asset_path=ASSET,
+                graph_guid=GRAPH,
+                operations=[_variable(type="vector")],
+            )
+        self.assertEqual(raised.exception.code, "blueprint-variable-type-not-allowed")
+        with self.assertRaises(PatchError) as raised:
+            validate_preview_parameters(
+                asset_path=ASSET,
+                graph_guid=GRAPH,
+                operations=[_variable(name="1Bad")],
+            )
+        self.assertEqual(raised.exception.code, "blueprint-variable-name-invalid")
+
+    def test_create_variable_names_are_unique_and_bounded(self) -> None:
+        # FName semantics: two names that only differ in case would collide at
+        # write time, so the ambiguity is refused before anything is sent.
+        with self.assertRaises(PatchError) as raised:
+            validate_preview_parameters(
+                asset_path=ASSET,
+                graph_guid=GRAPH,
+                operations=[_variable(), _variable(opId="v2", name="agentcount")],
+            )
+        self.assertEqual(raised.exception.code, "graph-patch-duplicate-target")
+
+        # One patch may not create more variables than the single writer may.
+        with self.assertRaises(PatchError) as raised:
+            validate_preview_parameters(
+                asset_path=ASSET,
+                graph_guid=GRAPH,
+                operations=[
+                    _variable(opId=f"v{index}", name=f"Var{index}") for index in range(9)
+                ],
+            )
+        self.assertEqual(raised.exception.code, "graph-patch-create-variable-limit")
+
+        # Eight is still legal.
+        request = validate_preview_parameters(
+            asset_path=ASSET,
+            graph_guid=GRAPH,
+            operations=[
+                _variable(opId=f"v{index}", name=f"Var{index}") for index in range(8)
+            ],
+        )
+        self.assertEqual(len(request["operations"]), 8)
+
+    def test_create_variable_rejects_foreign_fields(self) -> None:
+        for extra in (
+            {"nodeGuid": NODE_A},
+            {"pinGuid": PIN_A},
+            {"guid": VARIABLE_GUID},
+            {"value": "7"},
+        ):
+            with self.subTest(extra=extra):
+                with self.assertRaises(PatchError) as raised:
+                    validate_preview_parameters(
+                        asset_path=ASSET,
+                        graph_guid=GRAPH,
+                        operations=[_variable(**extra)],
+                    )
+                self.assertEqual(raised.exception.code, "graph-patch-unknown-parameter")
+
+    def test_mixed_pin_default_and_variable_patch_is_accepted(self) -> None:
+        request = validate_preview_parameters(
+            asset_path=ASSET,
+            graph_guid=GRAPH,
+            operations=[_operation(), _variable(opId="v1")],
+        )
+        self.assertEqual(
+            [item["kind"] for item in request["operations"]],
+            ["setPinDefault", "createVariable"],
+        )
+        self.assertEqual(request["operations"][1]["defaultValue"], "7")
+
+    def test_variable_result_entries_are_validated(self) -> None:
+        preview = _preview(
+            operationCount=1,
+            operations=[_variable_preview_entry()],
+        )
+        normalized = validate_preview_result(preview)
+        self.assertEqual(normalized["operations"][0]["name"], "AgentCount")
+        self.assertEqual(normalized["variableCount"], 2)
+
+        # A preview cannot know the created GUID yet.
+        with self.assertRaises(PatchError) as raised:
+            validate_preview_result(
+                _preview(operations=[_variable_preview_entry(guid=VARIABLE_GUID)])
+            )
+        self.assertEqual(raised.exception.code, "graph-patch-preview-invalid")
+
+        apply = _apply(
+            variableCountBefore=2,
+            variableCountAfter=3,
+            results=[_variable_apply_entry()],
+        )
+        normalized_apply = validate_apply_result(apply)
+        self.assertEqual(normalized_apply["results"][0]["guid"], VARIABLE_GUID)
+
+        for mutation in (
+            {"variableCountAfter": 4},
+            {"results": [_variable_apply_entry(guid="not-a-guid")]},
+            {"variablesFingerprintBefore": "not-a-sha256"},
+            {"variablesFingerprintAfter": "sha256:short"},
+        ):
+            with self.subTest(mutation=mutation):
+                with self.assertRaises(PatchError) as raised:
+                    validate_apply_result(apply | mutation)
+                self.assertEqual(raised.exception.code, "graph-patch-apply-invalid")
+
     def test_preview_tampering_fails_closed(self) -> None:
         validate_preview_result(_preview())
 
         for mutation, label in (
             ({"planId": "sha256:" + "f" * 63}, "planId"),
             ({"operationCount": 2}, "operationCount"),
-            ({"migratedKinds": ["setPinDefault", "createNode"]}, "migratedKinds"),
+            ({"migratedKinds": ["setPinDefault"]}, "migratedKinds"),
             ({"requiredConfirmation": APPLY_CONFIRMATION_PREFIX + "other"}, "confirmation"),
             ({"stateFingerprint": "sha256:short"}, "stateFingerprint"),
             ({"graphFingerprint": "sha1:short"}, "graphFingerprint"),

@@ -11,7 +11,13 @@ live module (``BlueprintPatchExperimental.cpp``) consumes, so a caller cannot
 build a bridge request of its own.
 
 Writer migration is incremental, one writer per commit.  A patch may contain only
-migrated kinds; the first migrated kind is ``setPinDefault``.
+migrated kinds; ``setPinDefault`` and ``createVariable`` are migrated.
+
+A Blueprint variable is asset-level, not graph-level.  The request still carries a
+``graphGuid`` and it still has to name a graph that belongs to that Blueprint and
+is the one the focused editor shows -- that GUID is the authorization and
+provenance anchor, not a constraint on where the variable lands.  Variable
+operations are validated against the Blueprint only.
 """
 
 from __future__ import annotations
@@ -24,6 +30,12 @@ from .experimental_pin_default_edit import (
     PinDefaultError,
     canonical_value,
     validate_preview_parameters as validate_pin_default_parameters,
+)
+from .experimental_variable_write import (
+    MAX_VARIABLES as MAX_CREATE_VARIABLES,
+    VariableWriteError,
+    canonical_variable_name,
+    canonical_variable_value,
 )
 
 PREVIEW_TOOL_NAME = "ue_preview_blueprint_patch_experimental"
@@ -48,10 +60,11 @@ MAX_ASSET_PATH = 512
 # Only these kinds are implemented by the live atomic patch.  A patch that mixes
 # a migrated and an unmigrated kind is refused before any write, so one patch
 # never carries two authorization contracts.
-MIGRATED_KINDS = ("setPinDefault",)
-RESERVED_KINDS = ("createVariable", "createNode", "connect", "rewirePin", "removeNode")
+MIGRATED_KINDS = ("setPinDefault", "createVariable")
+RESERVED_KINDS = ("createNode", "connect", "rewirePin", "removeNode")
 
 PIN_DEFAULT_FIELDS = ("nodeGuid", "pinName", "pinGuid", "type", "value")
+CREATE_VARIABLE_FIELDS = ("name", "type", "defaultValue")
 
 _GUID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
@@ -114,6 +127,15 @@ def _op_id(value: Any, index: int) -> str:
     return normalized
 
 
+def _guid_with_code(value: Any, label: str, *, error_code: str) -> str:
+    """Validate a GUID inside a result envelope, keeping the envelope's own code."""
+
+    try:
+        return _guid(value, label)
+    except PatchError as exc:
+        raise PatchError(error_code, exc.message) from exc
+
+
 def validate_preview_parameters(
     *,
     asset_path: Any,
@@ -133,6 +155,8 @@ def validate_preview_parameters(
     normalized_operations: list[dict[str, Any]] = []
     seen_op_ids: set[str] = set()
     seen_targets: set[tuple[str, str, str]] = set()
+    seen_variable_names: set[str] = set()
+    create_variable_count = 0
     for index, raw in enumerate(operations):
         item = _object(raw, f"operations[{index}]")
         op_id = _op_id(item.get("opId"), index)
@@ -154,6 +178,49 @@ def validate_preview_parameters(
                 "graph-patch-kind-not-allowed",
                 f"Operation kind '{kind}' is not an atomic patch kind.",
             )
+        if kind == "createVariable":
+            _reject_unknown(
+                item,
+                {"opId", "kind", *CREATE_VARIABLE_FIELDS},
+                f"operations[{index}]",
+            )
+            # Reuse the single-writer validators so the atomic patch and
+            # ue_apply_blueprint_variable_create_experimental cannot disagree about
+            # what a legal variable is.  Their error codes are kept verbatim; only
+            # the exception type is normalized.
+            try:
+                name = canonical_variable_name(item.get("name"))
+                variable_type, default_value = canonical_variable_value(
+                    item.get("type"),
+                    item.get("defaultValue"),
+                )
+            except VariableWriteError as exc:
+                raise PatchError(exc.code, exc.message) from exc
+            create_variable_count += 1
+            if create_variable_count > MAX_CREATE_VARIABLES:
+                # One patch may not create more variables than the single writer.
+                raise PatchError(
+                    "graph-patch-create-variable-limit",
+                    f"A patch may create at most {MAX_CREATE_VARIABLES} variables, the "
+                    "same bound as the single-writer variable tool.",
+                )
+            name_key = name.lower()
+            if name_key in seen_variable_names:
+                raise PatchError(
+                    "graph-patch-duplicate-target",
+                    f"Duplicate variable name: {name}.",
+                )
+            seen_variable_names.add(name_key)
+            normalized_operations.append(
+                {
+                    "opId": op_id,
+                    "kind": kind,
+                    "name": name,
+                    "type": variable_type,
+                    "defaultValue": default_value,
+                }
+            )
+            continue
         _reject_unknown(
             item,
             {"opId", "kind", *PIN_DEFAULT_FIELDS},
@@ -219,6 +286,27 @@ def save_confirmation_for_plan(plan_id: str) -> str:
     return SAVE_CONFIRMATION_PREFIX + plan_id
 
 
+def _canonical_variable_fields(
+    entry: dict[str, Any],
+    label: str,
+    *,
+    error_code: str,
+) -> dict[str, str]:
+    """Validate one createVariable result entry with the variable writer's rules."""
+
+    try:
+        name = canonical_variable_name(entry.get("name"))
+        variable_type, default_value = canonical_variable_value(
+            entry.get("type"),
+            entry.get("defaultValue"),
+        )
+    except VariableWriteError as exc:
+        raise PatchError(error_code, f"{label}: {exc.message}") from exc
+    if entry.get("existedBefore") is not False:
+        raise PatchError(error_code, f"{label}.existedBefore must be false.")
+    return {"name": name, "type": variable_type, "defaultValue": default_value}
+
+
 def validate_preview_result(preview: Any) -> dict[str, Any]:
     item = _object(_unwrap_tool_result(preview, "planId"), "preview")
     operations = item.get("operations")
@@ -237,6 +325,11 @@ def validate_preview_result(preview: Any) -> dict[str, Any]:
         or _SHA1.fullmatch(item.get("graphFingerprint")) is None
         or not isinstance(item.get("stateFingerprint"), str)
         or _SHA256.fullmatch(item.get("stateFingerprint")) is None
+        or not isinstance(item.get("variablesFingerprint"), str)
+        or _SHA256.fullmatch(item.get("variablesFingerprint")) is None
+        or isinstance(item.get("variableCount"), bool)
+        or not isinstance(item.get("variableCount"), int)
+        or item.get("variableCount") < 0
         or not isinstance(operations, list)
         or not 1 <= len(operations) <= MAX_OPERATIONS
         or item.get("operationCount") != len(operations)
@@ -244,13 +337,14 @@ def validate_preview_result(preview: Any) -> dict[str, Any]:
     ):
         raise PatchError(
             "graph-patch-preview-invalid",
-            "Preview envelope, planId, fingerprints, kinds or operation list are invalid.",
+            "Preview envelope, planId, fingerprints, counts, kinds or operation list are invalid.",
         )
     normalized_asset = _string(item.get("assetPath"), "preview.assetPath", maximum=MAX_ASSET_PATH)
     normalized_graph = _guid(item.get("graphGuid"), "preview.graphGuid")
     normalized_operations: list[dict[str, Any]] = []
     seen_op_ids: set[str] = set()
     seen_targets: set[tuple[str, str, str]] = set()
+    seen_variable_names: set[str] = set()
     for index, raw in enumerate(operations):
         entry = _object(raw, f"preview.operations[{index}]")
         op_id = _op_id(entry.get("opId"), index)
@@ -271,6 +365,25 @@ def validate_preview_result(preview: Any) -> dict[str, Any]:
                 "graph-patch-preview-invalid",
                 "Preview operations must all be validated.",
             )
+        if kind == "createVariable":
+            if entry.get("guid") is not None:
+                raise PatchError(
+                    "graph-patch-preview-invalid",
+                    f"preview.operations[{index}] must not carry a created GUID before Apply.",
+                )
+            normalized = _canonical_variable_fields(
+                entry,
+                f"preview.operations[{index}]",
+                error_code="graph-patch-preview-invalid",
+            )
+            if normalized["name"].lower() in seen_variable_names:
+                raise PatchError(
+                    "graph-patch-preview-invalid",
+                    f"Preview repeats the variable name {normalized['name']}.",
+                )
+            seen_variable_names.add(normalized["name"].lower())
+            normalized_operations.append({"opId": op_id, "kind": kind, **normalized})
+            continue
         node_guid = _guid(entry.get("nodeGuid"), f"preview.operations[{index}].nodeGuid")
         pin_guid = _guid(entry.get("pinGuid"), f"preview.operations[{index}].pinGuid")
         pin_name = _string(
@@ -316,6 +429,8 @@ def validate_preview_result(preview: Any) -> dict[str, Any]:
         "packageRevision": item.get("packageRevision"),
         "graphFingerprint": item.get("graphFingerprint"),
         "stateFingerprint": item.get("stateFingerprint"),
+        "variablesFingerprint": item.get("variablesFingerprint"),
+        "variableCount": item.get("variableCount"),
         "operations": normalized_operations,
         "requiredConfirmation": item.get("requiredConfirmation"),
     }
@@ -378,6 +493,10 @@ def validate_apply_result(apply_result: Any) -> dict[str, Any]:
         or _SHA1.fullmatch(item.get("graphFingerprintAfter")) is None
         or not isinstance(item.get("stateFingerprintAfter"), str)
         or _SHA256.fullmatch(item.get("stateFingerprintAfter")) is None
+        or not isinstance(item.get("variablesFingerprintBefore"), str)
+        or _SHA256.fullmatch(item.get("variablesFingerprintBefore")) is None
+        or not isinstance(item.get("variablesFingerprintAfter"), str)
+        or _SHA256.fullmatch(item.get("variablesFingerprintAfter")) is None
     ):
         raise PatchError(
             "graph-patch-apply-invalid",
@@ -391,6 +510,8 @@ def validate_apply_result(apply_result: Any) -> dict[str, Any]:
         )
     normalized_asset = _string(item.get("assetPath"), "applyResult.assetPath", maximum=MAX_ASSET_PATH)
     normalized_graph = _guid(item.get("graphGuid"), "applyResult.graphGuid")
+    normalized_results: list[dict[str, Any]] = []
+    created_variables = 0
     for index, raw in enumerate(results):
         entry = _object(raw, f"applyResult.results[{index}]")
         if entry.get("status") != "applied" or entry.get("rolledBack") is not False:
@@ -398,18 +519,58 @@ def validate_apply_result(apply_result: Any) -> dict[str, Any]:
                 "graph-patch-apply-invalid",
                 "Every applied operation must report status=applied and rolledBack=false.",
             )
-        _op_id(entry.get("opId"), index)
-        _guid(entry.get("nodeGuid"), f"applyResult.results[{index}].nodeGuid")
-        _guid(entry.get("pinGuid"), f"applyResult.results[{index}].pinGuid")
+        op_id = _op_id(entry.get("opId"), index)
+        kind = _string(entry.get("kind"), f"applyResult.results[{index}].kind", maximum=32)
+        if kind not in MIGRATED_KINDS:
+            raise PatchError(
+                "graph-patch-apply-invalid",
+                f"Apply result contains kind '{kind}', which this build did not migrate.",
+            )
+        if kind == "createVariable":
+            normalized = _canonical_variable_fields(
+                entry,
+                f"applyResult.results[{index}]",
+                error_code="graph-patch-apply-invalid",
+            )
+            guid = _guid_with_code(
+                entry.get("guid"),
+                f"applyResult.results[{index}].guid",
+                error_code="graph-patch-apply-invalid",
+            )
+            created_variables += 1
+            normalized_results.append(
+                {"opId": op_id, "kind": kind, **normalized, "guid": guid}
+            )
+            continue
+        normalized_results.append(
+            {
+                "opId": op_id,
+                "kind": kind,
+                "nodeGuid": _guid(entry.get("nodeGuid"), f"applyResult.results[{index}].nodeGuid"),
+                "pinGuid": _guid(entry.get("pinGuid"), f"applyResult.results[{index}].pinGuid"),
+            }
+        )
     for key in ("nodeCountBefore", "nodeCountAfter", "linkCountBefore", "linkCountAfter"):
         if isinstance(item.get(key), bool) or not isinstance(item.get(key), int) or item.get(key) < 0:
             raise PatchError(
                 "graph-patch-apply-invalid",
                 f"applyResult.{key} must be a non-negative integer.",
             )
+    for key in ("variableCountBefore", "variableCountAfter"):
+        if isinstance(item.get(key), bool) or not isinstance(item.get(key), int) or item.get(key) < 0:
+            raise PatchError(
+                "graph-patch-apply-invalid",
+                f"applyResult.{key} must be a non-negative integer.",
+            )
+    if item.get("variableCountAfter") != item.get("variableCountBefore") + created_variables:
+        raise PatchError(
+            "graph-patch-apply-invalid",
+            "Apply variable counts must match the number of createVariable results.",
+        )
     normalized = dict(item)
     normalized["assetPath"] = normalized_asset
     normalized["graphGuid"] = normalized_graph
+    normalized["results"] = normalized_results
     return normalized
 
 
@@ -474,6 +635,7 @@ __all__ = [
     "APPLY_METHOD",
     "APPLY_SCHEMA_VERSION",
     "APPLY_TOOL_NAME",
+    "CREATE_VARIABLE_FIELDS",
     "MIGRATED_KINDS",
     "MAX_OPERATIONS",
     "MAX_REQUEST_BYTES",
