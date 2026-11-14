@@ -668,3 +668,198 @@ preview 值另作 `graphFingerprintBefore` 返回。修完后同一次运行全�
 - 返回的 `nodeGuid` 在下一条 patch 里可直接使用（本切片用自动化测试证明它指向活节点）；connect 尚未
   迁移，所以“用它连线”本身还没有入口。
 - 建出的节点**未编译**：patch 结果 `compiled=false`，不自动 compile。
+
+## 切片 11 — 跨 writer 原子事务：连线已迁移（含 tempId）（2026-11-14）
+
+0-3.4 的第四个切片。把 `connect` 作为第四个 kind 迁进**已有的** patch 契约，与
+`setPinDefault`/`createVariable`/`createNode` 共用同一个 `FScopedTransaction`、同一套逐条结果与
+整体回滚；没有新建第二套 patch 契约，也没有改动五个 writer 各自的 Preview/Apply/Save 语义。
+
+`disconnect` 仍**未迁移**：它是“删边”，回滚语义与 connect 相反，单独一片更清楚。
+
+### 先说清楚一次结论反转：切片 10 说“不要 tempId”，本片必须要有
+
+切片 10 的文档写着“不要引入 tempId”，理由是**当时没有任何使用者**：那一节只做 `createNode`，
+patch 里没有任何东西能引用一个新节点，所以加 `tempId` 只会多出一块没有被证明过的面子。那个判断
+在当时是对的。
+
+本片把 `connect` 迁进来之后，**使用者出现了**：一条边的端点既可能是已有节点，也可能是**同一个
+patch 里刚建的节点**。0-3.4 的原始目标就是“一次提交内建节点 + 连线”，不引入 patch 内的节点引用
+就永远做不到。因此本片引入 `tempId`，并把它当作 patch 内部绑定（不是第二套身份系统）：
+
+- 它只在 patch 内可见，Apply 前就解析成 GUID，**从不**传给任何 writer；
+- 它不进 plan hash，进 hash 的是**声明它的那条 createNode op 的下标**（见下）；
+- 它不改变任何 writer 的接口。
+
+这不是“上一片做错了”，而是“上一片刻意不做当时无人使用的东西”。两条结论的差别只在是否需要它。
+
+### 三个决策
+
+**① tempId：引入，规则如下**
+
+| 规则 | 实现 |
+|---|---|
+| 形状 | `tmp:` + 1–64 个可打印 ASCII（0x21–0x7E）；非法 → `graph-edit-temp-id-invalid` |
+| 声明方 | 只有 `createNode` 可带 `tempId`；`setPinDefault`/`createVariable`/`connect` 带 → `graph-patch-unknown-parameter` |
+| 唯一性 | patch 内重复 → `graph-patch-duplicate-temp-id` |
+| 引用 | `connect` 的 `from`/`to` 可写节点 GUID 或 `tempId` |
+| 悬空 | 引用了没人声明的 `tempId` → `graph-patch-unknown-temp-id` |
+| 前向引用 | 引用了**后面**才声明的 `tempId` → `graph-patch-forward-temp-id`（解析按请求顺序进行，前向引用在事务外就拒绝） |
+| plan hash | `tempId` 文本**不进** hash；tempId 端点进入 hash 的是**声明它的 createNode 的 op 下标**（`temp:<index>:<pin>`） |
+
+为什么要用下标而不是“什么都不进”：如果 tempId 端点完全不进 hash，那么把两个 `tempId` 对调
+（`tmp:a→tmp:b` 变成 `tmp:b→tmp:a`）得到的 canonical 完全相同，但语义完全不同——preview 过的
+plan 就可以被拿去连一条方向相反的边。用下标既保留了“两个不同拼写表达同一意图 → 同一 planId”
+（tempId 只是标签），又让“绑定换了 → planId 换”（安全）。解析出来的 GUID **不能**进 hash：它
+是事务内才存在的，和切片 10 里 createNode 的 nodeGuid 同理。
+
+**② 边集指纹：现有指纹不够，必须新增**
+
+先实测（代码与自动化都证明了）：`stateFingerprint` 对每条 pin 只哈希 `LinkedTo.Num()`
+**数量**，不哈希端点。因此存在确定的盲区：把两条布的端点互换（`src1→A`、`src2→B` 变成
+`src1→B`、`src2→A`），每条 pin 的 link 数量全是 1 不变，`stateFingerprint` **完全不变**。
+
+对策：新增 `edgesFingerprint`，直接复用 rewire writer 已有的 `TryComputeLiveEdgeSetHash`
+（不写第二份实现），它按排序后的
+`fromNodeGuid|fromPinName|fromPinId>toNodeGuid|toPinName|toPinId` 列表哈希，正是“端点身份”。
+
+三个哈希的分工（互不重复）：
+
+| 指纹 | 覆盖 | 不覆盖 |
+|---|---|---|
+| `stateFingerprint`（pin writer） | 每条 pin 的默认值、`LinkedTo` **数量**、节点 pin 身份 | 端点是谁、节点类、节点位置 |
+| `nodesFingerprint`（graph edit writer） | 节点 GUID / class / 位置 / pin 清单与类型 | 任何边 |
+| `edgesFingerprint`（rewire writer） | 排序后的**边端点三元组** | 默认值、节点位置 |
+
+自动化测试里既有正向（apply 后 ≠ before、Undo == before、Redo == after、回滚 == before），也有
+**反向用例**：端点互换、数量不变 → `stateFingerprint` 不变、`edgesFingerprint` 必须变。
+
+**③ 范围：只做 connect**
+
+不迁 `disconnect`（删边，回滚语义相反）、不做 owned literals、不做 `rewirePin`/`removeNode`。
+写进已知限制。
+
+### 契约增量
+
+| 项 | 内容 |
+|---|---|
+| 已迁移 kind | `setPinDefault` + `createVariable` + `createNode` + `connect` |
+| connect 字段 | `opId`/`kind` 之外只接受 `from`/`fromPin`/`to`/`toPin`；其他字段 → `graph-patch-unknown-parameter` |
+| createNode 字段 | 新增可选 `tempId`（形状/唯一性见上） |
+| 端点 | 规范小写 GUID（已有节点）或 `tempId`；既不是 GUID 也无 `tmp:` 前缀 → `graph-patch-invalid-identifier` |
+| 解析 | **事务外**：端口方向（from=output、to=input）、类型 token（exec/bool/int/double/string）、两端 token 必须相等、自连、目标输入已连接、patch 内重复目标；tempId 端点用**声明的 createNode 契约**校验 pin，而不是等节点建出来 |
+| 写入 | **事务内**：只建已解析的边，用与单 writer 同一个 `TryCreateConnection` + 同一套 `ValidateSchemaConnection`/`ExistingPinTypeToken` 判定 |
+| 读回 | 每条 op 按四个坐标（两端 nodeGuid + pin）找回并断言“这条边存在、且是目标输入上的唯一连接”；patch 另外断言 `linkCountAfter == linkCountBefore + connect 数量`（没有多出别的边） |
+| 返回 | 每条 op 返回解析后的 `{fromNodeGuid, fromPin, fromPinGuid, fromType, toNodeGuid, toPin, toPinGuid, toType}` |
+| 回滚 | 逆序断开刚建的边（`BreakLinkTo` + `PinConnectionListChanged`）→ 恢复 `Status`/`bCachedDependenciesUpToDate`/Dirty → `Transaction.Cancel()`；随后整状态校验四个指纹，失败报 `graph-patch-restore-mismatch` |
+| 数量 | 单 patch 的 `connect` 上限沿用 writer 的 24，但 patch 总 op 上限是 16，所以实际最多 16 条；单节点 fan-out 沿用 writer 的 8 → `graph-edit-connection-limit` |
+| 包前置条件 | 与单 writer 一致：clean package、exact focused graph、可编辑 K2 图、PIE 停止；**不**额外要求 sha256 磁盘 revision |
+
+### 为什么这不是放宽安全边界
+
+- 边只在**已经解析过**的两个真实节点之间创建；tempId 在 Apply 前一定已经变成 GUID，未解析的
+  tempId 到达 seam 会被拒绝；
+- `tempId` 从不离开 patch，也不进入任何 writer 的请求；
+- 仍然只接受 8 种原始节点、exec/bool/int/double/string 五种 pin 类型、精确类型相等、拒绝自连、
+  拒绝已连接输入、拒绝重复目标；
+- 不保存、不编译；仍然要求 clean package + `CanTransact` + 无活动事务；
+- 回滚不是“相信 restore 返回值”，而是用计数 + 四个指纹证明回到 before。
+
+### 仍是单 writer 路径的
+
+| writer | 状态 |
+|---|---|
+| pin 默认值 | 已迁移（切片 8） |
+| 变量创建 | 已迁移（切片 9） |
+| graph edit 的 `createNode`（8 种原始节点） | 已迁移（切片 10） |
+| graph edit 的 `connect`（GUID / tempId 端点） | 已迁移（本切片） |
+| graph edit 的 `disconnect` | **未迁移** |
+| graph edit 的 `call_function` / `call_owned_pure_function` / owned literals / variable accessor | **未迁移** |
+| rewire | 未迁移 |
+| node remove | 未迁移 |
+
+### 已知限制
+
+- 一次 patch 只能落在一个图、一个包上。
+- `connect` 只建边，不删边、不改已有边；`rewirePin`/`disconnect` 没有入口。
+- 不支持 owned literals（会同时建节点并改边集）。
+- `tempId` 是 patch 内标签，不能跨 patch 复用；下一条 patch 只能用 Apply 返回的 `nodeGuid`。
+- patch 的 `tempId` 形状（1–64 可打印 ASCII）比单 writer 的 `IsTempId`（1–36 字母数字/`_`/`-`）宽，
+  因为它不经过 writer；这一点是刻意的，写进了代码注释。
+- 建出/连好的节点**未编译**：patch 结果 `compiled=false`。
+
+### 真实 Editor 证据（2026-11-14）
+
+环境：一次性 Host `N1_BlueprintNative_20261031`（`N1AcceptanceHost.uproject`），插件 `0.9.0.dev1`，
+UE 5.6.1；隔离 `UnrealEditor-Cmd -unattended -NullRHI`。自动化测试用
+`SetExperimentalWriteEnabledForTest` 走测试门禁，**没有**修改项目 ini（收尾核对
+`DefaultEngine.ini` 仍是 515 字节、无 `[UEAgentKit]` 段）。
+
+**A. 自动化测试（`Automation RunTests UEAgentKit.AtomicPatch`，exit 0，succeeded=4 / failed=0 / notRun=0）**
+
+| 测试 | 结果 | 耗时 | warnings |
+|---|---|---|---|
+| `UEAgentKit.AtomicPatch.Connect`（本片） | **Success** | 1.21s | 0 |
+| `UEAgentKit.AtomicPatch.CreateNode`（切片 10 回归） | **Success** | 0.39s | 0 |
+| `UEAgentKit.AtomicPatch.CreateVariable`（切片 9 回归） | **Success** | 0.39s | 0 |
+| `UEAgentKit.AtomicPatch.Expansion`（切片 8 回归） | **Success** | 0.43s | 0 |
+
+`Connect` 在同一张已落盘的 K2 fixture（两个 bool 源、一个 branch、一个 BooleanOR，全部未连线）
+上依次证明（全部为断言，不是观察）：
+
+| 检查 | 结果 |
+|---|---|
+| 未 opt-in 时 gate-off | `IsExperimentalWriteAvailable()==false` |
+| tempId 形状 | `tmp:` / 65 字符 / 含空格 → `graph-edit-temp-id-invalid` |
+| tempId 重复 | `graph-patch-duplicate-temp-id` |
+| tempId 悬空 | `graph-patch-unknown-temp-id` |
+| tempId 前向引用 | `graph-patch-forward-temp-id` |
+| 非 GUID 非 tempId 端点 | `graph-patch-invalid-identifier` |
+| pin 兼容性 | bool→exec → `graph-edit-pin-type-mismatch`；自连 → `graph-edit-self-connection`；两条边进同一输入 → `graph-edit-connection-duplicate` |
+| 未迁移 kind | `disconnect` → `graph-patch-kind-not-migrated` |
+| 拒绝后没有留下东西 | 节点数、边数、package Dirty、磁盘 SHA、`edgesFingerprint` 全部未变 |
+| **单 op 等价** | 与单 writer 的 existing-pin 路径对同一条边：`fromType`/`toType` 相同；patch 建出的边哈希 == writer 建出的边哈希；结果里的 `fromNodeGuid`/`fromPinGuid`/`toNodeGuid`/`toPinGuid` == 活 pin |
+| **边集指纹有效性** | apply 后 `edgesFingerprint` **≠** before（显式断言）；一次 Undo 后 **==** before；Redo 后 **==** after；apply 前后 `linkCount` 0→1；节点数不变 |
+| 原子回滚（第 2 条注入失败） | `writeOccurred=false`、`transactionOpened=true`、`stateRestored=true`；`results` 2 条（`applied`+`rolledBack=true` / `failed`+`graph-patch-apply-fault-injected`）；第 1 条边**已断开**、节点数不变、`edgesFingerprint` == before、package 干净、磁盘 SHA 未变、**同一 plan 再 preview 得到同一 planId** |
+| 回滚后同一 patch 真跑 | 2 条边都建成、两条边各自指向不同目标、`undoVerified/redoVerified=true`；一次 Undo 两条边全收回 |
+| **一键建节点+连线** | `[createNode(not_bool,tmp:src), createNode(branch,tmp:dst), connect(tmp:src.ReturnValue→tmp:dst.Condition)]`：preview 里 connect 只带 `fromTempId`（无 `fromNodeGuid`）；apply 后 3 条全 `applied`，connect 的 `fromNodeGuid`/`toNodeGuid` 等于两条 createNode 返回的 `nodeGuid`，两个新节点之间**真的连上**；节点 +2、边 +1；一次 Undo 把边和两个节点全部收回 |
+| 四种 kind 混合 | `[setPinDefault, createVariable, createNode, connect]` 顺序被钉住并全部 `applied`；bool pin 变 `true`、变量 +1、节点 +1、边 +1；`undoVerified/redoVerified=true` |
+| 脏包拒绝 + 显式 Save | apply 后 preview → `graph-patch-package-dirty`；Save `saved=true`、`packageDirty=false`、`edgesFingerprint` == apply 的 after、`assetSha256` == 磁盘 SHA、磁盘 SHA 只在这一次变化；readback 的 node/link 计数与 apply 一致 |
+| Save 后新 preview | 干净包上再 preview connect：`edgesFingerprint` == 保存后的值（即新 before） |
+| **反向用例（本片证明支点）** | 一个 patch 建 2 个 bool 源并连到 branch.Condition 与 BooleanOR.A；随后**手工互换两个目标**（每条 pin 的 link 数仍是 1）：`stateFingerprint` **保持不变**（显式断言，证明它看不见端点），`edgesFingerprint` **必须改变**（显式断言），link 总数不变 |
+
+**B. 验收过程中改掉/补上的两处**
+
+1. **产品侧**：`createNode` 的 preview 明细原来不返回 `tempId`。切片 11 之后 tempId 是 patch 的
+   合法字段，preview 必须把它回显（否则调用方无法确认“我声明的标签被接受了”）。已补
+   `detail.tempId`，Connect 测试与 Python 契约都断言它。
+2. **测试侧**：单 writer 的 existing-pin 端点要求 `subCategory` 精确匹配实际 pin 的
+   `PinSubCategory`；bool pin 是 `None` 而不是空串。这是**测试构造**写错，不是产品缺陷。
+
+**C. 三个既有测试断言的契约更新（不是放宽）**
+
+- `AtomicPatch.CreateVariable` 与 `AtomicPatch.CreateNode` 都断言 `migratedKinds`：由“恰好 3 个”
+  改为“恰好 4 个且顺序为 setPinDefault, createVariable, createNode, connect”（更强）。
+- 两个测试里“未迁移 kind”的拒绝循环把 `connect` 换成 `disconnect`：`connect` 已迁移，它的
+  fail-closed 行为由本片 `Connect` 测试逐条断言，没有减少覆盖面。
+- `AtomicPatch.CreateNode` 原来断言“createNode 拒绝 tempId”；本片之后 tempId 是合法字段，改为
+  断言“createNode 接受并回显 tempId”，并在 `Connect` 测试里断言形状/重复/悬空/前向引用四种拒绝。
+
+**D. 磁盘与收尾**
+
+- 本次四个一次性 fixture（`BP_PatchConnect` / `BP_PatchCreateNode` / `BP_PatchVariables` /
+  `BP_PatchExpansion`）在验收后从 Host `Content/UEAgentKitPatchExpansion/` 删除。
+- 收尾：0 个 UE 进程；`DefaultEngine.ini` 未改（515 字节，无 `[UEAgentKit]` 段），无备份文件残留。
+
+### 只被单测覆盖的
+
+- Python 契约层：`connect` 的字段白名单、端点形状（GUID / `tmp:`）、tempId 的形状/重复/悬空/
+  前向引用、单节点 8 条 fan-out 上限、preview 与 apply 结果里连接条目的校验（含“tempId 端点不得
+  带 pinGuid”“类型必须相等”“createdEdgeCount 与 link 计数一致”）、`edgesFingerprint` 的 sha256
+  形状。
+- MCP 工具层：`ue_preview/apply/save_blueprint_patch_experimental` 的注册与信封、失败时
+  `error.details.results` 的搬运，只有单元测试。**本片同样没有重跑 MCP socket 级别的真实调用**，
+  因此“Python→bridge→C++”的 connect 路径目前是 C++ 自动化 + Python 单测两侧的证据，缺少一次
+  端到端 socket 调用记录。
+- `graph-patch-connect-limit`（24 条）实际不可达：patch 总 op 上限 16 < 24，保留该分支是为了把上限
+  写成显式的，而不是隐含在另一个限制里；没有测试声称它可达。

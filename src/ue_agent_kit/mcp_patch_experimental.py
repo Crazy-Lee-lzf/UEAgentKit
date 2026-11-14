@@ -127,14 +127,15 @@ def register_patch_experimental_tools(
 
         Each operation carries an opId plus its kind-specific fields. This build
         migrates setPinDefault (nodeGuid, pinName, pinGuid, type, value),
-        createVariable (name, type, defaultValue) and createNode (nodeType, x, y),
-        so a request that names any other kind is refused before it reaches the
-        Editor. A createVariable operation targets the Blueprint, not the graph:
-        the graphGuid only has to be a graph of that Blueprint (and the one the
-        focused editor shows). A createNode operation creates one node and no
-        edge; use the nodeGuid returned by Apply if you need to connect it in a
-        second patch. The result binds the exact before values, the
-        graph/state/variable/node fingerprints and the required Apply
+        createVariable (name, type, defaultValue), createNode (nodeType, x, y,
+        optional tempId) and connect (from, fromPin, to, toPin), so a request that
+        names any other kind is refused before it reaches the Editor. A
+        createVariable operation targets the Blueprint, not the graph: the
+        graphGuid only has to be a graph of that Blueprint (and the one the focused
+        editor shows). A connect endpoint is a node GUID or a tempId declared by an
+        EARLIER createNode of the same request, so one patch can create a node and
+        wire it in a single transaction. The result binds the exact before values,
+        the graph/state/variable/node/edge fingerprints and the required Apply
         confirmation, and it lists one validated entry per operation.
         """
         try:

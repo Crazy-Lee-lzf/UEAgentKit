@@ -170,6 +170,60 @@ def _node_apply_entry(**overrides: Any) -> dict[str, Any]:
     return item
 
 
+def _connect(
+    *,
+    from_ref: str = NODE_B,
+    from_pin: str = "ReturnValue",
+    to_ref: str = NODE_A,
+    to_pin: str = "Condition",
+    opId: str = "c1",
+) -> dict[str, Any]:
+    return {
+        "opId": opId,
+        "kind": "connect",
+        "from": from_ref,
+        "fromPin": from_pin,
+        "to": to_ref,
+        "toPin": to_pin,
+    }
+
+
+def _connect_preview_entry(**overrides: Any) -> dict[str, Any]:
+    item = {
+        "opId": "c1",
+        "kind": "connect",
+        "status": "validated",
+        "fromTempId": "tmp:br",
+        "fromPin": "then",
+        "fromType": "exec",
+        "toNodeGuid": NODE_A,
+        "toPinGuid": PIN_A,
+        "toPin": "execute",
+        "toType": "exec",
+    }
+    item.update(overrides)
+    return item
+
+
+def _connect_apply_entry(**overrides: Any) -> dict[str, Any]:
+    item = {
+        "opId": "c1",
+        "kind": "connect",
+        "status": "applied",
+        "rolledBack": False,
+        "fromNodeGuid": NODE_B,
+        "fromPin": "then",
+        "fromPinGuid": PIN_B,
+        "fromType": "exec",
+        "toNodeGuid": NODE_A,
+        "toPin": "execute",
+        "toPinGuid": PIN_A,
+        "toType": "exec",
+    }
+    item.update(overrides)
+    return item
+
+
 def _preview(**overrides: Any) -> dict[str, Any]:
     result: dict[str, Any] = {
         "schemaVersion": PREVIEW_SCHEMA_VERSION,
@@ -186,12 +240,13 @@ def _preview(**overrides: Any) -> dict[str, Any]:
         "stateFingerprint": STATE_FINGERPRINT,
         "variablesFingerprint": STATE_FINGERPRINT,
         "nodesFingerprint": STATE_FINGERPRINT,
+        "edgesFingerprint": STATE_FINGERPRINT,
         "variableCount": 2,
         "operationCount": 1,
         "nodeCount": 4,
         "linkCount": 3,
         "requiredConfirmation": APPLY_CONFIRMATION_PREFIX + PLAN_ID,
-        "migratedKinds": ["setPinDefault", "createVariable", "createNode"],
+        "migratedKinds": ["setPinDefault", "createVariable", "createNode", "connect"],
         "operations": [
             {
                 "opId": "p1",
@@ -234,11 +289,14 @@ def _apply(**overrides: Any) -> dict[str, Any]:
         "variablesFingerprintAfter": AFTER_STATE_FINGERPRINT,
         "nodesFingerprintBefore": STATE_FINGERPRINT,
         "nodesFingerprintAfter": AFTER_STATE_FINGERPRINT,
+        "edgesFingerprintBefore": STATE_FINGERPRINT,
+        "edgesFingerprintAfter": AFTER_STATE_FINGERPRINT,
         "variableCountBefore": 2,
         "variableCountAfter": 2,
         "nodeCountBefore": 4,
         "nodeCountAfter": 4,
         "createdNodeCount": 0,
+        "createdEdgeCount": 0,
         "linkCountBefore": 3,
         "linkCountAfter": 3,
         "operationCount": 1,
@@ -376,7 +434,7 @@ class PatchContractTests(unittest.TestCase):
 
     def test_unmigrated_and_unknown_kinds_are_refused(self) -> None:
         for kind, code in (
-            ("connect", "graph-patch-kind-not-migrated"),
+            ("disconnect", "graph-patch-kind-not-migrated"),
             ("rewirePin", "graph-patch-kind-not-migrated"),
             ("removeNode", "graph-patch-kind-not-migrated"),
             ("moveNode", "graph-patch-kind-not-allowed"),
@@ -396,7 +454,7 @@ class PatchContractTests(unittest.TestCase):
             validate_preview_parameters(
                 asset_path=ASSET,
                 graph_guid=GRAPH,
-                operations=[_operation(), _operation(opId="p2", kind="connect")],
+                operations=[_operation(), _operation(opId="p2", kind="disconnect")],
             )
         self.assertEqual(raised.exception.code, "graph-patch-kind-not-migrated")
 
@@ -664,11 +722,11 @@ class PatchContractTests(unittest.TestCase):
 
     def test_create_node_rejects_foreign_fields(self) -> None:
         for extra in (
-            {"tempId": "tmp:a"},
             {"nodeGuid": NODE_A},
             {"inputLiterals": []},
             {"defaultValue": "1"},
             {"variableName": "Counter"},
+            {"from": NODE_A},
         ):
             with self.subTest(extra=extra):
                 with self.assertRaises(PatchError) as raised:
@@ -679,16 +737,192 @@ class PatchContractTests(unittest.TestCase):
                     )
                 self.assertEqual(raised.exception.code, "graph-patch-unknown-parameter")
 
-    def test_three_kind_patch_is_accepted_together(self) -> None:
+    def test_create_node_temp_id_is_optional_and_validated(self) -> None:
         request = validate_preview_parameters(
             asset_path=ASSET,
             graph_guid=GRAPH,
-            operations=[_operation(), _variable(opId="v1"), _node(opId="n1")],
+            operations=[_node(tempId="tmp:br")],
+        )
+        self.assertEqual(request["operations"][0]["tempId"], "tmp:br")
+
+        # A createNode without a tempId stays legal.
+        request = validate_preview_parameters(
+            asset_path=ASSET,
+            graph_guid=GRAPH,
+            operations=[_node()],
+        )
+        self.assertNotIn("tempId", request["operations"][0])
+
+        for temp_id in ("tmp:", "tmp:" + "a" * 65, "tmp:a b", "temp:a", 7):
+            with self.subTest(temp_id=temp_id):
+                with self.assertRaises(PatchError) as raised:
+                    validate_preview_parameters(
+                        asset_path=ASSET,
+                        graph_guid=GRAPH,
+                        operations=[_node(tempId=temp_id)],
+                    )
+                self.assertIn(
+                    raised.exception.code,
+                    ("graph-edit-temp-id-invalid", "graph-patch-invalid-parameters"),
+                )
+
+        with self.assertRaises(PatchError) as raised:
+            validate_preview_parameters(
+                asset_path=ASSET,
+                graph_guid=GRAPH,
+                operations=[_node(opId="n1", tempId="tmp:a"), _node(opId="n2", tempId="tmp:a")],
+            )
+        self.assertEqual(raised.exception.code, "graph-patch-duplicate-temp-id")
+
+    def test_connect_operation_is_normalized(self) -> None:
+        request = validate_preview_parameters(
+            asset_path=ASSET,
+            graph_guid=GRAPH,
+            operations=[
+                _node(tempId="tmp:br"),
+                _connect(from_ref="tmp:br", from_pin="then", to_ref=NODE_A, to_pin="execute"),
+            ],
+        )
+        self.assertEqual(
+            request["operations"][1],
+            {
+                "opId": "c1",
+                "kind": "connect",
+                "from": "tmp:br",
+                "fromPin": "then",
+                "to": NODE_A,
+                "toPin": "execute",
+            },
+        )
+
+        # Existing-to-existing and existing-to-new both stay legal.
+        validate_preview_parameters(
+            asset_path=ASSET,
+            graph_guid=GRAPH,
+            operations=[
+                _connect(from_ref=NODE_A, from_pin="then", to_ref=NODE_B, to_pin="execute"),
+            ],
+        )
+
+    def test_connect_temp_id_rules_are_enforced_before_any_write(self) -> None:
+        cases = (
+            (
+                [_connect(from_ref="tmp:missing", from_pin="then", to_ref=NODE_A, to_pin="execute")],
+                "graph-patch-unknown-temp-id",
+            ),
+            (
+                # Forward reference: the createNode comes afterwards.
+                [
+                    _connect(from_ref="tmp:later", from_pin="then", to_ref=NODE_A, to_pin="execute"),
+                    _node(opId="n1", tempId="tmp:later"),
+                ],
+                "graph-patch-forward-temp-id",
+            ),
+            (
+                [_connect(from_ref="not-a-guid", from_pin="then", to_ref=NODE_A, to_pin="execute")],
+                "graph-patch-invalid-identifier",
+            ),
+            (
+                [_connect(from_ref="tmp:", from_pin="then", to_ref=NODE_A, to_pin="execute")],
+                "graph-edit-temp-id-invalid",
+            ),
+        )
+        for operations, code in cases:
+            with self.subTest(code=code):
+                with self.assertRaises(PatchError) as raised:
+                    validate_preview_parameters(
+                        asset_path=ASSET,
+                        graph_guid=GRAPH,
+                        operations=operations,
+                    )
+                self.assertEqual(raised.exception.code, code)
+
+        with self.assertRaises(PatchError) as raised:
+            validate_preview_parameters(
+                asset_path=ASSET,
+                graph_guid=GRAPH,
+                operations=[
+                    _connect(from_ref=NODE_A, from_pin="then", to_ref=NODE_B, to_pin="execute"),
+                    _connect(
+                        opId="c2",
+                        from_ref=NODE_A,
+                        from_pin="else",
+                        to_ref=NODE_B,
+                        to_pin="execute",
+                    ),
+                ],
+            )
+        self.assertEqual(raised.exception.code, "graph-edit-connection-duplicate")
+
+    def test_four_kind_patch_is_accepted_together(self) -> None:
+        request = validate_preview_parameters(
+            asset_path=ASSET,
+            graph_guid=GRAPH,
+            operations=[
+                _operation(),
+                _variable(opId="v1"),
+                _node(opId="n1", tempId="tmp:br"),
+                _connect(from_ref="tmp:br", from_pin="then", to_ref=NODE_A, to_pin="execute"),
+            ],
         )
         self.assertEqual(
             [item["kind"] for item in request["operations"]],
-            ["setPinDefault", "createVariable", "createNode"],
+            ["setPinDefault", "createVariable", "createNode", "connect"],
         )
+
+    def test_connect_result_entries_are_validated(self) -> None:
+        preview = _preview(
+            operations=[
+                _node_preview_entry(tempId="tmp:br"),
+                _connect_preview_entry(),
+            ],
+            operationCount=2,
+        )
+        normalized = validate_preview_result(preview)
+        self.assertEqual(normalized["operations"][1]["fromTempId"], "tmp:br")
+        self.assertEqual(normalized["operations"][1]["toNodeGuid"], NODE_A)
+        self.assertNotIn("fromNodeGuid", normalized["operations"][1])
+
+        for mutation in (
+            {"fromTempId": "tmp:never-declared"},
+            {"fromNodeGuid": NODE_A, "fromTempId": "tmp:br"},
+            {"fromPinGuid": PIN_A},
+            {"fromType": "int"},
+            {"fromType": "object"},
+            {"toPin": ""},
+        ):
+            with self.subTest(mutation=mutation):
+                with self.assertRaises(PatchError) as raised:
+                    validate_preview_result(
+                        _preview(
+                            operations=[
+                                _node_preview_entry(tempId="tmp:br"),
+                                _connect_preview_entry(**mutation),
+                            ],
+                            operationCount=2,
+                        )
+                    )
+                self.assertEqual(raised.exception.code, "graph-patch-preview-invalid")
+
+        apply = _apply(
+            linkCountBefore=3,
+            linkCountAfter=4,
+            createdEdgeCount=1,
+            results=[_connect_apply_entry()],
+        )
+        normalized_apply = validate_apply_result(apply)
+        self.assertEqual(normalized_apply["results"][0]["fromNodeGuid"], NODE_B)
+
+        for mutation in (
+            {"createdEdgeCount": 2},
+            {"linkCountAfter": 3},
+            {"results": [_connect_apply_entry(fromPinGuid="not-a-guid")]},
+            {"edgesFingerprintAfter": "sha256:short"},
+        ):
+            with self.subTest(mutation=mutation):
+                with self.assertRaises(PatchError) as raised:
+                    validate_apply_result(apply | mutation)
+                self.assertEqual(raised.exception.code, "graph-patch-apply-invalid")
 
     def test_node_result_entries_are_validated(self) -> None:
         preview = _preview(

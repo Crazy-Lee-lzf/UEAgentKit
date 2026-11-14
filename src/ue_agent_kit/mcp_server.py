@@ -1434,9 +1434,9 @@ def _capabilities_response(
                 },
                 "requiresCompletePreviewResult": True,
                 "acceptsCallerBuiltRequest": False,
-                "migratedKinds": ["setPinDefault", "createVariable", "createNode"],
+                "migratedKinds": ["setPinDefault", "createVariable", "createNode", "connect"],
                 "reservedKinds": [
-                    "connect",
+                    "disconnect",
                     "rewirePin",
                     "removeNode",
                 ],

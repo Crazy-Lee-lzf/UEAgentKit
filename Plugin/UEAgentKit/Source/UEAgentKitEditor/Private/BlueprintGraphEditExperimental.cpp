@@ -4614,6 +4614,266 @@ namespace
 		return bAllRemoved;
 	}
 
+	/** Exactly one pin with this name and direction, or a writer-coded failure. */
+	UEdGraphPin* FindUniquePin(
+		UEdGraphNode* Node,
+		const FString& PinName,
+		const EEdGraphPinDirection Direction,
+		const TCHAR* Role,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
+	{
+		if (Node == nullptr)
+		{
+			Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-node-reference-unknown"),
+				TEXT("The edge endpoint node is unavailable."));
+			return nullptr;
+		}
+		UEdGraphPin* Match = nullptr;
+		for (UEdGraphPin* Pin : Node->Pins)
+		{
+			if (Pin != nullptr
+				&& Pin->Direction == Direction
+				&& Pin->PinName.ToString().Equals(PinName, ESearchCase::CaseSensitive))
+			{
+				if (Match != nullptr)
+				{
+					Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-edit-pin-ambiguous"),
+						FString::Printf(
+							TEXT("More than one %s pin named %s exists on node %s."),
+							Role,
+							*PinName,
+							*Node->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower)));
+					return nullptr;
+				}
+				Match = Pin;
+			}
+		}
+		if (Match == nullptr)
+		{
+			Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-pin-not-found"),
+				FString::Printf(
+					TEXT("Node %s has no %s pin named %s."),
+					*Node->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower),
+					Role,
+					*PinName));
+		}
+		return Match;
+	}
+
+	/** Resolve one non-tempId endpoint against the live graph. */
+	bool ResolveLiveEdgeEndpoint(
+		UEdGraph* Graph,
+		const bool bFrom,
+		UEAgentKitBlueprintGraphEditExperimental::FAtomicEdgeOperation& InOutOperation,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
+	{
+		const FString& NodeGuidText = bFrom ? InOutOperation.FromNodeGuid : InOutOperation.ToNodeGuid;
+		const FString& PinName = bFrom ? InOutOperation.FromPin : InOutOperation.ToPin;
+		FGuid NodeGuid;
+		if (!FGuid::Parse(NodeGuidText, NodeGuid))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-node-reference-unknown"),
+				FString::Printf(TEXT("'%s' is not a canonical node GUID."), *NodeGuidText));
+		}
+		UEdGraphNode* Node = FindNodeByGuid(Graph, NodeGuid);
+		if (Node == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-existing-node-not-found"),
+				FString::Printf(TEXT("No node with GUID %s exists in the focused graph."), *NodeGuidText));
+		}
+		if (Cast<UK2Node>(Node) == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-existing-node-not-k2"),
+				TEXT("Edge endpoints must be K2 Blueprint nodes."));
+		}
+		UEdGraphPin* Pin = FindUniquePin(
+			Node,
+			PinName,
+			bFrom ? EGPD_Output : EGPD_Input,
+			bFrom ? TEXT("output") : TEXT("input"),
+			OutErrorCode,
+			OutErrorMessage);
+		if (Pin == nullptr)
+		{
+			return false;
+		}
+		FString Type;
+		if (!ExistingPinTypeToken(Pin->PinType, Type))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-existing-pin-type-not-supported"),
+				FString::Printf(
+					TEXT("Pin %s carries a type this slice cannot connect (only exec/bool/int/double/string are supported)."),
+					*PinName));
+		}
+		if (!bFrom)
+		{
+			if (Pin->LinkedTo.Num() != 0)
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-existing-pin-already-linked"),
+					TEXT("The target input pin is already connected; this slice never breaks an existing link."));
+			}
+		}
+		if (bFrom)
+		{
+			InOutOperation.FromPinId = Pin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower);
+			InOutOperation.FromType = Type;
+		}
+		else
+		{
+			InOutOperation.ToPinId = Pin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower);
+			InOutOperation.ToType = Type;
+		}
+		return true;
+	}
+
+	/** Resolve one tempId endpoint from the declaring createNode operation. */
+	bool ResolveDeclaredEdgeEndpoint(
+		const UEAgentKitBlueprintGraphEditExperimental::FAtomicNodeOperation& Node,
+		const bool bFrom,
+		UEAgentKitBlueprintGraphEditExperimental::FAtomicEdgeOperation& InOutOperation,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
+	{
+		const FString& PinName = bFrom ? InOutOperation.FromPin : InOutOperation.ToPin;
+		const TArray<FString>& Pins = bFrom ? Node.OutputPins : Node.InputPins;
+		const TMap<FString, FString>& Types = bFrom ? Node.OutputPinTypes : Node.InputPinTypes;
+		if (!Pins.Contains(PinName))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-pin-not-allowed"),
+				FString::Printf(
+					TEXT("%s is not a supported %s pin of %s; allowed: %s."),
+					*PinName,
+					bFrom ? TEXT("output") : TEXT("input"),
+					*Node.NodeType,
+					*FString::Join(Pins, TEXT(", "))));
+		}
+		const FString Type = Types.FindRef(PinName);
+		if (Type.IsEmpty())
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-pin-not-allowed"),
+				FString::Printf(TEXT("%s has no declared type on %s."), *PinName, *Node.NodeType));
+		}
+		if (bFrom)
+		{
+			InOutOperation.FromType = Type;
+		}
+		else
+		{
+			InOutOperation.ToType = Type;
+		}
+		return true;
+	}
+
+	/** Break one edge and verify both pins stopped pointing at each other. */
+	bool BreakEdge(
+		UEdGraphPin* FromPin,
+		UEdGraphPin* ToPin,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
+	{
+		if (FromPin == nullptr || ToPin == nullptr)
+		{
+			return true;
+		}
+		FromPin->BreakLinkTo(ToPin);
+		if (FromPin->GetOwningNode() != nullptr)
+		{
+			FromPin->GetOwningNode()->PinConnectionListChanged(FromPin);
+		}
+		if (ToPin->GetOwningNode() != nullptr)
+		{
+			ToPin->GetOwningNode()->PinConnectionListChanged(ToPin);
+		}
+		if (FromPin->LinkedTo.Contains(ToPin) || ToPin->LinkedTo.Contains(FromPin))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-disconnect-failed"),
+				TEXT("The Editor did not remove the exact edge."));
+		}
+		return true;
+	}
+
+	/** Locate one edge's two pins by resolved identity; either may be null. */
+	void FindEdgePins(
+		UEdGraph* Graph,
+		const UEAgentKitBlueprintGraphEditExperimental::FAtomicEdgeOperation& Operation,
+		UEdGraphPin*& OutFromPin,
+		UEdGraphPin*& OutToPin)
+	{
+		OutFromPin = nullptr;
+		OutToPin = nullptr;
+		FGuid FromGuid;
+		FGuid ToGuid;
+		if (Graph == nullptr
+			|| !FGuid::Parse(Operation.FromNodeGuid, FromGuid)
+			|| !FGuid::Parse(Operation.ToNodeGuid, ToGuid))
+		{
+			return;
+		}
+		UEdGraphNode* FromNode = FindNodeByGuid(Graph, FromGuid);
+		UEdGraphNode* ToNode = FindNodeByGuid(Graph, ToGuid);
+		if (FromNode != nullptr)
+		{
+			for (UEdGraphPin* Pin : FromNode->Pins)
+			{
+				if (Pin != nullptr
+					&& Pin->Direction == EGPD_Output
+					&& Pin->PinName.ToString().Equals(Operation.FromPin, ESearchCase::CaseSensitive))
+				{
+					OutFromPin = Pin;
+					break;
+				}
+			}
+		}
+		if (ToNode != nullptr)
+		{
+			for (UEdGraphPin* Pin : ToNode->Pins)
+			{
+				if (Pin != nullptr
+					&& Pin->Direction == EGPD_Input
+					&& Pin->PinName.ToString().Equals(Operation.ToPin, ESearchCase::CaseSensitive))
+				{
+					OutToPin = Pin;
+					break;
+				}
+			}
+		}
+	}
+
 }
 
 bool UEAgentKitBlueprintGraphEditExperimental::IsExperimentalWriteAvailable()
@@ -4911,6 +5171,507 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryRestoreAtomicNodeOperations(
 			OutErrorMessage,
 			TEXT("graph-edit-node-restore-failed"),
 			TEXT("At least one created node survived its removal."));
+	}
+	return true;
+}
+
+FString UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicEdgeStateFingerprint(UEdGraph* Graph)
+{
+	// One implementation, already used by the rewire writer's Preview/Apply/Save:
+	// its hash covers the exact endpoints (node GUID + pin name + pin GUID), which
+	// is the property the atomic patch needs.
+	FString Hash;
+	if (!UEAgentKitBlueprintRewireExperimental::TryComputeLiveEdgeSetHash(Graph, Hash))
+	{
+		return FString();
+	}
+	return Hash;
+}
+
+bool UEAgentKitBlueprintGraphEditExperimental::TryResolveAtomicEdgeOperation(
+	UEdGraph* Graph,
+	FAtomicEdgeOperation& InOutOperation,
+	FTempNodeResolver ResolveTempNode,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	if (Graph == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-graph-unavailable"),
+			TEXT("The exact graph is unavailable."));
+	}
+	if (Graph->GetSchema() == nullptr || !Graph->GetSchema()->IsA<UEdGraphSchema_K2>())
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-schema-not-supported"),
+			TEXT("Experimental graph edit supports only K2 Blueprint graphs."));
+	}
+	if (InOutOperation.FromPin.IsEmpty() || InOutOperation.ToPin.IsEmpty())
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-invalid-parameters"),
+			TEXT("fromPin and toPin must be non-empty pin names."));
+	}
+	const bool bFromDeclared = !InOutOperation.FromTempId.IsEmpty();
+	const bool bToDeclared = !InOutOperation.ToTempId.IsEmpty();
+	const bool bFromGuid = !InOutOperation.FromNodeGuid.IsEmpty();
+	const bool bToGuid = !InOutOperation.ToNodeGuid.IsEmpty();
+	if (bFromDeclared == bFromGuid || bToDeclared == bToGuid)
+	{
+		// Exactly one identity form per endpoint.  A patch that fills both (or
+		// neither) is an internal contract violation, never a caller-visible shape.
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-invalid-parameters"),
+			TEXT("Each edge endpoint must carry exactly one of nodeGuid or tempId."));
+	}
+
+	if (bFromDeclared)
+	{
+		const FAtomicNodeOperation* Declared = ResolveTempNode(InOutOperation.FromTempId);
+		if (Declared == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-patch-unknown-temp-id"),
+				FString::Printf(
+					TEXT("tempId '%s' was not declared by an earlier createNode operation."),
+					*InOutOperation.FromTempId));
+		}
+		if (!ResolveDeclaredEdgeEndpoint(*Declared, /*bFrom=*/true, InOutOperation, OutErrorCode, OutErrorMessage))
+		{
+			return false;
+		}
+	}
+	else if (!ResolveLiveEdgeEndpoint(Graph, /*bFrom=*/true, InOutOperation, OutErrorCode, OutErrorMessage))
+	{
+		return false;
+	}
+
+	if (bToDeclared)
+	{
+		const FAtomicNodeOperation* Declared = ResolveTempNode(InOutOperation.ToTempId);
+		if (Declared == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-patch-unknown-temp-id"),
+				FString::Printf(
+					TEXT("tempId '%s' was not declared by an earlier createNode operation."),
+					*InOutOperation.ToTempId));
+		}
+		if (!ResolveDeclaredEdgeEndpoint(*Declared, /*bFrom=*/false, InOutOperation, OutErrorCode, OutErrorMessage))
+		{
+			return false;
+		}
+	}
+	else if (!ResolveLiveEdgeEndpoint(Graph, /*bFrom=*/false, InOutOperation, OutErrorCode, OutErrorMessage))
+	{
+		return false;
+	}
+
+	// A node cannot connect to itself.  Two tempIds compare by name; two GUIDs
+	// compare by GUID; a mixed pair cannot be the same node because the tempId
+	// node does not exist yet.
+	if (bFromDeclared && bToDeclared)
+	{
+		if (InOutOperation.FromTempId.Equals(InOutOperation.ToTempId, ESearchCase::CaseSensitive))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-self-connection"),
+				TEXT("A node cannot connect to itself in this experimental slice."));
+		}
+	}
+	else if (!bFromDeclared && !bToDeclared)
+	{
+		if (InOutOperation.FromNodeGuid.Equals(InOutOperation.ToNodeGuid, ESearchCase::CaseSensitive))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-self-connection"),
+				TEXT("A node cannot connect to itself in this experimental slice."));
+		}
+	}
+
+	if (!InOutOperation.FromType.Equals(InOutOperation.ToType, ESearchCase::CaseSensitive))
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-pin-type-mismatch"),
+			FString::Printf(
+				TEXT("Cannot connect %s (%s) to %s (%s); data kinds must match exactly."),
+				*InOutOperation.FromPin,
+				*InOutOperation.FromType,
+				*InOutOperation.ToPin,
+				*InOutOperation.ToType));
+	}
+
+	// The K2 schema is only consulted when both endpoints exist live.  A tempId
+	// endpoint mirrors the single writer's new-node path, which also relies on the
+	// exact type match above plus TryCreateConnection.
+	if (!bFromDeclared && !bToDeclared)
+	{
+		UEdGraphPin* FromPin = nullptr;
+		UEdGraphPin* ToPin = nullptr;
+		FindEdgePins(Graph, InOutOperation, FromPin, ToPin);
+		if (!ValidateSchemaConnection(Graph, FromPin, ToPin, OutErrorCode, OutErrorMessage))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+bool UEAgentKitBlueprintGraphEditExperimental::TryApplyAtomicEdgeOperations(
+	UBlueprint* Blueprint,
+	UEdGraph* Graph,
+	TArray<FAtomicEdgeOperation>& InOutOperations,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	if (Blueprint == nullptr || Graph == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-graph-unavailable"),
+			TEXT("The exact Blueprint graph is unavailable."));
+	}
+	if (InOutOperations.IsEmpty() || InOutOperations.Num() > MaxConnections)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-invalid-connections"),
+			FString::Printf(
+				TEXT("An atomic edge Apply takes between 1 and %d operations."),
+				MaxConnections));
+	}
+
+	TArray<TPair<UEdGraphPin*, UEdGraphPin*>> CreatedEdges;
+	auto RollbackCreatedEdges = [&]()
+	{
+		for (int32 Index = CreatedEdges.Num() - 1; Index >= 0; --Index)
+		{
+			FString IgnoredCode;
+			FString IgnoredMessage;
+			BreakEdge(CreatedEdges[Index].Key, CreatedEdges[Index].Value, IgnoredCode, IgnoredMessage);
+		}
+		CreatedEdges.Reset();
+	};
+
+	for (FAtomicEdgeOperation& Operation : InOutOperations)
+	{
+		// tempIds must already be translated by the caller; a leftover one means
+		// the patch tried to write an edge to a node that does not exist.
+		if (Operation.FromTempId.IsEmpty() == false || Operation.ToTempId.IsEmpty() == false)
+		{
+			RollbackCreatedEdges();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-node-reference-unknown"),
+				TEXT("An unresolved tempId reached the edge Apply; nothing was written."));
+		}
+		FGuid FromGuid;
+		FGuid ToGuid;
+		if (!FGuid::Parse(Operation.FromNodeGuid, FromGuid)
+			|| !FGuid::Parse(Operation.ToNodeGuid, ToGuid))
+		{
+			RollbackCreatedEdges();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-node-reference-unknown"),
+				TEXT("An edge endpoint did not carry a canonical node GUID."));
+		}
+		UEdGraphNode* FromNode = FindNodeByGuid(Graph, FromGuid);
+		UEdGraphNode* ToNode = FindNodeByGuid(Graph, ToGuid);
+		if (FromNode == nullptr || ToNode == nullptr)
+		{
+			RollbackCreatedEdges();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-existing-node-not-found"),
+				TEXT("An edge endpoint node disappeared before the transaction could connect it."));
+		}
+		if (Cast<UK2Node>(FromNode) == nullptr || Cast<UK2Node>(ToNode) == nullptr)
+		{
+			RollbackCreatedEdges();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-existing-node-not-k2"),
+				TEXT("Edge endpoints must be K2 Blueprint nodes."));
+		}
+		if (FromNode == ToNode)
+		{
+			RollbackCreatedEdges();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-self-connection"),
+				TEXT("A node cannot connect to itself in this experimental slice."));
+		}
+		UEdGraphPin* FromPin = FindUniquePin(
+			FromNode,
+			Operation.FromPin,
+			EGPD_Output,
+			TEXT("output"),
+			OutErrorCode,
+			OutErrorMessage);
+		if (FromPin == nullptr)
+		{
+			RollbackCreatedEdges();
+			return false;
+		}
+		UEdGraphPin* ToPin = FindUniquePin(
+			ToNode,
+			Operation.ToPin,
+			EGPD_Input,
+			TEXT("input"),
+			OutErrorCode,
+			OutErrorMessage);
+		if (ToPin == nullptr)
+		{
+			RollbackCreatedEdges();
+			return false;
+		}
+		FString FromType;
+		FString ToType;
+		if (!ExistingPinTypeToken(FromPin->PinType, FromType)
+			|| !ExistingPinTypeToken(ToPin->PinType, ToType))
+		{
+			RollbackCreatedEdges();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-existing-pin-type-not-supported"),
+				TEXT("An edge pin carries a type this slice cannot connect."));
+		}
+		if (!FromType.Equals(ToType, ESearchCase::CaseSensitive))
+		{
+			RollbackCreatedEdges();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-pin-type-mismatch"),
+				FString::Printf(
+					TEXT("Cannot connect %s (%s) to %s (%s); data kinds must match exactly."),
+					*Operation.FromPin,
+					*FromType,
+					*Operation.ToPin,
+					*ToType));
+		}
+		if (ToPin->LinkedTo.Num() != 0)
+		{
+			RollbackCreatedEdges();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-existing-pin-already-linked"),
+				TEXT("The target input pin became connected; this slice never breaks an existing link."));
+		}
+		if (FromPin->LinkedTo.Contains(ToPin))
+		{
+			RollbackCreatedEdges();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-connection-duplicate"),
+				TEXT("The exact edge already exists."));
+		}
+		// Both endpoints were live at plan time exactly when the patch already
+		// resolved their pin GUIDs; that is the case the single writer also sends
+		// through the schema check.
+		if (!Operation.FromPinId.IsEmpty() && !Operation.ToPinId.IsEmpty())
+		{
+			if (!ValidateSchemaConnection(Graph, FromPin, ToPin, OutErrorCode, OutErrorMessage))
+			{
+				RollbackCreatedEdges();
+				return false;
+			}
+		}
+		if (!Graph->GetSchema()->TryCreateConnection(FromPin, ToPin)
+			|| !FromPin->LinkedTo.Contains(ToPin))
+		{
+			RollbackCreatedEdges();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-connection-failed"),
+				TEXT("The Editor rejected the planned connection."));
+		}
+		if (ToPin->LinkedTo.Num() != 1 || !ToPin->LinkedTo.Contains(FromPin))
+		{
+			RollbackCreatedEdges();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-connection-failed"),
+				TEXT("The created edge did not read back as the only link on its target input."));
+		}
+		Operation.FromNodeGuid = FromNode->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower);
+		Operation.ToNodeGuid = ToNode->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower);
+		Operation.FromPinId = FromPin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower);
+		Operation.ToPinId = ToPin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower);
+		Operation.FromType = FromType;
+		Operation.ToType = ToType;
+		CreatedEdges.Add(TPair<UEdGraphPin*, UEdGraphPin*>(FromPin, ToPin));
+	}
+	return true;
+}
+
+bool UEAgentKitBlueprintGraphEditExperimental::TryCheckAtomicEdgeOperations(
+	UEdGraph* Graph,
+	const TArray<FAtomicEdgeOperation>& Operations,
+	bool bExpectAfter,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	if (Graph == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-graph-unavailable"),
+			TEXT("The exact graph is unavailable."));
+	}
+	for (const FAtomicEdgeOperation& Operation : Operations)
+	{
+		UEdGraphPin* FromPin = nullptr;
+		UEdGraphPin* ToPin = nullptr;
+		FindEdgePins(Graph, Operation, FromPin, ToPin);
+		if (!bExpectAfter)
+		{
+			// Undo of a patch that also created the nodes removes the nodes, so a
+			// missing endpoint is exactly the restored state.
+			if (FromPin != nullptr && ToPin != nullptr
+				&& (FromPin->LinkedTo.Contains(ToPin) || ToPin->LinkedTo.Contains(FromPin)))
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-readback-failed"),
+					FString::Printf(
+						TEXT("Edge %s.%s -> %s.%s is still present after the restore."),
+						*Operation.FromNodeGuid,
+						*Operation.FromPin,
+						*Operation.ToNodeGuid,
+						*Operation.ToPin));
+			}
+			continue;
+		}
+		if (FromPin == nullptr || ToPin == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-readback-failed"),
+				FString::Printf(
+					TEXT("Edge %s.%s -> %s.%s has a missing endpoint after Apply."),
+					*Operation.FromNodeGuid,
+					*Operation.FromPin,
+					*Operation.ToNodeGuid,
+					*Operation.ToPin));
+		}
+		if (!Operation.FromPinId.IsEmpty()
+			&& !FromPin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower).Equals(
+				Operation.FromPinId,
+				ESearchCase::CaseSensitive))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-readback-failed"),
+				TEXT("The source pin no longer carries the resolved PinId."));
+		}
+		if (!Operation.ToPinId.IsEmpty()
+			&& !ToPin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower).Equals(
+				Operation.ToPinId,
+				ESearchCase::CaseSensitive))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-readback-failed"),
+				TEXT("The target pin no longer carries the resolved PinId."));
+		}
+		if (!FromPin->LinkedTo.Contains(ToPin)
+			|| ToPin->LinkedTo.Num() != 1
+			|| !ToPin->LinkedTo.Contains(FromPin))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-readback-failed"),
+				FString::Printf(
+					TEXT("Edge %s.%s -> %s.%s is not the only link on its target input."),
+					*Operation.FromNodeGuid,
+					*Operation.FromPin,
+					*Operation.ToNodeGuid,
+					*Operation.ToPin));
+		}
+	}
+	return true;
+}
+
+bool UEAgentKitBlueprintGraphEditExperimental::TryRestoreAtomicEdgeOperations(
+	UBlueprint* Blueprint,
+	UEdGraph* Graph,
+	const TArray<FAtomicEdgeOperation>& Operations,
+	int32 AppliedCount,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	if (Graph == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-graph-unavailable"),
+			TEXT("The exact graph is unavailable."));
+	}
+	if (AppliedCount < 0 || AppliedCount > Operations.Num())
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-invalid-connections"),
+			TEXT("AppliedCount must address the prefix of the operation list."));
+	}
+	for (int32 Index = AppliedCount - 1; Index >= 0; --Index)
+	{
+		UEdGraphPin* FromPin = nullptr;
+		UEdGraphPin* ToPin = nullptr;
+		FindEdgePins(Graph, Operations[Index], FromPin, ToPin);
+		if (FromPin == nullptr || ToPin == nullptr)
+		{
+			continue;
+		}
+		if (!FromPin->LinkedTo.Contains(ToPin) && !ToPin->LinkedTo.Contains(FromPin))
+		{
+			continue;
+		}
+		if (!BreakEdge(FromPin, ToPin, OutErrorCode, OutErrorMessage))
+		{
+			return false;
+		}
 	}
 	return true;
 }

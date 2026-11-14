@@ -622,46 +622,57 @@ bool FUEAgentKitPatchCreateNodeTest::RunTest(const FString& Parameters)
 				return Fail();
 			}
 		}
-		// A foreign field is a typo, not something to ignore.
+		// A tempId became a legal createNode field in 0-3.4 slice 11 (it is what a
+		// connect endpoint of the same patch refers to), so this asserts the new
+		// contract: the label is accepted and reported, not silently ignored.
 		{
-			TSharedPtr<FJsonObject> BadField =
+			TSharedPtr<FJsonObject> WithTempId =
 				MakeNodeOperation(TEXT("n1"), TEXT("branch"), 0, 0);
-			BadField->SetStringField(TEXT("tempId"), TEXT("tmp:a"));
-			TSharedPtr<FJsonObject> RefusedResult;
-			FString RefusedCode;
-			FString RefusedMessage;
-			if (!TestFalse(
-					TEXT("a createNode operation refuses a tempId"),
+			WithTempId->SetStringField(TEXT("tempId"), TEXT("tmp:a"));
+			TSharedPtr<FJsonObject> TempIdPreview;
+			FString TempIdCode;
+			FString TempIdMessage;
+			if (!TestTrue(
+					TEXT("a createNode operation accepts a tempId"),
 					UEAgentKitBlueprintPatchExperimental::TryPreviewExperimental(
-						BuildPatchParams(Blueprint, Graph, { BadField }),
-						RefusedResult,
-						RefusedCode,
-						RefusedMessage))
-				|| !TestEqual(
-					TEXT("foreign-field code"),
-					RefusedCode,
-					FString(TEXT("graph-patch-unknown-parameter"))))
+						BuildPatchParams(Blueprint, Graph, { WithTempId }),
+						TempIdPreview,
+						TempIdCode,
+						TempIdMessage))
+				|| !TestTrue(TEXT("the tempId preview exists"), TempIdPreview.IsValid()))
+			{
+				AddError(TempIdCode + TEXT(" ") + TempIdMessage);
+				return Fail();
+			}
+			const TSharedPtr<FJsonObject> Entry =
+				TempIdPreview->GetArrayField(TEXT("operations"))[0]->AsObject();
+			if (!TestEqual(
+					TEXT("the preview reports the tempId"),
+					Entry->GetStringField(TEXT("tempId")),
+					FString(TEXT("tmp:a"))))
 			{
 				return Fail();
 			}
 		}
-		// `connect` is still unmigrated and must be refused before any write.
+		// `disconnect` is still unmigrated and must be refused before any write.
+		// (`connect` became migrated in 0-3.4 slice 11 and has its own automation
+		// test, UEAgentKit.AtomicPatch.Connect.)
 		{
 			TSharedRef<FJsonObject> Connect = MakeShared<FJsonObject>();
 			Connect->SetStringField(TEXT("opId"), TEXT("c1"));
-			Connect->SetStringField(TEXT("kind"), TEXT("connect"));
+			Connect->SetStringField(TEXT("kind"), TEXT("disconnect"));
 			TSharedPtr<FJsonObject> RefusedResult;
 			FString RefusedCode;
 			FString RefusedMessage;
 			if (!TestFalse(
-					TEXT("connect is still refused as unmigrated"),
+					TEXT("disconnect is still refused as unmigrated"),
 					UEAgentKitBlueprintPatchExperimental::TryPreviewExperimental(
 						BuildPatchParams(Blueprint, Graph, { Connect }),
 						RefusedResult,
 						RefusedCode,
 						RefusedMessage))
 				|| !TestEqual(
-					TEXT("connect refusal code"),
+					TEXT("disconnect refusal code"),
 					RefusedCode,
 					FString(TEXT("graph-patch-kind-not-migrated"))))
 			{
@@ -877,9 +888,9 @@ bool FUEAgentKitPatchCreateNodeTest::RunTest(const FString& Parameters)
 		const TArray<TSharedPtr<FJsonValue>>& MigratedKinds =
 			Preview->GetArrayField(TEXT("migratedKinds"));
 		if (!TestEqual(
-				TEXT("the preview advertises the three migrated kinds"),
+				TEXT("the preview advertises the four migrated kinds"),
 				JoinStrings(MigratedKinds),
-				FString(TEXT("setPinDefault,createVariable,createNode")))
+				FString(TEXT("setPinDefault,createVariable,createNode,connect")))
 			|| !TestEqual(
 				TEXT("the preview binds the live node fingerprint"),
 				Preview->GetStringField(TEXT("nodesFingerprint")),

@@ -184,6 +184,124 @@ namespace UEAgentKitBlueprintGraphEditExperimental
 	 */
 	FString ComputeAtomicNodeStateFingerprint(UEdGraph* Graph);
 
+	/**
+	 * One edge creation operation resolved against the live graph.
+	 *
+	 * 0-3.4 slice 11 seam: the cross-writer atomic patch connects pins through
+	 * these functions.  An endpoint is either one existing node GUID or one
+	 * tempId that an earlier `createNode` operation of the same patch declared;
+	 * the patch resolves tempIds to GUIDs before Apply, so this seam only ever
+	 * writes edges between real nodes inside the caller's transaction.
+	 *
+	 * The single writer's own connect path is not moved onto this seam: it also
+	 * carries owned literals, `fromExisting`/`toExisting` pin identities and
+	 * disconnect plans, which are outside this slice.  What is shared is the
+	 * judgement of what a legal edge is (`PinMatchesType`,
+	 * `ExistingPinTypeToken`, `ValidateSchemaConnection`) and the one
+	 * `TryCreateConnection` call.
+	 */
+	struct FAtomicEdgeOperation
+	{
+		/** Source endpoint: existing node GUID, or a tempId while still unresolved. */
+		FString FromNodeGuid;
+		FString FromTempId;
+		FString FromPin;
+		/** Target endpoint: existing node GUID, or a tempId while still unresolved. */
+		FString ToNodeGuid;
+		FString ToTempId;
+		FString ToPin;
+		/** Resolved by resolve (existing endpoints) or apply (tempId endpoints). */
+		FString FromPinId;
+		FString ToPinId;
+		FString FromType;
+		FString ToType;
+	};
+
+	/**
+	 * Lookup for a tempId endpoint's declared node contract.
+	 *
+	 * Returns the resolved createNode operation that declared the tempId, or null
+	 * when the patch did not declare it.  Read-only: it is used at plan time, when
+	 * the node does not exist yet.
+	 */
+	using FTempNodeResolver =
+		TFunctionRef<const FAtomicNodeOperation* (const FString& TempId)>;
+
+	/** The single writer's own connection bounds, shared with the atomic patch. */
+	constexpr int32 MaxConnectionsPerApply = 24;
+	constexpr int32 MaxConnectionsPerNodePerApply = 8;
+
+	/**
+	 * Validate one edge against the live graph.  Read-only.
+	 *
+	 * Resolves both endpoints (live node + exact pin), checks direction, the
+	 * supported exec/bool/int/double/string token, exact token equality, the
+	 * self-connection rule, an already-linked input, and the K2 schema response.
+	 * For a tempId endpoint the pin contract comes from the declaring createNode
+	 * operation, because the node does not exist yet.
+	 */
+	bool TryResolveAtomicEdgeOperation(
+		UEdGraph* Graph,
+		FAtomicEdgeOperation& InOutOperation,
+		FTempNodeResolver ResolveTempNode,
+		FString& OutErrorCode,
+		FString& OutErrorMessage);
+
+	/**
+	 * Create resolved edges inside the CALLER's transaction.
+	 *
+	 * Endpoints must already carry resolved node GUIDs (the patch translates
+	 * tempIds first).  Fills the resolved pin GUIDs and type tokens back into the
+	 * operations, verifies each new link, and on any failure removes every edge
+	 * this call already created before returning false.  No transaction is opened
+	 * here and the package Dirty bit is not touched here.
+	 */
+	bool TryApplyAtomicEdgeOperations(
+		UBlueprint* Blueprint,
+		UEdGraph* Graph,
+		TArray<FAtomicEdgeOperation>& InOutOperations,
+		FString& OutErrorCode,
+		FString& OutErrorMessage);
+
+	/**
+	 * Read every operation's edge back; bExpectAfter selects "exactly this edge
+	 * exists and it is the only link on the target input" or "the edge is gone".
+	 * A missing node/pin counts as "gone" so an Undo that also removed the nodes
+	 * a patch created still verifies.
+	 */
+	bool TryCheckAtomicEdgeOperations(
+		UEdGraph* Graph,
+		const TArray<FAtomicEdgeOperation>& Operations,
+		bool bExpectAfter,
+		FString& OutErrorCode,
+		FString& OutErrorMessage);
+
+	/**
+	 * Remove the first AppliedCount operations' edges, in reverse order.
+	 *
+	 * Used by the atomic patch rollback.  An edge that is already gone counts as
+	 * restored.  Returns false when an edge survives its own removal.
+	 */
+	bool TryRestoreAtomicEdgeOperations(
+		UBlueprint* Blueprint,
+		UEdGraph* Graph,
+		const TArray<FAtomicEdgeOperation>& Operations,
+		int32 AppliedCount,
+		FString& OutErrorCode,
+		FString& OutErrorMessage);
+
+	/**
+	 * Graph-level edge-set fingerprint: sha256 over the sorted
+	 * `fromNodeGuid|fromPinName|fromPinId>toNodeGuid|toPinName|toPinId` list.
+	 *
+	 * This is the rewire writer's own live edge-set hash (the same function its
+	 * Preview/Apply and Save already use), reported by the atomic patch as
+	 * `edgesFingerprint`.  It is the only one of the three hashes that identifies
+	 * edge ENDPOINTS: the pin-default state hash records only per-pin link
+	 * COUNTS, and the node hash records no links at all.
+	 */
+	FString ComputeAtomicEdgeStateFingerprint(UEdGraph* Graph);
+
 	/** Automation-only seam; never used by the bridge or MCP. */
 	void SetExperimentalWriteEnabledForTest(bool bEnabled);
 	void ResetExperimentalWriteForTest();

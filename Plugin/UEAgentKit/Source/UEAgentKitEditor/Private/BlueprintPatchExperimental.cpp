@@ -34,9 +34,10 @@ namespace
 	const TCHAR* const KindSetPinDefault = TEXT("setPinDefault");
 	const TCHAR* const KindCreateVariable = TEXT("createVariable");
 	const TCHAR* const KindCreateNode = TEXT("createNode");
+	const TCHAR* const KindConnect = TEXT("connect");
 	/** Exhaustive list of migrated kinds, in the order they were migrated. */
 	const TCHAR* const MigratedKindList =
-		TEXT("setPinDefault, createVariable, createNode");
+		TEXT("setPinDefault, createVariable, createNode, connect");
 	const TCHAR* const StatusValidated = TEXT("validated");
 	const TCHAR* const StatusApplied = TEXT("applied");
 	const TCHAR* const StatusFailed = TEXT("failed");
@@ -48,7 +49,7 @@ namespace
 	 * caller cannot mistake a typo for a future feature.
 	 */
 	const TCHAR* const ReservedKinds[] = {
-		TEXT("connect"),
+		TEXT("disconnect"),
 		TEXT("rewirePin"),
 		TEXT("removeNode"),
 	};
@@ -58,6 +59,12 @@ namespace
 		UEAgentKitBlueprintVariableExperimental::MaxVariablesPerApply;
 	constexpr int32 MaxCreateNodeOperations =
 		UEAgentKitBlueprintGraphEditExperimental::MaxNodesPerApply;
+	constexpr int32 MaxConnectOperations =
+		UEAgentKitBlueprintGraphEditExperimental::MaxConnectionsPerApply;
+	constexpr int32 MaxConnectionsPerNode =
+		UEAgentKitBlueprintGraphEditExperimental::MaxConnectionsPerNodePerApply;
+	/** `tmp:` plus at most this many printable ASCII characters (patch-local). */
+	constexpr int32 MaxTempIdLength = 64;
 
 	bool bTestOverrideSet = false;
 	bool bTestOverrideEnabled = false;
@@ -71,10 +78,13 @@ namespace
 	{
 		FString OpId;
 		FString Kind;
+		/** createNode only: the patch-local label an edge endpoint may reference. */
+		FString TempId;
 		/** Kind-specific resolved operation; only one of them is ever set. */
 		UEAgentKitBlueprintPinDefaultExperimental::FAtomicOperation PinDefault;
 		UEAgentKitBlueprintVariableExperimental::FAtomicVariableOperation Variable;
 		UEAgentKitBlueprintGraphEditExperimental::FAtomicNodeOperation Node;
+		UEAgentKitBlueprintGraphEditExperimental::FAtomicEdgeOperation Edge;
 		/** opId/kind/resolved fields; reused verbatim for the results array. */
 		TSharedPtr<FJsonObject> Detail;
 	};
@@ -94,6 +104,9 @@ namespace
 		/** Graph-level node structure, the graph-edit writer's own fingerprint. */
 		FString NodesFingerprintBefore;
 		FString NodesFingerprintAfter;
+		/** Graph-level edge set, the rewire writer's own live edge-set hash. */
+		FString EdgesFingerprintBefore;
+		FString EdgesFingerprintAfter;
 		FString PlanId;
 		TArray<FPatchOperation> Operations;
 		int32 NodeCountBefore = 0;
@@ -112,6 +125,7 @@ namespace
 		FString StateFingerprint;
 		FString VariablesFingerprint;
 		FString NodesFingerprint;
+		FString EdgesFingerprint;
 		int32 NodeCount = 0;
 		int32 LinkCount = 0;
 		int32 VariableCount = 0;
@@ -277,6 +291,87 @@ namespace
 		return true;
 	}
 
+	/**
+	 * Patch-local tempId shape: `tmp:` plus 1-64 printable ASCII characters.
+	 *
+	 * This is deliberately a superset of the single writer's own `IsTempId`
+	 * (which only allows alphanumerics, '_' and '-', up to 36 characters): a
+	 * tempId never leaves the patch -- it is resolved to a node GUID before Apply
+	 * and is never forwarded to the writer -- so the patch can accept a wider,
+	 * still-bounded label without changing anything the writer sees.
+	 */
+	bool IsPatchTempId(const FString& Value)
+	{
+		if (!Value.StartsWith(TEXT("tmp:"), ESearchCase::CaseSensitive)
+			|| Value.Len() <= 4
+			|| Value.Len() > 4 + MaxTempIdLength)
+		{
+			return false;
+		}
+		for (int32 Index = 4; Index < Value.Len(); ++Index)
+		{
+			const TCHAR Character = Value[Index];
+			if (Character < 0x21 || Character > 0x7E)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * Read one edge endpoint reference: a canonical node GUID or a declared tempId.
+	 *
+	 * A malformed `tmp:` value keeps the single writer's own code
+	 * (`graph-edit-temp-id-invalid`); anything that is neither a GUID nor a tempId
+	 * is a plain identifier error.
+	 */
+	bool ReadEndpointRef(
+		const TSharedPtr<FJsonObject>& Object,
+		const TCHAR* Key,
+		FString& OutNodeGuid,
+		FString& OutTempId,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
+	{
+		FString Reference;
+		if (!ReadString(Object, Key, Reference, OutErrorCode, OutErrorMessage))
+		{
+			return false;
+		}
+		if (Reference.StartsWith(TEXT("tmp:"), ESearchCase::CaseSensitive))
+		{
+			if (!IsPatchTempId(Reference))
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-temp-id-invalid"),
+					FString::Printf(
+						TEXT("%s must be 'tmp:' followed by 1-%d printable ASCII characters."),
+						Key,
+						MaxTempIdLength));
+			}
+			OutTempId = Reference;
+			OutNodeGuid.Reset();
+			return true;
+		}
+		FGuid Parsed;
+		if (!IsCanonicalGuid(Reference, Parsed))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-patch-invalid-identifier"),
+				FString::Printf(
+					TEXT("%s must be one canonical lower-case GUID or a 'tmp:' tempId."),
+					Key));
+		}
+		OutNodeGuid = Reference;
+		OutTempId.Reset();
+		return true;
+	}
+
 	int32 CountLinks(UEdGraph* Graph)
 	{
 		int32 Count = 0;
@@ -305,7 +400,8 @@ namespace
 	{
 		return Kind.Equals(KindSetPinDefault, ESearchCase::CaseSensitive)
 			|| Kind.Equals(KindCreateVariable, ESearchCase::CaseSensitive)
-			|| Kind.Equals(KindCreateNode, ESearchCase::CaseSensitive);
+			|| Kind.Equals(KindCreateNode, ESearchCase::CaseSensitive)
+			|| Kind.Equals(KindConnect, ESearchCase::CaseSensitive);
 	}
 
 	bool IsReservedKind(const FString& Kind)
@@ -432,8 +528,12 @@ namespace
 		TSet<FString> SeenOpIds;
 		TSet<FString> SeenTargets;
 		TSet<FString> SeenVariableNames;
+		TSet<FString> SeenTempIds;
+		TSet<FString> SeenEdgeTargets;
+		TMap<FString, int32> ConnectionCounts;
 		int32 VariableOperationCount = 0;
 		int32 NodeOperationCount = 0;
+		int32 ConnectOperationCount = 0;
 		for (int32 Index = 0; Index < Values->Num(); ++Index)
 		{
 			OutOperations.Add(FPatchOperation());
@@ -665,6 +765,7 @@ namespace
 						TEXT("nodeType"),
 						TEXT("x"),
 						TEXT("y"),
+						TEXT("tempId"),
 					},
 					OutErrorCode,
 					OutErrorMessage))
@@ -679,6 +780,37 @@ namespace
 					|| !ReadCoordinate(*Object, TEXT("y"), Y, OutErrorCode, OutErrorMessage))
 				{
 					return false;
+				}
+				// tempId is optional: a createNode that nothing references needs no
+				// label, but an edge endpoint in the same patch can only name a node
+				// through one.
+				if (Object->Get()->HasField(TEXT("tempId")))
+				{
+					FString TempId;
+					if (!ReadString(*Object, TEXT("tempId"), TempId, OutErrorCode, OutErrorMessage))
+					{
+						return false;
+					}
+					if (!IsPatchTempId(TempId))
+					{
+						return Fail(
+							OutErrorCode,
+							OutErrorMessage,
+							TEXT("graph-edit-temp-id-invalid"),
+							FString::Printf(
+								TEXT("tempId must be 'tmp:' followed by 1-%d printable ASCII characters."),
+								MaxTempIdLength));
+					}
+					if (SeenTempIds.Contains(TempId))
+					{
+						return Fail(
+							OutErrorCode,
+							OutErrorMessage,
+							TEXT("graph-patch-duplicate-temp-id"),
+							FString::Printf(TEXT("Duplicate tempId: %s"), *TempId));
+					}
+					SeenTempIds.Add(TempId);
+					Operation.TempId = TempId;
 				}
 				// A patch may not create more nodes than the single writer may.
 				++NodeOperationCount;
@@ -695,6 +827,102 @@ namespace
 				Operation.Node.NodeType = NodeType;
 				Operation.Node.X = X;
 				Operation.Node.Y = Y;
+			}
+			else if (Operation.Kind.Equals(KindConnect, ESearchCase::CaseSensitive))
+			{
+				// connect carries exactly the endpoint fields: from/fromPin/to/toPin.
+				if (!RejectUnknownParams(
+					*Object,
+					{
+						TEXT("opId"),
+						TEXT("kind"),
+						TEXT("from"),
+						TEXT("fromPin"),
+						TEXT("to"),
+						TEXT("toPin"),
+					},
+					OutErrorCode,
+					OutErrorMessage))
+				{
+					return false;
+				}
+				FString FromNodeGuid;
+				FString FromTempId;
+				FString ToNodeGuid;
+				FString ToTempId;
+				FString FromPin;
+				FString ToPin;
+				if (!ReadEndpointRef(
+						*Object,
+						TEXT("from"),
+						FromNodeGuid,
+						FromTempId,
+						OutErrorCode,
+						OutErrorMessage)
+					|| !ReadString(*Object, TEXT("fromPin"), FromPin, OutErrorCode, OutErrorMessage)
+					|| !ReadEndpointRef(
+						*Object,
+						TEXT("to"),
+						ToNodeGuid,
+						ToTempId,
+						OutErrorCode,
+						OutErrorMessage)
+					|| !ReadString(*Object, TEXT("toPin"), ToPin, OutErrorCode, OutErrorMessage))
+				{
+					return false;
+				}
+				// One patch may not outgrow the single writer's own connection bound.
+				++ConnectOperationCount;
+				if (ConnectOperationCount > MaxConnectOperations)
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-patch-connect-limit"),
+						FString::Printf(
+							TEXT("A patch may create at most %d connections, the same bound as the single-writer graph edit tool."),
+							MaxConnectOperations));
+				}
+				// The writer's per-node fan-out bound, counted over this patch only.
+				for (const FString& NodeRef :
+					{ FromNodeGuid.IsEmpty() ? FromTempId : FromNodeGuid,
+						ToNodeGuid.IsEmpty() ? ToTempId : ToNodeGuid })
+				{
+					int32& Count = ConnectionCounts.FindOrAdd(NodeRef);
+					++Count;
+					if (Count > MaxConnectionsPerNode)
+					{
+						return Fail(
+							OutErrorCode,
+							OutErrorMessage,
+							TEXT("graph-edit-connection-limit"),
+							FString::Printf(
+								TEXT("%s would exceed the %d-connection per-node limit."),
+								*NodeRef,
+								MaxConnectionsPerNode));
+					}
+				}
+				Operation.Edge.FromNodeGuid = FromNodeGuid;
+				Operation.Edge.FromTempId = FromTempId;
+				Operation.Edge.FromPin = FromPin;
+				Operation.Edge.ToNodeGuid = ToNodeGuid;
+				Operation.Edge.ToTempId = ToTempId;
+				Operation.Edge.ToPin = ToPin;
+				// Two operations writing one input would make the read-back of the
+				// first one fail by construction; refuse the ambiguity up front.
+				const FString TargetKey =
+					(ToNodeGuid.IsEmpty() ? ToTempId : ToNodeGuid) + TEXT("|") + ToPin;
+				if (SeenEdgeTargets.Contains(TargetKey))
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-edit-connection-duplicate"),
+						FString::Printf(
+							TEXT("Input pin already has a connection in this patch: %s"),
+							*TargetKey));
+				}
+				SeenEdgeTargets.Add(TargetKey);
 			}
 			else
 			{
@@ -718,6 +946,7 @@ namespace
 		UBlueprint* Blueprint,
 		UEdGraph* Graph,
 		FPatchOperation& Operation,
+		UEAgentKitBlueprintGraphEditExperimental::FTempNodeResolver ResolveTempNode,
 		FString& OutErrorCode,
 		FString& OutErrorMessage)
 	{
@@ -803,6 +1032,48 @@ namespace
 			Operation.Detail->SetArrayField(TEXT("outputPins"), Outputs);
 			Operation.Detail->SetObjectField(TEXT("inputPinTypes"), InputTypes);
 			Operation.Detail->SetObjectField(TEXT("outputPinTypes"), OutputTypes);
+			if (!Operation.TempId.IsEmpty())
+			{
+				// The label a later connect operation may use to name this node.
+				Operation.Detail->SetStringField(TEXT("tempId"), Operation.TempId);
+			}
+			return true;
+		}
+		if (Operation.Kind.Equals(KindConnect, ESearchCase::CaseSensitive))
+		{
+			if (!UEAgentKitBlueprintGraphEditExperimental::TryResolveAtomicEdgeOperation(
+				Graph,
+				Operation.Edge,
+				ResolveTempNode,
+				OutErrorCode,
+				OutErrorMessage))
+			{
+				return false;
+			}
+			// The detail keeps whichever identity form the operation was written
+			// with: a tempId endpoint has no GUID until Apply.
+			if (!Operation.Edge.FromTempId.IsEmpty())
+			{
+				Operation.Detail->SetStringField(TEXT("fromTempId"), Operation.Edge.FromTempId);
+			}
+			else
+			{
+				Operation.Detail->SetStringField(TEXT("fromNodeGuid"), Operation.Edge.FromNodeGuid);
+				Operation.Detail->SetStringField(TEXT("fromPinGuid"), Operation.Edge.FromPinId);
+			}
+			if (!Operation.Edge.ToTempId.IsEmpty())
+			{
+				Operation.Detail->SetStringField(TEXT("toTempId"), Operation.Edge.ToTempId);
+			}
+			else
+			{
+				Operation.Detail->SetStringField(TEXT("toNodeGuid"), Operation.Edge.ToNodeGuid);
+				Operation.Detail->SetStringField(TEXT("toPinGuid"), Operation.Edge.ToPinId);
+			}
+			Operation.Detail->SetStringField(TEXT("fromPin"), Operation.Edge.FromPin);
+			Operation.Detail->SetStringField(TEXT("fromType"), Operation.Edge.FromType);
+			Operation.Detail->SetStringField(TEXT("toPin"), Operation.Edge.ToPin);
+			Operation.Detail->SetStringField(TEXT("toType"), Operation.Edge.ToType);
 			return true;
 		}
 		return Fail(
@@ -819,6 +1090,7 @@ namespace
 		UBlueprint* Blueprint,
 		UEdGraph* Graph,
 		FPatchOperation& Operation,
+		TMap<FString, FString>& TempIdToNodeGuid,
 		FString& OutErrorCode,
 		FString& OutErrorMessage)
 	{
@@ -879,7 +1151,74 @@ namespace
 				Operation.Node.NodeGuid =
 					CreatedGuids[0].ToString(EGuidFormats::DigitsWithHyphensLower);
 				Operation.Detail->SetStringField(TEXT("nodeGuid"), Operation.Node.NodeGuid);
+				if (!Operation.TempId.IsEmpty())
+				{
+					// From here on an edge endpoint written as this tempId means
+					// this exact node.  The map lives only for this Apply.
+					TempIdToNodeGuid.Add(Operation.TempId, Operation.Node.NodeGuid);
+				}
 			}
+			return true;
+		}
+		if (Operation.Kind.Equals(KindConnect, ESearchCase::CaseSensitive))
+		{
+			UEAgentKitBlueprintGraphEditExperimental::FAtomicEdgeOperation Edge = Operation.Edge;
+			// The patch is the only layer that knows what a tempId means; the seam
+			// only ever writes edges between real nodes.
+			if (!Edge.FromTempId.IsEmpty())
+			{
+				const FString* Resolved = TempIdToNodeGuid.Find(Edge.FromTempId);
+				if (Resolved == nullptr)
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-patch-unknown-temp-id"),
+						FString::Printf(
+							TEXT("tempId '%s' has no created node at Apply time."),
+							*Edge.FromTempId));
+				}
+				Edge.FromNodeGuid = *Resolved;
+				Edge.FromTempId.Reset();
+			}
+			if (!Edge.ToTempId.IsEmpty())
+			{
+				const FString* Resolved = TempIdToNodeGuid.Find(Edge.ToTempId);
+				if (Resolved == nullptr)
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-patch-unknown-temp-id"),
+						FString::Printf(
+							TEXT("tempId '%s' has no created node at Apply time."),
+							*Edge.ToTempId));
+				}
+				Edge.ToNodeGuid = *Resolved;
+				Edge.ToTempId.Reset();
+			}
+			TArray<UEAgentKitBlueprintGraphEditExperimental::FAtomicEdgeOperation> Single;
+			Single.Add(Edge);
+			if (!UEAgentKitBlueprintGraphEditExperimental::TryApplyAtomicEdgeOperations(
+				Blueprint,
+				Graph,
+				Single,
+				OutErrorCode,
+				OutErrorMessage))
+			{
+				return false;
+			}
+			// Keep the resolved identity on the operation so the read-back, the
+			// rollback and the caller all see the same four values.
+			Operation.Edge = Single[0];
+			Operation.Detail->SetStringField(TEXT("fromNodeGuid"), Single[0].FromNodeGuid);
+			Operation.Detail->SetStringField(TEXT("fromPin"), Single[0].FromPin);
+			Operation.Detail->SetStringField(TEXT("fromPinGuid"), Single[0].FromPinId);
+			Operation.Detail->SetStringField(TEXT("fromType"), Single[0].FromType);
+			Operation.Detail->SetStringField(TEXT("toNodeGuid"), Single[0].ToNodeGuid);
+			Operation.Detail->SetStringField(TEXT("toPin"), Single[0].ToPin);
+			Operation.Detail->SetStringField(TEXT("toPinGuid"), Single[0].ToPinId);
+			Operation.Detail->SetStringField(TEXT("toType"), Single[0].ToType);
 			return true;
 		}
 		return Fail(
@@ -933,6 +1272,17 @@ namespace
 				OutErrorCode,
 				OutErrorMessage);
 		}
+		if (Operation.Kind.Equals(KindConnect, ESearchCase::CaseSensitive))
+		{
+			TArray<UEAgentKitBlueprintGraphEditExperimental::FAtomicEdgeOperation> Single;
+			Single.Add(Operation.Edge);
+			return UEAgentKitBlueprintGraphEditExperimental::TryCheckAtomicEdgeOperations(
+				Graph,
+				Single,
+				bExpectAfter,
+				OutErrorCode,
+				OutErrorMessage);
+		}
 		return true;
 	}
 
@@ -978,10 +1328,76 @@ namespace
 				OutErrorCode,
 				OutErrorMessage);
 		}
+		if (Operation.Kind.Equals(KindConnect, ESearchCase::CaseSensitive))
+		{
+			TArray<UEAgentKitBlueprintGraphEditExperimental::FAtomicEdgeOperation> Single;
+			Single.Add(Operation.Edge);
+			return UEAgentKitBlueprintGraphEditExperimental::TryRestoreAtomicEdgeOperations(
+				Blueprint,
+				Graph,
+				Single,
+				1,
+				OutErrorCode,
+				OutErrorMessage);
+		}
 		return true;
 	}
 
-	FString ComputeOperationCanonical(const FPatchOperation& Operation)
+	/**
+	 * Canonical form of one edge endpoint.
+	 *
+	 * An existing endpoint binds its node GUID, pin name and resolved pin GUID.
+	 * A tempId endpoint binds the INDEX of the createNode operation that declared
+	 * it, not the tempId text and not the not-yet-existing GUID:
+	 *
+	 *  - the tempId is a label, so two spellings of the same intent must hash the
+	 *    same (otherwise a cosmetic rename would invalidate a previewed plan);
+	 *  - the resolved GUID cannot enter the hash because it is assigned inside the
+	 *    transaction, exactly like a created node's GUID in slice 10;
+	 *  - the declaring INDEX keeps the binding semantic: swapping two tempIds
+	 *    changes which operation each edge refers to and therefore changes the
+	 *    hash, so a previewed plan can never be replayed against a different
+	 *    node/edge pairing.
+	 */
+	FString EndpointCanonical(
+		const FPatchOperation& Operation,
+		const bool bFrom,
+		const TArray<FPatchOperation>& AllOperations)
+	{
+		const FString& TempId = bFrom ? Operation.Edge.FromTempId : Operation.Edge.ToTempId;
+		const FString& PinName = bFrom ? Operation.Edge.FromPin : Operation.Edge.ToPin;
+		if (!TempId.IsEmpty())
+		{
+			int32 DeclaringIndex = INDEX_NONE;
+			for (int32 Index = 0; Index < AllOperations.Num(); ++Index)
+			{
+				if (AllOperations[Index].Kind.Equals(KindCreateNode, ESearchCase::CaseSensitive)
+					&& AllOperations[Index].TempId.Equals(TempId, ESearchCase::CaseSensitive))
+				{
+					DeclaringIndex = Index;
+					break;
+				}
+			}
+			FString Canonical;
+			Canonical = AppendField(Canonical, TEXT("temp"));
+			Canonical = AppendField(Canonical, FString::FromInt(DeclaringIndex));
+			Canonical = AppendField(Canonical, PinName);
+			return Canonical;
+		}
+		FString Canonical;
+		Canonical = AppendField(Canonical, TEXT("existing"));
+		Canonical = AppendField(
+			Canonical,
+			bFrom ? Operation.Edge.FromNodeGuid : Operation.Edge.ToNodeGuid);
+		Canonical = AppendField(Canonical, PinName);
+		Canonical = AppendField(Canonical, bFrom ? Operation.Edge.FromPinId : Operation.Edge.ToPinId);
+		Canonical = AppendField(Canonical, bFrom ? Operation.Edge.FromType : Operation.Edge.ToType);
+		return Canonical;
+	}
+
+	FString ComputeOperationCanonical(
+		const FPatchOperation& Operation,
+		const TArray<FPatchOperation>& AllOperations)
 	{
 		FString Canonical;
 		Canonical = AppendField(Canonical, Operation.OpId);
@@ -1012,6 +1428,11 @@ namespace
 			Canonical = AppendField(Canonical, Operation.Node.FunctionName);
 			Canonical = AppendField(Canonical, FString::FromInt(Operation.Node.X));
 			Canonical = AppendField(Canonical, FString::FromInt(Operation.Node.Y));
+		}
+		else if (Operation.Kind.Equals(KindConnect, ESearchCase::CaseSensitive))
+		{
+			Canonical += EndpointCanonical(Operation, /*bFrom=*/true, AllOperations);
+			Canonical += EndpointCanonical(Operation, /*bFrom=*/false, AllOperations);
 		}
 		return Canonical;
 	}
@@ -1213,16 +1634,90 @@ namespace
 				TEXT("graph-patch-fingerprint-failed"),
 				TEXT("Could not fingerprint the current graph node structure."));
 		}
+		// The pin-default hash records only per-pin link COUNTS, never endpoints,
+		// so a connect patch also binds the rewire writer's live edge-set hash.
+		OutPlan.EdgesFingerprintBefore =
+			UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicEdgeStateFingerprint(Graph);
+		if (OutPlan.EdgesFingerprintBefore.IsEmpty())
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-patch-fingerprint-failed"),
+				TEXT("Could not fingerprint the current graph edge set."));
+		}
 		OutPlan.NodeCountBefore = Graph->Nodes.Num();
 		OutPlan.LinkCountBefore = CountLinks(Graph);
 		OutPlan.VariableCountBefore = Blueprint->NewVariables.Num();
 
+		// tempId bindings are patch-local: collect every declaration first so an
+		// edge that names a LATER createNode is reported as a forward reference,
+		// not as an unknown label.
+		TMap<FString, int32> DeclaredTempIds;
 		for (int32 Index = 0; Index < OutPlan.Operations.Num(); ++Index)
 		{
+			const FPatchOperation& Operation = OutPlan.Operations[Index];
+			if (Operation.Kind.Equals(KindCreateNode, ESearchCase::CaseSensitive)
+				&& !Operation.TempId.IsEmpty())
+			{
+				DeclaredTempIds.Add(Operation.TempId, Index);
+			}
+		}
+		auto ResolveTempNode =
+			[&OutPlan, &DeclaredTempIds](
+				const FString& TempId) -> const UEAgentKitBlueprintGraphEditExperimental::FAtomicNodeOperation*
+		{
+			const int32* DeclaredIndex = DeclaredTempIds.Find(TempId);
+			if (DeclaredIndex == nullptr)
+			{
+				return nullptr;
+			}
+			return &OutPlan.Operations[*DeclaredIndex].Node;
+		};
+
+		for (int32 Index = 0; Index < OutPlan.Operations.Num(); ++Index)
+		{
+			FPatchOperation& Operation = OutPlan.Operations[Index];
+			if (Operation.Kind.Equals(KindConnect, ESearchCase::CaseSensitive))
+			{
+				for (const FString& TempId : {Operation.Edge.FromTempId, Operation.Edge.ToTempId})
+				{
+					if (TempId.IsEmpty())
+					{
+						continue;
+					}
+					const int32* DeclaredIndex = DeclaredTempIds.Find(TempId);
+					if (DeclaredIndex == nullptr)
+					{
+						OutPlan.FailedIndex = Index;
+						return Fail(
+							OutErrorCode,
+							OutErrorMessage,
+							TEXT("graph-patch-unknown-temp-id"),
+							FString::Printf(
+								TEXT("Operation %s references tempId '%s', which no createNode operation in this patch declares."),
+								*Operation.OpId,
+								*TempId));
+					}
+					if (*DeclaredIndex > Index)
+					{
+						OutPlan.FailedIndex = Index;
+						return Fail(
+							OutErrorCode,
+							OutErrorMessage,
+							TEXT("graph-patch-forward-temp-id"),
+							FString::Printf(
+								TEXT("Operation %s references tempId '%s' before the createNode operation that declares it; only earlier declarations may be referenced."),
+								*Operation.OpId,
+								*TempId));
+					}
+				}
+			}
 			if (!ResolveOperation(
 				Blueprint,
 				Graph,
-				OutPlan.Operations[Index],
+				Operation,
+				ResolveTempNode,
 				OutErrorCode,
 				OutErrorMessage))
 			{
@@ -1240,9 +1735,10 @@ namespace
 		Canonical = AppendField(Canonical, OutPlan.StateFingerprintBefore);
 		Canonical = AppendField(Canonical, OutPlan.VariablesFingerprintBefore);
 		Canonical = AppendField(Canonical, OutPlan.NodesFingerprintBefore);
+		Canonical = AppendField(Canonical, OutPlan.EdgesFingerprintBefore);
 		for (const FPatchOperation& Operation : OutPlan.Operations)
 		{
-			Canonical += ComputeOperationCanonical(Operation);
+			Canonical += ComputeOperationCanonical(Operation, OutPlan.Operations);
 		}
 		FString Digest;
 		if (!FBlueprintContextSha256::HashText(Canonical, Digest))
@@ -1287,6 +1783,7 @@ namespace
 		Result->SetStringField(TEXT("stateFingerprint"), Plan.StateFingerprintBefore);
 		Result->SetStringField(TEXT("variablesFingerprint"), Plan.VariablesFingerprintBefore);
 		Result->SetStringField(TEXT("nodesFingerprint"), Plan.NodesFingerprintBefore);
+		Result->SetStringField(TEXT("edgesFingerprint"), Plan.EdgesFingerprintBefore);
 		Result->SetNumberField(TEXT("operationCount"), Plan.Operations.Num());
 		Result->SetNumberField(TEXT("nodeCount"), Plan.NodeCountBefore);
 		Result->SetNumberField(TEXT("linkCount"), Plan.LinkCountBefore);
@@ -1300,6 +1797,7 @@ namespace
 				MakeShared<FJsonValueString>(KindSetPinDefault),
 				MakeShared<FJsonValueString>(KindCreateVariable),
 				MakeShared<FJsonValueString>(KindCreateNode),
+				MakeShared<FJsonValueString>(KindConnect),
 			});
 		Result->SetArrayField(TEXT("operations"), BuildValidatedResults(Plan));
 		return Result;
@@ -1586,8 +2084,15 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 					Blueprint)
 					.Equals(Plan.VariablesFingerprintBefore, ESearchCase::CaseSensitive)
 				&& UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicNodeStateFingerprint(Graph)
-					.Equals(Plan.NodesFingerprintBefore, ESearchCase::CaseSensitive);
+					.Equals(Plan.NodesFingerprintBefore, ESearchCase::CaseSensitive)
+				&& UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicEdgeStateFingerprint(Graph)
+					.Equals(Plan.EdgesFingerprintBefore, ESearchCase::CaseSensitive);
 		};
+
+		// tempId -> created node GUID, filled as the createNode operations apply.
+		// It never leaves this Apply: the plan hash binds the declaring operation
+		// index instead, so a caller cannot smuggle a different binding through.
+		TMap<FString, FString> TempIdToNodeGuid;
 
 		bool bApplied = true;
 		for (int32 Index = 0; Index < Plan.Operations.Num(); ++Index)
@@ -1614,6 +2119,7 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 				Blueprint,
 				Graph,
 				Plan.Operations[Index],
+				TempIdToNodeGuid,
 				OutErrorCode,
 				OutErrorMessage))
 			{
@@ -1727,7 +2233,9 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 			UEAgentKitBlueprintVariableExperimental::ComputeAtomicVariableStateFingerprint(Blueprint);
 		Plan.NodesFingerprintAfter =
 			UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicNodeStateFingerprint(Graph);
-		if (Plan.NodesFingerprintAfter.IsEmpty())
+		Plan.EdgesFingerprintAfter =
+			UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicEdgeStateFingerprint(Graph);
+		if (Plan.NodesFingerprintAfter.IsEmpty() || Plan.EdgesFingerprintAfter.IsEmpty())
 		{
 			RestoreAllAndCancel();
 			const bool bStateRestored = IsBeforeStateRestored();
@@ -1749,7 +2257,7 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 				OutErrorCode,
 				OutErrorMessage,
 				TEXT("graph-patch-fingerprint-failed"),
-				TEXT("Could not fingerprint the graph node structure after Apply; the whole patch was restored and its transaction cancelled."));
+				TEXT("Could not fingerprint the graph node structure or edge set after Apply; the whole patch was restored and its transaction cancelled."));
 		}
 		Plan.VariableCountAfter = Blueprint->NewVariables.Num();
 		AppliedResults = BuildOperationResults(
@@ -1766,17 +2274,23 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 	const int32 NodeCountAfter = Graph->Nodes.Num();
 	const int32 LinkCountAfter = CountLinks(Graph);
 	int32 CreatedNodeCount = 0;
+	int32 CreatedEdgeCount = 0;
 	for (const FPatchOperation& Operation : Plan.Operations)
 	{
 		if (Operation.Kind.Equals(KindCreateNode, ESearchCase::CaseSensitive))
 		{
 			++CreatedNodeCount;
 		}
+		else if (Operation.Kind.Equals(KindConnect, ESearchCase::CaseSensitive))
+		{
+			++CreatedEdgeCount;
+		}
 	}
-	// createNode is the only migrated kind that changes the graph structure, and it
-	// must never change an edge: the delta is exactly the number of node operations.
+	// createNode changes nodes and connect changes edges; neither may do the
+	// other's job, so both deltas are exact.  This is also the "no extra edge was
+	// created" proof: the link count is before + exactly the planned connections.
 	if (NodeCountAfter != Plan.NodeCountBefore + CreatedNodeCount
-		|| LinkCountAfter != Plan.LinkCountBefore)
+		|| LinkCountAfter != Plan.LinkCountBefore + CreatedEdgeCount)
 	{
 		if (GEditor->Trans != nullptr)
 		{
@@ -1811,7 +2325,9 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 					Blueprint)
 					.Equals(Plan.VariablesFingerprintBefore, ESearchCase::CaseSensitive)
 				&& UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicNodeStateFingerprint(Graph)
-					.Equals(Plan.NodesFingerprintBefore, ESearchCase::CaseSensitive);
+					.Equals(Plan.NodesFingerprintBefore, ESearchCase::CaseSensitive)
+				&& UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicEdgeStateFingerprint(Graph)
+					.Equals(Plan.EdgesFingerprintBefore, ESearchCase::CaseSensitive);
 		}
 		bUndoVerified = bBeforeStateVerified;
 		bool bAfterStateVerified = false;
@@ -1831,7 +2347,9 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 					Blueprint)
 					.Equals(Plan.VariablesFingerprintAfter, ESearchCase::CaseSensitive)
 				&& UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicNodeStateFingerprint(Graph)
-					.Equals(Plan.NodesFingerprintAfter, ESearchCase::CaseSensitive);
+					.Equals(Plan.NodesFingerprintAfter, ESearchCase::CaseSensitive)
+				&& UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicEdgeStateFingerprint(Graph)
+					.Equals(Plan.EdgesFingerprintAfter, ESearchCase::CaseSensitive);
 		}
 		bRedoVerified = bAfterStateVerified;
 	}
@@ -1889,6 +2407,7 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 	Receipt.StateFingerprint = Plan.StateFingerprintAfter;
 	Receipt.VariablesFingerprint = Plan.VariablesFingerprintAfter;
 	Receipt.NodesFingerprint = Plan.NodesFingerprintAfter;
+	Receipt.EdgesFingerprint = Plan.EdgesFingerprintAfter;
 	Receipt.NodeCount = NodeCountAfter;
 	Receipt.LinkCount = LinkCountAfter;
 	Receipt.VariableCount = Plan.VariableCountAfter;
@@ -1921,11 +2440,14 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 	Result->SetStringField(TEXT("variablesFingerprintAfter"), Plan.VariablesFingerprintAfter);
 	Result->SetStringField(TEXT("nodesFingerprintBefore"), Plan.NodesFingerprintBefore);
 	Result->SetStringField(TEXT("nodesFingerprintAfter"), Plan.NodesFingerprintAfter);
+	Result->SetStringField(TEXT("edgesFingerprintBefore"), Plan.EdgesFingerprintBefore);
+	Result->SetStringField(TEXT("edgesFingerprintAfter"), Plan.EdgesFingerprintAfter);
 	Result->SetNumberField(TEXT("variableCountBefore"), Plan.VariableCountBefore);
 	Result->SetNumberField(TEXT("variableCountAfter"), Plan.VariableCountAfter);
 	Result->SetNumberField(TEXT("nodeCountBefore"), Plan.NodeCountBefore);
 	Result->SetNumberField(TEXT("nodeCountAfter"), NodeCountAfter);
 	Result->SetNumberField(TEXT("createdNodeCount"), CreatedNodeCount);
+	Result->SetNumberField(TEXT("createdEdgeCount"), CreatedEdgeCount);
 	Result->SetNumberField(TEXT("linkCountBefore"), Plan.LinkCountBefore);
 	Result->SetNumberField(TEXT("linkCountAfter"), LinkCountAfter);
 	Result->SetNumberField(TEXT("operationCount"), Plan.Operations.Num());
@@ -2097,10 +2619,12 @@ bool UEAgentKitBlueprintPatchExperimental::TrySaveExperimental(
 		|| CountLinks(Graph) != ExpectedLinkCount
 		|| !UEAgentKitBlueprintPinDefaultExperimental::ComputeAtomicStateFingerprint(Graph)
 			.Equals(ExpectedStateFingerprint, ESearchCase::CaseSensitive)
-		// stateFingerprint covers pin defaults and links but neither the node class
-		// nor the node position, so Save also re-proves the node structure.
+		// stateFingerprint covers pin defaults and link counts but neither the node
+		// class/position nor the edge endpoints, so Save re-proves both.
 		|| !UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicNodeStateFingerprint(Graph)
-			.Equals(Receipt->NodesFingerprint, ESearchCase::CaseSensitive))
+			.Equals(Receipt->NodesFingerprint, ESearchCase::CaseSensitive)
+		|| !UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicEdgeStateFingerprint(Graph)
+			.Equals(Receipt->EdgesFingerprint, ESearchCase::CaseSensitive))
 	{
 		return Fail(
 			OutErrorCode,
@@ -2181,7 +2705,9 @@ bool UEAgentKitBlueprintPatchExperimental::TrySaveExperimental(
 		|| !UEAgentKitBlueprintVariableExperimental::ComputeAtomicVariableStateFingerprint(Blueprint)
 			.Equals(Receipt->VariablesFingerprint, ESearchCase::CaseSensitive)
 		|| !UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicNodeStateFingerprint(Graph)
-			.Equals(Receipt->NodesFingerprint, ESearchCase::CaseSensitive))
+			.Equals(Receipt->NodesFingerprint, ESearchCase::CaseSensitive)
+		|| !UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicEdgeStateFingerprint(Graph)
+			.Equals(Receipt->EdgesFingerprint, ESearchCase::CaseSensitive))
 	{
 		return Fail(
 			OutErrorCode,
@@ -2210,6 +2736,7 @@ bool UEAgentKitBlueprintPatchExperimental::TrySaveExperimental(
 	Readback->SetStringField(TEXT("stateFingerprint"), ExpectedStateFingerprint);
 	Readback->SetStringField(TEXT("variablesFingerprint"), Receipt->VariablesFingerprint);
 	Readback->SetStringField(TEXT("nodesFingerprint"), Receipt->NodesFingerprint);
+	Readback->SetStringField(TEXT("edgesFingerprint"), Receipt->EdgesFingerprint);
 	Readback->SetNumberField(TEXT("variableCount"), Receipt->VariableCount);
 	Readback->SetBoolField(TEXT("packageDirty"), false);
 	Readback->SetNumberField(TEXT("nodeCount"), ExpectedNodeCount);
@@ -2231,6 +2758,7 @@ bool UEAgentKitBlueprintPatchExperimental::TrySaveExperimental(
 	Result->SetStringField(TEXT("stateFingerprint"), ExpectedStateFingerprint);
 	Result->SetStringField(TEXT("variablesFingerprint"), Receipt->VariablesFingerprint);
 	Result->SetStringField(TEXT("nodesFingerprint"), Receipt->NodesFingerprint);
+	Result->SetStringField(TEXT("edgesFingerprint"), Receipt->EdgesFingerprint);
 	Result->SetNumberField(TEXT("variableCount"), Receipt->VariableCount);
 	Result->SetBoolField(TEXT("saved"), true);
 	Result->SetBoolField(TEXT("packageDirty"), false);
