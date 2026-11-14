@@ -63,6 +63,8 @@
 #include "K2Node_CallFunction.h"
 #include "K2Node_ExecutionSequence.h"
 #include "K2Node_IfThenElse.h"
+#include "K2Node_VariableGet.h"
+#include "K2Node_VariableSet.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
@@ -2447,6 +2449,550 @@ bool FUEAgentKitPatchRemoveNodeTest::RunTest(const FString& Parameters)
 	UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
 	UEAgentKitBlueprintNodeRemoveExperimental::ResetExperimentalWriteForTest();
 	UEAgentKitBlueprintRewireExperimental::ResetExperimentalWriteForTest();
+	return true;
+}
+
+namespace UEAgentKitPatchVariableAccessor
+{
+	using namespace UEAgentKitPatchCreateNode;
+	using UEAgentKitPatchRemoveNode::AreLinked;
+	using UEAgentKitPatchRemoveNode::FindPin;
+	using UEAgentKitPatchRemoveNode::SaveApplied;
+
+	const TCHAR* const AssetPath =
+		TEXT("/Game/UEAgentKitPatchExpansion/BP_PatchVariableAccessor.BP_PatchVariableAccessor");
+	const TCHAR* const PackageName =
+		TEXT("/Game/UEAgentKitPatchExpansion/BP_PatchVariableAccessor");
+	const TCHAR* const AssetName = TEXT("BP_PatchVariableAccessor");
+	const TCHAR* const FixtureVariable = TEXT("Counter");
+	const TCHAR* const VariableGetClassPath = TEXT("/Script/BlueprintGraph.K2Node_VariableGet");
+	const TCHAR* const VariableSetClassPath = TEXT("/Script/BlueprintGraph.K2Node_VariableSet");
+
+	/** One int member variable named Counter and nothing else, saved on disk. */
+	UBlueprint* CreateAccessorFixture(FString& OutError)
+	{
+		if (FindObject<UBlueprint>(nullptr, AssetPath) != nullptr)
+		{
+			OutError = TEXT("Variable accessor fixture already exists; use a fresh project.");
+			return nullptr;
+		}
+		if (!RemoveStaleFiles(PackageName, OutError))
+		{
+			return nullptr;
+		}
+		UPackage* Package = CreatePackage(PackageName);
+		UBlueprint* Blueprint = FKismetEditorUtilities::CreateBlueprint(
+			AActor::StaticClass(),
+			Package,
+			FName(AssetName),
+			BPTYPE_Normal,
+			FName(TEXT("UEAgentKitPatchVariableAccessor")));
+		if (Blueprint == nullptr || Blueprint->UbergraphPages.IsEmpty())
+		{
+			OutError = TEXT("Could not create the variable accessor fixture Blueprint.");
+			return nullptr;
+		}
+		UEdGraph* Graph = Blueprint->UbergraphPages[0];
+		const TArray<UEdGraphNode*> InitialNodes = Graph->Nodes;
+		for (UEdGraphNode* Node : InitialNodes)
+		{
+			if (Node != nullptr)
+			{
+				FBlueprintEditorUtils::RemoveNode(Blueprint, Node, true);
+			}
+		}
+		FEdGraphPinType IntType;
+		IntType.PinCategory = UEdGraphSchema_K2::PC_Int;
+		if (!FBlueprintEditorUtils::AddMemberVariable(Blueprint, FName(FixtureVariable), IntType)
+			|| Blueprint->NewVariables.IsEmpty())
+		{
+			OutError = TEXT("Could not add the fixture int variable.");
+			return nullptr;
+		}
+		FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+		FKismetEditorUtilities::CompileBlueprint(
+			Blueprint,
+			EBlueprintCompileOptions::SkipGarbageCollection);
+		if (Blueprint->Status == BS_Error)
+		{
+			OutError = TEXT("Variable accessor fixture failed to compile.");
+			return nullptr;
+		}
+		FAssetRegistryModule::AssetCreated(Blueprint);
+		Package->MarkPackageDirty();
+		if (!SaveBlueprint(Blueprint))
+		{
+			OutError = TEXT("Could not save the variable accessor fixture.");
+			return nullptr;
+		}
+		return Blueprint;
+	}
+
+	FString FixtureVariableGuid(UBlueprint* Blueprint)
+	{
+		if (Blueprint == nullptr)
+		{
+			return FString();
+		}
+		for (const FBPVariableDescription& Variable : Blueprint->NewVariables)
+		{
+			if (Variable.VarName.ToString().Equals(FixtureVariable, ESearchCase::CaseSensitive))
+			{
+				return GuidLower(Variable.VarGuid);
+			}
+		}
+		return FString();
+	}
+
+	TSharedPtr<FJsonObject> MakeAccessorNode(
+		const TCHAR* OpId,
+		const TCHAR* NodeType,
+		UBlueprint* Blueprint,
+		int32 X,
+		int32 Y,
+		const TCHAR* TempId = nullptr,
+		const TCHAR* VariableType = TEXT("int"))
+	{
+		TSharedRef<FJsonObject> Operation = MakeShared<FJsonObject>();
+		Operation->SetStringField(TEXT("opId"), OpId);
+		Operation->SetStringField(TEXT("kind"), TEXT("createNode"));
+		Operation->SetStringField(TEXT("nodeType"), NodeType);
+		Operation->SetNumberField(TEXT("x"), X);
+		Operation->SetNumberField(TEXT("y"), Y);
+		Operation->SetStringField(TEXT("variableName"), FixtureVariable);
+		Operation->SetStringField(TEXT("variableGuid"), FixtureVariableGuid(Blueprint));
+		Operation->SetStringField(TEXT("variableType"), VariableType);
+		if (TempId != nullptr)
+		{
+			Operation->SetStringField(TEXT("tempId"), TempId);
+		}
+		return Operation;
+	}
+
+	TSharedPtr<FJsonObject> WithTempId(TSharedPtr<FJsonObject> Operation, const TCHAR* TempId)
+	{
+		Operation->SetStringField(TEXT("tempId"), TempId);
+		return Operation;
+	}
+
+	TSharedPtr<FJsonObject> MakeConnectOperation(
+		const TCHAR* OpId,
+		const TCHAR* FromRef,
+		const TCHAR* FromPin,
+		const TCHAR* ToRef,
+		const TCHAR* ToPin)
+	{
+		TSharedRef<FJsonObject> Operation = MakeShared<FJsonObject>();
+		Operation->SetStringField(TEXT("opId"), OpId);
+		Operation->SetStringField(TEXT("kind"), TEXT("connect"));
+		Operation->SetStringField(TEXT("from"), FromRef);
+		Operation->SetStringField(TEXT("fromPin"), FromPin);
+		Operation->SetStringField(TEXT("to"), ToRef);
+		Operation->SetStringField(TEXT("toPin"), ToPin);
+		return Operation;
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUEAgentKitPatchVariableAccessorTest,
+	"UEAgentKit.AtomicPatch.VariableAccessor",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUEAgentKitPatchVariableAccessorTest::RunTest(const FString& Parameters)
+{
+	using namespace UEAgentKitPatchCreateNode;
+	using namespace UEAgentKitPatchVariableAccessor;
+
+	UEAgentKitBlueprintPatchExperimental::ResetExperimentalWriteForTest();
+	UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
+	if (!TestFalse(
+			TEXT("the atomic patch gate stays off unless the project opts in"),
+			UEAgentKitBlueprintPatchExperimental::IsExperimentalWriteAvailable()))
+	{
+		return false;
+	}
+	UEAgentKitBlueprintPatchExperimental::SetExperimentalWriteEnabledForTest(true);
+	UEAgentKitBlueprintGraphEditExperimental::SetExperimentalWriteEnabledForTest(true);
+	auto Fail = []
+	{
+		UEAgentKitBlueprintPatchExperimental::ResetExperimentalWriteForTest();
+		UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
+		return false;
+	};
+
+	FString Error;
+	UBlueprint* Blueprint = CreateAccessorFixture(Error);
+	if (!TestNotNull(TEXT("variable accessor fixture is created"), Blueprint))
+	{
+		AddError(Error);
+		return Fail();
+	}
+	UEdGraph* Graph = Blueprint->UbergraphPages[0];
+	UPackage* Package = Blueprint->GetOutermost();
+	if (!TestNotNull(TEXT("variable accessor graph is focused"), OpenAndFocus(Blueprint, Graph, Error)))
+	{
+		AddError(Error);
+		return Fail();
+	}
+	const FString GuidText = FixtureVariableGuid(Blueprint);
+	const int32 NodeCountBefore = Graph->Nodes.Num();
+	const FString AssetShaBefore = ComputeAssetSha(Blueprint);
+	const FString EdgesFingerprintBefore =
+		UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicEdgeStateFingerprint(Graph);
+	const FString NodesFingerprintBefore =
+		UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicNodeStateFingerprint(Graph);
+	if (!TestEqual(TEXT("the fixture variable has a canonical GUID"), GuidText.Len(), 36))
+	{
+		return Fail();
+	}
+
+	// ---- Fail-closed refusals: one table, no write, no dirty package. ----
+	{
+		TSharedPtr<FJsonObject> AbsentGuid =
+			MakeAccessorNode(TEXT("n1"), TEXT("variable_get"), Blueprint, 200, 0);
+		AbsentGuid->SetStringField(
+			TEXT("variableGuid"),
+			TEXT("00000000-0000-0000-0000-000000000000"));
+		AbsentGuid->SetStringField(TEXT("variableName"), TEXT("MissingCounter"));
+		TSharedPtr<FJsonObject> NameOwnedByOtherGuid =
+			MakeAccessorNode(TEXT("n1"), TEXT("variable_get"), Blueprint, 200, 0);
+		NameOwnedByOtherGuid->SetStringField(
+			TEXT("variableGuid"),
+			TEXT("00000000-0000-0000-0000-000000000000"));
+		TSharedPtr<FJsonObject> NameMismatch =
+			MakeAccessorNode(TEXT("n1"), TEXT("variable_get"), Blueprint, 200, 0);
+		NameMismatch->SetStringField(TEXT("variableName"), TEXT("OtherCounter"));
+		TSharedPtr<FJsonObject> TypeMismatch =
+			MakeAccessorNode(TEXT("n1"), TEXT("variable_get"), Blueprint, 200, 0, nullptr, TEXT("bool"));
+		TSharedPtr<FJsonObject> BadName =
+			MakeAccessorNode(TEXT("n1"), TEXT("variable_get"), Blueprint, 200, 0);
+		BadName->SetStringField(TEXT("variableName"), TEXT("Output_Get"));
+		TSharedPtr<FJsonObject> BadGuid =
+			MakeAccessorNode(TEXT("n1"), TEXT("variable_get"), Blueprint, 200, 0);
+		BadGuid->SetStringField(TEXT("variableGuid"), TEXT("not-a-guid"));
+		TSharedPtr<FJsonObject> BadType =
+			MakeAccessorNode(TEXT("n1"), TEXT("variable_set"), Blueprint, 200, 0, nullptr, TEXT("vector"));
+		TSharedPtr<FJsonObject> PrimitiveWithVariable =
+			MakeNodeOperation(TEXT("n1"), TEXT("branch"), 200, 0);
+		PrimitiveWithVariable->SetStringField(TEXT("variableName"), FixtureVariable);
+		struct FRefusal
+		{
+			const TCHAR* Label;
+			TSharedPtr<FJsonObject> Operation;
+			const TCHAR* ExpectedCode;
+		};
+		const TArray<FRefusal> Refusals = {
+			{ TEXT("a variable GUID and name that do not exist"), AbsentGuid, TEXT("graph-edit-variable-not-found") },
+			{ TEXT("a name that belongs to a different GUID"), NameOwnedByOtherGuid, TEXT("graph-edit-variable-identity-mismatch") },
+			{ TEXT("a name the declared GUID does not own"), NameMismatch, TEXT("graph-edit-variable-identity-mismatch") },
+			{ TEXT("a variableType that does not match the member"), TypeMismatch, TEXT("graph-edit-variable-type-mismatch") },
+			{ TEXT("a reserved pin name as variableName"), BadName, TEXT("graph-edit-variable-name-invalid") },
+			{ TEXT("a non-canonical variableGuid"), BadGuid, TEXT("graph-edit-variable-guid-invalid") },
+			{ TEXT("an unsupported variableType"), BadType, TEXT("graph-edit-variable-type-invalid") },
+			{ TEXT("a primitive nodeType carrying a variable field"), PrimitiveWithVariable, TEXT("graph-edit-variable-field-not-allowed") },
+		};
+		for (const FRefusal& Refusal : Refusals)
+		{
+			TSharedPtr<FJsonObject> RefusedResult;
+			FString RefusedCode;
+			FString RefusedMessage;
+			if (!TestFalse(
+					FString::Printf(TEXT("refused: %s"), Refusal.Label),
+					UEAgentKitBlueprintPatchExperimental::TryPreviewExperimental(
+						BuildPatchParams(Blueprint, Graph, { Refusal.Operation }),
+						RefusedResult,
+						RefusedCode,
+						RefusedMessage))
+				|| !TestEqual(
+					FString::Printf(TEXT("refusal code for %s"), Refusal.Label),
+					RefusedCode,
+					FString(Refusal.ExpectedCode)))
+			{
+				AddError(RefusedMessage);
+				return Fail();
+			}
+		}
+		if (!TestEqual(TEXT("refusals left the node count"), Graph->Nodes.Num(), NodeCountBefore)
+			|| !TestFalse(TEXT("refusals left the package clean"), Package->IsDirty())
+			|| !TestEqual(TEXT("refusals left the disk asset"), ComputeAssetSha(Blueprint), AssetShaBefore)
+			|| !TestEqual(
+				TEXT("refusals left the edge fingerprint"),
+				UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicEdgeStateFingerprint(Graph),
+				EdgesFingerprintBefore)
+			|| !TestEqual(
+				TEXT("refusals left the node fingerprint"),
+				UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicNodeStateFingerprint(Graph),
+				NodesFingerprintBefore))
+		{
+			return Fail();
+		}
+	}
+
+	// ---- get + int_add + connect in one transaction, then Undo/Redo, then Save. ----
+	{
+		const TArray<TSharedPtr<FJsonObject>> Operations = {
+			MakeAccessorNode(TEXT("g1"), TEXT("variable_get"), Blueprint, 200, 0, TEXT("tmp:get")),
+			WithTempId(MakeNodeOperation(TEXT("a1"), TEXT("int_add"), 420, 0), TEXT("tmp:add")),
+			MakeConnectOperation(TEXT("c1"), TEXT("tmp:get"), FixtureVariable, TEXT("tmp:add"), TEXT("A")),
+		};
+		TSharedPtr<FJsonObject> Preview;
+		FString Code;
+		FString Message;
+		if (!TestTrue(
+				TEXT("the accessor patch previews"),
+				UEAgentKitBlueprintPatchExperimental::TryPreviewExperimental(
+					BuildPatchParams(Blueprint, Graph, Operations),
+					Preview,
+					Code,
+					Message))
+			|| !TestTrue(TEXT("the accessor preview exists"), Preview.IsValid()))
+		{
+			AddError(Code + TEXT(" ") + Message);
+			return Fail();
+		}
+		const TArray<TSharedPtr<FJsonValue>>& Planned = Preview->GetArrayField(TEXT("operations"));
+		if (!TestEqual(
+				TEXT("the accessor preview reports the bound variable"),
+				Planned[0]->AsObject()->GetStringField(TEXT("variableName")),
+				FString(FixtureVariable))
+			|| !TestEqual(
+				TEXT("the accessor preview reports the variable type"),
+				Planned[0]->AsObject()->GetStringField(TEXT("variableType")),
+				FString(TEXT("int")))
+			|| !TestEqual(
+				TEXT("the accessor preview reports the read direction"),
+				Planned[0]->AsObject()->GetStringField(TEXT("variableAccess")),
+				FString(TEXT("read")))
+			|| !TestEqual(
+				TEXT("the accessor preview resolves the engine class"),
+				Planned[0]->AsObject()->GetStringField(TEXT("nodeClass")),
+				FString(VariableGetClassPath)))
+		{
+			return Fail();
+		}
+		TSharedPtr<FJsonObject> ApplyResult;
+		if (!TestTrue(
+				TEXT("the accessor patch applies"),
+				UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
+					BuildPatchApplyParams(Preview, Operations),
+					ApplyResult,
+					Code,
+					Message))
+			|| !TestTrue(TEXT("the accessor result exists"), ApplyResult.IsValid()))
+		{
+			AddError(Code + TEXT(" ") + Message);
+			return Fail();
+		}
+		bool bAllApplied = ApplyResult->GetArrayField(TEXT("results")).Num() == 3;
+		for (const TSharedPtr<FJsonValue>& Value : ApplyResult->GetArrayField(TEXT("results")))
+		{
+			bAllApplied = bAllApplied
+				&& Value->AsObject()->GetStringField(TEXT("status")) == TEXT("applied");
+		}
+		const TArray<TSharedPtr<FJsonValue>>& Results = ApplyResult->GetArrayField(TEXT("results"));
+		UEdGraphNode* GetNode = FindNodeByGuid(Graph, Results[0]->AsObject()->GetStringField(TEXT("nodeGuid")));
+		UEdGraphNode* AddNode = FindNodeByGuid(Graph, Results[1]->AsObject()->GetStringField(TEXT("nodeGuid")));
+		UEdGraphPin* CounterOut = FindPin(GetNode, FixtureVariable, EGPD_Output);
+		UEdGraphPin* AddA = FindPin(AddNode, TEXT("A"), EGPD_Input);
+		UK2Node_VariableGet* GetVariable = Cast<UK2Node_VariableGet>(GetNode);
+		if (!TestTrue(TEXT("all three operations applied"), bAllApplied)
+			|| !TestTrue(TEXT("the accessor node exists"), GetNode != nullptr)
+			|| !TestEqual(
+				TEXT("the created accessor is a K2Node_VariableGet"),
+				GetNode != nullptr && GetNode->GetClass() != nullptr
+					? GetNode->GetClass()->GetPathName()
+					: FString(),
+				FString(VariableGetClassPath))
+			|| !TestTrue(TEXT("the accessor is a variable-get node"), GetVariable != nullptr)
+			|| !TestEqual(
+				TEXT("the accessor binds the fixture variable"),
+				GetVariable != nullptr ? GetVariable->GetVarName().ToString() : FString(),
+				FString(FixtureVariable))
+			|| !TestNotNull(TEXT("the get node has the variable-named output pin"), CounterOut)
+			|| !TestTrue(TEXT("the accessor was wired to the add node"), AreLinked(CounterOut, AddA))
+			|| !TestEqual(
+				TEXT("two nodes were created"),
+				ApplyResult->GetNumberField(TEXT("createdNodeCount")),
+				2.0)
+			|| !TestEqual(
+				TEXT("one edge was created"),
+				ApplyResult->GetNumberField(TEXT("createdEdgeCount")),
+				1.0)
+			|| !TestEqual(
+				TEXT("the node count grew by two"),
+				ApplyResult->GetNumberField(TEXT("nodeCountAfter")),
+				static_cast<double>(NodeCountBefore + 2))
+			|| !TestEqual(
+				TEXT("the link count grew by one"),
+				ApplyResult->GetNumberField(TEXT("linkCountAfter")),
+				1.0)
+			|| !TestTrue(
+				TEXT("the accessor patch is one verified Undo unit"),
+				ApplyResult->GetBoolField(TEXT("undoVerified"))
+					&& ApplyResult->GetBoolField(TEXT("redoVerified"))))
+		{
+			return Fail();
+		}
+		if (!TestTrue(TEXT("Undo removes both created nodes"), GEditor->UndoTransaction())
+			|| !TestEqual(TEXT("Undo restores the node count"), Graph->Nodes.Num(), NodeCountBefore)
+			|| !TestEqual(
+				TEXT("Undo restores the node fingerprint"),
+				UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicNodeStateFingerprint(Graph),
+				NodesFingerprintBefore)
+			|| !TestEqual(
+				TEXT("Undo restores the edge fingerprint"),
+				UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicEdgeStateFingerprint(Graph),
+				EdgesFingerprintBefore)
+			|| !TestTrue(TEXT("Redo re-applies the patch"), GEditor->RedoTransaction())
+			|| !TestTrue(
+				TEXT("Redo brings the accessor back"),
+				FindNodeByGuid(Graph, GuidLower(GetNode->NodeGuid)) != nullptr))
+		{
+			return Fail();
+		}
+		if (!TestTrue(TEXT("the explicit save of the accessor patch succeeds"), SaveApplied(ApplyResult, Error)))
+		{
+			AddError(Error);
+			return Fail();
+		}
+		if (!TestFalse(TEXT("save cleared the dirty flag"), Package->IsDirty())
+			|| !TestFalse(
+				TEXT("save changed the asset on disk"),
+				ComputeAssetSha(Blueprint).Equals(AssetShaBefore, ESearchCase::CaseSensitive)))
+		{
+			return Fail();
+		}
+	}
+
+	// ---- variable_set: the write accessor and its four-pin contract. ----
+	{
+		const TArray<TSharedPtr<FJsonObject>> Operations = {
+			MakeAccessorNode(TEXT("s1"), TEXT("variable_set"), Blueprint, 200, 400, TEXT("tmp:set")),
+		};
+		TSharedPtr<FJsonObject> Preview;
+		FString Code;
+		FString Message;
+		if (!TestTrue(
+				TEXT("the set accessor patch previews"),
+				UEAgentKitBlueprintPatchExperimental::TryPreviewExperimental(
+					BuildPatchParams(Blueprint, Graph, Operations),
+					Preview,
+					Code,
+					Message)))
+		{
+			AddError(Code + TEXT(" ") + Message);
+			return Fail();
+		}
+		TSharedPtr<FJsonObject> ApplyResult;
+		if (!TestTrue(
+				TEXT("the set accessor patch applies"),
+				UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
+					BuildPatchApplyParams(Preview, Operations),
+					ApplyResult,
+					Code,
+					Message)))
+		{
+			AddError(Code + TEXT(" ") + Message);
+			return Fail();
+		}
+		UEdGraphNode* SetNode = FindNodeByGuid(
+			Graph,
+			ApplyResult->GetArrayField(TEXT("results"))[0]->AsObject()->GetStringField(TEXT("nodeGuid")));
+		if (!TestTrue(TEXT("the set accessor exists"), SetNode != nullptr)
+			|| !TestEqual(
+				TEXT("the created accessor is a K2Node_VariableSet"),
+				SetNode != nullptr && SetNode->GetClass() != nullptr
+					? SetNode->GetClass()->GetPathName()
+					: FString(),
+				FString(VariableSetClassPath))
+			|| !TestNotNull(TEXT("the set node has an execute input"), FindPin(SetNode, TEXT("execute"), EGPD_Input))
+			|| !TestNotNull(TEXT("the set node has the variable input"), FindPin(SetNode, FixtureVariable, EGPD_Input))
+			|| !TestNotNull(TEXT("the set node has a then output"), FindPin(SetNode, TEXT("then"), EGPD_Output))
+			|| !TestNotNull(
+				TEXT("the set node has an Output_Get output"),
+				FindPin(SetNode, TEXT("Output_Get"), EGPD_Output))
+			|| !TestEqual(
+				TEXT("the set accessor reports the write direction"),
+				ApplyResult->GetArrayField(TEXT("results"))[0]->AsObject()->GetStringField(
+					TEXT("variableAccess")),
+				FString(TEXT("write"))))
+		{
+			return Fail();
+		}
+		if (!TestTrue(TEXT("the set accessor save succeeds"), SaveApplied(ApplyResult, Error)))
+		{
+			AddError(Error);
+			return Fail();
+		}
+	}
+
+	// ---- Rollback: an injected failure removes both created accessors again. ----
+	{
+		const FString EdgesBeforeRollback =
+			UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicEdgeStateFingerprint(Graph);
+		const FString NodesBeforeRollback =
+			UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicNodeStateFingerprint(Graph);
+		const FString ShaBeforeRollback = ComputeAssetSha(Blueprint);
+		const int32 NodesBefore = Graph->Nodes.Num();
+		const TArray<TSharedPtr<FJsonObject>> Operations = {
+			MakeAccessorNode(TEXT("g1"), TEXT("variable_get"), Blueprint, 200, 600),
+			MakeAccessorNode(TEXT("s1"), TEXT("variable_set"), Blueprint, 420, 600),
+		};
+		TSharedPtr<FJsonObject> Preview;
+		FString Code;
+		FString Message;
+		if (!TestTrue(
+				TEXT("the accessor rollback patch previews"),
+				UEAgentKitBlueprintPatchExperimental::TryPreviewExperimental(
+					BuildPatchParams(Blueprint, Graph, Operations),
+					Preview,
+					Code,
+					Message)))
+		{
+			AddError(Code + TEXT(" ") + Message);
+			return Fail();
+		}
+		UEAgentKitBlueprintPatchExperimental::SetNextApplyFaultForTest(1);
+		TSharedPtr<FJsonObject> ApplyResult;
+		if (!TestFalse(
+				TEXT("the accessor rollback patch fails"),
+				UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
+					BuildPatchApplyParams(Preview, Operations),
+					ApplyResult,
+					Code,
+					Message)))
+		{
+			return Fail();
+		}
+		if (!TestEqual(
+				TEXT("the rollback reports the injected fault"),
+				Code,
+				FString(TEXT("graph-patch-apply-fault-injected")))
+			|| !TestEqual(
+				TEXT("the rollback removed the first accessor"),
+				Graph->Nodes.Num(),
+				NodesBefore)
+			|| !TestEqual(
+				TEXT("the rollback restored the node fingerprint"),
+				UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicNodeStateFingerprint(Graph),
+				NodesBeforeRollback)
+			|| !TestEqual(
+				TEXT("the rollback restored the edge fingerprint"),
+				UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicEdgeStateFingerprint(Graph),
+				EdgesBeforeRollback)
+			|| !TestFalse(TEXT("the rollback left the package clean"), Package->IsDirty())
+			|| !TestEqual(TEXT("the rollback left the disk asset"), ComputeAssetSha(Blueprint), ShaBeforeRollback)
+			|| !TestTrue(
+				TEXT("the rollback says the state is restored"),
+				ApplyResult->GetBoolField(TEXT("stateRestored"))))
+		{
+			AddError(Code + TEXT(" ") + Message);
+			return Fail();
+		}
+	}
+
+	UEAgentKitBlueprintPatchExperimental::ResetExperimentalWriteForTest();
+	UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
 	return true;
 }
 

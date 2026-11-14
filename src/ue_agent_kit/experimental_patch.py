@@ -64,6 +64,10 @@ from .experimental_graph_edit import (
     MAX_CONNECTIONS_PER_NODE,
     MAX_NODES as MAX_CREATE_NODES,
     NODE_TYPES,
+    VARIABLE_NODE_TYPES,
+    GraphEditError,
+    node_contract,
+    validate_variable_accessor_fields,
 )
 from .experimental_pin_default_edit import (
     PinDefaultError,
@@ -112,6 +116,9 @@ MIGRATED_KINDS = (
 PIN_DEFAULT_FIELDS = ("nodeGuid", "pinName", "pinGuid", "type", "value")
 CREATE_VARIABLE_FIELDS = ("name", "type", "defaultValue")
 CREATE_NODE_FIELDS = ("nodeType", "x", "y")
+# The three identity fields a variable accessor nodeType adds to createNode.  A
+# primitive nodeType must not carry them (graph-edit-variable-field-not-allowed).
+VARIABLE_ACCESSOR_FIELDS = ("variableName", "variableGuid", "variableType")
 CONNECT_FIELDS = ("from", "fromPin", "to", "toPin")
 # disconnect is the same four endpoint fields read the other way round.
 DISCONNECT_FIELDS = CONNECT_FIELDS
@@ -315,7 +322,25 @@ def _canonical_node_fields(
     would not have created.
     """
 
-    contract = _node_contract(entry.get("nodeType"), label, error_code=error_code)
+    node_type = entry.get("nodeType")
+    accessor = isinstance(node_type, str) and node_type in VARIABLE_NODE_TYPES
+    if accessor:
+        # The accessor's pin contract depends on the variable name and type, so it
+        # comes from the single writer's own resolver instead of a static table.
+        contract = node_contract(
+            {
+                "nodeType": node_type,
+                "variableName": entry.get("variableName"),
+                "variableType": entry.get("variableType"),
+            }
+        )
+        if contract is None:
+            raise PatchError(
+                error_code,
+                f"{label} is not a valid variable accessor declaration.",
+            )
+    else:
+        contract = _node_contract(node_type, label, error_code=error_code)
     if entry.get("nodeClass") != contract["nodeClass"]:
         raise PatchError(
             error_code,
@@ -356,6 +381,18 @@ def _canonical_node_fields(
     }
     if expected_function is not None:
         normalized["function"] = expected_function
+    if accessor:
+        try:
+            normalized.update(validate_variable_accessor_fields(node_type, entry, label))
+        except GraphEditError as exc:
+            raise PatchError(exc.code, exc.message) from exc
+        expected_access = VARIABLE_NODE_TYPES[node_type]["access"]
+        if entry.get("variableAccess") != expected_access:
+            raise PatchError(
+                error_code,
+                f"{label}.variableAccess must be {expected_access} for {node_type}.",
+            )
+        normalized["variableAccess"] = expected_access
     if expect_node_guid:
         normalized["nodeGuid"] = _guid_with_code(
             entry.get("nodeGuid"),
@@ -478,17 +515,42 @@ def validate_preview_parameters(
         if kind == "createNode":
             _reject_unknown(
                 item,
-                {"opId", "kind", *CREATE_NODE_FIELDS, "tempId"},
+                {
+                    "opId",
+                    "kind",
+                    *CREATE_NODE_FIELDS,
+                    "tempId",
+                    *VARIABLE_ACCESSOR_FIELDS,
+                },
                 f"operations[{index}]",
             )
-            # nodeType/x/y plus an optional patch-local tempId: no literal (that
-            # would change the edge set through a different mechanism, owned
-            # literals are still unmigrated).
-            _node_contract(
-                item.get("nodeType"),
-                f"operations[{index}]",
-                error_code="graph-edit-node-type-not-allowed",
-            )
+            node_type = item.get("nodeType")
+            accessor = isinstance(node_type, str) and node_type in VARIABLE_NODE_TYPES
+            # nodeType/x/y plus an optional patch-local tempId; the two accessor
+            # nodeTypes additionally bind one EXISTING member variable by name,
+            # GUID and type.  No literal is accepted (owned literals are still
+            # unmigrated).
+            if accessor:
+                try:
+                    variable_fields = validate_variable_accessor_fields(
+                        node_type,
+                        item,
+                        f"operations[{index}]",
+                    )
+                except GraphEditError as exc:
+                    raise PatchError(exc.code, exc.message) from exc
+            else:
+                _node_contract(
+                    node_type,
+                    f"operations[{index}]",
+                    error_code="graph-edit-node-type-not-allowed",
+                )
+                if any(field in item for field in VARIABLE_ACCESSOR_FIELDS):
+                    raise PatchError(
+                        "graph-edit-variable-field-not-allowed",
+                        f"operations[{index}] nodeType {node_type} does not accept "
+                        "variableName/variableGuid/variableType.",
+                    )
             x = _coordinate(
                 item.get("x"),
                 f"operations[{index}].x",
@@ -510,10 +572,12 @@ def validate_preview_parameters(
             normalized_node: dict[str, Any] = {
                 "opId": op_id,
                 "kind": kind,
-                "nodeType": item.get("nodeType"),
+                "nodeType": node_type,
                 "x": x,
                 "y": y,
             }
+            if accessor:
+                normalized_node.update(variable_fields)
             if "tempId" in item:
                 temp_id = _temp_id(item.get("tempId"), f"operations[{index}].tempId")
                 # Duplicates were already refused by the label pre-pass.

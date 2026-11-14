@@ -756,8 +756,8 @@ namespace
 			}
 			else if (Operation.Kind.Equals(KindCreateNode, ESearchCase::CaseSensitive))
 			{
-				// createNode carries exactly nodeType/x/y: no tempId (nothing can
-				// reference it inside this patch), no literal, no variable field.
+				// createNode carries nodeType/x/y, an optional tempId and -- only for
+				// the two variable accessor nodeTypes -- the exact variable identity.
 				if (!RejectUnknownParams(
 					*Object,
 					{
@@ -767,6 +767,9 @@ namespace
 						TEXT("x"),
 						TEXT("y"),
 						TEXT("tempId"),
+						TEXT("variableName"),
+						TEXT("variableGuid"),
+						TEXT("variableType"),
 					},
 					OutErrorCode,
 					OutErrorMessage))
@@ -781,6 +784,64 @@ namespace
 					|| !ReadCoordinate(*Object, TEXT("y"), Y, OutErrorCode, OutErrorMessage))
 				{
 					return false;
+				}
+				// Slice 15: the three variable fields belong to variable_get and
+				// variable_set only.  A primitive that carries one is refused with the
+				// single writer's own code, and a missing field on an accessor is left
+				// to the resolver, which reports the exact writer code for it.
+				const bool bVariableAccessorType =
+					NodeType.Equals(TEXT("variable_get"), ESearchCase::CaseSensitive)
+					|| NodeType.Equals(TEXT("variable_set"), ESearchCase::CaseSensitive);
+				const bool bHasVariableName = Object->Get()->HasField(TEXT("variableName"));
+				const bool bHasVariableGuid = Object->Get()->HasField(TEXT("variableGuid"));
+				const bool bHasVariableType = Object->Get()->HasField(TEXT("variableType"));
+				if (!bVariableAccessorType
+					&& (bHasVariableName || bHasVariableGuid || bHasVariableType))
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-edit-variable-field-not-allowed"),
+						FString::Printf(
+							TEXT("nodeType %s does not accept variableName/variableGuid/variableType."),
+							*NodeType));
+				}
+				if (bVariableAccessorType)
+				{
+					Operation.Node.bVariableAccessor = true;
+					if (bHasVariableName
+						&& !ReadString(
+							*Object,
+							TEXT("variableName"),
+							Operation.Node.VariableName,
+							OutErrorCode,
+							OutErrorMessage,
+							/*bAllowEmpty=*/true))
+					{
+						return false;
+					}
+					if (bHasVariableGuid
+						&& !ReadString(
+							*Object,
+							TEXT("variableGuid"),
+							Operation.Node.VariableGuid,
+							OutErrorCode,
+							OutErrorMessage,
+							/*bAllowEmpty=*/true))
+					{
+						return false;
+					}
+					if (bHasVariableType
+						&& !ReadString(
+							*Object,
+							TEXT("variableType"),
+							Operation.Node.VariableType,
+							OutErrorCode,
+							OutErrorMessage,
+							/*bAllowEmpty=*/true))
+					{
+						return false;
+					}
 				}
 				// tempId is optional: a createNode that nothing references needs no
 				// label, but an edge endpoint in the same patch can only name a node
@@ -1149,6 +1210,7 @@ namespace
 		if (Operation.Kind.Equals(KindCreateNode, ESearchCase::CaseSensitive))
 		{
 			if (!UEAgentKitBlueprintGraphEditExperimental::TryResolveAtomicNodeOperation(
+				Blueprint,
 				Graph,
 				Operation.Node,
 				OutErrorCode,
@@ -1192,6 +1254,15 @@ namespace
 			{
 				// The label a later connect operation may use to name this node.
 				Operation.Detail->SetStringField(TEXT("tempId"), Operation.TempId);
+			}
+			if (Operation.Node.bVariableAccessor)
+			{
+				// The bound member variable travels with the result, so a caller can
+				// confirm the accessor targets the variable it named.
+				Operation.Detail->SetStringField(TEXT("variableName"), Operation.Node.VariableName);
+				Operation.Detail->SetStringField(TEXT("variableGuid"), Operation.Node.VariableGuid);
+				Operation.Detail->SetStringField(TEXT("variableType"), Operation.Node.VariableType);
+				Operation.Detail->SetStringField(TEXT("variableAccess"), Operation.Node.VariableAccess);
 			}
 			return true;
 		}
@@ -1693,6 +1764,14 @@ namespace
 			Canonical = AppendField(Canonical, Operation.Node.FunctionName);
 			Canonical = AppendField(Canonical, FString::FromInt(Operation.Node.X));
 			Canonical = AppendField(Canonical, FString::FromInt(Operation.Node.Y));
+			if (Operation.Node.bVariableAccessor)
+			{
+				// A variable accessor binds one existing member variable by name,
+				// GUID and type; all three change what the node reads or writes.
+				Canonical = AppendField(Canonical, Operation.Node.VariableName);
+				Canonical = AppendField(Canonical, Operation.Node.VariableGuid);
+				Canonical = AppendField(Canonical, Operation.Node.VariableType);
+			}
 		}
 		else if (Operation.Kind.Equals(KindConnect, ESearchCase::CaseSensitive)
 			|| Operation.Kind.Equals(KindDisconnect, ESearchCase::CaseSensitive))

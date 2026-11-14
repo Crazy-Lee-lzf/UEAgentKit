@@ -316,6 +316,17 @@ def _node_contract(node: dict[str, Any]) -> dict[str, Any] | None:
     return NODE_TYPES.get(node_type) if isinstance(node_type, str) else None
 
 
+def node_contract(node: dict[str, Any]) -> dict[str, Any] | None:
+    """Public view of the exact node/pin contract for one normalized node.
+
+    The atomic patch reuses this so a `variable_get`/`variable_set` result is
+    checked against the same variable-dependent pin contract the standalone graph
+    edit tool declares, instead of a second copy of it (0-3.4 slice 15).
+    """
+
+    return _node_contract(node)
+
+
 _TEMP_ID = re.compile(r"^tmp:[A-Za-z0-9_-]{1,36}$")
 _VARIABLE_GUID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
@@ -330,6 +341,57 @@ class GraphEditError(Exception):
         super().__init__(message)
         self.code = code
         self.message = message
+
+
+def validate_variable_accessor_fields(
+    node_type: Any,
+    values: dict[str, Any],
+    label: str,
+) -> dict[str, str]:
+    """Validate the three bounded accessor fields with the writer's own rules.
+
+    One implementation for both callers: the standalone graph edit tool (which
+    raises ``GraphEditError`` directly) and the atomic patch (which normalizes the
+    same code into its own error type).  Nothing here creates or retypes a
+    variable -- it only checks that the identity the caller declared is a legal
+    accessor binding shape (0-3.4 slice 15).
+    """
+
+    if node_type not in VARIABLE_NODE_TYPES:
+        raise GraphEditError(
+            "graph-edit-node-type-not-allowed",
+            f"{label}: {node_type} is not a variable accessor nodeType.",
+        )
+    variable_name = values.get("variableName")
+    variable_guid = values.get("variableGuid")
+    variable_type = values.get("variableType")
+    if (
+        not isinstance(variable_name, str)
+        or not variable_name
+        or len(variable_name) > 128
+        or not variable_name.isidentifier()
+        or variable_name in VARIABLE_PIN_RESERVED
+    ):
+        raise GraphEditError(
+            "graph-edit-variable-name-invalid",
+            f"{label}.variableName must be a 1-128 character identifier "
+            f"other than {', '.join(VARIABLE_PIN_RESERVED)}.",
+        )
+    if not isinstance(variable_guid, str) or not _VARIABLE_GUID.fullmatch(variable_guid):
+        raise GraphEditError(
+            "graph-edit-variable-guid-invalid",
+            f"{label}.variableGuid must be one canonical lowercase GUID.",
+        )
+    if variable_type not in VARIABLE_TYPES:
+        raise GraphEditError(
+            "graph-edit-variable-type-invalid",
+            f"{label}.variableType must be bool, int, double or string.",
+        )
+    return {
+        "variableName": variable_name,
+        "variableGuid": variable_guid,
+        "variableType": variable_type,
+    }
 
 
 def _object(value: Any, label: str) -> dict[str, Any]:
@@ -852,37 +914,12 @@ def validate_preview_parameters(
                     "graph-edit-variable-field-not-allowed",
                     f"nodes[{index}] variable accessors do not accept call/literal fields.",
                 )
-            variable_name = item.get("variableName")
-            variable_guid = item.get("variableGuid")
-            variable_type = item.get("variableType")
-            if (
-                not isinstance(variable_name, str)
-                or not variable_name
-                or len(variable_name) > 128
-                or not variable_name.isidentifier()
-                or variable_name in VARIABLE_PIN_RESERVED
-            ):
-                raise GraphEditError(
-                    "graph-edit-variable-name-invalid",
-                    f"nodes[{index}].variableName must be a 1-128 character identifier "
-                    f"other than {', '.join(VARIABLE_PIN_RESERVED)}.",
-                )
-            if not isinstance(variable_guid, str) or not _VARIABLE_GUID.fullmatch(variable_guid):
-                raise GraphEditError(
-                    "graph-edit-variable-guid-invalid",
-                    f"nodes[{index}].variableGuid must be one canonical lowercase GUID.",
-                )
-            if variable_type not in VARIABLE_TYPES:
-                raise GraphEditError(
-                    "graph-edit-variable-type-invalid",
-                    f"nodes[{index}].variableType must be bool, int, double or string.",
-                )
             normalized_node.update(
-                {
-                    "variableName": variable_name,
-                    "variableGuid": variable_guid,
-                    "variableType": variable_type,
-                }
+                validate_variable_accessor_fields(
+                    node_type,
+                    item,
+                    f"nodes[{index}]",
+                )
             )
         elif node_type == CALL_FUNCTION_NODE_TYPE:
             if any(

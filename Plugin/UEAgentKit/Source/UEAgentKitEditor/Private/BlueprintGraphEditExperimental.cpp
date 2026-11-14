@@ -4301,6 +4301,97 @@ namespace
 	 * OutNode is set as soon as the node exists in the graph, so a caller that
 	 * gets `false` can still remove the partially created node.
 	 */
+	/**
+	 * Create one bounded member-variable accessor through the engine's spawner.
+	 *
+	 * 0-3.4 slice 15: extracted from the single writer's Apply so the atomic patch
+	 * creates accessors through exactly the same path -- same generated-property
+	 * lookup, same post-Preview type re-check, same
+	 * `UBlueprintVariableNodeSpawner::CreateFromMemberOrParam` + Invoke.  It never
+	 * creates, renames or retypes the variable itself.
+	 */
+	bool CreateVariableAccessorNode(
+		UBlueprint* Blueprint,
+		UEdGraph* Graph,
+		const FString& VariableName,
+		const FString& VariableType,
+		const bool bGet,
+		const int32 X,
+		const int32 Y,
+		UEdGraphNode*& OutNode,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
+	{
+		OutNode = nullptr;
+		if (Blueprint == nullptr || Graph == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-graph-unavailable"),
+				TEXT("The exact Blueprint graph is unavailable."));
+		}
+		FProperty* Property = FindMemberVariableProperty(Blueprint, FName(*VariableName));
+		if (Property == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-variable-property-unavailable"),
+				FString::Printf(
+					TEXT("Variable %s no longer has a generated/skeleton property."),
+					*VariableName));
+		}
+		FEdGraphPinType PropertyType;
+		FString ActualType;
+		if (!GetDefault<UEdGraphSchema_K2>()->ConvertPropertyToPinType(Property, PropertyType)
+			|| !VariableTypeToken(PropertyType, ActualType)
+			|| !ActualType.Equals(VariableType, ESearchCase::CaseSensitive))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-variable-type-mismatch"),
+				FString::Printf(
+					TEXT("Variable %s changed type after Preview."),
+					*VariableName));
+		}
+		TSubclassOf<UK2Node_Variable> VariableNodeClass = bGet
+			? UK2Node_VariableGet::StaticClass()
+			: UK2Node_VariableSet::StaticClass();
+		UBlueprintVariableNodeSpawner* VariableSpawner =
+			UBlueprintVariableNodeSpawner::CreateFromMemberOrParam(
+				VariableNodeClass,
+				Property);
+		if (VariableSpawner == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-node-spawn-failed"),
+				FString::Printf(
+					TEXT("Could not create a variable spawner for %s."),
+					*VariableName));
+		}
+		UEdGraphNode* Node = VariableSpawner->Invoke(
+			Graph,
+			IBlueprintNodeBinder::FBindingSet(),
+			FVector2D(X, Y));
+		if (Node == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-node-spawn-failed"),
+				FString::Printf(
+					TEXT("The Editor failed to spawn the %s accessor for %s."),
+					bGet ? TEXT("get") : TEXT("set"),
+					*VariableName));
+		}
+		OutNode = Node;
+		return true;
+	}
+
 	bool CreatePrimitiveNode(
 		UEdGraph* Graph,
 		const FNodeSpec& Spec,
@@ -4461,6 +4552,20 @@ namespace
 				Operation.X,
 				Operation.Y);
 			return false;
+		}
+		if (Operation.bVariableAccessor)
+		{
+			// Slice 15: the accessor's own read-back -- class, self-context, member
+			// name, member GUID and the four/one pin contract -- is the single
+			// writer's check, reused here.
+			FNodeSpec AccessorSpec;
+			AccessorSpec.bVariableAccessor = true;
+			AccessorSpec.NodeType = Operation.NodeType;
+			AccessorSpec.NodeClassPath = Operation.NodeClassPath;
+			AccessorSpec.VariableName = Operation.VariableName;
+			AccessorSpec.VariableGuid = Operation.VariableGuid;
+			AccessorSpec.VariableType = Operation.VariableType;
+			return VariableNodeMatchesSpec(Node, AccessorSpec, OutReason);
 		}
 
 		FNodeSpec Expected;
@@ -4955,6 +5060,7 @@ FString UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicNodeStateFingerpr
 }
 
 bool UEAgentKitBlueprintGraphEditExperimental::TryResolveAtomicNodeOperation(
+	UBlueprint* Blueprint,
 	UEdGraph* Graph,
 	FAtomicNodeOperation& InOutOperation,
 	FString& OutErrorCode,
@@ -4979,14 +5085,16 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryResolveAtomicNodeOperation(
 			TEXT("graph-edit-schema-not-supported"),
 			TEXT("Experimental graph edit supports only K2 Blueprint graphs."));
 	}
-	if (NodeClassForType(InOutOperation.NodeType) == nullptr)
+	const bool bAccessorType = InOutOperation.NodeType.Equals(TEXT("variable_get"), ESearchCase::CaseSensitive)
+		|| InOutOperation.NodeType.Equals(TEXT("variable_set"), ESearchCase::CaseSensitive);
+	if (!bAccessorType && NodeClassForType(InOutOperation.NodeType) == nullptr)
 	{
 		return Fail(
 			OutErrorCode,
 			OutErrorMessage,
 			TEXT("graph-edit-node-type-not-allowed"),
 			FString::Printf(
-				TEXT("The atomic patch creates only these nodeTypes: branch, sequence, not_bool, bool_or, int_add, int_equal, double_add, string_concat (got '%s')."),
+				TEXT("The atomic patch creates only these nodeTypes: branch, sequence, not_bool, bool_or, int_add, int_equal, double_add, string_concat, variable_get, variable_set (got '%s')."),
 				*InOutOperation.NodeType));
 	}
 	if (InOutOperation.X < -MaxCoordinate || InOutOperation.X > MaxCoordinate
@@ -5006,6 +5114,40 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryResolveAtomicNodeOperation(
 	Spec.NodeType = InOutOperation.NodeType;
 	Spec.X = InOutOperation.X;
 	Spec.Y = InOutOperation.Y;
+	if (bAccessorType)
+	{
+		// Slice 15: resolve the accessor through the single writer's own rules, so
+		// the identity/type checks and the engine pin contract cannot drift.  A
+		// variable that does not exist yet is refused here, before any transaction.
+		if (!IsSupportedVariableAccessorGraph(Blueprint, Graph))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-variable-graph-not-supported"),
+				TEXT("Variable accessor creation is limited to top-level event, function and macro graphs."));
+		}
+		Spec.bVariableAccessor = true;
+		Spec.VariableName = InOutOperation.VariableName;
+		Spec.VariableGuid = InOutOperation.VariableGuid;
+		Spec.VariableType = InOutOperation.VariableType;
+		if (!ResolveVariableNode(Spec, Blueprint, OutErrorCode, OutErrorMessage))
+		{
+			return false;
+		}
+		InOutOperation.bVariableAccessor = true;
+		InOutOperation.VariableName = Spec.VariableName;
+		InOutOperation.VariableGuid = Spec.VariableGuid;
+		InOutOperation.VariableType = Spec.VariableType;
+		InOutOperation.VariableAccess = Spec.VariableAccess;
+		InOutOperation.NodeClassPath = Spec.NodeClassPath;
+		InOutOperation.FunctionName.Reset();
+		InOutOperation.InputPins = Spec.InputPins;
+		InOutOperation.OutputPins = Spec.OutputPins;
+		InOutOperation.InputPinTypes = Spec.InputPinTypes;
+		InOutOperation.OutputPinTypes = Spec.OutputPinTypes;
+		return true;
+	}
 	if (!ConfigureNodeType(
 			InOutOperation.NodeType,
 			Spec,
@@ -5074,8 +5216,34 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyAtomicNodeOperations(
 		Spec.FunctionName = Operation.FunctionName;
 		Spec.X = Operation.X;
 		Spec.Y = Operation.Y;
+		Spec.bVariableAccessor = Operation.bVariableAccessor;
+		Spec.VariableName = Operation.VariableName;
+		Spec.VariableGuid = Operation.VariableGuid;
+		Spec.VariableType = Operation.VariableType;
+		Spec.VariableAccess = Operation.VariableAccess;
 		UEdGraphNode* Node = nullptr;
-		if (!CreatePrimitiveNode(Graph, Spec, Node, OutErrorCode, OutErrorMessage))
+		if (Operation.bVariableAccessor)
+		{
+			if (!CreateVariableAccessorNode(
+					Blueprint,
+					Graph,
+					Operation.VariableName,
+					Operation.VariableType,
+					Operation.NodeType.Equals(TEXT("variable_get"), ESearchCase::CaseSensitive),
+					Operation.X,
+					Operation.Y,
+					Node,
+					OutErrorCode,
+					OutErrorMessage))
+			{
+				if (!RemoveCreatedNodes(Blueprint, Graph, CreatedNodes))
+				{
+					OutErrorMessage += TEXT(" The atomic Apply could not remove a partially created node.");
+				}
+				return false;
+			}
+		}
+		else if (!CreatePrimitiveNode(Graph, Spec, Node, OutErrorCode, OutErrorMessage))
 		{
 			// A partially created node is still a write; remove it before the
 			// caller can observe an empty result.
@@ -6055,47 +6223,20 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 			UEdGraphNode* Node = nullptr;
 			if (Spec.bVariableAccessor)
 			{
-				FProperty* Property = FindMemberVariableProperty(Blueprint, FName(*Spec.VariableName));
-				if (Property == nullptr)
+				if (!CreateVariableAccessorNode(
+						Blueprint,
+						Graph,
+						Spec.VariableName,
+						Spec.VariableType,
+						Spec.NodeType.Equals(TEXT("variable_get"), ESearchCase::CaseSensitive),
+						Spec.X,
+						Spec.Y,
+						Node,
+						OutErrorCode,
+						OutErrorMessage))
 				{
-					return Abort(
-						TEXT("graph-edit-variable-property-unavailable"),
-						FString::Printf(
-							TEXT("Variable %s no longer has a generated/skeleton property."),
-							*Spec.VariableName));
+					return Abort(*OutErrorCode, OutErrorMessage);
 				}
-				FEdGraphPinType PropertyType;
-				FString ActualType;
-				if (!GetDefault<UEdGraphSchema_K2>()->ConvertPropertyToPinType(Property, PropertyType)
-					|| !VariableTypeToken(PropertyType, ActualType)
-					|| !ActualType.Equals(Spec.VariableType, ESearchCase::CaseSensitive))
-				{
-					return Abort(
-						TEXT("graph-edit-variable-type-mismatch"),
-						FString::Printf(
-							TEXT("Variable %s changed type after Preview."),
-							*Spec.VariableName));
-				}
-				TSubclassOf<UK2Node_Variable> VariableNodeClass =
-					Spec.NodeType.Equals(TEXT("variable_get"), ESearchCase::CaseSensitive)
-						? UK2Node_VariableGet::StaticClass()
-						: UK2Node_VariableSet::StaticClass();
-				UBlueprintVariableNodeSpawner* VariableSpawner =
-					UBlueprintVariableNodeSpawner::CreateFromMemberOrParam(
-						VariableNodeClass,
-						Property);
-				if (VariableSpawner == nullptr)
-				{
-					return Abort(
-						TEXT("graph-edit-node-spawn-failed"),
-						FString::Printf(
-							TEXT("Could not create a variable spawner for %s."),
-							*Spec.VariableName));
-				}
-				Node = VariableSpawner->Invoke(
-					Graph,
-					IBlueprintNodeBinder::FBindingSet(),
-					FVector2D(Spec.X, Spec.Y));
 			}
 			else if (!Spec.FunctionName.IsEmpty())
 			{

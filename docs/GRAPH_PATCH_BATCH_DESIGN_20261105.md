@@ -743,7 +743,9 @@ plan 就可以被拿去连一条方向相反的边。用下标既保留了“两
 
 | 项 | 内容 |
 |---|---|
-| 已迁移 kind | `setPinDefault` + `createVariable` + `createNode` + `connect`（切片 11）+ `disconnect` + `rewirePin`（切片 12）+ `removeNode`（切片 13，**全部 7 个**） |
+| 已迁移 kind | `setPinDefault` + `createVariable` + `createNode` + `connect`（切片 11）+ `disconnect` + `rewirePin`（切片 12）+ `removeNode`（切片 13，**全部 7 个**；切片 15 只在 `createNode` 里扩了两个 nodeType，**kind 数量仍是 7**） |
+| createNode 的 nodeType（切片 15） | 8 个 primitive + `variable_get` / `variable_set`；accessor 额外**必须**带 `variableName`/`variableGuid`/`variableType`，primitive 带任一 → `graph-edit-variable-field-not-allowed` |
+| 变量访问器（切片 15） | 只绑定**已存在**的顶层成员变量（`Blueprint->NewVariables` + 生成属性），解析/读回/图限制全部复用单 writer；「建变量 + 用变量」仍是两次调用 |
 | removeNode 字段（切片 13） | 节点删除 writer 自己的三个字段：`nodeGuid` / `expectedNodeClass` / `removedEdges[]`（每个条目六个身份字段）；**不含** `expectedEdgeSetHash`，见决策日志 |
 | removeNode 解析（切片 13） | 事务外沿用它自己的判定：可删类白名单（branch + 6 个纯 Kismet 数学函数）、隐藏/不可连 pin 不得有连接、不在白名单的 pin 类型、至多 1 条连带边、一次 patch 至多删 **1** 个节点（与单 writer 同一个界，`graph-patch-remove-node-limit`，2026-11-14 复核补上）、`removedEdges` 必须与活图**逐条相等**（不是照单全收） |
 | removeNode 回滚（切片 13） | 删节点会带走边，所以回滚**先放回同一个节点对象**（`Graph->AddNode`，保留 NodeGuid 与全部 PinId），再逐条重建 `removedEdges`；两者都断言，缺一即失败 |
@@ -783,7 +785,8 @@ plan 就可以被拿去连一条方向相反的边。用下标既保留了“两
 | graph edit 的 `createNode`（8 种原始节点） | 已迁移（切片 10） |
 | graph edit 的 `connect`（GUID / tempId 端点） | 已迁移（切片 11） |
 | graph edit 的 `disconnect` | 已迁移（切片 12） |
-| graph edit 的 `call_function` / `call_owned_pure_function` / owned literals / variable accessor | **未迁移** |
+| graph edit 的 `variable_get` / `variable_set` | 已迁移（切片 15，走 `createNode`） |
+| graph edit 的 `call_function` / `call_owned_pure_function` / owned literals | **未迁移** |
 | rewire | 已迁移（切片 12，`rewirePin`） |
 | node remove | 已迁移（切片 13） |
 
@@ -791,7 +794,9 @@ plan 就可以被拿去连一条方向相反的边。用下标既保留了“两
 
 - 一次 patch 只能落在一个图、一个包上。
 - `connect`/`disconnect`/`rewirePin` 各改一条边，`removeNode` 删一个节点（连带 ≤1 条边）；graph edit 的
-  owned literals / variable accessor / `call_function` 族仍没有入口。
+  owned literals / `call_function` 族仍没有入口。
+- 变量访问器只能引用**已经存在**的成员变量；「同一个 patch 里先 `createVariable` 再建它的访问器」做不到
+  （解析在 Preview 阶段查的是 `Blueprint->NewVariables` 与生成属性，而 `createVariable` 的写入在事务内）。
 - 不支持 owned literals（会同时建节点并改边集）。
 - `tempId` 是 patch 内标签，不能跨 patch 复用；下一条 patch 只能用 Apply 返回的 `nodeGuid`。
 - patch 的 `tempId` 形状（1–64 可打印 ASCII）比单 writer 的 `IsTempId`（1–36 字母数字/`_`/`-`）宽，
@@ -992,3 +997,120 @@ ExperimentalGraphPatchEdit=True` + MCP `--enable-experimental-graphpatch-edit`�
 `Output/e2e_patch_s13.py`（不提交，`Output/` 被 ignore）按 `probe → a → b → c → d → e → verify`
 分阶段驱动，每阶段的请求/响应原文落在 `Output/e2e_s13/*.json`。要复现必须先备一份资产文件，
 并把 `[UEAgentKit] ExperimentalGraphPatchEdit=True` 写进 Host ini、结束后还原。
+
+## 切片 15 — `createNode` 接受变量访问器（`variable_get` / `variable_set`）（2026-11-14）
+
+### 做了什么
+
+`createNode` 的 nodeType 白名单从 8 个 primitive 扩到 **10 个**：新增 `variable_get` / `variable_set`，
+并额外接受三个字段 `variableName` / `variableGuid` / `variableType`（三者**必须同时给**），
+以及照旧的可选 `tempId`。**没有新增 kind**：`MIGRATED_KINDS` 仍是 7 个，accessor 就是 `createNode`，
+因此 tempId / 坐标判重 / 16 节点上限 / 回滚 / detail 回读全部零改动生效。
+
+### 契约
+
+| 项 | 内容 |
+|---|---|
+| nodeType | `variable_get`（read）/ `variable_set`（write），class 分别是 `K2Node_VariableGet` / `K2Node_VariableSet` |
+| 三字段 | 两个 accessor nodeType 必须同时带；8 个 primitive 带任一 → `graph-edit-variable-field-not-allowed` |
+| 变量必须已存在 | 解析读的是 `Blueprint->NewVariables` + 生成属性，所以「建变量 + 用变量」仍是**两次调用**：先一个 `createVariable` patch，再一个 accessor patch。本片**不**提供一次建+用 |
+| tempId | 与 primitive 完全同语义；后面的 `connect` 可以把 get 的 `<VariableName>` 输出当端点 |
+| pin 契约 | get：输出 `<VariableName>`；set：输入 `execute` + `<VariableName>`，输出 `then` + `Output_Get` |
+| 图限制 | **不放宽**：accessor 仍只允许顶层 event/function/macro 图（`IsSupportedVariableAccessorGraph`） |
+| 计数 | accessor 算进 `createNode` 的同一个 `MaxNodesPerApply = 16` 上限；结果**没有**新字段 |
+| 回滚 | 删掉刚建的 accessor（`FBlueprintEditorUtils::RemoveNode`），**不走** removeNode 的可删类白名单 |
+| 结果回读 | preview/apply 的 operation detail 带 `variableName` / `variableGuid` / `variableType` / `variableAccess`；三个 identity 字段进 planId 的 canonical 形式 |
+
+### 复用了什么（没有第二套实现）
+
+- C++：`ResolveVariableNode`（身份/GUID↔名字互证/类型/pin 契约）、`VariableNodeMatchesSpec`（读回）、
+  `IsSupportedVariableAccessorGraph`（图限制）；创建走
+  `UBlueprintVariableNodeSpawner::CreateFromMemberOrParam` + `Invoke`。为了两条路径**同一段代码**，
+  把单 writer Apply 里的那段创建**提取**成 `CreateVariableAccessorNode`，单 writer 与 patch 都调它。
+- Python：把单 writer 的三字段校验提取成 `validate_variable_accessor_fields`（同一套 `graph-edit-variable-*`
+  码），并把 `_node_contract` 的公开别名 `node_contract` 交给 patch 用——accessor 的 pin 契约依赖变量名/类型，
+  不能写成静态表。patch 侧没有新正则、没有第二份 pin 表。
+- 接口变化只有一处：`TryResolveAtomicNodeOperation` 多了 `UBlueprint*` 首参（变量解析必须能看
+  `NewVariables` 与生成属性），调用点只有 patch 一处。
+
+### 拒绝项（全部断言错误码；拒绝后节点数/双指纹/包/SHA 不变）
+
+| 场景 | 码 |
+|---|---|
+| GUID 与名字都不存在 | `graph-edit-variable-not-found` |
+| 名字属于另一个 GUID | `graph-edit-variable-identity-mismatch` |
+| GUID 正确但名字不对 | `graph-edit-variable-identity-mismatch` |
+| 类型与成员变量不符 | `graph-edit-variable-type-mismatch` |
+| 名字非法 / 占用保留 pin 名 | `graph-edit-variable-name-invalid` |
+| GUID 非 canonical | `graph-edit-variable-guid-invalid` |
+| 类型不在 bool/int/double/string | `graph-edit-variable-type-invalid` |
+| primitive 带三字段 | `graph-edit-variable-field-not-allowed` |
+
+### 真实 Editor 证据（2026-11-14）
+
+环境：Host `N1_BlueprintNative_20261031`，插件 `0.9.0.dev1`，UE 5.6.1；隔离
+`UnrealEditor-Cmd -unattended -NullRHI -nop4 -nosplash`。自动化测试用
+`SetExperimentalWriteEnabledForTest` 走测试门禁，**没有**写 Host ini。跑前把 Host 旧 DLL 备份到
+`%TEMP%`，装入本次 Direct Build 产物（`5F8FB1DE`，21:16:43，晚于所有改动源文件）。
+
+**A. 自动化（`Automation RunTests UEAgentKit.AtomicPatch+UEAgentKit.NodeRemove+UEAgentKit.Rewire`，exit 0）**
+`succeeded=9 / succeededWithWarnings=2 / failed=0 / notRun=0`，共 **11** 条：
+
+| 测试 | 结果 | 耗时 |
+|---|---|---|
+| `AtomicPatch.VariableAccessor`（本片新增） | **Success** | 0.61s |
+| `AtomicPatch.RemoveNode` | Success | 0.57s |
+| `AtomicPatch.EdgeOps` | Success | 0.56s |
+| `AtomicPatch.Connect` | Success | 1.37s |
+| `AtomicPatch.CreateNode` | Success | 0.48s |
+| `AtomicPatch.CreateVariable` | Success | 0.43s |
+| `AtomicPatch.Expansion` | Success | 0.49s |
+| `NodeRemove.Expansion` | Success（1 条预期的 plan-stale warning） | 0.62s |
+| `NodeRemove.PieGate` | Success | 0.68s |
+| `Rewire.Expansion` | Success（1 条预期的 plan-stale warning） | 0.53s |
+| `Rewire.PieGate` | Success | 0.27s |
+
+`VariableAccessor` 在一张只有 `int Counter` 的已落盘 K2 fixture 上断言：7 条拒绝（上表前 7 行）、
+`get + int_add + connect` 一个事务 3 条 `applied`、`tx=1`、`undoVerified/redoVerified`、节点 +2 / 边 +1、
+accessor 的 class 是 `K2Node_VariableGet` 且 pin 名就是 `Counter`、边真的连到 `int_add.A`；
+一次 Undo 节点与双指纹回到 before、Redo 回来；显式 Save 后包不脏且磁盘 SHA 变化；
+`variable_set` 的四个 pin（`execute`/`Counter`/`then`/`Output_Get`）逐个断言；注入第 2 条失败后
+**两个 accessor 都消失**、`nodesFingerprint`/`edgesFingerprint` 回到 before、包干净、磁盘 SHA 不变、
+`stateRestored=true`。
+
+**B. 磁盘与收尾**
+
+- 跑前跑后 5 个基线资产 SHA 全部未变，`BP_N1EditSession.uasset` 仍是 **`584C8A2E0A8C5980`**（527,777 字节）。
+- 本次运行在 Host `Content\` 新建 3 个目录 / **9** 个 `.uasset`：`UEAgentKitPatchExpansion/` 里 7 个
+  （`BP_PatchConnect`、`BP_PatchCreateNode`、`BP_PatchEdgeOps`、`BP_PatchExpansion`、`BP_PatchRemoveNode`、
+  `BP_PatchVariableAccessor`、`BP_PatchVariables`），`UEAgentKitBlueprintNodeRemove/` 与
+  `UEAgentKitBlueprintRewire/` 各 1 个（writer 自己的 fixture）。已全部删除，`Content\` 回到
+  `Collections` / `Developers` / `N1Acceptance`。
+- Python 全量：`py -3.12 scripts\RunPythonTests.py full --quiet` → **2101 tests，OK (skipped=20)**，189.6s。
+
+### 只被单测覆盖的
+
+- Python 契约层：两个 nodeType 的归一化形状、三字段的逐字段拒绝码（含“缺字段沿用 writer 的
+  per-field 码而不是 unknown-parameter”）、primitive 带三字段的 `graph-edit-variable-field-not-allowed`、
+  accessor tempId 被 `connect` 引用、结果条目的 variable-dependent pin 契约与 `variableAccess` 一致性、
+  16 节点上限对 accessor 同样生效。
+- **本片没有重跑 MCP socket 级调用**：`variable_get`/`variable_set` 的端到端 socket 记录为 0，
+  这一角的证据只有 C++ 自动化 + Python 单测两侧。
+
+**决策日志（切片 15）**
+
+1. 不新增 `variableGet`/`variableSet` 两个 kind，只扩 `createNode` 的 nodeType：tempId / 判重 / 上限 /
+   回滚 / detail 全部复用，调用方还能把单 writer 的同一个 node 对象直接搬进 patch。
+2. 变量**必须 Preview 之前就存在**：`ResolveVariableNode` 查 `NewVariables` 与生成属性，而
+   `createVariable` 的写入在事务内。所以「建变量 + 建访问器」是两次调用，写进契约，不试图绕过。
+3. `IsSupportedVariableAccessorGraph` **保留**（只允许顶层 event/function/macro 图）。patch 的目标图
+   本来就是焦点 K2 图，放宽它需要单独一条决策，本片不做。
+4. 三字段的校验与 pin 契约**只有一份**：C++ 走 `ResolveVariableNode`/`VariableNodeMatchesSpec`，
+   Python 走提取出来的 `validate_variable_accessor_fields` 与 `node_contract`。
+5. 创建必须走 `UBlueprintVariableNodeSpawner::CreateFromMemberOrParam`：`NewObject` + `SetFromProperty`
+   会绕开引擎的成员绑定/自上下文处理，读回也证明不了。
+6. 拒绝码只复用 `graph-edit-variable-*`，没有新建 `graph-patch-variable-*`；primitive 带三字段沿用
+   writer 的 `graph-edit-variable-field-not-allowed`。
+7. 唯一接口变化是 `TryResolveAtomicNodeOperation` 增加 `UBlueprint*` 首参（调用点只有 patch 一处）。
+8. 回滚用「删自己刚建的节点」，**不**借 removeNode writer 的白名单——`K2Node_VariableGet/Set`
+   本来就不在它的可删类里。

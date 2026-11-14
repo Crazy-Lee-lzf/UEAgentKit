@@ -33,7 +33,13 @@ class UEdGraph;
  * FAtomicNodeOperation): the cross-writer patch creates nodes through the same
  * functions the single writer uses, inside the caller's transaction, and the
  * writer exposes its own node-structure fingerprint.  The seam never creates an
- * edge, an owned literal or a variable accessor.
+ * edge or an owned literal.
+ *
+ * 0-3.4 slice 15 extends the same seam to the bounded member-variable accessors
+ * (`variable_get` / `variable_set`), still through `ResolveVariableNode` and the
+ * engine's `UBlueprintVariableNodeSpawner`.  It stays limited to top-level event,
+ * function and macro graphs (`IsSupportedVariableAccessorGraph`) and to variables
+ * that already exist on the Blueprint.
  */
 namespace UEAgentKitBlueprintGraphEditExperimental
 {
@@ -68,24 +74,24 @@ namespace UEAgentKitBlueprintGraphEditExperimental
 		FString& OutErrorMessage);
 
 	/**
-	 * One primitive-node creation operation resolved against the live graph.
+	 * One node creation operation resolved against the live graph.
 	 *
 	 * 0-3.4 seam: the cross-writer atomic patch (BlueprintPatchExperimental)
 	 * creates nodes through these functions instead of keeping a second copy of
 	 * the node-type whitelist, the coordinate bound, the spawner/CallFunction
 	 * path or the pin-contract read-back.  The single writer's own Apply creates
 	 * the same eight primitive nodeTypes through the very same creation
-	 * function, so the two paths cannot drift.
+	 * function, so the two paths cannot drift; slice 15 added the bounded
+	 * member-variable accessors to that same path.
 	 *
 	 * Deliberately NOT part of this seam: `call_function`,
-	 * `call_owned_pure_function`, `variable_get`/`variable_set` and the owned
-	 * input literals.  They need connection-pin resolution (an existing pin, a
-	 * function allowlist entry, a member-variable binding) and belong to the
-	 * connect slice; `createNode` here is "create one node, touch no edge".
+	 * `call_owned_pure_function` and the owned input literals.  They need a
+	 * function allowlist entry and literal binding; `createNode` here is "create
+	 * one node, touch no edge".
 	 */
 	struct FAtomicNodeOperation
 	{
-		/** One of the eight primitive nodeTypes; canonicalized by resolve. */
+		/** One of the eight primitive nodeTypes or an accessor nodeType. */
 		FString NodeType;
 		/** Resolved class path (e.g. /Script/BlueprintGraph.K2Node_IfThenElse). */
 		FString NodeClassPath;
@@ -101,6 +107,23 @@ namespace UEAgentKitBlueprintGraphEditExperimental
 		int32 Y = 0;
 		/** Assigned inside the transaction; empty in a plan the caller previewed. */
 		FString NodeGuid;
+
+		/**
+		 * 0-3.4 slice 15: bounded member-variable accessor.
+		 *
+		 * `nodeType` is then `variable_get` or `variable_set`, the node is created
+		 * as a self-context accessor for one EXISTING top-level member variable,
+		 * and the three fields below carry its exact identity.  The variable has to
+		 * exist before Preview: resolve reads `Blueprint->NewVariables` and the
+		 * generated property, so "create the variable, then use it" stays two
+		 * calls (a `createVariable` patch and then this one).
+		 */
+		bool bVariableAccessor = false;
+		FString VariableName;
+		FString VariableGuid;
+		FString VariableType;
+		/** Resolved access direction: "read" for get, "write" for set. */
+		FString VariableAccess;
 	};
 
 	/**
@@ -120,8 +143,15 @@ namespace UEAgentKitBlueprintGraphEditExperimental
 	 * Applies the same nodeType whitelist, coordinate bound and K2-schema
 	 * precondition as Preview, resolves the class path and function name, and
 	 * records them in the operation.  No mutation, no transaction.
+	 *
+	 * 0-3.4 slice 15: a `variable_get`/`variable_set` operation is resolved
+	 * against `Blueprint` (its `NewVariables` and generated property) through the
+	 * single writer's own `ResolveVariableNode`, so the identity/type rules and the
+	 * pin contract are the same ones the standalone graph edit tool applies.  That
+	 * is why this function needs the Blueprint and not only the graph.
 	 */
 	bool TryResolveAtomicNodeOperation(
+		UBlueprint* Blueprint,
 		UEdGraph* Graph,
 		FAtomicNodeOperation& InOutOperation,
 		FString& OutErrorCode,

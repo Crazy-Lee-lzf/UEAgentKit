@@ -303,6 +303,65 @@ def _remove_entry(**overrides: Any) -> dict[str, Any]:
     return item
 
 
+def _accessor(
+    node_type: str = "variable_get",
+    *,
+    name: str = "Counter",
+    guid: str = VARIABLE_GUID,
+    variable_type: str = "int",
+    **overrides: Any,
+) -> dict[str, Any]:
+    item = {
+        "opId": "n1",
+        "kind": "createNode",
+        "nodeType": node_type,
+        "x": 200,
+        "y": 120,
+        "variableName": name,
+        "variableGuid": guid,
+        "variableType": variable_type,
+    }
+    item.update(overrides)
+    return item
+
+
+def _accessor_contract_fields(
+    node_type: str = "variable_get",
+    *,
+    name: str = "Counter",
+    variable_type: str = "int",
+) -> dict[str, Any]:
+    if node_type == "variable_get":
+        return {
+            "nodeType": node_type,
+            "nodeClass": "/Script/BlueprintGraph.K2Node_VariableGet",
+            "x": 200,
+            "y": 120,
+            "inputPins": [],
+            "outputPins": [name],
+            "inputPinTypes": {},
+            "outputPinTypes": {name: variable_type},
+            "variableName": name,
+            "variableGuid": VARIABLE_GUID,
+            "variableType": variable_type,
+            "variableAccess": "read",
+        }
+    return {
+        "nodeType": node_type,
+        "nodeClass": "/Script/BlueprintGraph.K2Node_VariableSet",
+        "x": 200,
+        "y": 120,
+        "inputPins": ["execute", name],
+        "outputPins": ["then", "Output_Get"],
+        "inputPinTypes": {"execute": "exec", name: variable_type},
+        "outputPinTypes": {"then": "exec", "Output_Get": variable_type},
+        "variableName": name,
+        "variableGuid": VARIABLE_GUID,
+        "variableType": variable_type,
+        "variableAccess": "write",
+    }
+
+
 def _preview(**overrides: Any) -> dict[str, Any]:
     result: dict[str, Any] = {
         "schemaVersion": PREVIEW_SCHEMA_VERSION,
@@ -761,7 +820,9 @@ class PatchContractTests(unittest.TestCase):
 
         # The graph-edit whitelist is the single source of truth: a nodeType only
         # the single writer knows (an allowlisted call_function) is not migrated.
-        for node_type in ("call_function", "call_owned_pure_function", "variable_get"):
+        # `variable_get`/`variable_set` left this group in slice 15: they are
+        # migrated, but only with the three identity fields.
+        for node_type in ("call_function", "call_owned_pure_function"):
             with self.subTest(node_type=node_type):
                 with self.assertRaises(PatchError) as raised:
                     validate_preview_parameters(
@@ -770,6 +831,20 @@ class PatchContractTests(unittest.TestCase):
                         operations=[_node(nodeType=node_type)],
                     )
                 self.assertEqual(raised.exception.code, "graph-edit-node-type-not-allowed")
+
+        # An accessor without its identity is refused by the writer's own rules.
+        for node_type, code in (
+            ("variable_get", "graph-edit-variable-name-invalid"),
+            ("variable_set", "graph-edit-variable-name-invalid"),
+        ):
+            with self.subTest(node_type=node_type):
+                with self.assertRaises(PatchError) as raised:
+                    validate_preview_parameters(
+                        asset_path=ASSET,
+                        graph_guid=GRAPH,
+                        operations=[_node(nodeType=node_type)],
+                    )
+                self.assertEqual(raised.exception.code, code)
 
     def test_create_node_coordinates_and_limits_are_enforced(self) -> None:
         for coordinate in (-100_001, 100_001, 1.5, "10", True):
@@ -809,7 +884,6 @@ class PatchContractTests(unittest.TestCase):
             {"nodeGuid": NODE_A},
             {"inputLiterals": []},
             {"defaultValue": "1"},
-            {"variableName": "Counter"},
             {"from": NODE_A},
         ):
             with self.subTest(extra=extra):
@@ -820,6 +894,188 @@ class PatchContractTests(unittest.TestCase):
                         operations=[_node(**extra)],
                     )
                 self.assertEqual(raised.exception.code, "graph-patch-unknown-parameter")
+
+        # A variable field on a primitive nodeType is not an unknown field: it is
+        # the single writer's own "this nodeType has no variable binding" refusal.
+        for extra in (
+            {"variableName": "Counter"},
+            {"variableGuid": VARIABLE_GUID},
+            {"variableType": "int"},
+        ):
+            with self.subTest(extra=extra):
+                with self.assertRaises(PatchError) as raised:
+                    validate_preview_parameters(
+                        asset_path=ASSET,
+                        graph_guid=GRAPH,
+                        operations=[_node(**extra)],
+                    )
+                self.assertEqual(
+                    raised.exception.code,
+                    "graph-edit-variable-field-not-allowed",
+                )
+
+    def test_variable_accessor_create_node_is_normalized(self) -> None:
+        # Slice 15: the two accessor nodeTypes travel through createNode with the
+        # three identity fields, and nothing else changes about the shape.
+        for node_type in ("variable_get", "variable_set"):
+            with self.subTest(node_type=node_type):
+                request = validate_preview_parameters(
+                    asset_path=ASSET,
+                    graph_guid=GRAPH,
+                    operations=[_accessor(node_type, tempId="tmp:acc")],
+                )
+                self.assertEqual(
+                    request["operations"][0],
+                    {
+                        "opId": "n1",
+                        "kind": "createNode",
+                        "nodeType": node_type,
+                        "x": 200,
+                        "y": 120,
+                        "variableName": "Counter",
+                        "variableGuid": VARIABLE_GUID,
+                        "variableType": "int",
+                        "tempId": "tmp:acc",
+                    },
+                )
+
+        # A later connect may name the accessor by its tempId; the pin is the
+        # variable name for a get.
+        request = validate_preview_parameters(
+            asset_path=ASSET,
+            graph_guid=GRAPH,
+            operations=[
+                _accessor("variable_get", tempId="tmp:acc"),
+                _connect(from_ref="tmp:acc", from_pin="Counter", to_ref=NODE_A, to_pin="A"),
+            ],
+        )
+        self.assertEqual(request["operations"][1]["from"], "tmp:acc")
+        self.assertEqual(request["operations"][1]["fromPin"], "Counter")
+
+        # Every field the writer validates is refused with the writer's own code.
+        for mutation, code in (
+            ({"variableName": ""}, "graph-edit-variable-name-invalid"),
+            ({"variableName": "Output_Get"}, "graph-edit-variable-name-invalid"),
+            ({"variableName": "Not An Identifier"}, "graph-edit-variable-name-invalid"),
+            ({"variableGuid": "not-a-guid"}, "graph-edit-variable-guid-invalid"),
+            ({"variableGuid": VARIABLE_GUID.upper()}, "graph-edit-variable-guid-invalid"),
+            ({"variableType": "vector"}, "graph-edit-variable-type-invalid"),
+        ):
+            with self.subTest(mutation=mutation):
+                with self.assertRaises(PatchError) as raised:
+                    validate_preview_parameters(
+                        asset_path=ASSET,
+                        graph_guid=GRAPH,
+                        operations=[_accessor(**mutation)],
+                    )
+                self.assertEqual(raised.exception.code, code)
+
+        # A missing field is the writer's own per-field refusal, never a generic
+        # "unknown parameter".
+        for field, code in (
+            ("variableName", "graph-edit-variable-name-invalid"),
+            ("variableGuid", "graph-edit-variable-guid-invalid"),
+            ("variableType", "graph-edit-variable-type-invalid"),
+        ):
+            with self.subTest(missing=field):
+                operation = _accessor()
+                del operation[field]
+                with self.assertRaises(PatchError) as raised:
+                    validate_preview_parameters(
+                        asset_path=ASSET,
+                        graph_guid=GRAPH,
+                        operations=[operation],
+                    )
+                self.assertEqual(raised.exception.code, code)
+
+        # Accessors count against the same 16-node bound as primitives.
+        with self.assertRaises(PatchError) as raised:
+            validate_preview_parameters(
+                asset_path=ASSET,
+                graph_guid=GRAPH,
+                operations=[_accessor(opId=f"n{index}") for index in range(17)],
+            )
+        self.assertEqual(raised.exception.code, "graph-patch-invalid-operations")
+
+        # The kind list itself did not grow: this is still createNode.
+        preview = _preview(
+            operations=[
+                {
+                    "opId": "n1",
+                    "kind": "createNode",
+                    "status": "validated",
+                    **_accessor_contract_fields(),
+                }
+            ]
+        )
+        normalized = validate_preview_result(preview)
+        self.assertEqual(normalized["operations"][0]["variableName"], "Counter")
+        self.assertEqual(normalized["operations"][0]["variableAccess"], "read")
+        self.assertEqual(len(preview["migratedKinds"]), 7)
+        self.assertNotIn("variableGet", preview["migratedKinds"])
+        self.assertNotIn("variableSet", preview["migratedKinds"])
+
+    def test_variable_accessor_result_entries_are_validated(self) -> None:
+        for node_type in ("variable_get", "variable_set"):
+            with self.subTest(node_type=node_type):
+                preview = _preview(
+                    operations=[
+                        {
+                            "opId": "n1",
+                            "kind": "createNode",
+                            "status": "validated",
+                            **_accessor_contract_fields(node_type),
+                        }
+                    ]
+                )
+                normalized = validate_preview_result(preview)
+                self.assertEqual(normalized["operations"][0]["nodeType"], node_type)
+
+        # The pin contract is the variable-dependent one: a get with the wrong
+        # output pin name is refused.
+        bad = _accessor_contract_fields("variable_get")
+        bad["outputPins"] = ["OtherName"]
+        with self.assertRaises(PatchError) as raised:
+            validate_preview_result(
+                _preview(operations=[{"opId": "n1", "kind": "createNode", "status": "validated", **bad}])
+            )
+        self.assertEqual(raised.exception.code, "graph-patch-preview-invalid")
+
+        # A set that claims the read access is refused too.
+        bad_access = _accessor_contract_fields("variable_set")
+        bad_access["variableAccess"] = "read"
+        with self.assertRaises(PatchError) as raised:
+            validate_preview_result(
+                _preview(
+                    operations=[
+                        {
+                            "opId": "n1",
+                            "kind": "createNode",
+                            "status": "validated",
+                            **bad_access,
+                        }
+                    ]
+                )
+            )
+        self.assertEqual(raised.exception.code, "graph-patch-preview-invalid")
+
+        applied = _apply(
+            nodeCountBefore=4,
+            nodeCountAfter=5,
+            createdNodeCount=1,
+            results=[
+                {
+                    "opId": "n1",
+                    "kind": "createNode",
+                    "nodeGuid": "ffffffff-0000-4111-8222-333333333333",
+                    "status": "applied",
+                    "rolledBack": False,
+                    **_accessor_contract_fields("variable_set"),
+                }
+            ],
+        )
+        normalized_apply = validate_apply_result(applied)
+        self.assertEqual(normalized_apply["results"][0]["variableType"], "int")
 
     def test_create_node_temp_id_is_optional_and_validated(self) -> None:
         request = validate_preview_parameters(
