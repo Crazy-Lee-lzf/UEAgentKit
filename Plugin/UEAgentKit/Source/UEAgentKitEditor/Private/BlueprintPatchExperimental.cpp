@@ -3,6 +3,7 @@
 #include "BlueprintContextSha256.h"
 #include "BlueprintGraphEditExperimental.h"
 #include "BlueprintGraphLayoutApply.h"
+#include "BlueprintNodeRemoveExperimental.h"
 #include "BlueprintPinDefaultEditExperimental.h"
 #include "BlueprintRewireExperimental.h"
 #include "BlueprintVariableWriteExperimental.h"
@@ -38,22 +39,14 @@ namespace
 	const TCHAR* const KindConnect = TEXT("connect");
 	const TCHAR* const KindDisconnect = TEXT("disconnect");
 	const TCHAR* const KindRewirePin = TEXT("rewirePin");
+	const TCHAR* const KindRemoveNode = TEXT("removeNode");
 	/** Exhaustive list of migrated kinds, in the order they were migrated. */
 	const TCHAR* const MigratedKindList =
-		TEXT("setPinDefault, createVariable, createNode, connect, disconnect, rewirePin");
+		TEXT("setPinDefault, createVariable, createNode, connect, disconnect, rewirePin, removeNode");
 	const TCHAR* const StatusValidated = TEXT("validated");
 	const TCHAR* const StatusApplied = TEXT("applied");
 	const TCHAR* const StatusFailed = TEXT("failed");
 	const TCHAR* const StatusNotAttempted = TEXT("notAttempted");
-
-	/**
-	 * Kinds that are designed but not migrated yet.  They are named here so the
-	 * rejection can say "designed, not migrated" instead of "unknown", and so a
-	 * caller cannot mistake a typo for a future feature.
-	 */
-	const TCHAR* const ReservedKinds[] = {
-		TEXT("removeNode"),
-	};
 
 	/** One patch may not outgrow the single writers' own Apply bounds. */
 	constexpr int32 MaxCreateVariableOperations =
@@ -87,6 +80,7 @@ namespace
 		UEAgentKitBlueprintGraphEditExperimental::FAtomicNodeOperation Node;
 		UEAgentKitBlueprintGraphEditExperimental::FAtomicEdgeOperation Edge;
 		UEAgentKitBlueprintRewireExperimental::FAtomicRewireOperation Rewire;
+		UEAgentKitBlueprintNodeRemoveExperimental::FAtomicRemoveOperation Remove;
 		/** opId/kind/resolved fields; reused verbatim for the results array. */
 		TSharedPtr<FJsonObject> Detail;
 	};
@@ -405,19 +399,8 @@ namespace
 			|| Kind.Equals(KindCreateNode, ESearchCase::CaseSensitive)
 			|| Kind.Equals(KindConnect, ESearchCase::CaseSensitive)
 			|| Kind.Equals(KindDisconnect, ESearchCase::CaseSensitive)
-			|| Kind.Equals(KindRewirePin, ESearchCase::CaseSensitive);
-	}
-
-	bool IsReservedKind(const FString& Kind)
-	{
-		for (const TCHAR* Reserved : ReservedKinds)
-		{
-			if (Kind.Equals(Reserved, ESearchCase::CaseSensitive))
-			{
-				return true;
-			}
-		}
-		return false;
+			|| Kind.Equals(KindRewirePin, ESearchCase::CaseSensitive)
+			|| Kind.Equals(KindRemoveNode, ESearchCase::CaseSensitive);
 	}
 
 	TSharedPtr<FJsonObject> MakeOperationDetail(const FString& OpId, const FString& Kind)
@@ -426,6 +409,25 @@ namespace
 		Detail->SetStringField(TEXT("opId"), OpId);
 		Detail->SetStringField(TEXT("kind"), Kind);
 		return Detail;
+	}
+
+	/**
+	 * One removed edge, in exactly the six identity fields plus two kind tokens
+	 * the node-removal writer's own result reports.
+	 */
+	TSharedRef<FJsonObject> MakeRemovedEdgeJson(
+		const UEAgentKitBlueprintNodeRemoveExperimental::FAtomicRemovedEdge& Edge)
+	{
+		TSharedRef<FJsonObject> Item = MakeShared<FJsonObject>();
+		Item->SetStringField(TEXT("fromNodeGuid"), Edge.FromNodeGuid);
+		Item->SetStringField(TEXT("fromPinName"), Edge.FromPinName);
+		Item->SetStringField(TEXT("fromPinGuid"), Edge.FromPinGuid);
+		Item->SetStringField(TEXT("fromKind"), Edge.FromKind);
+		Item->SetStringField(TEXT("toNodeGuid"), Edge.ToNodeGuid);
+		Item->SetStringField(TEXT("toPinName"), Edge.ToPinName);
+		Item->SetStringField(TEXT("toPinGuid"), Edge.ToPinGuid);
+		Item->SetStringField(TEXT("toKind"), Edge.ToKind);
+		return Item;
 	}
 
 	/**
@@ -605,26 +607,18 @@ namespace
 			}
 			SeenOpIds.Add(Operation.OpId);
 
+			// Every kind this seam designed is migrated now, so an unrecognised
+			// kind is a typo or a future feature, never "designed but pending".
 			if (!IsMigratedKind(Operation.Kind))
 			{
-				if (IsReservedKind(Operation.Kind))
-				{
-					return Fail(
-						OutErrorCode,
-						OutErrorMessage,
-						TEXT("graph-patch-kind-not-migrated"),
-						FString::Printf(
-							TEXT("Operation kind '%s' is designed but not migrated to the atomic patch yet; this build accepts: %s."),
-							*Operation.Kind,
-							MigratedKindList));
-				}
 				return Fail(
 					OutErrorCode,
 					OutErrorMessage,
 					TEXT("graph-patch-kind-not-allowed"),
 					FString::Printf(
-						TEXT("Operation kind '%s' is not an atomic patch kind."),
-						*Operation.Kind));
+						TEXT("Operation kind '%s' is not an atomic patch kind; this build accepts: %s."),
+						*Operation.Kind,
+						MigratedKindList));
 			}
 
 			if (Operation.Kind.Equals(KindSetPinDefault, ESearchCase::CaseSensitive))
@@ -986,6 +980,91 @@ namespace
 							MaxConnectOperations));
 				}
 			}
+			else if (Operation.Kind.Equals(KindRemoveNode, ESearchCase::CaseSensitive))
+			{
+				// The node-removal writer's own request fields, minus its
+				// expectedEdgeSetHash (this patch binds the same live edge set in
+				// its own plan hash).
+				if (!RejectUnknownParams(
+					*Object,
+					{
+						TEXT("opId"),
+						TEXT("kind"),
+						TEXT("nodeGuid"),
+						TEXT("expectedNodeClass"),
+						TEXT("removedEdges"),
+					},
+					OutErrorCode,
+					OutErrorMessage))
+				{
+					return false;
+				}
+				UEAgentKitBlueprintNodeRemoveExperimental::FAtomicRemoveOperation& Remove =
+					Operation.Remove;
+				if (!ReadString(*Object, TEXT("nodeGuid"), Remove.NodeGuid, OutErrorCode, OutErrorMessage)
+					|| !ReadString(
+						*Object,
+						TEXT("expectedNodeClass"),
+						Remove.NodeClass,
+						OutErrorCode,
+						OutErrorMessage))
+				{
+					return false;
+				}
+				const TArray<TSharedPtr<FJsonValue>>* RemovedEdges = nullptr;
+				if (!Object->Get()->TryGetArrayField(TEXT("removedEdges"), RemovedEdges)
+					|| RemovedEdges == nullptr)
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-remove-invalid-parameters"),
+						TEXT("removedEdges must be an array (empty for an isolated node)."));
+				}
+				if (RemovedEdges->Num()
+					> UEAgentKitBlueprintNodeRemoveExperimental::MaxIncidentEdgesPerNode)
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-remove-removed-edges-invalid"),
+						FString::Printf(
+							TEXT("A node-removal operation may list at most %d incident edge."),
+							UEAgentKitBlueprintNodeRemoveExperimental::MaxIncidentEdgesPerNode));
+				}
+				for (const TSharedPtr<FJsonValue>& Value : *RemovedEdges)
+				{
+					const TSharedPtr<FJsonObject> EdgeObject =
+						Value.IsValid() ? Value->AsObject() : nullptr;
+					if (!EdgeObject.IsValid()
+						|| !RejectUnknownParams(
+							EdgeObject,
+							{
+								TEXT("fromNodeGuid"),
+								TEXT("fromPinName"),
+								TEXT("fromPinGuid"),
+								TEXT("toNodeGuid"),
+								TEXT("toPinName"),
+								TEXT("toPinGuid"),
+							},
+							OutErrorCode,
+							OutErrorMessage))
+					{
+						return false;
+					}
+					UEAgentKitBlueprintNodeRemoveExperimental::FAtomicRemovedEdge Edge;
+					if (!ReadString(EdgeObject, TEXT("fromNodeGuid"), Edge.FromNodeGuid, OutErrorCode, OutErrorMessage)
+						|| !ReadString(EdgeObject, TEXT("fromPinName"), Edge.FromPinName, OutErrorCode, OutErrorMessage)
+						|| !ReadString(EdgeObject, TEXT("fromPinGuid"), Edge.FromPinGuid, OutErrorCode, OutErrorMessage)
+						|| !ReadString(EdgeObject, TEXT("toNodeGuid"), Edge.ToNodeGuid, OutErrorCode, OutErrorMessage)
+						|| !ReadString(EdgeObject, TEXT("toPinName"), Edge.ToPinName, OutErrorCode, OutErrorMessage)
+						|| !ReadString(EdgeObject, TEXT("toPinGuid"), Edge.ToPinGuid, OutErrorCode, OutErrorMessage))
+					{
+						return false;
+					}
+					Remove.RemovedEdges.Add(Edge);
+				}
+			}
 			else
 			{
 				// Unreachable while IsMigratedKind and these branches agree; kept so a
@@ -993,7 +1072,7 @@ namespace
 				return Fail(
 					OutErrorCode,
 					OutErrorMessage,
-					TEXT("graph-patch-kind-not-migrated"),
+					TEXT("graph-patch-kind-not-allowed"),
 					FString::Printf(
 						TEXT("Operation kind '%s' has no atomic field parser."),
 						*Operation.Kind));
@@ -1161,10 +1240,34 @@ namespace
 			Operation.Detail->SetStringField(TEXT("pinKind"), Operation.Rewire.PinKind);
 			return true;
 		}
+		if (Operation.Kind.Equals(KindRemoveNode, ESearchCase::CaseSensitive))
+		{
+			if (!UEAgentKitBlueprintNodeRemoveExperimental::TryResolveAtomicRemoveOperation(
+				Blueprint,
+				Graph,
+				Operation.Remove,
+				OutErrorCode,
+				OutErrorMessage))
+			{
+				return false;
+			}
+			Operation.Detail->SetStringField(TEXT("nodeGuid"), Operation.Remove.NodeGuid);
+			Operation.Detail->SetStringField(TEXT("nodeClass"), Operation.Remove.NodeClass);
+			Operation.Detail->SetStringField(TEXT("nodeTitle"), Operation.Remove.NodeTitle);
+			Operation.Detail->SetNumberField(TEXT("nodePinCount"), Operation.Remove.NodePinCount);
+			TArray<TSharedPtr<FJsonValue>> RemovedEdges;
+			for (const UEAgentKitBlueprintNodeRemoveExperimental::FAtomicRemovedEdge& Edge :
+				Operation.Remove.RemovedEdges)
+			{
+				RemovedEdges.Add(MakeShared<FJsonValueObject>(MakeRemovedEdgeJson(Edge)));
+			}
+			Operation.Detail->SetArrayField(TEXT("removedEdges"), RemovedEdges);
+			return true;
+		}
 		return Fail(
 			OutErrorCode,
 			OutErrorMessage,
-			TEXT("graph-patch-kind-not-migrated"),
+			TEXT("graph-patch-kind-not-allowed"),
 			FString::Printf(
 				TEXT("Operation kind '%s' has no atomic implementation."),
 				*Operation.Kind));
@@ -1316,10 +1419,21 @@ namespace
 				OutErrorCode,
 				OutErrorMessage);
 		}
+		if (Operation.Kind.Equals(KindRemoveNode, ESearchCase::CaseSensitive))
+		{
+			// The seam keeps the detached node object on the operation so a later
+			// failure in this same transaction can put the exact same node back.
+			return UEAgentKitBlueprintNodeRemoveExperimental::TryApplyAtomicRemoveOperation(
+				Blueprint,
+				Graph,
+				Operation.Remove,
+				OutErrorCode,
+				OutErrorMessage);
+		}
 		return Fail(
 			OutErrorCode,
 			OutErrorMessage,
-			TEXT("graph-patch-kind-not-migrated"),
+			TEXT("graph-patch-kind-not-allowed"),
 			FString::Printf(
 				TEXT("Operation kind '%s' has no atomic implementation."),
 				*Operation.Kind));
@@ -1388,6 +1502,15 @@ namespace
 				OutErrorCode,
 				OutErrorMessage);
 		}
+		if (Operation.Kind.Equals(KindRemoveNode, ESearchCase::CaseSensitive))
+		{
+			return UEAgentKitBlueprintNodeRemoveExperimental::TryCheckAtomicRemoveOperation(
+				Graph,
+				Operation.Remove,
+				bExpectAfter,
+				OutErrorCode,
+				OutErrorMessage);
+		}
 		return true;
 	}
 
@@ -1395,7 +1518,7 @@ namespace
 	bool RestoreOperation(
 		UBlueprint* Blueprint,
 		UEdGraph* Graph,
-		const FPatchOperation& Operation,
+		FPatchOperation& Operation,
 		FString& OutErrorCode,
 		FString& OutErrorMessage)
 	{
@@ -1452,6 +1575,18 @@ namespace
 				Blueprint,
 				Graph,
 				Operation.Rewire,
+				OutErrorCode,
+				OutErrorMessage);
+		}
+		if (Operation.Kind.Equals(KindRemoveNode, ESearchCase::CaseSensitive))
+		{
+			// Putting the node back also has to re-create the edges it took with it;
+			// this is why the seam kept the detached object instead of a copy of its
+			// identity.
+			return UEAgentKitBlueprintNodeRemoveExperimental::TryRestoreAtomicRemoveOperation(
+				Blueprint,
+				Graph,
+				Operation.Remove,
 				OutErrorCode,
 				OutErrorMessage);
 		}
@@ -1566,6 +1701,23 @@ namespace
 			Canonical = AppendField(Canonical, Operation.Rewire.NewSourcePinName);
 			Canonical = AppendField(Canonical, Operation.Rewire.NewSourcePinGuid);
 			Canonical = AppendField(Canonical, Operation.Rewire.PinKind);
+		}
+		else if (Operation.Kind.Equals(KindRemoveNode, ESearchCase::CaseSensitive))
+		{
+			// The node alone is not enough: the plan also binds which incident
+			// edges it takes with it, in the order the caller enumerated them.
+			Canonical = AppendField(Canonical, Operation.Remove.NodeGuid);
+			Canonical = AppendField(Canonical, Operation.Remove.NodeClass);
+			for (const UEAgentKitBlueprintNodeRemoveExperimental::FAtomicRemovedEdge& Edge :
+				Operation.Remove.RemovedEdges)
+			{
+				Canonical = AppendField(Canonical, Edge.FromNodeGuid);
+				Canonical = AppendField(Canonical, Edge.FromPinName);
+				Canonical = AppendField(Canonical, Edge.FromPinGuid);
+				Canonical = AppendField(Canonical, Edge.ToNodeGuid);
+				Canonical = AppendField(Canonical, Edge.ToPinName);
+				Canonical = AppendField(Canonical, Edge.ToPinGuid);
+			}
 		}
 		return Canonical;
 	}
@@ -1933,6 +2085,7 @@ namespace
 				MakeShared<FJsonValueString>(KindConnect),
 				MakeShared<FJsonValueString>(KindDisconnect),
 				MakeShared<FJsonValueString>(KindRewirePin),
+				MakeShared<FJsonValueString>(KindRemoveNode),
 			});
 		Result->SetArrayField(TEXT("operations"), BuildValidatedResults(Plan));
 		return Result;
@@ -2409,6 +2562,8 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 	const int32 NodeCountAfter = Graph->Nodes.Num();
 	const int32 LinkCountAfter = CountLinks(Graph);
 	int32 CreatedNodeCount = 0;
+	int32 RemovedNodeCount = 0;
+	int32 RemovedNodeEdgeCount = 0;
 	int32 CreatedEdgeCount = 0;
 	int32 RemovedEdgeCount = 0;
 	for (const FPatchOperation& Operation : Plan.Operations)
@@ -2416,6 +2571,11 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 		if (Operation.Kind.Equals(KindCreateNode, ESearchCase::CaseSensitive))
 		{
 			++CreatedNodeCount;
+		}
+		else if (Operation.Kind.Equals(KindRemoveNode, ESearchCase::CaseSensitive))
+		{
+			++RemovedNodeCount;
+			RemovedNodeEdgeCount += Operation.Remove.RemovedEdges.Num();
 		}
 		else if (Operation.Kind.Equals(KindConnect, ESearchCase::CaseSensitive))
 		{
@@ -2426,12 +2586,13 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 			++RemovedEdgeCount;
 		}
 	}
-	// createNode changes nodes; connect/disconnect move one edge each and a
-	// rewire swaps one edge for another, so net edge change is exactly
-	// created - removed and a rewire must leave the count alone.  This is also the
-	// "no extra edge was created or lost" proof.
-	if (NodeCountAfter != Plan.NodeCountBefore + CreatedNodeCount
-		|| LinkCountAfter != Plan.LinkCountBefore + CreatedEdgeCount - RemovedEdgeCount)
+	// createNode/removeNode change nodes; connect/disconnect move one edge each, a
+	// rewire swaps one edge for another and a removed node takes its enumerated
+	// edges with it.  Both deltas are therefore exact, which is the "nothing extra
+	// was created or lost" proof.
+	if (NodeCountAfter != Plan.NodeCountBefore + CreatedNodeCount - RemovedNodeCount
+		|| LinkCountAfter
+			!= Plan.LinkCountBefore + CreatedEdgeCount - RemovedEdgeCount - RemovedNodeEdgeCount)
 	{
 		if (GEditor->Trans != nullptr)
 		{
@@ -2588,6 +2749,8 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 	Result->SetNumberField(TEXT("nodeCountBefore"), Plan.NodeCountBefore);
 	Result->SetNumberField(TEXT("nodeCountAfter"), NodeCountAfter);
 	Result->SetNumberField(TEXT("createdNodeCount"), CreatedNodeCount);
+	Result->SetNumberField(TEXT("removedNodeCount"), RemovedNodeCount);
+	Result->SetNumberField(TEXT("removedNodeEdgeCount"), RemovedNodeEdgeCount);
 	Result->SetNumberField(TEXT("createdEdgeCount"), CreatedEdgeCount);
 	Result->SetNumberField(TEXT("removedEdgeCount"), RemovedEdgeCount);
 	Result->SetNumberField(TEXT("linkCountBefore"), Plan.LinkCountBefore);

@@ -24,7 +24,7 @@ class UEdGraph;
  *   slice 4  connect         -- migrated (0-3.4 slice 11)
  *   slice 5  disconnect      -- migrated (0-3.4 slice 12)
  *   slice 6  rewirePin       -- migrated (0-3.4 slice 12)
- *   slice 7  removeNode      -- NOT migrated yet
+ *   slice 7  removeNode      -- migrated (0-3.4 slice 13)
  *
  * Four state hashes are reported side by side, each owned by the writer that
  * already defines it: `stateFingerprint` (pin defaults and per-pin link counts),
@@ -34,10 +34,10 @@ class UEdGraph;
  * back" and "the node/edge set is back"; the pin-default hash alone records only
  * how many links each pin has, never which pins are on the other end.
  *
- * A patch may contain only migrated kinds.  A request that mixes a migrated and
- * an unmigrated kind is rejected before any write with
- * `graph-patch-kind-not-migrated`; that keeps one authorization contract per
- * patch instead of a hybrid.
+ * A patch may contain only migrated kinds.  Every kind this seam designed is
+ * migrated now, so a request that names any other kind is refused before any
+ * write with `graph-patch-kind-not-allowed`; that keeps one authorization
+ * contract per patch instead of a hybrid.
  *
  * A Blueprint variable is asset-level, not graph-level: `createVariable` is
  * resolved and written against the Blueprint only.  The request still carries a
@@ -66,9 +66,10 @@ class UEdGraph;
  * Explicit limits (never widened by this seam): at most 16 operations per patch,
  * at most 60 KiB request payload at the MCP boundary, one target graph and one
  * loaded package per patch.  `createVariable` keeps the single writer's own bound
- * of at most 8 variables per patch, `createNode` the writer's 16-node bound, and
+ * of at most 8 variables per patch, `createNode` the writer's 16-node bound,
  * `connect`/`disconnect`/`rewirePin` the writer's 8-connection per-node fan-out
- * bound and 24-edge per-patch bound.
+ * bound and 24-edge per-patch bound, and `removeNode` the node-removal writer's
+ * one-node / one-incident-edge bound.
  *
  * `disconnect` and `rewirePin` (0-3.4 slice 12) are the two kinds that CHANGE an
  * existing edge instead of adding one.  `disconnect` carries exactly the
@@ -83,6 +84,18 @@ class UEdGraph;
  * a disconnect leaves the per-pin link COUNTS of every other pin untouched and a
  * rewire leaves the total count unchanged, so the pin-default hash alone could
  * not prove either one.
+ *
+ * `removeNode` (0-3.4 slice 13) is the only kind that removes a node.  It carries
+ * the node-removal writer's own fields (`nodeGuid`, `expectedNodeClass`,
+ * `removedEdges[]`) minus `expectedEdgeSetHash`, because the patch already binds
+ * the same live edge set into its plan hash.  A removed node takes its incident
+ * edges with it, so the rollback re-attaches the exact detached node OBJECT
+ * (keep the NodeGuid and every PinId) and then re-creates each enumerated edge;
+ * restoring only the node or only the edges would leave the graph wrong.  The
+ * patch counts those implicit edge removals in `removedNodeEdgeCount`, so the
+ * link-delta proof stays exact.  Operations still run in request order: removing
+ * a node a later operation wanted to wire fails at Apply and rolls the whole
+ * patch back.
  *
  * The project must opt in with:
  *

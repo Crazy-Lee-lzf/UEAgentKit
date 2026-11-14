@@ -1441,11 +1441,10 @@ def _capabilities_response(
                     "connect",
                     "disconnect",
                     "rewirePin",
-                ],
-                "reservedKinds": [
                     "removeNode",
                 ],
-                "rejectsMixedMigratedAndUnmigratedKinds": True,
+                "reservedKinds": [],
+                "rejectsUnknownKinds": True,
                 "maxOperations": 16,
                 "refusesDuplicateOperationIds": True,
                 "refusesDuplicateTargets": True,

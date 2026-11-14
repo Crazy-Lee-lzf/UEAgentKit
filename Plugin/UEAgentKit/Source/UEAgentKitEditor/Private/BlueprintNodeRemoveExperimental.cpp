@@ -43,8 +43,10 @@ namespace
 	const TCHAR* const DirectionOutput = TEXT("output");
 	const TCHAR* const CallFunctionClassPath = TEXT("/Script/BlueprintGraph.K2Node_CallFunction");
 	const TCHAR* const BranchClassPath = TEXT("/Script/BlueprintGraph.K2Node_IfThenElse");
-	const int32 MaxNodesPerPlan = 1;
-	const int32 MaxIncidentEdges = 1;
+	const int32 MaxNodesPerPlan =
+		UEAgentKitBlueprintNodeRemoveExperimental::MaxNodesPerPlan;
+	const int32 MaxIncidentEdges =
+		UEAgentKitBlueprintNodeRemoveExperimental::MaxIncidentEdgesPerNode;
 
 	bool bTestOverrideSet = false;
 	bool bTestOverrideEnabled = false;
@@ -1422,6 +1424,70 @@ namespace
 			NodeCount,
 			LinkCount);
 	}
+
+	/** Key of one declared edge, in the same shape the planned edges are compared. */
+	bool MakeAtomicEdgeKey(
+		const UEAgentKitBlueprintNodeRemoveExperimental::FAtomicRemovedEdge& Edge,
+		FString& OutKey,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
+	{
+		FGuid Parsed;
+		if (!IsCanonicalGuid(Edge.FromNodeGuid, Parsed)
+			|| !IsCanonicalGuid(Edge.FromPinGuid, Parsed)
+			|| !IsCanonicalGuid(Edge.ToNodeGuid, Parsed)
+			|| !IsCanonicalGuid(Edge.ToPinGuid, Parsed)
+			|| !IsSafePinName(Edge.FromPinName)
+			|| !IsSafePinName(Edge.ToPinName))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-remove-removed-edges-invalid"),
+				TEXT("Each removedEdges entry needs canonical from/to node and pin GUIDs and safe pin names."));
+		}
+		OutKey = Edge.FromNodeGuid + TEXT("|") + Edge.FromPinName + TEXT("|") + Edge.FromPinGuid
+			+ TEXT(">") + Edge.ToNodeGuid + TEXT("|") + Edge.ToPinName + TEXT("|")
+			+ Edge.ToPinGuid;
+		return true;
+	}
+
+	/** Resolve one declared edge's two live pins by node GUID + pin GUID + name. */
+	bool FindAtomicEdgePins(
+		UEdGraph* Graph,
+		const UEAgentKitBlueprintNodeRemoveExperimental::FAtomicRemovedEdge& Edge,
+		UEdGraphPin*& OutFromPin,
+		UEdGraphPin*& OutToPin)
+	{
+		OutFromPin = nullptr;
+		OutToPin = nullptr;
+		FGuid FromNodeGuid;
+		FGuid FromPinGuid;
+		FGuid ToNodeGuid;
+		FGuid ToPinGuid;
+		if (Graph == nullptr
+			|| !IsCanonicalGuid(Edge.FromNodeGuid, FromNodeGuid)
+			|| !IsCanonicalGuid(Edge.FromPinGuid, FromPinGuid)
+			|| !IsCanonicalGuid(Edge.ToNodeGuid, ToNodeGuid)
+			|| !IsCanonicalGuid(Edge.ToPinGuid, ToPinGuid))
+		{
+			return false;
+		}
+		UEdGraphNode* FromNode = FindNode(Graph, FromNodeGuid);
+		UEdGraphNode* ToNode = FindNode(Graph, ToNodeGuid);
+		if (FromNode == nullptr || ToNode == nullptr)
+		{
+			return false;
+		}
+		OutFromPin = FindPinByGuid(FromNode, FromPinGuid);
+		OutToPin = FindPinByGuid(ToNode, ToPinGuid);
+		if (OutFromPin == nullptr || OutToPin == nullptr)
+		{
+			return false;
+		}
+		return OutFromPin->PinName.ToString().Equals(Edge.FromPinName, ESearchCase::CaseSensitive)
+			&& OutToPin->PinName.ToString().Equals(Edge.ToPinName, ESearchCase::CaseSensitive);
+	}
 }
 
 bool UEAgentKitBlueprintNodeRemoveExperimental::TryComputeLiveEdgeSetHash(
@@ -1435,6 +1501,491 @@ bool UEAgentKitBlueprintNodeRemoveExperimental::TryComputeLiveEdgeSetHash(
 	TArray<FString> Keys;
 	BuildEdgeKeys(Graph, Keys);
 	return HashKeys(EdgeSetVersion, Keys, OutHash);
+}
+
+bool UEAgentKitBlueprintNodeRemoveExperimental::TryResolveAtomicRemoveOperation(
+	UBlueprint* Blueprint,
+	UEdGraph* Graph,
+	FAtomicRemoveOperation& InOutOperation,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	if (Blueprint == nullptr || Graph == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-remove-invalid-parameters"),
+			TEXT("The exact Blueprint graph is unavailable."));
+	}
+	if (Cast<UEdGraphSchema_K2>(Graph->GetSchema()) == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-remove-node-type-not-allowed"),
+			TEXT("The focused graph is not a K2 graph."));
+	}
+	FGuid NodeGuid;
+	if (!IsCanonicalGuid(InOutOperation.NodeGuid, NodeGuid))
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-remove-invalid-identifier"),
+			TEXT("nodeGuid must be one canonical lower-case GUID."));
+	}
+	UEdGraphNode* Node = FindNode(Graph, NodeGuid);
+	if (Node == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-remove-node-not-found"),
+			FString::Printf(TEXT("Node %s is not in the focused graph."), *InOutOperation.NodeGuid));
+	}
+	FString ActualClass;
+	FString Reason;
+	if (!IsRemovableNode(Node, ActualClass, Reason))
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-remove-node-type-not-allowed"),
+			FString::Printf(
+				TEXT("Node %s of class %s is not a removable deterministic node (%s)."),
+				*InOutOperation.NodeGuid,
+				*ActualClass,
+				*Reason));
+	}
+	if (!ActualClass.Equals(InOutOperation.NodeClass, ESearchCase::CaseSensitive))
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-remove-node-class-mismatch"),
+			FString::Printf(
+				TEXT("Node %s is %s, not the requested %s."),
+				*InOutOperation.NodeGuid,
+				*ActualClass,
+				*InOutOperation.NodeClass));
+	}
+	for (UEdGraphPin* Pin : Node->Pins)
+	{
+		if (Pin == nullptr)
+		{
+			continue;
+		}
+		// A function-call node carries an unlinked hidden 'self' pin; a hidden or
+		// non-connectable pin is harmless only while it has no links.
+		if (Pin->bHidden || Pin->bNotConnectable)
+		{
+			if (Pin->LinkedTo.Num() != 0)
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-remove-node-pin-type-not-allowed"),
+					FString::Printf(
+						TEXT("Node %s carries a linked hidden/non-connectable pin %s."),
+						*InOutOperation.NodeGuid,
+						*Pin->PinName.ToString()));
+			}
+			continue;
+		}
+		FString PinReason;
+		if (ClassifyPin(Pin, PinReason) == EPinKind::Unsupported)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-remove-node-pin-type-not-allowed"),
+				FString::Printf(
+					TEXT("Node %s carries an unsupported pin %s (%s); the removal would be unverifiable."),
+					*InOutOperation.NodeGuid,
+					*Pin->PinName.ToString(),
+					*PinReason));
+		}
+	}
+	TArray<FEdgeRef> LiveEdges;
+	if (!GatherIncidentEdges(Node, LiveEdges, Reason))
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-remove-node-pin-type-not-allowed"),
+			FString::Printf(
+				TEXT("Node %s has an incident edge with an unsupported pin (%s)."),
+				*InOutOperation.NodeGuid,
+				*Reason));
+	}
+	if (LiveEdges.Num() > MaxIncidentEdges)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-remove-node-too-many-connections"),
+			FString::Printf(
+				TEXT("Node %s has %d incident edges; this slice only removes nodes with at most %d planned edge."),
+				*InOutOperation.NodeGuid,
+				LiveEdges.Num(),
+				MaxIncidentEdges));
+	}
+	// The caller must enumerate every incident edge exactly; the patch verifies
+	// that against the live graph instead of trusting the request.
+	TSet<FString> RequestedKeys;
+	for (const FAtomicRemovedEdge& Edge : InOutOperation.RemovedEdges)
+	{
+		FString Key;
+		if (!MakeAtomicEdgeKey(Edge, Key, OutErrorCode, OutErrorMessage))
+		{
+			return false;
+		}
+		if (RequestedKeys.Contains(Key))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-remove-removed-edges-invalid"),
+				TEXT("removedEdges must not contain duplicate entries."));
+		}
+		RequestedKeys.Add(Key);
+	}
+	TSet<FString> LiveKeys;
+	for (const FEdgeRef& Edge : LiveEdges)
+	{
+		LiveKeys.Add(MakeEdgeKey(Edge.From.Pin, Edge.To.Pin));
+	}
+	if (LiveKeys.Num() != RequestedKeys.Num()
+		|| !LiveKeys.Includes(RequestedKeys)
+		|| !RequestedKeys.Includes(LiveKeys))
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-remove-removed-edges-mismatch"),
+			FString::Printf(
+				TEXT("removedEdges does not exactly match the node's live incident edges. Live=[%s] requested=[%s]."),
+				*JoinKeys(LiveKeys.Array()),
+				*JoinKeys(RequestedKeys.Array())));
+	}
+	// Fill the resolved identity back into the caller's list, in its own order.
+	for (FAtomicRemovedEdge& Edge : InOutOperation.RemovedEdges)
+	{
+		FPinRef FromRef;
+		FPinRef ToRef;
+		FString PinReason;
+		UEdGraphPin* FromPin = nullptr;
+		UEdGraphPin* ToPin = nullptr;
+		if (!FindAtomicEdgePins(Graph, Edge, FromPin, ToPin)
+			|| !MakePinRef(FromPin, FromRef, PinReason)
+			|| !MakePinRef(ToPin, ToRef, PinReason))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-remove-removed-edges-mismatch"),
+				TEXT("A declared removedEdges entry no longer resolves to its live pins."));
+		}
+		Edge.FromNodeGuid = GuidLower(FromRef.NodeGuid);
+		Edge.FromPinName = FromRef.PinName;
+		Edge.FromPinGuid = GuidLower(FromRef.PinGuid);
+		Edge.FromKind = PinKindLabel(FromRef.Kind);
+		Edge.ToNodeGuid = GuidLower(ToRef.NodeGuid);
+		Edge.ToPinName = ToRef.PinName;
+		Edge.ToPinGuid = GuidLower(ToRef.PinGuid);
+		Edge.ToKind = PinKindLabel(ToRef.Kind);
+	}
+	InOutOperation.NodeClass = ActualClass;
+	InOutOperation.NodeTitle = Node->GetNodeTitle(ENodeTitleType::ListView).ToString();
+	InOutOperation.NodePinCount = Node->Pins.Num();
+	return true;
+}
+
+bool UEAgentKitBlueprintNodeRemoveExperimental::TryApplyAtomicRemoveOperation(
+	UBlueprint* Blueprint,
+	UEdGraph* Graph,
+	FAtomicRemoveOperation& InOutOperation,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	if (Blueprint == nullptr || Graph == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-remove-invalid-parameters"),
+			TEXT("The exact Blueprint graph is unavailable."));
+	}
+	FGuid NodeGuid;
+	if (!IsCanonicalGuid(InOutOperation.NodeGuid, NodeGuid))
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-remove-invalid-identifier"),
+			TEXT("nodeGuid must be one canonical lower-case GUID."));
+	}
+	UEdGraphNode* Node = FindNode(Graph, NodeGuid);
+	if (Node == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-remove-node-not-found"),
+			TEXT("The planned node disappeared before the transaction could remove it."));
+	}
+	Node->Modify();
+
+	// Re-prove the incident edge set immediately before the break, exactly like
+	// the writer's own Apply: same count, and each declared edge must be one of
+	// the node's live edges.
+	TArray<FEdgeRef> LiveEdges;
+	FString Reason;
+	if (!GatherIncidentEdges(Node, LiveEdges, Reason)
+		|| LiveEdges.Num() != InOutOperation.RemovedEdges.Num())
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-remove-removed-edges-mismatch"),
+			TEXT("The planned incident edges changed before the transaction could remove them."));
+	}
+	for (const FAtomicRemovedEdge& Edge : InOutOperation.RemovedEdges)
+	{
+		UEdGraphPin* FromPin = nullptr;
+		UEdGraphPin* ToPin = nullptr;
+		bool bIsLiveEdge = false;
+		if (FindAtomicEdgePins(Graph, Edge, FromPin, ToPin))
+		{
+			for (const FEdgeRef& Live : LiveEdges)
+			{
+				if (Live.From.Pin == FromPin && Live.To.Pin == ToPin)
+				{
+					bIsLiveEdge = true;
+					break;
+				}
+			}
+		}
+		if (!bIsLiveEdge)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-remove-removed-edges-mismatch"),
+				TEXT("The planned incident edge set changed before it could be removed."));
+		}
+	}
+	for (const FAtomicRemovedEdge& Edge : InOutOperation.RemovedEdges)
+	{
+		UEdGraphPin* FromPin = nullptr;
+		UEdGraphPin* ToPin = nullptr;
+		if (!FindAtomicEdgePins(Graph, Edge, FromPin, ToPin))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-remove-removed-edges-mismatch"),
+				TEXT("A planned incident edge no longer resolves to its live pins."));
+		}
+		FromPin->GetOwningNode()->Modify();
+		ToPin->GetOwningNode()->Modify();
+		FromPin->BreakLinkTo(ToPin);
+		FromPin->GetOwningNode()->PinConnectionListChanged(FromPin);
+		ToPin->GetOwningNode()->PinConnectionListChanged(ToPin);
+	}
+	for (UEdGraphPin* Pin : Node->Pins)
+	{
+		if (Pin != nullptr && Pin->LinkedTo.Num() != 0)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-remove-break-failed"),
+				TEXT("The planned node still has a link that was not enumerated; refusing to delete it."));
+		}
+	}
+
+	FBlueprintEditorUtils::RemoveNode(Blueprint, Node, true);
+	if (FindNode(Graph, NodeGuid) != nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-remove-delete-failed"),
+			TEXT("The planned node is still present after RemoveNode."));
+	}
+	// The object survives (RemoveNode only detaches it) and is what the rollback
+	// puts back, so the restored node keeps its exact NodeGuid and pin GUIDs.
+	InOutOperation.DetachedNode = Node;
+	return true;
+}
+
+bool UEAgentKitBlueprintNodeRemoveExperimental::TryCheckAtomicRemoveOperation(
+	UEdGraph* Graph,
+	const FAtomicRemoveOperation& Operation,
+	bool bExpectAfter,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	FGuid NodeGuid;
+	if (Graph == nullptr || !IsCanonicalGuid(Operation.NodeGuid, NodeGuid))
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-remove-invalid-identifier"),
+			TEXT("The exact graph or the canonical nodeGuid is unavailable."));
+	}
+	UEdGraphNode* Node = FindNode(Graph, NodeGuid);
+	if (bExpectAfter)
+	{
+		if (Node != nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-remove-post-commit-mismatch"),
+				FString::Printf(TEXT("Node %s is still in the graph."), *Operation.NodeGuid));
+		}
+		for (const FAtomicRemovedEdge& Edge : Operation.RemovedEdges)
+		{
+			UEdGraphPin* FromPin = nullptr;
+			UEdGraphPin* ToPin = nullptr;
+			if (FindAtomicEdgePins(Graph, Edge, FromPin, ToPin)
+				&& (FromPin->LinkedTo.Contains(ToPin) || ToPin->LinkedTo.Contains(FromPin)))
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-remove-post-commit-mismatch"),
+					TEXT("A removed node's edge is still present."));
+			}
+		}
+		return true;
+	}
+	if (Node == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-remove-post-commit-mismatch"),
+			FString::Printf(
+				TEXT("Node %s did not come back."),
+				*Operation.NodeGuid));
+	}
+	if (Node->GetClass() == nullptr
+		|| !Node->GetClass()->GetPathName().Equals(Operation.NodeClass, ESearchCase::CaseSensitive))
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-remove-post-commit-mismatch"),
+			FString::Printf(TEXT("Node %s came back with a different class."), *Operation.NodeGuid));
+	}
+	for (const FAtomicRemovedEdge& Edge : Operation.RemovedEdges)
+	{
+		UEdGraphPin* FromPin = nullptr;
+		UEdGraphPin* ToPin = nullptr;
+		if (!FindAtomicEdgePins(Graph, Edge, FromPin, ToPin)
+			|| !FromPin->LinkedTo.Contains(ToPin))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-remove-post-commit-mismatch"),
+				FString::Printf(
+					TEXT("Edge %s.%s -> %s.%s did not come back."),
+					*Edge.FromNodeGuid,
+					*Edge.FromPinName,
+					*Edge.ToNodeGuid,
+					*Edge.ToPinName));
+		}
+	}
+	return true;
+}
+
+bool UEAgentKitBlueprintNodeRemoveExperimental::TryRestoreAtomicRemoveOperation(
+	UBlueprint* Blueprint,
+	UEdGraph* Graph,
+	FAtomicRemoveOperation& InOutOperation,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	if (Blueprint == nullptr || Graph == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-remove-invalid-parameters"),
+			TEXT("The exact Blueprint graph is unavailable."));
+	}
+	FGuid NodeGuid;
+	if (!IsCanonicalGuid(InOutOperation.NodeGuid, NodeGuid))
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-remove-invalid-identifier"),
+			TEXT("nodeGuid must be one canonical lower-case GUID."));
+	}
+	UEdGraphNode* Node = FindNode(Graph, NodeGuid);
+	if (Node != nullptr)
+	{
+		// Already back (nothing to detach): keep going so the edges are re-checked.
+		InOutOperation.DetachedNode = nullptr;
+	}
+	else
+	{
+		Node = InOutOperation.DetachedNode;
+		if (!IsValid(Node) || Node->NodeGuid != NodeGuid)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-remove-delete-failed"),
+				TEXT("The detached node object is no longer available, so the removal cannot be restored."));
+		}
+		Node->Modify();
+		Graph->AddNode(Node, /*bFromUI=*/false, /*bSelectNewNode=*/false);
+		if (FindNode(Graph, NodeGuid) == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-remove-delete-failed"),
+				TEXT("The detached node could not be put back into the graph."));
+		}
+	}
+	for (const FAtomicRemovedEdge& Edge : InOutOperation.RemovedEdges)
+	{
+		UEdGraphPin* FromPin = nullptr;
+		UEdGraphPin* ToPin = nullptr;
+		if (!FindAtomicEdgePins(Graph, Edge, FromPin, ToPin))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-remove-removed-edges-mismatch"),
+				TEXT("A removed edge's pins are missing after the node came back."));
+		}
+		if (!FromPin->LinkedTo.Contains(ToPin))
+		{
+			FromPin->MakeLinkTo(ToPin);
+		}
+		FromPin->GetOwningNode()->PinConnectionListChanged(FromPin);
+		ToPin->GetOwningNode()->PinConnectionListChanged(ToPin);
+		if (!FromPin->LinkedTo.Contains(ToPin) || !ToPin->LinkedTo.Contains(FromPin))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-remove-removed-edges-mismatch"),
+				TEXT("A removed edge could not be re-created."));
+		}
+	}
+	InOutOperation.DetachedNode = nullptr;
+	return true;
 }
 
 bool UEAgentKitBlueprintNodeRemoveExperimental::IsExperimentalWriteAvailable()

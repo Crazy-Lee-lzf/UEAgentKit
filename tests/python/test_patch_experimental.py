@@ -264,6 +264,45 @@ def _rewire_entry(**overrides: Any) -> dict[str, Any]:
     return item
 
 
+def _removed_edge(**overrides: Any) -> dict[str, Any]:
+    item = {
+        "fromNodeGuid": NODE_B,
+        "fromPinName": "ReturnValue",
+        "fromPinGuid": PIN_B,
+        "toNodeGuid": NODE_A,
+        "toPinName": "Condition",
+        "toPinGuid": PIN_A,
+    }
+    item.update(overrides)
+    return item
+
+
+def _remove(**overrides: Any) -> dict[str, Any]:
+    item = {
+        "opId": "x1",
+        "kind": "removeNode",
+        "nodeGuid": NODE_A,
+        "expectedNodeClass": "/Script/BlueprintGraph.K2Node_IfThenElse",
+        "removedEdges": [_removed_edge()],
+    }
+    item.update(overrides)
+    return item
+
+
+def _remove_entry(**overrides: Any) -> dict[str, Any]:
+    item = {
+        "opId": "x1",
+        "kind": "removeNode",
+        "status": "validated",
+        "nodeGuid": NODE_A,
+        "nodeClass": "/Script/BlueprintGraph.K2Node_IfThenElse",
+        "nodePinCount": 5,
+        "removedEdges": [_removed_edge() | {"fromKind": "bool", "toKind": "bool"}],
+    }
+    item.update(overrides)
+    return item
+
+
 def _preview(**overrides: Any) -> dict[str, Any]:
     result: dict[str, Any] = {
         "schemaVersion": PREVIEW_SCHEMA_VERSION,
@@ -293,6 +332,7 @@ def _preview(**overrides: Any) -> dict[str, Any]:
             "connect",
             "disconnect",
             "rewirePin",
+            "removeNode",
         ],
         "operations": [
             {
@@ -343,6 +383,8 @@ def _apply(**overrides: Any) -> dict[str, Any]:
         "nodeCountBefore": 4,
         "nodeCountAfter": 4,
         "createdNodeCount": 0,
+        "removedNodeCount": 0,
+        "removedNodeEdgeCount": 0,
         "createdEdgeCount": 0,
         "removedEdgeCount": 0,
         "linkCountBefore": 3,
@@ -484,14 +526,10 @@ class PatchContractTests(unittest.TestCase):
         self.assertEqual(request["operations"][0]["value"], "false")
         self.assertEqual(request["operations"][1]["value"], "true")
 
-    def test_unmigrated_and_unknown_kinds_are_refused(self) -> None:
-        # Only removeNode is still designed-but-unmigrated; connect (slice 11) and
-        # disconnect/rewirePin (slice 12) are migrated and have their own tests.
-        for kind, code in (
-            ("removeNode", "graph-patch-kind-not-migrated"),
-            ("moveNode", "graph-patch-kind-not-allowed"),
-            ("setDefault", "graph-patch-kind-not-allowed"),
-        ):
+    def test_unknown_kinds_are_refused(self) -> None:
+        # Every designed kind is migrated now (`removeNode` closed the list in slice
+        # 13), so the only kind-level refusal left is "not an atomic patch kind".
+        for kind in ("moveNode", "setDefault", "pinDefault"):
             with self.subTest(kind=kind):
                 with self.assertRaises(PatchError) as raised:
                     validate_preview_parameters(
@@ -499,16 +537,16 @@ class PatchContractTests(unittest.TestCase):
                         graph_guid=GRAPH,
                         operations=[_operation(kind=kind)],
                     )
-                self.assertEqual(raised.exception.code, code)
+                self.assertEqual(raised.exception.code, "graph-patch-kind-not-allowed")
 
-    def test_mixed_migrated_and_unmigrated_patch_is_refused(self) -> None:
+    def test_mixed_known_and_unknown_patch_is_refused(self) -> None:
         with self.assertRaises(PatchError) as raised:
             validate_preview_parameters(
                 asset_path=ASSET,
                 graph_guid=GRAPH,
-                operations=[_operation(), _operation(opId="p2", kind="removeNode")],
+                operations=[_operation(), _operation(opId="p2", kind="moveNode")],
             )
-        self.assertEqual(raised.exception.code, "graph-patch-kind-not-migrated")
+        self.assertEqual(raised.exception.code, "graph-patch-kind-not-allowed")
 
     def test_duplicate_ids_and_targets_are_refused(self) -> None:
         with self.assertRaises(PatchError) as raised:
@@ -1114,7 +1152,103 @@ class PatchContractTests(unittest.TestCase):
                     validate_apply_result(apply | mutation)
                 self.assertEqual(raised.exception.code, "graph-patch-apply-invalid")
 
-    def test_six_kind_patch_is_accepted_together(self) -> None:
+    def test_remove_node_operation_is_normalized(self) -> None:
+        request = validate_preview_parameters(
+            asset_path=ASSET,
+            graph_guid=GRAPH,
+            operations=[_remove()],
+        )
+        self.assertEqual(request["operations"][0], _remove())
+        # An isolated node carries an empty edge list.
+        validate_preview_parameters(
+            asset_path=ASSET,
+            graph_guid=GRAPH,
+            operations=[_remove(removedEdges=[])],
+        )
+
+        for mutation, code in (
+            ({"nodeGuid": "not-a-guid"}, "graph-remove-invalid-identifier"),
+            ({"removedEdges": None}, "graph-remove-invalid-parameters"),
+            (
+                {
+                    "removedEdges": [
+                        _removed_edge(),
+                        _removed_edge(toPinName="B", toPinGuid=PIN_C),
+                    ]
+                },
+                "graph-remove-removed-edges-invalid",
+            ),
+            (
+                {"removedEdges": [_removed_edge(), _removed_edge()]},
+                "graph-remove-removed-edges-invalid",
+            ),
+            (
+                {"removedEdges": [_removed_edge(toPinGuid="not-a-guid")]},
+                "graph-remove-removed-edges-invalid",
+            ),
+            ({"removed_edges": []}, "graph-patch-unknown-parameter"),
+        ):
+            with self.subTest(mutation=mutation):
+                with self.assertRaises(PatchError) as raised:
+                    validate_preview_parameters(
+                        asset_path=ASSET,
+                        graph_guid=GRAPH,
+                        operations=[_remove(**mutation)],
+                    )
+                self.assertEqual(raised.exception.code, code)
+
+    def test_remove_node_result_entries_are_validated(self) -> None:
+        preview = _preview(operations=[_remove_entry()])
+        normalized = validate_preview_result(preview)
+        self.assertEqual(normalized["operations"][0]["nodeGuid"], NODE_A)
+        self.assertEqual(
+            normalized["operations"][0]["removedEdges"][0]["toPinGuid"],
+            PIN_A,
+        )
+
+        for mutation in (
+            {"nodeClass": ""},
+            {"removedEdges": None},
+            {"removedEdges": [{"fromNodeGuid": NODE_B}]},
+            {"removedEdges": [_removed_edge()]},
+            {"removedEdges": [_removed_edge() | {"fromKind": "object", "toKind": "bool"}]},
+            {"nodePinCount": -1},
+        ):
+            with self.subTest(mutation=mutation):
+                with self.assertRaises(PatchError) as raised:
+                    validate_preview_result(_preview(operations=[_remove_entry(**mutation)]))
+                self.assertEqual(raised.exception.code, "graph-patch-preview-invalid")
+
+        applied = _apply(
+            nodeCountBefore=4,
+            nodeCountAfter=3,
+            linkCountBefore=3,
+            linkCountAfter=2,
+            removedNodeCount=1,
+            removedNodeEdgeCount=1,
+            results=[
+                {
+                    **_remove_entry(),
+                    "status": "applied",
+                    "rolledBack": False,
+                }
+            ],
+        )
+        normalized_apply = validate_apply_result(applied)
+        self.assertEqual(normalized_apply["results"][0]["kind"], "removeNode")
+
+        for mutation in (
+            {"removedNodeCount": 0},
+            {"removedNodeEdgeCount": 0},
+            {"nodeCountAfter": 4},
+            {"linkCountAfter": 3},
+        ):
+            with self.subTest(mutation=mutation):
+                with self.assertRaises(PatchError) as raised:
+                    validate_apply_result(applied | mutation)
+                self.assertEqual(raised.exception.code, "graph-patch-apply-invalid")
+
+    def test_seven_kind_patch_is_accepted_together(self) -> None:
         request = validate_preview_parameters(
             asset_path=ASSET,
             graph_guid=GRAPH,
@@ -1132,6 +1266,7 @@ class PatchContractTests(unittest.TestCase):
                     "toPin": "Condition",
                 },
                 _rewire(opId="r1"),
+                _remove(opId="x1", removedEdges=[]),
             ],
         )
         self.assertEqual(
@@ -1143,6 +1278,7 @@ class PatchContractTests(unittest.TestCase):
                 "connect",
                 "disconnect",
                 "rewirePin",
+                "removeNode",
             ],
         )
 
@@ -1399,10 +1535,10 @@ class PatchToolTests(unittest.TestCase):
             plan_id=PLAN_ID,
             asset_path=ASSET,
             graph_guid=GRAPH,
-            operations=[_operation(kind="removeNode")],
+            operations=[_operation(kind="moveNode")],
         )
         self.assertFalse(response["ok"])
-        self.assertEqual(response["error"]["code"], "graph-patch-kind-not-migrated")
+        self.assertEqual(response["error"]["code"], "graph-patch-kind-not-allowed")
         self.assertEqual(live_editor.calls, [])
 
     def test_failed_apply_reports_per_operation_results(self) -> None:

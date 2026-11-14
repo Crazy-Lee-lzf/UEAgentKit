@@ -8,7 +8,7 @@
 //  - a single-operation patch derives exactly the before values, revision,
 //    graph fingerprint and state fingerprint the single-writer pin-default path
 //    derives, so the migrated path is field-for-field equivalent at plan time;
-//  - an unmigrated kind and a duplicate target fail closed before any write;
+//  - an unknown kind and a duplicate target fail closed before any write;
 //  - stale planIds and wrong phrases are refused;
 //  - a patch that fails on its SECOND operation restores the FIRST operation's
 //    effect, leaves the package clean, cancels the transaction and still reports
@@ -555,13 +555,13 @@ bool FUEAgentKitPatchExpansionTest::RunTest(const FString& Parameters)
 		};
 		TSharedPtr<FJsonObject> Unmigrated =
 			MakeShared<FJsonObject>(*BoolOp);
-		Unmigrated->SetStringField(TEXT("kind"), TEXT("removeNode"));
+		Unmigrated->SetStringField(TEXT("kind"), TEXT("moveNode"));
 		TSharedPtr<FJsonObject> Duplicate =
 			MakeShared<FJsonObject>(*BoolOp);
 		Duplicate->SetStringField(TEXT("opId"), TEXT("p9"));
 		Duplicate->SetStringField(TEXT("value"), TEXT("false"));
 		const TArray<FRefusal> Refusals = {
-			{ TEXT("reserved kind is refused"), { Unmigrated }, TEXT("graph-patch-kind-not-migrated") },
+			{ TEXT("an unknown kind is refused"), { Unmigrated }, TEXT("graph-patch-kind-not-allowed") },
 			{ TEXT("duplicate target is refused"), { BoolOp, Duplicate }, TEXT("graph-patch-duplicate-target") },
 			{
 				TEXT("connected pin is refused"),
@@ -1184,7 +1184,7 @@ bool FUEAgentKitPatchVariableTest::RunTest(const FString& Parameters)
 		Preview->GetStringField(TEXT("variablesFingerprint"));
 	const FString RequiredConfirmation = Preview->GetStringField(TEXT("requiredConfirmation"));
 	const TArray<TSharedPtr<FJsonValue>> MigratedKinds = Preview->GetArrayField(TEXT("migratedKinds"));
-	if (!TestEqual(TEXT("every migrated kind is advertised"), MigratedKinds.Num(), 6)
+	if (!TestEqual(TEXT("every migrated kind is advertised"), MigratedKinds.Num(), 7)
 		|| !TestEqual(
 			TEXT("first migrated kind is setPinDefault"),
 			MigratedKinds[0]->AsString(),
@@ -1208,7 +1208,11 @@ bool FUEAgentKitPatchVariableTest::RunTest(const FString& Parameters)
 		|| !TestEqual(
 			TEXT("sixth migrated kind is rewirePin"),
 			MigratedKinds[5]->AsString(),
-			FString(TEXT("rewirePin"))))
+			FString(TEXT("rewirePin")))
+		|| !TestEqual(
+			TEXT("seventh migrated kind is removeNode"),
+			MigratedKinds[6]->AsString(),
+			FString(TEXT("removeNode"))))
 	{
 		return Fail();
 	}
@@ -1334,10 +1338,9 @@ bool FUEAgentKitPatchVariableTest::RunTest(const FString& Parameters)
 			TEXT("blueprint-variable-duplicate-name")
 		});
 		Refusals.Add({ TEXT("a ninth variable is refused"), TooMany, TEXT("graph-patch-create-variable-limit") });
-		// Only `removeNode` is still designed-but-unmigrated; connect (slice 11) and
-		// disconnect/rewirePin (slice 12) have their own automation tests
-		// (UEAgentKit.AtomicPatch.{Connect,EdgeOps}).
-		for (const TCHAR* Kind : { TEXT("removeNode") })
+		// Every designed kind is migrated now (`removeNode` closed the list in slice
+		// 13), so the only kind-level refusal left is "not a patch kind".
+		for (const TCHAR* Kind : { TEXT("moveNode") })
 		{
 			TSharedPtr<FJsonObject> Unmigrated = UEAgentKitPatchExpansion::MakeOperation(
 				TEXT("p1"),
@@ -1350,7 +1353,7 @@ bool FUEAgentKitPatchVariableTest::RunTest(const FString& Parameters)
 				return Fail();
 			}
 			Unmigrated->SetStringField(TEXT("kind"), Kind);
-			Refusals.Add({ Kind, { Unmigrated }, TEXT("graph-patch-kind-not-migrated") });
+			Refusals.Add({ Kind, { Unmigrated }, TEXT("graph-patch-kind-not-allowed") });
 		}
 		for (const FRefusal& Refusal : Refusals)
 		{

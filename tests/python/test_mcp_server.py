@@ -763,14 +763,14 @@ class McpServerTests(unittest.TestCase):
         response = _error_response(
             "ue_preview_blueprint_patch_experimental",
             PatchError(
-                "graph-patch-kind-not-migrated",
-                "Operation kind 'disconnect' is designed but not migrated to the atomic patch yet.",
+                "graph-patch-kind-not-allowed",
+                "Operation kind 'moveNode' is not an atomic patch kind.",
             ),
             read_only=True,
         )
         self.assertFalse(response["ok"])
         self.assertTrue(response["readOnly"])
-        self.assertEqual(response["error"]["code"], "graph-patch-kind-not-migrated")
+        self.assertEqual(response["error"]["code"], "graph-patch-kind-not-allowed")
         self.assertEqual(response["error"]["type"], "PatchError")
 
     def test_index_service_is_read_only_and_returns_stable_envelopes(self) -> None:

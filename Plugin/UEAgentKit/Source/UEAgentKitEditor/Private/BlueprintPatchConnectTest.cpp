@@ -8,7 +8,7 @@
 //  - the product gate stays off unless the project opts in;
 //  - tempId shape/duplicate/unknown/forward-reference refusals and the
 //    pin-compatibility refusals (type mismatch, self connection, duplicate
-//    target, unmigrated `removeNode`) all fail closed before any write and leave
+//    target, an unknown kind) all fail closed before any write and leave
 //    the package, the graph and the disk SHA untouched;
 //  - a single `connect` patch creates exactly the edge the single-writer graph
 //    edit existing-pin path creates (same pin identities, same edge-set hash);
@@ -701,25 +701,26 @@ bool FUEAgentKitPatchConnectTest::RunTest(const FString& Parameters)
 				return Fail();
 			}
 		}
-		// `removeNode` is designed but still unmigrated.
+		// All seven designed kinds are migrated now; a kind that is not one of them
+		// is simply not a patch kind.
 		{
 			TSharedRef<FJsonObject> Disconnect = MakeShared<FJsonObject>();
-			Disconnect->SetStringField(TEXT("opId"), TEXT("r1"));
-			Disconnect->SetStringField(TEXT("kind"), TEXT("removeNode"));
+			Disconnect->SetStringField(TEXT("opId"), TEXT("x1"));
+			Disconnect->SetStringField(TEXT("kind"), TEXT("moveNode"));
 			TSharedPtr<FJsonObject> RefusedResult;
 			FString RefusedCode;
 			FString RefusedMessage;
 			if (!TestFalse(
-					TEXT("removeNode is still refused as unmigrated"),
+					TEXT("an unknown kind is refused"),
 					UEAgentKitBlueprintPatchExperimental::TryPreviewExperimental(
 						BuildPatchParams(Blueprint, Graph, { Disconnect }),
 						RefusedResult,
 						RefusedCode,
 						RefusedMessage))
 				|| !TestEqual(
-					TEXT("removeNode refusal code"),
+					TEXT("unknown kind refusal code"),
 					RefusedCode,
-					FString(TEXT("graph-patch-kind-not-migrated"))))
+					FString(TEXT("graph-patch-kind-not-allowed"))))
 			{
 				return Fail();
 			}

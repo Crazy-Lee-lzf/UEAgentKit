@@ -743,7 +743,11 @@ plan 就可以被拿去连一条方向相反的边。用下标既保留了“两
 
 | 项 | 内容 |
 |---|---|
-| 已迁移 kind | `setPinDefault` + `createVariable` + `createNode` + `connect`（切片 11）+ `disconnect` + `rewirePin`（切片 12） |
+| 已迁移 kind | `setPinDefault` + `createVariable` + `createNode` + `connect`（切片 11）+ `disconnect` + `rewirePin`（切片 12）+ `removeNode`（切片 13，**全部 7 个**） |
+| removeNode 字段（切片 13） | 节点删除 writer 自己的三个字段：`nodeGuid` / `expectedNodeClass` / `removedEdges[]`（每个条目六个身份字段）；**不含** `expectedEdgeSetHash`，见决策日志 |
+| removeNode 解析（切片 13） | 事务外沿用它自己的判定：可删类白名单（branch + 6 个纯 Kismet 数学函数）、隐藏/不可连 pin 不得有连接、不在白名单的 pin 类型、至多 1 条连带边、`removedEdges` 必须与活图**逐条相等**（不是照单全收） |
+| removeNode 回滚（切片 13） | 删节点会带走边，所以回滚**先放回同一个节点对象**（`Graph->AddNode`，保留 NodeGuid 与全部 PinId），再逐条重建 `removedEdges`；两者都断言，缺一即失败 |
+| removeNode 计数（切片 13） | 结果新增 `removedNodeCount` / `removedNodeEdgeCount`；`nodeCountAfter == before + created - removed`、`linkCountAfter == before + createdEdge - removedEdge - removedNodeEdge` |
 | disconnect 字段（切片 12） | 与 `connect` **完全相同**（`from`/`fromPin`/`to`/`toPin`）；端点必须是已存在节点，tempId → `graph-edit-disconnect-edge-not-found` |
 | disconnect 解析/写入/读回（切片 12） | 事务外：这条边必须存在、且是目标输入上的唯一连接（`graph-edit-disconnect-edge-not-found` / `-ambiguous`）；事务内 `BreakLinkTo` + 两侧 `PinConnectionListChanged`；读回期望“边已消失”，Undo 后期望“边回来且仍是唯一连接” |
 | rewirePin 字段（切片 12） | rewire writer 自己的九个字段：`target{NodeGuid,PinName,PinGuid}` / `oldSource*` / `newSource*`（可直接搬 writer 的请求对象） |
@@ -781,12 +785,13 @@ plan 就可以被拿去连一条方向相反的边。用下标既保留了“两
 | graph edit 的 `disconnect` | 已迁移（切片 12） |
 | graph edit 的 `call_function` / `call_owned_pure_function` / owned literals / variable accessor | **未迁移** |
 | rewire | 已迁移（切片 12，`rewirePin`） |
-| node remove | 未迁移 |
+| node remove | 已迁移（切片 13） |
 
 ### 已知限制
 
 - 一次 patch 只能落在一个图、一个包上。
-- `connect`/`disconnect`/`rewirePin` 各改一条边；`removeNode` 仍没有入口。
+- `connect`/`disconnect`/`rewirePin` 各改一条边，`removeNode` 删一个节点（连带 ≤1 条边）；graph edit 的
+  owned literals / variable accessor / `call_function` 族仍没有入口。
 - 不支持 owned literals（会同时建节点并改边集）。
 - `tempId` 是 patch 内标签，不能跨 patch 复用；下一条 patch 只能用 Apply 返回的 `nodeGuid`。
 - patch 的 `tempId` 形状（1–64 可打印 ASCII）比单 writer 的 `IsTempId`（1–36 字母数字/`_`/`-`）宽，
@@ -888,3 +893,24 @@ UE 5.6.1；隔离 `UnrealEditor-Cmd -unattended -NullRHI`。自动化测试用
    与 MCP 信封；**本片没有重跑 MCP socket 级真实调用**，端到端 socket 记录仍缺。
 9. 一处刻意的差异：`rewirePin` 不重复单 writer 的“仅顶层事件图”限制——patch 本身已经绑定
    assetPath+graphGuid+焦点编辑器，那条限制在单 writer（请求自己没有绑定图）里才必要。
+
+**决策日志（切片 13：`removeNode`，最后一个 kind）**
+
+1. `edgesFingerprint` 与 `nodeRemoveEdgeSetHash` **不是同一个函数**：两边都是 sha256 over
+   `node|pin|pinguid>node|pin|pinguid`（`MakeEdgeKey` 文本逐字符相同、排序相同），但版本前缀不同
+   （`ueak.blueprint-rewire-edge-set/1.0` vs `ueak.blueprint-node-remove-edge-set/1.0`），所以同一张图
+   的两个哈希**值不同、信息等价**。因此 patch 不加第二个哈希字段：`edgesFingerprint` 已经证明同一个
+   边集，并且进了 planId。
+2. `removeNode` 也不收 writer 的 `expectedEdgeSetHash`：理由同上，per-op 副本不增加证明力。
+3. 回滚靠**留对象**而不是重建：`FBlueprintEditorUtils::RemoveNode` → `UEdGraphNode::DestroyNode` →
+   `UEdGraph::RemoveNode` 只从 `Graph->Nodes` 摘掉，不销毁对象；seam 把该指针留在 `DetachedNode`，
+   回滚 `Graph->AddNode` 放回同一个对象，NodeGuid/PinId 全部不变，再逐条 `MakeLinkTo` 重连边。
+   这比 T3D 导入可靠（导入会 `ReconstructNode`，pin GUID 可能变）。
+4. 边数守恒式增加第三项：`linkCountAfter == before + created - removed - removedNodeEdge`，并新增
+   `removedNodeEdgeCount`；删孤立节点时它必须是 0，且 `edgesFingerprint` 必须**不变**（有断言）。
+5. 全部 7 个 kind 已迁移，`ReservedKinds` / `graph-patch-kind-not-migrated` 一并删除；未知 kind 只剩
+   `graph-patch-kind-not-allowed`（Python 侧同步）。这是删代码，不是放宽。
+6. 顺序语义：按请求顺序执行，先删后连会在 Apply 时报 `graph-remove-node-not-found` 并整体回滚。
+7. 既有测试的契约更新：`migratedKinds` 6→7（三处），"未迁移 kind" 断言全部换成未知 kind。
+8. 证据分界：真实证据是隔离 Host 上的 `UnrealEditor-Cmd` 自动化 6/6；只有单测的是 Python 契约层与
+   MCP 信封；本片没有重跑 MCP socket 级调用。

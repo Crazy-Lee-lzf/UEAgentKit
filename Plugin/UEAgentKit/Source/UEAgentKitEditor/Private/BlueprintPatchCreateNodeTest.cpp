@@ -12,7 +12,7 @@
 //
 //  - the product gate stays off unless the project opts in;
 //  - plan-time refusals (non-migrated nodeType, out-of-range coordinate, foreign
-//    field, unmigrated `connect`, more operations than the bound) happen before
+//    field, an unknown kind, more operations than the bound) happen before
 //    any write and leave the package clean;
 //  - a createNode patch derives the same node class / function / position / pin
 //    inventory / pin types the single-writer graph edit tool derives;
@@ -43,8 +43,10 @@
 #include "BlueprintContextSha256.h"
 #include "BlueprintGraphEditExperimental.h"
 #include "BlueprintGraphLayoutApply.h"
+#include "BlueprintNodeRemoveExperimental.h"
 #include "BlueprintPatchExperimental.h"
 #include "BlueprintPinDefaultEditExperimental.h"
+#include "BlueprintRewireExperimental.h"
 #include "BlueprintVariableWriteExperimental.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -654,28 +656,26 @@ bool FUEAgentKitPatchCreateNodeTest::RunTest(const FString& Parameters)
 				return Fail();
 			}
 		}
-		// `removeNode` is still unmigrated and must be refused before any write.
-		// (`connect` became migrated in 0-3.4 slice 11 and has its own automation
-		// test, UEAgentKit.AtomicPatch.Connect; `disconnect` and `rewirePin` became
-		// migrated in slice 12, UEAgentKit.AtomicPatch.EdgeOps.)
+		// Every designed kind is migrated now (`removeNode` closed the list in 0-3.4
+		// slice 13), so the refusal is "not a patch kind" rather than "not migrated".
 		{
 			TSharedRef<FJsonObject> Connect = MakeShared<FJsonObject>();
-			Connect->SetStringField(TEXT("opId"), TEXT("r1"));
-			Connect->SetStringField(TEXT("kind"), TEXT("removeNode"));
+			Connect->SetStringField(TEXT("opId"), TEXT("x1"));
+			Connect->SetStringField(TEXT("kind"), TEXT("moveNode"));
 			TSharedPtr<FJsonObject> RefusedResult;
 			FString RefusedCode;
 			FString RefusedMessage;
 			if (!TestFalse(
-					TEXT("removeNode is still refused as unmigrated"),
+					TEXT("an unknown kind is refused"),
 					UEAgentKitBlueprintPatchExperimental::TryPreviewExperimental(
 						BuildPatchParams(Blueprint, Graph, { Connect }),
 						RefusedResult,
 						RefusedCode,
 						RefusedMessage))
 				|| !TestEqual(
-					TEXT("removeNode refusal code"),
+					TEXT("unknown kind refusal code"),
 					RefusedCode,
-					FString(TEXT("graph-patch-kind-not-migrated"))))
+					FString(TEXT("graph-patch-kind-not-allowed"))))
 			{
 				return Fail();
 			}
@@ -889,9 +889,9 @@ bool FUEAgentKitPatchCreateNodeTest::RunTest(const FString& Parameters)
 		const TArray<TSharedPtr<FJsonValue>>& MigratedKinds =
 			Preview->GetArrayField(TEXT("migratedKinds"));
 		if (!TestEqual(
-				TEXT("the preview advertises the six migrated kinds"),
+				TEXT("the preview advertises the seven migrated kinds"),
 				JoinStrings(MigratedKinds),
-				FString(TEXT("setPinDefault,createVariable,createNode,connect,disconnect,rewirePin")))
+				FString(TEXT("setPinDefault,createVariable,createNode,connect,disconnect,rewirePin,removeNode")))
 			|| !TestEqual(
 				TEXT("the preview binds the live node fingerprint"),
 				Preview->GetStringField(TEXT("nodesFingerprint")),
@@ -1453,6 +1453,971 @@ bool FUEAgentKitPatchCreateNodeTest::RunTest(const FString& Parameters)
 
 	UEAgentKitBlueprintPatchExperimental::ResetExperimentalWriteForTest();
 	UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
+	return true;
+}
+
+namespace UEAgentKitPatchRemoveNode
+{
+	using namespace UEAgentKitPatchCreateNode;
+
+	const TCHAR* const AssetPath =
+		TEXT("/Game/UEAgentKitPatchExpansion/BP_PatchRemoveNode.BP_PatchRemoveNode");
+	const TCHAR* const PackageName = TEXT("/Game/UEAgentKitPatchExpansion/BP_PatchRemoveNode");
+	const TCHAR* const AssetName = TEXT("BP_PatchRemoveNode");
+	const TCHAR* const NotBoolClassPath = TEXT("/Script/BlueprintGraph.K2Node_CallFunction");
+
+	FString NodeClassPath(const UEdGraphNode* Node)
+	{
+		return Node != nullptr && Node->GetClass() != nullptr
+			? Node->GetClass()->GetPathName()
+			: FString();
+	}
+
+	bool AreLinked(UEdGraphPin* From, UEdGraphPin* To)
+	{
+		return From != nullptr && To != nullptr && From->LinkedTo.Contains(To)
+			&& To->LinkedTo.Contains(From);
+	}
+
+	UEdGraphPin* FindPin(UEdGraphNode* Node, const TCHAR* PinName, EEdGraphPinDirection Direction)
+	{
+		return Node != nullptr ? Node->FindPin(FName(PinName), Direction) : nullptr;
+	}
+
+	/**
+	 * Seven nodes and three edges:
+	 *   A(0,0) -> Branch.Condition, B(0,200) -> OR.A, C(0,400) -> OR.B,
+	 *   D(0,600) isolated, Sequence(200,600) isolated but not removable.
+	 * OR carries two incident edges (the "too many" case) and Branch one.
+	 */
+	UBlueprint* CreateRemoveFixture(FString& OutError)
+	{
+		if (FindObject<UBlueprint>(nullptr, AssetPath) != nullptr)
+		{
+			OutError = TEXT("RemoveNode fixture already exists; use a fresh project.");
+			return nullptr;
+		}
+		if (!RemoveStaleFiles(PackageName, OutError))
+		{
+			return nullptr;
+		}
+		UPackage* Package = CreatePackage(PackageName);
+		UBlueprint* Blueprint = FKismetEditorUtilities::CreateBlueprint(
+			AActor::StaticClass(),
+			Package,
+			FName(AssetName),
+			BPTYPE_Normal,
+			FName(TEXT("UEAgentKitPatchRemoveNode")));
+		if (Blueprint == nullptr || Blueprint->UbergraphPages.IsEmpty())
+		{
+			OutError = TEXT("Could not create the removeNode fixture Blueprint.");
+			return nullptr;
+		}
+		UEdGraph* Graph = Blueprint->UbergraphPages[0];
+		const TArray<UEdGraphNode*> InitialNodes = Graph->Nodes;
+		for (UEdGraphNode* Node : InitialNodes)
+		{
+			if (Node != nullptr)
+			{
+				FBlueprintEditorUtils::RemoveNode(Blueprint, Node, true);
+			}
+		}
+		UK2Node_IfThenElse* Branch = NewObject<UK2Node_IfThenElse>(Graph);
+		UK2Node_ExecutionSequence* Sequence = NewObject<UK2Node_ExecutionSequence>(Graph);
+		if (Branch == nullptr || Sequence == nullptr)
+		{
+			OutError = TEXT("Could not create the fixture control nodes.");
+			return nullptr;
+		}
+		for (UEdGraphNode* Node : { static_cast<UEdGraphNode*>(Branch),
+				static_cast<UEdGraphNode*>(Sequence) })
+		{
+			Graph->AddNode(Node, true, false);
+			Node->AllocateDefaultPins();
+			if (!Node->NodeGuid.IsValid())
+			{
+				Node->CreateNewGuid();
+			}
+		}
+		Branch->NodePosX = 340;
+		Branch->NodePosY = 0;
+		Sequence->NodePosX = 200;
+		Sequence->NodePosY = 600;
+		if (AddCallFunctionNode(Graph, UKismetMathLibrary::StaticClass(), TEXT("Not_PreBool"), 0, 0) == nullptr
+			|| AddCallFunctionNode(Graph, UKismetMathLibrary::StaticClass(), TEXT("Not_PreBool"), 0, 200) == nullptr
+			|| AddCallFunctionNode(Graph, UKismetMathLibrary::StaticClass(), TEXT("Not_PreBool"), 0, 400) == nullptr
+			|| AddCallFunctionNode(Graph, UKismetMathLibrary::StaticClass(), TEXT("Not_PreBool"), 0, 600) == nullptr
+			|| AddCallFunctionNode(Graph, UKismetMathLibrary::StaticClass(), TEXT("BooleanOR"), 340, 200) == nullptr)
+		{
+			OutError = TEXT("Could not create the fixture function nodes.");
+			return nullptr;
+		}
+		FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+		FKismetEditorUtilities::CompileBlueprint(
+			Blueprint,
+			EBlueprintCompileOptions::SkipGarbageCollection);
+		if (Blueprint->Status == BS_Error)
+		{
+			OutError = TEXT("removeNode fixture failed to compile.");
+			return nullptr;
+		}
+		auto FindAt = [Graph](int32 X, int32 Y) -> UEdGraphNode*
+		{
+			for (UEdGraphNode* Node : Graph->Nodes)
+			{
+				if (Node != nullptr && Node->NodePosX == X && Node->NodePosY == Y)
+				{
+					return Node;
+				}
+			}
+			return nullptr;
+		};
+		UEdGraphPin* AOut = FindPin(FindAt(0, 0), TEXT("ReturnValue"), EGPD_Output);
+		UEdGraphPin* BOut = FindPin(FindAt(0, 200), TEXT("ReturnValue"), EGPD_Output);
+		UEdGraphPin* COut = FindPin(FindAt(0, 400), TEXT("ReturnValue"), EGPD_Output);
+		UEdGraphPin* Condition = FindPin(FindAt(340, 0), TEXT("Condition"), EGPD_Input);
+		UEdGraphPin* OrA = FindPin(FindAt(340, 200), TEXT("A"), EGPD_Input);
+		UEdGraphPin* OrB = FindPin(FindAt(340, 200), TEXT("B"), EGPD_Input);
+		if (AOut == nullptr || BOut == nullptr || COut == nullptr || Condition == nullptr
+			|| OrA == nullptr || OrB == nullptr
+			|| !Graph->GetSchema()->TryCreateConnection(AOut, Condition)
+			|| !Graph->GetSchema()->TryCreateConnection(BOut, OrA)
+			|| !Graph->GetSchema()->TryCreateConnection(COut, OrB))
+		{
+			OutError = TEXT("Could not create the fixture edges.");
+			return nullptr;
+		}
+		FAssetRegistryModule::AssetCreated(Blueprint);
+		Package->MarkPackageDirty();
+		if (!SaveBlueprint(Blueprint))
+		{
+			OutError = TEXT("Could not save the removeNode fixture.");
+			return nullptr;
+		}
+		return Blueprint;
+	}
+
+	TSharedPtr<FJsonObject> MakeRemovedEdge(UEdGraphPin* From, UEdGraphPin* To)
+	{
+		TSharedRef<FJsonObject> Edge = MakeShared<FJsonObject>();
+		Edge->SetStringField(TEXT("fromNodeGuid"), GuidLower(From->GetOwningNode()->NodeGuid));
+		Edge->SetStringField(TEXT("fromPinName"), From->PinName.ToString());
+		Edge->SetStringField(TEXT("fromPinGuid"), GuidLower(From->PinId));
+		Edge->SetStringField(TEXT("toNodeGuid"), GuidLower(To->GetOwningNode()->NodeGuid));
+		Edge->SetStringField(TEXT("toPinName"), To->PinName.ToString());
+		Edge->SetStringField(TEXT("toPinGuid"), GuidLower(To->PinId));
+		return Edge;
+	}
+
+	TSharedPtr<FJsonObject> MakeNodeOperationWithTempId(
+		const TCHAR* OpId,
+		const TCHAR* NodeType,
+		int32 X,
+		int32 Y,
+		const TCHAR* TempId)
+	{
+		TSharedPtr<FJsonObject> Operation = MakeNodeOperation(OpId, NodeType, X, Y);
+		Operation->SetStringField(TEXT("tempId"), TempId);
+		return Operation;
+	}
+
+	TSharedPtr<FJsonObject> MakeRemoveOperation(
+		const TCHAR* OpId,
+		UEdGraphNode* Node,
+		const FString& ExpectedClass,
+		const TArray<TSharedPtr<FJsonObject>>& RemovedEdges)
+	{
+		TSharedRef<FJsonObject> Operation = MakeShared<FJsonObject>();
+		Operation->SetStringField(TEXT("opId"), OpId);
+		Operation->SetStringField(TEXT("kind"), TEXT("removeNode"));
+		Operation->SetStringField(TEXT("nodeGuid"), GuidLower(Node->NodeGuid));
+		Operation->SetStringField(TEXT("expectedNodeClass"), ExpectedClass);
+		TArray<TSharedPtr<FJsonValue>> Values;
+		for (const TSharedPtr<FJsonObject>& Edge : RemovedEdges)
+		{
+			Values.Add(MakeShared<FJsonValueObject>(Edge));
+		}
+		Operation->SetArrayField(TEXT("removedEdges"), Values);
+		return Operation;
+	}
+
+	bool SaveApplied(const TSharedPtr<FJsonObject>& ApplyResult, FString& OutError)
+	{
+		TSharedPtr<FJsonObject> Params = MakeShared<FJsonObject>();
+		Params->SetStringField(TEXT("assetPath"), ApplyResult->GetStringField(TEXT("assetPath")));
+		Params->SetStringField(TEXT("graphGuid"), ApplyResult->GetStringField(TEXT("graphGuid")));
+		Params->SetStringField(TEXT("planId"), ApplyResult->GetStringField(TEXT("planId")));
+		Params->SetStringField(
+			TEXT("expectedGraphFingerprint"),
+			ApplyResult->GetStringField(TEXT("graphFingerprintAfter")));
+		Params->SetStringField(
+			TEXT("expectedStateFingerprint"),
+			ApplyResult->GetStringField(TEXT("stateFingerprintAfter")));
+		Params->SetNumberField(
+			TEXT("expectedNodeCount"),
+			ApplyResult->GetNumberField(TEXT("nodeCountAfter")));
+		Params->SetNumberField(
+			TEXT("expectedLinkCount"),
+			ApplyResult->GetNumberField(TEXT("linkCountAfter")));
+		Params->SetStringField(
+			TEXT("confirmation"),
+			ApplyResult->GetStringField(TEXT("requiredSaveConfirmation")));
+		TSharedPtr<FJsonObject> SaveResult;
+		FString Code;
+		FString Message;
+		if (!UEAgentKitBlueprintPatchExperimental::TrySaveExperimental(
+				Params,
+				SaveResult,
+				Code,
+				Message))
+		{
+			OutError = Code + TEXT(" ") + Message;
+			return false;
+		}
+		return true;
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUEAgentKitPatchRemoveNodeTest,
+	"UEAgentKit.AtomicPatch.RemoveNode",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUEAgentKitPatchRemoveNodeTest::RunTest(const FString& Parameters)
+{
+	using namespace UEAgentKitPatchCreateNode;
+	using namespace UEAgentKitPatchRemoveNode;
+
+	UEAgentKitBlueprintPatchExperimental::ResetExperimentalWriteForTest();
+	UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
+	UEAgentKitBlueprintNodeRemoveExperimental::ResetExperimentalWriteForTest();
+	UEAgentKitBlueprintRewireExperimental::ResetExperimentalWriteForTest();
+	if (!TestFalse(
+			TEXT("the atomic patch gate stays off unless the project opts in"),
+			UEAgentKitBlueprintPatchExperimental::IsExperimentalWriteAvailable()))
+	{
+		return false;
+	}
+	UEAgentKitBlueprintPatchExperimental::SetExperimentalWriteEnabledForTest(true);
+	UEAgentKitBlueprintGraphEditExperimental::SetExperimentalWriteEnabledForTest(true);
+	UEAgentKitBlueprintNodeRemoveExperimental::SetExperimentalWriteEnabledForTest(true);
+	UEAgentKitBlueprintRewireExperimental::SetExperimentalWriteEnabledForTest(true);
+	auto Fail = []
+	{
+		UEAgentKitBlueprintPatchExperimental::ResetExperimentalWriteForTest();
+		UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
+		UEAgentKitBlueprintNodeRemoveExperimental::ResetExperimentalWriteForTest();
+		UEAgentKitBlueprintRewireExperimental::ResetExperimentalWriteForTest();
+		return false;
+	};
+
+	FString Error;
+	UBlueprint* Blueprint = CreateRemoveFixture(Error);
+	if (!TestNotNull(TEXT("removeNode fixture is created"), Blueprint))
+	{
+		AddError(Error);
+		return Fail();
+	}
+	UEdGraph* Graph = Blueprint->UbergraphPages[0];
+	UPackage* Package = Blueprint->GetOutermost();
+	if (!TestNotNull(TEXT("removeNode fixture graph is focused"), OpenAndFocus(Blueprint, Graph, Error)))
+	{
+		AddError(Error);
+		return Fail();
+	}
+	auto FindAt = [Graph](int32 X, int32 Y) -> UEdGraphNode*
+	{
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (Node != nullptr && Node->NodePosX == X && Node->NodePosY == Y)
+			{
+				return Node;
+			}
+		}
+		return nullptr;
+	};
+	UEdGraphNode* A = FindAt(0, 0);
+	UEdGraphNode* B = FindAt(0, 200);
+	UEdGraphNode* C = FindAt(0, 400);
+	UEdGraphNode* D = FindAt(0, 600);
+	UEdGraphNode* Branch = FindAt(340, 0);
+	UEdGraphNode* BoolOr = FindAt(340, 200);
+	UEdGraphNode* Sequence = FindAt(200, 600);
+	UEdGraphPin* AOut = FindPin(A, TEXT("ReturnValue"), EGPD_Output);
+	UEdGraphPin* BOut = FindPin(B, TEXT("ReturnValue"), EGPD_Output);
+	UEdGraphPin* COut = FindPin(C, TEXT("ReturnValue"), EGPD_Output);
+	UEdGraphPin* BranchCondition = FindPin(Branch, TEXT("Condition"), EGPD_Input);
+	UEdGraphPin* OrA = FindPin(BoolOr, TEXT("A"), EGPD_Input);
+	UEdGraphPin* OrB = FindPin(BoolOr, TEXT("B"), EGPD_Input);
+	if (!TestNotNull(TEXT("fixture A"), A)
+		|| !TestNotNull(TEXT("fixture B"), B)
+		|| !TestNotNull(TEXT("fixture C"), C)
+		|| !TestNotNull(TEXT("fixture D"), D)
+		|| !TestNotNull(TEXT("fixture branch"), Branch)
+		|| !TestNotNull(TEXT("fixture or"), BoolOr)
+		|| !TestNotNull(TEXT("fixture sequence"), Sequence)
+		|| !TestTrue(TEXT("the fixture starts with its three edges"),
+			AreLinked(AOut, BranchCondition) && AreLinked(BOut, OrA) && AreLinked(COut, OrB)))
+	{
+		return Fail();
+	}
+	const int32 NodeCountBefore = Graph->Nodes.Num();
+	const FString AssetShaBefore = ComputeAssetSha(Blueprint);
+	const FString EdgesFingerprintBefore =
+		UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicEdgeStateFingerprint(Graph);
+	const FString NodesFingerprintBefore =
+		UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicNodeStateFingerprint(Graph);
+	if (!TestEqual(TEXT("the fixture has seven nodes"), NodeCountBefore, 7)
+		|| !TestEqual(TEXT("the fixture has three edges"),
+			UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicEdgeStateFingerprint(Graph).Len(),
+			71))
+	{
+		return Fail();
+	}
+
+	// ---- Fail-closed refusals: one table, no write, no dirty package. ----
+	{
+		TSharedPtr<FJsonObject> AbsentNode = MakeRemoveOperation(
+			TEXT("r1"),
+			A,
+			NotBoolClassPath,
+			{});
+		AbsentNode->SetStringField(
+			TEXT("nodeGuid"),
+			TEXT("00000000-0000-0000-0000-000000000000"));
+		TSharedPtr<FJsonObject> BadClass =
+			MakeRemoveOperation(TEXT("r1"), A, NodeClassPath(Sequence), {});
+		TSharedPtr<FJsonObject> SequenceRemoval =
+			MakeRemoveOperation(TEXT("r1"), Sequence, NodeClassPath(Sequence), {});
+		TSharedPtr<FJsonObject> TooMany =
+			MakeRemoveOperation(TEXT("r1"), BoolOr, NodeClassPath(BoolOr), {});
+		TSharedPtr<FJsonObject> MissingEdge =
+			MakeRemoveOperation(TEXT("r1"), A, NotBoolClassPath, {});
+		TSharedPtr<FJsonObject> WrongEdge = MakeRemoveOperation(
+			TEXT("r1"),
+			A,
+			NotBoolClassPath,
+			{ MakeRemovedEdge(BOut, OrA) });
+		TSharedPtr<FJsonObject> BadPinGuid = MakeRemoveOperation(
+			TEXT("r1"),
+			A,
+			NotBoolClassPath,
+			{ MakeRemovedEdge(AOut, BranchCondition) });
+		BadPinGuid->GetArrayField(TEXT("removedEdges"))[0]->AsObject()->SetStringField(
+			TEXT("toPinGuid"),
+			TEXT("not-a-guid"));
+		TSharedPtr<FJsonObject> TwoEdges = MakeRemoveOperation(
+			TEXT("r1"),
+			D,
+			NotBoolClassPath,
+			{ MakeRemovedEdge(BOut, OrA), MakeRemovedEdge(COut, OrB) });
+		TSharedPtr<FJsonObject> NoEdgeList = MakeRemoveOperation(
+			TEXT("r1"),
+			D,
+			NotBoolClassPath,
+			{});
+		NoEdgeList->RemoveField(TEXT("removedEdges"));
+		struct FRefusal
+		{
+			const TCHAR* Label;
+			TSharedPtr<FJsonObject> Operation;
+			const TCHAR* ExpectedCode;
+		};
+		const TArray<FRefusal> Refusals = {
+			{
+				TEXT("a node outside the graph"),
+				AbsentNode,
+				TEXT("graph-remove-node-not-found"),
+			},
+			{
+				TEXT("a class that does not match the node"),
+				BadClass,
+				TEXT("graph-remove-node-class-mismatch"),
+			},
+			{
+				TEXT("a node class the writer never removes"),
+				SequenceRemoval,
+				TEXT("graph-remove-node-type-not-allowed"),
+			},
+			{
+				TEXT("a node with two incident edges"),
+				TooMany,
+				TEXT("graph-remove-node-too-many-connections"),
+			},
+			{
+				TEXT("an omission of the node's live edge"),
+				MissingEdge,
+				TEXT("graph-remove-removed-edges-mismatch"),
+			},
+			{
+				TEXT("an edge that is not incident to the node"),
+				WrongEdge,
+				TEXT("graph-remove-removed-edges-mismatch"),
+			},
+			{
+				TEXT("a non-canonical pin GUID on a declared edge"),
+				BadPinGuid,
+				TEXT("graph-remove-removed-edges-invalid"),
+			},
+			{
+				TEXT("two declared edges for one node"),
+				TwoEdges,
+				TEXT("graph-remove-removed-edges-invalid"),
+			},
+			{
+				TEXT("a missing removedEdges array"),
+				NoEdgeList,
+				TEXT("graph-remove-invalid-parameters"),
+			},
+		};
+		for (const FRefusal& Refusal : Refusals)
+		{
+			TSharedPtr<FJsonObject> RefusedResult;
+			FString RefusedCode;
+			FString RefusedMessage;
+			if (!TestFalse(
+					FString::Printf(TEXT("refused: %s"), Refusal.Label),
+					UEAgentKitBlueprintPatchExperimental::TryPreviewExperimental(
+						BuildPatchParams(Blueprint, Graph, { Refusal.Operation }),
+						RefusedResult,
+						RefusedCode,
+						RefusedMessage))
+				|| !TestEqual(
+					FString::Printf(TEXT("refusal code for %s"), Refusal.Label),
+					RefusedCode,
+					FString(Refusal.ExpectedCode)))
+			{
+				AddError(RefusedMessage);
+				return Fail();
+			}
+		}
+		// `removeNode` was the last designed kind; an unknown kind is now simply
+		// not a patch kind.
+		{
+			TSharedRef<FJsonObject> Unknown = MakeShared<FJsonObject>();
+			Unknown->SetStringField(TEXT("opId"), TEXT("x1"));
+			Unknown->SetStringField(TEXT("kind"), TEXT("moveNode"));
+			TSharedPtr<FJsonObject> RefusedResult;
+			FString RefusedCode;
+			FString RefusedMessage;
+			if (!TestFalse(
+					TEXT("an unknown kind is refused"),
+					UEAgentKitBlueprintPatchExperimental::TryPreviewExperimental(
+						BuildPatchParams(Blueprint, Graph, { Unknown }),
+						RefusedResult,
+						RefusedCode,
+						RefusedMessage))
+				|| !TestEqual(
+					TEXT("unknown kind code"),
+					RefusedCode,
+					FString(TEXT("graph-patch-kind-not-allowed"))))
+			{
+				return Fail();
+			}
+		}
+		if (!TestEqual(TEXT("refusals left the node count"), Graph->Nodes.Num(), NodeCountBefore)
+			|| !TestFalse(TEXT("refusals left the package clean"), Package->IsDirty())
+			|| !TestEqual(TEXT("refusals left the disk asset"), ComputeAssetSha(Blueprint), AssetShaBefore)
+			|| !TestEqual(
+				TEXT("refusals left the edge fingerprint"),
+				UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicEdgeStateFingerprint(Graph),
+				EdgesFingerprintBefore)
+			|| !TestEqual(
+				TEXT("refusals left the node fingerprint"),
+				UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicNodeStateFingerprint(Graph),
+				NodesFingerprintBefore))
+		{
+			return Fail();
+		}
+	}
+
+	// ---- Writer equivalence: the same node, seen by both previews. ----
+	{
+		TSharedPtr<FJsonObject> WriterPreview;
+		FString WriterCode;
+		FString WriterMessage;
+		if (!TestTrue(
+				TEXT("the single-writer node-remove preview succeeds"),
+				UEAgentKitBlueprintNodeRemoveExperimental::TryPreviewExperimental(
+					[&]()
+					{
+						TSharedRef<FJsonObject> Params = MakeShared<FJsonObject>();
+						Params->SetStringField(TEXT("assetPath"), Blueprint->GetPathName());
+						Params->SetStringField(TEXT("graphGuid"), GuidLower(Graph->GraphGuid));
+						Params->SetStringField(TEXT("nodeGuid"), GuidLower(A->NodeGuid));
+						Params->SetStringField(TEXT("expectedNodeClass"), NotBoolClassPath);
+						Params->SetStringField(
+							TEXT("expectedEdgeSetHash"),
+							[&]()
+							{
+								FString Hash;
+								UEAgentKitBlueprintNodeRemoveExperimental::TryComputeLiveEdgeSetHash(
+									Graph,
+									Hash);
+								return Hash;
+							}());
+						TArray<TSharedPtr<FJsonValue>> Edges;
+						Edges.Add(MakeShared<FJsonValueObject>(
+							MakeRemovedEdge(AOut, BranchCondition)));
+						Params->SetArrayField(TEXT("removedEdges"), Edges);
+						return Params;
+					}(),
+					WriterPreview,
+					WriterCode,
+					WriterMessage)))
+		{
+			AddError(WriterCode + TEXT(" ") + WriterMessage);
+			return Fail();
+		}
+		TSharedPtr<FJsonObject> PatchPreview;
+		FString Code;
+		FString Message;
+		if (!TestTrue(
+				TEXT("the patch preview of the same removal succeeds"),
+				UEAgentKitBlueprintPatchExperimental::TryPreviewExperimental(
+					BuildPatchParams(
+						Blueprint,
+						Graph,
+						{ MakeRemoveOperation(
+							TEXT("r1"),
+							A,
+							NotBoolClassPath,
+							{ MakeRemovedEdge(AOut, BranchCondition) }) }),
+					PatchPreview,
+					Code,
+					Message)))
+		{
+			AddError(Code + TEXT(" ") + Message);
+			return Fail();
+		}
+		const TSharedPtr<FJsonObject> Planned =
+			PatchPreview->GetArrayField(TEXT("operations"))[0]->AsObject();
+		const TArray<TSharedPtr<FJsonValue>>& PlannedEdges =
+			Planned->GetArrayField(TEXT("removedEdges"));
+		if (!TestEqual(
+				TEXT("both previews plan the same node count"),
+				PatchPreview->GetNumberField(TEXT("nodeCount")),
+				WriterPreview->GetNumberField(TEXT("nodeCountBefore")))
+			|| !TestEqual(
+				TEXT("both previews plan the same final node count"),
+				WriterPreview->GetNumberField(TEXT("nodeCountAfter")),
+				static_cast<double>(NodeCountBefore - 1))
+			|| !TestEqual(
+				TEXT("both previews plan the same final link count"),
+				WriterPreview->GetNumberField(TEXT("linkCountAfter")),
+				static_cast<double>(2))
+			|| !TestEqual(
+				TEXT("the patch preview reports the removed node"),
+				Planned->GetStringField(TEXT("nodeGuid")),
+				GuidLower(A->NodeGuid))
+			|| !TestEqual(
+				TEXT("the patch preview resolves the node class"),
+				Planned->GetStringField(TEXT("nodeClass")),
+				FString(NotBoolClassPath))
+			|| !TestEqual(TEXT("one removed edge planned"), PlannedEdges.Num(), 1)
+			|| !TestEqual(
+				TEXT("the planned edge matches the writer's own pin identity"),
+				PlannedEdges[0]->AsObject()->GetStringField(TEXT("toPinGuid")),
+				GuidLower(BranchCondition->PinId)))
+		{
+			return Fail();
+		}
+	}
+
+	// ---- Rollback (the point of this slice): a removed node AND its edge return.
+	{
+		const TArray<TSharedPtr<FJsonObject>> Operations = {
+			MakeRemoveOperation(
+				TEXT("r1"),
+				A,
+				NotBoolClassPath,
+				{ MakeRemovedEdge(AOut, BranchCondition) }),
+			UEAgentKitPatchCreateNode::MakeNodeOperation(TEXT("n1"), TEXT("sequence"), 700, 0),
+		};
+		TSharedPtr<FJsonObject> Preview;
+		FString Code;
+		FString Message;
+		if (!TestTrue(
+				TEXT("the removeNode rollback patch previews"),
+				UEAgentKitBlueprintPatchExperimental::TryPreviewExperimental(
+					BuildPatchParams(Blueprint, Graph, Operations),
+					Preview,
+					Code,
+					Message)))
+		{
+			AddError(Code + TEXT(" ") + Message);
+			return Fail();
+		}
+		UEAgentKitBlueprintPatchExperimental::SetNextApplyFaultForTest(1);
+		TSharedPtr<FJsonObject> ApplyResult;
+		if (!TestFalse(
+				TEXT("the removeNode rollback patch fails"),
+				UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
+					BuildPatchApplyParams(Preview, Operations),
+					ApplyResult,
+					Code,
+					Message)))
+		{
+			return Fail();
+		}
+		UEdGraphNode* RestoredA = FindNodeByGuid(Graph, GuidLower(A->NodeGuid));
+		UEdGraphPin* RestoredAOut = FindPin(RestoredA, TEXT("ReturnValue"), EGPD_Output);
+		UEdGraphPin* RestoredCondition = FindPin(Branch, TEXT("Condition"), EGPD_Input);
+		const TArray<TSharedPtr<FJsonValue>>& Results =
+			ApplyResult->GetArrayField(TEXT("results"));
+		if (!TestEqual(
+				TEXT("the rollback reports the injected fault"),
+				Code,
+				FString(TEXT("graph-patch-apply-fault-injected")))
+			|| !TestEqual(TEXT("one result per operation"), Results.Num(), 2)
+			|| !TestTrue(
+				TEXT("the removed node EXISTS again after the rollback"),
+				RestoredA != nullptr)
+			|| !TestEqual(
+				TEXT("the restored node kept its class"),
+				NodeClassPath(RestoredA),
+				FString(NotBoolClassPath))
+			|| !TestTrue(
+				TEXT("the removed node's EDGE is linked again after the rollback"),
+				AreLinked(RestoredAOut, RestoredCondition))
+			|| !TestEqual(TEXT("the rollback restored the node count"), Graph->Nodes.Num(), NodeCountBefore)
+			|| !TestEqual(
+				TEXT("the rollback restored the edge fingerprint"),
+				UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicEdgeStateFingerprint(Graph),
+				EdgesFingerprintBefore)
+			|| !TestEqual(
+				TEXT("the rollback restored the node fingerprint"),
+				UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicNodeStateFingerprint(Graph),
+				NodesFingerprintBefore)
+			|| !TestFalse(TEXT("the rollback left the package clean"), Package->IsDirty())
+			|| !TestEqual(TEXT("the rollback left the disk asset"), ComputeAssetSha(Blueprint), AssetShaBefore)
+			|| !TestTrue(
+				TEXT("the rollback says the state is restored"),
+				ApplyResult->GetBoolField(TEXT("stateRestored"))))
+		{
+			AddError(Code + TEXT(" ") + Message);
+			return Fail();
+		}
+	}
+
+	// ---- Remove a node that carries an edge, then Undo/Redo, then Save.
+	{
+		const TArray<TSharedPtr<FJsonObject>> Operations = {
+			MakeRemoveOperation(
+				TEXT("r1"),
+				A,
+				NotBoolClassPath,
+				{ MakeRemovedEdge(AOut, BranchCondition) }),
+		};
+		TSharedPtr<FJsonObject> Preview;
+		FString Code;
+		FString Message;
+		if (!TestTrue(
+				TEXT("the removeNode patch previews"),
+				UEAgentKitBlueprintPatchExperimental::TryPreviewExperimental(
+					BuildPatchParams(Blueprint, Graph, Operations),
+					Preview,
+					Code,
+					Message))
+			|| !TestTrue(TEXT("the removeNode preview exists"), Preview.IsValid()))
+		{
+			AddError(Code + TEXT(" ") + Message);
+			return Fail();
+		}
+		TSharedPtr<FJsonObject> ApplyResult;
+		if (!TestTrue(
+				TEXT("the removeNode patch applies"),
+				UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
+					BuildPatchApplyParams(Preview, Operations),
+					ApplyResult,
+					Code,
+					Message))
+			|| !TestTrue(TEXT("the removeNode result exists"), ApplyResult.IsValid()))
+		{
+			AddError(Code + TEXT(" ") + Message);
+			return Fail();
+		}
+		const FString EdgesAfter = ApplyResult->GetStringField(TEXT("edgesFingerprintAfter"));
+		const FString NodesAfter = ApplyResult->GetStringField(TEXT("nodesFingerprintAfter"));
+		if (!TestTrue(TEXT("the removed node is gone"), FindNodeByGuid(Graph, GuidLower(A->NodeGuid)) == nullptr)
+			|| !TestEqual(TEXT("one node fewer"), Graph->Nodes.Num(), NodeCountBefore - 1)
+			|| !TestEqual(
+				TEXT("the removed node took its edge with it"),
+				ApplyResult->GetNumberField(TEXT("linkCountAfter")),
+				2.0)
+			|| !TestEqual(
+				TEXT("the patch counts the removed node"),
+				ApplyResult->GetNumberField(TEXT("removedNodeCount")),
+				1.0)
+			|| !TestEqual(
+				TEXT("the patch counts the implicitly removed edge"),
+				ApplyResult->GetNumberField(TEXT("removedNodeEdgeCount")),
+				1.0)
+			|| !TestFalse(
+				TEXT("removing a node changed the edge fingerprint"),
+				EdgesAfter.Equals(EdgesFingerprintBefore, ESearchCase::CaseSensitive))
+			|| !TestFalse(
+				TEXT("removing a node changed the node fingerprint"),
+				NodesAfter.Equals(NodesFingerprintBefore, ESearchCase::CaseSensitive)))
+		{
+			return Fail();
+		}
+		if (!TestTrue(TEXT("Undo is available"), GEditor->UndoTransaction())
+			|| !TestTrue(
+				TEXT("Undo brings the node back"),
+				FindNodeByGuid(Graph, GuidLower(A->NodeGuid)) != nullptr)
+			|| !TestTrue(
+				TEXT("Undo brings the edge back"),
+				AreLinked(FindPin(A, TEXT("ReturnValue"), EGPD_Output), BranchCondition))
+			|| !TestEqual(TEXT("Undo restores the node count"), Graph->Nodes.Num(), NodeCountBefore)
+			|| !TestEqual(
+				TEXT("Undo returns the edge fingerprint to before"),
+				UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicEdgeStateFingerprint(Graph),
+				EdgesFingerprintBefore)
+			|| !TestTrue(TEXT("Redo is available"), GEditor->RedoTransaction())
+			|| !TestTrue(
+				TEXT("Redo removes the node again"),
+				FindNodeByGuid(Graph, GuidLower(A->NodeGuid)) == nullptr)
+			|| !TestEqual(
+				TEXT("Redo returns the node fingerprint to after"),
+				UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicNodeStateFingerprint(Graph),
+				NodesAfter))
+		{
+			return Fail();
+		}
+		if (!TestTrue(TEXT("the explicit save of the removal succeeds"), SaveApplied(ApplyResult, Error)))
+		{
+			AddError(Error);
+			return Fail();
+		}
+		if (!TestFalse(TEXT("save cleared the dirty flag"), Package->IsDirty())
+			|| !TestFalse(
+				TEXT("save changed the asset on disk"),
+				ComputeAssetSha(Blueprint).Equals(AssetShaBefore, ESearchCase::CaseSensitive)))
+		{
+			return Fail();
+		}
+	}
+
+	// ---- Remove an isolated node: nodes change, edges do not.
+	{
+		const FString EdgesBeforeIsolated =
+			UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicEdgeStateFingerprint(Graph);
+		const TArray<TSharedPtr<FJsonObject>> Operations = {
+			MakeRemoveOperation(TEXT("r2"), D, NotBoolClassPath, {}),
+		};
+		TSharedPtr<FJsonObject> Preview;
+		FString Code;
+		FString Message;
+		if (!TestTrue(
+				TEXT("the isolated removal previews"),
+				UEAgentKitBlueprintPatchExperimental::TryPreviewExperimental(
+					BuildPatchParams(Blueprint, Graph, Operations),
+					Preview,
+					Code,
+					Message)))
+		{
+			AddError(Code + TEXT(" ") + Message);
+			return Fail();
+		}
+		TSharedPtr<FJsonObject> ApplyResult;
+		if (!TestTrue(
+				TEXT("the isolated removal applies"),
+				UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
+					BuildPatchApplyParams(Preview, Operations),
+					ApplyResult,
+					Code,
+					Message)))
+		{
+			AddError(Code + TEXT(" ") + Message);
+			return Fail();
+		}
+		if (!TestTrue(TEXT("the isolated node is gone"), FindNodeByGuid(Graph, GuidLower(D->NodeGuid)) == nullptr)
+			|| !TestEqual(
+				TEXT("an isolated removal reports no implicitly removed edge"),
+				ApplyResult->GetNumberField(TEXT("removedNodeEdgeCount")),
+				0.0)
+			|| !TestEqual(
+				TEXT("an isolated removal keeps the edge fingerprint"),
+				ApplyResult->GetStringField(TEXT("edgesFingerprintAfter")),
+				EdgesBeforeIsolated)
+			|| !TestEqual(TEXT("the isolated removal keeps the link count"),
+				ApplyResult->GetNumberField(TEXT("linkCountAfter")),
+				2.0))
+		{
+			return Fail();
+		}
+		if (!TestTrue(TEXT("the isolated removal save succeeds"), SaveApplied(ApplyResult, Error)))
+		{
+			AddError(Error);
+			return Fail();
+		}
+	}
+
+	// ---- All seven kinds in one patch, then one Undo for all of them. ----
+	{
+		TSharedRef<FJsonObject> PinOperation = MakeShared<FJsonObject>();
+		PinOperation->SetStringField(TEXT("opId"), TEXT("p1"));
+		PinOperation->SetStringField(TEXT("kind"), TEXT("setPinDefault"));
+		PinOperation->SetStringField(TEXT("nodeGuid"), GuidLower(B->NodeGuid));
+		PinOperation->SetStringField(TEXT("pinName"), TEXT("A"));
+		PinOperation->SetStringField(TEXT("pinGuid"), GuidLower(FindPin(B, TEXT("A"), EGPD_Input)->PinId));
+		PinOperation->SetStringField(TEXT("type"), TEXT("bool"));
+		PinOperation->SetStringField(TEXT("value"), TEXT("true"));
+		TSharedRef<FJsonObject> VariableOperation = MakeShared<FJsonObject>();
+		VariableOperation->SetStringField(TEXT("opId"), TEXT("v1"));
+		VariableOperation->SetStringField(TEXT("kind"), TEXT("createVariable"));
+		VariableOperation->SetStringField(TEXT("name"), TEXT("RemovePatchFlag"));
+		VariableOperation->SetStringField(TEXT("type"), TEXT("bool"));
+		VariableOperation->SetStringField(TEXT("defaultValue"), TEXT("true"));
+		TSharedPtr<FJsonObject> RewireOperation = MakeShared<FJsonObject>();
+		RewireOperation->SetStringField(TEXT("opId"), TEXT("w1"));
+		RewireOperation->SetStringField(TEXT("kind"), TEXT("rewirePin"));
+		auto SetSide = [](const TSharedRef<FJsonObject>& Operation, const TCHAR* Prefix, UEdGraphPin* Pin)
+		{
+			Operation->SetStringField(
+				FString(Prefix) + TEXT("NodeGuid"),
+				GuidLower(Pin->GetOwningNode()->NodeGuid));
+			Operation->SetStringField(FString(Prefix) + TEXT("PinName"), Pin->PinName.ToString());
+			Operation->SetStringField(FString(Prefix) + TEXT("PinGuid"), GuidLower(Pin->PinId));
+		};
+		SetSide(RewireOperation.ToSharedRef(), TEXT("target"), OrA);
+		SetSide(RewireOperation.ToSharedRef(), TEXT("oldSource"), BOut);
+		SetSide(RewireOperation.ToSharedRef(), TEXT("newSource"), COut);
+
+		const TArray<TSharedPtr<FJsonObject>> Mixed = {
+			PinOperation,
+			VariableOperation,
+			MakeNodeOperationWithTempId(
+				TEXT("n1"),
+				TEXT("branch"),
+				700,
+				420,
+				TEXT("tmp:b2")),
+			[&]()
+			{
+				TSharedRef<FJsonObject> Connect = MakeShared<FJsonObject>();
+				Connect->SetStringField(TEXT("opId"), TEXT("c1"));
+				Connect->SetStringField(TEXT("kind"), TEXT("connect"));
+				Connect->SetStringField(TEXT("from"), GuidLower(B->NodeGuid));
+				Connect->SetStringField(TEXT("fromPin"), TEXT("ReturnValue"));
+				Connect->SetStringField(TEXT("to"), TEXT("tmp:b2"));
+				Connect->SetStringField(TEXT("toPin"), TEXT("Condition"));
+				return Connect;
+			}(),
+			[&]()
+			{
+				TSharedRef<FJsonObject> Disconnect = MakeShared<FJsonObject>();
+				Disconnect->SetStringField(TEXT("opId"), TEXT("d1"));
+				Disconnect->SetStringField(TEXT("kind"), TEXT("disconnect"));
+				Disconnect->SetStringField(TEXT("from"), GuidLower(C->NodeGuid));
+				Disconnect->SetStringField(TEXT("fromPin"), TEXT("ReturnValue"));
+				Disconnect->SetStringField(TEXT("to"), GuidLower(BoolOr->NodeGuid));
+				Disconnect->SetStringField(TEXT("toPin"), TEXT("B"));
+				return Disconnect;
+			}(),
+			RewireOperation,
+			MakeRemoveOperation(TEXT("r9"), Branch, NodeClassPath(Branch), {}),
+		};
+		const int32 VariableCountBefore = Blueprint->NewVariables.Num();
+		const FString EdgesBeforeMixed =
+			UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicEdgeStateFingerprint(Graph);
+		const int32 NodesBeforeMixed = Graph->Nodes.Num();
+		TSharedPtr<FJsonObject> Preview;
+		FString Code;
+		FString Message;
+		if (!TestTrue(
+				TEXT("the seven-kind patch previews"),
+				UEAgentKitBlueprintPatchExperimental::TryPreviewExperimental(
+					BuildPatchParams(Blueprint, Graph, Mixed),
+					Preview,
+					Code,
+					Message))
+			|| !TestTrue(TEXT("the seven-kind preview exists"), Preview.IsValid()))
+		{
+			AddError(Code + TEXT(" ") + Message);
+			return Fail();
+		}
+		TArray<FString> PlannedKinds;
+		for (const TSharedPtr<FJsonValue>& Value : Preview->GetArrayField(TEXT("operations")))
+		{
+			PlannedKinds.Add(Value->AsObject()->GetStringField(TEXT("kind")));
+		}
+		if (!TestEqual(
+				TEXT("all seven kinds are planned in order"),
+				FString::Join(PlannedKinds, TEXT(",")),
+				FString(TEXT("setPinDefault,createVariable,createNode,connect,disconnect,rewirePin,removeNode"))))
+		{
+			return Fail();
+		}
+		TSharedPtr<FJsonObject> ApplyResult;
+		if (!TestTrue(
+				TEXT("the seven-kind patch applies"),
+				UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
+					BuildPatchApplyParams(Preview, Mixed),
+					ApplyResult,
+					Code,
+					Message))
+			|| !TestTrue(TEXT("the seven-kind result exists"), ApplyResult.IsValid()))
+		{
+			AddError(Code + TEXT(" ") + Message);
+			return Fail();
+		}
+		bool bAllApplied = ApplyResult->GetArrayField(TEXT("results")).Num() == 7;
+		for (const TSharedPtr<FJsonValue>& Value : ApplyResult->GetArrayField(TEXT("results")))
+		{
+			bAllApplied = bAllApplied
+				&& Value->AsObject()->GetStringField(TEXT("status")) == TEXT("applied");
+		}
+		if (!TestTrue(TEXT("all seven kinds applied"), bAllApplied)
+			|| !TestTrue(TEXT("the removed node is gone"),
+				FindNodeByGuid(Graph, GuidLower(Branch->NodeGuid)) == nullptr)
+			|| !TestTrue(TEXT("the rewired edge moved to the new source"), AreLinked(COut, OrA))
+			|| !TestFalse(TEXT("the rewired edge left the old source"), AreLinked(BOut, OrA))
+			|| !TestFalse(TEXT("the disconnected edge is gone"), AreLinked(COut, OrB))
+			|| !TestEqual(
+				TEXT("the mixed patch nets one node and one edge"),
+				Graph->Nodes.Num(),
+				NodesBeforeMixed)
+			|| !TestEqual(
+				TEXT("the mixed patch keeps the link count"),
+				ApplyResult->GetNumberField(TEXT("linkCountAfter")),
+				2.0)
+			|| !TestEqual(
+				TEXT("the variable was created"),
+				Blueprint->NewVariables.Num(),
+				VariableCountBefore + 1))
+		{
+			return Fail();
+		}
+		if (!TestTrue(TEXT("one Undo reverts the whole patch"), GEditor->UndoTransaction())
+			|| !TestTrue(
+				TEXT("Undo brings the removed node back"),
+				FindNodeByGuid(Graph, GuidLower(Branch->NodeGuid)) != nullptr)
+			|| !TestTrue(TEXT("Undo undoes the rewire"), AreLinked(BOut, OrA))
+			|| !TestTrue(TEXT("Undo undoes the disconnect"), AreLinked(COut, OrB))
+			|| !TestEqual(
+				TEXT("Undo restores the node count"),
+				Graph->Nodes.Num(),
+				NodesBeforeMixed)
+			|| !TestEqual(
+				TEXT("Undo returns the edge fingerprint to before"),
+				UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicEdgeStateFingerprint(Graph),
+				EdgesBeforeMixed)
+			|| !TestEqual(
+				TEXT("Undo removes the created variable"),
+				Blueprint->NewVariables.Num(),
+				VariableCountBefore)
+			|| !TestTrue(TEXT("Redo re-applies the whole patch"), GEditor->RedoTransaction()))
+		{
+			return Fail();
+		}
+	}
+
+	UEAgentKitBlueprintPatchExperimental::ResetExperimentalWriteForTest();
+	UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
+	UEAgentKitBlueprintNodeRemoveExperimental::ResetExperimentalWriteForTest();
+	UEAgentKitBlueprintRewireExperimental::ResetExperimentalWriteForTest();
 	return true;
 }
 

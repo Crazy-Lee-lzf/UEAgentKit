@@ -87,9 +87,9 @@ MAX_OPERATIONS = 16
 MAX_OP_ID = 64
 MAX_ASSET_PATH = 512
 
-# Only these kinds are implemented by the live atomic patch.  A patch that mixes
-# a migrated and an unmigrated kind is refused before any write, so one patch
-# never carries two authorization contracts.
+# Only these kinds are implemented by the live atomic patch.  Every kind this
+# seam designed is migrated now, so a request that names anything else is refused
+# before any write instead of being silently carried as a hybrid.
 MIGRATED_KINDS = (
     "setPinDefault",
     "createVariable",
@@ -97,8 +97,8 @@ MIGRATED_KINDS = (
     "connect",
     "disconnect",
     "rewirePin",
+    "removeNode",
 )
-RESERVED_KINDS = ("removeNode",)
 
 PIN_DEFAULT_FIELDS = ("nodeGuid", "pinName", "pinGuid", "type", "value")
 CREATE_VARIABLE_FIELDS = ("name", "type", "defaultValue")
@@ -106,6 +106,20 @@ CREATE_NODE_FIELDS = ("nodeType", "x", "y")
 CONNECT_FIELDS = ("from", "fromPin", "to", "toPin")
 # disconnect is the same four endpoint fields read the other way round.
 DISCONNECT_FIELDS = CONNECT_FIELDS
+# The node-removal writer's own three fields; the incident edges are enumerated
+# separately so a removal can never silently take an edge with it.
+REMOVE_NODE_FIELDS = ("nodeGuid", "expectedNodeClass", "removedEdges")
+REMOVED_EDGE_FIELDS = (
+    "fromNodeGuid",
+    "fromPinName",
+    "fromPinGuid",
+    "toNodeGuid",
+    "toPinName",
+    "toPinGuid",
+)
+# The writer removes at most one node with at most one incident edge per call.
+MAX_REMOVED_NODES_PER_PATCH = 16
+MAX_REMOVED_EDGES_PER_NODE = 1
 # The rewire writer's own nine field names, so one request object can move
 # between the single-writer rewire tool and a patch operation.
 REWIRE_FIELDS = (
@@ -399,15 +413,12 @@ def validate_preview_parameters(
             )
         seen_op_ids.add(op_id)
         if kind not in MIGRATED_KINDS:
-            if kind in RESERVED_KINDS:
-                raise PatchError(
-                    "graph-patch-kind-not-migrated",
-                    f"Operation kind '{kind}' is designed but not migrated to the atomic "
-                    f"patch yet; this build accepts: {', '.join(MIGRATED_KINDS)}.",
-                )
+            # Every designed kind is migrated, so this is a typo or a future
+            # feature, never "migrated later".
             raise PatchError(
                 "graph-patch-kind-not-allowed",
-                f"Operation kind '{kind}' is not an atomic patch kind.",
+                f"Operation kind '{kind}' is not an atomic patch kind; this build "
+                f"accepts: {', '.join(MIGRATED_KINDS)}.",
             )
         if kind == "createVariable":
             _reject_unknown(
@@ -608,6 +619,74 @@ def validate_preview_parameters(
                     "bound as the single-writer graph edit tool.",
                 )
             normalized_operations.append(normalized_rewire)
+            continue
+        if kind == "removeNode":
+            _reject_unknown(
+                item,
+                {"opId", "kind", *REMOVE_NODE_FIELDS},
+                f"operations[{index}]",
+            )
+            node_guid = _guid_with_code(
+                item.get("nodeGuid"),
+                f"operations[{index}].nodeGuid",
+                error_code="graph-remove-invalid-identifier",
+            )
+            expected_node_class = _string(
+                item.get("expectedNodeClass"),
+                f"operations[{index}].expectedNodeClass",
+                maximum=256,
+            )
+            raw_edges = item.get("removedEdges")
+            if not isinstance(raw_edges, list):
+                raise PatchError(
+                    "graph-remove-invalid-parameters",
+                    "removedEdges must be an array (empty for an isolated node).",
+                )
+            if len(raw_edges) > MAX_REMOVED_EDGES_PER_NODE:
+                raise PatchError(
+                    "graph-remove-removed-edges-invalid",
+                    f"A node-removal operation may list at most {MAX_REMOVED_EDGES_PER_NODE} incident edge.",
+                )
+            normalized_edges: list[dict[str, str]] = []
+            seen_edge_keys: set[tuple[str, ...]] = set()
+            for edge_index, raw_edge in enumerate(raw_edges):
+                edge = _object(raw_edge, f"operations[{index}].removedEdges[{edge_index}]")
+                _reject_unknown(
+                    edge,
+                    set(REMOVED_EDGE_FIELDS),
+                    f"operations[{index}].removedEdges[{edge_index}]",
+                )
+                normalized_edge: dict[str, str] = {}
+                for field in REMOVED_EDGE_FIELDS:
+                    if field.endswith("PinName"):
+                        normalized_edge[field] = _string(
+                            edge.get(field),
+                            f"operations[{index}].removedEdges[{edge_index}].{field}",
+                            maximum=128,
+                        )
+                    else:
+                        normalized_edge[field] = _guid_with_code(
+                            edge.get(field),
+                            f"operations[{index}].removedEdges[{edge_index}].{field}",
+                            error_code="graph-remove-removed-edges-invalid",
+                        )
+                edge_key = tuple(normalized_edge[field] for field in REMOVED_EDGE_FIELDS)
+                if edge_key in seen_edge_keys:
+                    raise PatchError(
+                        "graph-remove-removed-edges-invalid",
+                        "removedEdges must not contain duplicate entries.",
+                    )
+                seen_edge_keys.add(edge_key)
+                normalized_edges.append(normalized_edge)
+            normalized_operations.append(
+                {
+                    "opId": op_id,
+                    "kind": kind,
+                    "nodeGuid": node_guid,
+                    "expectedNodeClass": expected_node_class,
+                    "removedEdges": normalized_edges,
+                }
+            )
             continue
         _reject_unknown(
             item,
@@ -850,6 +929,89 @@ def _canonical_rewire_fields(
     return normalized
 
 
+def _canonical_removed_edges(
+    value: Any,
+    label: str,
+    *,
+    error_code: str,
+) -> list[dict[str, str]]:
+    """Validate the enumerated incident edges of one removeNode result entry."""
+
+    if not isinstance(value, list):
+        raise PatchError(error_code, f"{label} must be an array.")
+    if len(value) > MAX_REMOVED_EDGES_PER_NODE:
+        raise PatchError(
+            error_code,
+            f"{label} may carry at most {MAX_REMOVED_EDGES_PER_NODE} incident edge.",
+        )
+    normalized: list[dict[str, str]] = []
+    for index, raw in enumerate(value):
+        entry = _object(raw, f"{label}[{index}]")
+        _reject_unknown(
+            entry,
+            set(REMOVED_EDGE_FIELDS) | {"fromKind", "toKind"},
+            f"{label}[{index}]",
+        )
+        item: dict[str, str] = {}
+        for field in REMOVED_EDGE_FIELDS:
+            if field.endswith("PinName"):
+                item[field] = _string(
+                    entry.get(field),
+                    f"{label}[{index}].{field}",
+                    maximum=128,
+                )
+            else:
+                item[field] = _guid_with_code(
+                    entry.get(field),
+                    f"{label}[{index}].{field}",
+                    error_code=error_code,
+                )
+        for side in ("fromKind", "toKind"):
+            kind = _string(entry.get(side), f"{label}[{index}].{side}", maximum=16)
+            if kind not in PATCH_PIN_TYPES:
+                raise PatchError(
+                    error_code,
+                    f"{label}[{index}].{side} is outside {', '.join(PATCH_PIN_TYPES)}.",
+                )
+            item[side] = kind
+        normalized.append(item)
+    return normalized
+
+
+def _canonical_remove_node_fields(
+    entry: dict[str, Any],
+    label: str,
+    *,
+    error_code: str,
+) -> dict[str, Any]:
+    """Validate one removeNode entry; preview and apply carry the same shape.
+
+    Extra envelope fields (`opId`/`kind`/`status`/`rolledBack`) are tolerated here
+    exactly like the other result validators; the request side is where unknown
+    fields are refused.
+    """
+
+    normalized: dict[str, Any] = {
+        "nodeGuid": _guid_with_code(
+            entry.get("nodeGuid"),
+            f"{label}.nodeGuid",
+            error_code=error_code,
+        ),
+        "nodeClass": _string(entry.get("nodeClass"), f"{label}.nodeClass", maximum=256),
+        "removedEdges": _canonical_removed_edges(
+            entry.get("removedEdges"),
+            f"{label}.removedEdges",
+            error_code=error_code,
+        ),
+    }
+    pin_count = entry.get("nodePinCount")
+    if pin_count is not None:
+        if isinstance(pin_count, bool) or not isinstance(pin_count, int) or pin_count < 0:
+            raise PatchError(error_code, f"{label}.nodePinCount must be a non-negative integer.")
+        normalized["nodePinCount"] = pin_count
+    return normalized
+
+
 def validate_preview_result(preview: Any) -> dict[str, Any]:
     item = _object(_unwrap_tool_result(preview, "planId"), "preview")
     operations = item.get("operations")
@@ -964,6 +1126,17 @@ def validate_preview_result(preview: Any) -> dict[str, Any]:
         if kind == "rewirePin":
             try:
                 normalized = _canonical_rewire_fields(
+                    entry,
+                    f"preview.operations[{index}]",
+                    error_code="graph-patch-preview-invalid",
+                )
+            except PatchError as exc:
+                raise PatchError("graph-patch-preview-invalid", exc.message) from exc
+            normalized_operations.append({"opId": op_id, "kind": kind, **normalized})
+            continue
+        if kind == "removeNode":
+            try:
+                normalized = _canonical_remove_node_fields(
                     entry,
                     f"preview.operations[{index}]",
                     error_code="graph-patch-preview-invalid",
@@ -1111,6 +1284,8 @@ def validate_apply_result(apply_result: Any) -> dict[str, Any]:
     normalized_results: list[dict[str, Any]] = []
     created_variables = 0
     created_nodes = 0
+    removed_nodes = 0
+    removed_node_edges = 0
     created_edges = 0
     removed_edges = 0
     for index, raw in enumerate(results):
@@ -1176,6 +1351,19 @@ def validate_apply_result(apply_result: Any) -> dict[str, Any]:
                 raise PatchError("graph-patch-apply-invalid", exc.message) from exc
             normalized_results.append({"opId": op_id, "kind": kind, **normalized})
             continue
+        if kind == "removeNode":
+            try:
+                normalized = _canonical_remove_node_fields(
+                    entry,
+                    f"applyResult.results[{index}]",
+                    error_code="graph-patch-apply-invalid",
+                )
+            except PatchError as exc:
+                raise PatchError("graph-patch-apply-invalid", exc.message) from exc
+            removed_nodes += 1
+            removed_node_edges += len(normalized["removedEdges"])
+            normalized_results.append({"opId": op_id, "kind": kind, **normalized})
+            continue
         normalized_results.append(
             {
                 "opId": op_id,
@@ -1205,11 +1393,17 @@ def validate_apply_result(apply_result: Any) -> dict[str, Any]:
         isinstance(item.get("createdNodeCount"), bool)
         or not isinstance(item.get("createdNodeCount"), int)
         or item.get("createdNodeCount") != created_nodes
-        or item.get("nodeCountAfter") != item.get("nodeCountBefore") + created_nodes
+        or isinstance(item.get("removedNodeCount"), bool)
+        or not isinstance(item.get("removedNodeCount"), int)
+        or item.get("removedNodeCount") != removed_nodes
+        or isinstance(item.get("removedNodeEdgeCount"), bool)
+        or not isinstance(item.get("removedNodeEdgeCount"), int)
+        or item.get("removedNodeEdgeCount") != removed_node_edges
+        or item.get("nodeCountAfter") != item.get("nodeCountBefore") + created_nodes - removed_nodes
     ):
         raise PatchError(
             "graph-patch-apply-invalid",
-            "Apply node counts must match the number of createNode results.",
+            "Apply node counts must match the createNode/removeNode results.",
         )
     if (
         isinstance(item.get("createdEdgeCount"), bool)
@@ -1218,12 +1412,14 @@ def validate_apply_result(apply_result: Any) -> dict[str, Any]:
         or isinstance(item.get("removedEdgeCount"), bool)
         or not isinstance(item.get("removedEdgeCount"), int)
         or item.get("removedEdgeCount") != removed_edges
-        or item.get("linkCountAfter") != item.get("linkCountBefore") + created_edges - removed_edges
+        or item.get("linkCountAfter")
+        != item.get("linkCountBefore") + created_edges - removed_edges - removed_node_edges
     ):
         raise PatchError(
             "graph-patch-apply-invalid",
-            "Apply link counts must match the connect/disconnect results; a "
-            "rewirePin keeps the count and is checked by the edge fingerprint.",
+            "Apply link counts must match the connect/disconnect/removeNode "
+            "results; a rewirePin keeps the count and is checked by the edge "
+            "fingerprint.",
         )
     normalized = dict(item)
     normalized["assetPath"] = normalized_asset
@@ -1305,7 +1501,6 @@ __all__ = [
     "PREVIEW_SCHEMA_VERSION",
     "PREVIEW_TOOL_NAME",
     "PatchError",
-    "RESERVED_KINDS",
     "REWIRE_FIELDS",
     "SAVE_CAPABILITY",
     "SAVE_CONFIRMATION_PREFIX",
