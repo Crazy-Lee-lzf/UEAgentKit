@@ -257,6 +257,24 @@ def _node_contract(node_type: Any, label: str, *, error_code: str) -> dict[str, 
     return NODE_TYPES[node_type]
 
 
+def _function_matches(actual: Any, expected: str) -> bool:
+    """Compare a per-operation CallFunction identity.
+
+    The Editor reports the member name alone (`Not_PreBool`) while the node
+    contract carries `Owner.Member` (`KismetMathLibrary.Not_PreBool`).  The owner
+    is already pinned by `nodeClass` plus the nodeType whitelist, so accepting the
+    bare member keeps the check meaningful instead of rejecting every node the
+    Editor actually created (0-3.4 slice 13: this blocked Save for any patch that
+    created a node).
+    """
+
+    if not isinstance(actual, str) or not actual:
+        return False
+    if actual == expected:
+        return True
+    return actual == expected.rsplit(".", 1)[-1]
+
+
 def _canonical_node_fields(
     entry: dict[str, Any],
     label: str,
@@ -282,7 +300,7 @@ def _canonical_node_fields(
     if expected_function is None:
         if entry.get("function") not in (None, ""):
             raise PatchError(error_code, f"{label}.function is not part of this nodeType.")
-    elif entry.get("function") != expected_function:
+    elif not _function_matches(entry.get("function"), expected_function):
         raise PatchError(
             error_code,
             f"{label}.function must be {expected_function} for {entry.get('nodeType')}.",
