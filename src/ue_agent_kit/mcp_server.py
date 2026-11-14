@@ -65,7 +65,13 @@ from .mcp_pin_default_edit_experimental import register_pin_default_edit_experim
 from .mcp_variable_write_experimental import register_variable_write_experimental_tools
 from .mcp_rewire_write_experimental import register_rewire_write_experimental_tools
 from .mcp_node_remove_write_experimental import register_node_remove_write_experimental_tools
+from .mcp_patch_experimental import register_patch_experimental_tools
 from .mcp_focus_blueprint_graph_experimental import register_focus_blueprint_graph_tool
+from .experimental_patch import (
+    APPLY_TOOL_NAME as EXPERIMENTAL_PATCH_APPLY_TOOL_NAME,
+    PREVIEW_TOOL_NAME as EXPERIMENTAL_PATCH_PREVIEW_TOOL_NAME,
+    SAVE_TOOL_NAME as EXPERIMENTAL_PATCH_SAVE_TOOL_NAME,
+)
 from .experimental_rewire_write import (
     APPLY_TOOL_NAME as EXPERIMENTAL_REWIRE_APPLY_TOOL_NAME,
     PREVIEW_TOOL_NAME as EXPERIMENTAL_REWIRE_PREVIEW_TOOL_NAME,
@@ -402,6 +408,13 @@ def _capabilities_response(
         and "editor.applyBlueprintNodeRemoveExperimental" in observed_capabilities
         and "editor.saveBlueprintNodeRemoveExperimental" in observed_capabilities
     )
+    atomic_patch_registered = bool(live_editor_enabled and experimental_graphpatch_edit)
+    atomic_patch_plugin_opt_in = bool(
+        isinstance(observed_capabilities, list)
+        and "editor.previewBlueprintPatchExperimental" in observed_capabilities
+        and "editor.applyBlueprintPatchExperimental" in observed_capabilities
+        and "editor.saveBlueprintPatchExperimental" in observed_capabilities
+    )
     memory_status = memory_service.status() if memory_service is not None else None
     verification_evidence_status = (
         workflow_service.verification_evidence_store.status()
@@ -575,6 +588,30 @@ def _capabilities_response(
                     },
                     {
                         "name": EXPERIMENTAL_NODE_REMOVE_SAVE_TOOL_NAME,
+                        "readOnly": False,
+                        "destructive": False,
+                        "experimental": True,
+                    },
+                ]
+                if live_editor_enabled and experimental_graphpatch_edit
+                else []
+            )
+            + (
+                [
+                    {
+                        "name": EXPERIMENTAL_PATCH_PREVIEW_TOOL_NAME,
+                        "readOnly": True,
+                        "destructive": False,
+                        "experimental": True,
+                    },
+                    {
+                        "name": EXPERIMENTAL_PATCH_APPLY_TOOL_NAME,
+                        "readOnly": False,
+                        "destructive": True,
+                        "experimental": True,
+                    },
+                    {
+                        "name": EXPERIMENTAL_PATCH_SAVE_TOOL_NAME,
                         "readOnly": False,
                         "destructive": False,
                         "experimental": True,
@@ -1355,6 +1392,74 @@ def _capabilities_response(
                 "autoSave": False,
                 "compiled": False,
                 "skeletonRegenerated": False,
+                "requiresExplicitSeparateSave": True,
+                "maxRequestBytes": 61440,
+            },
+            "experimentalAtomicPatch": {
+                "available": bool(atomic_patch_registered and atomic_patch_plugin_opt_in),
+                "registered": atomic_patch_registered,
+                "pluginCapabilityObserved": atomic_patch_plugin_opt_in,
+                "previewTool": EXPERIMENTAL_PATCH_PREVIEW_TOOL_NAME
+                if atomic_patch_registered
+                else "",
+                "applyTool": EXPERIMENTAL_PATCH_APPLY_TOOL_NAME
+                if atomic_patch_registered
+                else "",
+                "saveTool": EXPERIMENTAL_PATCH_SAVE_TOOL_NAME
+                if atomic_patch_registered
+                else "",
+                "bridgeMethods": [
+                    "editor.previewBlueprintPatchExperimental",
+                    "editor.applyBlueprintPatchExperimental",
+                    "editor.saveBlueprintPatchExperimental",
+                ]
+                if atomic_patch_registered
+                else [],
+                "readOnlyPreview": True,
+                "destructiveApply": True,
+                "experimental": True,
+                "productionDefault": False,
+                "productionEnabled": False,
+                "productionApprovalRequired": False,
+                "authorizationModel": (
+                    "project-level experimental opt-in plus one exact per-patch "
+                    "confirmation; every operation in the patch is applied inside one "
+                    "Editor transaction and any failure rolls the whole patch back"
+                ),
+                "explicitOptIn": {
+                    "serverFlag": "--enable-experimental-graphpatch-edit",
+                    "projectConfig": "[UEAgentKit] ExperimentalGraphPatchEdit=True",
+                    "requiresRunningEditorCapability": True,
+                },
+                "requiresCompletePreviewResult": True,
+                "acceptsCallerBuiltRequest": False,
+                "migratedKinds": ["setPinDefault"],
+                "reservedKinds": [
+                    "createVariable",
+                    "createNode",
+                    "connect",
+                    "rewirePin",
+                    "removeNode",
+                ],
+                "rejectsMixedMigratedAndUnmigratedKinds": True,
+                "maxOperations": 16,
+                "refusesDuplicateOperationIds": True,
+                "refusesDuplicateTargets": True,
+                "perOperationResults": True,
+                "perOperationResultsOnFailure": True,
+                "rollsBackEveryAppliedOperationOnFailure": True,
+                "writeOccurredFalseOnFailure": True,
+                "requiresCleanPackage": True,
+                "requiresPieStopped": True,
+                "exactFocusedGraphOnly": True,
+                "bindsPlanIdToLiveBeforeValuesAndFingerprints": True,
+                "explicitApplyConfirmation": "SET EXPERIMENTAL BLUEPRINT PATCH <planId>",
+                "explicitSaveConfirmation": "SAVE EXPERIMENTAL BLUEPRINT PATCH <planId>",
+                "saveRequiresPostApplyFingerprintAndCounts": True,
+                "undoRedoVerifiedInCall": True,
+                "singleTransaction": True,
+                "autoSave": False,
+                "compiled": False,
                 "requiresExplicitSeparateSave": True,
                 "maxRequestBytes": 61440,
             },
@@ -2664,6 +2769,20 @@ def create_mcp_server(
                     EXPERIMENTAL_NODE_REMOVE_PREVIEW_TOOL_NAME,
                     EXPERIMENTAL_NODE_REMOVE_APPLY_TOOL_NAME,
                     EXPERIMENTAL_NODE_REMOVE_SAVE_TOOL_NAME,
+                ),
+            )
+            register_patch_experimental_tools(
+                server=server,
+                live_editor_service=live_editor_service,
+                tool_annotations_type=ToolAnnotations,
+                error_response=_error_response,
+            )
+            _enforce_strict_tool_arguments(
+                server,
+                (
+                    EXPERIMENTAL_PATCH_PREVIEW_TOOL_NAME,
+                    EXPERIMENTAL_PATCH_APPLY_TOOL_NAME,
+                    EXPERIMENTAL_PATCH_SAVE_TOOL_NAME,
                 ),
             )
     if workflow_service is not None:

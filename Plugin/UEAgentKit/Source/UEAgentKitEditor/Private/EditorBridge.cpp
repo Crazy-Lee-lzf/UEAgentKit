@@ -13,6 +13,7 @@
 #include "BlueprintRewireExperimental.h"
 #include "BlueprintNodeRemoveExperimental.h"
 #include "BlueprintVariableWriteExperimental.h"
+#include "BlueprintPatchExperimental.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Components/ActorComponent.h"
@@ -1348,6 +1349,105 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 				ErrorMessage);
 		}
 	}
+	else if (Method == TEXT("editor.previewBlueprintPatchExperimental"))
+	{
+		if (!UEAgentKitBlueprintPatchExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-patch-experimental-disabled"),
+				TEXT("Experimental atomic Blueprint patching is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			// A rejected patch still has to report one status per operation, so the
+			// error envelope carries the result object as additive details instead
+			// of dropping it the way SendActionResult does.
+			if (UEAgentKitBlueprintPatchExperimental::TryPreviewExperimental(
+				Params,
+				Result,
+				ErrorCode,
+				ErrorMessage)
+				&& Result.IsValid())
+			{
+				SendResult(Client.Socket, RequestId, Result.ToSharedRef());
+			}
+			else
+			{
+				SendError(
+					Client.Socket,
+					RequestId,
+					ErrorCode.IsEmpty() ? TEXT("live-editor-action-failed") : ErrorCode,
+					ErrorMessage.IsEmpty() ? TEXT("The Blueprint patch preview failed.") : ErrorMessage,
+					Result);
+			}
+		}
+	}
+	else if (Method == TEXT("editor.applyBlueprintPatchExperimental"))
+	{
+		if (!UEAgentKitBlueprintPatchExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-patch-experimental-disabled"),
+				TEXT("Experimental atomic Blueprint patching is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			if (UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
+				Params,
+				Result,
+				ErrorCode,
+				ErrorMessage)
+				&& Result.IsValid())
+			{
+				SendResult(Client.Socket, RequestId, Result.ToSharedRef());
+			}
+			else
+			{
+				SendError(
+					Client.Socket,
+					RequestId,
+					ErrorCode.IsEmpty() ? TEXT("live-editor-action-failed") : ErrorCode,
+					ErrorMessage.IsEmpty() ? TEXT("The Blueprint patch apply failed.") : ErrorMessage,
+					Result);
+			}
+		}
+	}
+	else if (Method == TEXT("editor.saveBlueprintPatchExperimental"))
+	{
+		if (!UEAgentKitBlueprintPatchExperimental::IsExperimentalWriteAvailable())
+		{
+			SendError(
+				Client.Socket,
+				RequestId,
+				TEXT("graph-patch-experimental-disabled"),
+				TEXT("Experimental atomic Blueprint patching is not opted in for this project."));
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Result;
+			FString ErrorCode;
+			FString ErrorMessage;
+			SendActionResult(
+				UEAgentKitBlueprintPatchExperimental::TrySaveExperimental(
+					Params,
+					Result,
+					ErrorCode,
+					ErrorMessage),
+				Result,
+				ErrorCode,
+				ErrorMessage);
+		}
+	}
 	else if (Method == TEXT("editor.previewBlueprintVariableCreateExperimental"))
 	{
 		if (!UEAgentKitBlueprintVariableExperimental::IsExperimentalWriteAvailable())
@@ -2336,11 +2436,19 @@ void FUEAgentKitEditorBridge::SendError(
 	FSocket* Socket,
 	const FString& RequestId,
 	const FString& Code,
-	const FString& Message) const
+	const FString& Message,
+	const TSharedPtr<FJsonObject>& Details) const
 {
 	TSharedRef<FJsonObject> Error = MakeShared<FJsonObject>();
 	Error->SetStringField(TEXT("code"), Code);
 	Error->SetStringField(TEXT("message"), Message);
+	if (Details.IsValid())
+	{
+		// 0-3.4: a failed atomic patch must still report one result per operation,
+		// and the frozen error envelope only carries code/message.  Details is the
+		// additive place for that list; every existing caller passes none.
+		Error->SetObjectField(TEXT("details"), Details.ToSharedRef());
+	}
 	TSharedRef<FJsonObject> Response = MakeShared<FJsonObject>();
 	Response->SetStringField(TEXT("schemaVersion"), ProtocolSchemaVersion);
 	Response->SetStringField(TEXT("requestId"), RequestId);
@@ -2509,6 +2617,15 @@ TArray<TSharedPtr<FJsonValue>> FUEAgentKitEditorBridge::BuildCapabilityValues() 
 			UEAgentKitBlueprintPinDefaultExperimental::ApplyMethod));
 		Values.Add(MakeShared<FJsonValueString>(
 			UEAgentKitBlueprintPinDefaultExperimental::SaveMethod));
+	}
+	if (UEAgentKitBlueprintPatchExperimental::IsExperimentalWriteAvailable())
+	{
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintPatchExperimental::PreviewMethod));
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintPatchExperimental::ApplyMethod));
+		Values.Add(MakeShared<FJsonValueString>(
+			UEAgentKitBlueprintPatchExperimental::SaveMethod));
 	}
 	if (UEAgentKitBlueprintVariableExperimental::IsExperimentalWriteAvailable())
 	{

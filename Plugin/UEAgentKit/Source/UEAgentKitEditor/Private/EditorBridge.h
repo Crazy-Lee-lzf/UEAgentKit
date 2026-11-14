@@ -78,7 +78,8 @@ private:
 	void CloseConnection(int32 Index);
 	void ProcessLine(FClientConnection& Client, const TArray<uint8>& LineBytes);
 	bool SendResponse(FSocket* Socket, const TSharedRef<FJsonObject>& Response) const;
-	void SendError(FSocket* Socket, const FString& RequestId, const FString& Code, const FString& Message) const;
+	void SendError(FSocket* Socket, const FString& RequestId, const FString& Code, const FString& Message,
+		const TSharedPtr<FJsonObject>& Details = nullptr) const;
 	void SendResult(FSocket* Socket, const FString& RequestId, const TSharedRef<FJsonObject>& Result) const;
 
 	TSharedRef<FJsonObject> BuildHelloResult() const;

@@ -867,36 +867,40 @@ namespace
 		FString& OutErrorCode,
 		FString& OutErrorMessage)
 	{
+		TArray<UEAgentKitBlueprintPinDefaultExperimental::FAtomicOperation> Operations;
+		Operations.Reserve(Targets.Num());
 		for (const FPinDefaultTarget& Target : Targets)
 		{
-			UEdGraphNode* Node = nullptr;
-			UEdGraphPin* Pin = nullptr;
-			if (!FindExactInputPin(
-				Graph,
-				Target,
-				Node,
-				Pin,
-				OutErrorCode,
-				OutErrorMessage))
-			{
-				return false;
-			}
-			const FString Expected = bExpectAfter ? Target.Value : Target.BeforeValue;
-			if (!Pin->DefaultValue.Equals(Expected, ESearchCase::CaseSensitive))
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("graph-pin-default-readback-failed"),
-					FString::Printf(
-						TEXT("Pin %s.%s read back as '%s'; expected '%s'."),
-						*Target.NodeGuid,
-						*Target.PinName,
-						*Pin->DefaultValue,
-						*Expected));
-			}
+			UEAgentKitBlueprintPinDefaultExperimental::FAtomicOperation Operation;
+			Operation.NodeGuid = Target.NodeGuid;
+			Operation.PinName = Target.PinName;
+			Operation.PinGuid = Target.PinGuid;
+			Operation.Type = Target.Type;
+			Operation.Value = Target.Value;
+			Operation.BeforeValue = Target.BeforeValue;
+			Operations.Add(MoveTemp(Operation));
 		}
-		return true;
+		return UEAgentKitBlueprintPinDefaultExperimental::TryCheckAtomicOperations(
+			Graph,
+			Operations,
+			bExpectAfter,
+			OutErrorCode,
+			OutErrorMessage);
+	}
+
+	FPinDefaultTarget ToPinDefaultTarget(
+		const UEAgentKitBlueprintPinDefaultExperimental::FAtomicOperation& Operation)
+	{
+		FPinDefaultTarget Target;
+		Target.NodeGuid = Operation.NodeGuid;
+		Target.PinName = Operation.PinName;
+		Target.PinGuid = Operation.PinGuid;
+		Target.Type = Operation.Type;
+		Target.Value = Operation.Value;
+		Target.BeforeValue = Operation.BeforeValue;
+		IsCanonicalGuid(Target.NodeGuid, Target.NodeGuidValue);
+		IsCanonicalGuid(Target.PinGuid, Target.PinGuidValue);
+		return Target;
 	}
 
 	int32 CountLinks(UEdGraph* Graph)
@@ -949,6 +953,238 @@ void UEAgentKitBlueprintPinDefaultExperimental::ResetExperimentalWriteForTest()
 {
 	bTestOverrideSet = false;
 	bTestOverrideEnabled = false;
+}
+
+bool UEAgentKitBlueprintPinDefaultExperimental::TryResolveAtomicOperation(
+	UEdGraph* Graph,
+	FAtomicOperation& InOutOperation,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	if (Graph == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-pin-default-graph-unavailable"),
+			TEXT("The exact graph must be loaded before a pin default can be resolved."));
+	}
+	if (InOutOperation.PinName.IsEmpty() || InOutOperation.PinName.Len() > MaxPinName)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-pin-default-invalid-parameters"),
+			FString::Printf(TEXT("pinName must be 1..%d characters."), MaxPinName));
+	}
+	FString Canonical;
+	if (!CanonicalizeDefaultValue(
+		InOutOperation.Type,
+		InOutOperation.Value,
+		Canonical,
+		OutErrorCode,
+		OutErrorMessage))
+	{
+		return false;
+	}
+	InOutOperation.Value = Canonical;
+	FPinDefaultTarget Target = ToPinDefaultTarget(InOutOperation);
+	UEdGraphNode* Node = nullptr;
+	UEdGraphPin* Pin = nullptr;
+	if (!FindExactInputPin(Graph, Target, Node, Pin, OutErrorCode, OutErrorMessage))
+	{
+		return false;
+	}
+	const UEdGraphSchema_K2* Schema = Cast<UEdGraphSchema_K2>(Graph->GetSchema());
+	if (Schema == nullptr || Pin == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-pin-default-schema-not-supported"),
+			TEXT("Pin default edit supports only K2 Blueprint graphs."));
+	}
+	const FString ValidationMessage = Schema->IsPinDefaultValid(
+		Pin,
+		Target.Value,
+		nullptr,
+		FText::GetEmpty());
+	if (!ValidationMessage.IsEmpty())
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-pin-default-schema-rejected"),
+			FString::Printf(
+				TEXT("K2 schema rejected the default for %s.%s: %s"),
+				*Target.NodeGuid,
+				*Target.PinName,
+				*ValidationMessage));
+	}
+	InOutOperation.BeforeValue = Pin->DefaultValue;
+	return true;
+}
+
+bool UEAgentKitBlueprintPinDefaultExperimental::TryApplyAtomicOperations(
+	UEdGraph* Graph,
+	const TArray<FAtomicOperation>& Operations,
+	int32& OutAppliedCount,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	OutAppliedCount = 0;
+	if (Graph == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-pin-default-graph-unavailable"),
+			TEXT("The exact graph must be loaded before a pin default can be written."));
+	}
+	const UEdGraphSchema_K2* Schema = Cast<UEdGraphSchema_K2>(Graph->GetSchema());
+	if (Schema == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-pin-default-schema-not-supported"),
+			TEXT("Pin default edit supports only K2 Blueprint graphs."));
+	}
+	TArray<TPair<UEdGraphPin*, FString>> AppliedDefaults;
+	auto RestoreApplied = [Schema, &AppliedDefaults]()
+	{
+		for (int32 Index = AppliedDefaults.Num() - 1; Index >= 0; --Index)
+		{
+			UEdGraphPin* AppliedPin = AppliedDefaults[Index].Key;
+			if (AppliedPin != nullptr)
+			{
+				Schema->TrySetDefaultValue(*AppliedPin, AppliedDefaults[Index].Value, true);
+			}
+		}
+		AppliedDefaults.Reset();
+	};
+
+	for (const FAtomicOperation& Operation : Operations)
+	{
+		FPinDefaultTarget Target = ToPinDefaultTarget(Operation);
+		UEdGraphNode* Node = nullptr;
+		UEdGraphPin* Pin = nullptr;
+		if (!FindExactInputPin(Graph, Target, Node, Pin, OutErrorCode, OutErrorMessage))
+		{
+			RestoreApplied();
+			return false;
+		}
+		// Nodes created or recreated outside the Editor's node factory do not
+		// necessarily carry RF_Transactional.  Without it UObject::Modify() is a
+		// no-op, the transaction serializes no changed node, and the whole pin
+		// default edit is discarded as empty.  Mark the exact target node so its
+		// pin default change is a real undoable transaction.
+		Node->SetFlags(RF_Transactional);
+		Node->Modify();
+		Pin->Modify();
+		Schema->TrySetDefaultValue(*Pin, Target.Value, true);
+		if (!Pin->DefaultValue.Equals(Target.Value, ESearchCase::CaseSensitive))
+		{
+			RestoreApplied();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-pin-default-apply-rejected"),
+				FString::Printf(
+					TEXT("K2 did not store the requested default for %s.%s."),
+					*Target.NodeGuid,
+					*Target.PinName));
+		}
+		AppliedDefaults.Emplace(Pin, Target.BeforeValue);
+	}
+	OutAppliedCount = AppliedDefaults.Num();
+	return true;
+}
+
+bool UEAgentKitBlueprintPinDefaultExperimental::TryCheckAtomicOperations(
+	UEdGraph* Graph,
+	const TArray<FAtomicOperation>& Operations,
+	bool bExpectAfter,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	for (const FAtomicOperation& Operation : Operations)
+	{
+		FPinDefaultTarget Target = ToPinDefaultTarget(Operation);
+		UEdGraphNode* Node = nullptr;
+		UEdGraphPin* Pin = nullptr;
+		if (!FindExactInputPin(Graph, Target, Node, Pin, OutErrorCode, OutErrorMessage))
+		{
+			return false;
+		}
+		const FString Expected = bExpectAfter ? Target.Value : Target.BeforeValue;
+		if (!Pin->DefaultValue.Equals(Expected, ESearchCase::CaseSensitive))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-pin-default-readback-failed"),
+				FString::Printf(
+					TEXT("Pin %s.%s read back as '%s'; expected '%s'."),
+					*Target.NodeGuid,
+					*Target.PinName,
+					*Pin->DefaultValue,
+					*Expected));
+		}
+	}
+	return true;
+}
+
+bool UEAgentKitBlueprintPinDefaultExperimental::TryRestoreAtomicOperations(
+	UEdGraph* Graph,
+	const TArray<FAtomicOperation>& Operations,
+	int32 AppliedCount,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	const int32 Count = FMath::Clamp(AppliedCount, 0, Operations.Num());
+	if (Graph == nullptr || Count == 0)
+	{
+		return true;
+	}
+	const UEdGraphSchema_K2* Schema = Cast<UEdGraphSchema_K2>(Graph->GetSchema());
+	if (Schema == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-pin-default-schema-not-supported"),
+			TEXT("Pin default edit supports only K2 Blueprint graphs."));
+	}
+	for (int32 Index = Count - 1; Index >= 0; --Index)
+	{
+		FPinDefaultTarget Target = ToPinDefaultTarget(Operations[Index]);
+		UEdGraphNode* Node = nullptr;
+		UEdGraphPin* Pin = nullptr;
+		if (!FindExactInputPin(Graph, Target, Node, Pin, OutErrorCode, OutErrorMessage))
+		{
+			return false;
+		}
+		Schema->TrySetDefaultValue(*Pin, Target.BeforeValue, true);
+		if (!Pin->DefaultValue.Equals(Target.BeforeValue, ESearchCase::CaseSensitive))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-pin-default-restore-failed"),
+				FString::Printf(
+					TEXT("Pin %s.%s did not restore to '%s'."),
+					*Target.NodeGuid,
+					*Target.PinName,
+					*Target.BeforeValue));
+		}
+	}
+	return true;
+}
+
+FString UEAgentKitBlueprintPinDefaultExperimental::ComputeAtomicStateFingerprint(UEdGraph* Graph)
+{
+	return ComputeDefaultsFingerprint(Graph);
 }
 
 bool UEAgentKitBlueprintPinDefaultExperimental::TryPreviewExperimental(
@@ -1077,66 +1313,35 @@ bool UEAgentKitBlueprintPinDefaultExperimental::TryApplyExperimental(
 			FText::FromString(TEXT("UEAgentKit Set Blueprint Pin Defaults")));
 		Blueprint->Modify();
 		Graph->Modify();
-		const UEdGraphSchema_K2* Schema = Cast<UEdGraphSchema_K2>(Graph->GetSchema());
-		TArray<TPair<UEdGraphPin*, FString>> AppliedDefaults;
-		// Cancelling the transaction discards the undo record but not the live pin
-		// values, so restore every previously written pin before cancelling.
-		auto Rollback = [Schema, &AppliedDefaults]()
-		{
-			for (int32 Index = AppliedDefaults.Num() - 1; Index >= 0; --Index)
-			{
-				UEdGraphPin* AppliedPin = AppliedDefaults[Index].Key;
-				if (AppliedPin != nullptr && Schema != nullptr)
-				{
-					Schema->TrySetDefaultValue(*AppliedPin, AppliedDefaults[Index].Value, true);
-				}
-			}
-			AppliedDefaults.Reset();
-		};
-		auto Abort = [&OutErrorCode, &OutErrorMessage, &Transaction, &Rollback](
-			const TCHAR* Code,
-			const FString& Message) -> bool
-		{
-			Rollback();
-			Transaction.Cancel();
-			return Fail(OutErrorCode, OutErrorMessage, Code, Message);
-		};
-
+		// 0-3.4: the write loop lives in TryApplyAtomicOperations so the atomic
+		// patch applies pin defaults through exactly this code.  That helper
+		// restores every pin it already wrote before reporting a failure, which is
+		// what the local Rollback lambda used to do.
+		TArray<FAtomicOperation> Operations;
+		Operations.Reserve(Plan.Targets.Num());
 		for (const FPinDefaultTarget& Target : Plan.Targets)
 		{
-			UEdGraphNode* Node = nullptr;
-			UEdGraphPin* Pin = nullptr;
-			if (!FindExactInputPin(
-				Graph,
-				Target,
-				Node,
-				Pin,
-				OutErrorCode,
-				OutErrorMessage))
-			{
-				Rollback();
-				Transaction.Cancel();
-				return false;
-			}
-			// Nodes created or recreated outside the Editor's node factory do not
-			// necessarily carry RF_Transactional.  Without it UObject::Modify() is a
-			// no-op, the transaction serializes no changed node, and the whole pin
-			// default edit is discarded as empty.  Mark the exact target node so its
-			// pin default change is a real undoable transaction.
-			Node->SetFlags(RF_Transactional);
-			Node->Modify();
-			Pin->Modify();
-			Schema->TrySetDefaultValue(*Pin, Target.Value, true);
-			if (!Pin->DefaultValue.Equals(Target.Value, ESearchCase::CaseSensitive))
-			{
-				return Abort(
-					TEXT("graph-pin-default-apply-rejected"),
-					FString::Printf(
-						TEXT("K2 did not store the requested default for %s.%s."),
-						*Target.NodeGuid,
-						*Target.PinName));
-			}
-			AppliedDefaults.Emplace(Pin, Target.BeforeValue);
+			FAtomicOperation Operation;
+			Operation.NodeGuid = Target.NodeGuid;
+			Operation.PinName = Target.PinName;
+			Operation.PinGuid = Target.PinGuid;
+			Operation.Type = Target.Type;
+			Operation.Value = Target.Value;
+			Operation.BeforeValue = Target.BeforeValue;
+			Operations.Add(MoveTemp(Operation));
+		}
+		int32 AppliedCount = 0;
+		if (!UEAgentKitBlueprintPinDefaultExperimental::TryApplyAtomicOperations(
+			Graph,
+			Operations,
+			AppliedCount,
+			OutErrorCode,
+			OutErrorMessage))
+		{
+			// Cancelling the transaction discards the undo record but not the live
+			// pin values, so every pin was already restored before this point.
+			Transaction.Cancel();
+			return false;
 		}
 		Blueprint->GetOutermost()->MarkPackageDirty();
 	}
