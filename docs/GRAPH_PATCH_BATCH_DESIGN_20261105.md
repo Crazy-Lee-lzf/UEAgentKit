@@ -890,7 +890,7 @@ UE 5.6.1；隔离 `UnrealEditor-Cmd -unattended -NullRHI`。自动化测试用
    `removeNode`；`disconnect` 不再出现在“未迁移”断言里。
 7. 本片自动化测试 5 条（新增 `AtomicPatch.EdgeOps`，加进既有的边操作测试文件，**没有新建测试文件**）。
 8. 证据分界：真实证据是隔离 Host 上的 `UnrealEditor-Cmd` 自动化（5/5）；只有单测的是 Python 契约层
-   与 MCP 信封；**本片没有重跑 MCP socket 级真实调用**，端到端 socket 记录仍缺。
+   与 MCP 信封；**本片没有重跑 MCP socket 级真实调用**（该缺口后来在文末“真实端到端 socket 证据”一节补上）。
 9. 一处刻意的差异：`rewirePin` 不重复单 writer 的“仅顶层事件图”限制——patch 本身已经绑定
    assetPath+graphGuid+焦点编辑器，那条限制在单 writer（请求自己没有绑定图）里才必要。
 
@@ -913,7 +913,7 @@ UE 5.6.1；隔离 `UnrealEditor-Cmd -unattended -NullRHI`。自动化测试用
 6. 顺序语义：按请求顺序执行，先删后连会在 Apply 时报 `graph-remove-node-not-found` 并整体回滚。
 7. 既有测试的契约更新：`migratedKinds` 6→7（三处），"未迁移 kind" 断言全部换成未知 kind。
 8. 证据分界：真实证据是隔离 Host 上的 `UnrealEditor-Cmd` 自动化 6/6；只有单测的是 Python 契约层与
-   MCP 信封；本片没有重跑 MCP socket 级调用。
+   MCP 信封；本片没有重跑 MCP socket 级调用（已于文末“真实端到端 socket 证据”一节补做）。
 
 **复核补丁（2026-11-14，切片 13 之后）**
 
@@ -931,3 +931,64 @@ UE 5.6.1；隔离 `UnrealEditor-Cmd -unattended -NullRHI`。自动化测试用
    UEAgentKit.AtomicPatch+UEAgentKit.NodeRemove+UEAgentKit.Rewire` → succeeded=8 /
    succeededWithWarnings=2（两条均为既有的 “plan stale” warning）/ failed=0 / notRun=0；
    测试新建的 8 个资产包已从 Host `Content/` 删除，5 个基线资产 SHA 未变。
+
+## 真实端到端 socket 证据（2026-11-14 19:50–20:15，切片 13 之后补做）
+
+环境：隔离 Host `N1_BlueprintNative_20261031`，**真实 GUI Editor**（`UnrealEditor.exe`，不是 `-Cmd`），
+插件 DLL `E18A201D`（回读 `pluginBuildHash` 一致），双门禁同时打开（ini `[UEAgentKit]
+ExperimentalGraphPatchEdit=True` + MCP `--enable-experimental-graphpatch-edit`），MCP 走真实 stdio
+（`scripts/ue-agent-mcp.py`，`--policy` 指向只允许 `/Game/N1Acceptance` 的临时策略）。
+图：`EventGraph`，`graphGuid=3a5d0f7c-…`（文件里还有第二个 1 节点图，所以 `totalNodeCount = EventGraph + 1`）。
+
+**A. 五个 patch，每个都走完 `preview → apply → save`**
+
+| patch | kinds | tx | undo/redo | 节点 | 边 | `removedNodeEdgeCount` | `edgesFingerprint` after | save SHA |
+|---|---|---|---|---|---|---|---|---|
+| A | createNode×2 + connect | 1 | ✓ | 259→261 | 0→1 | 0 | fac8d799 | 572ae13e |
+| B | **rewirePin**（同节点 `then_0`→`then_1`） | 1 | ✓ | 261→261 | 1→1 | 0 | 38ea9468 | 137b4450 |
+| C | **removeNode**（连带 1 条边） | 1 | ✓ | 261→260 | 1→0 | **1** | **c36314fe（基线）** | 584c8a2e |
+| D | createNode（`int_add`） | 1 | ✓ | 260→261 | 0→0 | 0 | c36314fe | 99cdd0a6 |
+| E | **removeNode**（孤立节点，`removedEdges=[]`） | 1 | ✓ | 261→260 | 0→0 | **0** | c36314fe | 584c8a2e |
+
+要点：
+
+- 五条都是 `singleTransaction=true`、`transactionCount=1`、`undoVerified=true`、`redoVerified=true`。
+- C 的结果回读了 `removedEdges` 的 8 个字段（六个身份 + `fromKind`/`toKind`），删完 `edgesFingerprint`
+  回到**基线值**——被带走的是**精确**那一条边，不是"随便一条"。
+- B 的 `edgesFingerprint` 变了而 `linkCount` 没变（1→1），这才是"边换了端点、数量不变"的证据。
+- D+E 的 save SHA 与 C 的 save SHA **完全相同**（`584c8a2e`）：建一个节点再删掉，落盘字节与删之前一致。
+
+**B. 独立重载验证**
+
+杀进程 → 重启 `UnrealEditor.exe` → **新进程**读回 `nodeCount=260`、`linkCount=0`、
+`packageRevision=sha256:584c8a2e…`、`graphFingerprint=sha1:2471a421…`、`rewireEdgeSetHash=sha256:c36314fe…`、
+`nodeRemoveEdgeSetHash=sha256:afdeb6cd…`，与 save 时报告的每一项逐位相同（9/9 检查通过）。
+
+**C. 资产基线再变（必须记住）**
+
+| 项 | 旧 | 新 |
+|---|---|---|
+| `BP_N1EditSession.uasset` SHA | `73A67086CBEE94F5` | **`584C8A2E0A8C5980`**（527,777 字节） |
+| EventGraph 节点 | 259 | **260** |
+| 边 | 0 | **0** |
+
+多出的 1 个节点是 `K2Node_ExecutionSequence`（`c065515e-48c2-62a9-08af-2c9e8617be37`，位于 (8000,8000)，**孤立**）：
+`removeNode` 的可删类白名单只有 branch + 6 个纯 Kismet 函数，**不含 sequence**，所以它删不掉，也不该为了删它放宽白名单。
+这是本次唯一残留；其它 4 个资产 SHA 未变。
+注意 `edgesFingerprint` / `nodeRemoveEdgeSetHash` **只覆盖边集**，这个残留节点不会影响它们——
+下一个跑验收的人必须按 **260** 节点算，不要按 259。
+
+**D. 这次补上的两个缺口**
+
+- `rewirePin`：此前只有 C++ 自动化（`AtomicPatch.EdgeOps`），现在有 socket 级 apply + save + 独立重载。
+- `removeNode`：切片 13 交付时**没有** socket 证据，现在有（带 1 条边 + 孤立两种，都 save 过）。
+
+加上 2026-11-14 早些时候的 P1/P2（`setPinDefault` / `createVariable` / `createNode` / `connect` / `disconnect`
+各一次，含 save），**7 个 kind 现在都有 socket 级真实调用记录**；切片 8–12 各节末尾那句"没有 socket 记录"
+至此全部消解。
+
+**E. 复现方式**
+
+`Output/e2e_patch_s13.py`（不提交，`Output/` 被 ignore）按 `probe → a → b → c → d → e → verify`
+分阶段驱动，每阶段的请求/响应原文落在 `Output/e2e_s13/*.json`。要复现必须先备一份资产文件，
+并把 `[UEAgentKit] ExperimentalGraphPatchEdit=True` 写进 Host ini、结束后还原。
