@@ -1485,8 +1485,11 @@ namespace
 		{
 			return false;
 		}
-		return OutFromPin->PinName.ToString().Equals(Edge.FromPinName, ESearchCase::CaseSensitive)
-			&& OutToPin->PinName.ToString().Equals(Edge.ToPinName, ESearchCase::CaseSensitive);
+		// Both pins were resolved by GUID above; the names are only cross-checked.
+		// FName equality ignores case, and a wildcard node that rebuilt its pins
+		// can print "Option 0" where the plan recorded "option 0".
+		return OutFromPin->PinName.ToString().Equals(Edge.FromPinName, ESearchCase::IgnoreCase)
+			&& OutToPin->PinName.ToString().Equals(Edge.ToPinName, ESearchCase::IgnoreCase);
 	}
 }
 

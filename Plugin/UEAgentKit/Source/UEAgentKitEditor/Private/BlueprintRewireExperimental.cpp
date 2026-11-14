@@ -546,7 +546,11 @@ namespace
 					*PinGuidText,
 					Direction == EGPD_Input ? DirectionInput : DirectionOutput));
 		}
-		if (!Pin->PinName.ToString().Equals(PinNameText, ESearchCase::CaseSensitive))
+		// The pin was already found by GUID; its NAME is only cross-checked.  FName
+		// equality ignores case, and a wildcard node that rebuilt its pins can
+		// print "Option 0" where the plan recorded "option 0", so compare the way
+		// FName does instead of demanding the interned spelling.
+		if (!Pin->PinName.ToString().Equals(PinNameText, ESearchCase::IgnoreCase))
 		{
 			return Fail(
 				OutErrorCode,
