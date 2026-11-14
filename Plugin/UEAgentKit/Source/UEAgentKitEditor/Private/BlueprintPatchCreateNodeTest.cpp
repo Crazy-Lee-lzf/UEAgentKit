@@ -1915,6 +1915,35 @@ bool FUEAgentKitPatchRemoveNodeTest::RunTest(const FString& Parameters)
 				return Fail();
 			}
 		}
+		// Two removals in one patch would widen the single writer's one-node bound.
+		{
+			const TArray<TSharedPtr<FJsonObject>> Operations = {
+				MakeRemoveOperation(
+					TEXT("r1"),
+					A,
+					NotBoolClassPath,
+					{ MakeRemovedEdge(AOut, BranchCondition) }),
+				MakeRemoveOperation(TEXT("r2"), D, NodeClassPath(D), {}),
+			};
+			TSharedPtr<FJsonObject> RefusedResult;
+			FString RefusedCode;
+			FString RefusedMessage;
+			if (!TestFalse(
+					TEXT("two removals in one patch are refused"),
+					UEAgentKitBlueprintPatchExperimental::TryPreviewExperimental(
+						BuildPatchParams(Blueprint, Graph, Operations),
+						RefusedResult,
+						RefusedCode,
+						RefusedMessage))
+				|| !TestEqual(
+					TEXT("removal bound code"),
+					RefusedCode,
+					FString(TEXT("graph-patch-remove-node-limit"))))
+			{
+				AddError(RefusedMessage);
+				return Fail();
+			}
+		}
 		if (!TestEqual(TEXT("refusals left the node count"), Graph->Nodes.Num(), NodeCountBefore)
 			|| !TestFalse(TEXT("refusals left the package clean"), Package->IsDirty())
 			|| !TestEqual(TEXT("refusals left the disk asset"), ComputeAssetSha(Blueprint), AssetShaBefore)

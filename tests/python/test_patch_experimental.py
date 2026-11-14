@@ -1197,6 +1197,25 @@ class PatchContractTests(unittest.TestCase):
                     )
                 self.assertEqual(raised.exception.code, code)
 
+    def test_remove_node_is_limited_to_one_per_patch(self) -> None:
+        # The node-removal writer deletes one node per call, so one patch may not
+        # delete two: the seam must not widen the writer's own bound.
+        with self.assertRaises(PatchError) as raised:
+            validate_preview_parameters(
+                asset_path=ASSET,
+                graph_guid=GRAPH,
+                operations=[_remove(), _remove(opId="x2", nodeGuid=NODE_C)],
+            )
+        self.assertEqual(raised.exception.code, "graph-patch-remove-node-limit")
+
+        # One removal is still legal.
+        request = validate_preview_parameters(
+            asset_path=ASSET,
+            graph_guid=GRAPH,
+            operations=[_remove()],
+        )
+        self.assertEqual(len(request["operations"]), 1)
+
     def test_remove_node_result_entries_are_validated(self) -> None:
         preview = _preview(operations=[_remove_entry()])
         normalized = validate_preview_result(preview)

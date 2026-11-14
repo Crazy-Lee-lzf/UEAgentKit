@@ -55,6 +55,8 @@ namespace
 		UEAgentKitBlueprintGraphEditExperimental::MaxNodesPerApply;
 	constexpr int32 MaxConnectOperations =
 		UEAgentKitBlueprintGraphEditExperimental::MaxConnectionsPerApply;
+	constexpr int32 MaxRemoveNodeOperations =
+		UEAgentKitBlueprintNodeRemoveExperimental::MaxNodesPerPlan;
 	constexpr int32 MaxConnectionsPerNode =
 		UEAgentKitBlueprintGraphEditExperimental::MaxConnectionsPerNodePerApply;
 	/** `tmp:` plus at most this many printable ASCII characters (patch-local). */
@@ -540,6 +542,7 @@ namespace
 		int32 VariableOperationCount = 0;
 		int32 NodeOperationCount = 0;
 		int32 ConnectOperationCount = 0;
+		int32 RemoveNodeOperationCount = 0;
 		for (int32 Index = 0; Index < Values->Num(); ++Index)
 		{
 			OutOperations.Add(FPatchOperation());
@@ -1063,6 +1066,18 @@ namespace
 						return false;
 					}
 					Remove.RemovedEdges.Add(Edge);
+				}
+				// A patch may not remove more nodes than the single writer may.
+				++RemoveNodeOperationCount;
+				if (RemoveNodeOperationCount > MaxRemoveNodeOperations)
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-patch-remove-node-limit"),
+						FString::Printf(
+							TEXT("A patch may remove at most %d node, the same bound as the single-writer node-removal tool."),
+							MaxRemoveNodeOperations));
 				}
 			}
 			else

@@ -745,7 +745,7 @@ plan 就可以被拿去连一条方向相反的边。用下标既保留了“两
 |---|---|
 | 已迁移 kind | `setPinDefault` + `createVariable` + `createNode` + `connect`（切片 11）+ `disconnect` + `rewirePin`（切片 12）+ `removeNode`（切片 13，**全部 7 个**） |
 | removeNode 字段（切片 13） | 节点删除 writer 自己的三个字段：`nodeGuid` / `expectedNodeClass` / `removedEdges[]`（每个条目六个身份字段）；**不含** `expectedEdgeSetHash`，见决策日志 |
-| removeNode 解析（切片 13） | 事务外沿用它自己的判定：可删类白名单（branch + 6 个纯 Kismet 数学函数）、隐藏/不可连 pin 不得有连接、不在白名单的 pin 类型、至多 1 条连带边、`removedEdges` 必须与活图**逐条相等**（不是照单全收） |
+| removeNode 解析（切片 13） | 事务外沿用它自己的判定：可删类白名单（branch + 6 个纯 Kismet 数学函数）、隐藏/不可连 pin 不得有连接、不在白名单的 pin 类型、至多 1 条连带边、一次 patch 至多删 **1** 个节点（与单 writer 同一个界，`graph-patch-remove-node-limit`，2026-11-14 复核补上）、`removedEdges` 必须与活图**逐条相等**（不是照单全收） |
 | removeNode 回滚（切片 13） | 删节点会带走边，所以回滚**先放回同一个节点对象**（`Graph->AddNode`，保留 NodeGuid 与全部 PinId），再逐条重建 `removedEdges`；两者都断言，缺一即失败 |
 | removeNode 计数（切片 13） | 结果新增 `removedNodeCount` / `removedNodeEdgeCount`；`nodeCountAfter == before + created - removed`、`linkCountAfter == before + createdEdge - removedEdge - removedNodeEdge` |
 | disconnect 字段（切片 12） | 与 `connect` **完全相同**（`from`/`fromPin`/`to`/`toPin`）；端点必须是已存在节点，tempId → `graph-edit-disconnect-edge-not-found` |
@@ -914,3 +914,20 @@ UE 5.6.1；隔离 `UnrealEditor-Cmd -unattended -NullRHI`。自动化测试用
 7. 既有测试的契约更新：`migratedKinds` 6→7（三处），"未迁移 kind" 断言全部换成未知 kind。
 8. 证据分界：真实证据是隔离 Host 上的 `UnrealEditor-Cmd` 自动化 6/6；只有单测的是 Python 契约层与
    MCP 信封；本片没有重跑 MCP socket 级调用。
+
+**复核补丁（2026-11-14，切片 13 之后）**
+
+9. 补一个**漏掉的界**：切片 13 只把 `MaxIncidentEdgesPerNode`（≤1 条连带边）搬进 patch，漏了单 writer 的
+   `MaxNodesPerPlan = 1`，于是代码允许一个 patch 连删多个节点——这与 header 的
+   “Explicit limits (never widened by this seam)” 和同一张表里的“沿用 writer 的一节点界”自相矛盾。
+   现在 C++（`MaxRemoveNodeOperations`，读取 writer 的 `MaxNodesPerPlan`）与 Python
+   （`MAX_REMOVE_NODE_OPERATIONS`）都按 1 收紧，错误码 `graph-patch-remove-node-limit`；
+   两侧各加一条断言：`AtomicPatch.RemoveNode` 的 “two removals in one patch are refused”
+   与 `test_remove_node_is_limited_to_one_per_patch`。
+10. 同一次复核修掉两处**文档失真**：`experimental_patch.py` 的模块 docstring 还写着 “`removeNode` 未迁移”，
+    `ue_preview_blueprint_patch_experimental` 的 docstring 只列了六个 kind。两者都会让下一个 agent
+   以为删节点没有入口。
+11. 复核后的证据（同一隔离 Host，新 DLL `E18A201D`）：`Automation RunTests
+   UEAgentKit.AtomicPatch+UEAgentKit.NodeRemove+UEAgentKit.Rewire` → succeeded=8 /
+   succeededWithWarnings=2（两条均为既有的 “plan stale” warning）/ failed=0 / notRun=0；
+   测试新建的 8 个资产包已从 Host `Content/` 删除，5 个基线资产 SHA 未变。

@@ -126,6 +126,9 @@ REMOVED_EDGE_FIELDS = (
     "toPinName",
     "toPinGuid",
 )
+# The node-removal writer removes one node per call; a patch keeps that bound
+# instead of letting one transaction delete a whole neighbourhood.
+MAX_REMOVE_NODE_OPERATIONS = 1
 # The writer breaks at most one incident edge per node removal.
 MAX_REMOVED_EDGES_PER_NODE = 1
 # The rewire writer's own nine field names, so one request object can move
@@ -392,6 +395,7 @@ def validate_preview_parameters(
     connection_counts: dict[str, int] = {}
     create_variable_count = 0
     create_node_count = 0
+    remove_node_count = 0
     # connect, disconnect and rewirePin all move one edge, so they share the
     # single-writer edge bounds instead of each claiming its own.
     edge_operation_count = 0
@@ -686,6 +690,14 @@ def validate_preview_parameters(
                     )
                 seen_edge_keys.add(edge_key)
                 normalized_edges.append(normalized_edge)
+            # A patch may not remove more nodes than the single writer may.
+            remove_node_count += 1
+            if remove_node_count > MAX_REMOVE_NODE_OPERATIONS:
+                raise PatchError(
+                    "graph-patch-remove-node-limit",
+                    f"A patch may remove at most {MAX_REMOVE_NODE_OPERATIONS} node, the "
+                    "same bound as the single-writer node-removal tool.",
+                )
             normalized_operations.append(
                 {
                     "opId": op_id,
