@@ -123,6 +123,53 @@ def _variable_apply_entry(**overrides: Any) -> dict[str, Any]:
     return item
 
 
+def _node(**overrides: Any) -> dict[str, Any]:
+    item = {
+        "opId": "n1",
+        "kind": "createNode",
+        "nodeType": "branch",
+        "x": 120,
+        "y": -40,
+    }
+    item.update(overrides)
+    return item
+
+
+def _node_contract_fields(**overrides: Any) -> dict[str, Any]:
+    item = {
+        "nodeType": "branch",
+        "nodeClass": "/Script/BlueprintGraph.K2Node_IfThenElse",
+        "x": 120,
+        "y": -40,
+        "inputPins": ["execute", "Condition"],
+        "outputPins": ["then", "else"],
+        "inputPinTypes": {"execute": "exec", "Condition": "bool"},
+        "outputPinTypes": {"then": "exec", "else": "exec"},
+    }
+    item.update(overrides)
+    return item
+
+
+def _node_preview_entry(**overrides: Any) -> dict[str, Any]:
+    item = {"opId": "n1", "kind": "createNode", "status": "validated"}
+    item.update(_node_contract_fields())
+    item.update(overrides)
+    return item
+
+
+def _node_apply_entry(**overrides: Any) -> dict[str, Any]:
+    item = {
+        "opId": "n1",
+        "kind": "createNode",
+        "nodeGuid": "ffffffff-0000-4111-8222-333333333333",
+        "status": "applied",
+        "rolledBack": False,
+    }
+    item.update(_node_contract_fields())
+    item.update(overrides)
+    return item
+
+
 def _preview(**overrides: Any) -> dict[str, Any]:
     result: dict[str, Any] = {
         "schemaVersion": PREVIEW_SCHEMA_VERSION,
@@ -138,12 +185,13 @@ def _preview(**overrides: Any) -> dict[str, Any]:
         "graphFingerprint": GRAPH_FINGERPRINT,
         "stateFingerprint": STATE_FINGERPRINT,
         "variablesFingerprint": STATE_FINGERPRINT,
+        "nodesFingerprint": STATE_FINGERPRINT,
         "variableCount": 2,
         "operationCount": 1,
         "nodeCount": 4,
         "linkCount": 3,
         "requiredConfirmation": APPLY_CONFIRMATION_PREFIX + PLAN_ID,
-        "migratedKinds": ["setPinDefault", "createVariable"],
+        "migratedKinds": ["setPinDefault", "createVariable", "createNode"],
         "operations": [
             {
                 "opId": "p1",
@@ -184,10 +232,13 @@ def _apply(**overrides: Any) -> dict[str, Any]:
         "stateFingerprintAfter": AFTER_STATE_FINGERPRINT,
         "variablesFingerprintBefore": STATE_FINGERPRINT,
         "variablesFingerprintAfter": AFTER_STATE_FINGERPRINT,
+        "nodesFingerprintBefore": STATE_FINGERPRINT,
+        "nodesFingerprintAfter": AFTER_STATE_FINGERPRINT,
         "variableCountBefore": 2,
         "variableCountAfter": 2,
         "nodeCountBefore": 4,
         "nodeCountAfter": 4,
+        "createdNodeCount": 0,
         "linkCountBefore": 3,
         "linkCountAfter": 3,
         "operationCount": 1,
@@ -325,7 +376,6 @@ class PatchContractTests(unittest.TestCase):
 
     def test_unmigrated_and_unknown_kinds_are_refused(self) -> None:
         for kind, code in (
-            ("createNode", "graph-patch-kind-not-migrated"),
             ("connect", "graph-patch-kind-not-migrated"),
             ("rewirePin", "graph-patch-kind-not-migrated"),
             ("removeNode", "graph-patch-kind-not-migrated"),
@@ -346,7 +396,7 @@ class PatchContractTests(unittest.TestCase):
             validate_preview_parameters(
                 asset_path=ASSET,
                 graph_guid=GRAPH,
-                operations=[_operation(), _operation(opId="p2", kind="createNode")],
+                operations=[_operation(), _operation(opId="p2", kind="connect")],
             )
         self.assertEqual(raised.exception.code, "graph-patch-kind-not-migrated")
 
@@ -531,6 +581,177 @@ class PatchContractTests(unittest.TestCase):
             ["setPinDefault", "createVariable"],
         )
         self.assertEqual(request["operations"][1]["defaultValue"], "7")
+
+    def test_create_node_operation_is_normalized_like_the_graph_edit_writer(self) -> None:
+        request = validate_preview_parameters(
+            asset_path=ASSET,
+            graph_guid=GRAPH,
+            operations=[_node()],
+        )
+        # Only nodeType/x/y travel: no tempId and no literal, because this kind
+        # creates a node and touches no edge.
+        self.assertEqual(
+            request["operations"],
+            [{"opId": "n1", "kind": "createNode", "nodeType": "branch", "x": 120, "y": -40}],
+        )
+
+        for node_type in sorted(
+            (
+                "branch",
+                "sequence",
+                "not_bool",
+                "bool_or",
+                "int_add",
+                "int_equal",
+                "double_add",
+                "string_concat",
+            )
+        ):
+            with self.subTest(node_type=node_type):
+                accepted = validate_preview_parameters(
+                    asset_path=ASSET,
+                    graph_guid=GRAPH,
+                    operations=[_node(nodeType=node_type)],
+                )
+                self.assertEqual(accepted["operations"][0]["nodeType"], node_type)
+
+        # The graph-edit whitelist is the single source of truth: a nodeType only
+        # the single writer knows (an allowlisted call_function) is not migrated.
+        for node_type in ("call_function", "call_owned_pure_function", "variable_get"):
+            with self.subTest(node_type=node_type):
+                with self.assertRaises(PatchError) as raised:
+                    validate_preview_parameters(
+                        asset_path=ASSET,
+                        graph_guid=GRAPH,
+                        operations=[_node(nodeType=node_type)],
+                    )
+                self.assertEqual(raised.exception.code, "graph-edit-node-type-not-allowed")
+
+    def test_create_node_coordinates_and_limits_are_enforced(self) -> None:
+        for coordinate in (-100_001, 100_001, 1.5, "10", True):
+            with self.subTest(coordinate=coordinate):
+                with self.assertRaises(PatchError) as raised:
+                    validate_preview_parameters(
+                        asset_path=ASSET,
+                        graph_guid=GRAPH,
+                        operations=[_node(x=coordinate)],
+                    )
+                self.assertEqual(
+                    raised.exception.code, "graph-edit-invalid-parameters"
+                )
+
+        request = validate_preview_parameters(
+            asset_path=ASSET,
+            graph_guid=GRAPH,
+            operations=[_node(x=-100_000, y=100_000)],
+        )
+        self.assertEqual(request["operations"][0]["x"], -100_000)
+
+        # The single writer's 16-node bound is inherited, not widened.
+        request = validate_preview_parameters(
+            asset_path=ASSET,
+            graph_guid=GRAPH,
+            operations=[_node(opId=f"n{index}") for index in range(16)],
+        )
+        self.assertEqual(len(request["operations"]), 16)
+        with self.assertRaises(PatchError) as raised:
+            validate_preview_parameters(
+                asset_path=ASSET,
+                graph_guid=GRAPH,
+                operations=[_node(opId=f"n{index}") for index in range(17)],
+            )
+        self.assertEqual(raised.exception.code, "graph-patch-invalid-operations")
+
+    def test_create_node_rejects_foreign_fields(self) -> None:
+        for extra in (
+            {"tempId": "tmp:a"},
+            {"nodeGuid": NODE_A},
+            {"inputLiterals": []},
+            {"defaultValue": "1"},
+            {"variableName": "Counter"},
+        ):
+            with self.subTest(extra=extra):
+                with self.assertRaises(PatchError) as raised:
+                    validate_preview_parameters(
+                        asset_path=ASSET,
+                        graph_guid=GRAPH,
+                        operations=[_node(**extra)],
+                    )
+                self.assertEqual(raised.exception.code, "graph-patch-unknown-parameter")
+
+    def test_three_kind_patch_is_accepted_together(self) -> None:
+        request = validate_preview_parameters(
+            asset_path=ASSET,
+            graph_guid=GRAPH,
+            operations=[_operation(), _variable(opId="v1"), _node(opId="n1")],
+        )
+        self.assertEqual(
+            [item["kind"] for item in request["operations"]],
+            ["setPinDefault", "createVariable", "createNode"],
+        )
+
+    def test_node_result_entries_are_validated(self) -> None:
+        preview = _preview(
+            operations=[_node_preview_entry()],
+            operationCount=1,
+        )
+        normalized = validate_preview_result(preview)
+        self.assertEqual(normalized["operations"][0]["nodeType"], "branch")
+        self.assertEqual(normalized["operations"][0]["x"], 120)
+        self.assertNotIn("nodeGuid", normalized["operations"][0])
+
+        # A preview cannot know the created node GUID yet.
+        with self.assertRaises(PatchError) as raised:
+            validate_preview_result(
+                _preview(
+                    operations=[
+                        _node_preview_entry(
+                            nodeGuid="ffffffff-0000-4111-8222-333333333333"
+                        )
+                    ]
+                )
+            )
+        self.assertEqual(raised.exception.code, "graph-patch-preview-invalid")
+
+        # The declared contract must equal the writer's table, not a caller's idea.
+        for mutation in (
+            {"nodeClass": "/Script/BlueprintGraph.K2Node_ExecutionSequence"},
+            {"inputPins": ["execute"]},
+            {"inputPinTypes": {"execute": "exec", "Condition": "int"}},
+            {"x": 100_001},
+            {"nodeType": "call_function"},
+        ):
+            with self.subTest(mutation=mutation):
+                with self.assertRaises(PatchError) as raised:
+                    validate_preview_result(
+                        _preview(operations=[_node_preview_entry(**mutation)])
+                    )
+                self.assertEqual(raised.exception.code, "graph-patch-preview-invalid")
+
+        apply = _apply(
+            nodeCountBefore=4,
+            nodeCountAfter=5,
+            createdNodeCount=1,
+            results=[_node_apply_entry()],
+        )
+        normalized_apply = validate_apply_result(apply)
+        self.assertEqual(
+            normalized_apply["results"][0]["nodeGuid"],
+            "ffffffff-0000-4111-8222-333333333333",
+        )
+        self.assertEqual(normalized_apply["results"][0]["nodeType"], "branch")
+
+        for mutation in (
+            {"createdNodeCount": 2},
+            {"nodeCountAfter": 4},
+            {"results": [_node_apply_entry(nodeGuid="not-a-guid")]},
+            {"nodesFingerprintBefore": "not-a-sha256"},
+            {"nodesFingerprintAfter": "sha256:short"},
+        ):
+            with self.subTest(mutation=mutation):
+                with self.assertRaises(PatchError) as raised:
+                    validate_apply_result(apply | mutation)
+                self.assertEqual(raised.exception.code, "graph-patch-apply-invalid")
 
     def test_variable_result_entries_are_validated(self) -> None:
         preview = _preview(

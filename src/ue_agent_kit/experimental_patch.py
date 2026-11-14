@@ -11,13 +11,19 @@ live module (``BlueprintPatchExperimental.cpp``) consumes, so a caller cannot
 build a bridge request of its own.
 
 Writer migration is incremental, one writer per commit.  A patch may contain only
-migrated kinds; ``setPinDefault`` and ``createVariable`` are migrated.
+migrated kinds; ``setPinDefault``, ``createVariable`` and ``createNode`` are
+migrated (``createNode`` does not include ``connect``).
 
 A Blueprint variable is asset-level, not graph-level.  The request still carries a
 ``graphGuid`` and it still has to name a graph that belongs to that Blueprint and
 is the one the focused editor shows -- that GUID is the authorization and
 provenance anchor, not a constraint on where the variable lands.  Variable
 operations are validated against the Blueprint only.
+
+A ``createNode`` operation creates one node and touches no edge.  It accepts only
+``nodeType``/``x``/``y`` and only the eight primitive nodeTypes of the graph-edit
+writer; there is deliberately no ``tempId``, so connecting a new node takes a
+second patch that uses the returned ``nodeGuid``.
 """
 
 from __future__ import annotations
@@ -26,6 +32,11 @@ import re
 from typing import Any
 
 from .experimental_envelope import unwrap_tool_result as _unwrap_tool_result
+from .experimental_graph_edit import (
+    MAX_COORDINATE as MAX_NODE_COORDINATE,
+    MAX_NODES as MAX_CREATE_NODES,
+    NODE_TYPES,
+)
 from .experimental_pin_default_edit import (
     PinDefaultError,
     canonical_value,
@@ -60,11 +71,12 @@ MAX_ASSET_PATH = 512
 # Only these kinds are implemented by the live atomic patch.  A patch that mixes
 # a migrated and an unmigrated kind is refused before any write, so one patch
 # never carries two authorization contracts.
-MIGRATED_KINDS = ("setPinDefault", "createVariable")
-RESERVED_KINDS = ("createNode", "connect", "rewirePin", "removeNode")
+MIGRATED_KINDS = ("setPinDefault", "createVariable", "createNode")
+RESERVED_KINDS = ("connect", "rewirePin", "removeNode")
 
 PIN_DEFAULT_FIELDS = ("nodeGuid", "pinName", "pinGuid", "type", "value")
 CREATE_VARIABLE_FIELDS = ("name", "type", "defaultValue")
+CREATE_NODE_FIELDS = ("nodeType", "x", "y")
 
 _GUID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
@@ -136,6 +148,103 @@ def _guid_with_code(value: Any, label: str, *, error_code: str) -> str:
         raise PatchError(error_code, exc.message) from exc
 
 
+def _coordinate(value: Any, label: str, *, error_code: str) -> int:
+    """One node coordinate, with the graph-edit writer's own bound and code."""
+
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise PatchError(error_code, f"{label} must be an integer.")
+    if isinstance(value, float) and not value.is_integer():
+        raise PatchError(error_code, f"{label} must be an integer.")
+    normalized = int(value)
+    if normalized < -MAX_NODE_COORDINATE or normalized > MAX_NODE_COORDINATE:
+        raise PatchError(
+            error_code,
+            f"{label} must be between -{MAX_NODE_COORDINATE} and {MAX_NODE_COORDINATE}.",
+        )
+    return normalized
+
+
+def _node_contract(node_type: Any, label: str, *, error_code: str) -> dict[str, Any]:
+    """Resolve one primitive nodeType against the graph-edit writer's table."""
+
+    if not isinstance(node_type, str) or node_type not in NODE_TYPES:
+        raise PatchError(
+            error_code,
+            f"{label}.nodeType must be one of: {', '.join(sorted(NODE_TYPES))}.",
+        )
+    return NODE_TYPES[node_type]
+
+
+def _canonical_node_fields(
+    entry: dict[str, Any],
+    label: str,
+    *,
+    error_code: str,
+    expect_node_guid: bool,
+) -> dict[str, Any]:
+    """Validate one createNode request/result entry against the same table.
+
+    The class, function, pin inventory and pin types are not taken on trust: they
+    must equal the exact contract the single-writer graph edit tool declares for
+    that nodeType, which is how a patch result cannot describe a node the writer
+    would not have created.
+    """
+
+    contract = _node_contract(entry.get("nodeType"), label, error_code=error_code)
+    if entry.get("nodeClass") != contract["nodeClass"]:
+        raise PatchError(
+            error_code,
+            f"{label}.nodeClass must be {contract['nodeClass']} for {entry.get('nodeType')}.",
+        )
+    expected_function = contract.get("function")
+    if expected_function is None:
+        if entry.get("function") not in (None, ""):
+            raise PatchError(error_code, f"{label}.function is not part of this nodeType.")
+    elif entry.get("function") != expected_function:
+        raise PatchError(
+            error_code,
+            f"{label}.function must be {expected_function} for {entry.get('nodeType')}.",
+        )
+    x = _coordinate(entry.get("x"), f"{label}.x", error_code=error_code)
+    y = _coordinate(entry.get("y"), f"{label}.y", error_code=error_code)
+    for pins_key, types_key in (
+        ("inputPins", "inputPinTypes"),
+        ("outputPins", "outputPinTypes"),
+    ):
+        expected_pins = list(contract[pins_key])
+        if entry.get(pins_key) != expected_pins:
+            raise PatchError(
+                error_code,
+                f"{label}.{pins_key} must be {expected_pins} for {entry.get('nodeType')}.",
+            )
+        expected_types = dict(contract[types_key])
+        if entry.get(types_key) != expected_types:
+            raise PatchError(
+                error_code,
+                f"{label}.{types_key} must be {expected_types} for {entry.get('nodeType')}.",
+            )
+    normalized: dict[str, Any] = {
+        "nodeType": entry.get("nodeType"),
+        "nodeClass": contract["nodeClass"],
+        "x": x,
+        "y": y,
+    }
+    if expected_function is not None:
+        normalized["function"] = expected_function
+    if expect_node_guid:
+        normalized["nodeGuid"] = _guid_with_code(
+            entry.get("nodeGuid"),
+            f"{label}.nodeGuid",
+            error_code=error_code,
+        )
+    elif entry.get("nodeGuid") is not None:
+        raise PatchError(
+            error_code,
+            f"{label} must not carry a created nodeGuid before Apply.",
+        )
+    return normalized
+
+
 def validate_preview_parameters(
     *,
     asset_path: Any,
@@ -157,6 +266,7 @@ def validate_preview_parameters(
     seen_targets: set[tuple[str, str, str]] = set()
     seen_variable_names: set[str] = set()
     create_variable_count = 0
+    create_node_count = 0
     for index, raw in enumerate(operations):
         item = _object(raw, f"operations[{index}]")
         op_id = _op_id(item.get("opId"), index)
@@ -218,6 +328,44 @@ def validate_preview_parameters(
                     "name": name,
                     "type": variable_type,
                     "defaultValue": default_value,
+                }
+            )
+            continue
+        if kind == "createNode":
+            _reject_unknown(
+                item,
+                {"opId", "kind", *CREATE_NODE_FIELDS},
+                f"operations[{index}]",
+            )
+            # nodeType/x/y only: no tempId (nothing can reference the node inside
+            # this patch) and no literal (that would change the edge set, which
+            # belongs to the connect slice).
+            _node_contract(item.get("nodeType"), f"operations[{index}]", error_code="graph-edit-node-type-not-allowed")
+            x = _coordinate(
+                item.get("x"),
+                f"operations[{index}].x",
+                error_code="graph-edit-invalid-parameters",
+            )
+            y = _coordinate(
+                item.get("y"),
+                f"operations[{index}].y",
+                error_code="graph-edit-invalid-parameters",
+            )
+            create_node_count += 1
+            if create_node_count > MAX_CREATE_NODES:
+                # One patch may not create more nodes than the single writer.
+                raise PatchError(
+                    "graph-patch-create-node-limit",
+                    f"A patch may create at most {MAX_CREATE_NODES} nodes, the same "
+                    "bound as the single-writer graph edit tool.",
+                )
+            normalized_operations.append(
+                {
+                    "opId": op_id,
+                    "kind": kind,
+                    "nodeType": item.get("nodeType"),
+                    "x": x,
+                    "y": y,
                 }
             )
             continue
@@ -327,6 +475,8 @@ def validate_preview_result(preview: Any) -> dict[str, Any]:
         or _SHA256.fullmatch(item.get("stateFingerprint")) is None
         or not isinstance(item.get("variablesFingerprint"), str)
         or _SHA256.fullmatch(item.get("variablesFingerprint")) is None
+        or not isinstance(item.get("nodesFingerprint"), str)
+        or _SHA256.fullmatch(item.get("nodesFingerprint")) is None
         or isinstance(item.get("variableCount"), bool)
         or not isinstance(item.get("variableCount"), int)
         or item.get("variableCount") < 0
@@ -384,6 +534,15 @@ def validate_preview_result(preview: Any) -> dict[str, Any]:
             seen_variable_names.add(normalized["name"].lower())
             normalized_operations.append({"opId": op_id, "kind": kind, **normalized})
             continue
+        if kind == "createNode":
+            normalized = _canonical_node_fields(
+                entry,
+                f"preview.operations[{index}]",
+                error_code="graph-patch-preview-invalid",
+                expect_node_guid=False,
+            )
+            normalized_operations.append({"opId": op_id, "kind": kind, **normalized})
+            continue
         node_guid = _guid(entry.get("nodeGuid"), f"preview.operations[{index}].nodeGuid")
         pin_guid = _guid(entry.get("pinGuid"), f"preview.operations[{index}].pinGuid")
         pin_name = _string(
@@ -430,6 +589,7 @@ def validate_preview_result(preview: Any) -> dict[str, Any]:
         "graphFingerprint": item.get("graphFingerprint"),
         "stateFingerprint": item.get("stateFingerprint"),
         "variablesFingerprint": item.get("variablesFingerprint"),
+        "nodesFingerprint": item.get("nodesFingerprint"),
         "variableCount": item.get("variableCount"),
         "operations": normalized_operations,
         "requiredConfirmation": item.get("requiredConfirmation"),
@@ -497,6 +657,10 @@ def validate_apply_result(apply_result: Any) -> dict[str, Any]:
         or _SHA256.fullmatch(item.get("variablesFingerprintBefore")) is None
         or not isinstance(item.get("variablesFingerprintAfter"), str)
         or _SHA256.fullmatch(item.get("variablesFingerprintAfter")) is None
+        or not isinstance(item.get("nodesFingerprintBefore"), str)
+        or _SHA256.fullmatch(item.get("nodesFingerprintBefore")) is None
+        or not isinstance(item.get("nodesFingerprintAfter"), str)
+        or _SHA256.fullmatch(item.get("nodesFingerprintAfter")) is None
     ):
         raise PatchError(
             "graph-patch-apply-invalid",
@@ -512,6 +676,7 @@ def validate_apply_result(apply_result: Any) -> dict[str, Any]:
     normalized_graph = _guid(item.get("graphGuid"), "applyResult.graphGuid")
     normalized_results: list[dict[str, Any]] = []
     created_variables = 0
+    created_nodes = 0
     for index, raw in enumerate(results):
         entry = _object(raw, f"applyResult.results[{index}]")
         if entry.get("status") != "applied" or entry.get("rolledBack") is not False:
@@ -542,6 +707,16 @@ def validate_apply_result(apply_result: Any) -> dict[str, Any]:
                 {"opId": op_id, "kind": kind, **normalized, "guid": guid}
             )
             continue
+        if kind == "createNode":
+            normalized = _canonical_node_fields(
+                entry,
+                f"applyResult.results[{index}]",
+                error_code="graph-patch-apply-invalid",
+                expect_node_guid=True,
+            )
+            created_nodes += 1
+            normalized_results.append({"opId": op_id, "kind": kind, **normalized})
+            continue
         normalized_results.append(
             {
                 "opId": op_id,
@@ -566,6 +741,16 @@ def validate_apply_result(apply_result: Any) -> dict[str, Any]:
         raise PatchError(
             "graph-patch-apply-invalid",
             "Apply variable counts must match the number of createVariable results.",
+        )
+    if (
+        isinstance(item.get("createdNodeCount"), bool)
+        or not isinstance(item.get("createdNodeCount"), int)
+        or item.get("createdNodeCount") != created_nodes
+        or item.get("nodeCountAfter") != item.get("nodeCountBefore") + created_nodes
+    ):
+        raise PatchError(
+            "graph-patch-apply-invalid",
+            "Apply node counts must match the number of createNode results.",
         )
     normalized = dict(item)
     normalized["assetPath"] = normalized_asset
@@ -635,6 +820,7 @@ __all__ = [
     "APPLY_METHOD",
     "APPLY_SCHEMA_VERSION",
     "APPLY_TOOL_NAME",
+    "CREATE_NODE_FIELDS",
     "CREATE_VARIABLE_FIELDS",
     "MIGRATED_KINDS",
     "MAX_OPERATIONS",

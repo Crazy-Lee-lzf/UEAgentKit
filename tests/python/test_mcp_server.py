@@ -764,7 +764,7 @@ class McpServerTests(unittest.TestCase):
             "ue_preview_blueprint_patch_experimental",
             PatchError(
                 "graph-patch-kind-not-migrated",
-                "Operation kind 'createNode' is designed but not migrated to the atomic patch yet.",
+                "Operation kind 'connect' is designed but not migrated to the atomic patch yet.",
             ),
             read_only=True,
         )

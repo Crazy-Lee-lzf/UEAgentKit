@@ -1184,7 +1184,7 @@ bool FUEAgentKitPatchVariableTest::RunTest(const FString& Parameters)
 		Preview->GetStringField(TEXT("variablesFingerprint"));
 	const FString RequiredConfirmation = Preview->GetStringField(TEXT("requiredConfirmation"));
 	const TArray<TSharedPtr<FJsonValue>> MigratedKinds = Preview->GetArrayField(TEXT("migratedKinds"));
-	if (!TestEqual(TEXT("both migrated kinds are advertised"), MigratedKinds.Num(), 2)
+	if (!TestEqual(TEXT("every migrated kind is advertised"), MigratedKinds.Num(), 3)
 		|| !TestEqual(
 			TEXT("first migrated kind is setPinDefault"),
 			MigratedKinds[0]->AsString(),
@@ -1192,7 +1192,11 @@ bool FUEAgentKitPatchVariableTest::RunTest(const FString& Parameters)
 		|| !TestEqual(
 			TEXT("second migrated kind is createVariable"),
 			MigratedKinds[1]->AsString(),
-			FString(TEXT("createVariable"))))
+			FString(TEXT("createVariable")))
+		|| !TestEqual(
+			TEXT("third migrated kind is createNode"),
+			MigratedKinds[2]->AsString(),
+			FString(TEXT("createNode"))))
 	{
 		return Fail();
 	}
@@ -1318,7 +1322,11 @@ bool FUEAgentKitPatchVariableTest::RunTest(const FString& Parameters)
 			TEXT("blueprint-variable-duplicate-name")
 		});
 		Refusals.Add({ TEXT("a ninth variable is refused"), TooMany, TEXT("graph-patch-create-variable-limit") });
-		for (const TCHAR* Kind : { TEXT("createNode"), TEXT("connect"), TEXT("rewirePin"), TEXT("removeNode") })
+		// `createNode` became a migrated kind in 0-3.4 slice 10, so only the three
+		// kinds that are still designed-but-unmigrated are asserted here; the
+		// createNode contract has its own automation test
+		// (UEAgentKit.AtomicPatch.CreateNode).
+		for (const TCHAR* Kind : { TEXT("connect"), TEXT("rewirePin"), TEXT("removeNode") })
 		{
 			TSharedPtr<FJsonObject> Unmigrated = UEAgentKitPatchExpansion::MakeOperation(
 				TEXT("p1"),

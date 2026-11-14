@@ -1,6 +1,7 @@
 #include "BlueprintPatchExperimental.h"
 
 #include "BlueprintContextSha256.h"
+#include "BlueprintGraphEditExperimental.h"
 #include "BlueprintGraphLayoutApply.h"
 #include "BlueprintPinDefaultEditExperimental.h"
 #include "BlueprintVariableWriteExperimental.h"
@@ -32,8 +33,10 @@ namespace
 	const TCHAR* const ApplySchemaVersion = TEXT("ueak.blueprint-patch-apply/1.0");
 	const TCHAR* const KindSetPinDefault = TEXT("setPinDefault");
 	const TCHAR* const KindCreateVariable = TEXT("createVariable");
+	const TCHAR* const KindCreateNode = TEXT("createNode");
 	/** Exhaustive list of migrated kinds, in the order they were migrated. */
-	const TCHAR* const MigratedKindList = TEXT("setPinDefault, createVariable");
+	const TCHAR* const MigratedKindList =
+		TEXT("setPinDefault, createVariable, createNode");
 	const TCHAR* const StatusValidated = TEXT("validated");
 	const TCHAR* const StatusApplied = TEXT("applied");
 	const TCHAR* const StatusFailed = TEXT("failed");
@@ -45,15 +48,16 @@ namespace
 	 * caller cannot mistake a typo for a future feature.
 	 */
 	const TCHAR* const ReservedKinds[] = {
-		TEXT("createNode"),
 		TEXT("connect"),
 		TEXT("rewirePin"),
 		TEXT("removeNode"),
 	};
 
-	/** One patch may not outgrow the single variable writer's own Apply bound. */
+	/** One patch may not outgrow the single writers' own Apply bounds. */
 	constexpr int32 MaxCreateVariableOperations =
 		UEAgentKitBlueprintVariableExperimental::MaxVariablesPerApply;
+	constexpr int32 MaxCreateNodeOperations =
+		UEAgentKitBlueprintGraphEditExperimental::MaxNodesPerApply;
 
 	bool bTestOverrideSet = false;
 	bool bTestOverrideEnabled = false;
@@ -70,6 +74,7 @@ namespace
 		/** Kind-specific resolved operation; only one of them is ever set. */
 		UEAgentKitBlueprintPinDefaultExperimental::FAtomicOperation PinDefault;
 		UEAgentKitBlueprintVariableExperimental::FAtomicVariableOperation Variable;
+		UEAgentKitBlueprintGraphEditExperimental::FAtomicNodeOperation Node;
 		/** opId/kind/resolved fields; reused verbatim for the results array. */
 		TSharedPtr<FJsonObject> Detail;
 	};
@@ -86,6 +91,9 @@ namespace
 		/** Blueprint-level variable state, the variable writer's own fingerprint. */
 		FString VariablesFingerprintBefore;
 		FString VariablesFingerprintAfter;
+		/** Graph-level node structure, the graph-edit writer's own fingerprint. */
+		FString NodesFingerprintBefore;
+		FString NodesFingerprintAfter;
 		FString PlanId;
 		TArray<FPatchOperation> Operations;
 		int32 NodeCountBefore = 0;
@@ -103,6 +111,7 @@ namespace
 		FString GraphFingerprint;
 		FString StateFingerprint;
 		FString VariablesFingerprint;
+		FString NodesFingerprint;
 		int32 NodeCount = 0;
 		int32 LinkCount = 0;
 		int32 VariableCount = 0;
@@ -221,6 +230,53 @@ namespace
 		return Builder + FString::Printf(TEXT("%d:"), Field.Len()) + Field;
 	}
 
+	/**
+	 * Integer coordinate with the graph-edit writer's own bound and error code.
+	 *
+	 * The bound comes from the writer's header, so a patch cannot accept a
+	 * coordinate the single-writer tool would refuse.
+	 */
+	bool ReadCoordinate(
+		const TSharedPtr<FJsonObject>& Object,
+		const TCHAR* Key,
+		int32& OutValue,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
+	{
+		constexpr int32 Bound =
+			UEAgentKitBlueprintGraphEditExperimental::MaxNodeCoordinate;
+		double Number = 0.0;
+		if (!Object.IsValid() || !Object->TryGetNumberField(Key, Number))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-invalid-parameters"),
+				FString::Printf(
+					TEXT("%s must be an integer between -%d and %d."),
+					Key,
+					Bound,
+					Bound));
+		}
+		const int32 Rounded = FMath::RoundToInt(Number);
+		if (FMath::Abs(Number - static_cast<double>(Rounded)) > 0.0001
+			|| Rounded < -Bound
+			|| Rounded > Bound)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-invalid-parameters"),
+				FString::Printf(
+					TEXT("%s must be an integer between -%d and %d."),
+					Key,
+					Bound,
+					Bound));
+		}
+		OutValue = Rounded;
+		return true;
+	}
+
 	int32 CountLinks(UEdGraph* Graph)
 	{
 		int32 Count = 0;
@@ -248,7 +304,8 @@ namespace
 	bool IsMigratedKind(const FString& Kind)
 	{
 		return Kind.Equals(KindSetPinDefault, ESearchCase::CaseSensitive)
-			|| Kind.Equals(KindCreateVariable, ESearchCase::CaseSensitive);
+			|| Kind.Equals(KindCreateVariable, ESearchCase::CaseSensitive)
+			|| Kind.Equals(KindCreateNode, ESearchCase::CaseSensitive);
 	}
 
 	bool IsReservedKind(const FString& Kind)
@@ -376,6 +433,7 @@ namespace
 		TSet<FString> SeenTargets;
 		TSet<FString> SeenVariableNames;
 		int32 VariableOperationCount = 0;
+		int32 NodeOperationCount = 0;
 		for (int32 Index = 0; Index < Values->Num(); ++Index)
 		{
 			OutOperations.Add(FPatchOperation());
@@ -595,6 +653,49 @@ namespace
 				}
 				SeenVariableNames.Add(NameKey);
 			}
+			else if (Operation.Kind.Equals(KindCreateNode, ESearchCase::CaseSensitive))
+			{
+				// createNode carries exactly nodeType/x/y: no tempId (nothing can
+				// reference it inside this patch), no literal, no variable field.
+				if (!RejectUnknownParams(
+					*Object,
+					{
+						TEXT("opId"),
+						TEXT("kind"),
+						TEXT("nodeType"),
+						TEXT("x"),
+						TEXT("y"),
+					},
+					OutErrorCode,
+					OutErrorMessage))
+				{
+					return false;
+				}
+				FString NodeType;
+				int32 X = 0;
+				int32 Y = 0;
+				if (!ReadString(*Object, TEXT("nodeType"), NodeType, OutErrorCode, OutErrorMessage)
+					|| !ReadCoordinate(*Object, TEXT("x"), X, OutErrorCode, OutErrorMessage)
+					|| !ReadCoordinate(*Object, TEXT("y"), Y, OutErrorCode, OutErrorMessage))
+				{
+					return false;
+				}
+				// A patch may not create more nodes than the single writer may.
+				++NodeOperationCount;
+				if (NodeOperationCount > MaxCreateNodeOperations)
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-patch-create-node-limit"),
+						FString::Printf(
+							TEXT("A patch may create at most %d nodes, the same bound as the single-writer graph edit tool."),
+							MaxCreateNodeOperations));
+				}
+				Operation.Node.NodeType = NodeType;
+				Operation.Node.X = X;
+				Operation.Node.Y = Y;
+			}
 			else
 			{
 				// Unreachable while IsMigratedKind and these branches agree; kept so a
@@ -660,6 +761,50 @@ namespace
 				Operation.Variable.bExistedBefore);
 			return true;
 		}
+		if (Operation.Kind.Equals(KindCreateNode, ESearchCase::CaseSensitive))
+		{
+			if (!UEAgentKitBlueprintGraphEditExperimental::TryResolveAtomicNodeOperation(
+				Graph,
+				Operation.Node,
+				OutErrorCode,
+				OutErrorMessage))
+			{
+				return false;
+			}
+			Operation.Detail->SetStringField(TEXT("nodeType"), Operation.Node.NodeType);
+			Operation.Detail->SetStringField(TEXT("nodeClass"), Operation.Node.NodeClassPath);
+			if (!Operation.Node.FunctionName.IsEmpty())
+			{
+				Operation.Detail->SetStringField(TEXT("function"), Operation.Node.FunctionName);
+			}
+			Operation.Detail->SetNumberField(TEXT("x"), Operation.Node.X);
+			Operation.Detail->SetNumberField(TEXT("y"), Operation.Node.Y);
+			TArray<TSharedPtr<FJsonValue>> Inputs;
+			for (const FString& PinName : Operation.Node.InputPins)
+			{
+				Inputs.Add(MakeShared<FJsonValueString>(PinName));
+			}
+			TArray<TSharedPtr<FJsonValue>> Outputs;
+			for (const FString& PinName : Operation.Node.OutputPins)
+			{
+				Outputs.Add(MakeShared<FJsonValueString>(PinName));
+			}
+			TSharedRef<FJsonObject> InputTypes = MakeShared<FJsonObject>();
+			for (const TPair<FString, FString>& Pair : Operation.Node.InputPinTypes)
+			{
+				InputTypes->SetStringField(Pair.Key, Pair.Value);
+			}
+			TSharedRef<FJsonObject> OutputTypes = MakeShared<FJsonObject>();
+			for (const TPair<FString, FString>& Pair : Operation.Node.OutputPinTypes)
+			{
+				OutputTypes->SetStringField(Pair.Key, Pair.Value);
+			}
+			Operation.Detail->SetArrayField(TEXT("inputPins"), Inputs);
+			Operation.Detail->SetArrayField(TEXT("outputPins"), Outputs);
+			Operation.Detail->SetObjectField(TEXT("inputPinTypes"), InputTypes);
+			Operation.Detail->SetObjectField(TEXT("outputPinTypes"), OutputTypes);
+			return true;
+		}
 		return Fail(
 			OutErrorCode,
 			OutErrorMessage,
@@ -711,6 +856,32 @@ namespace
 			}
 			return true;
 		}
+		if (Operation.Kind.Equals(KindCreateNode, ESearchCase::CaseSensitive))
+		{
+			TArray<UEAgentKitBlueprintGraphEditExperimental::FAtomicNodeOperation> Single;
+			Single.Add(Operation.Node);
+			TArray<FGuid> CreatedGuids;
+			if (!UEAgentKitBlueprintGraphEditExperimental::TryApplyAtomicNodeOperations(
+				Blueprint,
+				Graph,
+				Single,
+				CreatedGuids,
+				OutErrorCode,
+				OutErrorMessage))
+			{
+				return false;
+			}
+			if (CreatedGuids.Num() == 1)
+			{
+				// The read-back, the restore and the caller's next patch all use
+				// this exact GUID; it is assigned inside the transaction and is
+				// deliberately not part of the previewed plan hash.
+				Operation.Node.NodeGuid =
+					CreatedGuids[0].ToString(EGuidFormats::DigitsWithHyphensLower);
+				Operation.Detail->SetStringField(TEXT("nodeGuid"), Operation.Node.NodeGuid);
+			}
+			return true;
+		}
 		return Fail(
 			OutErrorCode,
 			OutErrorMessage,
@@ -751,6 +922,17 @@ namespace
 				OutErrorCode,
 				OutErrorMessage);
 		}
+		if (Operation.Kind.Equals(KindCreateNode, ESearchCase::CaseSensitive))
+		{
+			TArray<UEAgentKitBlueprintGraphEditExperimental::FAtomicNodeOperation> Single;
+			Single.Add(Operation.Node);
+			return UEAgentKitBlueprintGraphEditExperimental::TryCheckAtomicNodeOperations(
+				Graph,
+				Single,
+				bExpectAfter,
+				OutErrorCode,
+				OutErrorMessage);
+		}
 		return true;
 	}
 
@@ -784,6 +966,18 @@ namespace
 				OutErrorCode,
 				OutErrorMessage);
 		}
+		if (Operation.Kind.Equals(KindCreateNode, ESearchCase::CaseSensitive))
+		{
+			TArray<UEAgentKitBlueprintGraphEditExperimental::FAtomicNodeOperation> Single;
+			Single.Add(Operation.Node);
+			return UEAgentKitBlueprintGraphEditExperimental::TryRestoreAtomicNodeOperations(
+				Blueprint,
+				Graph,
+				Single,
+				1,
+				OutErrorCode,
+				OutErrorMessage);
+		}
 		return true;
 	}
 
@@ -808,6 +1002,16 @@ namespace
 			Canonical = AppendField(Canonical, Operation.Variable.Name);
 			Canonical = AppendField(Canonical, Operation.Variable.Type);
 			Canonical = AppendField(Canonical, Operation.Variable.DefaultValue);
+		}
+		else if (Operation.Kind.Equals(KindCreateNode, ESearchCase::CaseSensitive))
+		{
+			// The created node GUID is deliberately absent: it is assigned inside
+			// the transaction, so it cannot be part of a plan the caller previewed.
+			Canonical = AppendField(Canonical, Operation.Node.NodeType);
+			Canonical = AppendField(Canonical, Operation.Node.NodeClassPath);
+			Canonical = AppendField(Canonical, Operation.Node.FunctionName);
+			Canonical = AppendField(Canonical, FString::FromInt(Operation.Node.X));
+			Canonical = AppendField(Canonical, FString::FromInt(Operation.Node.Y));
 		}
 		return Canonical;
 	}
@@ -996,6 +1200,19 @@ namespace
 				TEXT("graph-patch-fingerprint-failed"),
 				TEXT("Could not fingerprint the current Blueprint variable state."));
 		}
+		// The graph-level pin-default hash covers node identity and pins but not
+		// the node class or the node position, so a createNode patch also binds
+		// the graph-edit writer's own node-structure hash.
+		OutPlan.NodesFingerprintBefore =
+			UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicNodeStateFingerprint(Graph);
+		if (OutPlan.NodesFingerprintBefore.IsEmpty())
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-patch-fingerprint-failed"),
+				TEXT("Could not fingerprint the current graph node structure."));
+		}
 		OutPlan.NodeCountBefore = Graph->Nodes.Num();
 		OutPlan.LinkCountBefore = CountLinks(Graph);
 		OutPlan.VariableCountBefore = Blueprint->NewVariables.Num();
@@ -1022,6 +1239,7 @@ namespace
 		Canonical = AppendField(Canonical, OutPlan.GraphFingerprint);
 		Canonical = AppendField(Canonical, OutPlan.StateFingerprintBefore);
 		Canonical = AppendField(Canonical, OutPlan.VariablesFingerprintBefore);
+		Canonical = AppendField(Canonical, OutPlan.NodesFingerprintBefore);
 		for (const FPatchOperation& Operation : OutPlan.Operations)
 		{
 			Canonical += ComputeOperationCanonical(Operation);
@@ -1068,6 +1286,7 @@ namespace
 		Result->SetStringField(TEXT("graphFingerprint"), Plan.GraphFingerprint);
 		Result->SetStringField(TEXT("stateFingerprint"), Plan.StateFingerprintBefore);
 		Result->SetStringField(TEXT("variablesFingerprint"), Plan.VariablesFingerprintBefore);
+		Result->SetStringField(TEXT("nodesFingerprint"), Plan.NodesFingerprintBefore);
 		Result->SetNumberField(TEXT("operationCount"), Plan.Operations.Num());
 		Result->SetNumberField(TEXT("nodeCount"), Plan.NodeCountBefore);
 		Result->SetNumberField(TEXT("linkCount"), Plan.LinkCountBefore);
@@ -1080,6 +1299,7 @@ namespace
 			{
 				MakeShared<FJsonValueString>(KindSetPinDefault),
 				MakeShared<FJsonValueString>(KindCreateVariable),
+				MakeShared<FJsonValueString>(KindCreateNode),
 			});
 		Result->SetArrayField(TEXT("operations"), BuildValidatedResults(Plan));
 		return Result;
@@ -1348,6 +1568,27 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 			Transaction.Cancel();
 		};
 
+		/**
+		 * Prove the rollback actually returned to the previewed before state.
+		 *
+		 * The per-writer restore functions already report their own failure; this
+		 * is the whole-state check on top of it (counts plus all three shared
+		 * fingerprints), so a failed Apply cannot report rolledBack=true while the
+		 * graph is still changed.
+		 */
+		auto IsBeforeStateRestored = [&]() -> bool
+		{
+			return Graph->Nodes.Num() == Plan.NodeCountBefore
+				&& CountLinks(Graph) == Plan.LinkCountBefore
+				&& UEAgentKitBlueprintPinDefaultExperimental::ComputeAtomicStateFingerprint(Graph)
+					.Equals(Plan.StateFingerprintBefore, ESearchCase::CaseSensitive)
+				&& UEAgentKitBlueprintVariableExperimental::ComputeAtomicVariableStateFingerprint(
+					Blueprint)
+					.Equals(Plan.VariablesFingerprintBefore, ESearchCase::CaseSensitive)
+				&& UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicNodeStateFingerprint(Graph)
+					.Equals(Plan.NodesFingerprintBefore, ESearchCase::CaseSensitive);
+		};
+
 		bool bApplied = true;
 		for (int32 Index = 0; Index < Plan.Operations.Num(); ++Index)
 		{
@@ -1387,6 +1628,15 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 		if (!bApplied)
 		{
 			RestoreAllAndCancel();
+			const bool bStateRestored = IsBeforeStateRestored();
+			if (!bStateRestored)
+			{
+				Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-patch-restore-mismatch"),
+					TEXT("The rollback did not restore the exact pre-patch graph state."));
+			}
 			OutResult = BuildInactiveResult(
 				ApplySchemaVersion,
 				Plan,
@@ -1396,11 +1646,12 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 					OutErrorCode,
 					OutErrorMessage,
 					StatusApplied,
-					/*bRolledBack=*/true),
+					bStateRestored),
 				StatusApplied,
 				/*bTransactionOpened=*/true,
-				/*bRolledBack=*/true);
+				bStateRestored);
 			OutResult->SetNumberField(TEXT("appliedOperationCount"), 0);
+			OutResult->SetBoolField(TEXT("stateRestored"), bStateRestored);
 			return false;
 		}
 
@@ -1417,6 +1668,15 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 				OutErrorMessage))
 			{
 				RestoreAllAndCancel();
+				const bool bStateRestored = IsBeforeStateRestored();
+				if (!bStateRestored)
+				{
+					Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-patch-restore-mismatch"),
+						TEXT("The rollback did not restore the exact pre-patch graph state."));
+				}
 				OutResult = BuildInactiveResult(
 					ApplySchemaVersion,
 					Plan,
@@ -1426,11 +1686,12 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 						OutErrorCode,
 						OutErrorMessage,
 						StatusApplied,
-						/*bRolledBack=*/true),
+						bStateRestored),
 					StatusApplied,
 					/*bTransactionOpened=*/true,
-					/*bRolledBack=*/true);
+					bStateRestored);
 				OutResult->SetNumberField(TEXT("appliedOperationCount"), 0);
+				OutResult->SetBoolField(TEXT("stateRestored"), bStateRestored);
 				return false;
 			}
 		}
@@ -1439,6 +1700,7 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 		if (!Package->IsDirty())
 		{
 			RestoreAllAndCancel();
+			const bool bStateRestored = IsBeforeStateRestored();
 			OutResult = BuildInactiveResult(
 				ApplySchemaVersion,
 				Plan,
@@ -1448,10 +1710,11 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 					FString(),
 					FString(),
 					StatusApplied,
-					/*bRolledBack=*/true),
+					bStateRestored),
 				StatusApplied,
 				/*bTransactionOpened=*/true,
-				/*bRolledBack=*/true);
+				bStateRestored);
+			OutResult->SetBoolField(TEXT("stateRestored"), bStateRestored);
 			return Fail(
 				OutErrorCode,
 				OutErrorMessage,
@@ -1462,6 +1725,32 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 			UEAgentKitBlueprintPinDefaultExperimental::ComputeAtomicStateFingerprint(Graph);
 		Plan.VariablesFingerprintAfter =
 			UEAgentKitBlueprintVariableExperimental::ComputeAtomicVariableStateFingerprint(Blueprint);
+		Plan.NodesFingerprintAfter =
+			UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicNodeStateFingerprint(Graph);
+		if (Plan.NodesFingerprintAfter.IsEmpty())
+		{
+			RestoreAllAndCancel();
+			const bool bStateRestored = IsBeforeStateRestored();
+			OutResult = BuildInactiveResult(
+				ApplySchemaVersion,
+				Plan,
+				BuildOperationResults(
+					Plan.Operations,
+					INDEX_NONE,
+					FString(),
+					FString(),
+					StatusApplied,
+					bStateRestored),
+				StatusApplied,
+				/*bTransactionOpened=*/true,
+				bStateRestored);
+			OutResult->SetBoolField(TEXT("stateRestored"), bStateRestored);
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-patch-fingerprint-failed"),
+				TEXT("Could not fingerprint the graph node structure after Apply; the whole patch was restored and its transaction cancelled."));
+		}
 		Plan.VariableCountAfter = Blueprint->NewVariables.Num();
 		AppliedResults = BuildOperationResults(
 			Plan.Operations,
@@ -1476,6 +1765,29 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 	// before state and the exact after state.
 	const int32 NodeCountAfter = Graph->Nodes.Num();
 	const int32 LinkCountAfter = CountLinks(Graph);
+	int32 CreatedNodeCount = 0;
+	for (const FPatchOperation& Operation : Plan.Operations)
+	{
+		if (Operation.Kind.Equals(KindCreateNode, ESearchCase::CaseSensitive))
+		{
+			++CreatedNodeCount;
+		}
+	}
+	// createNode is the only migrated kind that changes the graph structure, and it
+	// must never change an edge: the delta is exactly the number of node operations.
+	if (NodeCountAfter != Plan.NodeCountBefore + CreatedNodeCount
+		|| LinkCountAfter != Plan.LinkCountBefore)
+	{
+		if (GEditor->Trans != nullptr)
+		{
+			GEditor->UndoTransaction();
+		}
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-patch-readback-failed"),
+			TEXT("The graph node/link counts do not match the plan after Apply."));
+	}
 	bool bUndoVerified = false;
 	bool bRedoVerified = false;
 	{
@@ -1483,8 +1795,8 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 		if (GEditor->UndoTransaction())
 		{
 			// Undo must put every kind back to its before state; each kind is read
-			// back through its own writer, and both the graph-level and the
-			// Blueprint-level fingerprint must return to the previewed values.
+			// back through its own writer, and the graph-level, Blueprint-level and
+			// node-structure fingerprints must all return to the previewed values.
 			bBeforeStateVerified =
 				CheckAllOperations(
 					Blueprint,
@@ -1497,7 +1809,9 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 					.Equals(Plan.StateFingerprintBefore, ESearchCase::CaseSensitive)
 				&& UEAgentKitBlueprintVariableExperimental::ComputeAtomicVariableStateFingerprint(
 					Blueprint)
-					.Equals(Plan.VariablesFingerprintBefore, ESearchCase::CaseSensitive);
+					.Equals(Plan.VariablesFingerprintBefore, ESearchCase::CaseSensitive)
+				&& UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicNodeStateFingerprint(Graph)
+					.Equals(Plan.NodesFingerprintBefore, ESearchCase::CaseSensitive);
 		}
 		bUndoVerified = bBeforeStateVerified;
 		bool bAfterStateVerified = false;
@@ -1515,7 +1829,9 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 					.Equals(Plan.StateFingerprintAfter, ESearchCase::CaseSensitive)
 				&& UEAgentKitBlueprintVariableExperimental::ComputeAtomicVariableStateFingerprint(
 					Blueprint)
-					.Equals(Plan.VariablesFingerprintAfter, ESearchCase::CaseSensitive);
+					.Equals(Plan.VariablesFingerprintAfter, ESearchCase::CaseSensitive)
+				&& UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicNodeStateFingerprint(Graph)
+					.Equals(Plan.NodesFingerprintAfter, ESearchCase::CaseSensitive);
 		}
 		bRedoVerified = bAfterStateVerified;
 	}
@@ -1546,6 +1862,21 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 			TEXT("graph-patch-readback-failed"),
 			TEXT("Final package dirty check failed for the Blueprint patch."));
 	}
+	// The layout graph fingerprint includes the node set and node positions, so a
+	// structural patch (createNode) must report the live post-Apply value instead
+	// of the previewed one.  Without this, Save's "is this still the dirty
+	// post-Apply graph" check would reject every createNode patch.
+	const FString GraphFingerprintAfter =
+		FinalPreflight->GetStringField(TEXT("graphFingerprint"));
+	if (GraphFingerprintAfter.IsEmpty())
+	{
+		GEditor->UndoTransaction();
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-patch-readback-failed"),
+			TEXT("The post-Apply graph fingerprint is unavailable; the patch was undone."));
+	}
 
 	if (RecentPatchApplies.Num() > 16)
 	{
@@ -1554,9 +1885,10 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 	FPatchReceipt Receipt;
 	Receipt.AssetPath = Plan.AssetPath;
 	Receipt.GraphGuid = Plan.GraphGuid;
-	Receipt.GraphFingerprint = Plan.GraphFingerprint;
+	Receipt.GraphFingerprint = GraphFingerprintAfter;
 	Receipt.StateFingerprint = Plan.StateFingerprintAfter;
 	Receipt.VariablesFingerprint = Plan.VariablesFingerprintAfter;
+	Receipt.NodesFingerprint = Plan.NodesFingerprintAfter;
 	Receipt.NodeCount = NodeCountAfter;
 	Receipt.LinkCount = LinkCountAfter;
 	Receipt.VariableCount = Plan.VariableCountAfter;
@@ -1582,14 +1914,18 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 	Result->SetStringField(
 		TEXT("requiredSaveConfirmation"),
 		FString(UEAgentKitBlueprintPatchExperimental::SaveConfirmationPrefix) + Plan.PlanId);
-	Result->SetStringField(TEXT("graphFingerprintAfter"), Plan.GraphFingerprint);
+	Result->SetStringField(TEXT("graphFingerprintAfter"), GraphFingerprintAfter);
+	Result->SetStringField(TEXT("graphFingerprintBefore"), Plan.GraphFingerprint);
 	Result->SetStringField(TEXT("stateFingerprintAfter"), Plan.StateFingerprintAfter);
 	Result->SetStringField(TEXT("variablesFingerprintBefore"), Plan.VariablesFingerprintBefore);
 	Result->SetStringField(TEXT("variablesFingerprintAfter"), Plan.VariablesFingerprintAfter);
+	Result->SetStringField(TEXT("nodesFingerprintBefore"), Plan.NodesFingerprintBefore);
+	Result->SetStringField(TEXT("nodesFingerprintAfter"), Plan.NodesFingerprintAfter);
 	Result->SetNumberField(TEXT("variableCountBefore"), Plan.VariableCountBefore);
 	Result->SetNumberField(TEXT("variableCountAfter"), Plan.VariableCountAfter);
 	Result->SetNumberField(TEXT("nodeCountBefore"), Plan.NodeCountBefore);
 	Result->SetNumberField(TEXT("nodeCountAfter"), NodeCountAfter);
+	Result->SetNumberField(TEXT("createdNodeCount"), CreatedNodeCount);
 	Result->SetNumberField(TEXT("linkCountBefore"), Plan.LinkCountBefore);
 	Result->SetNumberField(TEXT("linkCountAfter"), LinkCountAfter);
 	Result->SetNumberField(TEXT("operationCount"), Plan.Operations.Num());
@@ -1760,7 +2096,11 @@ bool UEAgentKitBlueprintPatchExperimental::TrySaveExperimental(
 		|| Graph->Nodes.Num() != ExpectedNodeCount
 		|| CountLinks(Graph) != ExpectedLinkCount
 		|| !UEAgentKitBlueprintPinDefaultExperimental::ComputeAtomicStateFingerprint(Graph)
-			.Equals(ExpectedStateFingerprint, ESearchCase::CaseSensitive))
+			.Equals(ExpectedStateFingerprint, ESearchCase::CaseSensitive)
+		// stateFingerprint covers pin defaults and links but neither the node class
+		// nor the node position, so Save also re-proves the node structure.
+		|| !UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicNodeStateFingerprint(Graph)
+			.Equals(Receipt->NodesFingerprint, ESearchCase::CaseSensitive))
 	{
 		return Fail(
 			OutErrorCode,
@@ -1839,7 +2179,9 @@ bool UEAgentKitBlueprintPatchExperimental::TrySaveExperimental(
 		|| !UEAgentKitBlueprintPinDefaultExperimental::ComputeAtomicStateFingerprint(Graph)
 			.Equals(ExpectedStateFingerprint, ESearchCase::CaseSensitive)
 		|| !UEAgentKitBlueprintVariableExperimental::ComputeAtomicVariableStateFingerprint(Blueprint)
-			.Equals(Receipt->VariablesFingerprint, ESearchCase::CaseSensitive))
+			.Equals(Receipt->VariablesFingerprint, ESearchCase::CaseSensitive)
+		|| !UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicNodeStateFingerprint(Graph)
+			.Equals(Receipt->NodesFingerprint, ESearchCase::CaseSensitive))
 	{
 		return Fail(
 			OutErrorCode,
@@ -1867,6 +2209,7 @@ bool UEAgentKitBlueprintPatchExperimental::TrySaveExperimental(
 	Readback->SetStringField(TEXT("graphFingerprint"), ExpectedGraphFingerprint);
 	Readback->SetStringField(TEXT("stateFingerprint"), ExpectedStateFingerprint);
 	Readback->SetStringField(TEXT("variablesFingerprint"), Receipt->VariablesFingerprint);
+	Readback->SetStringField(TEXT("nodesFingerprint"), Receipt->NodesFingerprint);
 	Readback->SetNumberField(TEXT("variableCount"), Receipt->VariableCount);
 	Readback->SetBoolField(TEXT("packageDirty"), false);
 	Readback->SetNumberField(TEXT("nodeCount"), ExpectedNodeCount);
@@ -1887,6 +2230,7 @@ bool UEAgentKitBlueprintPatchExperimental::TrySaveExperimental(
 	Result->SetStringField(TEXT("graphFingerprint"), ExpectedGraphFingerprint);
 	Result->SetStringField(TEXT("stateFingerprint"), ExpectedStateFingerprint);
 	Result->SetStringField(TEXT("variablesFingerprint"), Receipt->VariablesFingerprint);
+	Result->SetStringField(TEXT("nodesFingerprint"), Receipt->NodesFingerprint);
 	Result->SetNumberField(TEXT("variableCount"), Receipt->VariableCount);
 	Result->SetBoolField(TEXT("saved"), true);
 	Result->SetBoolField(TEXT("packageDirty"), false);

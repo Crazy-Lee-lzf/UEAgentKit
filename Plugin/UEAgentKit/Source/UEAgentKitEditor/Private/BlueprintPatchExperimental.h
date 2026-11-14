@@ -20,9 +20,16 @@ class UEdGraph;
  *
  *   slice 1  setPinDefault   -- migrated (0-3.4 slice 8)
  *   slice 2  createVariable  -- migrated (0-3.4 slice 9)
- *   slice 3  createNode/connect
- *   slice 4  rewirePin
- *   slice 5  removeNode
+ *   slice 3  createNode      -- migrated (0-3.4 slice 10)
+ *   slice 4  connect         -- NOT migrated yet (the node is created, no edge)
+ *   slice 5  rewirePin
+ *   slice 6  removeNode
+ *
+ * Three state hashes are reported side by side, each owned by the writer that
+ * already defines it: `stateFingerprint` (pin defaults and links),
+ * `variablesFingerprint` (Blueprint variables) and `nodesFingerprint` (node
+ * identity, class, position and pin inventory).  A structural patch therefore
+ * proves both "the defaults are back" and "the node set is back".
  *
  * A patch may contain only migrated kinds.  A request that mixes a migrated and
  * an unmigrated kind is rejected before any write with
@@ -36,10 +43,18 @@ class UEdGraph;
  * provenance anchor, never a constraint on where the variable lands.  One patch
  * therefore still lands on exactly one graph and one package.
  *
+ * `createNode` creates exactly one node and touches no edge.  It accepts only
+ * `nodeType`/`x`/`y` and only the eight primitive nodeTypes of the graph-edit
+ * writer; it creates them through that writer's own atomic seam, so the class,
+ * position, pin contract and spawner path are the same as the single writer's.
+ * There is deliberately no `tempId`: a caller that wants to connect a new node
+ * takes the returned `nodeGuid` and sends a second patch.  Owned input literals
+ * are not part of this kind (they create a node and change the edge set).
+ *
  * Explicit limits (never widened by this seam): at most 16 operations per patch,
  * at most 60 KiB request payload at the MCP boundary, one target graph and one
  * loaded package per patch.  `createVariable` keeps the single writer's own bound
- * of at most 8 variables per patch.
+ * of at most 8 variables per patch, `createNode` the writer's 16-node bound.
  *
  * The project must opt in with:
  *

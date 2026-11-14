@@ -506,3 +506,165 @@ failed=0，exit 0）**
   MCP 侧只经真实调用观察，没有单独单测。
 - `mcp_server._error_response` 的 `PatchError` 分支有单测，同时也在上面的真实调用里出现过
   （`graph-patch-kind-not-migrated`、`graph-patch-create-variable-limit`）。
+
+## 切片 10 — 跨 writer 原子事务：建节点已迁移（不含 connect）（2026-11-14）
+
+0-3.4 的第三个切片。把 `createNode` 作为第三个 kind 迁进**已有的** patch 契约，
+与 `setPinDefault`/`createVariable` 共用同一个 `FScopedTransaction`、同一套逐条结果与整体
+回滚；没有新建第二套 patch 契约，也没有改动五个 writer 各自的 Preview/Apply/Save 语义。
+
+`connect` 仍**未迁移**：它需要边集证明与 tempId 解析，与“节点身份+位置”是两种风险。
+**connect 单独一片。**
+
+### 先定的三个契约问题
+
+**① 图级指纹到底覆不覆盖节点集？（本片最大风险，先验证）**
+
+实测结论：切片 8/9 用的 `stateFingerprint`（`ComputeAtomicStateFingerprint`）**确实覆盖节点集**——
+它按 NodeGuid 排序逐节点哈希 NodeGuid + 每个 pin 的 name/direction/PinId/category/subcategory/
+DefaultValue/DefaultObject/DefaultTextValue/LinkedTo 数量。所以“新增一个节点”必然改变它，
+“回滚后指纹回到 before”不是空证明。
+
+但它**不覆盖两样 createNode 直接决定的东西**：节点**类**与节点**位置**（NodePosX/NodePosY）。
+一个位置错的节点、或类对的节点放在错位置，stateFingerprint 可能完全一样。因此本片**新增**
+`nodesFingerprint`（graph-edit writer 自己的节点结构哈希：NodeGuid + class path + NodePosX/Y +
+pin name/direction/PinId/category/subcategory，按 NodeGuid 排序），并在以下位置同时断言两个指纹：
+
+- `preview` 绑定 before，`apply` 报告 after；
+- apply 后 `nodesFingerprint` **≠** before（测试显式断言，不只看计数）；
+- Undo 后 **==** before，Redo 后 **==** after；
+- 失败回滚后 **==** before，并额外返回 `stateRestored`；
+- `save` 用 receipt 里的 `nodesFingerprint` 复核活图（stateFingerprint 不含类/位置，单靠它不够）。
+
+两者职责划分：`stateFingerprint` = pin 默认值/边数；`nodesFingerprint` = 节点身份/类/位置/pin 清单。
+pin 默认值**不**进 nodesFingerprint，避免两个哈希重复同一件事。
+
+**② 要不要 tempId？——不要。**
+
+本片不做 connect，patch 内没有任何东西能引用一个 tempId；引入它只会多出一块没有使用者的面，
+并且会让“patch 内引用完整性”看起来已经被证明（其实没有）。调用方要用新节点就连着两条 patch：
+第一条 `createNode` 拿到返回的 `nodeGuid`，第二条用它 connect。所以 `createNode` 只接受
+`nodeType`/`x`/`y`，出现 `tempId` 一律 `graph-patch-unknown-parameter`。
+
+**③ owned literals ——本片不做。**
+
+字面量是“为输入引脚配默认值”，在 graph-edit writer 里属于 call_function/owned-call 面，且会牵动
+边集与函数签名白名单；那是 connect 那一片的范围。因此 `createNode` 只覆盖 8 种原始节点类型
+（`branch`/`sequence`/`not_bool`/`bool_or`/`int_add`/`int_equal`/`double_add`/`string_concat`），
+`call_function`/`call_owned_pure_function`/`variable_get`/`variable_set` 即使单 writer 支持，
+patch 也会用 `graph-edit-node-type-not-allowed` 拒绝。**这是本片的已知限制，不是遗漏。**
+
+### 契约增量
+
+| 项 | 内容 |
+|---|---|
+| 已迁移 kind | `setPinDefault` + `createVariable` + `createNode` |
+| createNode 字段 | `opId`/`kind` 之外只接受 `nodeType`/`x`/`y`；其他字段 → `graph-patch-unknown-parameter` |
+| 节点类型白名单 | 8 种原始类型，**沿用 graph-edit writer 的码** `graph-edit-node-type-not-allowed`；不允许的 4 种（call_function / owned call / variable_get / variable_set）同样用它拒绝 |
+| 坐标 | 与单 writer 同一上限（±100000），同一错误码 `graph-edit-invalid-parameters`；非整数/越界都在事务外拒绝 |
+| 数量上限 | 一个 patch 最多 16 条 `createNode`（graph-edit writer 的 `MaxNodes`，也是 patch 总 op 上限） |
+| 解析 | **事务外**：类型白名单 + 坐标 + K2 schema + 固定函数存在性；解析出 `nodeClass`/`function`/pin 契约并写进 preview 结果 |
+| 写入 | **事务内**只创建：与单 writer **同一个创建函数**（`CreatePrimitiveNode`），因此 class、spawner/CallFunction 路径、RF_Transactional、位置、默认 pin 不可能出现两份实现 |
+| 读回 | 每条 op 按 `nodeGuid` 找回节点，校验存在性、class、位置、可见 pin 集合/方向/类型、目标函数与 owner；CallFunction 允许至多一个隐藏 self pin（与 writer 的 `ValidateCallFunctionNode` 同规则） |
+| 返回 | 每条 op 返回解析后的 `nodeGuid`（事务内赋值，**不**进 plan hash）；`createdNodeCount` 与 node/link 计数在同一事务里核对 |
+| 回滚 | 逆序删除刚创建的节点（`FBlueprintEditorUtils::RemoveNode`）→ 恢复 `Status`/`bCachedDependenciesUpToDate`/package Dirty → `Transaction.Cancel()`；随后整状态校验，失败返回 `graph-patch-restore-mismatch` |
+| 指纹 | `stateFingerprint` 含义不变；新增 graph 级 `nodesFingerprint`（before/after）；Undo/Redo 同时校验两者 |
+| 包前置条件 | 与单 writer 一致：clean package、exact focused graph、可编辑 K2 图、PIE 停止；**不**额外要求 sha256 磁盘 revision（节点在图里，不像变量那样是资产级对象） |
+
+### 为什么这不是放宽安全边界
+
+- 写入走 graph-edit writer 自己抽出的创建函数，单 writer 与 patch 共用同一份实现；
+- 节点数量上限沿用 writer 的 16，没有因为“patch 能装 16 条 op”而放大；
+- 只接受 8 种原始节点，不因为“patch 有 createNode”就打开 call_function/variable accessor 的入口；
+- 不创建边、不写字面量、不编译、不保存；仍然要求 exact focused graph + clean package +
+  `CanTransact` + 无活动事务；
+- 回滚后不是“相信 restore 返回值”，而是用计数 + 两个指纹证明回到了 before。
+
+### 仍是单 writer 路径的
+
+| writer | 状态 |
+|---|---|
+| pin 默认值 | 已迁移（切片 8） |
+| 变量创建 | 已迁移（切片 9） |
+| graph edit 的 `createNode`（8 种原始节点） | 已迁移（本切片） |
+| graph edit 的 `connect` / `disconnect` / 已有引脚端点 | **未迁移** |
+| graph edit 的 `call_function` / `call_owned_pure_function` / owned literals / variable accessor | **未迁移** |
+| rewire | 未迁移 |
+| node remove | 未迁移 |
+
+### 真实 Editor 证据（2026-11-14）
+
+环境：一次性 Host `N1_BlueprintNative_20261031`（`N1AcceptanceHost.uproject`），插件 `0.9.0.dev1`，
+UE 5.6.1；隔离 `UnrealEditor-Cmd -unattended -NullRHI`。自动化测试用 `SetExperimentalWriteEnabledForTest`
+走测试门禁，因此**没有**修改项目 ini（收尾核对 `DefaultEngine.ini` 仍是 515 字节、无 `[UEAgentKit]` 段）。
+
+**A. 自动化测试（`Automation RunTests UEAgentKit.AtomicPatch`，exit 0，succeeded=3 / failed=0 / notRun=0）**
+
+| 测试 | 结果 | 耗时 |
+|---|---|---|
+| `UEAgentKit.AtomicPatch.CreateNode`（本片） | **Success** | 1.33s |
+| `UEAgentKit.AtomicPatch.CreateVariable`（切片 9 回归） | **Success** | 0.40s |
+| `UEAgentKit.AtomicPatch.Expansion`（切片 8 回归） | **Success** | 0.45s |
+
+`CreateNode` 在同一张已落盘的 K2 fixture 上依次证明（全部为断言，不是观察）：
+
+| 检查 | 结果 |
+|---|---|
+| 未 opt-in 时 gate-off | `IsExperimentalWriteAvailable()==false` |
+| 计划期拒绝（任何写入前） | 非白名单 `call_function` → `graph-edit-node-type-not-allowed`；`x=100001` / `y=-100001` → `graph-edit-invalid-parameters`；`tempId` 外来字段 → `graph-patch-unknown-parameter`；`connect` → `graph-patch-kind-not-migrated`；17 条 op → `graph-patch-invalid-operations`；拒绝后节点数、package Dirty、磁盘 SHA 全部未变 |
+| **计划期等价** | 单 writer 的 `nodes[]` 与 patch 的 `operations[]` 对 4 种类型（branch / sequence / int_add / string_concat）的 `nodeType`、`nodeClass`、`function`、`x/y`、`inputPins`/`outputPins`、`inputPinTypes` **逐字段相等** |
+| **写入后等价** | patch 建出的 4 个节点与单 writer 建出的同类型节点，class / 位置 / 目标函数 / 可见 pin 清单（name+direction+category+subcategory）**逐字段相等**（含 KismetMathLibrary 与 KismetStringLibrary 两种 owner） |
+| **指纹有效性（本片关键）** | apply 后 `nodesFingerprint` **≠** before（显式断言）；同一 patch 的一次 Undo 后 **==** before、Redo 后 **==** after；`stateFingerprint` 也随节点集改变（显式断言 ≠） |
+| 原子回滚（第 2 条注入失败） | `writeOccurred=false`、`transactionOpened=true`、`rolledBack=true`、`stateRestored=true`；`results` 4 条齐全（`applied`+`rolledBack=true` / `failed`+`graph-patch-apply-fault-injected` / 两条 `notAttempted`） |
+| 回滚后什么都没留下 | 第 1 条的 branch 节点**已删除**（按位置+类断言不存在）、节点数回到 before、`nodesFingerprint` == before、package `IsDirty()==false`、磁盘 SHA 未变、**同一 plan 再 preview 得到同一 planId** |
+| 返回的 `nodeGuid` | 4 条结果各带 36 字符 `nodeGuid`，且每条都能在活图中找回同一个节点（class/位置一致）——这正是下一条 connect patch 需要的身份 |
+| 脏包拒绝 | apply 后再次 preview → `graph-patch-package-dirty` |
+| 显式 Save | `saved=true`、`packageDirty=false`、`nodesFingerprint` 等于 apply 的 after、`assetSha256` == 磁盘 SHA、且磁盘 SHA **只在这一次**变化 |
+| Save 后新 preview | 干净包上再 preview createNode：`nodesFingerprint` == 保存后的值、`nodeCount` == 保存后的计数 |
+| 三种 kind 混合 | `[setPinDefault, createVariable, createNode]` 三条全部 `applied`；bool pin 变 `true`、变量数 +1、节点数 +1；`undoVerified`/`redoVerified`=true；一次 Undo 把节点和变量都收回 |
+
+**B. 验收过程中发现并修掉的一个真实缺陷（必须记录）**
+
+第一次跑 `CreateNode` 时 Save 被拒：`graph-patch-save-plan-mismatch`。原因不是测试写错，而是 patch 的
+`graphFingerprintAfter` 一直沿用 **preview 时的图指纹**；切片 8/9 的 kind 不改图结构，所以这个问题
+看不出来，而 `createNode` 会改节点集，而 layout 的 `graphFingerprint` **包含节点集与位置**，于是
+Save 的「这还是不是 apply 后的那张脏图」检查必然失败。修法：Apply 在内部 Undo/Redo 验证之后重新取
+一次 focused preflight，用**实时的** `graphFingerprint` 作为 `graphFingerprintAfter` / receipt 值；
+preview 值另作 `graphFingerprintBefore` 返回。修完后同一次运行全绿。
+
+**C. 两个既有测试断言的契约更新（不是放宽）**
+
+- `AtomicPatch.CreateVariable` 断言 `migratedKinds` 恰好 2 个；本片之后是 3 个 → 改为断言 3 个且
+  顺序为 `setPinDefault, createVariable, createNode`（严格更强，因为顺序也被钉住）。
+- 同一个测试原来把 `createNode` 放在「未迁移 kind」拒绝循环里；本片之后它已迁移，因此该循环只保留
+  `connect`/`rewirePin`/`removeNode`。`createNode` 的 fail-closed 行为没有减少：它在外来字段、
+  非白名单类型、越界坐标、超量 op 上的拒绝，由本片 `CreateNode` 测试逐条断言。
+
+**D. 磁盘与收尾**
+
+- 本次三个一次性 fixture（`BP_PatchCreateNode` / `BP_PatchVariables` / `BP_PatchExpansion`）在验收后
+  从 Host `Content/UEAgentKitPatchExpansion/` 删除；除自动化的显式 Save 外没有资产 SHA 变化（每次
+  非保存阶段的 apply/rollback 都断言磁盘 SHA 不变）。
+- 收尾：0 个 UE 进程；`DefaultEngine.ini` 未改（515 字节，无 `[UEAgentKit]` 段），无备份文件残留。
+
+### 只被单测覆盖的
+
+- Python 契约层：`createNode` 的字段白名单（`tempId`/`nodeGuid`/`inputLiterals` 等一律
+  `graph-patch-unknown-parameter`）、8 种 nodeType 白名单与 `call_function` 等的拒绝码、
+  ±100000 坐标、16 条上限、preview/apply 结果里的类/函数/pin 契约与 node/link/variable 计数一致性、
+  `nodesFingerprint` 的 sha256 形状。
+- MCP 工具层：`ue_preview/apply/save_blueprint_patch_experimental` 的注册与信封、失败时
+  `error.details.results` 的搬运，只有单元测试。**本片没有重跑 MCP socket 级别的真实调用**（切片 8/9
+  做过的那条链路本片未复测），因此「Python→bridge→C++」的 createNode 路径目前只有 C++ 自动化 +
+  Python 单测两侧的证据，缺少一次端到端 socket 调用记录。
+- `graph-patch-create-node-limit` 分支目前实际不可达（patch 总 op 上限 16 == 单 writer 的 16 节点
+  上限），保留是为了和 `createVariable` 的上限形状一致；没有测试专门覆盖它，也没有声称它可达。
+
+### 已知限制
+
+- 一次 patch 只能落在一个图、一个包上。
+- `createNode` 只建节点、不建边：要让新节点参与执行/数据流，需要第二条 patch（connect，尚未迁移）。
+- 不支持 `tempId`，因此同一 patch 内无法表达“我新建的这个节点”的引用。
+- 返回的 `nodeGuid` 在下一条 patch 里可直接使用（本切片用自动化测试证明它指向活节点）；connect 尚未
+  迁移，所以“用它连线”本身还没有入口。
+- 建出的节点**未编译**：patch 结果 `compiled=false`，不自动 compile。

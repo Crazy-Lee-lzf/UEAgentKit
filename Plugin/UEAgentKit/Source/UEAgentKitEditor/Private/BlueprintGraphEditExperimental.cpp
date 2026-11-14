@@ -23,6 +23,7 @@
 #include "K2Node_VariableSet.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "Kismet/KismetStringLibrary.h"
+#include "Kismet2/BlueprintEditorUtils.h"
 #include "ScopedTransaction.h"
 #include "HAL/FileManager.h"
 #include "Misc/PackageName.h"
@@ -39,12 +40,12 @@ DEFINE_LOG_CATEGORY_STATIC(LogUEAgentKitGraphEditExperimental, Log, All);
 
 namespace
 {
-	constexpr int32 MaxNodes = 16;
+	constexpr int32 MaxNodes = UEAgentKitBlueprintGraphEditExperimental::MaxNodesPerApply;
 	constexpr int32 MaxConnections = 24;
 	constexpr int32 MaxConnectionsPerNode = 8;
 	constexpr int32 MaxOwnedLiterals = 8;
 	constexpr int32 MaxOwnedStringLiteral = 256;
-	constexpr int32 MaxCoordinate = 100000;
+	constexpr int32 MaxCoordinate = UEAgentKitBlueprintGraphEditExperimental::MaxNodeCoordinate;
 	const TCHAR* const PreviewSchemaVersion = TEXT("ueak.graphpatch-edit-preview/1.0");
 	const TCHAR* const BranchClassPath = TEXT("/Script/BlueprintGraph.K2Node_IfThenElse");
 	const TCHAR* const SequenceClassPath = TEXT("/Script/BlueprintGraph.K2Node_ExecutionSequence");
@@ -4198,6 +4199,421 @@ namespace
 		}
 		return nullptr;
 	}
+
+	FString AppendField(const FString& Builder, const FString& Field)
+	{
+		return Builder + FString::Printf(TEXT("%d:"), Field.Len()) + Field;
+	}
+
+	const TCHAR* const NodeStateFingerprintVersion = TEXT("ueak.blueprint-node-state/1");
+
+	/**
+	 * Node structure fingerprint: identity, class, position and pin inventory.
+	 *
+	 * Pin defaults and link counts belong to the pin-default writer's own
+	 * fingerprint, so they are deliberately not repeated here; the two hashes are
+	 * reported side by side by the atomic patch.
+	 */
+	FString ComputeNodeStateFingerprint(UEdGraph* Graph)
+	{
+		if (Graph == nullptr)
+		{
+			return FString();
+		}
+		TArray<UEdGraphNode*> SortedNodes;
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (Node != nullptr)
+			{
+				SortedNodes.Add(Node);
+			}
+		}
+		SortedNodes.Sort([](const UEdGraphNode& Left, const UEdGraphNode& Right)
+		{
+			return Left.NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower)
+				< Right.NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower);
+		});
+		FString Builder;
+		Builder = AppendField(Builder, NodeStateFingerprintVersion);
+		Builder = AppendField(
+			Builder,
+			Graph->GraphGuid.ToString(EGuidFormats::DigitsWithHyphensLower));
+		for (const UEdGraphNode* Node : SortedNodes)
+		{
+			Builder = AppendField(
+				Builder,
+				Node->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower));
+			Builder = AppendField(Builder, Node->GetClass()->GetPathName());
+			Builder = AppendField(Builder, FString::FromInt(Node->NodePosX));
+			Builder = AppendField(Builder, FString::FromInt(Node->NodePosY));
+			TArray<UEdGraphPin*> Pins;
+			for (UEdGraphPin* Pin : Node->Pins)
+			{
+				if (Pin != nullptr)
+				{
+					Pins.Add(Pin);
+				}
+			}
+			Pins.Sort([](const UEdGraphPin& Left, const UEdGraphPin& Right)
+			{
+				if (Left.PinName != Right.PinName)
+				{
+					return Left.PinName.LexicalLess(Right.PinName);
+				}
+				return Left.Direction < Right.Direction;
+			});
+			for (const UEdGraphPin* Pin : Pins)
+			{
+				Builder = AppendField(Builder, Pin->PinName.ToString());
+				Builder = AppendField(
+					Builder,
+					Pin->Direction == EGPD_Input ? TEXT("input") : TEXT("output"));
+				Builder = AppendField(
+					Builder,
+					Pin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower));
+				Builder = AppendField(Builder, Pin->PinType.PinCategory.ToString());
+				Builder = AppendField(Builder, Pin->PinType.PinSubCategory.ToString());
+				Builder = AppendField(
+					Builder,
+					Pin->PinType.PinSubCategoryObject != nullptr
+						? Pin->PinType.PinSubCategoryObject->GetPathName()
+						: FString());
+			}
+		}
+		FString Digest;
+		if (!FBlueprintContextSha256::HashText(Builder, Digest))
+		{
+			return FString();
+		}
+		return FString(TEXT("sha256:")) + Digest;
+	}
+
+	/**
+	 * Shared creation path for the eight primitive nodeTypes.
+	 *
+	 * Both the single-writer Apply and the atomic patch seam call this function,
+	 * so the class lookup, the spawner vs CallFunction choice, the
+	 * RF_Transactional flag, the position and the default pins cannot drift
+	 * between the two entry points.  `call_function`, `call_owned_pure_function`
+	 * and the variable accessors keep their own branches in the single writer and
+	 * are not reachable here.
+	 *
+	 * OutNode is set as soon as the node exists in the graph, so a caller that
+	 * gets `false` can still remove the partially created node.
+	 */
+	bool CreatePrimitiveNode(
+		UEdGraph* Graph,
+		const FNodeSpec& Spec,
+		UEdGraphNode*& OutNode,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
+	{
+		OutNode = nullptr;
+		if (Graph == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-graph-unavailable"),
+				TEXT("The exact graph is unavailable."));
+		}
+		UEdGraphNode* Node = nullptr;
+		if (!Spec.FunctionName.IsEmpty())
+		{
+			UClass* FunctionOwner = FunctionOwnerForNodeType(Spec.NodeType);
+			if (FunctionOwner == nullptr)
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-node-spawn-failed"),
+					TEXT("The function owner class is unavailable."));
+			}
+			UFunction* Function = FunctionOwner->FindFunctionByName(FName(*Spec.FunctionName));
+			if (Function == nullptr)
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-node-spawn-failed"),
+					FString::Printf(TEXT("The function %s is unavailable."), *Spec.FunctionName));
+			}
+			UK2Node_CallFunction* CallNode = NewObject<UK2Node_CallFunction>(Graph);
+			if (CallNode == nullptr)
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-node-spawn-failed"),
+					TEXT("Could not allocate the CallFunction node."));
+			}
+			CallNode->Modify();
+			Graph->AddNode(CallNode, true, false);
+			CallNode->SetFromFunction(Function);
+			if (CallNode->Pins.Num() == 0)
+			{
+				CallNode->AllocateDefaultPins();
+			}
+			Node = CallNode;
+		}
+		else
+		{
+			UClass* NodeClass = NodeClassForType(Spec.NodeType);
+			if (NodeClass == nullptr)
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-node-type-not-allowed"),
+					FString::Printf(TEXT("Unsupported nodeType: %s"), *Spec.NodeType));
+			}
+			UBlueprintNodeSpawner* Spawner = UBlueprintNodeSpawner::Create(
+				NodeClass,
+				GetTransientPackage());
+			if (Spawner == nullptr)
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-node-spawn-failed"),
+					FString::Printf(
+						TEXT("Could not create a node spawner for %s."),
+						*Spec.NodeType));
+			}
+			Node = Spawner->Invoke(
+				Graph,
+				IBlueprintNodeBinder::FBindingSet(),
+				FVector2D(Spec.X, Spec.Y));
+		}
+		if (Node == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-node-spawn-failed"),
+				FString::Printf(TEXT("The Editor failed to spawn %s."), *Spec.NodeType));
+		}
+		OutNode = Node;
+		Node->SetFlags(RF_Transactional);
+		if (!Node->NodeGuid.IsValid())
+		{
+			Node->CreateNewGuid();
+		}
+		Node->NodePosX = Spec.X;
+		Node->NodePosY = Spec.Y;
+		if (Node->Pins.Num() == 0)
+		{
+			Node->AllocateDefaultPins();
+		}
+		if (Node->Pins.Num() == 0 || !Node->NodeGuid.IsValid())
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-node-spawn-failed"),
+				FString::Printf(
+					TEXT("Spawned %s has no pins or no valid NodeGuid."),
+					*Spec.NodeType));
+		}
+		return true;
+	}
+
+	/**
+	 * Read one primitive node back against the exact plan.
+	 *
+	 * This is the atomic seam's contract check.  The single writer's own read-back
+	 * (node count, created GUID present, undo/redo) is unchanged; the patch adds
+	 * this stricter per-field proof because it returns one result per operation.
+	 */
+	bool NodeMatchesAtomicOperation(
+		const UEdGraphNode* Node,
+		const UEAgentKitBlueprintGraphEditExperimental::FAtomicNodeOperation& Operation,
+		FString& OutReason)
+	{
+		if (Node == nullptr)
+		{
+			OutReason = TEXT("The created node is missing from the live graph.");
+			return false;
+		}
+		if (!Node->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower).Equals(
+				Operation.NodeGuid,
+				ESearchCase::CaseSensitive))
+		{
+			OutReason = TEXT("The created node no longer carries the resolved NodeGuid.");
+			return false;
+		}
+		if (!Node->GetClass()->GetPathName().Equals(
+				Operation.NodeClassPath,
+				ESearchCase::CaseSensitive))
+		{
+			OutReason = FString::Printf(
+				TEXT("The created node class %s does not match the resolved class %s."),
+				*Node->GetClass()->GetPathName(),
+				*Operation.NodeClassPath);
+			return false;
+		}
+		if (Node->NodePosX != Operation.X || Node->NodePosY != Operation.Y)
+		{
+			OutReason = FString::Printf(
+				TEXT("The created node position (%d,%d) does not match the plan (%d,%d)."),
+				Node->NodePosX,
+				Node->NodePosY,
+				Operation.X,
+				Operation.Y);
+			return false;
+		}
+
+		FNodeSpec Expected;
+		Expected.NodeType = Operation.NodeType;
+		Expected.X = Operation.X;
+		Expected.Y = Operation.Y;
+		FString IgnoredCode;
+		FString IgnoredMessage;
+		if (!ConfigureNodeType(
+				Operation.NodeType,
+				Expected,
+				IgnoredCode,
+				IgnoredMessage))
+		{
+			OutReason = FString::Printf(
+				TEXT("The resolved nodeType %s has no contract."),
+				*Operation.NodeType);
+			return false;
+		}
+		const int32 ExpectedPinCount = Expected.InputPins.Num() + Expected.OutputPins.Num();
+		int32 VisiblePinCount = 0;
+		int32 HiddenSelfCount = 0;
+		for (const UEdGraphPin* Pin : Node->Pins)
+		{
+			if (Pin == nullptr)
+			{
+				continue;
+			}
+			const bool bIsHiddenSelf =
+				Pin->bHidden
+				&& Pin->Direction == EGPD_Input
+				&& Pin->PinName == UEdGraphSchema_K2::PN_Self;
+			if (bIsHiddenSelf)
+			{
+				++HiddenSelfCount;
+				if (Pin->LinkedTo.Num() != 0)
+				{
+					OutReason = TEXT("The hidden self pin unexpectedly has links.");
+					return false;
+				}
+				continue;
+			}
+			if (Pin->bHidden)
+			{
+				OutReason = FString::Printf(
+					TEXT("The created node has an unexpected hidden pin %s."),
+					*Pin->PinName.ToString());
+				return false;
+			}
+			++VisiblePinCount;
+		}
+		if (VisiblePinCount != ExpectedPinCount || HiddenSelfCount > 1)
+		{
+			OutReason = FString::Printf(
+				TEXT("The created %s node has %d visible pins, expected %d."),
+				*Operation.NodeType,
+				VisiblePinCount,
+				ExpectedPinCount);
+			return false;
+		}
+		for (const FString& PinName : Expected.InputPins)
+		{
+			const UEdGraphPin* Pin = Node->FindPin(FName(*PinName), EGPD_Input);
+			if (Pin == nullptr || !PinMatchesType(Pin, Expected.InputPinTypes.FindRef(PinName)))
+			{
+				OutReason = FString::Printf(
+					TEXT("The created node input pin %s is missing or has the wrong type."),
+					*PinName);
+				return false;
+			}
+		}
+		for (const FString& PinName : Expected.OutputPins)
+		{
+			const UEdGraphPin* Pin = Node->FindPin(FName(*PinName), EGPD_Output);
+			if (Pin == nullptr || !PinMatchesType(Pin, Expected.OutputPinTypes.FindRef(PinName)))
+			{
+				OutReason = FString::Printf(
+					TEXT("The created node output pin %s is missing or has the wrong type."),
+					*PinName);
+				return false;
+			}
+		}
+		if (!Expected.FunctionName.IsEmpty())
+		{
+			const UK2Node_CallFunction* CallNode = Cast<UK2Node_CallFunction>(Node);
+			const UFunction* Function = CallNode != nullptr ? CallNode->GetTargetFunction() : nullptr;
+			if (Function == nullptr
+				|| !Function->GetName().Equals(Expected.FunctionName, ESearchCase::CaseSensitive))
+			{
+				OutReason = FString::Printf(
+					TEXT("The created node no longer calls %s."),
+					*Expected.FunctionName);
+				return false;
+			}
+			UClass* OwnerClass = Function->GetOuterUClass();
+			UClass* ExpectedOwner = FunctionOwnerForNodeType(Operation.NodeType);
+			if (OwnerClass == nullptr
+				|| ExpectedOwner == nullptr
+				|| !OwnerClass->GetPathName().Equals(
+					ExpectedOwner->GetPathName(),
+					ESearchCase::CaseSensitive))
+			{
+				OutReason = TEXT("The created function node has the wrong owner class.");
+				return false;
+			}
+			if (!Function->HasAnyFunctionFlags(FUNC_BlueprintPure)
+				|| !Function->HasAnyFunctionFlags(FUNC_Static))
+			{
+				OutReason = TEXT("The created function node is not a static BlueprintPure call.");
+				return false;
+			}
+		}
+		return true;
+	}
+
+	UEdGraphNode* FindNodeByGuid(UEdGraph* Graph, const FGuid& Guid)
+	{
+		if (Graph == nullptr)
+		{
+			return nullptr;
+		}
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (Node != nullptr && Node->NodeGuid == Guid)
+			{
+				return Node;
+			}
+		}
+		return nullptr;
+	}
+
+	/** Remove nodes in reverse order; returns false when one survives. */
+	bool RemoveCreatedNodes(UBlueprint* Blueprint, UEdGraph* Graph, TArray<UEdGraphNode*>& Nodes)
+	{
+		bool bAllRemoved = true;
+		for (int32 Index = Nodes.Num() - 1; Index >= 0; --Index)
+		{
+			UEdGraphNode* Node = Nodes[Index];
+			if (Node == nullptr)
+			{
+				continue;
+			}
+			Node->Modify();
+			FBlueprintEditorUtils::RemoveNode(Blueprint, Node, true);
+			if (Graph != nullptr && Graph->Nodes.Contains(Node))
+			{
+				bAllRemoved = false;
+			}
+		}
+		Nodes.Reset();
+		return bAllRemoved;
+	}
+
 }
 
 bool UEAgentKitBlueprintGraphEditExperimental::IsExperimentalWriteAvailable()
@@ -4229,6 +4645,274 @@ void UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest()
 {
 	bTestOverrideSet = false;
 	bTestOverrideEnabled = false;
+}
+
+FString UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicNodeStateFingerprint(UEdGraph* Graph)
+{
+	return ComputeNodeStateFingerprint(Graph);
+}
+
+bool UEAgentKitBlueprintGraphEditExperimental::TryResolveAtomicNodeOperation(
+	UEdGraph* Graph,
+	FAtomicNodeOperation& InOutOperation,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	// Everything here is read-only: nodeType whitelist, coordinate bound and the
+	// exact K2 schema.  The resolved class/function fields are what the
+	// transaction is later allowed to write.
+	if (Graph == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-graph-unavailable"),
+			TEXT("The exact graph is unavailable."));
+	}
+	if (Graph->GetSchema() == nullptr || !Graph->GetSchema()->IsA<UEdGraphSchema_K2>())
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-schema-not-supported"),
+			TEXT("Experimental graph edit supports only K2 Blueprint graphs."));
+	}
+	if (NodeClassForType(InOutOperation.NodeType) == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-node-type-not-allowed"),
+			FString::Printf(
+				TEXT("The atomic patch creates only these nodeTypes: branch, sequence, not_bool, bool_or, int_add, int_equal, double_add, string_concat (got '%s')."),
+				*InOutOperation.NodeType));
+	}
+	if (InOutOperation.X < -MaxCoordinate || InOutOperation.X > MaxCoordinate
+		|| InOutOperation.Y < -MaxCoordinate || InOutOperation.Y > MaxCoordinate)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-invalid-parameters"),
+			FString::Printf(
+				TEXT("x and y must be integers between -%d and %d."),
+				MaxCoordinate,
+				MaxCoordinate));
+	}
+
+	FNodeSpec Spec;
+	Spec.NodeType = InOutOperation.NodeType;
+	Spec.X = InOutOperation.X;
+	Spec.Y = InOutOperation.Y;
+	if (!ConfigureNodeType(
+			InOutOperation.NodeType,
+			Spec,
+			OutErrorCode,
+			OutErrorMessage))
+	{
+		return false;
+	}
+	// The fixed functions must exist in this engine before the transaction opens;
+	// a missing function is not something the rollback path should discover.
+	if (!Spec.FunctionName.IsEmpty())
+	{
+		UClass* FunctionOwner = FunctionOwnerForNodeType(Spec.NodeType);
+		if (FunctionOwner == nullptr
+			|| FunctionOwner->FindFunctionByName(FName(*Spec.FunctionName)) == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-node-spawn-failed"),
+				FString::Printf(TEXT("The function %s is unavailable."), *Spec.FunctionName));
+		}
+	}
+	InOutOperation.NodeClassPath = Spec.NodeClassPath;
+	InOutOperation.FunctionName = Spec.FunctionName;
+	InOutOperation.InputPins = Spec.InputPins;
+	InOutOperation.OutputPins = Spec.OutputPins;
+	InOutOperation.InputPinTypes = Spec.InputPinTypes;
+	InOutOperation.OutputPinTypes = Spec.OutputPinTypes;
+	return true;
+}
+
+bool UEAgentKitBlueprintGraphEditExperimental::TryApplyAtomicNodeOperations(
+	UBlueprint* Blueprint,
+	UEdGraph* Graph,
+	const TArray<FAtomicNodeOperation>& Operations,
+	TArray<FGuid>& OutCreatedGuids,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	OutCreatedGuids.Reset();
+	if (Blueprint == nullptr || Graph == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-graph-unavailable"),
+			TEXT("The exact Blueprint graph is unavailable."));
+	}
+	if (Operations.IsEmpty() || Operations.Num() > MaxNodes)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-invalid-nodes"),
+			FString::Printf(
+				TEXT("An atomic node Apply takes between 1 and %d operations."),
+				MaxNodes));
+	}
+
+	TArray<UEdGraphNode*> CreatedNodes;
+	for (const FAtomicNodeOperation& Operation : Operations)
+	{
+		FNodeSpec Spec;
+		Spec.NodeType = Operation.NodeType;
+		Spec.FunctionName = Operation.FunctionName;
+		Spec.X = Operation.X;
+		Spec.Y = Operation.Y;
+		UEdGraphNode* Node = nullptr;
+		if (!CreatePrimitiveNode(Graph, Spec, Node, OutErrorCode, OutErrorMessage))
+		{
+			// A partially created node is still a write; remove it before the
+			// caller can observe an empty result.
+			if (Node != nullptr && Graph->Nodes.Contains(Node))
+			{
+				CreatedNodes.Add(Node);
+			}
+			if (!RemoveCreatedNodes(Blueprint, Graph, CreatedNodes))
+			{
+				OutErrorMessage += TEXT(" The atomic Apply could not remove a partially created node.");
+			}
+			return false;
+		}
+		FString Reason;
+		FAtomicNodeOperation Checked = Operation;
+		Checked.NodeGuid = Node->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower);
+		if (!NodeMatchesAtomicOperation(Node, Checked, Reason))
+		{
+			CreatedNodes.Add(Node);
+			RemoveCreatedNodes(Blueprint, Graph, CreatedNodes);
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-node-contract-failed"),
+				Reason);
+		}
+		CreatedNodes.Add(Node);
+		OutCreatedGuids.Add(Node->NodeGuid);
+	}
+	return true;
+}
+
+bool UEAgentKitBlueprintGraphEditExperimental::TryCheckAtomicNodeOperations(
+	UEdGraph* Graph,
+	const TArray<FAtomicNodeOperation>& Operations,
+	bool bExpectAfter,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	if (Graph == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-graph-unavailable"),
+			TEXT("The exact graph is unavailable."));
+	}
+	for (const FAtomicNodeOperation& Operation : Operations)
+	{
+		FGuid NodeGuid;
+		if (Operation.NodeGuid.Len() != 36
+			|| !FGuid::Parse(Operation.NodeGuid, NodeGuid))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-node-contract-failed"),
+				TEXT("The resolved NodeGuid is not a canonical GUID."));
+		}
+		const UEdGraphNode* Node = FindNodeByGuid(Graph, NodeGuid);
+		if (!bExpectAfter)
+		{
+			if (Node != nullptr)
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-node-restore-failed"),
+					FString::Printf(
+						TEXT("Node %s is still present after the restore."),
+						*Operation.NodeGuid));
+			}
+			continue;
+		}
+		FString Reason;
+		if (!NodeMatchesAtomicOperation(Node, Operation, Reason))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-node-contract-failed"),
+				Reason);
+		}
+	}
+	return true;
+}
+
+bool UEAgentKitBlueprintGraphEditExperimental::TryRestoreAtomicNodeOperations(
+	UBlueprint* Blueprint,
+	UEdGraph* Graph,
+	const TArray<FAtomicNodeOperation>& Operations,
+	int32 AppliedCount,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	if (Blueprint == nullptr || Graph == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-graph-unavailable"),
+			TEXT("The exact Blueprint graph is unavailable."));
+	}
+	if (AppliedCount < 0 || AppliedCount > Operations.Num())
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-invalid-nodes"),
+			TEXT("AppliedCount must address the prefix of the operation list."));
+	}
+	TArray<UEdGraphNode*> NodesToRemove;
+	for (int32 Index = 0; Index < AppliedCount; ++Index)
+	{
+		FGuid NodeGuid;
+		if (Operations[Index].NodeGuid.Len() != 36
+			|| !FGuid::Parse(Operations[Index].NodeGuid, NodeGuid))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-node-restore-failed"),
+				TEXT("The applied operation has no canonical NodeGuid to remove."));
+		}
+		UEdGraphNode* Node = FindNodeByGuid(Graph, NodeGuid);
+		if (Node != nullptr)
+		{
+			NodesToRemove.Add(Node);
+		}
+	}
+	if (!RemoveCreatedNodes(Blueprint, Graph, NodesToRemove))
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-node-restore-failed"),
+			TEXT("At least one created node survived its removal."));
+	}
+	return true;
 }
 
 bool UEAgentKitBlueprintGraphEditExperimental::TryPreviewExperimental(
@@ -4403,6 +5087,29 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
 
 		for (const FNodeSpec& Spec : Plan.Nodes)
 		{
+			if (!Spec.bVariableAccessor && !Spec.bCallFunction && !Spec.bOwnedCall)
+			{
+				// Primitive nodeTypes go through the one creation function the
+				// atomic patch seam also uses (0-3.4), so the two entry points
+				// cannot drift in class, spawner path, flags, position or pins.
+				// Everything the shared function already proved (transactional
+				// flag, valid NodeGuid, non-empty pins, exact position) is not
+				// repeated below.
+				UEdGraphNode* PrimitiveNode = nullptr;
+				if (!CreatePrimitiveNode(
+						Graph,
+						Spec,
+						PrimitiveNode,
+						OutErrorCode,
+						OutErrorMessage))
+				{
+					return Abort(*OutErrorCode, OutErrorMessage);
+				}
+				CreatedNodes.Add(Spec.TempId, PrimitiveNode);
+				CreatedGuidByTempId.Add(Spec.TempId, PrimitiveNode->NodeGuid);
+				CreatedGuids.Add(PrimitiveNode->NodeGuid);
+				continue;
+			}
 			UEdGraphNode* Node = nullptr;
 			if (Spec.bVariableAccessor)
 			{

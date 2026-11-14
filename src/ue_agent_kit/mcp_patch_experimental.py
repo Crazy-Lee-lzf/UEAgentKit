@@ -126,14 +126,16 @@ def register_patch_experimental_tools(
         """Read-only preview of one atomic Blueprint patch.
 
         Each operation carries an opId plus its kind-specific fields. This build
-        migrates setPinDefault (nodeGuid, pinName, pinGuid, type, value) and
-        createVariable (name, type, defaultValue), so a request that names any
-        other kind is refused before it reaches the Editor. A createVariable
-        operation targets the Blueprint, not the graph: the graphGuid only has to
-        be a graph of that Blueprint (and the one the focused editor shows). The
-        result binds the exact before values, the graph/state/variable
-        fingerprints and the required Apply confirmation, and it lists one
-        validated entry per operation.
+        migrates setPinDefault (nodeGuid, pinName, pinGuid, type, value),
+        createVariable (name, type, defaultValue) and createNode (nodeType, x, y),
+        so a request that names any other kind is refused before it reaches the
+        Editor. A createVariable operation targets the Blueprint, not the graph:
+        the graphGuid only has to be a graph of that Blueprint (and the one the
+        focused editor shows). A createNode operation creates one node and no
+        edge; use the nodeGuid returned by Apply if you need to connect it in a
+        second patch. The result binds the exact before values, the
+        graph/state/variable/node fingerprints and the required Apply
+        confirmation, and it lists one validated entry per operation.
         """
         try:
             _capabilities(live_editor_service, PREVIEW_CAPABILITY)
