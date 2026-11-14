@@ -423,6 +423,8 @@ class VariableWriteMcpToolTests(unittest.TestCase):
                 "ue_preview_blueprint_variable_create_experimental",
                 "ue_apply_blueprint_variable_create_experimental",
                 "ue_save_blueprint_variable_create_experimental",
+                # 0-3.4: one call runs preview -> apply (-> save).
+                "ue_create_blueprint_variables",
             },
         )
 

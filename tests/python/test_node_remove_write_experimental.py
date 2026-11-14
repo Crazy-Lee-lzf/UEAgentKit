@@ -529,6 +529,8 @@ class NodeRemoveMcpToolTests(unittest.TestCase):
                 "ue_preview_blueprint_node_remove_experimental",
                 "ue_apply_blueprint_node_remove_experimental",
                 "ue_save_blueprint_node_remove_experimental",
+                # 0-3.4: one call runs preview -> apply (-> save).
+                "ue_remove_blueprint_node",
             },
         )
 

@@ -526,6 +526,8 @@ class RewireMcpToolTests(unittest.TestCase):
                 "ue_preview_blueprint_rewire_experimental",
                 "ue_apply_blueprint_rewire_experimental",
                 "ue_save_blueprint_rewire_experimental",
+                # 0-3.4: one call runs preview -> apply (-> save).
+                "ue_rewire_blueprint_pin",
             },
         )
 

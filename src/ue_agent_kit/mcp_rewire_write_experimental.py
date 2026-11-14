@@ -243,4 +243,73 @@ def register_rewire_write_experimental_tools(
         }
 
 
+    @server.tool(annotations=apply_annotations)
+    def ue_rewire_blueprint_pin(
+        asset_path: str,
+        graph_guid: str,
+        operation: str,
+        target_node_guid: str,
+        target_pin_name: str,
+        target_pin_guid: str,
+        old_source_node_guid: str,
+        old_source_pin_name: str,
+        old_source_pin_guid: str,
+        expected_edge_set_hash: str,
+        new_source_node_guid: str | None = None,
+        new_source_pin_name: str | None = None,
+        new_source_pin_guid: str | None = None,
+        save: bool = False,
+    ) -> dict[str, Any]:
+        """Preview, apply and optionally save one Blueprint pin rewire in a single call.
+
+        Reuses the three existing tools in order, so every check is exactly the
+        same; each stage's bridge result is returned for audit. save=False leaves
+        the package dirty, exactly like Apply alone.
+        """
+        stages: dict[str, Any] = {}
+        preview = ue_preview_blueprint_rewire_experimental(
+            asset_path=asset_path,
+            graph_guid=graph_guid,
+            operation=operation,
+            target_node_guid=target_node_guid,
+            target_pin_name=target_pin_name,
+            target_pin_guid=target_pin_guid,
+            old_source_node_guid=old_source_node_guid,
+            old_source_pin_name=old_source_pin_name,
+            old_source_pin_guid=old_source_pin_guid,
+            expected_edge_set_hash=expected_edge_set_hash,
+            new_source_node_guid=new_source_node_guid,
+            new_source_pin_name=new_source_pin_name,
+            new_source_pin_guid=new_source_pin_guid,
+        )
+        if not preview.get("ok"):
+            return {**preview, "tool": "ue_rewire_blueprint_pin",
+                     "completedStages": [], "stages": stages}
+        stages["preview"] = preview["result"]
+        applied = ue_apply_blueprint_rewire_experimental(stages["preview"])
+        if not applied.get("ok"):
+            return {**applied, "tool": "ue_rewire_blueprint_pin",
+                     "completedStages": ["preview"], "stages": stages}
+        stages["apply"] = applied["result"]
+        if save:
+            saved = ue_save_blueprint_rewire_experimental(stages["apply"])
+            if not saved.get("ok"):
+                return {**saved, "tool": "ue_rewire_blueprint_pin",
+                         "completedStages": ["preview", "apply"],
+                         "stages": stages}
+            stages["save"] = saved["result"]
+        return {
+            "schemaVersion": "1.0",
+            "tool": "ue_rewire_blueprint_pin",
+            "ok": True,
+            "readOnly": False,
+            "destructive": True,
+            "experimental": True,
+            "explicitOptInRequired": True,
+            "productionDefault": False,
+            "source": "live-editor-memory",
+            "saved": bool(save),
+            "stages": stages,
+        }
+
 __all__ = ["register_rewire_write_experimental_tools"]

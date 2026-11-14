@@ -224,4 +224,57 @@ def register_graph_edit_experimental_tools(
         }
 
 
+    @server.tool(annotations=apply_annotations)
+    def ue_edit_blueprint_graph(
+        assetPath: str,
+        graphGuid: str,
+        nodes: list[dict[str, Any]],
+        connections: list[dict[str, Any]],
+        operation: str = "connect",
+        save: bool = False,
+    ) -> dict[str, Any]:
+        """Preview, apply and optionally save one Blueprint graph structure edit in a single call.
+
+        Reuses the three existing tools in order, so every check is exactly the
+        same; each stage's bridge result is returned for audit. save=False leaves
+        the package dirty, exactly like Apply alone.
+        """
+        stages: dict[str, Any] = {}
+        preview = ue_preview_blueprint_graph_edit_experimental(
+            assetPath=assetPath,
+            graphGuid=graphGuid,
+            nodes=nodes,
+            connections=connections,
+            operation=operation,
+        )
+        if not preview.get("ok"):
+            return {**preview, "tool": "ue_edit_blueprint_graph",
+                     "completedStages": [], "stages": stages}
+        stages["preview"] = preview["result"]
+        applied = ue_apply_blueprint_graph_edit_experimental(stages["preview"])
+        if not applied.get("ok"):
+            return {**applied, "tool": "ue_edit_blueprint_graph",
+                     "completedStages": ["preview"], "stages": stages}
+        stages["apply"] = applied["result"]
+        if save:
+            saved = ue_save_blueprint_graph_edit_experimental(stages["apply"])
+            if not saved.get("ok"):
+                return {**saved, "tool": "ue_edit_blueprint_graph",
+                         "completedStages": ["preview", "apply"],
+                         "stages": stages}
+            stages["save"] = saved["result"]
+        return {
+            "schemaVersion": "1.0",
+            "tool": "ue_edit_blueprint_graph",
+            "ok": True,
+            "readOnly": False,
+            "destructive": True,
+            "experimental": True,
+            "explicitOptInRequired": True,
+            "productionDefault": False,
+            "source": "live-editor-memory",
+            "saved": bool(save),
+            "stages": stages,
+        }
+
 __all__ = ["register_graph_edit_experimental_tools"]

@@ -229,4 +229,59 @@ def register_node_remove_write_experimental_tools(
         }
 
 
+    @server.tool(annotations=apply_annotations)
+    def ue_remove_blueprint_node(
+        asset_path: str,
+        graph_guid: str,
+        node_guid: str,
+        expected_node_class: str,
+        expected_edge_set_hash: str,
+        removed_edges: list[dict[str, Any]] | None = None,
+        save: bool = False,
+    ) -> dict[str, Any]:
+        """Preview, apply and optionally save one Blueprint node removal in a single call.
+
+        Reuses the three existing tools in order, so every check is exactly the
+        same; each stage's bridge result is returned for audit. save=False leaves
+        the package dirty, exactly like Apply alone.
+        """
+        stages: dict[str, Any] = {}
+        preview = ue_preview_blueprint_node_remove_experimental(
+            asset_path=asset_path,
+            graph_guid=graph_guid,
+            node_guid=node_guid,
+            expected_node_class=expected_node_class,
+            expected_edge_set_hash=expected_edge_set_hash,
+            removed_edges=removed_edges,
+        )
+        if not preview.get("ok"):
+            return {**preview, "tool": "ue_remove_blueprint_node",
+                     "completedStages": [], "stages": stages}
+        stages["preview"] = preview["result"]
+        applied = ue_apply_blueprint_node_remove_experimental(stages["preview"])
+        if not applied.get("ok"):
+            return {**applied, "tool": "ue_remove_blueprint_node",
+                     "completedStages": ["preview"], "stages": stages}
+        stages["apply"] = applied["result"]
+        if save:
+            saved = ue_save_blueprint_node_remove_experimental(stages["apply"])
+            if not saved.get("ok"):
+                return {**saved, "tool": "ue_remove_blueprint_node",
+                         "completedStages": ["preview", "apply"],
+                         "stages": stages}
+            stages["save"] = saved["result"]
+        return {
+            "schemaVersion": "1.0",
+            "tool": "ue_remove_blueprint_node",
+            "ok": True,
+            "readOnly": False,
+            "destructive": True,
+            "experimental": True,
+            "explicitOptInRequired": True,
+            "productionDefault": False,
+            "source": "live-editor-memory",
+            "saved": bool(save),
+            "stages": stages,
+        }
+
 __all__ = ["register_node_remove_write_experimental_tools"]

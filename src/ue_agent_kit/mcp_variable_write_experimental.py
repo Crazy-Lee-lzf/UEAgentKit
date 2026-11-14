@@ -197,4 +197,51 @@ def register_variable_write_experimental_tools(
         }
 
 
+    @server.tool(annotations=apply_annotations)
+    def ue_create_blueprint_variables(
+        asset_path: str,
+        variables: list[dict[str, Any]],
+        save: bool = False,
+    ) -> dict[str, Any]:
+        """Preview, apply and optionally save one Blueprint variable creation in a single call.
+
+        Reuses the three existing tools in order, so every check is exactly the
+        same; each stage's bridge result is returned for audit. save=False leaves
+        the package dirty, exactly like Apply alone.
+        """
+        stages: dict[str, Any] = {}
+        preview = ue_preview_blueprint_variable_create_experimental(
+            asset_path=asset_path,
+            variables=variables,
+        )
+        if not preview.get("ok"):
+            return {**preview, "tool": "ue_create_blueprint_variables",
+                     "completedStages": [], "stages": stages}
+        stages["preview"] = preview["result"]
+        applied = ue_apply_blueprint_variable_create_experimental(stages["preview"])
+        if not applied.get("ok"):
+            return {**applied, "tool": "ue_create_blueprint_variables",
+                     "completedStages": ["preview"], "stages": stages}
+        stages["apply"] = applied["result"]
+        if save:
+            saved = ue_save_blueprint_variable_create_experimental(stages["apply"])
+            if not saved.get("ok"):
+                return {**saved, "tool": "ue_create_blueprint_variables",
+                         "completedStages": ["preview", "apply"],
+                         "stages": stages}
+            stages["save"] = saved["result"]
+        return {
+            "schemaVersion": "1.0",
+            "tool": "ue_create_blueprint_variables",
+            "ok": True,
+            "readOnly": False,
+            "destructive": True,
+            "experimental": True,
+            "explicitOptInRequired": True,
+            "productionDefault": False,
+            "source": "live-editor-memory",
+            "saved": bool(save),
+            "stages": stages,
+        }
+
 __all__ = ["register_variable_write_experimental_tools"]
