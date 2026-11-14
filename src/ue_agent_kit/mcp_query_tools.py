@@ -1,21 +1,96 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Literal
 
-from .live_asset_overlay import get_session_overlay
+from .editor_bridge import LiveEditorError
+from .live_asset_overlay import (
+    BLUEPRINT_CLASS,
+    LiveOverlayError,
+    get_session_overlay,
+    package_file_for_object_path,
+    prove_and_install,
+    sha256_file,
+)
 
 OVERLAY_SECTION = "overlay"
 
 
-def _overlay_record(asset_path: str) -> dict[str, Any] | None:
-    """The session overlay entry for one asset, if a proven refresh installed one."""
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _project_path(live_editor_service: Any) -> Path | None:
+    """The fixed Editor project, or None when this server has no live Editor."""
+    config = getattr(live_editor_service, "config", None) if live_editor_service is not None else None
+    raw = getattr(config, "project_path", None) if config is not None else None
+    return Path(str(raw)) if raw else None
+
+
+def _idle_overlay_state() -> dict[str, Any]:
+    return {
+        "overlayCause": "installed",
+        "overlayRefreshed": False,
+        "overlayStale": False,
+        "staleCause": None,
+    }
+
+
+def _stale_cause(exc: BaseException) -> str:
+    code = getattr(exc, "code", "")
+    return str(code) if code else "live-index-refresh-unavailable"
+
+
+def _overlay_record(
+    asset_path: str,
+    live_editor_service: Any,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """The session overlay entry plus whether it still describes the disk.
+
+    0-3.3 slice 4: a record is only cache-worthy while its revision equals the
+    package file's current SHA-256.  A user Ctrl+S changes the file behind the
+    record, so the first read after that re-proves it through the same refresh
+    core the explicit tool uses; a refused re-proof keeps the old record but
+    marks it stale instead of presenting it as current.
+    """
     if not asset_path:
-        return None
-    return get_session_overlay().get(asset_path)
+        return None, _idle_overlay_state()
+    record = get_session_overlay().get(asset_path)
+    if record is None:
+        return None, _idle_overlay_state()
+    state = _idle_overlay_state()
+    project_path = _project_path(live_editor_service)
+    if project_path is None:
+        # Without a live Editor there is nothing to re-prove against.
+        return record, state
+    try:
+        package_file = package_file_for_object_path(project_path, asset_path)
+    except LiveOverlayError:
+        return record, state
+    try:
+        if not package_file.is_file():
+            return record, {**state, "overlayStale": True, "staleCause": "package-file-missing"}
+        current_sha = sha256_file(package_file)
+    except OSError:
+        return record, {**state, "overlayStale": True, "staleCause": "package-file-unreadable"}
+    if record.get("revision") == f"sha256:{current_sha}":
+        return record, state
+    try:
+        refreshed = prove_and_install(
+            project_path=project_path,
+            asset_path=asset_path,
+            expected_class=BLUEPRINT_CLASS,
+            call_method=live_editor_service.call_method,
+            captured_at_utc=_utc_now_iso(),
+        )
+    except (LiveOverlayError, LiveEditorError, OSError, ValueError, RuntimeError) as exc:
+        return record, {**state, "overlayStale": True, "staleCause": _stale_cause(exc)}
+    return refreshed, {**state, "overlayCause": "disk-changed", "overlayRefreshed": True}
 
 
-def _overlay_metadata(record: dict[str, Any]) -> dict[str, Any]:
+def _overlay_metadata(record: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
     """Provenance only: never a field the index would also have claimed."""
     return {
         "revision": record.get("revision", ""),
@@ -23,6 +98,10 @@ def _overlay_metadata(record: dict[str, Any]) -> dict[str, Any]:
         "capturedAtUtc": record.get("capturedAtUtc", ""),
         "editorSessionId": record.get("editorSessionId", ""),
         "recordSource": record.get("source", ""),
+        "overlayCause": state["overlayCause"],
+        "overlayRefreshed": state["overlayRefreshed"],
+        "overlayStale": state["overlayStale"],
+        "staleCause": state["staleCause"],
     }
 
 
@@ -31,12 +110,13 @@ def _overlay_only_response(
     record: dict[str, Any],
     *,
     include_canonical: bool,
+    state: dict[str, Any],
     degraded_reason: str = "",
 ) -> dict[str, Any]:
     """Answer from the overlay alone: used when the caller asked only for it, or
     when the index is unavailable but a proven live record exists."""
-    metadata = _overlay_metadata(record)
-    if include_canonical:
+    metadata = _overlay_metadata(record, state)
+    if include_canonical and not state["overlayStale"]:
         metadata["canonical"] = record.get("canonical")
     payload: dict[str, Any] = {
         "schemaVersion": "1.0",
@@ -138,7 +218,7 @@ def register_query_tools(
         max_output_tokens: int = DEFAULT_OUTPUT_TOKEN_BUDGET,
     ) -> dict[str, Any]:
         """Get selected asset sections with independent section pagination and output budgeting."""
-        record = _overlay_record(asset_path)
+        record, overlay_state = _overlay_record(asset_path, live_editor_service)
         requested = sections
         wants_overlay = False
         include_canonical = False
@@ -157,7 +237,7 @@ def register_query_tools(
                             read_only=True,
                         )
                     return _overlay_only_response(
-                        asset_path, record, include_canonical=True
+                        asset_path, record, include_canonical=True, state=overlay_state
                     )
                 requested = trimmed
                 include_canonical = True
@@ -183,14 +263,15 @@ def register_query_tools(
                     asset_path,
                     record,
                     include_canonical=True,
+                    state=overlay_state,
                     degraded_reason=f"index-unavailable: {type(exc).__name__}",
                 )
             return error_response("ue_get_asset", exc, read_only=True)
         if record is None:
             return response
         merged = dict(response) if isinstance(response, dict) else {"result": response}
-        metadata = _overlay_metadata(record)
-        if wants_overlay and include_canonical:
+        metadata = _overlay_metadata(record, overlay_state)
+        if wants_overlay and include_canonical and not overlay_state["overlayStale"]:
             metadata["canonical"] = record.get("canonical")
         # Explicit provenance: index-derived fields stay index-derived, the overlay
         # is always its own key so nothing silently swaps source.

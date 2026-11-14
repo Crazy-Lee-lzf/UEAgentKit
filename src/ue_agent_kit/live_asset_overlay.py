@@ -143,6 +143,55 @@ def build_overlay_record(
     }
 
 
+def prove_and_install(
+    *,
+    project_path: Any,
+    asset_path: str,
+    expected_class: str,
+    call_method: Any,
+    captured_at_utc: str,
+) -> dict[str, Any]:
+    """Prove one saved asset against the live Bridge and install its record.
+
+    This is the single refresh core: the explicit tool and the read-path
+    auto-refresh both call it, so the five refusals in ``build_overlay_record``
+    (including "bridge revision == disk sha256") are enforced exactly once.
+    """
+    if not str(project_path):
+        raise LiveOverlayError(
+            "live-index-refresh-no-project",
+            "The live Editor service has no fixed project path.",
+        )
+    project = Path(str(project_path))
+    package_file = package_file_for_object_path(project, asset_path)
+    if not package_file.is_file():
+        raise LiveOverlayError(
+            "live-index-refresh-asset-file-missing",
+            "There is no package file on disk for this asset path.",
+        )
+    payload = call_method(
+        "editor.getBlueprintGraphContext",
+        {"assetPath": asset_path, "offset": 0, "limit": 1},
+    )
+    if not isinstance(payload, dict):
+        raise LiveOverlayError(
+            "live-index-refresh-no-canonical",
+            "The Editor Bridge returned no canonical object for this asset.",
+        )
+    context = payload.get("context")
+    asset_class = str(context.get("assetClass", "")) if isinstance(context, dict) else ""
+    record = build_overlay_record(
+        asset_path=asset_path,
+        asset_class=asset_class,
+        expected_class=expected_class,
+        bridge_canonical=payload,
+        disk_sha256=sha256_file(package_file),
+        editor_session_id=str(payload.get("editorSessionId", "")),
+        captured_at_utc=captured_at_utc,
+    )
+    return get_session_overlay().install(record)
+
+
 class LiveAssetOverlay:
     """One MCP session's overlay, bounded and dropped on generation change."""
 

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
@@ -155,6 +157,140 @@ class GetAssetOverlayTests(unittest.TestCase):
         out = self.tool(_Index())(asset_path=ASSET, sections=["overlay"])
         self.assertFalse(out["ok"])
         self.assertIn("No proven live overlay record", out["error"]["message"])
+
+
+class _LiveService:
+    """The minimal live service shape the read path needs for disk detection."""
+
+    def __init__(
+        self,
+        project: Path,
+        payload: dict[str, Any] | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self.config = type("Config", (), {"project_path": project})()
+        self.payload = payload or {}
+        self.error = error
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    def call_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append((method, dict(params)))
+        if self.error is not None:
+            raise self.error
+        return dict(self.payload)
+
+
+class UserSaveDetectTests(unittest.TestCase):
+    """0-3.3 slice 4: a read follows the disk, or says the record is stale."""
+
+    def setUp(self) -> None:
+        reset_session_overlay()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.project = self.root / "Game.uproject"
+        self.project.write_bytes(b"{}")
+        self.package = self.root / "Content" / "N1" / "BP_A.uasset"
+        self.package.parent.mkdir(parents=True)
+        self.package.write_bytes(b"v1")
+        self.disk_sha = hashlib.sha256(b"v1").hexdigest()
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+        reset_session_overlay()
+
+    def _install(self, revision: str | None = None) -> None:
+        record = _record()
+        record["revision"] = f"sha256:{revision if revision is not None else self.disk_sha}"
+        get_session_overlay().install(record)
+
+    def _payload(
+        self,
+        sha: str | None = None,
+        *,
+        dirty: bool = False,
+    ) -> dict[str, Any]:
+        return {
+            "available": True,
+            "readOnly": True,
+            "packageDirty": dirty,
+            "editorSessionId": "session-10",
+            "context": {
+                "assetClass": BLUEPRINT_CLASS,
+                "revision": {"value": f"sha256:{sha if sha is not None else self.disk_sha}"},
+            },
+        }
+
+    def _tool(self, service: _LiveService):
+        server = _Server()
+        register_query_tools(
+            server=server,
+            index_service=_Index(),
+            workflow_service=None,
+            live_editor_service=service,
+            read_annotations=_Annotations(readOnlyHint=True),
+            error_response=_error_response,
+            capabilities_response=lambda *a, **k: {},
+            project_status_response=lambda *a, **k: {},
+        )
+        return server.tools["ue_get_asset"]
+
+    def _save_new_bytes(self) -> str:
+        self.package.write_bytes(b"v2")
+        return hashlib.sha256(b"v2").hexdigest()
+
+    def test_unchanged_disk_does_not_call_the_bridge(self) -> None:
+        self._install()
+        service = _LiveService(self.project, self._payload())
+        out = self._tool(service)(asset_path=ASSET)
+        self.assertEqual(service.calls, [])
+        self.assertFalse(out["overlay"]["overlayRefreshed"])
+        self.assertFalse(out["overlay"]["overlayStale"])
+        self.assertEqual(out["overlay"]["overlayCause"], "installed")
+        self.assertIsNone(out["overlay"]["staleCause"])
+
+    def test_changed_disk_refreshes_through_the_bridge(self) -> None:
+        self._install()
+        new_sha = self._save_new_bytes()
+        service = _LiveService(self.project, self._payload(new_sha))
+        out = self._tool(service)(asset_path=ASSET)
+        self.assertEqual(len(service.calls), 1)
+        self.assertEqual(service.calls[0][0], "editor.getBlueprintGraphContext")
+        self.assertTrue(out["overlay"]["overlayRefreshed"])
+        self.assertFalse(out["overlay"]["overlayStale"])
+        self.assertEqual(out["overlay"]["overlayCause"], "disk-changed")
+        self.assertEqual(out["overlay"]["revision"], f"sha256:{new_sha}")
+        self.assertEqual(get_session_overlay().get(ASSET)["revision"], f"sha256:{new_sha}")
+
+    def test_dirty_package_marks_the_record_stale(self) -> None:
+        self._install()
+        new_sha = self._save_new_bytes()
+        service = _LiveService(self.project, self._payload(new_sha, dirty=True))
+        out = self._tool(service)(asset_path=ASSET, sections=["overlay"])
+        self.assertTrue(out["overlay"]["overlayStale"])
+        self.assertEqual(out["overlay"]["staleCause"], "live-index-refresh-package-dirty")
+        self.assertFalse(out["overlay"]["overlayRefreshed"])
+        # The old canonical is never presented as the current disk state.
+        self.assertNotIn("canonical", out["overlay"])
+
+    def test_bridge_revision_mismatch_marks_stale(self) -> None:
+        self._install()
+        self._save_new_bytes()
+        service = _LiveService(self.project, self._payload("f" * 64))
+        out = self._tool(service)(asset_path=ASSET)
+        self.assertTrue(out["overlay"]["overlayStale"])
+        self.assertEqual(out["overlay"]["staleCause"], "live-index-refresh-stale-proof")
+        self.assertEqual(out["overlay"]["revision"], f"sha256:{self.disk_sha}")
+
+    def test_missing_package_file_marks_stale_without_raising(self) -> None:
+        self._install()
+        self.package.unlink()
+        service = _LiveService(self.project, self._payload())
+        out = self._tool(service)(asset_path=ASSET, sections=["overlay"])
+        self.assertTrue(out["ok"])
+        self.assertTrue(out["overlay"]["overlayStale"])
+        self.assertEqual(out["overlay"]["staleCause"], "package-file-missing")
+        self.assertEqual(service.calls, [])
+        self.assertNotIn("canonical", out["overlay"])
 
 
 if __name__ == "__main__":

@@ -110,6 +110,8 @@ class RefreshToolTests(unittest.TestCase):
         self.assertFalse(out["indexFresh"])
         self.assertTrue(out["overlayUpdated"])
         self.assertFalse(out["restartRequired"])
+        # 0-3.3 slice 4: the explicit tool is not the read path's auto refresh.
+        self.assertEqual(out["overlayCause"], "explicit")
         self.assertEqual(out["overlayEntryCount"], 1)
         self.assertEqual(service.calls[0][0], "editor.getBlueprintGraphContext")
         self.assertIsNotNone(get_session_overlay().get(ASSET))

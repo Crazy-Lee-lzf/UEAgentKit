@@ -105,7 +105,7 @@ exist.
 |---|---|---|
 | 2 | 接一个读路径：`ue_get_asset` 在命中 overlay 时返回 overlay 数据并标注 `source=overlay` | 需审计该工具所有字段的取数处 |
 | 3 | 显式工具 `ue_refresh_asset_index_live(asset_path)`（纯 Blueprint，复用 0-3.2 的 `editor.getBlueprintGraphContext`） | 会改动 MCP 工具计数，需同步 registry 与所有计数断言 |
-| 4 | 用户保存检测：`editor.getDirtyAssets` + 磁盘 SHA 轮询，或桥侧保存钩子 | 单独风险项，需真实 Editor 验证 |
+| 4 | ~~用户保存检测~~ **已交付（0-3.3 切片 4）**：读 overlay 时比较磁盘 SHA 与记录 revision，不一致就用同一刷新核心自动重证；被拒则标 stale + 原因码 | 无桥侧轮询/钩子，不需要真实 Editor 常驻 |
 | 5 | 非蓝图 canonical reader（Material / DataTable）与共享 schema | 需新的桥方法与导出器约定 |
 
 **验收口径不变**：切片 3 完成后，刷新单个资产必须返回 `indexFresh=false`、`overlayUpdated=true`，
@@ -207,6 +207,25 @@ sections=["overlay","symbols"] → 索引按 ["symbols"] 查询，附带 canonic
 ```
 
 canonical 只在显式请求 overlay 段时附带，默认响应不会因整份图导出而膨胀，输出预算不受影响。
+
+## 切片 4 — 已交付：用户保存检测（0-3.3）
+
+用户 Ctrl+S 改的是磁盘，overlay 记录不会自己更新。读路径现在每次都做一次轻量核对：
+
+```text
+sha256(包文件) == record.revision ?
+  是 → 直接用记录（不调用 Bridge，缓存价值保留）
+  否 → 复用 prove_and_install()（与显式工具同一份核心）重证
+         成功 → 用新记录应答：overlayCause="disk-changed"，overlayRefreshed=true
+         被拒 → 保留旧记录但 overlayStale=true，staleCause=<精确错误码>，且不再返回 canonical
+```
+
+`staleCause` 除 `live-index-refresh-*` 外还有两个文件层错误：`package-file-missing`、`package-file-unreadable`。
+无论哪条路径都不抛异常；过期记录**绝不**被当成当前磁盘状态返回（stale 时不输出 canonical）。
+
+overlay 段新增四个只增不改的字段：`overlayCause`（`installed` / `explicit` / `disk-changed`）、
+`overlayRefreshed`、`overlayStale`、`staleCause`。`ue_refresh_asset_index_live` 的响应也带
+`overlayCause="explicit"`，其余字段与错误码不变。
 
 ---
 
