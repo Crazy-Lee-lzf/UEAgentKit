@@ -1692,8 +1692,6 @@ bool FUEAgentKitPatchRemoveNodeTest::RunTest(const FString& Parameters)
 
 	UEAgentKitBlueprintPatchExperimental::ResetExperimentalWriteForTest();
 	UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
-	UEAgentKitBlueprintNodeRemoveExperimental::ResetExperimentalWriteForTest();
-	UEAgentKitBlueprintRewireExperimental::ResetExperimentalWriteForTest();
 	if (!TestFalse(
 			TEXT("the atomic patch gate stays off unless the project opts in"),
 			UEAgentKitBlueprintPatchExperimental::IsExperimentalWriteAvailable()))
@@ -1702,14 +1700,10 @@ bool FUEAgentKitPatchRemoveNodeTest::RunTest(const FString& Parameters)
 	}
 	UEAgentKitBlueprintPatchExperimental::SetExperimentalWriteEnabledForTest(true);
 	UEAgentKitBlueprintGraphEditExperimental::SetExperimentalWriteEnabledForTest(true);
-	UEAgentKitBlueprintNodeRemoveExperimental::SetExperimentalWriteEnabledForTest(true);
-	UEAgentKitBlueprintRewireExperimental::SetExperimentalWriteEnabledForTest(true);
 	auto Fail = []
 	{
 		UEAgentKitBlueprintPatchExperimental::ResetExperimentalWriteForTest();
 		UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
-		UEAgentKitBlueprintNodeRemoveExperimental::ResetExperimentalWriteForTest();
-		UEAgentKitBlueprintRewireExperimental::ResetExperimentalWriteForTest();
 		return false;
 	};
 
@@ -1962,44 +1956,8 @@ bool FUEAgentKitPatchRemoveNodeTest::RunTest(const FString& Parameters)
 		}
 	}
 
-	// ---- Writer equivalence: the same node, seen by both previews. ----
+	// ---- The patch resolves the same node/edge identity it will remove. ----
 	{
-		TSharedPtr<FJsonObject> WriterPreview;
-		FString WriterCode;
-		FString WriterMessage;
-		if (!TestTrue(
-				TEXT("the single-writer node-remove preview succeeds"),
-				UEAgentKitBlueprintNodeRemoveExperimental::TryPreviewExperimental(
-					[&]()
-					{
-						TSharedRef<FJsonObject> Params = MakeShared<FJsonObject>();
-						Params->SetStringField(TEXT("assetPath"), Blueprint->GetPathName());
-						Params->SetStringField(TEXT("graphGuid"), GuidLower(Graph->GraphGuid));
-						Params->SetStringField(TEXT("nodeGuid"), GuidLower(A->NodeGuid));
-						Params->SetStringField(TEXT("expectedNodeClass"), NotBoolClassPath);
-						Params->SetStringField(
-							TEXT("expectedEdgeSetHash"),
-							[&]()
-							{
-								FString Hash;
-								UEAgentKitBlueprintNodeRemoveExperimental::TryComputeLiveEdgeSetHash(
-									Graph,
-									Hash);
-								return Hash;
-							}());
-						TArray<TSharedPtr<FJsonValue>> Edges;
-						Edges.Add(MakeShared<FJsonValueObject>(
-							MakeRemovedEdge(AOut, BranchCondition)));
-						Params->SetArrayField(TEXT("removedEdges"), Edges);
-						return Params;
-					}(),
-					WriterPreview,
-					WriterCode,
-					WriterMessage)))
-		{
-			AddError(WriterCode + TEXT(" ") + WriterMessage);
-			return Fail();
-		}
 		TSharedPtr<FJsonObject> PatchPreview;
 		FString Code;
 		FString Message;
@@ -2026,30 +1984,22 @@ bool FUEAgentKitPatchRemoveNodeTest::RunTest(const FString& Parameters)
 		const TArray<TSharedPtr<FJsonValue>>& PlannedEdges =
 			Planned->GetArrayField(TEXT("removedEdges"));
 		if (!TestEqual(
-				TEXT("both previews plan the same node count"),
-				PatchPreview->GetNumberField(TEXT("nodeCount")),
-				WriterPreview->GetNumberField(TEXT("nodeCountBefore")))
-			|| !TestEqual(
-				TEXT("both previews plan the same final node count"),
-				WriterPreview->GetNumberField(TEXT("nodeCountAfter")),
-				static_cast<double>(NodeCountBefore - 1))
-			|| !TestEqual(
-				TEXT("both previews plan the same final link count"),
-				WriterPreview->GetNumberField(TEXT("linkCountAfter")),
-				static_cast<double>(2))
-			|| !TestEqual(
-				TEXT("the patch preview reports the removed node"),
+				TEXT("the preview plans one node"),
 				Planned->GetStringField(TEXT("nodeGuid")),
 				GuidLower(A->NodeGuid))
 			|| !TestEqual(
-				TEXT("the patch preview resolves the node class"),
+				TEXT("the preview resolves the node class"),
 				Planned->GetStringField(TEXT("nodeClass")),
 				FString(NotBoolClassPath))
 			|| !TestEqual(TEXT("one removed edge planned"), PlannedEdges.Num(), 1)
 			|| !TestEqual(
-				TEXT("the planned edge matches the writer's own pin identity"),
+				TEXT("the planned edge keeps the pin identity"),
 				PlannedEdges[0]->AsObject()->GetStringField(TEXT("toPinGuid")),
-				GuidLower(BranchCondition->PinId)))
+				GuidLower(BranchCondition->PinId))
+			|| !TestEqual(
+				TEXT("the preview reports the live node count"),
+				PatchPreview->GetNumberField(TEXT("nodeCount")),
+				static_cast<double>(NodeCountBefore)))
 		{
 			return Fail();
 		}
@@ -2447,8 +2397,6 @@ bool FUEAgentKitPatchRemoveNodeTest::RunTest(const FString& Parameters)
 
 	UEAgentKitBlueprintPatchExperimental::ResetExperimentalWriteForTest();
 	UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
-	UEAgentKitBlueprintNodeRemoveExperimental::ResetExperimentalWriteForTest();
-	UEAgentKitBlueprintRewireExperimental::ResetExperimentalWriteForTest();
 	return true;
 }
 

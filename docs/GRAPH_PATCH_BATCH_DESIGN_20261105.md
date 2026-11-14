@@ -6,6 +6,12 @@ migrated into it. The other four writers keep their per-operation
 Preview → Apply → Save contracts; see "切片 8" at the end for exactly which kinds
 a patch accepts today.
 
+> **Slice 16 (2026-11-15) removed the four writers' standalone pipelines.** Every
+> kind described below is now a `kind` of the atomic patch
+> (`ue_preview/apply/save_blueprint_patch_experimental`); their own
+> preview/apply/save tools, one-click tools and bridge methods are gone. This
+> document stays as the design history of how the migration got there.
+
 ## Goal
 
 One GraphPatch submission creates nodes, connects pins and sets unconnected pin

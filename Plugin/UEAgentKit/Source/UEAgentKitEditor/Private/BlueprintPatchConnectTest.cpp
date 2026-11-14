@@ -1828,7 +1828,6 @@ bool FUEAgentKitPatchEdgeOpsTest::RunTest(const FString& Parameters)
 
 	UEAgentKitBlueprintPatchExperimental::ResetExperimentalWriteForTest();
 	UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
-	UEAgentKitBlueprintRewireExperimental::ResetExperimentalWriteForTest();
 	if (!TestFalse(
 			TEXT("the atomic patch gate stays off unless the project opts in"),
 			UEAgentKitBlueprintPatchExperimental::IsExperimentalWriteAvailable()))
@@ -1837,12 +1836,10 @@ bool FUEAgentKitPatchEdgeOpsTest::RunTest(const FString& Parameters)
 	}
 	UEAgentKitBlueprintPatchExperimental::SetExperimentalWriteEnabledForTest(true);
 	UEAgentKitBlueprintGraphEditExperimental::SetExperimentalWriteEnabledForTest(true);
-	UEAgentKitBlueprintRewireExperimental::SetExperimentalWriteEnabledForTest(true);
 	auto Fail = []
 	{
 		UEAgentKitBlueprintPatchExperimental::ResetExperimentalWriteForTest();
 		UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
-		UEAgentKitBlueprintRewireExperimental::ResetExperimentalWriteForTest();
 		return false;
 	};
 
@@ -2541,7 +2538,6 @@ bool FUEAgentKitPatchEdgeOpsTest::RunTest(const FString& Parameters)
 
 	UEAgentKitBlueprintPatchExperimental::ResetExperimentalWriteForTest();
 	UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
-	UEAgentKitBlueprintRewireExperimental::ResetExperimentalWriteForTest();
 	return true;
 }
 

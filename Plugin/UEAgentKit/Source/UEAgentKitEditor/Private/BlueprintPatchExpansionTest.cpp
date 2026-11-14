@@ -428,13 +428,9 @@ bool FUEAgentKitPatchExpansionTest::RunTest(const FString& Parameters)
 		}
 	}
 	UEAgentKitBlueprintPatchExperimental::SetExperimentalWriteEnabledForTest(true);
-	// The equivalence block below deliberately re-previews the same operation
-	// through the unpatched single writer, which needs its own gate.
-	UEAgentKitBlueprintPinDefaultExperimental::SetExperimentalWriteEnabledForTest(true);
 	auto Fail = []()
 	{
 		UEAgentKitBlueprintPatchExperimental::ResetExperimentalWriteForTest();
-		UEAgentKitBlueprintPinDefaultExperimental::ResetExperimentalWriteForTest();
 		return false;
 	};
 
@@ -494,56 +490,8 @@ bool FUEAgentKitPatchExpansionTest::RunTest(const FString& Parameters)
 	}
 
 	// ---- Field-for-field equivalence with the single-writer preview. ----
-	{
-		TSharedPtr<FJsonObject> SingleParams = MakeShared<FJsonObject>();
-		SingleParams->SetStringField(TEXT("assetPath"), Blueprint->GetPathName());
-		SingleParams->SetStringField(TEXT("graphGuid"), GuidLower(Graph->GraphGuid));
-		TSharedRef<FJsonObject> SingleDefault = MakeShared<FJsonObject>();
-		SingleDefault->SetStringField(TEXT("nodeGuid"), BoolOp->GetStringField(TEXT("nodeGuid")));
-		SingleDefault->SetStringField(TEXT("pinName"), BoolOp->GetStringField(TEXT("pinName")));
-		SingleDefault->SetStringField(TEXT("pinGuid"), BoolOp->GetStringField(TEXT("pinGuid")));
-		SingleDefault->SetStringField(TEXT("type"), TEXT("bool"));
-		SingleDefault->SetStringField(TEXT("value"), TEXT("true"));
-		TArray<TSharedPtr<FJsonValue>> Defaults;
-		Defaults.Add(MakeShared<FJsonValueObject>(SingleDefault));
-		SingleParams->SetArrayField(TEXT("defaults"), Defaults);
-
-		TSharedPtr<FJsonObject> SinglePreview;
-		FString SingleCode;
-		FString SingleMessage;
-		if (!TestTrue(
-				TEXT("single-writer pin default preview still succeeds"),
-				UEAgentKitBlueprintPinDefaultExperimental::TryPreviewExperimental(
-					SingleParams,
-					SinglePreview,
-					SingleCode,
-					SingleMessage))
-			|| !TestTrue(TEXT("single-writer preview exists"), SinglePreview.IsValid()))
-		{
-			AddError(SingleCode + TEXT(" ") + SingleMessage);
-			return Fail();
-		}
-		if (!TestEqual(
-				TEXT("migrated patch and single writer agree on the graph fingerprint"),
-				SinglePreview->GetStringField(TEXT("graphFingerprint")),
-				GraphFingerprint)
-			|| !TestEqual(
-				TEXT("migrated patch and single writer agree on the package revision"),
-				SinglePreview->GetStringField(TEXT("packageRevision")),
-				PackageRevision)
-			|| !TestEqual(
-				TEXT("migrated patch state fingerprint is the single writer defaults fingerprint"),
-				SinglePreview->GetStringField(TEXT("defaultsFingerprint")),
-				StateFingerprintBefore)
-			|| !TestEqual(
-				TEXT("migrated patch and single writer agree on the bool before value"),
-				SinglePreview->GetArrayField(TEXT("defaults"))[0]->AsObject()->GetStringField(
-					TEXT("beforeValue")),
-				BoolBefore))
-		{
-			return Fail();
-		}
-	}
+	// Removed in slice 16 together with the single-writer pipeline; the patch's
+	// own preview/apply/readback below is the contract now.
 
 	// ---- Fail-closed previews. ----
 	{
@@ -889,7 +837,6 @@ bool FUEAgentKitPatchExpansionTest::RunTest(const FString& Parameters)
 	}
 
 	UEAgentKitBlueprintPatchExperimental::ResetExperimentalWriteForTest();
-	UEAgentKitBlueprintPinDefaultExperimental::ResetExperimentalWriteForTest();
 	return true;
 }
 
@@ -1035,24 +982,6 @@ namespace UEAgentKitPatchVariables
 		Item->SetStringField(TEXT("defaultValue"), DefaultValue);
 		return Item;
 	}
-
-	TSharedPtr<FJsonObject> MakeSingleVariablePreviewParams(
-		UBlueprint* Blueprint,
-		const TCHAR* Name,
-		const TCHAR* Type,
-		const TCHAR* DefaultValue)
-	{
-		TSharedRef<FJsonObject> Variable = MakeShared<FJsonObject>();
-		Variable->SetStringField(TEXT("name"), Name);
-		Variable->SetStringField(TEXT("type"), Type);
-		Variable->SetStringField(TEXT("defaultValue"), DefaultValue);
-		TArray<TSharedPtr<FJsonValue>> Variables;
-		Variables.Add(MakeShared<FJsonValueObject>(Variable));
-		TSharedRef<FJsonObject> Params = MakeShared<FJsonObject>();
-		Params->SetStringField(TEXT("assetPath"), Blueprint->GetPathName());
-		Params->SetArrayField(TEXT("variables"), Variables);
-		return Params;
-	}
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -1065,7 +994,6 @@ bool FUEAgentKitPatchVariableTest::RunTest(const FString& Parameters)
 	using namespace UEAgentKitPatchVariables;
 
 	UEAgentKitBlueprintPatchExperimental::ResetExperimentalWriteForTest();
-	UEAgentKitBlueprintVariableExperimental::ResetExperimentalWriteForTest();
 	if (!TestFalse(
 			TEXT("experimental atomic patch gate is off unless the project opts in"),
 			UEAgentKitBlueprintPatchExperimental::IsExperimentalWriteAvailable()))
@@ -1145,14 +1073,9 @@ bool FUEAgentKitPatchVariableTest::RunTest(const FString& Parameters)
 		}
 	}
 	UEAgentKitBlueprintPatchExperimental::SetExperimentalWriteEnabledForTest(true);
-	// The equivalence blocks below call the two single writers directly.
-	UEAgentKitBlueprintPinDefaultExperimental::SetExperimentalWriteEnabledForTest(true);
-	UEAgentKitBlueprintVariableExperimental::SetExperimentalWriteEnabledForTest(true);
 	auto Fail = []()
 	{
 		UEAgentKitBlueprintPatchExperimental::ResetExperimentalWriteForTest();
-		UEAgentKitBlueprintPinDefaultExperimental::ResetExperimentalWriteForTest();
-		UEAgentKitBlueprintVariableExperimental::ResetExperimentalWriteForTest();
 		return false;
 	};
 
@@ -1258,46 +1181,8 @@ bool FUEAgentKitPatchVariableTest::RunTest(const FString& Parameters)
 	}
 
 	// ---- Field-for-field equivalence with the single variable writer. ----
-	{
-		TSharedPtr<FJsonObject> SinglePreview;
-		FString SingleCode;
-		FString SingleMessage;
-		if (!TestTrue(
-				TEXT("single-writer variable preview still succeeds"),
-				UEAgentKitBlueprintVariableExperimental::TryPreviewExperimental(
-					MakeSingleVariablePreviewParams(
-						Blueprint,
-						TEXT("AgentCount"),
-						TEXT("int"),
-						TEXT("7")),
-					SinglePreview,
-					SingleCode,
-					SingleMessage))
-			|| !TestTrue(TEXT("single-writer variable preview exists"), SinglePreview.IsValid()))
-		{
-			AddError(SingleCode + TEXT(" ") + SingleMessage);
-			return Fail();
-		}
-		if (!TestEqual(
-				TEXT("patch variablesFingerprint is the variable writer's variablesFingerprint"),
-				VariablesFingerprintBefore,
-				SinglePreview->GetStringField(TEXT("variablesFingerprint")))
-			|| !TestEqual(
-				TEXT("patch and variable writer agree on graphFingerprint"),
-				Preview->GetStringField(TEXT("graphFingerprint")),
-				SinglePreview->GetStringField(TEXT("graphFingerprint")))
-			|| !TestEqual(
-				TEXT("patch and variable writer agree on packageRevision"),
-				Preview->GetStringField(TEXT("packageRevision")),
-				SinglePreview->GetStringField(TEXT("packageRevision")))
-			|| !TestEqual(
-				TEXT("patch and variable writer agree on variableCountBefore"),
-				Preview->GetNumberField(TEXT("variableCount")),
-				SinglePreview->GetNumberField(TEXT("variableCountBefore"))))
-		{
-			return Fail();
-		}
-	}
+	// Removed in slice 16 together with that writer's pipeline; the patch's own
+	// variablesFingerprint readback above is the contract now.
 
 	// ---- Fail-closed previews, all before any write. ----
 	{
@@ -1754,41 +1639,9 @@ bool FUEAgentKitPatchVariableTest::RunTest(const FString& Parameters)
 		}
 	}
 
-	// After the save the package is clean again, so the single variable writer's
-	// own preview must report exactly the fingerprint the patch reported as its
-	// after state.  That is the cross-module proof the two paths compute the same
-	// thing on the post-patch Blueprint.
+	// After the save the package is clean again; a patch preview on that saved
+	// state must see the variable the patch created in its before state.
 	{
-		TSharedPtr<FJsonObject> SingleAfterSave;
-		FString SingleAfterSaveCode;
-		FString SingleAfterSaveMessage;
-		if (!TestTrue(
-				TEXT("single-writer variable preview succeeds on the saved state"),
-				UEAgentKitBlueprintVariableExperimental::TryPreviewExperimental(
-					MakeSingleVariablePreviewParams(
-						Blueprint,
-						TEXT("NextVar"),
-						TEXT("bool"),
-						TEXT("true")),
-					SingleAfterSave,
-					SingleAfterSaveCode,
-					SingleAfterSaveMessage))
-			|| !TestTrue(TEXT("single-writer post-save preview exists"), SingleAfterSave.IsValid()))
-		{
-			AddError(SingleAfterSaveCode + TEXT(" ") + SingleAfterSaveMessage);
-			return Fail();
-		}
-		if (!TestEqual(
-				TEXT("the patch's after fingerprint is the variable writer's view of the saved state"),
-				SingleAfterSave->GetStringField(TEXT("variablesFingerprint")),
-				VariablesFingerprintAfter)
-			|| !TestEqual(
-				TEXT("the variable writer counts the created variable"),
-				SingleAfterSave->GetNumberField(TEXT("variableCountBefore")),
-				static_cast<double>(VariableCountBefore + 1)))
-		{
-			return Fail();
-		}
 		TSharedPtr<FJsonObject> AfterSavePreview;
 		FString AfterSaveCode;
 		FString AfterSaveMessage;
@@ -1846,8 +1699,6 @@ bool FUEAgentKitPatchVariableTest::RunTest(const FString& Parameters)
 	}
 
 	UEAgentKitBlueprintPatchExperimental::ResetExperimentalWriteForTest();
-	UEAgentKitBlueprintPinDefaultExperimental::ResetExperimentalWriteForTest();
-	UEAgentKitBlueprintVariableExperimental::ResetExperimentalWriteForTest();
 	return true;
 }
 

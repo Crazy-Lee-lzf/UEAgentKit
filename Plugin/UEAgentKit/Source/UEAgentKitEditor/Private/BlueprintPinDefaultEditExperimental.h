@@ -6,54 +6,26 @@ class FJsonObject;
 class UEdGraph;
 
 /**
- * Explicitly opted-in, bounded edit of existing Blueprint input-pin defaults.
+ * Atomic seam for editing existing Blueprint input-pin defaults.
  *
- * This is a P1 data-edit slice.  It only targets existing, unlinked, editable
- * input pins in the exact focused K2 graph, and only accepts strict
- * bool/int/double/string encodings.  It never creates nodes, changes links,
- * creates variables, deletes, disconnects, compiles, or saves implicitly.
+ * Only existing, unlinked, editable input pins of the exact focused K2 graph,
+ * and only the strict bool/int/double/string encodings are accepted.  It never
+ * creates nodes, changes links, creates variables, deletes, disconnects,
+ * compiles or saves.
  *
- * The project must opt in with:
- *
- *     [UEAgentKit]
- *     ExperimentalGraphPatchEdit=True
+ * Slice 16 removed the standalone preview/apply/save pipeline (and its
+ * one-click MCP tool) once the cross-writer atomic patch covered this kind; the
+ * module is now the seam the patch calls plus the state fingerprint.
  */
 namespace UEAgentKitBlueprintPinDefaultExperimental
 {
-	const TCHAR* const PreviewMethod = TEXT("editor.previewBlueprintPinDefaultsExperimental");
-	const TCHAR* const ApplyMethod = TEXT("editor.applyBlueprintPinDefaultsExperimental");
-	const TCHAR* const SaveMethod = TEXT("editor.saveBlueprintPinDefaultsExperimental");
-	const TCHAR* const ApplyConfirmationPrefix = TEXT("SET EXPERIMENTAL BLUEPRINT PIN DEFAULTS ");
-	const TCHAR* const SaveConfirmationPrefix = TEXT("SAVE EXPERIMENTAL BLUEPRINT PIN DEFAULTS ");
-
-	/** True only when the current project set the experimental opt-in flag. */
-	bool IsExperimentalWriteAvailable();
-
-	bool TryPreviewExperimental(
-		const TSharedPtr<FJsonObject>& Params,
-		TSharedPtr<FJsonObject>& OutResult,
-		FString& OutErrorCode,
-		FString& OutErrorMessage);
-
-	bool TryApplyExperimental(
-		const TSharedPtr<FJsonObject>& Params,
-		TSharedPtr<FJsonObject>& OutResult,
-		FString& OutErrorCode,
-		FString& OutErrorMessage);
-
-	bool TrySaveExperimental(
-		const TSharedPtr<FJsonObject>& Params,
-		TSharedPtr<FJsonObject>& OutResult,
-		FString& OutErrorCode,
-		FString& OutErrorMessage);
-
 	/**
 	 * One pin-default operation resolved against the live graph.
 	 *
 	 * 0-3.4 seam: the cross-writer atomic patch (BlueprintPatchExperimental)
-	 * applies pin defaults through these functions instead of keeping a second
-	 * copy of the pin lookup, schema validation or write loop.  The single-writer
-	 * Apply below calls the very same functions, so the two paths cannot drift.
+	 * applies pin defaults through these functions.  Slice 16 removed the
+	 * single-writer preview/apply/save pipeline and its one-click MCP tool, so
+	 * this module now exists only as that seam plus its state fingerprint.
 	 */
 	struct FAtomicOperation
 	{
@@ -120,14 +92,10 @@ namespace UEAgentKitBlueprintPinDefaultExperimental
 		FString& OutErrorMessage);
 
 	/**
-	 * Whole-graph state fingerprint.  For the same live graph this is exactly the
-	 * value the pin-default writer reports as `defaultsFingerprint`, so a migrated
-	 * single-operation patch can be compared field by field with an unpatched
-	 * Apply.
+	 * Whole-graph state fingerprint: pin identity, type, defaults and link counts.
+	 *
+	 * The atomic patch reports it as `stateFingerprint` and uses it as the
+	 * before/after proof of a patch, so it is part of the public seam.
 	 */
 	FString ComputeAtomicStateFingerprint(UEdGraph* Graph);
-
-	/** Automation-only seam; never used by the bridge or MCP. */
-	void SetExperimentalWriteEnabledForTest(bool bEnabled);
-	void ResetExperimentalWriteForTest();
 }

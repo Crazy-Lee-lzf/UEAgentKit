@@ -104,95 +104,48 @@ ue_save_blueprint_graph_edit_experimental(apply_result=<full apply result>,
   confirmation=<apply.requiredSaveConfirmation>)
 ```
 
-### Step 2 — edit unlinked pin defaults / 修改未连线 Pin 默认值
+### Step 2 — structural writes go through the atomic patch / 结构写入统一走 atomic patch
 
-Use snake_case parameters and one exact node/pin GUID per target:
+The standalone pin-default / variable-create / rewire / node-remove preview,
+apply, save and one-click tools were removed in slice 16. Every kind they owned
+is a `kind` of the cross-writer patch, in one transaction with per-operation
+results, rollback and Undo/Redo verification:
 
 ```json
-{"tool": "ue_preview_blueprint_pin_defaults_experimental",
+{"tool": "ue_preview_blueprint_patch_experimental",
  "arguments": {
    "asset_path": "/Game/.../BP_AgentE2E.BP_AgentE2E",
    "graph_guid": "<graphGuid>",
-   "defaults": [
-     {"nodeGuid": "<branch2 guid>", "pinName": "Condition", "pinGuid": "<pin guid>", "type": "bool", "value": "true"},
-     {"nodeGuid": "<int_add guid>", "pinName": "A", "pinGuid": "<pin guid>", "type": "int", "value": "7"},
-     {"nodeGuid": "<double_add guid>", "pinName": "A", "pinGuid": "<pin guid>", "type": "double", "value": "1.5"},
-     {"nodeGuid": "<string_concat guid>", "pinName": "A", "pinGuid": "<pin guid>", "type": "string", "value": "agent"}
+   "operations": [
+     {"opId": "p1", "kind": "setPinDefault", "nodeGuid": "<guid>", "pinName": "Condition",
+      "pinGuid": "<pin guid>", "type": "bool", "value": "true"},
+     {"opId": "v1", "kind": "createVariable", "name": "AgentCount", "type": "int", "defaultValue": "7"},
+     {"opId": "r1", "kind": "rewirePin", "targetNodeGuid": "<guid>", "targetPinName": "Condition",
+      "targetPinGuid": "<pin guid>", "oldSourceNodeGuid": "<guid>", "oldSourcePinName": "ReturnValue",
+      "oldSourcePinGuid": "<pin guid>", "newSourceNodeGuid": "<guid>", "newSourcePinName": "ReturnValue",
+      "newSourcePinGuid": "<pin guid>"},
+     {"opId": "n1", "kind": "removeNode", "nodeGuid": "<isolated node guid>",
+      "expectedNodeClass": "/Script/BlueprintGraph.K2Node_Not_PreBool", "removedEdges": []}
    ]
  }}
 ```
 
-Then call `ue_apply_blueprint_pin_defaults_experimental` and
-`ue_save_blueprint_pin_defaults_experimental` with their returned confirmations.
-Only existing, unlinked, non-container bool/int/double/string inputs are accepted.
+Then apply and save with the returned confirmations:
 
-### Step 3 — create top-level member variables / 创建成员变量
-
-```json
-{"tool": "ue_preview_blueprint_variable_create_experimental",
- "arguments": {
-   "asset_path": "/Game/.../BP_AgentE2E.BP_AgentE2E",
-   "variables": [
-     {"name": "AgentFlag", "type": "bool", "defaultValue": "true"},
-     {"name": "AgentCount", "type": "int", "defaultValue": "7"},
-     {"name": "AgentScale", "type": "double", "defaultValue": "1.5"},
-     {"name": "AgentLabel", "type": "string", "defaultValue": "agent"}
-   ]
- }}
+```text
+ue_apply_blueprint_patch_experimental(plan_id, asset_path, graph_guid, operations,
+  confirmation=<preview.requiredConfirmation>)
+ue_save_blueprint_patch_experimental(apply_result=<full apply result>,
+  confirmation=<apply.requiredSaveConfirmation>)
 ```
 
-Apply/Save: `ue_apply_blueprint_variable_create_experimental` →
-`ue_save_blueprint_variable_create_experimental`. This tool intentionally does not
-compile; the pending defaults are materialized by UE's later load compile (the P5
-reload proves the effective generated-class CDO values).
+The patch is one transaction and never saves implicitly; a failed operation
+restores the ones already applied (`writeOccurred=false`, one result per
+operation). Read-only rules are unchanged: pin defaults only on existing,
+unlinked, non-container bool/int/double/string inputs; one node removal with at
+most one enumerated incident edge; a rewire never breaks an unplanned link.
 
-### Step 4 — precise rewire / 精确改接一条边
-
-```json
-{"tool": "ue_preview_blueprint_rewire_experimental",
- "arguments": {
-   "asset_path": "/Game/.../BP_AgentE2E.BP_AgentE2E",
-   "graph_guid": "<graphGuid>",
-   "operation": "rewire",
-   "target_node_guid": "<branch guid>",
-   "target_pin_name": "Condition",
-   "target_pin_guid": "<pin guid>",
-   "old_source_node_guid": "<not guid>",
-   "old_source_pin_name": "ReturnValue",
-   "old_source_pin_guid": "<pin guid>",
-   "expected_edge_set_hash": "<preflight.rewireEdgeSetHash>",
-   "new_source_node_guid": "<or guid>",
-   "new_source_pin_name": "ReturnValue",
-   "new_source_pin_guid": "<pin guid>"
- }
-}
-```
-
-Apply/Save: `ue_apply_blueprint_rewire_experimental` →
-`ue_save_blueprint_rewire_experimental`. The tool breaks only the one planned edge
-and rejects any schema response that would break other links.
-
-### Step 5 — controlled node removal / 受控删除节点
-
-```json
-{"tool": "ue_preview_blueprint_node_remove_experimental",
- "arguments": {
-   "asset_path": "/Game/.../BP_AgentE2E.BP_AgentE2E",
-   "graph_guid": "<graphGuid>",
-   "node_guid": "<isolated not guid>",
-   "expected_node_class": "/Script/BlueprintGraph.K2Node_Not_PreBool",
-   "expected_edge_set_hash": "<preflight.nodeRemoveEdgeSetHash>",
-   "removed_edges": []
- }
-}
-```
-
-Apply/Save: `ue_apply_blueprint_node_remove_experimental` →
-`ue_save_blueprint_node_remove_experimental`. Start with an isolated allowlisted
-pure-function or branch node; a plan removes one node and at most one enumerated
-incident edge.
-
-### Step 6 — verify in a new process / 新进程只读校验
+### Step 3 — verify in a new process / 新进程只读校验
 
 Run a fresh Editor commandlet (the P5 script does this automatically):
 
