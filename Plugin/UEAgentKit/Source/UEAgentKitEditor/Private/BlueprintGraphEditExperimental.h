@@ -88,6 +88,11 @@ namespace UEAgentKitBlueprintGraphEditExperimental
 	 * `call_owned_pure_function` and the owned input literals.  They need a
 	 * function allowlist entry and literal binding; `createNode` here is "create
 	 * one node, touch no edge".
+	 *
+	 * Phase A widens exactly that boundary without a second writer: an operation
+	 * that names a registry `ActionId` is created by the engine spawner the action
+	 * database owns, so a project UFUNCTION or any cast target the registry can
+	 * describe works without a function allowlist.
 	 */
 	struct FAtomicNodeOperation
 	{
@@ -124,6 +129,26 @@ namespace UEAgentKitBlueprintGraphEditExperimental
 		FString VariableType;
 		/** Resolved access direction: "read" for get, "write" for set. */
 		FString VariableAccess;
+
+		/**
+		 * Action Registry spawn path (0-3.5 phase A).
+		 *
+		 * Instead of a synthetic `nodeType`, one operation may name an opaque
+		 * registry action id.  The registry describes the engine spawner behind
+		 * that id (class, action kind, constraints) and this seam invokes the
+		 * spawner itself with an EMPTY binding set -- it never re-implements a
+		 * spawner's customize delegate (that is where CallFunction resolves its
+		 * UFunction and where DynamicCast receives its TargetType).
+		 *
+		 * The created node's pins are read back from the live node after creation;
+		 * nothing here predicts a pin contract for this path.
+		 */
+		bool bActionSpawn = false;
+		FString ActionId;
+		/** Resolved discovery identity, for the caller's result only. */
+		FString SpawnerClass;
+		FString ActionKind;
+		FString ActionPayload;
 	};
 
 	/**

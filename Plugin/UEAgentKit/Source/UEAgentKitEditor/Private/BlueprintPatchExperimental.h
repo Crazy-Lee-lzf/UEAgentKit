@@ -46,11 +46,25 @@ class UEdGraph;
  * provenance anchor, never a constraint on where the variable lands.  One patch
  * therefore still lands on exactly one graph and one package.
  *
- * `createNode` creates exactly one node and touches no edge.  It accepts only
- * `nodeType`/`x`/`y` plus an optional `tempId`, and only the eight primitive
- * nodeTypes of the graph-edit writer; it creates them through that writer's own
- * atomic seam, so the class, position, pin contract and spawner path are the same
- * as the single writer's.  Owned input literals are not part of this kind.
+ * `createNode` creates exactly one node and touches no edge.  It requires exactly
+ * one of `nodeType` (the eight primitive nodeTypes of the graph-edit writer, or a
+ * variable accessor) and `actionId` (an opaque Action Registry id), plus `x`/`y`
+ * and an optional `tempId`.  Both paths go through that writer's own atomic seam:
+ * the `nodeType` path creates the node it always did, and the `actionId` path
+ * invokes the ENGINE spawner the action database owns, with an empty binding set.
+ * That is what lets a project UFUNCTION or a cast to any existing type be created
+ * without a function allowlist and without re-implementing a customize delegate.
+ * The action path reports the created node's ACTUAL pins (read after creation);
+ * it never predicts a pin contract.
+ *
+ * The action path is gated by its own second key on top of the patch opt-in:
+ *
+ *     [UEAgentKit]
+ *     ExperimentalGraphPatchEdit=True
+ *     ExperimentalNodeSpawn=True
+ *
+ * A patch that names `actionId` while `ExperimentalNodeSpawn` is unset fails with
+ * `graph-spawn-experimental-disabled` before anything is written.
  *
  * `connect` creates exactly one edge between two existing nodes or between a
  * node this patch creates and another endpoint.  An endpoint is a canonical node
@@ -114,6 +128,16 @@ namespace UEAgentKitBlueprintPatchExperimental
 	bool IsExperimentalWriteAvailable();
 
 	/**
+	 * Second, independent opt-in for the Action Registry node-spawn path.
+	 *
+	 * `[UEAgentKit] ExperimentalNodeSpawn=True` in the project's engine ini.  It
+	 * only ever narrows: it cannot enable the patch writer on its own, and it does
+	 * not widen the primitive nodeTypes.  Read-only catalog/search does not depend
+	 * on it.
+	 */
+	bool IsNodeSpawnWriteAvailable();
+
+	/**
 	 * Read-only preview.
 	 *
 	 * Resolves and validates every operation against the live graph, binds the
@@ -173,4 +197,8 @@ namespace UEAgentKitBlueprintPatchExperimental
 	/** Automation-only seam; never used by the bridge or MCP. */
 	void SetExperimentalWriteEnabledForTest(bool bEnabled);
 	void ResetExperimentalWriteForTest();
+
+	/** Automation-only seam for the second (node-spawn) key. */
+	void SetNodeSpawnEnabledForTest(bool bEnabled);
+	void ResetNodeSpawnForTest();
 }

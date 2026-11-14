@@ -66,6 +66,10 @@ from .mcp_variable_write_experimental import register_variable_write_experimenta
 from .mcp_rewire_write_experimental import register_rewire_write_experimental_tools
 from .mcp_node_remove_write_experimental import register_node_remove_write_experimental_tools
 from .mcp_patch_experimental import register_patch_experimental_tools
+from .mcp_node_spawn_read import (
+    NODE_ACTION_SEARCH_TOOL_NAME,
+    register_node_spawn_read_tools,
+)
 from .mcp_focus_blueprint_graph_experimental import register_focus_blueprint_graph_tool
 from .experimental_patch import (
     APPLY_TOOL_NAME as EXPERIMENTAL_PATCH_APPLY_TOOL_NAME,
@@ -2456,6 +2460,7 @@ def create_mcp_server(
     p8_test_only_graph_layout_apply: bool = False,
     experimental_graph_layout_apply: bool = False,
     experimental_graphpatch_edit: bool = False,
+    experimental_node_spawn: bool = False,
     pure_live: bool = False,
 ):
     if FastMCP is None or ToolAnnotations is None:
@@ -2553,6 +2558,14 @@ def create_mcp_server(
         raise ValueError("--enable-experimental-graph-layout-apply requires --enable-live-editor")
     if experimental_graphpatch_edit and live_editor_service is None:
         raise ValueError("--enable-experimental-graphpatch-edit requires --enable-live-editor")
+    if experimental_node_spawn and live_editor_service is None:
+        raise ValueError("--enable-experimental-node-spawn requires --enable-live-editor")
+    if experimental_node_spawn and not experimental_graphpatch_edit:
+        # The only write entry for an actionId is the existing patch createNode;
+        # enabling the spawn key without that tool family would expose nothing.
+        raise ValueError(
+            "--enable-experimental-node-spawn requires --enable-experimental-graphpatch-edit"
+        )
     server = FastMCP(
         MCP_SERVER_NAME,
         instructions=_server_instructions(
@@ -2650,6 +2663,17 @@ def create_mcp_server(
             tool_annotations_type=ToolAnnotations,
             error_response=_error_response,
         )
+        # Phase A read surface: one thin wrapper over native.invoke +
+        # graph.nodeRegistry.catalog.  Registered whenever a live Editor is
+        # configured -- it is read-only and the registry itself defaults to
+        # shadow mode.
+        register_node_spawn_read_tools(
+            server=server,
+            live_editor_service=live_editor_service,
+            read_annotations=read_annotations,
+            error_response=_error_response,
+        )
+        _enforce_strict_tool_arguments(server, (NODE_ACTION_SEARCH_TOOL_NAME,))
         _enforce_strict_tool_arguments(server, (GRAPH_CONTEXT_TOOL_NAME,))
         register_live_action_tools(
             server=server,
@@ -2783,6 +2807,7 @@ def create_mcp_server(
                 live_editor_service=live_editor_service,
                 tool_annotations_type=ToolAnnotations,
                 error_response=_error_response,
+                node_spawn_enabled=experimental_node_spawn,
             )
             _enforce_strict_tool_arguments(
                 server,
@@ -2870,6 +2895,16 @@ def build_parser() -> argparse.ArgumentParser:
             "Opt in to the bounded experimental Blueprint createNode/connectPins tools. "
             "The running Editor project must also set "
             "[UEAgentKit] ExperimentalGraphPatchEdit=True."
+        ),
+    )
+    parser.add_argument(
+        "--enable-experimental-node-spawn",
+        action="store_true",
+        help=(
+            "Opt in to Action Registry node creation through the existing patch "
+            "createNode operation (actionId). Requires --enable-experimental-graphpatch-edit. "
+            "The running Editor project must also set "
+            "[UEAgentKit] ExperimentalNodeSpawn=True."
         ),
     )
     parser.add_argument("--enable-source-control", action="store_true")
@@ -3001,6 +3036,9 @@ def _validate_pure_live_arguments(args: argparse.Namespace) -> None:
         ),
         "--enable-experimental-graphpatch-edit": getattr(
             args, "enable_experimental_graphpatch_edit", False
+        ),
+        "--enable-experimental-node-spawn": getattr(
+            args, "enable_experimental_node_spawn", False
         ),
     }
     enabled = [name for name, value in rejected.items() if value]
@@ -3203,6 +3241,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
             experimental_graphpatch_edit=bool(
                 getattr(args, "enable_experimental_graphpatch_edit", False)
+            ),
+            experimental_node_spawn=bool(
+                getattr(args, "enable_experimental_node_spawn", False)
             ),
         )
         server.run(transport="stdio")

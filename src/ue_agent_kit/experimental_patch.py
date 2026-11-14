@@ -278,6 +278,25 @@ def _endpoint_ref(value: Any, label: str) -> tuple[str | None, str | None]:
     return value, None
 
 
+def _action_id(value: Any, label: str) -> str:
+    """One Action Registry identity: 'action:' + 32 lower-case hex characters.
+
+    The id is a content hash the registry produces; this layer only checks the
+    shape so a request cannot smuggle an arbitrary string into the Editor.
+    """
+    text = _string(value, label, maximum=39)
+    if (
+        not text.startswith("action:")
+        or len(text) != 39
+        or any(character not in "0123456789abcdef" for character in text[7:])
+    ):
+        raise PatchError(
+            "graph-spawn-action-id-invalid",
+            f"{label} must be 'action:' followed by 32 lower-case hex characters.",
+        )
+    return text
+
+
 def _node_contract(node_type: Any, label: str, *, error_code: str) -> dict[str, Any]:
     """Resolve one primitive nodeType against the graph-edit writer's table."""
 
@@ -323,6 +342,92 @@ def _canonical_node_fields(
     """
 
     node_type = entry.get("nodeType")
+    action_id = entry.get("actionId")
+    if action_id is not None:
+        # Phase A action result: there is no nodeType table to check against.  The
+        # identity is the action, the class is what the registry resolved to, and
+        # the pins are the ones read from the LIVE node after creation -- so a
+        # preview must not carry pins and an apply must.
+        if node_type is not None:
+            raise PatchError(
+                error_code,
+                f"{label} must not carry both nodeType and actionId.",
+            )
+        action_id = _action_id(action_id, f"{label}.actionId")
+        node_class = _string(entry.get("nodeClass"), f"{label}.nodeClass", maximum=256)
+        x = _coordinate(entry.get("x"), f"{label}.x", error_code=error_code)
+        y = _coordinate(entry.get("y"), f"{label}.y", error_code=error_code)
+        normalized: dict[str, Any] = {
+            "actionId": action_id,
+            "nodeClass": node_class,
+            "x": x,
+            "y": y,
+        }
+        for optional in ("function", "targetClass", "actionKind", "spawnerClass"):
+            if entry.get(optional) is not None:
+                normalized[optional] = _string(
+                    entry.get(optional),
+                    f"{label}.{optional}",
+                    maximum=512,
+                    allow_empty=True,
+                )
+        if not expect_node_guid:
+            if entry.get("nodeGuid") is not None:
+                raise PatchError(
+                    error_code,
+                    f"{label} must not carry a created nodeGuid before Apply.",
+                )
+            if entry.get("pins") is not None:
+                raise PatchError(
+                    error_code,
+                    f"{label} must not carry pins before Apply; pins are read from the created node.",
+                )
+            return normalized
+        normalized["nodeGuid"] = _guid_with_code(
+            entry.get("nodeGuid"),
+            f"{label}.nodeGuid",
+            error_code=error_code,
+        )
+        pins = entry.get("pins")
+        if not isinstance(pins, list) or not pins:
+            raise PatchError(
+                error_code,
+                f"{label}.pins must list the created node's actual pins.",
+            )
+        normalized_pins: list[dict[str, Any]] = []
+        for pin_index, raw_pin in enumerate(pins):
+            pin = _object(raw_pin, f"{label}.pins[{pin_index}]")
+            normalized_pin: dict[str, Any] = {}
+            for field, maximum, allow_empty in (
+                ("name", 256, False),
+                ("direction", 8, False),
+                ("kind", 8, False),
+                ("category", 64, True),
+                ("subCategory", 64, True),
+                ("subCategoryObject", 512, True),
+            ):
+                normalized_pin[field] = _string(
+                    pin.get(field),
+                    f"{label}.pins[{pin_index}].{field}",
+                    maximum=maximum,
+                    allow_empty=allow_empty,
+                )
+            if normalized_pin["direction"] not in ("input", "output"):
+                raise PatchError(
+                    error_code,
+                    f"{label}.pins[{pin_index}].direction must be input or output.",
+                )
+            hidden = pin.get("hidden")
+            if hidden is not None:
+                if not isinstance(hidden, bool):
+                    raise PatchError(
+                        error_code,
+                        f"{label}.pins[{pin_index}].hidden must be a boolean.",
+                    )
+                normalized_pin["hidden"] = hidden
+            normalized_pins.append(normalized_pin)
+        normalized["pins"] = normalized_pins
+        return normalized
     accessor = isinstance(node_type, str) and node_type in VARIABLE_NODE_TYPES
     if accessor:
         # The accessor's pin contract depends on the variable name and type, so it
@@ -519,38 +624,65 @@ def validate_preview_parameters(
                     "opId",
                     "kind",
                     *CREATE_NODE_FIELDS,
+                    "actionId",
                     "tempId",
                     *VARIABLE_ACCESSOR_FIELDS,
                 },
                 f"operations[{index}]",
             )
             node_type = item.get("nodeType")
-            accessor = isinstance(node_type, str) and node_type in VARIABLE_NODE_TYPES
-            # nodeType/x/y plus an optional patch-local tempId; the two accessor
-            # nodeTypes additionally bind one EXISTING member variable by name,
-            # GUID and type.  No literal is accepted (owned literals are still
-            # unmigrated).
-            if accessor:
-                try:
-                    variable_fields = validate_variable_accessor_fields(
-                        node_type,
-                        item,
-                        f"operations[{index}]",
-                    )
-                except GraphEditError as exc:
-                    raise PatchError(exc.code, exc.message) from exc
-            else:
-                _node_contract(
-                    node_type,
-                    f"operations[{index}]",
-                    error_code="graph-edit-node-type-not-allowed",
+            action_id = item.get("actionId")
+            if node_type is not None and action_id is not None:
+                raise PatchError(
+                    "graph-spawn-action-id-conflict",
+                    f"operations[{index}] takes exactly one of nodeType and actionId.",
                 )
+            if node_type is None and action_id is None:
+                raise PatchError(
+                    "graph-edit-node-type-not-allowed",
+                    f"operations[{index}] needs nodeType or actionId.",
+                )
+            if action_id is not None:
+                # Phase A: an opaque registry identity replaces the nodeType
+                # whitelist.  The Editor re-derives the class and the admission
+                # fields from the registry; this layer only checks the shape.
+                action_id = _action_id(action_id, f"operations[{index}].actionId")
                 if any(field in item for field in VARIABLE_ACCESSOR_FIELDS):
                     raise PatchError(
                         "graph-edit-variable-field-not-allowed",
-                        f"operations[{index}] nodeType {node_type} does not accept "
+                        f"operations[{index}] actionId does not accept "
                         "variableName/variableGuid/variableType.",
                     )
+                accessor = False
+                variable_fields = {}
+            else:
+                accessor = isinstance(node_type, str) and node_type in VARIABLE_NODE_TYPES
+                # nodeType/x/y plus an optional patch-local tempId; the two accessor
+                # nodeTypes additionally bind one EXISTING member variable by name,
+                # GUID and type.  No literal is accepted (owned literals are still
+                # unmigrated).
+                if accessor:
+                    try:
+                        variable_fields = validate_variable_accessor_fields(
+                            node_type,
+                            item,
+                            f"operations[{index}]",
+                        )
+                    except GraphEditError as exc:
+                        raise PatchError(exc.code, exc.message) from exc
+                else:
+                    _node_contract(
+                        node_type,
+                        f"operations[{index}]",
+                        error_code="graph-edit-node-type-not-allowed",
+                    )
+                    if any(field in item for field in VARIABLE_ACCESSOR_FIELDS):
+                        raise PatchError(
+                            "graph-edit-variable-field-not-allowed",
+                            f"operations[{index}] nodeType {node_type} does not accept "
+                            "variableName/variableGuid/variableType.",
+                        )
+                    variable_fields = {}
             x = _coordinate(
                 item.get("x"),
                 f"operations[{index}].x",
@@ -572,10 +704,15 @@ def validate_preview_parameters(
             normalized_node: dict[str, Any] = {
                 "opId": op_id,
                 "kind": kind,
-                "nodeType": node_type,
                 "x": x,
                 "y": y,
             }
+            if action_id is not None:
+                # The action IS the identity; nodeType is deliberately absent so
+                # the Editor cannot see both and pick one.
+                normalized_node["actionId"] = action_id
+            else:
+                normalized_node["nodeType"] = node_type
             if accessor:
                 normalized_node.update(variable_fields)
             if "tempId" in item:

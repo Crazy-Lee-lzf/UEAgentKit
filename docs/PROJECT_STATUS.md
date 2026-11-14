@@ -124,7 +124,8 @@ Tool 数量只是接口规模，不代表每个 Tool 都会修改资产；大量
 
 ## 明确不支持的通用能力
 
-- 任意 Blueprint Graph Node CRUD / 自动布线。
+- 不做按类名自由创建 / 任意编辑的通用 Graph CRUD；**支持经 Action Registry 发现、由原生 spawner
+  执行的节点创建**（受实验双门禁约束）。
 - 任意 Level Actor Spawn/Delete/Transform/Property 编辑。
 - Material Graph / Niagara / Sequencer / Control Rig 通用写入。
 - PIE 输入注入和录制回放系统。

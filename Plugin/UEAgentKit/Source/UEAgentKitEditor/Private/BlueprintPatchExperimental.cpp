@@ -13,10 +13,13 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
+#include "EdGraphSchema_K2.h"
 #include "Editor.h"
 #include "Editor/Transactor.h"
 #include "Engine/Blueprint.h"
 #include "HAL/FileManager.h"
+#include "K2Node_CallFunction.h"
+#include "K2Node_DynamicCast.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Misc/PackageName.h"
 #include "ScopedTransaction.h"
@@ -64,6 +67,110 @@ namespace
 
 	bool bTestOverrideSet = false;
 	bool bTestOverrideEnabled = false;
+	bool bNodeSpawnOverrideSet = false;
+	bool bNodeSpawnOverrideEnabled = false;
+
+	/** Second opt-in, readable from the parse path (the public wrapper delegates here). */
+	bool IsNodeSpawnGateOpen()
+	{
+		if (bNodeSpawnOverrideSet)
+		{
+			return bNodeSpawnOverrideEnabled;
+		}
+		bool bEnabled = false;
+		if (GConfig == nullptr)
+		{
+			return false;
+		}
+		return GConfig->GetBool(
+			TEXT("UEAgentKit"),
+			TEXT("ExperimentalNodeSpawn"),
+			bEnabled,
+			GEngineIni)
+			&& bEnabled;
+	}
+
+	/** `action:` + the 32 lower-case hex characters of the registry content hash. */
+	bool IsActionId(const FString& Value)
+	{
+		if (Value.Len() != 39 || !Value.StartsWith(TEXT("action:"), ESearchCase::CaseSensitive))
+		{
+			return false;
+		}
+		for (int32 Index = 7; Index < Value.Len(); ++Index)
+		{
+			const TCHAR Character = Value[Index];
+			const bool bHex = (Character >= TEXT('0') && Character <= TEXT('9'))
+				|| (Character >= TEXT('a') && Character <= TEXT('f'));
+			if (!bHex)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * Read the created node's actual contract: class, identity and every pin.
+	 *
+	 * This is the post-creation read the action path promises.  It reads the LIVE
+	 * node inside the transaction and writes what the engine actually produced, so
+	 * the caller never has to trust a predicted pin list.
+	 */
+	void FillActualNodeContract(const UEdGraphNode* Node, const TSharedPtr<FJsonObject>& Detail)
+	{
+		if (Node == nullptr || !Detail.IsValid())
+		{
+			return;
+		}
+		Detail->SetStringField(
+			TEXT("nodeGuid"),
+			Node->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower));
+		Detail->SetStringField(TEXT("nodeClass"), Node->GetClass()->GetPathName());
+		if (const UK2Node_CallFunction* CallNode = Cast<UK2Node_CallFunction>(Node))
+		{
+			const UFunction* Function = CallNode->GetTargetFunction();
+			if (Function != nullptr)
+			{
+				Detail->SetStringField(TEXT("function"), Function->GetPathName());
+			}
+		}
+		if (const UK2Node_DynamicCast* CastNode = Cast<UK2Node_DynamicCast>(Node))
+		{
+			if (CastNode->TargetType != nullptr)
+			{
+				Detail->SetStringField(TEXT("targetClass"), CastNode->TargetType->GetPathName());
+			}
+		}
+		TArray<TSharedPtr<FJsonValue>> PinValues;
+		for (const UEdGraphPin* Pin : Node->Pins)
+		{
+			if (Pin == nullptr)
+			{
+				continue;
+			}
+			TSharedRef<FJsonObject> PinObject = MakeShared<FJsonObject>();
+			PinObject->SetStringField(TEXT("name"), Pin->PinName.ToString());
+			PinObject->SetStringField(
+				TEXT("direction"),
+				Pin->Direction == EGPD_Input ? TEXT("input") : TEXT("output"));
+			PinObject->SetStringField(
+				TEXT("kind"),
+				Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Exec ? TEXT("exec") : TEXT("data"));
+			// Hidden pins (the CallFunction self pin) are part of the node's real
+			// pin inventory and the registry descriptor lists them too; keep them
+			// and say they are hidden instead of silently filtering them out.
+			PinObject->SetBoolField(TEXT("hidden"), Pin->bHidden);
+			PinObject->SetStringField(TEXT("category"), Pin->PinType.PinCategory.ToString());
+			PinObject->SetStringField(TEXT("subCategory"), Pin->PinType.PinSubCategory.ToString());
+			const UObject* SubCategoryObject = Pin->PinType.PinSubCategoryObject.Get();
+			PinObject->SetStringField(
+				TEXT("subCategoryObject"),
+				SubCategoryObject != nullptr ? SubCategoryObject->GetPathName() : FString());
+			PinValues.Add(MakeShared<FJsonValueObject>(PinObject));
+		}
+		Detail->SetArrayField(TEXT("pins"), PinValues);
+	}
 
 #if WITH_DEV_AUTOMATION_TESTS
 	bool bFaultArmed = false;
@@ -758,12 +865,15 @@ namespace
 			{
 				// createNode carries nodeType/x/y, an optional tempId and -- only for
 				// the two variable accessor nodeTypes -- the exact variable identity.
+				// Phase A also accepts actionId INSTEAD of nodeType: an opaque
+				// registry identity whose spawner the engine owns.
 				if (!RejectUnknownParams(
 					*Object,
 					{
 						TEXT("opId"),
 						TEXT("kind"),
 						TEXT("nodeType"),
+						TEXT("actionId"),
 						TEXT("x"),
 						TEXT("y"),
 						TEXT("tempId"),
@@ -776,11 +886,49 @@ namespace
 				{
 					return false;
 				}
+				const bool bHasNodeType = Object->Get()->HasField(TEXT("nodeType"));
+				const bool bHasActionId = Object->Get()->HasField(TEXT("actionId"));
+				if (bHasNodeType && bHasActionId)
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-spawn-action-id-conflict"),
+						TEXT("A createNode operation takes exactly one of nodeType and actionId."));
+				}
 				FString NodeType;
+				FString ActionId;
 				int32 X = 0;
 				int32 Y = 0;
-				if (!ReadString(*Object, TEXT("nodeType"), NodeType, OutErrorCode, OutErrorMessage)
-					|| !ReadCoordinate(*Object, TEXT("x"), X, OutErrorCode, OutErrorMessage)
+				if (bHasActionId)
+				{
+					if (!IsNodeSpawnGateOpen())
+					{
+						return Fail(
+							OutErrorCode,
+							OutErrorMessage,
+							TEXT("graph-spawn-experimental-disabled"),
+							TEXT("Action Registry node creation is not opted in for this project ([UEAgentKit] ExperimentalNodeSpawn=True)."));
+					}
+					if (!ReadString(*Object, TEXT("actionId"), ActionId, OutErrorCode, OutErrorMessage))
+					{
+						return false;
+					}
+					if (!IsActionId(ActionId))
+					{
+						return Fail(
+							OutErrorCode,
+							OutErrorMessage,
+							TEXT("graph-spawn-action-id-invalid"),
+							TEXT("actionId must be 'action:' followed by 32 lower-case hex characters."));
+					}
+					Operation.Node.ActionId = ActionId;
+				}
+				else if (!ReadString(*Object, TEXT("nodeType"), NodeType, OutErrorCode, OutErrorMessage))
+				{
+					return false;
+				}
+				if (!ReadCoordinate(*Object, TEXT("x"), X, OutErrorCode, OutErrorMessage)
 					|| !ReadCoordinate(*Object, TEXT("y"), Y, OutErrorCode, OutErrorMessage))
 				{
 					return false;
@@ -795,8 +943,16 @@ namespace
 				const bool bHasVariableName = Object->Get()->HasField(TEXT("variableName"));
 				const bool bHasVariableGuid = Object->Get()->HasField(TEXT("variableGuid"));
 				const bool bHasVariableType = Object->Get()->HasField(TEXT("variableType"));
-				if (!bVariableAccessorType
-					&& (bHasVariableName || bHasVariableGuid || bHasVariableType))
+				const bool bHasVariableField = bHasVariableName || bHasVariableGuid || bHasVariableType;
+				if (bHasActionId && bHasVariableField)
+				{
+					return Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-edit-variable-field-not-allowed"),
+						TEXT("An actionId operation does not accept variableName/variableGuid/variableType."));
+				}
+				if (!bVariableAccessorType && bHasVariableField)
 				{
 					return Fail(
 						OutErrorCode,
@@ -1218,6 +1374,23 @@ namespace
 			{
 				return false;
 			}
+			if (Operation.Node.bActionSpawn)
+			{
+				// Phase A: the plan binds the registry identity and the resolved
+				// class; pins are NOT part of the plan because they are read from
+				// the created node afterwards.
+				Operation.Detail->SetStringField(TEXT("actionId"), Operation.Node.ActionId);
+				Operation.Detail->SetStringField(TEXT("nodeClass"), Operation.Node.NodeClassPath);
+				Operation.Detail->SetStringField(TEXT("spawnerClass"), Operation.Node.SpawnerClass);
+				Operation.Detail->SetStringField(TEXT("actionKind"), Operation.Node.ActionKind);
+				Operation.Detail->SetNumberField(TEXT("x"), Operation.Node.X);
+				Operation.Detail->SetNumberField(TEXT("y"), Operation.Node.Y);
+				if (!Operation.TempId.IsEmpty())
+				{
+					Operation.Detail->SetStringField(TEXT("tempId"), Operation.TempId);
+				}
+				return true;
+			}
 			Operation.Detail->SetStringField(TEXT("nodeType"), Operation.Node.NodeType);
 			Operation.Detail->SetStringField(TEXT("nodeClass"), Operation.Node.NodeClassPath);
 			if (!Operation.Node.FunctionName.IsEmpty())
@@ -1425,6 +1598,19 @@ namespace
 				Operation.Node.NodeGuid =
 					CreatedGuids[0].ToString(EGuidFormats::DigitsWithHyphensLower);
 				Operation.Detail->SetStringField(TEXT("nodeGuid"), Operation.Node.NodeGuid);
+				if (Operation.Node.bActionSpawn)
+				{
+					// Honest post-creation read: class, identity and the ACTUAL
+					// pins of the node the engine just created (no shadow contract).
+					for (UEdGraphNode* Node : Graph->Nodes)
+					{
+						if (Node != nullptr && Node->NodeGuid == CreatedGuids[0])
+						{
+							FillActualNodeContract(Node, Operation.Detail);
+							break;
+						}
+					}
+				}
 				if (!Operation.TempId.IsEmpty())
 				{
 					// From here on an edge endpoint written as this tempId means
@@ -1759,9 +1945,22 @@ namespace
 		{
 			// The created node GUID is deliberately absent: it is assigned inside
 			// the transaction, so it cannot be part of a plan the caller previewed.
-			Canonical = AppendField(Canonical, Operation.Node.NodeType);
-			Canonical = AppendField(Canonical, Operation.Node.NodeClassPath);
-			Canonical = AppendField(Canonical, Operation.Node.FunctionName);
+			if (Operation.Node.bActionSpawn)
+			{
+				// Phase A binds the action identity and the class it resolved to.
+				// The pin contract is NOT hashed: the created node's real pins are
+				// reported after creation, and predicting them here would turn the
+				// plan into a shadow contract.
+				Canonical = AppendField(Canonical, TEXT("action"));
+				Canonical = AppendField(Canonical, Operation.Node.ActionId);
+				Canonical = AppendField(Canonical, Operation.Node.NodeClassPath);
+			}
+			else
+			{
+				Canonical = AppendField(Canonical, Operation.Node.NodeType);
+				Canonical = AppendField(Canonical, Operation.Node.NodeClassPath);
+				Canonical = AppendField(Canonical, Operation.Node.FunctionName);
+			}
 			Canonical = AppendField(Canonical, FString::FromInt(Operation.Node.X));
 			Canonical = AppendField(Canonical, FString::FromInt(Operation.Node.Y));
 			if (Operation.Node.bVariableAccessor)
@@ -2215,6 +2414,23 @@ void UEAgentKitBlueprintPatchExperimental::ResetExperimentalWriteForTest()
 {
 	bTestOverrideSet = false;
 	bTestOverrideEnabled = false;
+}
+
+bool UEAgentKitBlueprintPatchExperimental::IsNodeSpawnWriteAvailable()
+{
+	return IsNodeSpawnGateOpen();
+}
+
+void UEAgentKitBlueprintPatchExperimental::SetNodeSpawnEnabledForTest(bool bEnabled)
+{
+	bNodeSpawnOverrideSet = true;
+	bNodeSpawnOverrideEnabled = bEnabled;
+}
+
+void UEAgentKitBlueprintPatchExperimental::ResetNodeSpawnForTest()
+{
+	bNodeSpawnOverrideSet = false;
+	bNodeSpawnOverrideEnabled = false;
 }
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -2701,6 +2917,39 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 	bool bUndoVerified = false;
 	bool bRedoVerified = false;
 	{
+		// One fingerprint at a time so a drift names the hash that drifted instead
+		// of collapsing into a bare "undo/redo failed".
+		auto CheckFingerprints = [&](const bool bExpectAfter) -> bool
+		{
+			const FString State = UEAgentKitBlueprintPinDefaultExperimental::ComputeAtomicStateFingerprint(Graph);
+			const FString Variables =
+				UEAgentKitBlueprintVariableExperimental::ComputeAtomicVariableStateFingerprint(Blueprint);
+			const FString Nodes =
+				UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicNodeStateFingerprint(Graph);
+			const FString Edges =
+				UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicEdgeStateFingerprint(Graph);
+			auto Mismatch = [&](const TCHAR* Name, const FString& Actual, const FString& Expected) -> bool
+			{
+				if (!Actual.IsEmpty() && Actual.Equals(Expected, ESearchCase::CaseSensitive))
+				{
+					return false;
+				}
+				OutErrorMessage = FString::Printf(
+					TEXT("The %s fingerprint does not match the %s plan value (%s)."),
+					Name,
+					bExpectAfter ? TEXT("after") : TEXT("before"),
+					*Actual);
+				return true;
+			};
+			if (Mismatch(TEXT("state"), State, bExpectAfter ? Plan.StateFingerprintAfter : Plan.StateFingerprintBefore)
+				|| Mismatch(TEXT("variables"), Variables, bExpectAfter ? Plan.VariablesFingerprintAfter : Plan.VariablesFingerprintBefore)
+				|| Mismatch(TEXT("nodes"), Nodes, bExpectAfter ? Plan.NodesFingerprintAfter : Plan.NodesFingerprintBefore)
+				|| Mismatch(TEXT("edges"), Edges, bExpectAfter ? Plan.EdgesFingerprintAfter : Plan.EdgesFingerprintBefore))
+			{
+				return false;
+			}
+			return true;
+		};
 		bool bBeforeStateVerified = false;
 		if (GEditor->UndoTransaction())
 		{
@@ -2715,15 +2964,7 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 					/*bExpectAfter=*/false,
 					OutErrorCode,
 					OutErrorMessage)
-				&& UEAgentKitBlueprintPinDefaultExperimental::ComputeAtomicStateFingerprint(Graph)
-					.Equals(Plan.StateFingerprintBefore, ESearchCase::CaseSensitive)
-				&& UEAgentKitBlueprintVariableExperimental::ComputeAtomicVariableStateFingerprint(
-					Blueprint)
-					.Equals(Plan.VariablesFingerprintBefore, ESearchCase::CaseSensitive)
-				&& UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicNodeStateFingerprint(Graph)
-					.Equals(Plan.NodesFingerprintBefore, ESearchCase::CaseSensitive)
-				&& UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicEdgeStateFingerprint(Graph)
-					.Equals(Plan.EdgesFingerprintBefore, ESearchCase::CaseSensitive);
+				&& CheckFingerprints(/*bExpectAfter=*/false);
 		}
 		bUndoVerified = bBeforeStateVerified;
 		bool bAfterStateVerified = false;
@@ -2737,15 +2978,7 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 					/*bExpectAfter=*/true,
 					OutErrorCode,
 					OutErrorMessage)
-				&& UEAgentKitBlueprintPinDefaultExperimental::ComputeAtomicStateFingerprint(Graph)
-					.Equals(Plan.StateFingerprintAfter, ESearchCase::CaseSensitive)
-				&& UEAgentKitBlueprintVariableExperimental::ComputeAtomicVariableStateFingerprint(
-					Blueprint)
-					.Equals(Plan.VariablesFingerprintAfter, ESearchCase::CaseSensitive)
-				&& UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicNodeStateFingerprint(Graph)
-					.Equals(Plan.NodesFingerprintAfter, ESearchCase::CaseSensitive)
-				&& UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicEdgeStateFingerprint(Graph)
-					.Equals(Plan.EdgesFingerprintAfter, ESearchCase::CaseSensitive);
+				&& CheckFingerprints(/*bExpectAfter=*/true);
 		}
 		bRedoVerified = bAfterStateVerified;
 	}
@@ -2755,11 +2988,20 @@ bool UEAgentKitBlueprintPatchExperimental::TryApplyExperimental(
 		{
 			GEditor->UndoTransaction();
 		}
+		// Keep the specific read-back failure (if any) instead of dropping it: a
+		// generic message turns one wrong pin into an unfalsifiable "failed".
+		const FString Detail = OutErrorMessage.IsEmpty()
+			? FString()
+			: FString::Printf(TEXT(" %s"), *OutErrorMessage);
 		return Fail(
 			OutErrorCode,
 			OutErrorMessage,
 			TEXT("graph-patch-undo-redo-failed"),
-			TEXT("Undo/Redo verification failed for the Blueprint patch."));
+			FString::Printf(
+				TEXT("Undo/Redo verification failed for the Blueprint patch (undoVerified=%s, redoVerified=%s).%s"),
+				bUndoVerified ? TEXT("true") : TEXT("false"),
+				bRedoVerified ? TEXT("true") : TEXT("false"),
+				*Detail));
 	}
 
 	TSharedPtr<FJsonObject> FinalPreflight;

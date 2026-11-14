@@ -144,6 +144,9 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_get_animation_scale_audit", "realtime", "read"),
     ToolDefinition("ue_cancel_animation_scale_audit", "realtime", "planning"),
     ToolDefinition("ue_export_animation_scale_audit_report", "realtime", "planning"),
+    # Node-spawn phase A: thin read-only wrapper over native.invoke +
+    # graph.nodeRegistry.catalog.  Registered with the other live read tools.
+    ToolDefinition("ue_search_node_actions", "live-read", "read"),
     ToolDefinition("ue_open_asset", "live-action", "planning", "editor.openAsset"),
     ToolDefinition("ue_focus_asset", "live-action", "planning", "editor.focusAsset"),
     ToolDefinition("ue_sync_content_browser", "live-action", "planning", "editor.syncContentBrowser"),

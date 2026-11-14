@@ -7,6 +7,10 @@
 #include "BlueprintNodeBinder.h"
 #include "BlueprintNodeSpawner.h"
 #include "BlueprintVariableNodeSpawner.h"
+#include "BlueprintBoundEventNodeSpawner.h"
+#include "BlueprintComponentNodeSpawner.h"
+#include "BlueprintDelegateNodeSpawner.h"
+#include "Native/NativeNodeRegistry.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
@@ -4271,8 +4275,11 @@ namespace
 				Builder = AppendField(
 					Builder,
 					Pin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower));
-				Builder = AppendField(Builder, Pin->PinType.PinCategory.ToString());
-				Builder = AppendField(Builder, Pin->PinType.PinSubCategory.ToString());
+				// Same FName normalisation as the pin-default hash: the name table
+				// keeps the first interned spelling, so a reconstructed node may
+				// print "Object" where it printed "object" before Undo/Redo.
+				Builder = AppendField(Builder, Pin->PinType.PinCategory.ToString().ToLower());
+				Builder = AppendField(Builder, Pin->PinType.PinSubCategory.ToString().ToLower());
 				Builder = AppendField(
 					Builder,
 					Pin->PinType.PinSubCategoryObject != nullptr
@@ -4510,6 +4517,162 @@ namespace
 	}
 
 	/**
+	 * Phase A admission for one registry action.
+	 *
+	 * Every refused field is one the descriptor already publishes, so this is not
+	 * a second policy engine: latent, world-context and variadic actions cannot be
+	 * placed by a plain spawner call, and the spawner families below need editor
+	 * context (a level actor, the selected actor, a delegate property) that this
+	 * surface deliberately does not have.  "This spawner needs something I do not
+	 * have" -- not "this node type is banned".
+	 */
+	bool CheckActionSpawnAdmissible(
+		const FNativeSpawnerResolution& Resolution,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
+	{
+		if (Resolution.Spawner == nullptr || !Resolution.Descriptor.IsValid())
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-spawn-action-unknown"),
+				TEXT("The action resolved without a describable spawner."));
+		}
+		const TSharedPtr<FJsonObject>* Constraints = nullptr;
+		const bool bHasConstraints = Resolution.Descriptor->TryGetObjectField(TEXT("constraints"), Constraints)
+			&& Constraints != nullptr
+			&& Constraints->IsValid();
+		auto Constraint = [&Constraints, bHasConstraints](const TCHAR* Field) -> bool
+		{
+			return bHasConstraints && (*Constraints)->GetBoolField(Field);
+		};
+		const TCHAR* UnsupportedField = !Constraint(TEXT("latent")) ? nullptr
+			: TEXT("latent");
+		if (UnsupportedField == nullptr && Constraint(TEXT("requiresWorldContext")))
+		{
+			UnsupportedField = TEXT("requiresWorldContext");
+		}
+		if (UnsupportedField == nullptr && Constraint(TEXT("variadic")))
+		{
+			UnsupportedField = TEXT("variadic");
+		}
+		if (UnsupportedField != nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-spawn-action-unsupported"),
+				FString::Printf(
+					TEXT("This action cannot be created by a plain spawner call: %s is set."),
+					UnsupportedField));
+		}
+		if (Resolution.Spawner->IsA<UBlueprintBoundEventNodeSpawner>()
+			|| Resolution.Spawner->IsA<UBlueprintComponentNodeSpawner>()
+			|| Resolution.Spawner->IsA<UBlueprintDelegateNodeSpawner>())
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-spawn-requires-binding"),
+				FString::Printf(
+					TEXT("The spawner %s requires a binding or an editor selection that this request does not carry."),
+					*Resolution.SpawnerClassPath));
+		}
+		if (!Resolution.ActionKind.Equals(TEXT("callFunction"), ESearchCase::CaseSensitive)
+			&& !Resolution.ActionKind.Equals(TEXT("cast"), ESearchCase::CaseSensitive))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-spawn-action-unsupported"),
+				FString::Printf(
+					TEXT("Phase A creates callFunction and cast actions only; this action is '%s'."),
+					*Resolution.ActionKind));
+		}
+		return true;
+	}
+
+	/**
+	 * Create one node through the engine spawner behind a registry action id.
+	 *
+	 * The spawner is invoked with an EMPTY binding set: the customize delegate the
+	 * action database installed is the only thing that sets CallFunction's
+	 * UFunction or DynamicCast's TargetType.  Re-implementing either here would be
+	 * a second, drifting copy of engine behaviour.
+	 */
+	bool CreateActionNode(
+		UEdGraph* Graph,
+		const UEAgentKitBlueprintGraphEditExperimental::FAtomicNodeOperation& Operation,
+		UEdGraphNode*& OutNode,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
+	{
+		OutNode = nullptr;
+		if (Graph == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-graph-unavailable"),
+				TEXT("The exact graph is unavailable."));
+		}
+		const FNativeSpawnerResolution Resolution =
+			FNativeNodeRegistry::Get().ResolveSpawnerForActionId(Operation.ActionId);
+		if (!Resolution.bOk)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				Resolution.ErrorCode.IsEmpty() ? TEXT("graph-spawn-action-unknown") : *Resolution.ErrorCode,
+				Resolution.ErrorMessage.IsEmpty()
+					? FString(TEXT("The action could not be resolved."))
+					: Resolution.ErrorMessage);
+		}
+		if (!CheckActionSpawnAdmissible(Resolution, OutErrorCode, OutErrorMessage))
+		{
+			return false;
+		}
+		if (!Resolution.NodeClassPath.Equals(Operation.NodeClassPath, ESearchCase::CaseSensitive))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-spawn-action-unknown"),
+				FString::Printf(
+					TEXT("The action now resolves to %s, not the planned %s."),
+					*Resolution.NodeClassPath,
+					*Operation.NodeClassPath));
+		}
+		UEdGraphNode* Node = Resolution.Spawner->Invoke(
+			Graph,
+			IBlueprintNodeBinder::FBindingSet(),
+			FVector2D(Operation.X, Operation.Y));
+		if (Node == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-spawn-action-failed"),
+				FString::Printf(
+					TEXT("The Editor failed to spawn the action %s."),
+					*Operation.ActionId));
+		}
+		OutNode = Node;
+		Node->SetFlags(RF_Transactional);
+		if (!Node->NodeGuid.IsValid())
+		{
+			Node->CreateNewGuid();
+		}
+		// The engine snaps a spawned node to the graph grid (9000 -> 8992); this
+		// writer's contract is the exact requested coordinate, exactly like the
+		// primitive path below which assigns x/y after spawning.
+		Node->NodePosX = Operation.X;
+		Node->NodePosY = Operation.Y;
+		return true;
+	}
+
+	/**
 	 * Read one primitive node back against the exact plan.
 	 *
 	 * This is the atomic seam's contract check.  The single writer's own read-back
@@ -4552,6 +4715,19 @@ namespace
 				Operation.X,
 				Operation.Y);
 			return false;
+		}
+		if (Operation.bActionSpawn)
+		{
+			// Phase A action spawn: identity is the class the action resolved to,
+			// plus the planned position.  The pin set is whatever the engine
+			// produced and is read back by the caller after creation; asserting a
+			// predicted pin contract here would be a shadow contract, not proof.
+			if (Node->Pins.Num() == 0)
+			{
+				OutReason = TEXT("The action-spawned node has no pins.");
+				return false;
+			}
+			return true;
 		}
 		if (Operation.bVariableAccessor)
 		{
@@ -5087,7 +5263,8 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryResolveAtomicNodeOperation(
 	}
 	const bool bAccessorType = InOutOperation.NodeType.Equals(TEXT("variable_get"), ESearchCase::CaseSensitive)
 		|| InOutOperation.NodeType.Equals(TEXT("variable_set"), ESearchCase::CaseSensitive);
-	if (!bAccessorType && NodeClassForType(InOutOperation.NodeType) == nullptr)
+	const bool bActionSpawn = !InOutOperation.ActionId.IsEmpty();
+	if (!bAccessorType && !bActionSpawn && NodeClassForType(InOutOperation.NodeType) == nullptr)
 	{
 		return Fail(
 			OutErrorCode,
@@ -5114,6 +5291,48 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryResolveAtomicNodeOperation(
 	Spec.NodeType = InOutOperation.NodeType;
 	Spec.X = InOutOperation.X;
 	Spec.Y = InOutOperation.Y;
+	if (bActionSpawn)
+	{
+		// Phase A: the action id is the whole identity.  Resolve it through the
+		// registry, apply the descriptor's own admission fields, and record what
+		// the engine will spawn.  No pin contract is predicted here: the created
+		// node's pins are read back after creation.
+		if (!InOutOperation.NodeType.IsEmpty())
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-spawn-action-id-conflict"),
+				TEXT("A createNode operation takes exactly one of nodeType and actionId."));
+		}
+		const FNativeSpawnerResolution Resolution =
+			FNativeNodeRegistry::Get().ResolveSpawnerForActionId(InOutOperation.ActionId);
+		if (!Resolution.bOk)
+		{
+			OutErrorCode = Resolution.ErrorCode.IsEmpty()
+				? TEXT("graph-spawn-action-unknown")
+				: Resolution.ErrorCode;
+			OutErrorMessage = Resolution.ErrorMessage.IsEmpty()
+				? FString(TEXT("The action could not be resolved."))
+				: Resolution.ErrorMessage;
+			return false;
+		}
+		if (!CheckActionSpawnAdmissible(Resolution, OutErrorCode, OutErrorMessage))
+		{
+			return false;
+		}
+		InOutOperation.bActionSpawn = true;
+		InOutOperation.NodeClassPath = Resolution.NodeClassPath;
+		InOutOperation.SpawnerClass = Resolution.SpawnerClassPath;
+		InOutOperation.ActionKind = Resolution.ActionKind;
+		InOutOperation.ActionPayload = Resolution.PayloadValue;
+		InOutOperation.FunctionName.Reset();
+		InOutOperation.InputPins.Reset();
+		InOutOperation.OutputPins.Reset();
+		InOutOperation.InputPinTypes.Reset();
+		InOutOperation.OutputPinTypes.Reset();
+		return true;
+	}
 	if (bAccessorType)
 	{
 		// Slice 15: resolve the accessor through the single writer's own rules, so
@@ -5222,7 +5441,22 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyAtomicNodeOperations(
 		Spec.VariableType = Operation.VariableType;
 		Spec.VariableAccess = Operation.VariableAccess;
 		UEdGraphNode* Node = nullptr;
-		if (Operation.bVariableAccessor)
+		if (Operation.bActionSpawn)
+		{
+			if (!CreateActionNode(Graph, Operation, Node, OutErrorCode, OutErrorMessage))
+			{
+				if (Node != nullptr && Graph->Nodes.Contains(Node))
+				{
+					CreatedNodes.Add(Node);
+				}
+				if (!RemoveCreatedNodes(Blueprint, Graph, CreatedNodes))
+				{
+					OutErrorMessage += TEXT(" The atomic Apply could not remove a partially created node.");
+				}
+				return false;
+			}
+		}
+		else if (Operation.bVariableAccessor)
 		{
 			if (!CreateVariableAccessorNode(
 					Blueprint,

@@ -78,6 +78,7 @@ def register_patch_experimental_tools(
     live_editor_service: Any,
     tool_annotations_type: Any,
     error_response: Any = _error_response,
+    node_spawn_enabled: bool = False,
 ) -> None:
     preview_annotations = tool_annotations_type(
         readOnlyHint=True,
@@ -117,6 +118,23 @@ def register_patch_experimental_tools(
             timeout_seconds=timeout_seconds,
         )
 
+    def _require_node_spawn_gate(operations: Any) -> None:
+        """First of the two node-spawn gates: the MCP CLI flag.
+
+        The second gate lives in the Editor (`[UEAgentKit] ExperimentalNodeSpawn`).
+        Refusing here keeps a caller from sending an actionId the running Editor
+        would reject anyway, and it makes "the flag is off" a distinct, local error.
+        """
+        if node_spawn_enabled or not isinstance(operations, list):
+            return
+        for operation in operations:
+            if isinstance(operation, dict) and "actionId" in operation:
+                raise LiveEditorError(
+                    "graph-spawn-experimental-disabled",
+                    "Action Registry node creation requires --enable-experimental-node-spawn "
+                    "and [UEAgentKit] ExperimentalNodeSpawn=True in the running project.",
+                )
+
     @server.tool(annotations=preview_annotations)
     def ue_preview_blueprint_patch_experimental(
         asset_path: str,
@@ -145,6 +163,7 @@ def register_patch_experimental_tools(
         """
         try:
             _capabilities(live_editor_service, PREVIEW_CAPABILITY)
+            _require_node_spawn_gate(operations)
             params = validate_preview_parameters(
                 asset_path=asset_path,
                 graph_guid=graph_guid,
@@ -188,6 +207,7 @@ def register_patch_experimental_tools(
         """
         try:
             _capabilities(live_editor_service, APPLY_CAPABILITY)
+            _require_node_spawn_gate(operations)
             params = build_apply_parameters(
                 plan_id=plan_id,
                 asset_path=asset_path,
