@@ -266,6 +266,7 @@ class SnapshotRefreshTests(unittest.TestCase):
             backup_root=self.backup_root,
             commit_enabled=True,
             active_snapshot=self.active,
+            subprocess_enabled=True,
         )
         return PatchWorkflowService(
             index_service,

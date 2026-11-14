@@ -14,6 +14,7 @@ from .live_asset_overlay import (
     prove_and_install,
     sha256_file,
 )
+from .subprocess_ledger import get_session_ledger
 
 OVERLAY_SECTION = "overlay"
 
@@ -279,6 +280,22 @@ def register_query_tools(
         merged["indexFresh"] = False
         merged["overlay"] = metadata
         return merged
+
+    @server.tool(annotations=read_annotations)
+    def ue_get_subprocess_ledger() -> dict[str, Any]:
+        """Return this session's bounded subprocess spawn attempts (blocked, spawned or failed)."""
+        stats = get_session_ledger().stats()
+        return {
+            "schemaVersion": "1.0",
+            "tool": "ue_get_subprocess_ledger",
+            "ok": True,
+            "readOnly": True,
+            "entries": stats["entries"],
+            "count": stats["count"],
+            "blockedCount": stats["blockedCount"],
+            "spawnedCount": stats["spawnedCount"],
+            "failedCount": stats["failedCount"],
+        }
 
     @server.tool(annotations=read_annotations)
     def ue_find_references(

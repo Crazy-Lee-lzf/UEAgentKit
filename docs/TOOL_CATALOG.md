@@ -32,6 +32,17 @@
 
 这些链接是**产品文档导航**，不保证所有 Tool 均随 v0.8.0 以同一模式默认开放。只读能力通常不意味着可写；计划生成不等于 Apply；在 Editor 内完成操作也不等于资产已保存或独立验证。
 
+## 子进程工作流（默认关闭）
+
+依赖冷启动 `UnrealEditor-Cmd.exe` 的 `workflow` 组（`ue_plan_patch` / `ue_dry_run_patch` / `ue_apply_patch` / `ue_verify_patch` / `ue_rollback_patch` / `ue_set_pin_default` / `ue_set_blueprint_default` / `ue_set_asset_property` 等）**默认不注册**。同时满足两件事才会出现：
+
+```text
+MCP:    --enable-subprocess-workflow
+Project: Config/DefaultEngine.ini 里 [UEAgentKit] SubprocessWorkflow=True
+```
+
+任一条件缺失时，任何仍能到达 spawn 的内部调用会在组装命令行之前抛 `workflow-subprocess-disabled`，不会启动进程。每次 spawn 尝试（`blocked` / `spawned` / `failed`）都会记进进程内有界 ledger；用只读工具 `ue_get_subprocess_ledger()` 查看，`spawnedCount == 0` 可以直接断言。原子 patch、node-spawn 与 overlay 刷新**不会**回退到这条子进程路径。
+
 ## 为新增 Tool 编写公开说明
 
 公开的单 Tool 文档应能让 AI Agent 不依赖内部研发报告而完成安全调用：用途、最小运行环境和启动模式、只读/修改标记、输入参数与返回结构、错误码、最小调用示例、需要的人工授权、失败与回滚、安全限制、测试的 UE 版本和范围。运行日志、私人测试工程、临时本机路径及阶段 RunState 应留在内部 Development。

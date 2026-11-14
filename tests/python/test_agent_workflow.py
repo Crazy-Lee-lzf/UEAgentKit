@@ -472,6 +472,7 @@ class AgentWorkflowTests(unittest.TestCase):
             work_root=self.work_root,
             backup_root=self.backup_root,
             commit_enabled=True,
+            subprocess_enabled=True,
         )
         self.service = PatchWorkflowService(
             FakeIndexService(),
@@ -1445,7 +1446,7 @@ class AgentWorkflowTests(unittest.TestCase):
 
     def test_live_write_tool_count_and_names_include_verification_trust(self) -> None:
         names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
-        self.assertEqual(len(names), 117)
+        self.assertEqual(len(names), 118)
         self.assertIn("ue_get_pie_world_contexts", names)
         self.assertIn("ue_inspect_pie_actor", names)
         self.assertIn("ue_analyze_change_impact", names)
@@ -1491,6 +1492,7 @@ class AgentWorkflowTests(unittest.TestCase):
             work_root=self.config.work_root,
             backup_root=self.config.backup_root,
             commit_enabled=False,
+            subprocess_enabled=True,
         )
         disabled_service = PatchWorkflowService(
             FakeIndexService(),
@@ -2400,6 +2402,7 @@ class AgentWorkflowTests(unittest.TestCase):
             work_root=self.config.work_root,
             backup_root=self.config.backup_root,
             commit_enabled=False,
+            subprocess_enabled=True,
         )
         disabled_service = PatchWorkflowService(
             FakeIndexService(),
@@ -3318,6 +3321,7 @@ class AgentWorkflowTests(unittest.TestCase):
             work_root=self.config.work_root,
             backup_root=self.config.backup_root,
             commit_enabled=False,
+            subprocess_enabled=True,
         )
         disabled_service = PatchWorkflowService(
             FakeIndexService(),

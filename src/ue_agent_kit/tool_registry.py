@@ -33,6 +33,7 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_get_project_status", "query", "read"),
     ToolDefinition("ue_search", "query", "read"),
     ToolDefinition("ue_get_asset", "query", "read"),
+    ToolDefinition("ue_get_subprocess_ledger", "query", "read"),
     ToolDefinition("ue_find_references", "query", "read"),
     ToolDefinition("ue_find_world_actors", "query", "read"),
     ToolDefinition("ue_find_world_partition_actors", "query", "read"),

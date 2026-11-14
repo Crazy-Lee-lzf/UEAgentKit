@@ -645,6 +645,7 @@ data-table-row-referenced    DataTable 删除/重命名目标 Row 存在精确 S
 policy-rejected             固定 Policy 拒绝资产、Operation 或语义 Target
 revision-conflict           Plan Revision 与当前 Revision Export 不一致
 dirty-package               Revision Export 记录目标 Package 为 Dirty
+workflow-subprocess-disabled 子进程工作流未同时开启 --enable-subprocess-workflow 与项目 ini SubprocessWorkflow=True
 workflow-timeout             UE 子进程超过固定超时
 ue-process-crashed           检测到 Fatal、Assertion、访问冲突或已知崩溃退出码
 workflow-report-missing      子进程未生成要求的结构化报告

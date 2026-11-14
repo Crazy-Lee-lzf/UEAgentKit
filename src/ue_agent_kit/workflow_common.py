@@ -8,6 +8,7 @@ import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator, Sequence
 from .agent_api import (
@@ -26,6 +27,9 @@ from .patches import (
 )
 from .snapshot_lifecycle import (
     ActiveSnapshot,
+)
+from .subprocess_ledger import (
+    get_session_ledger,
 )
 from .verification_evidence import (
     VerificationEvidenceStore,
@@ -133,6 +137,7 @@ class ProcessResult:
     stdout: str
     stderr: str
     elapsed_ms: float = 0.0
+    pid: int | None = None
 
 
 ProcessRunner = Callable[[list[str], Path, int], ProcessResult]
@@ -150,6 +155,9 @@ class PatchWorkflowConfig:
     commit_enabled: bool = False
     process_timeout_seconds: int = 1800
     active_snapshot: ActiveSnapshot | None = None
+    # 0-3.5: cold-starting UnrealEditor-Cmd.exe is default-off.  The caller must
+    # prove both the CLI flag and the project ini gate before setting this.
+    subprocess_enabled: bool = False
 
 
 @dataclass
@@ -646,21 +654,63 @@ class AuthorizedSaveRollbackDryRunRecord:
     consumed: bool = False
 
 
+def subprocess_workflow_enabled_for_project(project_path: Path | None) -> bool:
+    """True only when the project's ``DefaultEngine.ini`` opts in explicitly.
+
+    The second half of the 0-3.5 double gate:
+    ``[UEAgentKit] SubprocessWorkflow=True``.  A missing file, a missing
+    section/key, or any value other than a case-insensitive ``true``/``1`` keeps
+    the workflow subprocess path off.
+    """
+    if project_path is None:
+        return False
+    project = Path(str(project_path)).expanduser()
+    ini_path = (project if project.is_dir() else project.parent) / "Config" / "DefaultEngine.ini"
+    try:
+        text = ini_path.read_text(encoding="utf-8-sig", errors="replace")
+    except OSError:
+        return False
+    in_section = False
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith((";", "#")):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            in_section = line[1:-1].strip().lower() == "ueagentkit"
+            continue
+        if not in_section or "=" not in line:
+            continue
+        key, _separator, value = line.partition("=")
+        if key.strip().lower() == "subprocessworkflow":
+            return value.strip().strip('"').lower() in {"true", "1"}
+    return False
+
+
 def _default_process_runner(arguments: list[str], cwd: Path, timeout_seconds: int) -> ProcessResult:
     started = time.perf_counter()
-    completed = subprocess.run(
+    process = subprocess.Popen(
         arguments,
         cwd=str(cwd),
         stdin=subprocess.DEVNULL,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
         errors="replace",
-        timeout=timeout_seconds,
-        check=False,
     )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        stdout, stderr = process.communicate()
+        raise subprocess.TimeoutExpired(
+            arguments,
+            timeout_seconds,
+            output=stdout,
+            stderr=stderr,
+        ) from None
     elapsed_ms = (time.perf_counter() - started) * 1000.0
-    return ProcessResult(completed.returncode, completed.stdout, completed.stderr, elapsed_ms)
+    return ProcessResult(process.returncode, stdout or "", stderr or "", elapsed_ms, process.pid)
 
 
 def _json_bytes(value: Any) -> bytes:
@@ -848,6 +898,7 @@ class WorkflowCommonBase:
             commit_enabled=config.commit_enabled,
             process_timeout_seconds=config.process_timeout_seconds,
             active_snapshot=config.active_snapshot,
+            subprocess_enabled=config.subprocess_enabled,
         )
         self._runner = process_runner or _default_process_runner
         self._lock = threading.RLock()
@@ -1410,6 +1461,22 @@ class WorkflowCommonBase:
         stage: str,
         report_path: Path,
     ) -> ProcessResult:
+        # 0-3.5: refuse before the command line is assembled.  The ledger entry
+        # makes "no subprocess happened" observable even when a caller reaches
+        # this method directly instead of going through the tool group.
+        ledger = get_session_ledger()
+        if not self.config.subprocess_enabled:
+            ledger.record(
+                script=script_name,
+                commandlet=stage,
+                outcome="blocked",
+                error_code="workflow-subprocess-disabled",
+            )
+            raise WorkflowError(
+                "workflow-subprocess-disabled",
+                "Subprocess workflow is disabled; enable --enable-subprocess-workflow and "
+                "set [UEAgentKit] SubprocessWorkflow=True in the project config.",
+            )
         self._assert_runtime_boundaries()
         script = self.config.tool_root / "scripts" / script_name
         arguments = [
@@ -1421,11 +1488,21 @@ class WorkflowCommonBase:
             str(script),
             *script_arguments,
         ]
+        started_at_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        started = time.perf_counter()
         try:
             result = self._runner(arguments, self.config.tool_root, self.config.process_timeout_seconds)
         except subprocess.TimeoutExpired as exc:
             stdout = exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else str(exc.stdout or "")
             stderr = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else str(exc.stderr or "")
+            ledger.record(
+                script=script_name,
+                commandlet=stage,
+                started_at_utc=started_at_utc,
+                duration_ms=(time.perf_counter() - started) * 1000.0,
+                outcome="failed",
+                error_code="workflow-timeout",
+            )
             details = self._sanitize_details(
                 {
                     "stage": stage,
@@ -1440,6 +1517,24 @@ class WorkflowCommonBase:
                 "The Unreal workflow process exceeded its fixed timeout.",
                 details=details,
             ) from exc
+        except OSError:
+            ledger.record(
+                script=script_name,
+                commandlet=stage,
+                started_at_utc=started_at_utc,
+                duration_ms=(time.perf_counter() - started) * 1000.0,
+                outcome="failed",
+                error_code="workflow-process-launch-failed",
+            )
+            raise
+        ledger.record(
+            script=script_name,
+            commandlet=stage,
+            pid=result.pid,
+            started_at_utc=started_at_utc,
+            duration_ms=result.elapsed_ms or (time.perf_counter() - started) * 1000.0,
+            outcome="spawned",
+        )
         return result
 
 

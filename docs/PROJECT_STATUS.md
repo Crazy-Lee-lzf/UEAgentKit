@@ -122,6 +122,8 @@ Tool 数量只是接口规模，不代表每个 Tool 都会修改资产；大量
 
 本页以当前 `0.9.0.dev1` 候选为准：静态 registry 计数已被 node-spawn 与合并改动改写，不再列出固定数字；实际 Tool 以运行时 `ue_get_capabilities` 为准。默认关闭、按 flag 动态注册的实验写入只剩原子 patch（`ue_preview/apply/save_blueprint_patch_experimental`）与 node-spawn 读工具，旧的单 writer 工具已删除。候选范围见 [候选说明](RELEASE_0.9.0_PREVIEW.md)。
 
+依赖冷启动 `UnrealEditor-Cmd.exe` 的 `workflow` 组也默认不注册：需要 `--enable-subprocess-workflow` 与项目 `Config/DefaultEngine.ini` 的 `[UEAgentKit] SubprocessWorkflow=True` 双门禁同时满足。每次 spawn 尝试都记进会话内有界 ledger，用只读的 `ue_get_subprocess_ledger()` 查看；`spawnedCount == 0` 可断言。
+
 ## 明确不支持的通用能力
 
 - 不做按类名自由创建 / 任意编辑的通用 Graph CRUD；**支持经 Action Registry 发现、由原生 spawner

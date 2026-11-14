@@ -42,6 +42,7 @@ EXPECTED_ALL_TOOLS = [
     "ue_get_project_status",
     "ue_search",
     "ue_get_asset",
+    "ue_get_subprocess_ledger",
     "ue_find_references",
     "ue_find_world_actors",
     "ue_find_world_partition_actors",
@@ -164,22 +165,22 @@ class ToolRegistryTests(unittest.TestCase):
             tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True),
             EXPECTED_ALL_TOOLS,
         )
-        self.assertEqual(len(tool_names_for_mode()), 14)
-        self.assertEqual(len(tool_names_for_mode()), 14)
-        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 56)
-        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 75)
+        self.assertEqual(len(tool_names_for_mode()), 15)
+        self.assertEqual(len(tool_names_for_mode()), 15)
+        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 57)
+        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 76)
         self.assertEqual(
             tool_names_for_mode(memory_enabled=True),
             QUERY_TOOL_NAMES + EXPECTED_MEMORY_TOOLS,
         )
-        self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 28)
+        self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 29)
         self.assertEqual(
             len(tool_names_for_mode(live_editor_enabled=True, memory_enabled=True)),
-            70,
+            71,
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
-            89,
+            90,
         )
         self.assertEqual(
             len(
@@ -189,7 +190,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-            131,
+            132,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:

@@ -33,6 +33,7 @@ from .agent_workflow import (
     PatchWorkflowService,
     WorkflowError,
 )
+from .workflow_common import subprocess_workflow_enabled_for_project
 from .change_sets import register_change_set_tools
 from .config import DEFAULT_DATABASE, DEFAULT_MEMORY_DATABASE, resolve_project_policy
 from .editor_bridge import (
@@ -1878,7 +1879,13 @@ def create_mcp_server(
     if workflow_service is not None and workflow_config is not None:
         raise ValueError("Provide workflow_config or workflow_service, not both.")
     if workflow_service is None and workflow_config is not None:
-        workflow_service = PatchWorkflowService(index_service, workflow_config)
+        # 0-3.5: the workflow group cold-starts UnrealEditor-Cmd.exe, so it only
+        # exists when both gates are open.  With either gate off the service is
+        # not constructed at all and the group is not registered.
+        if not workflow_config.subprocess_enabled:
+            workflow_config = None
+        else:
+            workflow_service = PatchWorkflowService(index_service, workflow_config)
     if workflow_service is not None and memory_service is not None:
         bind_capture = getattr(
             workflow_service,
@@ -2165,6 +2172,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enable-commit-tools", action="store_true")
     parser.add_argument("--enable-live-editor", action="store_true")
     parser.add_argument(
+        "--enable-subprocess-workflow",
+        action="store_true",
+        help=(
+            "Opt in to the workflow tools that cold-start UnrealEditor-Cmd.exe. "
+            "The project must also set [UEAgentKit] SubprocessWorkflow=True in "
+            "Config/DefaultEngine.ini."
+        ),
+    )
+    parser.add_argument(
         "--enable-p7-test-only-graph-layout-apply",
         action="store_true",
         help=argparse.SUPPRESS,
@@ -2264,6 +2280,10 @@ def _build_workflow_config(args: argparse.Namespace) -> PatchWorkflowConfig | No
         backup_root=args.backup_root,
         commit_enabled=args.enable_commit_tools,
         process_timeout_seconds=args.process_timeout_seconds,
+        # 0-3.5 double gate: the CLI flag is only half of it; the project ini
+        # must also say SubprocessWorkflow=True.
+        subprocess_enabled=bool(getattr(args, "enable_subprocess_workflow", False))
+        and subprocess_workflow_enabled_for_project(args.project_path),
     )
 
 
