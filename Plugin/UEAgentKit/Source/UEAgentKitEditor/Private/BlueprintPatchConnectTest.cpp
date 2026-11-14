@@ -399,64 +399,6 @@ namespace UEAgentKitPatchConnect
 		return Params;
 	}
 
-	/** The single writer's pure existing-pin connection shape. */
-	TSharedPtr<FJsonObject> MakeExistingPin(
-		UEdGraphNode* Node,
-		UEdGraphPin* Pin,
-		const TCHAR* Direction,
-		const TCHAR* Category)
-	{
-		TSharedRef<FJsonObject> Spec = MakeShared<FJsonObject>();
-		Spec->SetStringField(TEXT("nodeGuid"), GuidLower(Node->NodeGuid));
-		Spec->SetStringField(TEXT("pinGuid"), GuidLower(Pin->PinId));
-		Spec->SetStringField(TEXT("pinName"), Pin->PinName.ToString());
-		Spec->SetStringField(TEXT("direction"), Direction);
-		Spec->SetStringField(TEXT("category"), Category);
-		Spec->SetStringField(TEXT("subCategory"), TEXT("None"));
-		return Spec;
-	}
-
-	TSharedPtr<FJsonObject> BuildGraphEditParams(
-		UBlueprint* Blueprint,
-		UEdGraph* Graph,
-		const TSharedPtr<FJsonObject>& FromExisting,
-		const TSharedPtr<FJsonObject>& ToExisting)
-	{
-		TSharedRef<FJsonObject> Connection = MakeShared<FJsonObject>();
-		Connection->SetObjectField(TEXT("fromExisting"), FromExisting);
-		Connection->SetObjectField(TEXT("toExisting"), ToExisting);
-		TArray<TSharedPtr<FJsonValue>> Connections;
-		Connections.Add(MakeShared<FJsonValueObject>(Connection));
-		TSharedRef<FJsonObject> Params = MakeShared<FJsonObject>();
-		Params->SetStringField(TEXT("assetPath"), Blueprint->GetPathName());
-		Params->SetStringField(TEXT("graphGuid"), GuidLower(Graph->GraphGuid));
-		Params->SetArrayField(TEXT("nodes"), {});
-		Params->SetArrayField(TEXT("connections"), Connections);
-		return Params;
-	}
-
-	TSharedPtr<FJsonObject> BuildGraphEditApplyParams(
-		const TSharedPtr<FJsonObject>& Preview,
-		const TSharedPtr<FJsonObject>& FromExisting,
-		const TSharedPtr<FJsonObject>& ToExisting)
-	{
-		TSharedRef<FJsonObject> Connection = MakeShared<FJsonObject>();
-		Connection->SetObjectField(TEXT("fromExisting"), FromExisting);
-		Connection->SetObjectField(TEXT("toExisting"), ToExisting);
-		TArray<TSharedPtr<FJsonValue>> Connections;
-		Connections.Add(MakeShared<FJsonValueObject>(Connection));
-		TSharedRef<FJsonObject> Params = MakeShared<FJsonObject>();
-		Params->SetStringField(TEXT("assetPath"), Preview->GetStringField(TEXT("assetPath")));
-		Params->SetStringField(TEXT("graphGuid"), Preview->GetStringField(TEXT("graphGuid")));
-		Params->SetArrayField(TEXT("nodes"), {});
-		Params->SetArrayField(TEXT("connections"), Connections);
-		Params->SetStringField(TEXT("planId"), Preview->GetStringField(TEXT("planId")));
-		Params->SetStringField(
-			TEXT("confirmation"),
-			Preview->GetStringField(TEXT("requiredConfirmation")));
-		return Params;
-	}
-
 	int32 CountLiveLinks(UEdGraph* Graph)
 	{
 		int32 Count = 0;
@@ -488,7 +430,6 @@ bool FUEAgentKitPatchConnectTest::RunTest(const FString& Parameters)
 	using namespace UEAgentKitPatchConnect;
 
 	UEAgentKitBlueprintPatchExperimental::ResetExperimentalWriteForTest();
-	UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
 	if (!TestFalse(
 			TEXT("experimental atomic patch gate is off unless the project opts in"),
 			UEAgentKitBlueprintPatchExperimental::IsExperimentalWriteAvailable()))
@@ -496,11 +437,9 @@ bool FUEAgentKitPatchConnectTest::RunTest(const FString& Parameters)
 		return false;
 	}
 	UEAgentKitBlueprintPatchExperimental::SetExperimentalWriteEnabledForTest(true);
-	UEAgentKitBlueprintGraphEditExperimental::SetExperimentalWriteEnabledForTest(true);
 	auto Fail = []()
 	{
 		UEAgentKitBlueprintPatchExperimental::ResetExperimentalWriteForTest();
-		UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
 		return false;
 	};
 
@@ -741,59 +680,12 @@ bool FUEAgentKitPatchConnectTest::RunTest(const FString& Parameters)
 		}
 	}
 
-	// ---- Single-op equivalence with the single-writer existing-pin path. ----
+	// ---- One patch connects one exact existing output to one exact existing input. ----
 	{
 		UEdGraphPin* SourceOut = FindPin(NotBool1, TEXT("ReturnValue"), EGPD_Output);
 		UEdGraphPin* BranchCondition = FindPin(Branch, TEXT("Condition"), EGPD_Input);
-		const TSharedPtr<FJsonObject> FromExisting =
-			MakeExistingPin(NotBool1, SourceOut, TEXT("output"), TEXT("bool"));
-		const TSharedPtr<FJsonObject> ToExisting =
-			MakeExistingPin(Branch, BranchCondition, TEXT("input"), TEXT("bool"));
 
-		TSharedPtr<FJsonObject> WriterPreview;
-		FString WriterCode;
-		FString WriterMessage;
-		if (!TestTrue(
-				TEXT("the single-writer existing-pin preview succeeds"),
-				UEAgentKitBlueprintGraphEditExperimental::TryPreviewExperimental(
-					BuildGraphEditParams(Blueprint, Graph, FromExisting, ToExisting),
-					WriterPreview,
-					WriterCode,
-					WriterMessage)))
-		{
-			AddError(WriterCode + TEXT(" ") + WriterMessage);
-			return Fail();
-		}
-		TSharedPtr<FJsonObject> WriterApply;
-		if (!TestTrue(
-				TEXT("the single-writer existing-pin apply succeeds"),
-				UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
-					BuildGraphEditApplyParams(WriterPreview, FromExisting, ToExisting),
-					WriterApply,
-					WriterCode,
-					WriterMessage)))
-		{
-			AddError(WriterCode + TEXT(" ") + WriterMessage);
-			return Fail();
-		}
-		const FString WriterEdgeHash =
-			UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicEdgeStateFingerprint(Graph);
-		if (!TestTrue(TEXT("the writer created the edge"), AreLinked(SourceOut, BranchCondition)))
-		{
-			return Fail();
-		}
-		// The writer's preview entry is the reference contract (pin names/types).
-		const TSharedPtr<FJsonObject> WriterConnection =
-			WriterPreview->GetArrayField(TEXT("connections"))[0]->AsObject();
-		if (!TestEqual(
-				TEXT("the writer plan connects bool to bool"),
-				WriterConnection->GetStringField(TEXT("fromType")),
-				FString(TEXT("bool"))))
-		{
-			return Fail();
-		}
-
-		// Test setup: put the fixture back to its saved baseline (no edges).
+		// Test setup: the fixture starts from its saved baseline (no edges).
 		SourceOut->BreakLinkTo(BranchCondition);
 		SourceOut->GetOwningNode()->PinConnectionListChanged(SourceOut);
 		BranchCondition->GetOwningNode()->PinConnectionListChanged(BranchCondition);
@@ -849,13 +741,13 @@ bool FUEAgentKitPatchConnectTest::RunTest(const FString& Parameters)
 				Planned->GetStringField(TEXT("toPin")),
 				FString(TEXT("Condition")))
 			|| !TestEqual(
-				TEXT("the patch preview derives the same source type"),
+				TEXT("the patch preview derives the source type"),
 				Planned->GetStringField(TEXT("fromType")),
-				WriterConnection->GetStringField(TEXT("fromType")))
+				FString(TEXT("bool")))
 			|| !TestEqual(
-				TEXT("the patch preview derives the same target type"),
+				TEXT("the patch preview derives the target type"),
 				Planned->GetStringField(TEXT("toType")),
-				WriterConnection->GetStringField(TEXT("toType")))
+				FString(TEXT("bool")))
 			|| !TestFalse(
 				TEXT("the patch preview has no created edge GUID yet"),
 				Planned->HasField(TEXT("guid"))))
@@ -896,10 +788,6 @@ bool FUEAgentKitPatchConnectTest::RunTest(const FString& Parameters)
 				TEXT("createdEdgeCount is one"),
 				ApplyResult->GetNumberField(TEXT("createdEdgeCount")),
 				1.0)
-			|| !TestEqual(
-				TEXT("the patch's after edge fingerprint is the writer's edge hash"),
-				ApplyResult->GetStringField(TEXT("edgesFingerprintAfter")),
-				WriterEdgeHash)
 			|| !TestEqual(
 				TEXT("the reported after fingerprint is the live one"),
 				ApplyResult->GetStringField(TEXT("edgesFingerprintAfter")),
@@ -1611,7 +1499,6 @@ bool FUEAgentKitPatchConnectTest::RunTest(const FString& Parameters)
 	}
 
 	UEAgentKitBlueprintPatchExperimental::ResetExperimentalWriteForTest();
-	UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
 	return true;
 }
 
@@ -1827,7 +1714,6 @@ bool FUEAgentKitPatchEdgeOpsTest::RunTest(const FString& Parameters)
 	using namespace UEAgentKitPatchEdgeOps;
 
 	UEAgentKitBlueprintPatchExperimental::ResetExperimentalWriteForTest();
-	UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
 	if (!TestFalse(
 			TEXT("the atomic patch gate stays off unless the project opts in"),
 			UEAgentKitBlueprintPatchExperimental::IsExperimentalWriteAvailable()))
@@ -1835,11 +1721,9 @@ bool FUEAgentKitPatchEdgeOpsTest::RunTest(const FString& Parameters)
 		return false;
 	}
 	UEAgentKitBlueprintPatchExperimental::SetExperimentalWriteEnabledForTest(true);
-	UEAgentKitBlueprintGraphEditExperimental::SetExperimentalWriteEnabledForTest(true);
 	auto Fail = []
 	{
 		UEAgentKitBlueprintPatchExperimental::ResetExperimentalWriteForTest();
-		UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
 		return false;
 	};
 
@@ -2537,7 +2421,6 @@ bool FUEAgentKitPatchEdgeOpsTest::RunTest(const FString& Parameters)
 	}
 
 	UEAgentKitBlueprintPatchExperimental::ResetExperimentalWriteForTest();
-	UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
 	return true;
 }
 

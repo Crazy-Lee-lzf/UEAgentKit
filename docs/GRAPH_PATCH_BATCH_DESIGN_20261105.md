@@ -11,6 +11,12 @@ a patch accepts today.
 > (`ue_preview/apply/save_blueprint_patch_experimental`); their own
 > preview/apply/save tools, one-click tools and bridge methods are gone. This
 > document stays as the design history of how the migration got there.
+>
+> **Slice 17 (2026-11-15) removed the graph-edit shell too.** `createNode` and
+> `connect` are now patch kinds; the graph-edit preview/apply/save tools, the
+> `ue_edit_blueprint_graph` combined tool and its bridge methods are gone. Node
+> creation therefore has exactly two doors: the registry
+> (`ue_search_node_actions` → `actionId`) and the patch.
 
 ## Goal
 

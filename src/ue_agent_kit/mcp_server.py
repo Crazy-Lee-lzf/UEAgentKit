@@ -60,7 +60,6 @@ from .mcp_pure_live_tools import (
 from .mcp_graph_layout_test_only import register_graph_layout_test_only_tool
 from .mcp_graph_layout_p8_test_only import register_graph_layout_p8_test_only_tool
 from .mcp_graph_layout_experimental import register_graph_layout_experimental_tools
-from .mcp_graph_edit_experimental import register_graph_edit_experimental_tools
 from .mcp_patch_experimental import register_patch_experimental_tools
 from .mcp_node_spawn_read import (
     NODE_ACTION_SEARCH_TOOL_NAME,
@@ -72,12 +71,6 @@ from .experimental_patch import (
     PREVIEW_TOOL_NAME as EXPERIMENTAL_PATCH_PREVIEW_TOOL_NAME,
     SAVE_TOOL_NAME as EXPERIMENTAL_PATCH_SAVE_TOOL_NAME,
     PatchError,
-)
-from .experimental_graph_edit import (
-    APPLY_TOOL_NAME as EXPERIMENTAL_GRAPH_EDIT_APPLY_TOOL_NAME,
-    PREVIEW_TOOL_NAME as EXPERIMENTAL_GRAPH_EDIT_PREVIEW_TOOL_NAME,
-    SAVE_TOOL_NAME as EXPERIMENTAL_GRAPH_EDIT_SAVE_TOOL_NAME,
-    GraphEditError,
 )
 from .experimental_graph_layout import (
     APPLY_TOOL_NAME as EXPERIMENTAL_APPLY_TOOL_NAME,
@@ -360,13 +353,6 @@ def _capabilities_response(
         and "editor.applyBlueprintGraphLayoutExperimental" in observed_capabilities
         and "editor.saveBlueprintGraphLayoutExperimental" in observed_capabilities
     )
-    graph_edit_registered = bool(live_editor_enabled and experimental_graphpatch_edit)
-    graph_edit_plugin_opt_in = bool(
-        isinstance(observed_capabilities, list)
-        and "editor.previewBlueprintGraphEditExperimental" in observed_capabilities
-        and "editor.applyBlueprintGraphEditExperimental" in observed_capabilities
-        and "editor.saveBlueprintGraphEditExperimental" in observed_capabilities
-    )
     atomic_patch_registered = bool(live_editor_enabled and experimental_graphpatch_edit)
     atomic_patch_plugin_opt_in = bool(
         isinstance(observed_capabilities, list)
@@ -433,30 +419,6 @@ def _capabilities_response(
                     },
                 ]
                 if live_editor_enabled and experimental_graph_layout_apply
-                else []
-            )
-            + (
-                [
-                    {
-                        "name": EXPERIMENTAL_GRAPH_EDIT_PREVIEW_TOOL_NAME,
-                        "readOnly": True,
-                        "destructive": False,
-                        "experimental": True,
-                    },
-                    {
-                        "name": EXPERIMENTAL_GRAPH_EDIT_APPLY_TOOL_NAME,
-                        "readOnly": False,
-                        "destructive": True,
-                        "experimental": True,
-                    },
-                    {
-                        "name": EXPERIMENTAL_GRAPH_EDIT_SAVE_TOOL_NAME,
-                        "readOnly": False,
-                        "destructive": False,
-                        "experimental": True,
-                    },
-                ]
-                if live_editor_enabled and experimental_graphpatch_edit
                 else []
             )
             + (
@@ -823,130 +785,6 @@ def _capabilities_response(
                 "requiresExplicitSeparateSave": True,
                 "saveReadback": "asset-sha256+live-layout-hash+package-revision",
                 "independentReloadVerified": False,
-                "maxRequestBytes": 61440,
-            },
-            "experimentalGraphPatchEdit": {
-                "available": bool(graph_edit_registered and graph_edit_plugin_opt_in),
-                "registered": graph_edit_registered,
-                "pluginCapabilityObserved": graph_edit_plugin_opt_in,
-                "previewTool": EXPERIMENTAL_GRAPH_EDIT_PREVIEW_TOOL_NAME if graph_edit_registered else "",
-                "applyTool": EXPERIMENTAL_GRAPH_EDIT_APPLY_TOOL_NAME if graph_edit_registered else "",
-                "saveTool": EXPERIMENTAL_GRAPH_EDIT_SAVE_TOOL_NAME if graph_edit_registered else "",
-                "bridgeMethods": [
-                    "editor.previewBlueprintGraphEditExperimental",
-                    "editor.applyBlueprintGraphEditExperimental",
-                    "editor.saveBlueprintGraphEditExperimental",
-                ]
-                if graph_edit_registered
-                else [],
-                "readOnlyPreview": True,
-                "destructiveApply": True,
-                "experimental": True,
-                "productionDefault": False,
-                "productionEnabled": False,
-                "productionApprovalRequired": False,
-                "authorizationModel": (
-                    "project-level experimental opt-in plus exact per-call confirmation; "
-                    "this is not a general GraphPatch executor"
-                ),
-                "explicitOptIn": {
-                    "serverFlag": "--enable-experimental-graphpatch-edit",
-                    "projectConfig": "[UEAgentKit] ExperimentalGraphPatchEdit=True",
-                    "requiresRunningEditorCapability": True,
-                },
-                "requiresCompletePreviewResult": True,
-                "acceptsCallerBuiltRequest": False,
-                "supportedNodeTypes": [
-                    "branch",
-                    "sequence",
-                    "not_bool",
-                    "bool_or",
-                    "int_add",
-                    "int_equal",
-                    "double_add",
-                    "string_concat",
-                    "variable_get",
-                    "variable_set",
-                ],
-                "supportedConnections": [
-                    "exec: then/else/then_0/then_1 -> execute",
-                    "bool: bool-producing ReturnValue/condition -> bool input",
-                    "int: int-producing ReturnValue -> int input",
-                    "double: double-producing ReturnValue -> double input",
-                    "string: string-producing ReturnValue -> string input",
-                    "variable_get: <VariableName> -> bool/int/double/string input",
-                    "variable_set: then/Output_Get -> bool/int/double/string input; execute accepts one exec source",
-                    "new output -> existing unlinked exact input (nodeGuid + pinGuid + name/direction/category)",
-                    "existing exact output -> new input (fan-out preserved; no existing edge is broken)",
-                    "one existing output -> one existing unlinked input (nodes=[], exact single edge)",
-                    "operation=disconnect: remove one exact existing edge (nodes=[], exact endpoints)",
-                    "one output pin may fan out to distinct input pins",
-                ],
-                "existingPinConnections": {
-                    "operations": ["connect", "disconnect"],
-                    "maxExistingEndpointsPerConnection": 2,
-                    "maxPureExistingToExistingPerPlan": 1,
-                    "maxDisconnectPerPlan": 1,
-                    "pureExistingRequiresZeroNodes": True,
-                    "pureExistingRequiresExactlyOneConnection": True,
-                    "disconnectRequiresZeroNodes": True,
-                    "disconnectRequiresExistingExactEdge": True,
-                    "disconnectPreservesOtherEdgesAndNodes": True,
-                    "newToNewConnectionsRemainSupported": True,
-                    "existingInputMustBeUnlinked": True,
-                    "existingOutputFanOutPreserved": True,
-                    "requiresMakeResponse": True,
-                    "rejectsBreakOthers": True,
-                    "rejectsConversionAndPromotion": True,
-                    "bindings": [
-                        "graphFingerprint",
-                        "packageRevision",
-                        "beforeEdgeSetHash",
-                        "nodeGuid",
-                        "pinGuid",
-                        "pinName",
-                        "direction",
-                        "category",
-                        "subCategory",
-                    ],
-                },
-                "variableAccessorNodes": {
-                    "nodeTypes": ["variable_get", "variable_set"],
-                    "scope": "existing top-level member variables only, bool/int/double/string, bound by GUID + name",
-                    "graphs": ["event (uber)", "function", "macro"],
-                    "createsVariables": False,
-                    "renamesOrRetypesVariables": False,
-                    "compiles": False,
-                },
-                "callFunctionNodes": {
-                    "nodeType": "call_function",
-                    "ownerClassPath": "/Script/Engine.KismetMathLibrary",
-                    "allowlist": ["Greater_IntInt", "Less_IntInt", "Clamp", "Abs_Int"],
-                    "requiresOwnerFunctionAndSignatureDigest": True,
-                    "requiresExactPinSchema": True,
-                    "staticPureOnly": True,
-                    "rejectsWorldLatentNetRpcRefOutConstContainers": True,
-                    "rejectsArbitraryFunctionPath": True,
-                    "staticContractOnly": True,
-                    "nativePending": True,
-                    "compiles": False,
-                },
-                "strictPinTypeCheck": True,
-                "saveRequiresPostApplyGraphFingerprint": True,
-                "explicitSaveConfirmation": "SAVE EXPERIMENTAL GRAPH NODES <planId>",
-                "saveRequiresExactNodeAndLinkCounts": True,
-                "exactFocusedGraphOnly": True,
-                "requiresCleanPackage": True,
-                "requiresPieStopped": True,
-                "requiresCurrentRevisionAndFingerprint": True,
-                "explicitApplyConfirmation": "CREATE EXPERIMENTAL GRAPH NODES <planId>",
-                "undoRedoVerifiedInCall": True,
-                "singleTransaction": True,
-                "autoSave": False,
-                "requiresExplicitSeparateSave": True,
-                "maxNodes": 16,
-                "maxConnections": 24,
-                "maxConnectionsPerNode": 8,
                 "maxRequestBytes": 61440,
             },
             "experimentalAtomicPatch": {
@@ -1876,8 +1714,6 @@ def _error_response(tool: str, error: Exception, *, read_only: bool) -> dict[str
         details = error.details
     elif isinstance(error, VerificationTrustError):
         code = error.code
-    elif isinstance(error, GraphEditError):
-        code = error.code
     elif isinstance(error, PatchError):
         # 0-3.4: a client-side refusal of the atomic patch keeps its exact code
         # instead of collapsing to the generic envelope code.
@@ -2261,20 +2097,6 @@ def create_mcp_server(
                 error_response=_error_response,
             )
             _enforce_strict_tool_arguments(server, ("ue_focus_blueprint_graph",))
-            register_graph_edit_experimental_tools(
-                server=server,
-                live_editor_service=live_editor_service,
-                tool_annotations_type=ToolAnnotations,
-                error_response=_error_response,
-            )
-            _enforce_strict_tool_arguments(
-                server,
-                (
-                    EXPERIMENTAL_GRAPH_EDIT_PREVIEW_TOOL_NAME,
-                    EXPERIMENTAL_GRAPH_EDIT_APPLY_TOOL_NAME,
-                    EXPERIMENTAL_GRAPH_EDIT_SAVE_TOOL_NAME,
-                ),
-            )
             register_patch_experimental_tools(
                 server=server,
                 live_editor_service=live_editor_service,

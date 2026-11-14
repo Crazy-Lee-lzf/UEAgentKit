@@ -7,72 +7,23 @@ class UBlueprint;
 class UEdGraph;
 
 /**
- * Explicitly opted-in, bounded Blueprint graph structure edit.
+ * Atomic seam for bounded Blueprint node creation and edge operations.
  *
- * This is a create/connect slice with deterministic node/schema contracts.  It
- * is not enabled by default, is not a general GraphPatch executor, and has no
- * Python, console or arbitrary command fallback.  The exact Editor project must
- * opt in with:
+ * This module used to carry its own create/connect Preview → Apply → Save
+ * pipeline. Slice 17 removed that shell (and its four MCP tools) once the
+ * cross-writer atomic patch covered the same node/edge contracts; what remains
+ * is the seam the patch calls plus the three state fingerprints.
  *
- *     [UEAgentKit]
- *     ExperimentalGraphPatchEdit=True
- *
- * Supported nodes are Branch, Sequence, Boolean NOT/OR, integer add/equal,
- * double add, string concat, and self-context member-variable Get/Set accessors
- * for existing plain bool/int/double/string variables.  Supported connections
- * are exact exec or exact bool/int/double/string data links; one output may fan
- * out to distinct inputs.  One endpoint may be an exact existing K2 pin
- * (nodeGuid + pinGuid + name + direction + category); an existing input must be
- * unlinked and the schema must return MAKE.  Every call still requires the exact
- * focused Blueprint graph, clean package, stopped PIE/SIE, current revision and
- * graph fingerprint, one FScopedTransaction, exact readback, and Undo/Redo
- * verification.  Save is a separate explicit gate bound to the Apply plan,
- * post-Apply fingerprint and exact node/link counts.
- *
- * 0-3.4 adds an atomic seam for the eight primitive nodeTypes (see
- * FAtomicNodeOperation): the cross-writer patch creates nodes through the same
- * functions the single writer uses, inside the caller's transaction, and the
- * writer exposes its own node-structure fingerprint.  The seam never creates an
- * edge or an owned literal.
- *
- * 0-3.4 slice 15 extends the same seam to the bounded member-variable accessors
- * (`variable_get` / `variable_set`), still through `ResolveVariableNode` and the
- * engine's `UBlueprintVariableNodeSpawner`.  It stays limited to top-level event,
- * function and macro graphs (`IsSupportedVariableAccessorGraph`) and to variables
- * that already exist on the Blueprint.
+ * The seam keeps the deterministic node/schema contracts: Branch, Sequence,
+ * Boolean NOT/OR, integer add/equal, double add, string concat, the eight
+ * primitive `nodeType` tokens, and self-context member-variable Get/Set
+ * accessors for existing plain bool/int/double/string variables.  Connections
+ * are exact exec or exact bool/int/double/string data links, judged by
+ * `ValidateSchemaConnection`; the patch owns the transaction and the
+ * Undo/Redo verification.
  */
 namespace UEAgentKitBlueprintGraphEditExperimental
 {
-	const TCHAR* const PreviewMethod = TEXT("editor.previewBlueprintGraphEditExperimental");
-	const TCHAR* const ApplyMethod = TEXT("editor.applyBlueprintGraphEditExperimental");
-	const TCHAR* const SaveMethod = TEXT("editor.saveBlueprintGraphEditExperimental");
-	const TCHAR* const ApplyConfirmationPrefix = TEXT("CREATE EXPERIMENTAL GRAPH NODES ");
-	const TCHAR* const SaveConfirmationPrefix = TEXT("SAVE EXPERIMENTAL GRAPH NODES ");
-
-	/** True only when the current project set the experimental opt-in flag. */
-	bool IsExperimentalWriteAvailable();
-
-	/** Read-only plan for a bounded createNode/connectPins request. */
-	bool TryPreviewExperimental(
-		const TSharedPtr<FJsonObject>& Params,
-		TSharedPtr<FJsonObject>& OutResult,
-		FString& OutErrorCode,
-		FString& OutErrorMessage);
-
-	/** Apply the exact previewed plan to the exact focused graph. */
-	bool TryApplyExperimental(
-		const TSharedPtr<FJsonObject>& Params,
-		TSharedPtr<FJsonObject>& OutResult,
-		FString& OutErrorCode,
-		FString& OutErrorMessage);
-
-	/** Explicit Save of the exact package produced by the preceding Apply. */
-	bool TrySaveExperimental(
-		const TSharedPtr<FJsonObject>& Params,
-		TSharedPtr<FJsonObject>& OutResult,
-		FString& OutErrorCode,
-		FString& OutErrorMessage);
-
 	/**
 	 * One node creation operation resolved against the live graph.
 	 *
@@ -385,15 +336,9 @@ namespace UEAgentKitBlueprintGraphEditExperimental
 	 * Graph-level edge-set fingerprint: sha256 over the sorted
 	 * `fromNodeGuid|fromPinName|fromPinId>toNodeGuid|toPinName|toPinId` list.
 	 *
-	 * This is the rewire writer's own live edge-set hash (the same function its
-	 * Preview/Apply and Save already use), reported by the atomic patch as
-	 * `edgesFingerprint`.  It is the only one of the three hashes that identifies
-	 * edge ENDPOINTS: the pin-default state hash records only per-pin link
-	 * COUNTS, and the node hash records no links at all.
+	 * Reported by the atomic patch as `edgesFingerprint`.  It is the only one of
+	 * the three hashes that identifies edge ENDPOINTS: the pin-default state hash
+	 * records only per-pin link COUNTS, and the node hash records no links at all.
 	 */
 	FString ComputeAtomicEdgeStateFingerprint(UEdGraph* Graph);
-
-	/** Automation-only seam; never used by the bridge or MCP. */
-	void SetExperimentalWriteEnabledForTest(bool bEnabled);
-	void ResetExperimentalWriteForTest();
 }

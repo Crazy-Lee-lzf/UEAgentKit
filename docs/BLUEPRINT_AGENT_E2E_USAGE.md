@@ -68,40 +68,47 @@ Use its `assetPath`, `graphGuid`, `packageRevision`, `graphFingerprint`,
 `rewireEdgeSetHash` and `nodeRemoveEdgeSetHash`. `focusSource` tells you whether
 live Slate focus or the explicit focus request selected the graph.
 
-### Step 1 — create safe nodes and connections / 建节点和连线
+### Step 1 — create nodes and connections / 建节点和连线
+
+Node creation has exactly two doors: the registry (`ue_search_node_actions` gives
+an `actionId`) and the atomic patch's `createNode`; edges are the patch's
+`connect`. The old graph-edit preview/apply/save tools were removed in slice 17.
 
 ```json
-{"tool": "ue_preview_blueprint_graph_edit_experimental",
+{"tool": "ue_preview_blueprint_patch_experimental",
  "arguments": {
-   "assetPath": "/Game/UEAgentKitAgentE2E/BP_AgentE2E.BP_AgentE2E",
-   "graphGuid": "<graphGuid from preflight>",
-   "nodes": [
-     {"tempId": "tmp:not", "nodeType": "not_bool", "x": -600, "y": 0},
-     {"tempId": "tmp:or", "nodeType": "bool_or", "x": -400, "y": 120},
-     {"tempId": "tmp:branch", "nodeType": "branch", "x": -200, "y": 0},
-     {"tempId": "tmp:seq", "nodeType": "sequence", "x": 100, "y": 0}
-   ],
-   "connections": [
-     {"from": "tmp:not", "fromPin": "ReturnValue", "to": "tmp:branch", "toPin": "Condition"},
-     {"from": "tmp:branch", "fromPin": "then", "to": "tmp:seq", "toPin": "execute"}
+   "asset_path": "/Game/UEAgentKitAgentE2E/BP_AgentE2E.BP_AgentE2E",
+   "graph_guid": "<graphGuid from preflight>",
+   "operations": [
+     {"opId": "n1", "kind": "createNode", "nodeType": "not_bool", "x": -600, "y": 0},
+     {"opId": "n2", "kind": "createNode", "nodeType": "bool_or", "x": -400, "y": 120},
+     {"opId": "n3", "kind": "createNode", "nodeType": "branch", "x": -200, "y": 0},
+     {"opId": "n4", "kind": "createNode", "nodeType": "sequence", "x": 100, "y": 0}
    ]
  }}
 ```
 
-Every `tempId` must match `^tmp:[A-Za-z0-9_-]{1,36}$` (the `tmp:` prefix is
-required and connections reference the same `tempId`). `nodeType` must be one of
-the exact supported names (`not_bool`, `bool_or`, `branch`, `sequence`,
-`int_add`, `double_add`, `int_equal`, `string_concat`, `variable_get`,
-`variable_set`, `call_function`, `call_owned_pure_function`) — `nodeClass` is
-derived by the plugin and is not a request field.
+`nodeType` is one of the exact primitive names (`not_bool`, `bool_or`, `branch`,
+`sequence`, `int_add`, `double_add`, `int_equal`, `string_concat`, `variable_get`,
+`variable_set`); a function call uses `actionId` from `ue_search_node_actions`
+instead. Apply and Save with the **returned** confirmation strings; every result
+carries the created `nodeGuid`.
 
-Apply and Save with the **returned** confirmation strings; never invent them:
+Then connect with a second patch (the package must be saved after the first one,
+or its preview is refused as dirty):
 
-```text
-ue_apply_blueprint_graph_edit_experimental(preview=<full preview result>,
-  confirmation=<preview.requiredConfirmation>)
-ue_save_blueprint_graph_edit_experimental(apply_result=<full apply result>,
-  confirmation=<apply.requiredSaveConfirmation>)
+```json
+{"tool": "ue_preview_blueprint_patch_experimental",
+ "arguments": {
+   "asset_path": "/Game/UEAgentKitAgentE2E/BP_AgentE2E.BP_AgentE2E",
+   "graph_guid": "<graphGuid>",
+   "operations": [
+     {"opId": "c1", "kind": "connect", "fromNodeGuid": "<n1 guid>", "fromPin": "ReturnValue",
+      "toNodeGuid": "<n3 guid>", "toPin": "Condition"},
+     {"opId": "c2", "kind": "connect", "fromNodeGuid": "<n3 guid>", "fromPin": "then",
+      "toNodeGuid": "<n4 guid>", "toPin": "execute"}
+   ]
+ }}
 ```
 
 ### Step 2 — structural writes go through the atomic patch / 结构写入统一走 atomic patch

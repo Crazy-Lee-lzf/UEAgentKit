@@ -538,9 +538,7 @@ bool FUEAgentKitNodeSpawnWildcardSelectTest::RunTest(const FString& Parameters)
 
 	UEAgentKitBlueprintPatchExperimental::ResetExperimentalWriteForTest();
 	UEAgentKitBlueprintPatchExperimental::ResetNodeSpawnForTest();
-	UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
 	UEAgentKitBlueprintPatchExperimental::SetExperimentalWriteEnabledForTest(true);
-	UEAgentKitBlueprintGraphEditExperimental::SetExperimentalWriteEnabledForTest(true);
 
 	FString Error;
 	UBlueprint* Blueprint = CreateFixture(SelectAssetPath, SelectPackageName, Error);
@@ -1027,7 +1025,6 @@ bool FUEAgentKitNodeSpawnWildcardSelectTest::RunTest(const FString& Parameters)
 
 	UEAgentKitBlueprintPatchExperimental::ResetNodeSpawnForTest();
 	UEAgentKitBlueprintPatchExperimental::ResetExperimentalWriteForTest();
-	UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
 	return true;
 }
 
@@ -1042,9 +1039,7 @@ bool FUEAgentKitNodeSpawnPromotableTest::RunTest(const FString& Parameters)
 
 	UEAgentKitBlueprintPatchExperimental::ResetExperimentalWriteForTest();
 	UEAgentKitBlueprintPatchExperimental::ResetNodeSpawnForTest();
-	UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
 	UEAgentKitBlueprintPatchExperimental::SetExperimentalWriteEnabledForTest(true);
-	UEAgentKitBlueprintGraphEditExperimental::SetExperimentalWriteEnabledForTest(true);
 
 	FString Error;
 	UBlueprint* Blueprint = CreateFixture(PromotableAssetPath, PromotablePackageName, Error);
@@ -1192,7 +1187,6 @@ bool FUEAgentKitNodeSpawnPromotableTest::RunTest(const FString& Parameters)
 
 	UEAgentKitBlueprintPatchExperimental::ResetNodeSpawnForTest();
 	UEAgentKitBlueprintPatchExperimental::ResetExperimentalWriteForTest();
-	UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest();
 	return true;
 }
 

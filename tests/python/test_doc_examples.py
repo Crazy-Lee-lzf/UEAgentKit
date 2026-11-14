@@ -52,7 +52,19 @@ class GraphEditDocExampleTests(unittest.TestCase):
             except json.JSONDecodeError:
                 continue
             arguments = payload.get("arguments") if isinstance(payload, dict) else None
-            if not isinstance(arguments, dict) or "nodes" not in arguments:
+            if not isinstance(arguments, dict):
+                continue
+            if "operations" in arguments:
+                # Slice 17: node creation is a createNode kind of the atomic
+                # patch; the example must still use a real nodeType token.
+                for operation in arguments["operations"]:
+                    if operation.get("kind") != "createNode":
+                        continue
+                    checked += 1
+                    self.assertIn(operation.get("nodeType"), allowed_types)
+                    self.assertNotIn("nodeClass", operation)
+                continue
+            if "nodes" not in arguments:
                 continue
             checked += 1
             for node in arguments["nodes"]:
