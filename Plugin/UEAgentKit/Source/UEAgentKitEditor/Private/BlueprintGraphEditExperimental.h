@@ -272,6 +272,17 @@ namespace UEAgentKitBlueprintGraphEditExperimental
 		/** Resolved by resolve (existing endpoints) or apply (tempId endpoints). */
 		FString FromPinId;
 		FString ToPinId;
+		/**
+		 * Resolved type tokens (exec / bool / int / double / string), or
+		 * `wildcard` while the K2 schema has not derived a type yet.
+		 *
+		 * Phase B: `K2Node_Select` and `K2Node_PromotableOperator` create their
+		 * option / A / B / ReturnValue pins as `PC_Wildcard`; the schema fills the
+		 * type in when the edge is created and the node rebuilds its pins.  A
+		 * wildcard is therefore "not known yet", never "any type": concrete types
+		 * must still match exactly, and after Apply these fields carry the ACTUAL
+		 * post-connection types (the caller also gets a `resolvedPins` snapshot).
+		 */
 		FString FromType;
 		FString ToType;
 		/**

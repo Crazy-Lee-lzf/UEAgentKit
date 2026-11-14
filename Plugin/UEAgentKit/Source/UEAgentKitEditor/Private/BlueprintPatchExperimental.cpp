@@ -111,6 +111,104 @@ namespace
 	}
 
 	/**
+	 * One node's visible pin inventory, as the post-write read reports it.
+	 *
+	 * Hidden pins (the CallFunction self pin) are part of the node's real pin
+	 * inventory and the registry descriptor lists them too; keep them and say they
+	 * are hidden instead of silently filtering them out.
+	 */
+	TArray<TSharedPtr<FJsonValue>> BuildNodePinInventory(const UEdGraphNode* Node)
+	{
+		TArray<TSharedPtr<FJsonValue>> PinValues;
+		if (Node == nullptr)
+		{
+			return PinValues;
+		}
+		for (const UEdGraphPin* Pin : Node->Pins)
+		{
+			if (Pin == nullptr)
+			{
+				continue;
+			}
+			TSharedRef<FJsonObject> PinObject = MakeShared<FJsonObject>();
+			PinObject->SetStringField(TEXT("name"), Pin->PinName.ToString());
+			PinObject->SetStringField(
+				TEXT("direction"),
+				Pin->Direction == EGPD_Input ? TEXT("input") : TEXT("output"));
+			PinObject->SetStringField(
+				TEXT("kind"),
+				Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Exec ? TEXT("exec") : TEXT("data"));
+			PinObject->SetBoolField(TEXT("hidden"), Pin->bHidden);
+			PinObject->SetStringField(TEXT("category"), Pin->PinType.PinCategory.ToString());
+			PinObject->SetStringField(TEXT("subCategory"), Pin->PinType.PinSubCategory.ToString());
+			const UObject* SubCategoryObject = Pin->PinType.PinSubCategoryObject.Get();
+			PinObject->SetStringField(
+				TEXT("subCategoryObject"),
+				SubCategoryObject != nullptr ? SubCategoryObject->GetPathName() : FString());
+			PinValues.Add(MakeShared<FJsonValueObject>(PinObject));
+		}
+		return PinValues;
+	}
+
+	UEdGraphNode* FindNodeByGuidText(UEdGraph* Graph, const FString& GuidText)
+	{
+		FGuid Guid;
+		if (Graph == nullptr || !FGuid::Parse(GuidText, Guid))
+		{
+			return nullptr;
+		}
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (Node != nullptr && Node->NodeGuid == Guid)
+			{
+				return Node;
+			}
+		}
+		return nullptr;
+	}
+
+	/**
+	 * Phase B read-back: the ACTUAL pin inventory of both edge endpoints.
+	 *
+	 * A wildcard node (Select / PromotableOperator) rebuilds its pins inside
+	 * TryCreateConnection, so the type a caller saw at plan time is not the type
+	 * the node has afterwards.  This snapshot is the only honest answer to "what
+	 * did the connection turn this node into".
+	 */
+	void FillResolvedEdgePins(
+		UEdGraph* Graph,
+		const FString& FromNodeGuid,
+		const FString& ToNodeGuid,
+		const TSharedPtr<FJsonObject>& Detail)
+	{
+		if (!Detail.IsValid())
+		{
+			return;
+		}
+		TSharedRef<FJsonObject> Resolved = MakeShared<FJsonObject>();
+		const TPair<const TCHAR*, FString> Sides[] = {
+			TPair<const TCHAR*, FString>(TEXT("from"), FromNodeGuid),
+			TPair<const TCHAR*, FString>(TEXT("to"), ToNodeGuid),
+		};
+		for (const TPair<const TCHAR*, FString>& Side : Sides)
+		{
+			UEdGraphNode* Node = FindNodeByGuidText(Graph, Side.Value);
+			if (Node == nullptr)
+			{
+				continue;
+			}
+			TSharedRef<FJsonObject> Snapshot = MakeShared<FJsonObject>();
+			Snapshot->SetStringField(
+				TEXT("nodeGuid"),
+				Node->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower));
+			Snapshot->SetStringField(TEXT("nodeClass"), Node->GetClass()->GetPathName());
+			Snapshot->SetArrayField(TEXT("pins"), BuildNodePinInventory(Node));
+			Resolved->SetObjectField(Side.Key, Snapshot);
+		}
+		Detail->SetObjectField(TEXT("resolvedPins"), Resolved);
+	}
+
+	/**
 	 * Read the created node's actual contract: class, identity and every pin.
 	 *
 	 * This is the post-creation read the action path promises.  It reads the LIVE
@@ -142,34 +240,7 @@ namespace
 				Detail->SetStringField(TEXT("targetClass"), CastNode->TargetType->GetPathName());
 			}
 		}
-		TArray<TSharedPtr<FJsonValue>> PinValues;
-		for (const UEdGraphPin* Pin : Node->Pins)
-		{
-			if (Pin == nullptr)
-			{
-				continue;
-			}
-			TSharedRef<FJsonObject> PinObject = MakeShared<FJsonObject>();
-			PinObject->SetStringField(TEXT("name"), Pin->PinName.ToString());
-			PinObject->SetStringField(
-				TEXT("direction"),
-				Pin->Direction == EGPD_Input ? TEXT("input") : TEXT("output"));
-			PinObject->SetStringField(
-				TEXT("kind"),
-				Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Exec ? TEXT("exec") : TEXT("data"));
-			// Hidden pins (the CallFunction self pin) are part of the node's real
-			// pin inventory and the registry descriptor lists them too; keep them
-			// and say they are hidden instead of silently filtering them out.
-			PinObject->SetBoolField(TEXT("hidden"), Pin->bHidden);
-			PinObject->SetStringField(TEXT("category"), Pin->PinType.PinCategory.ToString());
-			PinObject->SetStringField(TEXT("subCategory"), Pin->PinType.PinSubCategory.ToString());
-			const UObject* SubCategoryObject = Pin->PinType.PinSubCategoryObject.Get();
-			PinObject->SetStringField(
-				TEXT("subCategoryObject"),
-				SubCategoryObject != nullptr ? SubCategoryObject->GetPathName() : FString());
-			PinValues.Add(MakeShared<FJsonValueObject>(PinObject));
-		}
-		Detail->SetArrayField(TEXT("pins"), PinValues);
+		Detail->SetArrayField(TEXT("pins"), BuildNodePinInventory(Node));
 	}
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -1680,6 +1751,17 @@ namespace
 			Operation.Detail->SetStringField(TEXT("toPin"), Single[0].ToPin);
 			Operation.Detail->SetStringField(TEXT("toPinGuid"), Single[0].ToPinId);
 			Operation.Detail->SetStringField(TEXT("toType"), Single[0].ToType);
+			if (Operation.Kind.Equals(KindConnect, ESearchCase::CaseSensitive))
+			{
+				// Phase B: report what the connection actually produced.  A wildcard
+				// endpoint rebuilds its pins, so the caller must read the real types
+				// here instead of trusting the plan-time wildcard token.
+				FillResolvedEdgePins(
+					Graph,
+					Single[0].FromNodeGuid,
+					Single[0].ToNodeGuid,
+					Operation.Detail);
+			}
 			return true;
 		}
 		if (Operation.Kind.Equals(KindRewirePin, ESearchCase::CaseSensitive))

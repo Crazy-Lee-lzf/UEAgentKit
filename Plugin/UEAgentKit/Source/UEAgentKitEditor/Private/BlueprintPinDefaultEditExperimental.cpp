@@ -506,14 +506,15 @@ namespace
 			});
 			for (const UEdGraphPin* Pin : Pins)
 			{
-				Builder = AppendField(Builder, Pin->PinName.ToString());
+				Builder = AppendField(Builder, Pin->PinName.ToString().ToLower());
 				Builder = AppendField(Builder, Pin->Direction == EGPD_Input ? TEXT("input") : TEXT("output"));
 				Builder = AppendField(Builder, Pin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower));
 				// FNames are case-insensitive and the name table keeps whichever
-				// spelling was interned first, so the SAME pin type can print as
-				// "object" before an Undo/Redo and "Object" after it.  Hash the
-				// canonical lower-case spelling; otherwise a reconstructed node
-				// looks like a changed one.
+				// spelling was interned first, so the SAME pin can print as "Index"
+				// before an Undo/Redo and "index" after it (a wildcard node rebuilds
+				// its pins while connecting), and the SAME pin type can print as
+				// "object" before and "Object" after.  Hash the canonical lower-case
+				// spelling; otherwise a reconstructed node looks like a changed one.
 				Builder = AppendField(Builder, Pin->PinType.PinCategory.ToString().ToLower());
 				Builder = AppendField(Builder, Pin->PinType.PinSubCategory.ToString().ToLower());
 				Builder = AppendField(

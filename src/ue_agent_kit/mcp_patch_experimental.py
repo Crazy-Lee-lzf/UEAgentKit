@@ -159,7 +159,12 @@ def register_patch_experimental_tools(
         wire it in a single transaction; a disconnect endpoint must be an existing
         node. The result binds the exact before values, the
         graph/state/variable/node/edge fingerprints and the required Apply
-        confirmation, and it lists one validated entry per operation.
+        confirmation, and it lists one validated entry per operation. A connect
+        endpoint may be a PC_Wildcard pin (K2Node_Select, K2Node_PromotableOperator);
+        the preview reports its type as "wildcard" because the schema derives the
+        concrete type only when the edge is created. The Apply result then carries
+        the derived type plus a resolvedPins snapshot of both endpoint nodes read
+        after the write (wildcard nodes rebuild their pins).
         """
         try:
             _capabilities(live_editor_service, PREVIEW_CAPABILITY)
@@ -203,7 +208,10 @@ def register_patch_experimental_tools(
         All operations land in a single Editor transaction. If any operation
         fails, every operation already applied is restored, the transaction is
         cancelled and the response reports writeOccurred=false plus one status per
-        operation instead of only the first error.
+        operation instead of only the first error. A successful connect result
+        carries the ACTUAL post-write pin types (a wildcard endpoint becomes the
+        type the schema derived) and a resolvedPins snapshot of both endpoint
+        nodes, because wildcard nodes rebuild their pins while connecting.
         """
         try:
             _capabilities(live_editor_service, APPLY_CAPABILITY)

@@ -1422,6 +1422,15 @@ namespace
 			OutType = TEXT("exec");
 			return true;
 		}
+		// Phase B: a wildcard pin has no type of its own until the K2 schema derives
+		// one from a connection (K2Node_Select / K2Node_PromotableOperator create
+		// their option/A/B/ReturnValue pins as PC_Wildcard).  It gets its own token
+		// so "unknown yet" can never be mistaken for "any concrete type".
+		if (Type.PinCategory == UEdGraphSchema_K2::PC_Wildcard)
+		{
+			OutType = TEXT("wildcard");
+			return true;
+		}
 		return VariableTypeToken(Type, OutType);
 	}
 
@@ -4274,7 +4283,11 @@ namespace
 			});
 			for (const UEdGraphPin* Pin : Pins)
 			{
-				Builder = AppendField(Builder, Pin->PinName.ToString());
+				// Same FName normalisation as the pin-default hash: the name table
+				// keeps the first interned spelling, so a reconstructed node may
+				// print "index" where it printed "Index" before Undo/Redo, and
+				// "Object" where it printed "object".
+				Builder = AppendField(Builder, Pin->PinName.ToString().ToLower());
 				Builder = AppendField(
 					Builder,
 					Pin->Direction == EGPD_Input ? TEXT("input") : TEXT("output"));
@@ -4924,7 +4937,9 @@ namespace
 		{
 			if (Pin != nullptr
 				&& Pin->Direction == Direction
-				&& Pin->PinName.ToString().Equals(PinName, ESearchCase::CaseSensitive))
+				// Pin names are FNames: case-insensitive, and their printed spelling
+				// can change after a node rebuilds its pins (Index -> index).
+				&& Pin->PinName.ToString().Equals(PinName, ESearchCase::IgnoreCase))
 			{
 				if (Match != nullptr)
 				{
@@ -5181,7 +5196,7 @@ namespace
 			{
 				if (Pin != nullptr
 					&& Pin->Direction == EGPD_Output
-					&& Pin->PinName.ToString().Equals(Operation.FromPin, ESearchCase::CaseSensitive))
+					&& Pin->PinName.ToString().Equals(Operation.FromPin, ESearchCase::IgnoreCase))
 				{
 					OutFromPin = Pin;
 					break;
@@ -5194,7 +5209,7 @@ namespace
 			{
 				if (Pin != nullptr
 					&& Pin->Direction == EGPD_Input
-					&& Pin->PinName.ToString().Equals(Operation.ToPin, ESearchCase::CaseSensitive))
+					&& Pin->PinName.ToString().Equals(Operation.ToPin, ESearchCase::IgnoreCase))
 				{
 					OutToPin = Pin;
 					break;
@@ -5756,7 +5771,15 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryResolveAtomicEdgeOperation(
 		}
 	}
 
-	if (!InOutOperation.FromType.Equals(InOutOperation.ToType, ESearchCase::CaseSensitive))
+	// A wildcard endpoint has no type yet: the K2 schema derives it from the other
+	// side when the edge is created (and the node then rebuilds its pins).  Two
+	// concrete types still have to match exactly, and wildcard-vs-wildcard is
+	// allowed because the schema resolves it.
+	const bool bFromWildcard = InOutOperation.FromType.Equals(TEXT("wildcard"), ESearchCase::CaseSensitive);
+	const bool bToWildcard = InOutOperation.ToType.Equals(TEXT("wildcard"), ESearchCase::CaseSensitive);
+	if (!bFromWildcard
+		&& !bToWildcard
+		&& !InOutOperation.FromType.Equals(InOutOperation.ToType, ESearchCase::CaseSensitive))
 	{
 		return Fail(
 			OutErrorCode,
@@ -5964,7 +5987,18 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyAtomicEdgeOperations(
 				TEXT("graph-edit-existing-pin-type-not-supported"),
 				TEXT("An edge pin carries a type this slice cannot connect."));
 		}
-		if (!FromType.Equals(ToType, ESearchCase::CaseSensitive))
+		// The PLAN may have seen a wildcard: at that point the schema had not
+		// derived the type yet.  In that case the exact comparison here would be
+		// wrong (the first edge may already have typed this node), so the K2
+		// schema decides below -- and its four-way response is still honoured
+		// (MAKE only; conversion/promotion/break-others stay rejected).
+		const bool bPlanWildcard =
+			Operation.FromType.Equals(TEXT("wildcard"), ESearchCase::CaseSensitive)
+			|| Operation.ToType.Equals(TEXT("wildcard"), ESearchCase::CaseSensitive);
+		if (!bPlanWildcard
+			&& !FromType.Equals(ToType, ESearchCase::CaseSensitive)
+			&& !FromType.Equals(TEXT("wildcard"), ESearchCase::CaseSensitive)
+			&& !ToType.Equals(TEXT("wildcard"), ESearchCase::CaseSensitive))
 		{
 			RollbackChangedEdges();
 			return Fail(
@@ -6036,8 +6070,10 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyAtomicEdgeOperations(
 		}
 		// Both endpoints were live at plan time exactly when the patch already
 		// resolved their pin GUIDs; that is the case the single writer also sends
-		// through the schema check.
-		if (!Operation.FromPinId.IsEmpty() && !Operation.ToPinId.IsEmpty())
+		// through the schema check.  A plan-time wildcard also needs the check even
+		// for a tempId endpoint: the type it will actually connect to only exists
+		// now, and conversion/promotion must still be refused before any write.
+		if ((!Operation.FromPinId.IsEmpty() && !Operation.ToPinId.IsEmpty()) || bPlanWildcard)
 		{
 			if (!ValidateSchemaConnection(Graph, FromPin, ToPin, OutErrorCode, OutErrorMessage))
 			{
@@ -6045,8 +6081,7 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyAtomicEdgeOperations(
 				return false;
 			}
 		}
-		if (!Graph->GetSchema()->TryCreateConnection(FromPin, ToPin)
-			|| !FromPin->LinkedTo.Contains(ToPin))
+		if (!Graph->GetSchema()->TryCreateConnection(FromPin, ToPin))
 		{
 			RollbackChangedEdges();
 			return Fail(
@@ -6055,7 +6090,32 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyAtomicEdgeOperations(
 				TEXT("graph-edit-connection-failed"),
 				TEXT("The Editor rejected the planned connection."));
 		}
-		if (ToPin->LinkedTo.Num() != 1 || !ToPin->LinkedTo.Contains(FromPin))
+		// A wildcard node REBUILDS its pins inside TryCreateConnection (that is how
+		// the type is derived), so the pin objects captured above may already be
+		// gone.  Re-find both endpoints by node GUID + pin name and read the edge
+		// and the resolved types back from the live pins.
+		UEdGraphPin* CreatedFromPin = FindUniquePin(
+			FromNode,
+			Operation.FromPin,
+			EGPD_Output,
+			TEXT("output"),
+			OutErrorCode,
+			OutErrorMessage);
+		UEdGraphPin* CreatedToPin = FindUniquePin(
+			ToNode,
+			Operation.ToPin,
+			EGPD_Input,
+			TEXT("input"),
+			OutErrorCode,
+			OutErrorMessage);
+		if (CreatedFromPin == nullptr || CreatedToPin == nullptr)
+		{
+			RollbackChangedEdges();
+			return false;
+		}
+		if (!CreatedFromPin->LinkedTo.Contains(CreatedToPin)
+			|| CreatedToPin->LinkedTo.Num() != 1
+			|| !CreatedToPin->LinkedTo.Contains(CreatedFromPin))
 		{
 			RollbackChangedEdges();
 			return Fail(
@@ -6064,13 +6124,27 @@ bool UEAgentKitBlueprintGraphEditExperimental::TryApplyAtomicEdgeOperations(
 				TEXT("graph-edit-connection-failed"),
 				TEXT("The created edge did not read back as the only link on its target input."));
 		}
+		FString AppliedFromType;
+		FString AppliedToType;
+		if (!ExistingPinTypeToken(CreatedFromPin->PinType, AppliedFromType)
+			|| !ExistingPinTypeToken(CreatedToPin->PinType, AppliedToType))
+		{
+			RollbackChangedEdges();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-existing-pin-type-not-supported"),
+				TEXT("The connected pins carry a type this slice cannot read back."));
+		}
 		Operation.FromNodeGuid = FromNode->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower);
 		Operation.ToNodeGuid = ToNode->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower);
-		Operation.FromPinId = FromPin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower);
-		Operation.ToPinId = ToPin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower);
-		Operation.FromType = FromType;
-		Operation.ToType = ToType;
-		CreatedEdges.Add(TPair<UEdGraphPin*, UEdGraphPin*>(FromPin, ToPin));
+		Operation.FromPinId = CreatedFromPin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower);
+		Operation.ToPinId = CreatedToPin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower);
+		// Report the ACTUAL types after the schema derived them (a wildcard plan
+		// endpoint becomes the concrete type here).
+		Operation.FromType = AppliedFromType;
+		Operation.ToType = AppliedToType;
+		CreatedEdges.Add(TPair<UEdGraphPin*, UEdGraphPin*>(CreatedFromPin, CreatedToPin));
 	}
 	return true;
 }

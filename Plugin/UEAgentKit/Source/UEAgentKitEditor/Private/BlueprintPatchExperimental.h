@@ -70,6 +70,14 @@ class UEdGraph;
  * node this patch creates and another endpoint.  An endpoint is a canonical node
  * GUID or a `tempId` that an EARLIER `createNode` operation of the same patch
  * declared; forward references and unknown labels are refused before any write.
+ * A `PC_Wildcard` endpoint (`K2Node_Select`, `K2Node_PromotableOperator`) is
+ * accepted as "type not derived yet": the K2 schema derives it from the other
+ * side, still only when the answer is `CONNECT_RESPONSE_MAKE` (conversion nodes,
+ * type promotion and breaking existing links stay refused), and the operation
+ * result carries a `resolvedPins` snapshot of both endpoint nodes read AFTER the
+ * write -- a wildcard node rebuilds its pins, so the plan-time type is not the
+ * answer.  Wildcard is never treated as "any type": two concrete types must
+ * still match exactly.
  * The tempId is a patch-local label: it is resolved to a GUID before Apply, it
  * never reaches the writer, and it is bound in the plan hash by the INDEX of its
  * declaring operation (not by its spelling and not by the GUID, which does not

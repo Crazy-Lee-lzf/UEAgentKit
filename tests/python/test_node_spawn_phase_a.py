@@ -16,6 +16,7 @@ from typing import Any
 from ue_agent_kit.editor_bridge import LiveEditorError
 from ue_agent_kit.experimental_patch import (
     PatchError,
+    _canonical_edge_preview_fields,
     _canonical_node_fields,
     validate_preview_parameters,
 )
@@ -34,6 +35,10 @@ from ue_agent_kit.mcp_patch_experimental import (
 ASSET = "/Game/NodeSpawn/BP_NodeSpawn.BP_NodeSpawn"
 GRAPH = "11111111-2222-4333-8444-555555555555"
 ACTION_ID = "action:0123456789abcdef0123456789abcdef"
+NODE_A = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+PIN_A = "11111111-2222-4333-8444-666666666666"
+NODE_B = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff"
+PIN_B = "22222222-3333-4444-8555-777777777777"
 
 
 def _preview(**overrides: Any) -> dict[str, Any]:
@@ -365,6 +370,54 @@ class CreateNodeActionContractTests(unittest.TestCase):
                 expect_node_guid=True,
             )
         self.assertEqual(raised.exception.code, "graph-patch-apply-invalid")
+
+
+class WildcardPreviewContractTests(unittest.TestCase):
+    """Phase B: a preview may honestly report a PC_Wildcard endpoint."""
+
+    def _edge(self, from_type: str, to_type: str, to_pin: str = "Option 0") -> dict[str, Any]:
+        return {
+            "fromNodeGuid": NODE_A,
+            "fromPinGuid": PIN_A,
+            "fromPin": "ReturnValue",
+            "fromType": from_type,
+            "toNodeGuid": NODE_B,
+            "toPinGuid": PIN_B,
+            "toPin": to_pin,
+            "toType": to_type,
+        }
+
+    def test_preview_accepts_a_wildcard_target(self) -> None:
+        normalized = _canonical_edge_preview_fields(self._edge("int", "wildcard"), "edge", {})
+        self.assertEqual(normalized["fromType"], "int")
+        self.assertEqual(normalized["toType"], "wildcard")
+
+    def test_preview_accepts_a_wildcard_source(self) -> None:
+        normalized = _canonical_edge_preview_fields(
+            {
+                "fromNodeGuid": NODE_A,
+                "fromPinGuid": PIN_A,
+                "fromPin": "ReturnValue",
+                "fromType": "wildcard",
+                "toNodeGuid": NODE_B,
+                "toPinGuid": PIN_B,
+                "toPin": "Index",
+                "toType": "int",
+            },
+            "edge",
+            {},
+        )
+        self.assertEqual(normalized["fromType"], "wildcard")
+
+    def test_two_concrete_types_must_still_match(self) -> None:
+        with self.assertRaises(PatchError) as raised:
+            _canonical_edge_preview_fields(self._edge("int", "bool"), "edge", {})
+        self.assertEqual(raised.exception.code, "graph-patch-preview-invalid")
+
+    def test_unknown_type_token_is_still_refused(self) -> None:
+        with self.assertRaises(PatchError) as raised:
+            _canonical_edge_preview_fields(self._edge("int", "object"), "edge", {})
+        self.assertEqual(raised.exception.code, "graph-patch-preview-invalid")
 
 
 class PatchToolNodeSpawnGateTests(unittest.TestCase):

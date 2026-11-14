@@ -154,6 +154,11 @@ REWIRE_FIELDS = (
 REWIRE_PIN_FIELDS = ("targetPinName", "oldSourcePinName", "newSourcePinName")
 MAX_TEMP_ID_LENGTH = 64
 PATCH_PIN_TYPES = ("exec", "bool", "int", "double", "string")
+# Phase B: a PC_Wildcard endpoint (K2Node_Select / K2Node_PromotableOperator) has
+# no type until Apply derives it, so a PREVIEW may honestly report `wildcard`.
+# It is a distinct token, never "any type": at most one side may be wildcard and
+# the APPLY result must carry the concrete type the schema derived.
+PATCH_PREVIEW_PIN_TYPES = (*PATCH_PIN_TYPES, "wildcard")
 
 _GUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _SHA1 = re.compile(r"^sha1:[0-9a-f]{40}$")
@@ -650,8 +655,7 @@ def validate_preview_parameters(
                 if any(field in item for field in VARIABLE_ACCESSOR_FIELDS):
                     raise PatchError(
                         "graph-edit-variable-field-not-allowed",
-                        f"operations[{index}] actionId does not accept "
-                        "variableName/variableGuid/variableType.",
+                        f"operations[{index}] actionId does not accept variableName/variableGuid/variableType.",
                     )
                 accessor = False
                 variable_fields = {}
@@ -1040,12 +1044,12 @@ def _canonical_edge_preview_fields(
     to_pin = _string(entry.get("toPin"), f"{label}.toPin", maximum=128)
     from_type = _string(entry.get("fromType"), f"{label}.fromType", maximum=16)
     to_type = _string(entry.get("toType"), f"{label}.toType", maximum=16)
-    if from_type not in PATCH_PIN_TYPES or to_type not in PATCH_PIN_TYPES:
+    if from_type not in PATCH_PREVIEW_PIN_TYPES or to_type not in PATCH_PREVIEW_PIN_TYPES:
         raise PatchError(
             "graph-patch-preview-invalid",
-            f"{label} carries a pin type outside {', '.join(PATCH_PIN_TYPES)}.",
+            f"{label} carries a pin type outside {', '.join(PATCH_PREVIEW_PIN_TYPES)}.",
         )
-    if from_type != to_type:
+    if from_type != to_type and "wildcard" not in (from_type, to_type):
         raise PatchError(
             "graph-patch-preview-invalid",
             f"{label} connects {from_type} to {to_type}; data kinds must match.",

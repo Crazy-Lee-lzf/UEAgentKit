@@ -116,6 +116,44 @@ spawner 类）筛出候选，只对候选创建模板，并使用本次调用自
 
 `requiresTarget` **不拒绝**：非静态函数会得到一个未连线的 self pin，调用方可后续接线。
 
+## 4.3 阶段 B：wildcard 与回读
+
+`K2Node_Select` 的 `Option 0/1`、`ReturnValue`，以及 `K2Node_PromotableOperator` 的 `A/B/ReturnValue`，
+在创建时都是 `PC_Wildcard`；类型由 K2 schema 在**连上一条边时**从另一侧推导，节点随后重建 pin。
+所以阶段 B 不是「新的连接语义」，而是「放开 wildcard + 事后回读」。
+
+| 环节 | 行为 |
+|---|---|
+| 解析 | `wildcard` 视为「类型待定」的独立 token（永不等于「任意类型」）；具体类型仍必须精确相等 |
+| 校验 | schema 四条规则不变：只接受 `CONNECT_RESPONSE_MAKE`；转换节点、类型提升、打断既有连接继续拒绝 |
+| 二次校验 | plan 阶段看到 wildcard 时，apply 阶段会用**连接后的真实 pin** 重新做一次 schema 校验（tempId 端点同样覆盖），因为类型到那时才存在 |
+| 写入 | `TryCreateConnection` 之后**不缓存 pin 指针**（节点会重建 pin），按 node GUID + pin 名重新取，再回读边与类型 |
+| 回读 | 每个 `connect` op 的结果多一个 `resolvedPins`：`{from: {nodeGuid, nodeClass, pins[]}, to: {...}}`，即两端节点**连接之后**的实际 pin 快照（名/方向/kind/hidden/category/subCategory/subCategoryObject） |
+| 预期 pin | 不引入。`resolvedPins` 是事后观测，不是事前声明；调用方不需要声明类型 |
+
+已验证（真实 Editor 自动化）：
+
+- `int → Select."Option 0"` 之后 `Option 0/1`、`ReturnValue` 都变成 `int`，节点数不变（没有插转换/提升节点）；
+- 同一节点第二条边（`int → Option 1`）通过，且第一条边仍在；
+- 同一 patch 内第一条边把节点定成 `int` 后，第二条 `bool → Option 1` 被拒，且整批回滚（节点/边/指纹/包 Dirty/磁盘 SHA 不变）；
+- 具体类型不匹配（`int → Branch.Condition`）仍是 `graph-edit-pin-type-mismatch`；
+- tempId 端点 → wildcard 输入路径同样通过并回读；
+- 注入故障后第一条边被回滚，`stateRestored=true`。
+
+**与任务包的偏差（实测）**：`Select` 的 `Index` pin 创建时也是 `PC_Wildcard`（不是 `int`），
+连 `int` 之后仍是 `wildcard`；`int → wildcard` 的 `CanCreateConnection` 实测返回 `MAKE`
+（不是 `MAKE_WITH_PROMOTION`）；不同类型（`bool → 已定为 int`）实测返回 `DISALLOW`，
+因此错误码是 `graph-edit-existing-pin-connection-rejected`，不是 promotion/conversion。
+
+**重建后的 pin 身份**：wildcard 节点连接时 `ReconstructNode` 会重建 pin。实测同一 pin 的
+`PinId` 保持不变，但 FName 的**显示大小写**会变（`Index` → `index`）。因此：
+
+- pin-default 与 node-structure 两个指纹现在都把 pin 名小写后哈希（与阶段 A 的 type 名同类修复）；
+- `connect` 按 pin 名查找改为大小写不敏感（FName 语义），否则 `Index` 在重建后会查不到。
+
+没有这两个修复时，wildcard 连接的 Undo 会把图恢复到语义相同、哈希不同的状态，
+patch 会误报 `graph-patch-undo-redo-failed`。
+
 ## 5. 错误码
 
 | 错误码 | 触发条件 |
@@ -138,10 +176,12 @@ spawner 类）筛出候选，只对候选创建模板，并使用本次调用自
 | 项目 `UFUNCTION` → `K2Node_CallFunction`，pin 与实际一致 | Native 自动化 | `UEAgentKit.NodeSpawn.Function`（真实 Editor，`-unattended -NullRHI`） |
 | `Cast To Pawn` → `K2Node_DynamicCast`，`TargetType` 与 pin 正确 | Native 自动化 | `UEAgentKit.NodeSpawn.Cast` |
 | 四类拒绝各有错误码且零写入 | Native 自动化 | `UEAgentKit.NodeSpawn.Refusals` |
-| 门禁、`actionId` 形状、`canCreate` 归一化 | Python 单元 | `tests/python/test_node_spawn_phase_a.py` |
+| wildcard 连接由 schema 定型、无额外节点、回读实际 pin | Native 自动化 | `UEAgentKit.NodeSpawn.Wildcard` |
+| `K2Node_PromotableOperator` 的 wildcard 连接与回读 | Native 自动化 | `UEAgentKit.NodeSpawn.Promotable` |
+| 门禁、`actionId` 形状、`canCreate` 归一化、wildcard 预览类型 | Python 单元 | `tests/python/test_node_spawn_phase_a.py` |
 
 自动化用的是真实 Editor 进程与真实 patch 事务，但**仍属实验能力**：默认关闭，不代表生产默认可用。
-`CustomEvent`、事件绑定、Timeline、MathExpression、阶段 B 的接线都不在本阶段证据范围内。
+`CustomEvent`、事件绑定、Timeline、MathExpression 仍不在证据范围内。
 
 ## 7. 已知限制
 
@@ -150,6 +190,11 @@ spawner 类）筛出候选，只对候选创建模板，并使用本次调用自
 - 需要 binding 的 spawner 只能被「发现」而不能被创建；搜索会返回 `canCreate=false`。
 - 普通 catalog 单次最多 512 条（会话模板预算 768），**覆盖不了全部 action database**；
   按关键词/节点类检索走定向描述，只描述候选。Cast 按目标类检索需要带 `node_class`。
+- wildcard 节点（`Select` / `PromotableOperator`）由**引擎 spawner 在测试夹具里创建**；
+  `createNode` 仍不提供「建任意 special 节点」的路径（本片只放开 connect）。
+- `Select` 的 `Index` pin 也是 `PC_Wildcard`（实测），连上 `int` 后仍是 `wildcard`；
+  本片不推导 `Index` 类型。
+- wildcard 连接后 pin 对象会重建：跨 op 引用 pin GUID 不可靠，`resolvedPins` 是快照而不是稳定句柄。
 - 写侧解析 `actionId` 依赖本次会话已描述的 action：正常流程是「先搜索、再创建」。
   同一 id 在别处拿到但本会话从未搜索过时，返回 `graph-spawn-action-unknown` 并提示先搜索。
 - 蓝图自建函数同样走 `BlueprintFunctionNodeSpawner`；它们出现在 action database 中取决于
