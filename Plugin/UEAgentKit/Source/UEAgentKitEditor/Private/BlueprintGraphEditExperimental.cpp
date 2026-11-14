@@ -3809,8 +3809,14 @@ namespace
 			{
 				AppendField(Builder, Pin->PinName.ToString());
 				AppendField(Builder, Pin->Direction == EGPD_Input ? TEXT("input") : TEXT("output"));
-				AppendField(Builder, Pin->PinType.PinCategory.ToString());
-				AppendField(Builder, Pin->PinType.PinSubCategory.ToString());
+				// FNames are case-insensitive and the name table keeps whichever
+				// spelling was interned first, so the SAME pin type can print as
+				// "object" before an Undo/Redo and "Object" after it.  Hash the
+				// canonical lower-case spelling, exactly like
+				// ComputeNodeStateFingerprint and the pin-default state hash, so a
+				// reconstructed node never looks like a changed one.
+				AppendField(Builder, Pin->PinType.PinCategory.ToString().ToLower());
+				AppendField(Builder, Pin->PinType.PinSubCategory.ToString().ToLower());
 			}
 		}
 		AppendField(Builder, FString::FromInt(VariableNodeCount));
