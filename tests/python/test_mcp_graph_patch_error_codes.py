@@ -22,7 +22,6 @@ official table.  These tests keep that true:
 from __future__ import annotations
 
 import copy
-import importlib.util
 import json
 import re
 import sys

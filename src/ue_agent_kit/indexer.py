@@ -57,6 +57,7 @@ class IndexBuildResult:
     transaction_batches: int = 0
     assets: list[AssetIndexResult] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
     def to_dict(self, *, include_assets: bool = True) -> dict[str, Any]:
         result = asdict(self)
@@ -130,6 +131,9 @@ class _CanonicalPathResolver:
         self.export_root = export_root
         self._resolved: dict[str, Path] = {}
         self._fallback_by_asset: dict[str, Path] | None = None
+        # Observable evidence for canonical files the fallback scan had to skip.
+        # A skipped file must never silently look like "asset not exported".
+        self.skipped_canonical_files: list[str] = []
 
     def resolve_recorded(self, manifest_entry: dict[str, Any]) -> Path | None:
         recorded_path = str(manifest_entry.get("jsonPath", ""))
@@ -152,9 +156,15 @@ class _CanonicalPathResolver:
                 for candidate in sorted(canonical_root.rglob("*.json")):
                     try:
                         data = _load_json(candidate)
-                    except (OSError, json.JSONDecodeError):
+                    except (OSError, json.JSONDecodeError) as exc:
+                        self.skipped_canonical_files.append(
+                            f"{candidate.name}: unreadable-or-invalid-json ({exc.__class__.__name__})"
+                        )
                         continue
                     if not isinstance(data, dict):
+                        self.skipped_canonical_files.append(
+                            f"{candidate.name}: not-a-json-object"
+                        )
                         continue
                     candidate_asset_path = str(data.get("assetPath", ""))
                     if candidate_asset_path and candidate_asset_path not in fallback:
@@ -1117,7 +1127,20 @@ def build_index(
         if changed_path_source:
             set_metadata(connection, "last_index_changed_path_source", changed_path_source)
         set_metadata(connection, "last_indexed_at_utc", utc_now_iso())
+        if resolver.skipped_canonical_files:
+            set_metadata(
+                connection,
+                "last_index_skipped_canonical_files",
+                str(len(resolver.skipped_canonical_files)),
+            )
 
+    for skipped_file in resolver.skipped_canonical_files:
+        result.warnings.append(f"canonical-fallback-skip:{skipped_file}")
+    if result.warnings:
+        result.warnings.append(
+            "Canonical fallback skipped unreadable evidence; affected assets may report "
+            "not-found instead of being silently indexed from another file."
+        )
     return result
 
 

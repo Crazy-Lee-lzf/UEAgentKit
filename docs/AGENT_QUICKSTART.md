@@ -75,6 +75,7 @@ ue_plan_patch
 
 - [当前正式版本的功能边界](PROJECT_STATUS.md)
 - [详细 AI 使用指南](AI_USAGE.md)
+- [程序开发与 PIE 诊断示例](DEVELOPER_WORKFLOWS.md)
 - [MCP Tool 协议与调用边界](../spec/MCP_SERVER.md)
 - [安装、配置与首次验证](BUILD_AND_RUN.md)
 - [固定项目与 Write Policy](PROJECT_LEVEL_CONFIG.md)

@@ -88,6 +88,12 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
         "editor.getFocusedBlueprintGraphContext",
     ),
     ToolDefinition(
+        "ue_get_blueprint_graph_context",
+        "live-read",
+        "read",
+        "editor.getBlueprintGraphContext",
+    ),
+    ToolDefinition(
         "ue_preview_blueprint_graph_layout",
         "live-read",
         "read",
@@ -138,6 +144,9 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_get_animation_scale_audit", "realtime", "read"),
     ToolDefinition("ue_cancel_animation_scale_audit", "realtime", "planning"),
     ToolDefinition("ue_export_animation_scale_audit_report", "realtime", "planning"),
+    # Node-spawn phase A: thin read-only wrapper over native.invoke +
+    # graph.nodeRegistry.catalog.  Registered with the other live read tools.
+    ToolDefinition("ue_search_node_actions", "live-read", "read"),
     ToolDefinition("ue_open_asset", "live-action", "planning", "editor.openAsset"),
     ToolDefinition("ue_focus_asset", "live-action", "planning", "editor.focusAsset"),
     ToolDefinition("ue_sync_content_browser", "live-action", "planning", "editor.syncContentBrowser"),
@@ -146,6 +155,12 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_validate_asset", "live-action", "planning", "editor.validateAsset"),
     ToolDefinition("ue_validate_folder", "live-action", "planning", "editor.validateFolder"),
     ToolDefinition("ue_run_automation_test", "live-action", "planning", "editor.runAutomationTest"),
+    ToolDefinition(
+        "ue_refresh_asset_index_live",
+        "live-action",
+        "planning",
+        "editor.getBlueprintGraphContext",
+    ),
     ToolDefinition("ue_get_editor_context", "realtime", "read", "editor.getEditorContext"),
     ToolDefinition("ue_start_batch_task", "realtime", "planning", "editor.batchTask.start"),
     ToolDefinition("ue_get_batch_task", "realtime", "read", "editor.batchTask.status"),
@@ -203,6 +218,10 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_verify_live_write_checkpoint", "workflow", "read"),
     ToolDefinition("ue_get_asset_state", "workflow", "read"),
     ToolDefinition("ue_refresh_asset_index", "workflow", "planning"),
+    ToolDefinition("ue_begin_blueprint_edit_session", "workflow", "destructive"),
+    ToolDefinition("ue_end_blueprint_edit_session", "workflow", "destructive"),
+    ToolDefinition("ue_move_blueprint_node", "workflow", "destructive"),
+    ToolDefinition("ue_move_blueprint_nodes", "workflow", "destructive"),
     ToolDefinition("ue_save_authorized_asset", "workflow", "destructive"),
     ToolDefinition("ue_rollback_patch", "workflow", "destructive"),
     ToolDefinition("ue_create_change_set", "workflow", "planning"),

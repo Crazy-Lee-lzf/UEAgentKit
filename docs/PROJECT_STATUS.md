@@ -1,7 +1,7 @@
 # UE Agent Kit 0.8.0 能力状态
 
 当前已发布版本：**0.8.0**（此页按 `v0.8.0` Tag 的功能范围编写，不把后续本地分支的实验性功能计入正式发布）
-目标环境：**Unreal Engine 5.6 / Windows / Python 3.11–3.12**
+已发布 0.8.0：**Python 3.11–3.12**；0.9.0 Developer Preview 1 候选（0.9.0.dev1）：**Unreal Engine 5.6 / Windows / Python 3.11–3.14**
 
 
 ## 产品定位
@@ -120,11 +120,12 @@ Source Control 默认关闭。0.8.0 当前组合模式为：
 
 Tool 数量只是接口规模，不代表每个 Tool 都会修改资产；大量 Tool 是只读查询、规划、验证和状态读取。
 
-**本地 RC1 候选补充（不属于 v0.8.0 Tag）**：当前静态 registry 计数已随后续提交变为 Offline 14/28/20/34、Live 50/64/56/70、Workflow-only 71/85/77/91、Live + Workflow 107/121/113/127。另有默认关闭、按 flag 动态注册的实验工具（Blueprint 结构编辑、rewire、node-remove 等），不计入上表；以运行时 `ue_get_capabilities` 为准；RC1 范围与限制见 [RC1 release notes](RELEASE_RC1.md)。
+本页以当前 `0.9.0.dev1` 候选为准：静态 registry 计数已被 node-spawn 与合并改动改写，不再列出固定数字；实际 Tool 以运行时 `ue_get_capabilities` 为准。默认关闭、按 flag 动态注册的实验写入只剩原子 patch（`ue_preview/apply/save_blueprint_patch_experimental`）与 node-spawn 读工具，旧的单 writer 工具已删除。候选范围见 [候选说明](RELEASE_0.9.0_PREVIEW.md)。
 
 ## 明确不支持的通用能力
 
-- 任意 Blueprint Graph Node CRUD / 自动布线。
+- 不做按类名自由创建 / 任意编辑的通用 Graph CRUD；**支持经 Action Registry 发现、由原生 spawner
+  执行的节点创建**（受实验双门禁约束）。
 - 任意 Level Actor Spawn/Delete/Transform/Property 编辑。
 - Material Graph / Niagara / Sequencer / Control Rig 通用写入。
 - PIE 输入注入和录制回放系统。

@@ -16,7 +16,6 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
-import sqlite3
 import sys
 import tempfile
 import unittest

@@ -15,12 +15,12 @@ TOOL_ROOT = Path(__file__).resolve().parents[2]
 class PortabilityTests(unittest.TestCase):
     def test_supported_python_version(self) -> None:
         self.assertGreaterEqual(sys.version_info[:2], (3, 11))
-        self.assertLess(sys.version_info[:2], (3, 13))
+        self.assertLess(sys.version_info[:2], (3, 15))
 
     def test_pyproject_python_range(self) -> None:
         with (TOOL_ROOT / "pyproject.toml").open("rb") as stream:
             data = tomllib.load(stream)
-        self.assertEqual(data["project"]["requires-python"], ">=3.11,<3.13")
+        self.assertEqual(data["project"]["requires-python"], ">=3.11,<3.15")
 
     def test_requirements_have_no_unpinned_packages(self) -> None:
         lines = (TOOL_ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines()

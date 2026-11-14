@@ -133,6 +133,7 @@ Code freshness uses source SHA-256 as the content authority. File size and mtime
 ## Known limits
 
 - The original ~1,949-file production project is not available on the current machine, so final production-scale semantic acceptance remains deferred.
+- Validate the indexed project scope and freshness before relying on results for production changes.
 - C1 intentionally fails closed on ambiguous duplicate fully-qualified type identities, same-name overload sets, cross-file duplicate definitions, and unsupported declaration shapes.
 - `#include` proves a file dependency, not actual use of a specific type.
 - Non-reflected functions/properties are not indexed semantically by C2.

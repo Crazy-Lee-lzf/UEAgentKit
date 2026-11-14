@@ -11,6 +11,10 @@
 #include "Misc/Parse.h"
 #include "Modules/ModuleManager.h"
 
+#if WITH_DEV_AUTOMATION_TESTS
+#include "BlueprintEditSessionUIGate.h"
+#endif
+
 class FUEAgentKitEditorModule final : public IModuleInterface
 {
 public:
@@ -55,6 +59,10 @@ public:
 
 	virtual void ShutdownModule() override
 	{
+#if WITH_DEV_AUTOMATION_TESTS
+		// Never leave a disabled graph widget behind if the module unloads.
+		UEAgentKitBlueprintEdit::FBlueprintEditSessionUIGate::Get().ClearSessionTarget();
+#endif
 		if (GraphLayoutP11Menu.IsValid())
 		{
 			GraphLayoutP11Menu->Shutdown();

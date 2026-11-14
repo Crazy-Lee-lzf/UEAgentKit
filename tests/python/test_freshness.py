@@ -120,6 +120,53 @@ class FreshnessTests(unittest.TestCase):
         self.assertTrue(restored["sessionStateCleared"])
         self.assertEqual(self.tracker.session_stale_assets(), [])
 
+    def test_session_overlay_authorizes_only_own_resident_save_revision(self) -> None:
+        after_bytes = b"fresh-package-after"
+        after_revision = "sha256:" + revision(after_bytes)
+        self.package_path.write_bytes(after_bytes)
+        self.tracker.mark_commit(
+            ASSET_A,
+            "sha256:" + self.before_revision,
+            after_revision,
+            editor_session_id="editor-session-1",
+        )
+        overlay = self.tracker.inspect_asset(ASSET_A)
+        self.assertEqual(overlay["state"], "stale")
+        self.assertFalse(overlay["indexFresh"])
+        self.assertEqual(
+            overlay["sessionRevisionOverlay"]["revision"], after_revision
+        )
+        self.assertEqual(
+            overlay["sessionRevisionOverlay"]["source"], "authorized-resident-save"
+        )
+        self.assertEqual(overlay["writeGate"], "session-owned-save-overlay")
+
+        # An external write changes diskRevision: the overlay must stop applying.
+        self.package_path.write_bytes(b"external-edit")
+        external = self.tracker.inspect_asset(ASSET_A)
+        self.assertEqual(external["state"], "stale")
+        self.assertNotIn("sessionRevisionOverlay", external)
+
+        # Switching the snapshot generation drops the overlay as well.
+        self.tracker.clear_session_overlays()
+        self.package_path.write_bytes(after_bytes)
+        cleared = self.tracker.inspect_asset(ASSET_A)
+        self.assertNotIn("sessionRevisionOverlay", cleared)
+        self.assertFalse(cleared["indexFresh"])
+
+    def test_offline_commit_creates_no_session_overlay(self) -> None:
+        after_bytes = b"fresh-package-after"
+        after_revision = "sha256:" + revision(after_bytes)
+        self.package_path.write_bytes(after_bytes)
+        self.tracker.mark_commit(
+            ASSET_A,
+            "sha256:" + self.before_revision,
+            after_revision,
+        )
+        result = self.tracker.inspect_asset(ASSET_A)
+        self.assertEqual(result["state"], "stale")
+        self.assertNotIn("sessionRevisionOverlay", result)
+
     def test_unindexed_asset_is_unavailable(self) -> None:
         result = self.tracker.inspect_asset("/Game/Missing/DA_None.DA_None")
         self.assertEqual(result["state"], "unavailable")

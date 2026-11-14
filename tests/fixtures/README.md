@@ -45,6 +45,13 @@ scripts\RunWriteFixturePlan.ps1 `
 
 The wrapper validates the Plan before launching Unreal, recreates only explicitly listed targets, then uses a second Unreal process to verify every fixture. See [`../../spec/WRITE_FIXTURE_PLAN.md`](../../spec/WRITE_FIXTURE_PLAN.md).
 
+`-Mode` defaults to `Create`, which refuses targets that already exist; pass
+`-Mode Reset` explicitly to delete and recreate them. Before any Unreal process
+starts, the wrapper refuses to run when an Unreal Editor already holds the same
+`.uproject` (`fixture-project-in-use`) or when that ownership cannot be proven
+(`fixture-project-lock-unverifiable`). It never terminates or closes an Editor.
+See [`../../docs/DEF07_FIXTURE_CONCURRENCY_GUARD_20261103.md`](../../docs/DEF07_FIXTURE_CONCURRENCY_GUARD_20261103.md).
+
 ## Scalar patch regression
 
 `scalar_patch_regression_plan.json` creates the plugin-native scalar Data Asset used by `scripts\RunScalarPatchRegression.ps1`. The regression covers every currently supported `setAssetProperty` scalar representation, backup manifests, independent reloads, nine expected rejection paths, and a final reset. The regression is a development test rather than a public write API. Run it only against a disposable project through `scripts\RunScalarPatchRegression.ps1`; consult the script's available arguments and record its independent verification result.

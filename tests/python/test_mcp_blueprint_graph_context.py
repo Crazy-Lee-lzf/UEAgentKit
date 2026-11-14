@@ -3,25 +3,19 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
-import sys
-
-ROOT = Path(__file__).resolve().parents[2]
-SRC = ROOT / "src"
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
 
 from ue_agent_kit import __version__
-from ue_agent_kit.editor_bridge import (  # noqa: E402
+from ue_agent_kit.editor_bridge import (
     LiveEditorBridgeConfig,
     LiveEditorBridgeService,
     LiveEditorError,
 )
-from ue_agent_kit.mcp_live_tools import (  # noqa: E402
+from ue_agent_kit.mcp_live_tools import (
     GRAPH_CONTEXT_TOOL_NAME,
     MAX_GRAPH_CONTEXT_BYTES,
     register_live_read_tools,
 )
-from ue_agent_kit.tool_registry import tool_names_for_mode  # noqa: E402
+from ue_agent_kit.tool_registry import tool_names_for_mode
 
 CONTEXT_METHOD = "editor.getFocusedBlueprintGraphContext"
 

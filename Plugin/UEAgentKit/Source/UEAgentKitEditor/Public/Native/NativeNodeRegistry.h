@@ -1,5 +1,3 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
-
 #pragma once
 
 #include "CoreMinimal.h"
@@ -13,10 +11,11 @@
  * ueak.node-descriptor/1.0 documents and computes the contract hashes.  It
  * never modifies an asset, opens a transaction, marks a package dirty or saves.
  *
- * The feature is OFF by default and is opt-in through
- * ``[UEAgentKit] NativeToolRegistry=off|shadow|active`` (GConfig, startup only).
- * A missing or invalid manifest only disables the native surface; legacy P12
- * behaviour is untouched.
+ * The mode is ``shadow`` by default -- read-only enumeration is always on, but
+ * nothing is added to a context menu.  It can be narrowed or widened through
+ * ``[UEAgentKit] NativeToolRegistry=off|shadow|active`` (GConfig, startup only);
+ * ``active`` is the only mode that changes editor UI.  A missing or invalid
+ * manifest only disables the native surface; legacy P12 behaviour is untouched.
  */
 
 enum class ENativeRegistryMode : uint8
@@ -67,6 +66,38 @@ struct FNativeCatalogOptions
 
 	/** Optional fixed "discoveredAtUtc"; empty means capture the wall clock once per catalog. */
 	FString DiscoveredAtUtcOverride;
+
+	/**
+	 * Optional case-insensitive substring filter applied to each descriptor's
+	 * identity text (title, menu name, category, node/spawner class, action kind,
+	 * payload and keywords) BEFORE the MaxItems truncation.
+	 *
+	 * The catalog is bounded (MaxCatalogItems), while the action database is much
+	 * larger; a client that searches for one function must therefore be able to
+	 * narrow the set server-side instead of paging through a truncated list.  The
+	 * action-database fingerprint is still computed over the complete describable
+	 * set, so filtering never changes the catalog identity.
+	 */
+	FString FilterQuery;
+
+	/** Optional exact action id.  Used by the node-spawn write path to resolve one spawner. */
+	FString FilterActionId;
+
+	/** Optional exact node class path (e.g. /Script/BlueprintGraph.K2Node_DynamicCast). */
+	FString FilterNodeClass;
+
+	/**
+	 * Describe only the spawners the filters can select.
+	 *
+	 * The unbounded catalog describes whatever fits in the session template budget
+	 * (768 templates out of ~38k spawners), which is fine for a bounded read but
+	 * cannot answer "find AddNumbers" or "find Cast To Pawn": those actions are
+	 * outside the arbitrary first slice.  A targeted build therefore pre-filters
+	 * spawners by their cheap identity (function path / delegate / node class ...),
+	 * describes only the candidates, and uses its own per-call template budget
+	 * instead of the session counter.  It never freezes a failure for the session.
+	 */
+	bool bTargetedDescription = false;
 };
 
 struct FNativeCatalogIdentity
@@ -121,6 +152,9 @@ struct FNativeCatalogResult
 	int32 TotalUnsupported = 0;
 	int32 DuplicateActionIdCount = 0;
 	int32 TotalDescriptorsAvailable = 0;
+	int32 MatchedDescriptors = 0;
+	/** True when this build described only the filtered candidates (see bTargetedDescription). */
+	bool bTargeted = false;
 	int32 TemplateNodesCached = 0;
 	int32 TemplateNodesCreated = 0;
 	int32 TemplateBudgetSkips = 0;
@@ -140,14 +174,41 @@ struct FNativeCatalogResult
 };
 
 struct FNativeManifestSummary
-{
-	bool bLoaded = false;
+{	bool bLoaded = false;
 	FString SchemaVersion;
 	FString RegistryVersion;
 	FString Hash;
 	int32 ToolCount = 0;
 	TArray<FString> ToolIds;
 	TArray<FString> ToolVersions;
+};
+
+/**
+ * One action id resolved back to the engine spawner that creates it.
+ *
+ * Phase A of node creation needs exactly this: an opaque, content-addressed
+ * action id is the only identity a request carries, and the write path must end
+ * up with the engine's own spawner (never a re-implementation of the spawner's
+ * customize delegate).  Resolution describes the spawner through the same
+ * descriptor code the catalog uses, so the admission fields and the catalog can
+ * never disagree.
+ */
+struct FNativeSpawnerResolution
+{
+	bool bOk = false;
+	FString ErrorCode;
+	FString ErrorMessage;
+
+	/** Never owned here; the action database owns it.  Valid for this session. */
+	UBlueprintNodeSpawner* Spawner = nullptr;
+	TSharedPtr<FJsonObject> Descriptor;
+	FString ActionId;
+	FString NodeClassPath;
+	FString SpawnerClassPath;
+	/** Discovery classification: callFunction / cast / event / delegate / ... */
+	FString ActionKind;
+	/** Function path or target class path, verbatim from the discovery key payload. */
+	FString PayloadValue;
 };
 
 /** R1.3 context request.  Asset/graph/node/pin must already be loaded; nothing is loaded. */
@@ -270,6 +331,17 @@ public:
 	FNativeCatalogResult BuildCatalog(const FNativeCatalogOptions& Options) const;
 
 	/**
+	 * Resolve one action id to the engine spawner that creates it.
+	 *
+	 * Read-only: it describes spawners and touches only transient template nodes,
+	 * never an asset, a transaction or the dirty bit.  Unknown ids fail with
+	 * ``graph-spawn-action-unknown``; an id whose spawner cannot be described
+	 * reports the catalog's own reason.  Used by the node-spawn write path so a
+	 * request never needs to know an owner class or a function name.
+	 */
+	FNativeSpawnerResolution ResolveSpawnerForActionId(const FString& ActionId) const;
+
+	/**
 	 * R1.3: context-sensitive, read-only action set for an already-loaded
 	 * Blueprint graph/node/pin.  Fail-closed for unknown asset/graph/node/pin and
 	 * non-K2 graphs.  Uses the engine FBlueprintActionFilter over the already
@@ -357,6 +429,22 @@ private:
 	mutable TMap<FString, TSharedPtr<FJsonObject>> DescribedDescriptors;
 	mutable FString DescribedDatabaseFingerprint;
 	mutable int32 DescribedTotalSpawners = 0;
+
+	/**
+	 * Every action this session has resolved to a live spawner, including the ones
+	 * a targeted search described.  Never cleared by a later catalog build of a
+	 * different shape, so "search once, create afterwards" cannot lose the
+	 * spawner it just found.
+	 */
+	mutable TMap<FString, TWeakObjectPtr<UBlueprintNodeSpawner>> ResolvedSpawners;
+	mutable TMap<FString, TSharedPtr<FJsonObject>> ResolvedDescriptors;
+
+	/**
+	 * False when the last catalog build was filtered, so the described set no
+	 * longer covers the whole action database.  Context filtering rebuilds in that
+	 * case instead of silently evaluating a one-action set.
+	 */
+	mutable bool bDescribedSetComplete = true;
 
 	FNativeContextResult FilterContextInternal(
 		UBlueprint* Blueprint,

@@ -40,6 +40,7 @@ PURE_LIVE_READ_TOOL_NAMES: tuple[str, ...] = (
     "ue_get_blueprint_graph_selection",
     "ue_get_blueprint_graph_layout_preflight",
     "ue_get_focused_blueprint_graph_context",
+    "ue_get_blueprint_graph_context",
 )
 
 PURE_LIVE_PIE_TOOL_NAMES: tuple[str, ...] = (
@@ -220,6 +221,25 @@ def build_pure_live_capabilities(
                 "identityPolicy": "exact-pie-instance-and-single-actor-identity",
                 "componentPolicy": "at-most-one-owned-component-path-or-name-with-optional-class-check",
                 "perPropertyStatus": ["ok", "unknown", "not-exposed", "unsupported-type"],
+                "propertyProvenance": {
+                    "onlyForResolvedProperties": True,
+                    "fields": [
+                        "declaringClassPath",
+                        "declaringClassName",
+                        "declaringClassKind",
+                        "declaringClassPathTruncated",
+                        "declaringBlueprintPath",
+                        "declaringBlueprintPathTruncated",
+                    ],
+                    "kinds": ["native", "blueprint", "unknown"],
+                    "source": "UE reflection: FProperty::GetOwnerClass()",
+                    "policy": (
+                        "reflected declaring owner class only; no filesystem path, no source-file "
+                        "guessing, no raw object address; blueprint asset path only when "
+                        "UClass::ClassGeneratedBy is a UBlueprint"
+                    ),
+                    "maxClassPathChars": 512,
+                },
                 "errorCodes": [
                     "pie-component-not-found",
                     "pie-component-ambiguous",

@@ -77,6 +77,12 @@ class LiveEditorBridgeConfig:
 
 
 class LiveEditorBridgeService:
+    # This service talks to the resident bridge, which implements
+    # `editor.inspectAssetLive`.  The write pre-gate uses that live read instead
+    # of the offline index; services that do not advertise this capability keep
+    # the previous offline gate (see WorkflowCommon._live_asset_baseline).
+    supports_live_asset_inspect = True
+
     def __init__(self, config: LiveEditorBridgeConfig, *, server_version: str) -> None:
         project_path = config.project_path.resolve()
         if project_path.suffix.casefold() != ".uproject":

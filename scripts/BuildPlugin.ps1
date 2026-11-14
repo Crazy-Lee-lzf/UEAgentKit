@@ -23,8 +23,6 @@ if ($Method -eq "Direct")
 $PluginDescriptor = Join-Path $ToolRoot "Plugin\UEAgentKit\UEAgentKit.uplugin"
 $RunUAT = Join-Path $EngineRoot "Engine\Build\BatchFiles\RunUAT.bat"
 $MsvcToolchain = Resolve-UeakMsvcToolchain -MsvcToolsRoot $MsvcToolsRoot
-$AutoSdkRoot = Join-Path $ToolRoot "AutoSDK"
-$AutoSdkToolchain = Join-Path $AutoSdkRoot "HostWin64\Win64\VS2022\$($MsvcToolchain.Name)"
 if ([string]::IsNullOrWhiteSpace($PackageDirectory))
 {
     $PackageDirectory = Join-Path $ToolRoot "Build\Packaged\UEAgentKit"
@@ -36,17 +34,36 @@ else
 
 Assert-UeakPath -Path $PluginDescriptor -Description "Plugin descriptor" -PathType File
 Assert-UeakPath -Path $RunUAT -Description "RunUAT.bat" -PathType File
+Assert-UeakNoReparsePath -Path $MsvcToolchain.FullName
+Assert-UeakPlainTree -Path (Join-Path $ToolRoot "Plugin\UEAgentKit")
+$BuildRoot = Join-Path $ToolRoot "Build"
+$OutputRoot = Join-Path $ToolRoot "Output"
+$PackageAllowed = $false
+foreach ($AllowedRoot in @($BuildRoot, $OutputRoot))
+{
+    $FullAllowed = [System.IO.Path]::GetFullPath($AllowedRoot).TrimEnd([char]'\', [char]'/')
+    $Prefix = $FullAllowed + [System.IO.Path]::DirectorySeparatorChar
+    if ($PackageDirectory.StartsWith($Prefix, [System.StringComparison]::OrdinalIgnoreCase))
+    {
+        Assert-UeakUnderDirectory -Path $PackageDirectory -AllowedRoot $AllowedRoot
+        $PackageAllowed = $true
+        break
+    }
+}
+if (!$PackageAllowed)
+{
+    throw "Plugin package directory must stay within Build or Output."
+}
 New-Item -ItemType Directory -Path $PackageDirectory -Force | Out-Null
-Ensure-UeakJunction -LinkPath $AutoSdkToolchain -TargetPath $MsvcToolchain.FullName -ReplaceDifferentJunction | Out-Null
 
-$PreviousAutoSdkRoot = $env:UE_SDKS_ROOT
+$PreviousSdkRoot = [Environment]::GetEnvironmentVariable("UE_SDKS_ROOT", "Process")
 $PreviousAllowUbaExecutor = $env:UnrealBuildTool_BuildConfiguration__bAllowUBAExecutor
-$env:UE_SDKS_ROOT = $AutoSdkRoot
+# Use Visual Studio's installed toolchain directly; do not use an SDK mirror.
+[Environment]::SetEnvironmentVariable("UE_SDKS_ROOT", $null, "Process")
 $env:UnrealBuildTool_BuildConfiguration__bAllowUBAExecutor = "false"
 try
 {
     Write-Host "UAT MSVC     : $($MsvcToolchain.FullName)"
-    Write-Host "UAT AutoSDK  : $AutoSdkRoot"
     Write-Host "UAT UBA      : disabled"
     & $RunUAT @(
         "BuildPlugin",
@@ -64,7 +81,7 @@ try
 }
 finally
 {
-    $env:UE_SDKS_ROOT = $PreviousAutoSdkRoot
+    [Environment]::SetEnvironmentVariable("UE_SDKS_ROOT", $PreviousSdkRoot, "Process")
     if ($null -eq $PreviousAllowUbaExecutor)
     {
         Remove-Item Env:UnrealBuildTool_BuildConfiguration__bAllowUBAExecutor -ErrorAction SilentlyContinue

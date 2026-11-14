@@ -93,7 +93,17 @@ class _BridgeHandler(socketserver.StreamRequestHandler):
                     "requestedCount": len(params.get("propertyNames", [])),
                     "returnedCount": len(params.get("propertyNames", [])),
                     "properties": [
-                        {"name": name, "status": "ok", "valueReturned": True, "type": "int32", "value": 1}
+                        {
+                            "name": name,
+                            "status": "ok",
+                            "valueReturned": True,
+                            "type": "int32",
+                            "value": 1,
+                            "declaringClassPath": "/Script/Engine.Actor",
+                            "declaringClassName": "Actor",
+                            "declaringClassKind": "native",
+                            "declaringClassPathTruncated": False,
+                        }
                         for name in params.get("propertyNames", [])
                     ],
                 },
@@ -256,6 +266,11 @@ class PieScalarBridgeTests(unittest.TestCase):
         self.assertFalse(result["requiresDatabase"])
         self.assertEqual(result["targetKind"], "actor")
         self.assertEqual([item["name"] for item in result["properties"]], ["Health", "bIsDead"])
+        for item in result["properties"]:
+            self.assertEqual(item["declaringClassPath"], "/Script/Engine.Actor")
+            self.assertEqual(item["declaringClassKind"], "native")
+            self.assertFalse(item["declaringClassPathTruncated"])
+            self.assertNotIn("declaringBlueprintPath", item)
         request = _BridgeServer.requests[-1]
         self.assertEqual(request["method"], SCALAR_METHOD)
         self.assertEqual(request["params"]["pieInstanceId"], 0)
@@ -315,6 +330,21 @@ class PieScalarCapabilityTests(unittest.TestCase):
             self.assertIn(type_name, block["supportedTypes"])
         for code in ("pie-component-not-found", "pie-component-ambiguous", "pie-component-stale"):
             self.assertIn(code, block["errorCodes"])
+        provenance = block["propertyProvenance"]
+        self.assertTrue(provenance["onlyForResolvedProperties"])
+        self.assertEqual(provenance["kinds"], ["native", "blueprint", "unknown"])
+        self.assertEqual(provenance["maxClassPathChars"], 512)
+        self.assertIn("FProperty::GetOwnerClass()", provenance["source"])
+        for field in (
+            "declaringClassPath",
+            "declaringClassName",
+            "declaringClassKind",
+            "declaringClassPathTruncated",
+            "declaringBlueprintPath",
+            "declaringBlueprintPathTruncated",
+        ):
+            self.assertIn(field, provenance["fields"])
+        self.assertIn("no filesystem path", provenance["policy"])
         self.assertIn(SCALAR_TOOL, capabilities["liveEditor"]["tools"])
         self.assertEqual(capabilities["liveEditor"]["tools"], LIVE_EDITOR_TOOL_NAMES)
 
@@ -328,6 +358,9 @@ class PieScalarCapabilityTests(unittest.TestCase):
         self.assertEqual(len(payload["liveEditor"]["tools"]), len(PURE_LIVE_READ_TOOL_NAMES))
         self.assertEqual(payload["liveEditor"]["pieScalarInspection"]["tool"], SCALAR_TOOL)
         self.assertFalse(payload["liveEditor"]["pieScalarInspection"]["requiresDatabase"])
+        pure_provenance = payload["liveEditor"]["pieScalarInspection"]["propertyProvenance"]
+        self.assertTrue(pure_provenance["onlyForResolvedProperties"])
+        self.assertIn("declaringClassPath", pure_provenance["fields"])
 
 
 class PieScalarRegistryAndSourceTests(unittest.TestCase):
@@ -369,12 +402,36 @@ class PieScalarRegistryAndSourceTests(unittest.TestCase):
             "pie-component-ambiguous",
             "pie-component-stale",
             "MaxExactScalarInt64",
+            "GetOwnerClass()",
+            "declaringClassPath",
+            "declaringClassName",
+            "declaringClassKind",
+            "declaringClassPathTruncated",
+            "declaringBlueprintPath",
+            "declaringBlueprintPathTruncated",
+            "UBlueprintGeneratedClass",
+            "CLASS_CompiledFromBlueprint",
+            "ClassGeneratedBy",
+            "MaxScalarClassPathChars",
         ):
             self.assertIn(token, handler + header, token)
         self.assertIn('TEXT("editor.getPieScalars")', bridge)
         self.assertEqual(bridge.count('TEXT("editor.getPieScalars")'), 2)
         self.assertIn("TryReadPieScalarsResult", bridge)
         self.assertIn("TryReadPieScalarsResult", bridge_header)
+        # The failure item factory must never attach declaring-class metadata.
+        failure_block = handler.split("TSharedRef<FJsonObject> MakeScalarFailure(", 1)[1].split(
+            "TSharedRef<FJsonObject> MakeEnumItem(", 1
+        )[0]
+        self.assertNotIn("declaringClass", failure_block)
+        # No filesystem/source-file guessing anywhere in the PIE bridge handler.
+        for forbidden_source_path in (
+            "FPaths::",
+            "IFileManager",
+            "GetSourceFilePath",
+            "SourceFile",
+        ):
+            self.assertNotIn(forbidden_source_path, handler, forbidden_source_path)
         for forbidden in (
             "SpawnActor",
             "DestroyActor(",
@@ -419,8 +476,21 @@ class PieScalarRegistryAndSourceTests(unittest.TestCase):
             "MinScalarStringChars = 64",
             "DefaultScalarStringChars = 256",
             "MaxScalarStringChars = 512",
+            "MaxScalarClassPathChars = 512",
         ):
             self.assertIn(token, header)
+
+    def test_native_origin_tests_are_prepared(self) -> None:
+        native = (PLUGIN_PRIVATE / "P0PieRuntimeInspectionTest.cpp").read_text(encoding="utf-8")
+        for token in (
+            "declaringClassPath",
+            "declaringClassKind",
+            "declaringClassPathTruncated",
+            "InitialLifeSpan",
+            "AActor::StaticClass()->GetPathName()",
+            "unresolved property does not leak declaring metadata",
+        ):
+            self.assertIn(token, native, token)
 
 
 if __name__ == "__main__":

@@ -366,7 +366,7 @@ Save confirmation == SAVE P8 TEST-ONLY BP_LayoutP8
 
 - MCP Workflow 将每个成功且有变更的 Live Apply 原子写入固定 Work Root 下的 `live-write-journal/live_*.json`；Authorized Save 更新同一记录，成功 Undo/Discard 或成功 Verify 删除记录。MCP Server 重启后只恢复通过 Project、Schema、Operation、Target、Transaction 和生命周期校验的记录；损坏或身份不匹配记录只计入状态，不会获得写入权限。
 - `ue_verify_live_write` 可携带精确 `liveApplyReceipt`，为空时兼容地选择该资产最新待处理记录。同一资产的多个已保存待验证记录不会互相覆盖。Journal 写盘失败会返回 `journalPersisted=false`，但不会把已经成功的 Editor 修改或授权保存伪报成失败。
-- 对外协议、正式包与 Bridge 状态统一为 `0.8.0`；`publishedVersion` 和 `developmentLine` 均报告 `0.8.0`。
+- 已发布 0.8.0 的对外协议、正式包与 Bridge 状态为 `0.8.0`；本地 0.9.0 Developer Preview 1 候选为 `0.9.0.dev1`，`publishedVersion` 保持 `0.8.0`，`developmentLine` 报告 `0.9.0.dev1`。
 
 ## 状态与 Revision 语义
 

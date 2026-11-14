@@ -1,7 +1,6 @@
 """LayoutPlan 1.0: deterministic, pure, semantic-preserving layout preview.
 
-This module extends the G0.3 baseline retained in
-``prototype/graph_contracts/ueak_contract/layout.py`` with iterative SCC ranks,
+This module extends the G0.3 baseline with iterative SCC ranks,
 weighted bidirectional ordering, transitive pure attribution, immutable comment
 compounds and conservative scoped placement. :func:`preview_graph_layout`
 retains the public fail-closed request / output checks.  It never opens Unreal, mutates an
@@ -361,7 +360,6 @@ def layout_graph(graph: dict[str, Any], request: dict[str, Any] | None = None) -
                 size_by_node[comment_id][dimension] = bound_size
                 size_by_node[comment_id]['source'] = 'stored'
     reroute_nodes = {node_id for node_id, node in nodes.items() if node.get("kind") == "reroute"}
-    event_nodes = {node_id for node_id, node in nodes.items() if node.get("kind") == "event"}
     content_nodes = set(nodes) - comment_nodes
 
     pins = {str(pin['pinId']): pin for pin in graph.get('pins', [])}

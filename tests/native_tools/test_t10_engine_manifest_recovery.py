@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 import json
 import sys
 import tempfile
@@ -15,7 +14,6 @@ from t10_engine_manifest_recovery import (  # noqa: E402
     DEFAULT_BUILD_ID,
     DEFAULT_COVERAGE,
     DEFAULT_ENGINE_BIN,
-    ManifestError,
     reconcile,
 )
 

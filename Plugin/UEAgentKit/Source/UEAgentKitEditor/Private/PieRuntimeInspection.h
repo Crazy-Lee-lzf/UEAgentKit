@@ -42,6 +42,8 @@ namespace UEAgentKitPieRuntime
 	inline constexpr int32 MinScalarStringChars = 64;
 	inline constexpr int32 DefaultScalarStringChars = 256;
 	inline constexpr int32 MaxScalarStringChars = 512;
+	/** Reflected declaring-class anchors are bounded like other scalar metadata. */
+	inline constexpr int32 MaxScalarClassPathChars = 512;
 
 	/** Instance lookup class. Codes stay distinct on the wire. */
 	enum class ELookupStatus : uint8

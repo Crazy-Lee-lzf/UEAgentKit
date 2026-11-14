@@ -144,13 +144,16 @@ def _remove_reflection_children(
     child_ids = [str(row["stable_id"]) for row in rows]
     if child_ids:
         placeholders = ",".join("?" for _ in child_ids)
+        # Reimport owns only outgoing references of its own reflected
+        # children. Incoming references are evidence owned by their callers,
+        # potentially in other assets, and must survive this operation.
         connection.execute(
             f"""
             DELETE FROM references_table
-            WHERE source_symbol_id IN ({placeholders})
-               OR target_symbol_id IN ({placeholders})
+            WHERE asset_id = ?
+              AND source_symbol_id IN ({placeholders})
             """,
-            [*child_ids, *child_ids],
+            [asset_id, *child_ids],
         )
     connection.execute(
         """
@@ -176,6 +179,7 @@ def _insert_child_symbol(
     owner_stable_id: str,
     kind: str,
     record: dict[str, Any],
+    seen_stable_ids: set[str],
 ) -> None:
     stable_id = _clean_text(record.get("stableId", ""), name=f"{kind}.stableId")
     name = _clean_text(record.get("name", ""), name=f"{kind}.name")
@@ -189,6 +193,13 @@ def _insert_child_symbol(
     )
     if stable_id != expected_stable_id or not name:
         raise ValueError(f"Invalid reflected {kind} identity: {stable_id}")
+    # symbols.stable_id is globally UNIQUE, so a repeated child in one export
+    # would otherwise surface as a raw SQLite constraint error (or, in a future
+    # schema change, silently overwrite).  Report it as an explicit duplicate
+    # and roll the whole type back.
+    if stable_id in seen_stable_ids:
+        raise ValueError(f"Duplicate reflected {kind} stableId: {stable_id}")
+    seen_stable_ids.add(stable_id)
     cpp_type = str(record.get("returnType" if kind == "function" else "cppType", "")).strip()
     details = {
         "language": "cpp",
@@ -522,6 +533,7 @@ def index_reflection_export(
                     asset_id=asset_id,
                     owner_stable_id=stable_id,
                 )
+                seen_child_ids: set[str] = set()
                 connection.execute(
                     "UPDATE symbols SET details_json = ? WHERE id = ?",
                     (
@@ -544,6 +556,7 @@ def index_reflection_export(
                         owner_stable_id=stable_id,
                         kind="property",
                         record=property_record,
+                        seen_stable_ids=seen_child_ids,
                     )
                     property_count += 1
 
@@ -565,6 +578,7 @@ def index_reflection_export(
                         owner_stable_id=stable_id,
                         kind="function",
                         record=function_record,
+                        seen_stable_ids=seen_child_ids,
                     )
                     function_count += 1
 

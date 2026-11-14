@@ -199,7 +199,7 @@ class IncrementalBatchTests(unittest.TestCase):
         write_export(self.export_root, assets)
         with open_database(self.database_path) as connection:
             build_index(connection, self.export_root, self.database_path)
-            manifest = _rewrite_manifest(
+            _rewrite_manifest(
                 self.export_root,
                 lambda payload: payload["assets"][0].__setitem__(
                     "canonicalSha256",

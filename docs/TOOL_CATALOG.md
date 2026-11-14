@@ -28,6 +28,7 @@
 | 动画比例审计/修复 | [Scale Audit](ANIMATION_SCALE_AUDIT_TOOL.md)、[Scale Fix](ANIMATION_SCALE_FIX_TOOL.md)、[Batch Fix](ANIMATION_SCALE_FIX_BATCH_TOOL.md) |
 | 角色接地与二次运动 | [Ground Contact](CHARACTER_GROUND_CONTACT_TOOL.md)、[Secondary Motion](SKELETAL_SECONDARY_MOTION_TOOL.md) |
 | 重定向后处理 | [Retarget Postprocess](RETARGET_POSTPROCESS_TOOL.md) |
+| 基于 Action Registry 的节点创建（实验） | [Node Spawn Design](NODE_SPAWN_DESIGN_20261114.md) |
 
 这些链接是**产品文档导航**，不保证所有 Tool 均随 v0.8.0 以同一模式默认开放。只读能力通常不意味着可写；计划生成不等于 Apply；在 Editor 内完成操作也不等于资产已保存或独立验证。
 

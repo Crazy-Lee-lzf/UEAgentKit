@@ -12,6 +12,8 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "K2Node.h"
 #include "K2Node_Event.h"
+#include "K2Node_FunctionEntry.h"
+#include "K2Node_FunctionResult.h"
 #include "K2Node_IfThenElse.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
@@ -191,6 +193,71 @@ namespace BlueprintWriteFixtureCommandletPrivate
 				FName(TEXT("AccessLocal")),
 				IntType,
 				TEXT("3"));
+		}
+
+		// One compiled self-owned pure function with one int input and one bool
+		// return value.  Native acceptance must resolve this real generated-class
+		// UFunction and its exact graph GUID/signature.
+		bool bHasOwnedPureFunction = false;
+		for (UEdGraph* Graph : Blueprint->FunctionGraphs)
+		{
+			if (Graph != nullptr && Graph->GetName() == TEXT("OwnedPureFlag"))
+			{
+				bHasOwnedPureFunction = true;
+				break;
+			}
+		}
+		if (!bHasOwnedPureFunction)
+		{
+			UEdGraph* FunctionGraph = FBlueprintEditorUtils::CreateNewGraph(
+				Blueprint,
+				FName(TEXT("OwnedPureFlag")),
+				UEdGraph::StaticClass(),
+				UEdGraphSchema_K2::StaticClass());
+			if (FunctionGraph == nullptr)
+			{
+				OutError = TEXT("Could not create the owned pure fixture function graph.");
+				return false;
+			}
+			FBlueprintEditorUtils::AddFunctionGraph<UFunction>(
+				Blueprint,
+				FunctionGraph,
+				true,
+				nullptr);
+			UK2Node_FunctionEntry* FunctionEntry = nullptr;
+			for (UEdGraphNode* Node : FunctionGraph->Nodes)
+			{
+				if (UK2Node_FunctionEntry* Candidate = Cast<UK2Node_FunctionEntry>(Node))
+				{
+					FunctionEntry = Candidate;
+					break;
+				}
+			}
+			if (FunctionEntry == nullptr)
+			{
+				OutError = TEXT("The owned pure fixture has no function entry.");
+				return false;
+			}
+			FunctionEntry->AddExtraFlags(FUNC_BlueprintPure);
+			FunctionEntry->CreateUserDefinedPin(TEXT("A"), IntType, EGPD_Output);
+
+			FGraphNodeCreator<UK2Node_FunctionResult> ResultCreator(*FunctionGraph);
+			UK2Node_FunctionResult* FunctionResult = ResultCreator.CreateNode();
+			FunctionResult->NodePosX = 420;
+			FunctionResult->NodePosY = 0;
+			ResultCreator.Finalize();
+			FunctionResult->CreateUserDefinedPin(
+				TEXT("ReturnValue"),
+				BoolType,
+				EGPD_Input);
+			UEdGraphPin* EntryThen = FunctionEntry->FindPin(TEXT("then"), EGPD_Output);
+			UEdGraphPin* ResultExec = FunctionResult->FindPin(TEXT("execute"), EGPD_Input);
+			if (EntryThen == nullptr || ResultExec == nullptr)
+			{
+				OutError = TEXT("The owned pure fixture cannot link entry to result.");
+				return false;
+			}
+			EntryThen->MakeLinkTo(ResultExec);
 		}
 
 		// Two existing Branch nodes and two pre-existing Event->Branch edges.

@@ -4,7 +4,7 @@
 
 UE Agent Kit 是一套面向 **Unreal Engine 5.6** 的开源项目分析与受控修改工具，主要用于让 AI Agent 和开发者能够可靠地理解 Unreal 资产、Blueprint 语义、引用关系和编辑器状态，并在明确的安全边界内执行修改。
 
-当前已发布版本为 **0.8.0**，支持 **Unreal Engine 5.6 / Windows / Python 3.11–3.12**。
+当前已发布版本为 **0.8.0**（Python 3.11–3.12）；本地 0.9.0 Developer Preview 1 候选版本为 **0.9.0.dev1**，支持 **Unreal Engine 5.6 / Windows / Python 3.11–3.14**。
 
 ## 适合解决什么问题
 
@@ -62,11 +62,11 @@ Plan → Policy → Revision → Apply → Save → Verify → Diff / Trust
 
 写入不是任意脚本执行。稳定写入域受 **Write Policy、Revision、目标身份、Dirty Package、Transaction、显式保存和独立验证** 约束。
 
-### RC1 实验性 Blueprint 结构写入（默认关闭，不属于 v0.8.0 稳定面）
+### 实验性 Blueprint 结构写入（默认关闭，非稳定功能）
 
-RC1 本地候选还包含一组**默认关闭的内部实验能力**：有界 GraphEdit（8 类节点/连线）、Pin 默认值、用户变量创建、单边 rewire 和孤立节点删除。它们需要 MCP `--enable-experimental-graphpatch-edit` 与 Editor 工程 `[UEAgentKit] ExperimentalGraphPatchEdit=True` 同时开启，并且每次 Apply/Save 都要回传精确的 planId/confirmation。
+0.9.0 开发预览候选包含一组**默认关闭的内部实验能力**：结构写入统一走原子 patch（`createNode` / `connect` / `setPinDefault` / `createVariable` / `rewirePin` / `removeNode`，单事务、逐操作结果、Undo/Redo 验证），节点创建可选 registry `actionId`（`ue_search_node_actions`）。它们需要 MCP `--enable-experimental-graphpatch-edit` 与 Editor 工程 `[UEAgentKit] ExperimentalGraphPatchEdit=True` 同时开启，并且每次 Apply/Save 都要回传精确的 planId/confirmation；旧的单 writer 工具（pin-default / variable / rewire / node-remove / graph-edit 外壳）已删除。
 
-这些实验工具**不经过项目 Write Policy 白名单**，只接受精确资产/图身份、干净包、非 PIE、版本/指纹校验和有界操作；完整限制见 [Blueprint Graph 读写矩阵](docs/BLUEPRINT_GRAPH_READ_WRITE_MATRIX.md) 与 [实验用法](docs/BLUEPRINT_AGENT_E2E_USAGE.md)。它们不是生产默认，不应在正式项目中开启。稳定写入与实验写入是两套边界，不能把本文的 Write Policy 描述套到实验工具上。
+这些实验工具**不经过项目 Write Policy 白名单**，只接受精确资产/图身份、干净包、非 PIE、版本/指纹校验和有界操作；完整限制见 [实验用法](docs/BLUEPRINT_AGENT_E2E_USAGE.md)。它们不是生产默认，不应在正式项目中开启。稳定写入与实验写入是两套边界，不能把本文的 Write Policy 描述套到实验工具上。
 
 ## P4 / Perforce 集成
 
@@ -96,7 +96,7 @@ Windows 10 / 11
 Unreal Engine 5.6
 Visual Studio 2022 C++ Toolchain
 PowerShell 5.1+
-Python 3.11 或 3.12
+Python 3.11–3.14（0.8.0 已发布版为 3.11–3.12）
 P4 CLI（仅在启用 Source Control 时需要）
 ```
 
@@ -226,11 +226,13 @@ Read-only audit
 ## 文档
 
 - [AI Agent 快速接入](docs/AGENT_QUICKSTART.md)
+- [程序开发常用工作流](docs/DEVELOPER_WORKFLOWS.md)
 - [文档索引](docs/README.md)
 - [项目能力状态](docs/PROJECT_STATUS.md)
 - [公开 Roadmap](docs/ROADMAP.md)
 - [0.8.0 Release Notes](docs/RELEASE_0.8.0.md)
-- [RC1 internal experimental preview](docs/RELEASE_RC1.md) / [English](docs/RELEASE_RC1_EN.md)（不是 GitHub Release；版本仍为 0.8.0）
+- [RC1 internal experimental preview](docs/RELEASE_RC1.md) / [English](docs/RELEASE_RC1_EN.md)
+- [0.9.0 Developer Preview 1 candidate](docs/RELEASE_0.9.0_PREVIEW.md) / [English](docs/RELEASE_0.9.0_PREVIEW_EN.md) (not released)
 - [Memory Architecture](docs/MEMORY_ARCHITECTURE.md)
 - [Build and Run](docs/BUILD_AND_RUN.md)
 

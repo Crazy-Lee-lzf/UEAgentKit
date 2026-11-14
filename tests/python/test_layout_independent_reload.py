@@ -11,14 +11,11 @@ reported as independent-reload evidence.
 
 from __future__ import annotations
 
-import copy
-import importlib.util
 import json
 import subprocess
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]

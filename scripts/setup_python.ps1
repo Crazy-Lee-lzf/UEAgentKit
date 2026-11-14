@@ -36,7 +36,7 @@ if (!(Test-Path -LiteralPath $VenvPython -PathType Leaf))
 
 if (!(Test-UeakPythonVersion -PythonExecutable $VenvPython))
 {
-    throw "The project virtual environment must use CPython 3.11 or 3.12: $VenvPython"
+    throw "The project virtual environment must use CPython 3.11 through 3.14: $VenvPython"
 }
 
 & $VenvPython -m ensurepip --upgrade

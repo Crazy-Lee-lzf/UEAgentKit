@@ -449,7 +449,7 @@ class FunctionSymbolIndexTests(CppSymbolTraceTestBase):
         self.assertEqual(result.functions, 0)
 
     def test_index_is_idempotent_and_anchor_follows_edited_body(self) -> None:
-        header = self.write_header("Idem.h", (
+        self.write_header("Idem.h", (
             "class FIdem\n"
             "{\n"
             "public:\n"

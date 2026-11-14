@@ -85,7 +85,8 @@ def layered(
     starts = {i: 0 for i in outgoing}
     ready = sorted(i for i in outgoing if not indegree[i])
     layers: dict[str, int] = {}
-    original_y = lambda n: int((nodes.get(n, {}).get('position') or {}).get('y', 0))
+    def original_y(n: str) -> int:
+        return int((nodes.get(n, {}).get('position') or {}).get('y', 0))
     while ready:
         current = ready.pop(0)
         group = sccs[current]

@@ -71,8 +71,13 @@ class WorkflowPlanMixin:
         if not isinstance(assets, list) or len(assets) != 1 or not isinstance(assets[0], dict):
             raise WorkflowError("plan-invalid", "The stored MCP patch no longer contains exactly one asset.")
         asset_path = str(assets[0].get("assetPath", ""))
-        self._assert_asset_fresh(asset_path)
-        validation = validate_patch(record.patch_path, self.config.policy_path, self.config.revision_export)
+        freshness = self._assert_asset_fresh(asset_path)
+        self._assert_live_baseline_unchanged(record.live_baseline, freshness, asset_path)
+        validation = validate_patch(
+            record.patch_path,
+            self.config.policy_path,
+            self._revision_export_required(),
+        )
         if not validation.get("valid"):
             raise _validation_error(
                 validation,
@@ -100,7 +105,7 @@ class WorkflowPlanMixin:
             if not asset_result.get("found"):
                 raise WorkflowError("asset-not-indexed", "The requested asset is not present in the fixed SQLite index.")
             asset = asset_result["asset"]
-            self._assert_asset_fresh(asset_path)
+            freshness = self._assert_asset_fresh(asset_path)
             revision = asset.get("revision_value")
             asset_class = asset.get("asset_class")
             if not isinstance(revision, str) or not revision.startswith("sha256:"):
@@ -136,7 +141,11 @@ class WorkflowPlanMixin:
             directory = self._plan_directory(plan_id)
             patch_path = directory / "patch.json"
             _write_json_atomic(patch_path, patch)
-            validation = validate_patch(patch_path, self.config.policy_path, self.config.revision_export)
+            validation = validate_patch(
+                patch_path,
+                self.config.policy_path,
+                self._revision_export_required(),
+            )
             if not validation.get("valid"):
                 raise _validation_error(
                     validation,
@@ -162,7 +171,18 @@ class WorkflowPlanMixin:
                         "The DataTable row has indexed Searchable Name referencers and cannot be removed or renamed by a single-asset patch.",
                         details=reference_impact,
                     )
-            record = PlanRecord(plan_id, digest, patch, patch_path, validation)
+            record = PlanRecord(
+                plan_id,
+                digest,
+                patch,
+                patch_path,
+                validation,
+                live_baseline=(
+                    freshness.get("live")
+                    if freshness.get("state") == "live-editor"
+                    else None
+                ),
+            )
             self._plans[plan_id] = record
             self._prune_records()
             response = {

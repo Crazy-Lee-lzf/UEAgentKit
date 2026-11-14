@@ -249,6 +249,45 @@ class ReflectionIndexTests(unittest.TestCase):
                 0,
             )
 
+    def test_reimport_does_not_delete_foreign_references_to_reflected_child(self) -> None:
+        """Reflection owns its child symbols, not references created by other assets."""
+        with open_database(self.database_path) as connection:
+            imported = index_reflection_export(connection, self.export_path)
+            self.assertFalse(imported.errors)
+            base_id = int(connection.execute(
+                "SELECT id FROM assets WHERE asset_path LIKE '%/Base.h'"
+            ).fetchone()[0])
+            # Model an independently indexed call from Base.h to a reflected
+            # child of Hero.h. The reference has an owner asset different
+            # from the reflection type being reimported.
+            connection.execute(
+                """
+                INSERT INTO references_table(
+                    asset_id, stable_id, kind, source_symbol_id, target_symbol_id,
+                    target_kind, target_name, target_asset_path, target_path,
+                    details_json
+                ) VALUES (?, ?, 'calls', ?, ?, 'function', ?, ?, ?, '{}')
+                """,
+                (
+                    base_id,
+                    "regression:base-calls-hero-sethealth",
+                    "cpp:type:ABase",
+                    "cpp:function:AHero::SetHealth",
+                    "SetHealth",
+                    "Source/Game/Public/Hero.h",
+                    "AHero::SetHealth",
+                ),
+            )
+            imported_again = index_reflection_export(connection, self.export_path)
+            self.assertFalse(imported_again.errors)
+            surviving = connection.execute(
+                "SELECT asset_id, target_symbol_id FROM references_table WHERE stable_id = ?",
+                ("regression:base-calls-hero-sethealth",),
+            ).fetchone()
+            self.assertIsNotNone(surviving, "Reflection reimport deleted another asset's call")
+            self.assertEqual(int(surviving["asset_id"]), base_id)
+            self.assertEqual(surviving["target_symbol_id"], "cpp:function:AHero::SetHealth")
+
     def test_code_rebuild_preserves_reflection_enrichment(self) -> None:
         with open_database(self.database_path) as connection:
             imported = index_reflection_export(connection, self.export_path)
@@ -497,6 +536,26 @@ class ReflectionIndexTests(unittest.TestCase):
                     WHERE owner_symbol_id = 'cpp:type:AHero'
                       AND kind IN ('function', 'property')
                     """
+                ).fetchone()[0],
+                0,
+            )
+
+    def test_duplicate_child_stable_id_is_reported_and_rolled_back(self) -> None:
+        # DEF-12: a repeated reflected function/property must not rely on the
+        # raw SQLite UNIQUE failure (or a silent overwrite) for detection.
+        record = self._type_record()
+        duplicate = dict(record["functions"][0])
+        record["functions"] = [dict(record["functions"][0]), duplicate]
+        self._write_export(types=[record])
+
+        with open_database(self.database_path) as connection:
+            result = index_reflection_export(connection, self.export_path)
+            self.assertEqual(len(result.errors), 1)
+            self.assertIn("Duplicate reflected function stableId", result.errors[0])
+            self.assertEqual(result.matched_types, 0)
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) FROM symbols WHERE owner_symbol_id = 'cpp:type:AHero'"
                 ).fetchone()[0],
                 0,
             )

@@ -128,7 +128,8 @@ def _project_metrics(
 
 def main() -> int:
     BENCH_ROOT.mkdir(parents=True, exist_ok=True)
-    pack_paths = [_make_pack(index) for index in range(PACK_COUNT)]
+    for index in range(PACK_COUNT):
+        _make_pack(index)
 
     issuer = TestClaimIssuer(secret=SECRET, issuer=ISSUER, audience=AUDIENCE)
     verifier = HmacClaimVerifier(secret=SECRET, issuer=ISSUER, audience=AUDIENCE)

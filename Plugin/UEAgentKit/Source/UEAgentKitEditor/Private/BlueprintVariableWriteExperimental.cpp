@@ -23,7 +23,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogUEAgentKitBlueprintVariableExperimental, Log, All)
 
 namespace
 {
-	constexpr int32 MaxVariables = 8;
+	constexpr int32 MaxVariables = UEAgentKitBlueprintVariableExperimental::MaxVariablesPerApply;
 	constexpr int32 MaxVariableName = 64;
 	constexpr int32 MaxStringDefault = 1024;
 	const TCHAR* const PreviewSchemaVersion = TEXT("ueak.blueprint-variable-preview/1.0");
@@ -31,8 +31,6 @@ namespace
 	const TCHAR* const SaveSchemaVersion = TEXT("ueak.blueprint-variable-save/1.0");
 	const TCHAR* const VariablesFingerprintVersion = TEXT("ueak.blueprint-variable-state/1");
 
-	bool bTestOverrideSet = false;
-	bool bTestOverrideEnabled = false;
 
 	struct FVariableTarget
 	{
@@ -576,130 +574,6 @@ namespace
 		return Keys;
 	}
 
-	bool ParseTargets(
-		const TSharedPtr<FJsonObject>& Params,
-		TArray<FVariableTarget>& OutTargets,
-		FString& OutErrorCode,
-		FString& OutErrorMessage)
-	{
-		const TSharedPtr<FJsonValue> VariablesValue = Params->TryGetField(TEXT("variables"));
-		if (!VariablesValue.IsValid() || VariablesValue->Type != EJson::Array)
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("blueprint-variable-invalid-variables"),
-				TEXT("variables must be one JSON array."));
-		}
-		const TArray<TSharedPtr<FJsonValue>>& Items = VariablesValue->AsArray();
-		if (Items.Num() < 1 || Items.Num() > MaxVariables)
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("blueprint-variable-invalid-variables"),
-				FString::Printf(
-					TEXT("variables must contain between 1 and %d objects."),
-					MaxVariables));
-		}
-		TSet<FName> RequestNames;
-		for (int32 Index = 0; Index < Items.Num(); ++Index)
-		{
-			if (!Items[Index].IsValid() || Items[Index]->Type != EJson::Object)
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("blueprint-variable-invalid-variables"),
-					FString::Printf(TEXT("variables[%d] must be one object."), Index));
-			}
-			const TSharedPtr<FJsonObject> Item = Items[Index]->AsObject();
-			for (const FString& Key : JsonObjectKeys(Item))
-			{
-				if (Key != TEXT("name") && Key != TEXT("type") && Key != TEXT("defaultValue"))
-				{
-					return Fail(
-						OutErrorCode,
-						OutErrorMessage,
-						TEXT("blueprint-variable-unknown-parameter"),
-						FString::Printf(
-							TEXT("variables[%d] contains unknown field: %s"),
-							Index,
-							*Key));
-				}
-			}
-
-			FVariableTarget Target;
-			if (!ReadString(
-					Item,
-					TEXT("name"),
-					Target.Name,
-					OutErrorCode,
-					OutErrorMessage,
-					MaxVariableName)
-				|| !ReadString(
-					Item,
-					TEXT("type"),
-					Target.Type,
-					OutErrorCode,
-					OutErrorMessage,
-					16)
-				|| !ReadString(
-					Item,
-					TEXT("defaultValue"),
-					Target.DefaultValue,
-					OutErrorCode,
-					OutErrorMessage,
-					MaxStringDefault,
-					true))
-			{
-				return false;
-			}
-			if (!IsCanonicalVariableName(Target.Name))
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("blueprint-variable-name-invalid"),
-					FString::Printf(
-						TEXT("variables[%d].name must be 1-%d ASCII letters, digits or '_' and start with a letter or '_'."),
-						Index,
-						MaxVariableName));
-			}
-			if (!MakePinType(Target.Type, Target.PinType))
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("blueprint-variable-type-not-allowed"),
-					TEXT("Supported variable types: bool, int, double, string."));
-			}
-			if (!CanonicalizeDefaultValue(
-					Target.Type,
-					Target.DefaultValue,
-					OutErrorCode,
-					OutErrorMessage))
-			{
-				return false;
-			}
-			Target.NameValue = FName(*Target.Name);
-			if (RequestNames.Contains(Target.NameValue))
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("blueprint-variable-duplicate-name"),
-					FString::Printf(
-						TEXT("variables[%d].name duplicates another requested variable: %s"),
-						Index,
-						*Target.Name));
-			}
-			RequestNames.Add(Target.NameValue);
-			OutTargets.Add(MoveTemp(Target));
-		}
-		return true;
-	}
-
 	void CollectExistingVariableNames(const UBlueprint* Blueprint, TSet<FName>& OutNames)
 	{
 		if (Blueprint == nullptr)
@@ -753,1037 +627,301 @@ namespace
 		return INDEX_NONE;
 	}
 
-	int32 CountLinks(const UEdGraph* Graph)
+	FBPVariableDescription MakeVariableDescription(
+		const UEAgentKitBlueprintVariableExperimental::FAtomicVariableOperation& Operation)
 	{
-		if (Graph == nullptr)
+		FBPVariableDescription Variable;
+		Variable.VarName = FName(*Operation.Name);
+		Variable.VarGuid = FGuid::NewGuid();
+		FEdGraphPinType PinType;
+		MakePinType(Operation.Type, PinType);
+		Variable.VarType = PinType;
+		Variable.FriendlyName = FName::NameToDisplayString(
+			Operation.Name,
+			IsTypeToken(Operation.Type, TEXT("bool")));
+		Variable.PropertyFlags = CPF_Edit | CPF_BlueprintVisible | CPF_DisableEditOnInstance;
+		Variable.ReplicationCondition = COND_None;
+		Variable.Category = UEdGraphSchema_K2::VR_DefaultCategory;
+		Variable.DefaultValue = Operation.DefaultValue;
+		if (IsTypeToken(Operation.Type, TEXT("string")))
 		{
-			return 0;
+			Variable.SetMetaData(TEXT("MultiLine"), TEXT("true"));
 		}
-		int32 Count = 0;
-		for (const UEdGraphNode* Node : Graph->Nodes)
-		{
-			if (Node == nullptr)
-			{
-				continue;
-			}
-			for (const UEdGraphPin* Pin : Node->Pins)
-			{
-				if (Pin != nullptr)
-				{
-					Count += Pin->LinkedTo.Num();
-				}
-			}
-		}
-		return Count / 2;
-	}
-
-	bool BuildPlan(
-		const TSharedPtr<FJsonObject>& Params,
-		FVariablePlan& OutPlan,
-		FPlanContext& OutContext,
-		FString& OutErrorCode,
-		FString& OutErrorMessage)
-	{
-		if (!ReadString(
-				Params,
-				TEXT("assetPath"),
-				OutPlan.AssetPath,
-				OutErrorCode,
-				OutErrorMessage,
-				512)
-			|| !ParseTargets(Params, OutPlan.Targets, OutErrorCode, OutErrorMessage))
-		{
-			return false;
-		}
-		if (!UEAgentKitBlueprintVariableExperimental::IsExperimentalWriteAvailable())
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("blueprint-variable-experimental-disabled"),
-				TEXT("Experimental Blueprint variable creation is not opted in for this project."));
-		}
-		if (GEditor == nullptr || GEditor->IsPlaySessionInProgress() || GEditor->PlayWorld != nullptr)
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("blueprint-variable-pie-active"),
-				TEXT("Blueprint variable creation is unavailable while PIE or SIE is active."));
-		}
-
-		if (!UEAgentKitBlueprintGraphLayout::BuildFocusedEditorPreflight(
-				OutContext.Preflight,
-				OutErrorCode,
-				OutErrorMessage))
-		{
-			return false;
-		}
-		if (!OutContext.Preflight->GetStringField(TEXT("assetPath"))
-				.Equals(OutPlan.AssetPath, ESearchCase::CaseSensitive))
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("blueprint-variable-focused-blueprint-mismatch"),
-				TEXT("The focused Blueprint editor is not showing the exact assetPath from the request."));
-		}
-		if (OutContext.Preflight->GetBoolField(TEXT("packageDirty")))
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("blueprint-variable-package-dirty"),
-				TEXT("Blueprint variable creation requires a clean package before Apply."));
-		}
-		if (!OutContext.Preflight->GetBoolField(TEXT("editable")))
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("blueprint-variable-blueprint-not-editable"),
-				TEXT("The focused Blueprint is not editable."));
-		}
-
-		OutPlan.GraphGuid = OutContext.Preflight->GetStringField(TEXT("graphGuid"));
-		UEdGraph* Graph = nullptr;
-		if (!UEAgentKitBlueprintGraphLayout::ResolveExactTarget(
-				OutPlan.AssetPath,
-				OutPlan.GraphGuid,
-				OutContext.Blueprint,
-				Graph,
-				OutErrorCode,
-				OutErrorMessage))
-		{
-			return false;
-		}
-		if (OutContext.Blueprint == nullptr || Graph == nullptr
-			|| Graph->GetSchema() == nullptr
-			|| !Graph->GetSchema()->IsA<UEdGraphSchema_K2>())
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("blueprint-variable-schema-not-supported"),
-				TEXT("Blueprint variable creation supports only K2 Blueprint graphs."));
-		}
-		OutContext.Graph = Graph;
-
-		OutPlan.PackageRevision = OutContext.Preflight->GetStringField(TEXT("packageRevision"));
-		OutPlan.GraphFingerprint = OutContext.Preflight->GetStringField(TEXT("graphFingerprint"));
-		if (!IsSha256Text(OutPlan.PackageRevision))
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("blueprint-variable-revision-unavailable"),
-				TEXT("The exact Blueprint package needs a sha256 disk revision; save it to disk first."));
-		}
-		if (!OutPlan.GraphFingerprint.StartsWith(TEXT("sha1:"), ESearchCase::CaseSensitive))
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("blueprint-variable-fingerprint-unavailable"),
-				TEXT("The focused graph fingerprint is unavailable."));
-		}
-
-		OutPlan.VariablesFingerprintBefore = ComputeVariablesFingerprint(OutContext.Blueprint);
-		if (OutPlan.VariablesFingerprintBefore.IsEmpty())
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("blueprint-variable-fingerprint-unavailable"),
-				TEXT("Could not fingerprint the current Blueprint variable state."));
-		}
-		OutPlan.VariableCountBefore = OutContext.Blueprint->NewVariables.Num();
-		OutPlan.NodeCount = Graph->Nodes.Num();
-		OutPlan.LinkCount = CountLinks(Graph);
-
-		TSet<FName> ExistingNames;
-		CollectExistingVariableNames(OutContext.Blueprint, ExistingNames);
-		for (const FVariableTarget& Target : OutPlan.Targets)
-		{
-			if (ExistingNames.Contains(Target.NameValue)
-				|| FindVariableIndex(OutContext.Blueprint, Target.NameValue) != INDEX_NONE)
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("blueprint-variable-duplicate-name"),
-					FString::Printf(
-						TEXT("The Blueprint already declares a variable named %s (including parent classes)."),
-						*Target.Name));
-			}
-		}
-
-		FString Canonical = AppendField(FString(), TEXT("ueak.blueprint-variable/1.0"));
-		Canonical = AppendField(Canonical, OutPlan.AssetPath);
-		Canonical = AppendField(Canonical, OutPlan.GraphGuid);
-		Canonical = AppendField(Canonical, OutPlan.PackageRevision);
-		Canonical = AppendField(Canonical, OutPlan.GraphFingerprint);
-		Canonical = AppendField(Canonical, OutPlan.VariablesFingerprintBefore);
-		Canonical = AppendField(Canonical, FString::FromInt(OutPlan.VariableCountBefore));
-		Canonical = AppendField(Canonical, FString::FromInt(OutPlan.Targets.Num()));
-		TArray<FVariableTarget> SortedTargets = OutPlan.Targets;
-		SortedTargets.Sort([](const FVariableTarget& Left, const FVariableTarget& Right)
-		{
-			return Left.Name < Right.Name;
-		});
-		for (const FVariableTarget& Target : SortedTargets)
-		{
-			Canonical = AppendField(Canonical, Target.Name);
-			Canonical = AppendField(Canonical, Target.Type);
-			Canonical = AppendField(Canonical, Target.DefaultValue);
-		}
-		OutPlan.PlanId = HashTextOrEmpty(Canonical);
-		if (OutPlan.PlanId.IsEmpty())
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("blueprint-variable-fingerprint-unavailable"),
-				TEXT("Could not compute the Blueprint variable plan hash."));
-		}
-		UE_LOG(
-			LogUEAgentKitBlueprintVariableExperimental,
-			Display,
-			TEXT("Variable plan asset=%s graph=%s revision=%s graphFingerprint=%s variablesFingerprint=%s variables=%d nodes=%d links=%d planId=%s"),
-			*OutPlan.AssetPath,
-			*OutPlan.GraphGuid,
-			*OutPlan.PackageRevision,
-			*OutPlan.GraphFingerprint,
-			*OutPlan.VariablesFingerprintBefore,
-			OutPlan.VariableCountBefore,
-			OutPlan.NodeCount,
-			OutPlan.LinkCount,
-			*OutPlan.PlanId);
-		return true;
-	}
-
-	TSharedRef<FJsonObject> MakeVariableJson(
-		const FString& Name,
-		const FString& Type,
-		const FString& DefaultValue,
-		const FGuid& Guid)
-	{
-		TSharedRef<FJsonObject> Item = MakeShared<FJsonObject>();
-		Item->SetStringField(TEXT("name"), Name);
-		Item->SetStringField(TEXT("type"), Type);
-		Item->SetStringField(TEXT("defaultValue"), DefaultValue);
-		Item->SetStringField(
-			TEXT("guid"),
-			Guid.ToString(EGuidFormats::DigitsWithHyphensLower));
-		return Item;
-	}
-
-	bool SameVariable(const FBPVariableDescription& Left, const FBPVariableDescription& Right)
-	{
-		return Left.VarGuid == Right.VarGuid
-			&& Left.VarName == Right.VarName
-			&& Left.DefaultValue.Equals(Right.DefaultValue, ESearchCase::CaseSensitive)
-			&& Left.PropertyFlags == Right.PropertyFlags
-			&& DescribePinType(Left.VarType) == DescribePinType(Right.VarType);
+		return Variable;
 	}
 }
 
-bool UEAgentKitBlueprintVariableExperimental::IsExperimentalWriteAvailable()
-{
-	if (bTestOverrideSet)
-	{
-		return bTestOverrideEnabled;
-	}
-	if (GConfig == nullptr)
-	{
-		return false;
-	}
-	bool bEnabled = false;
-	return GConfig->GetBool(
-			TEXT("UEAgentKit"),
-			TEXT("ExperimentalGraphPatchEdit"),
-			bEnabled,
-			GEngineIni)
-		&& bEnabled;
-}
-
-void UEAgentKitBlueprintVariableExperimental::SetExperimentalWriteEnabledForTest(const bool bEnabled)
-{
-	bTestOverrideSet = true;
-	bTestOverrideEnabled = bEnabled;
-}
-
-void UEAgentKitBlueprintVariableExperimental::ResetExperimentalWriteForTest()
-{
-	bTestOverrideSet = false;
-	bTestOverrideEnabled = false;
-}
-
-bool UEAgentKitBlueprintVariableExperimental::TryPreviewExperimental(
-	const TSharedPtr<FJsonObject>& Params,
-	TSharedPtr<FJsonObject>& OutResult,
+bool UEAgentKitBlueprintVariableExperimental::TryResolveAtomicVariableOperation(
+	UBlueprint* Blueprint,
+	FAtomicVariableOperation& InOutOperation,
 	FString& OutErrorCode,
 	FString& OutErrorMessage)
 {
-	UE_LOG(
-		LogUEAgentKitBlueprintVariableExperimental,
-		Display,
-		TEXT("TryPreviewExperimental received valid=%s fields=%d"),
-		Params.IsValid() ? TEXT("true") : TEXT("false"),
-		Params.IsValid() ? Params->Values.Num() : -1);
-
-	if (!RejectUnknownParams(
-			Params,
-			{ TEXT("assetPath"), TEXT("variables") },
-			OutErrorCode,
-			OutErrorMessage))
-	{
-		return false;
-	}
-
-	FVariablePlan Plan;
-	FPlanContext Context;
-	if (!BuildPlan(Params, Plan, Context, OutErrorCode, OutErrorMessage))
-	{
-		return false;
-	}
-
-	TArray<TSharedPtr<FJsonValue>> RequestedVariables;
-	for (const FVariableTarget& Target : Plan.Targets)
-	{
-		TSharedRef<FJsonObject> Item = MakeShared<FJsonObject>();
-		Item->SetStringField(TEXT("name"), Target.Name);
-		Item->SetStringField(TEXT("type"), Target.Type);
-		Item->SetStringField(TEXT("defaultValue"), Target.DefaultValue);
-		RequestedVariables.Add(MakeShared<FJsonValueObject>(Item));
-	}
-
-	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
-	Result->SetStringField(TEXT("schemaVersion"), PreviewSchemaVersion);
-	Result->SetStringField(TEXT("action"), TEXT("preview-experimental-blueprint-variables"));
-	Result->SetBoolField(TEXT("experimental"), true);
-	Result->SetBoolField(TEXT("readOnly"), true);
-	Result->SetBoolField(TEXT("wroteBlueprint"), false);
-	Result->SetBoolField(TEXT("savedPackage"), false);
-	Result->SetBoolField(TEXT("compiled"), false);
-	Result->SetBoolField(TEXT("skeletonRegenerated"), false);
-	Result->SetBoolField(TEXT("requiresExplicitCompile"), true);
-	Result->SetStringField(TEXT("source"), TEXT("focused-blueprint-editor"));
-	Result->SetStringField(TEXT("assetPath"), Plan.AssetPath);
-	Result->SetStringField(TEXT("graphGuid"), Plan.GraphGuid);
-	Result->SetStringField(TEXT("packageRevision"), Plan.PackageRevision);
-	Result->SetStringField(TEXT("graphFingerprint"), Plan.GraphFingerprint);
-	Result->SetStringField(TEXT("variablesFingerprint"), Plan.VariablesFingerprintBefore);
-	Result->SetNumberField(TEXT("variableCountBefore"), Plan.VariableCountBefore);
-	Result->SetNumberField(TEXT("nodeCount"), Plan.NodeCount);
-	Result->SetNumberField(TEXT("linkCount"), Plan.LinkCount);
-	Result->SetNumberField(TEXT("createCount"), Plan.Targets.Num());
-	Result->SetArrayField(TEXT("variables"), RequestedVariables);
-	Result->SetStringField(TEXT("planId"), Plan.PlanId);
-	Result->SetStringField(
-		TEXT("requiredConfirmation"),
-		FString(ApplyConfirmationPrefix) + Plan.PlanId);
-	OutResult = Result;
-	return true;
-}
-
-bool UEAgentKitBlueprintVariableExperimental::TryApplyExperimental(
-	const TSharedPtr<FJsonObject>& Params,
-	TSharedPtr<FJsonObject>& OutResult,
-	FString& OutErrorCode,
-	FString& OutErrorMessage)
-{
-	UE_LOG(
-		LogUEAgentKitBlueprintVariableExperimental,
-		Display,
-		TEXT("TryApplyExperimental received valid=%s fields=%d"),
-		Params.IsValid() ? TEXT("true") : TEXT("false"),
-		Params.IsValid() ? Params->Values.Num() : -1);
-
-	if (!RejectUnknownParams(
-			Params,
-			{ TEXT("assetPath"), TEXT("planId"), TEXT("variables"), TEXT("confirmation") },
-			OutErrorCode,
-			OutErrorMessage))
-	{
-		return false;
-	}
-
-	FString RequestedPlanId;
-	FString Confirmation;
-	if (!ReadString(
-			Params,
-			TEXT("planId"),
-			RequestedPlanId,
-			OutErrorCode,
-			OutErrorMessage,
-			80)
-		|| !IsSha256Text(RequestedPlanId)
-		|| !ReadString(
-			Params,
-			TEXT("confirmation"),
-			Confirmation,
-			OutErrorCode,
-			OutErrorMessage,
-			256))
-	{
-		if (OutErrorCode.IsEmpty())
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("blueprint-variable-invalid-identifier"),
-				TEXT("planId must be one canonical sha256 plan hash."));
-		}
-		return false;
-	}
-
-	FVariablePlan Plan;
-	FPlanContext Context;
-	if (!BuildPlan(Params, Plan, Context, OutErrorCode, OutErrorMessage))
-	{
-		return false;
-	}
-
-	const FString ExpectedConfirmation = FString(ApplyConfirmationPrefix) + RequestedPlanId;
-	if (!Confirmation.Equals(ExpectedConfirmation, ESearchCase::CaseSensitive))
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("blueprint-variable-confirmation-required"),
-			FString::Printf(
-				TEXT("Explicit Apply confirmation must be exactly %s."),
-				*ExpectedConfirmation));
-	}
-	if (!Plan.PlanId.Equals(RequestedPlanId, ESearchCase::CaseSensitive))
-	{
-		UE_LOG(
-			LogUEAgentKitBlueprintVariableExperimental,
-			Warning,
-			TEXT("Variable plan stale: requested=%s computed=%s revision=%s graphFingerprint=%s variablesFingerprint=%s"),
-			*RequestedPlanId,
-			*Plan.PlanId,
-			*Plan.PackageRevision,
-			*Plan.GraphFingerprint,
-			*Plan.VariablesFingerprintBefore);
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("blueprint-variable-plan-stale"),
-			TEXT("The Blueprint variable plan is stale; run Preview again."));
-	}
-
-	UBlueprint* Blueprint = Context.Blueprint;
-	UEdGraph* Graph = Context.Graph;
-	TSet<FName> ExistingNames;
-	CollectExistingVariableNames(Blueprint, ExistingNames);
-	for (const FVariableTarget& Target : Plan.Targets)
-	{
-		if (ExistingNames.Contains(Target.NameValue))
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("blueprint-variable-duplicate-name"),
-				FString::Printf(
-					TEXT("The Blueprint already declares a variable named %s."),
-					*Target.Name));
-		}
-	}
-
-	const TArray<FBPVariableDescription> BeforeVariables = Blueprint->NewVariables;
-	const FString FingerprintBefore = ComputeVariablesFingerprint(Blueprint);
-	const int32 NodeCountBefore = Graph->Nodes.Num();
-	const int32 LinkCountBefore = CountLinks(Graph);
-	TArray<FGuid> CreatedGuids;
-	CreatedGuids.Reserve(Plan.Targets.Num());
-
-	{
-		FScopedTransaction Transaction(
-			FText::FromString(TEXT("UEAgentKit Create Blueprint Variables")));
-		Blueprint->Modify();
-		TArray<FName> AddedNames;
-		auto Rollback = [Blueprint, &AddedNames]()
-		{
-			for (int32 Index = Blueprint->NewVariables.Num() - 1; Index >= 0; --Index)
-			{
-				if (AddedNames.Contains(Blueprint->NewVariables[Index].VarName))
-				{
-					Blueprint->NewVariables.RemoveAt(Index);
-				}
-			}
-			AddedNames.Reset();
-		};
-
-		for (const FVariableTarget& Target : Plan.Targets)
-		{
-			if (FindVariableIndex(Blueprint, Target.NameValue) != INDEX_NONE)
-			{
-				Rollback();
-				Transaction.Cancel();
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("blueprint-variable-duplicate-name"),
-					FString::Printf(
-						TEXT("The Blueprint already declares a variable named %s."),
-						*Target.Name));
-			}
-			FBPVariableDescription Variable;
-			Variable.VarName = Target.NameValue;
-			Variable.VarGuid = FGuid::NewGuid();
-			Variable.VarType = Target.PinType;
-			Variable.FriendlyName = FName::NameToDisplayString(
-				Target.Name,
-				IsTypeToken(Target.Type, TEXT("bool")));
-			Variable.PropertyFlags = CPF_Edit | CPF_BlueprintVisible | CPF_DisableEditOnInstance;
-			Variable.ReplicationCondition = COND_None;
-			Variable.Category = UEdGraphSchema_K2::VR_DefaultCategory;
-			Variable.DefaultValue = Target.DefaultValue;
-			if (IsTypeToken(Target.Type, TEXT("string")))
-			{
-				Variable.SetMetaData(TEXT("MultiLine"), TEXT("true"));
-			}
-			Blueprint->NewVariables.Add(Variable);
-			AddedNames.Add(Target.NameValue);
-			CreatedGuids.Add(Variable.VarGuid);
-		}
-		FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
-	}
-
-	const FString FingerprintAfter = ComputeVariablesFingerprint(Blueprint);
-	const int32 VariableCountAfter = Blueprint->NewVariables.Num();
-	const int32 ExpectedCountAfter = BeforeVariables.Num() + Plan.Targets.Num();
-	auto FailReadback = [&OutErrorCode, &OutErrorMessage]() -> bool
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("blueprint-variable-readback-failed"),
-			TEXT("Post-Apply Blueprint variable readback failed."));
-	};
-	if (FingerprintAfter.IsEmpty() || VariableCountAfter != ExpectedCountAfter)
-	{
-		return FailReadback();
-	}
-	for (int32 Index = 0; Index < Plan.Targets.Num(); ++Index)
-	{
-		const FVariableTarget& Target = Plan.Targets[Index];
-		const FBPVariableDescription& Created = Blueprint->NewVariables[BeforeVariables.Num() + Index];
-		if (Created.VarName != Target.NameValue
-			|| Created.VarGuid != CreatedGuids[Index]
-			|| !MatchesDeclaredType(Created.VarType, Target.Type)
-			|| !Created.DefaultValue.Equals(Target.DefaultValue, ESearchCase::CaseSensitive)
-			|| (Created.PropertyFlags & (CPF_Edit | CPF_BlueprintVisible)) != (CPF_Edit | CPF_BlueprintVisible))
-		{
-			return FailReadback();
-		}
-		if (IsTypeToken(Target.Type, TEXT("string"))
-			&& Created.FindMetaDataEntryIndexForKey(TEXT("MultiLine")) == INDEX_NONE)
-		{
-			return FailReadback();
-		}
-	}
-	for (int32 Index = 0; Index < BeforeVariables.Num(); ++Index)
-	{
-		if (!SameVariable(BeforeVariables[Index], Blueprint->NewVariables[Index]))
-		{
-			return FailReadback();
-		}
-	}
-
-	bool bUndoVerified = GEditor->UndoTransaction()
-		&& ComputeVariablesFingerprint(Blueprint).Equals(FingerprintBefore, ESearchCase::CaseSensitive)
-		&& Blueprint->NewVariables.Num() == BeforeVariables.Num();
-	if (!bUndoVerified)
-	{
-		if (GEditor->Trans != nullptr)
-		{
-			GEditor->UndoTransaction();
-		}
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("blueprint-variable-undo-redo-failed"),
-			TEXT("Undo did not restore the exact Blueprint variable state."));
-	}
-	bool bRedoVerified = GEditor->RedoTransaction()
-		&& ComputeVariablesFingerprint(Blueprint).Equals(FingerprintAfter, ESearchCase::CaseSensitive)
-		&& Blueprint->NewVariables.Num() == VariableCountAfter;
-	if (bRedoVerified)
-	{
-		for (int32 Index = 0; Index < Plan.Targets.Num(); ++Index)
-		{
-			const FBPVariableDescription& Created = Blueprint->NewVariables[BeforeVariables.Num() + Index];
-			if (Created.VarGuid != CreatedGuids[Index]
-				|| !Created.DefaultValue.Equals(
-					Plan.Targets[Index].DefaultValue,
-					ESearchCase::CaseSensitive))
-			{
-				bRedoVerified = false;
-				break;
-			}
-		}
-	}
-	if (!bRedoVerified)
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("blueprint-variable-undo-redo-failed"),
-			TEXT("Redo did not restore the exact created Blueprint variables."));
-	}
-
-	TSharedPtr<FJsonObject> PostPreflight;
-	if (!UEAgentKitBlueprintGraphLayout::BuildFocusedEditorPreflight(
-			PostPreflight,
-			OutErrorCode,
-			OutErrorMessage))
-	{
-		return false;
-	}
-	if (!PostPreflight->GetBoolField(TEXT("packageDirty")))
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("blueprint-variable-readback-failed"),
-			TEXT("The Blueprint package is not dirty after the variable Apply."));
-	}
-	if (!PostPreflight->GetStringField(TEXT("graphFingerprint"))
-			.Equals(Plan.GraphFingerprint, ESearchCase::CaseSensitive)
-		|| Graph->Nodes.Num() != NodeCountBefore
-		|| CountLinks(Graph) != LinkCountBefore)
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("blueprint-variable-graph-changed"),
-			TEXT("The focused graph changed while creating variables."));
-	}
-
-	if (RecentVariableApplies.Num() > 16)
-	{
-		RecentVariableApplies.Reset();
-	}
-	FVariableReceipt Receipt;
-	Receipt.AssetPath = Plan.AssetPath;
-	Receipt.PackageRevision = Plan.PackageRevision;
-	Receipt.VariablesFingerprint = FingerprintAfter;
-	Receipt.VariableCount = VariableCountAfter;
-	for (int32 Index = 0; Index < Plan.Targets.Num(); ++Index)
-	{
-		Receipt.CreatedVariables.Emplace(
-			Plan.Targets[Index].Name,
-			CreatedGuids[Index].ToString(EGuidFormats::DigitsWithHyphensLower));
-	}
-	RecentVariableApplies.Add(Plan.PlanId, Receipt);
-
-	TArray<TSharedPtr<FJsonValue>> CreatedVariables;
-	for (int32 Index = 0; Index < Plan.Targets.Num(); ++Index)
-	{
-		CreatedVariables.Add(MakeShared<FJsonValueObject>(MakeVariableJson(
-			Plan.Targets[Index].Name,
-			Plan.Targets[Index].Type,
-			Plan.Targets[Index].DefaultValue,
-			CreatedGuids[Index])));
-	}
-
-	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
-	Result->SetStringField(TEXT("schemaVersion"), ApplySchemaVersion);
-	Result->SetStringField(TEXT("action"), TEXT("apply-experimental-blueprint-variables"));
-	Result->SetBoolField(TEXT("experimental"), true);
-	Result->SetBoolField(TEXT("applied"), true);
-	Result->SetBoolField(TEXT("singleTransaction"), true);
-	Result->SetBoolField(TEXT("undoVerified"), bUndoVerified);
-	Result->SetBoolField(TEXT("redoVerified"), bRedoVerified);
-	Result->SetBoolField(TEXT("saved"), false);
-	Result->SetBoolField(TEXT("compiled"), false);
-	Result->SetBoolField(TEXT("skeletonRegenerated"), false);
-	Result->SetBoolField(TEXT("requiresExplicitCompile"), true);
-	Result->SetBoolField(TEXT("autoSave"), false);
-	Result->SetStringField(TEXT("source"), TEXT("focused-blueprint-editor"));
-	Result->SetStringField(TEXT("planId"), Plan.PlanId);
-	Result->SetStringField(TEXT("assetPath"), Plan.AssetPath);
-	Result->SetStringField(TEXT("graphGuid"), Plan.GraphGuid);
-	Result->SetStringField(TEXT("confirmation"), Confirmation);
-	Result->SetStringField(TEXT("packageRevision"), Plan.PackageRevision);
-	Result->SetStringField(TEXT("graphFingerprintAfter"), Plan.GraphFingerprint);
-	Result->SetStringField(TEXT("variablesFingerprintBefore"), FingerprintBefore);
-	Result->SetStringField(TEXT("variablesFingerprintAfter"), FingerprintAfter);
-	Result->SetNumberField(TEXT("variableCountBefore"), BeforeVariables.Num());
-	Result->SetNumberField(TEXT("variableCountAfter"), VariableCountAfter);
-	Result->SetNumberField(TEXT("createCount"), Plan.Targets.Num());
-	Result->SetBoolField(TEXT("packageDirty"), true);
-	Result->SetStringField(TEXT("blueprintStatus"), TEXT("dirty"));
-	Result->SetNumberField(TEXT("nodeCount"), NodeCountBefore);
-	Result->SetNumberField(TEXT("linkCount"), LinkCountBefore);
-	Result->SetArrayField(TEXT("createdVariables"), CreatedVariables);
-	Result->SetStringField(
-		TEXT("requiredSaveConfirmation"),
-		FString(SaveConfirmationPrefix) + Plan.PlanId);
-	OutResult = Result;
-	return true;
-}
-
-bool UEAgentKitBlueprintVariableExperimental::TrySaveExperimental(
-	const TSharedPtr<FJsonObject>& Params,
-	TSharedPtr<FJsonObject>& OutResult,
-	FString& OutErrorCode,
-	FString& OutErrorMessage)
-{
-	UE_LOG(
-		LogUEAgentKitBlueprintVariableExperimental,
-		Display,
-		TEXT("TrySaveExperimental received valid=%s fields=%d"),
-		Params.IsValid() ? TEXT("true") : TEXT("false"),
-		Params.IsValid() ? Params->Values.Num() : -1);
-
-	if (!RejectUnknownParams(
-			Params,
-			{
-				TEXT("assetPath"),
-				TEXT("planId"),
-				TEXT("expectedVariablesFingerprint"),
-				TEXT("expectedPackageRevision"),
-				TEXT("expectedVariableCount"),
-				TEXT("confirmation"),
-			},
-			OutErrorCode,
-			OutErrorMessage))
-	{
-		return false;
-	}
-
-	FString AssetPath;
-	FString PlanId;
-	FString ExpectedFingerprint;
-	FString ExpectedRevision;
-	int32 ExpectedCount = 0;
-	FString Confirmation;
-	if (!ReadString(Params, TEXT("assetPath"), AssetPath, OutErrorCode, OutErrorMessage, 512)
-		|| !ReadString(Params, TEXT("planId"), PlanId, OutErrorCode, OutErrorMessage, 80)
-		|| !ReadString(
-			Params,
-			TEXT("expectedVariablesFingerprint"),
-			ExpectedFingerprint,
-			OutErrorCode,
-			OutErrorMessage,
-			71)
-		|| !ReadString(
-			Params,
-			TEXT("expectedPackageRevision"),
-			ExpectedRevision,
-			OutErrorCode,
-			OutErrorMessage,
-			71)
-		|| !ReadCount(
-			Params,
-			TEXT("expectedVariableCount"),
-			ExpectedCount,
-			OutErrorCode,
-			OutErrorMessage)
-		|| !ReadString(Params, TEXT("confirmation"), Confirmation, OutErrorCode, OutErrorMessage, 256))
-	{
-		return false;
-	}
-	if (!IsSha256Text(PlanId) || !IsSha256Text(ExpectedFingerprint) || !IsSha256Text(ExpectedRevision))
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("blueprint-variable-invalid-identifier"),
-			TEXT("planId, expectedVariablesFingerprint and expectedPackageRevision must be canonical sha256 values."));
-	}
-	if (!UEAgentKitBlueprintVariableExperimental::IsExperimentalWriteAvailable())
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("blueprint-variable-experimental-disabled"),
-			TEXT("Experimental Blueprint variable Save is not opted in for this project."));
-	}
-	const FString ExpectedConfirmation = FString(SaveConfirmationPrefix) + PlanId;
-	if (!Confirmation.Equals(ExpectedConfirmation, ESearchCase::CaseSensitive))
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("blueprint-variable-confirmation-required"),
-			FString::Printf(
-				TEXT("Explicit Save confirmation must be exactly %s."),
-				*ExpectedConfirmation));
-	}
-	const FVariableReceipt* Receipt = RecentVariableApplies.Find(PlanId);
-	if (Receipt == nullptr)
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("blueprint-variable-save-requires-apply"),
-			TEXT("Save requires the exact successful Apply receipt in this Editor process."));
-	}
-	if (!Receipt->AssetPath.Equals(AssetPath, ESearchCase::CaseSensitive))
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("blueprint-variable-save-plan-mismatch"),
-			TEXT("The Save assetPath does not match the Apply receipt."));
-	}
-	if (GEditor == nullptr || GEditor->IsPlaySessionInProgress() || GEditor->PlayWorld != nullptr)
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("blueprint-variable-pie-active"),
-			TEXT("Blueprint variable Save is unavailable while PIE or SIE is active."));
-	}
-
-	TSharedPtr<FJsonObject> Preflight;
-	if (!UEAgentKitBlueprintGraphLayout::BuildFocusedEditorPreflight(
-			Preflight,
-			OutErrorCode,
-			OutErrorMessage))
-	{
-		return false;
-	}
-	if (!Preflight->GetStringField(TEXT("assetPath")).Equals(AssetPath, ESearchCase::CaseSensitive))
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("blueprint-variable-focused-blueprint-mismatch"),
-			TEXT("The focused Blueprint editor is not showing the exact assetPath from the request."));
-	}
-	if (!Preflight->GetBoolField(TEXT("packageDirty")))
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("blueprint-variable-save-plan-mismatch"),
-			TEXT("The Blueprint package has no unsaved Apply to save."));
-	}
-	if (!Preflight->GetStringField(TEXT("packageRevision"))
-			.Equals(ExpectedRevision, ESearchCase::CaseSensitive)
-		|| !Receipt->PackageRevision.Equals(ExpectedRevision, ESearchCase::CaseSensitive))
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("blueprint-variable-save-revision-mismatch"),
-			TEXT("The on-disk Blueprint package revision changed after Apply."));
-	}
-
-	UBlueprint* Blueprint = nullptr;
-	UEdGraph* Graph = nullptr;
-	if (!UEAgentKitBlueprintGraphLayout::ResolveExactTarget(
-			AssetPath,
-			Preflight->GetStringField(TEXT("graphGuid")),
-			Blueprint,
-			Graph,
-			OutErrorCode,
-			OutErrorMessage))
-	{
-		return false;
-	}
 	if (Blueprint == nullptr)
 	{
 		return Fail(
 			OutErrorCode,
 			OutErrorMessage,
 			TEXT("blueprint-variable-asset-not-loaded"),
-			TEXT("The exact Blueprint asset is not loaded."));
+			TEXT("The exact Blueprint must be loaded before a variable can be resolved."));
 	}
-	const FString CurrentFingerprint = ComputeVariablesFingerprint(Blueprint);
-	if (!CurrentFingerprint.Equals(ExpectedFingerprint, ESearchCase::CaseSensitive)
-		|| !Receipt->VariablesFingerprint.Equals(ExpectedFingerprint, ESearchCase::CaseSensitive))
+	if (!IsCanonicalVariableName(InOutOperation.Name))
 	{
 		return Fail(
 			OutErrorCode,
 			OutErrorMessage,
-			TEXT("blueprint-variable-save-plan-mismatch"),
-			TEXT("The live Blueprint variable state no longer matches the Apply receipt."));
+			TEXT("blueprint-variable-name-invalid"),
+			FString::Printf(
+				TEXT("name must be 1-%d ASCII letters, digits or '_' and start with a letter or '_'."),
+				MaxVariableName));
 	}
-	if (Blueprint->NewVariables.Num() != ExpectedCount || Receipt->VariableCount != ExpectedCount)
+	FEdGraphPinType PinType;
+	if (!MakePinType(InOutOperation.Type, PinType))
 	{
 		return Fail(
 			OutErrorCode,
 			OutErrorMessage,
-			TEXT("blueprint-variable-save-plan-mismatch"),
-			TEXT("The live Blueprint variable count no longer matches the Apply receipt."));
+			TEXT("blueprint-variable-type-not-allowed"),
+			TEXT("Supported variable types: bool, int, double, string."));
 	}
-	for (const TPair<FString, FString>& Created : Receipt->CreatedVariables)
-	{
-		const int32 Index = FindVariableIndex(Blueprint, FName(*Created.Key));
-		if (Index == INDEX_NONE
-			|| !Blueprint->NewVariables[Index]
-					.VarGuid.ToString(EGuidFormats::DigitsWithHyphensLower)
-					.Equals(Created.Value, ESearchCase::CaseSensitive))
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("blueprint-variable-save-plan-mismatch"),
-				TEXT("A created Blueprint variable was renamed, removed or recreated after Apply."));
-		}
-	}
-
-	UPackage* Package = Blueprint->GetOutermost();
-	if (Package == nullptr)
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("blueprint-variable-package-invalid"),
-			TEXT("The exact Blueprint has no owner package."));
-	}
-	FString Filename;
-	if (!FPackageName::TryConvertLongPackageNameToFilename(
-			Package->GetName(),
-			Filename,
-			FPackageName::GetAssetPackageExtension()))
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("blueprint-variable-package-invalid"),
-			TEXT("The exact Blueprint package filename cannot be resolved."));
-	}
-	if (!IFileManager::Get().FileExists(*Filename))
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("blueprint-variable-save-package-file-missing"),
-			TEXT("The exact Blueprint package file does not exist on disk."));
-	}
-	const int64 FileSizeBefore = IFileManager::Get().FileSize(*Filename);
-	FString DigestBefore;
-	if (!FBlueprintContextSha256::HashFile(Filename, DigestBefore))
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("blueprint-variable-save-hash-failed"),
-			TEXT("The Blueprint package could not be hashed before saving."));
-	}
-
-	FSavePackageArgs SaveArgs;
-	SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
-	SaveArgs.SaveFlags = SAVE_NoError;
-	if (!UPackage::SavePackage(Package, Blueprint, *Filename, SaveArgs) || Package->IsDirty())
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("blueprint-variable-save-failed"),
-			TEXT("SavePackage did not confirm a clean saved package."));
-	}
-	FString AssetDigest;
-	if (!FBlueprintContextSha256::HashFile(Filename, AssetDigest))
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("blueprint-variable-save-hash-failed"),
-			TEXT("The saved Blueprint package could not be hashed."));
-	}
-	const int64 FileSizeAfter = IFileManager::Get().FileSize(*Filename);
-	if (FileSizeAfter <= 0)
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("blueprint-variable-save-readback-failed"),
-			TEXT("The saved Blueprint package file is empty."));
-	}
-	const FString PostSaveFingerprint = ComputeVariablesFingerprint(Blueprint);
-	if (!PostSaveFingerprint.Equals(ExpectedFingerprint, ESearchCase::CaseSensitive)
-		|| Blueprint->NewVariables.Num() != ExpectedCount)
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("blueprint-variable-save-readback-failed"),
-			TEXT("The live Blueprint variable state changed while saving."));
-	}
-
-	TSharedPtr<FJsonObject> PostSavePreflight;
-	if (!UEAgentKitBlueprintGraphLayout::BuildFocusedEditorPreflight(
-			PostSavePreflight,
+	if (!CanonicalizeDefaultValue(
+			InOutOperation.Type,
+			InOutOperation.DefaultValue,
 			OutErrorCode,
 			OutErrorMessage))
 	{
 		return false;
 	}
-	if (PostSavePreflight->GetBoolField(TEXT("packageDirty")))
+	// Same duplicate rule as the single writer's BuildPlan: own variables, class
+	// variables, parent Blueprint variables and parent-class properties.
+	TSet<FName> ExistingNames;
+	CollectExistingVariableNames(Blueprint, ExistingNames);
+	const FName NameValue(*InOutOperation.Name);
+	InOutOperation.bExistedBefore =
+		ExistingNames.Contains(NameValue) || FindVariableIndex(Blueprint, NameValue) != INDEX_NONE;
+	if (InOutOperation.bExistedBefore)
 	{
 		return Fail(
 			OutErrorCode,
 			OutErrorMessage,
-			TEXT("blueprint-variable-save-readback-failed"),
-			TEXT("The Blueprint package is still dirty after saving."));
+			TEXT("blueprint-variable-duplicate-name"),
+			FString::Printf(
+				TEXT("The Blueprint already declares a variable named %s (including parent classes)."),
+				*InOutOperation.Name));
 	}
+	return true;
+}
 
-	TArray<TSharedPtr<FJsonValue>> SavedVariables;
-	for (const TPair<FString, FString>& Created : Receipt->CreatedVariables)
+bool UEAgentKitBlueprintVariableExperimental::TryApplyAtomicVariableOperations(
+	UBlueprint* Blueprint,
+	const TArray<FAtomicVariableOperation>& Operations,
+	TArray<FGuid>& OutCreatedGuids,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	OutCreatedGuids.Reset();
+	if (Blueprint == nullptr)
 	{
-		const int32 Index = FindVariableIndex(Blueprint, FName(*Created.Key));
-		if (Index != INDEX_NONE)
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("blueprint-variable-asset-not-loaded"),
+			TEXT("The exact Blueprint must be loaded before a variable can be created."));
+	}
+	TArray<FName> AddedNames;
+	auto RestoreApplied = [Blueprint, &AddedNames, &OutCreatedGuids]()
+	{
+		for (int32 Index = Blueprint->NewVariables.Num() - 1; Index >= 0; --Index)
 		{
-			const FBPVariableDescription& Saved = Blueprint->NewVariables[Index];
-			SavedVariables.Add(MakeShared<FJsonValueObject>(MakeVariableJson(
-				Saved.VarName.ToString(),
-				DescribePinType(Saved.VarType),
-				Saved.DefaultValue,
-				Saved.VarGuid)));
+			if (AddedNames.Contains(Blueprint->NewVariables[Index].VarName))
+			{
+				Blueprint->NewVariables.RemoveAt(Index);
+			}
+		}
+		AddedNames.Reset();
+		// The seam restored everything it wrote itself, so the caller was left
+		// with nothing applied.
+		OutCreatedGuids.Reset();
+	};
+
+	for (const FAtomicVariableOperation& Operation : Operations)
+	{
+		const FName NameValue(*Operation.Name);
+		if (FindVariableIndex(Blueprint, NameValue) != INDEX_NONE)
+		{
+			RestoreApplied();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("blueprint-variable-duplicate-name"),
+				FString::Printf(
+					TEXT("The Blueprint already declares a variable named %s."),
+					*Operation.Name));
+		}
+		FEdGraphPinType PinType;
+		if (!MakePinType(Operation.Type, PinType))
+		{
+			RestoreApplied();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("blueprint-variable-type-not-allowed"),
+				TEXT("Supported variable types: bool, int, double, string."));
+		}
+		const FBPVariableDescription Variable = MakeVariableDescription(Operation);
+		Blueprint->NewVariables.Add(Variable);
+		AddedNames.Add(NameValue);
+		const FBPVariableDescription& Added = Blueprint->NewVariables.Last();
+		if (Added.VarName != NameValue
+			|| Added.VarGuid != Variable.VarGuid
+			|| !MatchesDeclaredType(Added.VarType, Operation.Type)
+			|| !Added.DefaultValue.Equals(Operation.DefaultValue, ESearchCase::CaseSensitive))
+		{
+			RestoreApplied();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("blueprint-variable-apply-rejected"),
+				FString::Printf(
+					TEXT("The Blueprint did not store the requested variable %s."),
+					*Operation.Name));
+		}
+		OutCreatedGuids.Add(Variable.VarGuid);
+	}
+	FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+	return true;
+}
+
+bool UEAgentKitBlueprintVariableExperimental::TryCheckAtomicVariableOperations(
+	UBlueprint* Blueprint,
+	const TArray<FAtomicVariableOperation>& Operations,
+	bool bExpectAfter,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	if (Blueprint == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("blueprint-variable-asset-not-loaded"),
+			TEXT("The exact Blueprint must be loaded before a variable can be read back."));
+	}
+	for (const FAtomicVariableOperation& Operation : Operations)
+	{
+		const int32 Index = FindVariableIndex(Blueprint, FName(*Operation.Name));
+		if (!bExpectAfter)
+		{
+			if (Operation.bExistedBefore)
+			{
+				// The variable belongs to the Blueprint and predates this operation;
+				// nothing about it is this layer's to check.
+				continue;
+			}
+			if (Index != INDEX_NONE)
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("blueprint-variable-readback-failed"),
+					FString::Printf(
+						TEXT("Variable %s still exists, but it did not exist before."),
+						*Operation.Name));
+			}
+			continue;
+		}
+		if (Index == INDEX_NONE)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("blueprint-variable-readback-failed"),
+				FString::Printf(
+					TEXT("Variable %s does not exist after the write."),
+					*Operation.Name));
+		}
+		const FBPVariableDescription& Variable = Blueprint->NewVariables[Index];
+		if (!MatchesDeclaredType(Variable.VarType, Operation.Type))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("blueprint-variable-readback-failed"),
+				FString::Printf(
+					TEXT("Variable %s reads back as %s; expected %s."),
+					*Operation.Name,
+					*DescribePinType(Variable.VarType),
+					*Operation.Type));
+		}
+		if (!Variable.DefaultValue.Equals(Operation.DefaultValue, ESearchCase::CaseSensitive))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("blueprint-variable-readback-failed"),
+				FString::Printf(
+					TEXT("Variable %s reads back with default '%s'; expected '%s'."),
+					*Operation.Name,
+					*Variable.DefaultValue,
+					*Operation.DefaultValue));
+		}
+		if (IsTypeToken(Operation.Type, TEXT("string"))
+			&& Variable.FindMetaDataEntryIndexForKey(TEXT("MultiLine")) == INDEX_NONE)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("blueprint-variable-readback-failed"),
+				FString::Printf(
+					TEXT("String variable %s lost its MultiLine metadata."),
+					*Operation.Name));
 		}
 	}
-
-	TSharedRef<FJsonObject> Readback = MakeShared<FJsonObject>();
-	Readback->SetStringField(TEXT("assetPath"), AssetPath);
-	Readback->SetStringField(TEXT("graphGuid"), Preflight->GetStringField(TEXT("graphGuid")));
-	Readback->SetStringField(TEXT("assetSha256"), FString(TEXT("sha256:")) + AssetDigest);
-	Readback->SetStringField(
-		TEXT("packageRevision"),
-		PostSavePreflight->GetStringField(TEXT("packageRevision")));
-	Readback->SetStringField(TEXT("variablesFingerprint"), PostSaveFingerprint);
-	Readback->SetNumberField(TEXT("variableCount"), Blueprint->NewVariables.Num());
-	Readback->SetStringField(TEXT("sha256Before"), FString(TEXT("sha256:")) + DigestBefore);
-	Readback->SetBoolField(TEXT("packageDirty"), false);
-	Readback->SetBoolField(TEXT("independentReloadVerified"), false);
-
-	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
-	Result->SetStringField(TEXT("schemaVersion"), SaveSchemaVersion);
-	Result->SetStringField(TEXT("action"), TEXT("save-experimental-blueprint-variables"));
-	Result->SetBoolField(TEXT("experimental"), true);
-	Result->SetStringField(TEXT("assetPath"), AssetPath);
-	Result->SetStringField(TEXT("graphGuid"), Preflight->GetStringField(TEXT("graphGuid")));
-	Result->SetStringField(TEXT("planId"), PlanId);
-	Result->SetStringField(TEXT("confirmation"), Confirmation);
-	Result->SetStringField(TEXT("assetSha256"), FString(TEXT("sha256:")) + AssetDigest);
-	Result->SetStringField(
-		TEXT("packageRevision"),
-		PostSavePreflight->GetStringField(TEXT("packageRevision")));
-	Result->SetStringField(TEXT("variablesFingerprint"), PostSaveFingerprint);
-	Result->SetNumberField(TEXT("variableCount"), Blueprint->NewVariables.Num());
-	Result->SetNumberField(TEXT("createCount"), SavedVariables.Num());
-	Result->SetBoolField(TEXT("saved"), true);
-	Result->SetBoolField(TEXT("packageDirty"), false);
-	Result->SetBoolField(TEXT("readbackVerified"), true);
-	Result->SetBoolField(TEXT("independentReloadVerified"), false);
-	Result->SetStringField(TEXT("requiredAcceptanceEvidence"), TEXT("independent-reload"));
-	Result->SetNumberField(TEXT("fileSizeBefore"), static_cast<double>(FileSizeBefore));
-	Result->SetNumberField(TEXT("fileSizeAfter"), static_cast<double>(FileSizeAfter));
-	Result->SetBoolField(TEXT("autoSave"), false);
-	Result->SetBoolField(TEXT("compiled"), false);
-	Result->SetBoolField(TEXT("skeletonRegenerated"), false);
-	Result->SetBoolField(TEXT("requiresExplicitCompile"), true);
-	Result->SetArrayField(TEXT("variables"), SavedVariables);
-	Result->SetObjectField(TEXT("readback"), Readback);
-	RecentVariableApplies.Remove(PlanId);
-	OutResult = Result;
 	return true;
+}
+
+bool UEAgentKitBlueprintVariableExperimental::TryRestoreAtomicVariableOperations(
+	UBlueprint* Blueprint,
+	const TArray<FAtomicVariableOperation>& Operations,
+	int32 AppliedCount,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	const int32 Count = FMath::Clamp(AppliedCount, 0, Operations.Num());
+	if (Blueprint == nullptr || Count == 0)
+	{
+		return true;
+	}
+	for (int32 Index = Count - 1; Index >= 0; --Index)
+	{
+		const FAtomicVariableOperation& Operation = Operations[Index];
+		if (Operation.bExistedBefore)
+		{
+			// Never delete a variable this operation did not create.
+			continue;
+		}
+		const FName NameValue(*Operation.Name);
+		const int32 VariableIndex = FindVariableIndex(Blueprint, NameValue);
+		if (VariableIndex == INDEX_NONE)
+		{
+			// Already gone: there is nothing left to delete for this operation.
+			continue;
+		}
+		Blueprint->NewVariables.RemoveAt(VariableIndex);
+		if (FindVariableIndex(Blueprint, NameValue) != INDEX_NONE)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("blueprint-variable-restore-failed"),
+				FString::Printf(TEXT("Variable %s could not be removed."), *Operation.Name));
+		}
+	}
+	return true;
+}
+
+FString UEAgentKitBlueprintVariableExperimental::ComputeAtomicVariableStateFingerprint(
+	UBlueprint* Blueprint)
+{
+	return ComputeVariablesFingerprint(Blueprint);
 }

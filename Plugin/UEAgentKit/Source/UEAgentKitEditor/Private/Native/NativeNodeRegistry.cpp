@@ -1,5 +1,3 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
-
 #include "Native/NativeNodeRegistry.h"
 
 #include "Native/NativeCanonicalJson.h"
@@ -321,6 +319,215 @@ namespace
 		TMap<FString, ENativeTrust> ModuleTrust;
 	};
 
+	/** One lower-case haystack per descriptor, used by the catalog's server-side filter. */
+	FString DescriptorHaystack(const TSharedPtr<FJsonObject>& Descriptor)
+	{
+		if (!Descriptor.IsValid())
+		{
+			return FString();
+		}
+		TArray<FString> Parts;
+		auto AddString = [&Parts](const FString& Value)
+		{
+			if (!Value.IsEmpty())
+			{
+				Parts.Add(Value);
+			}
+		};
+		AddString(Descriptor->GetStringField(TEXT("actionId")));
+		AddString(Descriptor->GetStringField(TEXT("title")));
+		AddString(Descriptor->GetStringField(TEXT("menuName")));
+		AddString(Descriptor->GetStringField(TEXT("category")));
+		const TSharedPtr<FJsonObject>* DiscoveryKey = nullptr;
+		if (Descriptor->TryGetObjectField(TEXT("discoveryKey"), DiscoveryKey)
+			&& DiscoveryKey != nullptr
+			&& DiscoveryKey->IsValid())
+		{
+			AddString((*DiscoveryKey)->GetStringField(TEXT("nodeClass")));
+			AddString((*DiscoveryKey)->GetStringField(TEXT("spawnerClass")));
+			AddString((*DiscoveryKey)->GetStringField(TEXT("actionKind")));
+			const TSharedPtr<FJsonObject>* Payload = nullptr;
+			if ((*DiscoveryKey)->TryGetObjectField(TEXT("payload"), Payload)
+				&& Payload != nullptr
+				&& Payload->IsValid())
+			{
+				for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*Payload)->Values)
+				{
+					if (Pair.Value.IsValid() && Pair.Value->Type == EJson::String)
+					{
+						AddString(Pair.Value->AsString());
+					}
+				}
+			}
+		}
+		const TArray<TSharedPtr<FJsonValue>>* Keywords = nullptr;
+		if (Descriptor->TryGetArrayField(TEXT("keywords"), Keywords) && Keywords != nullptr)
+		{
+			for (const TSharedPtr<FJsonValue>& Keyword : *Keywords)
+			{
+				if (Keyword.IsValid() && Keyword->Type == EJson::String)
+				{
+					AddString(Keyword->AsString());
+				}
+			}
+		}
+		return FString::Join(Parts, TEXT(" ")).ToLower();
+	}
+
+	/**
+	 * The part of a spawner's identity that needs no template.
+	 *
+	 * bOutComplete is false for spawners whose discovery payload only exists on a
+	 * template node (cast target class, macro graph, whitelisted special nodes);
+	 * those must always be described, the rest can be skipped cheaply.
+	 */
+	void SpawnerCheapIdentity(UBlueprintNodeSpawner* Spawner, FString& OutText, bool& bOutComplete)
+	{
+		TArray<FString> Parts;
+		bOutComplete = true;
+		if (Spawner == nullptr || Spawner->NodeClass == nullptr)
+		{
+			bOutComplete = false;
+			OutText.Reset();
+			return;
+		}
+		Parts.Add(Spawner->NodeClass->GetPathName());
+		Parts.Add(Spawner->GetClass()->GetPathName());
+		if (const UBlueprintFunctionNodeSpawner* FunctionSpawner = Cast<UBlueprintFunctionNodeSpawner>(Spawner))
+		{
+			const UFunction* Function = FunctionSpawner->GetFunction();
+			if (Function == nullptr)
+			{
+				bOutComplete = false;
+			}
+			else
+			{
+				Parts.Add(Function->GetPathName());
+				Parts.Add(Function->GetName());
+			}
+		}
+		else if (const UBlueprintVariableNodeSpawner* VariableSpawner = Cast<UBlueprintVariableNodeSpawner>(Spawner))
+		{
+			const FProperty* Property = VariableSpawner->GetVarProperty();
+			if (Property == nullptr)
+			{
+				bOutComplete = false;
+			}
+			else
+			{
+				Parts.Add(Property->GetName());
+			}
+		}
+		else if (const UBlueprintBoundEventNodeSpawner* BoundSpawner = Cast<UBlueprintBoundEventNodeSpawner>(Spawner))
+		{
+			const FMulticastDelegateProperty* Delegate = BoundSpawner->GetEventDelegate();
+			if (Delegate == nullptr)
+			{
+				bOutComplete = false;
+			}
+			else
+			{
+				Parts.Add(Delegate->GetName());
+			}
+		}
+		else if (const UBlueprintEventNodeSpawner* EventSpawner = Cast<UBlueprintEventNodeSpawner>(Spawner))
+		{
+			const UFunction* EventFunction = EventSpawner->GetEventFunction();
+			if (EventFunction == nullptr)
+			{
+				bOutComplete = false;
+			}
+			else
+			{
+				Parts.Add(EventFunction->GetName());
+			}
+		}
+		else if (const UBlueprintDelegateNodeSpawner* DelegateSpawner = Cast<UBlueprintDelegateNodeSpawner>(Spawner))
+		{
+			const FMulticastDelegateProperty* Delegate = DelegateSpawner->GetDelegateProperty();
+			if (Delegate == nullptr)
+			{
+				bOutComplete = false;
+			}
+			else
+			{
+				Parts.Add(Delegate->GetName());
+			}
+		}
+		else if (const UBlueprintComponentNodeSpawner* ComponentSpawner = Cast<UBlueprintComponentNodeSpawner>(Spawner))
+		{
+			const UClass* ComponentClass = ComponentSpawner->GetComponentClass();
+			if (ComponentClass == nullptr)
+			{
+				bOutComplete = false;
+			}
+			else
+			{
+				Parts.Add(ComponentClass->GetPathName());
+			}
+		}
+		else
+		{
+			// Cast / macro / plain spawners: the payload comes from the template.
+			bOutComplete = false;
+		}
+		OutText = FString::Join(Parts, TEXT(" ")).ToLower();
+	}
+
+	bool QueryTokensMatch(const FString& Haystack, const FString& Query)
+	{
+		TArray<FString> Tokens;
+		Query.ToLower().ParseIntoArray(Tokens, TEXT(" "), true);
+		for (const FString& Token : Tokens)
+		{
+			if (!Token.IsEmpty() && !Haystack.Contains(Token))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * One descriptor against the catalog's optional filters.
+	 *
+	 * A query is a whitespace-separated AND over lower-case substrings, so
+	 * "cast pawn" narrows to the Pawn cast rather than to every cast.  The exact
+	 * action id / node class filters exist for the write path and for a caller
+	 * that already knows the identity it wants.
+	 */
+	bool DescriptorMatchesFilter(
+		const FNativeNodeDescriptorRecord& Record,
+		const FString& FilterActionId,
+		const FString& FilterNodeClass,
+		const FString& FilterQuery)
+	{
+		if (!FilterActionId.IsEmpty()
+			&& !Record.ActionId.Equals(FilterActionId, ESearchCase::CaseSensitive))
+		{
+			return false;
+		}
+		const TSharedPtr<FJsonObject>* DiscoveryKey = nullptr;
+		FString NodeClassPath;
+		if (Record.Descriptor.IsValid()
+			&& Record.Descriptor->TryGetObjectField(TEXT("discoveryKey"), DiscoveryKey)
+			&& DiscoveryKey != nullptr
+			&& DiscoveryKey->IsValid())
+		{
+			NodeClassPath = (*DiscoveryKey)->GetStringField(TEXT("nodeClass"));
+		}
+		if (!FilterNodeClass.IsEmpty()
+			&& !NodeClassPath.Equals(FilterNodeClass, ESearchCase::CaseSensitive))
+		{
+			return false;
+		}
+		if (FilterQuery.IsEmpty())
+		{
+			return true;
+		}
+		return QueryTokensMatch(DescriptorHaystack(Record.Descriptor), FilterQuery);
+	}
+
 	struct FBuildContext
 	{
 		FString DiscoveredAtUtc;
@@ -375,7 +582,16 @@ namespace
 		{
 			return Fail(OutResult, TEXT("node-class-unavailable"));
 		}
-		if (Trust != ENativeTrust::Official)
+		// Official engine spawners are always described.  Phase A also needs the
+		// project's own functions: a project module's UFUNCTION (and a Blueprint's
+		// own function) is exposed as a plain UBlueprintFunctionNodeSpawner whose
+		// customize delegate only resolves the reflected function, so describing it
+		// touches nothing but a transient template node.  Everything else owned by
+		// the project or a third party stays out -- their spawners may require
+		// editor context this surface does not have.
+		const bool bProjectFunctionSpawner = Trust == ENativeTrust::Project
+			&& Spawner->IsA<UBlueprintFunctionNodeSpawner>();
+		if (Trust != ENativeTrust::Official && !bProjectFunctionSpawner)
 		{
 			// Never touch templates for project / third-party / unknown owners.
 			return Fail(OutResult, TEXT("untrusted-spawner-excluded"));
@@ -763,7 +979,7 @@ namespace
 		Descriptor->SetObjectValue(TEXT("source"), Source);
 		Descriptor->SetObjectValue(TEXT("risk"), FNativeCanonicalValue::MakeString(TEXT("R2")));
 		Descriptor->SetObjectValue(TEXT("capability"), FNativeCanonicalValue::MakeString(TEXT("core")));
-		Descriptor->SetObjectValue(TEXT("trustLevel"), FNativeCanonicalValue::MakeString(TEXT("official")));
+		Descriptor->SetObjectValue(TEXT("trustLevel"), FNativeCanonicalValue::MakeString(TrustName(Trust)));
 
 		const FNativeCanonicalValueRef DigestProjection =
 			Descriptor->CloneWithoutKeys({ TEXT("descriptorDigest") })->CloneWithoutNestedKey(TEXT("source"), TEXT("discoveredAtUtc"));
@@ -812,11 +1028,13 @@ TSharedRef<FJsonObject> FNativeCatalogResult::MakeSummaryJson() const
 		Mode == ENativeRegistryMode::Off ? TEXT("off") : (Mode == ENativeRegistryMode::Shadow ? TEXT("shadow") : TEXT("active")));
 	Object->SetBoolField(TEXT("complete"), bComplete);
 	Object->SetBoolField(TEXT("truncated"), bTruncated);
+	Object->SetBoolField(TEXT("targeted"), bTargeted);
 	Object->SetNumberField(TEXT("totalSpawners"), TotalSpawners);
 	Object->SetNumberField(TEXT("ownerCount"), OwnerCount);
 	Object->SetNumberField(TEXT("notNodeActionCount"), NotNodeActionCount);
 	Object->SetNumberField(TEXT("descriptorCount"), Descriptors.Num());
 	Object->SetNumberField(TEXT("totalDescriptorsAvailable"), TotalDescriptorsAvailable);
+	Object->SetNumberField(TEXT("matchedDescriptors"), MatchedDescriptors);
 	Object->SetNumberField(TEXT("totalUnsupported"), TotalUnsupported);
 	Object->SetNumberField(TEXT("duplicateActionIdCount"), DuplicateActionIdCount);
 	Object->SetNumberField(TEXT("templateNodesCached"), TemplateNodesCached);
@@ -873,7 +1091,10 @@ FString FNativeNodeRegistry::ReadConfiguredModeText()
 ENativeRegistryMode FNativeNodeRegistry::ParseMode(const FString& ModeText)
 {
 	const FString Normalized = ModeText.TrimStartAndEnd().ToLower();
-	if (Normalized == TEXT("shadow"))
+	// Shadow is the default: read-only enumeration is always available, and only
+	// an explicit "active" changes editor UI.  An unset key therefore means
+	// shadow; an unrecognized value still fails closed to off.
+	if (Normalized.IsEmpty() || Normalized == TEXT("shadow"))
 	{
 		return ENativeRegistryMode::Shadow;
 	}
@@ -1016,6 +1237,9 @@ void FNativeNodeRegistry::Shutdown()
 	DescribedDescriptors.Reset();
 	DescribedDatabaseFingerprint.Reset();
 	DescribedTotalSpawners = 0;
+	bDescribedSetComplete = true;
+	ResolvedSpawners.Reset();
+	ResolvedDescriptors.Reset();
 	CursorKey.Reset();
 	CursorTtlSeconds = UEAgentKitNativeCursor::CursorTtlSeconds;
 }
@@ -1192,10 +1416,14 @@ FNativeCatalogResult FNativeNodeRegistry::BuildCatalog(const FNativeCatalogOptio
 	Context.MaxPinsPerDescriptor = Effective.MaxPinsPerDescriptor;
 	Context.bAllowTemplateSpawn = Effective.bAllowOfficialTemplateSpawn;
 	Context.bAllowPinAllocation = Effective.bAllowTransientPinAllocation;
-	Context.MaxTemplateSpawns = FMath::Min(
-		Effective.MaxTemplateSpawns,
-		FMath::Max(0, MaxSessionTemplateCreations - SessionTemplateCreations));
-	Context.DeferredReasons = &DeferredSpawnerReasons;
+	Context.MaxTemplateSpawns = Effective.bTargetedDescription
+		? Effective.MaxTemplateSpawns
+		: FMath::Min(
+			Effective.MaxTemplateSpawns,
+			FMath::Max(0, MaxSessionTemplateCreations - SessionTemplateCreations));
+	// A targeted build never freezes a failure for the session: it describes a
+	// candidate slice, and a later call must be free to retry.
+	Context.DeferredReasons = Effective.bTargetedDescription ? nullptr : &DeferredSpawnerReasons;
 	Context.DeadlineSeconds = StartSeconds + Effective.TemplateBudgetMs / 1000.0;
 	// Fingerprint is patched in after the unique action id set is known.
 	Context.ActionDatabaseFingerprint = TEXT("sha256:0000000000000000");
@@ -1230,6 +1458,46 @@ FNativeCatalogResult FNativeNodeRegistry::BuildCatalog(const FNativeCatalogOptio
 			{
 				++Result.NotNodeActionCount;
 				continue;
+			}
+
+			// A targeted build describes only what the filters can select.  The
+			// node class and the cheap payload identity need no template, so a
+			// "find one function" query costs one template instead of the session
+			// budget.  Spawners whose payload needs a template (cast/macro/plain)
+			// are always candidates.
+			if (Effective.bTargetedDescription)
+			{
+				if (!Effective.FilterNodeClass.IsEmpty()
+					&& (Spawner->NodeClass == nullptr
+						|| !Spawner->NodeClass->GetPathName().Equals(
+							Effective.FilterNodeClass,
+							ESearchCase::CaseSensitive)))
+				{
+					continue;
+				}
+				if (!Effective.FilterQuery.IsEmpty())
+				{
+					FString CheapText;
+					bool bCheapIdentityComplete = false;
+					SpawnerCheapIdentity(Spawner, CheapText, bCheapIdentityComplete);
+					if (!QueryTokensMatch(CheapText, Effective.FilterQuery))
+					{
+						// A complete cheap identity means the payload is fully known
+						// here, so a template could not add a match: skip it.
+						if (bCheapIdentityComplete)
+						{
+							continue;
+						}
+						// Cast / macro / plain spawners hide their payload in the
+						// template.  Describe them only when the caller also pinned
+						// the node class; otherwise one keyword would describe every
+						// cast in the project.
+						if (Effective.FilterNodeClass.IsEmpty())
+						{
+							continue;
+						}
+					}
+				}
 			}
 
 			FActionResult Action;
@@ -1322,6 +1590,33 @@ FNativeCatalogResult FNativeNodeRegistry::BuildCatalog(const FNativeCatalogOptio
 		Result.Descriptors.Add(MoveTemp(Pair.Value));
 	}
 	Result.TotalDescriptorsAvailable = Result.Descriptors.Num();
+	Result.MatchedDescriptors = Result.Descriptors.Num();
+	Result.bTargeted = Effective.bTargetedDescription;
+
+	// The filters narrow what this call RETURNS; the fingerprint above is still
+	// computed over every describable action, so a filtered catalog keeps the same
+	// identity as the full one and a cursor cannot be replayed under a new filter.
+	const bool bHasFilter = !Effective.FilterActionId.IsEmpty()
+		|| !Effective.FilterNodeClass.IsEmpty()
+		|| !Effective.FilterQuery.IsEmpty();
+	if (bHasFilter)
+	{
+		TArray<FNativeNodeDescriptorRecord> Filtered;
+		Filtered.Reserve(Result.Descriptors.Num());
+		for (const FNativeNodeDescriptorRecord& Record : Result.Descriptors)
+		{
+			if (DescriptorMatchesFilter(
+					Record,
+					Effective.FilterActionId,
+					Effective.FilterNodeClass,
+					Effective.FilterQuery))
+			{
+				Filtered.Add(Record);
+			}
+		}
+		Result.Descriptors = MoveTemp(Filtered);
+		Result.MatchedDescriptors = Result.Descriptors.Num();
+	}
 
 	Result.Unsupported.Sort([](const FNativeUnsupportedEntry& Left, const FNativeUnsupportedEntry& Right) {
 		if (Left.Reason != Right.Reason)
@@ -1343,7 +1638,9 @@ FNativeCatalogResult FNativeNodeRegistry::BuildCatalog(const FNativeCatalogOptio
 
 	// Freeze the described set for R1.3 context filtering.  Context only ever
 	// evaluates these official, already-described spawners, so a context query
-	// can never trigger a project/third-party template.
+	// can never trigger a project/third-party template.  A targeted build ADDS to
+	// the session-resolved set instead of replacing it: the action it just
+	// described has to stay resolvable for the write that follows the search.
 	DescribedSpawners.Reset();
 	DescribedOwners.Reset();
 	DescribedDescriptors.Reset();
@@ -1358,8 +1655,33 @@ FNativeCatalogResult FNativeNodeRegistry::BuildCatalog(const FNativeCatalogOptio
 		DescribedOwners.Add(Record.ActionId, Source->Owner);
 		DescribedDescriptors.Add(Record.ActionId, Record.Descriptor);
 	}
+	if (Effective.bTargetedDescription)
+	{
+		for (const TPair<FString, TSharedPtr<FJsonObject>>& Pair : DescribedDescriptors)
+		{
+			ResolvedDescriptors.Add(Pair.Key, Pair.Value);
+		}
+		for (const TPair<FString, TWeakObjectPtr<UBlueprintNodeSpawner>>& Pair : DescribedSpawners)
+		{
+			ResolvedSpawners.Add(Pair.Key, Pair.Value);
+		}
+	}
+	else
+	{
+		// Additive as well: this set is a bounded slice of the database, so it must
+		// never erase an action an earlier targeted search already resolved.
+		for (const TPair<FString, TSharedPtr<FJsonObject>>& Pair : DescribedDescriptors)
+		{
+			ResolvedDescriptors.Add(Pair.Key, Pair.Value);
+		}
+		for (const TPair<FString, TWeakObjectPtr<UBlueprintNodeSpawner>>& Pair : DescribedSpawners)
+		{
+			ResolvedSpawners.Add(Pair.Key, Pair.Value);
+		}
+	}
 	DescribedDatabaseFingerprint = Result.ActionDatabaseFingerprint;
 	DescribedTotalSpawners = Result.TotalSpawners;
+	bDescribedSetComplete = !bHasFilter && !Effective.bTargetedDescription;
 
 	Result.bComplete = Result.TotalUnsupported == 0;
 	Result.TemplateNodesCached = Context.TemplateNodesCached;
@@ -1367,8 +1689,117 @@ FNativeCatalogResult FNativeNodeRegistry::BuildCatalog(const FNativeCatalogOptio
 	Result.TemplateBudgetSkips = Context.TemplateBudgetSkips;
 	Result.PinsAllocated = Context.PinsAllocated;
 	Result.PinAllocationFailures = Context.PinAllocationFailures;
-	SessionTemplateCreations += Context.TemplateNodesCreated;
+	if (!Effective.bTargetedDescription)
+	{
+		SessionTemplateCreations += Context.TemplateNodesCreated;
+	}
 	Result.DurationMs = (FPlatformTime::Seconds() - StartSeconds) * 1000.0;
+	Result.bOk = true;
+	return Result;
+}
+
+namespace
+{
+	void FillResolutionFromDescriptor(
+		const TSharedPtr<FJsonObject>& Descriptor,
+		FNativeSpawnerResolution& InOutResult)
+	{
+		const TSharedPtr<FJsonObject>* DiscoveryKey = nullptr;
+		if (!Descriptor.IsValid()
+			|| !Descriptor->TryGetObjectField(TEXT("discoveryKey"), DiscoveryKey)
+			|| DiscoveryKey == nullptr
+			|| !DiscoveryKey->IsValid())
+		{
+			return;
+		}
+		InOutResult.NodeClassPath = (*DiscoveryKey)->GetStringField(TEXT("nodeClass"));
+		InOutResult.SpawnerClassPath = (*DiscoveryKey)->GetStringField(TEXT("spawnerClass"));
+		InOutResult.ActionKind = (*DiscoveryKey)->GetStringField(TEXT("actionKind"));
+		const TSharedPtr<FJsonObject>* Payload = nullptr;
+		if ((*DiscoveryKey)->TryGetObjectField(TEXT("payload"), Payload)
+			&& Payload != nullptr
+			&& Payload->IsValid())
+		{
+			for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*Payload)->Values)
+			{
+				if (Pair.Value.IsValid() && Pair.Value->Type == EJson::String)
+				{
+					InOutResult.PayloadValue = Pair.Value->AsString();
+					break;
+				}
+			}
+		}
+	}
+}
+
+FNativeSpawnerResolution FNativeNodeRegistry::ResolveSpawnerForActionId(const FString& ActionId) const
+{
+	FNativeSpawnerResolution Result;
+	Result.ActionId = ActionId;
+	if (State != ENativeRegistryState::Ready)
+	{
+		Result.ErrorCode = State == ENativeRegistryState::Unavailable && !UnavailableCode.IsEmpty()
+			? UnavailableCode
+			: TEXT("native-registry-unavailable");
+		Result.ErrorMessage = TEXT("The native node registry is not enabled.");
+		return Result;
+	}
+	check(IsInGameThread());
+	if (ActionId.IsEmpty() || !ActionId.StartsWith(TEXT("action:"), ESearchCase::CaseSensitive))
+	{
+		Result.ErrorCode = TEXT("graph-spawn-action-id-invalid");
+		Result.ErrorMessage = TEXT("An actionId must be 'action:' followed by a lower-case content hash.");
+		return Result;
+	}
+
+	// A catalog/search call in this session already described the action; reuse it
+	// instead of walking the action database again.  This is the intended flow:
+	// search once, then create the actionId it returned.
+	if (const TWeakObjectPtr<UBlueprintNodeSpawner>* Existing = ResolvedSpawners.Find(ActionId))
+	{
+		if (UBlueprintNodeSpawner* Spawner = Existing->Get())
+		{
+			const TSharedPtr<FJsonObject>* Descriptor = ResolvedDescriptors.Find(ActionId);
+			if (Descriptor != nullptr && Descriptor->IsValid())
+			{
+				Result.Spawner = Spawner;
+				Result.Descriptor = *Descriptor;
+				FillResolutionFromDescriptor(*Descriptor, Result);
+				Result.bOk = true;
+				return Result;
+			}
+		}
+	}
+
+	FNativeCatalogOptions Options;
+	Options.MaxItems = 1;
+	Options.MaxTemplateSpawns = MaxSessionTemplateCreations;
+	Options.FilterActionId = ActionId;
+	const FNativeCatalogResult Catalog = BuildCatalog(Options);
+	if (!Catalog.bOk)
+	{
+		Result.ErrorCode = Catalog.ErrorCode;
+		Result.ErrorMessage = Catalog.ErrorMessage;
+		return Result;
+	}
+
+	const TWeakObjectPtr<UBlueprintNodeSpawner>* Found = DescribedSpawners.Find(ActionId);
+	UBlueprintNodeSpawner* Spawner = Found != nullptr ? Found->Get() : nullptr;
+	const TSharedPtr<FJsonObject>* Descriptor = DescribedDescriptors.Find(ActionId);
+	if (Spawner == nullptr || Descriptor == nullptr || !Descriptor->IsValid())
+	{
+		// The id is well formed but this action is not describable in this
+		// session.  The catalog describes a bounded slice, so the normal flow is
+		// "search first"; say so instead of guessing a reason.
+		Result.ErrorCode = TEXT("graph-spawn-action-unknown");
+		Result.ErrorMessage = FString::Printf(
+			TEXT("No describable node action has the id %s in this session; search it with ue_search_node_actions first."),
+			*ActionId);
+		return Result;
+	}
+	Result.Spawner = Spawner;
+	Result.Descriptor = *Descriptor;
+	FillResolutionFromDescriptor(*Descriptor, Result);
 	Result.bOk = true;
 	return Result;
 }
@@ -1621,6 +2052,8 @@ bool FNativeNodeRegistry::TryInvokeShadowTool(
 	int32 MaxItems = 64;
 	int32 PageSize = 0;
 	FString Cursor;
+	FString FilterQuery;
+	FString FilterNodeClass;
 	bool bHasMaxItems = false;
 	bool bIncludeDescriptors = bIsCatalog;
 	bool bIncludeUnsupported = true;
@@ -1660,6 +2093,39 @@ bool FNativeNodeRegistry::TryInvokeShadowTool(
 				return false;
 			}
 			PageSize = static_cast<int32>(Number);
+		}
+		else if (bIsCatalog && (Pair.Key == TEXT("query") || Pair.Key == TEXT("nodeClass")))
+		{
+			if (!Pair.Value.IsValid() || Pair.Value->Type != EJson::String)
+			{
+				OutErrorCode = TEXT("native-schema-invalid-arguments");
+				OutErrorMessage = FString::Printf(TEXT("%s must be a string."), *Pair.Key);
+				return false;
+			}
+			const FString Value = Pair.Value->AsString().TrimStartAndEnd();
+			if (Value.Len() > 256)
+			{
+				OutErrorCode = TEXT("native-schema-invalid-arguments");
+				OutErrorMessage = FString::Printf(TEXT("%s is too long."), *Pair.Key);
+				return false;
+			}
+			for (const TCHAR Character : Value)
+			{
+				if (Character < 32)
+				{
+					OutErrorCode = TEXT("native-schema-invalid-arguments");
+					OutErrorMessage = FString::Printf(TEXT("%s must not contain control characters."), *Pair.Key);
+					return false;
+				}
+			}
+			if (Pair.Key == TEXT("query"))
+			{
+				FilterQuery = Value;
+			}
+			else
+			{
+				FilterNodeClass = Value;
+			}
 		}
 		else if (bIsCatalog && Pair.Key == TEXT("cursor"))
 		{
@@ -1715,6 +2181,17 @@ bool FNativeNodeRegistry::TryInvokeShadowTool(
 
 	FNativeCatalogOptions Options;
 	Options.MaxItems = bCatalogPaging ? MaxCatalogItems : MaxItems;
+	Options.FilterQuery = FilterQuery;
+	Options.FilterNodeClass = FilterNodeClass;
+	// A named filter asks for one action, not for the bounded catalog slice: only
+	// the candidates are described, with a per-call template budget instead of the
+	// session-wide one (which only covers 768 of ~38k spawners).
+	Options.bTargetedDescription = !FilterQuery.IsEmpty() || !FilterNodeClass.IsEmpty();
+	if (Options.bTargetedDescription)
+	{
+		Options.MaxTemplateSpawns = 4096;
+		Options.TemplateBudgetMs = 15000.0;
+	}
 	// Use the existing 768-template session cap so the shadow catalog and the
 	// paged catalog describe the same official set.  This is not a budget
 	// increase: BuildCatalog already enforces MaxSessionTemplateCreations.
@@ -1751,7 +2228,10 @@ bool FNativeNodeRegistry::TryInvokeShadowTool(
 	}
 	if (bCatalogPaging)
 	{
-		const FString QueryHash = ComputeCursorQueryHash(TEXT("catalog"), TArray<TPair<FString, FString>>());
+		TArray<TPair<FString, FString>> QueryFields;
+		QueryFields.Add(TPair<FString, FString>(FString(TEXT("query")), FilterQuery));
+		QueryFields.Add(TPair<FString, FString>(FString(TEXT("nodeClass")), FilterNodeClass));
+		const FString QueryHash = ComputeCursorQueryHash(TEXT("catalog"), QueryFields);
 		if (QueryHash.IsEmpty())
 		{
 			OutErrorCode = TEXT("native-internal-error");
@@ -2143,9 +2623,11 @@ FNativeContextResult FNativeNodeRegistry::FilterContextInternal(
 		return Result;
 	}
 
-	// Context only evaluates the session's described, official actions.  This is
-	// the key trust bound: no menu builder enumeration and no untrusted template.
-	if (DescribedSpawners.Num() == 0)
+	// Context only evaluates the session's described actions.  This is the key
+	// trust bound: no menu builder enumeration and no untrusted template.  A
+	// filtered catalog build leaves only its matches in the described set, so it
+	// is not a valid basis for a context query either.
+	if (DescribedSpawners.Num() == 0 || !bDescribedSetComplete)
 	{
 		const FNativeCatalogResult Catalog = BuildCatalog(FNativeCatalogOptions());
 		if (!Catalog.bOk)

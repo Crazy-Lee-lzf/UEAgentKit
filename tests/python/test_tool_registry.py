@@ -67,6 +67,7 @@ EXPECTED_ALL_TOOLS = [
     "ue_get_blueprint_graph_selection",
     "ue_get_blueprint_graph_layout_preflight",
     "ue_get_focused_blueprint_graph_context",
+    "ue_get_blueprint_graph_context",
     "ue_preview_blueprint_graph_layout",
     "ue_analyze_animation_retarget",
     "ue_diagnose_animation_scale",
@@ -79,6 +80,7 @@ EXPECTED_ALL_TOOLS = [
     "ue_get_animation_scale_audit",
     "ue_cancel_animation_scale_audit",
     "ue_export_animation_scale_audit_report",
+    "ue_search_node_actions",
     "ue_open_asset",
     "ue_focus_asset",
     "ue_sync_content_browser",
@@ -87,6 +89,7 @@ EXPECTED_ALL_TOOLS = [
     "ue_validate_asset",
     "ue_validate_folder",
     "ue_run_automation_test",
+    "ue_refresh_asset_index_live",
     "ue_get_editor_context",
     "ue_start_batch_task",
     "ue_get_batch_task",
@@ -144,6 +147,10 @@ EXPECTED_ALL_TOOLS = [
     "ue_verify_live_write_checkpoint",
     "ue_get_asset_state",
     "ue_refresh_asset_index",
+    "ue_begin_blueprint_edit_session",
+    "ue_end_blueprint_edit_session",
+    "ue_move_blueprint_node",
+    "ue_move_blueprint_nodes",
     "ue_save_authorized_asset",
     "ue_rollback_patch",
     "ue_create_change_set",
@@ -158,8 +165,9 @@ class ToolRegistryTests(unittest.TestCase):
             EXPECTED_ALL_TOOLS,
         )
         self.assertEqual(len(tool_names_for_mode()), 14)
-        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 53)
-        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 71)
+        self.assertEqual(len(tool_names_for_mode()), 14)
+        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 56)
+        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 75)
         self.assertEqual(
             tool_names_for_mode(memory_enabled=True),
             QUERY_TOOL_NAMES + EXPECTED_MEMORY_TOOLS,
@@ -167,11 +175,11 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 28)
         self.assertEqual(
             len(tool_names_for_mode(live_editor_enabled=True, memory_enabled=True)),
-            67,
+            70,
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
-            85,
+            89,
         )
         self.assertEqual(
             len(
@@ -181,7 +189,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-            124,
+            131,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:
@@ -252,6 +260,9 @@ class ToolRegistryTests(unittest.TestCase):
                     "ue_cancel_animation_scale_audit",
                     "ue_export_animation_scale_audit_report",
                     "ue_preview_blueprint_graph_layout",
+                    # Read-only Action Registry search: it calls native.invoke
+                    # directly, so it has no 1:1 bridge method of its own.
+                    "ue_search_node_actions",
                 }
             ],
         )
@@ -320,13 +331,17 @@ class ToolRegistryTests(unittest.TestCase):
                     "ue_get_batch_task",
                     "ue_cancel_batch_task",
                     "ue_preview_blueprint_graph_layout",
+                    "ue_search_node_actions",
                 }
             ],
             [
                 definition.name
                 for definition in TOOL_REGISTRY
                 if definition.group in {"live-read", "live-action"}
-                and definition.name != "ue_preview_blueprint_graph_layout"
+                and definition.name not in {
+                    "ue_preview_blueprint_graph_layout",
+                    "ue_search_node_actions",
+                }
             ],
         )
         descriptors = tool_descriptors_for_mode(
@@ -464,8 +479,12 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertNotIn("const FString& PropertyPath", apply_declaration)
         self.assertNotIn("const FString& ParameterName", apply_declaration)
         self.assertNotIn("const FString& RowName", apply_declaration)
-        # Keep the live-write handler bounded while allowing the exact transaction-chain safety guards.
-        self.assertLess(len(live_write), 24500)
+        # Keep the live-write handler bounded while allowing the exact
+        # transaction-chain safety guards and the transactionId plumbing for
+        # retained Material/DataTable fast verify.  The per-asset read logic
+        # itself lives in EditorBridgeRetainedLiveWrite.cpp (asserted read-only
+        # by test_live_fast_verify_contract), so only the dispatch grows here.
+        self.assertLess(len(live_write), 24700)
 
         # Explicit Undo/Discard must reuse the committed Editor transaction and the
         # retained pre-write snapshot; it must never save the package.

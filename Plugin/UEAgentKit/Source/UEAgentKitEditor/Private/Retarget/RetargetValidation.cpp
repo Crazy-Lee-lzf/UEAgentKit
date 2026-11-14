@@ -91,7 +91,7 @@ namespace UEAgentKitRetarget
 				FTransform Local = RefSkeleton.GetRefBonePose()[IndexOnPath];
 				if (Sequence != nullptr && Sequence->GetSkeleton() == Skeleton)
 				{
-					FAnimExtractContext ExtractionContext(Time);
+					FAnimExtractContext ExtractionContext(static_cast<double>(Time));
 					FTransform TrackLocal;
 					Sequence->GetBoneTransform(TrackLocal, FSkeletonPoseBoneIndex(IndexOnPath), ExtractionContext, false);
 					if (!TrackLocal.GetRotation().ContainsNaN())

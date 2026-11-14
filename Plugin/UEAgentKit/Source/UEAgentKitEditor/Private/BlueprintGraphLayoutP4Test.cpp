@@ -640,7 +640,7 @@ namespace UEAgentKitGraphLayoutP4
 			OutProvenance->SetStringField(TEXT("engineVersion"), FEngineVersion::Current().ToString());
 			OutProvenance->SetStringField(TEXT("projectName"), FApp::GetProjectName());
 			OutProvenance->SetStringField(TEXT("exporterSchemaVersion"), TEXT("1.1"));
-			OutProvenance->SetStringField(TEXT("exporterVersion"), TEXT("0.8.0"));
+			OutProvenance->SetStringField(TEXT("exporterVersion"), TEXT("0.9.0.dev1"));
 			OutProvenance->SetStringField(TEXT("profile"), TEXT("full"));
 			OutProvenance->SetStringField(TEXT("assetPath"), Blueprint->GetPathName());
 			OutProvenance->SetStringField(TEXT("graphGuid"), GuidLower(Graph->GraphGuid));

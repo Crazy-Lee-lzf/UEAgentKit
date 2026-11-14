@@ -157,10 +157,12 @@ namespace UEAgentKitP0PieRuntime
 		bool bScalarTruncationVerified = false;
 		bool bScalarIsolationVerified = false;
 		bool bScalarOutputBounded = false;
+		bool bScalarOriginVerified = false;
 
 		TSharedPtr<FJsonObject> ContextListing;
 		TSharedPtr<FJsonObject> ActorInspection;
 		TSharedPtr<FJsonObject> ScalarInspection;
+		TSharedPtr<FJsonObject> OriginEvidence;
 		TSharedPtr<FJsonObject> CodeEvidence;
 		TSharedPtr<FJsonObject> BoundsEvidence;
 
@@ -222,6 +224,7 @@ namespace UEAgentKitP0PieRuntime
 		Evidence->SetBoolField(TEXT("scalarTruncationVerified"), State->bScalarTruncationVerified);
 		Evidence->SetBoolField(TEXT("scalarIsolationVerified"), State->bScalarIsolationVerified);
 		Evidence->SetBoolField(TEXT("scalarOutputBounded"), State->bScalarOutputBounded);
+		Evidence->SetBoolField(TEXT("scalarOriginVerified"), State->bScalarOriginVerified);
 		Evidence->SetStringField(TEXT("scalarActorName"), State->ScalarActorName);
 		Evidence->SetStringField(TEXT("scalarComponentName"), State->ScalarComponentName);
 		if (State->ContextListing.IsValid())
@@ -235,6 +238,10 @@ namespace UEAgentKitP0PieRuntime
 		if (State->ScalarInspection.IsValid())
 		{
 			Evidence->SetObjectField(TEXT("scalarInspection"), State->ScalarInspection.ToSharedRef());
+		}
+		if (State->OriginEvidence.IsValid())
+		{
+			Evidence->SetObjectField(TEXT("scalarOrigin"), State->OriginEvidence.ToSharedRef());
 		}
 		if (State->CodeEvidence.IsValid())
 		{
@@ -972,6 +979,92 @@ namespace UEAgentKitP0PieRuntime
 				FJsonSerializer::Serialize(ScalarResult.ToSharedRef(), Writer);
 				State->bScalarOutputBounded = Serialized.Len() <= 16 * 1024;
 				Test->TestTrue(TEXT("P0Pie scalar response stays within 16 KiB"), State->bScalarOutputBounded);
+
+				// Declaration provenance: reflected declaring class vs instance class.
+				const TSharedPtr<FJsonObject> HealthOrigin = FindItem(ScalarResult, TEXT("Health"));
+				Test->TestEqual(
+					TEXT("P0Pie direct property reports the instance class as declaring class"),
+					ItemString(HealthOrigin, TEXT("declaringClassPath")),
+					Fixture->GetClass()->GetPathName());
+				Test->TestEqual(
+					TEXT("P0Pie direct property declaring kind is native"),
+					ItemString(HealthOrigin, TEXT("declaringClassKind")),
+					FString(TEXT("native")));
+				Test->TestFalse(
+					TEXT("P0Pie declaring class path is not truncated"),
+					ItemBool(HealthOrigin, TEXT("declaringClassPathTruncated")));
+
+				FScalarInspectionRequest InheritedRequest = ScalarRequest;
+				InheritedRequest.PropertyNames = { TEXT("InitialLifeSpan") };
+				TSharedPtr<FJsonObject> InheritedResult;
+				if (Test->TestTrue(
+					TEXT("P0Pie inherited-property request succeeds"),
+					TryReadPieScalars(InheritedRequest, InheritedResult, Code, Message)))
+				{
+					const TSharedPtr<FJsonObject> LifeOrigin =
+						FindItem(InheritedResult, TEXT("InitialLifeSpan"));
+					Test->TestEqual(
+						TEXT("P0Pie inherited property reports its reflected declaring class"),
+						ItemString(LifeOrigin, TEXT("declaringClassPath")),
+						AActor::StaticClass()->GetPathName());
+					Test->TestTrue(
+						TEXT("P0Pie inherited declaring class differs from the instance class"),
+						ItemString(LifeOrigin, TEXT("declaringClassPath"))
+							!= Fixture->GetClass()->GetPathName());
+					Test->TestEqual(
+						TEXT("P0Pie inherited property declaring kind is native"),
+						ItemString(LifeOrigin, TEXT("declaringClassKind")),
+						FString(TEXT("native")));
+				}
+
+				const TSharedPtr<FJsonObject> NotExposedOrigin =
+					FindItem(ScalarResult, TEXT("NotExposed"));
+				FString LeakedDeclaringPath;
+				Test->TestFalse(
+					TEXT("P0Pie unresolved property does not leak declaring metadata"),
+					NotExposedOrigin.IsValid()
+						&& NotExposedOrigin->TryGetStringField(
+							TEXT("declaringClassPath"),
+							LeakedDeclaringPath));
+
+				const TSharedPtr<FJsonObject> LifeOriginItem = InheritedResult.IsValid()
+					? FindItem(InheritedResult, TEXT("InitialLifeSpan"))
+					: nullptr;
+				const FString InstanceClassPath = Fixture->GetClass()->GetPathName();
+				const FString DirectDeclaringPath =
+					ItemString(HealthOrigin, TEXT("declaringClassPath"));
+				const FString InheritedDeclaringPath =
+					ItemString(LifeOriginItem, TEXT("declaringClassPath"));
+				TSharedRef<FJsonObject> Origin = MakeShared<FJsonObject>();
+				Origin->SetStringField(TEXT("instanceClassPath"), InstanceClassPath);
+				Origin->SetStringField(TEXT("directProperty"), TEXT("Health"));
+				Origin->SetStringField(TEXT("directDeclaringClassPath"), DirectDeclaringPath);
+				Origin->SetStringField(
+					TEXT("directDeclaringClassKind"),
+					ItemString(HealthOrigin, TEXT("declaringClassKind")));
+				Origin->SetStringField(TEXT("inheritedProperty"), TEXT("InitialLifeSpan"));
+				Origin->SetStringField(
+					TEXT("inheritedDeclaringClassPath"),
+					InheritedDeclaringPath);
+				Origin->SetStringField(
+					TEXT("inheritedDeclaringClassKind"),
+					ItemString(LifeOriginItem, TEXT("declaringClassKind")));
+				Origin->SetBoolField(
+					TEXT("directMatchesInstanceClass"),
+					DirectDeclaringPath == InstanceClassPath);
+				Origin->SetBoolField(
+					TEXT("inheritedDiffersFromInstanceClass"),
+					!InheritedDeclaringPath.IsEmpty()
+						&& InheritedDeclaringPath != InstanceClassPath);
+				State->OriginEvidence = Origin;
+				State->bScalarOriginVerified =
+					DirectDeclaringPath == InstanceClassPath
+					&& ItemString(HealthOrigin, TEXT("declaringClassKind")) == TEXT("native")
+					&& InheritedDeclaringPath == AActor::StaticClass()->GetPathName()
+					&& ItemString(LifeOriginItem, TEXT("declaringClassKind")) == TEXT("native");
+
+				// A native Blueprint-declared property fixture is pending the next UE
+				// lease: the blueprint branch is covered by source contracts only.
 			}
 			else
 			{

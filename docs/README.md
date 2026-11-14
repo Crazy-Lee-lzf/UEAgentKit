@@ -5,6 +5,7 @@
 ## 快速开始
 
 - [AI Agent 快速接入（推荐）](AGENT_QUICKSTART.md) / [English](AGENT_QUICKSTART_EN.md)
+- [常用程序开发工作流](DEVELOPER_WORKFLOWS.md) / [English](DEVELOPER_WORKFLOWS_EN.md)
 
 - [README](../README.md) / [English README](../README_EN.md)
 - [构建与运行](BUILD_AND_RUN.md)
@@ -15,7 +16,9 @@
 
 ## Release Notes
 
-- **RC1 internal experimental preview**（非 GitHub Release，版本仍为 0.8.0）：[中文](RELEASE_RC1.md) / [English](RELEASE_RC1_EN.md)，发布检查见 [RC1 checklist](RC1_RELEASE_CHECKLIST.md)
+- **0.9.0 Developer Preview 1（候选，尚未发布）**：[中文](RELEASE_0.9.0_PREVIEW.md) / [English](RELEASE_0.9.0_PREVIEW_EN.md)
+
+- **RC1 internal experimental preview**（历史候选，非 GitHub Release）：[中文](RELEASE_RC1.md) / [English](RELEASE_RC1_EN.md)
 - [0.8.0](RELEASE_0.8.0.md) / [English](RELEASE_0.8.0_EN.md)
 - [0.7.0](RELEASE_0.7.0.md) / [English](RELEASE_0.7.0_EN.md)
 - [0.6.0](RELEASE_0.6.0.md) / [English](RELEASE_0.6.0_EN.md)
@@ -32,7 +35,6 @@
 - [AI-native UE Editor](AI_NATIVE_UE_EDITOR.md) / [English](AI_NATIVE_UE_EDITOR_EN.md)
 - [Reference Policy](REFERENCE_POLICY.md)
 - [C++ Code Knowledge](CODE_KNOWLEDGE.md)
-- [与 ue-llm-toolkit 的能力比较](COMPARISON_UE_LLM_TOOLKIT.md) / [English](COMPARISON_UE_LLM_TOOLKIT_EN.md)
 
 核心协议与机器契约位于 [`spec/`](../spec/)：
 
@@ -42,7 +44,7 @@
 - [`PATCH_SCHEMA.md`](../spec/PATCH_SCHEMA.md)
 - [`BACKUP_AND_ROLLBACK.md`](../spec/BACKUP_AND_ROLLBACK.md)
 
-## RC1 实验性 Blueprint 文档
+## Blueprint 实验功能
 
 以下文档描述默认关闭、需要显式双门禁的内部实验能力，不属于 v0.8.0 稳定面，也不代表生产授权：
 

@@ -4,18 +4,13 @@ import json
 import subprocess
 import sys
 import tempfile
-import time
 import unittest
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-if str(HERE) not in sys.path:
-    sys.path.insert(0, str(HERE))
+import layout_broker_harness as harness
 
-import layout_broker_harness as harness  # noqa: E402
-
-from ue_agent_kit.layout_broker import LayoutBrokerClient  # noqa: E402
-from ue_agent_kit.layout_broker import descriptor as descriptor_module  # noqa: E402
+from ue_agent_kit.layout_broker import LayoutBrokerClient
+from ue_agent_kit.layout_broker import descriptor as descriptor_module
 
 
 class ManualCliTests(unittest.TestCase):

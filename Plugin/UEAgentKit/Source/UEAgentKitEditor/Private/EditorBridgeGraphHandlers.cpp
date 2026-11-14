@@ -20,6 +20,7 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "Subsystems/AssetEditorSubsystem.h"
+#include "UObject/UObjectGlobals.h"
 
 using namespace UEAgentKitEditorBridgePrivate;
 
@@ -634,4 +635,211 @@ bool FUEAgentKitEditorBridge::TryBuildBlueprintGraphLayoutSaveTestOnlyResult(
 		OutResult,
 		OutErrorCode,
 		OutErrorMessage);
+}
+
+bool FUEAgentKitEditorBridge::TryBuildBlueprintGraphContextResult(
+	const TSharedPtr<FJsonObject>& Params,
+	TSharedPtr<FJsonObject>& OutResult,
+	FString& OutErrorCode,
+	FString& OutErrorMessage) const
+{
+	// Read any Blueprint's graph context by asset path without requiring an open
+	// or focused Blueprint Editor.  The asset may be loaded on demand, but this
+	// handler never dirties, saves, opens a tab, focuses a graph or mutates a
+	// package.  Node pagination keeps the response bounded.
+	constexpr int32 MaxOffset = 1000000;
+	constexpr int32 MaxLimit = 500;
+	constexpr int32 DefaultLimit = 200;
+
+	auto Reject = [&OutErrorCode, &OutErrorMessage](
+		const TCHAR* Code,
+		const FString& Message) -> bool
+	{
+		OutErrorCode = Code;
+		OutErrorMessage = Message;
+		return false;
+	};
+
+	if (!Params.IsValid())
+	{
+		return Reject(
+			TEXT("blueprint-graph-context-invalid-parameters"),
+			TEXT("The request must be a JSON object."));
+	}
+	for (const TPair<FString, TSharedPtr<FJsonValue>>& Entry : Params->Values)
+	{
+		if (Entry.Key != TEXT("assetPath")
+			&& Entry.Key != TEXT("graphGuid")
+			&& Entry.Key != TEXT("offset")
+			&& Entry.Key != TEXT("limit"))
+		{
+			return Reject(
+				TEXT("blueprint-graph-context-invalid-parameters"),
+				FString::Printf(TEXT("Unsupported field: %s"), *Entry.Key));
+		}
+	}
+
+	FString AssetPath;
+	if (!Params->TryGetStringField(TEXT("assetPath"), AssetPath)
+		|| !UEAgentKitEditorBridgePrivate::IsSafeGameAssetPath(AssetPath))
+	{
+		return Reject(
+			TEXT("blueprint-graph-context-invalid-parameters"),
+			TEXT("assetPath must be one exact /Game Object Path."));
+	}
+
+	FString GraphGuidText;
+	Params->TryGetStringField(TEXT("graphGuid"), GraphGuidText);
+	FGuid RequestedGraphGuid;
+	if (!GraphGuidText.IsEmpty() && !FGuid::Parse(GraphGuidText, RequestedGraphGuid))
+	{
+		return Reject(
+			TEXT("blueprint-graph-context-invalid-parameters"),
+			TEXT("graphGuid must be one canonical hyphenated GUID."));
+	}
+
+	int32 Offset = 0;
+	int32 Limit = DefaultLimit;
+	Params->TryGetNumberField(TEXT("offset"), Offset);
+	Params->TryGetNumberField(TEXT("limit"), Limit);
+	if (Offset < 0 || Offset > MaxOffset || Limit < 1 || Limit > MaxLimit)
+	{
+		return Reject(
+			TEXT("blueprint-graph-context-invalid-parameters"),
+			FString::Printf(
+				TEXT("offset must be 0..%d and limit must be 1..%d."),
+				MaxOffset,
+				MaxLimit));
+	}
+
+	UBlueprint* Blueprint = Cast<UBlueprint>(
+		StaticFindObject(UObject::StaticClass(), nullptr, *AssetPath, false));
+	const bool bLoadedByRequest = Blueprint == nullptr;
+	if (Blueprint == nullptr)
+	{
+		Blueprint = LoadObject<UBlueprint>(nullptr, *AssetPath);
+	}
+	if (Blueprint == nullptr)
+	{
+		return Reject(
+			TEXT("blueprint-graph-context-asset-unavailable"),
+			TEXT("The requested Blueprint could not be found or loaded."));
+	}
+
+	UEdGraph* TargetGraph = nullptr;
+	if (RequestedGraphGuid.IsValid())
+	{
+		auto SearchGraphs = [&TargetGraph, &RequestedGraphGuid](const auto& Graphs)
+		{
+			for (UEdGraph* Candidate : Graphs)
+			{
+				if (Candidate != nullptr && Candidate->GraphGuid == RequestedGraphGuid)
+				{
+					TargetGraph = Candidate;
+					return;
+				}
+			}
+		};
+		SearchGraphs(Blueprint->UbergraphPages);
+		if (TargetGraph == nullptr)
+		{
+			SearchGraphs(Blueprint->FunctionGraphs);
+		}
+		if (TargetGraph == nullptr)
+		{
+			SearchGraphs(Blueprint->MacroGraphs);
+		}
+		if (TargetGraph == nullptr)
+		{
+			SearchGraphs(Blueprint->DelegateSignatureGraphs);
+		}
+		if (TargetGraph == nullptr)
+		{
+			return Reject(
+				TEXT("blueprint-graph-context-graph-not-found"),
+				TEXT("The requested GraphGuid is not part of this Blueprint."));
+		}
+	}
+
+	FBlueprintContextExportOptions Options;
+	Options.Profile = EBlueprintContextProfile::Full;
+	Options.bWriteJson = false;
+	Options.bWriteBpctx = false;
+	Options.bIncludeLayout = false;
+	if (TargetGraph != nullptr)
+	{
+		Options.GraphFilter = TargetGraph->GetName();
+	}
+	FBlueprintContextExportResult ExportResult;
+	const TSharedRef<FJsonObject> Context =
+		FBlueprintContextExporter::BuildContextObject(Blueprint, Options, ExportResult);
+	// The exporter signals failure with a non-empty Error; bSuccess is only set on the
+	// file-export path (ExportBlueprint). Gate on Error, matching the layout handler above.
+	if (!ExportResult.Error.IsEmpty())
+	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("UEAgentKit getBlueprintGraphContext failed for '%s': %s"),
+			*AssetPath,
+			*ExportResult.Error);
+		return Reject(TEXT("blueprint-graph-context-export-failed"), ExportResult.Error);
+	}
+
+	// Per-graph node pagination.  The object is the same canonical context the
+	// offline exporter writes; only the node arrays are sliced.
+	int32 TotalNodeCount = 0;
+	int32 ReturnedNodeCount = 0;
+	const TArray<TSharedPtr<FJsonValue>>* Graphs = nullptr;
+	if (Context->TryGetArrayField(TEXT("graphs"), Graphs) && Graphs != nullptr)
+	{
+		for (const TSharedPtr<FJsonValue>& GraphValue : *Graphs)
+		{
+			const TSharedPtr<FJsonObject> GraphObject =
+				GraphValue.IsValid() ? GraphValue->AsObject() : nullptr;
+			if (!GraphObject.IsValid())
+			{
+				continue;
+			}
+			const TArray<TSharedPtr<FJsonValue>>* Nodes = nullptr;
+			if (!GraphObject->TryGetArrayField(TEXT("nodes"), Nodes) || Nodes == nullptr)
+			{
+				continue;
+			}
+			TotalNodeCount += Nodes->Num();
+			TArray<TSharedPtr<FJsonValue>> Page;
+			for (int32 Index = Offset; Index < Nodes->Num() && Page.Num() < Limit; ++Index)
+			{
+				Page.Add((*Nodes)[Index]);
+			}
+			ReturnedNodeCount += Page.Num();
+			GraphObject->SetArrayField(TEXT("nodes"), Page);
+		}
+	}
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetStringField(TEXT("schemaVersion"), TEXT("ueak.blueprintgraphcontext/1.0"));
+	Result->SetBoolField(TEXT("available"), true);
+	Result->SetBoolField(TEXT("readOnly"), true);
+	Result->SetStringField(TEXT("editorSessionId"), SessionId);
+	Result->SetStringField(TEXT("assetPath"), AssetPath);
+	Result->SetStringField(
+		TEXT("graphGuid"),
+		TargetGraph != nullptr
+			? TargetGraph->GraphGuid.ToString(EGuidFormats::DigitsWithHyphensLower)
+			: FString());
+	Result->SetBoolField(TEXT("loadedByRequest"), bLoadedByRequest);
+	Result->SetBoolField(
+		TEXT("packageDirty"),
+		Blueprint->GetOutermost() != nullptr && Blueprint->GetOutermost()->IsDirty());
+	Result->SetNumberField(TEXT("nodeOffset"), Offset);
+	Result->SetNumberField(TEXT("nodeLimit"), Limit);
+	Result->SetNumberField(TEXT("totalNodeCount"), TotalNodeCount);
+	Result->SetNumberField(TEXT("returnedNodeCount"), ReturnedNodeCount);
+	Result->SetBoolField(TEXT("truncated"), ReturnedNodeCount < TotalNodeCount);
+	Result->SetObjectField(TEXT("context"), Context);
+	OutResult = Result;
+	OutErrorCode.Reset();
+	OutErrorMessage.Reset();
+	return true;
 }

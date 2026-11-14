@@ -1,7 +1,7 @@
 # UE Agent Kit 0.8.0 Capability Status
 
 Latest published release: **0.8.0** (this page describes the `v0.8.0` tag, not later local-only experimental changes)
-Target environment: **Unreal Engine 5.6 / Windows / Python 3.11–3.12**
+Published 0.8.0: **Python 3.11–3.12**; 0.9.0 Developer Preview 1 candidate (0.9.0.dev1): **Unreal Engine 5.6 / Windows / Python 3.11–3.14**
 
 
 ## Product position
@@ -120,7 +120,7 @@ Source Control is disabled by default.
 
 Tool counts represent interface surface, not mutation breadth; many tools are read-only queries, planning, verification, or status operations.
 
-**Local RC1 candidate addendum (not the v0.8.0 tag):** the current static registry counts are Offline 14/28/20/34, Live 50/64/56/70, Workflow-only 71/85/77/91, and Live + Workflow 107/121/113/127. Additional default-off experimental tools (Blueprint structure edit, rewire, node removal, and related tools) are registered dynamically and are not included in this table;  use `ue_get_capabilities` at runtime as the source of truth; see the [RC1 release notes](RELEASE_RC1_EN.md).
+This page describes the current `0.9.0.dev1` candidate. The static registry counts changed with node-spawn and the merge, so no fixed numbers are listed; query `ue_get_capabilities` for active tools. The only default-off experimental write surface left is the atomic patch (`ue_preview/apply/save_blueprint_patch_experimental`) plus the node-spawn read tool; the old single-writer tools were removed. See the [candidate preview](RELEASE_0.9.0_PREVIEW_EN.md).
 
 ## Explicit non-goals in 0.8.0
 

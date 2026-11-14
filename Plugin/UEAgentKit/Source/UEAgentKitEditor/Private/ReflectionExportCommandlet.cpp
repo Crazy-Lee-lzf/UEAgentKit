@@ -25,7 +25,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogReflectionExport, Log, All);
 namespace ReflectionExportPrivate
 {
 	constexpr const TCHAR* SchemaVersion = TEXT("reflection-1.0");
-	constexpr const TCHAR* ExporterVersion = TEXT("0.8.0");
+	constexpr const TCHAR* ExporterVersion = TEXT("0.9.0.dev1");
 	constexpr const TCHAR* ProfileName = TEXT("code-reflection");
 
 	FString MakeTypeStableId(const FString& CppName)

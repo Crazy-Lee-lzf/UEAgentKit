@@ -11,6 +11,8 @@
 #include "Dom/JsonValue.h"
 #include "Editor.h"
 #include "Engine/Engine.h"
+#include "Engine/Blueprint.h"
+#include "Engine/BlueprintGeneratedClass.h"
 #include "Engine/GameInstance.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
@@ -945,12 +947,77 @@ namespace UEAgentKitPieRuntime
 			return FullName;
 		}
 
-		TSharedRef<FJsonObject> MakeScalarItem(const FString& Name)
+		FString TruncateBoundedClassPath(const FString& Path, bool& bOutTruncated)
 		{
+			bOutTruncated = Path.Len() > MaxScalarClassPathChars;
+			return bOutTruncated ? Path.Left(MaxScalarClassPathChars) : Path;
+		}
+
+		/**
+		 * Additive declaration provenance from UE reflection only.
+		 *
+		 * Reports the reflected declaring UClass (which may be a base class) and,
+		 * when the class object really is Blueprint-generated, its trusted asset
+		 * path.  No filesystem path is derived, guessed or inspected, and no raw
+		 * object address is exposed.  Only resolved properties get this metadata.
+		 */
+		void AddScalarPropertyProvenance(const FProperty* Property, const TSharedRef<FJsonObject>& Item)
+		{
+			const UClass* DeclaringClass = Property != nullptr ? Property->GetOwnerClass() : nullptr;
+			if (DeclaringClass == nullptr)
+			{
+				Item->SetStringField(TEXT("declaringClassKind"), TEXT("unknown"));
+				return;
+			}
+
+			bool bPathTruncated = false;
+			Item->SetStringField(
+				TEXT("declaringClassPath"),
+				TruncateBoundedClassPath(DeclaringClass->GetPathName(), bPathTruncated));
+			Item->SetBoolField(TEXT("declaringClassPathTruncated"), bPathTruncated);
+			Item->SetStringField(TEXT("declaringClassName"), DeclaringClass->GetName());
+
+			const bool bBlueprintGenerated =
+				Cast<UBlueprintGeneratedClass>(DeclaringClass) != nullptr
+				|| DeclaringClass->HasAnyClassFlags(CLASS_CompiledFromBlueprint);
+			if (bBlueprintGenerated)
+			{
+				Item->SetStringField(TEXT("declaringClassKind"), TEXT("blueprint"));
+#if WITH_EDITORONLY_DATA
+				const UBlueprint* GeneratedBlueprint = DeclaringClass->ClassGeneratedBy != nullptr
+					? Cast<UBlueprint>(DeclaringClass->ClassGeneratedBy)
+					: nullptr;
+				if (GeneratedBlueprint != nullptr)
+				{
+					bool bBlueprintPathTruncated = false;
+					Item->SetStringField(
+						TEXT("declaringBlueprintPath"),
+						TruncateBoundedClassPath(
+							GeneratedBlueprint->GetPathName(),
+							bBlueprintPathTruncated));
+					Item->SetBoolField(
+						TEXT("declaringBlueprintPathTruncated"),
+						bBlueprintPathTruncated);
+				}
+#endif
+				return;
+			}
+			if (DeclaringClass->HasAnyClassFlags(CLASS_Native))
+			{
+				Item->SetStringField(TEXT("declaringClassKind"), TEXT("native"));
+				return;
+			}
+			Item->SetStringField(TEXT("declaringClassKind"), TEXT("unknown"));
+		}
+
+		TSharedRef<FJsonObject> MakeScalarItem(const FProperty* Property)
+		{
+			const FString Name = Property != nullptr ? Property->GetName() : FString();
 			TSharedRef<FJsonObject> Item = MakeShared<FJsonObject>();
 			Item->SetStringField(TEXT("name"), Name);
 			Item->SetStringField(TEXT("status"), TEXT("ok"));
 			Item->SetBoolField(TEXT("valueReturned"), true);
+			AddScalarPropertyProvenance(Property, Item);
 			return Item;
 		}
 
@@ -972,9 +1039,9 @@ namespace UEAgentKitPieRuntime
 			return Item;
 		}
 
-		TSharedRef<FJsonObject> MakeEnumItem(const FString& Name, const UEnum* Enum, const int64 RawValue)
+		TSharedRef<FJsonObject> MakeEnumItem(const FProperty* Property, const UEnum* Enum, const int64 RawValue)
 		{
-			TSharedRef<FJsonObject> Item = MakeScalarItem(Name);
+			TSharedRef<FJsonObject> Item = MakeScalarItem(Property);
 			const FString ShortName = EnumShortName(Enum, RawValue);
 			Item->SetStringField(TEXT("type"), TEXT("enum"));
 			Item->SetStringField(TEXT("enumName"), Enum != nullptr ? Enum->GetName() : FString());
@@ -1009,7 +1076,7 @@ namespace UEAgentKitPieRuntime
 			if (Property->IsA<FBoolProperty>())
 			{
 				const FBoolProperty* BoolProperty = static_cast<const FBoolProperty*>(Property);
-				TSharedRef<FJsonObject> Item = MakeScalarItem(Property->GetName());
+				TSharedRef<FJsonObject> Item = MakeScalarItem(Property);
 				Item->SetStringField(TEXT("type"), TEXT("bool"));
 				Item->SetBoolField(TEXT("value"), BoolProperty->GetPropertyValue_InContainer(Object));
 				return Item;
@@ -1017,7 +1084,7 @@ namespace UEAgentKitPieRuntime
 			if (Property->IsA<FIntProperty>())
 			{
 				const FIntProperty* IntProperty = static_cast<const FIntProperty*>(Property);
-				TSharedRef<FJsonObject> Item = MakeScalarItem(Property->GetName());
+				TSharedRef<FJsonObject> Item = MakeScalarItem(Property);
 				Item->SetStringField(TEXT("type"), TEXT("int32"));
 				Item->SetNumberField(TEXT("value"), static_cast<double>(IntProperty->GetPropertyValue_InContainer(Object)));
 				return Item;
@@ -1026,7 +1093,7 @@ namespace UEAgentKitPieRuntime
 			{
 				const FInt64Property* Int64Property = static_cast<const FInt64Property*>(Property);
 				const int64 Value = Int64Property->GetPropertyValue_InContainer(Object);
-				TSharedRef<FJsonObject> Item = MakeScalarItem(Property->GetName());
+				TSharedRef<FJsonObject> Item = MakeScalarItem(Property);
 				Item->SetStringField(TEXT("type"), TEXT("int64"));
 				if (Value >= -MaxExactScalarInt64 && Value <= MaxExactScalarInt64)
 				{
@@ -1043,7 +1110,7 @@ namespace UEAgentKitPieRuntime
 			if (Property->IsA<FUInt32Property>())
 			{
 				const FUInt32Property* UInt32Property = static_cast<const FUInt32Property*>(Property);
-				TSharedRef<FJsonObject> Item = MakeScalarItem(Property->GetName());
+				TSharedRef<FJsonObject> Item = MakeScalarItem(Property);
 				Item->SetStringField(TEXT("type"), TEXT("uint32"));
 				Item->SetNumberField(TEXT("value"), static_cast<double>(UInt32Property->GetPropertyValue_InContainer(Object)));
 				return Item;
@@ -1056,7 +1123,7 @@ namespace UEAgentKitPieRuntime
 				{
 					return MakeScalarFailure(Property->GetName(), TEXT("unknown"), TEXT("non-finite"), DeclaredType);
 				}
-				TSharedRef<FJsonObject> Item = MakeScalarItem(Property->GetName());
+				TSharedRef<FJsonObject> Item = MakeScalarItem(Property);
 				Item->SetStringField(TEXT("type"), TEXT("float32"));
 				Item->SetNumberField(TEXT("value"), static_cast<double>(Value));
 				return Item;
@@ -1069,7 +1136,7 @@ namespace UEAgentKitPieRuntime
 				{
 					return MakeScalarFailure(Property->GetName(), TEXT("unknown"), TEXT("non-finite"), DeclaredType);
 				}
-				TSharedRef<FJsonObject> Item = MakeScalarItem(Property->GetName());
+				TSharedRef<FJsonObject> Item = MakeScalarItem(Property);
 				Item->SetStringField(TEXT("type"), TEXT("float64"));
 				Item->SetNumberField(TEXT("value"), Value);
 				return Item;
@@ -1077,7 +1144,7 @@ namespace UEAgentKitPieRuntime
 			if (Property->IsA<FNameProperty>())
 			{
 				const FNameProperty* NameProperty = static_cast<const FNameProperty*>(Property);
-				TSharedRef<FJsonObject> Item = MakeScalarItem(Property->GetName());
+				TSharedRef<FJsonObject> Item = MakeScalarItem(Property);
 				Item->SetStringField(TEXT("type"), TEXT("name"));
 				Item->SetStringField(TEXT("value"), NameProperty->GetPropertyValue_InContainer(Object).ToString());
 				return Item;
@@ -1092,7 +1159,7 @@ namespace UEAgentKitPieRuntime
 					MaxStringChars,
 					bTruncated,
 					OriginalLength);
-				TSharedRef<FJsonObject> Item = MakeScalarItem(Property->GetName());
+				TSharedRef<FJsonObject> Item = MakeScalarItem(Property);
 				Item->SetStringField(TEXT("type"), TEXT("string"));
 				Item->SetStringField(TEXT("value"), Value);
 				Item->SetNumberField(TEXT("originalLength"), OriginalLength);
@@ -1106,7 +1173,7 @@ namespace UEAgentKitPieRuntime
 				const int64 RawValue = Underlying != nullptr
 					? Underlying->GetSignedIntPropertyValue(ValuePtr)
 					: 0;
-				return MakeEnumItem(Property->GetName(), EnumProperty->GetEnum(), RawValue);
+				return MakeEnumItem(Property, EnumProperty->GetEnum(), RawValue);
 			}
 			if (Property->IsA<FByteProperty>())
 			{
@@ -1115,9 +1182,9 @@ namespace UEAgentKitPieRuntime
 				UEnum* ByteEnum = ByteProperty->GetIntPropertyEnum();
 				if (ByteEnum != nullptr)
 				{
-					return MakeEnumItem(Property->GetName(), ByteEnum, static_cast<int64>(RawValue));
+					return MakeEnumItem(Property, ByteEnum, static_cast<int64>(RawValue));
 				}
-				TSharedRef<FJsonObject> Item = MakeScalarItem(Property->GetName());
+				TSharedRef<FJsonObject> Item = MakeScalarItem(Property);
 				Item->SetStringField(TEXT("type"), TEXT("uint8"));
 				Item->SetNumberField(TEXT("value"), static_cast<double>(RawValue));
 				return Item;

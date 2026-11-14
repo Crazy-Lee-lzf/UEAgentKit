@@ -27,7 +27,6 @@ from ue_agent_kit.memory_mount import (  # noqa: E402
     ErrorCode,
     HmacClaimVerifier,
     MemoryMountError,
-    MountLimits,
     ReadOnlyMountAdapter,
     TestClaimIssuer,
     build_integrity_receipt,

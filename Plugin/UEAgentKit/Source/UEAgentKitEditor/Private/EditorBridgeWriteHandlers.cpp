@@ -1,5 +1,6 @@
 #include "EditorBridge.h"
 #include "EditorBridgeHandlerUtils.h"
+#include "EditorBridgeRetainedLiveWrite.h"
 #include "LiveWriteOperationRegistry.h"
 #include "LiveWriteTransaction.h"
 #include "BlueprintWriteCommon.h"
@@ -238,6 +239,7 @@ bool FUEAgentKitEditorBridge::TryVerifyAssetPropertyLiveFastResult(
 	const FString& Operation,
 	const FString& AssetPath,
 	const TSharedPtr<FJsonObject>& Target,
+	const FString& TransactionId,
 	TSharedPtr<FJsonObject>& OutResult,
 	FString& OutErrorCode,
 	FString& OutErrorMessage) const
@@ -375,6 +377,15 @@ bool FUEAgentKitEditorBridge::TryVerifyAssetPropertyLiveFastResult(
 		}
 		Result->SetStringField(TEXT("targetKind"), TEXT("property"));
 		Result->SetBoolField(TEXT("targetResolved"), true);
+	}
+	else if (!TransactionId.IsEmpty())
+	{
+		// Failure keeps the helper's exact fail-closed code; success compares below.
+		if (!ReadRetainedLiveWriteFastValue(SessionId, Operation, AssetPath, TransactionId,
+			Asset, LiveWriteTransactionRecords, Result, Value, OutErrorCode, OutErrorMessage))
+		{
+			return false;
+		}
 	}
 	else
 	{

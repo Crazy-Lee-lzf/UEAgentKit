@@ -70,6 +70,7 @@ If a guard fails, stop writing and return the error. Follow [Backup and Rollback
 ## Further reference
 
 - [Detailed AI Usage](AI_USAGE.md)
+- [Programming and PIE inspection workflows](DEVELOPER_WORKFLOWS_EN.md)
 - [MCP server contract and Tool interfaces](../spec/MCP_SERVER.md)
 - [Project configuration and Write Policy](PROJECT_LEVEL_CONFIG.md)
 - [Build and Run](BUILD_AND_RUN.md)

@@ -7,6 +7,10 @@
 #include "BlueprintNodeBinder.h"
 #include "BlueprintNodeSpawner.h"
 #include "BlueprintVariableNodeSpawner.h"
+#include "BlueprintBoundEventNodeSpawner.h"
+#include "BlueprintComponentNodeSpawner.h"
+#include "BlueprintDelegateNodeSpawner.h"
+#include "Native/NativeNodeRegistry.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
@@ -23,6 +27,7 @@
 #include "K2Node_VariableSet.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "Kismet/KismetStringLibrary.h"
+#include "Kismet2/BlueprintEditorUtils.h"
 #include "ScopedTransaction.h"
 #include "HAL/FileManager.h"
 #include "Misc/PackageName.h"
@@ -39,10 +44,12 @@ DEFINE_LOG_CATEGORY_STATIC(LogUEAgentKitGraphEditExperimental, Log, All);
 
 namespace
 {
-	constexpr int32 MaxNodes = 16;
+	constexpr int32 MaxNodes = UEAgentKitBlueprintGraphEditExperimental::MaxNodesPerApply;
 	constexpr int32 MaxConnections = 24;
 	constexpr int32 MaxConnectionsPerNode = 8;
-	constexpr int32 MaxCoordinate = 100000;
+	constexpr int32 MaxOwnedLiterals = 8;
+	constexpr int32 MaxOwnedStringLiteral = 256;
+	constexpr int32 MaxCoordinate = UEAgentKitBlueprintGraphEditExperimental::MaxNodeCoordinate;
 	const TCHAR* const PreviewSchemaVersion = TEXT("ueak.graphpatch-edit-preview/1.0");
 	const TCHAR* const BranchClassPath = TEXT("/Script/BlueprintGraph.K2Node_IfThenElse");
 	const TCHAR* const SequenceClassPath = TEXT("/Script/BlueprintGraph.K2Node_ExecutionSequence");
@@ -51,8 +58,13 @@ namespace
 	const TCHAR* const VariableSetClassPath = TEXT("/Script/BlueprintGraph.K2Node_VariableSet");
 	const TCHAR* const NotBoolFunctionName = TEXT("Not_PreBool");
 
-	bool bTestOverrideSet = false;
-	bool bTestOverrideEnabled = false;
+
+	struct FOwnedLiteralSpec
+	{
+		FString PinName;
+		FString Type;
+		FString Value;
+	};
 
 	struct FNodeSpec
 	{
@@ -79,6 +91,16 @@ namespace
 		bool bCallFunction = false;
 		FString CallFunctionOwnerPath;
 		FString CallFunctionSignatureDigest;
+		// Bounded same-Blueprint pure function call.  The exact function graph,
+		// function name and reflected signature are re-resolved against the
+		// focused Blueprint before any mutation.
+		bool bOwnedCall = false;
+		FString OwnedBlueprintPath;
+		FString OwnedFunctionGraphGuid;
+		FString OwnedFunctionName;
+		FString OwnedSignatureDigest;
+		FString OwnedOwnerClassPath;
+		TArray<FOwnedLiteralSpec> InputLiterals;
 	};
 
 	struct FCallFunctionPinDef
@@ -98,48 +120,7 @@ namespace
 
 	const TCHAR* const CallFunctionOwnerPath = TEXT("/Script/Engine.KismetMathLibrary");
 
-	FString CanonicalCallFunctionSignature(
-		const FString& OwnerClassPath,
-		const FString& FunctionName,
-		const TArray<FCallFunctionPinDef>& Pins)
-	{
-		TArray<FCallFunctionPinDef> SortedPins = Pins;
-		SortedPins.Sort([](const FCallFunctionPinDef& Left, const FCallFunctionPinDef& Right)
-		{
-			return Left.Name < Right.Name;
-		});
-		FString Canonical = OwnerClassPath + TEXT("|") + FunctionName + TEXT("|");
-		for (int32 Index = 0; Index < SortedPins.Num(); ++Index)
-		{
-			if (Index > 0)
-			{
-				Canonical += TEXT("|");
-			}
-			Canonical += SortedPins[Index].Name
-				+ TEXT(":")
-				+ SortedPins[Index].Direction
-				+ TEXT(":")
-				+ SortedPins[Index].Type;
-		}
-		return Canonical;
-	}
 
-	bool ComputeCallFunctionSignatureDigest(
-		const FString& OwnerClassPath,
-		const FString& FunctionName,
-		const TArray<FCallFunctionPinDef>& Pins,
-		FString& OutDigest)
-	{
-		FString HexDigest;
-		if (!FBlueprintContextSha256::HashText(
-			CanonicalCallFunctionSignature(OwnerClassPath, FunctionName, Pins),
-			HexDigest))
-		{
-			return false;
-		}
-		OutDigest = TEXT("sha256:") + HexDigest;
-		return true;
-	}
 
 	TArray<FCallFunctionAllowlistEntry> GetCallFunctionAllowlist()
 	{
@@ -204,49 +185,8 @@ namespace
 		});
 	}
 
-	struct FExistingPinSpec
-	{
-		FString NodeGuid;
-		FString PinGuid;
-		FString PinName;
-		FString Direction;
-		FString Category;
-		FString SubCategory;
-		FString TypeToken;
-		int32 LinkCount = 0;
-	};
 
-	struct FConnectionSpec
-	{
-		FString From;
-		FString FromPin;
-		FString FromType;
-		FString To;
-		FString ToPin;
-		FString ToType;
-		bool bFromExisting = false;
-		bool bToExisting = false;
-		FExistingPinSpec FromExisting;
-		FExistingPinSpec ToExisting;
-		UEdGraphPin* FromExistingPin = nullptr;
-		UEdGraphPin* ToExistingPin = nullptr;
-	};
 
-	struct FEditPlan
-	{
-		FString AssetPath;
-		FString GraphGuid;
-		FString PackageRevision;
-		FString GraphFingerprint;
-		FString BeforeEdgeSetHash;
-		FString PlanId;
-		FString Operation;
-		bool bDisconnect = false;
-		bool bHasExistingPin = false;
-		TArray<FNodeSpec> Nodes;
-		TArray<FConnectionSpec> Connections;
-		TSharedPtr<FJsonObject> Preview;
-	};
 
 	struct FApplyReceipt
 	{
@@ -255,7 +195,11 @@ namespace
 		FString GraphFingerprint;
 		FString VariableBindingHash;
 		FString EdgeSetHash;
+		FString OwnedLiteralHash;
+		FString OwnedLiteralNodeGuid;
+		TMap<FString, FString> OwnedLiteralValues;
 		bool bRequiresEdgeSetHash = false;
+		bool bRequiresOwnedLiteralHash = false;
 		int32 NodeCount = 0;
 		int32 LinkCount = 0;
 	};
@@ -282,131 +226,11 @@ namespace
 		return false;
 	}
 
-	bool RejectUnknownParams(
-		const TSharedPtr<FJsonObject>& Params,
-		const TSet<FString>& Allowed,
-		FString& OutErrorCode,
-		FString& OutErrorMessage)
-	{
-		if (!Params.IsValid())
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-invalid-parameters"),
-				TEXT("Graph edit parameters must be one JSON object."));
-		}
-		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Params->Values)
-		{
-			if (!Allowed.Contains(Pair.Key))
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("graph-edit-unknown-parameter"),
-					FString::Printf(TEXT("Unknown graph edit parameter: %s"), *Pair.Key));
-			}
-		}
-		return true;
-	}
 
-	bool ReadString(
-		const TSharedPtr<FJsonObject>& Object,
-		const TCHAR* Key,
-		FString& OutValue,
-		FString& OutErrorCode,
-		FString& OutErrorMessage)
-	{
-		if (!Object.IsValid() || !Object->TryGetStringField(Key, OutValue) || OutValue.IsEmpty())
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-invalid-parameters"),
-				FString::Printf(TEXT("%s must be a non-empty string."), Key));
-		}
-		return true;
-	}
 
-	bool ReadInt(
-		const TSharedPtr<FJsonObject>& Object,
-		const TCHAR* Key,
-		int32& OutValue,
-		FString& OutErrorCode,
-		FString& OutErrorMessage)
-	{
-		double Number = 0.0;
-		if (!Object.IsValid() || !Object->TryGetNumberField(Key, Number))
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-invalid-parameters"),
-				FString::Printf(TEXT("%s must be an integer."), Key));
-		}
-		const int32 Rounded = FMath::RoundToInt(Number);
-		if (FMath::Abs(Number - static_cast<double>(Rounded)) > 0.0001
-			|| Rounded < -MaxCoordinate
-			|| Rounded > MaxCoordinate)
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-invalid-parameters"),
-				FString::Printf(TEXT("%s must be an integer between -%d and %d."), Key, MaxCoordinate, MaxCoordinate));
-		}
-		OutValue = Rounded;
-		return true;
-	}
 
-	bool IsTempId(const FString& Value)
-	{
-		if (!Value.StartsWith(TEXT("tmp:"), ESearchCase::CaseSensitive) || Value.Len() > 40)
-		{
-			return false;
-		}
-		for (int32 Index = 4; Index < Value.Len(); ++Index)
-		{
-			const TCHAR Character = Value[Index];
-			if (!FChar::IsAlnum(Character) && Character != TEXT('_') && Character != TEXT('-'))
-			{
-				return false;
-			}
-		}
-		return Value.Len() > 4;
-	}
 
-	bool IsSha256(const FString& Value)
-	{
-		if (!Value.StartsWith(TEXT("sha256:"), ESearchCase::CaseSensitive) || Value.Len() != 71)
-		{
-			return false;
-		}
-		for (int32 Index = 7; Index < Value.Len(); ++Index)
-		{
-			if (!FChar::IsHexDigit(Value[Index]))
-			{
-				return false;
-			}
-		}
-		return true;
-	}
 
-	bool IsSha1(const FString& Value)
-	{
-		if (!Value.StartsWith(TEXT("sha1:"), ESearchCase::CaseSensitive) || Value.Len() != 45)
-		{
-			return false;
-		}
-		for (int32 Index = 5; Index < Value.Len(); ++Index)
-		{
-			if (!FChar::IsHexDigit(Value[Index]))
-			{
-				return false;
-			}
-		}
-		return true;
-	}
 
 	/**
 	 * Canonical lowercase 8-4-4-4-12 GUID, the same shape the Blueprint
@@ -744,59 +568,16 @@ namespace
 			FString::Printf(TEXT("Unsupported variable accessor nodeType: %s"), *Node.NodeType));
 	}
 
-	bool ResolveVariableNodes(
-		TArray<FNodeSpec>& Nodes,
-		UBlueprint* Blueprint,
-		UEdGraph* Graph,
-		FString& OutErrorCode,
-		FString& OutErrorMessage)
-	{
-		bool bHasVariableAccessor = false;
-		for (const FNodeSpec& Node : Nodes)
-		{
-			bHasVariableAccessor = bHasVariableAccessor || Node.bVariableAccessor;
-		}
-		if (!bHasVariableAccessor)
-		{
-			return true;
-		}
-		if (!IsSupportedVariableAccessorGraph(Blueprint, Graph))
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-variable-graph-not-supported"),
-				TEXT("Variable accessor creation is limited to top-level event, function and macro graphs."));
-		}
-		for (FNodeSpec& Node : Nodes)
-		{
-			if (!ResolveVariableNode(Node, Blueprint, OutErrorCode, OutErrorMessage))
-			{
-				return false;
-			}
-		}
-		return true;
-	}
 
-	bool IsSafePinTransportName(const FString& Value)
-	{
-		if (Value.IsEmpty() || Value.Len() > 128)
-		{
-			return false;
-		}
-		for (const TCHAR Character : Value)
-		{
-			if (Character == TEXT('|')
-				|| Character == TEXT('\n')
-				|| Character == TEXT('\r')
-				|| Character < 0x20
-				|| Character == 0x7f)
-			{
-				return false;
-			}
-		}
-		return true;
-	}
+
+
+
+
+
+
+
+
+
 
 	bool ExistingPinTypeToken(const FEdGraphPinType& Type, FString& OutType)
 	{
@@ -812,334 +593,21 @@ namespace
 			OutType = TEXT("exec");
 			return true;
 		}
+		// Phase B: a wildcard pin has no type of its own until the K2 schema derives
+		// one from a connection (K2Node_Select / K2Node_PromotableOperator create
+		// their option/A/B/ReturnValue pins as PC_Wildcard).  It gets its own token
+		// so "unknown yet" can never be mistaken for "any concrete type".
+		if (Type.PinCategory == UEdGraphSchema_K2::PC_Wildcard)
+		{
+			OutType = TEXT("wildcard");
+			return true;
+		}
 		return VariableTypeToken(Type, OutType);
 	}
 
-	bool DeclaredExistingPinToken(
-		const FString& Category,
-		const FString& SubCategory,
-		FString& OutType)
-	{
-		if (Category.Equals(TEXT("exec"), ESearchCase::CaseSensitive))
-		{
-			OutType = TEXT("exec");
-			return true;
-		}
-		if (Category.Equals(TEXT("bool"), ESearchCase::CaseSensitive))
-		{
-			OutType = TEXT("bool");
-			return true;
-		}
-		if (Category.Equals(TEXT("int"), ESearchCase::CaseSensitive))
-		{
-			OutType = TEXT("int");
-			return true;
-		}
-		if (Category.Equals(TEXT("string"), ESearchCase::CaseSensitive))
-		{
-			OutType = TEXT("string");
-			return true;
-		}
-		if (Category.Equals(TEXT("real"), ESearchCase::CaseSensitive)
-			&& SubCategory.Equals(TEXT("double"), ESearchCase::CaseSensitive))
-		{
-			OutType = TEXT("double");
-			return true;
-		}
-		if (Category.Equals(TEXT("double"), ESearchCase::CaseSensitive))
-		{
-			OutType = TEXT("double");
-			return true;
-		}
-		return false;
-	}
 
-	bool ReadExistingPinSpec(
-		const TSharedPtr<FJsonObject>& Object,
-		FExistingPinSpec& OutSpec,
-		FString& OutErrorCode,
-		FString& OutErrorMessage)
-	{
-		if (!Object.IsValid())
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-invalid-existing-pin"),
-				TEXT("fromExisting/toExisting must be one JSON object."));
-		}
-		if (!RejectUnknownParams(
-			Object,
-			{
-				TEXT("nodeGuid"),
-				TEXT("pinGuid"),
-				TEXT("pinName"),
-				TEXT("direction"),
-				TEXT("category"),
-				TEXT("subCategory"),
-			},
-			OutErrorCode,
-			OutErrorMessage))
-		{
-			return false;
-		}
-		if (!ReadString(Object, TEXT("nodeGuid"), OutSpec.NodeGuid, OutErrorCode, OutErrorMessage)
-			|| !ReadString(Object, TEXT("pinGuid"), OutSpec.PinGuid, OutErrorCode, OutErrorMessage)
-			|| !ReadString(Object, TEXT("pinName"), OutSpec.PinName, OutErrorCode, OutErrorMessage)
-			|| !ReadString(Object, TEXT("direction"), OutSpec.Direction, OutErrorCode, OutErrorMessage)
-			|| !ReadString(Object, TEXT("category"), OutSpec.Category, OutErrorCode, OutErrorMessage))
-		{
-			return false;
-		}
-		if (!Object->TryGetStringField(TEXT("subCategory"), OutSpec.SubCategory))
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-invalid-existing-pin"),
-				TEXT("subCategory must be a string (use an empty string when unused)."));
-		}
-		if (!IsCanonicalVariableGuid(OutSpec.NodeGuid)
-			|| !IsCanonicalVariableGuid(OutSpec.PinGuid))
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-existing-pin-guid-invalid"),
-				TEXT("nodeGuid and pinGuid must be canonical lowercase GUIDs."));
-		}
-		if (!OutSpec.Direction.Equals(TEXT("input"), ESearchCase::CaseSensitive)
-			&& !OutSpec.Direction.Equals(TEXT("output"), ESearchCase::CaseSensitive))
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-existing-pin-direction-invalid"),
-				TEXT("direction must be input or output."));
-		}
-		if (!IsSafePinTransportName(OutSpec.PinName))
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-existing-pin-name-invalid"),
-				TEXT("pinName must be 1-128 characters without control characters or '|'."));
-		}
-		if (!DeclaredExistingPinToken(OutSpec.Category, OutSpec.SubCategory, OutSpec.TypeToken))
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-existing-pin-type-not-supported"),
-				TEXT("Existing pins must be exec/bool/int/double/string without containers, refs, const or weak pointers."));
-		}
-		return true;
-	}
 
-	/**
-	 * Resolve one exact existing pin in the focused graph.  This only reads;
-	 * the caller decides whether the direction/link state is legal for the plan.
-	 */
-	bool ResolveExistingPin(
-		UEdGraph* Graph,
-		FExistingPinSpec& Spec,
-		UEdGraphPin*& OutPin,
-		FString& OutErrorCode,
-		FString& OutErrorMessage,
-		const bool bAllowLinkedInput = false)
-	{
-		OutPin = nullptr;
-		if (Graph == nullptr)
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-existing-pin-graph-unavailable"),
-				TEXT("The exact focused graph must be resolved before an existing pin can be addressed."));
-		}
-		FGuid NodeGuid;
-		FGuid PinGuid;
-		if (!FGuid::ParseExact(Spec.NodeGuid, EGuidFormats::DigitsWithHyphensLower, NodeGuid)
-			|| !FGuid::ParseExact(Spec.PinGuid, EGuidFormats::DigitsWithHyphensLower, PinGuid))
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-existing-pin-guid-invalid"),
-				TEXT("nodeGuid/pinGuid could not be parsed as canonical GUIDs."));
-		}
 
-		UEdGraphNode* Node = nullptr;
-		for (UEdGraphNode* Candidate : Graph->Nodes)
-		{
-			if (Candidate != nullptr && Candidate->NodeGuid == NodeGuid)
-			{
-				if (Node != nullptr)
-				{
-					return Fail(
-						OutErrorCode,
-						OutErrorMessage,
-						TEXT("graph-edit-existing-node-ambiguous"),
-						TEXT("More than one node in the focused graph has the requested NodeGuid."));
-				}
-				Node = Candidate;
-			}
-		}
-		if (Node == nullptr)
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-existing-node-not-found"),
-				FString::Printf(TEXT("No node with GUID %s exists in the focused graph."), *Spec.NodeGuid));
-		}
-		if (Cast<UK2Node>(Node) == nullptr)
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-existing-node-not-k2"),
-				TEXT("Existing endpoints must be K2 Blueprint nodes."));
-		}
-
-		for (UEdGraphPin* Candidate : Node->Pins)
-		{
-			if (Candidate != nullptr && Candidate->PinId == PinGuid)
-			{
-				if (OutPin != nullptr)
-				{
-					return Fail(
-						OutErrorCode,
-						OutErrorMessage,
-						TEXT("graph-edit-existing-pin-ambiguous"),
-						TEXT("More than one pin on the node has the requested PinGuid."));
-				}
-				OutPin = Candidate;
-			}
-		}
-		if (OutPin == nullptr)
-		{
-			bool bNameDirectionSeen = false;
-			for (const UEdGraphPin* Candidate : Node->Pins)
-			{
-				if (Candidate == nullptr)
-				{
-					continue;
-				}
-				const FString CandidateDirection =
-					Candidate->Direction == EGPD_Input ? TEXT("input") : TEXT("output");
-				if (Candidate->PinName.ToString().Equals(Spec.PinName, ESearchCase::CaseSensitive)
-					&& CandidateDirection.Equals(Spec.Direction, ESearchCase::CaseSensitive))
-				{
-					bNameDirectionSeen = true;
-					break;
-				}
-			}
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				bNameDirectionSeen
-					? TEXT("graph-edit-existing-pin-guid-mismatch")
-					: TEXT("graph-edit-existing-pin-not-found"),
-				FString::Printf(
-					TEXT("Pin %s (%s) was not found on node %s."),
-					*Spec.PinName,
-					*Spec.Direction,
-					*Spec.NodeGuid));
-		}
-
-		const FString ActualDirection = OutPin->Direction == EGPD_Input ? TEXT("input") : TEXT("output");
-		if (!ActualDirection.Equals(Spec.Direction, ESearchCase::CaseSensitive)
-			|| !OutPin->PinName.ToString().Equals(Spec.PinName, ESearchCase::CaseSensitive))
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-existing-pin-metadata-mismatch"),
-				TEXT("The existing pin does not match the requested name/direction."));
-		}
-		const FString ActualCategory = OutPin->PinType.PinCategory.ToString();
-		const FString ActualSubCategory = OutPin->PinType.PinSubCategory.ToString();
-		if (!ActualCategory.Equals(Spec.Category, ESearchCase::CaseSensitive)
-			|| !ActualSubCategory.Equals(Spec.SubCategory, ESearchCase::CaseSensitive))
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-existing-pin-metadata-mismatch"),
-				FString::Printf(
-					TEXT("Pin type is %s/%s, not the declared %s/%s."),
-					*ActualCategory,
-					*ActualSubCategory,
-					*Spec.Category,
-					*Spec.SubCategory));
-		}
-		FString ActualType;
-		if (!ExistingPinTypeToken(OutPin->PinType, ActualType))
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-existing-pin-type-not-supported"),
-				TEXT("The existing pin is not a plain exec/bool/int/double/string pin."));
-		}
-		if (!ActualType.Equals(Spec.TypeToken, ESearchCase::CaseSensitive))
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-existing-pin-type-mismatch"),
-				TEXT("The existing pin's supported type token changed after Preview."));
-		}
-		if (OutPin->bHidden || OutPin->bOrphanedPin || OutPin->bNotConnectable)
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-existing-pin-not-connectable"),
-				TEXT("Hidden, orphaned or non-connectable pins cannot be endpoints."));
-		}
-		if (OutPin->ParentPin != nullptr || OutPin->SubPins.Num() > 0)
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-existing-pin-split"),
-				TEXT("Split/sub pins cannot be endpoints in this slice."));
-		}
-		if (OutPin->Direction == EGPD_Input && OutPin->LinkedTo.Num() != 0 && !bAllowLinkedInput)
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-existing-pin-already-linked"),
-				TEXT("The existing input pin is already connected; this slice never breaks existing links."));
-		}
-		Spec.LinkCount = OutPin->LinkedTo.Num();
-		return true;
-	}
-
-	bool ConnectionsUseExistingPins(const TSharedPtr<FJsonObject>& Params)
-	{
-		const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
-		if (!Params.IsValid()
-			|| !Params->TryGetArrayField(TEXT("connections"), Values)
-			|| Values == nullptr)
-		{
-			return false;
-		}
-		for (const TSharedPtr<FJsonValue>& Value : *Values)
-		{
-			const TSharedPtr<FJsonObject>* Object = nullptr;
-			if (Value.IsValid() && Value->TryGetObject(Object) && Object != nullptr
-				&& ((*Object)->HasField(TEXT("fromExisting"))
-					|| (*Object)->HasField(TEXT("toExisting"))))
-			{
-				return true;
-			}
-		}
-		return false;
-	}
 
 	bool ConfigureNodeType(
 		const FString& NodeType,
@@ -1239,6 +707,12 @@ namespace
 			OutNode.NodeClassPath = CallFunctionClassPath;
 			return true;
 		}
+		if (NodeType == TEXT("call_owned_pure_function"))
+		{
+			OutNode.bOwnedCall = true;
+			OutNode.NodeClassPath = CallFunctionClassPath;
+			return true;
+		}
 		if (NodeType == TEXT("variable_get") || NodeType == TEXT("variable_set"))
 		{
 			// Pins and exact types depend on the existing member variable and
@@ -1254,7 +728,7 @@ namespace
 			OutErrorCode,
 			OutErrorMessage,
 			TEXT("graph-edit-node-type-not-allowed"),
-			TEXT("Supported nodeTypes: branch, sequence, not_bool, bool_or, int_add, int_equal, double_add, string_concat, call_function, variable_get, variable_set."));
+			TEXT("Supported nodeTypes: branch, sequence, not_bool, bool_or, int_add, int_equal, double_add, string_concat, call_function, call_owned_pure_function, variable_get, variable_set."));
 	}
 
 	const FNodeSpec* FindNode(const TArray<FNodeSpec>& Nodes, const FString& TempId)
@@ -1265,1566 +739,17 @@ namespace
 		});
 	}
 
-	bool ParseCallFunction(
-		const TSharedPtr<FJsonObject>& Object,
-		FNodeSpec& OutNode,
-		FString& OutErrorCode,
-		FString& OutErrorMessage)
-	{
-		const TSharedPtr<FJsonObject>* CallFunctionObject = nullptr;
-		if (!Object->TryGetObjectField(TEXT("callFunction"), CallFunctionObject)
-			|| CallFunctionObject == nullptr)
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-call-function-invalid"),
-				TEXT("call_function requires one exact callFunction object."));
-		}
-		if (!RejectUnknownParams(
-			*CallFunctionObject,
-			{
-				TEXT("ownerClassPath"),
-				TEXT("functionName"),
-				TEXT("signatureDigest"),
-				TEXT("pins"),
-			},
-			OutErrorCode,
-			OutErrorMessage))
-		{
-			return false;
-		}
-		FString OwnerClassPath;
-		FString FunctionName;
-		FString SignatureDigest;
-		if (!ReadString(
-				*CallFunctionObject,
-				TEXT("ownerClassPath"),
-				OwnerClassPath,
-				OutErrorCode,
-				OutErrorMessage)
-			|| !ReadString(
-				*CallFunctionObject,
-				TEXT("functionName"),
-				FunctionName,
-				OutErrorCode,
-				OutErrorMessage)
-			|| !ReadString(
-				*CallFunctionObject,
-				TEXT("signatureDigest"),
-				SignatureDigest,
-				OutErrorCode,
-				OutErrorMessage))
-		{
-			return false;
-		}
-		const FCallFunctionAllowlistEntry* Entry = FindCallFunctionAllowlistEntry(
-			OwnerClassPath,
-			FunctionName);
-		if (Entry == nullptr)
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-call-function-not-allowlisted"),
-				TEXT("The owner/function is not in the fixed engine pure static allowlist."));
-		}
-		if (!IsSha256(SignatureDigest)
-			|| !SignatureDigest.Equals(Entry->SignatureDigest, ESearchCase::CaseSensitive))
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-call-function-signature-mismatch"),
-				TEXT("signatureDigest does not match the allowlisted reflected signature."));
-		}
 
-		const TArray<TSharedPtr<FJsonValue>>* PinValues = nullptr;
-		if (!(*CallFunctionObject)->TryGetArrayField(TEXT("pins"), PinValues)
-			|| PinValues == nullptr
-			|| PinValues->IsEmpty()
-			|| PinValues->Num() > 16)
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-call-function-pin-mismatch"),
-				TEXT("pins must contain the exact reflected input/output pin schema."));
-		}
-		TArray<FCallFunctionPinDef> Pins;
-		for (const TSharedPtr<FJsonValue>& PinValue : *PinValues)
-		{
-			const TSharedPtr<FJsonObject>* PinObject = nullptr;
-			if (!PinValue.IsValid()
-				|| !PinValue->TryGetObject(PinObject)
-				|| PinObject == nullptr)
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("graph-edit-call-function-pin-mismatch"),
-					TEXT("Each callFunction pin must be an object."));
-			}
-			if (!RejectUnknownParams(
-				*PinObject,
-				{ TEXT("name"), TEXT("direction"), TEXT("type") },
-				OutErrorCode,
-				OutErrorMessage))
-			{
-				return false;
-			}
-			FCallFunctionPinDef Pin;
-			if (!ReadString(*PinObject, TEXT("name"), Pin.Name, OutErrorCode, OutErrorMessage)
-				|| !ReadString(
-					*PinObject,
-					TEXT("direction"),
-					Pin.Direction,
-					OutErrorCode,
-					OutErrorMessage)
-				|| !ReadString(*PinObject, TEXT("type"), Pin.Type, OutErrorCode, OutErrorMessage))
-			{
-				return false;
-			}
-			if (!IsSafePinTransportName(Pin.Name)
-				|| (Pin.Direction != TEXT("input") && Pin.Direction != TEXT("output"))
-				|| (Pin.Type != TEXT("exec")
-					&& Pin.Type != TEXT("bool")
-					&& Pin.Type != TEXT("int")
-					&& Pin.Type != TEXT("double")
-					&& Pin.Type != TEXT("string")))
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("graph-edit-call-function-pin-mismatch"),
-					TEXT("callFunction pins must be exact named primitive input/output pins."));
-			}
-			Pins.Add(MoveTemp(Pin));
-		}
-		auto SortPins = [](const TArray<FCallFunctionPinDef>& Source)
-		{
-			TArray<FCallFunctionPinDef> Sorted = Source;
-			Sorted.Sort([](const FCallFunctionPinDef& Left, const FCallFunctionPinDef& Right)
-			{
-				if (Left.Name != Right.Name)
-				{
-					return Left.Name < Right.Name;
-				}
-				return Left.Direction < Right.Direction;
-			});
-			return Sorted;
-		};
-		const TArray<FCallFunctionPinDef> ActualPins = SortPins(Pins);
-		const TArray<FCallFunctionPinDef> ExpectedPins = SortPins(Entry->Pins);
-		bool bPinsMatch = ActualPins.Num() == ExpectedPins.Num();
-		if (bPinsMatch)
-		{
-			for (int32 Index = 0; Index < ActualPins.Num(); ++Index)
-			{
-				bPinsMatch = bPinsMatch
-					&& ActualPins[Index].Name.Equals(ExpectedPins[Index].Name, ESearchCase::CaseSensitive)
-					&& ActualPins[Index].Direction.Equals(ExpectedPins[Index].Direction, ESearchCase::CaseSensitive)
-					&& ActualPins[Index].Type.Equals(ExpectedPins[Index].Type, ESearchCase::CaseSensitive);
-			}
-		}
-		if (!bPinsMatch)
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-call-function-pin-mismatch"),
-				TEXT("The declared pins do not match the allowlisted reflected pin schema."));
-		}
-		FString ComputedDigest;
-		if (!ComputeCallFunctionSignatureDigest(
-				OwnerClassPath,
-				FunctionName,
-				Pins,
-				ComputedDigest)
-			|| !ComputedDigest.Equals(Entry->SignatureDigest, ESearchCase::CaseSensitive))
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-call-function-signature-mismatch"),
-				TEXT("The declared pins do not hash to the allowlisted signature."));
-		}
 
-		OutNode.bCallFunction = true;
-		OutNode.NodeClassPath = CallFunctionClassPath;
-		OutNode.CallFunctionOwnerPath = OwnerClassPath;
-		OutNode.FunctionName = FunctionName;
-		OutNode.CallFunctionSignatureDigest = SignatureDigest;
-		OutNode.InputPins.Reset();
-		OutNode.OutputPins.Reset();
-		OutNode.InputPinTypes.Reset();
-		OutNode.OutputPinTypes.Reset();
-		for (const FCallFunctionPinDef& Pin : Pins)
-		{
-			if (Pin.Direction == TEXT("input"))
-			{
-				OutNode.InputPins.Add(Pin.Name);
-				OutNode.InputPinTypes.Add(Pin.Name, Pin.Type);
-			}
-			else
-			{
-				OutNode.OutputPins.Add(Pin.Name);
-				OutNode.OutputPinTypes.Add(Pin.Name, Pin.Type);
-			}
-		}
-		return true;
-	}
 
-	bool ParseNodes(
-		const TSharedPtr<FJsonObject>& Params,
-		TArray<FNodeSpec>& OutNodes,
-		FString& OutErrorCode,
-		FString& OutErrorMessage)
-	{
-		const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
-		if (!Params->TryGetArrayField(TEXT("nodes"), Values)
-			|| Values == nullptr
-			|| Values->Num() > MaxNodes)
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-invalid-nodes"),
-				FString::Printf(TEXT("nodes must contain between 0 and %d node objects."), MaxNodes));
-		}
 
-		TSet<FString> SeenTempIds;
-		for (const TSharedPtr<FJsonValue>& Value : *Values)
-		{
-			const TSharedPtr<FJsonObject>* Object = nullptr;
-			if (!Value.IsValid() || !Value->TryGetObject(Object) || Object == nullptr)
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("graph-edit-invalid-nodes"),
-					TEXT("Each node entry must be an object."));
-			}
-			if (!RejectUnknownParams(
-				*Object,
-				{
-					TEXT("tempId"),
-					TEXT("nodeType"),
-					TEXT("x"),
-					TEXT("y"),
-					TEXT("variableName"),
-					TEXT("variableGuid"),
-					TEXT("variableType"),
-					TEXT("callFunction"),
-				},
-				OutErrorCode,
-				OutErrorMessage))
-			{
-				return false;
-			}
-			FNodeSpec Node;
-			if (!ReadString(*Object, TEXT("tempId"), Node.TempId, OutErrorCode, OutErrorMessage)
-				|| !ReadString(*Object, TEXT("nodeType"), Node.NodeType, OutErrorCode, OutErrorMessage)
-				|| !ReadInt(*Object, TEXT("x"), Node.X, OutErrorCode, OutErrorMessage)
-				|| !ReadInt(*Object, TEXT("y"), Node.Y, OutErrorCode, OutErrorMessage))
-			{
-				return false;
-			}
-			if (!IsTempId(Node.TempId))
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("graph-edit-temp-id-invalid"),
-					TEXT("tempId must be 'tmp:' followed by 1-36 ASCII alphanumeric, '_' or '-' characters."));
-			}
-			if (SeenTempIds.Contains(Node.TempId))
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("graph-edit-temp-id-duplicate"),
-					FString::Printf(TEXT("Duplicate tempId: %s"), *Node.TempId));
-			}
-			SeenTempIds.Add(Node.TempId);
-			if (!ConfigureNodeType(Node.NodeType, Node, OutErrorCode, OutErrorMessage))
-			{
-				return false;
-			}
-			const bool bHasVariableFields = (*Object)->HasField(TEXT("variableName"))
-				|| (*Object)->HasField(TEXT("variableGuid"))
-				|| (*Object)->HasField(TEXT("variableType"));
-			const bool bHasCallFunctionField = (*Object)->HasField(TEXT("callFunction"));
-			if (Node.bCallFunction)
-			{
-				if (bHasVariableFields)
-				{
-					return Fail(
-						OutErrorCode,
-						OutErrorMessage,
-						TEXT("graph-edit-variable-field-not-allowed"),
-						TEXT("call_function does not accept variableName/variableGuid/variableType."));
-				}
-				if (!ParseCallFunction(
-					*Object,
-					Node,
-					OutErrorCode,
-					OutErrorMessage))
-				{
-					return false;
-				}
-			}
-			else if (Node.bVariableAccessor)
-			{
-				if (bHasCallFunctionField)
-				{
-					return Fail(
-						OutErrorCode,
-						OutErrorMessage,
-						TEXT("graph-edit-call-function-field-not-allowed"),
-						TEXT("variable accessor nodeTypes do not accept callFunction."));
-				}
-				if (!ReadString(*Object, TEXT("variableName"), Node.VariableName, OutErrorCode, OutErrorMessage)
-					|| !ReadString(*Object, TEXT("variableGuid"), Node.VariableGuid, OutErrorCode, OutErrorMessage)
-					|| !ReadString(*Object, TEXT("variableType"), Node.VariableType, OutErrorCode, OutErrorMessage))
-				{
-					return false;
-				}
-			}
-			else if (bHasVariableFields || bHasCallFunctionField)
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					bHasCallFunctionField
-						? TEXT("graph-edit-call-function-field-not-allowed")
-						: TEXT("graph-edit-variable-field-not-allowed"),
-					FString::Printf(
-						TEXT("nodeType %s does not accept variable or callFunction fields."),
-						*Node.NodeType));
-			}
-			OutNodes.Add(MoveTemp(Node));
-		}
-		return true;
-	}
 
-	bool ParseConnections(
-		const TSharedPtr<FJsonObject>& Params,
-		const TArray<FNodeSpec>& Nodes,
-		UEdGraph* Graph,
-		const bool bDisconnect,
-		TArray<FConnectionSpec>& OutConnections,
-		FString& OutErrorCode,
-		FString& OutErrorMessage)
-	{
-		const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
-		if (!Params->TryGetArrayField(TEXT("connections"), Values) || Values == nullptr)
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-invalid-connections"),
-				TEXT("connections must be an array (it may be empty)."));
-		}
-		if (Values->Num() > MaxConnections)
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-invalid-connections"),
-				FString::Printf(TEXT("connections may contain at most %d entries."), MaxConnections));
-		}
-		if (bDisconnect && (!Nodes.IsEmpty() || Values->Num() != 1))
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-disconnect-invalid-plan"),
-				TEXT("A disconnect plan requires exactly one connection and nodes=[]."));
-		}
 
-		TSet<FString> SeenTargets;
-		TMap<FString, int32> ConnectionCounts;
-		for (const TSharedPtr<FJsonValue>& Value : *Values)
-		{
-			const TSharedPtr<FJsonObject>* Object = nullptr;
-			if (!Value.IsValid() || !Value->TryGetObject(Object) || Object == nullptr)
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("graph-edit-invalid-connections"),
-					TEXT("Each connection entry must be an object."));
-			}
-			if (!RejectUnknownParams(
-				*Object,
-				{
-					TEXT("from"),
-					TEXT("fromPin"),
-					TEXT("to"),
-					TEXT("toPin"),
-					TEXT("fromExisting"),
-					TEXT("toExisting"),
-				},
-				OutErrorCode,
-				OutErrorMessage))
-			{
-				return false;
-			}
 
-			const bool bHasFromExistingField = (*Object)->HasField(TEXT("fromExisting"));
-			const bool bHasToExistingField = (*Object)->HasField(TEXT("toExisting"));
-			if (bDisconnect && !(bHasFromExistingField && bHasToExistingField))
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("graph-edit-disconnect-endpoints"),
-					TEXT("A disconnect connection requires both fromExisting and toExisting."));
-			}
-			if (bHasFromExistingField && bHasToExistingField)
-			{
-				if ((*Object)->HasField(TEXT("from"))
-					|| (*Object)->HasField(TEXT("fromPin"))
-					|| (*Object)->HasField(TEXT("to"))
-					|| (*Object)->HasField(TEXT("toPin")))
-				{
-					return Fail(
-						OutErrorCode,
-						OutErrorMessage,
-						TEXT("graph-edit-existing-endpoint-conflict"),
-						TEXT("A pure existing-to-existing connection cannot carry temp-id endpoints."));
-				}
-				FConnectionSpec ExistingConnection;
-				const TSharedPtr<FJsonObject>* FromObject = nullptr;
-				const TSharedPtr<FJsonObject>* ToObject = nullptr;
-				if (!(*Object)->TryGetObjectField(TEXT("fromExisting"), FromObject)
-					|| FromObject == nullptr
-					|| !(*Object)->TryGetObjectField(TEXT("toExisting"), ToObject)
-					|| ToObject == nullptr
-					|| !ReadExistingPinSpec(
-						*FromObject,
-						ExistingConnection.FromExisting,
-						OutErrorCode,
-						OutErrorMessage)
-					|| !ReadExistingPinSpec(
-						*ToObject,
-						ExistingConnection.ToExisting,
-						OutErrorCode,
-						OutErrorMessage))
-				{
-					return false;
-				}
-				if (!ExistingConnection.FromExisting.Direction.Equals(TEXT("output"), ESearchCase::CaseSensitive)
-					|| !ExistingConnection.ToExisting.Direction.Equals(TEXT("input"), ESearchCase::CaseSensitive))
-				{
-					return Fail(
-						OutErrorCode,
-						OutErrorMessage,
-						TEXT("graph-edit-existing-pin-direction"),
-						TEXT("Pure existing connections require fromExisting=output and toExisting=input."));
-				}
-				if (ExistingConnection.FromExisting.NodeGuid.Equals(
-					ExistingConnection.ToExisting.NodeGuid,
-					ESearchCase::CaseSensitive))
-				{
-					return Fail(
-						OutErrorCode,
-						OutErrorMessage,
-						TEXT("graph-edit-self-connection"),
-						TEXT("The two existing endpoints must belong to different nodes."));
-				}
-				ExistingConnection.bFromExisting = true;
-				ExistingConnection.bToExisting = true;
-				if (!ResolveExistingPin(
-					Graph,
-					ExistingConnection.FromExisting,
-					ExistingConnection.FromExistingPin,
-					OutErrorCode,
-					OutErrorMessage)
-					|| !ResolveExistingPin(
-						Graph,
-						ExistingConnection.ToExisting,
-						ExistingConnection.ToExistingPin,
-						OutErrorCode,
-						OutErrorMessage,
-						bDisconnect))
-				{
-					return false;
-				}
-				ExistingConnection.FromType = ExistingConnection.FromExisting.TypeToken;
-				ExistingConnection.ToType = ExistingConnection.ToExisting.TypeToken;
-				if (!ExistingConnection.FromType.Equals(
-					ExistingConnection.ToType,
-					ESearchCase::CaseSensitive))
-				{
-					return Fail(
-						OutErrorCode,
-						OutErrorMessage,
-						TEXT("graph-edit-pin-type-mismatch"),
-						FString::Printf(
-							TEXT("Cannot connect existing %s (%s) to existing %s (%s)."),
-							*ExistingConnection.FromExisting.PinName,
-							*ExistingConnection.FromType,
-							*ExistingConnection.ToExisting.PinName,
-							*ExistingConnection.ToType));
-				}
-				const FString TargetKey = FString::Printf(
-					TEXT("existing:%s|%s"),
-					*ExistingConnection.ToExisting.NodeGuid,
-					*ExistingConnection.ToExisting.PinGuid);
-				if (SeenTargets.Contains(TargetKey))
-				{
-					return Fail(
-						OutErrorCode,
-						OutErrorMessage,
-						TEXT("graph-edit-connection-duplicate"),
-						FString::Printf(TEXT("Input pin already has a connection in this plan: %s"), *TargetKey));
-				}
-				SeenTargets.Add(TargetKey);
-				if (bDisconnect)
-				{
-					if (!ExistingConnection.FromExistingPin->LinkedTo.Contains(
-							ExistingConnection.ToExistingPin)
-						|| !ExistingConnection.ToExistingPin->LinkedTo.Contains(
-							ExistingConnection.FromExistingPin))
-					{
-						return Fail(
-							OutErrorCode,
-							OutErrorMessage,
-							TEXT("graph-edit-disconnect-edge-not-found"),
-							TEXT("The exact existing edge does not exist between the two declared pins."));
-					}
-					if (ExistingConnection.ToExistingPin->LinkedTo.Num() != 1)
-					{
-						return Fail(
-							OutErrorCode,
-							OutErrorMessage,
-							TEXT("graph-edit-disconnect-ambiguous"),
-							TEXT("The declared existing input has more than one link; refusing an ambiguous disconnect."));
-					}
-				}
-				else if (!ValidateSchemaConnection(
-					Graph,
-					ExistingConnection.FromExistingPin,
-					ExistingConnection.ToExistingPin,
-					OutErrorCode,
-					OutErrorMessage))
-				{
-					return false;
-				}
-				OutConnections.Add(MoveTemp(ExistingConnection));
-				continue;
-			}
 
-			FConnectionSpec Connection;
-			if (bHasFromExistingField)
-			{
-				if ((*Object)->HasField(TEXT("from")) || (*Object)->HasField(TEXT("fromPin")))
-				{
-					return Fail(
-						OutErrorCode,
-						OutErrorMessage,
-						TEXT("graph-edit-existing-endpoint-conflict"),
-						TEXT("fromExisting cannot be combined with from/fromPin."));
-				}
-				const TSharedPtr<FJsonObject>* ExistingObject = nullptr;
-				if (!(*Object)->TryGetObjectField(TEXT("fromExisting"), ExistingObject)
-					|| ExistingObject == nullptr
-					|| !ReadExistingPinSpec(
-						*ExistingObject,
-						Connection.FromExisting,
-						OutErrorCode,
-						OutErrorMessage))
-				{
-					return false;
-				}
-				if (!Connection.FromExisting.Direction.Equals(TEXT("output"), ESearchCase::CaseSensitive))
-				{
-					return Fail(
-						OutErrorCode,
-						OutErrorMessage,
-						TEXT("graph-edit-existing-pin-direction"),
-						TEXT("fromExisting must be an output pin."));
-				}
-				Connection.bFromExisting = true;
-			}
-			else if (!ReadString(*Object, TEXT("from"), Connection.From, OutErrorCode, OutErrorMessage)
-				|| !ReadString(*Object, TEXT("fromPin"), Connection.FromPin, OutErrorCode, OutErrorMessage))
-			{
-				return false;
-			}
 
-			if (bHasToExistingField)
-			{
-				if ((*Object)->HasField(TEXT("to")) || (*Object)->HasField(TEXT("toPin")))
-				{
-					return Fail(
-						OutErrorCode,
-						OutErrorMessage,
-						TEXT("graph-edit-existing-endpoint-conflict"),
-						TEXT("toExisting cannot be combined with to/toPin."));
-				}
-				const TSharedPtr<FJsonObject>* ExistingObject = nullptr;
-				if (!(*Object)->TryGetObjectField(TEXT("toExisting"), ExistingObject)
-					|| ExistingObject == nullptr
-					|| !ReadExistingPinSpec(
-						*ExistingObject,
-						Connection.ToExisting,
-						OutErrorCode,
-						OutErrorMessage))
-				{
-					return false;
-				}
-				if (!Connection.ToExisting.Direction.Equals(TEXT("input"), ESearchCase::CaseSensitive))
-				{
-					return Fail(
-						OutErrorCode,
-						OutErrorMessage,
-						TEXT("graph-edit-existing-pin-direction"),
-						TEXT("toExisting must be an input pin."));
-				}
-				Connection.bToExisting = true;
-			}
-			else if (!ReadString(*Object, TEXT("to"), Connection.To, OutErrorCode, OutErrorMessage)
-				|| !ReadString(*Object, TEXT("toPin"), Connection.ToPin, OutErrorCode, OutErrorMessage))
-			{
-				return false;
-			}
 
-			if (Connection.bFromExisting)
-			{
-				if (Connection.FromExisting.TypeToken.IsEmpty())
-				{
-					return Fail(
-						OutErrorCode,
-						OutErrorMessage,
-						TEXT("graph-edit-existing-pin-type-not-supported"),
-						TEXT("The existing source pin type is unsupported."));
-				}
-				const FNodeSpec* To = FindNode(Nodes, Connection.To);
-				if (To == nullptr)
-				{
-					return Fail(
-						OutErrorCode,
-						OutErrorMessage,
-						TEXT("graph-edit-node-reference-unknown"),
-						FString::Printf(
-							TEXT("Connection references an unknown tempId: %s"),
-							*Connection.To));
-				}
-				const FString* ToType = To->InputPinTypes.Find(Connection.ToPin);
-				if (ToType == nullptr)
-				{
-					return Fail(
-						OutErrorCode,
-						OutErrorMessage,
-						TEXT("graph-edit-pin-not-allowed"),
-						FString::Printf(
-							TEXT("%s is not a supported input pin of %s; allowed: %s."),
-							*Connection.ToPin,
-							*To->NodeType,
-							*FString::Join(To->InputPins, TEXT(", "))));
-				}
-				if (!ResolveExistingPin(
-					Graph,
-					Connection.FromExisting,
-					Connection.FromExistingPin,
-					OutErrorCode,
-					OutErrorMessage))
-				{
-					return false;
-				}
-				Connection.FromType = Connection.FromExisting.TypeToken;
-				Connection.ToType = *ToType;
-			}
-			else if (Connection.bToExisting)
-			{
-				if (Connection.ToExisting.TypeToken.IsEmpty())
-				{
-					return Fail(
-						OutErrorCode,
-						OutErrorMessage,
-						TEXT("graph-edit-existing-pin-type-not-supported"),
-						TEXT("The existing target pin type is unsupported."));
-				}
-				const FNodeSpec* From = FindNode(Nodes, Connection.From);
-				if (From == nullptr)
-				{
-					return Fail(
-						OutErrorCode,
-						OutErrorMessage,
-						TEXT("graph-edit-node-reference-unknown"),
-						FString::Printf(
-							TEXT("Connection references an unknown tempId: %s"),
-							*Connection.From));
-				}
-				const FString* FromType = From->OutputPinTypes.Find(Connection.FromPin);
-				if (FromType == nullptr)
-				{
-					return Fail(
-						OutErrorCode,
-						OutErrorMessage,
-						TEXT("graph-edit-pin-not-allowed"),
-						FString::Printf(
-							TEXT("%s is not a supported output pin of %s; allowed: %s."),
-							*Connection.FromPin,
-							*From->NodeType,
-							*FString::Join(From->OutputPins, TEXT(", "))));
-				}
-				if (!ResolveExistingPin(
-					Graph,
-					Connection.ToExisting,
-					Connection.ToExistingPin,
-					OutErrorCode,
-					OutErrorMessage))
-				{
-					return false;
-				}
-				Connection.FromType = *FromType;
-				Connection.ToType = Connection.ToExisting.TypeToken;
-			}
-			else
-			{
-				const FNodeSpec* From = FindNode(Nodes, Connection.From);
-				const FNodeSpec* To = FindNode(Nodes, Connection.To);
-				if (From == nullptr || To == nullptr)
-				{
-					return Fail(
-						OutErrorCode,
-						OutErrorMessage,
-						TEXT("graph-edit-node-reference-unknown"),
-						FString::Printf(
-							TEXT("Connection references an unknown tempId: %s -> %s"),
-							*Connection.From,
-							*Connection.To));
-				}
-				if (Connection.From.Equals(Connection.To, ESearchCase::CaseSensitive))
-				{
-					return Fail(
-						OutErrorCode,
-						OutErrorMessage,
-						TEXT("graph-edit-self-connection"),
-						TEXT("A node cannot connect to itself in this experimental slice."));
-				}
-				const FString* FromType = From->OutputPinTypes.Find(Connection.FromPin);
-				if (FromType == nullptr)
-				{
-					return Fail(
-						OutErrorCode,
-						OutErrorMessage,
-						TEXT("graph-edit-pin-not-allowed"),
-						FString::Printf(
-							TEXT("%s is not a supported output pin of %s; allowed: %s."),
-							*Connection.FromPin,
-							*From->NodeType,
-							*FString::Join(From->OutputPins, TEXT(", "))));
-				}
-				const FString* ToType = To->InputPinTypes.Find(Connection.ToPin);
-				if (ToType == nullptr)
-				{
-					return Fail(
-						OutErrorCode,
-						OutErrorMessage,
-						TEXT("graph-edit-pin-not-allowed"),
-						FString::Printf(
-							TEXT("%s is not a supported input pin of %s; allowed: %s."),
-							*Connection.ToPin,
-							*To->NodeType,
-							*FString::Join(To->InputPins, TEXT(", "))));
-				}
-				Connection.FromType = *FromType;
-				Connection.ToType = *ToType;
-			}
 
-			if (!Connection.FromType.Equals(Connection.ToType, ESearchCase::CaseSensitive))
-			{
-				const FString FromLabel = Connection.bFromExisting
-					? FString::Printf(
-						TEXT("existing:%s/%s"),
-						*Connection.FromExisting.NodeGuid,
-						*Connection.FromExisting.PinName)
-					: Connection.FromPin;
-				const FString ToLabel = Connection.bToExisting
-					? FString::Printf(
-						TEXT("existing:%s/%s"),
-						*Connection.ToExisting.NodeGuid,
-						*Connection.ToExisting.PinName)
-					: Connection.ToPin;
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("graph-edit-pin-type-mismatch"),
-					FString::Printf(
-						TEXT("Cannot connect %s (%s) to %s (%s); data kinds must match exactly."),
-						*FromLabel,
-						*Connection.FromType,
-						*ToLabel,
-						*Connection.ToType));
-			}
-
-			const FString TargetKey = Connection.bToExisting
-				? FString::Printf(
-					TEXT("existing:%s|%s"),
-					*Connection.ToExisting.NodeGuid,
-					*Connection.ToExisting.PinGuid)
-				: Connection.To + TEXT("|") + Connection.ToPin;
-			if (SeenTargets.Contains(TargetKey))
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("graph-edit-connection-duplicate"),
-					FString::Printf(TEXT("Input pin already has a connection in this plan: %s"), *TargetKey));
-			}
-			SeenTargets.Add(TargetKey);
-
-			TArray<FString> NewTempIds;
-			if (!Connection.From.IsEmpty())
-			{
-				NewTempIds.Add(Connection.From);
-			}
-			if (!Connection.To.IsEmpty())
-			{
-				NewTempIds.Add(Connection.To);
-			}
-			for (const FString& TempId : NewTempIds)
-			{
-				int32& Count = ConnectionCounts.FindOrAdd(TempId);
-				++Count;
-				if (Count > MaxConnectionsPerNode)
-				{
-					return Fail(
-						OutErrorCode,
-						OutErrorMessage,
-						TEXT("graph-edit-connection-limit"),
-						FString::Printf(
-							TEXT("%s would exceed the %d-connection per-node limit."),
-							*TempId,
-							MaxConnectionsPerNode));
-				}
-			}
-			OutConnections.Add(MoveTemp(Connection));
-		}
-		return true;
-	}
-
-	bool BuildPreview(
-		const TSharedPtr<FJsonObject>& Params,
-		FEditPlan& OutPlan,
-		FString& OutErrorCode,
-		FString& OutErrorMessage)
-	{
-		OutPlan.Operation = TEXT("connect");
-		if (Params->HasField(TEXT("operation")))
-		{
-			FString OperationValue;
-			if (!Params->TryGetStringField(TEXT("operation"), OperationValue)
-				|| (OperationValue != TEXT("connect") && OperationValue != TEXT("disconnect")))
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("graph-edit-invalid-operation"),
-					TEXT("operation must be connect or disconnect."));
-			}
-			OutPlan.Operation = OperationValue;
-		}
-		OutPlan.bDisconnect = OutPlan.Operation == TEXT("disconnect");
-		if (!ReadString(Params, TEXT("assetPath"), OutPlan.AssetPath, OutErrorCode, OutErrorMessage)
-			|| !ReadString(Params, TEXT("graphGuid"), OutPlan.GraphGuid, OutErrorCode, OutErrorMessage)
-			|| !ParseNodes(Params, OutPlan.Nodes, OutErrorCode, OutErrorMessage))
-		{
-			return false;
-		}
-		// Static plans keep the historical validation order: connections are
-		// fully checked before any Editor/focus lookup.  Variable accessors only
-		// learn their pins after the exact Blueprint is resolved, so their
-		// connections are checked in the second pass below.
-		bool bHasVariableAccessor = false;
-		for (const FNodeSpec& Node : OutPlan.Nodes)
-		{
-			bHasVariableAccessor = bHasVariableAccessor || Node.bVariableAccessor;
-		}
-		const bool bHasExistingPin = ConnectionsUseExistingPins(Params);
-		OutPlan.bHasExistingPin = bHasExistingPin;
-		if (!bHasVariableAccessor
-			&& !bHasExistingPin
-			&& !ParseConnections(
-				Params,
-				OutPlan.Nodes,
-				nullptr,
-				false,
-				OutPlan.Connections,
-				OutErrorCode,
-				OutErrorMessage))
-		{
-			return false;
-		}
-
-		if (GEditor == nullptr || (GEditor->IsPlaySessionInProgress() || GEditor->PlayWorld != nullptr))
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-pie-active"),
-				TEXT("Experimental graph edit is unavailable while PIE or SIE is active."));
-		}
-
-		TSharedPtr<FJsonObject> Preflight;
-		if (!UEAgentKitBlueprintGraphLayout::BuildFocusedEditorPreflight(
-			Preflight,
-			OutErrorCode,
-			OutErrorMessage))
-		{
-			return false;
-		}
-		if (!Preflight->GetStringField(TEXT("assetPath")).Equals(OutPlan.AssetPath, ESearchCase::CaseSensitive)
-			|| !Preflight->GetStringField(TEXT("graphGuid")).Equals(OutPlan.GraphGuid, ESearchCase::CaseSensitive))
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-focused-graph-mismatch"),
-				TEXT("The focused Blueprint editor is not showing the exact assetPath/graphGuid from the request."));
-		}
-		if (Preflight->GetBoolField(TEXT("packageDirty")))
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-package-dirty"),
-				TEXT("Experimental graph edit requires a clean package before Apply."));
-		}
-		if (!Preflight->GetBoolField(TEXT("editable")))
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-graph-not-editable"),
-				TEXT("The focused graph is not editable."));
-		}
-
-		UBlueprint* Blueprint = nullptr;
-		UEdGraph* Graph = nullptr;
-		if (!UEAgentKitBlueprintGraphLayout::ResolveExactTarget(
-			OutPlan.AssetPath,
-			OutPlan.GraphGuid,
-			Blueprint,
-			Graph,
-			OutErrorCode,
-			OutErrorMessage))
-		{
-			return false;
-		}
-		if (Blueprint == nullptr || Graph == nullptr || Graph->GetSchema() == nullptr
-			|| !Graph->GetSchema()->IsA<UEdGraphSchema_K2>())
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-schema-not-supported"),
-				TEXT("Experimental graph edit supports only K2 Blueprint graphs."));
-		}
-
-		// Variable accessor pins depend on the exact existing member variable,
-		// so resolve them against the exact Blueprint before validating any
-		// connection that names those pins.
-		if (!ResolveVariableNodes(
-			OutPlan.Nodes,
-			Blueprint,
-			Graph,
-			OutErrorCode,
-			OutErrorMessage))
-		{
-			return false;
-		}
-		if (bHasVariableAccessor
-			|| bHasExistingPin)
-		{
-			if (!ParseConnections(
-				Params,
-				OutPlan.Nodes,
-				Graph,
-				OutPlan.bDisconnect,
-				OutPlan.Connections,
-				OutErrorCode,
-				OutErrorMessage))
-			{
-				return false;
-			}
-		}
-
-		int32 PureExistingConnectionCount = 0;
-		for (const FConnectionSpec& Connection : OutPlan.Connections)
-		{
-			if (Connection.bFromExisting && Connection.bToExisting)
-			{
-				++PureExistingConnectionCount;
-			}
-		}
-		if (PureExistingConnectionCount > 1)
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-existing-to-existing-limit"),
-				TEXT("A plan may add at most one existing-to-existing connection."));
-		}
-		if (OutPlan.bDisconnect)
-		{
-			if (!OutPlan.Nodes.IsEmpty()
-				|| OutPlan.Connections.Num() != 1
-				|| PureExistingConnectionCount != 1)
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("graph-edit-disconnect-invalid-plan"),
-					TEXT("A disconnect plan requires nodes=[] and exactly one existing-to-existing edge."));
-			}
-		}
-		else
-		{
-			if (PureExistingConnectionCount == 1
-				&& (!OutPlan.Nodes.IsEmpty() || OutPlan.Connections.Num() != 1))
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("graph-edit-existing-to-existing-plan"),
-					TEXT("A pure existing-to-existing connection must be the only connection and requires nodes=[]."));
-			}
-			if (OutPlan.Nodes.IsEmpty() && OutPlan.Connections.IsEmpty())
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("graph-edit-empty-plan"),
-					TEXT("A graph edit plan must create at least one node or connect at least one existing edge."));
-			}
-			if (OutPlan.Nodes.IsEmpty() && PureExistingConnectionCount == 0)
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("graph-edit-nodes-required"),
-					TEXT("nodes may be empty only for one pure existing-to-existing connection."));
-			}
-		}
-
-		OutPlan.PackageRevision = Preflight->GetStringField(TEXT("packageRevision"));
-		OutPlan.GraphFingerprint = Preflight->GetStringField(TEXT("graphFingerprint"));
-		if (bHasExistingPin)
-		{
-			if (!UEAgentKitBlueprintRewireExperimental::TryComputeLiveEdgeSetHash(
-				Graph,
-				OutPlan.BeforeEdgeSetHash))
-			{
-				return Fail(
-					OutErrorCode,
-					OutErrorMessage,
-					TEXT("graph-edit-edge-hash-failed"),
-					TEXT("Could not compute the before edge-set hash for the existing-pin plan."));
-			}
-		}
-
-		FString Canonical;
-		Canonical.Reserve(4096);
-		Canonical += TEXT("ueak.graphpatch-edit/1.0\n");
-		Canonical += OutPlan.AssetPath + TEXT("\n");
-		Canonical += OutPlan.GraphGuid + TEXT("\n");
-		Canonical += OutPlan.PackageRevision + TEXT("\n");
-		Canonical += OutPlan.GraphFingerprint + TEXT("\n");
-		if (bHasExistingPin)
-		{
-			Canonical += FString::Printf(
-				TEXT("E|%s\n"),
-				*OutPlan.BeforeEdgeSetHash);
-		}
-		if (OutPlan.bDisconnect && OutPlan.Connections.Num() == 1)
-		{
-			const FConnectionSpec& Disconnect = OutPlan.Connections[0];
-			Canonical += FString::Printf(
-				TEXT("D|%s|%s|%s|%s\n"),
-				*Disconnect.FromExisting.NodeGuid,
-				*Disconnect.FromExisting.PinGuid,
-				*Disconnect.ToExisting.NodeGuid,
-				*Disconnect.ToExisting.PinGuid);
-		}
-
-		TArray<FNodeSpec> SortedNodes = OutPlan.Nodes;
-		SortedNodes.Sort([](const FNodeSpec& Left, const FNodeSpec& Right)
-		{
-			return Left.TempId < Right.TempId;
-		});
-		for (const FNodeSpec& Node : SortedNodes)
-		{
-			Canonical += FString::Printf(
-				TEXT("N|%s|%s|%d|%d\n"),
-				*Node.TempId,
-				*Node.NodeType,
-				Node.X,
-				Node.Y);
-			if (Node.bVariableAccessor)
-			{
-				// The accessor is bound to one exact existing member variable:
-				// GUID + name + primitive type + read/write direction.  The name
-				// is length-prefixed so it cannot inject a canonical delimiter.
-				Canonical += FString::Printf(
-					TEXT("V|%s|%s|%s|%s|%d:%s\n"),
-					*Node.TempId,
-					*Node.VariableGuid,
-					*Node.VariableType,
-					*Node.VariableAccess,
-					Node.VariableName.Len(),
-					*Node.VariableName);
-			}
-			if (Node.bCallFunction)
-			{
-				Canonical += FString::Printf(
-					TEXT("CF|%s|%s|%s|%s\n"),
-					*Node.TempId,
-					*Node.CallFunctionOwnerPath,
-					*Node.FunctionName,
-					*Node.CallFunctionSignatureDigest);
-				TArray<FCallFunctionPinDef> Pins;
-				for (const FString& PinName : Node.InputPins)
-				{
-					Pins.Add({ PinName, TEXT("input"), Node.InputPinTypes.FindRef(PinName) });
-				}
-				for (const FString& PinName : Node.OutputPins)
-				{
-					Pins.Add({ PinName, TEXT("output"), Node.OutputPinTypes.FindRef(PinName) });
-				}
-				Pins.Sort([](const FCallFunctionPinDef& Left, const FCallFunctionPinDef& Right)
-				{
-					if (Left.Name != Right.Name)
-					{
-						return Left.Name < Right.Name;
-					}
-					return Left.Direction < Right.Direction;
-				});
-				for (const FCallFunctionPinDef& Pin : Pins)
-				{
-					Canonical += FString::Printf(
-						TEXT("CP|%s|%s|%s|%s\n"),
-						*Node.TempId,
-						*Pin.Name,
-						*Pin.Direction,
-						*Pin.Type);
-				}
-			}
-		}
-		TArray<FConnectionSpec> SortedConnections = OutPlan.Connections;
-		SortedConnections.Sort([](const FConnectionSpec& Left, const FConnectionSpec& Right)
-		{
-			if (Left.From != Right.From)
-			{
-				return Left.From < Right.From;
-			}
-			if (Left.FromPin != Right.FromPin)
-			{
-				return Left.FromPin < Right.FromPin;
-			}
-			if (Left.To != Right.To)
-			{
-				return Left.To < Right.To;
-			}
-			return Left.ToPin < Right.ToPin;
-		});
-		for (const FConnectionSpec& Connection : SortedConnections)
-		{
-			const FString FromLabel = Connection.bFromExisting
-				? FString::Printf(
-					TEXT("existing:%s:%s"),
-					*Connection.FromExisting.NodeGuid,
-					*Connection.FromExisting.PinGuid)
-				: Connection.From;
-			const FString ToLabel = Connection.bToExisting
-				? FString::Printf(
-					TEXT("existing:%s:%s"),
-					*Connection.ToExisting.NodeGuid,
-					*Connection.ToExisting.PinGuid)
-				: Connection.To;
-			Canonical += FString::Printf(
-				TEXT("C|%s|%s|%s|%s\n"),
-				*FromLabel,
-				Connection.bFromExisting ? *Connection.FromExisting.PinName : *Connection.FromPin,
-				*ToLabel,
-				Connection.bToExisting ? *Connection.ToExisting.PinName : *Connection.ToPin);
-			if (Connection.bFromExisting)
-			{
-				Canonical += FString::Printf(
-					TEXT("X|from|%s|%s|%s|%s|%s|%s|%s|%d\n"),
-					*Connection.FromExisting.NodeGuid,
-					*Connection.FromExisting.PinGuid,
-					*Connection.FromExisting.PinName,
-					*Connection.FromExisting.Direction,
-					*Connection.FromExisting.Category,
-					*Connection.FromExisting.SubCategory,
-					*Connection.FromExisting.TypeToken,
-					Connection.FromExisting.LinkCount);
-			}
-			if (Connection.bToExisting)
-			{
-				Canonical += FString::Printf(
-					TEXT("X|to|%s|%s|%s|%s|%s|%s|%s|%d\n"),
-					*Connection.ToExisting.NodeGuid,
-					*Connection.ToExisting.PinGuid,
-					*Connection.ToExisting.PinName,
-					*Connection.ToExisting.Direction,
-					*Connection.ToExisting.Category,
-					*Connection.ToExisting.SubCategory,
-					*Connection.ToExisting.TypeToken,
-					Connection.ToExisting.LinkCount);
-			}
-		}
-		FString Digest;
-		if (!FBlueprintContextSha256::HashText(Canonical, Digest))
-		{
-			return Fail(
-				OutErrorCode,
-				OutErrorMessage,
-				TEXT("graph-edit-plan-hash-failed"),
-				TEXT("Could not compute the graph edit plan hash."));
-		}
-		OutPlan.PlanId = TEXT("sha256:") + Digest;
-
-		TSharedRef<FJsonObject> Preview = MakeShared<FJsonObject>();
-		Preview->SetStringField(TEXT("schemaVersion"), PreviewSchemaVersion);
-		Preview->SetBoolField(TEXT("experimental"), true);
-		Preview->SetBoolField(TEXT("readOnly"), true);
-		Preview->SetBoolField(TEXT("wroteBlueprint"), false);
-		Preview->SetBoolField(TEXT("savedPackage"), false);
-		Preview->SetBoolField(TEXT("compiled"), false);
-		Preview->SetStringField(TEXT("planId"), OutPlan.PlanId);
-		Preview->SetStringField(TEXT("assetPath"), OutPlan.AssetPath);
-		Preview->SetStringField(TEXT("graphGuid"), OutPlan.GraphGuid);
-		Preview->SetStringField(TEXT("packageRevision"), OutPlan.PackageRevision);
-		Preview->SetStringField(TEXT("graphFingerprint"), OutPlan.GraphFingerprint);
-		Preview->SetStringField(TEXT("operation"), OutPlan.Operation);
-		if (bHasExistingPin)
-		{
-			Preview->SetStringField(TEXT("beforeEdgeSetHash"), OutPlan.BeforeEdgeSetHash);
-		}
-		if (OutPlan.bDisconnect)
-		{
-			Preview->SetNumberField(TEXT("disconnectCount"), 1);
-		}
-		Preview->SetNumberField(TEXT("nodeCountBefore"), Preflight->GetNumberField(TEXT("nodeCount")));
-		Preview->SetNumberField(TEXT("nodeCountAfter"), Preflight->GetNumberField(TEXT("nodeCount")) + OutPlan.Nodes.Num());
-		Preview->SetNumberField(TEXT("connectionCount"), OutPlan.Connections.Num());
-		Preview->SetStringField(
-			TEXT("requiredConfirmation"),
-			FString(UEAgentKitBlueprintGraphEditExperimental::ApplyConfirmationPrefix) + OutPlan.PlanId);
-
-		TArray<TSharedPtr<FJsonValue>> NodeValues;
-		for (const FNodeSpec& Node : OutPlan.Nodes)
-		{
-			TSharedRef<FJsonObject> Item = MakeShared<FJsonObject>();
-			Item->SetStringField(TEXT("tempId"), Node.TempId);
-			Item->SetStringField(TEXT("nodeType"), Node.NodeType);
-			Item->SetStringField(TEXT("nodeClass"), Node.NodeClassPath);
-			if (!Node.FunctionName.IsEmpty())
-			{
-				Item->SetStringField(TEXT("function"), Node.FunctionName);
-			}
-			if (Node.bVariableAccessor)
-			{
-				Item->SetStringField(TEXT("variableName"), Node.VariableName);
-				Item->SetStringField(TEXT("variableGuid"), Node.VariableGuid);
-				Item->SetStringField(TEXT("variableType"), Node.VariableType);
-				Item->SetStringField(TEXT("variableAccess"), Node.VariableAccess);
-			}
-			if (Node.bCallFunction)
-			{
-				TSharedRef<FJsonObject> CallFunction = MakeShared<FJsonObject>();
-				CallFunction->SetStringField(TEXT("ownerClassPath"), Node.CallFunctionOwnerPath);
-				CallFunction->SetStringField(TEXT("functionName"), Node.FunctionName);
-				CallFunction->SetStringField(
-					TEXT("signatureDigest"),
-					Node.CallFunctionSignatureDigest);
-				TArray<TSharedPtr<FJsonValue>> CallPins;
-				for (const FString& PinName : Node.InputPins)
-				{
-					TSharedRef<FJsonObject> Pin = MakeShared<FJsonObject>();
-					Pin->SetStringField(TEXT("name"), PinName);
-					Pin->SetStringField(TEXT("direction"), TEXT("input"));
-					Pin->SetStringField(TEXT("type"), Node.InputPinTypes.FindRef(PinName));
-					CallPins.Add(MakeShared<FJsonValueObject>(Pin));
-				}
-				for (const FString& PinName : Node.OutputPins)
-				{
-					TSharedRef<FJsonObject> Pin = MakeShared<FJsonObject>();
-					Pin->SetStringField(TEXT("name"), PinName);
-					Pin->SetStringField(TEXT("direction"), TEXT("output"));
-					Pin->SetStringField(TEXT("type"), Node.OutputPinTypes.FindRef(PinName));
-					CallPins.Add(MakeShared<FJsonValueObject>(Pin));
-				}
-				CallFunction->SetArrayField(TEXT("pins"), CallPins);
-				Item->SetObjectField(TEXT("callFunction"), CallFunction);
-			}
-			TSharedRef<FJsonObject> Position = MakeShared<FJsonObject>();
-			Position->SetNumberField(TEXT("x"), Node.X);
-			Position->SetNumberField(TEXT("y"), Node.Y);
-			Item->SetObjectField(TEXT("position"), Position);
-			TArray<TSharedPtr<FJsonValue>> Inputs;
-			for (const FString& Pin : Node.InputPins)
-			{
-				Inputs.Add(MakeShared<FJsonValueString>(Pin));
-			}
-			TArray<TSharedPtr<FJsonValue>> Outputs;
-			for (const FString& Pin : Node.OutputPins)
-			{
-				Outputs.Add(MakeShared<FJsonValueString>(Pin));
-			}
-			Item->SetArrayField(TEXT("inputPins"), Inputs);
-			Item->SetArrayField(TEXT("outputPins"), Outputs);
-			TSharedRef<FJsonObject> InputTypes = MakeShared<FJsonObject>();
-			for (const TPair<FString, FString>& Pair : Node.InputPinTypes)
-			{
-				InputTypes->SetStringField(Pair.Key, Pair.Value);
-			}
-			TSharedRef<FJsonObject> OutputTypes = MakeShared<FJsonObject>();
-			for (const TPair<FString, FString>& Pair : Node.OutputPinTypes)
-			{
-				OutputTypes->SetStringField(Pair.Key, Pair.Value);
-			}
-			Item->SetObjectField(TEXT("inputPinTypes"), InputTypes);
-			Item->SetObjectField(TEXT("outputPinTypes"), OutputTypes);
-			NodeValues.Add(MakeShared<FJsonValueObject>(Item));
-		}
-		Preview->SetArrayField(TEXT("nodes"), NodeValues);
-
-		auto MakeExistingPinObject = [](const FExistingPinSpec& Spec)
-		{
-			TSharedRef<FJsonObject> Object = MakeShared<FJsonObject>();
-			Object->SetStringField(TEXT("nodeGuid"), Spec.NodeGuid);
-			Object->SetStringField(TEXT("pinGuid"), Spec.PinGuid);
-			Object->SetStringField(TEXT("pinName"), Spec.PinName);
-			Object->SetStringField(TEXT("direction"), Spec.Direction);
-			Object->SetStringField(TEXT("category"), Spec.Category);
-			Object->SetStringField(TEXT("subCategory"), Spec.SubCategory);
-			return Object;
-		};
-		TArray<TSharedPtr<FJsonValue>> ConnectionValues;
-		for (const FConnectionSpec& Connection : OutPlan.Connections)
-		{
-			TSharedRef<FJsonObject> Item = MakeShared<FJsonObject>();
-			if (Connection.bFromExisting)
-			{
-				Item->SetObjectField(
-					TEXT("fromExisting"),
-					MakeExistingPinObject(Connection.FromExisting));
-			}
-			else
-			{
-				Item->SetStringField(TEXT("from"), Connection.From);
-				Item->SetStringField(TEXT("fromPin"), Connection.FromPin);
-			}
-			Item->SetStringField(TEXT("fromType"), Connection.FromType);
-			if (Connection.bToExisting)
-			{
-				Item->SetObjectField(
-					TEXT("toExisting"),
-					MakeExistingPinObject(Connection.ToExisting));
-			}
-			else
-			{
-				Item->SetStringField(TEXT("to"), Connection.To);
-				Item->SetStringField(TEXT("toPin"), Connection.ToPin);
-			}
-			Item->SetStringField(TEXT("toType"), Connection.ToType);
-			ConnectionValues.Add(MakeShared<FJsonValueObject>(Item));
-		}
-		Preview->SetArrayField(TEXT("connections"), ConnectionValues);
-
-		OutPlan.Preview = Preview;
-		return true;
-	}
-
-	int32 CountLinks(const UEdGraph* Graph)
-	{
-		int32 Count = 0;
-		for (const UEdGraphNode* Node : Graph->Nodes)
-		{
-			if (Node == nullptr)
-			{
-				continue;
-			}
-			for (const UEdGraphPin* Pin : Node->Pins)
-			{
-				if (Pin != nullptr && Pin->Direction == EGPD_Output)
-				{
-					Count += Pin->LinkedTo.Num();
-				}
-			}
-		}
-		return Count;
-	}
-
-	bool HasNodeGuid(const UEdGraph* Graph, const FGuid& Guid)
-	{
-		for (const UEdGraphNode* Node : Graph->Nodes)
-		{
-			if (Node != nullptr && Node->NodeGuid == Guid)
-			{
-				return true;
-			}
-		}
-		return false;
-	}
-
-	/**
-	 * Canonical hash of every UK2Node_Variable binding and accessor pin in the
-	 * graph.  The shared layout fingerprint covers node/pin identity but not
-	 * FMemberReference, so Save uses this receipt-side hash to refuse a same-type
-	 * variable retarget that happened after Apply.
-	 */
-	FString ComputeVariableBindingHash(const UEdGraph* Graph)
-	{
-		if (Graph == nullptr)
-		{
-			return FString();
-		}
-		auto AppendField = [](FString& Base, const FString& Value)
-		{
-			Base += FString::Printf(TEXT("%d:%s|"), Value.Len(), *Value);
-		};
-
-		TArray<UEdGraphNode*> SortedNodes;
-		SortedNodes.Reserve(Graph->Nodes.Num());
-		for (UEdGraphNode* Node : Graph->Nodes)
-		{
-			if (Node != nullptr)
-			{
-				SortedNodes.Add(Node);
-			}
-		}
-		SortedNodes.Sort([](const UEdGraphNode& Left, const UEdGraphNode& Right)
-		{
-			return Left.NodeGuid.ToString(EGuidFormats::Digits)
-				< Right.NodeGuid.ToString(EGuidFormats::Digits);
-		});
-
-		FString Builder;
-		AppendField(Builder, TEXT("ueak.graph-edit-variable-binding/1"));
-		AppendField(Builder, Graph->GraphGuid.ToString(EGuidFormats::DigitsWithHyphensLower));
-		int32 VariableNodeCount = 0;
-		for (const UEdGraphNode* Node : SortedNodes)
-		{
-			const UK2Node_Variable* VariableNode = Cast<UK2Node_Variable>(Node);
-			if (VariableNode == nullptr)
-			{
-				continue;
-			}
-			++VariableNodeCount;
-			AppendField(Builder, Node->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower));
-			AppendField(Builder, Node->GetClass()->GetPathName());
-			AppendField(Builder, VariableNode->VariableReference.IsSelfContext()
-				? TEXT("self")
-				: TEXT("external"));
-			AppendField(Builder, VariableNode->GetVarName().ToString());
-			AppendField(
-				Builder,
-				VariableNode->VariableReference.GetMemberGuid().ToString(
-					EGuidFormats::DigitsWithHyphensLower));
-			AppendField(
-				Builder,
-				Node->GetClass()->IsChildOf(UK2Node_VariableSet::StaticClass())
-					? TEXT("write")
-					: TEXT("read"));
-
-			TArray<UEdGraphPin*> Pins;
-			Pins.Reserve(Node->Pins.Num());
-			for (UEdGraphPin* Pin : Node->Pins)
-			{
-				if (Pin != nullptr)
-				{
-					Pins.Add(Pin);
-				}
-			}
-			Pins.Sort([](const UEdGraphPin& Left, const UEdGraphPin& Right)
-			{
-				if (Left.PinName != Right.PinName)
-				{
-					return Left.PinName.LexicalLess(Right.PinName);
-				}
-				return Left.Direction < Right.Direction;
-			});
-			AppendField(Builder, FString::FromInt(Pins.Num()));
-			for (const UEdGraphPin* Pin : Pins)
-			{
-				AppendField(Builder, Pin->PinName.ToString());
-				AppendField(Builder, Pin->Direction == EGPD_Input ? TEXT("input") : TEXT("output"));
-				AppendField(Builder, Pin->PinType.PinCategory.ToString());
-				AppendField(Builder, Pin->PinType.PinSubCategory.ToString());
-			}
-		}
-		AppendField(Builder, FString::FromInt(VariableNodeCount));
-
-		FString Digest;
-		if (!FBlueprintContextSha256::HashText(Builder, Digest))
-		{
-			return FString();
-		}
-		return TEXT("sha256:") + Digest;
-	}
-
-	bool ArePinsLinked(const UEdGraphPin* FromPin, const UEdGraphPin* ToPin)
-	{
-		return FromPin != nullptr
-			&& ToPin != nullptr
-			&& FromPin->LinkedTo.Contains(ToPin)
-			&& ToPin->LinkedTo.Contains(FromPin);
-	}
-
-	FString MakeEdgeKey(const UEdGraphPin* FromPin, const UEdGraphPin* ToPin)
-	{
-		if (FromPin == nullptr || ToPin == nullptr
-			|| FromPin->GetOwningNode() == nullptr || ToPin->GetOwningNode() == nullptr)
-		{
-			return FString();
-		}
-		return FString::Printf(
-			TEXT("%s|%s>%s|%s"),
-			*FromPin->GetOwningNode()->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower),
-			*FromPin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower),
-			*ToPin->GetOwningNode()->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower),
-			*ToPin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower));
-	}
-
-	void CollectEdgeKeys(const UEdGraph* Graph, TSet<FString>& OutKeys)
-	{
-		OutKeys.Reset();
-		if (Graph == nullptr)
-		{
-			return;
-		}
-		for (const UEdGraphNode* Node : Graph->Nodes)
-		{
-			if (Node == nullptr)
-			{
-				continue;
-			}
-			for (const UEdGraphPin* Pin : Node->Pins)
-			{
-				if (Pin == nullptr || Pin->Direction != EGPD_Output)
-				{
-					continue;
-				}
-				for (const UEdGraphPin* Linked : Pin->LinkedTo)
-				{
-					const FString Key = MakeEdgeKey(Pin, Linked);
-					if (!Key.IsEmpty())
-					{
-						OutKeys.Add(Key);
-					}
-				}
-			}
-		}
-	}
 
 	bool ValidateSchemaConnection(
 		UEdGraph* Graph,
@@ -3007,123 +932,6 @@ namespace
 		return UKismetMathLibrary::StaticClass();
 	}
 
-	bool ValidateCallFunctionNode(
-		UK2Node_CallFunction* Node,
-		const FNodeSpec& Spec,
-		FString& OutReason)
-	{
-		if (Node == nullptr)
-		{
-			OutReason = TEXT("The spawned CallFunction node is null.");
-			return false;
-		}
-		UFunction* Function = Node->GetTargetFunction();
-		if (Function == nullptr)
-		{
-			OutReason = TEXT("The CallFunction node has no resolved reflected function.");
-			return false;
-		}
-		if (!Function->GetName().Equals(Spec.FunctionName, ESearchCase::CaseSensitive))
-		{
-			OutReason = TEXT("The resolved function name does not match the plan.");
-			return false;
-		}
-		UClass* OwnerClass = Function->GetOuterUClass();
-		if (OwnerClass == nullptr
-			|| !OwnerClass->GetPathName().Equals(
-				Spec.CallFunctionOwnerPath,
-				ESearchCase::CaseSensitive))
-		{
-			OutReason = TEXT("The resolved function owner class does not match the plan.");
-			return false;
-		}
-		if (!Function->HasAnyFunctionFlags(FUNC_Static)
-			|| !Function->HasAnyFunctionFlags(FUNC_BlueprintPure))
-		{
-			OutReason = TEXT("The function is not a static BlueprintPure function.");
-			return false;
-		}
-		if (Function->HasAnyFunctionFlags(FUNC_Net)
-			|| Function->HasAnyFunctionFlags(FUNC_BlueprintAuthorityOnly)
-			|| Function->HasAnyFunctionFlags(FUNC_BlueprintEvent)
-			|| Function->HasAnyFunctionFlags(FUNC_Exec)
-			|| Function->HasMetaData(TEXT("Latent")))
-		{
-			OutReason = TEXT("The function has network/latent/authority/event/exec flags.");
-			return false;
-		}
-
-		const int32 ExpectedPinCount = Spec.InputPins.Num() + Spec.OutputPins.Num();
-		int32 VisiblePinCount = 0;
-		int32 HiddenSelfCount = 0;
-		TArray<FString> PinInventory;
-		for (const UEdGraphPin* Pin : Node->Pins)
-		{
-			if (Pin == nullptr)
-			{
-				continue;
-			}
-			const bool bIsHiddenSelf =
-				Pin->bHidden
-				&& Pin->Direction == EGPD_Input
-				&& Pin->PinName == UEdGraphSchema_K2::PN_Self;
-			if (bIsHiddenSelf)
-			{
-				++HiddenSelfCount;
-				if (Pin->LinkedTo.Num() != 0)
-				{
-					OutReason = TEXT("The hidden CallFunction self pin unexpectedly has links.");
-					return false;
-				}
-				continue;
-			}
-			if (Pin->bHidden)
-			{
-				OutReason = FString::Printf(
-					TEXT("The CallFunction node has an unexpected hidden pin %s."),
-					*Pin->PinName.ToString());
-				return false;
-			}
-			++VisiblePinCount;
-			PinInventory.Add(FString::Printf(
-				TEXT("%s:%s"),
-				*Pin->PinName.ToString(),
-				Pin->Direction == EGPD_Input ? TEXT("in") : TEXT("out")));
-		}
-		if (VisiblePinCount != ExpectedPinCount || HiddenSelfCount > 1)
-		{
-			OutReason = FString::Printf(
-				TEXT("The CallFunction node has %d visible pins (hidden self=%d), expected %d: %s"),
-				VisiblePinCount,
-				HiddenSelfCount,
-				ExpectedPinCount,
-				*FString::Join(PinInventory, TEXT(",")));
-			return false;
-		}
-		for (const FString& PinName : Spec.InputPins)
-		{
-			const UEdGraphPin* Pin = Node->FindPin(FName(*PinName), EGPD_Input);
-			if (Pin == nullptr || !PinMatchesType(Pin, Spec.InputPinTypes.FindRef(PinName)))
-			{
-				OutReason = FString::Printf(
-					TEXT("The CallFunction input pin %s is missing or has the wrong type."),
-					*PinName);
-				return false;
-			}
-		}
-		for (const FString& PinName : Spec.OutputPins)
-		{
-			const UEdGraphPin* Pin = Node->FindPin(FName(*PinName), EGPD_Output);
-			if (Pin == nullptr || !PinMatchesType(Pin, Spec.OutputPinTypes.FindRef(PinName)))
-			{
-				OutReason = FString::Printf(
-					TEXT("The CallFunction output pin %s is missing or has the wrong type."),
-					*PinName);
-				return false;
-			}
-		}
-		return true;
-	}
 
 	UClass* NodeClassForType(const FString& NodeType)
 	{
@@ -3146,1248 +954,2097 @@ namespace
 		}
 		return nullptr;
 	}
-}
 
-bool UEAgentKitBlueprintGraphEditExperimental::IsExperimentalWriteAvailable()
-{
-	if (bTestOverrideSet)
+	FString AppendField(const FString& Builder, const FString& Field)
 	{
-		return bTestOverrideEnabled;
-	}
-	bool bEnabled = false;
-	if (GConfig == nullptr)
-	{
-		return false;
-	}
-	return GConfig->GetBool(
-			TEXT("UEAgentKit"),
-			TEXT("ExperimentalGraphPatchEdit"),
-			bEnabled,
-			GEngineIni)
-		&& bEnabled;
-}
-
-void UEAgentKitBlueprintGraphEditExperimental::SetExperimentalWriteEnabledForTest(bool bEnabled)
-{
-	bTestOverrideSet = true;
-	bTestOverrideEnabled = bEnabled;
-}
-
-void UEAgentKitBlueprintGraphEditExperimental::ResetExperimentalWriteForTest()
-{
-	bTestOverrideSet = false;
-	bTestOverrideEnabled = false;
-}
-
-bool UEAgentKitBlueprintGraphEditExperimental::TryPreviewExperimental(
-	const TSharedPtr<FJsonObject>& Params,
-	TSharedPtr<FJsonObject>& OutResult,
-	FString& OutErrorCode,
-	FString& OutErrorMessage)
-{
-	if (!RejectUnknownParams(
-		Params,
-		{ TEXT("assetPath"), TEXT("graphGuid"), TEXT("nodes"), TEXT("connections"), TEXT("operation") },
-		OutErrorCode,
-		OutErrorMessage))
-	{
-		return false;
-	}
-	if (!IsExperimentalWriteAvailable())
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("graph-edit-experimental-disabled"),
-			TEXT("Experimental graph structure edit is not opted in for this project. "
-				 "Set [UEAgentKit] ExperimentalGraphPatchEdit=True in the project config."));
-	}
-	FEditPlan Plan;
-	if (!BuildPreview(Params, Plan, OutErrorCode, OutErrorMessage))
-	{
-		return false;
-	}
-	OutResult = Plan.Preview;
-	return true;
-}
-
-bool UEAgentKitBlueprintGraphEditExperimental::TryApplyExperimental(
-	const TSharedPtr<FJsonObject>& Params,
-	TSharedPtr<FJsonObject>& OutResult,
-	FString& OutErrorCode,
-	FString& OutErrorMessage)
-{
-	if (!RejectUnknownParams(
-		Params,
-		{ TEXT("assetPath"), TEXT("graphGuid"), TEXT("nodes"), TEXT("connections"), TEXT("planId"), TEXT("confirmation"), TEXT("operation") },
-		OutErrorCode,
-		OutErrorMessage))
-	{
-		return false;
-	}
-	if (!IsExperimentalWriteAvailable())
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("graph-edit-experimental-disabled"),
-			TEXT("Experimental graph structure edit is not opted in for this project. "
-				 "Set [UEAgentKit] ExperimentalGraphPatchEdit=True in the project config."));
-	}
-	if (GEditor == nullptr || GEditor->Trans == nullptr)
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("graph-edit-transaction-unavailable"),
-			TEXT("The Editor transaction history is unavailable."));
+		return Builder + FString::Printf(TEXT("%d:"), Field.Len()) + Field;
 	}
 
-	FString RequestedPlanId;
-	FString Confirmation;
-	if (!ReadString(Params, TEXT("planId"), RequestedPlanId, OutErrorCode, OutErrorMessage)
-		|| !ReadString(Params, TEXT("confirmation"), Confirmation, OutErrorCode, OutErrorMessage))
+	const TCHAR* const NodeStateFingerprintVersion = TEXT("ueak.blueprint-node-state/1");
+
+	/**
+	 * Node structure fingerprint: identity, class, position and pin inventory.
+	 *
+	 * Pin defaults and link counts belong to the pin-default writer's own
+	 * fingerprint, so they are deliberately not repeated here; the two hashes are
+	 * reported side by side by the atomic patch.
+	 */
+	FString ComputeNodeStateFingerprint(UEdGraph* Graph)
 	{
-		return false;
-	}
-	FEditPlan Plan;
-	if (!BuildPreview(Params, Plan, OutErrorCode, OutErrorMessage))
-	{
-		return false;
-	}
-	if (!RequestedPlanId.Equals(Plan.PlanId, ESearchCase::CaseSensitive))
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("graph-edit-plan-stale"),
-			FString::Printf(
-				TEXT("The graph or request changed after Preview; request a fresh preview before Apply. "
-					 "requested=%s current=%s packageRevision=%s graphFingerprint=%s"),
-				*RequestedPlanId,
-				*Plan.PlanId,
-				*Plan.PackageRevision,
-				*Plan.GraphFingerprint));
-	}
-	const FString ExpectedConfirmation =
-		FString(ApplyConfirmationPrefix) + Plan.PlanId;
-	if (!Confirmation.Equals(ExpectedConfirmation, ESearchCase::CaseSensitive))
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("graph-edit-confirmation-required"),
-			FString::Printf(TEXT("Explicit Apply confirmation must be exactly %s."), *ExpectedConfirmation));
+		if (Graph == nullptr)
+		{
+			return FString();
+		}
+		TArray<UEdGraphNode*> SortedNodes;
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (Node != nullptr)
+			{
+				SortedNodes.Add(Node);
+			}
+		}
+		SortedNodes.Sort([](const UEdGraphNode& Left, const UEdGraphNode& Right)
+		{
+			return Left.NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower)
+				< Right.NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower);
+		});
+		FString Builder;
+		Builder = AppendField(Builder, NodeStateFingerprintVersion);
+		Builder = AppendField(
+			Builder,
+			Graph->GraphGuid.ToString(EGuidFormats::DigitsWithHyphensLower));
+		for (const UEdGraphNode* Node : SortedNodes)
+		{
+			Builder = AppendField(
+				Builder,
+				Node->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower));
+			Builder = AppendField(Builder, Node->GetClass()->GetPathName());
+			Builder = AppendField(Builder, FString::FromInt(Node->NodePosX));
+			Builder = AppendField(Builder, FString::FromInt(Node->NodePosY));
+			TArray<UEdGraphPin*> Pins;
+			for (UEdGraphPin* Pin : Node->Pins)
+			{
+				if (Pin != nullptr)
+				{
+					Pins.Add(Pin);
+				}
+			}
+			Pins.Sort([](const UEdGraphPin& Left, const UEdGraphPin& Right)
+			{
+				// Order by the case-insensitive FName comparison, not by the
+				// interned spelling: a rebuilt wildcard pin can flip "Index" to
+				// "index", which would reorder the list and change the hash even
+				// though nothing in the graph changed.
+				const int32 NameOrder = Left.PinName.Compare(Right.PinName);
+				if (NameOrder != 0)
+				{
+					return NameOrder < 0;
+				}
+				return Left.Direction < Right.Direction;
+			});
+			for (const UEdGraphPin* Pin : Pins)
+			{
+				// Same FName normalisation as the pin-default hash: the name table
+				// keeps the first interned spelling, so a reconstructed node may
+				// print "index" where it printed "Index" before Undo/Redo, and
+				// "Object" where it printed "object".
+				Builder = AppendField(Builder, Pin->PinName.ToString().ToLower());
+				Builder = AppendField(
+					Builder,
+					Pin->Direction == EGPD_Input ? TEXT("input") : TEXT("output"));
+				Builder = AppendField(
+					Builder,
+					Pin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower));
+				// Same FName normalisation as the pin-default hash: the name table
+				// keeps the first interned spelling, so a reconstructed node may
+				// print "Object" where it printed "object" before Undo/Redo.
+				Builder = AppendField(Builder, Pin->PinType.PinCategory.ToString().ToLower());
+				Builder = AppendField(Builder, Pin->PinType.PinSubCategory.ToString().ToLower());
+				Builder = AppendField(
+					Builder,
+					Pin->PinType.PinSubCategoryObject != nullptr
+						? Pin->PinType.PinSubCategoryObject->GetPathName()
+						: FString());
+			}
+		}
+		FString Digest;
+		if (!FBlueprintContextSha256::HashText(Builder, Digest))
+		{
+			return FString();
+		}
+		return FString(TEXT("sha256:")) + Digest;
 	}
 
-	UBlueprint* Blueprint = nullptr;
-	UEdGraph* Graph = nullptr;
-	if (!UEAgentKitBlueprintGraphLayout::ResolveExactTarget(
-		Plan.AssetPath,
-		Plan.GraphGuid,
-		Blueprint,
-		Graph,
-		OutErrorCode,
-		OutErrorMessage))
+	/**
+	 * Shared creation path for the eight primitive nodeTypes.
+	 *
+	 * Both the single-writer Apply and the atomic patch seam call this function,
+	 * so the class lookup, the spawner vs CallFunction choice, the
+	 * RF_Transactional flag, the position and the default pins cannot drift
+	 * between the two entry points.  `call_function`, `call_owned_pure_function`
+	 * and the variable accessors keep their own branches in the single writer and
+	 * are not reachable here.
+	 *
+	 * OutNode is set as soon as the node exists in the graph, so a caller that
+	 * gets `false` can still remove the partially created node.
+	 */
+	/**
+	 * Create one bounded member-variable accessor through the engine's spawner.
+	 *
+	 * 0-3.4 slice 15: extracted from the single writer's Apply so the atomic patch
+	 * creates accessors through exactly the same path -- same generated-property
+	 * lookup, same post-Preview type re-check, same
+	 * `UBlueprintVariableNodeSpawner::CreateFromMemberOrParam` + Invoke.  It never
+	 * creates, renames or retypes the variable itself.
+	 */
+	bool CreateVariableAccessorNode(
+		UBlueprint* Blueprint,
+		UEdGraph* Graph,
+		const FString& VariableName,
+		const FString& VariableType,
+		const bool bGet,
+		const int32 X,
+		const int32 Y,
+		UEdGraphNode*& OutNode,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
 	{
-		return false;
-	}
-
-	const int32 NodeCountBefore = Graph->Nodes.Num();
-	const int32 LinkCountBefore = CountLinks(Graph);
-	TSet<FString> BeforeEdges;
-	TSet<FString> AfterEdges;
-	if (Plan.bDisconnect)
-	{
-		CollectEdgeKeys(Graph, BeforeEdges);
-	}
-	if (Plan.bHasExistingPin)
-	{
-		FString CurrentEdgeSetHash;
-		if (!UEAgentKitBlueprintRewireExperimental::TryComputeLiveEdgeSetHash(
-				Graph,
-				CurrentEdgeSetHash)
-			|| !CurrentEdgeSetHash.Equals(Plan.BeforeEdgeSetHash, ESearchCase::CaseSensitive))
+		OutNode = nullptr;
+		if (Blueprint == nullptr || Graph == nullptr)
 		{
 			return Fail(
 				OutErrorCode,
 				OutErrorMessage,
-				TEXT("graph-edit-edge-set-stale"),
-				TEXT("The live edge set changed after Preview; refusing to connect to an existing pin."));
+				TEXT("graph-edit-graph-unavailable"),
+				TEXT("The exact Blueprint graph is unavailable."));
 		}
+		FProperty* Property = FindMemberVariableProperty(Blueprint, FName(*VariableName));
+		if (Property == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-variable-property-unavailable"),
+				FString::Printf(
+					TEXT("Variable %s no longer has a generated/skeleton property."),
+					*VariableName));
+		}
+		FEdGraphPinType PropertyType;
+		FString ActualType;
+		if (!GetDefault<UEdGraphSchema_K2>()->ConvertPropertyToPinType(Property, PropertyType)
+			|| !VariableTypeToken(PropertyType, ActualType)
+			|| !ActualType.Equals(VariableType, ESearchCase::CaseSensitive))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-variable-type-mismatch"),
+				FString::Printf(
+					TEXT("Variable %s changed type after Preview."),
+					*VariableName));
+		}
+		TSubclassOf<UK2Node_Variable> VariableNodeClass = bGet
+			? UK2Node_VariableGet::StaticClass()
+			: UK2Node_VariableSet::StaticClass();
+		UBlueprintVariableNodeSpawner* VariableSpawner =
+			UBlueprintVariableNodeSpawner::CreateFromMemberOrParam(
+				VariableNodeClass,
+				Property);
+		if (VariableSpawner == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-node-spawn-failed"),
+				FString::Printf(
+					TEXT("Could not create a variable spawner for %s."),
+					*VariableName));
+		}
+		UEdGraphNode* Node = VariableSpawner->Invoke(
+			Graph,
+			IBlueprintNodeBinder::FBindingSet(),
+			FVector2D(X, Y));
+		if (Node == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-node-spawn-failed"),
+				FString::Printf(
+					TEXT("The Editor failed to spawn the %s accessor for %s."),
+					bGet ? TEXT("get") : TEXT("set"),
+					*VariableName));
+		}
+		OutNode = Node;
+		return true;
 	}
-	FString AfterEdgeSetHash;
-	TMap<FString, UEdGraphNode*> CreatedNodes;
-	TMap<FString, FGuid> CreatedGuidByTempId;
-	TArray<FGuid> CreatedGuids;
 
+	bool CreatePrimitiveNode(
+		UEdGraph* Graph,
+		const FNodeSpec& Spec,
+		UEdGraphNode*& OutNode,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
 	{
-		FScopedTransaction Transaction(
-			FText::FromString(TEXT("UEAgentKit Create Blueprint Nodes")));
-		Blueprint->Modify();
-		Graph->Modify();
-
-		auto Abort = [&OutErrorCode, &OutErrorMessage, &Transaction](
-			const TCHAR* Code,
-			const FString& Message) -> bool
+		OutNode = nullptr;
+		if (Graph == nullptr)
 		{
-			Transaction.Cancel();
-			return Fail(OutErrorCode, OutErrorMessage, Code, Message);
-		};
-
-		for (const FNodeSpec& Spec : Plan.Nodes)
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-graph-unavailable"),
+				TEXT("The exact graph is unavailable."));
+		}
+		UEdGraphNode* Node = nullptr;
+		if (!Spec.FunctionName.IsEmpty())
 		{
-			UEdGraphNode* Node = nullptr;
-			if (Spec.bVariableAccessor)
+			UClass* FunctionOwner = FunctionOwnerForNodeType(Spec.NodeType);
+			if (FunctionOwner == nullptr)
 			{
-				FProperty* Property = FindMemberVariableProperty(Blueprint, FName(*Spec.VariableName));
-				if (Property == nullptr)
-				{
-					return Abort(
-						TEXT("graph-edit-variable-property-unavailable"),
-						FString::Printf(
-							TEXT("Variable %s no longer has a generated/skeleton property."),
-							*Spec.VariableName));
-				}
-				FEdGraphPinType PropertyType;
-				FString ActualType;
-				if (!GetDefault<UEdGraphSchema_K2>()->ConvertPropertyToPinType(Property, PropertyType)
-					|| !VariableTypeToken(PropertyType, ActualType)
-					|| !ActualType.Equals(Spec.VariableType, ESearchCase::CaseSensitive))
-				{
-					return Abort(
-						TEXT("graph-edit-variable-type-mismatch"),
-						FString::Printf(
-							TEXT("Variable %s changed type after Preview."),
-							*Spec.VariableName));
-				}
-				TSubclassOf<UK2Node_Variable> VariableNodeClass =
-					Spec.NodeType.Equals(TEXT("variable_get"), ESearchCase::CaseSensitive)
-						? UK2Node_VariableGet::StaticClass()
-						: UK2Node_VariableSet::StaticClass();
-				UBlueprintVariableNodeSpawner* VariableSpawner =
-					UBlueprintVariableNodeSpawner::CreateFromMemberOrParam(
-						VariableNodeClass,
-						Property);
-				if (VariableSpawner == nullptr)
-				{
-					return Abort(
-						TEXT("graph-edit-node-spawn-failed"),
-						FString::Printf(
-							TEXT("Could not create a variable spawner for %s."),
-							*Spec.VariableName));
-				}
-				Node = VariableSpawner->Invoke(
-					Graph,
-					IBlueprintNodeBinder::FBindingSet(),
-					FVector2D(Spec.X, Spec.Y));
-			}
-			else if (!Spec.FunctionName.IsEmpty())
-			{
-				UClass* FunctionOwner = Spec.bCallFunction
-					? LoadObject<UClass>(nullptr, *Spec.CallFunctionOwnerPath)
-					: FunctionOwnerForNodeType(Spec.NodeType);
-				if (FunctionOwner == nullptr)
-				{
-					return Abort(
-						TEXT("graph-edit-node-spawn-failed"),
-						TEXT("The function owner class is unavailable."));
-				}
-				UFunction* Function = FunctionOwner->FindFunctionByName(
-					FName(*Spec.FunctionName));
-				if (Function == nullptr)
-				{
-					return Abort(
-						TEXT("graph-edit-node-spawn-failed"),
-						FString::Printf(TEXT("The function %s is unavailable."), *Spec.FunctionName));
-				}
-				if (Spec.bCallFunction)
-				{
-					const FCallFunctionAllowlistEntry* Entry = FindCallFunctionAllowlistEntry(
-						Spec.CallFunctionOwnerPath,
-						Spec.FunctionName);
-					if (Entry == nullptr
-						|| !Entry->SignatureDigest.Equals(
-							Spec.CallFunctionSignatureDigest,
-							ESearchCase::CaseSensitive))
-					{
-						return Abort(
-							TEXT("graph-edit-call-function-not-allowlisted"),
-							TEXT("The CallFunction plan is no longer in the fixed allowlist."));
-					}
-				}
-				UK2Node_CallFunction* CallNode = NewObject<UK2Node_CallFunction>(Graph);
-				if (CallNode == nullptr)
-				{
-					return Abort(
-						TEXT("graph-edit-node-spawn-failed"),
-						TEXT("Could not allocate the CallFunction node."));
-				}
-				CallNode->Modify();
-				Graph->AddNode(CallNode, true, false);
-				CallNode->SetFromFunction(Function);
-				if (CallNode->Pins.Num() == 0)
-				{
-					CallNode->AllocateDefaultPins();
-				}
-				if (Spec.bCallFunction)
-				{
-					FString PinReason;
-					if (!ValidateCallFunctionNode(CallNode, Spec, PinReason))
-					{
-						return Abort(
-							TEXT("graph-edit-call-function-pin-mismatch"),
-							PinReason);
-					}
-				}
-				Node = CallNode;
-			}
-			else
-			{
-				UClass* NodeClass = NodeClassForType(Spec.NodeType);
-				if (NodeClass == nullptr)
-				{
-					return Abort(
-						TEXT("graph-edit-node-type-not-allowed"),
-						FString::Printf(TEXT("Unsupported nodeType: %s"), *Spec.NodeType));
-				}
-				UBlueprintNodeSpawner* Spawner = UBlueprintNodeSpawner::Create(NodeClass, GetTransientPackage());
-				if (Spawner == nullptr)
-				{
-					return Abort(
-						TEXT("graph-edit-node-spawn-failed"),
-						FString::Printf(TEXT("Could not create a node spawner for %s."), *Spec.NodeType));
-				}
-				Node = Spawner->Invoke(
-					Graph,
-					IBlueprintNodeBinder::FBindingSet(),
-					FVector2D(Spec.X, Spec.Y));
-			}
-			// Keep every node created by this tool transactional.  Undo/Redo
-			// verification recreates nodes, and later bounded tools (pin defaults,
-			// rewire, node removal) must be able to record an undoable change on
-			// them in the same Editor session.
-			if (Node == nullptr)
-			{
-				return Abort(
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
 					TEXT("graph-edit-node-spawn-failed"),
-					FString::Printf(TEXT("The Editor failed to spawn %s."), *Spec.NodeType));
+					TEXT("The function owner class is unavailable."));
 			}
-			Node->SetFlags(RF_Transactional);
-			if (!Node->NodeGuid.IsValid())
+			UFunction* Function = FunctionOwner->FindFunctionByName(FName(*Spec.FunctionName));
+			if (Function == nullptr)
 			{
-				Node->CreateNewGuid();
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-node-spawn-failed"),
+					FString::Printf(TEXT("The function %s is unavailable."), *Spec.FunctionName));
 			}
-			Node->NodePosX = Spec.X;
-			Node->NodePosY = Spec.Y;
+			UK2Node_CallFunction* CallNode = NewObject<UK2Node_CallFunction>(Graph);
+			if (CallNode == nullptr)
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-node-spawn-failed"),
+					TEXT("Could not allocate the CallFunction node."));
+			}
+			CallNode->Modify();
+			Graph->AddNode(CallNode, true, false);
+			CallNode->SetFromFunction(Function);
+			if (CallNode->Pins.Num() == 0)
+			{
+				CallNode->AllocateDefaultPins();
+			}
+			Node = CallNode;
+		}
+		else
+		{
+			UClass* NodeClass = NodeClassForType(Spec.NodeType);
+			if (NodeClass == nullptr)
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-node-type-not-allowed"),
+					FString::Printf(TEXT("Unsupported nodeType: %s"), *Spec.NodeType));
+			}
+			UBlueprintNodeSpawner* Spawner = UBlueprintNodeSpawner::Create(
+				NodeClass,
+				GetTransientPackage());
+			if (Spawner == nullptr)
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-node-spawn-failed"),
+					FString::Printf(
+						TEXT("Could not create a node spawner for %s."),
+						*Spec.NodeType));
+			}
+			Node = Spawner->Invoke(
+				Graph,
+				IBlueprintNodeBinder::FBindingSet(),
+				FVector2D(Spec.X, Spec.Y));
+		}
+		if (Node == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-node-spawn-failed"),
+				FString::Printf(TEXT("The Editor failed to spawn %s."), *Spec.NodeType));
+		}
+		OutNode = Node;
+		Node->SetFlags(RF_Transactional);
+		if (!Node->NodeGuid.IsValid())
+		{
+			Node->CreateNewGuid();
+		}
+		Node->NodePosX = Spec.X;
+		Node->NodePosY = Spec.Y;
+		if (Node->Pins.Num() == 0)
+		{
+			Node->AllocateDefaultPins();
+		}
+		if (Node->Pins.Num() == 0 || !Node->NodeGuid.IsValid())
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-node-spawn-failed"),
+				FString::Printf(
+					TEXT("Spawned %s has no pins or no valid NodeGuid."),
+					*Spec.NodeType));
+		}
+		return true;
+	}
+
+	/**
+	 * Phase A admission for one registry action.
+	 *
+	 * Every refused field is one the descriptor already publishes, so this is not
+	 * a second policy engine: latent, world-context and variadic actions cannot be
+	 * placed by a plain spawner call, and the spawner families below need editor
+	 * context (a level actor, the selected actor, a delegate property) that this
+	 * surface deliberately does not have.  "This spawner needs something I do not
+	 * have" -- not "this node type is banned".
+	 */
+	bool CheckActionSpawnAdmissible(
+		const FNativeSpawnerResolution& Resolution,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
+	{
+		if (Resolution.Spawner == nullptr || !Resolution.Descriptor.IsValid())
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-spawn-action-unknown"),
+				TEXT("The action resolved without a describable spawner."));
+		}
+		const TSharedPtr<FJsonObject>* Constraints = nullptr;
+		const bool bHasConstraints = Resolution.Descriptor->TryGetObjectField(TEXT("constraints"), Constraints)
+			&& Constraints != nullptr
+			&& Constraints->IsValid();
+		auto Constraint = [&Constraints, bHasConstraints](const TCHAR* Field) -> bool
+		{
+			return bHasConstraints && (*Constraints)->GetBoolField(Field);
+		};
+		const TCHAR* UnsupportedField = !Constraint(TEXT("latent")) ? nullptr
+			: TEXT("latent");
+		if (UnsupportedField == nullptr && Constraint(TEXT("requiresWorldContext")))
+		{
+			UnsupportedField = TEXT("requiresWorldContext");
+		}
+		if (UnsupportedField == nullptr && Constraint(TEXT("variadic")))
+		{
+			UnsupportedField = TEXT("variadic");
+		}
+		if (UnsupportedField != nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-spawn-action-unsupported"),
+				FString::Printf(
+					TEXT("This action cannot be created by a plain spawner call: %s is set."),
+					UnsupportedField));
+		}
+		if (Resolution.Spawner->IsA<UBlueprintBoundEventNodeSpawner>()
+			|| Resolution.Spawner->IsA<UBlueprintComponentNodeSpawner>()
+			|| Resolution.Spawner->IsA<UBlueprintDelegateNodeSpawner>())
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-spawn-requires-binding"),
+				FString::Printf(
+					TEXT("The spawner %s requires a binding or an editor selection that this request does not carry."),
+					*Resolution.SpawnerClassPath));
+		}
+		if (!Resolution.ActionKind.Equals(TEXT("callFunction"), ESearchCase::CaseSensitive)
+			&& !Resolution.ActionKind.Equals(TEXT("cast"), ESearchCase::CaseSensitive))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-spawn-action-unsupported"),
+				FString::Printf(
+					TEXT("Phase A creates callFunction and cast actions only; this action is '%s'."),
+					*Resolution.ActionKind));
+		}
+		return true;
+	}
+
+	/**
+	 * Create one node through the engine spawner behind a registry action id.
+	 *
+	 * The spawner is invoked with an EMPTY binding set: the customize delegate the
+	 * action database installed is the only thing that sets CallFunction's
+	 * UFunction or DynamicCast's TargetType.  Re-implementing either here would be
+	 * a second, drifting copy of engine behaviour.
+	 */
+	bool CreateActionNode(
+		UEdGraph* Graph,
+		const UEAgentKitBlueprintGraphEditExperimental::FAtomicNodeOperation& Operation,
+		UEdGraphNode*& OutNode,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
+	{
+		OutNode = nullptr;
+		if (Graph == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-graph-unavailable"),
+				TEXT("The exact graph is unavailable."));
+		}
+		const FNativeSpawnerResolution Resolution =
+			FNativeNodeRegistry::Get().ResolveSpawnerForActionId(Operation.ActionId);
+		if (!Resolution.bOk)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				Resolution.ErrorCode.IsEmpty() ? TEXT("graph-spawn-action-unknown") : *Resolution.ErrorCode,
+				Resolution.ErrorMessage.IsEmpty()
+					? FString(TEXT("The action could not be resolved."))
+					: Resolution.ErrorMessage);
+		}
+		if (!CheckActionSpawnAdmissible(Resolution, OutErrorCode, OutErrorMessage))
+		{
+			return false;
+		}
+		if (!Resolution.NodeClassPath.Equals(Operation.NodeClassPath, ESearchCase::CaseSensitive))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-spawn-action-unknown"),
+				FString::Printf(
+					TEXT("The action now resolves to %s, not the planned %s."),
+					*Resolution.NodeClassPath,
+					*Operation.NodeClassPath));
+		}
+		UEdGraphNode* Node = Resolution.Spawner->Invoke(
+			Graph,
+			IBlueprintNodeBinder::FBindingSet(),
+			FVector2D(Operation.X, Operation.Y));
+		if (Node == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-spawn-action-failed"),
+				FString::Printf(
+					TEXT("The Editor failed to spawn the action %s."),
+					*Operation.ActionId));
+		}
+		OutNode = Node;
+		Node->SetFlags(RF_Transactional);
+		if (!Node->NodeGuid.IsValid())
+		{
+			Node->CreateNewGuid();
+		}
+		// The engine snaps a spawned node to the graph grid (9000 -> 8992); this
+		// writer's contract is the exact requested coordinate, exactly like the
+		// primitive path below which assigns x/y after spawning.
+		Node->NodePosX = Operation.X;
+		Node->NodePosY = Operation.Y;
+		return true;
+	}
+
+	/**
+	 * Read one primitive node back against the exact plan.
+	 *
+	 * This is the atomic seam's contract check.  The single writer's own read-back
+	 * (node count, created GUID present, undo/redo) is unchanged; the patch adds
+	 * this stricter per-field proof because it returns one result per operation.
+	 */
+	bool NodeMatchesAtomicOperation(
+		const UEdGraphNode* Node,
+		const UEAgentKitBlueprintGraphEditExperimental::FAtomicNodeOperation& Operation,
+		FString& OutReason)
+	{
+		if (Node == nullptr)
+		{
+			OutReason = TEXT("The created node is missing from the live graph.");
+			return false;
+		}
+		if (!Node->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower).Equals(
+				Operation.NodeGuid,
+				ESearchCase::CaseSensitive))
+		{
+			OutReason = TEXT("The created node no longer carries the resolved NodeGuid.");
+			return false;
+		}
+		if (!Node->GetClass()->GetPathName().Equals(
+				Operation.NodeClassPath,
+				ESearchCase::CaseSensitive))
+		{
+			OutReason = FString::Printf(
+				TEXT("The created node class %s does not match the resolved class %s."),
+				*Node->GetClass()->GetPathName(),
+				*Operation.NodeClassPath);
+			return false;
+		}
+		if (Node->NodePosX != Operation.X || Node->NodePosY != Operation.Y)
+		{
+			OutReason = FString::Printf(
+				TEXT("The created node position (%d,%d) does not match the plan (%d,%d)."),
+				Node->NodePosX,
+				Node->NodePosY,
+				Operation.X,
+				Operation.Y);
+			return false;
+		}
+		if (Operation.bActionSpawn)
+		{
+			// Phase A action spawn: identity is the class the action resolved to,
+			// plus the planned position.  The pin set is whatever the engine
+			// produced and is read back by the caller after creation; asserting a
+			// predicted pin contract here would be a shadow contract, not proof.
 			if (Node->Pins.Num() == 0)
 			{
-				Node->AllocateDefaultPins();
+				OutReason = TEXT("The action-spawned node has no pins.");
+				return false;
 			}
-			if (Node->Pins.Num() == 0 || !Node->NodeGuid.IsValid())
-			{
-				return Abort(
-					TEXT("graph-edit-node-spawn-failed"),
-					FString::Printf(TEXT("Spawned %s has no pins or no valid NodeGuid."), *Spec.NodeType));
-			}
-			if (Spec.bVariableAccessor)
-			{
-				FString ContractReason;
-				if (!VariableNodeMatchesSpec(Node, Spec, ContractReason))
-				{
-					return Abort(
-						TEXT("graph-edit-variable-pin-contract-failed"),
-						ContractReason);
-				}
-			}
-			CreatedNodes.Add(Spec.TempId, Node);
-			CreatedGuidByTempId.Add(Spec.TempId, Node->NodeGuid);
-			CreatedGuids.Add(Node->NodeGuid);
+			return true;
+		}
+		if (Operation.bVariableAccessor)
+		{
+			// Slice 15: the accessor's own read-back -- class, self-context, member
+			// name, member GUID and the four/one pin contract -- is the single
+			// writer's check, reused here.
+			FNodeSpec AccessorSpec;
+			AccessorSpec.bVariableAccessor = true;
+			AccessorSpec.NodeType = Operation.NodeType;
+			AccessorSpec.NodeClassPath = Operation.NodeClassPath;
+			AccessorSpec.VariableName = Operation.VariableName;
+			AccessorSpec.VariableGuid = Operation.VariableGuid;
+			AccessorSpec.VariableType = Operation.VariableType;
+			return VariableNodeMatchesSpec(Node, AccessorSpec, OutReason);
 		}
 
-		for (const FConnectionSpec& Connection : Plan.Connections)
+		FNodeSpec Expected;
+		Expected.NodeType = Operation.NodeType;
+		Expected.X = Operation.X;
+		Expected.Y = Operation.Y;
+		FString IgnoredCode;
+		FString IgnoredMessage;
+		if (!ConfigureNodeType(
+				Operation.NodeType,
+				Expected,
+				IgnoredCode,
+				IgnoredMessage))
 		{
-			UEdGraphPin* FromPin = nullptr;
-			UEdGraphPin* ToPin = nullptr;
-			if (Plan.bDisconnect)
+			OutReason = FString::Printf(
+				TEXT("The resolved nodeType %s has no contract."),
+				*Operation.NodeType);
+			return false;
+		}
+		const int32 ExpectedPinCount = Expected.InputPins.Num() + Expected.OutputPins.Num();
+		int32 VisiblePinCount = 0;
+		int32 HiddenSelfCount = 0;
+		for (const UEdGraphPin* Pin : Node->Pins)
+		{
+			if (Pin == nullptr)
 			{
-				FExistingPinSpec ResolvedFrom = Connection.FromExisting;
-				FExistingPinSpec ResolvedTo = Connection.ToExisting;
-				if (!ResolveExistingPin(
-						Graph,
-						ResolvedFrom,
-						FromPin,
-						OutErrorCode,
-						OutErrorMessage,
-						true)
-					|| !ResolveExistingPin(
-						Graph,
-						ResolvedTo,
-						ToPin,
-						OutErrorCode,
-						OutErrorMessage,
-						true))
+				continue;
+			}
+			const bool bIsHiddenSelf =
+				Pin->bHidden
+				&& Pin->Direction == EGPD_Input
+				&& Pin->PinName == UEdGraphSchema_K2::PN_Self;
+			if (bIsHiddenSelf)
+			{
+				++HiddenSelfCount;
+				if (Pin->LinkedTo.Num() != 0)
 				{
-					return Abort(*OutErrorCode, OutErrorMessage);
-				}
-				if (!FromPin->LinkedTo.Contains(ToPin)
-					|| ToPin->LinkedTo.Num() != 1
-					|| !ToPin->LinkedTo.Contains(FromPin))
-				{
-					return Abort(
-						TEXT("graph-edit-disconnect-edge-not-found"),
-						TEXT("The exact edge is no longer present or the input has become ambiguous."));
-				}
-				FromPin->BreakLinkTo(ToPin);
-				if (FromPin->LinkedTo.Contains(ToPin) || ToPin->LinkedTo.Contains(FromPin))
-				{
-					return Abort(
-						TEXT("graph-edit-disconnect-failed"),
-						TEXT("The Editor did not remove the exact edge."));
+					OutReason = TEXT("The hidden self pin unexpectedly has links.");
+					return false;
 				}
 				continue;
 			}
-			if (Connection.bFromExisting && Connection.bToExisting)
+			if (Pin->bHidden)
 			{
-				FExistingPinSpec ResolvedFrom = Connection.FromExisting;
-				FExistingPinSpec ResolvedTo = Connection.ToExisting;
-				if (!ResolveExistingPin(
-						Graph,
-						ResolvedFrom,
-						FromPin,
-						OutErrorCode,
-						OutErrorMessage)
-					|| !ResolveExistingPin(
-						Graph,
-						ResolvedTo,
-						ToPin,
-						OutErrorCode,
-						OutErrorMessage))
-				{
-					return Abort(*OutErrorCode, OutErrorMessage);
-				}
-				if (FromPin->LinkedTo.Num() != Connection.FromExisting.LinkCount)
-				{
-					return Abort(
-						TEXT("graph-edit-edge-set-stale"),
-						TEXT("The existing output pin fan-out changed after Preview."));
-				}
-				if (ToPin->LinkedTo.Num() != 0)
-				{
-					return Abort(
-						TEXT("graph-edit-existing-pin-already-linked"),
-						TEXT("The existing input pin became connected after Preview."));
-				}
-				if (FromPin->GetOwningNode() == ToPin->GetOwningNode())
-				{
-					return Abort(
-						TEXT("graph-edit-self-connection"),
-						TEXT("The two existing endpoints must belong to different nodes."));
-				}
+				OutReason = FString::Printf(
+					TEXT("The created node has an unexpected hidden pin %s."),
+					*Pin->PinName.ToString());
+				return false;
 			}
-			else if (Connection.bFromExisting)
+			++VisiblePinCount;
+		}
+		if (VisiblePinCount != ExpectedPinCount || HiddenSelfCount > 1)
+		{
+			OutReason = FString::Printf(
+				TEXT("The created %s node has %d visible pins, expected %d."),
+				*Operation.NodeType,
+				VisiblePinCount,
+				ExpectedPinCount);
+			return false;
+		}
+		for (const FString& PinName : Expected.InputPins)
+		{
+			const UEdGraphPin* Pin = Node->FindPin(FName(*PinName), EGPD_Input);
+			if (Pin == nullptr || !PinMatchesType(Pin, Expected.InputPinTypes.FindRef(PinName)))
 			{
-				FExistingPinSpec Resolved = Connection.FromExisting;
-				if (!ResolveExistingPin(
-					Graph,
-					Resolved,
-					FromPin,
-					OutErrorCode,
-					OutErrorMessage))
-				{
-					return Abort(*OutErrorCode, OutErrorMessage);
-				}
-				if (FromPin->LinkedTo.Num() != Connection.FromExisting.LinkCount)
-				{
-					return Abort(
-						TEXT("graph-edit-edge-set-stale"),
-						TEXT("The existing output pin fan-out changed after Preview."));
-				}
-				UEdGraphNode** ToNode = CreatedNodes.Find(Connection.To);
-				if (ToNode == nullptr)
-				{
-					return Abort(
-						TEXT("graph-edit-node-reference-unknown"),
-						TEXT("A connection referenced a node that was not created."));
-				}
-				ToPin = (*ToNode)->FindPin(FName(*Connection.ToPin), EGPD_Input);
-			}
-			else if (Connection.bToExisting)
-			{
-				UEdGraphNode** FromNode = CreatedNodes.Find(Connection.From);
-				if (FromNode == nullptr)
-				{
-					return Abort(
-						TEXT("graph-edit-node-reference-unknown"),
-						TEXT("A connection referenced a node that was not created."));
-				}
-				FromPin = (*FromNode)->FindPin(FName(*Connection.FromPin), EGPD_Output);
-				FExistingPinSpec Resolved = Connection.ToExisting;
-				if (!ResolveExistingPin(
-					Graph,
-					Resolved,
-					ToPin,
-					OutErrorCode,
-					OutErrorMessage))
-				{
-					return Abort(*OutErrorCode, OutErrorMessage);
-				}
-				if (ToPin->LinkedTo.Num() != 0)
-				{
-					return Abort(
-						TEXT("graph-edit-existing-pin-already-linked"),
-						TEXT("The existing input pin became connected after Preview."));
-				}
-			}
-			else
-			{
-				UEdGraphNode** FromNode = CreatedNodes.Find(Connection.From);
-				UEdGraphNode** ToNode = CreatedNodes.Find(Connection.To);
-				if (FromNode == nullptr || ToNode == nullptr)
-				{
-					return Abort(
-						TEXT("graph-edit-node-reference-unknown"),
-						TEXT("A connection referenced a node that was not created."));
-				}
-				FromPin = (*FromNode)->FindPin(FName(*Connection.FromPin), EGPD_Output);
-				ToPin = (*ToNode)->FindPin(FName(*Connection.ToPin), EGPD_Input);
-			}
-			if (FromPin == nullptr || ToPin == nullptr)
-			{
-				return Abort(
-					TEXT("graph-edit-pin-not-found"),
-					TEXT("The planned nodes do not expose the declared input/output pins."));
-			}
-			if (!PinMatchesType(FromPin, Connection.FromType)
-				|| !PinMatchesType(ToPin, Connection.ToType))
-			{
-				return Abort(
-					TEXT("graph-edit-pin-type-mismatch"),
-					FString::Printf(
-						TEXT("The resolved pins do not match the declared types %s -> %s."),
-						*Connection.FromType,
-						*Connection.ToType));
-			}
-			if (Connection.bFromExisting || Connection.bToExisting)
-			{
-				if (!ValidateSchemaConnection(
-					Graph,
-					FromPin,
-					ToPin,
-					OutErrorCode,
-					OutErrorMessage))
-				{
-					return Abort(*OutErrorCode, OutErrorMessage);
-				}
-			}
-			if (!Graph->GetSchema()->TryCreateConnection(FromPin, ToPin)
-				|| !ArePinsLinked(FromPin, ToPin))
-			{
-				return Abort(
-					TEXT("graph-edit-connection-failed"),
-					TEXT("The Editor rejected the planned connection."));
+				OutReason = FString::Printf(
+					TEXT("The created node input pin %s is missing or has the wrong type."),
+					*PinName);
+				return false;
 			}
 		}
-
-		Blueprint->GetOutermost()->MarkPackageDirty();
+		for (const FString& PinName : Expected.OutputPins)
+		{
+			const UEdGraphPin* Pin = Node->FindPin(FName(*PinName), EGPD_Output);
+			if (Pin == nullptr || !PinMatchesType(Pin, Expected.OutputPinTypes.FindRef(PinName)))
+			{
+				OutReason = FString::Printf(
+					TEXT("The created node output pin %s is missing or has the wrong type."),
+					*PinName);
+				return false;
+			}
+		}
+		if (!Expected.FunctionName.IsEmpty())
+		{
+			const UK2Node_CallFunction* CallNode = Cast<UK2Node_CallFunction>(Node);
+			const UFunction* Function = CallNode != nullptr ? CallNode->GetTargetFunction() : nullptr;
+			if (Function == nullptr
+				|| !Function->GetName().Equals(Expected.FunctionName, ESearchCase::CaseSensitive))
+			{
+				OutReason = FString::Printf(
+					TEXT("The created node no longer calls %s."),
+					*Expected.FunctionName);
+				return false;
+			}
+			UClass* OwnerClass = Function->GetOuterUClass();
+			UClass* ExpectedOwner = FunctionOwnerForNodeType(Operation.NodeType);
+			if (OwnerClass == nullptr
+				|| ExpectedOwner == nullptr
+				|| !OwnerClass->GetPathName().Equals(
+					ExpectedOwner->GetPathName(),
+					ESearchCase::CaseSensitive))
+			{
+				OutReason = TEXT("The created function node has the wrong owner class.");
+				return false;
+			}
+			if (!Function->HasAnyFunctionFlags(FUNC_BlueprintPure)
+				|| !Function->HasAnyFunctionFlags(FUNC_Static))
+			{
+				OutReason = TEXT("The created function node is not a static BlueprintPure call.");
+				return false;
+			}
+		}
+		return true;
 	}
 
-	auto FailCommitted = [&](const TCHAR* Code, const FString& Message) -> bool
+	UEdGraphNode* FindNodeByGuid(UEdGraph* Graph, const FGuid& Guid)
 	{
-		bool bHasAppliedState = Graph->Nodes.Num() != NodeCountBefore;
-		for (const FGuid& Guid : CreatedGuids)
+		if (Graph == nullptr)
 		{
-			bHasAppliedState = bHasAppliedState || HasNodeGuid(Graph, Guid);
+			return nullptr;
 		}
-		if (bHasAppliedState && GEditor != nullptr && GEditor->Trans != nullptr)
+		for (UEdGraphNode* Node : Graph->Nodes)
 		{
-			GEditor->UndoTransaction();
+			if (Node != nullptr && Node->NodeGuid == Guid)
+			{
+				return Node;
+			}
 		}
-		const bool bRestored = Graph->Nodes.Num() == NodeCountBefore
-			&& CountLinks(Graph) == LinkCountBefore;
-		return Fail(
+		return nullptr;
+	}
+
+	/** Remove nodes in reverse order; returns false when one survives. */
+	bool RemoveCreatedNodes(UBlueprint* Blueprint, UEdGraph* Graph, TArray<UEdGraphNode*>& Nodes)
+	{
+		bool bAllRemoved = true;
+		for (int32 Index = Nodes.Num() - 1; Index >= 0; --Index)
+		{
+			UEdGraphNode* Node = Nodes[Index];
+			if (Node == nullptr)
+			{
+				continue;
+			}
+			Node->Modify();
+			FBlueprintEditorUtils::RemoveNode(Blueprint, Node, true);
+			if (Graph != nullptr && Graph->Nodes.Contains(Node))
+			{
+				bAllRemoved = false;
+			}
+		}
+		Nodes.Reset();
+		return bAllRemoved;
+	}
+
+	/** Exactly one pin with this name and direction, or a writer-coded failure. */
+	UEdGraphPin* FindUniquePin(
+		UEdGraphNode* Node,
+		const FString& PinName,
+		const EEdGraphPinDirection Direction,
+		const TCHAR* Role,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
+	{
+		if (Node == nullptr)
+		{
+			Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-node-reference-unknown"),
+				TEXT("The edge endpoint node is unavailable."));
+			return nullptr;
+		}
+		UEdGraphPin* Match = nullptr;
+		for (UEdGraphPin* Pin : Node->Pins)
+		{
+			if (Pin != nullptr
+				&& Pin->Direction == Direction
+				// Pin names are FNames: case-insensitive, and their printed spelling
+				// can change after a node rebuilds its pins (Index -> index).
+				&& Pin->PinName.ToString().Equals(PinName, ESearchCase::IgnoreCase))
+			{
+				if (Match != nullptr)
+				{
+					Fail(
+						OutErrorCode,
+						OutErrorMessage,
+						TEXT("graph-edit-pin-ambiguous"),
+						FString::Printf(
+							TEXT("More than one %s pin named %s exists on node %s."),
+							Role,
+							*PinName,
+							*Node->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower)));
+					return nullptr;
+				}
+				Match = Pin;
+			}
+		}
+		if (Match == nullptr)
+		{
+			Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-pin-not-found"),
+				FString::Printf(
+					TEXT("Node %s has no %s pin named %s."),
+					*Node->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower),
+					Role,
+					*PinName));
+		}
+		return Match;
+	}
+
+	/** Resolve one non-tempId endpoint against the live graph. */
+	bool ResolveLiveEdgeEndpoint(
+		UEdGraph* Graph,
+		const bool bFrom,
+		UEAgentKitBlueprintGraphEditExperimental::FAtomicEdgeOperation& InOutOperation,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
+	{
+		const FString& NodeGuidText = bFrom ? InOutOperation.FromNodeGuid : InOutOperation.ToNodeGuid;
+		const FString& PinName = bFrom ? InOutOperation.FromPin : InOutOperation.ToPin;
+		FGuid NodeGuid;
+		if (!FGuid::Parse(NodeGuidText, NodeGuid))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-node-reference-unknown"),
+				FString::Printf(TEXT("'%s' is not a canonical node GUID."), *NodeGuidText));
+		}
+		UEdGraphNode* Node = FindNodeByGuid(Graph, NodeGuid);
+		if (Node == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-existing-node-not-found"),
+				FString::Printf(TEXT("No node with GUID %s exists in the focused graph."), *NodeGuidText));
+		}
+		if (Cast<UK2Node>(Node) == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-existing-node-not-k2"),
+				TEXT("Edge endpoints must be K2 Blueprint nodes."));
+		}
+		UEdGraphPin* Pin = FindUniquePin(
+			Node,
+			PinName,
+			bFrom ? EGPD_Output : EGPD_Input,
+			bFrom ? TEXT("output") : TEXT("input"),
 			OutErrorCode,
-			OutErrorMessage,
-			Code,
-			Message + (bRestored
-				? TEXT(" The applied changes were rolled back.")
-				: TEXT(" WARNING: automatic rollback did not restore the original graph.")));
-	};
-
-	TSharedPtr<FJsonObject> PostPreflight;
-	if (!UEAgentKitBlueprintGraphLayout::BuildFocusedEditorPreflight(
-		PostPreflight,
-		OutErrorCode,
-		OutErrorMessage))
-	{
-		return FailCommitted(
-			TEXT("graph-edit-readback-failed"),
-			TEXT("Post-Apply preflight failed: ") + OutErrorCode + TEXT(" ") + OutErrorMessage);
-	}
-	if (!PostPreflight->GetBoolField(TEXT("packageDirty")))
-	{
-		return FailCommitted(
-			TEXT("graph-edit-readback-failed"),
-			TEXT("The package did not become dirty after Apply."));
-	}
-	if (PostPreflight->GetNumberField(TEXT("nodeCount")) != NodeCountBefore + Plan.Nodes.Num())
-	{
-		return FailCommitted(
-			TEXT("graph-edit-readback-failed"),
-			TEXT("The graph node count does not match the previewed node count after Apply."));
-	}
-
-	const int32 NodeCountAfter = Graph->Nodes.Num();
-	const int32 LinkCountAfter = CountLinks(Graph);
-	const int32 ExpectedLinkDelta = Plan.bDisconnect
-		? -Plan.Connections.Num()
-		: Plan.Connections.Num();
-	if (LinkCountAfter != LinkCountBefore + ExpectedLinkDelta)
-	{
-		return FailCommitted(
-			TEXT("graph-edit-readback-failed"),
-			TEXT("The graph link count does not match the previewed edge delta after Apply."));
-	}
-	if (Plan.bDisconnect)
-	{
-		CollectEdgeKeys(Graph, AfterEdges);
-		int32 RemovedEdges = 0;
-		int32 AddedEdges = 0;
-		for (const FString& Edge : BeforeEdges)
+			OutErrorMessage);
+		if (Pin == nullptr)
 		{
-			RemovedEdges += AfterEdges.Contains(Edge) ? 0 : 1;
+			return false;
 		}
-		for (const FString& Edge : AfterEdges)
+		FString Type;
+		if (!ExistingPinTypeToken(Pin->PinType, Type))
 		{
-			AddedEdges += BeforeEdges.Contains(Edge) ? 0 : 1;
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-existing-pin-type-not-supported"),
+				FString::Printf(
+					TEXT("Pin %s carries a type this slice cannot connect (only exec/bool/int/double/string are supported)."),
+					*PinName));
 		}
-		const FConnectionSpec& Disconnect = Plan.Connections[0];
-		const FString RemovedKey = FString::Printf(
-			TEXT("%s|%s>%s|%s"),
-			*Disconnect.FromExisting.NodeGuid,
-			*Disconnect.FromExisting.PinGuid,
-			*Disconnect.ToExisting.NodeGuid,
-			*Disconnect.ToExisting.PinGuid);
-		if (RemovedEdges != 1
-			|| AddedEdges != 0
-			|| !BeforeEdges.Contains(RemovedKey)
-			|| AfterEdges.Contains(RemovedKey))
+		if (!bFrom && !InOutOperation.bDisconnect)
 		{
-			return FailCommitted(
-				TEXT("graph-edit-disconnect-delta-failed"),
-				TEXT("Disconnect did not remove exactly the declared edge while preserving all others."));
-		}
-	}
-	if (Plan.bHasExistingPin)
-	{
-		if (!UEAgentKitBlueprintRewireExperimental::TryComputeLiveEdgeSetHash(
-			Graph,
-			AfterEdgeSetHash))
-		{
-			return FailCommitted(
-				TEXT("graph-edit-readback-failed"),
-				TEXT("Could not compute the after edge-set hash."));
-		}
-	}
-	for (const FGuid& Guid : CreatedGuids)
-	{
-		if (!HasNodeGuid(Graph, Guid))
-		{
-			return FailCommitted(
-				TEXT("graph-edit-readback-failed"),
-				TEXT("At least one previewed node is missing from the live graph after Apply."));
-		}
-	}
-
-	const bool bUndoCalled = GEditor->UndoTransaction();
-	const bool bUndoNodes = Graph->Nodes.Num() == NodeCountBefore;
-	const bool bUndoLinks = CountLinks(Graph) == LinkCountBefore;
-	bool bUndoGuids = true;
-	for (const FGuid& Guid : CreatedGuids)
-	{
-		bUndoGuids = bUndoGuids && !HasNodeGuid(Graph, Guid);
-	}
-	bool bUndoEdgeSet = true;
-	if (Plan.bHasExistingPin)
-	{
-		FString UndoEdgeSetHash;
-		bUndoEdgeSet = UEAgentKitBlueprintRewireExperimental::TryComputeLiveEdgeSetHash(
-				Graph,
-				UndoEdgeSetHash)
-			&& UndoEdgeSetHash.Equals(Plan.BeforeEdgeSetHash, ESearchCase::CaseSensitive);
-	}
-	const bool bUndoVerified = bUndoCalled
-		&& bUndoNodes
-		&& bUndoLinks
-		&& bUndoGuids
-		&& bUndoEdgeSet;
-
-	const bool bRedoCalled = bUndoVerified && GEditor->RedoTransaction();
-	const bool bRedoNodes = Graph->Nodes.Num() == NodeCountAfter;
-	const bool bRedoLinks = CountLinks(Graph) == LinkCountAfter;
-	bool bRedoGuids = true;
-	for (const FGuid& Guid : CreatedGuids)
-	{
-		bRedoGuids = bRedoGuids && HasNodeGuid(Graph, Guid);
-	}
-	bool bRedoEdgeSet = true;
-	if (Plan.bHasExistingPin)
-	{
-		FString RedoEdgeSetHash;
-		bRedoEdgeSet = UEAgentKitBlueprintRewireExperimental::TryComputeLiveEdgeSetHash(
-				Graph,
-				RedoEdgeSetHash)
-			&& !AfterEdgeSetHash.IsEmpty()
-			&& RedoEdgeSetHash.Equals(AfterEdgeSetHash, ESearchCase::CaseSensitive);
-	}
-	// Redo must restore not only the GUID but the exact member-variable binding
-	// and engine pin contract, otherwise a renamed/retyped variable would look
-	// like a successful accessor creation.
-	bool bRedoVariableContracts = true;
-	FString RedoVariableReason;
-	for (const FNodeSpec& Spec : Plan.Nodes)
-	{
-		if (!Spec.bVariableAccessor)
-		{
-			continue;
-		}
-		const FGuid* CreatedGuid = CreatedGuidByTempId.Find(Spec.TempId);
-		const UEdGraphNode* RestoredNode = nullptr;
-		if (CreatedGuid != nullptr)
-		{
-			for (const UEdGraphNode* Candidate : Graph->Nodes)
+			// A connect needs a free target input; a disconnect needs exactly the
+			// opposite, so the "not already linked" rule belongs to connect only.
+			if (Pin->LinkedTo.Num() != 0)
 			{
-				if (Candidate != nullptr && Candidate->NodeGuid == *CreatedGuid)
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-existing-pin-already-linked"),
+					TEXT("The target input pin is already connected; this slice never breaks an existing link."));
+			}
+		}
+		if (bFrom)
+		{
+			InOutOperation.FromPinId = Pin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower);
+			InOutOperation.FromType = Type;
+		}
+		else
+		{
+			InOutOperation.ToPinId = Pin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower);
+			InOutOperation.ToType = Type;
+		}
+		return true;
+	}
+
+	/** Resolve one tempId endpoint from the declaring createNode operation. */
+	bool ResolveDeclaredEdgeEndpoint(
+		const UEAgentKitBlueprintGraphEditExperimental::FAtomicNodeOperation& Node,
+		const bool bFrom,
+		UEAgentKitBlueprintGraphEditExperimental::FAtomicEdgeOperation& InOutOperation,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
+	{
+		const FString& PinName = bFrom ? InOutOperation.FromPin : InOutOperation.ToPin;
+		const TArray<FString>& Pins = bFrom ? Node.OutputPins : Node.InputPins;
+		const TMap<FString, FString>& Types = bFrom ? Node.OutputPinTypes : Node.InputPinTypes;
+		if (!Pins.Contains(PinName))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-pin-not-allowed"),
+				FString::Printf(
+					TEXT("%s is not a supported %s pin of %s; allowed: %s."),
+					*PinName,
+					bFrom ? TEXT("output") : TEXT("input"),
+					*Node.NodeType,
+					*FString::Join(Pins, TEXT(", "))));
+		}
+		const FString Type = Types.FindRef(PinName);
+		if (Type.IsEmpty())
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-pin-not-allowed"),
+				FString::Printf(TEXT("%s has no declared type on %s."), *PinName, *Node.NodeType));
+		}
+		if (bFrom)
+		{
+			InOutOperation.FromType = Type;
+		}
+		else
+		{
+			InOutOperation.ToType = Type;
+		}
+		return true;
+	}
+
+	/** Break one edge and verify both pins stopped pointing at each other. */
+	bool BreakEdge(
+		UEdGraphPin* FromPin,
+		UEdGraphPin* ToPin,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
+	{
+		if (FromPin == nullptr || ToPin == nullptr)
+		{
+			return true;
+		}
+		FromPin->BreakLinkTo(ToPin);
+		if (FromPin->GetOwningNode() != nullptr)
+		{
+			FromPin->GetOwningNode()->PinConnectionListChanged(FromPin);
+		}
+		if (ToPin->GetOwningNode() != nullptr)
+		{
+			ToPin->GetOwningNode()->PinConnectionListChanged(ToPin);
+		}
+		if (FromPin->LinkedTo.Contains(ToPin) || ToPin->LinkedTo.Contains(FromPin))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-disconnect-failed"),
+				TEXT("The Editor did not remove the exact edge."));
+		}
+		return true;
+	}
+
+	/**
+	 * Re-create one exact edge and verify both pins point at each other.
+	 *
+	 * This is the inverse of BreakEdge and is only used to put an edge back after
+	 * a failed Apply (rollback) or to undo a planned disconnect; the forward path
+	 * always goes through the K2 schema instead.
+	 */
+	bool RelinkEdge(
+		UEdGraphPin* FromPin,
+		UEdGraphPin* ToPin,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
+	{
+		if (FromPin == nullptr || ToPin == nullptr)
+		{
+			return true;
+		}
+		if (!FromPin->LinkedTo.Contains(ToPin))
+		{
+			FromPin->MakeLinkTo(ToPin);
+		}
+		if (FromPin->GetOwningNode() != nullptr)
+		{
+			FromPin->GetOwningNode()->PinConnectionListChanged(FromPin);
+		}
+		if (ToPin->GetOwningNode() != nullptr)
+		{
+			ToPin->GetOwningNode()->PinConnectionListChanged(ToPin);
+		}
+		if (!FromPin->LinkedTo.Contains(ToPin) || !ToPin->LinkedTo.Contains(FromPin))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-disconnect-failed"),
+				TEXT("The Editor did not restore the exact edge."));
+		}
+		return true;
+	}
+
+	/** Locate one edge's two pins by resolved identity; either may be null. */
+	void FindEdgePins(
+		UEdGraph* Graph,
+		const UEAgentKitBlueprintGraphEditExperimental::FAtomicEdgeOperation& Operation,
+		UEdGraphPin*& OutFromPin,
+		UEdGraphPin*& OutToPin)
+	{
+		OutFromPin = nullptr;
+		OutToPin = nullptr;
+		FGuid FromGuid;
+		FGuid ToGuid;
+		if (Graph == nullptr
+			|| !FGuid::Parse(Operation.FromNodeGuid, FromGuid)
+			|| !FGuid::Parse(Operation.ToNodeGuid, ToGuid))
+		{
+			return;
+		}
+		UEdGraphNode* FromNode = FindNodeByGuid(Graph, FromGuid);
+		UEdGraphNode* ToNode = FindNodeByGuid(Graph, ToGuid);
+		if (FromNode != nullptr)
+		{
+			for (UEdGraphPin* Pin : FromNode->Pins)
+			{
+				if (Pin != nullptr
+					&& Pin->Direction == EGPD_Output
+					&& Pin->PinName.ToString().Equals(Operation.FromPin, ESearchCase::IgnoreCase))
 				{
-					RestoredNode = Candidate;
+					OutFromPin = Pin;
 					break;
 				}
 			}
 		}
-		if (!VariableNodeMatchesSpec(RestoredNode, Spec, RedoVariableReason))
+		if (ToNode != nullptr)
 		{
-			bRedoVariableContracts = false;
-			break;
+			for (UEdGraphPin* Pin : ToNode->Pins)
+			{
+				if (Pin != nullptr
+					&& Pin->Direction == EGPD_Input
+					&& Pin->PinName.ToString().Equals(Operation.ToPin, ESearchCase::IgnoreCase))
+				{
+					OutToPin = Pin;
+					break;
+				}
+			}
 		}
-	}
-	const bool bRedoVerified = bRedoCalled
-		&& bRedoNodes
-		&& bRedoLinks
-		&& bRedoGuids
-		&& bRedoEdgeSet
-		&& bRedoVariableContracts;
-	if (!bUndoVerified || !bRedoVerified)
-	{
-		return FailCommitted(
-			TEXT("graph-edit-undo-redo-failed"),
-			FString::Printf(
-				TEXT("Undo/Redo verification failed: undo=%s nodes=%s links=%s guids=%s edges=%s redo=%s edges=%s variables=%s %s"),
-				bUndoCalled ? TEXT("true") : TEXT("false"),
-				bUndoNodes ? TEXT("true") : TEXT("false"),
-				bUndoLinks ? TEXT("true") : TEXT("false"),
-				bUndoGuids ? TEXT("true") : TEXT("false"),
-				bUndoEdgeSet ? TEXT("true") : TEXT("false"),
-				bRedoVerified ? TEXT("true") : TEXT("false"),
-				bRedoEdgeSet ? TEXT("true") : TEXT("false"),
-				bRedoVariableContracts ? TEXT("true") : TEXT("false"),
-				*RedoVariableReason));
 	}
 
-	TSharedPtr<FJsonObject> FinalPreflight;
-	if (!UEAgentKitBlueprintGraphLayout::BuildFocusedEditorPreflight(
-		FinalPreflight,
-		OutErrorCode,
-		OutErrorMessage))
-	{
-		return FailCommitted(
-			TEXT("graph-edit-readback-failed"),
-			TEXT("Final preflight failed: ") + OutErrorCode + TEXT(" ") + OutErrorMessage);
-	}
-	if (!FinalPreflight->GetBoolField(TEXT("packageDirty")))
-	{
-		return FailCommitted(
-			TEXT("graph-edit-readback-failed"),
-			TEXT("The package is not dirty after Redo."));
-	}
-
-	TArray<TSharedPtr<FJsonValue>> CreatedNodeValues;
-	for (const FNodeSpec& Spec : Plan.Nodes)
-	{
-		const FGuid* NodeGuid = CreatedGuidByTempId.Find(Spec.TempId);
-		if (NodeGuid == nullptr)
-		{
-			continue;
-		}
-		TSharedRef<FJsonObject> Item = MakeShared<FJsonObject>();
-		Item->SetStringField(TEXT("tempId"), Spec.TempId);
-		Item->SetStringField(TEXT("nodeId"), FString(TEXT("n:")) + NodeGuid->ToString(EGuidFormats::DigitsWithHyphensLower));
-		Item->SetStringField(TEXT("nodeClass"), Spec.NodeClassPath);
-		if (!Spec.FunctionName.IsEmpty())
-		{
-			Item->SetStringField(TEXT("function"), Spec.FunctionName);
-		}
-		if (Spec.bVariableAccessor)
-		{
-			Item->SetStringField(TEXT("variableName"), Spec.VariableName);
-			Item->SetStringField(TEXT("variableGuid"), Spec.VariableGuid);
-			Item->SetStringField(TEXT("variableType"), Spec.VariableType);
-			Item->SetStringField(TEXT("variableAccess"), Spec.VariableAccess);
-		}
-		Item->SetNumberField(TEXT("x"), Spec.X);
-		Item->SetNumberField(TEXT("y"), Spec.Y);
-		CreatedNodeValues.Add(MakeShared<FJsonValueObject>(Item));
-	}
-
-	TArray<TSharedPtr<FJsonValue>> ConnectionValues;
-	auto MakeExistingPinObject = [](const FExistingPinSpec& Spec)
-	{
-		TSharedRef<FJsonObject> Object = MakeShared<FJsonObject>();
-		Object->SetStringField(TEXT("nodeGuid"), Spec.NodeGuid);
-		Object->SetStringField(TEXT("pinGuid"), Spec.PinGuid);
-		Object->SetStringField(TEXT("pinName"), Spec.PinName);
-		Object->SetStringField(TEXT("direction"), Spec.Direction);
-		Object->SetStringField(TEXT("category"), Spec.Category);
-		Object->SetStringField(TEXT("subCategory"), Spec.SubCategory);
-		return Object;
-	};
-	for (const FConnectionSpec& Connection : Plan.Connections)
-	{
-		TSharedRef<FJsonObject> Item = MakeShared<FJsonObject>();
-		if (Connection.bFromExisting)
-		{
-			Item->SetObjectField(TEXT("fromExisting"), MakeExistingPinObject(Connection.FromExisting));
-		}
-		else
-		{
-			Item->SetStringField(TEXT("from"), Connection.From);
-			Item->SetStringField(TEXT("fromPin"), Connection.FromPin);
-		}
-		Item->SetStringField(TEXT("fromType"), Connection.FromType);
-		if (Connection.bToExisting)
-		{
-			Item->SetObjectField(TEXT("toExisting"), MakeExistingPinObject(Connection.ToExisting));
-		}
-		else
-		{
-			Item->SetStringField(TEXT("to"), Connection.To);
-			Item->SetStringField(TEXT("toPin"), Connection.ToPin);
-		}
-		Item->SetStringField(TEXT("toType"), Connection.ToType);
-		ConnectionValues.Add(MakeShared<FJsonValueObject>(Item));
-	}
-
-	if (RecentApplies.Num() > 16)
-	{
-		RecentApplies.Reset();
-	}
-	FApplyReceipt Receipt;
-	Receipt.AssetPath = Plan.AssetPath;
-	Receipt.GraphGuid = Plan.GraphGuid;
-	Receipt.GraphFingerprint = FinalPreflight->GetStringField(TEXT("graphFingerprint"));
-	Receipt.NodeCount = NodeCountAfter;
-	Receipt.LinkCount = LinkCountAfter;
-	Receipt.VariableBindingHash = ComputeVariableBindingHash(Graph);
-	if (Receipt.VariableBindingHash.IsEmpty())
-	{
-		return FailCommitted(
-			TEXT("graph-edit-readback-failed"),
-			TEXT("Could not compute the variable binding hash after Apply."));
-	}
-	if (Plan.bHasExistingPin)
-	{
-		Receipt.bRequiresEdgeSetHash = true;
-		Receipt.EdgeSetHash = AfterEdgeSetHash;
-		if (Receipt.EdgeSetHash.IsEmpty())
-		{
-			return FailCommitted(
-				TEXT("graph-edit-readback-failed"),
-				TEXT("Could not bind the after edge-set hash to the Apply receipt."));
-		}
-	}
-	RecentApplies.Add(Plan.PlanId, Receipt);
-
-	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
-	Result->SetStringField(TEXT("schemaVersion"), TEXT("ueak.graphpatch-edit-apply/1.0"));
-	Result->SetBoolField(TEXT("experimental"), true);
-	Result->SetBoolField(TEXT("applied"), true);
-	Result->SetBoolField(TEXT("singleTransaction"), true);
-	Result->SetBoolField(TEXT("undoVerified"), bUndoVerified);
-	Result->SetBoolField(TEXT("redoVerified"), bRedoVerified);
-	Result->SetBoolField(TEXT("saved"), false);
-	Result->SetBoolField(TEXT("compiled"), false);
-	Result->SetBoolField(TEXT("autoSave"), false);
-	Result->SetStringField(TEXT("planId"), Plan.PlanId);
-	Result->SetStringField(TEXT("assetPath"), Plan.AssetPath);
-	Result->SetStringField(TEXT("graphGuid"), Plan.GraphGuid);
-	Result->SetStringField(TEXT("confirmation"), Confirmation);
-	Result->SetStringField(
-		TEXT("requiredSaveConfirmation"),
-		FString(SaveConfirmationPrefix) + Plan.PlanId);
-	Result->SetNumberField(TEXT("nodeCountBefore"), NodeCountBefore);
-	Result->SetNumberField(TEXT("nodeCountAfter"), NodeCountAfter);
-	Result->SetStringField(TEXT("operation"), Plan.Operation);
-	Result->SetNumberField(TEXT("createdNodeCount"), Plan.Nodes.Num());
-	Result->SetNumberField(
-		TEXT("createdConnectionCount"),
-		Plan.bDisconnect ? 0 : Plan.Connections.Num());
-	Result->SetNumberField(
-		TEXT("removedConnectionCount"),
-		Plan.bDisconnect ? Plan.Connections.Num() : 0);
-	Result->SetNumberField(TEXT("linkCountBefore"), LinkCountBefore);
-	Result->SetNumberField(TEXT("linkCountAfter"), LinkCountAfter);
-	Result->SetBoolField(TEXT("packageDirtyAfter"), true);
-	Result->SetStringField(TEXT("packageRevision"), FinalPreflight->GetStringField(TEXT("packageRevision")));
-	Result->SetStringField(TEXT("graphFingerprintAfter"), FinalPreflight->GetStringField(TEXT("graphFingerprint")));
-	Result->SetStringField(TEXT("variableBindingHash"), Receipt.VariableBindingHash);
-	if (Plan.bHasExistingPin)
-	{
-		Result->SetStringField(TEXT("beforeEdgeSetHash"), Plan.BeforeEdgeSetHash);
-		Result->SetStringField(TEXT("afterEdgeSetHash"), AfterEdgeSetHash);
-		Result->SetStringField(TEXT("edgeSetHash"), AfterEdgeSetHash);
-	}
-	Result->SetArrayField(TEXT("createdNodes"), CreatedNodeValues);
-	if (Plan.bDisconnect)
-	{
-		Result->SetArrayField(TEXT("removedConnections"), ConnectionValues);
-	}
-	else
-	{
-		Result->SetArrayField(TEXT("createdConnections"), ConnectionValues);
-	}
-	OutResult = Result;
-	return true;
 }
 
-bool UEAgentKitBlueprintGraphEditExperimental::TrySaveExperimental(
-	const TSharedPtr<FJsonObject>& Params,
-	TSharedPtr<FJsonObject>& OutResult,
+FString UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicNodeStateFingerprint(UEdGraph* Graph)
+{
+	return ComputeNodeStateFingerprint(Graph);
+}
+
+bool UEAgentKitBlueprintGraphEditExperimental::TryResolveAtomicNodeOperation(
+	UBlueprint* Blueprint,
+	UEdGraph* Graph,
+	FAtomicNodeOperation& InOutOperation,
 	FString& OutErrorCode,
 	FString& OutErrorMessage)
 {
-	if (!RejectUnknownParams(
-		Params,
-		{
-			TEXT("assetPath"),
-			TEXT("graphGuid"),
-			TEXT("planId"),
-			TEXT("expectedGraphFingerprint"),
-			TEXT("expectedNodeCount"),
-			TEXT("expectedLinkCount"),
-			TEXT("confirmation"),
-		},
-		OutErrorCode,
-		OutErrorMessage))
-	{
-		return false;
-	}
-	if (!IsExperimentalWriteAvailable())
+	// Everything here is read-only: nodeType whitelist, coordinate bound and the
+	// exact K2 schema.  The resolved class/function fields are what the
+	// transaction is later allowed to write.
+	if (Graph == nullptr)
 	{
 		return Fail(
 			OutErrorCode,
 			OutErrorMessage,
-			TEXT("graph-edit-experimental-disabled"),
-			TEXT("Experimental graph structure edit is not opted in for this project. "
-				 "Set [UEAgentKit] ExperimentalGraphPatchEdit=True in the project config."));
+			TEXT("graph-edit-graph-unavailable"),
+			TEXT("The exact graph is unavailable."));
 	}
-	if (GEditor == nullptr || (GEditor->IsPlaySessionInProgress() || GEditor->PlayWorld != nullptr))
+	if (Graph->GetSchema() == nullptr || !Graph->GetSchema()->IsA<UEdGraphSchema_K2>())
 	{
 		return Fail(
 			OutErrorCode,
 			OutErrorMessage,
-			TEXT("graph-edit-pie-active"),
-			TEXT("Experimental graph edit Save is unavailable while PIE or SIE is active."));
+			TEXT("graph-edit-schema-not-supported"),
+			TEXT("Experimental graph edit supports only K2 Blueprint graphs."));
 	}
-
-	FString AssetPath;
-	FString GraphGuid;
-	FString PlanId;
-	FString ExpectedFingerprint;
-	FString Confirmation;
-	if (!ReadString(Params, TEXT("assetPath"), AssetPath, OutErrorCode, OutErrorMessage)
-		|| !ReadString(Params, TEXT("graphGuid"), GraphGuid, OutErrorCode, OutErrorMessage)
-		|| !ReadString(Params, TEXT("planId"), PlanId, OutErrorCode, OutErrorMessage)
-		|| !ReadString(
-			Params,
-			TEXT("expectedGraphFingerprint"),
-			ExpectedFingerprint,
-			OutErrorCode,
-			OutErrorMessage)
-		|| !ReadString(Params, TEXT("confirmation"), Confirmation, OutErrorCode, OutErrorMessage))
+	const bool bAccessorType = InOutOperation.NodeType.Equals(TEXT("variable_get"), ESearchCase::CaseSensitive)
+		|| InOutOperation.NodeType.Equals(TEXT("variable_set"), ESearchCase::CaseSensitive);
+	const bool bActionSpawn = !InOutOperation.ActionId.IsEmpty();
+	if (!bAccessorType && !bActionSpawn && NodeClassForType(InOutOperation.NodeType) == nullptr)
 	{
-		return false;
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-node-type-not-allowed"),
+			FString::Printf(
+				TEXT("The atomic patch creates only these nodeTypes: branch, sequence, not_bool, bool_or, int_add, int_equal, double_add, string_concat, variable_get, variable_set (got '%s')."),
+				*InOutOperation.NodeType));
 	}
-	if (!IsSha256(PlanId) || !IsSha1(ExpectedFingerprint))
+	if (InOutOperation.X < -MaxCoordinate || InOutOperation.X > MaxCoordinate
+		|| InOutOperation.Y < -MaxCoordinate || InOutOperation.Y > MaxCoordinate)
 	{
 		return Fail(
 			OutErrorCode,
 			OutErrorMessage,
 			TEXT("graph-edit-invalid-parameters"),
-			TEXT("Save requires a canonical sha256 planId and sha1 expectedGraphFingerprint."));
+			FString::Printf(
+				TEXT("x and y must be integers between -%d and %d."),
+				MaxCoordinate,
+				MaxCoordinate));
 	}
 
-	double NodeCountNumber = 0.0;
-	double LinkCountNumber = 0.0;
-	if (!Params->TryGetNumberField(TEXT("expectedNodeCount"), NodeCountNumber)
-		|| !Params->TryGetNumberField(TEXT("expectedLinkCount"), LinkCountNumber)
-		|| FMath::Abs(NodeCountNumber - FMath::RoundToDouble(NodeCountNumber)) > 0.0001
-		|| FMath::Abs(LinkCountNumber - FMath::RoundToDouble(LinkCountNumber)) > 0.0001
-		|| NodeCountNumber < 0.0
-		|| LinkCountNumber < 0.0)
+	FNodeSpec Spec;
+	Spec.NodeType = InOutOperation.NodeType;
+	Spec.X = InOutOperation.X;
+	Spec.Y = InOutOperation.Y;
+	if (bActionSpawn)
 	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("graph-edit-invalid-parameters"),
-			TEXT("Save requires non-negative expectedNodeCount and expectedLinkCount integers."));
-	}
-	const int32 ExpectedNodeCount = static_cast<int32>(NodeCountNumber);
-	const int32 ExpectedLinkCount = static_cast<int32>(LinkCountNumber);
-	const FString ExpectedConfirmation =
-		FString(SaveConfirmationPrefix) + PlanId;
-	if (!Confirmation.Equals(ExpectedConfirmation, ESearchCase::CaseSensitive))
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("graph-edit-confirmation-required"),
-			FString::Printf(TEXT("Explicit Save confirmation must be exactly %s."), *ExpectedConfirmation));
-	}
-
-	const FApplyReceipt* Receipt = RecentApplies.Find(PlanId);
-	if (Receipt == nullptr)
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("graph-edit-save-requires-apply"),
-			TEXT("Save requires a successful Apply of the exact plan in this Editor session."));
-	}
-	if (!Receipt->AssetPath.Equals(AssetPath, ESearchCase::CaseSensitive)
-		|| !Receipt->GraphGuid.Equals(GraphGuid, ESearchCase::CaseSensitive)
-		|| !Receipt->GraphFingerprint.Equals(ExpectedFingerprint, ESearchCase::CaseSensitive)
-		|| Receipt->NodeCount != ExpectedNodeCount
-		|| Receipt->LinkCount != ExpectedLinkCount)
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("graph-edit-save-plan-mismatch"),
-			TEXT("Save parameters do not match the receipt recorded by the preceding Apply."));
-	}
-
-	TSharedPtr<FJsonObject> Preflight;
-	if (!UEAgentKitBlueprintGraphLayout::BuildFocusedEditorPreflight(
-		Preflight,
-		OutErrorCode,
-		OutErrorMessage))
-	{
-		return false;
-	}
-	if (!Preflight->GetStringField(TEXT("assetPath")).Equals(AssetPath, ESearchCase::CaseSensitive)
-		|| !Preflight->GetStringField(TEXT("graphGuid")).Equals(GraphGuid, ESearchCase::CaseSensitive))
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("graph-edit-focused-graph-mismatch"),
-			TEXT("The focused Blueprint editor is not showing the exact saved asset/graph."));
-	}
-	if (!Preflight->GetBoolField(TEXT("packageDirty")))
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("graph-edit-save-not-dirty"),
-			TEXT("Experimental graph edit Save requires the exact package to be dirty."));
-	}
-	if (!Preflight->GetStringField(TEXT("graphFingerprint")).Equals(
-		ExpectedFingerprint,
-		ESearchCase::CaseSensitive))
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("graph-edit-fingerprint-conflict"),
-			TEXT("The focused graph changed after the graph edit Apply; refusing to save unrelated edits."));
-	}
-
-	UBlueprint* Blueprint = nullptr;
-	UEdGraph* Graph = nullptr;
-	if (!UEAgentKitBlueprintGraphLayout::ResolveExactTarget(
-		AssetPath,
-		GraphGuid,
-		Blueprint,
-		Graph,
-		OutErrorCode,
-		OutErrorMessage))
-	{
-		return false;
-	}
-	if (Blueprint == nullptr || Graph == nullptr
-		|| Graph->Nodes.Num() != ExpectedNodeCount
-		|| CountLinks(Graph) != ExpectedLinkCount)
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("graph-edit-save-plan-mismatch"),
-			TEXT("The live graph node/link counts no longer match the Apply receipt."));
-	}
-	const FString LiveVariableBindingHash = ComputeVariableBindingHash(Graph);
-	if (LiveVariableBindingHash.IsEmpty()
-		|| !LiveVariableBindingHash.Equals(Receipt->VariableBindingHash, ESearchCase::CaseSensitive))
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("graph-edit-save-variable-binding-mismatch"),
-			TEXT("A variable accessor binding changed after Apply; refusing to save it under this plan."));
-	}
-	if (Receipt->bRequiresEdgeSetHash)
-	{
-		FString LiveEdgeSetHash;
-		if (!UEAgentKitBlueprintRewireExperimental::TryComputeLiveEdgeSetHash(
-				Graph,
-				LiveEdgeSetHash)
-			|| !LiveEdgeSetHash.Equals(Receipt->EdgeSetHash, ESearchCase::CaseSensitive))
+		// Phase A: the action id is the whole identity.  Resolve it through the
+		// registry, apply the descriptor's own admission fields, and record what
+		// the engine will spawn.  No pin contract is predicted here: the created
+		// node's pins are read back after creation.
+		if (!InOutOperation.NodeType.IsEmpty())
 		{
 			return Fail(
 				OutErrorCode,
 				OutErrorMessage,
-				TEXT("graph-edit-save-edge-set-mismatch"),
-				TEXT("The edge set changed after Apply; refusing to save the existing-pin plan."));
+				TEXT("graph-spawn-action-id-conflict"),
+				TEXT("A createNode operation takes exactly one of nodeType and actionId."));
+		}
+		const FNativeSpawnerResolution Resolution =
+			FNativeNodeRegistry::Get().ResolveSpawnerForActionId(InOutOperation.ActionId);
+		if (!Resolution.bOk)
+		{
+			OutErrorCode = Resolution.ErrorCode.IsEmpty()
+				? TEXT("graph-spawn-action-unknown")
+				: Resolution.ErrorCode;
+			OutErrorMessage = Resolution.ErrorMessage.IsEmpty()
+				? FString(TEXT("The action could not be resolved."))
+				: Resolution.ErrorMessage;
+			return false;
+		}
+		if (!CheckActionSpawnAdmissible(Resolution, OutErrorCode, OutErrorMessage))
+		{
+			return false;
+		}
+		InOutOperation.bActionSpawn = true;
+		InOutOperation.NodeClassPath = Resolution.NodeClassPath;
+		InOutOperation.SpawnerClass = Resolution.SpawnerClassPath;
+		InOutOperation.ActionKind = Resolution.ActionKind;
+		InOutOperation.ActionPayload = Resolution.PayloadValue;
+		InOutOperation.FunctionName.Reset();
+		InOutOperation.InputPins.Reset();
+		InOutOperation.OutputPins.Reset();
+		InOutOperation.InputPinTypes.Reset();
+		InOutOperation.OutputPinTypes.Reset();
+		return true;
+	}
+	if (bAccessorType)
+	{
+		// Slice 15: resolve the accessor through the single writer's own rules, so
+		// the identity/type checks and the engine pin contract cannot drift.  A
+		// variable that does not exist yet is refused here, before any transaction.
+		if (!IsSupportedVariableAccessorGraph(Blueprint, Graph))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-variable-graph-not-supported"),
+				TEXT("Variable accessor creation is limited to top-level event, function and macro graphs."));
+		}
+		Spec.bVariableAccessor = true;
+		Spec.VariableName = InOutOperation.VariableName;
+		Spec.VariableGuid = InOutOperation.VariableGuid;
+		Spec.VariableType = InOutOperation.VariableType;
+		if (!ResolveVariableNode(Spec, Blueprint, OutErrorCode, OutErrorMessage))
+		{
+			return false;
+		}
+		InOutOperation.bVariableAccessor = true;
+		InOutOperation.VariableName = Spec.VariableName;
+		InOutOperation.VariableGuid = Spec.VariableGuid;
+		InOutOperation.VariableType = Spec.VariableType;
+		InOutOperation.VariableAccess = Spec.VariableAccess;
+		InOutOperation.NodeClassPath = Spec.NodeClassPath;
+		InOutOperation.FunctionName.Reset();
+		InOutOperation.InputPins = Spec.InputPins;
+		InOutOperation.OutputPins = Spec.OutputPins;
+		InOutOperation.InputPinTypes = Spec.InputPinTypes;
+		InOutOperation.OutputPinTypes = Spec.OutputPinTypes;
+		return true;
+	}
+	if (!ConfigureNodeType(
+			InOutOperation.NodeType,
+			Spec,
+			OutErrorCode,
+			OutErrorMessage))
+	{
+		return false;
+	}
+	// The fixed functions must exist in this engine before the transaction opens;
+	// a missing function is not something the rollback path should discover.
+	if (!Spec.FunctionName.IsEmpty())
+	{
+		UClass* FunctionOwner = FunctionOwnerForNodeType(Spec.NodeType);
+		if (FunctionOwner == nullptr
+			|| FunctionOwner->FindFunctionByName(FName(*Spec.FunctionName)) == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-node-spawn-failed"),
+				FString::Printf(TEXT("The function %s is unavailable."), *Spec.FunctionName));
+		}
+	}
+	InOutOperation.NodeClassPath = Spec.NodeClassPath;
+	InOutOperation.FunctionName = Spec.FunctionName;
+	InOutOperation.InputPins = Spec.InputPins;
+	InOutOperation.OutputPins = Spec.OutputPins;
+	InOutOperation.InputPinTypes = Spec.InputPinTypes;
+	InOutOperation.OutputPinTypes = Spec.OutputPinTypes;
+	return true;
+}
+
+bool UEAgentKitBlueprintGraphEditExperimental::TryApplyAtomicNodeOperations(
+	UBlueprint* Blueprint,
+	UEdGraph* Graph,
+	const TArray<FAtomicNodeOperation>& Operations,
+	TArray<FGuid>& OutCreatedGuids,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	OutCreatedGuids.Reset();
+	if (Blueprint == nullptr || Graph == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-graph-unavailable"),
+			TEXT("The exact Blueprint graph is unavailable."));
+	}
+	if (Operations.IsEmpty() || Operations.Num() > MaxNodes)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-invalid-nodes"),
+			FString::Printf(
+				TEXT("An atomic node Apply takes between 1 and %d operations."),
+				MaxNodes));
+	}
+
+	TArray<UEdGraphNode*> CreatedNodes;
+	for (const FAtomicNodeOperation& Operation : Operations)
+	{
+		FNodeSpec Spec;
+		Spec.NodeType = Operation.NodeType;
+		Spec.FunctionName = Operation.FunctionName;
+		Spec.X = Operation.X;
+		Spec.Y = Operation.Y;
+		Spec.bVariableAccessor = Operation.bVariableAccessor;
+		Spec.VariableName = Operation.VariableName;
+		Spec.VariableGuid = Operation.VariableGuid;
+		Spec.VariableType = Operation.VariableType;
+		Spec.VariableAccess = Operation.VariableAccess;
+		UEdGraphNode* Node = nullptr;
+		if (Operation.bActionSpawn)
+		{
+			if (!CreateActionNode(Graph, Operation, Node, OutErrorCode, OutErrorMessage))
+			{
+				if (Node != nullptr && Graph->Nodes.Contains(Node))
+				{
+					CreatedNodes.Add(Node);
+				}
+				if (!RemoveCreatedNodes(Blueprint, Graph, CreatedNodes))
+				{
+					OutErrorMessage += TEXT(" The atomic Apply could not remove a partially created node.");
+				}
+				return false;
+			}
+		}
+		else if (Operation.bVariableAccessor)
+		{
+			if (!CreateVariableAccessorNode(
+					Blueprint,
+					Graph,
+					Operation.VariableName,
+					Operation.VariableType,
+					Operation.NodeType.Equals(TEXT("variable_get"), ESearchCase::CaseSensitive),
+					Operation.X,
+					Operation.Y,
+					Node,
+					OutErrorCode,
+					OutErrorMessage))
+			{
+				if (!RemoveCreatedNodes(Blueprint, Graph, CreatedNodes))
+				{
+					OutErrorMessage += TEXT(" The atomic Apply could not remove a partially created node.");
+				}
+				return false;
+			}
+		}
+		else if (!CreatePrimitiveNode(Graph, Spec, Node, OutErrorCode, OutErrorMessage))
+		{
+			// A partially created node is still a write; remove it before the
+			// caller can observe an empty result.
+			if (Node != nullptr && Graph->Nodes.Contains(Node))
+			{
+				CreatedNodes.Add(Node);
+			}
+			if (!RemoveCreatedNodes(Blueprint, Graph, CreatedNodes))
+			{
+				OutErrorMessage += TEXT(" The atomic Apply could not remove a partially created node.");
+			}
+			return false;
+		}
+		FString Reason;
+		FAtomicNodeOperation Checked = Operation;
+		Checked.NodeGuid = Node->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower);
+		if (!NodeMatchesAtomicOperation(Node, Checked, Reason))
+		{
+			CreatedNodes.Add(Node);
+			RemoveCreatedNodes(Blueprint, Graph, CreatedNodes);
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-node-contract-failed"),
+				Reason);
+		}
+		CreatedNodes.Add(Node);
+		OutCreatedGuids.Add(Node->NodeGuid);
+	}
+	return true;
+}
+
+bool UEAgentKitBlueprintGraphEditExperimental::TryCheckAtomicNodeOperations(
+	UEdGraph* Graph,
+	const TArray<FAtomicNodeOperation>& Operations,
+	bool bExpectAfter,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	if (Graph == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-graph-unavailable"),
+			TEXT("The exact graph is unavailable."));
+	}
+	for (const FAtomicNodeOperation& Operation : Operations)
+	{
+		FGuid NodeGuid;
+		if (Operation.NodeGuid.Len() != 36
+			|| !FGuid::Parse(Operation.NodeGuid, NodeGuid))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-node-contract-failed"),
+				TEXT("The resolved NodeGuid is not a canonical GUID."));
+		}
+		const UEdGraphNode* Node = FindNodeByGuid(Graph, NodeGuid);
+		if (!bExpectAfter)
+		{
+			if (Node != nullptr)
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-node-restore-failed"),
+					FString::Printf(
+						TEXT("Node %s is still present after the restore."),
+						*Operation.NodeGuid));
+			}
+			continue;
+		}
+		FString Reason;
+		if (!NodeMatchesAtomicOperation(Node, Operation, Reason))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-node-contract-failed"),
+				Reason);
+		}
+	}
+	return true;
+}
+
+bool UEAgentKitBlueprintGraphEditExperimental::TryRestoreAtomicNodeOperations(
+	UBlueprint* Blueprint,
+	UEdGraph* Graph,
+	const TArray<FAtomicNodeOperation>& Operations,
+	int32 AppliedCount,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	if (Blueprint == nullptr || Graph == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-graph-unavailable"),
+			TEXT("The exact Blueprint graph is unavailable."));
+	}
+	if (AppliedCount < 0 || AppliedCount > Operations.Num())
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-invalid-nodes"),
+			TEXT("AppliedCount must address the prefix of the operation list."));
+	}
+	TArray<UEdGraphNode*> NodesToRemove;
+	for (int32 Index = 0; Index < AppliedCount; ++Index)
+	{
+		FGuid NodeGuid;
+		if (Operations[Index].NodeGuid.Len() != 36
+			|| !FGuid::Parse(Operations[Index].NodeGuid, NodeGuid))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-node-restore-failed"),
+				TEXT("The applied operation has no canonical NodeGuid to remove."));
+		}
+		UEdGraphNode* Node = FindNodeByGuid(Graph, NodeGuid);
+		if (Node != nullptr)
+		{
+			NodesToRemove.Add(Node);
+		}
+	}
+	if (!RemoveCreatedNodes(Blueprint, Graph, NodesToRemove))
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-node-restore-failed"),
+			TEXT("At least one created node survived its removal."));
+	}
+	return true;
+}
+
+FString UEAgentKitBlueprintGraphEditExperimental::ComputeAtomicEdgeStateFingerprint(UEdGraph* Graph)
+{
+	// One implementation, already used by the rewire writer's Preview/Apply/Save:
+	// its hash covers the exact endpoints (node GUID + pin name + pin GUID), which
+	// is the property the atomic patch needs.
+	FString Hash;
+	if (!UEAgentKitBlueprintRewireExperimental::TryComputeLiveEdgeSetHash(Graph, Hash))
+	{
+		return FString();
+	}
+	return Hash;
+}
+
+bool UEAgentKitBlueprintGraphEditExperimental::TryResolveAtomicEdgeOperation(
+	UEdGraph* Graph,
+	FAtomicEdgeOperation& InOutOperation,
+	FTempNodeResolver ResolveTempNode,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	if (Graph == nullptr)
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-graph-unavailable"),
+			TEXT("The exact graph is unavailable."));
+	}
+	if (Graph->GetSchema() == nullptr || !Graph->GetSchema()->IsA<UEdGraphSchema_K2>())
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-schema-not-supported"),
+			TEXT("Experimental graph edit supports only K2 Blueprint graphs."));
+	}
+	if (InOutOperation.FromPin.IsEmpty() || InOutOperation.ToPin.IsEmpty())
+	{
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-invalid-parameters"),
+			TEXT("fromPin and toPin must be non-empty pin names."));
+	}
+	const bool bFromDeclared = !InOutOperation.FromTempId.IsEmpty();
+	const bool bToDeclared = !InOutOperation.ToTempId.IsEmpty();
+	const bool bFromGuid = !InOutOperation.FromNodeGuid.IsEmpty();
+	const bool bToGuid = !InOutOperation.ToNodeGuid.IsEmpty();
+	if (bFromDeclared == bFromGuid || bToDeclared == bToGuid)
+	{
+		// Exactly one identity form per endpoint.  A patch that fills both (or
+		// neither) is an internal contract violation, never a caller-visible shape.
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-invalid-parameters"),
+			TEXT("Each edge endpoint must carry exactly one of nodeGuid or tempId."));
+	}
+
+	if (bFromDeclared)
+	{
+		const FAtomicNodeOperation* Declared = ResolveTempNode(InOutOperation.FromTempId);
+		if (Declared == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-patch-unknown-temp-id"),
+				FString::Printf(
+					TEXT("tempId '%s' was not declared by an earlier createNode operation."),
+					*InOutOperation.FromTempId));
+		}
+		if (!ResolveDeclaredEdgeEndpoint(*Declared, /*bFrom=*/true, InOutOperation, OutErrorCode, OutErrorMessage))
+		{
+			return false;
+		}
+	}
+	else if (!ResolveLiveEdgeEndpoint(Graph, /*bFrom=*/true, InOutOperation, OutErrorCode, OutErrorMessage))
+	{
+		return false;
+	}
+
+	if (bToDeclared)
+	{
+		const FAtomicNodeOperation* Declared = ResolveTempNode(InOutOperation.ToTempId);
+		if (Declared == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-patch-unknown-temp-id"),
+				FString::Printf(
+					TEXT("tempId '%s' was not declared by an earlier createNode operation."),
+					*InOutOperation.ToTempId));
+		}
+		if (!ResolveDeclaredEdgeEndpoint(*Declared, /*bFrom=*/false, InOutOperation, OutErrorCode, OutErrorMessage))
+		{
+			return false;
+		}
+	}
+	else if (!ResolveLiveEdgeEndpoint(Graph, /*bFrom=*/false, InOutOperation, OutErrorCode, OutErrorMessage))
+	{
+		return false;
+	}
+
+	// A node cannot connect to itself.  Two tempIds compare by name; two GUIDs
+	// compare by GUID; a mixed pair cannot be the same node because the tempId
+	// node does not exist yet.
+	if (bFromDeclared && bToDeclared)
+	{
+		if (InOutOperation.FromTempId.Equals(InOutOperation.ToTempId, ESearchCase::CaseSensitive))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-self-connection"),
+				TEXT("A node cannot connect to itself in this experimental slice."));
+		}
+	}
+	else if (!bFromDeclared && !bToDeclared)
+	{
+		if (InOutOperation.FromNodeGuid.Equals(InOutOperation.ToNodeGuid, ESearchCase::CaseSensitive))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-self-connection"),
+				TEXT("A node cannot connect to itself in this experimental slice."));
 		}
 	}
 
-	UPackage* Package = Blueprint->GetOutermost();
-	if (Package == nullptr)
+	// A wildcard endpoint has no type yet: the K2 schema derives it from the other
+	// side when the edge is created (and the node then rebuilds its pins).  Two
+	// concrete types still have to match exactly, and wildcard-vs-wildcard is
+	// allowed because the schema resolves it.
+	const bool bFromWildcard = InOutOperation.FromType.Equals(TEXT("wildcard"), ESearchCase::CaseSensitive);
+	const bool bToWildcard = InOutOperation.ToType.Equals(TEXT("wildcard"), ESearchCase::CaseSensitive);
+	if (!bFromWildcard
+		&& !bToWildcard
+		&& !InOutOperation.FromType.Equals(InOutOperation.ToType, ESearchCase::CaseSensitive))
 	{
 		return Fail(
 			OutErrorCode,
 			OutErrorMessage,
-			TEXT("graph-edit-save-package-invalid"),
-			TEXT("The Blueprint package is unavailable."));
-	}
-	const FString Filename = FPackageName::LongPackageNameToFilename(
-		Package->GetName(),
-		FPackageName::GetAssetPackageExtension());
-	if (Filename.IsEmpty() || !IFileManager::Get().FileExists(*Filename))
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("graph-edit-save-package-file-missing"),
-			TEXT("The exact Blueprint package file does not exist on disk."));
-	}
-	const int64 FileSizeBefore = IFileManager::Get().FileSize(*Filename);
-
-	FSavePackageArgs SaveArgs;
-	SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
-	SaveArgs.SaveFlags = SAVE_NoError;
-	SaveArgs.Error = GError;
-	if (!UPackage::SavePackage(Package, Blueprint, *Filename, SaveArgs)
-		|| Package->IsDirty())
-	{
-		return Fail(
-			OutErrorCode,
-			OutErrorMessage,
-			TEXT("graph-edit-save-failed"),
-			TEXT("SavePackage did not confirm a clean saved package."));
+			TEXT("graph-edit-pin-type-mismatch"),
+			FString::Printf(
+				TEXT("Cannot connect %s (%s) to %s (%s); data kinds must match exactly."),
+				*InOutOperation.FromPin,
+				*InOutOperation.FromType,
+				*InOutOperation.ToPin,
+				*InOutOperation.ToType));
 	}
 
-	FString AssetDigest;
-	if (!FBlueprintContextSha256::HashFile(Filename, AssetDigest))
+	// A disconnect removes an edge that must already be there, so it never
+	// consults the create-connection response: it proves the exact edge instead.
+	if (InOutOperation.bDisconnect)
+	{
+		if (bFromDeclared || bToDeclared)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-disconnect-edge-not-found"),
+				TEXT("A disconnect endpoint must be an existing node; a node this patch creates has no edge to remove."));
+		}
+		UEdGraphPin* FromPin = nullptr;
+		UEdGraphPin* ToPin = nullptr;
+		FindEdgePins(Graph, InOutOperation, FromPin, ToPin);
+		if (FromPin == nullptr || ToPin == nullptr || !FromPin->LinkedTo.Contains(ToPin))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-disconnect-edge-not-found"),
+				FString::Printf(
+					TEXT("The edge %s.%s -> %s.%s is not in the graph."),
+					*InOutOperation.FromNodeGuid,
+					*InOutOperation.FromPin,
+					*InOutOperation.ToNodeGuid,
+					*InOutOperation.ToPin));
+		}
+		if (ToPin->LinkedTo.Num() != 1)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-disconnect-ambiguous"),
+				TEXT("The declared existing input has more than one link; refusing an ambiguous disconnect."));
+		}
+		return true;
+	}
+
+	// The K2 schema is only consulted when both endpoints exist live.  A tempId
+	// endpoint mirrors the single writer's new-node path, which also relies on the
+	// exact type match above plus TryCreateConnection.
+	if (!bFromDeclared && !bToDeclared)
+	{
+		UEdGraphPin* FromPin = nullptr;
+		UEdGraphPin* ToPin = nullptr;
+		FindEdgePins(Graph, InOutOperation, FromPin, ToPin);
+		if (!ValidateSchemaConnection(Graph, FromPin, ToPin, OutErrorCode, OutErrorMessage))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+bool UEAgentKitBlueprintGraphEditExperimental::TryApplyAtomicEdgeOperations(
+	UBlueprint* Blueprint,
+	UEdGraph* Graph,
+	TArray<FAtomicEdgeOperation>& InOutOperations,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	if (Blueprint == nullptr || Graph == nullptr)
 	{
 		return Fail(
 			OutErrorCode,
 			OutErrorMessage,
-			TEXT("graph-edit-save-hash-failed"),
-			TEXT("Could not hash the saved Blueprint package."));
+			TEXT("graph-edit-graph-unavailable"),
+			TEXT("The exact Blueprint graph is unavailable."));
 	}
-	AssetDigest = AssetDigest.ToLower();
-
-	TSharedPtr<FJsonObject> PostSavePreflight;
-	FString PostCode;
-	FString PostMessage;
-	if (!UEAgentKitBlueprintGraphLayout::BuildFocusedEditorPreflight(
-		PostSavePreflight,
-		PostCode,
-		PostMessage))
+	if (InOutOperations.IsEmpty() || InOutOperations.Num() > MaxConnections)
 	{
 		return Fail(
 			OutErrorCode,
 			OutErrorMessage,
-			TEXT("graph-edit-save-readback-failed"),
-			TEXT("Post-save preflight failed: ") + PostCode + TEXT(" ") + PostMessage);
+			TEXT("graph-edit-invalid-connections"),
+			FString::Printf(
+				TEXT("An atomic edge Apply takes between 1 and %d operations."),
+				MaxConnections));
 	}
-	if (PostSavePreflight->GetBoolField(TEXT("packageDirty"))
-		|| !PostSavePreflight->GetStringField(TEXT("graphFingerprint")).Equals(
-			ExpectedFingerprint,
-			ESearchCase::CaseSensitive)
-		|| PostSavePreflight->GetNumberField(TEXT("nodeCount")) != ExpectedNodeCount)
+
+	// Edges this call changed, so a failure inside the same call can put them
+	// back: created edges are broken again, removed (disconnected) edges are
+	// re-created.  Both lists undo in reverse order.
+	TArray<TPair<UEdGraphPin*, UEdGraphPin*>> CreatedEdges;
+	TArray<TPair<UEdGraphPin*, UEdGraphPin*>> RemovedEdges;
+	auto RollbackChangedEdges = [&]()
+	{
+		for (int32 Index = RemovedEdges.Num() - 1; Index >= 0; --Index)
+		{
+			FString IgnoredCode;
+			FString IgnoredMessage;
+			RelinkEdge(RemovedEdges[Index].Key, RemovedEdges[Index].Value, IgnoredCode, IgnoredMessage);
+		}
+		RemovedEdges.Reset();
+		for (int32 Index = CreatedEdges.Num() - 1; Index >= 0; --Index)
+		{
+			FString IgnoredCode;
+			FString IgnoredMessage;
+			BreakEdge(CreatedEdges[Index].Key, CreatedEdges[Index].Value, IgnoredCode, IgnoredMessage);
+		}
+		CreatedEdges.Reset();
+	};
+
+	for (FAtomicEdgeOperation& Operation : InOutOperations)
+	{
+		// tempIds must already be translated by the caller; a leftover one means
+		// the patch tried to write an edge to a node that does not exist.
+		if (Operation.FromTempId.IsEmpty() == false || Operation.ToTempId.IsEmpty() == false)
+		{
+			RollbackChangedEdges();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-node-reference-unknown"),
+				TEXT("An unresolved tempId reached the edge Apply; nothing was written."));
+		}
+		FGuid FromGuid;
+		FGuid ToGuid;
+		if (!FGuid::Parse(Operation.FromNodeGuid, FromGuid)
+			|| !FGuid::Parse(Operation.ToNodeGuid, ToGuid))
+		{
+			RollbackChangedEdges();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-node-reference-unknown"),
+				TEXT("An edge endpoint did not carry a canonical node GUID."));
+		}
+		UEdGraphNode* FromNode = FindNodeByGuid(Graph, FromGuid);
+		UEdGraphNode* ToNode = FindNodeByGuid(Graph, ToGuid);
+		if (FromNode == nullptr || ToNode == nullptr)
+		{
+			RollbackChangedEdges();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-existing-node-not-found"),
+				TEXT("An edge endpoint node disappeared before the transaction could connect it."));
+		}
+		if (Cast<UK2Node>(FromNode) == nullptr || Cast<UK2Node>(ToNode) == nullptr)
+		{
+			RollbackChangedEdges();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-existing-node-not-k2"),
+				TEXT("Edge endpoints must be K2 Blueprint nodes."));
+		}
+		if (FromNode == ToNode)
+		{
+			RollbackChangedEdges();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-self-connection"),
+				TEXT("A node cannot connect to itself in this experimental slice."));
+		}
+		UEdGraphPin* FromPin = FindUniquePin(
+			FromNode,
+			Operation.FromPin,
+			EGPD_Output,
+			TEXT("output"),
+			OutErrorCode,
+			OutErrorMessage);
+		if (FromPin == nullptr)
+		{
+			RollbackChangedEdges();
+			return false;
+		}
+		UEdGraphPin* ToPin = FindUniquePin(
+			ToNode,
+			Operation.ToPin,
+			EGPD_Input,
+			TEXT("input"),
+			OutErrorCode,
+			OutErrorMessage);
+		if (ToPin == nullptr)
+		{
+			RollbackChangedEdges();
+			return false;
+		}
+		FString FromType;
+		FString ToType;
+		if (!ExistingPinTypeToken(FromPin->PinType, FromType)
+			|| !ExistingPinTypeToken(ToPin->PinType, ToType))
+		{
+			RollbackChangedEdges();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-existing-pin-type-not-supported"),
+				TEXT("An edge pin carries a type this slice cannot connect."));
+		}
+		// The PLAN may have seen a wildcard: at that point the schema had not
+		// derived the type yet.  In that case the exact comparison here would be
+		// wrong (the first edge may already have typed this node), so the K2
+		// schema decides below -- and its four-way response is still honoured
+		// (MAKE only; conversion/promotion/break-others stay rejected).
+		const bool bPlanWildcard =
+			Operation.FromType.Equals(TEXT("wildcard"), ESearchCase::CaseSensitive)
+			|| Operation.ToType.Equals(TEXT("wildcard"), ESearchCase::CaseSensitive);
+		if (!bPlanWildcard
+			&& !FromType.Equals(ToType, ESearchCase::CaseSensitive)
+			&& !FromType.Equals(TEXT("wildcard"), ESearchCase::CaseSensitive)
+			&& !ToType.Equals(TEXT("wildcard"), ESearchCase::CaseSensitive))
+		{
+			RollbackChangedEdges();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-pin-type-mismatch"),
+				FString::Printf(
+					TEXT("Cannot connect %s (%s) to %s (%s); data kinds must match exactly."),
+					*Operation.FromPin,
+					*FromType,
+					*Operation.ToPin,
+					*ToType));
+		}
+		// A disconnect is the same two pins read the other way round: the edge
+		// must be the only link on its target, and removing it is the whole write.
+		if (Operation.bDisconnect)
+		{
+			if (!FromPin->LinkedTo.Contains(ToPin))
+			{
+				RollbackChangedEdges();
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-disconnect-edge-not-found"),
+					TEXT("The edge to remove disappeared before the transaction could break it."));
+			}
+			if (ToPin->LinkedTo.Num() != 1)
+			{
+				RollbackChangedEdges();
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-disconnect-ambiguous"),
+					TEXT("The target input has more than one link; refusing an ambiguous disconnect."));
+			}
+			if (!BreakEdge(FromPin, ToPin, OutErrorCode, OutErrorMessage))
+			{
+				RollbackChangedEdges();
+				return false;
+			}
+			Operation.FromNodeGuid =
+				FromNode->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower);
+			Operation.ToNodeGuid =
+				ToNode->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower);
+			Operation.FromPinId = FromPin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower);
+			Operation.ToPinId = ToPin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower);
+			Operation.FromType = FromType;
+			Operation.ToType = ToType;
+			RemovedEdges.Add(TPair<UEdGraphPin*, UEdGraphPin*>(FromPin, ToPin));
+			continue;
+		}
+		if (ToPin->LinkedTo.Num() != 0)
+		{
+			RollbackChangedEdges();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-existing-pin-already-linked"),
+				TEXT("The target input pin became connected; this slice never breaks an existing link."));
+		}
+		if (FromPin->LinkedTo.Contains(ToPin))
+		{
+			RollbackChangedEdges();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-connection-duplicate"),
+				TEXT("The exact edge already exists."));
+		}
+		// Both endpoints were live at plan time exactly when the patch already
+		// resolved their pin GUIDs; that is the case the single writer also sends
+		// through the schema check.  A plan-time wildcard also needs the check even
+		// for a tempId endpoint: the type it will actually connect to only exists
+		// now, and conversion/promotion must still be refused before any write.
+		if ((!Operation.FromPinId.IsEmpty() && !Operation.ToPinId.IsEmpty()) || bPlanWildcard)
+		{
+			if (!ValidateSchemaConnection(Graph, FromPin, ToPin, OutErrorCode, OutErrorMessage))
+			{
+				RollbackChangedEdges();
+				return false;
+			}
+		}
+		if (!Graph->GetSchema()->TryCreateConnection(FromPin, ToPin))
+		{
+			RollbackChangedEdges();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-connection-failed"),
+				TEXT("The Editor rejected the planned connection."));
+		}
+		// A wildcard node REBUILDS its pins inside TryCreateConnection (that is how
+		// the type is derived), so the pin objects captured above may already be
+		// gone.  Re-find both endpoints by node GUID + pin name and read the edge
+		// and the resolved types back from the live pins.
+		UEdGraphPin* CreatedFromPin = FindUniquePin(
+			FromNode,
+			Operation.FromPin,
+			EGPD_Output,
+			TEXT("output"),
+			OutErrorCode,
+			OutErrorMessage);
+		UEdGraphPin* CreatedToPin = FindUniquePin(
+			ToNode,
+			Operation.ToPin,
+			EGPD_Input,
+			TEXT("input"),
+			OutErrorCode,
+			OutErrorMessage);
+		if (CreatedFromPin == nullptr || CreatedToPin == nullptr)
+		{
+			RollbackChangedEdges();
+			return false;
+		}
+		if (!CreatedFromPin->LinkedTo.Contains(CreatedToPin)
+			|| CreatedToPin->LinkedTo.Num() != 1
+			|| !CreatedToPin->LinkedTo.Contains(CreatedFromPin))
+		{
+			RollbackChangedEdges();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-connection-failed"),
+				TEXT("The created edge did not read back as the only link on its target input."));
+		}
+		FString AppliedFromType;
+		FString AppliedToType;
+		if (!ExistingPinTypeToken(CreatedFromPin->PinType, AppliedFromType)
+			|| !ExistingPinTypeToken(CreatedToPin->PinType, AppliedToType))
+		{
+			RollbackChangedEdges();
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-existing-pin-type-not-supported"),
+				TEXT("The connected pins carry a type this slice cannot read back."));
+		}
+		Operation.FromNodeGuid = FromNode->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower);
+		Operation.ToNodeGuid = ToNode->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower);
+		Operation.FromPinId = CreatedFromPin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower);
+		Operation.ToPinId = CreatedToPin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower);
+		// Report the ACTUAL types after the schema derived them (a wildcard plan
+		// endpoint becomes the concrete type here).
+		Operation.FromType = AppliedFromType;
+		Operation.ToType = AppliedToType;
+		CreatedEdges.Add(TPair<UEdGraphPin*, UEdGraphPin*>(CreatedFromPin, CreatedToPin));
+	}
+	return true;
+}
+
+bool UEAgentKitBlueprintGraphEditExperimental::TryCheckAtomicEdgeOperations(
+	UEdGraph* Graph,
+	const TArray<FAtomicEdgeOperation>& Operations,
+	bool bExpectAfter,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	if (Graph == nullptr)
 	{
 		return Fail(
 			OutErrorCode,
 			OutErrorMessage,
-			TEXT("graph-edit-save-readback-failed"),
-			TEXT("The saved graph fingerprint/node count does not match the Apply receipt."));
+			TEXT("graph-edit-graph-unavailable"),
+			TEXT("The exact graph is unavailable."));
 	}
+	for (const FAtomicEdgeOperation& Operation : Operations)
+	{
+		UEdGraphPin* FromPin = nullptr;
+		UEdGraphPin* ToPin = nullptr;
+		FindEdgePins(Graph, Operation, FromPin, ToPin);
+		if (Operation.bDisconnect)
+		{
+			// A disconnect expects the opposite of a connect: gone after Apply,
+			// back after Undo.  Both nodes always pre-exist for this operation, so
+			// a missing endpoint is a real read-back failure either way.
+			const bool bWantLinked = !bExpectAfter;
+			const bool bLinked = FromPin != nullptr && ToPin != nullptr
+				&& (FromPin->LinkedTo.Contains(ToPin) || ToPin->LinkedTo.Contains(FromPin));
+			if (bWantLinked
+				&& (!bLinked || ToPin->LinkedTo.Num() != 1
+					|| !ToPin->LinkedTo.Contains(FromPin)))
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-readback-failed"),
+					FString::Printf(
+						TEXT("Edge %s.%s -> %s.%s is not restored as the only link on its target input."),
+						*Operation.FromNodeGuid,
+						*Operation.FromPin,
+						*Operation.ToNodeGuid,
+						*Operation.ToPin));
+			}
+			if (!bWantLinked && bLinked)
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-readback-failed"),
+					FString::Printf(
+						TEXT("Edge %s.%s -> %s.%s is still present after the disconnect."),
+						*Operation.FromNodeGuid,
+						*Operation.FromPin,
+						*Operation.ToNodeGuid,
+						*Operation.ToPin));
+			}
+			continue;
+		}
+		if (!bExpectAfter)
+		{
+			// Undo of a patch that also created the nodes removes the nodes, so a
+			// missing endpoint is exactly the restored state.
+			if (FromPin != nullptr && ToPin != nullptr
+				&& (FromPin->LinkedTo.Contains(ToPin) || ToPin->LinkedTo.Contains(FromPin)))
+			{
+				return Fail(
+					OutErrorCode,
+					OutErrorMessage,
+					TEXT("graph-edit-readback-failed"),
+					FString::Printf(
+						TEXT("Edge %s.%s -> %s.%s is still present after the restore."),
+						*Operation.FromNodeGuid,
+						*Operation.FromPin,
+						*Operation.ToNodeGuid,
+						*Operation.ToPin));
+			}
+			continue;
+		}
+		if (FromPin == nullptr || ToPin == nullptr)
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-readback-failed"),
+				FString::Printf(
+					TEXT("Edge %s.%s -> %s.%s has a missing endpoint after Apply."),
+					*Operation.FromNodeGuid,
+					*Operation.FromPin,
+					*Operation.ToNodeGuid,
+					*Operation.ToPin));
+		}
+		if (!Operation.FromPinId.IsEmpty()
+			&& !FromPin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower).Equals(
+				Operation.FromPinId,
+				ESearchCase::CaseSensitive))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-readback-failed"),
+				TEXT("The source pin no longer carries the resolved PinId."));
+		}
+		if (!Operation.ToPinId.IsEmpty()
+			&& !ToPin->PinId.ToString(EGuidFormats::DigitsWithHyphensLower).Equals(
+				Operation.ToPinId,
+				ESearchCase::CaseSensitive))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-readback-failed"),
+				TEXT("The target pin no longer carries the resolved PinId."));
+		}
+		if (!FromPin->LinkedTo.Contains(ToPin)
+			|| ToPin->LinkedTo.Num() != 1
+			|| !ToPin->LinkedTo.Contains(FromPin))
+		{
+			return Fail(
+				OutErrorCode,
+				OutErrorMessage,
+				TEXT("graph-edit-readback-failed"),
+				FString::Printf(
+					TEXT("Edge %s.%s -> %s.%s is not the only link on its target input."),
+					*Operation.FromNodeGuid,
+					*Operation.FromPin,
+					*Operation.ToNodeGuid,
+					*Operation.ToPin));
+		}
+	}
+	return true;
+}
 
-	const int64 FileSizeAfter = IFileManager::Get().FileSize(*Filename);
-	if (FileSizeAfter < 0)
+bool UEAgentKitBlueprintGraphEditExperimental::TryRestoreAtomicEdgeOperations(
+	UBlueprint* Blueprint,
+	UEdGraph* Graph,
+	const TArray<FAtomicEdgeOperation>& Operations,
+	int32 AppliedCount,
+	FString& OutErrorCode,
+	FString& OutErrorMessage)
+{
+	if (Graph == nullptr)
 	{
 		return Fail(
 			OutErrorCode,
 			OutErrorMessage,
-			TEXT("graph-edit-save-readback-failed"),
-			TEXT("The saved package file could not be read back."));
+			TEXT("graph-edit-graph-unavailable"),
+			TEXT("The exact graph is unavailable."));
 	}
-
-	TSharedRef<FJsonObject> Readback = MakeShared<FJsonObject>();
-	Readback->SetStringField(TEXT("assetPath"), AssetPath);
-	Readback->SetStringField(TEXT("graphGuid"), GraphGuid);
-	Readback->SetStringField(TEXT("assetSha256"), FString(TEXT("sha256:")) + AssetDigest);
-	Readback->SetStringField(
-		TEXT("packageRevision"),
-		PostSavePreflight->GetStringField(TEXT("packageRevision")));
-	Readback->SetStringField(
-		TEXT("graphFingerprint"),
-		PostSavePreflight->GetStringField(TEXT("graphFingerprint")));
-	Readback->SetBoolField(TEXT("packageDirty"), false);
-	Readback->SetNumberField(TEXT("nodeCount"), ExpectedNodeCount);
-	Readback->SetNumberField(TEXT("linkCount"), ExpectedLinkCount);
-	Readback->SetBoolField(TEXT("independentReloadVerified"), false);
-
-	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
-	Result->SetStringField(TEXT("action"), TEXT("save-experimental-graph-edit"));
-	Result->SetBoolField(TEXT("experimental"), true);
-	Result->SetStringField(TEXT("assetPath"), AssetPath);
-	Result->SetStringField(TEXT("graphGuid"), GraphGuid);
-	Result->SetStringField(TEXT("planId"), PlanId);
-	Result->SetStringField(TEXT("confirmation"), Confirmation);
-	Result->SetStringField(TEXT("assetSha256"), FString(TEXT("sha256:")) + AssetDigest);
-	Result->SetStringField(
-		TEXT("packageRevision"),
-		PostSavePreflight->GetStringField(TEXT("packageRevision")));
-	Result->SetStringField(
-		TEXT("graphFingerprint"),
-		PostSavePreflight->GetStringField(TEXT("graphFingerprint")));
-	Result->SetStringField(TEXT("variableBindingHash"), Receipt->VariableBindingHash);
-	if (Receipt->bRequiresEdgeSetHash)
+	if (AppliedCount < 0 || AppliedCount > Operations.Num())
 	{
-		Result->SetStringField(TEXT("edgeSetHash"), Receipt->EdgeSetHash);
+		return Fail(
+			OutErrorCode,
+			OutErrorMessage,
+			TEXT("graph-edit-invalid-connections"),
+			TEXT("AppliedCount must address the prefix of the operation list."));
 	}
-	Result->SetBoolField(TEXT("saved"), true);
-	Result->SetBoolField(TEXT("packageDirty"), false);
-	Result->SetBoolField(TEXT("readbackVerified"), true);
-	Result->SetBoolField(TEXT("independentReloadVerified"), false);
-	Result->SetStringField(TEXT("requiredAcceptanceEvidence"), TEXT("independent-reload"));
-	Result->SetNumberField(TEXT("fileSizeBefore"), static_cast<double>(FileSizeBefore));
-	Result->SetNumberField(TEXT("fileSizeAfter"), static_cast<double>(FileSizeAfter));
-	Result->SetBoolField(TEXT("autoSave"), false);
-	Result->SetBoolField(TEXT("compiled"), false);
-	Result->SetObjectField(TEXT("readback"), Readback);
-	RecentApplies.Remove(PlanId);
-	OutResult = Result;
+	for (int32 Index = AppliedCount - 1; Index >= 0; --Index)
+	{
+		UEdGraphPin* FromPin = nullptr;
+		UEdGraphPin* ToPin = nullptr;
+		FindEdgePins(Graph, Operations[Index], FromPin, ToPin);
+		if (FromPin == nullptr || ToPin == nullptr)
+		{
+			continue;
+		}
+		if (Operations[Index].bDisconnect)
+		{
+			// Restoring a disconnect means putting the removed edge back.
+			if (FromPin->LinkedTo.Contains(ToPin))
+			{
+				continue;
+			}
+			if (!RelinkEdge(FromPin, ToPin, OutErrorCode, OutErrorMessage))
+			{
+				return false;
+			}
+			continue;
+		}
+		if (!FromPin->LinkedTo.Contains(ToPin) && !ToPin->LinkedTo.Contains(FromPin))
+		{
+			continue;
+		}
+		if (!BreakEdge(FromPin, ToPin, OutErrorCode, OutErrorMessage))
+		{
+			return false;
+		}
+	}
 	return true;
 }

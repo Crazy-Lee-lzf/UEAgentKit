@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sqlite3
 from typing import Any, Literal
 
@@ -8,6 +9,100 @@ from .animation_scale_fix_batch import AnimationScaleFixBatchService
 from .batch_recovery import BatchRecoveryService
 from .bounded_batch import BoundedBatchService
 from .checkpoint_sets import CheckpointSetService
+
+_MAX_NODE_MOVE_COORDINATE = 1_000_000
+_MAX_NODE_MOVE_BATCH = 128
+_NODE_MOVE_ENTRY_FIELDS = frozenset({"nodeGuid", "expectedX", "expectedY", "x", "y"})
+_CANONICAL_GUID = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+)
+# Two concatenated lowercase hex GUIDs; the Bridge owns the value and this
+# wrapper only proves its shape before forwarding it.
+_CANONICAL_EDIT_SESSION_TOKEN = re.compile(r"[0-9a-f]{64}")
+
+
+def _is_exact_game_object_path(value: object) -> bool:
+    """True only for one exact /Game Package.Object Object Path."""
+    if not isinstance(value, str) or not value.startswith("/Game/"):
+        return False
+    if len(value) > 512 or "\\" in value or ":" in value or ".." in value:
+        return False
+    if any(ord(character) < 32 for character in value):
+        return False
+    package_path, separator, object_name = value.rpartition(".")
+    if not separator or not object_name or "/" in object_name:
+        return False
+    if "." in package_path:
+        # A second dot means an Object Path sub-path, not one exact asset.
+        return False
+    return package_path.startswith("/Game/") and not package_path.endswith("/")
+
+
+def _normalize_node_move_batch(nodes: object) -> list[dict[str, Any]]:
+    """Validate one exact node-move batch without touching the Editor."""
+    if not isinstance(nodes, list):
+        raise WorkflowError(
+            "node-move-batch-invalid-parameters",
+            "nodes must be a list of node move entries.",
+        )
+    if not nodes:
+        raise WorkflowError(
+            "node-move-batch-invalid-parameters",
+            "nodes must contain at least one entry.",
+        )
+    if len(nodes) > _MAX_NODE_MOVE_BATCH:
+        raise WorkflowError(
+            "node-move-batch-limit-exceeded",
+            f"nodes must contain at most {_MAX_NODE_MOVE_BATCH} entries.",
+        )
+    normalized: list[dict[str, Any]] = []
+    seen_guids: set[str] = set()
+    for index, entry in enumerate(nodes):
+        if not isinstance(entry, dict) or set(entry) != _NODE_MOVE_ENTRY_FIELDS:
+            raise WorkflowError(
+                "node-move-batch-invalid-parameters",
+                f"nodes[{index}] must contain exactly nodeGuid, expectedX, "
+                "expectedY, x, y.",
+            )
+        node_guid = entry["nodeGuid"]
+        if (
+            not isinstance(node_guid, str)
+            or _CANONICAL_GUID.fullmatch(node_guid) is None
+        ):
+            raise WorkflowError(
+                "node-move-batch-invalid-parameters",
+                f"nodes[{index}].nodeGuid must be one canonical lowercase "
+                "hyphenated GUID.",
+            )
+        if node_guid in seen_guids:
+            raise WorkflowError(
+                "node-move-batch-duplicate-node",
+                f"nodes[{index}] repeats nodeGuid {node_guid}.",
+            )
+        seen_guids.add(node_guid)
+        for key in ("expectedX", "expectedY", "x", "y"):
+            value = entry[key]
+            if (
+                type(value) is not int
+                or abs(value) > _MAX_NODE_MOVE_COORDINATE
+            ):
+                raise WorkflowError(
+                    "node-move-batch-coordinate-invalid",
+                    f"nodes[{index}].{key} must be an integer in "
+                    f"[-{_MAX_NODE_MOVE_COORDINATE}, {_MAX_NODE_MOVE_COORDINATE}].",
+                )
+        # Overlapping node positions are legal in a UE graph, so two entries may
+        # legitimately share one destination; only duplicate GUIDs are invalid.
+        normalized.append(
+            {
+                "nodeGuid": node_guid,
+                "expectedX": entry["expectedX"],
+                "expectedY": entry["expectedY"],
+                "x": entry["x"],
+                "y": entry["y"],
+            }
+        )
+    return normalized
 
 
 def register_workflow_tools(
@@ -943,15 +1038,304 @@ def register_workflow_tools(
             return error_response("ue_refresh_asset_index", exc, read_only=False)
 
     @server.tool(annotations=destructive_annotations)
+    def ue_begin_blueprint_edit_session(
+        asset_path: str,
+        graph_guid: str,
+        experimental: bool,
+    ) -> dict[str, Any]:
+        """Begin an experimental continuous Agent edit session on one clean, focused Blueprint graph; supports repeated token batches and position-only rollback, never saves, compiles, or blocks human editing."""
+        try:
+            if not workflow_service.config.commit_enabled:
+                raise WorkflowError(
+                    "blueprint-edit-session-disabled",
+                    "Blueprint edit sessions require explicit startup authorization "
+                    "of Commit tools.",
+                )
+            if workflow_service.live_editor_service is None:
+                raise WorkflowError(
+                    "live-editor-required",
+                    "Blueprint edit sessions require the connected, running Editor Bridge.",
+                )
+            if not _is_exact_game_object_path(asset_path):
+                raise WorkflowError(
+                    "blueprint-edit-session-invalid-parameters",
+                    "asset_path must be one exact /Game Package.Object Object Path.",
+                )
+            if (
+                not isinstance(graph_guid, str)
+                or _CANONICAL_GUID.fullmatch(graph_guid) is None
+            ):
+                raise WorkflowError(
+                    "blueprint-edit-session-invalid-parameters",
+                    "graph_guid must be one canonical lowercase hyphenated GUID.",
+                )
+            if type(experimental) is not bool:
+                raise WorkflowError(
+                    "blueprint-edit-session-invalid-parameters",
+                    "experimental must be a boolean.",
+                )
+            if not experimental:
+                # Continuous editing still has no UI lock, so it must be an
+                # explicit per-task opt-in even though position-only rollback
+                # exists for the same unsaved session.
+                raise WorkflowError(
+                    "blueprint-edit-session-experimental-opt-in-required",
+                    "Continuous Blueprint editing is experimental and has no "
+                    "human/UI edit lock; pass experimental=True and do not edit "
+                    "the graph until the session is ended. Rollback is limited to "
+                    "node positions this session moved while the package is unsaved.",
+                )
+            result = workflow_service.live_editor_service.call_method(
+                "editor.beginBlueprintEditSession",
+                {
+                    "assetPath": asset_path,
+                    "graphGuid": graph_guid,
+                    "experimentalContinuous": True,
+                },
+            )
+            return {
+                "schemaVersion": "1.0",
+                "tool": "ue_begin_blueprint_edit_session",
+                "ok": True,
+                "mode": "ResidentEditor",
+                "readOnly": False,
+                "childUnrealProcessCount": 0,
+                "saved": False,
+                "compiled": False,
+                "exclusiveUI": False,
+                "humanEditingBlocked": False,
+                "result": result,
+            }
+        except (WorkflowError, ValueError, RuntimeError, OSError) as exc:
+            return error_response(
+                "ue_begin_blueprint_edit_session", exc, read_only=False
+            )
+
+    @server.tool(annotations=destructive_annotations)
+    def ue_end_blueprint_edit_session(
+        edit_session_token: str,
+        mode: Literal["keep", "rollback"] = "keep",
+    ) -> dict[str, Any]:
+        """End an Agent edit session without saving: mode=keep only releases ownership, mode=rollback restores this session's node positions in one transaction when every safety proof still holds."""
+        try:
+            if not workflow_service.config.commit_enabled:
+                raise WorkflowError(
+                    "blueprint-edit-session-disabled",
+                    "Blueprint edit sessions require explicit startup authorization "
+                    "of Commit tools.",
+                )
+            if workflow_service.live_editor_service is None:
+                raise WorkflowError(
+                    "live-editor-required",
+                    "Blueprint edit sessions require the connected, running Editor Bridge.",
+                )
+            if (
+                not isinstance(edit_session_token, str)
+                or _CANONICAL_EDIT_SESSION_TOKEN.fullmatch(edit_session_token)
+                is None
+            ):
+                raise WorkflowError(
+                    "blueprint-edit-session-token-invalid",
+                    "edit_session_token must be the exact 64-character lowercase "
+                    "hex token returned by begin.",
+                )
+            if mode not in ("keep", "rollback"):
+                raise WorkflowError(
+                    "blueprint-edit-session-invalid-parameters",
+                    "mode must be keep or rollback.",
+                )
+            result = workflow_service.live_editor_service.call_method(
+                "editor.endBlueprintEditSession",
+                {
+                    "editSessionToken": edit_session_token,
+                    "mode": mode,
+                },
+            )
+            return {
+                "schemaVersion": "1.0",
+                "tool": "ue_end_blueprint_edit_session",
+                "ok": True,
+                "mode": "ResidentEditor",
+                "readOnly": False,
+                "childUnrealProcessCount": 0,
+                "saved": False,
+                "compiled": False,
+                "exclusiveUI": False,
+                "humanEditingBlocked": False,
+                "result": result,
+            }
+        except (WorkflowError, ValueError, RuntimeError, OSError) as exc:
+            return error_response(
+                "ue_end_blueprint_edit_session", exc, read_only=False
+            )
+
+    @server.tool(annotations=destructive_annotations)
+    def ue_move_blueprint_node(
+        asset_path: str,
+        graph_guid: str,
+        node_guid: str,
+        x: int,
+        y: int,
+        expected_x: int,
+        expected_y: int,
+        expected_dirty: bool,
+    ) -> dict[str, Any]:
+        """Move one already-open, clean Blueprint node by GUID; never save, compile, or launch Unreal."""
+        try:
+            if not workflow_service.config.commit_enabled:
+                raise WorkflowError(
+                    "node-move-disabled",
+                    "Node movement requires explicit startup authorization of Commit tools.",
+                )
+            if workflow_service.live_editor_service is None:
+                raise WorkflowError(
+                    "live-editor-required",
+                    "Node movement requires the connected, running Editor Bridge.",
+                )
+            if type(expected_dirty) is not bool:
+                raise WorkflowError(
+                    "node-move-invalid-parameters",
+                    "expected_dirty must be a boolean.",
+                )
+            if expected_dirty:
+                raise WorkflowError(
+                    "node-move-dirty-ownership-unproven",
+                    "Only the first clean-to-dirty move is supported; the Bridge cannot prove "
+                    "that this session owns an already-dirty package. Save or revert the "
+                    "Blueprint, then move from a clean package.",
+                )
+            if not _is_exact_game_object_path(asset_path):
+                raise WorkflowError(
+                    "node-move-invalid-parameters",
+                    "asset_path must be one exact /Game Package.Object Object Path.",
+                )
+            for label, value in (("graph_guid", graph_guid), ("node_guid", node_guid)):
+                if not isinstance(value, str) or _CANONICAL_GUID.fullmatch(value) is None:
+                    raise WorkflowError(
+                        "node-move-invalid-parameters",
+                        f"{label} must be one canonical lowercase hyphenated GUID.",
+                    )
+            for label, value in (
+                ("x", x),
+                ("y", y),
+                ("expected_x", expected_x),
+                ("expected_y", expected_y),
+            ):
+                if (
+                    type(value) is not int
+                    or abs(value) > _MAX_NODE_MOVE_COORDINATE
+                ):
+                    raise WorkflowError(
+                        "node-move-coordinate-invalid",
+                        f"{label} must be an integer in "
+                        f"[-{_MAX_NODE_MOVE_COORDINATE}, {_MAX_NODE_MOVE_COORDINATE}].",
+                    )
+            result = workflow_service.live_editor_service.call_method(
+                "editor.moveBlueprintNode",
+                {
+                    "assetPath": asset_path,
+                    "graphGuid": graph_guid,
+                    "nodeGuid": node_guid,
+                    "x": x,
+                    "y": y,
+                    "expectedX": expected_x,
+                    "expectedY": expected_y,
+                    "expectedDirty": expected_dirty,
+                },
+            )
+            return {
+                "schemaVersion": "1.0",
+                "tool": "ue_move_blueprint_node",
+                "ok": True,
+                "mode": "ResidentEditor",
+                "readOnly": False,
+                "childUnrealProcessCount": 0,
+                "saved": False,
+                "compiled": False,
+                "result": result,
+            }
+        except (WorkflowError, ValueError, RuntimeError, OSError) as exc:
+            return error_response("ue_move_blueprint_node", exc, read_only=False)
+
+    @server.tool(annotations=destructive_annotations)
+    def ue_move_blueprint_nodes(
+        asset_path: str,
+        graph_guid: str,
+        nodes: list[dict[str, Any]],
+        edit_session_token: str = "",
+    ) -> dict[str, Any]:
+        """Atomically move up to 128 nodes in one open Blueprint graph; a valid edit-session token allows repeated batches on one Dirty graph. Never saves, compiles, or launches Unreal."""
+        try:
+            if not workflow_service.config.commit_enabled:
+                raise WorkflowError(
+                    "node-move-disabled",
+                    "Node movement requires explicit startup authorization of Commit tools.",
+                )
+            if workflow_service.live_editor_service is None:
+                raise WorkflowError(
+                    "live-editor-required",
+                    "Node movement requires the connected, running Editor Bridge.",
+                )
+            if not _is_exact_game_object_path(asset_path):
+                raise WorkflowError(
+                    "node-move-batch-invalid-parameters",
+                    "asset_path must be one exact /Game Package.Object Object Path.",
+                )
+            if (
+                not isinstance(graph_guid, str)
+                or _CANONICAL_GUID.fullmatch(graph_guid) is None
+            ):
+                raise WorkflowError(
+                    "node-move-batch-invalid-parameters",
+                    "graph_guid must be one canonical lowercase hyphenated GUID.",
+                )
+            if edit_session_token:
+                if (
+                    not isinstance(edit_session_token, str)
+                    or _CANONICAL_EDIT_SESSION_TOKEN.fullmatch(edit_session_token)
+                    is None
+                ):
+                    raise WorkflowError(
+                        "blueprint-edit-session-token-invalid",
+                        "edit_session_token must be the exact 64-character "
+                        "lowercase hex token returned by begin.",
+                    )
+            normalized = _normalize_node_move_batch(nodes)
+            params: dict[str, Any] = {
+                "assetPath": asset_path,
+                "graphGuid": graph_guid,
+                "nodes": normalized,
+            }
+            if edit_session_token:
+                params["editSessionToken"] = edit_session_token
+            result = workflow_service.live_editor_service.call_method(
+                "editor.moveBlueprintNodes",
+                params,
+            )
+            return {
+                "schemaVersion": "1.0",
+                "tool": "ue_move_blueprint_nodes",
+                "ok": True,
+                "mode": "ResidentEditor",
+                "readOnly": False,
+                "childUnrealProcessCount": 0,
+                "saved": False,
+                "compiled": False,
+                "result": result,
+            }
+        except (WorkflowError, ValueError, RuntimeError, OSError) as exc:
+            return error_response("ue_move_blueprint_nodes", exc, read_only=False)
+
+    @server.tool(annotations=destructive_annotations)
     def ue_save_authorized_asset(
         asset_path: str,
         mode: Literal["Preview", "Commit"] = "Preview",
         save_receipt: str = "",
         confirmation: str = "",
         change_set_id: str = "",
-        verification_mode: Literal["immediate", "checkpoint"] = "immediate",
+        verification_mode: Literal["immediate", "checkpoint", "resident"] = "resident",
     ) -> dict[str, Any]:
-        """Preview or explicitly save one policy-authorized loaded Dirty asset with backup and verification."""
+        """Save via the resident Editor by default; independent reload requires explicit immediate mode."""
         try:
             return workflow_service.save_authorized_asset(
                 asset_path,

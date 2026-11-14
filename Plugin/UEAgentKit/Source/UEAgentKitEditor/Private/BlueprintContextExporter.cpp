@@ -26,7 +26,7 @@
 namespace BlueprintContextExporterPrivate
 {
 	static constexpr const TCHAR* SchemaVersion = TEXT("1.1");
-	static constexpr const TCHAR* ExporterVersion = TEXT("0.8.0");
+	static constexpr const TCHAR* ExporterVersion = TEXT("0.9.0.dev1");
 
 	FString GuidToString(const FGuid& Guid)
 	{
@@ -701,7 +701,11 @@ TSharedRef<FJsonObject> FBlueprintContextExporter::BuildContextObject(
 		return MakeShared<FJsonObject>();
 	}
 	InOutResult.AssetPath = Blueprint->GetPathName();
-	return BuildCanonicalJson(Blueprint, Options, InOutResult);
+	const TSharedRef<FJsonObject> Context = BuildCanonicalJson(Blueprint, Options, InOutResult);
+	// Success is signalled by an empty Error. Mirror that onto bSuccess so callers that
+	// gate on bSuccess observe the same contract as the file-export path (ExportBlueprint).
+	InOutResult.bSuccess = InOutResult.Error.IsEmpty();
+	return Context;
 }
 
 bool FBlueprintContextExporter::ExportBlueprint(

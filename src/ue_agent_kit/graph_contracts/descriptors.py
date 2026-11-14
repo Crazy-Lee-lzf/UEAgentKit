@@ -12,9 +12,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-from . import ids
 from .canonical import DOMAIN_ACTION, DOMAIN_DESCRIPTOR, DOMAIN_OPERATION, canonical_json, domain_hash, fingerprint, is_fingerprint
-from .errors import load_registry, make_diagnostic
+from .errors import load_registry
 from .schema import SchemaError, check_schema, negotiate_version, validate_document
 from .typed_graph import PIN_DIRECTIONS, PIN_TYPE_FIELDS, ValidationReport
 

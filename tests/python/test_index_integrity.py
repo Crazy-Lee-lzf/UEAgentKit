@@ -494,8 +494,8 @@ class RealExportSmokeTests(unittest.TestCase):
         f"real AssetCatalog export not configured (set {REAL_EXPORT_ENV})",
     )
     def test_real_asset_catalog_export_is_not_failed_and_reports_not_handled(self) -> None:
-        assert REAL_EXPORT is not None
-        report = audit_export_integrity(REAL_EXPORT)
+        assert self.REAL_EXPORT is not None
+        report = audit_export_integrity(self.REAL_EXPORT)
         self.assertNotEqual(report.status, STATUS_FAIL, report.render_text())
         self.assertEqual(report.counts["assetCount"], 426)
         self.assertEqual(report.counts["successCount"], 426)

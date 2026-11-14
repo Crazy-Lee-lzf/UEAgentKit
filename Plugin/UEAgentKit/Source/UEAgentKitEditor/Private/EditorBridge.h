@@ -15,6 +15,10 @@ namespace UEAgentKitLiveWrite
 {
 	struct FLiveWriteTransactionRecord;
 }
+namespace UEAgentKitBlueprintEdit
+{
+	class FBlueprintEditSessionManager;
+}
 
 class FUEAgentKitEditorBridge final
 {
@@ -74,7 +78,8 @@ private:
 	void CloseConnection(int32 Index);
 	void ProcessLine(FClientConnection& Client, const TArray<uint8>& LineBytes);
 	bool SendResponse(FSocket* Socket, const TSharedRef<FJsonObject>& Response) const;
-	void SendError(FSocket* Socket, const FString& RequestId, const FString& Code, const FString& Message) const;
+	void SendError(FSocket* Socket, const FString& RequestId, const FString& Code, const FString& Message,
+		const TSharedPtr<FJsonObject>& Details = nullptr) const;
 	void SendResult(FSocket* Socket, const FString& RequestId, const TSharedRef<FJsonObject>& Result) const;
 
 	TSharedRef<FJsonObject> BuildHelloResult() const;
@@ -99,8 +104,45 @@ private:
 	TSharedRef<FJsonObject> BuildCompileErrorsResult(const TSharedPtr<FJsonObject>& Params) const;
 	TSharedRef<FJsonObject> BuildInspectAssetLiveResult(const FString& AssetPath) const;
 	TSharedRef<FJsonObject> BuildBlueprintGraphSelectionResult() const;
+	bool TryMoveBlueprintNodeResult(
+		const TSharedPtr<FJsonObject>& Params,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage);
+	bool TryMoveBlueprintNodesResult(
+		const TSharedPtr<FJsonObject>& Params,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage);
+	/**
+	 * Bind one clean, loaded, focused Blueprint graph to an Agent edit session
+	 * token.  This is not a UI lock: it authorizes continuous Agent batches with
+	 * content-fingerprint validation only.  Rollback is not implemented.
+	 */
+	bool TryBeginBlueprintEditSessionResult(
+		const TSharedPtr<FJsonObject>& Params,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage);
+	/** End a session with mode=keep (release ownership only).  mode=rollback is unsupported in this slice. */
+	bool TryEndBlueprintEditSessionResult(
+		const TSharedPtr<FJsonObject>& Params,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage);
 	TSharedRef<FJsonObject> BuildBlueprintGraphLayoutPreflightResult() const;
 	TSharedRef<FJsonObject> BuildFocusedBlueprintGraphContextResult() const;
+	/**
+	 * Read any loaded-or-loadable Blueprint's canonical graph context by asset
+	 * path, optionally filtered to one GraphGuid and paginated by node offset /
+	 * limit.  Read-only: it may load the asset but never dirties, saves, opens a
+	 * tab or focuses a graph.
+	 */
+	bool TryBuildBlueprintGraphContextResult(
+		const TSharedPtr<FJsonObject>& Params,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage) const;
 	bool TryBuildBlueprintGraphLayoutProjectionResult(
 		const TSharedPtr<FJsonObject>& Params,
 		TSharedPtr<FJsonObject>& OutResult,
@@ -263,6 +305,7 @@ private:
 		const FString& Operation,
 		const FString& AssetPath,
 		const TSharedPtr<FJsonObject>& Target,
+		const FString& TransactionId,
 		TSharedPtr<FJsonObject>& OutResult,
 		FString& OutErrorCode,
 		FString& OutErrorMessage) const;
@@ -324,4 +367,6 @@ private:
 	FPendingAutomationRun PendingAutomation;
 	// Confirmed live write transactions per exact asset path; cleared on bridge start.
 	mutable TMap<FString, TMap<FGuid, TSharedPtr<UEAgentKitLiveWrite::FLiveWriteTransactionRecord>>> LiveWriteTransactionRecords;
+	// One Blueprint edit session at a time; cleared on bridge start/stop.
+	TUniquePtr<UEAgentKitBlueprintEdit::FBlueprintEditSessionManager> BlueprintEditSessionManager;
 };

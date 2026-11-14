@@ -1,16 +1,10 @@
 from __future__ import annotations
 
 import json
-import sys
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-
-ROOT = Path(__file__).resolve().parents[2]
-for entry in (str(ROOT / "src"), str(ROOT / "tests" / "python")):
-    if entry not in sys.path:
-        sys.path.insert(0, entry)
 
 from ue_agent_kit.layout_broker import protocol
 from ue_agent_kit.layout_broker.descriptor import build_descriptor, write_descriptor_atomic
@@ -22,6 +16,7 @@ from ue_agent_kit.pre_m4.canary_preflight import (
 )
 from ue_agent_kit.pre_m4.telemetry_eval import evaluate_evidence
 
+ROOT = Path(__file__).resolve().parents[2]
 BUILD = ROOT / "Build" / "m2-native" / "M34"
 
 

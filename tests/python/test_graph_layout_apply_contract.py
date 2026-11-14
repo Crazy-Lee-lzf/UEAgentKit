@@ -2,32 +2,27 @@ from __future__ import annotations
 
 import copy
 import json
-import sys
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-SRC = ROOT / "src"
-CANDIDATE = ROOT / "prototype" / "graph_contracts"
-for directory in (SRC, CANDIDATE):
-    if str(directory) not in sys.path:
-        sys.path.insert(0, str(directory))
-
-from ue_agent_kit.graph_contracts import (  # noqa: E402
+from ue_agent_kit.graph_contracts import (
     GraphLayoutApplyError,
     build_graph_layout_apply_request,
     preview_graph_layout,
     validate_contract_document,
 )
-from ue_agent_kit.graph_contracts.layout import recompute_layout_hash  # noqa: E402
-from ue_agent_kit.graph_contracts.layout_apply import (  # noqa: E402
+from ue_agent_kit.graph_contracts.layout import recompute_layout_hash
+from ue_agent_kit.graph_contracts.layout_apply import (
     APPLY_SCHEMA_VERSION,
     PREFLIGHT_SCHEMA_VERSION,
 )
 
+ROOT = Path(__file__).resolve().parents[2]
+FIXTURES = ROOT / "tests" / "fixtures" / "graph_contracts"
+
 
 def _graph() -> dict:
-    return json.loads((CANDIDATE / "fixtures" / "typedgraph" / "tg_comment_reroute.json").read_text(encoding="utf-8"))
+    return json.loads((FIXTURES / "tg_comment_reroute.json").read_text(encoding="utf-8"))
 
 
 def _preflight(graph: dict | None = None) -> dict:

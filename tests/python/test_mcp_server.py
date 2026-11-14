@@ -35,8 +35,10 @@ from ue_agent_kit.agent_api import (  # noqa: E402
 from ue_agent_kit.agent_workflow import WorkflowError  # noqa: E402
 from ue_agent_kit.database import open_database  # noqa: E402
 from ue_agent_kit.editor_bridge import LiveEditorError  # noqa: E402
+from ue_agent_kit.experimental_patch import PatchError  # noqa: E402
 from ue_agent_kit.indexer import build_index  # noqa: E402
 from ue_agent_kit.mcp_server import (  # noqa: E402
+    _error_response,
     _server_instructions,
     create_mcp_server,
     main as mcp_main,
@@ -754,6 +756,22 @@ class McpServerTests(unittest.TestCase):
             instructions,
         )
         self.assertIn("report trustVerdict not-evaluated", instructions)
+
+    def test_atomic_patch_refusals_keep_their_exact_error_code(self) -> None:
+        # 0-3.4: a client-side refusal of the atomic patch is not a generic
+        # server fault -- the caller needs the contract code it was told to expect.
+        response = _error_response(
+            "ue_preview_blueprint_patch_experimental",
+            PatchError(
+                "graph-patch-kind-not-allowed",
+                "Operation kind 'moveNode' is not an atomic patch kind.",
+            ),
+            read_only=True,
+        )
+        self.assertFalse(response["ok"])
+        self.assertTrue(response["readOnly"])
+        self.assertEqual(response["error"]["code"], "graph-patch-kind-not-allowed")
+        self.assertEqual(response["error"]["type"], "PatchError")
 
     def test_index_service_is_read_only_and_returns_stable_envelopes(self) -> None:
         before_hash = sha256(self.database_path)
@@ -2055,7 +2073,7 @@ class McpServerTests(unittest.TestCase):
             [tool.name for tool in tools],
             tool_names_for_mode(workflow_enabled=True, memory_enabled=True),
         )
-        self.assertEqual(len(tools), 85)
+        self.assertEqual(len(tools), 89)
 
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
         memory_contract = capabilities["projectMemory"]
@@ -2129,7 +2147,7 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         expected_names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 110)
+        self.assertEqual(len(tools), 117)
         for tool in tools:
             definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
             self.assertEqual(bool(tool.annotations.readOnlyHint), definition.read_only, tool.name)

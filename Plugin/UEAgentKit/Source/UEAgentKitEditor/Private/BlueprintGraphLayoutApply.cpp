@@ -2528,6 +2528,11 @@ namespace UEAgentKitBlueprintGraphLayout
 
 		return ApplyToGraph(Blueprint, Graph, Request, OutResult, OutErrorCode, OutErrorMessage);
 	}
+
+	FString ComputeGraphContentFingerprint(UEdGraph* Graph)
+	{
+		return ComputeGraphFingerprint(Graph);
+	}
 }
 
 #if WITH_DEV_AUTOMATION_TESTS
