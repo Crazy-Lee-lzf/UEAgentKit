@@ -93,9 +93,9 @@ namespace UEAgentKitBlueprintNodeRemoveExpansion
 	FString EdgeKey(const UEdGraphPin* From, const UEdGraphPin* To)
 	{
 		return GuidLower(From->GetOwningNode()->NodeGuid) + TEXT("|")
-			+ From->PinName.ToString() + TEXT("|") + GuidLower(From->PinId) + TEXT(">")
+			+ From->PinName.ToString().ToLower() + TEXT("|") + GuidLower(From->PinId) + TEXT(">")
 			+ GuidLower(To->GetOwningNode()->NodeGuid) + TEXT("|")
-			+ To->PinName.ToString() + TEXT("|") + GuidLower(To->PinId);
+			+ To->PinName.ToString().ToLower() + TEXT("|") + GuidLower(To->PinId);
 	}
 
 	void BuildEdgeKeys(const UEdGraph* Graph, TArray<FString>& OutKeys)

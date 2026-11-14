@@ -362,9 +362,9 @@ namespace
 	FString MakeEdgeKey(const UEdGraphPin* From, const UEdGraphPin* To)
 	{
 		return GuidLower(From->GetOwningNode()->NodeGuid) + TEXT("|")
-			+ From->PinName.ToString() + TEXT("|") + GuidLower(From->PinId) + TEXT(">")
+			+ From->PinName.ToString().ToLower() + TEXT("|") + GuidLower(From->PinId) + TEXT(">")
 			+ GuidLower(To->GetOwningNode()->NodeGuid) + TEXT("|")
-			+ To->PinName.ToString() + TEXT("|") + GuidLower(To->PinId);
+			+ To->PinName.ToString().ToLower() + TEXT("|") + GuidLower(To->PinId);
 	}
 
 	void BuildEdgeKeys(const UEdGraph* Graph, TArray<FString>& OutKeys)
@@ -432,7 +432,7 @@ namespace
 			for (const UEdGraphPin* Pin : Pins)
 			{
 				OutKeys.Add(
-					NodeGuid + TEXT("|") + Pin->PinName.ToString() + TEXT("|")
+					NodeGuid + TEXT("|") + Pin->PinName.ToString().ToLower() + TEXT("|")
 					+ GuidLower(Pin->PinId) + TEXT("|")
 					+ (Pin->Direction == EGPD_Input ? DirectionInput : DirectionOutput));
 			}
