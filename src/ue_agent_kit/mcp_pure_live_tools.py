@@ -32,6 +32,7 @@ PURE_LIVE_READ_TOOL_NAMES: tuple[str, ...] = (
     "ue_get_current_level",
     "ue_get_pie_state",
     "ue_get_pie_world_contexts",
+    "ue_list_pie_actors",
     "ue_inspect_pie_actor",
     "ue_get_pie_scalars",
     "ue_get_output_log",
@@ -45,6 +46,7 @@ PURE_LIVE_READ_TOOL_NAMES: tuple[str, ...] = (
 
 PURE_LIVE_PIE_TOOL_NAMES: tuple[str, ...] = (
     "ue_get_pie_world_contexts",
+    "ue_list_pie_actors",
     "ue_inspect_pie_actor",
     "ue_get_pie_scalars",
 )

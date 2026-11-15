@@ -90,6 +90,35 @@ def register_live_read_tools(
             return error_response("ue_get_pie_world_contexts", exc, read_only=True)
 
     @server.tool(annotations=read_annotations)
+    def ue_list_pie_actors(
+        world_context_id: str = "",
+        pie_instance_id: int = -1,
+        offset: int = 0,
+        limit: int = 50,
+        name_contains: str = "",
+        class_contains: str = "",
+        tag_contains: str = "",
+        world_path: str = "",
+    ) -> dict[str, Any]:
+        """List a bounded page of Actors inside exactly one PIE world (Server/Client kept apart), filtered by name/class/tag and ordered by object path."""
+        try:
+            params: dict[str, Any] = {
+                "offset": offset,
+                "limit": limit,
+                "nameContains": name_contains,
+                "classContains": class_contains,
+                "tagContains": tag_contains,
+                "worldPath": world_path,
+            }
+            if world_context_id:
+                params["worldContextId"] = world_context_id
+            else:
+                params["pieInstanceId"] = pie_instance_id
+            return live_editor_service.call_tool("ue_list_pie_actors", params)
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_list_pie_actors", exc, read_only=True)
+
+    @server.tool(annotations=read_annotations)
     def ue_inspect_pie_actor(
         pie_instance_id: int,
         actor_path: str = "",

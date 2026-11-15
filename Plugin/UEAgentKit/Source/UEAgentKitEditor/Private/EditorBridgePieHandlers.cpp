@@ -1525,3 +1525,376 @@ bool FUEAgentKitEditorBridge::TryReadPieScalarsResult(
 	}
 	return TryReadPieScalars(Request, OutResult, OutErrorCode, OutErrorMessage);
 }
+
+namespace UEAgentKitPieRuntime
+{
+	namespace
+	{
+		bool ContainsIgnoreCase(const FString& Haystack, const FString& Needle)
+		{
+			return Needle.IsEmpty() || Haystack.Contains(Needle, ESearchCase::IgnoreCase);
+		}
+
+		/**
+		 * One exact PIE world for a listing request: worldContextId or
+		 * pieInstanceId, never both or neither, and never two live worlds merged.
+		 */
+		bool ResolvePieWorldForListing(
+			const FActorListRequest& Request,
+			FWorldContextSnapshot& OutSnapshot,
+			FString& OutErrorCode,
+			FString& OutErrorMessage)
+		{
+			const bool bHasContextId = !Request.WorldContextId.IsEmpty();
+			const bool bHasInstanceId = Request.PieInstanceId >= 0;
+			if (bHasContextId == bHasInstanceId)
+			{
+				OutErrorCode = FailureCode(EFailure::InvalidRequest);
+				OutErrorMessage = TEXT("Provide exactly one world identity: worldContextId or pieInstanceId.");
+				return false;
+			}
+
+			TArray<FWorldContextSnapshot> Contexts;
+			bool bContextScanTruncated = false;
+			CollectPieWorldContexts(Contexts, bContextScanTruncated);
+			if (bContextScanTruncated)
+			{
+				OutErrorCode = FailureCode(EFailure::ContextScanTruncated);
+				OutErrorMessage = FString::Printf(
+					TEXT("The PIE world context scan reached its bounded limit of %d contexts, so the requested world could not be verified."),
+					MaxWorldContextScan);
+				return false;
+			}
+
+			if (bHasInstanceId)
+			{
+				TArray<int32> LiveInstanceIds;
+				for (const FWorldContextSnapshot& Snapshot : Contexts)
+				{
+					LiveInstanceIds.AddUnique(Snapshot.PieInstanceId);
+				}
+				TArray<int32> RetiredInstanceIds;
+				GetRetiredPieInstances(RetiredInstanceIds);
+				const ELookupStatus Status = ClassifyInstanceLookup(
+					Request.PieInstanceId,
+					LiveInstanceIds,
+					RetiredInstanceIds);
+				if (Status == ELookupStatus::NotRunning)
+				{
+					OutErrorCode = FailureCode(EFailure::InstanceNotRunning);
+					OutErrorMessage = FString::Printf(
+						TEXT("PIE is not running in this Editor process, so PIE instance %d has no live world."),
+						Request.PieInstanceId);
+					return false;
+				}
+				if (Status == ELookupStatus::Stale)
+				{
+					OutErrorCode = FailureCode(EFailure::InstanceStale);
+					OutErrorMessage = FString::Printf(
+						TEXT("PIE instance %d was observed earlier in this Editor process but is no longer running; re-query editor.getPieWorldContexts."),
+						Request.PieInstanceId);
+					return false;
+				}
+				if (Status == ELookupStatus::NotFound)
+				{
+					OutErrorCode = FailureCode(EFailure::InstanceNotFound);
+					OutErrorMessage = FString::Printf(
+						TEXT("PIE instance %d is not one of the live PIE world contexts; re-query editor.getPieWorldContexts."),
+						Request.PieInstanceId);
+					return false;
+				}
+			}
+
+			const FWorldContextSnapshot* Found = nullptr;
+			int32 MatchCount = 0;
+			FString MatchSummary;
+			for (const FWorldContextSnapshot& Candidate : Contexts)
+			{
+				const bool bMatches = bHasContextId
+					? Candidate.ContextId == Request.WorldContextId
+					: Candidate.PieInstanceId == Request.PieInstanceId;
+				if (!bMatches)
+				{
+					continue;
+				}
+				++MatchCount;
+				if (Found == nullptr)
+				{
+					Found = &Candidate;
+				}
+				if (MatchSummary.Len() < 512)
+				{
+					if (!MatchSummary.IsEmpty())
+					{
+						MatchSummary += TEXT(", ");
+					}
+					MatchSummary += FString::Printf(
+						TEXT("%s (%s)"),
+						*Candidate.WorldPath,
+						*Candidate.NetModeName);
+				}
+			}
+			if (MatchCount == 0)
+			{
+				OutErrorCode = FailureCode(EFailure::InstanceNotFound);
+				OutErrorMessage = bHasContextId
+					? FString::Printf(
+						TEXT("worldContextId '%s' is not one of the live PIE world contexts; re-query editor.getPieWorldContexts."),
+						*Request.WorldContextId)
+					: FString::Printf(
+						TEXT("PIE instance %d no longer has a resolvable world."),
+						Request.PieInstanceId);
+				return false;
+			}
+			if (MatchCount > 1)
+			{
+				OutErrorCode = FailureCode(EFailure::InstanceAmbiguous);
+				OutErrorMessage = FString::Printf(
+					TEXT("The requested world matches %d live PIE world contexts (%s); the exact world is ambiguous, so nothing was listed."),
+					MatchCount,
+					*MatchSummary);
+				return false;
+			}
+			if (Found == nullptr || Found->World == nullptr)
+			{
+				OutErrorCode = FailureCode(EFailure::InstanceNotFound);
+				OutErrorMessage = TEXT("The requested PIE world context no longer has a resolvable world.");
+				return false;
+			}
+			if (!Request.WorldPath.IsEmpty() && !PathEqualsExact(Request.WorldPath, Found->WorldPath))
+			{
+				OutErrorCode = FailureCode(EFailure::WorldStale);
+				OutErrorMessage = FString::Printf(
+					TEXT("The requested world context now resolves to world '%s', not the requested world '%s'; the instance was reused."),
+					*Found->WorldPath,
+					*Request.WorldPath);
+				return false;
+			}
+			OutSnapshot = *Found;
+			return true;
+		}
+
+		/** One Actor summary; no components and no properties (that is P2). */
+		TSharedRef<FJsonObject> DescribeListedActor(const FWorldContextSnapshot& Snapshot, AActor* Actor)
+		{
+			TSharedRef<FJsonObject> Item = MakeShared<FJsonObject>();
+			Item->SetStringField(TEXT("path"), Actor->GetPathName());
+			Item->SetStringField(TEXT("name"), Actor->GetName());
+			Item->SetStringField(TEXT("label"), Actor->GetActorLabel(false));
+			Item->SetStringField(
+				TEXT("class"),
+				Actor->GetClass() != nullptr ? Actor->GetClass()->GetPathName() : FString());
+			Item->SetStringField(
+				TEXT("ownerPath"),
+				Actor->GetOwner() != nullptr ? Actor->GetOwner()->GetPathName() : FString());
+
+			const FTransform Transform = Actor->GetActorTransform();
+			TSharedRef<FJsonObject> TransformJson = MakeShared<FJsonObject>();
+			TransformJson->SetObjectField(TEXT("location"), VectorJson(Transform.GetLocation()));
+			TransformJson->SetObjectField(TEXT("rotation"), RotatorJson(Transform.Rotator()));
+			TransformJson->SetObjectField(TEXT("scale"), VectorJson(Transform.GetScale3D()));
+			Item->SetObjectField(TEXT("transform"), TransformJson);
+
+			TSharedRef<FJsonObject> NetRoleJson = MakeShared<FJsonObject>();
+			NetRoleJson->SetStringField(TEXT("localRole"), NetRoleEnumName(Actor->GetLocalRole()));
+			NetRoleJson->SetStringField(TEXT("localRoleName"), NetRoleShortName(Actor->GetLocalRole()));
+			NetRoleJson->SetBoolField(TEXT("hasAuthority"), Actor->HasAuthority());
+			NetRoleJson->SetBoolField(TEXT("isServer"), Snapshot.bIsServer);
+			NetRoleJson->SetBoolField(TEXT("isClient"), Snapshot.bIsClient);
+			Item->SetObjectField(TEXT("netRole"), NetRoleJson);
+
+			TArray<TSharedPtr<FJsonValue>> Tags;
+			for (const FName& Tag : Actor->Tags)
+			{
+				Tags.Add(MakeShared<FJsonValueString>(Tag.ToString()));
+			}
+			Item->SetArrayField(TEXT("tags"), Tags);
+			return Item;
+		}
+	}
+
+	bool TryListPieActors(
+		const FActorListRequest& Request,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage)
+	{
+		OutResult.Reset();
+		OutErrorCode.Reset();
+		OutErrorMessage.Reset();
+
+		if (Request.Offset < 0)
+		{
+			OutErrorCode = FailureCode(EFailure::InvalidRequest);
+			OutErrorMessage = TEXT("offset must be zero or a positive integer.");
+			return false;
+		}
+		if (Request.Limit < 1)
+		{
+			OutErrorCode = FailureCode(EFailure::InvalidRequest);
+			OutErrorMessage = FString::Printf(
+				TEXT("limit must be from 1 through %d."),
+				MaxActorListLimit);
+			return false;
+		}
+		const int32 Limit = FMath::Clamp(Request.Limit, 1, MaxActorListLimit);
+
+		FWorldContextSnapshot Snapshot;
+		if (!ResolvePieWorldForListing(Request, Snapshot, OutErrorCode, OutErrorMessage))
+		{
+			return false;
+		}
+
+		TArray<AActor*> Matched;
+		int32 ScannedActorCount = 0;
+		bool bScanTruncated = false;
+		for (TActorIterator<AActor> It(Snapshot.World); It; ++It)
+		{
+			AActor* Actor = *It;
+			if (Actor == nullptr)
+			{
+				continue;
+			}
+			if (ScannedActorCount >= MaxScannedActors)
+			{
+				bScanTruncated = true;
+				break;
+			}
+			++ScannedActorCount;
+			if (!ContainsIgnoreCase(Actor->GetName(), Request.NameContains))
+			{
+				continue;
+			}
+			const FString ClassPath = Actor->GetClass() != nullptr
+				? Actor->GetClass()->GetPathName()
+				: FString();
+			if (!ContainsIgnoreCase(ClassPath, Request.ClassContains))
+			{
+				continue;
+			}
+			if (!Request.TagContains.IsEmpty())
+			{
+				bool bTagMatched = false;
+				for (const FName& Tag : Actor->Tags)
+				{
+					if (ContainsIgnoreCase(Tag.ToString(), Request.TagContains))
+					{
+						bTagMatched = true;
+						break;
+					}
+				}
+				if (!bTagMatched)
+				{
+					continue;
+				}
+			}
+			Matched.Add(Actor);
+		}
+
+		// Deterministic order: full object path, never a display name.  The sort
+		// predicate receives references because TArray::Sort dereferences pointers.
+		Matched.Sort([](const AActor& Left, const AActor& Right)
+		{
+			return Left.GetPathName() < Right.GetPathName();
+		});
+
+		const int32 TotalCount = Matched.Num();
+		const int32 Begin = FMath::Clamp(Request.Offset, 0, TotalCount);
+		const int32 End = FMath::Clamp(Request.Offset + Limit, Begin, TotalCount);
+
+		TArray<TSharedPtr<FJsonValue>> Actors;
+		for (int32 Index = Begin; Index < End; ++Index)
+		{
+			Actors.Add(MakeShared<FJsonValueObject>(DescribeListedActor(Snapshot, Matched[Index])));
+		}
+
+		TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+		Result->SetBoolField(TEXT("readOnly"), true);
+		Result->SetBoolField(TEXT("requiresDatabase"), false);
+		Result->SetStringField(TEXT("pieState"), UEAgentKitEditorBridgePrivate::GetPieStateName());
+		Result->SetStringField(TEXT("worldKey"), Snapshot.ContextId);
+		Result->SetStringField(TEXT("worldContextId"), Snapshot.ContextId);
+		Result->SetNumberField(TEXT("pieInstanceId"), Snapshot.PieInstanceId);
+		Result->SetStringField(TEXT("worldPath"), Snapshot.WorldPath);
+		Result->SetStringField(TEXT("worldName"), Snapshot.WorldName);
+		Result->SetStringField(TEXT("worldType"), Snapshot.WorldType);
+		Result->SetStringField(TEXT("netModeName"), Snapshot.NetModeName);
+		Result->SetNumberField(TEXT("netMode"), Snapshot.NetMode);
+		Result->SetStringField(TEXT("serverOrClient"), Snapshot.ServerOrClient);
+		Result->SetBoolField(TEXT("isServer"), Snapshot.bIsServer);
+		Result->SetBoolField(TEXT("isClient"), Snapshot.bIsClient);
+		Result->SetNumberField(TEXT("totalCount"), TotalCount);
+		Result->SetNumberField(TEXT("offset"), Begin);
+		Result->SetNumberField(TEXT("limit"), Limit);
+		Result->SetNumberField(TEXT("returnedCount"), Actors.Num());
+		Result->SetBoolField(TEXT("truncated"), bScanTruncated || End < TotalCount);
+		Result->SetBoolField(TEXT("scanTruncated"), bScanTruncated);
+		Result->SetNumberField(TEXT("scannedActorCount"), ScannedActorCount);
+		TSharedRef<FJsonObject> Filters = MakeShared<FJsonObject>();
+		Filters->SetStringField(TEXT("nameContains"), Request.NameContains);
+		Filters->SetStringField(TEXT("classContains"), Request.ClassContains);
+		Filters->SetStringField(TEXT("tagContains"), Request.TagContains);
+		Result->SetObjectField(TEXT("filters"), Filters);
+		Result->SetArrayField(TEXT("actors"), Actors);
+
+		OutResult = Result;
+		return true;
+	}
+}
+
+bool FUEAgentKitEditorBridge::TryListPieActorsResult(
+	const TSharedPtr<FJsonObject>& Params,
+	TSharedPtr<FJsonObject>& OutResult,
+	FString& OutErrorCode,
+	FString& OutErrorMessage) const
+{
+	using namespace UEAgentKitPieRuntime;
+		OutResult.Reset();
+		OutErrorCode.Reset();
+		OutErrorMessage.Reset();
+		if (!Params.IsValid())
+		{
+			OutErrorCode = FailureCode(EFailure::InvalidRequest);
+			OutErrorMessage = TEXT("editor.listPieActors requires an exact worldContextId or pieInstanceId.");
+			return false;
+		}
+
+		FActorListRequest Request;
+		FString WorldContextId;
+		if (Params->TryGetStringField(TEXT("worldContextId"), WorldContextId))
+		{
+			Request.WorldContextId = WorldContextId;
+		}
+		double PieInstanceId = 0.0;
+		if (Params->TryGetNumberField(TEXT("pieInstanceId"), PieInstanceId))
+		{
+			Request.PieInstanceId = static_cast<int32>(PieInstanceId);
+		}
+
+		double Offset = 0.0;
+		if (Params->TryGetNumberField(TEXT("offset"), Offset))
+		{
+			if (FMath::FloorToDouble(Offset) != Offset)
+			{
+				OutErrorCode = FailureCode(EFailure::InvalidRequest);
+				OutErrorMessage = TEXT("offset must be an integer.");
+				return false;
+			}
+			Request.Offset = static_cast<int32>(Offset);
+		}
+		double Limit = static_cast<double>(DefaultActorListLimit);
+		Params->TryGetNumberField(TEXT("limit"), Limit);
+		if (FMath::FloorToDouble(Limit) != Limit)
+		{
+			OutErrorCode = FailureCode(EFailure::InvalidRequest);
+			OutErrorMessage = TEXT("limit must be an integer.");
+			return false;
+		}
+		Request.Limit = static_cast<int32>(Limit);
+
+		Params->TryGetStringField(TEXT("worldPath"), Request.WorldPath);
+		Params->TryGetStringField(TEXT("nameContains"), Request.NameContains);
+		Params->TryGetStringField(TEXT("classContains"), Request.ClassContains);
+		Params->TryGetStringField(TEXT("tagContains"), Request.TagContains);
+		return TryListPieActors(Request, OutResult, OutErrorCode, OutErrorMessage);
+	}

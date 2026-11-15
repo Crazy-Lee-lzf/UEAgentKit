@@ -44,6 +44,9 @@ namespace UEAgentKitPieRuntime
 	inline constexpr int32 MaxScalarStringChars = 512;
 	/** Reflected declaring-class anchors are bounded like other scalar metadata. */
 	inline constexpr int32 MaxScalarClassPathChars = 512;
+	/** Bounded Actor listing inside one exact PIE world (P1). */
+	inline constexpr int32 DefaultActorListLimit = 50;
+	inline constexpr int32 MaxActorListLimit = 200;
 
 	/** Instance lookup class. Codes stay distinct on the wire. */
 	enum class ELookupStatus : uint8
@@ -201,6 +204,35 @@ namespace UEAgentKitPieRuntime
 	 */
 	bool TryReadPieScalars(
 		const FScalarInspectionRequest& Request,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage);
+
+	/**
+	 * P1: one bounded, deterministically ordered page of Actors inside exactly
+	 * one PIE world.
+	 *
+	 * The world is addressed by exactly one of worldContextId (the contextId
+	 * from editor.getPieWorldContexts) or pieInstanceId; Server and Client worlds
+	 * are never merged.  Actors are ordered by their full object path, so the
+	 * same live state always yields the same pages.  Filters are
+	 * case-insensitive substring matches on name, class path and any tag.
+	 */
+	struct FActorListRequest
+	{
+		int32 PieInstanceId = INDEX_NONE;
+		FString WorldContextId;
+		/** Optional expected world path; a mismatch is reported as stale. */
+		FString WorldPath;
+		int32 Offset = 0;
+		int32 Limit = DefaultActorListLimit;
+		FString NameContains;
+		FString ClassContains;
+		FString TagContains;
+	};
+
+	bool TryListPieActors(
+		const FActorListRequest& Request,
 		TSharedPtr<FJsonObject>& OutResult,
 		FString& OutErrorCode,
 		FString& OutErrorMessage);

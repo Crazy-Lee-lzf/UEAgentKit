@@ -36,6 +36,7 @@ _CAPABILITY_GATED_TOOLS = {
     "ue_get_editor_context": "editor.getEditorContext",
     "ue_get_focused_blueprint_graph_context": "editor.getFocusedBlueprintGraphContext",
     "ue_get_pie_world_contexts": "editor.getPieWorldContexts",
+    "ue_list_pie_actors": "editor.listPieActors",
     "ue_inspect_pie_actor": "editor.inspectPieActor",
     "ue_get_pie_scalars": "editor.getPieScalars",
     "ue_start_batch_task": "editor.batchTask.start",
@@ -539,6 +540,45 @@ class LiveEditorBridgeService:
                 "maxContexts": LiveEditorBridgeService._bounded_integer(
                     params.get("maxContexts", 16), "maxContexts", 1, 32),
             }
+        if tool_name == "ue_list_pie_actors":
+            allowed = {
+                "worldContextId",
+                "pieInstanceId",
+                "worldPath",
+                "offset",
+                "limit",
+                "nameContains",
+                "classContains",
+                "tagContains",
+            }
+            LiveEditorBridgeService._reject_unknown_params(params, allowed)
+            normalized: dict[str, Any] = {
+                "offset": LiveEditorBridgeService._bounded_integer(
+                    params.get("offset", 0), "offset", 0),
+                "limit": LiveEditorBridgeService._bounded_integer(
+                    params.get("limit", 50), "limit", 1, 200),
+            }
+            world_context_id = params.get("worldContextId", "")
+            if world_context_id not in ("", None):
+                normalized["worldContextId"] = LiveEditorBridgeService._bounded_string(
+                    world_context_id, "worldContextId", 128)
+            pie_instance_id = params.get("pieInstanceId")
+            if pie_instance_id is not None:
+                normalized["pieInstanceId"] = LiveEditorBridgeService._bounded_integer(
+                    pie_instance_id, "pieInstanceId", 0)
+            if ("worldContextId" in normalized) == ("pieInstanceId" in normalized):
+                raise LiveEditorError(
+                    "live-editor-invalid-parameters",
+                    "Provide exactly one world identity: worldContextId or pieInstanceId.",
+                )
+            for field in ("nameContains", "classContains", "tagContains"):
+                raw_value = params.get(field, "")
+                if raw_value in ("", None):
+                    continue
+                normalized[field] = LiveEditorBridgeService._bounded_string(
+                    raw_value, field, 256)
+            LiveEditorBridgeService._normalize_optional_object_path(params, normalized, "worldPath")
+            return normalized
         if tool_name == "ue_inspect_pie_actor":
             allowed = {
                 "pieInstanceId",

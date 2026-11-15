@@ -100,6 +100,11 @@ private:
 		TSharedPtr<FJsonObject>& OutResult,
 		FString& OutErrorCode,
 		FString& OutErrorMessage) const;
+	bool TryListPieActorsResult(
+		const TSharedPtr<FJsonObject>& Params,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage) const;
 	TSharedRef<FJsonObject> BuildOutputLogResult(const TSharedPtr<FJsonObject>& Params) const;
 	TSharedRef<FJsonObject> BuildCompileErrorsResult(const TSharedPtr<FJsonObject>& Params) const;
 	TSharedRef<FJsonObject> BuildInspectAssetLiveResult(const FString& AssetPath) const;

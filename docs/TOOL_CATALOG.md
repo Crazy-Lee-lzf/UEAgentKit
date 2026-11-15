@@ -11,7 +11,7 @@
 | 影响与验证 | `ue_analyze_change_impact`、`ue_analyze_semantic_diff`、`ue_build_verification_plan`、`ue_evaluate_trust_verdict` | 只读分析 |
 | 离线 GraphPatch 预览 | `ue_preview_graph_patch` | 只验证 IR，不连接 Editor、不写入 |
 | Live Editor | `ue_editor_status`、`ue_get_selection`、`ue_get_open_assets`、`ue_get_dirty_assets`、`ue_get_current_level` | 当前 Editor 状态 |
-| Live 图 / PIE | `ue_get_blueprint_graph_context`、`ue_get_focused_blueprint_graph_context`、`ue_get_blueprint_graph_layout_preflight`、`ue_get_pie_state`、`ue_get_pie_world_contexts`、`ue_inspect_pie_actor`、`ue_get_pie_scalars` | 只读；PIE 需要精确 instance |
+| Live 图 / PIE | `ue_get_blueprint_graph_context`、`ue_get_focused_blueprint_graph_context`、`ue_get_blueprint_graph_layout_preflight`、`ue_get_pie_state`、`ue_get_pie_world_contexts`、`ue_list_pie_actors`、`ue_inspect_pie_actor`、`ue_get_pie_scalars` | 只读；PIE 需要精确 instance；`ue_list_pie_actors` 按 object path 稳定排序并分页，Name/Class/Tag 为大小写不敏感子串过滤，Server/Client 世界分开 |
 | 资产 / 日志 | `ue_inspect_asset_live`、`ue_get_output_log`、`ue_get_compile_errors` | 只读诊断 |
 | Project Memory | `ue_memory_search`、`ue_memory_get`、`ue_memory_get_context`、`ue_memory_expand_node`、`ue_memory_get_evidence` | 需要 `--enable-project-memory` |
 | 代码知识 | `ue_search(scope="symbols", profile="code")` | C++ 符号与静态调用点 |

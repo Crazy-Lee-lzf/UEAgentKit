@@ -22,6 +22,7 @@
 #include "Misc/DateTime.h"
 #include "Misc/EngineVersion.h"
 #include "Misc/FileHelper.h"
+#include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
@@ -441,6 +442,277 @@ namespace UEAgentKitP0PieRuntime
 			State->SpawnedActorLabel = First->GetActorLabel(false);
 			State->bLabelAmbiguityVerified =
 				First->GetActorLabel(false) == SharedLabel && Second->GetActorLabel(false) == SharedLabel;
+
+			// ---- P1: bounded Actor listing inside one exact PIE world ----------
+			auto ReadActorPaths = [Test](
+				const TSharedPtr<FJsonObject>& Result,
+				TArray<FString>& OutPaths) -> bool
+			{
+				if (!Result.IsValid())
+				{
+					return false;
+				}
+				const TArray<TSharedPtr<FJsonValue>>* Actors = nullptr;
+				if (!Result->TryGetArrayField(TEXT("actors"), Actors) || Actors == nullptr)
+				{
+					Test->AddError(TEXT("P0Pie Actor listing has no actors array."));
+					return false;
+				}
+				for (const TSharedPtr<FJsonValue>& Value : *Actors)
+				{
+					const TSharedPtr<FJsonObject> Item = Value.IsValid() ? Value->AsObject() : nullptr;
+					if (!Item.IsValid())
+					{
+						Test->AddError(TEXT("P0Pie Actor listing has a non-object entry."));
+						return false;
+					}
+					OutPaths.Add(Item->GetStringField(TEXT("path")));
+				}
+				return true;
+			};
+
+			auto IsSortedAscending = [](const TArray<FString>& Paths) -> bool
+			{
+				for (int32 Index = 1; Index < Paths.Num(); ++Index)
+				{
+					if (Paths[Index - 1] > Paths[Index])
+					{
+						return false;
+					}
+				}
+				return true;
+			};
+
+			FActorListRequest ServerList;
+			ServerList.PieInstanceId = State->ServerInstanceId;
+			ServerList.Limit = 2;
+			TSharedPtr<FJsonObject> ServerFirstPage;
+			FString ListCode;
+			FString ListMessage;
+			if (Test->TestTrue(
+				TEXT("P0Pie Actor listing by pieInstanceId succeeds"),
+				TryListPieActors(ServerList, ServerFirstPage, ListCode, ListMessage)))
+			{
+				const int32 TotalCount = static_cast<int32>(ServerFirstPage->GetNumberField(TEXT("totalCount")));
+				const int32 ReturnedCount = static_cast<int32>(ServerFirstPage->GetNumberField(TEXT("returnedCount")));
+				Test->TestEqual(
+					TEXT("P0Pie Actor listing reports the requested PIE instance id"),
+					static_cast<int32>(ServerFirstPage->GetNumberField(TEXT("pieInstanceId"))),
+					State->ServerInstanceId);
+				Test->TestEqual(
+					TEXT("P0Pie Actor listing keeps the server world key"),
+					ServerFirstPage->GetStringField(TEXT("worldKey")),
+					State->ServerContextId);
+				Test->TestTrue(
+					TEXT("P0Pie Actor listing sees at least the two spawned Actors"),
+					TotalCount >= 2);
+				Test->TestEqual(
+					TEXT("P0Pie Actor listing page size is the requested limit"),
+					ReturnedCount,
+					FMath::Min(2, TotalCount));
+				Test->TestTrue(TEXT("P0Pie Actor listing is read-only"), ServerFirstPage->GetBoolField(TEXT("readOnly")));
+				Test->TestFalse(
+					TEXT("P0Pie Actor listing does not need the database"),
+					ServerFirstPage->GetBoolField(TEXT("requiresDatabase")));
+
+				TArray<FString> FirstPagePaths;
+				if (ReadActorPaths(ServerFirstPage, FirstPagePaths))
+				{
+					Test->TestTrue(
+						TEXT("P0Pie Actor listing page is sorted by object path"),
+						IsSortedAscending(FirstPagePaths));
+				}
+
+				// Page through the whole world: pages must not overlap and their
+				// union must be the full filtered set.
+				TArray<FString> AllPaths;
+				TSet<FString> SeenPaths;
+				bool bPageOverlap = false;
+				int32 Offset = 0;
+				int32 Guard = 0;
+				while (Guard++ < 512)
+				{
+					FActorListRequest PageRequest = ServerList;
+					PageRequest.Offset = Offset;
+					TSharedPtr<FJsonObject> PageResult;
+					if (!TryListPieActors(PageRequest, PageResult, ListCode, ListMessage))
+					{
+						Test->AddError(FString::Printf(
+							TEXT("P0Pie Actor listing page at offset %d failed: %s %s"),
+							Offset,
+							*ListCode,
+							*ListMessage));
+						break;
+					}
+					TArray<FString> PagePaths;
+					if (!ReadActorPaths(PageResult, PagePaths))
+					{
+						break;
+					}
+					Test->TestTrue(
+						TEXT("P0Pie Actor listing page is sorted by object path"),
+						IsSortedAscending(PagePaths));
+					for (const FString& Path : PagePaths)
+					{
+						if (SeenPaths.Contains(Path))
+						{
+							bPageOverlap = true;
+						}
+						SeenPaths.Add(Path);
+						AllPaths.Add(Path);
+					}
+					const int32 PageTotal = static_cast<int32>(PageResult->GetNumberField(TEXT("totalCount")));
+					if (Offset + 2 >= PageTotal)
+					{
+						break;
+					}
+					Offset += 2;
+				}
+				Test->TestFalse(TEXT("P0Pie Actor listing pages never overlap"), bPageOverlap);
+				Test->TestEqual(
+					TEXT("P0Pie Actor listing pages cover the whole filtered set"),
+					AllPaths.Num(),
+					TotalCount);
+				Test->TestTrue(
+					TEXT("P0Pie Actor listing includes both spawned Actors"),
+					SeenPaths.Contains(State->SpawnedActorPath) && SeenPaths.Contains(Second->GetPathName()));
+
+				// Case-insensitive name filter: every returned name matches.
+				FActorListRequest NameFilter;
+				NameFilter.PieInstanceId = State->ServerInstanceId;
+				NameFilter.Limit = MaxActorListLimit;
+				NameFilter.NameContains = State->SpawnedActorName.ToLower();
+				TSharedPtr<FJsonObject> NameFiltered;
+				if (Test->TestTrue(
+					TEXT("P0Pie Actor listing by nameContains succeeds"),
+					TryListPieActors(NameFilter, NameFiltered, ListCode, ListMessage)))
+				{
+					TArray<FString> FilteredPaths;
+					ReadActorPaths(NameFiltered, FilteredPaths);
+					bool bAllMatch = FilteredPaths.Num() > 0;
+					for (const FString& Path : FilteredPaths)
+					{
+						const FString Leaf = FPackageName::ObjectPathToObjectName(Path);
+						if (!Leaf.Contains(State->SpawnedActorName, ESearchCase::IgnoreCase))
+						{
+							bAllMatch = false;
+						}
+					}
+					Test->TestTrue(
+						TEXT("P0Pie Actor listing nameContains is case-insensitive and exact to the filter"),
+						bAllMatch);
+				}
+
+				// Class filter on the class path.
+				FActorListRequest ClassFilter;
+				ClassFilter.PieInstanceId = State->ServerInstanceId;
+				ClassFilter.Limit = MaxActorListLimit;
+				ClassFilter.ClassContains = TEXT("StaticMeshActor");
+				TSharedPtr<FJsonObject> ClassFiltered;
+				if (Test->TestTrue(
+					TEXT("P0Pie Actor listing by classContains succeeds"),
+					TryListPieActors(ClassFilter, ClassFiltered, ListCode, ListMessage)))
+				{
+					const TArray<TSharedPtr<FJsonValue>>* FilteredActors = nullptr;
+					ClassFiltered->TryGetArrayField(TEXT("actors"), FilteredActors);
+					bool bAllMatch = FilteredActors != nullptr && FilteredActors->Num() >= 2;
+					if (FilteredActors != nullptr)
+					{
+						for (const TSharedPtr<FJsonValue>& Value : *FilteredActors)
+						{
+							const TSharedPtr<FJsonObject> Item = Value.IsValid() ? Value->AsObject() : nullptr;
+							if (!Item.IsValid()
+								|| !Item->GetStringField(TEXT("class")).Contains(
+									TEXT("StaticMeshActor"),
+									ESearchCase::IgnoreCase))
+							{
+								bAllMatch = false;
+							}
+						}
+					}
+					Test->TestTrue(
+						TEXT("P0Pie Actor listing classContains returns only matching classes"),
+						bAllMatch);
+				}
+			}
+
+			// Server and Client worlds never share Actors: their path sets are disjoint.
+			FActorListRequest ClientList;
+			ClientList.PieInstanceId = State->ClientInstanceId;
+			ClientList.Limit = MaxActorListLimit;
+			TSharedPtr<FJsonObject> ClientResult;
+			if (Test->TestTrue(
+				TEXT("P0Pie Actor listing in the client world succeeds"),
+				TryListPieActors(ClientList, ClientResult, ListCode, ListMessage)))
+			{
+				TArray<FString> ClientPaths;
+				ReadActorPaths(ClientResult, ClientPaths);
+				Test->TestEqual(
+					TEXT("P0Pie client listing reports the client PIE instance id"),
+					static_cast<int32>(ClientResult->GetNumberField(TEXT("pieInstanceId"))),
+					State->ClientInstanceId);
+				Test->TestTrue(
+					TEXT("P0Pie client listing keeps a distinct world key"),
+					ClientResult->GetStringField(TEXT("worldKey")) != State->ServerContextId);
+				Test->TestFalse(
+					TEXT("P0Pie client listing is flagged as client"),
+					ClientResult->GetBoolField(TEXT("isServer")));
+
+				FActorListRequest ServerAll;
+				ServerAll.PieInstanceId = State->ServerInstanceId;
+				ServerAll.Limit = MaxActorListLimit;
+				TSharedPtr<FJsonObject> ServerAllResult;
+				TArray<FString> ServerPaths;
+				if (TryListPieActors(ServerAll, ServerAllResult, ListCode, ListMessage)
+					&& ReadActorPaths(ServerAllResult, ServerPaths))
+				{
+					bool bShared = false;
+					for (const FString& Path : ClientPaths)
+					{
+						if (ServerPaths.Contains(Path))
+						{
+							bShared = true;
+						}
+					}
+					Test->TestFalse(
+						TEXT("P0Pie server and client Actor lists are disjoint"),
+						bShared);
+				}
+			}
+
+			// Bounded refusals: bad bounds and bad world identity.
+			FActorListRequest NegativeOffset = ServerList;
+			NegativeOffset.Offset = -1;
+			TSharedPtr<FJsonObject> Refused;
+			Test->TestFalse(
+				TEXT("P0Pie Actor listing refuses a negative offset"),
+				TryListPieActors(NegativeOffset, Refused, ListCode, ListMessage));
+			Test->TestEqual(
+				TEXT("P0Pie negative offset wire code"),
+				ListCode,
+				FString(FailureCode(EFailure::InvalidRequest)));
+
+			FActorListRequest ZeroLimit = ServerList;
+			ZeroLimit.Limit = 0;
+			Test->TestFalse(
+				TEXT("P0Pie Actor listing refuses a zero limit"),
+				TryListPieActors(ZeroLimit, Refused, ListCode, ListMessage));
+
+			FActorListRequest BothIdentities = ServerList;
+			BothIdentities.WorldContextId = State->ServerContextId;
+			Test->TestFalse(
+				TEXT("P0Pie Actor listing refuses two world identities"),
+				TryListPieActors(BothIdentities, Refused, ListCode, ListMessage));
+
+			FActorListRequest UnknownContext;
+			UnknownContext.WorldContextId = TEXT("pie-9999-none");
+			Test->TestFalse(
+				TEXT("P0Pie Actor listing refuses an unknown worldContextId"),
+				TryListPieActors(UnknownContext, Refused, ListCode, ListMessage));
+			Test->TestEqual(
+				TEXT("P0Pie unknown worldContextId wire code"),
+				ListCode,
+				FString(FailureCode(EFailure::InstanceNotFound)));
 
 			auto Inspect = [Test](
 				const FActorInspectionRequest& Request,
@@ -1565,6 +1837,66 @@ bool FUEAgentKitP0PieContractTest::RunTest(const FString& Parameters)
 		TEXT("P0Pie Actor inspection without PIE is rejected"),
 		TryDescribePieActor(NotRunning, Result, Code, Message));
 	TestEqual(TEXT("P0Pie Actor inspection without PIE returns pie-not-running"), Code, NotRunningCode);
+
+	// ---- P1: Actor listing contract codes without PIE ------------------------
+	TSharedPtr<FJsonObject> ListResult;
+	FString ListCode;
+	FString ListMessage;
+
+	FActorListRequest ListNotRunning;
+	ListNotRunning.PieInstanceId = 1;
+	TestFalse(
+		TEXT("P0Pie Actor listing without PIE is rejected"),
+		TryListPieActors(ListNotRunning, ListResult, ListCode, ListMessage));
+	TestEqual(
+		TEXT("P0Pie Actor listing without PIE returns pie-not-running"),
+		ListCode,
+		NotRunningCode);
+	TestTrue(
+		TEXT("P0Pie Actor listing without PIE reports no result object"),
+		!ListResult.IsValid());
+
+	FActorListRequest ListNoIdentity;
+	ListNoIdentity.Limit = 10;
+	TestFalse(
+		TEXT("P0Pie Actor listing without a world identity is rejected"),
+		TryListPieActors(ListNoIdentity, ListResult, ListCode, ListMessage));
+	TestEqual(
+		TEXT("P0Pie Actor listing without identity returns pie-invalid-parameters"),
+		ListCode,
+		FString(TEXT("pie-invalid-parameters")));
+
+	FActorListRequest ListNegativeOffset;
+	ListNegativeOffset.PieInstanceId = 1;
+	ListNegativeOffset.Offset = -1;
+	TestFalse(
+		TEXT("P0Pie Actor listing with a negative offset is rejected"),
+		TryListPieActors(ListNegativeOffset, ListResult, ListCode, ListMessage));
+	TestEqual(
+		TEXT("P0Pie Actor listing negative offset returns pie-invalid-parameters"),
+		ListCode,
+		FString(TEXT("pie-invalid-parameters")));
+
+	FActorListRequest ListZeroLimit;
+	ListZeroLimit.PieInstanceId = 1;
+	ListZeroLimit.Limit = 0;
+	TestFalse(
+		TEXT("P0Pie Actor listing with a zero limit is rejected"),
+		TryListPieActors(ListZeroLimit, ListResult, ListCode, ListMessage));
+	TestEqual(
+		TEXT("P0Pie Actor listing zero limit returns pie-invalid-parameters"),
+		ListCode,
+		FString(TEXT("pie-invalid-parameters")));
+
+	FActorListRequest ListUnknownContext;
+	ListUnknownContext.WorldContextId = TEXT("pie-1234-server");
+	TestFalse(
+		TEXT("P0Pie Actor listing with an unknown worldContextId is rejected"),
+		TryListPieActors(ListUnknownContext, ListResult, ListCode, ListMessage));
+	TestEqual(
+		TEXT("P0Pie Actor listing unknown worldContextId returns pie-instance-not-found"),
+		ListCode,
+		FString(TEXT("pie-instance-not-found")));
 
 	return true;
 }
