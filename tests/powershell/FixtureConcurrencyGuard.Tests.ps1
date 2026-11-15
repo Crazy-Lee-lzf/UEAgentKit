@@ -53,7 +53,10 @@ function New-FakeProcess
 }
 
 # --- disposable project layout -------------------------------------------
-$root = Join-Path $env:TEMP ("ueak-def07-" + [System.Guid]::NewGuid().ToString("N"))
+# $env:TEMP only exists on Windows; the Linux release-validation runners do have
+# pwsh, so fall back to the platform temp directory instead of failing to bind.
+$tempRoot = if ($env:TEMP) { $env:TEMP } elseif ($env:TMP) { $env:TMP } else { [System.IO.Path]::GetTempPath() }
+$root = Join-Path $tempRoot ("ueak-def07-" + [System.Guid]::NewGuid().ToString("N"))
 $spaced = Join-Path $root "With Space"
 $other = Join-Path $root "Other"
 $sameName = Join-Path $root "SameName"
