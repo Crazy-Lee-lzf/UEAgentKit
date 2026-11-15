@@ -1,50 +1,51 @@
-# 专用 Tool 文档索引（面向用户与 AI Agent）
+# Tool 目录（面向用户与 AI Agent）
 
-此索引只指向与 UE Agent Kit 使用有关的工具说明。实际能调用的 Tool 及输入/返回 Schema，**始终以当前服务器的 `ue_get_capabilities` 和 MCP 工具定义为准**。文档中出现的阶段验收结果不代表在其他 UE 版本、项目或当前用户环境中可用。
+实际可调用的 Tool 及其输入/返回 Schema，**始终以当前服务器的 `ue_get_capabilities` 和 MCP 工具定义为准**。下面只列入口与归属，不承诺每个部署都注册同一组。
 
-## AI Agent 使用规则
+## 读取
 
-在使用任何专用 Tool 前先确认：
+| 领域 | 代表性 Tool | 说明 |
+|---|---|---|
+| 能力与状态 | `ue_get_capabilities`、`ue_get_project_status`、`ue_get_subprocess_ledger` | 先发现能力；ledger 用于确认有没有启动子进程 |
+| 资产 / 符号 / 引用 | `ue_search`、`ue_get_asset`、`ue_find_references` | 索引查询；`ue_get_asset` 可能带 overlay 信息 |
+| 影响与验证 | `ue_analyze_change_impact`、`ue_analyze_semantic_diff`、`ue_build_verification_plan`、`ue_evaluate_trust_verdict` | 只读分析 |
+| 离线 GraphPatch 预览 | `ue_preview_graph_patch` | 只验证 IR，不连接 Editor、不写入 |
+| Live Editor | `ue_editor_status`、`ue_get_selection`、`ue_get_open_assets`、`ue_get_dirty_assets`、`ue_get_current_level` | 当前 Editor 状态 |
+| Live 图 / PIE | `ue_get_blueprint_graph_context`、`ue_get_focused_blueprint_graph_context`、`ue_get_blueprint_graph_layout_preflight`、`ue_get_pie_state`、`ue_get_pie_world_contexts`、`ue_inspect_pie_actor`、`ue_get_pie_scalars` | 只读；PIE 需要精确 instance |
+| 资产 / 日志 | `ue_inspect_asset_live`、`ue_get_output_log`、`ue_get_compile_errors` | 只读诊断 |
+| Project Memory | `ue_memory_search`、`ue_memory_get`、`ue_memory_get_context`、`ue_memory_expand_node`、`ue_memory_get_evidence` | 需要 `--enable-project-memory` |
+| 代码知识 | `ue_search(scope="symbols", profile="code")` | C++ 符号与静态调用点 |
 
-| 检查项 | 操作 |
-| --- | --- |
-| 环境 | 核对部署版本、目标 UE 版本、插件和 Editor 是否在线 |
-| 能力 | 先调用 `ue_get_capabilities`；缺失的 Tool 不能假装存在 |
-| 输入 | 严格依照本会话 Tool Schema 填参数；不得凭自然语言臆造 ID、路径、Receipt |
-| 权限和副作用 | 将只读诊断、规划、Editor 内存修改、Save/Commit 分开 |
-| 输出 | 返回 Source、Target、Revision、状态和可核验证据，不把推断当事实 |
-| 错误 | 返回实际错误码及阻塞条件，不绕过 Dirty/Policy/Revision/Session 门禁 |
-| 恢复 | 修改类 Tool 应具备独立 Verify；失败时按对应文档的 Undo/Discard/rollback 流程操作 |
-| 已验证范围 | 本地 Smoke/自动化只对所列测试版本与测试工程有效，不是生产授权 |
+## 写入
 
-通用读取与受控写入顺序见 [AI Agent 快速接入](AGENT_QUICKSTART.md)，具体 MCP 行为见 [MCP Server](../spec/MCP_SERVER.md) 和 [备份/回滚](../spec/BACKUP_AND_ROLLBACK.md)。
+| 领域 | 代表性 Tool | 门禁 |
+|---|---|---|
+| 稳定 patch / Save / Verify | `ue_plan_patch`、`ue_dry_run_patch`、`ue_apply_patch`、`ue_verify_asset`、`ue_rollback_patch` | workflow 双门禁 + Write Policy |
+| 配置写入 | `ue_set_datatable_*`、`ue_set_asset_*`、`ue_set_material_parameter`、`ue_set_blueprint_default`、`ue_set_component_property`、`ue_set_pin_default` | workflow 双门禁 + Write Policy |
+| Live 单资产修改 | `ue_apply_asset_property_live`、`ue_undo_asset_property_live`、`ue_discard_asset_property_live`、`ue_save_authorized_asset` | workflow 双门禁 + Write Policy |
+| 位置批量移动 / edit session | `ue_move_blueprint_node`、`ue_move_blueprint_nodes`、`ue_begin_blueprint_edit_session`、`ue_end_blueprint_edit_session` | workflow 双门禁 |
+| 实验 Blueprint patch | `ue_preview_blueprint_patch_experimental`、`ue_apply_blueprint_patch_experimental`、`ue_save_blueprint_patch_experimental` | `--enable-experimental-graphpatch-edit` + ini |
+| Action Registry 节点创建 | `ue_search_node_actions`（只读）+ `createNode` 的 `actionId` | 再加 `--enable-experimental-node-spawn` + ini |
+| 实时索引 | `ue_refresh_asset_index_live` | 需要 Live Editor；不写索引 |
+| Source Control | `ue_source_control_status`、`ue_source_control_prepare_write`、`ue_source_control_changelists`、`ue_source_control_prepare_changelist`、`ue_source_control_resolve_status`、`ue_source_control_resolve_text` | `--enable-source-control` + P4 CLI |
 
-## 公开专用工具说明
+`workflow` 组只有在 MCP `--enable-write-tools`、`--enable-subprocess-workflow`、项目 `[UEAgentKit] SubprocessWorkflow=True` 同时成立时才会注册。实验 patch 与 Source Control 使用各自的门禁，不经过 Write Policy。
 
-| 功能领域 | Tool 说明 |
-| --- | --- |
-| Additive 动画诊断 | [Additive Animation Diagnosis](ADDITIVE_ANIMATION_DIAGNOSIS_TOOL.md)、[Evaluation](ADDITIVE_ANIMATION_EVALUATION_TOOL.md) |
-| Additive Base Pose 计划与修复 | [Fix Plan](ADDITIVE_BASE_POSE_FIX_PLAN_TOOL.md)、[Write](ADDITIVE_BASE_POSE_FIX_WRITE_TOOL.md) |
-| 动画比例审计/修复 | [Scale Audit](ANIMATION_SCALE_AUDIT_TOOL.md)、[Scale Fix](ANIMATION_SCALE_FIX_TOOL.md)、[Batch Fix](ANIMATION_SCALE_FIX_BATCH_TOOL.md) |
-| 角色接地与二次运动 | [Ground Contact](CHARACTER_GROUND_CONTACT_TOOL.md)、[Secondary Motion](SKELETAL_SECONDARY_MOTION_TOOL.md) |
+## 专用工具文档
+
+| 功能领域 | 文档 |
+|---|---|
+| Additive 动画诊断与求值 | [Diagnosis](ADDITIVE_ANIMATION_DIAGNOSIS_TOOL.md) · [Evaluation](ADDITIVE_ANIMATION_EVALUATION_TOOL.md) |
+| Additive Base Pose 修复 | [Plan](ADDITIVE_BASE_POSE_FIX_PLAN_TOOL.md) · [Write](ADDITIVE_BASE_POSE_FIX_WRITE_TOOL.md) |
+| 动画比例审计 / 修复 | [Audit](ANIMATION_SCALE_AUDIT_TOOL.md) · [Fix](ANIMATION_SCALE_FIX_TOOL.md) · [Batch](ANIMATION_SCALE_FIX_BATCH_TOOL.md) |
+| 角色接地 / 次级运动 | [Ground Contact](CHARACTER_GROUND_CONTACT_TOOL.md) · [Secondary Motion](SKELETAL_SECONDARY_MOTION_TOOL.md) |
 | 重定向后处理 | [Retarget Postprocess](RETARGET_POSTPROCESS_TOOL.md) |
-| 基于 Action Registry 的节点创建（实验） | [Node Spawn Design](NODE_SPAWN_DESIGN_20261114.md) |
+| Blueprint 实验写入 | [Blueprint 实验用法](BLUEPRINT_AGENT_E2E_USAGE.md) |
 
-这些链接是**产品文档导航**，不保证所有 Tool 均随 v0.8.0 以同一模式默认开放。只读能力通常不意味着可写；计划生成不等于 Apply；在 Editor 内完成操作也不等于资产已保存或独立验证。
+## 调用规则
 
-## 子进程工作流（默认关闭）
-
-依赖冷启动 `UnrealEditor-Cmd.exe` 的 `workflow` 组（`ue_plan_patch` / `ue_dry_run_patch` / `ue_apply_patch` / `ue_verify_patch` / `ue_rollback_patch` / `ue_set_pin_default` / `ue_set_blueprint_default` / `ue_set_asset_property` 等）**默认不注册**。同时满足两件事才会出现：
-
-```text
-MCP:    --enable-subprocess-workflow
-Project: Config/DefaultEngine.ini 里 [UEAgentKit] SubprocessWorkflow=True
-```
-
-任一条件缺失时，任何仍能到达 spawn 的内部调用会在组装命令行之前抛 `workflow-subprocess-disabled`，不会启动进程。每次 spawn 尝试（`blocked` / `spawned` / `failed`）都会记进进程内有界 ledger；用只读工具 `ue_get_subprocess_ledger()` 查看，`spawnedCount == 0` 可以直接断言。原子 patch、node-spawn 与 overlay 刷新**不会**回退到这条子进程路径。
-
-## 为新增 Tool 编写公开说明
-
-公开的单 Tool 文档应能让 AI Agent 不依赖内部研发报告而完成安全调用：用途、最小运行环境和启动模式、只读/修改标记、输入参数与返回结构、错误码、最小调用示例、需要的人工授权、失败与回滚、安全限制、测试的 UE 版本和范围。运行日志、私人测试工程、临时本机路径及阶段 RunState 应留在内部 Development。
-
-如页面缺少某项内容，Agent 应读取对应版本的 MCP Schema 或报告该字段尚未由公开文档证明，**不得补造默认值或错误码**。
+- 先 `ue_get_capabilities`；缺失的 Tool 不能假装存在。
+- 严格按当前 Schema 填参数；不猜 ID、路径、Receipt 或确认字符串。
+- 只读诊断、规划、Editor 内存修改、Save / Commit 分开。
+- 返回实际错误码和阻塞条件，不绕过 Dirty / Policy / Revision / Session 门禁。
+- 修改失败时按对应文档执行 Undo / Discard / rollback，不继续叠加写入。

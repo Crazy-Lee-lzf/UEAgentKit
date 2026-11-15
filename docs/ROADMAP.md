@@ -1,12 +1,13 @@
 # UE Agent Kit Roadmap
 
-当前已发布版本为 **0.8.0**。以下是产品方向，不代表已发布能力或固定交付日期。
+当前已发布版本为 **0.8.0**。最新预发布为 **0.9.0 Developer Preview 1（`v0.9.0-dev1`）**；下一版候选为 **0.9.0 Developer Preview 2（计划版本 `0.9.0.dev2`，未发布）**。以下是产品方向，不代表已发布能力或固定交付日期。
 
 ## P0：Blueprint 核心读写与 PIE 诊断
 
-- 完善 Blueprint 结构和调用关系读取，以及**默认关闭**的有界节点修改。
+- 把**默认关闭**的 Blueprint 结构写入从原子 patch 扩展到真实项目反复验证的节点/连线场景，但不开放任意 Graph CRUD。
+- 完善 Live Editor 读写与索引新鲜度：用户保存后的自动重证、并发编辑边界、无索引写入。
 - 通过 PIE 读取明确的 Server/Client World、Actor 与 Component，帮助定位程序逻辑问题。
-- 加强 C++/Blueprint 之间的来源关联和读取新鲜度标记；写入始终需要明确授权和验证。
+- 加强 C++/Blueprint 之间的来源关联；写入始终需要明确授权和验证。
 
 ## P1：常用资产（DataTable / DataAsset 优先）
 

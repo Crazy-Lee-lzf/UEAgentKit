@@ -2,6 +2,8 @@
 
 更新时间：2026-08-01
 
+> 本规范描述稳定 Bridge 面。0.9.0 DP2 候选新增的 `editor.*BlueprintPatchExperimental` 方法、Action Registry 创建与 live index overlay 不在本页展开，见 [Blueprint 实验用法](../docs/BLUEPRINT_AGENT_E2E_USAGE.md) 与 [能力状态](../docs/PROJECT_STATUS.md)。
+
 ## 目标
 
 Live Editor Bridge 让固定项目的本地 MCP Server 读取当前 Unreal Editor 内存状态，同时保持离线 SQLite 查询与写入安全模型不变。Bridge 只开放显式注册的高层读取与受限 Editor Action；任何磁盘保存仍必须通过固定项目 Workflow、Policy、Revision、Receipt、备份和独立验证，不提供任意 UObject、Console、Python、Shell、SQL 或文件系统接口。

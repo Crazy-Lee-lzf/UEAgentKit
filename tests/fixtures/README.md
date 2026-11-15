@@ -50,7 +50,6 @@ The wrapper validates the Plan before launching Unreal, recreates only explicitl
 starts, the wrapper refuses to run when an Unreal Editor already holds the same
 `.uproject` (`fixture-project-in-use`) or when that ownership cannot be proven
 (`fixture-project-lock-unverifiable`). It never terminates or closes an Editor.
-See [`../../docs/DEF07_FIXTURE_CONCURRENCY_GUARD_20261103.md`](../../docs/DEF07_FIXTURE_CONCURRENCY_GUARD_20261103.md).
 
 ## Scalar patch regression
 

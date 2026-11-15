@@ -2,7 +2,7 @@
 
 本文面向从 GitHub 获取 UE Agent Kit 并接入 Unreal Engine 5.6 项目的用户。
 
-当前版本：**0.8.0**；本地 0.9.0 Developer Preview 1 候选为 **0.9.0.dev1**。
+当前稳定版：**0.8.0**；最新预发布：**0.9.0 Developer Preview 1（`v0.9.0-dev1`）**；下一版候选：**0.9.0 Developer Preview 2（计划版本 `0.9.0.dev2`，未发布）**。
 
 ## 1. 环境要求
 
@@ -159,7 +159,7 @@ scripts\ue-agent.cmd index build Output\AssetCatalog --changed-path-file changed
 
 该文件是显式信任输入：未列出的非 World 资产会被视为未变化；World 资产仍会读取 Canonical 并事务性校验/修复 World V2。指纹不匹配时构建直接失败，不会静默降级。若不能保证变更集完整，不要传该参数，使用默认严格模式（或 `--no-manifest-digest` 明确关闭 manifest 摘要快速路径）。
 
-`index build` 完成后会记录 manifest SHA-256、export UTC、数据库路径和构建模式。`ue_get_project_status` / `ue_get_index_status` 返回 `indexSnapshotState`（`fresh|stale|unknown`）、`exportSnapshotState`、`indexSnapshotReasons`、`lastExportUtc` 和 `databasePath`。冷 SQLite 只能证明“索引与记录的导出快照一致”，看不到 Editor 当前 PackageRevision，因此默认 `indexSnapshotState=unknown` 并带 `editor-state-not-compared`；只有结合 live/Revision freshness 才会报告 `fresh`。manifest 被重建、数据库被复制到另一路径或构建不完整时会报告 `stale`，不会伪造 `fresh`。
+`index build` 完成后会记录 manifest SHA-256、export UTC、数据库路径和构建模式。`ue_get_project_status` 返回 `indexSnapshotState`（`fresh|stale|unknown`）、`exportSnapshotState`、`indexSnapshotReasons`、`lastExportUtc` 和 `databasePath`。冷 SQLite 只能证明“索引与记录的导出快照一致”，看不到 Editor 当前 PackageRevision，因此默认 `indexSnapshotState=unknown` 并带 `editor-state-not-compared`；只有结合 live/Revision freshness 才会报告 `fresh`。manifest 被重建、数据库被复制到另一路径或构建不完整时会报告 `stale`，不会伪造 `fresh`。
 
 查询示例：
 
@@ -179,6 +179,8 @@ python scripts\ValidateAssetCatalog.py ^
 ```
 
 ## 8. 启动 MCP
+
+### 只读与 Pure Live
 
 检查固定 SQLite 数据库：
 
@@ -201,6 +203,63 @@ scripts\RunMcp.cmd ^
   -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3" ^
   -EnableProjectMemory ^
   -MemoryDatabase "<TOOL_ROOT>\.data\ue_agent_kit_memory.sqlite3"
+```
+
+在 Live Editor 上做只读查询（无索引、无 SQLite）：
+
+```bat
+scripts\RunMcp.cmd ^
+  -EnableLiveEditor ^
+  -PureLive ^
+  -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject"
+```
+
+### 写入 / 实验 / P4
+
+`RunMcp.cmd` 只封装只读与 Pure Live。写入、实验和 P4 需要直接启动 Python 模块；固定项目、Policy 和数据库仍然在启动时确定。注意：`RunMcp.cmd -EnableWriteTools` 不会传 `--enable-subprocess-workflow`，因此启动后仍然没有 `workflow` 组；写入请使用下面的直启命令。
+
+稳定写入（示例为没有索引 / Revision Export 的 live-only 启动）：
+
+```bat
+.venv\Scripts\python.exe scripts\ue-agent-mcp.py ^
+  --enable-write-tools ^
+  --enable-live-editor ^
+  --enable-subprocess-workflow ^
+  --project "<PROJECT_ROOT>\ProjectName.uproject" ^
+  --engine-root "<UE_5.6>" ^
+  --policy "<POLICY_JSON>" ^
+  --database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
+```
+
+项目 `Config/DefaultEngine.ini` 同时需要：
+
+```ini
+[UEAgentKit]
+SubprocessWorkflow=True
+```
+
+`--enable-subprocess-workflow` 与 ini 缺一不可；否则 `workflow` 组不会注册。若机器上有 Revision Export，追加 `--revision-export "<REVISION_EXPORT>"`；patch 类写入在缺少它时会以 `revision-export-required` 拒绝。`--policy` 始终必填。
+
+实验 Blueprint 结构写入：
+
+```bat
+.venv\Scripts\python.exe scripts\ue-agent-mcp.py ^
+  --enable-live-editor ^
+  --enable-experimental-graphpatch-edit ^
+  --enable-experimental-node-spawn ^
+  --project "<PROJECT_ROOT>\ProjectName.uproject" ^
+  --database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
+```
+
+项目 ini 同时需要 `ExperimentalGraphPatchEdit=True`；使用 Action Registry 创建节点时再加 `ExperimentalNodeSpawn=True`。这两个开关只对隔离测试工程使用。
+
+P4 / Source Control：
+
+```bat
+.venv\Scripts\python.exe scripts\ue-agent-mcp.py ^
+  --enable-source-control ^
+  --project "<PROJECT_ROOT>\ProjectName.uproject" ^
+  --database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
 ```
 
 实际可用 Tool 以 `ue_get_capabilities` 返回值为准。不同启动模式会启用不同的 Offline / Live / Workflow / Memory / Source Control Tool 集合。
@@ -318,7 +377,7 @@ P4-managed Delete  人工执行
 python scripts\ValidateRelease.py --require-release-docs
 ```
 
-该检查覆盖版本一致性、Ruff、Python 测试、Schema 和示例 Patch。GitHub Actions 对 0.9.0 开发候选在 Python 3.11–3.14 上运行同类验证；已发布 0.8.0 验证为 3.11–3.12。
+该检查覆盖版本一致性、Schema、示例 Patch 和 Ruff。GitHub Actions 对 0.9.0 开发线在 Python 3.11–3.14 上运行同类验证；已发布 0.8.0 验证为 3.11–3.12。`--require-release-docs` 还会检查当前版本的 Release Notes 与文档索引链接。
 
 正式 Windows Release 打包：
 

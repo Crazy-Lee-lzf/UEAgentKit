@@ -1,24 +1,19 @@
 # UE Agent Kit 文档
 
-这里收录面向 **使用者、集成者和贡献者** 的产品文档。内部开发计划、Agent 交接记录、阶段验收流水账不属于公开产品文档，不在发布树中维护。
+这里收录面向 **使用者、集成者和 AI Agent** 的公开文档。内部开发计划、验收流水账和交接记录不在发布树中维护。
 
-## 快速开始
+## 从这里开始
 
-- [AI Agent 快速接入（推荐）](AGENT_QUICKSTART.md) / [English](AGENT_QUICKSTART_EN.md)
-- [常用程序开发工作流](DEVELOPER_WORKFLOWS.md) / [English](DEVELOPER_WORKFLOWS_EN.md)
-
-- [README](../README.md) / [English README](../README_EN.md)
-- [构建与运行](BUILD_AND_RUN.md)
-- [AI 使用说明](AI_USAGE.md)
-- [项目级配置](PROJECT_LEVEL_CONFIG.md)
+- [README](../README.md) / [English](../README_EN.md)
+- [AI Agent 快速接入](AGENT_QUICKSTART.md) / [English](AGENT_QUICKSTART_EN.md)
 - [当前能力状态](PROJECT_STATUS.md) / [English](PROJECT_STATUS_EN.md)
-- [公开 Roadmap](ROADMAP.md) / [English](ROADMAP_EN.md)
+- [构建与运行](BUILD_AND_RUN.md)
+- [专用 Tool 索引](TOOL_CATALOG.md)
 
 ## Release Notes
 
-- **0.9.0 Developer Preview 1（候选，尚未发布）**：[中文](RELEASE_0.9.0_PREVIEW.md) / [English](RELEASE_0.9.0_PREVIEW_EN.md)
-
-- **RC1 internal experimental preview**（历史候选，非 GitHub Release）：[中文](RELEASE_RC1.md) / [English](RELEASE_RC1_EN.md)
+- **0.9.0 Developer Preview 2（候选，未发布）**：[中文](RELEASE_0.9.0_DP2.md) / [English](RELEASE_0.9.0_DP2_EN.md)
+- **0.9.0 Developer Preview 1（已发布，2026-10-30）**：[中文](RELEASE_0.9.0_PREVIEW.md) / [English](RELEASE_0.9.0_PREVIEW_EN.md)
 - [0.8.0](RELEASE_0.8.0.md) / [English](RELEASE_0.8.0_EN.md)
 - [0.7.0](RELEASE_0.7.0.md) / [English](RELEASE_0.7.0_EN.md)
 - [0.6.0](RELEASE_0.6.0.md) / [English](RELEASE_0.6.0_EN.md)
@@ -27,11 +22,24 @@
 - [0.5.0](RELEASE_0.5.0.md) / [English](RELEASE_0.5.0_EN.md)
 - [0.4.4](RELEASE_0.4.4.md) / [English](RELEASE_0.4.4_EN.md)
 
+## 使用与配置
+
+- [AI 使用指南](AI_USAGE.md)
+- [程序开发工作流](DEVELOPER_WORKFLOWS.md) / [English](DEVELOPER_WORKFLOWS_EN.md)
+- [项目级配置与 Write Policy](PROJECT_LEVEL_CONFIG.md)
+- [公开 Roadmap](ROADMAP.md) / [English](ROADMAP_EN.md)
+
+## Blueprint 实验能力
+
+默认关闭、需要显式双门禁，不属于稳定发布面，也不代表生产授权。
+
+- [Blueprint 实验用法](BLUEPRINT_AGENT_E2E_USAGE.md) / [English](BLUEPRINT_AGENT_E2E_USAGE_EN.md)
+
 ## 架构与安全
 
-- [Memory Architecture](MEMORY_ARCHITECTURE.md) / [English](MEMORY_ARCHITECTURE_EN.md)
+- [Project Memory 架构](MEMORY_ARCHITECTURE.md) / [English](MEMORY_ARCHITECTURE_EN.md)
 - [Asset Index Schema v2 与 CJK 迁移](INDEX_SCHEMA_V2_MIGRATION.md)
-- [查询模式现状：Offline / Live / Auto 差距评估](QUERY_MODES_OFFLINE_LIVE_AUTO.md)
+- [查询模式：Offline / Live / Auto 差距评估](QUERY_MODES_OFFLINE_LIVE_AUTO.md)
 - [AI-native UE Editor](AI_NATIVE_UE_EDITOR.md) / [English](AI_NATIVE_UE_EDITOR_EN.md)
 - [Reference Policy](REFERENCE_POLICY.md)
 - [C++ Code Knowledge](CODE_KNOWLEDGE.md)
@@ -44,15 +52,4 @@
 - [`PATCH_SCHEMA.md`](../spec/PATCH_SCHEMA.md)
 - [`BACKUP_AND_ROLLBACK.md`](../spec/BACKUP_AND_ROLLBACK.md)
 
-## Blueprint 实验功能
-
-以下文档描述默认关闭、需要显式双门禁的内部实验能力，不属于 v0.8.0 稳定面，也不代表生产授权：
-
-- [Blueprint Agent 端到端实验用法](BLUEPRINT_AGENT_E2E_USAGE.md)
-- [Blueprint Graph 读写能力矩阵](BLUEPRINT_GRAPH_READ_WRITE_MATRIX.md)
-
-## 专用工具文档
-
-- [AI Agent 专用 Tool 索引与安全调用规则](TOOL_CATALOG.md)
-
-本目录中 `*_TOOL.md` 文档描述可公开使用的动画诊断、修复、重定向和二次运动等专用 Tool。具体可用性以当前版本的 MCP capabilities 和对应 Tool 文档为准。
+专用动画诊断、修复与重定向工具见 [Tool 索引](TOOL_CATALOG.md)。

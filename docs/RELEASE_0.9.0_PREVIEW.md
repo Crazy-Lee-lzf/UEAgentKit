@@ -1,23 +1,36 @@
-# UE Agent Kit 0.9.0 Developer Preview 1（本地候选 0.9.0.dev1）
+# UE Agent Kit 0.9.0 Developer Preview 1（已发布）
 
-**尚未发布。** 当前公开版本仍为 **0.8.0**；本页不是升级说明或生产授权。
+**状态：预发布（Prerelease），2026-10-30 发布。** 这是历史发布说明，不是下一版升级说明，也不是生产授权。稳定版仍为 **0.8.0**。
 
-## 拟纳入的能力
+- [GitHub Release 与安装包](https://github.com/Crazy-Lee-lzf/UEAgentKit/releases/tag/v0.9.0-dev1)
+- [源代码 Tag `v0.9.0-dev1`](https://github.com/Crazy-Lee-lzf/UEAgentKit/tree/v0.9.0-dev1)
+- 版本：`0.9.0.dev1`；环境：Unreal Engine 5.6 / Windows x64 / Python 3.11–3.14
 
-- **Blueprint 读取**：Graph、Node、Pin、变量及引用，区分索引快照和实时 Editor。
-- **实验性 Blueprint 修改**：有限白名单节点、精确连线/断线和受控变量操作；Preview、确认、显式 Save、Verify 分离。
-- **PIE 只读诊断**：识别 Server/Client World，精确查看 Actor、Transform、NetRole、组件及指定的少量标量属性；已解析属性可报告反射声明类。
-- **C++ 分析**：搜索符号、静态调用点及来源；不保证运行时分派。
-- **现有工具**：继续提供受控 DataTable/DataAsset/Material Instance 配置操作、Project Memory、可选 P4 安全功能。
+## DP1 包含什么
 
-## 安全与限制
+- **Blueprint 读取**：Graph、Node、Pin、变量及引用，区分索引快照与实时 Editor。
+- **实验性 Blueprint 修改**（默认关闭）：八种 primitive 节点与变量 accessor 的创建/连线、未连线输入的 Pin 默认值、顶层成员变量创建、单边 rewire、孤立节点移除；Preview、精确确认、Apply、显式 Save、Verify 分离。
+- **PIE 只读诊断**：Server/Client World、Actor、Transform、NetRole、组件与指定标量属性；已解析属性可报告反射声明类。
+- **C++ 静态分析**：符号、调用点与来源证据；不宣称运行时分派。
+- **已有能力**：受限 DataTable / Data Asset / Material Instance 工作流、Project Memory、按需开启的 P4 操作。
+- 旧版单 writer 工具（pin-default / variable / rewire / node-remove / graph-edit 外壳）是 DP1 的写入口；它们已在后续开发中被统一的原子 patch 取代。
 
-实验性 GraphEdit **默认关闭，不受稳定 Write Policy 白名单约束**；必须 MCP 开关和工程配置双门禁，且仅供隔离测试工程。它不是任意节点 CRUD，也不会自动编译或 Save All。
+## 验证范围
 
-本地集成候选已通过 UE 5.6.1 原生验收：有界 Kismet CallFunction、同一 Blueprint 自有 Pure Function 调用及其未连线输入常量（原生实测 int）、无索引 Pure Live MCP 启动，以及 ue_get_pie_scalars 标量读取和反射声明类来源。**候选代码通过验收不代表已公开发布。** bool/double/string 输入常量、Blueprint 自声明属性来源和 PIE Client 标量值尚未得到同等原生覆盖。PIE 不提供运行时 Pin 执行轨迹或完整 GAS 状态；不支持通用关卡、AnimGraph、MaterialGraph、NiagaraGraph 写入。
+- GitHub Actions：Python 3.11、3.12、3.13、3.14 四项通过。
+- Windows 发行校验通过：完整 Python 测试、Ruff 与打包检查无失败。
+- UE 5.6 Win64 原生 UAT 通过，不依赖 AutoSDK Junction。
+- 从发布 ZIP 解压加载的 DLL 通过 `UEAgentKit.P0Pie` 原生测试，0 错误、0 警告。
+- Release ZIP、wheel、SHA256SUMS 与 release-manifest 已重新下载并逐文件比对。
 
-## 环境与接入
+这些结果只对应 DP1 的冻结构建，不外推到其他 UE 版本、项目或后续代码。
 
-目标：**UE 5.6 / Win64、Python 3.11–3.14**（0.8.0 已发布版为 3.11–3.12）。[安装](BUILD_AND_RUN.md) · [Agent Quickstart](AGENT_QUICKSTART.md) · [开发者工作流](DEVELOPER_WORKFLOWS.md)。
+## 安装
 
-最终能力以冻结构建的 `ue_get_capabilities` 为准。正式发布仍须通过真实 UE/MCP 验收、隐私与版权审计，并获得用户授权；本候选没有 GitHub Tag 或 Release。
+从 Release 下载 `UEAgentKit-0.9.0.dev1-UE5.6-Win64.zip`，把其中的 `UEAgentKit` 目录复制到项目 `Plugins/`。Python 使用对应 `ue_agent_kit-0.9.0.dev1-py3-none-any.whl`。
+
+## 限制
+
+实验性 Blueprint 写入默认关闭，需要 MCP 开关与工程 ini 双重授权，且仅限隔离测试工程。DP1 不支持通用关卡、AnimGraph、MaterialGraph、NiagaraGraph 写入，也不提供运行时 Pin 执行轨迹或完整 GAS 状态。bool/double/string 输入常量、Blueprint 自声明属性来源和 PIE Client 标量值不在 DP1 的原生覆盖范围内。
+
+下一版候选见 [0.9.0 Developer Preview 2](RELEASE_0.9.0_DP2.md)；稳定版见 [0.8.0 Release Notes](RELEASE_0.8.0.md)。

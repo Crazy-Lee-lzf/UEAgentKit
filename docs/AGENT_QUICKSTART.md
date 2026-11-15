@@ -2,82 +2,98 @@
 
 [English](AGENT_QUICKSTART_EN.md)
 
-> 适用于通过 MCP 使用 UE Agent Kit 的用户及 AI Agent。**先确认实际安装版本，再调用运行时返回的 Tool**。以下只介绍安全接入路径，不授权绕过项目和写入门禁。
+> 适用于通过 MCP 使用 UE Agent Kit 的用户及 AI Agent。**先确认服务端实际启用的模式，再调用 `ue_get_capabilities` 返回的 Tool**。本文不授权绕过任何项目或写入门禁。
 
-## 版本与权限边界
+## 1. 先确认运行模式
 
-- 已发布 `v0.8.0` 的能力及限制见 [0.8.0 状态](PROJECT_STATUS.md) 和 [Release Notes](RELEASE_0.8.0.md)。本地开发分支可能包含额外的实验性功能，不代表 GitHub 用户已获得该能力。
-- 普通查询优先只读；稳定写入 Tool 必须由服务端启动模式、固定工程及 Write Policy 授权。调用方**不能**在 Tool 参数中变更工程、引擎、数据库、Policy 或 Editor Endpoint。
-- 例外：默认关闭的 `--enable-experimental-graphpatch-edit` Blueprint 结构写入不经过 Write Policy，只受实验 flag、工程 ini、精确 plan/confirmation、资产/图身份和 Clean/PIE 校验约束；不得用于生产项目。
-- 蓝图通用 Graph Node CRUD、任意资产/Actor 编辑、任意 Shell/Python 执行、自动 Save All 均不是 v0.8.0 的开放能力。Native Registry / Native Layout Preview 和 R7 Staged Context Handoff 等后续研发功能不能因源码存在就视为默认可用。
+UE Agent Kit 的 Tool 是**按启动参数动态注册**的。连接后看不到某个 Tool，通常不是 Agent 调用错误，而是服务端没有开对应模式。
 
-## 1. 用户完成一次性环境接入
+| 模式 | 启动方式 | 你应看到 |
+|---|---|---|
+| 离线只读 | `RunMcp.cmd -Database ...` | query、离线 GraphPatch 预览（Memory 需单独开启） |
+| Pure Live 只读 | `RunMcp.cmd -EnableLiveEditor -PureLive -ProjectPath ...` | live-read，无索引、无写入 |
+| Live + 索引 | `RunMcp.cmd -EnableLiveEditor -ProjectPath ... -Database ...` | live-read + query |
+| 受控写入 | 直接 `.venv\Scripts\python.exe scripts\ue-agent-mcp.py`，开启 write-tools + subprocess + Policy | `workflow` 组 |
+| 实验 Blueprint | 直接 `py -m ...`，开启 graphpatch / node-spawn 双门禁 | 原子 patch、节点创建 |
+| P4 | 直接 `py -m ... --enable-source-control --project ...` | Source Control |
 
-从仓库根目录执行。详细依赖、插件安装、命令参数和项目绑定见 [构建与运行](BUILD_AND_RUN.md) 与 [项目级配置](PROJECT_LEVEL_CONFIG.md)。
+`RunMcp.cmd` 只覆盖只读和 Pure Live；写入与实验模式的完整命令见 [构建与运行](BUILD_AND_RUN.md)。受控写入需要同时满足：
 
-```bat
-scripts\setup_python.cmd -WithMcp
-scripts\RunAssetCatalog.cmd -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject" -Root "/Game" -Output "Output\AssetCatalog"
-scripts\RunExport.cmd -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject" -Root "/Game" -Profile full -Format both -Output "Output\Blueprints"
-scripts\ue-agent.cmd index build Output\AssetCatalog
-scripts\ue-agent.cmd index build Output\Blueprints
-scripts\RunMcp.cmd -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3" -Check
+```text
+MCP:    --enable-write-tools --enable-subprocess-workflow
+Project: Config/DefaultEngine.ini -> [UEAgentKit] SubprocessWorkflow=True
+Policy: 目标资产/操作在 Write Policy 范围内
 ```
 
-以上命令假设 UE 插件已按 [构建与运行](BUILD_AND_RUN.md) 安装，并由用户使用自己的 Engine/Project 路径完成项目配置；`<...>` 均为占位符，不能原样直接运行。单独启动只读 stdio MCP：
+实验 Blueprint 写入不走 Write Policy，另需 `--enable-experimental-graphpatch-edit` + `[UEAgentKit] ExperimentalGraphPatchEdit=True`；创建 Registry 节点再加 `--enable-experimental-node-spawn` + `[UEAgentKit] ExperimentalNodeSpawn=True`。
 
-```bat
-scripts\RunMcp.cmd -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
-```
+## 2. 用户一次性接入
 
-在 MCP 客户端中配置该启动命令并连接。Live Editor 和可写 Workflow 需要额外的**服务器启动配置**，不是 Agent 在一次调用里临时开启。
+安装、插件接入、导出/索引、固定项目和 Policy 的完整命令见 [构建与运行](BUILD_AND_RUN.md)；最短版本在 [README 快速开始](../README.md)。Agent 不需要重复执行这些步骤，只需确认服务端已启动。
 
-## 2. Agent 必须先发现能力
+## 3. Agent 第一步：发现能力
 
-连接后首先调用 `ue_get_capabilities`，核实当前注册 Tool 及其读取/写入标记。具体参数、输出结构及错误码以实际 Tool Schema 和 [MCP 契约](../spec/MCP_SERVER.md) 为准。
+连接后先调用 `ue_get_capabilities`，确认：
 
-不要仅凭 Markdown 中的总数、源代码里的实验性 handler 或测试报告推断 Tool 已开放。如果 Tool 未注册、Editor 不在线、工程身份不匹配或权限不足，就报告当前阻塞，不尝试绕过。
+- 当前启用了哪些组（query / live-read / workflow / memory / source-control）。
+- `workflow` 是否存在。不存在时，写入类 Tool 一律不可用，应先让用户检查双门禁。
+- 实验 patch、`ue_search_node_actions` 是否出现。没出现就不要假装能调用。
 
-## 3. 从只读查询开始
+不要根据 Markdown 总数、源码里的 handler 或历史 release notes 推断 Tool 已开放。
 
-在 Schema 支持的情况下，按以下顺序完成项目检索：
+## 4. 只读查询
 
 ```text
 ue_get_capabilities
 → ue_get_project_status
 → ue_search（先定位 Asset / Symbol）
-→ ue_get_asset（只取必要的资产详情）
-→ ue_find_references（确认依赖、影响范围）
-→ 向用户输出 Asset Path、Revision、事实来源和未知项
+→ ue_get_asset（只取必要详情）
+→ ue_find_references（确认依赖与影响范围）
+→ 需要当前 Editor 状态时，再调用 live-read 工具
 ```
 
-读取结果必须区分*当前数据事实*、*基于调用关系的推断*、*未导出的未知数据*；不能把 SQLite 的冻结 Revision 当成实时 Editor Package 的状态。只有当前 Tool 明确可用时，才调用 Live Editor 读取工具。
+读取结果要区分：
 
-## 4. 写入必须明确授权
+- **事实**：直接来自 Canonical JSON、BPCTX 或 SQLite。
+- **推断**：根据引用、命名、调用关系得出的解释。
+- **未知**：当前 Reader 或索引没有导出的字段。
 
-**默认不写入**。仅当用户要求修改、服务端开放所需工具、目标受固定 Write Policy 覆盖、Revision/Dirty 检查通过时，才执行：
+SQLite 是保存时的快照；Live Editor 是当前内存。`ue_get_asset` 如果带有 overlay 信息，注意 `overlayCause`、`overlayRefreshed`、`overlayStale` 与 `staleCause`：`overlayStale=true` 时不能把该 canonical 当作当前磁盘事实。
+
+## 5. 受控写入
+
+**默认不写。** 仅在用户明确要求、服务端已开 workflow 门禁、目标受 Write Policy 覆盖、Revision / Dirty / 身份检查通过时执行：
 
 ```text
 ue_plan_patch
 → ue_dry_run_patch
-→ 向用户展示具体 Diff / 目标 Asset / 风险，取得明确授权
-→ ue_apply_patch（使用本会话产生的有效 Receipt/确认）
-→ 按工作流执行显式 Save（如必要）
+→ 向用户展示目标资产、Diff、风险，取得明确授权
+→ ue_apply_patch（一次性 Receipt / 精确确认）
+→ 显式 Save（如需要）
 → ue_verify_asset（独立验证）
-→ 返回已保存/已验证与失败项
+→ 返回已保存/已验证/失败项
 ```
 
-不要从自然语言猜测 Receipt、Revision、确认字符串或 Backup 引用。Dry Run 通过不等于允许 Commit；Live Apply 成功不等于磁盘已保存，保存成功也不等于独立验证通过。
+对已在 Editor 中打开、干净的单个非 Blueprint 资产，也可使用 `ue_apply_asset_property_live` 修改内存值；它进入 Undo 栈并标记 Dirty，但**不保存**。保存必须另调 `ue_save_authorized_asset`；放弃用 `ue_undo_asset_property_live` / `ue_discard_asset_property_live`。
 
-失败时**停止进一步写入**，返回错误码和当前状态；满足条件时按 [备份与回滚契约](../spec/BACKUP_AND_ROLLBACK.md) 执行回滚 Dry Run → 显式确认 → Commit → 验证。服务端重启或索引快照刷新后，原会话 Receipt 可能失效，应重新规划并复核。
+注意：
 
-## 5. 发布状态与进一步阅读
+- 不要从自然语言猜 Receipt、Revision、confirmation 或 Backup 引用。
+- Dry Run 通过不等于允许 Commit；Live Apply 成功不等于磁盘已保存；保存成功也不等于独立 Verify 通过。
+- 失败时停止继续写入，返回错误码和当前状态；需要回滚时按 [备份与回滚契约](../spec/BACKUP_AND_ROLLBACK.md) 执行 Dry Run → 确认 → Commit → 验证。
+- MCP 重启或快照刷新后，旧 Receipt 可能失效，需要重新 Plan。
 
-- [当前正式版本的功能边界](PROJECT_STATUS.md)
-- [详细 AI 使用指南](AI_USAGE.md)
-- [程序开发与 PIE 诊断示例](DEVELOPER_WORKFLOWS.md)
-- [MCP Tool 协议与调用边界](../spec/MCP_SERVER.md)
-- [安装、配置与首次验证](BUILD_AND_RUN.md)
-- [固定项目与 Write Policy](PROJECT_LEVEL_CONFIG.md)
+## 6. 实验 Blueprint 结构写入
 
-本文是通用接入流程，不证明某个实验能力已经在你的服务器上可用。最终以当前已部署版本、`ue_get_capabilities`、服务端门禁和独立验证结果为准。
+实验能力，默认关闭，只能在隔离测试工程使用。最短路径：
+
+```text
+ue_search_node_actions（可选，拿 actionId）
+→ ue_preview_blueprint_patch_experimental（拿 planId / confirmation）
+→ ue_apply_blueprint_patch_experimental（回传 preview 返回的确认）
+→ ue_save_blueprint_patch_experimental（单独显式保存）
+```
+
+一次 Apply 一个事务；失败会返回逐操作结果并回滚已执行部分。具体操作、限制和错误码见 [Blueprint 实验用法](BLUEPRINT_AGENT_E2E_USAGE.md)。
+
+相关：[当前能力状态](PROJECT_STATUS.md) · [构建与运行](BUILD_AND_RUN.md) · [程序开发工作流](DEVELOPER_WORKFLOWS.md) · [MCP 契约](../spec/MCP_SERVER.md)。

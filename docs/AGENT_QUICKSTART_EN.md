@@ -1,79 +1,97 @@
 # AI Agent Quick Start
 
-> For users and AI agents accessing UE Agent Kit through MCP. **Check the deployed version and discover the runtime tools before taking action.** This guide does not grant permission to bypass project or write safety checks.
+> For users and AI agents accessing UE Agent Kit through MCP. **Confirm the deployed mode, then call only the tools returned by `ue_get_capabilities`.** This guide grants no permission to bypass project or write gates.
 
-## Version and safety boundary
+## 1. Confirm the runtime mode
 
-- The public `v0.8.0` release is documented in [Capability Status](PROJECT_STATUS_EN.md) and [Release Notes](RELEASE_0.8.0_EN.md). Features available only in a local development branch are not necessarily shipped.
-- Start read-only. Stable writes require an explicitly enabled server mode, a fixed Unreal project, a scoped Write Policy, and a valid revision/confirmation flow.
-- Exception: the default-off `--enable-experimental-graphpatch-edit` Blueprint structure tools do not use Write Policy. They are bounded by the experimental flag, the project ini, exact plan/confirmation, asset/graph identity, and clean/PIE checks, and must not be used on a production project.
-- Generic Blueprint Graph node CRUD, arbitrary Actor/asset mutations, arbitrary shell/Python, and Save All are not open interfaces in v0.8.0. Later native tools and Memory Mount staging remain experimental or disabled until explicitly enabled and verified.
+UE Agent Kit registers tools **dynamically from server flags**. A missing tool usually means the mode is not enabled on the server, not that the agent called it incorrectly.
 
-## 1. Prepare the environment
+| Mode | Start | What you should see |
+|---|---|---|
+| Offline read-only | `RunMcp.cmd -Database ...` | query, offline GraphPatch preview (Memory requires a separate flag) |
+| Pure Live read-only | `RunMcp.cmd -EnableLiveEditor -PureLive -ProjectPath ...` | live-read; no index, no writes |
+| Live + index | `RunMcp.cmd -EnableLiveEditor -ProjectPath ... -Database ...` | live-read + query |
+| Controlled writes | direct `.venv\Scripts\python.exe scripts\ue-agent-mcp.py` with write-tools + subprocess + Policy | `workflow` group |
+| Experimental Blueprint | direct `py -m ...` with graphpatch / node-spawn double gates | atomic patch, node creation |
+| P4 | direct `py -m ... --enable-source-control --project ...` | Source Control |
 
-From the repository root, after installing the UE plugin for your project as described in [Build and Run](BUILD_AND_RUN.md):
+`RunMcp.cmd` covers read-only and Pure Live only; full commands for writes and experiments are in [Build and Run](BUILD_AND_RUN.md). Controlled writes require all of:
 
-```bat
-scripts\setup_python.cmd -WithMcp
-scripts\RunAssetCatalog.cmd -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject" -Root "/Game" -Output "Output\AssetCatalog"
-scripts\RunExport.cmd -ProjectPath "<PROJECT_ROOT>\ProjectName.uproject" -Root "/Game" -Profile full -Format both -Output "Output\Blueprints"
-scripts\ue-agent.cmd index build Output\AssetCatalog
-scripts\ue-agent.cmd index build Output\Blueprints
-scripts\RunMcp.cmd -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3" -Check
+```text
+MCP:     --enable-write-tools --enable-subprocess-workflow
+Project: Config/DefaultEngine.ini -> [UEAgentKit] SubprocessWorkflow=True
+Policy:  the target asset/operation is covered by the Write Policy
 ```
 
-Replace the example paths with your own project and tool paths. These are placeholders, not literal values.
+Experimental Blueprint writes bypass the Write Policy and instead require `--enable-experimental-graphpatch-edit` + `[UEAgentKit] ExperimentalGraphPatchEdit=True`; Action Registry node creation adds `--enable-experimental-node-spawn` + `[UEAgentKit] ExperimentalNodeSpawn=True`.
 
-Start the read-only stdio MCP server and connect it from your MCP client:
+## 2. One-time user setup
 
-```bat
-scripts\RunMcp.cmd -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
-```
+Installation, plugin wiring, export/index, fixed projects, and Policy are documented in [Build and Run](BUILD_AND_RUN.md); the shortest version is in the [README quick start](../README_EN.md). The agent does not repeat those steps; it only confirms that the server is running.
 
-Live Editor and writable Workflow modes require additional server-side startup configuration. An agent cannot switch a session into write mode using a Tool parameter.
+## 3. First agent step: discover capabilities
 
-## 2. Discover and read first
+Call `ue_get_capabilities` and check:
 
-After connecting, call `ue_get_capabilities` and inspect the actual registered tools and their schemas. Follow the advertised argument types rather than guessing parameters or relying on a fixed tool count.
+- Which groups are enabled: query / live-read / workflow / memory / source-control.
+- Whether `workflow` exists. If not, no stable write tool is available; ask the user to check the double gate.
+- Whether the experimental patch and `ue_search_node_actions` appear. Do not pretend to call tools that are absent.
 
-Suggested read path:
+Do not infer availability from README counts, source handlers, or historical release notes.
+
+## 4. Read-only queries
 
 ```text
 ue_get_capabilities
 → ue_get_project_status
-→ ue_search
-→ ue_get_asset
-→ ue_find_references
-→ report exact Asset Path, Revision, evidence, and unknowns
+→ ue_search (locate an asset or symbol first)
+→ ue_get_asset (only the detail you need)
+→ ue_find_references (dependencies and impact)
+→ live-read tools only when current Editor state matters
 ```
 
-Only call Live Editor tools if present and the Editor connection is available. Distinguish indexed snapshots from current in-memory/dirty package state.
+Keep three kinds of output separate:
 
-## 3. Explicitly authorized write path
+- **Fact**: directly from Canonical JSON, BPCTX, or SQLite.
+- **Inference**: interpretation based on references, naming, or call relationships.
+- **Unknown**: fields the current reader or index did not export.
 
-Do not write unless the user has requested it and the server exposes the required capability for a fixed, Policy-authorized target.
+SQLite is a saved snapshot; the live Editor is current memory. When `ue_get_asset` carries overlay metadata, read `overlayCause`, `overlayRefreshed`, `overlayStale`, and `staleCause`: if `overlayStale=true`, do not treat that canonical as current disk state.
+
+## 5. Controlled writes
+
+**Do not write by default.** Write only when the user asked for it, the workflow gate is enabled, the target is covered by the Write Policy, and revision/dirty/identity checks pass:
 
 ```text
 ue_plan_patch
 → ue_dry_run_patch
-→ present the exact target/Diff and obtain explicit approval
-→ ue_apply_patch using the server-issued Receipt and confirmation
-→ explicit Save, if the workflow requires one
-→ ue_verify_asset independently
-→ report verified results and any outstanding failures
+→ show target asset, diff, and risk; obtain explicit authorization
+→ ue_apply_patch (one-time receipt / exact confirmation)
+→ explicit Save when needed
+→ ue_verify_asset (independent verification)
+→ report saved / verified / failed items
 ```
 
-Never invent a Receipt, asset Revision, confirmation phrase, or backup reference. A successful Dry Run is not permission to Commit; an in-memory apply does not prove disk persistence; a Save does not substitute for Verify.
+For one already-open, clean, non-Blueprint asset, `ue_apply_asset_property_live` can change the Editor memory value. It enters the Undo stack and marks the package dirty, but **does not save**. Save separately with `ue_save_authorized_asset`; discard with `ue_undo_asset_property_live` or `ue_discard_asset_property_live`.
 
-If a guard fails, stop writing and return the error. Follow [Backup and Rollback](../spec/BACKUP_AND_ROLLBACK.md) for an authorized rollback with a new Dry Run, confirmation, commit, and verification. Receipts may become invalid when the server restarts or the snapshot changes.
+Rules:
 
-## Further reference
+- Never guess receipts, revisions, confirmation strings, or backup references from natural language.
+- A passing Dry Run does not authorize Commit; a successful live apply does not mean the package was saved; a successful save does not prove independent verification.
+- On failure, stop writing and return the error code and current state. For rollback, follow [Backup and rollback](../spec/BACKUP_AND_ROLLBACK.md): Dry Run → confirmation → Commit → verification.
+- Receipts may expire after an MCP restart or snapshot refresh; re-plan instead of reusing them.
 
-- [Detailed AI Usage](AI_USAGE.md)
-- [Programming and PIE inspection workflows](DEVELOPER_WORKFLOWS_EN.md)
-- [MCP server contract and Tool interfaces](../spec/MCP_SERVER.md)
-- [Project configuration and Write Policy](PROJECT_LEVEL_CONFIG.md)
-- [Build and Run](BUILD_AND_RUN.md)
-- [Published Capability Status](PROJECT_STATUS_EN.md)
+## 6. Experimental Blueprint structure writes
 
-The actual available Tool surface is defined by the installed release, `ue_get_capabilities`, server safety gates, and verification—not by the existence of development code.
+Experimental, default off, disposable projects only. Shortest path:
+
+```text
+ue_search_node_actions (optional; obtain actionId)
+→ ue_preview_blueprint_patch_experimental (obtain planId / confirmation)
+→ ue_apply_blueprint_patch_experimental (pass the confirmation returned by preview)
+→ ue_save_blueprint_patch_experimental (separate explicit save)
+```
+
+One Apply is one transaction; a failure returns per-operation results and restores what was already applied. Operations, limits, and error codes are in [Blueprint experimental usage](BLUEPRINT_AGENT_E2E_USAGE_EN.md).
+
+Related: [capability status](PROJECT_STATUS_EN.md) · [Build and Run](BUILD_AND_RUN.md) · [developer workflows](DEVELOPER_WORKFLOWS_EN.md) · [MCP contract](../spec/MCP_SERVER.md).

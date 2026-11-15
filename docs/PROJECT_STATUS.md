@@ -1,148 +1,96 @@
-# UE Agent Kit 0.8.0 能力状态
+# UE Agent Kit 能力状态
 
-当前已发布版本：**0.8.0**（此页按 `v0.8.0` Tag 的功能范围编写，不把后续本地分支的实验性功能计入正式发布）
-已发布 0.8.0：**Python 3.11–3.12**；0.9.0 Developer Preview 1 候选（0.9.0.dev1）：**Unreal Engine 5.6 / Windows / Python 3.11–3.14**
+[English](PROJECT_STATUS_EN.md)
 
+## 版本状态
 
-## 产品定位
+| 版本 | 状态 | 时间 | 说明 |
+|---|---|---|---|
+| 0.8.0 | 稳定版 | 2026-09-07 | 上一个稳定发布；Python 3.11–3.12 |
+| 0.9.0 Developer Preview 1 | 预发布（已发布） | 2026-10-30 | `v0.9.0-dev1`；Python 3.11–3.14 |
+| 0.9.0 Developer Preview 2 | 候选（未发布） | — | 计划版本 `0.9.0.dev2`；本页描述对象 |
 
-UE Agent Kit 是 Unreal Engine 的**项目知识层 + 受控修改工作流**，重点是：
+本页以 **0.9.0 Developer Preview 2 候选代码**为准。已发布版本的具体行为以对应 Release Notes 为准；DP2 尚未创建 tag 或 GitHub Release。
 
-1. 把 Unreal 资产、Blueprint 语义、引用关系和 Editor 状态转换为稳定、可搜索的数据。
-2. 为 AI Agent 提供项目上下文、影响分析和验证证据。
-3. 通过 Policy / Revision / Transaction / Save / Verify 等门禁执行窄范围写入。
-4. 保留可追踪的 Project Memory 和变更证据。
-
-它不是通用远程桌面，也不是任意 Unreal Python / Shell 执行器。
+UE Agent Kit 是 Unreal Engine 的**项目知识层 + 受控修改工作流**：把资产、Blueprint 语义、引用关系和 Editor 状态转换为可搜索数据，为 Agent 提供上下文与验证证据，并通过 Policy / Revision / Transaction / Save / Verify 门禁执行窄范围写入。
 
 ## 读取能力
 
-### 离线项目读取
+### 离线索引
 
-- Asset Registry 可见资产目录和 Package 信息。
+- Asset Registry 资产目录与 Package 信息。
 - Static Mesh、Skeletal Mesh、Skeleton、Physics Asset、Material、Material Instance、Texture、Animation、DataTable、Data Asset、Niagara、World 等专用读取。
-- Blueprint Graph / Node / Pin、变量、函数、宏、接口、Cast、Delegate 等语义。
-- Canonical JSON、BPCTX/1、SQLite/FTS5 索引。
-- Asset / Symbol / Reference 搜索与反向引用查询。
+- Blueprint Graph / Node / Pin、变量、函数、宏、接口、Cast、Delegate 语义。
+- Canonical JSON、BPCTX/1、SQLite/FTS5 索引，Asset / Symbol / Reference 搜索与反向引用。
 - Package SHA-256 Revision 与索引新鲜度比较。
 
-### Live Editor 读取
+### Live Editor
 
-- Editor / PIE/SIE / World / Selection。
-- Open Assets 和 Dirty Packages。
-- Output Log 和 Blueprint 编译诊断。
-- 精确资产 Live Inspect，不为只读查询主动加载无关资产。
-- 当前 Blueprint Graph 和选中 Node。
+- Editor / PIE/SIE / World / Selection、Open Assets、Dirty Packages。
+- Output Log、Blueprint 编译诊断、精确资产 Live Inspect。
+- 按 asset path 读取任意 Blueprint 图上下文；不依赖离线索引。
+- PIE Server/Client 的 Actor、Transform、NetRole、组件及指定标量属性（只读）。
+
+### 实时索引 overlay
+
+- `ue_get_asset` 命中会话级 overlay 时，会先用磁盘 Package 的 SHA-256 校验记录；磁盘变化则自动向 Editor 重新取证。
+- 重新取证失败时返回 `overlayStale=true` + `staleCause`，不再返回旧 canonical。
+- `ue_refresh_asset_index_live` 可显式刷新单个已保存 Blueprint；只影响当前 MCP 会话（最多 64 条），不写 SQLite、不要求重启。
+- 当前范围：`/Game` 下的 Blueprint、普通单文件 Package；World Partition 外部 Actor 与多文件 Package 不支持。
 
 ### Project Memory / Knowledge
 
-- Rule、Finding、Decision、Known Issue、Task Record、Runtime Evidence。
-- Revision-aware stale / superseded / conflicted 状态。
-- 确定性 L0 capture 和 L1 distillation。
-- FTS5 召回，以及可选的 Vector + RRF hybrid recall。
-- 持久化 L2/L3 项目上下文和有界自动注入。
-- 只读 Knowledge Web。
+Rule、Finding、Decision、Known Issue、Task Record、Runtime Evidence；Revision-aware stale/superseded/conflicted；FTS5 召回与可选 Vector + RRF；L2/L3 上下文注入；只读 Knowledge Web。
 
 ## 写入能力
 
-### Blueprint
+所有写入默认关闭。`workflow` 组需要 MCP `--enable-write-tools` + `--enable-subprocess-workflow`、项目 ini `SubprocessWorkflow=True`、以及覆盖目标的 Write Policy。实验 Blueprint 写入使用独立门禁，不经过 Write Policy 白名单。
 
-支持已注册的窄范围操作，例如变量默认值、组件属性、Pin 默认值和描述。写入受 Policy / Revision / Editor 状态约束，并支持 Transaction、Undo/Discard、显式 Save 和 Verify。
+| 写入域 | 入口 | 定位 | 额外门禁 |
+|---|---|---|---|
+| Data Asset（标量 / 引用 / Struct·Array·Set·Map） | `workflow` | 稳定面 | workflow 门禁 |
+| Material Instance（Scalar / Vector / Texture / Static Switch） | `workflow` | 稳定面 | workflow 门禁 |
+| DataTable（Cell / Row Fields / Add·Remove·Rename Row） | `workflow` | 稳定面 | workflow 门禁 |
+| Blueprint 已注册 Operation（变量默认值、组件属性、Pin 默认值、描述） | `workflow` | 稳定面 | workflow 门禁 |
+| Live 单资产属性 Apply（Editor 内存 + Undo，显式 Save） | `workflow` | 稳定面 | workflow 门禁 |
+| AnimSequence 诊断 / 修复 / 重定向辅助 | `workflow` / `live-read` | 有限能力 | 视 Tool 而定 |
+| Blueprint 原子 patch：`createNode` / `connect` / `disconnect` / `setPinDefault` / `createVariable` / `rewirePin` / `removeNode` | `ue_*_blueprint_patch_experimental` | 实验 | `--enable-experimental-graphpatch-edit` + ini |
+| 通过 Action Registry `actionId` 创建节点（CallFunction / Cast） | 同上 `createNode` | 实验 | 再加 `--enable-experimental-node-spawn` + ini |
+| Blueprint 位置批量移动 / edit session | `workflow`（`ue_move_blueprint_node*`） | 实验接口 | workflow 门禁 |
 
-### Data Asset
+实验 patch 的限制：一次最多 16 个操作、16 个新节点、8 个新变量；边操作受总操作数限制，单节点最多 8 条连接；`removeNode` 每次最多 1 个节点和 1 条 incident edge；只接受顶层 K2 事件图、干净 Package、非 PIE；一次 Apply 一个事务，失败回滚；Save 独立。完整用法见 [Blueprint 实验用法](BLUEPRINT_AGENT_E2E_USAGE.md)。
 
-- 标量属性。
-- Object / Class / Soft Object / Soft Class 引用。
-- Struct / Array / Set / Map 完整值。
+运行模式、门禁与启动命令见 [Agent Quickstart](AGENT_QUICKSTART.md)；完整参数见 [构建与运行](BUILD_AND_RUN.md)。实际可用 Tool 始终以 `ue_get_capabilities` 为准。
 
-### Material Instance
+## Agent 工作流
 
-- Scalar
-- Vector
-- Texture
-- Static Switch
-
-### DataTable
-
-- 单元格。
-- 多字段 Row 更新。
-- Add / Remove / Rename Row。
-
-### Animation
-
-提供有限的 AnimSequence 实时诊断/修复、Additive Base Pose、比例修复、批处理和重定向辅助 Tool。它不是完整的动画资产编辑器替代品。
-
-## Agent 工作流能力
-
-- Task Context。
-- Relevant Asset Discovery。
-- Impact Analysis。
-- Change Set。
-- Semantic Diff。
-- Verification Plan。
-- Trust Verdict。
-- Authorized Save / Strong Verify。
-- Recovery / rollback evidence。
+Task Context、Relevant Asset Discovery、Impact Analysis、Change Set、Semantic Diff、Verification Plan、Trust Verdict、Authorized Save / Strong Verify、Recovery / rollback evidence。写入完成不等于任务成功；独立验证和证据是流程的一部分。
 
 ## P4 / Perforce
 
-Source Control 为 opt-in 功能。
+Source Control 为 opt-in。支持 mapping / opened / lock / owner / client / have / head 查询、精确文件 `p4 edit`、受限 safe sync、pending changelist 查询/创建/描述更新、精确已打开文件 `reopen`、resolve preview、满足条件的普通文本 `resolve -am`，以及持久化审计记录。
 
-支持：
+Agent 不执行 P4 Submit / Revert / P4-managed Delete；不提供通用 P4 argv / shell 透传；`.uasset` / `.umap` 不自动选择 yours/theirs，也不自动内容 Resolve。
 
-- mapping / opened / lock / owner / client / have / head 查询；
-- exact-file `p4 edit`；
-- 受限 safe sync；
-- pending changelist 查询/创建/描述更新；
-- exact-file `reopen`；
-- resolve preview；
-- 满足条件的普通文本 `resolve -am`；
-- durable audit receipt。
+## 明确不支持
 
-不支持并且不计划通过通用入口绕过：
-
-- Agent-side P4 Submit；
-- P4 Revert；
-- P4-managed Delete；
-- generic P4 command passthrough；
-- `.uasset/.umap` 自动 accept yours/theirs 或自动内容 Resolve。
-
-## MCP Tool 规模
-
-Source Control 默认关闭。0.8.0 当前组合模式为：
-
-| 模式 | 基础 | + Memory | + Source Control | + Memory + Source Control |
-|---|---:|---:|---:|---:|
-| Offline | 10 | 24 | 16 | 30 |
-| Live | 43 | 57 | 49 | 63 |
-| Workflow-only | 67 | 81 | 73 | 87 |
-| Live + Workflow | 100 | 114 | 106 | 120 |
-
-Tool 数量只是接口规模，不代表每个 Tool 都会修改资产；大量 Tool 是只读查询、规划、验证和状态读取。
-
-本页以当前 `0.9.0.dev1` 候选为准：静态 registry 计数已被 node-spawn 与合并改动改写，不再列出固定数字；实际 Tool 以运行时 `ue_get_capabilities` 为准。默认关闭、按 flag 动态注册的实验写入只剩原子 patch（`ue_preview/apply/save_blueprint_patch_experimental`）与 node-spawn 读工具，旧的单 writer 工具已删除。候选范围见 [候选说明](RELEASE_0.9.0_PREVIEW.md)。
-
-依赖冷启动 `UnrealEditor-Cmd.exe` 的 `workflow` 组也默认不注册：需要 `--enable-subprocess-workflow` 与项目 `Config/DefaultEngine.ini` 的 `[UEAgentKit] SubprocessWorkflow=True` 双门禁同时满足。每次 spawn 尝试都记进会话内有界 ledger，用只读的 `ue_get_subprocess_ledger()` 查看；`spawnedCount == 0` 可断言。
-
-## 明确不支持的通用能力
-
-- 不做按类名自由创建 / 任意编辑的通用 Graph CRUD；**支持经 Action Registry 发现、由原生 spawner
-  执行的节点创建**（受实验双门禁约束）。
-- 任意 Level Actor Spawn/Delete/Transform/Property 编辑。
-- Material Graph / Niagara / Sequencer / Control Rig 通用写入。
-- PIE 输入注入和录制回放系统。
-- 任意 Asset Import / Duplicate / Rename / Delete / Migrate。
-- 任意 Console / Python / Shell / UObject Method 执行。
-- 自动 Save All。
+| 能力 | 说明 |
+|---|---|
+| 按类名自由创建节点 / 任意 Graph CRUD / 自动布线 | 只有七种实验 patch 操作和有界节点入口 |
+| CustomEvent、事件/委托绑定、Timeline、MathExpression | 不在 Action Registry 创建范围 |
+| 用 `createNode` 创建 `Select` / `PromotableOperator` | 只能连接其 wildcard 端点，由 schema 推导类型 |
+| 嵌套子图写入 | 实验 patch 只验证顶层 K2 事件图 |
+| 任意 Level Actor Spawn/Delete/Transform/Property | 不提供通用关卡编辑 |
+| Material Graph / Niagara / Sequencer / Control Rig 通用写入 | 只有专用只读或有限流程 |
+| PIE 输入注入 / 录制回放 | 只读诊断 |
+| Asset Import / Duplicate / Rename / Delete / Migrate | 不提供通用资产生命周期操作 |
+| Console / Python / Shell / UObject Method 执行 | 不提供通用执行入口 |
+| 自动 Save All / 自动编译 | Save 与 Compile 都是独立动作 |
+| Agent 侧 P4 Submit / Revert / Delete | 由人完成 |
 
 ## 安全模型
 
-核心原则：
-
-- 先理解，再修改。
 - 默认只读；写入必须显式启用。
-- Write Policy 决定可修改范围。
-- Revision 防止基于过期状态写入。
-- Dirty Package、Session、Target Identity 等条件不满足时拒绝操作。
-- Save 和“任务成功”不是同一件事；成功需要独立验证和证据。
-- P4 最终 Submit/Revert/Delete 由人执行。
+- Revision、Dirty Package、Session、Target Identity 不满足时拒绝。
+- 失败回滚与 Undo 证据优先于“看起来成功”。
+- Save 成功不等于任务成功；需要独立 Verify 和可追溯证据。

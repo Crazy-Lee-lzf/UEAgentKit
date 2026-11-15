@@ -1,12 +1,13 @@
 # UE Agent Kit Roadmap
 
-The latest published release is **0.8.0**. These are product directions, not shipping commitments or dates.
+The latest published release is **0.8.0**. The latest prerelease is **0.9.0 Developer Preview 1 (`v0.9.0-dev1`)**; the next candidate is **0.9.0 Developer Preview 2 (planned version `0.9.0.dev2`, unreleased)**. These are product directions, not shipping commitments or dates.
 
 ## P0: Blueprint core workflows and PIE diagnosis
 
-- Improve Blueprint structure/call references and **default-off** bounded node edits.
+- Extend the **default-off** Blueprint structure writer from the atomic patch to node/connection scenarios proven by real projects, without opening arbitrary graph CRUD.
+- Improve live Editor reads and index freshness: re-proving after user saves, concurrency boundaries, and writes without an index.
 - Read explicit Server/Client PIE Worlds, Actors, and Components to help diagnose code behavior.
-- Improve C++/Blueprint provenance and freshness reporting while keeping writes authorized and verifiable.
+- Improve C++/Blueprint provenance while keeping writes authorized and verifiable.
 
 ## P1: Common assets (DataTable / DataAsset first)
 

@@ -1,10 +1,10 @@
 # Graph Layout Contracts — Experimental Preview
 
-> **Status:** local development and test-only. Not part of the published UE Agent Kit v0.8.0 write surface. **No general production Blueprint Graph Apply endpoint is authorized.**
+> **Status:** local development and test-only. Not part of the stable 0.8.0 write surface. **No general production Blueprint Graph Apply endpoint is authorized.**
 
 ## Purpose and available surfaces
 
-Graph Layout uses a canonical plan to describe bounded, deterministic Blueprint node positions. The current experimental development tree includes read-only graph context/preflight and layout-plan preview paths. Their actual availability depends on the installed plugin, MCP tool registration, project identity and feature flags.
+Graph Layout uses a canonical plan to describe bounded, deterministic Blueprint node positions. The current development tree includes read-only graph context/preflight and layout-plan preview paths. Their actual availability depends on the installed plugin, MCP tool registration, project identity and feature flags.
 
 For end users and AI agents, start with:
 
@@ -14,14 +14,14 @@ For end users and AI agents, start with:
 
 Before calling a preview tool, query `ue_get_capabilities`. Do not infer that a method is available because its code or schema exists in the checkout.
 
-The default-off, explicitly opted-in MCP Apply/Save loop is documented in
+The default-off, explicitly opted-in MCP Apply/Save loop for layout is documented in
 [Experimental MCP Apply](EXPERIMENTAL_MCP_APPLY.md). It is experimental and
 requires both a server flag and an Editor project config opt-in.
 
-The default-off live createNode/connectPins slice (Branch/Sequence plus a
-type-checked Bool data link) is documented in
-[Experimental MCP Graph Edit](EXPERIMENTAL_MCP_GRAPH_EDIT.md). It is not a
-general GraphPatch executor.
+The live atomic Blueprint patch, Action Registry node creation, and their gates are documented in
+[Blueprint experimental usage](../../docs/BLUEPRINT_AGENT_E2E_USAGE_EN.md). That page is the
+current user-facing contract; the older graph-edit shell and its standalone writer tools are gone.
+`ue_preview_graph_patch` remains an offline, read-only GraphPatch IR preview and never writes to the Editor.
 
 ## Contracts and experimental reference implementation
 

@@ -2,14 +2,27 @@
 
 All notable changes to UE Agent Kit are documented here.
 
-## 0.9.0.dev1 — Developer Preview 1 (local candidate)
+## 0.9.0.dev2 — Developer Preview 2 (candidate, unreleased)
 
-This section describes candidate development changes, not a published release. Stable v0.8.0 remains unchanged. See the [candidate release notes](docs/RELEASE_0.9.0_PREVIEW_EN.md).
+Candidate changes for the next GitHub release. DP2 has no tag or Release yet; see the [DP2 release notes](docs/RELEASE_0.9.0_DP2_EN.md).
+
+- Replaced the five standalone Blueprint writers with one atomic cross-writer patch: `createNode`, `connect`, `disconnect`, `setPinDefault`, `createVariable`, `rewirePin`, and `removeNode` run in one Editor transaction with per-operation results, rollback of already-applied work, and Undo/Redo verification. Save remains a separate explicit action.
+- Added Action Registry node creation: `createNode` accepts an `actionId` from `ue_search_node_actions` and can create `K2Node_CallFunction` (engine, project, or Blueprint-defined functions) and `K2Node_DynamicCast`. Search reports `canCreate` / `rejectReason`; latent, world-context, variadic, and binding-dependent spawners are refused.
+- Added wildcard endpoint connections for `Select` / `PromotableOperator`; the K2 schema derives the type during the write and `resolvedPins` returns the post-connection pins. Special nodes are still not creatable through `createNode`.
+- Added live-only write startup: bridge-native writes can run against a live Editor without an index or Revision Export; patch-based writes still require a Revision Export and report the missing evidence explicitly.
+- Added a session-scoped live index overlay with on-disk change detection. `ue_get_asset` re-proves an overlay record when the package changed and reports `overlayStale` / `staleCause` instead of returning stale data. `ue_refresh_asset_index_live` refreshes one Blueprint without writing the index or restarting.
+- Allowed users and agents to edit the same graph through position batches and edit sessions: a dirty package is accepted, conflicts are checked per named node, and rollback restores only Agent-written nodes the user has not changed.
+- Made the `workflow` group default-off behind the MCP `--enable-subprocess-workflow` flag and the project `[UEAgentKit] SubprocessWorkflow=True` setting. With either gate off the group is not registered; every spawn attempt is recorded in a bounded session ledger exposed by `ue_get_subprocess_ledger`.
+- Removed the standalone pin-default / variable / rewire / node-remove preview, apply, save, and one-click tools plus the graph-edit shell from the MCP surface.
+
+## 0.9.0.dev1 — Developer Preview 1 (published 2026-10-30)
+
+DP1 is published as the `v0.9.0-dev1` prerelease. See the [DP1 release notes](docs/RELEASE_0.9.0_PREVIEW_EN.md).
 
 - Added default-off, double-opt-in bounded Blueprint structure tools: GraphEdit with eight allowlisted node types, typed unlinked pin defaults, top-level user-variable creation, single-edge rewire, and isolated allowlisted node removal. Each family uses Preview → exact plan/confirmation → Apply → explicit Save, never auto-saves or compiles, and remains outside the project Write Policy allowlist.
-- Added the corresponding Agent-facing focus/preflight helpers, read-only fresh-process reload verification, and end-to-end MCP evidence. These are internal-preview capabilities, not a production default.
+- Added the corresponding Agent-facing focus/preflight helpers, read-only fresh-process reload verification, and end-to-end MCP evidence. These are preview capabilities, not a production default.
 - Added Project Memory schema v7 with a CJK-expanded `search_text` projection and external-content FTS5 rebuild, so Han/Kana/Hangul substrings such as `护甲` inside `护甲升级链` are recalled without changing the ASCII search API or ranked order. The v6→v7 migration is transactional, verifies with `quick_check`, fails closed on partial/newer schemas, and preserves v6 backups, embeddings, context snapshots, and linked data.
-- Validated the local UE 5.6.1 integrated candidate: constrained CallFunction, same-Blueprint Pure Function calls with native-tested int literals, indexless pure-Live MCP, and PIE scalar inspection with native declaring-class provenance. Candidate only; not yet published.
+- Validated the UE 5.6.1 integrated candidate: constrained CallFunction, same-Blueprint Pure Function calls with native-tested int literals, indexless pure-Live MCP, and PIE scalar inspection with native declaring-class provenance. Included in DP1.
 - Clarified public documentation so the stable v0.8.0 Write Policy boundary is not presented as covering the experimental tools.
 
 ## 0.8.0 — agent workflow, memory, knowledge web, and P4 collaboration

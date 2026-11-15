@@ -2,231 +2,99 @@
 
 [中文](README.md)
 
-UE Agent Kit is an open-source **Unreal Engine 5.6** project-analysis and controlled-mutation toolkit for AI agents and developers. It turns Unreal assets, Blueprint semantics, references, and live Editor state into searchable project knowledge, then exposes narrowly scoped write workflows with explicit safety gates.
+UE Agent Kit is an open-source **Unreal Engine 5.6** project-analysis and controlled-mutation toolkit. It turns `.uasset` data, Blueprint semantics, references, and live Editor state into searchable project knowledge, then lets AI agents perform narrow writes behind explicit safety gates. It is not a general graph editor or an arbitrary script executor.
 
-The latest published release is **0.8.0** (Python 3.11–3.12); the local 0.9.0 Developer Preview 1 candidate is **0.9.0.dev1** and supports **Unreal Engine 5.6 / Windows / Python 3.11–3.14**.
+The latest published release is **0.8.0** (stable). The latest prerelease is **UEAgentKit 0.9.0 Developer Preview 1** (`v0.9.0-dev1`, 2026-10-30); the next candidate is **0.9.0 Developer Preview 2** (planned version `0.9.0.dev2`, unreleased). Runtime target: **Unreal Engine 5.6 / Windows x64 / Python 3.11–3.14**.
 
-## What it is for
+## What it does
 
-UE projects keep important information inside `.uasset` packages, Blueprint graphs, Asset Registry metadata, and the running Editor. UE Agent Kit helps answer questions such as:
+- **Project queries**: Asset Registry inventory; specialized readers for Static Mesh, Material, Texture, Animation, DataTable, Data Asset, Niagara, World, and more; SQLite + FTS5 indexing; forward and reverse references.
+- **Blueprint reads**: graphs, nodes, pins, variable read/write sites, function/macro/interface/cast/delegate semantics, with saved snapshots kept distinct from live Editor state.
+- **Live Editor**: current World, selection, open/dirty assets, Output Log, compile errors, PIE Server/Client objects, and explicitly requested scalar properties.
+- **Controlled writes**: Data Asset, Material Instance, DataTable, AnimSequence assistance, and registered Blueprint operations such as variable defaults, component properties, and pin defaults. Writes stay behind Write Policy, Revision, dirty-package, transaction, explicit Save, and independent Verify.
+- **Experimental Blueprint structure writes** (default off): one atomic patch with seven operations — `createNode` / `connect` / `disconnect` / `setPinDefault` / `createVariable` / `rewirePin` / `removeNode`. Nodes can be created from an Action Registry `actionId`.
+- **Agent workflow**: Task Context, Impact Analysis, Change Set, Semantic Diff, Verification Plan, Trust Verdict, and revision-aware Project Memory.
+- **P4 / Perforce** (opt-in): mapping / opened / lock / have / head queries, exact-file `p4 edit`, bounded safe sync, pending changelists, reopen, and plain-text resolve. The Agent never runs Submit, Revert, or Delete.
 
-- What does this asset depend on, and what references it?
-- Where is a Blueprint variable read or written?
-- What are the current values in a DataTable, Material Instance, or Data Asset?
-- What can be affected by a proposed change?
-- Did an AI-generated edit actually persist to disk as intended?
-- In a P4 workspace, is the file mapped, opened, locked, behind head, or unresolved?
+## Quick start
 
-```text
-UE Editor / Asset Registry
-        ↓
-Canonical JSON / Blueprint semantic export
-        ↓
-SQLite / FTS5 project index
-        ↓
-MCP / CLI queries
-        ↓
-Plan → Policy → Revision → Apply → Save → Verify → Diff / Trust
-```
-
-## Main capabilities
-
-### Asset and Blueprint queries
-
-- Project-wide Asset Registry export and SQLite/FTS5 indexing.
-- Specialized readers for Static Mesh, Skeletal Mesh, Material, Texture, Animation, DataTable, Data Asset, Niagara, World, and more.
-- Blueprint Graph / Node / Pin structure, variable reads/writes, function/macro/interface calls, Dynamic Casts, delegates, and related semantics.
-- Hard/Soft Package, Soft Object/Class, and Searchable Name references.
-- Live Editor context including World, selection, open assets, dirty packages, Output Log, and Blueprint compile diagnostics.
-
-### Agent workflow
-
-- Task Context and relevant-asset discovery.
-- Reverse-reference Impact Analysis.
-- Change-Set-bound Semantic Diff.
-- Evidence-gated Verification Plans and Trust Verdicts.
-- Revision-aware Project Memory for rules, findings, decisions, task results, and validation evidence.
-- A read-only Knowledge Web for navigating project knowledge and relationships.
-
-### Controlled writes
-
-The current write surface includes:
-
-- Blueprint registered operations for variable defaults, component properties, pin defaults, descriptions, and related narrow edits.
-- Data Asset scalar, object/class/soft references, and Struct/Array/Set/Map values.
-- Material Instance Scalar / Vector / Texture / Static Switch parameters.
-- DataTable cell, row-field, add/remove/rename operations.
-- Narrow AnimSequence realtime fixes and retarget-assistance workflows.
-
-Writes are not arbitrary scripting. Stable write domains remain gated by **Write Policy, Revision, target identity, dirty-package state, transactions, explicit persistence, and independent verification**.
-
-### Experimental Blueprint structure writes (default off, not stable)
-
-The developer-preview candidate contains a default-off experiment: all structural writes go through the atomic patch (`createNode` / `connect` / `setPinDefault` / `createVariable` / `rewirePin` / `removeNode`, one transaction, per-operation results, Undo/Redo verification), and node creation can use a registry `actionId` (`ue_search_node_actions`). Both the MCP flag `--enable-experimental-graphpatch-edit` and the Editor project setting `[UEAgentKit] ExperimentalGraphPatchEdit=True` are required, and every Apply/Save needs its exact planId/confirmation. The old single-writer tools (pin-default / variable / rewire / node-remove and the graph-edit shell) were removed.
-
-These experimental tools do **not** go through the project Write Policy allowlist. They require an exact asset/graph identity, a clean package, stopped PIE, revision/fingerprint checks, and bounded operations; see the [experimental usage](docs/BLUEPRINT_AGENT_E2E_USAGE.md). They are not a production default and must not be enabled on a production project. The Write Policy description above applies to stable writes, not to this experiment.
-
-## P4 / Perforce integration
-
-Source Control support is opt-in. 0.8.0 can:
-
-- Inspect mapping, opened files, owner/client, locks, have/head revisions, and pending changelists.
-- Run exact-file `p4 edit`.
-- Perform strictly bounded safe sync when evidence allows it.
-- Create/update pending changelists for the current user/client and `reopen` exact already-opened files.
-- Preview resolve state and run bounded conflict-free text `resolve -am` where eligible.
-- Persist source-control audit records and provide human final-action handoff metadata.
-
-Safety boundary:
-
-- **The Agent does not submit P4 changelists.**
-- **The Agent does not run P4 revert.**
-- **The Agent does not run P4-managed delete.**
-- No generic P4 argv or shell passthrough is exposed.
-- `.uasset` / `.umap` are never auto-resolved by choosing yours/theirs.
-
-## Installation
-
-### Requirements
+### 1. Requirements
 
 ```text
 Windows 10 / 11
 Unreal Engine 5.6
-Visual Studio 2022 C++ Toolchain
+Visual Studio 2022 C++ toolchain
 PowerShell 5.1+
-Python 3.11–3.14 (published 0.8.0: 3.11–3.12)
-P4 CLI (only when Source Control support is enabled)
+Python 3.11–3.14
+P4 CLI (only for Source Control)
 ```
 
-### 1. Clone
+### 2. Install
 
-```bash
+```bat
 git clone git@github.com:Crazy-Lee-lzf/UEAgentKit.git
 cd UEAgentKit
-```
-
-### 2. Python environment
-
-For MCP support:
-
-```bat
 scripts\setup_python.cmd -WithMcp
-```
-
-### 3. Build the UE5.6 plugin
-
-```bat
 scripts\BuildPluginDirect.cmd -EngineRoot "<UE_5.6>"
 ```
 
-Default output:
-
-```text
-Build\Compiled\UEAgentKit
-```
-
-You may also link the source plugin into a project and let the project compile it:
+You can also compile the source plugin inside your project, or install a packaged build:
 
 ```bat
-scripts\InstallProjectPlugin.cmd -Mode Source -ProjectPath "<PROJECT>.uproject"
-```
-
-Or install the packaged plugin:
-
-```bat
+scripts\InstallProjectPlugin.cmd -Mode Source  -ProjectPath "<PROJECT>.uproject"
 scripts\InstallProjectPlugin.cmd -Mode Package -ProjectPath "<PROJECT>.uproject"
 ```
 
-## Build a project index
-
-Export non-Blueprint assets:
+### 3. Build the project index
 
 ```bat
 scripts\RunAssetCatalog.cmd -Root "/Game" -Output "Output\AssetCatalog"
-```
-
-Export Blueprint semantics:
-
-```bat
 scripts\RunExport.cmd -Root "/Game" -Profile full -Format both -Output "Output\Blueprints"
-```
-
-Build the SQLite index:
-
-```bat
 scripts\ue-agent.cmd index build Output\AssetCatalog
 scripts\ue-agent.cmd index build Output\Blueprints
-scripts\ue-agent.cmd index stats
 ```
 
-Example queries:
-
-```bat
-scripts\ue-agent.cmd search assets --class StaticMesh
-scripts\ue-agent.cmd search symbols MaxWalkSpeed
-scripts\ue-agent.cmd references --target-asset /Game/Characters/BP_Player.BP_Player
-```
-
-## MCP
-
-UE Agent Kit uses local `stdio` MCP. In fixed-project mode, the database, project, Policy, Revision Export, and work roots are selected when the server starts; individual tools cannot substitute arbitrary paths.
+### 4. Start a read-only MCP server
 
 ```bat
 scripts\RunMcp.cmd -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3" -Check
+scripts\RunMcp.cmd -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
 ```
 
-See:
+### 5. Let the Agent discover capabilities first
 
-- [Build and Run](docs/BUILD_AND_RUN.md)
-- [AI Usage](docs/AI_USAGE.md)
-- [Project-level configuration](docs/PROJECT_LEVEL_CONFIG.md)
-- [MCP Server contract](spec/MCP_SERVER.md)
-- [Live Editor Bridge contract](spec/LIVE_EDITOR_BRIDGE.md)
+Call `ue_get_capabilities` after connecting, then query in the order `ue_search` → `ue_get_asset` → `ue_find_references`. A tool that is not registered is unavailable right now; do not infer availability from this README or from source code.
 
-## Write Policy
+## Writes and experiments
 
-A Write Policy is UE Agent Kit's project-level write allowlist. It controls which projects, `/Game/...` roots, asset classes, operations, properties, DataTable fields, Material parameters, and reference targets may be changed, as well as whether Commit and Revision/clean-package requirements are enabled.
+**Stable writes** require all of: `--enable-write-tools`, `--enable-subprocess-workflow`, the project setting `[UEAgentKit] SubprocessWorkflow=True` in `Config/DefaultEngine.ini`, and a Write Policy that covers the target. Without them the `workflow` group does not appear in capabilities. `RunMcp.cmd` currently covers read-only and Pure Live modes only; write and experimental modes must run `.venv\Scripts\python.exe scripts\ue-agent-mcp.py` directly. Full commands are in [Build and Run](docs/BUILD_AND_RUN.md).
 
-The repository includes an [example policy](config/write-policy.example.json). Real projects should create a minimal project-specific policy rather than opening all of `/Game`.
+**Experimental Blueprint structure writes** additionally require the MCP flag `--enable-experimental-graphpatch-edit` and the project setting `[UEAgentKit] ExperimentalGraphPatchEdit=True`. Creating nodes from the Action Registry also requires `--enable-experimental-node-spawn` and `[UEAgentKit] ExperimentalNodeSpawn=True`. One Apply is one Editor transaction; a failure restores the operations already applied, and Save is always a separate explicit call. These tools bypass the stable Write Policy allowlist and are for disposable test projects only. See [Blueprint experimental usage](docs/BLUEPRINT_AGENT_E2E_USAGE.md).
 
-A recommended first integration is:
-
-```text
-Read-only audit
-→ build index
-→ verify P4 mapping
-→ create a minimal Write Policy
-→ select a test asset
-→ Plan / Dry Run
-→ explicit write
-→ Save / Verify / Diff
-```
+**Machines without an index or Revision Export** can start the write mode against a live Editor (live-only): SQLite is not required, but offline revision evidence is lost and patch-based writes still require a Revision Export. On the read side, `ue_get_asset` now verifies a session overlay against the package on disk and re-proves it from the Editor when it changed; if it cannot, it returns `overlayStale` / `staleCause` instead of the old canonical. `ue_refresh_asset_index_live` refreshes one Blueprint explicitly without writing the index or requiring a restart.
 
 ## Current limitations
 
-0.8.0 does not expose:
+- No arbitrary graph CRUD, arbitrary Level Actor editing, or general Material Graph / Niagara / Sequencer / Control Rig writes.
+- The experimental patch covers seven operations and top-level K2 event graphs only; it cannot create CustomEvent, event/delegate binding, Timeline, MathExpression, or `Select` / `PromotableOperator` themselves.
+- No PIE input injection, arbitrary Asset Import/Duplicate/Rename/Delete/Migrate, or console / Python / shell / UObject method execution.
+- No automatic Save All and no automatic compile.
+- The Agent never runs P4 Submit / Revert / Delete and never auto-resolves `.uasset` / `.umap` content.
 
-- Arbitrary Blueprint Graph node CRUD or automatic rewiring.
-- Arbitrary Level Actor spawn/delete/transform editing.
-- Arbitrary Material Graph / Niagara / Sequencer / Control Rig mutation.
-- Arbitrary Unreal Python, console commands, shell execution, or UObject method invocation.
-- Automatic Save All.
-- Agent-side P4 submit, revert, or delete.
-
-These restrictions are part of the product safety model and are not intended to be bypassed through generic scripting interfaces.
+See [capability status](docs/PROJECT_STATUS_EN.md) for the full boundary, alternatives, and release status.
 
 ## Documentation
 
-- [AI Agent Quick Start](docs/AGENT_QUICKSTART_EN.md)
-- [Developer Workflows](docs/DEVELOPER_WORKFLOWS_EN.md)
-- [Documentation index](docs/README.md)
-- [Current capability status](docs/PROJECT_STATUS_EN.md)
-- [Public roadmap](docs/ROADMAP_EN.md)
-- [0.8.0 Release Notes](docs/RELEASE_0.8.0_EN.md)
-- [RC1 internal experimental preview](docs/RELEASE_RC1.md) / [English](docs/RELEASE_RC1_EN.md) (historical candidate, not released)
-- [0.9.0 Developer Preview 1 candidate](docs/RELEASE_0.9.0_PREVIEW.md) / [English](docs/RELEASE_0.9.0_PREVIEW_EN.md) (not released)
-- [Memory Architecture](docs/MEMORY_ARCHITECTURE_EN.md)
+- [AI Agent Quick Start](docs/AGENT_QUICKSTART_EN.md) / [中文](docs/AGENT_QUICKSTART.md)
+- [Capability status](docs/PROJECT_STATUS_EN.md) / [中文](docs/PROJECT_STATUS.md)
+- [0.9.0 Developer Preview 2 (candidate)](docs/RELEASE_0.9.0_DP2_EN.md) / [中文](docs/RELEASE_0.9.0_DP2.md)
+- [0.9.0 Developer Preview 1 (published)](docs/RELEASE_0.9.0_PREVIEW_EN.md) / [中文](docs/RELEASE_0.9.0_PREVIEW.md)
+- [0.8.0 Release Notes](docs/RELEASE_0.8.0_EN.md) / [中文](docs/RELEASE_0.8.0.md)
+- [Blueprint experimental usage](docs/BLUEPRINT_AGENT_E2E_USAGE_EN.md) / [中文](docs/BLUEPRINT_AGENT_E2E_USAGE.md)
+- [Tool catalog](docs/TOOL_CATALOG.md)
 - [Build and Run](docs/BUILD_AND_RUN.md)
+- [Developer workflows](docs/DEVELOPER_WORKFLOWS_EN.md) / [中文](docs/DEVELOPER_WORKFLOWS.md)
+- [Documentation index](docs/README.md)
 
 ## License
 

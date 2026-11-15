@@ -1,23 +1,36 @@
-# UE Agent Kit 0.9.0 Developer Preview 1 (local candidate 0.9.0.dev1)
+# UE Agent Kit 0.9.0 Developer Preview 1 (published)
 
-**Not released.** The current public version is **v0.8.0**. This is neither an upgrade notice nor permission for production writes.
+**Status: prerelease, published 2026-10-30.** This is historical release documentation, not an upgrade notice for the next version and not a production authorization. The stable release remains **0.8.0**.
 
-## Proposed capabilities
+- [GitHub Release and artifacts](https://github.com/Crazy-Lee-lzf/UEAgentKit/releases/tag/v0.9.0-dev1)
+- [Source tag `v0.9.0-dev1`](https://github.com/Crazy-Lee-lzf/UEAgentKit/tree/v0.9.0-dev1)
+- Version: `0.9.0.dev1`; environment: Unreal Engine 5.6 / Windows x64 / Python 3.11–3.14
 
-- **Blueprint reads:** Graphs, Nodes, Pins, variables and references; distinguish saved index snapshots from live Editor state.
-- **Experimental Blueprint edits:** bounded allowlisted nodes, exact link/unlink, and controlled variable operations; Preview, confirmation, explicit Save and Verify are separate.
-- **Read-only PIE diagnosis:** select Server/Client Worlds and inspect exact Actor identity, Transform, NetRole, Components, and explicitly requested scalar properties, including reflected declaring classes.
-- **C++ investigation:** search symbols, static call sites and provenance without claiming runtime dispatch.
-- **Existing tools:** limited DataTable/DataAsset/Material Instance updates, Project Memory and opt-in safe P4 operations.
+## What DP1 includes
 
-## Safety and limits
+- **Blueprint reads**: graphs, nodes, pins, variables, and references, with saved index snapshots kept distinct from live Editor state.
+- **Experimental Blueprint edits** (default off): creation/connection of eight primitive node types and variable accessors, pin defaults on unlinked inputs, top-level member variable creation, single-edge rewire, and isolated node removal; Preview, exact confirmation, Apply, explicit Save, and Verify are separate.
+- **Read-only PIE diagnostics**: Server/Client worlds, actors, transforms, NetRole, components, and explicitly requested scalar properties, including reflected declaring classes.
+- **C++ static analysis**: symbols, call sites, and provenance; no claim of runtime dispatch.
+- **Existing capabilities**: bounded DataTable / Data Asset / Material Instance workflows, Project Memory, and opt-in P4 operations.
+- The old single-writer tools (pin-default / variable / rewire / node-remove / graph-edit shell) were DP1's write entry points; they were later replaced by the unified atomic patch.
 
-Experimental GraphEdit is **off by default and outside the stable Write Policy allowlist**. Both an MCP flag and a project configuration switch are required, and only disposable test projects may use it. It is not arbitrary Graph CRUD and does not auto-compile or Save All.
+## Validation scope
 
-The local integrated candidate passed UE 5.6.1 native acceptance for constrained Kismet CallFunction, same-Blueprint-owned Pure Function calls with unlinked input literals (native-tested with int), indexless pure-Live MCP startup, and ue_get_pie_scalars with reflected declaring-class provenance. **Candidate code acceptance is not a public release.** Native evidence does not yet cover bool/double/string input literals, Blueprint-declared property provenance, or PIE client scalar values. PIE does not provide executed pin traces or complete GAS state. General Level, AnimGraph, MaterialGraph, and NiagaraGraph writes remain unavailable.
+- GitHub Actions: Python 3.11, 3.12, 3.13, and 3.14 all passed.
+- Windows release validation passed: full Python tests, Ruff, and packaging checks had no failures.
+- UE 5.6 Win64 native UAT passed without AutoSDK junctions.
+- The DLL loaded from the published ZIP passed the `UEAgentKit.P0Pie` native tests with 0 errors and 0 warnings.
+- The release ZIP, wheel, SHA256SUMS, and release-manifest were re-downloaded and compared file by file.
 
-## Compatibility and usage
+These results apply only to the frozen DP1 build; they do not generalize to other UE versions, projects, or later code.
 
-Target: **UE 5.6 / Win64, Python 3.11–3.14** (published 0.8.0: 3.11–3.12). [Build and Run](BUILD_AND_RUN.md) · [Agent Quick Start](AGENT_QUICKSTART_EN.md) · [Developer Workflows](DEVELOPER_WORKFLOWS_EN.md).
+## Installation
 
-The frozen build's `ue_get_capabilities` is authoritative. Publication requires real UE/MCP acceptance, privacy and copyright review, and explicit user approval. No GitHub tag or Release exists for this candidate.
+Download `UEAgentKit-0.9.0.dev1-UE5.6-Win64.zip` from the release, and copy its `UEAgentKit` folder into your project's `Plugins/` directory. Use the matching `ue_agent_kit-0.9.0.dev1-py3-none-any.whl` for Python.
+
+## Limits
+
+Experimental Blueprint writes are off by default, require both an MCP flag and a project ini opt-in, and are limited to disposable test projects. DP1 does not support general Level, AnimGraph, MaterialGraph, or NiagaraGraph writes, and does not provide executed pin traces or complete GAS state. Bool/double/string input literals, Blueprint-declared property provenance, and PIE client scalar values are outside DP1's native coverage.
+
+See [0.9.0 Developer Preview 2](RELEASE_0.9.0_DP2_EN.md) for the next candidate and [0.8.0 release notes](RELEASE_0.8.0_EN.md) for the stable release.
