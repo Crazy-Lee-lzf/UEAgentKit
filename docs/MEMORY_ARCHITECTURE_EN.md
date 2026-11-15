@@ -2,7 +2,7 @@
 
 Updated: 2026-08-03
 
-> Version 0.8.0 provides fixed-project Project Memory with Knowledge Trees, Active Work, progressive context disclosure, deterministic L0/L1 processing, optional hybrid recall, persisted L2/L3 context, and on-demand evidence. A shared team Knowledge Service remains a future direction.
+> The released v0.9.0-dev1 preview retains the fixed-project Memory capabilities introduced in 0.8.0, including Knowledge Trees, Active Work, progressive context disclosure, deterministic L0/L1 processing, optional hybrid recall, persisted L2/L3 context, and on-demand evidence. A shared team Knowledge Service remains a future direction.
 
 ## 1. Goals
 

@@ -13,7 +13,7 @@ from jsonschema import Draft202012Validator
 
 ROOT = Path(__file__).resolve().parents[1]
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(?:\.(?:dev|a|b|rc)\d+)?$")
-PUBLISHED_VERSION = "0.8.0"
+PUBLISHED_VERSION = "0.9.0.dev1"
 
 
 def project_version() -> str:
@@ -106,18 +106,18 @@ def validate_version_sources(expected_version: str | None = None, *, require_rel
         elif any(value != version for value in values):
             issues.append(f"{relative}: inconsistent {field_name} values {values!r}, expected {version}")
 
-    _expect_text(issues, ROOT / "README.md", f"当前已发布版本为 **{PUBLISHED_VERSION}**", "README published version")
+    _expect_text(issues, ROOT / "README.md", f"当前最新公开预发布版本为 **0.9.0 Developer Preview 1（v0.9.0-dev1 / Python {PUBLISHED_VERSION}）**", "README published version")
     _expect_text(
         issues,
         ROOT / "README_EN.md",
-        f"The latest published release is **{PUBLISHED_VERSION}**",
+        f"The latest published prerelease is **0.9.0 Developer Preview 1 (v0.9.0-dev1 / Python {PUBLISHED_VERSION})**",
         "README_EN published version",
     )
-    _expect_text(issues, ROOT / "docs/ROADMAP.md", f"当前已发布版本为 **{PUBLISHED_VERSION}**", "roadmap version")
+    _expect_text(issues, ROOT / "docs/ROADMAP.md", "当前最新公开预发布为 **0.9.0 Developer Preview 1（v0.9.0-dev1）**", "roadmap version")
     _expect_text(
         issues,
         ROOT / "docs/ROADMAP_EN.md",
-        f"The latest published release is **{PUBLISHED_VERSION}**",
+        "The latest published prerelease is **0.9.0 Developer Preview 1 (v0.9.0-dev1)**",
         "roadmap EN version",
     )
     _expect_text(issues, ROOT / "CHANGELOG.md", f"## {version} ", "changelog release heading")
