@@ -84,9 +84,16 @@ class GraphEditDocExampleTests(unittest.TestCase):
         self.assertIn("Config/DefaultEngine.ini", self.text)
         self.assertNotIn("Config/DefaultEditor.ini", self.text)
 
-    def test_write_cli_example_carries_the_three_required_paths(self) -> None:
-        for flag in ("--engine-root", "--policy", "--revision-export"):
-            self.assertIn(flag, self.text, flag)
+    def test_write_example_carries_the_current_gates_and_entry_points(self) -> None:
+        # The write path is the live atomic patch, not the retired offline CLI
+        # (--engine-root / --policy / --revision-export no longer exist).  The
+        # example must still show both gates and the tool it opens.
+        for needle in (
+            "--enable-experimental-graphpatch-edit",
+            "--enable-experimental-node-spawn",
+            "ue_preview_blueprint_patch_experimental",
+        ):
+            self.assertIn(needle, self.text, needle)
 
 
 if __name__ == "__main__":

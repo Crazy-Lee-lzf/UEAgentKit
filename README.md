@@ -4,7 +4,7 @@
 
 UE Agent Kit 是一套面向 **Unreal Engine 5.6** 的开源项目分析与受控修改工具。它把 `.uasset`、Blueprint 语义、引用关系和运行中的 Editor 状态变成可检索的数据，并让 AI Agent 在明确的安全边界内执行窄范围修改。它不是通用图编辑器，也不是任意脚本执行器。
 
-当前已发布版本为 **0.8.0**（稳定版）。最新公开预发布为 **UEAgentKit 0.9.0 Developer Preview 1**（`v0.9.0-dev1`，2026-10-30）；下一版候选为 **0.9.0 Developer Preview 2**（计划版本 `0.9.0.dev2`，尚未发布）。运行环境：**Unreal Engine 5.6 / Windows x64 / Python 3.11–3.14**。
+当前已发布版本为 **0.8.0**（稳定版）。当前最新公开预发布版本为 **0.9.0 Developer Preview 1（v0.9.0-dev1 / Python 0.9.0.dev1）**（2026-10-30）；下一版候选为 **0.9.0 Developer Preview 2**（计划版本 `0.9.0.dev2`，尚未发布）。运行环境：**Unreal Engine 5.6 / Windows x64 / Python 3.11–3.14**。
 
 ## 它能做什么
 

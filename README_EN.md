@@ -4,7 +4,7 @@
 
 UE Agent Kit is an open-source **Unreal Engine 5.6** project-analysis and controlled-mutation toolkit. It turns `.uasset` data, Blueprint semantics, references, and live Editor state into searchable project knowledge, then lets AI agents perform narrow writes behind explicit safety gates. It is not a general graph editor or an arbitrary script executor.
 
-The latest published release is **0.8.0** (stable). The latest prerelease is **UEAgentKit 0.9.0 Developer Preview 1** (`v0.9.0-dev1`, 2026-10-30); the next candidate is **0.9.0 Developer Preview 2** (planned version `0.9.0.dev2`, unreleased). Runtime target: **Unreal Engine 5.6 / Windows x64 / Python 3.11–3.14**.
+The latest published release is **0.8.0** (stable). The latest published prerelease is **0.9.0 Developer Preview 1 (v0.9.0-dev1 / Python 0.9.0.dev1)** (2026-10-30); the next candidate is **0.9.0 Developer Preview 2** (planned version `0.9.0.dev2`, unreleased). Runtime target: **Unreal Engine 5.6 / Windows x64 / Python 3.11–3.14**.
 
 ## What it does
 
