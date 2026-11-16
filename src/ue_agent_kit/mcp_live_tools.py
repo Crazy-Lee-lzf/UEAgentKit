@@ -185,6 +185,88 @@ def register_live_read_tools(
             return error_response("ue_get_pie_scalars", exc, read_only=True)
 
     @server.tool(annotations=read_annotations)
+    def ue_list_pie_object_properties(
+        pie_instance_id: int,
+        actor_path: str = "",
+        actor_guid: str = "",
+        actor_name: str = "",
+        actor_label: str = "",
+        actor_class_path: str = "",
+        component_path: str = "",
+        component_name: str = "",
+        component_class_path: str = "",
+        world_path: str = "",
+        name_contains: str = "",
+        max_properties: int = 128,
+    ) -> dict[str, Any]:
+        """List reflected properties of one exact PIE object with kind and per-type support; no Edit/BlueprintVisible gate."""
+        try:
+            params: dict[str, Any] = {
+                "pieInstanceId": pie_instance_id,
+                "maxProperties": max_properties,
+            }
+            for field, value in (
+                ("actorPath", actor_path),
+                ("actorGuid", actor_guid),
+                ("actorName", actor_name),
+                ("actorLabel", actor_label),
+                ("actorClassPath", actor_class_path),
+                ("componentPath", component_path),
+                ("componentName", component_name),
+                ("componentClassPath", component_class_path),
+                ("worldPath", world_path),
+                ("nameContains", name_contains),
+            ):
+                if value:
+                    params[field] = value
+            return live_editor_service.call_tool("ue_list_pie_object_properties", params)
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_list_pie_object_properties", exc, read_only=True)
+
+    @server.tool(annotations=read_annotations)
+    def ue_read_pie_object_properties(
+        pie_instance_id: int,
+        property_names: list[str],
+        actor_path: str = "",
+        actor_guid: str = "",
+        actor_name: str = "",
+        actor_label: str = "",
+        actor_class_path: str = "",
+        component_path: str = "",
+        component_name: str = "",
+        component_class_path: str = "",
+        world_path: str = "",
+        offset: int = 0,
+        limit: int = 50,
+        max_string_chars: int = 256,
+    ) -> dict[str, Any]:
+        """Read up to 16 named reflected property values from one exact PIE object; containers are paged and object references are identity only."""
+        try:
+            params: dict[str, Any] = {
+                "pieInstanceId": pie_instance_id,
+                "propertyNames": property_names,
+                "offset": offset,
+                "limit": limit,
+                "maxStringChars": max_string_chars,
+            }
+            for field, value in (
+                ("actorPath", actor_path),
+                ("actorGuid", actor_guid),
+                ("actorName", actor_name),
+                ("actorLabel", actor_label),
+                ("actorClassPath", actor_class_path),
+                ("componentPath", component_path),
+                ("componentName", component_name),
+                ("componentClassPath", component_class_path),
+                ("worldPath", world_path),
+            ):
+                if value:
+                    params[field] = value
+            return live_editor_service.call_tool("ue_read_pie_object_properties", params)
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_read_pie_object_properties", exc, read_only=True)
+
+    @server.tool(annotations=read_annotations)
     def ue_get_output_log(
         category: str = "",
         minimum_verbosity: Literal[

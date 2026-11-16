@@ -105,6 +105,18 @@ private:
 		TSharedPtr<FJsonObject>& OutResult,
 		FString& OutErrorCode,
 		FString& OutErrorMessage) const;
+	/** P2: bounded reflective property discovery on one exact PIE object. */
+	bool TryListPieObjectPropertiesResult(
+		const TSharedPtr<FJsonObject>& Params,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage) const;
+	/** P2: bounded reflective property value read on one exact PIE object. */
+	bool TryReadPieObjectPropertiesResult(
+		const TSharedPtr<FJsonObject>& Params,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage) const;
 	TSharedRef<FJsonObject> BuildOutputLogResult(const TSharedPtr<FJsonObject>& Params) const;
 	TSharedRef<FJsonObject> BuildCompileErrorsResult(const TSharedPtr<FJsonObject>& Params) const;
 	TSharedRef<FJsonObject> BuildInspectAssetLiveResult(const FString& AssetPath) const;

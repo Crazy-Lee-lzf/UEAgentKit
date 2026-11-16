@@ -219,6 +219,62 @@ simulating
 
 当存在 Play World 时同时返回 World Path、World Type 和 Net Mode。
 
+### editor.listPieObjectProperties / editor.readPieObjectProperties
+
+PIE 通用反射属性读取（MCP：`ue_list_pie_object_properties` / `ue_read_pie_object_properties`）。两者都只读同一份 Editor 内存：不建事务、不改对象、不编译、不 Save、不打开 SQLite 索引。
+
+目标身份：
+
+```text
+pieInstanceId            必填；精确 PIE 实例（0 为主实例），Server/Client 不混
+worldPath                可选；不匹配返回 pie-world-stale
+actorPath / actorGuid / actorName / actorLabel
+                         恰好一个
+componentPath / componentName
+                         至多一个；定位该 Actor 拥有的组件
+componentClassPath       可选；要求已给出组件身份，不匹配返回 pie-component-stale
+```
+
+`list` 额外接受 `nameContains`（大小写不敏感子串）与 `maxProperties`（1..512，默认 128）。返回 `objectPath`、`classPath`、`worldKey`、`pieInstanceId`、`totalCount`、`matchedCount`、`returnedCount`、`truncated`，以及按声明名稳定排序的 `properties[]`：
+
+```text
+name, type（声明 C++ 类型）, typeKind,
+isArray / isMap / isSet / isStruct / isObjectRef,
+supported(bool), unsupportedReason（仅 supported=false 时出现）
+```
+
+`read` 额外接受 `propertyNames`（1..16，去重后校验）、`offset`（≥0）、`limit`（1..200，默认 50）、`maxStringChars`（32..512，默认 256）。返回 `properties[]`，每项含 `name`、`type`、`typeKind`、`status`、`valueReturned`，并按形状附加：
+
+```text
+标量      value；int64/uint64 超出 2^53 时改为字符串并置 valueAsString=true
+enum      value（短名）、enumName、enumEntry、enumEntryKnown、numericValue
+struct    structName、members[] { name, type, typeKind, supported, reason?, value|members }
+          成员嵌套上限 4 层、每 struct 最多 64 个成员
+array     containerKind、elementType、elementTypeKind、
+set       totalCount、offset、limit、returnedCount、hasMore、items[]
+map       keyType/keyTypeKind、valueType/valueTypeKind、
+          items[] { index, key, value }
+对象引用  objectRef { path, class, worldKey, pieInstanceId, isNull, inPieWorld, truncated }
+          只给身份；不展开被引用对象的属性、不解析 soft reference、不触发加载
+```
+
+`status` 取值：
+
+```text
+ok               值已返回
+unsupported-type 类型无法安全解码；带 reason 且 valueReturned=false，不返回值
+unknown          属性不存在（reason=property-not-found）或实例上不可读
+not-exposed      属于 `editor.getPieScalars` 的可见性门槛；P2 不据此拒绝，因此不产生
+```
+
+`typeKind` 是封闭词表：`bool,int8,int16,int32,int64,uint8,uint16,uint32,uint64,float,double,name,string,enum,struct,array,set,map,object,class,softObject,softClass,weakObject`；`text,delegate,multicastDelegate,interface,fieldPath,bitfield,lazyObject,unknown` 一律 `unsupported-type`，`reason` 分别为 `text-not-readable`、`delegate-not-readable`、`interface-not-readable`、`field-path-not-readable`、`bitfield-not-readable`、`lazy-object-not-readable`、`type-not-supported`。`lazyObject` 被拒绝是因为解析它会强制加载 Package。
+
+读门槛：**不以 `CPF_Edit` / `CPF_BlueprintVisible` 为门槛**，也不因 `CPF_NativeAccessSpecifierPrivate` 拒绝；只按上表的类型可解码性判断。`nested-container-not-supported` 与 `struct-depth-exceeded` 是防御性拒绝（UHT 本身禁止嵌套 UPROPERTY 容器）。
+
+单次响应有界：容器元素总数 512、字符串总预算 256K 字符；耗尽时对应项返回 `unknown` + `response-budget-exhausted`，不静默截断。
+
+错误码沿用 P0/P1 家族：`pie-not-running`、`pie-instance-not-found`、`pie-instance-stale`、`pie-instance-ambiguous`、`pie-world-stale`、`pie-actor-not-found`、`pie-actor-ambiguous`、`pie-actor-stale`、`pie-component-not-found`、`pie-component-ambiguous`、`pie-component-stale`、`pie-actor-scan-truncated`、`pie-context-scan-truncated`、`pie-invalid-parameters`。
+
 ### ue_get_output_log
 
 Bridge 注册为 `FOutputDevice`，保留最多 4096 条当前会话日志，并在启动时读取可用 Backlog。查询支持 `category`、`minimum_verbosity`、`keyword`、`since_sequence`、`since_utc`、`until_utc`、`pie_session_id` 和 `limit`；单次最多 100 条。每条结果包含单调递增 Sequence、UTC、Category、Verbosity、Thread、PIE Session 和是否来自 Backlog。缓冲淘汰数量通过 `droppedCount` 明确返回。

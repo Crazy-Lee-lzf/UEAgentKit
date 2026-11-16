@@ -1446,7 +1446,7 @@ class AgentWorkflowTests(unittest.TestCase):
 
     def test_live_write_tool_count_and_names_include_verification_trust(self) -> None:
         names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
-        self.assertEqual(len(names), 119)
+        self.assertEqual(len(names), 121)
         self.assertIn("ue_get_pie_world_contexts", names)
         self.assertIn("ue_inspect_pie_actor", names)
         self.assertIn("ue_analyze_change_impact", names)

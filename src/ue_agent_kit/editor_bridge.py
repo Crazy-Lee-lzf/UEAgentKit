@@ -20,6 +20,8 @@ DEFAULT_TIMEOUT_SECONDS = 2.0
 
 # Scalar snapshots accept only immediate reflected field identifiers.
 _PURE_PROPERTY_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+# P2 property names are the same identifier shape with a wider bound.
+_OBJECT_PROPERTY_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 
 
 LIVE_LOG_VERBOSITIES = {
@@ -39,6 +41,8 @@ _CAPABILITY_GATED_TOOLS = {
     "ue_list_pie_actors": "editor.listPieActors",
     "ue_inspect_pie_actor": "editor.inspectPieActor",
     "ue_get_pie_scalars": "editor.getPieScalars",
+    "ue_list_pie_object_properties": "editor.listPieObjectProperties",
+    "ue_read_pie_object_properties": "editor.readPieObjectProperties",
     "ue_start_batch_task": "editor.batchTask.start",
     "ue_get_batch_task": "editor.batchTask.status",
     "ue_cancel_batch_task": "editor.batchTask.cancel",
@@ -677,6 +681,87 @@ class LiveEditorBridgeService:
                 names.append(text)
             normalized["propertyNames"] = names
             return normalized
+        if tool_name == "ue_list_pie_object_properties":
+            allowed = {
+                "pieInstanceId",
+                "worldPath",
+                "actorPath",
+                "actorGuid",
+                "actorName",
+                "actorLabel",
+                "actorClassPath",
+                "componentPath",
+                "componentName",
+                "componentClassPath",
+                "nameContains",
+                "maxProperties",
+            }
+            LiveEditorBridgeService._reject_unknown_params(params, allowed)
+            normalized: dict[str, Any] = {}
+            LiveEditorBridgeService._normalize_pie_object_target(params, normalized)
+            raw_name_contains = params.get("nameContains", "")
+            if raw_name_contains not in ("", None):
+                normalized["nameContains"] = LiveEditorBridgeService._bounded_string(
+                    raw_name_contains, "nameContains", 256)
+            normalized["maxProperties"] = LiveEditorBridgeService._bounded_integer(
+                params.get("maxProperties", 128), "maxProperties", 1, 512)
+            return normalized
+        if tool_name == "ue_read_pie_object_properties":
+            allowed = {
+                "pieInstanceId",
+                "worldPath",
+                "actorPath",
+                "actorGuid",
+                "actorName",
+                "actorLabel",
+                "actorClassPath",
+                "componentPath",
+                "componentName",
+                "componentClassPath",
+                "propertyNames",
+                "offset",
+                "limit",
+                "maxStringChars",
+            }
+            LiveEditorBridgeService._reject_unknown_params(params, allowed)
+            normalized = {}
+            LiveEditorBridgeService._normalize_pie_object_target(params, normalized)
+            normalized["offset"] = LiveEditorBridgeService._bounded_integer(
+                params.get("offset", 0), "offset", 0)
+            normalized["limit"] = LiveEditorBridgeService._bounded_integer(
+                params.get("limit", 50), "limit", 1, 200)
+            normalized["maxStringChars"] = LiveEditorBridgeService._bounded_integer(
+                params.get("maxStringChars", 256), "maxStringChars", 32, 512)
+
+            raw_names = params.get("propertyNames", [])
+            if not isinstance(raw_names, list) or not raw_names:
+                raise LiveEditorError(
+                    "live-editor-invalid-parameters",
+                    "propertyNames must contain between 1 and 16 reflected property identifiers.",
+                )
+            # The names are validated here and de-duplicated here only to bound
+            # the request; the original list is passed through so the Bridge can
+            # report exactly which names it collapsed.
+            names: list[str] = []
+            distinct: list[str] = []
+            for raw_name in raw_names:
+                text = LiveEditorBridgeService._bounded_string(raw_name, "propertyNames", 128)
+                if not _OBJECT_PROPERTY_IDENTIFIER.fullmatch(text):
+                    raise LiveEditorError(
+                        "live-editor-invalid-parameters",
+                        "propertyNames entries must be plain identifiers; dotted paths, "
+                        "indices and non-reflected shapes are rejected.",
+                    )
+                if text not in distinct:
+                    distinct.append(text)
+                names.append(text)
+            if len(distinct) > 16:
+                raise LiveEditorError(
+                    "live-editor-invalid-parameters",
+                    "propertyNames must contain at most 16 distinct names after de-duplication.",
+                )
+            normalized["propertyNames"] = names
+            return normalized
         if tool_name == "ue_start_batch_task":
             allowed = {"operation", "maxActors", "maxComponentsPerActor", "timeoutSeconds"}
             LiveEditorBridgeService._reject_unknown_params(params, allowed)
@@ -828,6 +913,40 @@ class LiveEditorBridgeService:
         if "actorGuid" in normalized:
             LiveEditorBridgeService._validate_guid(normalized["actorGuid"], "actorGuid")
             normalized["actorGuid"] = normalized["actorGuid"].lower()
+
+    @staticmethod
+    def _normalize_pie_object_target(params: dict[str, Any], normalized: dict[str, Any]) -> None:
+        """P2 target policy: exact instance, one Actor identity, at most one Component."""
+        normalized["pieInstanceId"] = LiveEditorBridgeService._bounded_integer(
+            params.get("pieInstanceId", -1), "pieInstanceId", 0)
+        LiveEditorBridgeService._normalize_actor_identity(params, normalized)
+
+        component_identities = 0
+        for field, maximum in (("componentPath", 512), ("componentName", 256)):
+            raw_value = params.get(field, "")
+            if not raw_value:
+                continue
+            text = LiveEditorBridgeService._bounded_string(raw_value, field, maximum)
+            if not text:
+                continue
+            if field == "componentPath":
+                LiveEditorBridgeService._validate_live_object_path(text, field)
+            component_identities += 1
+            normalized[field] = text
+        if component_identities > 1:
+            raise LiveEditorError(
+                "live-editor-invalid-parameters",
+                "Provide at most one Component identity: componentPath or componentName.",
+            )
+        if params.get("componentClassPath"):
+            if component_identities != 1:
+                raise LiveEditorError(
+                    "live-editor-invalid-parameters",
+                    "componentClassPath requires componentPath or componentName.",
+                )
+            LiveEditorBridgeService._normalize_optional_object_path(
+                params, normalized, "componentClassPath")
+        LiveEditorBridgeService._normalize_optional_object_path(params, normalized, "worldPath")
 
     @staticmethod
     def _normalize_optional_object_path(

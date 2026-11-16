@@ -1,4 +1,5 @@
 #include "PieRuntimeInspection.h"
+#include "PieObjectProperties.h"
 
 #include "EditorBridge.h"
 #include "EditorBridgeHandlerUtils.h"
@@ -1276,74 +1277,21 @@ namespace UEAgentKitPieRuntime
 
 		if (!Request.ComponentPath.IsEmpty() || !Request.ComponentName.IsEmpty())
 		{
-			TArray<UActorComponent*> Components;
-			Actor->GetComponents(Components);
+			// One shared Component resolver: the P1 scalar read and the P2
+			// property readers must agree on identity, ambiguity and stale
+			// handling, so the logic lives in exactly one place.
 			UActorComponent* ComponentMatch = nullptr;
-			int32 ComponentMatchCount = 0;
-			TArray<FString> ComponentCandidates;
-			for (UActorComponent* Candidate : Components)
+			const EFailure ComponentFailure = ResolvePieComponentExact(
+				Actor,
+				Request.Actor.PieInstanceId,
+				Request.ComponentPath,
+				Request.ComponentName,
+				Request.ComponentClassPath,
+				ComponentMatch,
+				Message);
+			if (ComponentFailure != EFailure::None)
 			{
-				if (Candidate == nullptr)
-				{
-					continue;
-				}
-				const bool bMatches = !Request.ComponentPath.IsEmpty()
-					? PathEqualsExact(Candidate->GetPathName(), Request.ComponentPath)
-					: PathEqualsExact(Candidate->GetName(), Request.ComponentName);
-				if (!bMatches)
-				{
-					continue;
-				}
-				++ComponentMatchCount;
-				if (ComponentMatch == nullptr)
-				{
-					ComponentMatch = Candidate;
-				}
-				if (ComponentCandidates.Num() < MaxAmbiguousCandidates)
-				{
-					ComponentCandidates.Add(Candidate->GetPathName());
-				}
-			}
-			if (ComponentMatchCount == 0 || ComponentMatch == nullptr)
-			{
-				return Fail(
-					EFailure::ComponentNotFound,
-					FString::Printf(
-						TEXT("No owned Component of Actor '%s' matches the requested identity in PIE instance %d."),
-						*Actor->GetPathName(),
-						Request.Actor.PieInstanceId));
-			}
-			if (ComponentMatchCount > 1)
-			{
-				return Fail(
-					EFailure::ComponentAmbiguous,
-					FString::Printf(
-						TEXT("The Component identity matches %d owned Components in PIE instance %d; use componentPath. Bounded candidates: %s"),
-						ComponentMatchCount,
-						Request.Actor.PieInstanceId,
-						*JoinCandidatePaths(ComponentCandidates)));
-			}
-			if (ComponentMatch->IsBeingDestroyed())
-			{
-				return Fail(
-					EFailure::ComponentNotFound,
-					FString::Printf(
-						TEXT("The matched Component '%s' is being destroyed."),
-						*ComponentMatch->GetPathName()));
-			}
-			if (!Request.ComponentClassPath.IsEmpty()
-				&& (ComponentMatch->GetClass() == nullptr
-					|| !PathEqualsExact(ComponentMatch->GetClass()->GetPathName(), Request.ComponentClassPath)))
-			{
-				return Fail(
-					EFailure::ComponentStale,
-					FString::Printf(
-						TEXT("Component '%s' is class '%s', not the expected '%s'."),
-						*ComponentMatch->GetPathName(),
-						ComponentMatch->GetClass() != nullptr
-							? *ComponentMatch->GetClass()->GetPathName()
-							: TEXT(""),
-						*Request.ComponentClassPath));
+				return Fail(ComponentFailure, Message);
 			}
 			Target = ComponentMatch;
 			bComponentTarget = true;
