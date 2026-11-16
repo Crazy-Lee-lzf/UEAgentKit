@@ -19,11 +19,18 @@ The MCP server must be pinned to the project with Live Editor enabled and PIE ru
 ```text
 ue_get_pie_state()
 ue_get_pie_world_contexts(max_contexts=16)
+ue_list_pie_actors(
+    world_context_id="<contextId from the World list>",   # or pie_instance_id=<integer>
+    offset=0, limit=50,
+    name_contains="", class_contains="", tag_contains=""
+)
 ue_inspect_pie_actor(
     pie_instance_id=<integer from the World list>,
     actor_path="<exact Actor path in that PIE World>"
 )
 ```
+
+`ue_list_pie_actors` lists Actor summaries (path/name/class/transform/NetRole/owner/tags) inside exactly one PIE World, ordered by object path and paginated; the name/class/tag filters are case-insensitive substrings and Server and Client worlds are never merged. `totalCount`/`truncated` say whether the page is the whole set; keep the same `worldContextId` and filters to reproduce the next page.
 
 Pass **only one** of `actor_path`, `actor_guid`, `actor_name`, and `actor_label`. Choose the exact Server/Client `pieInstanceId` returned by the World list; do not guess. `world_path` can further constrain identity. The result includes Actor class, Transform, NetRole and bounded Component information, not runtime pin values or complete GAS state.
 

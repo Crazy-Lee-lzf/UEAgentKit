@@ -1838,65 +1838,102 @@ bool FUEAgentKitP0PieContractTest::RunTest(const FString& Parameters)
 		TryDescribePieActor(NotRunning, Result, Code, Message));
 	TestEqual(TEXT("P0Pie Actor inspection without PIE returns pie-not-running"), Code, NotRunningCode);
 
-	// ---- P1: Actor listing contract codes without PIE ------------------------
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUEAgentKitPieActorListContractTest,
+	"UEAgentKit.P0Pie.ActorListContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUEAgentKitPieActorListContractTest::RunTest(const FString& Parameters)
+{
+	using namespace UEAgentKitPieRuntime;
+
+	ResetPieInstanceHistoryForTests();
+
 	TSharedPtr<FJsonObject> ListResult;
 	FString ListCode;
 	FString ListMessage;
+	const FString NotRunningCode(FailureCode(EFailure::InstanceNotRunning));
+	const FString InvalidCode(FailureCode(EFailure::InvalidRequest));
 
 	FActorListRequest ListNotRunning;
 	ListNotRunning.PieInstanceId = 1;
 	TestFalse(
-		TEXT("P0Pie Actor listing without PIE is rejected"),
+		TEXT("PieActorList without PIE is rejected"),
 		TryListPieActors(ListNotRunning, ListResult, ListCode, ListMessage));
 	TestEqual(
-		TEXT("P0Pie Actor listing without PIE returns pie-not-running"),
+		TEXT("PieActorList without PIE returns pie-not-running"),
 		ListCode,
 		NotRunningCode);
 	TestTrue(
-		TEXT("P0Pie Actor listing without PIE reports no result object"),
+		TEXT("PieActorList without PIE reports no result object"),
 		!ListResult.IsValid());
 
 	FActorListRequest ListNoIdentity;
 	ListNoIdentity.Limit = 10;
 	TestFalse(
-		TEXT("P0Pie Actor listing without a world identity is rejected"),
+		TEXT("PieActorList without a world identity is rejected"),
 		TryListPieActors(ListNoIdentity, ListResult, ListCode, ListMessage));
 	TestEqual(
-		TEXT("P0Pie Actor listing without identity returns pie-invalid-parameters"),
+		TEXT("PieActorList without identity returns pie-invalid-parameters"),
 		ListCode,
-		FString(TEXT("pie-invalid-parameters")));
+		InvalidCode);
+
+	FActorListRequest ListBothIdentities;
+	ListBothIdentities.PieInstanceId = 1;
+	ListBothIdentities.WorldContextId = TEXT("pie-1-listenServer");
+	TestFalse(
+		TEXT("PieActorList with two world identities is rejected"),
+		TryListPieActors(ListBothIdentities, ListResult, ListCode, ListMessage));
+	TestEqual(
+		TEXT("PieActorList with two identities returns pie-invalid-parameters"),
+		ListCode,
+		InvalidCode);
 
 	FActorListRequest ListNegativeOffset;
 	ListNegativeOffset.PieInstanceId = 1;
 	ListNegativeOffset.Offset = -1;
 	TestFalse(
-		TEXT("P0Pie Actor listing with a negative offset is rejected"),
+		TEXT("PieActorList with a negative offset is rejected"),
 		TryListPieActors(ListNegativeOffset, ListResult, ListCode, ListMessage));
 	TestEqual(
-		TEXT("P0Pie Actor listing negative offset returns pie-invalid-parameters"),
+		TEXT("PieActorList negative offset returns pie-invalid-parameters"),
 		ListCode,
-		FString(TEXT("pie-invalid-parameters")));
+		InvalidCode);
 
 	FActorListRequest ListZeroLimit;
 	ListZeroLimit.PieInstanceId = 1;
 	ListZeroLimit.Limit = 0;
 	TestFalse(
-		TEXT("P0Pie Actor listing with a zero limit is rejected"),
+		TEXT("PieActorList with a zero limit is rejected"),
 		TryListPieActors(ListZeroLimit, ListResult, ListCode, ListMessage));
 	TestEqual(
-		TEXT("P0Pie Actor listing zero limit returns pie-invalid-parameters"),
+		TEXT("PieActorList zero limit returns pie-invalid-parameters"),
 		ListCode,
-		FString(TEXT("pie-invalid-parameters")));
+		InvalidCode);
+
+	FActorListRequest ListTooLargeLimit;
+	ListTooLargeLimit.PieInstanceId = 1;
+	ListTooLargeLimit.Limit = MaxActorListLimit + 1;
+	TestFalse(
+		TEXT("PieActorList with an oversized limit still reaches world resolution"),
+		TryListPieActors(ListTooLargeLimit, ListResult, ListCode, ListMessage));
+	TestEqual(
+		TEXT("PieActorList clamps an oversized limit instead of refusing the request"),
+		ListCode,
+		NotRunningCode);
 
 	FActorListRequest ListUnknownContext;
 	ListUnknownContext.WorldContextId = TEXT("pie-1234-server");
 	TestFalse(
-		TEXT("P0Pie Actor listing with an unknown worldContextId is rejected"),
+		TEXT("PieActorList with an unknown worldContextId is rejected"),
 		TryListPieActors(ListUnknownContext, ListResult, ListCode, ListMessage));
 	TestEqual(
-		TEXT("P0Pie Actor listing unknown worldContextId returns pie-instance-not-found"),
+		TEXT("PieActorList unknown worldContextId returns pie-instance-not-found"),
 		ListCode,
-		FString(TEXT("pie-instance-not-found")));
+		FString(FailureCode(EFailure::InstanceNotFound)));
 
 	return true;
 }

@@ -19,11 +19,18 @@
 ```text
 ue_get_pie_state()
 ue_get_pie_world_contexts(max_contexts=16)
+ue_list_pie_actors(
+    world_context_id="<World 列表返回的 contextId>",   # 或 pie_instance_id=<整数>
+    offset=0, limit=50,
+    name_contains="", class_contains="", tag_contains=""
+)
 ue_inspect_pie_actor(
     pie_instance_id=<World 列表返回的整数>,
     actor_path="<该 PIE World 的精确 Actor 路径>"
 )
 ```
+
+`ue_list_pie_actors` 只列一个精确 PIE World 的 Actor 概要（path/name/class/transform/NetRole/owner/tags），按 object path 稳定排序并分页；Name/Class/Tag 都是大小写不敏感子串过滤，Server 与 Client 世界永不混合。`totalCount`/`truncated` 说明这一页是否是全部；翻页时保持同一 `worldContextId` 和过滤条件即可复现。
 
 `ue_inspect_pie_actor` 的 `actor_path` / `actor_guid` / `actor_name` / `actor_label` **只能选一个**。从 World 列表选择确切的 Server/Client `pieInstanceId`，不要猜测；必要时传 `world_path`。返回 Actor 类、Transform、NetRole 及有界组件信息，不提供运行时 Pin 或完整 GAS 状态。
 
