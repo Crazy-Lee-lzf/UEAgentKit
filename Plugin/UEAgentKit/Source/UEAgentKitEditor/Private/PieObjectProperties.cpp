@@ -4,12 +4,14 @@
 
 #include "Components/ActorComponent.h"
 #include "Dom/JsonValue.h"
+#include "Engine/Level.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Misc/DateTime.h"
 #include "UObject/EnumProperty.h"
 #include "UObject/FieldPathProperty.h"
 #include "UObject/TextProperty.h"
+#include "UObject/UObjectGlobals.h"
 #include "UObject/UnrealType.h"
 
 namespace UEAgentKitPieRuntime
@@ -128,6 +130,8 @@ namespace UEAgentKitPieRuntime
 			int32 Offset = 0;
 			int32 Limit = DefaultContainerPageLimit;
 			const TArray<FWorldContextSnapshot>* AllContexts = nullptr;
+			/** The world the request was resolved in; used to flag cross-world refs. */
+			const FWorldContextSnapshot* SourceSnapshot = nullptr;
 			int32 RemainingItems = MaxReturnedContainerItems;
 			int32 RemainingChars = MaxReturnedPropertyChars;
 
@@ -153,6 +157,141 @@ namespace UEAgentKitPieRuntime
 		};
 
 		FPropertySupport EvaluateSupportInternal(const FProperty* Property, const int32 Depth);
+
+		/**
+		 * Shape gate for a P3 object path.
+		 *
+		 * Deliberately shape-only: it never decides whether an object exists.  A
+		 * well shaped path that resolves to nothing is `pie-object-not-found`, and
+		 * a path that resolves outside the requested world is `pie-world-stale`,
+		 * so the two failures stay distinguishable.
+		 */
+		bool IsExactLiveObjectPath(const FString& Path)
+		{
+			if (Path.IsEmpty() || Path.Len() > MaxReferencedObjectPathChars)
+			{
+				return false;
+			}
+			if (!Path.StartsWith(TEXT("/"), ESearchCase::CaseSensitive) || !Path.Contains(TEXT(".")))
+			{
+				return false;
+			}
+			if (Path.Contains(TEXT("\\")) || Path.Contains(TEXT("//")) || Path.Contains(TEXT("..")))
+			{
+				return false;
+			}
+			if (Path.EndsWith(TEXT("."), ESearchCase::CaseSensitive))
+			{
+				return false;
+			}
+			for (const TCHAR Character : Path)
+			{
+				if (Character < 32)
+				{
+					return false;
+				}
+			}
+			return true;
+		}
+
+		/**
+		 * Exact lookup of an already loaded UObject by full path.
+		 *
+		 * FindObject never loads a package, so a reference into an unloaded asset
+		 * reports not-found instead of pulling content in.
+		 */
+		UObject* FindLiveObjectByPath(const FString& Path)
+		{
+			return FindObject<UObject>(nullptr, *Path);
+		}
+
+		/**
+		 * The world a UObject belongs to, or null when it belongs to none.
+		 *
+		 * Engine objects answer GetWorld() directly; a plain subobject does not, so
+		 * the bounded outer chain is walked as well.  A ULevel is special because
+		 * its Outer is the package, not the world.
+		 */
+		const UWorld* FindWorldOfObject(const UObject* Object)
+		{
+			if (Object == nullptr)
+			{
+				return nullptr;
+			}
+			if (const UWorld* OwnWorld = Object->GetWorld())
+			{
+				return OwnWorld;
+			}
+			if (const ULevel* AsLevel = Cast<ULevel>(Object))
+			{
+				if (AsLevel->OwningWorld != nullptr)
+				{
+					return AsLevel->OwningWorld;
+				}
+			}
+			const UObject* Cursor = Object->GetOuter();
+			for (int32 Step = 0; Cursor != nullptr && Step < MaxOuterChainSteps; ++Step)
+			{
+				if (const UWorld* OuterWorld = Cursor->GetWorld())
+				{
+					return OuterWorld;
+				}
+				if (const ULevel* AsLevel = Cast<ULevel>(Cursor))
+				{
+					if (AsLevel->OwningWorld != nullptr)
+					{
+						return AsLevel->OwningWorld;
+					}
+				}
+				Cursor = Cursor->GetOuter();
+			}
+			return nullptr;
+		}
+
+		/** The Actor that owns this object, when one is reachable. */
+		AActor* FindOwningActorOf(UObject* Object)
+		{
+			if (Object == nullptr)
+			{
+				return nullptr;
+			}
+			if (AActor* AsActor = Cast<AActor>(Object))
+			{
+				return AsActor;
+			}
+			if (UActorComponent* AsComponent = Cast<UActorComponent>(Object))
+			{
+				return AsComponent->GetOwner();
+			}
+			UObject* Cursor = Object->GetOuter();
+			for (int32 Step = 0; Cursor != nullptr && Step < MaxOuterChainSteps; ++Step)
+			{
+				if (AActor* AsActor = Cast<AActor>(Cursor))
+				{
+					return AsActor;
+				}
+				Cursor = Cursor->GetOuter();
+			}
+			return nullptr;
+		}
+
+		/** Stable `targetKind` for one resolved object. */
+		const TCHAR* TargetKindOf(const UObject* Object)
+		{
+			if (Object == nullptr)
+			{
+				return TEXT("object");
+			}
+			if (Object->IsA<AActor>())
+			{
+				return TEXT("actor");
+			}
+			if (Object->IsA<UActorComponent>())
+			{
+				return TEXT("component");
+			}
+			return TEXT("object");
+		}
 
 		/** The owning class path, truncated like every other reported path. */
 		void AddDeclaringClass(const FProperty* Property, const TSharedRef<FJsonObject>& Item)
@@ -195,6 +334,11 @@ namespace UEAgentKitPieRuntime
 				ObjectRef->SetStringField(TEXT("worldKey"), FString());
 				ObjectRef->SetNumberField(TEXT("pieInstanceId"), -1);
 				ObjectRef->SetBoolField(TEXT("inPieWorld"), false);
+				ObjectRef->SetBoolField(TEXT("crossWorld"), false);
+				ObjectRef->SetBoolField(TEXT("propertiesReadable"), false);
+				ObjectRef->SetStringField(TEXT("outerPath"), FString());
+				ObjectRef->SetBoolField(TEXT("outerPathTruncated"), false);
+				ObjectRef->SetStringField(TEXT("outerClass"), FString());
 				ObjectRef->SetBoolField(TEXT("truncated"), false);
 				return ObjectRef;
 			}
@@ -216,19 +360,9 @@ namespace UEAgentKitPieRuntime
 				Object->GetClass() != nullptr ? Object->GetClass()->GetPathName() : FString());
 			ObjectRef->SetStringField(TEXT("name"), Object->GetName());
 
-			const UWorld* World = nullptr;
-			if (const UWorld* AsWorld = Cast<UWorld>(Object))
-			{
-				World = AsWorld;
-			}
-			else if (const AActor* AsActor = Cast<AActor>(Object))
-			{
-				World = AsActor->GetWorld();
-			}
-			else if (const UActorComponent* AsComponent = Cast<UActorComponent>(Object))
-			{
-				World = AsComponent->GetWorld();
-			}
+			// One world derivation for every reference, including plain
+			// subobjects whose Outer chain reaches a live PIE world.
+			const UWorld* World = FindWorldOfObject(Object);
 
 			FString WorldKey;
 			int32 PieInstanceId = INDEX_NONE;
@@ -244,9 +378,38 @@ namespace UEAgentKitPieRuntime
 					}
 				}
 			}
+			const bool bInPieWorld = !WorldKey.IsEmpty();
+			// P3: a reference that resolves into a *different* live PIE world is
+			// reported as such instead of being silently treated as local.  Such a
+			// reference cannot be navigated from this world, so `propertiesReadable`
+			// is false and the next hop is refused with pie-world-stale.
+			const bool bCrossWorld = bInPieWorld
+				&& Ctx.SourceSnapshot != nullptr
+				&& !WorldKey.Equals(Ctx.SourceSnapshot->ContextId, ESearchCase::CaseSensitive);
 			ObjectRef->SetStringField(TEXT("worldKey"), WorldKey);
 			ObjectRef->SetNumberField(TEXT("pieInstanceId"), PieInstanceId);
-			ObjectRef->SetBoolField(TEXT("inPieWorld"), !WorldKey.IsEmpty());
+			ObjectRef->SetBoolField(TEXT("inPieWorld"), bInPieWorld);
+			ObjectRef->SetBoolField(TEXT("crossWorld"), bCrossWorld);
+			ObjectRef->SetBoolField(TEXT("propertiesReadable"), bInPieWorld && !bCrossWorld);
+
+			bool bOuterTruncated = false;
+			int32 OuterOriginalLength = 0;
+			const UObject* Outer = Object->GetOuter();
+			ObjectRef->SetStringField(
+				TEXT("outerPath"),
+				Outer != nullptr
+					? TruncateChars(
+						Outer->GetPathName(),
+						MaxReferencedObjectPathChars,
+						bOuterTruncated,
+						OuterOriginalLength)
+					: FString());
+			ObjectRef->SetBoolField(TEXT("outerPathTruncated"), bOuterTruncated);
+			ObjectRef->SetStringField(
+				TEXT("outerClass"),
+				Outer != nullptr && Outer->GetClass() != nullptr
+					? Outer->GetClass()->GetPathName()
+					: FString());
 			return ObjectRef;
 		}
 
@@ -272,6 +435,11 @@ namespace UEAgentKitPieRuntime
 			ObjectRef->SetStringField(TEXT("worldKey"), FString());
 			ObjectRef->SetNumberField(TEXT("pieInstanceId"), -1);
 			ObjectRef->SetBoolField(TEXT("inPieWorld"), false);
+			ObjectRef->SetBoolField(TEXT("crossWorld"), false);
+			ObjectRef->SetBoolField(TEXT("propertiesReadable"), false);
+			ObjectRef->SetStringField(TEXT("outerPath"), FString());
+			ObjectRef->SetBoolField(TEXT("outerPathTruncated"), false);
+			ObjectRef->SetStringField(TEXT("outerClass"), FString());
 			ObjectRef->SetBoolField(TEXT("resolved"), false);
 			return ObjectRef;
 		}
@@ -1128,10 +1296,16 @@ namespace UEAgentKitPieRuntime
 			Result->SetStringField(TEXT("serverOrClient"), Snapshot.ServerOrClient);
 			Result->SetBoolField(TEXT("isServer"), Snapshot.bIsServer);
 			Result->SetBoolField(TEXT("isClient"), Snapshot.bIsClient);
-			Result->SetStringField(TEXT("targetKind"), Resolved.bIsComponent ? TEXT("component") : TEXT("actor"));
+			// Derived from the resolved object itself, so an Actor target reached
+			// through objectPath still reports targetKind=actor.
+			Result->SetStringField(TEXT("targetKind"), TargetKindOf(Resolved.Target));
+
+			AActor* OwningActor = Resolved.Actor != nullptr
+				? Resolved.Actor
+				: FindOwningActorOf(Resolved.Target);
 			Result->SetStringField(
 				TEXT("actorPath"),
-				Resolved.Actor != nullptr ? Resolved.Actor->GetPathName() : FString());
+				OwningActor != nullptr ? OwningActor->GetPathName() : FString());
 			Result->SetStringField(
 				TEXT("objectPath"),
 				Resolved.Target != nullptr ? Resolved.Target->GetPathName() : FString());
@@ -1142,6 +1316,28 @@ namespace UEAgentKitPieRuntime
 				TEXT("classPath"),
 				Resolved.Target != nullptr && Resolved.Target->GetClass() != nullptr
 					? Resolved.Target->GetClass()->GetPathName()
+					: FString());
+
+			// P3 identity echo: the outer chain lets a caller walk upwards without
+			// a second lookup, and `outerPath` is the exact path form a caller can
+			// pass back in as objectPath.
+			bool bOuterTruncated = false;
+			int32 OuterOriginalLength = 0;
+			const UObject* Outer = Resolved.Target != nullptr ? Resolved.Target->GetOuter() : nullptr;
+			Result->SetStringField(
+				TEXT("outerPath"),
+				Outer != nullptr
+					? TruncateChars(
+						Outer->GetPathName(),
+						MaxReferencedObjectPathChars,
+						bOuterTruncated,
+						OuterOriginalLength)
+					: FString());
+			Result->SetBoolField(TEXT("outerPathTruncated"), bOuterTruncated);
+			Result->SetStringField(
+				TEXT("outerClassPath"),
+				Outer != nullptr && Outer->GetClass() != nullptr
+					? Outer->GetClass()->GetPathName()
 					: FString());
 		}
 	}
@@ -1502,6 +1698,78 @@ namespace UEAgentKitPieRuntime
 		OutResolved = FResolvedPropertyTarget();
 		OutErrorMessage.Reset();
 
+		// ---- P3: an arbitrary UObject inside exactly one PIE world ------------
+		if (!Request.ObjectPath.IsEmpty())
+		{
+			if (!Request.Actor.ActorPath.IsEmpty()
+				|| !Request.Actor.ActorGuid.IsEmpty()
+				|| !Request.Actor.ActorName.IsEmpty()
+				|| !Request.Actor.ActorLabel.IsEmpty())
+			{
+				OutErrorMessage = TEXT("objectPath is a complete target on its own; do not combine it with an Actor identity.");
+				return EFailure::InvalidRequest;
+			}
+			if (!Request.ComponentPath.IsEmpty()
+				|| !Request.ComponentName.IsEmpty()
+				|| !Request.ComponentClassPath.IsEmpty())
+			{
+				OutErrorMessage = TEXT("objectPath addresses the exact object directly; Component identities apply to Actor targets only.");
+				return EFailure::InvalidRequest;
+			}
+			if (Request.Actor.PieInstanceId < 0)
+			{
+				OutErrorMessage = TEXT("pieInstanceId must be the exact PIE instance id reported by editor.getPieWorldContexts (0 is the primary instance).");
+				return EFailure::InvalidRequest;
+			}
+			if (!IsExactLiveObjectPath(Request.ObjectPath))
+			{
+				OutErrorMessage = FString::Printf(
+					TEXT("objectPath must be one exact Object Path of at most %d characters, for example /Game/Map.Map:PersistentLevel.Actor.Component.Object."),
+					MaxReferencedObjectPathChars);
+				return EFailure::InvalidRequest;
+			}
+
+			const EFailure WorldFailure = ResolvePieWorldExact(
+				Request.Actor.PieInstanceId,
+				Request.Actor.WorldPath,
+				OutResolved.Snapshot,
+				OutResolved.AllContexts,
+				OutErrorMessage);
+			if (WorldFailure != EFailure::None)
+			{
+				return WorldFailure;
+			}
+
+			UObject* Found = FindLiveObjectByPath(Request.ObjectPath);
+			if (Found == nullptr)
+			{
+				OutErrorMessage = FString::Printf(
+					TEXT("No loaded UObject has the exact path '%s'; object paths are not guessed and no package is loaded to find one."),
+					*Request.ObjectPath);
+				return EFailure::ObjectNotFound;
+			}
+
+			// The object must live in the exact requested world.  A path that
+			// resolves into another PIE world (or into no world at all, such as a
+			// class or a CDO) is reported through the STALE family, exactly like a
+			// reused PIE instance.
+			const UWorld* ObjectWorld = FindWorldOfObject(Found);
+			if (ObjectWorld == nullptr || ObjectWorld != OutResolved.Snapshot.World)
+			{
+				OutErrorMessage = FString::Printf(
+					TEXT("Object '%s' is not part of the requested PIE world '%s' (instance %d); a cross-world reference cannot be navigated, so nothing was read."),
+					*Request.ObjectPath,
+					*OutResolved.Snapshot.WorldPath,
+					OutResolved.Snapshot.PieInstanceId);
+				return EFailure::WorldStale;
+			}
+
+			OutResolved.Target = Found;
+			OutResolved.Actor = FindOwningActorOf(Found);
+			OutResolved.bIsComponent = Found->IsA<UActorComponent>();
+			return EFailure::None;
+		}
+
 		if (!Request.ComponentPath.IsEmpty() && !Request.ComponentName.IsEmpty())
 		{
 			OutErrorMessage = TEXT("Provide at most one Component identity: componentPath or componentName.");
@@ -1726,6 +1994,7 @@ namespace UEAgentKitPieRuntime
 		Ctx.Offset = Request.Offset;
 		Ctx.Limit = Limit;
 		Ctx.AllContexts = &Resolved.AllContexts;
+		Ctx.SourceSnapshot = &Resolved.Snapshot;
 
 		TArray<TSharedPtr<FJsonValue>> Items;
 		for (const FString& Name : UniqueNames)
@@ -1850,6 +2119,7 @@ namespace
 		Params->TryGetStringField(TEXT("actorName"), OutRequest.Actor.ActorName);
 		Params->TryGetStringField(TEXT("actorLabel"), OutRequest.Actor.ActorLabel);
 		Params->TryGetStringField(TEXT("actorClassPath"), OutRequest.Actor.ActorClassPath);
+		Params->TryGetStringField(TEXT("objectPath"), OutRequest.ObjectPath);
 		Params->TryGetStringField(TEXT("componentPath"), OutRequest.ComponentPath);
 		Params->TryGetStringField(TEXT("componentName"), OutRequest.ComponentName);
 		Params->TryGetStringField(TEXT("componentClassPath"), OutRequest.ComponentClassPath);

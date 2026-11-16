@@ -191,6 +191,8 @@ namespace UEAgentKitPieRuntime
 			return TEXT("pie-context-scan-truncated");
 		case EFailure::ScanTruncated:
 			return TEXT("pie-actor-scan-truncated");
+		case EFailure::ObjectNotFound:
+			return TEXT("pie-object-not-found");
 		case EFailure::None:
 		default:
 			return TEXT("");
@@ -585,6 +587,130 @@ namespace UEAgentKitPieRuntime
 		}
 	}
 
+	EFailure ResolvePieWorldExact(
+		const int32 PieInstanceId,
+		const FString& WorldPath,
+		FWorldContextSnapshot& OutSnapshot,
+		TArray<FWorldContextSnapshot>& OutAllContexts,
+		FString& OutErrorMessage)
+	{
+		OutSnapshot = FWorldContextSnapshot();
+		OutAllContexts.Reset();
+		OutErrorMessage.Reset();
+
+		auto Fail = [&OutErrorMessage](const EFailure Failure, const FString& Message)
+		{
+			OutErrorMessage = Message;
+			return Failure;
+		};
+
+		TArray<FWorldContextSnapshot> Contexts;
+		bool bContextScanTruncated = false;
+		CollectPieWorldContexts(Contexts, bContextScanTruncated);
+		if (bContextScanTruncated)
+		{
+			return Fail(
+				EFailure::ContextScanTruncated,
+				FString::Printf(
+					TEXT("The PIE world context scan reached its bounded limit of %d contexts, so the requested instance could not be verified."),
+					MaxWorldContextScan));
+		}
+
+		TArray<int32> LiveInstanceIds;
+		for (const FWorldContextSnapshot& Snapshot : Contexts)
+		{
+			LiveInstanceIds.AddUnique(Snapshot.PieInstanceId);
+		}
+		TArray<int32> RetiredInstanceIds;
+		GetRetiredPieInstances(RetiredInstanceIds);
+
+		const ELookupStatus Status = ClassifyInstanceLookup(PieInstanceId, LiveInstanceIds, RetiredInstanceIds);
+		if (Status == ELookupStatus::NotRunning)
+		{
+			return Fail(
+				EFailure::InstanceNotRunning,
+				FString::Printf(
+					TEXT("PIE is not running in this Editor process, so PIE instance %d has no live world."),
+					PieInstanceId));
+		}
+		if (Status == ELookupStatus::Stale)
+		{
+			return Fail(
+				EFailure::InstanceStale,
+				FString::Printf(
+					TEXT("PIE instance %d was observed earlier in this Editor process but is no longer running; re-query editor.getPieWorldContexts."),
+					PieInstanceId));
+		}
+		if (Status == ELookupStatus::NotFound)
+		{
+			return Fail(
+				EFailure::InstanceNotFound,
+				FString::Printf(
+					TEXT("PIE instance %d is not one of the live PIE world contexts; re-query editor.getPieWorldContexts."),
+					PieInstanceId));
+		}
+
+		// A PIE instance id must identify exactly one live world.  If the engine
+		// ever exposes the same id for two contexts (transient play/stop states),
+		// fail closed instead of silently inspecting the first world.
+		const FWorldContextSnapshot* Snapshot = nullptr;
+		int32 MatchingContextCount = 0;
+		FString MatchingContextSummary;
+		for (const FWorldContextSnapshot& Candidate : Contexts)
+		{
+			if (Candidate.PieInstanceId != PieInstanceId)
+			{
+				continue;
+			}
+			++MatchingContextCount;
+			if (Snapshot == nullptr)
+			{
+				Snapshot = &Candidate;
+			}
+			if (MatchingContextSummary.Len() < 512)
+			{
+				if (!MatchingContextSummary.IsEmpty())
+				{
+					MatchingContextSummary += TEXT(", ");
+				}
+				MatchingContextSummary += FString::Printf(
+					TEXT("%s (%s)"),
+					*Candidate.WorldPath,
+					*Candidate.NetModeName);
+			}
+		}
+		if (MatchingContextCount > 1)
+		{
+			return Fail(
+				EFailure::InstanceAmbiguous,
+				FString::Printf(
+					TEXT("PIE instance %d matches %d live world contexts (%s); the exact world is ambiguous, so nothing was inspected. Use the contextId from editor.getPieWorldContexts."),
+					PieInstanceId,
+					MatchingContextCount,
+					*MatchingContextSummary));
+		}
+		if (Snapshot == nullptr || Snapshot->World == nullptr)
+		{
+			return Fail(
+				EFailure::InstanceNotFound,
+				FString::Printf(TEXT("PIE instance %d no longer has a resolvable world."), PieInstanceId));
+		}
+		if (!WorldPath.IsEmpty() && !PathEqualsExact(WorldPath, Snapshot->WorldPath))
+		{
+			return Fail(
+				EFailure::WorldStale,
+				FString::Printf(
+					TEXT("PIE instance %d now resolves to world '%s', not the requested world '%s'; the instance was reused."),
+					PieInstanceId,
+					*Snapshot->WorldPath,
+					*WorldPath));
+		}
+
+		OutSnapshot = *Snapshot;
+		OutAllContexts = MoveTemp(Contexts);
+		return EFailure::None;
+	}
+
 	EFailure ResolvePieActorExact(
 		const FActorInspectionRequest& Request,
 		FResolvedPieActor& OutResolved,
@@ -617,107 +743,18 @@ namespace UEAgentKitPieRuntime
 				TEXT("Provide exactly one Actor identity: actorPath, actorGuid, actorName, or actorLabel."));
 		}
 
-		TArray<FWorldContextSnapshot> Contexts;
-		bool bContextScanTruncated = false;
-		CollectPieWorldContexts(Contexts, bContextScanTruncated);
-		if (bContextScanTruncated)
+		TArray<FWorldContextSnapshot> AllContexts;
+		const EFailure WorldFailure = ResolvePieWorldExact(
+			Request.PieInstanceId,
+			Request.WorldPath,
+			OutResolved.Snapshot,
+			AllContexts,
+			OutErrorMessage);
+		if (WorldFailure != EFailure::None)
 		{
-			return Fail(
-				EFailure::ContextScanTruncated,
-				FString::Printf(
-					TEXT("The PIE world context scan reached its bounded limit of %d contexts, so the requested instance could not be verified."),
-					MaxWorldContextScan));
+			return WorldFailure;
 		}
-
-		TArray<int32> LiveInstanceIds;
-		for (const FWorldContextSnapshot& Snapshot : Contexts)
-		{
-			LiveInstanceIds.AddUnique(Snapshot.PieInstanceId);
-		}
-		TArray<int32> RetiredInstanceIds;
-		GetRetiredPieInstances(RetiredInstanceIds);
-
-		const ELookupStatus Status = ClassifyInstanceLookup(Request.PieInstanceId, LiveInstanceIds, RetiredInstanceIds);
-		if (Status == ELookupStatus::NotRunning)
-		{
-			return Fail(
-				EFailure::InstanceNotRunning,
-				FString::Printf(
-					TEXT("PIE is not running in this Editor process, so PIE instance %d has no live world."),
-					Request.PieInstanceId));
-		}
-		if (Status == ELookupStatus::Stale)
-		{
-			return Fail(
-				EFailure::InstanceStale,
-				FString::Printf(
-					TEXT("PIE instance %d was observed earlier in this Editor process but is no longer running; re-query editor.getPieWorldContexts."),
-					Request.PieInstanceId));
-		}
-		if (Status == ELookupStatus::NotFound)
-		{
-			return Fail(
-				EFailure::InstanceNotFound,
-				FString::Printf(
-					TEXT("PIE instance %d is not one of the live PIE world contexts; re-query editor.getPieWorldContexts."),
-					Request.PieInstanceId));
-		}
-
-		// A PIE instance id must identify exactly one live world.  If the engine
-		// ever exposes the same id for two contexts (transient play/stop states),
-		// fail closed instead of silently inspecting the first world.
-		const FWorldContextSnapshot* Snapshot = nullptr;
-		int32 MatchingContextCount = 0;
-		FString MatchingContextSummary;
-		for (const FWorldContextSnapshot& Candidate : Contexts)
-		{
-			if (Candidate.PieInstanceId != Request.PieInstanceId)
-			{
-				continue;
-			}
-			++MatchingContextCount;
-			if (Snapshot == nullptr)
-			{
-				Snapshot = &Candidate;
-			}
-			if (MatchingContextSummary.Len() < 512)
-			{
-				if (!MatchingContextSummary.IsEmpty())
-				{
-					MatchingContextSummary += TEXT(", ");
-				}
-				MatchingContextSummary += FString::Printf(
-					TEXT("%s (%s)"),
-					*Candidate.WorldPath,
-					*Candidate.NetModeName);
-			}
-		}
-		if (MatchingContextCount > 1)
-		{
-			return Fail(
-				EFailure::InstanceAmbiguous,
-				FString::Printf(
-					TEXT("PIE instance %d matches %d live world contexts (%s); the exact world is ambiguous, so nothing was inspected. Use the contextId from editor.getPieWorldContexts."),
-					Request.PieInstanceId,
-					MatchingContextCount,
-					*MatchingContextSummary));
-		}
-		if (Snapshot == nullptr || Snapshot->World == nullptr)
-		{
-			return Fail(
-				EFailure::InstanceNotFound,
-				FString::Printf(TEXT("PIE instance %d no longer has a resolvable world."), Request.PieInstanceId));
-		}
-		if (!Request.WorldPath.IsEmpty() && !PathEqualsExact(Request.WorldPath, Snapshot->WorldPath))
-		{
-			return Fail(
-				EFailure::WorldStale,
-				FString::Printf(
-					TEXT("PIE instance %d now resolves to world '%s', not the requested world '%s'; the instance was reused."),
-					Request.PieInstanceId,
-					*Snapshot->WorldPath,
-					*Request.WorldPath));
-		}
+		const FWorldContextSnapshot* Snapshot = &OutResolved.Snapshot;
 
 		AActor* Match = nullptr;
 		int32 MatchCount = 0;

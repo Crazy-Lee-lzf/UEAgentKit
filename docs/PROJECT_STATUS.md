@@ -31,6 +31,7 @@ UE Agent Kit 是 Unreal Engine 的**项目知识层 + 受控修改工作流**：
 - 按 asset path 读取任意 Blueprint 图上下文；不依赖离线索引。
 - PIE Server/Client 的 Actor、Transform、NetRole、组件及指定标量属性（只读）。
 - PIE 任意 UObject 的反射属性：先列属性（名称 + kind + 是否可读），再按名读取值；支持标量与 struct 展开、Array/Map/Set 分页、对象引用只给身份；不支持的类型返回 `unsupported-type` 与原因且不返回值。不以 `BlueprintVisible`/`Edit` 作为读门槛。
+- 对象引用导航：`objectPath` 可指向该 PIE 世界内任意 UObject，返回的 `objectRef.path` 可直接作为下一跳输入；链路逐跳显式调用、绝不自动递归，跨世界引用标记 `crossWorld` 并被拒绝。
 
 ### 实时索引 overlay
 

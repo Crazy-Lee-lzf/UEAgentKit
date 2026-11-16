@@ -75,6 +75,11 @@ namespace UEAgentKitPieRuntime
 		ComponentStale,
 		ContextScanTruncated,
 		ScanTruncated,
+		/**
+		 * P3: an exact object path did not resolve to a loaded UObject.  Kept at
+		 * the end of the enum so existing numeric values never move.
+		 */
+		ObjectNotFound,
 	};
 
 	/** Stable wire code for one lookup status; Matched has no code. */
@@ -140,6 +145,23 @@ namespace UEAgentKitPieRuntime
 
 	/** Bounded listing; MaxContexts is clamped to [1, MaxPieWorldContexts]. */
 	TSharedRef<FJsonObject> BuildWorldContextsJson(int32 MaxContexts = DefaultMaxContexts);
+
+	/**
+	 * Resolve one exact live PIE world.
+	 *
+	 * Shared prologue of every PIE inspection request: classifies the instance
+	 * (not running / stale / not found), rejects an instance id that matches two
+	 * live contexts, and reports a reused instance as world-stale when an
+	 * expected world path no longer matches.  `OutAllContexts` receives the full
+	 * bounded snapshot list so a caller can place a referenced object in its own
+	 * world without a second scan.
+	 */
+	EFailure ResolvePieWorldExact(
+		int32 PieInstanceId,
+		const FString& WorldPath,
+		FWorldContextSnapshot& OutSnapshot,
+		TArray<FWorldContextSnapshot>& OutAllContexts,
+		FString& OutErrorMessage);
 
 	struct FActorInspectionRequest
 	{

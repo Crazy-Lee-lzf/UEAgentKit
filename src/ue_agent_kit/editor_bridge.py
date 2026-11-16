@@ -690,6 +690,7 @@ class LiveEditorBridgeService:
                 "actorName",
                 "actorLabel",
                 "actorClassPath",
+                "objectPath",
                 "componentPath",
                 "componentName",
                 "componentClassPath",
@@ -715,6 +716,7 @@ class LiveEditorBridgeService:
                 "actorName",
                 "actorLabel",
                 "actorClassPath",
+                "objectPath",
                 "componentPath",
                 "componentName",
                 "componentClassPath",
@@ -916,9 +918,43 @@ class LiveEditorBridgeService:
 
     @staticmethod
     def _normalize_pie_object_target(params: dict[str, Any], normalized: dict[str, Any]) -> None:
-        """P2 target policy: exact instance, one Actor identity, at most one Component."""
+        """P2/P3 target policy: exact instance, one target, at most one Component.
+
+        A target is either one Actor identity (optionally narrowed to one owned
+        Component) or, since P3, one exact ``objectPath`` naming any UObject that
+        belongs to the requested PIE world.  The two forms never mix.
+        """
         normalized["pieInstanceId"] = LiveEditorBridgeService._bounded_integer(
             params.get("pieInstanceId", -1), "pieInstanceId", 0)
+
+        object_path = params.get("objectPath", "")
+        if object_path not in ("", None):
+            actor_identities = [
+                field
+                for field in ("actorPath", "actorGuid", "actorName", "actorLabel")
+                if params.get(field) not in ("", None)
+            ]
+            if actor_identities:
+                raise LiveEditorError(
+                    "live-editor-invalid-parameters",
+                    "objectPath is a complete target on its own; do not combine it "
+                    "with an Actor identity.",
+                )
+            if any(
+                params.get(field) not in ("", None)
+                for field in ("componentPath", "componentName", "componentClassPath")
+            ):
+                raise LiveEditorError(
+                    "live-editor-invalid-parameters",
+                    "objectPath addresses the exact object directly; Component "
+                    "identities apply to Actor targets only.",
+                )
+            text = LiveEditorBridgeService._bounded_string(object_path, "objectPath", 512)
+            LiveEditorBridgeService._validate_live_object_path(text, "objectPath")
+            normalized["objectPath"] = text
+            LiveEditorBridgeService._normalize_optional_object_path(params, normalized, "worldPath")
+            return
+
         LiveEditorBridgeService._normalize_actor_identity(params, normalized)
 
         component_identities = 0

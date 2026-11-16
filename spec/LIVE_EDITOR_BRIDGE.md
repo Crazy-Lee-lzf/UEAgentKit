@@ -230,10 +230,23 @@ pieInstanceId            必填；精确 PIE 实例（0 为主实例），Server
 worldPath                可选；不匹配返回 pie-world-stale
 actorPath / actorGuid / actorName / actorLabel
                          恰好一个
+objectPath               该 PIE 世界内任意 UObject 的精确 Object Path（P3）；
+                         与上面四个 Actor 身份互斥，也与下面所有组件身份互斥
 componentPath / componentName
                          至多一个；定位该 Actor 拥有的组件
 componentClassPath       可选；要求已给出组件身份，不匹配返回 pie-component-stale
 ```
+
+P3 的 `objectPath` 解析规则：
+
+```text
+范围      必须在请求的精确 pieInstanceId（+ 可选 worldPath）内；从不跨世界解析
+查找      按完整 Object Path 精确查找已加载对象，不加载任何 Package
+不存在    形状合法但查不到 → pie-object-not-found
+世界不符  对象存在但其所属世界不是请求的世界（含无世界对象，如 UClass/CDO）→ pie-world-stale
+```
+
+身份回传（两个 Method 的同一个 envelope，P3 起新增 `outerPath`/`outerClassPath`）：`objectPath`、`classPath`、`pieInstanceId`、`worldKey`、`outerPath`、`outerClassPath`、`outerPathTruncated`、`targetKind`（`actor` / `component` / `object`）、`actorPath`（可推导时给出所属 Actor，否则为空）。
 
 `list` 额外接受 `nameContains`（大小写不敏感子串）与 `maxProperties`（1..512，默认 128）。返回 `objectPath`、`classPath`、`worldKey`、`pieInstanceId`、`totalCount`、`matchedCount`、`returnedCount`、`truncated`，以及按声明名稳定排序的 `properties[]`：
 
@@ -254,9 +267,23 @@ array     containerKind、elementType、elementTypeKind、
 set       totalCount、offset、limit、returnedCount、hasMore、items[]
 map       keyType/keyTypeKind、valueType/valueTypeKind、
           items[] { index, key, value }
-对象引用  objectRef { path, class, worldKey, pieInstanceId, isNull, inPieWorld, truncated }
+对象引用  objectRef { path, class, worldKey, pieInstanceId, outerPath, outerClass,
+          isNull, inPieWorld, crossWorld, propertiesReadable, truncated }
           只给身份；不展开被引用对象的属性、不解析 soft reference、不触发加载
 ```
+
+`objectRef` 的导航契约（P3）：
+
+```text
+path                 可以直接作为下一次调用的 objectPath；不会被改写或归一化
+worldKey/pieInstanceId  该引用真正所属的 PIE 世界（不是发起读取的世界）
+outerPath            被引用对象的 Outer 路径，可继续向上走
+crossWorld           true 表示该引用指向另一个 PIE 世界；此时 propertiesReadable=false，
+                     用它作 objectPath 再读会被 pie-world-stale 拒绝
+propertiesReadable   false 表示这一跳不可继续（空引用 / 不在 PIE 世界 / 跨世界）
+```
+
+链路是**逐跳显式调用**：一次读取只返回被引用对象的身份，绝不自动展开它自己的属性；Agent 需要下一跳时把 `objectRef.path` 作为 `objectPath` 再调用一次。
 
 `status` 取值：
 
@@ -273,7 +300,7 @@ not-exposed      属于 `editor.getPieScalars` 的可见性门槛；P2 不据此
 
 单次响应有界：容器元素总数 512、字符串总预算 256K 字符；耗尽时对应项返回 `unknown` + `response-budget-exhausted`，不静默截断。
 
-错误码沿用 P0/P1 家族：`pie-not-running`、`pie-instance-not-found`、`pie-instance-stale`、`pie-instance-ambiguous`、`pie-world-stale`、`pie-actor-not-found`、`pie-actor-ambiguous`、`pie-actor-stale`、`pie-component-not-found`、`pie-component-ambiguous`、`pie-component-stale`、`pie-actor-scan-truncated`、`pie-context-scan-truncated`、`pie-invalid-parameters`。
+错误码沿用 P0/P1 家族：`pie-not-running`、`pie-instance-not-found`、`pie-instance-stale`、`pie-instance-ambiguous`、`pie-world-stale`、`pie-actor-not-found`、`pie-actor-ambiguous`、`pie-actor-stale`、`pie-component-not-found`、`pie-component-ambiguous`、`pie-component-stale`、`pie-actor-scan-truncated`、`pie-context-scan-truncated`、`pie-invalid-parameters`，以及 P3 新增的 `pie-object-not-found`（`objectPath` 解析不到已加载对象）。`pie-world-stale` 同时覆盖「引用指向别的世界」与「对象不属于请求的世界」。
 
 ### ue_get_output_log
 

@@ -47,6 +47,8 @@ namespace UEAgentKitPieRuntime
 	inline constexpr int32 MaxStructDepth = 4;
 	inline constexpr int32 MaxStructMembersPerStruct = 64;
 	inline constexpr int32 MaxReferencedObjectPathChars = 512;
+	/** Bounded outer-chain walk when deriving the world of an arbitrary object. */
+	inline constexpr int32 MaxOuterChainSteps = 32;
 	inline constexpr int32 MaxDeclaredTypeChars = 128;
 	/** Whole-response budgets; exceeding them downgrades, never truncates silently. */
 	inline constexpr int32 MaxReturnedContainerItems = 512;
@@ -135,6 +137,12 @@ namespace UEAgentKitPieRuntime
 	struct FPropertyTargetRequest
 	{
 		FActorInspectionRequest Actor;
+		/**
+		 * P3: any UObject inside the exact PIE world, addressed by its full object
+		 * path.  Mutually exclusive with every Actor and Component identity, so a
+		 * caller always states exactly one target.
+		 */
+		FString ObjectPath;
 		/** Optional owned Component identity: at most one of path or name. */
 		FString ComponentPath;
 		FString ComponentName;
@@ -157,9 +165,13 @@ namespace UEAgentKitPieRuntime
 	};
 
 	/**
-	 * Resolve the exact Actor and optional owned Component for a property
-	 * request.  Shares the P1 Actor resolver and the shared Component resolver,
-	 * so identity, ambiguity and stale handling stay one implementation.
+	 * Resolve the exact object behind a property request: one Actor (optionally
+	 * narrowed to one owned Component), or - in P3 - any UObject inside the exact
+	 * PIE world addressed by its full object path.
+	 *
+	 * Everything shares the P1 world/Actor resolver and the shared Component
+	 * resolver, so identity, ambiguity, cross-world and stale handling stay one
+	 * implementation instead of one per hop.
 	 */
 	EFailure ResolvePiePropertyTarget(
 		const FPropertyTargetRequest& Request,
