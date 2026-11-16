@@ -36,6 +36,43 @@ ue_inspect_pie_actor(
 
 需要运行时属性时用只读 `ue_get_pie_scalars`：指定精确 PIE instance、Actor 身份、可选一个组件及 1–8 个标量属性名。已解析属性包含反射声明类来源；C++ 继承属性已通过原生验收，Blueprint 自声明属性和 PIE Client 标量值尚未等量覆盖。遇到 `pie-not-running`、`pie-instance-stale`、`pie-actor-ambiguous` 时重新枚举实例，不使用过期数据。
 
+## 运行时属性与对象导航（PIE）
+
+```text
+ue_get_pie_world_contexts()                       # 先拿到精确 pieInstanceId
+ue_list_pie_object_properties(
+    pie_instance_id=<整数>, actor_path="<Actor 路径>",
+    name_contains=""                              # 可选，过滤属性名
+)
+ue_read_pie_object_properties(
+    pie_instance_id=<整数>, actor_path="<Actor 路径>",
+    property_names=["Health", "Inventory", "OwnerState"],
+    offset=0, limit=50                            # 容器元素分页
+)
+# 上一步返回的 objectRef.path 可以直接作为下一跳目标
+ue_read_pie_object_properties(
+    pie_instance_id=<整数>, object_path="<objectRef.path>",
+    property_names=["bIsActive"]
+)
+```
+
+`ue_list_pie_object_properties` 只列属性名与 kind，不读值；`ue_read_pie_object_properties` 才按名取值。两者都不以 `BlueprintVisible` / `Edit` 作为门槛，读不了的类型返回 `unsupported-type` 与原因且不返回值——**不要**把 unsupported 当成 0 或空。
+
+容器用 `offset`/`limit` 分页，返回 `totalCount` / `hasMore`；对象引用只返回 `objectRef`（path/class/world），**不会**自动展开被引用对象。想继续看就显式再调一次，把 `objectRef.path` 当成 `object_path`。跨世界的引用会标记 `worldKey` 不一致并拒绝，不要绕过。
+
+## Niagara 模块栈
+
+```text
+ue_get_niagara_module_stack(system_path="/Game/Dev/NS_DevStack.NS_DevStack", include_inputs=True)
+ue_set_niagara_module_input(
+    system_path="/Game/Dev/NS_DevStack.NS_DevStack",
+    emitter_name="Emitter A", module_name="Spawn Rate", input_name="SpawnRate",
+    value=25.0, expected_value_mode="Local"
+)
+```
+
+`ue_get_niagara_module_stack` 按真实执行阶段返回模块，顺序即引擎顺序，不要自行排序；每个 Input 的 `source` 决定能不能改——只有 `Local` 可以直接写。`ue_set_niagara_module_input` 一次修改一个事务（可 Undo/Redo），`saved=false` 表示还需要显式 Save；来源是 Linked/Dynamic 时会拒绝并给出 `linkedTarget`，共享 Module Script 资产永远只读。
+
 ## Blueprint 和配置修改
 
 **稳定写入**：先确认 workflow 门禁（`--enable-write-tools` + `--enable-subprocess-workflow` + 项目 `SubprocessWorkflow=True` + Write Policy），再走 Plan → Dry Run → 用户明确确认 → Apply → 显式 Save → 独立 Verify。DataTable、DataAsset、Material Instance 的受支持字段以实际 Schema 为准；P4 Submit 仍需人工完成。

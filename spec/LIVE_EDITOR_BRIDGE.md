@@ -219,6 +219,54 @@ simulating
 
 当存在 Play World 时同时返回 World Path、World Type 和 Net Mode。
 
+### editor.listPieActors
+
+PIE World 内的 Actor 列举（MCP：`ue_list_pie_actors`）。只读一个精确 PIE 世界，Server/Client 永不混合。
+
+```text
+pieInstanceId / worldContextId   必须提供且只提供一个；两者都给或都不给返回 pie-invalid-parameters
+offset / limit                   默认 0 / 50，limit 上限 200
+nameContains / classContains / tagContains   大小写不敏感子串过滤，可组合
+```
+
+返回 `pieInstanceId`、`worldKey`、`totalCount`、`offset`、`limit`、`truncated` 与 `actors[]`；每个 Actor 给
+`path` / `name` / `class` / `transform` / `netRole` / `ownerPath` / `tags`。排序固定按 object path 升序，
+因此同一 `worldContextId` + 同一过滤条件 + 递增 `offset` 可无重叠地遍历完整 World。
+不返回组件的属性值（那是 `ue_inspect_pie_actor` 与 `ue_read_pie_object_properties` 的职责）。
+
+### editor.getNiagaraModuleStack
+
+读取一个 Niagara System 的 Module Stack（MCP：`ue_get_niagara_module_stack`）。只读：不建事务、不编译、不写资产。
+
+```text
+systemPath              必填；/Game/... 的 NS 资产路径
+includeInputs           默认 true
+maxModules / maxInputsPerModule   有界，默认 128 / 32，超出回报 truncated
+```
+
+按真实执行阶段返回 `emitters[].stages[].modules[]`：`stage` 为 SystemSpawn / SystemUpdate / EmitterSpawn /
+EmitterUpdate / ParticleSpawn / ParticleUpdate / Other；模块的 `order` 是引擎顺序，**不做名称排序**。
+每个 Input 给 `name` / `type` / `source`（Local | Linked | Dynamic | Data | ObjectAsset | Expression）与可安全
+表达的 Local `value`；Linked 额外给 `linkedTarget`。
+失败码：`niagara-system-not-found`、`niagara-system-compiling`、`niagara-stack-unavailable`。
+
+### editor.setNiagaraModuleInput
+
+修改一个 Niagara Module Input 的本地值（MCP：`ue_set_niagara_module_input`）。受控写入：一次修改 = 一次 Undo，
+不自动 Save，不修改共享 Module Script 资产。
+
+```text
+systemPath + emitterName|emitterHandleId + moduleName (+ moduleOccurrence) + inputName + value  必填
+stage                 可选；用于同名模块的消歧
+expectedValueMode     默认 Local；不匹配则拒绝并回报实际来源
+expectedOldValue      可选；与当前值不符返回 niagara-input-stale 且零副作用
+```
+
+只接受来源为 `Local` 的输入，类型限 Float / Int / Bool / Vector / Color。
+返回 `oldValue` / `newValue` / `wrote` / `transactionCount` / `undoVerified` / `redoVerified` / `saved=false` /
+`requiresSave=true` / `compileRequested`。新旧值相同则 `wrote=false` 且不建事务、不置脏。
+Linked / Dynamic 输入返回 `niagara-input-source-not-local` 与 `linkedTarget`；共享脚本资产始终只读。
+
 ### editor.listPieObjectProperties / editor.readPieObjectProperties
 
 PIE 通用反射属性读取（MCP：`ue_list_pie_object_properties` / `ue_read_pie_object_properties`）。两者都只读同一份 Editor 内存：不建事务、不改对象、不编译、不 Save、不打开 SQLite 索引。

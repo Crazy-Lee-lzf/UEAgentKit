@@ -30,6 +30,14 @@ UE Agent Kit is a **project knowledge layer plus controlled mutation workflow** 
 - Output Log, Blueprint compile diagnostics, and exact live asset inspection.
 - Blueprint graph context by asset path, without requiring the offline index.
 - Read-only PIE Server/Client actors, transforms, NetRole, components, and explicitly requested scalar properties.
+- Reflected properties of any PIE UObject: list the property names and kinds first, then read values by name. Scalars and structs expand, Array/Map/Set page, object references return identity only, and unsupported types report `unsupported-type` with a reason instead of a value. `BlueprintVisible` / `Edit` is not a read gate.
+- Object-reference navigation: `objectPath` accepts any UObject inside the exact PIE world and the returned `objectRef.path` can be used as the next hop. Every hop is an explicit call, nothing recurses automatically, and a reference that belongs to another world is flagged `crossWorld` and refused.
+
+### Niagara module stacks
+
+- Read a Module Stack by real execution stage: System/Emitter/Particle Spawn and Update groups, modules in engine order (never name-sorted), and every Input reports its name, type, source (Local / Linked / Dynamic / Data / ObjectAsset / Expression) and a safely expressible current value.
+- Bounded edits of a Module Input local constant (Float / Int / Bool / Vector / Color): one Editor transaction per edit with Undo/Redo, never auto-saves, and never modifies the shared Module Script asset. Inputs whose source is not Local are refused with the actual source and linked target.
+- Both directions act on the open System; fixtures such as `NS_DevStack` come from `scripts/GenerateNiagaraStackFixture.ps1` and are not committed.
 
 ### Live index overlay
 

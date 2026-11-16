@@ -36,6 +36,35 @@ Pass **only one** of `actor_path`, `actor_guid`, `actor_name`, and `actor_label`
 
 For runtime values, use read-only `ue_get_pie_scalars`: specify an exact PIE instance and Actor identity, optionally one Component, and 1–8 scalar property names. Resolved properties can identify their reflected declaring class. Inherited C++ ownership has native acceptance; Blueprint-declared provenance and PIE client scalar values are not equally covered. Report `pie-not-running`, `pie-instance-stale`, and `pie-actor-ambiguous` accurately and re-enumerate after restarts.
 
+## Runtime properties and object navigation (PIE)
+
+```text
+ue_get_pie_world_contexts()                       # get the exact pieInstanceId first
+ue_list_pie_object_properties(pie_instance_id=<int>, actor_path="<actor path>", name_contains="")
+ue_read_pie_object_properties(
+    pie_instance_id=<int>, actor_path="<actor path>",
+    property_names=["Health", "Inventory", "OwnerState"], offset=0, limit=50
+)
+# the objectRef.path returned above can be the next hop target
+ue_read_pie_object_properties(pie_instance_id=<int>, object_path="<objectRef.path>", property_names=["bIsActive"])
+```
+
+`ue_list_pie_object_properties` only lists names and kinds; `ue_read_pie_object_properties` reads values. `BlueprintVisible` / `Edit` is not a read gate, and unsupported types return `unsupported-type` with a reason instead of a value - never treat that as zero or empty.
+
+Containers page with `offset` / `limit` and report `totalCount` / `hasMore`. Object references return `objectRef` (path/class/world) and are never expanded automatically; use `objectRef.path` as `object_path` for the next hop. A reference whose `worldKey` differs is refused.
+
+## Niagara module stacks
+
+```text
+ue_get_niagara_module_stack(system_path="/Game/Dev/NS_DevStack.NS_DevStack", include_inputs=True)
+ue_set_niagara_module_input(
+    system_path="/Game/Dev/NS_DevStack.NS_DevStack", emitter_name="Emitter A",
+    module_name="Spawn Rate", input_name="SpawnRate", value=25.0, expected_value_mode="Local"
+)
+```
+
+Modules come back in engine order by execution stage - do not sort them. The `source` of an Input decides whether it can be written: only `Local` is editable. `ue_set_niagara_module_input` is one transaction per edit (Undo/Redo works), `saved=false` means an explicit Save is still required, Linked/Dynamic sources are refused with their `linkedTarget`, and the shared Module Script asset is always read-only.
+
 ## Blueprint and configuration changes
 
 **Stable writes**: confirm the workflow gates (`--enable-write-tools` + `--enable-subprocess-workflow` + project `SubprocessWorkflow=True` + Write Policy), then Plan → Dry Run → explicit user approval → Apply → explicit Save → independent Verify. Check supported DataTable, DataAsset and Material Instance fields against the runtime Schema. P4 Submit remains a human action.

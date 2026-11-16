@@ -33,6 +33,12 @@ UE Agent Kit 是 Unreal Engine 的**项目知识层 + 受控修改工作流**：
 - PIE 任意 UObject 的反射属性：先列属性（名称 + kind + 是否可读），再按名读取值；支持标量与 struct 展开、Array/Map/Set 分页、对象引用只给身份；不支持的类型返回 `unsupported-type` 与原因且不返回值。不以 `BlueprintVisible`/`Edit` 作为读门槛。
 - 对象引用导航：`objectPath` 可指向该 PIE 世界内任意 UObject，返回的 `objectRef.path` 可直接作为下一跳输入；链路逐跳显式调用、绝不自动递归，跨世界引用标记 `crossWorld` 并被拒绝。
 
+### Niagara 模块栈
+
+- 按真实执行阶段读取 Module Stack：System/Emitter/Particle 的 Spawn 与 Update 分组，模块按引擎顺序返回（不做名称排序），每个 Input 给名称、类型、来源（Local / Linked / Dynamic / Data / ObjectAsset / Expression）与可安全表达的当前值。
+- 受控修改 Module Input 的本地常量（Float / Int / Bool / Vector / Color）：一次修改一个 Editor 事务、可 Undo/Redo、不自动 Save、不修改共享 Module Script 资产；来源不是 Local 时拒绝并返回实际来源与链接目标。
+- 读写都作用在已打开的 System 上；`NS_DevStack` 之类的夹具由 `scripts/GenerateNiagaraStackFixture.ps1` 生成，不进版本库。
+
 ### 实时索引 overlay
 
 - `ue_get_asset` 命中会话级 overlay 时，会先用磁盘 Package 的 SHA-256 校验记录；磁盘变化则自动向 Editor 重新取证。
