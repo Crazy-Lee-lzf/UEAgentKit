@@ -225,6 +225,54 @@ def register_live_read_tools(
             return error_response("ue_inspect_asset_live", exc, read_only=True)
 
     @server.tool(annotations=read_annotations)
+    def ue_get_niagara_module_stack(
+        system_path: str,
+        include_inputs: bool = True,
+        max_modules: int = 128,
+        max_inputs_per_module: int = 32,
+    ) -> dict[str, Any]:
+        """Read a Niagara System's real Module Stack by execution stage with module order and input value sources, read-only."""
+        try:
+            if (
+                not isinstance(system_path, str)
+                or not system_path.startswith("/Game/")
+                or "\\" in system_path
+                or ".." in system_path
+                or ":" in system_path
+                or any(ord(character) < 32 for character in system_path)
+            ):
+                raise LiveEditorError(
+                    "live-editor-invalid-parameters",
+                    "system_path must be one exact /Game package or object path.",
+                )
+            if not isinstance(include_inputs, bool):
+                raise LiveEditorError(
+                    "live-editor-invalid-parameters",
+                    "include_inputs must be a boolean.",
+                )
+            if type(max_modules) is not int or not 1 <= max_modules <= 1024:
+                raise LiveEditorError(
+                    "live-editor-invalid-parameters",
+                    "max_modules must be an integer in [1, 1024].",
+                )
+            if type(max_inputs_per_module) is not int or not 0 <= max_inputs_per_module <= 256:
+                raise LiveEditorError(
+                    "live-editor-invalid-parameters",
+                    "max_inputs_per_module must be an integer in [0, 256].",
+                )
+            return live_editor_service.call_tool(
+                "ue_get_niagara_module_stack",
+                {
+                    "systemPath": system_path,
+                    "includeInputs": include_inputs,
+                    "maxModules": max_modules,
+                    "maxInputsPerModule": max_inputs_per_module,
+                },
+            )
+        except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+            return error_response("ue_get_niagara_module_stack", exc, read_only=True)
+
+    @server.tool(annotations=read_annotations)
     def ue_get_blueprint_graph_selection() -> dict[str, Any]:
         """Return the focused Graph and bounded selected Nodes from the most recently active ordinary Blueprint Editor."""
         try:

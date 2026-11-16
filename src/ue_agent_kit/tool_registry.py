@@ -70,6 +70,7 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_get_output_log", "live-read", "read", "editor.getOutputLog"),
     ToolDefinition("ue_get_compile_errors", "live-read", "read", "editor.getCompileErrors"),
     ToolDefinition("ue_inspect_asset_live", "live-read", "read", "editor.inspectAssetLive"),
+    ToolDefinition("ue_get_niagara_module_stack", "live-read", "read", "editor.getNiagaraModuleStack"),
     ToolDefinition(
         "ue_get_blueprint_graph_selection",
         "live-read",

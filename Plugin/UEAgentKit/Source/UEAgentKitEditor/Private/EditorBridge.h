@@ -103,6 +103,16 @@ private:
 	TSharedRef<FJsonObject> BuildOutputLogResult(const TSharedPtr<FJsonObject>& Params) const;
 	TSharedRef<FJsonObject> BuildCompileErrorsResult(const TSharedPtr<FJsonObject>& Params) const;
 	TSharedRef<FJsonObject> BuildInspectAssetLiveResult(const FString& AssetPath) const;
+	/**
+	 * Read-only Niagara Module Stack projection: real execution stages, real stack
+	 * order, module inputs with their value source.  Never writes, never compiles
+	 * explicitly and never saves.
+	 */
+	bool TryBuildNiagaraModuleStackResult(
+		const TSharedPtr<FJsonObject>& Params,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
+		FString& OutErrorMessage) const;
 	TSharedRef<FJsonObject> BuildBlueprintGraphSelectionResult() const;
 	bool TryMoveBlueprintNodeResult(
 		const TSharedPtr<FJsonObject>& Params,

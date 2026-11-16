@@ -65,6 +65,7 @@ EXPECTED_ALL_TOOLS = [
     "ue_get_output_log",
     "ue_get_compile_errors",
     "ue_inspect_asset_live",
+    "ue_get_niagara_module_stack",
     "ue_get_blueprint_graph_selection",
     "ue_get_blueprint_graph_layout_preflight",
     "ue_get_focused_blueprint_graph_context",
@@ -167,7 +168,7 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertEqual(len(tool_names_for_mode()), 15)
         self.assertEqual(len(tool_names_for_mode()), 15)
-        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 57)
+        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 58)
         self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 76)
         self.assertEqual(
             tool_names_for_mode(memory_enabled=True),
@@ -176,7 +177,7 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 29)
         self.assertEqual(
             len(tool_names_for_mode(live_editor_enabled=True, memory_enabled=True)),
-            71,
+            72,
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
@@ -190,7 +191,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-            132,
+            133,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:
@@ -226,6 +227,7 @@ class ToolRegistryTests(unittest.TestCase):
             "TryUndoAssetPropertyLiveResult": "EditorBridgeWriteHandlers.cpp",
             "TryDiscardAssetPropertyLiveResult": "EditorBridgeWriteHandlers.cpp",
             "RevertLiveWriteTransaction": "EditorBridgeWriteHandlers.cpp",
+            "TryBuildNiagaraModuleStackResult": "EditorBridgeNiagaraHandlers.cpp",
         }
         for symbol, filename in handlers.items():
             self.assertNotIn(f"FUEAgentKitEditorBridge::{symbol}", core, symbol)

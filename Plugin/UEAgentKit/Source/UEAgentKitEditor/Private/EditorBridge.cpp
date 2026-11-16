@@ -63,6 +63,7 @@ namespace UEAgentKitEditorBridgePrivate
 		TEXT("editor.getOutputLog"),
 		TEXT("editor.getCompileErrors"),
 		TEXT("editor.inspectAssetLive"),
+		TEXT("editor.getNiagaraModuleStack"),
 		TEXT("editor.getBlueprintGraphSelection"),
 		TEXT("editor.moveBlueprintNode"),
 		TEXT("editor.moveBlueprintNodes"),
@@ -863,6 +864,14 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 		{
 			SendResult(Client.Socket, RequestId, BuildInspectAssetLiveResult(AssetPath));
 		}
+	}
+	else if (Method == TEXT("editor.getNiagaraModuleStack"))
+	{
+		TSharedPtr<FJsonObject> ActionResult;
+		FString ErrorCode;
+		FString ErrorMessage;
+		const bool bSucceeded = TryBuildNiagaraModuleStackResult(Params, ActionResult, ErrorCode, ErrorMessage);
+		SendActionResult(bSucceeded, ActionResult, ErrorCode, ErrorMessage);
 	}
 	else if (Method == TEXT("editor.getBlueprintGraphSelection"))
 	{

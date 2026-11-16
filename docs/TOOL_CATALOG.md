@@ -13,6 +13,7 @@
 | Live Editor | `ue_editor_status`、`ue_get_selection`、`ue_get_open_assets`、`ue_get_dirty_assets`、`ue_get_current_level` | 当前 Editor 状态 |
 | Live 图 / PIE | `ue_get_blueprint_graph_context`、`ue_get_focused_blueprint_graph_context`、`ue_get_blueprint_graph_layout_preflight`、`ue_get_pie_state`、`ue_get_pie_world_contexts`、`ue_inspect_pie_actor`、`ue_get_pie_scalars` | 只读；PIE 需要精确 instance |
 | 资产 / 日志 | `ue_inspect_asset_live`、`ue_get_output_log`、`ue_get_compile_errors` | 只读诊断 |
+| Niagara Stack | `ue_get_niagara_module_stack` | 按真实执行阶段只读 Module / Input 与来源 |
 | Project Memory | `ue_memory_search`、`ue_memory_get`、`ue_memory_get_context`、`ue_memory_expand_node`、`ue_memory_get_evidence` | 需要 `--enable-project-memory` |
 | 代码知识 | `ue_search(scope="symbols", profile="code")` | C++ 符号与静态调用点 |
 
