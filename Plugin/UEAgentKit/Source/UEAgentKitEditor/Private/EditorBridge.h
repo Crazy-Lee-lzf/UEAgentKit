@@ -112,6 +112,14 @@ private:
 		const TSharedPtr<FJsonObject>& Params,
 		TSharedPtr<FJsonObject>& OutResult,
 		FString& OutErrorCode,
+		FString& OutErrorMessage) const;	/**
+	 * Set one Local Niagara module input.  Refuses every non-Local source, refuses
+	 * stale expectedOldValue and never saves; one call is one Undo step.
+	 */
+	bool TrySetNiagaraModuleInputResult(
+		const TSharedPtr<FJsonObject>& Params,
+		TSharedPtr<FJsonObject>& OutResult,
+		FString& OutErrorCode,
 		FString& OutErrorMessage) const;
 	TSharedRef<FJsonObject> BuildBlueprintGraphSelectionResult() const;
 	bool TryMoveBlueprintNodeResult(

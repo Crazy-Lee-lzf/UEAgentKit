@@ -157,6 +157,7 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_validate_asset", "live-action", "planning", "editor.validateAsset"),
     ToolDefinition("ue_validate_folder", "live-action", "planning", "editor.validateFolder"),
     ToolDefinition("ue_run_automation_test", "live-action", "planning", "editor.runAutomationTest"),
+    ToolDefinition("ue_set_niagara_module_input", "live-action", "planning", "editor.setNiagaraModuleInput"),
     ToolDefinition(
         "ue_refresh_asset_index_live",
         "live-action",

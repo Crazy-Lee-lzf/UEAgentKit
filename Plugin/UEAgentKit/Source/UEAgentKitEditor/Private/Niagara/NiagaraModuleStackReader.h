@@ -3,13 +3,14 @@
 #include "CoreMinimal.h"
 #include "Dom/JsonObject.h"
 
+class UNiagaraSystem;
+class FNiagaraSystemViewModel;
+
 /**
- * Read-only Niagara Module Stack reader.
+ * Niagara Module Stack reader plus the two stack helpers the N2 writer shares with
+ * it, so both slices load the asset and build the view model the same way.
  *
- * Walks the Niagara Editor stack view models so that the reported module order is
- * the real stack order the engine builds, not an order derived from asset data.
- *
- * Nothing in this file writes: no transactions, no SetLocalValue, no Save.
+ * Nothing in the reader writes: no transactions, no SetLocalValue, no Save.
  */
 namespace UEAgentKitNiagaraStack
 {
@@ -39,6 +40,21 @@ namespace UEAgentKitNiagaraStack
 
 	/** Wire error code for a failure kind. */
 	const TCHAR* FailureCode(EReadFailure Failure);
+
+	/**
+	 * Resolve a /Game path to a loaded UNiagaraSystem.
+	 *
+	 * Accepts both a package path and an exact object path.  Loading queues the
+	 * engine's post-load compile, so this waits for it (a readiness wait, not an
+	 * edit) and fails with SystemCompiling when it still has work outstanding.
+	 */
+	UNiagaraSystem* ResolveSystem(const FString& SystemPath, EReadFailure& OutFailure, FString& OutMessage);
+
+	/** Build the data-processing only view model used by both the reader and the writer. */
+	TSharedPtr<FNiagaraSystemViewModel> CreateStackViewModel(UNiagaraSystem& System);
+
+	/** Destroy a view model built by CreateStackViewModel. */
+	void ReleaseStackViewModel(TSharedPtr<FNiagaraSystemViewModel>& ViewModel);
 
 	/**
 	 * Read the module stack of one Niagara System.

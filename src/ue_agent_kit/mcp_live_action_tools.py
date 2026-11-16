@@ -118,6 +118,74 @@ def register_live_action_tools(
                 "maxEntries": max_entries,
             },
         )
+
+    def _invalid(message: str) -> dict[str, Any]:
+        return error_response(
+            "ue_set_niagara_module_input",
+            LiveEditorError("live-editor-invalid-parameters", message),
+            read_only=False,
+        )
+
+    @server.tool(annotations=action_annotations)
+    def ue_set_niagara_module_input(
+        system_path: str,
+        module_name: str,
+        input_name: str,
+        value: Any = None,
+        emitter_name: str = "",
+        emitter_handle_id: str = "",
+        stage: str = "",
+        module_occurrence: int = 0,
+        expected_value_mode: str = "Local",
+        expected_old_value: Any = None,
+        verify_undo: bool = True,
+        compile_timeout_seconds: int = 30,
+    ) -> dict[str, Any]:
+        """Set one Local Niagara module input constant; refuses Linked/Dynamic sources and never saves."""
+        if (
+            not isinstance(system_path, str)
+            or not system_path.startswith("/Game/")
+            or "\\" in system_path
+            or ".." in system_path
+            or ":" in system_path
+            or any(ord(character) < 32 for character in system_path)
+        ):
+            return _invalid("system_path must be one exact /Game package or object path.",
+            )
+        if not isinstance(module_name, str) or not module_name:
+            return _invalid("module_name is required."
+            )
+        if not isinstance(input_name, str) or not input_name:
+            return _invalid("input_name is required."
+            )
+        if value is None:
+            return _invalid("value is required."
+            )
+        if type(module_occurrence) is not int or module_occurrence < 0:
+            return _invalid("module_occurrence must be a non-negative integer."
+            )
+        if type(compile_timeout_seconds) is not int or not 1 <= compile_timeout_seconds <= 300:
+            return _invalid("compile_timeout_seconds must be an integer in [1, 300].",
+            )
+        params: dict[str, Any] = {
+            "systemPath": system_path,
+            "moduleName": module_name,
+            "inputName": input_name,
+            "value": value,
+            "moduleOccurrence": module_occurrence,
+            "expectedValueMode": expected_value_mode,
+            "verifyUndo": verify_undo,
+            "compileTimeoutSeconds": compile_timeout_seconds,
+        }
+        if emitter_name:
+            params["emitterName"] = emitter_name
+        if emitter_handle_id:
+            params["emitterHandleId"] = emitter_handle_id
+        if stage:
+            params["stage"] = stage
+        if expected_old_value is not None:
+            params["expectedOldValue"] = expected_old_value
+        return call("ue_set_niagara_module_input", params)
     @server.tool(annotations=action_annotations)
     def ue_refresh_asset_index_live(asset_path: str) -> dict[str, Any]:
         """Prove one saved Blueprint's live canonical record and install it in this session's overlay without writing the index, saving, or restarting."""

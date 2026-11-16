@@ -1,5 +1,7 @@
 #include "Niagara/NiagaraModuleStackReader.h"
 
+#include "Niagara/NiagaraInputValue.h"
+
 #include "NiagaraCommon.h"
 #include "NiagaraScript.h"
 #include "NiagaraSystem.h"
@@ -73,69 +75,8 @@ namespace UEAgentKitNiagaraStack
 		}
 
 		/**
-		 * Read `Count` numeric components out of a Niagara struct payload.
-		 * Niagara uses float and double (LWC) variants of the same logical type, so
-		 * the component width is inferred from the payload size rather than assumed.
-		 */
-		bool ReadComponents(const uint8* Data, const int32 Size, const int32 Count, TArray<double>& Out)
-		{
-			Out.Reset();
-			if (Data == nullptr || Count <= 0)
-			{
-				return false;
-			}
-
-			if (Size == Count * static_cast<int32>(sizeof(double)))
-			{
-				Out.Reserve(Count);
-				for (int32 Index = 0; Index < Count; ++Index)
-				{
-					double Value = 0.0;
-					FMemory::Memcpy(&Value, Data + Index * sizeof(double), sizeof(double));
-					Out.Add(Value);
-				}
-				return true;
-			}
-
-			if (Size == Count * static_cast<int32>(sizeof(float)))
-			{
-				Out.Reserve(Count);
-				for (int32 Index = 0; Index < Count; ++Index)
-				{
-					float Value = 0.0f;
-					FMemory::Memcpy(&Value, Data + Index * sizeof(float), sizeof(float));
-					Out.Add(static_cast<double>(Value));
-				}
-				return true;
-			}
-
-			return false;
-		}
-
-		TSharedPtr<FJsonValue> MakeComponentObject(
-			const uint8* Data,
-			const int32 Size,
-			const TCHAR* const* Names,
-			const int32 Count)
-		{
-			TArray<double> Components;
-			if (!ReadComponents(Data, Size, Count, Components))
-			{
-				return nullptr;
-			}
-
-			const TSharedRef<FJsonObject> Object = MakeShared<FJsonObject>();
-			for (int32 Index = 0; Index < Count; ++Index)
-			{
-				Object->SetNumberField(Names[Index], Components[Index]);
-			}
-			return MakeShared<FJsonValueObject>(Object);
-		}
-
-		/**
-		 * Convert a Local input payload into a JSON value when the shape is one the
-		 * Agent can reason about.  Anything else is only reported as valueText so we
-		 * never invent a number for exotic struct payloads.
+		 * Project a Local input payload into JSON through the shared value module,
+		 * so N1 reads exactly what N2 writes.
 		 */
 		TSharedPtr<FJsonValue> MakeTypedLocalValue(
 			const FNiagaraTypeDefinition& Type,
@@ -143,88 +84,11 @@ namespace UEAgentKitNiagaraStack
 			const int32 Size,
 			bool& bOutRepresentable)
 		{
-			bOutRepresentable = false;
-			if (Data == nullptr || Size <= 0)
-			{
-				return nullptr;
-			}
-
-			// Compare by the concrete UScriptStruct rather than by display name:
-			// FNiagaraTypeDefinition::GetName() returns the struct short name
-			// ("NiagaraFloat", "Vector", "LinearColor", ...), not a friendly type name.
-			const UStruct* Struct = Type.GetStruct();
-			auto Matches = [Struct](const UScriptStruct* Known) { return Struct != nullptr && Struct == Known; };
-
-			if (Matches(FNiagaraTypeDefinition::GetFloatStruct()) && Size == static_cast<int32>(sizeof(float)))
-			{
-				float Value = 0.0f;
-				FMemory::Memcpy(&Value, Data, sizeof(float));
-				bOutRepresentable = true;
-				return MakeShared<FJsonValueNumber>(static_cast<double>(Value));
-			}
-
-			// TypeDefinition::GetStruct() maps enums onto the int struct, so enum
-			// inputs are reported as their numeric value rather than dropped.
-			if (Matches(FNiagaraTypeDefinition::GetIntStruct()) && Size == static_cast<int32>(sizeof(int32)))
-			{
-				int32 Value = 0;
-				FMemory::Memcpy(&Value, Data, sizeof(int32));
-				bOutRepresentable = true;
-				return MakeShared<FJsonValueNumber>(static_cast<double>(Value));
-			}
-
-			// FNiagaraBool stores 0xFFFFFFFF for true and 0 for false.
-			if (Matches(FNiagaraTypeDefinition::GetBoolStruct()) && Size == static_cast<int32>(sizeof(int32)))
-			{
-				int32 Value = 0;
-				FMemory::Memcpy(&Value, Data, sizeof(int32));
-				bOutRepresentable = true;
-				return MakeShared<FJsonValueBoolean>(Value != 0);
-			}
-
-			static const TCHAR* const Vec2Names[] = { TEXT("x"), TEXT("y") };
-			static const TCHAR* const Vec3Names[] = { TEXT("x"), TEXT("y"), TEXT("z") };
-			static const TCHAR* const Vec4Names[] = { TEXT("x"), TEXT("y"), TEXT("z"), TEXT("w") };
-			static const TCHAR* const ColorNames[] = { TEXT("r"), TEXT("g"), TEXT("b"), TEXT("a") };
-
-			const bool bIsVec2 = Matches(FNiagaraTypeDefinition::GetVec2Struct());
-			const bool bIsVec3 = Matches(FNiagaraTypeDefinition::GetVec3Struct())
-				|| Matches(FNiagaraTypeDefinition::GetPositionStruct());
-			const bool bIsVec4 = Matches(FNiagaraTypeDefinition::GetVec4Struct())
-				|| Matches(FNiagaraTypeDefinition::GetQuatStruct());
-			const bool bIsColor = Matches(FNiagaraTypeDefinition::GetColorStruct());
-
-			if (bIsVec2)
-			{
-				TSharedPtr<FJsonValue> Value = MakeComponentObject(Data, Size, Vec2Names, 2);
-				bOutRepresentable = Value.IsValid();
-				return Value;
-			}
-
-			if (bIsVec3)
-			{
-				TSharedPtr<FJsonValue> Value = MakeComponentObject(Data, Size, Vec3Names, 3);
-				bOutRepresentable = Value.IsValid();
-				return Value;
-			}
-
-			if (bIsVec4)
-			{
-				TSharedPtr<FJsonValue> Value = MakeComponentObject(Data, Size, Vec4Names, 4);
-				bOutRepresentable = Value.IsValid();
-				return Value;
-			}
-
-			if (bIsColor)
-			{
-				TSharedPtr<FJsonValue> Value = MakeComponentObject(Data, Size, ColorNames, 4);
-				bOutRepresentable = Value.IsValid();
-				return Value;
-			}
-
-			return nullptr;
+			TSharedPtr<FJsonValue> Value;
+			FString Reason;
+			bOutRepresentable = UEAgentKitNiagaraValue::ToJson(Type, Data, Size, Value, Reason);
+			return bOutRepresentable ? Value : nullptr;
 		}
-
 		FString SafeObjectPath(const UObject* Object)
 		{
 			return Object != nullptr ? Object->GetPathName() : FString(EmptyString);
@@ -537,6 +401,85 @@ namespace UEAgentKitNiagaraStack
 		return TEXT("live-editor-action-failed");
 	}
 
+	UNiagaraSystem* ResolveSystem(const FString& SystemPath, EReadFailure& OutFailure, FString& OutMessage)
+	{
+		OutFailure = EReadFailure::None;
+		OutMessage.Reset();
+
+		if (SystemPath.IsEmpty() || !SystemPath.StartsWith(TEXT("/")))
+		{
+			OutFailure = EReadFailure::InvalidRequest;
+			OutMessage = TEXT("systemPath must be an exact /Game package path of a Niagara System.");
+			return nullptr;
+		}
+
+		UNiagaraSystem* System = Cast<UNiagaraSystem>(FSoftObjectPath(SystemPath).TryLoad());
+		if (System == nullptr && !SystemPath.Contains(TEXT(".")))
+		{
+			// Accept a bare package path (/Game/Dev/NS_DevStack) as well as an exact
+			// object path (/Game/Dev/NS_DevStack.NS_DevStack).
+			const FString ObjectPath = SystemPath + TEXT(".") + FPackageName::GetShortName(SystemPath);
+			System = Cast<UNiagaraSystem>(FSoftObjectPath(ObjectPath).TryLoad());
+		}
+		if (System == nullptr)
+		{
+			OutFailure = EReadFailure::SystemNotFound;
+			OutMessage = FString::Printf(
+				TEXT("No Niagara System asset was found at '%s'."), *SystemPath);
+			return nullptr;
+		}
+
+		// Loading a Niagara System queues the engine's own post-load compile, so the
+		// first call almost always starts with a pending request.  Completing it is a
+		// readiness wait (UNiagaraSystem::WaitForCompilationComplete), not a new edit:
+		// it never dirties the package and never saves.
+		if (System->HasOutstandingCompilationRequests())
+		{
+			System->WaitForCompilationComplete(/*bIncludingGPUShaders*/ false, /*bShowProgress*/ false);
+		}
+		if (System->HasOutstandingCompilationRequests())
+		{
+			OutFailure = EReadFailure::SystemCompiling;
+			OutMessage = FString::Printf(
+				TEXT("Niagara System '%s' still has outstanding compilation requests after waiting."), *SystemPath);
+			return nullptr;
+		}
+
+		return System;
+	}
+
+	/**
+	 * Build the data-processing only view model (no preview scene, no sequencer, no
+	 * undo registration), mirroring UNiagaraSystemAuditCommandlet.
+	 *
+	 * FNiagaraSystemViewModel::GetExistingViewModelForObject() cannot be used here:
+	 * its backing static TNiagaraViewModelManager<...>::ObjectsToViewModels is
+	 * explicitly instantiated inside the NiagaraEditor module without an export
+	 * macro, so calling it from another module is a link error.
+	 */
+	TSharedPtr<FNiagaraSystemViewModel> CreateStackViewModel(UNiagaraSystem& System)
+	{
+		TSharedPtr<FNiagaraSystemViewModel> ViewModel = MakeShared<FNiagaraSystemViewModel>();
+
+		FNiagaraSystemViewModelOptions Options;
+		Options.EditMode = ENiagaraSystemViewModelEditMode::SystemAsset;
+		Options.bIsForDataProcessingOnly = true;
+		Options.bCanAutoCompile = false;
+		Options.bCanSimulate = false;
+		Options.bCanModifyEmittersFromTimeline = false;
+		Options.MessageLogGuid = System.GetAssetGuid();
+
+		// Initialize() ends with RefreshAll(), which creates the emitter handle view
+		// models and their per-emitter stack view models.
+		ViewModel->Initialize(System, Options);
+		return ViewModel;
+	}
+
+	/** The destructor unregisters the view model and runs Cleanup(). */
+	void ReleaseStackViewModel(TSharedPtr<FNiagaraSystemViewModel>& ViewModel)
+	{
+		ViewModel.Reset();
+	}
 	bool ReadModuleStack(
 		const FReadRequest& Request,
 		TSharedPtr<FJsonObject>& OutResult,
@@ -566,64 +509,19 @@ namespace UEAgentKitNiagaraStack
 			return false;
 		}
 
-		const FSoftObjectPath SoftSystemPath(Request.SystemPath);
-		UNiagaraSystem* System = Cast<UNiagaraSystem>(SoftSystemPath.TryLoad());
+		UNiagaraSystem* System = ResolveSystem(Request.SystemPath, OutFailure, OutMessage);
 		if (System == nullptr)
 		{
-			// Accept a bare package path (/Game/Dev/NS_DevStack) as well as an exact
-			// object path (/Game/Dev/NS_DevStack.NS_DevStack).
-			if (!Request.SystemPath.Contains(TEXT(".")))
-			{
-				const FString ObjectPath = Request.SystemPath + TEXT(".") + FPackageName::GetShortName(Request.SystemPath);
-				System = Cast<UNiagaraSystem>(FSoftObjectPath(ObjectPath).TryLoad());
-			}
-		}
-		if (System == nullptr)
-		{
-			OutFailure = EReadFailure::SystemNotFound;
-			OutMessage = FString::Printf(
-				TEXT("No Niagara System asset was found at '%s'."), *Request.SystemPath);
 			return false;
 		}
 
-		// Loading a Niagara System queues the engine's own post-load compile, so the
-		// first read almost always starts with a pending request.  Completing it is a
-		// readiness wait (UNiagaraSystem::WaitForCompilationComplete), not a new edit:
-		// it never dirties the package and never saves.  The view model build below
-		// waits for the same compilation anyway.
-		if (System->HasOutstandingCompilationRequests())
+		TSharedPtr<FNiagaraSystemViewModel> SystemViewModel = CreateStackViewModel(*System);
+		if (!SystemViewModel.IsValid())
 		{
-			System->WaitForCompilationComplete(/*bIncludingGPUShaders*/ false, /*bShowProgress*/ false);
-		}
-		if (System->HasOutstandingCompilationRequests())
-		{
-			OutFailure = EReadFailure::SystemCompiling;
-			OutMessage = FString::Printf(
-				TEXT("Niagara System '%s' still has outstanding compilation requests after waiting."), *Request.SystemPath);
+			OutFailure = EReadFailure::StackUnavailable;
+			OutMessage = TEXT("The Niagara System view model could not be created.");
 			return false;
 		}
-
-		// Always build a data-processing only view model (no preview scene, no
-		// sequencer, no undo registration), mirroring UNiagaraSystemAuditCommandlet.
-		//
-		// FNiagaraSystemViewModel::GetExistingViewModelForObject() cannot be used
-		// here: its backing static TNiagaraViewModelManager<...>::ObjectsToViewModels
-		// is explicitly instantiated inside the NiagaraEditor module without an
-		// export macro, so calling it from another module is a link error.
-		TSharedPtr<FNiagaraSystemViewModel> SystemViewModel = MakeShared<FNiagaraSystemViewModel>();
-
-		FNiagaraSystemViewModelOptions Options;
-		Options.EditMode = ENiagaraSystemViewModelEditMode::SystemAsset;
-		Options.bIsForDataProcessingOnly = true;
-		Options.bCanAutoCompile = false;
-		Options.bCanSimulate = false;
-		Options.bCanModifyEmittersFromTimeline = false;
-		Options.MessageLogGuid = System->GetAssetGuid();
-
-		// Initialize() ends with RefreshAll(), which creates the emitter handle view
-		// models and their per-emitter stack view models.
-		SystemViewModel->Initialize(*System, Options);
-
 		const TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 		Result->SetStringField(TEXT("systemPath"), Request.SystemPath);
 		Result->SetBoolField(TEXT("loaded"), true);
@@ -669,9 +567,7 @@ namespace UEAgentKitNiagaraStack
 		Result->SetNumberField(TEXT("maxInputsPerModule"), Request.MaxInputsPerModule);
 		Result->SetBoolField(TEXT("includeInputs"), Request.bIncludeInputs);
 
-		// The destructor unregisters the view model and runs Cleanup(), which also
-		// keeps TNiagaraViewModelManager::CleanAll() happy at module shutdown.
-		SystemViewModel.Reset();
+		ReleaseStackViewModel(SystemViewModel);
 
 		OutResult = Result;
 		return true;

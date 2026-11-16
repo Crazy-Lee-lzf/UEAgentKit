@@ -64,6 +64,7 @@ namespace UEAgentKitEditorBridgePrivate
 		TEXT("editor.getCompileErrors"),
 		TEXT("editor.inspectAssetLive"),
 		TEXT("editor.getNiagaraModuleStack"),
+		TEXT("editor.setNiagaraModuleInput"),
 		TEXT("editor.getBlueprintGraphSelection"),
 		TEXT("editor.moveBlueprintNode"),
 		TEXT("editor.moveBlueprintNodes"),
@@ -872,6 +873,28 @@ void FUEAgentKitEditorBridge::ProcessLine(FClientConnection& Client, const TArra
 		FString ErrorMessage;
 		const bool bSucceeded = TryBuildNiagaraModuleStackResult(Params, ActionResult, ErrorCode, ErrorMessage);
 		SendActionResult(bSucceeded, ActionResult, ErrorCode, ErrorMessage);
+	}
+	else if (Method == TEXT("editor.setNiagaraModuleInput"))
+	{
+		TSharedPtr<FJsonObject> ActionResult;
+		FString ErrorCode;
+		FString ErrorMessage;
+		const bool bSucceeded = TrySetNiagaraModuleInputResult(Params, ActionResult, ErrorCode, ErrorMessage);
+		if (bSucceeded)
+		{
+			SendResult(Client.Socket, RequestId, ActionResult.ToSharedRef());
+		}
+		else
+		{
+			// The refusal payload still carries the real source (linkedTarget, current
+			// value), so pass it as structured details instead of dropping it.
+			SendError(
+				Client.Socket,
+				RequestId,
+				ErrorCode.IsEmpty() ? TEXT("live-editor-action-failed") : ErrorCode,
+				ErrorMessage.IsEmpty() ? TEXT("The Editor action failed.") : ErrorMessage,
+				ActionResult);
+		}
 	}
 	else if (Method == TEXT("editor.getBlueprintGraphSelection"))
 	{
