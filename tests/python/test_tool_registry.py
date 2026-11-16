@@ -68,6 +68,7 @@ EXPECTED_ALL_TOOLS = [
     "ue_get_output_log",
     "ue_get_compile_errors",
     "ue_inspect_asset_live",
+    "ue_get_niagara_module_stack",
     "ue_get_blueprint_graph_selection",
     "ue_get_blueprint_graph_layout_preflight",
     "ue_get_focused_blueprint_graph_context",
@@ -93,6 +94,7 @@ EXPECTED_ALL_TOOLS = [
     "ue_validate_asset",
     "ue_validate_folder",
     "ue_run_automation_test",
+    "ue_set_niagara_module_input",
     "ue_refresh_asset_index_live",
     "ue_get_editor_context",
     "ue_start_batch_task",
@@ -170,7 +172,7 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertEqual(len(tool_names_for_mode()), 15)
         self.assertEqual(len(tool_names_for_mode()), 15)
-        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 60)
+        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 62)
         self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 76)
         self.assertEqual(
             tool_names_for_mode(memory_enabled=True),
@@ -179,7 +181,7 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 29)
         self.assertEqual(
             len(tool_names_for_mode(live_editor_enabled=True, memory_enabled=True)),
-            74,
+            76,
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
@@ -193,7 +195,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-            135,
+137,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:

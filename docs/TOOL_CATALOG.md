@@ -13,6 +13,7 @@
 | Live Editor | `ue_editor_status`、`ue_get_selection`、`ue_get_open_assets`、`ue_get_dirty_assets`、`ue_get_current_level` | 当前 Editor 状态 |
 | Live 图 / PIE | `ue_get_blueprint_graph_context`、`ue_get_focused_blueprint_graph_context`、`ue_get_blueprint_graph_layout_preflight`、`ue_get_pie_state`、`ue_get_pie_world_contexts`、`ue_list_pie_actors`、`ue_inspect_pie_actor`、`ue_get_pie_scalars`、`ue_list_pie_object_properties`、`ue_read_pie_object_properties` | 只读；PIE 需要精确 instance；`ue_list_pie_actors` 按 object path 稳定排序并分页，Name/Class/Tag 为大小写不敏感子串过滤，Server/Client 世界分开；两个 PIE 属性 Tool 走反射（不以 Edit/BlueprintVisible 为门槛），容器按 `offset`/`limit` 分页，对象引用只返回身份（`objectRef.path` 可直接作为下一跳的 `objectPath`，逐跳显式调用、跨世界引用标记 `crossWorld` 并拒绝继续），不支持的类型返回 `unsupported-type` + 原因 |
 | 资产 / 日志 | `ue_inspect_asset_live`、`ue_get_output_log`、`ue_get_compile_errors` | 只读诊断 |
+| Niagara Stack | `ue_get_niagara_module_stack` | 按真实执行阶段只读 Module / Input 与来源 |
 | Project Memory | `ue_memory_search`、`ue_memory_get`、`ue_memory_get_context`、`ue_memory_expand_node`、`ue_memory_get_evidence` | 需要 `--enable-project-memory` |
 | 代码知识 | `ue_search(scope="symbols", profile="code")` | C++ 符号与静态调用点 |
 
@@ -23,6 +24,7 @@
 | 稳定 patch / Save / Verify | `ue_plan_patch`、`ue_dry_run_patch`、`ue_apply_patch`、`ue_verify_asset`、`ue_rollback_patch` | workflow 双门禁 + Write Policy |
 | 配置写入 | `ue_set_datatable_*`、`ue_set_asset_*`、`ue_set_material_parameter`、`ue_set_blueprint_default`、`ue_set_component_property`、`ue_set_pin_default` | workflow 双门禁 + Write Policy |
 | Live 单资产修改 | `ue_apply_asset_property_live`、`ue_undo_asset_property_live`、`ue_discard_asset_property_live`、`ue_save_authorized_asset` | workflow 双门禁 + Write Policy |
+| Niagara Module Input | `ue_set_niagara_module_input` | 仅 Local 常量；一次修改一次 Undo；不自动 Save |
 | 位置批量移动 / edit session | `ue_move_blueprint_node`、`ue_move_blueprint_nodes`、`ue_begin_blueprint_edit_session`、`ue_end_blueprint_edit_session` | workflow 双门禁 |
 | 实验 Blueprint patch | `ue_preview_blueprint_patch_experimental`、`ue_apply_blueprint_patch_experimental`、`ue_save_blueprint_patch_experimental` | `--enable-experimental-graphpatch-edit` + ini |
 | Action Registry 节点创建 | `ue_search_node_actions`（只读）+ `createNode` 的 `actionId` | 再加 `--enable-experimental-node-spawn` + ini |

@@ -40,6 +40,7 @@ PURE_LIVE_READ_TOOL_NAMES: tuple[str, ...] = (
     "ue_get_output_log",
     "ue_get_compile_errors",
     "ue_inspect_asset_live",
+    "ue_get_niagara_module_stack",
     "ue_get_blueprint_graph_selection",
     "ue_get_blueprint_graph_layout_preflight",
     "ue_get_focused_blueprint_graph_context",
