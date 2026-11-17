@@ -57,6 +57,13 @@ __pycache__/
 # Internal acceptance reports and run states kept out of the public tree.
 # Public spec/ contains contracts and schemas only; reports are internal evidence.
 # Pattern rules replace the previous one-line-per-file list.
+#
+# 2026-11-17 (A1.2-b): the ignored reports that used to physically live under
+# spec/ were MOVED OUT of the public tree to
+#   <UEAgentKit-Development>/archives/spec-internal-reports-20261117/
+#   (zip + per-file SHA-256 manifest: spec-internal-reports-20261117.zip)
+# The rules below stay so newly generated reports keep being ignored instead of
+# silently re-entering the public tree.
 /spec/**/*_REPORT.md
 /spec/**/*_RUN_STATE_*.md
 /spec/**/*_RUNSTATE_*.md
