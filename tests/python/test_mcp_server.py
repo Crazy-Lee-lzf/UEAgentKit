@@ -968,6 +968,20 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual([tool.name for tool in tools], tool_names_for_mode())
 
     @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
+    def test_capabilities_do_not_advertise_profile_hidden_tools(self) -> None:
+        server = create_mcp_server(
+            self.database_path,
+            live_editor_service=FakeLiveEditorService(),
+            tool_profile="core",
+        )
+        names = [tool.name for tool in asyncio.run(server.list_tools())]
+        _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
+        self.assertEqual([entry["name"] for entry in capabilities["tools"]], names)
+        self.assertEqual(capabilities["liveEditor"]["tools"], [])
+        self.assertFalse(capabilities["liveEditor"]["pieRuntimeInspection"]["available"])
+        self.assertFalse(capabilities["liveEditor"]["pieScalarInspection"]["available"])
+
+    @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
     def test_fastmcp_registers_read_only_status_and_query_tools(self) -> None:
         server = create_mcp_server(self.database_path)
         tools = asyncio.run(server.list_tools())

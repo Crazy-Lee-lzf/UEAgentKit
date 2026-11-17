@@ -334,6 +334,14 @@ def _read_engine_status(workflow_service: PatchWorkflowService | None) -> dict[s
     }
 
 
+def _profile_visible_names(names: Sequence[str], tool_profile: str | None) -> list[str]:
+    """The subset of ``names`` one profile lets a client call (None keeps all)."""
+
+    if tool_profile is None:
+        return list(names)
+    return [name for name in names if tool_profile_allows(tool_profile, name)]
+
+
 def _capabilities_response(
     workflow_service: PatchWorkflowService | None,
     live_editor_service: LiveEditorBridgeService | None,
@@ -352,6 +360,11 @@ def _capabilities_response(
     live_editor_enabled = live_editor_service is not None
     memory_enabled = memory_service is not None
     source_control_enabled = source_control_service is not None
+    # ue_pie lives in the live-read group, so the profile can hide it too.
+    pie_visible = bool(
+        live_editor_enabled
+        and (tool_profile is None or tool_profile_allows(tool_profile, "ue_pie"))
+    )
     experimental_registered = bool(live_editor_enabled and experimental_graph_layout_apply)
     observed_capabilities = (
         live_editor_status.get("capabilities")
@@ -397,12 +410,17 @@ def _capabilities_response(
             "mode": _server_mode(write_tools_enabled, commit_enabled, memory_enabled),
         },
         "tools": (
-            tool_descriptors_for_mode(
-                live_editor_enabled=live_editor_enabled,
-                workflow_enabled=write_tools_enabled,
-                memory_enabled=memory_enabled,
-                source_control_enabled=source_control_enabled,
-            )
+            [
+                descriptor
+                for descriptor in tool_descriptors_for_mode(
+                    live_editor_enabled=live_editor_enabled,
+                    workflow_enabled=write_tools_enabled,
+                    memory_enabled=memory_enabled,
+                    source_control_enabled=source_control_enabled,
+                )
+                if tool_profile is None
+                or tool_profile_allows(tool_profile, str(descriptor["name"]))
+            ]
             + (
                 [
                     {
@@ -480,7 +498,7 @@ def _capabilities_response(
         "sourceControl": {
             "configured": source_control_enabled,
             "advisory": True,
-            "tools": SOURCE_CONTROL_TOOL_NAMES if source_control_enabled else [],
+            "tools": _profile_visible_names(SOURCE_CONTROL_TOOL_NAMES, tool_profile) if source_control_enabled else [],
             "submitCapability": False,
             "revertCapability": False,
             "deleteCapability": False,
@@ -494,7 +512,7 @@ def _capabilities_response(
         "liveEditor": {
             "configured": live_editor_enabled,
             "transport": "localhost-tcp" if live_editor_enabled else "unavailable",
-            "tools": LIVE_EDITOR_TOOL_NAMES if live_editor_enabled else [],
+            "tools": _profile_visible_names(LIVE_EDITOR_TOOL_NAMES, tool_profile) if live_editor_enabled else [],
             "source": "editor-memory" if live_editor_enabled else "unavailable",
             "fixedProject": live_editor_enabled,
             "fixedEndpoint": live_editor_enabled,
@@ -536,14 +554,14 @@ def _capabilities_response(
                 "automationRevisionCoverage": "not-applicable",
             },
             "pieRuntimeInspection": {
-                "available": live_editor_enabled,
+                "available": pie_visible,
                 "readOnly": True,
                 "requiresDatabase": False,
                 "serverStartupRequiresIndexDatabase": True,
                 "requiresPieStopped": False,
                 "pieControlSupported": False,
-                "tool": "ue_pie" if live_editor_enabled else "",
-                "actions": ["worlds", "inspect_actor"] if live_editor_enabled else [],
+                "tool": "ue_pie" if pie_visible else "",
+                "actions": ["worlds", "inspect_actor"] if pie_visible else [],
                 "bridgeMethods": [
                     "editor.getPieWorldContexts",
                     "editor.inspectPieActor",
@@ -572,10 +590,10 @@ def _capabilities_response(
                 ],
             },
             "pieScalarInspection": {
-                "available": live_editor_enabled,
-                "tool": "ue_pie" if live_editor_enabled else "",
-                "action": "scalars" if live_editor_enabled else "",
-                "bridgeMethod": "editor.getPieScalars" if live_editor_enabled else "",
+                "available": pie_visible,
+                "tool": "ue_pie" if pie_visible else "",
+                "action": "scalars" if pie_visible else "",
+                "bridgeMethod": "editor.getPieScalars" if pie_visible else "",
                 "readOnly": True,
                 "requiresDatabase": False,
                 "source": "pie-live",
