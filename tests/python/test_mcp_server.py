@@ -48,6 +48,7 @@ from ue_agent_kit.tool_registry import (  # noqa: E402
     LIVE_EDITOR_TOOL_NAMES,
     QUERY_TOOL_NAMES,
     TOOL_DEFINITIONS_BY_NAME,
+    consolidated_tool_names_for_mode,
     tool_names_for_mode,
 )
 
@@ -1664,7 +1665,7 @@ class McpServerTests(unittest.TestCase):
         live_service = FakeLiveEditorService()
         server = create_mcp_server(self.database_path, live_editor_service=live_service)
         tools = asyncio.run(server.list_tools())
-        expected_names = tool_names_for_mode(live_editor_enabled=True)
+        expected_names = consolidated_tool_names_for_mode(live_editor_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
         forbidden = {
             "address",
@@ -2146,9 +2147,11 @@ class McpServerTests(unittest.TestCase):
             live_editor_service=live_service,
         )
         tools = asyncio.run(server.list_tools())
-        expected_names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
+        expected_names = consolidated_tool_names_for_mode(
+            live_editor_enabled=True, workflow_enabled=True
+        )
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 123)
+        self.assertEqual(len(tools), 117)
         for tool in tools:
             definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
             self.assertEqual(bool(tool.annotations.readOnlyHint), definition.read_only, tool.name)
@@ -2665,7 +2668,7 @@ class McpServerTests(unittest.TestCase):
             "ue_get_open_assets",
             "ue_get_dirty_assets",
             "ue_get_current_level",
-            "ue_get_pie_state",
+            "ue_pie",
             "ue_get_output_log",
             "ue_get_compile_errors",
             "ue_inspect_asset_live",

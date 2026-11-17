@@ -319,7 +319,8 @@ class PieScalarCapabilityTests(unittest.TestCase):
         )
         block = capabilities["liveEditor"]["pieScalarInspection"]
         self.assertTrue(block["available"])
-        self.assertEqual(block["tool"], SCALAR_TOOL)
+        self.assertEqual(block["tool"], "ue_pie")
+        self.assertEqual(block["action"], "scalars")
         self.assertEqual(block["bridgeMethod"], SCALAR_METHOD)
         self.assertTrue(block["readOnly"])
         self.assertFalse(block["requiresDatabase"])
@@ -345,7 +346,8 @@ class PieScalarCapabilityTests(unittest.TestCase):
         ):
             self.assertIn(field, provenance["fields"])
         self.assertIn("no filesystem path", provenance["policy"])
-        self.assertIn(SCALAR_TOOL, capabilities["liveEditor"]["tools"])
+        self.assertIn("ue_pie", capabilities["liveEditor"]["tools"])
+        self.assertNotIn(SCALAR_TOOL, capabilities["liveEditor"]["tools"])
         self.assertEqual(capabilities["liveEditor"]["tools"], LIVE_EDITOR_TOOL_NAMES)
 
     def test_pure_live_capabilities_expose_scalar_inspection(self) -> None:
@@ -354,9 +356,11 @@ class PieScalarCapabilityTests(unittest.TestCase):
             server_version=__version__,
             live_status={"configured": True, "state": "available"},
         )
-        self.assertIn(SCALAR_TOOL, payload["liveEditor"]["tools"])
+        self.assertIn("ue_pie", payload["liveEditor"]["tools"])
+        self.assertNotIn(SCALAR_TOOL, payload["liveEditor"]["tools"])
         self.assertEqual(len(payload["liveEditor"]["tools"]), len(PURE_LIVE_READ_TOOL_NAMES))
-        self.assertEqual(payload["liveEditor"]["pieScalarInspection"]["tool"], SCALAR_TOOL)
+        self.assertEqual(payload["liveEditor"]["pieScalarInspection"]["tool"], "ue_pie")
+        self.assertEqual(payload["liveEditor"]["pieScalarInspection"]["action"], "scalars")
         self.assertFalse(payload["liveEditor"]["pieScalarInspection"]["requiresDatabase"])
         pure_provenance = payload["liveEditor"]["pieScalarInspection"]["propertyProvenance"]
         self.assertTrue(pure_provenance["onlyForResolvedProperties"])
@@ -370,7 +374,8 @@ class PieScalarRegistryAndSourceTests(unittest.TestCase):
         self.assertEqual(definition.group, "live-read")
         self.assertTrue(definition.read_only)
         self.assertFalse(definition.destructive)
-        self.assertIn(SCALAR_TOOL, LIVE_EDITOR_TOOL_NAMES)
+        self.assertNotIn(SCALAR_TOOL, LIVE_EDITOR_TOOL_NAMES)
+        self.assertIn("ue_pie", LIVE_EDITOR_TOOL_NAMES)
         self.assertIn(SCALAR_TOOL, tool_names_for_mode(live_editor_enabled=True))
 
     def test_cpp_handler_contract(self) -> None:

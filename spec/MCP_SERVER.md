@@ -36,7 +36,7 @@ ue_get_selection
 ue_get_open_assets
 ue_get_dirty_assets
 ue_get_current_level
-ue_get_pie_state
+ue_pie
 ue_get_output_log
 ue_get_compile_errors
 ue_inspect_asset_live
@@ -153,7 +153,7 @@ Live Editor 能力分为三组，成功结果均标记 `source=live-editor-memor
 - `ue_get_open_assets`：`UAssetEditorSubsystem` 中打开的资产，最多 200 项。
 - `ue_get_dirty_assets`：Dirty `/Game/` Package 和 Asset Registry 路径，最多 200 项。
 - `ue_get_current_level`：Editor World、Persistent/Current Level、World Partition 和 Dirty 状态。
-- `ue_get_pie_state`：`stopped`、`playing` 或 `simulating`，以及 Play World/Net Mode。
+- `ue_pie`：只读 PIE 统一入口，`action` 取 `state`、`worlds`、`list_actors`、`inspect_actor`、`scalars`、`list_properties`、`read_properties`，转发到原有的 7 个 Bridge 端点（端点与参数不变，逐动词 MCP Tool 不再单独注册）。`state` 返回 `stopped`、`playing` 或 `simulating`，以及 Play World/Net Mode。
 - `ue_get_output_log`：4096 条内存环形缓冲，支持 Category、最低 Verbosity、关键词、UTC 范围、PIE Session、`since_sequence` 和最多 100 条分页读取。
 - `ue_get_compile_errors`：读取 Bridge 当前会话捕获到的编译相关 Warning/Error，并补充最多 100 个已加载 Blueprint 的 `Status` 与截断信息；返回 `historyComplete=false`，不冒充完整 Message Log 历史。
 - `ue_inspect_asset_live`：只接受精确 `/Game/...Asset.Asset`，返回 Asset Registry 和已加载对象状态；使用 `StaticFindObject`，不触发加载，并明确返回 `loadedByBridge=false`。

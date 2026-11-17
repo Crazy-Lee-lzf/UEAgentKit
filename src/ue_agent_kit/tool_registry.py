@@ -29,6 +29,7 @@ class ToolDefinition:
 
 
 TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
+    ToolDefinition("ue_pie", "live-read", "read"),
     ToolDefinition("ue_get_capabilities", "query", "read"),
     ToolDefinition("ue_get_project_status", "query", "read"),
     ToolDefinition("ue_search", "query", "read"),
@@ -251,10 +252,38 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
 )
 
 TOOL_DEFINITIONS_BY_NAME = {definition.name: definition for definition in TOOL_REGISTRY}
+
+# Tools that one consolidated tool replaces.  When the consolidated surface is
+# on, the replaced names are never registered or advertised, so a client never
+# sees both.  Defined before the name lists below because they filter on it.
+CONSOLIDATED_REPLACED_TOOLS: dict[str, tuple[str, ...]] = {
+    "ue_pie": (
+        "ue_get_pie_state",
+        "ue_get_pie_world_contexts",
+        "ue_list_pie_actors",
+        "ue_inspect_pie_actor",
+        "ue_get_pie_scalars",
+        "ue_list_pie_object_properties",
+        "ue_read_pie_object_properties",
+    ),
+}
+
+CONSOLIDATED_TOOL_NAMES: tuple[str, ...] = tuple(CONSOLIDATED_REPLACED_TOOLS)
+
+
+def replaced_tool_names() -> frozenset[str]:
+    """Every tool name a consolidated tool takes over."""
+
+    return frozenset(name for names in CONSOLIDATED_REPLACED_TOOLS.values() for name in names)
+
+
 QUERY_TOOL_NAMES = [definition.name for definition in TOOL_REGISTRY if definition.group == "query"]
 MEMORY_TOOL_NAMES = [definition.name for definition in TOOL_REGISTRY if definition.group == "memory"]
 LIVE_EDITOR_TOOL_NAMES = [
-    definition.name for definition in TOOL_REGISTRY if definition.group in {"live-read", "live-action", "realtime"}
+    definition.name
+    for definition in TOOL_REGISTRY
+    if definition.group in {"live-read", "live-action", "realtime"}
+    and definition.name not in replaced_tool_names()
 ]
 WORKFLOW_TOOL_NAMES = [definition.name for definition in TOOL_REGISTRY if definition.group == "workflow"]
 SOURCE_CONTROL_TOOL_NAMES = [
@@ -378,6 +407,56 @@ def tool_names_for_mode(
     ]
 
 
+def consolidated_tool_names_for_mode(
+    *,
+    live_editor_enabled: bool = False,
+    workflow_enabled: bool = False,
+    memory_enabled: bool = False,
+    source_control_enabled: bool = False,
+) -> list[str]:
+    """Registered names for one mode with every replaced per-verb name removed.
+
+    This is what an unprofiled server exposes: the mode filter, minus the names a
+    consolidated tool took over, in registry order.
+    """
+
+    replaced = replaced_tool_names()
+    return [
+        name
+        for name in tool_names_for_mode(
+            live_editor_enabled=live_editor_enabled,
+            workflow_enabled=workflow_enabled,
+            memory_enabled=memory_enabled,
+            source_control_enabled=source_control_enabled,
+        )
+        if name not in replaced
+    ]
+
+
+def effective_tool_names_for_profile(
+    profile: str,
+    *,
+    live_editor_enabled: bool = False,
+    workflow_enabled: bool = False,
+    memory_enabled: bool = False,
+    source_control_enabled: bool = False,
+) -> list[str]:
+    """What a client actually receives: profile minus replaced names plus consolidated tools."""
+
+    allowed = profile_groups(profile)
+    names: list[str] = []
+    for name in consolidated_tool_names_for_mode(
+        live_editor_enabled=live_editor_enabled,
+        workflow_enabled=workflow_enabled,
+        memory_enabled=memory_enabled,
+        source_control_enabled=source_control_enabled,
+    ):
+        group = tool_group_for_name(name)
+        if group is None or group in allowed:
+            names.append(name)
+    return names
+
+
 def tool_descriptors_for_mode(
     *,
     live_editor_enabled: bool,
@@ -385,6 +464,9 @@ def tool_descriptors_for_mode(
     memory_enabled: bool = False,
     source_control_enabled: bool = False,
 ) -> list[dict[str, object]]:
+    """Descriptors for what a client can actually call: replaced names excluded."""
+
+    replaced = replaced_tool_names()
     return [
         {
             "name": definition.name,
@@ -397,4 +479,5 @@ def tool_descriptors_for_mode(
             memory_enabled=memory_enabled,
             source_control_enabled=source_control_enabled,
         )
+        if definition.name not in replaced
     ]

@@ -587,7 +587,8 @@ class PieCapabilityDescriptorTests(unittest.TestCase):
         self.assertFalse(block["requiresPieStopped"])
         self.assertFalse(block["pieControlSupported"])
         self.assertTrue(block["serverClientIdentification"])
-        self.assertEqual(block["tools"], [WORLD_CONTEXT_TOOL, INSPECT_ACTOR_TOOL])
+        self.assertEqual(block["tool"], "ue_pie")
+        self.assertEqual(block["actions"], ["worlds", "inspect_actor"])
         self.assertEqual(block["bridgeMethods"], list(NEW_CAPABILITIES))
         self.assertEqual(block["maxWorldContexts"], 32)
         self.assertEqual(block["maxActorComponents"], 128)
@@ -605,8 +606,10 @@ class PieCapabilityDescriptorTests(unittest.TestCase):
     def test_pie_state_remains_the_only_pie_control_flag(self) -> None:
         capabilities = self._capabilities()
         self.assertFalse(capabilities["liveEditor"]["editorActions"]["pieSupported"])
-        self.assertIn(WORLD_CONTEXT_TOOL, capabilities["liveEditor"]["tools"])
-        self.assertIn(INSPECT_ACTOR_TOOL, capabilities["liveEditor"]["tools"])
+        # P1: one consolidated entry point replaced both per-verb tools.
+        self.assertIn("ue_pie", capabilities["liveEditor"]["tools"])
+        self.assertNotIn(WORLD_CONTEXT_TOOL, capabilities["liveEditor"]["tools"])
+        self.assertNotIn(INSPECT_ACTOR_TOOL, capabilities["liveEditor"]["tools"])
         self.assertEqual(capabilities["liveEditor"]["tools"], LIVE_EDITOR_TOOL_NAMES)
 
 
@@ -619,7 +622,9 @@ class PieRegistryContractTests(unittest.TestCase):
             self.assertEqual(definition.group, "live-read")
             self.assertTrue(definition.read_only)
             self.assertFalse(definition.destructive)
-            self.assertIn(tool, LIVE_EDITOR_TOOL_NAMES)
+            # Still the implementation, but no longer an advertised tool name.
+            self.assertNotIn(tool, LIVE_EDITOR_TOOL_NAMES)
+        self.assertIn("ue_pie", LIVE_EDITOR_TOOL_NAMES)
 
 
 class PiePluginSourceContractTests(unittest.TestCase):

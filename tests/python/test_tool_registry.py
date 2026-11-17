@@ -15,6 +15,7 @@ from ue_agent_kit.tool_registry import (  # noqa: E402
     QUERY_TOOL_NAMES,
     TOOL_DEFINITIONS_BY_NAME,
     TOOL_REGISTRY,
+    replaced_tool_names,
     tool_descriptors_for_mode,
     tool_names_for_mode,
 )
@@ -38,6 +39,7 @@ EXPECTED_MEMORY_TOOLS = [
 
 
 EXPECTED_ALL_TOOLS = [
+    "ue_pie",
     "ue_get_capabilities",
     "ue_get_project_status",
     "ue_search",
@@ -172,7 +174,7 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertEqual(len(tool_names_for_mode()), 15)
         self.assertEqual(len(tool_names_for_mode()), 15)
-        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 62)
+        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 63)
         self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 76)
         self.assertEqual(
             tool_names_for_mode(memory_enabled=True),
@@ -181,7 +183,7 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 29)
         self.assertEqual(
             len(tool_names_for_mode(live_editor_enabled=True, memory_enabled=True)),
-            76,
+            77,
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
@@ -195,7 +197,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-137,
+138,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:
@@ -255,7 +257,7 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertEqual(len(names), len(set(names)))
         self.assertEqual(set(names), set(TOOL_DEFINITIONS_BY_NAME))
         self.assertEqual(
-            list(LIVE_EDITOR_METHODS),
+            [name for name in LIVE_EDITOR_METHODS if name not in replaced_tool_names()],
             [
                 name
                 for name in LIVE_EDITOR_TOOL_NAMES
@@ -269,6 +271,8 @@ class ToolRegistryTests(unittest.TestCase):
                     # Read-only Action Registry search: it calls native.invoke
                     # directly, so it has no 1:1 bridge method of its own.
                     "ue_search_node_actions",
+                    # Consolidated dispatcher: several bridge calls behind one tool.
+                    "ue_pie",
                 }
             ],
         )
@@ -344,6 +348,7 @@ class ToolRegistryTests(unittest.TestCase):
                 definition.name
                 for definition in TOOL_REGISTRY
                 if definition.group in {"live-read", "live-action"}
+                and definition.name not in replaced_tool_names()
                 and definition.name not in {
                     "ue_preview_blueprint_graph_layout",
                     "ue_search_node_actions",
@@ -354,7 +359,10 @@ class ToolRegistryTests(unittest.TestCase):
             live_editor_enabled=True,
             workflow_enabled=True,
         )
-        self.assertEqual([item["name"] for item in descriptors], EXPECTED_ALL_TOOLS)
+        self.assertEqual(
+            [item["name"] for item in descriptors],
+            [name for name in EXPECTED_ALL_TOOLS if name not in replaced_tool_names()],
+        )
         self.assertTrue(TOOL_DEFINITIONS_BY_NAME["ue_get_asset_state"].read_only)
         self.assertTrue(TOOL_DEFINITIONS_BY_NAME["ue_apply_patch"].destructive)
         self.assertTrue(TOOL_DEFINITIONS_BY_NAME["ue_apply_asset_property_live"].destructive)

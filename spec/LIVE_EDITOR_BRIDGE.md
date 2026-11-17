@@ -104,7 +104,7 @@ ue_get_selection
 ue_get_open_assets
 ue_get_dirty_assets
 ue_get_current_level
-ue_get_pie_state
+ue_pie
 ue_get_output_log
 ue_get_compile_errors
 ue_inspect_asset_live
@@ -207,7 +207,7 @@ detail_limit = 1..5
 
 返回 Editor World、Persistent/Current Level、World Type、World Partition 和 Package Dirty 状态。
 
-### ue_get_pie_state
+### ue_pie(action="state")
 
 返回：
 
@@ -221,7 +221,7 @@ simulating
 
 ### editor.listPieActors
 
-PIE World 内的 Actor 列举（MCP：`ue_list_pie_actors`）。只读一个精确 PIE 世界，Server/Client 永不混合。
+PIE World 内的 Actor 列举（MCP：`ue_pie(action="list_actors")`）。只读一个精确 PIE 世界，Server/Client 永不混合。
 
 ```text
 pieInstanceId / worldContextId   必须提供且只提供一个；两者都给或都不给返回 pie-invalid-parameters
@@ -232,7 +232,7 @@ nameContains / classContains / tagContains   大小写不敏感子串过滤，�
 返回 `pieInstanceId`、`worldKey`、`totalCount`、`offset`、`limit`、`truncated` 与 `actors[]`；每个 Actor 给
 `path` / `name` / `class` / `transform` / `netRole` / `ownerPath` / `tags`。排序固定按 object path 升序，
 因此同一 `worldContextId` + 同一过滤条件 + 递增 `offset` 可无重叠地遍历完整 World。
-不返回组件的属性值（那是 `ue_inspect_pie_actor` 与 `ue_read_pie_object_properties` 的职责）。
+不返回组件的属性值（那是 `ue_pie(action="inspect_actor")` 与 `ue_pie(action="read_properties")` 的职责）。
 
 ### editor.getNiagaraModuleStack
 
@@ -269,7 +269,7 @@ Linked / Dynamic 输入返回 `niagara-input-source-not-local` 与 `linkedTarget
 
 ### editor.listPieObjectProperties / editor.readPieObjectProperties
 
-PIE 通用反射属性读取（MCP：`ue_list_pie_object_properties` / `ue_read_pie_object_properties`）。两者都只读同一份 Editor 内存：不建事务、不改对象、不编译、不 Save、不打开 SQLite 索引。
+PIE 通用反射属性读取（MCP：`ue_pie(action="list_properties")` / `ue_pie(action="read_properties")`）。两者都只读同一份 Editor 内存：不建事务、不改对象、不编译、不 Save、不打开 SQLite 索引。
 
 目标身份：
 

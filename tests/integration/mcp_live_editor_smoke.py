@@ -17,7 +17,10 @@ SRC_ROOT = TOOL_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from ue_agent_kit.tool_registry import TOOL_DEFINITIONS_BY_NAME, tool_names_for_mode  # noqa: E402
+from ue_agent_kit.tool_registry import (  # noqa: E402
+    TOOL_DEFINITIONS_BY_NAME,
+    consolidated_tool_names_for_mode,
+)
 SRC_ROOT = TOOL_ROOT / "src"
 PYTHON_TESTS = TOOL_ROOT / "tests" / "python"
 for search_path in (SRC_ROOT, PYTHON_TESTS):
@@ -34,8 +37,12 @@ from test_indexer_queries import (  # noqa: E402
 from ue_agent_kit.database import open_database  # noqa: E402
 from ue_agent_kit.indexer import build_index  # noqa: E402
 
-EXPECTED_TOOLS = tool_names_for_mode(live_editor_enabled=True)
-LIVE_TOOLS = EXPECTED_TOOLS[5:]
+EXPECTED_TOOLS = consolidated_tool_names_for_mode(live_editor_enabled=True)
+LIVE_TOOLS = [
+    name
+    for name in EXPECTED_TOOLS
+    if TOOL_DEFINITIONS_BY_NAME[name].group in {"live-read", "live-action", "realtime"}
+]
 READ_LIVE_TOOLS = [name for name in LIVE_TOOLS if TOOL_DEFINITIONS_BY_NAME[name].read_only]
 ACTION_LIVE_TOOLS = [name for name in LIVE_TOOLS if not TOOL_DEFINITIONS_BY_NAME[name].read_only]
 
@@ -154,9 +161,12 @@ async def _run(
                 capabilities_result = await session.call_tool("ue_get_capabilities", {})
                 project_status_result = await session.call_tool("ue_get_project_status", {})
                 live_results = {
-                    tool: (await session.call_tool(tool, {})).structuredContent
-                    for tool in LIVE_TOOLS[:6]
+                    "ue_pie": (
+                        await session.call_tool("ue_pie", {"action": "state"})
+                    ).structuredContent
                 }
+                for tool in [name for name in LIVE_TOOLS[:6] if name != "ue_pie"]:
+                    live_results[tool] = (await session.call_tool(tool, {})).structuredContent
                 live_results["ue_get_output_log"] = (
                     await session.call_tool(
                         "ue_get_output_log",
@@ -293,7 +303,7 @@ async def _run(
     current_level = live_results["ue_get_current_level"]["result"]
     if not current_level.get("available") or not current_level.get("currentLevelPath"):
         raise RuntimeError(f"Current level result is incomplete: {current_level}")
-    pie_state = live_results["ue_get_pie_state"]["result"]
+    pie_state = live_results["ue_pie"]["result"]
     if pie_state.get("state") not in {"stopped", "playing", "simulating"}:
         raise RuntimeError(f"PIE state is invalid: {pie_state}")
 

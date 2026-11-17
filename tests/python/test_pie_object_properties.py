@@ -103,8 +103,9 @@ class PieObjectPropertyRegistryTests(unittest.TestCase):
                 self.assertIn(tool, tool_names_for_mode(live_editor_enabled=True))
                 self.assertNotIn(tool, tool_names_for_mode())
                 self.assertNotIn(tool, tool_names_for_mode(workflow_enabled=True))
-                self.assertIn(tool, PURE_LIVE_READ_TOOL_NAMES)
-                self.assertIn(tool, PURE_LIVE_PIE_TOOL_NAMES)
+                # P1: hidden from the exposed surface, reached via ue_pie instead.
+                self.assertNotIn(tool, PURE_LIVE_READ_TOOL_NAMES)
+                self.assertEqual(PURE_LIVE_PIE_TOOL_NAMES, ("ue_pie",))
 
     def test_capability_block_documents_the_contract(self) -> None:
         capabilities = build_pure_live_capabilities(

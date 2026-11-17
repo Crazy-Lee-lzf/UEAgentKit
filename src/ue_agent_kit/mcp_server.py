@@ -89,6 +89,7 @@ from .mcp_graph_patch_tools import (
     GRAPH_PATCH_PREVIEW_TOOL_NAME,
     register_graph_patch_tools,
 )
+from .mcp_consolidated_tools import register_consolidated_tools
 from .mcp_query_tools import register_query_tools
 from .mcp_realtime_tools import register_realtime_tools
 from .mcp_source_control_tools import register_source_control_tools
@@ -134,6 +135,7 @@ from .tool_registry import (
     TOOL_DEFINITIONS_BY_NAME,
     tool_descriptors_for_mode,
     tool_profile_allows,
+    replaced_tool_names,
 )
 from .snapshot_lifecycle import (
     FrozenSessionSnapshot,
@@ -536,12 +538,8 @@ def _capabilities_response(
                 "serverStartupRequiresIndexDatabase": True,
                 "requiresPieStopped": False,
                 "pieControlSupported": False,
-                "tools": [
-                    "ue_get_pie_world_contexts",
-                    "ue_inspect_pie_actor",
-                ]
-                if live_editor_enabled
-                else [],
+                "tool": "ue_pie" if live_editor_enabled else "",
+                "actions": ["worlds", "inspect_actor"] if live_editor_enabled else [],
                 "bridgeMethods": [
                     "editor.getPieWorldContexts",
                     "editor.inspectPieActor",
@@ -571,7 +569,8 @@ def _capabilities_response(
             },
             "pieScalarInspection": {
                 "available": live_editor_enabled,
-                "tool": "ue_get_pie_scalars" if live_editor_enabled else "",
+                "tool": "ue_pie" if live_editor_enabled else "",
+                "action": "scalars" if live_editor_enabled else "",
                 "bridgeMethod": "editor.getPieScalars" if live_editor_enabled else "",
                 "readOnly": True,
                 "requiresDatabase": False,
@@ -1804,14 +1803,20 @@ def _create_pure_live_mcp_server(
         json_response=True,
     )
 
-    registration_server: Any = server
-    if tool_profile is not None:
-        registration_server = _ProfileFilteredServer(server, tool_profile)
+    registration_server: Any = _ProfileFilteredServer(server, tool_profile)
     read_annotations = ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
         idempotentHint=True,
         openWorldHint=False,
+    )
+    # Same consolidation as the indexed server: one ue_pie entry point replaces
+    # the seven per-verb PIE tools, which stay hidden here as well.
+    register_consolidated_tools(
+        server=registration_server,
+        live_editor_service=live_editor_service,
+        read_annotations=read_annotations,
+        error_response=_error_response,
     )
     register_pure_live_meta_tools(
         server=registration_server,
@@ -1839,12 +1844,14 @@ class _ProfileFilteredServer:
     """Registers only the tools one profile allows, then delegates everything else.
 
     The profile is an upper bound: a registrar that is not reached registers
-    nothing, and no group becomes enabled that the run flags left off.
+    nothing, and no group becomes enabled that the run flags left off.  A
+    ``None`` profile keeps every group and only applies the consolidation hiding.
     """
 
-    def __init__(self, server: Any, profile: str) -> None:
+    def __init__(self, server: Any, profile: str | None) -> None:
         self._server = server
         self._profile = profile
+        self._hidden = replaced_tool_names()
 
     def __getattr__(self, item: str) -> Any:
         return getattr(self._server, item)
@@ -1853,9 +1860,11 @@ class _ProfileFilteredServer:
         decorator = self._server.tool(*args, **kwargs)
 
         def register(func: Any) -> Any:
-            if tool_profile_allows(self._profile, func.__name__):
-                return decorator(func)
-            return func
+            if func.__name__ in self._hidden:
+                return func
+            if self._profile is not None and not tool_profile_allows(self._profile, func.__name__):
+                return func
+            return decorator(func)
 
         return register
 
@@ -1989,11 +1998,9 @@ def create_mcp_server(
         json_response=True,
     )
 
-    # A profile narrows what gets registered; None keeps the historical behaviour.
-    registration_server: Any = server
-    if tool_profile is not None:
-        registration_server = _ProfileFilteredServer(server, tool_profile)
-
+    # A profile narrows what gets registered; None keeps every group and only
+    # applies the consolidation hiding performed by the proxy.
+    registration_server: Any = _ProfileFilteredServer(server, tool_profile)
 
     read_annotations = ToolAnnotations(
         readOnlyHint=True,
@@ -2001,6 +2008,16 @@ def create_mcp_server(
         idempotentHint=True,
         openWorldHint=False,
     )
+
+    # The consolidated Live Editor façade is registered first so the client-visible
+    # order matches TOOL_REGISTRY (it is the entry point for PIE reads).
+    if live_editor_service is not None:
+        register_consolidated_tools(
+            server=registration_server,
+            live_editor_service=live_editor_service,
+            read_annotations=read_annotations,
+            error_response=_error_response,
+        )
 
     register_query_tools(
         server=registration_server,

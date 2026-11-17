@@ -30,13 +30,7 @@ PURE_LIVE_READ_TOOL_NAMES: tuple[str, ...] = (
     "ue_get_open_assets",
     "ue_get_dirty_assets",
     "ue_get_current_level",
-    "ue_get_pie_state",
-    "ue_get_pie_world_contexts",
-    "ue_list_pie_actors",
-    "ue_inspect_pie_actor",
-    "ue_get_pie_scalars",
-    "ue_list_pie_object_properties",
-    "ue_read_pie_object_properties",
+    "ue_pie",
     "ue_get_output_log",
     "ue_get_compile_errors",
     "ue_inspect_asset_live",
@@ -47,14 +41,7 @@ PURE_LIVE_READ_TOOL_NAMES: tuple[str, ...] = (
     "ue_get_blueprint_graph_context",
 )
 
-PURE_LIVE_PIE_TOOL_NAMES: tuple[str, ...] = (
-    "ue_get_pie_world_contexts",
-    "ue_list_pie_actors",
-    "ue_inspect_pie_actor",
-    "ue_get_pie_scalars",
-    "ue_list_pie_object_properties",
-    "ue_read_pie_object_properties",
-)
+PURE_LIVE_PIE_TOOL_NAMES: tuple[str, ...] = ("ue_pie",)
 
 _PURE_LIVE_INDEX_STATUS: dict[str, Any] = {
     "configured": False,
@@ -190,7 +177,8 @@ def build_pure_live_capabilities(
             },
             "pieScalarInspection": {
                 "available": True,
-                "tool": "ue_get_pie_scalars",
+                "tool": "ue_pie",
+                "action": "scalars",
                 "bridgeMethod": "editor.getPieScalars",
                 "readOnly": True,
                 "requiresDatabase": False,
@@ -255,9 +243,10 @@ def build_pure_live_capabilities(
             },
             "pieObjectPropertyRead": {
                 "available": True,
-                "tools": [
-                    "ue_list_pie_object_properties",
-                    "ue_read_pie_object_properties",
+                "tool": "ue_pie",
+                "actions": [
+                    "list_properties",
+                    "read_properties",
                 ],
                 "bridgeMethods": [
                     "editor.listPieObjectProperties",

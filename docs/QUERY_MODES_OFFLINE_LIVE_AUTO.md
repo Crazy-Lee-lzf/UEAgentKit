@@ -20,9 +20,9 @@
 | 单资产详情 | ✅ `queries.get_asset`（SQLite 快照） | ✅ `ue_inspect_asset_live`（当前 Editor 状态） | ❌ 无统一合并/重读 |
 | 引用查询 | ✅ `queries.find_references`（深度 1–3） | ❌ 无引用图 live 查询 | ❌ |
 | C++ 代码符号/引用 | ✅ `build_code_index` + `search_symbols(profile="code")` | ❌ | ❌ |
-| Editor 选区/打开资产/脏资产/PIE/日志/编译错误 | ❌ | ✅ `ue_get_selection`、`ue_get_open_assets`、`ue_get_dirty_assets`、`ue_get_pie_state`、`ue_get_output_log`、`ue_get_compile_errors` | ❌ |
+| Editor 选区/打开资产/脏资产/PIE/日志/编译错误 | ❌ | ✅ `ue_get_selection`、`ue_get_open_assets`、`ue_get_dirty_assets`、`ue_pie(action="state")`、`ue_get_output_log`、`ue_get_compile_errors` | ❌ |
 | Blueprint 图选区/上下文 | ❌（仅索引中的图节点） | ✅ `ue_get_blueprint_graph_selection`、`ue_get_focused_blueprint_graph_context` | ❌ |
-| PIE 运行时只读（World/Actor/Component） | ❌ | ✅ `ue_get_pie_world_contexts`、`ue_inspect_pie_actor`（PIE instance + Server/Client/NetMode；有界；stopped fail-closed；只读） | ❌ |
+| PIE 运行时只读（World/Actor/Component） | ❌ | ✅ `ue_pie(action="worlds")`、`ue_pie(action="inspect_actor")`（PIE instance + Server/Client/NetMode；有界；stopped fail-closed；只读） | ❌ |
 | 快照元数据 | ✅ `IndexQueryService` 返回 snapshot id、数据库 schema 版本等 | ⚠️ 仅 bridge/编辑器状态，不是资产快照 | ❌ 无统一快照语义 |
 | 写入 | ❌ 仅允许生成计划 | ✅ 经 Editor 插件的 live write / patch 工具 | ❌ |
 
@@ -49,8 +49,8 @@
 入口：
 
 - `ue_agent_kit.editor_bridge`：与 Editor 插件的请求/响应通道；
-- `mcp_live_tools.register_live_read_tools`：`ue_editor_status`、`ue_get_selection`、`ue_get_open_assets`、`ue_get_dirty_assets`、`ue_get_current_level`、`ue_get_pie_state`、`ue_get_output_log`、`ue_get_compile_errors`、`ue_inspect_asset_live`、Blueprint 图选区/上下文等；
-- PIE 只读事实：`ue_get_pie_world_contexts`（PIE WorldContext 列表：唯一 `pieInstanceId` + Server/Client/NetMode）与 `ue_inspect_pie_actor`（精确 world 内 Actor 的 path/class/transform/NetRole + 有界组件 class/path/assets）；两者只读，不做 PIE 启停，不做 Gameplay/Animation/GAS 属性，不做跨 world 猜测；
+- `mcp_live_tools.register_live_read_tools`：`ue_editor_status`、`ue_get_selection`、`ue_get_open_assets`、`ue_get_dirty_assets`、`ue_get_current_level`、`ue_get_output_log`、`ue_get_compile_errors`、`ue_inspect_asset_live`、Blueprint 图选区/上下文等；PIE 只读统一由 `mcp_consolidated_tools` 的 `ue_pie` 暴露；
+- PIE 只读事实：`ue_pie(action="worlds")`（PIE WorldContext 列表：唯一 `pieInstanceId` + Server/Client/NetMode）与 `ue_pie(action="inspect_actor")`（精确 world 内 Actor 的 path/class/transform/NetRole + 有界组件 class/path/assets）；两者只读，不做 PIE 启停，不做 Gameplay/Animation/GAS 属性，不做跨 world 猜测；底层仍是 Editor Bridge 的 7 个 `ue_*_pie_*` 端点，行为不变；
 - 写入侧：live write / structured write / material / data table / retarget 等工具，均经过 Editor 插件与验证流程。
 
 特征：

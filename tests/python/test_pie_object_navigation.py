@@ -101,8 +101,10 @@ class PieObjectNavigationSurfaceTests(unittest.TestCase):
                 self.assertTrue(definition.read_only)
                 self.assertEqual(LIVE_EDITOR_METHODS[tool], method)
                 self.assertIn(tool, tool_names_for_mode(live_editor_enabled=True))
-                self.assertIn(tool, PURE_LIVE_READ_TOOL_NAMES)
-                self.assertIn(tool, PURE_LIVE_PIE_TOOL_NAMES)
+                # P1: the per-verb tool stays the implementation but is no longer
+                # a registered name; ue_pie(action=...) is the exposed surface.
+                self.assertNotIn(tool, PURE_LIVE_READ_TOOL_NAMES)
+                self.assertEqual(PURE_LIVE_PIE_TOOL_NAMES, ("ue_pie",))
 
     def test_capabilities_document_object_navigation(self) -> None:
         capabilities = build_pure_live_capabilities(

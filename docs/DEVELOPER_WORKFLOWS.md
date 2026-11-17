@@ -17,46 +17,51 @@
 固定项目的 MCP 必须启用 Live Editor，Editor 正在 PIE。带索引 Live 与**无索引 Pure Live** 都可以启动；实际可用性以 `ue_get_capabilities` 为准。
 
 ```text
-ue_get_pie_state()
-ue_get_pie_world_contexts(max_contexts=16)
-ue_list_pie_actors(
+ue_pie(action="state")
+ue_pie(action="worlds", max_contexts=16)
+ue_pie(
+    action="list_actors",
     world_context_id="<World 列表返回的 contextId>",   # 或 pie_instance_id=<整数>
     offset=0, limit=50,
     name_contains="", class_contains="", tag_contains=""
 )
-ue_inspect_pie_actor(
+ue_pie(
+    action="inspect_actor",
     pie_instance_id=<World 列表返回的整数>,
     actor_path="<该 PIE World 的精确 Actor 路径>"
 )
 ```
 
-`ue_list_pie_actors` 只列一个精确 PIE World 的 Actor 概要（path/name/class/transform/NetRole/owner/tags），按 object path 稳定排序并分页；Name/Class/Tag 都是大小写不敏感子串过滤，Server 与 Client 世界永不混合。`totalCount`/`truncated` 说明这一页是否是全部；翻页时保持同一 `worldContextId` 和过滤条件即可复现。
+`ue_pie(action="list_actors")` 只列一个精确 PIE World 的 Actor 概要（path/name/class/transform/NetRole/owner/tags），按 object path 稳定排序并分页；Name/Class/Tag 都是大小写不敏感子串过滤，Server 与 Client 世界永不混合。`totalCount`/`truncated` 说明这一页是否是全部；翻页时保持同一 `worldContextId` 和过滤条件即可复现。
 
-`ue_inspect_pie_actor` 的 `actor_path` / `actor_guid` / `actor_name` / `actor_label` **只能选一个**。从 World 列表选择确切的 Server/Client `pieInstanceId`，不要猜测；必要时传 `world_path`。返回 Actor 类、Transform、NetRole 及有界组件信息，不提供运行时 Pin 或完整 GAS 状态。
+`ue_pie(action="inspect_actor")` 的 `actor_path` / `actor_guid` / `actor_name` / `actor_label` **只能选一个**。从 World 列表选择确切的 Server/Client `pieInstanceId`，不要猜测；必要时传 `world_path`。返回 Actor 类、Transform、NetRole 及有界组件信息，不提供运行时 Pin 或完整 GAS 状态。
 
-需要运行时属性时用只读 `ue_get_pie_scalars`：指定精确 PIE instance、Actor 身份、可选一个组件及 1–8 个标量属性名。已解析属性包含反射声明类来源；C++ 继承属性已通过原生验收，Blueprint 自声明属性和 PIE Client 标量值尚未等量覆盖。遇到 `pie-not-running`、`pie-instance-stale`、`pie-actor-ambiguous` 时重新枚举实例，不使用过期数据。
+需要运行时属性时用只读 `ue_pie(action="scalars")`：指定精确 PIE instance、Actor 身份、可选一个组件及 1–8 个标量属性名。已解析属性包含反射声明类来源；C++ 继承属性已通过原生验收，Blueprint 自声明属性和 PIE Client 标量值尚未等量覆盖。遇到 `pie-not-running`、`pie-instance-stale`、`pie-actor-ambiguous` 时重新枚举实例，不使用过期数据。
 
 ## 运行时属性与对象导航（PIE）
 
 ```text
-ue_get_pie_world_contexts()                       # 先拿到精确 pieInstanceId
-ue_list_pie_object_properties(
+ue_pie(action="worlds")                            # 先拿到精确 pieInstanceId
+ue_pie(
+    action="list_properties",
     pie_instance_id=<整数>, actor_path="<Actor 路径>",
-    name_contains=""                              # 可选，过滤属性名
+    name_contains=""                               # 可选，过滤属性名
 )
-ue_read_pie_object_properties(
+ue_pie(
+    action="read_properties",
     pie_instance_id=<整数>, actor_path="<Actor 路径>",
     property_names=["Health", "Inventory", "OwnerState"],
-    offset=0, limit=50                            # 容器元素分页
+    offset=0, limit=50                             # 容器元素分页
 )
 # 上一步返回的 objectRef.path 可以直接作为下一跳目标
-ue_read_pie_object_properties(
+ue_pie(
+    action="read_properties",
     pie_instance_id=<整数>, object_path="<objectRef.path>",
     property_names=["bIsActive"]
 )
 ```
 
-`ue_list_pie_object_properties` 只列属性名与 kind，不读值；`ue_read_pie_object_properties` 才按名取值。两者都不以 `BlueprintVisible` / `Edit` 作为门槛，读不了的类型返回 `unsupported-type` 与原因且不返回值——**不要**把 unsupported 当成 0 或空。
+`ue_pie(action="list_properties")` 只列属性名与 kind，不读值；`ue_pie(action="read_properties")` 才按名取值。两者都不以 `BlueprintVisible` / `Edit` 作为门槛，读不了的类型返回 `unsupported-type` 与原因且不返回值——**不要**把 unsupported 当成 0 或空。
 
 容器用 `offset`/`limit` 分页，返回 `totalCount` / `hasMore`；对象引用只返回 `objectRef`（path/class/world），**不会**自动展开被引用对象。想继续看就显式再调一次，把 `objectRef.path` 当成 `object_path`。跨世界的引用会标记 `worldKey` 不一致并拒绝，不要绕过。
 

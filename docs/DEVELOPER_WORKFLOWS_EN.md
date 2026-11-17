@@ -17,39 +17,42 @@ An offline index is a saved snapshot; Live Editor describes in-memory state. C++
 The MCP server must be pinned to the project with Live Editor enabled and PIE running. Both indexed Live and **indexless pure-Live** startup are supported; actual availability depends on `ue_get_capabilities`.
 
 ```text
-ue_get_pie_state()
-ue_get_pie_world_contexts(max_contexts=16)
-ue_list_pie_actors(
+ue_pie(action="state")
+ue_pie(action="worlds", max_contexts=16)
+ue_pie(
+    action="list_actors",
     world_context_id="<contextId from the World list>",   # or pie_instance_id=<integer>
     offset=0, limit=50,
     name_contains="", class_contains="", tag_contains=""
 )
-ue_inspect_pie_actor(
+ue_pie(
+    action="inspect_actor",
     pie_instance_id=<integer from the World list>,
     actor_path="<exact Actor path in that PIE World>"
 )
 ```
 
-`ue_list_pie_actors` lists Actor summaries (path/name/class/transform/NetRole/owner/tags) inside exactly one PIE World, ordered by object path and paginated; the name/class/tag filters are case-insensitive substrings and Server and Client worlds are never merged. `totalCount`/`truncated` say whether the page is the whole set; keep the same `worldContextId` and filters to reproduce the next page.
+`ue_pie(action="list_actors")` lists Actor summaries (path/name/class/transform/NetRole/owner/tags) inside exactly one PIE World, ordered by object path and paginated; the name/class/tag filters are case-insensitive substrings and Server and Client worlds are never merged. `totalCount`/`truncated` say whether the page is the whole set; keep the same `worldContextId` and filters to reproduce the next page.
 
 Pass **only one** of `actor_path`, `actor_guid`, `actor_name`, and `actor_label`. Choose the exact Server/Client `pieInstanceId` returned by the World list; do not guess. `world_path` can further constrain identity. The result includes Actor class, Transform, NetRole and bounded Component information, not runtime pin values or complete GAS state.
 
-For runtime values, use read-only `ue_get_pie_scalars`: specify an exact PIE instance and Actor identity, optionally one Component, and 1–8 scalar property names. Resolved properties can identify their reflected declaring class. Inherited C++ ownership has native acceptance; Blueprint-declared provenance and PIE client scalar values are not equally covered. Report `pie-not-running`, `pie-instance-stale`, and `pie-actor-ambiguous` accurately and re-enumerate after restarts.
+For runtime values, use read-only `ue_pie(action="scalars")`: specify an exact PIE instance and Actor identity, optionally one Component, and 1–8 scalar property names. Resolved properties can identify their reflected declaring class. Inherited C++ ownership has native acceptance; Blueprint-declared provenance and PIE client scalar values are not equally covered. Report `pie-not-running`, `pie-instance-stale`, and `pie-actor-ambiguous` accurately and re-enumerate after restarts.
 
 ## Runtime properties and object navigation (PIE)
 
 ```text
-ue_get_pie_world_contexts()                       # get the exact pieInstanceId first
-ue_list_pie_object_properties(pie_instance_id=<int>, actor_path="<actor path>", name_contains="")
-ue_read_pie_object_properties(
+ue_pie(action="worlds")                           # get the exact pieInstanceId first
+ue_pie(action="list_properties", pie_instance_id=<int>, actor_path="<actor path>", name_contains="")
+ue_pie(
+    action="read_properties",
     pie_instance_id=<int>, actor_path="<actor path>",
     property_names=["Health", "Inventory", "OwnerState"], offset=0, limit=50
 )
 # the objectRef.path returned above can be the next hop target
-ue_read_pie_object_properties(pie_instance_id=<int>, object_path="<objectRef.path>", property_names=["bIsActive"])
+ue_pie(action="read_properties", pie_instance_id=<int>, object_path="<objectRef.path>", property_names=["bIsActive"])
 ```
 
-`ue_list_pie_object_properties` only lists names and kinds; `ue_read_pie_object_properties` reads values. `BlueprintVisible` / `Edit` is not a read gate, and unsupported types return `unsupported-type` with a reason instead of a value - never treat that as zero or empty.
+`ue_pie(action="list_properties")` only lists names and kinds; `ue_pie(action="read_properties")` reads values. `BlueprintVisible` / `Edit` is not a read gate, and unsupported types return `unsupported-type` with a reason instead of a value - never treat that as zero or empty.
 
 Containers page with `offset` / `limit` and report `totalCount` / `hasMore`. Object references return `objectRef` (path/class/world) and are never expanded automatically; use `objectRef.path` as `object_path` for the next hop. A reference whose `worldKey` differs is refused.
 

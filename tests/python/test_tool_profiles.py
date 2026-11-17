@@ -52,7 +52,7 @@ class ToolProfileRegistryTests(unittest.TestCase):
             memory_enabled=True,
             source_control_enabled=True,
         )
-        expected = {"core": 15, "read": 29, "live": 66, "live-write": 76, "full": 143}
+        expected = {"core": 15, "read": 29, "live": 67, "live-write": 77, "full": 144}
         for name, count in expected.items():
             self.assertEqual(
                 len(tool_names_for_profile(name, **everything)),
@@ -99,15 +99,19 @@ class ProfileFilteredServerTests(unittest.TestCase):
 
         self.assertEqual(fake.registered, ["ue_get_capabilities"])
 
-    def test_full_registers_everything(self) -> None:
+    def test_full_still_hides_replaced_tools(self) -> None:
         fake = self._FakeServer()
         target = _ProfileFilteredServer(fake, "full")
 
         def ue_get_pie_state() -> None:  # pragma: no cover - not called
             pass
 
+        def ue_pie() -> None:  # pragma: no cover - not called
+            pass
+
         target.tool()(ue_get_pie_state)
-        self.assertEqual(fake.registered, ["ue_get_pie_state"])
+        target.tool()(ue_pie)
+        self.assertEqual(fake.registered, ["ue_pie"])
 
 
 class CliProfileTests(unittest.TestCase):
