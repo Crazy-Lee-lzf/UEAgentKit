@@ -14,6 +14,8 @@ This page describes the **0.9.0 Developer Preview 2 candidate code**. Published 
 
 UE Agent Kit is a **project knowledge layer plus controlled mutation workflow** for Unreal Engine. It turns assets, Blueprint semantics, references, and Editor state into searchable data, provides agents with context and verification evidence, and executes narrow writes behind Policy / Revision / Transaction / Save / Verify gates.
 
+- The MCP tool surface is bounded by `--tool-profile` (default `core` = 15 tools; `read` / `live` / `live-write` / `full` widen it). A profile is an upper bound: it never enables a group the run flags left off, and `ue_get_capabilities.toolProfile` reports it.
+
 ## Read capabilities
 
 ### Offline index

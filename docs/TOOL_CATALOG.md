@@ -2,6 +2,26 @@
 
 实际可调用的 Tool 及其输入/返回 Schema，**始终以当前服务器的 `ue_get_capabilities` 和 MCP 工具定义为准**。下面只列入口与归属，不承诺每个部署都注册同一组。
 
+## 工具档位（`--tool-profile`）
+
+工具数量会直接影响每个新会话的上下文体积，所以 MCP 启动时用**档位**限制可见工具面。
+档位是**上限**：它只会隐藏，不会打开任何被开关关掉的组。
+
+| 档位 | 可见分组 | 工具数 | 适用 |
+|---|---|---:|---|
+| `core`（默认） | query | **15** | 只做检索/分析/能力发现 |
+| `read` | + memory | 29 | 需要 Project Memory 的只读会话 |
+| `live` | + live-read、realtime | 66 | 连 Editor 做只读诊断（PIE / 图 / 资产） |
+| `live-write` | + live-action | 76 | 需要受控写入（原子 patch、Niagara 参数） |
+| `full` | + workflow、source-control | 143 | 离线批处理 / 源控；仍需各自的开关 |
+
+```powershell
+python scripts\ue-agent-mcp.py --enable-live-editor --tool-profile live ...
+```
+
+`ue_get_capabilities` 的 `toolProfile` 字段回报当前档位。档位与既有开关是**交集**：
+例如 `--tool-profile full` 但没有 `--enable-live-editor`，仍然看不到 live 工具。
+
 ## 读取
 
 | 领域 | 代表性 Tool | 说明 |

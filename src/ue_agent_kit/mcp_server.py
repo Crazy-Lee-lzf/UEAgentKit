@@ -127,11 +127,13 @@ from .verification_trust import (
 from .source_control import P4SourceControlService
 from .tool_registry import (
     HIGH_LEVEL_WRITE_TOOL_NAMES,
+    TOOL_PROFILE_NAMES,
     LIVE_EDITOR_TOOL_NAMES,
     MEMORY_TOOL_NAMES,
     SOURCE_CONTROL_TOOL_NAMES,
     TOOL_DEFINITIONS_BY_NAME,
     tool_descriptors_for_mode,
+    tool_profile_allows,
 )
 from .snapshot_lifecycle import (
     FrozenSessionSnapshot,
@@ -336,6 +338,7 @@ def _capabilities_response(
     p8_test_only_graph_layout_apply: bool = False,
     experimental_graph_layout_apply: bool = False,
     experimental_graphpatch_edit: bool = False,
+    tool_profile: str | None = None,
     live_editor_status: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     write_tools_enabled = workflow_service is not None
@@ -380,6 +383,7 @@ def _capabilities_response(
         "tool": "ue_get_capabilities",
         "ok": True,
         "readOnly": True,
+        "toolProfile": tool_profile,
         "server": {
             "name": MCP_SERVER_NAME,
             "version": __version__,
@@ -1773,6 +1777,7 @@ def _create_pure_live_mcp_server(
     p8_test_only_graph_layout_apply: bool,
     experimental_graph_layout_apply: bool,
     experimental_graphpatch_edit: bool,
+    tool_profile: str | None = None,
 ):
     """Bounded, explicitly opt-in pure-live server (no index, no SQLite)."""
     if database_path is not None:
@@ -1798,6 +1803,10 @@ def _create_pure_live_mcp_server(
         instructions=_pure_live_server_instructions(),
         json_response=True,
     )
+
+    registration_server: Any = server
+    if tool_profile is not None:
+        registration_server = _ProfileFilteredServer(server, tool_profile)
     read_annotations = ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
@@ -1805,7 +1814,7 @@ def _create_pure_live_mcp_server(
         openWorldHint=False,
     )
     register_pure_live_meta_tools(
-        server=server,
+        server=registration_server,
         live_editor_service=live_editor_service,
         server_name=MCP_SERVER_NAME,
         server_version=__version__,
@@ -1813,7 +1822,7 @@ def _create_pure_live_mcp_server(
         exposed_tools=PURE_LIVE_READ_TOOL_NAMES,
     )
     register_live_read_tools(
-        server=server,
+        server=registration_server,
         live_editor_service=live_editor_service,
         index_service=None,
         audit_report_root=None,
@@ -1824,6 +1833,31 @@ def _create_pure_live_mcp_server(
     )
     _enforce_strict_tool_arguments(server, (GRAPH_CONTEXT_TOOL_NAME,))
     return server
+
+
+class _ProfileFilteredServer:
+    """Registers only the tools one profile allows, then delegates everything else.
+
+    The profile is an upper bound: a registrar that is not reached registers
+    nothing, and no group becomes enabled that the run flags left off.
+    """
+
+    def __init__(self, server: Any, profile: str) -> None:
+        self._server = server
+        self._profile = profile
+
+    def __getattr__(self, item: str) -> Any:
+        return getattr(self._server, item)
+
+    def tool(self, *args: Any, **kwargs: Any) -> Any:
+        decorator = self._server.tool(*args, **kwargs)
+
+        def register(func: Any) -> Any:
+            if tool_profile_allows(self._profile, func.__name__):
+                return decorator(func)
+            return func
+
+        return register
 
 
 def create_mcp_server(
@@ -1841,6 +1875,7 @@ def create_mcp_server(
     experimental_graphpatch_edit: bool = False,
     experimental_node_spawn: bool = False,
     pure_live: bool = False,
+    tool_profile: str | None = None,
 ):
     if FastMCP is None or ToolAnnotations is None:
         raise RuntimeError(
@@ -1954,6 +1989,12 @@ def create_mcp_server(
         json_response=True,
     )
 
+    # A profile narrows what gets registered; None keeps the historical behaviour.
+    registration_server: Any = server
+    if tool_profile is not None:
+        registration_server = _ProfileFilteredServer(server, tool_profile)
+
+
     read_annotations = ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
@@ -1962,7 +2003,7 @@ def create_mcp_server(
     )
 
     register_query_tools(
-        server=server,
+        server=registration_server,
         index_service=index_service,
         workflow_service=workflow_service,
         live_editor_service=live_editor_service,
@@ -1977,6 +2018,7 @@ def create_mcp_server(
             p8_test_only_graph_layout_apply=p8_test_only_graph_layout_apply,
             experimental_graph_layout_apply=experimental_graph_layout_apply,
             experimental_graphpatch_edit=experimental_graphpatch_edit,
+            tool_profile=tool_profile,
             live_editor_status=(
                 live.status()
                 if (experimental_graph_layout_apply or experimental_graphpatch_edit) and live is not None
@@ -1990,13 +2032,13 @@ def create_mcp_server(
             memory_service,
         ),
     )
-    register_graph_patch_tools(server=server, read_annotations=read_annotations)
+    register_graph_patch_tools(server=registration_server, read_annotations=read_annotations)
     _enforce_strict_tool_arguments(server, (GRAPH_PATCH_PREVIEW_TOOL_NAME,))
     _enforce_strict_tool_arguments(server, STRICT_IMPACT_ARGUMENT_TOOL_NAMES)
     _enforce_strict_tool_arguments(server, STRICT_SEMANTIC_DIFF_ARGUMENT_TOOL_NAMES)
     _enforce_strict_tool_arguments(server, STRICT_VERIFICATION_TRUST_ARGUMENT_TOOL_NAMES)
     register_task_context_tools(
-        server=server,
+        server=registration_server,
         task_context_service=TaskContextService(
             index_service=index_service,
             memory_service=memory_service,
@@ -2010,7 +2052,7 @@ def create_mcp_server(
     _enforce_strict_tool_arguments(server, STRICT_TASK_CONTEXT_ARGUMENT_TOOL_NAMES)
     if source_control_service is not None:
         register_source_control_tools(
-            server=server,
+            server=registration_server,
             source_control_service=source_control_service,
             read_annotations=read_annotations,
             tool_annotations_type=ToolAnnotations,
@@ -2019,7 +2061,7 @@ def create_mcp_server(
         _enforce_strict_tool_arguments(server, STRICT_SOURCE_CONTROL_ARGUMENT_TOOL_NAMES)
     if memory_service is not None:
         register_memory_tools(
-            server=server,
+            server=registration_server,
             memory_service=memory_service,
             index_database_path=index_service.database_path,
             read_annotations=read_annotations,
@@ -2029,7 +2071,7 @@ def create_mcp_server(
         _enforce_strict_tool_arguments(server, STRICT_MEMORY_ARGUMENT_TOOL_NAMES)
     if live_editor_service is not None:
         register_live_read_tools(
-            server=server,
+            server=registration_server,
             live_editor_service=live_editor_service,
             index_service=index_service,
             audit_report_root=audit_report_root,
@@ -2042,7 +2084,7 @@ def create_mcp_server(
         # configured -- it is read-only and the registry itself defaults to
         # shadow mode.
         register_node_spawn_read_tools(
-            server=server,
+            server=registration_server,
             live_editor_service=live_editor_service,
             read_annotations=read_annotations,
             error_response=_error_response,
@@ -2050,7 +2092,7 @@ def create_mcp_server(
         _enforce_strict_tool_arguments(server, (NODE_ACTION_SEARCH_TOOL_NAME,))
         _enforce_strict_tool_arguments(server, (GRAPH_CONTEXT_TOOL_NAME,))
         register_live_action_tools(
-            server=server,
+            server=registration_server,
             live_editor_service=live_editor_service,
             verification_evidence_store=(
                 workflow_service.verification_evidence_store if workflow_service is not None else None
@@ -2059,13 +2101,13 @@ def create_mcp_server(
             error_response=_error_response,
         )
         register_realtime_tools(
-            server=server,
+            server=registration_server,
             live_editor_service=live_editor_service,
             read_annotations=read_annotations,
             error_response=_error_response,
         )
         register_batch_task_tools(
-            server=server,
+            server=registration_server,
             live_editor_service=live_editor_service,
             read_annotations=read_annotations,
             tool_annotations_type=ToolAnnotations,
@@ -2073,21 +2115,21 @@ def create_mcp_server(
         )
         if p7_test_only_graph_layout_apply:
             register_graph_layout_test_only_tool(
-                server=server,
+                server=registration_server,
                 live_editor_service=live_editor_service,
                 tool_annotations_type=ToolAnnotations,
                 error_response=_error_response,
             )
         if p8_test_only_graph_layout_apply:
             register_graph_layout_p8_test_only_tool(
-                server=server,
+                server=registration_server,
                 live_editor_service=live_editor_service,
                 tool_annotations_type=ToolAnnotations,
                 error_response=_error_response,
             )
         if experimental_graph_layout_apply:
             register_graph_layout_experimental_tools(
-                server=server,
+                server=registration_server,
                 live_editor_service=live_editor_service,
                 tool_annotations_type=ToolAnnotations,
                 error_response=_error_response,
@@ -2098,14 +2140,14 @@ def create_mcp_server(
             )
         if experimental_graphpatch_edit:
             register_focus_blueprint_graph_tool(
-                server=server,
+                server=registration_server,
                 live_editor_service=live_editor_service,
                 tool_annotations_type=ToolAnnotations,
                 error_response=_error_response,
             )
             _enforce_strict_tool_arguments(server, ("ue_focus_blueprint_graph",))
             register_patch_experimental_tools(
-                server=server,
+                server=registration_server,
                 live_editor_service=live_editor_service,
                 tool_annotations_type=ToolAnnotations,
                 error_response=_error_response,
@@ -2121,14 +2163,14 @@ def create_mcp_server(
             )
     if workflow_service is not None:
         register_workflow_tools(
-            server=server,
+            server=registration_server,
             workflow_service=workflow_service,
             read_annotations=read_annotations,
             tool_annotations_type=ToolAnnotations,
             error_response=_error_response,
         )
         register_change_set_tools(
-            server=server,
+            server=registration_server,
             workflow_service=workflow_service,
             read_annotations=read_annotations,
             tool_annotations_type=ToolAnnotations,
@@ -2171,6 +2213,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enable-write-tools", action="store_true")
     parser.add_argument("--enable-commit-tools", action="store_true")
     parser.add_argument("--enable-live-editor", action="store_true")
+    parser.add_argument(
+        "--tool-profile",
+        choices=list(TOOL_PROFILE_NAMES),
+        default="core",
+        help=(
+            "Upper bound on the tool groups this session exposes. "
+            "core=query only, read=+memory, live=+live-read/realtime, "
+            "live-write=+live-action, full=everything the flags allow. "
+            "Default: core."
+        ),
+    )
     parser.add_argument(
         "--enable-subprocess-workflow",
         action="store_true",
@@ -2532,6 +2585,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             experimental_graph_layout_apply=bool(getattr(args, "enable_experimental_graph_layout_apply", False)),
             experimental_graphpatch_edit=bool(getattr(args, "enable_experimental_graphpatch_edit", False)),
             experimental_node_spawn=bool(getattr(args, "enable_experimental_node_spawn", False)),
+            tool_profile=getattr(args, "tool_profile", None),
         )
         server.run(transport="stdio")
         return 0

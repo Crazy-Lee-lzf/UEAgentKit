@@ -288,6 +288,78 @@ def tool_definitions_for_mode(
     return [definition for definition in TOOL_REGISTRY if definition.group in enabled_groups]
 
 
+ToolProfile = Literal["core", "read", "live", "live-write", "full"]
+
+TOOL_PROFILE_NAMES: tuple[ToolProfile, ...] = ("core", "read", "live", "live-write", "full")
+
+# A profile is an UPPER BOUND on the tool groups a session may see.  It never
+# enables a group that the run flags left off: the effective set is
+# profile groups intersected with what the server actually registered.
+TOOL_PROFILE_GROUPS: dict[ToolProfile, frozenset[ToolGroup]] = {
+    "core": frozenset({"query"}),
+    "read": frozenset({"query", "memory"}),
+    "live": frozenset({"query", "memory", "live-read", "realtime"}),
+    "live-write": frozenset({"query", "memory", "live-read", "live-action", "realtime"}),
+    "full": frozenset(
+        {"query", "memory", "live-read", "live-action", "realtime", "workflow", "source-control"}
+    ),
+}
+
+
+def profile_groups(profile: str) -> frozenset[ToolGroup]:
+    """The tool groups one profile may expose.  Unknown profiles are rejected."""
+
+    groups = TOOL_PROFILE_GROUPS.get(profile)  # type: ignore[arg-type]
+    if groups is None:
+        raise ValueError(
+            f"Unknown tool profile {profile!r}; expected one of {TOOL_PROFILE_NAMES}."
+        )
+    return groups
+
+
+def tool_group_for_name(name: str) -> ToolGroup | None:
+    """The registry group of one tool name, or None when the registry does not know it."""
+
+    definition = TOOL_DEFINITIONS_BY_NAME.get(name)
+    return definition.group if definition is not None else None
+
+
+def tool_profile_allows(profile: str, tool_name: str) -> bool:
+    """Whether a profile may expose one tool.
+
+    Tools the registry does not know (experimental surfaces registered outside it,
+    legacy helpers) are allowed: the profile must not silently hide them.
+    """
+
+    group = tool_group_for_name(tool_name)
+    if group is None:
+        return True
+    return group in profile_groups(profile)
+
+
+def tool_names_for_profile(
+    profile: str,
+    *,
+    live_editor_enabled: bool = False,
+    workflow_enabled: bool = False,
+    memory_enabled: bool = False,
+    source_control_enabled: bool = False,
+) -> list[str]:
+    """Mode-filtered tool names, further narrowed by one profile."""
+
+    allowed = profile_groups(profile)
+    return [
+        name
+        for name in tool_names_for_mode(
+            live_editor_enabled=live_editor_enabled,
+            workflow_enabled=workflow_enabled,
+            memory_enabled=memory_enabled,
+            source_control_enabled=source_control_enabled,
+        )
+        if (tool_group_for_name(name) or "query") in allowed
+    ]
+
+
 def tool_names_for_mode(
     *,
     live_editor_enabled: bool = False,
