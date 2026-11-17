@@ -16,6 +16,8 @@ param(
     [int]$ProcessTimeoutSeconds = 1800,
     [ValidateRange(0.1, 600.0)]
     [double]$LiveEditorTimeoutSeconds = 2.0,
+    [ValidateSet("core", "read", "live", "live-write", "full")]
+    [string]$ToolProfile = "live-write",
     [switch]$PureLive,
     [switch]$Check
 )
@@ -63,6 +65,7 @@ if ($PureLive)
         $EntryPoint,
         "--pure-live",
         "--enable-live-editor",
+        "--tool-profile", $ToolProfile,
         "--project", $ProjectPath,
         "--live-editor-timeout-seconds", [string]$LiveEditorTimeoutSeconds
     )
@@ -97,7 +100,7 @@ if ($EnableCommitTools -and !$EnableWriteTools)
     throw "EnableCommitTools requires EnableWriteTools."
 }
 
-$Arguments = @($EntryPoint, "--database", $Database)
+$Arguments = @($EntryPoint, "--database", $Database, "--tool-profile", $ToolProfile)
 if ($EnableProjectMemory)
 {
     if ([string]::IsNullOrWhiteSpace($MemoryDatabase))
