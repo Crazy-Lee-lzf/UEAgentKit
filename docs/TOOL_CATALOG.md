@@ -22,6 +22,8 @@ python scripts\ue-agent-mcp.py --enable-live-editor --tool-profile live ...
 `ue_get_capabilities` 的 `toolProfile` 字段回报当前档位。档位与既有开关是**交集**：
 例如 `--tool-profile full` 但没有 `--enable-live-editor`，仍然看不到 live 工具。
 
+`--pure-live` 是固定的 16 个只读工具，不受档位裁剪；两种模式都通过 `ue_pie` 暴露 PIE 读取。
+
 ## 读取
 
 | 领域 | 代表性 Tool | 说明 |

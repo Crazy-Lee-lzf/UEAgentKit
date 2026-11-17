@@ -198,8 +198,12 @@ def _enforce_strict_tool_arguments(server: Any, tool_names: Sequence[str]) -> No
         raise RuntimeError("FastMCP Tool Manager is unavailable.")
     for tool_name in tool_names:
         tool = tool_manager.get_tool(tool_name)
+        if tool is None:
+            # A tool profile may have left this tool unregistered; strictness
+            # only applies to tools the client can actually call.
+            continue
         argument_model = getattr(getattr(tool, "fn_metadata", None), "arg_model", None)
-        if tool is None or argument_model is None:
+        if argument_model is None:
             raise RuntimeError(f"FastMCP argument model is unavailable for {tool_name}.")
         argument_model.model_config = {
             **argument_model.model_config,
@@ -1776,9 +1780,12 @@ def _create_pure_live_mcp_server(
     p8_test_only_graph_layout_apply: bool,
     experimental_graph_layout_apply: bool,
     experimental_graphpatch_edit: bool,
-    tool_profile: str | None = None,
 ):
-    """Bounded, explicitly opt-in pure-live server (no index, no SQLite)."""
+    """Bounded, explicitly opt-in pure-live server (no index, no SQLite).
+
+    The surface is fixed (see ``PURE_LIVE_READ_TOOL_NAMES``); ``--tool-profile``
+    is not applied here because there is nothing further to narrow.
+    """
     if database_path is not None:
         raise ValueError("--pure-live does not accept --database; no index is opened in this mode.")
     if live_editor_service is None:
@@ -1803,7 +1810,9 @@ def _create_pure_live_mcp_server(
         json_response=True,
     )
 
-    registration_server: Any = _ProfileFilteredServer(server, tool_profile)
+    # No profile here: the pure-live surface is already fixed, so the proxy only
+    # applies the consolidation hiding.
+    registration_server: Any = _ProfileFilteredServer(server, None)
     read_annotations = ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,

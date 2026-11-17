@@ -15,7 +15,7 @@
 UE Agent Kit 是 Unreal Engine 的**项目知识层 + 受控修改工作流**：把资产、Blueprint 语义、引用关系和 Editor 状态转换为可搜索数据，为 Agent 提供上下文与验证证据，并通过 Policy / Revision / Transaction / Save / Verify 门禁执行窄范围写入。
 
 - MCP 暴露的工具面用 `--tool-profile` 分档（默认 `core` = 15 个工具；`read` / `live` / `live-write` / `full` 逐步放开）。档位只做**上限**，不会打开被开关关掉的组；`ue_get_capabilities.toolProfile` 回报当前档位。
-- PIE 只读读取统一走 `ue_pie(action=...)`（`state` / `worlds` / `list_actors` / `inspect_actor` / `scalars` / `list_properties` / `read_properties`）；原来 7 个逐动词 Tool 不再单独注册，参数与返回不变。
+- PIE 只读读取统一走 `ue_pie(action=...)`（`state` / `worlds` / `list_actors` / `inspect_actor` / `scalars` / `list_properties` / `read_properties`）；原来 7 个逐动词 Tool 不再单独注册。参数与桥接返回不变，成功结果额外带一个 `action` 字段回显本次动作。
 
 ## 读取能力
 

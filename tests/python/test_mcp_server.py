@@ -956,6 +956,18 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(live_payload["liveEditor"]["reasonCode"], "live-editor-unavailable")
 
     @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
+    def test_narrow_profile_with_live_editor_still_starts(self) -> None:
+        # A profile only hides groups: startup must not fail because the
+        # strict-argument pass looks for a tool the profile left unregistered.
+        server = create_mcp_server(
+            self.database_path,
+            live_editor_service=FakeLiveEditorService(),
+            tool_profile="core",
+        )
+        tools = asyncio.run(server.list_tools())
+        self.assertEqual([tool.name for tool in tools], tool_names_for_mode())
+
+    @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
     def test_fastmcp_registers_read_only_status_and_query_tools(self) -> None:
         server = create_mcp_server(self.database_path)
         tools = asyncio.run(server.list_tools())
