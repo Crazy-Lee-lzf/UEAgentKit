@@ -76,12 +76,12 @@ BackupRoot
 并额外注册：
 
 ```text
-ue_set_blueprint_default
-ue_set_component_property
-ue_set_pin_default
+ue_set_property(action="blueprint_default")
+ue_set_property(action="component_property")
+ue_set_property(action="pin_default")
 ue_asset_property
 ue_live_write(action="verify")
-ue_set_material_parameter
+ue_set_property(action="material_parameter")
 ue_datatable
 ue_patch(action="plan")
 ue_patch(action="dry_run")
@@ -376,13 +376,13 @@ Blueprint commandlet 使用已有 `setVariableDefault`，persisted/verified 均 
 常见修改优先使用以下 Tool，Agent 不需要填写底层 Operation 名称或 Patch Target：
 
 ```text
-ue_set_blueprint_default    variable_name + value
-ue_set_component_property   component_name + property_path + value
-ue_set_pin_default           graph_guid + node_guid + pin_name + value
+ue_set_property(action="blueprint_default")    variable_name + value
+ue_set_property(action="component_property")   component_name + property_path + value
+ue_set_property(action="pin_default")           graph_guid + node_guid + pin_name + value
 ue_asset_property(action="set")        property_path + value
 ue_asset_property(action="set_reference")  property_path + reference object or null
 ue_asset_property(action="set_structured")   property_path + stable structured value
-ue_set_material_parameter    parameter_name + parameter_type + value
+ue_set_property(action="material_parameter")    parameter_name + parameter_type + value
 ue_datatable action=set_cell         row_name + field_name + value
 ue_datatable action=set_row_fields   row_name + values
 ue_datatable action=add_row          row_name + values
@@ -408,7 +408,7 @@ mode=DryRun   自动执行 Plan -> Unreal Dry Run，返回 planId 与 dryRunRece
 
 ### `ue_asset_property(action="apply")`
 
-该破坏性 Tool 属于 Workflow 写入 Tool；执行时必须同时启用 Live Editor、Workflow Write 与 Commit 三项启动能力。它不接受任意资产、属性或 Policy，而是只接受当前会话已有的高层 Plan 结果（`ue_asset_property(action="set")(mode=Plan)`、`ue_asset_property(action="set_reference")(mode=Plan)`、`ue_asset_property(action="set_structured")(mode=Plan)` 或 `ue_set_material_parameter(mode=Plan)`）：
+该破坏性 Tool 属于 Workflow 写入 Tool；执行时必须同时启用 Live Editor、Workflow Write 与 Commit 三项启动能力。它不接受任意资产、属性或 Policy，而是只接受当前会话已有的高层 Plan 结果（`ue_asset_property(action="set")(mode=Plan)`、`ue_asset_property(action="set_reference")(mode=Plan)`、`ue_asset_property(action="set_structured")(mode=Plan)` 或 `ue_set_property(action="material_parameter")(mode=Plan)`）：
 
 ```text
 plan_id      = 当前会话有效 Plan ID
@@ -433,7 +433,7 @@ editor_session_id = Apply 结果中的 editorSessionId
 
 ### `ue_live_write(action="verify")`（Apply → Save → Verify → Memory 闭环）
 
-该规划类 Tool 把一次 Live Apply 收尾成标准闭环：`ue_asset_property(action="apply")`（返回并 Journal 化 `liveApplyReceipt`）→ 用户显式 `ue_save_authorized_asset` Preview/Commit → `ue_live_write(action="verify")(asset_path, live_apply_receipt="")`。显式 Receipt 精确选择记录；为空时选择该资产最新待处理记录，以兼容旧 Client。
+该规划类 Tool 把一次 Live Apply 收尾成标准闭环：`ue_asset_property(action="apply")`（返回并 Journal 化 `liveApplyReceipt`）→ 用户显式 `ue_blueprint_edit(action="save")` Preview/Commit → `ue_live_write(action="verify")(asset_path, live_apply_receipt="")`。显式 Receipt 精确选择记录；为空时选择该资产最新待处理记录，以兼容旧 Client。
 
 - 每个发生实际变更的 Apply 记录原子写入固定 Work Root 的 `live-write-journal`；Authorized Save 更新为 saved，成功 Undo/Discard 或成功 Verify 删除。Server 重启只恢复通过 Schema、Project、Operation、Target、Transaction 和生命周期校验的记录。
 - Apply/Save 返回 `journalPersisted`。Journal I/O 失败不会反转已经成功的 Editor 操作，只在 `ue_workflow_status.liveWriteJournal` 中报告 `pendingRecordCount`、`recoveredRecordCount` 与 `journalErrorCount`。
@@ -459,7 +459,7 @@ ue_change_set(action="get")(change_set_id)
 ue_asset_property(action="apply")
 ue_asset_property(action="undo")
 ue_asset_property(action="discard")
-ue_save_authorized_asset
+ue_blueprint_edit(action="save")
 ue_live_write(action="verify")
 ue_patch(action="apply")
 ue_patch(action="verify")
@@ -486,7 +486,7 @@ unknown
 
 `ue_patch(action="apply")` 与 `ue_patch(action="verify")` 的可选 `change_set_id` 为 commandlet workflow bridge，必须绑定同一 Plan/Apply receipt/资产。expected no-op 使用 `noop_*` Operation ID，公共 payload 返回 `noOp=true`；它是终态但没有伪造的 LiveApply receipt、transaction、journal、save 或 verify。Change Set journal 自身的持久化结果与 Live journal 分开报告。
 
-`ue_set_material_parameter.parameter_type` 仅接受 `Scalar`、`Vector`、`Texture` 或 `StaticSwitch`，Server 映射到现有四个已注册 Operation。高层 Tool 只覆盖当前稳定 Operation；`ue_patch(action="plan")` 继续保留，供已注册但尚无高层封装的 Operation 使用。
+`ue_set_property(action="material_parameter").parameter_type` 仅接受 `Scalar`、`Vector`、`Texture` 或 `StaticSwitch`，Server 映射到现有四个已注册 Operation。高层 Tool 只覆盖当前稳定 Operation；`ue_patch(action="plan")` 继续保留，供已注册但尚无高层封装的 Operation 使用。
 
 Live Write 稳定错误包括 `live-editor-write-disabled`、`live-editor-required`、`live-editor-write-confirmation-required`、`live-editor-write-not-allowed`、`live-editor-write-operation-unsupported`、`live-editor-write-asset-not-loaded`、`live-editor-write-asset-not-open`、`live-editor-write-blueprint-unsupported`、`live-editor-write-package-invalid`、`live-editor-write-package-dirty`、`live-editor-write-property-not-found`、`live-editor-write-property-not-editable`、`live-editor-write-property-type-unsupported`、`live-editor-write-value-invalid`、`live-editor-write-material-instance-required`、`live-editor-write-material-parameter-invalid`、`live-editor-write-material-parameter-not-found`、`live-editor-write-material-texture-invalid`、`live-editor-write-material-apply-failed`、`live-editor-write-data-table-required`、`live-editor-write-data-table-row-invalid`、`live-editor-write-data-table-row-not-found`、`live-editor-write-data-table-row-exists`、`live-editor-write-data-table-field-unsupported`、`live-editor-write-data-table-value-invalid`、`live-editor-write-data-table-row-referenced`、`live-editor-write-data-table-apply-failed`、`live-editor-write-undo-not-found`、`live-editor-write-undo-transaction-mismatch`、`live-editor-write-undo-session-mismatch`、`live-editor-write-undo-asset-mismatch`、`live-editor-write-undo-stack-mismatch`、`live-editor-write-undo-package-saved`、`live-editor-write-undo-target-changed`、`live-editor-write-undo-failed`、`live-editor-write-undo-verify-failed`、`live-write-verify-not-found`、`live-write-verify-save-unauthorized`、`live-editor-write-verify-not-loaded`、`live-write-verify-export-failed`、`live-write-verify-export-invalid`、`live-write-verify-revision-mismatch`、`live-write-verify-revision-unchanged`、`live-write-verify-value-mismatch` 和 `live-editor-write-apply-failed`。
 
@@ -560,7 +560,7 @@ Evaluator 重新生成同一 Plan，只消费当前适用 Evidence，不执行 C
 
 ```text
 live write applied
-  -> ue_save_authorized_asset
+  -> ue_blueprint_edit(action="save")
 persisted but not independently verified
   -> ue_live_write(action="verify") / ue_patch(action="verify")
 verified persistence, semantic not checked

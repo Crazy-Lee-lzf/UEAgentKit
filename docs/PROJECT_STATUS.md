@@ -69,7 +69,7 @@ Rule、Finding、Decision、Known Issue、Task Record、Runtime Evidence；Revis
 | AnimSequence 诊断 / 修复 / 重定向辅助 | `workflow` / `live-read` | 有限能力 | 视 Tool 而定 |
 | Blueprint 原子 patch：`createNode` / `connect` / `disconnect` / `setPinDefault` / `createVariable` / `rewirePin` / `removeNode` | `ue_*_blueprint_patch_experimental` | 实验 | `--enable-experimental-graphpatch-edit` + ini |
 | 通过 Action Registry `actionId` 创建节点（CallFunction / Cast） | 同上 `createNode` | 实验 | 再加 `--enable-experimental-node-spawn` + ini |
-| Blueprint 位置批量移动 / edit session | `workflow`（`ue_move_blueprint_node*`） | 实验接口 | workflow 门禁 |
+| Blueprint 位置批量移动 / edit session | `workflow`（`ue_blueprint_edit(action="move_node")*`） | 实验接口 | workflow 门禁 |
 
 实验 patch 的限制：一次最多 16 个操作、16 个新节点、8 个新变量；边操作受总操作数限制，单节点最多 8 条连接；`removeNode` 每次最多 1 个节点和 1 条 incident edge；只接受顶层 K2 事件图、干净 Package、非 PIE；一次 Apply 一个事务，失败回滚；Save 独立。完整用法见 [Blueprint 实验用法](BLUEPRINT_AGENT_E2E_USAGE.md)。
 

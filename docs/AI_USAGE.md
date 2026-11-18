@@ -79,7 +79,7 @@ ue_patch(action="plan")
 → 必要时 ue_patch(action="rollback") DryRun → Commit
 ```
 
-对已打开、干净的非 Blueprint 单资产，`ue_asset_property(action="apply")` 修改 Editor 内存并进入 Undo 栈，但不保存；保存用 `ue_save_authorized_asset`，放弃用 `ue_asset_property(action="undo")` / `ue_asset_property(action="discard")`。
+对已打开、干净的非 Blueprint 单资产，`ue_asset_property(action="apply")` 修改 Editor 内存并进入 Undo 栈，但不保存；保存用 `ue_blueprint_edit(action="save")`，放弃用 `ue_asset_property(action="undo")` / `ue_asset_property(action="discard")`。
 
 不要从自然语言猜 Receipt、Revision、确认字符串或 Backup 引用。Dry Run 通过不等于允许 Commit；Live Apply 成功不等于磁盘已保存；保存成功也不等于独立验证通过。失败时停止写入，返回错误码和当前状态；回滚按 [备份与回滚契约](../spec/BACKUP_AND_ROLLBACK.md) 执行。
 

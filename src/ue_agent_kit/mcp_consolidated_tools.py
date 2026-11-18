@@ -1394,57 +1394,166 @@ def register_patch_tool(
             return error_response("ue_patch", exc, read_only=False)
 
 
-BLUEPRINT_SESSION_ACTIONS: dict[str, tuple[str, tuple[str, ...]]] = {
-    "begin": ("ue_begin_blueprint_edit_session", ("asset_path", "graph_guid", "experimental")),
-    "end": ("ue_end_blueprint_edit_session", ("edit_session_token", "mode")),
+SET_PROPERTY_ACTIONS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "blueprint_default": (
+        "ue_set_blueprint_default",
+        ("asset_path", "variable_name", "value", "mode", "description"),
+    ),
+    "component_property": (
+        "ue_set_component_property",
+        ("asset_path", "component_name", "property_path", "value", "mode", "description"),
+    ),
+    "pin_default": (
+        "ue_set_pin_default",
+        ("asset_path", "graph_guid", "node_guid", "pin_name", "value", "mode", "description"),
+    ),
+    "material_parameter": (
+        "ue_set_material_parameter",
+        ("asset_path", "parameter_name", "parameter_type", "value", "mode", "description"),
+    ),
 }
 
-BLUEPRINT_SESSION_REQUIRED: dict[str, tuple[str, ...]] = {
-    "begin": ("asset_path", "graph_guid"),
-    "end": ("edit_session_token",),
+SET_PROPERTY_REQUIRED: dict[str, tuple[str, ...]] = {
+    "blueprint_default": ("asset_path", "variable_name", "value"),
+    "component_property": ("asset_path", "component_name", "property_path", "value"),
+    "pin_default": ("asset_path", "graph_guid", "node_guid", "pin_name", "value"),
+    "material_parameter": ("asset_path", "parameter_name", "parameter_type", "value"),
+}
+
+BLUEPRINT_EDIT_ACTIONS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "move_node": (
+        "ue_move_blueprint_node",
+        (
+            "asset_path",
+            "graph_guid",
+            "node_guid",
+            "x",
+            "y",
+            "expected_x",
+            "expected_y",
+            "expected_dirty",
+        ),
+    ),
+    "move_nodes": (
+        "ue_move_blueprint_nodes",
+        ("asset_path", "graph_guid", "nodes", "edit_session_token"),
+    ),
+    "begin_session": (
+        "ue_begin_blueprint_edit_session",
+        ("asset_path", "graph_guid", "experimental"),
+    ),
+    "end_session": (
+        "ue_end_blueprint_edit_session",
+        ("edit_session_token", "mode"),
+    ),
+    "save": (
+        "ue_save_authorized_asset",
+        ("asset_path", "mode", "save_receipt", "confirmation", "change_set_id", "verification_mode"),
+    ),
+}
+
+BLUEPRINT_EDIT_REQUIRED: dict[str, tuple[str, ...]] = {
+    "move_node": ("asset_path", "graph_guid", "node_guid", "x", "y", "expected_x", "expected_y", "expected_dirty"),
+    "move_nodes": ("asset_path", "graph_guid", "nodes"),
+    "begin_session": ("asset_path", "graph_guid"),
+    "end_session": ("edit_session_token",),
+    "save": ("asset_path",),
 }
 
 
-def register_blueprint_session_tool(
+def _dispatch_with_required(
+    raw: dict[str, Any],
+    action: str,
+    actions: dict[str, tuple[str, tuple[str, ...]]],
+    required: dict[str, tuple[str, ...]],
+    tool: str,
+) -> tuple[str, dict[str, Any]]:
+    if action not in actions:
+        raise ValueError(
+            f"{tool}: unknown action {action!r}; expected one of {sorted(actions)}."
+        )
+    for name in required.get(action, ()):
+        if raw.get(name) is None:
+            raise ValueError(f"{tool}(action={action!r}) needs {name}.")
+    handler, accepted = actions[action]
+    params = {name: raw[name] for name in accepted if raw.get(name) is not None}
+    return handler, params
+
+
+def register_set_property_tool(
+    *,
+    server: Any,
+    handlers: dict[str, Any],
+    planning_annotations: Any,
+    error_response: Any,
+) -> None:
+    """Register ``ue_set_property`` over the four policy-gated property writers."""
+
+    @server.tool(annotations=planning_annotations)
+    def ue_set_property(
+        action: str,
+        asset_path: str | None = None,
+        variable_name: str | None = None,
+        value: Any = None,
+        mode: str = "Plan",
+        description: str | None = None,
+        component_name: str | None = None,
+        property_path: str | None = None,
+        graph_guid: str | None = None,
+        node_guid: str | None = None,
+        pin_name: str | None = None,
+        parameter_name: str | None = None,
+        parameter_type: str | None = None,
+    ) -> dict[str, Any]:
+        """One property entry point (Plan/DryRun): blueprint_default, component_property, pin_default, material_parameter."""
+
+        try:
+            handler_name, params = _dispatch_with_required(
+                locals(), action, SET_PROPERTY_ACTIONS, SET_PROPERTY_REQUIRED, "ue_set_property"
+            )
+            return handlers[handler_name](**params)
+        except (TypeError, ValueError, RuntimeError) as exc:
+            return error_response("ue_set_property", exc, read_only=False)
+
+
+def register_blueprint_edit_tool(
     *,
     server: Any,
     handlers: dict[str, Any],
     annotations: Any,
     error_response: Any,
 ) -> None:
-    """Register ``ue_blueprint_edit_session`` over the begin/end pair."""
+    """Register ``ue_blueprint_edit`` over move, session and authorized save."""
 
     @server.tool(annotations=annotations)
-    def ue_blueprint_edit_session(
+    def ue_blueprint_edit(
         action: str,
         asset_path: str | None = None,
         graph_guid: str | None = None,
-        experimental: bool | None = None,
+        node_guid: str | None = None,
+        x: int | None = None,
+        y: int | None = None,
+        expected_x: int | None = None,
+        expected_y: int | None = None,
+        expected_dirty: bool | None = None,
+        nodes: list[dict[str, Any]] | None = None,
         edit_session_token: str | None = None,
+        experimental: bool | None = None,
         mode: str | None = None,
+        save_receipt: str | None = None,
+        confirmation: str | None = None,
+        change_set_id: str | None = None,
+        verification_mode: str | None = None,
     ) -> dict[str, Any]:
-        """One Blueprint edit-session entry point: begin (starts a session) or end (keep/rollback)."""
+        """One Blueprint edit entry point: move_node, move_nodes, begin_session, end_session, save."""
 
         try:
-            if action not in BLUEPRINT_SESSION_ACTIONS:
-                raise ValueError(
-                    f"ue_blueprint_edit_session: unknown action {action!r}; expected one of "
-                    f"{sorted(BLUEPRINT_SESSION_ACTIONS)}."
-                )
-            for required in BLUEPRINT_SESSION_REQUIRED.get(action, ()):
-                if locals().get(required) is None:
-                    raise ValueError(
-                        f"ue_blueprint_edit_session(action={action!r}) needs {required}."
-                    )
-            handler, accepted = BLUEPRINT_SESSION_ACTIONS[action]
-            params = {
-                name: locals()[name]
-                for name in accepted
-                if locals().get(name) is not None
-            }
-            return handlers[handler](**params)
+            handler_name, params = _dispatch_with_required(
+                locals(), action, BLUEPRINT_EDIT_ACTIONS, BLUEPRINT_EDIT_REQUIRED, "ue_blueprint_edit"
+            )
+            return handlers[handler_name](**params)
         except (TypeError, ValueError, RuntimeError) as exc:
-            return error_response("ue_blueprint_edit_session", exc, read_only=False)
+            return error_response("ue_blueprint_edit", exc, read_only=False)
 
 
 __all__ = [
@@ -1452,8 +1561,8 @@ __all__ = [
     "ASSET_PROPERTY_REQUIRED",
     "CHANGE_SET_ACTIONS",
     "CHANGE_SET_REQUIRED",
-    "BLUEPRINT_SESSION_ACTIONS",
-    "BLUEPRINT_SESSION_REQUIRED",
+    "BLUEPRINT_EDIT_ACTIONS",
+    "BLUEPRINT_EDIT_REQUIRED",
     "DATATABLE_ACTIONS",
     "LIVE_WRITE_ACTIONS",
     "LIVE_WRITE_REQUIRED",
@@ -1469,6 +1578,8 @@ __all__ = [
     "RETARGET_ACTIONS",
     "RETARGET_REQUIRED",
     "SCALE_FIX_ACTIONS",
+    "SET_PROPERTY_ACTIONS",
+    "SET_PROPERTY_REQUIRED",
     "SCALE_FIX_REQUIRED",
     "datatable_change",
     "pie_inspect_actor_params",
@@ -1481,9 +1592,10 @@ __all__ = [
     "register_animation_retarget_tool",
     "register_animation_scale_fix_tool",
     "register_asset_property_tool",
-    "register_blueprint_session_tool",
+    "register_blueprint_edit_tool",
     "register_change_set_tool",
     "register_patch_tool",
+    "register_set_property_tool",
     "register_consolidated_tools",
     "register_datatable_tool",
     "register_live_write_tool",

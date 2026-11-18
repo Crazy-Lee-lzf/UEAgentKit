@@ -69,7 +69,7 @@ All writes are off by default. The `workflow` group requires `--enable-write-too
 | AnimSequence diagnosis / fix / retarget assistance | `workflow` / `live-read` | Bounded | Tool-dependent |
 | Blueprint atomic patch: `createNode` / `connect` / `disconnect` / `setPinDefault` / `createVariable` / `rewirePin` / `removeNode` | `ue_*_blueprint_patch_experimental` | Experimental | `--enable-experimental-graphpatch-edit` + ini |
 | Node creation from an Action Registry `actionId` (CallFunction / Cast) | same `createNode` | Experimental | plus `--enable-experimental-node-spawn` + ini |
-| Blueprint position batches / edit sessions | `workflow` (`ue_move_blueprint_node*`) | Experimental interface | workflow gate |
+| Blueprint position batches / edit sessions | `workflow` (`ue_blueprint_edit(action="move_node")*`) | Experimental interface | workflow gate |
 
 Experimental patch limits: up to 16 operations, 16 new nodes, and 8 new variables per patch; edge operations are bounded by the operation total and at most 8 per node; `removeNode` removes at most one node and one incident edge; top-level K2 event graphs only; clean package and stopped PIE; one transaction per Apply with rollback on failure; Save is separate. See [Blueprint experimental usage](BLUEPRINT_AGENT_E2E_USAGE_EN.md).
 

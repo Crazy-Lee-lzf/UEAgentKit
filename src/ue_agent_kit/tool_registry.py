@@ -184,6 +184,7 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_start_batch_task", "realtime", "planning", "editor.batchTask.start"),
     ToolDefinition("ue_get_batch_task", "realtime", "read", "editor.batchTask.status"),
     ToolDefinition("ue_cancel_batch_task", "realtime", "planning", "editor.batchTask.cancel"),
+    ToolDefinition("ue_set_property", "workflow", "planning", high_level_change=True),
     ToolDefinition("ue_set_blueprint_default", "workflow", "planning", high_level_change=True),
     ToolDefinition("ue_set_component_property", "workflow", "planning", high_level_change=True),
     ToolDefinition("ue_set_pin_default", "workflow", "planning", high_level_change=True),
@@ -243,7 +244,7 @@ ToolDefinition("ue_plan_live_write_batch", "workflow", "planning"),
     ToolDefinition("ue_verify_live_write_checkpoint", "workflow", "read"),
     ToolDefinition("ue_get_asset_state", "workflow", "read"),
     ToolDefinition("ue_refresh_asset_index", "workflow", "planning"),
-    ToolDefinition("ue_blueprint_edit_session", "workflow", "destructive"),
+    ToolDefinition("ue_blueprint_edit", "workflow", "destructive"),
     ToolDefinition("ue_begin_blueprint_edit_session", "workflow", "destructive"),
     ToolDefinition("ue_end_blueprint_edit_session", "workflow", "destructive"),
     ToolDefinition("ue_move_blueprint_node", "workflow", "destructive"),
@@ -274,9 +275,12 @@ CONSOLIDATED_REPLACED_TOOLS: dict[str, tuple[str, ...]] = {
         "ue_remove_datatable_row",
         "ue_rename_datatable_row",
     ),
-    "ue_blueprint_edit_session": (
+    "ue_blueprint_edit": (
         "ue_begin_blueprint_edit_session",
         "ue_end_blueprint_edit_session",
+        "ue_move_blueprint_node",
+        "ue_move_blueprint_nodes",
+        "ue_save_authorized_asset",
     ),
     "ue_patch": (
         "ue_plan_patch",
@@ -316,6 +320,12 @@ CONSOLIDATED_REPLACED_TOOLS: dict[str, tuple[str, ...]] = {
         "ue_validate_animation_retarget",
         "ue_verify_animation_retarget_batch",
         "ue_rollback_animation_retarget_batch",
+    ),
+    "ue_set_property": (
+        "ue_set_blueprint_default",
+        "ue_set_component_property",
+        "ue_set_pin_default",
+        "ue_set_material_parameter",
     ),
     "ue_asset_property": (
         "ue_set_asset_property",

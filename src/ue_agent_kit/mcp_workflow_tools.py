@@ -8,10 +8,11 @@ from .agent_workflow import MATERIAL_PARAMETER_OPERATIONS, PatchWorkflowService,
 from .mcp_consolidated_tools import (
     register_animation_scale_fix_tool,
     register_asset_property_tool,
-    register_blueprint_session_tool,
+    register_blueprint_edit_tool,
     register_datatable_tool,
     register_live_write_tool,
     register_patch_tool,
+    register_set_property_tool,
 )
 from .animation_scale_fix_batch import AnimationScaleFixBatchService
 from .batch_recovery import BatchRecoveryService
@@ -207,6 +208,14 @@ def register_workflow_tools(
             value=value,
             description=description,
         )
+
+    # A0/P2: one tool replaces the four policy-gated property writers.
+    register_set_property_tool(
+        server=server,
+        handlers=handlers,
+        planning_annotations=planning_annotations,
+        error_response=error_response,
+    )
 
     @server.tool(annotations=planning_annotations)
     def ue_set_blueprint_default(
@@ -981,8 +990,8 @@ def register_workflow_tools(
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_refresh_asset_index", exc, read_only=False)
 
-    # A0/P2: one tool replaces the begin/end edit-session pair.
-    register_blueprint_session_tool(
+    # A0/P2: one tool replaces move, the edit session and authorized save.
+    register_blueprint_edit_tool(
         server=server,
         handlers=handlers,
         annotations=destructive_annotations,

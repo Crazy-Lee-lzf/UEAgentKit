@@ -2169,7 +2169,7 @@ class McpServerTests(unittest.TestCase):
             [tool.name for tool in tools],
             consolidated_tool_names_for_mode(workflow_enabled=True, memory_enabled=True),
         )
-        self.assertEqual(len(tools), 33)
+        self.assertEqual(len(tools), 27)
 
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
         memory_contract = capabilities["projectMemory"]
@@ -2253,7 +2253,7 @@ class McpServerTests(unittest.TestCase):
             live_editor_enabled=True, workflow_enabled=True
         )
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 72)
+        self.assertEqual(len(tools), 66)
         for tool in tools:
             definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
             self.assertEqual(bool(tool.annotations.readOnlyHint), definition.read_only, tool.name)
@@ -2350,8 +2350,9 @@ class McpServerTests(unittest.TestCase):
         # Mixed facade: it can also apply, undo and discard.
         self.assertTrue(high_level_tool.annotations.destructiveHint)
         self.assertFalse(high_level_tool.annotations.readOnlyHint)
-        material_tool = next(tool for tool in tools if tool.name == "ue_set_material_parameter")
-        self.assertIn("parameter_type", material_tool.inputSchema["properties"])
+        set_tool = next(tool for tool in tools if tool.name == "ue_set_property")
+        for parameter in ("action", "variable_name", "component_name", "pin_name", "parameter_type"):
+            self.assertIn(parameter, set_tool.inputSchema["properties"])
 
         patch_tool = next(tool for tool in tools if tool.name == "ue_patch")
         self.assertTrue(patch_tool.annotations.destructiveHint)
@@ -2430,7 +2431,7 @@ class McpServerTests(unittest.TestCase):
         self.assertTrue(capabilities["highLevelChanges"]["available"])
         self.assertEqual(capabilities["highLevelChanges"]["defaultMode"], "Plan")
         self.assertFalse(capabilities["highLevelChanges"]["commitSupportedDirectly"])
-        self.assertEqual(len(capabilities["highLevelChanges"]["tools"]), 8)
+        self.assertEqual(len(capabilities["highLevelChanges"]["tools"]), 5)
         self.assertIn("ue_datatable", capabilities["highLevelChanges"]["tools"])
         self.assertIn("ue_asset_property", capabilities["highLevelChanges"]["tools"])
         self.assertNotIn("ue_set_datatable_cell", capabilities["highLevelChanges"]["tools"])
@@ -2478,18 +2479,25 @@ class McpServerTests(unittest.TestCase):
 
         high_level_cases = [
             (
-                "ue_set_blueprint_default",
-                {"asset_path": ASSET_A, "variable_name": "Health", "value": 10},
+                "ue_set_property",
+                {"action": "blueprint_default", "asset_path": ASSET_A, "variable_name": "Health", "value": 10},
                 "setVariableDefault",
             ),
             (
-                "ue_set_component_property",
-                {"asset_path": ASSET_A, "component_name": "Root", "property_path": "Mobility", "value": "Movable"},
+                "ue_set_property",
+                {
+                    "action": "component_property",
+                    "asset_path": ASSET_A,
+                    "component_name": "Root",
+                    "property_path": "Mobility",
+                    "value": "Movable",
+                },
                 "setComponentProperty",
             ),
             (
-                "ue_set_pin_default",
+                "ue_set_property",
                 {
+                    "action": "pin_default",
                     "asset_path": ASSET_A,
                     "graph_guid": "11111111-1111-1111-1111-111111111111",
                     "node_guid": "22222222-2222-2222-2222-222222222222",
@@ -2524,8 +2532,14 @@ class McpServerTests(unittest.TestCase):
                 "setAssetStructuredProperty",
             ),
             (
-                "ue_set_material_parameter",
-                {"asset_path": GENERIC_ASSET, "parameter_name": "Roughness", "parameter_type": "Scalar", "value": 0.5},
+                "ue_set_property",
+                {
+                    "action": "material_parameter",
+                    "asset_path": GENERIC_ASSET,
+                    "parameter_name": "Roughness",
+                    "parameter_type": "Scalar",
+                    "value": 0.5,
+                },
                 "setMaterialInstanceScalarParameter",
             ),
             (

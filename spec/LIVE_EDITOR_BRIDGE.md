@@ -493,7 +493,7 @@ Save confirmation == SAVE P8 TEST-ONLY BP_LayoutP8
 - `GEditor->UndoTransaction(...)` 执行失败返回 `live-editor-write-undo-failed`，不使用 Snapshot 冒充事务成功；回退成功后显式恢复写入前 Dirty 状态，并用保留 Snapshot 读回验证目标值（不一致时用 Snapshot 兜底恢复），验证失败返回 `live-editor-write-undo-verify-failed`；成功后 Bridge 与 Workflow 记录均删除，二次 Undo 或 Verify 返回 not-found。
 - 返回 `action`（`undo-asset-property-live`/`discard-asset-property-live`）、`operation`、`valueKind`、`assetPath`、`transactionId`、回退前/后值、`dirtyBefore`/`dirtyAfter`、`transactionRecorded=false`、`saved=false` 与 `editorSessionId`；整个过程不触碰磁盘、SQLite 或 Revision Export。
 
-该 Capability 不生成磁盘 Revision，也不修改 SQLite/Revision Export。用户检查后可以在编辑器中 Undo，或者通过现有 `ue_save_authorized_asset` Preview/Commit 流程显式保存。
+该 Capability 不生成磁盘 Revision，也不修改 SQLite/Revision Export。用户检查后可以在编辑器中 Undo，或者通过现有 `ue_blueprint_edit(action="save")` Preview/Commit 流程显式保存。
 
 ## 可恢复 Workflow Journal 与版本语义
 

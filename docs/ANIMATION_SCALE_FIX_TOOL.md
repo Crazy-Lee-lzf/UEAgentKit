@@ -80,7 +80,7 @@ ue_asset_property(action="discard")
 确认 Live Apply 结果后，继续使用现有受控流程：
 
 ```text
-ue_save_authorized_asset
+ue_blueprint_edit(action="save")
 → ue_live_write(action="verify") / ue_patch(action="verify")
 ```
 

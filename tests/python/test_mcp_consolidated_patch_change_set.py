@@ -13,12 +13,14 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from ue_agent_kit.mcp_consolidated_tools import (  # noqa: E402
-    BLUEPRINT_SESSION_ACTIONS,
+    BLUEPRINT_EDIT_ACTIONS,
+    SET_PROPERTY_ACTIONS,
     CHANGE_SET_ACTIONS,
     PATCH_ACTIONS,
-    register_blueprint_session_tool,
+    register_blueprint_edit_tool,
     register_change_set_tool,
     register_patch_tool,
+    register_set_property_tool,
 )
 
 
@@ -127,25 +129,96 @@ class PatchDispatchTests(unittest.TestCase):
         self.assertEqual(calls, [])
 
 
-class BlueprintSessionDispatchTests(unittest.TestCase):
+class BlueprintEditDispatchTests(unittest.TestCase):
     def test_every_action_reaches_its_handler(self) -> None:
-        server, calls = _surface(register_blueprint_session_tool, BLUEPRINT_SESSION_ACTIONS, annotations=None)
+        server, calls = _surface(register_blueprint_edit_tool, BLUEPRINT_EDIT_ACTIONS, annotations=None)
         cases = {
-            "begin": {"asset_path": "/Game/BP", "graph_guid": "guid-1", "experimental": True},
-            "end": {"edit_session_token": "token-1", "mode": "rollback"},
+            "begin_session": {"asset_path": "/Game/BP", "graph_guid": "guid-1", "experimental": True},
+            "end_session": {"edit_session_token": "token-1", "mode": "rollback"},
+            "move_node": {
+                "asset_path": "/Game/BP",
+                "graph_guid": "guid-1",
+                "node_guid": "node-1",
+                "x": 10,
+                "y": 20,
+                "expected_x": 0,
+                "expected_y": 0,
+                "expected_dirty": False,
+            },
+            "move_nodes": {"asset_path": "/Game/BP", "graph_guid": "g", "nodes": []},
+            "save": {"asset_path": "/Game/BP", "mode": "Preview"},
         }
-        self.assertEqual(set(cases), set(BLUEPRINT_SESSION_ACTIONS))
+        self.assertEqual(set(cases), set(BLUEPRINT_EDIT_ACTIONS))
         for action, kwargs in cases.items():
             with self.subTest(action=action):
-                result = server.tools["ue_blueprint_edit_session"](action=action, **kwargs)
+                result = server.tools["ue_blueprint_edit"](action=action, **kwargs)
                 self.assertTrue(result["ok"])
-                self.assertEqual(calls[-1], (BLUEPRINT_SESSION_ACTIONS[action][0], kwargs))
+                self.assertEqual(calls[-1], (BLUEPRINT_EDIT_ACTIONS[action][0], kwargs))
 
     def test_required_arguments_are_checked(self) -> None:
-        server, calls = _surface(register_blueprint_session_tool, BLUEPRINT_SESSION_ACTIONS, annotations=None)
-        result = server.tools["ue_blueprint_edit_session"](action="end")
+        server, calls = _surface(register_blueprint_edit_tool, BLUEPRINT_EDIT_ACTIONS, annotations=None)
+        result = server.tools["ue_blueprint_edit"](action="end_session")
         self.assertFalse(result["ok"])
         self.assertIn("edit_session_token", result["error"])
+        self.assertEqual(calls, [])
+
+
+class SetPropertyDispatchTests(unittest.TestCase):
+    def test_every_action_reaches_its_handler(self) -> None:
+        server, calls = _surface(
+            register_set_property_tool, SET_PROPERTY_ACTIONS, planning_annotations=None
+        )
+        cases = {
+            "blueprint_default": {
+                "asset_path": "/Game/BP",
+                "variable_name": "Health",
+                "value": 10,
+            },
+            "component_property": {
+                "asset_path": "/Game/BP",
+                "component_name": "Root",
+                "property_path": "Mobility",
+                "value": "Movable",
+            },
+            "pin_default": {
+                "asset_path": "/Game/BP",
+                "graph_guid": "g-1",
+                "node_guid": "n-1",
+                "pin_name": "Value",
+                "value": "1",
+            },
+            "material_parameter": {
+                "asset_path": "/Game/MI",
+                "parameter_name": "Roughness",
+                "parameter_type": "Scalar",
+                "value": 0.5,
+            },
+        }
+        self.assertEqual(set(cases), set(SET_PROPERTY_ACTIONS))
+        for action, kwargs in cases.items():
+            with self.subTest(action=action):
+                result = server.tools["ue_set_property"](action=action, **kwargs)
+                self.assertTrue(result["ok"])
+                # mode defaults to Plan in the schema and is forwarded as such.
+                expected = {**kwargs, "mode": "Plan"}
+                self.assertEqual(calls[-1], (SET_PROPERTY_ACTIONS[action][0], expected))
+
+    def test_required_arguments_are_checked(self) -> None:
+        server, calls = _surface(
+            register_set_property_tool, SET_PROPERTY_ACTIONS, planning_annotations=None
+        )
+        result = server.tools["ue_set_property"](action="pin_default", asset_path="/Game/BP")
+        self.assertFalse(result["ok"])
+        self.assertIn("graph_guid", result["error"])
+        self.assertEqual(calls, [])
+
+    def test_unknown_action_reports_without_dispatch(self) -> None:
+        server, calls = _surface(
+            register_set_property_tool, SET_PROPERTY_ACTIONS, planning_annotations=None
+        )
+        result = server.tools["ue_set_property"](action="everything")
+        self.assertFalse(result["ok"])
+        self.assertIn("unknown action", result["error"])
         self.assertEqual(calls, [])
 
 
