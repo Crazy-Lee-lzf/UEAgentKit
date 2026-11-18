@@ -373,7 +373,7 @@ CLI 的 stdout/stderr 在入口处固定为 UTF-8，确保 Windows 管道、中�
 }
 ```
 
-`arguments` 与 `ue_memory_write(action="record_task")` 的输入 Schema 完全一致。启用 Workflow 与 Project Memory 时，Agent 应把该对象原样传入目标 Tool，不得修改或自行构造 Patch、Backup Manifest、Validation Evidence 与 Revision 引用。
+`arguments` 已包含 `action`，可以直接作为 `ue_memory_write` 的参数对象。启用 Workflow 与 Project Memory 时，Agent 应把该对象原样传入目标 Tool，不得修改或自行构造 Patch、Backup Manifest、Validation Evidence 与 Revision 引用。
 
 证据来源：
 

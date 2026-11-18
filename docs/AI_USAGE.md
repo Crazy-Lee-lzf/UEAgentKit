@@ -116,7 +116,7 @@ scripts\ue-agent.cmd memory export ^
 ```text
 ue_apply_patch
 → ue_verify_asset
-→ ue_memory_write(action="record_task")(memoryTaskEvidence.arguments)
+→ ue_memory_write(**)   # 原样传入 memoryTaskEvidence.arguments
 ```
 
 只在 `ue_verify_asset.verified=true` 且返回 `memoryTaskEvidence` 时记录成功 Task，并原样使用 `memoryTaskEvidence.arguments`。Rollback Commit 返回 `restored=true` 和 `memoryTaskEvidence` 时同样记录，outcome 为 `rolledBack`；不要把 rollback Dry Run 记录成终态。
