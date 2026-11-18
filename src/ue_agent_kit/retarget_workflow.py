@@ -1015,7 +1015,7 @@ class RetargetWorkflowMixin:
                 "memoryTaskEvidence": evidence,
                 "nextStep": (
                     "The saved outputs were independently reloaded and match disk. If Memory is enabled, "
-                    "pass memoryTaskEvidence.arguments unchanged to ue_memory_record_task."
+                    "pass memoryTaskEvidence.arguments unchanged to ue_memory_write."
                     if verified
                     else "Resolve the independent verification failures before trusting the saved outputs."
                 ),
@@ -1281,8 +1281,9 @@ class RetargetWorkflowMixin:
         backup_manifest_ref = f"backup-manifest:{task['taskId']}" if entries else "backup-manifest:not-applicable"
         return {
             "schemaVersion": "1.0",
-            "tool": "ue_memory_record_task",
+            "tool": "ue_memory_write",
             "arguments": {
+                "action": "record_task",
                 "task_key": f"retarget:{task['planId']}",
                 "title": f"Animation retarget batch {task['taskId']}",
                 "conclusion": conclusion,

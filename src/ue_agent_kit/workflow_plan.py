@@ -728,7 +728,7 @@ class WorkflowPlanMixin:
                 "liveEditorSafety": live_editor_safety,
                 "nextStep": (
                     "If Project Memory is enabled, pass memoryTaskEvidence.arguments unchanged to "
-                    "ue_memory_record_task."
+                    "ue_memory_write."
                 ),
             }
 

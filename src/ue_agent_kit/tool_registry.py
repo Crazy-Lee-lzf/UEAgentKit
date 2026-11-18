@@ -45,10 +45,12 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_evaluate_trust_verdict", "query", "read"),
     ToolDefinition("ue_preview_graph_patch", "query", "read"),
     ToolDefinition("ue_get_task_context", "query", "read"),
+    ToolDefinition("ue_memory", "memory", "read"),
     ToolDefinition("ue_memory_search", "memory", "read"),
     ToolDefinition("ue_memory_get", "memory", "read"),
     ToolDefinition("ue_memory_list_l0_events", "memory", "read"),
     ToolDefinition("ue_memory_get_l0_event", "memory", "read"),
+    ToolDefinition("ue_memory_write", "memory", "planning"),
     ToolDefinition("ue_memory_add_rule", "memory", "planning"),
     ToolDefinition("ue_memory_record_finding", "memory", "planning"),
     ToolDefinition("ue_memory_record_task", "memory", "planning"),
@@ -265,6 +267,24 @@ CONSOLIDATED_REPLACED_TOOLS: dict[str, tuple[str, ...]] = {
         "ue_remove_datatable_row",
         "ue_rename_datatable_row",
     ),
+    "ue_memory": (
+        "ue_memory_search",
+        "ue_memory_get",
+        "ue_memory_list_l0_events",
+        "ue_memory_get_l0_event",
+        "ue_memory_get_context",
+        "ue_memory_expand_node",
+        "ue_memory_get_evidence",
+    ),
+    "ue_memory_write": (
+        "ue_memory_add_rule",
+        "ue_memory_record_finding",
+        "ue_memory_record_task",
+        "ue_memory_mark_superseded",
+        "ue_memory_validate",
+        "ue_memory_update_knowledge",
+        "ue_memory_update_work",
+    ),
     "ue_pie": (
         "ue_get_pie_state",
         "ue_get_pie_world_contexts",
@@ -286,7 +306,11 @@ def replaced_tool_names() -> frozenset[str]:
 
 
 QUERY_TOOL_NAMES = [definition.name for definition in TOOL_REGISTRY if definition.group == "query"]
-MEMORY_TOOL_NAMES = [definition.name for definition in TOOL_REGISTRY if definition.group == "memory"]
+MEMORY_TOOL_NAMES = [
+    definition.name
+    for definition in TOOL_REGISTRY
+    if definition.group == "memory" and definition.name not in replaced_tool_names()
+]
 LIVE_EDITOR_TOOL_NAMES = [
     definition.name
     for definition in TOOL_REGISTRY

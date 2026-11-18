@@ -265,8 +265,9 @@ def _live_write_memory_task_evidence(
     manifest_id = f"live-save:{record.save_receipt}" if record.save_receipt else ""
     return {
         "schemaVersion": MEMORY_TASK_EVIDENCE_SCHEMA_VERSION,
-        "tool": "ue_memory_record_task",
+        "tool": "ue_memory_write",
         "arguments": {
+            "action": "record_task",
             "task_key": f"live-write:{record.plan_id}",
             "title": f"Live write {record.plan_id} on {record.asset_path}",
             "conclusion": conclusion,
@@ -505,8 +506,9 @@ def _verified_memory_task_evidence(
     manifest_id = apply.manifest_path.name
     return {
         "schemaVersion": MEMORY_TASK_EVIDENCE_SCHEMA_VERSION,
-        "tool": "ue_memory_record_task",
+        "tool": "ue_memory_write",
         "arguments": {
+            "action": "record_task",
             "task_key": f"patch:{apply.plan_id}",
             "title": f"Verified patch {apply.plan_id}",
             "conclusion": (
@@ -565,8 +567,9 @@ def _rollback_memory_task_evidence(
     manifest_id = apply.manifest_path.name
     return {
         "schemaVersion": MEMORY_TASK_EVIDENCE_SCHEMA_VERSION,
-        "tool": "ue_memory_record_task",
+        "tool": "ue_memory_write",
         "arguments": {
+            "action": "record_task",
             "task_key": f"rollback:{apply.plan_id}",
             "title": f"Rolled back patch {apply.plan_id}",
             "conclusion": (

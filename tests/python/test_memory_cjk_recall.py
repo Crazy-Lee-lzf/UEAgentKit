@@ -396,7 +396,7 @@ class McpChineseRecallTests(_ChineseRecallFixture):
 
     def test_ue_memory_search_returns_chinese_rule_with_source_and_status(self) -> None:
         _, payload = asyncio.run(
-            self.server.call_tool("ue_memory_search", {"query": "背包格子颜色", "limit": 5})
+            self.server.call_tool("ue_memory", {"action": "search", "query": "背包格子颜色", "limit": 5})
         )
         self.assertTrue(payload["ok"], payload)
         self.assertGreaterEqual(payload["resultCount"], 1)
@@ -409,8 +409,8 @@ class McpChineseRecallTests(_ChineseRecallFixture):
     def test_ue_memory_get_context_recalls_asset_rule_and_active_work(self) -> None:
         _, payload = asyncio.run(
             self.server.call_tool(
-                "ue_memory_get_context",
-                {
+                "ue_memory",
+                {"action": "get_context",
                     "query": "背包格子颜色",
                     "asset_paths": [ASSET_INVENTORY],
                     "detail_level": 2,

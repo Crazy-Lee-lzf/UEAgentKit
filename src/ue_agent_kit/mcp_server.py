@@ -167,6 +167,8 @@ else:
 MCP_SERVER_NAME = "UE Agent Kit"
 TOOL_ROOT = Path(__file__).resolve().parents[2]
 STRICT_MEMORY_ARGUMENT_TOOL_NAMES = (
+    "ue_memory",
+    "ue_memory_write",
     "ue_memory_list_l0_events",
     "ue_memory_get_l0_event",
     "ue_memory_get_context",
@@ -267,7 +269,7 @@ def _server_instructions(
     )
     memory_workflow_text = (
         "After ue_verify_asset succeeds or ue_rollback_patch completes a verified Commit, call "
-        "ue_memory_record_task with memoryTaskEvidence.arguments unchanged; never invent or edit "
+        "ue_memory_write with memoryTaskEvidence.arguments unchanged; never invent or edit "
         "its Patch, Backup Manifest, Validation Evidence, or Revision references. "
         if memory_enabled and write_tools_enabled
         else ""
@@ -1033,7 +1035,8 @@ def _capabilities_response(
             "workflowEvidenceSourceTools": (
                 ["ue_verify_asset", "ue_rollback_patch"] if memory_enabled and write_tools_enabled else []
             ),
-            "workflowEvidenceTargetTool": ("ue_memory_record_task" if memory_enabled and write_tools_enabled else ""),
+            "workflowEvidenceTargetTool": ("ue_memory_write" if memory_enabled and write_tools_enabled else ""),
+            "workflowEvidenceTargetAction": ("record_task" if memory_enabled and write_tools_enabled else ""),
             "workflowEvidenceArgumentsPath": (
                 "memoryTaskEvidence.arguments" if memory_enabled and write_tools_enabled else ""
             ),

@@ -518,8 +518,279 @@ def register_datatable_tool(
             return error_response("ue_datatable", exc, read_only=False)
 
 
+# action -> the parameters the historical per-verb tool accepted.  The facade
+# passes only the ones the caller actually supplied, so every default stays the
+# original tool's default.
+MEMORY_READ_ACTIONS: dict[str, tuple[str, ...]] = {
+    "search": ("query", "record_types", "statuses", "scope_type", "scope_key", "limit"),
+    "get": ("record_id",),
+    "list_l0_events": ("event_kinds", "change_set_id", "distilled", "limit"),
+    "get_l0_event": ("event_id",),
+    "get_context": (
+        "query",
+        "node_path",
+        "asset_paths",
+        "detail_level",
+        "budget_chars",
+        "max_nodes",
+        "max_records",
+        "max_depth",
+    ),
+    "expand_node": (
+        "path",
+        "detail_level",
+        "depth",
+        "budget_chars",
+        "max_nodes",
+        "max_records",
+        "max_depth",
+    ),
+    "get_evidence": ("record_id",),
+}
+
+MEMORY_READ_REQUIRED: dict[str, tuple[str, ...]] = {
+    "search": ("query",),
+    "get": ("record_id",),
+    "expand_node": ("path",),
+    "get_l0_event": ("event_id",),
+    "get_evidence": ("record_id",),
+}
+
+MEMORY_WRITE_ACTIONS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "add_rule": (
+        "ue_memory_add_rule",
+        (
+            "subject_key",
+            "title",
+            "body",
+            "source_ref",
+            "confidence",
+            "observed_at_utc",
+            "scopes",
+            "revision_set",
+            "artifacts",
+            "details",
+        ),
+    ),
+    "record_finding": (
+        "ue_memory_record_finding",
+        (
+            "record_type",
+            "subject_key",
+            "title",
+            "body",
+            "source_kind",
+            "source_ref",
+            "confidence",
+            "observed_at_utc",
+            "scopes",
+            "revision_set",
+            "artifacts",
+            "details",
+        ),
+    ),
+    "record_task": (
+        "ue_memory_record_task",
+        (
+            "task_key",
+            "title",
+            "conclusion",
+            "outcome",
+            "patch_ref",
+            "backup_manifest_ref",
+            "validation_evidence_ref",
+            "revision_set",
+            "scopes",
+            "confidence",
+            "observed_at_utc",
+            "patch_details",
+            "backup_manifest_details",
+            "validation_evidence_details",
+            "details",
+        ),
+    ),
+    "mark_superseded": (
+        "ue_memory_mark_superseded",
+        ("record_id", "replacement_record_id", "reason"),
+    ),
+    "validate": ("ue_memory_validate", ()),
+}
+
+MEMORY_WRITE_REQUIRED: dict[str, tuple[str, ...]] = {
+    "add_rule": ("subject_key", "title", "body"),
+    "record_finding": ("record_type", "subject_key", "title", "body"),
+    "record_task": (
+        "task_key",
+        "title",
+        "conclusion",
+        "outcome",
+        "patch_ref",
+        "backup_manifest_ref",
+        "validation_evidence_ref",
+        "revision_set",
+    ),
+    "mark_superseded": ("record_id", "replacement_record_id", "reason"),
+}
+
+MEMORY_KNOWLEDGE_ACTIONS: tuple[str, ...] = (
+    "create_node",
+    "update_node",
+    "delete_node",
+    "attach_record",
+    "detach_record",
+    "add_record",
+)
+
+MEMORY_WORK_ACTIONS: tuple[str, ...] = (
+    "plan",
+    "start",
+    "get",
+    "add_todo",
+    "set_next_action",
+    "block",
+    "resume",
+    "complete",
+    "cancel",
+    "set_links",
+)
+
+_MEMORY_READ_HANDLERS = {name: f"ue_memory_{name}" for name in MEMORY_READ_ACTIONS}
+
+
+def _memory_read_call(raw: dict[str, Any], action: str) -> tuple[str, dict[str, Any]]:
+    if action not in MEMORY_READ_ACTIONS:
+        raise ValueError(
+            f"ue_memory: unknown action {action!r}; expected one of "
+            f"{sorted(MEMORY_READ_ACTIONS)}."
+        )
+    for required in MEMORY_READ_REQUIRED.get(action, ()):
+        if raw.get(required) is None:
+            raise ValueError(f"ue_memory(action={action!r}) needs {required}.")
+    params = {
+        name: raw[name]
+        for name in MEMORY_READ_ACTIONS[action]
+        if raw.get(name) is not None
+    }
+    return _MEMORY_READ_HANDLERS[action], params
+
+
+def _memory_write_call(
+    raw: dict[str, Any], action: str
+) -> tuple[str, dict[str, Any]]:
+    if action in MEMORY_KNOWLEDGE_ACTIONS:
+        return "ue_memory_update_knowledge", {"action": action, "payload": raw.get("payload") or {}}
+    if action in MEMORY_WORK_ACTIONS:
+        return "ue_memory_update_work", {"action": action, "payload": raw.get("payload") or {}}
+    if action not in MEMORY_WRITE_ACTIONS:
+        raise ValueError(
+            f"ue_memory_write: unknown action {action!r}; expected one of "
+            f"{sorted(MEMORY_WRITE_ACTIONS) + list(MEMORY_KNOWLEDGE_ACTIONS) + list(MEMORY_WORK_ACTIONS)}."
+        )
+    for required in MEMORY_WRITE_REQUIRED.get(action, ()):
+        if raw.get(required) is None:
+            raise ValueError(f"ue_memory_write(action={action!r}) needs {required}.")
+    handler, accepted = MEMORY_WRITE_ACTIONS[action]
+    params = {name: raw[name] for name in accepted if raw.get(name) is not None}
+    return handler, params
+
+
+def register_memory_read_tool(
+    *,
+    server: Any,
+    handlers: dict[str, Any],
+    read_annotations: Any,
+    error_response: Any,
+) -> None:
+    """Register ``ue_memory`` in front of the seven read-only memory tools."""
+
+    @server.tool(annotations=read_annotations)
+    def ue_memory(
+        action: str,
+        query: str | None = None,
+        record_id: str | None = None,
+        event_id: str | None = None,
+        path: str | None = None,
+        node_path: str | None = None,
+        record_types: list[str] | None = None,
+        statuses: list[str] | None = None,
+        scope_type: str | None = None,
+        scope_key: str | None = None,
+        event_kinds: list[str] | None = None,
+        change_set_id: str | None = None,
+        distilled: bool | None = None,
+        asset_paths: list[str] | None = None,
+        detail_level: int | None = None,
+        depth: int | None = None,
+        budget_chars: int | None = None,
+        max_nodes: int | None = None,
+        max_records: int | None = None,
+        max_depth: int | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        """One read-only Project Memory entry point: search, get, list_l0_events, get_l0_event, get_context, expand_node, get_evidence."""
+
+        try:
+            handler_name, params = _memory_read_call(locals(), action)
+            return handlers[handler_name](**params)
+        except (TypeError, ValueError, RuntimeError) as exc:
+            return error_response("ue_memory", exc, read_only=True)
+
+
+def register_memory_write_tool(
+    *,
+    server: Any,
+    handlers: dict[str, Any],
+    planning_annotations: Any,
+    error_response: Any,
+) -> None:
+    """Register ``ue_memory_write`` in front of the seven write-side memory tools."""
+
+    @server.tool(annotations=planning_annotations)
+    def ue_memory_write(
+        action: str,
+        payload: dict[str, Any] | None = None,
+        subject_key: str | None = None,
+        title: str | None = None,
+        body: str | None = None,
+        record_type: str | None = None,
+        source_kind: str | None = None,
+        source_ref: str | None = None,
+        confidence: float | None = None,
+        observed_at_utc: str | None = None,
+        scopes: list[dict[str, Any]] | None = None,
+        revision_set: list[dict[str, Any]] | None = None,
+        artifacts: list[dict[str, Any]] | None = None,
+        details: dict[str, Any] | None = None,
+        task_key: str | None = None,
+        conclusion: str | None = None,
+        outcome: str | None = None,
+        patch_ref: str | None = None,
+        backup_manifest_ref: str | None = None,
+        validation_evidence_ref: str | None = None,
+        patch_details: dict[str, Any] | None = None,
+        backup_manifest_details: dict[str, Any] | None = None,
+        validation_evidence_details: dict[str, Any] | None = None,
+        record_id: str | None = None,
+        replacement_record_id: str | None = None,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        """One Project Memory write entry point: add_rule, record_finding, record_task, mark_superseded, validate, and the knowledge/work sub-actions."""
+
+        try:
+            handler_name, params = _memory_write_call(locals(), action)
+            return handlers[handler_name](**params)
+        except (TypeError, ValueError, RuntimeError) as exc:
+            return error_response("ue_memory_write", exc, read_only=False)
+
+
 __all__ = [
     "DATATABLE_ACTIONS",
+    "MEMORY_KNOWLEDGE_ACTIONS",
+    "MEMORY_READ_ACTIONS",
+    "MEMORY_READ_REQUIRED",
+    "MEMORY_WORK_ACTIONS",
+    "MEMORY_WRITE_ACTIONS",
+    "MEMORY_WRITE_REQUIRED",
     "PIE_ACTIONS",
     "datatable_change",
     "pie_inspect_actor_params",
@@ -531,4 +802,6 @@ __all__ = [
     "pie_world_contexts_params",
     "register_consolidated_tools",
     "register_datatable_tool",
+    "register_memory_read_tool",
+    "register_memory_write_tool",
 ]

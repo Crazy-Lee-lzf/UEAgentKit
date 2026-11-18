@@ -10,10 +10,10 @@
 | 档位 | 可见分组 | 工具数 | 适用 |
 |---|---|---:|---|
 | `core`（默认） | query | **15** | 只做检索/分析/能力发现 |
-| `read` | + memory | 29 | 需要 Project Memory 的只读会话 |
-| `live` | + live-read、realtime | **60** | 连 Editor 做只读诊断（PIE / 图 / 资产） |
-| `live-write` | + live-action | 70 | 需要受控写入（原子 patch、Niagara 参数） |
-| `full` | + workflow、source-control | 133 | 离线批处理 / 源控；仍需各自的开关 |
+| `read` | + memory | 17 | 需要 Project Memory 的只读会话 |
+| `live` | + live-read、realtime | **48** | 连 Editor 做只读诊断（PIE / 图 / 资产） |
+| `live-write` | + live-action | 58 | 需要受控写入（原子 patch、Niagara 参数） |
+| `full` | + workflow、source-control | 121 | 离线批处理 / 源控；仍需各自的开关 |
 
 ```powershell
 python scripts\ue-agent-mcp.py --enable-live-editor --tool-profile live ...
@@ -36,7 +36,7 @@ python scripts\ue-agent-mcp.py --enable-live-editor --tool-profile live ...
 | Live 图 / PIE | `ue_get_blueprint_graph_context`、`ue_get_focused_blueprint_graph_context`、`ue_get_blueprint_graph_layout_preflight`、`ue_pie` | 只读；PIE 全部走 `ue_pie(action=...)`：`state`、`worlds`、`list_actors`、`inspect_actor`、`scalars`、`list_properties`、`read_properties`（原 7 个逐动词 Tool 已合并，不再单独注册）。`list_actors` 按 object path 稳定排序并分页，Name/Class/Tag 为大小写不敏感子串过滤，Server/Client 世界分开；`scalars` / `list_properties` / `read_properties` 走反射（不以 Edit/BlueprintVisible 为门槛），容器按 `offset`/`limit` 分页，对象引用只返回身份（`objectRef.path` 可直接作为下一跳的 `objectPath`，逐跳显式调用、跨世界引用标记 `crossWorld` 并拒绝继续），不支持的类型返回 `unsupported-type` + 原因 |
 | 资产 / 日志 | `ue_inspect_asset_live`、`ue_get_output_log`、`ue_get_compile_errors` | 只读诊断 |
 | Niagara Stack | `ue_get_niagara_module_stack` | 按真实执行阶段只读 Module / Input 与来源 |
-| Project Memory | `ue_memory_search`、`ue_memory_get`、`ue_memory_get_context`、`ue_memory_expand_node`、`ue_memory_get_evidence` | 需要 `--enable-project-memory` |
+| Project Memory | `ue_memory`（读：`search` / `get` / `get_context` / `expand_node` / `get_evidence` / `list_l0_events` / `get_l0_event`）、`ue_memory_write`（写：`add_rule` / `record_finding` / `record_task` / `mark_superseded` / `validate` + knowledge/work 子动作） | 需要 `--enable-project-memory` |
 | 代码知识 | `ue_search(scope="symbols", profile="code")` | C++ 符号与静态调用点 |
 
 ## 写入

@@ -1579,7 +1579,8 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertEqual(verified["indexFreshness"]["state"], "stale")
         evidence = verified["memoryTaskEvidence"]
         self.assertEqual(evidence["schemaVersion"], "1.0")
-        self.assertEqual(evidence["tool"], "ue_memory_record_task")
+        self.assertEqual(evidence["tool"], "ue_memory_write")
+        self.assertEqual(evidence["arguments"]["action"], "record_task")
         arguments = evidence["arguments"]
         self.assertEqual(arguments["task_key"], f"patch:{plan['planId']}")
         self.assertEqual(arguments["outcome"], "succeeded")
@@ -1653,7 +1654,8 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertTrue(restored["restored"])
         self.assertEqual(restored["indexFreshness"]["state"], "fresh")
         rollback_evidence = restored["memoryTaskEvidence"]
-        self.assertEqual(rollback_evidence["tool"], "ue_memory_record_task")
+        self.assertEqual(rollback_evidence["tool"], "ue_memory_write")
+        self.assertEqual(rollback_evidence["arguments"]["action"], "record_task")
         rollback_arguments = rollback_evidence["arguments"]
         self.assertEqual(rollback_arguments["task_key"], f"rollback:{plan['planId']}")
         self.assertEqual(rollback_arguments["outcome"], "rolledBack")

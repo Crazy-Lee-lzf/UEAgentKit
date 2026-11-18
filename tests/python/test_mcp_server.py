@@ -160,8 +160,9 @@ class FakeWorkflowService:
             "reportId": report_id,
             "memoryTaskEvidence": {
                 "schemaVersion": "1.0",
-                "tool": "ue_memory_record_task",
+                "tool": "ue_memory_write",
                 "arguments": {
+                    "action": "record_task",
                     "task_key": "patch:plan_test",
                     "title": "Verified patch plan_test",
                     "conclusion": (
@@ -245,8 +246,9 @@ class FakeWorkflowService:
                     "verificationReportId": verification_report_id,
                     "memoryTaskEvidence": {
                         "schemaVersion": "1.0",
-                        "tool": "ue_memory_record_task",
+                        "tool": "ue_memory_write",
                         "arguments": {
+                            "action": "record_task",
                             "task_key": "rollback:plan_test",
                             "title": "Rolled back patch plan_test",
                             "conclusion": (
@@ -1213,9 +1215,9 @@ class McpServerTests(unittest.TestCase):
             memory_service=memory_service,
         )
         tools = asyncio.run(server.list_tools())
-        expected_names = tool_names_for_mode(memory_enabled=True)
+        expected_names = consolidated_tool_names_for_mode(memory_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 29)
+        self.assertEqual(len(tools), 17)
         forbidden = {
             "database",
             "database_path",
@@ -1275,8 +1277,8 @@ class McpServerTests(unittest.TestCase):
         event_id = capture_result.event_ids[0]
         _, listed = asyncio.run(
             server.call_tool(
-                "ue_memory_list_l0_events",
-                {
+                "ue_memory",
+                {"action": "list_l0_events",
                     "event_kinds": ["live_write"],
                     "change_set_id": "cs_l0",
                     "distilled": False,
@@ -1290,8 +1292,8 @@ class McpServerTests(unittest.TestCase):
         self.assertNotIn(str(self.temp_root), str(listed))
         _, exact = asyncio.run(
             server.call_tool(
-                "ue_memory_get_l0_event",
-                {"event_id": event_id},
+                "ue_memory",
+                {"action": "get_l0_event", "event_id": event_id},
             )
         )
         self.assertEqual(exact["event"]["eventId"], event_id)
@@ -1299,15 +1301,15 @@ class McpServerTests(unittest.TestCase):
         with self.assertRaisesRegex(Exception, "Extra inputs are not permitted"):
             asyncio.run(
                 server.call_tool(
-                    "ue_memory_list_l0_events",
-                    {"project_key": "Other"},
+                    "ue_memory",
+                    {"action": "list_l0_events", "project_key": "Other"},
                 )
             )
 
         _, rule = asyncio.run(
             server.call_tool(
-                "ue_memory_add_rule",
-                {
+                "ue_memory_write",
+                {"action": "add_rule",
                     "subject_key": "rule:code:newline",
                     "title": "Text files use CRLF",
                     "body": "All tracked text files use UTF-8 without BOM and CRLF.",
@@ -1330,8 +1332,8 @@ class McpServerTests(unittest.TestCase):
 
         _, finding = asyncio.run(
             server.call_tool(
-                "ue_memory_record_finding",
-                {
+                "ue_memory_write",
+                {"action": "record_finding",
                     "record_type": "projectFact",
                     "subject_key": "asset:player:revision",
                     "title": "Player asset revision",
@@ -1355,8 +1357,8 @@ class McpServerTests(unittest.TestCase):
 
         _, task = asyncio.run(
             server.call_tool(
-                "ue_memory_record_task",
-                {
+                "ue_memory_write",
+                {"action": "record_task",
                     "task_key": "player-revision-validation",
                     "title": "Validate player revision",
                     "conclusion": "The player asset revision was validated and retained.",
@@ -1396,8 +1398,8 @@ class McpServerTests(unittest.TestCase):
 
         _, invalid_task = asyncio.run(
             server.call_tool(
-                "ue_memory_record_task",
-                {
+                "ue_memory_write",
+                {"action": "record_task",
                     "task_key": "invalid-path",
                     "title": "Invalid task",
                     "conclusion": "This task must be rejected.",
@@ -1420,29 +1422,29 @@ class McpServerTests(unittest.TestCase):
 
         _, search = asyncio.run(
             server.call_tool(
-                "ue_memory_search",
-                {"query": "CRLF", "record_types": ["projectRule"]},
+                "ue_memory",
+                {"action": "search", "query": "CRLF", "record_types": ["projectRule"]},
             )
         )
         self.assertEqual(search["resultCount"], 1)
         self.assertEqual(search["items"][0]["record"]["recordId"], rule_record["recordId"])
         _, empty_statuses = asyncio.run(
             server.call_tool(
-                "ue_memory_search",
-                {"query": "CRLF", "statuses": []},
+                "ue_memory",
+                {"action": "search", "query": "CRLF", "statuses": []},
             )
         )
         self.assertFalse(empty_statuses["ok"])
         self.assertEqual(empty_statuses["error"]["code"], "invalid-arguments")
 
-        _, fetched = asyncio.run(server.call_tool("ue_memory_get", {"record_id": finding_record["recordId"]}))
+        _, fetched = asyncio.run(server.call_tool("ue_memory", {"action": "get", "record_id": finding_record["recordId"]}))
         self.assertEqual(
             fetched["record"]["revisionSet"][0]["revision"],
             f"sha256:{REVISION_A}",
         )
         self.assertRegex(fetched["record"]["evidenceSha256"], r"^sha256:[0-9a-f]{64}$")
 
-        _, validated = asyncio.run(server.call_tool("ue_memory_validate", {}))
+        _, validated = asyncio.run(server.call_tool("ue_memory_write", {"action": "validate"}))
         self.assertTrue(validated["ok"])
         self.assertIn(finding_record["recordId"], validated["checkedRecordIds"])
         self.assertIn(task_record["recordId"], validated["checkedRecordIds"])
@@ -1450,8 +1452,8 @@ class McpServerTests(unittest.TestCase):
 
         _, replacement = asyncio.run(
             server.call_tool(
-                "ue_memory_record_finding",
-                {
+                "ue_memory_write",
+                {"action": "record_finding",
                     "record_type": "knownIssue",
                     "subject_key": "issue:test",
                     "title": "Replacement issue",
@@ -1461,8 +1463,8 @@ class McpServerTests(unittest.TestCase):
         )
         _, original = asyncio.run(
             server.call_tool(
-                "ue_memory_record_finding",
-                {
+                "ue_memory_write",
+                {"action": "record_finding",
                     "record_type": "knownIssue",
                     "subject_key": "issue:test",
                     "title": "Original issue",
@@ -1472,8 +1474,8 @@ class McpServerTests(unittest.TestCase):
         )
         _, superseded = asyncio.run(
             server.call_tool(
-                "ue_memory_mark_superseded",
-                {
+                "ue_memory_write",
+                {"action": "mark_superseded",
                     "record_id": original["record"]["recordId"],
                     "replacement_record_id": replacement["record"]["recordId"],
                     "reason": "issue-state-updated",
@@ -1487,7 +1489,7 @@ class McpServerTests(unittest.TestCase):
         )
 
         _, missing = asyncio.run(
-            server.call_tool("ue_memory_get", {"record_id": "mem_00000000000000000000000000000000"})
+            server.call_tool("ue_memory", {"action": "get", "record_id": "mem_00000000000000000000000000000000"})
         )
         self.assertFalse(missing["ok"])
         self.assertEqual(missing["error"]["code"], "memory-record-not-found")
@@ -1509,18 +1511,12 @@ class McpServerTests(unittest.TestCase):
         )
         server = create_mcp_server(self.database_path, memory_service=memory_service)
         tools_by_name = {tool.name: tool for tool in asyncio.run(server.list_tools())}
-        for tool_name in (
-            "ue_memory_get_context",
-            "ue_memory_expand_node",
-            "ue_memory_get_evidence",
-            "ue_memory_update_knowledge",
-            "ue_memory_update_work",
-        ):
+        for tool_name in ("ue_memory", "ue_memory_write"):
             self.assertFalse(tools_by_name[tool_name].inputSchema["additionalProperties"])
 
         _, root = asyncio.run(
             server.call_tool(
-                "ue_memory_update_knowledge",
+                "ue_memory_write",
                 {
                     "action": "create_node",
                     "payload": {
@@ -1535,7 +1531,7 @@ class McpServerTests(unittest.TestCase):
         self.assertTrue(root["ok"])
         _, combat = asyncio.run(
             server.call_tool(
-                "ue_memory_update_knowledge",
+                "ue_memory_write",
                 {
                     "action": "create_node",
                     "payload": {
@@ -1553,7 +1549,7 @@ class McpServerTests(unittest.TestCase):
 
         _, knowledge = asyncio.run(
             server.call_tool(
-                "ue_memory_update_knowledge",
+                "ue_memory_write",
                 {
                     "action": "add_record",
                     "payload": {
@@ -1574,7 +1570,7 @@ class McpServerTests(unittest.TestCase):
 
         _, planned = asyncio.run(
             server.call_tool(
-                "ue_memory_update_work",
+                "ue_memory_write",
                 {
                     "action": "plan",
                     "payload": {
@@ -1591,14 +1587,14 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(planned["work"]["status"], "planned")
         _, started = asyncio.run(
             server.call_tool(
-                "ue_memory_update_work",
+                "ue_memory_write",
                 {"action": "start", "payload": {"workItemId": work_id}},
             )
         )
         self.assertEqual(started["work"]["status"], "in_progress")
         _, todo = asyncio.run(
             server.call_tool(
-                "ue_memory_update_work",
+                "ue_memory_write",
                 {
                     "action": "add_todo",
                     "payload": {"workItemId": work_id, "text": "Run smoke test."},
@@ -1608,7 +1604,7 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(todo["work"]["todos"][0]["text"], "Run smoke test.")
         _, blocked = asyncio.run(
             server.call_tool(
-                "ue_memory_update_work",
+                "ue_memory_write",
                 {
                     "action": "block",
                     "payload": {
@@ -1621,7 +1617,7 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(blocked["work"]["status"], "blocked")
         _, resumed = asyncio.run(
             server.call_tool(
-                "ue_memory_update_work",
+                "ue_memory_write",
                 {
                     "action": "resume",
                     "payload": {"workItemId": work_id, "nextAction": "Retry automation."},
@@ -1632,8 +1628,8 @@ class McpServerTests(unittest.TestCase):
 
         _, context = asyncio.run(
             server.call_tool(
-                "ue_memory_get_context",
-                {
+                "ue_memory",
+                {"action": "get_context",
                     "query": "damage",
                     "node_path": "/project/combat",
                     "asset_paths": [ASSET_A],
@@ -1652,24 +1648,24 @@ class McpServerTests(unittest.TestCase):
 
         _, expanded = asyncio.run(
             server.call_tool(
-                "ue_memory_expand_node",
-                {"path": "/project/combat", "detail_level": 3, "depth": 0},
+                "ue_memory",
+                {"action": "expand_node", "path": "/project/combat", "detail_level": 3, "depth": 0},
             )
         )
         self.assertEqual(expanded["context"]["records"][0]["body"], record["body"])
-        _, evidence = asyncio.run(server.call_tool("ue_memory_get_evidence", {"record_id": record["recordId"]}))
+        _, evidence = asyncio.run(server.call_tool("ue_memory", {"action": "get_evidence", "record_id": record["recordId"]}))
         self.assertEqual(evidence["evidence"]["source"]["sourceRef"], "test:user")
 
         _, completed = asyncio.run(
             server.call_tool(
-                "ue_memory_update_work",
+                "ue_memory_write",
                 {"action": "complete", "payload": {"workItemId": work_id}},
             )
         )
         self.assertEqual(completed["work"]["status"], "done")
         _, invalid_terminal = asyncio.run(
             server.call_tool(
-                "ue_memory_update_work",
+                "ue_memory_write",
                 {
                     "action": "block",
                     "payload": {"workItemId": work_id, "blockedReason": "Too late."},
@@ -1681,7 +1677,7 @@ class McpServerTests(unittest.TestCase):
 
         _, forbidden_revision = asyncio.run(
             server.call_tool(
-                "ue_memory_update_knowledge",
+                "ue_memory_write",
                 {
                     "action": "add_record",
                     "payload": {
@@ -1697,11 +1693,11 @@ class McpServerTests(unittest.TestCase):
         self.assertFalse(forbidden_revision["ok"])
         self.assertEqual(forbidden_revision["error"]["code"], "invalid-arguments")
         with self.assertRaisesRegex(Exception, "Extra inputs are not permitted"):
-            asyncio.run(server.call_tool("ue_memory_get_context", {"database": "memory.sqlite3"}))
+            asyncio.run(server.call_tool("ue_memory", {"action": "get_context", "database": "memory.sqlite3"}))
         _, missing_evidence = asyncio.run(
             server.call_tool(
-                "ue_memory_get_evidence",
-                {"record_id": "mem_00000000000000000000000000000000"},
+                "ue_memory",
+                {"action": "get_evidence", "record_id": "mem_00000000000000000000000000000000"},
             )
         )
         self.assertFalse(missing_evidence["ok"])
@@ -2122,7 +2118,7 @@ class McpServerTests(unittest.TestCase):
             [tool.name for tool in tools],
             consolidated_tool_names_for_mode(workflow_enabled=True, memory_enabled=True),
         )
-        self.assertEqual(len(tools), 86)
+        self.assertEqual(len(tools), 74)
 
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
         memory_contract = capabilities["projectMemory"]
@@ -2131,7 +2127,8 @@ class McpServerTests(unittest.TestCase):
             memory_contract["workflowEvidenceSourceTools"],
             ["ue_verify_asset", "ue_rollback_patch"],
         )
-        self.assertEqual(memory_contract["workflowEvidenceTargetTool"], "ue_memory_record_task")
+        self.assertEqual(memory_contract["workflowEvidenceTargetTool"], "ue_memory_write")
+        self.assertEqual(memory_contract["workflowEvidenceTargetAction"], "record_task")
         self.assertEqual(
             memory_contract["workflowEvidenceArgumentsPath"],
             "memoryTaskEvidence.arguments",
@@ -2139,8 +2136,9 @@ class McpServerTests(unittest.TestCase):
 
         _, verified = asyncio.run(server.call_tool("ue_verify_asset", {"apply_receipt": "apply_test"}))
         evidence = verified["memoryTaskEvidence"]
-        self.assertEqual(evidence["tool"], "ue_memory_record_task")
+        self.assertEqual(evidence["tool"], "ue_memory_write")
         arguments = evidence["arguments"]
+        self.assertEqual(arguments["action"], "record_task")
         self.assertEqual(arguments["validation_evidence_ref"], "validation-evidence:report_verify_test")
         self.assertNotIn("apply_receipt", arguments)
         self.assertNotIn("database", json.dumps(arguments, ensure_ascii=False).lower())
@@ -2168,7 +2166,7 @@ class McpServerTests(unittest.TestCase):
             )
         )
         rollback_evidence = rolled_back["memoryTaskEvidence"]
-        self.assertEqual(rollback_evidence["tool"], "ue_memory_record_task")
+        self.assertEqual(rollback_evidence["tool"], "ue_memory_write")
         rollback_arguments = rollback_evidence["arguments"]
         self.assertEqual(rollback_arguments["outcome"], "rolledBack")
         self.assertEqual(

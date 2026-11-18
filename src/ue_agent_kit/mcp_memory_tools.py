@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from .active_work import WorkItem, WorkItemDraft, WorkStatus
+from .mcp_consolidated_tools import register_memory_read_tool, register_memory_write_tool
 from .memory_context import ContextBudget, RecallBudget
 from .memory_l0 import MemoryL0Event
 from .memory_reports import memory_record_payload
@@ -210,6 +211,18 @@ def register_memory_tools(
         openWorldHint=False,
     )
 
+    # A0/P1: ue_memory / ue_memory_write dispatch to these exact callables, so
+    # the per-verb tools stay the single implementation.  handlers is filled at
+    # the end of registration; the facades resolve it lazily per call.
+    handlers: dict[str, Any] = {}
+
+    register_memory_read_tool(
+        server=server,
+        handlers=handlers,
+        read_annotations=read_annotations,
+        error_response=error_response,
+    )
+
     @server.tool(annotations=read_annotations)
     def ue_memory_search(
         query: str,
@@ -356,6 +369,13 @@ def register_memory_tools(
                 _memory_error(exc),
                 read_only=True,
             )
+
+    register_memory_write_tool(
+        server=server,
+        handlers=handlers,
+        planning_annotations=planning_annotations,
+        error_response=error_response,
+    )
 
     @server.tool(annotations=planning_annotations)
     def ue_memory_add_rule(
@@ -963,3 +983,13 @@ def register_memory_tools(
             sqlite3.Error,
         ) as exc:
             return error_response("ue_memory_update_work", _memory_error(exc), read_only=False)
+
+    # Every per-verb tool above is a local callable; the facades dispatch to
+    # these exact objects, including ones a profile kept out of registration.
+    handlers.update(
+        {
+            name: value
+            for name, value in list(locals().items())
+            if name.startswith("ue_memory_") and callable(value)
+        }
+    )

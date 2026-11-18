@@ -21,10 +21,12 @@ from ue_agent_kit.tool_registry import (  # noqa: E402
 )
 
 EXPECTED_MEMORY_TOOLS = [
+    "ue_memory",
     "ue_memory_search",
     "ue_memory_get",
     "ue_memory_list_l0_events",
     "ue_memory_get_l0_event",
+    "ue_memory_write",
     "ue_memory_add_rule",
     "ue_memory_record_finding",
     "ue_memory_record_task",
@@ -181,14 +183,14 @@ class ToolRegistryTests(unittest.TestCase):
             tool_names_for_mode(memory_enabled=True),
             QUERY_TOOL_NAMES + EXPECTED_MEMORY_TOOLS,
         )
-        self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 29)
+        self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 31)
         self.assertEqual(
             len(tool_names_for_mode(live_editor_enabled=True, memory_enabled=True)),
-            77,
+            79,
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
-            91,
+            93,
         )
         self.assertEqual(
             len(
@@ -198,7 +200,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-            139,
+            141,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:
@@ -382,7 +384,8 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertEqual(
             [item["name"] for item in memory_descriptors],
-            QUERY_TOOL_NAMES + EXPECTED_MEMORY_TOOLS,
+            QUERY_TOOL_NAMES
+            + [name for name in EXPECTED_MEMORY_TOOLS if name not in replaced_tool_names()],
         )
 
     def test_live_action_handlers_keep_bounded_execution_surface(self) -> None:
