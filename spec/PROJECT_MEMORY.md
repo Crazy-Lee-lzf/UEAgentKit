@@ -345,7 +345,7 @@ CLI 的 stdout/stderr 在入口处固定为 UTF-8，确保 Windows 管道、中�
 
 ## 17. Workflow Evidence Handoff
 
-成功的 `ue_verify_asset` 会返回：
+成功的 `ue_patch(action="verify")` 会返回：
 
 ```json
 {

@@ -70,13 +70,13 @@ Registry Tags 能证明资产类型和部分构建元数据，但不能证明 So
 ## 5. 受控写入
 
 ```text
-ue_plan_patch
-→ ue_dry_run_patch
+ue_patch(action="plan")
+→ ue_patch(action="dry_run")
 → 用户确认 Diff / 目标 / 风险
-→ ue_apply_patch（一次性 Receipt + 精确确认）
+→ ue_patch(action="apply")（一次性 Receipt + 精确确认）
 → 显式 Save
-→ ue_verify_asset
-→ 必要时 ue_rollback_patch DryRun → Commit
+→ ue_patch(action="verify")
+→ 必要时 ue_patch(action="rollback") DryRun → Commit
 ```
 
 对已打开、干净的非 Blueprint 单资产，`ue_asset_property(action="apply")` 修改 Editor 内存并进入 Undo 栈，但不保存；保存用 `ue_save_authorized_asset`，放弃用 `ue_asset_property(action="undo")` / `ue_asset_property(action="discard")`。
@@ -114,11 +114,11 @@ scripts\ue-agent.cmd memory export ^
 ## 7. 写入后的 Memory 记录
 
 ```text
-ue_apply_patch
-→ ue_verify_asset
+ue_patch(action="apply")
+→ ue_patch(action="verify")
 → ue_memory_write(**)   # 原样传入 memoryTaskEvidence.arguments
 ```
 
-只在 `ue_verify_asset.verified=true` 且返回 `memoryTaskEvidence` 时记录成功 Task，并原样使用 `memoryTaskEvidence.arguments`。Rollback Commit 返回 `restored=true` 和 `memoryTaskEvidence` 时同样记录，outcome 为 `rolledBack`；不要把 rollback Dry Run 记录成终态。
+只在 `ue_patch(action="verify").verified=true` 且返回 `memoryTaskEvidence` 时记录成功 Task，并原样使用 `memoryTaskEvidence.arguments`。Rollback Commit 返回 `restored=true` 和 `memoryTaskEvidence` 时同样记录，outcome 为 `rolledBack`；不要把 rollback Dry Run 记录成终态。
 
 能读取某类数据，不代表支持对应写入；完整能力边界与不支持列表见 [能力状态](PROJECT_STATUS.md)。

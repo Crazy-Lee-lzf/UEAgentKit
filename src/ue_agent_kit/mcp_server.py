@@ -2239,12 +2239,16 @@ def create_mcp_server(
                 ),
             )
     if workflow_service is not None:
+        # Shared sink: ue_change_set reaches the checkpoint tools that the
+        # workflow registrar owns.
+        consolidated_handlers: dict[str, Any] = {}
         register_workflow_tools(
             server=registration_server,
             workflow_service=workflow_service,
             read_annotations=read_annotations,
             tool_annotations_type=ToolAnnotations,
             error_response=_error_response,
+            handler_sink=consolidated_handlers,
         )
         register_change_set_tools(
             server=registration_server,
@@ -2252,6 +2256,7 @@ def create_mcp_server(
             read_annotations=read_annotations,
             tool_annotations_type=ToolAnnotations,
             error_response=_error_response,
+            handler_sink=consolidated_handlers,
         )
 
     return server

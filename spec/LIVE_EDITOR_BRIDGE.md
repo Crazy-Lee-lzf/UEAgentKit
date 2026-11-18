@@ -518,7 +518,7 @@ Immutable Index   当前 MCP 会话冻结的 SQLite Snapshot
 - Live Tool 结果不清除或覆盖 SQLite/Revision Export 的 stale 状态。
 - 写入 Plan 仍必须通过现有三源磁盘新鲜度门禁。
 - Live Read 只观察已有状态。普通 Live Action 可以执行已注册的资产导航、Blueprint 编译和官方 Data Validation。`ue_asset_property(action="apply")` 是独立的 Plan/Policy/Revision 约束内存写入，只标记 Dirty 并记录 Undo；所有 Live 路径都不能自动保存、运行 Console/Python/Shell、接受任意 UObject Method 或改变 SQLite/Revision Export。
-- `ue_refresh_asset_index` 属于固定项目工作流而非 Live 只读 Tool；启用 Live Bridge 时，它会先通过 `ue_inspect_asset_live` 拒绝 Dirty 目标，再构建配对 Snapshot Generation。
+- `ue_patch(action="refresh_index")` 属于固定项目工作流而非 Live 只读 Tool；启用 Live Bridge 时，它会先通过 `ue_inspect_asset_live` 拒绝 Dirty 目标，再构建配对 Snapshot Generation。
 
 ## 稳定错误码
 

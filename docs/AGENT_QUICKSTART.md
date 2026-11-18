@@ -65,12 +65,12 @@ SQLite 是保存时的快照；Live Editor 是当前内存。`ue_get_asset` 如�
 **默认不写。** 仅在用户明确要求、服务端已开 workflow 门禁、目标受 Write Policy 覆盖、Revision / Dirty / 身份检查通过时执行：
 
 ```text
-ue_plan_patch
-→ ue_dry_run_patch
+ue_patch(action="plan")
+→ ue_patch(action="dry_run")
 → 向用户展示目标资产、Diff、风险，取得明确授权
-→ ue_apply_patch（一次性 Receipt / 精确确认）
+→ ue_patch(action="apply")（一次性 Receipt / 精确确认）
 → 显式 Save（如需要）
-→ ue_verify_asset（独立验证）
+→ ue_patch(action="verify")（独立验证）
 → 返回已保存/已验证/失败项
 ```
 

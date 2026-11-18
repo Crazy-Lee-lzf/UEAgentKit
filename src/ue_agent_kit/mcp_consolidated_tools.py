@@ -1244,9 +1244,216 @@ def register_live_write_tool(
             return error_response("ue_live_write", exc, read_only=False)
 
 
+CHANGE_SET_ACTIONS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "create": ("ue_create_change_set", ("title", "task_id")),
+    "get": ("ue_get_change_set", ("change_set_id",)),
+    "save_checkpoint": (
+        "ue_save_change_set_checkpoint",
+        ("batch_execution_id", "mode", "confirmation"),
+    ),
+    "verify_checkpoint": (
+        "ue_verify_change_set_checkpoint",
+        ("checkpoint_set_id",),
+    ),
+}
+
+CHANGE_SET_REQUIRED: dict[str, tuple[str, ...]] = {
+    "create": (),
+    "get": ("change_set_id",),
+    "save_checkpoint": ("batch_execution_id", "mode"),
+    "verify_checkpoint": ("checkpoint_set_id",),
+}
+
+
+def _change_set_call(raw: dict[str, Any], action: str) -> tuple[str, dict[str, Any]]:
+    if action not in CHANGE_SET_ACTIONS:
+        raise ValueError(
+            f"ue_change_set: unknown action {action!r}; expected one of "
+            f"{sorted(CHANGE_SET_ACTIONS)}."
+        )
+    for required in CHANGE_SET_REQUIRED.get(action, ()):
+        if raw.get(required) is None:
+            raise ValueError(f"ue_change_set(action={action!r}) needs {required}.")
+    handler, accepted = CHANGE_SET_ACTIONS[action]
+    params = {name: raw[name] for name in accepted if raw.get(name) is not None}
+    return handler, params
+
+
+def register_change_set_tool(
+    *,
+    server: Any,
+    handlers: dict[str, Any],
+    planning_annotations: Any,
+    error_response: Any,
+) -> None:
+    """Register ``ue_change_set`` in front of create/get and the checkpoint pair.
+
+    The checkpoint handlers come from the workflow registrar through the shared
+    handler sink, so the facade can reach both modules' implementations.
+    """
+
+    @server.tool(annotations=planning_annotations)
+    def ue_change_set(
+        action: str,
+        title: str | None = None,
+        task_id: str | None = None,
+        change_set_id: str | None = None,
+        batch_execution_id: str | None = None,
+        mode: str | None = None,
+        confirmation: str | None = None,
+        checkpoint_set_id: str | None = None,
+    ) -> dict[str, Any]:
+        """One Change Set entry point: create, get, save_checkpoint, verify_checkpoint."""
+
+        try:
+            handler_name, params = _change_set_call(locals(), action)
+            return handlers[handler_name](**params)
+        except (TypeError, ValueError, RuntimeError) as exc:
+            return error_response("ue_change_set", exc, read_only=False)
+
+
+PATCH_ACTIONS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "plan": (
+        "ue_plan_patch",
+        ("asset_path", "operation", "target", "value", "description"),
+    ),
+    "dry_run": ("ue_dry_run_patch", ("plan_id",)),
+    "apply": (
+        "ue_apply_patch",
+        ("plan_id", "dry_run_receipt", "confirmation", "change_set_id"),
+    ),
+    "verify": ("ue_verify_asset", ("apply_receipt", "change_set_id")),
+    "rollback": (
+        "ue_rollback_patch",
+        ("apply_receipt", "mode", "rollback_dry_run_receipt", "confirmation"),
+    ),
+    "state": ("ue_get_asset_state", ("asset_path",)),
+    "refresh_index": ("ue_refresh_asset_index", ("asset_path", "mode")),
+}
+
+PATCH_REQUIRED: dict[str, tuple[str, ...]] = {
+    "plan": ("asset_path", "operation"),
+    "dry_run": ("plan_id",),
+    "apply": ("plan_id", "dry_run_receipt", "confirmation"),
+    "verify": ("apply_receipt",),
+    "rollback": ("apply_receipt",),
+    "state": ("asset_path",),
+    "refresh_index": ("asset_path",),
+}
+
+
+def _patch_call(raw: dict[str, Any], action: str) -> tuple[str, dict[str, Any]]:
+    if action not in PATCH_ACTIONS:
+        raise ValueError(
+            f"ue_patch: unknown action {action!r}; expected one of "
+            f"{sorted(PATCH_ACTIONS)}."
+        )
+    for required in PATCH_REQUIRED.get(action, ()):
+        if raw.get(required) is None:
+            raise ValueError(f"ue_patch(action={action!r}) needs {required}.")
+    handler, accepted = PATCH_ACTIONS[action]
+    params = {name: raw[name] for name in accepted if raw.get(name) is not None}
+    return handler, params
+
+
+def register_patch_tool(
+    *,
+    server: Any,
+    handlers: dict[str, Any],
+    annotations: Any,
+    error_response: Any,
+) -> None:
+    """Register ``ue_patch`` in front of plan/dry_run/apply/verify/rollback plus state helpers.
+
+    The caller passes the destructive annotations: apply, rollback and index
+    refresh can change disk state.
+    """
+
+    @server.tool(annotations=annotations)
+    def ue_patch(
+        action: str,
+        asset_path: str | None = None,
+        operation: str | None = None,
+        target: dict[str, Any] | None = None,
+        value: Any = None,
+        description: str | None = None,
+        plan_id: str | None = None,
+        dry_run_receipt: str | None = None,
+        confirmation: str | None = None,
+        change_set_id: str | None = None,
+        apply_receipt: str | None = None,
+        mode: str | None = None,
+        rollback_dry_run_receipt: str | None = None,
+    ) -> dict[str, Any]:
+        """One patch entry point: plan, dry_run, apply, verify, rollback, state, refresh_index."""
+
+        try:
+            handler_name, params = _patch_call(locals(), action)
+            return handlers[handler_name](**params)
+        except (TypeError, ValueError, RuntimeError) as exc:
+            return error_response("ue_patch", exc, read_only=False)
+
+
+BLUEPRINT_SESSION_ACTIONS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "begin": ("ue_begin_blueprint_edit_session", ("asset_path", "graph_guid", "experimental")),
+    "end": ("ue_end_blueprint_edit_session", ("edit_session_token", "mode")),
+}
+
+BLUEPRINT_SESSION_REQUIRED: dict[str, tuple[str, ...]] = {
+    "begin": ("asset_path", "graph_guid"),
+    "end": ("edit_session_token",),
+}
+
+
+def register_blueprint_session_tool(
+    *,
+    server: Any,
+    handlers: dict[str, Any],
+    annotations: Any,
+    error_response: Any,
+) -> None:
+    """Register ``ue_blueprint_edit_session`` over the begin/end pair."""
+
+    @server.tool(annotations=annotations)
+    def ue_blueprint_edit_session(
+        action: str,
+        asset_path: str | None = None,
+        graph_guid: str | None = None,
+        experimental: bool | None = None,
+        edit_session_token: str | None = None,
+        mode: str | None = None,
+    ) -> dict[str, Any]:
+        """One Blueprint edit-session entry point: begin (starts a session) or end (keep/rollback)."""
+
+        try:
+            if action not in BLUEPRINT_SESSION_ACTIONS:
+                raise ValueError(
+                    f"ue_blueprint_edit_session: unknown action {action!r}; expected one of "
+                    f"{sorted(BLUEPRINT_SESSION_ACTIONS)}."
+                )
+            for required in BLUEPRINT_SESSION_REQUIRED.get(action, ()):
+                if locals().get(required) is None:
+                    raise ValueError(
+                        f"ue_blueprint_edit_session(action={action!r}) needs {required}."
+                    )
+            handler, accepted = BLUEPRINT_SESSION_ACTIONS[action]
+            params = {
+                name: locals()[name]
+                for name in accepted
+                if locals().get(name) is not None
+            }
+            return handlers[handler](**params)
+        except (TypeError, ValueError, RuntimeError) as exc:
+            return error_response("ue_blueprint_edit_session", exc, read_only=False)
+
+
 __all__ = [
     "ASSET_PROPERTY_ACTIONS",
     "ASSET_PROPERTY_REQUIRED",
+    "CHANGE_SET_ACTIONS",
+    "CHANGE_SET_REQUIRED",
+    "BLUEPRINT_SESSION_ACTIONS",
+    "BLUEPRINT_SESSION_REQUIRED",
     "DATATABLE_ACTIONS",
     "LIVE_WRITE_ACTIONS",
     "LIVE_WRITE_REQUIRED",
@@ -1256,6 +1463,8 @@ __all__ = [
     "MEMORY_WORK_ACTIONS",
     "MEMORY_WRITE_ACTIONS",
     "MEMORY_WRITE_REQUIRED",
+    "PATCH_ACTIONS",
+    "PATCH_REQUIRED",
     "PIE_ACTIONS",
     "RETARGET_ACTIONS",
     "RETARGET_REQUIRED",
@@ -1272,6 +1481,9 @@ __all__ = [
     "register_animation_retarget_tool",
     "register_animation_scale_fix_tool",
     "register_asset_property_tool",
+    "register_blueprint_session_tool",
+    "register_change_set_tool",
+    "register_patch_tool",
     "register_consolidated_tools",
     "register_datatable_tool",
     "register_live_write_tool",

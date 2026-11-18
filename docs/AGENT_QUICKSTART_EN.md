@@ -63,12 +63,12 @@ SQLite is a saved snapshot; the live Editor is current memory. When `ue_get_asse
 **Do not write by default.** Write only when the user asked for it, the workflow gate is enabled, the target is covered by the Write Policy, and revision/dirty/identity checks pass:
 
 ```text
-ue_plan_patch
-→ ue_dry_run_patch
+ue_patch(action="plan")
+→ ue_patch(action="dry_run")
 → show target asset, diff, and risk; obtain explicit authorization
-→ ue_apply_patch (one-time receipt / exact confirmation)
+→ ue_patch(action="apply") (one-time receipt / exact confirmation)
 → explicit Save when needed
-→ ue_verify_asset (independent verification)
+→ ue_patch(action="verify") (independent verification)
 → report saved / verified / failed items
 ```
 

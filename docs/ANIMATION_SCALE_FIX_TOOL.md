@@ -81,7 +81,7 @@ ue_asset_property(action="discard")
 
 ```text
 ue_save_authorized_asset
-→ ue_live_write(action="verify") / ue_verify_asset
+→ ue_live_write(action="verify") / ue_patch(action="verify")
 ```
 
 保存后的独立 Unreal 重载验证会比较：

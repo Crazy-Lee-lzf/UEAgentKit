@@ -1448,7 +1448,7 @@ class AgentWorkflowTests(unittest.TestCase):
         names = consolidated_tool_names_for_mode(
             live_editor_enabled=True, workflow_enabled=True
         )
-        self.assertEqual(len(names), 82)
+        self.assertEqual(len(names), 72)
         self.assertIn("ue_pie", names)
         self.assertIn("ue_datatable", names)
         self.assertNotIn("ue_get_pie_world_contexts", names)

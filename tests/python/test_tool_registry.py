@@ -132,6 +132,7 @@ EXPECTED_ALL_TOOLS = [
     "ue_add_datatable_row",
     "ue_remove_datatable_row",
     "ue_rename_datatable_row",
+    "ue_patch",
     "ue_plan_patch",
     "ue_live_write",
     "ue_plan_live_write_batch",
@@ -162,12 +163,14 @@ EXPECTED_ALL_TOOLS = [
     "ue_verify_live_write_checkpoint",
     "ue_get_asset_state",
     "ue_refresh_asset_index",
+    "ue_blueprint_edit_session",
     "ue_begin_blueprint_edit_session",
     "ue_end_blueprint_edit_session",
     "ue_move_blueprint_node",
     "ue_move_blueprint_nodes",
     "ue_save_authorized_asset",
     "ue_rollback_patch",
+    "ue_change_set",
     "ue_create_change_set",
     "ue_get_change_set",
 ]
@@ -182,7 +185,7 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertEqual(len(tool_names_for_mode()), 15)
         self.assertEqual(len(tool_names_for_mode()), 15)
         self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 63)
-        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 81)
+        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 84)
         self.assertEqual(
             tool_names_for_mode(memory_enabled=True),
             QUERY_TOOL_NAMES + EXPECTED_MEMORY_TOOLS,
@@ -194,7 +197,7 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
-            97,
+            100,
         )
         self.assertEqual(
             len(
@@ -204,7 +207,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-            145,
+            148,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:

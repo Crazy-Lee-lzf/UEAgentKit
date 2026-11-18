@@ -2169,7 +2169,7 @@ class McpServerTests(unittest.TestCase):
             [tool.name for tool in tools],
             consolidated_tool_names_for_mode(workflow_enabled=True, memory_enabled=True),
         )
-        self.assertEqual(len(tools), 43)
+        self.assertEqual(len(tools), 33)
 
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
         memory_contract = capabilities["projectMemory"]
@@ -2185,7 +2185,12 @@ class McpServerTests(unittest.TestCase):
             "memoryTaskEvidence.arguments",
         )
 
-        _, verified = asyncio.run(server.call_tool("ue_verify_asset", {"apply_receipt": "apply_test"}))
+        _, verified = asyncio.run(
+            server.call_tool(
+                "ue_patch",
+                {"action": "verify", "apply_receipt": "apply_test"},
+            )
+        )
         evidence = verified["memoryTaskEvidence"]
         self.assertEqual(evidence["tool"], "ue_memory_write")
         arguments = evidence["arguments"]
@@ -2207,8 +2212,9 @@ class McpServerTests(unittest.TestCase):
 
         _, rolled_back = asyncio.run(
             server.call_tool(
-                "ue_rollback_patch",
+                "ue_patch",
                 {
+                    "action": "rollback",
                     "apply_receipt": "apply_test",
                     "mode": "Commit",
                     "rollback_dry_run_receipt": "rollback_dry_test",
@@ -2247,7 +2253,7 @@ class McpServerTests(unittest.TestCase):
             live_editor_enabled=True, workflow_enabled=True
         )
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 82)
+        self.assertEqual(len(tools), 72)
         for tool in tools:
             definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
             self.assertEqual(bool(tool.annotations.readOnlyHint), definition.read_only, tool.name)
@@ -2347,20 +2353,11 @@ class McpServerTests(unittest.TestCase):
         material_tool = next(tool for tool in tools if tool.name == "ue_set_material_parameter")
         self.assertIn("parameter_type", material_tool.inputSchema["properties"])
 
-        apply_tool = next(tool for tool in tools if tool.name == "ue_apply_patch")
-        self.assertTrue(apply_tool.annotations.destructiveHint)
-        self.assertFalse(apply_tool.annotations.readOnlyHint)
-        state_tool = next(tool for tool in tools if tool.name == "ue_get_asset_state")
-        self.assertEqual(set(state_tool.inputSchema["properties"]), {"asset_path"})
-        self.assertTrue(state_tool.annotations.readOnlyHint)
-        self.assertFalse(state_tool.annotations.destructiveHint)
-        refresh_tool = next(tool for tool in tools if tool.name == "ue_refresh_asset_index")
-        self.assertEqual(set(refresh_tool.inputSchema["properties"]), {"asset_path", "mode"})
-        self.assertFalse(refresh_tool.annotations.readOnlyHint)
-        self.assertFalse(refresh_tool.annotations.destructiveHint)
-        verify_tool = next(tool for tool in tools if tool.name == "ue_verify_asset")
-        self.assertFalse(verify_tool.annotations.readOnlyHint)
-        self.assertFalse(verify_tool.annotations.destructiveHint)
+        patch_tool = next(tool for tool in tools if tool.name == "ue_patch")
+        self.assertTrue(patch_tool.annotations.destructiveHint)
+        self.assertFalse(patch_tool.annotations.readOnlyHint)
+        for parameter in ("action", "asset_path", "plan_id", "apply_receipt", "mode"):
+            self.assertIn(parameter, patch_tool.inputSchema["properties"])
         verification_properties = {
             "change_set_id",
             "impact_depth",
@@ -2586,8 +2583,8 @@ class McpServerTests(unittest.TestCase):
 
         _, asset_state = asyncio.run(
             server.call_tool(
-                "ue_get_asset_state",
-                {"asset_path": "/Game/UEAgentKitWriteTests/Test.Test"},
+                "ue_patch",
+                {"action": "state", "asset_path": "/Game/UEAgentKitWriteTests/Test.Test"},
             )
         )
         self.assertEqual(asset_state["state"], "synchronized")
@@ -2595,8 +2592,8 @@ class McpServerTests(unittest.TestCase):
 
         _, refresh_preview = asyncio.run(
             server.call_tool(
-                "ue_refresh_asset_index",
-                {"asset_path": "/Game/UEAgentKitWriteTests/Test.Test", "mode": "Preview"},
+                "ue_patch",
+                {"action": "refresh_index", "asset_path": "/Game/UEAgentKitWriteTests/Test.Test", "mode": "Preview"},
             )
         )
         self.assertTrue(refresh_preview["ok"])
@@ -2618,8 +2615,9 @@ class McpServerTests(unittest.TestCase):
 
         _, planned = asyncio.run(
             server.call_tool(
-                "ue_plan_patch",
+                "ue_patch",
                 {
+                    "action": "plan",
                     "asset_path": ASSET_A,
                     "operation": "setBlueprintDescription",
                     "target": {},
@@ -2630,16 +2628,23 @@ class McpServerTests(unittest.TestCase):
         self.assertTrue(planned["ok"])
         _, applied = asyncio.run(
             server.call_tool(
-                "ue_apply_patch",
-                {"plan_id": "plan_test", "dry_run_receipt": "dry_test", "confirmation": "COMMIT plan_test"},
+                "ue_patch",
+                {
+                    "action": "apply",
+                    "plan_id": "plan_test",
+                    "dry_run_receipt": "dry_test",
+                    "confirmation": "COMMIT plan_test",
+                },
             )
         )
         self.assertEqual(applied["applyReceipt"], "apply_test")
 
-        _, created_set = asyncio.run(server.call_tool("ue_create_change_set", {}))
+        _, created_set = asyncio.run(server.call_tool("ue_change_set", {"action": "create"}))
         self.assertTrue(created_set["ok"])
         self.assertEqual(created_set["changeSetId"], "cs_fake")
-        _, read_set = asyncio.run(server.call_tool("ue_get_change_set", {"change_set_id": "cs_fake"}))
+        _, read_set = asyncio.run(server.call_tool(
+                "ue_change_set", {"action": "get", "change_set_id": "cs_fake"}
+            ))
         self.assertEqual(read_set["changeSetId"], "cs_fake")
         self.assertEqual(read_set["receiptCount"], 0)
 

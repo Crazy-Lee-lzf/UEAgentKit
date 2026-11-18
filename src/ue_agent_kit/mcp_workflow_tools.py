@@ -8,8 +8,10 @@ from .agent_workflow import MATERIAL_PARAMETER_OPERATIONS, PatchWorkflowService,
 from .mcp_consolidated_tools import (
     register_animation_scale_fix_tool,
     register_asset_property_tool,
+    register_blueprint_session_tool,
     register_datatable_tool,
     register_live_write_tool,
+    register_patch_tool,
 )
 from .animation_scale_fix_batch import AnimationScaleFixBatchService
 from .batch_recovery import BatchRecoveryService
@@ -118,6 +120,7 @@ def register_workflow_tools(
     read_annotations: Any,
     tool_annotations_type: Any,
     error_response: Any,
+    handler_sink: dict[str, Any] | None = None,
 ) -> None:
     planning_annotations = tool_annotations_type(
         readOnlyHint=False,
@@ -145,7 +148,7 @@ def register_workflow_tools(
 
     # A0/P1: consolidated facades dispatch to these exact callables.  handlers is
     # filled at the end of registration; facades resolve it lazily per call.
-    handlers: dict[str, Any] = {}
+    handlers: dict[str, Any] = handler_sink if handler_sink is not None else {}
 
     def _captured_error_response(
         tool_name: str,
@@ -733,6 +736,15 @@ def register_workflow_tools(
         error_response=error_response,
     )
 
+    # A0/P2: one tool replaces plan/dry_run/apply/verify/rollback plus the
+    # asset-state helpers.
+    register_patch_tool(
+        server=server,
+        handlers=handlers,
+        annotations=destructive_annotations,
+        error_response=error_response,
+    )
+
     @server.tool(annotations=planning_annotations)
     def ue_plan_patch(
         asset_path: str,
@@ -968,6 +980,14 @@ def register_workflow_tools(
             return workflow_service.refresh_asset_index(asset_path, mode=mode)
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_refresh_asset_index", exc, read_only=False)
+
+    # A0/P2: one tool replaces the begin/end edit-session pair.
+    register_blueprint_session_tool(
+        server=server,
+        handlers=handlers,
+        annotations=destructive_annotations,
+        error_response=error_response,
+    )
 
     @server.tool(annotations=destructive_annotations)
     def ue_begin_blueprint_edit_session(

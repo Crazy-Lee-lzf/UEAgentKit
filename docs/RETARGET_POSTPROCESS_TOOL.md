@@ -131,7 +131,7 @@ Retarget Batch Complete
 → paired Revision Export + SQLite Refresh (ue_animation_retarget(action="refresh_postprocess_index") Preview/Apply)
 → MCP Restart
 → Reopen persisted Plan (ue_animation_retarget(action="reopen_postprocess"))
-→ Revalidate against fresh Index Revision (ue_get_asset_state / re-audit)
+→ Revalidate against fresh Index Revision (ue_patch(action="state") / re-audit)
 → convert eligible AnimSequence suggestions to existing P2 Batch Plan (ue_animation_scale_fix(action="plan_batch"))
 ```
 
