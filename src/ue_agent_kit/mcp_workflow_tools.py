@@ -5,6 +5,7 @@ import sqlite3
 from typing import Any, Literal
 
 from .agent_workflow import MATERIAL_PARAMETER_OPERATIONS, PatchWorkflowService, WorkflowError
+from .mcp_consolidated_tools import register_datatable_tool
 from .animation_scale_fix_batch import AnimationScaleFixBatchService
 from .batch_recovery import BatchRecoveryService
 from .bounded_batch import BoundedBatchService
@@ -699,115 +700,13 @@ def register_workflow_tools(
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_set_material_parameter", exc, read_only=False)
 
-    @server.tool(annotations=planning_annotations)
-    def ue_set_datatable_cell(
-        asset_path: str,
-        row_name: str,
-        field_name: str,
-        value: Any,
-        mode: Literal["Plan", "DryRun"] = "Plan",
-        description: str = "",
-    ) -> dict[str, Any]:
-        """Plan or Dry Run one authorized existing DataTable row field change."""
-        try:
-            return _run_high_level_change(
-                tool_name="ue_set_datatable_cell",
-                mode=mode,
-                asset_path=asset_path,
-                operation="setDataTableCell",
-                target={"rowName": row_name, "fieldName": field_name},
-                value=value,
-                description=description,
-            )
-        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-            return error_response("ue_set_datatable_cell", exc, read_only=False)
-
-    @server.tool(annotations=planning_annotations)
-    def ue_set_datatable_row_fields(
-        asset_path: str,
-        row_name: str,
-        values: dict[str, Any],
-        mode: Literal["Plan", "DryRun"] = "Plan",
-        description: str = "",
-    ) -> dict[str, Any]:
-        """Plan or Dry Run one atomic authorized update to fields in an existing DataTable row."""
-        try:
-            return _run_high_level_change(
-                tool_name="ue_set_datatable_row_fields",
-                mode=mode,
-                asset_path=asset_path,
-                operation="setDataTableRowFields",
-                target={"rowName": row_name},
-                value=values,
-                description=description,
-            )
-        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-            return error_response("ue_set_datatable_row_fields", exc, read_only=False)
-
-    @server.tool(annotations=planning_annotations)
-    def ue_add_datatable_row(
-        asset_path: str,
-        row_name: str,
-        values: dict[str, Any] | None = None,
-        mode: Literal["Plan", "DryRun"] = "Plan",
-        description: str = "",
-    ) -> dict[str, Any]:
-        """Plan or Dry Run one authorized DataTable row creation."""
-        try:
-            return _run_high_level_change(
-                tool_name="ue_add_datatable_row",
-                mode=mode,
-                asset_path=asset_path,
-                operation="addDataTableRow",
-                target={"rowName": row_name},
-                value=values or {},
-                description=description,
-            )
-        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-            return error_response("ue_add_datatable_row", exc, read_only=False)
-
-    @server.tool(annotations=planning_annotations)
-    def ue_remove_datatable_row(
-        asset_path: str,
-        row_name: str,
-        mode: Literal["Plan", "DryRun"] = "Plan",
-        description: str = "",
-    ) -> dict[str, Any]:
-        """Plan or Dry Run one authorized DataTable row removal."""
-        try:
-            return _run_high_level_change(
-                tool_name="ue_remove_datatable_row",
-                mode=mode,
-                asset_path=asset_path,
-                operation="removeDataTableRow",
-                target={"rowName": row_name},
-                value=True,
-                description=description,
-            )
-        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-            return error_response("ue_remove_datatable_row", exc, read_only=False)
-
-    @server.tool(annotations=planning_annotations)
-    def ue_rename_datatable_row(
-        asset_path: str,
-        row_name: str,
-        new_row_name: str,
-        mode: Literal["Plan", "DryRun"] = "Plan",
-        description: str = "",
-    ) -> dict[str, Any]:
-        """Plan or Dry Run one authorized DataTable row rename."""
-        try:
-            return _run_high_level_change(
-                tool_name="ue_rename_datatable_row",
-                mode=mode,
-                asset_path=asset_path,
-                operation="renameDataTableRow",
-                target={"rowName": row_name, "newRowName": new_row_name},
-                value=True,
-                description=description,
-            )
-        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-            return error_response("ue_rename_datatable_row", exc, read_only=False)
+    # A0/P1: one tool replaces the five per-verb DataTable row tools.
+    register_datatable_tool(
+        server=server,
+        workflow_service=workflow_service,
+        planning_annotations=planning_annotations,
+        error_response=error_response,
+    )
 
     @server.tool(annotations=planning_annotations)
     def ue_plan_patch(

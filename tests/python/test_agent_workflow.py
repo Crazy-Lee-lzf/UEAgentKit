@@ -29,7 +29,7 @@ from ue_agent_kit.agent_workflow import (  # noqa: E402
 from ue_agent_kit.change_sets import ChangeSetOperationRecord, MAX_CHANGE_SET_RECEIPTS  # noqa: E402
 from ue_agent_kit.editor_bridge import LiveEditorError  # noqa: E402
 from ue_agent_kit.memory_service import ProjectMemoryService  # noqa: E402
-from ue_agent_kit.tool_registry import tool_names_for_mode  # noqa: E402
+from ue_agent_kit.tool_registry import consolidated_tool_names_for_mode  # noqa: E402
 
 
 PROJECT = "我的项目"
@@ -1445,10 +1445,14 @@ class AgentWorkflowTests(unittest.TestCase):
         )
 
     def test_live_write_tool_count_and_names_include_verification_trust(self) -> None:
-        names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
-        self.assertEqual(len(names), 124)
-        self.assertIn("ue_get_pie_world_contexts", names)
-        self.assertIn("ue_inspect_pie_actor", names)
+        names = consolidated_tool_names_for_mode(
+            live_editor_enabled=True, workflow_enabled=True
+        )
+        self.assertEqual(len(names), 113)
+        self.assertIn("ue_pie", names)
+        self.assertIn("ue_datatable", names)
+        self.assertNotIn("ue_get_pie_world_contexts", names)
+        self.assertNotIn("ue_set_datatable_cell", names)
         self.assertIn("ue_analyze_change_impact", names)
         self.assertIn("ue_analyze_semantic_diff", names)
         self.assertIn("ue_build_verification_plan", names)

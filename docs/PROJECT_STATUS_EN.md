@@ -16,6 +16,7 @@ UE Agent Kit is a **project knowledge layer plus controlled mutation workflow** 
 
 - The MCP tool surface is bounded by `--tool-profile` (default `core` = 15 tools; `read` / `live` / `live-write` / `full` widen it). A profile is an upper bound: it never enables a group the run flags left off, and `ue_get_capabilities.toolProfile` reports it.
 - Read-only PIE reads go through one entry point, `ue_pie(action=...)` (`state` / `worlds` / `list_actors` / `inspect_actor` / `scalars` / `list_properties` / `read_properties`); the seven per-verb tools are no longer registered separately. Arguments and bridge payloads are unchanged; a successful result carries one extra `action` field echoing the requested action.
+- DataTable row writes go through one entry point, `ue_datatable(action=...)` (`set_cell` / `set_row_fields` / `add_row` / `remove_row` / `rename_row`); the five per-verb tools are no longer registered separately, with the same Plan/DryRun and Write Policy gates.
 
 ## Read capabilities
 

@@ -982,6 +982,27 @@ class McpServerTests(unittest.TestCase):
         self.assertFalse(capabilities["liveEditor"]["pieScalarInspection"]["available"])
 
     @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
+    def test_capabilities_match_registration_with_workflow_profile(self) -> None:
+        server = create_mcp_server(
+            self.database_path,
+            workflow_service=FakeWorkflowService(),
+            tool_profile="full",
+        )
+        names = [tool.name for tool in asyncio.run(server.list_tools())]
+        _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
+        self.assertEqual([entry["name"] for entry in capabilities["tools"]], names)
+        self.assertIn("ue_datatable", names)
+        for replaced in (
+            "ue_set_datatable_cell",
+            "ue_set_datatable_row_fields",
+            "ue_add_datatable_row",
+            "ue_remove_datatable_row",
+            "ue_rename_datatable_row",
+        ):
+            self.assertNotIn(replaced, names)
+            self.assertNotIn(replaced, [entry["name"] for entry in capabilities["tools"]])
+
+    @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
     def test_fastmcp_registers_read_only_status_and_query_tools(self) -> None:
         server = create_mcp_server(self.database_path)
         tools = asyncio.run(server.list_tools())
@@ -2099,9 +2120,9 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         self.assertEqual(
             [tool.name for tool in tools],
-            tool_names_for_mode(workflow_enabled=True, memory_enabled=True),
+            consolidated_tool_names_for_mode(workflow_enabled=True, memory_enabled=True),
         )
-        self.assertEqual(len(tools), 90)
+        self.assertEqual(len(tools), 86)
 
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
         memory_contract = capabilities["projectMemory"]
@@ -2177,7 +2198,7 @@ class McpServerTests(unittest.TestCase):
             live_editor_enabled=True, workflow_enabled=True
         )
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 117)
+        self.assertEqual(len(tools), 113)
         for tool in tools:
             definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
             self.assertEqual(bool(tool.annotations.readOnlyHint), definition.read_only, tool.name)
@@ -2252,7 +2273,7 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         self.assertEqual(
             [tool.name for tool in tools],
-            tool_names_for_mode(workflow_enabled=True),
+            consolidated_tool_names_for_mode(workflow_enabled=True),
         )
         forbidden = {
             "database",
@@ -2366,7 +2387,9 @@ class McpServerTests(unittest.TestCase):
         self.assertTrue(capabilities["highLevelChanges"]["available"])
         self.assertEqual(capabilities["highLevelChanges"]["defaultMode"], "Plan")
         self.assertFalse(capabilities["highLevelChanges"]["commitSupportedDirectly"])
-        self.assertEqual(len(capabilities["highLevelChanges"]["tools"]), 14)
+        self.assertEqual(len(capabilities["highLevelChanges"]["tools"]), 10)
+        self.assertIn("ue_datatable", capabilities["highLevelChanges"]["tools"])
+        self.assertNotIn("ue_set_datatable_cell", capabilities["highLevelChanges"]["tools"])
         self.assertTrue(capabilities["assetState"]["available"])
         self.assertEqual(
             capabilities["assetState"]["sources"],
@@ -2460,24 +2483,49 @@ class McpServerTests(unittest.TestCase):
                 "setMaterialInstanceScalarParameter",
             ),
             (
-                "ue_set_datatable_cell",
-                {"asset_path": GENERIC_ASSET, "row_name": "Default", "field_name": "Value", "value": 7},
+                "ue_datatable",
+                {
+                    "action": "set_cell",
+                    "asset_path": GENERIC_ASSET,
+                    "row_name": "Default",
+                    "field_name": "Value",
+                    "value": 7,
+                },
                 "setDataTableCell",
             ),
             (
-                "ue_set_datatable_row_fields",
-                {"asset_path": GENERIC_ASSET, "row_name": "Default", "values": {"Value": 7, "Enabled": True}},
+                "ue_datatable",
+                {
+                    "action": "set_row_fields",
+                    "asset_path": GENERIC_ASSET,
+                    "row_name": "Default",
+                    "values": {"Value": 7, "Enabled": True},
+                },
                 "setDataTableRowFields",
             ),
             (
-                "ue_add_datatable_row",
-                {"asset_path": GENERIC_ASSET, "row_name": "Added", "values": {"Value": 7}},
+                "ue_datatable",
+                {
+                    "action": "add_row",
+                    "asset_path": GENERIC_ASSET,
+                    "row_name": "Added",
+                    "values": {"Value": 7},
+                },
                 "addDataTableRow",
             ),
-            ("ue_remove_datatable_row", {"asset_path": GENERIC_ASSET, "row_name": "Default"}, "removeDataTableRow"),
             (
-                "ue_rename_datatable_row",
-                {"asset_path": GENERIC_ASSET, "row_name": "Default", "new_row_name": "Renamed"},
+                "ue_datatable",
+                {"action": "remove_row", "asset_path": GENERIC_ASSET, "row_name": "Default"},
+                "removeDataTableRow",
+            ),
+            (
+                "ue_datatable",
+                {
+                    "action": "rename_row",
+                    "asset_path": GENERIC_ASSET,
+                    "row_name": "Default",
+                    "new_row_name": "Renamed",
+                },
                 "renameDataTableRow",
             ),
         ]

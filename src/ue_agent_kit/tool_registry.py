@@ -202,6 +202,7 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_set_asset_reference_property", "workflow", "planning", high_level_change=True),
     ToolDefinition("ue_set_asset_structured_property", "workflow", "planning", high_level_change=True),
     ToolDefinition("ue_set_material_parameter", "workflow", "planning", high_level_change=True),
+    ToolDefinition("ue_datatable", "workflow", "planning", high_level_change=True),
     ToolDefinition("ue_set_datatable_cell", "workflow", "planning", high_level_change=True),
     ToolDefinition("ue_set_datatable_row_fields", "workflow", "planning", high_level_change=True),
     ToolDefinition("ue_add_datatable_row", "workflow", "planning", high_level_change=True),
@@ -257,6 +258,13 @@ TOOL_DEFINITIONS_BY_NAME = {definition.name: definition for definition in TOOL_R
 # on, the replaced names are never registered or advertised, so a client never
 # sees both.  Defined before the name lists below because they filter on it.
 CONSOLIDATED_REPLACED_TOOLS: dict[str, tuple[str, ...]] = {
+    "ue_datatable": (
+        "ue_set_datatable_cell",
+        "ue_set_datatable_row_fields",
+        "ue_add_datatable_row",
+        "ue_remove_datatable_row",
+        "ue_rename_datatable_row",
+    ),
     "ue_pie": (
         "ue_get_pie_state",
         "ue_get_pie_world_contexts",
@@ -289,7 +297,11 @@ WORKFLOW_TOOL_NAMES = [definition.name for definition in TOOL_REGISTRY if defini
 SOURCE_CONTROL_TOOL_NAMES = [
     definition.name for definition in TOOL_REGISTRY if definition.group == "source-control"
 ]
-HIGH_LEVEL_WRITE_TOOL_NAMES = [definition.name for definition in TOOL_REGISTRY if definition.high_level_change]
+HIGH_LEVEL_WRITE_TOOL_NAMES = [
+    definition.name
+    for definition in TOOL_REGISTRY
+    if definition.high_level_change and definition.name not in replaced_tool_names()
+]
 LIVE_EDITOR_METHODS = {
     definition.name: definition.live_method
     for definition in TOOL_REGISTRY

@@ -14,6 +14,7 @@ registered (see ``CONSOLIDATED_REPLACED_TOOLS``), so a client never sees both.
 
 from __future__ import annotations
 
+import sqlite3
 from typing import Any
 
 PIE_ACTIONS: dict[str, str] = {
@@ -390,8 +391,137 @@ def register_consolidated_tools(
             return error_response("ue_pie", exc, read_only=True)
 
 
+DATATABLE_ACTIONS: dict[str, str] = {
+    "set_cell": "setDataTableCell",
+    "set_row_fields": "setDataTableRowFields",
+    "add_row": "addDataTableRow",
+    "remove_row": "removeDataTableRow",
+    "rename_row": "renameDataTableRow",
+}
+
+_DATATABLE_ACTION_ALIASES = {
+    "cell": "set_cell",
+    "row_fields": "set_row_fields",
+    "add": "add_row",
+    "remove": "remove_row",
+    "rename": "rename_row",
+}
+
+
+def datatable_change(
+    action: str,
+    *,
+    row_name: str,
+    field_name: str = "",
+    value: Any = None,
+    values: dict[str, Any] | None = None,
+    new_row_name: str = "",
+) -> dict[str, Any]:
+    """The prepared-change kwargs one DataTable edit needs: operation, target, value.
+
+    This mirrors what the five per-verb tools sent to
+    ``workflow_service.prepare_high_level_change`` before they were consolidated.
+    """
+
+    if action == "set_cell":
+        if not field_name:
+            raise ValueError("ue_datatable(action='set_cell') needs field_name.")
+        if value is None:
+            raise ValueError("ue_datatable(action='set_cell') needs value.")
+        return {
+            "operation": "setDataTableCell",
+            "target": {"rowName": row_name, "fieldName": field_name},
+            "value": value,
+        }
+    if action == "set_row_fields":
+        if not values:
+            raise ValueError(
+                "ue_datatable(action='set_row_fields') needs a non-empty values object."
+            )
+        return {
+            "operation": "setDataTableRowFields",
+            "target": {"rowName": row_name},
+            "value": dict(values),
+        }
+    if action == "add_row":
+        return {
+            "operation": "addDataTableRow",
+            "target": {"rowName": row_name},
+            "value": dict(values or {}),
+        }
+    if action == "remove_row":
+        return {
+            "operation": "removeDataTableRow",
+            "target": {"rowName": row_name},
+            "value": True,
+        }
+    if not new_row_name:
+        raise ValueError("ue_datatable(action='rename_row') needs new_row_name.")
+    return {
+        "operation": "renameDataTableRow",
+        "target": {"rowName": row_name, "newRowName": new_row_name},
+        "value": True,
+    }
+
+
+def register_datatable_tool(
+    *,
+    server: Any,
+    workflow_service: Any,
+    planning_annotations: Any,
+    error_response: Any,
+) -> None:
+    """Register ``ue_datatable`` where the five per-verb tools used to sit.
+
+    It is registered from the workflow module so the client-visible order keeps
+    following TOOL_REGISTRY.
+    """
+
+    @server.tool(annotations=planning_annotations)
+    def ue_datatable(
+        action: str,
+        asset_path: str,
+        row_name: str,
+        field_name: str = "",
+        value: Any = None,
+        values: dict[str, Any] | None = None,
+        new_row_name: str = "",
+        mode: str = "Plan",
+        description: str = "",
+    ) -> dict[str, Any]:
+        """One policy-gated DataTable row edit: set_cell, set_row_fields, add_row, remove_row, rename_row (Plan or DryRun)."""
+
+        try:
+            resolved = _resolve_action(
+                action, DATATABLE_ACTIONS, _DATATABLE_ACTION_ALIASES, "ue_datatable"
+            )
+            change = datatable_change(
+                resolved,
+                row_name=row_name,
+                field_name=field_name,
+                value=value,
+                values=values,
+                new_row_name=new_row_name,
+            )
+            result = workflow_service.prepare_high_level_change(
+                tool_name="ue_datatable",
+                mode=mode,
+                asset_path=asset_path,
+                description=description,
+                **change,
+            )
+            if isinstance(result, dict):
+                result = dict(result)
+                result.setdefault("action", resolved)
+            return result
+        except (FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+            return error_response("ue_datatable", exc, read_only=False)
+
+
 __all__ = [
+    "DATATABLE_ACTIONS",
     "PIE_ACTIONS",
+    "datatable_change",
     "pie_inspect_actor_params",
     "pie_list_actors_params",
     "pie_list_object_properties_params",
@@ -400,4 +530,5 @@ __all__ = [
     "pie_state_params",
     "pie_world_contexts_params",
     "register_consolidated_tools",
+    "register_datatable_tool",
 ]
