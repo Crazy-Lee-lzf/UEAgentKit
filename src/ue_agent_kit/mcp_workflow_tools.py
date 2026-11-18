@@ -5,7 +5,7 @@ import sqlite3
 from typing import Any, Literal
 
 from .agent_workflow import MATERIAL_PARAMETER_OPERATIONS, PatchWorkflowService, WorkflowError
-from .mcp_consolidated_tools import register_datatable_tool
+from .mcp_consolidated_tools import register_animation_scale_fix_tool, register_datatable_tool
 from .animation_scale_fix_batch import AnimationScaleFixBatchService
 from .batch_recovery import BatchRecoveryService
 from .bounded_batch import BoundedBatchService
@@ -137,6 +137,10 @@ def register_workflow_tools(
     bounded_batch_service = BoundedBatchService(workflow_service)
     checkpoint_set_service = CheckpointSetService(workflow_service, bounded_batch_service)
     batch_recovery_service = BatchRecoveryService(workflow_service, bounded_batch_service, checkpoint_set_service)
+
+    # A0/P1: consolidated facades dispatch to these exact callables.  handlers is
+    # filled at the end of registration; facades resolve it lazily per call.
+    handlers: dict[str, Any] = {}
 
     def _captured_error_response(
         tool_name: str,
@@ -286,6 +290,14 @@ def register_workflow_tools(
             )
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_set_asset_property", exc, read_only=False)
+
+    # A0/P1: one tool replaces the nine animation-scale-fix tools.
+    register_animation_scale_fix_tool(
+        server=server,
+        handlers=handlers,
+        annotations=destructive_annotations,
+        error_response=error_response,
+    )
 
     @server.tool(annotations=planning_annotations)
     def ue_plan_animation_scale_fix(
@@ -1271,3 +1283,13 @@ def register_workflow_tools(
             )
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_rollback_patch", exc, read_only=mode == "DryRun")
+
+    # Every per-verb tool above is a local callable; the facades dispatch to
+    # these exact objects, including ones a profile kept out of registration.
+    handlers.update(
+        {
+            name: value
+            for name, value in list(locals().items())
+            if name.startswith("ue_") and callable(value)
+        }
+    )

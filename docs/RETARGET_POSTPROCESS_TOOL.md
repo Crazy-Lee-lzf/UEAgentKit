@@ -132,7 +132,7 @@ Retarget Batch Complete
 → MCP Restart
 → Reopen persisted Plan (ue_reopen_animation_retarget_postprocess)
 → Revalidate against fresh Index Revision (ue_get_asset_state / re-audit)
-→ convert eligible AnimSequence suggestions to existing P2 Batch Plan (ue_plan_animation_scale_fix_batch)
+→ convert eligible AnimSequence suggestions to existing P2 Batch Plan (ue_animation_scale_fix(action="plan_batch"))
 ```
 
 ### 7.1 Retarget Output Index Refresh

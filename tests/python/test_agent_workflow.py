@@ -1448,7 +1448,7 @@ class AgentWorkflowTests(unittest.TestCase):
         names = consolidated_tool_names_for_mode(
             live_editor_enabled=True, workflow_enabled=True
         )
-        self.assertEqual(len(names), 113)
+        self.assertEqual(len(names), 105)
         self.assertIn("ue_pie", names)
         self.assertIn("ue_datatable", names)
         self.assertNotIn("ue_get_pie_world_contexts", names)
@@ -1464,7 +1464,7 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertIn("ue_discard_asset_property_live", names)
         self.assertIn("ue_verify_live_write", names)
         self.assertIn("ue_verify_live_write_checkpoint", names)
-        self.assertIn("ue_refresh_animation_scale_fix_batch_index", names)
+        self.assertIn("ue_animation_scale_fix", names)
         self.assertIn("ue_start_animation_retarget_postprocess", names)
         self.assertIn("ue_get_animation_retarget_postprocess", names)
         self.assertIn("ue_plan_animation_retarget_postprocess", names)

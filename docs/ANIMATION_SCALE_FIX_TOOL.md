@@ -26,7 +26,7 @@ UE 最终 Component Space Pose
 ### 2.1 创建修复计划
 
 ```text
-ue_plan_animation_scale_fix
+ue_animation_scale_fix(action="plan")
 ```
 
 主要参数：

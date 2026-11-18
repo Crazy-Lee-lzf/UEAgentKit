@@ -783,6 +783,156 @@ def register_memory_write_tool(
             return error_response("ue_memory_write", exc, read_only=False)
 
 
+SCALE_FIX_ACTIONS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "plan": (
+        "ue_plan_animation_scale_fix",
+        (
+            "asset_path",
+            "root_bone",
+            "expected_final_scale",
+            "force_root_lock",
+            "enable_root_motion",
+            "use_normalized_root_motion_scale",
+            "root_motion_root_lock",
+            "root_track_scale_mode",
+            "uniform_scale",
+            "final_scale_tolerance",
+            "description",
+        ),
+    ),
+    "plan_batch": (
+        "ue_plan_animation_scale_fix_batch",
+        (
+            "audit_task_id",
+            "audit_report_id",
+            "asset_paths",
+            "expected_final_scale_overrides",
+            "final_scale_tolerance",
+            "description",
+        ),
+    ),
+    "get": ("ue_get_animation_scale_fix_batch", ("batch_plan_id",)),
+    "apply": (
+        "ue_apply_animation_scale_fix_batch_live",
+        ("batch_plan_id", "confirmation", "batch_apply_receipt", "max_assets"),
+    ),
+    "save": (
+        "ue_save_animation_scale_fix_batch",
+        ("batch_plan_id", "confirmation", "batch_save_receipt", "max_assets"),
+    ),
+    "verify": (
+        "ue_verify_animation_scale_fix_batch",
+        ("batch_plan_id", "batch_verify_receipt", "max_assets"),
+    ),
+    "refresh_index": (
+        "ue_refresh_animation_scale_fix_batch_index",
+        (
+            "batch_plan_id",
+            "mode",
+            "confirmation",
+            "batch_index_refresh_receipt",
+            "max_assets",
+        ),
+    ),
+    "rollback": (
+        "ue_rollback_animation_scale_fix_batch",
+        ("batch_plan_id", "mode", "confirmation", "batch_rollback_receipt", "max_assets"),
+    ),
+    "undo": (
+        "ue_undo_animation_scale_fix_batch",
+        ("batch_plan_id", "confirmation", "batch_undo_receipt", "max_assets"),
+    ),
+}
+
+SCALE_FIX_REQUIRED: dict[str, tuple[str, ...]] = {
+    "plan": ("asset_path", "root_bone", "expected_final_scale"),
+    "plan_batch": ("audit_task_id", "audit_report_id", "asset_paths"),
+    "get": ("batch_plan_id",),
+    "apply": ("batch_plan_id",),
+    "save": ("batch_plan_id",),
+    "verify": ("batch_plan_id",),
+    "refresh_index": ("batch_plan_id",),
+    "rollback": ("batch_plan_id",),
+    "undo": ("batch_plan_id",),
+}
+
+SCALE_FIX_ALIASES = {
+    "refresh": "refresh_index",
+    "refresh_index_batch": "refresh_index",
+    "plan_batch_audit": "plan_batch",
+}
+
+
+def _scale_fix_call(
+    raw: dict[str, Any], action: str
+) -> tuple[str, dict[str, Any]]:
+    resolved = SCALE_FIX_ALIASES.get(action, action)
+    if resolved not in SCALE_FIX_ACTIONS:
+        raise ValueError(
+            f"ue_animation_scale_fix: unknown action {action!r}; expected one of "
+            f"{sorted(SCALE_FIX_ACTIONS)}."
+        )
+    for required in SCALE_FIX_REQUIRED.get(resolved, ()):
+        if raw.get(required) is None:
+            raise ValueError(
+                f"ue_animation_scale_fix(action={resolved!r}) needs {required}."
+            )
+    handler, accepted = SCALE_FIX_ACTIONS[resolved]
+    params = {name: raw[name] for name in accepted if raw.get(name) is not None}
+    return handler, params
+
+
+def register_animation_scale_fix_tool(
+    *,
+    server: Any,
+    handlers: dict[str, Any],
+    annotations: Any,
+    error_response: Any,
+) -> None:
+    """Register ``ue_animation_scale_fix`` in front of the nine scale-fix tools.
+
+    The caller passes the destructive annotations: the family can apply, save,
+    roll back and undo, so a plain planning hint would understate it.
+    """
+
+    @server.tool(annotations=annotations)
+    def ue_animation_scale_fix(
+        action: str,
+        asset_path: str | None = None,
+        root_bone: str | None = None,
+        expected_final_scale: float | None = None,
+        force_root_lock: bool | None = None,
+        enable_root_motion: bool | None = None,
+        use_normalized_root_motion_scale: bool | None = None,
+        root_motion_root_lock: str | None = None,
+        root_track_scale_mode: str | None = None,
+        uniform_scale: float | None = None,
+        final_scale_tolerance: float | None = None,
+        description: str | None = None,
+        audit_task_id: str | None = None,
+        audit_report_id: str | None = None,
+        asset_paths: list[str] | None = None,
+        expected_final_scale_overrides: dict[str, float] | None = None,
+        batch_plan_id: str | None = None,
+        confirmation: str | None = None,
+        max_assets: int | None = None,
+        batch_apply_receipt: str | None = None,
+        batch_save_receipt: str | None = None,
+        batch_verify_receipt: str | None = None,
+        batch_index_refresh_receipt: str | None = None,
+        batch_rollback_receipt: str | None = None,
+        batch_undo_receipt: str | None = None,
+        mode: str | None = None,
+    ) -> dict[str, Any]:
+        """One animation scale-fix entry point: plan, plan_batch, get, apply, save, verify, refresh_index, rollback, undo."""
+
+        try:
+            handler_name, params = _scale_fix_call(locals(), action)
+            return handlers[handler_name](**params)
+        except (TypeError, ValueError, RuntimeError) as exc:
+            return error_response("ue_animation_scale_fix", exc, read_only=False)
+
+
 __all__ = [
     "DATATABLE_ACTIONS",
     "MEMORY_KNOWLEDGE_ACTIONS",
@@ -792,6 +942,8 @@ __all__ = [
     "MEMORY_WRITE_ACTIONS",
     "MEMORY_WRITE_REQUIRED",
     "PIE_ACTIONS",
+    "SCALE_FIX_ACTIONS",
+    "SCALE_FIX_REQUIRED",
     "datatable_change",
     "pie_inspect_actor_params",
     "pie_list_actors_params",
@@ -800,6 +952,7 @@ __all__ = [
     "pie_scalars_params",
     "pie_state_params",
     "pie_world_contexts_params",
+    "register_animation_scale_fix_tool",
     "register_consolidated_tools",
     "register_datatable_tool",
     "register_memory_read_tool",

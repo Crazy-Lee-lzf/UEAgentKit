@@ -9,14 +9,16 @@ P1 已能把多个 AnimSequence 审计为 `normal`、`root-lock-candidate`、`ro
 当前工具：
 
 ```text
-ue_plan_animation_scale_fix_batch
-ue_get_animation_scale_fix_batch
-ue_apply_animation_scale_fix_batch_live
-ue_save_animation_scale_fix_batch
-ue_verify_animation_scale_fix_batch
-ue_refresh_animation_scale_fix_batch_index
-ue_rollback_animation_scale_fix_batch
-ue_undo_animation_scale_fix_batch
+ue_animation_scale_fix(action=...)
+  plan            单资产 plan
+  plan_batch      批量 plan
+  get             读取批量 Plan
+  apply           逐资产应用（receipt + confirmation）
+  save            逐资产保存
+  verify          独立重载验证
+  refresh_index   刷新索引
+  rollback        回滚
+  undo            Undo 撤销
 ```
 
 当前安全边界：
@@ -115,7 +117,7 @@ expectedFinalScale = explicit override
 Batch Planner 不创建新的多资产 Patch 格式。每个资产仍调用现有单资产：
 
 ```text
-ue_plan_animation_scale_fix
+ue_animation_scale_fix(action="plan")
 → setAnimationScaleFix
 → Policy validation
 → exact expectedRevision
@@ -164,7 +166,7 @@ Batch Plan 自身写到固定：
 WorkRoot/animation-scale-fix-batches/<batchPlanId>/plan.json
 ```
 
-并返回 `batchPlanDigest=sha256:...`。`ue_get_animation_scale_fix_batch` 会重新读取文件并核对 SHA 和内容；文件被修改后会报告 tamper，而不是继续使用。
+并返回 `batchPlanDigest=sha256:...`。`ue_animation_scale_fix(action="get")` 会重新读取文件并核对 SHA 和内容；文件被修改后会报告 tamper，而不是继续使用。
 
 ## 6. Bounded Live Apply / Undo
 
@@ -176,7 +178,7 @@ Batch Live Apply 仍复用现有单资产 `ue_apply_asset_property_live` / `ue_u
 LIVE APPLY BATCH <batchPlanId>
 ```
 
-服务创建一个现有 Change Set，并按 Batch Plan 顺序调用每个子 Plan。单次调用最多处理 8 个资产；若未完成，会返回 session-local `batchApplyReceipt`，后续调用只能携带该 receipt 继续。`ue_get_animation_scale_fix_batch` 只读 execution snapshot，不会在轮询时推进写入。
+服务创建一个现有 Change Set，并按 Batch Plan 顺序调用每个子 Plan。单次调用最多处理 8 个资产；若未完成，会返回 session-local `batchApplyReceipt`，后续调用只能携带该 receipt 继续。`ue_animation_scale_fix(action="get")` 只读 execution snapshot，不会在轮询时推进写入。
 
 每个 changed 资产保留自己的 `liveApplyReceipt`、`transactionId`、`editorSessionId` 和 Runtime Verification。单资产 `setAnimationScaleFix` 已在成功返回前完成 Final Component Pose Verify，Batch 层只汇总 `referenceLocalScale`、`finalEvaluationStatus`、`finalRootScale`，不重新实现比例验证。
 
@@ -220,11 +222,11 @@ SAVE BATCH <batchPlanId>
 
 ### Independent Verify
 
-`ue_verify_animation_scale_fix_batch` 每次最多验证 2 个已保存资产，并复用单资产 `ue_verify_live_write`。Batch 只在 `actualRevision` 与持久化预期值都通过独立重载验证后把子项标记为 `verified`。
+`ue_animation_scale_fix(action="verify")` 每次最多验证 2 个已保存资产，并复用单资产 `ue_verify_live_write`。Batch 只在 `actualRevision` 与持久化预期值都通过独立重载验证后把子项标记为 `verified`。
 
 ### 保留修改：Atomic Index Refresh
 
-`ue_refresh_animation_scale_fix_batch_index` 分两阶段：
+`ue_animation_scale_fix(action="refresh_index")` 分两阶段：
 
 ```text
 Preview / Prepare   max 2 assets per call

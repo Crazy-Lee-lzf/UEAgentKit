@@ -52,7 +52,7 @@ class ToolProfileRegistryTests(unittest.TestCase):
             memory_enabled=True,
             source_control_enabled=True,
         )
-        expected = {"core": 15, "read": 31, "live": 69, "live-write": 79, "full": 147}
+        expected = {"core": 15, "read": 31, "live": 69, "live-write": 79, "full": 148}
         for name, count in expected.items():
             self.assertEqual(
                 len(tool_names_for_profile(name, **everything)),
