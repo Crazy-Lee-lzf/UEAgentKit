@@ -367,11 +367,19 @@ def _capabilities_response(
         live_editor_enabled
         and (tool_profile is None or tool_profile_allows(tool_profile, "ue_pie"))
     )
-    # The memory hand-off only exists when the write facade is callable.
+    # The memory hand-off only exists when both ends are callable: the workflow
+    # tools that produce the evidence and the facade that records it.
     memory_handoff = bool(
         memory_enabled
         and write_tools_enabled
-        and (tool_profile is None or tool_profile_allows(tool_profile, "ue_memory_write"))
+        and (
+            tool_profile is None
+            or (
+                tool_profile_allows(tool_profile, "ue_memory_write")
+                and tool_profile_allows(tool_profile, "ue_verify_asset")
+                and tool_profile_allows(tool_profile, "ue_rollback_patch")
+            )
+        )
     )
     experimental_registered = bool(live_editor_enabled and experimental_graph_layout_apply)
     observed_capabilities = (

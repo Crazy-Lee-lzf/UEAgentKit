@@ -1024,6 +1024,38 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(capabilities["projectMemory"]["workflowEvidenceTargetTool"], "")
 
     @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
+    def test_memory_handoff_claims_only_callable_ends(self) -> None:
+        memory_service = ProjectMemoryService(
+            database_path=self.temp_root / "handoff-memory.sqlite3",
+            project_key="测试项目",
+        )
+        # read keeps the facades but hides the workflow tools that produce the
+        # evidence, so the hand-off must not be claimed there.
+        read_server = create_mcp_server(
+            self.database_path,
+            workflow_service=FakeWorkflowService(),
+            memory_service=memory_service,
+            tool_profile="read",
+        )
+        _, read_capabilities = asyncio.run(read_server.call_tool("ue_get_capabilities", {}))
+        read_contract = read_capabilities["projectMemory"]
+        self.assertEqual(read_contract["tools"], ["ue_memory", "ue_memory_write"])
+        self.assertFalse(read_contract["workflowEvidenceHandoff"])
+        self.assertEqual(read_contract["workflowEvidenceSourceTools"], [])
+
+        full_server = create_mcp_server(
+            self.database_path,
+            workflow_service=FakeWorkflowService(),
+            memory_service=memory_service,
+            tool_profile="full",
+        )
+        _, full_capabilities = asyncio.run(full_server.call_tool("ue_get_capabilities", {}))
+        full_contract = full_capabilities["projectMemory"]
+        self.assertTrue(full_contract["workflowEvidenceHandoff"])
+        self.assertEqual(full_contract["workflowEvidenceTargetTool"], "ue_memory_write")
+        self.assertEqual(full_contract["workflowEvidenceTargetAction"], "record_task")
+
+    @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
     def test_fastmcp_registers_read_only_status_and_query_tools(self) -> None:
         server = create_mcp_server(self.database_path)
         tools = asyncio.run(server.list_tools())
