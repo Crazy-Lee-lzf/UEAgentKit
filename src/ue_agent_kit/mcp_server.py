@@ -937,18 +937,26 @@ def _capabilities_response(
             },
             "retargetPostprocess": {
                 "available": bool(live_editor_enabled and write_tools_enabled),
-                "startTool": "ue_start_animation_retarget_postprocess"
+                "startTool": "ue_animation_retarget"
                 if live_editor_enabled and write_tools_enabled
                 else "",
-                "statusTool": "ue_get_animation_retarget_postprocess"
+                "statusTool": "ue_animation_retarget"
                 if live_editor_enabled and write_tools_enabled
                 else "",
-                "planTool": "ue_plan_animation_retarget_postprocess"
+                "planTool": "ue_animation_retarget"
                 if live_editor_enabled and write_tools_enabled
                 else "",
-                "reopenTool": "ue_reopen_animation_retarget_postprocess"
+                "reopenTool": "ue_animation_retarget"
                 if live_editor_enabled and write_tools_enabled
                 else "",
+                "actions": {
+                    "start": "start_postprocess",
+                    "status": "get_postprocess",
+                    "plan": "plan_postprocess",
+                    "reopen": "reopen_postprocess",
+                }
+                if live_editor_enabled and write_tools_enabled
+                else {},
                 "source": "exact-completed-retarget-batch-outputs",
                 "acceptedRetargetStates": ["completed", "saved"],
                 "animSequenceAuditTool": "ue_diagnose_animation_scale",
@@ -1059,14 +1067,26 @@ def _capabilities_response(
         "animationScaleFixBatch": {
             "available": write_tools_enabled,
             "planningOnly": False,
-            "planTool": "ue_plan_animation_scale_fix_batch" if write_tools_enabled else "",
-            "getTool": "ue_get_animation_scale_fix_batch" if write_tools_enabled else "",
-            "applyTool": "ue_apply_animation_scale_fix_batch_live" if write_tools_enabled else "",
-            "saveTool": "ue_save_animation_scale_fix_batch" if write_tools_enabled else "",
-            "verifyTool": "ue_verify_animation_scale_fix_batch" if write_tools_enabled else "",
-            "indexRefreshTool": "ue_refresh_animation_scale_fix_batch_index" if write_tools_enabled else "",
-            "rollbackTool": "ue_rollback_animation_scale_fix_batch" if write_tools_enabled else "",
-            "undoTool": "ue_undo_animation_scale_fix_batch" if write_tools_enabled else "",
+            "planTool": "ue_animation_scale_fix" if write_tools_enabled else "",
+            "getTool": "ue_animation_scale_fix" if write_tools_enabled else "",
+            "applyTool": "ue_animation_scale_fix" if write_tools_enabled else "",
+            "saveTool": "ue_animation_scale_fix" if write_tools_enabled else "",
+            "verifyTool": "ue_animation_scale_fix" if write_tools_enabled else "",
+            "indexRefreshTool": "ue_animation_scale_fix" if write_tools_enabled else "",
+            "rollbackTool": "ue_animation_scale_fix" if write_tools_enabled else "",
+            "undoTool": "ue_animation_scale_fix" if write_tools_enabled else "",
+            "actions": {
+                "plan": "plan_batch",
+                "get": "get",
+                "apply": "apply",
+                "save": "save",
+                "verify": "verify",
+                "refreshIndex": "refresh_index",
+                "rollback": "rollback",
+                "undo": "undo",
+            }
+            if write_tools_enabled
+            else {},
             "sourceReportTool": "ue_export_animation_scale_audit_report",
             "maxAssets": MAX_BATCH_SCALE_FIX_ASSETS,
             "maxSessionPlans": MAX_BATCH_SCALE_FIX_PLANS,
