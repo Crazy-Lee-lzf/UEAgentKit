@@ -74,7 +74,7 @@ ue_plan_patch
 → 返回已保存/已验证/失败项
 ```
 
-对已在 Editor 中打开、干净的单个非 Blueprint 资产，也可使用 `ue_apply_asset_property_live` 修改内存值；它进入 Undo 栈并标记 Dirty，但**不保存**。保存必须另调 `ue_save_authorized_asset`；放弃用 `ue_undo_asset_property_live` / `ue_discard_asset_property_live`。
+对已在 Editor 中打开、干净的单个非 Blueprint 资产，也可使用 `ue_asset_property(action="apply")` 修改内存值；它进入 Undo 栈并标记 Dirty，但**不保存**。保存必须另调 `ue_save_authorized_asset`；放弃用 `ue_asset_property(action="undo")` / `ue_asset_property(action="discard")`。
 
 注意：
 

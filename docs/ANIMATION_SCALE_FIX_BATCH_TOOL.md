@@ -170,7 +170,7 @@ WorkRoot/animation-scale-fix-batches/<batchPlanId>/plan.json
 
 ## 6. Bounded Live Apply / Undo
 
-Batch Live Apply 仍复用现有单资产 `ue_apply_asset_property_live` / `ue_undo_asset_property_live`，不新增 UObject 写入实现。
+Batch Live Apply 仍复用现有单资产 `ue_asset_property(action="apply")` / `ue_asset_property(action="undo")`，不新增 UObject 写入实现。
 
 首次 Apply 必须精确确认：
 

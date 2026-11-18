@@ -187,6 +187,7 @@ TOOL_REGISTRY: tuple[ToolDefinition, ...] = (
     ToolDefinition("ue_set_blueprint_default", "workflow", "planning", high_level_change=True),
     ToolDefinition("ue_set_component_property", "workflow", "planning", high_level_change=True),
     ToolDefinition("ue_set_pin_default", "workflow", "planning", high_level_change=True),
+    ToolDefinition("ue_asset_property", "workflow", "destructive", high_level_change=True),
     ToolDefinition("ue_set_asset_property", "workflow", "planning", high_level_change=True),
     ToolDefinition("ue_animation_scale_fix", "workflow", "destructive", high_level_change=True),
     ToolDefinition("ue_plan_animation_scale_fix", "workflow", "planning", high_level_change=True),
@@ -267,6 +268,14 @@ CONSOLIDATED_REPLACED_TOOLS: dict[str, tuple[str, ...]] = {
         "ue_add_datatable_row",
         "ue_remove_datatable_row",
         "ue_rename_datatable_row",
+    ),
+    "ue_asset_property": (
+        "ue_set_asset_property",
+        "ue_set_asset_reference_property",
+        "ue_set_asset_structured_property",
+        "ue_apply_asset_property_live",
+        "ue_undo_asset_property_live",
+        "ue_discard_asset_property_live",
     ),
     "ue_animation_scale_fix": (
         "ue_plan_animation_scale_fix",

@@ -13,7 +13,7 @@
 | `read` | + memory | 17 | 需要 Project Memory 的只读会话 |
 | `live` | + live-read、realtime | **48** | 连 Editor 做只读诊断（PIE / 图 / 资产） |
 | `live-write` | + live-action | 58 | 需要受控写入（原子 patch、Niagara 参数） |
-| `full` | + workflow、source-control | 113 | 离线批处理 / 源控；仍需各自的开关 |
+| `full` | + workflow、source-control | 108 | 离线批处理 / 源控；仍需各自的开关 |
 
 ```powershell
 python scripts\ue-agent-mcp.py --enable-live-editor --tool-profile live ...
@@ -45,7 +45,7 @@ python scripts\ue-agent-mcp.py --enable-live-editor --tool-profile live ...
 |---|---|---|
 | 稳定 patch / Save / Verify | `ue_plan_patch`、`ue_dry_run_patch`、`ue_apply_patch`、`ue_verify_asset`、`ue_rollback_patch` | workflow 双门禁 + Write Policy |
 | 配置写入 | `ue_datatable`（DataTable 行：`set_cell` / `set_row_fields` / `add_row` / `remove_row` / `rename_row`）、`ue_set_asset_*`、`ue_set_material_parameter`、`ue_set_blueprint_default`、`ue_set_component_property`、`ue_set_pin_default` | workflow 双门禁 + Write Policy |
-| Live 单资产修改 | `ue_apply_asset_property_live`、`ue_undo_asset_property_live`、`ue_discard_asset_property_live`、`ue_save_authorized_asset` | workflow 双门禁 + Write Policy |
+| Live 单资产修改 | `ue_asset_property(action="apply")`、`ue_asset_property(action="undo")`、`ue_asset_property(action="discard")`、`ue_save_authorized_asset` | workflow 双门禁 + Write Policy |
 | Niagara Module Input | `ue_set_niagara_module_input` | 仅 Local 常量；一次修改一次 Undo；不自动 Save |
 | 位置批量移动 / edit session | `ue_move_blueprint_node`、`ue_move_blueprint_nodes`、`ue_begin_blueprint_edit_session`、`ue_end_blueprint_edit_session` | workflow 双门禁 |
 | 实验 Blueprint patch | `ue_preview_blueprint_patch_experimental`、`ue_apply_blueprint_patch_experimental`、`ue_save_blueprint_patch_experimental` | `--enable-experimental-graphpatch-edit` + ini |

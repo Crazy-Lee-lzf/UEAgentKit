@@ -18,7 +18,7 @@
 ```text
 ue_plan_additive_base_pose_fix_apply   （plan，workflow / planning，high_level_change）
   → operation = setAdditiveBasePoseFix   （C++ live-write）
-  → 应用走 ue_apply_asset_property_live
+  → 应用走 ue_asset_property(action="apply")
   → Undo / Discard / Save / Verify 复用现有 live-write 闭环
 ```
 
@@ -78,7 +78,7 @@ ue_diagnose_additive_animation            → Base Pose 引用是否可用（分
 ue_evaluate_animation_with_base_pose      → 最终比例来自 Base Pose 还是 Delta（组合求值）
 ue_plan_additive_base_pose_fix            → 要修什么、能否自动推导（只读计划）
 ue_plan_additive_base_pose_fix_apply      → 按计划写入（本片，live-write）
-ue_apply_asset_property_live              → 实际应用 + 组合验证
+ue_asset_property(action="apply")              → 实际应用 + 组合验证
 （未来）复合资产重建                       → 不在范围，遵循「不处理 Composite 变更」约束
 ```
 

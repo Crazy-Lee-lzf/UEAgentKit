@@ -148,8 +148,12 @@ class WriteTimeoutSemanticsTests(unittest.TestCase):
             )
             _, payload = asyncio.run(
                 server.call_tool(
-                    "ue_apply_asset_property_live",
-                    {"plan_id": "plan_test", "confirmation": "APPLY plan_test"},
+                    "ue_asset_property",
+                    {
+                        "action": "apply",
+                        "plan_id": "plan_test",
+                        "confirmation": "APPLY plan_test",
+                    },
                 )
             )
         self.assertFalse(payload["ok"])

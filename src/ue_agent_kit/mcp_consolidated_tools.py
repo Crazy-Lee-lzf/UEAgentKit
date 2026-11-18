@@ -933,7 +933,99 @@ def register_animation_scale_fix_tool(
             return error_response("ue_animation_scale_fix", exc, read_only=False)
 
 
+ASSET_PROPERTY_ACTIONS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "set": (
+        "ue_set_asset_property",
+        ("asset_path", "property_path", "value", "mode", "description"),
+    ),
+    "set_reference": (
+        "ue_set_asset_reference_property",
+        ("asset_path", "property_path", "value", "mode", "description"),
+    ),
+    "set_structured": (
+        "ue_set_asset_structured_property",
+        ("asset_path", "property_path", "value", "mode", "description"),
+    ),
+    "apply": ("ue_apply_asset_property_live", ("plan_id", "confirmation", "change_set_id")),
+    "undo": (
+        "ue_undo_asset_property_live",
+        ("asset_path", "transaction_id", "editor_session_id", "change_set_id"),
+    ),
+    "discard": (
+        "ue_discard_asset_property_live",
+        ("asset_path", "transaction_id", "editor_session_id", "change_set_id"),
+    ),
+}
+
+ASSET_PROPERTY_REQUIRED: dict[str, tuple[str, ...]] = {
+    "set": ("asset_path", "property_path", "value"),
+    "set_reference": ("asset_path", "property_path"),
+    "set_structured": ("asset_path", "property_path", "value"),
+    "apply": ("plan_id", "confirmation"),
+    "undo": ("asset_path", "transaction_id", "editor_session_id"),
+    "discard": ("asset_path", "transaction_id", "editor_session_id"),
+}
+
+
+def _asset_property_call(
+    raw: dict[str, Any], action: str
+) -> tuple[str, dict[str, Any]]:
+    if action not in ASSET_PROPERTY_ACTIONS:
+        raise ValueError(
+            f"ue_asset_property: unknown action {action!r}; expected one of "
+            f"{sorted(ASSET_PROPERTY_ACTIONS)}."
+        )
+    for required in ASSET_PROPERTY_REQUIRED.get(action, ()):
+        if raw.get(required) is None:
+            raise ValueError(f"ue_asset_property(action={action!r}) needs {required}.")
+    handler, accepted = ASSET_PROPERTY_ACTIONS[action]
+    params = {
+        name: raw[name]
+        for name in accepted
+        if raw.get(name) is not None or (name == "value" and action == "set_reference")
+    }
+    return handler, params
+
+
+def register_asset_property_tool(
+    *,
+    server: Any,
+    handlers: dict[str, Any],
+    annotations: Any,
+    error_response: Any,
+) -> None:
+    """Register ``ue_asset_property`` in front of the six asset-property tools.
+
+    ``set_reference`` keeps an explicit ``value=None`` meaningful: it clears the
+    reference, so the facade forwards it instead of treating it as omitted.
+    """
+
+    @server.tool(annotations=annotations)
+    def ue_asset_property(
+        action: str,
+        asset_path: str | None = None,
+        property_path: str | None = None,
+        value: Any = None,
+        mode: str = "Plan",
+        description: str | None = None,
+        plan_id: str | None = None,
+        confirmation: str | None = None,
+        change_set_id: str | None = None,
+        transaction_id: str | None = None,
+        editor_session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """One asset-property entry point: set, set_reference, set_structured (Plan/DryRun), apply, undo, discard."""
+
+        try:
+            handler_name, params = _asset_property_call(locals(), action)
+            return handlers[handler_name](**params)
+        except (TypeError, ValueError, RuntimeError) as exc:
+            return error_response("ue_asset_property", exc, read_only=False)
+
+
 __all__ = [
+    "ASSET_PROPERTY_ACTIONS",
+    "ASSET_PROPERTY_REQUIRED",
     "DATATABLE_ACTIONS",
     "MEMORY_KNOWLEDGE_ACTIONS",
     "MEMORY_READ_ACTIONS",
@@ -953,6 +1045,7 @@ __all__ = [
     "pie_state_params",
     "pie_world_contexts_params",
     "register_animation_scale_fix_tool",
+    "register_asset_property_tool",
     "register_consolidated_tools",
     "register_datatable_tool",
     "register_memory_read_tool",

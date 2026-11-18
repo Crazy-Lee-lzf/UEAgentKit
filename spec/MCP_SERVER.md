@@ -79,13 +79,8 @@ BackupRoot
 ue_set_blueprint_default
 ue_set_component_property
 ue_set_pin_default
-ue_set_asset_property
-ue_apply_asset_property_live
-ue_undo_asset_property_live
-ue_discard_asset_property_live
+ue_asset_property
 ue_verify_live_write
-ue_set_asset_reference_property
-ue_set_asset_structured_property
 ue_set_material_parameter
 ue_datatable
 ue_plan_patch
@@ -384,9 +379,9 @@ Blueprint commandlet 使用已有 `setVariableDefault`，persisted/verified 均 
 ue_set_blueprint_default    variable_name + value
 ue_set_component_property   component_name + property_path + value
 ue_set_pin_default           graph_guid + node_guid + pin_name + value
-ue_set_asset_property        property_path + value
-ue_set_asset_reference_property  property_path + reference object or null
-ue_set_asset_structured_property   property_path + stable structured value
+ue_asset_property(action="set")        property_path + value
+ue_asset_property(action="set_reference")  property_path + reference object or null
+ue_asset_property(action="set_structured")   property_path + stable structured value
 ue_set_material_parameter    parameter_name + parameter_type + value
 ue_datatable action=set_cell         row_name + field_name + value
 ue_datatable action=set_row_fields   row_name + values
@@ -396,9 +391,9 @@ ue_datatable action=rename_row       row_name + new_row_name
 ```
 
 
-`ue_set_asset_reference_property` maps to `setAssetReferenceProperty` and accepts `null` or an exact `{referenceType, path}` object. It only targets Data Asset top-level Object/Class/Soft Object/Soft Class properties and does not broaden the scalar `ue_set_asset_property` contract.
+`ue_asset_property(action="set_reference")` maps to `setAssetReferenceProperty` and accepts `null` or an exact `{referenceType, path}` object. It only targets Data Asset top-level Object/Class/Soft Object/Soft Class properties and does not broaden the scalar `ue_asset_property(action="set")` contract.
 
-`ue_set_asset_structured_property` maps to `setAssetStructuredProperty`. It replaces one Data Asset top-level Struct/Array/Set/Map with the Reader-exported stable schema; Struct fields must be complete and Set/Map entries must be uniquely sorted by Canonical JSON. Commit remains a separate `ue_apply_patch` step.
+`ue_asset_property(action="set_structured")` maps to `setAssetStructuredProperty`. It replaces one Data Asset top-level Struct/Array/Set/Map with the Reader-exported stable schema; Struct fields must be complete and Set/Map entries must be uniquely sorted by Canonical JSON. Commit remains a separate `ue_apply_patch` step.
 
 `ue_datatable(action="add_row")` accepts an optional 0–32-field scalar object. `ue_datatable(action="remove_row")` and `ue_datatable(action="rename_row")` generate low-level Operations with the required explicit `value=true` acknowledgement. All three still follow Plan → Dry Run → one-time receipt → explicit Commit and the existing backup/verification/rollback gates.
 
@@ -411,9 +406,9 @@ mode=DryRun   自动执行 Plan -> Unreal Dry Run，返回 planId 与 dryRunRece
 
 高层 Tool **不提供 Commit 模式**。实际保存仍必须调用 `ue_apply_patch`，携带高层 Dry Run 返回的一次性 `dryRunReceipt`，并使用精确 `COMMIT <planId>` 确认。这样高层易用性不会绕过 Policy、Revision、新鲜度、备份、验证或 rollback 安全门。
 
-### `ue_apply_asset_property_live`
+### `ue_asset_property(action="apply")`
 
-该破坏性 Tool 属于 Workflow 写入 Tool；执行时必须同时启用 Live Editor、Workflow Write 与 Commit 三项启动能力。它不接受任意资产、属性或 Policy，而是只接受当前会话已有的高层 Plan 结果（`ue_set_asset_property(mode=Plan)`、`ue_set_asset_reference_property(mode=Plan)`、`ue_set_asset_structured_property(mode=Plan)` 或 `ue_set_material_parameter(mode=Plan)`）：
+该破坏性 Tool 属于 Workflow 写入 Tool；执行时必须同时启用 Live Editor、Workflow Write 与 Commit 三项启动能力。它不接受任意资产、属性或 Policy，而是只接受当前会话已有的高层 Plan 结果（`ue_asset_property(action="set")(mode=Plan)`、`ue_asset_property(action="set_reference")(mode=Plan)`、`ue_asset_property(action="set_structured")(mode=Plan)` 或 `ue_set_material_parameter(mode=Plan)`）：
 
 ```text
 plan_id      = 当前会话有效 Plan ID
@@ -424,7 +419,7 @@ confirmation = LIVE APPLY <planId>
 
 成功时在 Game Thread 中通过 `FScopedTransaction`、`Modify()`、`PostEditChangeProperty()`（材质参数复用 `UMaterialEditingLibrary` 刷新）和 `MarkPackageDirty()` 修改当前 Editor 内存，返回 `operation`、`valueKind`、Before/After、Dirty、Editor Session 与 Undo 事务证据；成功修改额外返回稳定 `transactionId`（已提交 Editor Undo Transaction 的 GUID）供显式 Undo/Discard 使用；引用写入还返回 `referenceType`、`referenceConstraintClass`、`referencePath` 与 `resolvedReferenceClass`，结构化写入还返回 `structuredKind`、`structuredSchema`、`diff` 与 `diffTruncated`，材质参数写入还返回 `parameterName`、`parameterType` 与 `parameterAssociation=Global`，DataTable 写入还返回 `rowName`、`dataTableKind`（`cell`/`row-fields`/`row-add`/`row-remove`/`row-rename`）与 `rowStructPath`（`setDataTableCell` 附加 `fieldName`、`renameDataTableRow` 附加 `newRowName`）。失败会恢复原值、原 Dirty 状态并取消 Transaction，No-op 不制造 Undo 或 Dirty。该 Tool 始终返回 `saved=false`、`diskRevisionChanged=false`，不会调用 `SavePackage`；用户可在编辑器中检查或撤销，持久化仍需单独走现有授权保存流程。
 
-### `ue_undo_asset_property_live` / `ue_discard_asset_property_live`
+### `ue_asset_property(action="undo")` / `ue_asset_property(action="discard")`
 
 两个破坏性 Tool 显式回退一个精确已确认的 Live Apply，不需要新 Plan：Undo 通过 `GEditor->UndoTransaction(true)` 撤销（可 Redo），Discard 通过 `GEditor->UndoTransaction(false)` 丢弃。Bridge 记录键为 Asset Path + Transaction GUID，Workflow 通过同一 Transaction/Session 身份关闭对应 Receipt；不会按资产名模糊撤销，也不会任意遍历 Undo 历史。
 
@@ -438,7 +433,7 @@ editor_session_id = Apply 结果中的 editorSessionId
 
 ### `ue_verify_live_write`（Apply → Save → Verify → Memory 闭环）
 
-该规划类 Tool 把一次 Live Apply 收尾成标准闭环：`ue_apply_asset_property_live`（返回并 Journal 化 `liveApplyReceipt`）→ 用户显式 `ue_save_authorized_asset` Preview/Commit → `ue_verify_live_write(asset_path, live_apply_receipt="")`。显式 Receipt 精确选择记录；为空时选择该资产最新待处理记录，以兼容旧 Client。
+该规划类 Tool 把一次 Live Apply 收尾成标准闭环：`ue_asset_property(action="apply")`（返回并 Journal 化 `liveApplyReceipt`）→ 用户显式 `ue_save_authorized_asset` Preview/Commit → `ue_verify_live_write(asset_path, live_apply_receipt="")`。显式 Receipt 精确选择记录；为空时选择该资产最新待处理记录，以兼容旧 Client。
 
 - 每个发生实际变更的 Apply 记录原子写入固定 Work Root 的 `live-write-journal`；Authorized Save 更新为 saved，成功 Undo/Discard 或成功 Verify 删除。Server 重启只恢复通过 Schema、Project、Operation、Target、Transaction 和生命周期校验的记录。
 - Apply/Save 返回 `journalPersisted`。Journal I/O 失败不会反转已经成功的 Editor 操作，只在 `ue_workflow_status.liveWriteJournal` 中报告 `pendingRecordCount`、`recoveredRecordCount` 与 `journalErrorCount`。
@@ -461,9 +456,9 @@ ue_get_change_set(change_set_id)
 创建结果包含固定 `changeSetId`、`taskId`、`editorSessionId`、`title` 和 `status=planned`。以下既有 Tool 接受可选 `change_set_id`：
 
 ```text
-ue_apply_asset_property_live
-ue_undo_asset_property_live
-ue_discard_asset_property_live
+ue_asset_property(action="apply")
+ue_asset_property(action="undo")
+ue_asset_property(action="discard")
 ue_save_authorized_asset
 ue_verify_live_write
 ue_apply_patch

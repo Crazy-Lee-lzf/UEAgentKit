@@ -5,7 +5,11 @@ import sqlite3
 from typing import Any, Literal
 
 from .agent_workflow import MATERIAL_PARAMETER_OPERATIONS, PatchWorkflowService, WorkflowError
-from .mcp_consolidated_tools import register_animation_scale_fix_tool, register_datatable_tool
+from .mcp_consolidated_tools import (
+    register_animation_scale_fix_tool,
+    register_asset_property_tool,
+    register_datatable_tool,
+)
 from .animation_scale_fix_batch import AnimationScaleFixBatchService
 from .batch_recovery import BatchRecoveryService
 from .bounded_batch import BoundedBatchService
@@ -268,6 +272,14 @@ def register_workflow_tools(
             )
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_set_pin_default", exc, read_only=False)
+
+    # A0/P1: one tool replaces the six asset-property tools.
+    register_asset_property_tool(
+        server=server,
+        handlers=handlers,
+        annotations=destructive_annotations,
+        error_response=error_response,
+    )
 
     @server.tool(annotations=planning_annotations)
     def ue_set_asset_property(

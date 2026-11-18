@@ -72,7 +72,7 @@ ue_plan_patch
 → report saved / verified / failed items
 ```
 
-For one already-open, clean, non-Blueprint asset, `ue_apply_asset_property_live` can change the Editor memory value. It enters the Undo stack and marks the package dirty, but **does not save**. Save separately with `ue_save_authorized_asset`; discard with `ue_undo_asset_property_live` or `ue_discard_asset_property_live`.
+For one already-open, clean, non-Blueprint asset, `ue_asset_property(action="apply")` can change the Editor memory value. It enters the Undo stack and marks the package dirty, but **does not save**. Save separately with `ue_save_authorized_asset`; discard with `ue_asset_property(action="undo")` or `ue_asset_property(action="discard")`.
 
 Rules:
 

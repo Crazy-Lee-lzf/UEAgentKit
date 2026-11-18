@@ -465,7 +465,7 @@ Save confirmation == SAVE P8 TEST-ONLY BP_LayoutP8
 
 ## Live Editor Write
 
-`editor.applyAssetPropertyLive` 是首个受控内存写入 Capability，由 Workflow Tool `ue_apply_asset_property_live` 间接调用。该 Tool 虽属于 Workflow 注册表，但执行时必须同时启用 Live Editor、Write Tools 和 Commit Tools；MCP Client 不能直接选择 Bridge Method，也不能绕过固定 Plan、Policy、Revision 或精确确认短语。
+`editor.applyAssetPropertyLive` 是首个受控内存写入 Capability，由 Workflow Tool `ue_asset_property(action="apply")` 间接调用。该 Tool 虽属于 Workflow 注册表，但执行时必须同时启用 Live Editor、Write Tools 和 Commit Tools；MCP Client 不能直接选择 Bridge Method，也不能绕过固定 Plan、Policy、Revision 或精确确认短语。
 
 从 0.8.0 稳定写入模型延续至 0.9.0 DP1 的安全边界：
 
@@ -480,12 +480,12 @@ Save confirmation == SAVE P8 TEST-ONLY BP_LayoutP8
 - 材质参数写入强制复用离线 Patch Schema：Operation 名、`{"parameterName": ...}` Target 与值格式（Scalar=有限 JSON number、Vector=`{r,g,b,a}`、Texture=Object Path 字符串、StaticSwitch=JSON boolean）与 `AssetPatchCommandlet` 完全一致，不引入第二套 JSON 格式；只接受已加载的 `MaterialInstanceConstant`（拒绝 MID/非 MI），参数必须存在且是 Global Association，Texture 目标必须是可加载的 `/Game` Texture 资产；Policy 侧 `allowedMaterialParameters`（`class#Type#ParameterName`）授权由 Plan 阶段强制执行。材质参数的读回校验（值、Override、Expression GUID）与离线命令let一致，失败即回滚。
 - DataTable 写入强制复用离线 Row Schema：行结构必须是可用的 `FTableRowBase` 派生结构，字段只支持 bool/Enum/数值/String/Name/Text 标量（与离线 `SetPropertyFromJson` 一致），`allowedDataTableFields`（`class#RowStruct#FieldName`）授权由 Plan 阶段强制执行；`setDataTableCell`/`setDataTableRowFields` 修改现有行的字段，其中 RowFields 请求是 1–32 个字段的原子子集，未请求字段保持原值，读回只校验请求字段并返回完整行；字段修改后调用 `HandleDataTableChanged(RowName)` 刷新 DataTable 观察者。`addDataTableRow` 创建行（目标行不得存在），`removeDataTableRow`/`renameDataTableRow` 要求 `value=true` 确认、目标行存在、`renameDataTableRow` 要求新行名不同且不存在，并再次执行 Searchable Name 引用影响门禁（有引用即拒绝）。快照为整表行深拷贝，失败时整表恢复；No-op 检测基于整表规范 JSON 相等（写同值不产生 Undo 或 Dirty）。
 - 调用 `PostEditChangeProperty()` 并标记 Package Dirty，但绝不调用 `SavePackage`。
-- 返回 `operation`、`valueKind`、`loadedByBridge=false`、Before/After、Dirty、Transaction、referenceType/referencePath/resolvedReferenceClass 和 Editor Session 证据；结构化写入额外返回 `structuredKind`、`structuredSchema`、`diff` 与 `diffTruncated`；材质参数写入返回 `parameterName`、`parameterType`、`parameterAssociation=Global`（并移除 `propertyPath`），`valueKind` 分别为 `material-scalar`/`material-vector`/`material-texture`/`material-static-switch`；DataTable 写入返回 `rowName`、`dataTableKind`、`rowStructPath`（并移除 `propertyPath`），`valueKind` 为 `data-table-cell`/`data-table-row-fields`/`data-table-row-add`/`data-table-row-remove`/`data-table-row-rename`；成功修改额外返回稳定 `transactionId`（已提交的 Editor Undo Transaction 的 GUID），供 `ue_undo_asset_property_live`/`ue_discard_asset_property_live` 精确回退；标量 Operation 的既有返回字段与值保持兼容。
+- 返回 `operation`、`valueKind`、`loadedByBridge=false`、Before/After、Dirty、Transaction、referenceType/referencePath/resolvedReferenceClass 和 Editor Session 证据；结构化写入额外返回 `structuredKind`、`structuredSchema`、`diff` 与 `diffTruncated`；材质参数写入返回 `parameterName`、`parameterType`、`parameterAssociation=Global`（并移除 `propertyPath`），`valueKind` 分别为 `material-scalar`/`material-vector`/`material-texture`/`material-static-switch`；DataTable 写入返回 `rowName`、`dataTableKind`、`rowStructPath`（并移除 `propertyPath`），`valueKind` 为 `data-table-cell`/`data-table-row-fields`/`data-table-row-add`/`data-table-row-remove`/`data-table-row-rename`；成功修改额外返回稳定 `transactionId`（已提交的 Editor Undo Transaction 的 GUID），供 `ue_asset_property(action="undo")`/`ue_asset_property(action="discard")` 精确回退；标量 Operation 的既有返回字段与值保持兼容。
 - PIE/SIE、地图、Dirty Package、Blueprint、嵌套属性路径、不支持的属性类型、容器、非 MI 资产、不存在的材质参数、非 DataTable 资产、缺失或重复行、不支持的字段、被引用行与 DataTable 之外的 Live Apply 全部拒绝。
 
 ## Live Editor Write Undo / Discard
 
-`editor.undoAssetPropertyLive`（`ue_undo_asset_property_live`）与 `editor.discardAssetPropertyLive`（`ue_discard_asset_property_live`）提供对最近一次已确认 Live Apply 的显式回退，替代依赖用户手动 Ctrl+Z：
+`editor.undoAssetPropertyLive`（`ue_asset_property(action="undo")`）与 `editor.discardAssetPropertyLive`（`ue_asset_property(action="discard")`）提供对最近一次已确认 Live Apply 的显式回退，替代依赖用户手动 Ctrl+Z：
 
 - 只接受 `assetPath` + `transactionId` + `editorSessionId`（三者在 Apply 结果中返回）。Bridge 按精确 Asset Path + Transaction GUID 保存记录，不再以新记录静默覆盖旧 Transaction；当前 Clean Package 门禁仍保证一个资产同时只有当前未保存写入可撤销，已保存且不可撤销的旧记录会在下一次 Clean Apply 前清理。
 - Undo 调用 `GEditor->UndoTransaction(true)`（可 Redo），Discard 调用 `GEditor->UndoTransaction(false)`（丢弃事务）；两者都只作用于一像素精确的已提交事务，绝不任意回滚编辑器历史或跨资产批量撤销。
@@ -517,7 +517,7 @@ Immutable Index   当前 MCP 会话冻结的 SQLite Snapshot
 - Dirty UObject 不生成虚假的磁盘 SHA-256 Revision。
 - Live Tool 结果不清除或覆盖 SQLite/Revision Export 的 stale 状态。
 - 写入 Plan 仍必须通过现有三源磁盘新鲜度门禁。
-- Live Read 只观察已有状态。普通 Live Action 可以执行已注册的资产导航、Blueprint 编译和官方 Data Validation。`ue_apply_asset_property_live` 是独立的 Plan/Policy/Revision 约束内存写入，只标记 Dirty 并记录 Undo；所有 Live 路径都不能自动保存、运行 Console/Python/Shell、接受任意 UObject Method 或改变 SQLite/Revision Export。
+- Live Read 只观察已有状态。普通 Live Action 可以执行已注册的资产导航、Blueprint 编译和官方 Data Validation。`ue_asset_property(action="apply")` 是独立的 Plan/Policy/Revision 约束内存写入，只标记 Dirty 并记录 Undo；所有 Live 路径都不能自动保存、运行 Console/Python/Shell、接受任意 UObject Method 或改变 SQLite/Revision Export。
 - `ue_refresh_asset_index` 属于固定项目工作流而非 Live 只读 Tool；启用 Live Bridge 时，它会先通过 `ue_inspect_asset_live` 拒绝 Dirty 目标，再构建配对 Snapshot Generation。
 
 ## 稳定错误码

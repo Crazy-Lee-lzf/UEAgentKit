@@ -49,7 +49,7 @@ ue_animation_scale_fix(action="plan")
 ### 2.2 应用到 Editor 内存
 
 ```text
-ue_apply_asset_property_live
+ue_asset_property(action="apply")
 ```
 
 确认短语：
@@ -69,8 +69,8 @@ LIVE APPLY <planId>
 ### 2.3 撤销或放弃
 
 ```text
-ue_undo_asset_property_live
-ue_discard_asset_property_live
+ue_asset_property(action="undo")
+ue_asset_property(action="discard")
 ```
 
 两者都不会保存 Package。Undo 保留 Editor Redo 语义；Discard 用于恢复到本次修改前状态并结束该事务。

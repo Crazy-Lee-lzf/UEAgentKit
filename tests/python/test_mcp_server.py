@@ -2169,7 +2169,7 @@ class McpServerTests(unittest.TestCase):
             [tool.name for tool in tools],
             consolidated_tool_names_for_mode(workflow_enabled=True, memory_enabled=True),
         )
-        self.assertEqual(len(tools), 66)
+        self.assertEqual(len(tools), 61)
 
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
         memory_contract = capabilities["projectMemory"]
@@ -2247,7 +2247,7 @@ class McpServerTests(unittest.TestCase):
             live_editor_enabled=True, workflow_enabled=True
         )
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 105)
+        self.assertEqual(len(tools), 100)
         for tool in tools:
             definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
             self.assertEqual(bool(tool.annotations.readOnlyHint), definition.read_only, tool.name)
@@ -2338,10 +2338,11 @@ class McpServerTests(unittest.TestCase):
         for tool in tools:
             properties = set(tool.inputSchema.get("properties", {}))
             self.assertFalse(properties.intersection(forbidden), (tool.name, properties))
-        high_level_tool = next(tool for tool in tools if tool.name == "ue_set_asset_property")
+        high_level_tool = next(tool for tool in tools if tool.name == "ue_asset_property")
         self.assertIn("mode", high_level_tool.inputSchema["properties"])
         self.assertEqual(high_level_tool.inputSchema["properties"]["mode"]["default"], "Plan")
-        self.assertFalse(high_level_tool.annotations.destructiveHint)
+        # Mixed facade: it can also apply, undo and discard.
+        self.assertTrue(high_level_tool.annotations.destructiveHint)
         self.assertFalse(high_level_tool.annotations.readOnlyHint)
         material_tool = next(tool for tool in tools if tool.name == "ue_set_material_parameter")
         self.assertIn("parameter_type", material_tool.inputSchema["properties"])
@@ -2436,8 +2437,9 @@ class McpServerTests(unittest.TestCase):
         self.assertTrue(capabilities["highLevelChanges"]["available"])
         self.assertEqual(capabilities["highLevelChanges"]["defaultMode"], "Plan")
         self.assertFalse(capabilities["highLevelChanges"]["commitSupportedDirectly"])
-        self.assertEqual(len(capabilities["highLevelChanges"]["tools"]), 10)
+        self.assertEqual(len(capabilities["highLevelChanges"]["tools"]), 8)
         self.assertIn("ue_datatable", capabilities["highLevelChanges"]["tools"])
+        self.assertIn("ue_asset_property", capabilities["highLevelChanges"]["tools"])
         self.assertNotIn("ue_set_datatable_cell", capabilities["highLevelChanges"]["tools"])
         self.assertTrue(capabilities["assetState"]["available"])
         self.assertEqual(
@@ -2504,13 +2506,14 @@ class McpServerTests(unittest.TestCase):
                 "setPinDefault",
             ),
             (
-                "ue_set_asset_property",
-                {"asset_path": GENERIC_ASSET, "property_path": "BoolValue", "value": True},
+                "ue_asset_property",
+                {"action": "set", "asset_path": GENERIC_ASSET, "property_path": "BoolValue", "value": True},
                 "setAssetProperty",
             ),
             (
-                "ue_set_asset_reference_property",
+                "ue_asset_property",
                 {
+                    "action": "set_reference",
                     "asset_path": GENERIC_ASSET,
                     "property_path": "ObjectValue",
                     "value": {"referenceType": "Object", "path": "/Game/UEAgentKitTests/T_Test.T_Test"},
@@ -2518,8 +2521,9 @@ class McpServerTests(unittest.TestCase):
                 "setAssetReferenceProperty",
             ),
             (
-                "ue_set_asset_structured_property",
+                "ue_asset_property",
                 {
+                    "action": "set_structured",
                     "asset_path": GENERIC_ASSET,
                     "property_path": "ArrayValue",
                     "value": {"valueType": "Array", "items": [1, 2]},
@@ -2604,8 +2608,14 @@ class McpServerTests(unittest.TestCase):
 
         _, high_level_dry = asyncio.run(
             server.call_tool(
-                "ue_set_asset_property",
-                {"asset_path": GENERIC_ASSET, "property_path": "BoolValue", "value": True, "mode": "DryRun"},
+                "ue_asset_property",
+                {
+                    "action": "set",
+                    "asset_path": GENERIC_ASSET,
+                    "property_path": "BoolValue",
+                    "value": True,
+                    "mode": "DryRun",
+                },
             )
         )
         self.assertEqual(high_level_dry["dryRunReceipt"], "dry_test")
@@ -2649,9 +2659,7 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(
             change_sets["bindableTools"],
             [
-                "ue_apply_asset_property_live",
-                "ue_undo_asset_property_live",
-                "ue_discard_asset_property_live",
+                "ue_asset_property",
                 "ue_save_authorized_asset",
                 "ue_verify_live_write",
                 "ue_verify_live_write_fast",
@@ -2686,8 +2694,14 @@ class McpServerTests(unittest.TestCase):
         server = create_mcp_server(self.database_path, workflow_service=CrashingWorkflow())
         _, payload = asyncio.run(
             server.call_tool(
-                "ue_set_asset_property",
-                {"asset_path": GENERIC_ASSET, "property_path": "BoolValue", "value": True, "mode": "DryRun"},
+                "ue_asset_property",
+                {
+                    "action": "set",
+                    "asset_path": GENERIC_ASSET,
+                    "property_path": "BoolValue",
+                    "value": True,
+                    "mode": "DryRun",
+                },
             )
         )
         self.assertFalse(payload["ok"])

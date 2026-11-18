@@ -999,9 +999,7 @@ def _capabilities_response(
                 "journaled": True,
                 "workRootBound": True,
                 "bindableTools": [
-                    "ue_apply_asset_property_live",
-                    "ue_undo_asset_property_live",
-                    "ue_discard_asset_property_live",
+                    "ue_asset_property",
                     "ue_save_authorized_asset",
                     "ue_verify_live_write",
                     "ue_verify_live_write_fast",
