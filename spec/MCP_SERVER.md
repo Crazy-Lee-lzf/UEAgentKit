@@ -87,11 +87,7 @@ ue_verify_live_write
 ue_set_asset_reference_property
 ue_set_asset_structured_property
 ue_set_material_parameter
-ue_set_datatable_cell
-ue_set_datatable_row_fields
-ue_add_datatable_row
-ue_remove_datatable_row
-ue_rename_datatable_row
+ue_datatable
 ue_plan_patch
 ue_dry_run_patch
 ue_apply_patch
@@ -278,7 +274,7 @@ include_memory        默认 true
 max_output_tokens     默认 4096，范围 256–32768
 ```
 
-返回结构按 `request / project / targetAssets / relevantAssets / memory / activeWork / liveEditor / revisionState / changeSet / correlation / risks / nextExpansions / degradedSources / outputBudget` 组织。每个事实带 `source`；Revision 状态来自 SQLite / Revision Export / 磁盘 Package 三方 SHA-256 比较；Memory 摘要复用有界 `ue_memory_get_context`；Live Editor 摘要复用 Bridge 的 `editor.getEditorContext`；Change Set 复用 journal 状态机。
+返回结构按 `request / project / targetAssets / relevantAssets / memory / activeWork / liveEditor / revisionState / changeSet / correlation / risks / nextExpansions / degradedSources / outputBudget` 组织。每个事实带 `source`；Revision 状态来自 SQLite / Revision Export / 磁盘 Package 三方 SHA-256 比较；Memory 摘要复用有界 `ue_memory(action="get_context")`；Live Editor 摘要复用 Bridge 的 `editor.getEditorContext`；Change Set 复用 journal 状态机。
 
 - `risks` 只包含确定性事实：`target-dirty-in-editor`、`asset-stale`、`asset-revision-unavailable`、`target-not-indexed`、`memory-stale-records`、`memory-conflicted-records`、`change-set-not-found`、`change-set-terminal`、`work-item-not-found`、`relevant-assets-search-failed` 等；不包含模型推断，禁止把猜测混成事实。
 - 某一来源不可用时只降级对应 section（例如 Offline 模式 `revisionState.available=false, reason=revision-export-not-configured`，Live Editor 未启用时 `liveEditor.reason=live-editor-disabled`），不会让整个请求失败；降级明细在 `degradedSources` 中显式列出。
@@ -392,11 +388,11 @@ ue_set_asset_property        property_path + value
 ue_set_asset_reference_property  property_path + reference object or null
 ue_set_asset_structured_property   property_path + stable structured value
 ue_set_material_parameter    parameter_name + parameter_type + value
-ue_set_datatable_cell        row_name + field_name + value
-ue_set_datatable_row_fields   row_name + values
-ue_add_datatable_row          row_name + values
-ue_remove_datatable_row       row_name
-ue_rename_datatable_row       row_name + new_row_name
+ue_datatable action=set_cell         row_name + field_name + value
+ue_datatable action=set_row_fields   row_name + values
+ue_datatable action=add_row          row_name + values
+ue_datatable action=remove_row       row_name
+ue_datatable action=rename_row       row_name + new_row_name
 ```
 
 
@@ -404,7 +400,7 @@ ue_rename_datatable_row       row_name + new_row_name
 
 `ue_set_asset_structured_property` maps to `setAssetStructuredProperty`. It replaces one Data Asset top-level Struct/Array/Set/Map with the Reader-exported stable schema; Struct fields must be complete and Set/Map entries must be uniquely sorted by Canonical JSON. Commit remains a separate `ue_apply_patch` step.
 
-`ue_add_datatable_row` accepts an optional 0–32-field scalar object. `ue_remove_datatable_row` and `ue_rename_datatable_row` generate low-level Operations with the required explicit `value=true` acknowledgement. All three still follow Plan → Dry Run → one-time receipt → explicit Commit and the existing backup/verification/rollback gates.
+`ue_datatable(action="add_row")` accepts an optional 0–32-field scalar object. `ue_datatable(action="remove_row")` and `ue_datatable(action="rename_row")` generate low-level Operations with the required explicit `value=true` acknowledgement. All three still follow Plan → Dry Run → one-time receipt → explicit Commit and the existing backup/verification/rollback gates.
 
 所有高层 Tool 都要求完整 Unreal Object Path，并支持：
 
@@ -449,7 +445,7 @@ editor_session_id = Apply 结果中的 editorSessionId
 - 若目标包仍 Dirty：返回 `state=not-saved` 终态（`saved=false`、`verified=false`、`undoAvailable=true`、磁盘 Revision 未变），不伪装成功；`memoryTaskEvidence` 以 `cancelled` 结论记录“未持久化，可保存或撤销”，并明确 `independentReload=false`，因为该分支没有启动独立重载。下一步提示继续授权保存或 Undo/Discard；成功回退会直接关闭待处理 Live Apply 记录。
 - 若包干净但未经过授权保存（外部保存/手工撤销/Session 分叉）：拒绝 `live-write-verify-save-unauthorized` 并要求重新 Plan。
 - 若已授权保存：独立 Unreal 进程重载磁盘资产；Data Asset、Material Instance 与 DataTable 复用 `RunAssetCatalog.ps1`，Blueprint apply report 则复用既有 `RunExport.ps1 -Profile full -Format json -IncludeUnchangedDefaults`，同时保留 defaults/components 与 graph/pin Canonical。验证校验导出的资产路径、干净的 SHA-256 Revision 与磁盘一致、Revision 相对冻结索引已变化，并按 Kind 提取导出值与应用时 `afterValue` 做 JSON 级比对。DataTable Rename 按 `newRowName` 提取目标行，其余 DataTable 操作按 `rowName`；通过后返回 `state=verified`、`actualRevision`、`expectedValue`/`exportedValue`、`undoAvailable=false`，并生成独立重载 `memoryTaskEvidence`。
-- `memoryRecorded=false` 恒定：Memory Task Record 由 `ue_memory_record_task` 落库，其失败会如实报错，本 Tool 从不声称 Memory 已写入。
+- `memoryRecorded=false` 恒定：Memory Task Record 由 `ue_memory_write(action="record_task")` 落库，其失败会如实报错，本 Tool 从不声称 Memory 已写入。
 
 该 Tool 不执行 Save All、不自动保存、不保存非授权资产、不让 Memory 反向覆盖源资产；本身不写磁盘、不修改 SQLite/Revision Export。
 
@@ -834,20 +830,20 @@ Tool 分组：
 
 ```text
 Read:
-  ue_memory_search
-  ue_memory_get
+  ue_memory(action="search")
+  ue_memory(action="get")
 
 Persistent planning actions:
-  ue_memory_add_rule
-  ue_memory_record_finding
-  ue_memory_record_task
-  ue_memory_mark_superseded
-  ue_memory_validate
+  ue_memory_write(action="add_rule")
+  ue_memory_write(action="record_finding")
+  ue_memory_write(action="record_task")
+  ue_memory_write(action="mark_superseded")
+  ue_memory_write(action="validate")
 ```
 
-`ue_memory_record_task` 固定写入 `taskRecord + tool-observed`，只接受终态 `succeeded`、`failed`、`rolledBack` 或 `cancelled`。它必须绑定最终结论、Patch、Backup Manifest、Validation Evidence 和至少一个稳定 Revision；Artifact 引用不能是绝对本机路径或父目录穿越路径。
+`ue_memory_write(action="record_task")` 固定写入 `taskRecord + tool-observed`，只接受终态 `succeeded`、`failed`、`rolledBack` 或 `cancelled`。它必须绑定最终结论、Patch、Backup Manifest、Validation Evidence 和至少一个稳定 Revision；Artifact 引用不能是绝对本机路径或父目录穿越路径。
 
-`ue_memory_validate` 使用当前固定 SQLite 的 `assets.revision_value`，仅更新 Memory Status，不修改索引或 Unreal Asset。完整数据模型和状态规则见 [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md)。
+`ue_memory_write(action="validate")` 使用当前固定 SQLite 的 `assets.revision_value`，仅更新 Memory Status，不修改索引或 Unreal Asset。完整数据模型和状态规则见 [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md)。
 
 ## Workflow 与 Project Memory 证据交接
 
@@ -856,10 +852,11 @@ Persistent planning actions:
 ```text
 workflowEvidenceHandoff = true
 workflowEvidenceSourceTools = [ue_verify_asset, ue_rollback_patch]
-workflowEvidenceTargetTool = ue_memory_record_task
+workflowEvidenceTargetTool = ue_memory_write
+workflowEvidenceTargetAction = record_task
 workflowEvidenceArgumentsPath = memoryTaskEvidence.arguments
 ```
 
-`ue_verify_asset` 只有在独立 UE 重载确认 Asset Path 与最终 Revision 完全一致后，才返回 `outcome=succeeded` 的 `memoryTaskEvidence`。`ue_rollback_patch` 只有在 Commit 恢复和独立验证均成功后，才返回 `outcome=rolledBack` 的同格式证据包。两者的 `arguments` 都可以直接作为 `ue_memory_record_task` 参数。Agent 不得从日志文本、文件路径或会话 Receipt 自行重建证据。
+`ue_verify_asset` 只有在独立 UE 重载确认 Asset Path 与最终 Revision 完全一致后，才返回 `outcome=succeeded` 的 `memoryTaskEvidence`。`ue_rollback_patch` 只有在 Commit 恢复和独立验证均成功后，才返回 `outcome=rolledBack` 的同格式证据包。两者的 `arguments` 都可以直接作为 `ue_memory_write(action="record_task")` 参数。Agent 不得从日志文本、文件路径或会话 Receipt 自行重建证据。
 
 仅启用 Memory、未启用 Workflow 时，`workflowEvidenceHandoff=false`，不会暗示存在可验证的写入证据来源。

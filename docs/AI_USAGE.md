@@ -88,10 +88,10 @@ ue_plan_patch
 按需逐层读取，不要每轮加载全部 Memory：
 
 ```text
-ue_memory_get_context
-→ ue_memory_expand_node
-→ ue_memory_get_evidence
-→ 需要精确记录时 ue_memory_search / ue_memory_get
+ue_memory(action="get_context")
+→ ue_memory(action="expand_node")
+→ ue_memory(action="get_evidence")
+→ 需要精确记录时 ue_memory(action="search") / ue_memory(action="get")
 ```
 
 服务器会强制 Token Budget，默认过滤 `stale` / `superseded`，并返回建议的 `nextActions`。当前目标、TODO 和阻塞属于 Active Work，不混入长期知识记录。
@@ -116,7 +116,7 @@ scripts\ue-agent.cmd memory export ^
 ```text
 ue_apply_patch
 → ue_verify_asset
-→ ue_memory_record_task(memoryTaskEvidence.arguments)
+→ ue_memory_write(action="record_task")(memoryTaskEvidence.arguments)
 ```
 
 只在 `ue_verify_asset.verified=true` 且返回 `memoryTaskEvidence` 时记录成功 Task，并原样使用 `memoryTaskEvidence.arguments`。Rollback Commit 返回 `restored=true` 和 `memoryTaskEvidence` 时同样记录，outcome 为 `rolledBack`；不要把 rollback Dry Run 记录成终态。

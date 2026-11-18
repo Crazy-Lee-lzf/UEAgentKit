@@ -241,28 +241,28 @@ Service 仍不接受来自 Agent 的任意数据库路径。MCP 接入时，Memo
 
 ## 14. MCP Tool 契约
 
-Project Memory 默认关闭。Server 只有在启动时显式配置 `--enable-project-memory` 后才注册：
+Project Memory 默认关闭。Server 只有在启动时显式配置 `--enable-project-memory` 后才注册这两个入口：
 
 ```text
-ue_memory_search
-ue_memory_get
-ue_memory_add_rule
-ue_memory_record_finding
-ue_memory_record_task
-ue_memory_mark_superseded
-ue_memory_validate
+ue_memory(action="search")
+ue_memory(action="get")
+ue_memory_write(action="add_rule")
+ue_memory_write(action="record_finding")
+ue_memory_write(action="record_task")
+ue_memory_write(action="mark_superseded")
+ue_memory_write(action="validate")
 ```
 
 固定边界：
 
 - Memory 数据库路径只在 Server 启动时配置，Tool 参数不能传入或覆盖。
 - Project Key 从已验证的固定 SQLite 索引读取，Tool 参数不能选择其他项目。
-- `ue_memory_add_rule` 固定写入 `projectRule + user-confirmed`，仅应在用户明确确认规则后调用。
-- `ue_memory_record_finding` 只接受 `tool-observed` 或 `model-inferred`，不能伪装成用户确认。
-- `ue_memory_record_task` 固定写入 `taskRecord + tool-observed`，要求最终结论、完整三类 Artifact 和至少一个稳定 Revision。
+- `ue_memory_write(action="add_rule")` 固定写入 `projectRule + user-confirmed`，仅应在用户明确确认规则后调用。
+- `ue_memory_write(action="record_finding")` 只接受 `tool-observed` 或 `model-inferred`，不能伪装成用户确认。
+- `ue_memory_write(action="record_task")` 固定写入 `taskRecord + tool-observed`，要求最终结论、完整三类 Artifact 和至少一个稳定 Revision。
 - Finding 类型只允许 `projectFact`、`decisionRecord`、`knownIssue` 和 `runtimeEvidence`。
-- `ue_memory_search` 默认排除 `stale` 与 `superseded`，需要审计历史时必须显式请求对应状态。
-- `ue_memory_validate` 只读取 Server 固定索引中的 Revision，并可能把不匹配记录持久化为 `stale`。
+- `ue_memory(action="search")` 默认排除 `stale` 与 `superseded`，需要审计历史时必须显式请求对应状态。
+- `ue_memory_write(action="validate")` 只读取 Server 固定索引中的 Revision，并可能把不匹配记录持久化为 `stale`。
 - Memory 写入不修改 Unreal Asset，但属于持久化状态变化，因此 annotations 不是 Read Only，也不是 Destructive。
 
 启用 Memory 后的 Tool 数量：
@@ -278,7 +278,7 @@ Combined + Memory  65
 
 ## 15. Task Outcome 契约
 
-`ue_memory_record_task` 用于保存一个已经结束并形成最终结论的工作任务，而不是保存进行中的临时计划。记录固定为：
+`ue_memory_write(action="record_task")` 用于保存一个已经结束并形成最终结论的工作任务，而不是保存进行中的临时计划。记录固定为：
 
 ```text
 recordType = taskRecord
@@ -307,7 +307,7 @@ validationEvidence
 
 Artifact 只保存稳定 ID 或工程相对引用，不复制文件内容，也不接受盘符绝对路径、POSIX 绝对路径或 `..` 父目录穿越。Project Scope 自动补全并且必须匹配 Server 固定 Project Key。
 
-Task Outcome 是不可变审计记录。后续出现新的最终结论时创建新记录，并通过 `ue_memory_mark_superseded` 显式取代旧记录；不得原地覆盖历史证据。
+Task Outcome 是不可变审计记录。后续出现新的最终结论时创建新记录，并通过 `ue_memory_write(action="mark_superseded")` 显式取代旧记录；不得原地覆盖历史证据。
 
 ## 16. CLI 与审计导出
 
@@ -351,8 +351,9 @@ CLI 的 stdout/stderr 在入口处固定为 UTF-8，确保 Windows 管道、中�
 {
   "memoryTaskEvidence": {
     "schemaVersion": "1.0",
-    "tool": "ue_memory_record_task",
+    "tool": "ue_memory_write",
     "arguments": {
+      "action": "record_task",
       "task_key": "patch:<planId>",
       "title": "Verified patch <planId>",
       "conclusion": "...",
@@ -372,7 +373,7 @@ CLI 的 stdout/stderr 在入口处固定为 UTF-8，确保 Windows 管道、中�
 }
 ```
 
-`arguments` 与 `ue_memory_record_task` 的输入 Schema 完全一致。启用 Workflow 与 Project Memory 时，Agent 应把该对象原样传入目标 Tool，不得修改或自行构造 Patch、Backup Manifest、Validation Evidence 与 Revision 引用。
+`arguments` 与 `ue_memory_write(action="record_task")` 的输入 Schema 完全一致。启用 Workflow 与 Project Memory 时，Agent 应把该对象原样传入目标 Tool，不得修改或自行构造 Patch、Backup Manifest、Validation Evidence 与 Revision 引用。
 
 证据来源：
 
@@ -385,7 +386,7 @@ CLI 的 stdout/stderr 在入口处固定为 UTF-8，确保 Windows 管道、中�
 
 成功的 rollback Commit 使用相同外层结构，但 `task_key=rollback:<planId>`、`outcome=rolledBack`、Revision Set 绑定恢复后的 pre-Commit Revision，Validation Artifact 同时记录脱敏 rollback Report ID 与独立 verification Report ID。rollback Dry Run、确认失败、恢复失败或 Revision 不匹配时不生成 rolledBack Evidence。
 
-`scripts\TestMcpWorkflow.cmd` 的真实 UE5.6 回归会在同一固定工程会话中记录 succeeded 与 rolledBack Task，随后运行 `ue_memory_validate`：Commit 后 Revision 在 rollback 后必须变为 `stale`，恢复 Revision 对应的 rolledBack Record 必须保持 `valid`。回归同时验证 Audit Snapshot SHA-256、Package SHA-256 恢复和 immutable Index 零修改。
+`scripts\TestMcpWorkflow.cmd` 的真实 UE5.6 回归会在同一固定工程会话中记录 succeeded 与 rolledBack Task，随后运行 `ue_memory_write(action="validate")`：Commit 后 Revision 在 rollback 后必须变为 `stale`，恢复 Revision 对应的 rolledBack Record 必须保持 `valid`。回归同时验证 Audit Snapshot SHA-256、Package SHA-256 恢复和 immutable Index 零修改。
 
 ## 18. Schema v3：Knowledge Tree 与 Active Work
 
@@ -442,23 +443,23 @@ Level 4  原始 Evidence、Revision 与 Artifact
 
 ## 20. MCP 高层入口与兼容性
 
-Schema v3 新增五个固定项目高层 Tool：
+Schema v3 新增五个固定项目高层动作，由 `ue_memory` / `ue_memory_write` 的 action 暴露：
 
 ```text
-ue_memory_get_context
-ue_memory_expand_node
-ue_memory_get_evidence
-ue_memory_update_knowledge
-ue_memory_update_work
+ue_memory(action="get_context")
+ue_memory(action="expand_node")
+ue_memory(action="get_evidence")
+ue_memory_write(action=<knowledge sub-action>)
+ue_memory_write(action=<work sub-action>)
 ```
 
-- `ue_memory_get_context` 按 Query、Node Path、Asset Path、Detail Level 和 Budget 组装 Project Profile、Knowledge Nodes、Active Work、少量有效 Record 与 `nextActions`。
-- `ue_memory_expand_node` 按精确 Path、Depth 和 Detail Level 展开。
-- `ue_memory_get_evidence` 只按精确 Record ID 返回 Evidence/Artifact，不做模糊猜测。
-- `ue_memory_update_knowledge` 通过明确 Action 管理 Node、Record 绑定和稳定知识。
-- `ue_memory_update_work` 通过明确 Action 管理 Active Work 生命周期和关联。
+- `ue_memory(action="get_context")` 按 Query、Node Path、Asset Path、Detail Level 和 Budget 组装 Project Profile、Knowledge Nodes、Active Work、少量有效 Record 与 `nextActions`。
+- `ue_memory(action="expand_node")` 按精确 Path、Depth 和 Detail Level 展开。
+- `ue_memory(action="get_evidence")` 只按精确 Record ID 返回 Evidence/Artifact，不做模糊猜测。
+- `ue_memory_write(action=<knowledge sub-action>)` 通过明确 Action 管理 Node、Record 绑定和稳定知识。
+- `ue_memory_write(action=<work sub-action>)` 通过明确 Action 管理 Active Work 生命周期和关联。
 
-五个新 Tool 的顶层参数使用严格 Schema，未知参数会被 FastMCP 拒绝；不得提交数据库路径、Project Key、缓存键、任意 SQL 或 Revision SHA。现有七个 `ue_memory_*` Tool 保持名称、顺序和既有语义兼容。
+这两个入口的顶层参数使用严格 Schema，未知参数会被 FastMCP 拒绝；不得提交数据库路径、Project Key、缓存键、任意 SQL 或 Revision SHA。原有 per-verb memory Tool 的语义由对应 action 原样保留，但不再单独注册。
 
 审计导出保留 Schema v2 的 `records`、`statusEvents` 和原有计数字段，并追加 `knowledgeNodes`、`activeWork`、Node/Work/TODO 数量。多人共享 Knowledge Service、账号权限、团队 Scope 与乐观并发仍属于后续阶段。
 

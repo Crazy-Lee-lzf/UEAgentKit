@@ -216,14 +216,14 @@ Agent
 以下 Tool 已在 0.8.0 中正式提供：
 
 ```text
-ue_memory_get_context
-ue_memory_expand_node
-ue_memory_get_evidence
-ue_memory_update_knowledge
-ue_memory_update_work
+ue_memory(action="get_context")
+ue_memory(action="expand_node")
+ue_memory(action="get_evidence")
+ue_memory_write(action=<knowledge sub-action>)
+ue_memory_write(action=<work sub-action>)
 ```
 
-### `ue_memory_get_context`
+### `ue_memory(action="get_context")`
 
 绝大多数任务的第一入口。根据 Query、固定 Project、当前资产和预算返回：
 
@@ -233,19 +233,19 @@ ue_memory_update_work
 - 相关 Active Work。
 - 推荐的下一步展开动作。
 
-### `ue_memory_expand_node`
+### `ue_memory(action="expand_node")`
 
 按一个稳定 Path、指定深度和 Detail Level 展开子节点或实现摘要。
 
-### `ue_memory_get_evidence`
+### `ue_memory(action="get_evidence")`
 
 只在需要证明结论时读取指定 Record 或 Artifact 的证据。
 
-### `ue_memory_update_knowledge`
+### `ue_memory_write(action=<knowledge sub-action>)`
 
 统一处理节点新增、摘要更新、稳定结论写入、重复检测和确认要求。Agent 不直接操作数据库表，也不手工选择 Revision SHA。
 
-### `ue_memory_update_work`
+### `ue_memory_write(action=<work sub-action>)`
 
 通过 `start/add_todo/block/complete/cancel/set_next_action` 等 Action 维护当前工作。
 
@@ -358,7 +358,7 @@ SQLite FTS5 的 `unicode61` 分词器把一整段连续汉字、假名或谚文�
 1. 任意深度 Knowledge Tree 与 Project Profile 根节点。
 2. 现有六类 Record 可选绑定 Knowledge Node。
 3. 独立 Active Work、TODO、阻塞和下一步状态机。
-4. `ue_memory_get_context`、`ue_memory_expand_node` 和按需 Evidence。
+4. `ue_memory(action="get_context")`、`ue_memory(action="expand_node")` 和按需 Evidence。
 5. 0–4 级渐进式披露、确定性字符预算、默认状态过滤和结构化 `nextActions`。
 6. 固定项目高层 Knowledge/Work 更新 Tool，以及兼容式审计导出。
 
