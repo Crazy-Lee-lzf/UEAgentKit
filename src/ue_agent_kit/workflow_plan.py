@@ -954,10 +954,10 @@ class WorkflowPlanMixin:
                     "changeSetIdArgument": "change_set_id",
                     "sameIdRequired": True,
                     "passToApplicableTools": [
-                        "ue_apply_asset_property_live",
+                        "ue_asset_property(action=\"apply\")",
                         "ue_apply_patch",
                         "ue_save_authorized_asset",
-                        "ue_verify_live_write",
+                        "ue_live_write(action=\"verify\")",
                         "ue_verify_asset",
                         "ue_analyze_semantic_diff",
                         "ue_build_verification_plan",

@@ -81,7 +81,7 @@ ue_asset_property(action="discard")
 
 ```text
 ue_save_authorized_asset
-→ ue_verify_live_write / ue_verify_asset
+→ ue_live_write(action="verify") / ue_verify_asset
 ```
 
 保存后的独立 Unreal 重载验证会比较：
@@ -94,7 +94,7 @@ ue_save_authorized_asset
 - 首帧、中间帧、末帧 Scale。
 
 
-`ue_verify_live_write` 明确拆分四类结果：
+`ue_live_write(action="verify")` 明确拆分四类结果：
 
 ```text
 appliedValue             Live Apply 后的完整读取值

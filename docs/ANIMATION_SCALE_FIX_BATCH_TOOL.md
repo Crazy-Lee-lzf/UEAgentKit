@@ -222,7 +222,7 @@ SAVE BATCH <batchPlanId>
 
 ### Independent Verify
 
-`ue_animation_scale_fix(action="verify")` 每次最多验证 2 个已保存资产，并复用单资产 `ue_verify_live_write`。Batch 只在 `actualRevision` 与持久化预期值都通过独立重载验证后把子项标记为 `verified`。
+`ue_animation_scale_fix(action="verify")` 每次最多验证 2 个已保存资产，并复用单资产 `ue_live_write(action="verify")`。Batch 只在 `actualRevision` 与持久化预期值都通过独立重载验证后把子项标记为 `verified`。
 
 ### 保留修改：Atomic Index Refresh
 

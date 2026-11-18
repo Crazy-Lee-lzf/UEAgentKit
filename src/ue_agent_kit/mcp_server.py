@@ -297,7 +297,7 @@ def _server_instructions(
         "They create a strict Plan by default and may run Plan plus Dry Run, but never Commit. Use ue_apply_patch only "
         "with the returned planId and one-time Dry Run receipt. When a request contains multiple W4 operations "
         "(setAssetProperty, setVariableDefault, setComponentProperty, setPinDefault), prefer the read-only "
-        "ue_plan_live_write_batch planner. The low-level ue_plan_patch remains available for "
+        "ue_live_write(action=\"plan_batch\") planner. The low-level ue_plan_patch remains available for "
         "registered Operations not covered by a high-level Tool. Tool arguments cannot choose filesystem paths, policies, projects, "
         "engines, databases, Editor Bridge endpoints, or arbitrary Unreal commands. "
         + memory_workflow_text
@@ -1009,9 +1009,7 @@ def _capabilities_response(
                 "bindableTools": [
                     "ue_asset_property",
                     "ue_save_authorized_asset",
-                    "ue_verify_live_write",
-                    "ue_verify_live_write_fast",
-                    "ue_verify_live_write_checkpoint",
+                    "ue_live_write",
                 ],
             },
         },
@@ -1668,7 +1666,7 @@ _INDETERMINATE_WRITE_ERROR_CODES = frozenset(
 _INDETERMINATE_WRITE_SUGGESTION = (
     "Do not repeat this write. The Editor may have applied it before the transport failed: "
     "read the current asset state (ue_get_dirty_assets, ue_get_asset_state, "
-    "ue_verify_live_write_fast) and undo or discard the transaction before retrying."
+    "ue_live_write(action=\"verify_fast\")) and undo or discard the transaction before retrying."
 )
 
 

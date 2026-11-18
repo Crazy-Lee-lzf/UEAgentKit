@@ -2169,7 +2169,7 @@ class McpServerTests(unittest.TestCase):
             [tool.name for tool in tools],
             consolidated_tool_names_for_mode(workflow_enabled=True, memory_enabled=True),
         )
-        self.assertEqual(len(tools), 48)
+        self.assertEqual(len(tools), 43)
 
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
         memory_contract = capabilities["projectMemory"]
@@ -2247,7 +2247,7 @@ class McpServerTests(unittest.TestCase):
             live_editor_enabled=True, workflow_enabled=True
         )
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 87)
+        self.assertEqual(len(tools), 82)
         for tool in tools:
             definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
             self.assertEqual(bool(tool.annotations.readOnlyHint), definition.read_only, tool.name)
@@ -2657,9 +2657,7 @@ class McpServerTests(unittest.TestCase):
             [
                 "ue_asset_property",
                 "ue_save_authorized_asset",
-                "ue_verify_live_write",
-                "ue_verify_live_write_fast",
-                "ue_verify_live_write_checkpoint",
+                "ue_live_write",
             ],
         )
         self.assertEqual(

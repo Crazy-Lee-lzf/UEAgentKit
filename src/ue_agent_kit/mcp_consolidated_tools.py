@@ -1163,10 +1163,93 @@ def register_animation_retarget_tool(
             return error_response("ue_animation_retarget", exc, read_only=False)
 
 
+LIVE_WRITE_ACTIONS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "plan_batch": ("ue_plan_live_write_batch", ("assets", "description")),
+    "apply_batch": (
+        "ue_apply_live_write_batch",
+        ("batch_plan_id", "confirmation", "change_set_id"),
+    ),
+    "recover_batch": (
+        "ue_recover_live_write_batch",
+        ("batch_execution_id", "mode", "confirmation"),
+    ),
+    "verify": ("ue_verify_live_write", ("asset_path", "live_apply_receipt", "change_set_id")),
+    "verify_fast": (
+        "ue_verify_live_write_fast",
+        ("asset_path", "live_apply_receipt", "change_set_id"),
+    ),
+    "verify_checkpoint": (
+        "ue_verify_live_write_checkpoint",
+        ("checkpoint_id", "change_set_id", "asset_path"),
+    ),
+}
+
+LIVE_WRITE_REQUIRED: dict[str, tuple[str, ...]] = {
+    "plan_batch": ("assets",),
+    "apply_batch": ("batch_plan_id", "confirmation", "change_set_id"),
+    "recover_batch": ("batch_execution_id",),
+    "verify": ("asset_path",),
+    "verify_fast": ("asset_path",),
+    "verify_checkpoint": ("checkpoint_id",),
+}
+
+
+def _live_write_call(raw: dict[str, Any], action: str) -> tuple[str, dict[str, Any]]:
+    if action not in LIVE_WRITE_ACTIONS:
+        raise ValueError(
+            f"ue_live_write: unknown action {action!r}; expected one of "
+            f"{sorted(LIVE_WRITE_ACTIONS)}."
+        )
+    for required in LIVE_WRITE_REQUIRED.get(action, ()):
+        if raw.get(required) is None:
+            raise ValueError(f"ue_live_write(action={action!r}) needs {required}.")
+    handler, accepted = LIVE_WRITE_ACTIONS[action]
+    params = {name: raw[name] for name in accepted if raw.get(name) is not None}
+    return handler, params
+
+
+def register_live_write_tool(
+    *,
+    server: Any,
+    handlers: dict[str, Any],
+    annotations: Any,
+    error_response: Any,
+) -> None:
+    """Register ``ue_live_write`` in front of the six live-write tools.
+
+    The caller passes the destructive annotations: the family can apply a batch,
+    save, recover and roll back.
+    """
+
+    @server.tool(annotations=annotations)
+    def ue_live_write(
+        action: str,
+        assets: list[dict[str, Any]] | None = None,
+        description: str | None = None,
+        batch_plan_id: str | None = None,
+        confirmation: str | None = None,
+        change_set_id: str | None = None,
+        batch_execution_id: str | None = None,
+        mode: str | None = None,
+        asset_path: str | None = None,
+        live_apply_receipt: str | None = None,
+        checkpoint_id: str | None = None,
+    ) -> dict[str, Any]:
+        """One live-write entry point: plan_batch, apply_batch, recover_batch, verify, verify_fast, verify_checkpoint."""
+
+        try:
+            handler_name, params = _live_write_call(locals(), action)
+            return handlers[handler_name](**params)
+        except (TypeError, ValueError, RuntimeError) as exc:
+            return error_response("ue_live_write", exc, read_only=False)
+
+
 __all__ = [
     "ASSET_PROPERTY_ACTIONS",
     "ASSET_PROPERTY_REQUIRED",
     "DATATABLE_ACTIONS",
+    "LIVE_WRITE_ACTIONS",
+    "LIVE_WRITE_REQUIRED",
     "MEMORY_KNOWLEDGE_ACTIONS",
     "MEMORY_READ_ACTIONS",
     "MEMORY_READ_REQUIRED",
@@ -1191,6 +1274,7 @@ __all__ = [
     "register_asset_property_tool",
     "register_consolidated_tools",
     "register_datatable_tool",
+    "register_live_write_tool",
     "register_memory_read_tool",
     "register_memory_write_tool",
 ]

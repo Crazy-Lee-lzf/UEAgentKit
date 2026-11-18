@@ -1572,9 +1572,9 @@ class TaskContextService:
             if isinstance(summary, dict) and summary.get("injectionText"):
                 expansions.append(
                     {
-                        "tool": "ue_memory_search",
+                        "tool": "ue_memory",
                         "reason": "explicit-memory-search-on-demand",
-                        "arguments": {"query": query},
+                        "arguments": {"action": "search", "query": query},
                     }
                 )
             # The automatic Memory section is L3/L2 injection only. Explicit

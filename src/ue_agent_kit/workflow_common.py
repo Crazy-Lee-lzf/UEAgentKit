@@ -313,7 +313,7 @@ def _live_write_memory_task_evidence(
             },
             "details": {
                 "workflowEvidenceSchemaVersion": MEMORY_TASK_EVIDENCE_SCHEMA_VERSION,
-                "workflowTool": "ue_verify_live_write",
+                "workflowTool": "ue_live_write(action=\"verify\")",
             },
         },
     }

@@ -80,7 +80,7 @@ ue_set_blueprint_default
 ue_set_component_property
 ue_set_pin_default
 ue_asset_property
-ue_verify_live_write
+ue_live_write(action="verify")
 ue_set_material_parameter
 ue_datatable
 ue_plan_patch
@@ -429,11 +429,11 @@ transaction_id    = Apply 结果中的 transactionId（精确 GUID）
 editor_session_id = Apply 结果中的 editorSessionId
 ```
 
-执行前重新校验 Session 身份、资产内存对象/Class/Package 身份、包未被保存、Editor Undo 栈顶就是该事务（`GetUndoContext` 的 TransactionId 与 PrimaryObject 匹配），并确认目标当前值仍等于本次 Apply 的 `afterValue`；目标被后续非事务修改时以 `live-editor-write-undo-target-changed` 拒绝，避免覆盖较新值。`GEditor->UndoTransaction(...)` 失败返回 `live-editor-write-undo-failed`，不得使用 Snapshot 伪装事务成功。回退成功后显式恢复写入前 Dirty 状态，并用写入前 Snapshot 读回验证目标值，Bridge 与 Workflow 记录同时删除（二次回退和后续 `ue_verify_live_write` 返回 not-found）。返回 `mode`（`LiveUndo`/`LiveDiscard`）、`operation`、`valueKind`、`assetPath`、`transactionId`、`editorSessionId`、回退前后值、`dirtyBefore`/`dirtyAfter` 与 `saved=false`/`diskRevisionChanged=false`；整个过程不触碰磁盘、SQLite 或 Revision Export。
+执行前重新校验 Session 身份、资产内存对象/Class/Package 身份、包未被保存、Editor Undo 栈顶就是该事务（`GetUndoContext` 的 TransactionId 与 PrimaryObject 匹配），并确认目标当前值仍等于本次 Apply 的 `afterValue`；目标被后续非事务修改时以 `live-editor-write-undo-target-changed` 拒绝，避免覆盖较新值。`GEditor->UndoTransaction(...)` 失败返回 `live-editor-write-undo-failed`，不得使用 Snapshot 伪装事务成功。回退成功后显式恢复写入前 Dirty 状态，并用写入前 Snapshot 读回验证目标值，Bridge 与 Workflow 记录同时删除（二次回退和后续 `ue_live_write(action="verify")` 返回 not-found）。返回 `mode`（`LiveUndo`/`LiveDiscard`）、`operation`、`valueKind`、`assetPath`、`transactionId`、`editorSessionId`、回退前后值、`dirtyBefore`/`dirtyAfter` 与 `saved=false`/`diskRevisionChanged=false`；整个过程不触碰磁盘、SQLite 或 Revision Export。
 
-### `ue_verify_live_write`（Apply → Save → Verify → Memory 闭环）
+### `ue_live_write(action="verify")`（Apply → Save → Verify → Memory 闭环）
 
-该规划类 Tool 把一次 Live Apply 收尾成标准闭环：`ue_asset_property(action="apply")`（返回并 Journal 化 `liveApplyReceipt`）→ 用户显式 `ue_save_authorized_asset` Preview/Commit → `ue_verify_live_write(asset_path, live_apply_receipt="")`。显式 Receipt 精确选择记录；为空时选择该资产最新待处理记录，以兼容旧 Client。
+该规划类 Tool 把一次 Live Apply 收尾成标准闭环：`ue_asset_property(action="apply")`（返回并 Journal 化 `liveApplyReceipt`）→ 用户显式 `ue_save_authorized_asset` Preview/Commit → `ue_live_write(action="verify")(asset_path, live_apply_receipt="")`。显式 Receipt 精确选择记录；为空时选择该资产最新待处理记录，以兼容旧 Client。
 
 - 每个发生实际变更的 Apply 记录原子写入固定 Work Root 的 `live-write-journal`；Authorized Save 更新为 saved，成功 Undo/Discard 或成功 Verify 删除。Server 重启只恢复通过 Schema、Project、Operation、Target、Transaction 和生命周期校验的记录。
 - Apply/Save 返回 `journalPersisted`。Journal I/O 失败不会反转已经成功的 Editor 操作，只在 `ue_workflow_status.liveWriteJournal` 中报告 `pendingRecordCount`、`recoveredRecordCount` 与 `journalErrorCount`。
@@ -460,7 +460,7 @@ ue_asset_property(action="apply")
 ue_asset_property(action="undo")
 ue_asset_property(action="discard")
 ue_save_authorized_asset
-ue_verify_live_write
+ue_live_write(action="verify")
 ue_apply_patch
 ue_verify_asset
 ```
@@ -562,7 +562,7 @@ Evaluator 重新生成同一 Plan，只消费当前适用 Evidence，不执行 C
 live write applied
   -> ue_save_authorized_asset
 persisted but not independently verified
-  -> ue_verify_live_write / ue_verify_asset
+  -> ue_live_write(action="verify") / ue_verify_asset
 verified persistence, semantic not checked
   -> ue_analyze_semantic_diff(stage=verified)
 semantic state known, obligations unknown

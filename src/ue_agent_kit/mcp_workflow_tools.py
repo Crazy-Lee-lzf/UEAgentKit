@@ -9,6 +9,7 @@ from .mcp_consolidated_tools import (
     register_animation_scale_fix_tool,
     register_asset_property_tool,
     register_datatable_tool,
+    register_live_write_tool,
 )
 from .animation_scale_fix_batch import AnimationScaleFixBatchService
 from .batch_recovery import BatchRecoveryService
@@ -751,6 +752,14 @@ def register_workflow_tools(
             )
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_plan_patch", exc, read_only=False)
+
+    # A0/P2: one tool replaces the six live-write tools.
+    register_live_write_tool(
+        server=server,
+        handlers=handlers,
+        annotations=destructive_annotations,
+        error_response=error_response,
+    )
 
     @server.tool(annotations=planning_annotations)
     def ue_plan_live_write_batch(

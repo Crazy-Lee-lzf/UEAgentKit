@@ -1448,7 +1448,7 @@ class AgentWorkflowTests(unittest.TestCase):
         names = consolidated_tool_names_for_mode(
             live_editor_enabled=True, workflow_enabled=True
         )
-        self.assertEqual(len(names), 87)
+        self.assertEqual(len(names), 82)
         self.assertIn("ue_pie", names)
         self.assertIn("ue_datatable", names)
         self.assertNotIn("ue_get_pie_world_contexts", names)
@@ -1459,14 +1459,13 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertIn("ue_evaluate_trust_verdict", names)
         self.assertIn("ue_asset_property", names)
         self.assertNotIn("ue_set_asset_property", names)
-        self.assertIn("ue_verify_live_write", names)
-        self.assertIn("ue_verify_live_write_checkpoint", names)
+        self.assertIn("ue_live_write", names)
         self.assertIn("ue_animation_scale_fix", names)
         self.assertIn("ue_animation_retarget", names)
         self.assertNotIn("ue_start_animation_retarget_postprocess", names)
         self.assertEqual(names.count("ue_asset_property"), 1)
         self.assertEqual(names.count("ue_animation_scale_fix"), 1)
-        self.assertEqual(names.count("ue_verify_live_write"), 1)
+        self.assertEqual(names.count("ue_live_write"), 1)
         self.assertEqual(len(set(names)), len(names))
 
     def test_live_asset_property_write_requires_live_and_commit_modes(self) -> None:
@@ -2775,7 +2774,8 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertEqual(saved["childUnrealProcessCount"], 0)
         self.assertEqual(saved["afterRevision"], saved_revision)
         self.assertEqual(saved["liveApplyReceipt"], applied["liveApplyReceipt"])
-        self.assertEqual(saved["nextActions"][0]["tool"], "ue_verify_live_write_fast")
+        self.assertEqual(saved["nextActions"][0]["tool"], "ue_live_write")
+        self.assertEqual(saved["nextActions"][0]["arguments"]["action"], "verify_fast")
         self.assertEqual(package_file.read_bytes(), saved_bytes)
 
     def test_resident_save_allows_continuous_edit_without_refresh_or_restart(self) -> None:
@@ -2980,7 +2980,8 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertTrue(saved["saved"])
         self.assertEqual(saved["liveApplyReceipt"], applied["liveApplyReceipt"])
         self.assertTrue(saved["liveWriteSaved"])
-        self.assertEqual(saved["nextActions"][0]["tool"], "ue_verify_live_write")
+        self.assertEqual(saved["nextActions"][0]["tool"], "ue_live_write")
+        self.assertEqual(saved["nextActions"][0]["arguments"]["action"], "verify")
 
         saved_change_set = service.get_change_set(change_set_id)
         self.assertEqual(saved_change_set["status"], "saved")

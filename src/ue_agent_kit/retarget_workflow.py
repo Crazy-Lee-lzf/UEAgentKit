@@ -996,7 +996,7 @@ class RetargetWorkflowMixin:
                 outcome="succeeded" if verified else "failed",
                 revision_set=revision_set,
                 validation_report_id=validation_report_id,
-                workflow_tool="ue_verify_animation_retarget_batch",
+                workflow_tool="ue_animation_retarget(action=\"verify_batch\")",
                 state="verified" if verified else "failed",
             )
             return {
@@ -1238,7 +1238,7 @@ class RetargetWorkflowMixin:
                 outcome="rolledBack" if rollback_ok else "failed",
                 revision_set=revision_set,
                 validation_report_id="",
-                workflow_tool="ue_rollback_animation_retarget_batch",
+                workflow_tool="ue_animation_retarget(action=\"rollback_batch\")",
                 state="rolled-back" if rollback_ok else "failed",
             )
             return {
