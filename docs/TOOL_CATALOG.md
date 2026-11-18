@@ -13,7 +13,7 @@
 | `read` | + memory | 17 | 需要 Project Memory 的只读会话 |
 | `live` | + live-read、realtime | **48** | 连 Editor 做只读诊断（PIE / 图 / 资产） |
 | `live-write` | + live-action | 58 | 需要受控写入（原子 patch、Niagara 参数） |
-| `full` | + workflow、source-control | 108 | 离线批处理 / 源控；仍需各自的开关 |
+| `full` | + workflow、source-control | 95 | 离线批处理 / 源控；仍需各自的开关 |
 
 ```powershell
 python scripts\ue-agent-mcp.py --enable-live-editor --tool-profile live ...

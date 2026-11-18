@@ -11,6 +11,7 @@ from .character_ground_contact import build_ground_contact_item
 from .editor_bridge import LiveEditorBridgeService, LiveEditorError
 from .skeletal_secondary_motion import build_secondary_motion_item
 from .retarget_postprocess import RetargetPostprocessService
+from .mcp_consolidated_tools import register_animation_retarget_tool
 
 RETARGET_INSPECT_CAPABILITY = "retarget.inspect"
 RETARGET_PLAN_CAPABILITY = "retarget.plan"
@@ -445,6 +446,15 @@ def register_retarget_workflow_tools(
 
     postprocess_service = RetargetPostprocessService(workflow_service)
 
+    # A0/P2: one tool replaces the fourteen retarget workflow tools.
+    handlers: dict[str, Any] = {}
+    register_animation_retarget_tool(
+        server=server,
+        handlers=handlers,
+        annotations=destructive_annotations,
+        error_response=error_response,
+    )
+
     @server.tool(annotations=planning_annotations)
     def ue_plan_animation_retarget(
         sourceMesh: str,
@@ -723,3 +733,13 @@ def register_retarget_workflow_tools(
             )
         except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
             return error_response("ue_rollback_animation_retarget_batch", exc, read_only=False)
+
+    # Every per-verb retarget tool above is a local callable; the facade
+    # dispatches to these exact objects.
+    handlers.update(
+        {
+            name: value
+            for name, value in list(locals().items())
+            if name.startswith("ue_") and callable(value)
+        }
+    )

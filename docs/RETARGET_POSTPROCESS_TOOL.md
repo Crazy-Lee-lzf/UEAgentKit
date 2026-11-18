@@ -19,12 +19,12 @@ Other / Unknown
 ## 2. 工具
 
 ```text
-ue_start_animation_retarget_postprocess
-ue_get_animation_retarget_postprocess
-ue_plan_animation_retarget_postprocess
+ue_animation_retarget(action="start_postprocess")
+ue_animation_retarget(action="get_postprocess")
+ue_animation_retarget(action="plan_postprocess")
 ```
 
-来源必须是当前 MCP session 中状态为 `completed` 或 `saved` 的 Retarget Batch Task。P3 context 是纯读取接口，不会像 `ue_get_animation_retarget_batch` 一样推进 queued task。
+来源必须是当前 MCP session 中状态为 `completed` 或 `saved` 的 Retarget Batch Task。P3 context 是纯读取接口，不会像 `ue_animation_retarget(action="get_batch")` 一样推进 queued task。
 
 Retarget Batch 输出现在额外返回：
 
@@ -126,28 +126,28 @@ P3 第一阶段只生成只读 Suggested Plan。第二阶段把它安全接到 P
 Retarget Batch Complete
 → P3 Audit + Suggested Plan
 → User Review
-→ Authorized Retarget Save (ue_save_animation_retarget_batch)
-→ Independent Verify (ue_verify_animation_retarget_batch)
-→ paired Revision Export + SQLite Refresh (ue_refresh_animation_retarget_postprocess_index Preview/Apply)
+→ Authorized Retarget Save (ue_animation_retarget(action="save_batch"))
+→ Independent Verify (ue_animation_retarget(action="verify_batch"))
+→ paired Revision Export + SQLite Refresh (ue_animation_retarget(action="refresh_postprocess_index") Preview/Apply)
 → MCP Restart
-→ Reopen persisted Plan (ue_reopen_animation_retarget_postprocess)
+→ Reopen persisted Plan (ue_animation_retarget(action="reopen_postprocess"))
 → Revalidate against fresh Index Revision (ue_get_asset_state / re-audit)
 → convert eligible AnimSequence suggestions to existing P2 Batch Plan (ue_animation_scale_fix(action="plan_batch"))
 ```
 
 ### 7.1 Retarget Output Index Refresh
 
-新增工具 `ue_refresh_animation_retarget_postprocess_index`（`retarget.batch` 能力，Preview/Apply）：
+新增工具 `ue_animation_retarget(action="refresh_postprocess_index")`（`retarget.batch` 能力，Preview/Apply）：
 
 - 前置：Retarget Task `status = saved` 且 `independentValidation.verified = true`，且已生成不可变 Suggested Plan。
 - 范围：仅 `root-lock-candidate` / `root-track-candidate` 的 AnimSequence 输出。
 - Preview：复用 `prepare_batch_index_refresh_candidate` 逐批准备独立 Export candidate（零写入），并把 candidate Revision 与独立验证 Revision 比对，不一致 fail-stop。
 - Apply：复用 `apply_batch_index_refresh` 一次性原子切换 paired SQLite + Revision Export generation，确认短语 `REFRESH RETARGET POSTPROCESS <postprocessId>`，成功后当前 session 必须重启。
 
-P3 不复制第二套 Package Save / Index 写入；Save/Verify/Rollback 继续复用 `ue_save_animation_retarget_batch` / `ue_verify_animation_retarget_batch` / `ue_rollback_animation_retarget_batch`，Index 原子生成复用 P2 的 paired snapshot 基础设施。
+P3 不复制第二套 Package Save / Index 写入；Save/Verify/Rollback 继续复用 `ue_animation_retarget(action="save_batch")` / `ue_animation_retarget(action="verify_batch")` / `ue_animation_retarget(action="rollback_batch")`，Index 原子生成复用 P2 的 paired snapshot 基础设施。
 
 ### 7.2 Restart 后重建可信上下文
 
-新增只读工具 `ue_reopen_animation_retarget_postprocess(planRelativePath)`：从固定 WorkRoot 下 `retarget-postprocess/<postprocessId>/plan.json` 重读不可变 Suggested Plan，返回输出路径、suggestions、executionBoundary 与重新计算的 SHA-256 digest。重启后内存 record 丢失，Agent 应依赖该持久化 artifact + fresh Index 重新验证，而不是信任重启前的运行时求值。
+新增只读工具 `ue_animation_retarget(action="reopen_postprocess")(planRelativePath)`：从固定 WorkRoot 下 `retarget-postprocess/<postprocessId>/plan.json` 重读不可变 Suggested Plan，返回输出路径、suggestions、executionBoundary 与重新计算的 SHA-256 digest。重启后内存 record 丢失，Agent 应依赖该持久化 artifact + fresh Index 重新验证，而不是信任重启前的运行时求值。
 
 之后再单独处理 BlendSpace / AimOffset / Montage 引用更新。Additive + Base Pose 仍属于 P4，不在 P3 中绕过。

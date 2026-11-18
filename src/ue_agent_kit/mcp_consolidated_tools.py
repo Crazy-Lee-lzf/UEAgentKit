@@ -1023,6 +1023,146 @@ def register_asset_property_tool(
             return error_response("ue_asset_property", exc, read_only=False)
 
 
+RETARGET_ACTIONS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "plan": (
+        "ue_plan_animation_retarget",
+        ("sourceMesh", "targetMesh", "includeOptionalChains", "outputDirectory"),
+    ),
+    "apply_setup": (
+        "ue_apply_animation_retarget_setup",
+        ("planId", "confirmation", "changeSetId", "updateExisting", "allowLargePoseOffset"),
+    ),
+    "start_batch": (
+        "ue_start_animation_retarget_batch",
+        (
+            "planId",
+            "retargeter",
+            "sourceAssets",
+            "outputDirectory",
+            "naming",
+            "overwriteExisting",
+            "includeReferencedAssets",
+            "exportOnlyAnimatedBones",
+            "retainAdditiveFlags",
+        ),
+    ),
+    "get_batch": ("ue_get_animation_retarget_batch", ("taskId",)),
+    "cancel_batch": ("ue_cancel_animation_retarget_batch", ("taskId",)),
+    "save_batch": (
+        "ue_save_animation_retarget_batch",
+        ("taskId", "confirmation", "changeSetId"),
+    ),
+    "verify_batch": ("ue_verify_animation_retarget_batch", ("taskId",)),
+    "rollback_batch": (
+        "ue_rollback_animation_retarget_batch",
+        ("taskId", "mode", "rollbackDryRunReceipt", "confirmation"),
+    ),
+    "start_postprocess": (
+        "ue_start_animation_retarget_postprocess",
+        ("retargetTaskId", "loadIfNeeded", "batchSize"),
+    ),
+    "get_postprocess": ("ue_get_animation_retarget_postprocess", ("postprocessId",)),
+    "plan_postprocess": (
+        "ue_plan_animation_retarget_postprocess",
+        ("postprocessId", "description"),
+    ),
+    "reopen_postprocess": (
+        "ue_reopen_animation_retarget_postprocess",
+        ("planRelativePath",),
+    ),
+    "refresh_postprocess_index": (
+        "ue_refresh_animation_retarget_postprocess_index",
+        ("postprocessId", "mode", "confirmation", "refreshReceipt", "maxAssets"),
+    ),
+    "validate": ("ue_validate_animation_retarget", ("retargeter", "animationPaths")),
+}
+
+RETARGET_REQUIRED: dict[str, tuple[str, ...]] = {
+    "plan": ("sourceMesh", "targetMesh"),
+    "apply_setup": ("planId", "confirmation"),
+    "start_batch": ("planId", "retargeter", "sourceAssets"),
+    "get_batch": ("taskId",),
+    "cancel_batch": ("taskId",),
+    "save_batch": ("taskId", "confirmation"),
+    "verify_batch": ("taskId",),
+    "rollback_batch": ("taskId",),
+    "start_postprocess": ("retargetTaskId",),
+    "get_postprocess": ("postprocessId",),
+    "plan_postprocess": ("postprocessId",),
+    "reopen_postprocess": ("planRelativePath",),
+    "refresh_postprocess_index": ("postprocessId",),
+    "validate": ("retargeter", "animationPaths"),
+}
+
+
+def _retarget_call(raw: dict[str, Any], action: str) -> tuple[str, dict[str, Any]]:
+    if action not in RETARGET_ACTIONS:
+        raise ValueError(
+            f"ue_animation_retarget: unknown action {action!r}; expected one of "
+            f"{sorted(RETARGET_ACTIONS)}."
+        )
+    for required in RETARGET_REQUIRED.get(action, ()):
+        if raw.get(required) is None:
+            raise ValueError(f"ue_animation_retarget(action={action!r}) needs {required}.")
+    handler, accepted = RETARGET_ACTIONS[action]
+    params = {name: raw[name] for name in accepted if raw.get(name) is not None}
+    return handler, params
+
+
+def register_animation_retarget_tool(
+    *,
+    server: Any,
+    handlers: dict[str, Any],
+    annotations: Any,
+    error_response: Any,
+) -> None:
+    """Register ``ue_animation_retarget`` in front of the fourteen retarget tools.
+
+    The caller passes the destructive annotations: the family can apply a setup,
+    run batches, save and roll back.
+    """
+
+    @server.tool(annotations=annotations)
+    def ue_animation_retarget(
+        action: str,
+        sourceMesh: str | None = None,
+        targetMesh: str | None = None,
+        includeOptionalChains: bool | None = None,
+        outputDirectory: str | None = None,
+        planId: str | None = None,
+        confirmation: str | None = None,
+        changeSetId: str | None = None,
+        updateExisting: bool | None = None,
+        allowLargePoseOffset: bool | None = None,
+        retargeter: str | None = None,
+        sourceAssets: list[str] | None = None,
+        naming: dict[str, Any] | None = None,
+        overwriteExisting: bool | None = None,
+        includeReferencedAssets: bool | None = None,
+        exportOnlyAnimatedBones: bool | None = None,
+        retainAdditiveFlags: bool | None = None,
+        taskId: str | None = None,
+        mode: str | None = None,
+        rollbackDryRunReceipt: str | None = None,
+        retargetTaskId: str | None = None,
+        loadIfNeeded: bool | None = None,
+        batchSize: int | None = None,
+        postprocessId: str | None = None,
+        description: str | None = None,
+        planRelativePath: str | None = None,
+        refreshReceipt: str | None = None,
+        maxAssets: int | None = None,
+        animationPaths: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """One animation retarget entry point: plan, apply_setup, start/get/cancel/save/verify/rollback batch, and the postprocess actions."""
+
+        try:
+            handler_name, params = _retarget_call(locals(), action)
+            return handlers[handler_name](**params)
+        except (TypeError, ValueError, RuntimeError) as exc:
+            return error_response("ue_animation_retarget", exc, read_only=False)
+
+
 __all__ = [
     "ASSET_PROPERTY_ACTIONS",
     "ASSET_PROPERTY_REQUIRED",
@@ -1034,6 +1174,8 @@ __all__ = [
     "MEMORY_WRITE_ACTIONS",
     "MEMORY_WRITE_REQUIRED",
     "PIE_ACTIONS",
+    "RETARGET_ACTIONS",
+    "RETARGET_REQUIRED",
     "SCALE_FIX_ACTIONS",
     "SCALE_FIX_REQUIRED",
     "datatable_change",
@@ -1044,6 +1186,7 @@ __all__ = [
     "pie_scalars_params",
     "pie_state_params",
     "pie_world_contexts_params",
+    "register_animation_retarget_tool",
     "register_animation_scale_fix_tool",
     "register_asset_property_tool",
     "register_consolidated_tools",
