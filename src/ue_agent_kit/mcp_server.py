@@ -367,6 +367,12 @@ def _capabilities_response(
         live_editor_enabled
         and (tool_profile is None or tool_profile_allows(tool_profile, "ue_pie"))
     )
+    # The memory hand-off only exists when the write facade is callable.
+    memory_handoff = bool(
+        memory_enabled
+        and write_tools_enabled
+        and (tool_profile is None or tool_profile_allows(tool_profile, "ue_memory_write"))
+    )
     experimental_registered = bool(live_editor_enabled and experimental_graph_layout_apply)
     observed_capabilities = (
         live_editor_status.get("capabilities")
@@ -1008,7 +1014,7 @@ def _capabilities_response(
             "l0EventCount": memory_status.l0_event_count if memory_status is not None else 0,
             "pendingL0EventCount": (memory_status.pending_l0_event_count if memory_status is not None else 0),
             "evidenceChainCount": (memory_status.evidence_chain_count if memory_status is not None else 0),
-            "tools": MEMORY_TOOL_NAMES if memory_enabled else [],
+            "tools": _profile_visible_names(MEMORY_TOOL_NAMES, tool_profile) if memory_enabled else [],
             "recordTypes": [
                 "projectFact",
                 "projectRule",
@@ -1031,14 +1037,14 @@ def _capabilities_response(
             "progressiveContextLevels": [0, 1, 2, 3, 4],
             "contextTokenEstimateRule": "approximately 4 chars per token",
             "revisionAware": True,
-            "workflowEvidenceHandoff": bool(memory_enabled and write_tools_enabled),
+            "workflowEvidenceHandoff": memory_handoff,
             "workflowEvidenceSourceTools": (
-                ["ue_verify_asset", "ue_rollback_patch"] if memory_enabled and write_tools_enabled else []
+                ["ue_verify_asset", "ue_rollback_patch"] if memory_handoff else []
             ),
-            "workflowEvidenceTargetTool": ("ue_memory_write" if memory_enabled and write_tools_enabled else ""),
-            "workflowEvidenceTargetAction": ("record_task" if memory_enabled and write_tools_enabled else ""),
+            "workflowEvidenceTargetTool": ("ue_memory_write" if memory_handoff else ""),
+            "workflowEvidenceTargetAction": ("record_task" if memory_handoff else ""),
             "workflowEvidenceArgumentsPath": (
-                "memoryTaskEvidence.arguments" if memory_enabled and write_tools_enabled else ""
+                "memoryTaskEvidence.arguments" if memory_handoff else ""
             ),
             "vectorDatabase": False,
             "arbitraryDatabaseArguments": False,

@@ -824,7 +824,7 @@ Project Memory 是可选的独立持久化层，不属于会被替换的 immutab
 --memory-database <fixed-memory.sqlite3>
 ```
 
-若只启用 Project Memory，Server Mode 为 `fixed-project-memory`。Memory Database 和 Project Key 均在启动时固定：数据库路径来自 Server 配置，Project Key 来自当前索引的 `metadata.project_key`。六个 `ue_memory_*` Tool 均不接受数据库、索引、项目或文件系统路径参数。
+若只启用 Project Memory，Server Mode 为 `fixed-project-memory`。Memory Database 和 Project Key 均在启动时固定：数据库路径来自 Server 配置，Project Key 来自当前索引的 `metadata.project_key`。`ue_memory` 与 `ue_memory_write` 两个入口均不接受数据库、索引、项目或文件系统路径参数。
 
 Tool 分组：
 

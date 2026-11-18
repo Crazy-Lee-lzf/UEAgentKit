@@ -1005,6 +1005,25 @@ class McpServerTests(unittest.TestCase):
             self.assertNotIn(replaced, [entry["name"] for entry in capabilities["tools"]])
 
     @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
+    def test_capabilities_do_not_advertise_profile_hidden_memory_tools(self) -> None:
+        memory_service = ProjectMemoryService(
+            database_path=self.temp_root / "hidden-memory.sqlite3",
+            project_key="测试项目",
+        )
+        server = create_mcp_server(
+            self.database_path,
+            memory_service=memory_service,
+            tool_profile="core",
+        )
+        names = [tool.name for tool in asyncio.run(server.list_tools())]
+        _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
+        self.assertNotIn("ue_memory", names)
+        self.assertNotIn("ue_memory_write", names)
+        self.assertEqual(capabilities["projectMemory"]["tools"], [])
+        self.assertFalse(capabilities["projectMemory"]["workflowEvidenceHandoff"])
+        self.assertEqual(capabilities["projectMemory"]["workflowEvidenceTargetTool"], "")
+
+    @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
     def test_fastmcp_registers_read_only_status_and_query_tools(self) -> None:
         server = create_mcp_server(self.database_path)
         tools = asyncio.run(server.list_tools())
