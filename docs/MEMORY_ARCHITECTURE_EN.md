@@ -153,22 +153,22 @@ Do not split ordinary reading, writing, maintenance, and TODO behavior into seve
 These tools are available in 0.8.0:
 
 ```text
-ue_memory_get_context
-ue_memory_expand_node
-ue_memory_get_evidence
-ue_memory_update_knowledge
-ue_memory_update_work
+ue_memory(action="get_context")
+ue_memory(action="expand_node")
+ue_memory(action="get_evidence")
+ue_memory_write(action=<knowledge sub-action>)
+ue_memory_write(action=<work sub-action>)
 ```
 
-`ue_memory_get_context` is the normal first entry point and returns only the necessary Project Profile fragment, matched paths, system summaries, related Active Work, and suggested next actions.
+`ue_memory(action="get_context")` is the normal first entry point and returns only the necessary Project Profile fragment, matched paths, system summaries, related Active Work, and suggested next actions.
 
-`ue_memory_expand_node` expands one stable path to a requested depth and detail level.
+`ue_memory(action="expand_node")` expands one stable path to a requested depth and detail level.
 
-`ue_memory_get_evidence` retrieves evidence only when a conclusion must be proven.
+`ue_memory(action="get_evidence")` retrieves evidence only when a conclusion must be proven.
 
-`ue_memory_update_knowledge` handles node creation, summary updates, durable conclusion writes, duplicate checks, and confirmation requirements.
+`ue_memory_write(action=<knowledge sub-action>)` handles node creation, summary updates, durable conclusion writes, duplicate checks, and confirmation requirements.
 
-`ue_memory_update_work` manages `start`, `add_todo`, `block`, `complete`, `cancel`, and `set_next_action` actions.
+`ue_memory_write(action=<work sub-action>)` manages `start`, `add_todo`, `block`, `complete`, `cancel`, and `set_next_action` actions.
 
 Deterministic Task Records, Revision Sets, and Workflow Evidence remain automatic outputs of UEAgentKit workflows rather than free-form agent writes. Active Work, Change Sets, Editor Sessions, and final Evidence are not yet automatically bound into one unified task object; that is cross-cutting integration work and does not block realtime CRUD expansion. Latency benchmarks for the Knowledge Tree, FTS, Context assembly, and large Memory databases are also still pending.
 
@@ -261,7 +261,7 @@ Implemented:
 1. An arbitrary-depth Knowledge Tree with a Project Profile root.
 2. Optional Knowledge Node bindings for all six existing record types.
 3. Separate Active Work, TODO, blocker, and next-action state handling.
-4. `ue_memory_get_context`, `ue_memory_expand_node`, and on-demand Evidence retrieval.
+4. `ue_memory(action="get_context")`, `ue_memory(action="expand_node")`, and on-demand Evidence retrieval.
 5. Levels 0–4 progressive disclosure, deterministic character budgets, default status filters, and structured `nextActions`.
 6. Fixed-project high-level Knowledge/Work update tools and backward-compatible audit exports.
 

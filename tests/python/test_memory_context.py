@@ -192,7 +192,11 @@ class MemoryContextTests(unittest.TestCase):
         self.assertTrue(context["nextActions"])
         self.assertIn(
             context["nextActions"][0]["tool"],
-            {"ue_memory_get", "ue_memory_get_evidence", "ue_memory_expand_node"},
+            {"ue_memory"},
+        )
+        self.assertIn(
+            context["nextActions"][0]["arguments"]["action"],
+            {"get", "get_evidence", "expand_node"},
         )
         self.assertEqual(context["usage"]["estimatedTokens"], estimate_tokens(context["usage"]["usedChars"]))
 

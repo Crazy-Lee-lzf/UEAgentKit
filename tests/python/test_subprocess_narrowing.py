@@ -124,8 +124,8 @@ class SubprocessWorkflowGateTests(unittest.TestCase):
             workflow_config=_config(self.paths, enabled=False),
         )
         disabled_names = {tool.name for tool in asyncio.run(disabled.list_tools())}
-        self.assertNotIn("ue_set_pin_default", disabled_names)
-        self.assertNotIn("ue_apply_patch", disabled_names)
+        self.assertNotIn("ue_set_property", disabled_names)
+        self.assertNotIn("ue_patch", disabled_names)
         self.assertIn("ue_get_subprocess_ledger", disabled_names)
 
         enabled = create_mcp_server(
@@ -133,8 +133,8 @@ class SubprocessWorkflowGateTests(unittest.TestCase):
             workflow_config=_config(self.paths, enabled=True),
         )
         enabled_names = {tool.name for tool in asyncio.run(enabled.list_tools())}
-        self.assertIn("ue_set_pin_default", enabled_names)
-        self.assertIn("ue_apply_patch", enabled_names)
+        self.assertIn("ue_set_property", enabled_names)
+        self.assertIn("ue_patch", enabled_names)
         self.assertGreater(len(enabled_names), len(disabled_names))
         self.assertIsNotNone(index)
 

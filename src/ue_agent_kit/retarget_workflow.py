@@ -996,7 +996,7 @@ class RetargetWorkflowMixin:
                 outcome="succeeded" if verified else "failed",
                 revision_set=revision_set,
                 validation_report_id=validation_report_id,
-                workflow_tool="ue_verify_animation_retarget_batch",
+                workflow_tool="ue_animation_retarget(action=\"verify_batch\")",
                 state="verified" if verified else "failed",
             )
             return {
@@ -1015,7 +1015,7 @@ class RetargetWorkflowMixin:
                 "memoryTaskEvidence": evidence,
                 "nextStep": (
                     "The saved outputs were independently reloaded and match disk. If Memory is enabled, "
-                    "pass memoryTaskEvidence.arguments unchanged to ue_memory_record_task."
+                    "pass memoryTaskEvidence.arguments unchanged to ue_memory_write."
                     if verified
                     else "Resolve the independent verification failures before trusting the saved outputs."
                 ),
@@ -1238,7 +1238,7 @@ class RetargetWorkflowMixin:
                 outcome="rolledBack" if rollback_ok else "failed",
                 revision_set=revision_set,
                 validation_report_id="",
-                workflow_tool="ue_rollback_animation_retarget_batch",
+                workflow_tool="ue_animation_retarget(action=\"rollback_batch\")",
                 state="rolled-back" if rollback_ok else "failed",
             )
             return {
@@ -1281,8 +1281,9 @@ class RetargetWorkflowMixin:
         backup_manifest_ref = f"backup-manifest:{task['taskId']}" if entries else "backup-manifest:not-applicable"
         return {
             "schemaVersion": "1.0",
-            "tool": "ue_memory_record_task",
+            "tool": "ue_memory_write",
             "arguments": {
+                "action": "record_task",
                 "task_key": f"retarget:{task['planId']}",
                 "title": f"Animation retarget batch {task['taskId']}",
                 "conclusion": conclusion,

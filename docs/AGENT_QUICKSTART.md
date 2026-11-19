@@ -25,6 +25,10 @@ Project: Config/DefaultEngine.ini -> [UEAgentKit] SubprocessWorkflow=True
 Policy: 目标资产/操作在 Write Policy 范围内
 ```
 
+档位不要忘：直接启动 `ue-agent-mcp.py` 时默认档位是 `core`（只有 query 组），
+写入/实验需要 `--tool-profile full` 或 `--tool-profile live-write`，
+也可以用 `--tool-groups` 直接点名分组（例如 `query,workflow`）。
+
 实验 Blueprint 写入不走 Write Policy，另需 `--enable-experimental-graphpatch-edit` + `[UEAgentKit] ExperimentalGraphPatchEdit=True`；创建 Registry 节点再加 `--enable-experimental-node-spawn` + `[UEAgentKit] ExperimentalNodeSpawn=True`。
 
 ## 2. 用户一次性接入
@@ -65,16 +69,16 @@ SQLite 是保存时的快照；Live Editor 是当前内存。`ue_get_asset` 如�
 **默认不写。** 仅在用户明确要求、服务端已开 workflow 门禁、目标受 Write Policy 覆盖、Revision / Dirty / 身份检查通过时执行：
 
 ```text
-ue_plan_patch
-→ ue_dry_run_patch
+ue_patch(action="plan")
+→ ue_patch(action="dry_run")
 → 向用户展示目标资产、Diff、风险，取得明确授权
-→ ue_apply_patch（一次性 Receipt / 精确确认）
+→ ue_patch(action="apply")（一次性 Receipt / 精确确认）
 → 显式 Save（如需要）
-→ ue_verify_asset（独立验证）
+→ ue_patch(action="verify")（独立验证）
 → 返回已保存/已验证/失败项
 ```
 
-对已在 Editor 中打开、干净的单个非 Blueprint 资产，也可使用 `ue_apply_asset_property_live` 修改内存值；它进入 Undo 栈并标记 Dirty，但**不保存**。保存必须另调 `ue_save_authorized_asset`；放弃用 `ue_undo_asset_property_live` / `ue_discard_asset_property_live`。
+对已在 Editor 中打开、干净的单个非 Blueprint 资产，也可使用 `ue_asset_property(action="apply")` 修改内存值；它进入 Undo 栈并标记 Dirty，但**不保存**。保存必须另调 `ue_blueprint_edit(action="save")`；放弃用 `ue_asset_property(action="undo")` / `ue_asset_property(action="discard")`。
 
 注意：
 

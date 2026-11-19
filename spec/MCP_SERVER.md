@@ -36,7 +36,7 @@ ue_get_selection
 ue_get_open_assets
 ue_get_dirty_assets
 ue_get_current_level
-ue_get_pie_state
+ue_pie
 ue_get_output_log
 ue_get_compile_errors
 ue_inspect_asset_live
@@ -76,34 +76,25 @@ BackupRoot
 并额外注册：
 
 ```text
-ue_set_blueprint_default
-ue_set_component_property
-ue_set_pin_default
-ue_set_asset_property
-ue_apply_asset_property_live
-ue_undo_asset_property_live
-ue_discard_asset_property_live
-ue_verify_live_write
-ue_set_asset_reference_property
-ue_set_asset_structured_property
-ue_set_material_parameter
-ue_set_datatable_cell
-ue_set_datatable_row_fields
-ue_add_datatable_row
-ue_remove_datatable_row
-ue_rename_datatable_row
-ue_plan_patch
-ue_dry_run_patch
-ue_apply_patch
-ue_verify_asset
-ue_get_asset_state
-ue_refresh_asset_index
-ue_rollback_patch
+ue_set_property(action="blueprint_default")
+ue_set_property(action="component_property")
+ue_set_property(action="pin_default")
+ue_asset_property
+ue_live_write(action="verify")
+ue_set_property(action="material_parameter")
+ue_datatable
+ue_patch(action="plan")
+ue_patch(action="dry_run")
+ue_patch(action="apply")
+ue_patch(action="verify")
+ue_patch(action="state")
+ue_patch(action="refresh_index")
+ue_patch(action="rollback")
 ```
 
-只有再使用 `-EnableCommitTools`，且固定 Policy 的 `commitEnabled=true`，`ue_apply_patch` 与 rollback Commit 才能写入项目资产。`ue_refresh_asset_index` 不修改 `.uasset`，但会修改 UE Agent Kit 自己的活动索引 Generation，因此标记为 `readOnlyHint=false`、`destructiveHint=false`。
+只有再使用 `-EnableCommitTools`，且固定 Policy 的 `commitEnabled=true`，`ue_patch(action="apply")` 与 rollback Commit 才能写入项目资产。`ue_patch(action="refresh_index")` 不修改 `.uasset`，但会修改 UE Agent Kit 自己的活动索引 Generation，因此标记为 `readOnlyHint=false`、`destructiveHint=false`。
 
-### `ue_get_asset_state`
+### `ue_patch(action="state")`
 
 只接受一个精确 `/Game/...Asset.Asset`，并只在固定项目工作流模式注册。该 Tool 为 `readOnlyHint=true`，汇总：
 
@@ -116,7 +107,7 @@ sqlite           会话冻结 SQLite Revision
 
 总体状态包括 `synchronized`、`memory-dirty`、`disk-newer-than-snapshots`、`sqlite-outdated`、`revision-export-outdated`、`persistent-sources-diverged` 和 `incomplete`。结果同时返回 `saveRequired`、`indexRefreshRequired`、`refreshBlockedByDirtyMemory` 与 `recommendedAction`。`loaded-saved` 只表示内存 Package 未 Dirty，不等于内存与磁盘经过加密哈希证明相同。
 
-### `ue_refresh_asset_index`
+### `ue_patch(action="refresh_index")`
 
 该 Tool 只接受：
 
@@ -153,7 +144,7 @@ Live Editor 能力分为三组，成功结果均标记 `source=live-editor-memor
 - `ue_get_open_assets`：`UAssetEditorSubsystem` 中打开的资产，最多 200 项。
 - `ue_get_dirty_assets`：Dirty `/Game/` Package 和 Asset Registry 路径，最多 200 项。
 - `ue_get_current_level`：Editor World、Persistent/Current Level、World Partition 和 Dirty 状态。
-- `ue_get_pie_state`：`stopped`、`playing` 或 `simulating`，以及 Play World/Net Mode。
+- `ue_pie`：只读 PIE 统一入口，`action` 取 `state`、`worlds`、`list_actors`、`inspect_actor`、`scalars`、`list_properties`、`read_properties`，转发到原有的 7 个 Bridge 端点（端点与参数不变，逐动词 MCP Tool 不再单独注册）。`state` 返回 `stopped`、`playing` 或 `simulating`，以及 Play World/Net Mode。
 - `ue_get_output_log`：4096 条内存环形缓冲，支持 Category、最低 Verbosity、关键词、UTC 范围、PIE Session、`since_sequence` 和最多 100 条分页读取。
 - `ue_get_compile_errors`：读取 Bridge 当前会话捕获到的编译相关 Warning/Error，并补充最多 100 个已加载 Blueprint 的 `Status` 与截断信息；返回 `historyComplete=false`，不冒充完整 Message Log 历史。
 - `ue_inspect_asset_live`：只接受精确 `/Game/...Asset.Asset`，返回 Asset Registry 和已加载对象状态；使用 `StaticFindObject`，不触发加载，并明确返回 `loadedByBridge=false`。
@@ -278,7 +269,7 @@ include_memory        默认 true
 max_output_tokens     默认 4096，范围 256–32768
 ```
 
-返回结构按 `request / project / targetAssets / relevantAssets / memory / activeWork / liveEditor / revisionState / changeSet / correlation / risks / nextExpansions / degradedSources / outputBudget` 组织。每个事实带 `source`；Revision 状态来自 SQLite / Revision Export / 磁盘 Package 三方 SHA-256 比较；Memory 摘要复用有界 `ue_memory_get_context`；Live Editor 摘要复用 Bridge 的 `editor.getEditorContext`；Change Set 复用 journal 状态机。
+返回结构按 `request / project / targetAssets / relevantAssets / memory / activeWork / liveEditor / revisionState / changeSet / correlation / risks / nextExpansions / degradedSources / outputBudget` 组织。每个事实带 `source`；Revision 状态来自 SQLite / Revision Export / 磁盘 Package 三方 SHA-256 比较；Memory 摘要复用有界 `ue_memory(action="get_context")`；Live Editor 摘要复用 Bridge 的 `editor.getEditorContext`；Change Set 复用 journal 状态机。
 
 - `risks` 只包含确定性事实：`target-dirty-in-editor`、`asset-stale`、`asset-revision-unavailable`、`target-not-indexed`、`memory-stale-records`、`memory-conflicted-records`、`change-set-not-found`、`change-set-terminal`、`work-item-not-found`、`relevant-assets-search-failed` 等；不包含模型推断，禁止把猜测混成事实。
 - 某一来源不可用时只降级对应 section（例如 Offline 模式 `revisionState.available=false, reason=revision-export-not-configured`，Live Editor 未启用时 `liveEditor.reason=live-editor-disabled`），不会让整个请求失败；降级明细在 `degradedSources` 中显式列出。
@@ -385,26 +376,26 @@ Blueprint commandlet 使用已有 `setVariableDefault`，persisted/verified 均 
 常见修改优先使用以下 Tool，Agent 不需要填写底层 Operation 名称或 Patch Target：
 
 ```text
-ue_set_blueprint_default    variable_name + value
-ue_set_component_property   component_name + property_path + value
-ue_set_pin_default           graph_guid + node_guid + pin_name + value
-ue_set_asset_property        property_path + value
-ue_set_asset_reference_property  property_path + reference object or null
-ue_set_asset_structured_property   property_path + stable structured value
-ue_set_material_parameter    parameter_name + parameter_type + value
-ue_set_datatable_cell        row_name + field_name + value
-ue_set_datatable_row_fields   row_name + values
-ue_add_datatable_row          row_name + values
-ue_remove_datatable_row       row_name
-ue_rename_datatable_row       row_name + new_row_name
+ue_set_property(action="blueprint_default")    variable_name + value
+ue_set_property(action="component_property")   component_name + property_path + value
+ue_set_property(action="pin_default")           graph_guid + node_guid + pin_name + value
+ue_asset_property(action="set")        property_path + value
+ue_asset_property(action="set_reference")  property_path + reference object or null
+ue_asset_property(action="set_structured")   property_path + stable structured value
+ue_set_property(action="material_parameter")    parameter_name + parameter_type + value
+ue_datatable action=set_cell         row_name + field_name + value
+ue_datatable action=set_row_fields   row_name + values
+ue_datatable action=add_row          row_name + values
+ue_datatable action=remove_row       row_name
+ue_datatable action=rename_row       row_name + new_row_name
 ```
 
 
-`ue_set_asset_reference_property` maps to `setAssetReferenceProperty` and accepts `null` or an exact `{referenceType, path}` object. It only targets Data Asset top-level Object/Class/Soft Object/Soft Class properties and does not broaden the scalar `ue_set_asset_property` contract.
+`ue_asset_property(action="set_reference")` maps to `setAssetReferenceProperty` and accepts `null` or an exact `{referenceType, path}` object. It only targets Data Asset top-level Object/Class/Soft Object/Soft Class properties and does not broaden the scalar `ue_asset_property(action="set")` contract.
 
-`ue_set_asset_structured_property` maps to `setAssetStructuredProperty`. It replaces one Data Asset top-level Struct/Array/Set/Map with the Reader-exported stable schema; Struct fields must be complete and Set/Map entries must be uniquely sorted by Canonical JSON. Commit remains a separate `ue_apply_patch` step.
+`ue_asset_property(action="set_structured")` maps to `setAssetStructuredProperty`. It replaces one Data Asset top-level Struct/Array/Set/Map with the Reader-exported stable schema; Struct fields must be complete and Set/Map entries must be uniquely sorted by Canonical JSON. Commit remains a separate `ue_patch(action="apply")` step.
 
-`ue_add_datatable_row` accepts an optional 0–32-field scalar object. `ue_remove_datatable_row` and `ue_rename_datatable_row` generate low-level Operations with the required explicit `value=true` acknowledgement. All three still follow Plan → Dry Run → one-time receipt → explicit Commit and the existing backup/verification/rollback gates.
+`ue_datatable(action="add_row")` accepts an optional 0–32-field scalar object. `ue_datatable(action="remove_row")` and `ue_datatable(action="rename_row")` generate low-level Operations with the required explicit `value=true` acknowledgement. All three still follow Plan → Dry Run → one-time receipt → explicit Commit and the existing backup/verification/rollback gates.
 
 所有高层 Tool 都要求完整 Unreal Object Path，并支持：
 
@@ -413,11 +404,11 @@ mode=Plan     仅创建并校验严格 Plan，默认值
 mode=DryRun   自动执行 Plan -> Unreal Dry Run，返回 planId 与 dryRunReceipt
 ```
 
-高层 Tool **不提供 Commit 模式**。实际保存仍必须调用 `ue_apply_patch`，携带高层 Dry Run 返回的一次性 `dryRunReceipt`，并使用精确 `COMMIT <planId>` 确认。这样高层易用性不会绕过 Policy、Revision、新鲜度、备份、验证或 rollback 安全门。
+高层 Tool **不提供 Commit 模式**。实际保存仍必须调用 `ue_patch(action="apply")`，携带高层 Dry Run 返回的一次性 `dryRunReceipt`，并使用精确 `COMMIT <planId>` 确认。这样高层易用性不会绕过 Policy、Revision、新鲜度、备份、验证或 rollback 安全门。
 
-### `ue_apply_asset_property_live`
+### `ue_asset_property(action="apply")`
 
-该破坏性 Tool 属于 Workflow 写入 Tool；执行时必须同时启用 Live Editor、Workflow Write 与 Commit 三项启动能力。它不接受任意资产、属性或 Policy，而是只接受当前会话已有的高层 Plan 结果（`ue_set_asset_property(mode=Plan)`、`ue_set_asset_reference_property(mode=Plan)`、`ue_set_asset_structured_property(mode=Plan)` 或 `ue_set_material_parameter(mode=Plan)`）：
+该破坏性 Tool 属于 Workflow 写入 Tool；执行时必须同时启用 Live Editor、Workflow Write 与 Commit 三项启动能力。它不接受任意资产、属性或 Policy，而是只接受当前会话已有的高层 Plan 结果（`ue_asset_property(action="set")(mode=Plan)`、`ue_asset_property(action="set_reference")(mode=Plan)`、`ue_asset_property(action="set_structured")(mode=Plan)` 或 `ue_set_property(action="material_parameter")(mode=Plan)`）：
 
 ```text
 plan_id      = 当前会话有效 Plan ID
@@ -428,7 +419,7 @@ confirmation = LIVE APPLY <planId>
 
 成功时在 Game Thread 中通过 `FScopedTransaction`、`Modify()`、`PostEditChangeProperty()`（材质参数复用 `UMaterialEditingLibrary` 刷新）和 `MarkPackageDirty()` 修改当前 Editor 内存，返回 `operation`、`valueKind`、Before/After、Dirty、Editor Session 与 Undo 事务证据；成功修改额外返回稳定 `transactionId`（已提交 Editor Undo Transaction 的 GUID）供显式 Undo/Discard 使用；引用写入还返回 `referenceType`、`referenceConstraintClass`、`referencePath` 与 `resolvedReferenceClass`，结构化写入还返回 `structuredKind`、`structuredSchema`、`diff` 与 `diffTruncated`，材质参数写入还返回 `parameterName`、`parameterType` 与 `parameterAssociation=Global`，DataTable 写入还返回 `rowName`、`dataTableKind`（`cell`/`row-fields`/`row-add`/`row-remove`/`row-rename`）与 `rowStructPath`（`setDataTableCell` 附加 `fieldName`、`renameDataTableRow` 附加 `newRowName`）。失败会恢复原值、原 Dirty 状态并取消 Transaction，No-op 不制造 Undo 或 Dirty。该 Tool 始终返回 `saved=false`、`diskRevisionChanged=false`，不会调用 `SavePackage`；用户可在编辑器中检查或撤销，持久化仍需单独走现有授权保存流程。
 
-### `ue_undo_asset_property_live` / `ue_discard_asset_property_live`
+### `ue_asset_property(action="undo")` / `ue_asset_property(action="discard")`
 
 两个破坏性 Tool 显式回退一个精确已确认的 Live Apply，不需要新 Plan：Undo 通过 `GEditor->UndoTransaction(true)` 撤销（可 Redo），Discard 通过 `GEditor->UndoTransaction(false)` 丢弃。Bridge 记录键为 Asset Path + Transaction GUID，Workflow 通过同一 Transaction/Session 身份关闭对应 Receipt；不会按资产名模糊撤销，也不会任意遍历 Undo 历史。
 
@@ -438,18 +429,18 @@ transaction_id    = Apply 结果中的 transactionId（精确 GUID）
 editor_session_id = Apply 结果中的 editorSessionId
 ```
 
-执行前重新校验 Session 身份、资产内存对象/Class/Package 身份、包未被保存、Editor Undo 栈顶就是该事务（`GetUndoContext` 的 TransactionId 与 PrimaryObject 匹配），并确认目标当前值仍等于本次 Apply 的 `afterValue`；目标被后续非事务修改时以 `live-editor-write-undo-target-changed` 拒绝，避免覆盖较新值。`GEditor->UndoTransaction(...)` 失败返回 `live-editor-write-undo-failed`，不得使用 Snapshot 伪装事务成功。回退成功后显式恢复写入前 Dirty 状态，并用写入前 Snapshot 读回验证目标值，Bridge 与 Workflow 记录同时删除（二次回退和后续 `ue_verify_live_write` 返回 not-found）。返回 `mode`（`LiveUndo`/`LiveDiscard`）、`operation`、`valueKind`、`assetPath`、`transactionId`、`editorSessionId`、回退前后值、`dirtyBefore`/`dirtyAfter` 与 `saved=false`/`diskRevisionChanged=false`；整个过程不触碰磁盘、SQLite 或 Revision Export。
+执行前重新校验 Session 身份、资产内存对象/Class/Package 身份、包未被保存、Editor Undo 栈顶就是该事务（`GetUndoContext` 的 TransactionId 与 PrimaryObject 匹配），并确认目标当前值仍等于本次 Apply 的 `afterValue`；目标被后续非事务修改时以 `live-editor-write-undo-target-changed` 拒绝，避免覆盖较新值。`GEditor->UndoTransaction(...)` 失败返回 `live-editor-write-undo-failed`，不得使用 Snapshot 伪装事务成功。回退成功后显式恢复写入前 Dirty 状态，并用写入前 Snapshot 读回验证目标值，Bridge 与 Workflow 记录同时删除（二次回退和后续 `ue_live_write(action="verify")` 返回 not-found）。返回 `mode`（`LiveUndo`/`LiveDiscard`）、`operation`、`valueKind`、`assetPath`、`transactionId`、`editorSessionId`、回退前后值、`dirtyBefore`/`dirtyAfter` 与 `saved=false`/`diskRevisionChanged=false`；整个过程不触碰磁盘、SQLite 或 Revision Export。
 
-### `ue_verify_live_write`（Apply → Save → Verify → Memory 闭环）
+### `ue_live_write(action="verify")`（Apply → Save → Verify → Memory 闭环）
 
-该规划类 Tool 把一次 Live Apply 收尾成标准闭环：`ue_apply_asset_property_live`（返回并 Journal 化 `liveApplyReceipt`）→ 用户显式 `ue_save_authorized_asset` Preview/Commit → `ue_verify_live_write(asset_path, live_apply_receipt="")`。显式 Receipt 精确选择记录；为空时选择该资产最新待处理记录，以兼容旧 Client。
+该规划类 Tool 把一次 Live Apply 收尾成标准闭环：`ue_asset_property(action="apply")`（返回并 Journal 化 `liveApplyReceipt`）→ 用户显式 `ue_blueprint_edit(action="save")` Preview/Commit → `ue_live_write(action="verify")(asset_path, live_apply_receipt="")`。显式 Receipt 精确选择记录；为空时选择该资产最新待处理记录，以兼容旧 Client。
 
 - 每个发生实际变更的 Apply 记录原子写入固定 Work Root 的 `live-write-journal`；Authorized Save 更新为 saved，成功 Undo/Discard 或成功 Verify 删除。Server 重启只恢复通过 Schema、Project、Operation、Target、Transaction 和生命周期校验的记录。
 - Apply/Save 返回 `journalPersisted`。Journal I/O 失败不会反转已经成功的 Editor 操作，只在 `ue_workflow_status.liveWriteJournal` 中报告 `pendingRecordCount`、`recoveredRecordCount` 与 `journalErrorCount`。
 - 若目标包仍 Dirty：返回 `state=not-saved` 终态（`saved=false`、`verified=false`、`undoAvailable=true`、磁盘 Revision 未变），不伪装成功；`memoryTaskEvidence` 以 `cancelled` 结论记录“未持久化，可保存或撤销”，并明确 `independentReload=false`，因为该分支没有启动独立重载。下一步提示继续授权保存或 Undo/Discard；成功回退会直接关闭待处理 Live Apply 记录。
 - 若包干净但未经过授权保存（外部保存/手工撤销/Session 分叉）：拒绝 `live-write-verify-save-unauthorized` 并要求重新 Plan。
 - 若已授权保存：独立 Unreal 进程重载磁盘资产；Data Asset、Material Instance 与 DataTable 复用 `RunAssetCatalog.ps1`，Blueprint apply report 则复用既有 `RunExport.ps1 -Profile full -Format json -IncludeUnchangedDefaults`，同时保留 defaults/components 与 graph/pin Canonical。验证校验导出的资产路径、干净的 SHA-256 Revision 与磁盘一致、Revision 相对冻结索引已变化，并按 Kind 提取导出值与应用时 `afterValue` 做 JSON 级比对。DataTable Rename 按 `newRowName` 提取目标行，其余 DataTable 操作按 `rowName`；通过后返回 `state=verified`、`actualRevision`、`expectedValue`/`exportedValue`、`undoAvailable=false`，并生成独立重载 `memoryTaskEvidence`。
-- `memoryRecorded=false` 恒定：Memory Task Record 由 `ue_memory_record_task` 落库，其失败会如实报错，本 Tool 从不声称 Memory 已写入。
+- `memoryRecorded=false` 恒定：Memory Task Record 由 `ue_memory_write(action="record_task")` 落库，其失败会如实报错，本 Tool 从不声称 Memory 已写入。
 
 该 Tool 不执行 Save All、不自动保存、不保存非授权资产、不让 Memory 反向覆盖源资产；本身不写磁盘、不修改 SQLite/Revision Export。
 
@@ -458,20 +449,20 @@ editor_session_id = Apply 结果中的 editorSessionId
 Change Set 是任务级 Live Write 容器，不替代单次 Plan、Transaction、Receipt、Save 或 Verify。启用 Workflow 时额外注册：
 
 ```text
-ue_create_change_set(title, task_id="")
-ue_get_change_set(change_set_id)
+ue_change_set(action="create")(title, task_id="")
+ue_change_set(action="get")(change_set_id)
 ```
 
 创建结果包含固定 `changeSetId`、`taskId`、`editorSessionId`、`title` 和 `status=planned`。以下既有 Tool 接受可选 `change_set_id`：
 
 ```text
-ue_apply_asset_property_live
-ue_undo_asset_property_live
-ue_discard_asset_property_live
-ue_save_authorized_asset
-ue_verify_live_write
-ue_apply_patch
-ue_verify_asset
+ue_asset_property(action="apply")
+ue_asset_property(action="undo")
+ue_asset_property(action="discard")
+ue_blueprint_edit(action="save")
+ue_live_write(action="verify")
+ue_patch(action="apply")
+ue_patch(action="verify")
 ```
 
 传入 Change Set 后，每个 Apply 会绑定其 `planId/assetPath/operation/transactionId/editorSessionId/liveApplyReceipt`。后续 Undo、Discard、Save 和 Verify 必须属于同一 Change Set，不能借用其他任务的 Receipt。
@@ -491,11 +482,11 @@ failed
 unknown
 ```
 
-`ue_get_change_set` 还返回 `affectedAssets`、`transactionIds`、`validation` 和 `saveState` 聚合。成功 Undo/Discard/Verify 不删除历史 Operation；Server 重启后，无法用当前 Editor Session 和 Live Journal 重新证明的运行时状态标记为 `unknown`。最多保留 50 个 Change Set、每个最多 100 个 Operation；容量清理只删除终态记录，若全部仍活跃则拒绝新建，不静默丢失活跃任务。
+`ue_change_set(action="get")` 还返回 `affectedAssets`、`transactionIds`、`validation` 和 `saveState` 聚合。成功 Undo/Discard/Verify 不删除历史 Operation；Server 重启后，无法用当前 Editor Session 和 Live Journal 重新证明的运行时状态标记为 `unknown`。最多保留 50 个 Change Set、每个最多 100 个 Operation；容量清理只删除终态记录，若全部仍活跃则拒绝新建，不静默丢失活跃任务。
 
-`ue_apply_patch` 与 `ue_verify_asset` 的可选 `change_set_id` 为 commandlet workflow bridge，必须绑定同一 Plan/Apply receipt/资产。expected no-op 使用 `noop_*` Operation ID，公共 payload 返回 `noOp=true`；它是终态但没有伪造的 LiveApply receipt、transaction、journal、save 或 verify。Change Set journal 自身的持久化结果与 Live journal 分开报告。
+`ue_patch(action="apply")` 与 `ue_patch(action="verify")` 的可选 `change_set_id` 为 commandlet workflow bridge，必须绑定同一 Plan/Apply receipt/资产。expected no-op 使用 `noop_*` Operation ID，公共 payload 返回 `noOp=true`；它是终态但没有伪造的 LiveApply receipt、transaction、journal、save 或 verify。Change Set journal 自身的持久化结果与 Live journal 分开报告。
 
-`ue_set_material_parameter.parameter_type` 仅接受 `Scalar`、`Vector`、`Texture` 或 `StaticSwitch`，Server 映射到现有四个已注册 Operation。高层 Tool 只覆盖当前稳定 Operation；`ue_plan_patch` 继续保留，供已注册但尚无高层封装的 Operation 使用。
+`ue_set_property(action="material_parameter").parameter_type` 仅接受 `Scalar`、`Vector`、`Texture` 或 `StaticSwitch`，Server 映射到现有四个已注册 Operation。高层 Tool 只覆盖当前稳定 Operation；`ue_patch(action="plan")` 继续保留，供已注册但尚无高层封装的 Operation 使用。
 
 Live Write 稳定错误包括 `live-editor-write-disabled`、`live-editor-required`、`live-editor-write-confirmation-required`、`live-editor-write-not-allowed`、`live-editor-write-operation-unsupported`、`live-editor-write-asset-not-loaded`、`live-editor-write-asset-not-open`、`live-editor-write-blueprint-unsupported`、`live-editor-write-package-invalid`、`live-editor-write-package-dirty`、`live-editor-write-property-not-found`、`live-editor-write-property-not-editable`、`live-editor-write-property-type-unsupported`、`live-editor-write-value-invalid`、`live-editor-write-material-instance-required`、`live-editor-write-material-parameter-invalid`、`live-editor-write-material-parameter-not-found`、`live-editor-write-material-texture-invalid`、`live-editor-write-material-apply-failed`、`live-editor-write-data-table-required`、`live-editor-write-data-table-row-invalid`、`live-editor-write-data-table-row-not-found`、`live-editor-write-data-table-row-exists`、`live-editor-write-data-table-field-unsupported`、`live-editor-write-data-table-value-invalid`、`live-editor-write-data-table-row-referenced`、`live-editor-write-data-table-apply-failed`、`live-editor-write-undo-not-found`、`live-editor-write-undo-transaction-mismatch`、`live-editor-write-undo-session-mismatch`、`live-editor-write-undo-asset-mismatch`、`live-editor-write-undo-stack-mismatch`、`live-editor-write-undo-package-saved`、`live-editor-write-undo-target-changed`、`live-editor-write-undo-failed`、`live-editor-write-undo-verify-failed`、`live-write-verify-not-found`、`live-write-verify-save-unauthorized`、`live-editor-write-verify-not-loaded`、`live-write-verify-export-failed`、`live-write-verify-export-invalid`、`live-write-verify-revision-mismatch`、`live-write-verify-revision-unchanged`、`live-write-verify-value-mismatch` 和 `live-editor-write-apply-failed`。
 
@@ -569,9 +560,9 @@ Evaluator 重新生成同一 Plan，只消费当前适用 Evidence，不执行 C
 
 ```text
 live write applied
-  -> ue_save_authorized_asset
+  -> ue_blueprint_edit(action="save")
 persisted but not independently verified
-  -> ue_verify_live_write / ue_verify_asset
+  -> ue_live_write(action="verify") / ue_patch(action="verify")
 verified persistence, semantic not checked
   -> ue_analyze_semantic_diff(stage=verified)
 semantic state known, obligations unknown
@@ -658,7 +649,7 @@ workflow-report-invalid      报告不是有效 JSON Object
 
 ## 底层写入工作流 Tool
 
-### `ue_plan_patch`
+### `ue_patch(action="plan")`
 
 输入资产路径、已注册 Operation、语义 Target 和 JSON Value。Server：
 
@@ -674,7 +665,7 @@ Plan 只在当前 Server 会话有效。
 
 该 Plan 检查是提前反馈，不替代执行期安全判断。UE Commandlet 在 Remove/Rename 实际修改前使用当前 Asset Registry 和完整 `FAssetIdentifier(Package, Object, RowName)` 再次检查；发现 Referencer 时以退出码 17 零写入拒绝。当前不自动重写引用方，也不使用字符串模糊扫描。
 
-### `ue_dry_run_patch`
+### `ue_patch(action="dry_run")`
 
 按 `planId` 调用现有 `RunPatch.ps1 -Mode DryRun`，并要求：
 
@@ -688,7 +679,7 @@ beforeRevision==afterRevision
 
 成功后返回一次性 `dryRunReceipt`。
 
-### `ue_apply_patch`
+### `ue_patch(action="apply")`
 
 要求：
 
@@ -700,11 +691,11 @@ beforeRevision==afterRevision
 
 成功后生成外部备份、Backup Manifest 和 `applyReceipt`。同一 Dry Run Receipt 不能重复 Commit。
 
-### `ue_verify_asset`
+### `ue_patch(action="verify")`
 
 使用独立 Unreal Editor 进程重新导出目标资产，并核对 Object Path 与 Commit 后 SHA-256 Revision。非 Blueprint 使用 `RunAssetCatalog.ps1`；Blueprint apply report 使用既有 `RunExport.ps1` 的 `full/json/IncludeUnchangedDefaults` 路由，确保同一 Canonical 能验证变量 defaults、component overrides 与 pin defaults。该 Tool 不修改项目资产，但会在固定 Work Root 写验证报告，因此 MCP Annotation 不是纯 read-only。
 
-### `ue_rollback_patch`
+### `ue_patch(action="rollback")`
 
 分两阶段：
 
@@ -828,26 +819,26 @@ Project Memory 是可选的独立持久化层，不属于会被替换的 immutab
 --memory-database <fixed-memory.sqlite3>
 ```
 
-若只启用 Project Memory，Server Mode 为 `fixed-project-memory`。Memory Database 和 Project Key 均在启动时固定：数据库路径来自 Server 配置，Project Key 来自当前索引的 `metadata.project_key`。六个 `ue_memory_*` Tool 均不接受数据库、索引、项目或文件系统路径参数。
+若只启用 Project Memory，Server Mode 为 `fixed-project-memory`。Memory Database 和 Project Key 均在启动时固定：数据库路径来自 Server 配置，Project Key 来自当前索引的 `metadata.project_key`。`ue_memory` 与 `ue_memory_write` 两个入口均不接受数据库、索引、项目或文件系统路径参数。
 
 Tool 分组：
 
 ```text
 Read:
-  ue_memory_search
-  ue_memory_get
+  ue_memory(action="search")
+  ue_memory(action="get")
 
 Persistent planning actions:
-  ue_memory_add_rule
-  ue_memory_record_finding
-  ue_memory_record_task
-  ue_memory_mark_superseded
-  ue_memory_validate
+  ue_memory_write(action="add_rule")
+  ue_memory_write(action="record_finding")
+  ue_memory_write(action="record_task")
+  ue_memory_write(action="mark_superseded")
+  ue_memory_write(action="validate")
 ```
 
-`ue_memory_record_task` 固定写入 `taskRecord + tool-observed`，只接受终态 `succeeded`、`failed`、`rolledBack` 或 `cancelled`。它必须绑定最终结论、Patch、Backup Manifest、Validation Evidence 和至少一个稳定 Revision；Artifact 引用不能是绝对本机路径或父目录穿越路径。
+`ue_memory_write(action="record_task")` 固定写入 `taskRecord + tool-observed`，只接受终态 `succeeded`、`failed`、`rolledBack` 或 `cancelled`。它必须绑定最终结论、Patch、Backup Manifest、Validation Evidence 和至少一个稳定 Revision；Artifact 引用不能是绝对本机路径或父目录穿越路径。
 
-`ue_memory_validate` 使用当前固定 SQLite 的 `assets.revision_value`，仅更新 Memory Status，不修改索引或 Unreal Asset。完整数据模型和状态规则见 [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md)。
+`ue_memory_write(action="validate")` 使用当前固定 SQLite 的 `assets.revision_value`，仅更新 Memory Status，不修改索引或 Unreal Asset。完整数据模型和状态规则见 [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md)。
 
 ## Workflow 与 Project Memory 证据交接
 
@@ -855,11 +846,12 @@ Persistent planning actions:
 
 ```text
 workflowEvidenceHandoff = true
-workflowEvidenceSourceTools = [ue_verify_asset, ue_rollback_patch]
-workflowEvidenceTargetTool = ue_memory_record_task
+workflowEvidenceSourceTools = [ue_patch(action="verify"), ue_patch(action="rollback")]
+workflowEvidenceTargetTool = ue_memory_write
+workflowEvidenceTargetAction = record_task
 workflowEvidenceArgumentsPath = memoryTaskEvidence.arguments
 ```
 
-`ue_verify_asset` 只有在独立 UE 重载确认 Asset Path 与最终 Revision 完全一致后，才返回 `outcome=succeeded` 的 `memoryTaskEvidence`。`ue_rollback_patch` 只有在 Commit 恢复和独立验证均成功后，才返回 `outcome=rolledBack` 的同格式证据包。两者的 `arguments` 都可以直接作为 `ue_memory_record_task` 参数。Agent 不得从日志文本、文件路径或会话 Receipt 自行重建证据。
+`ue_patch(action="verify")` 只有在独立 UE 重载确认 Asset Path 与最终 Revision 完全一致后，才返回 `outcome=succeeded` 的 `memoryTaskEvidence`。`ue_patch(action="rollback")` 只有在 Commit 恢复和独立验证均成功后，才返回 `outcome=rolledBack` 的同格式证据包。两者的 `arguments` 都可以直接作为 `ue_memory_write(action="record_task")` 参数。Agent 不得从日志文本、文件路径或会话 Receipt 自行重建证据。
 
 仅启用 Memory、未启用 Workflow 时，`workflowEvidenceHandoff=false`，不会暗示存在可验证的写入证据来源。

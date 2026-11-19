@@ -48,6 +48,9 @@ from ue_agent_kit.tool_registry import (  # noqa: E402
     LIVE_EDITOR_TOOL_NAMES,
     QUERY_TOOL_NAMES,
     TOOL_DEFINITIONS_BY_NAME,
+    consolidated_tool_names_for_mode,
+    effective_tool_names_for_selection,
+    parse_tool_groups,
     tool_names_for_mode,
 )
 
@@ -159,8 +162,9 @@ class FakeWorkflowService:
             "reportId": report_id,
             "memoryTaskEvidence": {
                 "schemaVersion": "1.0",
-                "tool": "ue_memory_record_task",
+                "tool": "ue_memory_write",
                 "arguments": {
+                    "action": "record_task",
                     "task_key": "patch:plan_test",
                     "title": "Verified patch plan_test",
                     "conclusion": (
@@ -244,8 +248,9 @@ class FakeWorkflowService:
                     "verificationReportId": verification_report_id,
                     "memoryTaskEvidence": {
                         "schemaVersion": "1.0",
-                        "tool": "ue_memory_record_task",
+                        "tool": "ue_memory_write",
                         "arguments": {
+                            "action": "record_task",
                             "task_key": "rollback:plan_test",
                             "title": "Rolled back patch plan_test",
                             "conclusion": (
@@ -896,6 +901,33 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(payload["index"]["tool"], "ue_index_status")
         self.assertEqual(payload["index"]["stats"]["counts"]["assets"], 2)
         self.assertFalse(payload["projectMemoryEnabled"])
+        self.assertEqual(payload["toolSelection"], {"profile": "core", "groups": ["query"]})
+
+        groups_output = io.StringIO()
+        with contextlib.redirect_stdout(groups_output):
+            groups_exit_code = mcp_main(
+                [
+                    "--database",
+                    str(self.database_path),
+                    "--tool-groups",
+                    "query,workflow",
+                    "--check",
+                ]
+            )
+        self.assertEqual(groups_exit_code, 0)
+        groups_payload = json.loads(groups_output.getvalue())
+        self.assertEqual(
+            groups_payload["toolSelection"],
+            {"profile": "custom", "groups": ["query", "workflow"]},
+        )
+
+        bad_output = io.StringIO()
+        with contextlib.redirect_stderr(bad_output):
+            bad_exit_code = mcp_main(
+                ["--database", str(self.database_path), "--tool-groups", "nope", "--check"]
+            )
+        self.assertEqual(bad_exit_code, 1)
+        self.assertEqual(json.loads(bad_output.getvalue())["error"]["code"], "invalid-arguments")
 
         memory_path = self.temp_root / "check-memory.sqlite3"
         memory_output = io.StringIO()
@@ -953,6 +985,136 @@ class McpServerTests(unittest.TestCase):
         self.assertTrue(live_payload["liveEditorEnabled"])
         self.assertEqual(live_payload["liveEditor"]["state"], "unavailable")
         self.assertEqual(live_payload["liveEditor"]["reasonCode"], "live-editor-unavailable")
+
+    @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
+    def test_narrow_profile_with_live_editor_still_starts(self) -> None:
+        # A profile only hides groups: startup must not fail because the
+        # strict-argument pass looks for a tool the profile left unregistered.
+        server = create_mcp_server(
+            self.database_path,
+            live_editor_service=FakeLiveEditorService(),
+            tool_profile="core",
+        )
+        tools = asyncio.run(server.list_tools())
+        self.assertEqual([tool.name for tool in tools], tool_names_for_mode())
+
+    @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
+    def test_capabilities_do_not_advertise_profile_hidden_tools(self) -> None:
+        server = create_mcp_server(
+            self.database_path,
+            live_editor_service=FakeLiveEditorService(),
+            tool_profile="core",
+        )
+        names = [tool.name for tool in asyncio.run(server.list_tools())]
+        _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
+        self.assertEqual([entry["name"] for entry in capabilities["tools"]], names)
+        self.assertEqual(capabilities["liveEditor"]["tools"], [])
+        self.assertFalse(capabilities["liveEditor"]["pieRuntimeInspection"]["available"])
+        self.assertFalse(capabilities["liveEditor"]["pieScalarInspection"]["available"])
+
+    @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
+    def test_capabilities_match_registration_with_workflow_profile(self) -> None:
+        server = create_mcp_server(
+            self.database_path,
+            workflow_service=FakeWorkflowService(),
+            tool_profile="full",
+        )
+        names = [tool.name for tool in asyncio.run(server.list_tools())]
+        _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
+        self.assertEqual([entry["name"] for entry in capabilities["tools"]], names)
+        self.assertIn("ue_datatable", names)
+        for replaced in (
+            "ue_set_datatable_cell",
+            "ue_set_datatable_row_fields",
+            "ue_add_datatable_row",
+            "ue_remove_datatable_row",
+            "ue_rename_datatable_row",
+        ):
+            self.assertNotIn(replaced, names)
+            self.assertNotIn(replaced, [entry["name"] for entry in capabilities["tools"]])
+
+    @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
+    def test_tool_groups_expose_exactly_the_requested_groups(self) -> None:
+        memory_service = ProjectMemoryService(
+            database_path=self.temp_root / "groups-memory.sqlite3",
+            project_key="测试项目",
+        )
+        server = create_mcp_server(
+            self.database_path,
+            live_editor_service=FakeLiveEditorService(),
+            workflow_service=FakeWorkflowService(),
+            memory_service=memory_service,
+            tool_groups="query,memory",
+        )
+        names = [tool.name for tool in asyncio.run(server.list_tools())]
+        expected = effective_tool_names_for_selection(
+            parse_tool_groups("query,memory"),
+            live_editor_enabled=True,
+            workflow_enabled=True,
+            memory_enabled=True,
+        )
+        self.assertEqual(names, expected)
+        # The live-read group is not in the selection, so its tools are gone even
+        # though the services are wired.
+        self.assertNotIn("ue_pie", names)
+        self.assertIn("ue_memory", names)
+
+        _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
+        self.assertEqual(capabilities["toolProfile"], "custom")
+        self.assertEqual(capabilities["toolGroups"], ["query", "memory"])
+        advertised = [entry["name"] for entry in capabilities["tools"]]
+        self.assertEqual(advertised, names)
+
+    @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
+    def test_capabilities_do_not_advertise_profile_hidden_memory_tools(self) -> None:
+        memory_service = ProjectMemoryService(
+            database_path=self.temp_root / "hidden-memory.sqlite3",
+            project_key="测试项目",
+        )
+        server = create_mcp_server(
+            self.database_path,
+            memory_service=memory_service,
+            tool_profile="core",
+        )
+        names = [tool.name for tool in asyncio.run(server.list_tools())]
+        _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
+        self.assertNotIn("ue_memory", names)
+        self.assertNotIn("ue_memory_write", names)
+        self.assertEqual(capabilities["projectMemory"]["tools"], [])
+        self.assertFalse(capabilities["projectMemory"]["workflowEvidenceHandoff"])
+        self.assertEqual(capabilities["projectMemory"]["workflowEvidenceTargetTool"], "")
+
+    @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
+    def test_memory_handoff_claims_only_callable_ends(self) -> None:
+        memory_service = ProjectMemoryService(
+            database_path=self.temp_root / "handoff-memory.sqlite3",
+            project_key="测试项目",
+        )
+        # read keeps the facades but hides the workflow tools that produce the
+        # evidence, so the hand-off must not be claimed there.
+        read_server = create_mcp_server(
+            self.database_path,
+            workflow_service=FakeWorkflowService(),
+            memory_service=memory_service,
+            tool_profile="read",
+        )
+        _, read_capabilities = asyncio.run(read_server.call_tool("ue_get_capabilities", {}))
+        read_contract = read_capabilities["projectMemory"]
+        self.assertEqual(read_contract["tools"], ["ue_memory", "ue_memory_write"])
+        self.assertFalse(read_contract["workflowEvidenceHandoff"])
+        self.assertEqual(read_contract["workflowEvidenceSourceTools"], [])
+
+        full_server = create_mcp_server(
+            self.database_path,
+            workflow_service=FakeWorkflowService(),
+            memory_service=memory_service,
+            tool_profile="full",
+        )
+        _, full_capabilities = asyncio.run(full_server.call_tool("ue_get_capabilities", {}))
+        full_contract = full_capabilities["projectMemory"]
+        self.assertTrue(full_contract["workflowEvidenceHandoff"])
+        self.assertEqual(full_contract["workflowEvidenceTargetTool"], "ue_memory_write")
+        self.assertEqual(full_contract["workflowEvidenceTargetAction"], "record_task")
 
     @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
     def test_fastmcp_registers_read_only_status_and_query_tools(self) -> None:
@@ -1165,9 +1327,9 @@ class McpServerTests(unittest.TestCase):
             memory_service=memory_service,
         )
         tools = asyncio.run(server.list_tools())
-        expected_names = tool_names_for_mode(memory_enabled=True)
+        expected_names = consolidated_tool_names_for_mode(memory_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 29)
+        self.assertEqual(len(tools), 17)
         forbidden = {
             "database",
             "database_path",
@@ -1227,8 +1389,8 @@ class McpServerTests(unittest.TestCase):
         event_id = capture_result.event_ids[0]
         _, listed = asyncio.run(
             server.call_tool(
-                "ue_memory_list_l0_events",
-                {
+                "ue_memory",
+                {"action": "list_l0_events",
                     "event_kinds": ["live_write"],
                     "change_set_id": "cs_l0",
                     "distilled": False,
@@ -1242,8 +1404,8 @@ class McpServerTests(unittest.TestCase):
         self.assertNotIn(str(self.temp_root), str(listed))
         _, exact = asyncio.run(
             server.call_tool(
-                "ue_memory_get_l0_event",
-                {"event_id": event_id},
+                "ue_memory",
+                {"action": "get_l0_event", "event_id": event_id},
             )
         )
         self.assertEqual(exact["event"]["eventId"], event_id)
@@ -1251,15 +1413,15 @@ class McpServerTests(unittest.TestCase):
         with self.assertRaisesRegex(Exception, "Extra inputs are not permitted"):
             asyncio.run(
                 server.call_tool(
-                    "ue_memory_list_l0_events",
-                    {"project_key": "Other"},
+                    "ue_memory",
+                    {"action": "list_l0_events", "project_key": "Other"},
                 )
             )
 
         _, rule = asyncio.run(
             server.call_tool(
-                "ue_memory_add_rule",
-                {
+                "ue_memory_write",
+                {"action": "add_rule",
                     "subject_key": "rule:code:newline",
                     "title": "Text files use CRLF",
                     "body": "All tracked text files use UTF-8 without BOM and CRLF.",
@@ -1282,8 +1444,8 @@ class McpServerTests(unittest.TestCase):
 
         _, finding = asyncio.run(
             server.call_tool(
-                "ue_memory_record_finding",
-                {
+                "ue_memory_write",
+                {"action": "record_finding",
                     "record_type": "projectFact",
                     "subject_key": "asset:player:revision",
                     "title": "Player asset revision",
@@ -1307,8 +1469,8 @@ class McpServerTests(unittest.TestCase):
 
         _, task = asyncio.run(
             server.call_tool(
-                "ue_memory_record_task",
-                {
+                "ue_memory_write",
+                {"action": "record_task",
                     "task_key": "player-revision-validation",
                     "title": "Validate player revision",
                     "conclusion": "The player asset revision was validated and retained.",
@@ -1348,8 +1510,8 @@ class McpServerTests(unittest.TestCase):
 
         _, invalid_task = asyncio.run(
             server.call_tool(
-                "ue_memory_record_task",
-                {
+                "ue_memory_write",
+                {"action": "record_task",
                     "task_key": "invalid-path",
                     "title": "Invalid task",
                     "conclusion": "This task must be rejected.",
@@ -1372,29 +1534,29 @@ class McpServerTests(unittest.TestCase):
 
         _, search = asyncio.run(
             server.call_tool(
-                "ue_memory_search",
-                {"query": "CRLF", "record_types": ["projectRule"]},
+                "ue_memory",
+                {"action": "search", "query": "CRLF", "record_types": ["projectRule"]},
             )
         )
         self.assertEqual(search["resultCount"], 1)
         self.assertEqual(search["items"][0]["record"]["recordId"], rule_record["recordId"])
         _, empty_statuses = asyncio.run(
             server.call_tool(
-                "ue_memory_search",
-                {"query": "CRLF", "statuses": []},
+                "ue_memory",
+                {"action": "search", "query": "CRLF", "statuses": []},
             )
         )
         self.assertFalse(empty_statuses["ok"])
         self.assertEqual(empty_statuses["error"]["code"], "invalid-arguments")
 
-        _, fetched = asyncio.run(server.call_tool("ue_memory_get", {"record_id": finding_record["recordId"]}))
+        _, fetched = asyncio.run(server.call_tool("ue_memory", {"action": "get", "record_id": finding_record["recordId"]}))
         self.assertEqual(
             fetched["record"]["revisionSet"][0]["revision"],
             f"sha256:{REVISION_A}",
         )
         self.assertRegex(fetched["record"]["evidenceSha256"], r"^sha256:[0-9a-f]{64}$")
 
-        _, validated = asyncio.run(server.call_tool("ue_memory_validate", {}))
+        _, validated = asyncio.run(server.call_tool("ue_memory_write", {"action": "validate"}))
         self.assertTrue(validated["ok"])
         self.assertIn(finding_record["recordId"], validated["checkedRecordIds"])
         self.assertIn(task_record["recordId"], validated["checkedRecordIds"])
@@ -1402,8 +1564,8 @@ class McpServerTests(unittest.TestCase):
 
         _, replacement = asyncio.run(
             server.call_tool(
-                "ue_memory_record_finding",
-                {
+                "ue_memory_write",
+                {"action": "record_finding",
                     "record_type": "knownIssue",
                     "subject_key": "issue:test",
                     "title": "Replacement issue",
@@ -1413,8 +1575,8 @@ class McpServerTests(unittest.TestCase):
         )
         _, original = asyncio.run(
             server.call_tool(
-                "ue_memory_record_finding",
-                {
+                "ue_memory_write",
+                {"action": "record_finding",
                     "record_type": "knownIssue",
                     "subject_key": "issue:test",
                     "title": "Original issue",
@@ -1424,8 +1586,8 @@ class McpServerTests(unittest.TestCase):
         )
         _, superseded = asyncio.run(
             server.call_tool(
-                "ue_memory_mark_superseded",
-                {
+                "ue_memory_write",
+                {"action": "mark_superseded",
                     "record_id": original["record"]["recordId"],
                     "replacement_record_id": replacement["record"]["recordId"],
                     "reason": "issue-state-updated",
@@ -1439,7 +1601,7 @@ class McpServerTests(unittest.TestCase):
         )
 
         _, missing = asyncio.run(
-            server.call_tool("ue_memory_get", {"record_id": "mem_00000000000000000000000000000000"})
+            server.call_tool("ue_memory", {"action": "get", "record_id": "mem_00000000000000000000000000000000"})
         )
         self.assertFalse(missing["ok"])
         self.assertEqual(missing["error"]["code"], "memory-record-not-found")
@@ -1461,18 +1623,12 @@ class McpServerTests(unittest.TestCase):
         )
         server = create_mcp_server(self.database_path, memory_service=memory_service)
         tools_by_name = {tool.name: tool for tool in asyncio.run(server.list_tools())}
-        for tool_name in (
-            "ue_memory_get_context",
-            "ue_memory_expand_node",
-            "ue_memory_get_evidence",
-            "ue_memory_update_knowledge",
-            "ue_memory_update_work",
-        ):
+        for tool_name in ("ue_memory", "ue_memory_write"):
             self.assertFalse(tools_by_name[tool_name].inputSchema["additionalProperties"])
 
         _, root = asyncio.run(
             server.call_tool(
-                "ue_memory_update_knowledge",
+                "ue_memory_write",
                 {
                     "action": "create_node",
                     "payload": {
@@ -1487,7 +1643,7 @@ class McpServerTests(unittest.TestCase):
         self.assertTrue(root["ok"])
         _, combat = asyncio.run(
             server.call_tool(
-                "ue_memory_update_knowledge",
+                "ue_memory_write",
                 {
                     "action": "create_node",
                     "payload": {
@@ -1505,7 +1661,7 @@ class McpServerTests(unittest.TestCase):
 
         _, knowledge = asyncio.run(
             server.call_tool(
-                "ue_memory_update_knowledge",
+                "ue_memory_write",
                 {
                     "action": "add_record",
                     "payload": {
@@ -1526,7 +1682,7 @@ class McpServerTests(unittest.TestCase):
 
         _, planned = asyncio.run(
             server.call_tool(
-                "ue_memory_update_work",
+                "ue_memory_write",
                 {
                     "action": "plan",
                     "payload": {
@@ -1543,14 +1699,14 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(planned["work"]["status"], "planned")
         _, started = asyncio.run(
             server.call_tool(
-                "ue_memory_update_work",
+                "ue_memory_write",
                 {"action": "start", "payload": {"workItemId": work_id}},
             )
         )
         self.assertEqual(started["work"]["status"], "in_progress")
         _, todo = asyncio.run(
             server.call_tool(
-                "ue_memory_update_work",
+                "ue_memory_write",
                 {
                     "action": "add_todo",
                     "payload": {"workItemId": work_id, "text": "Run smoke test."},
@@ -1560,7 +1716,7 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(todo["work"]["todos"][0]["text"], "Run smoke test.")
         _, blocked = asyncio.run(
             server.call_tool(
-                "ue_memory_update_work",
+                "ue_memory_write",
                 {
                     "action": "block",
                     "payload": {
@@ -1573,7 +1729,7 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(blocked["work"]["status"], "blocked")
         _, resumed = asyncio.run(
             server.call_tool(
-                "ue_memory_update_work",
+                "ue_memory_write",
                 {
                     "action": "resume",
                     "payload": {"workItemId": work_id, "nextAction": "Retry automation."},
@@ -1584,8 +1740,8 @@ class McpServerTests(unittest.TestCase):
 
         _, context = asyncio.run(
             server.call_tool(
-                "ue_memory_get_context",
-                {
+                "ue_memory",
+                {"action": "get_context",
                     "query": "damage",
                     "node_path": "/project/combat",
                     "asset_paths": [ASSET_A],
@@ -1604,24 +1760,24 @@ class McpServerTests(unittest.TestCase):
 
         _, expanded = asyncio.run(
             server.call_tool(
-                "ue_memory_expand_node",
-                {"path": "/project/combat", "detail_level": 3, "depth": 0},
+                "ue_memory",
+                {"action": "expand_node", "path": "/project/combat", "detail_level": 3, "depth": 0},
             )
         )
         self.assertEqual(expanded["context"]["records"][0]["body"], record["body"])
-        _, evidence = asyncio.run(server.call_tool("ue_memory_get_evidence", {"record_id": record["recordId"]}))
+        _, evidence = asyncio.run(server.call_tool("ue_memory", {"action": "get_evidence", "record_id": record["recordId"]}))
         self.assertEqual(evidence["evidence"]["source"]["sourceRef"], "test:user")
 
         _, completed = asyncio.run(
             server.call_tool(
-                "ue_memory_update_work",
+                "ue_memory_write",
                 {"action": "complete", "payload": {"workItemId": work_id}},
             )
         )
         self.assertEqual(completed["work"]["status"], "done")
         _, invalid_terminal = asyncio.run(
             server.call_tool(
-                "ue_memory_update_work",
+                "ue_memory_write",
                 {
                     "action": "block",
                     "payload": {"workItemId": work_id, "blockedReason": "Too late."},
@@ -1633,7 +1789,7 @@ class McpServerTests(unittest.TestCase):
 
         _, forbidden_revision = asyncio.run(
             server.call_tool(
-                "ue_memory_update_knowledge",
+                "ue_memory_write",
                 {
                     "action": "add_record",
                     "payload": {
@@ -1649,11 +1805,11 @@ class McpServerTests(unittest.TestCase):
         self.assertFalse(forbidden_revision["ok"])
         self.assertEqual(forbidden_revision["error"]["code"], "invalid-arguments")
         with self.assertRaisesRegex(Exception, "Extra inputs are not permitted"):
-            asyncio.run(server.call_tool("ue_memory_get_context", {"database": "memory.sqlite3"}))
+            asyncio.run(server.call_tool("ue_memory", {"action": "get_context", "database": "memory.sqlite3"}))
         _, missing_evidence = asyncio.run(
             server.call_tool(
-                "ue_memory_get_evidence",
-                {"record_id": "mem_00000000000000000000000000000000"},
+                "ue_memory",
+                {"action": "get_evidence", "record_id": "mem_00000000000000000000000000000000"},
             )
         )
         self.assertFalse(missing_evidence["ok"])
@@ -1664,7 +1820,7 @@ class McpServerTests(unittest.TestCase):
         live_service = FakeLiveEditorService()
         server = create_mcp_server(self.database_path, live_editor_service=live_service)
         tools = asyncio.run(server.list_tools())
-        expected_names = tool_names_for_mode(live_editor_enabled=True)
+        expected_names = consolidated_tool_names_for_mode(live_editor_enabled=True)
         self.assertEqual([tool.name for tool in tools], expected_names)
         forbidden = {
             "address",
@@ -2072,9 +2228,9 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         self.assertEqual(
             [tool.name for tool in tools],
-            tool_names_for_mode(workflow_enabled=True, memory_enabled=True),
+            consolidated_tool_names_for_mode(workflow_enabled=True, memory_enabled=True),
         )
-        self.assertEqual(len(tools), 90)
+        self.assertEqual(len(tools), 27)
 
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
         memory_contract = capabilities["projectMemory"]
@@ -2083,16 +2239,23 @@ class McpServerTests(unittest.TestCase):
             memory_contract["workflowEvidenceSourceTools"],
             ["ue_verify_asset", "ue_rollback_patch"],
         )
-        self.assertEqual(memory_contract["workflowEvidenceTargetTool"], "ue_memory_record_task")
+        self.assertEqual(memory_contract["workflowEvidenceTargetTool"], "ue_memory_write")
+        self.assertEqual(memory_contract["workflowEvidenceTargetAction"], "record_task")
         self.assertEqual(
             memory_contract["workflowEvidenceArgumentsPath"],
             "memoryTaskEvidence.arguments",
         )
 
-        _, verified = asyncio.run(server.call_tool("ue_verify_asset", {"apply_receipt": "apply_test"}))
+        _, verified = asyncio.run(
+            server.call_tool(
+                "ue_patch",
+                {"action": "verify", "apply_receipt": "apply_test"},
+            )
+        )
         evidence = verified["memoryTaskEvidence"]
-        self.assertEqual(evidence["tool"], "ue_memory_record_task")
+        self.assertEqual(evidence["tool"], "ue_memory_write")
         arguments = evidence["arguments"]
+        self.assertEqual(arguments["action"], "record_task")
         self.assertEqual(arguments["validation_evidence_ref"], "validation-evidence:report_verify_test")
         self.assertNotIn("apply_receipt", arguments)
         self.assertNotIn("database", json.dumps(arguments, ensure_ascii=False).lower())
@@ -2110,8 +2273,9 @@ class McpServerTests(unittest.TestCase):
 
         _, rolled_back = asyncio.run(
             server.call_tool(
-                "ue_rollback_patch",
+                "ue_patch",
                 {
+                    "action": "rollback",
                     "apply_receipt": "apply_test",
                     "mode": "Commit",
                     "rollback_dry_run_receipt": "rollback_dry_test",
@@ -2120,7 +2284,7 @@ class McpServerTests(unittest.TestCase):
             )
         )
         rollback_evidence = rolled_back["memoryTaskEvidence"]
-        self.assertEqual(rollback_evidence["tool"], "ue_memory_record_task")
+        self.assertEqual(rollback_evidence["tool"], "ue_memory_write")
         rollback_arguments = rollback_evidence["arguments"]
         self.assertEqual(rollback_arguments["outcome"], "rolledBack")
         self.assertEqual(
@@ -2146,9 +2310,11 @@ class McpServerTests(unittest.TestCase):
             live_editor_service=live_service,
         )
         tools = asyncio.run(server.list_tools())
-        expected_names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
+        expected_names = consolidated_tool_names_for_mode(
+            live_editor_enabled=True, workflow_enabled=True
+        )
         self.assertEqual([tool.name for tool in tools], expected_names)
-        self.assertEqual(len(tools), 123)
+        self.assertEqual(len(tools), 66)
         for tool in tools:
             definition = TOOL_DEFINITIONS_BY_NAME[tool.name]
             self.assertEqual(bool(tool.annotations.readOnlyHint), definition.read_only, tool.name)
@@ -2158,9 +2324,9 @@ class McpServerTests(unittest.TestCase):
         _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
         postprocess = capabilities["liveEditor"]["retargetPostprocess"]
         self.assertTrue(postprocess["available"])
-        self.assertEqual(postprocess["startTool"], "ue_start_animation_retarget_postprocess")
-        self.assertEqual(postprocess["statusTool"], "ue_get_animation_retarget_postprocess")
-        self.assertEqual(postprocess["planTool"], "ue_plan_animation_retarget_postprocess")
+        self.assertEqual(postprocess["startTool"], "ue_animation_retarget")
+        self.assertEqual(postprocess["actions"]["start"], "start_postprocess")
+        self.assertEqual(postprocess["actions"]["plan"], "plan_postprocess")
         self.assertFalse(postprocess["assetWrites"])
         self.assertFalse(postprocess["autoApplyAllowed"])
         self.assertTrue(postprocess["requiresUserReview"])
@@ -2223,7 +2389,7 @@ class McpServerTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         self.assertEqual(
             [tool.name for tool in tools],
-            tool_names_for_mode(workflow_enabled=True),
+            consolidated_tool_names_for_mode(workflow_enabled=True),
         )
         forbidden = {
             "database",
@@ -2239,28 +2405,21 @@ class McpServerTests(unittest.TestCase):
         for tool in tools:
             properties = set(tool.inputSchema.get("properties", {}))
             self.assertFalse(properties.intersection(forbidden), (tool.name, properties))
-        high_level_tool = next(tool for tool in tools if tool.name == "ue_set_asset_property")
+        high_level_tool = next(tool for tool in tools if tool.name == "ue_asset_property")
         self.assertIn("mode", high_level_tool.inputSchema["properties"])
         self.assertEqual(high_level_tool.inputSchema["properties"]["mode"]["default"], "Plan")
-        self.assertFalse(high_level_tool.annotations.destructiveHint)
+        # Mixed facade: it can also apply, undo and discard.
+        self.assertTrue(high_level_tool.annotations.destructiveHint)
         self.assertFalse(high_level_tool.annotations.readOnlyHint)
-        material_tool = next(tool for tool in tools if tool.name == "ue_set_material_parameter")
-        self.assertIn("parameter_type", material_tool.inputSchema["properties"])
+        set_tool = next(tool for tool in tools if tool.name == "ue_set_property")
+        for parameter in ("action", "variable_name", "component_name", "pin_name", "parameter_type"):
+            self.assertIn(parameter, set_tool.inputSchema["properties"])
 
-        apply_tool = next(tool for tool in tools if tool.name == "ue_apply_patch")
-        self.assertTrue(apply_tool.annotations.destructiveHint)
-        self.assertFalse(apply_tool.annotations.readOnlyHint)
-        state_tool = next(tool for tool in tools if tool.name == "ue_get_asset_state")
-        self.assertEqual(set(state_tool.inputSchema["properties"]), {"asset_path"})
-        self.assertTrue(state_tool.annotations.readOnlyHint)
-        self.assertFalse(state_tool.annotations.destructiveHint)
-        refresh_tool = next(tool for tool in tools if tool.name == "ue_refresh_asset_index")
-        self.assertEqual(set(refresh_tool.inputSchema["properties"]), {"asset_path", "mode"})
-        self.assertFalse(refresh_tool.annotations.readOnlyHint)
-        self.assertFalse(refresh_tool.annotations.destructiveHint)
-        verify_tool = next(tool for tool in tools if tool.name == "ue_verify_asset")
-        self.assertFalse(verify_tool.annotations.readOnlyHint)
-        self.assertFalse(verify_tool.annotations.destructiveHint)
+        patch_tool = next(tool for tool in tools if tool.name == "ue_patch")
+        self.assertTrue(patch_tool.annotations.destructiveHint)
+        self.assertFalse(patch_tool.annotations.readOnlyHint)
+        for parameter in ("action", "asset_path", "plan_id", "apply_receipt", "mode"):
+            self.assertIn(parameter, patch_tool.inputSchema["properties"])
         verification_properties = {
             "change_set_id",
             "impact_depth",
@@ -2300,14 +2459,10 @@ class McpServerTests(unittest.TestCase):
         batch_contract = capabilities["animationScaleFixBatch"]
         self.assertTrue(batch_contract["available"])
         self.assertFalse(batch_contract["planningOnly"])
-        self.assertEqual(batch_contract["planTool"], "ue_plan_animation_scale_fix_batch")
-        self.assertEqual(batch_contract["getTool"], "ue_get_animation_scale_fix_batch")
-        self.assertEqual(batch_contract["applyTool"], "ue_apply_animation_scale_fix_batch_live")
-        self.assertEqual(batch_contract["saveTool"], "ue_save_animation_scale_fix_batch")
-        self.assertEqual(batch_contract["verifyTool"], "ue_verify_animation_scale_fix_batch")
-        self.assertEqual(batch_contract["indexRefreshTool"], "ue_refresh_animation_scale_fix_batch_index")
-        self.assertEqual(batch_contract["rollbackTool"], "ue_rollback_animation_scale_fix_batch")
-        self.assertEqual(batch_contract["undoTool"], "ue_undo_animation_scale_fix_batch")
+        self.assertEqual(batch_contract["planTool"], "ue_animation_scale_fix")
+        self.assertEqual(batch_contract["actions"]["plan"], "plan_batch")
+        self.assertEqual(batch_contract["actions"]["apply"], "apply")
+        self.assertEqual(batch_contract["actions"]["undo"], "undo")
         self.assertEqual(batch_contract["maxAssets"], 100)
         self.assertEqual(batch_contract["maxSessionPlans"], 50)
         self.assertEqual(batch_contract["maxLiveStep"], 8)
@@ -2337,7 +2492,10 @@ class McpServerTests(unittest.TestCase):
         self.assertTrue(capabilities["highLevelChanges"]["available"])
         self.assertEqual(capabilities["highLevelChanges"]["defaultMode"], "Plan")
         self.assertFalse(capabilities["highLevelChanges"]["commitSupportedDirectly"])
-        self.assertEqual(len(capabilities["highLevelChanges"]["tools"]), 14)
+        self.assertEqual(len(capabilities["highLevelChanges"]["tools"]), 5)
+        self.assertIn("ue_datatable", capabilities["highLevelChanges"]["tools"])
+        self.assertIn("ue_asset_property", capabilities["highLevelChanges"]["tools"])
+        self.assertNotIn("ue_set_datatable_cell", capabilities["highLevelChanges"]["tools"])
         self.assertTrue(capabilities["assetState"]["available"])
         self.assertEqual(
             capabilities["assetState"]["sources"],
@@ -2382,18 +2540,25 @@ class McpServerTests(unittest.TestCase):
 
         high_level_cases = [
             (
-                "ue_set_blueprint_default",
-                {"asset_path": ASSET_A, "variable_name": "Health", "value": 10},
+                "ue_set_property",
+                {"action": "blueprint_default", "asset_path": ASSET_A, "variable_name": "Health", "value": 10},
                 "setVariableDefault",
             ),
             (
-                "ue_set_component_property",
-                {"asset_path": ASSET_A, "component_name": "Root", "property_path": "Mobility", "value": "Movable"},
+                "ue_set_property",
+                {
+                    "action": "component_property",
+                    "asset_path": ASSET_A,
+                    "component_name": "Root",
+                    "property_path": "Mobility",
+                    "value": "Movable",
+                },
                 "setComponentProperty",
             ),
             (
-                "ue_set_pin_default",
+                "ue_set_property",
                 {
+                    "action": "pin_default",
                     "asset_path": ASSET_A,
                     "graph_guid": "11111111-1111-1111-1111-111111111111",
                     "node_guid": "22222222-2222-2222-2222-222222222222",
@@ -2403,13 +2568,14 @@ class McpServerTests(unittest.TestCase):
                 "setPinDefault",
             ),
             (
-                "ue_set_asset_property",
-                {"asset_path": GENERIC_ASSET, "property_path": "BoolValue", "value": True},
+                "ue_asset_property",
+                {"action": "set", "asset_path": GENERIC_ASSET, "property_path": "BoolValue", "value": True},
                 "setAssetProperty",
             ),
             (
-                "ue_set_asset_reference_property",
+                "ue_asset_property",
                 {
+                    "action": "set_reference",
                     "asset_path": GENERIC_ASSET,
                     "property_path": "ObjectValue",
                     "value": {"referenceType": "Object", "path": "/Game/UEAgentKitTests/T_Test.T_Test"},
@@ -2417,8 +2583,9 @@ class McpServerTests(unittest.TestCase):
                 "setAssetReferenceProperty",
             ),
             (
-                "ue_set_asset_structured_property",
+                "ue_asset_property",
                 {
+                    "action": "set_structured",
                     "asset_path": GENERIC_ASSET,
                     "property_path": "ArrayValue",
                     "value": {"valueType": "Array", "items": [1, 2]},
@@ -2426,29 +2593,60 @@ class McpServerTests(unittest.TestCase):
                 "setAssetStructuredProperty",
             ),
             (
-                "ue_set_material_parameter",
-                {"asset_path": GENERIC_ASSET, "parameter_name": "Roughness", "parameter_type": "Scalar", "value": 0.5},
+                "ue_set_property",
+                {
+                    "action": "material_parameter",
+                    "asset_path": GENERIC_ASSET,
+                    "parameter_name": "Roughness",
+                    "parameter_type": "Scalar",
+                    "value": 0.5,
+                },
                 "setMaterialInstanceScalarParameter",
             ),
             (
-                "ue_set_datatable_cell",
-                {"asset_path": GENERIC_ASSET, "row_name": "Default", "field_name": "Value", "value": 7},
+                "ue_datatable",
+                {
+                    "action": "set_cell",
+                    "asset_path": GENERIC_ASSET,
+                    "row_name": "Default",
+                    "field_name": "Value",
+                    "value": 7,
+                },
                 "setDataTableCell",
             ),
             (
-                "ue_set_datatable_row_fields",
-                {"asset_path": GENERIC_ASSET, "row_name": "Default", "values": {"Value": 7, "Enabled": True}},
+                "ue_datatable",
+                {
+                    "action": "set_row_fields",
+                    "asset_path": GENERIC_ASSET,
+                    "row_name": "Default",
+                    "values": {"Value": 7, "Enabled": True},
+                },
                 "setDataTableRowFields",
             ),
             (
-                "ue_add_datatable_row",
-                {"asset_path": GENERIC_ASSET, "row_name": "Added", "values": {"Value": 7}},
+                "ue_datatable",
+                {
+                    "action": "add_row",
+                    "asset_path": GENERIC_ASSET,
+                    "row_name": "Added",
+                    "values": {"Value": 7},
+                },
                 "addDataTableRow",
             ),
-            ("ue_remove_datatable_row", {"asset_path": GENERIC_ASSET, "row_name": "Default"}, "removeDataTableRow"),
             (
-                "ue_rename_datatable_row",
-                {"asset_path": GENERIC_ASSET, "row_name": "Default", "new_row_name": "Renamed"},
+                "ue_datatable",
+                {"action": "remove_row", "asset_path": GENERIC_ASSET, "row_name": "Default"},
+                "removeDataTableRow",
+            ),
+            (
+                "ue_datatable",
+                {
+                    "action": "rename_row",
+                    "asset_path": GENERIC_ASSET,
+                    "row_name": "Default",
+                    "new_row_name": "Renamed",
+                },
                 "renameDataTableRow",
             ),
         ]
@@ -2460,8 +2658,8 @@ class McpServerTests(unittest.TestCase):
 
         _, asset_state = asyncio.run(
             server.call_tool(
-                "ue_get_asset_state",
-                {"asset_path": "/Game/UEAgentKitWriteTests/Test.Test"},
+                "ue_patch",
+                {"action": "state", "asset_path": "/Game/UEAgentKitWriteTests/Test.Test"},
             )
         )
         self.assertEqual(asset_state["state"], "synchronized")
@@ -2469,8 +2667,8 @@ class McpServerTests(unittest.TestCase):
 
         _, refresh_preview = asyncio.run(
             server.call_tool(
-                "ue_refresh_asset_index",
-                {"asset_path": "/Game/UEAgentKitWriteTests/Test.Test", "mode": "Preview"},
+                "ue_patch",
+                {"action": "refresh_index", "asset_path": "/Game/UEAgentKitWriteTests/Test.Test", "mode": "Preview"},
             )
         )
         self.assertTrue(refresh_preview["ok"])
@@ -2478,16 +2676,23 @@ class McpServerTests(unittest.TestCase):
 
         _, high_level_dry = asyncio.run(
             server.call_tool(
-                "ue_set_asset_property",
-                {"asset_path": GENERIC_ASSET, "property_path": "BoolValue", "value": True, "mode": "DryRun"},
+                "ue_asset_property",
+                {
+                    "action": "set",
+                    "asset_path": GENERIC_ASSET,
+                    "property_path": "BoolValue",
+                    "value": True,
+                    "mode": "DryRun",
+                },
             )
         )
         self.assertEqual(high_level_dry["dryRunReceipt"], "dry_test")
 
         _, planned = asyncio.run(
             server.call_tool(
-                "ue_plan_patch",
+                "ue_patch",
                 {
+                    "action": "plan",
                     "asset_path": ASSET_A,
                     "operation": "setBlueprintDescription",
                     "target": {},
@@ -2498,16 +2703,23 @@ class McpServerTests(unittest.TestCase):
         self.assertTrue(planned["ok"])
         _, applied = asyncio.run(
             server.call_tool(
-                "ue_apply_patch",
-                {"plan_id": "plan_test", "dry_run_receipt": "dry_test", "confirmation": "COMMIT plan_test"},
+                "ue_patch",
+                {
+                    "action": "apply",
+                    "plan_id": "plan_test",
+                    "dry_run_receipt": "dry_test",
+                    "confirmation": "COMMIT plan_test",
+                },
             )
         )
         self.assertEqual(applied["applyReceipt"], "apply_test")
 
-        _, created_set = asyncio.run(server.call_tool("ue_create_change_set", {}))
+        _, created_set = asyncio.run(server.call_tool("ue_change_set", {"action": "create"}))
         self.assertTrue(created_set["ok"])
         self.assertEqual(created_set["changeSetId"], "cs_fake")
-        _, read_set = asyncio.run(server.call_tool("ue_get_change_set", {"change_set_id": "cs_fake"}))
+        _, read_set = asyncio.run(server.call_tool(
+                "ue_change_set", {"action": "get", "change_set_id": "cs_fake"}
+            ))
         self.assertEqual(read_set["changeSetId"], "cs_fake")
         self.assertEqual(read_set["receiptCount"], 0)
 
@@ -2523,13 +2735,9 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(
             change_sets["bindableTools"],
             [
-                "ue_apply_asset_property_live",
-                "ue_undo_asset_property_live",
-                "ue_discard_asset_property_live",
+                "ue_asset_property",
                 "ue_save_authorized_asset",
-                "ue_verify_live_write",
-                "ue_verify_live_write_fast",
-                "ue_verify_live_write_checkpoint",
+                "ue_live_write",
             ],
         )
         self.assertEqual(
@@ -2560,8 +2768,14 @@ class McpServerTests(unittest.TestCase):
         server = create_mcp_server(self.database_path, workflow_service=CrashingWorkflow())
         _, payload = asyncio.run(
             server.call_tool(
-                "ue_set_asset_property",
-                {"asset_path": GENERIC_ASSET, "property_path": "BoolValue", "value": True, "mode": "DryRun"},
+                "ue_asset_property",
+                {
+                    "action": "set",
+                    "asset_path": GENERIC_ASSET,
+                    "property_path": "BoolValue",
+                    "value": True,
+                    "mode": "DryRun",
+                },
             )
         )
         self.assertFalse(payload["ok"])
@@ -2665,7 +2879,7 @@ class McpServerTests(unittest.TestCase):
             "ue_get_open_assets",
             "ue_get_dirty_assets",
             "ue_get_current_level",
-            "ue_get_pie_state",
+            "ue_pie",
             "ue_get_output_log",
             "ue_get_compile_errors",
             "ue_inspect_asset_live",

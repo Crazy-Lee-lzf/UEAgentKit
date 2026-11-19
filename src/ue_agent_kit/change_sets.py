@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+from .mcp_consolidated_tools import register_change_set_tool
 
 CHANGE_SET_SCHEMA_VERSION = "2.0"
 LEGACY_CHANGE_SET_SCHEMA_VERSION = "1.0"
@@ -334,12 +335,22 @@ def register_change_set_tools(
     read_annotations: Any,
     tool_annotations_type: Any,
     error_response: Any,
+    handler_sink: dict[str, Any] | None = None,
 ) -> None:
     planning_annotations = tool_annotations_type(
         readOnlyHint=False,
         destructiveHint=False,
         idempotentHint=False,
         openWorldHint=False,
+    )
+    handlers: dict[str, Any] = handler_sink if handler_sink is not None else {}
+
+    # A0/P2: one tool replaces create/get plus the checkpoint pair.
+    register_change_set_tool(
+        server=server,
+        handlers=handlers,
+        planning_annotations=planning_annotations,
+        error_response=error_response,
     )
 
     @server.tool(annotations=planning_annotations)
@@ -357,3 +368,11 @@ def register_change_set_tools(
             return workflow_service.get_change_set(change_set_id)
         except (FileNotFoundError, OSError, ValueError, RuntimeError, TypeError) as exc:
             return error_response("ue_get_change_set", exc, read_only=True)
+
+    handlers.update(
+        {
+            name: value
+            for name, value in list(locals().items())
+            if name.startswith("ue_") and callable(value)
+        }
+    )

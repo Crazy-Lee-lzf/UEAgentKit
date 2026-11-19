@@ -2,6 +2,53 @@
 
 实际可调用的 Tool 及其输入/返回 Schema，**始终以当前服务器的 `ue_get_capabilities` 和 MCP 工具定义为准**。下面只列入口与归属，不承诺每个部署都注册同一组。
 
+## 工具档位（`--tool-profile` / `--tool-groups`）
+
+工具数量会直接影响每个新会话的上下文体积，所以 MCP 启动时用**档位**限制可见工具面。
+档位是**上限**：它只会隐藏，不会打开任何被开关关掉的组。
+
+| 档位 | 可见分组 | 工具数 | 适用 |
+|---|---|---:|---|
+| `core`（默认） | query | **15** | 只做检索/分析/能力发现 |
+| `read` | + memory | 17 | 需要 Project Memory 的只读会话 |
+| `live` | + live-read、realtime | **48** | 连 Editor 做只读诊断（PIE / 图 / 资产） |
+| `live-write` | + live-action | 58 | 需要受控写入（原子 patch、Niagara 参数） |
+| `full` | + workflow、source-control | 74 | 离线批处理 / 源控；仍需各自的开关 |
+
+默认档位取决于入口：`ue-agent-mcp.py` 的 `--tool-profile` 默认 `core`，
+`RunMcp.cmd` / `RunMcp.ps1` 的 `-ToolProfile` 默认 `live-write`。
+
+```powershell
+python scripts\ue-agent-mcp.py --enable-live-editor --tool-profile live ...
+```
+
+档位只是常用组合的预设。需要预设之外的组合时，用 `--tool-groups` 直接点名分组，
+它会**覆盖** `--tool-profile`：
+
+```powershell
+# 只做写入流程、不要 Editor 只读面：query + workflow，25 个工具
+python scripts\ue-agent-mcp.py --enable-write-tools ... --tool-groups query,workflow
+```
+
+| 分组 | 内容 |
+|---|---|
+| `query` | 检索、分析、能力发现 |
+| `memory` | Project Memory 读写 |
+| `realtime` | Editor 实时状态与日志 |
+| `live-read` | Blueprint 图、PIE、Niagara 的只读面 |
+| `live-action` | 受控写入（原子 patch、Niagara 参数） |
+| `workflow` | 子进程 workflow 组 |
+| `source-control` | Perforce 只读查询 |
+
+未点名的分组不注册。分组名写错在启动时直接报错（不会静默缩小工具面），
+空列表同样报错；`--pure-live` 不接受 `--tool-groups`，因为它有固定的只读工具集。
+
+`ue_get_capabilities` 的 `toolProfile` 字段回报当前档位（用 `--tool-groups` 时是 `custom`），
+`toolGroups` 回报实际生效的分组。档位/分组与既有开关是**交集**：
+例如 `--tool-profile full` 但没有 `--enable-live-editor`，仍然看不到 live 工具。
+
+`--pure-live` 是固定的 16 个只读工具，不受档位裁剪；两种模式都通过 `ue_pie` 暴露 PIE 读取。
+
 ## 读取
 
 | 领域 | 代表性 Tool | 说明 |
@@ -11,21 +58,21 @@
 | 影响与验证 | `ue_analyze_change_impact`、`ue_analyze_semantic_diff`、`ue_build_verification_plan`、`ue_evaluate_trust_verdict` | 只读分析 |
 | 离线 GraphPatch 预览 | `ue_preview_graph_patch` | 只验证 IR，不连接 Editor、不写入 |
 | Live Editor | `ue_editor_status`、`ue_get_selection`、`ue_get_open_assets`、`ue_get_dirty_assets`、`ue_get_current_level` | 当前 Editor 状态 |
-| Live 图 / PIE | `ue_get_blueprint_graph_context`、`ue_get_focused_blueprint_graph_context`、`ue_get_blueprint_graph_layout_preflight`、`ue_get_pie_state`、`ue_get_pie_world_contexts`、`ue_list_pie_actors`、`ue_inspect_pie_actor`、`ue_get_pie_scalars`、`ue_list_pie_object_properties`、`ue_read_pie_object_properties` | 只读；PIE 需要精确 instance；`ue_list_pie_actors` 按 object path 稳定排序并分页，Name/Class/Tag 为大小写不敏感子串过滤，Server/Client 世界分开；两个 PIE 属性 Tool 走反射（不以 Edit/BlueprintVisible 为门槛），容器按 `offset`/`limit` 分页，对象引用只返回身份（`objectRef.path` 可直接作为下一跳的 `objectPath`，逐跳显式调用、跨世界引用标记 `crossWorld` 并拒绝继续），不支持的类型返回 `unsupported-type` + 原因 |
+| Live 图 / PIE | `ue_get_blueprint_graph_context`、`ue_get_focused_blueprint_graph_context`、`ue_get_blueprint_graph_layout_preflight`、`ue_pie` | 只读；PIE 全部走 `ue_pie(action=...)`：`state`、`worlds`、`list_actors`、`inspect_actor`、`scalars`、`list_properties`、`read_properties`（原 7 个逐动词 Tool 已合并，不再单独注册）。`list_actors` 按 object path 稳定排序并分页，Name/Class/Tag 为大小写不敏感子串过滤，Server/Client 世界分开；`scalars` / `list_properties` / `read_properties` 走反射（不以 Edit/BlueprintVisible 为门槛），容器按 `offset`/`limit` 分页，对象引用只返回身份（`objectRef.path` 可直接作为下一跳的 `objectPath`，逐跳显式调用、跨世界引用标记 `crossWorld` 并拒绝继续），不支持的类型返回 `unsupported-type` + 原因 |
 | 资产 / 日志 | `ue_inspect_asset_live`、`ue_get_output_log`、`ue_get_compile_errors` | 只读诊断 |
 | Niagara Stack | `ue_get_niagara_module_stack` | 按真实执行阶段只读 Module / Input 与来源 |
-| Project Memory | `ue_memory_search`、`ue_memory_get`、`ue_memory_get_context`、`ue_memory_expand_node`、`ue_memory_get_evidence` | 需要 `--enable-project-memory` |
+| Project Memory | `ue_memory`（读：`search` / `get` / `get_context` / `expand_node` / `get_evidence` / `list_l0_events` / `get_l0_event`）、`ue_memory_write`（写：`add_rule` / `record_finding` / `record_task` / `mark_superseded` / `validate` + knowledge/work 子动作） | 需要 `--enable-project-memory` |
 | 代码知识 | `ue_search(scope="symbols", profile="code")` | C++ 符号与静态调用点 |
 
 ## 写入
 
 | 领域 | 代表性 Tool | 门禁 |
 |---|---|---|
-| 稳定 patch / Save / Verify | `ue_plan_patch`、`ue_dry_run_patch`、`ue_apply_patch`、`ue_verify_asset`、`ue_rollback_patch` | workflow 双门禁 + Write Policy |
-| 配置写入 | `ue_set_datatable_*`、`ue_set_asset_*`、`ue_set_material_parameter`、`ue_set_blueprint_default`、`ue_set_component_property`、`ue_set_pin_default` | workflow 双门禁 + Write Policy |
-| Live 单资产修改 | `ue_apply_asset_property_live`、`ue_undo_asset_property_live`、`ue_discard_asset_property_live`、`ue_save_authorized_asset` | workflow 双门禁 + Write Policy |
+| 稳定 patch / Save / Verify | `ue_patch(action="plan")`、`ue_patch(action="dry_run")`、`ue_patch(action="apply")`、`ue_patch(action="verify")`、`ue_patch(action="rollback")` | workflow 双门禁 + Write Policy |
+| 配置写入 | `ue_datatable`（DataTable 行：`set_cell` / `set_row_fields` / `add_row` / `remove_row` / `rename_row`）、`ue_set_asset_*`、`ue_set_property(action="material_parameter")`、`ue_set_property(action="blueprint_default")`、`ue_set_property(action="component_property")`、`ue_set_property(action="pin_default")` | workflow 双门禁 + Write Policy |
+| Live 单资产修改 | `ue_asset_property(action="apply")`、`ue_asset_property(action="undo")`、`ue_asset_property(action="discard")`、`ue_blueprint_edit(action="save")` | workflow 双门禁 + Write Policy |
 | Niagara Module Input | `ue_set_niagara_module_input` | 仅 Local 常量；一次修改一次 Undo；不自动 Save |
-| 位置批量移动 / edit session | `ue_move_blueprint_node`、`ue_move_blueprint_nodes`、`ue_begin_blueprint_edit_session`、`ue_end_blueprint_edit_session` | workflow 双门禁 |
+| 位置批量移动 / edit session | `ue_blueprint_edit(action="move_node")`、`ue_blueprint_edit(action="move_nodes")`、`ue_blueprint_edit_session(action="begin")`、`ue_blueprint_edit_session(action="end")` | workflow 双门禁 |
 | 实验 Blueprint patch | `ue_preview_blueprint_patch_experimental`、`ue_apply_blueprint_patch_experimental`、`ue_save_blueprint_patch_experimental` | `--enable-experimental-graphpatch-edit` + ini |
 | Action Registry 节点创建 | `ue_search_node_actions`（只读）+ `createNode` 的 `actionId` | 再加 `--enable-experimental-node-spawn` + ini |
 | 实时索引 | `ue_refresh_asset_index_live` | 需要 Live Editor；不写索引 |

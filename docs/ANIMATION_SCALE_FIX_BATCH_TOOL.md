@@ -9,14 +9,16 @@ P1 已能把多个 AnimSequence 审计为 `normal`、`root-lock-candidate`、`ro
 当前工具：
 
 ```text
-ue_plan_animation_scale_fix_batch
-ue_get_animation_scale_fix_batch
-ue_apply_animation_scale_fix_batch_live
-ue_save_animation_scale_fix_batch
-ue_verify_animation_scale_fix_batch
-ue_refresh_animation_scale_fix_batch_index
-ue_rollback_animation_scale_fix_batch
-ue_undo_animation_scale_fix_batch
+ue_animation_scale_fix(action=...)
+  plan            单资产 plan
+  plan_batch      批量 plan
+  get             读取批量 Plan
+  apply           逐资产应用（receipt + confirmation）
+  save            逐资产保存
+  verify          独立重载验证
+  refresh_index   刷新索引
+  rollback        回滚
+  undo            Undo 撤销
 ```
 
 当前安全边界：
@@ -115,7 +117,7 @@ expectedFinalScale = explicit override
 Batch Planner 不创建新的多资产 Patch 格式。每个资产仍调用现有单资产：
 
 ```text
-ue_plan_animation_scale_fix
+ue_animation_scale_fix(action="plan")
 → setAnimationScaleFix
 → Policy validation
 → exact expectedRevision
@@ -164,11 +166,11 @@ Batch Plan 自身写到固定：
 WorkRoot/animation-scale-fix-batches/<batchPlanId>/plan.json
 ```
 
-并返回 `batchPlanDigest=sha256:...`。`ue_get_animation_scale_fix_batch` 会重新读取文件并核对 SHA 和内容；文件被修改后会报告 tamper，而不是继续使用。
+并返回 `batchPlanDigest=sha256:...`。`ue_animation_scale_fix(action="get")` 会重新读取文件并核对 SHA 和内容；文件被修改后会报告 tamper，而不是继续使用。
 
 ## 6. Bounded Live Apply / Undo
 
-Batch Live Apply 仍复用现有单资产 `ue_apply_asset_property_live` / `ue_undo_asset_property_live`，不新增 UObject 写入实现。
+Batch Live Apply 仍复用现有单资产 `ue_asset_property(action="apply")` / `ue_asset_property(action="undo")`，不新增 UObject 写入实现。
 
 首次 Apply 必须精确确认：
 
@@ -176,7 +178,7 @@ Batch Live Apply 仍复用现有单资产 `ue_apply_asset_property_live` / `ue_u
 LIVE APPLY BATCH <batchPlanId>
 ```
 
-服务创建一个现有 Change Set，并按 Batch Plan 顺序调用每个子 Plan。单次调用最多处理 8 个资产；若未完成，会返回 session-local `batchApplyReceipt`，后续调用只能携带该 receipt 继续。`ue_get_animation_scale_fix_batch` 只读 execution snapshot，不会在轮询时推进写入。
+服务创建一个现有 Change Set，并按 Batch Plan 顺序调用每个子 Plan。单次调用最多处理 8 个资产；若未完成，会返回 session-local `batchApplyReceipt`，后续调用只能携带该 receipt 继续。`ue_animation_scale_fix(action="get")` 只读 execution snapshot，不会在轮询时推进写入。
 
 每个 changed 资产保留自己的 `liveApplyReceipt`、`transactionId`、`editorSessionId` 和 Runtime Verification。单资产 `setAnimationScaleFix` 已在成功返回前完成 Final Component Pose Verify，Batch 层只汇总 `referenceLocalScale`、`finalEvaluationStatus`、`finalRootScale`，不重新实现比例验证。
 
@@ -220,11 +222,11 @@ SAVE BATCH <batchPlanId>
 
 ### Independent Verify
 
-`ue_verify_animation_scale_fix_batch` 每次最多验证 2 个已保存资产，并复用单资产 `ue_verify_live_write`。Batch 只在 `actualRevision` 与持久化预期值都通过独立重载验证后把子项标记为 `verified`。
+`ue_animation_scale_fix(action="verify")` 每次最多验证 2 个已保存资产，并复用单资产 `ue_live_write(action="verify")`。Batch 只在 `actualRevision` 与持久化预期值都通过独立重载验证后把子项标记为 `verified`。
 
 ### 保留修改：Atomic Index Refresh
 
-`ue_refresh_animation_scale_fix_batch_index` 分两阶段：
+`ue_animation_scale_fix(action="refresh_index")` 分两阶段：
 
 ```text
 Preview / Prepare   max 2 assets per call
@@ -238,7 +240,7 @@ Preview / Prepare   max 2 assets per call
 
 Preview 只在固定 WorkRoot 下生成短路径、独立导出的 candidate，不修改当前 SQLite，也不切换 active pointer。Apply 前会重新计算每个目标 Package 的 SHA-256，防止 Preview 后磁盘发生变化。
 
-Apply 不循环调用单资产 `ue_refresh_asset_index`。它只 clone 当前 Revision Export 一次、复制 SQLite 一次，然后把所有 candidate 合入同一个 staging generation；所有 Revision 与数据库完整性检查通过后才一次性切换 active pointer。任一资产失败都不会产生半刷新的 active snapshot。
+Apply 不循环调用单资产 `ue_patch(action="refresh_index")`。它只 clone 当前 Revision Export 一次、复制 SQLite 一次，然后把所有 candidate 合入同一个 staging generation；所有 Revision 与数据库完整性检查通过后才一次性切换 active pointer。任一资产失败都不会产生半刷新的 active snapshot。
 
 发布验证在受控 UE5.6 fixture 上执行到 Index Refresh Preview，并确认 Package / SQLite SHA 均不变；不会对用户项目样本执行未经授权的 active pointer Apply。多资产 Apply 的原子 paired-generation 行为由真实临时 SQLite + Revision Export Fixture 验证：同一 generation 同时更新 A、加入 B、保留无关旧资产与导出文件，并在 pointer 中记录完整 `refreshedAssets`。
 

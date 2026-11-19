@@ -14,6 +14,11 @@
 
 UE Agent Kit 是 Unreal Engine 的**项目知识层 + 受控修改工作流**：把资产、Blueprint 语义、引用关系和 Editor 状态转换为可搜索数据，为 Agent 提供上下文与验证证据，并通过 Policy / Revision / Transaction / Save / Verify 门禁执行窄范围写入。
 
+- MCP 暴露的工具面用 `--tool-profile` 分档（默认 `core` = 15 个工具；`read` / `live` / `live-write` / `full` 逐步放开）。档位只做**上限**，不会打开被开关关掉的组；`ue_get_capabilities.toolProfile` 回报当前档位。预设之外的组合用 `--tool-groups` 直接点名分组（如 `query,workflow`），它覆盖档位，实际生效的分组由 `ue_get_capabilities.toolGroups` 回报。
+- PIE 只读读取统一走 `ue_pie(action=...)`（`state` / `worlds` / `list_actors` / `inspect_actor` / `scalars` / `list_properties` / `read_properties`）；原来 7 个逐动词 Tool 不再单独注册。参数与桥接返回不变，成功结果额外带一个 `action` 字段回显本次动作。
+- DataTable 行写入统一走 `ue_datatable(action=...)`（`set_cell` / `set_row_fields` / `add_row` / `remove_row` / `rename_row`）；原来 5 个逐动词 Tool 不再单独注册，Plan/DryRun 与 Write Policy 门禁不变。
+- Project Memory 收敛为两个入口：`ue_memory(action=...)` 负责 7 个只读动作，`ue_memory_write(action=...)` 负责记录写入与 knowledge/work 子动作；原来 14 个逐动词 Tool 不再单独注册，参数、默认值与返回结构不变。
+
 ## 读取能力
 
 ### 离线索引
@@ -64,7 +69,7 @@ Rule、Finding、Decision、Known Issue、Task Record、Runtime Evidence；Revis
 | AnimSequence 诊断 / 修复 / 重定向辅助 | `workflow` / `live-read` | 有限能力 | 视 Tool 而定 |
 | Blueprint 原子 patch：`createNode` / `connect` / `disconnect` / `setPinDefault` / `createVariable` / `rewirePin` / `removeNode` | `ue_*_blueprint_patch_experimental` | 实验 | `--enable-experimental-graphpatch-edit` + ini |
 | 通过 Action Registry `actionId` 创建节点（CallFunction / Cast） | 同上 `createNode` | 实验 | 再加 `--enable-experimental-node-spawn` + ini |
-| Blueprint 位置批量移动 / edit session | `workflow`（`ue_move_blueprint_node*`） | 实验接口 | workflow 门禁 |
+| Blueprint 位置批量移动 / edit session | `workflow`（`ue_blueprint_edit(action="move_node")*`） | 实验接口 | workflow 门禁 |
 
 实验 patch 的限制：一次最多 16 个操作、16 个新节点、8 个新变量；边操作受总操作数限制，单节点最多 8 条连接；`removeNode` 每次最多 1 个节点和 1 条 incident edge；只接受顶层 K2 事件图、干净 Package、非 PIE；一次 Apply 一个事务，失败回滚；Save 独立。完整用法见 [Blueprint 实验用法](BLUEPRINT_AGENT_E2E_USAGE.md)。
 

@@ -15,15 +15,18 @@ from ue_agent_kit.tool_registry import (  # noqa: E402
     QUERY_TOOL_NAMES,
     TOOL_DEFINITIONS_BY_NAME,
     TOOL_REGISTRY,
+    replaced_tool_names,
     tool_descriptors_for_mode,
     tool_names_for_mode,
 )
 
 EXPECTED_MEMORY_TOOLS = [
+    "ue_memory",
     "ue_memory_search",
     "ue_memory_get",
     "ue_memory_list_l0_events",
     "ue_memory_get_l0_event",
+    "ue_memory_write",
     "ue_memory_add_rule",
     "ue_memory_record_finding",
     "ue_memory_record_task",
@@ -38,6 +41,7 @@ EXPECTED_MEMORY_TOOLS = [
 
 
 EXPECTED_ALL_TOOLS = [
+    "ue_pie",
     "ue_get_capabilities",
     "ue_get_project_status",
     "ue_search",
@@ -100,10 +104,13 @@ EXPECTED_ALL_TOOLS = [
     "ue_start_batch_task",
     "ue_get_batch_task",
     "ue_cancel_batch_task",
+    "ue_set_property",
     "ue_set_blueprint_default",
     "ue_set_component_property",
     "ue_set_pin_default",
+    "ue_asset_property",
     "ue_set_asset_property",
+    "ue_animation_scale_fix",
     "ue_plan_animation_scale_fix",
     "ue_plan_additive_base_pose_fix_apply",
     "ue_plan_animation_scale_fix_batch",
@@ -120,12 +127,15 @@ EXPECTED_ALL_TOOLS = [
     "ue_set_asset_reference_property",
     "ue_set_asset_structured_property",
     "ue_set_material_parameter",
+    "ue_datatable",
     "ue_set_datatable_cell",
     "ue_set_datatable_row_fields",
     "ue_add_datatable_row",
     "ue_remove_datatable_row",
     "ue_rename_datatable_row",
+    "ue_patch",
     "ue_plan_patch",
+    "ue_live_write",
     "ue_plan_live_write_batch",
     "ue_apply_live_write_batch",
     "ue_save_change_set_checkpoint",
@@ -133,6 +143,7 @@ EXPECTED_ALL_TOOLS = [
     "ue_recover_live_write_batch",
     "ue_dry_run_patch",
     "ue_apply_patch",
+    "ue_animation_retarget",
     "ue_plan_animation_retarget",
     "ue_apply_animation_retarget_setup",
     "ue_start_animation_retarget_batch",
@@ -153,12 +164,14 @@ EXPECTED_ALL_TOOLS = [
     "ue_verify_live_write_checkpoint",
     "ue_get_asset_state",
     "ue_refresh_asset_index",
+    "ue_blueprint_edit",
     "ue_begin_blueprint_edit_session",
     "ue_end_blueprint_edit_session",
     "ue_move_blueprint_node",
     "ue_move_blueprint_nodes",
     "ue_save_authorized_asset",
     "ue_rollback_patch",
+    "ue_change_set",
     "ue_create_change_set",
     "ue_get_change_set",
 ]
@@ -172,20 +185,20 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertEqual(len(tool_names_for_mode()), 15)
         self.assertEqual(len(tool_names_for_mode()), 15)
-        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 62)
-        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 76)
+        self.assertEqual(len(tool_names_for_mode(live_editor_enabled=True)), 63)
+        self.assertEqual(len(tool_names_for_mode(workflow_enabled=True)), 85)
         self.assertEqual(
             tool_names_for_mode(memory_enabled=True),
             QUERY_TOOL_NAMES + EXPECTED_MEMORY_TOOLS,
         )
-        self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 29)
+        self.assertEqual(len(tool_names_for_mode(memory_enabled=True)), 31)
         self.assertEqual(
             len(tool_names_for_mode(live_editor_enabled=True, memory_enabled=True)),
-            76,
+            79,
         )
         self.assertEqual(
             len(tool_names_for_mode(workflow_enabled=True, memory_enabled=True)),
-            90,
+            101,
         )
         self.assertEqual(
             len(
@@ -195,7 +208,7 @@ class ToolRegistryTests(unittest.TestCase):
                     memory_enabled=True,
                 )
             ),
-137,
+            149,
         )
 
     def test_mcp_registration_and_editor_readers_remain_split(self) -> None:
@@ -255,7 +268,7 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertEqual(len(names), len(set(names)))
         self.assertEqual(set(names), set(TOOL_DEFINITIONS_BY_NAME))
         self.assertEqual(
-            list(LIVE_EDITOR_METHODS),
+            [name for name in LIVE_EDITOR_METHODS if name not in replaced_tool_names()],
             [
                 name
                 for name in LIVE_EDITOR_TOOL_NAMES
@@ -269,6 +282,8 @@ class ToolRegistryTests(unittest.TestCase):
                     # Read-only Action Registry search: it calls native.invoke
                     # directly, so it has no 1:1 bridge method of its own.
                     "ue_search_node_actions",
+                    # Consolidated dispatcher: several bridge calls behind one tool.
+                    "ue_pie",
                 }
             ],
         )
@@ -344,6 +359,7 @@ class ToolRegistryTests(unittest.TestCase):
                 definition.name
                 for definition in TOOL_REGISTRY
                 if definition.group in {"live-read", "live-action"}
+                and definition.name not in replaced_tool_names()
                 and definition.name not in {
                     "ue_preview_blueprint_graph_layout",
                     "ue_search_node_actions",
@@ -354,7 +370,10 @@ class ToolRegistryTests(unittest.TestCase):
             live_editor_enabled=True,
             workflow_enabled=True,
         )
-        self.assertEqual([item["name"] for item in descriptors], EXPECTED_ALL_TOOLS)
+        self.assertEqual(
+            [item["name"] for item in descriptors],
+            [name for name in EXPECTED_ALL_TOOLS if name not in replaced_tool_names()],
+        )
         self.assertTrue(TOOL_DEFINITIONS_BY_NAME["ue_get_asset_state"].read_only)
         self.assertTrue(TOOL_DEFINITIONS_BY_NAME["ue_apply_patch"].destructive)
         self.assertTrue(TOOL_DEFINITIONS_BY_NAME["ue_apply_asset_property_live"].destructive)
@@ -373,7 +392,8 @@ class ToolRegistryTests(unittest.TestCase):
         )
         self.assertEqual(
             [item["name"] for item in memory_descriptors],
-            QUERY_TOOL_NAMES + EXPECTED_MEMORY_TOOLS,
+            QUERY_TOOL_NAMES
+            + [name for name in EXPECTED_MEMORY_TOOLS if name not in replaced_tool_names()],
         )
 
     def test_live_action_handlers_keep_bounded_execution_surface(self) -> None:

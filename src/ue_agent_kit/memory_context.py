@@ -691,9 +691,9 @@ def _finalize_context_budget(response: dict[str, Any], max_chars: int) -> dict[s
                 response,
                 {
                     "tool": (
-                        "ue_memory_get_evidence"
+                        "ue_memory(action=\"get_evidence\")"
                         if response["detailLevel"] >= 3
-                        else "ue_memory_get"
+                        else "ue_memory(action=\"get\")"
                     ),
                     "reason": "record-budget-truncated",
                     "arguments": {"record_id": removed["recordId"]},
@@ -705,7 +705,7 @@ def _finalize_context_budget(response: dict[str, Any], max_chars: int) -> dict[s
             _add_next_action(
                 response,
                 {
-                    "tool": "ue_memory_update_work",
+                    "tool": "ue_memory_write",
                     "reason": "active-work-budget-truncated",
                     "arguments": {
                         "action": "get",
@@ -719,9 +719,10 @@ def _finalize_context_budget(response: dict[str, Any], max_chars: int) -> dict[s
             _add_next_action(
                 response,
                 {
-                    "tool": "ue_memory_expand_node",
+                    "tool": "ue_memory",
                     "reason": "node-budget-truncated",
                     "arguments": {
+                        "action": "expand_node",
                         "path": removed["path"],
                         "detail_level": response["detailLevel"],
                     },
@@ -780,9 +781,9 @@ def _finalize_recall_budget(
                 _add_next_action(
                     response,
                     {
-                        "tool": "ue_memory_get_evidence" if response["detailLevel"] >= 3 else "ue_memory_get",
+                        "tool": "ue_memory",
                         "reason": "recall-item-budget-truncated",
-                        "arguments": {"record_id": removed["recordId"]},
+                        "arguments": {"action": "get_evidence" if response["detailLevel"] >= 3 else "get", "record_id": removed["recordId"]},
                     },
                 )
                 continue
@@ -791,7 +792,7 @@ def _finalize_recall_budget(
                 _add_next_action(
                     response,
                     {
-                        "tool": "ue_memory_update_work",
+                        "tool": "ue_memory_write",
                         "reason": "recall-item-budget-truncated",
                         "arguments": {
                             "action": "get",
@@ -805,9 +806,10 @@ def _finalize_recall_budget(
                 _add_next_action(
                     response,
                     {
-                        "tool": "ue_memory_expand_node",
+                        "tool": "ue_memory",
                         "reason": "recall-item-budget-truncated",
                         "arguments": {
+                            "action": "expand_node",
                             "path": removed["path"],
                             "detail_level": response["detailLevel"],
                         },
@@ -826,9 +828,9 @@ def _finalize_recall_budget(
                 _add_next_action(
                     response,
                     {
-                        "tool": "ue_memory_get_evidence" if response["detailLevel"] >= 3 else "ue_memory_get",
+                        "tool": "ue_memory",
                         "reason": "recall-content-budget-truncated",
-                        "arguments": {"record_id": removed["recordId"]},
+                        "arguments": {"action": "get_evidence" if response["detailLevel"] >= 3 else "get", "record_id": removed["recordId"]},
                     },
                 )
                 continue
@@ -837,7 +839,7 @@ def _finalize_recall_budget(
                 _add_next_action(
                     response,
                     {
-                        "tool": "ue_memory_update_work",
+                        "tool": "ue_memory_write",
                         "reason": "recall-content-budget-truncated",
                         "arguments": {
                             "action": "get",
@@ -851,9 +853,10 @@ def _finalize_recall_budget(
                 _add_next_action(
                     response,
                     {
-                        "tool": "ue_memory_expand_node",
+                        "tool": "ue_memory",
                         "reason": "recall-content-budget-truncated",
                         "arguments": {
+                            "action": "expand_node",
                             "path": removed["path"],
                             "detail_level": response["detailLevel"],
                         },
@@ -875,9 +878,9 @@ def _finalize_recall_budget(
                 _add_next_action(
                     response,
                     {
-                        "tool": "ue_memory_get_evidence" if response["detailLevel"] >= 3 else "ue_memory_get",
+                        "tool": "ue_memory",
                         "reason": "recall-token-budget-truncated",
-                        "arguments": {"record_id": removed["recordId"]},
+                        "arguments": {"action": "get_evidence" if response["detailLevel"] >= 3 else "get", "record_id": removed["recordId"]},
                     },
                 )
                 continue
@@ -886,7 +889,7 @@ def _finalize_recall_budget(
                 _add_next_action(
                     response,
                     {
-                        "tool": "ue_memory_update_work",
+                        "tool": "ue_memory_write",
                         "reason": "recall-token-budget-truncated",
                         "arguments": {
                             "action": "get",
@@ -900,9 +903,10 @@ def _finalize_recall_budget(
                 _add_next_action(
                     response,
                     {
-                        "tool": "ue_memory_expand_node",
+                        "tool": "ue_memory",
                         "reason": "recall-token-budget-truncated",
                         "arguments": {
+                            "action": "expand_node",
                             "path": removed["path"],
                             "detail_level": response["detailLevel"],
                         },
@@ -1225,15 +1229,16 @@ def build_memory_context(
         if omitted_node_path:
             response["nextActions"].append(
                 {
-                    "tool": "ue_memory_expand_node",
+                    "tool": "ue_memory",
                     "reason": "node-budget-truncated",
-                    "arguments": {"path": omitted_node_path, "detail_level": level},
+                    "arguments": {
+                        "action": "expand_node","path": omitted_node_path, "detail_level": level},
                 }
             )
         if omitted_work_id:
             response["nextActions"].append(
                 {
-                    "tool": "ue_memory_update_work",
+                    "tool": "ue_memory_write",
                     "reason": "active-work-budget-truncated",
                     "arguments": {
                         "action": "get",
@@ -1244,17 +1249,18 @@ def build_memory_context(
         if omitted_record_id:
             response["nextActions"].append(
                 {
-                    "tool": "ue_memory_get_evidence" if level >= 3 else "ue_memory_get",
+                    "tool": "ue_memory",
                     "reason": "record-budget-truncated",
-                    "arguments": {"record_id": omitted_record_id},
+                    "arguments": {"action": "get_evidence" if level >= 3 else "get", "record_id": omitted_record_id},
                 }
             )
         if not response["truncated"] and level < 4 and records:
             response["nextActions"].append(
                 {
-                    "tool": "ue_memory_get_evidence",
+                    "tool": "ue_memory",
                     "reason": "evidence-available-on-demand",
-                    "arguments": {"record_id": records[0].record_id},
+                    "arguments": {
+                        "action": "get_evidence","record_id": records[0].record_id},
                 }
             )
 

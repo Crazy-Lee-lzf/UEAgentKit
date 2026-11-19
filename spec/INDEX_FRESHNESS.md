@@ -97,7 +97,7 @@ File SHA-256 values are cached by file size and nanosecond modification time for
 
 ### Plan
 
-`ue_plan_patch` first requires the target asset to be present in SQLite, then requires three-source state `fresh`.
+`ue_patch(action="plan")` first requires the target asset to be present in SQLite, then requires three-source state `fresh`.
 
 - `index-stale`: all sources were available but did not match.
 - `index-freshness-unavailable`: a safe three-source comparison could not be completed.
@@ -128,7 +128,7 @@ The Commit response includes `indexFreshness.state=stale`.
 
 ### Independent Verify
 
-`ue_verify_asset` confirms that a new Unreal process sees the committed Revision. Verification does not update the fixed snapshots and must not clear stale state.
+`ue_patch(action="verify")` confirms that a new Unreal process sees the committed Revision. Verification does not update the fixed snapshots and must not clear stale state.
 
 ### Rollback
 
@@ -138,7 +138,7 @@ If the package is restored to another Revision, or either snapshot changed indep
 
 ## Four-source asset state
 
-`ue_get_asset_state` adds optional Editor memory to the existing three persistent Revision sources. It does not change the write freshness gate, which remains based on SQLite, Revision Export, and disk SHA-256.
+`ue_patch(action="state")` adds optional Editor memory to the existing three persistent Revision sources. It does not change the write freshness gate, which remains based on SQLite, Revision Export, and disk SHA-256.
 
 ```text
 Editor Memory      loaded / Dirty / open / selected; no cryptographic Revision
@@ -151,7 +151,7 @@ A clean loaded Package is not proof that memory bytes equal disk. Dirty memory a
 
 ## Implemented single-asset refresh lifecycle
 
-`ue_refresh_asset_index` never mutates the SQLite file opened by the running server. A fixed workflow session resolves one active Pair at startup and freezes that selection:
+`ue_patch(action="refresh_index")` never mutates the SQLite file opened by the running server. A fixed workflow session resolves one active Pair at startup and freezes that selection:
 
 - A legacy configured SQLite + Revision Export Pair is copied into a private session snapshot, so later external rebuilds cannot change the running session.
 - An internal immutable Generation is pinned directly without duplicating the entire tree.

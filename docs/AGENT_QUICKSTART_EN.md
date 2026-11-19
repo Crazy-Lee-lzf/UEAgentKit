@@ -23,6 +23,11 @@ Project: Config/DefaultEngine.ini -> [UEAgentKit] SubprocessWorkflow=True
 Policy:  the target asset/operation is covered by the Write Policy
 ```
 
+Do not forget the profile: launching `ue-agent-mcp.py` directly defaults to `core`
+(the query group only). Writes and experiments need `--tool-profile full` or
+`--tool-profile live-write`, or name the groups yourself with `--tool-groups`
+(for example `query,workflow`).
+
 Experimental Blueprint writes bypass the Write Policy and instead require `--enable-experimental-graphpatch-edit` + `[UEAgentKit] ExperimentalGraphPatchEdit=True`; Action Registry node creation adds `--enable-experimental-node-spawn` + `[UEAgentKit] ExperimentalNodeSpawn=True`.
 
 ## 2. One-time user setup
@@ -63,16 +68,16 @@ SQLite is a saved snapshot; the live Editor is current memory. When `ue_get_asse
 **Do not write by default.** Write only when the user asked for it, the workflow gate is enabled, the target is covered by the Write Policy, and revision/dirty/identity checks pass:
 
 ```text
-ue_plan_patch
-→ ue_dry_run_patch
+ue_patch(action="plan")
+→ ue_patch(action="dry_run")
 → show target asset, diff, and risk; obtain explicit authorization
-→ ue_apply_patch (one-time receipt / exact confirmation)
+→ ue_patch(action="apply") (one-time receipt / exact confirmation)
 → explicit Save when needed
-→ ue_verify_asset (independent verification)
+→ ue_patch(action="verify") (independent verification)
 → report saved / verified / failed items
 ```
 
-For one already-open, clean, non-Blueprint asset, `ue_apply_asset_property_live` can change the Editor memory value. It enters the Undo stack and marks the package dirty, but **does not save**. Save separately with `ue_save_authorized_asset`; discard with `ue_undo_asset_property_live` or `ue_discard_asset_property_live`.
+For one already-open, clean, non-Blueprint asset, `ue_asset_property(action="apply")` can change the Editor memory value. It enters the Undo stack and marks the package dirty, but **does not save**. Save separately with `ue_blueprint_edit(action="save")`; discard with `ue_asset_property(action="undo")` or `ue_asset_property(action="discard")`.
 
 Rules:
 

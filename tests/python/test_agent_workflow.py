@@ -29,7 +29,7 @@ from ue_agent_kit.agent_workflow import (  # noqa: E402
 from ue_agent_kit.change_sets import ChangeSetOperationRecord, MAX_CHANGE_SET_RECEIPTS  # noqa: E402
 from ue_agent_kit.editor_bridge import LiveEditorError  # noqa: E402
 from ue_agent_kit.memory_service import ProjectMemoryService  # noqa: E402
-from ue_agent_kit.tool_registry import tool_names_for_mode  # noqa: E402
+from ue_agent_kit.tool_registry import consolidated_tool_names_for_mode  # noqa: E402
 
 
 PROJECT = "我的项目"
@@ -1445,31 +1445,27 @@ class AgentWorkflowTests(unittest.TestCase):
         )
 
     def test_live_write_tool_count_and_names_include_verification_trust(self) -> None:
-        names = tool_names_for_mode(live_editor_enabled=True, workflow_enabled=True)
-        self.assertEqual(len(names), 123)
-        self.assertIn("ue_get_pie_world_contexts", names)
-        self.assertIn("ue_inspect_pie_actor", names)
+        names = consolidated_tool_names_for_mode(
+            live_editor_enabled=True, workflow_enabled=True
+        )
+        self.assertEqual(len(names), 66)
+        self.assertIn("ue_pie", names)
+        self.assertIn("ue_datatable", names)
+        self.assertNotIn("ue_get_pie_world_contexts", names)
+        self.assertNotIn("ue_set_datatable_cell", names)
         self.assertIn("ue_analyze_change_impact", names)
         self.assertIn("ue_analyze_semantic_diff", names)
         self.assertIn("ue_build_verification_plan", names)
         self.assertIn("ue_evaluate_trust_verdict", names)
-        self.assertIn("ue_set_asset_property", names)
-        self.assertIn("ue_set_asset_reference_property", names)
-        self.assertIn("ue_apply_asset_property_live", names)
-        self.assertIn("ue_undo_asset_property_live", names)
-        self.assertIn("ue_discard_asset_property_live", names)
-        self.assertIn("ue_verify_live_write", names)
-        self.assertIn("ue_verify_live_write_checkpoint", names)
-        self.assertIn("ue_refresh_animation_scale_fix_batch_index", names)
-        self.assertIn("ue_start_animation_retarget_postprocess", names)
-        self.assertIn("ue_get_animation_retarget_postprocess", names)
-        self.assertIn("ue_plan_animation_retarget_postprocess", names)
-        self.assertEqual(names.count("ue_set_asset_property"), 1)
-        self.assertEqual(names.count("ue_set_asset_reference_property"), 1)
-        self.assertEqual(names.count("ue_apply_asset_property_live"), 1)
-        self.assertEqual(names.count("ue_undo_asset_property_live"), 1)
-        self.assertEqual(names.count("ue_discard_asset_property_live"), 1)
-        self.assertEqual(names.count("ue_verify_live_write"), 1)
+        self.assertIn("ue_asset_property", names)
+        self.assertNotIn("ue_set_asset_property", names)
+        self.assertIn("ue_live_write", names)
+        self.assertIn("ue_animation_scale_fix", names)
+        self.assertIn("ue_animation_retarget", names)
+        self.assertNotIn("ue_start_animation_retarget_postprocess", names)
+        self.assertEqual(names.count("ue_asset_property"), 1)
+        self.assertEqual(names.count("ue_animation_scale_fix"), 1)
+        self.assertEqual(names.count("ue_live_write"), 1)
         self.assertEqual(len(set(names)), len(names))
 
     def test_live_asset_property_write_requires_live_and_commit_modes(self) -> None:
@@ -1575,7 +1571,8 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertEqual(verified["indexFreshness"]["state"], "stale")
         evidence = verified["memoryTaskEvidence"]
         self.assertEqual(evidence["schemaVersion"], "1.0")
-        self.assertEqual(evidence["tool"], "ue_memory_record_task")
+        self.assertEqual(evidence["tool"], "ue_memory_write")
+        self.assertEqual(evidence["arguments"]["action"], "record_task")
         arguments = evidence["arguments"]
         self.assertEqual(arguments["task_key"], f"patch:{plan['planId']}")
         self.assertEqual(arguments["outcome"], "succeeded")
@@ -1649,7 +1646,8 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertTrue(restored["restored"])
         self.assertEqual(restored["indexFreshness"]["state"], "fresh")
         rollback_evidence = restored["memoryTaskEvidence"]
-        self.assertEqual(rollback_evidence["tool"], "ue_memory_record_task")
+        self.assertEqual(rollback_evidence["tool"], "ue_memory_write")
+        self.assertEqual(rollback_evidence["arguments"]["action"], "record_task")
         rollback_arguments = rollback_evidence["arguments"]
         self.assertEqual(rollback_arguments["task_key"], f"rollback:{plan['planId']}")
         self.assertEqual(rollback_arguments["outcome"], "rolledBack")
@@ -2776,7 +2774,8 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertEqual(saved["childUnrealProcessCount"], 0)
         self.assertEqual(saved["afterRevision"], saved_revision)
         self.assertEqual(saved["liveApplyReceipt"], applied["liveApplyReceipt"])
-        self.assertEqual(saved["nextActions"][0]["tool"], "ue_verify_live_write_fast")
+        self.assertEqual(saved["nextActions"][0]["tool"], "ue_live_write")
+        self.assertEqual(saved["nextActions"][0]["arguments"]["action"], "verify_fast")
         self.assertEqual(package_file.read_bytes(), saved_bytes)
 
     def test_resident_save_allows_continuous_edit_without_refresh_or_restart(self) -> None:
@@ -2981,7 +2980,8 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertTrue(saved["saved"])
         self.assertEqual(saved["liveApplyReceipt"], applied["liveApplyReceipt"])
         self.assertTrue(saved["liveWriteSaved"])
-        self.assertEqual(saved["nextActions"][0]["tool"], "ue_verify_live_write")
+        self.assertEqual(saved["nextActions"][0]["tool"], "ue_live_write")
+        self.assertEqual(saved["nextActions"][0]["arguments"]["action"], "verify")
 
         saved_change_set = service.get_change_set(change_set_id)
         self.assertEqual(saved_change_set["status"], "saved")

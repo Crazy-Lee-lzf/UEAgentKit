@@ -5,6 +5,15 @@ import sqlite3
 from typing import Any, Literal
 
 from .agent_workflow import MATERIAL_PARAMETER_OPERATIONS, PatchWorkflowService, WorkflowError
+from .mcp_consolidated_tools import (
+    register_animation_scale_fix_tool,
+    register_asset_property_tool,
+    register_blueprint_edit_tool,
+    register_datatable_tool,
+    register_live_write_tool,
+    register_patch_tool,
+    register_set_property_tool,
+)
 from .animation_scale_fix_batch import AnimationScaleFixBatchService
 from .batch_recovery import BatchRecoveryService
 from .bounded_batch import BoundedBatchService
@@ -112,6 +121,7 @@ def register_workflow_tools(
     read_annotations: Any,
     tool_annotations_type: Any,
     error_response: Any,
+    handler_sink: dict[str, Any] | None = None,
 ) -> None:
     planning_annotations = tool_annotations_type(
         readOnlyHint=False,
@@ -136,6 +146,10 @@ def register_workflow_tools(
     bounded_batch_service = BoundedBatchService(workflow_service)
     checkpoint_set_service = CheckpointSetService(workflow_service, bounded_batch_service)
     batch_recovery_service = BatchRecoveryService(workflow_service, bounded_batch_service, checkpoint_set_service)
+
+    # A0/P1: consolidated facades dispatch to these exact callables.  handlers is
+    # filled at the end of registration; facades resolve it lazily per call.
+    handlers: dict[str, Any] = handler_sink if handler_sink is not None else {}
 
     def _captured_error_response(
         tool_name: str,
@@ -194,6 +208,14 @@ def register_workflow_tools(
             value=value,
             description=description,
         )
+
+    # A0/P2: one tool replaces the four policy-gated property writers.
+    register_set_property_tool(
+        server=server,
+        handlers=handlers,
+        planning_annotations=planning_annotations,
+        error_response=error_response,
+    )
 
     @server.tool(annotations=planning_annotations)
     def ue_set_blueprint_default(
@@ -264,6 +286,14 @@ def register_workflow_tools(
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_set_pin_default", exc, read_only=False)
 
+    # A0/P1: one tool replaces the six asset-property tools.
+    register_asset_property_tool(
+        server=server,
+        handlers=handlers,
+        annotations=destructive_annotations,
+        error_response=error_response,
+    )
+
     @server.tool(annotations=planning_annotations)
     def ue_set_asset_property(
         asset_path: str,
@@ -285,6 +315,14 @@ def register_workflow_tools(
             )
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_set_asset_property", exc, read_only=False)
+
+    # A0/P1: one tool replaces the nine animation-scale-fix tools.
+    register_animation_scale_fix_tool(
+        server=server,
+        handlers=handlers,
+        annotations=destructive_annotations,
+        error_response=error_response,
+    )
 
     @server.tool(annotations=planning_annotations)
     def ue_plan_animation_scale_fix(
@@ -699,115 +737,22 @@ def register_workflow_tools(
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_set_material_parameter", exc, read_only=False)
 
-    @server.tool(annotations=planning_annotations)
-    def ue_set_datatable_cell(
-        asset_path: str,
-        row_name: str,
-        field_name: str,
-        value: Any,
-        mode: Literal["Plan", "DryRun"] = "Plan",
-        description: str = "",
-    ) -> dict[str, Any]:
-        """Plan or Dry Run one authorized existing DataTable row field change."""
-        try:
-            return _run_high_level_change(
-                tool_name="ue_set_datatable_cell",
-                mode=mode,
-                asset_path=asset_path,
-                operation="setDataTableCell",
-                target={"rowName": row_name, "fieldName": field_name},
-                value=value,
-                description=description,
-            )
-        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-            return error_response("ue_set_datatable_cell", exc, read_only=False)
+    # A0/P1: one tool replaces the five per-verb DataTable row tools.
+    register_datatable_tool(
+        server=server,
+        workflow_service=workflow_service,
+        planning_annotations=planning_annotations,
+        error_response=error_response,
+    )
 
-    @server.tool(annotations=planning_annotations)
-    def ue_set_datatable_row_fields(
-        asset_path: str,
-        row_name: str,
-        values: dict[str, Any],
-        mode: Literal["Plan", "DryRun"] = "Plan",
-        description: str = "",
-    ) -> dict[str, Any]:
-        """Plan or Dry Run one atomic authorized update to fields in an existing DataTable row."""
-        try:
-            return _run_high_level_change(
-                tool_name="ue_set_datatable_row_fields",
-                mode=mode,
-                asset_path=asset_path,
-                operation="setDataTableRowFields",
-                target={"rowName": row_name},
-                value=values,
-                description=description,
-            )
-        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-            return error_response("ue_set_datatable_row_fields", exc, read_only=False)
-
-    @server.tool(annotations=planning_annotations)
-    def ue_add_datatable_row(
-        asset_path: str,
-        row_name: str,
-        values: dict[str, Any] | None = None,
-        mode: Literal["Plan", "DryRun"] = "Plan",
-        description: str = "",
-    ) -> dict[str, Any]:
-        """Plan or Dry Run one authorized DataTable row creation."""
-        try:
-            return _run_high_level_change(
-                tool_name="ue_add_datatable_row",
-                mode=mode,
-                asset_path=asset_path,
-                operation="addDataTableRow",
-                target={"rowName": row_name},
-                value=values or {},
-                description=description,
-            )
-        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-            return error_response("ue_add_datatable_row", exc, read_only=False)
-
-    @server.tool(annotations=planning_annotations)
-    def ue_remove_datatable_row(
-        asset_path: str,
-        row_name: str,
-        mode: Literal["Plan", "DryRun"] = "Plan",
-        description: str = "",
-    ) -> dict[str, Any]:
-        """Plan or Dry Run one authorized DataTable row removal."""
-        try:
-            return _run_high_level_change(
-                tool_name="ue_remove_datatable_row",
-                mode=mode,
-                asset_path=asset_path,
-                operation="removeDataTableRow",
-                target={"rowName": row_name},
-                value=True,
-                description=description,
-            )
-        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-            return error_response("ue_remove_datatable_row", exc, read_only=False)
-
-    @server.tool(annotations=planning_annotations)
-    def ue_rename_datatable_row(
-        asset_path: str,
-        row_name: str,
-        new_row_name: str,
-        mode: Literal["Plan", "DryRun"] = "Plan",
-        description: str = "",
-    ) -> dict[str, Any]:
-        """Plan or Dry Run one authorized DataTable row rename."""
-        try:
-            return _run_high_level_change(
-                tool_name="ue_rename_datatable_row",
-                mode=mode,
-                asset_path=asset_path,
-                operation="renameDataTableRow",
-                target={"rowName": row_name, "newRowName": new_row_name},
-                value=True,
-                description=description,
-            )
-        except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-            return error_response("ue_rename_datatable_row", exc, read_only=False)
+    # A0/P2: one tool replaces plan/dry_run/apply/verify/rollback plus the
+    # asset-state helpers.
+    register_patch_tool(
+        server=server,
+        handlers=handlers,
+        annotations=destructive_annotations,
+        error_response=error_response,
+    )
 
     @server.tool(annotations=planning_annotations)
     def ue_plan_patch(
@@ -828,6 +773,14 @@ def register_workflow_tools(
             )
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_plan_patch", exc, read_only=False)
+
+    # A0/P2: one tool replaces the six live-write tools.
+    register_live_write_tool(
+        server=server,
+        handlers=handlers,
+        annotations=destructive_annotations,
+        error_response=error_response,
+    )
 
     @server.tool(annotations=planning_annotations)
     def ue_plan_live_write_batch(
@@ -1036,6 +989,14 @@ def register_workflow_tools(
             return workflow_service.refresh_asset_index(asset_path, mode=mode)
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_refresh_asset_index", exc, read_only=False)
+
+    # A0/P2: one tool replaces move, the edit session and authorized save.
+    register_blueprint_edit_tool(
+        server=server,
+        handlers=handlers,
+        annotations=destructive_annotations,
+        error_response=error_response,
+    )
 
     @server.tool(annotations=destructive_annotations)
     def ue_begin_blueprint_edit_session(
@@ -1372,3 +1333,13 @@ def register_workflow_tools(
             )
         except (WorkflowError, FileNotFoundError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
             return error_response("ue_rollback_patch", exc, read_only=mode == "DryRun")
+
+    # Every per-verb tool above is a local callable; the facades dispatch to
+    # these exact objects, including ones a profile kept out of registration.
+    handlers.update(
+        {
+            name: value
+            for name, value in list(locals().items())
+            if name.startswith("ue_") and callable(value)
+        }
+    )

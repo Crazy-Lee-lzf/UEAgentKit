@@ -89,6 +89,7 @@ from .mcp_graph_patch_tools import (
     GRAPH_PATCH_PREVIEW_TOOL_NAME,
     register_graph_patch_tools,
 )
+from .mcp_consolidated_tools import register_consolidated_tools
 from .mcp_query_tools import register_query_tools
 from .mcp_realtime_tools import register_realtime_tools
 from .mcp_source_control_tools import register_source_control_tools
@@ -127,11 +128,17 @@ from .verification_trust import (
 from .source_control import P4SourceControlService
 from .tool_registry import (
     HIGH_LEVEL_WRITE_TOOL_NAMES,
+    TOOL_GROUP_NAMES,
+    TOOL_PROFILE_NAMES,
     LIVE_EDITOR_TOOL_NAMES,
     MEMORY_TOOL_NAMES,
     SOURCE_CONTROL_TOOL_NAMES,
     TOOL_DEFINITIONS_BY_NAME,
+    ToolGroup,
+    resolve_tool_selection,
     tool_descriptors_for_mode,
+    tool_group_is_allowed,
+    replaced_tool_names,
 )
 from .snapshot_lifecycle import (
     FrozenSessionSnapshot,
@@ -163,6 +170,8 @@ else:
 MCP_SERVER_NAME = "UE Agent Kit"
 TOOL_ROOT = Path(__file__).resolve().parents[2]
 STRICT_MEMORY_ARGUMENT_TOOL_NAMES = (
+    "ue_memory",
+    "ue_memory_write",
     "ue_memory_list_l0_events",
     "ue_memory_get_l0_event",
     "ue_memory_get_context",
@@ -194,8 +203,12 @@ def _enforce_strict_tool_arguments(server: Any, tool_names: Sequence[str]) -> No
         raise RuntimeError("FastMCP Tool Manager is unavailable.")
     for tool_name in tool_names:
         tool = tool_manager.get_tool(tool_name)
+        if tool is None:
+            # A tool profile may have left this tool unregistered; strictness
+            # only applies to tools the client can actually call.
+            continue
         argument_model = getattr(getattr(tool, "fn_metadata", None), "arg_model", None)
-        if tool is None or argument_model is None:
+        if argument_model is None:
             raise RuntimeError(f"FastMCP argument model is unavailable for {tool_name}.")
         argument_model.model_config = {
             **argument_model.model_config,
@@ -259,7 +272,7 @@ def _server_instructions(
     )
     memory_workflow_text = (
         "After ue_verify_asset succeeds or ue_rollback_patch completes a verified Commit, call "
-        "ue_memory_record_task with memoryTaskEvidence.arguments unchanged; never invent or edit "
+        "ue_memory_write with memoryTaskEvidence.arguments unchanged; never invent or edit "
         "its Patch, Backup Manifest, Validation Evidence, or Revision references. "
         if memory_enabled and write_tools_enabled
         else ""
@@ -287,7 +300,7 @@ def _server_instructions(
         "They create a strict Plan by default and may run Plan plus Dry Run, but never Commit. Use ue_apply_patch only "
         "with the returned planId and one-time Dry Run receipt. When a request contains multiple W4 operations "
         "(setAssetProperty, setVariableDefault, setComponentProperty, setPinDefault), prefer the read-only "
-        "ue_plan_live_write_batch planner. The low-level ue_plan_patch remains available for "
+        "ue_live_write(action=\"plan_batch\") planner. The low-level ue_plan_patch remains available for "
         "registered Operations not covered by a high-level Tool. Tool arguments cannot choose filesystem paths, policies, projects, "
         "engines, databases, Editor Bridge endpoints, or arbitrary Unreal commands. "
         + memory_workflow_text
@@ -326,6 +339,16 @@ def _read_engine_status(workflow_service: PatchWorkflowService | None) -> dict[s
     }
 
 
+def _selection_visible_names(
+    names: Sequence[str], selection: frozenset[ToolGroup] | None
+) -> list[str]:
+    """The subset of ``names`` one group selection lets a client call (None keeps all)."""
+
+    if selection is None:
+        return list(names)
+    return [name for name in names if tool_group_is_allowed(selection, name)]
+
+
 def _capabilities_response(
     workflow_service: PatchWorkflowService | None,
     live_editor_service: LiveEditorBridgeService | None,
@@ -336,6 +359,9 @@ def _capabilities_response(
     p8_test_only_graph_layout_apply: bool = False,
     experimental_graph_layout_apply: bool = False,
     experimental_graphpatch_edit: bool = False,
+    tool_profile: str | None = None,
+    tool_selection: frozenset[ToolGroup] | None = None,
+    tool_groups_spec: str | None = None,
     live_editor_status: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     write_tools_enabled = workflow_service is not None
@@ -343,6 +369,19 @@ def _capabilities_response(
     live_editor_enabled = live_editor_service is not None
     memory_enabled = memory_service is not None
     source_control_enabled = source_control_service is not None
+    # ue_pie lives in the live-read group, so the selection can hide it too.
+    pie_visible = bool(
+        live_editor_enabled and tool_group_is_allowed(tool_selection, "ue_pie")
+    )
+    # The memory hand-off only exists when both ends are callable: the workflow
+    # tools that produce the evidence and the facade that records it.
+    memory_handoff = bool(
+        memory_enabled
+        and write_tools_enabled
+        and tool_group_is_allowed(tool_selection, "ue_memory_write")
+        and tool_group_is_allowed(tool_selection, "ue_verify_asset")
+        and tool_group_is_allowed(tool_selection, "ue_rollback_patch")
+    )
     experimental_registered = bool(live_editor_enabled and experimental_graph_layout_apply)
     observed_capabilities = (
         live_editor_status.get("capabilities")
@@ -380,6 +419,12 @@ def _capabilities_response(
         "tool": "ue_get_capabilities",
         "ok": True,
         "readOnly": True,
+        "toolProfile": "custom" if tool_groups_spec else tool_profile,
+        "toolGroups": (
+            [name for name in TOOL_GROUP_NAMES if name in tool_selection]
+            if tool_selection is not None
+            else None
+        ),
         "server": {
             "name": MCP_SERVER_NAME,
             "version": __version__,
@@ -387,12 +432,16 @@ def _capabilities_response(
             "mode": _server_mode(write_tools_enabled, commit_enabled, memory_enabled),
         },
         "tools": (
-            tool_descriptors_for_mode(
-                live_editor_enabled=live_editor_enabled,
-                workflow_enabled=write_tools_enabled,
-                memory_enabled=memory_enabled,
-                source_control_enabled=source_control_enabled,
-            )
+            [
+                descriptor
+                for descriptor in tool_descriptors_for_mode(
+                    live_editor_enabled=live_editor_enabled,
+                    workflow_enabled=write_tools_enabled,
+                    memory_enabled=memory_enabled,
+                    source_control_enabled=source_control_enabled,
+                )
+                if tool_group_is_allowed(tool_selection, str(descriptor["name"]))
+            ]
             + (
                 [
                     {
@@ -470,7 +519,7 @@ def _capabilities_response(
         "sourceControl": {
             "configured": source_control_enabled,
             "advisory": True,
-            "tools": SOURCE_CONTROL_TOOL_NAMES if source_control_enabled else [],
+            "tools": _selection_visible_names(SOURCE_CONTROL_TOOL_NAMES, tool_selection) if source_control_enabled else [],
             "submitCapability": False,
             "revertCapability": False,
             "deleteCapability": False,
@@ -484,7 +533,7 @@ def _capabilities_response(
         "liveEditor": {
             "configured": live_editor_enabled,
             "transport": "localhost-tcp" if live_editor_enabled else "unavailable",
-            "tools": LIVE_EDITOR_TOOL_NAMES if live_editor_enabled else [],
+            "tools": _selection_visible_names(LIVE_EDITOR_TOOL_NAMES, tool_selection) if live_editor_enabled else [],
             "source": "editor-memory" if live_editor_enabled else "unavailable",
             "fixedProject": live_editor_enabled,
             "fixedEndpoint": live_editor_enabled,
@@ -526,18 +575,14 @@ def _capabilities_response(
                 "automationRevisionCoverage": "not-applicable",
             },
             "pieRuntimeInspection": {
-                "available": live_editor_enabled,
+                "available": pie_visible,
                 "readOnly": True,
                 "requiresDatabase": False,
                 "serverStartupRequiresIndexDatabase": True,
                 "requiresPieStopped": False,
                 "pieControlSupported": False,
-                "tools": [
-                    "ue_get_pie_world_contexts",
-                    "ue_inspect_pie_actor",
-                ]
-                if live_editor_enabled
-                else [],
+                "tool": "ue_pie" if pie_visible else "",
+                "actions": ["worlds", "inspect_actor"] if pie_visible else [],
                 "bridgeMethods": [
                     "editor.getPieWorldContexts",
                     "editor.inspectPieActor",
@@ -566,9 +611,10 @@ def _capabilities_response(
                 ],
             },
             "pieScalarInspection": {
-                "available": live_editor_enabled,
-                "tool": "ue_get_pie_scalars" if live_editor_enabled else "",
-                "bridgeMethod": "editor.getPieScalars" if live_editor_enabled else "",
+                "available": pie_visible,
+                "tool": "ue_pie" if pie_visible else "",
+                "action": "scalars" if pie_visible else "",
+                "bridgeMethod": "editor.getPieScalars" if pie_visible else "",
                 "readOnly": True,
                 "requiresDatabase": False,
                 "source": "pie-live",
@@ -896,18 +942,26 @@ def _capabilities_response(
             },
             "retargetPostprocess": {
                 "available": bool(live_editor_enabled and write_tools_enabled),
-                "startTool": "ue_start_animation_retarget_postprocess"
+                "startTool": "ue_animation_retarget"
                 if live_editor_enabled and write_tools_enabled
                 else "",
-                "statusTool": "ue_get_animation_retarget_postprocess"
+                "statusTool": "ue_animation_retarget"
                 if live_editor_enabled and write_tools_enabled
                 else "",
-                "planTool": "ue_plan_animation_retarget_postprocess"
+                "planTool": "ue_animation_retarget"
                 if live_editor_enabled and write_tools_enabled
                 else "",
-                "reopenTool": "ue_reopen_animation_retarget_postprocess"
+                "reopenTool": "ue_animation_retarget"
                 if live_editor_enabled and write_tools_enabled
                 else "",
+                "actions": {
+                    "start": "start_postprocess",
+                    "status": "get_postprocess",
+                    "plan": "plan_postprocess",
+                    "reopen": "reopen_postprocess",
+                }
+                if live_editor_enabled and write_tools_enabled
+                else {},
                 "source": "exact-completed-retarget-batch-outputs",
                 "acceptedRetargetStates": ["completed", "saved"],
                 "animSequenceAuditTool": "ue_diagnose_animation_scale",
@@ -958,13 +1012,9 @@ def _capabilities_response(
                 "journaled": True,
                 "workRootBound": True,
                 "bindableTools": [
-                    "ue_apply_asset_property_live",
-                    "ue_undo_asset_property_live",
-                    "ue_discard_asset_property_live",
+                    "ue_asset_property",
                     "ue_save_authorized_asset",
-                    "ue_verify_live_write",
-                    "ue_verify_live_write_fast",
-                    "ue_verify_live_write_checkpoint",
+                    "ue_live_write",
                 ],
             },
         },
@@ -981,7 +1031,7 @@ def _capabilities_response(
             "l0EventCount": memory_status.l0_event_count if memory_status is not None else 0,
             "pendingL0EventCount": (memory_status.pending_l0_event_count if memory_status is not None else 0),
             "evidenceChainCount": (memory_status.evidence_chain_count if memory_status is not None else 0),
-            "tools": MEMORY_TOOL_NAMES if memory_enabled else [],
+            "tools": _selection_visible_names(MEMORY_TOOL_NAMES, tool_selection) if memory_enabled else [],
             "recordTypes": [
                 "projectFact",
                 "projectRule",
@@ -1004,13 +1054,14 @@ def _capabilities_response(
             "progressiveContextLevels": [0, 1, 2, 3, 4],
             "contextTokenEstimateRule": "approximately 4 chars per token",
             "revisionAware": True,
-            "workflowEvidenceHandoff": bool(memory_enabled and write_tools_enabled),
+            "workflowEvidenceHandoff": memory_handoff,
             "workflowEvidenceSourceTools": (
-                ["ue_verify_asset", "ue_rollback_patch"] if memory_enabled and write_tools_enabled else []
+                ["ue_verify_asset", "ue_rollback_patch"] if memory_handoff else []
             ),
-            "workflowEvidenceTargetTool": ("ue_memory_record_task" if memory_enabled and write_tools_enabled else ""),
+            "workflowEvidenceTargetTool": ("ue_memory_write" if memory_handoff else ""),
+            "workflowEvidenceTargetAction": ("record_task" if memory_handoff else ""),
             "workflowEvidenceArgumentsPath": (
-                "memoryTaskEvidence.arguments" if memory_enabled and write_tools_enabled else ""
+                "memoryTaskEvidence.arguments" if memory_handoff else ""
             ),
             "vectorDatabase": False,
             "arbitraryDatabaseArguments": False,
@@ -1019,14 +1070,26 @@ def _capabilities_response(
         "animationScaleFixBatch": {
             "available": write_tools_enabled,
             "planningOnly": False,
-            "planTool": "ue_plan_animation_scale_fix_batch" if write_tools_enabled else "",
-            "getTool": "ue_get_animation_scale_fix_batch" if write_tools_enabled else "",
-            "applyTool": "ue_apply_animation_scale_fix_batch_live" if write_tools_enabled else "",
-            "saveTool": "ue_save_animation_scale_fix_batch" if write_tools_enabled else "",
-            "verifyTool": "ue_verify_animation_scale_fix_batch" if write_tools_enabled else "",
-            "indexRefreshTool": "ue_refresh_animation_scale_fix_batch_index" if write_tools_enabled else "",
-            "rollbackTool": "ue_rollback_animation_scale_fix_batch" if write_tools_enabled else "",
-            "undoTool": "ue_undo_animation_scale_fix_batch" if write_tools_enabled else "",
+            "planTool": "ue_animation_scale_fix" if write_tools_enabled else "",
+            "getTool": "ue_animation_scale_fix" if write_tools_enabled else "",
+            "applyTool": "ue_animation_scale_fix" if write_tools_enabled else "",
+            "saveTool": "ue_animation_scale_fix" if write_tools_enabled else "",
+            "verifyTool": "ue_animation_scale_fix" if write_tools_enabled else "",
+            "indexRefreshTool": "ue_animation_scale_fix" if write_tools_enabled else "",
+            "rollbackTool": "ue_animation_scale_fix" if write_tools_enabled else "",
+            "undoTool": "ue_animation_scale_fix" if write_tools_enabled else "",
+            "actions": {
+                "plan": "plan_batch",
+                "get": "get",
+                "apply": "apply",
+                "save": "save",
+                "verify": "verify",
+                "refreshIndex": "refresh_index",
+                "rollback": "rollback",
+                "undo": "undo",
+            }
+            if write_tools_enabled
+            else {},
             "sourceReportTool": "ue_export_animation_scale_audit_report",
             "maxAssets": MAX_BATCH_SCALE_FIX_ASSETS,
             "maxSessionPlans": MAX_BATCH_SCALE_FIX_PLANS,
@@ -1608,7 +1671,7 @@ _INDETERMINATE_WRITE_ERROR_CODES = frozenset(
 _INDETERMINATE_WRITE_SUGGESTION = (
     "Do not repeat this write. The Editor may have applied it before the transport failed: "
     "read the current asset state (ue_get_dirty_assets, ue_get_asset_state, "
-    "ue_verify_live_write_fast) and undo or discard the transaction before retrying."
+    "ue_live_write(action=\"verify_fast\")) and undo or discard the transaction before retrying."
 )
 
 
@@ -1774,7 +1837,11 @@ def _create_pure_live_mcp_server(
     experimental_graph_layout_apply: bool,
     experimental_graphpatch_edit: bool,
 ):
-    """Bounded, explicitly opt-in pure-live server (no index, no SQLite)."""
+    """Bounded, explicitly opt-in pure-live server (no index, no SQLite).
+
+    The surface is fixed (see ``PURE_LIVE_READ_TOOL_NAMES``); ``--tool-profile``
+    is not applied here because there is nothing further to narrow.
+    """
     if database_path is not None:
         raise ValueError("--pure-live does not accept --database; no index is opened in this mode.")
     if live_editor_service is None:
@@ -1798,14 +1865,26 @@ def _create_pure_live_mcp_server(
         instructions=_pure_live_server_instructions(),
         json_response=True,
     )
+
+    # No profile here: the pure-live surface is already fixed, so the proxy only
+    # applies the consolidation hiding.
+    registration_server: Any = _GroupFilteredServer(server, None)
     read_annotations = ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
         idempotentHint=True,
         openWorldHint=False,
     )
+    # Same consolidation as the indexed server: one ue_pie entry point replaces
+    # the seven per-verb PIE tools, which stay hidden here as well.
+    register_consolidated_tools(
+        server=registration_server,
+        live_editor_service=live_editor_service,
+        read_annotations=read_annotations,
+        error_response=_error_response,
+    )
     register_pure_live_meta_tools(
-        server=server,
+        server=registration_server,
         live_editor_service=live_editor_service,
         server_name=MCP_SERVER_NAME,
         server_version=__version__,
@@ -1813,7 +1892,7 @@ def _create_pure_live_mcp_server(
         exposed_tools=PURE_LIVE_READ_TOOL_NAMES,
     )
     register_live_read_tools(
-        server=server,
+        server=registration_server,
         live_editor_service=live_editor_service,
         index_service=None,
         audit_report_root=None,
@@ -1824,6 +1903,35 @@ def _create_pure_live_mcp_server(
     )
     _enforce_strict_tool_arguments(server, (GRAPH_CONTEXT_TOOL_NAME,))
     return server
+
+
+class _GroupFilteredServer:
+    """Registers only the tool groups one selection allows, then delegates.
+
+    The selection is an upper bound: a registrar that is not reached registers
+    nothing, and no group becomes enabled that the run flags left off.  A
+    ``None`` selection keeps every group and only applies the consolidation hiding.
+    """
+
+    def __init__(self, server: Any, selection: frozenset[ToolGroup] | None) -> None:
+        self._server = server
+        self._selection = selection
+        self._hidden = replaced_tool_names()
+
+    def __getattr__(self, item: str) -> Any:
+        return getattr(self._server, item)
+
+    def tool(self, *args: Any, **kwargs: Any) -> Any:
+        decorator = self._server.tool(*args, **kwargs)
+
+        def register(func: Any) -> Any:
+            if func.__name__ in self._hidden:
+                return func
+            if not tool_group_is_allowed(self._selection, func.__name__):
+                return func
+            return decorator(func)
+
+        return register
 
 
 def create_mcp_server(
@@ -1841,6 +1949,8 @@ def create_mcp_server(
     experimental_graphpatch_edit: bool = False,
     experimental_node_spawn: bool = False,
     pure_live: bool = False,
+    tool_profile: str | None = None,
+    tool_groups: str | None = None,
 ):
     if FastMCP is None or ToolAnnotations is None:
         raise RuntimeError(
@@ -1848,7 +1958,17 @@ def create_mcp_server(
             "or install the mcp optional dependency."
         ) from _MCP_IMPORT_ERROR
 
+    # Both knobs resolve to the same thing: a set of tool groups.  An explicit
+    # list wins over the profile preset, and an unknown group name fails here
+    # rather than silently shrinking the surface.
+    selection = resolve_tool_selection(tool_profile, tool_groups)
+
     if pure_live:
+        if tool_groups is not None:
+            raise ValueError(
+                "--tool-groups needs the indexed surface; --pure-live keeps its fixed "
+                "read-only set."
+            )
         return _create_pure_live_mcp_server(
             database_path=database_path,
             workflow_config=workflow_config,
@@ -1954,6 +2074,10 @@ def create_mcp_server(
         json_response=True,
     )
 
+    # A selection narrows what gets registered; None keeps every group and only
+    # applies the consolidation hiding performed by the proxy.
+    registration_server: Any = _GroupFilteredServer(server, selection)
+
     read_annotations = ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
@@ -1961,8 +2085,18 @@ def create_mcp_server(
         openWorldHint=False,
     )
 
+    # The consolidated Live Editor façade is registered first so the client-visible
+    # order matches TOOL_REGISTRY (it is the entry point for PIE reads).
+    if live_editor_service is not None:
+        register_consolidated_tools(
+            server=registration_server,
+            live_editor_service=live_editor_service,
+            read_annotations=read_annotations,
+            error_response=_error_response,
+        )
+
     register_query_tools(
-        server=server,
+        server=registration_server,
         index_service=index_service,
         workflow_service=workflow_service,
         live_editor_service=live_editor_service,
@@ -1977,6 +2111,9 @@ def create_mcp_server(
             p8_test_only_graph_layout_apply=p8_test_only_graph_layout_apply,
             experimental_graph_layout_apply=experimental_graph_layout_apply,
             experimental_graphpatch_edit=experimental_graphpatch_edit,
+            tool_profile=tool_profile,
+            tool_selection=selection,
+            tool_groups_spec=tool_groups,
             live_editor_status=(
                 live.status()
                 if (experimental_graph_layout_apply or experimental_graphpatch_edit) and live is not None
@@ -1990,13 +2127,13 @@ def create_mcp_server(
             memory_service,
         ),
     )
-    register_graph_patch_tools(server=server, read_annotations=read_annotations)
+    register_graph_patch_tools(server=registration_server, read_annotations=read_annotations)
     _enforce_strict_tool_arguments(server, (GRAPH_PATCH_PREVIEW_TOOL_NAME,))
     _enforce_strict_tool_arguments(server, STRICT_IMPACT_ARGUMENT_TOOL_NAMES)
     _enforce_strict_tool_arguments(server, STRICT_SEMANTIC_DIFF_ARGUMENT_TOOL_NAMES)
     _enforce_strict_tool_arguments(server, STRICT_VERIFICATION_TRUST_ARGUMENT_TOOL_NAMES)
     register_task_context_tools(
-        server=server,
+        server=registration_server,
         task_context_service=TaskContextService(
             index_service=index_service,
             memory_service=memory_service,
@@ -2010,7 +2147,7 @@ def create_mcp_server(
     _enforce_strict_tool_arguments(server, STRICT_TASK_CONTEXT_ARGUMENT_TOOL_NAMES)
     if source_control_service is not None:
         register_source_control_tools(
-            server=server,
+            server=registration_server,
             source_control_service=source_control_service,
             read_annotations=read_annotations,
             tool_annotations_type=ToolAnnotations,
@@ -2019,7 +2156,7 @@ def create_mcp_server(
         _enforce_strict_tool_arguments(server, STRICT_SOURCE_CONTROL_ARGUMENT_TOOL_NAMES)
     if memory_service is not None:
         register_memory_tools(
-            server=server,
+            server=registration_server,
             memory_service=memory_service,
             index_database_path=index_service.database_path,
             read_annotations=read_annotations,
@@ -2029,7 +2166,7 @@ def create_mcp_server(
         _enforce_strict_tool_arguments(server, STRICT_MEMORY_ARGUMENT_TOOL_NAMES)
     if live_editor_service is not None:
         register_live_read_tools(
-            server=server,
+            server=registration_server,
             live_editor_service=live_editor_service,
             index_service=index_service,
             audit_report_root=audit_report_root,
@@ -2042,7 +2179,7 @@ def create_mcp_server(
         # configured -- it is read-only and the registry itself defaults to
         # shadow mode.
         register_node_spawn_read_tools(
-            server=server,
+            server=registration_server,
             live_editor_service=live_editor_service,
             read_annotations=read_annotations,
             error_response=_error_response,
@@ -2050,7 +2187,7 @@ def create_mcp_server(
         _enforce_strict_tool_arguments(server, (NODE_ACTION_SEARCH_TOOL_NAME,))
         _enforce_strict_tool_arguments(server, (GRAPH_CONTEXT_TOOL_NAME,))
         register_live_action_tools(
-            server=server,
+            server=registration_server,
             live_editor_service=live_editor_service,
             verification_evidence_store=(
                 workflow_service.verification_evidence_store if workflow_service is not None else None
@@ -2059,13 +2196,13 @@ def create_mcp_server(
             error_response=_error_response,
         )
         register_realtime_tools(
-            server=server,
+            server=registration_server,
             live_editor_service=live_editor_service,
             read_annotations=read_annotations,
             error_response=_error_response,
         )
         register_batch_task_tools(
-            server=server,
+            server=registration_server,
             live_editor_service=live_editor_service,
             read_annotations=read_annotations,
             tool_annotations_type=ToolAnnotations,
@@ -2073,21 +2210,21 @@ def create_mcp_server(
         )
         if p7_test_only_graph_layout_apply:
             register_graph_layout_test_only_tool(
-                server=server,
+                server=registration_server,
                 live_editor_service=live_editor_service,
                 tool_annotations_type=ToolAnnotations,
                 error_response=_error_response,
             )
         if p8_test_only_graph_layout_apply:
             register_graph_layout_p8_test_only_tool(
-                server=server,
+                server=registration_server,
                 live_editor_service=live_editor_service,
                 tool_annotations_type=ToolAnnotations,
                 error_response=_error_response,
             )
         if experimental_graph_layout_apply:
             register_graph_layout_experimental_tools(
-                server=server,
+                server=registration_server,
                 live_editor_service=live_editor_service,
                 tool_annotations_type=ToolAnnotations,
                 error_response=_error_response,
@@ -2098,14 +2235,14 @@ def create_mcp_server(
             )
         if experimental_graphpatch_edit:
             register_focus_blueprint_graph_tool(
-                server=server,
+                server=registration_server,
                 live_editor_service=live_editor_service,
                 tool_annotations_type=ToolAnnotations,
                 error_response=_error_response,
             )
             _enforce_strict_tool_arguments(server, ("ue_focus_blueprint_graph",))
             register_patch_experimental_tools(
-                server=server,
+                server=registration_server,
                 live_editor_service=live_editor_service,
                 tool_annotations_type=ToolAnnotations,
                 error_response=_error_response,
@@ -2120,19 +2257,24 @@ def create_mcp_server(
                 ),
             )
     if workflow_service is not None:
+        # Shared sink: ue_change_set reaches the checkpoint tools that the
+        # workflow registrar owns.
+        consolidated_handlers: dict[str, Any] = {}
         register_workflow_tools(
-            server=server,
+            server=registration_server,
             workflow_service=workflow_service,
             read_annotations=read_annotations,
             tool_annotations_type=ToolAnnotations,
             error_response=_error_response,
+            handler_sink=consolidated_handlers,
         )
         register_change_set_tools(
-            server=server,
+            server=registration_server,
             workflow_service=workflow_service,
             read_annotations=read_annotations,
             tool_annotations_type=ToolAnnotations,
             error_response=_error_response,
+            handler_sink=consolidated_handlers,
         )
 
     return server
@@ -2171,6 +2313,27 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enable-write-tools", action="store_true")
     parser.add_argument("--enable-commit-tools", action="store_true")
     parser.add_argument("--enable-live-editor", action="store_true")
+    parser.add_argument(
+        "--tool-profile",
+        choices=list(TOOL_PROFILE_NAMES),
+        default="core",
+        help=(
+            "Upper bound on the tool groups this session exposes. "
+            "core=query only, read=+memory, live=+live-read/realtime, "
+            "live-write=+live-action, full=everything the flags allow. "
+            "Default: core."
+        ),
+    )
+    parser.add_argument(
+        "--tool-groups",
+        default=None,
+        metavar="GROUPS",
+        help=(
+            "Comma-separated tool groups to expose, overriding --tool-profile. "
+            f"Available: {', '.join(TOOL_GROUP_NAMES)}. "
+            "Example: --tool-groups query,memory,workflow"
+        ),
+    )
     parser.add_argument(
         "--enable-subprocess-workflow",
         action="store_true",
@@ -2487,6 +2650,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 audit_report_root=args.work_root,
             )
         if args.check:
+            checked_selection = resolve_tool_selection(args.tool_profile, args.tool_groups)
             payload: dict[str, Any] = {
                 "schemaVersion": "1.0",
                 "tool": "ue_agent_kit_mcp_status",
@@ -2497,6 +2661,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "liveEditorEnabled": live_editor_service is not None,
                 "projectMemoryEnabled": memory_service is not None,
                 "sourceControlEnabled": source_control_service is not None,
+                "toolSelection": {
+                    "profile": "custom" if args.tool_groups else args.tool_profile,
+                    "groups": [
+                        name
+                        for name in TOOL_GROUP_NAMES
+                        if name in (checked_selection or frozenset())
+                    ],
+                },
             }
             if workflow_service is not None:
                 payload["workflow"] = workflow_service.status()
@@ -2532,6 +2704,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             experimental_graph_layout_apply=bool(getattr(args, "enable_experimental_graph_layout_apply", False)),
             experimental_graphpatch_edit=bool(getattr(args, "enable_experimental_graphpatch_edit", False)),
             experimental_node_spawn=bool(getattr(args, "enable_experimental_node_spawn", False)),
+            tool_profile=getattr(args, "tool_profile", None),
+            tool_groups=getattr(args, "tool_groups", None),
         )
         server.run(transport="stdio")
         return 0

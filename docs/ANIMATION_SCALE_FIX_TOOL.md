@@ -26,7 +26,7 @@ UE 最终 Component Space Pose
 ### 2.1 创建修复计划
 
 ```text
-ue_plan_animation_scale_fix
+ue_animation_scale_fix(action="plan")
 ```
 
 主要参数：
@@ -49,7 +49,7 @@ ue_plan_animation_scale_fix
 ### 2.2 应用到 Editor 内存
 
 ```text
-ue_apply_asset_property_live
+ue_asset_property(action="apply")
 ```
 
 确认短语：
@@ -69,8 +69,8 @@ LIVE APPLY <planId>
 ### 2.3 撤销或放弃
 
 ```text
-ue_undo_asset_property_live
-ue_discard_asset_property_live
+ue_asset_property(action="undo")
+ue_asset_property(action="discard")
 ```
 
 两者都不会保存 Package。Undo 保留 Editor Redo 语义；Discard 用于恢复到本次修改前状态并结束该事务。
@@ -80,8 +80,8 @@ ue_discard_asset_property_live
 确认 Live Apply 结果后，继续使用现有受控流程：
 
 ```text
-ue_save_authorized_asset
-→ ue_verify_live_write / ue_verify_asset
+ue_blueprint_edit(action="save")
+→ ue_live_write(action="verify") / ue_patch(action="verify")
 ```
 
 保存后的独立 Unreal 重载验证会比较：
@@ -94,7 +94,7 @@ ue_save_authorized_asset
 - 首帧、中间帧、末帧 Scale。
 
 
-`ue_verify_live_write` 明确拆分四类结果：
+`ue_live_write(action="verify")` 明确拆分四类结果：
 
 ```text
 appliedValue             Live Apply 后的完整读取值

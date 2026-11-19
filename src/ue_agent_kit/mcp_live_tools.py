@@ -5,6 +5,14 @@ import re
 from typing import Any, Literal
 
 from .editor_bridge import LiveEditorBridgeService, LiveEditorError
+from .mcp_consolidated_tools import (
+    pie_inspect_actor_params,
+    pie_list_actors_params,
+    pie_list_object_properties_params,
+    pie_read_object_properties_params,
+    pie_scalars_params,
+    pie_world_contexts_params,
+)
 
 MAX_GRAPH_CONTEXT_BYTES = 700 * 1024
 GRAPH_CONTEXT_TOOL_NAME = "ue_get_focused_blueprint_graph_context"
@@ -84,7 +92,7 @@ def register_live_read_tools(
         try:
             return live_editor_service.call_tool(
                 "ue_get_pie_world_contexts",
-                {"maxContexts": max_contexts},
+                pie_world_contexts_params(max_contexts=max_contexts),
             )
         except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
             return error_response("ue_get_pie_world_contexts", exc, read_only=True)
@@ -102,18 +110,16 @@ def register_live_read_tools(
     ) -> dict[str, Any]:
         """List a bounded page of Actors inside exactly one PIE world (Server/Client kept apart), filtered by name/class/tag and ordered by object path."""
         try:
-            params: dict[str, Any] = {
-                "offset": offset,
-                "limit": limit,
-                "nameContains": name_contains,
-                "classContains": class_contains,
-                "tagContains": tag_contains,
-                "worldPath": world_path,
-            }
-            if world_context_id:
-                params["worldContextId"] = world_context_id
-            else:
-                params["pieInstanceId"] = pie_instance_id
+            params = pie_list_actors_params(
+                world_context_id=world_context_id,
+                pie_instance_id=pie_instance_id,
+                offset=offset,
+                limit=limit,
+                name_contains=name_contains,
+                class_contains=class_contains,
+                tag_contains=tag_contains,
+                world_path=world_path,
+            )
             return live_editor_service.call_tool("ue_list_pie_actors", params)
         except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
             return error_response("ue_list_pie_actors", exc, read_only=True)
@@ -134,17 +140,17 @@ def register_live_read_tools(
         try:
             return live_editor_service.call_tool(
                 "ue_inspect_pie_actor",
-                {
-                    "pieInstanceId": pie_instance_id,
-                    "actorPath": actor_path,
-                    "actorGuid": actor_guid,
-                    "actorName": actor_name,
-                    "actorLabel": actor_label,
-                    "actorClassPath": actor_class_path,
-                    "worldPath": world_path,
-                    "maxComponents": max_components,
-                    "maxAssetsPerComponent": max_assets_per_component,
-                },
+                pie_inspect_actor_params(
+                    pie_instance_id=pie_instance_id,
+                    actor_path=actor_path,
+                    actor_guid=actor_guid,
+                    actor_name=actor_name,
+                    actor_label=actor_label,
+                    actor_class_path=actor_class_path,
+                    world_path=world_path,
+                    max_components=max_components,
+                    max_assets_per_component=max_assets_per_component,
+                ),
             )
         except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
             return error_response("ue_inspect_pie_actor", exc, read_only=True)
@@ -167,19 +173,19 @@ def register_live_read_tools(
         try:
             return live_editor_service.call_tool(
                 "ue_get_pie_scalars",
-                {
-                    "pieInstanceId": pie_instance_id,
-                    "actorPath": actor_path,
-                    "actorGuid": actor_guid,
-                    "actorName": actor_name,
-                    "actorLabel": actor_label,
-                    "componentPath": component_path,
-                    "componentName": component_name,
-                    "componentClassPath": component_class_path,
-                    "worldPath": world_path,
-                    "propertyNames": property_names,
-                    "maxStringChars": max_string_chars,
-                },
+                pie_scalars_params(
+                    pie_instance_id=pie_instance_id,
+                    property_names=property_names,
+                    actor_path=actor_path,
+                    actor_guid=actor_guid,
+                    actor_name=actor_name,
+                    actor_label=actor_label,
+                    component_path=component_path,
+                    component_name=component_name,
+                    component_class_path=component_class_path,
+                    world_path=world_path,
+                    max_string_chars=max_string_chars,
+                ),
             )
         except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
             return error_response("ue_get_pie_scalars", exc, read_only=True)
@@ -202,25 +208,21 @@ def register_live_read_tools(
     ) -> dict[str, Any]:
         """List reflected properties of one exact PIE object with kind and per-type support; no Edit/BlueprintVisible gate."""
         try:
-            params: dict[str, Any] = {
-                "pieInstanceId": pie_instance_id,
-                "maxProperties": max_properties,
-            }
-            for field, value in (
-                ("actorPath", actor_path),
-                ("actorGuid", actor_guid),
-                ("actorName", actor_name),
-                ("actorLabel", actor_label),
-                ("actorClassPath", actor_class_path),
-                ("objectPath", object_path),
-                ("componentPath", component_path),
-                ("componentName", component_name),
-                ("componentClassPath", component_class_path),
-                ("worldPath", world_path),
-                ("nameContains", name_contains),
-            ):
-                if value:
-                    params[field] = value
+            params = pie_list_object_properties_params(
+                pie_instance_id=pie_instance_id,
+                actor_path=actor_path,
+                actor_guid=actor_guid,
+                actor_name=actor_name,
+                actor_label=actor_label,
+                actor_class_path=actor_class_path,
+                object_path=object_path,
+                component_path=component_path,
+                component_name=component_name,
+                component_class_path=component_class_path,
+                world_path=world_path,
+                name_contains=name_contains,
+                max_properties=max_properties,
+            )
             return live_editor_service.call_tool("ue_list_pie_object_properties", params)
         except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
             return error_response("ue_list_pie_object_properties", exc, read_only=True)
@@ -245,27 +247,23 @@ def register_live_read_tools(
     ) -> dict[str, Any]:
         """Read up to 16 named reflected property values from one exact PIE object; containers are paged and object references are identity only."""
         try:
-            params: dict[str, Any] = {
-                "pieInstanceId": pie_instance_id,
-                "propertyNames": property_names,
-                "offset": offset,
-                "limit": limit,
-                "maxStringChars": max_string_chars,
-            }
-            for field, value in (
-                ("actorPath", actor_path),
-                ("actorGuid", actor_guid),
-                ("actorName", actor_name),
-                ("actorLabel", actor_label),
-                ("actorClassPath", actor_class_path),
-                ("objectPath", object_path),
-                ("componentPath", component_path),
-                ("componentName", component_name),
-                ("componentClassPath", component_class_path),
-                ("worldPath", world_path),
-            ):
-                if value:
-                    params[field] = value
+            params = pie_read_object_properties_params(
+                pie_instance_id=pie_instance_id,
+                property_names=property_names,
+                actor_path=actor_path,
+                actor_guid=actor_guid,
+                actor_name=actor_name,
+                actor_label=actor_label,
+                actor_class_path=actor_class_path,
+                object_path=object_path,
+                component_path=component_path,
+                component_name=component_name,
+                component_class_path=component_class_path,
+                world_path=world_path,
+                offset=offset,
+                limit=limit,
+                max_string_chars=max_string_chars,
+            )
             return live_editor_service.call_tool("ue_read_pie_object_properties", params)
         except (LiveEditorError, FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
             return error_response("ue_read_pie_object_properties", exc, read_only=True)

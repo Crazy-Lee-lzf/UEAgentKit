@@ -605,8 +605,8 @@ class WorkflowVerifyMixin:
             "nextStep": "Call ue_verify_live_write_checkpoint with this checkpointId to perform exactly one independent export and verify all effective operations.",
             "nextActions": [
                 {
-                    "tool": "ue_verify_live_write_checkpoint",
-                    "arguments": {"checkpoint_id": checkpoint.checkpoint_id},
+                    "tool": "ue_live_write",
+                    "arguments": {"action": "verify_checkpoint", "checkpoint_id": checkpoint.checkpoint_id},
                     "reason": "Run exactly one independent Unreal export and verify all effective writes covered by this checkpoint.",
                 }
             ],
@@ -1026,19 +1026,21 @@ class WorkflowVerifyMixin:
                 "nextStep": (
                     "Continue editing in the resident Editor; this save has Fast Resident "
                     "Verify and a disk SHA but is not independently reloaded. Use "
-                    "ue_verify_live_write later at a milestone when a strong reload is required."
+                    'ue_live_write(action="verify") later at a milestone when a strong reload is required.'
                     if verification_mode == "resident"
-                    else "Call ue_verify_live_write for this exact asset to close the loop with an "
+                    else 'Call ue_live_write(action="verify") for this exact asset to close the loop with an '
                     "independent reload and Revision. Do not refresh the frozen index before the scoped Trust verdict."
                 ),
                 "nextActions": (
-                    [{"tool": "ue_verify_live_write_fast",
-                      "arguments": {"asset_path": asset_path, "live_apply_receipt": live_receipt},
+                    [{"tool": "ue_live_write",
+                      "arguments": {
+                          "action": "verify_fast", "asset_path": asset_path, "live_apply_receipt": live_receipt,
+                      },
                       "reason": "Recheck the exact value in the resident Editor without starting Unreal."}]
                     if verification_mode == "resident"
-                    else [{"tool": "ue_verify_live_write",
+                    else [{"tool": "ue_live_write",
                            "arguments": {
-                               "asset_path": asset_path,
+                               "action": "verify","asset_path": asset_path,
                                **({"change_set_id": change_set_id} if change_set_id else {}),
                            },
                            "reason": "Independently reload and verify the exact saved live write."}]

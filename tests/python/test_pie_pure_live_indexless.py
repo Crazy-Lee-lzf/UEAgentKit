@@ -130,7 +130,7 @@ class PureLiveServerTests(unittest.TestCase):
             mcp_server.IndexQueryService = original  # type: ignore[assignment]
         names = _tool_names(server)
         self.assertEqual(names, sorted(PURE_LIVE_READ_TOOL_NAMES))
-        self.assertEqual(len(names), 22)
+        self.assertEqual(len(names), 16)
 
     def test_only_bounded_read_tools_are_registered(self) -> None:
         names = set(_tool_names(self._server()))
@@ -138,11 +138,7 @@ class PureLiveServerTests(unittest.TestCase):
             "ue_get_capabilities",
             "ue_get_project_status",
             "ue_editor_status",
-            "ue_get_pie_world_contexts",
-            "ue_inspect_pie_actor",
-            "ue_get_pie_scalars",
-            "ue_list_pie_object_properties",
-            "ue_read_pie_object_properties",
+            "ue_pie",
             "ue_get_output_log",
             "ue_get_compile_errors",
             "ue_get_focused_blueprint_graph_context",
@@ -223,8 +219,8 @@ class PureLiveServerTests(unittest.TestCase):
     def test_missing_editor_returns_clear_unavailable_error(self) -> None:
         server = self._server()
         for tool_name, arguments in (
-            ("ue_get_pie_world_contexts", {"max_contexts": 4}),
-            ("ue_inspect_pie_actor", {"pie_instance_id": 0, "actor_name": "X"}),
+            ("ue_pie", {"action": "worlds", "max_contexts": 4}),
+            ("ue_pie", {"action": "inspect_actor", "pie_instance_id": 0, "actor_name": "X"}),
             ("ue_get_selection", {}),
         ):
             payload = _call(server, tool_name, arguments)
@@ -240,7 +236,7 @@ class PureLiveServerTests(unittest.TestCase):
         before = sorted(p.name for p in self.root.rglob("*"))
         server = self._server()
         _call(server, "ue_get_capabilities", {})
-        _call(server, "ue_get_pie_world_contexts", {"max_contexts": 2})
+        _call(server, "ue_pie", {"action": "worlds", "max_contexts": 2})
         after = sorted(p.name for p in self.root.rglob("*"))
         self.assertEqual(before, after)
         self.assertFalse(list(self.root.rglob("*.sqlite3")))
@@ -254,7 +250,7 @@ class PureLiveServerTests(unittest.TestCase):
             server_version=__version__,
         )
         server = mcp_server.create_mcp_server(None, live_editor_service=service, pure_live=True)
-        payload = _call(server, "ue_get_pie_world_contexts", {"max_contexts": 2})
+        payload = _call(server, "ue_pie", {"action": "worlds", "max_contexts": 2})
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["error"]["code"], "live-editor-project-mismatch")
 
@@ -265,7 +261,7 @@ class PureLiveServerTests(unittest.TestCase):
             server_version=__version__,
         )
         server = mcp_server.create_mcp_server(None, live_editor_service=service, pure_live=True)
-        payload = _call(server, "ue_get_pie_state", {})
+        payload = _call(server, "ue_pie", {"action": "state"})
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["error"]["code"], "live-editor-project-mismatch")
 
@@ -332,7 +328,7 @@ class PureLiveValidationTests(unittest.TestCase):
         server = mcp_server.create_mcp_server(database, live_editor_service=_FakeLive(self.project))
         names = _tool_names(server)
         self.assertIn("ue_search", names)
-        self.assertIn("ue_get_pie_world_contexts", names)
+        self.assertIn("ue_pie", names)
         self.assertGreater(len(names), len(PURE_LIVE_READ_TOOL_NAMES))
 
     def test_cli_parser_and_pure_live_argument_validation(self) -> None:
@@ -432,7 +428,7 @@ class PureLiveLauncherAndRegistryTests(unittest.TestCase):
         self.assertIn("PureLive does not accept Database", source)
         # Default mode keeps asserting the fixed index and passing it.
         self.assertIn('Assert-UeakPath -Path $Database -Description "UE Agent Kit SQLite index"', source)
-        self.assertIn('$Arguments = @($EntryPoint, "--database", $Database)', source)
+        self.assertIn('$Arguments = @($EntryPoint, "--database", $Database, "--tool-profile", $ToolProfile)', source)
         self.assertNotIn("Write-Host", source)
 
     def test_exposed_names_are_real_read_only_registry_entries(self) -> None:
@@ -578,7 +574,7 @@ class PureLiveRealBridgeTests(unittest.TestCase):
         )
         server = mcp_server.create_mcp_server(None, live_editor_service=service, pure_live=True)
         before = sorted(p.name for p in self.root.rglob("*"))
-        payload = _call(server, "ue_get_pie_world_contexts", {"max_contexts": 2})
+        payload = _call(server, "ue_pie", {"action": "worlds", "max_contexts": 2})
         after = sorted(p.name for p in self.root.rglob("*"))
         self.assertTrue(payload["ok"], payload)
         self.assertEqual(payload["result"]["pieInstanceIds"], [0])

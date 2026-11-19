@@ -14,6 +14,11 @@ This page describes the **0.9.0 Developer Preview 2 candidate code**. Published 
 
 UE Agent Kit is a **project knowledge layer plus controlled mutation workflow** for Unreal Engine. It turns assets, Blueprint semantics, references, and Editor state into searchable data, provides agents with context and verification evidence, and executes narrow writes behind Policy / Revision / Transaction / Save / Verify gates.
 
+- The MCP tool surface is bounded by `--tool-profile` (default `core` = 15 tools; `read` / `live` / `live-write` / `full` widen it). A profile is an upper bound: it never enables a group the run flags left off, and `ue_get_capabilities.toolProfile` reports it. Combinations no preset offers are named directly with `--tool-groups` (for example `query,workflow`); it overrides the profile, and `ue_get_capabilities.toolGroups` reports the groups that took effect.
+- Read-only PIE reads go through one entry point, `ue_pie(action=...)` (`state` / `worlds` / `list_actors` / `inspect_actor` / `scalars` / `list_properties` / `read_properties`); the seven per-verb tools are no longer registered separately. Arguments and bridge payloads are unchanged; a successful result carries one extra `action` field echoing the requested action.
+- DataTable row writes go through one entry point, `ue_datatable(action=...)` (`set_cell` / `set_row_fields` / `add_row` / `remove_row` / `rename_row`); the five per-verb tools are no longer registered separately, with the same Plan/DryRun and Write Policy gates.
+- Project Memory is two entry points: `ue_memory(action=...)` for the seven read actions and `ue_memory_write(action=...)` for record writes plus the knowledge/work sub-actions; the fourteen per-verb tools are no longer registered separately, with unchanged arguments, defaults and results.
+
 ## Read capabilities
 
 ### Offline index
@@ -64,7 +69,7 @@ All writes are off by default. The `workflow` group requires `--enable-write-too
 | AnimSequence diagnosis / fix / retarget assistance | `workflow` / `live-read` | Bounded | Tool-dependent |
 | Blueprint atomic patch: `createNode` / `connect` / `disconnect` / `setPinDefault` / `createVariable` / `rewirePin` / `removeNode` | `ue_*_blueprint_patch_experimental` | Experimental | `--enable-experimental-graphpatch-edit` + ini |
 | Node creation from an Action Registry `actionId` (CallFunction / Cast) | same `createNode` | Experimental | plus `--enable-experimental-node-spawn` + ini |
-| Blueprint position batches / edit sessions | `workflow` (`ue_move_blueprint_node*`) | Experimental interface | workflow gate |
+| Blueprint position batches / edit sessions | `workflow` (`ue_blueprint_edit(action="move_node")*`) | Experimental interface | workflow gate |
 
 Experimental patch limits: up to 16 operations, 16 new nodes, and 8 new variables per patch; edge operations are bounded by the operation total and at most 8 per node; `removeNode` removes at most one node and one incident edge; top-level K2 event graphs only; clean package and stopped PIE; one transaction per Apply with rollback on failure; Save is separate. See [Blueprint experimental usage](BLUEPRINT_AGENT_E2E_USAGE_EN.md).
 

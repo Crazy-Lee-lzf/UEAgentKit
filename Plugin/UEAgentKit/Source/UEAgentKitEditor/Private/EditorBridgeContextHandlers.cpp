@@ -54,12 +54,17 @@ namespace UEAgentKitEditorContextPrivate
 		}
 	}
 
-	TSharedRef<FJsonObject> BuildNextAction(const FString& Tool, const FString& Reason)
+	TSharedRef<FJsonObject> BuildNextAction(const FString& Tool, const FString& Reason, const FString& Action = FString())
 	{
-		TSharedRef<FJsonObject> Action = MakeShared<FJsonObject>();
-		Action->SetStringField(TEXT("tool"), Tool);
-		Action->SetStringField(TEXT("reason"), Reason);
-		return Action;
+		TSharedRef<FJsonObject> ActionObject = MakeShared<FJsonObject>();
+		ActionObject->SetStringField(TEXT("tool"), Tool);
+		ActionObject->SetStringField(TEXT("reason"), Reason);
+		if (!Action.IsEmpty())
+		{
+			// Consolidated tools take an action; the hint must stay callable.
+			ActionObject->SetStringField(TEXT("action"), Action);
+		}
+		return ActionObject;
 	}
 }
 
@@ -159,7 +164,7 @@ TSharedRef<FJsonObject> FUEAgentKitEditorBridge::BuildEditorContextResult() cons
 	EditorSection->TryGetStringField(TEXT("pieState"), PieState);
 	if (PieState == TEXT("playing") || PieState == TEXT("simulating"))
 	{
-		NextActions.Add(MakeShared<FJsonValueObject>(BuildNextAction(TEXT("ue_get_pie_state"), TEXT("pie-active"))));
+		NextActions.Add(MakeShared<FJsonValueObject>(BuildNextAction(TEXT("ue_pie"), TEXT("pie-active"), TEXT("state"))));
 	}
 	if (LogCursor->TryGetNumberField(TEXT("newestSequence"), NumberValue) && NumberValue > 0.0)
 	{
