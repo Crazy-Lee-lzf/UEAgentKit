@@ -23,6 +23,11 @@ Project: Config/DefaultEngine.ini -> [UEAgentKit] SubprocessWorkflow=True
 Policy:  the target asset/operation is covered by the Write Policy
 ```
 
+Do not forget the profile: launching `ue-agent-mcp.py` directly defaults to `core`
+(the query group only). Writes and experiments need `--tool-profile full` or
+`--tool-profile live-write`, or name the groups yourself with `--tool-groups`
+(for example `query,workflow`).
+
 Experimental Blueprint writes bypass the Write Policy and instead require `--enable-experimental-graphpatch-edit` + `[UEAgentKit] ExperimentalGraphPatchEdit=True`; Action Registry node creation adds `--enable-experimental-node-spawn` + `[UEAgentKit] ExperimentalNodeSpawn=True`.
 
 ## 2. One-time user setup

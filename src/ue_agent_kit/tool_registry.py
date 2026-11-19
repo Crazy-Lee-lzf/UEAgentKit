@@ -481,6 +481,75 @@ def tool_profile_allows(profile: str, tool_name: str) -> bool:
     return group in profile_groups(profile)
 
 
+TOOL_GROUP_NAMES: tuple[ToolGroup, ...] = (
+    "query",
+    "memory",
+    "realtime",
+    "live-read",
+    "live-action",
+    "workflow",
+    "source-control",
+)
+
+
+def parse_tool_groups(spec: str) -> frozenset[ToolGroup]:
+    """Turn a comma-separated ``--tool-groups`` value into a validated group set.
+
+    The five profiles are presets over these same groups, so an explicit list is
+    only a finer-grained way to say the same thing; it is not a second mechanism.
+    An empty selection is rejected instead of silently meaning "nothing".
+    """
+
+    groups: set[ToolGroup] = set()
+    for raw in spec.split(","):
+        name = raw.strip().lower()
+        if not name:
+            continue
+        if name not in TOOL_GROUP_NAMES:
+            raise ValueError(
+                f"Unknown tool group {name!r}; expected a comma-separated subset of "
+                f"{', '.join(TOOL_GROUP_NAMES)}."
+            )
+        groups.add(name)  # type: ignore[arg-type]
+    if not groups:
+        raise ValueError(
+            f"--tool-groups needs at least one of: {', '.join(TOOL_GROUP_NAMES)}."
+        )
+    return frozenset(groups)
+
+
+def resolve_tool_selection(
+    profile: str | None, groups: str | None = None
+) -> frozenset[ToolGroup] | None:
+    """The group set a session exposes; an explicit group list wins over a profile.
+
+    ``None`` means "no bound": every group the run flags enabled stays visible.
+    """
+
+    if groups is not None:
+        return parse_tool_groups(groups)
+    if profile is None:
+        return None
+    return profile_groups(profile)
+
+
+def tool_group_is_allowed(
+    selection: frozenset[ToolGroup] | None, tool_name: str
+) -> bool:
+    """Whether a resolved selection may expose one tool.
+
+    ``None`` keeps everything, and names the registry does not know stay visible
+    for the same reason ``tool_profile_allows`` keeps them.
+    """
+
+    if selection is None:
+        return True
+    group = tool_group_for_name(tool_name)
+    if group is None:
+        return True
+    return group in selection
+
+
 def tool_names_for_profile(
     profile: str,
     *,
@@ -558,7 +627,25 @@ def effective_tool_names_for_profile(
 ) -> list[str]:
     """What a client actually receives: profile minus replaced names plus consolidated tools."""
 
-    allowed = profile_groups(profile)
+    return effective_tool_names_for_selection(
+        profile_groups(profile),
+        live_editor_enabled=live_editor_enabled,
+        workflow_enabled=workflow_enabled,
+        memory_enabled=memory_enabled,
+        source_control_enabled=source_control_enabled,
+    )
+
+
+def effective_tool_names_for_selection(
+    selection: frozenset[ToolGroup] | None,
+    *,
+    live_editor_enabled: bool = False,
+    workflow_enabled: bool = False,
+    memory_enabled: bool = False,
+    source_control_enabled: bool = False,
+) -> list[str]:
+    """What a client receives for a resolved group selection (``None`` keeps everything)."""
+
     names: list[str] = []
     for name in consolidated_tool_names_for_mode(
         live_editor_enabled=live_editor_enabled,
@@ -566,8 +653,7 @@ def effective_tool_names_for_profile(
         memory_enabled=memory_enabled,
         source_control_enabled=source_control_enabled,
     ):
-        group = tool_group_for_name(name)
-        if group is None or group in allowed:
+        if tool_group_is_allowed(selection, name):
             names.append(name)
     return names
 

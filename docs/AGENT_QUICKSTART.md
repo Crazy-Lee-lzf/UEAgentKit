@@ -25,6 +25,10 @@ Project: Config/DefaultEngine.ini -> [UEAgentKit] SubprocessWorkflow=True
 Policy: 目标资产/操作在 Write Policy 范围内
 ```
 
+档位不要忘：直接启动 `ue-agent-mcp.py` 时默认档位是 `core`（只有 query 组），
+写入/实验需要 `--tool-profile full` 或 `--tool-profile live-write`，
+也可以用 `--tool-groups` 直接点名分组（例如 `query,workflow`）。
+
 实验 Blueprint 写入不走 Write Policy，另需 `--enable-experimental-graphpatch-edit` + `[UEAgentKit] ExperimentalGraphPatchEdit=True`；创建 Registry 节点再加 `--enable-experimental-node-spawn` + `[UEAgentKit] ExperimentalNodeSpawn=True`。
 
 ## 2. 用户一次性接入

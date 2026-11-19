@@ -225,11 +225,14 @@ scripts\RunMcp.cmd ^
   --enable-write-tools ^
   --enable-live-editor ^
   --enable-subprocess-workflow ^
+  --tool-profile full ^
   --project "<PROJECT_ROOT>\ProjectName.uproject" ^
   --engine-root "<UE_5.6>" ^
   --policy "<POLICY_JSON>" ^
   --database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
 ```
+
+`--tool-profile` 不能省：默认档位是 `core`（只有 query 组），没有它启动出来就没有写入工具。
 
 项目 `Config/DefaultEngine.ini` 同时需要：
 
@@ -247,6 +250,7 @@ SubprocessWorkflow=True
   --enable-live-editor ^
   --enable-experimental-graphpatch-edit ^
   --enable-experimental-node-spawn ^
+  --tool-profile live-write ^
   --project "<PROJECT_ROOT>\ProjectName.uproject" ^
   --database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
 ```
@@ -258,11 +262,23 @@ P4 / Source Control：
 ```bat
 .venv\Scripts\python.exe scripts\ue-agent-mcp.py ^
   --enable-source-control ^
+  --tool-profile full ^
   --project "<PROJECT_ROOT>\ProjectName.uproject" ^
   --database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
 ```
 
 实际可用 Tool 以 `ue_get_capabilities` 返回值为准。不同启动模式会启用不同的 Offline / Live / Workflow / Memory / Source Control Tool 集合。
+
+档位只覆盖常见组合；需要其它组合时用 `--tool-groups` 点名分组，它覆盖 `--tool-profile`。
+例如只做写入流程、不要 Editor 只读面：
+
+```bat
+.venv\Scripts\python.exe scripts\ue-agent-mcp.py ^
+  --enable-write-tools ^
+  --enable-subprocess-workflow ^
+  --tool-groups query,workflow ^
+  ...其余参数同上...
+```
 
 完整 MCP 契约见 [`../spec/MCP_SERVER.md`](../spec/MCP_SERVER.md)。
 

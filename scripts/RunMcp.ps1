@@ -18,6 +18,7 @@ param(
     [double]$LiveEditorTimeoutSeconds = 2.0,
     [ValidateSet("core", "read", "live", "live-write", "full")]
     [string]$ToolProfile = "live-write",
+    [string]$ToolGroups = "",
     [switch]$PureLive,
     [switch]$Check
 )
@@ -35,6 +36,10 @@ if ($PureLive)
     if (!$EnableLiveEditor)
     {
         throw "PureLive requires EnableLiveEditor."
+    }
+    if (![string]::IsNullOrWhiteSpace($ToolGroups))
+    {
+        throw "PureLive keeps a fixed read-only tool set; ToolGroups needs the indexed surface."
     }
     if ($EnableWriteTools -or $EnableCommitTools -or $EnableProjectMemory)
     {
@@ -101,6 +106,11 @@ if ($EnableCommitTools -and !$EnableWriteTools)
 }
 
 $Arguments = @($EntryPoint, "--database", $Database, "--tool-profile", $ToolProfile)
+if (![string]::IsNullOrWhiteSpace($ToolGroups))
+{
+    # An explicit group list overrides the profile preset on the server side.
+    $Arguments += @("--tool-groups", $ToolGroups)
+}
 if ($EnableProjectMemory)
 {
     if ([string]::IsNullOrWhiteSpace($MemoryDatabase))

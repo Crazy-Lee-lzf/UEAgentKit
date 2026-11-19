@@ -49,6 +49,8 @@ from ue_agent_kit.tool_registry import (  # noqa: E402
     QUERY_TOOL_NAMES,
     TOOL_DEFINITIONS_BY_NAME,
     consolidated_tool_names_for_mode,
+    effective_tool_names_for_selection,
+    parse_tool_groups,
     tool_names_for_mode,
 )
 
@@ -899,6 +901,33 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(payload["index"]["tool"], "ue_index_status")
         self.assertEqual(payload["index"]["stats"]["counts"]["assets"], 2)
         self.assertFalse(payload["projectMemoryEnabled"])
+        self.assertEqual(payload["toolSelection"], {"profile": "core", "groups": ["query"]})
+
+        groups_output = io.StringIO()
+        with contextlib.redirect_stdout(groups_output):
+            groups_exit_code = mcp_main(
+                [
+                    "--database",
+                    str(self.database_path),
+                    "--tool-groups",
+                    "query,workflow",
+                    "--check",
+                ]
+            )
+        self.assertEqual(groups_exit_code, 0)
+        groups_payload = json.loads(groups_output.getvalue())
+        self.assertEqual(
+            groups_payload["toolSelection"],
+            {"profile": "custom", "groups": ["query", "workflow"]},
+        )
+
+        bad_output = io.StringIO()
+        with contextlib.redirect_stderr(bad_output):
+            bad_exit_code = mcp_main(
+                ["--database", str(self.database_path), "--tool-groups", "nope", "--check"]
+            )
+        self.assertEqual(bad_exit_code, 1)
+        self.assertEqual(json.loads(bad_output.getvalue())["error"]["code"], "invalid-arguments")
 
         memory_path = self.temp_root / "check-memory.sqlite3"
         memory_output = io.StringIO()
@@ -1003,6 +1032,38 @@ class McpServerTests(unittest.TestCase):
         ):
             self.assertNotIn(replaced, names)
             self.assertNotIn(replaced, [entry["name"] for entry in capabilities["tools"]])
+
+    @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
+    def test_tool_groups_expose_exactly_the_requested_groups(self) -> None:
+        memory_service = ProjectMemoryService(
+            database_path=self.temp_root / "groups-memory.sqlite3",
+            project_key="测试项目",
+        )
+        server = create_mcp_server(
+            self.database_path,
+            live_editor_service=FakeLiveEditorService(),
+            workflow_service=FakeWorkflowService(),
+            memory_service=memory_service,
+            tool_groups="query,memory",
+        )
+        names = [tool.name for tool in asyncio.run(server.list_tools())]
+        expected = effective_tool_names_for_selection(
+            parse_tool_groups("query,memory"),
+            live_editor_enabled=True,
+            workflow_enabled=True,
+            memory_enabled=True,
+        )
+        self.assertEqual(names, expected)
+        # The live-read group is not in the selection, so its tools are gone even
+        # though the services are wired.
+        self.assertNotIn("ue_pie", names)
+        self.assertIn("ue_memory", names)
+
+        _, capabilities = asyncio.run(server.call_tool("ue_get_capabilities", {}))
+        self.assertEqual(capabilities["toolProfile"], "custom")
+        self.assertEqual(capabilities["toolGroups"], ["query", "memory"])
+        advertised = [entry["name"] for entry in capabilities["tools"]]
+        self.assertEqual(advertised, names)
 
     @unittest.skipUnless(MCP_AVAILABLE, "optional mcp dependency is not installed")
     def test_capabilities_do_not_advertise_profile_hidden_memory_tools(self) -> None:

@@ -128,13 +128,16 @@ from .verification_trust import (
 from .source_control import P4SourceControlService
 from .tool_registry import (
     HIGH_LEVEL_WRITE_TOOL_NAMES,
+    TOOL_GROUP_NAMES,
     TOOL_PROFILE_NAMES,
     LIVE_EDITOR_TOOL_NAMES,
     MEMORY_TOOL_NAMES,
     SOURCE_CONTROL_TOOL_NAMES,
     TOOL_DEFINITIONS_BY_NAME,
+    ToolGroup,
+    resolve_tool_selection,
     tool_descriptors_for_mode,
-    tool_profile_allows,
+    tool_group_is_allowed,
     replaced_tool_names,
 )
 from .snapshot_lifecycle import (
@@ -336,12 +339,14 @@ def _read_engine_status(workflow_service: PatchWorkflowService | None) -> dict[s
     }
 
 
-def _profile_visible_names(names: Sequence[str], tool_profile: str | None) -> list[str]:
-    """The subset of ``names`` one profile lets a client call (None keeps all)."""
+def _selection_visible_names(
+    names: Sequence[str], selection: frozenset[ToolGroup] | None
+) -> list[str]:
+    """The subset of ``names`` one group selection lets a client call (None keeps all)."""
 
-    if tool_profile is None:
+    if selection is None:
         return list(names)
-    return [name for name in names if tool_profile_allows(tool_profile, name)]
+    return [name for name in names if tool_group_is_allowed(selection, name)]
 
 
 def _capabilities_response(
@@ -355,6 +360,8 @@ def _capabilities_response(
     experimental_graph_layout_apply: bool = False,
     experimental_graphpatch_edit: bool = False,
     tool_profile: str | None = None,
+    tool_selection: frozenset[ToolGroup] | None = None,
+    tool_groups_spec: str | None = None,
     live_editor_status: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     write_tools_enabled = workflow_service is not None
@@ -362,24 +369,18 @@ def _capabilities_response(
     live_editor_enabled = live_editor_service is not None
     memory_enabled = memory_service is not None
     source_control_enabled = source_control_service is not None
-    # ue_pie lives in the live-read group, so the profile can hide it too.
+    # ue_pie lives in the live-read group, so the selection can hide it too.
     pie_visible = bool(
-        live_editor_enabled
-        and (tool_profile is None or tool_profile_allows(tool_profile, "ue_pie"))
+        live_editor_enabled and tool_group_is_allowed(tool_selection, "ue_pie")
     )
     # The memory hand-off only exists when both ends are callable: the workflow
     # tools that produce the evidence and the facade that records it.
     memory_handoff = bool(
         memory_enabled
         and write_tools_enabled
-        and (
-            tool_profile is None
-            or (
-                tool_profile_allows(tool_profile, "ue_memory_write")
-                and tool_profile_allows(tool_profile, "ue_verify_asset")
-                and tool_profile_allows(tool_profile, "ue_rollback_patch")
-            )
-        )
+        and tool_group_is_allowed(tool_selection, "ue_memory_write")
+        and tool_group_is_allowed(tool_selection, "ue_verify_asset")
+        and tool_group_is_allowed(tool_selection, "ue_rollback_patch")
     )
     experimental_registered = bool(live_editor_enabled and experimental_graph_layout_apply)
     observed_capabilities = (
@@ -418,7 +419,12 @@ def _capabilities_response(
         "tool": "ue_get_capabilities",
         "ok": True,
         "readOnly": True,
-        "toolProfile": tool_profile,
+        "toolProfile": "custom" if tool_groups_spec else tool_profile,
+        "toolGroups": (
+            [name for name in TOOL_GROUP_NAMES if name in tool_selection]
+            if tool_selection is not None
+            else None
+        ),
         "server": {
             "name": MCP_SERVER_NAME,
             "version": __version__,
@@ -434,8 +440,7 @@ def _capabilities_response(
                     memory_enabled=memory_enabled,
                     source_control_enabled=source_control_enabled,
                 )
-                if tool_profile is None
-                or tool_profile_allows(tool_profile, str(descriptor["name"]))
+                if tool_group_is_allowed(tool_selection, str(descriptor["name"]))
             ]
             + (
                 [
@@ -514,7 +519,7 @@ def _capabilities_response(
         "sourceControl": {
             "configured": source_control_enabled,
             "advisory": True,
-            "tools": _profile_visible_names(SOURCE_CONTROL_TOOL_NAMES, tool_profile) if source_control_enabled else [],
+            "tools": _selection_visible_names(SOURCE_CONTROL_TOOL_NAMES, tool_selection) if source_control_enabled else [],
             "submitCapability": False,
             "revertCapability": False,
             "deleteCapability": False,
@@ -528,7 +533,7 @@ def _capabilities_response(
         "liveEditor": {
             "configured": live_editor_enabled,
             "transport": "localhost-tcp" if live_editor_enabled else "unavailable",
-            "tools": _profile_visible_names(LIVE_EDITOR_TOOL_NAMES, tool_profile) if live_editor_enabled else [],
+            "tools": _selection_visible_names(LIVE_EDITOR_TOOL_NAMES, tool_selection) if live_editor_enabled else [],
             "source": "editor-memory" if live_editor_enabled else "unavailable",
             "fixedProject": live_editor_enabled,
             "fixedEndpoint": live_editor_enabled,
@@ -1026,7 +1031,7 @@ def _capabilities_response(
             "l0EventCount": memory_status.l0_event_count if memory_status is not None else 0,
             "pendingL0EventCount": (memory_status.pending_l0_event_count if memory_status is not None else 0),
             "evidenceChainCount": (memory_status.evidence_chain_count if memory_status is not None else 0),
-            "tools": _profile_visible_names(MEMORY_TOOL_NAMES, tool_profile) if memory_enabled else [],
+            "tools": _selection_visible_names(MEMORY_TOOL_NAMES, tool_selection) if memory_enabled else [],
             "recordTypes": [
                 "projectFact",
                 "projectRule",
@@ -1863,7 +1868,7 @@ def _create_pure_live_mcp_server(
 
     # No profile here: the pure-live surface is already fixed, so the proxy only
     # applies the consolidation hiding.
-    registration_server: Any = _ProfileFilteredServer(server, None)
+    registration_server: Any = _GroupFilteredServer(server, None)
     read_annotations = ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
@@ -1900,17 +1905,17 @@ def _create_pure_live_mcp_server(
     return server
 
 
-class _ProfileFilteredServer:
-    """Registers only the tools one profile allows, then delegates everything else.
+class _GroupFilteredServer:
+    """Registers only the tool groups one selection allows, then delegates.
 
-    The profile is an upper bound: a registrar that is not reached registers
+    The selection is an upper bound: a registrar that is not reached registers
     nothing, and no group becomes enabled that the run flags left off.  A
-    ``None`` profile keeps every group and only applies the consolidation hiding.
+    ``None`` selection keeps every group and only applies the consolidation hiding.
     """
 
-    def __init__(self, server: Any, profile: str | None) -> None:
+    def __init__(self, server: Any, selection: frozenset[ToolGroup] | None) -> None:
         self._server = server
-        self._profile = profile
+        self._selection = selection
         self._hidden = replaced_tool_names()
 
     def __getattr__(self, item: str) -> Any:
@@ -1922,7 +1927,7 @@ class _ProfileFilteredServer:
         def register(func: Any) -> Any:
             if func.__name__ in self._hidden:
                 return func
-            if self._profile is not None and not tool_profile_allows(self._profile, func.__name__):
+            if not tool_group_is_allowed(self._selection, func.__name__):
                 return func
             return decorator(func)
 
@@ -1945,6 +1950,7 @@ def create_mcp_server(
     experimental_node_spawn: bool = False,
     pure_live: bool = False,
     tool_profile: str | None = None,
+    tool_groups: str | None = None,
 ):
     if FastMCP is None or ToolAnnotations is None:
         raise RuntimeError(
@@ -1952,7 +1958,17 @@ def create_mcp_server(
             "or install the mcp optional dependency."
         ) from _MCP_IMPORT_ERROR
 
+    # Both knobs resolve to the same thing: a set of tool groups.  An explicit
+    # list wins over the profile preset, and an unknown group name fails here
+    # rather than silently shrinking the surface.
+    selection = resolve_tool_selection(tool_profile, tool_groups)
+
     if pure_live:
+        if tool_groups is not None:
+            raise ValueError(
+                "--tool-groups needs the indexed surface; --pure-live keeps its fixed "
+                "read-only set."
+            )
         return _create_pure_live_mcp_server(
             database_path=database_path,
             workflow_config=workflow_config,
@@ -2058,9 +2074,9 @@ def create_mcp_server(
         json_response=True,
     )
 
-    # A profile narrows what gets registered; None keeps every group and only
+    # A selection narrows what gets registered; None keeps every group and only
     # applies the consolidation hiding performed by the proxy.
-    registration_server: Any = _ProfileFilteredServer(server, tool_profile)
+    registration_server: Any = _GroupFilteredServer(server, selection)
 
     read_annotations = ToolAnnotations(
         readOnlyHint=True,
@@ -2096,6 +2112,8 @@ def create_mcp_server(
             experimental_graph_layout_apply=experimental_graph_layout_apply,
             experimental_graphpatch_edit=experimental_graphpatch_edit,
             tool_profile=tool_profile,
+            tool_selection=selection,
+            tool_groups_spec=tool_groups,
             live_editor_status=(
                 live.status()
                 if (experimental_graph_layout_apply or experimental_graphpatch_edit) and live is not None
@@ -2304,6 +2322,16 @@ def build_parser() -> argparse.ArgumentParser:
             "core=query only, read=+memory, live=+live-read/realtime, "
             "live-write=+live-action, full=everything the flags allow. "
             "Default: core."
+        ),
+    )
+    parser.add_argument(
+        "--tool-groups",
+        default=None,
+        metavar="GROUPS",
+        help=(
+            "Comma-separated tool groups to expose, overriding --tool-profile. "
+            f"Available: {', '.join(TOOL_GROUP_NAMES)}. "
+            "Example: --tool-groups query,memory,workflow"
         ),
     )
     parser.add_argument(
@@ -2622,6 +2650,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 audit_report_root=args.work_root,
             )
         if args.check:
+            checked_selection = resolve_tool_selection(args.tool_profile, args.tool_groups)
             payload: dict[str, Any] = {
                 "schemaVersion": "1.0",
                 "tool": "ue_agent_kit_mcp_status",
@@ -2632,6 +2661,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "liveEditorEnabled": live_editor_service is not None,
                 "projectMemoryEnabled": memory_service is not None,
                 "sourceControlEnabled": source_control_service is not None,
+                "toolSelection": {
+                    "profile": "custom" if args.tool_groups else args.tool_profile,
+                    "groups": [
+                        name
+                        for name in TOOL_GROUP_NAMES
+                        if name in (checked_selection or frozenset())
+                    ],
+                },
             }
             if workflow_service is not None:
                 payload["workflow"] = workflow_service.status()
@@ -2668,6 +2705,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             experimental_graphpatch_edit=bool(getattr(args, "enable_experimental_graphpatch_edit", False)),
             experimental_node_spawn=bool(getattr(args, "enable_experimental_node_spawn", False)),
             tool_profile=getattr(args, "tool_profile", None),
+            tool_groups=getattr(args, "tool_groups", None),
         )
         server.run(transport="stdio")
         return 0
