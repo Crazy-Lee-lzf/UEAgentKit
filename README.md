@@ -69,6 +69,8 @@ scripts\RunMcp.cmd -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
 
 **稳定写入**需要同时满足：服务端启用 `--enable-write-tools`、`--enable-subprocess-workflow`，项目 `Config/DefaultEngine.ini` 设置 `[UEAgentKit] SubprocessWorkflow=True`，并且目标受 Write Policy 覆盖。缺任一项时 `workflow` 组不会出现在 capabilities 中。`RunMcp.cmd` 目前只覆盖只读和 Pure Live 模式；写入与实验模式需要直接运行 `.venv\Scripts\python.exe scripts\ue-agent-mcp.py`，完整命令见 [构建与运行](docs/BUILD_AND_RUN.md)。
 
+直接启动时**还要给档位**：`ue-agent-mcp.py` 的 `--tool-profile` 默认是 `core`（只有 query 组），写入要加 `--tool-profile full`（或 `--tool-profile live-write`），也可以用 `--tool-groups` 点名分组，例如 `--tool-groups query,workflow`。档位是**上限**，不会打开被开关关掉的组；`ue_get_capabilities` 的 `toolProfile` / `toolGroups` 回报实际生效范围。全部工具与档位见 [专用 Tool 索引](docs/TOOL_CATALOG.md)。
+
 **实验 Blueprint 结构写入**额外需要 MCP `--enable-experimental-graphpatch-edit` 与项目 `[UEAgentKit] ExperimentalGraphPatchEdit=True`；通过 Action Registry 创建节点时，再加 `--enable-experimental-node-spawn` 与 `[UEAgentKit] ExperimentalNodeSpawn=True`。一次 Apply 是一个 Editor 事务，失败会回滚已执行的操作；Save 永远是独立显式动作。它们不经过稳定 Write Policy 白名单，只允许隔离测试工程使用。用法与限制见 [Blueprint 实验用法](docs/BLUEPRINT_AGENT_E2E_USAGE.md)。
 
 **没有索引或 Revision Export 的机器**可以在 Live Editor 上启动写入模式（live-only）：不需要 SQLite，但会失去离线 Revision 证据，patch 类写入仍会要求 Revision Export。读取侧新增会话级 overlay：`ue_get_asset` 发现磁盘包已变化时会自动向 Editor 重新取证；取不到时返回 `overlayStale` / `staleCause`，不会继续返回旧 canonical。`ue_refresh_asset_index_live` 可显式刷新单个 Blueprint，不写索引、不要求重启。

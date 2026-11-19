@@ -4,7 +4,7 @@
 
 ## What changed since DP1
 
-- **One atomic Blueprint patch**: seven operations — `createNode` / `connect` / `disconnect` / `setPinDefault` / `createVariable` / `rewirePin` / `removeNode` — now live in one tool family (`ue_preview/apply/save_blueprint_patch_experimental`). One Apply is one Editor transaction with per-operation results, rollback of already-applied work on failure, and Undo/Redo verification; Save remains a separate action.
+- **One atomic Blueprint patch**: seven operations — `createNode` / `connect` / `disconnect` / `setPinDefault` / `createVariable` / `rewirePin` / `removeNode` — now live in one tool family (`ue_preview_blueprint_patch_experimental` / `ue_apply_blueprint_patch_experimental` / `ue_save_blueprint_patch_experimental`). One Apply is one Editor transaction with per-operation results, rollback of already-applied work on failure, and Undo/Redo verification; Save remains a separate action.
 - **Action Registry node creation**: `createNode` can use an `actionId` returned by `ue_search_node_actions` to create `K2Node_CallFunction` and `K2Node_DynamicCast`. Engine functions, project C++ `BlueprintCallable` functions, and Blueprint-defined functions are eligible; the Cast target class is chosen by the engine spawner. Search reports `canCreate` / `rejectReason` before a write.
 - **Wildcard connections**: `Select` / `PromotableOperator` wildcard pins can be connected; the K2 schema derives the type during the write, and `resolvedPins` returns the post-connection pin snapshot. `createNode` still cannot create these node classes.
 - **Live-only write startup**: a machine without a SQLite index or Revision Export can start the write mode against a live Editor. Bridge-native writes (such as node positions and edit sessions) need no index; patch-based writes still require a Revision Export at use time. The trade-off is the loss of offline revision evidence.
@@ -12,6 +12,42 @@
 - **User and Agent can edit the same graph**: position batches / edit sessions may begin on a dirty package, check per-node expected coordinates, and roll back only nodes the Agent wrote last and the user has not changed, reporting skipped nodes. The structural patch still requires a clean package; the two boundaries are different.
 - **Narrower subprocess workflow**: the `workflow` group is not registered by default. It requires both `--enable-subprocess-workflow` and the project setting `[UEAgentKit] SubprocessWorkflow=True`. Every spawn attempt is recorded in a bounded session ledger; the read-only `ue_get_subprocess_ledger` exposes it.
 - **Old writer tools removed**: standalone pin-default / variable / rewire / node-remove preview/apply/save tools and the graph-edit shell are no longer registered; their capabilities moved into the atomic patch.
+
+## Tool surface (one of the main DP2 changes)
+
+DP1 had one tool per action, so connecting a session pulled in well over a hundred definitions. DP2 reduces that in two ways.
+
+**One — family entry points.** Twelve families became `action` entry points, and **81 old names are no longer registered or advertised**:
+
+| Entry point | Actions |
+|---|---|
+| `ue_pie` | `state` / `worlds` / `list_actors` / `inspect_actor` / `scalars` / `list_properties` / `read_properties` |
+| `ue_datatable` | `set_cell` / `set_row_fields` / `add_row` / `remove_row` / `rename_row` |
+| `ue_memory` / `ue_memory_write` | seven read actions / record writes plus the knowledge and work sub-actions |
+| `ue_patch` | `plan` / `dry_run` / `apply` / `verify` / `rollback` / `state` / `refresh_index` |
+| `ue_change_set` | `create` / `get` / `save_checkpoint` / `verify_checkpoint` |
+| `ue_live_write` | `plan_batch` / `apply_batch` / `recover_batch` / `verify` / `verify_fast` / `verify_checkpoint` |
+| `ue_asset_property` | `set` / `set_reference` / `set_structured` / `apply` / `undo` / `discard` and related |
+| `ue_set_property` | `blueprint_default` / `component_property` / `pin_default` / `material_parameter` |
+| `ue_animation_scale_fix` | single-asset and batch scale audit/fix actions |
+| `ue_animation_retarget` | retarget analysis and postprocess actions |
+| `ue_blueprint_edit` | `move_node` / `move_nodes` / `begin_session` / `end_session` / `save` |
+
+Arguments, defaults, Plan/Dry Run receipts, and result shapes are unchanged; a successful call echoes its `action`.
+
+**Two — profiles and the session surface.** `--tool-profile` bounds how many tools one session exposes; `--tool-groups` names groups directly when no preset fits:
+
+| Selection | Visible tools | Definition size |
+|---|---:|---:|
+| `core` (CLI default) | 15 | ≈3.0k tokens |
+| `read` | 17 | |
+| `live` | 48 | |
+| `live-write` (`RunMcp.cmd` default) | 58 | |
+| `full` | 74 | ≈14.6k tokens |
+| `--tool-groups query,workflow` | 25 | combinations no preset offers |
+
+A profile is only an **upper bound**: it never enables a group the run flags left off.
+`ue_get_capabilities` reports `toolProfile` (or `custom` when a group list was given) and `toolGroups`, and the tools it lists match what `tools/list` actually registered.
 
 ## Caveats
 
@@ -26,13 +62,17 @@
 Stable writes: --enable-write-tools + --enable-subprocess-workflow
                + project [UEAgentKit] SubprocessWorkflow=True
                + a Write Policy covering the target
+               + --tool-profile full (or name the groups with --tool-groups)
 
 Experimental patch: --enable-experimental-graphpatch-edit
                + project [UEAgentKit] ExperimentalGraphPatchEdit=True
+               + --tool-profile live-write
 
 Registry creation: add --enable-experimental-node-spawn
                + project [UEAgentKit] ExperimentalNodeSpawn=True
 ```
+
+Running `ue-agent-mcp.py` directly defaults to the `core` profile (the query group only); without a profile the write tools are not registered.
 
 ## Environment
 

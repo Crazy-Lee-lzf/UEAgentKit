@@ -18,6 +18,7 @@ UE Agent Kit is a **project knowledge layer plus controlled mutation workflow** 
 - Read-only PIE reads go through one entry point, `ue_pie(action=...)` (`state` / `worlds` / `list_actors` / `inspect_actor` / `scalars` / `list_properties` / `read_properties`); the seven per-verb tools are no longer registered separately. Arguments and bridge payloads are unchanged; a successful result carries one extra `action` field echoing the requested action.
 - DataTable row writes go through one entry point, `ue_datatable(action=...)` (`set_cell` / `set_row_fields` / `add_row` / `remove_row` / `rename_row`); the five per-verb tools are no longer registered separately, with the same Plan/DryRun and Write Policy gates.
 - Project Memory is two entry points: `ue_memory(action=...)` for the seven read actions and `ue_memory_write(action=...)` for record writes plus the knowledge/work sub-actions; the fourteen per-verb tools are no longer registered separately, with unchanged arguments, defaults and results.
+- The other eight families follow the same shape: `ue_patch` (`plan` / `dry_run` / `apply` / `verify` / `rollback` / `state` / `refresh_index`), `ue_change_set`, `ue_live_write`, `ue_asset_property`, `ue_set_property` (`blueprint_default` / `component_property` / `pin_default` / `material_parameter`), `ue_animation_scale_fix`, `ue_animation_retarget`, and `ue_blueprint_edit` (`move_node` / `move_nodes` / `begin_session` / `end_session` / `save`). Eighty-one per-verb tools are no longer registered; the largest surface drops from 137 to 74.
 
 ## Read capabilities
 

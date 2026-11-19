@@ -436,7 +436,7 @@ editor_session_id = Apply 结果中的 editorSessionId
 该规划类 Tool 把一次 Live Apply 收尾成标准闭环：`ue_asset_property(action="apply")`（返回并 Journal 化 `liveApplyReceipt`）→ 用户显式 `ue_blueprint_edit(action="save")` Preview/Commit → `ue_live_write(action="verify")(asset_path, live_apply_receipt="")`。显式 Receipt 精确选择记录；为空时选择该资产最新待处理记录，以兼容旧 Client。
 
 - 每个发生实际变更的 Apply 记录原子写入固定 Work Root 的 `live-write-journal`；Authorized Save 更新为 saved，成功 Undo/Discard 或成功 Verify 删除。Server 重启只恢复通过 Schema、Project、Operation、Target、Transaction 和生命周期校验的记录。
-- Apply/Save 返回 `journalPersisted`。Journal I/O 失败不会反转已经成功的 Editor 操作，只在 `ue_workflow_status.liveWriteJournal` 中报告 `pendingRecordCount`、`recoveredRecordCount` 与 `journalErrorCount`。
+- Apply/Save 返回 `journalPersisted`。Journal I/O 失败不会反转已经成功的 Editor 操作，只在 `ue_get_project_status.workflow.liveWriteJournal` 中报告 `pendingRecordCount`、`recoveredRecordCount` 与 `journalErrorCount`。
 - 若目标包仍 Dirty：返回 `state=not-saved` 终态（`saved=false`、`verified=false`、`undoAvailable=true`、磁盘 Revision 未变），不伪装成功；`memoryTaskEvidence` 以 `cancelled` 结论记录“未持久化，可保存或撤销”，并明确 `independentReload=false`，因为该分支没有启动独立重载。下一步提示继续授权保存或 Undo/Discard；成功回退会直接关闭待处理 Live Apply 记录。
 - 若包干净但未经过授权保存（外部保存/手工撤销/Session 分叉）：拒绝 `live-write-verify-save-unauthorized` 并要求重新 Plan。
 - 若已授权保存：独立 Unreal 进程重载磁盘资产；Data Asset、Material Instance 与 DataTable 复用 `RunAssetCatalog.ps1`，Blueprint apply report 则复用既有 `RunExport.ps1 -Profile full -Format json -IncludeUnchangedDefaults`，同时保留 defaults/components 与 graph/pin Canonical。验证校验导出的资产路径、干净的 SHA-256 Revision 与磁盘一致、Revision 相对冻结索引已变化，并按 Kind 提取导出值与应用时 `afterValue` 做 JSON 级比对。DataTable Rename 按 `newRowName` 提取目标行，其余 DataTable 操作按 `rowName`；通过后返回 `state=verified`、`actualRevision`、`expectedValue`/`exportedValue`、`undoAvailable=false`，并生成独立重载 `memoryTaskEvidence`。

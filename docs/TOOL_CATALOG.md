@@ -72,7 +72,7 @@ python scripts\ue-agent-mcp.py --enable-write-tools ... --tool-groups query,work
 | 配置写入 | `ue_datatable`（DataTable 行：`set_cell` / `set_row_fields` / `add_row` / `remove_row` / `rename_row`）、`ue_set_asset_*`、`ue_set_property(action="material_parameter")`、`ue_set_property(action="blueprint_default")`、`ue_set_property(action="component_property")`、`ue_set_property(action="pin_default")` | workflow 双门禁 + Write Policy |
 | Live 单资产修改 | `ue_asset_property(action="apply")`、`ue_asset_property(action="undo")`、`ue_asset_property(action="discard")`、`ue_blueprint_edit(action="save")` | workflow 双门禁 + Write Policy |
 | Niagara Module Input | `ue_set_niagara_module_input` | 仅 Local 常量；一次修改一次 Undo；不自动 Save |
-| 位置批量移动 / edit session | `ue_blueprint_edit(action="move_node")`、`ue_blueprint_edit(action="move_nodes")`、`ue_blueprint_edit_session(action="begin")`、`ue_blueprint_edit_session(action="end")` | workflow 双门禁 |
+| 位置批量移动 / edit session | `ue_blueprint_edit`（`move_node` / `move_nodes` / `begin_session` / `end_session` / `save`） | workflow 双门禁 |
 | 实验 Blueprint patch | `ue_preview_blueprint_patch_experimental`、`ue_apply_blueprint_patch_experimental`、`ue_save_blueprint_patch_experimental` | `--enable-experimental-graphpatch-edit` + ini |
 | Action Registry 节点创建 | `ue_search_node_actions`（只读）+ `createNode` 的 `actionId` | 再加 `--enable-experimental-node-spawn` + ini |
 | 实时索引 | `ue_refresh_asset_index_live` | 需要 Live Editor；不写索引 |

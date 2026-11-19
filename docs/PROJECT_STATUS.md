@@ -18,6 +18,7 @@ UE Agent Kit 是 Unreal Engine 的**项目知识层 + 受控修改工作流**：
 - PIE 只读读取统一走 `ue_pie(action=...)`（`state` / `worlds` / `list_actors` / `inspect_actor` / `scalars` / `list_properties` / `read_properties`）；原来 7 个逐动词 Tool 不再单独注册。参数与桥接返回不变，成功结果额外带一个 `action` 字段回显本次动作。
 - DataTable 行写入统一走 `ue_datatable(action=...)`（`set_cell` / `set_row_fields` / `add_row` / `remove_row` / `rename_row`）；原来 5 个逐动词 Tool 不再单独注册，Plan/DryRun 与 Write Policy 门禁不变。
 - Project Memory 收敛为两个入口：`ue_memory(action=...)` 负责 7 个只读动作，`ue_memory_write(action=...)` 负责记录写入与 knowledge/work 子动作；原来 14 个逐动词 Tool 不再单独注册，参数、默认值与返回结构不变。
+- 其余 8 个家族同样收敛为单一入口：`ue_patch`（`plan` / `dry_run` / `apply` / `verify` / `rollback` / `state` / `refresh_index`）、`ue_change_set`、`ue_live_write`、`ue_asset_property`、`ue_set_property`（`blueprint_default` / `component_property` / `pin_default` / `material_parameter`）、`ue_animation_scale_fix`、`ue_animation_retarget`、`ue_blueprint_edit`（`move_node` / `move_nodes` / `begin_session` / `end_session` / `save`）。合计 81 个逐动词 Tool 不再注册；最大可见面从 137 降到 74。
 
 ## 读取能力
 
