@@ -2,7 +2,7 @@
 
 [中文](DEVELOPER_WORKFLOWS.md)
 
-**Call `ue_get_capabilities` first.** The stable release is 0.8.0; the latest prerelease is 0.9.0 Developer Preview 1; 0.9.0 Developer Preview 2 is still a candidate. The live and experimental tools below require registration on the deployed server.
+**Call `ue_get_capabilities` first.** The current version is 0.9.0. The live and experimental tools below require registration on the deployed server.
 
 ## Find Blueprint and C++ code
 

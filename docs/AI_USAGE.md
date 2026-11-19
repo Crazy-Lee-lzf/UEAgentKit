@@ -4,7 +4,7 @@
 
 ## 1. 版本与运行模式
 
-- 当前版本 **0.9.0**（稳定版）；此前的预发布是 **0.9.0 Developer Preview 1（`v0.9.0-dev1`）**，再往前是稳定版 **0.8.0**。
+- 当前版本 **0.9.0**。
 - Tool 按启动参数动态注册。连接后先调用 `ue_get_capabilities`；没出现的 Tool 就是当前不可用。
 - `workflow` 组需要 `--enable-write-tools` + `--enable-subprocess-workflow` + 项目 `[UEAgentKit] SubprocessWorkflow=True` + Write Policy。缺任一项时不要尝试写入。
 - 实验 Blueprint 写入使用独立门禁，不经过 Write Policy；见 [Blueprint 实验用法](BLUEPRINT_AGENT_E2E_USAGE.md)。

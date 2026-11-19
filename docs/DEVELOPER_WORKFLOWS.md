@@ -2,7 +2,7 @@
 
 [English](DEVELOPER_WORKFLOWS_EN.md)
 
-**先调用 `ue_get_capabilities`。** 稳定版为 0.8.0；最新预发布为 0.9.0 Developer Preview 1；0.9.0 Developer Preview 2 仍是候选，未发布。下面的 Live / 实验工具只在已部署服务器实际注册时可用。
+**先调用 `ue_get_capabilities`。** 当前版本为 0.9.0。下面的 Live / 实验工具只在已部署服务器实际注册时可用。
 
 ## Blueprint 与 C++ 查询
 

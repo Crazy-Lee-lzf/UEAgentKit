@@ -106,18 +106,18 @@ def validate_version_sources(expected_version: str | None = None, *, require_rel
         elif any(value != version for value in values):
             issues.append(f"{relative}: inconsistent {field_name} values {values!r}, expected {version}")
 
-    _expect_text(issues, ROOT / "README.md", f"当前已发布版本为 **{PUBLISHED_VERSION}**（稳定版", "README published version")
+    _expect_text(issues, ROOT / "README.md", f"当前版本 **{PUBLISHED_VERSION}**", "README published version")
     _expect_text(
         issues,
         ROOT / "README_EN.md",
-        f"The latest published release is **{PUBLISHED_VERSION}** (stable",
+        f"Current version: **{PUBLISHED_VERSION}**",
         "README_EN published version",
     )
-    _expect_text(issues, ROOT / "docs/ROADMAP.md", f"当前已发布版本为 **{PUBLISHED_VERSION}**", "roadmap version")
+    _expect_text(issues, ROOT / "docs/ROADMAP.md", f"当前版本 **{PUBLISHED_VERSION}**", "roadmap version")
     _expect_text(
         issues,
         ROOT / "docs/ROADMAP_EN.md",
-        f"The latest published release is **{PUBLISHED_VERSION}**",
+        f"Current version: **{PUBLISHED_VERSION}**",
         "roadmap EN version",
     )
     _expect_text(issues, ROOT / "CHANGELOG.md", f"## {version} ", "changelog release heading")
