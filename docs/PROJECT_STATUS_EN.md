@@ -8,9 +8,9 @@
 |---|---|---|---|
 | 0.8.0 | Stable | 2026-09-07 | Previous stable release; Python 3.11–3.12 |
 | 0.9.0 Developer Preview 1 | Prerelease (published) | 2026-10-30 | `v0.9.0-dev1`; Python 3.11–3.14 |
-| 0.9.0 Developer Preview 2 | Candidate (unreleased) | — | Planned version `0.9.0.dev2`; the subject of this page |
+| 0.9.0 | Stable (published) | 2026-11-19 | `v0.9.0`; the subject of this page |
 
-This page describes the **0.9.0 Developer Preview 2 candidate code**. Published behavior is defined by the matching release notes; DP2 has no tag or GitHub Release yet.
+This page describes **0.9.0**. Behavior of earlier versions is defined by the matching release notes.
 
 UE Agent Kit is a **project knowledge layer plus controlled mutation workflow** for Unreal Engine. It turns assets, Blueprint semantics, references, and Editor state into searchable data, provides agents with context and verification evidence, and executes narrow writes behind Policy / Revision / Transaction / Save / Verify gates.
 

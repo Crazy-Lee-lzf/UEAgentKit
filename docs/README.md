@@ -12,8 +12,8 @@
 
 ## Release Notes
 
-- **0.9.0 Developer Preview 2（候选，未发布）**：[中文](RELEASE_0.9.0_DP2.md) / [English](RELEASE_0.9.0_DP2_EN.md)
-- **0.9.0 Developer Preview 1（已发布，2026-10-30）**：[中文](RELEASE_0.9.0_PREVIEW.md) / [English](RELEASE_0.9.0_PREVIEW_EN.md)
+- **0.9.0（稳定版，2026-11-19）**：[中文](RELEASE_0.9.0.md) / [English](RELEASE_0.9.0_EN.md)
+- **0.9.0 Developer Preview 1（预发布，2026-10-30）**：[中文](RELEASE_0.9.0_PREVIEW.md) / [English](RELEASE_0.9.0_PREVIEW_EN.md)
 - [0.8.0](RELEASE_0.8.0.md) / [English](RELEASE_0.8.0_EN.md)
 - [0.7.0](RELEASE_0.7.0.md) / [English](RELEASE_0.7.0_EN.md)
 - [0.6.0](RELEASE_0.6.0.md) / [English](RELEASE_0.6.0_EN.md)

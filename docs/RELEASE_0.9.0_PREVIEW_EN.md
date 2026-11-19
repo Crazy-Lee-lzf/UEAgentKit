@@ -33,4 +33,4 @@ Download `UEAgentKit-0.9.0.dev1-UE5.6-Win64.zip` from the release, and copy its 
 
 Experimental Blueprint writes are off by default, require both an MCP flag and a project ini opt-in, and are limited to disposable test projects. DP1 does not support general Level, AnimGraph, MaterialGraph, or NiagaraGraph writes, and does not provide executed pin traces or complete GAS state. Bool/double/string input literals, Blueprint-declared property provenance, and PIE client scalar values are outside DP1's native coverage.
 
-See [0.9.0 Developer Preview 2](RELEASE_0.9.0_DP2_EN.md) for the next candidate and [0.8.0 release notes](RELEASE_0.8.0_EN.md) for the stable release.
+The next release is [0.9.0 (stable)](RELEASE_0.9.0_EN.md); before this, the [0.8.0 release notes](RELEASE_0.8.0_EN.md).

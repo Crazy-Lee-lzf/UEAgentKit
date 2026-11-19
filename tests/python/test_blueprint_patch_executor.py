@@ -325,7 +325,7 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
 
     def test_release_version_is_consistent(self) -> None:
 
-        expected_version = "0.9.0.dev1"
+        expected_version = "0.9.0"
         pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         plugin = json.loads(
             (ROOT / "Plugin" / "UEAgentKit" / "UEAgentKit.uplugin").read_text(
@@ -348,7 +348,7 @@ class BlueprintPatchExecutorTests(unittest.TestCase):
             self.assertNotIn("0.5.0", source, path)
 
         scalar_regression = (ROOT / "scripts" / "RunScalarPatchRegression.ps1").read_text(encoding="utf-8")
-        self.assertIn('toolVersion = "0.9.0.dev1"', scalar_regression)
+        self.assertIn('toolVersion = "0.9.0"', scalar_regression)
 
         versioned_cpp_files = [
             "AssetCatalogExportCommandlet.cpp",

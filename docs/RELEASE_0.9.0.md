@@ -1,9 +1,10 @@
-# UE Agent Kit 0.9.0 Developer Preview 2（候选）
+# UE Agent Kit 0.9.0（稳定版）
 
-**状态：候选，尚未发布。** 计划版本号为 `0.9.0.dev2`；发布前会在发布提交中统一 bump，当前 checkout 的版本号以 `pyproject.toml` / plugin 为准。没有 GitHub Tag 或 Release。最新公开预发布仍是 [0.9.0 Developer Preview 1](RELEASE_0.9.0_PREVIEW.md)；稳定版仍是 [0.8.0](RELEASE_0.8.0.md)。本页描述候选代码，不是生产授权。
+**状态：已发布（2026-11-19）。** 版本号 `0.9.0`，`pyproject.toml`、`UEAgentKit.uplugin` 与插件内各处版本字段一致。上一个版本是 [0.9.0 Developer Preview 1](RELEASE_0.9.0_PREVIEW.md)（`v0.9.0-dev1` 预发布），再往前是稳定版 [0.8.0](RELEASE_0.8.0.md)。
 
-## DP2 相对 DP1 的变化
+## 相对 0.9.0.dev1（DP1）的变化
 
+- **工具面收窄（对 MCP 客户端是破坏性变更）**：81 个逐动词 Tool 名字不再注册，改为 12 个家族入口，见下面「工具面」一节。连接后不再一次涌出全量工具，而由档位/分组决定可见面。
 - **统一原子 Blueprint patch**：`createNode` / `connect` / `disconnect` / `setPinDefault` / `createVariable` / `rewirePin` / `removeNode` 七种操作合并到同一组工具（`ue_preview_blueprint_patch_experimental` / `ue_apply_blueprint_patch_experimental` / `ue_save_blueprint_patch_experimental`）。一次 Apply 一个 Editor 事务，逐操作返回结果，失败回滚已执行部分，并做 Undo/Redo 校验；Save 仍然是独立动作。
 - **Action Registry 节点创建**：`createNode` 可以用 `ue_search_node_actions` 返回的 `actionId` 创建 `K2Node_CallFunction` 与 `K2Node_DynamicCast`。可调用引擎函数、项目 C++ `BlueprintCallable` 和蓝图自建函数；Cast 目标类由引擎 spawner 决定。搜索会提前返回 `canCreate` / `rejectReason`。
 - **Wildcard 连线**：`Select` / `PromotableOperator` 的 wildcard 端点可以通过 `connect` 连接，由 K2 schema 在写入时推导类型；结果里的 `resolvedPins` 是连接后的实际 pin 快照。`createNode` 仍不能创建这两类节点。
@@ -13,9 +14,9 @@
 - **子进程 workflow 收窄**：`workflow` 组默认不注册，需要 MCP `--enable-subprocess-workflow` 与项目 `[UEAgentKit] SubprocessWorkflow=True` 同时满足。每次 spawn 尝试记入会话内有界 ledger，可用只读的 `ue_get_subprocess_ledger` 查看。
 - **旧 writer 工具移除**：pin-default / variable / rewire / node-remove 的独立 preview/apply/save 与 graph-edit 外壳不再注册；能力并入原子 patch。
 
-## 工具面（DP2 相对 DP1 的主要变化之一）
+## 工具面（本次的主要变化之一）
 
-DP1 时代每个动作一个工具，连接后一次涌出百余个定义。DP2 把它收成两类：
+0.9.0.dev1 时代每个动作一个工具，连接后一次涌出百余个定义。0.9.0 把它收成两类：
 
 **一、家族入口。** 十二个家族合成 `action` 入口，共有 **81 个旧名字不再注册、也不再出现在 `ue_get_capabilities` 里**：
 
@@ -52,7 +53,7 @@ DP1 时代每个动作一个工具，连接后一次涌出百余个定义。DP2 
 
 ## 仍需注意
 
-- DP2 的核心新能力仍然是**默认关闭的实验能力**，不是生产默认。
+- 0.9.0 的实验能力**仍然默认关闭**：Blueprint 结构 patch 与 Action Registry 建节点都需要显式 flag + 项目 ini 双门禁，且只对隔离测试工程开放。
 - 实验 patch 不走稳定 Write Policy 白名单；只接受精确资产/图身份、干净 Package、非 PIE、版本/指纹校验和有界操作。
 - 已验证的 patch 范围是顶层 K2 事件图；不写嵌套子图。
 - `RunMcp.cmd` 目前只覆盖只读与 Pure Live；写入、实验和 P4 模式需要直接运行 `.venv\Scripts\python.exe scripts\ue-agent-mcp.py`。完整参数见 [构建与运行](BUILD_AND_RUN.md)。
@@ -75,8 +76,12 @@ Registry 创建：再加 --enable-experimental-node-spawn
 
 直接跑 `ue-agent-mcp.py` 时档位默认是 `core`（只有 query 组），忘了给档位就看不到写入工具。
 
+## 安装
+
+从 Release 下载 `UEAgentKit-0.9.0-UE5.6-Win64.zip`，把其中的 `UEAgentKit` 目录复制到项目 `Plugins/`。Python 使用对应的 `ue_agent_kit-0.9.0-py3-none-any.whl`。校验和见 Release 页的 `SHA256SUMS`。
+
 ## 环境
 
-Unreal Engine 5.6 / Windows x64 / Python 3.11–3.14。能力以冻结构建的 `ue_get_capabilities` 为准；DP2 尚未发布，不提供安装包或 SHA-256。
+Unreal Engine 5.6 / Windows x64 / Python 3.11–3.14。能力以冻结构建的 `ue_get_capabilities` 为准；不同开关下的工具集合不同，升级前先看 [专用 Tool 索引](TOOL_CATALOG.md) 的档位表。
 
 用法与限制见 [Blueprint 实验用法](BLUEPRINT_AGENT_E2E_USAGE.md)，能力边界见 [能力状态](PROJECT_STATUS.md)。

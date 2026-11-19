@@ -33,4 +33,4 @@
 
 实验性 Blueprint 写入默认关闭，需要 MCP 开关与工程 ini 双重授权，且仅限隔离测试工程。DP1 不支持通用关卡、AnimGraph、MaterialGraph、NiagaraGraph 写入，也不提供运行时 Pin 执行轨迹或完整 GAS 状态。bool/double/string 输入常量、Blueprint 自声明属性来源和 PIE Client 标量值不在 DP1 的原生覆盖范围内。
 
-下一版候选见 [0.9.0 Developer Preview 2](RELEASE_0.9.0_DP2.md)；稳定版见 [0.8.0 Release Notes](RELEASE_0.8.0.md)。
+后续版本见 [0.9.0（稳定版）](RELEASE_0.9.0.md)；再往前是 [0.8.0 Release Notes](RELEASE_0.8.0.md)。

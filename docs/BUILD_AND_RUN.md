@@ -2,7 +2,7 @@
 
 本文面向从 GitHub 获取 UE Agent Kit 并接入 Unreal Engine 5.6 项目的用户。
 
-当前稳定版：**0.8.0**；最新预发布：**0.9.0 Developer Preview 1（`v0.9.0-dev1`）**；下一版候选：**0.9.0 Developer Preview 2（计划版本 `0.9.0.dev2`，未发布）**。
+当前版本：**0.9.0**（稳定版）；此前的预发布是 **0.9.0 Developer Preview 1（`v0.9.0-dev1`）**，再往前是稳定版 **0.8.0**。
 
 ## 1. 环境要求
 

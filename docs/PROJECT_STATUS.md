@@ -8,9 +8,9 @@
 |---|---|---|---|
 | 0.8.0 | 稳定版 | 2026-09-07 | 上一个稳定发布；Python 3.11–3.12 |
 | 0.9.0 Developer Preview 1 | 预发布（已发布） | 2026-10-30 | `v0.9.0-dev1`；Python 3.11–3.14 |
-| 0.9.0 Developer Preview 2 | 候选（未发布） | — | 计划版本 `0.9.0.dev2`；本页描述对象 |
+| 0.9.0 | 稳定版（已发布） | 2026-11-19 | `v0.9.0`；本页描述对象 |
 
-本页以 **0.9.0 Developer Preview 2 候选代码**为准。已发布版本的具体行为以对应 Release Notes 为准；DP2 尚未创建 tag 或 GitHub Release。
+本页以 **0.9.0** 为准。更早版本的具体行为以对应 Release Notes 为准。
 
 UE Agent Kit 是 Unreal Engine 的**项目知识层 + 受控修改工作流**：把资产、Blueprint 语义、引用关系和 Editor 状态转换为可搜索数据，为 Agent 提供上下文与验证证据，并通过 Policy / Revision / Transaction / Save / Verify 门禁执行窄范围写入。
 

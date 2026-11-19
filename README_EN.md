@@ -4,7 +4,7 @@
 
 UE Agent Kit is an open-source **Unreal Engine 5.6** project-analysis and controlled-mutation toolkit. It turns `.uasset` data, Blueprint semantics, references, and live Editor state into searchable project knowledge, then lets AI agents perform narrow writes behind explicit safety gates. It is not a general graph editor or an arbitrary script executor.
 
-The latest published release is **0.8.0** (stable). The latest published prerelease is **0.9.0 Developer Preview 1 (v0.9.0-dev1 / Python 0.9.0.dev1)** (2026-10-30); the next candidate is **0.9.0 Developer Preview 2** (planned version `0.9.0.dev2`, unreleased). Runtime target: **Unreal Engine 5.6 / Windows x64 / Python 3.11–3.14**.
+The latest published release is **0.9.0** (stable, 2026-11-19). The previous prerelease was **0.9.0 Developer Preview 1 (v0.9.0-dev1)**; before that, the stable **0.8.0**. Runtime target: **Unreal Engine 5.6 / Windows x64 / Python 3.11–3.14**.
 
 ## What it does
 
@@ -89,7 +89,7 @@ See [capability status](docs/PROJECT_STATUS_EN.md) for the full boundary, altern
 
 - [AI Agent Quick Start](docs/AGENT_QUICKSTART_EN.md) / [中文](docs/AGENT_QUICKSTART.md)
 - [Capability status](docs/PROJECT_STATUS_EN.md) / [中文](docs/PROJECT_STATUS.md)
-- [0.9.0 Developer Preview 2 (candidate)](docs/RELEASE_0.9.0_DP2_EN.md) / [中文](docs/RELEASE_0.9.0_DP2.md)
+- [0.9.0 (stable)](docs/RELEASE_0.9.0_EN.md) / [中文](docs/RELEASE_0.9.0.md)
 - [0.9.0 Developer Preview 1 (published)](docs/RELEASE_0.9.0_PREVIEW_EN.md) / [中文](docs/RELEASE_0.9.0_PREVIEW.md)
 - [0.8.0 Release Notes](docs/RELEASE_0.8.0_EN.md) / [中文](docs/RELEASE_0.8.0.md)
 - [Blueprint experimental usage](docs/BLUEPRINT_AGENT_E2E_USAGE_EN.md) / [中文](docs/BLUEPRINT_AGENT_E2E_USAGE.md)

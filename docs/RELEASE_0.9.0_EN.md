@@ -1,9 +1,10 @@
-# UE Agent Kit 0.9.0 Developer Preview 2 (candidate)
+# UE Agent Kit 0.9.0 (stable)
 
-**Status: candidate, unreleased.** The planned version is `0.9.0.dev2`; the release commit will bump it consistently, and the current checkout's version is defined by `pyproject.toml` / the plugin. There is no GitHub tag or Release. The latest published prerelease remains [0.9.0 Developer Preview 1](RELEASE_0.9.0_PREVIEW_EN.md); the stable release remains [0.8.0](RELEASE_0.8.0_EN.md). This page describes candidate code, not a production authorization.
+**Status: released (2026-11-19).** The version is `0.9.0`, consistent across `pyproject.toml`, `UEAgentKit.uplugin`, and the version fields inside the plugin. The previous release is [0.9.0 Developer Preview 1](RELEASE_0.9.0_PREVIEW_EN.md) (the `v0.9.0-dev1` prerelease); before that, the stable [0.8.0](RELEASE_0.8.0_EN.md).
 
-## What changed since DP1
+## What changed since 0.9.0.dev1 (DP1)
 
+- **Narrower tool surface (breaking for MCP clients)**: 81 per-verb tool names are no longer registered and became 12 family entry points, described in the tool surface section below. A session no longer pulls in every tool; a profile or group list decides what is visible.
 - **One atomic Blueprint patch**: seven operations — `createNode` / `connect` / `disconnect` / `setPinDefault` / `createVariable` / `rewirePin` / `removeNode` — now live in one tool family (`ue_preview_blueprint_patch_experimental` / `ue_apply_blueprint_patch_experimental` / `ue_save_blueprint_patch_experimental`). One Apply is one Editor transaction with per-operation results, rollback of already-applied work on failure, and Undo/Redo verification; Save remains a separate action.
 - **Action Registry node creation**: `createNode` can use an `actionId` returned by `ue_search_node_actions` to create `K2Node_CallFunction` and `K2Node_DynamicCast`. Engine functions, project C++ `BlueprintCallable` functions, and Blueprint-defined functions are eligible; the Cast target class is chosen by the engine spawner. Search reports `canCreate` / `rejectReason` before a write.
 - **Wildcard connections**: `Select` / `PromotableOperator` wildcard pins can be connected; the K2 schema derives the type during the write, and `resolvedPins` returns the post-connection pin snapshot. `createNode` still cannot create these node classes.
@@ -13,9 +14,9 @@
 - **Narrower subprocess workflow**: the `workflow` group is not registered by default. It requires both `--enable-subprocess-workflow` and the project setting `[UEAgentKit] SubprocessWorkflow=True`. Every spawn attempt is recorded in a bounded session ledger; the read-only `ue_get_subprocess_ledger` exposes it.
 - **Old writer tools removed**: standalone pin-default / variable / rewire / node-remove preview/apply/save tools and the graph-edit shell are no longer registered; their capabilities moved into the atomic patch.
 
-## Tool surface (one of the main DP2 changes)
+## Tool surface (one of the main changes)
 
-DP1 had one tool per action, so connecting a session pulled in well over a hundred definitions. DP2 reduces that in two ways.
+0.9.0.dev1 had one tool per action, so connecting a session pulled in well over a hundred definitions. 0.9.0 reduces that in two ways.
 
 **One — family entry points.** Twelve families became `action` entry points, and **81 old names are no longer registered or advertised**:
 
@@ -51,7 +52,7 @@ A profile is only an **upper bound**: it never enables a group the run flags lef
 
 ## Caveats
 
-- DP2's headline additions are still **default-off experimental capabilities**, not production defaults.
+- The experimental capabilities stay **default-off** in 0.9.0: the Blueprint structure patch and Action Registry node creation both need an explicit flag plus the project ini gate, and are for disposable test projects only.
 - The experimental patch bypasses the stable Write Policy allowlist; it requires exact asset/graph identity, a clean package, stopped PIE, revision/fingerprint checks, and bounded operations.
 - The verified patch scope is top-level K2 event graphs; nested subgraphs are not written.
 - `RunMcp.cmd` currently covers read-only and Pure Live modes only. Writes, experiments, and P4 require running `.venv\Scripts\python.exe scripts\ue-agent-mcp.py` directly; full arguments are in [Build and Run](BUILD_AND_RUN.md).
@@ -74,8 +75,12 @@ Registry creation: add --enable-experimental-node-spawn
 
 Running `ue-agent-mcp.py` directly defaults to the `core` profile (the query group only); without a profile the write tools are not registered.
 
+## Installing
+
+Download `UEAgentKit-0.9.0-UE5.6-Win64.zip` from the release and copy its `UEAgentKit` folder into the project's `Plugins/`. Python uses the matching `ue_agent_kit-0.9.0-py3-none-any.whl`. Checksums are in the release's `SHA256SUMS`.
+
 ## Environment
 
-Unreal Engine 5.6 / Windows x64 / Python 3.11–3.14. The frozen build's `ue_get_capabilities` is authoritative. DP2 is unreleased and has no installer or SHA-256 yet.
+Unreal Engine 5.6 / Windows x64 / Python 3.11–3.14. The frozen build's `ue_get_capabilities` is authoritative; the tool set differs per flag, so check the profile table in the [Tool catalog](TOOL_CATALOG.md) before upgrading.
 
 See [Blueprint experimental usage](BLUEPRINT_AGENT_E2E_USAGE_EN.md) for operations and limits, and [Capability Status](PROJECT_STATUS_EN.md) for the boundary.

@@ -2,9 +2,11 @@
 
 All notable changes to UE Agent Kit are documented here.
 
-## 0.9.0.dev2 — Developer Preview 2 (candidate, unreleased)
+## 0.9.0 — Blueprint atomic patch, PIE inspector, Niagara stack, and a bounded tool surface (released 2026-11-19)
 
-Candidate changes for the next GitHub release. DP2 has no tag or Release yet; see the [DP2 release notes](docs/RELEASE_0.9.0_DP2_EN.md).
+0.9.0 promotes the Developer Preview line to a stable release. See the [0.9.0 release notes](docs/RELEASE_0.9.0_EN.md). The `0.9.0.dev1` Developer Preview remains published as its own prerelease.
+
+- **Breaking for MCP clients:** 81 per-verb tool names are gone. Twelve family entry points replace them (below), and sessions now expose a bounded, selected subset of groups instead of every tool.
 
 - Replaced the five standalone Blueprint writers with one atomic cross-writer patch: `createNode`, `connect`, `disconnect`, `setPinDefault`, `createVariable`, `rewirePin`, and `removeNode` run in one Editor transaction with per-operation results, rollback of already-applied work, and Undo/Redo verification. Save remains a separate explicit action.
 - Added Action Registry node creation: `createNode` accepts an `actionId` from `ue_search_node_actions` and can create `K2Node_CallFunction` (engine, project, or Blueprint-defined functions) and `K2Node_DynamicCast`. Search reports `canCreate` / `rejectReason`; latent, world-context, variadic, and binding-dependent spawners are refused.

@@ -4,7 +4,7 @@
 
 UE Agent Kit 是一套面向 **Unreal Engine 5.6** 的开源项目分析与受控修改工具。它把 `.uasset`、Blueprint 语义、引用关系和运行中的 Editor 状态变成可检索的数据，并让 AI Agent 在明确的安全边界内执行窄范围修改。它不是通用图编辑器，也不是任意脚本执行器。
 
-当前已发布版本为 **0.8.0**（稳定版）。当前最新公开预发布版本为 **0.9.0 Developer Preview 1（v0.9.0-dev1 / Python 0.9.0.dev1）**（2026-10-30）；下一版候选为 **0.9.0 Developer Preview 2**（计划版本 `0.9.0.dev2`，尚未发布）。运行环境：**Unreal Engine 5.6 / Windows x64 / Python 3.11–3.14**。
+当前已发布版本为 **0.9.0**（稳定版，2026-11-19）。上一个预发布为 **0.9.0 Developer Preview 1（v0.9.0-dev1）**，再往前是稳定版 **0.8.0**。运行环境：**Unreal Engine 5.6 / Windows x64 / Python 3.11–3.14**。
 
 ## 它能做什么
 
@@ -89,7 +89,7 @@ scripts\RunMcp.cmd -Database "<TOOL_ROOT>\.data\ue_agent_kit.sqlite3"
 
 - [AI Agent 快速接入](docs/AGENT_QUICKSTART.md) / [English](docs/AGENT_QUICKSTART_EN.md)
 - [当前能力状态](docs/PROJECT_STATUS.md) / [English](docs/PROJECT_STATUS_EN.md)
-- [0.9.0 Developer Preview 2（候选）](docs/RELEASE_0.9.0_DP2.md) / [English](docs/RELEASE_0.9.0_DP2_EN.md)
+- [0.9.0（稳定版）](docs/RELEASE_0.9.0.md) / [English](docs/RELEASE_0.9.0_EN.md)
 - [0.9.0 Developer Preview 1（已发布）](docs/RELEASE_0.9.0_PREVIEW.md) / [English](docs/RELEASE_0.9.0_PREVIEW_EN.md)
 - [0.8.0 Release Notes](docs/RELEASE_0.8.0.md) / [English](docs/RELEASE_0.8.0_EN.md)
 - [Blueprint 实验用法](docs/BLUEPRINT_AGENT_E2E_USAGE.md) / [English](docs/BLUEPRINT_AGENT_E2E_USAGE_EN.md)
