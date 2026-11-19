@@ -78,7 +78,7 @@ Registry 创建：再加 --enable-experimental-node-spawn
 
 ## 安装
 
-从 Release 下载 `UEAgentKit-0.9.0-UE5.6-Win64.zip`，把其中的 `UEAgentKit` 目录复制到项目 `Plugins/`。Python 使用对应的 `ue_agent_kit-0.9.0-py3-none-any.whl`。校验和见 Release 页的 `SHA256SUMS`。
+从 Release 下载 `UEAgentKit-0.9.0-UE5.6-Win64.zip`，把其中的 `UEAgentKit` 目录复制到项目 `Plugins/`。Python 使用对应的 `ue_agent_kit-0.9.0-py3-none-any.whl`。校验和见 Release 页的 `SHA256SUMS.txt`。
 
 ## 环境
 

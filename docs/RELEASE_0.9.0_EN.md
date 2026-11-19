@@ -77,7 +77,7 @@ Running `ue-agent-mcp.py` directly defaults to the `core` profile (the query gro
 
 ## Installing
 
-Download `UEAgentKit-0.9.0-UE5.6-Win64.zip` from the release and copy its `UEAgentKit` folder into the project's `Plugins/`. Python uses the matching `ue_agent_kit-0.9.0-py3-none-any.whl`. Checksums are in the release's `SHA256SUMS`.
+Download `UEAgentKit-0.9.0-UE5.6-Win64.zip` from the release and copy its `UEAgentKit` folder into the project's `Plugins/`. Python uses the matching `ue_agent_kit-0.9.0-py3-none-any.whl`. Checksums are in the release's `SHA256SUMS.txt`.
 
 ## Environment
 
